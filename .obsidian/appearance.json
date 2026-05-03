@@ -1,3 +1,5 @@
 {
-  "enabledCssSnippets": []
+  "enabledCssSnippets": [
+    "customjs-loader"
+  ]
 }
