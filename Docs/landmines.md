@@ -123,6 +123,28 @@ Both touched **only** by the installer, only via `applyTemplaterHotkeys` / `appl
 
 Surfaced 2026-05-04 during v0.1.x close (T2.1-discovery §8 + T2.6 deferral); codified in v0.1.3.
 
+### 13. Bootstrap stub is content-static; never re-edit
+
+Each consumer's `Docs/Meta/Templater/platformInstall.js` is a ~12-line dispatcher set once during v0.1.2 S2. It MUST be byte-identical across all consumers (`diff` between any two stubs returns empty). The stub never re-syncs with `platform/install.js` — that file is now canonical-only and reached at runtime via `require()`. If a future cycle wants to change the stub's contract (config-file path, error telemetry, etc.), every consumer's stub must be updated in lockstep AND the change documented as a distribution-model bump.
+
+**Why:** the stub IS the new distribution mechanism. Drift in the stub breaks consumers silently — they'd dispatch to a different install.js path, or skip the require-cache clear, or read a different config. The stub's content-static invariant is the load-bearing replacement for the old md5-verified bootstrap-copy ritual.
+
+**Canonical source:** `platform/installer-stub.js` — single source of truth for the stub body. Every consumer's bootstrap copy must match it byte-for-byte.
+
+**Recovery from drift:** copy `platform/installer-stub.js` over the divergent consumer's bootstrap path; re-run harness; commit only the canonical source if its body changed.
+
+Codified in v0.1.2.
+
+### 14. `gitState()` is best-effort; must never throw
+
+The `gitState()` helper at the top of `platform/install.js` records workshop git revision into installed.json history. It wraps every `execSync` in try/catch and returns `{commit:null, tag:null, dirty:null}` on any failure. Install proceeds regardless of git state — even on a non-git workshop, even on a missing `git` binary.
+
+**Why:** install correctness must NOT depend on git correctness. The lean v0.1.2 model is "stub dispatches; install runs; we record what we can about workshop state." Coupling install success to git availability would block desktop-no-git scenarios and break workshop dogfood if anyone wiped `.git/`.
+
+**What this means for callers:** code that READS `installed.history[].git_commit` etc. must tolerate `null` for entries written before v0.5.0 OR by a non-git install. Drift-detection (future cycle) treats `null` as "unknown," not "in sync" or "out of sync."
+
+Codified in v0.1.2.
+
 ## Operational gotchas
 
 ### CustomJS scan folder is per-vault and configured in `.obsidian/plugins/customjs/data.json`

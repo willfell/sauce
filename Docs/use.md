@@ -2,73 +2,75 @@
 
 This doc covers daily operations. For architectural background, see [how.md](how.md).
 
-## Onboarding a new consumer vault
+## Onboarding a new consumer vault (post-v0.1.2)
 
-The recurring workflow. Steps:
+Before v0.1.2 the onboarding flow required cp'ing a 1300-line `install.js` into each consumer's `Docs/Meta/Templater/platformInstall.js` (the bootstrap-copy × 3 ritual). v0.1.2 retires that — consumers now use a 20-line content-static thin stub that dispatches at runtime.
 
-### 1. Decide vault paths
+### 1. Clone the workshop repo
 
-Two choices the consumer's `platform-config.json` needs:
-- `views_path` — where Dataview view scripts go (e.g., `Docs/Meta/Views`, or `Extras/Scripts` if not yet canonically migrated).
-- `templater_scripts_path` — where Templater user scripts go (matches the consumer's Templater settings).
-
-If the consumer is brand new (no existing customjs-guard installation), use the canonical paths:
-```json
-{
-  "workshop_relative_path": "../workshop/poc-vault",
-  "variables": {
-    "views_path": "Docs/Meta/Views",
-    "templater_scripts_path": "Docs/Meta/Templater",
-    "scripts_path": "Docs/Meta/Scripts"
-  }
-}
-```
-
-If the consumer has an existing customjs-guard installation (e.g., accuris), use its current paths so the installer overwrites cleanly without orphan files.
-
-### 2. Write the consumer's bootstrap files
-
-Three files, all under `<consumer>/Docs/Meta/`:
-
-- `platform-config.json` — paths + variables.
-- `platform-subscription.json` — what mechanisms this vault adopts.
-- `Templater/platformInstall.js` — copy of `<workshop>/platform/install.js`. This is the bootstrap: the consumer needs `platformInstall.js` BEFORE it can run any other install.
-
-### 3. Verify Obsidian-side configuration
-
-In the consumer vault's Obsidian:
-- Templater plugin's "Script files folder location" matches `templater_scripts_path` from `platform-config.json`.
-- CustomJS plugin's "JS files folder" matches `scripts_path` from `platform-config.json`.
-- Dataview plugin has "Enable JavaScript queries" ON.
-- The plugins are present + enabled (Templater, Dataview, CustomJS at minimum).
-
-### 4. Run the installer
-
-In the consumer vault's Obsidian:
-1. Settings → Templater → User Script Functions → reload.
-2. Open any note. Command palette → `Templater: Open Insert Template modal` → pick the install template (or paste `<%* await tp.user.platformInstall(tp) %>` into a note and run "Templater: Replace templates in active file").
-3. Approve the gates that fire (CSS snippet, appearance.json edit).
-4. Final Notice: `platformInstall: complete.`
-
-### 5. Verify
+On the consumer machine, ensure the beacon workshop is cloned at a known relative path. The convention is `../workshop/poc-vault` from each consumer vault root, but any path works as long as it's recorded in `platform-config.json` (step 2):
 
 ```bash
-cat <consumer>/Docs/Meta/platform-installed.json
-ls <consumer>/Docs/Meta/Templater/{validate,hook-validate,audit-walker,platformInstall}.js
-ls <consumer>/<views_path>/customjs-guard/view.js
-cat <consumer>/.obsidian/appearance.json | grep customjs-loader
+git clone git@github-personal:willfell/beacon.git /path/to/workshop/poc-vault
 ```
 
-All five should resolve. `platform-installed.json` should list the subscribed mechanisms with `installed_at` timestamps.
+### 2. Create the consumer's bootstrap state files
 
-### 6. Wire the validator hook (optional, after first install)
+In the new vault's `Docs/Meta/`, create three JSON files (all platform metadata is JSON per landmine #6):
 
-If you want the validator to fire automatically on every new note in this consumer:
-- Templater → Trigger settings → enable "Trigger Templater on new file creation".
-- Add a startup hook: in the consumer's Templater settings, register a startup template that calls `<%* await tp.user["hook-validate"](tp) %>`.
-- The hook reads each newly-created note's frontmatter, looks up the matching rule, validates, auto-fixes simple things, surfaces complex violations as Notices.
+- **`platform-config.json`** — at minimum:
+  ```json
+  {
+    "workshop_relative_path": "../workshop/poc-vault",
+    "variables": {
+      "templates_path": "Docs/Meta/Templates",
+      "scripts_path": "Docs/Meta/Scripts",
+      "rules_path": "Docs/Meta/rules"
+    }
+  }
+  ```
+- **`platform-subscription.json`** — list mechanisms + blueprints to install with version pins:
+  ```json
+  {
+    "workshop_version": "0.5.0",
+    "mechanisms": [
+      { "name": "customjs-guard", "version": "1.0.0" },
+      { "name": "validator", "version": "0.1.1" },
+      { "name": "audit", "version": "0.1.1" }
+    ],
+    "blueprints": []
+  }
+  ```
+- `platform-installed.json` is auto-managed; the installer creates it on first run.
 
-This is opt-in — without it, the validator only fires when manually invoked.
+### 3. Drop in the thin stub
+
+Copy the canonical stub from the workshop:
+
+```bash
+cp /path/to/workshop/poc-vault/platform/installer-stub.js \
+   /path/to/consumer/Docs/Meta/Templater/platformInstall.js
+```
+
+Verify md5 matches the canonical:
+```bash
+md5sum /path/to/workshop/poc-vault/platform/installer-stub.js \
+       /path/to/consumer/Docs/Meta/Templater/platformInstall.js
+```
+
+The stub is content-static per landmine #13 — never edit it per-consumer. Future workshop updates reach the consumer via `git pull` in the workshop repo + a fresh install run; the stub itself doesn't change.
+
+### 4. Install Slash Commander (community plugin)
+
+In Obsidian: Settings → Community plugins → Browse → "Slash Commander" → Install + Enable. This is irreducible per Obsidian's plugin-install API not being script-accessible (the only manual plugin step left in the consumer flow).
+
+### 5. Run the installer
+
+Open the Templater command palette and run `_install-platform`. The thin stub reads `platform-config.json`, resolves the workshop path, and dispatches to canonical `<workshop>/platform/install.js`. The canonical installer materializes mechanisms + blueprints, applies external-plugin checks, registers Templater hotkeys + Slash Commander bindings (v0.1.3), and records the run in `platform-installed.json` history with `git_commit / git_tag / git_dirty` (v0.1.2).
+
+### 6. Reload Obsidian
+
+Cmd+R (or Ctrl+R) — picks up newly registered Templater hotkeys + Slash Commander bindings. The slash commands `/validate`, `/audit`, and any blueprint-declared bindings go live.
 
 ---
 

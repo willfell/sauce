@@ -115,7 +115,9 @@ If a consumer's existing paths differ from canonical (e.g., accuris currently ha
 
 ## Installer flow
 
-`tp.user.platformInstall(tp)` runs as a Templater user script. Steps:
+The installer is invoked via the consumer's `_install-platform.md` Templater template. The consumer's `Docs/Meta/Templater/platformInstall.js` is a ~12-line content-static thin stub (post-v0.1.2 S2) that reads `Docs/Meta/platform-config.json`, resolves `<workshop>/platform/install.js`, clears Node's `require.cache` for that path, and dispatches via `require()`. The canonical `install.js` runs the full install loop on the consumer's vault.
+
+Steps the canonical installer performs:
 
 1. Read `Docs/Meta/platform-config.json` → vault path map + variables.
 2. Read `Docs/Meta/platform-subscription.json` → what this vault wants.
@@ -161,3 +163,9 @@ Trade-off: JSON is less human-readable than YAML but every reader needs zero dep
 Drift detection (in `audit-walker.js`):
 - For each subscribed mechanism, compare `installed[i].version` to `subscription[i].version`. Mismatch = drift.
 - For each subscribed mechanism, also compare against `manifest.mechanisms[i].version`. If subscription is behind manifest, the consumer can update by bumping the subscription and re-running `platformInstall`.
+
+### Distribution model (post-v0.1.2)
+
+Each consumer's `Docs/Meta/Templater/platformInstall.js` is a ~12-line content-static thin stub. It reads the consumer's `platform-config.json` to resolve the workshop path, clears Node's require cache for the canonical installer, and dispatches to `<workshop>/platform/install.js`. The canonical installer is the single source of truth at runtime; it lives in the workshop git repo and is updated via normal git workflow (`git pull` in the workshop, then re-run the install in each consumer).
+
+The stub itself never changes after v0.1.2 S2 deployment. Edits to canonical `install.js` propagate to all consumers automatically on the next install run, with no per-consumer file changes.
