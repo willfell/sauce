@@ -1,0 +1,8 @@
+# Workshop platform manifest.
+# Version is the workshop's overall release version. Each mechanism + blueprint has its own version.
+
+workshop_version: 0.1.0
+date: 2026-05-02
+
+mechanisms: []
+blueprints: []
