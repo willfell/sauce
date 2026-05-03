@@ -1,10 +1,11 @@
 // validate.js — vault-platform validator (runs as tp.user.validate).
 //
-// Usage from a template (manual):
-//   <%* const result = await tp.user.validate(tp.file, "project");
-//       if (result.violations.length) console.log(result.violations); %>
+// Usage from a runner template (preferred — no Templater wrapper traps):
+//   <%* const result = await tp.user.validate({ file: app.workspace.getActiveFile() });
+//       if (!result.violations.length) { new Notice("validate: clean"); }
+//       else { console.log("[validate]", result.violations); } %>
 //
-// Usage from a hook (preferred — see hook.js):
+// Usage from a hook (hook.js):
 //   tp.hooks.on_all_templates_executed(async () => {
 //     const file = tp.config.target_file;
 //     const result = await tp.user.validate({ file });
@@ -12,14 +13,32 @@
 //
 // Returns: { fixes: [{file, op, ...}], violations: [{rule, severity, message}] }
 
+function resolveTFile(input, app) {
+  if (!input) return app.workspace.getActiveFile() || null;
+  // shape: { file: TFile }
+  if (input.file && input.file.path && typeof input.file.path === "string") return input.file;
+  // shape: TFile directly (string path + basename present)
+  if (input.path && typeof input.path === "string" && input.basename) return input;
+  // shape: tp.file wrapper or anything else — fall through to activeFile
+  return app.workspace.getActiveFile() || null;
+}
+
+function whenMatches(when, fm) {
+  // Crude evaluator: supports "frontmatter.X == 'Y'" / "frontmatter.X != 'Y'".
+  const m = when.match(/^frontmatter\.(\w+)\s*(==|!=)\s*['"]([^'"]+)['"]$/);
+  if (!m) return true; // unknown predicate → don't filter
+  const [, key, op, val] = m;
+  const actual = fm[key];
+  return op === "==" ? actual === val : actual !== val;
+}
+
 module.exports = async function (tpFileOrObj, moduleId) {
   const app = this.app || window.app;
   const result = { fixes: [], violations: [] };
 
-  // Resolve TFile from input (Templater passes a TFile in tp.file; hook passes { file }).
-  const file = tpFileOrObj?.file ?? tpFileOrObj;
-  if (!file || !file.path) {
-    result.violations.push({ rule: "internal", severity: "error", message: "validate: invalid file argument" });
+  const file = resolveTFile(tpFileOrObj, app);
+  if (!file) {
+    result.violations.push({ rule: "internal", severity: "error", message: "validate: cannot resolve file" });
     return result;
   }
 
@@ -127,23 +146,27 @@ async function checkTags(ctx, gr, mr) {
 
 async function checkRequiredBlocks(ctx, gr, mr) {
   const required = [...((gr.required_blocks) || []), ...(((mr || {}).required_blocks) || [])];
+  const dvjsBlocks = [...ctx.body.matchAll(/```dataviewjs\n([\s\S]*?)\n```/g)].map((m) => m[1]);
   for (const spec of required) {
-    if (spec.when) {
-      // Crude evaluator: supports "frontmatter.X == 'Y'" / "frontmatter.X != 'Y'".
-      const m = spec.when.match(/^frontmatter\.(\w+)\s*(==|!=)\s*['"]([^'"]+)['"]$/);
-      if (m) {
-        const [, key, op, val] = m;
-        const actual = ctx.fm[key];
-        const matches = op === "==" ? actual === val : actual !== val;
-        if (!matches) continue;
+    if (spec.when && !whenMatches(spec.when, ctx.fm)) continue;
+    if (spec.kind === "dataviewjs" && spec.must_call && spec.via === "customjs-guard") {
+      const className = spec.must_call.replace(/^customJS\./, "");
+      const wrapperRe = new RegExp(
+        `dv\\.view\\(\\s*["']Docs/Meta/Views/customjs-guard["']\\s*,\\s*\\{[^}]*class\\s*:\\s*["']${className}["']`
+      );
+      const matched = dvjsBlocks.some((b) => wrapperRe.test(b));
+      if (!matched) {
+        ctx.result.violations.push({
+          rule: "required_blocks.missing",
+          severity: "error",
+          message: `Missing required ${spec.kind} block calling ${spec.must_call} via ${spec.via}`,
+        });
       }
-    }
-    const expectedSnippet = spec.content;
-    if (!ctx.body.includes(expectedSnippet)) {
+    } else {
       ctx.result.violations.push({
-        rule: "required_blocks.missing",
-        severity: "error",
-        message: `Missing required ${spec.type} block containing: ${expectedSnippet.slice(0, 80)}`,
+        rule: "required_blocks.schema",
+        severity: "warn",
+        message: `Unknown required_blocks schema: ${JSON.stringify(spec).slice(0, 100)}`,
       });
     }
   }

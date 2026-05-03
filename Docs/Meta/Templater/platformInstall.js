@@ -266,6 +266,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   // Failure here records history but does NOT throw — install of this item
   // is otherwise complete, and the registry is regenerated on every install.
   await applyNavButtons(tp, mech, variables, history);
+  await applyExternalPlugins(tp, mech, history);
 
   return true;
 }
@@ -650,6 +651,98 @@ function validateAndResolve(btn, sourceName, variables, history) {
     };
   }
   return btn;
+}
+
+// applyExternalPlugins — for each item that declares external_plugins[], read
+// .obsidian/community-plugins.json and warn (Notice + history) for any required
+// dep that is not currently enabled. Honors C4 hardening: malformed
+// community-plugins.json is preserved + reported, never overwritten. Failures
+// here record history but do NOT throw — install of this item is otherwise
+// complete. The runtime plugin (e.g., Kanban) materializes board notes; the
+// installer cannot install Obsidian community plugins itself, so this is a
+// detection-and-surface-up helper, not a remediation step.
+async function applyExternalPlugins(tp, manifest, history) {
+  if (!manifest || !Array.isArray(manifest.external_plugins) || manifest.external_plugins.length === 0) return;
+  const adapter = tp.app.vault.adapter;
+  const pluginsPath = ".obsidian/community-plugins.json";
+
+  if (!(await adapter.exists(pluginsPath))) {
+    new Notice(`applyExternalPlugins: ${pluginsPath} absent; cannot verify deps for ${manifest.name}`, 6000);
+    if (history) {
+      history.push({
+        event: "warning",
+        step: "external_plugins",
+        name: manifest.name,
+        message: `${pluginsPath} absent`,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  let raw;
+  try {
+    raw = await adapter.read(pluginsPath);
+  } catch (e) {
+    new Notice(`applyExternalPlugins: cannot read ${pluginsPath} (${e.message}); skipping check for ${manifest.name}`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "external_plugins",
+        name: manifest.name,
+        message: `read failed for ${pluginsPath}: ${e.message}`,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  let enabled;
+  try {
+    enabled = JSON.parse(raw);
+  } catch (e) {
+    new Notice(`applyExternalPlugins: ${pluginsPath} malformed JSON (${e.message}); skipping check for ${manifest.name}`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "external_plugins",
+        name: manifest.name,
+        message: `${pluginsPath} malformed JSON: ${e.message}`,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+  if (!Array.isArray(enabled)) {
+    new Notice(`applyExternalPlugins: ${pluginsPath} parsed but not an array; skipping check for ${manifest.name}`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "external_plugins",
+        name: manifest.name,
+        message: `${pluginsPath} parsed but not an array`,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  for (const dep of manifest.external_plugins) {
+    if (!dep || !dep.id) continue;
+    if (dep.required && !enabled.includes(dep.id)) {
+      new Notice(`${manifest.name} requires plugin ${dep.id}: ${dep.reason || "(no reason)"}. Install + enable in Settings → Community plugins.`, 10000);
+      if (history) {
+        history.push({
+          event: "warning",
+          step: "external_plugins",
+          name: manifest.name,
+          plugin_id: dep.id,
+          reason: dep.reason || null,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    }
+  }
 }
 
 // pruneNavButtonsRegistry — drop contributions.<X> for any X not in the current
