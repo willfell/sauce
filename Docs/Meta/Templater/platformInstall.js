@@ -16,6 +16,32 @@
 //   3. For each post_install step: handle (snippet enable, notice, etc.) gated by approval.
 //   4. Update platform-installed.json.
 
+// gitState(workshopPath) — best-effort capture of workshop git state for
+// installed.history audit. Returns {commit, tag, dirty} where any field may
+// be null if the workshop is not a git repo, git is unavailable, or HEAD has
+// no exact-match tag. NEVER throws — install correctness must NOT depend on
+// git correctness (landmine #14).
+//
+// Used by every installed.history.push() site post-workshopPath-resolution.
+// Pre-resolution push sites (step: read_config, step: read_subscription) MUST
+// record git_commit:null, git_tag:null, git_dirty:null explicitly.
+function gitState(workshopPath) {
+  const { execSync } = require("child_process");
+  const result = { commit: null, tag: null, dirty: null };
+  try {
+    result.commit = execSync(`git -C "${workshopPath}" rev-parse HEAD`, { encoding: "utf8" }).trim();
+  } catch { /* not a git repo, or git unavailable; leave null */ }
+  try {
+    const out = execSync(`git -C "${workshopPath}" describe --tags --exact-match HEAD 2>/dev/null`, { encoding: "utf8" }).trim();
+    result.tag = out.length > 0 ? out : null;
+  } catch { /* HEAD has no exact tag; leave null */ }
+  try {
+    const status = execSync(`git -C "${workshopPath}" status --porcelain`, { encoding: "utf8" });
+    result.dirty = status.length > 0;
+  } catch { /* leave null */ }
+  return result;
+}
+
 module.exports = async function (tp) {
   const app = tp.app;
 
@@ -41,23 +67,28 @@ module.exports = async function (tp) {
 
     if (!config) {
       new Notice("platformInstall: cannot read/parse Docs/Meta/platform-config.json. Aborting.", 6000);
-      installedNow.history.push({ event: "error", step: "read_config", message: "Docs/Meta/platform-config.json missing or unparseable", attempted_at: new Date().toISOString() });
+      installedNow.history.push({ event: "error", step: "read_config", message: "Docs/Meta/platform-config.json missing or unparseable", git_commit: null, git_tag: null, git_dirty: null, attempted_at: new Date().toISOString() });
       return;
     }
     if (!subscription) {
       new Notice("platformInstall: cannot read/parse Docs/Meta/platform-subscription.json. Aborting.", 6000);
-      installedNow.history.push({ event: "error", step: "read_subscription", message: "Docs/Meta/platform-subscription.json missing or unparseable", attempted_at: new Date().toISOString() });
+      installedNow.history.push({ event: "error", step: "read_subscription", message: "Docs/Meta/platform-subscription.json missing or unparseable", git_commit: null, git_tag: null, git_dirty: null, attempted_at: new Date().toISOString() });
       return;
     }
 
     const workshopPath =
       config.workshop_path ||
       resolveWorkshopPath(app, config.workshop_relative_path || "../workshop/poc-vault");
+
+    // gitState captured BEFORE manifest read so even read_manifest failures get git context.
+    // Carried into every installed.history.push() site post-resolution.
+    const git = gitState(workshopPath);
+
     const manifest = await readJsonAbsolute(`${workshopPath}/platform/manifest.json`);
 
     if (!manifest) {
       new Notice(`platformInstall: cannot read workshop manifest at ${workshopPath}/platform/manifest.json`, 8000);
-      installedNow.history.push({ event: "error", step: "read_manifest", message: `cannot read workshop manifest at ${workshopPath}/platform/manifest.json`, attempted_at: new Date().toISOString() });
+      installedNow.history.push({ event: "error", step: "read_manifest", message: `cannot read workshop manifest at ${workshopPath}/platform/manifest.json`, git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
       return;
     }
 
@@ -90,7 +121,7 @@ module.exports = async function (tp) {
     const { order, cycle } = topoSort(nodes);
     if (cycle) {
       new Notice(`platformInstall: dependency cycle involving ${cycle}. Aborting.`, 8000);
-      installedNow.history.push({ event: "error", step: "topo_sort", message: `dependency cycle involving ${cycle}`, attempted_at: new Date().toISOString() });
+      installedNow.history.push({ event: "error", step: "topo_sort", message: `dependency cycle involving ${cycle}`, git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
       return;
     }
 
@@ -98,7 +129,7 @@ module.exports = async function (tp) {
     const allSkipped = [...missingItems, ...depSkipped];
     for (const s of allSkipped) {
       new Notice(`platformInstall: skipping ${s.name} — ${s.reason}`, 6000);
-      installedNow.history.push({ event: "skip", name: s.name, reason: s.reason, attempted_at: new Date().toISOString() });
+      installedNow.history.push({ event: "skip", name: s.name, reason: s.reason, git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
     }
 
     // 6. install in resolved order. Each installItem is wrapped in try/catch
@@ -111,13 +142,13 @@ module.exports = async function (tp) {
       if (installedEntry && installedEntry.version === node.sub.version) continue;
       const itemMan = perItemManifest.get(name);
       try {
-        const ok = await installItem(tp, workshopPath, node.target, itemMan, variables, installedNow.history);
+        const ok = await installItem(tp, workshopPath, node.target, itemMan, variables, installedNow.history, git);
         if (ok) {
           const entry = { name, version: node.sub.version, installed_at: new Date().toISOString() };
           const idx = installedNow[bucketKey].findIndex((m) => m.name === name);
           if (idx >= 0) installedNow[bucketKey][idx] = entry;
           else installedNow[bucketKey].push(entry);
-          installedNow.history.push({ event: "install", kind: node.target.kind, ...entry });
+          installedNow.history.push({ event: "install", kind: node.target.kind, ...entry, git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty });
         }
       } catch (e) {
         new Notice(`platformInstall: ${name} crashed during install — ${e.message}`, 8000);
@@ -126,6 +157,9 @@ module.exports = async function (tp) {
           name,
           step: "installItem",
           message: e.message,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
           attempted_at: new Date().toISOString(),
         });
       }
@@ -137,13 +171,16 @@ module.exports = async function (tp) {
     // mechanic needed. Wrapped in its own try/catch so a malformed registry
     // (or a missing one) never aborts the broader install.
     try {
-      await pruneNavButtonsRegistry(tp, subscription, installedNow.history);
+      await pruneNavButtonsRegistry(tp, subscription, installedNow.history, git);
     } catch (e) {
       new Notice(`platformInstall: nav-buttons registry prune failed — ${e.message}`, 6000);
       installedNow.history.push({
         event: "error",
         step: "nav_buttons_prune",
         message: e.message,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
         attempted_at: new Date().toISOString(),
       });
     }
@@ -165,13 +202,16 @@ module.exports = async function (tp) {
     // entry on errors, shape guards, idempotency, no-write-when-clean) is
     // preserved by gating on `mutated` and only writing through the finally.
     try {
-      await pruneInstalledLedger(tp, subscription, installedNow);
+      await pruneInstalledLedger(tp, subscription, installedNow, git);
     } catch (e) {
       new Notice(`platformInstall: installed ledger prune failed — ${e.message}`, 6000);
       installedNow.history.push({
         event: "error",
         step: "installed_ledger_prune",
         message: e.message,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
         attempted_at: new Date().toISOString(),
       });
     }
@@ -184,6 +224,9 @@ module.exports = async function (tp) {
       event: "error",
       step: "top_level",
       message: e.message,
+      git_commit: null,
+      git_tag: null,
+      git_dirty: null,
       attempted_at: new Date().toISOString(),
     });
   } finally {
@@ -199,7 +242,7 @@ module.exports = async function (tp) {
   }
 };
 
-async function installItem(tp, workshopPath, target, itemMan, variables, history) {
+async function installItem(tp, workshopPath, target, itemMan, variables, history, git) {
   const adapter = tp.app.vault.adapter;
   const mech = itemMan;
   if (!mech) {
@@ -210,6 +253,9 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
         step: "installItem",
         name: (target && target.name) || (target && target.path),
         message: `missing manifest for ${target && target.path}`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
         attempted_at: new Date().toISOString(),
       });
     }
@@ -251,7 +297,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
 
   for (const step of mech.post_install || []) {
     if (step.type === "enable_snippet") {
-      await enableSnippet(tp, step.snippet, step.approval === "required", mech.name, history);
+      await enableSnippet(tp, step.snippet, step.approval === "required", mech.name, history, git);
     } else if (step.type === "notice") {
       new Notice(step.message, 8000);
     }
@@ -259,16 +305,16 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
 
   // Materialize rule_fragments contributed by this item.
   for (const frag of mech.rule_fragments || []) {
-    await applyRuleFragment(tp, frag, mech.name, variables, history);
+    await applyRuleFragment(tp, frag, mech.name, variables, history, git);
   }
 
   // Aggregate nav-button declarations into Docs/Meta/nav-buttons-registry.json.
   // Failure here records history but does NOT throw — install of this item
   // is otherwise complete, and the registry is regenerated on every install.
-  await applyNavButtons(tp, mech, variables, history);
-  await applyExternalPlugins(tp, mech, history);
-  await applyTemplaterHotkeys(tp, mech, variables, history);          // NEW v0.1.3
-  await applySlashCommanderBindings(tp, mech, variables, history);    // NEW v0.1.3
+  await applyNavButtons(tp, mech, variables, history, git);
+  await applyExternalPlugins(tp, mech, history, git);
+  await applyTemplaterHotkeys(tp, mech, variables, history, git);          // NEW v0.1.3
+  await applySlashCommanderBindings(tp, mech, variables, history, git);    // NEW v0.1.3
 
   return true;
 }
@@ -496,7 +542,7 @@ function topoSort(nodes) {
   return { order, cycle: null };
 }
 
-async function applyRuleFragment(tp, frag, sourceName, variables, history) {
+async function applyRuleFragment(tp, frag, sourceName, variables, history, git) {
   const adapter = tp.app.vault.adapter;
   const rulesPath = variables.rules_path;
   if (!rulesPath) {
@@ -507,6 +553,9 @@ async function applyRuleFragment(tp, frag, sourceName, variables, history) {
         step: "applyRuleFragment",
         name: sourceName,
         message: `rules_path not configured; skipped fragment for target "${frag && frag.target}"`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
         attempted_at: new Date().toISOString(),
       });
     }
@@ -528,6 +577,9 @@ async function applyRuleFragment(tp, frag, sourceName, variables, history) {
           step: "applyRuleFragment",
           name: sourceName,
           message: `read failed for ${rulePath}: ${e.message}`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
           attempted_at: new Date().toISOString(),
         });
       }
@@ -544,6 +596,9 @@ async function applyRuleFragment(tp, frag, sourceName, variables, history) {
           step: "applyRuleFragment",
           name: sourceName,
           message: `${rulePath} is malformed JSON: ${e.message}`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
           attempted_at: new Date().toISOString(),
         });
       }
@@ -560,7 +615,7 @@ async function applyRuleFragment(tp, frag, sourceName, variables, history) {
 // applyRuleFragment in posture: malformed pre-existing JSON is preserved
 // (C4 hardening); per-entry validation skips bad entries without taking the
 // whole contribution down; failures record history but do not throw.
-async function applyNavButtons(tp, manifest, variables, history) {
+async function applyNavButtons(tp, manifest, variables, history, git) {
   if (!manifest || !Array.isArray(manifest.nav_buttons) || manifest.nav_buttons.length === 0) return;
   const adapter = tp.app.vault.adapter;
   const registryPath = "Docs/Meta/nav-buttons-registry.json";
@@ -578,6 +633,9 @@ async function applyNavButtons(tp, manifest, variables, history) {
           step: "nav_buttons",
           name: manifest.name,
           message: `read failed for ${registryPath}: ${e.message}`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
           attempted_at: new Date().toISOString(),
         });
       }
@@ -594,6 +652,9 @@ async function applyNavButtons(tp, manifest, variables, history) {
           step: "nav_buttons",
           name: manifest.name,
           message: `${registryPath} is malformed JSON: ${e.message}`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
           attempted_at: new Date().toISOString(),
         });
       }
@@ -603,7 +664,7 @@ async function applyNavButtons(tp, manifest, variables, history) {
   registry.contributions = registry.contributions || {};
 
   const validated = manifest.nav_buttons
-    .map((btn) => validateAndResolve(btn, manifest.name, variables, history))
+    .map((btn) => validateAndResolve(btn, manifest.name, variables, history, git))
     .filter(Boolean);
 
   if (validated.length === 0) {
@@ -613,6 +674,9 @@ async function applyNavButtons(tp, manifest, variables, history) {
         step: "nav_buttons",
         name: manifest.name,
         reason: "all entries invalid",
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
         attempted_at: new Date().toISOString(),
       });
     }
@@ -628,7 +692,7 @@ async function applyNavButtons(tp, manifest, variables, history) {
 // otherwise. createFromTemplate's template_source is rewritten from the
 // manifest-relative form (e.g., "content/kanban-board.md") to the consumer-resolved
 // form ("<content_path>/<sourceName>/<...>") so the renderer can read it directly.
-function validateAndResolve(btn, sourceName, variables, history) {
+function validateAndResolve(btn, sourceName, variables, history, git) {
   if (!btn || !btn.id || !btn.label || !btn.action || !btn.action.type) {
     new Notice(`nav-buttons: invalid declaration in ${sourceName} (missing id/label/action)`, 8000);
     if (history) {
@@ -637,6 +701,9 @@ function validateAndResolve(btn, sourceName, variables, history) {
         step: "nav_buttons",
         name: sourceName,
         reason: `entry ${(btn && btn.id) || "<no-id>"} invalid`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
         attempted_at: new Date().toISOString(),
       });
     }
@@ -663,7 +730,7 @@ function validateAndResolve(btn, sourceName, variables, history) {
 // complete. The runtime plugin (e.g., Kanban) materializes board notes; the
 // installer cannot install Obsidian community plugins itself, so this is a
 // detection-and-surface-up helper, not a remediation step.
-async function applyExternalPlugins(tp, manifest, history) {
+async function applyExternalPlugins(tp, manifest, history, git) {
   if (!manifest || !Array.isArray(manifest.external_plugins) || manifest.external_plugins.length === 0) return;
   const adapter = tp.app.vault.adapter;
   const pluginsPath = ".obsidian/community-plugins.json";
@@ -676,6 +743,9 @@ async function applyExternalPlugins(tp, manifest, history) {
         step: "external_plugins",
         name: manifest.name,
         message: `${pluginsPath} absent`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
         attempted_at: new Date().toISOString(),
       });
     }
@@ -693,6 +763,9 @@ async function applyExternalPlugins(tp, manifest, history) {
         step: "external_plugins",
         name: manifest.name,
         message: `read failed for ${pluginsPath}: ${e.message}`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
         attempted_at: new Date().toISOString(),
       });
     }
@@ -710,6 +783,9 @@ async function applyExternalPlugins(tp, manifest, history) {
         step: "external_plugins",
         name: manifest.name,
         message: `${pluginsPath} malformed JSON: ${e.message}`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
         attempted_at: new Date().toISOString(),
       });
     }
@@ -723,6 +799,9 @@ async function applyExternalPlugins(tp, manifest, history) {
         step: "external_plugins",
         name: manifest.name,
         message: `${pluginsPath} parsed but not an array`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
         attempted_at: new Date().toISOString(),
       });
     }
@@ -740,6 +819,9 @@ async function applyExternalPlugins(tp, manifest, history) {
           name: manifest.name,
           plugin_id: dep.id,
           reason: dep.reason || null,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
           attempted_at: new Date().toISOString(),
         });
       }
@@ -757,7 +839,7 @@ async function applyExternalPlugins(tp, manifest, history) {
 // Empty-string entries Templater seeds at first install (`[""]`) are
 // preserved — additive merge only. Templater's register_templates_hotkeys()
 // early-returns on falsy entries, so the empty seed is harmless.
-async function applyTemplaterHotkeys(tp, manifest, variables, history) {
+async function applyTemplaterHotkeys(tp, manifest, variables, history, git) {
   if (!manifest || !Array.isArray(manifest.templater_hotkeys) || manifest.templater_hotkeys.length === 0) return;
   const adapter = tp.app.vault.adapter;
   const target = ".obsidian/plugins/templater-obsidian/data.json";
@@ -770,6 +852,9 @@ async function applyTemplaterHotkeys(tp, manifest, variables, history) {
         step: "templater_hotkeys",
         name: manifest.name,
         message: `${target} absent`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
         attempted_at: new Date().toISOString(),
       });
     }
@@ -787,6 +872,9 @@ async function applyTemplaterHotkeys(tp, manifest, variables, history) {
         step: "templater_hotkeys",
         name: manifest.name,
         message: `read failed for ${target}: ${e.message}`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
         attempted_at: new Date().toISOString(),
       });
     }
@@ -804,6 +892,9 @@ async function applyTemplaterHotkeys(tp, manifest, variables, history) {
         step: "templater_hotkeys",
         name: manifest.name,
         message: `${target} malformed JSON: ${e.message}`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
         attempted_at: new Date().toISOString(),
       });
     }
@@ -818,6 +909,9 @@ async function applyTemplaterHotkeys(tp, manifest, variables, history) {
         step: "templater_hotkeys",
         name: manifest.name,
         message: `${target} enabled_templates_hotkeys not an array`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
         attempted_at: new Date().toISOString(),
       });
     }
@@ -833,6 +927,9 @@ async function applyTemplaterHotkeys(tp, manifest, variables, history) {
         step: "templater_hotkeys",
         name: manifest.name,
         message: "variables.templates_path missing",
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
         attempted_at: new Date().toISOString(),
       });
     }
@@ -851,6 +948,9 @@ async function applyTemplaterHotkeys(tp, manifest, variables, history) {
           name: manifest.name,
           template_path: fullPath,
           action: "skipped_existing",
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
           attempted_at: new Date().toISOString(),
         });
       }
@@ -865,6 +965,9 @@ async function applyTemplaterHotkeys(tp, manifest, variables, history) {
         name: manifest.name,
         template_path: fullPath,
         action: "applied",
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
         attempted_at: new Date().toISOString(),
       });
     }
@@ -883,6 +986,9 @@ async function applyTemplaterHotkeys(tp, manifest, variables, history) {
         step: "templater_hotkeys",
         name: manifest.name,
         message: `backup write failed: ${e.message}`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
         attempted_at: new Date().toISOString(),
       });
     }
@@ -899,6 +1005,9 @@ async function applyTemplaterHotkeys(tp, manifest, variables, history) {
         step: "templater_hotkeys",
         name: manifest.name,
         message: `write failed: ${e.message}`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
         attempted_at: new Date().toISOString(),
       });
     }
@@ -912,7 +1021,7 @@ async function applyTemplaterHotkeys(tp, manifest, variables, history) {
 // manifest.templater_hotkeys[] or manifest.files[] (catches typos). Honors
 // landmine #12 — never overwrites a malformed data.json; never strips user
 // bindings.
-async function applySlashCommanderBindings(tp, manifest, variables, history) {
+async function applySlashCommanderBindings(tp, manifest, variables, history, git) {
   if (!manifest || !Array.isArray(manifest.slash_commander_bindings) || manifest.slash_commander_bindings.length === 0) return;
   const adapter = tp.app.vault.adapter;
   const target = ".obsidian/plugins/slash-commander/data.json";
@@ -925,6 +1034,9 @@ async function applySlashCommanderBindings(tp, manifest, variables, history) {
         step: "slash_commander_bindings",
         name: manifest.name,
         message: `${target} absent`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
         attempted_at: new Date().toISOString(),
       });
     }
@@ -941,6 +1053,9 @@ async function applySlashCommanderBindings(tp, manifest, variables, history) {
         step: "slash_commander_bindings",
         name: manifest.name,
         message: `read failed for ${target}: ${e.message}`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
         attempted_at: new Date().toISOString(),
       });
     }
@@ -958,6 +1073,9 @@ async function applySlashCommanderBindings(tp, manifest, variables, history) {
         step: "slash_commander_bindings",
         name: manifest.name,
         message: `${target} malformed JSON: ${e.message}`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
         attempted_at: new Date().toISOString(),
       });
     }
@@ -972,6 +1090,9 @@ async function applySlashCommanderBindings(tp, manifest, variables, history) {
         step: "slash_commander_bindings",
         name: manifest.name,
         message: `${target} bindings not an array`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
         attempted_at: new Date().toISOString(),
       });
     }
@@ -987,6 +1108,9 @@ async function applySlashCommanderBindings(tp, manifest, variables, history) {
         step: "slash_commander_bindings",
         name: manifest.name,
         message: "variables.templates_path missing",
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
         attempted_at: new Date().toISOString(),
       });
     }
@@ -1023,6 +1147,9 @@ async function applySlashCommanderBindings(tp, manifest, variables, history) {
           binding_name: entry.name,
           template: entry.template,
           message: `binding references template "${entry.template}" not declared in templater_hotkeys[] or files[]; skipping`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
           attempted_at: new Date().toISOString(),
         });
       }
@@ -1042,6 +1169,9 @@ async function applySlashCommanderBindings(tp, manifest, variables, history) {
           binding_name: entry.name,
           command_id: cmdId,
           action: "skipped_existing",
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
           attempted_at: new Date().toISOString(),
         });
       }
@@ -1065,6 +1195,9 @@ async function applySlashCommanderBindings(tp, manifest, variables, history) {
         binding_name: entry.name,
         command_id: cmdId,
         action: "applied",
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
         attempted_at: new Date().toISOString(),
       });
     }
@@ -1081,6 +1214,9 @@ async function applySlashCommanderBindings(tp, manifest, variables, history) {
         step: "slash_commander_bindings",
         name: manifest.name,
         message: `backup write failed: ${e.message}`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
         attempted_at: new Date().toISOString(),
       });
     }
@@ -1097,6 +1233,9 @@ async function applySlashCommanderBindings(tp, manifest, variables, history) {
         step: "slash_commander_bindings",
         name: manifest.name,
         message: `write failed: ${e.message}`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
         attempted_at: new Date().toISOString(),
       });
     }
@@ -1107,7 +1246,7 @@ async function applySlashCommanderBindings(tp, manifest, variables, history) {
 // pruneNavButtonsRegistry — drop contributions.<X> for any X not in the current
 // subscription. Called once at the end of the install loop. Honors C4 hardening:
 // a malformed pre-existing registry is left untouched and reported.
-async function pruneNavButtonsRegistry(tp, subscription, history) {
+async function pruneNavButtonsRegistry(tp, subscription, history, git) {
   const adapter = tp.app.vault.adapter;
   const registryPath = "Docs/Meta/nav-buttons-registry.json";
   if (!(await adapter.exists(registryPath))) return;
@@ -1122,6 +1261,9 @@ async function pruneNavButtonsRegistry(tp, subscription, history) {
         event: "error",
         step: "nav_buttons_prune",
         message: `read failed for ${registryPath}: ${e.message}`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
         attempted_at: new Date().toISOString(),
       });
     }
@@ -1137,6 +1279,9 @@ async function pruneNavButtonsRegistry(tp, subscription, history) {
         event: "error",
         step: "nav_buttons_prune",
         message: `${registryPath} is malformed JSON: ${e.message}`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
         attempted_at: new Date().toISOString(),
       });
     }
@@ -1149,6 +1294,9 @@ async function pruneNavButtonsRegistry(tp, subscription, history) {
         event: "error",
         step: "nav_buttons_prune",
         message: `${registryPath} parsed but has unexpected shape (expected object)`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
         attempted_at: new Date().toISOString(),
       });
     }
@@ -1191,7 +1339,7 @@ async function pruneNavButtonsRegistry(tp, subscription, history) {
 // mutated" idempotency optimization is implicit: when nothing is removed, no
 // history events are pushed and `installedNow` shape is unchanged, so the
 // finally-block write is byte-identical to the prior on-disk content.
-async function pruneInstalledLedger(tp, subscription, installedNow) {
+async function pruneInstalledLedger(tp, subscription, installedNow, git) {
   const adapter = tp.app.vault.adapter;
   const ledgerPath = "Docs/Meta/platform-installed.json";
   const history = installedNow.history;
@@ -1210,6 +1358,9 @@ async function pruneInstalledLedger(tp, subscription, installedNow) {
         event: "error",
         step: "installed_ledger_prune",
         message: `read failed for ${ledgerPath}: ${e.message}`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
         attempted_at: new Date().toISOString(),
       });
     }
@@ -1225,6 +1376,9 @@ async function pruneInstalledLedger(tp, subscription, installedNow) {
         event: "error",
         step: "installed_ledger_prune",
         message: `${ledgerPath} is malformed JSON: ${e.message}`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
         attempted_at: new Date().toISOString(),
       });
     }
@@ -1237,6 +1391,9 @@ async function pruneInstalledLedger(tp, subscription, installedNow) {
         event: "error",
         step: "installed_ledger_prune",
         message: `${ledgerPath} parsed but has unexpected shape (expected object)`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
         attempted_at: new Date().toISOString(),
       });
     }
@@ -1265,6 +1422,9 @@ async function pruneInstalledLedger(tp, subscription, installedNow) {
             kind,
             name: (entry && entry.name) || "<unknown>",
             reason: "no longer subscribed",
+            git_commit: git.commit,
+            git_tag: git.tag,
+            git_dirty: git.dirty,
             attempted_at: new Date().toISOString(),
           });
         }
@@ -1284,7 +1444,7 @@ async function pruneInstalledLedger(tp, subscription, installedNow) {
   void mutated;
 }
 
-async function enableSnippet(tp, snippet, approvalRequired, sourceName, history) {
+async function enableSnippet(tp, snippet, approvalRequired, sourceName, history, git) {
   const adapter = tp.app.vault.adapter;
   const path = ".obsidian/appearance.json";
   let json;
@@ -1300,6 +1460,9 @@ async function enableSnippet(tp, snippet, approvalRequired, sourceName, history)
           step: "enableSnippet",
           name: sourceName,
           message: `read failed for ${path}: ${e.message}`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
           attempted_at: new Date().toISOString(),
         });
       }
@@ -1316,6 +1479,9 @@ async function enableSnippet(tp, snippet, approvalRequired, sourceName, history)
           step: "enableSnippet",
           name: sourceName,
           message: `${path} is malformed JSON: ${e.message}`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
           attempted_at: new Date().toISOString(),
         });
       }

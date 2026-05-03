@@ -321,6 +321,44 @@ async function main() {
     for (const w of writeLog) console.log(`  ${w.path}  (${w.bytes}B)`);
   }
 
+  // ----- v0.1.2 git-fields assertion -------------------------------------
+  // gitState() must populate git_commit / git_tag / git_dirty on every history
+  // entry written this run. Scoped to newHistory because pre-v0.5.0 entries
+  // (written before the gitState() helper landed) genuinely lack the fields —
+  // landmine #14 tolerates null/missing on those. NEW entries from this run
+  // are post-T1.3 wire-up and MUST carry the fields.
+  {
+    const missingFields = [];
+    for (const [idx, entry] of newHistory.entries()) {
+      if (!("git_commit" in entry)) missingFields.push(`newHistory[${idx}].git_commit`);
+      if (!("git_tag" in entry)) missingFields.push(`newHistory[${idx}].git_tag`);
+      if (!("git_dirty" in entry)) missingFields.push(`newHistory[${idx}].git_dirty`);
+    }
+    if (missingFields.length > 0) {
+      console.error(`FAIL: missing git fields on ${missingFields.length} site(s):`);
+      for (const f of missingFields) console.error(`  ${f}`);
+      process.exit(1);
+    }
+    if (newHistory.length > 0) {
+      const hasRealCommit = newHistory.some(
+        (e) => e.git_commit !== null && /^[0-9a-f]{40}$/.test(e.git_commit)
+      );
+      if (!hasRealCommit) {
+        console.error(
+          `FAIL: ${newHistory.length} new history entries but none has a real git_commit sha — gitState() not capturing on a real-git workshop?`
+        );
+        process.exit(1);
+      }
+      console.log(
+        `\n--- Git-fields assertion ---\n  OK: ${newHistory.length} new history entries; git fields present on all; at least one has a real 40-char sha.`
+      );
+    } else {
+      console.log(
+        `\n--- Git-fields assertion ---\n  OK: 0 new history entries this run (idempotent); nothing to check.`
+      );
+    }
+  }
+
   // ----- exit code --------------------------------------------------------
 
   const errOrSkip = newHistory.filter((h) => h.event === "error" || h.event === "skip");
