@@ -53,7 +53,10 @@ Beacon is a real published repo at `git@github-personal:willfell/beacon.git`. Co
 
 Stop and ask the user before any of:
 
-- Modifying anything inside `.obsidian/` of any vault (plugin configs, workspace, hotkeys).
+- Modifying anything inside `.obsidian/` of any vault EXCEPT for the two installer-managed paths allowlisted in landmine #12:
+  - `.obsidian/plugins/templater-obsidian/data.json`
+  - `.obsidian/plugins/slash-commander/data.json`
+  Edits to these two paths must follow landmine #12's safety mechanics (additive-merge-only, backup-on-edit, malformed-JSON guard, failure-loud history).
 - Creating a new top-level directory in any vault (in consumers, prefer `beacon/<module>/` for platform-managed content).
 - Bumping `workshop_version` in `platform/manifest.json` (it's the global release marker).
 - Editing or removing files inside `platform/mechanisms/*/` after a version has been promoted to a consumer.

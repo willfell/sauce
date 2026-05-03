@@ -267,6 +267,8 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   // is otherwise complete, and the registry is regenerated on every install.
   await applyNavButtons(tp, mech, variables, history);
   await applyExternalPlugins(tp, mech, history);
+  await applyTemplaterHotkeys(tp, mech, variables, history);          // NEW v0.1.3
+  await applySlashCommanderBindings(tp, mech, variables, history);    // NEW v0.1.3
 
   return true;
 }
@@ -742,6 +744,363 @@ async function applyExternalPlugins(tp, manifest, history) {
         });
       }
     }
+  }
+}
+
+// applyTemplaterHotkeys — for each item that declares templater_hotkeys[],
+// read .obsidian/plugins/templater-obsidian/data.json and additive-merge each
+// entry's full template path into enabled_templates_hotkeys[]. Idempotent
+// (skip if already present). Failure-loud (Notice + history). Backup-on-edit
+// to <target>.beacon-backup. Honors landmine #12 — never overwrites a
+// malformed data.json; never strips user entries.
+//
+// Empty-string entries Templater seeds at first install (`[""]`) are
+// preserved — additive merge only. Templater's register_templates_hotkeys()
+// early-returns on falsy entries, so the empty seed is harmless.
+async function applyTemplaterHotkeys(tp, manifest, variables, history) {
+  if (!manifest || !Array.isArray(manifest.templater_hotkeys) || manifest.templater_hotkeys.length === 0) return;
+  const adapter = tp.app.vault.adapter;
+  const target = ".obsidian/plugins/templater-obsidian/data.json";
+
+  if (!(await adapter.exists(target))) {
+    new Notice(`applyTemplaterHotkeys: ${target} absent; cannot register hotkeys for ${manifest.name}`, 6000);
+    if (history) {
+      history.push({
+        event: "warning",
+        step: "templater_hotkeys",
+        name: manifest.name,
+        message: `${target} absent`,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  let raw;
+  try {
+    raw = await adapter.read(target);
+  } catch (e) {
+    new Notice(`applyTemplaterHotkeys: cannot read ${target} (${e.message}); skipping for ${manifest.name}`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "templater_hotkeys",
+        name: manifest.name,
+        message: `read failed for ${target}: ${e.message}`,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch (e) {
+    new Notice(`applyTemplaterHotkeys: ${target} malformed JSON (${e.message}); skipping for ${manifest.name}`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "templater_hotkeys",
+        name: manifest.name,
+        message: `${target} malformed JSON: ${e.message}`,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  if (!Array.isArray(data.enabled_templates_hotkeys)) {
+    new Notice(`applyTemplaterHotkeys: ${target} parsed but enabled_templates_hotkeys not an array; skipping for ${manifest.name}`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "templater_hotkeys",
+        name: manifest.name,
+        message: `${target} enabled_templates_hotkeys not an array`,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  const templatesPath = variables && variables.templates_path;
+  if (!templatesPath) {
+    new Notice(`applyTemplaterHotkeys: variables.templates_path missing; cannot register for ${manifest.name}`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "templater_hotkeys",
+        name: manifest.name,
+        message: "variables.templates_path missing",
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  let appended = 0;
+  for (const entry of manifest.templater_hotkeys) {
+    if (!entry || !entry.template) continue;
+    const fullPath = `${templatesPath}/${entry.template}`;
+    if (data.enabled_templates_hotkeys.includes(fullPath)) {
+      if (history) {
+        history.push({
+          event: "info",
+          step: "templater_hotkeys",
+          name: manifest.name,
+          template_path: fullPath,
+          action: "skipped_existing",
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      continue;
+    }
+    data.enabled_templates_hotkeys.push(fullPath);
+    appended++;
+    if (history) {
+      history.push({
+        event: "info",
+        step: "templater_hotkeys",
+        name: manifest.name,
+        template_path: fullPath,
+        action: "applied",
+        attempted_at: new Date().toISOString(),
+      });
+    }
+  }
+
+  if (appended === 0) return;
+
+  // Backup before write (one-deep, overwrite-on-edit).
+  try {
+    await adapter.write(`${target}.beacon-backup`, raw);
+  } catch (e) {
+    new Notice(`applyTemplaterHotkeys: backup write failed (${e.message}); aborting modification for ${manifest.name}`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "templater_hotkeys",
+        name: manifest.name,
+        message: `backup write failed: ${e.message}`,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  try {
+    await adapter.write(target, JSON.stringify(data, null, 2));
+  } catch (e) {
+    new Notice(`applyTemplaterHotkeys: write failed (${e.message}) for ${manifest.name}`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "templater_hotkeys",
+        name: manifest.name,
+        message: `write failed: ${e.message}`,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+  }
+}
+
+// applySlashCommanderBindings — for each item that declares
+// slash_commander_bindings[], read .obsidian/plugins/slash-commander/data.json
+// and additive-merge each entry into bindings[]. Idempotency on `id` field.
+// Cross-validates that entry.template is also declared in
+// manifest.templater_hotkeys[] or manifest.files[] (catches typos). Honors
+// landmine #12 — never overwrites a malformed data.json; never strips user
+// bindings.
+async function applySlashCommanderBindings(tp, manifest, variables, history) {
+  if (!manifest || !Array.isArray(manifest.slash_commander_bindings) || manifest.slash_commander_bindings.length === 0) return;
+  const adapter = tp.app.vault.adapter;
+  const target = ".obsidian/plugins/slash-commander/data.json";
+
+  if (!(await adapter.exists(target))) {
+    new Notice(`applySlashCommanderBindings: ${target} absent; cannot register bindings for ${manifest.name}`, 6000);
+    if (history) {
+      history.push({
+        event: "warning",
+        step: "slash_commander_bindings",
+        name: manifest.name,
+        message: `${target} absent`,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  let raw;
+  try {
+    raw = await adapter.read(target);
+  } catch (e) {
+    if (history) {
+      history.push({
+        event: "error",
+        step: "slash_commander_bindings",
+        name: manifest.name,
+        message: `read failed for ${target}: ${e.message}`,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    new Notice(`applySlashCommanderBindings: cannot read ${target} (${e.message}); skipping for ${manifest.name}`, 8000);
+    return;
+  }
+
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch (e) {
+    if (history) {
+      history.push({
+        event: "error",
+        step: "slash_commander_bindings",
+        name: manifest.name,
+        message: `${target} malformed JSON: ${e.message}`,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    new Notice(`applySlashCommanderBindings: ${target} malformed JSON (${e.message}); skipping for ${manifest.name}`, 8000);
+    return;
+  }
+
+  if (!Array.isArray(data.bindings)) {
+    if (history) {
+      history.push({
+        event: "error",
+        step: "slash_commander_bindings",
+        name: manifest.name,
+        message: `${target} bindings not an array`,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    new Notice(`applySlashCommanderBindings: ${target} bindings not an array; skipping for ${manifest.name}`, 8000);
+    return;
+  }
+
+  const templatesPath = variables && variables.templates_path;
+  if (!templatesPath) {
+    if (history) {
+      history.push({
+        event: "error",
+        step: "slash_commander_bindings",
+        name: manifest.name,
+        message: "variables.templates_path missing",
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    new Notice(`applySlashCommanderBindings: variables.templates_path missing; cannot register for ${manifest.name}`, 8000);
+    return;
+  }
+
+  // Build cross-validation set: templates the manifest is known to ship.
+  const declared = new Set();
+  for (const e of manifest.templater_hotkeys || []) {
+    if (e && e.template) declared.add(e.template);
+  }
+  for (const f of manifest.files || []) {
+    if (f && f.source) {
+      const base = f.source.includes("/") ? f.source.substring(f.source.lastIndexOf("/") + 1) : f.source;
+      declared.add(base);
+    }
+    if (f && f.dest) {
+      const base = f.dest.includes("/") ? f.dest.substring(f.dest.lastIndexOf("/") + 1) : f.dest;
+      declared.add(base);
+    }
+  }
+
+  let appended = 0;
+  for (const entry of manifest.slash_commander_bindings) {
+    if (!entry || !entry.name || !entry.template) continue;
+
+    if (!declared.has(entry.template)) {
+      if (history) {
+        history.push({
+          event: "warning",
+          step: "slash_commander_bindings",
+          name: manifest.name,
+          binding_name: entry.name,
+          template: entry.template,
+          message: `binding references template "${entry.template}" not declared in templater_hotkeys[] or files[]; skipping`,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      new Notice(`applySlashCommanderBindings: ${manifest.name} binding "${entry.name}" references undeclared template "${entry.template}"; skipped`, 8000);
+      continue;
+    }
+
+    const fullPath = `${templatesPath}/${entry.template}`;
+    const cmdId = `templater-obsidian:${fullPath}`;
+
+    if (data.bindings.some((b) => b && b.id === cmdId)) {
+      if (history) {
+        history.push({
+          event: "info",
+          step: "slash_commander_bindings",
+          name: manifest.name,
+          binding_name: entry.name,
+          command_id: cmdId,
+          action: "skipped_existing",
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      continue;
+    }
+
+    data.bindings.push({
+      name: entry.name,
+      id: cmdId,
+      action: cmdId,
+      icon: "templater-icon",
+      mode: "any",
+      triggerMode: "anywhere",
+    });
+    appended++;
+    if (history) {
+      history.push({
+        event: "info",
+        step: "slash_commander_bindings",
+        name: manifest.name,
+        binding_name: entry.name,
+        command_id: cmdId,
+        action: "applied",
+        attempted_at: new Date().toISOString(),
+      });
+    }
+  }
+
+  if (appended === 0) return;
+
+  try {
+    await adapter.write(`${target}.beacon-backup`, raw);
+  } catch (e) {
+    if (history) {
+      history.push({
+        event: "error",
+        step: "slash_commander_bindings",
+        name: manifest.name,
+        message: `backup write failed: ${e.message}`,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    new Notice(`applySlashCommanderBindings: backup write failed (${e.message}); aborting modification for ${manifest.name}`, 8000);
+    return;
+  }
+
+  try {
+    await adapter.write(target, JSON.stringify(data, null, 2));
+  } catch (e) {
+    if (history) {
+      history.push({
+        event: "error",
+        step: "slash_commander_bindings",
+        name: manifest.name,
+        message: `write failed: ${e.message}`,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    new Notice(`applySlashCommanderBindings: write failed (${e.message}) for ${manifest.name}`, 8000);
   }
 }
 

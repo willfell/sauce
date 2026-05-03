@@ -308,6 +308,10 @@ async function main() {
     console.log(`  ${s.placeholder || "(no message)"}`);
   }
 
+  const pluginDataWrites = writeLog.filter((w) => w.path.startsWith(".obsidian/plugins/"));
+  console.log(`\n--- Plugin-data writes (${pluginDataWrites.length}) ---`);
+  for (const w of pluginDataWrites) console.log(`  ${w.path}  (${w.bytes}B)`);
+
   const newHistory = (post && post.history) ? post.history.slice(preHistoryLen) : [];
   console.log(`\n--- New history entries this run (${newHistory.length}) ---`);
   for (const h of newHistory) console.log("  " + JSON.stringify(h));
