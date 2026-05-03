@@ -1,0 +1,13 @@
+name: customjs-guard
+version: 1.0.0
+description: Polling guard for CustomJS callsites that prevents cold-load ReferenceError flashes.
+files:
+  - { source: view.js, dest: "{{views_path}}/customjs-guard/view.js" }
+  - { source: loader.css, dest: ".obsidian/snippets/customjs-loader.css", approval: required }
+post_install:
+  - { type: enable_snippet, snippet: customjs-loader, approval: required }
+rule_fragments:
+  - target: _global
+    fragment: |
+      forbid_dataviewjs_patterns:
+        - { pattern: "await customJS\\.", reason: "use customjs-guard instead" }
