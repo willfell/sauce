@@ -1,8 +1,17 @@
 # Workshop platform manifest.
 # Version is the workshop's overall release version. Each mechanism + blueprint has its own version.
 
-workshop_version: 0.1.0
+workshop_version: 0.2.0
 date: 2026-05-02
+
+# install.js is special: it's the bootstrap mechanism that consumers must have BEFORE
+# they can run any other install. Bootstrap path: copy install.js manually into the
+# consumer's templater_scripts_path on first setup, then run it once to install
+# everything else.
+installer:
+  source: install.js
+  version: 0.1.0
+  bootstrap_dest: "{{templater_scripts_path}}/platformInstall.js"
 
 mechanisms:
   - { name: customjs-guard, version: 1.0.0, path: mechanisms/customjs-guard }
