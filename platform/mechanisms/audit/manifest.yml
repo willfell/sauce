@@ -1,0 +1,6 @@
+name: audit
+version: 0.1.0
+description: Walks every .md file, runs validator, reports violations + platform drift to Timestamps/Audits/YYYY-MM-DD-audit.md.
+files:
+  - { source: audit-walker.js, dest: "{{templater_scripts_path}}/audit-walker.js" }
+post_install: []
