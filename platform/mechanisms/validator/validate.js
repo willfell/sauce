@@ -55,15 +55,15 @@ async function loadRule(app, rulesPath, name) {
   const tfile = app.vault.getAbstractFileByPath(`${rulesPath}/${name}.yml`);
   if (!tfile) return null;
   const text = await app.vault.read(tfile);
-  // YAML global is provided by Obsidian's bundled js-yaml (Dataview ships it).
-  // If unavailable, fall back to a minimal frontmatter-style parser (not implemented — install js-yaml).
+  try {
+    const obs = require("obsidian");
+    if (obs && typeof obs.parseYaml === "function") return obs.parseYaml(text);
+  } catch (e) { /* fall through */ }
   try {
     if (typeof YAML !== "undefined" && YAML.parse) return YAML.parse(text);
     if (typeof window !== "undefined" && window.YAML?.parse) return window.YAML.parse(text);
-    return null;
-  } catch (e) {
-    return null;
-  }
+  } catch (e) { /* fall through */ }
+  return null;
 }
 
 async function checkFrontmatter(ctx, gr, mr) {

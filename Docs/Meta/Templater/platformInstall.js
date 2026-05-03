@@ -23,8 +23,12 @@ module.exports = async function (tp) {
     history: [],
   };
 
-  if (!config || !subscription) {
-    new Notice("platformInstall: missing platform-config.yml or platform-subscription.yml. Aborting.", 6000);
+  if (!config) {
+    new Notice("platformInstall: cannot read/parse Docs/Meta/platform-config.yml. Aborting.", 6000);
+    return;
+  }
+  if (!subscription) {
+    new Notice("platformInstall: cannot read/parse Docs/Meta/platform-subscription.yml. Aborting.", 6000);
     return;
   }
 
@@ -147,44 +151,58 @@ async function readAbsolute(absPath) {
   }
 }
 
-async function readYamlAbsolute(absPath) {
-  const text = await readAbsolute(absPath);
-  if (!text) return null;
+function parseYamlText(text) {
+  if (typeof text !== "string" || text.length === 0) return null;
+  try {
+    const obs = require("obsidian");
+    if (obs && typeof obs.parseYaml === "function") return obs.parseYaml(text);
+  } catch (e) {
+    /* require("obsidian") not available in this context */
+  }
   try {
     if (typeof YAML !== "undefined" && YAML.parse) return YAML.parse(text);
     if (typeof window !== "undefined" && window.YAML?.parse) return window.YAML.parse(text);
-    return null;
   } catch (e) {
-    return null;
+    /* fall through */
   }
+  console.warn("[platform] No YAML parser available — install JS Engine plugin or use Obsidian 1.4+");
+  return null;
+}
+
+function stringifyYamlObj(obj) {
+  try {
+    const obs = require("obsidian");
+    if (obs && typeof obs.stringifyYaml === "function") return obs.stringifyYaml(obj);
+  } catch (e) {
+    /* fall through */
+  }
+  try {
+    if (typeof YAML !== "undefined" && YAML.stringify) return YAML.stringify(obj);
+    if (typeof window !== "undefined" && window.YAML?.stringify) return window.YAML.stringify(obj);
+  } catch (e) {
+    /* fall through */
+  }
+  return JSON.stringify(obj, null, 2);
+}
+
+async function readYamlAbsolute(absPath) {
+  const text = await readAbsolute(absPath);
+  if (!text) return null;
+  return parseYamlText(text);
 }
 
 async function readYaml(app, path) {
   const f = app.vault.getAbstractFileByPath(path);
   if (!f) return null;
   const text = await app.vault.read(f);
-  try {
-    if (typeof YAML !== "undefined" && YAML.parse) return YAML.parse(text);
-    if (typeof window !== "undefined" && window.YAML?.parse) return window.YAML.parse(text);
-    return null;
-  } catch (e) {
-    return null;
-  }
+  return parseYamlText(text);
 }
 
 async function writeYaml(app, path, obj) {
   const banner =
     "# Auto-managed by platform installer.\n" +
     "# Edit by hand only if you know what you're doing.\n";
-  let body;
-  try {
-    if (typeof YAML !== "undefined" && YAML.stringify) body = YAML.stringify(obj);
-    else if (typeof window !== "undefined" && window.YAML?.stringify) body = window.YAML.stringify(obj);
-    else body = JSON.stringify(obj, null, 2); // last-resort fallback
-  } catch (e) {
-    body = JSON.stringify(obj, null, 2);
-  }
-  const text = banner + body;
+  const text = banner + stringifyYamlObj(obj);
   const tfile = app.vault.getAbstractFileByPath(path);
   if (tfile) await app.vault.modify(tfile, text);
   else await app.vault.create(path, text);

@@ -43,12 +43,14 @@ async function readYaml(app, path) {
   if (!f) return null;
   const text = await app.vault.read(f);
   try {
+    const obs = require("obsidian");
+    if (obs && typeof obs.parseYaml === "function") return obs.parseYaml(text);
+  } catch (e) { /* fall through */ }
+  try {
     if (typeof YAML !== "undefined" && YAML.parse) return YAML.parse(text);
     if (typeof window !== "undefined" && window.YAML?.parse) return window.YAML.parse(text);
-    return null;
-  } catch (e) {
-    return null;
-  }
+  } catch (e) { /* fall through */ }
+  return null;
 }
 
 function computeDrift(installed, subscription) {
