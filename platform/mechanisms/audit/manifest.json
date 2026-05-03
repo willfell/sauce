@@ -1,6 +1,6 @@
 {
   "name": "audit",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Walks every .md file, runs validator, reports violations + platform drift to Timestamps/Audits/YYYY-MM-DD-audit.md.",
   "files": [
     { "source": "audit-walker.js", "dest": "{{templater_scripts_path}}/audit-walker.js" },
@@ -8,6 +8,12 @@
   ],
   "external_plugins": [
     { "id": "slash-commander", "required": true, "reason": "Surface /audit slash command for the audit walker." }
+  ],
+  "templater_hotkeys": [
+    { "template": "Audit.md" }
+  ],
+  "slash_commander_bindings": [
+    { "name": "audit", "template": "Audit.md" }
   ],
   "post_install": []
 }

@@ -1,6 +1,6 @@
 {
   "name": "validator",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Rule-engine validator + Templater hook handler. Reads Docs/Meta/rules/* and validates a file.",
   "files": [
     { "source": "validate.js", "dest": "{{templater_scripts_path}}/validate.js" },
@@ -9,6 +9,12 @@
   ],
   "external_plugins": [
     { "id": "slash-commander", "required": true, "reason": "Surface /validate slash command for ad-hoc validation." }
+  ],
+  "templater_hotkeys": [
+    { "template": "Validate.md" }
+  ],
+  "slash_commander_bindings": [
+    { "name": "validate", "template": "Validate.md" }
   ],
   "post_install": [
     { "type": "notice", "message": "Reload Templater after install (Settings → Templater → reload user scripts)." }

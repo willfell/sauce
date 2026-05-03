@@ -7,13 +7,13 @@
     },
     {
       "name": "validator",
-      "version": "0.1.0",
-      "installed_at": "2026-05-03T02:27:18.935Z"
+      "version": "0.1.1",
+      "installed_at": "2026-05-03T20:47:39.853Z"
     },
     {
       "name": "audit",
-      "version": "0.1.0",
-      "installed_at": "2026-05-03T02:27:18.939Z"
+      "version": "0.1.1",
+      "installed_at": "2026-05-03T20:47:39.854Z"
     },
     {
       "name": "nav-buttons",
@@ -98,6 +98,66 @@
       "name": "audit",
       "reason": "subscription pins audit@0.1.0 but workshop has 0.1.0-test",
       "attempted_at": "2026-05-03T18:49:47.327Z"
+    },
+    {
+      "event": "warning",
+      "step": "external_plugins",
+      "name": "validator",
+      "plugin_id": "slash-commander",
+      "reason": "Surface /validate slash command for ad-hoc validation.",
+      "attempted_at": "2026-05-03T20:47:39.852Z"
+    },
+    {
+      "event": "info",
+      "step": "templater_hotkeys",
+      "name": "validator",
+      "template_path": "Docs/Meta/Templates/Validate.md",
+      "action": "applied",
+      "attempted_at": "2026-05-03T20:47:39.852Z"
+    },
+    {
+      "event": "warning",
+      "step": "slash_commander_bindings",
+      "name": "validator",
+      "message": ".obsidian/plugins/slash-commander/data.json absent",
+      "attempted_at": "2026-05-03T20:47:39.853Z"
+    },
+    {
+      "event": "install",
+      "kind": "mechanism",
+      "name": "validator",
+      "version": "0.1.1",
+      "installed_at": "2026-05-03T20:47:39.853Z"
+    },
+    {
+      "event": "warning",
+      "step": "external_plugins",
+      "name": "audit",
+      "plugin_id": "slash-commander",
+      "reason": "Surface /audit slash command for the audit walker.",
+      "attempted_at": "2026-05-03T20:47:39.854Z"
+    },
+    {
+      "event": "info",
+      "step": "templater_hotkeys",
+      "name": "audit",
+      "template_path": "Docs/Meta/Templates/Audit.md",
+      "action": "applied",
+      "attempted_at": "2026-05-03T20:47:39.854Z"
+    },
+    {
+      "event": "warning",
+      "step": "slash_commander_bindings",
+      "name": "audit",
+      "message": ".obsidian/plugins/slash-commander/data.json absent",
+      "attempted_at": "2026-05-03T20:47:39.854Z"
+    },
+    {
+      "event": "install",
+      "kind": "mechanism",
+      "name": "audit",
+      "version": "0.1.1",
+      "installed_at": "2026-05-03T20:47:39.854Z"
     }
   ]
 }

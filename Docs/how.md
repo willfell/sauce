@@ -128,9 +128,18 @@ If a consumer's existing paths differ from canonical (e.g., accuris currently ha
    c. Read mechanism's `manifest.json` from workshop.
    d. For each file in the mechanism: read source, substitute `{{vars}}`, write to dest. Approval-gate any file with `"approval": "required"`.
    e. Run `post_install` steps: `enable_snippet` (with optional approval), `notice` (informational popup).
-   f. Append to `installed` + `history`.
+   f. Apply `nav_buttons[]` declarations to the registry (if any).
+   g. Apply `external_plugins[]` warnings (warn-only — surfaces missing community-plugin deps).
+   h. Apply `templater_hotkeys[]` registrations to `.obsidian/plugins/templater-obsidian/data.json` (additive merge, backup-on-edit; see landmine #12).
+   i. Apply `slash_commander_bindings[]` registrations to `.obsidian/plugins/slash-commander/data.json` (additive merge, backup-on-edit; see landmine #12).
+   j. Append to `installed` + `history`.
 7. Write `Docs/Meta/platform-installed.json`.
 8. Show "platformInstall: complete." Notice.
+
+> [!info] Optional manifest fields (additive across versions)
+> - `templater_hotkeys[]` (added v0.1.3) — list of `{ template: "<basename>.md" }` entries the installer registers in Templater's Template Hotkeys, populating `.obsidian/plugins/templater-obsidian/data.json:enabled_templates_hotkeys[]` so per-template `Insert <name>` commands surface in the palette.
+> - `slash_commander_bindings[]` (added v0.1.3) — list of `{ name, template }` entries the installer registers in Slash Commander, populating `.obsidian/plugins/slash-commander/data.json:bindings[]`. The `name` is the slash trigger (user types `/<name>`); installer derives the full SC binding shape (`name`, `id`, `action`, `icon: "templater-icon"`, `mode: "any"`, `triggerMode: "anywhere"`) and computes `id = action = "templater-obsidian:" + <full-template-path>` from the basename + `variables.templates_path`.
+> - Both fields cross-validate against the manifest's `files[]` (or each other) — a binding referencing a template the manifest doesn't ship surfaces a warning + skip.
 
 Cross-vault file reads use `require("fs").promises` (Node API available in Templater desktop). Mobile would need a different path; not supported yet.
 

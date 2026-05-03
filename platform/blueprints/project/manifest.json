@@ -1,6 +1,6 @@
 {
   "name": "project",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "kind": "blueprint",
   "description": "Project note bundle — boards/planning/<slug>/ structure, planning board view, workstream manager, /new-project command.",
   "depends_on": [
@@ -9,6 +9,12 @@
   ],
   "external_plugins": [
     { "id": "slash-commander", "required": true, "reason": "Surface /new-project slash command." }
+  ],
+  "templater_hotkeys": [
+    { "template": "Create New Project.md" }
+  ],
+  "slash_commander_bindings": [
+    { "name": "new-project", "template": "Create New Project.md" }
   ],
   "customjs_classes": [
     "ProjectNavButtons",

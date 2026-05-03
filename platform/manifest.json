@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop platform manifest. Each mechanism + blueprint has its own version.",
-  "workshop_version": "0.4.0",
+  "workshop_version": "0.4.1",
   "date": "2026-05-03",
   "installer": {
     "source": "install.js",
@@ -9,11 +9,11 @@
   },
   "mechanisms": [
     { "name": "customjs-guard", "version": "1.0.0", "path": "mechanisms/customjs-guard" },
-    { "name": "validator", "version": "0.1.0", "path": "mechanisms/validator" },
-    { "name": "audit", "version": "0.1.0", "path": "mechanisms/audit" },
+    { "name": "validator", "version": "0.1.1", "path": "mechanisms/validator" },
+    { "name": "audit", "version": "0.1.1", "path": "mechanisms/audit" },
     { "name": "nav-buttons", "version": "2.0.0", "path": "mechanisms/nav-buttons" }
   ],
   "blueprints": [
-    { "name": "project", "version": "0.2.0", "path": "blueprints/project" }
+    { "name": "project", "version": "0.2.1", "path": "blueprints/project" }
   ]
 }

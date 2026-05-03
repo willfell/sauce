@@ -1,2 +1,4 @@
 .obsidian/workspace*
 .trash/
+# v0.1.3+: backup-on-edit files written by applyTemplaterHotkeys + applySlashCommanderBindings (landmine #12)
+*.beacon-backup

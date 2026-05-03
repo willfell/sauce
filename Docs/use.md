@@ -75,22 +75,15 @@ This is opt-in — without it, the validator only fires when manually invoked.
 ## Slash Commander setup (per consumer vault)
 
 > [!info] Why this exists
-> The platform ships three runner templates (`Create New Project.md`, `Validate.md`, `Audit.md`) as Templater commands. Slash Commander is a third-party community plugin that surfaces them as ergonomic slash keywords (`/new-project`, `/validate`, `/audit`) — type the keyword in any note → command palette filters → Templater fires the template. One-time setup per consumer vault.
+> The platform ships three runner templates (`Create New Project.md`, `Validate.md`, `Audit.md`) and surfaces them as slash commands (`/new-project`, `/validate`, `/audit`) via the Slash Commander community plugin. Three steps total per consumer vault — two installer-driven, one manual.
 
 > [!todo] One-time setup steps
-> 1. **Install the plugin.** Settings → Community plugins → Browse → search "Slash Commander" → Install → Enable. The installer's `external_plugins[]` check fires a Notice + history `warning, step: external_plugins` entry on every install if this is missing.
-> 2. **Register the three runner templates in Templater's "Template Hotkeys" section.** Settings → Templater → scroll to "Template Hotkeys" → click "Add new hotkey for template" three times → in each dropdown pick `Docs/Meta/Templates/Create New Project.md`, `Docs/Meta/Templates/Validate.md`, `Docs/Meta/Templates/Audit.md`. (You don't need to assign a keyboard hotkey — registration alone surfaces them as `Templater: Insert <name>` commands in the palette.) Each registration appears as an entry in `.obsidian/plugins/templater-obsidian/data.json:enabled_templates_hotkeys`.
-> 3. **Reload Templater user scripts** (Settings → Templater → reload user scripts) so `tp.user.validate` and `tp.user["audit-walker"]` are picked up.
-> 4. **Map the three slash keywords.** Settings → Slash Commander → "Add command":
->    - `/new-project` → `Templater: Insert Create New Project`
->    - `/validate` → `Templater: Insert Validate`
->    - `/audit` → `Templater: Insert Audit`
-
-> [!warning] Why step 2 is required (Templater quirk)
-> Templater does NOT auto-generate per-template commands — by default the command palette only exposes 4 base Templater commands (Open insert template modal, Replace templates in active file, Jump to next cursor location, Create new note from template). Per-template `Templater: Insert <name>` commands ONLY appear in the palette (and therefore are ONLY mappable in Slash Commander) AFTER registering each template in the Template Hotkeys section. Without step 2, Slash Commander's command picker shows none of the three "Insert" commands; mapping fails. Surfaced during v0.1.x manual smokes (T2.6) — codified here. The platform installer cannot do this registration automatically because editing `.obsidian/plugins/templater-obsidian/data.json` is an "ask before acting" gate (CLAUDE.md non-negotiables); per-vault user action only.
+> 1. **Install Slash Commander.** Settings → Community plugins → Browse → search "Slash Commander" → Install → Enable. Irreducible (Obsidian's plugin install API is not exposed to scripts).
+> 2. **Run the platform installer.** It writes Templater Template Hotkeys + Slash Commander bindings into the two plugin data.jsons (additive merge, backup on edit, idempotent on re-runs). See landmine #12 for the safety mechanics.
+> 3. **Reload Obsidian** (Cmd+R / Ctrl+R or restart). Plugin caches re-read from disk; the three slash commands go live. Irreducible (Templater registers per-template commands at plugin boot, not on settings save).
 
 > [!example] Verifying
-> Open any note. Type `/validate` → Notice: `validate: clean` (or violation count + console output). Type `/audit` → walker runs; Notice: `audit: complete — see Timestamps/Audits/`. Type `/new-project` → prompts for slug; new project note materializes under `boards/planning/<slug>/`.
+> Open any note. Type `/validate` → fuzzy-matches the platform's binding → fires `Insert Validate` → Notice: `validate: clean` (or violation count). Type `/audit` → walker writes `Timestamps/Audits/<today>-audit.md`. Type `/new-project` → prompts for slug → new project note materializes.
 
 > [!warning] Plugin id is `slash-commander`
 > The Obsidian community-plugin slug is the un-prefixed form (NOT `obsidian-slash-commander`). The three manifests' `external_plugins[].id` declarations cite this exact string. Locked from disk in v0.1.x patch cycle (T2.1) by reading `.obsidian/community-plugins.json` after a real install.

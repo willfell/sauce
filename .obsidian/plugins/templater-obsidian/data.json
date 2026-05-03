@@ -29,7 +29,9 @@
   "syntax_highlighting": true,
   "syntax_highlighting_mobile": false,
   "enabled_templates_hotkeys": [
-    ""
+    "",
+    "Docs/Meta/Templates/Validate.md",
+    "Docs/Meta/Templates/Audit.md"
   ],
   "startup_templates": [
     ""
