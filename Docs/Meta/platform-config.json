@@ -1,0 +1,9 @@
+{
+  "_comment": "Workshop self-install path map. workshop_relative_path '.' = install into this same vault.",
+  "workshop_relative_path": ".",
+  "variables": {
+    "views_path": "Docs/Meta/Views",
+    "templater_scripts_path": "Docs/Meta/Templater",
+    "scripts_path": "Docs/Meta/Scripts"
+  }
+}

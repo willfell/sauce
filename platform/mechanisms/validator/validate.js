@@ -36,7 +36,7 @@ module.exports = async function (tpFileOrObj, moduleId) {
   const moduleRule = resolvedModule ? await loadRule(app, rulesPath, resolvedModule) : null;
 
   if (!globalRule) {
-    result.violations.push({ rule: "internal", severity: "warn", message: "validate: _global.yml not found; skipping" });
+    result.violations.push({ rule: "internal", severity: "warn", message: "validate: _global.json not found; skipping" });
     return result;
   }
 
@@ -52,18 +52,14 @@ module.exports = async function (tpFileOrObj, moduleId) {
 };
 
 async function loadRule(app, rulesPath, name) {
-  const tfile = app.vault.getAbstractFileByPath(`${rulesPath}/${name}.yml`);
+  const tfile = app.vault.getAbstractFileByPath(`${rulesPath}/${name}.json`);
   if (!tfile) return null;
   const text = await app.vault.read(tfile);
   try {
-    const obs = require("obsidian");
-    if (obs && typeof obs.parseYaml === "function") return obs.parseYaml(text);
-  } catch (e) { /* fall through */ }
-  try {
-    if (typeof YAML !== "undefined" && YAML.parse) return YAML.parse(text);
-    if (typeof window !== "undefined" && window.YAML?.parse) return window.YAML.parse(text);
-  } catch (e) { /* fall through */ }
-  return null;
+    return JSON.parse(text);
+  } catch (e) {
+    return null;
+  }
 }
 
 async function checkFrontmatter(ctx, gr, mr) {

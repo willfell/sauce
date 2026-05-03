@@ -1,44 +1,48 @@
 // install.js — the per-vault installer. Runs as tp.user.platformInstall(tp).
 //
 // Reads:
-//   <workshop>/platform/manifest.yml                (workshop catalogue)
-//   Docs/Meta/platform-config.yml                  (this vault's path map + workshop_path)
-//   Docs/Meta/platform-subscription.yml            (what this vault wants)
-//   Docs/Meta/platform-installed.yml               (what's currently installed)
+//   <workshop>/platform/manifest.json               (workshop catalogue)
+//   Docs/Meta/platform-config.json                  (this vault's path map + workshop_path)
+//   Docs/Meta/platform-subscription.json            (what this vault wants)
+//   Docs/Meta/platform-installed.json               (what's currently installed)
+//
+// All platform metadata is JSON for portability — Templater scripts can't access
+// require("obsidian").parseYaml. Rule files (used by validator) stay JSON for the
+// same reason.
 //
 // For each subscribed mechanism / blueprint at a NEWER version than installed:
-//   1. Read its manifest.yml.
-//   2. For each file: substitute {{vars}} from platform-config.yml, copy to dest.
+//   1. Read its manifest.json.
+//   2. For each file: substitute {{vars}} from platform-config.json, copy to dest.
 //   3. For each post_install step: handle (snippet enable, notice, etc.) gated by approval.
-//   4. Update platform-installed.yml.
+//   4. Update platform-installed.json.
 
 module.exports = async function (tp) {
   const app = tp.app;
 
-  const config = await readYaml(app, "Docs/Meta/platform-config.yml");
-  const subscription = await readYaml(app, "Docs/Meta/platform-subscription.yml");
-  const installed = (await readYaml(app, "Docs/Meta/platform-installed.yml")) || {
+  const config = await readJson(app, "Docs/Meta/platform-config.json");
+  const subscription = await readJson(app, "Docs/Meta/platform-subscription.json");
+  const installed = (await readJson(app, "Docs/Meta/platform-installed.json")) || {
     mechanisms: [],
     blueprints: [],
     history: [],
   };
 
   if (!config) {
-    new Notice("platformInstall: cannot read/parse Docs/Meta/platform-config.yml. Aborting.", 6000);
+    new Notice("platformInstall: cannot read/parse Docs/Meta/platform-config.json. Aborting.", 6000);
     return;
   }
   if (!subscription) {
-    new Notice("platformInstall: cannot read/parse Docs/Meta/platform-subscription.yml. Aborting.", 6000);
+    new Notice("platformInstall: cannot read/parse Docs/Meta/platform-subscription.json. Aborting.", 6000);
     return;
   }
 
   const workshopPath =
     config.workshop_path ||
     resolveWorkshopPath(app, config.workshop_relative_path || "../workshop/poc-vault");
-  const manifest = await readYamlAbsolute(`${workshopPath}/platform/manifest.yml`);
+  const manifest = await readJsonAbsolute(`${workshopPath}/platform/manifest.json`);
 
   if (!manifest) {
-    new Notice(`platformInstall: cannot read workshop manifest at ${workshopPath}/platform/manifest.yml`, 8000);
+    new Notice(`platformInstall: cannot read workshop manifest at ${workshopPath}/platform/manifest.json`, 8000);
     return;
   }
 
@@ -78,14 +82,14 @@ module.exports = async function (tp) {
   // Blueprint install: same shape, deferred to a future task. The harness is here:
   // for (const sub of subscription.blueprints || []) { ... }
 
-  await writeYaml(app, "Docs/Meta/platform-installed.yml", installedNow);
+  await writeJson(app, "Docs/Meta/platform-installed.json", installedNow);
   new Notice("platformInstall: complete.", 4000);
 };
 
 async function installMechanism(tp, workshopPath, target, variables) {
   const adapter = tp.app.vault.adapter;
-  const manPath = `${workshopPath}/platform/${target.path}/manifest.yml`;
-  const mech = await readYamlAbsolute(manPath);
+  const manPath = `${workshopPath}/platform/${target.path}/manifest.json`;
+  const mech = await readJsonAbsolute(manPath);
   if (!mech) {
     new Notice(`installMechanism: cannot read ${manPath}`, 4000);
     return false;
@@ -134,10 +138,8 @@ function substitute(text, variables) {
 }
 
 function resolveWorkshopPath(app, relative) {
-  // Templater desktop: app.vault.adapter.basePath is the absolute vault root.
   const base = app.vault.adapter.basePath || app.vault.adapter.getBasePath?.();
-  if (!base) return relative; // best-effort — relative paths may fail in fs.readFile
-  // node:path is available in Templater scripts via require.
+  if (!base) return relative;
   const path = require("path");
   return path.resolve(base, relative);
 }
@@ -151,58 +153,31 @@ async function readAbsolute(absPath) {
   }
 }
 
-function parseYamlText(text) {
+function parseJsonText(text) {
   if (typeof text !== "string" || text.length === 0) return null;
   try {
-    const obs = require("obsidian");
-    if (obs && typeof obs.parseYaml === "function") return obs.parseYaml(text);
+    return JSON.parse(text);
   } catch (e) {
-    /* require("obsidian") not available in this context */
+    console.warn("[platform] JSON parse failed:", e.message);
+    return null;
   }
-  try {
-    if (typeof YAML !== "undefined" && YAML.parse) return YAML.parse(text);
-    if (typeof window !== "undefined" && window.YAML?.parse) return window.YAML.parse(text);
-  } catch (e) {
-    /* fall through */
-  }
-  console.warn("[platform] No YAML parser available — install JS Engine plugin or use Obsidian 1.4+");
-  return null;
 }
 
-function stringifyYamlObj(obj) {
-  try {
-    const obs = require("obsidian");
-    if (obs && typeof obs.stringifyYaml === "function") return obs.stringifyYaml(obj);
-  } catch (e) {
-    /* fall through */
-  }
-  try {
-    if (typeof YAML !== "undefined" && YAML.stringify) return YAML.stringify(obj);
-    if (typeof window !== "undefined" && window.YAML?.stringify) return window.YAML.stringify(obj);
-  } catch (e) {
-    /* fall through */
-  }
-  return JSON.stringify(obj, null, 2);
-}
-
-async function readYamlAbsolute(absPath) {
+async function readJsonAbsolute(absPath) {
   const text = await readAbsolute(absPath);
   if (!text) return null;
-  return parseYamlText(text);
+  return parseJsonText(text);
 }
 
-async function readYaml(app, path) {
+async function readJson(app, path) {
   const f = app.vault.getAbstractFileByPath(path);
   if (!f) return null;
   const text = await app.vault.read(f);
-  return parseYamlText(text);
+  return parseJsonText(text);
 }
 
-async function writeYaml(app, path, obj) {
-  const banner =
-    "# Auto-managed by platform installer.\n" +
-    "# Edit by hand only if you know what you're doing.\n";
-  const text = banner + stringifyYamlObj(obj);
+async function writeJson(app, path, obj) {
+  const text = JSON.stringify(obj, null, 2);
   const tfile = app.vault.getAbstractFileByPath(path);
   if (tfile) await app.vault.modify(tfile, text);
   else await app.vault.create(path, text);

@@ -1,0 +1,9 @@
+{
+  "_comment": "Workshop _global rule file — empty stubs. Consumer vaults populate with real rules.",
+  "required_frontmatter": {},
+  "required_tags": [],
+  "required_blocks": [],
+  "forbid_dataviewjs_patterns": [
+    { "pattern": "await customJS\\.", "reason": "use customjs-guard via dv.view instead" }
+  ]
+}

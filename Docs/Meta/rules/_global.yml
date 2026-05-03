@@ -1,9 +1,0 @@
-# Workshop _global rule file — empty stubs.
-# Consumer vaults populate this with their actual non-negotiables;
-# the workshop has no real content so the rules stay neutral here.
-
-required_frontmatter: {}
-required_tags: []
-required_blocks: []
-forbid_dataviewjs_patterns:
-  - { pattern: "await customJS\\.", reason: "use customjs-guard via dv.view instead" }

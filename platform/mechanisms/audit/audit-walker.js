@@ -17,8 +17,8 @@ module.exports = async function (tp) {
   }
 
   // Compare installed vs subscribed platform versions.
-  const installed = (await readYaml(app, "Docs/Meta/platform-installed.yml")) || {};
-  const subscription = (await readYaml(app, "Docs/Meta/platform-subscription.yml")) || {};
+  const installed = (await readJson(app, "Docs/Meta/platform-installed.json")) || {};
+  const subscription = (await readJson(app, "Docs/Meta/platform-subscription.json")) || {};
   report.platformDrift = computeDrift(installed, subscription);
 
   const today = new Date().toISOString().slice(0, 10);
@@ -38,19 +38,15 @@ module.exports = async function (tp) {
   return reportPath;
 };
 
-async function readYaml(app, path) {
+async function readJson(app, path) {
   const f = app.vault.getAbstractFileByPath(path);
   if (!f) return null;
   const text = await app.vault.read(f);
   try {
-    const obs = require("obsidian");
-    if (obs && typeof obs.parseYaml === "function") return obs.parseYaml(text);
-  } catch (e) { /* fall through */ }
-  try {
-    if (typeof YAML !== "undefined" && YAML.parse) return YAML.parse(text);
-    if (typeof window !== "undefined" && window.YAML?.parse) return window.YAML.parse(text);
-  } catch (e) { /* fall through */ }
-  return null;
+    return JSON.parse(text);
+  } catch (e) {
+    return null;
+  }
 }
 
 function computeDrift(installed, subscription) {
