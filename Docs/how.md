@@ -41,6 +41,24 @@ A blueprint lives at `platform/blueprints/<name>/` with:
 - `variants.json` — declares aliases (e.g., headspace renames `project` → `side-quest`).
 - `manifest.json` — version + install steps.
 
+### Module directory under `beacon/` namespace (blueprint-only invariant)
+
+Every **blueprint** owns ONE directory at `beacon/<module_directory>/` in the consumer vault. All files the blueprint materializes — at install time via `files[]`, OR at runtime via templates / commands / nav-button click actions — land under that one directory. Cross-module data flows via wikilinks only; no blueprint writes into another's directory.
+
+The `beacon/` parent namespace demarcates platform-managed content from the consumer's personal content. Consumers keep any other top-level structure they want (e.g., `Timestamps/`, `Resources/`) — `beacon/` is the contract boundary.
+
+Each blueprint manifest declares `module_directory: "<name>"` (required, enforced by installer). The installer derives the full materialization root as `<vault_root>/beacon/<module_directory>/`. Examples: `beacon/boards/` for the boards blueprint (v0.2.0), `beacon/to-do/` / `beacon/projects/` / `beacon/trips/` / `beacon/finance/` for future blueprints.
+
+**Why:**
+- Install / update / uninstall a blueprint = touch one directory at `beacon/<module>/`. Predictable.
+- Cross-module name collisions become impossible by construction.
+- Platform-managed content is cleanly demarcated from consumer-personal content via the `beacon/` namespace.
+- New blueprints get a clean recipe — pick a directory name under `beacon/`, own it.
+
+**Mechanisms are exempt.** Mechanisms (`customjs-guard`, `validator`, `audit`, `nav-buttons`) are shared infrastructure landing under `Docs/Meta/Scripts/`, `Docs/Meta/Views/`, `Docs/Meta/Templater/` — not module-scoped, not under `beacon/`.
+
+Codified as landmine #11 + a CLAUDE.md non-negotiable. Decision rationale and shape at `Docs/plans/2026-05-03-boards-blueprint-design.md`. Refined 2026-05-04 to add the `beacon/` namespace prefix.
+
 ### Subscription
 Per-consumer-vault `Docs/Meta/platform-subscription.json` declaring which mechanisms + blueprints this vault adopts and at which versions:
 

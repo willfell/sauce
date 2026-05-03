@@ -57,6 +57,51 @@ The installer reads the workshop's manifest from outside its own vault. We use `
 
 **Fix:** the platform is desktop-first. Mobile is a future consideration; would require Obsidian Sync to deliver the workshop's files into each consumer's vault first (as a vendored copy), then the installer reads from `app.vault.adapter` instead of `fs`.
 
+### 9. Installer substitution variables come ONLY from `platform-config.json:variables`
+
+`substituteStrict` (paths) and `substituteLenient` (body content) in `install.js` both read from `paths.variables`, populated solely from each consumer's `platform-config.json:variables` map. They do NOT consume `variants.json`, the top-level `vault_identity` config field, or any other source. Placeholders like `{{vault_identity_tag}}` declared in a blueprint's content files will land literal in the materialized output unless that exact key is also in `variables`.
+
+**Fix:** if a blueprint's content needs vault-specific tokenization (`vault_identity_tag`, etc.), either (a) drop the placeholder if location-scoping is sufficient (see project blueprint v0.2.0's kanban template — the file lives at `boards/To-Do-Board.md`, already vault-scoped), or (b) add the matching key to every consumer's `platform-config.json:variables` map. Future option (c): teach `install.js` to merge each blueprint's resolved variant from `variants.json` into the substitution variables — separate design pass.
+
+Surfaced during v0.1.1 S3 quality review of `kanban-board.md`. See `Docs/plans/execution-logs/2026-05-03-registry-driven-nav-buttons/T3.1-T3.4-project-blueprint-v0.2.0.md` for the post-mortem.
+
+### 11. Module-directory invariant under `beacon/` namespace — every blueprint owns ONE directory at `beacon/<module>/`
+
+Every blueprint declares ONE directory at `beacon/<module_directory>/` in the consumer vault that it exclusively owns. All files the blueprint materializes (at install time via `files[]`, OR at runtime via templates / commands / nav-button actions creating notes) land under that directory. Cross-module data flows via wikilinks only — no module writes into another module's directory.
+
+The `beacon/` parent namespace demarcates platform-managed content from the consumer's personal content. Consumers can keep any other top-level structure (e.g., accuris's `Timestamps/`, `Resources/`) without collision risk.
+
+Each blueprint manifest declares `module_directory: "<name>"` (required field, enforced by installer in v0.2.0+). Examples: `beacon/boards/` for the boards blueprint, `beacon/to-do/` for a future to-do blueprint, `beacon/projects/` / `beacon/trips/` / `beacon/finance/` for future blueprints.
+
+**Why it exists:**
+1. Without the per-blueprint invariant, two blueprints could collide on directory names (e.g., the v0.1.1 project blueprint placed content under `boards/planning/<slug>/`, claiming a sub-tree of `boards/`, which conflicted with the future boards blueprint's territory).
+2. Without the `beacon/` namespace, platform-managed content is interleaved with consumer-personal content at vault root — making install/update/uninstall surface harder to reason about, and risking accidental clobber of personal content.
+
+Install / update / uninstall a blueprint = touch one directory at `beacon/<module>/`; predictable; cross-module collisions impossible by construction.
+
+**Fix:** every blueprint manifest must declare `module_directory`. Installer derives the materialization root as `<vault_root>/beacon/<module_directory>/`. Refuses to install a blueprint manifest that lacks `module_directory` (failure-loud). Two blueprints declaring the same `module_directory` → installer Notice + skips the second (first-wins by install order); recorded as `warning, step: module_directory_collision`.
+
+**Mechanisms exempt.** Mechanisms (cross-cutting code: `customjs-guard`, `validator`, `audit`, `nav-buttons`) are shared infrastructure that continues to land under `Docs/Meta/Scripts/`, `Docs/Meta/Views/`, `Docs/Meta/Templater/`, etc. — not module-scoped, not under `beacon/`.
+
+**Known violations (legacy, awaiting future cycles):**
+- project blueprint @ v0.2.0 places content under `boards/planning/<slug>/` (top-level `boards/`), mis-located on TWO axes: wrong namespace (no `beacon/` prefix) AND wrong module dir (lives under `boards/` instead of its own `projects/`). Resolved in a future cycle by migrating project to `beacon/projects/<slug>/`.
+- v0.1.1's `boards/To-Do-Board.md` materialized at top-level `boards/`. v0.2.0's boards blueprint will materialize the new Kanban-plugin board at `beacon/boards/To-Do-Board.md` — the legacy file may need cleanup or coexist briefly during transition. Plan as part of v0.2.0 stage 4.
+
+Surfaced during v0.1.1 S4 manual smokes (project's "Board" button being the wrong primitive); refined 2026-05-04 with the `beacon/` namespace decision; design at `Docs/plans/2026-05-03-boards-blueprint-design.md`.
+
+### 10. Forcing the installer to re-process a manifest needs a triple version bump
+
+`install.js:111` short-circuits per-item install when `subscribed.version === installed.version`. Tests that need to exercise behavior INSIDE `installItem()` (e.g., `applyNavButtons`, `applyRuleFragment`, file-write paths) cannot just edit the workshop manifest in place — the installer skips it.
+
+**Fix (test mechanic):** to force re-processing of a single item under test, transiently bump THREE coordinated versions, run, then restore all three:
+1. The item's own manifest (`platform/<kind>/<name>/manifest.json:version`).
+2. The workshop manifest's entry for that item (`platform/manifest.json:<kind>[].<name>.version`).
+3. The consumer subscription's entry (`<consumer>/Docs/Meta/platform-subscription.json:<kind>[].<name>.version`).
+
+Restore-discipline is critical — partial restore leaves the workshop dogfood gate red. Verify each of the three is back to the canonical value AND re-run the workshop self-install harness AND re-run the consumer install harness before declaring the test complete. Surfaced in v0.1.1 S4 T4.8 (malformed nav_buttons entry negative test). See `Docs/plans/execution-logs/2026-05-03-registry-driven-nav-buttons/T4.0-T4.9-S4-harness-and-barebones-regression.md`.
+
+**Fix (long-term, deferred):** consider adding `--force-reinstall <name>` to `install.js` for v0.1.2+ so test mechanics can skip the version-skip guard for a named item without touching three files. Not blocking; not free.
+
 ## Operational gotchas
 
 ### CustomJS scan folder is per-vault and configured in `.obsidian/plugins/customjs/data.json`

@@ -1,10 +1,11 @@
 {
   "_comment": "Workshop self-subscription. Pinned to the workshop's own manifest version.",
-  "workshop_version": "0.2.0",
+  "workshop_version": "0.4.0",
   "mechanisms": [
     { "name": "customjs-guard", "version": "1.0.0" },
     { "name": "validator", "version": "0.1.0" },
-    { "name": "audit", "version": "0.1.0" }
+    { "name": "audit", "version": "0.1.0" },
+    { "name": "nav-buttons", "version": "2.0.0" }
   ],
   "blueprints": []
 }

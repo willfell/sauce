@@ -14,6 +14,11 @@
       "name": "audit",
       "version": "0.1.0",
       "installed_at": "2026-05-03T02:27:18.939Z"
+    },
+    {
+      "name": "nav-buttons",
+      "version": "2.0.0",
+      "installed_at": "2026-05-03T08:48:15.371Z"
     }
   ],
   "blueprints": [],
@@ -35,6 +40,52 @@
       "name": "audit",
       "version": "0.1.0",
       "installed_at": "2026-05-03T02:27:18.939Z"
+    },
+    {
+      "event": "skip",
+      "name": "audit",
+      "reason": "depends on validator >=99.0.0 but subscription pins validator@0.1.0",
+      "attempted_at": "2026-05-03T05:57:50.682Z"
+    },
+    {
+      "event": "install",
+      "kind": "mechanism",
+      "name": "nav-buttons",
+      "version": "1.0.0",
+      "installed_at": "2026-05-03T06:08:05.648Z"
+    },
+    {
+      "event": "skip",
+      "name": "nav-buttons",
+      "reason": "depends on customjs-guard >=99.0.0 but subscription pins customjs-guard@1.0.0",
+      "attempted_at": "2026-05-03T06:14:19.478Z"
+    },
+    {
+      "event": "install",
+      "kind": "blueprint",
+      "name": "project",
+      "version": "0.1.0",
+      "installed_at": "2026-05-03T08:24:01.511Z"
+    },
+    {
+      "event": "error",
+      "step": "nav_buttons_prune",
+      "message": "Docs/Meta/nav-buttons-registry.json is malformed JSON: Unexpected end of JSON input",
+      "attempted_at": "2026-05-03T08:24:15.823Z"
+    },
+    {
+      "event": "install",
+      "kind": "mechanism",
+      "name": "nav-buttons",
+      "version": "2.0.0",
+      "installed_at": "2026-05-03T08:48:15.371Z"
+    },
+    {
+      "event": "prune",
+      "kind": "mechanism",
+      "name": "fake-mechanism",
+      "reason": "no longer subscribed",
+      "attempted_at": "2026-05-03T09:00:52.917Z"
     }
   ]
 }

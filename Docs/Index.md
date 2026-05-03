@@ -31,14 +31,16 @@ This is the **workshop vault** — the canonical home for the vault platform. Me
 
 - **[prompts/](prompts/)** — Self-contained agent prompts for specific operations. Each prompt is copy-paste-ready for a fresh session.
 
-## Status (as of 2026-05-02)
+## Status (as of 2026-05-04)
 
-- ✅ Workshop vault created and self-installs its own platform.
-- ✅ Three mechanisms shipped at v1.0.0 / v0.1.0 / v0.1.0:
-  - `customjs-guard` — Dataview view + CSS snippet that prevents cold-load `ReferenceError` flashes.
-  - `validator` — rule engine + Templater hook that validates notes against `Docs/Meta/rules/*.json`.
-  - `audit` — walker that produces a vault audit report.
-- ✅ Installer (`tp.user.platformInstall`) at v0.1.0.
-- 🔄 First consumer onboarding: `tmp-acc-vault` (test mirror of accuris) — see [prompts/](prompts/).
-- ⬜ Real consumers: accuris, ero, headspace.
-- ⬜ Blueprints: zero. First blueprint (`project`) is the next major workstream.
+- ✅ **v0.1.0 closed** — workshop self-installs four mechanisms + first blueprint.
+- ✅ **v0.1.1 CLOSED** — result writeup at `plans/2026-05-03-registry-driven-nav-buttons-result.md`. All deliverables green; T4.7 deferred with four pre-existing-bug findings logged for next cycle.
+- ⬜ **v0.1.x patch (proposed)** — fix the four T4.7 findings (validator/audit subsystem bugs, runner-UX gaps).
+- ⬜ **v0.1.2 designed** — git-based pull + thin stub bootstrap. See `plans/2026-05-03-multi-vault-automation-design.md`.
+- ⬜ **v0.2.0 designed, approved** — boards blueprint (real Obsidian-Kanban-plugin board + Templater date-routed card notes); retires project's Board contribution; codifies module-directory invariant. See `plans/2026-05-03-boards-blueprint-design.md`.
+- ⬜ **Real consumers:** accuris, ero, headspace — gated on barebones success across v0.1.x + v0.1.2 + v0.2.0.
+
+**Mechanisms:** `customjs-guard@1.0.0`, `validator@0.1.0` (with known bugs), `audit@0.1.0` (with known bugs), `nav-buttons@2.0.0`.
+**Blueprints:** `project@0.2.0`.
+**Workshop version:** `0.4.0`.
+**Load-bearing harnesses:** `platform/test/run-install.js`, `platform/test/run-renderer.js`.

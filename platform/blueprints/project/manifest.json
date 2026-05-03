@@ -1,0 +1,46 @@
+{
+  "name": "project",
+  "version": "0.2.0",
+  "kind": "blueprint",
+  "description": "Project note bundle — boards/planning/<slug>/ structure, planning board view, workstream manager, /new-project command.",
+  "depends_on": [
+    { "name": "nav-buttons",    "range": ">=2.0.0" },
+    { "name": "customjs-guard", "range": ">=1.0.0" }
+  ],
+  "customjs_classes": [
+    "ProjectNavButtons",
+    "PlanningNavButtons",
+    "PlanningBoardProjects",
+    "ProjectWorkstreams",
+    "ProjectWorkstreamManager"
+  ],
+  "files": [
+    { "source": "rule.json",                              "dest": "{{rules_path}}/project.json" },
+    { "source": "variants.json",                          "dest": "{{rules_path}}/project.variants.json" },
+    { "source": "templates/create-new-project.md",        "dest": "{{templates_path}}/Create New Project.md" },
+    { "source": "helpers/project-nav-buttons.js",         "dest": "{{scripts_path}}/project/project-nav-buttons.js" },
+    { "source": "helpers/planning-nav-buttons.js",        "dest": "{{scripts_path}}/project/planning-nav-buttons.js" },
+    { "source": "helpers/planning-board-projects.js",     "dest": "{{scripts_path}}/project/planning-board-projects.js" },
+    { "source": "helpers/project-workstreams.js",         "dest": "{{scripts_path}}/project/project-workstreams.js" },
+    { "source": "helpers/project-workstream-manager.js",  "dest": "{{scripts_path}}/project/project-workstream-manager.js" },
+    { "source": "commands/new-project.md",                "dest": "{{commands_path}}/new-project.md" },
+    { "source": "content/kanban-board.md",                "dest": "{{content_path}}/project/kanban-board.md" }
+  ],
+  "nav_buttons": [
+    {
+      "id": "board",
+      "label": "Board",
+      "icon": "board",
+      "order": 100,
+      "action": {
+        "type": "createFromTemplate",
+        "target": "boards/To-Do-Board.md",
+        "template_source": "kanban-board.md"
+      }
+    }
+  ],
+  "post_install": [
+    { "type": "notice", "message": "Project blueprint installed. Reload Templater (user scripts) + reload CustomJS to register new classes." }
+  ],
+  "rule_fragments": []
+}

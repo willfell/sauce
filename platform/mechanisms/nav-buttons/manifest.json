@@ -1,0 +1,14 @@
+{
+  "name": "nav-buttons",
+  "version": "2.0.0",
+  "description": "Thin renderer over Docs/Meta/nav-buttons-registry.json. Each blueprint/mechanism declares nav_buttons[]; installer aggregates.",
+  "depends_on": [
+    { "name": "customjs-guard", "range": ">=1.0.0" }
+  ],
+  "customjs_classes": ["SpaceNavButtons"],
+  "files": [
+    { "source": "space-nav-buttons.js", "dest": "{{scripts_path}}/nav-buttons/space-nav-buttons.js" }
+  ],
+  "post_install": [],
+  "rule_fragments": []
+}
