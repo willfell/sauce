@@ -86,6 +86,18 @@
       "name": "fake-mechanism",
       "reason": "no longer subscribed",
       "attempted_at": "2026-05-03T09:00:52.917Z"
+    },
+    {
+      "event": "skip",
+      "name": "validator",
+      "reason": "subscription pins validator@0.1.0 but workshop has 0.1.0-test",
+      "attempted_at": "2026-05-03T18:49:47.327Z"
+    },
+    {
+      "event": "skip",
+      "name": "audit",
+      "reason": "subscription pins audit@0.1.0 but workshop has 0.1.0-test",
+      "attempted_at": "2026-05-03T18:49:47.327Z"
     }
   ]
 }

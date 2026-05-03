@@ -7,6 +7,9 @@
     { "name": "nav-buttons",    "range": ">=2.0.0" },
     { "name": "customjs-guard", "range": ">=1.0.0" }
   ],
+  "external_plugins": [
+    { "id": "slash-commander", "required": true, "reason": "Surface /new-project slash command." }
+  ],
   "customjs_classes": [
     "ProjectNavButtons",
     "PlanningNavButtons",

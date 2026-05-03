@@ -70,6 +70,33 @@ If you want the validator to fire automatically on every new note in this consum
 
 This is opt-in — without it, the validator only fires when manually invoked.
 
+---
+
+## Slash Commander setup (per consumer vault)
+
+> [!info] Why this exists
+> The platform ships three runner templates (`Create New Project.md`, `Validate.md`, `Audit.md`) as Templater commands. Slash Commander is a third-party community plugin that surfaces them as ergonomic slash keywords (`/new-project`, `/validate`, `/audit`) — type the keyword in any note → command palette filters → Templater fires the template. One-time setup per consumer vault.
+
+> [!todo] One-time setup steps
+> 1. **Install the plugin.** Settings → Community plugins → Browse → search "Slash Commander" → Install → Enable. The installer's `external_plugins[]` check fires a Notice + history `warning, step: external_plugins` entry on every install if this is missing.
+> 2. **Register the three runner templates in Templater's "Template Hotkeys" section.** Settings → Templater → scroll to "Template Hotkeys" → click "Add new hotkey for template" three times → in each dropdown pick `Docs/Meta/Templates/Create New Project.md`, `Docs/Meta/Templates/Validate.md`, `Docs/Meta/Templates/Audit.md`. (You don't need to assign a keyboard hotkey — registration alone surfaces them as `Templater: Insert <name>` commands in the palette.) Each registration appears as an entry in `.obsidian/plugins/templater-obsidian/data.json:enabled_templates_hotkeys`.
+> 3. **Reload Templater user scripts** (Settings → Templater → reload user scripts) so `tp.user.validate` and `tp.user["audit-walker"]` are picked up.
+> 4. **Map the three slash keywords.** Settings → Slash Commander → "Add command":
+>    - `/new-project` → `Templater: Insert Create New Project`
+>    - `/validate` → `Templater: Insert Validate`
+>    - `/audit` → `Templater: Insert Audit`
+
+> [!warning] Why step 2 is required (Templater quirk)
+> Templater does NOT auto-generate per-template commands — by default the command palette only exposes 4 base Templater commands (Open insert template modal, Replace templates in active file, Jump to next cursor location, Create new note from template). Per-template `Templater: Insert <name>` commands ONLY appear in the palette (and therefore are ONLY mappable in Slash Commander) AFTER registering each template in the Template Hotkeys section. Without step 2, Slash Commander's command picker shows none of the three "Insert" commands; mapping fails. Surfaced during v0.1.x manual smokes (T2.6) — codified here. The platform installer cannot do this registration automatically because editing `.obsidian/plugins/templater-obsidian/data.json` is an "ask before acting" gate (CLAUDE.md non-negotiables); per-vault user action only.
+
+> [!example] Verifying
+> Open any note. Type `/validate` → Notice: `validate: clean` (or violation count + console output). Type `/audit` → walker runs; Notice: `audit: complete — see Timestamps/Audits/`. Type `/new-project` → prompts for slug; new project note materializes under `boards/planning/<slug>/`.
+
+> [!warning] Plugin id is `slash-commander`
+> The Obsidian community-plugin slug is the un-prefixed form (NOT `obsidian-slash-commander`). The three manifests' `external_plugins[].id` declarations cite this exact string. Locked from disk in v0.1.x patch cycle (T2.1) by reading `.obsidian/community-plugins.json` after a real install.
+
+---
+
 ## Updating an existing consumer
 
 Consumer is at version A; workshop has version B (newer):
@@ -104,14 +131,16 @@ The first blueprint is the next major workstream. Sketch:
 
 ## Running the audit
 
-Once `audit-walker.js` is materialized in a consumer:
+Once `audit-walker.js` + `Audit.md` are materialized in a consumer (audit mechanism v0.1.0+) and Slash Commander is mapped:
 
 1. Open any note in the consumer.
-2. Templater: Replace templates in active file with `<%* const path = await tp.user["audit-walker"](tp); console.log("Audit at", path); %>`.
+2. Type `/audit` (or run `Templater: Insert Audit` from the command palette).
 3. Audit report writes to `Timestamps/Audits/YYYY-MM-DD-audit.md`.
 4. Sections: platform drift, violations summary, violations by file.
+5. Notice: `audit: complete — see Timestamps/Audits/`.
 
-A `/audit` slash command that wraps this is a Phase 8 follow-up.
+> [!info] Pre-Slash-Commander fallback
+> If Slash Commander isn't installed, run the audit by replacing templates in the active file with `<%* await tp.user["audit-walker"](tp); %>`. The `Audit.md` runner template is the same content as a saved Templater command.
 
 ## Recovering from a broken install
 
