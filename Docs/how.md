@@ -124,17 +124,20 @@ Steps the canonical installer performs:
 3. Read `Docs/Meta/platform-installed.json` → what's currently installed (or empty).
 4. Resolve workshop absolute path via `app.vault.adapter.basePath` + `config.workshop_relative_path`.
 5. Read `<workshop>/platform/manifest.json`.
-6. For each subscribed mechanism:
+5a. **Validate `module_directory` on every subscribed blueprint manifest** (added v0.2.0). Missing or empty → record `error / module_directory_missing`, skip that blueprint. Two blueprints declaring the same value → record `warning / module_directory_collision`, first-wins by topo order (skip the second). Mechanisms exempt.
+5b. **Build per-blueprint substitution overlay** (added v0.2.0). For each blueprint, set `{{module_directory}}` → `beacon/<bare-name>` in a shallow-copy variables overlay; mechanisms continue to receive the unmutated base variables.
+6. For each subscribed mechanism / non-skipped blueprint:
    a. Look up in workshop manifest. Skip if version mismatch with subscription.
    b. Compare with installed; skip if already at this version.
-   c. Read mechanism's `manifest.json` from workshop.
-   d. For each file in the mechanism: read source, substitute `{{vars}}`, write to dest. Approval-gate any file with `"approval": "required"`.
-   e. Run `post_install` steps: `enable_snippet` (with optional approval), `notice` (informational popup).
-   f. Apply `nav_buttons[]` declarations to the registry (if any).
-   g. Apply `external_plugins[]` warnings (warn-only — surfaces missing community-plugin deps).
-   h. Apply `templater_hotkeys[]` registrations to `.obsidian/plugins/templater-obsidian/data.json` (additive merge, backup-on-edit; see landmine #12).
-   i. Apply `slash_commander_bindings[]` registrations to `.obsidian/plugins/slash-commander/data.json` (additive merge, backup-on-edit; see landmine #12).
-   j. Append to `installed` + `history`.
+   c. Read item's `manifest.json` from workshop.
+   d. **Run `pre_install[]` steps** (added v0.2.0): for `type: "delete"`, back up the target to `<path>.pre_install_bak` and remove the original; record `delete / pre_install_delete` history. Absent target → `info / pre_install_delete_skip`. Directory target → `warning / pre_install_delete_skip`. Unknown type → `warning / pre_install_unknown_type`.
+   e. For each file in the item: read source, substitute `{{vars}}`, **compare bytes against the current dest content** (added v0.2.0 Option B). Identical → skip write. Differs and prior is non-empty → write `<dest>.bak` + overwrite + record `replace / file_overwrite` with `prior_sha + new_sha`. Absent or 0-byte prior → fresh write, no event. Approval-gate any file with `"approval": "required"`.
+   f. Run `post_install` steps: `enable_snippet` (with optional approval), `notice` (informational popup).
+   g. Apply `nav_buttons[]` declarations to the registry (if any).
+   h. Apply `external_plugins[]` warnings (warn-only — surfaces missing community-plugin deps).
+   i. Apply `templater_hotkeys[]` registrations to `.obsidian/plugins/templater-obsidian/data.json` (additive merge, backup-on-edit; see landmine #12).
+   j. Apply `slash_commander_bindings[]` registrations to `.obsidian/plugins/slash-commander/data.json` (additive merge, backup-on-edit; see landmine #12).
+   k. Append to `installed` + `history`.
 7. Write `Docs/Meta/platform-installed.json`.
 8. Show "platformInstall: complete." Notice.
 
@@ -142,6 +145,8 @@ Steps the canonical installer performs:
 > - `templater_hotkeys[]` (added v0.1.3) — list of `{ template: "<basename>.md" }` entries the installer registers in Templater's Template Hotkeys, populating `.obsidian/plugins/templater-obsidian/data.json:enabled_templates_hotkeys[]` so per-template `Insert <name>` commands surface in the palette.
 > - `slash_commander_bindings[]` (added v0.1.3) — list of `{ name, template }` entries the installer registers in Slash Commander, populating `.obsidian/plugins/slash-commander/data.json:bindings[]`. The `name` is the slash trigger (user types `/<name>`); installer derives the full SC binding shape (`name`, `id`, `action`, `icon: "templater-icon"`, `mode: "any"`, `triggerMode: "anywhere"`) and computes `id = action = "templater-obsidian:" + <full-template-path>` from the basename + `variables.templates_path`.
 > - Both fields cross-validate against the manifest's `files[]` (or each other) — a binding referencing a template the manifest doesn't ship surfaces a warning + skip.
+> - `module_directory` (added v0.2.0; **REQUIRED on every blueprint**, mechanisms exempt) — bare directory name (e.g., `"boards"`). Installer derives the full namespaced path `beacon/<bare-name>` for the per-blueprint `{{module_directory}}` substitution variable. Two blueprints declaring the same value collide and the second is skipped (first-wins). See landmine #11.
+> - `pre_install[]` (added v0.2.0) — list of pre-files-loop actions to run for stale-file cleanup or migration. Currently one action type: `{ type: "delete", path: "<dest-relative-with-substitution>", reason: "<why>" }`. Path goes through `substituteStrict`. Existing target file is read, sha256-hashed, backed up to `<path>.pre_install_bak`, then removed via `adapter.remove`. Absent target is a no-op (idempotent). Directory target surfaces a warning and skips. Unknown action types surface a warning and skip. One-shot per blueprint version per consumer (gated by the existing version-skip mechanic in step 6.b).
 
 Cross-vault file reads use `require("fs").promises` (Node API available in Templater desktop). Mobile would need a different path; not supported yet.
 

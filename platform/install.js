@@ -117,6 +117,83 @@ module.exports = async function (tp) {
     //    distinguish "not subscribed" from "subscribed-but-skipped").
     const depSkipped = checkDeps(nodes, perItemManifest, subscriptionLookup, missingItems);
 
+    // 3a. validate module_directory on every blueprint manifest (v0.2.0 T1.1).
+    //
+    // Mechanisms are EXEMPT — module_directory is a blueprint-only contract.
+    //
+    // Two checks per blueprint:
+    //   A. required-field check: manifest.module_directory must be a non-empty
+    //      string. Missing/empty/non-string → record event:"error",
+    //      step:"module_directory_missing"; surface Notice; SKIP this blueprint
+    //      (do not call installItem; do not error out the whole install).
+    //   B. collision check: tracks claims in a Map<string,string> (directory →
+    //      first blueprint to claim it; iteration order is the resolved-deps
+    //      iteration order, so first-wins). On collision → record event:"warning",
+    //      step:"module_directory_collision"; surface Notice; SKIP the SECOND
+    //      blueprint. The first installs normally.
+    //
+    // Both checks add the offending blueprint name to a skip set; the install
+    // loop below short-circuits when the current name is in the set.
+    //
+    // Posture mirrors v0.1.3 helpers (applyTemplaterHotkeys / applySlashCommanderBindings):
+    // failure-loud, never throws, full git fields on every history push, attempted_at on each.
+    const moduleDirectorySkip = new Set();
+    const moduleDirToBlueprint = new Map();
+    for (const [name, node] of nodes) {
+      if (node.target.kind !== "blueprint") continue;
+      const itemMan = perItemManifest.get(name);
+      if (!itemMan) continue; // missing manifest already handled in installItem; nothing to validate.
+      try {
+        const md = itemMan.module_directory;
+        if (typeof md !== "string" || md.length === 0) {
+          new Notice(`platformInstall: blueprint ${name} is missing required module_directory; skipping.`, 8000);
+          installedNow.history.push({
+            event: "error",
+            step: "module_directory_missing",
+            name,
+            message: `blueprint ${name} manifest lacks required non-empty string module_directory field`,
+            git_commit: git.commit,
+            git_tag: git.tag,
+            git_dirty: git.dirty,
+            attempted_at: new Date().toISOString(),
+          });
+          moduleDirectorySkip.add(name);
+          continue;
+        }
+        if (moduleDirToBlueprint.has(md)) {
+          const firstClaimant = moduleDirToBlueprint.get(md);
+          new Notice(`platformInstall: blueprint ${name} declares module_directory "${md}" already claimed by ${firstClaimant}; skipping ${name}.`, 8000);
+          installedNow.history.push({
+            event: "warning",
+            step: "module_directory_collision",
+            name,
+            colliding_with: firstClaimant,
+            module_directory: md,
+            message: `blueprint ${name} declares module_directory "${md}" already claimed by ${firstClaimant}; skipping ${name} (first-wins by topo order)`,
+            git_commit: git.commit,
+            git_tag: git.tag,
+            git_dirty: git.dirty,
+            attempted_at: new Date().toISOString(),
+          });
+          moduleDirectorySkip.add(name);
+          continue;
+        }
+        moduleDirToBlueprint.set(md, name);
+      } catch (e) {
+        // Defensive: never let validation failures abort the broader install.
+        installedNow.history.push({
+          event: "warning",
+          step: "module_directory_validation",
+          name,
+          message: `module_directory validation threw: ${e.message}`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    }
+
     // 4. topo sort
     const { order, cycle } = topoSort(nodes);
     if (cycle) {
@@ -135,6 +212,10 @@ module.exports = async function (tp) {
     // 6. install in resolved order. Each installItem is wrapped in try/catch
     //    so a single item failure doesn't abort the whole loop (E1).
     for (const name of order) {
+      // v0.2.0 T1.1: skip blueprints that failed module_directory validation
+      // (missing field) or lost a collision check (first-wins). The Notice +
+      // history entry was already recorded in the validation pass above.
+      if (moduleDirectorySkip.has(name)) continue;
       const node = nodes.get(name);
       const bucketKey = node.target.kind === "blueprint" ? "blueprints" : "mechanisms";
       installedNow[bucketKey] = installedNow[bucketKey] || [];
@@ -142,7 +223,25 @@ module.exports = async function (tp) {
       if (installedEntry && installedEntry.version === node.sub.version) continue;
       const itemMan = perItemManifest.get(name);
       try {
-        const ok = await installItem(tp, workshopPath, node.target, itemMan, variables, installedNow.history, git);
+        // v0.2.0 T1.2: per-blueprint {{module_directory}} substitution overlay.
+        // Resolves to the namespaced full path "beacon/<bare-name>" (per
+        // landmine #11 + 2026-05-04 design refinement). The base `variables`
+        // object is NEVER mutated — each iteration constructs a fresh shallow
+        // copy, so module_directory cannot leak from one blueprint into
+        // another's substitution context. Mechanisms receive the unchanged
+        // base `variables` (no module_directory key), so substituteStrict
+        // failures loud on any mechanism content that misuses the variable
+        // and substituteLenient leaves the literal `{{module_directory}}` in
+        // bodies — both desired postures.
+        //
+        // T1.1's validation pass already guarantees itemMan.module_directory
+        // is a non-empty string for any blueprint that reaches this loop
+        // (moduleDirectorySkip short-circuits the rest at line 218).
+        let itemVars = variables;
+        if (node.target.kind === "blueprint") {
+          itemVars = { ...variables, module_directory: `beacon/${itemMan.module_directory}` };
+        }
+        const ok = await installItem(tp, workshopPath, node.target, itemMan, itemVars, installedNow.history, git);
         if (ok) {
           const entry = { name, version: node.sub.version, installed_at: new Date().toISOString() };
           const idx = installedNow[bucketKey].findIndex((m) => m.name === name);
@@ -245,6 +344,32 @@ module.exports = async function (tp) {
 async function installItem(tp, workshopPath, target, itemMan, variables, history, git) {
   const adapter = tp.app.vault.adapter;
   const mech = itemMan;
+
+  // v0.2.0 T1.2 defensive guard: if a blueprint reaches installItem without
+  // module_directory in `variables`, T1.1's validation pass + the install-loop
+  // skip-set should have already short-circuited it. This guard is
+  // belt-and-suspenders — record a warning (not error) so the issue surfaces
+  // in history, but proceed; substituteStrict on a `{{module_directory}}`-
+  // containing path will fail loud on its own and abort the file. This
+  // guard's only job is to make the diagnostic obvious rather than masked
+  // behind a generic "unsubstituted variables" error.
+  if (mech && target && target.kind === "blueprint") {
+    if (variables.module_directory === undefined || variables.module_directory === null || variables.module_directory === "") {
+      if (history) {
+        history.push({
+          event: "warning",
+          step: "module_directory_substitution_missing",
+          name: mech.name || (target && target.name),
+          message: "blueprint reached installItem without variables.module_directory; T1.1 validation pass should have caught this",
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    }
+  }
+
   if (!mech) {
     new Notice(`installItem: missing manifest for ${target && target.path}`, 4000);
     if (history) {
@@ -261,6 +386,14 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
     }
     return false;
   }
+
+  // v0.2.0 T1.4: pre_install[] runs FIRST, before files[] materialization and
+  // every other helper. Currently supports `type: "delete"` only — sweeps
+  // legacy / superseded files prior to fresh install. Failure-loud, never
+  // throws (helper handles its own errors). Ordering rationale: any leftover
+  // file the new contract wants to overwrite at a different path needs to be
+  // out of the way before T1.3's Option B mechanic compares prior bytes.
+  await applyPreInstall(tp, mech, variables, history, git);
 
   for (const f of mech.files || []) {
     const sourceAbs = `${workshopPath}/platform/${target.path}/${f.source}`;
@@ -292,7 +425,99 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
     if (destDir && !(await adapter.exists(destDir))) {
       await adapter.mkdir(destDir);
     }
-    await adapter.write(destPath, substituted);
+
+    // v0.2.0 T1.3: Option B content overwrite mechanic for files[]-declared
+    // content. Compare the post-substitution body against the existing dest
+    // (if any). Three branches:
+    //   1. Identical content → skip the write entirely (idempotent;
+    //      no history event).
+    //   2. Differs AND prior is non-empty → write prior to <dest>.bak
+    //      (overwrite-on-edit, one-deep, no rotation), then overwrite dest
+    //      with the new substituted body. Record event:"replace",
+    //      step:"file_overwrite" with prior_sha + new_sha.
+    //   3. Dest absent OR 0-byte → write substituted source as fresh; no
+    //      history event for the fresh write.
+    //
+    // Posture mirrors v0.1.3 helpers (applyTemplaterHotkeys / applySlashCommanderBindings):
+    // never throws — read failures + bak write failures degrade to a
+    // history error and skip the dest write so we don't half-update.
+    // The .bak suffix here (NOT .beacon-backup) is the file-content-overwrite
+    // convention; v0.1.3's plugin-data convention uses .beacon-backup.
+    const destExists = await adapter.exists(destPath);
+    let priorContent = null;
+    if (destExists) {
+      try {
+        priorContent = await adapter.read(destPath);
+      } catch (e) {
+        // Treat unreadable dest as null; fall through to fresh write. Record
+        // a warning so the issue surfaces in history.
+        if (history) {
+          history.push({
+            event: "warning",
+            step: "file_overwrite",
+            name: mech.name,
+            dest: destPath,
+            message: `read failed before overwrite check: ${e.message}`,
+            git_commit: git.commit,
+            git_tag: git.tag,
+            git_dirty: git.dirty,
+            attempted_at: new Date().toISOString(),
+          });
+        }
+      }
+    }
+
+    if (priorContent !== null && priorContent === substituted) {
+      // Identical; skip the write entirely (idempotent).
+      continue;
+    }
+
+    if (priorContent !== null && priorContent.length > 0) {
+      // Differs and non-empty: backup prior to <dest>.bak, then overwrite.
+      const crypto = require("crypto");
+      const priorSha = crypto.createHash("sha256").update(priorContent).digest("hex");
+      const newSha = crypto.createHash("sha256").update(substituted).digest("hex");
+      const bakPath = `${destPath}.bak`;
+      try {
+        await adapter.write(bakPath, priorContent);
+      } catch (e) {
+        // Don't half-update: skip the dest overwrite if bak write failed.
+        new Notice(`installItem: bak write failed for ${destPath} — ${e.message}`, 8000);
+        if (history) {
+          history.push({
+            event: "error",
+            step: "file_overwrite",
+            name: mech.name,
+            dest: destPath,
+            message: `bak write failed: ${e.message}`,
+            git_commit: git.commit,
+            git_tag: git.tag,
+            git_dirty: git.dirty,
+            attempted_at: new Date().toISOString(),
+          });
+        }
+        continue;
+      }
+      await adapter.write(destPath, substituted);
+      if (history) {
+        history.push({
+          event: "replace",
+          step: "file_overwrite",
+          name: mech.name,
+          dest: destPath,
+          prior_sha: priorSha,
+          new_sha: newSha,
+          bak_path: bakPath,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    } else {
+      // priorContent is null OR empty (0-byte) → fresh write; existing flow.
+      await adapter.write(destPath, substituted);
+    }
   }
 
   for (const step of mech.post_install || []) {
@@ -825,6 +1050,237 @@ async function applyExternalPlugins(tp, manifest, history, git) {
           attempted_at: new Date().toISOString(),
         });
       }
+    }
+  }
+}
+
+// applyPreInstall — for each item that declares pre_install[], execute each
+// step in order. Currently the only supported `type` is "delete" — sweep a
+// stale legacy / superseded file before the new contract materializes (e.g.,
+// boards blueprint v0.1.1 → v0.2.0 retires top-level boards/To-Do-Board.md
+// in favor of beacon/boards/To-Do-Board.md). Failure-loud, never throws.
+//
+// Step shape: { type: "delete", path: "<dest-relative-path>", reason: "<why>" }
+//
+// Per-step behavior:
+//   - "delete" + file exists:    backup to <path>.pre_install_bak (one-deep,
+//                                 overwrite-on-edit, no rotation), then
+//                                 adapter.remove(path). History event:
+//                                 event:"delete", step:"pre_install_delete"
+//                                 with name, path, prior_sha (sha256 hex),
+//                                 bak_path, reason, full git fields, attempted_at.
+//   - "delete" + file absent:    no-op. History event:
+//                                 event:"info", step:"pre_install_delete_skip"
+//                                 with message:"file already absent". Idempotent
+//                                 on re-runs.
+//   - "delete" + path is dir:    no-op. History event:
+//                                 event:"warning", step:"pre_install_delete_skip"
+//                                 with message:"target is a directory; pre_install
+//                                 delete is single-file only". Continues to next
+//                                 entry.
+//   - unknown type:              History event:
+//                                 event:"warning", step:"pre_install_unknown_type"
+//                                 with name, type, message. Skips the step but
+//                                 continues with remaining pre_install entries.
+//
+// .pre_install_bak suffix is intentionally distinct from T1.3's content-overwrite
+// .bak suffix to prevent collision (one is per-file content drift recovery; the
+// other is per-pre-install-delete recovery).
+async function applyPreInstall(tp, mech, variables, history, git) {
+  if (!mech || !Array.isArray(mech.pre_install) || mech.pre_install.length === 0) return;
+  const adapter = tp.app.vault.adapter;
+  const crypto = require("crypto");
+
+  for (const step of mech.pre_install) {
+    if (!step || typeof step !== "object") continue;
+
+    if (step.type !== "delete") {
+      // Unknown / future type; surface a warning and continue.
+      if (history) {
+        history.push({
+          event: "warning",
+          step: "pre_install_unknown_type",
+          name: mech.name,
+          type: step.type,
+          message: `pre_install step has unsupported type "${step.type}"; skipped (only "delete" is supported)`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      new Notice(`applyPreInstall: ${mech.name} has unsupported pre_install type "${step.type}"; skipped`, 6000);
+      continue;
+    }
+
+    // type === "delete"
+    let resolvedPath;
+    try {
+      resolvedPath = substituteStrict(step.path, variables);
+    } catch (e) {
+      if (history) {
+        history.push({
+          event: "error",
+          step: "pre_install_delete",
+          name: mech.name,
+          path: step.path,
+          message: `path substitution failed: ${e.message}`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      new Notice(`applyPreInstall: ${mech.name} pre_install path substitution failed — ${e.message}`, 8000);
+      continue;
+    }
+
+    const exists = await adapter.exists(resolvedPath);
+    if (!exists) {
+      if (history) {
+        history.push({
+          event: "info",
+          step: "pre_install_delete_skip",
+          name: mech.name,
+          path: resolvedPath,
+          reason: step.reason || null,
+          message: "file already absent",
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      continue;
+    }
+
+    // Distinguish file vs directory. Prefer adapter.stat() if available;
+    // fall back to attempting adapter.read() and treating any failure as
+    // "probably a directory; skip with a warning". Obsidian's DataAdapter
+    // exposes stat() returning { type: "file" | "folder", ... }.
+    let isDirectory = false;
+    if (typeof adapter.stat === "function") {
+      try {
+        const s = await adapter.stat(resolvedPath);
+        if (s && s.type === "folder") isDirectory = true;
+      } catch {
+        // stat threw — treat as unknown; fall through to read-attempt below.
+      }
+    }
+
+    if (!isDirectory && typeof adapter.stat !== "function") {
+      // Best-effort heuristic when stat is unavailable: try to read the path
+      // as a file. read() on a directory throws on every adapter we care
+      // about (Node fs, Obsidian DataAdapter). If read fails, conservatively
+      // assume directory and skip with a warning rather than calling remove.
+      try {
+        await adapter.read(resolvedPath);
+      } catch {
+        isDirectory = true;
+      }
+    }
+
+    if (isDirectory) {
+      if (history) {
+        history.push({
+          event: "warning",
+          step: "pre_install_delete_skip",
+          name: mech.name,
+          path: resolvedPath,
+          reason: step.reason || null,
+          message: "target is a directory; pre_install delete is single-file only",
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      new Notice(`applyPreInstall: ${mech.name} pre_install delete target "${resolvedPath}" is a directory; skipped`, 6000);
+      continue;
+    }
+
+    // File exists; capture prior_sha, write backup, then delete.
+    let priorContent;
+    try {
+      priorContent = await adapter.read(resolvedPath);
+    } catch (e) {
+      if (history) {
+        history.push({
+          event: "error",
+          step: "pre_install_delete",
+          name: mech.name,
+          path: resolvedPath,
+          message: `read failed: ${e.message}`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      new Notice(`applyPreInstall: ${mech.name} read failed for ${resolvedPath} — ${e.message}`, 8000);
+      continue;
+    }
+
+    const priorSha = crypto.createHash("sha256").update(priorContent).digest("hex");
+    const bakPath = `${resolvedPath}.pre_install_bak`;
+
+    try {
+      await adapter.write(bakPath, priorContent);
+    } catch (e) {
+      // Don't half-update — record failure and skip the delete so the user
+      // can recover the original by hand if necessary.
+      if (history) {
+        history.push({
+          event: "error",
+          step: "pre_install_delete",
+          name: mech.name,
+          path: resolvedPath,
+          message: `backup write failed: ${e.message}`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      new Notice(`applyPreInstall: ${mech.name} backup write failed for ${bakPath} — ${e.message}`, 8000);
+      continue;
+    }
+
+    try {
+      await adapter.remove(resolvedPath);
+    } catch (e) {
+      if (history) {
+        history.push({
+          event: "error",
+          step: "pre_install_delete",
+          name: mech.name,
+          path: resolvedPath,
+          bak_path: bakPath,
+          message: `remove failed (backup at ${bakPath}): ${e.message}`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      new Notice(`applyPreInstall: ${mech.name} remove failed for ${resolvedPath} — ${e.message}`, 8000);
+      continue;
+    }
+
+    if (history) {
+      history.push({
+        event: "delete",
+        step: "pre_install_delete",
+        name: mech.name,
+        path: resolvedPath,
+        prior_sha: priorSha,
+        bak_path: bakPath,
+        reason: step.reason || null,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
     }
   }
 }

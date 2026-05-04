@@ -126,6 +126,38 @@ const adapter = {
       folders: entries.filter((e) => e.isDirectory()).map((e) => `${p}/${e.name}`),
     };
   },
+
+  // v0.2.0 T1.4: pre_install delete uses adapter.remove() to delete a single
+  // file. Mirrors Obsidian's DataAdapter.remove(normalizedPath) — which removes
+  // a SINGLE FILE only (directories use rmdir). On non-existent path → throws
+  // ENOENT; the installer's applyPreInstall short-circuits via adapter.exists()
+  // before calling remove(), so this only fires on real files.
+  async remove(p) {
+    if (flags.dryRun) {
+      vlog("adapter.remove (dry-run)", p);
+      return;
+    }
+    vlog("adapter.remove", p);
+    await fsp.unlink(abs(p));
+  },
+
+  // v0.2.0 T1.4: pre_install delete uses adapter.stat() to distinguish
+  // file-vs-directory before attempting remove. Mirrors Obsidian's
+  // DataAdapter.stat(normalizedPath) -> { type: "file" | "folder", size, mtime, ctime }.
+  // Returns null on non-existent path (the installer pre-checks exists() first).
+  async stat(p) {
+    try {
+      const s = await fsp.stat(abs(p));
+      return {
+        type: s.isDirectory() ? "folder" : "file",
+        size: s.size,
+        mtime: s.mtimeMs,
+        ctime: s.ctimeMs,
+      };
+    } catch {
+      return null;
+    }
+  },
 };
 
 // ----- fake vault ----------------------------------------------------------
@@ -315,6 +347,27 @@ async function main() {
   const newHistory = (post && post.history) ? post.history.slice(preHistoryLen) : [];
   console.log(`\n--- New history entries this run (${newHistory.length}) ---`);
   for (const h of newHistory) console.log("  " + JSON.stringify(h));
+
+  // v0.2.0 T1.5: surface Option B content overwrites separately for audit visibility.
+  const contentOverwrites = newHistory.filter(
+    (h) => h.event === "replace" && h.step === "file_overwrite"
+  );
+  console.log(`\n--- Content overwrites (${contentOverwrites.length}) ---`);
+  for (const h of contentOverwrites) {
+    const prior = (h.prior_sha || "").slice(0, 8);
+    const next = (h.new_sha || "").slice(0, 8);
+    console.log(`  ${h.dest}  ${prior}..${next}  (bak: ${h.bak_path})`);
+  }
+
+  // v0.2.0 T1.5: surface pre_install delete events separately.
+  const preInstallDeletes = newHistory.filter(
+    (h) => h.event === "delete" && h.step === "pre_install_delete"
+  );
+  console.log(`\n--- Pre-install deletes (${preInstallDeletes.length}) ---`);
+  for (const h of preInstallDeletes) {
+    const prior = (h.prior_sha || "").slice(0, 8);
+    console.log(`  ${h.path}  ${prior}  (bak: ${h.bak_path})`);
+  }
 
   if (flags.dryRun) {
     console.log(`\n--- Dry-run write log (${writeLog.length} would-be writes) ---`);
