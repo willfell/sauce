@@ -1504,6 +1504,371 @@ async function caseC5SubstitutionOnSettings() {
   }
 }
 
+// --------------------------------------------------------------------------
+// v0.4.0 T1.4: applyTemplaterFolderTemplates (FT1-FT5) + validateAndResolve
+// runTemplaterTemplate branch (R1)
+// --------------------------------------------------------------------------
+//
+// FT1-FT4 use scaffoldVault (mechanism shape) — substitution coverage isn't
+// needed and the helper runs against any manifest declaring
+// templater_folder_templates[]. FT5 + R1 use scaffoldBlueprintVault to
+// exercise the per-blueprint {{module_directory}} overlay (and, for R1, the
+// nav-button registry write that runs validateAndResolve).
+//
+// Note: the helper REQUIRES data.folder_templates to be an array — if absent,
+// it records an error and skips. The default templater data.json scaffold
+// (TEMPLATER_DEFAULT) does NOT include folder_templates, so each FT case
+// pre-seeds an explicit value.
+
+async function caseFT1IdempotentMerge() {
+  console.log("\n--- Case FT1: applyTemplaterFolderTemplates idempotent merge / skip-existing ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseFT1-"));
+  try {
+    const seedBody = JSON.stringify({
+      enabled_templates_hotkeys: [],
+      folder_templates: [{ folder: "beacon/to-do", template: "Docs/Meta/Templates/Today To-Do.md" }],
+      startup_templates: [""],
+    }, null, 2);
+    const manifest = {
+      name: "test-fixture",
+      version: "0.1.0",
+      files: [],
+      templater_folder_templates: [
+        { folder: "beacon/to-do", template: "Docs/Meta/Templates/Today To-Do.md" },
+      ],
+    };
+    await scaffoldVault(scratch, {
+      templaterData: seedBody,
+      slashCommanderData: SC_DEFAULT,
+      manifest,
+    });
+
+    // First run.
+    const first = await runHarness(scratch);
+    assertTrue("FT1: platform-installed.json was written (first run)", first !== null);
+    const firstSkipped = (first && first.history || []).filter(
+      (h) => h.event === "info" && h.step === "templater_folder_templates" && h.action === "skipped_existing" && h.folder === "beacon/to-do" && h.template === "Docs/Meta/Templates/Today To-Do.md"
+    );
+    assertEq("FT1: first run records exactly one skipped_existing event", firstSkipped.length, 1);
+
+    const firstApplied = (first && first.history || []).filter(
+      (h) => h.event === "info" && h.step === "templater_folder_templates" && h.action === "applied"
+    );
+    assertEq("FT1: first run records 0 applied events", firstApplied.length, 0);
+
+    const tdataPath = path.join(scratch, ".obsidian/plugins/templater-obsidian/data.json");
+    const bodyAfter1 = await readRaw(tdataPath);
+    assertEq("FT1: templater data.json byte-equal to pre-seed (no rewrite)", bodyAfter1, seedBody);
+
+    const backupPath = `${tdataPath}.beacon-backup`;
+    assertTrue("FT1: no <target>.beacon-backup created on skip", !fs.existsSync(backupPath));
+
+    // Second run — bump fixture version to force re-process.
+    const fixtureManifest2 = { ...manifest, version: "0.1.1" };
+    await fsp.writeFile(path.join(scratch, "_fake-workshop/platform/manifest.json"), JSON.stringify({
+      workshop_version: "0.0.0-test",
+      mechanisms: [{ name: "test-fixture", version: "0.1.1", path: "mechanisms/test-fixture" }],
+      blueprints: [],
+    }, null, 2), "utf8");
+    await fsp.writeFile(path.join(scratch, "_fake-workshop/platform/mechanisms/test-fixture/manifest.json"), JSON.stringify(fixtureManifest2, null, 2), "utf8");
+    await fsp.writeFile(path.join(scratch, "Docs/Meta/platform-subscription.json"), JSON.stringify({
+      mechanisms: [{ name: "test-fixture", version: "0.1.1" }],
+      blueprints: [],
+    }, null, 2), "utf8");
+
+    const second = await runHarness(scratch);
+    const newOnSecond = (second && second.history || []).slice((first && first.history || []).length);
+    const secondSkipped = newOnSecond.filter(
+      (h) => h.event === "info" && h.step === "templater_folder_templates" && h.action === "skipped_existing"
+    );
+    const secondApplied = newOnSecond.filter(
+      (h) => h.event === "info" && h.step === "templater_folder_templates" && h.action === "applied"
+    );
+    assertEq("FT1: second run records one skipped_existing event", secondSkipped.length, 1);
+    assertEq("FT1: second run records 0 applied events", secondApplied.length, 0);
+
+    const bodyAfter2 = await readRaw(tdataPath);
+    assertEq("FT1: templater data.json still byte-equal to pre-seed after second run", bodyAfter2, seedBody);
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseFT2MalformedJson() {
+  console.log("\n--- Case FT2: applyTemplaterFolderTemplates malformed-JSON guard ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseFT2-"));
+  try {
+    const malformed = "{not valid json";
+    const manifest = {
+      name: "test-fixture",
+      version: "0.1.0",
+      files: [],
+      templater_folder_templates: [
+        { folder: "beacon/to-do", template: "Docs/Meta/Templates/Today To-Do.md" },
+      ],
+    };
+    await scaffoldVault(scratch, {
+      templaterData: malformed,
+      slashCommanderData: SC_DEFAULT,
+      manifest,
+    });
+
+    const result = await runHarness(scratch);
+    assertTrue("FT2: platform-installed.json was written", result !== null);
+
+    const errs = (result && result.history || []).filter(
+      (h) => h.event === "error" && h.step === "templater_folder_templates"
+    );
+    assertTrue("FT2: at least one error/templater_folder_templates event recorded", errs.length >= 1, `got ${errs.length}`);
+    if (errs.length >= 1) {
+      assertTrue(
+        "FT2: error message mentions malformed JSON",
+        typeof errs[0].message === "string" && /malformed JSON/i.test(errs[0].message),
+        `message was: ${errs[0].message}`
+      );
+    }
+
+    const tdataPath = path.join(scratch, ".obsidian/plugins/templater-obsidian/data.json");
+    const bodyAfter = await readRaw(tdataPath);
+    assertEq("FT2: malformed templater data.json untouched", bodyAfter, malformed);
+
+    const backupPath = `${tdataPath}.beacon-backup`;
+    assertTrue("FT2: no <target>.beacon-backup created on malformed-JSON guard", !fs.existsSync(backupPath));
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseFT3AdditivePreservesUserEntries() {
+  console.log("\n--- Case FT3: applyTemplaterFolderTemplates additive merge preserves user entries ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseFT3-"));
+  try {
+    const seedBody = JSON.stringify({
+      enabled_templates_hotkeys: [],
+      folder_templates: [{ folder: "user/path", template: "user/Template.md" }],
+      startup_templates: [""],
+    }, null, 2);
+    const manifest = {
+      name: "test-fixture",
+      version: "0.1.0",
+      files: [],
+      templater_folder_templates: [
+        { folder: "beacon/to-do", template: "Docs/Meta/Templates/Today To-Do.md" },
+      ],
+    };
+    await scaffoldVault(scratch, {
+      templaterData: seedBody,
+      slashCommanderData: SC_DEFAULT,
+      manifest,
+    });
+
+    const result = await runHarness(scratch);
+    assertTrue("FT3: platform-installed.json was written", result !== null);
+
+    const tdataPath = path.join(scratch, ".obsidian/plugins/templater-obsidian/data.json");
+    const after = await readJson(tdataPath);
+    assertEq("FT3: folder_templates length === 2 after merge", after.folder_templates.length, 2);
+    assertEq("FT3: index 0 user folder preserved", after.folder_templates[0].folder, "user/path");
+    assertEq("FT3: index 0 user template preserved", after.folder_templates[0].template, "user/Template.md");
+    assertEq("FT3: index 1 manifest folder appended", after.folder_templates[1].folder, "beacon/to-do");
+    assertEq("FT3: index 1 manifest template appended", after.folder_templates[1].template, "Docs/Meta/Templates/Today To-Do.md");
+
+    const applied = (result && result.history || []).filter(
+      (h) => h.event === "info" && h.step === "templater_folder_templates" && h.action === "applied" && h.folder === "beacon/to-do"
+    );
+    assertEq("FT3: exactly one applied event for the manifest entry", applied.length, 1);
+
+    const backupPath = `${tdataPath}.beacon-backup`;
+    assertTrue("FT3: <target>.beacon-backup exists (pre-edit content was backed up)", fs.existsSync(backupPath));
+    if (fs.existsSync(backupPath)) {
+      const bakBody = await readRaw(backupPath);
+      assertEq("FT3: <target>.beacon-backup body byte-equal to pre-seed", bakBody, seedBody);
+    }
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseFT4BackupOnEdit() {
+  console.log("\n--- Case FT4: applyTemplaterFolderTemplates backup-on-edit content fidelity ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseFT4-"));
+  try {
+    const tdataPre = JSON.stringify({
+      enabled_templates_hotkeys: [],
+      folder_templates: [{ folder: "user/path", template: "user/Template.md" }],
+      startup_templates: [""],
+    }, null, 2);
+    const manifest = {
+      name: "test-fixture",
+      version: "0.1.0",
+      files: [],
+      templater_folder_templates: [
+        { folder: "beacon/to-do", template: "Docs/Meta/Templates/Today To-Do.md" },
+      ],
+    };
+    await scaffoldVault(scratch, {
+      templaterData: tdataPre,
+      slashCommanderData: SC_DEFAULT,
+      manifest,
+    });
+
+    const result = await runHarness(scratch);
+    assertTrue("FT4: platform-installed.json was written", result !== null);
+
+    const tdataPath = path.join(scratch, ".obsidian/plugins/templater-obsidian/data.json");
+    const backupPath = `${tdataPath}.beacon-backup`;
+    assertTrue("FT4: <target>.beacon-backup exists", fs.existsSync(backupPath));
+    if (fs.existsSync(backupPath)) {
+      const bakBody = await readRaw(backupPath);
+      assertEq("FT4: backup body byte-identical to pre-seed bytes", bakBody, tdataPre);
+    }
+
+    const liveBody = await readRaw(tdataPath);
+    assertTrue("FT4: live file body NOT equal to pre-seed (write occurred)", liveBody !== tdataPre);
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseFT5SubstitutionApplied() {
+  console.log("\n--- Case FT5: applyTemplaterFolderTemplates substitution applied to folder + template ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseFT5-"));
+  try {
+    await scaffoldBlueprintVault(scratch, [
+      {
+        name: "test-fixture-ft5",
+        version: "0.1.0",
+        manifest: {
+          name: "test-fixture-ft5",
+          version: "0.1.0",
+          kind: "blueprint",
+          module_directory: "to-do",
+          files: [],
+          templater_folder_templates: [
+            { folder: "{{module_directory}}", template: "{{templates_path}}/Today To-Do.md" },
+          ],
+        },
+      },
+    ]);
+    // Pre-seed templater data.json with an empty folder_templates array so the
+    // helper has somewhere to append (default scaffold lacks the field).
+    const tdataPath = path.join(scratch, ".obsidian/plugins/templater-obsidian/data.json");
+    const seedBody = JSON.stringify({
+      enabled_templates_hotkeys: [],
+      folder_templates: [],
+      startup_templates: [""],
+    }, null, 2);
+    await fsp.writeFile(tdataPath, seedBody, "utf8");
+
+    const result = await runHarness(scratch);
+    assertTrue("FT5: platform-installed.json was written", result !== null);
+
+    const after = await readJson(tdataPath);
+    assertEq("FT5: folder_templates length === 1", after.folder_templates.length, 1);
+    assertEq("FT5: written folder is resolved literal beacon/to-do", after.folder_templates[0].folder, "beacon/to-do");
+    assertEq("FT5: written template is resolved literal Docs/Meta/Templates/Today To-Do.md", after.folder_templates[0].template, "Docs/Meta/Templates/Today To-Do.md");
+
+    const applied = (result && result.history || []).filter(
+      (h) => h.event === "info" && h.step === "templater_folder_templates" && h.action === "applied" && h.name === "test-fixture-ft5"
+    );
+    assertEq("FT5: exactly one applied event", applied.length, 1);
+    if (applied.length === 1) {
+      const a = applied[0];
+      assertEq("FT5: applied event folder === beacon/to-do", a.folder, "beacon/to-do");
+      assertEq("FT5: applied event template === Docs/Meta/Templates/Today To-Do.md", a.template, "Docs/Meta/Templates/Today To-Do.md");
+      assertTrue(
+        "FT5: applied event has git_commit field (string or null per landmine #14)",
+        typeof a.git_commit === "string" || a.git_commit === null
+      );
+      assertTrue(
+        "FT5: applied event has git_tag field (string or null per landmine #14)",
+        typeof a.git_tag === "string" || a.git_tag === null
+      );
+      assertTrue(
+        "FT5: applied event has git_dirty field (boolean or null per landmine #14)",
+        typeof a.git_dirty === "boolean" || a.git_dirty === null
+      );
+      assertTrue("FT5: applied event has attempted_at field", typeof a.attempted_at === "string");
+    }
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseR1ValidateAndResolveRunTemplaterTemplate() {
+  console.log("\n--- Case R1: validateAndResolve runTemplaterTemplate branch (template_source rewrite + substituteLenient) ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseR1-"));
+  try {
+    await scaffoldBlueprintVault(scratch, [
+      {
+        name: "test-fixture-r1",
+        version: "0.1.0",
+        manifest: {
+          name: "test-fixture-r1",
+          version: "0.1.0",
+          kind: "blueprint",
+          module_directory: "to-do",
+          files: [],
+          nav_buttons: [
+            {
+              id: "todo-today",
+              label: "+ Today's To-Do",
+              icon: "todo",
+              order: 110,
+              action: {
+                type: "runTemplaterTemplate",
+                template_source: "Today To-Do.md",
+                folder: "{{module_directory}}/YYYY/MM-MMMM",
+                filename: "YYYY-MM-DD-[ToDo]",
+              },
+            },
+          ],
+        },
+      },
+    ]);
+
+    const result = await runHarness(scratch);
+    assertTrue("R1: platform-installed.json was written", result !== null);
+
+    const registryPath = path.join(scratch, "Docs/Meta/nav-buttons-registry.json");
+    assertTrue("R1: nav-buttons-registry.json was created", fs.existsSync(registryPath));
+
+    if (fs.existsSync(registryPath)) {
+      const registry = await readJson(registryPath);
+      assertTrue(
+        "R1: registry contributions['test-fixture-r1'] exists with one entry",
+        registry.contributions
+        && Array.isArray(registry.contributions["test-fixture-r1"])
+        && registry.contributions["test-fixture-r1"].length === 1
+      );
+
+      const contrib = registry.contributions["test-fixture-r1"][0];
+      assertEq("R1: action.type === runTemplaterTemplate (preserved)", contrib.action.type, "runTemplaterTemplate");
+      assertEq(
+        "R1: action.template_source rewritten under templates_path (no sourceName prefix)",
+        contrib.action.template_source,
+        "Docs/Meta/Templates/Today To-Do.md"
+      );
+      assertEq(
+        "R1: action.folder substituteLenient applied — {{module_directory}} resolved; YYYY/MM-MMMM preserved",
+        contrib.action.folder,
+        "beacon/to-do/YYYY/MM-MMMM"
+      );
+      assertEq(
+        "R1: action.filename preserved verbatim (no {{...}} placeholder; brackets retained)",
+        contrib.action.filename,
+        "YYYY-MM-DD-[ToDo]"
+      );
+      assertEq("R1: id preserved", contrib.id, "todo-today");
+      assertEq("R1: label preserved", contrib.label, "+ Today's To-Do");
+      assertEq("R1: icon preserved", contrib.icon, "todo");
+      assertEq("R1: order preserved", contrib.order, 110);
+    }
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
 async function case4BackupOnEdit() {
   console.log("\n--- Case 4: backup-on-edit ---");
   const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-case4-"));
@@ -1555,6 +1920,12 @@ async function case4BackupOnEdit() {
   await caseC3AdditivePreservesUserKeys();
   await caseC4BackupOnEditBytes();
   await caseC5SubstitutionOnSettings();
+  await caseFT1IdempotentMerge();
+  await caseFT2MalformedJson();
+  await caseFT3AdditivePreservesUserEntries();
+  await caseFT4BackupOnEdit();
+  await caseFT5SubstitutionApplied();
+  await caseR1ValidateAndResolveRunTemplaterTemplate();
 
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);

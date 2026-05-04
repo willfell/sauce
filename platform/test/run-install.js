@@ -379,6 +379,17 @@ async function main() {
     console.log(`  ${h.plugin_id}  keys: [${keys}]  (bak: ${h.backup_path || "—"})`);
   }
 
+  // v0.4.0 T1.3: surface templater_folder_templates applied + skipped_existing events separately.
+  // Includes skipped_existing (unlike core_plugin_settings) so the summary shows folder-template
+  // idempotency at-a-glance during barebones smoke verification.
+  const folderTemplateWrites = newHistory.filter(
+    (h) => h.event === "info" && h.step === "templater_folder_templates" && (h.action === "applied" || h.action === "skipped_existing")
+  );
+  console.log(`\n--- Templater folder-templates writes (${folderTemplateWrites.length}) ---`);
+  for (const h of folderTemplateWrites) {
+    console.log(`  ${h.folder} -> ${h.template}  (action: ${h.action})`);
+  }
+
   if (flags.dryRun) {
     console.log(`\n--- Dry-run write log (${writeLog.length} would-be writes) ---`);
     for (const w of writeLog) console.log(`  ${w.path}  (${w.bytes}B)`);

@@ -17,8 +17,8 @@
     },
     {
       "name": "nav-buttons",
-      "version": "2.0.0",
-      "installed_at": "2026-05-03T08:48:15.371Z"
+      "version": "2.1.0",
+      "installed_at": "2026-05-04T05:28:41.666Z"
     }
   ],
   "blueprints": [],
@@ -158,6 +158,38 @@
       "name": "audit",
       "version": "0.1.1",
       "installed_at": "2026-05-03T20:47:39.854Z"
+    },
+    {
+      "event": "skip",
+      "name": "nav-buttons",
+      "reason": "subscription pins nav-buttons@2.0.0 but workshop has 2.1.0",
+      "git_commit": "d44296dbc147f08417411d09dbd52ce6abd5a9d3",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-04T05:28:27.797Z"
+    },
+    {
+      "event": "replace",
+      "step": "file_overwrite",
+      "name": "nav-buttons",
+      "dest": "Docs/Meta/Scripts/nav-buttons/space-nav-buttons.js",
+      "prior_sha": "db70798d7ef555d83ba2d455cd650b401abf5dee7ffc0973e1e5566dee4dba13",
+      "new_sha": "bc2d797fa531bfa547db513d1ccbc22db27be58109840cde8698fcf4605c5d3d",
+      "bak_path": "Docs/Meta/Scripts/nav-buttons/space-nav-buttons.js.bak",
+      "git_commit": "d44296dbc147f08417411d09dbd52ce6abd5a9d3",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-04T05:28:41.665Z"
+    },
+    {
+      "event": "install",
+      "kind": "mechanism",
+      "name": "nav-buttons",
+      "version": "2.1.0",
+      "installed_at": "2026-05-04T05:28:41.666Z",
+      "git_commit": "d44296dbc147f08417411d09dbd52ce6abd5a9d3",
+      "git_tag": null,
+      "git_dirty": true
     }
   ]
 }

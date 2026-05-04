@@ -611,6 +611,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyExternalPlugins(tp, mech, history, git);
   await applyTemplaterHotkeys(tp, mech, variables, history, git);          // NEW v0.1.3
   await applySlashCommanderBindings(tp, mech, variables, history, git);    // NEW v0.1.3
+  await applyTemplaterFolderTemplates(tp, mech, variables, history, git);  // NEW v0.4.0
   await applyCorePluginSettings(tp, mech, variables, history, git);        // NEW v0.3.0
 
   return true;
@@ -1049,6 +1050,20 @@ function validateAndResolve(btn, sourceName, variables, history, git) {
         ...btn.action,
         target: resolvedTarget,
         template_source: `${contentPath}/${sourceName}/${btn.action.template_source}`,
+      },
+    };
+  }
+  if (btn.action.type === "runTemplaterTemplate" && btn.action.template_source) {
+    const templatesPath = variables.templates_path || "Docs/Meta/Templates";
+    return {
+      ...btn,
+      action: {
+        ...btn.action,
+        // folder + filename remain moment.format strings, resolved at click-time
+        // by the renderer. install-time substituteLenient handles {{...}} placeholders.
+        folder:   substituteLenient(btn.action.folder || "",   variables),
+        filename: substituteLenient(btn.action.filename || "", variables),
+        template_source: `${templatesPath}/${btn.action.template_source}`,
       },
     };
   }
@@ -1804,6 +1819,207 @@ async function applySlashCommanderBindings(tp, manifest, variables, history, git
       });
     }
     new Notice(`applySlashCommanderBindings: write failed (${e.message}) for ${manifest.name}`, 8000);
+  }
+}
+
+// applyTemplaterFolderTemplates — for each item that declares
+// templater_folder_templates[], read .obsidian/plugins/templater-obsidian/data.json
+// and additive-merge each entry into folder_templates[]. Match-by-folder; first-wins
+// idempotency. Empty-default placeholder {folder:"", template:""} is replaced
+// on first-write rather than appended-alongside (Templater seeds it on plugin first-init).
+// Failure-loud (Notice + history). Backup-on-edit to <target>.beacon-backup.
+// Honors landmine #12 — never overwrites a malformed data.json; never strips user entries.
+async function applyTemplaterFolderTemplates(tp, manifest, variables, history, git) {
+  if (!manifest || !Array.isArray(manifest.templater_folder_templates) || manifest.templater_folder_templates.length === 0) return;
+  const adapter = tp.app.vault.adapter;
+  const target = ".obsidian/plugins/templater-obsidian/data.json";
+
+  if (!(await adapter.exists(target))) {
+    new Notice(`applyTemplaterFolderTemplates: ${target} absent; cannot register folder-templates for ${manifest.name}`, 6000);
+    if (history) {
+      history.push({
+        event: "warning",
+        step: "templater_folder_templates",
+        name: manifest.name,
+        message: `${target} absent`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  let raw;
+  try {
+    raw = await adapter.read(target);
+  } catch (e) {
+    new Notice(`applyTemplaterFolderTemplates: cannot read ${target} (${e.message}); skipping for ${manifest.name}`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "templater_folder_templates",
+        name: manifest.name,
+        message: `read failed for ${target}: ${e.message}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch (e) {
+    new Notice(`applyTemplaterFolderTemplates: ${target} malformed JSON (${e.message}); skipping for ${manifest.name}`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "templater_folder_templates",
+        name: manifest.name,
+        message: `${target} malformed JSON: ${e.message}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  if (!Array.isArray(data.folder_templates)) {
+    new Notice(`applyTemplaterFolderTemplates: ${target} parsed but folder_templates not an array; skipping for ${manifest.name}`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "templater_folder_templates",
+        name: manifest.name,
+        message: `${target} folder_templates not an array`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  let appended = 0;
+  for (const entry of manifest.templater_folder_templates) {
+    if (!entry || typeof entry.folder !== "string" || typeof entry.template !== "string") {
+      if (history) {
+        history.push({
+          event: "warning",
+          step: "templater_folder_templates",
+          name: manifest.name,
+          message: "invalid entry shape",
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      continue;
+    }
+    const resolvedFolder = substituteLenient(entry.folder, variables);
+    const resolvedTemplate = substituteLenient(entry.template, variables);
+    if (!resolvedFolder || !resolvedTemplate) {
+      if (history) {
+        history.push({
+          event: "warning",
+          step: "templater_folder_templates",
+          name: manifest.name,
+          message: "empty folder or template after substitution",
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      continue;
+    }
+
+    const emptyDefaultIdx = data.folder_templates.findIndex(ft =>
+      ft && ft.folder === "" && ft.template === ""
+    );
+
+    const existingIdx = data.folder_templates.findIndex(ft => ft && ft.folder === resolvedFolder);
+    if (existingIdx >= 0) {
+      const existing = data.folder_templates[existingIdx];
+      if (existing.template === resolvedTemplate) {
+        if (history) {
+          history.push({
+            event: "info",
+            step: "templater_folder_templates",
+            name: manifest.name,
+            folder: resolvedFolder,
+            template: resolvedTemplate,
+            action: "skipped_existing",
+            git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+            attempted_at: new Date().toISOString(),
+          });
+        }
+        continue;
+      }
+      if (history) {
+        history.push({
+          event: "warning",
+          step: "templater_folder_templates",
+          name: manifest.name,
+          folder: resolvedFolder,
+          message: `user override preserved (existing template "${existing.template}" differs from manifest "${resolvedTemplate}")`,
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      continue;
+    }
+
+    if (emptyDefaultIdx >= 0 && data.folder_templates.length === 1) {
+      data.folder_templates[emptyDefaultIdx] = { folder: resolvedFolder, template: resolvedTemplate };
+    } else {
+      data.folder_templates.push({ folder: resolvedFolder, template: resolvedTemplate });
+    }
+    appended++;
+    if (history) {
+      history.push({
+        event: "info",
+        step: "templater_folder_templates",
+        name: manifest.name,
+        folder: resolvedFolder,
+        template: resolvedTemplate,
+        action: "applied",
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+  }
+
+  if (appended === 0) return;
+
+  try {
+    await adapter.write(`${target}.beacon-backup`, raw);
+  } catch (e) {
+    new Notice(`applyTemplaterFolderTemplates: backup write failed (${e.message}); aborting modification for ${manifest.name}`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "templater_folder_templates",
+        name: manifest.name,
+        message: `backup write failed: ${e.message}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  try {
+    await adapter.write(target, JSON.stringify(data, null, 2));
+  } catch (e) {
+    new Notice(`applyTemplaterFolderTemplates: write failed (${e.message}) for ${manifest.name}`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "templater_folder_templates",
+        name: manifest.name,
+        message: `write failed: ${e.message}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
   }
 }
 

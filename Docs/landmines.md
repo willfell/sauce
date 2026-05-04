@@ -109,7 +109,7 @@ The `.obsidian/` ask-before-acting gate is lifted for exactly three files:
 - `.obsidian/plugins/slash-commander/data.json`
 - `.obsidian/daily-notes.json` (added in v0.3.0)
 
-All three touched **only** by the installer, only via `applyTemplaterHotkeys` / `applySlashCommanderBindings` / `applyCorePluginSettings`, and only under all four of:
+All three touched **only** by the installer, only via `applyTemplaterHotkeys` / `applySlashCommanderBindings` / `applyTemplaterFolderTemplates` / `applyCorePluginSettings`, and only under all four of:
 
 1. **Additive merge.** Never strip, modify, or reorder pre-existing entries; only append new entries the manifest declares.
 2. **Backup on edit.** Write `<target>.beacon-backup` before any modification (one-deep, overwrite-on-edit, single backup per target).
@@ -122,7 +122,7 @@ All three touched **only** by the installer, only via `applyTemplaterHotkeys` / 
 
 **Recovery.** If a `.beacon-backup` file diverges from the live data.json in a way the user wants to revert, copy the backup over the live file + reload Obsidian. Backups are not auto-rotated; manual cleanup is the consumer's call.
 
-Surfaced 2026-05-04 during v0.1.x close (T2.1-discovery §8 + T2.6 deferral); codified in v0.1.3. Allowlist expanded from 2 → 3 paths in v0.3.0 to add `.obsidian/daily-notes.json` for the daily blueprint.
+Surfaced 2026-05-04 during v0.1.x close (T2.1-discovery §8 + T2.6 deferral); codified in v0.1.3. Allowlist expanded from 2 → 3 paths in v0.3.0 to add `.obsidian/daily-notes.json` for the daily blueprint. Allowlist UNCHANGED in v0.4.0 (still 3 paths); helper count grew 3 → 4 with `applyTemplaterFolderTemplates` (writes to the same templater data.json as `applyTemplaterHotkeys`, just to a new top-level field `folder_templates[]`).
 
 ### 13. Bootstrap stub is content-static; never re-edit
 

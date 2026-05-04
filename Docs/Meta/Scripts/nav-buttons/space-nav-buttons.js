@@ -7,9 +7,14 @@
  * This class reads the registry at render time, sorts entries by (order,
  * source, id), and dispatches click on action.type.
  *
- * Action types (v0.1.1):
- *   - openLink           { target }
- *   - createFromTemplate { target, template_source }
+ * Action types (v0.4.0):
+ *   - openLink             { target }
+ *   - createFromTemplate   { target, template_source }
+ *   - runTemplaterTemplate { template_source, folder, filename }
+ *
+ * For runTemplaterTemplate, folder + filename are moment.format strings
+ * resolved at click-time. Square brackets escape literals (e.g., "[ToDo]").
+ * Idempotent: re-click on same day opens the existing dated file.
  *
  * Usage in DataviewJS:
  *   await dv.view("Docs/Meta/Views/customjs-guard", { class: "SpaceNavButtons" });
@@ -197,6 +202,57 @@ class SpaceNavButtons {
         }
       }
       app.workspace.openLinkText(action.target, "");
+      return;
+    }
+
+    if (type === "runTemplaterTemplate") {
+      const tpPlugin = app.plugins.plugins["templater-obsidian"];
+      if (!tpPlugin || !tpPlugin.templater) {
+        new Notice(`nav-buttons: Templater plugin not enabled (from ${btn._source})`, 8000);
+        return;
+      }
+
+      const folder = (action.folder || "").trim()
+        ? window.moment().format(action.folder)
+        : "";
+      const filenameNoExt = (action.filename || "").trim()
+        ? window.moment().format(action.filename)
+        : "Untitled";
+      const target = folder ? `${folder}/${filenameNoExt}.md` : `${filenameNoExt}.md`;
+
+      const existingTarget = app.vault.getAbstractFileByPath(target);
+      if (existingTarget) {
+        app.workspace.openLinkText(target, "");
+        return;
+      }
+
+      if (folder && !app.vault.getAbstractFileByPath(folder)) {
+        try {
+          await app.vault.createFolder(folder);
+        } catch (folderErr) {
+          if (!/already exists|exists/i.test((folderErr && folderErr.message) || "")) {
+            new Notice(`nav-buttons: cannot create folder ${folder} — ${folderErr.message}`, 8000);
+            return;
+          }
+        }
+      }
+
+      const templateFile = app.vault.getAbstractFileByPath(action.template_source);
+      if (!templateFile) {
+        new Notice(`nav-buttons: template not found at ${action.template_source} (from ${btn._source})`, 8000);
+        return;
+      }
+
+      try {
+        await tpPlugin.templater.create_new_note_from_template(templateFile, folder, filenameNoExt, true);
+      } catch (err) {
+        const msg = (err && err.message) || "";
+        if (!/already exists|exists/i.test(msg)) {
+          new Notice(`nav-buttons: Templater create failed for ${target} (from ${btn._source}) — ${msg}`, 8000);
+          return;
+        }
+        app.workspace.openLinkText(target, "");
+      }
       return;
     }
 

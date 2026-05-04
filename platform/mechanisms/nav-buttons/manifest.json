@@ -1,7 +1,7 @@
 {
   "name": "nav-buttons",
-  "version": "2.0.0",
-  "description": "Thin renderer over Docs/Meta/nav-buttons-registry.json. Each blueprint/mechanism declares nav_buttons[]; installer aggregates.",
+  "version": "2.1.0",
+  "description": "Thin renderer over Docs/Meta/nav-buttons-registry.json. Each blueprint/mechanism declares nav_buttons[]; installer aggregates. v2.1.0 adds the runTemplaterTemplate action type for date-routed runtime-creation blueprints (renderer-resolves moment.format folder + filename -> templater.create_new_note_from_template).",
   "depends_on": [
     { "name": "customjs-guard", "range": ">=1.0.0" }
   ],
