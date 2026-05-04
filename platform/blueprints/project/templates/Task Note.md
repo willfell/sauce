@@ -8,4 +8,13 @@ tags:
   - {{DATE_TAG}}
 ---
 
-<!-- TODO S2: port full body from accuris/Extras/Templates/Template, Task Note.md -->
+```dataviewjs
+await dv.view("Docs/Meta/Views/customjs-guard", { class: "SpaceNavButtons" });
+```
+
+---
+
+```dataviewjs
+await dv.view("Docs/Meta/Views/customjs-guard", { class: "ProjectNavButtons" });
+```
+

@@ -5,7 +5,7 @@
  * Uses app.fileManager.processFrontMatter() for safe YAML serialization.
  *
  * Usage in DataviewJS (atlas note):
- *   await dv.view("Extras/Scripts/customjs-guard", { class: "ProjectWorkstreamManager" });
+ *   await dv.view("Docs/Meta/Views/customjs-guard", { class: "ProjectWorkstreamManager" });
  */
 class ProjectWorkstreamManager {
     async render(dv) {

@@ -1,10 +1,24 @@
 ---
+
 kanban-plugin: board
 title: {{NAME}} Board
 type: kanban
 tags:
   - board
   - project/{{SLUG}}
+
 ---
 
-<!-- TODO S2: port full body from accuris/Extras/Templates/Template, Project Board.md -->
+## In Planning
+
+## In Progress
+
+## Blocked
+
+## Completed
+
+%% kanban:settings
+```
+{"kanban-plugin":"board","list-collapse":[false,false,false,false],"mark-cards-complete":true,"new-note-folder":"beacon/projects/{{SLUG}}/tasks","new-note-template":"{{templates_path}}/Template, Kanban Card.md"}
+```
+%%
