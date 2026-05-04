@@ -1084,6 +1084,9 @@ function validateAndResolve(btn, sourceName, variables, history, git) {
       },
     };
   }
+  if (btn.action.type === "invoke_command" && btn.action.command_id) {
+    return btn;  // passthrough; command_id preserved literally for runtime dispatch
+  }
   return btn;
 }
 

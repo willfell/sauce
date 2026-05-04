@@ -1,11 +1,11 @@
 {
   "name": "daily",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "kind": "blueprint",
   "module_directory": "daily",
-  "description": "Date-organized daily notes via Obsidian's core Daily Notes plugin + Calendar; ports accuris's Timestamps pattern under beacon/daily/. v0.1.2: filename pattern format dddd-YYYY-MM-DD per v0.4.2 platform invariant <Name>-YYYY-MM-DD.",
+  "description": "Date-organized daily notes via Obsidian's core Daily Notes plugin + Calendar; ports accuris's Timestamps pattern under beacon/daily/. v0.1.3: contributes Today nav-button (invoke_command -> daily-notes:goto-today) requiring nav-buttons >=2.3.0; filename pattern dddd-YYYY-MM-DD per v0.4.2 platform invariant.",
   "depends_on": [
-    { "name": "nav-buttons",    "range": ">=2.0.0" },
+    { "name": "nav-buttons",    "range": ">=2.3.0" },
     { "name": "customjs-guard", "range": ">=1.0.0" }
   ],
   "core_plugin_settings": [
@@ -25,7 +25,15 @@
     { "source": "content/daily-template.md",        "dest": "{{templates_path}}/Daily Note.md" },
     { "source": "helpers/space-daily-dashboard.js", "dest": "{{scripts_path}}/daily/space-daily-dashboard.js" }
   ],
-  "nav_buttons": [],
+  "nav_buttons": [
+    {
+      "id": "daily-today",
+      "label": "Daily",
+      "icon": "daily",
+      "order": 50,
+      "action": { "type": "invoke_command", "command_id": "daily-notes:goto-today" }
+    }
+  ],
   "post_install": [
     {
       "type": "notice",

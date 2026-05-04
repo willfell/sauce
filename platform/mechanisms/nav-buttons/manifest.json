@@ -1,7 +1,7 @@
 {
   "name": "nav-buttons",
-  "version": "2.2.0",
-  "description": "Thin renderer over Docs/Meta/nav-buttons-registry.json. Each blueprint/mechanism declares nav_buttons[]; installer aggregates. v2.2.0 BREAKING: runTemplaterTemplate action shape changed — single moment-format folder/filename fields replaced with split-field schema (folder_prefix + folder_date_pattern + filename_prefix + filename_date_pattern + filename_suffix). Literal text never reaches moment.format(); bracket-escape gap architecturally impossible.",
+  "version": "2.3.0",
+  "description": "Thin renderer over Docs/Meta/nav-buttons-registry.json. Each blueprint/mechanism declares nav_buttons[]; installer aggregates. v2.3.0 ADDITIVE: adds invoke_command action type for arbitrary Obsidian command dispatch; adds top arrow-row prev/next-day daily-nav (skip-to-nearest-existing with grey-out) when daily blueprint installed (reads .obsidian/daily-notes.json at runtime). Adaptive multi-row layout + hover styling unchanged from v2.0.0.",
   "depends_on": [
     { "name": "customjs-guard", "range": ">=1.0.0" }
   ],

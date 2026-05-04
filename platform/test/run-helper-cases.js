@@ -2041,6 +2041,57 @@ async function caseR4MissingFolderPrefix() {
   }
 }
 
+async function caseR5InvokeCommandPassthrough() {
+  console.log("\n--- Case R5: validateAndResolve invoke_command passthrough (command_id literal preserved) ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseR5-"));
+  try {
+    await scaffoldBlueprintVault(scratch, [
+      {
+        name: "test-fixture-r5",
+        version: "0.1.0",
+        manifest: {
+          name: "test-fixture-r5",
+          version: "0.1.0",
+          kind: "blueprint",
+          module_directory: "today",
+          files: [],
+          nav_buttons: [
+            {
+              id: "today-cmd",
+              label: "Today",
+              icon: "daily",
+              order: 50,
+              action: {
+                type: "invoke_command",
+                command_id: "daily-notes:goto-today",
+              },
+            },
+          ],
+        },
+      },
+    ]);
+
+    const result = await runHarness(scratch);
+    assertTrue("R5: platform-installed.json was written", result !== null);
+
+    const registry = await readJson(path.join(scratch, "Docs/Meta/nav-buttons-registry.json"));
+    const contrib = registry.contributions["test-fixture-r5"][0];
+
+    assertEq("R5: action.type === invoke_command (preserved)", contrib.action.type, "invoke_command");
+    assertEq(
+      "R5: action.command_id preserved verbatim (no substitution applied; literal)",
+      contrib.action.command_id,
+      "daily-notes:goto-today"
+    );
+    assertEq("R5: id preserved", contrib.id, "today-cmd");
+    assertEq("R5: label preserved", contrib.label, "Today");
+    assertEq("R5: icon preserved", contrib.icon, "daily");
+    assertEq("R5: order preserved", contrib.order, 50);
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
 async function case4BackupOnEdit() {
   console.log("\n--- Case 4: backup-on-edit ---");
   const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-case4-"));
@@ -2101,6 +2152,7 @@ async function case4BackupOnEdit() {
   await caseR2FilenameDefaults();
   await caseR3EmptyFolderDatePattern();
   await caseR4MissingFolderPrefix();
+  await caseR5InvokeCommandPassthrough();
 
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);

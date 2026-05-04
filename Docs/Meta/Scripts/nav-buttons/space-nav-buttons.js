@@ -1,5 +1,5 @@
 /**
- * SpaceNavButtons (CustomJS) — v2.0.0
+ * SpaceNavButtons (CustomJS) — v2.3.0
  *
  * Thin renderer over Docs/Meta/nav-buttons-registry.json. Each blueprint or
  * mechanism declares nav_buttons[] in its manifest; the installer aggregates
@@ -7,19 +7,38 @@
  * This class reads the registry at render time, sorts entries by (order,
  * source, id), and dispatches click on action.type.
  *
- * Action types (v0.4.0):
+ * Action types (v0.4.2):
  *   - openLink             { target }
  *   - createFromTemplate   { target, template_source }
- *   - runTemplaterTemplate { template_source, folder, filename }
+ *   - runTemplaterTemplate { template_source, folder_prefix, folder_date_pattern, filename_prefix, filename_date_pattern, filename_suffix }
+ *   - invoke_command       { command_id }       (v2.3.0)
  *
- * For runTemplaterTemplate, folder + filename are moment.format strings
- * resolved at click-time. Square brackets escape literals (e.g., "[ToDo]").
- * Idempotent: re-click on same day opens the existing dated file.
+ * v2.3.0 also adds a top arrow row for daily-nav (prev/next-day with
+ * skip-to-nearest-existing + grey-out) when daily blueprint installed.
+ * Renders ABOVE the registry button list. Reads .obsidian/daily-notes.json
+ * at runtime to acquire daily folder + format.
  *
  * Usage in DataviewJS:
  *   await dv.view("Docs/Meta/Views/customjs-guard", { class: "SpaceNavButtons" });
  */
 class SpaceNavButtons {
+  // ── _readDailyNotesMeta — read .obsidian/daily-notes.json. Returns null if
+  // absent, unreadable, or malformed; never throws. Used to gate the top
+  // arrow-row rendering: if daily blueprint not installed, no arrows.
+  async _readDailyNotesMeta() {
+    const path = ".obsidian/daily-notes.json";
+    try {
+      if (!(await app.vault.adapter.exists(path))) return null;
+      const raw = await app.vault.adapter.read(path);
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed.folder !== "string" || typeof parsed.format !== "string") return null;
+      if (parsed.folder.length === 0 || parsed.format.length === 0) return null;
+      return parsed;
+    } catch (e) {
+      return null;
+    }
+  }
+
   async render(dv) {
     // ── Icons (Lucide, 15x15 stroke-based) ──────────────────────────────
     const ICONS = {
@@ -80,6 +99,78 @@ class SpaceNavButtons {
       gap: 10px;
       margin: 4px 0 12px 0;
     `;
+
+    // ── Top arrow row (daily-nav prev/next; rendered when daily blueprint installed) ──
+    const dailyMeta = await this._readDailyNotesMeta();
+    if (dailyMeta) {
+      const currentFile = dv.current && dv.current();
+      const fileName = (currentFile && currentFile.file && currentFile.file.name) || "";
+      const dm = fileName.match(/(\d{4}-\d{2}-\d{2})/);
+      const currentDate = dm
+        ? window.moment(dm[1], "YYYY-MM-DD", true)
+        : window.moment();
+
+      // Scan daily folder for existing dailies; sort by date.
+      const allDailies = app.vault.getMarkdownFiles()
+        .filter(f => f.path.startsWith(dailyMeta.folder + "/"))
+        .map(f => {
+          const fdm = f.name.match(/(\d{4}-\d{2}-\d{2})/);
+          return fdm ? { file: f, m: window.moment(fdm[1], "YYYY-MM-DD", true) } : null;
+        })
+        .filter(x => x && x.m.isValid())
+        .sort((a, b) => a.m.diff(b.m));
+
+      const earlier = allDailies.filter(x => x.m.isBefore(currentDate, "day")).pop();
+      const later = allDailies.filter(x => x.m.isAfter(currentDate, "day"))[0];
+
+      const chevronLeft = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>`;
+      const chevronRight = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>`;
+
+      const arrowBaseStyle = `
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 4px 10px;
+        border-radius: 6px;
+        border: 1px solid transparent;
+        background: transparent;
+        color: var(--text-muted);
+        font-size: 0.8em;
+        font-family: inherit;
+        transition: color 0.15s, background 0.15s;
+      `;
+
+      const topRow = container.createEl("div");
+      topRow.style.cssText = `
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      `;
+
+      // Prev button
+      const prevBtn = topRow.createEl("button");
+      const prevLabel = earlier ? earlier.m.format("ddd, MMM D") : "—";
+      prevBtn.innerHTML = chevronLeft + `<span>${prevLabel}</span>`;
+      const prevDisabled = !earlier;
+      prevBtn.style.cssText = arrowBaseStyle + (prevDisabled ? "opacity: 0.4; cursor: default;" : "cursor: pointer;");
+      if (!prevDisabled) {
+        prevBtn.onmouseenter = () => { prevBtn.style.color = "var(--text-normal)"; prevBtn.style.background = "var(--background-modifier-hover)"; };
+        prevBtn.onmouseleave = () => { prevBtn.style.color = "var(--text-muted)"; prevBtn.style.background = "transparent"; };
+        prevBtn.onclick = () => app.workspace.openLinkText(earlier.file.path, "");
+      }
+
+      // Next button
+      const nextBtn = topRow.createEl("button");
+      const nextLabel = later ? later.m.format("ddd, MMM D") : "—";
+      nextBtn.innerHTML = `<span>${nextLabel}</span>` + chevronRight;
+      const nextDisabled = !later;
+      nextBtn.style.cssText = arrowBaseStyle + (nextDisabled ? "opacity: 0.4; cursor: default;" : "cursor: pointer;");
+      if (!nextDisabled) {
+        nextBtn.onmouseenter = () => { nextBtn.style.color = "var(--text-normal)"; nextBtn.style.background = "var(--background-modifier-hover)"; };
+        nextBtn.onmouseleave = () => { nextBtn.style.color = "var(--text-muted)"; nextBtn.style.background = "transparent"; };
+        nextBtn.onclick = () => app.workspace.openLinkText(later.file.path, "");
+      }
+    }
 
     const rowStyle = `
       display: flex;
@@ -262,6 +353,19 @@ class SpaceNavButtons {
         }
         app.workspace.openLinkText(target, "");
       }
+      return;
+    }
+
+    if (type === "invoke_command") {
+      if (!action.command_id) {
+        new Notice(`nav-buttons: invoke_command missing command_id (from ${btn._source})`, 8000);
+        return;
+      }
+      if (!app.commands.commands[action.command_id]) {
+        new Notice(`nav-buttons: command not found "${action.command_id}" (from ${btn._source})`, 8000);
+        return;
+      }
+      app.commands.executeCommandById(action.command_id);
       return;
     }
 
