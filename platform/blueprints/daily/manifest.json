@@ -1,9 +1,9 @@
 {
   "name": "daily",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "kind": "blueprint",
   "module_directory": "daily",
-  "description": "Date-organized daily notes via Obsidian's core Daily Notes plugin + Calendar; ports accuris's Timestamps pattern under beacon/daily/. v0.1.1: SpaceDailyDashboard's meetingsPath updated from beacon/meetings to beacon/meetings/notes for the v0.3.2 hub-centric meetings layout.",
+  "description": "Date-organized daily notes via Obsidian's core Daily Notes plugin + Calendar; ports accuris's Timestamps pattern under beacon/daily/. v0.1.2: filename pattern format dddd-YYYY-MM-DD per v0.4.2 platform invariant <Name>-YYYY-MM-DD.",
   "depends_on": [
     { "name": "nav-buttons",    "range": ">=2.0.0" },
     { "name": "customjs-guard", "range": ">=1.0.0" }
@@ -13,7 +13,7 @@
       "id": "daily-notes",
       "settings": {
         "folder": "{{module_directory}}",
-        "format": "YYYY/MM-MMMM/YYYY-MM-DD-dddd",
+        "format": "YYYY/MM-MMMM/dddd-YYYY-MM-DD",
         "template": "{{templates_path}}/Daily Note.md"
       }
     }

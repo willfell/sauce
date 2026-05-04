@@ -8,7 +8,8 @@
 class NewMeetingButton {
   async render(dv) {
     const currentFile = dv.current();
-    const currentDateStr = currentFile.file.name.substring(0, 10);
+    const dateMatch = currentFile.file.name.match(/(\d{4}-\d{2}-\d{2})/);
+    const currentDateStr = dateMatch ? dateMatch[1] : window.moment().format("YYYY-MM-DD");
 
     // (no spacePrefix — beacon has no Life/ namespace)
     const datePart = window.moment(currentDateStr);
@@ -88,7 +89,7 @@ class NewMeetingButton {
       const title = await inputModal("Meeting title:");
       if (!title) return;
 
-      const meetingFilename = currentDateStr + " " + title;
+      const meetingFilename = `${title}-${currentDateStr}`;
       const template = app.vault.getAbstractFileByPath("Docs/Meta/Templates/Meeting.md");
       if (template) {
         const templater = app.plugins.plugins["templater-obsidian"];

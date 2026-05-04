@@ -8,12 +8,13 @@
 class MeetingsHubCards {
   async render(dv) {
     const currentFile = dv.current();
-    const currentDateStr = currentFile.file.name.substring(0, 10);
+    const dateMatch = currentFile.file.name.match(/(\d{4}-\d{2}-\d{2})/);
+    const currentDateStr = dateMatch ? dateMatch[1] : window.moment().format("YYYY-MM-DD");
 
     // (no spacePrefix — beacon has no Life/ namespace)
 
     const meetings = dv.pages('"beacon/meetings/notes"')
-      .where(p => p.file.name.startsWith(currentDateStr))
+      .where(p => p.file.name.endsWith(`-${currentDateStr}`))
       .sort(p => {
         if (p.date) {
           return moment(p.date.toString()).format("HH:mm");
@@ -34,7 +35,7 @@ class MeetingsHubCards {
       container.style.cssText = "display: flex; flex-direction: column; gap: 12px; margin: 16px 0;";
 
       for (const p of meetings) {
-        const title = p.file.name.substring(11) || p.file.name;
+        const title = p.file.name.replace(/-\d{4}-\d{2}-\d{2}$/, "") || p.file.name;
 
         let time = "";
         if (p.date) {

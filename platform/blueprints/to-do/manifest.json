@@ -1,11 +1,11 @@
 {
   "name": "to-do",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "kind": "blueprint",
   "module_directory": "to-do",
-  "description": "Date-routed daily to-do notes feeding SpaceDailyDashboard's tasks panel under beacon/to-do/.",
+  "description": "Date-routed daily to-do notes feeding SpaceDailyDashboard's tasks panel under beacon/to-do/. v0.1.1: migrated to v0.4.2 split-field nav-button schema.",
   "depends_on": [
-    { "name": "nav-buttons",    "range": ">=2.1.0" },
+    { "name": "nav-buttons",    "range": ">=2.2.0" },
     { "name": "customjs-guard", "range": ">=1.0.0" }
   ],
   "files": [
@@ -20,8 +20,11 @@
       "action": {
         "type": "runTemplaterTemplate",
         "template_source": "Today To-Do.md",
-        "folder": "{{module_directory}}/YYYY/MM-MMMM",
-        "filename": "YYYY-MM-DD-[ToDo]"
+        "folder_prefix": "{{module_directory}}",
+        "folder_date_pattern": "YYYY/MM-MMMM",
+        "filename_prefix": "ToDo-",
+        "filename_date_pattern": "YYYY-MM-DD",
+        "filename_suffix": ""
       }
     }
   ],
