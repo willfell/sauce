@@ -1,8 +1,10 @@
 {
+  "_comment": "v0.3.0 (BREAKING) drops Board contribution + content/kanban-board.md (boards blueprint owns the Board button now). module_directory: 'projects-legacy' is a stopgap satisfying T1.1's required-field check while acknowledging project's content actually materializes at Docs/Meta/* + boards/planning/<slug>/ today (none of project's files reference {{module_directory}}, so the substitution is set-but-unused). Future cycle migrates project to module_directory: 'projects' under beacon/projects/.",
   "name": "project",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "kind": "blueprint",
-  "description": "Project note bundle — boards/planning/<slug>/ structure, planning board view, workstream manager, /new-project command.",
+  "module_directory": "projects-legacy",
+  "description": "Project note bundle — boards/planning/<slug>/ structure, planning board view, workstream manager, /new-project command. v0.3.0 retires the Board button (moved to boards blueprint).",
   "depends_on": [
     { "name": "nav-buttons",    "range": ">=2.0.0" },
     { "name": "customjs-guard", "range": ">=1.0.0" }
@@ -32,24 +34,11 @@
     { "source": "helpers/planning-board-projects.js",     "dest": "{{scripts_path}}/project/planning-board-projects.js" },
     { "source": "helpers/project-workstreams.js",         "dest": "{{scripts_path}}/project/project-workstreams.js" },
     { "source": "helpers/project-workstream-manager.js",  "dest": "{{scripts_path}}/project/project-workstream-manager.js" },
-    { "source": "commands/new-project.md",                "dest": "{{commands_path}}/new-project.md" },
-    { "source": "content/kanban-board.md",                "dest": "{{content_path}}/project/kanban-board.md" }
+    { "source": "commands/new-project.md",                "dest": "{{commands_path}}/new-project.md" }
   ],
-  "nav_buttons": [
-    {
-      "id": "board",
-      "label": "Board",
-      "icon": "board",
-      "order": 100,
-      "action": {
-        "type": "createFromTemplate",
-        "target": "boards/To-Do-Board.md",
-        "template_source": "kanban-board.md"
-      }
-    }
-  ],
+  "nav_buttons": [],
   "post_install": [
-    { "type": "notice", "message": "Project blueprint installed. Reload Templater (user scripts) + reload CustomJS to register new classes." }
+    { "type": "notice", "message": "Project blueprint v0.3.0 installed. Board button retired (now provided by boards blueprint). Reload Templater + CustomJS to pick up changes." }
   ],
   "rule_fragments": []
 }

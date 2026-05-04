@@ -1,0 +1,55 @@
+{
+  "name": "boards",
+  "version": "0.1.0",
+  "kind": "blueprint",
+  "module_directory": "boards",
+  "description": "Kanban-plugin task board with Templater date-routed card notes under beacon/boards/.",
+  "depends_on": [
+    { "name": "nav-buttons",    "range": ">=2.0.0" },
+    { "name": "customjs-guard", "range": ">=1.0.0" }
+  ],
+  "external_plugins": [
+    {
+      "id": "obsidian-kanban",
+      "required": true,
+      "reason": "Renders {{module_directory}}/To-Do-Board.md as an interactive kanban; without the plugin the board renders as plain markdown."
+    }
+  ],
+  "pre_install": [
+    {
+      "type": "delete",
+      "path": "boards/To-Do-Board.md",
+      "reason": "v0.1.1-era top-level Dataview-kanban file (project blueprint Board contribution); superseded by beacon/boards/To-Do-Board.md (Kanban-plugin format) at this blueprint's install."
+    }
+  ],
+  "files": [
+    {
+      "source": "content/To-Do-Board.md",
+      "dest": "{{module_directory}}/To-Do-Board.md"
+    },
+    {
+      "source": "templates/Template, Board Card.md",
+      "dest": "{{templates_path}}/Template, Board Card.md"
+    }
+  ],
+  "nav_buttons": [
+    {
+      "id": "boards-board",
+      "label": "Board",
+      "icon": "board",
+      "order": 100,
+      "action": {
+        "type": "createFromTemplate",
+        "target": "{{module_directory}}/To-Do-Board.md",
+        "template_source": "To-Do-Board.md"
+      }
+    }
+  ],
+  "post_install": [
+    {
+      "type": "notice",
+      "message": "Boards blueprint installed at beacon/boards/. REQUIRED: enable the Kanban community plugin (Settings → Community plugins → Browse → Kanban) AND the Templater 'Trigger Templater on new file creation' setting. Then click the Board nav-button from any note. Cards added in the kanban auto-route to beacon/boards/cards/YYYY/MM-MMMM/<title>.md via Templater. Note: any v0.1.1-era top-level boards/To-Do-Board.md was deleted by pre_install (backup at boards/To-Do-Board.md.pre_install_bak)."
+    }
+  ],
+  "rule_fragments": []
+}

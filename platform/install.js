@@ -841,7 +841,14 @@ async function applyRuleFragment(tp, frag, sourceName, variables, history, git) 
 // (C4 hardening); per-entry validation skips bad entries without taking the
 // whole contribution down; failures record history but do not throw.
 async function applyNavButtons(tp, manifest, variables, history, git) {
-  if (!manifest || !Array.isArray(manifest.nav_buttons) || manifest.nav_buttons.length === 0) return;
+  if (!manifest) return;
+  // v0.2.0 fix: an empty/missing nav_buttons[] on a re-installing item must
+  // PRUNE that item's prior contribution from the registry (otherwise stale
+  // buttons from earlier versions persist forever — surfaced in v0.2.0 S2 when
+  // project@0.3.0 retired its Board button but the v0.2.1-era entry remained).
+  // We still need to read/write the registry to perform the prune, so we cannot
+  // early-return on empty.
+  const navButtonsArr = Array.isArray(manifest.nav_buttons) ? manifest.nav_buttons : [];
   const adapter = tp.app.vault.adapter;
   const registryPath = "Docs/Meta/nav-buttons-registry.json";
 
@@ -888,7 +895,29 @@ async function applyNavButtons(tp, manifest, variables, history, git) {
   }
   registry.contributions = registry.contributions || {};
 
-  const validated = manifest.nav_buttons
+  // Empty declared nav_buttons[] → prune any prior contribution + return early
+  // (no need to write if there was nothing to prune).
+  if (navButtonsArr.length === 0) {
+    if (manifest.name in registry.contributions) {
+      delete registry.contributions[manifest.name];
+      await adapter.write(registryPath, JSON.stringify(registry, null, 2));
+      if (history) {
+        history.push({
+          event: "info",
+          step: "nav_buttons",
+          name: manifest.name,
+          action: "pruned_empty_declaration",
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    }
+    return;
+  }
+
+  const validated = navButtonsArr
     .map((btn) => validateAndResolve(btn, manifest.name, variables, history, git))
     .filter(Boolean);
 
@@ -936,10 +965,17 @@ function validateAndResolve(btn, sourceName, variables, history, git) {
   }
   if (btn.action.type === "createFromTemplate" && btn.action.template_source) {
     const contentPath = variables.content_path || "Docs/Meta/Content";
+    // v0.2.0 fix: substitute {{xxx}} placeholders in the target path using the
+    // current item's variables overlay (which already includes the per-blueprint
+    // {{module_directory}} → "beacon/<bare-name>" mapping per T1.2). Stores
+    // resolved literals in the registry so the renderer dispatches without
+    // needing per-blueprint substitution context at click time.
+    const resolvedTarget = substituteLenient(btn.action.target || "", variables);
     return {
       ...btn,
       action: {
         ...btn.action,
+        target: resolvedTarget,
         template_source: `${contentPath}/${sourceName}/${btn.action.template_source}`,
       },
     };

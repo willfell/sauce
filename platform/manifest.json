@@ -1,7 +1,7 @@
 {
   "_comment": "Workshop platform manifest. Each mechanism + blueprint has its own version.",
-  "workshop_version": "0.5.0",
-  "date": "2026-05-03",
+  "workshop_version": "0.6.0",
+  "date": "2026-05-04",
   "installer": {
     "source": "install.js",
     "version": "0.1.0",
@@ -14,6 +14,7 @@
     { "name": "nav-buttons", "version": "2.0.0", "path": "mechanisms/nav-buttons" }
   ],
   "blueprints": [
-    { "name": "project", "version": "0.2.1", "path": "blueprints/project" }
+    { "name": "project", "version": "0.3.0", "path": "blueprints/project" },
+    { "name": "boards", "version": "0.1.0", "path": "blueprints/boards" }
   ]
 }
