@@ -167,7 +167,7 @@ class SpaceNavButtons {
       try {
         body = await app.vault.adapter.read(action.template_source);
       } catch (err) {
-        new Notice(`nav-buttons: cannot read template ${action.template_source}`, 8000);
+        new Notice(`nav-buttons: cannot read template ${action.template_source} (from ${btn._source}) — ${err.message}`, 8000);
         return;
       }
 
@@ -178,7 +178,7 @@ class SpaceNavButtons {
           await app.vault.createFolder(folder);
         } catch (folderErr) {
           // Race: another caller may have just created it. Ignore "exists" errors.
-          if (!/exists/i.test((folderErr && folderErr.message) || "")) {
+          if (!/already exists|exists/i.test((folderErr && folderErr.message) || "")) {
             new Notice(`nav-buttons: cannot create folder ${folder} — ${folderErr.message}`, 8000);
             return;
           }

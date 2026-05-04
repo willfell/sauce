@@ -4,6 +4,19 @@
   "required_tags": [],
   "required_blocks": [],
   "forbid_dataviewjs_patterns": [
-    { "pattern": "await customJS\\.", "reason": "use customjs-guard via dv.view instead" }
-  ]
+    {
+      "pattern": "await customJS\\.",
+      "reason": "use customjs-guard via dv.view instead"
+    }
+  ],
+  "contributions": {
+    "customjs-guard": {
+      "forbid_dataviewjs_patterns": [
+        {
+          "pattern": "await customJS\\.",
+          "reason": "use customjs-guard instead"
+        }
+      ]
+    }
+  }
 }
