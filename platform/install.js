@@ -1084,6 +1084,15 @@ function validateAndResolve(btn, sourceName, variables, history, git) {
       },
     };
   }
+  if (btn.action.type === "openLink" && btn.action.target) {
+    return {
+      ...btn,
+      action: {
+        ...btn.action,
+        target: substituteLenient(btn.action.target, variables),
+      },
+    };
+  }
   if (btn.action.type === "invoke_command" && btn.action.command_id) {
     return btn;  // passthrough; command_id preserved literally for runtime dispatch
   }

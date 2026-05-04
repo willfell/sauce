@@ -17,7 +17,7 @@
     { "name": "boards", "version": "0.1.0", "path": "blueprints/boards" },
     { "name": "daily", "version": "0.1.4", "path": "blueprints/daily" },
     { "name": "meetings", "version": "0.1.2", "path": "blueprints/meetings" },
-    { "name": "project", "version": "1.1.0", "path": "blueprints/project" },
+    { "name": "project", "version": "1.2.1", "path": "blueprints/project" },
     { "name": "to-do", "version": "0.1.2", "path": "blueprints/to-do" }
   ]
 }

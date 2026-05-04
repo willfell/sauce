@@ -2092,6 +2092,85 @@ async function caseR5InvokeCommandPassthrough() {
   }
 }
 
+async function caseR6OpenLinkTargetSubstitution() {
+  console.log("\n--- Case R6: validateAndResolve openLink target substitution ({{module_directory}} resolves) ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseR6-"));
+  try {
+    await scaffoldBlueprintVault(scratch, [
+      {
+        name: "test-fixture-r6",
+        version: "0.1.0",
+        manifest: {
+          name: "test-fixture-r6",
+          version: "0.1.0",
+          kind: "blueprint",
+          module_directory: "projects",
+          files: [],
+          nav_buttons: [
+            {
+              id: "open-projects-index",
+              label: "Projects",
+              icon: "folder",
+              order: 10,
+              action: {
+                type: "openLink",
+                target: "{{module_directory}}/Projects.md",
+              },
+            },
+            {
+              id: "broken-no-target",
+              label: "Broken",
+              icon: "x",
+              order: 11,
+              action: {
+                type: "openLink",
+                // NO target field — should fall through to passthrough (return btn)
+              },
+            },
+          ],
+        },
+      },
+    ]);
+
+    const result = await runHarness(scratch);
+    assertTrue("R6: platform-installed.json was written", result !== null);
+
+    const registry = await readJson(path.join(scratch, "Docs/Meta/nav-buttons-registry.json"));
+    const contribs = registry.contributions["test-fixture-r6"];
+    assertTrue("R6: registry has contributions for test-fixture-r6", Array.isArray(contribs) && contribs.length >= 1);
+
+    const goodContrib = contribs.find((c) => c.id === "open-projects-index");
+    assertTrue("R6: registry contains the openLink button entry", !!goodContrib);
+
+    assertEq("R6: action.type === openLink (preserved)", goodContrib.action.type, "openLink");
+    assertEq(
+      "R6: action.target has {{module_directory}} substituted to beacon/projects",
+      goodContrib.action.target,
+      "beacon/projects/Projects.md"
+    );
+    assertTrue(
+      "R6: action.target does NOT contain literal {{module_directory}}",
+      !goodContrib.action.target.includes("{{module_directory}}")
+    );
+    assertEq("R6: id preserved", goodContrib.id, "open-projects-index");
+    assertEq("R6: label preserved", goodContrib.label, "Projects");
+    assertEq("R6: icon preserved", goodContrib.icon, "folder");
+    assertEq("R6: order preserved", goodContrib.order, 10);
+
+    // Missing-target branch: falls through to bottom `return btn` passthrough.
+    // Entry is NOT rejected by the head check (id/label/action/action.type present).
+    const passthroughContrib = contribs.find((c) => c.id === "broken-no-target");
+    assertTrue("R6: missing-target entry falls through (passthrough; not rejected by head check)", !!passthroughContrib);
+    assertEq("R6: missing-target action.type preserved", passthroughContrib.action.type, "openLink");
+    assertTrue(
+      "R6: missing-target entry has no .target field added by the new branch",
+      passthroughContrib.action.target === undefined
+    );
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
 async function case4BackupOnEdit() {
   console.log("\n--- Case 4: backup-on-edit ---");
   const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-case4-"));
@@ -2153,6 +2232,7 @@ async function case4BackupOnEdit() {
   await caseR3EmptyFolderDatePattern();
   await caseR4MissingFolderPrefix();
   await caseR5InvokeCommandPassthrough();
+  await caseR6OpenLinkTargetSubstitution();
 
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
