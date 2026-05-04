@@ -1,9 +1,9 @@
 {
   "name": "to-do",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "kind": "blueprint",
   "module_directory": "to-do",
-  "description": "Date-routed daily to-do notes feeding SpaceDailyDashboard's tasks panel under beacon/to-do/. v0.1.1: migrated to v0.4.2 split-field nav-button schema.",
+  "description": "Date-routed daily to-do notes feeding SpaceDailyDashboard's tasks panel under beacon/to-do/. v0.1.2: filename pattern <Name>-YYYY-MM-DD (filename_prefix \"ToDo-\") per v0.4.2 platform invariant.",
   "depends_on": [
     { "name": "nav-buttons",    "range": ">=2.2.0" },
     { "name": "customjs-guard", "range": ">=1.0.0" }

@@ -1,9 +1,9 @@
 {
   "name": "meetings",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "kind": "blueprint",
   "module_directory": "meetings",
-  "description": "Hub-centric meeting notes: one Meetings Hub per day at beacon/meetings/hubs/ aggregating individual meeting notes at beacon/meetings/notes/ via inline NewMeetingButton + MeetingsHubCards CustomJS classes. v0.1.1: migrated to v0.4.2 split-field nav-button schema.",
+  "description": "Hub-centric meeting notes: one Meetings Hub per day at beacon/meetings/hubs/YYYY/MM-MMMM/ aggregating individual meeting notes at beacon/meetings/notes/ via inline NewMeetingButton + MeetingsHubCards CustomJS classes. v0.1.2: filename pattern <Name>-YYYY-MM-DD (Meetings-YYYY-MM-DD.md hub; <title>-YYYY-MM-DD.md per-meeting); hub folder date-routed; class regex date-extract.",
   "depends_on": [
     { "name": "nav-buttons",    "range": ">=2.2.0" },
     { "name": "customjs-guard", "range": ">=1.0.0" }
