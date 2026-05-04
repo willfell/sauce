@@ -1086,6 +1086,277 @@ async function caseP4UnknownTypeWarningOnly() {
   }
 }
 
+// --------------------------------------------------------------------------
+// v0.3.0 T1.1: applyCorePluginSettings (C1-C5)
+// --------------------------------------------------------------------------
+//
+// applyCorePluginSettings reads .obsidian/<entry.id>.json and additive-merges
+// the declared settings (top-level shallow merge; nested objects replaced
+// wholesale). Mirrors v0.1.3 helper posture exactly: idempotent skip-write,
+// backup-on-edit, malformed-JSON guard, failure-loud history.
+//
+// Cases C1-C5 use the existing scaffoldVault helper (mechanism shape) for
+// C1-C4 (which don't need the per-blueprint module_directory overlay), and
+// scaffoldBlueprintVault for C5 (which DOES exercise the overlay).
+
+const C1_DAILY_SETTINGS = {
+  folder: "beacon/daily",
+  format: "YYYY/MM-MMMM/YYYY-MM-DD-dddd",
+  template: "Docs/Meta/Templates/Daily Note.md",
+};
+
+async function caseC1IdempotentMerge() {
+  console.log("\n--- Case C1: applyCorePluginSettings idempotent merge on re-run ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseC1-"));
+  try {
+    const manifest = {
+      name: "test-fixture",
+      version: "0.1.0",
+      files: [],
+      core_plugin_settings: [{ id: "test-core-plugin", settings: C1_DAILY_SETTINGS }],
+    };
+    await scaffoldVault(scratch, {
+      templaterData: TEMPLATER_DEFAULT,
+      slashCommanderData: SC_DEFAULT,
+      manifest,
+    });
+    // Pre-seed core plugin file with EXACTLY the merged shape the helper would
+    // produce (so the merge result === existing → skipped_existing).
+    const corePath = path.join(scratch, ".obsidian/test-core-plugin.json");
+    const seedBody = JSON.stringify(C1_DAILY_SETTINGS, null, 2);
+    await fsp.writeFile(corePath, seedBody, "utf8");
+
+    // First run.
+    const first = await runHarness(scratch);
+    assertTrue("C1: platform-installed.json was written (first run)", first !== null);
+    const firstSkipped = (first && first.history || []).filter(
+      (h) => h.event === "info" && h.step === "core_plugin_settings" && h.action === "skipped_existing" && h.plugin_id === "test-core-plugin"
+    );
+    assertEq("C1: first run records one skipped_existing event", firstSkipped.length, 1);
+
+    // Snapshot: file body byte-equal to the pre-seeded body.
+    const bodyAfter1 = await readRaw(corePath);
+    assertEq("C1: core plugin file unchanged after first run", bodyAfter1, seedBody);
+
+    // No backup file because we skipped the write.
+    const backupPath = `${corePath}.beacon-backup`;
+    assertTrue("C1: no <target>.beacon-backup created on skip", !fs.existsSync(backupPath));
+
+    // Second run — bump fixture version + re-read manifest.
+    const fixtureManifest2 = { ...manifest, version: "0.1.1" };
+    await fsp.writeFile(path.join(scratch, "_fake-workshop/platform/manifest.json"), JSON.stringify({
+      workshop_version: "0.0.0-test",
+      mechanisms: [{ name: "test-fixture", version: "0.1.1", path: "mechanisms/test-fixture" }],
+      blueprints: [],
+    }, null, 2), "utf8");
+    await fsp.writeFile(path.join(scratch, "_fake-workshop/platform/mechanisms/test-fixture/manifest.json"), JSON.stringify(fixtureManifest2, null, 2), "utf8");
+    await fsp.writeFile(path.join(scratch, "Docs/Meta/platform-subscription.json"), JSON.stringify({
+      mechanisms: [{ name: "test-fixture", version: "0.1.1" }],
+      blueprints: [],
+    }, null, 2), "utf8");
+
+    const second = await runHarness(scratch);
+    const newOnSecond = (second && second.history || []).slice((first && first.history || []).length);
+    const secondSkipped = newOnSecond.filter(
+      (h) => h.event === "info" && h.step === "core_plugin_settings" && h.action === "skipped_existing" && h.plugin_id === "test-core-plugin"
+    );
+    const secondApplied = newOnSecond.filter(
+      (h) => h.event === "info" && h.step === "core_plugin_settings" && h.action === "applied"
+    );
+    assertEq("C1: second run records one skipped_existing event", secondSkipped.length, 1);
+    assertEq("C1: second run records 0 applied events", secondApplied.length, 0);
+
+    const bodyAfter2 = await readRaw(corePath);
+    assertEq("C1: core plugin file still unchanged after second run", bodyAfter2, seedBody);
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseC2MalformedJson() {
+  console.log("\n--- Case C2: applyCorePluginSettings malformed-JSON guard ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseC2-"));
+  try {
+    const manifest = {
+      name: "test-fixture",
+      version: "0.1.0",
+      files: [],
+      core_plugin_settings: [{ id: "test-core-plugin", settings: C1_DAILY_SETTINGS }],
+    };
+    await scaffoldVault(scratch, {
+      templaterData: TEMPLATER_DEFAULT,
+      slashCommanderData: SC_DEFAULT,
+      manifest,
+    });
+    const corePath = path.join(scratch, ".obsidian/test-core-plugin.json");
+    const malformed = "{not valid json";
+    await fsp.writeFile(corePath, malformed, "utf8");
+
+    const result = await runHarness(scratch);
+    assertTrue("C2: platform-installed.json was written", result !== null);
+
+    const errs = (result && result.history || []).filter(
+      (h) => h.event === "error" && h.step === "core_plugin_settings" && h.plugin_id === "test-core-plugin"
+    );
+    assertTrue("C2: at least one error/core_plugin_settings event recorded", errs.length >= 1, `got ${errs.length}`);
+    if (errs.length >= 1) {
+      assertTrue(
+        "C2: error message mentions malformed JSON",
+        typeof errs[0].message === "string" && /malformed JSON/i.test(errs[0].message),
+        `message was: ${errs[0].message}`
+      );
+    }
+
+    // File must be unchanged byte-for-byte.
+    const bodyAfter = await readRaw(corePath);
+    assertEq("C2: malformed core plugin data.json untouched", bodyAfter, malformed);
+
+    // No backup created — we never wrote, so we never backed up.
+    const backupPath = `${corePath}.beacon-backup`;
+    assertTrue("C2: no <target>.beacon-backup created on malformed-JSON guard", !fs.existsSync(backupPath));
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseC3AdditivePreservesUserKeys() {
+  console.log("\n--- Case C3: applyCorePluginSettings additive merge preserves user keys ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseC3-"));
+  try {
+    const manifest = {
+      name: "test-fixture",
+      version: "0.1.0",
+      files: [],
+      core_plugin_settings: [{ id: "test-core-plugin", settings: C1_DAILY_SETTINGS }],
+    };
+    await scaffoldVault(scratch, {
+      templaterData: TEMPLATER_DEFAULT,
+      slashCommanderData: SC_DEFAULT,
+      manifest,
+    });
+    const corePath = path.join(scratch, ".obsidian/test-core-plugin.json");
+    const seed = { folder: "OldPath", customField: "keepme", format: "old" };
+    const seedBody = JSON.stringify(seed, null, 2);
+    await fsp.writeFile(corePath, seedBody, "utf8");
+
+    const result = await runHarness(scratch);
+    assertTrue("C3: platform-installed.json was written", result !== null);
+
+    const applied = (result && result.history || []).filter(
+      (h) => h.event === "info" && h.step === "core_plugin_settings" && h.action === "applied" && h.plugin_id === "test-core-plugin"
+    );
+    assertEq("C3: exactly one applied event", applied.length, 1);
+
+    const after = await readJson(corePath);
+    assertEq("C3: folder overwritten by manifest", after.folder, "beacon/daily");
+    assertEq("C3: format overwritten by manifest", after.format, "YYYY/MM-MMMM/YYYY-MM-DD-dddd");
+    assertEq("C3: template added (was absent)", after.template, "Docs/Meta/Templates/Daily Note.md");
+    assertEq("C3: customField preserved (user-only key)", after.customField, "keepme");
+    assertEq("C3: top-level keys count is 4", Object.keys(after).length, 4);
+
+    const backupPath = `${corePath}.beacon-backup`;
+    assertTrue("C3: <target>.beacon-backup exists (pre-existing content was backed up)", fs.existsSync(backupPath));
+    if (fs.existsSync(backupPath)) {
+      const backupBody = await readRaw(backupPath);
+      assertEq("C3: <target>.beacon-backup body byte-equal to original pre-seed", backupBody, seedBody);
+    }
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseC4BackupOnEditBytes() {
+  console.log("\n--- Case C4: applyCorePluginSettings backup captures pre-edit content ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseC4-"));
+  try {
+    const manifest = {
+      name: "test-fixture",
+      version: "0.1.0",
+      files: [],
+      core_plugin_settings: [{ id: "test-core-plugin", settings: { folder: "Y" } }],
+    };
+    await scaffoldVault(scratch, {
+      templaterData: TEMPLATER_DEFAULT,
+      slashCommanderData: SC_DEFAULT,
+      manifest,
+    });
+    const corePath = path.join(scratch, ".obsidian/test-core-plugin.json");
+    const seedBody = '{"folder":"X"}';
+    await fsp.writeFile(corePath, seedBody, "utf8");
+
+    const result = await runHarness(scratch);
+    assertTrue("C4: platform-installed.json was written", result !== null);
+
+    const backupPath = `${corePath}.beacon-backup`;
+    assertTrue("C4: <target>.beacon-backup exists", fs.existsSync(backupPath));
+    if (fs.existsSync(backupPath)) {
+      const bakBody = await readRaw(backupPath);
+      assertEq("C4: <target>.beacon-backup byte-equal to pre-seed bytes", bakBody, seedBody);
+    }
+
+    const after = await readJson(corePath);
+    assertEq("C4: live file folder === Y (manifest wins)", after.folder, "Y");
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseC5SubstitutionOnSettings() {
+  console.log("\n--- Case C5: applyCorePluginSettings substitution applied to settings values ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseC5-"));
+  try {
+    await scaffoldBlueprintVault(scratch, [
+      {
+        name: "test-fixture-c5",
+        version: "0.1.0",
+        manifest: {
+          name: "test-fixture-c5",
+          version: "0.1.0",
+          kind: "blueprint",
+          module_directory: "test",
+          files: [],
+          core_plugin_settings: [
+            {
+              id: "test-core-plugin",
+              settings: {
+                folder: "{{module_directory}}",
+                template: "{{templates_path}}/Daily Note.md",
+              },
+            },
+          ],
+        },
+      },
+    ]);
+    // No pre-seed → fresh write path.
+    const result = await runHarness(scratch);
+    assertTrue("C5: platform-installed.json was written", result !== null);
+
+    const corePath = path.join(scratch, ".obsidian/test-core-plugin.json");
+    assertTrue("C5: core plugin data.json was created", fs.existsSync(corePath));
+
+    if (fs.existsSync(corePath)) {
+      const after = await readJson(corePath);
+      assertEq("C5: folder substituted to beacon/test", after.folder, "beacon/test");
+      assertEq("C5: template substituted with templates_path", after.template, "Docs/Meta/Templates/Daily Note.md");
+    }
+
+    const applied = (result && result.history || []).filter(
+      (h) => h.event === "info" && h.step === "core_plugin_settings" && h.action === "applied" && h.plugin_id === "test-core-plugin"
+    );
+    assertEq("C5: exactly one applied event", applied.length, 1);
+    if (applied.length === 1) {
+      const a = applied[0];
+      assertEq("C5: applied event settings_keys === [folder, template]", a.settings_keys, ["folder", "template"]);
+      assertTrue("C5: applied event has git_commit field", "git_commit" in a);
+      assertTrue("C5: applied event has git_tag field", "git_tag" in a);
+      assertTrue("C5: applied event has git_dirty field", "git_dirty" in a);
+      assertTrue("C5: applied event has attempted_at field", typeof a.attempted_at === "string");
+    }
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
 async function case4BackupOnEdit() {
   console.log("\n--- Case 4: backup-on-edit ---");
   const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-case4-"));
@@ -1131,6 +1402,11 @@ async function case4BackupOnEdit() {
   await caseP2PreInstallDeleteAbsentFile();
   await caseP3PreInstallDeleteDirectoryTarget();
   await caseP4UnknownTypeWarningOnly();
+  await caseC1IdempotentMerge();
+  await caseC2MalformedJson();
+  await caseC3AdditivePreservesUserKeys();
+  await caseC4BackupOnEditBytes();
+  await caseC5SubstitutionOnSettings();
 
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);

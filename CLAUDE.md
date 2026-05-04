@@ -53,10 +53,11 @@ Beacon is a real published repo at `git@github-personal:willfell/beacon.git`. Co
 
 Stop and ask the user before any of:
 
-- Modifying anything inside `.obsidian/` of any vault EXCEPT for the two installer-managed paths allowlisted in landmine #12:
+- Modifying anything inside `.obsidian/` of any vault EXCEPT for the three installer-managed paths allowlisted in landmine #12:
   - `.obsidian/plugins/templater-obsidian/data.json`
   - `.obsidian/plugins/slash-commander/data.json`
-  Edits to these two paths must follow landmine #12's safety mechanics (additive-merge-only, backup-on-edit, malformed-JSON guard, failure-loud history).
+  - `.obsidian/daily-notes.json` (added in v0.3.0)
+  Edits to these three paths must follow landmine #12's safety mechanics (additive-merge-only, backup-on-edit, malformed-JSON guard, failure-loud history).
 - Modifying the body of `Docs/Meta/Templater/platformInstall.js` in any consumer (the thin stub is content-static per landmine #13; lockstep change across all consumers + distribution-model bump required).
 - Editing `platform/installer-stub.js` (changes the canonical stub body; cascades to every consumer in the next deployment).
 - Creating a new top-level directory in any vault (in consumers, prefer `beacon/<module>/` for platform-managed content).

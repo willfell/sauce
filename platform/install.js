@@ -540,6 +540,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyExternalPlugins(tp, mech, history, git);
   await applyTemplaterHotkeys(tp, mech, variables, history, git);          // NEW v0.1.3
   await applySlashCommanderBindings(tp, mech, variables, history, git);    // NEW v0.1.3
+  await applyCorePluginSettings(tp, mech, variables, history, git);        // NEW v0.3.0
 
   return true;
 }
@@ -1732,6 +1733,229 @@ async function applySlashCommanderBindings(tp, manifest, variables, history, git
       });
     }
     new Notice(`applySlashCommanderBindings: write failed (${e.message}) for ${manifest.name}`, 8000);
+  }
+}
+
+// applyCorePluginSettings — for each item that declares core_plugin_settings[],
+// read .obsidian/<entry.id>.json and additive-merge the declared settings.
+// Top-level shallow merge: keys in entry.settings overwrite existing top-level
+// keys; nested objects are replaced wholesale; pre-existing keys NOT declared
+// in entry.settings are preserved.
+//
+// Posture (mirrors v0.1.3 applyTemplaterHotkeys / applySlashCommanderBindings):
+//   - Idempotent skip-write: if shallow-merged result === existing structurally,
+//     emit info/skipped_existing event and skip both backup write AND target write.
+//   - Backup-on-edit: when there's pre-existing content to back up, write the
+//     raw pre-edit body to <target>.beacon-backup BEFORE overwriting the live file.
+//     If the target file is absent, create it directly with no backup.
+//   - Malformed-JSON guard: never overwrite a file we can't parse; record an
+//     error and skip — no backup, no live write.
+//   - Failure-loud history: every failure path emits an error event under
+//     step:"core_plugin_settings" with full git fields + attempted_at.
+//   - Substitution: settings values are substituted via substituteLenient using
+//     the per-item variables overlay (so blueprints get {{module_directory}}).
+//     Substitution variable values must be JSON-safe scalars (no embedded `"`,
+//     `\`, or control chars) — round-trip is JSON.stringify → substitute → JSON.parse,
+//     so an unsafe value triggers a parse error and we fail closed (no live write).
+//     TODO(v0.3.x): substitute on the parsed object tree to remove this constraint.
+//
+// Targets Obsidian CORE plugin data files at .obsidian/<id>.json (e.g.,
+// daily-notes, periodic-notes). Distinct from community-plugin data which
+// lives at .obsidian/plugins/<id>/data.json (handled by applyTemplaterHotkeys
+// and applySlashCommanderBindings).
+async function applyCorePluginSettings(tp, manifest, variables, history, git) {
+  if (!manifest || !Array.isArray(manifest.core_plugin_settings) || manifest.core_plugin_settings.length === 0) return;
+  const adapter = tp.app.vault.adapter;
+
+  for (const entry of manifest.core_plugin_settings) {
+    if (!entry || typeof entry.id !== "string" || entry.id.length === 0) {
+      new Notice(`applyCorePluginSettings: ${manifest.name} has invalid entry.id; skipped`, 6000);
+      if (history) {
+        history.push({
+          event: "warning",
+          step: "core_plugin_settings",
+          name: manifest.name,
+          message: "invalid_id",
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      continue;
+    }
+    const target = `.obsidian/${entry.id}.json`;
+
+    // Substitute placeholders in settings values via substituteLenient.
+    // Round-trip via JSON to apply substitution to every string value at any
+    // nesting level (per locked decision: nested objects are replaced wholesale,
+    // but their string values are still substituted on the way through).
+    let substituted;
+    try {
+      const sourceJson = JSON.stringify(entry.settings || {});
+      substituted = JSON.parse(substituteLenient(sourceJson, variables));
+    } catch (e) {
+      new Notice(`applyCorePluginSettings: ${manifest.name} substitution failed for ${entry.id} — ${e.message}`, 8000);
+      if (history) {
+        history.push({
+          event: "error",
+          step: "core_plugin_settings",
+          name: manifest.name,
+          plugin_id: entry.id,
+          message: `substitution failed: ${e.message}`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      continue;
+    }
+
+    let raw = "";
+    let existing = {};
+    if (await adapter.exists(target)) {
+      try {
+        raw = await adapter.read(target);
+      } catch (e) {
+        new Notice(`applyCorePluginSettings: cannot read ${target} (${e.message}); skipping for ${manifest.name}`, 8000);
+        if (history) {
+          history.push({
+            event: "error",
+            step: "core_plugin_settings",
+            name: manifest.name,
+            plugin_id: entry.id,
+            message: `read failed for ${target}: ${e.message}`,
+            git_commit: git.commit,
+            git_tag: git.tag,
+            git_dirty: git.dirty,
+            attempted_at: new Date().toISOString(),
+          });
+        }
+        continue;
+      }
+
+      try {
+        existing = JSON.parse(raw);
+      } catch (e) {
+        new Notice(`applyCorePluginSettings: ${target} malformed JSON (${e.message}); skipping for ${manifest.name}`, 8000);
+        if (history) {
+          history.push({
+            event: "error",
+            step: "core_plugin_settings",
+            name: manifest.name,
+            plugin_id: entry.id,
+            message: `${target} malformed JSON: ${e.message}`,
+            git_commit: git.commit,
+            git_tag: git.tag,
+            git_dirty: git.dirty,
+            attempted_at: new Date().toISOString(),
+          });
+        }
+        continue;
+      }
+
+      if (existing === null || typeof existing !== "object" || Array.isArray(existing)) {
+        new Notice(`applyCorePluginSettings: ${target} parsed but is not a JSON object; skipping for ${manifest.name}`, 8000);
+        if (history) {
+          history.push({
+            event: "error",
+            step: "core_plugin_settings",
+            name: manifest.name,
+            plugin_id: entry.id,
+            message: `${target} parsed but is not a JSON object`,
+            git_commit: git.commit,
+            git_tag: git.tag,
+            git_dirty: git.dirty,
+            attempted_at: new Date().toISOString(),
+          });
+        }
+        continue;
+      }
+    }
+
+    // Shallow merge: substituted (manifest) wins on key collisions.
+    const merged = Object.assign({}, existing, substituted);
+    const mergedSerialized = JSON.stringify(merged, null, 2);
+
+    // Idempotent skip-write: structural equality between merged and existing.
+    if (raw && JSON.stringify(existing, null, 2) === mergedSerialized) {
+      if (history) {
+        history.push({
+          event: "info",
+          step: "core_plugin_settings",
+          name: manifest.name,
+          plugin_id: entry.id,
+          action: "skipped_existing",
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      continue;
+    }
+
+    // Backup-on-edit: only when there is pre-existing content to back up.
+    let backupPath = null;
+    if (raw) {
+      backupPath = `${target}.beacon-backup`;
+      try {
+        await adapter.write(backupPath, raw);
+      } catch (e) {
+        new Notice(`applyCorePluginSettings: backup write failed (${e.message}); aborting modification for ${manifest.name}`, 8000);
+        if (history) {
+          history.push({
+            event: "error",
+            step: "core_plugin_settings",
+            name: manifest.name,
+            plugin_id: entry.id,
+            message: `backup write failed: ${e.message}`,
+            git_commit: git.commit,
+            git_tag: git.tag,
+            git_dirty: git.dirty,
+            attempted_at: new Date().toISOString(),
+          });
+        }
+        continue;
+      }
+    }
+
+    try {
+      await adapter.write(target, mergedSerialized);
+    } catch (e) {
+      new Notice(`applyCorePluginSettings: write failed (${e.message}) for ${manifest.name}`, 8000);
+      if (history) {
+        history.push({
+          event: "error",
+          step: "core_plugin_settings",
+          name: manifest.name,
+          plugin_id: entry.id,
+          message: `write failed: ${e.message}`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      continue;
+    }
+
+    if (history) {
+      history.push({
+        event: "info",
+        step: "core_plugin_settings",
+        name: manifest.name,
+        plugin_id: entry.id,
+        action: "applied",
+        settings_keys: Object.keys(substituted),
+        backup_path: backupPath,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
   }
 }
 

@@ -369,6 +369,16 @@ async function main() {
     console.log(`  ${h.path}  ${prior}  (bak: ${h.bak_path})`);
   }
 
+  // v0.3.0 T1.2: surface core_plugin_settings applied events separately.
+  const corePluginWrites = newHistory.filter(
+    (h) => h.event === "info" && h.step === "core_plugin_settings" && h.action === "applied"
+  );
+  console.log(`\n--- Core-plugin settings writes (${corePluginWrites.length}) ---`);
+  for (const h of corePluginWrites) {
+    const keys = Array.isArray(h.settings_keys) ? h.settings_keys.join(",") : "";
+    console.log(`  ${h.plugin_id}  keys: [${keys}]  (bak: ${h.backup_path || "—"})`);
+  }
+
   if (flags.dryRun) {
     console.log(`\n--- Dry-run write log (${writeLog.length} would-be writes) ---`);
     for (const w of writeLog) console.log(`  ${w.path}  (${w.bytes}B)`);

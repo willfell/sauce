@@ -137,7 +137,8 @@ Steps the canonical installer performs:
    h. Apply `external_plugins[]` warnings (warn-only — surfaces missing community-plugin deps).
    i. Apply `templater_hotkeys[]` registrations to `.obsidian/plugins/templater-obsidian/data.json` (additive merge, backup-on-edit; see landmine #12).
    j. Apply `slash_commander_bindings[]` registrations to `.obsidian/plugins/slash-commander/data.json` (additive merge, backup-on-edit; see landmine #12).
-   k. Append to `installed` + `history`.
+   k. Apply `core_plugin_settings[]` registrations to `.obsidian/<id>.json` (added v0.3.0; additive shallow merge, backup-on-edit; see landmine #12).
+   l. Append to `installed` + `history`.
 7. Write `Docs/Meta/platform-installed.json`.
 8. Show "platformInstall: complete." Notice.
 
@@ -147,6 +148,7 @@ Steps the canonical installer performs:
 > - Both fields cross-validate against the manifest's `files[]` (or each other) — a binding referencing a template the manifest doesn't ship surfaces a warning + skip.
 > - `module_directory` (added v0.2.0; **REQUIRED on every blueprint**, mechanisms exempt) — bare directory name (e.g., `"boards"`). Installer derives the full namespaced path `beacon/<bare-name>` for the per-blueprint `{{module_directory}}` substitution variable. Two blueprints declaring the same value collide and the second is skipped (first-wins). See landmine #11.
 > - `pre_install[]` (added v0.2.0) — list of pre-files-loop actions to run for stale-file cleanup or migration. Currently one action type: `{ type: "delete", path: "<dest-relative-with-substitution>", reason: "<why>" }`. Path goes through `substituteStrict`. Existing target file is read, sha256-hashed, backed up to `<path>.pre_install_bak`, then removed via `adapter.remove`. Absent target is a no-op (idempotent). Directory target surfaces a warning and skips. Unknown action types surface a warning and skip. One-shot per blueprint version per consumer (gated by the existing version-skip mechanic in step 6.b).
+> - `core_plugin_settings[]` (added v0.3.0) — list of `{ id, settings }` entries the installer additive-shallow-merges into Obsidian core-plugin data files at `.obsidian/<id>.json`. Top-level keys in `settings` overwrite existing top-level keys; nested objects are replaced wholesale; pre-existing keys not declared by the manifest are preserved. Settings string values pass through `substituteLenient` using the per-item variables overlay (so blueprints get `{{module_directory}}` resolved). Idempotent skip-write when merged === existing; backup-on-edit to `<target>.beacon-backup` only when there is pre-existing content to back up. Honors landmine #12's four safety mechanics. First use: daily blueprint v0.1.0 writes `.obsidian/daily-notes.json` (`folder` / `format` / `template`).
 
 Cross-vault file reads use `require("fs").promises` (Node API available in Templater desktop). Mobile would need a different path; not supported yet.
 

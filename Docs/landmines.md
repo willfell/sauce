@@ -102,26 +102,27 @@ Restore-discipline is critical — partial restore leaves the workshop dogfood g
 
 **Fix (long-term, deferred):** consider adding `--force-reinstall <name>` to `install.js` for v0.1.2+ so test mechanics can skip the version-skip guard for a named item without touching three files. Not blocking; not free.
 
-### 12. `.obsidian/plugin-data` ban-lift allowlist — only two paths, only via the installer, only with the four safety mechanics
+### 12. `.obsidian/plugin-data` ban-lift allowlist — only three paths, only via the installer, only with the four safety mechanics
 
-The `.obsidian/` ask-before-acting gate is lifted for exactly two files:
+The `.obsidian/` ask-before-acting gate is lifted for exactly three files:
 - `.obsidian/plugins/templater-obsidian/data.json`
 - `.obsidian/plugins/slash-commander/data.json`
+- `.obsidian/daily-notes.json` (added in v0.3.0)
 
-Both touched **only** by the installer, only via `applyTemplaterHotkeys` / `applySlashCommanderBindings`, and only under all four of:
+All three touched **only** by the installer, only via `applyTemplaterHotkeys` / `applySlashCommanderBindings` / `applyCorePluginSettings`, and only under all four of:
 
 1. **Additive merge.** Never strip, modify, or reorder pre-existing entries; only append new entries the manifest declares.
 2. **Backup on edit.** Write `<target>.beacon-backup` before any modification (one-deep, overwrite-on-edit, single backup per target).
 3. **Malformed-JSON guard (C4 parity).** If the file is unreadable, unparseable, or has unexpected top-level shape (e.g., `enabled_templates_hotkeys` not an array, `bindings` not an array), the installer logs a warning history entry + surfaces a Notice + returns. NEVER overwrites a malformed file.
-4. **Failure-loud history.** Every applied / skipped / warning / error path writes a history entry under `step: templater_hotkeys` or `step: slash_commander_bindings` with full context (manifest name, binding name, template path, message, attempted_at).
+4. **Failure-loud history.** Every applied / skipped / warning / error path writes a history entry under `step: templater_hotkeys`, `step: slash_commander_bindings`, or `step: core_plugin_settings` with full context (manifest name, binding name / plugin id, template path / settings keys, message, attempted_at).
 
-**Why the allowlist exists.** Templater's per-template `Insert <name>` commands are only registered when `enabled_templates_hotkeys[]` is populated; Slash Commander's slash bindings are persisted in its `data.json:bindings[]`. Both must be populated before the consumer's first reload after install, OR the user has to do manual configuration the platform can otherwise fully automate. The two paths are the entire surface needed to deliver `/validate /audit /new-project` automatically.
+**Why the allowlist exists.** Templater's per-template `Insert <name>` commands are only registered when `enabled_templates_hotkeys[]` is populated; Slash Commander's slash bindings are persisted in its `data.json:bindings[]`; the core Daily Notes plugin reads `folder` / `format` / `template` from `.obsidian/daily-notes.json`. All three must be populated by the installer, OR the user has to do manual configuration the platform can otherwise fully automate. The three paths are the entire surface needed to deliver `/validate /audit /new-project` automatically AND ship the daily blueprint with its path convention pre-wired.
 
-**Why nothing else.** Editing other `.obsidian/` files (workspace.json, hotkeys.json, other plugins' data.json) cuts across user-customizable territory the platform has no claim on. The allowlist is exhaustive: any future cycle proposing a third path requires (a) the same four safety mechanics, (b) updating CLAUDE.md + this landmine, (c) explicit user approval.
+**Why nothing else.** Editing other `.obsidian/` files (workspace.json, hotkeys.json, other plugins' data.json) cuts across user-customizable territory the platform has no claim on. The allowlist is exhaustive: any future cycle proposing a fourth path requires (a) the same four safety mechanics, (b) updating CLAUDE.md + this landmine, (c) explicit user approval.
 
 **Recovery.** If a `.beacon-backup` file diverges from the live data.json in a way the user wants to revert, copy the backup over the live file + reload Obsidian. Backups are not auto-rotated; manual cleanup is the consumer's call.
 
-Surfaced 2026-05-04 during v0.1.x close (T2.1-discovery §8 + T2.6 deferral); codified in v0.1.3.
+Surfaced 2026-05-04 during v0.1.x close (T2.1-discovery §8 + T2.6 deferral); codified in v0.1.3. Allowlist expanded from 2 → 3 paths in v0.3.0 to add `.obsidian/daily-notes.json` for the daily blueprint.
 
 ### 13. Bootstrap stub is content-static; never re-edit
 
