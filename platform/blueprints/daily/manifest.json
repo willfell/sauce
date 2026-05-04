@@ -1,9 +1,9 @@
 {
   "name": "daily",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "kind": "blueprint",
   "module_directory": "daily",
-  "description": "Date-organized daily notes via Obsidian's core Daily Notes plugin + Calendar; ports accuris's Timestamps pattern under beacon/daily/.",
+  "description": "Date-organized daily notes via Obsidian's core Daily Notes plugin + Calendar; ports accuris's Timestamps pattern under beacon/daily/. v0.1.1: SpaceDailyDashboard's meetingsPath updated from beacon/meetings to beacon/meetings/notes for the v0.3.2 hub-centric meetings layout.",
   "depends_on": [
     { "name": "nav-buttons",    "range": ">=2.0.0" },
     { "name": "customjs-guard", "range": ">=1.0.0" }

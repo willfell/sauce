@@ -18,7 +18,7 @@ class SpaceDailyDashboard {
     const today = dateMatch ? dateMatch[1] : moment().format("YYYY-MM-DD");
 
     const config = {
-      meetingsPath: "beacon/meetings",
+      meetingsPath: "beacon/meetings/notes",
       todoPaths: ["beacon/to-do"]
     };
 

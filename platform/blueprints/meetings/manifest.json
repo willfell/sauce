@@ -1,0 +1,43 @@
+{
+  "name": "meetings",
+  "version": "0.1.0",
+  "kind": "blueprint",
+  "module_directory": "meetings",
+  "description": "Hub-centric meeting notes: one Meetings Hub per day at beacon/meetings/hubs/ aggregating individual meeting notes at beacon/meetings/notes/ via inline NewMeetingButton + MeetingsHubCards CustomJS classes.",
+  "depends_on": [
+    { "name": "nav-buttons",    "range": ">=2.1.0" },
+    { "name": "customjs-guard", "range": ">=1.0.0" }
+  ],
+  "customjs_classes": ["MeetingsHubCards", "NewMeetingButton"],
+  "files": [
+    { "source": "templates/Meeting.md",         "dest": "{{templates_path}}/Meeting.md" },
+    { "source": "templates/Meeting Hub.md",     "dest": "{{templates_path}}/Meeting Hub.md" },
+    { "source": "helpers/meetings-hub-cards.js", "dest": "{{scripts_path}}/meetings/meetings-hub-cards.js" },
+    { "source": "helpers/new-meeting-button.js", "dest": "{{scripts_path}}/meetings/new-meeting-button.js" }
+  ],
+  "nav_buttons": [
+    {
+      "id": "meetings-hub",
+      "label": "Meetings",
+      "icon": "meetings",
+      "order": 120,
+      "action": {
+        "type": "runTemplaterTemplate",
+        "template_source": "Meeting Hub.md",
+        "folder": "{{module_directory}}/[hubs]",
+        "filename": "YYYY-MM-DD-[Meetings]"
+      }
+    }
+  ],
+  "templater_folder_templates": [
+    { "folder": "{{module_directory}}/notes", "template": "{{templates_path}}/Meeting.md" },
+    { "folder": "{{module_directory}}/hubs",  "template": "{{templates_path}}/Meeting Hub.md" }
+  ],
+  "post_install": [
+    {
+      "type": "notice",
+      "message": "Meetings blueprint installed at beacon/meetings/. REQUIRED: enable the Templater community plugin if not already enabled. Click 'Meetings' to open today's meetings hub at beacon/meetings/hubs/YYYY-MM-DD-Meetings.md. From the hub, click 'New Meeting' to create individual meeting notes at beacon/meetings/notes/YYYY/MM-MMMM/YYYY-MM-DD <title>.md (you'll be prompted for title and attendees). Hub renders today's meetings as cards with status badges; meetings also appear in the daily dashboard's Today's Meetings panel."
+    }
+  ],
+  "rule_fragments": []
+}
