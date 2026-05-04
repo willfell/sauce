@@ -643,25 +643,6 @@ function substituteLenient(text, variables) {
   });
 }
 
-// substituteForMomentFormat — like substituteLenient, but wraps each substituted
-// value in moment.format literal-escape brackets ([...]) so the resolved string
-// can be passed to moment().format() without literal characters being interpreted
-// as format tokens. Without this, e.g. "beacon/to-do" → moment-formats to
-// "b0pmcon/to-0th" because b/e/a/c/o/n/d/o overlap with moment format tokens.
-// Used by validateAndResolve for runTemplaterTemplate's folder + filename fields.
-// Constraint: variable values must not contain literal "[" or "]" (would break
-// the moment bracket-balancing). Current Beacon variables (module_directory,
-// templates_path, etc.) never contain brackets, so this is a documented limit
-// rather than an enforced check.
-function substituteForMomentFormat(text, variables) {
-  return text.replace(/\{\{(\w+)\}\}/g, (_, key) => {
-    if (variables[key] === undefined || variables[key] === null) {
-      return `{{${key}}}`;
-    }
-    return `[${variables[key]}]`;
-  });
-}
-
 function resolveWorkshopPath(app, relative) {
   const base = app.vault.adapter.basePath || app.vault.adapter.getBasePath?.();
   if (!base) return relative;
@@ -1074,14 +1055,31 @@ function validateAndResolve(btn, sourceName, variables, history, git) {
   }
   if (btn.action.type === "runTemplaterTemplate" && btn.action.template_source) {
     const templatesPath = variables.templates_path || "Docs/Meta/Templates";
+    if (typeof btn.action.folder_prefix !== "string" || btn.action.folder_prefix.length === 0) {
+      new Notice(`nav-buttons: invalid runTemplaterTemplate in ${sourceName} (missing required folder_prefix)`, 8000);
+      if (history) {
+        history.push({
+          event: "warning",
+          step: "nav_buttons",
+          name: sourceName,
+          reason: `entry ${btn.id || "<no-id>"} missing folder_prefix`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      return null;
+    }
     return {
       ...btn,
       action: {
         ...btn.action,
-        // folder + filename remain moment.format strings, resolved at click-time
-        // by the renderer. install-time substituteLenient handles {{...}} placeholders.
-        folder:   substituteForMomentFormat(btn.action.folder || "",   variables),
-        filename: substituteForMomentFormat(btn.action.filename || "", variables),
+        folder_prefix:         substituteLenient(btn.action.folder_prefix, variables),
+        folder_date_pattern:   typeof btn.action.folder_date_pattern === "string" ? btn.action.folder_date_pattern : "",
+        filename_prefix:       substituteLenient(btn.action.filename_prefix || "", variables),
+        filename_date_pattern: typeof btn.action.filename_date_pattern === "string" ? btn.action.filename_date_pattern : "",
+        filename_suffix:       substituteLenient(btn.action.filename_suffix || "", variables),
         template_source: `${templatesPath}/${btn.action.template_source}`,
       },
     };

@@ -212,12 +212,21 @@ class SpaceNavButtons {
         return;
       }
 
-      const folder = (action.folder || "").trim()
-        ? window.moment().format(action.folder)
-        : "";
-      const filenameNoExt = (action.filename || "").trim()
-        ? window.moment().format(action.filename)
-        : "Untitled";
+      // v0.4.2 split-field schema. Literal text never reaches moment.format().
+      const folderPrefix = action.folder_prefix || "";
+      const folderDatePattern = action.folder_date_pattern || "";
+      const filenamePrefix = action.filename_prefix || "";
+      const filenameDatePattern = action.filename_date_pattern || "";
+      const filenameSuffix = action.filename_suffix || "";
+
+      const folder = folderDatePattern
+        ? `${folderPrefix}/${window.moment().format(folderDatePattern)}`
+        : folderPrefix;
+      const filenameComposed =
+        filenamePrefix
+        + (filenameDatePattern ? window.moment().format(filenameDatePattern) : "")
+        + filenameSuffix;
+      const filenameNoExt = filenameComposed.trim() ? filenameComposed : "Untitled";
       const target = folder ? `${folder}/${filenameNoExt}.md` : `${filenameNoExt}.md`;
 
       const existingTarget = app.vault.getAbstractFileByPath(target);

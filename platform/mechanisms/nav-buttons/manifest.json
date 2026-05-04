@@ -1,7 +1,7 @@
 {
   "name": "nav-buttons",
-  "version": "2.1.0",
-  "description": "Thin renderer over Docs/Meta/nav-buttons-registry.json. Each blueprint/mechanism declares nav_buttons[]; installer aggregates. v2.1.0 adds the runTemplaterTemplate action type for date-routed runtime-creation blueprints (renderer-resolves moment.format folder + filename -> templater.create_new_note_from_template).",
+  "version": "2.2.0",
+  "description": "Thin renderer over Docs/Meta/nav-buttons-registry.json. Each blueprint/mechanism declares nav_buttons[]; installer aggregates. v2.2.0 BREAKING: runTemplaterTemplate action shape changed — single moment-format folder/filename fields replaced with split-field schema (folder_prefix + folder_date_pattern + filename_prefix + filename_date_pattern + filename_suffix). Literal text never reaches moment.format(); bracket-escape gap architecturally impossible.",
   "depends_on": [
     { "name": "customjs-guard", "range": ">=1.0.0" }
   ],

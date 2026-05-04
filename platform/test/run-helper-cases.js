@@ -1796,7 +1796,7 @@ async function caseFT5SubstitutionApplied() {
 }
 
 async function caseR1ValidateAndResolveRunTemplaterTemplate() {
-  console.log("\n--- Case R1: validateAndResolve runTemplaterTemplate branch (template_source rewrite + substituteLenient) ---");
+  console.log("\n--- Case R1: validateAndResolve runTemplaterTemplate branch (v0.4.2 split-field schema) ---");
   const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseR1-"));
   try {
     await scaffoldBlueprintVault(scratch, [
@@ -1818,8 +1818,10 @@ async function caseR1ValidateAndResolveRunTemplaterTemplate() {
               action: {
                 type: "runTemplaterTemplate",
                 template_source: "Today To-Do.md",
-                folder: "{{module_directory}}/YYYY/MM-MMMM",
-                filename: "YYYY-MM-DD-[ToDo]",
+                folder_prefix: "{{module_directory}}",
+                folder_date_pattern: "YYYY/MM-MMMM",
+                filename_date_pattern: "YYYY-MM-DD",
+                filename_suffix: "-ToDo",
               },
             },
           ],
@@ -1845,25 +1847,195 @@ async function caseR1ValidateAndResolveRunTemplaterTemplate() {
       const contrib = registry.contributions["test-fixture-r1"][0];
       assertEq("R1: action.type === runTemplaterTemplate (preserved)", contrib.action.type, "runTemplaterTemplate");
       assertEq(
-        "R1: action.template_source rewritten under templates_path (no sourceName prefix)",
+        "R1: action.template_source rewritten under templates_path",
         contrib.action.template_source,
         "Docs/Meta/Templates/Today To-Do.md"
       );
       assertEq(
-        "R1: action.folder substituteForMomentFormat applied — {{module_directory}} resolved AND bracket-wrapped so moment.format treats it as literal; YYYY/MM-MMMM preserved",
-        contrib.action.folder,
-        "[beacon/to-do]/YYYY/MM-MMMM"
+        "R1: action.folder_prefix substituteLenient applied — {{module_directory}} resolved to literal beacon/to-do (NO bracket-wrapping)",
+        contrib.action.folder_prefix,
+        "beacon/to-do"
       );
       assertEq(
-        "R1: action.filename preserved verbatim (no {{...}} placeholder; brackets retained)",
-        contrib.action.filename,
-        "YYYY-MM-DD-[ToDo]"
+        "R1: action.folder_date_pattern preserved verbatim",
+        contrib.action.folder_date_pattern,
+        "YYYY/MM-MMMM"
+      );
+      assertEq(
+        "R1: action.filename_prefix defaulted to empty string",
+        contrib.action.filename_prefix,
+        ""
+      );
+      assertEq(
+        "R1: action.filename_date_pattern preserved verbatim",
+        contrib.action.filename_date_pattern,
+        "YYYY-MM-DD"
+      );
+      assertEq(
+        "R1: action.filename_suffix preserved verbatim (no substitution; literal)",
+        contrib.action.filename_suffix,
+        "-ToDo"
       );
       assertEq("R1: id preserved", contrib.id, "todo-today");
       assertEq("R1: label preserved", contrib.label, "+ Today's To-Do");
       assertEq("R1: icon preserved", contrib.icon, "todo");
       assertEq("R1: order preserved", contrib.order, 110);
     }
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseR2FilenameDefaults() {
+  console.log("\n--- Case R2: validateAndResolve runTemplaterTemplate filename defaults (only date_pattern declared) ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseR2-"));
+  try {
+    await scaffoldBlueprintVault(scratch, [
+      {
+        name: "test-fixture-r2",
+        version: "0.1.0",
+        manifest: {
+          name: "test-fixture-r2",
+          version: "0.1.0",
+          kind: "blueprint",
+          module_directory: "minimal",
+          files: [],
+          nav_buttons: [
+            {
+              id: "min-button",
+              label: "Min",
+              icon: "min",
+              order: 100,
+              action: {
+                type: "runTemplaterTemplate",
+                template_source: "Minimal.md",
+                folder_prefix: "{{module_directory}}",
+                filename_date_pattern: "YYYY-MM-DD",
+              },
+            },
+          ],
+        },
+      },
+    ]);
+
+    const result = await runHarness(scratch);
+    assertTrue("R2: platform-installed.json was written", result !== null);
+
+    const registry = await readJson(path.join(scratch, "Docs/Meta/nav-buttons-registry.json"));
+    const contrib = registry.contributions["test-fixture-r2"][0];
+
+    assertEq("R2: folder_prefix substituted", contrib.action.folder_prefix, "beacon/minimal");
+    assertEq("R2: folder_date_pattern defaulted to empty string", contrib.action.folder_date_pattern, "");
+    assertEq("R2: filename_prefix defaulted to empty string", contrib.action.filename_prefix, "");
+    assertEq("R2: filename_date_pattern preserved", contrib.action.filename_date_pattern, "YYYY-MM-DD");
+    assertEq("R2: filename_suffix defaulted to empty string", contrib.action.filename_suffix, "");
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseR3EmptyFolderDatePattern() {
+  console.log("\n--- Case R3: validateAndResolve runTemplaterTemplate empty folder_date_pattern (meetings-shape) ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseR3-"));
+  try {
+    await scaffoldBlueprintVault(scratch, [
+      {
+        name: "test-fixture-r3",
+        version: "0.1.0",
+        manifest: {
+          name: "test-fixture-r3",
+          version: "0.1.0",
+          kind: "blueprint",
+          module_directory: "meetings",
+          files: [],
+          nav_buttons: [
+            {
+              id: "meetings-hub",
+              label: "Meetings",
+              icon: "meetings",
+              order: 120,
+              action: {
+                type: "runTemplaterTemplate",
+                template_source: "Meeting Hub.md",
+                folder_prefix: "{{module_directory}}/hubs",
+                folder_date_pattern: "",
+                filename_date_pattern: "YYYY-MM-DD",
+                filename_suffix: "-Meetings",
+              },
+            },
+          ],
+        },
+      },
+    ]);
+
+    const result = await runHarness(scratch);
+    const registry = await readJson(path.join(scratch, "Docs/Meta/nav-buttons-registry.json"));
+    const contrib = registry.contributions["test-fixture-r3"][0];
+
+    assertEq(
+      "R3: folder_prefix substituted — literal 'hubs' segment NOT bracket-wrapped (architecturally safe)",
+      contrib.action.folder_prefix,
+      "beacon/meetings/hubs"
+    );
+    assertEq("R3: folder_date_pattern preserved as empty string", contrib.action.folder_date_pattern, "");
+    assertEq("R3: filename_date_pattern preserved", contrib.action.filename_date_pattern, "YYYY-MM-DD");
+    assertEq("R3: filename_suffix preserved", contrib.action.filename_suffix, "-Meetings");
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseR4MissingFolderPrefix() {
+  console.log("\n--- Case R4: validateAndResolve runTemplaterTemplate missing required folder_prefix (failure path) ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseR4-"));
+  try {
+    await scaffoldBlueprintVault(scratch, [
+      {
+        name: "test-fixture-r4",
+        version: "0.1.0",
+        manifest: {
+          name: "test-fixture-r4",
+          version: "0.1.0",
+          kind: "blueprint",
+          module_directory: "broken",
+          files: [],
+          nav_buttons: [
+            {
+              id: "broken-button",
+              label: "Broken",
+              icon: "x",
+              order: 999,
+              action: {
+                type: "runTemplaterTemplate",
+                template_source: "Broken.md",
+                filename_date_pattern: "YYYY-MM-DD",
+              },
+            },
+          ],
+        },
+      },
+    ]);
+
+    const result = await runHarness(scratch);
+    assertTrue("R4: platform-installed.json was written (install proceeded)", result !== null);
+
+    const registryPath = path.join(scratch, "Docs/Meta/nav-buttons-registry.json");
+    if (fs.existsSync(registryPath)) {
+      const registry = await readJson(registryPath);
+      const contribs = (registry.contributions || {})["test-fixture-r4"];
+      assertTrue(
+        "R4: registry has no valid contribution for test-fixture-r4 (entry rejected)",
+        !contribs || contribs.length === 0
+      );
+    }
+
+    const navButtonWarnings = (result && result.history || []).filter(
+      (h) => h.event === "warning" && h.step === "nav_buttons" && h.name === "test-fixture-r4"
+    );
+    assertTrue(
+      "R4: history records at least one warning under step: nav_buttons for the rejected entry",
+      navButtonWarnings.length >= 1
+    );
   } finally {
     await fsp.rm(scratch, { recursive: true, force: true });
   }
@@ -1926,6 +2098,9 @@ async function case4BackupOnEdit() {
   await caseFT4BackupOnEdit();
   await caseFT5SubstitutionApplied();
   await caseR1ValidateAndResolveRunTemplaterTemplate();
+  await caseR2FilenameDefaults();
+  await caseR3EmptyFolderDatePattern();
+  await caseR4MissingFolderPrefix();
 
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
