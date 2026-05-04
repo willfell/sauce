@@ -1,0 +1,36 @@
+{
+  "name": "daily",
+  "version": "0.1.0",
+  "kind": "blueprint",
+  "module_directory": "daily",
+  "description": "Date-organized daily notes via Obsidian's core Daily Notes plugin + Calendar; ports accuris's Timestamps pattern under beacon/daily/.",
+  "depends_on": [
+    { "name": "nav-buttons",    "range": ">=2.0.0" },
+    { "name": "customjs-guard", "range": ">=1.0.0" }
+  ],
+  "core_plugin_settings": [
+    {
+      "id": "daily-notes",
+      "settings": {
+        "folder": "{{module_directory}}",
+        "format": "YYYY/MM-MMMM/YYYY-MM-DD-dddd",
+        "template": "{{templates_path}}/Daily Note.md"
+      }
+    }
+  ],
+  "customjs_classes": [
+    "SpaceDailyDashboard"
+  ],
+  "files": [
+    { "source": "content/daily-template.md",        "dest": "{{templates_path}}/Daily Note.md" },
+    { "source": "helpers/space-daily-dashboard.js", "dest": "{{scripts_path}}/daily/space-daily-dashboard.js" }
+  ],
+  "nav_buttons": [],
+  "post_install": [
+    {
+      "type": "notice",
+      "message": "Daily blueprint installed at beacon/daily/. REQUIRED: enable the core Daily Notes plugin (Settings → Core plugins → Daily notes) AND optionally the Calendar community plugin (Settings → Community plugins → Browse → Calendar). Run command 'Daily notes: Open today's daily note' (or click a date in Calendar) to create your first daily note."
+    }
+  ],
+  "rule_fragments": []
+}

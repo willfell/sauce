@@ -600,6 +600,153 @@ async function caseM5MechanismDoesNotReceiveModuleDirectory() {
 }
 
 // --------------------------------------------------------------------------
+// v0.3.0: module_directory mkdir mechanic (M6)
+// --------------------------------------------------------------------------
+//
+// installItem must explicitly create `beacon/<module_directory>/` for every
+// blueprint, regardless of whether files[] writes anything under that path.
+// This codifies landmine #11 at the installer level (previously the directory
+// was created only as a side-effect of files[] writes there). Daily blueprint
+// surfaced this gap — its files all land under Docs/Meta/* but the Daily
+// Notes plugin requires `beacon/daily/` to pre-exist.
+//
+// M6.A: fresh install of a blueprint whose files[] does NOT write under
+//       {{module_directory}}/... → directory still exists; history records
+//       info/module_directory, action: "created".
+// M6.B: re-run with bumped version → directory still exists; history records
+//       info/module_directory, action: "already_exists".
+
+async function caseM6ModuleDirectoryEnsured() {
+  console.log("\n--- Case M6: blueprint module_directory created at install time even when no files[] write under it ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseM6-"));
+  try {
+    // Fixture: blueprint declares module_directory "test-mod" but its only
+    // file lands under Docs/Meta/Scripts (NOT under {{module_directory}}/...).
+    // After install, beacon/test-mod/ must still exist as a directory.
+    const blueprint = {
+      name: "test-fixture-m6",
+      version: "0.1.0",
+      manifest: {
+        name: "test-fixture-m6",
+        version: "0.1.0",
+        kind: "blueprint",
+        module_directory: "test-mod",
+        files: [
+          { source: "scripts/foo.js", dest: "{{scripts_path}}/m6/foo.js" }
+        ]
+      },
+      sourceFiles: [
+        { relPath: "scripts/foo.js", body: "// m6 fixture\n" }
+      ]
+    };
+
+    await scaffoldBlueprintVault(scratch, [blueprint]);
+
+    // ---- M6.A: fresh install ----
+    const first = await runHarness(scratch);
+    assertTrue("M6.A: platform-installed.json was written", first !== null);
+
+    const moduleDirAbs = path.join(scratch, "beacon/test-mod");
+    assertTrue(
+      "M6.A: beacon/test-mod/ exists on disk after fresh install",
+      fs.existsSync(moduleDirAbs)
+    );
+    if (fs.existsSync(moduleDirAbs)) {
+      assertTrue(
+        "M6.A: beacon/test-mod/ is a directory (not a file)",
+        fs.statSync(moduleDirAbs).isDirectory()
+      );
+    }
+
+    const createdEvents = (first && first.history || []).filter(
+      (h) =>
+        h.event === "info" &&
+        h.step === "module_directory" &&
+        h.name === "test-fixture-m6" &&
+        h.action === "created"
+    );
+    assertEq("M6.A: exactly one info/module_directory created event", createdEvents.length, 1);
+
+    if (createdEvents.length === 1) {
+      const c = createdEvents[0];
+      assertEq("M6.A: created event path === beacon/test-mod", c.path, "beacon/test-mod");
+      assertTrue("M6.A: created event has git_commit field", "git_commit" in c);
+      assertTrue("M6.A: created event has git_tag field", "git_tag" in c);
+      assertTrue("M6.A: created event has git_dirty field", "git_dirty" in c);
+      assertTrue("M6.A: created event has attempted_at field", typeof c.attempted_at === "string");
+    }
+
+    // No error events for module_directory step.
+    const errs = (first && first.history || []).filter(
+      (h) => h.event === "error" && h.step === "module_directory"
+    );
+    assertEq("M6.A: NO error/module_directory events", errs.length, 0);
+
+    // ---- M6.B: re-run with bumped fixture version ----
+    const blueprint2Manifest = { ...blueprint.manifest, version: "0.2.0" };
+    await fsp.writeFile(
+      path.join(scratch, "_fake-workshop/platform/blueprints/test-fixture-m6/manifest.json"),
+      JSON.stringify(blueprint2Manifest, null, 2),
+      "utf8"
+    );
+    await fsp.writeFile(
+      path.join(scratch, "_fake-workshop/platform/manifest.json"),
+      JSON.stringify({
+        workshop_version: "0.0.0-test",
+        mechanisms: [],
+        blueprints: [{ name: "test-fixture-m6", version: "0.2.0", path: "blueprints/test-fixture-m6" }]
+      }, null, 2),
+      "utf8"
+    );
+    await fsp.writeFile(
+      path.join(scratch, "Docs/Meta/platform-subscription.json"),
+      JSON.stringify({
+        mechanisms: [],
+        blueprints: [{ name: "test-fixture-m6", version: "0.2.0" }]
+      }, null, 2),
+      "utf8"
+    );
+
+    const second = await runHarness(scratch);
+    assertTrue("M6.B: platform-installed.json was written on second run", second !== null);
+
+    assertTrue(
+      "M6.B: beacon/test-mod/ still exists on disk after re-run",
+      fs.existsSync(moduleDirAbs) && fs.statSync(moduleDirAbs).isDirectory()
+    );
+
+    const newOnSecond = (second && second.history || []).slice((first && first.history || []).length);
+    const alreadyExists = newOnSecond.filter(
+      (h) =>
+        h.event === "info" &&
+        h.step === "module_directory" &&
+        h.name === "test-fixture-m6" &&
+        h.action === "already_exists"
+    );
+    assertEq("M6.B: exactly one info/module_directory already_exists event on re-run", alreadyExists.length, 1);
+
+    if (alreadyExists.length === 1) {
+      const a = alreadyExists[0];
+      assertEq("M6.B: already_exists event path === beacon/test-mod", a.path, "beacon/test-mod");
+      assertTrue("M6.B: already_exists event has git_commit field", "git_commit" in a);
+      assertTrue("M6.B: already_exists event has attempted_at field", typeof a.attempted_at === "string");
+    }
+
+    const newCreated = newOnSecond.filter(
+      (h) => h.event === "info" && h.step === "module_directory" && h.action === "created"
+    );
+    assertEq("M6.B: NO new created events on re-run (directory already existed)", newCreated.length, 0);
+
+    const newErrs = newOnSecond.filter(
+      (h) => h.event === "error" && h.step === "module_directory"
+    );
+    assertEq("M6.B: NO error/module_directory events on re-run", newErrs.length, 0);
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+// --------------------------------------------------------------------------
 // v0.2.0 T1.3: Option B content overwrite mechanic for files[] (O1-O5)
 // --------------------------------------------------------------------------
 //
@@ -1393,6 +1540,7 @@ async function case4BackupOnEdit() {
   await caseM3ModuleDirectorySubstitutes();
   await caseM4NoLeakBetweenBlueprints();
   await caseM5MechanismDoesNotReceiveModuleDirectory();
+  await caseM6ModuleDirectoryEnsured();
   await caseO1IdenticalContentSkipsOverwrite();
   await caseO2DifferingContentBackupAndReplace();
   await caseO3ZeroByteDestNoBackup();

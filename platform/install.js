@@ -395,6 +395,77 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   // out of the way before T1.3's Option B mechanic compares prior bytes.
   await applyPreInstall(tp, mech, variables, history, git);
 
+  // v0.3.0: ensure the blueprint's module_directory exists at install time.
+  // Codifies landmine #11 — every blueprint owns beacon/<module_directory>/ —
+  // at the installer level. Historically the directory was created as a
+  // side-effect of files[] writes there; blueprints whose files all land
+  // under Docs/Meta/* (e.g., daily — Daily Notes plugin requires
+  // beacon/daily/ to pre-exist) need an explicit mkdir. Mechanisms exempt:
+  // variables.module_directory is unset for non-blueprint installs per the
+  // v0.2.0 T1.2 per-blueprint overlay logic; this guard is just truthiness.
+  // Ordering rationale: AFTER applyPreInstall (so a pre_install delete that
+  // cleared a stale beacon/<old-name>/ directory has run before mkdir creates
+  // the new one) and BEFORE the files[] loop (so any files[] dest under
+  // {{module_directory}}/sub/... finds the parent already present). Three
+  // outcomes — created / already_exists / error — recorded with full git
+  // fields + attempted_at for parity with pre_install_delete events.
+  if (variables && variables.module_directory) {
+    const moduleDir = variables.module_directory;
+    let mkdirAction = null;
+    let mkdirError = null;
+    // Check existence FIRST to distinguish created vs already_exists
+    // deterministically across adapters. Obsidian's vault adapter throws when
+    // mkdir hits an existing path; Node's fs.promises.mkdir({recursive:true})
+    // is silently idempotent. Pre-checking unifies both behaviors and keeps
+    // the harness assertions on the already_exists event meaningful.
+    const preExisted = await adapter.exists(moduleDir);
+    if (preExisted) {
+      mkdirAction = "already_exists";
+    } else {
+      try {
+        await adapter.mkdir(moduleDir);
+        mkdirAction = "created";
+      } catch (e) {
+        // Race or permission — re-check existence; if present, treat as
+        // already_exists (someone else created it between our check and call);
+        // otherwise record the underlying error.
+        if (await adapter.exists(moduleDir)) {
+          mkdirAction = "already_exists";
+        } else {
+          mkdirError = e && e.message ? e.message : String(e);
+        }
+      }
+    }
+    if (history) {
+      if (mkdirError) {
+        new Notice(`installItem: ${mech.name} mkdir ${moduleDir} failed — ${mkdirError}`, 8000);
+        history.push({
+          event: "error",
+          step: "module_directory",
+          name: mech.name,
+          path: moduleDir,
+          message: `mkdir failed: ${mkdirError}`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      } else {
+        history.push({
+          event: "info",
+          step: "module_directory",
+          name: mech.name,
+          path: moduleDir,
+          action: mkdirAction,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    }
+  }
+
   for (const f of mech.files || []) {
     const sourceAbs = `${workshopPath}/platform/${target.path}/${f.source}`;
 
