@@ -643,6 +643,25 @@ function substituteLenient(text, variables) {
   });
 }
 
+// substituteForMomentFormat — like substituteLenient, but wraps each substituted
+// value in moment.format literal-escape brackets ([...]) so the resolved string
+// can be passed to moment().format() without literal characters being interpreted
+// as format tokens. Without this, e.g. "beacon/to-do" → moment-formats to
+// "b0pmcon/to-0th" because b/e/a/c/o/n/d/o overlap with moment format tokens.
+// Used by validateAndResolve for runTemplaterTemplate's folder + filename fields.
+// Constraint: variable values must not contain literal "[" or "]" (would break
+// the moment bracket-balancing). Current Beacon variables (module_directory,
+// templates_path, etc.) never contain brackets, so this is a documented limit
+// rather than an enforced check.
+function substituteForMomentFormat(text, variables) {
+  return text.replace(/\{\{(\w+)\}\}/g, (_, key) => {
+    if (variables[key] === undefined || variables[key] === null) {
+      return `{{${key}}}`;
+    }
+    return `[${variables[key]}]`;
+  });
+}
+
 function resolveWorkshopPath(app, relative) {
   const base = app.vault.adapter.basePath || app.vault.adapter.getBasePath?.();
   if (!base) return relative;
@@ -1061,8 +1080,8 @@ function validateAndResolve(btn, sourceName, variables, history, git) {
         ...btn.action,
         // folder + filename remain moment.format strings, resolved at click-time
         // by the renderer. install-time substituteLenient handles {{...}} placeholders.
-        folder:   substituteLenient(btn.action.folder || "",   variables),
-        filename: substituteLenient(btn.action.filename || "", variables),
+        folder:   substituteForMomentFormat(btn.action.folder || "",   variables),
+        filename: substituteForMomentFormat(btn.action.filename || "", variables),
         template_source: `${templatesPath}/${btn.action.template_source}`,
       },
     };

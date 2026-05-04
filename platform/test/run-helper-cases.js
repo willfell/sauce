@@ -1850,9 +1850,9 @@ async function caseR1ValidateAndResolveRunTemplaterTemplate() {
         "Docs/Meta/Templates/Today To-Do.md"
       );
       assertEq(
-        "R1: action.folder substituteLenient applied — {{module_directory}} resolved; YYYY/MM-MMMM preserved",
+        "R1: action.folder substituteForMomentFormat applied — {{module_directory}} resolved AND bracket-wrapped so moment.format treats it as literal; YYYY/MM-MMMM preserved",
         contrib.action.folder,
-        "beacon/to-do/YYYY/MM-MMMM"
+        "[beacon/to-do]/YYYY/MM-MMMM"
       );
       assertEq(
         "R1: action.filename preserved verbatim (no {{...}} placeholder; brackets retained)",
