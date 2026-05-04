@@ -523,6 +523,13 @@ class ProjectNavButtons {
         if (previousRoot) previousRoot.remove();
         const root = dv.container.createEl("div", { cls: "pnb-root" });
 
+        const topDivider = root.createEl("hr");
+        topDivider.style.cssText = "border: none; border-top: 1px solid var(--background-modifier-border); margin: 8px 0 6px 0;";
+
+        const sectionLabel = root.createEl("div");
+        sectionLabel.textContent = "Project";
+        sectionLabel.style.cssText = "font-size: 0.72em; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;";
+
         const container = root.createEl("div");
         container.style.cssText = `
             display: flex;
