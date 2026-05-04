@@ -1,6 +1,6 @@
 {
   "name": "project",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "kind": "blueprint",
   "module_directory": "projects",
   "description": "Per-project atlas + structure + Kanban board with hierarchical tasks (task hub + notes + task-board + folder-style sub-task cards), workstream-tagged cards, and All-Projects hub. v1.0.0 BREAKING: replaces v0.3.0 projects-legacy stopgap; module_directory 'projects-legacy' → 'projects'; drops slash-command surface in favor of New Project nav-button on the Projects.md hub; pre_install[delete] retires legacy boards/To-Do-Board.md.",
@@ -11,7 +11,8 @@
   "customjs_classes": [
     "ProjectNavButtons",
     "ProjectWorkstreams",
-    "ProjectWorkstreamManager"
+    "ProjectWorkstreamManager",
+    "ProjectsHubCards"
   ],
   "pre_install": [
     { "type": "delete", "path": "boards/To-Do-Board.md" }
@@ -27,6 +28,7 @@
     { "source": "helpers/project-nav-buttons.js",        "dest": "{{scripts_path}}/project/project-nav-buttons.js" },
     { "source": "helpers/project-workstream-manager.js", "dest": "{{scripts_path}}/project/project-workstream-manager.js" },
     { "source": "helpers/project-workstreams.js",        "dest": "{{scripts_path}}/project/project-workstreams.js" },
+    { "source": "helpers/projects-hub-cards.js",         "dest": "{{scripts_path}}/project/projects-hub-cards.js" },
     { "source": "content/Projects.md",                   "dest": "{{module_directory}}/Projects.md" }
   ],
   "nav_buttons": [],
