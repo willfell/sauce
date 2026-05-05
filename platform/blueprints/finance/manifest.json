@@ -1,6 +1,6 @@
 {
   "name": "finance",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "kind": "blueprint",
   "module_directory": "finance",
   "description": "Finance blueprint covering Budgets + Paychecks + Invoices under beacon/finance/. Top hub Finance.md aggregates pending items from all three sub-areas. Budgets/Paychecks are flat dated entities; Invoices use a per-month folder ecosystem mirroring trips/<slug>/. Status pills (Planning/In Progress/Done) derived from frontmatter via shared FinanceStatus helper. Three overlay-dialog New buttons each tailored to their entity inputs.",
@@ -18,7 +18,10 @@
     "NewBudgetButton",
     "NewPaycheckButton",
     "NewInvoiceButton",
-    "InvoiceNavButtons"
+    "InvoiceNavButtons",
+    "FinanceFrontmatter",
+    "BudgetNavButtons",
+    "PaycheckNavButtons"
   ],
   "files": [
     { "source": "helpers/finance-status.js",       "dest": "{{scripts_path}}/finance/finance-status.js" },
@@ -30,6 +33,9 @@
     { "source": "helpers/new-paycheck-button.js",  "dest": "{{scripts_path}}/finance/new-paycheck-button.js" },
     { "source": "helpers/new-invoice-button.js",   "dest": "{{scripts_path}}/finance/new-invoice-button.js" },
     { "source": "helpers/invoice-nav-buttons.js",  "dest": "{{scripts_path}}/finance/invoice-nav-buttons.js" },
+    { "source": "helpers/finance-frontmatter.js",  "dest": "{{scripts_path}}/finance/finance-frontmatter.js" },
+    { "source": "helpers/budget-nav-buttons.js",   "dest": "{{scripts_path}}/finance/budget-nav-buttons.js" },
+    { "source": "helpers/paycheck-nav-buttons.js", "dest": "{{scripts_path}}/finance/paycheck-nav-buttons.js" },
 
     { "source": "content/Finance.md",              "dest": "{{module_directory}}/Finance.md" },
     { "source": "content/Budgets.md",              "dest": "{{module_directory}}/budgets/Budgets.md" },

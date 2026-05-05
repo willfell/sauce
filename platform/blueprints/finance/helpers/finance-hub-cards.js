@@ -20,7 +20,7 @@ class FinanceHubCards {
 
         // ── Row 1: area-link buttons ─────────────────────────────────────
         const areaRow = root.createEl("div");
-        areaRow.style.cssText = "display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0 8px 0;";
+        areaRow.style.cssText = "display: flex; gap: 12px; flex-wrap: wrap; margin: 16px 0 12px 0;";
         const areas = [
             { label: "Budgets",   target: "beacon/finance/budgets/Budgets.md" },
             { label: "Paychecks", target: "beacon/finance/paychecks/Paychecks.md" },
@@ -28,14 +28,14 @@ class FinanceHubCards {
         ];
         for (const a of areas) {
             const btn = areaRow.createEl("button");
-            btn.textContent = a.label;
-            btn.style.cssText = "cursor: pointer; padding: 8px 16px; border-radius: 6px; font-size: 0.9em; font-weight: 500; border: 1px solid var(--background-modifier-border); background: var(--background-secondary); color: var(--text-normal);";
+            btn.innerHTML = `<span>Open ${a.label}</span><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>`;
+            btn.style.cssText = "cursor: pointer; padding: 10px 18px; border-radius: 8px; font-size: 0.92em; font-weight: 500; border: 1px solid var(--background-modifier-border); background: var(--background-secondary); color: var(--text-normal); min-height: 44px; display: inline-flex; align-items: center; gap: 6px;";
             btn.onclick = () => app.workspace.openLinkText(a.target, "");
         }
 
         // ── Row 2: action buttons (delegated to NewXButton helpers) ──────
         const actionRow = root.createEl("div");
-        actionRow.style.cssText = "display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px;";
+        actionRow.style.cssText = "display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px;";
         const actionShim = { container: actionRow };
         await customJS.NewBudgetButton.render(actionShim);
         await customJS.NewPaycheckButton.render(actionShim);
