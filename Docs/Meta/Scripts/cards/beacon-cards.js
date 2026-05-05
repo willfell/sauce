@@ -103,9 +103,10 @@ class BeaconCards {
 
     _renderCard(parent, page, ctx) {
         const card = parent.createEl("div");
-        card.style.cssText = "background: var(--background-secondary); border: 1px solid var(--background-modifier-border); border-radius: 8px; padding: 12px 16px; cursor: pointer; transition: all 0.2s ease; display: flex; flex-direction: column; gap: 6px; box-sizing: border-box; min-width: 0;";
-        card.onmouseenter = () => { card.style.transform = "translateY(-2px)"; card.style.boxShadow = "0 4px 12px rgba(0,0,0,0.15)"; card.style.borderColor = "var(--interactive-accent)"; };
-        card.onmouseleave = () => { card.style.transform = "none"; card.style.boxShadow = "none"; card.style.borderColor = "var(--background-modifier-border)"; };
+        const restingShadow = "0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04)";
+        card.style.cssText = `background: var(--background-secondary); border: 1px solid var(--background-modifier-border); border-radius: 10px; padding: 14px 16px; cursor: pointer; transition: all 0.18s ease; display: flex; flex-direction: column; gap: 6px; box-sizing: border-box; min-width: 0; min-height: 56px; box-shadow: ${restingShadow}; justify-content: center;`;
+        card.onmouseenter = () => { card.style.transform = "translateY(-2px)"; card.style.boxShadow = "0 6px 16px rgba(0,0,0,0.18)"; card.style.borderColor = "var(--interactive-accent)"; card.style.background = "var(--background-secondary-alt, var(--background-secondary))"; };
+        card.onmouseleave = () => { card.style.transform = "none"; card.style.boxShadow = restingShadow; card.style.borderColor = "var(--background-modifier-border)"; card.style.background = "var(--background-secondary)"; };
         card.onclick = (ev) => {
             if (ctx.onClick) { ctx.onClick(page, ev); return; }
             const t = ctx.targetFn(page);

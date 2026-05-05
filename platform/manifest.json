@@ -12,7 +12,7 @@
     { "name": "validator", "version": "0.1.1", "path": "mechanisms/validator" },
     { "name": "audit", "version": "0.1.1", "path": "mechanisms/audit" },
     { "name": "nav-buttons", "version": "2.3.0", "path": "mechanisms/nav-buttons" },
-    { "name": "cards", "version": "0.2.0", "path": "mechanisms/cards" }
+    { "name": "cards", "version": "0.2.1", "path": "mechanisms/cards" }
   ],
   "blueprints": [
     { "name": "boards", "version": "0.1.0", "path": "blueprints/boards" },
