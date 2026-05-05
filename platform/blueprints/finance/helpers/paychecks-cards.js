@@ -22,7 +22,12 @@ class PaychecksCards {
             title: p => `Paycheck — ${customJS.FinanceStatus.formatDate(p.pay_period_start, "YYYY-MM-DD") || p.file.name}`,
             subtitle: p => {
                 const exp = Array.isArray(p.expenses) ? p.expenses : [];
-                const paid = exp.filter(e => e && e.paid === true).length;
+                const isPaid = (e) => {
+                    if (!e) return false;
+                    const v = e.paid;
+                    return v === true || (typeof v === "string" && v.toLowerCase() === "true");
+                };
+                const paid = exp.filter(isPaid).length;
                 const amt = Number(p.paycheck_amount || 0);
                 const startStr = customJS.FinanceStatus.formatDate(p.pay_period_start, "YYYY-MM-DD");
                 const endStr   = customJS.FinanceStatus.formatDate(p.pay_period_end,   "YYYY-MM-DD");

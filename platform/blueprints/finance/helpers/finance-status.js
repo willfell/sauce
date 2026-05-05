@@ -48,7 +48,14 @@ class FinanceStatus {
         if (type === "paycheck") {
             const start = this._toMoment(page.pay_period_start);
             const expenses = Array.isArray(page.expenses) ? page.expenses : [];
-            const allPaid = expenses.length > 0 && expenses.every(e => e && e.paid === true);
+            const isPaid = (e) => {
+                if (!e) return false;
+                const v = e.paid;
+                if (v === true) return true;
+                if (typeof v === "string" && v.toLowerCase() === "true") return true;
+                return false;
+            };
+            const allPaid = expenses.length > 0 && expenses.every(isPaid);
             if (allPaid) return { label: "Done", tone: "success" };
             if (start && start.isValid() && !today.isBefore(start, "day")) {
                 return { label: "In Progress", tone: "warn" };
