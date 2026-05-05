@@ -22,8 +22,8 @@
     },
     {
       "name": "cards",
-      "version": "0.1.1",
-      "installed_at": "2026-05-05T00:41:49.282Z"
+      "version": "0.2.0",
+      "installed_at": "2026-05-05T01:47:17.294Z"
     }
   ],
   "blueprints": [],
@@ -281,6 +281,56 @@
       "version": "0.1.1",
       "installed_at": "2026-05-05T00:41:49.282Z",
       "git_commit": "fd7d941dec27cefe931b2e8c7158f220c5fe89d0",
+      "git_tag": null,
+      "git_dirty": true
+    },
+    {
+      "event": "skip",
+      "name": "cards",
+      "reason": "subscription pins cards@0.1.1 but workshop has 0.2.0",
+      "git_commit": "e1e01a82b147275d5ece1b28313445a1d4e106d1",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-05T01:46:58.784Z"
+    },
+    {
+      "event": "skip",
+      "name": "cards",
+      "reason": "subscription pins cards@0.1.1 but workshop has 0.2.0",
+      "git_commit": "e1e01a82b147275d5ece1b28313445a1d4e106d1",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-05T01:46:58.873Z"
+    },
+    {
+      "event": "skip",
+      "name": "cards",
+      "reason": "subscription pins cards@0.1.1 but workshop has 0.2.0",
+      "git_commit": "e1e01a82b147275d5ece1b28313445a1d4e106d1",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-05T01:47:06.193Z"
+    },
+    {
+      "event": "replace",
+      "step": "file_overwrite",
+      "name": "cards",
+      "dest": "Docs/Meta/Scripts/cards/beacon-cards.js",
+      "prior_sha": "96a9f3e175b9f9e7028bfff10b8caa686c7dad6fa12bff068138da01920c766a",
+      "new_sha": "4b1d4288635438982efa8dbd6ed3c341042c96741ce7ed41580b03de8a59429b",
+      "bak_path": "Docs/Meta/Scripts/cards/beacon-cards.js.bak",
+      "git_commit": "e1e01a82b147275d5ece1b28313445a1d4e106d1",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-05T01:47:17.293Z"
+    },
+    {
+      "event": "install",
+      "kind": "mechanism",
+      "name": "cards",
+      "version": "0.2.0",
+      "installed_at": "2026-05-05T01:47:17.294Z",
+      "git_commit": "e1e01a82b147275d5ece1b28313445a1d4e106d1",
       "git_tag": null,
       "git_dirty": true
     }
