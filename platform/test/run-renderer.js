@@ -29,11 +29,14 @@
  *   BC7   success-tone          badges[].tone === "success" renders green (#16a34a) chip
  *   DA1   active-file-with-date  dv.current() basename matches /(\d{4}-\d{2}-\d{2})/ → helper returns extracted ISO
  *   DA2   active-file-without-date  dv.current() basename has no date → helper falls back to today (window.moment stub)
+ *   FF1   budget-nav-in-path         BudgetNavButtons on Budget atlas path → 2 buttons (active hidden)
+ *   FF2   budget-nav-out-of-path     BudgetNavButtons on non-budget path → renders nothing
+ *   FF3   hub-area-row-chevron       FinanceHubCards area-row buttons render with chevron SVG + "Open " label
  *
  * Usage:
  *   node platform/test/run-renderer.js [--vault <path>] [test-selector]
  *   test-selector:
- *     all (default), empty, malformed, unknown-action, lazy-scaffold, barebones-one-button, beacon-cards, date-aware
+ *     all (default), empty, malformed, unknown-action, lazy-scaffold, barebones-one-button, beacon-cards, date-aware, finance
  *   exit 0 on all selected pass; 1 otherwise
  */
 
@@ -229,6 +232,35 @@ function loadRendererClass(app, Notice) {
 function loadBeaconCardsClass(app) {
   const fn = new Function('app', `${BEACON_CARDS_SRC}\nreturn BeaconCards;`);
   return fn(app);
+}
+
+function makeFinanceCustomJsStub() {
+  const noop = { render: async () => {} };
+  return {
+    NewBudgetButton: noop,
+    NewPaycheckButton: noop,
+    NewInvoiceButton: noop,
+    BudgetsCards: noop,
+    PaychecksCards: noop,
+    InvoicesCards: noop,
+    FinanceFrontmatter: { update: async () => {}, read: () => null, isTruthy: (v) => v === true || (typeof v === 'string' && v.toLowerCase() === 'true') },
+  };
+}
+
+function loadFinanceClass(className, app) {
+  const filename = className === 'BudgetNavButtons' ? 'budget-nav-buttons.js'
+    : className === 'PaycheckNavButtons' ? 'paycheck-nav-buttons.js'
+    : className === 'FinanceHubCards' ? 'finance-hub-cards.js'
+    : className === 'BudgetCategoriesEditor' ? 'budget-categories-editor.js'
+    : className === 'PaycheckExpensesEditor' ? 'paycheck-expenses-editor.js'
+    : className === 'InvoiceTimeLogEditor' ? 'invoice-time-log-editor.js'
+    : className === 'InvoiceControls' ? 'invoice-controls.js'
+    : null;
+  if (!filename) throw new Error(`loadFinanceClass: unknown class ${className}`);
+  const filepath = path.join(WORKSHOP, 'platform', 'blueprints', 'finance', 'helpers', filename);
+  const src = fs.readFileSync(filepath, 'utf8');
+  const fn = new Function('app', 'customJS', 'Notice', `${src}\nreturn ${className};`);
+  return fn(app, makeFinanceCustomJsStub(), FakeNotice);
 }
 
 // ── Tree helpers ─────────────────────────────────────────────────────────
@@ -793,6 +825,50 @@ async function testDA2ActiveFileWithoutDate() {
   }
 }
 
+async function testFF1BudgetNavInPath() {
+  console.log('\n=== FF1 — BudgetNavButtons in-path renders 2 buttons (active hidden) ===');
+  const app = makeApp();
+  const Cls = loadFinanceClass('BudgetNavButtons', app);
+  const dv = makeDvWithCurrent({ file: { name: 'Budget-2026-05', path: 'beacon/finance/budgets/2026-05/Budget-2026-05.md' } });
+  const sn = new Cls();
+  await sn.render(dv);
+  const root = findClass(dv.container, 'bnb-root');
+  const buttonCount = root ? countButtons(root) : 0;
+  console.log(`  bnb-root present: ${!!root} ; button count: ${buttonCount}`);
+  const pass = !!root && buttonCount === 2;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
+async function testFF2BudgetNavOutOfPath() {
+  console.log('\n=== FF2 — BudgetNavButtons out-of-path renders nothing ===');
+  const app = makeApp();
+  const Cls = loadFinanceClass('BudgetNavButtons', app);
+  const dv = makeDvWithCurrent({ file: { name: 'SomeAtlas', path: 'beacon/projects/SomeAtlas.md' } });
+  const sn = new Cls();
+  await sn.render(dv);
+  const root = findClass(dv.container, 'bnb-root');
+  console.log(`  bnb-root present (should be false): ${!!root}`);
+  const pass = !root;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
+async function testFF3HubAreaRowChevron() {
+  console.log('\n=== FF3 — FinanceHubCards area-row buttons have chevron SVG + Open label ===');
+  const app = makeApp();
+  const Cls = loadFinanceClass('FinanceHubCards', app);
+  const dv = makeDv();
+  const sn = new Cls();
+  await sn.render(dv);
+  const allButtons = collectButtons(dv.container);
+  const chevronButtons = allButtons.filter(b => typeof b.innerHTML === 'string' && b.innerHTML.includes('<svg') && b.innerHTML.includes('Open '));
+  console.log(`  area-row buttons with chevron + 'Open ' label: ${chevronButtons.length}`);
+  const pass = chevronButtons.length === 3;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
 // ── Main ─────────────────────────────────────────────────────────────────
 (async () => {
   const which = ARGS.selector;
@@ -817,6 +893,11 @@ async function testDA2ActiveFileWithoutDate() {
     if (which === 'date-aware' || which === 'all') {
       results.push(['DA1 active-file-with-date', await testDA1ActiveFileWithDate()]);
       results.push(['DA2 active-file-without-date', await testDA2ActiveFileWithoutDate()]);
+    }
+    if (which === 'finance' || which === 'all') {
+      results.push(['FF1 budget-nav-in-path', await testFF1BudgetNavInPath()]);
+      results.push(['FF2 budget-nav-out-of-path', await testFF2BudgetNavOutOfPath()]);
+      results.push(['FF3 hub-area-row-chevron', await testFF3HubAreaRowChevron()]);
     }
     if (which === 'barebones-one-button' || which === 'all') {
       const isWorkshop = VAULT === WORKSHOP;
