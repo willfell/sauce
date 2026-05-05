@@ -21,17 +21,6 @@ await dv.view("Docs/Meta/Views/customjs-guard", { class: "TripNavButtons" });
 
 ---
 
-# {{NAME}}
-
-**Dates:** {{START_DATE}} — {{END_DATE}}
-**Location:** {{LOCATION}}
-
----
-
-## Trip Details
-
-- [[Flights]] — Flight info
-- [[Stay]] — Lodging details
-- [[Packing List]] — What to bring
-- [[To Do]] — Pre-trip tasks
-- [[Notes]] — Free-form notes
+```dataviewjs
+await dv.view("Docs/Meta/Views/customjs-guard", { class: "TripSectionsCards" });
+```

@@ -1,6 +1,6 @@
 {
   "name": "trips",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "kind": "blueprint",
   "module_directory": "trips",
   "description": "Per-trip ecosystem under beacon/trips/<slug>/. Each trip is a flat folder with an atlas note + 5 baseline sections (Flights, Stay, Packing List, To Do, Notes). Hub at beacon/trips/Trips.md lists trips as BeaconCards row-layout cards sorted upcoming-first. 'New Trip' button scaffolds the directory tree from a name + dates + location dialog. Per-trip nav buttons auto-discover sibling sections.",
@@ -9,7 +9,7 @@
     { "name": "customjs-guard", "range": ">=1.0.0" },
     { "name": "cards",          "range": ">=0.1.1" }
   ],
-  "customjs_classes": ["TripsHubCards", "TripNavButtons"],
+  "customjs_classes": ["TripsHubCards", "TripNavButtons", "TripSectionsCards"],
   "files": [
     { "source": "templates/Trip Atlas.md",         "dest": "{{templates_path}}/Template, Trip Atlas.md" },
     { "source": "templates/Trip Flights.md",       "dest": "{{templates_path}}/Template, Trip Flights.md" },
@@ -19,6 +19,7 @@
     { "source": "templates/Trip Notes.md",         "dest": "{{templates_path}}/Template, Trip Notes.md" },
     { "source": "helpers/trips-hub-cards.js",      "dest": "{{scripts_path}}/trips/trips-hub-cards.js" },
     { "source": "helpers/trip-nav-buttons.js",     "dest": "{{scripts_path}}/trips/trip-nav-buttons.js" },
+    { "source": "helpers/trip-sections-cards.js",  "dest": "{{scripts_path}}/trips/trip-sections-cards.js" },
     { "source": "content/Trips.md",                "dest": "{{module_directory}}/Trips.md" }
   ],
   "nav_buttons": [

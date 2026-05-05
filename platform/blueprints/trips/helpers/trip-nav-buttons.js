@@ -50,12 +50,9 @@ class TripNavButtons {
         const folderObj = app.vault.getAbstractFileByPath(ctx.tripDir);
         if (!folderObj || !folderObj.children) return;
 
-        const siblings = folderObj.children
-            .filter(f => f.extension === "md")
-            .sort((a, b) => a.name.localeCompare(b.name));
+        const siblings = folderObj.children.filter(f => f.extension === "md");
         if (siblings.length === 0) return;
 
-        // Identify atlas: first sibling whose frontmatter has type === "trip".
         let atlasFile = null;
         for (const f of siblings) {
             const cache = app.metadataCache.getFileCache(f);
@@ -66,17 +63,27 @@ class TripNavButtons {
         }
 
         const icons = this._icons();
-        const buttons = [];
-        if (atlasFile && atlasFile.path !== currentPath) {
-            buttons.push({ label: atlasFile.basename, icon: icons.trip, path: atlasFile.path });
-        }
+        const DEFAULT_ORDER = ["Flights", "Stay", "Packing List", "To Do", "Notes"];
+        const sectionIconFor = (name) => {
+            const map = {
+                "Flights": icons.flights,
+                "Stay": icons.stay,
+                "Packing List": icons.packing,
+                "To Do": icons.todo,
+                "Notes": icons.notes
+            };
+            return map[name] || icons.section;
+        };
+
+        const defaults = [];
+        const additional = [];
         for (const f of siblings) {
             if (f === atlasFile) continue;
-            if (f.path === currentPath) continue;
-            buttons.push({ label: f.basename, icon: icons.section, path: f.path });
+            if (DEFAULT_ORDER.includes(f.basename)) defaults.push(f);
+            else additional.push(f);
         }
-
-        if (buttons.length === 0) return;
+        defaults.sort((a, b) => DEFAULT_ORDER.indexOf(a.basename) - DEFAULT_ORDER.indexOf(b.basename));
+        additional.sort((a, b) => a.name.localeCompare(b.name));
 
         const topDivider = root.createEl("hr");
         topDivider.style.cssText = "border: none; border-top: 1px solid var(--background-modifier-border); margin: 8px 0 6px 0;";
@@ -85,27 +92,49 @@ class TripNavButtons {
         sectionLabel.textContent = "Trip";
         sectionLabel.style.cssText = "font-size: 0.72em; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;";
 
-        const container = root.createEl("div");
-        container.style.cssText = "display: flex; flex-wrap: nowrap; gap: 6px; margin-bottom: 4px; overflow-x: auto;";
+        const buildRow = (buttons, opts) => {
+            opts = opts || {};
+            if (buttons.length === 0) return;
+            const row = root.createEl("div");
+            row.style.cssText = "display: flex; flex-wrap: nowrap; gap: 6px; margin-bottom: 6px; overflow-x: auto;";
+            const padding = opts.fullWidth ? "9px 16px" : "6px 14px";
+            const fontSize = opts.fullWidth ? "0.9em" : "0.82em";
+            const fontWeight = opts.fullWidth ? "600" : "500";
+            const btnStyle = `cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: ${padding}; border-radius: 6px; border: 1px solid var(--background-modifier-border); background: var(--background-primary); color: var(--text-muted); font-size: ${fontSize}; font-weight: ${fontWeight}; font-family: inherit; letter-spacing: 0.01em; transition: all 0.15s ease; flex: 1; min-width: 0; white-space: nowrap;`;
+            for (const btn of buttons) {
+                const el = row.createEl("button");
+                el.innerHTML = btn.icon + `<span>${btn.label}</span>`;
+                el.style.cssText = btnStyle;
+                el.onmouseenter = () => {
+                    el.style.background = "var(--interactive-accent)";
+                    el.style.color = "var(--text-on-accent)";
+                    el.style.borderColor = "var(--interactive-accent)";
+                };
+                el.onmouseleave = () => {
+                    el.style.background = "var(--background-primary)";
+                    el.style.color = "var(--text-muted)";
+                    el.style.borderColor = "var(--background-modifier-border)";
+                };
+                el.onclick = () => app.workspace.openLinkText(btn.path, "");
+            }
+        };
 
-        const btnStyle = `cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 6px 14px; border-radius: 6px; border: 1px solid var(--background-modifier-border); background: var(--background-primary); color: var(--text-muted); font-size: 0.82em; font-weight: 500; font-family: inherit; letter-spacing: 0.01em; transition: all 0.15s ease; flex: 1; min-width: 0; white-space: nowrap;`;
-
-        for (const btn of buttons) {
-            const el = container.createEl("button");
-            el.innerHTML = btn.icon + `<span>${btn.label}</span>`;
-            el.style.cssText = btnStyle;
-            el.onmouseenter = () => {
-                el.style.background = "var(--interactive-accent)";
-                el.style.color = "var(--text-on-accent)";
-                el.style.borderColor = "var(--interactive-accent)";
-            };
-            el.onmouseleave = () => {
-                el.style.background = "var(--background-primary)";
-                el.style.color = "var(--text-muted)";
-                el.style.borderColor = "var(--background-modifier-border)";
-            };
-            el.onclick = () => app.workspace.openLinkText(btn.path, "");
+        // Row 1 — atlas (full-width, only when not on atlas)
+        if (atlasFile && atlasFile.path !== currentPath) {
+            buildRow([{ label: atlasFile.basename, icon: icons.trip, path: atlasFile.path }], { fullWidth: true });
         }
+
+        // Row 2 — default sections (Flights, Stay, Packing List, To Do, Notes); current self-hides
+        const defaultButtons = defaults
+            .filter(f => f.path !== currentPath)
+            .map(f => ({ label: f.basename, icon: sectionIconFor(f.basename), path: f.path }));
+        buildRow(defaultButtons);
+
+        // Row 3 — additional sections (user-added); current self-hides
+        const additionalButtons = additional
+            .filter(f => f.path !== currentPath)
+            .map(f => ({ label: f.basename, icon: icons.section, path: f.path }));
+        buildRow(additionalButtons);
 
         // "New Section" action button — atlas context only
         if (ctx.context === "trip-atlas" && atlasFile) {
@@ -158,8 +187,13 @@ class TripNavButtons {
 
     _icons() {
         return {
-            trip: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/></svg>`,
+            trip:    `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/></svg>`,
             section: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`,
+            flights: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/></svg>`,
+            stay:    `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4v16"/><path d="M2 8h18a2 2 0 0 1 2 2v10"/><path d="M2 17h20"/><path d="M6 8v9"/></svg>`,
+            packing: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M8 10h8"/><path d="M8 18v-4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v4"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>`,
+            todo:    `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="m9 12 2 2 4-4"/></svg>`,
+            notes:   `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`,
         };
     }
 
@@ -362,12 +396,6 @@ await dv.view("Docs/Meta/Views/customjs-guard", { class: "SpaceNavButtons" });
 \`\`\`dataviewjs
 await dv.view("Docs/Meta/Views/customjs-guard", { class: "TripNavButtons" });
 \`\`\`
-
----
-
-> Back to [[${atlasName}]]
-
-# ${title}
 `;
 
         await app.vault.create(targetPath, body);
