@@ -16,7 +16,7 @@
  *              Plain string + null retain prior behavior (backward-compatible).
  *   icon     — (page) => string (optional; inline SVG HTML rendered left of title)
  *   meta     — (page) => string (optional; HTML rendered right of title row when layout="row")
- *   badges   — (page) => Array<{label, tone?, icon?}> (optional; tone: "accent"|"warn"|"error"|"muted")
+ *   badges   — (page) => Array<{label, tone?, icon?}> (optional; tone: "accent"|"warn"|"error"|"success"|"muted")
  *              v0.2.0: optional icon (inline SVG HTML) prepended inside chip.
  *   progress — (page) => {done, total}|null (optional; renders bar + count)
  *   target   — (page) => string (optional; default page.file.path; passed to openLinkText)
@@ -199,10 +199,11 @@ class BeaconCards {
         for (const b of badges) {
             const tone = b.tone || "muted";
             const palette = {
-                accent: { bg: "var(--interactive-accent)", text: "var(--text-on-accent)" },
-                warn:   { bg: "#f59e0b", text: "#fff" },
-                error:  { bg: "#dc2626", text: "#fff" },
-                muted:  { bg: "var(--background-modifier-border)", text: "var(--text-muted)" }
+                accent:  { bg: "var(--interactive-accent)", text: "var(--text-on-accent)" },
+                warn:    { bg: "#f59e0b", text: "#fff" },
+                error:   { bg: "#dc2626", text: "#fff" },
+                success: { bg: "#16a34a", text: "#fff" },
+                muted:   { bg: "var(--background-modifier-border)", text: "var(--text-muted)" }
             };
             const p = palette[tone] || palette.muted;
             const chip = badgeRow.createEl("span");

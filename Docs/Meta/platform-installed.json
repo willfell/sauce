@@ -17,13 +17,13 @@
     },
     {
       "name": "nav-buttons",
-      "version": "2.5.0",
-      "installed_at": "2026-05-05T04:41:04.814Z"
+      "version": "2.5.2",
+      "installed_at": "2026-05-05T19:13:18.931Z"
     },
     {
       "name": "cards",
-      "version": "0.2.1",
-      "installed_at": "2026-05-05T02:05:49.566Z"
+      "version": "0.2.2",
+      "installed_at": "2026-05-05T19:13:18.933Z"
     }
   ],
   "blueprints": [],
@@ -400,6 +400,165 @@
       "version": "2.5.0",
       "installed_at": "2026-05-05T04:41:04.814Z",
       "git_commit": "52c9184efd9acadfe98b82b6242c54ff0a31b1bb",
+      "git_tag": null,
+      "git_dirty": true
+    },
+    {
+      "event": "replace",
+      "step": "file_overwrite",
+      "name": "nav-buttons",
+      "dest": "Docs/Meta/Scripts/nav-buttons/space-nav-buttons.js",
+      "prior_sha": "6d2281a606d89892b063725febd90b58fc0cceb38952781e7ce8972ec4283c45",
+      "new_sha": "e9cbba98f2107254eb8e7a02e40d2dcda4fd79f9a913baff6f21051efd80b642",
+      "bak_path": "Docs/Meta/Scripts/nav-buttons/space-nav-buttons.js.bak",
+      "git_commit": "5d3301e5368285db4bd2593c4c582ff34ef87e9d",
+      "git_tag": "v0.15.0",
+      "git_dirty": true,
+      "attempted_at": "2026-05-05T18:36:22.415Z"
+    },
+    {
+      "event": "install",
+      "kind": "mechanism",
+      "name": "nav-buttons",
+      "version": "2.5.1",
+      "installed_at": "2026-05-05T18:36:22.416Z",
+      "git_commit": "5d3301e5368285db4bd2593c4c582ff34ef87e9d",
+      "git_tag": "v0.15.0",
+      "git_dirty": true
+    },
+    {
+      "event": "skip",
+      "name": "nav-buttons",
+      "reason": "subscription pins nav-buttons@2.5.1 but workshop has 2.5.2",
+      "git_commit": "138188f8ad3d3602d712307813bc30be7ccdb0a0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-05T19:12:25.652Z"
+    },
+    {
+      "event": "skip",
+      "name": "cards",
+      "reason": "subscription pins cards@0.2.1 but workshop has 0.2.2",
+      "git_commit": "138188f8ad3d3602d712307813bc30be7ccdb0a0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-05T19:12:25.652Z"
+    },
+    {
+      "event": "skip",
+      "name": "nav-buttons",
+      "reason": "subscription pins nav-buttons@2.5.1 but workshop has 2.5.2",
+      "git_commit": "138188f8ad3d3602d712307813bc30be7ccdb0a0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-05T19:12:36.491Z"
+    },
+    {
+      "event": "skip",
+      "name": "cards",
+      "reason": "subscription pins cards@0.2.1 but workshop has 0.2.2",
+      "git_commit": "138188f8ad3d3602d712307813bc30be7ccdb0a0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-05T19:12:36.491Z"
+    },
+    {
+      "event": "skip",
+      "name": "nav-buttons",
+      "reason": "subscription pins nav-buttons@2.5.1 but workshop has 2.5.2",
+      "git_commit": "138188f8ad3d3602d712307813bc30be7ccdb0a0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-05T19:12:39.620Z"
+    },
+    {
+      "event": "skip",
+      "name": "cards",
+      "reason": "subscription pins cards@0.2.1 but workshop has 0.2.2",
+      "git_commit": "138188f8ad3d3602d712307813bc30be7ccdb0a0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-05T19:12:39.620Z"
+    },
+    {
+      "event": "skip",
+      "name": "nav-buttons",
+      "reason": "subscription pins nav-buttons@2.5.1 but workshop has 2.5.2",
+      "git_commit": "138188f8ad3d3602d712307813bc30be7ccdb0a0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-05T19:12:49.739Z"
+    },
+    {
+      "event": "skip",
+      "name": "cards",
+      "reason": "subscription pins cards@0.2.1 but workshop has 0.2.2",
+      "git_commit": "138188f8ad3d3602d712307813bc30be7ccdb0a0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-05T19:12:49.739Z"
+    },
+    {
+      "event": "skip",
+      "name": "nav-buttons",
+      "reason": "subscription pins nav-buttons@2.5.1 but workshop has 2.5.2",
+      "git_commit": "138188f8ad3d3602d712307813bc30be7ccdb0a0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-05T19:13:02.253Z"
+    },
+    {
+      "event": "skip",
+      "name": "cards",
+      "reason": "subscription pins cards@0.2.1 but workshop has 0.2.2",
+      "git_commit": "138188f8ad3d3602d712307813bc30be7ccdb0a0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-05T19:13:02.253Z"
+    },
+    {
+      "event": "replace",
+      "step": "file_overwrite",
+      "name": "nav-buttons",
+      "dest": "Docs/Meta/Scripts/nav-buttons/space-nav-buttons.js",
+      "prior_sha": "e9cbba98f2107254eb8e7a02e40d2dcda4fd79f9a913baff6f21051efd80b642",
+      "new_sha": "db7d9376595c0cb016f27c9231cc254665ed4af0ba900530797e425cc5e90705",
+      "bak_path": "Docs/Meta/Scripts/nav-buttons/space-nav-buttons.js.bak",
+      "git_commit": "138188f8ad3d3602d712307813bc30be7ccdb0a0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-05T19:13:18.929Z"
+    },
+    {
+      "event": "install",
+      "kind": "mechanism",
+      "name": "nav-buttons",
+      "version": "2.5.2",
+      "installed_at": "2026-05-05T19:13:18.931Z",
+      "git_commit": "138188f8ad3d3602d712307813bc30be7ccdb0a0",
+      "git_tag": null,
+      "git_dirty": true
+    },
+    {
+      "event": "replace",
+      "step": "file_overwrite",
+      "name": "cards",
+      "dest": "Docs/Meta/Scripts/cards/beacon-cards.js",
+      "prior_sha": "0387cc38b0727591a10ce9cf9b8732f33b54d57d46f6cfeb9d5047a41d8d3610",
+      "new_sha": "35cb318a14fe5298b39fccfb761e6f001d49ba64701166366a04ac45072137ef",
+      "bak_path": "Docs/Meta/Scripts/cards/beacon-cards.js.bak",
+      "git_commit": "138188f8ad3d3602d712307813bc30be7ccdb0a0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-05T19:13:18.933Z"
+    },
+    {
+      "event": "install",
+      "kind": "mechanism",
+      "name": "cards",
+      "version": "0.2.2",
+      "installed_at": "2026-05-05T19:13:18.933Z",
+      "git_commit": "138188f8ad3d3602d712307813bc30be7ccdb0a0",
       "git_tag": null,
       "git_dirty": true
     }

@@ -26,6 +26,7 @@
  *   BC4   badge-icon            badges[].icon populates inline SVG in chip
  *   BC5   badge-no-icon         badges[] without icon renders text-only chip (regression)
  *   BC6   synthetic-page-onclick synthetic page + custom onClick fires
+ *   BC7   success-tone          badges[].tone === "success" renders green (#16a34a) chip
  *   DA1   active-file-with-date  dv.current() basename matches /(\d{4}-\d{2}-\d{2})/ → helper returns extracted ISO
  *   DA2   active-file-without-date  dv.current() basename has no date → helper falls back to today (window.moment stub)
  *
@@ -729,6 +730,31 @@ async function testBC6SyntheticPageOnClick() {
   return pass;
 }
 
+async function testBC7SuccessTone() {
+  console.log('\n=== BC7 — badges[].tone === "success" renders green (#16a34a) chip ===');
+  const app = makeApp();
+  const Cls = loadBeaconCardsClass(app);
+  const dv = makeDv();
+  const cards = new Cls();
+  await cards.render(dv, {
+    pages: [{ file: { name: 'Done item', path: 'x.md' } }],
+    badges: () => [{ label: 'Done', tone: 'success' }],
+  });
+  const matchingChips = collectAll(dv.container, (el) =>
+    el.tag === 'span' && el.textContent === 'Done');
+  console.log(`  span chips with textContent === "Done": ${matchingChips.length}`);
+  let bgOk = false;
+  if (matchingChips.length > 0) {
+    const chip = matchingChips[0];
+    const css = (chip.style && chip.style.cssText) || '';
+    bgOk = css.includes('#16a34a');
+    console.log(`  chip cssText includes "#16a34a": ${bgOk}; cssText sample: ${css.slice(0, 200)}`);
+  }
+  const pass = matchingChips.length === 1 && bgOk;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
 async function testDA1ActiveFileWithDate() {
   console.log('\n=== DA1 — active file with date in basename → helper returns extracted ISO ===');
   reset();
@@ -786,6 +812,7 @@ async function testDA2ActiveFileWithoutDate() {
       results.push(['BC4 badge-icon', await testBC4BadgeIcon()]);
       results.push(['BC5 badge-no-icon', await testBC5BadgeNoIcon()]);
       results.push(['BC6 synthetic-page-onclick', await testBC6SyntheticPageOnClick()]);
+      results.push(['BC7 success-tone', await testBC7SuccessTone()]);
     }
     if (which === 'date-aware' || which === 'all') {
       results.push(['DA1 active-file-with-date', await testDA1ActiveFileWithDate()]);

@@ -1,7 +1,7 @@
 {
   "name": "cards",
-  "version": "0.1.1",
-  "description": "Shared mobile-aware card renderer (BeaconCards). Any blueprint listing related notes calls customJS.BeaconCards.render(dv, opts) instead of Dataview tables. Decoupled from Dataview semantics; caller supplies pages array. v0.1.1 ADDITIVE: adds icon/meta/layout options (layout=\"row\" mirrors accuris Planning-Board card pattern: title+icon left, meta right, progress bar full-width).",
+  "version": "0.2.2",
+  "description": "Shared mobile-aware card renderer (BeaconCards). Any blueprint listing related notes calls customJS.BeaconCards.render(dv, opts) instead of Dataview tables. Decoupled from Dataview semantics; caller supplies pages array. v0.2.2 ADDITIVE: adds success tone (#16a34a green) to badges palette alongside existing accent/warn/error/muted.",
   "depends_on": [
     { "name": "customjs-guard", "range": ">=1.0.0" }
   ],
