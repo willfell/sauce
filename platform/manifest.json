@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop platform manifest. Each mechanism + blueprint has its own version.",
-  "workshop_version": "0.17.0",
+  "workshop_version": "0.18.0",
   "date": "2026-05-05",
   "installer": {
     "source": "install.js",
@@ -12,13 +12,14 @@
     { "name": "validator", "version": "0.1.1", "path": "mechanisms/validator" },
     { "name": "audit", "version": "0.1.1", "path": "mechanisms/audit" },
     { "name": "nav-buttons", "version": "2.5.2", "path": "mechanisms/nav-buttons" },
-    { "name": "cards", "version": "0.2.3", "path": "mechanisms/cards" }
+    { "name": "cards", "version": "0.2.3", "path": "mechanisms/cards" },
+    { "name": "beacon-button", "version": "0.1.0", "path": "mechanisms/beacon-button" }
   ],
   "blueprints": [
     { "name": "boards", "version": "0.1.0", "path": "blueprints/boards" },
     { "name": "daily", "version": "0.2.1", "path": "blueprints/daily" },
     { "name": "meetings", "version": "0.2.0", "path": "blueprints/meetings" },
-    { "name": "project", "version": "1.3.2", "path": "blueprints/project" },
+    { "name": "project", "version": "1.3.3", "path": "blueprints/project" },
     { "name": "to-do", "version": "0.1.2", "path": "blueprints/to-do" },
     { "name": "journal", "version": "0.1.0", "path": "blueprints/journal" },
     { "name": "trips", "version": "0.1.4", "path": "blueprints/trips" },

@@ -351,16 +351,6 @@ class ProjectNavButtons {
         app.workspace.openLinkText(filePath, "");
     }
 
-    _renderActionButton(container, label, icon, onClick) {
-        const btn = container.createEl("button");
-        btn.innerHTML = icon + `<span>${label}</span>`;
-        btn.style.cssText = `cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 6px 14px; border-radius: 6px; border: 1px solid var(--interactive-accent); background: var(--background-primary); color: var(--interactive-accent); font-size: 0.82em; font-weight: 500; font-family: inherit; letter-spacing: 0.01em; transition: all 0.15s ease; flex: 1; min-width: 0;`;
-        btn.onmouseenter = () => { btn.style.background = "var(--interactive-accent)"; btn.style.color = "var(--text-on-accent)"; };
-        btn.onmouseleave = () => { btn.style.background = "var(--background-primary)"; btn.style.color = "var(--interactive-accent)"; };
-        btn.onclick = onClick;
-        return btn;
-    }
-
     async renderTaskNoteTiles(parent, notesFolder, currentPath) {
         const folderObj = app.vault.getAbstractFileByPath(notesFolder);
         if (!folderObj || !folderObj.children) return;
@@ -714,14 +704,19 @@ class ProjectNavButtons {
             const actionRow = root.createEl("div");
             actionRow.style.cssText = "display: flex; flex-wrap: nowrap; gap: 6px; margin-bottom: 4px;";
 
-            this._renderActionButton(actionRow, "New Note", plusIcon, async () => {
-                const title = await this._promptForTitle(notesFolder);
-                if (!title) return;
-                const targetPath = await this._createTaskNote(notesFolder, title, projectSlug, ctx.taskFolder, taskHubPath);
-                if (targetPath) {
-                    new Notice(`Created: ${title}`);
-                    app.workspace.openLinkText(targetPath, "");
-                }
+            customJS.BeaconButton.render(actionRow, {
+                label: "New Note",
+                icon: plusIcon,
+                onClick: async () => {
+                    const title = await this._promptForTitle(notesFolder);
+                    if (!title) return;
+                    const targetPath = await this._createTaskNote(notesFolder, title, projectSlug, ctx.taskFolder, taskHubPath);
+                    if (targetPath) {
+                        new Notice(`Created: ${title}`);
+                        app.workspace.openLinkText(targetPath, "");
+                    }
+                },
+                flex: true
             });
 
             if (ctx.context === "task-hub") {
@@ -730,16 +725,26 @@ class ProjectNavButtons {
                 const boardIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>`;
 
                 if (boardExists) {
-                    this._renderActionButton(actionRow, "Open Board", boardIcon, async () => {
-                        await this._openAsKanban(boardPath);
+                    customJS.BeaconButton.render(actionRow, {
+                        label: "Open Board",
+                        icon: boardIcon,
+                        onClick: async () => {
+                            await this._openAsKanban(boardPath);
+                        },
+                        flex: true
                     });
                 } else {
-                    this._renderActionButton(actionRow, "Create Board", boardIcon, async () => {
-                        const created = await this._createTaskBoard(projectDir, ctx.taskFolder);
-                        if (created) {
-                            new Notice("Task board created.");
-                            await this._openAsKanban(created);
-                        }
+                    customJS.BeaconButton.render(actionRow, {
+                        label: "Create Board",
+                        icon: boardIcon,
+                        onClick: async () => {
+                            const created = await this._createTaskBoard(projectDir, ctx.taskFolder);
+                            if (created) {
+                                new Notice("Task board created.");
+                                await this._openAsKanban(created);
+                            }
+                        },
+                        flex: true
                     });
                 }
             }
@@ -762,14 +767,19 @@ class ProjectNavButtons {
 
         const plusIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>`;
 
-        this._renderActionButton(actionRow, "New Project", plusIcon, async () => {
-            const projectInfo = await this._promptForProjectName();
-            if (!projectInfo) return;
-            const targetPath = await this._createProject(projectInfo);
-            if (targetPath) {
-                new Notice(`Created project: ${projectInfo.name}`);
-                app.workspace.openLinkText(targetPath, "");
-            }
+        customJS.BeaconButton.render(actionRow, {
+            label: "New Project",
+            icon: plusIcon,
+            onClick: async () => {
+                const projectInfo = await this._promptForProjectName();
+                if (!projectInfo) return;
+                const targetPath = await this._createProject(projectInfo);
+                if (targetPath) {
+                    new Notice(`Created project: ${projectInfo.name}`);
+                    app.workspace.openLinkText(targetPath, "");
+                }
+            },
+            flex: true
         });
     }
 }

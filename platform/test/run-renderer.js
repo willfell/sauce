@@ -37,11 +37,17 @@
  *   FF6   invoice-time-log-editor-out-of-path     InvoiceTimeLogEditor on non-Time-Log path renders nothing
  *   FF7   invoice-controls-rate-and-toggle        InvoiceControls renders rate input + Mark Submitted button
  *   FF8   widget-embed-dedup                      InvoiceControls inside .markdown-embed renders nothing
+ *   BB1   baseline-csstext         BeaconButton.render returns HTMLButtonElement with accent baseline cssText
+ *   BB2   flex-fill-css            opts.flex === true appends "flex: 1; min-width: 0" to base cssText
+ *   BB3   onclick-wires            opts.onClick wires through (synthetic click triggers handler)
+ *   BB4   disabled-hover-noop      opts.disabled === true initial; hover handlers no-op while btn.disabled
+ *   BB5   icon-before-label        opts.icon HTML inlined verbatim before <span>${label}</span>
+ *   BB6   hover-swap               hover-enter swaps to filled accent; hover-leave restores
  *
  * Usage:
  *   node platform/test/run-renderer.js [--vault <path>] [test-selector]
  *   test-selector:
- *     all (default), empty, malformed, unknown-action, lazy-scaffold, barebones-one-button, beacon-cards, date-aware, finance
+ *     all (default), empty, malformed, unknown-action, lazy-scaffold, barebones-one-button, beacon-cards, date-aware, finance, beacon-button
  *   exit 0 on all selected pass; 1 otherwise
  */
 
@@ -86,6 +92,9 @@ const RENDERER_SRC = fs.readFileSync(RENDERER_FILE, 'utf8');
 
 const BEACON_CARDS_FILE = path.join(WORKSHOP, 'platform', 'mechanisms', 'cards', 'beacon-cards.js');
 const BEACON_CARDS_SRC = fs.readFileSync(BEACON_CARDS_FILE, 'utf8');
+
+const BEACON_BUTTON_FILE = path.join(WORKSHOP, 'platform', 'mechanisms', 'beacon-button', 'beacon-button.js');
+const BEACON_BUTTON_SRC = fs.existsSync(BEACON_BUTTON_FILE) ? fs.readFileSync(BEACON_BUTTON_FILE, 'utf8') : '';
 
 // ── DOM stub ─────────────────────────────────────────────────────────────
 function makeEl(tag, opts) {
@@ -238,6 +247,12 @@ function loadRendererClass(app, Notice) {
 
 function loadBeaconCardsClass(app) {
   const fn = new Function('app', `${BEACON_CARDS_SRC}\nreturn BeaconCards;`);
+  return fn(app);
+}
+
+function loadBeaconButtonClass(app) {
+  if (!BEACON_BUTTON_SRC) return null;
+  const fn = new Function('app', `${BEACON_BUTTON_SRC}\nreturn typeof BeaconButton !== 'undefined' ? BeaconButton : null;`);
   return fn(app);
 }
 
@@ -794,6 +809,109 @@ async function testBC7SuccessTone() {
   return pass;
 }
 
+// ── BeaconButton mechanism (v0.18.0) ─────────────────────────────────────
+async function testBB1RenderReturnsButtonWithBaselineCssText() {
+  console.log('\n=== BB1 — render returns HTMLButtonElement with accent baseline cssText ===');
+  const app = makeApp();
+  const Cls = loadBeaconButtonClass(app);
+  if (!Cls) { console.log('  FAIL — BeaconButton class not loaded'); return false; }
+  const parent = makeEl('div', {});
+  const btn = new Cls().render(parent, { label: 'Hi', icon: '<svg/>', onClick: () => {} });
+  const css = (btn && btn.style && btn.style.cssText) || '';
+  const pass = btn && btn.tag === 'button'
+    && css.includes('border: 1px solid var(--interactive-accent)')
+    && css.includes('background: var(--background-primary)')
+    && css.includes('color: var(--interactive-accent)')
+    && !css.includes('flex: 1');
+  console.log(`  cssText sample: ${css.slice(0, 120)}...`);
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
+async function testBB2FlexAppendsFillCss() {
+  console.log('\n=== BB2 — flex:true appends "flex: 1; min-width: 0" ===');
+  const app = makeApp();
+  const Cls = loadBeaconButtonClass(app);
+  if (!Cls) { console.log('  FAIL — BeaconButton class not loaded'); return false; }
+  const parent = makeEl('div', {});
+  const btn = new Cls().render(parent, { label: 'Hi', icon: '<svg/>', onClick: () => {}, flex: true });
+  const css = (btn && btn.style && btn.style.cssText) || '';
+  const pass = css.includes('flex: 1') && css.includes('min-width: 0');
+  console.log(`  cssText includes flex: 1 + min-width: 0 → ${pass}`);
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
+async function testBB3OnClickWires() {
+  console.log('\n=== BB3 — onClick option wires through ===');
+  const app = makeApp();
+  const Cls = loadBeaconButtonClass(app);
+  if (!Cls) { console.log('  FAIL — BeaconButton class not loaded'); return false; }
+  const parent = makeEl('div', {});
+  let fired = 0;
+  const btn = new Cls().render(parent, { label: 'Hi', icon: '<svg/>', onClick: () => { fired++; } });
+  if (btn && typeof btn.onclick === 'function') btn.onclick();
+  const pass = fired === 1;
+  console.log(`  fired: ${fired}`);
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
+async function testBB4DisabledHoverNoOp() {
+  console.log('\n=== BB4 — disabled:true initial; hover handlers no-op while disabled ===');
+  const app = makeApp();
+  const Cls = loadBeaconButtonClass(app);
+  if (!Cls) { console.log('  FAIL — BeaconButton class not loaded'); return false; }
+  const parent = makeEl('div', {});
+  const btn = new Cls().render(parent, { label: 'Hi', icon: '<svg/>', onClick: () => {}, disabled: true });
+  if (btn && typeof btn.onmouseenter === 'function') btn.onmouseenter();
+  const css = (btn && btn.style && btn.style.cssText) || '';
+  const stillAccentText = css.includes('color: var(--interactive-accent)');
+  const stillPrimaryBg = css.includes('background: var(--background-primary)');
+  const pass = btn && btn.disabled === true && stillAccentText && stillPrimaryBg;
+  console.log(`  btn.disabled: ${btn && btn.disabled}; afterEnter accent text: ${stillAccentText}; primary bg: ${stillPrimaryBg}`);
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
+async function testBB5IconHtmlInlinedBeforeLabel() {
+  console.log('\n=== BB5 — icon HTML inlined verbatim before <span>${label}</span> ===');
+  const app = makeApp();
+  const Cls = loadBeaconButtonClass(app);
+  if (!Cls) { console.log('  FAIL — BeaconButton class not loaded'); return false; }
+  const parent = makeEl('div', {});
+  const iconHtml = '<svg data-test="icon"/>';
+  const btn = new Cls().render(parent, { label: 'Save', icon: iconHtml, onClick: () => {} });
+  const html = (btn && btn.innerHTML) || '';
+  const idxIcon = html.indexOf('data-test="icon"');
+  const idxLabel = html.indexOf('<span>Save</span>');
+  const pass = idxIcon !== -1 && idxLabel !== -1 && idxIcon < idxLabel;
+  console.log(`  innerHTML: ${html}`);
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
+async function testBB6HoverEnterLeaveSwapsColors() {
+  console.log('\n=== BB6 — hover-enter swaps to filled accent; hover-leave restores ===');
+  const app = makeApp();
+  const Cls = loadBeaconButtonClass(app);
+  if (!Cls) { console.log('  FAIL — BeaconButton class not loaded'); return false; }
+  const parent = makeEl('div', {});
+  const btn = new Cls().render(parent, { label: 'Hi', icon: '<svg/>', onClick: () => {} });
+  if (btn && typeof btn.onmouseenter === 'function') btn.onmouseenter();
+  const cssEnter = (btn && btn.style && btn.style.cssText) || '';
+  const enteredFill = cssEnter.includes('background: var(--interactive-accent)')
+    && cssEnter.includes('color: var(--text-on-accent)');
+  if (btn && typeof btn.onmouseleave === 'function') btn.onmouseleave();
+  const cssLeave = (btn && btn.style && btn.style.cssText) || '';
+  const restored = cssLeave.includes('background: var(--background-primary)')
+    && cssLeave.includes('color: var(--interactive-accent)');
+  const pass = enteredFill && restored;
+  console.log(`  enteredFill: ${enteredFill}; restored: ${restored}`);
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
 async function testDA1ActiveFileWithDate() {
   console.log('\n=== DA1 — active file with date in basename → helper returns extracted ISO ===');
   reset();
@@ -996,6 +1114,14 @@ async function testFF3HubAreaRowIcons() {
       results.push(['BC5 badge-no-icon', await testBC5BadgeNoIcon()]);
       results.push(['BC6 synthetic-page-onclick', await testBC6SyntheticPageOnClick()]);
       results.push(['BC7 success-tone', await testBC7SuccessTone()]);
+    }
+    if (which === 'beacon-button' || which === 'all') {
+      results.push(['BB1 baseline-csstext', await testBB1RenderReturnsButtonWithBaselineCssText()]);
+      results.push(['BB2 flex-fill-css', await testBB2FlexAppendsFillCss()]);
+      results.push(['BB3 onclick-wires', await testBB3OnClickWires()]);
+      results.push(['BB4 disabled-hover-noop', await testBB4DisabledHoverNoOp()]);
+      results.push(['BB5 icon-before-label', await testBB5IconHtmlInlinedBeforeLabel()]);
+      results.push(['BB6 hover-swap', await testBB6HoverEnterLeaveSwapsColors()]);
     }
     if (which === 'date-aware' || which === 'all') {
       results.push(['DA1 active-file-with-date', await testDA1ActiveFileWithDate()]);

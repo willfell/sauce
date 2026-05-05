@@ -22,8 +22,13 @@
     },
     {
       "name": "cards",
-      "version": "0.2.2",
-      "installed_at": "2026-05-05T19:13:18.933Z"
+      "version": "0.2.3",
+      "installed_at": "2026-05-05T22:15:53.617Z"
+    },
+    {
+      "name": "beacon-button",
+      "version": "0.1.0",
+      "installed_at": "2026-05-05T23:33:07.505Z"
     }
   ],
   "blueprints": [],
@@ -559,6 +564,39 @@
       "version": "0.2.2",
       "installed_at": "2026-05-05T19:13:18.933Z",
       "git_commit": "138188f8ad3d3602d712307813bc30be7ccdb0a0",
+      "git_tag": null,
+      "git_dirty": true
+    },
+    {
+      "event": "replace",
+      "step": "file_overwrite",
+      "name": "cards",
+      "dest": "Docs/Meta/Scripts/cards/beacon-cards.js",
+      "prior_sha": "35cb318a14fe5298b39fccfb761e6f001d49ba64701166366a04ac45072137ef",
+      "new_sha": "140dec8e2aa552192182ca446a50d8a38ba096e19ddb0225b10ee65595649edf",
+      "bak_path": "Docs/Meta/Scripts/cards/beacon-cards.js.bak",
+      "git_commit": "bc5dee27fc0f2274709f8eba77ba2c1ee05bb2e2",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-05T22:15:53.616Z"
+    },
+    {
+      "event": "install",
+      "kind": "mechanism",
+      "name": "cards",
+      "version": "0.2.3",
+      "installed_at": "2026-05-05T22:15:53.617Z",
+      "git_commit": "bc5dee27fc0f2274709f8eba77ba2c1ee05bb2e2",
+      "git_tag": null,
+      "git_dirty": true
+    },
+    {
+      "event": "install",
+      "kind": "mechanism",
+      "name": "beacon-button",
+      "version": "0.1.0",
+      "installed_at": "2026-05-05T23:33:07.505Z",
+      "git_commit": "98abe04a3322e834eed764ee87f7b1c3684eb1bb",
       "git_tag": null,
       "git_dirty": true
     }
