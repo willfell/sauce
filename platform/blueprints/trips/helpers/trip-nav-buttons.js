@@ -106,6 +106,27 @@ class TripNavButtons {
             };
             el.onclick = () => app.workspace.openLinkText(btn.path, "");
         }
+
+        // "New Section" action button — atlas context only
+        if (ctx.context === "trip-atlas" && atlasFile) {
+            const divider = root.createEl("hr");
+            divider.style.cssText = "border: none; border-top: 1px solid var(--background-modifier-border); margin: 8px 0;";
+
+            const actionRow = root.createEl("div");
+            actionRow.style.cssText = "display: flex; flex-wrap: nowrap; gap: 6px; margin-bottom: 4px;";
+
+            const plusIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>`;
+
+            this._renderActionButton(actionRow, "New Section", plusIcon, async () => {
+                const title = await this._promptForSectionTitle(ctx.tripDir);
+                if (!title) return;
+                const sectionPath = await this._createTripSection(ctx.tripDir, title, atlasFile.basename);
+                if (sectionPath) {
+                    new Notice(`Created section: ${title}`);
+                    app.workspace.openLinkText(sectionPath, "");
+                }
+            });
+        }
     }
 
     async _renderTripsHub(root) {
@@ -254,6 +275,103 @@ class TripNavButtons {
         wrap.appendChild(input);
         dialog.appendChild(wrap);
         return input;
+    }
+
+    async _promptForSectionTitle(tripDir) {
+        return new Promise((resolve) => {
+            const overlay = document.createElement("div");
+            overlay.style.cssText = "position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; display: flex; align-items: center; justify-content: center;";
+            const dialog = document.createElement("div");
+            dialog.style.cssText = "background: var(--background-primary); border-radius: 12px; padding: 24px; min-width: 360px; max-width: 480px; box-shadow: 0 8px 32px rgba(0,0,0,0.3);";
+
+            const heading = document.createElement("div");
+            heading.textContent = "New Section";
+            heading.style.cssText = "font-size: 1.1em; font-weight: 600; margin-bottom: 12px;";
+            dialog.appendChild(heading);
+
+            const input = this._addTextField(dialog, "Section title (e.g. Honorees)");
+
+            const status = document.createElement("div");
+            status.style.cssText = "font-size: 0.8em; color: var(--text-muted); min-height: 1.2em; margin-bottom: 12px;";
+            dialog.appendChild(status);
+
+            const checkCollision = () => {
+                const title = input.value.trim();
+                if (!title) { status.textContent = ""; return; }
+                if (app.vault.getAbstractFileByPath(`${tripDir}/${title}.md`)) {
+                    status.textContent = `"${title}" already exists in this trip.`;
+                    status.style.color = "var(--text-error)";
+                } else {
+                    status.textContent = "";
+                }
+            };
+            input.addEventListener("input", checkCollision);
+
+            const btnRow = document.createElement("div");
+            btnRow.style.cssText = "display: flex; gap: 8px; justify-content: flex-end;";
+
+            const cancelBtn = document.createElement("button");
+            cancelBtn.textContent = "Cancel";
+            cancelBtn.style.cssText = "padding: 6px 14px; border-radius: 6px; cursor: pointer; border: 1px solid var(--background-modifier-border); background: var(--background-primary); color: var(--text-muted);";
+            cancelBtn.onclick = () => { document.body.removeChild(overlay); resolve(null); };
+
+            const okBtn = document.createElement("button");
+            okBtn.textContent = "Create";
+            okBtn.style.cssText = "padding: 6px 14px; border-radius: 6px; cursor: pointer; border: 1px solid var(--interactive-accent); background: var(--interactive-accent); color: var(--text-on-accent);";
+            okBtn.onclick = () => {
+                const title = input.value.trim();
+                if (!title) return;
+                if (app.vault.getAbstractFileByPath(`${tripDir}/${title}.md`)) { checkCollision(); input.focus(); return; }
+                document.body.removeChild(overlay);
+                resolve(title);
+            };
+
+            input.addEventListener("keydown", (e) => {
+                if (e.key === "Enter") okBtn.click();
+                if (e.key === "Escape") cancelBtn.click();
+            });
+
+            btnRow.appendChild(cancelBtn);
+            btnRow.appendChild(okBtn);
+            dialog.appendChild(btnRow);
+            overlay.appendChild(dialog);
+            overlay.addEventListener("click", (e) => { if (e.target === overlay) cancelBtn.click(); });
+            document.body.appendChild(overlay);
+            setTimeout(() => input.focus(), 0);
+        });
+    }
+
+    async _createTripSection(tripDir, title, atlasName) {
+        const targetPath = `${tripDir}/${title}.md`;
+        if (app.vault.getAbstractFileByPath(targetPath)) return targetPath;
+
+        const now = new Date();
+        const pad = (n) => String(n).padStart(2, "0");
+        const dateStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+
+        const body = `---
+created: ${dateStr}
+tags:
+  - trip
+---
+
+\`\`\`dataviewjs
+await dv.view("Docs/Meta/Views/customjs-guard", { class: "SpaceNavButtons" });
+\`\`\`
+
+\`\`\`dataviewjs
+await dv.view("Docs/Meta/Views/customjs-guard", { class: "TripNavButtons" });
+\`\`\`
+
+---
+
+> Back to [[${atlasName}]]
+
+# ${title}
+`;
+
+        await app.vault.create(targetPath, body);
+        return targetPath;
     }
 
     async _createTrip({ name, slug, start_date, end_date, location }) {
