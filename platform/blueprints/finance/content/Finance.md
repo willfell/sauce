@@ -10,8 +10,6 @@ cssclasses:
 await dv.view("{{views_path}}/customjs-guard", { class: "SpaceNavButtons" });
 ```
 
-# Finance
-
 ```dataviewjs
 await dv.view("{{views_path}}/customjs-guard", { class: "FinanceHubCards" });
 ```
