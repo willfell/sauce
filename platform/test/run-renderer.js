@@ -20,11 +20,17 @@
  *   T2.7  unknown-action      synthetic registry, unknown action.type → click Notice
  *   T4.0  lazy-scaffold       createFromTemplate dispatch → folder/file create + open
  *   T4.4  barebones-one-button   barebones's real registry → exactly one Board button
+ *   BC1   subtitle-object       subtitle returning {text, secondaryText} → two subtitle elements
+ *   BC2   subtitle-null         subtitle returning null → no subtitle element (regression)
+ *   BC3   subtitle-string       subtitle returning string → single subtitle (regression)
+ *   BC4   badge-icon            badges[].icon populates inline SVG in chip
+ *   BC5   badge-no-icon         badges[] without icon renders text-only chip (regression)
+ *   BC6   synthetic-page-onclick synthetic page + custom onClick fires
  *
  * Usage:
  *   node platform/test/run-renderer.js [--vault <path>] [test-selector]
  *   test-selector:
- *     all (default), empty, malformed, unknown-action, lazy-scaffold, barebones-one-button
+ *     all (default), empty, malformed, unknown-action, lazy-scaffold, barebones-one-button, beacon-cards
  *   exit 0 on all selected pass; 1 otherwise
  */
 
@@ -66,6 +72,9 @@ const KANBAN_TARGET_REL = 'boards/To-Do-Board.md';
 
 // Cache the renderer source at module load — identical bytes per test run.
 const RENDERER_SRC = fs.readFileSync(RENDERER_FILE, 'utf8');
+
+const BEACON_CARDS_FILE = path.join(WORKSHOP, 'platform', 'mechanisms', 'cards', 'beacon-cards.js');
+const BEACON_CARDS_SRC = fs.readFileSync(BEACON_CARDS_FILE, 'utf8');
 
 // ── DOM stub ─────────────────────────────────────────────────────────────
 function makeEl(tag, opts) {
@@ -208,6 +217,11 @@ function loadRendererClass(app, Notice) {
   return fn(app, Notice);
 }
 
+function loadBeaconCardsClass(app) {
+  const fn = new Function('app', `${BEACON_CARDS_SRC}\nreturn BeaconCards;`);
+  return fn(app);
+}
+
 // ── Tree helpers ─────────────────────────────────────────────────────────
 function findClass(root, cls) {
   if (root.cls === cls) return root;
@@ -234,6 +248,12 @@ function collectButtons(root, out) {
   out = out || [];
   if (root.tag === 'button') out.push(root);
   for (const c of root.children) collectButtons(c, out);
+  return out;
+}
+function collectAll(root, predicate, out) {
+  out = out || [];
+  if (predicate(root)) out.push(root);
+  for (const c of root.children) collectAll(c, predicate, out);
   return out;
 }
 
@@ -511,6 +531,170 @@ async function testBarebonesOneButton() {
   return pass;
 }
 
+// ── BeaconCards renderer cases (v0.12.0 cards@0.2.0 API extension) ───────
+
+async function testBC1SubtitleObject() {
+  console.log('\n=== BC1 — subtitle returning {text, secondaryText} renders TWO subtitle elements ===');
+  const app = makeApp();
+  const Cls = loadBeaconCardsClass(app);
+  const dv = makeDv();
+  const cards = new Cls();
+  await cards.render(dv, {
+    pages: [{ file: { name: 'Test', path: 'Test.md' } }],
+    title: (p) => p.file.name,
+    subtitle: () => ({ text: 'Primary line', secondaryText: 'Secondary italic line' }),
+    layout: 'stacked',
+  });
+  const primary = collectAll(dv.container, (el) => el.text === 'Primary line' || el.innerHTML === 'Primary line');
+  // The renderer assigns el.textContent — captured as a property on the stub.
+  const primaryHits = collectAll(dv.container, (el) => el.textContent === 'Primary line');
+  const secondaryHits = collectAll(dv.container, (el) =>
+    el.textContent === 'Secondary italic line'
+    && typeof el.style?.cssText === 'string'
+    && el.style.cssText.includes('italic')
+    && el.style.cssText.includes('0.78em'));
+  console.log(`  primary "Primary line" elements: ${primaryHits.length}`);
+  console.log(`  secondary italic-0.78em "Secondary italic line" elements: ${secondaryHits.length}`);
+  const pass = primaryHits.length >= 1 && secondaryHits.length >= 1;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
+async function testBC2SubtitleNull() {
+  console.log('\n=== BC2 — subtitle returning null renders no subtitle element (regression) ===');
+  const app = makeApp();
+  const Cls = loadBeaconCardsClass(app);
+  const dv = makeDv();
+  const cards = new Cls();
+  await cards.render(dv, {
+    pages: [{ file: { name: 'Test', path: 'Test.md' } }],
+    title: (p) => p.file.name,
+    subtitle: () => null,
+    layout: 'stacked',
+  });
+  const subtitleLike = collectAll(dv.container, (el) =>
+    typeof el.style?.cssText === 'string'
+    && el.style.cssText.includes('font-size: 0.8em')
+    && el.style.cssText.includes('color: var(--text-muted)')
+    && (!el.textContent || el.textContent === ''));
+  console.log(`  subtitle-shaped empty elements: ${subtitleLike.length}`);
+  const pass = subtitleLike.length === 0;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
+async function testBC3SubtitleString() {
+  console.log('\n=== BC3 — subtitle returning string renders a single muted line (regression) ===');
+  const app = makeApp();
+  const Cls = loadBeaconCardsClass(app);
+  const dv = makeDv();
+  const cards = new Cls();
+  await cards.render(dv, {
+    pages: [{ file: { name: 'Test', path: 'Test.md' } }],
+    title: (p) => p.file.name,
+    subtitle: () => 'Single subtitle string',
+    layout: 'stacked',
+  });
+  const matchHits = collectAll(dv.container, (el) => el.textContent === 'Single subtitle string');
+  const secondaryHits = collectAll(dv.container, (el) =>
+    typeof el.style?.cssText === 'string'
+    && el.style.cssText.includes('italic')
+    && el.style.cssText.includes('0.78em'));
+  console.log(`  "Single subtitle string" elements: ${matchHits.length}`);
+  console.log(`  italic-0.78em (secondary-line) elements: ${secondaryHits.length}`);
+  const pass = matchHits.length === 1 && secondaryHits.length === 0;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
+async function testBC4BadgeIcon() {
+  console.log('\n=== BC4 — badges[] entry with icon renders inline-SVG inside chip ===');
+  const app = makeApp();
+  const Cls = loadBeaconCardsClass(app);
+  const dv = makeDv();
+  const cards = new Cls();
+  const testIcon = '<svg data-test="badge-icon" width="12" height="12"></svg>';
+  await cards.render(dv, {
+    pages: [{ file: { name: 'Test', path: 'Test.md' } }],
+    badges: () => [{ label: 'Test', tone: 'accent', icon: testIcon }],
+  });
+  const chipsWithIcon = collectAll(dv.container, (el) =>
+    el.tag === 'span'
+    && (
+      (typeof el.innerHTML === 'string' && el.innerHTML.includes('data-test="badge-icon"'))
+      || el.children.some((c) => typeof c.innerHTML === 'string' && c.innerHTML.includes('data-test="badge-icon"'))
+    ));
+  console.log(`  span chips containing data-test="badge-icon": ${chipsWithIcon.length}`);
+  let labelOk = false;
+  if (chipsWithIcon.length > 0) {
+    const chip = chipsWithIcon[0];
+    const chipText = chip.textContent || '';
+    const descendantTextHit = collectAll(chip, (el) => (el.textContent || '').includes('Test')).length > 0;
+    labelOk = chipText.includes('Test') || descendantTextHit;
+    console.log(`  chip text includes "Test": ${chipText.includes('Test')}; descendant text hit: ${descendantTextHit}`);
+  }
+  const pass = chipsWithIcon.length >= 1 && labelOk;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
+async function testBC5BadgeNoIcon() {
+  console.log('\n=== BC5 — badges[] entry without icon renders text-only chip (regression) ===');
+  const app = makeApp();
+  const Cls = loadBeaconCardsClass(app);
+  const dv = makeDv();
+  const cards = new Cls();
+  await cards.render(dv, {
+    pages: [{ file: { name: 'Test', path: 'Test.md' } }],
+    badges: () => [{ label: 'PlainBadge', tone: 'muted' }],
+  });
+  const matchingChips = collectAll(dv.container, (el) =>
+    el.tag === 'span' && el.textContent === 'PlainBadge');
+  console.log(`  span chips with textContent === "PlainBadge": ${matchingChips.length}`);
+  let svgFree = false;
+  if (matchingChips.length > 0) {
+    const chip = matchingChips[0];
+    const innerHtml = typeof chip.innerHTML === 'string' ? chip.innerHTML : '';
+    svgFree = !innerHtml.includes('<svg');
+    console.log(`  chip innerHTML excludes <svg: ${svgFree}`);
+  }
+  const pass = matchingChips.length === 1 && svgFree;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
+async function testBC6SyntheticPageOnClick() {
+  console.log('\n=== BC6 — synthetic-page object + custom onClick fires ===');
+  const app = makeApp();
+  const Cls = loadBeaconCardsClass(app);
+  const dv = makeDv();
+  const cards = new Cls();
+  let capturedClickedPage = null;
+  await cards.render(dv, {
+    pages: [{ file: { name: 'Synthetic', path: 'synth.md' }, _custom: 'marker' }],
+    title: (p) => p.file.name,
+    onClick: (p, _ev) => { capturedClickedPage = p; },
+  });
+  const cardEls = collectAll(dv.container, (el) =>
+    typeof el.style?.cssText === 'string' && el.style.cssText.includes('cursor: pointer'));
+  console.log(`  clickable cards (cursor: pointer): ${cardEls.length}`);
+  if (cardEls.length === 0) {
+    console.log('  FAIL — no clickable card');
+    return false;
+  }
+  const cardEl = cardEls[0];
+  if (typeof cardEl.onclick === 'function') {
+    cardEl.onclick({});
+  } else {
+    console.log('  FAIL — clickable card has no onclick handler');
+    return false;
+  }
+  console.log(`  capturedClickedPage._custom: ${capturedClickedPage && capturedClickedPage._custom}`);
+  const pass = !!capturedClickedPage && capturedClickedPage._custom === 'marker';
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
 // ── Main ─────────────────────────────────────────────────────────────────
 (async () => {
   const which = ARGS.selector;
@@ -523,6 +707,14 @@ async function testBarebonesOneButton() {
     if (which === 'malformed' || which === 'all') results.push(['T2.6 malformed', await testMalformed()]);
     if (which === 'unknown-action' || which === 'all') results.push(['T2.7 unknown-action', await testUnknownAction()]);
     if (which === 'lazy-scaffold' || which === 'all') results.push(['T4.0 lazy-scaffold', await testLazyScaffold()]);
+    if (which === 'beacon-cards' || which === 'all') {
+      results.push(['BC1 subtitle-object', await testBC1SubtitleObject()]);
+      results.push(['BC2 subtitle-null', await testBC2SubtitleNull()]);
+      results.push(['BC3 subtitle-string', await testBC3SubtitleString()]);
+      results.push(['BC4 badge-icon', await testBC4BadgeIcon()]);
+      results.push(['BC5 badge-no-icon', await testBC5BadgeNoIcon()]);
+      results.push(['BC6 synthetic-page-onclick', await testBC6SyntheticPageOnClick()]);
+    }
     if (which === 'barebones-one-button' || which === 'all') {
       const isWorkshop = VAULT === WORKSHOP;
       const explicit = which === 'barebones-one-button';
