@@ -149,11 +149,11 @@ class NewPaycheckButton {
         const today = window.moment().format("YYYY-MM-DD");
         const body = `---
 type: paycheck
-pay_period_start: ${start_date}
-pay_period_end: ${end_date}
+pay_period_start: "${start_date}"
+pay_period_end: "${end_date}"
 paycheck_amount: ${amount}
 expenses: []
-created: ${today}
+created: "${today}"
 tags:
   - finance
   - paycheck
@@ -163,6 +163,10 @@ cssclasses:
 
 \`\`\`dataviewjs
 await dv.view("Docs/Meta/Views/customjs-guard", { class: "SpaceNavButtons" });
+\`\`\`
+
+\`\`\`dataviewjs
+await customJS.FinanceStatus.renderBadge(dv, "paycheck");
 \`\`\`
 
 # Paycheck — ${start_date} to ${end_date}

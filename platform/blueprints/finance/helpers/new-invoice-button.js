@@ -126,12 +126,12 @@ class NewInvoiceButton {
 
         const invoiceBody = `---
 type: invoice
-month: ${month}
-date: ${month}-01
+month: "${month}"
+date: "${month}-01"
 hours: 0
 amount: 0
 submitted_date: null
-created: ${today}
+created: "${today}"
 tags:
   - finance
   - invoice
@@ -147,13 +147,18 @@ await dv.view("Docs/Meta/Views/customjs-guard", { class: "SpaceNavButtons" });
 await dv.view("Docs/Meta/Views/customjs-guard", { class: "InvoiceNavButtons" });
 \`\`\`
 
+\`\`\`dataviewjs
+await customJS.FinanceStatus.renderBadge(dv, "invoice");
+\`\`\`
+
 # Invoice — ${month}
 
 | Field | Value |
 |-------|-------|
-| **Month** | \`= this.month\` |
+| **Month** | ${month} |
 | **Hours** | \`= this.hours\` |
 | **Amount** | \`= "$" + this.amount\` |
+| **Submitted** | \`= choice(this.submitted_date, this.submitted_date, "—")\` |
 
 ## Time Log
 
@@ -165,10 +170,10 @@ await dv.view("Docs/Meta/Views/customjs-guard", { class: "InvoiceNavButtons" });
 
         const timeLogBody = `---
 type: time-log
-month: ${month}
-date: ${month}-01
+month: "${month}"
+date: "${month}-01"
 total_hours: 0
-created: ${today}
+created: "${today}"
 tags:
   - finance
   - time-log
@@ -176,12 +181,13 @@ cssclasses:
   - wide
 ---
 
+%% nav buttons rendered conditionally — suppressed when this note is embedded via ![[Time-Log-${month}]] inside the invoice atlas %%
 \`\`\`dataviewjs
-await dv.view("Docs/Meta/Views/customjs-guard", { class: "SpaceNavButtons" });
-\`\`\`
-
-\`\`\`dataviewjs
-await dv.view("Docs/Meta/Views/customjs-guard", { class: "InvoiceNavButtons" });
+const isEmbedded = dv.container.closest(".markdown-embed") != null;
+if (!isEmbedded) {
+    await dv.view("Docs/Meta/Views/customjs-guard", { class: "SpaceNavButtons" });
+    await dv.view("Docs/Meta/Views/customjs-guard", { class: "InvoiceNavButtons" });
+}
 \`\`\`
 
 # Time Log — ${month}

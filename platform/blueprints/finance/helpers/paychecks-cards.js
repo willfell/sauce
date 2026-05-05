@@ -19,14 +19,14 @@ class PaychecksCards {
         await customJS.BeaconCards.render(dv, {
             pages: filtered,
             layout: "row",
-            title: p => `Paycheck — ${p.pay_period_start || p.file.name}`,
+            title: p => `Paycheck — ${customJS.FinanceStatus.formatDate(p.pay_period_start, "YYYY-MM-DD") || p.file.name}`,
             subtitle: p => {
                 const exp = Array.isArray(p.expenses) ? p.expenses : [];
                 const paid = exp.filter(e => e && e.paid === true).length;
                 const amt = Number(p.paycheck_amount || 0);
-                const range = (p.pay_period_start && p.pay_period_end)
-                    ? `${p.pay_period_start} to ${p.pay_period_end}`
-                    : "";
+                const startStr = customJS.FinanceStatus.formatDate(p.pay_period_start, "YYYY-MM-DD");
+                const endStr   = customJS.FinanceStatus.formatDate(p.pay_period_end,   "YYYY-MM-DD");
+                const range = (startStr && endStr) ? `${startStr} to ${endStr}` : "";
                 return {
                     text: `${paid}/${exp.length} paid · $${amt.toLocaleString()}`,
                     secondaryText: range

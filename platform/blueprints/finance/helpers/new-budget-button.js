@@ -113,9 +113,9 @@ class NewBudgetButton {
         const today = window.moment().format("YYYY-MM-DD");
         const body = `---
 type: budget
-budget_month: ${month}
+budget_month: "${month}"
 categories: []
-created: ${today}
+created: "${today}"
 tags:
   - finance
   - budget
@@ -125,6 +125,10 @@ cssclasses:
 
 \`\`\`dataviewjs
 await dv.view("Docs/Meta/Views/customjs-guard", { class: "SpaceNavButtons" });
+\`\`\`
+
+\`\`\`dataviewjs
+await customJS.FinanceStatus.renderBadge(dv, "budget");
 \`\`\`
 
 # Budget — ${month}
