@@ -128,9 +128,10 @@ class NewInvoiceButton {
 type: invoice
 month: "${month}"
 date: "${month}-01"
+rate: 0
 hours: 0
 amount: 0
-submitted_date: null
+submitted_date:
 created: "${today}"
 tags:
   - finance
@@ -151,18 +152,19 @@ await dv.view("Docs/Meta/Views/customjs-guard", { class: "InvoiceNavButtons" });
 await customJS.FinanceStatus.renderBadge(dv, "invoice");
 \`\`\`
 
+\`\`\`dataviewjs
+await dv.view("Docs/Meta/Views/customjs-guard", { class: "InvoiceControls" });
+\`\`\`
+
 # Invoice — ${month}
 
 | Field | Value |
 |-------|-------|
 | **Month** | ${month} |
+| **Rate** | \`= "$" + this.rate + "/hr"\` |
 | **Hours** | \`= this.hours\` |
 | **Amount** | \`= "$" + this.amount\` |
 | **Submitted** | \`= choice(this.submitted_date, this.submitted_date, "—")\` |
-
-## Time Log
-
-![[Time-Log-${month}]]
 
 ## Notes
 
@@ -173,6 +175,7 @@ type: time-log
 month: "${month}"
 date: "${month}-01"
 total_hours: 0
+entries: []
 created: "${today}"
 tags:
   - finance
@@ -181,7 +184,7 @@ cssclasses:
   - wide
 ---
 
-%% nav buttons rendered conditionally — suppressed when this note is embedded via ![[Time-Log-${month}]] inside the invoice atlas %%
+%% nav buttons rendered conditionally — suppressed when this note is embedded elsewhere %%
 \`\`\`dataviewjs
 const isEmbedded = dv.container.closest(".markdown-embed") != null;
 if (!isEmbedded) {
@@ -192,14 +195,9 @@ if (!isEmbedded) {
 
 # Time Log — ${month}
 
-| Date | Start | End | Hours | Description |
-|------|-------|-----|------:|-------------|
-
-## Totals
-
-| | |
-|---|---:|
-| **Total Hours** | \`= this.total_hours\` |
+\`\`\`dataviewjs
+await dv.view("Docs/Meta/Views/customjs-guard", { class: "InvoiceTimeLogEditor" });
+\`\`\`
 `;
 
         const boardBody = `---

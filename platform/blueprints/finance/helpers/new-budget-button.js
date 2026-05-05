@@ -131,6 +131,10 @@ await dv.view("Docs/Meta/Views/customjs-guard", { class: "SpaceNavButtons" });
 \`\`\`
 
 \`\`\`dataviewjs
+await dv.view("Docs/Meta/Views/customjs-guard", { class: "BudgetNavButtons" });
+\`\`\`
+
+\`\`\`dataviewjs
 await customJS.FinanceStatus.renderBadge(dv, "budget");
 \`\`\`
 
@@ -138,9 +142,9 @@ await customJS.FinanceStatus.renderBadge(dv, "budget");
 
 ## Categories
 
-| Name | Planned | Actual |
-|------|--------:|-------:|
-| (add categories to frontmatter \`categories: []\` as \`{name, planned, actual}\`) |  |  |
+\`\`\`dataviewjs
+await dv.view("Docs/Meta/Views/customjs-guard", { class: "BudgetCategoriesEditor" });
+\`\`\`
 
 ## Notes
 

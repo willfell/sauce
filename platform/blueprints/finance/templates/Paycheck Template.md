@@ -16,11 +16,21 @@ cssclasses:
 await dv.view("Docs/Meta/Views/customjs-guard", { class: "SpaceNavButtons" });
 ```
 
+```dataviewjs
+await dv.view("Docs/Meta/Views/customjs-guard", { class: "PaycheckNavButtons" });
+```
+
+```dataviewjs
+await customJS.FinanceStatus.renderBadge(dv, "paycheck");
+```
+
 # Paycheck
 
 ## Expenses
 
-(Add expenses to frontmatter `expenses: []` as `{item, amount, category, paid, url?}`)
+```dataviewjs
+await dv.view("Docs/Meta/Views/customjs-guard", { class: "PaycheckExpensesEditor" });
+```
 
 ## Notes
 
