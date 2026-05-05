@@ -1,0 +1,41 @@
+{
+  "name": "journal",
+  "version": "0.1.0",
+  "kind": "blueprint",
+  "module_directory": "journal",
+  "description": "Date-routed daily journal entries under beacon/journal/. Filename pattern Journal-YYYY-MM-DD per gotcha 8 platform invariant. Nav-button-driven creation via runTemplaterTemplate; manual creation under beacon/journal/ auto-applies template via templater_folder_templates.",
+  "depends_on": [
+    { "name": "nav-buttons",    "range": ">=2.4.0" },
+    { "name": "customjs-guard", "range": ">=1.0.0" }
+  ],
+  "files": [
+    { "source": "templates/Today Journal.md", "dest": "{{templates_path}}/Today Journal.md" }
+  ],
+  "nav_buttons": [
+    {
+      "id": "journal-today",
+      "label": "+ Today's Journal",
+      "icon": "journal",
+      "order": 120,
+      "action": {
+        "type": "runTemplaterTemplate",
+        "template_source": "Today Journal.md",
+        "folder_prefix": "{{module_directory}}",
+        "folder_date_pattern": "YYYY/MM-MMMM",
+        "filename_prefix": "Journal-",
+        "filename_date_pattern": "YYYY-MM-DD",
+        "filename_suffix": ""
+      }
+    }
+  ],
+  "templater_folder_templates": [
+    { "folder": "{{module_directory}}", "template": "{{templates_path}}/Today Journal.md" }
+  ],
+  "post_install": [
+    {
+      "type": "notice",
+      "message": "Journal blueprint installed at beacon/journal/. REQUIRED: enable the Templater community plugin if not already enabled. Click '+ Today's Journal' in the nav-button row to create today's file at beacon/journal/YYYY/MM-MMMM/Journal-YYYY-MM-DD.md. Manual file creation under beacon/journal/ auto-applies the template (via Templater folder-template registration). Frontmatter cross-links to that day's daily note via [[<DayName>-YYYY-MM-DD]] when daily blueprint is installed."
+    }
+  ],
+  "rule_fragments": []
+}
