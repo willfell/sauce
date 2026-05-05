@@ -1,9 +1,9 @@
 {
   "name": "daily",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "kind": "blueprint",
   "module_directory": "daily",
-  "description": "Date-organized daily notes via Obsidian's core Daily Notes plugin + Calendar; ports accuris's Timestamps pattern under beacon/daily/. v0.1.4: contributes Today nav-button (invoke_command -> daily-notes; the core daily-notes plugin's 'Open today's daily note' command id) requiring nav-buttons >=2.3.0; filename pattern dddd-YYYY-MM-DD per v0.4.2 platform invariant.",
+  "description": "Date-organized daily notes via Obsidian's core Daily Notes plugin + Calendar; ports accuris's Timestamps pattern under beacon/daily/. v0.1.4: contributes Today nav-button (invoke_command -> daily-notes; the core daily-notes plugin's 'Open today's daily note' command id) requiring nav-buttons >=2.3.0; filename pattern dddd-YYYY-MM-DD per v0.4.2 platform invariant. v0.2.0: SpaceDailyDashboard panels (tasks + meetings) migrated to BeaconCards via panel-host wrapper preserved + per-panel dv shim ({container: subContainerEl}); tasks panel rendered ABOVE meetings panel (S2 user feedback); tasks use synthetic-page pattern with onClick to parent file.",
   "depends_on": [
     { "name": "nav-buttons",    "range": ">=2.3.0" },
     { "name": "customjs-guard", "range": ">=1.0.0" }
