@@ -1,9 +1,16 @@
 /**
  * Daily Dashboard (CustomJS)
- * Shows meetings and tasks for the current daily note.
+ * Panel-host wrapper around two BeaconCards calls (tasks + meetings).
  *
  * Usage in DataviewJS:
  *   await dv.view("Docs/Meta/Views/customjs-guard", { class: "SpaceDailyDashboard" });
+ *
+ * v0.2.0 (cards-cohesion cycle): migrated from flat <ul> lists to per-panel
+ * BeaconCards.render calls (columns: 1). Panel-host wrapper preserved
+ * (rounded background, per-section SVG headers). Both-empty short-circuit
+ * preserved. Tasks render ABOVE meetings (S2 user feedback). Tasks use
+ * synthetic-page pattern: each task becomes a {file:{name,path}, line, text,
+ * _isTask:true} object with custom onClick that opens the parent file.
  */
 class SpaceDailyDashboard {
   async render(dv) {
@@ -27,12 +34,7 @@ class SpaceDailyDashboard {
       const pages = dv.pages(`"${config.meetingsPath}"`)
         .where(p => p.file.name.startsWith(today))
         .sort(p => p.file.name, "asc");
-      return pages.array().map(p => ({
-        link: p.file.link,
-        path: p.file.path,
-        name: p.file.name.replace(`${today} `, ""),
-        summary: p.summary || ""
-      }));
+      return pages.array();
     };
 
     const getTasks = () => {
@@ -43,7 +45,12 @@ class SpaceDailyDashboard {
         for (const page of todoPages) {
           const pageTasks = page.file.tasks.where(t => !t.completed);
           for (const task of pageTasks) {
-            tasks.push({ text: task.text, due: task.due });
+            tasks.push({
+              file: { name: page.file.name, path: page.file.path },
+              line: task.line,
+              text: task.text,
+              _isTask: true
+            });
           }
         }
       }
@@ -68,39 +75,9 @@ class SpaceDailyDashboard {
       border: 1px solid var(--background-modifier-border);
     `;
 
-    if (meetings.length > 0) {
-      const meetingsSection = container.createEl("div", { cls: "section" });
-      meetingsSection.style.cssText = "margin-bottom: 16px;";
-
-      const meetingsHeader = meetingsSection.createEl("div", { cls: "section-header" });
-      meetingsHeader.innerHTML = `${icons.calendar} <span>Today's Meetings</span>`;
-      meetingsHeader.style.cssText = `
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        font-size: 0.95em;
-        font-weight: 600;
-        color: var(--text-normal);
-        margin-bottom: 10px;
-      `;
-
-      const meetingsList = meetingsSection.createEl("ul");
-      meetingsList.style.cssText = "margin: 0; padding-left: 20px; list-style-type: disc;";
-
-      for (const meeting of meetings) {
-        const li = meetingsList.createEl("li");
-        li.style.cssText = "margin: 6px 0; font-size: 0.9em;";
-        const link = li.createEl("a", { cls: "internal-link", href: meeting.path });
-        link.innerText = meeting.name;
-        if (meeting.summary) {
-          li.createEl("span", { text: ` — ${meeting.summary}` });
-          li.lastChild.style.color = "var(--text-muted)";
-        }
-      }
-    }
-
     if (tasks.length > 0) {
       const tasksSection = container.createEl("div", { cls: "section" });
+      tasksSection.style.cssText = "margin-bottom: 16px;";
 
       const tasksHeader = tasksSection.createEl("div", { cls: "section-header" });
       tasksHeader.innerHTML = `${icons.checkSquare} <span>Today's Tasks</span>`;
@@ -114,14 +91,49 @@ class SpaceDailyDashboard {
         margin-bottom: 10px;
       `;
 
-      const tasksList = tasksSection.createEl("ul");
-      tasksList.style.cssText = "margin: 0; padding-left: 20px; list-style-type: disc;";
+      const tasksPanel = tasksSection.createEl("div");
+      const tasksShim = { container: tasksPanel };
+      await customJS.BeaconCards.render(tasksShim, {
+        pages: tasks,
+        layout: "stacked",
+        columns: 1,
+        title: p => p.text,
+        target: p => p.file.path,
+        onClick: (p, ev) => app.workspace.openLinkText(p.file.path, ""),
+        sort: () => 0,
+        empty: "(no tasks — should not render due to outer hasContent guard)"
+      });
+    }
 
-      for (const task of tasks) {
-        const li = tasksList.createEl("li");
-        li.style.cssText = "margin: 6px 0; font-size: 0.9em;";
-        li.innerText = task.text;
-      }
+    if (meetings.length > 0) {
+      const meetingsSection = container.createEl("div", { cls: "section" });
+
+      const meetingsHeader = meetingsSection.createEl("div", { cls: "section-header" });
+      meetingsHeader.innerHTML = `${icons.calendar} <span>Today's Meetings</span>`;
+      meetingsHeader.style.cssText = `
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.95em;
+        font-weight: 600;
+        color: var(--text-normal);
+        margin-bottom: 10px;
+      `;
+
+      const meetingsPanel = meetingsSection.createEl("div");
+      const meetingsShim = { container: meetingsPanel };
+      await customJS.BeaconCards.render(meetingsShim, {
+        pages: meetings,
+        layout: "stacked",
+        columns: 1,
+        title: p => p.file.name.replace(`${today} `, ""),
+        subtitle: p => {
+          const s = p.summary || "";
+          return (typeof s === "string" && s.trim()) ? s.trim() : null;
+        },
+        target: p => p.file.path,
+        empty: "(no meetings — should not render due to outer hasContent guard)"
+      });
     }
   }
 }
