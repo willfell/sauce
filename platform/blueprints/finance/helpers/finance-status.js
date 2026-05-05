@@ -83,16 +83,19 @@ class FinanceStatus {
         if (!page) return;
         const { label, tone } = this.derive(page, type);
         const palette = {
-            warn:    { bg: "#f59e0b", text: "#fff" },
-            success: { bg: "#16a34a", text: "#fff" },
-            muted:   { bg: "var(--background-modifier-border)", text: "var(--text-muted)" }
+            warn:    { dot: "#f59e0b", border: "rgba(245, 158, 11, 0.35)",  bg: "rgba(245, 158, 11, 0.08)" },
+            success: { dot: "#16a34a", border: "rgba(22, 163, 74, 0.35)",   bg: "rgba(22, 163, 74, 0.08)" },
+            muted:   { dot: "var(--text-muted)", border: "var(--background-modifier-border)", bg: "transparent" }
         };
         const p = palette[tone] || palette.muted;
         const row = dv.container.createEl("div", { cls: "fs-badge-row" });
         row.style.cssText = "display: flex; gap: 6px; margin: 4px 0 12px 0;";
         const chip = row.createEl("span");
-        chip.textContent = label;
-        chip.style.cssText = `display: inline-flex; align-items: center; padding: 3px 12px; border-radius: 4px; font-size: 0.78em; font-weight: 600; background: ${p.bg}; color: ${p.text}; white-space: nowrap;`;
+        chip.style.cssText = `display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px 3px 8px; border-radius: 999px; font-size: 0.75em; font-weight: 500; background: ${p.bg}; color: var(--text-normal); border: 1px solid ${p.border}; white-space: nowrap; letter-spacing: 0.02em;`;
+        const dot = chip.createEl("span");
+        dot.style.cssText = `width: 6px; height: 6px; border-radius: 50%; background: ${p.dot}; flex-shrink: 0;`;
+        const text = chip.createEl("span");
+        text.textContent = label;
     }
 
     /** Format a Date|string|Luxon-DateTime to YYYY-MM-DD or YYYY-MM. */

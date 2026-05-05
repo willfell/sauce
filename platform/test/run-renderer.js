@@ -959,17 +959,19 @@ async function testFF8WidgetEmbedDedup() {
   return pass;
 }
 
-async function testFF3HubAreaRowChevron() {
-  console.log('\n=== FF3 — FinanceHubCards area-row buttons have chevron SVG + Open label ===');
+async function testFF3HubAreaRowIcons() {
+  console.log('\n=== FF3 — FinanceHubCards area-row buttons have icon SVG + label (post-CF-1) ===');
   const app = makeApp();
   const Cls = loadFinanceClass('FinanceHubCards', app);
   const dv = makeDv();
   const sn = new Cls();
   await sn.render(dv);
   const allButtons = collectButtons(dv.container);
-  const chevronButtons = allButtons.filter(b => typeof b.innerHTML === 'string' && b.innerHTML.includes('<svg') && b.innerHTML.includes('Open '));
-  console.log(`  area-row buttons with chevron + 'Open ' label: ${chevronButtons.length}`);
-  const pass = chevronButtons.length === 3;
+  const iconButtons = allButtons.filter(b => typeof b.innerHTML === 'string' && b.innerHTML.includes('<svg'));
+  const labels = ['Budgets', 'Paychecks', 'Invoices'];
+  const labelMatches = labels.filter(lbl => iconButtons.some(b => b.innerHTML.includes(`<span>${lbl}</span>`)));
+  console.log(`  area-row buttons with SVG: ${iconButtons.length} ; matched labels: ${labelMatches.length}/3`);
+  const pass = iconButtons.length === 3 && labelMatches.length === 3;
   console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
   return pass;
 }
@@ -1002,7 +1004,7 @@ async function testFF3HubAreaRowChevron() {
     if (which === 'finance' || which === 'all') {
       results.push(['FF1 budget-nav-in-path', await testFF1BudgetNavInPath()]);
       results.push(['FF2 budget-nav-out-of-path', await testFF2BudgetNavOutOfPath()]);
-      results.push(['FF3 hub-area-row-chevron', await testFF3HubAreaRowChevron()]);
+      results.push(['FF3 hub-area-row-icons', await testFF3HubAreaRowIcons()]);
       results.push(['FF4 budget-categories-editor-add-button', await testFF4BudgetCategoriesAddButton()]);
       results.push(['FF5 paycheck-expenses-editor-add-button', await testFF5PaycheckExpensesAddButton()]);
       results.push(['FF6 invoice-time-log-editor-out-of-path', await testFF6InvoiceTimeLogOutOfPath()]);
