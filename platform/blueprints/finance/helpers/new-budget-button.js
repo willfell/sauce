@@ -58,7 +58,7 @@ class NewBudgetButton {
             const checkExists = () => {
                 const m = input.value;
                 if (!m) { status.textContent = ""; return; }
-                const path = `beacon/finance/budgets/Budget-${m}.md`;
+                const path = `beacon/finance/budgets/${m}/Budget-${m}.md`;
                 if (app.vault.getAbstractFileByPath(path)) {
                     status.textContent = `Budget-${m}.md already exists. Will open existing.`;
                     status.style.color = "var(--text-muted)";
@@ -101,11 +101,14 @@ class NewBudgetButton {
     }
 
     async _createBudget(month) {
-        const dir = "beacon/finance/budgets";
-        if (!app.vault.getAbstractFileByPath(dir)) {
-            await app.vault.createFolder(dir);
+        const baseDir = "beacon/finance/budgets";
+        const entityDir = `${baseDir}/${month}`;
+        for (const dir of [baseDir, entityDir]) {
+            if (!app.vault.getAbstractFileByPath(dir)) {
+                await app.vault.createFolder(dir);
+            }
         }
-        const path = `${dir}/Budget-${month}.md`;
+        const path = `${entityDir}/Budget-${month}.md`;
         if (app.vault.getAbstractFileByPath(path)) {
             new Notice(`Budget-${month}.md already exists; opening.`);
             return path;

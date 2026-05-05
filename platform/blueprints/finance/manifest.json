@@ -1,6 +1,6 @@
 {
   "name": "finance",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "kind": "blueprint",
   "module_directory": "finance",
   "description": "Finance blueprint covering Budgets + Paychecks + Invoices under beacon/finance/. Top hub Finance.md aggregates pending items from all three sub-areas. Budgets/Paychecks are flat dated entities; Invoices use a per-month folder ecosystem mirroring trips/<slug>/. Status pills (Planning/In Progress/Done) derived from frontmatter via shared FinanceStatus helper. Three overlay-dialog New buttons each tailored to their entity inputs.",

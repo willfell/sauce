@@ -51,7 +51,7 @@ class NewPaycheckButton {
                 if (endInput.value < startInput.value) return "End date must be on or after start date.";
                 const amt = Number(amountInput.value);
                 if (Number.isNaN(amt) || amt < 0) return "Amount must be a non-negative number.";
-                const path = `beacon/finance/paychecks/Paycheck-${startInput.value}.md`;
+                const path = `beacon/finance/paychecks/${startInput.value}/Paycheck-${startInput.value}.md`;
                 if (app.vault.getAbstractFileByPath(path)) return `Paycheck-${startInput.value}.md already exists. Will open existing.`;
                 return null;
             };
@@ -137,11 +137,14 @@ class NewPaycheckButton {
     }
 
     async _createPaycheck({ start_date, end_date, amount }) {
-        const dir = "beacon/finance/paychecks";
-        if (!app.vault.getAbstractFileByPath(dir)) {
-            await app.vault.createFolder(dir);
+        const baseDir = "beacon/finance/paychecks";
+        const entityDir = `${baseDir}/${start_date}`;
+        for (const dir of [baseDir, entityDir]) {
+            if (!app.vault.getAbstractFileByPath(dir)) {
+                await app.vault.createFolder(dir);
+            }
         }
-        const path = `${dir}/Paycheck-${start_date}.md`;
+        const path = `${entityDir}/Paycheck-${start_date}.md`;
         if (app.vault.getAbstractFileByPath(path)) {
             new Notice(`Paycheck-${start_date}.md already exists; opening.`);
             return path;
