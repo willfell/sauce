@@ -32,6 +32,11 @@
  *   FF1   budget-nav-in-path         BudgetNavButtons on Budget atlas path → 2 buttons (active hidden)
  *   FF2   budget-nav-out-of-path     BudgetNavButtons on non-budget path → renders nothing
  *   FF3   hub-area-row-chevron       FinanceHubCards area-row buttons render with chevron SVG + "Open " label
+ *   FF4   budget-categories-editor-add-button     BudgetCategoriesEditor renders Add button on Budget page
+ *   FF5   paycheck-expenses-editor-add-button     PaycheckExpensesEditor renders Add button on Paycheck page
+ *   FF6   invoice-time-log-editor-out-of-path     InvoiceTimeLogEditor on non-Time-Log path renders nothing
+ *   FF7   invoice-controls-rate-and-toggle        InvoiceControls renders rate input + Mark Submitted button
+ *   FF8   widget-embed-dedup                      InvoiceControls inside .markdown-embed renders nothing
  *
  * Usage:
  *   node platform/test/run-renderer.js [--vault <path>] [test-selector]
@@ -95,6 +100,8 @@ function makeEl(tag, opts) {
     onmouseenter: null,
     onmouseleave: null,
     parent: null,
+    addEventListener: function () {},
+    removeEventListener: function () {},
   };
   el.createEl = function (t, o) {
     const c = makeEl(t, o);
@@ -854,6 +861,104 @@ async function testFF2BudgetNavOutOfPath() {
   return pass;
 }
 
+function makeDvWithCurrentAndFrontmatter(file, fm) {
+  const dv = makeDvWithCurrent({ file, ...fm });
+  return dv;
+}
+
+async function testFF4BudgetCategoriesAddButton() {
+  console.log('\n=== FF4 — BudgetCategoriesEditor renders Add button on Budget page ===');
+  const app = makeApp({ fileExistsHook: (p) => ({ path: p }) });
+  const Cls = loadFinanceClass('BudgetCategoriesEditor', app);
+  const dv = makeDvWithCurrentAndFrontmatter(
+    { name: 'Budget-2026-05', path: 'beacon/finance/budgets/2026-05/Budget-2026-05.md' },
+    { categories: [] }
+  );
+  const sn = new Cls();
+  await sn.render(dv);
+  const root = findClass(dv.container, 'bce-root');
+  const buttons = root ? collectButtons(root) : [];
+  const addBtn = buttons.find(b => typeof b.innerHTML === 'string' && b.innerHTML.includes('Add Category'));
+  console.log(`  bce-root present: ${!!root} ; Add button found: ${!!addBtn}`);
+  const pass = !!root && !!addBtn;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
+async function testFF5PaycheckExpensesAddButton() {
+  console.log('\n=== FF5 — PaycheckExpensesEditor renders Add button on Paycheck page ===');
+  const app = makeApp({ fileExistsHook: (p) => ({ path: p }) });
+  const Cls = loadFinanceClass('PaycheckExpensesEditor', app);
+  const dv = makeDvWithCurrentAndFrontmatter(
+    { name: 'Paycheck-2026-05-15', path: 'beacon/finance/paychecks/2026-05-15/Paycheck-2026-05-15.md' },
+    { expenses: [] }
+  );
+  const sn = new Cls();
+  await sn.render(dv);
+  const root = findClass(dv.container, 'pee-root');
+  const buttons = root ? collectButtons(root) : [];
+  const addBtn = buttons.find(b => typeof b.innerHTML === 'string' && b.innerHTML.includes('Add Expense'));
+  console.log(`  pee-root present: ${!!root} ; Add button found: ${!!addBtn}`);
+  const pass = !!root && !!addBtn;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
+async function testFF6InvoiceTimeLogOutOfPath() {
+  console.log('\n=== FF6 — InvoiceTimeLogEditor on non-Time-Log path renders nothing ===');
+  const app = makeApp();
+  const Cls = loadFinanceClass('InvoiceTimeLogEditor', app);
+  const dv = makeDvWithCurrentAndFrontmatter(
+    { name: 'SomeAtlas', path: 'beacon/projects/SomeAtlas.md' },
+    { entries: [] }
+  );
+  const sn = new Cls();
+  await sn.render(dv);
+  const root = findClass(dv.container, 'itle-root');
+  console.log(`  itle-root present (should be false): ${!!root}`);
+  const pass = !root;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
+async function testFF7InvoiceControlsRateAndToggle() {
+  console.log('\n=== FF7 — InvoiceControls renders rate input + Mark Submitted button ===');
+  const app = makeApp({ fileExistsHook: (p) => ({ path: p }) });
+  const Cls = loadFinanceClass('InvoiceControls', app);
+  const dv = makeDvWithCurrentAndFrontmatter(
+    { name: 'Invoice-2026-05', path: 'beacon/finance/invoices/2026-05/Invoice-2026-05.md' },
+    { rate: 75, submitted_date: '' }
+  );
+  const sn = new Cls();
+  await sn.render(dv);
+  const root = findClass(dv.container, 'ic-root');
+  const inputs = root ? collectAll(root, el => el.tag === 'input') : [];
+  const buttons = root ? collectButtons(root) : [];
+  const markBtn = buttons.find(b => typeof b.textContent === 'string' && b.textContent.includes('Mark Submitted'));
+  console.log(`  ic-root: ${!!root} ; rate input count: ${inputs.length} ; Mark Submitted button: ${!!markBtn}`);
+  const pass = !!root && inputs.length >= 1 && !!markBtn;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
+async function testFF8WidgetEmbedDedup() {
+  console.log('\n=== FF8 — InvoiceControls inside .markdown-embed renders nothing ===');
+  const app = makeApp();
+  const Cls = loadFinanceClass('InvoiceControls', app);
+  const dv = makeDvWithCurrentAndFrontmatter(
+    { name: 'Invoice-2026-05', path: 'beacon/finance/invoices/2026-05/Invoice-2026-05.md' },
+    { rate: 75, submitted_date: '' }
+  );
+  dv.container.closest = (sel) => sel === '.markdown-embed' ? { tag: 'div' } : null;
+  const sn = new Cls();
+  await sn.render(dv);
+  const root = findClass(dv.container, 'ic-root');
+  console.log(`  ic-root present (should be false): ${!!root}`);
+  const pass = !root;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
 async function testFF3HubAreaRowChevron() {
   console.log('\n=== FF3 — FinanceHubCards area-row buttons have chevron SVG + Open label ===');
   const app = makeApp();
@@ -898,6 +1003,11 @@ async function testFF3HubAreaRowChevron() {
       results.push(['FF1 budget-nav-in-path', await testFF1BudgetNavInPath()]);
       results.push(['FF2 budget-nav-out-of-path', await testFF2BudgetNavOutOfPath()]);
       results.push(['FF3 hub-area-row-chevron', await testFF3HubAreaRowChevron()]);
+      results.push(['FF4 budget-categories-editor-add-button', await testFF4BudgetCategoriesAddButton()]);
+      results.push(['FF5 paycheck-expenses-editor-add-button', await testFF5PaycheckExpensesAddButton()]);
+      results.push(['FF6 invoice-time-log-editor-out-of-path', await testFF6InvoiceTimeLogOutOfPath()]);
+      results.push(['FF7 invoice-controls-rate-and-toggle', await testFF7InvoiceControlsRateAndToggle()]);
+      results.push(['FF8 widget-embed-dedup', await testFF8WidgetEmbedDedup()]);
     }
     if (which === 'barebones-one-button' || which === 'all') {
       const isWorkshop = VAULT === WORKSHOP;
