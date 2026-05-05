@@ -30,5 +30,3 @@ await customJS.FinanceStatus.renderBadge(dv, "invoice");
 await dv.view("Docs/Meta/Views/customjs-guard", { class: "InvoiceControls" });
 ```
 
-## Notes
-

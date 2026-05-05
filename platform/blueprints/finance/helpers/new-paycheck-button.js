@@ -184,8 +184,6 @@ await customJS.FinanceStatus.renderBadge(dv, "paycheck");
 await dv.view("Docs/Meta/Views/customjs-guard", { class: "PaycheckExpensesEditor" });
 \`\`\`
 
-## Notes
-
 `;
         await app.vault.create(path, body);
         return path;

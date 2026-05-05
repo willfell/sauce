@@ -146,8 +146,6 @@ await customJS.FinanceStatus.renderBadge(dv, "budget");
 await dv.view("Docs/Meta/Views/customjs-guard", { class: "BudgetCategoriesEditor" });
 \`\`\`
 
-## Notes
-
 `;
         await app.vault.create(path, body);
         return path;
