@@ -1,0 +1,66 @@
+{
+  "name": "finance",
+  "version": "0.1.0",
+  "kind": "blueprint",
+  "module_directory": "finance",
+  "description": "Finance blueprint covering Budgets + Paychecks + Invoices under beacon/finance/. Top hub Finance.md aggregates pending items from all three sub-areas. Budgets/Paychecks are flat dated entities; Invoices use a per-month folder ecosystem mirroring trips/<slug>/. Status pills (Planning/In Progress/Done) derived from frontmatter via shared FinanceStatus helper. Three overlay-dialog New buttons each tailored to their entity inputs.",
+  "depends_on": [
+    { "name": "nav-buttons",    "range": ">=2.5.2" },
+    { "name": "cards",          "range": ">=0.2.2" },
+    { "name": "customjs-guard", "range": ">=1.0.0" }
+  ],
+  "customjs_classes": [
+    "FinanceStatus",
+    "FinanceHubCards",
+    "BudgetsCards",
+    "PaychecksCards",
+    "InvoicesCards",
+    "NewBudgetButton",
+    "NewPaycheckButton",
+    "NewInvoiceButton",
+    "InvoiceNavButtons"
+  ],
+  "files": [
+    { "source": "helpers/finance-status.js",       "dest": "{{scripts_path}}/finance/finance-status.js" },
+    { "source": "helpers/finance-hub-cards.js",    "dest": "{{scripts_path}}/finance/finance-hub-cards.js" },
+    { "source": "helpers/budgets-cards.js",        "dest": "{{scripts_path}}/finance/budgets-cards.js" },
+    { "source": "helpers/paychecks-cards.js",      "dest": "{{scripts_path}}/finance/paychecks-cards.js" },
+    { "source": "helpers/invoices-cards.js",       "dest": "{{scripts_path}}/finance/invoices-cards.js" },
+    { "source": "helpers/new-budget-button.js",    "dest": "{{scripts_path}}/finance/new-budget-button.js" },
+    { "source": "helpers/new-paycheck-button.js",  "dest": "{{scripts_path}}/finance/new-paycheck-button.js" },
+    { "source": "helpers/new-invoice-button.js",   "dest": "{{scripts_path}}/finance/new-invoice-button.js" },
+    { "source": "helpers/invoice-nav-buttons.js",  "dest": "{{scripts_path}}/finance/invoice-nav-buttons.js" },
+
+    { "source": "content/Finance.md",              "dest": "{{module_directory}}/Finance.md" },
+    { "source": "content/Budgets.md",              "dest": "{{module_directory}}/budgets/Budgets.md" },
+    { "source": "content/Paychecks.md",            "dest": "{{module_directory}}/paychecks/Paychecks.md" },
+    { "source": "content/Invoices.md",             "dest": "{{module_directory}}/invoices/Invoices.md" },
+
+    { "source": "templates/Budget Template.md",         "dest": "{{templates_path}}/Template, Budget.md" },
+    { "source": "templates/Paycheck Template.md",       "dest": "{{templates_path}}/Template, Paycheck.md" },
+    { "source": "templates/Invoice Template.md",        "dest": "{{templates_path}}/Template, Invoice.md" },
+    { "source": "templates/Time Log Template.md",       "dest": "{{templates_path}}/Template, Time Log.md" },
+    { "source": "templates/Invoice Board.md",           "dest": "{{templates_path}}/Template, Invoice Board.md" },
+    { "source": "templates/Invoice Board Card.md",      "dest": "{{templates_path}}/Template, Invoice Board Card.md" }
+  ],
+  "nav_buttons": [
+    {
+      "id": "finance-hub",
+      "label": "Finance",
+      "icon": "finance",
+      "order": 120,
+      "action": { "type": "openLink", "target": "{{module_directory}}/Finance.md" }
+    }
+  ],
+  "templater_folder_templates": [
+    { "folder": "{{module_directory}}/budgets",   "template": "{{templates_path}}/Template, Budget.md" },
+    { "folder": "{{module_directory}}/paychecks", "template": "{{templates_path}}/Template, Paycheck.md" }
+  ],
+  "post_install": [
+    {
+      "type": "notice",
+      "message": "Finance blueprint v0.1.0 installed at beacon/finance/. Open beacon/finance/Finance.md and click 'New Budget' / 'New Paycheck' / 'New Invoice' to scaffold entries. Status pills (Planning/In Progress/Done) derive from frontmatter at render time. Cmd+R required after this install to load 9 CustomJS classes."
+    }
+  ],
+  "rule_fragments": []
+}
