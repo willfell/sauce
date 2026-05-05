@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop platform manifest. Each mechanism + blueprint has its own version.",
-  "workshop_version": "0.14.0",
+  "workshop_version": "0.15.0",
   "date": "2026-05-04",
   "installer": {
     "source": "install.js",
@@ -11,7 +11,7 @@
     { "name": "customjs-guard", "version": "1.0.0", "path": "mechanisms/customjs-guard" },
     { "name": "validator", "version": "0.1.1", "path": "mechanisms/validator" },
     { "name": "audit", "version": "0.1.1", "path": "mechanisms/audit" },
-    { "name": "nav-buttons", "version": "2.5.0", "path": "mechanisms/nav-buttons" },
+    { "name": "nav-buttons", "version": "2.5.1", "path": "mechanisms/nav-buttons" },
     { "name": "cards", "version": "0.2.1", "path": "mechanisms/cards" }
   ],
   "blueprints": [
@@ -20,6 +20,7 @@
     { "name": "meetings", "version": "0.2.0", "path": "blueprints/meetings" },
     { "name": "project", "version": "1.3.2", "path": "blueprints/project" },
     { "name": "to-do", "version": "0.1.2", "path": "blueprints/to-do" },
-    { "name": "journal", "version": "0.1.0", "path": "blueprints/journal" }
+    { "name": "journal", "version": "0.1.0", "path": "blueprints/journal" },
+    { "name": "trips", "version": "0.1.0", "path": "blueprints/trips" }
   ]
 }
