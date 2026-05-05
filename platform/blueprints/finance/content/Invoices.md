@@ -11,8 +11,6 @@ cssclasses:
 await dv.view("{{views_path}}/customjs-guard", { class: "SpaceNavButtons" });
 ```
 
-# Invoices
-
 ```dataviewjs
 await dv.view("{{views_path}}/customjs-guard", { class: "NewInvoiceButton" });
 ```
