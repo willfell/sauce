@@ -6,7 +6,8 @@ class TripSectionsCards {
     if (tripsIdx < 1 || pathParts[tripsIdx - 1] !== "beacon" || pathParts.length !== tripsIdx + 3) {
       return;
     }
-    const tripDir = `beacon/trips/${pathParts[tripsIdx + 1]}`;
+    const slug = pathParts[tripsIdx + 1];
+    const tripDir = `beacon/trips/${slug}`;
 
     const folderObj = app.vault.getAbstractFileByPath(tripDir);
     if (!folderObj || !folderObj.children) return;
@@ -24,6 +25,7 @@ class TripSectionsCards {
       "Packing List": `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--interactive-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;"><path d="M4 10a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M8 10h8"/><path d="M8 18v-4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v4"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>`,
       "To Do":        `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--interactive-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="m9 12 2 2 4-4"/></svg>`,
       "Notes":        `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--interactive-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`,
+      "Trip Board":   `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--interactive-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>`,
     };
     const fallbackIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--interactive-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
 
@@ -31,18 +33,33 @@ class TripSectionsCards {
 
     const pages = siblings.map(f => ({ file: { name: f.basename, path: f.path } }));
 
+    // Trip Board lives under <slug>/board/<slug>-board.md (subfolder, not a sibling).
+    // Synthesize a card entry pointing at it with the "Trip Board" display name.
+    const boardPath = `${tripDir}/board/${slug}-board.md`;
+    const boardFile = app.vault.getAbstractFileByPath(boardPath);
+    if (boardFile) {
+      pages.push({ file: { name: "Trip Board", path: boardPath } });
+    }
+
+    const isDefault = (name) => DEFAULT_ORDER.includes(name) || name === "Trip Board";
+
     await window.customJS.BeaconCards.render(dv, {
       pages,
       layout: "stacked",
+      group: (p) => isDefault(p.file.name) ? "Default Sections" : "Additional Sections",
       title: (p) => p.file.name,
       icon: (p) => ICONS[p.file.name] || fallbackIcon,
       target: (p) => p.file.path,
       sort: (a, b) => {
-        const ai = DEFAULT_ORDER.indexOf(a.file.name);
-        const bi = DEFAULT_ORDER.indexOf(b.file.name);
-        if (ai !== -1 && bi !== -1) return ai - bi;
-        if (ai !== -1) return -1;
-        if (bi !== -1) return 1;
+        const aDef = isDefault(a.file.name);
+        const bDef = isDefault(b.file.name);
+        if (aDef && bDef) {
+          if (a.file.name === "Trip Board") return 1;
+          if (b.file.name === "Trip Board") return -1;
+          return DEFAULT_ORDER.indexOf(a.file.name) - DEFAULT_ORDER.indexOf(b.file.name);
+        }
+        if (aDef) return -1;
+        if (bDef) return 1;
         return a.file.name.localeCompare(b.file.name);
       },
       empty: "No sections yet. Click 'New Section' to add one."

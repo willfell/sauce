@@ -11,16 +11,33 @@ class TripNavButtons {
             return { context: "trips-hub" };
         }
 
+        const slug = pathParts[tripsIdx + 1];
+        const tripDir = `beacon/trips/${slug}`;
+
         // beacon/trips/<slug>/<file>.md
         if (pathParts.length === tripsIdx + 3) {
-            const slug = pathParts[tripsIdx + 1];
-            const tripDir = `beacon/trips/${slug}`;
             const cache = app.metadataCache.getFileCache(dv.current().file);
             const fmType = cache?.frontmatter?.type;
             if (fmType === "trip") {
                 return { context: "trip-atlas", slug, tripDir };
             }
             return { context: "trip-section", slug, tripDir };
+        }
+
+        // beacon/trips/<slug>/board/...
+        if (pathParts[tripsIdx + 2] === "board") {
+            // beacon/trips/<slug>/board/<file>.md
+            if (pathParts.length === tripsIdx + 4) {
+                const basename = pathParts[tripsIdx + 3].replace(/\.md$/, "");
+                if (basename.endsWith("-board")) {
+                    return { context: "trip-board", slug, tripDir };
+                }
+                return { context: "trip-card", slug, tripDir };
+            }
+            // beacon/trips/<slug>/board/<TaskName>/<file>.md (post-promote folder-style)
+            if (pathParts.length === tripsIdx + 5) {
+                return { context: "trip-card", slug, tripDir };
+            }
         }
 
         return { context: "non-trip" };
@@ -41,6 +58,10 @@ class TripNavButtons {
         }
         if (ctx.context === "trip-atlas" || ctx.context === "trip-section") {
             await this._renderTripContext(root, ctx, filePath);
+            return;
+        }
+        if (ctx.context === "trip-board" || ctx.context === "trip-card") {
+            await this._renderBoardContext(root, ctx, filePath);
             return;
         }
         // non-trip → no render
@@ -124,17 +145,23 @@ class TripNavButtons {
             buildRow([{ label: atlasFile.basename, icon: icons.trip, path: atlasFile.path }], { fullWidth: true });
         }
 
-        // Row 2 — default sections (Flights, Stay, Packing List, To Do, Notes); current self-hides
+        // Row 2 — default sections + Trip Board; current self-hides
         const defaultButtons = defaults
             .filter(f => f.path !== currentPath)
             .map(f => ({ label: f.basename, icon: sectionIconFor(f.basename), path: f.path }));
+        const boardPath = `${ctx.tripDir}/board/${ctx.slug}-board.md`;
+        if (app.vault.getAbstractFileByPath(boardPath)) {
+            defaultButtons.push({ label: "Trip Board", icon: icons.board, path: boardPath });
+        }
         buildRow(defaultButtons);
 
-        // Row 3 — additional sections (user-added); current self-hides
-        const additionalButtons = additional
-            .filter(f => f.path !== currentPath)
-            .map(f => ({ label: f.basename, icon: icons.section, path: f.path }));
-        buildRow(additionalButtons);
+        // Row 3 — additional sections (user-added); HIDDEN in trip-atlas context (cards grid covers it)
+        if (ctx.context !== "trip-atlas") {
+            const additionalButtons = additional
+                .filter(f => f.path !== currentPath)
+                .map(f => ({ label: f.basename, icon: icons.section, path: f.path }));
+            buildRow(additionalButtons);
+        }
 
         // "New Section" action button — atlas context only
         if (ctx.context === "trip-atlas" && atlasFile) {
@@ -194,7 +221,51 @@ class TripNavButtons {
             packing: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10a4 4 0 0 1 4-4h8a4 4 0 0 1 4 4v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M8 10h8"/><path d="M8 18v-4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v4"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>`,
             todo:    `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="m9 12 2 2 4-4"/></svg>`,
             notes:   `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`,
+            board:   `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>`,
         };
+    }
+
+    async _renderBoardContext(root, ctx, currentPath) {
+        const folderObj = app.vault.getAbstractFileByPath(ctx.tripDir);
+        if (!folderObj || !folderObj.children) return;
+
+        let atlasFile = null;
+        for (const f of folderObj.children) {
+            if (f.extension !== "md") continue;
+            const cache = app.metadataCache.getFileCache(f);
+            if (cache?.frontmatter?.type === "trip") { atlasFile = f; break; }
+        }
+
+        const icons = this._icons();
+        const buttons = [];
+        if (atlasFile) {
+            buttons.push({ label: atlasFile.basename, icon: icons.trip, path: atlasFile.path });
+        }
+
+        const boardPath = `${ctx.tripDir}/board/${ctx.slug}-board.md`;
+        if (ctx.context === "trip-card" && app.vault.getAbstractFileByPath(boardPath)) {
+            buttons.push({ label: "Trip Board", icon: icons.board, path: boardPath });
+        }
+        if (buttons.length === 0) return;
+
+        const topDivider = root.createEl("hr");
+        topDivider.style.cssText = "border: none; border-top: 1px solid var(--background-modifier-border); margin: 8px 0 6px 0;";
+
+        const sectionLabel = root.createEl("div");
+        sectionLabel.textContent = "Trip";
+        sectionLabel.style.cssText = "font-size: 0.72em; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;";
+
+        const row = root.createEl("div");
+        row.style.cssText = "display: flex; flex-wrap: nowrap; gap: 6px; margin-bottom: 4px; overflow-x: auto;";
+        const btnStyle = `cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 9px 16px; border-radius: 6px; border: 1px solid var(--background-modifier-border); background: var(--background-primary); color: var(--text-muted); font-size: 0.9em; font-weight: 600; font-family: inherit; letter-spacing: 0.01em; transition: all 0.15s ease; flex: 1; min-width: 0; white-space: nowrap;`;
+        for (const btn of buttons) {
+            const el = row.createEl("button");
+            el.innerHTML = btn.icon + `<span>${btn.label}</span>`;
+            el.style.cssText = btnStyle;
+            el.onmouseenter = () => { el.style.background = "var(--interactive-accent)"; el.style.color = "var(--text-on-accent)"; el.style.borderColor = "var(--interactive-accent)"; };
+            el.onmouseleave = () => { el.style.background = "var(--background-primary)"; el.style.color = "var(--text-muted)"; el.style.borderColor = "var(--background-modifier-border)"; };
+            el.onclick = () => app.workspace.openLinkText(btn.path, "");
+        }
     }
 
     async _promptForTripDetails() {
@@ -404,8 +475,11 @@ await dv.view("Docs/Meta/Views/customjs-guard", { class: "TripNavButtons" });
 
     async _createTrip({ name, slug, start_date, end_date, location }) {
         const tripDir = `beacon/trips/${slug}`;
-        if (!app.vault.getAbstractFileByPath(tripDir)) {
-            await app.vault.createFolder(tripDir);
+        const boardDir = `${tripDir}/board`;
+        for (const dir of [tripDir, boardDir]) {
+            if (!app.vault.getAbstractFileByPath(dir)) {
+                await app.vault.createFolder(dir);
+            }
         }
 
         const tplBase = "Docs/Meta/Templates";
@@ -440,6 +514,7 @@ await dv.view("Docs/Meta/Views/customjs-guard", { class: "TripNavButtons" });
         await writeTpl("Template, Trip Packing List.md", "Packing List.md");
         await writeTpl("Template, Trip To Do.md", "To Do.md");
         await writeTpl("Template, Trip Notes.md", "Notes.md");
+        await writeTpl("Template, Trip Board.md", `board/${slug}-board.md`);
 
         return atlasPath;
     }
