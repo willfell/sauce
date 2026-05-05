@@ -26,11 +26,13 @@
  *   BC4   badge-icon            badges[].icon populates inline SVG in chip
  *   BC5   badge-no-icon         badges[] without icon renders text-only chip (regression)
  *   BC6   synthetic-page-onclick synthetic page + custom onClick fires
+ *   DA1   active-file-with-date  dv.current() basename matches /(\d{4}-\d{2}-\d{2})/ → helper returns extracted ISO
+ *   DA2   active-file-without-date  dv.current() basename has no date → helper falls back to today (window.moment stub)
  *
  * Usage:
  *   node platform/test/run-renderer.js [--vault <path>] [test-selector]
  *   test-selector:
- *     all (default), empty, malformed, unknown-action, lazy-scaffold, barebones-one-button, beacon-cards
+ *     all (default), empty, malformed, unknown-action, lazy-scaffold, barebones-one-button, beacon-cards, date-aware
  *   exit 0 on all selected pass; 1 otherwise
  */
 
@@ -127,6 +129,12 @@ function makeDv() {
       return e;
     },
   };
+}
+
+function makeDvWithCurrent(currentReturn) {
+  const dv = makeDv();
+  dv.current = () => currentReturn;
+  return dv;
 }
 
 // ── Notice capture ───────────────────────────────────────────────────────
@@ -284,6 +292,32 @@ async function withTempRegistry(content_or_null, fn) {
 
 function reset() {
   captured_notices = [];
+}
+
+// Install a minimal global.window.moment stub for tests that exercise
+// _resolveActionDate's today-fallback path. Returns a restore function.
+// The stub supports the EXACT subset the helper uses:
+//   - moment(s, "YYYY-MM-DD", true).isValid()
+//   - moment().format("YYYY-MM-DD")
+function withWindowMomentStub(todayIso) {
+  const prior_window = global.window;
+  global.window = {
+    moment: function (s, fmt, strict) {
+      if (s === undefined) {
+        return { format: () => todayIso };
+      }
+      // Strict-parse semantics: validate components match YYYY-MM-DD.
+      const m = typeof s === 'string' && s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      const valid = !!m && (() => {
+        const y = +m[1], mo = +m[2], d = +m[3];
+        if (mo < 1 || mo > 12 || d < 1 || d > 31) return false;
+        const probe = new Date(Date.UTC(y, mo - 1, d));
+        return probe.getUTCFullYear() === y && (probe.getUTCMonth() + 1) === mo && probe.getUTCDate() === d;
+      })();
+      return { isValid: () => valid };
+    },
+  };
+  return () => { global.window = prior_window; };
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────
@@ -695,6 +729,44 @@ async function testBC6SyntheticPageOnClick() {
   return pass;
 }
 
+async function testDA1ActiveFileWithDate() {
+  console.log('\n=== DA1 — active file with date in basename → helper returns extracted ISO ===');
+  reset();
+  const restore = withWindowMomentStub('2099-01-01'); // unused; DA1 takes regex-match path
+  try {
+    const app = makeApp();
+    const Cls = loadRendererClass(app, FakeNotice);
+    const dv = makeDvWithCurrent({ file: { name: 'Journal-2026-05-10', path: 'beacon/journal/2026/05-May/Journal-2026-05-10.md' } });
+    const sn = new Cls();
+    const date = sn._resolveActionDate(dv);
+    console.log(`  resolved date: ${date}`);
+    const pass = date === '2026-05-10';
+    console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+    return pass;
+  } finally {
+    restore();
+  }
+}
+
+async function testDA2ActiveFileWithoutDate() {
+  console.log('\n=== DA2 — active file without date → helper falls back to today (stubbed) ===');
+  reset();
+  const restore = withWindowMomentStub('2026-05-04');
+  try {
+    const app = makeApp();
+    const Cls = loadRendererClass(app, FakeNotice);
+    const dv = makeDvWithCurrent({ file: { name: 'SomeAtlas', path: 'beacon/projects/SomeAtlas.md' } });
+    const sn = new Cls();
+    const date = sn._resolveActionDate(dv);
+    console.log(`  resolved date: ${date}`);
+    const pass = date === '2026-05-04';
+    console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+    return pass;
+  } finally {
+    restore();
+  }
+}
+
 // ── Main ─────────────────────────────────────────────────────────────────
 (async () => {
   const which = ARGS.selector;
@@ -714,6 +786,10 @@ async function testBC6SyntheticPageOnClick() {
       results.push(['BC4 badge-icon', await testBC4BadgeIcon()]);
       results.push(['BC5 badge-no-icon', await testBC5BadgeNoIcon()]);
       results.push(['BC6 synthetic-page-onclick', await testBC6SyntheticPageOnClick()]);
+    }
+    if (which === 'date-aware' || which === 'all') {
+      results.push(['DA1 active-file-with-date', await testDA1ActiveFileWithDate()]);
+      results.push(['DA2 active-file-without-date', await testDA2ActiveFileWithoutDate()]);
     }
     if (which === 'barebones-one-button' || which === 'all') {
       const isWorkshop = VAULT === WORKSHOP;
