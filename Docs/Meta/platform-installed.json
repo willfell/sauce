@@ -19,6 +19,11 @@
       "name": "nav-buttons",
       "version": "2.3.0",
       "installed_at": "2026-05-04T20:01:28.751Z"
+    },
+    {
+      "name": "cards",
+      "version": "0.1.0",
+      "installed_at": "2026-05-04T23:42:36.779Z"
     }
   ],
   "blueprints": [],
@@ -243,6 +248,16 @@
       "version": "2.3.0",
       "installed_at": "2026-05-04T20:01:28.751Z",
       "git_commit": "e727a12c6cda8f3064929942586940594008f2d0",
+      "git_tag": null,
+      "git_dirty": true
+    },
+    {
+      "event": "install",
+      "kind": "mechanism",
+      "name": "cards",
+      "version": "0.1.0",
+      "installed_at": "2026-05-04T23:42:36.779Z",
+      "git_commit": "f15441b843c907a75bd924ea76d4b476b8347b65",
       "git_tag": null,
       "git_dirty": true
     }

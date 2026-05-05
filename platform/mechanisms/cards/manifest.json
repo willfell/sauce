@@ -1,0 +1,14 @@
+{
+  "name": "cards",
+  "version": "0.1.0",
+  "description": "Shared mobile-aware card renderer (BeaconCards). Any blueprint listing related notes calls customJS.BeaconCards.render(dv, opts) instead of Dataview tables. Decoupled from Dataview semantics; caller supplies pages array. v0.1.0: initial release; consumed by project blueprint via ProjectsHubCards delegation.",
+  "depends_on": [
+    { "name": "customjs-guard", "range": ">=1.0.0" }
+  ],
+  "customjs_classes": ["BeaconCards"],
+  "files": [
+    { "source": "beacon-cards.js", "dest": "{{scripts_path}}/cards/beacon-cards.js" }
+  ],
+  "post_install": [],
+  "rule_fragments": []
+}
