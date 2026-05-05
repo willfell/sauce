@@ -1,5 +1,5 @@
 /**
- * Project Workstreams — Structure View (CustomJS)
+ * Project Workstreams — Map View (CustomJS)
  * Renders tasks grouped by workstream with status badges and progress.
  * Reads the kanban board for task status. Completed tasks sort to bottom.
  * Unassigned tasks get a "Move" button to reassign to a workstream.
@@ -48,7 +48,7 @@ class ProjectWorkstreams {
         };
 
         const projectPages = dv.pages(`"${projectDir}"`)
-            .where(p => p.file.path !== filePath && !p.file.name.endsWith("-board") && !p.file.name.endsWith("- Structure"));
+            .where(p => p.file.path !== filePath && !p.file.name.endsWith("-board") && !p.file.name.endsWith("- Map"));
 
         const grouped = {};
         const unassigned = [];
@@ -152,6 +152,19 @@ class ProjectWorkstreams {
                 let hdrHtml = `${icons.ws} <strong>${ws.name || ws.id}</strong>`;
                 hdrHtml += ` <span style="color: var(--text-muted); font-weight: 400; font-size: 0.82em; margin-left: auto;">${total > 0 ? `${done}/${total}` : "no tasks"}</span>`;
                 hdr.innerHTML = hdrHtml;
+
+                if (total > 0) {
+                    const isMobile = !!app.isMobile;
+                    const pct = Math.round((done / total) * 100);
+                    if (isMobile) {
+                        const countSpan = hdr.querySelector('span');
+                        if (countSpan) countSpan.style.color = pct >= 100 ? "#16a34a" : "var(--text-muted)";
+                    } else {
+                        const barWrap = section.createEl("div");
+                        barWrap.style.cssText = "height: 3px; border-radius: 2px; background: var(--background-modifier-border); overflow: hidden; margin: 4px 0;";
+                        barWrap.createEl("div").style.cssText = `height: 100%; width: ${pct}%; background: ${pct >= 100 ? "#16a34a" : "var(--interactive-accent)"}; border-radius: 2px;`;
+                    }
+                }
 
                 if (ws.description) {
                     section.createEl("div", { text: ws.description }).style.cssText = "color: var(--text-muted); font-size: 0.82em; margin: 2px 0 4px 28px;";

@@ -12,14 +12,14 @@ const planIdx = parts.indexOf("projects");
 if (planIdx >= 0 && planIdx + 1 < parts.length) {
     const projectDir = parts.slice(0, planIdx + 2).join("/");
 
-    // Find atlas note: in project root, not tasks/, not board, not structure
+    // Find atlas note: in project root, not tasks/, not board, not map
     const candidates = app.vault.getFiles().filter(f =>
         f.extension === "md" &&
         f.path.startsWith(projectDir + "/") &&
         !f.path.includes("/tasks/") &&
         !f.path.includes("/resources/") &&
         !f.basename.endsWith("-board") &&
-        !f.basename.includes("Structure")
+        !f.basename.includes("Map")
     );
 
     const atlasNote = candidates.find(f => {

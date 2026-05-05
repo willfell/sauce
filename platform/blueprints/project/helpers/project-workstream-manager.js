@@ -55,7 +55,7 @@ class ProjectWorkstreamManager {
             .where(p => {
                 if (p.file.path === filePath) return false;
                 if (p.file.name.endsWith("-board")) return false;
-                if (p.file.name.endsWith("- Structure")) return false;
+                if (p.file.name.endsWith("- Map")) return false;
                 return p.source_board !== undefined || p.workstream !== undefined;
             });
 
@@ -80,13 +80,13 @@ class ProjectWorkstreamManager {
         const blockedAll = boardTasks.filter(t => t.lane === "Blocked").length;
         const inProgressAll = boardTasks.filter(t => t.lane === "In Progress").length;
 
-        const findStructureNote = () => {
+        const findMapNote = () => {
             return app.vault.getFiles().find(f =>
                 f.path.startsWith(projectDir + "/") &&
                 !f.path.includes("/tasks/") &&
                 (() => {
                     const cache = app.metadataCache.getFileCache(f);
-                    return cache?.frontmatter?.type === "structure";
+                    return cache?.frontmatter?.type === "map";
                 })()
             );
         };
@@ -94,8 +94,8 @@ class ProjectWorkstreamManager {
         const updateWorkstreams = async (newWs) => {
             const atlasFile = app.vault.getAbstractFileByPath(filePath);
             if (atlasFile) await app.fileManager.processFrontMatter(atlasFile, fm => { fm.workstreams = newWs; });
-            const structureFile = findStructureNote();
-            if (structureFile) await app.fileManager.processFrontMatter(structureFile, fm => { fm.workstreams = newWs; });
+            const mapFile = findMapNote();
+            if (mapFile) await app.fileManager.processFrontMatter(mapFile, fm => { fm.workstreams = newWs; });
         };
 
         const slugify = (str) => {

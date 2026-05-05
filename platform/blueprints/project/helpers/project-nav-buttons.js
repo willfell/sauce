@@ -7,7 +7,7 @@
  *   await dv.view("Docs/Meta/Views/customjs-guard", { class: "ProjectNavButtons" });
  *
  * Expected file paths:
- *   beacon/projects/<slug>/<atlas|structure|board>.md
+ *   beacon/projects/<slug>/<atlas|map|board>.md
  *   beacon/projects/<slug>/tasks/<TaskName>.md                    (legacy flat tasks)
  *   beacon/projects/<slug>/tasks/<TaskName>/<TaskName>.md         (new task-folder convention)
  *   beacon/projects/<slug>/tasks/<TaskName>/<sub-note>.md         (sub-notes peer to a task)
@@ -27,16 +27,16 @@ class ProjectNavButtons {
         const tasksIdx = planningIdx + 2;
 
         const basename = dv.current().file.name;
-        const isStructure = basename.endsWith("- Structure");
+        const isMap = basename.endsWith("- Map");
 
         // Project board: <slug>-board.md directly under project dir
         if (basename.endsWith("-board") && pathParts.length === planningIdx + 3) {
             return { context: "project-board", pathParts, planningIdx, projectSlug, projectDir };
         }
 
-        // Project structure
-        if (isStructure && pathParts.length === planningIdx + 3) {
-            return { context: "project-structure", pathParts, planningIdx, projectSlug, projectDir };
+        // Project map
+        if (isMap && pathParts.length === planningIdx + 3) {
+            return { context: "project-map", pathParts, planningIdx, projectSlug, projectDir };
         }
 
         // Inside tasks/?
@@ -338,7 +338,7 @@ class ProjectNavButtons {
         };
 
         const atlasPath = await writeTpl("Template, Project.md", `${name}.md`);
-        await writeTpl("Template, Project Structure.md", `${name} - Structure.md`);
+        await writeTpl("Template, Project Map.md", `${name} - Map.md`);
         await writeTpl("Template, Project Board.md", `${slug}-board.md`);
 
         return atlasPath;
@@ -406,7 +406,7 @@ class ProjectNavButtons {
     async render(dv) {
         const icons = {
             project: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>`,
-            structure: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12h-8"/><path d="M21 6H8"/><path d="M21 18h-8"/><path d="M3 6v4c0 1.1.9 2 2 2h3"/><path d="M3 10v6c0 1.1.9 2 2 2h3"/></svg>`,
+            map: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12h-8"/><path d="M21 6H8"/><path d="M21 18h-8"/><path d="M3 6v4c0 1.1.9 2 2 2h3"/><path d="M3 10v6c0 1.1.9 2 2 2h3"/></svg>`,
             board: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>`,
             task: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="m9 12 2 2 4-4"/></svg>`
         };
@@ -431,10 +431,10 @@ class ProjectNavButtons {
             return tags.includes("project");
         });
 
-        const structureNote = projectFiles.find(f => f.basename.endsWith("- Structure"));
+        const mapNote = projectFiles.find(f => f.basename.endsWith("- Map"));
 
         const isMainNote = mainNote && filePath === mainNote.path;
-        const isStructure = dv.current().file.name.endsWith("- Structure");
+        const isMap = dv.current().file.name.endsWith("- Map");
         const isBoard = dv.current().file.name.endsWith("-board");
 
         // ── Sub-note detection ──────────────────────────────────────────────
@@ -467,8 +467,8 @@ class ProjectNavButtons {
         if (!isMainNote && mainNote) {
             buttons.push({ label: mainNote.basename, icon: icons.project, path: mainNote.path });
         }
-        if (!isStructure && structureNote) {
-            buttons.push({ label: "Structure", icon: icons.structure, path: structureNote.path });
+        if (!isMap && mapNote) {
+            buttons.push({ label: "Map", icon: icons.map, path: mapNote.path });
         }
         if (!isBoard) {
             buttons.push({ label: "Project Board", icon: icons.board, path: boardPath });
@@ -485,10 +485,10 @@ class ProjectNavButtons {
         }
 
         // task-board: shown buttons should be Task: <X> · Project Hub · Project Board
-        // (Structure button is removed because the task-board doesn't need it)
+        // (Map button is removed because the task-board doesn't need it)
         if (ctx.context === "task-board") {
             const taskHubPath = `${projectDir}/tasks/${ctx.taskFolder}/${ctx.taskFolder}.md`;
-            const filteredButtons = buttons.filter(b => b.label !== "Structure");
+            const filteredButtons = buttons.filter(b => b.label !== "Map");
             if (app.vault.getAbstractFileByPath(taskHubPath) && !filteredButtons.some(b => b.path === taskHubPath)) {
                 filteredButtons.unshift({ label: `Task: ${ctx.taskFolder}`, icon: icons.task, path: taskHubPath });
             }
@@ -576,7 +576,7 @@ class ProjectNavButtons {
         }
 
         // --- Workstream widget (card notes only) ---
-        const isCardNote = !isMainNote && !isStructure && !isBoard && dv.current().source_board;
+        const isCardNote = !isMainNote && !isMap && !isBoard && dv.current().source_board;
         if (isCardNote && mainNote) {
             // (Dedupe handled by the root-level cleanup at the top of render.)
             const atlasCache = app.metadataCache.getFileCache(mainNote);

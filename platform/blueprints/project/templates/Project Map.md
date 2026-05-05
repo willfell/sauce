@@ -1,6 +1,6 @@
 ---
 created: {{DATE}}
-type: structure
+type: map
 tags:
   - project/{{SLUG}}
 workstreams: []

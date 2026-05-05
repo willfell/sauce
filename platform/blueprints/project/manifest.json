@@ -1,25 +1,28 @@
 {
   "name": "project",
-  "version": "1.2.2",
+  "version": "1.3.2",
   "kind": "blueprint",
   "module_directory": "projects",
-  "description": "Per-project atlas + structure + Kanban board with hierarchical tasks (task hub + notes + task-board + folder-style sub-task cards), workstream-tagged cards, and All-Projects hub. v1.0.0 BREAKING: replaces v0.3.0 projects-legacy stopgap; module_directory 'projects-legacy' → 'projects'; drops slash-command surface in favor of New Project nav-button on the Projects.md hub; pre_install[delete] retires legacy boards/To-Do-Board.md.",
+  "description": "Per-project atlas + map + Kanban board with hierarchical tasks (task hub + notes + task-board + folder-style sub-task cards), workstream-tagged cards, and All-Projects hub. v1.3.0 ADDITIVE: depends on cards>=0.1.0; ProjectsHubCards delegates to BeaconCards; Project Structure renamed to Project Map; Map note's Dataview tables converted to cards; ProjectWorkstreams gains per-workstream progress bars + counts.",
   "depends_on": [
     { "name": "nav-buttons",    "range": ">=2.3.0" },
-    { "name": "customjs-guard", "range": ">=1.0.0" }
+    { "name": "customjs-guard", "range": ">=1.0.0" },
+    { "name": "cards",          "range": ">=0.1.1" }
   ],
   "customjs_classes": [
     "ProjectNavButtons",
     "ProjectWorkstreams",
     "ProjectWorkstreamManager",
-    "ProjectsHubCards"
+    "ProjectsHubCards",
+    "ProjectNotesCards",
+    "ProjectReferencedByCards"
   ],
   "pre_install": [
     { "type": "delete", "path": "boards/To-Do-Board.md" }
   ],
   "files": [
     { "source": "templates/Project.md",                  "dest": "{{templates_path}}/Template, Project.md" },
-    { "source": "templates/Project Structure.md",        "dest": "{{templates_path}}/Template, Project Structure.md" },
+    { "source": "templates/Project Map.md",              "dest": "{{templates_path}}/Template, Project Map.md" },
     { "source": "templates/Project Board.md",            "dest": "{{templates_path}}/Template, Project Board.md" },
     { "source": "templates/Kanban Card.md",              "dest": "{{templates_path}}/Template, Kanban Card.md" },
     { "source": "templates/Task Note.md",                "dest": "{{templates_path}}/Template, Task Note.md" },
@@ -29,6 +32,8 @@
     { "source": "helpers/project-workstream-manager.js", "dest": "{{scripts_path}}/project/project-workstream-manager.js" },
     { "source": "helpers/project-workstreams.js",        "dest": "{{scripts_path}}/project/project-workstreams.js" },
     { "source": "helpers/projects-hub-cards.js",         "dest": "{{scripts_path}}/project/projects-hub-cards.js" },
+    { "source": "helpers/project-notes-cards.js",        "dest": "{{scripts_path}}/project/project-notes-cards.js" },
+    { "source": "helpers/project-referenced-by-cards.js","dest": "{{scripts_path}}/project/project-referenced-by-cards.js" },
     { "source": "content/Projects.md",                   "dest": "{{module_directory}}/Projects.md" }
   ],
   "nav_buttons": [
