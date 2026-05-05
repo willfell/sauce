@@ -17,8 +17,8 @@
     },
     {
       "name": "nav-buttons",
-      "version": "2.4.0",
-      "installed_at": "2026-05-05T03:28:17.697Z"
+      "version": "2.5.0",
+      "installed_at": "2026-05-05T04:41:04.814Z"
     },
     {
       "name": "cards",
@@ -377,6 +377,29 @@
       "version": "2.4.0",
       "installed_at": "2026-05-05T03:28:17.697Z",
       "git_commit": "02dac520f712e864baa0ca83be1a130e3e5fd1ed",
+      "git_tag": null,
+      "git_dirty": true
+    },
+    {
+      "event": "replace",
+      "step": "file_overwrite",
+      "name": "nav-buttons",
+      "dest": "Docs/Meta/Scripts/nav-buttons/space-nav-buttons.js",
+      "prior_sha": "611fea6b4ae5305a259e88afb7caee6ed1e90c0a41c535eaebc9b8b643ab2289",
+      "new_sha": "6d2281a606d89892b063725febd90b58fc0cceb38952781e7ce8972ec4283c45",
+      "bak_path": "Docs/Meta/Scripts/nav-buttons/space-nav-buttons.js.bak",
+      "git_commit": "52c9184efd9acadfe98b82b6242c54ff0a31b1bb",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-05T04:41:04.813Z"
+    },
+    {
+      "event": "install",
+      "kind": "mechanism",
+      "name": "nav-buttons",
+      "version": "2.5.0",
+      "installed_at": "2026-05-05T04:41:04.814Z",
+      "git_commit": "52c9184efd9acadfe98b82b6242c54ff0a31b1bb",
       "git_tag": null,
       "git_dirty": true
     }
