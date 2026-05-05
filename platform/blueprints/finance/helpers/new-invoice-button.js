@@ -158,16 +158,6 @@ await customJS.FinanceStatus.renderBadge(dv, "invoice");
 await dv.view("Docs/Meta/Views/customjs-guard", { class: "InvoiceControls" });
 \`\`\`
 
-# Invoice — ${month}
-
-| Field | Value |
-|-------|-------|
-| **Month** | ${month} |
-| **Rate** | \`= "$" + this.rate + "/hr"\` |
-| **Hours** | \`= this.hours\` |
-| **Amount** | \`= "$" + this.amount\` |
-| **Submitted** | \`= choice(this.submitted_date, this.submitted_date, "—")\` |
-
 ## Notes
 
 `;
@@ -194,8 +184,6 @@ if (!isEmbedded) {
     await dv.view("Docs/Meta/Views/customjs-guard", { class: "InvoiceNavButtons" });
 }
 \`\`\`
-
-# Time Log — ${month}
 
 \`\`\`dataviewjs
 await dv.view("Docs/Meta/Views/customjs-guard", { class: "InvoiceTimeLogEditor" });

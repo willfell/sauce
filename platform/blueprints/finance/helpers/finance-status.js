@@ -56,7 +56,9 @@ class FinanceStatus {
                 return false;
             };
             const allPaid = expenses.length > 0 && expenses.every(isPaid);
+            const anyPaid = expenses.some(isPaid);
             if (allPaid) return { label: "Done", tone: "success" };
+            if (anyPaid) return { label: "In Progress", tone: "warn" };
             if (start && start.isValid() && !today.isBefore(start, "day")) {
                 return { label: "In Progress", tone: "warn" };
             }

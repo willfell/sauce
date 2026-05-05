@@ -24,8 +24,6 @@ await dv.view("Docs/Meta/Views/customjs-guard", { class: "PaycheckNavButtons" })
 await customJS.FinanceStatus.renderBadge(dv, "paycheck");
 ```
 
-# Paycheck
-
 ## Expenses
 
 ```dataviewjs

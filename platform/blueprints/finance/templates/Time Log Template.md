@@ -20,8 +20,6 @@ await dv.view("Docs/Meta/Views/customjs-guard", { class: "SpaceNavButtons" });
 await dv.view("Docs/Meta/Views/customjs-guard", { class: "InvoiceNavButtons" });
 ```
 
-# Time Log
-
 ```dataviewjs
 await dv.view("Docs/Meta/Views/customjs-guard", { class: "InvoiceTimeLogEditor" });
 ```

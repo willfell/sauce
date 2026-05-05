@@ -178,8 +178,6 @@ await dv.view("Docs/Meta/Views/customjs-guard", { class: "PaycheckNavButtons" })
 await customJS.FinanceStatus.renderBadge(dv, "paycheck");
 \`\`\`
 
-# Paycheck — ${start_date} to ${end_date}
-
 ## Expenses
 
 \`\`\`dataviewjs

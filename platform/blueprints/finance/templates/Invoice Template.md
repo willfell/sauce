@@ -30,14 +30,5 @@ await customJS.FinanceStatus.renderBadge(dv, "invoice");
 await dv.view("Docs/Meta/Views/customjs-guard", { class: "InvoiceControls" });
 ```
 
-# Invoice — <% tp.date.now("YYYY-MM") %>
-
-| Field | Value |
-|-------|-------|
-| **Month** | `= this.month` |
-| **Rate** | `= "$" + this.rate + "/hr"` |
-| **Hours** | `= this.hours` |
-| **Amount** | `= "$" + this.amount` |
-
 ## Notes
 

@@ -140,8 +140,6 @@ await dv.view("Docs/Meta/Views/customjs-guard", { class: "BudgetNavButtons" });
 await customJS.FinanceStatus.renderBadge(dv, "budget");
 \`\`\`
 
-# Budget — ${month}
-
 ## Categories
 
 \`\`\`dataviewjs

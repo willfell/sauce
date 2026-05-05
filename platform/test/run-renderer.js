@@ -934,7 +934,7 @@ async function testFF7InvoiceControlsRateAndToggle() {
   const root = findClass(dv.container, 'ic-root');
   const inputs = root ? collectAll(root, el => el.tag === 'input') : [];
   const buttons = root ? collectButtons(root) : [];
-  const markBtn = buttons.find(b => typeof b.textContent === 'string' && b.textContent.includes('Mark Submitted'));
+  const markBtn = buttons.find(b => (typeof b.textContent === 'string' && b.textContent.includes('Mark Submitted')) || (typeof b.innerHTML === 'string' && b.innerHTML.includes('Mark Submitted')));
   console.log(`  ic-root: ${!!root} ; rate input count: ${inputs.length} ; Mark Submitted button: ${!!markBtn}`);
   const pass = !!root && inputs.length >= 1 && !!markBtn;
   console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
