@@ -11,6 +11,9 @@
  *   - openLink             { target }
  *   - createFromTemplate   { target, template_source }
  *   - runTemplaterTemplate { template_source, folder_prefix, folder_date_pattern, filename_prefix, filename_date_pattern, filename_suffix }
+ *     - v2.5.0: action date is sourced from the active file's basename if it matches /(\d{4}-\d{2}-\d{2})/
+ *       AND parses as a valid ISO date; falls back to today otherwise. Lets users prepare future-dated
+ *       to-do/meetings/journal files by clicking nav buttons on a future-dated daily note.
  *   - invoke_command       { command_id }       (v2.3.0)
  *
  * v2.3.0 also adds a top arrow row for daily-nav (prev/next-day with
@@ -37,6 +40,21 @@ class SpaceNavButtons {
     } catch (e) {
       return null;
     }
+  }
+
+  // Resolve the date used by runTemplaterTemplate folder/filename substitutions.
+  // If the active file's basename matches /(\d{4}-\d{2}-\d{2})/ AND the captured
+  // string is a valid ISO date, return it verbatim. Otherwise fall back to today.
+  // Returned shape: 'YYYY-MM-DD' string. Caller parses via window.moment(s, "YYYY-MM-DD", true).format(pattern).
+  _resolveActionDate(dv) {
+    const currentFile = dv && dv.current && dv.current();
+    const fileName = (currentFile && currentFile.file && currentFile.file.name) || "";
+    const dm = fileName.match(/(\d{4}-\d{2}-\d{2})/);
+    if (dm) {
+      const m = window.moment(dm[1], "YYYY-MM-DD", true);
+      if (m.isValid()) return dm[1];
+    }
+    return window.moment().format("YYYY-MM-DD");
   }
 
   async render(dv) {
@@ -236,13 +254,13 @@ class SpaceNavButtons {
           el.style.borderColor = "var(--background-modifier-border)";
         };
 
-        el.onclick = () => this._dispatchAction(btn);
+        el.onclick = () => this._dispatchAction(btn, dv);
       }
     }
   }
 
   // ── Action dispatcher ──────────────────────────────────────────────────
-  async _dispatchAction(btn) {
+  async _dispatchAction(btn, dv) {
     const action = (btn && btn.action) || {};
     const type = action.type;
 
@@ -311,12 +329,14 @@ class SpaceNavButtons {
       const filenameDatePattern = action.filename_date_pattern || "";
       const filenameSuffix = action.filename_suffix || "";
 
+      const actionDate = this._resolveActionDate(dv);
+      const actionMoment = window.moment(actionDate, "YYYY-MM-DD", true);
       const folder = folderDatePattern
-        ? `${folderPrefix}/${window.moment().format(folderDatePattern)}`
+        ? `${folderPrefix}/${actionMoment.format(folderDatePattern)}`
         : folderPrefix;
       const filenameComposed =
         filenamePrefix
-        + (filenameDatePattern ? window.moment().format(filenameDatePattern) : "")
+        + (filenameDatePattern ? actionMoment.format(filenameDatePattern) : "")
         + filenameSuffix;
       const filenameNoExt = filenameComposed.trim() ? filenameComposed : "Untitled";
       const target = folder ? `${folder}/${filenameNoExt}.md` : `${filenameNoExt}.md`;
