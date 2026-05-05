@@ -37,7 +37,7 @@ class PaychecksCards {
                     secondaryText: range
                 };
             },
-            badges: p => [customJS.FinanceStatus.derive(p, "paycheck")],
+            badges: p => [{ ...customJS.FinanceStatus.derive(p, "paycheck"), style: "outline" }],
             targetFn: p => p.file.path,
         });
     }

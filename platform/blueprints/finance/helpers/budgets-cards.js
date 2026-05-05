@@ -31,7 +31,7 @@ class BudgetsCards {
                     secondaryText: `Planned $${planned.toLocaleString()} · Actual $${actual.toLocaleString()}`
                 };
             },
-            badges: p => [customJS.FinanceStatus.derive(p, "budget")],
+            badges: p => [{ ...customJS.FinanceStatus.derive(p, "budget"), style: "outline" }],
             targetFn: p => p.file.path,
         });
     }

@@ -31,7 +31,7 @@ class InvoicesCards {
                     secondaryText: `submitted: ${submitted}`
                 };
             },
-            badges: p => [customJS.FinanceStatus.derive(p, "invoice")],
+            badges: p => [{ ...customJS.FinanceStatus.derive(p, "invoice"), style: "outline" }],
             targetFn: p => p.file.path,
         });
     }

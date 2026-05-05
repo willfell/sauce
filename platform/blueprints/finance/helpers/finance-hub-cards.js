@@ -52,18 +52,24 @@ class FinanceHubCards {
         }
 
         const sections = [
-            { title: "Pending Budgets",   cls: "BudgetsCards" },
-            { title: "Pending Paychecks", cls: "PaychecksCards" },
-            { title: "Pending Invoices",  cls: "InvoicesCards" }
+            { title: "Pending Budgets",   cls: "BudgetsCards",   type: "budget",   folder: "beacon/finance/budgets" },
+            { title: "Pending Paychecks", cls: "PaychecksCards", type: "paycheck", folder: "beacon/finance/paychecks" },
+            { title: "Pending Invoices",  cls: "InvoicesCards",  type: "invoice",  folder: "beacon/finance/invoices" }
         ];
         for (const sec of sections) {
+            const pending = (dv.pages && dv.pages(`"${sec.folder}"`)
+                .where(p => p.type === sec.type)
+                .array()
+                .filter(p => customJS.FinanceStatus.derive(p, sec.type).label !== "Done")) || [];
+            if (pending.length === 0) continue;
+
             const heading = root.createEl("h3");
             heading.textContent = sec.title;
             heading.style.cssText = "margin-top: 16px; margin-bottom: 8px; font-size: 0.85em; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em;";
             const sub = root.createEl("div");
             const subDv = {
                 container: sub,
-                pages: dv.pages ? dv.pages.bind(dv) : undefined,
+                pages: dv.pages.bind(dv),
                 current: dv.current ? dv.current.bind(dv) : undefined,
                 el: dv.el ? dv.el.bind(dv) : undefined
             };
