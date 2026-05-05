@@ -1,16 +1,20 @@
 /**
  * Daily Dashboard (CustomJS)
- * Panel-host wrapper around two BeaconCards calls (tasks + meetings).
+ * Panel-host wrapper: tasks panel as compact bullet list (clickable to parent
+ * file); meetings panel as BeaconCards.
  *
  * Usage in DataviewJS:
  *   await dv.view("Docs/Meta/Views/customjs-guard", { class: "SpaceDailyDashboard" });
  *
- * v0.2.0 (cards-cohesion cycle): migrated from flat <ul> lists to per-panel
- * BeaconCards.render calls (columns: 1). Panel-host wrapper preserved
- * (rounded background, per-section SVG headers). Both-empty short-circuit
- * preserved. Tasks render ABOVE meetings (S2 user feedback). Tasks use
- * synthetic-page pattern: each task becomes a {file:{name,path}, line, text,
- * _isTask:true} object with custom onClick that opens the parent file.
+ * v0.2.0 (cards-cohesion cycle): meetings panel migrated to BeaconCards via
+ * thin {container: subContainerEl} dv shim; tasks panel kept as flat <ul>
+ * (audit-predicted regression on cards-for-tasks confirmed by user smoke).
+ * Tasks render ABOVE meetings. Both-empty short-circuit + per-section SVG
+ * headers + double-execution guard preserved.
+ *
+ * v0.2.1 (S3.4.1 inline-CF): tasks panel reverted from BeaconCards to bullet
+ * <ul> per user feedback — at-a-glance compact list is the right primitive
+ * for tasks; cards bloat the visual.
  */
 class SpaceDailyDashboard {
   async render(dv) {
@@ -46,10 +50,8 @@ class SpaceDailyDashboard {
           const pageTasks = page.file.tasks.where(t => !t.completed);
           for (const task of pageTasks) {
             tasks.push({
-              file: { name: page.file.name, path: page.file.path },
-              line: task.line,
               text: task.text,
-              _isTask: true
+              parentPath: page.file.path
             });
           }
         }
@@ -62,7 +64,6 @@ class SpaceDailyDashboard {
     const hasContent = meetings.length > 0 || tasks.length > 0;
     if (!hasContent) return;
 
-    // Guard against double-execution
     const existing = dv.container.querySelector(".space-daily-dashboard");
     if (existing) existing.remove();
 
@@ -91,18 +92,15 @@ class SpaceDailyDashboard {
         margin-bottom: 10px;
       `;
 
-      const tasksPanel = tasksSection.createEl("div");
-      const tasksShim = { container: tasksPanel };
-      await customJS.BeaconCards.render(tasksShim, {
-        pages: tasks,
-        layout: "stacked",
-        columns: 1,
-        title: p => p.text,
-        target: p => p.file.path,
-        onClick: (p, ev) => app.workspace.openLinkText(p.file.path, ""),
-        sort: () => 0,
-        empty: "(no tasks — should not render due to outer hasContent guard)"
-      });
+      const tasksList = tasksSection.createEl("ul");
+      tasksList.style.cssText = "margin: 0; padding-left: 20px; list-style-type: disc;";
+
+      for (const task of tasks) {
+        const li = tasksList.createEl("li");
+        li.style.cssText = "margin: 6px 0; font-size: 0.9em; cursor: pointer;";
+        li.innerText = task.text;
+        li.onclick = () => app.workspace.openLinkText(task.parentPath, "");
+      }
     }
 
     if (meetings.length > 0) {
