@@ -11,10 +11,13 @@
  * Options:
  *   pages    — Array of Dataview pages OR hand-rolled objects (required)
  *   title    — (page) => string (required; plain text)
- *   subtitle — (page) => string|null (optional)
+ *   subtitle — (page) => string|null|{text:string, secondaryText?:string} (optional)
+ *              v0.2.0: object form renders a second muted-italic line below.
+ *              Plain string + null retain prior behavior (backward-compatible).
  *   icon     — (page) => string (optional; inline SVG HTML rendered left of title)
  *   meta     — (page) => string (optional; HTML rendered right of title row when layout="row")
- *   badges   — (page) => Array<{label, tone?}> (optional; tone: "accent"|"warn"|"error"|"muted")
+ *   badges   — (page) => Array<{label, tone?, icon?}> (optional; tone: "accent"|"warn"|"error"|"muted")
+ *              v0.2.0: optional icon (inline SVG HTML) prepended inside chip.
  *   progress — (page) => {done, total}|null (optional; renders bar + count)
  *   target   — (page) => string (optional; default page.file.path; passed to openLinkText)
  *   sort     — (a, b) => number (optional; default mtime desc)
@@ -23,6 +26,14 @@
  *   columns  — number | "auto" (optional; default "auto" — auto-fit ~280px min; 1 = single column)
  *   layout   — "stacked" | "row" (optional; default "stacked"; "row" = title+meta on one row; columns defaults to 1)
  *   onClick  — (page, ev) => void (optional; overrides default openLinkText)
+ *
+ * Synthetic-page pattern (codified v0.2.0):
+ *   pages may be hand-rolled objects rather than Dataview pages. Minimum
+ *   shape is {file: {name, path}} for default target resolution. Custom
+ *   onClick supports line-anchored or non-file destinations.
+ *   Example: SpaceDailyDashboard tasks panel passes
+ *   [{file: {name, path}, line, text, _isTask: true}, ...] with onClick
+ *   that calls app.workspace.openLinkText(parentPath, "").
  */
 class BeaconCards {
     async render(dv, opts) {
@@ -116,12 +127,7 @@ class BeaconCards {
         const titleSpan = `<span style="${ctx.isMobile ? "white-space: normal; word-break: break-word;" : "white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"}">${this._escape(titleText)}</span>`;
         titleEl.innerHTML = `${iconHtml}${titleSpan}`;
 
-        const sub = ctx.subtitleFn(page);
-        if (sub) {
-            const subEl = card.createEl("div");
-            subEl.style.cssText = `font-size: 0.8em; color: var(--text-muted); ${ctx.isMobile ? "white-space: normal; word-break: break-word;" : "white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"}`;
-            subEl.textContent = sub;
-        }
+        this._renderSubtitle(card, page, ctx, { indent: "" });
 
         this._renderBadges(card, page, ctx);
         this._renderProgress(card, page, ctx);
@@ -142,13 +148,8 @@ class BeaconCards {
         const titleSpan = `<span style="overflow: hidden; text-overflow: ellipsis; ${isMobile ? "white-space: normal; word-break: break-word;" : "white-space: nowrap;"}">${this._escape(titleText)}</span>`;
         titleEl.innerHTML = `${iconHtml}${titleSpan}`;
 
-        const sub = ctx.subtitleFn(page);
-        if (sub) {
-            const subEl = left.createEl("div");
-            const indent = iconHtml ? "padding-left: 24px;" : "";
-            subEl.style.cssText = `font-size: 0.8em; color: var(--text-muted); margin-top: 2px; ${indent} ${isMobile ? "white-space: normal; word-break: break-word;" : "overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"}`;
-            subEl.textContent = sub;
-        }
+        const indentCss = iconHtml ? "padding-left: 24px;" : "";
+        this._renderSubtitle(left, page, ctx, { indent: indentCss });
 
         const metaHtml = ctx.metaFn(page) || "";
         if (metaHtml) {
@@ -159,6 +160,34 @@ class BeaconCards {
 
         this._renderBadges(card, page, ctx);
         this._renderProgress(card, page, ctx);
+    }
+
+    _renderSubtitle(parent, page, ctx, opts) {
+        opts = opts || {};
+        const indent = opts.indent || "";
+        const sub = ctx.subtitleFn(page);
+        if (sub === null || sub === undefined || sub === "") return;
+        let primaryText, secondaryText;
+        if (typeof sub === "string") {
+            primaryText = sub;
+            secondaryText = null;
+        } else if (typeof sub === "object" && sub !== null) {
+            primaryText = sub.text || "";
+            secondaryText = sub.secondaryText || null;
+        } else {
+            return;
+        }
+        if (!primaryText && !secondaryText) return;
+        if (primaryText) {
+            const subEl = parent.createEl("div");
+            subEl.style.cssText = `font-size: 0.8em; color: var(--text-muted); margin-top: 2px; ${indent} ${ctx.isMobile ? "white-space: normal; word-break: break-word;" : "white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"}`;
+            subEl.textContent = primaryText;
+        }
+        if (secondaryText) {
+            const sub2El = parent.createEl("div");
+            sub2El.style.cssText = `font-size: 0.78em; font-style: italic; color: var(--text-faint); margin-top: 1px; ${indent} ${ctx.isMobile ? "white-space: normal; word-break: break-word;" : "overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"}`;
+            sub2El.textContent = secondaryText;
+        }
     }
 
     _renderBadges(card, page, ctx) {
@@ -176,8 +205,17 @@ class BeaconCards {
             };
             const p = palette[tone] || palette.muted;
             const chip = badgeRow.createEl("span");
-            chip.style.cssText = `display: inline-block; padding: 1px 8px; border-radius: 4px; font-size: 0.72em; font-weight: 500; background: ${p.bg}; color: ${p.text}; white-space: nowrap;`;
-            chip.textContent = b.label;
+            const hasIcon = !!b.icon;
+            chip.style.cssText = `display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 4px; font-size: 0.72em; font-weight: 500; background: ${p.bg}; color: ${p.text}; white-space: nowrap;`;
+            if (hasIcon) {
+                const iconSpan = chip.createEl("span");
+                iconSpan.style.cssText = "display: inline-flex; align-items: center; line-height: 0;";
+                iconSpan.innerHTML = b.icon;
+                const labelSpan = chip.createEl("span");
+                labelSpan.textContent = b.label;
+            } else {
+                chip.textContent = b.label;
+            }
         }
     }
 
