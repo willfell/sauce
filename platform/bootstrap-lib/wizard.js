@@ -97,7 +97,7 @@ async function runFirstRunWizard(opts) {
     // -------- Non-interactive short-circuit --------
     if (nonInteractive) {
         const workshopRelativePath =
-            (defaults && defaults.workshopRelativePath) || "../beacon";
+            (defaults && defaults.workshopRelativePath) || "Beacon";
         const displayName =
             (defaults && defaults.displayName) ||
             (vaultPath ? path.basename(vaultPath) : "vault");
@@ -168,7 +168,7 @@ async function runFirstRunWizard(opts) {
 
     // 2. Workshop relative path.
     const defaultWorkshopRel =
-        (defaults && defaults.workshopRelativePath) || "../beacon";
+        (defaults && defaults.workshopRelativePath) || "Beacon";
     const workshopRelativePath = await input({
         message: "Workshop relative path (from vault root):",
         default: defaultWorkshopRel,

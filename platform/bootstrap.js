@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Beacon consumer bootstrap — interactive Node CLI (v0.21.0).
+ * Beacon consumer bootstrap — interactive Node CLI (v0.22.0 S2).
  *
  * Run from a consumer vault directory:
  *   node ../beacon/platform/bootstrap.js
@@ -21,7 +21,11 @@
  *
  * Exports: runBootstrap({ vaultPath, nonInteractive, skipInstaller,
  *                        forceReinstall, injectExtraPluginIds, wizardDefaults })
- *   for harness import.
+ *   plus phase functions for CLI / harness use:
+ *     - phaseFirstRunWizard
+ *     - phaseFetchPlugins
+ *     - phaseRunInstaller
+ *     - phaseWriteActivation (NEW v0.22.0)
  */
 
 const fs = require("fs");
@@ -64,31 +68,17 @@ function detectInquirerOrExit() {
     }
 }
 
-async function runBootstrap(opts) {
-    opts = opts || {};
-    const vaultPath = path.resolve(opts.vaultPath || process.cwd());
-    const nonInteractive = !!opts.nonInteractive;
-    const skipInstaller = !!opts.skipInstaller;
-    const forceReinstall = opts.forceReinstall || [];
-    const injectExtraPluginIds = opts.injectExtraPluginIds || [];
-    const wizardDefaults = opts.wizardDefaults || null;
-    const action = opts.action || null;
+// ----------------------------------------------------------------------------
+// Phase functions (v0.22.0 S2 — extracted for reuse by CLI verbs).
+// ----------------------------------------------------------------------------
 
-    // Step 1: node_modules detection. Skipped under nonInteractive (harness path).
-    if (!nonInteractive) {
-        detectInquirerOrExit();
-    }
-
-    // Step 2: read or generate consumer config.
-    const cfgPath = path.join(vaultPath, "Docs/Meta/platform-config.json");
-    const subPath = path.join(vaultPath, "Docs/Meta/platform-subscription.json");
+async function phaseFirstRunWizard(opts) {
+    // opts: { vaultPath, cfgPath, subPath, nonInteractive, wizardDefaults }
+    const { vaultPath, cfgPath, subPath, nonInteractive, wizardDefaults } = opts;
+    let config, subscription, workshopPath, workshopManifest;
     const cfgExists = fs.existsSync(cfgPath);
     const subExists = fs.existsSync(subPath);
-
-    let config, subscription, workshopPath, workshopManifest;
-
     if (cfgExists && subExists) {
-        // Re-run path
         config = readJson(cfgPath);
         subscription = readJson(subPath);
         workshopPath = path.resolve(vaultPath, config.workshop_relative_path);
@@ -97,48 +87,12 @@ async function runBootstrap(opts) {
             throw new Error(`Workshop manifest not found at ${wmPath} (resolved from config.workshop_relative_path = ${config.workshop_relative_path}).`);
         }
         workshopManifest = readJson(wmPath);
-
-        // Re-run wizard menu (interactive only)
-        if (!nonInteractive) {
-            const r = await wizardMod.runReRunWizard({
-                vaultPath,
-                existingConfig: config,
-                existingSubscription: subscription,
-                workshopManifest,
-                nonInteractive: false
-            });
-            if (r.action === "quit") {
-                console.log("Quit.");
-                return { fetched: [], skipped: [], failed: [] };
-            }
-            if (r.action === "edit-sub" && r.payload) {
-                subscription = mergeSubscription(subscription, r.payload, workshopManifest);
-                writeJsonAtomic(subPath, subscription);
-            }
-            if (r.action === "edit-cfg" && r.payload && r.payload.config) {
-                config = Object.assign({}, config, r.payload.config);
-                writeJsonAtomic(cfgPath, config);
-                workshopPath = path.resolve(vaultPath, config.workshop_relative_path);
-                workshopManifest = readJson(path.join(workshopPath, "platform/manifest.json"));
-            }
-            if (r.action === "force-redl" && r.payload && Array.isArray(r.payload.ids)) {
-                forceReinstall.push(...r.payload.ids);
-            }
-            // For "install" or any falling-through action, continue to step 5.
-        } else if (action) {
-            // Non-interactive with explicit action (test path; e.g., BS2 falls through to install)
-            // No-op for "install"; other actions handled by direct opts.
-        }
     } else {
         // First-run path: defer workshop discovery to the wizard so it can
         // prompt for workshop_relative_path FIRST + validate manifest exists.
-        // Without this deferral, the bootstrap fails BEFORE the wizard runs
-        // when the consumer vault is not at the canonical sibling-of-workshop
-        // depth (CF-3 surfaced in Phase C from /workshop/scratch/1 needing
-        // ../../beacon, not the hardcoded default ../beacon).
         const r = await wizardMod.runFirstRunWizard({
             vaultPath,
-            workshopManifest: null,  // wizard loads after path validates
+            workshopManifest: null,
             nonInteractive,
             defaults: wizardDefaults || {}
         });
@@ -149,6 +103,160 @@ async function runBootstrap(opts) {
         writeJsonAtomic(subPath, subscription);
         workshopPath = path.resolve(vaultPath, config.workshop_relative_path);
         workshopManifest = readJson(path.join(workshopPath, "platform/manifest.json"));
+    }
+    return { config, subscription, workshopPath, workshopManifest };
+}
+
+async function phaseFetchPlugins(opts) {
+    // Returns { fetched, skipped, failed }.
+    const { vaultPath, workshopPath, workshopManifest, subscription, forceReinstall, injectExtraPluginIds } = opts;
+    const pluginIds = new Set();
+    for (const fp of (workshopManifest.foundational_plugins || [])) {
+        if (fp && typeof fp.id === "string") pluginIds.add(fp.id);
+    }
+    const subscribedItems = [
+        ...((subscription.mechanisms) || []).map(m => ({ kind: "mechanisms", name: m.name })),
+        ...((subscription.blueprints) || []).map(b => ({ kind: "blueprints", name: b.name }))
+    ];
+    for (const item of subscribedItems) {
+        if (!item.name) continue;
+        const itemMfPath = path.join(workshopPath, "platform", item.kind, item.name, "manifest.json");
+        if (!fs.existsSync(itemMfPath)) continue;
+        let mf;
+        try { mf = readJson(itemMfPath); } catch (_) { continue; }
+        for (const p of (mf.external_plugins || [])) {
+            if (p && typeof p.id === "string") pluginIds.add(p.id);
+        }
+    }
+    for (const id of (injectExtraPluginIds || [])) {
+        if (typeof id === "string") pluginIds.add(id);
+    }
+    const index = await indexMod.fetchIndex();
+    const fetched = [], skipped = [], failed = [];
+    for (const id of pluginIds) {
+        const entry = index[id];
+        if (!entry) {
+            failed.push({ id, reason: `plugin id '${id}' not found in obsidian-releases community-plugins index` });
+            continue;
+        }
+        const force = (forceReinstall || []).includes(id);
+        try {
+            const r = await fetchPluginMod.fetchPlugin({ id, repo: entry.repo, vaultPath, force });
+            if (r.status === "skipped") skipped.push({ id });
+            else if (r.status === "fetched") fetched.push({ id });
+        } catch (e) {
+            failed.push({ id, reason: e.message });
+        }
+    }
+    const installedIds = [...fetched.map(x => x.id), ...skipped.map(x => x.id)];
+    if (installedIds.length > 0) {
+        await mergeMod.mergeCommunityPlugins({ vaultPath, addIds: installedIds });
+    }
+    return { fetched, skipped, failed };
+}
+
+async function phaseRunInstaller(opts) {
+    const installer = require("./install.js");
+    if (typeof installer.runInstall === "function") {
+        await installer.runInstall(opts.vaultPath);
+    }
+}
+
+async function phaseWriteActivation(opts) {
+    // NEW v0.22.0 — generates <workshopAbsPath>/Scripts/{activate.sh, beacon}
+    // with absolute paths baked in. Atomic write + backup-on-overwrite to
+    // .beacon-backup (matches landmine #12 mechanic #2).
+    const { vaultPath, workshopAbsPath } = opts;
+    const scriptsDir = path.join(workshopAbsPath, "Scripts");
+    ensureDir(scriptsDir);
+    const cliPath = path.join(workshopAbsPath, "platform/cli/beacon-cli.js");
+    const actPath = path.join(scriptsDir, "activate.sh");
+    const binPath = path.join(scriptsDir, "beacon");
+    const actBody = `# Beacon activation — sourced into your shell.
+# Generated by phaseWriteActivation; absolute paths resolved at install time.
+export BEACON_VAULT="${vaultPath}"
+case ":$PATH:" in
+  *":${scriptsDir}:"*) ;;
+  *) export PATH="${scriptsDir}:$PATH" ;;
+esac
+echo "beacon active. Try: beacon status"
+`;
+    const binBody = `#!/usr/bin/env bash
+exec node "${cliPath}" "$@"
+`;
+    _writeWithBackup(actPath, actBody);
+    _writeWithBackup(binPath, binBody);
+    fs.chmodSync(binPath, 0o755);
+    return { activatePath: actPath, beaconPath: binPath };
+}
+
+function _writeWithBackup(p, body) {
+    if (fs.existsSync(p)) {
+        const backup = p + ".beacon-backup";
+        fs.copyFileSync(p, backup);
+    }
+    const tmp = p + ".tmp";
+    fs.writeFileSync(tmp, body);
+    fs.renameSync(tmp, p);
+}
+
+// ----------------------------------------------------------------------------
+// Back-compat wrapper: runBootstrap composes the phases + preserves v0.21.x
+// re-run-wizard menu, CF-5 canonical-variables augment, CF-4 stub-copy block,
+// and the final report block.
+// ----------------------------------------------------------------------------
+
+async function runBootstrap(opts) {
+    opts = opts || {};
+    const vaultPath = path.resolve(opts.vaultPath || process.cwd());
+    const nonInteractive = !!opts.nonInteractive;
+    const skipInstaller = !!opts.skipInstaller;
+    const forceReinstall = opts.forceReinstall || [];
+    const injectExtraPluginIds = opts.injectExtraPluginIds || [];
+    const wizardDefaults = opts.wizardDefaults || null;
+    const action = opts.action || null;
+
+    if (!nonInteractive) {
+        detectInquirerOrExit();
+    }
+
+    const cfgPath = path.join(vaultPath, "Docs/Meta/platform-config.json");
+    const subPath = path.join(vaultPath, "Docs/Meta/platform-subscription.json");
+
+    // Capture pre-existence BEFORE phaseFirstRunWizard writes either file —
+    // determines whether the re-run wizard menu should fire (only when the
+    // user already had a config; first-run path is just-prompted).
+    const cfgPreExisted = fs.existsSync(cfgPath) && fs.existsSync(subPath);
+
+    let { config, subscription, workshopPath, workshopManifest } =
+        await phaseFirstRunWizard({ vaultPath, cfgPath, subPath, nonInteractive, wizardDefaults });
+
+    // Re-run wizard menu (interactive only; preserves v0.21.0 behavior).
+    if (!nonInteractive && cfgPreExisted) {
+        const r = await wizardMod.runReRunWizard({
+            vaultPath,
+            existingConfig: config,
+            existingSubscription: subscription,
+            workshopManifest,
+            nonInteractive: false
+        });
+        if (r.action === "quit") {
+            console.log("Quit.");
+            return { fetched: [], skipped: [], failed: [] };
+        }
+        if (r.action === "edit-sub" && r.payload) {
+            subscription = mergeSubscription(subscription, r.payload, workshopManifest);
+            writeJsonAtomic(subPath, subscription);
+        }
+        if (r.action === "edit-cfg" && r.payload && r.payload.config) {
+            config = Object.assign({}, config, r.payload.config);
+            writeJsonAtomic(cfgPath, config);
+            workshopPath = path.resolve(vaultPath, config.workshop_relative_path);
+            workshopManifest = readJson(path.join(workshopPath, "platform/manifest.json"));
+        }
+        if (r.action === "force-redl" && r.payload && Array.isArray(r.payload.ids)) {
+            forceReinstall.push(...r.payload.ids);
+        }
     }
 
     // CF-5: ensure config.variables has the canonical platform path keys.
@@ -198,71 +306,12 @@ async function runBootstrap(opts) {
         }
     }
 
-    // Step 5: build plugin id set (foundational + per-subscribed external_plugins + injections)
-    const pluginIds = new Set();
-    const foundational = workshopManifest.foundational_plugins || [];
-    for (const fp of foundational) {
-        if (fp && typeof fp.id === "string") pluginIds.add(fp.id);
-    }
-    const subscribedItems = [
-        ...((subscription.mechanisms) || []).map(m => ({ kind: "mechanisms", name: m.name })),
-        ...((subscription.blueprints) || []).map(b => ({ kind: "blueprints", name: b.name }))
-    ];
-    for (const item of subscribedItems) {
-        if (!item.name) continue;
-        const itemMfPath = path.join(workshopPath, "platform", item.kind, item.name, "manifest.json");
-        if (!fs.existsSync(itemMfPath)) continue;
-        let mf;
-        try { mf = readJson(itemMfPath); } catch (_) { continue; }
-        for (const p of (mf.external_plugins || [])) {
-            if (p && typeof p.id === "string") pluginIds.add(p.id);
-        }
-    }
-    for (const id of injectExtraPluginIds) {
-        if (typeof id === "string") pluginIds.add(id);
-    }
+    const { fetched, skipped, failed } = await phaseFetchPlugins({
+        vaultPath, workshopPath, workshopManifest, subscription, forceReinstall, injectExtraPluginIds
+    });
 
-    // Step 6: fetch upstream index for id → repo lookup
-    const index = await indexMod.fetchIndex();
-
-    // Step 7: per-plugin fetch (skip-if-present unless force)
-    const fetched = [];
-    const skipped = [];
-    const failed = [];
-
-    for (const id of pluginIds) {
-        const entry = index[id];
-        if (!entry) {
-            failed.push({ id, reason: `plugin id '${id}' not found in obsidian-releases community-plugins index` });
-            continue;
-        }
-        const force = forceReinstall.includes(id);
-        try {
-            const r = await fetchPluginMod.fetchPlugin({
-                id,
-                repo: entry.repo,
-                vaultPath,
-                force
-            });
-            if (r.status === "skipped") skipped.push({ id });
-            else if (r.status === "fetched") fetched.push({ id });
-        } catch (e) {
-            failed.push({ id, reason: e.message });
-        }
-    }
-
-    // Step 8: register installed plugin ids in community-plugins.json (additive merge)
-    const installedIds = [...fetched.map(x => x.id), ...skipped.map(x => x.id)];
-    if (installedIds.length > 0) {
-        await mergeMod.mergeCommunityPlugins({ vaultPath, addIds: installedIds });
-    }
-
-    // Step 9: drive the existing Node installer (themes, appearance, style-settings, files, nav buttons)
     if (!skipInstaller) {
-        const installer = require("./install.js");
-        if (typeof installer.runInstall === "function") {
-            await installer.runInstall(vaultPath);
-        }
+        await phaseRunInstaller({ vaultPath });
     }
 
     // Step 10: report
@@ -312,4 +361,10 @@ if (require.main === module) {
         .catch(e => { console.error(e.stack || e.message); process.exit(1); });
 }
 
-module.exports = { runBootstrap };
+module.exports = {
+    runBootstrap,
+    phaseFirstRunWizard,
+    phaseFetchPlugins,
+    phaseRunInstaller,
+    phaseWriteActivation
+};
