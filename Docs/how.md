@@ -280,3 +280,49 @@ The bootstrap reads `foundational_plugins[]` PLUS each subscribed mechanism/blue
 ### Honored env vars
 
 - `GITHUB_TOKEN` — when set, bootstrap sends `Authorization: Bearer <token>` on every HTTPS GET. Useful for high-quota sessions (5000/hr authenticated vs 60/hr unauth).
+
+---
+
+## Convenience mechanism (v0.21.1+)
+
+The `convenience@0.1.0` mechanism ships a pair of "fresh-vault → ready-to-use" defaults:
+
+- **Global hotkeys** — `Cmd+-` (workspace:copy-full-path) and `Cmd+=` (workspace:copy-path), the macOS-native equivalent of "copy this note's absolute path" / "copy its vault-relative path". (The Cmd+= literal physical key for what users typically *call* "Cmd++" on a US keyboard.)
+- **Dataview JS enable** — sets `enableDataviewJs:true` + `enableInlineDataviewJs:true` on `.obsidian/plugins/dataview/data.json` (gated on Dataview being enabled in `.obsidian/community-plugins.json`).
+
+Daily blueprint v0.2.2 ships its own additions in lockstep:
+
+- **Daily-notes autorun** — `autorun:true` on the existing `core_plugin_settings.daily-notes` entry, so today's daily note auto-opens on Obsidian startup.
+- **Cmd+[** — bound to the core `daily-notes` command (the Cmd+[ key invokes "Open today's daily note" via the new shared `hotkeys[]` manifest field).
+
+### NEW manifest fields (mechanism + blueprint)
+
+```json
+"hotkeys": [
+  { "command_id": "workspace:copy-full-path", "modifiers": ["Mod"], "key": "-" }
+]
+```
+Flat shape; one binding per entry. `Mod` is Obsidian's portable modifier (Cmd on macOS, Ctrl on Windows/Linux). For two bindings on a single command, declare two entries — the helper's first-wins logic lets the second overwrite become a `skipped_existing`. Validation rejects entries with empty `command_id` / non-array `modifiers` / empty `key` (skipped + warning history; siblings still applied).
+
+```json
+"community_plugin_settings": [
+  { "id": "dataview", "settings": { "enableDataviewJs": true, "enableInlineDataviewJs": true } }
+]
+```
+Mirror of `core_plugin_settings[]` exactly except target is `.obsidian/plugins/${id}/data.json`. `id` is path-traversal-validated (no `/` `\` `..` allowed). Substitution via `substituteLenient` round-trip on `JSON.stringify(settings)`. Plugin-dir absent → skip + history `info/skipped_plugin_dir_absent`. Pair with `external_plugins:[{id}]` so the broadened prereq gate in `applyCommunityPluginData` short-circuits when the plugin isn't enabled.
+
+### NEW installer helpers
+
+| Helper | Target | Posture |
+|---|---|---|
+| `applyCommunityPluginData` | `.obsidian/plugins/${id}/data.json` | additive shallow merge; substituted (manifest) wins; `.beacon-backup` on edit; idempotent skip on structural equality; broadened prereq gate (any external_plugins[] id absent → skip whole helper); plugin-dir absent → skip per entry; path-traversal validator on `id` |
+| `applyHotkeys` | `.obsidian/hotkeys.json` | additive per-`command_id`; FIRST-WINS (existing user binding always preserved); `.beacon-backup` on edit; malformed-JSON guard; `info/applied` or `info/skipped_existing` history per entry |
+
+Both wired into `installItem` after `applyCorePluginSettings` (CommunityPluginData, line 616) and after `applyStyleSettings` (Hotkeys, line 620). Helper count is now **9** (allowlist-touching helpers; 10 if you also count `applyExternalPlugins` and 11 if you count `applyNavButtons`).
+
+### Lessons / gotchas
+
+- **Broadened prereq gate vs styling helpers' `required:true` interpretation.** `_externalPluginsSatisfied` only flags entries with `required:true` as missing. The styling helpers (v0.19.0) honor that semantic. `applyCommunityPluginData` (v0.21.1) broadens it: ANY declared `external_plugins[]` id missing from `.obsidian/community-plugins.json` short-circuits the whole helper. Justification: writing `enableDataviewJs:true` to a plugin that isn't enabled is a wasted write that drifts on the next consumer reload. Future helpers should pick the semantic that fits their failure mode; the divergence is intentional.
+- **First-wins on hotkeys is non-negotiable.** The convenience mechanism declares 2 hotkeys; the daily blueprint declares 1. If a consumer has already bound `daily-notes` to Cmd+\\, the daily blueprint's Cmd+[ becomes a `skipped_existing`. This is correct: the platform never modifies a user's hotkey. Authors who want to FORCE a binding need to explicitly tell the user to delete the prior binding first; there's no override knob.
+- **`Mod` modifier portability.** Obsidian normalizes `Mod` to Cmd on macOS, Ctrl on Windows/Linux. Production accuris uses `Mod` throughout — verified working at v0.21.1 ship.
+- **Allowlist 11 is the soft cap.** Adding a 12th path requires explicit user approval per CLAUDE.md non-negotiables + landmine #12. Bias toward extending an existing helper before proposing a new path.
