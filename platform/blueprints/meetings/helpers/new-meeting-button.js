@@ -82,19 +82,20 @@ class NewMeetingButton {
     };
 
     const container = dv.el("div", "");
-    const btn = container.createEl("button");
-    btn.innerHTML = newMeetingIcon + `<span style="margin-left: 8px;">New Meeting</span>`;
-    btn.style.cssText = "cursor: pointer; padding: 12px 24px; border-radius: 8px; font-size: 1em; display: inline-flex; align-items: center; justify-content: center;";
-    btn.onclick = async () => {
-      const title = await inputModal("Meeting title:");
-      if (!title) return;
+    customJS.BeaconButton.render(container, {
+      label: "New Meeting",
+      icon: newMeetingIcon,
+      onClick: async () => {
+        const title = await inputModal("Meeting title:");
+        if (!title) return;
 
-      const meetingFilename = `${title}-${currentDateStr}`;
-      const template = app.vault.getAbstractFileByPath("Docs/Meta/Templates/Meeting.md");
-      if (template) {
-        const templater = app.plugins.plugins["templater-obsidian"];
-        await templater.templater.create_new_note_from_template(template, folder, meetingFilename, true);
-      }
-    };
+        const meetingFilename = `${title}-${currentDateStr}`;
+        const template = app.vault.getAbstractFileByPath("Docs/Meta/Templates/Meeting.md");
+        if (template) {
+          const templater = app.plugins.plugins["templater-obsidian"];
+          await templater.templater.create_new_note_from_template(template, folder, meetingFilename, true);
+        }
+      },
+    });
   }
 }

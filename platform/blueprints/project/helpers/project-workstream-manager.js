@@ -177,13 +177,11 @@ class ProjectWorkstreamManager {
         const btnRow = root.createEl("div");
         btnRow.style.cssText = "display: flex; gap: 8px; margin-bottom: 10px;";
 
-        const addBtn = btnRow.createEl("button", { text: "+ Add" });
-        addBtn.style.cssText = "padding: 4px 12px; border-radius: 6px; cursor: pointer; font-size: 0.82em; background: var(--interactive-accent); color: var(--text-on-accent); border: none; font-weight: 500;";
-        addBtn.onclick = addWorkstream;
+        const plusIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>`;
+        const minusIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></svg>`;
 
-        const rmBtn = btnRow.createEl("button", { text: "\u2212 Remove" });
-        rmBtn.style.cssText = "padding: 4px 12px; border-radius: 6px; cursor: pointer; font-size: 0.82em; background: var(--background-secondary); color: var(--text-muted); border: 1px solid var(--background-modifier-border);";
-        rmBtn.onclick = removeWorkstream;
+        customJS.BeaconButton.render(btnRow, { label: "Add", icon: plusIcon, onClick: addWorkstream });
+        customJS.BeaconButton.render(btnRow, { label: "Remove", icon: minusIcon, onClick: removeWorkstream });
 
         if (totalAll > 0) {
             const pct = Math.round((completedAll / totalAll) * 100);

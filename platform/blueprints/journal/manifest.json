@@ -1,6 +1,6 @@
 {
   "name": "journal",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "kind": "blueprint",
   "module_directory": "journal",
   "description": "Date-routed daily journal entries under beacon/journal/. Filename pattern Journal-YYYY-MM-DD per gotcha 8 platform invariant. Nav-button-driven creation via runTemplaterTemplate; manual creation under beacon/journal/ auto-applies template via templater_folder_templates.",
@@ -14,7 +14,7 @@
   "nav_buttons": [
     {
       "id": "journal-today",
-      "label": "+ Today's Journal",
+      "label": "Journal",
       "icon": "journal",
       "order": 120,
       "action": {
