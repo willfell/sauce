@@ -1,0 +1,20 @@
+{
+  "name": "styling",
+  "version": "0.1.0",
+  "description": "Vault appearance — Baseline theme + Style Settings canonical config. Vendors Baseline theme files; declares Style Settings community plugin as a prerequisite (not vendored). Three new installer helpers (applyVendoredThemes, applyAppearance, applyStyleSettings) mirror the v0.1.3 plugin-data automation posture: additive merge, backup-on-edit, malformed-JSON guard, failure-loud history.",
+  "depends_on": [],
+  "external_plugins": [
+    { "id": "obsidian-style-settings", "name": "Style Settings", "required": true }
+  ],
+  "vendored_themes": [
+    { "name": "Baseline", "src": "assets/themes/Baseline" }
+  ],
+  "appearance": {
+    "cssTheme": "Baseline",
+    "enabledCssSnippets": ["customjs-loader"]
+  },
+  "style_settings_defaults_src": "data/style-settings-default.json",
+  "files": [],
+  "post_install": [],
+  "rule_fragments": []
+}
