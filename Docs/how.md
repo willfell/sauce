@@ -181,3 +181,29 @@ Drift detection (in `audit-walker.js`):
 Each consumer's `Docs/Meta/Templater/platformInstall.js` is a ~12-line content-static thin stub. It reads the consumer's `platform-config.json` to resolve the workshop path, clears Node's require cache for the canonical installer, and dispatches to `<workshop>/platform/install.js`. The canonical installer is the single source of truth at runtime; it lives in the workshop git repo and is updated via normal git workflow (`git pull` in the workshop, then re-run the install in each consumer).
 
 The stub itself never changes after v0.1.2 S2 deployment. Edits to canonical `install.js` propagate to all consumers automatically on the next install run, with no per-consumer file changes.
+
+---
+
+## Gotchas / Lessons learned (v0.11.0–v0.19.0)
+
+Eleven cycles of operational lessons not yet codified elsewhere. Per-cycle detail in result writeups under `Docs/plans/` (filename pattern: `<date>-<cycle>-result.md`); CLAUDE.md status snapshot is the running summary across all cycles; `Docs/landmines.md` is the rule registry.
+
+1. **In-cycle re-process bump rule** — when revising in-cycle staged work, bump the item version (PATCH for fixes). See landmine #16 for the full mechanic. Surfaced: v0.6.0 / v0.17.0 / v0.18.0 / v0.18.1 / v0.19.0.
+
+2. **API-contract quoting** — when authoring a new mechanism API or invoking an existing shared API in a design doc, QUOTE the literal call shape. Inferring from a sibling fails (TripsHubCards inferred BeaconCards' API → CF-1; design described "field-function API matching ProjectsHubCards precedent" but didn't quote the call shape). Surfaced: v0.6.0.
+
+3. **dv-shim composition discipline** — when a hub renderer hands a sub-container to another customJS class, the shim MUST proxy every dv method the sub-class calls (`pages` + `current` + `el` minimum). A `{container: sub}`-only shim breaks any sub-renderer that calls `dv.pages(...)`. Surfaced: v0.17.0 CF-1 (latent v0.16.0 bug).
+
+4. **Mobile-aware visual design** — every CustomJS class designed for desktop AND mobile from the start. Installer is desktop-only (landmine #8); renderers are not. Surfaced: v0.4.2 gotcha 7.
+
+5. **Embed dedup via `closest(".markdown-embed")`** — when a note is embedded via `![[X]]`, its dataviewjs blocks should suppress duplicated nav-buttons / widgets at the top of the embedded block via `if (dv.container.closest(".markdown-embed")) return;`. Surfaced: v0.16.0.
+
+6. **YAML date auto-parsing + frontmatter parser variance** — frontmatter values matching `YYYY-MM-DD` or `YYYY-MM` auto-parse to Date|Luxon objects; quote on write (`"${month}"`) + tolerant `_toMoment(val)` on read (accepts Luxon/Date/string). Inline-flow booleans may parse as strings; centralize coercion via `isPaid()`-style helpers. Surfaced: v0.16.0.
+
+7. **NBSP gotcha — widgets are the canonical fix** — manual frontmatter editing introduces U+00A0 NBSPs through chat / markdown copy-paste, corrupting inline-flow YAML arrays. Editor widgets (e.g., BudgetCategoriesEditor / PaycheckExpensesEditor / InvoiceTimeLogEditor) bypass every YAML edge case at the source by mutating frontmatter via `app.fileManager.processFrontMatter`. Surfaced: v0.16.0 → fixed in v0.17.0.
+
+8. **Two backup-suffix conventions** — `.bak` for file-content overwrite (vendored themes; v0.2.0 boards Option B precedent), `.beacon-backup` for plugin-data additive merge. Mixing them is confusing; codified in landmine #12 mechanic #2. Surfaced: v0.19.0.
+
+9. **Helpers that materialize new state need explicit prereq gates** — `applyExternalPlugins` only emits warnings; helpers that mkdir + fresh-write must short-circuit at the top via `_externalPluginsSatisfied(tp, manifest)` or equivalent prereq check. Pattern reusable for any future helper whose missing-prereq state isn't recoverable post-hoc. Surfaced: v0.19.0 CF-1.
+
+10. **Bounded cohesion — BeaconCards = hubs only / bullet lists for tasks; outline-accent buttons go through BeaconButton** — BeaconCards for hub-style listings (real files with title/subtitle/meta worth surfacing visually); plain `<ul>` for compact at-a-glance task panels (v0.12.0 daily blueprint S3.4.1 inline-CF). Outline-accent action buttons go through `customJS.BeaconButton.render(...)` — no inline cssText + hover handlers (v0.18.0 BeaconButton mechanism promotion).

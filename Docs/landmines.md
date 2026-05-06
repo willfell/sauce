@@ -165,6 +165,34 @@ The styling mechanism (`platform/mechanisms/styling/`) vendors the Baseline them
 
 Codified in v0.19.0.
 
+### 16. In-cycle re-process bump rule — when reusing in-cycle staged work, in-cycle revisions MUST bump the version
+
+The installer's per-item install loop short-circuits when `installedEntry.version === node.sub.version`. Any in-cycle CF that revises content WITHOUT bumping the item's version reaches barebones (or any other consumer) as the *previous* content because the version-equal short-circuit fires before the new content is read.
+
+**Quoted call site (`platform/install.js:223`):**
+```javascript
+      if (installedEntry && installedEntry.version === node.sub.version) continue;
+```
+
+**Five-data-point precedent:**
+- **v0.6.0** trips 0.1.0 → 0.1.1 → 0.1.2 → 0.1.3 → 0.1.4 (4 in-cycle bumps for hub/atlas/sections/Trip Board CFs).
+- **v0.17.0** finance 0.1.4 → 0.2.0 → 0.2.1 → 0.2.2 → 0.2.3 → 0.2.4 → 0.2.5 → 0.2.6 (6 in-cycle bumps across CF-1..CF-5).
+- **v0.18.0** finance 0.2.6 → 0.2.7 → 0.2.8 → 0.2.9 (3-bump stack for CF-1 InvoiceControls Save fix).
+- **v0.18.1** to-do 0.1.2 → 0.1.3 → 0.1.4 (CF-1 trailing-space trim forced re-process).
+- **v0.19.0** styling 0.1.0 → 0.1.1 (CF-1 prereq gate). Mechanism cycles extend lockstep to **4 files** (workshop manifest + mechanism manifest + workshop subscription + barebones subscription) per v0.19.0 CF-1 reinforcement.
+
+**Rule.** Any in-cycle revision after first install MUST bump the item version (PATCH for fixes, MINOR for additive). Lockstep edits to:
+1. blueprint or mechanism manifest (`platform/<kind>/<name>/manifest.json:version`)
+2. workshop catalogue line (`platform/manifest.json:<kind>[].<name>.version`)
+3. workshop subscription (mechanisms only — workshop self-subscription dogfoods mechanisms)
+4. barebones subscription (`../barebones-beacon-poc/Docs/Meta/platform-subscription.json:<kind>[].<name>.version`)
+
+**Recovery if a CF lands without a version bump.** Bump the item version + re-run install. The barebones drift is silent — `installed.json` still records the prior content's SHA in history.
+
+**Long-term fix candidate (deferred).** A `--force-reinstall <name>` flag for `install.js` so test mechanics + in-cycle CFs can skip the version-equal short-circuit without touching files. Same fix candidate as landmine #10. Not blocking; not free.
+
+Codified in v0.20.0.
+
 ## Operational gotchas
 
 ### CustomJS scan folder is per-vault and configured in `.obsidian/plugins/customjs/data.json`
