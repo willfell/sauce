@@ -207,3 +207,76 @@ Load-bearing operational lessons not yet codified elsewhere. Most surfaced acros
 9. **Helpers that materialize new state need explicit prereq gates** — `applyExternalPlugins` only emits warnings; helpers that mkdir + fresh-write must short-circuit at the top via `_externalPluginsSatisfied(tp, manifest)` or equivalent prereq check. Pattern reusable for any future helper whose missing-prereq state isn't recoverable post-hoc. Surfaced: v0.19.0 CF-1.
 
 10. **Bounded cohesion — BeaconCards = hubs only / bullet lists for tasks; outline-accent buttons go through BeaconButton** — BeaconCards for hub-style listings (real files with title/subtitle/meta worth surfacing visually); plain `<ul>` for compact at-a-glance task panels (v0.12.0 daily blueprint S3.4.1 inline-CF). Outline-accent action buttons go through `customJS.BeaconButton.render(...)` — no inline cssText + hover handlers (v0.18.0 BeaconButton mechanism promotion).
+
+
+---
+
+## Consumer bootstrap (v0.21.0+)
+
+Beacon vault platform ships an interactive Node-based bootstrap orchestrator at `platform/bootstrap.js`. A fresh consumer goes from `git clone` to fully-loaded with one shell command.
+
+### Quick start
+
+```bash
+# One-time workshop setup
+cd <workshop-path>           # e.g., /Users/willfell/Documents/obsidian/sync/workshop/beacon
+npm install
+
+# Consumer-side, from inside any consumer vault
+cd <consumer-vault>
+node <workshop-path>/platform/bootstrap.js
+```
+
+The wizard handles config + subscription generation on first run, then plugin fetch, then runs the existing Node installer. After it completes, open the vault in Obsidian + Cmd+R.
+
+### What bootstrap does
+
+1. **Detects existing config.** If `Docs/Meta/platform-config.json` + `platform-subscription.json` exist, opens the re-run menu (install / edit subscription / edit config / force-redownload / quit). If absent, opens the first-run wizard.
+2. **First-run wizard** (5 prompts via `@inquirer/prompts`):
+   - Workshop relative path (validates `<vault>/<rel>/platform/manifest.json` exists)
+   - Vault display name (defaults to vault dirname)
+   - Mechanisms checkbox (defaults: customjs-guard, nav-buttons, cards, beacon-button, styling)
+   - Blueprints checkbox (defaults: none — opt-in)
+   - Confirm summary
+3. **Writes config files** atomically (`.tmp` + rename) with canonical 6 path variables (`views_path`, `templater_scripts_path`, `scripts_path`, `rules_path`, `templates_path`, `commands_path`) merged into `variables` alongside `workshop` (display name) + `vault_identity_tag` (lowercase).
+4. **Vendors the v0.1.2 thin-stub** at `Docs/Meta/Templater/platformInstall.js` if missing (landmine #13 content-static; never re-edits an existing one).
+5. **Fetches the upstream community-plugins index** (`raw.githubusercontent.com/obsidianmd/obsidian-releases/master/community-plugins.json`) for id → repo lookup. Cached for the run.
+6. **Per plugin in (foundational ∪ subscribed `external_plugins[]`):** skip-if-present unless force-redownload selected. Otherwise HTTPS GET `manifest.json` + `main.js` + (optional) `styles.css` from `https://github.com/<repo>/releases/latest/download/<asset>` (follows 302 redirects to GitHub's CDN). Vendors into `<vault>/.obsidian/plugins/<id>/`.
+7. **Merges plugin ids into `community-plugins.json`** (additive; sorted; deduped; `.beacon-backup` of prior).
+8. **Invokes `runInstall(vaultPath)`** — the existing Node installer — which materializes themes, appearance, style-settings, blueprints, nav-buttons, etc.
+9. **Prints a condensed summary** (Notice lines + Verdict + section counts; ~30-80 lines). Full output tee'd to `Docs/Meta/bootstrap-last-install.log` for inspection.
+
+### Schema additions in v0.21.0
+
+`platform/manifest.json`:
+
+```jsonc
+{
+  "workshop_version": "0.21.0",
+  "foundational_plugins": [           // NEW — workshop-level plugins required by every consumer
+    { "id": "templater-obsidian" },
+    { "id": "customjs" },
+    { "id": "dataview" }
+  ],
+  "mechanisms": [...],
+  "blueprints": [...]
+}
+```
+
+The bootstrap reads `foundational_plugins[]` PLUS each subscribed mechanism/blueprint's existing `external_plugins[].id` to compute the union plugin set.
+
+### Failure modes
+
+| Scenario | Behavior |
+|---|---|
+| Network offline (index fetch) | Fail-loud "Cannot reach raw.githubusercontent.com…", exit 1 |
+| Network offline (mid-plugin) | Per-plugin failed entry; partial state OK; skip-if-present resumes |
+| GitHub 404 on manifest.json or main.js | Per-plugin failed entry; other plugins succeed |
+| GitHub 404 on styles.css | Tolerated silently (many plugins ship without styles.css) |
+| GitHub rate limit | Fail-loud with hint to set `GITHUB_TOKEN` |
+| Workshop missing `node_modules` | Print "Run cd <workshop> && npm install first", exit 1 |
+| Plugin id not in upstream index | Per-plugin failed entry; other plugins succeed |
+
+### Honored env vars
+
+- `GITHUB_TOKEN` — when set, bootstrap sends `Authorization: Bearer <token>` on every HTTPS GET. Useful for high-quota sessions (5000/hr authenticated vs 60/hr unauth).

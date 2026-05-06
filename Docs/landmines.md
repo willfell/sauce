@@ -51,11 +51,13 @@ After the installer copies `validate.js` / `hook-validate.js` / `audit-walker.js
 
 **Fix:** every install ends with a Notice instructing the user to reload. Built into the validator's manifest as a `post_install: { type: notice }` step.
 
-### 8. Cross-vault filesystem reads need `require("fs")`, desktop only
+### 8. Cross-vault filesystem reads need `require("fs")`, desktop only — `install.js` is filesystem-only; `bootstrap.js` (v0.21.0+) is the network gateway
 
 The installer reads the workshop's manifest from outside its own vault. We use `require("fs").promises.readFile(absPath, "utf8")` — Node API available in desktop Templater. Obsidian mobile sandboxes the renderer differently and `fs` is unavailable.
 
 **Fix:** the platform is desktop-first. Mobile is a future consideration; would require Obsidian Sync to deliver the workshop's files into each consumer's vault first (as a vendored copy), then the installer reads from `app.vault.adapter` instead of `fs`.
+
+**v0.21.0 amendment:** `install.js` is desktop-only AND filesystem-only — never makes network calls. `bootstrap.js` is the platform's network gateway and may make HTTPS calls to GitHub releases (community-plugins index + per-plugin manifest/main.js/styles.css). Bootstrap's network posture is governed by landmine #17.
 
 ### 9. Installer substitution variables come ONLY from `platform-config.json:variables`
 
@@ -102,15 +104,18 @@ Restore-discipline is critical — partial restore leaves the workshop dogfood g
 
 **Fix (long-term, deferred):** consider adding `--force-reinstall <name>` to `install.js` for v0.1.2+ so test mechanics can skip the version-skip guard for a named item without touching three files. Not blocking; not free.
 
-### 12. `.obsidian/plugin-data` ban-lift allowlist — only six paths, only via the installer, only with the four safety mechanics
+### 12. `.obsidian/plugin-data` ban-lift allowlist — only nine paths, only via the installer/bootstrap, only with the four safety mechanics
 
-The `.obsidian/` ask-before-acting gate is lifted for exactly six paths:
+The `.obsidian/` ask-before-acting gate is lifted for exactly nine paths:
 - `.obsidian/plugins/templater-obsidian/data.json`
 - `.obsidian/plugins/slash-commander/data.json`
 - `.obsidian/daily-notes.json` (added in v0.3.0)
 - `.obsidian/themes/<Name>/` (added in v0.19.0 — vendored theme dir; overwrite-with-backup posture, NOT additive merge)
 - `.obsidian/appearance.json` (added in v0.19.0 — `cssTheme` always overridden; `enabledCssSnippets[]` additive union)
 - `.obsidian/plugins/obsidian-style-settings/data.json` (added in v0.19.0 — additive per-key first-wins; user values preserved over canonical defaults)
+- `.obsidian/plugins/<id>/main.js` (added in v0.21.0 — bootstrap-fetched plugin entry-point; overwrite-with-backup `.beacon-backup` only when force-redownload selected)
+- `.obsidian/plugins/<id>/manifest.json` (added in v0.21.0 — bootstrap-fetched plugin manifest; same posture)
+- `.obsidian/plugins/<id>/styles.css` (added in v0.21.0 — bootstrap-fetched plugin styles; same posture; 404-tolerated)
 
 All six touched **only** by the installer, only via `applyTemplaterHotkeys` / `applySlashCommanderBindings` / `applyTemplaterFolderTemplates` / `applyCorePluginSettings` / `applyVendoredThemes` / `applyAppearance` / `applyStyleSettings`, and only under all four of:
 
@@ -192,6 +197,23 @@ The installer's per-item install loop short-circuits when `installedEntry.versio
 **Long-term fix candidate (deferred).** A `--force-reinstall <name>` flag for `install.js` so test mechanics + in-cycle CFs can skip the version-equal short-circuit without touching files. Same fix candidate as landmine #10. Not blocking; not free.
 
 Codified in v0.20.0.
+
+### 17. Bootstrap network posture — failure-loud + idempotent + skip-if-present + GitHub-only
+
+The `platform/bootstrap.js` orchestrator (v0.21.0+) is the only platform layer that makes network calls. Its posture:
+
+1. **Single network host:** `raw.githubusercontent.com` (for the upstream community-plugins index) and `github.com` (for plugin release-asset redirects → CDN). No other domains. No telemetry. No analytics.
+2. **Failure-loud:** every fetch failure throws with a descriptive message ("Cannot reach raw.githubusercontent.com…", "HTTPS … returned 404", "GitHub rate-limited"). Per-plugin failures are caught at the orchestrator level + recorded as `failed: [{id, reason}]` in the run report. Network-down at index-fetch is fatal (no plugins can be processed without id → repo lookup).
+3. **Idempotent skip-if-present:** `fetchPlugin` returns `{status: "skipped"}` when `<vault>/.obsidian/plugins/<id>/manifest.json` exists and force-redownload was not requested. Subsequent bootstrap runs are zero-network for fully-installed vaults (modulo the index fetch which is cached for the run's lifetime).
+4. **No mid-fetch cleanup:** if a plugin fetch throws partway through writing files, the partial state remains on disk. Skip-if-present resumes correctly on retry (manifest.json may or may not have been written; if not, next run re-fetches the whole plugin).
+5. **`.beacon-backup` on overwrite:** force-redownload writes `<file>.beacon-backup` for each overwritten asset BEFORE writing the new content. Backup-copy failure is fatal (mirrors `applyTemplaterHotkeys` posture from v0.1.3+).
+6. **Path traversal validator:** plugin id must match `/^[a-z0-9][a-z0-9._-]*$/i` AND `path.relative(pluginsRoot, pluginDir)` must not escape with `..`. Defense against hostile upstream entries or attacker-controlled `--reinstall` arguments.
+7. **`process.env.GITHUB_TOKEN` honored:** if set, every HTTPS GET sends `Authorization: Bearer <token>`. Token never appears in logs or thrown error messages.
+8. **Redirect-following:** `_https.getText` follows up to 5 redirect hops. GitHub release-asset URLs respond 302 to a CDN URL — without redirect-following, every plugin fetch fails with "returned 302".
+
+**Why this is its own landmine.** Bootstrap is an installer-adjacent layer that intentionally crosses landmine #8 (desktop-only-filesystem). The network exposure is small + well-bounded but adds new failure modes the in-vault installer doesn't have. Future cycles that touch bootstrap or add new helpers that fetch from the network must preserve all eight postures. New network hosts (e.g., a plugin's mirror, a CDN other than GitHub's) require explicit user approval + a #17 update.
+
+Codified in v0.21.0 after Phase A surfaced 302-redirect failures (CF-1) at first real GitHub fetch.
 
 ## Operational gotchas
 
