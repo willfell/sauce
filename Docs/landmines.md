@@ -91,7 +91,7 @@ Surfaced during v0.1.1 S4 manual smokes (project's "Board" button being the wron
 
 ### 10. Forcing the installer to re-process a manifest needs a triple version bump
 
-`install.js:111` short-circuits per-item install when `subscribed.version === installed.version`. Tests that need to exercise behavior INSIDE `installItem()` (e.g., `applyNavButtons`, `applyRuleFragment`, file-write paths) cannot just edit the workshop manifest in place — the installer skips it.
+`install.js:223` short-circuits per-item install when `installedEntry.version === node.sub.version` (see landmine #16 for the literal call-site quote). Tests that need to exercise behavior INSIDE `installItem()` (e.g., `applyNavButtons`, `applyRuleFragment`, file-write paths) cannot just edit the workshop manifest in place — the installer skips it.
 
 **Fix (test mechanic):** to force re-processing of a single item under test, transiently bump THREE coordinated versions, run, then restore all three:
 1. The item's own manifest (`platform/<kind>/<name>/manifest.json:version`).

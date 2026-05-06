@@ -186,7 +186,7 @@ The stub itself never changes after v0.1.2 S2 deployment. Edits to canonical `in
 
 ## Gotchas / Lessons learned (v0.11.0–v0.19.0)
 
-Eleven cycles of operational lessons not yet codified elsewhere. Per-cycle detail in result writeups under `Docs/plans/` (filename pattern: `<date>-<cycle>-result.md`); CLAUDE.md status snapshot is the running summary across all cycles; `Docs/landmines.md` is the rule registry.
+Load-bearing operational lessons not yet codified elsewhere. Most surfaced across v0.11.0–v0.19.0; entry #4 originated in v0.4.2 and has reinforced through every renderer cycle since. Per-cycle detail in result writeups under `Docs/plans/` (filename pattern: `<date>-<cycle>-result.md`); CLAUDE.md status snapshot is the running summary across all cycles; `Docs/landmines.md` is the rule registry.
 
 1. **In-cycle re-process bump rule** — when revising in-cycle staged work, bump the item version (PATCH for fixes). See landmine #16 for the full mechanic. Surfaced: v0.6.0 / v0.17.0 / v0.18.0 / v0.18.1 / v0.19.0.
 
