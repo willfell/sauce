@@ -3403,3 +3403,28 @@ async function enableSnippet(tp, snippet, approvalRequired, sourceName, history,
   await adapter.write(path, JSON.stringify(json, null, 2));
   new Notice(`Enabled snippet ${snippet}. Reload Obsidian to apply.`, 6000);
 }
+
+// ============================================================
+// v0.21.0 — re-importable Node entrypoint for bootstrap.js
+// No-op when loaded inside Templater (module / module.exports both undefined there).
+// Wraps run-install.js as a child process for safety; cleaner refactor TBD if S4 surfaces friction.
+// ============================================================
+if (typeof module !== "undefined" && module.exports && typeof module.exports === "function") {
+    // Attach as a property of the existing function export — preserves the
+    // top-level `module.exports = async function (tp) {...}` contract that
+    // run-install.js relies on (it expects `require(installerPath)` to return
+    // a function), while also exposing `.runInstall(vaultPath)` for
+    // bootstrap.js to invoke.
+    module.exports.runInstall = async function runInstall(vaultPath) {
+        const path = require("path");
+        const child_process = require("child_process");
+        const result = child_process.spawnSync(
+            process.execPath,
+            [path.join(__dirname, "test", "run-install.js"), vaultPath],
+            { stdio: "inherit", encoding: "utf8" }
+        );
+        if (result.status !== 0) {
+            throw new Error(`runInstall failed with exit ${result.status}`);
+        }
+    };
+}

@@ -6,3 +6,7 @@
 # v0.1.2 S2: pre-stub-deployment bootstrap snapshots (rollback target). Retained
 # locally for ≥1 cycle; never tracked.
 _backups/
+
+# v0.21.0: bootstrap.js depends on @inquirer/prompts; node_modules vendored locally.
+# package.json + package-lock.json are tracked; node_modules is not.
+node_modules/

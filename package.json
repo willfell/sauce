@@ -1,0 +1,19 @@
+{
+  "name": "beacon-workshop",
+  "version": "0.21.0",
+  "private": true,
+  "description": "Beacon vault platform workshop (canonical source). bootstrap.js requires @inquirer/prompts; harnesses (run-install/run-helper-cases/run-renderer/run-bootstrap) stay zero-dep.",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "bootstrap": "node platform/bootstrap.js",
+    "test:install": "node platform/test/run-install.js .",
+    "test:helpers": "node platform/test/run-helper-cases.js",
+    "test:renderer": "node platform/test/run-renderer.js",
+    "test:bootstrap": "node platform/test/run-bootstrap.js"
+  },
+  "dependencies": {
+    "@inquirer/prompts": "^7.0.0"
+  }
+}
