@@ -1,0 +1,215 @@
+#!/usr/bin/env node
+// run-cli.js — harness for platform/cli/* verb dispatcher + cmd-*.js modules.
+// Mirrors run-bootstrap.js conventions: assertTrue / assertEqual / withTempVault.
+
+const fs = require("fs");
+const path = require("path");
+const os = require("os");
+const { spawnSync } = require("child_process");
+
+let pass = 0, fail = 0;
+
+function assertTrue(cond, label) {
+    if (cond) { pass++; console.log("  PASS  " + label); }
+    else { fail++; console.log("  FAIL  " + label); }
+}
+function assertEqual(actual, expected, label) {
+    if (actual === expected) { pass++; console.log("  PASS  " + label); }
+    else { fail++; console.log("  FAIL  " + label + " — expected " + JSON.stringify(expected) + " got " + JSON.stringify(actual)); }
+}
+
+async function withTempVault(setup, fn) {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "beacon-cli-"));
+    try {
+        fs.mkdirSync(path.join(tmp, "Docs/Meta"), { recursive: true });
+        fs.writeFileSync(path.join(tmp, "Docs/Meta/platform-config.json"),
+            JSON.stringify({ workshop_relative_path: "Beacon", variables: {} }, null, 2));
+        fs.writeFileSync(path.join(tmp, "Docs/Meta/platform-subscription.json"),
+            JSON.stringify({ mechanisms: [], blueprints: [] }, null, 2));
+        if (typeof setup === "function") await setup(tmp);
+        await fn(tmp);
+    } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+    }
+}
+
+// C1: dispatcher walks cwd ancestors to find vault
+async function caseC1AncestorWalk() {
+    const label = "C1 dispatcher walks cwd ancestors to find vault";
+    await withTempVault({}, async (vaultPath) => {
+        const cli = require("../cli/beacon-cli.js");
+        const ctx = await cli.resolveContext({ cwd: path.join(vaultPath, "Docs/Meta") });
+        assertEqual(ctx.vaultPath, vaultPath, label);
+    });
+}
+
+// C2: BEACON_VAULT env-var fallback when cwd is not in a vault
+async function caseC2BeaconVaultEnv() {
+    const label = "C2 dispatcher honors BEACON_VAULT env-var fallback";
+    await withTempVault({}, async (vaultPath) => {
+        const cli = require("../cli/beacon-cli.js");
+        const ctx = await cli.resolveContext({ cwd: os.tmpdir(), env: { BEACON_VAULT: vaultPath } });
+        assertEqual(ctx.vaultPath, vaultPath, label);
+    });
+}
+
+// C3: not-in-vault error
+async function caseC3NotInVault() {
+    const label = "C3 dispatcher errors when not in vault and BEACON_VAULT unset";
+    const cli = require("../cli/beacon-cli.js");
+    let threw = false;
+    try { await cli.resolveContext({ cwd: "/", env: {} }); }
+    catch (e) { threw = true; assertTrue(/Not inside a beacon-managed vault/.test(e.message), label + ": error message"); }
+    if (!threw) { fail++; console.log("  FAIL  " + label + " — expected throw"); }
+}
+
+// C4: unknown verb
+async function caseC4UnknownVerb() {
+    const label = "C4 dispatcher errors on unknown verb";
+    await withTempVault({}, async (vaultPath) => {
+        const cli = require("../cli/beacon-cli.js");
+        let threw = false;
+        try { await cli.dispatch(["frobnicate"], { cwd: vaultPath, env: {} }); }
+        catch (e) { threw = true; assertTrue(/unknown verb/i.test(e.message), label + ": error message"); }
+        if (!threw) { fail++; console.log("  FAIL  " + label + " — expected throw"); }
+    });
+}
+
+// C5: status reports clean state
+async function caseC5StatusClean() {
+    const label = "C5 status reports clean state on fresh vault";
+    await withTempVault({}, async (vaultPath) => {
+        // Stub workshop fixture so status can read manifest
+        fs.mkdirSync(path.join(vaultPath, "Beacon/platform"), { recursive: true });
+        fs.writeFileSync(path.join(vaultPath, "Beacon/platform/manifest.json"),
+            JSON.stringify({ workshop_version: "0.22.0", mechanisms: [], blueprints: [] }, null, 2));
+        const cmd = require("../cli/cmd-status.js");
+        const ctx = { vaultPath, config: { workshop_relative_path: "Beacon" },
+            subscription: { mechanisms: [], blueprints: [] },
+            workshopPath: path.join(vaultPath, "Beacon"),
+            workshopManifest: { workshop_version: "0.22.0", mechanisms: [], blueprints: [] } };
+        const out = await cmd.run(ctx, []);  // returns { lines: [...] } in test mode
+        assertTrue(out.lines.some(l => /Vault:\s/.test(l)), label + ": vault line present");
+        assertTrue(out.lines.some(l => /Drift:\s+none/.test(l)), label + ": drift = none");
+    });
+}
+
+// C6: status detects subscribed-vs-installed drift
+async function caseC6StatusDrift() {
+    const label = "C6 status detects subscription/install drift";
+    await withTempVault({}, async (vaultPath) => {
+        const cmd = require("../cli/cmd-status.js");
+        // Subscribed: validator@0.1.1; Installed (history): validator@0.1.0
+        fs.writeFileSync(path.join(vaultPath, "Docs/Meta/platform-installed.json"),
+            JSON.stringify({ history: [{ kind: "mechanisms", name: "validator", version: "0.1.0" }] }, null, 2));
+        const ctx = { vaultPath, config: { workshop_relative_path: "Beacon" },
+            subscription: { mechanisms: [{ name: "validator", version: "0.1.1" }], blueprints: [] },
+            workshopPath: path.join(vaultPath, "Beacon"),
+            workshopManifest: { workshop_version: "0.22.0", mechanisms: [{ name: "validator", version: "0.1.1" }], blueprints: [] } };
+        const out = await cmd.run(ctx, []);
+        assertTrue(out.lines.some(l => /Drift:.*validator/i.test(l)), label + ": drift line names validator");
+    });
+}
+
+// C7: update ff-only mock-git path succeeds
+async function caseC7UpdateFFOnly() {
+    const label = "C7 update happy-path with mocked git";
+    await withTempVault({}, async (vaultPath) => {
+        const cmd = require("../cli/cmd-update.js");
+        // Inject mockGit hook on ctx
+        const events = [];
+        const ctx = {
+            vaultPath, config: { workshop_relative_path: "Beacon" },
+            subscription: { mechanisms: [], blueprints: [] },
+            workshopPath: path.join(vaultPath, "Beacon"),
+            workshopManifest: { workshop_version: "0.22.0" },
+            _gitExec: (args) => { events.push(args.join(" ")); return { code: 0, stdout: "", stderr: "" }; },
+            _npmInstall: () => { events.push("npm install"); return { code: 0 }; },
+            _runInstaller: () => { events.push("install"); }
+        };
+        await cmd.run(ctx, []);
+        assertTrue(events.includes("fetch origin main"), label + ": git fetch invoked");
+        assertTrue(events.some(e => /reset --hard origin\/main/.test(e)), label + ": reset --hard invoked");
+        assertTrue(events.includes("install"), label + ": installer phase invoked");
+    });
+}
+
+// C8: update refuses on dirty tree without --force
+async function caseC8UpdateDirtyRefusal() {
+    const label = "C8 update fails loud on dirty tree without --force";
+    await withTempVault({}, async (vaultPath) => {
+        const cmd = require("../cli/cmd-update.js");
+        const ctx = {
+            vaultPath, config: { workshop_relative_path: "Beacon" },
+            subscription: { mechanisms: [], blueprints: [] },
+            workshopPath: path.join(vaultPath, "Beacon"),
+            workshopManifest: { workshop_version: "0.22.0" },
+            _gitExec: (args) => {
+                if (args[0] === "status" && args.includes("--short")) return { code: 0, stdout: " M file.js\n", stderr: "" };
+                return { code: 0, stdout: "", stderr: "" };
+            }
+        };
+        let threw = false;
+        try { await cmd.run(ctx, []); }
+        catch (e) { threw = true; assertTrue(/dirty/i.test(e.message), label + ": error message names dirty tree"); }
+        if (!threw) { fail++; console.log("  FAIL  " + label + " — expected throw"); }
+    });
+}
+
+// C9: update --force overrides dirty tree
+async function caseC9UpdateForceOverride() {
+    const label = "C9 update --force overrides dirty tree";
+    await withTempVault({}, async (vaultPath) => {
+        const cmd = require("../cli/cmd-update.js");
+        const events = [];
+        const ctx = {
+            vaultPath, config: { workshop_relative_path: "Beacon" },
+            subscription: { mechanisms: [], blueprints: [] },
+            workshopPath: path.join(vaultPath, "Beacon"),
+            workshopManifest: { workshop_version: "0.22.0" },
+            _gitExec: (args) => {
+                if (args[0] === "status" && args.includes("--short")) return { code: 0, stdout: " M file.js\n", stderr: "" };
+                events.push(args.join(" "));
+                return { code: 0, stdout: "", stderr: "" };
+            },
+            _runInstaller: () => { events.push("install"); }
+        };
+        await cmd.run(ctx, ["--force"]);
+        assertTrue(events.some(e => /reset --hard/.test(e)), label + ": reset --hard invoked despite dirty");
+    });
+}
+
+// C10: wizard delegates to runReRunWizard
+async function caseC10WizardDelegates() {
+    const label = "C10 wizard delegates to runReRunWizard";
+    await withTempVault({}, async (vaultPath) => {
+        const cmd = require("../cli/cmd-wizard.js");
+        let called = false;
+        const ctx = {
+            vaultPath, config: { workshop_relative_path: "Beacon" },
+            subscription: { mechanisms: [], blueprints: [] },
+            workshopPath: path.join(vaultPath, "Beacon"),
+            workshopManifest: { workshop_version: "0.22.0" },
+            _runReRunWizard: async () => { called = true; return { action: "quit" }; }
+        };
+        await cmd.run(ctx, []);
+        assertTrue(called, label);
+    });
+}
+
+async function main() {
+    await caseC1AncestorWalk();
+    await caseC2BeaconVaultEnv();
+    await caseC3NotInVault();
+    await caseC4UnknownVerb();
+    await caseC5StatusClean();
+    await caseC6StatusDrift();
+    await caseC7UpdateFFOnly();
+    await caseC8UpdateDirtyRefusal();
+    await caseC9UpdateForceOverride();
+    await caseC10WizardDelegates();
+    console.log("\n========\nResult: " + pass + " passed, " + fail + " failed.");
+    process.exitCode = fail > 0 ? 1 : 0;
+}
+
+main().catch(e => { console.error(e.stack || e.message); process.exit(1); });

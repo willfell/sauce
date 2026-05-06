@@ -444,6 +444,93 @@ async function caseBS9FollowsRedirects() {
     });
 }
 
+// BS10: phaseWriteActivation generates Scripts/activate.sh + Scripts/beacon
+//       with absolute paths baked in + chmod 0755.
+async function caseBS10ActivationArtifacts() {
+    const label = "BS10 phaseWriteActivation generates Beacon/Scripts artifacts";
+    await withTempVault({}, async (vaultPath) => {
+        const bootstrap = require("../bootstrap.js");
+        const fs = require("fs");
+        const path = require("path");
+        // Pre-create <vault>/Beacon/ to mimic post-clone state
+        const workshopAbs = path.join(vaultPath, "Beacon");
+        fs.mkdirSync(path.join(workshopAbs, "platform/cli"), { recursive: true });
+        fs.writeFileSync(path.join(workshopAbs, "platform/cli/beacon-cli.js"), "// stub");
+        await bootstrap.phaseWriteActivation({ vaultPath, workshopAbsPath: workshopAbs });
+        const actPath = path.join(workshopAbs, "Scripts/activate.sh");
+        const binPath = path.join(workshopAbs, "Scripts/beacon");
+        assertTrue(fs.existsSync(actPath), label + ": activate.sh exists");
+        assertTrue(fs.existsSync(binPath), label + ": Scripts/beacon exists");
+        const actBody = fs.readFileSync(actPath, "utf8");
+        assertTrue(actBody.includes(workshopAbs + "/Scripts"), label + ": activate.sh has absolute Scripts path");
+        assertTrue(actBody.includes('BEACON_VAULT="' + vaultPath + '"'), label + ": activate.sh exports BEACON_VAULT");
+        const binStat = fs.statSync(binPath);
+        assertEqual(binStat.mode & 0o777, 0o755, label + ": Scripts/beacon is chmod 0755");
+    });
+}
+
+// BS11: first-run wizard defaults workshop_relative_path to "Beacon" (was "../beacon")
+async function caseBS11WizardDefaultsBeacon() {
+    const label = "BS11 first-run wizard defaults workshop_relative_path to Beacon";
+    // Use nonInteractive + wizardDefaults injection per existing BS8 pattern.
+    await withTempVault({}, async (vaultPath) => {
+        const wizard = require("../bootstrap-lib/wizard.js");
+        const r = await wizard.runFirstRunWizard({
+            vaultPath,
+            workshopManifest: null,
+            nonInteractive: true,
+            defaults: { /* no override; expect Beacon */ }
+        });
+        assertEqual(r.config.workshop_relative_path, "Beacon", label);
+    });
+}
+
+// BS12: legacy sibling-of-workshop layout still works when explicitly configured
+async function caseBS12SiblingFallback() {
+    const label = "BS12 sibling-of-workshop layout still works for legacy POC vaults";
+    // Seed config explicitly with workshop_relative_path: "../beacon-fixture"
+    // and assert runBootstrap does not error on the layout.
+    // Mirrors caseBS2IdempotentReRun shape.
+    await withTempVault({}, async (vaultPath) => {
+        // Setup: create sibling workshop fixture with minimal manifest
+        const path = require("path");
+        const fs = require("fs");
+        const sibling = path.join(path.dirname(vaultPath), "beacon-fixture-" + Date.now());
+        fs.mkdirSync(path.join(sibling, "platform"), { recursive: true });
+        fs.writeFileSync(path.join(sibling, "platform/manifest.json"),
+            JSON.stringify({ workshop_version: "0.22.0", foundational_plugins: [], mechanisms: [], blueprints: [] }, null, 2));
+        try {
+            seedConfig(vaultPath, { workshop_relative_path: path.relative(vaultPath, sibling) });
+            const bootstrap = require("../bootstrap.js");
+            await withMockedHttps({}, async () => {
+                const r = await bootstrap.runBootstrap({ vaultPath, nonInteractive: true, skipInstaller: true });
+                assertTrue(Array.isArray(r.fetched), label + ": returns shape");
+            });
+        } finally {
+            fs.rmSync(sibling, { recursive: true, force: true });
+        }
+    });
+}
+
+// BS13: phaseWriteActivation atomic write + backup-on-overwrite
+async function caseBS13ActivationAtomicAndBackup() {
+    const label = "BS13 phaseWriteActivation atomic write + backup-on-overwrite";
+    await withTempVault({}, async (vaultPath) => {
+        const bootstrap = require("../bootstrap.js");
+        const fs = require("fs");
+        const path = require("path");
+        const workshopAbs = path.join(vaultPath, "Beacon");
+        fs.mkdirSync(path.join(workshopAbs, "Scripts"), { recursive: true });
+        // Pre-existing activate.sh — should be backed up as .beacon-backup
+        fs.writeFileSync(path.join(workshopAbs, "Scripts/activate.sh"), "PRIOR\n");
+        await bootstrap.phaseWriteActivation({ vaultPath, workshopAbsPath: workshopAbs });
+        const backup = path.join(workshopAbs, "Scripts/activate.sh.beacon-backup");
+        assertTrue(fs.existsSync(backup), label + ": prior activate.sh backed up");
+        const backupBody = fs.readFileSync(backup, "utf8");
+        assertEqual(backupBody, "PRIOR\n", label + ": backup preserves prior content");
+    });
+}
+
 // ============================================================
 // Runner
 // ============================================================
@@ -458,7 +545,11 @@ const cases = {
         caseBS6UnknownPluginId,
         caseBS7CommunityPluginsAdditiveMerge,
         caseBS8WizardGeneratesValidFiles,
-        caseBS9FollowsRedirects
+        caseBS9FollowsRedirects,
+        caseBS10ActivationArtifacts,
+        caseBS11WizardDefaultsBeacon,
+        caseBS12SiblingFallback,
+        caseBS13ActivationAtomicAndBackup
     ]
 };
 
