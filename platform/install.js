@@ -613,9 +613,11 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applySlashCommanderBindings(tp, mech, variables, history, git);    // NEW v0.1.3
   await applyTemplaterFolderTemplates(tp, mech, variables, history, git);  // NEW v0.4.0
   await applyCorePluginSettings(tp, mech, variables, history, git);        // NEW v0.3.0
+  await applyCommunityPluginData(tp, mech, variables, history, git);       // NEW v0.21.1
   await applyVendoredThemes(tp, mech, workshopPath, target.path, history, git);  // NEW v0.19.0
   await applyAppearance(tp, mech, history, git);                                  // NEW v0.19.0
   await applyStyleSettings(tp, mech, workshopPath, target.path, history, git);    // NEW v0.19.0
+  await applyHotkeys(tp, mech, history, git);                                     // NEW v0.21.1
 
   return true;
 }
@@ -1625,6 +1627,184 @@ async function applyTemplaterHotkeys(tp, manifest, variables, history, git) {
   }
 }
 
+// applyHotkeys — for each item that declares manifest.hotkeys[], merge into
+// `.obsidian/hotkeys.json` with first-wins semantics on command_id. Mirrors
+// applyTemplaterHotkeys posture (read/parse/validate -> backup-on-edit -> write)
+// but creates the target fresh when absent and skips the variables.templates_path
+// dependency. NEW v0.21.1.
+async function applyHotkeys(tp, manifest, history, git) {
+  if (!manifest || !Array.isArray(manifest.hotkeys) || manifest.hotkeys.length === 0) return;
+  const adapter = tp.app.vault.adapter;
+  const target = ".obsidian/hotkeys.json";
+  const validModifiers = ["Mod", "Ctrl", "Meta", "Alt", "Shift"];
+
+  let raw = null;
+  let existing = {};
+  if (await adapter.exists(target)) {
+    try {
+      raw = await adapter.read(target);
+    } catch (e) {
+      new Notice(`applyHotkeys: cannot read ${target} (${e.message}); skipping for ${manifest.name}`, 8000);
+      if (history) {
+        history.push({
+          event: "error",
+          step: "hotkeys",
+          name: manifest.name,
+          message: `read failed for ${target}: ${e.message}`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      return;
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (e) {
+      new Notice(`applyHotkeys: ${target} malformed JSON (${e.message}); skipping for ${manifest.name}`, 8000);
+      if (history) {
+        history.push({
+          event: "error",
+          step: "hotkeys",
+          name: manifest.name,
+          message: `${target} malformed JSON: ${e.message}`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      return;
+    }
+
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+      new Notice(`applyHotkeys: ${target} parsed but is not a JSON object; skipping for ${manifest.name}`, 8000);
+      if (history) {
+        history.push({
+          event: "error",
+          step: "hotkeys",
+          name: manifest.name,
+          message: `${target} parsed but is not a JSON object`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      return;
+    }
+
+    existing = parsed;
+  }
+
+  let appended = 0;
+  for (const entry of manifest.hotkeys) {
+    const cid = entry && entry.command_id;
+    const isValid =
+      entry &&
+      typeof cid === "string" && cid.length > 0 &&
+      Array.isArray(entry.modifiers) &&
+      entry.modifiers.every((m) => validModifiers.includes(m)) &&
+      typeof entry.key === "string" && entry.key.length > 0;
+
+    if (!isValid) {
+      new Notice(`applyHotkeys: ${manifest.name} invalid hotkey entry; skipped`, 6000);
+      if (history) {
+        history.push({
+          event: "warning",
+          step: "hotkeys",
+          name: manifest.name,
+          command_id: (cid && typeof cid === "string") ? cid : "<missing>",
+          message: "invalid_entry",
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      continue;
+    }
+
+    if (Array.isArray(existing[cid]) && existing[cid].length > 0) {
+      if (history) {
+        history.push({
+          event: "info",
+          step: "hotkeys",
+          name: manifest.name,
+          command_id: cid,
+          action: "skipped_existing",
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      continue;
+    }
+
+    existing[cid] = [{ modifiers: [...entry.modifiers], key: entry.key }];
+    appended++;
+    if (history) {
+      history.push({
+        event: "info",
+        step: "hotkeys",
+        name: manifest.name,
+        command_id: cid,
+        action: "applied",
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+  }
+
+  if (appended === 0) return;
+
+  // Backup before write (one-deep, overwrite-on-edit). Only when target pre-existed.
+  if (raw !== null) {
+    try {
+      await adapter.write(`${target}.beacon-backup`, raw);
+    } catch (e) {
+      new Notice(`applyHotkeys: backup write failed (${e.message}); aborting modification for ${manifest.name}`, 8000);
+      if (history) {
+        history.push({
+          event: "error",
+          step: "hotkeys",
+          name: manifest.name,
+          message: `backup write failed: ${e.message}`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      return;
+    }
+  }
+
+  try {
+    await adapter.write(target, JSON.stringify(existing, null, 2));
+  } catch (e) {
+    new Notice(`applyHotkeys: write failed (${e.message}) for ${manifest.name}`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "hotkeys",
+        name: manifest.name,
+        message: `write failed: ${e.message}`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+  }
+}
+
 // applySlashCommanderBindings — for each item that declares
 // slash_commander_bindings[], read .obsidian/plugins/slash-commander/data.json
 // and additive-merge each entry into bindings[]. Idempotency on `id` field.
@@ -2268,6 +2448,281 @@ async function applyCorePluginSettings(tp, manifest, variables, history, git) {
         plugin_id: entry.id,
         action: "applied",
         settings_keys: Object.keys(substituted),
+        backup_path: backupPath,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+  }
+}
+
+// applyCommunityPluginData — for each item that declares community_plugin_settings[],
+// merge per-plugin settings into .obsidian/plugins/<id>/data.json. Mirrors the
+// applyCorePluginSettings posture (additive shallow merge, backup-on-edit to
+// <target>.beacon-backup, malformed-JSON guard, idempotent skip-write,
+// failure-loud history). Differences from applyCorePluginSettings:
+//   - Target path is .obsidian/plugins/<id>/data.json (NOT .obsidian/<id>.json).
+//   - Prereq gate at the top via _externalPluginsSatisfied (NEW v0.19.0 lesson:
+//     helpers that materialize state need a stronger prereq contract than
+//     helpers that read existing state — short-circuit before any writes).
+//   - Path-traversal validator on id (rejects "/", "\", "..").
+//   - Plugin-dir-absent skip per entry (info/skipped_plugin_dir_absent).
+async function applyCommunityPluginData(tp, manifest, variables, history, git) {
+  if (!manifest || !Array.isArray(manifest.community_plugin_settings) || manifest.community_plugin_settings.length === 0) return;
+
+  const adapter = tp.app.vault.adapter;
+
+  // Prereq gate: delegate to the canonical _externalPluginsSatisfied helper
+  // (honors required:true entries). For applyCommunityPluginData specifically
+  // we additionally treat ALL external_plugins[] as prereqs (whether or not
+  // they're flagged required:true), since materializing settings into a
+  // plugin's data.json without that plugin enabled would be a wasted write
+  // and risks silent drift on next consumer reload.
+  const canonical = await _externalPluginsSatisfied(tp, manifest);
+  let allDeclaredIds = (manifest && Array.isArray(manifest.external_plugins))
+    ? manifest.external_plugins.filter((e) => e && typeof e.id === "string" && e.id.length > 0).map((e) => e.id)
+    : [];
+  let extraMissing = [];
+  if (allDeclaredIds.length > 0) {
+    const cpPath = ".obsidian/community-plugins.json";
+    let enabledIds = null;
+    try {
+      if (await adapter.exists(cpPath)) {
+        const raw = await adapter.read(cpPath);
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) enabledIds = new Set(parsed);
+      }
+    } catch (e) {
+      // Conservative: treat as empty so all declared ids are missing.
+      enabledIds = null;
+    }
+    if (enabledIds === null) {
+      extraMissing = allDeclaredIds.slice();
+    } else {
+      extraMissing = allDeclaredIds.filter((id) => !enabledIds.has(id));
+    }
+  }
+  if (!canonical.ok || extraMissing.length > 0) {
+    const merged = Array.from(new Set([...(canonical.missingIds || []), ...extraMissing]));
+    new Notice(`applyCommunityPluginData: ${manifest.name} prereq plugins missing (${merged.join(",")}); skipped`, 6000);
+    if (history) {
+      history.push({
+        event: "info",
+        step: "community_plugin_data",
+        name: manifest.name,
+        action: "skipped_missing_prereq",
+        missing_ids: merged,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  for (const entry of manifest.community_plugin_settings) {
+    const id = entry && entry.id;
+    if (typeof id !== "string" || id.length === 0 || /[\\/]|\.\./.test(id)) {
+      new Notice(`applyCommunityPluginData: ${manifest.name} has invalid entry.id; skipped`, 6000);
+      if (history) {
+        history.push({
+          event: "warning",
+          step: "community_plugin_data",
+          name: manifest.name,
+          id: id,
+          message: "invalid_id",
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      continue;
+    }
+
+    const target = `.obsidian/plugins/${id}/data.json`;
+    const pluginDir = `.obsidian/plugins/${id}`;
+
+    if (!(await adapter.exists(pluginDir))) {
+      if (history) {
+        history.push({
+          event: "info",
+          step: "community_plugin_data",
+          name: manifest.name,
+          plugin_id: id,
+          action: "skipped_plugin_dir_absent",
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      continue;
+    }
+
+    // Substitute placeholders via JSON round-trip (mirrors applyCorePluginSettings).
+    let substituted;
+    try {
+      const sourceJson = JSON.stringify(entry.settings || {});
+      substituted = JSON.parse(substituteLenient(sourceJson, variables));
+    } catch (e) {
+      new Notice(`applyCommunityPluginData: ${manifest.name} substitution failed for ${id} — ${e.message}`, 8000);
+      if (history) {
+        history.push({
+          event: "error",
+          step: "community_plugin_data",
+          name: manifest.name,
+          plugin_id: id,
+          message: `substitution failed: ${e.message}`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      continue;
+    }
+
+    let raw = "";
+    let existing = {};
+    if (await adapter.exists(target)) {
+      try {
+        raw = await adapter.read(target);
+      } catch (e) {
+        new Notice(`applyCommunityPluginData: cannot read ${target} (${e.message}); skipping for ${manifest.name}`, 8000);
+        if (history) {
+          history.push({
+            event: "error",
+            step: "community_plugin_data",
+            name: manifest.name,
+            plugin_id: id,
+            message: `read failed for ${target}: ${e.message}`,
+            git_commit: git.commit,
+            git_tag: git.tag,
+            git_dirty: git.dirty,
+            attempted_at: new Date().toISOString(),
+          });
+        }
+        continue;
+      }
+
+      try {
+        existing = JSON.parse(raw);
+      } catch (e) {
+        new Notice(`applyCommunityPluginData: ${target} malformed JSON (${e.message}); skipping for ${manifest.name}`, 8000);
+        if (history) {
+          history.push({
+            event: "error",
+            step: "community_plugin_data",
+            name: manifest.name,
+            plugin_id: id,
+            message: `${target} malformed JSON: ${e.message}`,
+            git_commit: git.commit,
+            git_tag: git.tag,
+            git_dirty: git.dirty,
+            attempted_at: new Date().toISOString(),
+          });
+        }
+        continue;
+      }
+
+      if (existing === null || typeof existing !== "object" || Array.isArray(existing)) {
+        new Notice(`applyCommunityPluginData: ${target} parsed but is not a JSON object; skipping for ${manifest.name}`, 8000);
+        if (history) {
+          history.push({
+            event: "error",
+            step: "community_plugin_data",
+            name: manifest.name,
+            plugin_id: id,
+            message: `${target} parsed but is not a JSON object`,
+            git_commit: git.commit,
+            git_tag: git.tag,
+            git_dirty: git.dirty,
+            attempted_at: new Date().toISOString(),
+          });
+        }
+        continue;
+      }
+    }
+
+    // Shallow merge: substituted (manifest) wins on key collisions.
+    const merged = Object.assign({}, existing, substituted);
+    const mergedSerialized = JSON.stringify(merged, null, 2);
+
+    // Idempotent skip-write: structural equality between merged and existing.
+    if (raw && JSON.stringify(existing, null, 2) === mergedSerialized) {
+      if (history) {
+        history.push({
+          event: "info",
+          step: "community_plugin_data",
+          name: manifest.name,
+          plugin_id: id,
+          action: "skipped_existing",
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      continue;
+    }
+
+    // Backup-on-edit: only when there is pre-existing content to back up.
+    let backupPath = null;
+    if (raw) {
+      backupPath = `${target}.beacon-backup`;
+      try {
+        await adapter.write(backupPath, raw);
+      } catch (e) {
+        new Notice(`applyCommunityPluginData: backup write failed (${e.message}); aborting modification for ${manifest.name}`, 8000);
+        if (history) {
+          history.push({
+            event: "error",
+            step: "community_plugin_data",
+            name: manifest.name,
+            plugin_id: id,
+            message: `backup write failed: ${e.message}`,
+            git_commit: git.commit,
+            git_tag: git.tag,
+            git_dirty: git.dirty,
+            attempted_at: new Date().toISOString(),
+          });
+        }
+        continue;
+      }
+    }
+
+    try {
+      await adapter.write(target, mergedSerialized);
+    } catch (e) {
+      new Notice(`applyCommunityPluginData: write failed (${e.message}) for ${manifest.name}`, 8000);
+      if (history) {
+        history.push({
+          event: "error",
+          step: "community_plugin_data",
+          name: manifest.name,
+          plugin_id: id,
+          message: `write failed: ${e.message}`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      continue;
+    }
+
+    if (history) {
+      history.push({
+        event: "info",
+        step: "community_plugin_data",
+        name: manifest.name,
+        plugin_id: id,
+        action: "applied",
+        keys: Object.keys(substituted),
         backup_path: backupPath,
         git_commit: git.commit,
         git_tag: git.tag,

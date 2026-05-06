@@ -1,9 +1,9 @@
 {
   "name": "daily",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "kind": "blueprint",
   "module_directory": "daily",
-  "description": "Date-organized daily notes via Obsidian's core Daily Notes plugin + Calendar; ports accuris's Timestamps pattern under beacon/daily/. v0.1.4: contributes Today nav-button (invoke_command -> daily-notes; the core daily-notes plugin's 'Open today's daily note' command id) requiring nav-buttons >=2.3.0; filename pattern dddd-YYYY-MM-DD per v0.4.2 platform invariant. v0.2.0: SpaceDailyDashboard panels (tasks + meetings) migrated to BeaconCards via panel-host wrapper preserved + per-panel dv shim ({container: subContainerEl}); tasks panel rendered ABOVE meetings panel (S2 user feedback); tasks use synthetic-page pattern with onClick to parent file.",
+  "description": "Date-organized daily notes via Obsidian's core Daily Notes plugin + Calendar; ports accuris's Timestamps pattern under beacon/daily/. v0.1.4: contributes Today nav-button (invoke_command -> daily-notes; the core daily-notes plugin's 'Open today's daily note' command id) requiring nav-buttons >=2.3.0; filename pattern dddd-YYYY-MM-DD per v0.4.2 platform invariant. v0.2.0: SpaceDailyDashboard panels (tasks + meetings) migrated to BeaconCards via panel-host wrapper preserved + per-panel dv shim ({container: subContainerEl}); tasks panel rendered ABOVE meetings panel (S2 user feedback); tasks use synthetic-page pattern with onClick to parent file. v0.2.2: adds autorun:true on app start + Cmd+[ binding for the daily-notes command (consumes new hotkeys[] manifest field shipped with convenience@0.1.0 mechanism in v0.21.1).",
   "depends_on": [
     { "name": "nav-buttons",    "range": ">=2.3.0" },
     { "name": "customjs-guard", "range": ">=1.0.0" }
@@ -14,9 +14,13 @@
       "settings": {
         "folder": "{{module_directory}}",
         "format": "YYYY/MM-MMMM/dddd-YYYY-MM-DD",
-        "template": "{{templates_path}}/Daily Note.md"
+        "template": "{{templates_path}}/Daily Note.md",
+        "autorun": true
       }
     }
+  ],
+  "hotkeys": [
+    { "command_id": "daily-notes", "modifiers": ["Mod"], "key": "[" }
   ],
   "customjs_classes": [
     "SpaceDailyDashboard"

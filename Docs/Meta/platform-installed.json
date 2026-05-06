@@ -32,8 +32,13 @@
     },
     {
       "name": "styling",
-      "version": "0.1.1",
-      "installed_at": "2026-05-06T03:40:41.431Z"
+      "version": "0.1.2",
+      "installed_at": "2026-05-06T19:41:15.228Z"
+    },
+    {
+      "name": "convenience",
+      "version": "0.1.0",
+      "installed_at": "2026-05-06T21:22:56.514Z"
     }
   ],
   "blueprints": [],
@@ -712,6 +717,108 @@
       "version": "0.1.1",
       "installed_at": "2026-05-06T03:40:41.431Z",
       "git_commit": "e8b74e783e3d2ab8f500fceeb9a365514dd08b0d",
+      "git_tag": null,
+      "git_dirty": true
+    },
+    {
+      "event": "info",
+      "step": "theme_overwrite",
+      "name": "styling",
+      "theme": "Baseline",
+      "dest": ".obsidian/themes/Baseline/manifest.json",
+      "action": "skipped_existing",
+      "git_commit": "fad86a3660c604e14db96b0fa860dec9fa1304b7",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-06T19:41:15.223Z"
+    },
+    {
+      "event": "info",
+      "step": "theme_overwrite",
+      "name": "styling",
+      "theme": "Baseline",
+      "dest": ".obsidian/themes/Baseline/theme.css",
+      "action": "skipped_existing",
+      "git_commit": "fad86a3660c604e14db96b0fa860dec9fa1304b7",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-06T19:41:15.227Z"
+    },
+    {
+      "event": "info",
+      "step": "appearance",
+      "name": "styling",
+      "action": "skipped_existing",
+      "git_commit": "fad86a3660c604e14db96b0fa860dec9fa1304b7",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-06T19:41:15.227Z"
+    },
+    {
+      "event": "info",
+      "step": "style_settings",
+      "name": "styling",
+      "action": "skipped_existing",
+      "git_commit": "fad86a3660c604e14db96b0fa860dec9fa1304b7",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-06T19:41:15.228Z"
+    },
+    {
+      "event": "install",
+      "kind": "mechanism",
+      "name": "styling",
+      "version": "0.1.2",
+      "installed_at": "2026-05-06T19:41:15.228Z",
+      "git_commit": "fad86a3660c604e14db96b0fa860dec9fa1304b7",
+      "git_tag": null,
+      "git_dirty": true
+    },
+    {
+      "event": "info",
+      "step": "community_plugin_data",
+      "name": "convenience",
+      "plugin_id": "dataview",
+      "action": "applied",
+      "keys": [
+        "enableDataviewJs",
+        "enableInlineDataviewJs"
+      ],
+      "backup_path": ".obsidian/plugins/dataview/data.json.beacon-backup",
+      "git_commit": "18200442b5d0d1c943e9f3db61bfe74265322b3a",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-06T21:22:56.513Z"
+    },
+    {
+      "event": "info",
+      "step": "hotkeys",
+      "name": "convenience",
+      "command_id": "workspace:copy-full-path",
+      "action": "applied",
+      "git_commit": "18200442b5d0d1c943e9f3db61bfe74265322b3a",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-06T21:22:56.514Z"
+    },
+    {
+      "event": "info",
+      "step": "hotkeys",
+      "name": "convenience",
+      "command_id": "workspace:copy-path",
+      "action": "applied",
+      "git_commit": "18200442b5d0d1c943e9f3db61bfe74265322b3a",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-06T21:22:56.514Z"
+    },
+    {
+      "event": "install",
+      "kind": "mechanism",
+      "name": "convenience",
+      "version": "0.1.0",
+      "installed_at": "2026-05-06T21:22:56.514Z",
+      "git_commit": "18200442b5d0d1c943e9f3db61bfe74265322b3a",
       "git_tag": null,
       "git_dirty": true
     }

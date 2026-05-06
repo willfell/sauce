@@ -1,0 +1,24 @@
+{
+  "name": "convenience",
+  "version": "0.1.0",
+  "kind": "mechanism",
+  "description": "Consumer-convenience defaults: workspace copy-path hotkeys (Cmd+- copy full path; Cmd+= copy vault-relative path) + Dataview JS enable. NEW v0.21.1: introduces hotkeys[] + community_plugin_settings[] manifest fields + applyHotkeys + applyCommunityPluginData installer helpers. Allowlist 9 -> 11 (.obsidian/plugins/dataview/data.json + .obsidian/hotkeys.json); helper count 7 -> 9. applyCommunityPluginData short-circuits when any external_plugins[] id is absent from .obsidian/community-plugins.json (broadened gate vs styling helpers' required:true semantic, since materializing into a missing plugin's data.json is a wasted write).",
+  "depends_on": [],
+  "external_plugins": [
+    { "id": "dataview" }
+  ],
+  "hotkeys": [
+    { "command_id": "workspace:copy-full-path", "modifiers": ["Mod"], "key": "-" },
+    { "command_id": "workspace:copy-path",      "modifiers": ["Mod"], "key": "=" }
+  ],
+  "community_plugin_settings": [
+    {
+      "id": "dataview",
+      "settings": {
+        "enableDataviewJs": true,
+        "enableInlineDataviewJs": true
+      }
+    }
+  ],
+  "files": []
+}
