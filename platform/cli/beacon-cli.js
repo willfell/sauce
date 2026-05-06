@@ -45,6 +45,33 @@ async function resolveContext(opts) {
     return { vaultPath, config, subscription, workshopPath, workshopManifest };
 }
 
+// Synthesize a minimal ctx for `bootstrap --vault PATH` when no
+// platform-config.json exists yet (install.sh hand-off entry point).
+// The bootstrap verb is the only one that CREATES the config, so it must
+// tolerate its absence. Other verbs require resolveContext.
+function bootstrapCtxFromArgs(rest) {
+    let vaultPath = null;
+    for (let i = 0; i < rest.length; i++) {
+        if (rest[i] === "--vault" && i + 1 < rest.length) {
+            vaultPath = path.resolve(rest[i + 1]);
+            break;
+        }
+    }
+    if (!vaultPath) return null;
+    if (!fs.existsSync(vaultPath)) return null;
+    // Workshop is the cloned Beacon/ inside the vault per install.sh contract.
+    const workshopPath = path.join(vaultPath, "Beacon");
+    const wmPath = path.join(workshopPath, "platform/manifest.json");
+    const workshopManifest = fs.existsSync(wmPath) ? readJson(wmPath) : null;
+    return {
+        vaultPath,
+        config: { workshop_relative_path: "Beacon", variables: {} },
+        subscription: { mechanisms: [], blueprints: [] },
+        workshopPath,
+        workshopManifest
+    };
+}
+
 async function dispatch(argv, opts) {
     opts = opts || {};
     const verb = argv[0];
@@ -56,7 +83,16 @@ async function dispatch(argv, opts) {
     if (!VERBS[verb]) {
         throw new Error(`unknown verb: ${verb}\nUsage: beacon <bootstrap|update|status|wizard>`);
     }
-    const ctx = await resolveContext(opts);
+    let ctx;
+    if (verb === "bootstrap") {
+        // Bootstrap CREATES the config — tolerate its absence when --vault is
+        // supplied (install.sh hand-off path). Fall through to resolveContext
+        // only if --vault was not passed (rare; manual re-bootstrap inside
+        // an already-managed vault).
+        ctx = bootstrapCtxFromArgs(rest) || await resolveContext(opts);
+    } else {
+        ctx = await resolveContext(opts);
+    }
     const mod = require(VERBS[verb]);
     await mod.run(ctx, rest);
 }

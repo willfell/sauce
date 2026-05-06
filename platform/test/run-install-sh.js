@@ -50,8 +50,9 @@ function caseI1MissingNode() {
         writeShim(shimDir, "git", "exit 0");
         writeShim(shimDir, "npm", "exit 0");
     }, (tmp, shimDir, env) => {
-        // Override env.PATH to ONLY shimDir + /usr/bin (which lacks node in this test)
-        env.PATH = shimDir + ":/usr/bin";
+        // Override env.PATH to a minimal sysbin set lacking node.
+        // Includes /bin so `bash` resolves on macOS (where bash lives at /bin/bash, not /usr/bin/bash).
+        env.PATH = shimDir + ":/bin:/usr/bin";
         const r = runInstallSh(env, tmp);
         assertTrue(r.status !== 0, label + ": exit non-zero");
         assertTrue(/node/i.test(r.stderr || r.stdout), label + ": message mentions node");
@@ -66,7 +67,7 @@ function caseI2MissingGit() {
         writeShim(shimDir, "node", "exit 0");
         writeShim(shimDir, "npm", "exit 0");
     }, (tmp, shimDir, env) => {
-        env.PATH = shimDir + ":/usr/bin";
+        env.PATH = shimDir + ":/bin:/usr/bin";
         const r = runInstallSh(env, tmp);
         assertTrue(r.status !== 0, label + ": exit non-zero");
         assertTrue(/git/i.test(r.stderr || r.stdout), label + ": message mentions git");
@@ -83,7 +84,10 @@ function caseI3ClonesIntoVault() {
         writeShim(shimDir, "git", `
 case "$1" in
   clone)
-    DEST="$3"
+    # Skip flags after 'clone' to find positional URL + DEST.
+    shift
+    while [[ "$1" == --* ]]; do shift; done
+    DEST="$2"
     mkdir -p "$DEST/platform/cli"
     echo '{ "workshop_version": "0.22.0", "mechanisms": [], "blueprints": [], "foundational_plugins": [] }' > "$DEST/platform/manifest.json"
     cat > "$DEST/platform/cli/beacon-cli.js" <<'JS'
@@ -98,7 +102,9 @@ JS
 esac
         `);
         writeShim(shimDir, "npm", "exit 0");
-        writeShim(shimDir, "node", "/usr/bin/env node \"$@\"");  // pass through to real node
+        // Pass through to the real node via absolute path (avoids PATH-shadowing recursion
+        // when shimDir is prepended to PATH and contains this very shim).
+        writeShim(shimDir, "node", "exec \"" + process.execPath + "\" \"$@\"");
     }, (tmp, shimDir, env) => {
         env.PATH = shimDir + ":" + process.env.PATH;
         const vaultPath = path.join(tmp, "vault");
@@ -159,7 +165,10 @@ function caseI6ExecHandoff() {
         writeShim(shimDir, "git", `
 case "$1" in
   clone)
-    DEST="$3"
+    # Skip flags after 'clone' to find positional URL + DEST.
+    shift
+    while [[ "$1" == --* ]]; do shift; done
+    DEST="$2"
     mkdir -p "$DEST/platform/cli"
     echo '{ "workshop_version": "0.22.0", "mechanisms": [], "blueprints": [], "foundational_plugins": [] }' > "$DEST/platform/manifest.json"
     cat > "$DEST/platform/cli/beacon-cli.js" <<'JS'
@@ -170,7 +179,7 @@ JS
 esac
         `);
         writeShim(shimDir, "npm", "exit 0");
-        writeShim(shimDir, "node", "/usr/bin/env node \"$@\"");
+        writeShim(shimDir, "node", "exec \"" + process.execPath + "\" \"$@\"");
     }, (tmp, shimDir, env) => {
         env.PATH = shimDir + ":" + process.env.PATH;
         env.HANDOFF_MARKER = tmp;
