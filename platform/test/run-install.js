@@ -444,10 +444,14 @@ async function main() {
   } else if (!crashed) {
     console.log("  clean run — exit 0");
   }
-  process.exit(exitCode);
+  // CF-2: use process.exitCode (NOT process.exit) so stdout drains before exit.
+  // process.exit terminates the event loop immediately and truncates buffered
+  // stdout when piped (bootstrap.js's spawn capture lost ~half the output).
+  // Setting exitCode lets main() return + Node exits naturally with full flush.
+  process.exitCode = exitCode;
 }
 
 main().catch((e) => {
   console.error("[harness] uncaught:", e.stack || e.message);
-  process.exit(1);
+  process.exitCode = 1;
 });

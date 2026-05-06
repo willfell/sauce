@@ -3413,18 +3413,115 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     // Attach as a property of the existing function export — preserves the
     // top-level `module.exports = async function (tp) {...}` contract that
     // run-install.js relies on (it expects `require(installerPath)` to return
-    // a function), while also exposing `.runInstall(vaultPath)` for
+    // a function), while also exposing `.runInstall(vaultPath, opts)` for
     // bootstrap.js to invoke.
-    module.exports.runInstall = async function runInstall(vaultPath) {
+    //
+    // CF-2: by default, capture run-install.js's stdio (Phase B/C surfaced
+    // 2200-line JSON dumps mixed into the user's terminal). We tee the
+    // captured output to <vault>/Docs/Meta/bootstrap-last-install.log + emit
+    // only a condensed summary (Notice lines + verdict + run counts) to
+    // stdout. Pass { verbose: true } to opt back into raw stdio inherit.
+    module.exports.runInstall = async function runInstall(vaultPath, opts) {
+        opts = opts || {};
         const path = require("path");
+        const fs = require("fs");
         const child_process = require("child_process");
-        const result = child_process.spawnSync(
-            process.execPath,
-            [path.join(__dirname, "test", "run-install.js"), vaultPath],
-            { stdio: "inherit", encoding: "utf8" }
-        );
+
+        if (opts.verbose) {
+            const result = child_process.spawnSync(
+                process.execPath,
+                [path.join(__dirname, "test", "run-install.js"), vaultPath],
+                { stdio: "inherit", encoding: "utf8" }
+            );
+            if (result.status !== 0) {
+                throw new Error(`runInstall failed with exit ${result.status}`);
+            }
+            return;
+        }
+
+        // Use async spawn (NOT spawnSync) because run-install.js calls
+        // process.exit(N) which truncates buffered stdout when piped.
+        // spawnSync collects what's flushed, returns ~1900 lines instead of
+        // the full ~4100. Async spawn waits for the child's `close` event
+        // which fires AFTER stdout EOF — gets the full output even with
+        // process.exit truncation upstream.
+        const { stdout, stderr, status } = await new Promise((resolve, reject) => {
+            const child = child_process.spawn(
+                process.execPath,
+                [path.join(__dirname, "test", "run-install.js"), vaultPath],
+                { stdio: ["ignore", "pipe", "pipe"] }
+            );
+            const out = []; const err = [];
+            child.stdout.on("data", (c) => out.push(c));
+            child.stderr.on("data", (c) => err.push(c));
+            child.on("error", reject);
+            child.on("close", (code) => {
+                resolve({
+                    stdout: Buffer.concat(out).toString("utf8"),
+                    stderr: Buffer.concat(err).toString("utf8"),
+                    status: code
+                });
+            });
+        });
+        const result = { stdout, stderr, status };
+
+        // Tee full output to a log file inside the vault so the user can
+        // inspect when something goes wrong, without polluting stdout on
+        // the happy path.
+        const logDir = path.join(vaultPath, "Docs", "Meta");
+        try { fs.mkdirSync(logDir, { recursive: true }); } catch (_e) {}
+        const logPath = path.join(logDir, "bootstrap-last-install.log");
+        try {
+            fs.writeFileSync(logPath, stdout + (stderr ? "\n--- STDERR ---\n" + stderr : ""), "utf8");
+        } catch (_e) {}
+
+        // Condensed summary: emit Notice lines, the Verdict block, and the
+        // simple count rows. Skip the JSON dumps + history blobs.
+        const lines = stdout.split("\n");
+        const summary = [];
+        let inJsonBlock = false;
+        let inHistoryBlock = false;
+        for (const line of lines) {
+            // Skip indented JSON content blocks (history dump + final
+            // platform-installed.json block).
+            if (line === "--- Final platform-installed.json ---" || line === "--- New history entries this run ---") {
+                inJsonBlock = true;
+                continue;
+            }
+            if (line.startsWith("--- ") && inJsonBlock) {
+                inJsonBlock = false;
+                // fall through to emit the new section heading
+            }
+            if (inJsonBlock) continue;
+
+            // Skip raw history JSON one-liners (start with {"event"...).
+            if (/^\s*\{"event"/.test(line)) continue;
+
+            // Skip empty leading lines.
+            if (!line.trim() && summary.length === 0) continue;
+
+            summary.push(line);
+        }
+
+        // Print summary, but cap to ~60 lines. If the install is enormous,
+        // direct user to the log.
+        const MAX_SUMMARY_LINES = 80;
+        if (summary.length > MAX_SUMMARY_LINES) {
+            const head = summary.slice(0, MAX_SUMMARY_LINES);
+            head.push("");
+            head.push(`(+${summary.length - MAX_SUMMARY_LINES} more lines — full log: ${logPath})`);
+            for (const l of head) console.log(l);
+        } else {
+            for (const l of summary) console.log(l);
+        }
+
+        if (stderr.trim()) {
+            console.error("--- runInstall STDERR ---");
+            console.error(stderr);
+        }
+
         if (result.status !== 0) {
-            throw new Error(`runInstall failed with exit ${result.status}`);
+            throw new Error(`runInstall failed with exit ${result.status} — full log: ${logPath}`);
         }
     };
 }
