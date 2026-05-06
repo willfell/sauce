@@ -107,7 +107,55 @@ async function scaffoldVault(scratchDir, opts) {
   // Pre-seeded plugin data.jsons (per case).
   await fsp.writeFile(path.join(scratchDir, ".obsidian/plugins/templater-obsidian/data.json"), opts.templaterData, "utf8");
   await fsp.writeFile(path.join(scratchDir, ".obsidian/plugins/slash-commander/data.json"), opts.slashCommanderData, "utf8");
-  await fsp.writeFile(path.join(scratchDir, ".obsidian/community-plugins.json"), JSON.stringify(["templater-obsidian", "slash-commander"]), "utf8");
+
+  // Default community-plugins.json — caller may override via opts.styling to add obsidian-style-settings.
+  let communityPlugins = ["templater-obsidian", "slash-commander"];
+
+  // v0.19.0 styling cases: optional fixture for vendored themes + canonical Style Settings JSON.
+  if (opts.styling) {
+    // Seed vendored theme assets in the FAKE WORKSHOP (read-source location).
+    if (opts.styling.themeFiles) {
+      const themeDir = path.join(fakeWorkshop, "platform/mechanisms/test-fixture/assets/themes", opts.styling.themeFiles.name);
+      await fsp.mkdir(themeDir, { recursive: true });
+      for (const [name, body] of Object.entries(opts.styling.themeFiles.files || {})) {
+        await fsp.writeFile(path.join(themeDir, name), body, "utf8");
+      }
+    }
+    // Seed canonical Style Settings defaults JSON in the fake workshop.
+    if (opts.styling.defaultsBody !== undefined) {
+      const defaultsDir = path.join(fakeWorkshop, "platform/mechanisms/test-fixture/data");
+      await fsp.mkdir(defaultsDir, { recursive: true });
+      await fsp.writeFile(path.join(defaultsDir, "style-settings-default.json"), opts.styling.defaultsBody, "utf8");
+    }
+    // Pre-seed the consumer's Style Settings plugin dir + community-plugins.json so applyExternalPlugins is satisfied.
+    await fsp.mkdir(path.join(scratchDir, ".obsidian/plugins/obsidian-style-settings"), { recursive: true });
+    if (opts.styling.consumerStyleSettingsBody !== undefined) {
+      await fsp.writeFile(
+        path.join(scratchDir, ".obsidian/plugins/obsidian-style-settings/data.json"),
+        opts.styling.consumerStyleSettingsBody,
+        "utf8"
+      );
+    }
+    if (opts.styling.consumerAppearanceBody !== undefined) {
+      await fsp.writeFile(
+        path.join(scratchDir, ".obsidian/appearance.json"),
+        opts.styling.consumerAppearanceBody,
+        "utf8"
+      );
+    }
+    if (opts.styling.consumerThemeFiles) {
+      const consumerThemeDir = path.join(scratchDir, ".obsidian/themes", opts.styling.consumerThemeFiles.name);
+      await fsp.mkdir(consumerThemeDir, { recursive: true });
+      for (const [name, body] of Object.entries(opts.styling.consumerThemeFiles.files || {})) {
+        await fsp.writeFile(path.join(consumerThemeDir, name), body, "utf8");
+      }
+    }
+    if (opts.styling.includeStyleSettingsInCommunityPlugins !== false) {
+      communityPlugins = communityPlugins.concat(["obsidian-style-settings"]);
+    }
+  }
+
+  await fsp.writeFile(path.join(scratchDir, ".obsidian/community-plugins.json"), JSON.stringify(communityPlugins), "utf8");
 }
 
 async function runHarness(scratchDir) {
@@ -2197,6 +2245,604 @@ async function case4BackupOnEdit() {
   }
 }
 
+// =====================================================================
+// v0.19.0 styling cycle — 15 cases under VT/AP/SS naming.
+// VT* — applyVendoredThemes
+// AP* — applyAppearance
+// SS* — applyStyleSettings
+// =====================================================================
+
+const STYLING_THEME_MANIFEST_BODY = JSON.stringify({ name: "Baseline", version: "1.0.0", author: "test" });
+const STYLING_THEME_CSS_BODY = "/* baseline */\nbody { color: rebeccapurple; }\n";
+const STYLING_DEFAULTS_BODY = JSON.stringify({
+  "baseline-style@@accented-interface": true,
+  "baseline-style@@color-scheme-light": "rose-pine-light",
+  "baseline-style@@color-scheme-dark": "melange-dark",
+  "baseline-style@@h1-size": "1.8em",
+  "baseline-style@@font-text-override": "Inter",
+}, null, 2);
+
+function styledManifest(extra) {
+  return Object.assign({
+    name: "test-fixture",
+    version: "0.1.0",
+    files: [],
+    vendored_themes: [{ name: "Baseline", src: "assets/themes/Baseline" }],
+    appearance: { cssTheme: "Baseline", enabledCssSnippets: ["customjs-loader"] },
+    style_settings_defaults_src: "data/style-settings-default.json",
+    external_plugins: [{ id: "obsidian-style-settings", name: "Style Settings", required: true }],
+  }, extra || {});
+}
+
+// ---------- applyVendoredThemes (VT1-VT5) ----------
+
+async function caseVT1FreshWriteToEmptyConsumer() {
+  console.log("\n--- Case VT1: applyVendoredThemes fresh write to consumer with no .obsidian/themes/ ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseVT1-"));
+  try {
+    const manifest = styledManifest();
+    await scaffoldVault(scratch, {
+      templaterData: TEMPLATER_DEFAULT,
+      slashCommanderData: SC_DEFAULT,
+      manifest,
+      styling: {
+        themeFiles: {
+          name: "Baseline",
+          files: { "manifest.json": STYLING_THEME_MANIFEST_BODY, "theme.css": STYLING_THEME_CSS_BODY },
+        },
+        defaultsBody: STYLING_DEFAULTS_BODY,
+      },
+    });
+
+    const result = await runHarness(scratch);
+    assertTrue("VT1: platform-installed.json was written", result !== null);
+
+    const replaceEvts = (result && result.history || []).filter(
+      (h) => h.event === "replace" && h.step === "theme_overwrite"
+    );
+    assertTrue("VT1: at least one replace/theme_overwrite recorded", replaceEvts.length >= 1, `got ${replaceEvts.length}`);
+
+    const cssPath = path.join(scratch, ".obsidian/themes/Baseline/theme.css");
+    const manifestPath = path.join(scratch, ".obsidian/themes/Baseline/manifest.json");
+    assertTrue("VT1: theme.css materialized in consumer", fs.existsSync(cssPath));
+    assertTrue("VT1: manifest.json materialized in consumer", fs.existsSync(manifestPath));
+    if (fs.existsSync(cssPath)) {
+      const css = await readRaw(cssPath);
+      assertEq("VT1: theme.css body byte-equal to source", css, STYLING_THEME_CSS_BODY);
+    }
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseVT2IdempotentSkipsOverwriteOnSha256Match() {
+  console.log("\n--- Case VT2: applyVendoredThemes sha256-match skips overwrite on re-run ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseVT2-"));
+  try {
+    const manifest = styledManifest();
+    await scaffoldVault(scratch, {
+      templaterData: TEMPLATER_DEFAULT,
+      slashCommanderData: SC_DEFAULT,
+      manifest,
+      styling: {
+        themeFiles: {
+          name: "Baseline",
+          files: { "manifest.json": STYLING_THEME_MANIFEST_BODY, "theme.css": STYLING_THEME_CSS_BODY },
+        },
+        defaultsBody: STYLING_DEFAULTS_BODY,
+      },
+    });
+
+    const first = await runHarness(scratch);
+    const firstReplaces = (first && first.history || []).filter(
+      (h) => h.event === "replace" && h.step === "theme_overwrite"
+    );
+    assertTrue("VT2: first run wrote theme files", firstReplaces.length >= 1, `got ${firstReplaces.length}`);
+
+    // Bump fixture version so the install loop re-processes (gotcha 9).
+    const fixtureManifest2 = Object.assign({}, manifest, { version: "0.1.1" });
+    await fsp.writeFile(path.join(scratch, "_fake-workshop/platform/manifest.json"), JSON.stringify({
+      workshop_version: "0.0.0-test",
+      mechanisms: [{ name: "test-fixture", version: "0.1.1", path: "mechanisms/test-fixture" }],
+      blueprints: [],
+    }, null, 2), "utf8");
+    await fsp.writeFile(path.join(scratch, "_fake-workshop/platform/mechanisms/test-fixture/manifest.json"), JSON.stringify(fixtureManifest2, null, 2), "utf8");
+    await fsp.writeFile(path.join(scratch, "Docs/Meta/platform-subscription.json"), JSON.stringify({
+      mechanisms: [{ name: "test-fixture", version: "0.1.1" }],
+      blueprints: [],
+    }, null, 2), "utf8");
+
+    const second = await runHarness(scratch);
+    const newOnSecond = (second && second.history || []).slice((first && first.history || []).length);
+    const secondReplaces = newOnSecond.filter(
+      (h) => h.event === "replace" && h.step === "theme_overwrite"
+    );
+    const secondSkips = newOnSecond.filter(
+      (h) => h.event === "info" && h.step === "theme_overwrite" && h.action === "skipped_existing"
+    );
+    assertEq("VT2: second run records 0 replace/theme_overwrite events (sha256 match)", secondReplaces.length, 0);
+    assertTrue("VT2: second run records at least one skipped_existing (theme files unchanged)", secondSkips.length >= 1);
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseVT3SubsequentOverwriteCreatesBak() {
+  console.log("\n--- Case VT3: applyVendoredThemes overwrite creates .bak when prior content differs ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseVT3-"));
+  try {
+    const manifest = styledManifest();
+    const priorCss = "/* OLD baseline body */\n";
+    await scaffoldVault(scratch, {
+      templaterData: TEMPLATER_DEFAULT,
+      slashCommanderData: SC_DEFAULT,
+      manifest,
+      styling: {
+        themeFiles: {
+          name: "Baseline",
+          files: { "manifest.json": STYLING_THEME_MANIFEST_BODY, "theme.css": STYLING_THEME_CSS_BODY },
+        },
+        defaultsBody: STYLING_DEFAULTS_BODY,
+        consumerThemeFiles: {
+          name: "Baseline",
+          files: { "theme.css": priorCss },
+        },
+      },
+    });
+
+    const result = await runHarness(scratch);
+    assertTrue("VT3: install ran", result !== null);
+
+    const cssPath = path.join(scratch, ".obsidian/themes/Baseline/theme.css");
+    const bakPath = `${cssPath}.bak`;
+    assertTrue("VT3: <theme.css>.bak exists (prior content backed up)", fs.existsSync(bakPath));
+    if (fs.existsSync(bakPath)) {
+      const bak = await readRaw(bakPath);
+      assertEq("VT3: .bak body byte-equal to prior consumer content", bak, priorCss);
+    }
+
+    const live = await readRaw(cssPath);
+    assertEq("VT3: live theme.css body byte-equal to source", live, STYLING_THEME_CSS_BODY);
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseVT4MissingSourceFailsLoud() {
+  console.log("\n--- Case VT4: applyVendoredThemes source-absent emits error event ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseVT4-"));
+  try {
+    const manifest = styledManifest({ vendored_themes: [{ name: "Baseline", src: "assets/themes/Baseline" }] });
+    // NOTE: do NOT pass styling.themeFiles — workshop has no source dir for Baseline.
+    await scaffoldVault(scratch, {
+      templaterData: TEMPLATER_DEFAULT,
+      slashCommanderData: SC_DEFAULT,
+      manifest,
+      styling: {
+        defaultsBody: STYLING_DEFAULTS_BODY,
+      },
+    });
+
+    const result = await runHarness(scratch);
+    assertTrue("VT4: install ran", result !== null);
+
+    const errEvts = (result && result.history || []).filter(
+      (h) => h.event === "error" && h.step === "theme_overwrite"
+    );
+    assertTrue("VT4: at least one error/theme_overwrite recorded", errEvts.length >= 1, `got ${errEvts.length}`);
+
+    // No theme files materialized in consumer.
+    const consumerThemeDir = path.join(scratch, ".obsidian/themes/Baseline");
+    if (fs.existsSync(consumerThemeDir)) {
+      const files = fs.readdirSync(consumerThemeDir);
+      assertEq("VT4: consumer .obsidian/themes/Baseline/ has 0 files when source missing", files.length, 0);
+    }
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseVT5MultipleFilesAllOverwritten() {
+  console.log("\n--- Case VT5: applyVendoredThemes processes every file in the source theme dir ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseVT5-"));
+  try {
+    const manifest = styledManifest();
+    await scaffoldVault(scratch, {
+      templaterData: TEMPLATER_DEFAULT,
+      slashCommanderData: SC_DEFAULT,
+      manifest,
+      styling: {
+        themeFiles: {
+          name: "Baseline",
+          files: {
+            "manifest.json": STYLING_THEME_MANIFEST_BODY,
+            "theme.css": STYLING_THEME_CSS_BODY,
+            "extra.css": "/* extra rules */\n",
+          },
+        },
+        defaultsBody: STYLING_DEFAULTS_BODY,
+      },
+    });
+
+    const result = await runHarness(scratch);
+    assertTrue("VT5: install ran", result !== null);
+
+    for (const fname of ["manifest.json", "theme.css", "extra.css"]) {
+      const p = path.join(scratch, ".obsidian/themes/Baseline", fname);
+      assertTrue(`VT5: ${fname} materialized`, fs.existsSync(p));
+    }
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+// ---------- applyAppearance (AP1-AP5) ----------
+
+async function caseAP1FreshWriteCreatesAppearanceJson() {
+  console.log("\n--- Case AP1: applyAppearance creates appearance.json when absent ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseAP1-"));
+  try {
+    const manifest = styledManifest();
+    await scaffoldVault(scratch, {
+      templaterData: TEMPLATER_DEFAULT,
+      slashCommanderData: SC_DEFAULT,
+      manifest,
+      styling: {
+        themeFiles: {
+          name: "Baseline",
+          files: { "manifest.json": STYLING_THEME_MANIFEST_BODY, "theme.css": STYLING_THEME_CSS_BODY },
+        },
+        defaultsBody: STYLING_DEFAULTS_BODY,
+      },
+    });
+
+    const result = await runHarness(scratch);
+    assertTrue("AP1: install ran", result !== null);
+
+    const apPath = path.join(scratch, ".obsidian/appearance.json");
+    assertTrue("AP1: appearance.json materialized", fs.existsSync(apPath));
+    if (fs.existsSync(apPath)) {
+      const ap = await readJson(apPath);
+      assertEq("AP1: cssTheme set to Baseline", ap.cssTheme, "Baseline");
+      assertTrue("AP1: enabledCssSnippets contains customjs-loader",
+        Array.isArray(ap.enabledCssSnippets) && ap.enabledCssSnippets.includes("customjs-loader"));
+    }
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseAP2AdditiveSnippetUnion() {
+  console.log("\n--- Case AP2: applyAppearance enabledCssSnippets[] additive union with consumer overrides ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseAP2-"));
+  try {
+    const manifest = styledManifest();
+    const priorAppearance = JSON.stringify({ cssTheme: "OldTheme", enabledCssSnippets: ["my-snippet", "another"] }, null, 2);
+    await scaffoldVault(scratch, {
+      templaterData: TEMPLATER_DEFAULT,
+      slashCommanderData: SC_DEFAULT,
+      manifest,
+      styling: {
+        themeFiles: {
+          name: "Baseline",
+          files: { "manifest.json": STYLING_THEME_MANIFEST_BODY, "theme.css": STYLING_THEME_CSS_BODY },
+        },
+        defaultsBody: STYLING_DEFAULTS_BODY,
+        consumerAppearanceBody: priorAppearance,
+      },
+    });
+
+    const result = await runHarness(scratch);
+    assertTrue("AP2: install ran", result !== null);
+
+    const ap2Path = path.join(scratch, ".obsidian/appearance.json");
+    if (fs.existsSync(ap2Path)) {
+      const ap = await readJson(ap2Path);
+      assertEq("AP2: cssTheme overridden to Baseline", ap.cssTheme, "Baseline");
+      assertTrue("AP2: my-snippet preserved", Array.isArray(ap.enabledCssSnippets) && ap.enabledCssSnippets.includes("my-snippet"));
+      assertTrue("AP2: another preserved", Array.isArray(ap.enabledCssSnippets) && ap.enabledCssSnippets.includes("another"));
+      assertTrue("AP2: customjs-loader added", Array.isArray(ap.enabledCssSnippets) && ap.enabledCssSnippets.includes("customjs-loader"));
+      assertEq("AP2: enabledCssSnippets length is 3 (no duplicates)", (ap.enabledCssSnippets || []).length, 3);
+    } else {
+      assertTrue("AP2: appearance.json materialized", false, "appearance.json missing");
+    }
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseAP3CssThemeAlwaysOverridden() {
+  console.log("\n--- Case AP3: applyAppearance always sets cssTheme to manifest value ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseAP3-"));
+  try {
+    const manifest = styledManifest();
+    const priorAppearance = JSON.stringify({ cssTheme: "OtherTheme", baseFontSize: 14 }, null, 2);
+    await scaffoldVault(scratch, {
+      templaterData: TEMPLATER_DEFAULT,
+      slashCommanderData: SC_DEFAULT,
+      manifest,
+      styling: {
+        themeFiles: {
+          name: "Baseline",
+          files: { "manifest.json": STYLING_THEME_MANIFEST_BODY, "theme.css": STYLING_THEME_CSS_BODY },
+        },
+        defaultsBody: STYLING_DEFAULTS_BODY,
+        consumerAppearanceBody: priorAppearance,
+      },
+    });
+
+    const result = await runHarness(scratch);
+    assertTrue("AP3: install ran", result !== null);
+
+    const ap3Path = path.join(scratch, ".obsidian/appearance.json");
+    if (fs.existsSync(ap3Path)) {
+      const ap = await readJson(ap3Path);
+      assertEq("AP3: cssTheme overridden", ap.cssTheme, "Baseline");
+      assertEq("AP3: unrelated key preserved (baseFontSize)", ap.baseFontSize, 14);
+    } else {
+      assertTrue("AP3: appearance.json present", false, "appearance.json missing");
+    }
+
+    const bakPath = path.join(scratch, ".obsidian/appearance.json.beacon-backup");
+    assertTrue("AP3: appearance.json.beacon-backup exists", fs.existsSync(bakPath));
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseAP4MalformedJsonGuard() {
+  console.log("\n--- Case AP4: applyAppearance malformed-JSON guard ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseAP4-"));
+  try {
+    const manifest = styledManifest();
+    const malformed = "{not valid";
+    await scaffoldVault(scratch, {
+      templaterData: TEMPLATER_DEFAULT,
+      slashCommanderData: SC_DEFAULT,
+      manifest,
+      styling: {
+        themeFiles: {
+          name: "Baseline",
+          files: { "manifest.json": STYLING_THEME_MANIFEST_BODY, "theme.css": STYLING_THEME_CSS_BODY },
+        },
+        defaultsBody: STYLING_DEFAULTS_BODY,
+        consumerAppearanceBody: malformed,
+      },
+    });
+
+    const result = await runHarness(scratch);
+    assertTrue("AP4: install ran", result !== null);
+
+    const errs = (result && result.history || []).filter(
+      (h) => h.event === "error" && h.step === "appearance"
+    );
+    assertTrue("AP4: at least one error/appearance event recorded", errs.length >= 1, `got ${errs.length}`);
+
+    const apPath = path.join(scratch, ".obsidian/appearance.json");
+    const after = await readRaw(apPath);
+    assertEq("AP4: malformed appearance.json untouched", after, malformed);
+
+    const bakPath = `${apPath}.beacon-backup`;
+    assertTrue("AP4: no .beacon-backup created on malformed-JSON guard", !fs.existsSync(bakPath));
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseAP5BackupOnEditBytes() {
+  console.log("\n--- Case AP5: applyAppearance backup captures pre-edit bytes ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseAP5-"));
+  try {
+    const manifest = styledManifest();
+    const priorBody = JSON.stringify({ cssTheme: "X" });
+    await scaffoldVault(scratch, {
+      templaterData: TEMPLATER_DEFAULT,
+      slashCommanderData: SC_DEFAULT,
+      manifest,
+      styling: {
+        themeFiles: {
+          name: "Baseline",
+          files: { "manifest.json": STYLING_THEME_MANIFEST_BODY, "theme.css": STYLING_THEME_CSS_BODY },
+        },
+        defaultsBody: STYLING_DEFAULTS_BODY,
+        consumerAppearanceBody: priorBody,
+      },
+    });
+
+    const result = await runHarness(scratch);
+    assertTrue("AP5: install ran", result !== null);
+
+    const bakPath = path.join(scratch, ".obsidian/appearance.json.beacon-backup");
+    assertTrue("AP5: appearance.json.beacon-backup exists", fs.existsSync(bakPath));
+    if (fs.existsSync(bakPath)) {
+      const bak = await readRaw(bakPath);
+      assertEq("AP5: backup byte-equal to pre-edit", bak, priorBody);
+    }
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+// ---------- applyStyleSettings (SS1-SS5) ----------
+
+async function caseSS1DefaultsWriteOnEmptyDataJson() {
+  console.log("\n--- Case SS1: applyStyleSettings full canonical write when data.json absent ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseSS1-"));
+  try {
+    const manifest = styledManifest();
+    await scaffoldVault(scratch, {
+      templaterData: TEMPLATER_DEFAULT,
+      slashCommanderData: SC_DEFAULT,
+      manifest,
+      styling: {
+        themeFiles: {
+          name: "Baseline",
+          files: { "manifest.json": STYLING_THEME_MANIFEST_BODY, "theme.css": STYLING_THEME_CSS_BODY },
+        },
+        defaultsBody: STYLING_DEFAULTS_BODY,
+      },
+    });
+
+    const result = await runHarness(scratch);
+    assertTrue("SS1: install ran", result !== null);
+
+    const ssPath = path.join(scratch, ".obsidian/plugins/obsidian-style-settings/data.json");
+    assertTrue("SS1: data.json materialized", fs.existsSync(ssPath));
+    if (fs.existsSync(ssPath)) {
+      const ss = await readJson(ssPath);
+      const expected = JSON.parse(STYLING_DEFAULTS_BODY);
+      assertEq("SS1: all canonical keys present", Object.keys(ss).sort().join(","), Object.keys(expected).sort().join(","));
+      assertEq("SS1: color-scheme-light value matches canonical", ss["baseline-style@@color-scheme-light"], "rose-pine-light");
+    }
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseSS2AdditivePreservesUserOverride() {
+  console.log("\n--- Case SS2: applyStyleSettings user-override preserved (first-wins) ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseSS2-"));
+  try {
+    const manifest = styledManifest();
+    const userBody = JSON.stringify({ "baseline-style@@h1-size": "2.5em" }, null, 2);
+    await scaffoldVault(scratch, {
+      templaterData: TEMPLATER_DEFAULT,
+      slashCommanderData: SC_DEFAULT,
+      manifest,
+      styling: {
+        themeFiles: {
+          name: "Baseline",
+          files: { "manifest.json": STYLING_THEME_MANIFEST_BODY, "theme.css": STYLING_THEME_CSS_BODY },
+        },
+        defaultsBody: STYLING_DEFAULTS_BODY,
+        consumerStyleSettingsBody: userBody,
+      },
+    });
+
+    const result = await runHarness(scratch);
+    assertTrue("SS2: install ran", result !== null);
+
+    const ss2Path = path.join(scratch, ".obsidian/plugins/obsidian-style-settings/data.json");
+    if (fs.existsSync(ss2Path)) {
+      const ss = await readJson(ss2Path);
+      assertEq("SS2: user override h1-size preserved", ss["baseline-style@@h1-size"], "2.5em");
+      assertEq("SS2: missing canonical key filled in (color-scheme-light)", ss["baseline-style@@color-scheme-light"], "rose-pine-light");
+      assertEq("SS2: missing canonical key filled in (font-text-override)", ss["baseline-style@@font-text-override"], "Inter");
+    } else {
+      assertTrue("SS2: data.json present", false, "data.json missing");
+    }
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseSS3MalformedJsonGuard() {
+  console.log("\n--- Case SS3: applyStyleSettings malformed consumer data.json guard ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseSS3-"));
+  try {
+    const manifest = styledManifest();
+    const malformed = "{not valid";
+    await scaffoldVault(scratch, {
+      templaterData: TEMPLATER_DEFAULT,
+      slashCommanderData: SC_DEFAULT,
+      manifest,
+      styling: {
+        themeFiles: {
+          name: "Baseline",
+          files: { "manifest.json": STYLING_THEME_MANIFEST_BODY, "theme.css": STYLING_THEME_CSS_BODY },
+        },
+        defaultsBody: STYLING_DEFAULTS_BODY,
+        consumerStyleSettingsBody: malformed,
+      },
+    });
+
+    const result = await runHarness(scratch);
+    assertTrue("SS3: install ran", result !== null);
+
+    const errs = (result && result.history || []).filter(
+      (h) => h.event === "error" && h.step === "style_settings"
+    );
+    assertTrue("SS3: at least one error/style_settings event recorded", errs.length >= 1, `got ${errs.length}`);
+
+    const ssPath = path.join(scratch, ".obsidian/plugins/obsidian-style-settings/data.json");
+    const after = await readRaw(ssPath);
+    assertEq("SS3: malformed data.json untouched", after, malformed);
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseSS4MissingDefaultsSrcFailsLoud() {
+  console.log("\n--- Case SS4: applyStyleSettings missing style_settings_defaults_src in workshop emits error ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseSS4-"));
+  try {
+    const manifest = styledManifest();
+    // NOTE: do NOT pass styling.defaultsBody — workshop has no source defaults.
+    await scaffoldVault(scratch, {
+      templaterData: TEMPLATER_DEFAULT,
+      slashCommanderData: SC_DEFAULT,
+      manifest,
+      styling: {
+        themeFiles: {
+          name: "Baseline",
+          files: { "manifest.json": STYLING_THEME_MANIFEST_BODY, "theme.css": STYLING_THEME_CSS_BODY },
+        },
+      },
+    });
+
+    const result = await runHarness(scratch);
+    assertTrue("SS4: install ran", result !== null);
+
+    const errs = (result && result.history || []).filter(
+      (h) => h.event === "error" && h.step === "style_settings"
+    );
+    assertTrue("SS4: at least one error/style_settings event recorded", errs.length >= 1, `got ${errs.length}`);
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseSS5BackupOnEdit() {
+  console.log("\n--- Case SS5: applyStyleSettings backup captures pre-edit bytes ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseSS5-"));
+  try {
+    const manifest = styledManifest();
+    const priorBody = JSON.stringify({ "baseline-style@@h1-size": "2.5em", customUserKey: "preserved" });
+    await scaffoldVault(scratch, {
+      templaterData: TEMPLATER_DEFAULT,
+      slashCommanderData: SC_DEFAULT,
+      manifest,
+      styling: {
+        themeFiles: {
+          name: "Baseline",
+          files: { "manifest.json": STYLING_THEME_MANIFEST_BODY, "theme.css": STYLING_THEME_CSS_BODY },
+        },
+        defaultsBody: STYLING_DEFAULTS_BODY,
+        consumerStyleSettingsBody: priorBody,
+      },
+    });
+
+    const result = await runHarness(scratch);
+    assertTrue("SS5: install ran", result !== null);
+
+    const ssPath = path.join(scratch, ".obsidian/plugins/obsidian-style-settings/data.json");
+    const bakPath = `${ssPath}.beacon-backup`;
+    assertTrue("SS5: data.json.beacon-backup exists", fs.existsSync(bakPath));
+    if (fs.existsSync(bakPath)) {
+      const bak = await readRaw(bakPath);
+      assertEq("SS5: backup byte-equal to pre-edit", bak, priorBody);
+    }
+
+    if (fs.existsSync(ssPath)) {
+      const ss = await readJson(ssPath);
+      assertEq("SS5: user customUserKey preserved post-merge", ss.customUserKey, "preserved");
+      assertEq("SS5: user h1-size override preserved", ss["baseline-style@@h1-size"], "2.5em");
+    }
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -2233,6 +2879,23 @@ async function case4BackupOnEdit() {
   await caseR4MissingFolderPrefix();
   await caseR5InvokeCommandPassthrough();
   await caseR6OpenLinkTargetSubstitution();
+
+  // v0.19.0 styling cycle — TDD-first cases for applyVendoredThemes / applyAppearance / applyStyleSettings.
+  await caseVT1FreshWriteToEmptyConsumer();
+  await caseVT2IdempotentSkipsOverwriteOnSha256Match();
+  await caseVT3SubsequentOverwriteCreatesBak();
+  await caseVT4MissingSourceFailsLoud();
+  await caseVT5MultipleFilesAllOverwritten();
+  await caseAP1FreshWriteCreatesAppearanceJson();
+  await caseAP2AdditiveSnippetUnion();
+  await caseAP3CssThemeAlwaysOverridden();
+  await caseAP4MalformedJsonGuard();
+  await caseAP5BackupOnEditBytes();
+  await caseSS1DefaultsWriteOnEmptyDataJson();
+  await caseSS2AdditivePreservesUserOverride();
+  await caseSS3MalformedJsonGuard();
+  await caseSS4MissingDefaultsSrcFailsLoud();
+  await caseSS5BackupOnEdit();
 
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
