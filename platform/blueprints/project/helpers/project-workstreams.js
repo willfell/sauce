@@ -48,7 +48,13 @@ class ProjectWorkstreams {
         };
 
         const projectPages = dv.pages(`"${projectDir}"`)
-            .where(p => p.file.path !== filePath && !p.file.name.endsWith("-board") && !p.file.name.endsWith("- Map"));
+            .where(p =>
+                p.file.path !== filePath &&
+                !p.file.name.endsWith("-board") &&
+                !p.file.name.endsWith("- Map") &&
+                !p.task_parent &&
+                !p.file.path.includes("/board/")
+            );
 
         const grouped = {};
         const unassigned = [];

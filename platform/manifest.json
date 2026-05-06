@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop platform manifest. Each mechanism + blueprint has its own version.",
-  "workshop_version": "0.18.1",
+  "workshop_version": "0.18.2",
   "date": "2026-05-05",
   "installer": {
     "source": "install.js",
@@ -19,7 +19,7 @@
     { "name": "boards", "version": "0.1.0", "path": "blueprints/boards" },
     { "name": "daily", "version": "0.2.1", "path": "blueprints/daily" },
     { "name": "meetings", "version": "0.2.1", "path": "blueprints/meetings" },
-    { "name": "project", "version": "1.3.4", "path": "blueprints/project" },
+    { "name": "project", "version": "1.3.5", "path": "blueprints/project" },
     { "name": "to-do", "version": "0.1.4", "path": "blueprints/to-do" },
     { "name": "journal", "version": "0.1.1", "path": "blueprints/journal" },
     { "name": "trips", "version": "0.1.4", "path": "blueprints/trips" },

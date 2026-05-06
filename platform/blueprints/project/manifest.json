@@ -1,6 +1,6 @@
 {
   "name": "project",
-  "version": "1.3.4",
+  "version": "1.3.5",
   "kind": "blueprint",
   "module_directory": "projects",
   "description": "Per-project atlas + map + Kanban board with hierarchical tasks (task hub + notes + task-board + folder-style sub-task cards), workstream-tagged cards, and All-Projects hub. v1.3.3 PATCH: ProjectNavButtons migrated to customJS.BeaconButton.render(...) instead of inline _renderActionButton (4 call sites). Visual surface IDENTICAL; pure dedupe. Adds beacon-button >=0.1.0 dep.",
