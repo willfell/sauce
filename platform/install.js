@@ -613,6 +613,9 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applySlashCommanderBindings(tp, mech, variables, history, git);    // NEW v0.1.3
   await applyTemplaterFolderTemplates(tp, mech, variables, history, git);  // NEW v0.4.0
   await applyCorePluginSettings(tp, mech, variables, history, git);        // NEW v0.3.0
+  await applyVendoredThemes(tp, mech, workshopPath, target.path, history, git);  // NEW v0.19.0
+  await applyAppearance(tp, mech, history, git);                                  // NEW v0.19.0
+  await applyStyleSettings(tp, mech, workshopPath, target.path, history, git);    // NEW v0.19.0
 
   return true;
 }
@@ -2272,6 +2275,787 @@ async function applyCorePluginSettings(tp, manifest, variables, history, git) {
         attempted_at: new Date().toISOString(),
       });
     }
+  }
+}
+
+// applyVendoredThemes — for each item that declares vendored_themes[], copy the
+// vendored theme directory from <workshop>/platform/<targetPath>/<src>/ into the
+// consumer's .obsidian/themes/<name>/ via the vault adapter. Mirrors the boards
+// Option B `file_overwrite` posture (sha256 compare; .bak of non-empty prior;
+// replace event), applied per-file under .obsidian/themes/. Suffix is .bak
+// (file-content overwrite convention) NOT .beacon-backup (plugin-data
+// convention; that's reserved for applyTemplaterHotkeys / applySlashCommanderBindings /
+// applyCorePluginSettings under .obsidian/plugins/<id>/data.json or
+// .obsidian/<core-id>.json).
+//
+// Source-side reads use require("fs") synchronously (the workshop is OUTSIDE
+// the vault — the adapter cannot reach it). Consumer-side reads/writes use the
+// async vault adapter (tp.app.vault.adapter).
+//
+// Posture (mirrors v0.3.0 applyCorePluginSettings + v0.2.0 file_overwrite):
+//   - Failure-loud: every fs / adapter operation in try/catch; on catch push
+//     error/theme_overwrite + Notice + continue with next file (never throws).
+//   - Backup-on-edit: when consumer dest exists AND differs from source, write
+//     <destRelPath>.bak before overwriting.
+//   - Idempotent: sha256-compare source vs. existing; on match push
+//     info/theme_overwrite + action "skipped_existing" + skip-write.
+//   - All history entries include git.commit / git.tag / git.dirty +
+//     attempted_at: new Date().toISOString().
+async function applyVendoredThemes(tp, manifest, workshopPath, targetPath, history, git) {
+  if (!manifest || !Array.isArray(manifest.vendored_themes) || manifest.vendored_themes.length === 0) return;
+  const fs = require("fs");
+  const path = require("path");
+  const crypto = require("crypto");
+  const adapter = tp.app.vault.adapter;
+
+  for (const entry of manifest.vendored_themes) {
+    if (!entry || typeof entry.name !== "string" || entry.name.length === 0 ||
+        typeof entry.src !== "string" || entry.src.length === 0) {
+      new Notice(`applyVendoredThemes: ${manifest.name} has invalid vendored_themes entry; skipped`, 6000);
+      if (history) {
+        history.push({
+          event: "warning",
+          step: "theme_overwrite",
+          name: manifest.name,
+          message: "invalid_entry",
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      continue;
+    }
+
+    const sourceDir = path.join(workshopPath, "platform", targetPath, entry.src);
+    if (!fs.existsSync(sourceDir)) {
+      new Notice(`applyVendoredThemes: source absent ${sourceDir} for ${manifest.name}/${entry.name}`, 8000);
+      if (history) {
+        history.push({
+          event: "error",
+          step: "theme_overwrite",
+          name: manifest.name,
+          theme: entry.name,
+          message: `source absent: ${sourceDir}`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      continue;
+    }
+
+    const destDir = `.obsidian/themes/${entry.name}`;
+    try {
+      if (!(await adapter.exists(destDir))) {
+        await adapter.mkdir(destDir);
+      }
+    } catch (e) {
+      new Notice(`applyVendoredThemes: mkdir failed for ${destDir} (${e.message}); skipping ${manifest.name}/${entry.name}`, 8000);
+      if (history) {
+        history.push({
+          event: "error",
+          step: "theme_overwrite",
+          name: manifest.name,
+          theme: entry.name,
+          message: `mkdir failed for ${destDir}: ${e.message}`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      continue;
+    }
+
+    let srcFiles = [];
+    try {
+      srcFiles = fs.readdirSync(sourceDir, { withFileTypes: true })
+        .filter((d) => d.isFile())
+        .map((d) => d.name);
+    } catch (e) {
+      new Notice(`applyVendoredThemes: readdir failed for ${sourceDir} (${e.message}); skipping ${manifest.name}/${entry.name}`, 8000);
+      if (history) {
+        history.push({
+          event: "error",
+          step: "theme_overwrite",
+          name: manifest.name,
+          theme: entry.name,
+          message: `readdir failed for ${sourceDir}: ${e.message}`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      continue;
+    }
+
+    for (const filename of srcFiles) {
+      const srcPath = path.join(sourceDir, filename);
+      const destRelPath = `${destDir}/${filename}`;
+
+      let srcBytes;
+      let srcSha;
+      try {
+        srcBytes = fs.readFileSync(srcPath);
+        srcSha = crypto.createHash("sha256").update(srcBytes).digest("hex");
+      } catch (e) {
+        new Notice(`applyVendoredThemes: read source failed for ${srcPath} (${e.message})`, 8000);
+        if (history) {
+          history.push({
+            event: "error",
+            step: "theme_overwrite",
+            name: manifest.name,
+            theme: entry.name,
+            dest: destRelPath,
+            message: `read source failed: ${e.message}`,
+            git_commit: git.commit,
+            git_tag: git.tag,
+            git_dirty: git.dirty,
+            attempted_at: new Date().toISOString(),
+          });
+        }
+        continue;
+      }
+
+      let destExists = false;
+      try {
+        destExists = await adapter.exists(destRelPath);
+      } catch (e) {
+        new Notice(`applyVendoredThemes: exists check failed for ${destRelPath} (${e.message})`, 8000);
+        if (history) {
+          history.push({
+            event: "error",
+            step: "theme_overwrite",
+            name: manifest.name,
+            theme: entry.name,
+            dest: destRelPath,
+            message: `exists check failed: ${e.message}`,
+            git_commit: git.commit,
+            git_tag: git.tag,
+            git_dirty: git.dirty,
+            attempted_at: new Date().toISOString(),
+          });
+        }
+        continue;
+      }
+
+      if (destExists) {
+        let existingRaw;
+        try {
+          existingRaw = await adapter.read(destRelPath);
+        } catch (e) {
+          new Notice(`applyVendoredThemes: read dest failed for ${destRelPath} (${e.message})`, 8000);
+          if (history) {
+            history.push({
+              event: "error",
+              step: "theme_overwrite",
+              name: manifest.name,
+              theme: entry.name,
+              dest: destRelPath,
+              message: `read dest failed: ${e.message}`,
+              git_commit: git.commit,
+              git_tag: git.tag,
+              git_dirty: git.dirty,
+              attempted_at: new Date().toISOString(),
+            });
+          }
+          continue;
+        }
+
+        const existingBytes = Buffer.from(existingRaw, "utf8");
+        const existingSha = crypto.createHash("sha256").update(existingBytes).digest("hex");
+
+        if (srcSha === existingSha) {
+          if (history) {
+            history.push({
+              event: "info",
+              step: "theme_overwrite",
+              name: manifest.name,
+              theme: entry.name,
+              dest: destRelPath,
+              action: "skipped_existing",
+              git_commit: git.commit,
+              git_tag: git.tag,
+              git_dirty: git.dirty,
+              attempted_at: new Date().toISOString(),
+            });
+          }
+          continue;
+        }
+
+        const bakPath = `${destRelPath}.bak`;
+        try {
+          await adapter.write(bakPath, existingRaw);
+        } catch (e) {
+          new Notice(`applyVendoredThemes: bak write failed for ${bakPath} (${e.message}); aborting overwrite of ${destRelPath}`, 8000);
+          if (history) {
+            history.push({
+              event: "error",
+              step: "theme_overwrite",
+              name: manifest.name,
+              theme: entry.name,
+              dest: destRelPath,
+              message: `bak write failed: ${e.message}`,
+              git_commit: git.commit,
+              git_tag: git.tag,
+              git_dirty: git.dirty,
+              attempted_at: new Date().toISOString(),
+            });
+          }
+          continue;
+        }
+
+        try {
+          await adapter.write(destRelPath, srcBytes.toString("utf8"));
+        } catch (e) {
+          new Notice(`applyVendoredThemes: dest write failed for ${destRelPath} (${e.message})`, 8000);
+          if (history) {
+            history.push({
+              event: "error",
+              step: "theme_overwrite",
+              name: manifest.name,
+              theme: entry.name,
+              dest: destRelPath,
+              message: `dest write failed: ${e.message}`,
+              git_commit: git.commit,
+              git_tag: git.tag,
+              git_dirty: git.dirty,
+              attempted_at: new Date().toISOString(),
+            });
+          }
+          continue;
+        }
+
+        if (history) {
+          history.push({
+            event: "replace",
+            step: "theme_overwrite",
+            name: manifest.name,
+            theme: entry.name,
+            dest: destRelPath,
+            prior_sha: existingSha,
+            new_sha: srcSha,
+            backup_path: bakPath,
+            git_commit: git.commit,
+            git_tag: git.tag,
+            git_dirty: git.dirty,
+            attempted_at: new Date().toISOString(),
+          });
+        }
+      } else {
+        // Fresh write — no prior content to back up.
+        try {
+          await adapter.write(destRelPath, srcBytes.toString("utf8"));
+        } catch (e) {
+          new Notice(`applyVendoredThemes: fresh write failed for ${destRelPath} (${e.message})`, 8000);
+          if (history) {
+            history.push({
+              event: "error",
+              step: "theme_overwrite",
+              name: manifest.name,
+              theme: entry.name,
+              dest: destRelPath,
+              message: `fresh write failed: ${e.message}`,
+              git_commit: git.commit,
+              git_tag: git.tag,
+              git_dirty: git.dirty,
+              attempted_at: new Date().toISOString(),
+            });
+          }
+          continue;
+        }
+
+        if (history) {
+          history.push({
+            event: "replace",
+            step: "theme_overwrite",
+            name: manifest.name,
+            theme: entry.name,
+            dest: destRelPath,
+            new_sha: srcSha,
+            git_commit: git.commit,
+            git_tag: git.tag,
+            git_dirty: git.dirty,
+            attempted_at: new Date().toISOString(),
+          });
+        }
+      }
+    }
+  }
+}
+
+// applyAppearance — write/merge .obsidian/appearance.json from a manifest's
+// `appearance` block. Mirrors applyCorePluginSettings posture (failure-loud
+// history, malformed-JSON guard, backup-on-edit, idempotent skip-write,
+// never-throws). cssTheme is ALWAYS overridden (single canonical theme per
+// design); enabledCssSnippets is additively unioned (existing-first order
+// preserved); any other keys in `desired` are shallow-merged over the existing
+// object for forward-compat. Backup suffix is .beacon-backup (plugin-data
+// convention; same as applyCorePluginSettings).
+async function applyAppearance(tp, manifest, history, git) {
+  if (!manifest || typeof manifest.appearance !== "object" || manifest.appearance === null || Array.isArray(manifest.appearance)) return;
+  const adapter = tp.app.vault.adapter;
+  const target = ".obsidian/appearance.json";
+  const desired = manifest.appearance;
+
+  // Fresh-write branch: no pre-existing file → write desired verbatim.
+  if (!(await adapter.exists(target))) {
+    const body = JSON.stringify(desired, null, 2);
+    try {
+      await adapter.write(target, body);
+    } catch (e) {
+      new Notice(`applyAppearance: write failed (${e.message}) for ${manifest.name}`, 8000);
+      if (history) {
+        history.push({
+          event: "error",
+          step: "appearance",
+          name: manifest.name,
+          message: `write failed: ${e.message}`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      return;
+    }
+    if (history) {
+      history.push({
+        event: "info",
+        step: "appearance",
+        name: manifest.name,
+        action: "applied",
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  // Merge branch: file exists. Read raw → parse → C4 guard → merge → backup → write.
+  let raw;
+  try {
+    raw = await adapter.read(target);
+  } catch (e) {
+    new Notice(`applyAppearance: cannot read ${target} (${e.message}); skipping for ${manifest.name}`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "appearance",
+        name: manifest.name,
+        message: `read failed for ${target}: ${e.message}`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  let existing;
+  try {
+    existing = JSON.parse(raw);
+  } catch (e) {
+    new Notice(`applyAppearance: ${target} malformed JSON (${e.message}); skipping for ${manifest.name}`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "appearance",
+        name: manifest.name,
+        message: `${target} malformed JSON: ${e.message}`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  if (existing === null || typeof existing !== "object" || Array.isArray(existing)) {
+    new Notice(`applyAppearance: ${target} parsed but is not a JSON object; skipping for ${manifest.name}`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "appearance",
+        name: manifest.name,
+        message: `${target} parsed but is not a JSON object`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  // Compose merged: shallow-merge desired over existing for forward-compat,
+  // then overlay the two structured fields with their explicit semantics.
+  const merged = Object.assign({}, existing, desired);
+  // cssTheme: always overridden by desired (single canonical theme).
+  if (typeof desired.cssTheme !== "undefined") {
+    merged.cssTheme = desired.cssTheme;
+  }
+  // enabledCssSnippets: additive union (existing first; preserve order; skip dups).
+  if (Array.isArray(desired.enabledCssSnippets)) {
+    const existingSnippets = Array.isArray(existing.enabledCssSnippets) ? existing.enabledCssSnippets.slice() : [];
+    const seen = new Set(existingSnippets);
+    for (const s of desired.enabledCssSnippets) {
+      if (!seen.has(s)) {
+        existingSnippets.push(s);
+        seen.add(s);
+      }
+    }
+    merged.enabledCssSnippets = existingSnippets;
+  }
+
+  const mergedSerialized = JSON.stringify(merged, null, 2);
+
+  // Idempotent skip-write: structural equality.
+  if (JSON.stringify(existing, null, 2) === mergedSerialized) {
+    if (history) {
+      history.push({
+        event: "info",
+        step: "appearance",
+        name: manifest.name,
+        action: "skipped_existing",
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  // Backup-on-edit: capture pre-edit raw bytes before overwriting.
+  const backupPath = `${target}.beacon-backup`;
+  try {
+    await adapter.write(backupPath, raw);
+  } catch (e) {
+    new Notice(`applyAppearance: backup write failed (${e.message}); aborting modification for ${manifest.name}`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "appearance",
+        name: manifest.name,
+        message: `backup write failed: ${e.message}`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  try {
+    await adapter.write(target, mergedSerialized);
+  } catch (e) {
+    new Notice(`applyAppearance: write failed (${e.message}) for ${manifest.name}`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "appearance",
+        name: manifest.name,
+        message: `write failed: ${e.message}`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  if (history) {
+    history.push({
+      event: "info",
+      step: "appearance",
+      name: manifest.name,
+      action: "applied",
+      backup_path: backupPath,
+      git_commit: git.commit,
+      git_tag: git.tag,
+      git_dirty: git.dirty,
+      attempted_at: new Date().toISOString(),
+    });
+  }
+}
+
+// applyStyleSettings — v0.19.0 styling cycle. Materializes the canonical
+// Style Settings defaults JSON (declared per blueprint/mechanism via the
+// manifest field `style_settings_defaults_src`) into the consumer's
+// .obsidian/plugins/obsidian-style-settings/data.json. First-wins merge —
+// existing user values win over source defaults so manual tweaks survive
+// re-install. Posture mirrors applyCorePluginSettings (failure-loud history,
+// malformed-JSON guard, backup-on-edit, idempotent skip-write on
+// structural-equal, never-throws). Source is read from the workshop via
+// require("fs") synchronously — the workshop lives outside the vault and the
+// vault adapter cannot reach it.
+async function applyStyleSettings(tp, manifest, workshopPath, targetPath, history, git) {
+  if (!manifest || typeof manifest.style_settings_defaults_src !== "string") return;
+  const fs = require("fs");
+  const path = require("path");
+  const adapter = tp.app.vault.adapter;
+  const target = ".obsidian/plugins/obsidian-style-settings/data.json";
+
+  const sourceAbs = path.join(workshopPath, "platform", targetPath, manifest.style_settings_defaults_src);
+
+  if (!fs.existsSync(sourceAbs)) {
+    new Notice(`applyStyleSettings: source missing ${sourceAbs}; skipping for ${manifest.name}`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "style_settings",
+        name: manifest.name,
+        message: `source missing: ${sourceAbs}`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  let sourceText;
+  try {
+    sourceText = fs.readFileSync(sourceAbs, "utf8");
+  } catch (e) {
+    new Notice(`applyStyleSettings: source read failed (${e.message}); skipping for ${manifest.name}`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "style_settings",
+        name: manifest.name,
+        message: `source read failed: ${e.message}`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  let sourceParsed;
+  try {
+    sourceParsed = JSON.parse(sourceText);
+  } catch (e) {
+    new Notice(`applyStyleSettings: source malformed JSON (${e.message}); skipping for ${manifest.name}`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "style_settings",
+        name: manifest.name,
+        message: `source malformed JSON: ${e.message}`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  if (sourceParsed === null || typeof sourceParsed !== "object" || Array.isArray(sourceParsed)) {
+    new Notice(`applyStyleSettings: source parsed but is not a JSON object; skipping for ${manifest.name}`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "style_settings",
+        name: manifest.name,
+        message: `source parsed but is not a JSON object`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  const exists = await adapter.exists(target);
+  let raw = "";
+  if (exists) {
+    try {
+      raw = await adapter.read(target);
+    } catch (e) {
+      new Notice(`applyStyleSettings: cannot read ${target} (${e.message}); skipping for ${manifest.name}`, 8000);
+      if (history) {
+        history.push({
+          event: "error",
+          step: "style_settings",
+          name: manifest.name,
+          message: `read failed for ${target}: ${e.message}`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      return;
+    }
+  }
+
+  // Empty / whitespace-only consumer content → fresh write (no backup).
+  if (!exists || raw.trim().length === 0) {
+    const body = JSON.stringify(sourceParsed, null, 2);
+    try {
+      await adapter.write(target, body);
+    } catch (e) {
+      new Notice(`applyStyleSettings: write failed (${e.message}) for ${manifest.name}`, 8000);
+      if (history) {
+        history.push({
+          event: "error",
+          step: "style_settings",
+          name: manifest.name,
+          message: `write failed: ${e.message}`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      return;
+    }
+    if (history) {
+      history.push({
+        event: "info",
+        step: "style_settings",
+        name: manifest.name,
+        action: "applied",
+        backup_path: null,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  // Pre-existing non-empty: parse + structural validate. Malformed → skip
+  // (do NOT write, do NOT backup; leave malformed file as-is so the user can
+  // recover manually).
+  let existingParsed;
+  try {
+    existingParsed = JSON.parse(raw);
+  } catch (e) {
+    new Notice(`applyStyleSettings: ${target} malformed JSON (${e.message}); skipping for ${manifest.name}`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "style_settings",
+        name: manifest.name,
+        message: `${target} malformed JSON: ${e.message}`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  if (existingParsed === null || typeof existingParsed !== "object" || Array.isArray(existingParsed)) {
+    new Notice(`applyStyleSettings: ${target} parsed but is not a JSON object; skipping for ${manifest.name}`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "style_settings",
+        name: manifest.name,
+        message: `${target} parsed but is not a JSON object`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  // First-wins merge: existing user values win over source defaults.
+  const merged = Object.assign({}, sourceParsed, existingParsed);
+  const mergedSerialized = JSON.stringify(merged, null, 2);
+  const existingSerialized = JSON.stringify(existingParsed, null, 2);
+
+  if (mergedSerialized === existingSerialized) {
+    if (history) {
+      history.push({
+        event: "info",
+        step: "style_settings",
+        name: manifest.name,
+        action: "skipped_existing",
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  // Backup-on-edit BEFORE write. Skip dest write on backup failure so we
+  // don't half-update.
+  const bakPath = `${target}.beacon-backup`;
+  try {
+    await adapter.write(bakPath, raw);
+  } catch (e) {
+    new Notice(`applyStyleSettings: backup write failed (${e.message}); aborting modification for ${manifest.name}`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "style_settings",
+        name: manifest.name,
+        message: `backup write failed: ${e.message}`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  try {
+    await adapter.write(target, mergedSerialized);
+  } catch (e) {
+    new Notice(`applyStyleSettings: write failed (${e.message}) for ${manifest.name}`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "style_settings",
+        name: manifest.name,
+        message: `write failed: ${e.message}`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  if (history) {
+    history.push({
+      event: "info",
+      step: "style_settings",
+      name: manifest.name,
+      action: "applied",
+      backup_path: bakPath,
+      git_commit: git.commit,
+      git_tag: git.tag,
+      git_dirty: git.dirty,
+      attempted_at: new Date().toISOString(),
+    });
   }
 }
 
