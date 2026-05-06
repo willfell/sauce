@@ -29,6 +29,11 @@
       "name": "beacon-button",
       "version": "0.1.0",
       "installed_at": "2026-05-05T23:33:07.505Z"
+    },
+    {
+      "name": "styling",
+      "version": "0.1.1",
+      "installed_at": "2026-05-06T03:40:41.431Z"
     }
   ],
   "blueprints": [],
@@ -597,6 +602,116 @@
       "version": "0.1.0",
       "installed_at": "2026-05-05T23:33:07.505Z",
       "git_commit": "98abe04a3322e834eed764ee87f7b1c3684eb1bb",
+      "git_tag": null,
+      "git_dirty": true
+    },
+    {
+      "event": "replace",
+      "step": "theme_overwrite",
+      "name": "styling",
+      "theme": "Baseline",
+      "dest": ".obsidian/themes/Baseline/manifest.json",
+      "new_sha": "53c57317a61d68dece9c1844bb5ef5e11962d6ab686ef4ddd7d1ba1226d62c5e",
+      "git_commit": "e8b74e783e3d2ab8f500fceeb9a365514dd08b0d",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-06T03:36:34.431Z"
+    },
+    {
+      "event": "replace",
+      "step": "theme_overwrite",
+      "name": "styling",
+      "theme": "Baseline",
+      "dest": ".obsidian/themes/Baseline/theme.css",
+      "new_sha": "b1fda42d790f9a1fdd6ce7938e5d96ae2b2b5946e75e3f4b34e0515cfb300b4b",
+      "git_commit": "e8b74e783e3d2ab8f500fceeb9a365514dd08b0d",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-06T03:36:34.433Z"
+    },
+    {
+      "event": "info",
+      "step": "appearance",
+      "name": "styling",
+      "action": "applied",
+      "backup_path": ".obsidian/appearance.json.beacon-backup",
+      "git_commit": "e8b74e783e3d2ab8f500fceeb9a365514dd08b0d",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-06T03:36:34.434Z"
+    },
+    {
+      "event": "info",
+      "step": "style_settings",
+      "name": "styling",
+      "action": "applied",
+      "backup_path": null,
+      "git_commit": "e8b74e783e3d2ab8f500fceeb9a365514dd08b0d",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-06T03:36:34.435Z"
+    },
+    {
+      "event": "install",
+      "kind": "mechanism",
+      "name": "styling",
+      "version": "0.1.0",
+      "installed_at": "2026-05-06T03:36:34.435Z",
+      "git_commit": "e8b74e783e3d2ab8f500fceeb9a365514dd08b0d",
+      "git_tag": null,
+      "git_dirty": true
+    },
+    {
+      "event": "info",
+      "step": "theme_overwrite",
+      "name": "styling",
+      "theme": "Baseline",
+      "dest": ".obsidian/themes/Baseline/manifest.json",
+      "action": "skipped_existing",
+      "git_commit": "e8b74e783e3d2ab8f500fceeb9a365514dd08b0d",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-06T03:40:41.425Z"
+    },
+    {
+      "event": "info",
+      "step": "theme_overwrite",
+      "name": "styling",
+      "theme": "Baseline",
+      "dest": ".obsidian/themes/Baseline/theme.css",
+      "action": "skipped_existing",
+      "git_commit": "e8b74e783e3d2ab8f500fceeb9a365514dd08b0d",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-06T03:40:41.429Z"
+    },
+    {
+      "event": "info",
+      "step": "appearance",
+      "name": "styling",
+      "action": "skipped_existing",
+      "git_commit": "e8b74e783e3d2ab8f500fceeb9a365514dd08b0d",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-06T03:40:41.430Z"
+    },
+    {
+      "event": "info",
+      "step": "style_settings",
+      "name": "styling",
+      "action": "skipped_existing",
+      "git_commit": "e8b74e783e3d2ab8f500fceeb9a365514dd08b0d",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-06T03:40:41.431Z"
+    },
+    {
+      "event": "install",
+      "kind": "mechanism",
+      "name": "styling",
+      "version": "0.1.1",
+      "installed_at": "2026-05-06T03:40:41.431Z",
+      "git_commit": "e8b74e783e3d2ab8f500fceeb9a365514dd08b0d",
       "git_tag": null,
       "git_dirty": true
     }

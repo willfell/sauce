@@ -7,7 +7,8 @@
     { "name": "audit", "version": "0.1.1" },
     { "name": "nav-buttons", "version": "2.5.2" },
     { "name": "cards", "version": "0.2.3" },
-    { "name": "beacon-button", "version": "0.1.0" }
+    { "name": "beacon-button", "version": "0.1.0" },
+    { "name": "styling", "version": "0.1.1" }
   ],
   "blueprints": []
 }

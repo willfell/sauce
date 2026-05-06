@@ -2301,8 +2301,61 @@ async function applyCorePluginSettings(tp, manifest, variables, history, git) {
 //     info/theme_overwrite + action "skipped_existing" + skip-write.
 //   - All history entries include git.commit / git.tag / git.dirty +
 //     attempted_at: new Date().toISOString().
+// _externalPluginsSatisfied — small gate used by the three v0.19.0 styling
+// helpers (applyVendoredThemes / applyAppearance / applyStyleSettings) to
+// short-circuit when a manifest's declared external_plugins[] aren't all
+// present in .obsidian/community-plugins.json. Without this gate the v0.1.3
+// applyExternalPlugins helper merely emits a warning + continues; the styling
+// helpers actively materialize state so they need a stronger contract: if any
+// REQUIRED prereq is absent, do nothing (no theme files, no appearance.json
+// edit, no Style Settings data.json write). Returns { ok, missingIds }; on
+// read/parse failure conservatively returns ok=false with a synthetic missing
+// list so the caller no-ops (failure-loud — caller emits its own info event).
+async function _externalPluginsSatisfied(tp, manifest) {
+  const required = (manifest && Array.isArray(manifest.external_plugins))
+    ? manifest.external_plugins.filter((e) => e && e.required && typeof e.id === "string").map((e) => e.id)
+    : [];
+  if (required.length === 0) return { ok: true, missingIds: [] };
+  const adapter = tp.app.vault.adapter;
+  const target = ".obsidian/community-plugins.json";
+  if (!(await adapter.exists(target))) return { ok: false, missingIds: required };
+  let raw;
+  try {
+    raw = await adapter.read(target);
+  } catch (e) {
+    return { ok: false, missingIds: required };
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (e) {
+    return { ok: false, missingIds: required };
+  }
+  if (!Array.isArray(parsed)) return { ok: false, missingIds: required };
+  const have = new Set(parsed);
+  const missing = required.filter((id) => !have.has(id));
+  return { ok: missing.length === 0, missingIds: missing };
+}
+
 async function applyVendoredThemes(tp, manifest, workshopPath, targetPath, history, git) {
   if (!manifest || !Array.isArray(manifest.vendored_themes) || manifest.vendored_themes.length === 0) return;
+  const prereq = await _externalPluginsSatisfied(tp, manifest);
+  if (!prereq.ok) {
+    if (history) {
+      history.push({
+        event: "info",
+        step: "theme_overwrite",
+        name: manifest.name,
+        action: "skipped_missing_prereq",
+        missing_plugin_ids: prereq.missingIds,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
   const fs = require("fs");
   const path = require("path");
   const crypto = require("crypto");
@@ -2597,6 +2650,23 @@ async function applyVendoredThemes(tp, manifest, workshopPath, targetPath, histo
 // convention; same as applyCorePluginSettings).
 async function applyAppearance(tp, manifest, history, git) {
   if (!manifest || typeof manifest.appearance !== "object" || manifest.appearance === null || Array.isArray(manifest.appearance)) return;
+  const prereq = await _externalPluginsSatisfied(tp, manifest);
+  if (!prereq.ok) {
+    if (history) {
+      history.push({
+        event: "info",
+        step: "appearance",
+        name: manifest.name,
+        action: "skipped_missing_prereq",
+        missing_plugin_ids: prereq.missingIds,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
   const adapter = tp.app.vault.adapter;
   const target = ".obsidian/appearance.json";
   const desired = manifest.appearance;
@@ -2801,6 +2871,23 @@ async function applyAppearance(tp, manifest, history, git) {
 // vault adapter cannot reach it.
 async function applyStyleSettings(tp, manifest, workshopPath, targetPath, history, git) {
   if (!manifest || typeof manifest.style_settings_defaults_src !== "string") return;
+  const prereq = await _externalPluginsSatisfied(tp, manifest);
+  if (!prereq.ok) {
+    if (history) {
+      history.push({
+        event: "info",
+        step: "style_settings",
+        name: manifest.name,
+        action: "skipped_missing_prereq",
+        missing_plugin_ids: prereq.missingIds,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
   const fs = require("fs");
   const path = require("path");
   const adapter = tp.app.vault.adapter;
