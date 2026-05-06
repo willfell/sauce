@@ -14,7 +14,7 @@ await dv.view("{{views_path}}/customjs-guard", { class: "SpaceNavButtons" });
 
 ## Tasks
 
-- [ ] 
+- [ ]
 
 ## Notes
 
