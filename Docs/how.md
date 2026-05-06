@@ -326,3 +326,104 @@ Both wired into `installItem` after `applyCorePluginSettings` (CommunityPluginDa
 - **First-wins on hotkeys is non-negotiable.** The convenience mechanism declares 2 hotkeys; the daily blueprint declares 1. If a consumer has already bound `daily-notes` to Cmd+\\, the daily blueprint's Cmd+[ becomes a `skipped_existing`. This is correct: the platform never modifies a user's hotkey. Authors who want to FORCE a binding need to explicitly tell the user to delete the prior binding first; there's no override knob.
 - **`Mod` modifier portability.** Obsidian normalizes `Mod` to Cmd on macOS, Ctrl on Windows/Linux. Production accuris uses `Mod` throughout — verified working at v0.21.1 ship.
 - **Allowlist 11 is the soft cap.** Adding a 12th path requires explicit user approval per CLAUDE.md non-negotiables + landmine #12. Bias toward extending an existing helper before proposing a new path.
+
+---
+
+## CLI surface (v0.22.0+)
+
+v0.22.0 introduces a `beacon` CLI as the consumer-facing operations surface for vaults bootstrapped via the inside-vault layout. This section is the architecture / concepts reference; for user-facing usage see [install.md](install.md).
+
+### Dispatcher pattern (cwd-walk + `BEACON_VAULT` fallback)
+
+The CLI entry point is `platform/cli/beacon-cli.js`. The dispatcher resolves which vault the user is operating on by:
+
+1. **Walking cwd ancestors** looking for `Docs/Meta/platform-config.json`. The first ancestor containing that file is treated as the vault root. This lets `beacon status` work from any subdirectory inside an activated vault.
+2. **`$BEACON_VAULT` env-var fallback.** If the cwd-walk finds no config (e.g., the user is outside the vault tree), the dispatcher reads `process.env.BEACON_VAULT`. The activation script (`Beacon/Scripts/activate.sh`) exports this on every `source` so the fallback is always populated for an activated shell.
+3. **Failure-loud on neither.** If the cwd-walk fails AND `BEACON_VAULT` is unset, the dispatcher prints "Not inside a beacon-managed vault. cd into one or set BEACON_VAULT" and exits 1. Mirrors the failure-loud posture from landmine #17 and `applyTemplaterHotkeys` precedent.
+
+### The four-verb surface
+
+| Verb | File | Behavior |
+|---|---|---|
+| `bootstrap` | `platform/cli/cmd-bootstrap.js` | Re-runs the first-run bootstrap from a clean state. Rare in day-2 use; kept for re-bootstrap-after-uninstall scenarios. Special case in the dispatcher: `bootstrap` is the only verb that runs BEFORE the config exists, so the dispatcher's normal cwd-walk → load-config posture is bypassed via `bootstrapCtxFromArgs(argv)` which builds a minimal `{vault, version}` ctx from `--vault` argv alone. |
+| `update` | `platform/cli/cmd-update.js` | `git fetch + git reset --hard origin/main` inside `Beacon/`. Working-tree dirty check; `--force` overrides. If `package.json` SHA changed, re-runs `npm install --omit=dev`. Re-invokes the installer phase. The only verb with substantial new logic. |
+| `status` | `platform/cli/cmd-status.js` | Read-only state report: workshop git head + dirty state + commits-behind-origin count, subscribed mechanism / blueprint counts, drift summary. No writes. Uses the v0.1.2 `gitState()` helper (landmine #14 — best-effort, never throws). |
+| `wizard` | `platform/cli/cmd-wizard.js` | Falls through to the existing `runReRunWizard()` from `bootstrap-lib/wizard.js`. No new visual code. |
+
+Each verb file is 50-150 LOC; per v0.21.1 lesson (a) the per-verb structure (vs single 1000-LOC switch) keeps insertion points 200+ LOC apart so future cycles can dispatch parallel subagents safely.
+
+### Activation script + chmod posture
+
+At install time, `phaseWriteActivation` (NEW in v0.22.0) writes two artifacts:
+
+- **`<vault>/Beacon/Scripts/activate.sh`** — single-purpose shell script:
+  ```sh
+  export PATH="<abs-vault>/Beacon/Scripts:$PATH"
+  export BEACON_VAULT="<abs-vault>"
+  echo "beacon active. Try: beacon status"
+  ```
+  Absolute paths are resolved at write time (not runtime) — relative paths break for vaults reached via symlink.
+
+- **`<vault>/Beacon/Scripts/beacon`** — bash wrapper:
+  ```sh
+  #!/usr/bin/env bash
+  exec node "<abs-vault>/Beacon/platform/cli/beacon-cli.js" "$@"
+  ```
+  `chmod 0755` so it's executable from PATH.
+
+The script does NOT modify `~/.zshrc` or `~/.bashrc`. Per-shell activation is the deliberate posture: matches `nvm`, Python venv, and other dev-tool conventions where shell-rc edits are user-managed.
+
+### Visual primitives + ANSI fallback
+
+`platform/visual/{banner.js, section.js, colors.js}` provide shared rendering primitives used by both `install.sh` (delegated via small node helper) and the CLI verbs:
+
+- **`banner.js`** — the box-drawing 4-line banner ("Beacon · v0.22.0" / "Obsidian vault platform").
+- **`section.js`** — sectioned step output (`[1/4] Detecting environment... OK`).
+- **`colors.js`** — ANSI escape wrappers (`green`, `yellow`, `red`, `dim`, `bold`).
+
+**TTY detection at module load.** `colors.js` checks `process.stdout.isTTY` once at require-time. When stdout is not a TTY (CI, piped output, redirect to file), every color function becomes identity (returns its input verbatim). No new dependency — straight ANSI escapes against the existing `@inquirer/prompts`-only dep tree.
+
+### Phase-refactored `bootstrap.js` + four exported phases
+
+v0.22.0 refactors `platform/bootstrap.js`'s `runBootstrap()` into four reusable phases. Each is a standalone async function with a documented signature:
+
+| Phase | Purpose | Reused by |
+|---|---|---|
+| `phaseFirstRunWizard(ctx)` | Drive the existing first-run wizard prompts; write `Docs/Meta/platform-{config,subscription}.json`. | `cmd-bootstrap` |
+| `phaseFetchPlugins(ctx)` | Fetch the upstream community-plugins index + per-plugin assets (foundational + subscribed `external_plugins[]` union). | `cmd-bootstrap`, `cmd-update` (when subscription changes) |
+| `phaseRunInstaller(ctx)` | Invoke the existing in-vault installer (`platform/install.js:runInstall(vaultPath)`). | `cmd-bootstrap`, `cmd-update` |
+| `phaseWriteActivation(ctx)` | NEW — write `<vault>/Beacon/Scripts/{activate.sh, beacon}` with resolved absolute paths + chmod. | `cmd-bootstrap` |
+
+Public `runBootstrap()` is retained as a thin wrapper calling all four phases in order — back-compat for any caller that imported it before v0.22.0.
+
+### Bootstrap-verb dispatcher special case
+
+The CLI dispatcher's normal pattern is cwd-walk → load-config → dispatch. `bootstrap` is the verb that CREATES that config — it runs from a state where `Docs/Meta/platform-config.json` doesn't yet exist. Special handling:
+
+```js
+if (verb === "bootstrap") {
+  // Skip cwd-walk + config-load. Build minimal ctx from --vault argv.
+  const ctx = bootstrapCtxFromArgs(argv);
+  return runBootstrap(ctx);
+}
+// Else: normal cwd-walk → load-config → dispatch path
+```
+
+`bootstrapCtxFromArgs(argv)` reads `--vault PATH` (defaulting to `process.cwd()`), canonicalizes the path, and returns `{vault, version}` — the minimal shape `phaseFirstRunWizard` needs. Without this special case, `beacon bootstrap` from a fresh vault would fail with the dispatcher's "Not inside a beacon-managed vault" error.
+
+### Test-hook DI pattern
+
+Each verb file exports its main function plus a `_<name>` test-hook for dependency injection:
+
+```js
+module.exports = {
+  cmdUpdate,                 // Public entry point
+  _gitExec: childProcess.execFileSync,        // Override in tests
+  _npmInstall: defaultNpmInstall,             // Override in tests
+  _runInstaller: defaultRunInstaller,         // Override in tests
+};
+```
+
+`run-cli.js` cases C1-C10 swap these out for in-process stubs (no real git / no real npm / no real installer write) so the CLI surface is testable without an actual vault on disk. Same posture as `run-bootstrap.js` (existing 36 sub-asserts) and `run-install-sh.js` (NEW v0.22.0 — mocks `git` + `npm` via PATH-prefixed shim scripts; v0.20.0 lesson (a) — test isolation via inline synthetic bodies). Test hooks are prefixed with `_` to signal "internal API; don't call from production code."
+
+For the CLI's user-facing usage reference see [install.md](install.md).

@@ -217,6 +217,31 @@ The `platform/bootstrap.js` orchestrator (v0.21.0+) is the only platform layer t
 
 Codified in v0.21.0 after Phase A surfaced 302-redirect failures (CF-1) at first real GitHub fetch.
 
+### 18. Inside-vault `Beacon/` is git-managed — never hand-edit
+
+Consumer vaults bootstrapped via `curl ... | bash` get the workshop cloned into `<vault>/Beacon/` (capital B). That directory is git-managed — `beacon update` fetches origin/main and `git reset --hard origin/main`-s. Hand-edits are wiped on the next update. If you need to customize:
+
+- Mechanism / blueprint subscriptions: `beacon wizard` (writes `Docs/Meta/platform-subscription.json`)
+- Config: `beacon wizard` → "Edit config" (writes `Docs/Meta/platform-config.json`)
+- Plugin behavior: edit `.obsidian/` per landmine #12 mechanics
+
+**Symptom.** A user opens `<vault>/Beacon/platform/install.js` in their editor to "tweak something" and saves it. On the next `beacon update` the edit is silently discarded by `git reset --hard origin/main`. With `--force` the working tree is reset even when dirty — surfacing as "my fix to install.js disappeared."
+
+**Why this matters.** `Beacon/` is the only git-managed top-level platform dir in any consumer vault. It is the v0.22.0 analogue of v0.19.0's vendored theme (landmine #15) — canonical platform content vended into the consumer vault, replaceable on every update, never hand-modified. Customizations route through:
+
+1. **`beacon wizard`** for subscription / config edits (writes `Docs/Meta/platform-*.json`, NOT inside `Beacon/`).
+2. **Mechanism / blueprint manifests upstream** for behavior changes (open a PR or fork; `git pull` + `beacon update`).
+3. **`.obsidian/` allowlist paths** for plugin-data tweaks per landmine #12 mechanics.
+
+**Recovery.** If you hand-edited a file inside `Beacon/` and want to keep your change while still updating:
+1. Copy the edit out of `Beacon/` (e.g., to `~/scratch/my-edit.js`).
+2. `beacon update --force` to discard the dirty state and pull origin/main.
+3. Re-apply the edit upstream (via PR or local fork) so the change survives future updates.
+
+If you DIDN'T mean to hand-edit and just want a clean state: `beacon update --force` is the canonical reset.
+
+Mirrors landmine #15 (vendored theme is mechanism-owned). Codified 2026-05-06 with v0.22.0.
+
 ## Operational gotchas
 
 ### CustomJS scan folder is per-vault and configured in `.obsidian/plugins/customjs/data.json`
