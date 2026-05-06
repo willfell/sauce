@@ -80,7 +80,7 @@ async function withTempVault(setup, fn) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "beacon-bs-"));
     fs.mkdirSync(path.join(dir, ".obsidian"), { recursive: true });
     fs.mkdirSync(path.join(dir, "Docs", "Meta"), { recursive: true });
-    if (setup) setup(dir);
+    if (typeof setup === "function") setup(dir);
     try {
         // CRITICAL: await fn so cleanup runs AFTER async work completes.
         // Without await, fs.rmSync fires before runBootstrap's async writes —
@@ -495,7 +495,7 @@ async function caseBS12SiblingFallback() {
         // Setup: create sibling workshop fixture with minimal manifest
         const path = require("path");
         const fs = require("fs");
-        const sibling = path.join(path.dirname(vaultPath), "beacon-fixture-" + Date.now());
+        const sibling = fs.mkdtempSync(path.join(os.tmpdir(), "beacon-fixture-"));
         fs.mkdirSync(path.join(sibling, "platform"), { recursive: true });
         fs.writeFileSync(path.join(sibling, "platform/manifest.json"),
             JSON.stringify({ workshop_version: "0.22.0", foundational_plugins: [], mechanisms: [], blueprints: [] }, null, 2));

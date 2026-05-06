@@ -5,17 +5,16 @@
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
-const { spawnSync } = require("child_process");
 
 let pass = 0, fail = 0;
 
 function assertTrue(cond, label) {
-    if (cond) { pass++; console.log("  PASS  " + label); }
-    else { fail++; console.log("  FAIL  " + label); }
+    if (cond) { pass++; console.log("  PASS: " + label); }
+    else { fail++; console.log("  FAIL: " + label); }
 }
 function assertEqual(actual, expected, label) {
-    if (actual === expected) { pass++; console.log("  PASS  " + label); }
-    else { fail++; console.log("  FAIL  " + label + " — expected " + JSON.stringify(expected) + " got " + JSON.stringify(actual)); }
+    if (actual === expected) { pass++; console.log("  PASS: " + label); }
+    else { fail++; console.log("  FAIL: " + label + " — expected " + JSON.stringify(expected) + " got " + JSON.stringify(actual)); }
 }
 
 async function withTempVault(setup, fn) {
@@ -197,17 +196,17 @@ async function caseC10WizardDelegates() {
     });
 }
 
+const cases = [
+    caseC1AncestorWalk, caseC2BeaconVaultEnv, caseC3NotInVault, caseC4UnknownVerb,
+    caseC5StatusClean, caseC6StatusDrift, caseC7UpdateFFOnly, caseC8UpdateDirtyRefusal,
+    caseC9UpdateForceOverride, caseC10WizardDelegates
+];
+
 async function main() {
-    await caseC1AncestorWalk();
-    await caseC2BeaconVaultEnv();
-    await caseC3NotInVault();
-    await caseC4UnknownVerb();
-    await caseC5StatusClean();
-    await caseC6StatusDrift();
-    await caseC7UpdateFFOnly();
-    await caseC8UpdateDirtyRefusal();
-    await caseC9UpdateForceOverride();
-    await caseC10WizardDelegates();
+    for (const c of cases) {
+        try { await c(); }
+        catch (e) { fail++; console.log("  FAIL  " + c.name + ": " + (e.message || e)); }
+    }
     console.log("\n========\nResult: " + pass + " passed, " + fail + " failed.");
     process.exitCode = fail > 0 ? 1 : 0;
 }

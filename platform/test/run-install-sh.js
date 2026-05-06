@@ -11,8 +11,13 @@ let pass = 0, fail = 0;
 const REPO_ROOT = path.resolve(__dirname, "../..");
 const INSTALL_SH = path.join(REPO_ROOT, "install.sh");
 
-function assertTrue(c, l) { if (c) { pass++; console.log("  PASS  " + l); } else { fail++; console.log("  FAIL  " + l); } }
-function assertEqual(a, e, l) { if (a === e) { pass++; console.log("  PASS  " + l); } else { fail++; console.log("  FAIL  " + l + " — expected " + JSON.stringify(e) + " got " + JSON.stringify(a)); } }
+if (!fs.existsSync(INSTALL_SH)) {
+    console.log("  BASELINE: install.sh missing — all 6 cases will fail at exec time");
+    console.log("  (post-S3 implementation: cases assert real preflight + clone behavior)");
+}
+
+function assertTrue(c, l) { if (c) { pass++; console.log("  PASS: " + l); } else { fail++; console.log("  FAIL: " + l); } }
+function assertEqual(a, e, l) { if (a === e) { pass++; console.log("  PASS: " + l); } else { fail++; console.log("  FAIL: " + l + " — expected " + JSON.stringify(e) + " got " + JSON.stringify(a)); } }
 
 function withShimEnv(setup, fn) {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "beacon-installsh-"));
@@ -20,7 +25,7 @@ function withShimEnv(setup, fn) {
     fs.mkdirSync(shimDir, { recursive: true });
     try {
         if (typeof setup === "function") setup(tmp, shimDir);
-        const env = Object.assign({}, process.env, { PATH: shimDir + ":" + process.env.PATH });
+        const env = Object.assign({}, process.env);
         return fn(tmp, shimDir, env);
     } finally {
         fs.rmSync(tmp, { recursive: true, force: true });
@@ -41,10 +46,7 @@ function runInstallSh(env, vaultPath, extraStdin) {
 function caseI1MissingNode() {
     const label = "I1 install.sh fails loud when node missing";
     withShimEnv((tmp, shimDir) => {
-        // Shim: which-style probe — write `node` shim that exits non-zero
-        // OR provide a `command` shim — simplest is to have install.sh use
-        // `command -v node` and our PATH-only shim provides nothing for node.
-        // We do NOT write a node shim; rely on install.sh's preflight.
+        // Do not write a node shim — install.sh preflight detects via 'command -v node'.
         writeShim(shimDir, "git", "exit 0");
         writeShim(shimDir, "npm", "exit 0");
     }, (tmp, shimDir, env) => {
@@ -122,6 +124,8 @@ function caseI4RefusesOverwrite() {
         const r = runInstallSh(env, vaultPath);
         assertTrue(r.status !== 0, label + ": exit non-zero");
         assertTrue(fs.existsSync(path.join(vaultPath, "Beacon/SENTINEL")), label + ": existing Beacon/ untouched");
+        assertTrue(/already exists|--overwrite|aborted/i.test(r.stderr || r.stdout || ""),
+            label + ": refusal message names overwrite/exists");
     });
 }
 
@@ -176,13 +180,16 @@ esac
     });
 }
 
+const cases = [
+    caseI1MissingNode, caseI2MissingGit, caseI3ClonesIntoVault,
+    caseI4RefusesOverwrite, caseI5OverwriteBackup, caseI6ExecHandoff
+];
+
 (async function main() {
-    caseI1MissingNode();
-    caseI2MissingGit();
-    caseI3ClonesIntoVault();
-    caseI4RefusesOverwrite();
-    caseI5OverwriteBackup();
-    caseI6ExecHandoff();
+    for (const c of cases) {
+        try { await c(); }
+        catch (e) { fail++; console.log("  FAIL  " + c.name + ": " + (e.message || e)); }
+    }
     console.log("\n========\nResult: " + pass + " passed, " + fail + " failed.");
     process.exitCode = fail > 0 ? 1 : 0;
 })();
