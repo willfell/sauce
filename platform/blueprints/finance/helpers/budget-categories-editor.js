@@ -23,12 +23,12 @@ class BudgetCategoriesEditor {
 
         const actionRow = root.createEl("div");
         actionRow.style.cssText = "margin-bottom: 8px;";
-        const addBtn = actionRow.createEl("button");
-        addBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg><span>Add Category</span>`;
-        addBtn.style.cssText = "cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 6px 14px; border-radius: 6px; border: 1px solid var(--interactive-accent); background: var(--background-primary); color: var(--interactive-accent); font-size: 0.82em; font-weight: 500; font-family: inherit; letter-spacing: 0.01em; transition: all 0.15s ease;";
-        addBtn.onmouseenter = () => { addBtn.style.background = "var(--interactive-accent)"; addBtn.style.color = "var(--text-on-accent)"; };
-        addBtn.onmouseleave = () => { addBtn.style.background = "var(--background-primary)"; addBtn.style.color = "var(--interactive-accent)"; };
-        addBtn.onclick = () => this._addFlow(file, dv);
+        const plusIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>`;
+        const addBtn = customJS.BeaconButton.render(actionRow, {
+            label: "Add Category",
+            icon: plusIcon,
+            onClick: () => this._addFlow(file, dv)
+        });
 
         const header = root.createEl("div");
         header.style.cssText = "display: flex; gap: 8px; padding: 6px 0; font-size: 0.78em; color: var(--text-muted); border-bottom: 1px solid var(--background-modifier-border); margin-top: 8px;";

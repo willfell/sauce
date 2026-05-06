@@ -4,9 +4,10 @@
  * Submitted toggle). Replaces the legacy Month/Rate/Hours/Amount markdown
  * table on the Invoice atlas. submitted_date set to today via window.moment
  * when toggling on; cleared when toggling off. Embed-deduped per v0.16.0
- * lesson. All writes via customJS.FinanceFrontmatter.update. Note: when rate
- * changes, the Invoice atlas's amount is NOT proactively recomputed; it
- * updates on the next Time-Log edit (rate x hours).
+ * lesson. All writes via customJS.FinanceFrontmatter.update.
+ * v0.2.8: Save also recomputes amount = round(rate * hours, 2) so rate
+ * changes immediately propagate to the summary strip without requiring a
+ * Time-Log re-edit.
  */
 class InvoiceControls {
     async render(dv) {
@@ -81,66 +82,56 @@ class InvoiceControls {
         rateInput.value = String(rate);
         rateInput.style.cssText = "padding: 4px 8px; border-radius: 6px; border: 1px solid var(--background-modifier-border); background: var(--background-secondary); color: var(--text-normal); font-size: 0.9em; width: 80px; min-width: 0; box-sizing: border-box;";
 
-        const saveBtn = leftGroup.createEl("button");
-        saveBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg><span>Save</span>`;
-        const saveBtnBaseStyle = "cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 6px 14px; border-radius: 6px; border: 1px solid var(--interactive-accent); background: var(--background-primary); color: var(--interactive-accent); font-size: 0.82em; font-weight: 500; font-family: inherit; letter-spacing: 0.01em; transition: all 0.15s ease;";
-        saveBtn.style.cssText = saveBtnBaseStyle;
-        saveBtn.onmouseenter = () => {
-            if (saveBtn.disabled) return;
-            saveBtn.style.background = "var(--interactive-accent)";
-            saveBtn.style.color = "var(--text-on-accent)";
-        };
-        saveBtn.onmouseleave = () => {
-            if (saveBtn.disabled) return;
-            saveBtn.style.background = "var(--background-primary)";
-            saveBtn.style.color = "var(--interactive-accent)";
-        };
+        const saveIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>`;
+        const saveBtn = customJS.BeaconButton.render(leftGroup, {
+            label: "Save",
+            icon: saveIcon,
+            onClick: async () => {
+                if (saveBtn.disabled) return;
+                const value = Number(rateInput.value);
+                if (Number.isNaN(value) || value < 0) {
+                    new Notice("Rate must be a non-negative number.");
+                    return;
+                }
+                await customJS.FinanceFrontmatter.update(file, (fm) => {
+                    fm.rate = value;
+                    const h = Number(fm.hours || 0);
+                    fm.amount = Math.round(value * h * 100) / 100;
+                });
+                await this.render(dv);
+            }
+        });
 
         const refreshSaveEnabled = () => {
             const v = Number(rateInput.value);
-            const same = !Number.isNaN(v) && v === rate;
-            saveBtn.disabled = same;
-            saveBtn.style.opacity = same ? "0.4" : "1";
-            saveBtn.style.cursor = same ? "default" : "pointer";
+            const valid = !Number.isNaN(v) && v >= 0;
+            const expectedAmount = valid ? Math.round(v * hours * 100) / 100 : 0;
+            const inSync = valid && v === rate && expectedAmount === amount;
+            saveBtn.disabled = inSync || !valid;
+            saveBtn.style.opacity = saveBtn.disabled ? "0.4" : "1";
+            saveBtn.style.cursor = saveBtn.disabled ? "default" : "pointer";
         };
         rateInput.addEventListener("input", refreshSaveEnabled);
         refreshSaveEnabled();
 
-        saveBtn.onclick = async () => {
-            if (saveBtn.disabled) return;
-            const value = Number(rateInput.value);
-            if (Number.isNaN(value) || value < 0) {
-                new Notice("Rate must be a non-negative number.");
-                return;
-            }
-            await customJS.FinanceFrontmatter.update(file, (fm) => { fm.rate = value; });
-            await this.render(dv);
-        };
-
-        const note = leftGroup.createEl("span");
-        note.textContent = "Amount recomputes on next Time-Log edit.";
-        note.style.cssText = "font-size: 0.72em; color: var(--text-muted); font-style: italic;";
-
         const rightGroup = controlsRow.createEl("div");
         rightGroup.style.cssText = "display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-left: auto;";
 
-        const submitBtn = rightGroup.createEl("button");
         const submitIcon = submitted
             ? `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`
             : `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
-        submitBtn.innerHTML = submitIcon + `<span>${submitted ? "Unmark Submitted" : "Mark Submitted"}</span>`;
-        submitBtn.style.cssText = "cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 6px 14px; border-radius: 6px; border: 1px solid var(--interactive-accent); background: var(--background-primary); color: var(--interactive-accent); font-size: 0.82em; font-weight: 500; font-family: inherit; letter-spacing: 0.01em; transition: all 0.15s ease;";
-        submitBtn.onmouseenter = () => { submitBtn.style.background = "var(--interactive-accent)"; submitBtn.style.color = "var(--text-on-accent)"; };
-        submitBtn.onmouseleave = () => { submitBtn.style.background = "var(--background-primary)"; submitBtn.style.color = "var(--interactive-accent)"; };
-
-        submitBtn.onclick = async () => {
-            if (submitted) {
-                await customJS.FinanceFrontmatter.update(file, (fm) => { fm.submitted_date = ""; });
-            } else {
-                const today = window.moment().format("YYYY-MM-DD");
-                await customJS.FinanceFrontmatter.update(file, (fm) => { fm.submitted_date = today; });
+        const submitBtn = customJS.BeaconButton.render(rightGroup, {
+            label: submitted ? "Unmark Submitted" : "Mark Submitted",
+            icon: submitIcon,
+            onClick: async () => {
+                if (submitted) {
+                    await customJS.FinanceFrontmatter.update(file, (fm) => { fm.submitted_date = ""; });
+                } else {
+                    const today = window.moment().format("YYYY-MM-DD");
+                    await customJS.FinanceFrontmatter.update(file, (fm) => { fm.submitted_date = today; });
+                }
+                await this.render(dv);
             }
-            await this.render(dv);
-        };
+        });
     }
 }

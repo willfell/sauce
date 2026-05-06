@@ -13,17 +13,17 @@ class NewBudgetButton {
         const root = dv.container.createEl("div", { cls: "nbb-root" });
         root.style.cssText = "margin: 8px 0;";
 
-        const btn = root.createEl("button");
-        btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg><span>New Budget</span>`;
-        btn.style.cssText = "cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 6px 14px; border-radius: 6px; border: 1px solid var(--interactive-accent); background: var(--background-primary); color: var(--interactive-accent); font-size: 0.82em; font-weight: 500; font-family: inherit; letter-spacing: 0.01em; transition: all 0.15s ease; min-width: 0;";
-        btn.onmouseenter = () => { btn.style.background = "var(--interactive-accent)"; btn.style.color = "var(--text-on-accent)"; };
-        btn.onmouseleave = () => { btn.style.background = "var(--background-primary)"; btn.style.color = "var(--interactive-accent)"; };
-        btn.onclick = async () => {
-            const month = await this._promptForMonth();
-            if (!month) return;
-            const path = await this._createBudget(month);
-            if (path) await app.workspace.openLinkText(path, "");
-        };
+        const plusIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>`;
+        const btn = customJS.BeaconButton.render(root, {
+            label: "New Budget",
+            icon: plusIcon,
+            onClick: async () => {
+                const month = await this._promptForMonth();
+                if (!month) return;
+                const path = await this._createBudget(month);
+                if (path) await app.workspace.openLinkText(path, "");
+            }
+        });
     }
 
     _promptForMonth() {

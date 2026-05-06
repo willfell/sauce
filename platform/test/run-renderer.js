@@ -266,6 +266,15 @@ function makeFinanceCustomJsStub() {
     PaychecksCards: noop,
     InvoicesCards: noop,
     FinanceFrontmatter: { update: async () => {}, read: () => null, isTruthy: (v) => v === true || (typeof v === 'string' && v.toLowerCase() === 'true') },
+    BeaconButton: {
+      render: (parent, opts) => {
+        const btn = parent.createEl('button');
+        btn.innerHTML = (opts && opts.icon ? opts.icon : '') + `<span>${opts && opts.label != null ? opts.label : ''}</span>`;
+        if (opts && typeof opts.onClick === 'function') btn.onclick = opts.onClick;
+        if (opts && opts.disabled === true) btn.disabled = true;
+        return btn;
+      },
+    },
   };
 }
 
