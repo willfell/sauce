@@ -72,8 +72,13 @@ async function runFirstRunWizard(opts) {
         nonInteractive = false
     } = opts || {};
 
-    const manifestMechs = _safeArray(workshopManifest && workshopManifest.mechanisms);
-    const manifestBlueprints = _safeArray(workshopManifest && workshopManifest.blueprints);
+    // workshopManifest may be null on first-run interactive (bootstrap.js
+    // defers manifest discovery so the wizard can prompt for + validate the
+    // path first — CF-3 fix). We resolve `manifestMechs` / `manifestBlueprints`
+    // from the loaded manifest LATER, after the workshop_relative_path prompt.
+    let resolvedManifest = workshopManifest;
+    let manifestMechs = _safeArray(resolvedManifest && resolvedManifest.mechanisms);
+    let manifestBlueprints = _safeArray(resolvedManifest && resolvedManifest.blueprints);
 
     // -------- Non-interactive short-circuit --------
     if (nonInteractive) {
@@ -82,6 +87,24 @@ async function runFirstRunWizard(opts) {
         const displayName =
             (defaults && defaults.displayName) ||
             (vaultPath ? path.basename(vaultPath) : "vault");
+
+        // CF-3: if workshopManifest wasn't provided, attempt to load it from
+        // the resolved workshopRelativePath so subscription entries can be
+        // built with real version pins. If load fails, fall back to "0.0.0"
+        // + empty arrays (the BS8 harness contract: subscription is "valid"
+        // — non-empty workshop_version string + arrays present).
+        if (!resolvedManifest && vaultPath) {
+            // Use path.resolve so absolute workshopRelativePath (BS8 contract)
+            // restarts the resolution; path.join would concatenate wrongly.
+            const wmPath = path.resolve(vaultPath, workshopRelativePath, "platform/manifest.json");
+            try {
+                resolvedManifest = JSON.parse(fs.readFileSync(wmPath, "utf8"));
+                manifestMechs = _safeArray(resolvedManifest.mechanisms);
+                manifestBlueprints = _safeArray(resolvedManifest.blueprints);
+            } catch (_e) {
+                // Stay with empty arrays — non-fatal in nonInteractive contract.
+            }
+        }
 
         const selectedMechs = Array.isArray(defaults.mechanisms)
             ? defaults.mechanisms.slice()
@@ -97,7 +120,7 @@ async function runFirstRunWizard(opts) {
             },
             subscription: {
                 workshop_version:
-                    (workshopManifest && workshopManifest.workshop_version) || "0.0.0",
+                    (resolvedManifest && resolvedManifest.workshop_version) || "0.0.0",
                 mechanisms: _buildSubscriptionEntries(selectedMechs, manifestMechs),
                 blueprints: _buildSubscriptionEntries(selectedBlueprints, manifestBlueprints)
             }
@@ -143,6 +166,21 @@ async function runFirstRunWizard(opts) {
             }
         }
     });
+
+    // CF-3: load the workshop manifest now that the path has validated.
+    // Caller may have passed null (deferred discovery) — populate locally so
+    // the mechanism + blueprint checkboxes have real choices.
+    if (!resolvedManifest) {
+        // path.resolve so absolute workshop_relative_path is honored.
+        const wmPath = path.resolve(resolvedVaultPath, workshopRelativePath, "platform/manifest.json");
+        try {
+            resolvedManifest = JSON.parse(fs.readFileSync(wmPath, "utf8"));
+            manifestMechs = _safeArray(resolvedManifest.mechanisms);
+            manifestBlueprints = _safeArray(resolvedManifest.blueprints);
+        } catch (e) {
+            throw new Error(`Failed to read workshop manifest at ${wmPath}: ${e.message}`);
+        }
+    }
 
     // 3. Vault display name.
     const defaultDisplayName =
@@ -209,7 +247,7 @@ async function runFirstRunWizard(opts) {
         },
         subscription: {
             workshop_version:
-                (workshopManifest && workshopManifest.workshop_version) || "0.0.0",
+                (resolvedManifest && resolvedManifest.workshop_version) || "0.0.0",
             mechanisms: _buildSubscriptionEntries(selectedMechs, manifestMechs),
             blueprints: _buildSubscriptionEntries(selectedBlueprints, manifestBlueprints)
         }

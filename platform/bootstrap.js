@@ -130,19 +130,15 @@ async function runBootstrap(opts) {
             // No-op for "install"; other actions handled by direct opts.
         }
     } else {
-        // First-run path: generate config + subscription via wizard.
-        // Need workshop path FIRST to read manifest. Pull from defaults or fall back.
-        const wsRel = (wizardDefaults && wizardDefaults.workshopRelativePath) || "../beacon";
-        workshopPath = path.resolve(vaultPath, wsRel);
-        const wmPath = path.join(workshopPath, "platform/manifest.json");
-        if (!fs.existsSync(wmPath)) {
-            throw new Error(`Workshop manifest not found at ${wmPath}. Set workshop_relative_path correctly.`);
-        }
-        workshopManifest = readJson(wmPath);
-
+        // First-run path: defer workshop discovery to the wizard so it can
+        // prompt for workshop_relative_path FIRST + validate manifest exists.
+        // Without this deferral, the bootstrap fails BEFORE the wizard runs
+        // when the consumer vault is not at the canonical sibling-of-workshop
+        // depth (CF-3 surfaced in Phase C from /workshop/scratch/1 needing
+        // ../../beacon, not the hardcoded default ../beacon).
         const r = await wizardMod.runFirstRunWizard({
             vaultPath,
-            workshopManifest,
+            workshopManifest: null,  // wizard loads after path validates
             nonInteractive,
             defaults: wizardDefaults || {}
         });
