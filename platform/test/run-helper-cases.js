@@ -2843,6 +2843,55 @@ async function caseSS5BackupOnEdit() {
   }
 }
 
+// v0.20.0 docs polish cycle — trailing-whitespace lint for blueprint template + content bodies.
+// Carry from v0.18.1 lesson 2 (template-body trailing-whitespace defect class).
+// Walks platform/blueprints/<bp>/{content,templates}/*.md (the two-level layout —
+// content/ holds install-time-materialized notes, templates/ holds Templater
+// template sources). One sub-assert per file scanned (PASS = no [ \t]+$ on any
+// line). Failure-loud: prints <file>:<line> + JSON-quoted line for each
+// violation. Helper-cases 312 -> 346 (34 new sub-asserts at v0.20.0 ship).
+async function caseTW1TemplatesNoTrailingWhitespace() {
+  const label = "TW1 templates-no-trailing-whitespace";
+  const blueprintsDir = path.join(WORKSHOP, "platform", "blueprints");
+  const blueprints = await fsp.readdir(blueprintsDir);
+  let filesScanned = 0;
+  let totalViolations = 0;
+
+  for (const bp of blueprints) {
+    const bpDir = path.join(blueprintsDir, bp);
+    const bpStat = await fsp.stat(bpDir);
+    if (!bpStat.isDirectory()) continue;
+    const subdirs = await fsp.readdir(bpDir);
+    for (const sub of subdirs) {
+      const subDir = path.join(bpDir, sub);
+      const subStat = await fsp.stat(subDir);
+      if (!subStat.isDirectory()) continue;
+      const entries = await fsp.readdir(subDir);
+      for (const e of entries) {
+        if (!e.endsWith(".md")) continue;
+        const abs = path.join(subDir, e);
+        const body = await fsp.readFile(abs, "utf8");
+        const lines = body.split("\n");
+        const fileViolations = [];
+        for (let i = 0; i < lines.length; i++) {
+          if (/[ \t]+$/.test(lines[i])) {
+            fileViolations.push(`${path.relative(WORKSHOP, abs)}:${i + 1}  ${JSON.stringify(lines[i])}`);
+          }
+        }
+        filesScanned++;
+        totalViolations += fileViolations.length;
+        assertTrue(
+          `${label} — ${path.relative(WORKSHOP, abs)} has no trailing whitespace`,
+          fileViolations.length === 0,
+          fileViolations.length > 0 ? `\n      ${fileViolations.join("\n      ")}` : ""
+        );
+      }
+    }
+  }
+
+  console.log(`  ${label}: ${filesScanned} files scanned, ${totalViolations} violations`);
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -2896,6 +2945,9 @@ async function caseSS5BackupOnEdit() {
   await caseSS3MalformedJsonGuard();
   await caseSS4MissingDefaultsSrcFailsLoud();
   await caseSS5BackupOnEdit();
+
+  // v0.20.0 docs polish cycle — trailing-whitespace lint.
+  await caseTW1TemplatesNoTrailingWhitespace();
 
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);

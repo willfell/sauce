@@ -84,7 +84,6 @@ const RENDERER_FILE = path.join(WORKSHOP, 'platform', 'mechanisms', 'nav-buttons
 const VAULT = ARGS.vault ? path.resolve(ARGS.vault) : WORKSHOP;
 const REGISTRY_REL = 'Docs/Meta/nav-buttons-registry.json';
 const REGISTRY_ABS = path.join(VAULT, REGISTRY_REL);
-const KANBAN_TEMPLATE_SRC_REL = 'platform/blueprints/project/content/kanban-board.md';
 const KANBAN_TARGET_REL = 'boards/To-Do-Board.md';
 
 // Cache the renderer source at module load — identical bytes per test run.
@@ -495,10 +494,9 @@ async function testLazyScaffold() {
   // for the registry's declared template_source path; this decouples the test
   // from VAULT's filesystem state (no need to materialize the template inside
   // VAULT just to exercise dispatch).
-  const templateSourceAbs = path.join(WORKSHOP, KANBAN_TEMPLATE_SRC_REL);
-  const templateBody = fs.readFileSync(templateSourceAbs, 'utf8');
+  const templateBody = '# Synthetic Kanban\n\n```kanban\n## Backlog\n\n## In Progress\n\n## Done\n```\n';
   const templateBodyLen = templateBody.length;
-  console.log(`  template source: ${KANBAN_TEMPLATE_SRC_REL} (${templateBodyLen}B)`);
+  console.log(`  template source: synthetic://kanban-board (${templateBodyLen}B)`);
 
   const synthetic = JSON.stringify({
     schema_version: 1,
@@ -512,7 +510,7 @@ async function testLazyScaffold() {
           action: {
             type: 'createFromTemplate',
             target: KANBAN_TARGET_REL,
-            template_source: KANBAN_TEMPLATE_SRC_REL,
+            template_source: 'synthetic://kanban-board',
           },
         },
       ],
@@ -531,7 +529,7 @@ async function testLazyScaffold() {
     // of VAULT, so this test works against any vault target.
     const origRead = app.vault.adapter.read;
     app.vault.adapter.read = async function (p) {
-      if (p === KANBAN_TEMPLATE_SRC_REL) return templateBody;
+      if (p === 'synthetic://kanban-board') return templateBody;
       return origRead.call(this, p);
     };
 
