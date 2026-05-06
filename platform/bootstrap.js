@@ -151,6 +151,26 @@ async function runBootstrap(opts) {
         workshopManifest = readJson(path.join(workshopPath, "platform/manifest.json"));
     }
 
+    // CF-4: ensure the v0.1.2 thin-stub installer dispatcher exists at
+    // <vault>/Docs/Meta/Templater/platformInstall.js. run-install.js (and
+    // Templater inside Obsidian) load this stub as the installer entry point;
+    // the stub reads platform-config.json and dispatches to the workshop's
+    // canonical install.js. Without it run-install fails "bootstrap installer
+    // missing" (CF-4 surfaced in Phase C from scratch/1 — fresh vault never
+    // had the stub).
+    //
+    // Stub is content-static across all consumers (landmine #13; md5
+    // invariant a39257da1dd49ae4481e5cd0a42bdac4). Write only if missing;
+    // never re-edit an existing one.
+    const stubDest = path.join(vaultPath, "Docs/Meta/Templater/platformInstall.js");
+    if (!fs.existsSync(stubDest)) {
+        const stubSrc = path.join(workshopPath, "platform/installer-stub.js");
+        if (fs.existsSync(stubSrc)) {
+            ensureDir(path.dirname(stubDest));
+            fs.copyFileSync(stubSrc, stubDest);
+        }
+    }
+
     // Step 5: build plugin id set (foundational + per-subscribed external_plugins + injections)
     const pluginIds = new Set();
     const foundational = workshopManifest.foundational_plugins || [];
