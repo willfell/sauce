@@ -2843,6 +2843,367 @@ async function caseSS5BackupOnEdit() {
   }
 }
 
+// =============================================================================
+// v0.21.1 consumer-convenience cycle — TDD-first cases for applyHotkeys
+// (HK1-HK5) and applyCommunityPluginData (CP1-CP5). Helper-cases 346 -> ~376
+// (10 new cases, ~30 sub-asserts). Cases land FAILING until S2 wires the new
+// helpers into installItem.
+//
+// Fixture posture: each case scaffolds via scaffoldVault then writes case-
+// specific extras (`.obsidian/hotkeys.json` body, dataview plugin dir, dataview
+// data.json body) before runHarness. The `manifest` passed to scaffoldVault
+// carries the new schema fields (`hotkeys[]`, `community_plugin_settings[]`,
+// `external_plugins[]`).
+// =============================================================================
+
+function fixtureHotkeysManifest(extra) {
+  return Object.assign({}, FIXTURE_MANIFEST_BASE, {
+    templater_hotkeys: [],
+    slash_commander_bindings: [],
+  }, extra || {});
+}
+
+async function caseHK1NoHotkeysFieldNoOp() {
+  console.log("\n--- Case HK1: applyHotkeys no-op when manifest.hotkeys[] absent/empty ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseHK1-"));
+  try {
+    const manifest = fixtureHotkeysManifest({});
+    await scaffoldVault(scratch, {
+      templaterData: TEMPLATER_DEFAULT,
+      slashCommanderData: SC_DEFAULT,
+      manifest,
+    });
+    const result = await runHarness(scratch);
+    assertTrue("HK1: install ran", result !== null);
+    const hotkeysPath = path.join(scratch, ".obsidian/hotkeys.json");
+    assertTrue("HK1: .obsidian/hotkeys.json was NOT created", !fs.existsSync(hotkeysPath));
+    const hotkeyHistory = (result.history || []).filter((h) => h.step === "hotkeys");
+    assertEq("HK1: zero history entries with step:hotkeys", hotkeyHistory.length, 0);
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseHK2FreshWriteCreatesHotkeysJson() {
+  console.log("\n--- Case HK2: applyHotkeys creates hotkeys.json on fresh write ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseHK2-"));
+  try {
+    const manifest = fixtureHotkeysManifest({
+      hotkeys: [
+        { command_id: "workspace:copy-full-path", modifiers: ["Mod"], key: "-" },
+        { command_id: "workspace:copy-path", modifiers: ["Mod"], key: "=" },
+      ],
+    });
+    await scaffoldVault(scratch, {
+      templaterData: TEMPLATER_DEFAULT,
+      slashCommanderData: SC_DEFAULT,
+      manifest,
+    });
+    const result = await runHarness(scratch);
+    assertTrue("HK2: install ran", result !== null);
+    const hotkeysPath = path.join(scratch, ".obsidian/hotkeys.json");
+    assertTrue("HK2: hotkeys.json materialized", fs.existsSync(hotkeysPath));
+    if (fs.existsSync(hotkeysPath)) {
+      const hk = await readJson(hotkeysPath);
+      assertTrue(
+        "HK2: workspace:copy-full-path entry present",
+        Array.isArray(hk["workspace:copy-full-path"]) && hk["workspace:copy-full-path"].length === 1
+      );
+      assertEq(
+        "HK2: workspace:copy-full-path key value",
+        hk["workspace:copy-full-path"][0],
+        { modifiers: ["Mod"], key: "-" }
+      );
+      assertTrue(
+        "HK2: workspace:copy-path entry present",
+        Array.isArray(hk["workspace:copy-path"]) && hk["workspace:copy-path"].length === 1
+      );
+    }
+    const bakPath = `${hotkeysPath}.beacon-backup`;
+    assertTrue("HK2: NO .beacon-backup on first-creation", !fs.existsSync(bakPath));
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseHK3FirstWinsPreservesUserBinding() {
+  console.log("\n--- Case HK3: applyHotkeys first-wins preserves pre-existing user binding ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseHK3-"));
+  try {
+    const manifest = fixtureHotkeysManifest({
+      hotkeys: [
+        { command_id: "daily-notes", modifiers: ["Mod"], key: "[" },
+        { command_id: "workspace:copy-path", modifiers: ["Mod"], key: "=" },
+      ],
+    });
+    const userBody = JSON.stringify({
+      "daily-notes": [{ modifiers: ["Mod"], key: "\\" }],
+    }, null, 2);
+    await scaffoldVault(scratch, {
+      templaterData: TEMPLATER_DEFAULT,
+      slashCommanderData: SC_DEFAULT,
+      manifest,
+    });
+    const hotkeysPath = path.join(scratch, ".obsidian/hotkeys.json");
+    await fsp.writeFile(hotkeysPath, userBody, "utf8");
+    const result = await runHarness(scratch);
+    assertTrue("HK3: install ran", result !== null);
+    const hk = await readJson(hotkeysPath);
+    assertEq("HK3: user daily-notes binding PRESERVED (key:\\)", hk["daily-notes"][0].key, "\\");
+    assertTrue("HK3: workspace:copy-path ADDED", Array.isArray(hk["workspace:copy-path"]) && hk["workspace:copy-path"][0].key === "=");
+    const bakPath = `${hotkeysPath}.beacon-backup`;
+    assertTrue("HK3: .beacon-backup written (pre-existing non-empty file overwrite)", fs.existsSync(bakPath));
+    const hkHist = (result.history || []).filter((h) => h.step === "hotkeys");
+    const skipped = hkHist.filter((h) => h.action === "skipped_existing" && h.command_id === "daily-notes");
+    const applied = hkHist.filter((h) => h.action === "applied" && h.command_id === "workspace:copy-path");
+    assertTrue("HK3: history skipped_existing for daily-notes present", skipped.length >= 1);
+    assertTrue("HK3: history applied for workspace:copy-path present", applied.length >= 1);
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseHK4MalformedJsonGuard() {
+  console.log("\n--- Case HK4: applyHotkeys malformed-JSON guard ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseHK4-"));
+  try {
+    const manifest = fixtureHotkeysManifest({
+      hotkeys: [{ command_id: "workspace:copy-path", modifiers: ["Mod"], key: "=" }],
+    });
+    await scaffoldVault(scratch, {
+      templaterData: TEMPLATER_DEFAULT,
+      slashCommanderData: SC_DEFAULT,
+      manifest,
+    });
+    const hotkeysPath = path.join(scratch, ".obsidian/hotkeys.json");
+    const malformed = "{not valid";
+    await fsp.writeFile(hotkeysPath, malformed, "utf8");
+    const result = await runHarness(scratch);
+    assertTrue("HK4: install ran", result !== null);
+    const stillRaw = await readRaw(hotkeysPath);
+    assertEq("HK4: malformed file UNTOUCHED (no overwrite)", stillRaw, malformed);
+    const errs = (result.history || []).filter((h) => h.step === "hotkeys" && h.event === "error");
+    assertTrue("HK4: history error/hotkeys/malformed present", errs.some((e) => /malformed JSON/i.test(e.message || "")));
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseHK5InvalidEntrySkippedSiblingsApplied() {
+  console.log("\n--- Case HK5: applyHotkeys skips invalid entry; siblings still applied ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseHK5-"));
+  try {
+    const manifest = fixtureHotkeysManifest({
+      hotkeys: [
+        { command_id: "workspace:copy-path", modifiers: ["Mod"], key: "=" },
+        { command_id: "" }, // invalid: empty command_id
+      ],
+    });
+    await scaffoldVault(scratch, {
+      templaterData: TEMPLATER_DEFAULT,
+      slashCommanderData: SC_DEFAULT,
+      manifest,
+    });
+    const result = await runHarness(scratch);
+    assertTrue("HK5: install ran", result !== null);
+    const hotkeysPath = path.join(scratch, ".obsidian/hotkeys.json");
+    assertTrue("HK5: hotkeys.json materialized for sibling entry", fs.existsSync(hotkeysPath));
+    if (fs.existsSync(hotkeysPath)) {
+      const hk = await readJson(hotkeysPath);
+      assertTrue("HK5: workspace:copy-path applied", Array.isArray(hk["workspace:copy-path"]));
+      assertTrue("HK5: invalid entry NOT present (no empty key)", !("" in hk));
+    }
+    const warnings = (result.history || []).filter((h) => h.step === "hotkeys" && h.event === "warning");
+    assertTrue("HK5: history warning for invalid entry present", warnings.some((w) => /invalid_entry/i.test(w.message || "")));
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+// -----------------------------------------------------------------------------
+// CP1-CP5 — applyCommunityPluginData
+// -----------------------------------------------------------------------------
+
+async function seedDataviewPlugin(scratchDir, opts) {
+  // opts: { dirPresent: bool, dataJson?: string, communityPluginsIncludesDataview?: bool }
+  const dvDir = path.join(scratchDir, ".obsidian/plugins/dataview");
+  if (opts.dirPresent) {
+    await fsp.mkdir(dvDir, { recursive: true });
+    if (opts.dataJson !== undefined) {
+      await fsp.writeFile(path.join(dvDir, "data.json"), opts.dataJson, "utf8");
+    }
+  }
+  if (opts.communityPluginsIncludesDataview) {
+    const cpPath = path.join(scratchDir, ".obsidian/community-plugins.json");
+    let cp = [];
+    if (fs.existsSync(cpPath)) {
+      try { cp = JSON.parse(await fsp.readFile(cpPath, "utf8")); } catch (e) { cp = []; }
+    }
+    if (!cp.includes("dataview")) cp.push("dataview");
+    await fsp.writeFile(cpPath, JSON.stringify(cp), "utf8");
+  }
+}
+
+async function caseCP1MissingPrereqShortCircuits() {
+  console.log("\n--- Case CP1: applyCommunityPluginData prereq gate (dataview NOT in community-plugins.json) ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseCP1-"));
+  try {
+    const manifest = fixtureHotkeysManifest({
+      external_plugins: [{ id: "dataview" }],
+      community_plugin_settings: [
+        { id: "dataview", settings: { enableDataviewJs: true } },
+      ],
+    });
+    await scaffoldVault(scratch, {
+      templaterData: TEMPLATER_DEFAULT,
+      slashCommanderData: SC_DEFAULT,
+      manifest,
+    });
+    // dataview NOT added to community-plugins.json; prereq gate must short-circuit.
+    const result = await runHarness(scratch);
+    assertTrue("CP1: install ran", result !== null);
+    const dvData = path.join(scratch, ".obsidian/plugins/dataview/data.json");
+    assertTrue("CP1: dataview/data.json NOT written", !fs.existsSync(dvData));
+    const cpHist = (result.history || []).filter((h) => h.step === "community_plugin_data");
+    const skipped = cpHist.filter((h) => h.action === "skipped_missing_prereq");
+    assertTrue("CP1: history info/skipped_missing_prereq present", skipped.length >= 1);
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseCP2PluginDirAbsentSkips() {
+  console.log("\n--- Case CP2: applyCommunityPluginData plugin dir absent ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseCP2-"));
+  try {
+    const manifest = fixtureHotkeysManifest({
+      external_plugins: [{ id: "dataview" }],
+      community_plugin_settings: [
+        { id: "dataview", settings: { enableDataviewJs: true } },
+      ],
+    });
+    await scaffoldVault(scratch, {
+      templaterData: TEMPLATER_DEFAULT,
+      slashCommanderData: SC_DEFAULT,
+      manifest,
+    });
+    // Add dataview to community-plugins.json so prereq gate passes,
+    // but DO NOT create the plugin directory.
+    await seedDataviewPlugin(scratch, { dirPresent: false, communityPluginsIncludesDataview: true });
+    const result = await runHarness(scratch);
+    assertTrue("CP2: install ran", result !== null);
+    const dvData = path.join(scratch, ".obsidian/plugins/dataview/data.json");
+    assertTrue("CP2: dataview/data.json NOT created (dir absent)", !fs.existsSync(dvData));
+    const cpHist = (result.history || []).filter((h) => h.step === "community_plugin_data");
+    const skipped = cpHist.filter((h) => h.action === "skipped_plugin_dir_absent" && h.plugin_id === "dataview");
+    assertTrue("CP2: history info/skipped_plugin_dir_absent present", skipped.length >= 1);
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseCP3ManifestWinsShallowMerge() {
+  console.log("\n--- Case CP3: applyCommunityPluginData manifest WINS shallow merge ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseCP3-"));
+  try {
+    const manifest = fixtureHotkeysManifest({
+      external_plugins: [{ id: "dataview" }],
+      community_plugin_settings: [
+        { id: "dataview", settings: { enableDataviewJs: true, enableInlineDataviewJs: true } },
+      ],
+    });
+    await scaffoldVault(scratch, {
+      templaterData: TEMPLATER_DEFAULT,
+      slashCommanderData: SC_DEFAULT,
+      manifest,
+    });
+    const priorBody = JSON.stringify({ enableDataviewJs: false, otherKey: "keep" }, null, 2);
+    await seedDataviewPlugin(scratch, {
+      dirPresent: true,
+      dataJson: priorBody,
+      communityPluginsIncludesDataview: true,
+    });
+    const result = await runHarness(scratch);
+    assertTrue("CP3: install ran", result !== null);
+    const dvDataPath = path.join(scratch, ".obsidian/plugins/dataview/data.json");
+    const dv = await readJson(dvDataPath);
+    assertEq("CP3: enableDataviewJs WINS to true (manifest wins)", dv.enableDataviewJs, true);
+    assertEq("CP3: enableInlineDataviewJs added", dv.enableInlineDataviewJs, true);
+    assertEq("CP3: otherKey preserved", dv.otherKey, "keep");
+    const bak = `${dvDataPath}.beacon-backup`;
+    assertTrue("CP3: .beacon-backup written", fs.existsSync(bak));
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseCP4MalformedJsonGuard() {
+  console.log("\n--- Case CP4: applyCommunityPluginData malformed-JSON guard ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseCP4-"));
+  try {
+    const manifest = fixtureHotkeysManifest({
+      external_plugins: [{ id: "dataview" }],
+      community_plugin_settings: [
+        { id: "dataview", settings: { enableDataviewJs: true } },
+      ],
+    });
+    await scaffoldVault(scratch, {
+      templaterData: TEMPLATER_DEFAULT,
+      slashCommanderData: SC_DEFAULT,
+      manifest,
+    });
+    const malformed = "{not valid";
+    await seedDataviewPlugin(scratch, {
+      dirPresent: true,
+      dataJson: malformed,
+      communityPluginsIncludesDataview: true,
+    });
+    const result = await runHarness(scratch);
+    assertTrue("CP4: install ran", result !== null);
+    const dvDataPath = path.join(scratch, ".obsidian/plugins/dataview/data.json");
+    const stillRaw = await readRaw(dvDataPath);
+    assertEq("CP4: malformed file UNTOUCHED", stillRaw, malformed);
+    const errs = (result.history || []).filter((h) => h.step === "community_plugin_data" && h.event === "error");
+    assertTrue("CP4: history error for malformed JSON present", errs.some((e) => /malformed JSON/i.test(e.message || "")));
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseCP5PathTraversalRejected() {
+  console.log("\n--- Case CP5: applyCommunityPluginData rejects path-traversal id ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseCP5-"));
+  try {
+    const manifest = fixtureHotkeysManifest({
+      external_plugins: [{ id: "dataview" }],
+      community_plugin_settings: [
+        { id: "../foo", settings: { hostile: true } },
+      ],
+    });
+    await scaffoldVault(scratch, {
+      templaterData: TEMPLATER_DEFAULT,
+      slashCommanderData: SC_DEFAULT,
+      manifest,
+    });
+    await seedDataviewPlugin(scratch, {
+      dirPresent: true,
+      dataJson: "{}",
+      communityPluginsIncludesDataview: true,
+    });
+    const result = await runHarness(scratch);
+    assertTrue("CP5: install ran", result !== null);
+    // Belt-and-suspenders: nothing written outside .obsidian/plugins/.
+    const fooDataInsidePlugins = path.join(scratch, ".obsidian/plugins/../foo/data.json");
+    assertTrue("CP5: traversal-target NOT created", !fs.existsSync(fooDataInsidePlugins));
+    const fooDataAtObsidianRoot = path.join(scratch, ".obsidian/foo/data.json");
+    assertTrue("CP5: .obsidian/foo/data.json NOT created", !fs.existsSync(fooDataAtObsidianRoot));
+    const warns = (result.history || []).filter((h) => h.step === "community_plugin_data" && h.event === "warning");
+    assertTrue("CP5: history warning for invalid_id present", warns.some((w) => /invalid_id/i.test(w.message || "")));
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
 // v0.20.0 docs polish cycle — trailing-whitespace lint for blueprint template + content bodies.
 // Carry from v0.18.1 lesson 2 (template-body trailing-whitespace defect class).
 // Walks platform/blueprints/<bp>/{content,templates}/*.md (the two-level layout —
@@ -2945,6 +3306,18 @@ async function caseTW1TemplatesNoTrailingWhitespace() {
   await caseSS3MalformedJsonGuard();
   await caseSS4MissingDefaultsSrcFailsLoud();
   await caseSS5BackupOnEdit();
+
+  // v0.21.1 consumer-convenience cycle — applyHotkeys + applyCommunityPluginData.
+  await caseHK1NoHotkeysFieldNoOp();
+  await caseHK2FreshWriteCreatesHotkeysJson();
+  await caseHK3FirstWinsPreservesUserBinding();
+  await caseHK4MalformedJsonGuard();
+  await caseHK5InvalidEntrySkippedSiblingsApplied();
+  await caseCP1MissingPrereqShortCircuits();
+  await caseCP2PluginDirAbsentSkips();
+  await caseCP3ManifestWinsShallowMerge();
+  await caseCP4MalformedJsonGuard();
+  await caseCP5PathTraversalRejected();
 
   // v0.20.0 docs polish cycle — trailing-whitespace lint.
   await caseTW1TemplatesNoTrailingWhitespace();
