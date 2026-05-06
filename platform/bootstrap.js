@@ -151,6 +151,33 @@ async function runBootstrap(opts) {
         workshopManifest = readJson(path.join(workshopPath, "platform/manifest.json"));
     }
 
+    // CF-5: ensure config.variables has the canonical platform path keys.
+    // Older configs (pre-v0.21.0 or wizard-generated configs missing the
+    // canonical defaults) may lack views_path / templates_path / etc. and
+    // every install run emits "Unsubstituted variables: X" Notices, skipping
+    // file writes. Augment ADDITIVELY — never overwrite a user-supplied value.
+    const CANONICAL_VARIABLES = {
+        views_path: "Docs/Meta/Views",
+        templater_scripts_path: "Docs/Meta/Templater",
+        scripts_path: "Docs/Meta/Scripts",
+        rules_path: "Docs/Meta/rules",
+        templates_path: "Docs/Meta/Templates",
+        commands_path: "commands"
+    };
+    if (config && typeof config === "object") {
+        config.variables = config.variables || {};
+        let augmented = false;
+        for (const [k, v] of Object.entries(CANONICAL_VARIABLES)) {
+            if (config.variables[k] === undefined) {
+                config.variables[k] = v;
+                augmented = true;
+            }
+        }
+        if (augmented) {
+            writeJsonAtomic(cfgPath, config);
+        }
+    }
+
     // CF-4: ensure the v0.1.2 thin-stub installer dispatcher exists at
     // <vault>/Docs/Meta/Templater/platformInstall.js. run-install.js (and
     // Templater inside Obsidian) load this stub as the installer entry point;

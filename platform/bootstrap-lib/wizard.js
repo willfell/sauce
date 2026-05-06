@@ -41,6 +41,20 @@ const DEFAULT_MECHANISMS_CHECKED = [
     "styling"
 ];
 
+// CF-5: canonical path variables the platform expects in every consumer's
+// platform-config.json under `variables: {}`. These are platform conventions
+// (every blueprint's files[] uses {{templates_path}}/Template, X.md etc.), not
+// user choices, so the wizard writes them automatically without prompting.
+// Identical layout across all consumers (barebones, accuris-mirror, scratch/*).
+const CANONICAL_VARIABLES = {
+    views_path: "Docs/Meta/Views",
+    templater_scripts_path: "Docs/Meta/Templater",
+    scripts_path: "Docs/Meta/Scripts",
+    rules_path: "Docs/Meta/rules",
+    templates_path: "Docs/Meta/Templates",
+    commands_path: "commands"
+};
+
 function _safeArray(v) {
     return Array.isArray(v) ? v : [];
 }
@@ -116,7 +130,10 @@ async function runFirstRunWizard(opts) {
         return {
             config: {
                 workshop_relative_path: workshopRelativePath,
-                variables: { workshop: displayName }
+                variables: Object.assign({}, CANONICAL_VARIABLES, {
+                    workshop: displayName,
+                    vault_identity_tag: String(displayName).toLowerCase()
+                })
             },
             subscription: {
                 workshop_version:
@@ -243,7 +260,10 @@ async function runFirstRunWizard(opts) {
     return {
         config: {
             workshop_relative_path: String(workshopRelativePath).trim(),
-            variables: { workshop: String(displayName).trim() }
+            variables: Object.assign({}, CANONICAL_VARIABLES, {
+                workshop: String(displayName).trim(),
+                vault_identity_tag: String(displayName).trim().toLowerCase()
+            })
         },
         subscription: {
             workshop_version:
