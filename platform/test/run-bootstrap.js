@@ -37,7 +37,7 @@ function assertEqual(actual, expected, label) {
 // ============================================================
 // HTTPS mock — intercepts https.get for the duration of fn()
 // ============================================================
-function withMockedHttps(routes, fn) {
+async function withMockedHttps(routes, fn) {
     const original = https.get;
     let callCount = 0;
     const callLog = [];
@@ -64,20 +64,29 @@ function withMockedHttps(routes, fn) {
     };
     https.get._callCount = () => callCount;
     https.get._callLog = () => callLog.slice();
-    try { return fn({ getCallCount: () => callCount, getCallLog: () => callLog.slice() }); }
-    finally { https.get = original; }
+    try {
+        // CRITICAL: await fn so the mock stays installed for the duration of all
+        // async https.get calls inside fn. Without await, the mock is restored
+        // before the callbacks fire — a silent test-isolation bug.
+        return await fn({ getCallCount: () => callCount, getCallLog: () => callLog.slice() });
+    } finally { https.get = original; }
 }
 
 // ============================================================
 // Temp vault helper
 // ============================================================
-function withTempVault(setup, fn) {
+async function withTempVault(setup, fn) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "beacon-bs-"));
     fs.mkdirSync(path.join(dir, ".obsidian"), { recursive: true });
     fs.mkdirSync(path.join(dir, "Docs", "Meta"), { recursive: true });
     if (setup) setup(dir);
-    try { return fn(dir); }
-    finally {
+    try {
+        // CRITICAL: await fn so cleanup runs AFTER async work completes.
+        // Without await, fs.rmSync fires before runBootstrap's async writes —
+        // BS1 passed by luck (mkdir-recursive recreates) but BS2/BS3/BS7 fail
+        // because their pre-populated state gets wiped mid-test.
+        return await fn(dir);
+    } finally {
         try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) {}
     }
 }
@@ -111,9 +120,14 @@ function pluginRoutes(id, repo, opts) {
     return out;
 }
 
+// Absolute path to the real workshop — used by seedConfig so bootstrap.js
+// can read platform/manifest.json + walk subscribed mechanism manifests
+// during harness runs from a temp vault.
+const WORKSHOP_ROOT = path.resolve(__dirname, "../..");
+
 function seedConfig(vaultPath, overrides) {
     const cfg = Object.assign({
-        workshop_relative_path: "../beacon",
+        workshop_relative_path: WORKSHOP_ROOT,
         variables: {}
     }, (overrides && overrides.config) || {});
     const sub = Object.assign({
