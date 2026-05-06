@@ -11,11 +11,35 @@
  * lands in one place and can't drift between the two callers.
  */
 
-function getText(url, headers, opts) {
+const MAX_REDIRECTS = 5;
+
+function getText(url, headers, opts, _depth) {
+    const depth = _depth || 0;
     const httpsClient = (opts && opts.httpsClient) || require("https");
     return new Promise((resolve, reject) => {
         const req = httpsClient.get(url, { headers: headers || {} }, (res) => {
             const status = res.statusCode;
+
+            // Follow redirects (CF-1, surfaced at first real GitHub fetch in
+            // Phase A — release-asset URLs respond 302 to the actual content
+            // URL on a CDN, never 200 directly).
+            if (status >= 300 && status < 400 && res.headers && res.headers.location) {
+                if (typeof res.resume === "function") res.resume();
+                if (depth >= MAX_REDIRECTS) {
+                    return reject(new Error(`HTTPS ${url} exceeded ${MAX_REDIRECTS} redirects`));
+                }
+                const next = res.headers.location;
+                // Resolve relative redirects against the original URL.
+                let nextUrl = next;
+                if (next.startsWith("/")) {
+                    const u = new URL(url);
+                    nextUrl = u.origin + next;
+                } else if (!/^https?:\/\//i.test(next)) {
+                    nextUrl = new URL(next, url).toString();
+                }
+                return getText(nextUrl, headers, opts, depth + 1).then(resolve, reject);
+            }
+
             if (status !== 200) {
                 // Drain the response so the socket is freed. Resume is preferred
                 // over destroy because some mocks don't implement destroy().

@@ -49,6 +49,7 @@ async function withMockedHttps(routes, fn) {
         const route = routes[u];
         const status = route ? (route.status || 200) : 404;
         const body = route ? (route.body || "") : "";
+        const respHeaders = (route && route.headers) || {};
         const res = {
             statusCode: status,
             on: (ev, h) => {
@@ -56,7 +57,7 @@ async function withMockedHttps(routes, fn) {
                 if (ev === "end") setTimeout(h, 1);
                 if (ev === "error") {} // not invoked under mock
             },
-            headers: {},
+            headers: respHeaders,
             resume: () => {}
         };
         setTimeout(() => cb(res), 0);
@@ -407,6 +408,42 @@ async function caseBS8WizardGeneratesValidFiles() {
     });
 }
 
+async function caseBS9FollowsRedirects() {
+    console.log("  BS9 follows GitHub release-asset 302 redirects");
+    const { runBootstrap } = require("../bootstrap.js");
+    await withTempVault(d => seedConfig(d), async (d) => {
+        // Three-asset routes for templater-obsidian return 302 → real CDN URL.
+        // The CDN URL returns 200 with the actual body. Bootstrap must follow.
+        const routes = {
+            [MOCK_INDEX_URL]: { body: MOCK_INDEX_BODY }
+        };
+        // Set up redirect chains for the styling-related plugin (one is enough).
+        const redirectBase = "https://github.com/mgmeyers/obsidian-style-settings/releases/latest/download";
+        const cdnBase = "https://cdn.example.com/obsidian-style-settings";
+        routes[`${redirectBase}/manifest.json`] = { status: 302, body: "", headers: { location: `${cdnBase}/manifest.json` } };
+        routes[`${redirectBase}/main.js`]       = { status: 302, body: "", headers: { location: `${cdnBase}/main.js` } };
+        routes[`${redirectBase}/styles.css`]    = { status: 302, body: "", headers: { location: `${cdnBase}/styles.css` } };
+        routes[`${cdnBase}/manifest.json`]      = { body: JSON.stringify({ id: "obsidian-style-settings", version: "1.0.0" }) };
+        routes[`${cdnBase}/main.js`]            = { body: "// real content" };
+        routes[`${cdnBase}/styles.css`]         = { body: "/* real styles */" };
+        // Other plugins: just direct 200 (foundational templater/customjs/dataview)
+        Object.assign(routes,
+            pluginRoutes("templater-obsidian", "SilentVoid13/Templater"),
+            pluginRoutes("customjs", "saml-dev/obsidian-custom-js"),
+            pluginRoutes("dataview", "blacksmithgu/obsidian-dataview")
+        );
+
+        // Need to extend the mock to support `headers.location`. Pass status + headers in route.
+        await withMockedHttps(routes, async () => {
+            await runBootstrap({ vaultPath: d, nonInteractive: true, skipInstaller: true });
+        });
+        const styPath = path.join(d, ".obsidian/plugins/obsidian-style-settings");
+        assertTrue(fs.existsSync(path.join(styPath, "manifest.json")), "BS9: redirected manifest.json written");
+        const main = fs.readFileSync(path.join(styPath, "main.js"), "utf8");
+        assertEqual(main, "// real content", "BS9: redirected main.js content matches CDN target");
+    });
+}
+
 // ============================================================
 // Runner
 // ============================================================
@@ -420,7 +457,8 @@ const cases = {
         caseBS5MainJs404FailsLoud,
         caseBS6UnknownPluginId,
         caseBS7CommunityPluginsAdditiveMerge,
-        caseBS8WizardGeneratesValidFiles
+        caseBS8WizardGeneratesValidFiles,
+        caseBS9FollowsRedirects
     ]
 };
 
