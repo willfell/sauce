@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop platform manifest. Each mechanism + blueprint has its own version.",
-  "workshop_version": "0.18.2",
+  "workshop_version": "0.19.0",
   "date": "2026-05-05",
   "installer": {
     "source": "install.js",

@@ -102,27 +102,30 @@ Restore-discipline is critical — partial restore leaves the workshop dogfood g
 
 **Fix (long-term, deferred):** consider adding `--force-reinstall <name>` to `install.js` for v0.1.2+ so test mechanics can skip the version-skip guard for a named item without touching three files. Not blocking; not free.
 
-### 12. `.obsidian/plugin-data` ban-lift allowlist — only three paths, only via the installer, only with the four safety mechanics
+### 12. `.obsidian/plugin-data` ban-lift allowlist — only six paths, only via the installer, only with the four safety mechanics
 
-The `.obsidian/` ask-before-acting gate is lifted for exactly three files:
+The `.obsidian/` ask-before-acting gate is lifted for exactly six paths:
 - `.obsidian/plugins/templater-obsidian/data.json`
 - `.obsidian/plugins/slash-commander/data.json`
 - `.obsidian/daily-notes.json` (added in v0.3.0)
+- `.obsidian/themes/<Name>/` (added in v0.19.0 — vendored theme dir; overwrite-with-backup posture, NOT additive merge)
+- `.obsidian/appearance.json` (added in v0.19.0 — `cssTheme` always overridden; `enabledCssSnippets[]` additive union)
+- `.obsidian/plugins/obsidian-style-settings/data.json` (added in v0.19.0 — additive per-key first-wins; user values preserved over canonical defaults)
 
-All three touched **only** by the installer, only via `applyTemplaterHotkeys` / `applySlashCommanderBindings` / `applyTemplaterFolderTemplates` / `applyCorePluginSettings`, and only under all four of:
+All six touched **only** by the installer, only via `applyTemplaterHotkeys` / `applySlashCommanderBindings` / `applyTemplaterFolderTemplates` / `applyCorePluginSettings` / `applyVendoredThemes` / `applyAppearance` / `applyStyleSettings`, and only under all four of:
 
-1. **Additive merge.** Never strip, modify, or reorder pre-existing entries; only append new entries the manifest declares.
-2. **Backup on edit.** Write `<target>.beacon-backup` before any modification (one-deep, overwrite-on-edit, single backup per target).
-3. **Malformed-JSON guard (C4 parity).** If the file is unreadable, unparseable, or has unexpected top-level shape (e.g., `enabled_templates_hotkeys` not an array, `bindings` not an array), the installer logs a warning history entry + surfaces a Notice + returns. NEVER overwrites a malformed file.
-4. **Failure-loud history.** Every applied / skipped / warning / error path writes a history entry under `step: templater_hotkeys`, `step: slash_commander_bindings`, or `step: core_plugin_settings` with full context (manifest name, binding name / plugin id, template path / settings keys, message, attempted_at).
+1. **Additive merge.** Never strip, modify, or reorder pre-existing entries; only append new entries the manifest declares. **Exception (v0.19.0 vendored themes only):** `.obsidian/themes/<Name>/` files use sha256-compare overwrite-with-backup (`.bak` suffix; non-empty prior content backed up before write). Theme files are platform-canonical content; consumers customize via Style Settings JSON or `.obsidian/snippets/`.
+2. **Backup on edit.** Write `<target>.beacon-backup` (or `<file>.bak` for the vendored-themes path) before any modification (one-deep, overwrite-on-edit, single backup per target).
+3. **Malformed-JSON guard (C4 parity).** If the file is unreadable, unparseable, or has unexpected top-level shape (e.g., `enabled_templates_hotkeys` not an array, `bindings` not an array, parsed-but-not-an-object), the installer logs an error history entry + surfaces a Notice + returns. NEVER overwrites a malformed file.
+4. **Failure-loud history.** Every applied / skipped / warning / error path writes a history entry under `step: templater_hotkeys`, `step: slash_commander_bindings`, `step: core_plugin_settings`, `step: theme_overwrite`, `step: appearance`, or `step: style_settings` with full context (manifest name, binding name / plugin id, template path / settings keys, theme name / dest, message, attempted_at).
 
-**Why the allowlist exists.** Templater's per-template `Insert <name>` commands are only registered when `enabled_templates_hotkeys[]` is populated; Slash Commander's slash bindings are persisted in its `data.json:bindings[]`; the core Daily Notes plugin reads `folder` / `format` / `template` from `.obsidian/daily-notes.json`. All three must be populated by the installer, OR the user has to do manual configuration the platform can otherwise fully automate. The three paths are the entire surface needed to deliver `/validate /audit /new-project` automatically AND ship the daily blueprint with its path convention pre-wired.
+**Why the allowlist exists.** Templater's per-template `Insert <name>` commands are only registered when `enabled_templates_hotkeys[]` is populated; Slash Commander's slash bindings are persisted in its `data.json:bindings[]`; the core Daily Notes plugin reads `folder` / `format` / `template` from `.obsidian/daily-notes.json`; the Baseline community theme is canonical platform content materialized at `.obsidian/themes/Baseline/`; the active theme + enabled CSS snippets are persisted in `.obsidian/appearance.json`; the canonical Style Settings JSON (rose-pine-light + melange-dark + 38 keys) is persisted in `.obsidian/plugins/obsidian-style-settings/data.json`. All six must be populated by the installer, OR the user has to do manual configuration the platform can otherwise fully automate. The six paths are the entire surface needed to deliver `/validate /audit /new-project` automatically + ship the daily blueprint with its path convention pre-wired + ship the canonical Beacon look-and-feel out of the box.
 
-**Why nothing else.** Editing other `.obsidian/` files (workspace.json, hotkeys.json, other plugins' data.json) cuts across user-customizable territory the platform has no claim on. The allowlist is exhaustive: any future cycle proposing a fourth path requires (a) the same four safety mechanics, (b) updating CLAUDE.md + this landmine, (c) explicit user approval.
+**Why nothing else.** Editing other `.obsidian/` files (workspace.json, hotkeys.json, other plugins' data.json) cuts across user-customizable territory the platform has no claim on. The allowlist is exhaustive: any future cycle proposing a seventh path requires (a) the same four safety mechanics, (b) updating CLAUDE.md + this landmine, (c) explicit user approval.
 
-**Recovery.** If a `.beacon-backup` file diverges from the live data.json in a way the user wants to revert, copy the backup over the live file + reload Obsidian. Backups are not auto-rotated; manual cleanup is the consumer's call.
+**Recovery.** If a `.beacon-backup` (additive-merge paths) or `.bak` (vendored-themes path) file diverges from the live target in a way the user wants to revert, copy the backup over the live file + reload Obsidian. Backups are not auto-rotated; manual cleanup is the consumer's call.
 
-Surfaced 2026-05-04 during v0.1.x close (T2.1-discovery §8 + T2.6 deferral); codified in v0.1.3. Allowlist expanded from 2 → 3 paths in v0.3.0 to add `.obsidian/daily-notes.json` for the daily blueprint. Allowlist UNCHANGED in v0.4.0 (still 3 paths); helper count grew 3 → 4 with `applyTemplaterFolderTemplates` (writes to the same templater data.json as `applyTemplaterHotkeys`, just to a new top-level field `folder_templates[]`).
+Surfaced 2026-05-04 during v0.1.x close (T2.1-discovery §8 + T2.6 deferral); codified in v0.1.3. Allowlist expanded from 2 → 3 paths in v0.3.0 to add `.obsidian/daily-notes.json` for the daily blueprint. Allowlist UNCHANGED in v0.4.0 (still 3 paths); helper count grew 3 → 4 with `applyTemplaterFolderTemplates` (writes to the same templater data.json as `applyTemplaterHotkeys`, just to a new top-level field `folder_templates[]`). Allowlist expanded from 3 → 6 paths in v0.19.0 to add `.obsidian/themes/<Name>/`, `.obsidian/appearance.json`, and `.obsidian/plugins/obsidian-style-settings/data.json` for the styling mechanism; helper count grew 4 → 7 with `applyVendoredThemes` (sha256-compare overwrite-with-backup; new `.bak` suffix exception to mechanic #1) + `applyAppearance` (cssTheme always overridden; enabledCssSnippets additive union) + `applyStyleSettings` (per-key first-wins merge — user values preserved over canonical defaults). All three v0.19.0 helpers gate on `manifest.external_plugins[].required` IDs being present in `.obsidian/community-plugins.json`; absent prereq → `info/{theme_overwrite,appearance,style_settings}` + `action: "skipped_missing_prereq"` + zero writes.
 
 ### 13. Bootstrap stub is content-static; never re-edit
 
@@ -145,6 +148,22 @@ The `gitState()` helper at the top of `platform/install.js` records workshop git
 **What this means for callers:** code that READS `installed.history[].git_commit` etc. must tolerate `null` for entries written before v0.5.0 OR by a non-git install. Drift-detection (future cycle) treats `null` as "unknown," not "in sync" or "out of sync."
 
 Codified in v0.1.2.
+
+### 15. Vendored theme is mechanism-owned; never hand-edit `.obsidian/themes/<Name>/` in any vault
+
+The styling mechanism (`platform/mechanisms/styling/`) vendors the Baseline theme as canonical platform content. The installer's `applyVendoredThemes` helper (v0.19.0) treats the consumer's `.obsidian/themes/<Name>/` as REPLACEABLE — every install run sha256-compares each file against the workshop source; mismatches get the consumer's prior content backed up to `<file>.bak` (single-deep, overwrite-on-edit) and overwritten.
+
+**Symptom.** A user manually edits `.obsidian/themes/Baseline/theme.css` to tweak a color or font; on the next install the edit is silently clobbered (recoverable from `theme.css.bak` but not signaled visually). Multiple successive edits without intervening installs would lose the prior `.bak` at the next overwrite (`.bak` is single-deep — no rotation).
+
+**Why this matters.** `.obsidian/themes/<Name>/` is the only `.obsidian/` allowlist path with overwrite-with-backup posture (the other five are additive-merge under various rules). All theme-level customization MUST route through:
+1. **Style Settings JSON** (the whole point of the plugin — UI toggles for color schemes, fonts, sizes, blockquote style, etc.) — landed at `.obsidian/plugins/obsidian-style-settings/data.json`, additive-per-key first-wins so user values win over canonical defaults on every install.
+2. **User-owned snippets** at `.obsidian/snippets/` (NOT in the allowlist; user-managed; never touched by the installer; surfaces in Obsidian's Settings → Appearance → CSS snippets UI).
+
+**Rule.** No vault edits to `.obsidian/themes/<Name>/` ever. If you need a custom rule that Style Settings doesn't expose, either (a) add a snippet, or (b) extend the canonical Style Settings JSON in the workshop and ship a styling@0.1.x bump (mechanism is additive-per-key, so new canonical keys reach existing consumers without clobbering their overrides).
+
+**Recovery.** If the installer overwrites a theme file you wanted to keep, copy `<file>.bak` over the live file. If `.bak` was already overwritten by a prior install cycle, the change is lost — reconstruct from the workshop source + your snippet file, OR fork the theme upstream.
+
+Codified in v0.19.0.
 
 ## Operational gotchas
 
