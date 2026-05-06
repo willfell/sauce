@@ -1,6 +1,6 @@
 {
   "name": "styling",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Vault appearance — Baseline theme + Style Settings canonical config. Vendors Baseline theme files; declares Style Settings community plugin as a prerequisite (not vendored). Three new installer helpers (applyVendoredThemes, applyAppearance, applyStyleSettings) mirror the v0.1.3 plugin-data automation posture: additive merge, backup-on-edit, malformed-JSON guard, failure-loud history. v0.1.1 PATCH (CF-1): all three helpers now no-op when manifest.external_plugins[].required prereqs are absent from .obsidian/community-plugins.json — Smoke A behavior.",
   "depends_on": [],
   "external_plugins": [
