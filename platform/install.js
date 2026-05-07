@@ -1463,10 +1463,23 @@ async function applyPreInstall(tp, mech, variables, history, git) {
 // .obsidian/plugins/templater-obsidian/data.json doesn't exist yet.
 const FOUNDATIONAL_PLUGIN_DEFAULTS = {
   "templater-obsidian": (variables) => ({
+    // CF-1 (v0.26.0 S4 acceptance smoke): scaffold MUST include the array
+    // fields downstream helpers (applyTemplaterHotkeys, applyTemplaterFolderTemplates)
+    // read additively. Without enabled_templates_hotkeys: [], the hotkeys helper
+    // errors on read with "enabled_templates_hotkeys not an array" because the
+    // first thing it does is JSON.parse + array-shape validation. Folder-templates
+    // helper similarly expects folder_templates: [] to merge into.
+    //
+    // Fields kept minimal — Templater's own defaults fill in everything else
+    // when the plugin starts. These four are the ones our installer logic
+    // touches at install time.
     templates_folder: variables.templates_path || "ranch/templates",
     trigger_on_file_creation: true,
     enable_folder_templates: true,
-    folder_templates: []
+    folder_templates: [],
+    enabled_templates_hotkeys: [],
+    startup_templates: [],
+    enable_system_commands: true
   })
 };
 
