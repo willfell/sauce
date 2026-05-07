@@ -10,7 +10,7 @@ On cold vault load, Dataview/Templater render dataviewjs blocks before the Custo
 
 **Fix:** never use the bare pattern. Always go through the customjs-guard view:
 ```dataviewjs
-await dv.view("ranch/Views/customjs-guard", { class: "SpaceNavButtons" });
+await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 ```
 
 ### 2. `typeof customJS === 'undefined'` does NOT guard against the error
@@ -23,7 +23,7 @@ CustomJS declares its global with `let customJS = …`, putting the name in the 
 
 The CustomJS plugin scans its `jsFolder` and tries to parse every `.js` file as a CustomJS class. A Dataview view file uses different syntax (top-level body, not a class). CustomJS hits a parse error and **aborts class registration entirely** — every customJS class in the vault goes dark.
 
-**Fix:** view files live OUTSIDE the CustomJS scan folder. Canonical: `ranch/Views/`. ERO has a CLAUDE.md non-negotiable banning the legacy `Extras/Scripts/...` location for the same reason.
+**Fix:** view files live OUTSIDE the CustomJS scan folder. Canonical: `ranch/views/`. ERO has a CLAUDE.md non-negotiable banning the legacy `Extras/Scripts/...` location for the same reason.
 
 ### 4. Dataview view files are NOT CommonJS modules
 
@@ -83,7 +83,7 @@ Install / update / uninstall a blueprint = touch one directory at `spice/<module
 
 **Fix:** every blueprint manifest must declare `module_directory`. Installer derives the materialization root as `<vault_root>/spice/<module_directory>/`. Refuses to install a blueprint manifest that lacks `module_directory` (failure-loud). Two blueprints declaring the same `module_directory` → installer Notice + skips the second (first-wins by install order); recorded as `warning, step: module_directory_collision`.
 
-**Mechanisms exempt.** Mechanisms (cross-cutting code: `customjs-guard`, `validator`, `audit`, `nav-buttons`) are shared infrastructure that continues to land under `ranch/Scripts/`, `ranch/Views/`, `ranch/Templater/`, etc. — not module-scoped, not under `spice/`.
+**Mechanisms exempt.** Mechanisms (cross-cutting code: `customjs-guard`, `validator`, `audit`, `nav-buttons`) are shared infrastructure that continues to land under `ranch/scripts/`, `ranch/views/`, `ranch/templater/`, etc. — not module-scoped, not under `spice/`.
 
 **Historical violations (resolved):**
 - project blueprint @ v0.2.0 placed content under `boards/planning/<slug>/` (top-level `boards/`), mis-located on TWO axes: wrong namespace (no `beacon/` prefix at the time) AND wrong module dir (under `boards/` instead of its own `projects/`). RESOLVED in v0.5.0 (project port to `beacon/projects/<slug>/`) and renamed to `spice/projects/<slug>/` in v0.25.0. Retained here for historical context.
@@ -142,7 +142,7 @@ Surfaced 2026-05-04 during v0.1.x close (T2.1-discovery §8 + T2.6 deferral); co
 
 ### 13. Bootstrap stub is content-static; never re-edit (per-consumer drift forbidden)
 
-Each consumer's `ranch/Templater/platformInstall.js` is a ~12-line dispatcher first set during v0.1.2 S2. It MUST be byte-identical across all consumers at any given platform version (`diff` between any two stubs returns empty). The stub never re-syncs with `platform/install.js` — that file is now canonical-only and reached at runtime via `require()`.
+Each consumer's `ranch/templater/platformInstall.js` is a ~12-line dispatcher first set during v0.1.2 S2. It MUST be byte-identical across all consumers at any given platform version (`diff` between any two stubs returns empty). The stub never re-syncs with `platform/install.js` — that file is now canonical-only and reached at runtime via `require()`.
 
 **Stub body history.** The stub body has changed exactly ONCE in its history:
 - **v0.1.2 → v0.23.0:** historical md5 invariant `a39257da1dd49ae4481e5cd0a42bdac4`. Stub read `Docs/Meta/platform-config.json` at runtime.
@@ -256,11 +256,35 @@ If you DIDN'T mean to hand-edit and just want a clean state: `sauce update --for
 
 Mirrors landmine #15 (vendored theme is mechanism-owned). Codified 2026-05-06 with v0.22.0; clone dir renamed `Beacon/` → `pantry/` in v0.23.0 to resolve the macOS APFS case-collision.
 
+### 19. Platform-managed directory names are lowercase
+
+All directories materialized by sauce installer logic under `pantry/`, `ranch/`, `spice/` MUST be lowercase. Mixed-case or TitleCase directory names cause macOS APFS case-collision risk + path-canonicalization drift across case-sensitive / case-insensitive filesystems.
+
+**EXCEPTIONS (do not "fix" these):**
+
+- **`MM-MMMM/`** date-routed folders (e.g., `05-May/`) — moment.format default; user-facing date display, NOT a directory-naming choice.
+- **`assets/themes/<ThemeName>/`** — vendored theme directory (currently `Baseline/`); preserve the vendor's chosen case verbatim.
+- **User-facing NOTE FILENAMES** — `Projects.md`, `Trips.md`, `Finance.md`, `Meetings-<date>.md`, `Thursday-<date>.md`, `Journal-<date>.md`, etc. — file naming, not directory naming.
+- **Historical doc paths** in `Docs/plans/` and `Docs/prompts/` — preserve cycle-time accuracy (path-migration-2026-05-05 precedent).
+- **`pantry/`** — already correctly cased per v0.23.0.
+- **`spice/`** — already lowercase per v0.25.0.
+
+**Recovery from violation.** Rename via the macOS APFS case-insensitive workaround:
+
+```bash
+git mv ranch/Templater ranch/templater_tmp && git mv ranch/templater_tmp ranch/templater
+# ... repeat per uppercase dir
+```
+
+Then sed-sweep across all source files (template bodies, CustomJS class string literals, manifest path strings, harness-setup paths, current-state docs) + harness baseline updates. Single atomic commit per the v0.24.0 / v0.25.0 / v0.26.0 mass-rename pattern.
+
+**Codified in v0.26.0** — the cycle that did the canonical lowercase sweep of `ranch/Templater|Scripts|Templates|Views`. Future blueprints / mechanisms authoring under `pantry/`, `ranch/`, or `spice/` MUST use lowercase directory names from the start.
+
 ## Operational gotchas
 
 ### CustomJS scan folder is per-vault and configured in `.obsidian/plugins/customjs/data.json`
 
-When canonically migrating a consumer to `ranch/Scripts/`, also update CustomJS's `jsFolder` setting. Editing that file is a `.obsidian/` change and needs explicit user approval (per each vault's CLAUDE.md "ask before acting" rule).
+When canonically migrating a consumer to `ranch/scripts/`, also update CustomJS's `jsFolder` setting. Editing that file is a `.obsidian/` change and needs explicit user approval (per each vault's CLAUDE.md "ask before acting" rule).
 
 ### Approval gates use Templater's `tp.system.suggester`
 

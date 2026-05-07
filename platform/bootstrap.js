@@ -286,11 +286,11 @@ async function runBootstrap(opts) {
     // every install run emits "Unsubstituted variables: X" Notices, skipping
     // file writes. Augment ADDITIVELY — never overwrite a user-supplied value.
     const CANONICAL_VARIABLES = {
-        views_path: "ranch/Views",
-        templater_scripts_path: "ranch/Templater",
-        scripts_path: "ranch/Scripts",
+        views_path: "ranch/views",
+        templater_scripts_path: "ranch/templater",
+        scripts_path: "ranch/scripts",
         rules_path: "ranch/rules",
-        templates_path: "ranch/Templates",
+        templates_path: "ranch/templates",
         commands_path: "commands"
     };
     if (config && typeof config === "object") {
@@ -308,7 +308,7 @@ async function runBootstrap(opts) {
     }
 
     // CF-4: ensure the v0.1.2 thin-stub installer dispatcher exists at
-    // <vault>/ranch/Templater/platformInstall.js. run-install.js (and
+    // <vault>/ranch/templater/platformInstall.js. run-install.js (and
     // Templater inside Obsidian) load this stub as the installer entry point;
     // the stub reads platform-config.json and dispatches to the workshop's
     // canonical install.js. Without it run-install fails "bootstrap installer
@@ -318,7 +318,7 @@ async function runBootstrap(opts) {
     // Stub is content-static across all consumers (landmine #13; md5
     // invariant a39257da1dd49ae4481e5cd0a42bdac4). Write only if missing;
     // never re-edit an existing one.
-    const stubDest = path.join(vaultPath, "ranch/Templater/platformInstall.js");
+    const stubDest = path.join(vaultPath, "ranch/templater/platformInstall.js");
     if (!fs.existsSync(stubDest)) {
         const stubSrc = path.join(workshopPath, "platform/installer-stub.js");
         if (fs.existsSync(stubSrc)) {

@@ -143,11 +143,11 @@ cssclasses:
 ---
 
 \`\`\`dataviewjs
-await dv.view("ranch/Views/customjs-guard", { class: "SpaceNavButtons" });
+await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 \`\`\`
 
 \`\`\`dataviewjs
-await dv.view("ranch/Views/customjs-guard", { class: "InvoiceNavButtons" });
+await dv.view("ranch/views/customjs-guard", { class: "InvoiceNavButtons" });
 \`\`\`
 
 \`\`\`dataviewjs
@@ -155,7 +155,7 @@ await customJS.FinanceStatus.renderBadge(dv, "invoice");
 \`\`\`
 
 \`\`\`dataviewjs
-await dv.view("ranch/Views/customjs-guard", { class: "InvoiceControls" });
+await dv.view("ranch/views/customjs-guard", { class: "InvoiceControls" });
 \`\`\`
 
 `;
@@ -178,13 +178,13 @@ cssclasses:
 \`\`\`dataviewjs
 const isEmbedded = dv.container.closest(".markdown-embed") != null;
 if (!isEmbedded) {
-    await dv.view("ranch/Views/customjs-guard", { class: "SpaceNavButtons" });
-    await dv.view("ranch/Views/customjs-guard", { class: "InvoiceNavButtons" });
+    await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+    await dv.view("ranch/views/customjs-guard", { class: "InvoiceNavButtons" });
 }
 \`\`\`
 
 \`\`\`dataviewjs
-await dv.view("ranch/Views/customjs-guard", { class: "InvoiceTimeLogEditor" });
+await dv.view("ranch/views/customjs-guard", { class: "InvoiceTimeLogEditor" });
 \`\`\`
 `;
 
@@ -206,7 +206,7 @@ tags:
 
 %% kanban:settings
 \`\`\`
-{"kanban-plugin":"board","list-collapse":[false,false,false],"new-note-folder":"spice/finance/invoices/${month}/board","new-note-template":"ranch/Templates/Template, Invoice Board Card.md"}
+{"kanban-plugin":"board","list-collapse":[false,false,false],"new-note-folder":"spice/finance/invoices/${month}/board","new-note-template":"ranch/templates/Template, Invoice Board Card.md"}
 \`\`\`
 %%
 `;

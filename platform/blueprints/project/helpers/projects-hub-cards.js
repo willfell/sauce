@@ -5,7 +5,7 @@
  * full-width below. Mirrors accuris's Planning-Board active-projects pattern.
  *
  * Usage in DataviewJS:
- *   await dv.view("ranch/Views/customjs-guard", { class: "ProjectsHubCards" });
+ *   await dv.view("ranch/views/customjs-guard", { class: "ProjectsHubCards" });
  */
 class ProjectsHubCards {
     async render(dv) {

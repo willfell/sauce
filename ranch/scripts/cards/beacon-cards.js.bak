@@ -4,7 +4,7 @@
  * caller supplies the pages array.
  *
  * Usage in DataviewJS:
- *   await dv.view("ranch/views/customjs-guard", { class: "BeaconCards", args: {...} });
+ *   await dv.view("Docs/Meta/Views/customjs-guard", { class: "BeaconCards", args: {...} });
  * OR (recommended — call .render directly from a wrapper class):
  *   await customJS.BeaconCards.render(dv, { pages, title: p => p.file.name, ... });
  *
@@ -16,10 +16,8 @@
  *              Plain string + null retain prior behavior (backward-compatible).
  *   icon     — (page) => string (optional; inline SVG HTML rendered left of title)
  *   meta     — (page) => string (optional; HTML rendered right of title row when layout="row")
- *   badges   — (page) => Array<{label, tone?, icon?, style?}> (optional; tone: "accent"|"warn"|"error"|"success"|"muted")
+ *   badges   — (page) => Array<{label, tone?, icon?}> (optional; tone: "accent"|"warn"|"error"|"success"|"muted")
  *              v0.2.0: optional icon (inline SVG HTML) prepended inside chip.
- *              v0.2.3: optional style ("fill"|"outline"); default "fill" preserves prior behavior.
- *              "outline" renders a colored dot + alpha-blend bg + 999px pill (Linear/Github aesthetic).
  *   progress — (page) => {done, total}|null (optional; renders bar + count)
  *   target   — (page) => string (optional; default page.file.path; passed to openLinkText)
  *   sort     — (a, b) => number (optional; default mtime desc)
@@ -198,44 +196,27 @@ class BeaconCards {
         if (badges.length === 0) return;
         const badgeRow = card.createEl("div");
         badgeRow.style.cssText = "display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px;";
-        const fillPalette = {
-            accent:  { bg: "var(--interactive-accent)", text: "var(--text-on-accent)" },
-            warn:    { bg: "#f59e0b", text: "#fff" },
-            error:   { bg: "#dc2626", text: "#fff" },
-            success: { bg: "#16a34a", text: "#fff" },
-            muted:   { bg: "var(--background-modifier-border)", text: "var(--text-muted)" }
-        };
-        const outlinePalette = {
-            accent:  { dot: "var(--interactive-accent)", border: "var(--interactive-accent)", bg: "transparent" },
-            warn:    { dot: "#f59e0b", border: "rgba(245, 158, 11, 0.35)", bg: "rgba(245, 158, 11, 0.08)" },
-            error:   { dot: "#dc2626", border: "rgba(220, 38, 38, 0.35)",  bg: "rgba(220, 38, 38, 0.08)" },
-            success: { dot: "#16a34a", border: "rgba(22, 163, 74, 0.35)",  bg: "rgba(22, 163, 74, 0.08)" },
-            muted:   { dot: "var(--text-muted)", border: "var(--background-modifier-border)", bg: "transparent" }
-        };
         for (const b of badges) {
             const tone = b.tone || "muted";
-            const style = b.style === "outline" ? "outline" : "fill";
+            const palette = {
+                accent:  { bg: "var(--interactive-accent)", text: "var(--text-on-accent)" },
+                warn:    { bg: "#f59e0b", text: "#fff" },
+                error:   { bg: "#dc2626", text: "#fff" },
+                success: { bg: "#16a34a", text: "#fff" },
+                muted:   { bg: "var(--background-modifier-border)", text: "var(--text-muted)" }
+            };
+            const p = palette[tone] || palette.muted;
             const chip = badgeRow.createEl("span");
-            if (style === "outline") {
-                const p = outlinePalette[tone] || outlinePalette.muted;
-                chip.style.cssText = `display: inline-flex; align-items: center; gap: 6px; padding: 1px 10px 1px 8px; border-radius: 999px; font-size: 0.72em; font-weight: 500; background: ${p.bg}; color: var(--text-normal); border: 1px solid ${p.border}; white-space: nowrap; letter-spacing: 0.02em;`;
-                const dot = chip.createEl("span");
-                dot.style.cssText = `width: 6px; height: 6px; border-radius: 50%; background: ${p.dot}; flex-shrink: 0;`;
+            const hasIcon = !!b.icon;
+            chip.style.cssText = `display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 4px; font-size: 0.72em; font-weight: 500; background: ${p.bg}; color: ${p.text}; white-space: nowrap;`;
+            if (hasIcon) {
+                const iconSpan = chip.createEl("span");
+                iconSpan.style.cssText = "display: inline-flex; align-items: center; line-height: 0;";
+                iconSpan.innerHTML = b.icon;
                 const labelSpan = chip.createEl("span");
                 labelSpan.textContent = b.label;
             } else {
-                const p = fillPalette[tone] || fillPalette.muted;
-                const hasIcon = !!b.icon;
-                chip.style.cssText = `display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 4px; font-size: 0.72em; font-weight: 500; background: ${p.bg}; color: ${p.text}; white-space: nowrap;`;
-                if (hasIcon) {
-                    const iconSpan = chip.createEl("span");
-                    iconSpan.style.cssText = "display: inline-flex; align-items: center; line-height: 0;";
-                    iconSpan.innerHTML = b.icon;
-                    const labelSpan = chip.createEl("span");
-                    labelSpan.textContent = b.label;
-                } else {
-                    chip.textContent = b.label;
-                }
+                chip.textContent = b.label;
             }
         }
     }

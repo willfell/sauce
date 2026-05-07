@@ -152,7 +152,7 @@ async function checkRequiredBlocks(ctx, gr, mr) {
     if (spec.kind === "dataviewjs" && spec.must_call && spec.via === "customjs-guard") {
       const className = spec.must_call.replace(/^customJS\./, "");
       const wrapperRe = new RegExp(
-        `dv\\.view\\(\\s*["']ranch/Views/customjs-guard["']\\s*,\\s*\\{[^}]*class\\s*:\\s*["']${className}["']`
+        `dv\\.view\\(\\s*["']ranch/views/customjs-guard["']\\s*,\\s*\\{[^}]*class\\s*:\\s*["']${className}["']`
       );
       const matched = dvjsBlocks.some((b) => wrapperRe.test(b));
       if (!matched) {

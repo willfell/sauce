@@ -102,11 +102,11 @@ if (newFilePath.includes("/tasks/")) {
 -%>
 
 ```dataviewjs
-await dv.view("ranch/Views/customjs-guard", { class: "SpaceNavButtons" });
+await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 ```
 
 ---
 
 ```dataviewjs
-await dv.view("ranch/Views/customjs-guard", { class: "ProjectNavButtons" });
+await dv.view("ranch/views/customjs-guard", { class: "ProjectNavButtons" });
 ```

@@ -7,11 +7,11 @@ cssclasses:
 ---
 
 ```dataviewjs
-await dv.view("ranch/Views/customjs-guard", { class: "SpaceNavButtons" });
+await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 ```
 
 ```dataviewjs
-await dv.view("ranch/Views/customjs-guard", { class: "TripNavButtons" });
+await dv.view("ranch/views/customjs-guard", { class: "TripNavButtons" });
 ```
 
 ---
@@ -19,5 +19,5 @@ await dv.view("ranch/Views/customjs-guard", { class: "TripNavButtons" });
 ## All Trips
 
 ```dataviewjs
-await dv.view("ranch/Views/customjs-guard", { class: "TripsHubCards" });
+await dv.view("ranch/views/customjs-guard", { class: "TripsHubCards" });
 ```

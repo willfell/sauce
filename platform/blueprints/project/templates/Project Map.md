@@ -7,15 +7,15 @@ workstreams: []
 ---
 
 ```dataviewjs
-await dv.view("ranch/Views/customjs-guard", { class: "SpaceNavButtons" });
+await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 ```
 
 ```dataviewjs
-await dv.view("ranch/Views/customjs-guard", { class: "ProjectNavButtons" });
+await dv.view("ranch/views/customjs-guard", { class: "ProjectNavButtons" });
 ```
 
 ---
 
 ```dataviewjs
-await dv.view("ranch/Views/customjs-guard", { class: "ProjectWorkstreams" });
+await dv.view("ranch/views/customjs-guard", { class: "ProjectWorkstreams" });
 ```

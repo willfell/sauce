@@ -167,11 +167,11 @@ cssclasses:
 ---
 
 \`\`\`dataviewjs
-await dv.view("ranch/Views/customjs-guard", { class: "SpaceNavButtons" });
+await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 \`\`\`
 
 \`\`\`dataviewjs
-await dv.view("ranch/Views/customjs-guard", { class: "PaycheckNavButtons" });
+await dv.view("ranch/views/customjs-guard", { class: "PaycheckNavButtons" });
 \`\`\`
 
 \`\`\`dataviewjs
@@ -181,7 +181,7 @@ await customJS.FinanceStatus.renderBadge(dv, "paycheck");
 ## Expenses
 
 \`\`\`dataviewjs
-await dv.view("ranch/Views/customjs-guard", { class: "PaycheckExpensesEditor" });
+await dv.view("ranch/views/customjs-guard", { class: "PaycheckExpensesEditor" });
 \`\`\`
 
 `;

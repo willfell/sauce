@@ -70,7 +70,7 @@ After that, the `sauce` CLI is on your PATH:
 
 
 
-Before v0.1.2 the onboarding flow required cp'ing a 1300-line `install.js` into each consumer's `ranch/Templater/platformInstall.js` (the bootstrap-copy × 3 ritual). v0.1.2 retires that — consumers now use a 20-line content-static thin stub that dispatches at runtime.
+Before v0.1.2 the onboarding flow required cp'ing a 1300-line `install.js` into each consumer's `ranch/templater/platformInstall.js` (the bootstrap-copy × 3 ritual). v0.1.2 retires that — consumers now use a 20-line content-static thin stub that dispatches at runtime.
 
 ### 1. Clone the workshop repo
 
@@ -89,8 +89,8 @@ In the new vault's `ranch/`, create three JSON files (all platform metadata is J
   {
     "workshop_relative_path": "../workshop/poc-vault",
     "variables": {
-      "templates_path": "ranch/Templates",
-      "scripts_path": "ranch/Scripts",
+      "templates_path": "ranch/templates",
+      "scripts_path": "ranch/scripts",
       "rules_path": "ranch/rules"
     }
   }
@@ -115,13 +115,13 @@ Copy the canonical stub from the workshop:
 
 ```bash
 cp /path/to/workshop/poc-vault/platform/installer-stub.js \
-   /path/to/consumer/ranch/Templater/platformInstall.js
+   /path/to/consumer/ranch/templater/platformInstall.js
 ```
 
 Verify md5 matches the canonical:
 ```bash
 md5sum /path/to/workshop/poc-vault/platform/installer-stub.js \
-       /path/to/consumer/ranch/Templater/platformInstall.js
+       /path/to/consumer/ranch/templater/platformInstall.js
 ```
 
 The stub is content-static per landmine #13 — never edit it per-consumer. Future workshop updates reach the consumer via `git pull` in the workshop repo + a fresh install run; the stub itself doesn't change.
@@ -213,5 +213,5 @@ If the installer aborts mid-flight:
 
 If you need to fully reset a consumer's platform state:
 1. Delete `ranch/platform-installed.json`.
-2. Optionally delete `ranch/Templater/{validate,hook-validate,audit-walker}.js`, `ranch/Views/customjs-guard/view.js`, `.obsidian/snippets/customjs-loader.css`.
+2. Optionally delete `ranch/templater/{validate,hook-validate,audit-walker}.js`, `ranch/views/customjs-guard/view.js`, `.obsidian/snippets/customjs-loader.css`.
 3. Re-run `tp.user.platformInstall(tp)`. Everything re-installs from scratch.

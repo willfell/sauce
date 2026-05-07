@@ -97,7 +97,7 @@ module.exports = async function (tp) {
     // Keep this list narrow — only variables the installer itself depends on (registry
     // location, content drop) belong here. Per-item path variables stay required-by-config.
     if (variables.content_path === undefined || variables.content_path === null) {
-      variables.content_path = "ranch/Content";
+      variables.content_path = "ranch/content";
     }
 
     // CF-3 (v0.24.0): align CustomJS plugin's jsFolder setting with the
@@ -1051,7 +1051,7 @@ function validateAndResolve(btn, sourceName, variables, history, git) {
     return null;
   }
   if (btn.action.type === "createFromTemplate" && btn.action.template_source) {
-    const contentPath = variables.content_path || "ranch/Content";
+    const contentPath = variables.content_path || "ranch/content";
     // v0.2.0 fix: substitute {{xxx}} placeholders in the target path using the
     // current item's variables overlay (which already includes the per-blueprint
     // {{module_directory}} → "spice/<bare-name>" mapping per T1.2). Stores
@@ -1068,7 +1068,7 @@ function validateAndResolve(btn, sourceName, variables, history, git) {
     };
   }
   if (btn.action.type === "runTemplaterTemplate" && btn.action.template_source) {
-    const templatesPath = variables.templates_path || "ranch/Templates";
+    const templatesPath = variables.templates_path || "ranch/templates";
     if (typeof btn.action.folder_prefix !== "string" || btn.action.folder_prefix.length === 0) {
       new Notice(`nav-buttons: invalid runTemplaterTemplate in ${sourceName} (missing required folder_prefix)`, 8000);
       if (history) {
@@ -1463,7 +1463,7 @@ async function applyPreInstall(tp, mech, variables, history, git) {
 // .obsidian/plugins/templater-obsidian/data.json doesn't exist yet.
 const FOUNDATIONAL_PLUGIN_DEFAULTS = {
   "templater-obsidian": (variables) => ({
-    templates_folder: variables.templates_path || "ranch/Templates",
+    templates_folder: variables.templates_path || "ranch/templates",
     trigger_on_file_creation: true,
     enable_folder_templates: true,
     folder_templates: []

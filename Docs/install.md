@@ -132,12 +132,12 @@ sed -i '' 's|Docs/Meta|ranch|g' ranch/platform-config.json
 # Then in Obsidian: Cmd+R, then run the platform install command (or `sauce update` from the CLI).
 ```
 
-The new stub md5 invariant for `<vault>/ranch/Templater/platformInstall.js` is `ea23aa812503bfca66359d3b2b239ba8`. Existing stubs at the OLD md5 (`a39257da1dd49ae4481e5cd0a42bdac4`) will be overwritten by the next install run with the new canonical body.
+The new stub md5 invariant for `<vault>/ranch/templater/platformInstall.js` is `ea23aa812503bfca66359d3b2b239ba8`. Existing stubs at the OLD md5 (`a39257da1dd49ae4481e5cd0a42bdac4`) will be overwritten by the next install run with the new canonical body.
 
 > [!info] CustomJS plugin `jsFolder` migration
-> v0.24.0 ships a new `applyCustomJsSettings` helper that automatically migrates `.obsidian/plugins/customjs/data.json:jsFolder` from `Docs/Meta/Scripts` to `ranch/Scripts` on the first install run. Surgical: only overwrites the legacy v0.23.x value or absent settings; any other user-customized `jsFolder` is preserved.
+> v0.24.0 ships a new `applyCustomJsSettings` helper that automatically migrates `.obsidian/plugins/customjs/data.json:jsFolder` from `Docs/Meta/Scripts` to `ranch/scripts` on the first install run. Surgical: only overwrites the legacy v0.23.x value or absent settings; any other user-customized `jsFolder` is preserved.
 >
-> If you upgrade and dataviewjs blocks render `SpaceNavButtons unavailable` / `<ClassName> unavailable`, your CustomJS plugin's scan folder is stale. Either (a) run `sauce update` (helper auto-migrates), or (b) open Obsidian Settings → Community Plugins → CustomJS, set `jsFolder` to `ranch/Scripts`, then Cmd+R.
+> If you upgrade and dataviewjs blocks render `SpaceNavButtons unavailable` / `<ClassName> unavailable`, your CustomJS plugin's scan folder is stale. Either (a) run `sauce update` (helper auto-migrates), or (b) open Obsidian Settings → Community Plugins → CustomJS, set `jsFolder` to `ranch/scripts`, then Cmd+R.
 
 ## Upgrading from v0.24.x to v0.25.0
 
@@ -154,6 +154,27 @@ After reinstall, all blueprint content lands at `<vault>/spice/<module>/` (e.g.,
 
 > [!success] Sauce rebrand sequence COMPLETE
 > v0.23.0 (Tree 1) renamed the workshop clone `Beacon/` → `pantry/`. v0.24.0 (Tree 3) renamed the runtime plumbing `Docs/Meta/` → `ranch/`. v0.25.0 (Tree 2) renames the blueprint module namespace `beacon/<module>/` → `spice/<module>/`. The `pantry/` + `ranch/` + `spice/` namespace tripod is now the canonical layout.
+
+---
+
+## Upgrading from v0.25.x to v0.26.0
+
+v0.26.0 lowercases the four `ranch/` subdirectories (`Templater` → `templater`, `Scripts` → `scripts`, `Templates` → `templates`, `Views` → `views`) to resolve macOS APFS case-collision risk and standardize platform-managed directory naming (per landmine #19). v0.26.0 also fixes the `sauce wizard` "Edit subscription" double-wrap bug, scaffolds `Templater` data.json defaults at install time so daily-note placeholders render correctly on first run, and adds `convenience` to the default mechanism set.
+
+Existing v0.25.x consumers must wipe + reinstall the four affected directories:
+
+```bash
+cd <vault>
+rm -rf ranch/Templater ranch/Scripts ranch/Templates ranch/Views
+sauce update --force
+```
+
+The next install run materializes the lowercase variants and updates `<vault>/ranch/platform-config.json:variables` automatically. No data loss — every file under those directories was installer-managed and gets re-materialized from the workshop's canonical source.
+
+> [!info] Also new in v0.26.0
+> - Wizard "Edit subscription" no longer produces nested `{name: {name, version}, version: "0.0.0"}` entries (P0-1 fix). Legacy double-wrapped state on disk is healed automatically on next edit.
+> - Templater `data.json` is scaffolded automatically at install time (P0-2 — `scaffoldFoundationalPluginData` helper). No more 6 silent helper-skips on fresh installs; daily-note Templater placeholders render correctly on first run.
+> - `convenience` mechanism now ships in `DEFAULT_MECHANISMS_CHECKED` (P0-3) — fresh non-interactive installs get DataviewJS + Cmd+- / Cmd+= copy-path hotkeys by default. `sauce wizard` users can opt out.
 
 ---
 

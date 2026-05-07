@@ -4,7 +4,7 @@
  * Auto-hides the button for the current note type.
  *
  * Usage in DataviewJS:
- *   await dv.view("ranch/Views/customjs-guard", { class: "ProjectNavButtons" });
+ *   await dv.view("ranch/views/customjs-guard", { class: "ProjectNavButtons" });
  *
  * Expected file paths:
  *   spice/projects/<slug>/<atlas|map|board>.md

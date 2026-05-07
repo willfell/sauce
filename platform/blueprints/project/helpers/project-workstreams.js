@@ -5,7 +5,7 @@
  * Unassigned tasks get a "Move" button to reassign to a workstream.
  *
  * Usage in DataviewJS:
- *   await dv.view("ranch/Views/customjs-guard", { class: "ProjectWorkstreams" });
+ *   await dv.view("ranch/views/customjs-guard", { class: "ProjectWorkstreams" });
  */
 class ProjectWorkstreams {
     async render(dv) {

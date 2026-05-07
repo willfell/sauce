@@ -48,11 +48,11 @@ const DEFAULT_MECHANISMS_CHECKED = [
 // user choices, so the wizard writes them automatically without prompting.
 // Identical layout across all consumers (barebones, accuris-mirror, scratch/*).
 const CANONICAL_VARIABLES = {
-    views_path: "ranch/Views",
-    templater_scripts_path: "ranch/Templater",
-    scripts_path: "ranch/Scripts",
+    views_path: "ranch/views",
+    templater_scripts_path: "ranch/templater",
+    scripts_path: "ranch/scripts",
     rules_path: "ranch/rules",
-    templates_path: "ranch/Templates",
+    templates_path: "ranch/templates",
     commands_path: "commands"
 };
 

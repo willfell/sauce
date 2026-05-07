@@ -93,7 +93,7 @@ async function scaffoldVault(scratchDir, opts) {
       templater_scripts_path: "ranch/templater",
       scripts_path: "ranch/scripts",
       templates_path: "ranch/templates",
-      content_path: "ranch/Content",
+      content_path: "ranch/content",
       rules_path: "ranch/rules",
     }
   }, null, 2), "utf8");
@@ -368,7 +368,7 @@ async function scaffoldBlueprintVault(scratchDir, blueprints, opts) {
       templater_scripts_path: "ranch/templater",
       scripts_path: "ranch/scripts",
       templates_path: "ranch/templates",
-      content_path: "ranch/Content",
+      content_path: "ranch/content",
       rules_path: "ranch/rules",
     }
   }, null, 2), "utf8");

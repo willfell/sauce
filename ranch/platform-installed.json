@@ -826,7 +826,7 @@
       "event": "info",
       "step": "customjs_settings",
       "action": "migrated_legacy",
-      "jsFolder": "ranch/Scripts",
+      "jsFolder": "ranch/scripts",
       "git_commit": "b2bdada163f50bb6b02ddec174891d7d12fa67ef",
       "git_tag": null,
       "git_dirty": true,

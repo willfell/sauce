@@ -55,7 +55,7 @@ Each blueprint manifest declares `module_directory: "<name>"` (required, enforce
 - Platform-managed content is cleanly demarcated from consumer-personal content via the `spice/` namespace.
 - New blueprints get a clean recipe — pick a directory name under `spice/`, own it.
 
-**Mechanisms are exempt.** Mechanisms (`customjs-guard`, `validator`, `audit`, `nav-buttons`) are shared infrastructure landing under `ranch/Scripts/`, `ranch/Views/`, `ranch/Templater/` — not module-scoped, not under `spice/`.
+**Mechanisms are exempt.** Mechanisms (`customjs-guard`, `validator`, `audit`, `nav-buttons`) are shared infrastructure landing under `ranch/scripts/`, `ranch/views/`, `ranch/templater/` — not module-scoped, not under `spice/`.
 
 Codified as landmine #11 + a CLAUDE.md non-negotiable. Decision rationale and shape at `Docs/plans/2026-05-03-boards-blueprint-design.md`. Refined 2026-05-04 to add the `spice/` namespace prefix.
 
@@ -105,8 +105,8 @@ workshop/poc-vault/
 ## Consumer layout (target shape)
 
 A consumer vault has the same `ranch/` shape as the workshop. The platform installs into:
-- `ranch/Templater/` — receives `platformInstall.js`, `validate.js`, `hook-validate.js`, `audit-walker.js`.
-- `ranch/Views/` — receives `customjs-guard/view.js`.
+- `ranch/templater/` — receives `platformInstall.js`, `validate.js`, `hook-validate.js`, `audit-walker.js`.
+- `ranch/views/` — receives `customjs-guard/view.js`.
 - `.obsidian/snippets/` — receives `customjs-loader.css`.
 - `.obsidian/appearance.json` — gets `customjs-loader` added to `enabledCssSnippets`.
 - `ranch/rules/` — receives any rule fragments (currently customjs-guard contributes a `_global.json` fragment).
@@ -115,7 +115,7 @@ If a consumer's existing paths differ from canonical (e.g., accuris currently ha
 
 ## Installer flow
 
-The installer is invoked via the consumer's `_install-platform.md` Templater template. The consumer's `ranch/Templater/platformInstall.js` is a ~12-line content-static thin stub (post-v0.1.2 S2) that reads `ranch/platform-config.json`, resolves `<workshop>/platform/install.js`, clears Node's `require.cache` for that path, and dispatches via `require()`. The canonical `install.js` runs the full install loop on the consumer's vault.
+The installer is invoked via the consumer's `_install-platform.md` Templater template. The consumer's `ranch/templater/platformInstall.js` is a ~12-line content-static thin stub (post-v0.1.2 S2) that reads `ranch/platform-config.json`, resolves `<workshop>/platform/install.js`, clears Node's `require.cache` for that path, and dispatches via `require()`. The canonical `install.js` runs the full install loop on the consumer's vault.
 
 Steps the canonical installer performs:
 
@@ -178,7 +178,7 @@ Drift detection (in `audit-walker.js`):
 
 ### Distribution model (post-v0.1.2)
 
-Each consumer's `ranch/Templater/platformInstall.js` is a ~12-line content-static thin stub. It reads the consumer's `platform-config.json` to resolve the workshop path, clears Node's require cache for the canonical installer, and dispatches to `<workshop>/platform/install.js`. The canonical installer is the single source of truth at runtime; it lives in the workshop git repo and is updated via normal git workflow (`git pull` in the workshop, then re-run the install in each consumer).
+Each consumer's `ranch/templater/platformInstall.js` is a ~12-line content-static thin stub. It reads the consumer's `platform-config.json` to resolve the workshop path, clears Node's require cache for the canonical installer, and dispatches to `<workshop>/platform/install.js`. The canonical installer is the single source of truth at runtime; it lives in the workshop git repo and is updated via normal git workflow (`git pull` in the workshop, then re-run the install in each consumer).
 
 The stub itself never changes after v0.1.2 S2 deployment. Edits to canonical `install.js` propagate to all consumers automatically on the next install run, with no per-consumer file changes.
 
@@ -239,7 +239,7 @@ The wizard handles config + subscription generation on first run, then plugin fe
    - Blueprints checkbox (defaults: none — opt-in)
    - Confirm summary
 3. **Writes config files** atomically (`.tmp` + rename) with canonical 6 path variables (`views_path`, `templater_scripts_path`, `scripts_path`, `rules_path`, `templates_path`, `commands_path`) merged into `variables` alongside `workshop` (display name) + `vault_identity_tag` (lowercase).
-4. **Vendors the v0.1.2 thin-stub** at `ranch/Templater/platformInstall.js` if missing (landmine #13 content-static; never re-edits an existing one).
+4. **Vendors the v0.1.2 thin-stub** at `ranch/templater/platformInstall.js` if missing (landmine #13 content-static; never re-edits an existing one).
 5. **Fetches the upstream community-plugins index** (`raw.githubusercontent.com/obsidianmd/obsidian-releases/master/community-plugins.json`) for id → repo lookup. Cached for the run.
 6. **Per plugin in (foundational ∪ subscribed `external_plugins[]`):** skip-if-present unless force-redownload selected. Otherwise HTTPS GET `manifest.json` + `main.js` + (optional) `styles.css` from `https://github.com/<repo>/releases/latest/download/<asset>` (follows 302 redirects to GitHub's CDN). Vendors into `<vault>/.obsidian/plugins/<id>/`.
 7. **Merges plugin ids into `community-plugins.json`** (additive; sorted; deduped; `.sauce-backup` of prior).
