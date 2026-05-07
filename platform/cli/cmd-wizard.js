@@ -23,9 +23,30 @@ async function run(ctx, args) {
         return;
     }
     if (r.action === "edit-sub" && r.payload) {
+        // v0.26.0 P0-1: route through wizard's _normalizeSubscriptionFile helper
+        // (mirrors bootstrap.js writeback site). Payload entries from
+        // runReRunWizard arrive as already-objects (from _buildSubscriptionEntries);
+        // convert to bare strings so the helper's contract stays pure.
+        // C-1 (v0.26.0 quality review): always disk-load wizard module for
+        // _normalizeSubscriptionFile access. The ctx._runReRunWizard test hook
+        // only stubs runReRunWizard; the normalization helper is a static
+        // import and the conditional `wizard` shim doesn't carry it.
         const subPath = path.join(ctx.vaultPath, "ranch/platform-subscription.json");
-        const merged = _mergeSubscription(ctx.subscription, r.payload, ctx.workshopManifest);
-        fs.writeFileSync(subPath, JSON.stringify(merged, null, 2) + "\n");
+        const wizardMod = require("../bootstrap-lib/wizard.js");
+        const toNames = (arr) => (Array.isArray(arr) ? arr : [])
+            .map(e => (e && typeof e === "object" && typeof e.name === "string") ? e.name : (typeof e === "string" ? e : null))
+            .filter(Boolean);
+        wizardMod._normalizeSubscriptionFile(
+            subPath,
+            {
+                mechanisms: toNames(r.payload.mechanisms),
+                blueprints: toNames(r.payload.blueprints)
+            },
+            {
+                mechanisms: (ctx.workshopManifest && ctx.workshopManifest.mechanisms) || [],
+                blueprints: (ctx.workshopManifest && ctx.workshopManifest.blueprints) || []
+            }
+        );
     }
     if (r.action === "edit-cfg" && r.payload && r.payload.config) {
         const cfgPath = path.join(ctx.vaultPath, "ranch/platform-config.json");
@@ -39,24 +60,6 @@ async function run(ctx, args) {
         const bootstrap = require("../bootstrap.js");
         await bootstrap.phaseRunInstaller({ vaultPath: ctx.vaultPath });
     }
-}
-
-function _mergeSubscription(existing, payload, workshopManifest) {
-    const out = Object.assign({}, existing);
-    const wm = workshopManifest || {};
-    if (Array.isArray(payload.mechanisms)) {
-        out.mechanisms = payload.mechanisms.map(name => {
-            const m = (wm.mechanisms || []).find(x => x.name === name);
-            return { name, version: m ? m.version : (existing.mechanisms || []).find(x => x.name === name)?.version || "0.0.0" };
-        });
-    }
-    if (Array.isArray(payload.blueprints)) {
-        out.blueprints = payload.blueprints.map(name => {
-            const b = (wm.blueprints || []).find(x => x.name === name);
-            return { name, version: b ? b.version : (existing.blueprints || []).find(x => x.name === name)?.version || "0.0.0" };
-        });
-    }
-    return out;
 }
 
 module.exports = { run };

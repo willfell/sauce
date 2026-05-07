@@ -617,6 +617,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   // is otherwise complete, and the registry is regenerated on every install.
   await applyNavButtons(tp, mech, variables, history, git);
   await applyExternalPlugins(tp, mech, history, git);
+  await scaffoldFoundationalPluginData(tp, mech, workshopPath, variables, history, git);  // NEW v0.26.0
   await applyTemplaterHotkeys(tp, mech, variables, history, git);          // NEW v0.1.3
   await applySlashCommanderBindings(tp, mech, variables, history, git);    // NEW v0.1.3
   await applyTemplaterFolderTemplates(tp, mech, variables, history, git);  // NEW v0.4.0
@@ -1446,6 +1447,227 @@ async function applyPreInstall(tp, mech, variables, history, git) {
         git_dirty: git.dirty,
         attempted_at: new Date().toISOString(),
       });
+    }
+  }
+}
+
+// FOUNDATIONAL_PLUGIN_DEFAULTS — minimal valid data.json shapes for plugins
+// that require pre-existing config when they first start. Keyed by plugin id;
+// value is a function (variables) => object so substitution from variables
+// (e.g., templates_path) is honored. Only plugins that need pre-install
+// scaffolding belong here — customjs and dataview do NOT (no required schema
+// at startup; their data.json is created by Obsidian itself).
+//
+// v0.26.0 P0-2 — closes the "6 silent helper-skips on fresh install" symptom
+// where applyTemplaterHotkeys + applyTemplaterFolderTemplates skip because
+// .obsidian/plugins/templater-obsidian/data.json doesn't exist yet.
+const FOUNDATIONAL_PLUGIN_DEFAULTS = {
+  "templater-obsidian": (variables) => ({
+    templates_folder: variables.templates_path || "ranch/Templates",
+    trigger_on_file_creation: true,
+    enable_folder_templates: true,
+    folder_templates: []
+  })
+};
+
+// scaffoldFoundationalPluginData — for plugins that need a minimal valid
+// data.json before they first start (e.g. templater-obsidian's
+// templates_folder + folder_templates), materialize defaults from the
+// FOUNDATIONAL_PLUGIN_DEFAULTS registry when the plugin dir exists but
+// data.json is absent. Idempotent (skip-if-present). Failure-loud (Notice +
+// history; never throws). Atomic write (tmp + rename). NO backup suffix —
+// this helper only writes when the file is ABSENT.
+//
+// Path-traversal validator on plugin id (mirrors v0.21.1 lesson). Unknown
+// ids are silent no-ops (registry is opt-in; many declared external_plugins
+// don't need pre-install scaffolding). Candidate ids gathered from item
+// manifest.external_plugins[] + manifest.foundational_plugins[] PLUS the
+// workshop-level manifest.foundational_plugins[] (read best-effort from
+// disk; failure to read does NOT throw).
+//
+// v0.26.0 P0-2 — closes the fresh-install gap where the 6 helpers
+// (applyTemplaterHotkeys + applyTemplaterFolderTemplates across
+// validator/audit/to-do/journal/meetings/finance) silently skip because
+// Obsidian hasn't created data.json yet.
+async function scaffoldFoundationalPluginData(tp, manifest, workshopPath, variables, history, git) {
+  if (!manifest) return;
+  const fs = require("fs");
+  const path = require("path");
+
+  function _validId(id) {
+    return typeof id === "string" && /^[a-z0-9][a-z0-9-]*$/i.test(id);
+  }
+
+  // Gather candidate plugin ids from per-item declarations + workshop manifest.
+  const ids = new Set();
+  if (Array.isArray(manifest.external_plugins)) {
+    for (const dep of manifest.external_plugins) {
+      if (dep && typeof dep.id === "string" && _validId(dep.id)) ids.add(dep.id);
+    }
+  }
+  if (Array.isArray(manifest.foundational_plugins)) {
+    for (const dep of manifest.foundational_plugins) {
+      if (dep && typeof dep.id === "string" && _validId(dep.id)) ids.add(dep.id);
+    }
+  }
+  // Best-effort workshop-level read: failure to read does NOT throw.
+  try {
+    const workshopManifestPath = path.join(workshopPath, "platform/manifest.json");
+    if (fs.existsSync(workshopManifestPath)) {
+      const raw = fs.readFileSync(workshopManifestPath, "utf8");
+      const wm = JSON.parse(raw);
+      if (wm && Array.isArray(wm.foundational_plugins)) {
+        for (const dep of wm.foundational_plugins) {
+          if (dep && typeof dep.id === "string" && _validId(dep.id)) ids.add(dep.id);
+        }
+      }
+    }
+  } catch { /* best-effort; never throws */ }
+
+  if (ids.size === 0) return;
+
+  // I-3 (v0.26.0 quality review): defensive — getBasePath() can throw or return
+  // undefined on adapters that don't expose it. Failure-loud + early-return keeps
+  // the helper non-fatal to install when the vault adapter is non-standard.
+  let basePath;
+  try {
+    basePath = tp.app.vault.adapter.getBasePath();
+  } catch (e) {
+    new Notice(`scaffoldFoundationalPluginData: vault adapter getBasePath unavailable (${e.message})`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "scaffold_foundational",
+        name: manifest.name,
+        item: manifest.name,
+        action: "adapter_unavailable",
+        error: e.message,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+  if (!basePath || typeof basePath !== "string") {
+    if (history) {
+      history.push({
+        event: "error",
+        step: "scaffold_foundational",
+        name: manifest.name,
+        item: manifest.name,
+        action: "adapter_unavailable",
+        error: "getBasePath returned non-string",
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  for (const id of ids) {
+    // Unknown id: silent no-op. Registry is opt-in.
+    const factory = FOUNDATIONAL_PLUGIN_DEFAULTS[id];
+    if (typeof factory !== "function") continue;
+
+    const pluginDir = path.join(basePath, ".obsidian/plugins", id);
+    const dataPath = path.join(pluginDir, "data.json");
+    const relDataPath = `.obsidian/plugins/${id}/data.json`;
+
+    // Plugin dir must exist; otherwise skip.
+    let dirOk = false;
+    try {
+      dirOk = fs.statSync(pluginDir).isDirectory();
+    } catch {
+      dirOk = false;
+    }
+    if (!dirOk) {
+      if (history) {
+        history.push({
+          event: "info",
+          step: "scaffold_foundational",
+          name: manifest.name,
+          item: manifest.name,
+          id,
+          action: "skipped_missing_plugin_dir",
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      continue;
+    }
+
+    // data.json already present: skip (no overwrite).
+    let dataExists = false;
+    try {
+      fs.statSync(dataPath);
+      dataExists = true;
+    } catch {
+      dataExists = false;
+    }
+    if (dataExists) {
+      if (history) {
+        history.push({
+          event: "info",
+          step: "scaffold_foundational",
+          name: manifest.name,
+          item: manifest.name,
+          id,
+          action: "skipped_already_present",
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      continue;
+    }
+
+    // Atomic write: tmp + rename. No backup since data.json was absent.
+    try {
+      const defaults = factory(variables || {});
+      const body = JSON.stringify(defaults, null, 2);
+      const tmpPath = `${dataPath}.tmp`;
+      fs.writeFileSync(tmpPath, body, "utf8");
+      fs.renameSync(tmpPath, dataPath);
+      if (history) {
+        history.push({
+          event: "info",
+          step: "scaffold_foundational",
+          name: manifest.name,
+          item: manifest.name,
+          id,
+          action: "scaffolded",
+          path: relDataPath,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    } catch (e) {
+      new Notice(`scaffoldFoundationalPluginData: write failed for ${relDataPath} (${e.message})`, 8000);
+      if (history) {
+        history.push({
+          event: "error",
+          step: "scaffold_foundational",
+          name: manifest.name,
+          item: manifest.name,
+          id,
+          action: "write_failed",
+          error: e.message,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      // Failure-loud, do not throw — install continues.
     }
   }
 }

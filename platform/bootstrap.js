@@ -245,8 +245,29 @@ async function runBootstrap(opts) {
             return { fetched: [], skipped: [], failed: [] };
         }
         if (r.action === "edit-sub" && r.payload) {
-            subscription = mergeSubscription(subscription, r.payload, workshopManifest);
-            writeJsonAtomic(subPath, subscription);
+            // v0.26.0 P0-1: route through wizard's _normalizeSubscriptionFile
+            // helper. The helper takes bare-string selections + manifest entries
+            // and writes flat {name, version} entries atomically, healing any
+            // legacy double-wrapped entries on disk in the same pass. Payload
+            // entries from runReRunWizard arrive as already-objects (from
+            // _buildSubscriptionEntries); convert to bare strings here so the
+            // helper's contract stays pure.
+            const toNames = (arr) => (Array.isArray(arr) ? arr : [])
+                .map(e => (e && typeof e === "object" && typeof e.name === "string") ? e.name : (typeof e === "string" ? e : null))
+                .filter(Boolean);
+            wizardMod._normalizeSubscriptionFile(
+                subPath,
+                {
+                    mechanisms: toNames(r.payload.mechanisms),
+                    blueprints: toNames(r.payload.blueprints)
+                },
+                {
+                    mechanisms: workshopManifest.mechanisms || [],
+                    blueprints: workshopManifest.blueprints || []
+                }
+            );
+            // Re-read the normalized subscription so downstream phases see flat shape.
+            subscription = readJson(subPath);
         }
         if (r.action === "edit-cfg" && r.payload && r.payload.config) {
             config = Object.assign({}, config, r.payload.config);
@@ -336,23 +357,6 @@ async function runBootstrap(opts) {
         }
     }
     return report;
-}
-
-function mergeSubscription(existing, payload, workshopManifest) {
-    const out = Object.assign({}, existing);
-    if (Array.isArray(payload.mechanisms)) {
-        out.mechanisms = payload.mechanisms.map(name => {
-            const m = (workshopManifest.mechanisms || []).find(x => x.name === name);
-            return { name, version: m ? m.version : (existing.mechanisms || []).find(x => x.name === name)?.version || "0.0.0" };
-        });
-    }
-    if (Array.isArray(payload.blueprints)) {
-        out.blueprints = payload.blueprints.map(name => {
-            const b = (workshopManifest.blueprints || []).find(x => x.name === name);
-            return { name, version: b ? b.version : (existing.blueprints || []).find(x => x.name === name)?.version || "0.0.0" };
-        });
-    }
-    return out;
 }
 
 if (require.main === module) {

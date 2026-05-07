@@ -38,7 +38,8 @@ const DEFAULT_MECHANISMS_CHECKED = [
     "nav-buttons",
     "cards",
     "accent-button",
-    "styling"
+    "styling",
+    "convenience"  // NEW v0.26.0 — DataviewJS + copy-path hotkeys on by default
 ];
 
 // CF-5: canonical path variables the platform expects in every consumer's
@@ -72,6 +73,120 @@ function _buildSubscriptionEntries(selectedNames, manifestEntries) {
         }
     }
     return out;
+}
+
+/**
+ * v0.26.0 P0-1 — coerce a possibly-double-wrapped subscription entry to the flat
+ * {name: string, version: string} shape. Defensive: handles three input shapes:
+ *
+ *   1. flat:        {name: "X", version: "1.0.0"}             → unchanged
+ *   2. legacy wrap: {name: {name: "X", version: "1.0.0"}, version: "0.0.0"}
+ *                   → {name: "X", version: "1.0.0"} (inner wins)
+ *   3. bare string: "X"                                       → {name: "X", version}
+ *
+ * Version resolution priority: inner-wrap > flat-stored > manifest > "0.0.0".
+ * Returns null when no usable name can be derived.
+ *
+ * @param entry - one element of subscription.mechanisms[] or .blueprints[]
+ * @param manifestEntries - workshop manifest list to fall back to for version
+ */
+function _coerceSubscriptionEntry(entry, manifestEntries) {
+    if (entry == null) return null;
+
+    let name = null;
+    let version = null;
+
+    if (typeof entry === "string") {
+        name = entry;
+    } else if (typeof entry === "object") {
+        if (entry.name && typeof entry.name === "object") {
+            // Legacy double-wrap shape: inner object holds the real values.
+            name = typeof entry.name.name === "string" ? entry.name.name : null;
+            version =
+                typeof entry.name.version === "string" && entry.name.version
+                    ? entry.name.version
+                    : null;
+        } else if (typeof entry.name === "string") {
+            name = entry.name;
+            if (typeof entry.version === "string" && entry.version && entry.version !== "0.0.0") {
+                version = entry.version;
+            }
+        }
+    }
+
+    if (!name) return null;
+
+    if (!version) {
+        const m = _findEntry(manifestEntries, name);
+        if (m && typeof m.version === "string") {
+            version = m.version;
+        }
+    }
+
+    // I-1 (v0.26.0 quality review): mirror _buildSubscriptionEntries skip-unknown
+    // behavior. When the name has no resolvable version (not in entry, not in
+    // manifest), return null rather than emitting a "0.0.0" zombie entry — that
+    // sentinel was the v0.25.x bug-value and propagating it perpetuates the
+    // broken state. Caller filters nulls out.
+    if (!version) return null;
+
+    return { name, version };
+}
+
+/**
+ * v0.26.0 P0-1 — Heal legacy double-wrapped subscription entries on writeback.
+ *
+ * Reads <vault>/ranch/platform-subscription.json (if it exists) to preserve any
+ * pre-existing top-level fields (e.g. workshop_version), then constructs flat
+ * {name: string, version: string} entries from the bare-string `selection` by
+ * looking up versions in `manifestEntries`. Atomic write (tmp + rename) to
+ * protect against partial writes. Idempotent — running twice with the same
+ * selection produces the same file byte-for-byte.
+ *
+ * @param subPath - absolute path to ranch/platform-subscription.json
+ * @param selection - { mechanisms: string[], blueprints: string[] } bare-string
+ *                    names to subscribe to (already-deduped by caller)
+ * @param manifestEntries - { mechanisms: Array, blueprints: Array } workshop
+ *                          manifest entries to resolve versions from
+ */
+function _normalizeSubscriptionFile(subPath, selection, manifestEntries) {
+    const sel = selection || {};
+    const me = manifestEntries || {};
+    const mechManifest = _safeArray(me.mechanisms);
+    const blueprintManifest = _safeArray(me.blueprints);
+
+    // Read existing file to preserve top-level fields (workshop_version etc.).
+    // Best-effort: missing file or malformed JSON → start from empty object.
+    let existing = {};
+    try {
+        if (fs.existsSync(subPath)) {
+            existing = JSON.parse(fs.readFileSync(subPath, "utf8")) || {};
+        }
+    } catch (_e) {
+        existing = {};
+    }
+
+    const buildFlat = (names, manifest) => {
+        const out = [];
+        for (const raw of _safeArray(names)) {
+            // Selection should be bare strings, but coerce defensively in case
+            // a legacy callsite passes already-objects (the v0.25.x bug shape).
+            const coerced = _coerceSubscriptionEntry(raw, manifest);
+            if (coerced) out.push(coerced);
+        }
+        return out;
+    };
+
+    const out = Object.assign({}, existing, {
+        mechanisms: buildFlat(sel.mechanisms, mechManifest),
+        blueprints: buildFlat(sel.blueprints, blueprintManifest)
+    });
+
+    // Atomic write: write to tmp + rename. Protects against partial writes if
+    // the process is interrupted mid-write.
+    const tmp = subPath + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify(out, null, 2));
+    fs.renameSync(tmp, subPath);
 }
 
 // ----------------------------------------------------------------------------
@@ -446,4 +561,9 @@ async function runReRunWizard(opts) {
     return { action: "quit" };
 }
 
-module.exports = { runFirstRunWizard, runReRunWizard };
+module.exports = {
+    runFirstRunWizard,
+    runReRunWizard,
+    _normalizeSubscriptionFile,
+    _coerceSubscriptionEntry
+};
