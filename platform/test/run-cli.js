@@ -392,13 +392,224 @@ async function caseC15WizardEditSubscriptionFlatWrite() {
     });
 }
 
+// C16-C19: v0.26.1 P1-3a — `sauce help` verb.
+// cmd-help.js does NOT exist yet at S1. Pre-S2, cases FAIL with
+// "Cannot find module './cmd-help.js'". Post-S2, cases assert on
+// the help-output `{ lines }` shape returned by cmd-help.run.
+//
+// SAUCE_TEST_MODE is set on each case so cmd-help suppresses console.log
+// (the canonical pattern from cmd-status.js).
+
+async function caseC16HelpVerbOutput() {
+    const label = "C16 sauce help verb output contains all 5 verbs";
+    process.env.SAUCE_TEST_MODE = "1";
+    try {
+        const cmd = require("../cli/cmd-help.js");
+        const out = await cmd.run(null, []);
+        const joined = (out && Array.isArray(out.lines)) ? out.lines.join("\n") : "";
+        assertTrue(/bootstrap/.test(joined), label + ": mentions bootstrap");
+        assertTrue(/update/.test(joined), label + ": mentions update");
+        assertTrue(/status/.test(joined), label + ": mentions status");
+        assertTrue(/wizard/.test(joined), label + ": mentions wizard");
+        assertTrue(/help/.test(joined), label + ": mentions help");
+    } finally {
+        delete process.env.SAUCE_TEST_MODE;
+    }
+}
+
+async function caseC17BareSauceRoutesToHelp() {
+    const label = "C17 bare sauce (no verb) routes to help";
+    process.env.SAUCE_TEST_MODE = "1";
+    // Spy: monkey-patch require.cache for cmd-help.js so dispatch() picks
+    // up our spy instead of the real module. This decouples the route-to-help
+    // assertion from cmd-help.run's actual output (which C16 already covers).
+    const helpPath = path.resolve(__dirname, "../cli/cmd-help.js");
+    let invocations = 0;
+    require.cache[helpPath] = { exports: { run: async (_ctx, _args) => { invocations++; return { lines: [] }; } } };
+    try {
+        const cli = require("../cli/sauce-cli.js");
+        // No verb -> dispatch(['']) maps to undefined -> should route to help.
+        await cli.dispatch([], { cwd: os.tmpdir(), env: {} });
+        assertTrue(invocations >= 1, label + ": cmd-help.run invoked at least once");
+    } catch (e) {
+        fail++;
+        console.log("  FAIL  " + label + ": threw " + (e.message || e));
+    } finally {
+        delete require.cache[helpPath];
+        // Also evict sauce-cli so it picks up fresh VERBS map next test.
+        const cliPath = path.resolve(__dirname, "../cli/sauce-cli.js");
+        delete require.cache[cliPath];
+        delete process.env.SAUCE_TEST_MODE;
+    }
+}
+
+async function caseC18LongAndShortHelpFlags() {
+    const label = "C18 sauce --help and sauce -h route to help";
+    process.env.SAUCE_TEST_MODE = "1";
+    const helpPath = path.resolve(__dirname, "../cli/cmd-help.js");
+    const cliPath = path.resolve(__dirname, "../cli/sauce-cli.js");
+    let invocations = 0;
+    require.cache[helpPath] = { exports: { run: async (_ctx, _args) => { invocations++; return { lines: [] }; } } };
+    try {
+        delete require.cache[cliPath];
+        const cli = require("../cli/sauce-cli.js");
+        await cli.dispatch(["--help"], { cwd: os.tmpdir(), env: {} });
+        const afterLong = invocations;
+        await cli.dispatch(["-h"], { cwd: os.tmpdir(), env: {} });
+        const afterShort = invocations;
+        assertTrue(afterLong >= 1, label + ": --help invoked cmd-help.run");
+        assertTrue(afterShort > afterLong, label + ": -h also invoked cmd-help.run");
+    } catch (e) {
+        fail++;
+        console.log("  FAIL  " + label + ": threw " + (e.message || e));
+    } finally {
+        delete require.cache[helpPath];
+        delete require.cache[cliPath];
+        delete process.env.SAUCE_TEST_MODE;
+    }
+}
+
+async function caseC19HelpWorksOutsideVault() {
+    const label = "C19 sauce help works outside any vault (no resolveContext)";
+    process.env.SAUCE_TEST_MODE = "1";
+    const helpPath = path.resolve(__dirname, "../cli/cmd-help.js");
+    const cliPath = path.resolve(__dirname, "../cli/sauce-cli.js");
+    let invocations = 0;
+    let resolveContextThrew = false;
+    // Spy cmd-help so the call is observable without depending on the real
+    // module's output.
+    require.cache[helpPath] = { exports: { run: async (_ctx, _args) => { invocations++; return { lines: [] }; } } };
+    try {
+        delete require.cache[cliPath];
+        const cli = require("../cli/sauce-cli.js");
+        // cwd=/, env without SAUCE_VAULT — resolveContext would throw if reached.
+        try {
+            await cli.dispatch(["help"], { cwd: "/", env: {} });
+        } catch (e) {
+            if (/Not inside a sauce-managed vault/.test(e.message || "")) {
+                resolveContextThrew = true;
+            } else {
+                throw e;
+            }
+        }
+        assertTrue(invocations >= 1, label + ": cmd-help.run invoked despite no vault");
+        assertTrue(!resolveContextThrew, label + ": resolveContext NOT thrown for help verb");
+    } catch (e) {
+        fail++;
+        console.log("  FAIL  " + label + ": threw " + (e.message || e));
+    } finally {
+        delete require.cache[helpPath];
+        delete require.cache[cliPath];
+        delete process.env.SAUCE_TEST_MODE;
+    }
+}
+
+// C20-C22: v0.26.1 P1-3c — sauce status convenience-warn block.
+// cmd-status.js does NOT have the warn block yet at S1. Pre-S2, cases FAIL
+// because the expected "[warn]" line is missing from out.lines. Post-S2, the
+// warn block reads each subscribed blueprint's manifest, checks depends_on
+// for "convenience", and emits a warn line when convenience is not subscribed.
+
+async function _seedBlueprintManifest(workshopPath, name, manifest) {
+    const dir = path.join(workshopPath, "platform/blueprints", name);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify(manifest, null, 2));
+}
+
+async function caseC20StatusWarnsConvenienceMissing() {
+    const label = "C20 status warns when DV blueprint subscribed but convenience absent";
+    await withTempVault({}, async (vaultPath) => {
+        // Stub workshop fixture so status can read blueprint manifests.
+        fs.mkdirSync(path.join(vaultPath, "pantry/platform"), { recursive: true });
+        fs.writeFileSync(path.join(vaultPath, "pantry/platform/manifest.json"),
+            JSON.stringify({ workshop_version: "0.26.1", mechanisms: [], blueprints: [{ name: "project", version: "1.3.6" }] }, null, 2));
+        await _seedBlueprintManifest(path.join(vaultPath, "pantry"), "project", {
+            name: "project", version: "1.3.6",
+            depends_on: [{ name: "convenience", range: ">=0.1.0" }]
+        });
+        const cmd = require("../cli/cmd-status.js");
+        const ctx = {
+            vaultPath, config: { workshop_relative_path: "pantry" },
+            subscription: { mechanisms: [], blueprints: [{ name: "project", version: "1.3.6" }] },
+            workshopPath: path.join(vaultPath, "pantry"),
+            workshopManifest: { workshop_version: "0.26.1" },
+            // Mock _gitExec so status doesn't shell out.
+            _gitExec: () => ({ code: 0, stdout: "", stderr: "" }),
+        };
+        const out = await cmd.run(ctx, []);
+        const joined = (out && Array.isArray(out.lines)) ? out.lines.join("\n") : "";
+        assertTrue(/\[warn\]/.test(joined), label + ": output contains [warn]");
+        assertTrue(/convenience/.test(joined), label + ": warn mentions convenience");
+        assertTrue(/project/.test(joined), label + ": warn names the project blueprint");
+    });
+}
+
+async function caseC21StatusSilentWhenConvenienceSubscribed() {
+    const label = "C21 status silent on convenience when convenience subscribed";
+    await withTempVault({}, async (vaultPath) => {
+        fs.mkdirSync(path.join(vaultPath, "pantry/platform"), { recursive: true });
+        fs.writeFileSync(path.join(vaultPath, "pantry/platform/manifest.json"),
+            JSON.stringify({ workshop_version: "0.26.1", mechanisms: [], blueprints: [{ name: "project", version: "1.3.6" }] }, null, 2));
+        await _seedBlueprintManifest(path.join(vaultPath, "pantry"), "project", {
+            name: "project", version: "1.3.6",
+            depends_on: [{ name: "convenience", range: ">=0.1.0" }]
+        });
+        const cmd = require("../cli/cmd-status.js");
+        const ctx = {
+            vaultPath, config: { workshop_relative_path: "pantry" },
+            subscription: {
+                mechanisms: [{ name: "convenience", version: "0.1.0" }],
+                blueprints: [{ name: "project", version: "1.3.6" }]
+            },
+            workshopPath: path.join(vaultPath, "pantry"),
+            workshopManifest: { workshop_version: "0.26.1" },
+            _gitExec: () => ({ code: 0, stdout: "", stderr: "" }),
+        };
+        const out = await cmd.run(ctx, []);
+        const joined = (out && Array.isArray(out.lines)) ? out.lines.join("\n") : "";
+        assertTrue(!/\[warn\].*convenience/i.test(joined), label + ": no convenience warn line");
+    });
+}
+
+async function caseC22StatusSilentWhenNoDvBlueprint() {
+    const label = "C22 status silent on convenience when no DV blueprint subscribed";
+    await withTempVault({}, async (vaultPath) => {
+        fs.mkdirSync(path.join(vaultPath, "pantry/platform"), { recursive: true });
+        fs.writeFileSync(path.join(vaultPath, "pantry/platform/manifest.json"),
+            JSON.stringify({ workshop_version: "0.26.1", mechanisms: [], blueprints: [{ name: "boards", version: "0.1.0" }] }, null, 2));
+        // Boards has NO convenience dep.
+        await _seedBlueprintManifest(path.join(vaultPath, "pantry"), "boards", {
+            name: "boards", version: "0.1.0",
+            depends_on: []
+        });
+        const cmd = require("../cli/cmd-status.js");
+        const ctx = {
+            vaultPath, config: { workshop_relative_path: "pantry" },
+            subscription: {
+                mechanisms: [],
+                blueprints: [{ name: "boards", version: "0.1.0" }]
+            },
+            workshopPath: path.join(vaultPath, "pantry"),
+            workshopManifest: { workshop_version: "0.26.1" },
+            _gitExec: () => ({ code: 0, stdout: "", stderr: "" }),
+        };
+        const out = await cmd.run(ctx, []);
+        const joined = (out && Array.isArray(out.lines)) ? out.lines.join("\n") : "";
+        assertTrue(!/\[warn\].*convenience/i.test(joined), label + ": no convenience warn line for boards-only");
+    });
+}
+
 const cases = [
     caseC1AncestorWalk, caseC2SauceVaultEnv, caseC3NotInVault, caseC4UnknownVerb,
     caseC5StatusClean, caseC6StatusDrift, caseC7UpdateFFOnly, caseC8UpdateDirtyRefusal,
     caseC9UpdateForceOverride, caseC10WizardDelegates,
     caseC11BootstrapNonInteractive, caseC12BootstrapMechanismsAll,
     caseC13BootstrapBlueprintsCsv, caseC14WizardNonInteractiveDefaults,
-    caseC15WizardEditSubscriptionFlatWrite  // NEW v0.26.0
+    caseC15WizardEditSubscriptionFlatWrite,  // v0.26.0
+    caseC16HelpVerbOutput, caseC17BareSauceRoutesToHelp,
+    caseC18LongAndShortHelpFlags, caseC19HelpWorksOutsideVault,  // v0.26.1 P1-3a
+    caseC20StatusWarnsConvenienceMissing, caseC21StatusSilentWhenConvenienceSubscribed,
+    caseC22StatusSilentWhenNoDvBlueprint  // v0.26.1 P1-3c
 ];
 
 async function main() {

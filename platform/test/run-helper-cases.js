@@ -3386,6 +3386,167 @@ async function caseSF5TemplatesPathSubstitution() {
   }
 }
 
+// -----------------------------------------------------------------------------
+// AS1-AS5 — applyAppSettings (v0.26.1 P1-2)
+// Workshop-level helper that writes .obsidian/app.json with declared keys from
+// workshopManifest.app_settings. Mirrors v0.24.0 applyCustomJsSettings posture
+// (additive shallow merge, backup-on-edit, malformed-JSON guard, atomic write,
+// failure-loud history under step "app_settings").
+//
+// Each case writes app_settings into the FAKE workshop manifest at
+// <scratch>/_fake-workshop/platform/manifest.json (overwriting scaffoldVault's
+// default-shaped manifest), then runs the canonical installer harness which
+// reads workshopManifest at the top of install() and (post-S2) invokes
+// applyAppSettings(tp, workshopManifest, history, git).
+//
+// Pre-S2: applyAppSettings is not implemented; cases FAIL because the helper
+// is never invoked (no history entries, no .obsidian/app.json materialized).
+// Post-S2: history entries appear under step "app_settings"; file state
+// matches expected.
+// -----------------------------------------------------------------------------
+
+async function _writeWorkshopManifestWithAppSettings(scratch, appSettings) {
+  // Overwrite the fake workshop manifest scaffoldVault wrote earlier so it
+  // carries the app_settings field. Other fields preserved (mechanisms /
+  // blueprints / workshop_version) per scaffoldVault's defaults.
+  const wmPath = path.join(scratch, "_fake-workshop/platform/manifest.json");
+  const existing = JSON.parse(await fsp.readFile(wmPath, "utf8"));
+  existing.app_settings = appSettings;
+  await fsp.writeFile(wmPath, JSON.stringify(existing, null, 2), "utf8");
+}
+
+async function caseAS1AppJsonAbsent() {
+  console.log("\n--- Case AS1: applyAppSettings creates app.json when absent ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseAS1-"));
+  try {
+    await scaffoldVault(scratch, {
+      templaterData: TEMPLATER_DEFAULT,
+      slashCommanderData: SC_DEFAULT,
+      manifest: FIXTURE_MANIFEST_BASE,
+    });
+    await _writeWorkshopManifestWithAppSettings(scratch, { alwaysOpenInNewTab: true });
+    const appJsonPath = path.join(scratch, ".obsidian/app.json");
+    // Confirm absent pre-install.
+    if (fs.existsSync(appJsonPath)) await fsp.unlink(appJsonPath);
+    const result = await runHarness(scratch);
+    assertTrue("AS1: install ran", result !== null);
+    assertTrue("AS1: app.json materialized post-install", fs.existsSync(appJsonPath));
+    if (fs.existsSync(appJsonPath)) {
+      const data = await readJson(appJsonPath);
+      assertEq("AS1: alwaysOpenInNewTab=true written", data.alwaysOpenInNewTab, true);
+    } else {
+      assertTrue("AS1: alwaysOpenInNewTab=true written (file missing)", false);
+    }
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseAS2OverridesExisting() {
+  console.log("\n--- Case AS2: applyAppSettings overrides existing alwaysOpenInNewTab=false ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseAS2-"));
+  try {
+    await scaffoldVault(scratch, {
+      templaterData: TEMPLATER_DEFAULT,
+      slashCommanderData: SC_DEFAULT,
+      manifest: FIXTURE_MANIFEST_BASE,
+    });
+    await _writeWorkshopManifestWithAppSettings(scratch, { alwaysOpenInNewTab: true });
+    const appJsonPath = path.join(scratch, ".obsidian/app.json");
+    await fsp.writeFile(appJsonPath, JSON.stringify({ alwaysOpenInNewTab: false }, null, 2), "utf8");
+    const result = await runHarness(scratch);
+    assertTrue("AS2: install ran", result !== null);
+    const data = await readJson(appJsonPath);
+    assertEq("AS2: alwaysOpenInNewTab overridden true (platform-as-overrider)", data.alwaysOpenInNewTab, true);
+    const applied = (result.history || []).filter(
+      (h) => h.step === "app_settings" && h.action === "applied"
+    );
+    assertTrue("AS2: history applied entry under step=app_settings", applied.length >= 1);
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseAS3PreservesNonDeclared() {
+  console.log("\n--- Case AS3: applyAppSettings preserves non-declared keys verbatim ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseAS3-"));
+  try {
+    await scaffoldVault(scratch, {
+      templaterData: TEMPLATER_DEFAULT,
+      slashCommanderData: SC_DEFAULT,
+      manifest: FIXTURE_MANIFEST_BASE,
+    });
+    await _writeWorkshopManifestWithAppSettings(scratch, { alwaysOpenInNewTab: true });
+    const appJsonPath = path.join(scratch, ".obsidian/app.json");
+    // Pre-existing user customization with a non-declared key.
+    await fsp.writeFile(appJsonPath, JSON.stringify({
+      legacyEditor: true,
+      promptDelete: false,
+    }, null, 2), "utf8");
+    const result = await runHarness(scratch);
+    assertTrue("AS3: install ran", result !== null);
+    const data = await readJson(appJsonPath);
+    assertEq("AS3: non-declared legacyEditor preserved verbatim", data.legacyEditor, true);
+    assertEq("AS3: declared alwaysOpenInNewTab=true merged in", data.alwaysOpenInNewTab, true);
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseAS4MalformedJsonGuard() {
+  console.log("\n--- Case AS4: applyAppSettings malformed JSON guard ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseAS4-"));
+  try {
+    await scaffoldVault(scratch, {
+      templaterData: TEMPLATER_DEFAULT,
+      slashCommanderData: SC_DEFAULT,
+      manifest: FIXTURE_MANIFEST_BASE,
+    });
+    await _writeWorkshopManifestWithAppSettings(scratch, { alwaysOpenInNewTab: true });
+    const appJsonPath = path.join(scratch, ".obsidian/app.json");
+    const malformed = "{not valid json at all";
+    await fsp.writeFile(appJsonPath, malformed, "utf8");
+    const result = await runHarness(scratch);
+    assertTrue("AS4: install ran", result !== null);
+    const after = await readRaw(appJsonPath);
+    assertEq("AS4: malformed body preserved verbatim (zero writes)", after, malformed);
+    const errors = (result.history || []).filter(
+      (h) => h.step === "app_settings" && h.action === "error"
+    );
+    assertTrue("AS4: history error entry under step=app_settings", errors.length >= 1);
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseAS5BackupBeforeEdit() {
+  console.log("\n--- Case AS5: applyAppSettings writes .sauce-backup before edit ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseAS5-"));
+  try {
+    await scaffoldVault(scratch, {
+      templaterData: TEMPLATER_DEFAULT,
+      slashCommanderData: SC_DEFAULT,
+      manifest: FIXTURE_MANIFEST_BASE,
+    });
+    await _writeWorkshopManifestWithAppSettings(scratch, { alwaysOpenInNewTab: true });
+    const appJsonPath = path.join(scratch, ".obsidian/app.json");
+    const priorBody = JSON.stringify({ alwaysOpenInNewTab: false, marker: "prior" }, null, 2);
+    await fsp.writeFile(appJsonPath, priorBody, "utf8");
+    const result = await runHarness(scratch);
+    assertTrue("AS5: install ran", result !== null);
+    const backupPath = appJsonPath + ".sauce-backup";
+    assertTrue("AS5: .sauce-backup written before edit", fs.existsSync(backupPath));
+    if (fs.existsSync(backupPath)) {
+      const backupBody = await readRaw(backupPath);
+      assertEq("AS5: backup body matches prior content verbatim", backupBody, priorBody);
+    } else {
+      assertTrue("AS5: backup body matches prior content (backup missing)", false);
+    }
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
 // v0.20.0 docs polish cycle — trailing-whitespace lint for blueprint template + content bodies.
 // Carry from v0.18.1 lesson 2 (template-body trailing-whitespace defect class).
 // Walks platform/blueprints/<bp>/{content,templates}/*.md (the two-level layout —
@@ -3507,6 +3668,13 @@ async function caseTW1TemplatesNoTrailingWhitespace() {
   await caseSF3PluginDirAbsentSkips();
   await caseSF4UnknownPluginSilentNoOp();
   await caseSF5TemplatesPathSubstitution();
+
+  // v0.26.1 P1-2 — TDD-first cases for applyAppSettings.
+  await caseAS1AppJsonAbsent();
+  await caseAS2OverridesExisting();
+  await caseAS3PreservesNonDeclared();
+  await caseAS4MalformedJsonGuard();
+  await caseAS5BackupBeforeEdit();
 
   // v0.20.0 docs polish cycle — trailing-whitespace lint.
   await caseTW1TemplatesNoTrailingWhitespace();

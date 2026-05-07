@@ -512,6 +512,130 @@ async function caseBS12SiblingFallback() {
     });
 }
 
+// BS14: v0.26.1 P1-1 — phaseFetchPlugins fetches the 4 new community plugins
+// (obsidian-admonition / calendar / obsidian-tasks-plugin / url-into-selection)
+// when foundational_plugins[] declares them. Pre-S2 the canonical workshop
+// manifest does NOT include these ids, so this case uses a synthetic
+// workshop fixture to drive runBootstrap. Post-S2 the canonical manifest
+// gains these ids; this synthetic-fixture posture keeps the case isolated
+// from upstream churn.
+async function caseBS14FetchesFourNewFoundationalPlugins() {
+    const label = "BS14 phaseFetchPlugins fetches 4 new community plugins";
+    // The community-plugins-index module caches across calls (module-level
+    // _cache). BS1-BS9 ran first with MOCK_INDEX_BODY (no new ids) and
+    // populated the cache. Clear it so BS14 sees the BS14-specific routes.
+    const indexMod = require("../bootstrap-lib/community-plugins-index.js");
+    if (typeof indexMod._clearCache === "function") indexMod._clearCache();
+    await withTempVault({}, async (vaultPath) => {
+        // Synthesize a fixture workshop containing the 4 new ids in foundational_plugins[].
+        const sibling = fs.mkdtempSync(path.join(os.tmpdir(), "beacon-bs14-fixture-"));
+        try {
+            fs.mkdirSync(path.join(sibling, "platform"), { recursive: true });
+            fs.writeFileSync(path.join(sibling, "platform/manifest.json"),
+                JSON.stringify({
+                    workshop_version: "0.26.1",
+                    foundational_plugins: [
+                        { id: "templater-obsidian" },
+                        { id: "customjs" },
+                        { id: "dataview" },
+                        { id: "obsidian-admonition" },
+                        { id: "calendar" },
+                        { id: "obsidian-tasks-plugin" },
+                        { id: "url-into-selection" }
+                    ],
+                    mechanisms: [],
+                    blueprints: []
+                }, null, 2));
+            seedConfig(vaultPath, {
+                config: { workshop_relative_path: path.relative(vaultPath, sibling) },
+                subscription: { workshop_version: "0.26.1", mechanisms: [], blueprints: [] }
+            });
+            const indexBody = JSON.stringify([
+                { id: "templater-obsidian", name: "Templater", repo: "SilentVoid13/Templater" },
+                { id: "customjs", name: "CustomJS", repo: "saml-dev/obsidian-custom-js" },
+                { id: "dataview", name: "Dataview", repo: "blacksmithgu/obsidian-dataview" },
+                { id: "obsidian-admonition", name: "Admonition", repo: "javalent/admonition" },
+                { id: "calendar", name: "Calendar", repo: "liamcain/obsidian-calendar-plugin" },
+                { id: "obsidian-tasks-plugin", name: "Tasks", repo: "obsidian-tasks-group/obsidian-tasks" },
+                { id: "url-into-selection", name: "Paste URL Into Selection", repo: "denolehov/obsidian-url-into-selection" }
+            ]);
+            const routes = Object.assign({},
+                { [MOCK_INDEX_URL]: { body: indexBody } },
+                pluginRoutes("templater-obsidian", "SilentVoid13/Templater"),
+                pluginRoutes("customjs", "saml-dev/obsidian-custom-js"),
+                pluginRoutes("dataview", "blacksmithgu/obsidian-dataview"),
+                pluginRoutes("obsidian-admonition", "javalent/admonition", { skipStyles: true }),
+                pluginRoutes("calendar", "liamcain/obsidian-calendar-plugin", { skipStyles: true }),
+                pluginRoutes("obsidian-tasks-plugin", "obsidian-tasks-group/obsidian-tasks", { skipStyles: true }),
+                pluginRoutes("url-into-selection", "denolehov/obsidian-url-into-selection", { skipStyles: true })
+            );
+            const bootstrap = require("../bootstrap.js");
+            await withMockedHttps(routes, async () => {
+                await bootstrap.runBootstrap({ vaultPath, nonInteractive: true, skipInstaller: true });
+            });
+            const newIds = ["obsidian-admonition", "calendar", "obsidian-tasks-plugin", "url-into-selection"];
+            for (const id of newIds) {
+                const dir = path.join(vaultPath, ".obsidian/plugins", id);
+                assertTrue(fs.existsSync(path.join(dir, "manifest.json")), label + ": " + id + "/manifest.json present");
+                assertTrue(fs.existsSync(path.join(dir, "main.js")), label + ": " + id + "/main.js present");
+            }
+        } finally {
+            fs.rmSync(sibling, { recursive: true, force: true });
+        }
+    });
+}
+
+// BS15-BS17: v0.26.1 P1-3c — wizard _autoAddConvenienceIfDvBlueprintsSelected.
+// The helper does NOT exist yet at S1. Pre-S2, cases FAIL with TypeError
+// ("not a function") when accessing wizardMod._autoAddConvenienceIfDvBlueprintsSelected.
+// Post-S2, the helper is exported and pure (no I/O); these cases test it
+// directly with synthetic fixtures.
+
+function _bs15FixtureFullBlueprints() {
+    return [
+        { name: "project", version: "1.3.6", depends_on: [{ name: "convenience", range: ">=0.1.0" }] },
+        { name: "boards", version: "0.1.0", depends_on: [] }
+    ];
+}
+
+async function caseBS15AutoAddsConvenienceForDvBlueprint() {
+    const label = "BS15 _autoAddConvenienceIfDvBlueprintsSelected adds convenience for project";
+    const wizardMod = require("../bootstrap-lib/wizard.js");
+    // Pre-S2: wizardMod._autoAddConvenienceIfDvBlueprintsSelected is undefined
+    // → calling it throws TypeError; runner catches + reports as 1 FAIL per case.
+    const result = wizardMod._autoAddConvenienceIfDvBlueprintsSelected(
+        ["customjs-guard"],
+        ["project"],
+        _bs15FixtureFullBlueprints()
+    );
+    assertTrue(Array.isArray(result), label + ": returns array");
+    assertTrue(result.includes("convenience"), label + ": convenience appended");
+}
+
+async function caseBS16NoAddForNonDvBlueprint() {
+    const label = "BS16 _autoAddConvenienceIfDvBlueprintsSelected leaves selection unchanged for boards-only";
+    const wizardMod = require("../bootstrap-lib/wizard.js");
+    const result = wizardMod._autoAddConvenienceIfDvBlueprintsSelected(
+        ["customjs-guard"],
+        ["boards"],
+        _bs15FixtureFullBlueprints()
+    );
+    assertTrue(Array.isArray(result), label + ": returns array");
+    assertTrue(!result.includes("convenience"), label + ": convenience NOT added (boards has no convenience dep)");
+}
+
+async function caseBS17NoDuplicateWhenAlreadyPresent() {
+    const label = "BS17 _autoAddConvenienceIfDvBlueprintsSelected no duplicate when already selected";
+    const wizardMod = require("../bootstrap-lib/wizard.js");
+    const result = wizardMod._autoAddConvenienceIfDvBlueprintsSelected(
+        ["convenience"],
+        ["project"],
+        _bs15FixtureFullBlueprints()
+    );
+    const occurrences = result.filter(x => x === "convenience").length;
+    assertTrue(occurrences === 1, label + ": convenience appears exactly once (" + occurrences + ")");
+}
+
 // BS13: phaseWriteActivation atomic write + backup-on-overwrite
 async function caseBS13ActivationAtomicAndBackup() {
     const label = "BS13 phaseWriteActivation atomic write + backup-on-overwrite";
@@ -549,7 +673,13 @@ const cases = {
         caseBS10ActivationArtifacts,
         caseBS11WizardDefaultsPantry,
         caseBS12SiblingFallback,
-        caseBS13ActivationAtomicAndBackup
+        caseBS13ActivationAtomicAndBackup,
+        // v0.26.1 P1-1: 4 new foundational plugins
+        caseBS14FetchesFourNewFoundationalPlugins,
+        // v0.26.1 P1-3c: wizard auto-add convenience helper
+        caseBS15AutoAddsConvenienceForDvBlueprint,
+        caseBS16NoAddForNonDvBlueprint,
+        caseBS17NoDuplicateWhenAlreadyPresent
     ]
 };
 
