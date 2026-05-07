@@ -62,13 +62,13 @@ async function run(ctx, args) {
     console.log(section.ok());
 
     console.log("");
-    console.log("  Beacon installed at " + ctx.workshopPath);
+    console.log("  Sauce installed at " + ctx.workshopPath);
     console.log("");
     console.log("  To activate in this shell:");
-    console.log("    source Beacon/Scripts/activate.sh");
+    console.log("    source pantry/Scripts/activate.sh");
     console.log("");
     console.log("  Then try:");
-    console.log("    beacon status");
+    console.log("    sauce status");
 
     return report;
 }

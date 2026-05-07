@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// platform/cli/beacon-cli.js — Beacon CLI dispatcher.
-// Resolves vault context (cwd ancestor walk; $BEACON_VAULT fallback) and
+// platform/cli/sauce-cli.js — Sauce CLI dispatcher.
+// Resolves vault context (cwd ancestor walk; $SAUCE_VAULT fallback) and
 // dispatches to cmd-<verb>.js.
 
 const fs = require("fs");
@@ -28,18 +28,18 @@ async function resolveContext(opts) {
         }
         cur = path.dirname(cur);
     }
-    if (!vaultPath && env.BEACON_VAULT) {
-        if (fs.existsSync(path.join(env.BEACON_VAULT, "Docs/Meta/platform-config.json"))) {
-            vaultPath = env.BEACON_VAULT;
+    if (!vaultPath && env.SAUCE_VAULT) {
+        if (fs.existsSync(path.join(env.SAUCE_VAULT, "Docs/Meta/platform-config.json"))) {
+            vaultPath = env.SAUCE_VAULT;
         }
     }
     if (!vaultPath) {
-        throw new Error("Not inside a beacon-managed vault. cd into one or set BEACON_VAULT.");
+        throw new Error("Not inside a sauce-managed vault. cd into one or set SAUCE_VAULT.");
     }
     const config = readJson(path.join(vaultPath, "Docs/Meta/platform-config.json"));
     const subPath = path.join(vaultPath, "Docs/Meta/platform-subscription.json");
     const subscription = fs.existsSync(subPath) ? readJson(subPath) : { mechanisms: [], blueprints: [] };
-    const workshopPath = path.resolve(vaultPath, config.workshop_relative_path || "Beacon");
+    const workshopPath = path.resolve(vaultPath, config.workshop_relative_path || "pantry");
     const wmPath = path.join(workshopPath, "platform/manifest.json");
     const workshopManifest = fs.existsSync(wmPath) ? readJson(wmPath) : null;
     return { vaultPath, config, subscription, workshopPath, workshopManifest };
@@ -59,13 +59,13 @@ function bootstrapCtxFromArgs(rest) {
     }
     if (!vaultPath) return null;
     if (!fs.existsSync(vaultPath)) return null;
-    // Workshop is the cloned Beacon/ inside the vault per install.sh contract.
-    const workshopPath = path.join(vaultPath, "Beacon");
+    // Workshop is the cloned pantry/ inside the vault per install.sh contract.
+    const workshopPath = path.join(vaultPath, "pantry");
     const wmPath = path.join(workshopPath, "platform/manifest.json");
     const workshopManifest = fs.existsSync(wmPath) ? readJson(wmPath) : null;
     return {
         vaultPath,
-        config: { workshop_relative_path: "Beacon", variables: {} },
+        config: { workshop_relative_path: "pantry", variables: {} },
         subscription: { mechanisms: [], blueprints: [] },
         workshopPath,
         workshopManifest
@@ -81,7 +81,7 @@ async function dispatch(argv, opts) {
         return;
     }
     if (!VERBS[verb]) {
-        throw new Error(`unknown verb: ${verb}\nUsage: beacon <bootstrap|update|status|wizard>`);
+        throw new Error(`unknown verb: ${verb}\nUsage: sauce <bootstrap|update|status|wizard>`);
     }
     let ctx;
     if (verb === "bootstrap") {
@@ -98,7 +98,7 @@ async function dispatch(argv, opts) {
 }
 
 function printUsage() {
-    console.log("Usage: beacon <verb> [args]\n\nVerbs:\n  bootstrap  First-run install (rare; called by install.sh)\n  update     Pull latest workshop + reinstall\n  status     Show vault + workshop state\n  wizard     Interactive subscription / config editor\n");
+    console.log("Usage: sauce <verb> [args]\n\nVerbs:\n  bootstrap  First-run install (rare; called by install.sh)\n  update     Pull latest workshop + reinstall\n  status     Show vault + workshop state\n  wizard     Interactive subscription / config editor\n");
 }
 
 if (require.main === module) {

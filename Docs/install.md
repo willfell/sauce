@@ -1,11 +1,11 @@
-# Installing Beacon (v0.22.0+)
+# Installing Sauce (v0.23.0+)
 
-This is the user-facing install reference for the **inside-vault layout** introduced in v0.22.0 — a single curl one-liner clones the workshop into `<vault>/Beacon/`, npm-installs, and runs the first-run wizard.
+This is the user-facing install reference for the **inside-vault layout** introduced in v0.22.0 — a single curl one-liner clones the workshop into `<vault>/pantry/`, npm-installs, and runs the first-run wizard.
 
 For architectural context see [how.md](how.md). For ongoing operations see [use.md](use.md).
 
 > [!info] Two layouts coexist
-> v0.22.0 introduces the inside-vault layout but does NOT retire the legacy sibling-of-workshop layout (`workshop_relative_path: "../beacon"`). Existing POC vaults continue to work unchanged. Only fresh consumer vaults bootstrapped via the curl one-liner default to the inside-vault `Beacon/` shape.
+> v0.22.0 introduces the inside-vault layout but does NOT retire the legacy sibling-of-workshop layout (`workshop_relative_path: "../beacon"`). Existing POC vaults continue to work unchanged. Only fresh consumer vaults bootstrapped via the curl one-liner default to the inside-vault `pantry/` shape.
 
 ---
 
@@ -14,33 +14,33 @@ For architectural context see [how.md](how.md). For ongoing operations see [use.
 > [!abstract] The whole install
 > ```bash
 > cd /path/to/your/vault
-> curl -fsSL https://raw.githubusercontent.com/willfell/beacon/main/install.sh | bash
+> curl -fsSL https://raw.githubusercontent.com/willfell/sauce/main/install.sh | bash
 > ```
 
 The script runs four phases with sectioned output:
 
 ```
   ╔══════════════════════════════════════╗
-  ║   Beacon  ·  installer               ║
+  ║   Sauce   ·  installer               ║
   ║   Obsidian vault platform            ║
   ╚══════════════════════════════════════╝
 
   [1/4] Detecting environment...                OK
         node v22.1.0 · git 2.45.0 · vault /Users/me/notes/personal
 
-  [2/4] Cloning workshop into Beacon/...        OK
+  [2/4] Cloning workshop into pantry/...        OK
 
   [3/4] Installing dependencies...              OK
 
   [4/4] Running first-run wizard...
-        ?  Workshop path inside vault: Beacon
+        ?  Workshop path inside vault: pantry
         ?  Vault display name: personal
         ?  Mechanisms to subscribe: ...
         ?  Blueprints to subscribe: ...
         ?  Confirm and write config? Yes
 ```
 
-When the wizard finishes the script prints a final "Activate with: source Beacon/Scripts/activate.sh" hint.
+When the wizard finishes the script prints a final "Activate with: source pantry/Scripts/activate.sh" hint.
 
 > [!warning] Run from inside the vault dir
 > The script defaults `--vault` to the current working directory. cd into the vault first OR pass `--vault /abs/path/to/vault` explicitly.
@@ -51,7 +51,7 @@ When the wizard finishes the script prints a final "Activate with: source Beacon
 
 > [!info] What you need before running the one-liner
 > - **Node.js 18 or newer** — the platform runs on Node's standard library + a single dependency (`@inquirer/prompts`).
-> - **git 2.30 or newer** — used for the initial clone and for `beacon update`.
+> - **git 2.30 or newer** — used for the initial clone and for `sauce update`.
 
 Install lines per platform:
 
@@ -79,11 +79,11 @@ After a successful run, your vault layout looks like this:
 ```
 <vault>/                                  Your Obsidian vault root
 ├── .obsidian/                            (existing) Obsidian state
-├── Beacon/                               NEW — workshop clone (git-managed)
+├── pantry/                               NEW — workshop clone (git-managed)
 │   ├── platform/                         CLI verbs, install.js, mechanisms, blueprints
 │   ├── Scripts/
-│   │   ├── activate.sh                   NEW — per-shell PATH + BEACON_VAULT export
-│   │   └── beacon                        NEW — bash wrapper exec'ing node CLI
+│   │   ├── activate.sh                   NEW — per-shell PATH + SAUCE_VAULT export
+│   │   └── sauce                         NEW — bash wrapper exec'ing node CLI
 │   ├── node_modules/                     npm install --omit=dev artifact
 │   └── .git/                             clone --depth=1 history
 ├── Docs/Meta/                            Consumer-side platform state
@@ -94,20 +94,30 @@ After a successful run, your vault layout looks like this:
 ```
 
 > [!info] What "git-managed" means
-> The `Beacon/` directory is a real git clone with `origin` pointing at the upstream beacon repo. `beacon update` calls `git fetch + git reset --hard origin/main` inside it. Hand-edits are wiped on the next update — see [landmines.md #18](landmines.md).
+> The `pantry/` directory is a real git clone with `origin` pointing at the upstream Sauce repo. `sauce update` calls `git fetch + git reset --hard origin/main` inside it. Hand-edits are wiped on the next update — see [landmines.md #18](landmines.md).
 
-> [!warning] macOS APFS case-collision breaks blueprint runtime — known issue, fix queued for v0.23.0
-> **Symptom:** On macOS APFS (case-insensitive default), opening Daily Notes / Boards / Meetings / Finance / Journal / To-Do / Trips / Projects produces errors like *"Failed to create daily note. Folder 'beacon/daily' not found."*
->
-> **Root cause:** The workshop clone at `Beacon/` (capital B) aliases the entire blueprint module-directory namespace at `beacon/<module>/` (lowercase, per [landmines.md #11](landmines.md)). Blueprint `module_directory` mkdirs from `bash install.sh` land **inside** `<vault>/Beacon/` instead of at vault root. Even though APFS resolves `beacon` ≡ `Beacon` to the same physical inode, **Obsidian's vault index is case-sensitive at the app layer** — the indexed folder is `Beacon/daily`, but the daily-notes plugin's configured `folder` is `beacon/daily`, and the lookup fails.
->
-> **Workshop-side `.gitignore` (v0.22.1+)** masks the dirty-tree symptom for `beacon status` but does NOT fix the runtime breakage.
->
-> **Affected:** macOS users on APFS-default volumes (the vast majority). Linux and case-sensitive macOS volumes materialize `<vault>/beacon/<module>/` separately from `<vault>/Beacon/` and work correctly.
->
-> **Workaround until v0.23.0:** none. Blueprints that materialize content under `beacon/<module>/` are functionally broken on macOS APFS. The `beacon` CLI verbs, `Beacon/Scripts/activate.sh`, and the workshop git tree all work normally — it's blueprint runtime entry points (Daily Notes plugin, Kanban-plugin board files, finance/journal/to-do nav-buttons) that fail.
->
-> **Fix planned for v0.23.0:** rename the workshop clone dir from `Beacon/` to a non-colliding name (candidates under brainstorm; the lowercase `beacon/` namespace stays per landmine #11). v0.22.0 curl-bootstrapped vaults will need a one-time migration. See [landmines.md #18](landmines.md) for the inside-vault `Beacon/` git-managed posture.
+> [!success] Resolved in v0.23.0
+> The macOS APFS case-collision (former `Beacon/` ≡ lowercase `beacon/<module>/`)
+> is resolved by renaming the workshop clone dir to `pantry/`. Daily Notes
+> "Open today's daily note" works correctly on macOS APFS as of v0.23.0.
+> Upgrading from v0.22.x: see "Upgrading from v0.22.x" section below.
+
+---
+
+## Upgrading from v0.22.x
+
+If you have an existing v0.22.0 / v0.22.1 install:
+
+```bash
+cd <vault>
+mv Beacon pantry                                                                # rename workshop clone dir
+sed -i '' 's/"workshop_relative_path": "Beacon"/"workshop_relative_path": "pantry"/' Docs/Meta/platform-config.json
+source pantry/Scripts/activate.sh
+sauce status                                                                    # verify
+```
+
+If you exported `BEACON_VAULT` / `BEACON_REPO_URL` in your shell rc-file,
+update them to `SAUCE_VAULT` / `SAUCE_REPO_URL`.
 
 ---
 
@@ -118,45 +128,45 @@ The install does **not** touch your shell rc files (`~/.zshrc`, `~/.bashrc`, etc
 > [!success] Activate the current shell
 > ```bash
 > cd <vault>
-> source Beacon/Scripts/activate.sh
+> source pantry/Scripts/activate.sh
 > ```
 >
 > Output:
 > ```
-> beacon active. Try: beacon status
+> sauce active. Try: sauce status
 > ```
 
 What activation does:
 
 ```sh
-export PATH="<abs-vault>/Beacon/Scripts:$PATH"
-export BEACON_VAULT="<abs-vault>"
+export PATH="<abs-vault>/pantry/Scripts:$PATH"
+export SAUCE_VAULT="<abs-vault>"
 ```
 
-After that, the `beacon` CLI is on your PATH and works from anywhere. `BEACON_VAULT` is the fallback the dispatcher uses if you run a verb from outside the vault tree.
+After that, the `sauce` CLI is on your PATH and works from anywhere. `SAUCE_VAULT` is the fallback the dispatcher uses if you run a verb from outside the vault tree.
 
 > [!tip] Want it persistent?
-> Add `source /abs/path/to/vault/Beacon/Scripts/activate.sh` to your shell rc. The platform deliberately doesn't do this for you — auto-modifying shell rc is a CLAUDE-side ask-before-acting concern.
+> Add `source /abs/path/to/vault/pantry/Scripts/activate.sh` to your shell rc. The platform deliberately doesn't do this for you — auto-modifying shell rc is a CLAUDE-side ask-before-acting concern.
 
 ---
 
 ## Day-2 operations
 
-> [!example]- `beacon status` — read-only state report
+> [!example]- `sauce status` — read-only state report
 > ```
->   Beacon  ·  v0.22.0
+>   Sauce   ·  v0.23.0
 >   Vault:        ~/notes/personal
->   Workshop:     Beacon/  (git head a3f2b1, clean, 0 behind origin/main)
+>   Workshop:     pantry/  (git head a3f2b1, clean, 0 behind origin/main)
 >   Subscribed:   7 mechanisms · 8 blueprints
 >   Drift:        none
 > ```
-> No writes. Safe to run any time. Use it before `beacon update` to see what would change.
+> No writes. Safe to run any time. Use it before `sauce update` to see what would change.
 
-> [!example]- `beacon update` — pull latest workshop + re-run installer
+> [!example]- `sauce update` — pull latest workshop + re-run installer
 > ```
 >   [1/4] Fetching origin/main...                 OK (3 new commits)
 >   [2/4] Checking working tree...                OK (clean)
->   [3/4] Resetting Beacon/ to origin/main...     OK
+>   [3/4] Resetting pantry/ to origin/main...     OK
 >   [4/4] Re-running installer...                 OK
 >         2 files updated · 0 errors
 >
@@ -164,30 +174,30 @@ After that, the `beacon` CLI is on your PATH and works from anywhere. `BEACON_VA
 > ```
 >
 > What happens:
-> 1. `git fetch origin` inside `Beacon/`
+> 1. `git fetch origin` inside `pantry/`
 > 2. Working-tree dirty check — if dirty, **fails loud** (use `--force` to override).
 > 3. `git reset --hard origin/main`
 > 4. If `package.json` SHA changed, re-runs `npm install --omit=dev`
 > 5. Re-invokes the installer phase against the same config
 
-> [!example]- `beacon update --force` — dirty-tree override
-> When you've hand-edited something inside `Beacon/` (which you shouldn't — see [landmines.md #18](landmines.md)) and need to discard those edits to get back to a clean upstream:
+> [!example]- `sauce update --force` — dirty-tree override
+> When you've hand-edited something inside `pantry/` (which you shouldn't — see [landmines.md #18](landmines.md)) and need to discard those edits to get back to a clean upstream:
 > ```bash
-> beacon update --force
+> sauce update --force
 > ```
 > The dirty check is skipped; `git reset --hard origin/main` discards local changes.
 
-> [!example]- `beacon wizard` — re-run the subscription / config prompts
+> [!example]- `sauce wizard` — re-run the subscription / config prompts
 > Falls through to the existing re-run wizard from `bootstrap-lib/wizard.js`. Lets you toggle subscribed mechanisms / blueprints, edit the path-variable config, or quit without changes. Idempotent — quitting at any point leaves files untouched.
 
 ---
 
 ## Sync exclusion guides
 
-`Beacon/` contains two large directories that should NOT be cloud-synced:
+`pantry/` contains two large directories that should NOT be cloud-synced:
 
-- **`Beacon/node_modules/`** — npm install artifact; large, regenerable via `beacon update`.
-- **`Beacon/.git/`** — git history; large, regenerable via re-clone.
+- **`pantry/node_modules/`** — npm install artifact; large, regenerable via `sauce update`.
+- **`pantry/.git/`** — git history; large, regenerable via re-clone.
 
 Per provider:
 
@@ -196,19 +206,19 @@ Per provider:
 > 2. Find the **Exclude from sync** field.
 > 3. Add (one per line):
 >    ```
->    Beacon/node_modules
->    Beacon/.git
+>    pantry/node_modules
+>    pantry/.git
 >    ```
 > 4. Save.
 >
-> The `.bak` files left behind by `beacon update --force` (or by landmine #12 backup-on-edit mechanics) are NOT auto-excluded but are small. If they bother you, also add `Beacon.bak` and `Beacon.bak.*`.
+> The `.bak` files left behind by `sauce update --force` (or by landmine #12 backup-on-edit mechanics) are NOT auto-excluded but are small. If they bother you, also add `pantry.bak` and `pantry.bak.*`.
 
 > [!example]- iCloud Drive
 > iCloud's exclude mechanism is path-suffix-based: appending `.nosync` to a directory name signals iCloud to leave it un-synced.
 >
 > ```bash
-> mv Beacon/node_modules Beacon/node_modules.nosync
-> mv Beacon/.git Beacon/.git.nosync
+> mv pantry/node_modules pantry/node_modules.nosync
+> mv pantry/.git pantry/.git.nosync
 > ```
 >
 > > [!warning] This breaks `require()` and `git`
@@ -219,8 +229,8 @@ Per provider:
 > > **Recommended posture:** if you use iCloud Drive, do NOT put your Obsidian vault inside it. Put the vault under `~/notes/` or another non-iCloud path.
 
 > [!example]- Dropbox (Smart Sync / Online-only)
-> 1. Right-click `Beacon/node_modules` in Finder/Explorer → Smart Sync → **Online only**.
-> 2. Right-click `Beacon/.git` → Smart Sync → **Online only**.
+> 1. Right-click `pantry/node_modules` in Finder/Explorer → Smart Sync → **Online only**.
+> 2. Right-click `pantry/.git` → Smart Sync → **Online only**.
 >
 > The directories remain on disk references but their contents are not stored locally; Dropbox fetches on demand. Node and git both still work — Dropbox transparently materializes files on access.
 
@@ -228,63 +238,63 @@ Per provider:
 
 ## Troubleshooting
 
-> [!example]- "Not inside a beacon-managed vault"
-> The CLI dispatcher walks cwd ancestors looking for `Docs/Meta/platform-config.json`. If it doesn't find one and `$BEACON_VAULT` isn't set, you get this error.
+> [!example]- "Not inside a sauce-managed vault"
+> The CLI dispatcher walks cwd ancestors looking for `Docs/Meta/platform-config.json`. If it doesn't find one and `$SAUCE_VAULT` isn't set, you get this error.
 >
 > Fixes (any one works):
-> 1. `cd` into the vault root or any subdirectory of it before running `beacon`.
-> 2. `export BEACON_VAULT=/abs/path/to/vault` and re-run.
-> 3. Re-source the activation script: `source <vault>/Beacon/Scripts/activate.sh` (this sets `BEACON_VAULT`).
+> 1. `cd` into the vault root or any subdirectory of it before running `sauce`.
+> 2. `export SAUCE_VAULT=/abs/path/to/vault` and re-run.
+> 3. Re-source the activation script: `source <vault>/pantry/Scripts/activate.sh` (this sets `SAUCE_VAULT`).
 
-> [!example]- "Working tree dirty" on `beacon update`
+> [!example]- "Working tree dirty" on `sauce update`
 > ```
 >   [2/4] Checking working tree...                FAIL
->         Beacon/ has uncommitted changes:
+>         pantry/ has uncommitted changes:
 >          M platform/install.js
->          ?? Beacon/local-experiment.js
+>          ?? pantry/local-experiment.js
 >         Re-run with --force to discard.
 > ```
 >
 > Fixes:
-> 1. **Discard the dirty state** (recommended; see landmine #18): `beacon update --force`.
-> 2. If you genuinely need to keep the changes, copy them out of `Beacon/` first, then `beacon update --force`.
+> 1. **Discard the dirty state** (recommended; see landmine #18): `sauce update --force`.
+> 2. If you genuinely need to keep the changes, copy them out of `pantry/` first, then `sauce update --force`.
 
-> [!example]- "Beacon/ already exists" on re-install
-> When running `curl ... | bash` for a second time, the script refuses to overwrite an existing `Beacon/` because curl|bash provides no TTY for an interactive prompt.
+> [!example]- "pantry/ already exists" on re-install
+> When running `curl ... | bash` for a second time, the script refuses to overwrite an existing `pantry/` because curl|bash provides no TTY for an interactive prompt.
 >
 > Fixes:
 > 1. **Download the script first** then run it directly (it can prompt):
 >    ```bash
->    curl -fsSL https://raw.githubusercontent.com/willfell/beacon/main/install.sh -o install.sh
+>    curl -fsSL https://raw.githubusercontent.com/willfell/sauce/main/install.sh -o install.sh
 >    bash install.sh
 >    ```
-> 2. **Force-overwrite (backs up to `Beacon.bak`)**:
+> 2. **Force-overwrite (backs up to `pantry.bak`)**:
 >    ```bash
->    bash <(curl -fsSL https://raw.githubusercontent.com/willfell/beacon/main/install.sh) --overwrite
+>    bash <(curl -fsSL https://raw.githubusercontent.com/willfell/sauce/main/install.sh) --overwrite
 >    ```
 >
-> The script preserves any prior `Beacon.bak` by timestamping it (`Beacon.bak.YYYYMMDD-HHMMSS`) — backups are never destroyed.
+> The script preserves any prior `pantry.bak` by timestamping it (`pantry.bak.YYYYMMDD-HHMMSS`) — backups are never destroyed.
 
-> [!example]- `beacon` command not found
-> The `beacon` CLI is added to PATH via `activate.sh`. PATH state is per-shell:
-> - Each new terminal needs `source <vault>/Beacon/Scripts/activate.sh` before `beacon` works.
+> [!example]- `sauce` command not found
+> The `sauce` CLI is added to PATH via `activate.sh`. PATH state is per-shell:
+> - Each new terminal needs `source <vault>/pantry/Scripts/activate.sh` before `sauce` works.
 > - The script does NOT modify `~/.zshrc` or `~/.bashrc` (that's an explicit choice — see "Activation per shell" above).
 >
 > Verify:
 > ```bash
-> echo "$PATH" | tr ':' '\n' | grep Beacon/Scripts
-> # should print: /abs/path/to/vault/Beacon/Scripts
+> echo "$PATH" | tr ':' '\n' | grep pantry/Scripts
+> # should print: /abs/path/to/vault/pantry/Scripts
 > ```
 
 ---
 
 ## Uninstall
 
-To fully remove Beacon from a vault:
+To fully remove Sauce from a vault:
 
 ```bash
 cd <vault>
-rm -rf Beacon/ Beacon.bak Beacon.bak.*
+rm -rf pantry/ pantry.bak pantry.bak.*
 rm -f Docs/Meta/platform-config.json \
       Docs/Meta/platform-subscription.json \
       Docs/Meta/platform-installed.json
@@ -306,7 +316,7 @@ rm -f Docs/Meta/platform-config.json \
 
 The v0.22.0 inside-vault layout is **one of two supported shapes**:
 
-- **Inside-vault (v0.22.0+, default for fresh consumers):** workshop clone at `<vault>/Beacon/`, `workshop_relative_path: "Beacon"` in `platform-config.json`. Bootstrapped via the curl one-liner.
+- **Inside-vault (v0.22.0+, default for fresh consumers):** workshop clone at `<vault>/pantry/`, `workshop_relative_path: "pantry"` in `platform-config.json`. Bootstrapped via the curl one-liner.
 - **Sibling-of-workshop (legacy, still supported):** workshop checked out at a path adjacent to the vault, e.g., `~/Documents/obsidian/sync/workshop/beacon/`, with the consumer's `platform-config.json` pointing at it via `workshop_relative_path: "../beacon"`. Used by existing POC vaults (`barebones-beacon-poc`, `accuris-beacon-poc`) and by the workshop's own self-install.
 
 Both shapes use the same canonical `install.js` at runtime via the v0.1.2 thin-stub dispatch — no code paths diverge based on layout. The only difference is the value stored in `workshop_relative_path`.

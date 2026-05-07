@@ -4,12 +4,12 @@ This doc covers daily operations. For architectural background, see [how.md](how
 
 ## Onboarding via curl one-liner (v0.22.0+)
 
-The fastest way to onboard a fresh consumer vault is the inside-vault layout introduced in v0.22.0 — a single curl one-liner clones the workshop into `<vault>/Beacon/`, npm-installs, and runs the first-run wizard.
+The fastest way to onboard a fresh consumer vault is the inside-vault layout introduced in v0.22.0 — a single curl one-liner clones the workshop into `<vault>/pantry/`, npm-installs, and runs the first-run wizard.
 
 > [!success] One command
 > ```bash
 > cd /path/to/your/vault
-> curl -fsSL https://raw.githubusercontent.com/willfell/beacon/main/install.sh | bash
+> curl -fsSL https://raw.githubusercontent.com/willfell/sauce/main/install.sh | bash
 > ```
 
 > [!info] Prerequisites
@@ -22,7 +22,7 @@ The fastest way to onboard a fresh consumer vault is the inside-vault layout int
 
 After the curl one-liner clones + npm-installs, the existing first-run wizard runs (5 prompts via `@inquirer/prompts`):
 
-1. **Workshop relative path** (defaults to `Beacon` for the inside-vault layout)
+1. **Workshop relative path** (defaults to `pantry` for the inside-vault layout)
 2. **Vault display name** (defaults to vault dirname)
 3. **Mechanisms checkbox** (defaults: customjs-guard, nav-buttons, cards, beacon-button, styling, convenience)
 4. **Blueprints checkbox** (defaults: none — opt-in per blueprint)
@@ -35,9 +35,9 @@ After the curl one-liner clones + npm-installs, the existing first-run wizard ru
 
 ```
 <vault>/
-├── Beacon/                               NEW — workshop clone
+├── pantry/                               NEW — workshop clone
 │   ├── platform/                         CLI verbs, install.js, mechanisms, blueprints
-│   ├── Scripts/{activate.sh, beacon}     NEW — activation + CLI wrapper
+│   ├── Scripts/{activate.sh, sauce}      NEW — activation + CLI wrapper
 │   ├── node_modules/                     npm install --omit=dev artifact
 │   └── .git/                             clone --depth=1 history
 └── Docs/Meta/platform-{config,subscription,installed}.json   Consumer-side state
@@ -48,15 +48,15 @@ After the curl one-liner clones + npm-installs, the existing first-run wizard ru
 The install does NOT modify `~/.zshrc` or `~/.bashrc`. Each new shell needs:
 
 ```bash
-source <vault>/Beacon/Scripts/activate.sh
+source <vault>/pantry/Scripts/activate.sh
 ```
 
-After that, the `beacon` CLI is on your PATH:
+After that, the `sauce` CLI is on your PATH:
 
-- `beacon status` — read-only state report
-- `beacon update` — `git fetch + git reset --hard origin/main` inside `Beacon/` + re-run installer
-- `beacon update --force` — discard dirty working tree before reset
-- `beacon wizard` — re-run the subscription / config prompts
+- `sauce status` — read-only state report
+- `sauce update` — `git fetch + git reset --hard origin/main` inside `pantry/` + re-run installer
+- `sauce update --force` — discard dirty working tree before reset
+- `sauce wizard` — re-run the subscription / config prompts
 
 > [!tip] Full reference
 > See [install.md](install.md) for the full reference — sync-exclusion guides for Obsidian Sync / iCloud / Dropbox, troubleshooting, uninstall steps.
@@ -66,7 +66,7 @@ After that, the `beacon` CLI is on your PATH:
 ## Onboarding a new consumer vault (post-v0.1.2)
 
 > [!info] When to use this flow vs the curl one-liner
-> The curl one-liner above is the canonical flow for fresh consumer vaults. Use the manual flow below when you're (a) maintaining an existing POC vault that uses the legacy sibling-of-workshop layout, (b) onboarding into an environment without internet access, or (c) explicitly want the legacy `workshop_relative_path: "../beacon"` shape rather than the inside-vault `Beacon/` shape.
+> The curl one-liner above is the canonical flow for fresh consumer vaults. Use the manual flow below when you're (a) maintaining an existing POC vault that uses the legacy sibling-of-workshop layout, (b) onboarding into an environment without internet access, or (c) explicitly want the legacy `workshop_relative_path: "../beacon"` shape rather than the inside-vault `pantry/` shape.
 
 
 
@@ -74,10 +74,10 @@ Before v0.1.2 the onboarding flow required cp'ing a 1300-line `install.js` into 
 
 ### 1. Clone the workshop repo
 
-On the consumer machine, ensure the beacon workshop is cloned at a known relative path. The convention is `../workshop/poc-vault` from each consumer vault root, but any path works as long as it's recorded in `platform-config.json` (step 2):
+On the consumer machine, ensure the Sauce workshop is cloned at a known relative path. The convention is `../workshop/poc-vault` from each consumer vault root, but any path works as long as it's recorded in `platform-config.json` (step 2):
 
 ```bash
-git clone git@github-personal:willfell/beacon.git /path/to/workshop/poc-vault
+git clone git@github-personal:willfell/sauce.git /path/to/workshop/poc-vault
 ```
 
 ### 2. Create the consumer's bootstrap state files

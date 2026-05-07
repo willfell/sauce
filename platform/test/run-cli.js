@@ -36,17 +36,17 @@ async function withTempVault(setup, fn) {
 async function caseC1AncestorWalk() {
     const label = "C1 dispatcher walks cwd ancestors to find vault";
     await withTempVault({}, async (vaultPath) => {
-        const cli = require("../cli/beacon-cli.js");
+        const cli = require("../cli/sauce-cli.js");
         const ctx = await cli.resolveContext({ cwd: path.join(vaultPath, "Docs/Meta") });
         assertEqual(ctx.vaultPath, vaultPath, label);
     });
 }
 
 // C2: SAUCE_VAULT env-var fallback when cwd is not in a vault
-async function caseC2BeaconVaultEnv() {
+async function caseC2SauceVaultEnv() {
     const label = "C2 dispatcher honors SAUCE_VAULT env-var fallback";
     await withTempVault({}, async (vaultPath) => {
-        const cli = require("../cli/beacon-cli.js");
+        const cli = require("../cli/sauce-cli.js");
         const ctx = await cli.resolveContext({ cwd: os.tmpdir(), env: { SAUCE_VAULT: vaultPath } });
         assertEqual(ctx.vaultPath, vaultPath, label);
     });
@@ -55,10 +55,10 @@ async function caseC2BeaconVaultEnv() {
 // C3: not-in-vault error
 async function caseC3NotInVault() {
     const label = "C3 dispatcher errors when not in vault and SAUCE_VAULT unset";
-    const cli = require("../cli/beacon-cli.js");
+    const cli = require("../cli/sauce-cli.js");
     let threw = false;
     try { await cli.resolveContext({ cwd: "/", env: {} }); }
-    catch (e) { threw = true; assertTrue(/Not inside a beacon-managed vault/.test(e.message), label + ": error message"); }
+    catch (e) { threw = true; assertTrue(/Not inside a sauce-managed vault/.test(e.message), label + ": error message"); }
     if (!threw) { fail++; console.log("  FAIL  " + label + " — expected throw"); }
 }
 
@@ -66,7 +66,7 @@ async function caseC3NotInVault() {
 async function caseC4UnknownVerb() {
     const label = "C4 dispatcher errors on unknown verb";
     await withTempVault({}, async (vaultPath) => {
-        const cli = require("../cli/beacon-cli.js");
+        const cli = require("../cli/sauce-cli.js");
         let threw = false;
         try { await cli.dispatch(["frobnicate"], { cwd: vaultPath, env: {} }); }
         catch (e) { threw = true; assertTrue(/unknown verb/i.test(e.message), label + ": error message"); }
@@ -330,7 +330,7 @@ async function caseC14WizardNonInteractiveDefaults() {
 }
 
 const cases = [
-    caseC1AncestorWalk, caseC2BeaconVaultEnv, caseC3NotInVault, caseC4UnknownVerb,
+    caseC1AncestorWalk, caseC2SauceVaultEnv, caseC3NotInVault, caseC4UnknownVerb,
     caseC5StatusClean, caseC6StatusDrift, caseC7UpdateFFOnly, caseC8UpdateDirtyRefusal,
     caseC9UpdateForceOverride, caseC10WizardDelegates,
     caseC11BootstrapNonInteractive, caseC12BootstrapMechanismsAll,

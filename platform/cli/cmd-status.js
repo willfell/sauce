@@ -50,7 +50,7 @@ async function run(ctx, args) {
     }
     lines.push("  Drift:        " + (driftedNames.length === 0 ? "none" : driftedNames.join(", ")));
 
-    if (!process.env.BEACON_TEST_MODE) {
+    if (!process.env.SAUCE_TEST_MODE) {
         for (const l of lines) console.log(l);
     }
     return { lines };

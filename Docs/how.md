@@ -213,13 +213,13 @@ Load-bearing operational lessons not yet codified elsewhere. Most surfaced acros
 
 ## Consumer bootstrap (v0.21.0+)
 
-Beacon vault platform ships an interactive Node-based bootstrap orchestrator at `platform/bootstrap.js`. A fresh consumer goes from `git clone` to fully-loaded with one shell command.
+Sauce vault platform ships an interactive Node-based bootstrap orchestrator at `platform/bootstrap.js`. A fresh consumer goes from `git clone` to fully-loaded with one shell command.
 
 ### Quick start
 
 ```bash
 # One-time workshop setup
-cd <workshop-path>           # e.g., /Users/willfell/Documents/obsidian/sync/workshop/beacon
+cd <workshop-path>           # e.g., /Users/willfell/Documents/obsidian/sync/workshop/sauce
 npm install
 
 # Consumer-side, from inside any consumer vault
@@ -331,22 +331,22 @@ Both wired into `installItem` after `applyCorePluginSettings` (CommunityPluginDa
 
 ## CLI surface (v0.22.0+)
 
-v0.22.0 introduces a `beacon` CLI as the consumer-facing operations surface for vaults bootstrapped via the inside-vault layout. This section is the architecture / concepts reference; for user-facing usage see [install.md](install.md).
+v0.22.0 introduces a `sauce` CLI as the consumer-facing operations surface for vaults bootstrapped via the inside-vault layout. This section is the architecture / concepts reference; for user-facing usage see [install.md](install.md).
 
-### Dispatcher pattern (cwd-walk + `BEACON_VAULT` fallback)
+### Dispatcher pattern (cwd-walk + `SAUCE_VAULT` fallback)
 
-The CLI entry point is `platform/cli/beacon-cli.js`. The dispatcher resolves which vault the user is operating on by:
+The CLI entry point is `platform/cli/sauce-cli.js`. The dispatcher resolves which vault the user is operating on by:
 
-1. **Walking cwd ancestors** looking for `Docs/Meta/platform-config.json`. The first ancestor containing that file is treated as the vault root. This lets `beacon status` work from any subdirectory inside an activated vault.
-2. **`$BEACON_VAULT` env-var fallback.** If the cwd-walk finds no config (e.g., the user is outside the vault tree), the dispatcher reads `process.env.BEACON_VAULT`. The activation script (`Beacon/Scripts/activate.sh`) exports this on every `source` so the fallback is always populated for an activated shell.
-3. **Failure-loud on neither.** If the cwd-walk fails AND `BEACON_VAULT` is unset, the dispatcher prints "Not inside a beacon-managed vault. cd into one or set BEACON_VAULT" and exits 1. Mirrors the failure-loud posture from landmine #17 and `applyTemplaterHotkeys` precedent.
+1. **Walking cwd ancestors** looking for `Docs/Meta/platform-config.json`. The first ancestor containing that file is treated as the vault root. This lets `sauce status` work from any subdirectory inside an activated vault.
+2. **`$SAUCE_VAULT` env-var fallback.** If the cwd-walk finds no config (e.g., the user is outside the vault tree), the dispatcher reads `process.env.SAUCE_VAULT`. The activation script (`pantry/Scripts/activate.sh`) exports this on every `source` so the fallback is always populated for an activated shell.
+3. **Failure-loud on neither.** If the cwd-walk fails AND `SAUCE_VAULT` is unset, the dispatcher prints "Not inside a sauce-managed vault. cd into one or set SAUCE_VAULT" and exits 1. Mirrors the failure-loud posture from landmine #17 and `applyTemplaterHotkeys` precedent.
 
 ### The four-verb surface
 
 | Verb | File | Behavior |
 |---|---|---|
 | `bootstrap` | `platform/cli/cmd-bootstrap.js` | Re-runs the first-run bootstrap from a clean state. Rare in day-2 use; kept for re-bootstrap-after-uninstall scenarios. Special case in the dispatcher: `bootstrap` is the only verb that runs BEFORE the config exists, so the dispatcher's normal cwd-walk → load-config posture is bypassed via `bootstrapCtxFromArgs(argv)` which builds a minimal `{vault, version}` ctx from `--vault` argv alone. |
-| `update` | `platform/cli/cmd-update.js` | `git fetch + git reset --hard origin/main` inside `Beacon/`. Working-tree dirty check; `--force` overrides. If `package.json` SHA changed, re-runs `npm install --omit=dev`. Re-invokes the installer phase. The only verb with substantial new logic. |
+| `update` | `platform/cli/cmd-update.js` | `git fetch + git reset --hard origin/main` inside `pantry/`. Working-tree dirty check; `--force` overrides. If `package.json` SHA changed, re-runs `npm install --omit=dev`. Re-invokes the installer phase. The only verb with substantial new logic. |
 | `status` | `platform/cli/cmd-status.js` | Read-only state report: workshop git head + dirty state + commits-behind-origin count, subscribed mechanism / blueprint counts, drift summary. No writes. Uses the v0.1.2 `gitState()` helper (landmine #14 — best-effort, never throws). |
 | `wizard` | `platform/cli/cmd-wizard.js` | Falls through to the existing `runReRunWizard()` from `bootstrap-lib/wizard.js`. No new visual code. |
 
@@ -356,18 +356,18 @@ Each verb file is 50-150 LOC; per v0.21.1 lesson (a) the per-verb structure (vs 
 
 At install time, `phaseWriteActivation` (NEW in v0.22.0) writes two artifacts:
 
-- **`<vault>/Beacon/Scripts/activate.sh`** — single-purpose shell script:
+- **`<vault>/pantry/Scripts/activate.sh`** — single-purpose shell script:
   ```sh
-  export PATH="<abs-vault>/Beacon/Scripts:$PATH"
-  export BEACON_VAULT="<abs-vault>"
-  echo "beacon active. Try: beacon status"
+  export PATH="<abs-vault>/pantry/Scripts:$PATH"
+  export SAUCE_VAULT="<abs-vault>"
+  echo "sauce active. Try: sauce status"
   ```
   Absolute paths are resolved at write time (not runtime) — relative paths break for vaults reached via symlink.
 
-- **`<vault>/Beacon/Scripts/beacon`** — bash wrapper:
+- **`<vault>/pantry/Scripts/sauce`** — bash wrapper:
   ```sh
   #!/usr/bin/env bash
-  exec node "<abs-vault>/Beacon/platform/cli/beacon-cli.js" "$@"
+  exec node "<abs-vault>/pantry/platform/cli/sauce-cli.js" "$@"
   ```
   `chmod 0755` so it's executable from PATH.
 
@@ -377,7 +377,7 @@ The script does NOT modify `~/.zshrc` or `~/.bashrc`. Per-shell activation is th
 
 `platform/visual/{banner.js, section.js, colors.js}` provide shared rendering primitives used by both `install.sh` (delegated via small node helper) and the CLI verbs:
 
-- **`banner.js`** — the box-drawing 4-line banner ("Beacon · v0.22.0" / "Obsidian vault platform").
+- **`banner.js`** — the box-drawing 4-line banner ("Sauce · v0.23.0" / "Obsidian vault platform").
 - **`section.js`** — sectioned step output (`[1/4] Detecting environment... OK`).
 - **`colors.js`** — ANSI escape wrappers (`green`, `yellow`, `red`, `dim`, `bold`).
 
@@ -392,7 +392,7 @@ v0.22.0 refactors `platform/bootstrap.js`'s `runBootstrap()` into four reusable 
 | `phaseFirstRunWizard(ctx)` | Drive the existing first-run wizard prompts; write `Docs/Meta/platform-{config,subscription}.json`. | `cmd-bootstrap` |
 | `phaseFetchPlugins(ctx)` | Fetch the upstream community-plugins index + per-plugin assets (foundational + subscribed `external_plugins[]` union). | `cmd-bootstrap`, `cmd-update` (when subscription changes) |
 | `phaseRunInstaller(ctx)` | Invoke the existing in-vault installer (`platform/install.js:runInstall(vaultPath)`). | `cmd-bootstrap`, `cmd-update` |
-| `phaseWriteActivation(ctx)` | NEW — write `<vault>/Beacon/Scripts/{activate.sh, beacon}` with resolved absolute paths + chmod. | `cmd-bootstrap` |
+| `phaseWriteActivation(ctx)` | NEW — write `<vault>/pantry/Scripts/{activate.sh, sauce}` with resolved absolute paths + chmod. | `cmd-bootstrap` |
 
 Public `runBootstrap()` is retained as a thin wrapper calling all four phases in order — back-compat for any caller that imported it before v0.22.0.
 
@@ -409,7 +409,7 @@ if (verb === "bootstrap") {
 // Else: normal cwd-walk → load-config → dispatch path
 ```
 
-`bootstrapCtxFromArgs(argv)` reads `--vault PATH` (defaulting to `process.cwd()`), canonicalizes the path, and returns `{vault, version}` — the minimal shape `phaseFirstRunWizard` needs. Without this special case, `beacon bootstrap` from a fresh vault would fail with the dispatcher's "Not inside a beacon-managed vault" error.
+`bootstrapCtxFromArgs(argv)` reads `--vault PATH` (defaulting to `process.cwd()`), canonicalizes the path, and returns `{vault, version}` — the minimal shape `phaseFirstRunWizard` needs. Without this special case, `sauce bootstrap` from a fresh vault would fail with the dispatcher's "Not inside a sauce-managed vault" error.
 
 ### Test-hook DI pattern
 

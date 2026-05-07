@@ -91,6 +91,12 @@ Install / update / uninstall a blueprint = touch one directory at `beacon/<modul
 
 Surfaced during v0.1.1 S4 manual smokes (project's "Board" button being the wrong primitive); refined 2026-05-04 with the `beacon/` namespace decision; design at `Docs/plans/2026-05-03-boards-blueprint-design.md`.
 
+> [!info] Planned v0.25.0 rename
+> The `beacon/<module>/` namespace renames to `spice/<module>/` in v0.25.0
+> as part of the Sauce rebrand sequence. The invariant itself stays: each
+> blueprint owns ONE directory under the namespace; cross-module data flows
+> via wikilinks only. Only the namespace dir name changes.
+
 ### 10. Forcing the installer to re-process a manifest needs a triple version bump
 
 `install.js:223` short-circuits per-item install when `installedEntry.version === node.sub.version` (see landmine #16 for the literal call-site quote). Tests that need to exercise behavior INSIDE `installItem()` (e.g., `applyNavButtons`, `applyRuleFragment`, file-write paths) cannot just edit the workshop manifest in place — the installer skips it.
@@ -126,7 +132,7 @@ All eleven touched **only** by the installer, only via `applyTemplaterHotkeys` /
 3. **Malformed-JSON guard (C4 parity).** If the file is unreadable, unparseable, or has unexpected top-level shape (e.g., `enabled_templates_hotkeys` not an array, `bindings` not an array, parsed-but-not-an-object), the installer logs an error history entry + surfaces a Notice + returns. NEVER overwrites a malformed file.
 4. **Failure-loud history.** Every applied / skipped / warning / error path writes a history entry under `step: templater_hotkeys`, `step: slash_commander_bindings`, `step: core_plugin_settings`, `step: theme_overwrite`, `step: appearance`, `step: style_settings`, `step: community_plugin_data`, or `step: hotkeys` with full context (manifest name, binding name / plugin id / command_id, template path / settings keys, theme name / dest, message, attempted_at).
 
-**Why the allowlist exists.** Templater's per-template `Insert <name>` commands are only registered when `enabled_templates_hotkeys[]` is populated; Slash Commander's slash bindings are persisted in its `data.json:bindings[]`; the core Daily Notes plugin reads `folder` / `format` / `template` / `autorun` from `.obsidian/daily-notes.json`; the Baseline community theme is canonical platform content materialized at `.obsidian/themes/Baseline/`; the active theme + enabled CSS snippets are persisted in `.obsidian/appearance.json`; the canonical Style Settings JSON (rose-pine-light + melange-dark + 38 keys) is persisted in `.obsidian/plugins/obsidian-style-settings/data.json`; Dataview's `enableDataviewJs` / `enableInlineDataviewJs` toggles live in `.obsidian/plugins/dataview/data.json`; global Obsidian hotkeys live in `.obsidian/hotkeys.json`. All eleven must be populated by the installer, OR the user has to do manual configuration the platform can otherwise fully automate. The eleven paths are the entire surface needed to deliver `/validate /audit /new-project` automatically + ship the daily blueprint with its path convention pre-wired + ship the canonical Beacon look-and-feel out of the box + auto-enable Dataview JS + bind the consumer-convenience hotkeys (Cmd+- / Cmd+= / Cmd+[).
+**Why the allowlist exists.** Templater's per-template `Insert <name>` commands are only registered when `enabled_templates_hotkeys[]` is populated; Slash Commander's slash bindings are persisted in its `data.json:bindings[]`; the core Daily Notes plugin reads `folder` / `format` / `template` / `autorun` from `.obsidian/daily-notes.json`; the Baseline community theme is canonical platform content materialized at `.obsidian/themes/Baseline/`; the active theme + enabled CSS snippets are persisted in `.obsidian/appearance.json`; the canonical Style Settings JSON (rose-pine-light + melange-dark + 38 keys) is persisted in `.obsidian/plugins/obsidian-style-settings/data.json`; Dataview's `enableDataviewJs` / `enableInlineDataviewJs` toggles live in `.obsidian/plugins/dataview/data.json`; global Obsidian hotkeys live in `.obsidian/hotkeys.json`. All eleven must be populated by the installer, OR the user has to do manual configuration the platform can otherwise fully automate. The eleven paths are the entire surface needed to deliver `/validate /audit /new-project` automatically + ship the daily blueprint with its path convention pre-wired + ship the canonical Sauce look-and-feel out of the box + auto-enable Dataview JS + bind the consumer-convenience hotkeys (Cmd+- / Cmd+= / Cmd+[).
 
 **Why nothing else.** Editing other `.obsidian/` files (workspace.json, app.json, other plugins' data.json) cuts across user-customizable territory the platform has no claim on. The allowlist is exhaustive: any future cycle proposing a twelfth path requires (a) the same four safety mechanics, (b) updating CLAUDE.md + this landmine, (c) explicit user approval.
 
@@ -217,30 +223,30 @@ The `platform/bootstrap.js` orchestrator (v0.21.0+) is the only platform layer t
 
 Codified in v0.21.0 after Phase A surfaced 302-redirect failures (CF-1) at first real GitHub fetch.
 
-### 18. Inside-vault `Beacon/` is git-managed — never hand-edit
+### 18. Inside-vault `pantry/` is git-managed — never hand-edit
 
-Consumer vaults bootstrapped via `curl ... | bash` get the workshop cloned into `<vault>/Beacon/` (capital B). That directory is git-managed — `beacon update` fetches origin/main and `git reset --hard origin/main`-s. Hand-edits are wiped on the next update. If you need to customize:
+Consumer vaults bootstrapped via `curl ... | bash` get the workshop cloned into `<vault>/pantry/` (lowercase, post-v0.23.0; renamed from the v0.22.x `Beacon/` to resolve the macOS APFS case-collision with the lowercase `beacon/<module>/` namespace — see install.md "Upgrading from v0.22.x"). That directory is git-managed — `sauce update` fetches origin/main and `git reset --hard origin/main`-s. Hand-edits are wiped on the next update. If you need to customize:
 
-- Mechanism / blueprint subscriptions: `beacon wizard` (writes `Docs/Meta/platform-subscription.json`)
-- Config: `beacon wizard` → "Edit config" (writes `Docs/Meta/platform-config.json`)
+- Mechanism / blueprint subscriptions: `sauce wizard` (writes `Docs/Meta/platform-subscription.json`)
+- Config: `sauce wizard` → "Edit config" (writes `Docs/Meta/platform-config.json`)
 - Plugin behavior: edit `.obsidian/` per landmine #12 mechanics
 
-**Symptom.** A user opens `<vault>/Beacon/platform/install.js` in their editor to "tweak something" and saves it. On the next `beacon update` the edit is silently discarded by `git reset --hard origin/main`. With `--force` the working tree is reset even when dirty — surfacing as "my fix to install.js disappeared."
+**Symptom.** A user opens `<vault>/pantry/platform/install.js` in their editor to "tweak something" and saves it. On the next `sauce update` the edit is silently discarded by `git reset --hard origin/main`. With `--force` the working tree is reset even when dirty — surfacing as "my fix to install.js disappeared."
 
-**Why this matters.** `Beacon/` is the only git-managed top-level platform dir in any consumer vault. It is the v0.22.0 analogue of v0.19.0's vendored theme (landmine #15) — canonical platform content vended into the consumer vault, replaceable on every update, never hand-modified. Customizations route through:
+**Why this matters.** `pantry/` is the only git-managed top-level platform dir in any consumer vault. It is the v0.22.0 analogue of v0.19.0's vendored theme (landmine #15) — canonical platform content vended into the consumer vault, replaceable on every update, never hand-modified. Customizations route through:
 
-1. **`beacon wizard`** for subscription / config edits (writes `Docs/Meta/platform-*.json`, NOT inside `Beacon/`).
-2. **Mechanism / blueprint manifests upstream** for behavior changes (open a PR or fork; `git pull` + `beacon update`).
+1. **`sauce wizard`** for subscription / config edits (writes `Docs/Meta/platform-*.json`, NOT inside `pantry/`).
+2. **Mechanism / blueprint manifests upstream** for behavior changes (open a PR or fork; `git pull` + `sauce update`).
 3. **`.obsidian/` allowlist paths** for plugin-data tweaks per landmine #12 mechanics.
 
-**Recovery.** If you hand-edited a file inside `Beacon/` and want to keep your change while still updating:
-1. Copy the edit out of `Beacon/` (e.g., to `~/scratch/my-edit.js`).
-2. `beacon update --force` to discard the dirty state and pull origin/main.
+**Recovery.** If you hand-edited a file inside `pantry/` and want to keep your change while still updating:
+1. Copy the edit out of `pantry/` (e.g., to `~/scratch/my-edit.js`).
+2. `sauce update --force` to discard the dirty state and pull origin/main.
 3. Re-apply the edit upstream (via PR or local fork) so the change survives future updates.
 
-If you DIDN'T mean to hand-edit and just want a clean state: `beacon update --force` is the canonical reset.
+If you DIDN'T mean to hand-edit and just want a clean state: `sauce update --force` is the canonical reset.
 
-Mirrors landmine #15 (vendored theme is mechanism-owned). Codified 2026-05-06 with v0.22.0.
+Mirrors landmine #15 (vendored theme is mechanism-owned). Codified 2026-05-06 with v0.22.0; clone dir renamed `Beacon/` → `pantry/` in v0.23.0 to resolve the macOS APFS case-collision.
 
 ## Operational gotchas
 

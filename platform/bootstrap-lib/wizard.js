@@ -97,7 +97,7 @@ async function runFirstRunWizard(opts) {
     // -------- Non-interactive short-circuit --------
     if (nonInteractive) {
         const workshopRelativePath =
-            (defaults && defaults.workshopRelativePath) || "Beacon";
+            (defaults && defaults.workshopRelativePath) || "pantry";
         const displayName =
             (defaults && defaults.displayName) ||
             (vaultPath ? path.basename(vaultPath) : "vault");
@@ -177,7 +177,7 @@ async function runFirstRunWizard(opts) {
 
     // 2. Workshop relative path.
     const defaultWorkshopRel =
-        (defaults && defaults.workshopRelativePath) || "Beacon";
+        (defaults && defaults.workshopRelativePath) || "pantry";
     const workshopRelativePath = await input({
         message: "Workshop relative path (from vault root):",
         default: defaultWorkshopRel,
@@ -310,7 +310,7 @@ async function runReRunWizard(opts) {
     const { input, checkbox, select } = _loadInquirer();
 
     const action = await select({
-        message: "Beacon already configured. What would you like to do?",
+        message: "Sauce already configured. What would you like to do?",
         choices: [
             {
                 name: "Just install plugins + run installer (skip-if-present)",
@@ -375,7 +375,7 @@ async function runReRunWizard(opts) {
 
     if (action === "edit-cfg") {
         const defaultRel =
-            existingConfig.workshop_relative_path || "../beacon";
+            existingConfig.workshop_relative_path || "pantry";
         const defaultDisplay =
             (existingConfig.variables && existingConfig.variables.workshop) ||
             (vaultPath ? path.basename(vaultPath) : "vault");

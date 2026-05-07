@@ -27,11 +27,11 @@ async function run(ctx, args) {
     if (dirty && !force) {
         console.log(section.fail("dirty"));
         const detail = (status.stdout || "").trim().split("\n").map(l => "    " + l).join("\n");
-        throw new Error("Beacon/ working tree is dirty:\n" + detail + "\n  Pass --force to override.");
+        throw new Error("pantry/ working tree is dirty:\n" + detail + "\n  Pass --force to override.");
     }
     console.log(section.ok(dirty ? "dirty (override via --force)" : "clean"));
 
-    process.stdout.write("  " + section.step(3, total, "Resetting Beacon/ to origin/main...") + "  ");
+    process.stdout.write("  " + section.step(3, total, "Resetting pantry/ to origin/main...") + "  ");
     const reset = _gitExec(ctx, ["reset", "--hard", "origin/main"]);
     if (reset.code !== 0) {
         console.log(section.fail());
