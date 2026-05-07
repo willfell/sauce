@@ -1,13 +1,13 @@
 {
-  "name": "beacon-button",
+  "name": "accent-button",
   "version": "0.1.0",
-  "description": "Shared outline-accent action button renderer (BeaconButton). Any blueprint creating an outline-accent action button calls customJS.BeaconButton.render(parent, opts) instead of inline cssText + hover handlers. opts: {label, icon, onClick, flex?, disabled?, tone?}. tone reserved for future additive tones; only 'accent' valid at v0.18.0. Returns HTMLButtonElement; callers may mutate btn.disabled post-render (hover handlers honor it).",
+  "description": "Shared outline-accent action button renderer (AccentButton; renamed from BeaconButton in v0.24.0). Any blueprint creating an outline-accent action button calls customJS.AccentButton.render(parent, opts) instead of inline cssText + hover handlers. opts: {label, icon, onClick, flex?, disabled?, tone?}. tone reserved for future additive tones; only 'accent' valid at v0.1.0 (this mechanism's launch version). Returns HTMLButtonElement; callers may mutate btn.disabled post-render (hover handlers honor it).",
   "depends_on": [
     { "name": "customjs-guard", "range": ">=1.0.0" }
   ],
-  "customjs_classes": ["BeaconButton"],
+  "customjs_classes": ["AccentButton"],
   "files": [
-    { "source": "beacon-button.js", "dest": "{{scripts_path}}/beacon-button/beacon-button.js" }
+    { "source": "accent-button.js", "dest": "{{scripts_path}}/accent-button/accent-button.js" }
   ],
   "post_install": [],
   "rule_fragments": []

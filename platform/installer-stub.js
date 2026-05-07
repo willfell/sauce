@@ -8,7 +8,7 @@ module.exports = async (tp) => {
   const path = require("path");
   let cfg;
   try {
-    cfg = JSON.parse(await tp.app.vault.adapter.read("Docs/Meta/platform-config.json"));
+    cfg = JSON.parse(await tp.app.vault.adapter.read("ranch/platform-config.json"));
   } catch (e) {
     new Notice(`platformInstall: failed to read platform-config.json (${e.message})`, 10000);
     return;

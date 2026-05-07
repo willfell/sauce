@@ -23,12 +23,12 @@ async function run(ctx, args) {
         return;
     }
     if (r.action === "edit-sub" && r.payload) {
-        const subPath = path.join(ctx.vaultPath, "Docs/Meta/platform-subscription.json");
+        const subPath = path.join(ctx.vaultPath, "ranch/platform-subscription.json");
         const merged = _mergeSubscription(ctx.subscription, r.payload, ctx.workshopManifest);
         fs.writeFileSync(subPath, JSON.stringify(merged, null, 2) + "\n");
     }
     if (r.action === "edit-cfg" && r.payload && r.payload.config) {
-        const cfgPath = path.join(ctx.vaultPath, "Docs/Meta/platform-config.json");
+        const cfgPath = path.join(ctx.vaultPath, "ranch/platform-config.json");
         const merged = Object.assign({}, ctx.config, r.payload.config);
         fs.writeFileSync(cfgPath, JSON.stringify(merged, null, 2) + "\n");
     }

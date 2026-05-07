@@ -55,12 +55,12 @@ Each blueprint manifest declares `module_directory: "<name>"` (required, enforce
 - Platform-managed content is cleanly demarcated from consumer-personal content via the `beacon/` namespace.
 - New blueprints get a clean recipe — pick a directory name under `beacon/`, own it.
 
-**Mechanisms are exempt.** Mechanisms (`customjs-guard`, `validator`, `audit`, `nav-buttons`) are shared infrastructure landing under `Docs/Meta/Scripts/`, `Docs/Meta/Views/`, `Docs/Meta/Templater/` — not module-scoped, not under `beacon/`.
+**Mechanisms are exempt.** Mechanisms (`customjs-guard`, `validator`, `audit`, `nav-buttons`) are shared infrastructure landing under `ranch/Scripts/`, `ranch/Views/`, `ranch/Templater/` — not module-scoped, not under `beacon/`.
 
 Codified as landmine #11 + a CLAUDE.md non-negotiable. Decision rationale and shape at `Docs/plans/2026-05-03-boards-blueprint-design.md`. Refined 2026-05-04 to add the `beacon/` namespace prefix.
 
 ### Subscription
-Per-consumer-vault `Docs/Meta/platform-subscription.json` declaring which mechanisms + blueprints this vault adopts and at which versions:
+Per-consumer-vault `ranch/platform-subscription.json` declaring which mechanisms + blueprints this vault adopts and at which versions:
 
 ```json
 {
@@ -85,16 +85,16 @@ workshop/poc-vault/
 │   ├── Index.md                               Documentation entry point.
 │   ├── why.md, how.md, use.md, landmines.md   Conceptual docs.
 │   ├── plans/                                 Design + implementation plans.
-│   ├── prompts/                               Copy-paste-ready agent prompts.
-│   ├── Meta/
-│   │   ├── platform-config.json               Workshop's self-install path map.
-│   │   ├── platform-subscription.json         Workshop's self-subscription.
-│   │   ├── platform-installed.json            Auto-managed: what's currently installed.
-│   │   ├── Templater/                         Materialized user scripts (incl. platformInstall.js).
-│   │   ├── Views/                             Materialized Dataview view files.
-│   │   ├── Scripts/                           CustomJS classes (none in workshop).
-│   │   ├── Templates/                         Templater templates.
-│   │   └── rules/                             Rule registry (_global.json + per-blueprint rules).
+│   └── prompts/                               Copy-paste-ready agent prompts.
+├── ranch/
+│   ├── platform-config.json                   Workshop's self-install path map.
+│   ├── platform-subscription.json             Workshop's self-subscription.
+│   ├── platform-installed.json                Auto-managed: what's currently installed.
+│   ├── Templater/                             Materialized user scripts (incl. platformInstall.js).
+│   ├── Views/                                 Materialized Dataview view files.
+│   ├── Scripts/                               CustomJS classes (none in workshop).
+│   ├── Templates/                             Templater templates.
+│   └── rules/                                 Rule registry (_global.json + per-blueprint rules).
 └── platform/
     ├── manifest.json                          Version catalogue.
     ├── install.js                             The installer (canonical source).
@@ -104,24 +104,24 @@ workshop/poc-vault/
 
 ## Consumer layout (target shape)
 
-A consumer vault has the same `Docs/Meta/` shape as the workshop. The platform installs into:
-- `Docs/Meta/Templater/` — receives `platformInstall.js`, `validate.js`, `hook-validate.js`, `audit-walker.js`.
-- `Docs/Meta/Views/` — receives `customjs-guard/view.js`.
+A consumer vault has the same `ranch/` shape as the workshop. The platform installs into:
+- `ranch/Templater/` — receives `platformInstall.js`, `validate.js`, `hook-validate.js`, `audit-walker.js`.
+- `ranch/Views/` — receives `customjs-guard/view.js`.
 - `.obsidian/snippets/` — receives `customjs-loader.css`.
 - `.obsidian/appearance.json` — gets `customjs-loader` added to `enabledCssSnippets`.
-- `Docs/Meta/rules/` — receives any rule fragments (currently customjs-guard contributes a `_global.json` fragment).
+- `ranch/rules/` — receives any rule fragments (currently customjs-guard contributes a `_global.json` fragment).
 
 If a consumer's existing paths differ from canonical (e.g., accuris currently has the customjs-guard view at `Extras/Scripts/customjs-guard/view.js` from the original rollout), the consumer's `platform-config.json` reflects that, and the installer materializes to the existing path. A canonical-path migration is a separate, deferred plan.
 
 ## Installer flow
 
-The installer is invoked via the consumer's `_install-platform.md` Templater template. The consumer's `Docs/Meta/Templater/platformInstall.js` is a ~12-line content-static thin stub (post-v0.1.2 S2) that reads `Docs/Meta/platform-config.json`, resolves `<workshop>/platform/install.js`, clears Node's `require.cache` for that path, and dispatches via `require()`. The canonical `install.js` runs the full install loop on the consumer's vault.
+The installer is invoked via the consumer's `_install-platform.md` Templater template. The consumer's `ranch/Templater/platformInstall.js` is a ~12-line content-static thin stub (post-v0.1.2 S2) that reads `ranch/platform-config.json`, resolves `<workshop>/platform/install.js`, clears Node's `require.cache` for that path, and dispatches via `require()`. The canonical `install.js` runs the full install loop on the consumer's vault.
 
 Steps the canonical installer performs:
 
-1. Read `Docs/Meta/platform-config.json` → vault path map + variables.
-2. Read `Docs/Meta/platform-subscription.json` → what this vault wants.
-3. Read `Docs/Meta/platform-installed.json` → what's currently installed (or empty).
+1. Read `ranch/platform-config.json` → vault path map + variables.
+2. Read `ranch/platform-subscription.json` → what this vault wants.
+3. Read `ranch/platform-installed.json` → what's currently installed (or empty).
 4. Resolve workshop absolute path via `app.vault.adapter.basePath` + `config.workshop_relative_path`.
 5. Read `<workshop>/platform/manifest.json`.
 5a. **Validate `module_directory` on every subscribed blueprint manifest** (added v0.2.0). Missing or empty → record `error / module_directory_missing`, skip that blueprint. Two blueprints declaring the same value → record `warning / module_directory_collision`, first-wins by topo order (skip the second). Mechanisms exempt.
@@ -140,7 +140,7 @@ Steps the canonical installer performs:
    k. Apply `templater_folder_templates[]` registrations to `.obsidian/plugins/templater-obsidian/data.json:folder_templates[]` (added v0.4.0; additive merge by `folder` field, first-wins idempotency, user-override preserved on template mismatch, empty-default placeholder replaced on first-write; backup-on-edit; see landmine #12).
    l. Apply `core_plugin_settings[]` registrations to `.obsidian/<id>.json` (added v0.3.0; additive shallow merge, backup-on-edit; see landmine #12).
    m. Append to `installed` + `history`.
-7. Write `Docs/Meta/platform-installed.json`.
+7. Write `ranch/platform-installed.json`.
 8. Show "platformInstall: complete." Notice.
 
 > [!info] Optional manifest fields (additive across versions)
@@ -159,7 +159,7 @@ Cross-vault file reads use `require("fs").promises` (Node API available in Templ
 
 ## Why JSON, not YAML
 
-`Docs/Meta/platform-config.json`, `platform-subscription.json`, `platform-installed.json`, and `platform/manifest.json` are all JSON. Same for each mechanism's `manifest.json` and the `rules/_global.json`.
+`ranch/platform-config.json`, `platform-subscription.json`, `platform-installed.json`, and `platform/manifest.json` are all JSON. Same for each mechanism's `manifest.json` and the `rules/_global.json`.
 
 Reason: Templater user scripts can't reach Obsidian's `parseYaml` (the `obsidian` virtual module isn't registered for non-plugin contexts). `JSON.parse` is a built-in, universally available. We tried `require("obsidian").parseYaml` first; it returned undefined.
 
@@ -178,7 +178,7 @@ Drift detection (in `audit-walker.js`):
 
 ### Distribution model (post-v0.1.2)
 
-Each consumer's `Docs/Meta/Templater/platformInstall.js` is a ~12-line content-static thin stub. It reads the consumer's `platform-config.json` to resolve the workshop path, clears Node's require cache for the canonical installer, and dispatches to `<workshop>/platform/install.js`. The canonical installer is the single source of truth at runtime; it lives in the workshop git repo and is updated via normal git workflow (`git pull` in the workshop, then re-run the install in each consumer).
+Each consumer's `ranch/Templater/platformInstall.js` is a ~12-line content-static thin stub. It reads the consumer's `platform-config.json` to resolve the workshop path, clears Node's require cache for the canonical installer, and dispatches to `<workshop>/platform/install.js`. The canonical installer is the single source of truth at runtime; it lives in the workshop git repo and is updated via normal git workflow (`git pull` in the workshop, then re-run the install in each consumer).
 
 The stub itself never changes after v0.1.2 S2 deployment. Edits to canonical `install.js` propagate to all consumers automatically on the next install run, with no per-consumer file changes.
 
@@ -206,7 +206,7 @@ Load-bearing operational lessons not yet codified elsewhere. Most surfaced acros
 
 9. **Helpers that materialize new state need explicit prereq gates** — `applyExternalPlugins` only emits warnings; helpers that mkdir + fresh-write must short-circuit at the top via `_externalPluginsSatisfied(tp, manifest)` or equivalent prereq check. Pattern reusable for any future helper whose missing-prereq state isn't recoverable post-hoc. Surfaced: v0.19.0 CF-1.
 
-10. **Bounded cohesion — BeaconCards = hubs only / bullet lists for tasks; outline-accent buttons go through BeaconButton** — BeaconCards for hub-style listings (real files with title/subtitle/meta worth surfacing visually); plain `<ul>` for compact at-a-glance task panels (v0.12.0 daily blueprint S3.4.1 inline-CF). Outline-accent action buttons go through `customJS.BeaconButton.render(...)` — no inline cssText + hover handlers (v0.18.0 BeaconButton mechanism promotion).
+10. **Bounded cohesion — BeaconCards = hubs only / bullet lists for tasks; outline-accent buttons go through AccentButton** — BeaconCards for hub-style listings (real files with title/subtitle/meta worth surfacing visually); plain `<ul>` for compact at-a-glance task panels (v0.12.0 daily blueprint S3.4.1 inline-CF). Outline-accent action buttons go through `customJS.AccentButton.render(...)` — no inline cssText + hover handlers (v0.18.0 introduced this as BeaconButton; renamed to AccentButton in v0.24.0).
 
 
 ---
@@ -231,20 +231,20 @@ The wizard handles config + subscription generation on first run, then plugin fe
 
 ### What bootstrap does
 
-1. **Detects existing config.** If `Docs/Meta/platform-config.json` + `platform-subscription.json` exist, opens the re-run menu (install / edit subscription / edit config / force-redownload / quit). If absent, opens the first-run wizard.
+1. **Detects existing config.** If `ranch/platform-config.json` + `platform-subscription.json` exist, opens the re-run menu (install / edit subscription / edit config / force-redownload / quit). If absent, opens the first-run wizard.
 2. **First-run wizard** (5 prompts via `@inquirer/prompts`):
    - Workshop relative path (validates `<vault>/<rel>/platform/manifest.json` exists)
    - Vault display name (defaults to vault dirname)
-   - Mechanisms checkbox (defaults: customjs-guard, nav-buttons, cards, beacon-button, styling)
+   - Mechanisms checkbox (defaults: customjs-guard, nav-buttons, cards, accent-button, styling)
    - Blueprints checkbox (defaults: none — opt-in)
    - Confirm summary
 3. **Writes config files** atomically (`.tmp` + rename) with canonical 6 path variables (`views_path`, `templater_scripts_path`, `scripts_path`, `rules_path`, `templates_path`, `commands_path`) merged into `variables` alongside `workshop` (display name) + `vault_identity_tag` (lowercase).
-4. **Vendors the v0.1.2 thin-stub** at `Docs/Meta/Templater/platformInstall.js` if missing (landmine #13 content-static; never re-edits an existing one).
+4. **Vendors the v0.1.2 thin-stub** at `ranch/Templater/platformInstall.js` if missing (landmine #13 content-static; never re-edits an existing one).
 5. **Fetches the upstream community-plugins index** (`raw.githubusercontent.com/obsidianmd/obsidian-releases/master/community-plugins.json`) for id → repo lookup. Cached for the run.
 6. **Per plugin in (foundational ∪ subscribed `external_plugins[]`):** skip-if-present unless force-redownload selected. Otherwise HTTPS GET `manifest.json` + `main.js` + (optional) `styles.css` from `https://github.com/<repo>/releases/latest/download/<asset>` (follows 302 redirects to GitHub's CDN). Vendors into `<vault>/.obsidian/plugins/<id>/`.
 7. **Merges plugin ids into `community-plugins.json`** (additive; sorted; deduped; `.beacon-backup` of prior).
 8. **Invokes `runInstall(vaultPath)`** — the existing Node installer — which materializes themes, appearance, style-settings, blueprints, nav-buttons, etc.
-9. **Prints a condensed summary** (Notice lines + Verdict + section counts; ~30-80 lines). Full output tee'd to `Docs/Meta/bootstrap-last-install.log` for inspection.
+9. **Prints a condensed summary** (Notice lines + Verdict + section counts; ~30-80 lines). Full output tee'd to `ranch/bootstrap-last-install.log` for inspection.
 
 ### Schema additions in v0.21.0
 
@@ -337,7 +337,7 @@ v0.22.0 introduces a `sauce` CLI as the consumer-facing operations surface for v
 
 The CLI entry point is `platform/cli/sauce-cli.js`. The dispatcher resolves which vault the user is operating on by:
 
-1. **Walking cwd ancestors** looking for `Docs/Meta/platform-config.json`. The first ancestor containing that file is treated as the vault root. This lets `sauce status` work from any subdirectory inside an activated vault.
+1. **Walking cwd ancestors** looking for `ranch/platform-config.json`. The first ancestor containing that file is treated as the vault root. This lets `sauce status` work from any subdirectory inside an activated vault.
 2. **`$SAUCE_VAULT` env-var fallback.** If the cwd-walk finds no config (e.g., the user is outside the vault tree), the dispatcher reads `process.env.SAUCE_VAULT`. The activation script (`pantry/Scripts/activate.sh`) exports this on every `source` so the fallback is always populated for an activated shell.
 3. **Failure-loud on neither.** If the cwd-walk fails AND `SAUCE_VAULT` is unset, the dispatcher prints "Not inside a sauce-managed vault. cd into one or set SAUCE_VAULT" and exits 1. Mirrors the failure-loud posture from landmine #17 and `applyTemplaterHotkeys` precedent.
 
@@ -389,7 +389,7 @@ v0.22.0 refactors `platform/bootstrap.js`'s `runBootstrap()` into four reusable 
 
 | Phase | Purpose | Reused by |
 |---|---|---|
-| `phaseFirstRunWizard(ctx)` | Drive the existing first-run wizard prompts; write `Docs/Meta/platform-{config,subscription}.json`. | `cmd-bootstrap` |
+| `phaseFirstRunWizard(ctx)` | Drive the existing first-run wizard prompts; write `ranch/platform-{config,subscription}.json`. | `cmd-bootstrap` |
 | `phaseFetchPlugins(ctx)` | Fetch the upstream community-plugins index + per-plugin assets (foundational + subscribed `external_plugins[]` union). | `cmd-bootstrap`, `cmd-update` (when subscription changes) |
 | `phaseRunInstaller(ctx)` | Invoke the existing in-vault installer (`platform/install.js:runInstall(vaultPath)`). | `cmd-bootstrap`, `cmd-update` |
 | `phaseWriteActivation(ctx)` | NEW — write `<vault>/pantry/Scripts/{activate.sh, sauce}` with resolved absolute paths + chmod. | `cmd-bootstrap` |
@@ -398,7 +398,7 @@ Public `runBootstrap()` is retained as a thin wrapper calling all four phases in
 
 ### Bootstrap-verb dispatcher special case
 
-The CLI dispatcher's normal pattern is cwd-walk → load-config → dispatch. `bootstrap` is the verb that CREATES that config — it runs from a state where `Docs/Meta/platform-config.json` doesn't yet exist. Special handling:
+The CLI dispatcher's normal pattern is cwd-walk → load-config → dispatch. `bootstrap` is the verb that CREATES that config — it runs from a state where `ranch/platform-config.json` doesn't yet exist. Special handling:
 
 ```js
 if (verb === "bootstrap") {

@@ -461,11 +461,11 @@ tags:
 ---
 
 \`\`\`dataviewjs
-await dv.view("Docs/Meta/Views/customjs-guard", { class: "SpaceNavButtons" });
+await dv.view("ranch/Views/customjs-guard", { class: "SpaceNavButtons" });
 \`\`\`
 
 \`\`\`dataviewjs
-await dv.view("Docs/Meta/Views/customjs-guard", { class: "TripNavButtons" });
+await dv.view("ranch/Views/customjs-guard", { class: "TripNavButtons" });
 \`\`\`
 `;
 
@@ -482,7 +482,7 @@ await dv.view("Docs/Meta/Views/customjs-guard", { class: "TripNavButtons" });
             }
         }
 
-        const tplBase = "Docs/Meta/Templates";
+        const tplBase = "ranch/Templates";
         const now = new Date();
         const pad = (n) => String(n).padStart(2, "0");
         const dateStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;

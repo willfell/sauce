@@ -9,7 +9,7 @@
  *
  * Flow:
  *   1. Detect node_modules; print hint + exit if missing (skipped in nonInteractive)
- *   2. Read <vault>/Docs/Meta/platform-config.json (or trigger first-run wizard)
+ *   2. Read <vault>/ranch/platform-config.json (or trigger first-run wizard)
  *   3. Resolve workshop path; read workshop manifest
  *   4. If config exists: optional re-run wizard menu (skipped in nonInteractive)
  *   5. Compute plugin set (foundational ∪ external_plugins from subscribed items)
@@ -220,8 +220,8 @@ async function runBootstrap(opts) {
         detectInquirerOrExit();
     }
 
-    const cfgPath = path.join(vaultPath, "Docs/Meta/platform-config.json");
-    const subPath = path.join(vaultPath, "Docs/Meta/platform-subscription.json");
+    const cfgPath = path.join(vaultPath, "ranch/platform-config.json");
+    const subPath = path.join(vaultPath, "ranch/platform-subscription.json");
 
     // Capture pre-existence BEFORE phaseFirstRunWizard writes either file —
     // determines whether the re-run wizard menu should fire (only when the
@@ -265,11 +265,11 @@ async function runBootstrap(opts) {
     // every install run emits "Unsubstituted variables: X" Notices, skipping
     // file writes. Augment ADDITIVELY — never overwrite a user-supplied value.
     const CANONICAL_VARIABLES = {
-        views_path: "Docs/Meta/Views",
-        templater_scripts_path: "Docs/Meta/Templater",
-        scripts_path: "Docs/Meta/Scripts",
-        rules_path: "Docs/Meta/rules",
-        templates_path: "Docs/Meta/Templates",
+        views_path: "ranch/Views",
+        templater_scripts_path: "ranch/Templater",
+        scripts_path: "ranch/Scripts",
+        rules_path: "ranch/rules",
+        templates_path: "ranch/Templates",
         commands_path: "commands"
     };
     if (config && typeof config === "object") {
@@ -287,7 +287,7 @@ async function runBootstrap(opts) {
     }
 
     // CF-4: ensure the v0.1.2 thin-stub installer dispatcher exists at
-    // <vault>/Docs/Meta/Templater/platformInstall.js. run-install.js (and
+    // <vault>/ranch/Templater/platformInstall.js. run-install.js (and
     // Templater inside Obsidian) load this stub as the installer entry point;
     // the stub reads platform-config.json and dispatches to the workshop's
     // canonical install.js. Without it run-install fails "bootstrap installer
@@ -297,7 +297,7 @@ async function runBootstrap(opts) {
     // Stub is content-static across all consumers (landmine #13; md5
     // invariant a39257da1dd49ae4481e5cd0a42bdac4). Write only if missing;
     // never re-edit an existing one.
-    const stubDest = path.join(vaultPath, "Docs/Meta/Templater/platformInstall.js");
+    const stubDest = path.join(vaultPath, "ranch/Templater/platformInstall.js");
     if (!fs.existsSync(stubDest)) {
         const stubSrc = path.join(workshopPath, "platform/installer-stub.js");
         if (fs.existsSync(stubSrc)) {

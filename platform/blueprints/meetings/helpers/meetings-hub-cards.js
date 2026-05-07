@@ -5,7 +5,7 @@
  * delegates rendering to BeaconCards with layout: "row".
  *
  * Usage in DataviewJS:
- *   await dv.view("Docs/Meta/Views/customjs-guard", { class: "MeetingsHubCards" });
+ *   await dv.view("ranch/Views/customjs-guard", { class: "MeetingsHubCards" });
  *
  * v0.2.0 (cards-cohesion cycle): migrated from hand-rolled card chrome to
  * BeaconCards.render call. Visual fidelity preserved via subtitle:{text,

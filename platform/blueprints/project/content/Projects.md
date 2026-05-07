@@ -5,11 +5,11 @@ tags:
 ---
 
 ```dataviewjs
-await dv.view("Docs/Meta/Views/customjs-guard", { class: "SpaceNavButtons" });
+await dv.view("ranch/Views/customjs-guard", { class: "SpaceNavButtons" });
 ```
 
 ```dataviewjs
-await dv.view("Docs/Meta/Views/customjs-guard", { class: "ProjectNavButtons" });
+await dv.view("ranch/Views/customjs-guard", { class: "ProjectNavButtons" });
 ```
 
 ---
@@ -17,5 +17,5 @@ await dv.view("Docs/Meta/Views/customjs-guard", { class: "ProjectNavButtons" });
 ## All Projects
 
 ```dataviewjs
-await dv.view("Docs/Meta/Views/customjs-guard", { class: "ProjectsHubCards" });
+await dv.view("ranch/Views/customjs-guard", { class: "ProjectsHubCards" });
 ```

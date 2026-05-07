@@ -22,22 +22,22 @@ async function resolveContext(opts) {
     let vaultPath = null;
     let cur = path.resolve(cwd);
     while (cur !== path.dirname(cur)) {
-        if (fs.existsSync(path.join(cur, "Docs/Meta/platform-config.json"))) {
+        if (fs.existsSync(path.join(cur, "ranch/platform-config.json"))) {
             vaultPath = cur;
             break;
         }
         cur = path.dirname(cur);
     }
     if (!vaultPath && env.SAUCE_VAULT) {
-        if (fs.existsSync(path.join(env.SAUCE_VAULT, "Docs/Meta/platform-config.json"))) {
+        if (fs.existsSync(path.join(env.SAUCE_VAULT, "ranch/platform-config.json"))) {
             vaultPath = env.SAUCE_VAULT;
         }
     }
     if (!vaultPath) {
         throw new Error("Not inside a sauce-managed vault. cd into one or set SAUCE_VAULT.");
     }
-    const config = readJson(path.join(vaultPath, "Docs/Meta/platform-config.json"));
-    const subPath = path.join(vaultPath, "Docs/Meta/platform-subscription.json");
+    const config = readJson(path.join(vaultPath, "ranch/platform-config.json"));
+    const subPath = path.join(vaultPath, "ranch/platform-subscription.json");
     const subscription = fs.existsSync(subPath) ? readJson(subPath) : { mechanisms: [], blueprints: [] };
     const workshopPath = path.resolve(vaultPath, config.workshop_relative_path || "pantry");
     const wmPath = path.join(workshopPath, "platform/manifest.json");

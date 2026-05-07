@@ -68,7 +68,7 @@ GIT_VER="$(git --version | awk '{print $3}')"
 printf 'OK\n        node %s · git %s · vault %s\n\n' "$NODE_VER" "$GIT_VER" "$VAULT"
 
 # [2/4] Vault target
-mkdir -p "$VAULT/Docs/Meta"
+mkdir -p "$VAULT/ranch"
 SAUCE_DIR="$VAULT/pantry"
 if [ -d "$SAUCE_DIR" ]; then
     if [ "$OVERWRITE" = "1" ]; then

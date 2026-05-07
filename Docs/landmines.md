@@ -10,7 +10,7 @@ On cold vault load, Dataview/Templater render dataviewjs blocks before the Custo
 
 **Fix:** never use the bare pattern. Always go through the customjs-guard view:
 ```dataviewjs
-await dv.view("Docs/Meta/Views/customjs-guard", { class: "SpaceNavButtons" });
+await dv.view("ranch/Views/customjs-guard", { class: "SpaceNavButtons" });
 ```
 
 ### 2. `typeof customJS === 'undefined'` does NOT guard against the error
@@ -23,7 +23,7 @@ CustomJS declares its global with `let customJS = …`, putting the name in the 
 
 The CustomJS plugin scans its `jsFolder` and tries to parse every `.js` file as a CustomJS class. A Dataview view file uses different syntax (top-level body, not a class). CustomJS hits a parse error and **aborts class registration entirely** — every customJS class in the vault goes dark.
 
-**Fix:** view files live OUTSIDE the CustomJS scan folder. Canonical: `Docs/Meta/Views/`. ERO has a CLAUDE.md non-negotiable banning the legacy `Extras/Scripts/...` location for the same reason.
+**Fix:** view files live OUTSIDE the CustomJS scan folder. Canonical: `ranch/Views/`. ERO has a CLAUDE.md non-negotiable banning the legacy `Extras/Scripts/...` location for the same reason.
 
 ### 4. Dataview view files are NOT CommonJS modules
 
@@ -83,7 +83,7 @@ Install / update / uninstall a blueprint = touch one directory at `beacon/<modul
 
 **Fix:** every blueprint manifest must declare `module_directory`. Installer derives the materialization root as `<vault_root>/beacon/<module_directory>/`. Refuses to install a blueprint manifest that lacks `module_directory` (failure-loud). Two blueprints declaring the same `module_directory` → installer Notice + skips the second (first-wins by install order); recorded as `warning, step: module_directory_collision`.
 
-**Mechanisms exempt.** Mechanisms (cross-cutting code: `customjs-guard`, `validator`, `audit`, `nav-buttons`) are shared infrastructure that continues to land under `Docs/Meta/Scripts/`, `Docs/Meta/Views/`, `Docs/Meta/Templater/`, etc. — not module-scoped, not under `beacon/`.
+**Mechanisms exempt.** Mechanisms (cross-cutting code: `customjs-guard`, `validator`, `audit`, `nav-buttons`) are shared infrastructure that continues to land under `ranch/Scripts/`, `ranch/Views/`, `ranch/Templater/`, etc. — not module-scoped, not under `beacon/`.
 
 **Known violations (legacy, awaiting future cycles):**
 - project blueprint @ v0.2.0 places content under `boards/planning/<slug>/` (top-level `boards/`), mis-located on TWO axes: wrong namespace (no `beacon/` prefix) AND wrong module dir (lives under `boards/` instead of its own `projects/`). Resolved in a future cycle by migrating project to `beacon/projects/<slug>/`.
@@ -104,7 +104,7 @@ Surfaced during v0.1.1 S4 manual smokes (project's "Board" button being the wron
 **Fix (test mechanic):** to force re-processing of a single item under test, transiently bump THREE coordinated versions, run, then restore all three:
 1. The item's own manifest (`platform/<kind>/<name>/manifest.json:version`).
 2. The workshop manifest's entry for that item (`platform/manifest.json:<kind>[].<name>.version`).
-3. The consumer subscription's entry (`<consumer>/Docs/Meta/platform-subscription.json:<kind>[].<name>.version`).
+3. The consumer subscription's entry (`<consumer>/ranch/platform-subscription.json:<kind>[].<name>.version`).
 
 Restore-discipline is critical — partial restore leaves the workshop dogfood gate red. Verify each of the three is back to the canonical value AND re-run the workshop self-install harness AND re-run the consumer install harness before declaring the test complete. Surfaced in v0.1.1 S4 T4.8 (malformed nav_buttons entry negative test). See `Docs/plans/execution-logs/2026-05-03-registry-driven-nav-buttons/T4.0-T4.9-S4-harness-and-barebones-regression.md`.
 
@@ -140,17 +140,25 @@ All eleven touched **only** by the installer, only via `applyTemplaterHotkeys` /
 
 Surfaced 2026-05-04 during v0.1.x close (T2.1-discovery §8 + T2.6 deferral); codified in v0.1.3. Allowlist expanded from 2 → 3 paths in v0.3.0 to add `.obsidian/daily-notes.json` for the daily blueprint. Allowlist UNCHANGED in v0.4.0 (still 3 paths); helper count grew 3 → 4 with `applyTemplaterFolderTemplates` (writes to the same templater data.json as `applyTemplaterHotkeys`, just to a new top-level field `folder_templates[]`). Allowlist expanded from 3 → 6 paths in v0.19.0 to add `.obsidian/themes/<Name>/`, `.obsidian/appearance.json`, and `.obsidian/plugins/obsidian-style-settings/data.json` for the styling mechanism; helper count grew 4 → 7 with `applyVendoredThemes` (sha256-compare overwrite-with-backup; new `.bak` suffix exception to mechanic #1) + `applyAppearance` (cssTheme always overridden; enabledCssSnippets additive union) + `applyStyleSettings` (per-key first-wins merge — user values preserved over canonical defaults). All three v0.19.0 helpers gate on `manifest.external_plugins[].required` IDs being present in `.obsidian/community-plugins.json`; absent prereq → `info/{theme_overwrite,appearance,style_settings}` + `action: "skipped_missing_prereq"` + zero writes. Allowlist expanded from 6 → 9 paths in v0.21.0 to add `.obsidian/plugins/<id>/{main.js,manifest.json,styles.css}` for the bootstrap-fetched plugin entry-point/manifest/styles; bootstrap is the platform's only network gateway, install.js stays filesystem-only (landmine #17). Allowlist expanded from 9 → 11 paths in v0.21.1 to add `.obsidian/plugins/dataview/data.json` and `.obsidian/hotkeys.json` for the convenience@0.1.0 mechanism; helper count grew 7 → 9 with `applyCommunityPluginData` (additive shallow merge; substituteLenient round-trip; path-traversal validator on `id`; plugin-dir-absent skip; broadened prereq gate that short-circuits on ANY declared `external_plugins[]` id absent from `.obsidian/community-plugins.json` regardless of `required:true` flag — divergent from the v0.19.0 styling helpers' interpretation, justified because materializing settings into a missing plugin's data.json would be a wasted write and risks silent drift on next consumer reload) + `applyHotkeys` (additive per-`command_id` first-wins; FIRST-WINS protects pre-existing user bindings — never modifies any binding the consumer has already set).
 
-### 13. Bootstrap stub is content-static; never re-edit
+### 13. Bootstrap stub is content-static; never re-edit (per-consumer drift forbidden)
 
-Each consumer's `Docs/Meta/Templater/platformInstall.js` is a ~12-line dispatcher set once during v0.1.2 S2. It MUST be byte-identical across all consumers (`diff` between any two stubs returns empty). The stub never re-syncs with `platform/install.js` — that file is now canonical-only and reached at runtime via `require()`. If a future cycle wants to change the stub's contract (config-file path, error telemetry, etc.), every consumer's stub must be updated in lockstep AND the change documented as a distribution-model bump.
+Each consumer's `ranch/Templater/platformInstall.js` is a ~12-line dispatcher first set during v0.1.2 S2. It MUST be byte-identical across all consumers at any given platform version (`diff` between any two stubs returns empty). The stub never re-syncs with `platform/install.js` — that file is now canonical-only and reached at runtime via `require()`.
 
-**Why:** the stub IS the new distribution mechanism. Drift in the stub breaks consumers silently — they'd dispatch to a different install.js path, or skip the require-cache clear, or read a different config. The stub's content-static invariant is the load-bearing replacement for the old md5-verified bootstrap-copy ritual.
+**Stub body history.** The stub body has changed exactly ONCE in its history:
+- **v0.1.2 → v0.23.0:** historical md5 invariant `a39257da1dd49ae4481e5cd0a42bdac4`. Stub read `Docs/Meta/platform-config.json` at runtime.
+- **v0.24.0+ (current):** new md5 invariant `ea23aa812503bfca66359d3b2b239ba8`. Tree 3 rename moved the runtime plumbing dir; stub line 11 now reads `ranch/platform-config.json`.
 
-**Canonical source:** `platform/installer-stub.js` — single source of truth for the stub body. Every consumer's bootstrap copy must match it byte-for-byte.
+Going forward, the stub body changes ONLY on Tree N rename cycles (rare — these are the multi-cycle rebrand renames that move the runtime plumbing tree, e.g., `Docs/Meta/` → `ranch/`). Any other proposed stub change requires a distribution-model bump documented in CLAUDE.md.
 
-**Recovery from drift:** copy `platform/installer-stub.js` over the divergent consumer's bootstrap path; re-run harness; commit only the canonical source if its body changed.
+**Per-consumer drift is still forbidden.** Within a given platform version, the stub MUST be byte-identical across every consumer. The "changed once at v0.24.0" exception is a global lockstep transition — every consumer flips to the new md5 in the same release window — not a per-consumer customization knob.
 
-Codified in v0.1.2.
+**Why:** the stub IS the distribution mechanism. Drift in the stub breaks consumers silently — they'd dispatch to a different install.js path, or skip the require-cache clear, or read a different config. The stub's content-static invariant is the load-bearing replacement for the old md5-verified bootstrap-copy ritual.
+
+**Canonical source:** `platform/installer-stub.js` — single source of truth for the stub body. Every consumer's bootstrap copy must match it byte-for-byte at the current platform version's md5 invariant.
+
+**Recovery from drift:** copy `platform/installer-stub.js` over the divergent consumer's bootstrap path; re-run harness; commit only the canonical source if its body changed. v0.24.0 install runs auto-overwrite any stub still at the old `a39257da...` md5 with the new canonical body (`ea23aa81...`).
+
+Codified in v0.1.2; amended in v0.24.0 (Tree 3 rename — first stub-body change).
 
 ### 14. `gitState()` is best-effort; must never throw
 
@@ -198,7 +206,7 @@ The installer's per-item install loop short-circuits when `installedEntry.versio
 1. blueprint or mechanism manifest (`platform/<kind>/<name>/manifest.json:version`)
 2. workshop catalogue line (`platform/manifest.json:<kind>[].<name>.version`)
 3. workshop subscription (mechanisms only — workshop self-subscription dogfoods mechanisms)
-4. barebones subscription (`../barebones-beacon-poc/Docs/Meta/platform-subscription.json:<kind>[].<name>.version`)
+4. barebones subscription (`../barebones-beacon-poc/ranch/platform-subscription.json:<kind>[].<name>.version`)
 
 **Recovery if a CF lands without a version bump.** Bump the item version + re-run install. The barebones drift is silent — `installed.json` still records the prior content's SHA in history.
 
@@ -227,15 +235,15 @@ Codified in v0.21.0 after Phase A surfaced 302-redirect failures (CF-1) at first
 
 Consumer vaults bootstrapped via `curl ... | bash` get the workshop cloned into `<vault>/pantry/` (lowercase, post-v0.23.0; renamed from the v0.22.x `Beacon/` to resolve the macOS APFS case-collision with the lowercase `beacon/<module>/` namespace — see install.md "Upgrading from v0.22.x"). That directory is git-managed — `sauce update` fetches origin/main and `git reset --hard origin/main`-s. Hand-edits are wiped on the next update. If you need to customize:
 
-- Mechanism / blueprint subscriptions: `sauce wizard` (writes `Docs/Meta/platform-subscription.json`)
-- Config: `sauce wizard` → "Edit config" (writes `Docs/Meta/platform-config.json`)
+- Mechanism / blueprint subscriptions: `sauce wizard` (writes `ranch/platform-subscription.json`)
+- Config: `sauce wizard` → "Edit config" (writes `ranch/platform-config.json`)
 - Plugin behavior: edit `.obsidian/` per landmine #12 mechanics
 
 **Symptom.** A user opens `<vault>/pantry/platform/install.js` in their editor to "tweak something" and saves it. On the next `sauce update` the edit is silently discarded by `git reset --hard origin/main`. With `--force` the working tree is reset even when dirty — surfacing as "my fix to install.js disappeared."
 
 **Why this matters.** `pantry/` is the only git-managed top-level platform dir in any consumer vault. It is the v0.22.0 analogue of v0.19.0's vendored theme (landmine #15) — canonical platform content vended into the consumer vault, replaceable on every update, never hand-modified. Customizations route through:
 
-1. **`sauce wizard`** for subscription / config edits (writes `Docs/Meta/platform-*.json`, NOT inside `pantry/`).
+1. **`sauce wizard`** for subscription / config edits (writes `ranch/platform-*.json`, NOT inside `pantry/`).
 2. **Mechanism / blueprint manifests upstream** for behavior changes (open a PR or fork; `git pull` + `sauce update`).
 3. **`.obsidian/` allowlist paths** for plugin-data tweaks per landmine #12 mechanics.
 
@@ -252,7 +260,7 @@ Mirrors landmine #15 (vendored theme is mechanism-owned). Codified 2026-05-06 wi
 
 ### CustomJS scan folder is per-vault and configured in `.obsidian/plugins/customjs/data.json`
 
-When canonically migrating a consumer to `Docs/Meta/Scripts/`, also update CustomJS's `jsFolder` setting. Editing that file is a `.obsidian/` change and needs explicit user approval (per each vault's CLAUDE.md "ask before acting" rule).
+When canonically migrating a consumer to `ranch/Scripts/`, also update CustomJS's `jsFolder` setting. Editing that file is a `.obsidian/` change and needs explicit user approval (per each vault's CLAUDE.md "ask before acting" rule).
 
 ### Approval gates use Templater's `tp.system.suggester`
 

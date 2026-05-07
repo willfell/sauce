@@ -1,7 +1,7 @@
 {
   "name": "nav-buttons",
   "version": "2.5.2",
-  "description": "Thin renderer over Docs/Meta/nav-buttons-registry.json. Each blueprint/mechanism declares nav_buttons[]; installer aggregates. v2.3.0 ADDITIVE: adds invoke_command action type for arbitrary Obsidian command dispatch; adds top arrow-row prev/next-day daily-nav (skip-to-nearest-existing with grey-out) when daily blueprint installed (reads .obsidian/daily-notes.json at runtime). Adaptive multi-row layout + hover styling unchanged from v2.0.0.; v2.4.0: additive 'journal' ICONS entry for journal blueprint; v2.5.0: date-aware runTemplaterTemplate dispatcher (active-file basename → date); v2.5.1 PATCH ADDITIVE: ICONS entries 'trips' (plane) + 'trip' (location pin) for trips@0.1.0 blueprint; v2.5.2 PATCH ADDITIVE: ICONS entry 'finance' (wallet) for finance@0.1.0 blueprint",
+  "description": "Thin renderer over ranch/nav-buttons-registry.json. Each blueprint/mechanism declares nav_buttons[]; installer aggregates. v2.3.0 ADDITIVE: adds invoke_command action type for arbitrary Obsidian command dispatch; adds top arrow-row prev/next-day daily-nav (skip-to-nearest-existing with grey-out) when daily blueprint installed (reads .obsidian/daily-notes.json at runtime). Adaptive multi-row layout + hover styling unchanged from v2.0.0.; v2.4.0: additive 'journal' ICONS entry for journal blueprint; v2.5.0: date-aware runTemplaterTemplate dispatcher (active-file basename → date); v2.5.1 PATCH ADDITIVE: ICONS entries 'trips' (plane) + 'trip' (location pin) for trips@0.1.0 blueprint; v2.5.2 PATCH ADDITIVE: ICONS entry 'finance' (wallet) for finance@0.1.0 blueprint",
   "depends_on": [
     { "name": "customjs-guard", "range": ">=1.0.0" }
   ],

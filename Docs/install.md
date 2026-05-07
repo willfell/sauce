@@ -86,7 +86,7 @@ After a successful run, your vault layout looks like this:
 │   │   └── sauce                         NEW — bash wrapper exec'ing node CLI
 │   ├── node_modules/                     npm install --omit=dev artifact
 │   └── .git/                             clone --depth=1 history
-├── Docs/Meta/                            Consumer-side platform state
+├── ranch/                                Consumer-side platform state
 │   ├── platform-config.json              NEW — vault-side path map + variables
 │   ├── platform-subscription.json        NEW — what mechanisms/blueprints you opted into
 │   └── platform-installed.json           NEW — auto-managed install ledger
@@ -111,13 +111,28 @@ If you have an existing v0.22.0 / v0.22.1 install:
 ```bash
 cd <vault>
 mv Beacon pantry                                                                # rename workshop clone dir
-sed -i '' 's/"workshop_relative_path": "Beacon"/"workshop_relative_path": "pantry"/' Docs/Meta/platform-config.json
+sed -i '' 's/"workshop_relative_path": "Beacon"/"workshop_relative_path": "pantry"/' ranch/platform-config.json
 source pantry/Scripts/activate.sh
 sauce status                                                                    # verify
 ```
 
 If you exported `BEACON_VAULT` / `BEACON_REPO_URL` in your shell rc-file,
 update them to `SAUCE_VAULT` / `SAUCE_REPO_URL`.
+
+---
+
+## Upgrading from v0.23.x to v0.24.0
+
+The runtime plumbing directory has moved from `<vault>/Docs/Meta/` to `<vault>/ranch/`. The `beacon-button` mechanism has been renamed to `accent-button`. Run this once per consumer vault:
+
+```bash
+cd <vault>
+mv Docs/Meta ranch
+sed -i '' 's|Docs/Meta|ranch|g' ranch/platform-config.json
+# Then in Obsidian: Cmd+R, then run the platform install command (or `sauce update` from the CLI).
+```
+
+The new stub md5 invariant for `<vault>/ranch/Templater/platformInstall.js` is `ea23aa812503bfca66359d3b2b239ba8`. Existing stubs at the OLD md5 (`a39257da1dd49ae4481e5cd0a42bdac4`) will be overwritten by the next install run with the new canonical body.
 
 ---
 
@@ -239,7 +254,7 @@ Per provider:
 ## Troubleshooting
 
 > [!example]- "Not inside a sauce-managed vault"
-> The CLI dispatcher walks cwd ancestors looking for `Docs/Meta/platform-config.json`. If it doesn't find one and `$SAUCE_VAULT` isn't set, you get this error.
+> The CLI dispatcher walks cwd ancestors looking for `ranch/platform-config.json`. If it doesn't find one and `$SAUCE_VAULT` isn't set, you get this error.
 >
 > Fixes (any one works):
 > 1. `cd` into the vault root or any subdirectory of it before running `sauce`.
@@ -295,9 +310,9 @@ To fully remove Sauce from a vault:
 ```bash
 cd <vault>
 rm -rf pantry/ pantry.bak pantry.bak.*
-rm -f Docs/Meta/platform-config.json \
-      Docs/Meta/platform-subscription.json \
-      Docs/Meta/platform-installed.json
+rm -f ranch/platform-config.json \
+      ranch/platform-subscription.json \
+      ranch/platform-installed.json
 ```
 
 > [!warning] What this does NOT undo

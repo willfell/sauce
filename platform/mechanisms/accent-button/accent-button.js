@@ -1,17 +1,18 @@
 /**
- * BeaconButton (CustomJS)
+ * AccentButton (CustomJS)
  * Shared outline-accent action button renderer. Single-method API; promotes
  * the duplicated outline-accent button pattern from project-nav-buttons.js
  * (and the finance helpers) into one canonical surface so visual cohesion
  * stays free for future callers.
  *
- * Visual surface at v0.18.0 is IDENTICAL to the project-nav-buttons.js:357
- * canonical source — pure dedupe, no design drift.
+ * Visual surface at v0.18.0 was IDENTICAL to the original inline
+ * _renderActionButton helper in project-nav-buttons.js (since deleted in
+ * v0.18.0 S1) — pure dedupe, no design drift.
  *
  * Usage in DataviewJS (via customjs-guard):
- *   await dv.view("Docs/Meta/Views/customjs-guard", { class: "BeaconButton", args: {...} });
+ *   await dv.view("ranch/Views/customjs-guard", { class: "AccentButton", args: {...} });
  * OR (recommended — call .render directly from a wrapper class):
- *   customJS.BeaconButton.render(parent, { label, icon, onClick, ... });
+ *   customJS.AccentButton.render(parent, { label, icon, onClick, ... });
  *
  * Options:
  *   label    — string (required; button text rendered inside <span>)
@@ -28,7 +29,7 @@
  * Returns: HTMLButtonElement (the rendered button) so callers can attach
  *   additional state or stash a reference for later toggling.
  */
-class BeaconButton {
+class AccentButton {
     /**
      * Render an outline-accent action button into `parent`.
      *

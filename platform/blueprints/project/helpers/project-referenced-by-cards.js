@@ -6,7 +6,7 @@
  * Wrapped via customjs-guard for cold-load safety (landmines #1, #2).
  *
  * Usage in DataviewJS:
- *   await dv.view("Docs/Meta/Views/customjs-guard", { class: "ProjectReferencedByCards" });
+ *   await dv.view("ranch/Views/customjs-guard", { class: "ProjectReferencedByCards" });
  */
 class ProjectReferencedByCards {
     async render(dv) {

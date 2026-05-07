@@ -83,7 +83,7 @@ class InvoiceControls {
         rateInput.style.cssText = "padding: 4px 8px; border-radius: 6px; border: 1px solid var(--background-modifier-border); background: var(--background-secondary); color: var(--text-normal); font-size: 0.9em; width: 80px; min-width: 0; box-sizing: border-box;";
 
         const saveIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>`;
-        const saveBtn = customJS.BeaconButton.render(leftGroup, {
+        const saveBtn = customJS.AccentButton.render(leftGroup, {
             label: "Save",
             icon: saveIcon,
             onClick: async () => {
@@ -120,7 +120,7 @@ class InvoiceControls {
         const submitIcon = submitted
             ? `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>`
             : `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
-        const submitBtn = customJS.BeaconButton.render(rightGroup, {
+        const submitBtn = customJS.AccentButton.render(rightGroup, {
             label: submitted ? "Unmark Submitted" : "Mark Submitted",
             icon: submitIcon,
             onClick: async () => {

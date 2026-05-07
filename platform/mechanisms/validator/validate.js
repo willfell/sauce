@@ -50,7 +50,7 @@ module.exports = async function (tpFileOrObj, moduleId) {
   const resolvedModule = moduleId || fm.module || null;
 
   // Load rules.
-  const rulesPath = "Docs/Meta/rules";
+  const rulesPath = "ranch/rules";
   const globalRule = await loadRule(app, rulesPath, "_global");
   const moduleRule = resolvedModule ? await loadRule(app, rulesPath, resolvedModule) : null;
 
@@ -152,7 +152,7 @@ async function checkRequiredBlocks(ctx, gr, mr) {
     if (spec.kind === "dataviewjs" && spec.must_call && spec.via === "customjs-guard") {
       const className = spec.must_call.replace(/^customJS\./, "");
       const wrapperRe = new RegExp(
-        `dv\\.view\\(\\s*["']Docs/Meta/Views/customjs-guard["']\\s*,\\s*\\{[^}]*class\\s*:\\s*["']${className}["']`
+        `dv\\.view\\(\\s*["']ranch/Views/customjs-guard["']\\s*,\\s*\\{[^}]*class\\s*:\\s*["']${className}["']`
       );
       const matched = dvjsBlocks.some((b) => wrapperRe.test(b));
       if (!matched) {

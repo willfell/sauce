@@ -11,11 +11,11 @@ cssclasses:
 ---
 
 ```dataviewjs
-await dv.view("Docs/Meta/Views/customjs-guard", { class: "SpaceNavButtons" });
+await dv.view("ranch/Views/customjs-guard", { class: "SpaceNavButtons" });
 ```
 
 ```dataviewjs
-await dv.view("Docs/Meta/Views/customjs-guard", { class: "BudgetNavButtons" });
+await dv.view("ranch/Views/customjs-guard", { class: "BudgetNavButtons" });
 ```
 
 ```dataviewjs
@@ -25,6 +25,6 @@ await customJS.FinanceStatus.renderBadge(dv, "budget");
 ## Categories
 
 ```dataviewjs
-await dv.view("Docs/Meta/Views/customjs-guard", { class: "BudgetCategoriesEditor" });
+await dv.view("ranch/Views/customjs-guard", { class: "BudgetCategoriesEditor" });
 ```
 

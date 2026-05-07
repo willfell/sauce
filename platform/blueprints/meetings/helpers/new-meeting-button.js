@@ -3,7 +3,7 @@
  * Creates a button to add new meeting notes with date prefix.
  *
  * Usage in DataviewJS:
- *   await dv.view("Docs/Meta/Views/customjs-guard", { class: "NewMeetingButton" });
+ *   await dv.view("ranch/Views/customjs-guard", { class: "NewMeetingButton" });
  */
 class NewMeetingButton {
   async render(dv) {
@@ -82,7 +82,7 @@ class NewMeetingButton {
     };
 
     const container = dv.el("div", "");
-    customJS.BeaconButton.render(container, {
+    customJS.AccentButton.render(container, {
       label: "New Meeting",
       icon: newMeetingIcon,
       onClick: async () => {
@@ -90,7 +90,7 @@ class NewMeetingButton {
         if (!title) return;
 
         const meetingFilename = `${title}-${currentDateStr}`;
-        const template = app.vault.getAbstractFileByPath("Docs/Meta/Templates/Meeting.md");
+        const template = app.vault.getAbstractFileByPath("ranch/Templates/Meeting.md");
         if (template) {
           const templater = app.plugins.plugins["templater-obsidian"];
           await templater.templater.create_new_note_from_template(template, folder, meetingFilename, true);

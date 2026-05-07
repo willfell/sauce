@@ -6,7 +6,7 @@
  * cold-load safety (landmines #1, #2).
  *
  * Usage in DataviewJS:
- *   await dv.view("Docs/Meta/Views/customjs-guard", { class: "ProjectNotesCards" });
+ *   await dv.view("ranch/Views/customjs-guard", { class: "ProjectNotesCards" });
  */
 class ProjectNotesCards {
     async render(dv) {

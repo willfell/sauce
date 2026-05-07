@@ -36,7 +36,7 @@ async function applyFix(tp, fix) {
 }
 
 async function appendLintQueue(tp, file, violations) {
-  const path = "Docs/Meta/_lint-queue.yml";
+  const path = "ranch/_lint-queue.yml";
   const tfile = tp.app.vault.getAbstractFileByPath(path);
   const entry =
     `\n- file: "${file.path}"\n  date: "${new Date().toISOString()}"\n  violations:\n` +

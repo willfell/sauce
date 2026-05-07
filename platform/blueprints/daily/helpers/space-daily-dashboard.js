@@ -4,7 +4,7 @@
  * file); meetings panel as BeaconCards.
  *
  * Usage in DataviewJS:
- *   await dv.view("Docs/Meta/Views/customjs-guard", { class: "SpaceDailyDashboard" });
+ *   await dv.view("ranch/Views/customjs-guard", { class: "SpaceDailyDashboard" });
  *
  * v0.2.0 (cards-cohesion cycle): meetings panel migrated to BeaconCards via
  * thin {container: subContainerEl} dv shim; tasks panel kept as flat <ul>

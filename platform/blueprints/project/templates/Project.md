@@ -9,11 +9,11 @@ workstreams: []
 ---
 
 ```dataviewjs
-await dv.view("Docs/Meta/Views/customjs-guard", { class: "SpaceNavButtons" });
+await dv.view("ranch/Views/customjs-guard", { class: "SpaceNavButtons" });
 ```
 
 ```dataviewjs
-await dv.view("Docs/Meta/Views/customjs-guard", { class: "ProjectNavButtons" });
+await dv.view("ranch/Views/customjs-guard", { class: "ProjectNavButtons" });
 ```
 
 ---
@@ -21,7 +21,7 @@ await dv.view("Docs/Meta/Views/customjs-guard", { class: "ProjectNavButtons" });
 ## Workstreams
 
 ```dataviewjs
-await dv.view("Docs/Meta/Views/customjs-guard", { class: "ProjectWorkstreamManager" });
+await dv.view("ranch/Views/customjs-guard", { class: "ProjectWorkstreamManager" });
 ```
 
 ---
@@ -30,10 +30,10 @@ await dv.view("Docs/Meta/Views/customjs-guard", { class: "ProjectWorkstreamManag
 >
 > #### Project Notes
 > ```dataviewjs
-> await dv.view("Docs/Meta/Views/customjs-guard", { class: "ProjectNotesCards" });
+> await dv.view("ranch/Views/customjs-guard", { class: "ProjectNotesCards" });
 > ```
 >
 > #### Referenced By
 > ```dataviewjs
-> await dv.view("Docs/Meta/Views/customjs-guard", { class: "ProjectReferencedByCards" });
+> await dv.view("ranch/Views/customjs-guard", { class: "ProjectReferencedByCards" });
 > ```

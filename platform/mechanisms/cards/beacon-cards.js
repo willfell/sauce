@@ -4,7 +4,7 @@
  * caller supplies the pages array.
  *
  * Usage in DataviewJS:
- *   await dv.view("Docs/Meta/Views/customjs-guard", { class: "BeaconCards", args: {...} });
+ *   await dv.view("ranch/Views/customjs-guard", { class: "BeaconCards", args: {...} });
  * OR (recommended — call .render directly from a wrapper class):
  *   await customJS.BeaconCards.render(dv, { pages, title: p => p.file.name, ... });
  *

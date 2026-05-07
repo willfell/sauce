@@ -5,7 +5,7 @@
  * Uses app.fileManager.processFrontMatter() for safe YAML serialization.
  *
  * Usage in DataviewJS (atlas note):
- *   await dv.view("Docs/Meta/Views/customjs-guard", { class: "ProjectWorkstreamManager" });
+ *   await dv.view("ranch/Views/customjs-guard", { class: "ProjectWorkstreamManager" });
  */
 class ProjectWorkstreamManager {
     async render(dv) {
@@ -180,8 +180,8 @@ class ProjectWorkstreamManager {
         const plusIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>`;
         const minusIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></svg>`;
 
-        customJS.BeaconButton.render(btnRow, { label: "Add", icon: plusIcon, onClick: addWorkstream });
-        customJS.BeaconButton.render(btnRow, { label: "Remove", icon: minusIcon, onClick: removeWorkstream });
+        customJS.AccentButton.render(btnRow, { label: "Add", icon: plusIcon, onClick: addWorkstream });
+        customJS.AccentButton.render(btnRow, { label: "Remove", icon: minusIcon, onClick: removeWorkstream });
 
         if (totalAll > 0) {
             const pct = Math.round((completedAll / totalAll) * 100);

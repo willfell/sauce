@@ -17,8 +17,8 @@ module.exports = async function (tp) {
   }
 
   // Compare installed vs subscribed platform versions.
-  const installed = (await readJson(app, "Docs/Meta/platform-installed.json")) || {};
-  const subscription = (await readJson(app, "Docs/Meta/platform-subscription.json")) || {};
+  const installed = (await readJson(app, "ranch/platform-installed.json")) || {};
+  const subscription = (await readJson(app, "ranch/platform-subscription.json")) || {};
   report.platformDrift = computeDrift(installed, subscription);
 
   const today = new Date().toISOString().slice(0, 10);

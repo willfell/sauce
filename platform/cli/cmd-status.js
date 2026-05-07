@@ -33,7 +33,7 @@ async function run(ctx, args) {
     lines.push(`  Subscribed:   ${subM} mechanisms · ${subB} blueprints`);
 
     // Drift: subscribed.version vs platform-installed.json history latest
-    const installedPath = path.join(ctx.vaultPath, "Docs/Meta/platform-installed.json");
+    const installedPath = path.join(ctx.vaultPath, "ranch/platform-installed.json");
     let installed = { history: [] };
     if (fs.existsSync(installedPath)) {
         try { installed = JSON.parse(fs.readFileSync(installedPath, "utf8")); }

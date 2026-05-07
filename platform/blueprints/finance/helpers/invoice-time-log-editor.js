@@ -32,7 +32,7 @@ class InvoiceTimeLogEditor {
         const actionRow = root.createEl("div");
         actionRow.style.cssText = "margin-bottom: 8px;";
         const plusIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>`;
-        const addBtn = customJS.BeaconButton.render(actionRow, {
+        const addBtn = customJS.AccentButton.render(actionRow, {
             label: "Add Entry",
             icon: plusIcon,
             onClick: () => this._addFlow(file, dv, entries, siblingInvoicePath)

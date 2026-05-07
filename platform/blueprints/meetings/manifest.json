@@ -7,7 +7,7 @@
   "depends_on": [
     { "name": "nav-buttons",    "range": ">=2.2.0" },
     { "name": "customjs-guard", "range": ">=1.0.0" },
-    { "name": "beacon-button",  "range": ">=0.1.0" }
+    { "name": "accent-button",  "range": ">=0.1.0" }
   ],
   "customjs_classes": ["MeetingsHubCards", "NewMeetingButton"],
   "files": [

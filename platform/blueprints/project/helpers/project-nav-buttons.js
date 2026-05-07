@@ -4,7 +4,7 @@
  * Auto-hides the button for the current note type.
  *
  * Usage in DataviewJS:
- *   await dv.view("Docs/Meta/Views/customjs-guard", { class: "ProjectNavButtons" });
+ *   await dv.view("ranch/Views/customjs-guard", { class: "ProjectNavButtons" });
  *
  * Expected file paths:
  *   beacon/projects/<slug>/<atlas|map|board>.md
@@ -508,7 +508,7 @@ class ProjectNavButtons {
         // (esp. on file-modified events triggered by our own processFrontMatter
         // calls in the workstream widget). Wrap all our output in a single
         // removable root so re-renders replace previous output instead of
-        // appending. See Docs/Meta/Plugins.md for the landmine writeup.
+        // appending. See ranch/Plugins.md for the landmine writeup.
         const previousRoot = dv.container.querySelector(":scope > .pnb-root");
         if (previousRoot) previousRoot.remove();
         const root = dv.container.createEl("div", { cls: "pnb-root" });
@@ -704,7 +704,7 @@ class ProjectNavButtons {
             const actionRow = root.createEl("div");
             actionRow.style.cssText = "display: flex; flex-wrap: nowrap; gap: 6px; margin-bottom: 4px;";
 
-            customJS.BeaconButton.render(actionRow, {
+            customJS.AccentButton.render(actionRow, {
                 label: "New Note",
                 icon: plusIcon,
                 onClick: async () => {
@@ -725,7 +725,7 @@ class ProjectNavButtons {
                 const boardIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>`;
 
                 if (boardExists) {
-                    customJS.BeaconButton.render(actionRow, {
+                    customJS.AccentButton.render(actionRow, {
                         label: "Open Board",
                         icon: boardIcon,
                         onClick: async () => {
@@ -734,7 +734,7 @@ class ProjectNavButtons {
                         flex: true
                     });
                 } else {
-                    customJS.BeaconButton.render(actionRow, {
+                    customJS.AccentButton.render(actionRow, {
                         label: "Create Board",
                         icon: boardIcon,
                         onClick: async () => {
@@ -767,7 +767,7 @@ class ProjectNavButtons {
 
         const plusIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>`;
 
-        customJS.BeaconButton.render(actionRow, {
+        customJS.AccentButton.render(actionRow, {
             label: "New Project",
             icon: plusIcon,
             onClick: async () => {

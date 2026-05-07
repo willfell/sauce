@@ -2,9 +2,9 @@
 //
 // Reads:
 //   <workshop>/platform/manifest.json               (workshop catalogue)
-//   Docs/Meta/platform-config.json                  (this vault's path map + workshop_path)
-//   Docs/Meta/platform-subscription.json            (what this vault wants)
-//   Docs/Meta/platform-installed.json               (what's currently installed)
+//   ranch/platform-config.json                  (this vault's path map + workshop_path)
+//   ranch/platform-subscription.json            (what this vault wants)
+//   ranch/platform-installed.json               (what's currently installed)
 //
 // All platform metadata is JSON for portability — Templater scripts can't access
 // require("obsidian").parseYaml. Rule files (used by validator) stay JSON for the
@@ -45,7 +45,7 @@ function gitState(workshopPath) {
 module.exports = async function (tp) {
   const app = tp.app;
 
-  const installed = (await readJson(app, "Docs/Meta/platform-installed.json")) || {
+  const installed = (await readJson(app, "ranch/platform-installed.json")) || {
     mechanisms: [],
     blueprints: [],
     history: [],
@@ -62,17 +62,17 @@ module.exports = async function (tp) {
 
   let topLevelOk = false;
   try {
-    const config = await readJson(app, "Docs/Meta/platform-config.json");
-    const subscription = await readJson(app, "Docs/Meta/platform-subscription.json");
+    const config = await readJson(app, "ranch/platform-config.json");
+    const subscription = await readJson(app, "ranch/platform-subscription.json");
 
     if (!config) {
-      new Notice("platformInstall: cannot read/parse Docs/Meta/platform-config.json. Aborting.", 6000);
-      installedNow.history.push({ event: "error", step: "read_config", message: "Docs/Meta/platform-config.json missing or unparseable", git_commit: null, git_tag: null, git_dirty: null, attempted_at: new Date().toISOString() });
+      new Notice("platformInstall: cannot read/parse ranch/platform-config.json. Aborting.", 6000);
+      installedNow.history.push({ event: "error", step: "read_config", message: "ranch/platform-config.json missing or unparseable", git_commit: null, git_tag: null, git_dirty: null, attempted_at: new Date().toISOString() });
       return;
     }
     if (!subscription) {
-      new Notice("platformInstall: cannot read/parse Docs/Meta/platform-subscription.json. Aborting.", 6000);
-      installedNow.history.push({ event: "error", step: "read_subscription", message: "Docs/Meta/platform-subscription.json missing or unparseable", git_commit: null, git_tag: null, git_dirty: null, attempted_at: new Date().toISOString() });
+      new Notice("platformInstall: cannot read/parse ranch/platform-subscription.json. Aborting.", 6000);
+      installedNow.history.push({ event: "error", step: "read_subscription", message: "ranch/platform-subscription.json missing or unparseable", git_commit: null, git_tag: null, git_dirty: null, attempted_at: new Date().toISOString() });
       return;
     }
 
@@ -97,7 +97,7 @@ module.exports = async function (tp) {
     // Keep this list narrow — only variables the installer itself depends on (registry
     // location, content drop) belong here. Per-item path variables stay required-by-config.
     if (variables.content_path === undefined || variables.content_path === null) {
-      variables.content_path = "Docs/Meta/Content";
+      variables.content_path = "ranch/Content";
     }
 
     // 1. resolve which items to install + their order
@@ -264,7 +264,7 @@ module.exports = async function (tp) {
       }
     }
 
-    // 7. Subscription-aware pruning of Docs/Meta/nav-buttons-registry.json.
+    // 7. Subscription-aware pruning of ranch/nav-buttons-registry.json.
     // Removes contributions.<source> for any source that is no longer in the
     // current subscription. Self-cleaning registry — no separate uninstall
     // mechanic needed. Wrapped in its own try/catch so a malformed registry
@@ -284,7 +284,7 @@ module.exports = async function (tp) {
       });
     }
 
-    // 8. Subscription-aware pruning of Docs/Meta/platform-installed.json
+    // 8. Subscription-aware pruning of ranch/platform-installed.json
     // bucket arrays (mechanisms[], blueprints[]). Symmetric with the
     // nav-buttons-registry prune above: drops install ledger entries whose
     // names are no longer in the current subscription, so the ledger never
@@ -331,7 +331,7 @@ module.exports = async function (tp) {
   } finally {
     // ALWAYS persist whatever state we have, success or failure (E1).
     try {
-      await writeJson(app, "Docs/Meta/platform-installed.json", installedNow);
+      await writeJson(app, "ranch/platform-installed.json", installedNow);
     } catch (e) {
       new Notice(`platformInstall: failed to write platform-installed.json — ${e.message}`, 8000);
     }
@@ -399,7 +399,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   // Codifies landmine #11 — every blueprint owns beacon/<module_directory>/ —
   // at the installer level. Historically the directory was created as a
   // side-effect of files[] writes there; blueprints whose files all land
-  // under Docs/Meta/* (e.g., daily — Daily Notes plugin requires
+  // under ranch/* (e.g., daily — Daily Notes plugin requires
   // beacon/daily/ to pre-exist) need an explicit mkdir. Mechanisms exempt:
   // variables.module_directory is unset for non-blueprint installs per the
   // v0.2.0 T1.2 per-blueprint overlay logic; this guard is just truthiness.
@@ -604,7 +604,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
     await applyRuleFragment(tp, frag, mech.name, variables, history, git);
   }
 
-  // Aggregate nav-button declarations into Docs/Meta/nav-buttons-registry.json.
+  // Aggregate nav-button declarations into ranch/nav-buttons-registry.json.
   // Failure here records history but does NOT throw — install of this item
   // is otherwise complete, and the registry is regenerated on every install.
   await applyNavButtons(tp, mech, variables, history, git);
@@ -914,7 +914,7 @@ async function applyRuleFragment(tp, frag, sourceName, variables, history, git) 
 }
 
 // applyNavButtons — aggregate this item's nav_buttons[] declarations into
-// Docs/Meta/nav-buttons-registry.json under contributions.<name>. Mirrors
+// ranch/nav-buttons-registry.json under contributions.<name>. Mirrors
 // applyRuleFragment in posture: malformed pre-existing JSON is preserved
 // (C4 hardening); per-entry validation skips bad entries without taking the
 // whole contribution down; failures record history but do not throw.
@@ -928,7 +928,7 @@ async function applyNavButtons(tp, manifest, variables, history, git) {
   // early-return on empty.
   const navButtonsArr = Array.isArray(manifest.nav_buttons) ? manifest.nav_buttons : [];
   const adapter = tp.app.vault.adapter;
-  const registryPath = "Docs/Meta/nav-buttons-registry.json";
+  const registryPath = "ranch/nav-buttons-registry.json";
 
   let registry = { schema_version: 1, contributions: {} };
   if (await adapter.exists(registryPath)) {
@@ -1042,7 +1042,7 @@ function validateAndResolve(btn, sourceName, variables, history, git) {
     return null;
   }
   if (btn.action.type === "createFromTemplate" && btn.action.template_source) {
-    const contentPath = variables.content_path || "Docs/Meta/Content";
+    const contentPath = variables.content_path || "ranch/Content";
     // v0.2.0 fix: substitute {{xxx}} placeholders in the target path using the
     // current item's variables overlay (which already includes the per-blueprint
     // {{module_directory}} → "beacon/<bare-name>" mapping per T1.2). Stores
@@ -1059,7 +1059,7 @@ function validateAndResolve(btn, sourceName, variables, history, git) {
     };
   }
   if (btn.action.type === "runTemplaterTemplate" && btn.action.template_source) {
-    const templatesPath = variables.templates_path || "Docs/Meta/Templates";
+    const templatesPath = variables.templates_path || "ranch/Templates";
     if (typeof btn.action.folder_prefix !== "string" || btn.action.folder_prefix.length === 0) {
       new Notice(`nav-buttons: invalid runTemplaterTemplate in ${sourceName} (missing required folder_prefix)`, 8000);
       if (history) {
@@ -3606,7 +3606,7 @@ async function applyStyleSettings(tp, manifest, workshopPath, targetPath, histor
 // a malformed pre-existing registry is left untouched and reported.
 async function pruneNavButtonsRegistry(tp, subscription, history, git) {
   const adapter = tp.app.vault.adapter;
-  const registryPath = "Docs/Meta/nav-buttons-registry.json";
+  const registryPath = "ranch/nav-buttons-registry.json";
   if (!(await adapter.exists(registryPath))) return;
 
   let raw;
@@ -3699,7 +3699,7 @@ async function pruneNavButtonsRegistry(tp, subscription, history, git) {
 // finally-block write is byte-identical to the prior on-disk content.
 async function pruneInstalledLedger(tp, subscription, installedNow, git) {
   const adapter = tp.app.vault.adapter;
-  const ledgerPath = "Docs/Meta/platform-installed.json";
+  const ledgerPath = "ranch/platform-installed.json";
   const history = installedNow.history;
 
   // First-install case: nothing on disk yet → no-op (installedNow is the
@@ -3873,7 +3873,7 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     //
     // CF-2: by default, capture run-install.js's stdio (Phase B/C surfaced
     // 2200-line JSON dumps mixed into the user's terminal). We tee the
-    // captured output to <vault>/Docs/Meta/bootstrap-last-install.log + emit
+    // captured output to <vault>/ranch/bootstrap-last-install.log + emit
     // only a condensed summary (Notice lines + verdict + run counts) to
     // stdout. Pass { verbose: true } to opt back into raw stdio inherit.
     module.exports.runInstall = async function runInstall(vaultPath, opts) {
@@ -3923,7 +3923,7 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
         // Tee full output to a log file inside the vault so the user can
         // inspect when something goes wrong, without polluting stdout on
         // the happy path.
-        const logDir = path.join(vaultPath, "Docs", "Meta");
+        const logDir = path.join(vaultPath, "ranch");
         try { fs.mkdirSync(logDir, { recursive: true }); } catch (_e) {}
         const logPath = path.join(logDir, "bootstrap-last-install.log");
         try {

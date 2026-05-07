@@ -24,7 +24,7 @@ After the curl one-liner clones + npm-installs, the existing first-run wizard ru
 
 1. **Workshop relative path** (defaults to `pantry` for the inside-vault layout)
 2. **Vault display name** (defaults to vault dirname)
-3. **Mechanisms checkbox** (defaults: customjs-guard, nav-buttons, cards, beacon-button, styling, convenience)
+3. **Mechanisms checkbox** (defaults: customjs-guard, nav-buttons, cards, accent-button, styling, convenience)
 4. **Blueprints checkbox** (defaults: none — opt-in per blueprint)
 5. **Confirm summary**
 
@@ -40,7 +40,7 @@ After the curl one-liner clones + npm-installs, the existing first-run wizard ru
 │   ├── Scripts/{activate.sh, sauce}      NEW — activation + CLI wrapper
 │   ├── node_modules/                     npm install --omit=dev artifact
 │   └── .git/                             clone --depth=1 history
-└── Docs/Meta/platform-{config,subscription,installed}.json   Consumer-side state
+└── ranch/platform-{config,subscription,installed}.json       Consumer-side state
 ```
 
 ### Activation per shell
@@ -70,7 +70,7 @@ After that, the `sauce` CLI is on your PATH:
 
 
 
-Before v0.1.2 the onboarding flow required cp'ing a 1300-line `install.js` into each consumer's `Docs/Meta/Templater/platformInstall.js` (the bootstrap-copy × 3 ritual). v0.1.2 retires that — consumers now use a 20-line content-static thin stub that dispatches at runtime.
+Before v0.1.2 the onboarding flow required cp'ing a 1300-line `install.js` into each consumer's `ranch/Templater/platformInstall.js` (the bootstrap-copy × 3 ritual). v0.1.2 retires that — consumers now use a 20-line content-static thin stub that dispatches at runtime.
 
 ### 1. Clone the workshop repo
 
@@ -82,16 +82,16 @@ git clone git@github-personal:willfell/sauce.git /path/to/workshop/poc-vault
 
 ### 2. Create the consumer's bootstrap state files
 
-In the new vault's `Docs/Meta/`, create three JSON files (all platform metadata is JSON per landmine #6):
+In the new vault's `ranch/`, create three JSON files (all platform metadata is JSON per landmine #6):
 
 - **`platform-config.json`** — at minimum:
   ```json
   {
     "workshop_relative_path": "../workshop/poc-vault",
     "variables": {
-      "templates_path": "Docs/Meta/Templates",
-      "scripts_path": "Docs/Meta/Scripts",
-      "rules_path": "Docs/Meta/rules"
+      "templates_path": "ranch/Templates",
+      "scripts_path": "ranch/Scripts",
+      "rules_path": "ranch/rules"
     }
   }
   ```
@@ -115,13 +115,13 @@ Copy the canonical stub from the workshop:
 
 ```bash
 cp /path/to/workshop/poc-vault/platform/installer-stub.js \
-   /path/to/consumer/Docs/Meta/Templater/platformInstall.js
+   /path/to/consumer/ranch/Templater/platformInstall.js
 ```
 
 Verify md5 matches the canonical:
 ```bash
 md5sum /path/to/workshop/poc-vault/platform/installer-stub.js \
-       /path/to/consumer/Docs/Meta/Templater/platformInstall.js
+       /path/to/consumer/ranch/Templater/platformInstall.js
 ```
 
 The stub is content-static per landmine #13 — never edit it per-consumer. Future workshop updates reach the consumer via `git pull` in the workshop repo + a fresh install run; the stub itself doesn't change.
@@ -164,7 +164,7 @@ Consumer is at version A; workshop has version B (newer):
 
 1. In workshop: bump versions in `platform/manifest.json` and the relevant `mechanisms/<name>/manifest.json`.
 2. Obsidian Sync delivers the new workshop contents to every machine.
-3. In the consumer: edit `Docs/Meta/platform-subscription.json` to pin the new versions.
+3. In the consumer: edit `ranch/platform-subscription.json` to pin the new versions.
 4. Run `tp.user.platformInstall(tp)` in the consumer. It detects the version delta and re-installs.
 5. `platform-installed.json` records the new version + a new history entry.
 
@@ -212,6 +212,6 @@ If the installer aborts mid-flight:
 - If an approval gate was declined, the file is skipped but the mechanism is otherwise installed. Re-run the installer to re-prompt.
 
 If you need to fully reset a consumer's platform state:
-1. Delete `Docs/Meta/platform-installed.json`.
-2. Optionally delete `Docs/Meta/Templater/{validate,hook-validate,audit-walker}.js`, `Docs/Meta/Views/customjs-guard/view.js`, `.obsidian/snippets/customjs-loader.css`.
+1. Delete `ranch/platform-installed.json`.
+2. Optionally delete `ranch/Templater/{validate,hook-validate,audit-walker}.js`, `ranch/Views/customjs-guard/view.js`, `.obsidian/snippets/customjs-loader.css`.
 3. Re-run `tp.user.platformInstall(tp)`. Everything re-installs from scratch.

@@ -18,7 +18,7 @@
     { "name": "audit", "version": "0.1.1", "path": "mechanisms/audit" },
     { "name": "nav-buttons", "version": "2.5.2", "path": "mechanisms/nav-buttons" },
     { "name": "cards", "version": "0.2.3", "path": "mechanisms/cards" },
-    { "name": "beacon-button", "version": "0.1.0", "path": "mechanisms/beacon-button" },
+    { "name": "accent-button", "version": "0.1.0", "path": "mechanisms/accent-button" },
     { "name": "styling", "version": "0.1.2", "path": "mechanisms/styling" },
     { "name": "convenience", "version": "0.1.0", "path": "mechanisms/convenience" }
   ],

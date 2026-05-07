@@ -18,7 +18,7 @@ class NewInvoiceButton {
         root.style.cssText = "margin: 8px 0;";
 
         const plusIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>`;
-        customJS.BeaconButton.render(root, {
+        customJS.AccentButton.render(root, {
             label: "New Invoice",
             icon: plusIcon,
             onClick: async () => {
@@ -143,11 +143,11 @@ cssclasses:
 ---
 
 \`\`\`dataviewjs
-await dv.view("Docs/Meta/Views/customjs-guard", { class: "SpaceNavButtons" });
+await dv.view("ranch/Views/customjs-guard", { class: "SpaceNavButtons" });
 \`\`\`
 
 \`\`\`dataviewjs
-await dv.view("Docs/Meta/Views/customjs-guard", { class: "InvoiceNavButtons" });
+await dv.view("ranch/Views/customjs-guard", { class: "InvoiceNavButtons" });
 \`\`\`
 
 \`\`\`dataviewjs
@@ -155,7 +155,7 @@ await customJS.FinanceStatus.renderBadge(dv, "invoice");
 \`\`\`
 
 \`\`\`dataviewjs
-await dv.view("Docs/Meta/Views/customjs-guard", { class: "InvoiceControls" });
+await dv.view("ranch/Views/customjs-guard", { class: "InvoiceControls" });
 \`\`\`
 
 `;
@@ -178,13 +178,13 @@ cssclasses:
 \`\`\`dataviewjs
 const isEmbedded = dv.container.closest(".markdown-embed") != null;
 if (!isEmbedded) {
-    await dv.view("Docs/Meta/Views/customjs-guard", { class: "SpaceNavButtons" });
-    await dv.view("Docs/Meta/Views/customjs-guard", { class: "InvoiceNavButtons" });
+    await dv.view("ranch/Views/customjs-guard", { class: "SpaceNavButtons" });
+    await dv.view("ranch/Views/customjs-guard", { class: "InvoiceNavButtons" });
 }
 \`\`\`
 
 \`\`\`dataviewjs
-await dv.view("Docs/Meta/Views/customjs-guard", { class: "InvoiceTimeLogEditor" });
+await dv.view("ranch/Views/customjs-guard", { class: "InvoiceTimeLogEditor" });
 \`\`\`
 `;
 
@@ -206,7 +206,7 @@ tags:
 
 %% kanban:settings
 \`\`\`
-{"kanban-plugin":"board","list-collapse":[false,false,false],"new-note-folder":"beacon/finance/invoices/${month}/board","new-note-template":"Docs/Meta/Templates/Template, Invoice Board Card.md"}
+{"kanban-plugin":"board","list-collapse":[false,false,false],"new-note-folder":"beacon/finance/invoices/${month}/board","new-note-template":"ranch/Templates/Template, Invoice Board Card.md"}
 \`\`\`
 %%
 `;

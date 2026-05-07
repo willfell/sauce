@@ -12,15 +12,15 @@ cssclasses:
 ---
 
 ```dataviewjs
-await dv.view("Docs/Meta/Views/customjs-guard", { class: "SpaceNavButtons" });
+await dv.view("ranch/Views/customjs-guard", { class: "SpaceNavButtons" });
 ```
 
 ```dataviewjs
-await dv.view("Docs/Meta/Views/customjs-guard", { class: "TripNavButtons" });
+await dv.view("ranch/Views/customjs-guard", { class: "TripNavButtons" });
 ```
 
 ---
 
 ```dataviewjs
-await dv.view("Docs/Meta/Views/customjs-guard", { class: "TripSectionsCards" });
+await dv.view("ranch/Views/customjs-guard", { class: "TripSectionsCards" });
 ```

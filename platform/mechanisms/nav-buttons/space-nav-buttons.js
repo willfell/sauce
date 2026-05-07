@@ -1,7 +1,7 @@
 /**
  * SpaceNavButtons (CustomJS) — v2.3.0
  *
- * Thin renderer over Docs/Meta/nav-buttons-registry.json. Each blueprint or
+ * Thin renderer over ranch/nav-buttons-registry.json. Each blueprint or
  * mechanism declares nav_buttons[] in its manifest; the installer aggregates
  * declarations into the registry namespaced under contributions.<source>.
  * This class reads the registry at render time, sorts entries by (order,
@@ -22,7 +22,7 @@
  * at runtime to acquire daily folder + format.
  *
  * Usage in DataviewJS:
- *   await dv.view("Docs/Meta/Views/customjs-guard", { class: "SpaceNavButtons" });
+ *   await dv.view("ranch/Views/customjs-guard", { class: "SpaceNavButtons" });
  */
 class SpaceNavButtons {
   // ── _readDailyNotesMeta — read .obsidian/daily-notes.json. Returns null if
@@ -78,7 +78,7 @@ class SpaceNavButtons {
       `<span class="nav-fallback-icon">${(label && label[0] || "?").toUpperCase()}</span>`;
 
     // ── Read registry ────────────────────────────────────────────────────
-    const REGISTRY_PATH = "Docs/Meta/nav-buttons-registry.json";
+    const REGISTRY_PATH = "ranch/nav-buttons-registry.json";
     let registry;
     try {
       const raw = await app.vault.adapter.read(REGISTRY_PATH);

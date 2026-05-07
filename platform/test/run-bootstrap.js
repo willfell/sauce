@@ -79,7 +79,7 @@ async function withMockedHttps(routes, fn) {
 async function withTempVault(setup, fn) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "beacon-bs-"));
     fs.mkdirSync(path.join(dir, ".obsidian"), { recursive: true });
-    fs.mkdirSync(path.join(dir, "Docs", "Meta"), { recursive: true });
+    fs.mkdirSync(path.join(dir, "ranch"), { recursive: true });
     if (typeof setup === "function") setup(dir);
     try {
         // CRITICAL: await fn so cleanup runs AFTER async work completes.
