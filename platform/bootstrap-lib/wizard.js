@@ -581,10 +581,26 @@ async function runReRunWizard(opts) {
                   })
                 : [];
 
+        // v0.26.1 P1-3c: parity with first-run path — auto-add convenience
+        // when a DV blueprint is selected without convenience checked.
+        let resolvedMechs = selectedMechs;
+        const workshopPathForLoad =
+            vaultPath && existingConfig && existingConfig.workshop_relative_path
+                ? path.resolve(vaultPath, existingConfig.workshop_relative_path)
+                : null;
+        if (workshopPathForLoad) {
+            const fullBlueprints = _loadFullBlueprintManifests(workshopPathForLoad, workshopManifest);
+            resolvedMechs = _autoAddConvenienceIfDvBlueprintsSelected(
+                selectedMechs,
+                selectedBlueprints,
+                fullBlueprints
+            );
+        }
+
         return {
             action: "edit-sub",
             payload: {
-                mechanisms: _buildSubscriptionEntries(selectedMechs, manifestMechs),
+                mechanisms: _buildSubscriptionEntries(resolvedMechs, manifestMechs),
                 blueprints: _buildSubscriptionEntries(selectedBlueprints, manifestBlueprints)
             }
         };

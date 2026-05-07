@@ -601,15 +601,24 @@ function _bs15FixtureFullBlueprints() {
 async function caseBS15AutoAddsConvenienceForDvBlueprint() {
     const label = "BS15 _autoAddConvenienceIfDvBlueprintsSelected adds convenience for project";
     const wizardMod = require("../bootstrap-lib/wizard.js");
-    // Pre-S2: wizardMod._autoAddConvenienceIfDvBlueprintsSelected is undefined
-    // → calling it throws TypeError; runner catches + reports as 1 FAIL per case.
-    const result = wizardMod._autoAddConvenienceIfDvBlueprintsSelected(
-        ["customjs-guard"],
-        ["project"],
-        _bs15FixtureFullBlueprints()
-    );
-    assertTrue(Array.isArray(result), label + ": returns array");
-    assertTrue(result.includes("convenience"), label + ": convenience appended");
+    // I-2 fix: suppress the auto-add helper's `[info] Auto-added convenience...`
+    // console.log during harness runs (the helper gates console.log on
+    // !SAUCE_TEST_MODE). Restore prior value in finally so other cases see
+    // their normal env.
+    const priorTestMode = process.env.SAUCE_TEST_MODE;
+    process.env.SAUCE_TEST_MODE = "1";
+    try {
+        const result = wizardMod._autoAddConvenienceIfDvBlueprintsSelected(
+            ["customjs-guard"],
+            ["project"],
+            _bs15FixtureFullBlueprints()
+        );
+        assertTrue(Array.isArray(result), label + ": returns array");
+        assertTrue(result.includes("convenience"), label + ": convenience appended");
+    } finally {
+        if (priorTestMode === undefined) delete process.env.SAUCE_TEST_MODE;
+        else process.env.SAUCE_TEST_MODE = priorTestMode;
+    }
 }
 
 async function caseBS16NoAddForNonDvBlueprint() {
