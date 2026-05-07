@@ -37,7 +37,7 @@ const DEFAULT_MECHANISMS_CHECKED = [
     "customjs-guard",
     "nav-buttons",
     "cards",
-    "beacon-button",
+    "accent-button",
     "styling"
 ];
 

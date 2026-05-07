@@ -3,9 +3,9 @@
 // installer helpers (applyTemplaterHotkeys, applySlashCommanderBindings).
 //
 // Each case scaffolds a tmpdir scratch vault with a minimal layout:
-//   <tmp>/Docs/Meta/platform-config.json
-//   <tmp>/Docs/Meta/platform-subscription.json
-//   <tmp>/Docs/Meta/Templater/platformInstall.js  (copy of canonical)
+//   <tmp>/ranch/platform-config.json
+//   <tmp>/ranch/platform-subscription.json
+//   <tmp>/ranch/Templater/platformInstall.js  (copy of canonical)
 //   <tmp>/.obsidian/plugins/templater-obsidian/data.json  (per case)
 //   <tmp>/.obsidian/plugins/slash-commander/data.json     (per case)
 //   <tmp>/.obsidian/community-plugins.json
@@ -60,16 +60,16 @@ function assertTrue(label, cond, hint) {
 
 async function scaffoldVault(scratchDir, opts) {
   // opts = { templaterData, slashCommanderData, manifest }
-  await fsp.mkdir(path.join(scratchDir, "Docs/Meta/Templater"), { recursive: true });
-  await fsp.mkdir(path.join(scratchDir, "Docs/Meta/Templates"), { recursive: true });
-  await fsp.mkdir(path.join(scratchDir, "Docs/Meta/Scripts"), { recursive: true });
-  await fsp.mkdir(path.join(scratchDir, "Docs/Meta/Views"), { recursive: true });
-  await fsp.mkdir(path.join(scratchDir, "Docs/Meta/rules"), { recursive: true });
+  await fsp.mkdir(path.join(scratchDir, "ranch/Templater"), { recursive: true });
+  await fsp.mkdir(path.join(scratchDir, "ranch/Templates"), { recursive: true });
+  await fsp.mkdir(path.join(scratchDir, "ranch/Scripts"), { recursive: true });
+  await fsp.mkdir(path.join(scratchDir, "ranch/Views"), { recursive: true });
+  await fsp.mkdir(path.join(scratchDir, "ranch/rules"), { recursive: true });
   await fsp.mkdir(path.join(scratchDir, ".obsidian/plugins/templater-obsidian"), { recursive: true });
   await fsp.mkdir(path.join(scratchDir, ".obsidian/plugins/slash-commander"), { recursive: true });
 
   // Bootstrap installer copy.
-  await fsp.copyFile(CANONICAL_INSTALLER, path.join(scratchDir, "Docs/Meta/Templater/platformInstall.js"));
+  await fsp.copyFile(CANONICAL_INSTALLER, path.join(scratchDir, "ranch/Templater/platformInstall.js"));
 
   // Mock workshop manifest reachable from this scratch vault: write a fake
   // workshop layout under <scratchDir>/_fake-workshop/ and override
@@ -86,20 +86,20 @@ async function scaffoldVault(scratchDir, opts) {
   await fsp.writeFile(path.join(fakeWorkshop, "platform/mechanisms/test-fixture/manifest.json"), JSON.stringify(opts.manifest, null, 2), "utf8");
 
   // platform-config.json: workshop_relative_path points at the fake workshop.
-  await fsp.writeFile(path.join(scratchDir, "Docs/Meta/platform-config.json"), JSON.stringify({
+  await fsp.writeFile(path.join(scratchDir, "ranch/platform-config.json"), JSON.stringify({
     workshop_relative_path: "_fake-workshop",
     variables: {
-      views_path: "Docs/Meta/Views",
-      templater_scripts_path: "Docs/Meta/Templater",
-      scripts_path: "Docs/Meta/Scripts",
-      templates_path: "Docs/Meta/Templates",
-      content_path: "Docs/Meta/Content",
-      rules_path: "Docs/Meta/rules",
+      views_path: "ranch/Views",
+      templater_scripts_path: "ranch/Templater",
+      scripts_path: "ranch/Scripts",
+      templates_path: "ranch/Templates",
+      content_path: "ranch/Content",
+      rules_path: "ranch/rules",
     }
   }, null, 2), "utf8");
 
   // Minimal subscription with the test-fixture mechanism.
-  await fsp.writeFile(path.join(scratchDir, "Docs/Meta/platform-subscription.json"), JSON.stringify({
+  await fsp.writeFile(path.join(scratchDir, "ranch/platform-subscription.json"), JSON.stringify({
     mechanisms: [{ name: "test-fixture", version: "0.1.0" }],
     blueprints: []
   }, null, 2), "utf8");
@@ -166,7 +166,7 @@ async function runHarness(scratchDir) {
     // exit 1 is fine for our purposes (we inspect history); only re-throw on
     // catastrophic process failure (no installed.json written at all).
   }
-  const installedPath = path.join(scratchDir, "Docs/Meta/platform-installed.json");
+  const installedPath = path.join(scratchDir, "ranch/platform-installed.json");
   if (!fs.existsSync(installedPath)) return null;
   return JSON.parse(await fsp.readFile(installedPath, "utf8"));
 }
@@ -224,7 +224,7 @@ async function case1Idempotent() {
       blueprints: []
     }, null, 2), "utf8");
     await fsp.writeFile(path.join(scratch, "_fake-workshop/platform/mechanisms/test-fixture/manifest.json"), JSON.stringify(fixtureManifest2, null, 2), "utf8");
-    await fsp.writeFile(path.join(scratch, "Docs/Meta/platform-subscription.json"), JSON.stringify({
+    await fsp.writeFile(path.join(scratch, "ranch/platform-subscription.json"), JSON.stringify({
       mechanisms: [{ name: "test-fixture", version: "0.1.1" }],
       blueprints: []
     }, null, 2), "utf8");
@@ -285,7 +285,7 @@ async function case3AdditivePreservesUserEntries() {
 
     const tdataAfter = await readJson(path.join(scratch, ".obsidian/plugins/templater-obsidian/data.json"));
     assertEq("case3: user entry preserved at index 0", tdataAfter.enabled_templates_hotkeys[0], "My Custom Template.md");
-    assertTrue("case3: platform entries appended", tdataAfter.enabled_templates_hotkeys.includes("Docs/Meta/Templates/FixtureA.md") && tdataAfter.enabled_templates_hotkeys.includes("Docs/Meta/Templates/FixtureB.md"));
+    assertTrue("case3: platform entries appended", tdataAfter.enabled_templates_hotkeys.includes("ranch/Templates/FixtureA.md") && tdataAfter.enabled_templates_hotkeys.includes("ranch/Templates/FixtureB.md"));
     assertEq("case3: array length is 2 user + 2 platform", tdataAfter.enabled_templates_hotkeys.length, 4);
 
     const sdataAfter = await readJson(path.join(scratch, ".obsidian/plugins/slash-commander/data.json"));
@@ -315,15 +315,15 @@ async function scaffoldBlueprintVault(scratchDir, blueprints, opts) {
   //   sourceFiles   = optional [{ relPath, body }] to write under
   //                   <fakeWorkshop>/platform/blueprints/<name>/<relPath>.
   // opts (optional): { extraMechanisms: [{ name, version, manifest, sourceFiles? }] }
-  await fsp.mkdir(path.join(scratchDir, "Docs/Meta/Templater"), { recursive: true });
-  await fsp.mkdir(path.join(scratchDir, "Docs/Meta/Templates"), { recursive: true });
-  await fsp.mkdir(path.join(scratchDir, "Docs/Meta/Scripts"), { recursive: true });
-  await fsp.mkdir(path.join(scratchDir, "Docs/Meta/Views"), { recursive: true });
-  await fsp.mkdir(path.join(scratchDir, "Docs/Meta/rules"), { recursive: true });
+  await fsp.mkdir(path.join(scratchDir, "ranch/Templater"), { recursive: true });
+  await fsp.mkdir(path.join(scratchDir, "ranch/Templates"), { recursive: true });
+  await fsp.mkdir(path.join(scratchDir, "ranch/Scripts"), { recursive: true });
+  await fsp.mkdir(path.join(scratchDir, "ranch/Views"), { recursive: true });
+  await fsp.mkdir(path.join(scratchDir, "ranch/rules"), { recursive: true });
   await fsp.mkdir(path.join(scratchDir, ".obsidian/plugins/templater-obsidian"), { recursive: true });
   await fsp.mkdir(path.join(scratchDir, ".obsidian/plugins/slash-commander"), { recursive: true });
 
-  await fsp.copyFile(CANONICAL_INSTALLER, path.join(scratchDir, "Docs/Meta/Templater/platformInstall.js"));
+  await fsp.copyFile(CANONICAL_INSTALLER, path.join(scratchDir, "ranch/Templater/platformInstall.js"));
 
   const fakeWorkshop = path.join(scratchDir, "_fake-workshop");
   for (const bp of blueprints) {
@@ -361,19 +361,19 @@ async function scaffoldBlueprintVault(scratchDir, blueprints, opts) {
     blueprints: blueprints.map((bp) => ({ name: bp.name, version: bp.version, path: `blueprints/${bp.name}` }))
   }, null, 2), "utf8");
 
-  await fsp.writeFile(path.join(scratchDir, "Docs/Meta/platform-config.json"), JSON.stringify({
+  await fsp.writeFile(path.join(scratchDir, "ranch/platform-config.json"), JSON.stringify({
     workshop_relative_path: "_fake-workshop",
     variables: {
-      views_path: "Docs/Meta/Views",
-      templater_scripts_path: "Docs/Meta/Templater",
-      scripts_path: "Docs/Meta/Scripts",
-      templates_path: "Docs/Meta/Templates",
-      content_path: "Docs/Meta/Content",
-      rules_path: "Docs/Meta/rules",
+      views_path: "ranch/Views",
+      templater_scripts_path: "ranch/Templater",
+      scripts_path: "ranch/Scripts",
+      templates_path: "ranch/Templates",
+      content_path: "ranch/Content",
+      rules_path: "ranch/rules",
     }
   }, null, 2), "utf8");
 
-  await fsp.writeFile(path.join(scratchDir, "Docs/Meta/platform-subscription.json"), JSON.stringify({
+  await fsp.writeFile(path.join(scratchDir, "ranch/platform-subscription.json"), JSON.stringify({
     mechanisms: extraMechanisms.map((m) => ({ name: m.name, version: m.version })),
     blueprints: blueprints.map((bp) => ({ name: bp.name, version: bp.version }))
   }, null, 2), "utf8");
@@ -624,7 +624,7 @@ async function caseM5MechanismDoesNotReceiveModuleDirectory() {
     const installedMech = (result && result.mechanisms || []).find((m) => m.name === "test-fixture-mech");
     assertTrue("M5: mechanism installed", installedMech !== undefined && installedMech.version === "0.1.0");
 
-    const destAbs = path.join(scratch, "Docs/Meta/Scripts/foo.md");
+    const destAbs = path.join(scratch, "ranch/Scripts/foo.md");
     assertTrue("M5: mechanism dest file exists", fs.existsSync(destAbs));
 
     if (fs.existsSync(destAbs)) {
@@ -655,7 +655,7 @@ async function caseM5MechanismDoesNotReceiveModuleDirectory() {
 // blueprint, regardless of whether files[] writes anything under that path.
 // This codifies landmine #11 at the installer level (previously the directory
 // was created only as a side-effect of files[] writes there). Daily blueprint
-// surfaced this gap — its files all land under Docs/Meta/* but the Daily
+// surfaced this gap — its files all land under ranch/* but the Daily
 // Notes plugin requires `beacon/daily/` to pre-exist.
 //
 // M6.A: fresh install of a blueprint whose files[] does NOT write under
@@ -669,7 +669,7 @@ async function caseM6ModuleDirectoryEnsured() {
   const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseM6-"));
   try {
     // Fixture: blueprint declares module_directory "test-mod" but its only
-    // file lands under Docs/Meta/Scripts (NOT under {{module_directory}}/...).
+    // file lands under ranch/Scripts (NOT under {{module_directory}}/...).
     // After install, beacon/test-mod/ must still exist as a directory.
     const blueprint = {
       name: "test-fixture-m6",
@@ -747,7 +747,7 @@ async function caseM6ModuleDirectoryEnsured() {
       "utf8"
     );
     await fsp.writeFile(
-      path.join(scratch, "Docs/Meta/platform-subscription.json"),
+      path.join(scratch, "ranch/platform-subscription.json"),
       JSON.stringify({
         mechanisms: [],
         blueprints: [{ name: "test-fixture-m6", version: "0.2.0" }]
@@ -1297,7 +1297,7 @@ async function caseP4UnknownTypeWarningOnly() {
 const C1_DAILY_SETTINGS = {
   folder: "beacon/daily",
   format: "YYYY/MM-MMMM/YYYY-MM-DD-dddd",
-  template: "Docs/Meta/Templates/Daily Note.md",
+  template: "ranch/Templates/Daily Note.md",
 };
 
 async function caseC1IdempotentMerge() {
@@ -1345,7 +1345,7 @@ async function caseC1IdempotentMerge() {
       blueprints: [],
     }, null, 2), "utf8");
     await fsp.writeFile(path.join(scratch, "_fake-workshop/platform/mechanisms/test-fixture/manifest.json"), JSON.stringify(fixtureManifest2, null, 2), "utf8");
-    await fsp.writeFile(path.join(scratch, "Docs/Meta/platform-subscription.json"), JSON.stringify({
+    await fsp.writeFile(path.join(scratch, "ranch/platform-subscription.json"), JSON.stringify({
       mechanisms: [{ name: "test-fixture", version: "0.1.1" }],
       blueprints: [],
     }, null, 2), "utf8");
@@ -1445,7 +1445,7 @@ async function caseC3AdditivePreservesUserKeys() {
     const after = await readJson(corePath);
     assertEq("C3: folder overwritten by manifest", after.folder, "beacon/daily");
     assertEq("C3: format overwritten by manifest", after.format, "YYYY/MM-MMMM/YYYY-MM-DD-dddd");
-    assertEq("C3: template added (was absent)", after.template, "Docs/Meta/Templates/Daily Note.md");
+    assertEq("C3: template added (was absent)", after.template, "ranch/Templates/Daily Note.md");
     assertEq("C3: customField preserved (user-only key)", after.customField, "keepme");
     assertEq("C3: top-level keys count is 4", Object.keys(after).length, 4);
 
@@ -1532,7 +1532,7 @@ async function caseC5SubstitutionOnSettings() {
     if (fs.existsSync(corePath)) {
       const after = await readJson(corePath);
       assertEq("C5: folder substituted to beacon/test", after.folder, "beacon/test");
-      assertEq("C5: template substituted with templates_path", after.template, "Docs/Meta/Templates/Daily Note.md");
+      assertEq("C5: template substituted with templates_path", after.template, "ranch/Templates/Daily Note.md");
     }
 
     const applied = (result && result.history || []).filter(
@@ -1574,7 +1574,7 @@ async function caseFT1IdempotentMerge() {
   try {
     const seedBody = JSON.stringify({
       enabled_templates_hotkeys: [],
-      folder_templates: [{ folder: "beacon/to-do", template: "Docs/Meta/Templates/Today To-Do.md" }],
+      folder_templates: [{ folder: "beacon/to-do", template: "ranch/Templates/Today To-Do.md" }],
       startup_templates: [""],
     }, null, 2);
     const manifest = {
@@ -1582,7 +1582,7 @@ async function caseFT1IdempotentMerge() {
       version: "0.1.0",
       files: [],
       templater_folder_templates: [
-        { folder: "beacon/to-do", template: "Docs/Meta/Templates/Today To-Do.md" },
+        { folder: "beacon/to-do", template: "ranch/Templates/Today To-Do.md" },
       ],
     };
     await scaffoldVault(scratch, {
@@ -1595,7 +1595,7 @@ async function caseFT1IdempotentMerge() {
     const first = await runHarness(scratch);
     assertTrue("FT1: platform-installed.json was written (first run)", first !== null);
     const firstSkipped = (first && first.history || []).filter(
-      (h) => h.event === "info" && h.step === "templater_folder_templates" && h.action === "skipped_existing" && h.folder === "beacon/to-do" && h.template === "Docs/Meta/Templates/Today To-Do.md"
+      (h) => h.event === "info" && h.step === "templater_folder_templates" && h.action === "skipped_existing" && h.folder === "beacon/to-do" && h.template === "ranch/Templates/Today To-Do.md"
     );
     assertEq("FT1: first run records exactly one skipped_existing event", firstSkipped.length, 1);
 
@@ -1619,7 +1619,7 @@ async function caseFT1IdempotentMerge() {
       blueprints: [],
     }, null, 2), "utf8");
     await fsp.writeFile(path.join(scratch, "_fake-workshop/platform/mechanisms/test-fixture/manifest.json"), JSON.stringify(fixtureManifest2, null, 2), "utf8");
-    await fsp.writeFile(path.join(scratch, "Docs/Meta/platform-subscription.json"), JSON.stringify({
+    await fsp.writeFile(path.join(scratch, "ranch/platform-subscription.json"), JSON.stringify({
       mechanisms: [{ name: "test-fixture", version: "0.1.1" }],
       blueprints: [],
     }, null, 2), "utf8");
@@ -1652,7 +1652,7 @@ async function caseFT2MalformedJson() {
       version: "0.1.0",
       files: [],
       templater_folder_templates: [
-        { folder: "beacon/to-do", template: "Docs/Meta/Templates/Today To-Do.md" },
+        { folder: "beacon/to-do", template: "ranch/Templates/Today To-Do.md" },
       ],
     };
     await scaffoldVault(scratch, {
@@ -1701,7 +1701,7 @@ async function caseFT3AdditivePreservesUserEntries() {
       version: "0.1.0",
       files: [],
       templater_folder_templates: [
-        { folder: "beacon/to-do", template: "Docs/Meta/Templates/Today To-Do.md" },
+        { folder: "beacon/to-do", template: "ranch/Templates/Today To-Do.md" },
       ],
     };
     await scaffoldVault(scratch, {
@@ -1719,7 +1719,7 @@ async function caseFT3AdditivePreservesUserEntries() {
     assertEq("FT3: index 0 user folder preserved", after.folder_templates[0].folder, "user/path");
     assertEq("FT3: index 0 user template preserved", after.folder_templates[0].template, "user/Template.md");
     assertEq("FT3: index 1 manifest folder appended", after.folder_templates[1].folder, "beacon/to-do");
-    assertEq("FT3: index 1 manifest template appended", after.folder_templates[1].template, "Docs/Meta/Templates/Today To-Do.md");
+    assertEq("FT3: index 1 manifest template appended", after.folder_templates[1].template, "ranch/Templates/Today To-Do.md");
 
     const applied = (result && result.history || []).filter(
       (h) => h.event === "info" && h.step === "templater_folder_templates" && h.action === "applied" && h.folder === "beacon/to-do"
@@ -1751,7 +1751,7 @@ async function caseFT4BackupOnEdit() {
       version: "0.1.0",
       files: [],
       templater_folder_templates: [
-        { folder: "beacon/to-do", template: "Docs/Meta/Templates/Today To-Do.md" },
+        { folder: "beacon/to-do", template: "ranch/Templates/Today To-Do.md" },
       ],
     };
     await scaffoldVault(scratch, {
@@ -1814,7 +1814,7 @@ async function caseFT5SubstitutionApplied() {
     const after = await readJson(tdataPath);
     assertEq("FT5: folder_templates length === 1", after.folder_templates.length, 1);
     assertEq("FT5: written folder is resolved literal beacon/to-do", after.folder_templates[0].folder, "beacon/to-do");
-    assertEq("FT5: written template is resolved literal Docs/Meta/Templates/Today To-Do.md", after.folder_templates[0].template, "Docs/Meta/Templates/Today To-Do.md");
+    assertEq("FT5: written template is resolved literal ranch/Templates/Today To-Do.md", after.folder_templates[0].template, "ranch/Templates/Today To-Do.md");
 
     const applied = (result && result.history || []).filter(
       (h) => h.event === "info" && h.step === "templater_folder_templates" && h.action === "applied" && h.name === "test-fixture-ft5"
@@ -1823,7 +1823,7 @@ async function caseFT5SubstitutionApplied() {
     if (applied.length === 1) {
       const a = applied[0];
       assertEq("FT5: applied event folder === beacon/to-do", a.folder, "beacon/to-do");
-      assertEq("FT5: applied event template === Docs/Meta/Templates/Today To-Do.md", a.template, "Docs/Meta/Templates/Today To-Do.md");
+      assertEq("FT5: applied event template === ranch/Templates/Today To-Do.md", a.template, "ranch/Templates/Today To-Do.md");
       assertTrue(
         "FT5: applied event has git_commit field (string or null per landmine #14)",
         typeof a.git_commit === "string" || a.git_commit === null
@@ -1880,7 +1880,7 @@ async function caseR1ValidateAndResolveRunTemplaterTemplate() {
     const result = await runHarness(scratch);
     assertTrue("R1: platform-installed.json was written", result !== null);
 
-    const registryPath = path.join(scratch, "Docs/Meta/nav-buttons-registry.json");
+    const registryPath = path.join(scratch, "ranch/nav-buttons-registry.json");
     assertTrue("R1: nav-buttons-registry.json was created", fs.existsSync(registryPath));
 
     if (fs.existsSync(registryPath)) {
@@ -1897,7 +1897,7 @@ async function caseR1ValidateAndResolveRunTemplaterTemplate() {
       assertEq(
         "R1: action.template_source rewritten under templates_path",
         contrib.action.template_source,
-        "Docs/Meta/Templates/Today To-Do.md"
+        "ranch/Templates/Today To-Do.md"
       );
       assertEq(
         "R1: action.folder_prefix substituteLenient applied — {{module_directory}} resolved to literal beacon/to-do (NO bracket-wrapping)",
@@ -1969,7 +1969,7 @@ async function caseR2FilenameDefaults() {
     const result = await runHarness(scratch);
     assertTrue("R2: platform-installed.json was written", result !== null);
 
-    const registry = await readJson(path.join(scratch, "Docs/Meta/nav-buttons-registry.json"));
+    const registry = await readJson(path.join(scratch, "ranch/nav-buttons-registry.json"));
     const contrib = registry.contributions["test-fixture-r2"][0];
 
     assertEq("R2: folder_prefix substituted", contrib.action.folder_prefix, "beacon/minimal");
@@ -2017,7 +2017,7 @@ async function caseR3EmptyFolderDatePattern() {
     ]);
 
     const result = await runHarness(scratch);
-    const registry = await readJson(path.join(scratch, "Docs/Meta/nav-buttons-registry.json"));
+    const registry = await readJson(path.join(scratch, "ranch/nav-buttons-registry.json"));
     const contrib = registry.contributions["test-fixture-r3"][0];
 
     assertEq(
@@ -2067,7 +2067,7 @@ async function caseR4MissingFolderPrefix() {
     const result = await runHarness(scratch);
     assertTrue("R4: platform-installed.json was written (install proceeded)", result !== null);
 
-    const registryPath = path.join(scratch, "Docs/Meta/nav-buttons-registry.json");
+    const registryPath = path.join(scratch, "ranch/nav-buttons-registry.json");
     if (fs.existsSync(registryPath)) {
       const registry = await readJson(registryPath);
       const contribs = (registry.contributions || {})["test-fixture-r4"];
@@ -2122,7 +2122,7 @@ async function caseR5InvokeCommandPassthrough() {
     const result = await runHarness(scratch);
     assertTrue("R5: platform-installed.json was written", result !== null);
 
-    const registry = await readJson(path.join(scratch, "Docs/Meta/nav-buttons-registry.json"));
+    const registry = await readJson(path.join(scratch, "ranch/nav-buttons-registry.json"));
     const contrib = registry.contributions["test-fixture-r5"][0];
 
     assertEq("R5: action.type === invoke_command (preserved)", contrib.action.type, "invoke_command");
@@ -2183,7 +2183,7 @@ async function caseR6OpenLinkTargetSubstitution() {
     const result = await runHarness(scratch);
     assertTrue("R6: platform-installed.json was written", result !== null);
 
-    const registry = await readJson(path.join(scratch, "Docs/Meta/nav-buttons-registry.json"));
+    const registry = await readJson(path.join(scratch, "ranch/nav-buttons-registry.json"));
     const contribs = registry.contributions["test-fixture-r6"];
     assertTrue("R6: registry has contributions for test-fixture-r6", Array.isArray(contribs) && contribs.length >= 1);
 
@@ -2347,7 +2347,7 @@ async function caseVT2IdempotentSkipsOverwriteOnSha256Match() {
       blueprints: [],
     }, null, 2), "utf8");
     await fsp.writeFile(path.join(scratch, "_fake-workshop/platform/mechanisms/test-fixture/manifest.json"), JSON.stringify(fixtureManifest2, null, 2), "utf8");
-    await fsp.writeFile(path.join(scratch, "Docs/Meta/platform-subscription.json"), JSON.stringify({
+    await fsp.writeFile(path.join(scratch, "ranch/platform-subscription.json"), JSON.stringify({
       mechanisms: [{ name: "test-fixture", version: "0.1.1" }],
       blueprints: [],
     }, null, 2), "utf8");

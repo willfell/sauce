@@ -139,8 +139,8 @@ function seedConfig(vaultPath, overrides) {
         ],
         blueprints: []
     }, (overrides && overrides.subscription) || {});
-    fs.writeFileSync(path.join(vaultPath, "Docs/Meta/platform-config.json"), JSON.stringify(cfg, null, 2));
-    fs.writeFileSync(path.join(vaultPath, "Docs/Meta/platform-subscription.json"), JSON.stringify(sub, null, 2));
+    fs.writeFileSync(path.join(vaultPath, "ranch/platform-config.json"), JSON.stringify(cfg, null, 2));
+    fs.writeFileSync(path.join(vaultPath, "ranch/platform-subscription.json"), JSON.stringify(sub, null, 2));
 }
 
 function readJson(p) {
@@ -399,8 +399,8 @@ async function caseBS8WizardGeneratesValidFiles() {
                 }
             });
         });
-        const cfg = readJson(path.join(d, "Docs/Meta/platform-config.json"));
-        const sub = readJson(path.join(d, "Docs/Meta/platform-subscription.json"));
+        const cfg = readJson(path.join(d, "ranch/platform-config.json"));
+        const sub = readJson(path.join(d, "ranch/platform-subscription.json"));
         assertTrue(typeof cfg.workshop_relative_path === "string", "BS8: config workshop_relative_path is string");
         assertTrue(Array.isArray(sub.mechanisms), "BS8: subscription mechanisms is array");
         assertTrue(sub.mechanisms.length >= 1, "BS8: subscription has at least one mechanism");

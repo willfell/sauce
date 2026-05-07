@@ -2,7 +2,7 @@
 // run-install.js — headless harness for platform/install.js.
 //
 // Replaces the manual Templater-in-Obsidian dogfood loop with a Node CLI.
-// Loads <vault>/Docs/Meta/Templater/platformInstall.js (byte-identical
+// Loads <vault>/ranch/Templater/platformInstall.js (byte-identical
 // bootstrap copy of platform/install.js) and runs it against a fake `tp`
 // object that proxies the Obsidian APIs the installer touches into the
 // real filesystem rooted at the given vault path.
@@ -259,7 +259,7 @@ class Notice {
 // ----- main ----------------------------------------------------------------
 
 async function readInstalled() {
-  const p = abs("Docs/Meta/platform-installed.json");
+  const p = abs("ranch/platform-installed.json");
   try {
     const raw = await fsp.readFile(p, "utf8");
     return JSON.parse(raw);
@@ -270,11 +270,11 @@ async function readInstalled() {
 
 async function main() {
   // Sanity: verify vault layout looks like a vault.
-  if (!fs.existsSync(abs("Docs/Meta/platform-config.json"))) {
-    console.error(`run-install: ${VAULT}/Docs/Meta/platform-config.json not found — is this a vault?`);
+  if (!fs.existsSync(abs("ranch/platform-config.json"))) {
+    console.error(`run-install: ${VAULT}/ranch/platform-config.json not found — is this a vault?`);
     process.exit(2);
   }
-  const installerPath = abs("Docs/Meta/Templater/platformInstall.js");
+  const installerPath = abs("ranch/Templater/platformInstall.js");
   if (!fs.existsSync(installerPath)) {
     console.error(`run-install: ${installerPath} not found — bootstrap installer missing`);
     process.exit(2);

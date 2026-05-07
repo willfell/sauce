@@ -37,7 +37,7 @@
  *   FF6   invoice-time-log-editor-out-of-path     InvoiceTimeLogEditor on non-Time-Log path renders nothing
  *   FF7   invoice-controls-rate-and-toggle        InvoiceControls renders rate input + Mark Submitted button
  *   FF8   widget-embed-dedup                      InvoiceControls inside .markdown-embed renders nothing
- *   BB1   baseline-csstext         BeaconButton.render returns HTMLButtonElement with accent baseline cssText
+ *   BB1   baseline-csstext         AccentButton.render returns HTMLButtonElement with accent baseline cssText
  *   BB2   flex-fill-css            opts.flex === true appends "flex: 1; min-width: 0" to base cssText
  *   BB3   onclick-wires            opts.onClick wires through (synthetic click triggers handler)
  *   BB4   disabled-hover-noop      opts.disabled === true initial; hover handlers no-op while btn.disabled
@@ -47,7 +47,7 @@
  * Usage:
  *   node platform/test/run-renderer.js [--vault <path>] [test-selector]
  *   test-selector:
- *     all (default), empty, malformed, unknown-action, lazy-scaffold, barebones-one-button, beacon-cards, date-aware, finance, beacon-button
+ *     all (default), empty, malformed, unknown-action, lazy-scaffold, barebones-one-button, beacon-cards, date-aware, finance, accent-button
  *   exit 0 on all selected pass; 1 otherwise
  */
 
@@ -82,7 +82,7 @@ const RENDERER_FILE = path.join(WORKSHOP, 'platform', 'mechanisms', 'nav-buttons
 
 // Target vault for registry + adapter reads/writes.
 const VAULT = ARGS.vault ? path.resolve(ARGS.vault) : WORKSHOP;
-const REGISTRY_REL = 'Docs/Meta/nav-buttons-registry.json';
+const REGISTRY_REL = 'ranch/nav-buttons-registry.json';
 const REGISTRY_ABS = path.join(VAULT, REGISTRY_REL);
 const KANBAN_TARGET_REL = 'boards/To-Do-Board.md';
 
@@ -92,8 +92,8 @@ const RENDERER_SRC = fs.readFileSync(RENDERER_FILE, 'utf8');
 const BEACON_CARDS_FILE = path.join(WORKSHOP, 'platform', 'mechanisms', 'cards', 'beacon-cards.js');
 const BEACON_CARDS_SRC = fs.readFileSync(BEACON_CARDS_FILE, 'utf8');
 
-const BEACON_BUTTON_FILE = path.join(WORKSHOP, 'platform', 'mechanisms', 'beacon-button', 'beacon-button.js');
-const BEACON_BUTTON_SRC = fs.existsSync(BEACON_BUTTON_FILE) ? fs.readFileSync(BEACON_BUTTON_FILE, 'utf8') : '';
+const ACCENT_BUTTON_FILE = path.join(WORKSHOP, 'platform', 'mechanisms', 'accent-button', 'accent-button.js');
+const ACCENT_BUTTON_SRC = fs.existsSync(ACCENT_BUTTON_FILE) ? fs.readFileSync(ACCENT_BUTTON_FILE, 'utf8') : '';
 
 // ── DOM stub ─────────────────────────────────────────────────────────────
 function makeEl(tag, opts) {
@@ -249,9 +249,9 @@ function loadBeaconCardsClass(app) {
   return fn(app);
 }
 
-function loadBeaconButtonClass(app) {
-  if (!BEACON_BUTTON_SRC) return null;
-  const fn = new Function('app', `${BEACON_BUTTON_SRC}\nreturn typeof BeaconButton !== 'undefined' ? BeaconButton : null;`);
+function loadAccentButtonClass(app) {
+  if (!ACCENT_BUTTON_SRC) return null;
+  const fn = new Function('app', `${ACCENT_BUTTON_SRC}\nreturn typeof AccentButton !== 'undefined' ? AccentButton : null;`);
   return fn(app);
 }
 
@@ -265,7 +265,7 @@ function makeFinanceCustomJsStub() {
     PaychecksCards: noop,
     InvoicesCards: noop,
     FinanceFrontmatter: { update: async () => {}, read: () => null, isTruthy: (v) => v === true || (typeof v === 'string' && v.toLowerCase() === 'true') },
-    BeaconButton: {
+    AccentButton: {
       render: (parent, opts) => {
         const btn = parent.createEl('button');
         btn.innerHTML = (opts && opts.icon ? opts.icon : '') + `<span>${opts && opts.label != null ? opts.label : ''}</span>`;
@@ -816,12 +816,12 @@ async function testBC7SuccessTone() {
   return pass;
 }
 
-// ── BeaconButton mechanism (v0.18.0) ─────────────────────────────────────
+// ── AccentButton mechanism (v0.18.0; renamed from BeaconButton in v0.24.0) ─
 async function testBB1RenderReturnsButtonWithBaselineCssText() {
   console.log('\n=== BB1 — render returns HTMLButtonElement with accent baseline cssText ===');
   const app = makeApp();
-  const Cls = loadBeaconButtonClass(app);
-  if (!Cls) { console.log('  FAIL — BeaconButton class not loaded'); return false; }
+  const Cls = loadAccentButtonClass(app);
+  if (!Cls) { console.log('  FAIL — AccentButton class not loaded'); return false; }
   const parent = makeEl('div', {});
   const btn = new Cls().render(parent, { label: 'Hi', icon: '<svg/>', onClick: () => {} });
   const css = (btn && btn.style && btn.style.cssText) || '';
@@ -838,8 +838,8 @@ async function testBB1RenderReturnsButtonWithBaselineCssText() {
 async function testBB2FlexAppendsFillCss() {
   console.log('\n=== BB2 — flex:true appends "flex: 1; min-width: 0" ===');
   const app = makeApp();
-  const Cls = loadBeaconButtonClass(app);
-  if (!Cls) { console.log('  FAIL — BeaconButton class not loaded'); return false; }
+  const Cls = loadAccentButtonClass(app);
+  if (!Cls) { console.log('  FAIL — AccentButton class not loaded'); return false; }
   const parent = makeEl('div', {});
   const btn = new Cls().render(parent, { label: 'Hi', icon: '<svg/>', onClick: () => {}, flex: true });
   const css = (btn && btn.style && btn.style.cssText) || '';
@@ -852,8 +852,8 @@ async function testBB2FlexAppendsFillCss() {
 async function testBB3OnClickWires() {
   console.log('\n=== BB3 — onClick option wires through ===');
   const app = makeApp();
-  const Cls = loadBeaconButtonClass(app);
-  if (!Cls) { console.log('  FAIL — BeaconButton class not loaded'); return false; }
+  const Cls = loadAccentButtonClass(app);
+  if (!Cls) { console.log('  FAIL — AccentButton class not loaded'); return false; }
   const parent = makeEl('div', {});
   let fired = 0;
   const btn = new Cls().render(parent, { label: 'Hi', icon: '<svg/>', onClick: () => { fired++; } });
@@ -867,8 +867,8 @@ async function testBB3OnClickWires() {
 async function testBB4DisabledHoverNoOp() {
   console.log('\n=== BB4 — disabled:true initial; hover handlers no-op while disabled ===');
   const app = makeApp();
-  const Cls = loadBeaconButtonClass(app);
-  if (!Cls) { console.log('  FAIL — BeaconButton class not loaded'); return false; }
+  const Cls = loadAccentButtonClass(app);
+  if (!Cls) { console.log('  FAIL — AccentButton class not loaded'); return false; }
   const parent = makeEl('div', {});
   const btn = new Cls().render(parent, { label: 'Hi', icon: '<svg/>', onClick: () => {}, disabled: true });
   if (btn && typeof btn.onmouseenter === 'function') btn.onmouseenter();
@@ -884,8 +884,8 @@ async function testBB4DisabledHoverNoOp() {
 async function testBB5IconHtmlInlinedBeforeLabel() {
   console.log('\n=== BB5 — icon HTML inlined verbatim before <span>${label}</span> ===');
   const app = makeApp();
-  const Cls = loadBeaconButtonClass(app);
-  if (!Cls) { console.log('  FAIL — BeaconButton class not loaded'); return false; }
+  const Cls = loadAccentButtonClass(app);
+  if (!Cls) { console.log('  FAIL — AccentButton class not loaded'); return false; }
   const parent = makeEl('div', {});
   const iconHtml = '<svg data-test="icon"/>';
   const btn = new Cls().render(parent, { label: 'Save', icon: iconHtml, onClick: () => {} });
@@ -901,8 +901,8 @@ async function testBB5IconHtmlInlinedBeforeLabel() {
 async function testBB6HoverEnterLeaveSwapsColors() {
   console.log('\n=== BB6 — hover-enter swaps to filled accent; hover-leave restores ===');
   const app = makeApp();
-  const Cls = loadBeaconButtonClass(app);
-  if (!Cls) { console.log('  FAIL — BeaconButton class not loaded'); return false; }
+  const Cls = loadAccentButtonClass(app);
+  if (!Cls) { console.log('  FAIL — AccentButton class not loaded'); return false; }
   const parent = makeEl('div', {});
   const btn = new Cls().render(parent, { label: 'Hi', icon: '<svg/>', onClick: () => {} });
   if (btn && typeof btn.onmouseenter === 'function') btn.onmouseenter();
@@ -1122,7 +1122,7 @@ async function testFF3HubAreaRowIcons() {
       results.push(['BC6 synthetic-page-onclick', await testBC6SyntheticPageOnClick()]);
       results.push(['BC7 success-tone', await testBC7SuccessTone()]);
     }
-    if (which === 'beacon-button' || which === 'all') {
+    if (which === 'accent-button' || which === 'all') {
       results.push(['BB1 baseline-csstext', await testBB1RenderReturnsButtonWithBaselineCssText()]);
       results.push(['BB2 flex-fill-css', await testBB2FlexAppendsFillCss()]);
       results.push(['BB3 onclick-wires', await testBB3OnClickWires()]);

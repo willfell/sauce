@@ -20,10 +20,10 @@ function assertEqual(actual, expected, label) {
 async function withTempVault(setup, fn) {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "beacon-cli-"));
     try {
-        fs.mkdirSync(path.join(tmp, "Docs/Meta"), { recursive: true });
-        fs.writeFileSync(path.join(tmp, "Docs/Meta/platform-config.json"),
+        fs.mkdirSync(path.join(tmp, "ranch"), { recursive: true });
+        fs.writeFileSync(path.join(tmp, "ranch/platform-config.json"),
             JSON.stringify({ workshop_relative_path: "pantry", variables: {} }, null, 2));
-        fs.writeFileSync(path.join(tmp, "Docs/Meta/platform-subscription.json"),
+        fs.writeFileSync(path.join(tmp, "ranch/platform-subscription.json"),
             JSON.stringify({ mechanisms: [], blueprints: [] }, null, 2));
         if (typeof setup === "function") await setup(tmp);
         await fn(tmp);
@@ -37,7 +37,7 @@ async function caseC1AncestorWalk() {
     const label = "C1 dispatcher walks cwd ancestors to find vault";
     await withTempVault({}, async (vaultPath) => {
         const cli = require("../cli/sauce-cli.js");
-        const ctx = await cli.resolveContext({ cwd: path.join(vaultPath, "Docs/Meta") });
+        const ctx = await cli.resolveContext({ cwd: path.join(vaultPath, "ranch") });
         assertEqual(ctx.vaultPath, vaultPath, label);
     });
 }
@@ -99,7 +99,7 @@ async function caseC6StatusDrift() {
     await withTempVault({}, async (vaultPath) => {
         const cmd = require("../cli/cmd-status.js");
         // Subscribed: validator@0.1.1; Installed (history): validator@0.1.0
-        fs.writeFileSync(path.join(vaultPath, "Docs/Meta/platform-installed.json"),
+        fs.writeFileSync(path.join(vaultPath, "ranch/platform-installed.json"),
             JSON.stringify({ history: [{ kind: "mechanisms", name: "validator", version: "0.1.0" }] }, null, 2));
         const ctx = { vaultPath, config: { workshop_relative_path: "pantry" },
             subscription: { mechanisms: [{ name: "validator", version: "0.1.1" }], blueprints: [] },
@@ -308,7 +308,7 @@ async function caseC14WizardNonInteractiveDefaults() {
                     { name: "customjs-guard", version: "1.0.0" },
                     { name: "nav-buttons", version: "2.5.2" },
                     { name: "cards", version: "0.2.3" },
-                    { name: "beacon-button", version: "0.1.0" },
+                    { name: "accent-button", version: "0.1.0" },
                     { name: "styling", version: "0.1.2" },
                     { name: "validator", version: "0.1.1" }   // NOT in default-checked
                 ],
@@ -323,7 +323,7 @@ async function caseC14WizardNonInteractiveDefaults() {
             defaults: {}               // no overrides — exercise default fallback
         });
         const subscribedNames = (r.subscription.mechanisms || []).map(m => m.name).sort();
-        const expected = ["beacon-button", "cards", "customjs-guard", "nav-buttons", "styling"];
+        const expected = ["accent-button", "cards", "customjs-guard", "nav-buttons", "styling"];
         assertEqual(JSON.stringify(subscribedNames), JSON.stringify(expected),
             label + ": 5 default mechs (NOT including validator)");
     });
