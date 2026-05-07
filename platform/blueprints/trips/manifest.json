@@ -1,13 +1,14 @@
 {
   "name": "trips",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "kind": "blueprint",
   "module_directory": "trips",
   "description": "Per-trip ecosystem under spice/trips/<slug>/. Each trip is a flat folder with an atlas note + 5 baseline sections (Flights, Stay, Packing List, To Do, Notes). Hub at spice/trips/Trips.md lists trips as BeaconCards row-layout cards sorted upcoming-first. 'New Trip' button scaffolds the directory tree from a name + dates + location dialog. Per-trip nav buttons auto-discover sibling sections.",
   "depends_on": [
     { "name": "nav-buttons",    "range": ">=2.5.1" },
     { "name": "customjs-guard", "range": ">=1.0.0" },
-    { "name": "cards",          "range": ">=0.1.1" }
+    { "name": "cards",          "range": ">=0.1.1" },
+    { "name": "convenience",    "range": ">=0.1.0" }
   ],
   "customjs_classes": ["TripsHubCards", "TripNavButtons", "TripSectionsCards"],
   "files": [

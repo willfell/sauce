@@ -1,12 +1,13 @@
 {
   "name": "journal",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "kind": "blueprint",
   "module_directory": "journal",
   "description": "Date-routed daily journal entries under spice/journal/. Filename pattern Journal-YYYY-MM-DD per gotcha 8 platform invariant. Nav-button-driven creation via runTemplaterTemplate; manual creation under spice/journal/ auto-applies template via templater_folder_templates.",
   "depends_on": [
     { "name": "nav-buttons",    "range": ">=2.4.0" },
-    { "name": "customjs-guard", "range": ">=1.0.0" }
+    { "name": "customjs-guard", "range": ">=1.0.0" },
+    { "name": "convenience",    "range": ">=0.1.0" }
   ],
   "files": [
     { "source": "templates/Today Journal.md", "dest": "{{templates_path}}/Today Journal.md" }

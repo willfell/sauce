@@ -1,6 +1,6 @@
 {
   "name": "finance",
-  "version": "0.2.9",
+  "version": "0.2.10",
   "kind": "blueprint",
   "module_directory": "finance",
   "description": "Finance blueprint covering Budgets + Paychecks + Invoices under spice/finance/. Top hub Finance.md aggregates pending items from all three sub-areas. Budgets/Paychecks are flat dated entities; Invoices use a per-month folder ecosystem mirroring trips/<slug>/. Status pills (Planning/In Progress/Done) derived from frontmatter via shared FinanceStatus helper. v0.2.7 PATCH: 8 outline-accent button call sites migrated to customJS.AccentButton.render. v0.2.8 PATCH (in-cycle CF-1): InvoiceControls Save now also recomputes amount = round(rate * hours, 2) on save; Save's enabled state additionally considers amount drift (enabled when stored amount != rate * hours) so stale-amount entities can be re-synced without changing the rate. Misleading caveat note removed.",
@@ -8,7 +8,8 @@
     { "name": "nav-buttons",    "range": ">=2.5.2" },
     { "name": "cards",          "range": ">=0.2.3" },
     { "name": "customjs-guard", "range": ">=1.0.0" },
-    { "name": "accent-button",  "range": ">=0.1.0" }
+    { "name": "accent-button",  "range": ">=0.1.0" },
+    { "name": "convenience",    "range": ">=0.1.0" }
   ],
   "customjs_classes": [
     "FinanceStatus",

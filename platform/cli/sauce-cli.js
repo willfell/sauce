@@ -10,7 +10,8 @@ const VERBS = {
     bootstrap: "./cmd-bootstrap.js",
     update:    "./cmd-update.js",
     status:    "./cmd-status.js",
-    wizard:    "./cmd-wizard.js"
+    wizard:    "./cmd-wizard.js",
+    help:      "./cmd-help.js"
 };
 
 function readJson(p) { return JSON.parse(fs.readFileSync(p, "utf8")); }
@@ -74,14 +75,19 @@ function bootstrapCtxFromArgs(rest) {
 
 async function dispatch(argv, opts) {
     opts = opts || {};
-    const verb = argv[0];
+    let verb = argv[0];
     const rest = argv.slice(1);
-    if (!verb || verb === "--help" || verb === "-h") {
-        printUsage();
+    // v0.26.1 P1-3a: route bare `sauce`, `sauce --help`, `sauce -h` to the
+    // help verb. Help works OUTSIDE any vault — does NOT call resolveContext.
+    if (verb === undefined || verb === "--help" || verb === "-h") verb = "help";
+    if (verb === "help") {
+        const cmd = require(VERBS.help);
+        await cmd.run(null, rest);
+        process.exitCode = 0;
         return;
     }
     if (!VERBS[verb]) {
-        throw new Error(`unknown verb: ${verb}\nUsage: sauce <bootstrap|update|status|wizard>`);
+        throw new Error(`unknown verb: ${verb}\nUsage: sauce <bootstrap|update|status|wizard|help>`);
     }
     let ctx;
     if (verb === "bootstrap") {

@@ -50,10 +50,42 @@ async function run(ctx, args) {
     }
     lines.push("  Drift:        " + (driftedNames.length === 0 ? "none" : driftedNames.join(", ")));
 
+    // v0.26.1 P1-3c: warn when a subscribed blueprint declares a depends_on
+    // entry for "convenience" but convenience is not in subscription.mechanisms.
+    // Best-effort: missing or malformed blueprint manifests are silently
+    // ignored (status is read-only diagnostic; failure-loud is wrong here).
+    const subscribedMechs = new Set((ctx.subscription.mechanisms || []).map(m => m && m.name));
+    const missing = [];
+    for (const b of (ctx.subscription.blueprints || [])) {
+        if (!b || !b.name) continue;
+        const bpManifest = readBlueprintManifest(ctx, b.name);
+        if (!bpManifest || !Array.isArray(bpManifest.depends_on)) continue;
+        for (const dep of bpManifest.depends_on) {
+            if (dep && dep.name === "convenience" && !subscribedMechs.has("convenience")) {
+                missing.push(b.name);
+                break;
+            }
+        }
+    }
+    if (missing.length > 0) {
+        lines.push("");
+        lines.push(`  [warn] Blueprint(s) ${missing.join(", ")} depend on convenience but it is not subscribed.`);
+        lines.push("         Run `sauce wizard` to add it.");
+    }
+
     if (!process.env.SAUCE_TEST_MODE) {
         for (const l of lines) console.log(l);
     }
     return { lines };
+}
+
+function readBlueprintManifest(ctx, name) {
+    try {
+        const p = path.join(ctx.workshopPath, "platform/blueprints", name, "manifest.json");
+        return JSON.parse(fs.readFileSync(p, "utf8"));
+    } catch (_e) {
+        return null;
+    }
 }
 
 function _gitExec(ctx, args) {

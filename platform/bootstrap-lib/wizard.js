@@ -87,6 +87,60 @@ function _deriveVaultIdentityTag(displayName) {
     return lower;
 }
 
+/**
+ * v0.26.1 P1-3c — load each blueprint's full manifest (with depends_on) from
+ * <workshopPath>/platform/blueprints/<name>/manifest.json. Workshop manifest's
+ * blueprints[] entries are {name, version, path} only; the depends_on array
+ * lives in the per-blueprint manifest. Best-effort: missing/malformed manifests
+ * are silently skipped (returns shorter array). Pure (no I/O outside readFileSync).
+ */
+function _loadFullBlueprintManifests(workshopPath, workshopManifest) {
+    const out = [];
+    const entries = _safeArray(workshopManifest && workshopManifest.blueprints);
+    for (const e of entries) {
+        if (!e || typeof e.name !== "string") continue;
+        try {
+            const p = path.join(workshopPath, "platform/blueprints", e.name, "manifest.json");
+            const m = JSON.parse(fs.readFileSync(p, "utf8"));
+            out.push(m);
+        } catch (_e) { /* best-effort */ }
+    }
+    return out;
+}
+
+/**
+ * v0.26.1 P1-3c — auto-add the "convenience" mechanism to selectedMechs when
+ * any selected blueprint declares a depends_on entry for it. Pure: no I/O.
+ *
+ * - Returns input unchanged if convenience is already selected (no duplicate).
+ * - Returns input unchanged if no selected blueprint depends on convenience.
+ * - Otherwise returns a new array with "convenience" appended.
+ *
+ * @param selectedMechs - array of mechanism names already chosen
+ * @param selectedBlueprints - array of blueprint names already chosen
+ * @param fullBlueprints - array of full blueprint manifests (name + depends_on);
+ *                         see _loadFullBlueprintManifests
+ */
+function _autoAddConvenienceIfDvBlueprintsSelected(selectedMechs, selectedBlueprints, fullBlueprints) {
+    const mechs = _safeArray(selectedMechs);
+    if (mechs.includes("convenience")) return mechs.slice();
+    const bps = _safeArray(selectedBlueprints);
+    const fulls = _safeArray(fullBlueprints);
+    const triggering = [];
+    for (const name of bps) {
+        const full = fulls.find((b) => b && b.name === name);
+        if (!full || !Array.isArray(full.depends_on)) continue;
+        if (full.depends_on.some((d) => d && d.name === "convenience")) {
+            triggering.push(name);
+        }
+    }
+    if (triggering.length === 0) return mechs.slice();
+    if (!process.env.SAUCE_TEST_MODE) {
+        console.log(`[info] Auto-added convenience because ${triggering[0]} depends on it.`);
+    }
+    return [...mechs, "convenience"];
+}
+
 function _buildSubscriptionEntries(selectedNames, manifestEntries) {
     const out = [];
     for (const name of _safeArray(selectedNames)) {
@@ -271,8 +325,22 @@ async function runFirstRunWizard(opts) {
             if (Array.isArray(v)) return v.slice();
             return [];
         };
-        const selectedMechs = _resolveMechs(defaults && defaults.mechanisms);
+        let selectedMechs = _resolveMechs(defaults && defaults.mechanisms);
         const selectedBlueprints = _resolveBlueprints(defaults && defaults.blueprints);
+
+        // v0.26.1 P1-3c: auto-add convenience when any selected blueprint
+        // depends on it. Reads per-blueprint manifests from disk to learn
+        // depends_on (workshop manifest's blueprints[] is name/version only).
+        const workshopPathForLoad =
+            (vaultPath && workshopRelativePath)
+                ? path.resolve(vaultPath, workshopRelativePath)
+                : null;
+        if (workshopPathForLoad && resolvedManifest) {
+            const fullBlueprints = _loadFullBlueprintManifests(workshopPathForLoad, resolvedManifest);
+            selectedMechs = _autoAddConvenienceIfDvBlueprintsSelected(
+                selectedMechs, selectedBlueprints, fullBlueprints
+            );
+        }
 
         return {
             config: {
@@ -366,7 +434,7 @@ async function runFirstRunWizard(opts) {
         value: m.name,
         checked: mechDefaultSet.has(m.name)
     }));
-    const selectedMechs =
+    let selectedMechs =
         mechChoices.length > 0
             ? await checkbox({
                   message: "Select mechanisms to subscribe to:",
@@ -390,6 +458,17 @@ async function runFirstRunWizard(opts) {
                   choices: blueprintChoices
               })
             : [];
+
+    // v0.26.1 P1-3c: auto-add convenience when any selected blueprint
+    // depends on it. Reads per-blueprint manifests from disk to learn
+    // depends_on (workshop manifest's blueprints[] is name/version only).
+    {
+        const workshopPathForLoad = path.resolve(resolvedVaultPath, workshopRelativePath);
+        const fullBlueprints = _loadFullBlueprintManifests(workshopPathForLoad, resolvedManifest);
+        selectedMechs = _autoAddConvenienceIfDvBlueprintsSelected(
+            selectedMechs, selectedBlueprints, fullBlueprints
+        );
+    }
 
     // 6. Confirm.
     const proceed = await confirm({
@@ -588,5 +667,7 @@ module.exports = {
     runFirstRunWizard,
     runReRunWizard,
     _normalizeSubscriptionFile,
-    _coerceSubscriptionEntry
+    _coerceSubscriptionEntry,
+    _loadFullBlueprintManifests,
+    _autoAddConvenienceIfDvBlueprintsSelected
 };

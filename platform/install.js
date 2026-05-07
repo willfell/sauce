@@ -108,6 +108,11 @@ module.exports = async function (tp) {
     // run (not per-item) since CustomJS is foundational + platform-wide.
     await applyCustomJsSettings(tp, variables, installedNow.history, git);
 
+    // v0.26.1 P1-2: write declared keys from workshopManifest.app_settings
+    // into <vault>/.obsidian/app.json (additive shallow merge, platform-as-
+    // overrider, backup-on-edit, atomic write). Workshop-level helper.
+    await applyAppSettings(tp, manifest, installedNow.history, git);
+
     // 1. resolve which items to install + their order
     const { nodes, skipped: missingItems } = resolveDependencies(subscription, manifest);
 
@@ -2250,6 +2255,194 @@ async function applyCustomJsSettings(tp, variables, history, git) {
         attempted_at: new Date().toISOString(),
       });
     }
+  }
+}
+
+// applyAppSettings — write declared keys from workshopManifest.app_settings
+// into <vault>/.obsidian/app.json. NEW v0.26.1 (P1-2). Workshop-level helper
+// (runs ONCE per install run, NOT per-item). Mirrors applyCustomJsSettings
+// posture: additive shallow merge, backup-on-edit (.sauce-backup), atomic write
+// (tmp + rename), malformed-JSON guard, failure-loud history under step
+// "app_settings". Platform-as-overrider for declared keys (NOT first-wins) —
+// the platform DECLARES alwaysOpenInNewTab as a vault baseline; user's other
+// app.json keys are preserved verbatim.
+async function applyAppSettings(tp, workshopManifest, history, git) {
+  if (!workshopManifest || !workshopManifest.app_settings ||
+      typeof workshopManifest.app_settings !== "object" ||
+      Object.keys(workshopManifest.app_settings).length === 0) {
+    return; // silent no-op when no settings declared
+  }
+
+  let basePath;
+  try {
+    basePath = tp.app.vault.adapter.getBasePath();
+  } catch (e) {
+    new Notice(`applyAppSettings: vault adapter getBasePath unavailable (${e.message})`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "app_settings",
+        action: "error",
+        message: e.message,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+  if (!basePath || typeof basePath !== "string") {
+    if (history) {
+      history.push({
+        event: "error",
+        step: "app_settings",
+        action: "error",
+        message: "getBasePath returned non-string",
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  const obsidianDir = require("path").join(basePath, ".obsidian");
+  if (!require("fs").existsSync(obsidianDir)) {
+    if (history) {
+      history.push({
+        event: "info",
+        step: "app_settings",
+        action: "skipped_obsidian_dir_absent",
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  const target = require("path").join(obsidianDir, "app.json");
+  let existing = {};
+  const targetExisted = require("fs").existsSync(target);
+  if (targetExisted) {
+    let raw;
+    try {
+      raw = require("fs").readFileSync(target, "utf8");
+    } catch (e) {
+      new Notice(`applyAppSettings: cannot read ${target} (${e.message}); skipping`, 8000);
+      if (history) {
+        history.push({
+          event: "error",
+          step: "app_settings",
+          action: "error",
+          message: e.message,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      return;
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (e) {
+      new Notice(`applyAppSettings: ${target} malformed JSON (${e.message}); skipping`, 8000);
+      if (history) {
+        history.push({
+          event: "error",
+          step: "app_settings",
+          action: "error",
+          message: e.message,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      return;
+    }
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      new Notice(`applyAppSettings: ${target} parsed but not a JSON object; skipping`, 8000);
+      if (history) {
+        history.push({
+          event: "error",
+          step: "app_settings",
+          action: "error",
+          message: "malformed shape",
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      return;
+    }
+    existing = parsed;
+  }
+
+  // Backup-on-edit BEFORE write (only if file existed; create-from-scratch needs no backup).
+  if (targetExisted) {
+    try {
+      require("fs").copyFileSync(target, target + ".sauce-backup");
+    } catch (e) {
+      new Notice(`applyAppSettings: backup write failed (${e.message}); aborting`, 8000);
+      if (history) {
+        history.push({
+          event: "error",
+          step: "app_settings",
+          action: "error",
+          message: `backup failed: ${e.message}`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      return;
+    }
+  }
+
+  // Additive shallow merge: platform-as-overrider for declared keys.
+  const merged = { ...existing, ...workshopManifest.app_settings };
+
+  // Atomic write: tmp + rename.
+  const tmp = target + ".tmp";
+  try {
+    require("fs").writeFileSync(tmp, JSON.stringify(merged, null, 2), "utf8");
+    require("fs").renameSync(tmp, target);
+  } catch (e) {
+    new Notice(`applyAppSettings: write failed (${e.message})`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "app_settings",
+        action: "error",
+        message: e.message,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  if (history) {
+    history.push({
+      event: "info",
+      step: "app_settings",
+      action: "applied",
+      keys_written: Object.keys(workshopManifest.app_settings),
+      git_commit: git.commit,
+      git_tag: git.tag,
+      git_dirty: git.dirty,
+      attempted_at: new Date().toISOString(),
+    });
   }
 }
 

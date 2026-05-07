@@ -1,13 +1,14 @@
 {
   "name": "meetings",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "kind": "blueprint",
   "module_directory": "meetings",
   "description": "Hub-centric meeting notes: one Meetings Hub per day at spice/meetings/hubs/YYYY/MM-MMMM/ aggregating individual meeting notes at spice/meetings/notes/ via inline NewMeetingButton + MeetingsHubCards CustomJS classes. v0.1.2: filename pattern <Name>-YYYY-MM-DD (Meetings-YYYY-MM-DD.md hub; <title>-YYYY-MM-DD.md per-meeting); hub folder date-routed; class regex date-extract. v0.2.0: MeetingsHubCards migrated to BeaconCards via row layout + async pre-fetch adapter; per-badge SVG icons + secondaryText subtitle preserved end-to-end.",
   "depends_on": [
     { "name": "nav-buttons",    "range": ">=2.2.0" },
     { "name": "customjs-guard", "range": ">=1.0.0" },
-    { "name": "accent-button",  "range": ">=0.1.0" }
+    { "name": "accent-button",  "range": ">=0.1.0" },
+    { "name": "convenience",    "range": ">=0.1.0" }
   ],
   "customjs_classes": ["MeetingsHubCards", "NewMeetingButton"],
   "files": [
