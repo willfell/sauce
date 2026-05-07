@@ -447,31 +447,31 @@ async function caseBS9FollowsRedirects() {
 // BS10: phaseWriteActivation generates Scripts/activate.sh + Scripts/beacon
 //       with absolute paths baked in + chmod 0755.
 async function caseBS10ActivationArtifacts() {
-    const label = "BS10 phaseWriteActivation generates Beacon/Scripts artifacts";
+    const label = "BS10 phaseWriteActivation generates pantry/Scripts artifacts";
     await withTempVault({}, async (vaultPath) => {
         const bootstrap = require("../bootstrap.js");
         const fs = require("fs");
         const path = require("path");
-        // Pre-create <vault>/Beacon/ to mimic post-clone state
-        const workshopAbs = path.join(vaultPath, "Beacon");
+        // Pre-create <vault>/pantry/ to mimic post-clone state
+        const workshopAbs = path.join(vaultPath, "pantry");
         fs.mkdirSync(path.join(workshopAbs, "platform/cli"), { recursive: true });
-        fs.writeFileSync(path.join(workshopAbs, "platform/cli/beacon-cli.js"), "// stub");
+        fs.writeFileSync(path.join(workshopAbs, "platform/cli/sauce-cli.js"), "// stub");
         await bootstrap.phaseWriteActivation({ vaultPath, workshopAbsPath: workshopAbs });
         const actPath = path.join(workshopAbs, "Scripts/activate.sh");
-        const binPath = path.join(workshopAbs, "Scripts/beacon");
+        const binPath = path.join(workshopAbs, "Scripts/sauce");
         assertTrue(fs.existsSync(actPath), label + ": activate.sh exists");
-        assertTrue(fs.existsSync(binPath), label + ": Scripts/beacon exists");
+        assertTrue(fs.existsSync(binPath), label + ": Scripts/sauce exists");
         const actBody = fs.readFileSync(actPath, "utf8");
         assertTrue(actBody.includes(workshopAbs + "/Scripts"), label + ": activate.sh has absolute Scripts path");
-        assertTrue(actBody.includes('BEACON_VAULT="' + vaultPath + '"'), label + ": activate.sh exports BEACON_VAULT");
+        assertTrue(actBody.includes('SAUCE_VAULT="' + vaultPath + '"'), label + ": activate.sh exports SAUCE_VAULT");
         const binStat = fs.statSync(binPath);
-        assertEqual(binStat.mode & 0o777, 0o755, label + ": Scripts/beacon is chmod 0755");
+        assertEqual(binStat.mode & 0o777, 0o755, label + ": Scripts/sauce is chmod 0755");
     });
 }
 
-// BS11: first-run wizard defaults workshop_relative_path to "Beacon" (was "../beacon")
-async function caseBS11WizardDefaultsBeacon() {
-    const label = "BS11 first-run wizard defaults workshop_relative_path to Beacon";
+// BS11: first-run wizard defaults workshop_relative_path to "pantry" (was "Beacon")
+async function caseBS11WizardDefaultsPantry() {
+    const label = "BS11 first-run wizard defaults workshop_relative_path to pantry";
     // Use nonInteractive + wizardDefaults injection per existing BS8 pattern.
     await withTempVault({}, async (vaultPath) => {
         const wizard = require("../bootstrap-lib/wizard.js");
@@ -479,9 +479,9 @@ async function caseBS11WizardDefaultsBeacon() {
             vaultPath,
             workshopManifest: null,
             nonInteractive: true,
-            defaults: { /* no override; expect Beacon */ }
+            defaults: { /* no override; expect pantry */ }
         });
-        assertEqual(r.config.workshop_relative_path, "Beacon", label);
+        assertEqual(r.config.workshop_relative_path, "pantry", label);
     });
 }
 
@@ -519,7 +519,7 @@ async function caseBS13ActivationAtomicAndBackup() {
         const bootstrap = require("../bootstrap.js");
         const fs = require("fs");
         const path = require("path");
-        const workshopAbs = path.join(vaultPath, "Beacon");
+        const workshopAbs = path.join(vaultPath, "pantry");
         fs.mkdirSync(path.join(workshopAbs, "Scripts"), { recursive: true });
         // Pre-existing activate.sh — should be backed up as .beacon-backup
         fs.writeFileSync(path.join(workshopAbs, "Scripts/activate.sh"), "PRIOR\n");
@@ -547,7 +547,7 @@ const cases = {
         caseBS8WizardGeneratesValidFiles,
         caseBS9FollowsRedirects,
         caseBS10ActivationArtifacts,
-        caseBS11WizardDefaultsBeacon,
+        caseBS11WizardDefaultsPantry,
         caseBS12SiblingFallback,
         caseBS13ActivationAtomicAndBackup
     ]

@@ -22,7 +22,7 @@ async function withTempVault(setup, fn) {
     try {
         fs.mkdirSync(path.join(tmp, "Docs/Meta"), { recursive: true });
         fs.writeFileSync(path.join(tmp, "Docs/Meta/platform-config.json"),
-            JSON.stringify({ workshop_relative_path: "Beacon", variables: {} }, null, 2));
+            JSON.stringify({ workshop_relative_path: "pantry", variables: {} }, null, 2));
         fs.writeFileSync(path.join(tmp, "Docs/Meta/platform-subscription.json"),
             JSON.stringify({ mechanisms: [], blueprints: [] }, null, 2));
         if (typeof setup === "function") await setup(tmp);
@@ -42,19 +42,19 @@ async function caseC1AncestorWalk() {
     });
 }
 
-// C2: BEACON_VAULT env-var fallback when cwd is not in a vault
+// C2: SAUCE_VAULT env-var fallback when cwd is not in a vault
 async function caseC2BeaconVaultEnv() {
-    const label = "C2 dispatcher honors BEACON_VAULT env-var fallback";
+    const label = "C2 dispatcher honors SAUCE_VAULT env-var fallback";
     await withTempVault({}, async (vaultPath) => {
         const cli = require("../cli/beacon-cli.js");
-        const ctx = await cli.resolveContext({ cwd: os.tmpdir(), env: { BEACON_VAULT: vaultPath } });
+        const ctx = await cli.resolveContext({ cwd: os.tmpdir(), env: { SAUCE_VAULT: vaultPath } });
         assertEqual(ctx.vaultPath, vaultPath, label);
     });
 }
 
 // C3: not-in-vault error
 async function caseC3NotInVault() {
-    const label = "C3 dispatcher errors when not in vault and BEACON_VAULT unset";
+    const label = "C3 dispatcher errors when not in vault and SAUCE_VAULT unset";
     const cli = require("../cli/beacon-cli.js");
     let threw = false;
     try { await cli.resolveContext({ cwd: "/", env: {} }); }
@@ -79,13 +79,13 @@ async function caseC5StatusClean() {
     const label = "C5 status reports clean state on fresh vault";
     await withTempVault({}, async (vaultPath) => {
         // Stub workshop fixture so status can read manifest
-        fs.mkdirSync(path.join(vaultPath, "Beacon/platform"), { recursive: true });
-        fs.writeFileSync(path.join(vaultPath, "Beacon/platform/manifest.json"),
+        fs.mkdirSync(path.join(vaultPath, "pantry/platform"), { recursive: true });
+        fs.writeFileSync(path.join(vaultPath, "pantry/platform/manifest.json"),
             JSON.stringify({ workshop_version: "0.22.0", mechanisms: [], blueprints: [] }, null, 2));
         const cmd = require("../cli/cmd-status.js");
-        const ctx = { vaultPath, config: { workshop_relative_path: "Beacon" },
+        const ctx = { vaultPath, config: { workshop_relative_path: "pantry" },
             subscription: { mechanisms: [], blueprints: [] },
-            workshopPath: path.join(vaultPath, "Beacon"),
+            workshopPath: path.join(vaultPath, "pantry"),
             workshopManifest: { workshop_version: "0.22.0", mechanisms: [], blueprints: [] } };
         const out = await cmd.run(ctx, []);  // returns { lines: [...] } in test mode
         assertTrue(out.lines.some(l => /Vault:\s/.test(l)), label + ": vault line present");
@@ -101,9 +101,9 @@ async function caseC6StatusDrift() {
         // Subscribed: validator@0.1.1; Installed (history): validator@0.1.0
         fs.writeFileSync(path.join(vaultPath, "Docs/Meta/platform-installed.json"),
             JSON.stringify({ history: [{ kind: "mechanisms", name: "validator", version: "0.1.0" }] }, null, 2));
-        const ctx = { vaultPath, config: { workshop_relative_path: "Beacon" },
+        const ctx = { vaultPath, config: { workshop_relative_path: "pantry" },
             subscription: { mechanisms: [{ name: "validator", version: "0.1.1" }], blueprints: [] },
-            workshopPath: path.join(vaultPath, "Beacon"),
+            workshopPath: path.join(vaultPath, "pantry"),
             workshopManifest: { workshop_version: "0.22.0", mechanisms: [{ name: "validator", version: "0.1.1" }], blueprints: [] } };
         const out = await cmd.run(ctx, []);
         assertTrue(out.lines.some(l => /Drift:.*validator/i.test(l)), label + ": drift line names validator");
@@ -118,9 +118,9 @@ async function caseC7UpdateFFOnly() {
         // Inject mockGit hook on ctx
         const events = [];
         const ctx = {
-            vaultPath, config: { workshop_relative_path: "Beacon" },
+            vaultPath, config: { workshop_relative_path: "pantry" },
             subscription: { mechanisms: [], blueprints: [] },
-            workshopPath: path.join(vaultPath, "Beacon"),
+            workshopPath: path.join(vaultPath, "pantry"),
             workshopManifest: { workshop_version: "0.22.0" },
             _gitExec: (args) => { events.push(args.join(" ")); return { code: 0, stdout: "", stderr: "" }; },
             _npmInstall: () => { events.push("npm install"); return { code: 0 }; },
@@ -139,9 +139,9 @@ async function caseC8UpdateDirtyRefusal() {
     await withTempVault({}, async (vaultPath) => {
         const cmd = require("../cli/cmd-update.js");
         const ctx = {
-            vaultPath, config: { workshop_relative_path: "Beacon" },
+            vaultPath, config: { workshop_relative_path: "pantry" },
             subscription: { mechanisms: [], blueprints: [] },
-            workshopPath: path.join(vaultPath, "Beacon"),
+            workshopPath: path.join(vaultPath, "pantry"),
             workshopManifest: { workshop_version: "0.22.0" },
             _gitExec: (args) => {
                 if (args[0] === "status" && args.includes("--short")) return { code: 0, stdout: " M file.js\n", stderr: "" };
@@ -162,9 +162,9 @@ async function caseC9UpdateForceOverride() {
         const cmd = require("../cli/cmd-update.js");
         const events = [];
         const ctx = {
-            vaultPath, config: { workshop_relative_path: "Beacon" },
+            vaultPath, config: { workshop_relative_path: "pantry" },
             subscription: { mechanisms: [], blueprints: [] },
-            workshopPath: path.join(vaultPath, "Beacon"),
+            workshopPath: path.join(vaultPath, "pantry"),
             workshopManifest: { workshop_version: "0.22.0" },
             _gitExec: (args) => {
                 if (args[0] === "status" && args.includes("--short")) return { code: 0, stdout: " M file.js\n", stderr: "" };
@@ -185,9 +185,9 @@ async function caseC10WizardDelegates() {
         const cmd = require("../cli/cmd-wizard.js");
         let called = false;
         const ctx = {
-            vaultPath, config: { workshop_relative_path: "Beacon" },
+            vaultPath, config: { workshop_relative_path: "pantry" },
             subscription: { mechanisms: [], blueprints: [] },
-            workshopPath: path.join(vaultPath, "Beacon"),
+            workshopPath: path.join(vaultPath, "pantry"),
             workshopManifest: { workshop_version: "0.22.0" },
             _runReRunWizard: async () => { called = true; return { action: "quit" }; }
         };
@@ -201,8 +201,8 @@ async function caseC11BootstrapNonInteractive() {
     const label = "C11 cmd-bootstrap parses --non-interactive";
     await withTempVault({}, async (vaultPath) => {
         // Stub workshop manifest so cmd-bootstrap can read banner version.
-        fs.mkdirSync(path.join(vaultPath, "Beacon/platform"), { recursive: true });
-        fs.writeFileSync(path.join(vaultPath, "Beacon/platform/manifest.json"),
+        fs.mkdirSync(path.join(vaultPath, "pantry/platform"), { recursive: true });
+        fs.writeFileSync(path.join(vaultPath, "pantry/platform/manifest.json"),
             JSON.stringify({ workshop_version: "0.22.1", mechanisms: [], blueprints: [] }, null, 2));
 
         // Pre-load bootstrap module + monkey-patch runBootstrap on the resolved module
@@ -218,7 +218,7 @@ async function caseC11BootstrapNonInteractive() {
             const cmd = require("../cli/cmd-bootstrap.js");
             const ctx = {
                 vaultPath,
-                workshopPath: path.join(vaultPath, "Beacon"),
+                workshopPath: path.join(vaultPath, "pantry"),
                 workshopManifest: { workshop_version: "0.22.1" }
             };
             await cmd.run(ctx, ["--vault", vaultPath, "--non-interactive"]);
@@ -235,8 +235,8 @@ async function caseC11BootstrapNonInteractive() {
 async function caseC12BootstrapMechanismsAll() {
     const label = "C12 cmd-bootstrap parses --mechanisms=all";
     await withTempVault({}, async (vaultPath) => {
-        fs.mkdirSync(path.join(vaultPath, "Beacon/platform"), { recursive: true });
-        fs.writeFileSync(path.join(vaultPath, "Beacon/platform/manifest.json"),
+        fs.mkdirSync(path.join(vaultPath, "pantry/platform"), { recursive: true });
+        fs.writeFileSync(path.join(vaultPath, "pantry/platform/manifest.json"),
             JSON.stringify({ workshop_version: "0.22.1", mechanisms: [], blueprints: [] }, null, 2));
         const bootstrap = require("../bootstrap.js");
         const originalRunBootstrap = bootstrap.runBootstrap;
@@ -248,7 +248,7 @@ async function caseC12BootstrapMechanismsAll() {
             const cmd = require("../cli/cmd-bootstrap.js");
             const ctx = {
                 vaultPath,
-                workshopPath: path.join(vaultPath, "Beacon"),
+                workshopPath: path.join(vaultPath, "pantry"),
                 workshopManifest: { workshop_version: "0.22.1" }
             };
             await cmd.run(ctx, ["--vault", vaultPath, "--non-interactive", "--mechanisms=all"]);
@@ -266,8 +266,8 @@ async function caseC12BootstrapMechanismsAll() {
 async function caseC13BootstrapBlueprintsCsv() {
     const label = "C13 cmd-bootstrap parses --blueprints=daily,journal";
     await withTempVault({}, async (vaultPath) => {
-        fs.mkdirSync(path.join(vaultPath, "Beacon/platform"), { recursive: true });
-        fs.writeFileSync(path.join(vaultPath, "Beacon/platform/manifest.json"),
+        fs.mkdirSync(path.join(vaultPath, "pantry/platform"), { recursive: true });
+        fs.writeFileSync(path.join(vaultPath, "pantry/platform/manifest.json"),
             JSON.stringify({ workshop_version: "0.22.1", mechanisms: [], blueprints: [] }, null, 2));
         const bootstrap = require("../bootstrap.js");
         const originalRunBootstrap = bootstrap.runBootstrap;
@@ -279,7 +279,7 @@ async function caseC13BootstrapBlueprintsCsv() {
             const cmd = require("../cli/cmd-bootstrap.js");
             const ctx = {
                 vaultPath,
-                workshopPath: path.join(vaultPath, "Beacon"),
+                workshopPath: path.join(vaultPath, "pantry"),
                 workshopManifest: { workshop_version: "0.22.1" }
             };
             await cmd.run(ctx, ["--vault", vaultPath, "--non-interactive", "--blueprints=daily,journal"]);
@@ -300,8 +300,8 @@ async function caseC14WizardNonInteractiveDefaults() {
     await withTempVault({}, async (vaultPath) => {
         // Set up a workshop manifest at the resolved path so the wizard's
         // CF-3 manifest-load branch finds it (defaults populated for valid pins).
-        fs.mkdirSync(path.join(vaultPath, "Beacon/platform"), { recursive: true });
-        fs.writeFileSync(path.join(vaultPath, "Beacon/platform/manifest.json"),
+        fs.mkdirSync(path.join(vaultPath, "pantry/platform"), { recursive: true });
+        fs.writeFileSync(path.join(vaultPath, "pantry/platform/manifest.json"),
             JSON.stringify({
                 workshop_version: "0.22.1",
                 mechanisms: [

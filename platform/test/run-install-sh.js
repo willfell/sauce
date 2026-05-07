@@ -81,7 +81,7 @@ function caseI2MissingGit() {
 
 // I3: clones into vault correctly (with full mock-git)
 function caseI3ClonesIntoVault() {
-    const label = "I3 install.sh clones beacon into <vault>/Beacon/";
+    const label = "I3 install.sh clones sauce into <vault>/pantry/";
     withShimEnv((tmp, shimDir) => {
         const vaultPath = path.join(tmp, "vault");
         fs.mkdirSync(vaultPath, { recursive: true });
@@ -95,12 +95,12 @@ case "$1" in
     DEST="$2"
     mkdir -p "$DEST/platform/cli"
     echo '{ "workshop_version": "0.22.0", "mechanisms": [], "blueprints": [], "foundational_plugins": [] }' > "$DEST/platform/manifest.json"
-    cat > "$DEST/platform/cli/beacon-cli.js" <<'JS'
+    cat > "$DEST/platform/cli/sauce-cli.js" <<'JS'
 #!/usr/bin/env node
 // stub: success path — write a marker so the test can assert the hand-off happened.
-require("fs").writeFileSync(require("path").join(process.argv[3] || ".", ".beacon-cli-ran"), "ok");
+require("fs").writeFileSync(require("path").join(process.argv[3] || ".", ".sauce-cli-ran"), "ok");
 JS
-    chmod +x "$DEST/platform/cli/beacon-cli.js"
+    chmod +x "$DEST/platform/cli/sauce-cli.js"
     exit 0
     ;;
   *) exit 0 ;;
@@ -114,18 +114,18 @@ esac
         env.PATH = shimDir + ":" + process.env.PATH;
         const vaultPath = path.join(tmp, "vault");
         const r = runInstallSh(env, vaultPath);
-        const beaconCli = path.join(vaultPath, "Beacon/platform/cli/beacon-cli.js");
-        assertTrue(fs.existsSync(beaconCli), label + ": Beacon/platform/cli/beacon-cli.js exists post-clone");
+        const sauceCli = path.join(vaultPath, "pantry/platform/cli/sauce-cli.js");
+        assertTrue(fs.existsSync(sauceCli), label + ": pantry/platform/cli/sauce-cli.js exists post-clone");
     });
 }
 
-// I4: refuses to overwrite existing Beacon/ without confirm
+// I4: refuses to overwrite existing pantry/ without confirm
 function caseI4RefusesOverwrite() {
     const label = "I4 install.sh refuses overwrite without confirm";
     withShimEnv((tmp, shimDir) => {
         const vaultPath = path.join(tmp, "vault");
-        fs.mkdirSync(path.join(vaultPath, "Beacon"), { recursive: true });
-        fs.writeFileSync(path.join(vaultPath, "Beacon/SENTINEL"), "preexisting\n");
+        fs.mkdirSync(path.join(vaultPath, "pantry"), { recursive: true });
+        fs.writeFileSync(path.join(vaultPath, "pantry/SENTINEL"), "preexisting\n");
         writeShim(shimDir, "git", "exit 0");
         writeShim(shimDir, "npm", "exit 0");
         writeShim(shimDir, "node", "exit 0");
@@ -134,19 +134,19 @@ function caseI4RefusesOverwrite() {
         const vaultPath = path.join(tmp, "vault");
         const r = runInstallSh(env, vaultPath);
         assertTrue(r.status !== 0, label + ": exit non-zero");
-        assertTrue(fs.existsSync(path.join(vaultPath, "Beacon/SENTINEL")), label + ": existing Beacon/ untouched");
+        assertTrue(fs.existsSync(path.join(vaultPath, "pantry/SENTINEL")), label + ": existing pantry/ untouched");
         assertTrue(/already exists|--overwrite|aborted/i.test(r.stderr || r.stdout || ""),
             label + ": refusal message names overwrite/exists");
     });
 }
 
-// I5: --overwrite flag → backup + replace (Beacon → Beacon.bak)
+// I5: --overwrite flag → backup + replace (pantry → pantry.bak)
 function caseI5OverwriteBackup() {
-    const label = "I5 install.sh --overwrite backs up Beacon to Beacon.bak";
+    const label = "I5 install.sh --overwrite backs up pantry to pantry.bak";
     withShimEnv((tmp, shimDir) => {
         const vaultPath = path.join(tmp, "vault");
-        fs.mkdirSync(path.join(vaultPath, "Beacon"), { recursive: true });
-        fs.writeFileSync(path.join(vaultPath, "Beacon/SENTINEL"), "preexisting\n");
+        fs.mkdirSync(path.join(vaultPath, "pantry"), { recursive: true });
+        fs.writeFileSync(path.join(vaultPath, "pantry/SENTINEL"), "preexisting\n");
         writeShim(shimDir, "git", "exit 0");
         writeShim(shimDir, "npm", "exit 0");
         writeShim(shimDir, "node", "exit 0");
@@ -155,8 +155,8 @@ function caseI5OverwriteBackup() {
         const vaultPath = path.join(tmp, "vault");
         const r = spawnSync("bash", [INSTALL_SH, "--vault", vaultPath, "--non-interactive", "--overwrite"],
             { env, encoding: "utf8" });
-        const sentinelInBak = path.join(vaultPath, "Beacon.bak/SENTINEL");
-        assertTrue(fs.existsSync(sentinelInBak), label + ": prior contents moved to Beacon.bak");
+        const sentinelInBak = path.join(vaultPath, "pantry.bak/SENTINEL");
+        assertTrue(fs.existsSync(sentinelInBak), label + ": prior contents moved to pantry.bak");
     });
 }
 
@@ -176,7 +176,7 @@ case "$1" in
     DEST="$2"
     mkdir -p "$DEST/platform/cli"
     echo '{ "workshop_version": "0.22.0", "mechanisms": [], "blueprints": [], "foundational_plugins": [] }' > "$DEST/platform/manifest.json"
-    cat > "$DEST/platform/cli/beacon-cli.js" <<'JS'
+    cat > "$DEST/platform/cli/sauce-cli.js" <<'JS'
 require("fs").writeFileSync(require("path").join(process.env.HANDOFF_MARKER || ".", ".handoff"), "ok");
 JS
     exit 0 ;;
@@ -209,7 +209,7 @@ case "$1" in
     DEST="$2"
     mkdir -p "$DEST/platform/cli"
     echo '{ "workshop_version": "0.22.1", "mechanisms": [], "blueprints": [], "foundational_plugins": [] }' > "$DEST/platform/manifest.json"
-    cat > "$DEST/platform/cli/beacon-cli.js" <<'JS'
+    cat > "$DEST/platform/cli/sauce-cli.js" <<'JS'
 require("fs").writeFileSync(require("path").join(process.env.ARGV_MARKER || ".", ".argv"), JSON.stringify(process.argv));
 JS
     exit 0 ;;
@@ -245,7 +245,7 @@ case "$1" in
     DEST="$2"
     mkdir -p "$DEST/platform/cli"
     echo '{ "workshop_version": "0.22.1", "mechanisms": [], "blueprints": [], "foundational_plugins": [] }' > "$DEST/platform/manifest.json"
-    cat > "$DEST/platform/cli/beacon-cli.js" <<'JS'
+    cat > "$DEST/platform/cli/sauce-cli.js" <<'JS'
 require("fs").writeFileSync(require("path").join(process.env.HANDOFF_MARKER || ".", ".handoff"), "ok");
 JS
     exit 0 ;;
