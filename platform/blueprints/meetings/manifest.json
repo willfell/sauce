@@ -1,14 +1,16 @@
 {
   "name": "meetings",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "kind": "blueprint",
   "module_directory": "meetings",
-  "description": "Hub-centric meeting notes: one Meetings Hub per day at spice/meetings/hubs/YYYY/MM-MMMM/ aggregating individual meeting notes at spice/meetings/notes/ via inline NewMeetingButton + MeetingsHubCards CustomJS classes. v0.1.2: filename pattern <Name>-YYYY-MM-DD (Meetings-YYYY-MM-DD.md hub; <title>-YYYY-MM-DD.md per-meeting); hub folder date-routed; class regex date-extract. v0.2.0: MeetingsHubCards migrated to BeaconCards via row layout + async pre-fetch adapter; per-badge SVG icons + secondaryText subtitle preserved end-to-end.",
+  "description": "Hub-centric meeting notes: one Meetings Hub per day at spice/meetings/hubs/YYYY/MM-MMMM/ aggregating individual meeting notes at spice/meetings/notes/ via inline NewMeetingButton + MeetingsHubCards CustomJS classes. v0.1.2: filename pattern <Name>-YYYY-MM-DD (Meetings-YYYY-MM-DD.md hub; <title>-YYYY-MM-DD.md per-meeting); hub folder date-routed; class regex date-extract. v0.2.0: MeetingsHubCards migrated to BeaconCards via row layout + async pre-fetch adapter; per-badge SVG icons + secondaryText subtitle preserved end-to-end. v0.3.0 MINOR: pilot integration with people-rendering@0.1.0 mechanism — MeetingsHubCards subtitle slot renders attendee chips for registered People (those with spice/people/<name>.md notes) via PeopleRendering.renderChip callback (uses cards@0.2.4 subtitle-callback polymorphism); falls back to comma-string when no registered People; new ## Attendees chip-rendering dataviewjs block in Meeting.md template above the bullet list. NewMeetingButton attendee autocomplete deferred to v0.27.x carry.",
   "depends_on": [
-    { "name": "nav-buttons",    "range": ">=2.2.0" },
-    { "name": "customjs-guard", "range": ">=1.0.0" },
-    { "name": "accent-button",  "range": ">=0.1.0" },
-    { "name": "convenience",    "range": ">=0.1.0" }
+    { "name": "nav-buttons",      "range": ">=2.2.0" },
+    { "name": "customjs-guard",   "range": ">=1.0.0" },
+    { "name": "accent-button",    "range": ">=0.1.0" },
+    { "name": "convenience",      "range": ">=0.1.0" },
+    { "name": "people-rendering", "range": ">=0.1.0" },
+    { "name": "cards",            "range": ">=0.2.4" }
   ],
   "customjs_classes": ["MeetingsHubCards", "NewMeetingButton"],
   "files": [

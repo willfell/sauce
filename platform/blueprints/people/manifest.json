@@ -1,33 +1,41 @@
 {
   "name": "people",
   "version": "0.1.0",
-  "description": "Per-person notes under spice/people/<First Last>.md, with hub at spice/people/People.md and shared rendering via people-rendering mechanism. Materializes Templater folder template + global People nav-button.",
+  "kind": "blueprint",
   "module_directory": "people",
+  "description": "Per-person notes under spice/people/<First Last>.md, with hub at spice/people/People.md and shared rendering via people-rendering mechanism. Materializes Templater folder template + global People nav-button.",
   "depends_on": [
-    "people-rendering >=0.1.0",
-    "customjs-guard >=1.0.0",
-    "nav-buttons >=2.5.3",
-    "accent-button >=0.1.0",
-    "cards >=0.2.4"
+    { "name": "people-rendering", "range": ">=0.1.0" },
+    { "name": "customjs-guard",   "range": ">=1.0.0" },
+    { "name": "nav-buttons",      "range": ">=2.5.3" },
+    { "name": "accent-button",    "range": ">=0.1.0" },
+    { "name": "cards",            "range": ">=0.2.4" }
   ],
+  "customjs_classes": ["PeopleHubCards", "NewPersonButton", "PersonNavButtons"],
   "files": [
-    { "src": "scripts/people-hub-cards.js",     "dest": "{{scripts_path}}/people/people-hub-cards.js" },
-    { "src": "scripts/new-person-button.js",    "dest": "{{scripts_path}}/people/new-person-button.js" },
-    { "src": "scripts/person-nav-buttons.js",   "dest": "{{scripts_path}}/people/person-nav-buttons.js" },
-    { "src": "templates/Template, People.md",   "dest": "{{templates_path}}/Template, People.md" },
-    { "src": "content/People.md",               "dest": "{{module_directory}}/People.md" }
+    { "source": "scripts/people-hub-cards.js",     "dest": "{{scripts_path}}/people/people-hub-cards.js" },
+    { "source": "scripts/new-person-button.js",    "dest": "{{scripts_path}}/people/new-person-button.js" },
+    { "source": "scripts/person-nav-buttons.js",   "dest": "{{scripts_path}}/people/person-nav-buttons.js" },
+    { "source": "templates/Template, People.md",   "dest": "{{templates_path}}/Template, People.md" },
+    { "source": "content/People.md",               "dest": "{{module_directory}}/People.md" }
   ],
   "templater_folder_templates": [
     { "folder": "{{module_directory}}", "template": "{{templates_path}}/Template, People.md" }
   ],
   "nav_buttons": [
     {
-      "context": "global",
+      "id": "people-hub",
       "label": "People",
       "icon": "people",
       "order": 60,
       "action": { "type": "openLink", "target": "{{module_directory}}/People.md" }
     }
   ],
-  "post_install_message": "people@0.1.0 installed. Open spice/people/People.md to see the hub. Click `+ New Person` to create. Existing People notes (if migrated from a consumer vault) survive as long as they live under spice/people/."
+  "post_install": [
+    {
+      "type": "notice",
+      "message": "people@0.1.0 installed. Open spice/people/People.md to see the hub. Click '+ New Person' to create. Existing People notes (if migrated from a consumer vault) survive as long as they live under spice/people/."
+    }
+  ],
+  "rule_fragments": []
 }

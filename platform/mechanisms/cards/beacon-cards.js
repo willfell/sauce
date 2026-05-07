@@ -11,9 +11,11 @@
  * Options:
  *   pages    — Array of Dataview pages OR hand-rolled objects (required)
  *   title    — (page) => string (required; plain text)
- *   subtitle — (page) => string|null|{text:string, secondaryText?:string} (optional)
+ *   subtitle — (page) => string|null|{text:string, secondaryText?:string}|((parent: HTMLElement) => void) (optional)
  *              v0.2.0: object form renders a second muted-italic line below.
  *              Plain string + null retain prior behavior (backward-compatible).
+ *              v0.2.4: function form is a caller-driven render callback; receives the
+ *              subtitle parent element and renders into it directly (caller owns styling).
  *   icon     — (page) => string (optional; inline SVG HTML rendered left of title)
  *   meta     — (page) => string (optional; HTML rendered right of title row when layout="row")
  *   badges   — (page) => Array<{label, tone?, icon?, style?}> (optional; tone: "accent"|"warn"|"error"|"success"|"muted")
@@ -170,6 +172,13 @@ class BeaconCards {
         const indent = opts.indent || "";
         const sub = ctx.subtitleFn(page);
         if (sub === null || sub === undefined || sub === "") return;
+        if (typeof sub === "function") {
+            // v0.2.4 PATCH ADDITIVE — caller-driven subtitle rendering via callback.
+            // The callback receives `parent` and renders into it directly. Indent/styling
+            // are the caller's responsibility in this branch.
+            sub(parent);
+            return;
+        }
         let primaryText, secondaryText;
         if (typeof sub === "string") {
             primaryText = sub;

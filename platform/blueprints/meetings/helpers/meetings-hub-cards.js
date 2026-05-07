@@ -50,6 +50,14 @@ class MeetingsHubCards {
           }).filter(a => a);
         }
       }
+      // v0.3.0 pilot: extract registered People (those with spice/people/<name>.md notes).
+      // Scope to the ## Attendees section ONLY — extracting from the full body would chip
+      // unrelated People mentioned in ## Notes / ## Action Items / ## Agenda.
+      const attendeesSection = (attendeesMatch && attendeesMatch[1]) || "";
+      const peopleMentions = (attendeesSection && customJS && customJS.PeopleRendering && typeof customJS.PeopleRendering.extractMentions === "function")
+        ? customJS.PeopleRendering.extractMentions(attendeesSection)
+        : [];
+      const peopleAttendeeLinks = peopleMentions.map(m => "[[" + m.display + "]]");
       const openTasks = (content.match(/- \[ \]/g) || []).length;
       const doneTasks = (content.match(/- \[x\]/gi) || []).length;
       const notesSection = content.match(/## Notes\s*([\s\S]*?)(?=---|##|$)/);
@@ -68,6 +76,7 @@ class MeetingsHubCards {
       return {
         file: { name: p.file.name, path: p.file.path },
         attendees,
+        peopleAttendeeLinks,
         openTasks,
         doneTasks,
         hasNotes,
@@ -85,6 +94,30 @@ class MeetingsHubCards {
         ? `<span style="display: inline-flex; align-items: center; gap: 4px;">${icons.clock}<span>${p.timeStr}</span></span>`
         : "",
       subtitle: p => {
+        // v0.3.0 pilot: when at least one attendee is a registered Person, render chips via PeopleRendering callback.
+        // Falls back to existing comma-string behavior when no registered People (or PeopleRendering unavailable).
+        const truncatedSummary = p.summary && p.summary.length > 80 ? p.summary.substring(0, 77) + "..." : (p.summary || null);
+        if (p.peopleAttendeeLinks && p.peopleAttendeeLinks.length > 0
+            && customJS && customJS.PeopleRendering && typeof customJS.PeopleRendering.renderChip === "function") {
+          return (parent) => {
+            const row = parent.createEl("div");
+            row.style.cssText = "display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px;";
+            for (const link of p.peopleAttendeeLinks) {
+              customJS.PeopleRendering.renderChip(row, link);
+            }
+            const unregistered = Math.max(0, p.attendees.length - p.peopleAttendeeLinks.length);
+            if (unregistered > 0) {
+              const moreEl = parent.createEl("span");
+              moreEl.textContent = "+" + unregistered;
+              moreEl.style.cssText = "color: var(--text-muted); font-size: 0.8em; padding-left: 4px;";
+            }
+            if (truncatedSummary) {
+              const sec = parent.createEl("div");
+              sec.textContent = truncatedSummary;
+              sec.style.cssText = "color: var(--text-muted); font-size: 0.78em; font-style: italic; margin-top: 2px;";
+            }
+          };
+        }
         const attendeesText = p.attendees.length === 0
           ? null
           : (p.attendees.length <= 3
@@ -92,9 +125,8 @@ class MeetingsHubCards {
               : p.attendees.slice(0, 2).join(", ") + ` +${p.attendees.length - 2}`);
         if (!attendeesText && !p.summary) return null;
         if (!p.summary) return attendeesText;
-        const truncated = p.summary.length > 80 ? p.summary.substring(0, 77) + "..." : p.summary;
-        if (!attendeesText) return truncated;
-        return { text: attendeesText, secondaryText: truncated };
+        if (!attendeesText) return truncatedSummary;
+        return { text: attendeesText, secondaryText: truncatedSummary };
       },
       badges: p => {
         const out = [];

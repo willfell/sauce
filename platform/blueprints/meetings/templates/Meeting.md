@@ -30,6 +30,14 @@ await dv.view("{{views_path}}/customjs-guard", { class: "SpaceNavButtons" });
 
 ## Attendees
 
+```dataviewjs
+await dv.view("{{views_path}}/customjs-guard", {
+  class: "PeopleRendering",
+  method: "renderMentionList",
+  args: [dv, { mode: "mentioned_in_note", notePath: dv.current().file.path, scopePath: "spice/people" }, { style: "chips" }]
+});
+```
+
 <%* for (const attendee of attendees) {
   tR += `- [[${attendee}]]\n`;
 }
