@@ -2,7 +2,7 @@
 // run-install.js — headless harness for platform/install.js.
 //
 // Replaces the manual Templater-in-Obsidian dogfood loop with a Node CLI.
-// Loads <vault>/ranch/Templater/platformInstall.js (byte-identical
+// Loads <vault>/ranch/templater/platformInstall.js (byte-identical
 // bootstrap copy of platform/install.js) and runs it against a fake `tp`
 // object that proxies the Obsidian APIs the installer touches into the
 // real filesystem rooted at the given vault path.
@@ -274,7 +274,7 @@ async function main() {
     console.error(`run-install: ${VAULT}/ranch/platform-config.json not found — is this a vault?`);
     process.exit(2);
   }
-  const installerPath = abs("ranch/Templater/platformInstall.js");
+  const installerPath = abs("ranch/templater/platformInstall.js");
   if (!fs.existsSync(installerPath)) {
     console.error(`run-install: ${installerPath} not found — bootstrap installer missing`);
     process.exit(2);

@@ -5,7 +5,7 @@
 // Each case scaffolds a tmpdir scratch vault with a minimal layout:
 //   <tmp>/ranch/platform-config.json
 //   <tmp>/ranch/platform-subscription.json
-//   <tmp>/ranch/Templater/platformInstall.js  (copy of canonical)
+//   <tmp>/ranch/templater/platformInstall.js  (copy of canonical)
 //   <tmp>/.obsidian/plugins/templater-obsidian/data.json  (per case)
 //   <tmp>/.obsidian/plugins/slash-commander/data.json     (per case)
 //   <tmp>/.obsidian/community-plugins.json
@@ -60,16 +60,16 @@ function assertTrue(label, cond, hint) {
 
 async function scaffoldVault(scratchDir, opts) {
   // opts = { templaterData, slashCommanderData, manifest }
-  await fsp.mkdir(path.join(scratchDir, "ranch/Templater"), { recursive: true });
-  await fsp.mkdir(path.join(scratchDir, "ranch/Templates"), { recursive: true });
-  await fsp.mkdir(path.join(scratchDir, "ranch/Scripts"), { recursive: true });
-  await fsp.mkdir(path.join(scratchDir, "ranch/Views"), { recursive: true });
+  await fsp.mkdir(path.join(scratchDir, "ranch/templater"), { recursive: true });
+  await fsp.mkdir(path.join(scratchDir, "ranch/templates"), { recursive: true });
+  await fsp.mkdir(path.join(scratchDir, "ranch/scripts"), { recursive: true });
+  await fsp.mkdir(path.join(scratchDir, "ranch/views"), { recursive: true });
   await fsp.mkdir(path.join(scratchDir, "ranch/rules"), { recursive: true });
   await fsp.mkdir(path.join(scratchDir, ".obsidian/plugins/templater-obsidian"), { recursive: true });
   await fsp.mkdir(path.join(scratchDir, ".obsidian/plugins/slash-commander"), { recursive: true });
 
   // Bootstrap installer copy.
-  await fsp.copyFile(CANONICAL_INSTALLER, path.join(scratchDir, "ranch/Templater/platformInstall.js"));
+  await fsp.copyFile(CANONICAL_INSTALLER, path.join(scratchDir, "ranch/templater/platformInstall.js"));
 
   // Mock workshop manifest reachable from this scratch vault: write a fake
   // workshop layout under <scratchDir>/_fake-workshop/ and override
@@ -89,10 +89,10 @@ async function scaffoldVault(scratchDir, opts) {
   await fsp.writeFile(path.join(scratchDir, "ranch/platform-config.json"), JSON.stringify({
     workshop_relative_path: "_fake-workshop",
     variables: {
-      views_path: "ranch/Views",
-      templater_scripts_path: "ranch/Templater",
-      scripts_path: "ranch/Scripts",
-      templates_path: "ranch/Templates",
+      views_path: "ranch/views",
+      templater_scripts_path: "ranch/templater",
+      scripts_path: "ranch/scripts",
+      templates_path: "ranch/templates",
       content_path: "ranch/Content",
       rules_path: "ranch/rules",
     }
@@ -285,7 +285,7 @@ async function case3AdditivePreservesUserEntries() {
 
     const tdataAfter = await readJson(path.join(scratch, ".obsidian/plugins/templater-obsidian/data.json"));
     assertEq("case3: user entry preserved at index 0", tdataAfter.enabled_templates_hotkeys[0], "My Custom Template.md");
-    assertTrue("case3: platform entries appended", tdataAfter.enabled_templates_hotkeys.includes("ranch/Templates/FixtureA.md") && tdataAfter.enabled_templates_hotkeys.includes("ranch/Templates/FixtureB.md"));
+    assertTrue("case3: platform entries appended", tdataAfter.enabled_templates_hotkeys.includes("ranch/templates/FixtureA.md") && tdataAfter.enabled_templates_hotkeys.includes("ranch/templates/FixtureB.md"));
     assertEq("case3: array length is 2 user + 2 platform", tdataAfter.enabled_templates_hotkeys.length, 4);
 
     const sdataAfter = await readJson(path.join(scratch, ".obsidian/plugins/slash-commander/data.json"));
@@ -315,15 +315,15 @@ async function scaffoldBlueprintVault(scratchDir, blueprints, opts) {
   //   sourceFiles   = optional [{ relPath, body }] to write under
   //                   <fakeWorkshop>/platform/blueprints/<name>/<relPath>.
   // opts (optional): { extraMechanisms: [{ name, version, manifest, sourceFiles? }] }
-  await fsp.mkdir(path.join(scratchDir, "ranch/Templater"), { recursive: true });
-  await fsp.mkdir(path.join(scratchDir, "ranch/Templates"), { recursive: true });
-  await fsp.mkdir(path.join(scratchDir, "ranch/Scripts"), { recursive: true });
-  await fsp.mkdir(path.join(scratchDir, "ranch/Views"), { recursive: true });
+  await fsp.mkdir(path.join(scratchDir, "ranch/templater"), { recursive: true });
+  await fsp.mkdir(path.join(scratchDir, "ranch/templates"), { recursive: true });
+  await fsp.mkdir(path.join(scratchDir, "ranch/scripts"), { recursive: true });
+  await fsp.mkdir(path.join(scratchDir, "ranch/views"), { recursive: true });
   await fsp.mkdir(path.join(scratchDir, "ranch/rules"), { recursive: true });
   await fsp.mkdir(path.join(scratchDir, ".obsidian/plugins/templater-obsidian"), { recursive: true });
   await fsp.mkdir(path.join(scratchDir, ".obsidian/plugins/slash-commander"), { recursive: true });
 
-  await fsp.copyFile(CANONICAL_INSTALLER, path.join(scratchDir, "ranch/Templater/platformInstall.js"));
+  await fsp.copyFile(CANONICAL_INSTALLER, path.join(scratchDir, "ranch/templater/platformInstall.js"));
 
   const fakeWorkshop = path.join(scratchDir, "_fake-workshop");
   for (const bp of blueprints) {
@@ -364,10 +364,10 @@ async function scaffoldBlueprintVault(scratchDir, blueprints, opts) {
   await fsp.writeFile(path.join(scratchDir, "ranch/platform-config.json"), JSON.stringify({
     workshop_relative_path: "_fake-workshop",
     variables: {
-      views_path: "ranch/Views",
-      templater_scripts_path: "ranch/Templater",
-      scripts_path: "ranch/Scripts",
-      templates_path: "ranch/Templates",
+      views_path: "ranch/views",
+      templater_scripts_path: "ranch/templater",
+      scripts_path: "ranch/scripts",
+      templates_path: "ranch/templates",
       content_path: "ranch/Content",
       rules_path: "ranch/rules",
     }
@@ -624,7 +624,7 @@ async function caseM5MechanismDoesNotReceiveModuleDirectory() {
     const installedMech = (result && result.mechanisms || []).find((m) => m.name === "test-fixture-mech");
     assertTrue("M5: mechanism installed", installedMech !== undefined && installedMech.version === "0.1.0");
 
-    const destAbs = path.join(scratch, "ranch/Scripts/foo.md");
+    const destAbs = path.join(scratch, "ranch/scripts/foo.md");
     assertTrue("M5: mechanism dest file exists", fs.existsSync(destAbs));
 
     if (fs.existsSync(destAbs)) {
@@ -669,7 +669,7 @@ async function caseM6ModuleDirectoryEnsured() {
   const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseM6-"));
   try {
     // Fixture: blueprint declares module_directory "test-mod" but its only
-    // file lands under ranch/Scripts (NOT under {{module_directory}}/...).
+    // file lands under ranch/scripts (NOT under {{module_directory}}/...).
     // After install, spice/test-mod/ must still exist as a directory.
     const blueprint = {
       name: "test-fixture-m6",
@@ -1297,7 +1297,7 @@ async function caseP4UnknownTypeWarningOnly() {
 const C1_DAILY_SETTINGS = {
   folder: "spice/daily",
   format: "YYYY/MM-MMMM/YYYY-MM-DD-dddd",
-  template: "ranch/Templates/Daily Note.md",
+  template: "ranch/templates/Daily Note.md",
 };
 
 async function caseC1IdempotentMerge() {
@@ -1445,7 +1445,7 @@ async function caseC3AdditivePreservesUserKeys() {
     const after = await readJson(corePath);
     assertEq("C3: folder overwritten by manifest", after.folder, "spice/daily");
     assertEq("C3: format overwritten by manifest", after.format, "YYYY/MM-MMMM/YYYY-MM-DD-dddd");
-    assertEq("C3: template added (was absent)", after.template, "ranch/Templates/Daily Note.md");
+    assertEq("C3: template added (was absent)", after.template, "ranch/templates/Daily Note.md");
     assertEq("C3: customField preserved (user-only key)", after.customField, "keepme");
     assertEq("C3: top-level keys count is 4", Object.keys(after).length, 4);
 
@@ -1532,7 +1532,7 @@ async function caseC5SubstitutionOnSettings() {
     if (fs.existsSync(corePath)) {
       const after = await readJson(corePath);
       assertEq("C5: folder substituted to spice/test", after.folder, "spice/test");
-      assertEq("C5: template substituted with templates_path", after.template, "ranch/Templates/Daily Note.md");
+      assertEq("C5: template substituted with templates_path", after.template, "ranch/templates/Daily Note.md");
     }
 
     const applied = (result && result.history || []).filter(
@@ -1574,7 +1574,7 @@ async function caseFT1IdempotentMerge() {
   try {
     const seedBody = JSON.stringify({
       enabled_templates_hotkeys: [],
-      folder_templates: [{ folder: "spice/to-do", template: "ranch/Templates/Today To-Do.md" }],
+      folder_templates: [{ folder: "spice/to-do", template: "ranch/templates/Today To-Do.md" }],
       startup_templates: [""],
     }, null, 2);
     const manifest = {
@@ -1582,7 +1582,7 @@ async function caseFT1IdempotentMerge() {
       version: "0.1.0",
       files: [],
       templater_folder_templates: [
-        { folder: "spice/to-do", template: "ranch/Templates/Today To-Do.md" },
+        { folder: "spice/to-do", template: "ranch/templates/Today To-Do.md" },
       ],
     };
     await scaffoldVault(scratch, {
@@ -1595,7 +1595,7 @@ async function caseFT1IdempotentMerge() {
     const first = await runHarness(scratch);
     assertTrue("FT1: platform-installed.json was written (first run)", first !== null);
     const firstSkipped = (first && first.history || []).filter(
-      (h) => h.event === "info" && h.step === "templater_folder_templates" && h.action === "skipped_existing" && h.folder === "spice/to-do" && h.template === "ranch/Templates/Today To-Do.md"
+      (h) => h.event === "info" && h.step === "templater_folder_templates" && h.action === "skipped_existing" && h.folder === "spice/to-do" && h.template === "ranch/templates/Today To-Do.md"
     );
     assertEq("FT1: first run records exactly one skipped_existing event", firstSkipped.length, 1);
 
@@ -1652,7 +1652,7 @@ async function caseFT2MalformedJson() {
       version: "0.1.0",
       files: [],
       templater_folder_templates: [
-        { folder: "spice/to-do", template: "ranch/Templates/Today To-Do.md" },
+        { folder: "spice/to-do", template: "ranch/templates/Today To-Do.md" },
       ],
     };
     await scaffoldVault(scratch, {
@@ -1701,7 +1701,7 @@ async function caseFT3AdditivePreservesUserEntries() {
       version: "0.1.0",
       files: [],
       templater_folder_templates: [
-        { folder: "spice/to-do", template: "ranch/Templates/Today To-Do.md" },
+        { folder: "spice/to-do", template: "ranch/templates/Today To-Do.md" },
       ],
     };
     await scaffoldVault(scratch, {
@@ -1719,7 +1719,7 @@ async function caseFT3AdditivePreservesUserEntries() {
     assertEq("FT3: index 0 user folder preserved", after.folder_templates[0].folder, "user/path");
     assertEq("FT3: index 0 user template preserved", after.folder_templates[0].template, "user/Template.md");
     assertEq("FT3: index 1 manifest folder appended", after.folder_templates[1].folder, "spice/to-do");
-    assertEq("FT3: index 1 manifest template appended", after.folder_templates[1].template, "ranch/Templates/Today To-Do.md");
+    assertEq("FT3: index 1 manifest template appended", after.folder_templates[1].template, "ranch/templates/Today To-Do.md");
 
     const applied = (result && result.history || []).filter(
       (h) => h.event === "info" && h.step === "templater_folder_templates" && h.action === "applied" && h.folder === "spice/to-do"
@@ -1751,7 +1751,7 @@ async function caseFT4BackupOnEdit() {
       version: "0.1.0",
       files: [],
       templater_folder_templates: [
-        { folder: "spice/to-do", template: "ranch/Templates/Today To-Do.md" },
+        { folder: "spice/to-do", template: "ranch/templates/Today To-Do.md" },
       ],
     };
     await scaffoldVault(scratch, {
@@ -1814,7 +1814,7 @@ async function caseFT5SubstitutionApplied() {
     const after = await readJson(tdataPath);
     assertEq("FT5: folder_templates length === 1", after.folder_templates.length, 1);
     assertEq("FT5: written folder is resolved literal spice/to-do", after.folder_templates[0].folder, "spice/to-do");
-    assertEq("FT5: written template is resolved literal ranch/Templates/Today To-Do.md", after.folder_templates[0].template, "ranch/Templates/Today To-Do.md");
+    assertEq("FT5: written template is resolved literal ranch/templates/Today To-Do.md", after.folder_templates[0].template, "ranch/templates/Today To-Do.md");
 
     const applied = (result && result.history || []).filter(
       (h) => h.event === "info" && h.step === "templater_folder_templates" && h.action === "applied" && h.name === "test-fixture-ft5"
@@ -1823,7 +1823,7 @@ async function caseFT5SubstitutionApplied() {
     if (applied.length === 1) {
       const a = applied[0];
       assertEq("FT5: applied event folder === spice/to-do", a.folder, "spice/to-do");
-      assertEq("FT5: applied event template === ranch/Templates/Today To-Do.md", a.template, "ranch/Templates/Today To-Do.md");
+      assertEq("FT5: applied event template === ranch/templates/Today To-Do.md", a.template, "ranch/templates/Today To-Do.md");
       assertTrue(
         "FT5: applied event has git_commit field (string or null per landmine #14)",
         typeof a.git_commit === "string" || a.git_commit === null
@@ -1897,7 +1897,7 @@ async function caseR1ValidateAndResolveRunTemplaterTemplate() {
       assertEq(
         "R1: action.template_source rewritten under templates_path",
         contrib.action.template_source,
-        "ranch/Templates/Today To-Do.md"
+        "ranch/templates/Today To-Do.md"
       );
       assertEq(
         "R1: action.folder_prefix substituteLenient applied — {{module_directory}} resolved to literal spice/to-do (NO bracket-wrapping)",
@@ -3204,6 +3204,188 @@ async function caseCP5PathTraversalRejected() {
   }
 }
 
+// -----------------------------------------------------------------------------
+// SF1-SF5 — scaffoldFoundationalPluginData (v0.26.0 P0-2)
+// Materializes Templater data.json defaults at install time when the plugin
+// dir exists but data.json is absent (fresh-install scenario where Obsidian
+// hasn't yet created the file). Mirrors v0.1.3 / v0.21.1 helper posture
+// (failure-loud + idempotent skip-if-present + atomic write + history).
+// -----------------------------------------------------------------------------
+
+function fixtureScaffoldFoundationalManifest(extras) {
+  // Like fixtureHotkeysManifest but tailored to scaffold-foundational tests:
+  // declares external_plugins (or foundational_plugins) without other
+  // additive helpers' fields (templater_hotkeys etc.) so SF assertions
+  // observe scaffoldFoundationalPluginData behavior in isolation.
+  return Object.assign({
+    name: "test-fixture",
+    version: "0.1.0",
+    files: [],
+  }, extras || {});
+}
+
+async function caseSF1AbsentDataJsonScaffolds() {
+  console.log("\n--- Case SF1: absent templater data.json triggers scaffold-write ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseSF1-"));
+  try {
+    const manifest = fixtureScaffoldFoundationalManifest({
+      external_plugins: [{ id: "templater-obsidian" }],
+    });
+    await scaffoldVault(scratch, {
+      templaterData: TEMPLATER_DEFAULT,
+      slashCommanderData: SC_DEFAULT,
+      manifest,
+    });
+    // Delete the pre-seeded data.json so SF1 exercises the absent-file path.
+    const dataPath = path.join(scratch, ".obsidian/plugins/templater-obsidian/data.json");
+    await fsp.unlink(dataPath);
+    const result = await runHarness(scratch);
+    assertTrue("SF1: install ran", result !== null);
+    assertTrue("SF1: data.json now exists post-scaffold", fs.existsSync(dataPath));
+    if (fs.existsSync(dataPath)) {
+      const data = await readJson(dataPath);
+      assertEq("SF1: templates_folder reflects variables.templates_path", data.templates_folder, "ranch/templates");
+      assertEq("SF1: trigger_on_file_creation true", data.trigger_on_file_creation, true);
+      assertEq("SF1: enable_folder_templates true", data.enable_folder_templates, true);
+      assertTrue("SF1: folder_templates is empty array",
+        Array.isArray(data.folder_templates) && data.folder_templates.length === 0);
+    }
+    const scaffolded = (result.history || []).filter(
+      (h) => h.step === "scaffold_foundational" && h.action === "scaffolded" && h.id === "templater-obsidian"
+    );
+    assertTrue("SF1: history scaffolded entry written", scaffolded.length >= 1);
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseSF2PresentDataJsonSkips() {
+  console.log("\n--- Case SF2: present data.json skips scaffold (no overwrite) ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseSF2-"));
+  try {
+    const manifest = fixtureScaffoldFoundationalManifest({
+      external_plugins: [{ id: "templater-obsidian" }],
+    });
+    // Pre-existing user-customized data.json supplied via templaterData.
+    const userData = JSON.stringify({
+      templates_folder: "MyCustom/Path",
+      arbitrary_user_field: "preserve me",
+    }, null, 2);
+    await scaffoldVault(scratch, {
+      templaterData: userData,
+      slashCommanderData: SC_DEFAULT,
+      manifest,
+    });
+    const dataPath = path.join(scratch, ".obsidian/plugins/templater-obsidian/data.json");
+    const result = await runHarness(scratch);
+    assertTrue("SF2: install ran", result !== null);
+    const data = await readJson(dataPath);
+    assertEq("SF2: pre-existing templates_folder preserved", data.templates_folder, "MyCustom/Path");
+    assertEq("SF2: arbitrary user field preserved", data.arbitrary_user_field, "preserve me");
+    const skipped = (result.history || []).filter(
+      (h) => h.step === "scaffold_foundational" && h.action === "skipped_already_present" && h.id === "templater-obsidian"
+    );
+    assertTrue("SF2: history skipped_already_present entry", skipped.length >= 1);
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseSF3PluginDirAbsentSkips() {
+  console.log("\n--- Case SF3: plugin dir absent skips with skipped_missing_plugin_dir ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseSF3-"));
+  try {
+    const manifest = fixtureScaffoldFoundationalManifest({
+      external_plugins: [{ id: "templater-obsidian" }],
+    });
+    await scaffoldVault(scratch, {
+      templaterData: TEMPLATER_DEFAULT,
+      slashCommanderData: SC_DEFAULT,
+      manifest,
+    });
+    // Remove the plugin dir entirely AND remove templater-obsidian from
+    // community-plugins.json so applyExternalPlugins doesn't short-circuit
+    // before scaffoldFoundationalPluginData; the scaffold helper itself
+    // handles the missing-dir case.
+    await fsp.rm(path.join(scratch, ".obsidian/plugins/templater-obsidian"), { recursive: true, force: true });
+    const result = await runHarness(scratch);
+    assertTrue("SF3: install ran", result !== null);
+    const dataPath = path.join(scratch, ".obsidian/plugins/templater-obsidian/data.json");
+    assertTrue("SF3: data.json NOT written (plugin dir absent)", !fs.existsSync(dataPath));
+    const skipped = (result.history || []).filter(
+      (h) => h.step === "scaffold_foundational" && h.action === "skipped_missing_plugin_dir" && h.id === "templater-obsidian"
+    );
+    assertTrue("SF3: history skipped_missing_plugin_dir entry", skipped.length >= 1);
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseSF4UnknownPluginSilentNoOp() {
+  console.log("\n--- Case SF4: unknown plugin id silent no-op ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseSF4-"));
+  try {
+    const manifest = fixtureScaffoldFoundationalManifest({
+      external_plugins: [{ id: "some-random-plugin" }],
+    });
+    await scaffoldVault(scratch, {
+      templaterData: TEMPLATER_DEFAULT,
+      slashCommanderData: SC_DEFAULT,
+      manifest,
+    });
+    // Pre-create the unknown plugin's dir so applyExternalPlugins doesn't
+    // mask the result; scaffoldFoundationalPluginData should still no-op
+    // because there's no registry entry for "some-random-plugin".
+    await fsp.mkdir(path.join(scratch, ".obsidian/plugins/some-random-plugin"), { recursive: true });
+    const cpPath = path.join(scratch, ".obsidian/community-plugins.json");
+    const cp = JSON.parse(await fsp.readFile(cpPath, "utf8"));
+    if (!cp.includes("some-random-plugin")) cp.push("some-random-plugin");
+    await fsp.writeFile(cpPath, JSON.stringify(cp), "utf8");
+    const result = await runHarness(scratch);
+    assertTrue("SF4: install ran", result !== null);
+    const dataPath = path.join(scratch, ".obsidian/plugins/some-random-plugin/data.json");
+    assertTrue("SF4: no data.json materialized for unknown plugin", !fs.existsSync(dataPath));
+    const sfHist = (result.history || []).filter((h) => h.step === "scaffold_foundational" && h.id === "some-random-plugin");
+    assertEq("SF4: zero scaffold_foundational history entries for unknown id", sfHist.length, 0);
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseSF5TemplatesPathSubstitution() {
+  console.log("\n--- Case SF5: templates_folder substitution from variables.templates_path ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseSF5-"));
+  try {
+    const manifest = fixtureScaffoldFoundationalManifest({
+      external_plugins: [{ id: "templater-obsidian" }],
+    });
+    await scaffoldVault(scratch, {
+      templaterData: TEMPLATER_DEFAULT,
+      slashCommanderData: SC_DEFAULT,
+      manifest,
+    });
+    // Override platform-config variables.templates_path to a non-default value
+    // so the registry's variables-aware fallback path is exercised.
+    const cfgPath = path.join(scratch, "ranch/platform-config.json");
+    const cfg = JSON.parse(await fsp.readFile(cfgPath, "utf8"));
+    cfg.variables.templates_path = "custom/templates/path";
+    await fsp.writeFile(cfgPath, JSON.stringify(cfg, null, 2), "utf8");
+    // Delete the pre-seeded data.json so the scaffold helper writes fresh.
+    await fsp.unlink(path.join(scratch, ".obsidian/plugins/templater-obsidian/data.json"));
+    const result = await runHarness(scratch);
+    assertTrue("SF5: install ran", result !== null);
+    const dataPath = path.join(scratch, ".obsidian/plugins/templater-obsidian/data.json");
+    assertTrue("SF5: data.json materialized", fs.existsSync(dataPath));
+    if (fs.existsSync(dataPath)) {
+      const data = await readJson(dataPath);
+      assertEq("SF5: templates_folder reflects custom variables.templates_path",
+        data.templates_folder, "custom/templates/path");
+    }
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
 // v0.20.0 docs polish cycle — trailing-whitespace lint for blueprint template + content bodies.
 // Carry from v0.18.1 lesson 2 (template-body trailing-whitespace defect class).
 // Walks platform/blueprints/<bp>/{content,templates}/*.md (the two-level layout —
@@ -3318,6 +3500,13 @@ async function caseTW1TemplatesNoTrailingWhitespace() {
   await caseCP3ManifestWinsShallowMerge();
   await caseCP4MalformedJsonGuard();
   await caseCP5PathTraversalRejected();
+
+  // v0.26.0 first-run robustness — TDD-first cases for scaffoldFoundationalPluginData.
+  await caseSF1AbsentDataJsonScaffolds();
+  await caseSF2PresentDataJsonSkips();
+  await caseSF3PluginDirAbsentSkips();
+  await caseSF4UnknownPluginSilentNoOp();
+  await caseSF5TemplatesPathSubstitution();
 
   // v0.20.0 docs polish cycle — trailing-whitespace lint.
   await caseTW1TemplatesNoTrailingWhitespace();

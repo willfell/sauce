@@ -294,7 +294,9 @@ async function caseC13BootstrapBlueprintsCsv() {
     });
 }
 
-// C14: wizard nonInteractive branch defaults selectedMechs to DEFAULT_MECHANISMS_CHECKED
+// C14: wizard nonInteractive branch defaults selectedMechs to DEFAULT_MECHANISMS_CHECKED.
+// v0.26.0 P0-3: convenience is now in DEFAULT_MECHANISMS_CHECKED so fresh non-interactive
+// installs get DataviewJS + copy-path hotkeys by default.
 async function caseC14WizardNonInteractiveDefaults() {
     const label = "C14 wizard nonInteractive defaults match interactive defaults";
     await withTempVault({}, async (vaultPath) => {
@@ -303,14 +305,15 @@ async function caseC14WizardNonInteractiveDefaults() {
         fs.mkdirSync(path.join(vaultPath, "pantry/platform"), { recursive: true });
         fs.writeFileSync(path.join(vaultPath, "pantry/platform/manifest.json"),
             JSON.stringify({
-                workshop_version: "0.22.1",
+                workshop_version: "0.26.0",
                 mechanisms: [
                     { name: "customjs-guard", version: "1.0.0" },
                     { name: "nav-buttons", version: "2.5.2" },
                     { name: "cards", version: "0.2.3" },
                     { name: "accent-button", version: "0.1.0" },
                     { name: "styling", version: "0.1.2" },
-                    { name: "validator", version: "0.1.1" }   // NOT in default-checked
+                    { name: "convenience", version: "0.1.0" },  // NEW v0.26.0 — must be defaulted
+                    { name: "validator", version: "0.1.1" }     // NOT in default-checked
                 ],
                 blueprints: []
             }, null, 2));
@@ -323,9 +326,69 @@ async function caseC14WizardNonInteractiveDefaults() {
             defaults: {}               // no overrides — exercise default fallback
         });
         const subscribedNames = (r.subscription.mechanisms || []).map(m => m.name).sort();
-        const expected = ["accent-button", "cards", "customjs-guard", "nav-buttons", "styling"];
+        const expected = ["accent-button", "cards", "convenience", "customjs-guard", "nav-buttons", "styling"];
         assertEqual(JSON.stringify(subscribedNames), JSON.stringify(expected),
-            label + ": 5 default mechs (NOT including validator)");
+            label + ": 6 default mechs (including convenience; NOT including validator)");
+        // v0.26.0 P0-3 explicit regression-guard: convenience MUST be in the default
+        // subscription set so DataviewJS + copy-path hotkeys come on by default.
+        assertTrue(subscribedNames.includes("convenience"),
+            label + ": convenience present in default subscription");
+    });
+}
+
+// C15: v0.26.0 P0-1 — wizard Edit-subscription writes flat {name, version} entries.
+// Symptom on v0.25.x: legacy double-wrap of existing subscription entries shaped
+// {name: {name: "X", version: "Y"}, version: "0.0.0"}. After P0-1 fix, the
+// _normalizeSubscriptionFile helper heals legacy entries on next edit.
+async function caseC15WizardEditSubscriptionFlatWrite() {
+    const label = "C15 wizard edit-subscription writes flat {name, version} entries";
+    await withTempVault({}, async (vaultPath) => {
+        // Pre-populate subscription with legacy double-wrapped entries on disk
+        // (mimicking the v0.25.x bug shape).
+        const subPath = path.join(vaultPath, "ranch/platform-subscription.json");
+        fs.writeFileSync(subPath, JSON.stringify({
+            mechanisms: [
+                { name: { name: "customjs-guard", version: "1.0.0" }, version: "0.0.0" },
+                { name: { name: "nav-buttons",    version: "2.5.2" }, version: "0.0.0" }
+            ],
+            blueprints: []
+        }, null, 2));
+
+        const manifestMechs = [
+            { name: "customjs-guard", version: "1.0.0" },
+            { name: "nav-buttons", version: "2.5.2" },
+            { name: "cards", version: "0.2.3" }  // NOT in selection
+        ];
+
+        const wizardMod = require("../bootstrap-lib/wizard.js");
+        if (typeof wizardMod._normalizeSubscriptionFile !== "function") {
+            fail++;
+            console.log("  FAIL: " + label + " — wizardMod._normalizeSubscriptionFile not exported (P0-1 helper not yet implemented)");
+            return;
+        }
+
+        // Simulate the writeback path: caller passes bare-string selection;
+        // helper reads existing file (with legacy double-wrap), normalizes
+        // to flat shape, writes back.
+        wizardMod._normalizeSubscriptionFile(subPath, {
+            mechanisms: ["customjs-guard", "nav-buttons"],
+            blueprints: []
+        }, { mechanisms: manifestMechs, blueprints: [] });
+
+        const after = JSON.parse(fs.readFileSync(subPath, "utf8"));
+        assertTrue(Array.isArray(after.mechanisms) && after.mechanisms.length === 2,
+            label + ": 2 mechanisms written");
+        assertTrue(after.mechanisms.every(m => typeof m.name === "string"),
+            label + ": every mechanisms[].name is a string (no nested object)");
+        assertTrue(after.mechanisms.every(m => typeof m.version === "string" && m.version !== "0.0.0"),
+            label + ": every mechanisms[].version is a non-sentinel string");
+        assertTrue(after.mechanisms.every(m => !(m.name && typeof m.name === "object")),
+            label + ": no nested {name: {...}} double-wrap remains");
+        // Verify version was correctly resolved from manifestMechs:
+        const cjs = after.mechanisms.find(m => m.name === "customjs-guard");
+        assertEqual(cjs && cjs.version, "1.0.0", label + ": customjs-guard version resolved from manifest");
+        const nb = after.mechanisms.find(m => m.name === "nav-buttons");
+        assertEqual(nb && nb.version, "2.5.2", label + ": nav-buttons version resolved from manifest");
     });
 }
 
@@ -334,7 +397,8 @@ const cases = [
     caseC5StatusClean, caseC6StatusDrift, caseC7UpdateFFOnly, caseC8UpdateDirtyRefusal,
     caseC9UpdateForceOverride, caseC10WizardDelegates,
     caseC11BootstrapNonInteractive, caseC12BootstrapMechanismsAll,
-    caseC13BootstrapBlueprintsCsv, caseC14WizardNonInteractiveDefaults
+    caseC13BootstrapBlueprintsCsv, caseC14WizardNonInteractiveDefaults,
+    caseC15WizardEditSubscriptionFlatWrite  // NEW v0.26.0
 ];
 
 async function main() {
