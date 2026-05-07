@@ -5,9 +5,10 @@
     { "name": "customjs-guard", "version": "1.0.0" },
     { "name": "validator", "version": "0.1.1" },
     { "name": "audit", "version": "0.1.1" },
-    { "name": "nav-buttons", "version": "2.5.2" },
-    { "name": "cards", "version": "0.2.3" },
+    { "name": "nav-buttons", "version": "2.5.3" },
+    { "name": "cards", "version": "0.2.4" },
     { "name": "accent-button", "version": "0.1.0" },
+    { "name": "people-rendering", "version": "0.1.0" },
     { "name": "styling", "version": "0.1.2" },
     { "name": "convenience", "version": "0.1.0" }
   ],

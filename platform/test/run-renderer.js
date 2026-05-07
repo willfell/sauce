@@ -95,6 +95,9 @@ const BEACON_CARDS_SRC = fs.readFileSync(BEACON_CARDS_FILE, 'utf8');
 const ACCENT_BUTTON_FILE = path.join(WORKSHOP, 'platform', 'mechanisms', 'accent-button', 'accent-button.js');
 const ACCENT_BUTTON_SRC = fs.existsSync(ACCENT_BUTTON_FILE) ? fs.readFileSync(ACCENT_BUTTON_FILE, 'utf8') : '';
 
+const PEOPLE_RENDERING_FILE = path.join(WORKSHOP, 'platform', 'mechanisms', 'people-rendering', 'people-rendering.js');
+const PEOPLE_RENDERING_SRC = fs.existsSync(PEOPLE_RENDERING_FILE) ? fs.readFileSync(PEOPLE_RENDERING_FILE, 'utf8') : '';
+
 // ── DOM stub ─────────────────────────────────────────────────────────────
 function makeEl(tag, opts) {
   const el = {
@@ -253,6 +256,12 @@ function loadAccentButtonClass(app) {
   if (!ACCENT_BUTTON_SRC) return null;
   const fn = new Function('app', `${ACCENT_BUTTON_SRC}\nreturn typeof AccentButton !== 'undefined' ? AccentButton : null;`);
   return fn(app);
+}
+
+function loadPeopleRenderingClass(app, customJS, Notice) {
+  if (!PEOPLE_RENDERING_SRC) return null;
+  const fn = new Function('app', 'customJS', 'Notice', `${PEOPLE_RENDERING_SRC}\nreturn typeof PeopleRendering !== 'undefined' ? PeopleRendering : null;`);
+  return fn(app, customJS || {}, Notice || FakeNotice);
 }
 
 function makeFinanceCustomJsStub() {
@@ -816,6 +825,229 @@ async function testBC7SuccessTone() {
   return pass;
 }
 
+async function testBC8SubtitleCallback() {
+  console.log('\n=== BC8 — subtitle returning (parent) => void callback fires once and renders into subtitle slot ===');
+  const app = makeApp();
+  const Cls = loadBeaconCardsClass(app);
+  const dv = makeDv();
+  const cards = new Cls();
+  let calls = 0;
+  await cards.render(dv, {
+    pages: [{ file: { name: 'Test', path: 'Test.md' } }],
+    title: (p) => p.file.name,
+    subtitle: () => (parent) => {
+      calls++;
+      const span = parent.createEl('span');
+      span.textContent = 'callback-rendered-text';
+    },
+    layout: 'stacked',
+  });
+  const cbHits = collectAll(dv.container, (el) => el.textContent === 'callback-rendered-text');
+  console.log(`  subtitle callback invocations: ${calls}`);
+  console.log(`  callback-rendered DOM elements: ${cbHits.length}`);
+  const pass = calls === 1 && cbHits.length >= 1;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
+// ── people-rendering mechanism (v0.27.0) ────────────────────────────────
+async function testPR1ChipResolved() {
+  console.log('\n=== PR1 — renderChip with valid personLink returns <span> with name + tooltip from frontmatter ===');
+  const app = makeApp();
+  app.metadataCache = {
+    getFirstLinkpathDest: (linkpath) => ({ path: 'spice/people/' + linkpath + '.md', basename: linkpath }),
+    getFileCache: () => ({ frontmatter: { company: 'Acme', title: 'Engineer' } }),
+  };
+  const Cls = loadPeopleRenderingClass(app);
+  if (!Cls) { console.log('  FAIL — PeopleRendering class not loaded'); return false; }
+  const parent = makeEl('div', {});
+  let span;
+  try {
+    span = new Cls().renderChip(parent, '[[Jane Doe]]');
+  } catch (e) {
+    console.log(`  FAIL — renderChip threw: ${e.message}`);
+    return false;
+  }
+  const isSpan = !!span && span.tag === 'span';
+  const hasName = isSpan && typeof span.textContent === 'string' && span.textContent.includes('Jane Doe');
+  const hasTooltip = isSpan && typeof span.title === 'string' && span.title.includes('Acme') && span.title.includes('Engineer');
+  console.log(`  is <span>: ${isSpan}; name in text: ${hasName}; tooltip has frontmatter: ${hasTooltip}`);
+  const pass = isSpan && hasName && hasTooltip;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
+async function testPR2ChipMissing() {
+  console.log('\n=== PR2 — renderChip with unresolved link renders red-tinted span + Notice on click ===');
+  reset();
+  const app = makeApp();
+  app.metadataCache = { getFirstLinkpathDest: () => null, getFileCache: () => null };
+  const Cls = loadPeopleRenderingClass(app);
+  if (!Cls) { console.log('  FAIL — class not loaded'); return false; }
+  const parent = makeEl('div', {});
+  let span;
+  try {
+    span = new Cls().renderChip(parent, '[[Unknown]]');
+  } catch (e) {
+    console.log(`  FAIL — threw: ${e.message}`);
+    return false;
+  }
+  const css = (span.style && span.style.cssText) || '';
+  const clsStr = (span.cls || '') + ' ' + (span.className || '');
+  const looksMissing = css.includes('--text-error')
+    || css.includes('color: var(--text-error)')
+    || css.includes('rgba(255')
+    || /missing|unknown/i.test(clsStr);
+  if (typeof span.onclick === 'function') {
+    span.onclick({});
+  }
+  const hadNotice = captured_notices.some((n) => /unknown person/i.test(n.msg || ''));
+  console.log(`  red-tinted: ${looksMissing}; click→Notice "Unknown person…": ${hadNotice}`);
+  const pass = looksMissing && hadNotice;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
+async function testPR3CardDelegates() {
+  console.log('\n=== PR3 — renderCard delegates to customJS.BeaconCards.render with synthetic-page list of one ===');
+  const app = makeApp();
+  app.metadataCache = {
+    getFirstLinkpathDest: () => ({ path: 'spice/people/Jane Doe.md', basename: 'Jane Doe' }),
+    getFileCache: () => ({ frontmatter: { company: 'Acme', title: 'Engineer' } }),
+  };
+  const calls = [];
+  const customJSStub = { BeaconCards: { render: async (dv, opts) => { calls.push({ dv, opts }); } } };
+  const Cls = loadPeopleRenderingClass(app, customJSStub);
+  if (!Cls) { console.log('  FAIL — class not loaded'); return false; }
+  const dv = makeDv();
+  try {
+    new Cls().renderCard(dv, '[[Jane Doe]]', { layout: 'row' });
+  } catch (e) {
+    console.log(`  FAIL — renderCard threw: ${e.message}`);
+    return false;
+  }
+  await new Promise((r) => setImmediate(r));
+  const callCount = calls.length;
+  let pageCount = 0;
+  let layoutThreaded = false;
+  if (callCount === 1) {
+    const opts = calls[0].opts || {};
+    const pages = opts.pages || opts.items || [];
+    pageCount = Array.isArray(pages) ? pages.length : 0;
+    layoutThreaded = opts.layout === 'row';
+  }
+  console.log(`  BeaconCards.render calls: ${callCount}; synthetic pages: ${pageCount}; layout threaded: ${layoutThreaded}`);
+  const pass = callCount === 1 && pageCount === 1 && layoutThreaded;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
+async function testPR4MentionListMentioningPerson() {
+  console.log('\n=== PR4 — renderMentionList(mode=mentioning_person) emits dv.pages(scopePath).where chain; respects limit ===');
+  const app = makeApp();
+  app.metadataCache = {
+    getFirstLinkpathDest: () => ({ path: 'spice/people/Jane Doe.md', basename: 'Jane Doe' }),
+    getFileCache: () => ({ frontmatter: {} }),
+  };
+  const customJSStub = { BeaconCards: { render: async () => {} } };
+  const Cls = loadPeopleRenderingClass(app, customJSStub);
+  if (!Cls) { console.log('  FAIL — class not loaded'); return false; }
+
+  const observed = { pages_arg: null, where_invoked: false, sort_invoked: false, limit_observed: null };
+  const chain = {
+    where(fn) { observed.where_invoked = true; return chain; },
+    sort(fn, dir) { observed.sort_invoked = true; return chain; },
+    slice(start, end) {
+      observed.limit_observed = end !== undefined ? end - start : end;
+      return [];
+    },
+    limit(n) { observed.limit_observed = n; return chain; },
+    [Symbol.iterator]() { return [].values(); },
+    length: 0,
+    map(fn) { return []; },
+    forEach() {},
+  };
+  const dvSpy = {
+    container: makeEl('div', {}),
+    fileLink: (p) => ({ path: p, type: 'file', display: p }),
+    pages(arg) { observed.pages_arg = arg; return chain; },
+  };
+  try {
+    const result = new Cls().renderMentionList(dvSpy, { mode: 'mentioning_person', personLink: '[[Jane Doe]]', scopePath: 'spice/meetings' }, { style: 'cards', limit: 50 });
+    if (result && typeof result.then === 'function') await result;
+  } catch (e) {
+    console.log(`  FAIL — renderMentionList threw: ${e.message}`);
+    return false;
+  }
+  const pagesArgOk = observed.pages_arg === '"spice/meetings"';
+  const limitOk = observed.limit_observed === 50;
+  console.log(`  pages arg: ${observed.pages_arg}; .where invoked: ${observed.where_invoked}; limit threaded: ${limitOk}`);
+  const pass = pagesArgOk && observed.where_invoked && limitOk;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
+async function testPR5MentionListMentionedInNote() {
+  console.log('\n=== PR5 — renderMentionList(mode=mentioned_in_note) reads body via app.vault + filters via extractMentions ===');
+  const app = makeApp();
+  app.vault.adapter.read = async (p) => {
+    if (p === 'spice/meetings/Test.md') return 'Body [[Jane Doe]] and [[Random Note]]';
+    throw new Error('unexpected read: ' + p);
+  };
+  app.metadataCache = {
+    getFirstLinkpathDest: (linkpath) => {
+      if (linkpath === 'Jane Doe') return { path: 'spice/people/Jane Doe.md', basename: 'Jane Doe' };
+      return null;
+    },
+    getFileCache: () => ({ frontmatter: { company: 'Acme', title: 'Engineer' } }),
+  };
+  const customJSStub = { BeaconCards: { render: async () => {} } };
+  const Cls = loadPeopleRenderingClass(app, customJSStub);
+  if (!Cls) { console.log('  FAIL — class not loaded'); return false; }
+  const dv = makeDv();
+  try {
+    const result = new Cls().renderMentionList(dv, { mode: 'mentioned_in_note', notePath: 'spice/meetings/Test.md' }, { style: 'chips' });
+    if (result && typeof result.then === 'function') await result;
+  } catch (e) {
+    console.log(`  FAIL — renderMentionList threw: ${e.message}`);
+    return false;
+  }
+  const chipsForJane = collectAll(dv.container, (el) => el.tag === 'span' && typeof el.textContent === 'string' && el.textContent.includes('Jane Doe'));
+  const chipsForRandom = collectAll(dv.container, (el) => el.tag === 'span' && typeof el.textContent === 'string' && el.textContent.includes('Random'));
+  console.log(`  Jane chips: ${chipsForJane.length}; Random chips: ${chipsForRandom.length}`);
+  const pass = chipsForJane.length === 1 && chipsForRandom.length === 0;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
+async function testPR6ExtractMentionsArray() {
+  console.log('\n=== PR6 — extractMentions returns Array<{display,target}>; filters to spice/people/; unique=true dedupes ===');
+  const app = makeApp();
+  app.metadataCache = {
+    getFirstLinkpathDest: (linkpath) => {
+      if (linkpath === 'Jane Doe') return { path: 'spice/people/Jane Doe.md', basename: 'Jane Doe' };
+      return null;
+    },
+  };
+  const Cls = loadPeopleRenderingClass(app);
+  if (!Cls) { console.log('  FAIL — class not loaded'); return false; }
+  let out;
+  try {
+    out = new Cls().extractMentions('Body [[Jane Doe]] and [[Random Note]] and [[Jane Doe]]');
+  } catch (e) {
+    console.log(`  FAIL — extractMentions threw: ${e.message}`);
+    return false;
+  }
+  const isArray = Array.isArray(out);
+  const len = isArray ? out.length : 0;
+  const first = isArray && out[0];
+  const shapeOk = !!first && first.display === 'Jane Doe' && first.target === 'spice/people/Jane Doe.md';
+  console.log(`  isArray: ${isArray}; length: ${len}; first.display: ${first && first.display}; first.target: ${first && first.target}`);
+  const pass = isArray && len === 1 && shapeOk;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
 // ── AccentButton mechanism (v0.18.0; renamed from BeaconButton in v0.24.0) ─
 async function testBB1RenderReturnsButtonWithBaselineCssText() {
   console.log('\n=== BB1 — render returns HTMLButtonElement with accent baseline cssText ===');
@@ -1121,6 +1353,15 @@ async function testFF3HubAreaRowIcons() {
       results.push(['BC5 badge-no-icon', await testBC5BadgeNoIcon()]);
       results.push(['BC6 synthetic-page-onclick', await testBC6SyntheticPageOnClick()]);
       results.push(['BC7 success-tone', await testBC7SuccessTone()]);
+      results.push(['BC8 subtitle-callback', await testBC8SubtitleCallback()]);
+    }
+    if (which === 'people-rendering' || which === 'all') {
+      results.push(['PR1 chip-resolved', await testPR1ChipResolved()]);
+      results.push(['PR2 chip-missing', await testPR2ChipMissing()]);
+      results.push(['PR3 card-delegates', await testPR3CardDelegates()]);
+      results.push(['PR4 mention-list-mentioning-person', await testPR4MentionListMentioningPerson()]);
+      results.push(['PR5 mention-list-mentioned-in-note', await testPR5MentionListMentionedInNote()]);
+      results.push(['PR6 extract-mentions-array', await testPR6ExtractMentionsArray()]);
     }
     if (which === 'accent-button' || which === 'all') {
       results.push(['BB1 baseline-csstext', await testBB1RenderReturnsButtonWithBaselineCssText()]);

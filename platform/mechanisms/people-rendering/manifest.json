@@ -1,0 +1,9 @@
+{
+  "name": "people-rendering",
+  "version": "0.1.0",
+  "description": "Shared CustomJS rendering helpers for People notes — chips, cards, mention lists, and [[Person]] extraction. Used by people blueprint + any blueprint that surfaces person references (meetings, daily, journal, projects).",
+  "depends_on": ["customjs-guard >=1.0.0", "cards >=0.2.4"],
+  "files": [
+    { "src": "people-rendering.js", "dest": "{{scripts_path}}/people-rendering/people-rendering.js" }
+  ]
+}
