@@ -3,6 +3,18 @@
 # v0.1.3+: backup-on-edit files written by applyTemplaterHotkeys + applySlashCommanderBindings (landmine #12)
 *.beacon-backup
 
+# v0.25.0: backup-suffix renamed from .beacon-backup to .sauce-backup (landmine #12 mechanic #2)
+*.sauce-backup
+
+# v0.24.0+: stale CustomJS .bak files left in workshop dogfood from manual debug sessions
+*.bak
+
+# v0.24.0 dogfood drift: workshop self-state under ranch/scripts/accent-button/ is
+# materialized by the workshop's own self-install. Tracked content lives upstream at
+# platform/mechanisms/accent-button/; the materialized copy here is regenerated on
+# every install and should not be tracked.
+ranch/scripts/accent-button/
+
 # v0.1.2 S2: pre-stub-deployment bootstrap snapshots (rollback target). Retained
 # locally for ≥1 cycle; never tracked.
 _backups/
