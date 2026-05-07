@@ -100,6 +100,14 @@ module.exports = async function (tp) {
       variables.content_path = "ranch/Content";
     }
 
+    // CF-3 (v0.24.0): align CustomJS plugin's jsFolder setting with the
+    // consumer's scripts_path variable. CustomJS scans this dir at startup;
+    // after Tree 3 rename (Docs/Meta -> ranch) every consumer's stale
+    // jsFolder="Docs/Meta/Scripts" no longer resolves -> "SpaceNavButtons
+    // unavailable" chips on every dataviewjs render. Run ONCE per install
+    // run (not per-item) since CustomJS is foundational + platform-wide.
+    await applyCustomJsSettings(tp, variables, installedNow.history, git);
+
     // 1. resolve which items to install + their order
     const { nodes, skipped: missingItems } = resolveDependencies(subscription, manifest);
 
@@ -1795,6 +1803,211 @@ async function applyHotkeys(tp, manifest, history, git) {
         event: "error",
         step: "hotkeys",
         name: manifest.name,
+        message: `write failed: ${e.message}`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+  }
+}
+
+// applyCustomJsSettings — write .obsidian/plugins/customjs/data.json's
+// jsFolder field to match the consumer's scripts_path variable. NEW v0.24.0
+// (CF-3 of v0.24.0 Tree 3 rename). Mirrors applyHotkeys posture
+// (read/parse/validate -> backup-on-edit -> write). Idempotent: skips write
+// when jsFolder is already set to scripts_path. Surgical migration: only
+// overwrites the legacy value "Docs/Meta/Scripts" or absent/empty values
+// (preserves user-customized jsFolder).
+async function applyCustomJsSettings(tp, variables, history, git) {
+  const adapter = tp.app.vault.adapter;
+  const pluginDir = ".obsidian/plugins/customjs";
+  const target = `${pluginDir}/data.json`;
+  const desired = (variables && typeof variables.scripts_path === "string") ? variables.scripts_path : null;
+
+  if (!desired) return;
+  // Path-traversal guard.
+  if (desired.startsWith("/") || desired.startsWith("..") || desired.includes("../") || desired.includes("\\")) {
+    new Notice(`applyCustomJsSettings: refusing suspicious scripts_path '${desired}'`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "customjs_settings",
+        message: `refused suspicious scripts_path: ${desired}`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  // Foundational prereq: customjs plugin dir must exist (vendored by bootstrap).
+  if (!(await adapter.exists(pluginDir))) {
+    if (history) {
+      history.push({
+        event: "info",
+        step: "customjs_settings",
+        action: "skipped_missing_prereq",
+        message: `${pluginDir} absent`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  let raw = null;
+  let existing = {};
+  if (await adapter.exists(target)) {
+    try {
+      raw = await adapter.read(target);
+    } catch (e) {
+      new Notice(`applyCustomJsSettings: cannot read ${target} (${e.message}); skipping`, 8000);
+      if (history) {
+        history.push({
+          event: "error",
+          step: "customjs_settings",
+          message: `read failed for ${target}: ${e.message}`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      return;
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (e) {
+      new Notice(`applyCustomJsSettings: ${target} malformed JSON (${e.message}); skipping`, 8000);
+      if (history) {
+        history.push({
+          event: "error",
+          step: "customjs_settings",
+          message: `${target} malformed JSON: ${e.message}`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      return;
+    }
+
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+      new Notice(`applyCustomJsSettings: ${target} parsed but is not a JSON object; skipping`, 8000);
+      if (history) {
+        history.push({
+          event: "error",
+          step: "customjs_settings",
+          message: `${target} parsed but is not a JSON object`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      return;
+    }
+
+    existing = parsed;
+  }
+
+  const current = existing.jsFolder;
+  const isLegacyDocsmeta = (typeof current === "string" && current === "Docs/Meta/Scripts");
+  const isAbsentOrEmpty = (current === undefined || current === null || current === "");
+  const alreadyDesired = (current === desired);
+
+  if (alreadyDesired) {
+    if (history) {
+      history.push({
+        event: "info",
+        step: "customjs_settings",
+        action: "noop_already_desired",
+        jsFolder: desired,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  // Surgical: only overwrite legacy v0.23.x value OR absent. Preserve any
+  // other user-customized jsFolder (e.g., a user who runs CustomJS classes
+  // out of a non-platform dir for development).
+  if (!isLegacyDocsmeta && !isAbsentOrEmpty) {
+    if (history) {
+      history.push({
+        event: "info",
+        step: "customjs_settings",
+        action: "skipped_user_customized",
+        jsFolder: current,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  existing.jsFolder = desired;
+  // Provide expected default fields when starting fresh — keeps the file
+  // shape recognizable to the CustomJS plugin without forcing schema drift.
+  if (existing.jsFiles === undefined) existing.jsFiles = "";
+  if (existing.startupScriptNames === undefined) existing.startupScriptNames = [];
+  if (existing.registeredInvocableScriptNames === undefined) existing.registeredInvocableScriptNames = [];
+  if (existing.rerunStartupScriptsOnFileChange === undefined) existing.rerunStartupScriptsOnFileChange = false;
+
+  if (raw !== null) {
+    try {
+      await adapter.write(`${target}.beacon-backup`, raw);
+    } catch (e) {
+      new Notice(`applyCustomJsSettings: backup write failed (${e.message}); aborting`, 8000);
+      if (history) {
+        history.push({
+          event: "error",
+          step: "customjs_settings",
+          message: `backup write failed: ${e.message}`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      return;
+    }
+  }
+
+  try {
+    await adapter.write(target, JSON.stringify(existing, null, 2));
+    if (history) {
+      history.push({
+        event: "info",
+        step: "customjs_settings",
+        action: isLegacyDocsmeta ? "migrated_legacy" : "applied_fresh",
+        jsFolder: desired,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+  } catch (e) {
+    new Notice(`applyCustomJsSettings: write failed (${e.message})`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "customjs_settings",
         message: `write failed: ${e.message}`,
         git_commit: git.commit,
         git_tag: git.tag,

@@ -1,6 +1,6 @@
 {
   "jsFiles": "",
-  "jsFolder": "Docs/Meta/Scripts",
+  "jsFolder": "ranch/Scripts",
   "startupScriptNames": [],
   "registeredInvocableScriptNames": [],
   "rerunStartupScriptsOnFileChange": false

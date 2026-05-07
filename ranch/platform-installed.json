@@ -26,11 +26,6 @@
       "installed_at": "2026-05-05T22:15:53.617Z"
     },
     {
-      "name": "beacon-button",
-      "version": "0.1.0",
-      "installed_at": "2026-05-05T23:33:07.505Z"
-    },
-    {
       "name": "styling",
       "version": "0.1.2",
       "installed_at": "2026-05-06T19:41:15.228Z"
@@ -39,6 +34,11 @@
       "name": "convenience",
       "version": "0.1.0",
       "installed_at": "2026-05-06T21:22:56.514Z"
+    },
+    {
+      "name": "accent-button",
+      "version": "0.1.0",
+      "installed_at": "2026-05-07T15:46:37.751Z"
     }
   ],
   "blueprints": [],
@@ -821,6 +821,36 @@
       "git_commit": "18200442b5d0d1c943e9f3db61bfe74265322b3a",
       "git_tag": null,
       "git_dirty": true
+    },
+    {
+      "event": "info",
+      "step": "customjs_settings",
+      "action": "migrated_legacy",
+      "jsFolder": "ranch/Scripts",
+      "git_commit": "b2bdada163f50bb6b02ddec174891d7d12fa67ef",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-07T15:46:37.746Z"
+    },
+    {
+      "event": "install",
+      "kind": "mechanism",
+      "name": "accent-button",
+      "version": "0.1.0",
+      "installed_at": "2026-05-07T15:46:37.751Z",
+      "git_commit": "b2bdada163f50bb6b02ddec174891d7d12fa67ef",
+      "git_tag": null,
+      "git_dirty": true
+    },
+    {
+      "event": "prune",
+      "kind": "mechanism",
+      "name": "beacon-button",
+      "reason": "no longer subscribed",
+      "git_commit": "b2bdada163f50bb6b02ddec174891d7d12fa67ef",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-07T15:46:37.751Z"
     }
   ]
 }

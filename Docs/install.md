@@ -134,6 +134,11 @@ sed -i '' 's|Docs/Meta|ranch|g' ranch/platform-config.json
 
 The new stub md5 invariant for `<vault>/ranch/Templater/platformInstall.js` is `ea23aa812503bfca66359d3b2b239ba8`. Existing stubs at the OLD md5 (`a39257da1dd49ae4481e5cd0a42bdac4`) will be overwritten by the next install run with the new canonical body.
 
+> [!info] CustomJS plugin `jsFolder` migration
+> v0.24.0 ships a new `applyCustomJsSettings` helper that automatically migrates `.obsidian/plugins/customjs/data.json:jsFolder` from `Docs/Meta/Scripts` to `ranch/Scripts` on the first install run. Surgical: only overwrites the legacy v0.23.x value or absent settings; any other user-customized `jsFolder` is preserved.
+>
+> If you upgrade and dataviewjs blocks render `SpaceNavButtons unavailable` / `<ClassName> unavailable`, your CustomJS plugin's scan folder is stale. Either (a) run `sauce update` (helper auto-migrates), or (b) open Obsidian Settings → Community Plugins → CustomJS, set `jsFolder` to `ranch/Scripts`, then Cmd+R.
+
 ---
 
 ## Activation per shell
