@@ -490,7 +490,7 @@ async function caseM2ModuleDirectoryCollision() {
 // --------------------------------------------------------------------------
 
 async function caseM3ModuleDirectorySubstitutes() {
-  console.log("\n--- Case M3: {{module_directory}} substitutes to beacon/<name> for blueprint files ---");
+  console.log("\n--- Case M3: {{module_directory}} substitutes to spice/<name> for blueprint files ---");
   const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseM3-"));
   try {
     await scaffoldBlueprintVault(scratch, [
@@ -514,14 +514,14 @@ async function caseM3ModuleDirectorySubstitutes() {
     const result = await runHarness(scratch);
     assertTrue("M3: platform-installed.json was written", result !== null);
 
-    const destAbs = path.join(scratch, "beacon/alpha/sub/foo.md");
-    assertTrue("M3: dest file lands at beacon/alpha/sub/foo.md (substituted path)", fs.existsSync(destAbs));
+    const destAbs = path.join(scratch, "spice/alpha/sub/foo.md");
+    assertTrue("M3: dest file lands at spice/alpha/sub/foo.md (substituted path)", fs.existsSync(destAbs));
 
     if (fs.existsSync(destAbs)) {
       const body = await readRaw(destAbs);
       assertTrue(
-        "M3: dest body contains beacon/alpha/To-Do-Board.md (lenient body sub)",
-        body.includes("beacon/alpha/To-Do-Board.md"),
+        "M3: dest body contains spice/alpha/To-Do-Board.md (lenient body sub)",
+        body.includes("spice/alpha/To-Do-Board.md"),
         `body was: ${body.trim()}`
       );
       assertTrue(
@@ -580,18 +580,18 @@ async function caseM4NoLeakBetweenBlueprints() {
     ]);
     await runHarness(scratch);
 
-    const aPath = path.join(scratch, "beacon/alpha/file.md");
-    const bPath = path.join(scratch, "beacon/beta/file.md");
-    assertTrue("M4: alpha file exists at beacon/alpha/file.md", fs.existsSync(aPath));
-    assertTrue("M4: beta file exists at beacon/beta/file.md", fs.existsSync(bPath));
+    const aPath = path.join(scratch, "spice/alpha/file.md");
+    const bPath = path.join(scratch, "spice/beta/file.md");
+    assertTrue("M4: alpha file exists at spice/alpha/file.md", fs.existsSync(aPath));
+    assertTrue("M4: beta file exists at spice/beta/file.md", fs.existsSync(bPath));
 
     if (fs.existsSync(aPath) && fs.existsSync(bPath)) {
       const aBody = await readRaw(aPath);
       const bBody = await readRaw(bPath);
-      assertTrue("M4: alpha body references beacon/alpha", aBody.includes("beacon/alpha"));
-      assertTrue("M4: alpha body does NOT reference beacon/beta", !aBody.includes("beacon/beta"));
-      assertTrue("M4: beta body references beacon/beta", bBody.includes("beacon/beta"));
-      assertTrue("M4: beta body does NOT reference beacon/alpha", !bBody.includes("beacon/alpha"));
+      assertTrue("M4: alpha body references spice/alpha", aBody.includes("spice/alpha"));
+      assertTrue("M4: alpha body does NOT reference spice/beta", !aBody.includes("spice/beta"));
+      assertTrue("M4: beta body references spice/beta", bBody.includes("spice/beta"));
+      assertTrue("M4: beta body does NOT reference spice/alpha", !bBody.includes("spice/alpha"));
     }
   } finally {
     await fsp.rm(scratch, { recursive: true, force: true });
@@ -651,12 +651,12 @@ async function caseM5MechanismDoesNotReceiveModuleDirectory() {
 // v0.3.0: module_directory mkdir mechanic (M6)
 // --------------------------------------------------------------------------
 //
-// installItem must explicitly create `beacon/<module_directory>/` for every
+// installItem must explicitly create `spice/<module_directory>/` for every
 // blueprint, regardless of whether files[] writes anything under that path.
 // This codifies landmine #11 at the installer level (previously the directory
 // was created only as a side-effect of files[] writes there). Daily blueprint
 // surfaced this gap — its files all land under ranch/* but the Daily
-// Notes plugin requires `beacon/daily/` to pre-exist.
+// Notes plugin requires `spice/daily/` to pre-exist.
 //
 // M6.A: fresh install of a blueprint whose files[] does NOT write under
 //       {{module_directory}}/... → directory still exists; history records
@@ -670,7 +670,7 @@ async function caseM6ModuleDirectoryEnsured() {
   try {
     // Fixture: blueprint declares module_directory "test-mod" but its only
     // file lands under ranch/Scripts (NOT under {{module_directory}}/...).
-    // After install, beacon/test-mod/ must still exist as a directory.
+    // After install, spice/test-mod/ must still exist as a directory.
     const blueprint = {
       name: "test-fixture-m6",
       version: "0.1.0",
@@ -694,14 +694,14 @@ async function caseM6ModuleDirectoryEnsured() {
     const first = await runHarness(scratch);
     assertTrue("M6.A: platform-installed.json was written", first !== null);
 
-    const moduleDirAbs = path.join(scratch, "beacon/test-mod");
+    const moduleDirAbs = path.join(scratch, "spice/test-mod");
     assertTrue(
-      "M6.A: beacon/test-mod/ exists on disk after fresh install",
+      "M6.A: spice/test-mod/ exists on disk after fresh install",
       fs.existsSync(moduleDirAbs)
     );
     if (fs.existsSync(moduleDirAbs)) {
       assertTrue(
-        "M6.A: beacon/test-mod/ is a directory (not a file)",
+        "M6.A: spice/test-mod/ is a directory (not a file)",
         fs.statSync(moduleDirAbs).isDirectory()
       );
     }
@@ -717,7 +717,7 @@ async function caseM6ModuleDirectoryEnsured() {
 
     if (createdEvents.length === 1) {
       const c = createdEvents[0];
-      assertEq("M6.A: created event path === beacon/test-mod", c.path, "beacon/test-mod");
+      assertEq("M6.A: created event path === spice/test-mod", c.path, "spice/test-mod");
       assertTrue("M6.A: created event has git_commit field", "git_commit" in c);
       assertTrue("M6.A: created event has git_tag field", "git_tag" in c);
       assertTrue("M6.A: created event has git_dirty field", "git_dirty" in c);
@@ -759,7 +759,7 @@ async function caseM6ModuleDirectoryEnsured() {
     assertTrue("M6.B: platform-installed.json was written on second run", second !== null);
 
     assertTrue(
-      "M6.B: beacon/test-mod/ still exists on disk after re-run",
+      "M6.B: spice/test-mod/ still exists on disk after re-run",
       fs.existsSync(moduleDirAbs) && fs.statSync(moduleDirAbs).isDirectory()
     );
 
@@ -775,7 +775,7 @@ async function caseM6ModuleDirectoryEnsured() {
 
     if (alreadyExists.length === 1) {
       const a = alreadyExists[0];
-      assertEq("M6.B: already_exists event path === beacon/test-mod", a.path, "beacon/test-mod");
+      assertEq("M6.B: already_exists event path === spice/test-mod", a.path, "spice/test-mod");
       assertTrue("M6.B: already_exists event has git_commit field", "git_commit" in a);
       assertTrue("M6.B: already_exists event has attempted_at field", typeof a.attempted_at === "string");
     }
@@ -830,7 +830,7 @@ async function caseO1IdenticalContentSkipsOverwrite() {
     ]);
     // Pre-prime the dest with EXACTLY the expected post-substitution body
     // (the source body has no substitution tokens, so substituted === body).
-    const destAbs = path.join(scratch, "beacon/o1/hello.md");
+    const destAbs = path.join(scratch, "spice/o1/hello.md");
     await fsp.mkdir(path.dirname(destAbs), { recursive: true });
     await fsp.writeFile(destAbs, body, "utf8");
 
@@ -872,7 +872,7 @@ async function caseO2DifferingContentBackupAndReplace() {
         sourceFiles: [{ relPath: "content/c.md", body: newBody }]
       }
     ]);
-    const destAbs = path.join(scratch, "beacon/o2/c.md");
+    const destAbs = path.join(scratch, "spice/o2/c.md");
     await fsp.mkdir(path.dirname(destAbs), { recursive: true });
     await fsp.writeFile(destAbs, oldBody, "utf8");
 
@@ -936,7 +936,7 @@ async function caseO3ZeroByteDestNoBackup() {
         sourceFiles: [{ relPath: "content/c.md", body }]
       }
     ]);
-    const destAbs = path.join(scratch, "beacon/o3/c.md");
+    const destAbs = path.join(scratch, "spice/o3/c.md");
     await fsp.mkdir(path.dirname(destAbs), { recursive: true });
     await fsp.writeFile(destAbs, "", "utf8"); // 0-byte file
 
@@ -982,7 +982,7 @@ async function caseO4FreshWriteNoReplace() {
     const result = await runHarness(scratch);
     assertTrue("O4: platform-installed.json was written", result !== null);
 
-    const destAbs = path.join(scratch, "beacon/o4/c.md");
+    const destAbs = path.join(scratch, "spice/o4/c.md");
     assertTrue("O4: dest file created", fs.existsSync(destAbs));
     if (fs.existsSync(destAbs)) {
       const finalBody = await readRaw(destAbs);
@@ -1006,9 +1006,9 @@ async function caseO5SubstitutionAffectsSha() {
   const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseO5-"));
   try {
     // Source body contains {{module_directory}} token. With module_directory="alpha",
-    // post-substitution body is "see beacon/alpha/foo.md\n".
+    // post-substitution body is "see spice/alpha/foo.md\n".
     const sourceBody = "see {{module_directory}}/foo.md\n";
-    const expectedSubstituted = "see beacon/alpha/foo.md\n";
+    const expectedSubstituted = "see spice/alpha/foo.md\n";
     await scaffoldBlueprintVault(scratch, [
       {
         name: "test-fixture-o5",
@@ -1024,7 +1024,7 @@ async function caseO5SubstitutionAffectsSha() {
       }
     ]);
     // Prime dest with EXACT post-substitution body — should be idempotent.
-    const destAbs = path.join(scratch, "beacon/alpha/c.md");
+    const destAbs = path.join(scratch, "spice/alpha/c.md");
     await fsp.mkdir(path.dirname(destAbs), { recursive: true });
     await fsp.writeFile(destAbs, expectedSubstituted, "utf8");
 
@@ -1295,7 +1295,7 @@ async function caseP4UnknownTypeWarningOnly() {
 // scaffoldBlueprintVault for C5 (which DOES exercise the overlay).
 
 const C1_DAILY_SETTINGS = {
-  folder: "beacon/daily",
+  folder: "spice/daily",
   format: "YYYY/MM-MMMM/YYYY-MM-DD-dddd",
   template: "ranch/Templates/Daily Note.md",
 };
@@ -1334,8 +1334,8 @@ async function caseC1IdempotentMerge() {
     assertEq("C1: core plugin file unchanged after first run", bodyAfter1, seedBody);
 
     // No backup file because we skipped the write.
-    const backupPath = `${corePath}.beacon-backup`;
-    assertTrue("C1: no <target>.beacon-backup created on skip", !fs.existsSync(backupPath));
+    const backupPath = `${corePath}.sauce-backup`;
+    assertTrue("C1: no <target>.sauce-backup created on skip", !fs.existsSync(backupPath));
 
     // Second run — bump fixture version + re-read manifest.
     const fixtureManifest2 = { ...manifest, version: "0.1.1" };
@@ -1407,8 +1407,8 @@ async function caseC2MalformedJson() {
     assertEq("C2: malformed core plugin data.json untouched", bodyAfter, malformed);
 
     // No backup created — we never wrote, so we never backed up.
-    const backupPath = `${corePath}.beacon-backup`;
-    assertTrue("C2: no <target>.beacon-backup created on malformed-JSON guard", !fs.existsSync(backupPath));
+    const backupPath = `${corePath}.sauce-backup`;
+    assertTrue("C2: no <target>.sauce-backup created on malformed-JSON guard", !fs.existsSync(backupPath));
   } finally {
     await fsp.rm(scratch, { recursive: true, force: true });
   }
@@ -1443,17 +1443,17 @@ async function caseC3AdditivePreservesUserKeys() {
     assertEq("C3: exactly one applied event", applied.length, 1);
 
     const after = await readJson(corePath);
-    assertEq("C3: folder overwritten by manifest", after.folder, "beacon/daily");
+    assertEq("C3: folder overwritten by manifest", after.folder, "spice/daily");
     assertEq("C3: format overwritten by manifest", after.format, "YYYY/MM-MMMM/YYYY-MM-DD-dddd");
     assertEq("C3: template added (was absent)", after.template, "ranch/Templates/Daily Note.md");
     assertEq("C3: customField preserved (user-only key)", after.customField, "keepme");
     assertEq("C3: top-level keys count is 4", Object.keys(after).length, 4);
 
-    const backupPath = `${corePath}.beacon-backup`;
-    assertTrue("C3: <target>.beacon-backup exists (pre-existing content was backed up)", fs.existsSync(backupPath));
+    const backupPath = `${corePath}.sauce-backup`;
+    assertTrue("C3: <target>.sauce-backup exists (pre-existing content was backed up)", fs.existsSync(backupPath));
     if (fs.existsSync(backupPath)) {
       const backupBody = await readRaw(backupPath);
-      assertEq("C3: <target>.beacon-backup body byte-equal to original pre-seed", backupBody, seedBody);
+      assertEq("C3: <target>.sauce-backup body byte-equal to original pre-seed", backupBody, seedBody);
     }
   } finally {
     await fsp.rm(scratch, { recursive: true, force: true });
@@ -1482,11 +1482,11 @@ async function caseC4BackupOnEditBytes() {
     const result = await runHarness(scratch);
     assertTrue("C4: platform-installed.json was written", result !== null);
 
-    const backupPath = `${corePath}.beacon-backup`;
-    assertTrue("C4: <target>.beacon-backup exists", fs.existsSync(backupPath));
+    const backupPath = `${corePath}.sauce-backup`;
+    assertTrue("C4: <target>.sauce-backup exists", fs.existsSync(backupPath));
     if (fs.existsSync(backupPath)) {
       const bakBody = await readRaw(backupPath);
-      assertEq("C4: <target>.beacon-backup byte-equal to pre-seed bytes", bakBody, seedBody);
+      assertEq("C4: <target>.sauce-backup byte-equal to pre-seed bytes", bakBody, seedBody);
     }
 
     const after = await readJson(corePath);
@@ -1531,7 +1531,7 @@ async function caseC5SubstitutionOnSettings() {
 
     if (fs.existsSync(corePath)) {
       const after = await readJson(corePath);
-      assertEq("C5: folder substituted to beacon/test", after.folder, "beacon/test");
+      assertEq("C5: folder substituted to spice/test", after.folder, "spice/test");
       assertEq("C5: template substituted with templates_path", after.template, "ranch/Templates/Daily Note.md");
     }
 
@@ -1574,7 +1574,7 @@ async function caseFT1IdempotentMerge() {
   try {
     const seedBody = JSON.stringify({
       enabled_templates_hotkeys: [],
-      folder_templates: [{ folder: "beacon/to-do", template: "ranch/Templates/Today To-Do.md" }],
+      folder_templates: [{ folder: "spice/to-do", template: "ranch/Templates/Today To-Do.md" }],
       startup_templates: [""],
     }, null, 2);
     const manifest = {
@@ -1582,7 +1582,7 @@ async function caseFT1IdempotentMerge() {
       version: "0.1.0",
       files: [],
       templater_folder_templates: [
-        { folder: "beacon/to-do", template: "ranch/Templates/Today To-Do.md" },
+        { folder: "spice/to-do", template: "ranch/Templates/Today To-Do.md" },
       ],
     };
     await scaffoldVault(scratch, {
@@ -1595,7 +1595,7 @@ async function caseFT1IdempotentMerge() {
     const first = await runHarness(scratch);
     assertTrue("FT1: platform-installed.json was written (first run)", first !== null);
     const firstSkipped = (first && first.history || []).filter(
-      (h) => h.event === "info" && h.step === "templater_folder_templates" && h.action === "skipped_existing" && h.folder === "beacon/to-do" && h.template === "ranch/Templates/Today To-Do.md"
+      (h) => h.event === "info" && h.step === "templater_folder_templates" && h.action === "skipped_existing" && h.folder === "spice/to-do" && h.template === "ranch/Templates/Today To-Do.md"
     );
     assertEq("FT1: first run records exactly one skipped_existing event", firstSkipped.length, 1);
 
@@ -1608,8 +1608,8 @@ async function caseFT1IdempotentMerge() {
     const bodyAfter1 = await readRaw(tdataPath);
     assertEq("FT1: templater data.json byte-equal to pre-seed (no rewrite)", bodyAfter1, seedBody);
 
-    const backupPath = `${tdataPath}.beacon-backup`;
-    assertTrue("FT1: no <target>.beacon-backup created on skip", !fs.existsSync(backupPath));
+    const backupPath = `${tdataPath}.sauce-backup`;
+    assertTrue("FT1: no <target>.sauce-backup created on skip", !fs.existsSync(backupPath));
 
     // Second run — bump fixture version to force re-process.
     const fixtureManifest2 = { ...manifest, version: "0.1.1" };
@@ -1652,7 +1652,7 @@ async function caseFT2MalformedJson() {
       version: "0.1.0",
       files: [],
       templater_folder_templates: [
-        { folder: "beacon/to-do", template: "ranch/Templates/Today To-Do.md" },
+        { folder: "spice/to-do", template: "ranch/Templates/Today To-Do.md" },
       ],
     };
     await scaffoldVault(scratch, {
@@ -1680,8 +1680,8 @@ async function caseFT2MalformedJson() {
     const bodyAfter = await readRaw(tdataPath);
     assertEq("FT2: malformed templater data.json untouched", bodyAfter, malformed);
 
-    const backupPath = `${tdataPath}.beacon-backup`;
-    assertTrue("FT2: no <target>.beacon-backup created on malformed-JSON guard", !fs.existsSync(backupPath));
+    const backupPath = `${tdataPath}.sauce-backup`;
+    assertTrue("FT2: no <target>.sauce-backup created on malformed-JSON guard", !fs.existsSync(backupPath));
   } finally {
     await fsp.rm(scratch, { recursive: true, force: true });
   }
@@ -1701,7 +1701,7 @@ async function caseFT3AdditivePreservesUserEntries() {
       version: "0.1.0",
       files: [],
       templater_folder_templates: [
-        { folder: "beacon/to-do", template: "ranch/Templates/Today To-Do.md" },
+        { folder: "spice/to-do", template: "ranch/Templates/Today To-Do.md" },
       ],
     };
     await scaffoldVault(scratch, {
@@ -1718,19 +1718,19 @@ async function caseFT3AdditivePreservesUserEntries() {
     assertEq("FT3: folder_templates length === 2 after merge", after.folder_templates.length, 2);
     assertEq("FT3: index 0 user folder preserved", after.folder_templates[0].folder, "user/path");
     assertEq("FT3: index 0 user template preserved", after.folder_templates[0].template, "user/Template.md");
-    assertEq("FT3: index 1 manifest folder appended", after.folder_templates[1].folder, "beacon/to-do");
+    assertEq("FT3: index 1 manifest folder appended", after.folder_templates[1].folder, "spice/to-do");
     assertEq("FT3: index 1 manifest template appended", after.folder_templates[1].template, "ranch/Templates/Today To-Do.md");
 
     const applied = (result && result.history || []).filter(
-      (h) => h.event === "info" && h.step === "templater_folder_templates" && h.action === "applied" && h.folder === "beacon/to-do"
+      (h) => h.event === "info" && h.step === "templater_folder_templates" && h.action === "applied" && h.folder === "spice/to-do"
     );
     assertEq("FT3: exactly one applied event for the manifest entry", applied.length, 1);
 
-    const backupPath = `${tdataPath}.beacon-backup`;
-    assertTrue("FT3: <target>.beacon-backup exists (pre-edit content was backed up)", fs.existsSync(backupPath));
+    const backupPath = `${tdataPath}.sauce-backup`;
+    assertTrue("FT3: <target>.sauce-backup exists (pre-edit content was backed up)", fs.existsSync(backupPath));
     if (fs.existsSync(backupPath)) {
       const bakBody = await readRaw(backupPath);
-      assertEq("FT3: <target>.beacon-backup body byte-equal to pre-seed", bakBody, seedBody);
+      assertEq("FT3: <target>.sauce-backup body byte-equal to pre-seed", bakBody, seedBody);
     }
   } finally {
     await fsp.rm(scratch, { recursive: true, force: true });
@@ -1751,7 +1751,7 @@ async function caseFT4BackupOnEdit() {
       version: "0.1.0",
       files: [],
       templater_folder_templates: [
-        { folder: "beacon/to-do", template: "ranch/Templates/Today To-Do.md" },
+        { folder: "spice/to-do", template: "ranch/Templates/Today To-Do.md" },
       ],
     };
     await scaffoldVault(scratch, {
@@ -1764,8 +1764,8 @@ async function caseFT4BackupOnEdit() {
     assertTrue("FT4: platform-installed.json was written", result !== null);
 
     const tdataPath = path.join(scratch, ".obsidian/plugins/templater-obsidian/data.json");
-    const backupPath = `${tdataPath}.beacon-backup`;
-    assertTrue("FT4: <target>.beacon-backup exists", fs.existsSync(backupPath));
+    const backupPath = `${tdataPath}.sauce-backup`;
+    assertTrue("FT4: <target>.sauce-backup exists", fs.existsSync(backupPath));
     if (fs.existsSync(backupPath)) {
       const bakBody = await readRaw(backupPath);
       assertEq("FT4: backup body byte-identical to pre-seed bytes", bakBody, tdataPre);
@@ -1813,7 +1813,7 @@ async function caseFT5SubstitutionApplied() {
 
     const after = await readJson(tdataPath);
     assertEq("FT5: folder_templates length === 1", after.folder_templates.length, 1);
-    assertEq("FT5: written folder is resolved literal beacon/to-do", after.folder_templates[0].folder, "beacon/to-do");
+    assertEq("FT5: written folder is resolved literal spice/to-do", after.folder_templates[0].folder, "spice/to-do");
     assertEq("FT5: written template is resolved literal ranch/Templates/Today To-Do.md", after.folder_templates[0].template, "ranch/Templates/Today To-Do.md");
 
     const applied = (result && result.history || []).filter(
@@ -1822,7 +1822,7 @@ async function caseFT5SubstitutionApplied() {
     assertEq("FT5: exactly one applied event", applied.length, 1);
     if (applied.length === 1) {
       const a = applied[0];
-      assertEq("FT5: applied event folder === beacon/to-do", a.folder, "beacon/to-do");
+      assertEq("FT5: applied event folder === spice/to-do", a.folder, "spice/to-do");
       assertEq("FT5: applied event template === ranch/Templates/Today To-Do.md", a.template, "ranch/Templates/Today To-Do.md");
       assertTrue(
         "FT5: applied event has git_commit field (string or null per landmine #14)",
@@ -1900,9 +1900,9 @@ async function caseR1ValidateAndResolveRunTemplaterTemplate() {
         "ranch/Templates/Today To-Do.md"
       );
       assertEq(
-        "R1: action.folder_prefix substituteLenient applied — {{module_directory}} resolved to literal beacon/to-do (NO bracket-wrapping)",
+        "R1: action.folder_prefix substituteLenient applied — {{module_directory}} resolved to literal spice/to-do (NO bracket-wrapping)",
         contrib.action.folder_prefix,
-        "beacon/to-do"
+        "spice/to-do"
       );
       assertEq(
         "R1: action.folder_date_pattern preserved verbatim",
@@ -1972,7 +1972,7 @@ async function caseR2FilenameDefaults() {
     const registry = await readJson(path.join(scratch, "ranch/nav-buttons-registry.json"));
     const contrib = registry.contributions["test-fixture-r2"][0];
 
-    assertEq("R2: folder_prefix substituted", contrib.action.folder_prefix, "beacon/minimal");
+    assertEq("R2: folder_prefix substituted", contrib.action.folder_prefix, "spice/minimal");
     assertEq("R2: folder_date_pattern defaulted to empty string", contrib.action.folder_date_pattern, "");
     assertEq("R2: filename_prefix defaulted to empty string", contrib.action.filename_prefix, "");
     assertEq("R2: filename_date_pattern preserved", contrib.action.filename_date_pattern, "YYYY-MM-DD");
@@ -2023,7 +2023,7 @@ async function caseR3EmptyFolderDatePattern() {
     assertEq(
       "R3: folder_prefix substituted — literal 'hubs' segment NOT bracket-wrapped (architecturally safe)",
       contrib.action.folder_prefix,
-      "beacon/meetings/hubs"
+      "spice/meetings/hubs"
     );
     assertEq("R3: folder_date_pattern preserved as empty string", contrib.action.folder_date_pattern, "");
     assertEq("R3: filename_date_pattern preserved", contrib.action.filename_date_pattern, "YYYY-MM-DD");
@@ -2192,9 +2192,9 @@ async function caseR6OpenLinkTargetSubstitution() {
 
     assertEq("R6: action.type === openLink (preserved)", goodContrib.action.type, "openLink");
     assertEq(
-      "R6: action.target has {{module_directory}} substituted to beacon/projects",
+      "R6: action.target has {{module_directory}} substituted to spice/projects",
       goodContrib.action.target,
-      "beacon/projects/Projects.md"
+      "spice/projects/Projects.md"
     );
     assertTrue(
       "R6: action.target does NOT contain literal {{module_directory}}",
@@ -2235,10 +2235,10 @@ async function case4BackupOnEdit() {
     await scaffoldVault(scratch, { templaterData: tdataPre, slashCommanderData: sdataPre, manifest: FIXTURE_MANIFEST_BASE });
     await runHarness(scratch);
 
-    const tBackup = await readRaw(path.join(scratch, ".obsidian/plugins/templater-obsidian/data.json.beacon-backup"));
+    const tBackup = await readRaw(path.join(scratch, ".obsidian/plugins/templater-obsidian/data.json.sauce-backup"));
     assertEq("case4: templater backup byte-identical to pre-edit", tBackup, tdataPre);
 
-    const sBackup = await readRaw(path.join(scratch, ".obsidian/plugins/slash-commander/data.json.beacon-backup"));
+    const sBackup = await readRaw(path.join(scratch, ".obsidian/plugins/slash-commander/data.json.sauce-backup"));
     assertEq("case4: slash-commander backup byte-identical to pre-edit", sBackup, sdataPre);
   } finally {
     await fsp.rm(scratch, { recursive: true, force: true });
@@ -2583,8 +2583,8 @@ async function caseAP3CssThemeAlwaysOverridden() {
       assertTrue("AP3: appearance.json present", false, "appearance.json missing");
     }
 
-    const bakPath = path.join(scratch, ".obsidian/appearance.json.beacon-backup");
-    assertTrue("AP3: appearance.json.beacon-backup exists", fs.existsSync(bakPath));
+    const bakPath = path.join(scratch, ".obsidian/appearance.json.sauce-backup");
+    assertTrue("AP3: appearance.json.sauce-backup exists", fs.existsSync(bakPath));
   } finally {
     await fsp.rm(scratch, { recursive: true, force: true });
   }
@@ -2622,8 +2622,8 @@ async function caseAP4MalformedJsonGuard() {
     const after = await readRaw(apPath);
     assertEq("AP4: malformed appearance.json untouched", after, malformed);
 
-    const bakPath = `${apPath}.beacon-backup`;
-    assertTrue("AP4: no .beacon-backup created on malformed-JSON guard", !fs.existsSync(bakPath));
+    const bakPath = `${apPath}.sauce-backup`;
+    assertTrue("AP4: no .sauce-backup created on malformed-JSON guard", !fs.existsSync(bakPath));
   } finally {
     await fsp.rm(scratch, { recursive: true, force: true });
   }
@@ -2652,8 +2652,8 @@ async function caseAP5BackupOnEditBytes() {
     const result = await runHarness(scratch);
     assertTrue("AP5: install ran", result !== null);
 
-    const bakPath = path.join(scratch, ".obsidian/appearance.json.beacon-backup");
-    assertTrue("AP5: appearance.json.beacon-backup exists", fs.existsSync(bakPath));
+    const bakPath = path.join(scratch, ".obsidian/appearance.json.sauce-backup");
+    assertTrue("AP5: appearance.json.sauce-backup exists", fs.existsSync(bakPath));
     if (fs.existsSync(bakPath)) {
       const bak = await readRaw(bakPath);
       assertEq("AP5: backup byte-equal to pre-edit", bak, priorBody);
@@ -2826,8 +2826,8 @@ async function caseSS5BackupOnEdit() {
     assertTrue("SS5: install ran", result !== null);
 
     const ssPath = path.join(scratch, ".obsidian/plugins/obsidian-style-settings/data.json");
-    const bakPath = `${ssPath}.beacon-backup`;
-    assertTrue("SS5: data.json.beacon-backup exists", fs.existsSync(bakPath));
+    const bakPath = `${ssPath}.sauce-backup`;
+    assertTrue("SS5: data.json.sauce-backup exists", fs.existsSync(bakPath));
     if (fs.existsSync(bakPath)) {
       const bak = await readRaw(bakPath);
       assertEq("SS5: backup byte-equal to pre-edit", bak, priorBody);
@@ -2919,8 +2919,8 @@ async function caseHK2FreshWriteCreatesHotkeysJson() {
         Array.isArray(hk["workspace:copy-path"]) && hk["workspace:copy-path"].length === 1
       );
     }
-    const bakPath = `${hotkeysPath}.beacon-backup`;
-    assertTrue("HK2: NO .beacon-backup on first-creation", !fs.existsSync(bakPath));
+    const bakPath = `${hotkeysPath}.sauce-backup`;
+    assertTrue("HK2: NO .sauce-backup on first-creation", !fs.existsSync(bakPath));
   } finally {
     await fsp.rm(scratch, { recursive: true, force: true });
   }
@@ -2951,8 +2951,8 @@ async function caseHK3FirstWinsPreservesUserBinding() {
     const hk = await readJson(hotkeysPath);
     assertEq("HK3: user daily-notes binding PRESERVED (key:\\)", hk["daily-notes"][0].key, "\\");
     assertTrue("HK3: workspace:copy-path ADDED", Array.isArray(hk["workspace:copy-path"]) && hk["workspace:copy-path"][0].key === "=");
-    const bakPath = `${hotkeysPath}.beacon-backup`;
-    assertTrue("HK3: .beacon-backup written (pre-existing non-empty file overwrite)", fs.existsSync(bakPath));
+    const bakPath = `${hotkeysPath}.sauce-backup`;
+    assertTrue("HK3: .sauce-backup written (pre-existing non-empty file overwrite)", fs.existsSync(bakPath));
     const hkHist = (result.history || []).filter((h) => h.step === "hotkeys");
     const skipped = hkHist.filter((h) => h.action === "skipped_existing" && h.command_id === "daily-notes");
     const applied = hkHist.filter((h) => h.action === "applied" && h.command_id === "workspace:copy-path");
@@ -3130,8 +3130,8 @@ async function caseCP3ManifestWinsShallowMerge() {
     assertEq("CP3: enableDataviewJs WINS to true (manifest wins)", dv.enableDataviewJs, true);
     assertEq("CP3: enableInlineDataviewJs added", dv.enableInlineDataviewJs, true);
     assertEq("CP3: otherKey preserved", dv.otherKey, "keep");
-    const bak = `${dvDataPath}.beacon-backup`;
-    assertTrue("CP3: .beacon-backup written", fs.existsSync(bak));
+    const bak = `${dvDataPath}.sauce-backup`;
+    assertTrue("CP3: .sauce-backup written", fs.existsSync(bak));
   } finally {
     await fsp.rm(scratch, { recursive: true, force: true });
   }

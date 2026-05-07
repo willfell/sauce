@@ -244,7 +244,7 @@ async function caseBS3ForceRedownloadSinglePlugin() {
         const styMain = fs.readFileSync(path.join(d, ".obsidian/plugins/obsidian-style-settings/main.js"), "utf8");
         assertTrue(styMain.includes("mock"), "BS3: style-settings overwritten with mock content");
         // Backup of prior file written
-        assertTrue(fs.existsSync(path.join(d, ".obsidian/plugins/obsidian-style-settings/main.js.beacon-backup")), "BS3: .beacon-backup written for overwritten file");
+        assertTrue(fs.existsSync(path.join(d, ".obsidian/plugins/obsidian-style-settings/main.js.sauce-backup")), "BS3: .sauce-backup written for overwritten file");
         // Other plugins NOT overwritten
         const cusMain = fs.readFileSync(path.join(d, ".obsidian/plugins/customjs/main.js"), "utf8");
         assertEqual(cusMain, "// customjs pre-existing\n", "BS3: other plugins unchanged");
@@ -371,7 +371,7 @@ async function caseBS7CommunityPluginsAdditiveMerge() {
         const deduped = [...new Set(cp)];
         assertEqual(cp.length, deduped.length, "BS7: no duplicates");
         // Backup of prior file written
-        assertTrue(fs.existsSync(path.join(d, ".obsidian/community-plugins.json.beacon-backup")), "BS7: .beacon-backup written");
+        assertTrue(fs.existsSync(path.join(d, ".obsidian/community-plugins.json.sauce-backup")), "BS7: .sauce-backup written");
     });
 }
 
@@ -521,10 +521,10 @@ async function caseBS13ActivationAtomicAndBackup() {
         const path = require("path");
         const workshopAbs = path.join(vaultPath, "pantry");
         fs.mkdirSync(path.join(workshopAbs, "Scripts"), { recursive: true });
-        // Pre-existing activate.sh — should be backed up as .beacon-backup
+        // Pre-existing activate.sh — should be backed up as .sauce-backup
         fs.writeFileSync(path.join(workshopAbs, "Scripts/activate.sh"), "PRIOR\n");
         await bootstrap.phaseWriteActivation({ vaultPath, workshopAbsPath: workshopAbs });
-        const backup = path.join(workshopAbs, "Scripts/activate.sh.beacon-backup");
+        const backup = path.join(workshopAbs, "Scripts/activate.sh.sauce-backup");
         assertTrue(fs.existsSync(backup), label + ": prior activate.sh backed up");
         const backupBody = fs.readFileSync(backup, "utf8");
         assertEqual(backupBody, "PRIOR\n", label + ": backup preserves prior content");

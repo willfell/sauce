@@ -926,7 +926,7 @@ async function testDA1ActiveFileWithDate() {
   try {
     const app = makeApp();
     const Cls = loadRendererClass(app, FakeNotice);
-    const dv = makeDvWithCurrent({ file: { name: 'Journal-2026-05-10', path: 'beacon/journal/2026/05-May/Journal-2026-05-10.md' } });
+    const dv = makeDvWithCurrent({ file: { name: 'Journal-2026-05-10', path: 'spice/journal/2026/05-May/Journal-2026-05-10.md' } });
     const sn = new Cls();
     const date = sn._resolveActionDate(dv);
     console.log(`  resolved date: ${date}`);
@@ -945,7 +945,7 @@ async function testDA2ActiveFileWithoutDate() {
   try {
     const app = makeApp();
     const Cls = loadRendererClass(app, FakeNotice);
-    const dv = makeDvWithCurrent({ file: { name: 'SomeAtlas', path: 'beacon/projects/SomeAtlas.md' } });
+    const dv = makeDvWithCurrent({ file: { name: 'SomeAtlas', path: 'spice/projects/SomeAtlas.md' } });
     const sn = new Cls();
     const date = sn._resolveActionDate(dv);
     console.log(`  resolved date: ${date}`);
@@ -961,7 +961,7 @@ async function testFF1BudgetNavInPath() {
   console.log('\n=== FF1 — BudgetNavButtons in-path renders 2 buttons (active hidden) ===');
   const app = makeApp();
   const Cls = loadFinanceClass('BudgetNavButtons', app);
-  const dv = makeDvWithCurrent({ file: { name: 'Budget-2026-05', path: 'beacon/finance/budgets/2026-05/Budget-2026-05.md' } });
+  const dv = makeDvWithCurrent({ file: { name: 'Budget-2026-05', path: 'spice/finance/budgets/2026-05/Budget-2026-05.md' } });
   const sn = new Cls();
   await sn.render(dv);
   const root = findClass(dv.container, 'bnb-root');
@@ -976,7 +976,7 @@ async function testFF2BudgetNavOutOfPath() {
   console.log('\n=== FF2 — BudgetNavButtons out-of-path renders nothing ===');
   const app = makeApp();
   const Cls = loadFinanceClass('BudgetNavButtons', app);
-  const dv = makeDvWithCurrent({ file: { name: 'SomeAtlas', path: 'beacon/projects/SomeAtlas.md' } });
+  const dv = makeDvWithCurrent({ file: { name: 'SomeAtlas', path: 'spice/projects/SomeAtlas.md' } });
   const sn = new Cls();
   await sn.render(dv);
   const root = findClass(dv.container, 'bnb-root');
@@ -996,7 +996,7 @@ async function testFF4BudgetCategoriesAddButton() {
   const app = makeApp({ fileExistsHook: (p) => ({ path: p }) });
   const Cls = loadFinanceClass('BudgetCategoriesEditor', app);
   const dv = makeDvWithCurrentAndFrontmatter(
-    { name: 'Budget-2026-05', path: 'beacon/finance/budgets/2026-05/Budget-2026-05.md' },
+    { name: 'Budget-2026-05', path: 'spice/finance/budgets/2026-05/Budget-2026-05.md' },
     { categories: [] }
   );
   const sn = new Cls();
@@ -1015,7 +1015,7 @@ async function testFF5PaycheckExpensesAddButton() {
   const app = makeApp({ fileExistsHook: (p) => ({ path: p }) });
   const Cls = loadFinanceClass('PaycheckExpensesEditor', app);
   const dv = makeDvWithCurrentAndFrontmatter(
-    { name: 'Paycheck-2026-05-15', path: 'beacon/finance/paychecks/2026-05-15/Paycheck-2026-05-15.md' },
+    { name: 'Paycheck-2026-05-15', path: 'spice/finance/paychecks/2026-05-15/Paycheck-2026-05-15.md' },
     { expenses: [] }
   );
   const sn = new Cls();
@@ -1034,7 +1034,7 @@ async function testFF6InvoiceTimeLogOutOfPath() {
   const app = makeApp();
   const Cls = loadFinanceClass('InvoiceTimeLogEditor', app);
   const dv = makeDvWithCurrentAndFrontmatter(
-    { name: 'SomeAtlas', path: 'beacon/projects/SomeAtlas.md' },
+    { name: 'SomeAtlas', path: 'spice/projects/SomeAtlas.md' },
     { entries: [] }
   );
   const sn = new Cls();
@@ -1051,7 +1051,7 @@ async function testFF7InvoiceControlsRateAndToggle() {
   const app = makeApp({ fileExistsHook: (p) => ({ path: p }) });
   const Cls = loadFinanceClass('InvoiceControls', app);
   const dv = makeDvWithCurrentAndFrontmatter(
-    { name: 'Invoice-2026-05', path: 'beacon/finance/invoices/2026-05/Invoice-2026-05.md' },
+    { name: 'Invoice-2026-05', path: 'spice/finance/invoices/2026-05/Invoice-2026-05.md' },
     { rate: 75, submitted_date: '' }
   );
   const sn = new Cls();
@@ -1071,7 +1071,7 @@ async function testFF8WidgetEmbedDedup() {
   const app = makeApp();
   const Cls = loadFinanceClass('InvoiceControls', app);
   const dv = makeDvWithCurrentAndFrontmatter(
-    { name: 'Invoice-2026-05', path: 'beacon/finance/invoices/2026-05/Invoice-2026-05.md' },
+    { name: 'Invoice-2026-05', path: 'spice/finance/invoices/2026-05/Invoice-2026-05.md' },
     { rate: 75, submitted_date: '' }
   );
   dv.container.closest = (sel) => sel === '.markdown-embed' ? { tag: 'div' } : null;
