@@ -178,6 +178,32 @@ The next install run materializes the lowercase variants and updates `<vault>/ra
 
 ---
 
+## Upgrading from v0.26.1 to v0.27.0
+
+v0.27.0 ships the People mechanism + blueprint + meetings pilot integration. Pure-additive at the install layer (no new state-materializing helpers; no allowlist additions; no schema breaks). Run `sauce update --force` to pull v0.27.0 and let the installer apply the new state additively.
+
+What changes after the update:
+
+- **NEW `people-rendering@0.1.0` mechanism** — shared `PeopleRendering` CustomJS class shipping `renderChip` / `renderCard` / `renderMentionList` / `extractMentions`. Materialized at `ranch/scripts/people-rendering/people-rendering.js`. Used by the people blueprint + meetings pilot in this cycle; reusable by daily / journal / project / todos in future cycles.
+- **NEW `people@0.1.0` blueprint** — per-person notes at `spice/people/<First Last>.md`, canonical hub at `spice/people/People.md`, three classes (`PeopleHubCards` / `NewPersonButton` / `PersonNavButtons`). Templater folder-template registered for `spice/people` → `Template, People.md` (any new file under `spice/people/` auto-applies the template). Global "People" nav-button (Lucide users icon).
+- **`cards@0.2.3 → 0.2.4` PATCH ADDITIVE** — `subtitle` parameter polymorphism extended to accept `(parent: HTMLElement) => void` callback in addition to existing `string | null | {text, secondaryText}`. Default behavior unchanged for existing callers.
+- **`nav-buttons@2.5.2 → 2.5.3` PATCH ADDITIVE** — adds `people` Lucide users icon (12th ICONS entry).
+- **`meetings@0.2.2 → 0.3.0` MINOR — pilot integration with people-rendering**:
+  - **MeetingsHubCards subtitle** now renders attendee chips for registered People (those with `spice/people/<name>.md` notes) via `PeopleRendering.renderChip` callback. Falls back to existing comma-string when no registered People are in the meeting's `## Attendees` section. Extraction is scoped to the `## Attendees` section only (won't pick up People mentioned elsewhere in the body).
+  - **`Template, Meetings.md`** gains a `## Attendees` chip-rendering dataviewjs block ABOVE the existing bullet list. Existing meeting notes (pre-v0.27.0) keep their original body; only newly-created meetings post-update include the chip block. Legacy attendees still work — wikilinks remain navigable; the chip block reads body wikilinks at render time. Migration tooling (v0.28.0) MAY append the chip block to migrated meetings as an opt-in body-rewrite step.
+  - **NewMeetingButton attendees autocomplete** — DEFERRED to a v0.27.x carry. For now, manually type wikilink form (`[[Jane Doe]]`) when entering attendees in the new-meeting overlay.
+
+> [!warning] Existing meeting notes do NOT retroactively gain the `## Attendees` chip block
+> Only newly-created meetings post-v0.27.0 install include the chip block. Existing meetings keep their original body. The chip block is purely additive — adding it manually to an existing meeting is supported (paste the block above your existing `## Attendees` bullet list).
+
+> [!info] People hub creation
+> The People hub at `spice/people/People.md` is created at install time. Its body has a self-tag `type: people-hub` + dataviewjs blocks invoking `SpaceNavButtons` + `NewPersonButton` + `PeopleHubCards`. Click `+ New Person` to create your first person note. Per-person notes auto-route to `spice/people/<First Last>.md` via the Templater folder-template.
+
+> [!success] Migration risk profile
+> Migration tooling (v0.28.0) will translate consumer-vault People notes (e.g., `Extras/People/<Name>.md` from accuris/ero/headspace) into Sauce's `spice/people/<First Last>.md` shape with zero data loss. Filename + frontmatter migrate 1:1. Pre-locking the canonical schema in v0.27.0 makes v0.28.0 a mostly-mechanical migration script.
+
+---
+
 ## Upgrading from v0.26.0 to v0.26.1
 
 v0.26.1 is purely additive — no migration steps required. Run `sauce update --force` to pull v0.26.1 and let the installer apply the new state additively.
