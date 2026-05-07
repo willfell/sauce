@@ -22,3 +22,9 @@ _backups/
 # v0.21.0: bootstrap.js depends on @inquirer/prompts; node_modules vendored locally.
 # package.json + package-lock.json are tracked; node_modules is not.
 node_modules/
+
+# v0.26.1: workshop self-bootstrap activation scripts (phaseWriteActivation
+# materializes <workshop>/Scripts/sauce + activate.sh when workshop is bootstrapped
+# as its own consumer). Root-anchored to mask only at workshop root, not nested
+# /Scripts/ paths anywhere else in the tree.
+/Scripts/

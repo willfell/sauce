@@ -178,6 +178,21 @@ The next install run materializes the lowercase variants and updates `<vault>/ra
 
 ---
 
+## Upgrading from v0.26.0 to v0.26.1
+
+v0.26.1 is purely additive — no migration steps required. Run `sauce update --force` to pull v0.26.1 and let the installer apply the new state additively.
+
+What changes after the update:
+
+- **4 new community plugins fetched + auto-enabled** (`obsidian-admonition`, `calendar`, `obsidian-tasks-plugin`, `url-into-selection`). The plugins are added to your vault's `.obsidian/plugins/` and to `.obsidian/community-plugins.json`. Each ships with empty `data.json` — configure each via its plugin UI under Settings → Community plugins.
+- **`alwaysOpenInNewTab: true`** is written to `.obsidian/app.json` (your existing app.json keys are preserved verbatim; a `.sauce-backup` is written before the edit). After this, every wikilink click opens in a new tab. To disable: Obsidian Settings → Files & Links → "Always open in new tab" → off. The platform won't re-overwrite on subsequent installs because the additive merge is platform-as-overrider only for declared keys.
+- **NEW `sauce help` verb** — running `sauce help` (or bare `sauce` / `sauce --help` / `sauce -h`) prints a usage screen listing all 5 verbs. Works from any directory, including outside any sauce-managed vault.
+- **NEW `sauce status` warning** — when a subscribed blueprint declares `convenience` in its `depends_on` but the convenience mechanism isn't subscribed, status emits a `[warn]` line listing the affected blueprint(s).
+- **Wizard auto-add convenience** — `sauce wizard` (both first-run and re-run "Edit subscription") now auto-adds `convenience` to your selected mechanisms when any DV-using blueprint (daily, journal, meetings, project, trips, finance) is selected. Prints `[info] Auto-added convenience because <blueprint> depends on it.` Cannot be disabled, but you can drop `convenience` afterward by re-running wizard if you also drop all DV blueprints.
+- **6 DV blueprint depends_on bumps** (PATCH each) — daily 0.2.3, journal 0.1.2, meetings 0.2.2, project 1.3.6, trips 0.1.5, finance 0.2.10. Each blueprint manifest's `depends_on[]` now declares `{ "name": "convenience", "range": ">=0.1.0" }`. No content change; the bumps trigger reprocess via landmine #16.
+
+---
+
 ## Activation per shell
 
 The install does **not** touch your shell rc files (`~/.zshrc`, `~/.bashrc`, etc.) — every new shell starts un-activated.
