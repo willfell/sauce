@@ -2,19 +2,19 @@ class TripNavButtons {
     detectContext(filePath, dv) {
         const pathParts = filePath.split("/");
         const tripsIdx = pathParts.indexOf("trips");
-        if (tripsIdx < 1 || pathParts[tripsIdx - 1] !== "beacon") {
+        if (tripsIdx < 1 || pathParts[tripsIdx - 1] !== "spice") {
             return { context: "non-trip" };
         }
 
-        // beacon/trips/Trips.md
+        // spice/trips/Trips.md
         if (pathParts.length === tripsIdx + 2 && pathParts[tripsIdx + 1] === "Trips.md") {
             return { context: "trips-hub" };
         }
 
         const slug = pathParts[tripsIdx + 1];
-        const tripDir = `beacon/trips/${slug}`;
+        const tripDir = `spice/trips/${slug}`;
 
-        // beacon/trips/<slug>/<file>.md
+        // spice/trips/<slug>/<file>.md
         if (pathParts.length === tripsIdx + 3) {
             const cache = app.metadataCache.getFileCache(dv.current().file);
             const fmType = cache?.frontmatter?.type;
@@ -24,9 +24,9 @@ class TripNavButtons {
             return { context: "trip-section", slug, tripDir };
         }
 
-        // beacon/trips/<slug>/board/...
+        // spice/trips/<slug>/board/...
         if (pathParts[tripsIdx + 2] === "board") {
-            // beacon/trips/<slug>/board/<file>.md
+            // spice/trips/<slug>/board/<file>.md
             if (pathParts.length === tripsIdx + 4) {
                 const basename = pathParts[tripsIdx + 3].replace(/\.md$/, "");
                 if (basename.endsWith("-board")) {
@@ -34,7 +34,7 @@ class TripNavButtons {
                 }
                 return { context: "trip-card", slug, tripDir };
             }
-            // beacon/trips/<slug>/board/<TaskName>/<file>.md (post-promote folder-style)
+            // spice/trips/<slug>/board/<TaskName>/<file>.md (post-promote folder-style)
             if (pathParts.length === tripsIdx + 5) {
                 return { context: "trip-card", slug, tripDir };
             }
@@ -300,9 +300,9 @@ class TripNavButtons {
             const refresh = () => {
                 const name = nameInput.value.trim();
                 const slug = slugify(name);
-                slugDisplay.textContent = slug ? `Slug: beacon/trips/${slug}/` : "Slug:";
+                slugDisplay.textContent = slug ? `Slug: spice/trips/${slug}/` : "Slug:";
                 if (!name) { status.textContent = ""; return; }
-                const existing = app.vault.getAbstractFileByPath(`beacon/trips/${slug}`);
+                const existing = app.vault.getAbstractFileByPath(`spice/trips/${slug}`);
                 if (existing) {
                     status.textContent = `"${slug}" already exists. Try a different name.`;
                     status.style.color = "var(--text-error)";
@@ -328,7 +328,7 @@ class TripNavButtons {
                 if (!name) return;
                 const slug = slugify(name);
                 if (!slug) { status.textContent = "Name must contain alphanumerics."; status.style.color = "var(--text-error)"; return; }
-                if (app.vault.getAbstractFileByPath(`beacon/trips/${slug}`)) { refresh(); nameInput.focus(); return; }
+                if (app.vault.getAbstractFileByPath(`spice/trips/${slug}`)) { refresh(); nameInput.focus(); return; }
                 document.body.removeChild(overlay);
                 resolve({
                     name,
@@ -474,7 +474,7 @@ await dv.view("ranch/Views/customjs-guard", { class: "TripNavButtons" });
     }
 
     async _createTrip({ name, slug, start_date, end_date, location }) {
-        const tripDir = `beacon/trips/${slug}`;
+        const tripDir = `spice/trips/${slug}`;
         const boardDir = `${tripDir}/board`;
         for (const dir of [tripDir, boardDir]) {
             if (!app.vault.getAbstractFileByPath(dir)) {

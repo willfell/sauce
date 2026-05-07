@@ -1,6 +1,6 @@
 /**
  * NewInvoiceButton — overlay-dialog button for creating an invoice ecosystem
- * under beacon/finance/invoices/<YYYY-MM>/.
+ * under spice/finance/invoices/<YYYY-MM>/.
  *
  * Inputs: month picker. Defaults to current month.
  * Scaffolds THREE files:
@@ -64,7 +64,7 @@ class NewInvoiceButton {
             const checkExists = () => {
                 const m = input.value;
                 if (!m) { status.textContent = ""; return; }
-                const dir = `beacon/finance/invoices/${m}`;
+                const dir = `spice/finance/invoices/${m}`;
                 if (app.vault.getAbstractFileByPath(dir)) {
                     status.textContent = `${dir}/ already exists. Will open existing Invoice.`;
                     status.style.color = "var(--text-muted)";
@@ -107,7 +107,7 @@ class NewInvoiceButton {
     }
 
     async _createInvoice(month) {
-        const baseDir = `beacon/finance/invoices/${month}`;
+        const baseDir = `spice/finance/invoices/${month}`;
         const boardDir = `${baseDir}/board`;
         const invoicePath = `${baseDir}/Invoice-${month}.md`;
         const timeLogPath = `${baseDir}/Time-Log-${month}.md`;
@@ -206,7 +206,7 @@ tags:
 
 %% kanban:settings
 \`\`\`
-{"kanban-plugin":"board","list-collapse":[false,false,false],"new-note-folder":"beacon/finance/invoices/${month}/board","new-note-template":"ranch/Templates/Template, Invoice Board Card.md"}
+{"kanban-plugin":"board","list-collapse":[false,false,false],"new-note-folder":"spice/finance/invoices/${month}/board","new-note-template":"ranch/Templates/Template, Invoice Board Card.md"}
 \`\`\`
 %%
 `;

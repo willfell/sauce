@@ -18,7 +18,7 @@
  *       - styles.css missing → tolerate (BS4)
  *     - mkdir <vault>/.obsidian/plugins/<id>/ (recursive)
  *     - Write each file ATOMICALLY (.tmp + rename). If overwriting,
- *       write `<file>.beacon-backup` first (matches landmine #12 mechanic
+ *       write `<file>.sauce-backup` first (matches landmine #12 mechanic
  *       from v0.1.3+). Backup-failure is a hard fail (mirrors
  *       applyTemplaterHotkeys posture in install.js).
  *     - Return { status: "fetched", files: {...} }
@@ -56,7 +56,7 @@ function _writeAtomic(targetPath, content) {
 
 function _writeWithBackup(targetPath, content) {
     if (fs.existsSync(targetPath)) {
-        const backupPath = targetPath + ".beacon-backup";
+        const backupPath = targetPath + ".sauce-backup";
         try {
             fs.copyFileSync(targetPath, backupPath);
         } catch (e) {

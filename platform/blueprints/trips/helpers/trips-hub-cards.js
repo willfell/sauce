@@ -1,6 +1,6 @@
 class TripsHubCards {
   async render(dv) {
-    const trips = dv.pages('"beacon/trips"').where(p => p.type === "trip");
+    const trips = dv.pages('"spice/trips"').where(p => p.type === "trip");
 
     const parseDate = (dateValue) => {
       if (!dateValue) return null;

@@ -9,7 +9,7 @@
  */
 class ProjectsHubCards {
     async render(dv) {
-        const projectHubs = dv.pages('"beacon/projects"')
+        const projectHubs = dv.pages('"spice/projects"')
             .where(p => p.file.etags.includes("#project")
                      && p.file.name !== "Projects"
                      && !p.file.path.includes("/steps/")

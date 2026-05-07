@@ -17,6 +17,6 @@ tags:
 
 %% kanban:settings
 ```
-{"kanban-plugin":"board","list-collapse":[false,false,false],"mark-cards-complete":true,"new-note-folder":"beacon/trips/{{SLUG}}/board","new-note-template":"{{templates_path}}/Template, Trip Board Card.md"}
+{"kanban-plugin":"board","list-collapse":[false,false,false],"mark-cards-complete":true,"new-note-folder":"spice/trips/{{SLUG}}/board","new-note-template":"{{templates_path}}/Template, Trip Board Card.md"}
 ```
 %%

@@ -1,6 +1,6 @@
 /**
  * PaycheckNavButtons — per-paycheck context nav. Auto-detects via path prefix
- * `beacon/finance/paychecks/<YYYY-MM-DD>/`. Renders Paycheck / Paychecks Hub /
+ * `spice/finance/paychecks/<YYYY-MM-DD>/`. Renders Paycheck / Paychecks Hub /
  * Finance Hub buttons with icons + hover-to-accent transition. Top HR +
  * uppercase "PAYCHECK" section label. Hides the button matching the active
  * file. Embed-deduped per v0.16.0 lesson. Mirrors project blueprint shape.
@@ -13,7 +13,7 @@ class PaycheckNavButtons {
         if (previous) previous.remove();
 
         const path = dv.current()?.file?.path || "";
-        const m = path.match(/^beacon\/finance\/paychecks\/(\d{4}-\d{2}-\d{2})\//);
+        const m = path.match(/^spice\/finance\/paychecks\/(\d{4}-\d{2}-\d{2})\//);
         if (!m) return;
         const start_date = m[1];
 
@@ -24,9 +24,9 @@ class PaycheckNavButtons {
         };
 
         const targets = [
-            { label: "Paycheck",      icon: icons.paycheck,     target: `beacon/finance/paychecks/${start_date}/Paycheck-${start_date}.md` },
-            { label: "Paychecks Hub", icon: icons.paychecksHub, target: `beacon/finance/paychecks/Paychecks.md` },
-            { label: "Finance Hub",   icon: icons.financeHub,   target: `beacon/finance/Finance.md` }
+            { label: "Paycheck",      icon: icons.paycheck,     target: `spice/finance/paychecks/${start_date}/Paycheck-${start_date}.md` },
+            { label: "Paychecks Hub", icon: icons.paychecksHub, target: `spice/finance/paychecks/Paychecks.md` },
+            { label: "Finance Hub",   icon: icons.financeHub,   target: `spice/finance/Finance.md` }
         ].filter(t => t.target !== path);
         if (targets.length === 0) return;
 

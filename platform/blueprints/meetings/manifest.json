@@ -3,7 +3,7 @@
   "version": "0.2.1",
   "kind": "blueprint",
   "module_directory": "meetings",
-  "description": "Hub-centric meeting notes: one Meetings Hub per day at beacon/meetings/hubs/YYYY/MM-MMMM/ aggregating individual meeting notes at beacon/meetings/notes/ via inline NewMeetingButton + MeetingsHubCards CustomJS classes. v0.1.2: filename pattern <Name>-YYYY-MM-DD (Meetings-YYYY-MM-DD.md hub; <title>-YYYY-MM-DD.md per-meeting); hub folder date-routed; class regex date-extract. v0.2.0: MeetingsHubCards migrated to BeaconCards via row layout + async pre-fetch adapter; per-badge SVG icons + secondaryText subtitle preserved end-to-end.",
+  "description": "Hub-centric meeting notes: one Meetings Hub per day at spice/meetings/hubs/YYYY/MM-MMMM/ aggregating individual meeting notes at spice/meetings/notes/ via inline NewMeetingButton + MeetingsHubCards CustomJS classes. v0.1.2: filename pattern <Name>-YYYY-MM-DD (Meetings-YYYY-MM-DD.md hub; <title>-YYYY-MM-DD.md per-meeting); hub folder date-routed; class regex date-extract. v0.2.0: MeetingsHubCards migrated to BeaconCards via row layout + async pre-fetch adapter; per-badge SVG icons + secondaryText subtitle preserved end-to-end.",
   "depends_on": [
     { "name": "nav-buttons",    "range": ">=2.2.0" },
     { "name": "customjs-guard", "range": ">=1.0.0" },
@@ -40,7 +40,7 @@
   "post_install": [
     {
       "type": "notice",
-      "message": "Meetings blueprint installed at beacon/meetings/. REQUIRED: enable the Templater community plugin if not already enabled. Click 'Meetings' to open today's meetings hub at beacon/meetings/hubs/YYYY-MM-DD-Meetings.md. From the hub, click 'New Meeting' to create individual meeting notes at beacon/meetings/notes/YYYY/MM-MMMM/YYYY-MM-DD <title>.md (you'll be prompted for title and attendees). Hub renders today's meetings as cards with status badges; meetings also appear in the daily dashboard's Today's Meetings panel."
+      "message": "Meetings blueprint installed at spice/meetings/. REQUIRED: enable the Templater community plugin if not already enabled. Click 'Meetings' to open today's meetings hub at spice/meetings/hubs/YYYY-MM-DD-Meetings.md. From the hub, click 'New Meeting' to create individual meeting notes at spice/meetings/notes/YYYY/MM-MMMM/YYYY-MM-DD <title>.md (you'll be prompted for title and attendees). Hub renders today's meetings as cards with status badges; meetings also appear in the daily dashboard's Today's Meetings panel."
     }
   ],
   "rule_fragments": []

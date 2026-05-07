@@ -2,7 +2,7 @@
  * mergeCommunityPlugins({ vaultPath, addIds }) → Promise<{ before, after, added }>
  *   - Reads <vault>/.obsidian/community-plugins.json (default to [] if absent)
  *   - Computes union with addIds (dedupe + sort alphabetically)
- *   - If different from before: writes `.beacon-backup` of prior + writes new array
+ *   - If different from before: writes `.sauce-backup` of prior + writes new array
  *   - Returns { before, after, added } for ledger logging
  *   - Failure-loud on malformed JSON (matches landmine #12 malformed-JSON guard)
  */
@@ -57,7 +57,7 @@ async function mergeCommunityPlugins({ vaultPath, addIds }) {
 
     // Backup prior file content (if it existed) BEFORE atomic write.
     if (fileExisted) {
-        const backupPath = filePath + ".beacon-backup";
+        const backupPath = filePath + ".sauce-backup";
         fs.copyFileSync(filePath, backupPath);
     }
 

@@ -3,14 +3,14 @@ const targetPath = tp.config.target_file?.path || "";
 const sourceBoard = app.workspace.getActiveFile()?.path || targetPath;
 
 // Derive project slug + task folder from the path:
-// beacon/projects/<project>/tasks/<Task>/board/<Card>.md
+// spice/projects/<project>/tasks/<Task>/board/<Card>.md
 const m = (targetPath || "").match(/^beacon\/projects\/([^/]+)\/tasks\/([^/]+)\/board\/([^/]+)$/);
 const projectSlug = m?.[1] || "";
 const taskFolder = m?.[2] || "";
 const cardName = tp.file.title;
 
 const taskParent = projectSlug && taskFolder
-    ? `beacon/projects/${projectSlug}/tasks/${taskFolder}/${taskFolder}.md`
+    ? `spice/projects/${projectSlug}/tasks/${taskFolder}/${taskFolder}.md`
     : "";
 
 const alias = projectSlug && taskFolder
@@ -30,8 +30,8 @@ tags:
 ---
 <%*
 // Auto-promote into per-task folder convention.
-// Kanban creates the file flat at beacon/projects/<slug>/tasks/<TaskName>.md.
-// Move it into beacon/projects/<slug>/tasks/<TaskName>/<TaskName>.md so the task
+// Kanban creates the file flat at spice/projects/<slug>/tasks/<TaskName>.md.
+// Move it into spice/projects/<slug>/tasks/<TaskName>/<TaskName>.md so the task
 // note and any sub-notes live together. Idempotent: skips if already inside a
 // folder of the same name, or if the target file already exists.
 const newFilePath = tp.config.target_file?.path || "";

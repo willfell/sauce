@@ -49,7 +49,7 @@
   "post_install": [
     {
       "type": "notice",
-      "message": "Project blueprint v1.0.0 installed at beacon/projects/. To create your first project: open beacon/projects/Projects.md (Cmd+O → search 'Projects') and click the 'New Project' action button. Per-project Kanban cards auto-promote to folder-style (tasks/<X>/<X>.md and board/<Y>/<Y>.md) via Templater. Workstream tagging on cards via the Change/Assign widget rendered on each card. Cmd+R required after this install to load the 3 CustomJS classes."
+      "message": "Project blueprint v1.0.0 installed at spice/projects/. To create your first project: open spice/projects/Projects.md (Cmd+O → search 'Projects') and click the 'New Project' action button. Per-project Kanban cards auto-promote to folder-style (tasks/<X>/<X>.md and board/<Y>/<Y>.md) via Templater. Workstream tagging on cards via the Change/Assign widget rendered on each card. Cmd+R required after this install to load the 3 CustomJS classes."
     }
   ],
   "rule_fragments": []

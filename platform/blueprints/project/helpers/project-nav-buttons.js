@@ -7,10 +7,10 @@
  *   await dv.view("ranch/Views/customjs-guard", { class: "ProjectNavButtons" });
  *
  * Expected file paths:
- *   beacon/projects/<slug>/<atlas|map|board>.md
- *   beacon/projects/<slug>/tasks/<TaskName>.md                    (legacy flat tasks)
- *   beacon/projects/<slug>/tasks/<TaskName>/<TaskName>.md         (new task-folder convention)
- *   beacon/projects/<slug>/tasks/<TaskName>/<sub-note>.md         (sub-notes peer to a task)
+ *   spice/projects/<slug>/<atlas|map|board>.md
+ *   spice/projects/<slug>/tasks/<TaskName>.md                    (legacy flat tasks)
+ *   spice/projects/<slug>/tasks/<TaskName>/<TaskName>.md         (new task-folder convention)
+ *   spice/projects/<slug>/tasks/<TaskName>/<sub-note>.md         (sub-notes peer to a task)
  *
  * Sub-note detection: a file inside tasks/<X>/ whose basename != X.
  * For sub-notes, prepends a "Task: <X>" button only if <X>.md exists in that folder.
@@ -77,7 +77,7 @@ class ProjectNavButtons {
             return { context: "project-hub", pathParts, planningIdx, projectSlug, projectDir };
         }
 
-        // Projects hub: beacon/projects/Projects.md (single fixed-path hub note)
+        // Projects hub: spice/projects/Projects.md (single fixed-path hub note)
         if (pathParts.length === planningIdx + 2 && basename === "Projects") {
             return { context: "projects-hub", pathParts, planningIdx };
         }
@@ -191,9 +191,9 @@ class ProjectNavButtons {
             const refresh = () => {
                 const name = input.value.trim();
                 const slug = slugify(name);
-                slugDisplay.textContent = slug ? `Slug: beacon/projects/${slug}/` : "Slug:";
+                slugDisplay.textContent = slug ? `Slug: spice/projects/${slug}/` : "Slug:";
                 if (!name) { status.textContent = ""; return; }
-                const existing = app.vault.getAbstractFileByPath(`beacon/projects/${slug}`);
+                const existing = app.vault.getAbstractFileByPath(`spice/projects/${slug}`);
                 if (existing) {
                     status.textContent = `"${slug}" already exists. Try a different name.`;
                     status.style.color = "var(--text-error)";
@@ -219,7 +219,7 @@ class ProjectNavButtons {
                 if (!name) return;
                 const slug = slugify(name);
                 if (!slug) { status.textContent = "Name must contain alphanumerics."; status.style.color = "var(--text-error)"; return; }
-                if (app.vault.getAbstractFileByPath(`beacon/projects/${slug}`)) { refresh(); input.focus(); return; }
+                if (app.vault.getAbstractFileByPath(`spice/projects/${slug}`)) { refresh(); input.focus(); return; }
                 document.body.removeChild(overlay);
                 resolve({ name, slug });
             };
@@ -303,7 +303,7 @@ class ProjectNavButtons {
     }
 
     async _createProject({ name, slug }) {
-        const projectDir = `beacon/projects/${slug}`;
+        const projectDir = `spice/projects/${slug}`;
         const tasksDir = `${projectDir}/tasks`;
         for (const dir of [projectDir, tasksDir]) {
             if (!app.vault.getAbstractFileByPath(dir)) {
@@ -428,8 +428,8 @@ class ProjectNavButtons {
         const isBoard = dv.current().file.name.endsWith("-board");
 
         // ── Sub-note detection ──────────────────────────────────────────────
-        // Path shape for a sub-note: beacon/projects/<slug>/tasks/<TaskName>/<other>.md
-        // Path shape for a task note: beacon/projects/<slug>/tasks/<TaskName>/<TaskName>.md
+        // Path shape for a sub-note: spice/projects/<slug>/tasks/<TaskName>/<other>.md
+        // Path shape for a task note: spice/projects/<slug>/tasks/<TaskName>/<TaskName>.md
         // Only render the Task button when (a) we're nested under tasks/<X>/ AND
         // (b) basename != X AND (c) <X>.md exists in that folder (skip for legacy
         // sub-folders like doc-db-testing/ that have no matching task note).

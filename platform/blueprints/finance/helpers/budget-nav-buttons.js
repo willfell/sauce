@@ -1,6 +1,6 @@
 /**
  * BudgetNavButtons — per-budget context nav. Auto-detects via path prefix
- * `beacon/finance/budgets/<YYYY-MM>/`. Renders Budget / Budgets Hub / Finance
+ * `spice/finance/budgets/<YYYY-MM>/`. Renders Budget / Budgets Hub / Finance
  * Hub buttons with icons + hover-to-accent transition. Top HR + uppercase
  * "BUDGET" section label. Hides the button matching the active file.
  * Embed-deduped per v0.16.0 lesson. Mirrors project blueprint nav-button shape.
@@ -13,7 +13,7 @@ class BudgetNavButtons {
         if (previous) previous.remove();
 
         const path = dv.current()?.file?.path || "";
-        const m = path.match(/^beacon\/finance\/budgets\/(\d{4}-\d{2})\//);
+        const m = path.match(/^spice\/finance\/budgets\/(\d{4}-\d{2})\//);
         if (!m) return;
         const month = m[1];
 
@@ -24,9 +24,9 @@ class BudgetNavButtons {
         };
 
         const targets = [
-            { label: "Budget",      icon: icons.budget,     target: `beacon/finance/budgets/${month}/Budget-${month}.md` },
-            { label: "Budgets Hub", icon: icons.budgetsHub, target: `beacon/finance/budgets/Budgets.md` },
-            { label: "Finance Hub", icon: icons.financeHub, target: `beacon/finance/Finance.md` }
+            { label: "Budget",      icon: icons.budget,     target: `spice/finance/budgets/${month}/Budget-${month}.md` },
+            { label: "Budgets Hub", icon: icons.budgetsHub, target: `spice/finance/budgets/Budgets.md` },
+            { label: "Finance Hub", icon: icons.financeHub, target: `spice/finance/Finance.md` }
         ].filter(t => t.target !== path);
         if (targets.length === 0) return;
 

@@ -3,7 +3,7 @@
   "version": "0.2.9",
   "kind": "blueprint",
   "module_directory": "finance",
-  "description": "Finance blueprint covering Budgets + Paychecks + Invoices under beacon/finance/. Top hub Finance.md aggregates pending items from all three sub-areas. Budgets/Paychecks are flat dated entities; Invoices use a per-month folder ecosystem mirroring trips/<slug>/. Status pills (Planning/In Progress/Done) derived from frontmatter via shared FinanceStatus helper. v0.2.7 PATCH: 8 outline-accent button call sites migrated to customJS.AccentButton.render. v0.2.8 PATCH (in-cycle CF-1): InvoiceControls Save now also recomputes amount = round(rate * hours, 2) on save; Save's enabled state additionally considers amount drift (enabled when stored amount != rate * hours) so stale-amount entities can be re-synced without changing the rate. Misleading caveat note removed.",
+  "description": "Finance blueprint covering Budgets + Paychecks + Invoices under spice/finance/. Top hub Finance.md aggregates pending items from all three sub-areas. Budgets/Paychecks are flat dated entities; Invoices use a per-month folder ecosystem mirroring trips/<slug>/. Status pills (Planning/In Progress/Done) derived from frontmatter via shared FinanceStatus helper. v0.2.7 PATCH: 8 outline-accent button call sites migrated to customJS.AccentButton.render. v0.2.8 PATCH (in-cycle CF-1): InvoiceControls Save now also recomputes amount = round(rate * hours, 2) on save; Save's enabled state additionally considers amount drift (enabled when stored amount != rate * hours) so stale-amount entities can be re-synced without changing the rate. Misleading caveat note removed.",
   "depends_on": [
     { "name": "nav-buttons",    "range": ">=2.5.2" },
     { "name": "cards",          "range": ">=0.2.3" },
@@ -74,7 +74,7 @@
   "post_install": [
     {
       "type": "notice",
-      "message": "Finance blueprint v0.1.0 installed at beacon/finance/. Open beacon/finance/Finance.md and click 'New Budget' / 'New Paycheck' / 'New Invoice' to scaffold entries. Status pills (Planning/In Progress/Done) derive from frontmatter at render time. Cmd+R required after this install to load 9 CustomJS classes."
+      "message": "Finance blueprint v0.1.0 installed at spice/finance/. Open spice/finance/Finance.md and click 'New Budget' / 'New Paycheck' / 'New Invoice' to scaffold entries. Status pills (Planning/In Progress/Done) derive from frontmatter at render time. Cmd+R required after this install to load 9 CustomJS classes."
     }
   ],
   "rule_fragments": []

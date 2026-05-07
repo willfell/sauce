@@ -3,7 +3,7 @@
   "version": "0.1.4",
   "kind": "blueprint",
   "module_directory": "to-do",
-  "description": "Date-routed daily to-do notes feeding SpaceDailyDashboard's tasks panel under beacon/to-do/. v0.1.2: filename pattern <Name>-YYYY-MM-DD (filename_prefix \"ToDo-\") per v0.4.2 platform invariant.",
+  "description": "Date-routed daily to-do notes feeding SpaceDailyDashboard's tasks panel under spice/to-do/. v0.1.2: filename pattern <Name>-YYYY-MM-DD (filename_prefix \"ToDo-\") per v0.4.2 platform invariant.",
   "depends_on": [
     { "name": "nav-buttons",    "range": ">=2.2.0" },
     { "name": "customjs-guard", "range": ">=1.0.0" }
@@ -34,7 +34,7 @@
   "post_install": [
     {
       "type": "notice",
-      "message": "To-do blueprint installed at beacon/to-do/. REQUIRED: enable the Templater community plugin if not already enabled. Click '+ Today's To-Do' in the nav-button row to create today's file at beacon/to-do/YYYY/MM-MMMM/YYYY-MM-DD-ToDo.md. Manual file creation in beacon/to-do/ now also auto-applies the template (via Templater folder-template registration). Tasks added in today's file appear in the daily dashboard's Today's Tasks panel."
+      "message": "To-do blueprint installed at spice/to-do/. REQUIRED: enable the Templater community plugin if not already enabled. Click '+ Today's To-Do' in the nav-button row to create today's file at spice/to-do/YYYY/MM-MMMM/YYYY-MM-DD-ToDo.md. Manual file creation in spice/to-do/ now also auto-applies the template (via Templater folder-template registration). Tasks added in today's file appear in the daily dashboard's Today's Tasks panel."
     }
   ],
   "rule_fragments": []

@@ -1,6 +1,6 @@
 /**
  * NewBudgetButton — overlay-dialog button for creating a Budget-YYYY-MM.md
- * entity under beacon/finance/budgets/.
+ * entity under spice/finance/budgets/.
  *
  * Inputs: month picker (<input type="month">). Defaults to current month.
  * Filename: Budget-YYYY-MM.md. Frontmatter: type: budget, budget_month, categories[].
@@ -60,7 +60,7 @@ class NewBudgetButton {
             const checkExists = () => {
                 const m = input.value;
                 if (!m) { status.textContent = ""; return; }
-                const path = `beacon/finance/budgets/${m}/Budget-${m}.md`;
+                const path = `spice/finance/budgets/${m}/Budget-${m}.md`;
                 if (app.vault.getAbstractFileByPath(path)) {
                     status.textContent = `Budget-${m}.md already exists. Will open existing.`;
                     status.style.color = "var(--text-muted)";
@@ -103,7 +103,7 @@ class NewBudgetButton {
     }
 
     async _createBudget(month) {
-        const baseDir = "beacon/finance/budgets";
+        const baseDir = "spice/finance/budgets";
         const entityDir = `${baseDir}/${month}`;
         for (const dir of [baseDir, entityDir]) {
             if (!app.vault.getAbstractFileByPath(dir)) {

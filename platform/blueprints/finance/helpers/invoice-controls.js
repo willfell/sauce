@@ -19,7 +19,7 @@ class InvoiceControls {
         const page = dv.current();
         if (!page || !page.file) return;
 
-        const m = page.file.path.match(/^beacon\/finance\/invoices\/(\d{4}-\d{2})\/Invoice-/);
+        const m = page.file.path.match(/^spice\/finance\/invoices\/(\d{4}-\d{2})\/Invoice-/);
         if (!m) return;
         const month = m[1];
 

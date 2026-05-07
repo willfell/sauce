@@ -1,5 +1,5 @@
 /**
- * BudgetsCards — listing view for beacon/finance/budgets/Budget-*.md.
+ * BudgetsCards — listing view for spice/finance/budgets/Budget-*.md.
  *
  * Delegates to BeaconCards row layout (mobile-aware mechanism). Status pill
  * derived via customJS.FinanceStatus.derive(page, "budget").
@@ -11,7 +11,7 @@ class BudgetsCards {
     async render(dv, opts) {
         opts = opts || {};
         const filter = opts.filter || "all";
-        const pages = dv.pages('"beacon/finance/budgets"')
+        const pages = dv.pages('"spice/finance/budgets"')
             .where(p => p.type === "budget")
             .array()
             .sort((a, b) => String(b.budget_month || "").localeCompare(String(a.budget_month || "")));

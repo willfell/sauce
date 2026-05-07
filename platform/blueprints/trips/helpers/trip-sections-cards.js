@@ -3,11 +3,11 @@ class TripSectionsCards {
     const filePath = dv.current().file.path;
     const pathParts = filePath.split("/");
     const tripsIdx = pathParts.indexOf("trips");
-    if (tripsIdx < 1 || pathParts[tripsIdx - 1] !== "beacon" || pathParts.length !== tripsIdx + 3) {
+    if (tripsIdx < 1 || pathParts[tripsIdx - 1] !== "spice" || pathParts.length !== tripsIdx + 3) {
       return;
     }
     const slug = pathParts[tripsIdx + 1];
-    const tripDir = `beacon/trips/${slug}`;
+    const tripDir = `spice/trips/${slug}`;
 
     const folderObj = app.vault.getAbstractFileByPath(tripDir);
     if (!folderObj || !folderObj.children) return;

@@ -1,5 +1,5 @@
 /**
- * InvoicesCards — listing view for beacon/finance/invoices/<YYYY-MM>/Invoice-*.md.
+ * InvoicesCards — listing view for spice/finance/invoices/<YYYY-MM>/Invoice-*.md.
  *
  * Delegates to BeaconCards row layout. Status pill derived via
  * customJS.FinanceStatus.derive(page, "invoice"). Filters to type=="invoice"
@@ -9,7 +9,7 @@ class InvoicesCards {
     async render(dv, opts) {
         opts = opts || {};
         const filter = opts.filter || "all";
-        const pages = dv.pages('"beacon/finance/invoices"')
+        const pages = dv.pages('"spice/finance/invoices"')
             .where(p => p.type === "invoice")
             .array()
             .sort((a, b) => String(b.month || "").localeCompare(String(a.month || "")));

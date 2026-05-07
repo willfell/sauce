@@ -82,8 +82,8 @@ tags:
 ---
 <%*
 // Auto-promote into per-task folder convention.
-// Kanban creates the file flat at beacon/projects/<slug>/tasks/<TaskName>.md.
-// Move it into beacon/projects/<slug>/tasks/<TaskName>/<TaskName>.md so the task
+// Kanban creates the file flat at spice/projects/<slug>/tasks/<TaskName>.md.
+// Move it into spice/projects/<slug>/tasks/<TaskName>/<TaskName>.md so the task
 // note and any sub-notes live together. Idempotent: skips if already inside a
 // folder of the same name, or if the target file already exists.
 const newFilePath = tp.config.target_file?.path || "";

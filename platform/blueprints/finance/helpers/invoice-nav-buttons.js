@@ -1,6 +1,6 @@
 /**
  * InvoiceNavButtons — per-invoice ecosystem context nav. Auto-detects via path
- * prefix `beacon/finance/invoices/<YYYY-MM>/`. Renders Invoice / Time Log /
+ * prefix `spice/finance/invoices/<YYYY-MM>/`. Renders Invoice / Time Log /
  * Board / Finance Hub buttons with icons + hover-to-accent transition. Top HR
  * + uppercase "INVOICE" section label. Hides the button matching the active
  * file. Embed-deduped per v0.16.0 lesson. Mirrors project blueprint shape.
@@ -13,10 +13,10 @@ class InvoiceNavButtons {
         if (previous) previous.remove();
 
         const path = dv.current()?.file?.path || "";
-        const m = path.match(/^beacon\/finance\/invoices\/(\d{4}-\d{2})\//);
+        const m = path.match(/^spice\/finance\/invoices\/(\d{4}-\d{2})\//);
         if (!m) return;
         const month = m[1];
-        const root = `beacon/finance/invoices/${month}`;
+        const root = `spice/finance/invoices/${month}`;
 
         const icons = {
             invoice: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/></svg>`,
@@ -29,7 +29,7 @@ class InvoiceNavButtons {
             { label: "Invoice",     icon: icons.invoice,    target: `${root}/Invoice-${month}.md` },
             { label: "Time Log",    icon: icons.timeLog,    target: `${root}/Time-Log-${month}.md` },
             { label: "Board",       icon: icons.board,      target: `${root}/board/Board-${month}.md` },
-            { label: "Finance Hub", icon: icons.financeHub, target: `beacon/finance/Finance.md` }
+            { label: "Finance Hub", icon: icons.financeHub, target: `spice/finance/Finance.md` }
         ].filter(t => t.target !== path);
         if (targets.length === 0) return;
 

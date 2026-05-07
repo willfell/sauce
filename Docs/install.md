@@ -97,7 +97,7 @@ After a successful run, your vault layout looks like this:
 > The `pantry/` directory is a real git clone with `origin` pointing at the upstream Sauce repo. `sauce update` calls `git fetch + git reset --hard origin/main` inside it. Hand-edits are wiped on the next update — see [landmines.md #18](landmines.md).
 
 > [!success] Resolved in v0.23.0
-> The macOS APFS case-collision (former `Beacon/` ≡ lowercase `beacon/<module>/`)
+> The macOS APFS case-collision (former `Beacon/` ≡ lowercase `spice/<module>/`)
 > is resolved by renaming the workshop clone dir to `pantry/`. Daily Notes
 > "Open today's daily note" works correctly on macOS APFS as of v0.23.0.
 > Upgrading from v0.22.x: see "Upgrading from v0.22.x" section below.
@@ -138,6 +138,22 @@ The new stub md5 invariant for `<vault>/ranch/Templater/platformInstall.js` is `
 > v0.24.0 ships a new `applyCustomJsSettings` helper that automatically migrates `.obsidian/plugins/customjs/data.json:jsFolder` from `Docs/Meta/Scripts` to `ranch/Scripts` on the first install run. Surgical: only overwrites the legacy v0.23.x value or absent settings; any other user-customized `jsFolder` is preserved.
 >
 > If you upgrade and dataviewjs blocks render `SpaceNavButtons unavailable` / `<ClassName> unavailable`, your CustomJS plugin's scan folder is stale. Either (a) run `sauce update` (helper auto-migrates), or (b) open Obsidian Settings → Community Plugins → CustomJS, set `jsFolder` to `ranch/Scripts`, then Cmd+R.
+
+## Upgrading from v0.24.x to v0.25.0
+
+The blueprint module namespace has moved from `<vault>/beacon/<module>/` to `<vault>/spice/<module>/`. The backup-suffix convention has changed from `.beacon-backup` to `.sauce-backup`. v0.25.0 ships under fresh-start posture — no legacy consumer state to preserve. If your vault has prior v0.24.x state under `<vault>/beacon/`, the cleanest upgrade is wipe + reinstall:
+
+```bash
+cd <vault>
+# Backup anything personal under <vault>/beacon/ (notes you want to keep) elsewhere first.
+rm -rf beacon
+sauce update --force
+```
+
+After reinstall, all blueprint content lands at `<vault>/spice/<module>/` (e.g., `spice/daily/`, `spice/projects/`, `spice/finance/`). Templater folder-template registrations + Daily Notes core-plugin folder are rewritten by the installer to the new namespace.
+
+> [!success] Sauce rebrand sequence COMPLETE
+> v0.23.0 (Tree 1) renamed the workshop clone `Beacon/` → `pantry/`. v0.24.0 (Tree 3) renamed the runtime plumbing `Docs/Meta/` → `ranch/`. v0.25.0 (Tree 2) renames the blueprint module namespace `beacon/<module>/` → `spice/<module>/`. The `pantry/` + `ranch/` + `spice/` namespace tripod is now the canonical layout.
 
 ---
 
@@ -323,9 +339,9 @@ rm -f ranch/platform-config.json \
 > [!warning] What this does NOT undo
 > The platform's `.obsidian/` plugin-data merges (Templater hotkeys, Slash Commander bindings, Daily Notes settings, vendored Baseline theme, Style Settings JSON, hotkeys.json entries, Dataview settings, and other allowlisted paths — see [landmines.md #12](landmines.md)) are NOT auto-reverted by uninstall.
 >
-> Each of those paths has a sibling `.beacon-backup` (or `.bak` for vendored themes) created the first time the installer touched it. To revert:
-> 1. Find each backup: `find .obsidian -name '*.beacon-backup' -o -name '*.bak'`
-> 2. Copy each backup over its live target (e.g., `cp .obsidian/hotkeys.json.beacon-backup .obsidian/hotkeys.json`).
+> Each of those paths has a sibling `.sauce-backup` (or `.bak` for vendored themes) created the first time the installer touched it. To revert:
+> 1. Find each backup: `find .obsidian -name '*.sauce-backup' -o -name '*.bak'`
+> 2. Copy each backup over its live target (e.g., `cp .obsidian/hotkeys.json.sauce-backup .obsidian/hotkeys.json`).
 > 3. Reload Obsidian (Cmd+R).
 >
 > Backups are single-deep — one prior version per target. The platform doesn't auto-rotate them.
@@ -337,7 +353,7 @@ rm -f ranch/platform-config.json \
 The v0.22.0 inside-vault layout is **one of two supported shapes**:
 
 - **Inside-vault (v0.22.0+, default for fresh consumers):** workshop clone at `<vault>/pantry/`, `workshop_relative_path: "pantry"` in `platform-config.json`. Bootstrapped via the curl one-liner.
-- **Sibling-of-workshop (legacy, still supported):** workshop checked out at a path adjacent to the vault, e.g., `~/Documents/obsidian/sync/workshop/beacon/`, with the consumer's `platform-config.json` pointing at it via `workshop_relative_path: "../beacon"`. Used by existing POC vaults (`barebones-beacon-poc`, `accuris-beacon-poc`) and by the workshop's own self-install.
+- **Sibling-of-workshop (legacy, still supported):** workshop checked out at a path adjacent to the vault, e.g., `~/Documents/obsidian/sync/workshop/spice/`, with the consumer's `platform-config.json` pointing at it via `workshop_relative_path: "../beacon"`. Used by existing POC vaults (`barebones-beacon-poc`, `accuris-beacon-poc`) and by the workshop's own self-install.
 
 Both shapes use the same canonical `install.js` at runtime via the v0.1.2 thin-stub dispatch — no code paths diverge based on layout. The only difference is the value stored in `workshop_relative_path`.
 

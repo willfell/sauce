@@ -1,5 +1,5 @@
 /**
- * PaychecksCards — listing view for beacon/finance/paychecks/Paycheck-*.md.
+ * PaychecksCards — listing view for spice/finance/paychecks/Paycheck-*.md.
  *
  * Delegates to BeaconCards row layout. Status pill derived via
  * customJS.FinanceStatus.derive(page, "paycheck"). Sorted newest-first by
@@ -9,7 +9,7 @@ class PaychecksCards {
     async render(dv, opts) {
         opts = opts || {};
         const filter = opts.filter || "all";
-        const pages = dv.pages('"beacon/finance/paychecks"')
+        const pages = dv.pages('"spice/finance/paychecks"')
             .where(p => p.type === "paycheck")
             .array()
             .sort((a, b) => String(b.pay_period_start || "").localeCompare(String(a.pay_period_start || "")));

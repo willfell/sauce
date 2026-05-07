@@ -1,6 +1,6 @@
 /**
  * InvoiceTimeLogEditor — Add/Edit/Delete editor for the entries[] frontmatter
- * array on Time-Log entity pages under beacon/finance/invoices/<YYYY-MM>/.
+ * array on Time-Log entity pages under spice/finance/invoices/<YYYY-MM>/.
  * Auto-computes hours per entry from start+end. Sums total_hours and
  * propagates to the sibling Invoice atlas's hours + amount (rate x hours).
  * Two-file write surface; non-atomic — surfaces a Notice if the sibling write
@@ -17,10 +17,10 @@ class InvoiceTimeLogEditor {
         const page = dv.current();
         if (!page || !page.file) return;
 
-        const m = page.file.path.match(/^beacon\/finance\/invoices\/(\d{4}-\d{2})\/Time-Log-/);
+        const m = page.file.path.match(/^spice\/finance\/invoices\/(\d{4}-\d{2})\/Time-Log-/);
         if (!m) return;
         const month = m[1];
-        const siblingInvoicePath = `beacon/finance/invoices/${month}/Invoice-${month}.md`;
+        const siblingInvoicePath = `spice/finance/invoices/${month}/Invoice-${month}.md`;
 
         const file = app.vault.getAbstractFileByPath(page.file.path);
         if (!file) return;

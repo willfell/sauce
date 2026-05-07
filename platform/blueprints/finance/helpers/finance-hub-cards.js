@@ -27,9 +27,9 @@ class FinanceHubCards {
         areaRow.style.cssText = "display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin: 16px 0 16px 0;";
 
         const areas = [
-            { label: "Budgets",   icon: icons.budgets,   target: "beacon/finance/budgets/Budgets.md" },
-            { label: "Paychecks", icon: icons.paychecks, target: "beacon/finance/paychecks/Paychecks.md" },
-            { label: "Invoices",  icon: icons.invoices,  target: "beacon/finance/invoices/Invoices.md" }
+            { label: "Budgets",   icon: icons.budgets,   target: "spice/finance/budgets/Budgets.md" },
+            { label: "Paychecks", icon: icons.paychecks, target: "spice/finance/paychecks/Paychecks.md" },
+            { label: "Invoices",  icon: icons.invoices,  target: "spice/finance/invoices/Invoices.md" }
         ];
 
         const btnStyle = "cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 8px 16px; border-radius: 6px; border: 1px solid var(--background-modifier-border); background: var(--background-primary); color: var(--text-muted); font-size: 0.85em; font-weight: 500; font-family: inherit; letter-spacing: 0.01em; transition: all 0.15s ease; min-height: 40px;";
@@ -52,9 +52,9 @@ class FinanceHubCards {
         }
 
         const sections = [
-            { title: "Pending Budgets",   cls: "BudgetsCards",   type: "budget",   folder: "beacon/finance/budgets" },
-            { title: "Pending Paychecks", cls: "PaychecksCards", type: "paycheck", folder: "beacon/finance/paychecks" },
-            { title: "Pending Invoices",  cls: "InvoicesCards",  type: "invoice",  folder: "beacon/finance/invoices" }
+            { title: "Pending Budgets",   cls: "BudgetsCards",   type: "budget",   folder: "spice/finance/budgets" },
+            { title: "Pending Paychecks", cls: "PaychecksCards", type: "paycheck", folder: "spice/finance/paychecks" },
+            { title: "Pending Invoices",  cls: "InvoicesCards",  type: "invoice",  folder: "spice/finance/invoices" }
         ];
         for (const sec of sections) {
             const pending = (dv.pages && dv.pages(`"${sec.folder}"`)

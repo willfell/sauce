@@ -1,6 +1,6 @@
 /**
  * NewPaycheckButton — overlay-dialog button for creating a Paycheck-YYYY-MM-DD.md
- * entity under beacon/finance/paychecks/.
+ * entity under spice/finance/paychecks/.
  *
  * Inputs: pay_period_start (date) + pay_period_end (date) + amount (number).
  * Filename derives from start_date: Paycheck-YYYY-MM-DD.md.
@@ -53,7 +53,7 @@ class NewPaycheckButton {
                 if (endInput.value < startInput.value) return "End date must be on or after start date.";
                 const amt = Number(amountInput.value);
                 if (Number.isNaN(amt) || amt < 0) return "Amount must be a non-negative number.";
-                const path = `beacon/finance/paychecks/${startInput.value}/Paycheck-${startInput.value}.md`;
+                const path = `spice/finance/paychecks/${startInput.value}/Paycheck-${startInput.value}.md`;
                 if (app.vault.getAbstractFileByPath(path)) return `Paycheck-${startInput.value}.md already exists. Will open existing.`;
                 return null;
             };
@@ -139,7 +139,7 @@ class NewPaycheckButton {
     }
 
     async _createPaycheck({ start_date, end_date, amount }) {
-        const baseDir = "beacon/finance/paychecks";
+        const baseDir = "spice/finance/paychecks";
         const entityDir = `${baseDir}/${start_date}`;
         for (const dir of [baseDir, entityDir]) {
             if (!app.vault.getAbstractFileByPath(dir)) {

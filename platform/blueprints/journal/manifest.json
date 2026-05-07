@@ -3,7 +3,7 @@
   "version": "0.1.1",
   "kind": "blueprint",
   "module_directory": "journal",
-  "description": "Date-routed daily journal entries under beacon/journal/. Filename pattern Journal-YYYY-MM-DD per gotcha 8 platform invariant. Nav-button-driven creation via runTemplaterTemplate; manual creation under beacon/journal/ auto-applies template via templater_folder_templates.",
+  "description": "Date-routed daily journal entries under spice/journal/. Filename pattern Journal-YYYY-MM-DD per gotcha 8 platform invariant. Nav-button-driven creation via runTemplaterTemplate; manual creation under spice/journal/ auto-applies template via templater_folder_templates.",
   "depends_on": [
     { "name": "nav-buttons",    "range": ">=2.4.0" },
     { "name": "customjs-guard", "range": ">=1.0.0" }
@@ -34,7 +34,7 @@
   "post_install": [
     {
       "type": "notice",
-      "message": "Journal blueprint installed at beacon/journal/. REQUIRED: enable the Templater community plugin if not already enabled. Click '+ Today's Journal' in the nav-button row to create today's file at beacon/journal/YYYY/MM-MMMM/Journal-YYYY-MM-DD.md. Manual file creation under beacon/journal/ auto-applies the template (via Templater folder-template registration). Frontmatter cross-links to that day's daily note via [[<DayName>-YYYY-MM-DD]] when daily blueprint is installed."
+      "message": "Journal blueprint installed at spice/journal/. REQUIRED: enable the Templater community plugin if not already enabled. Click '+ Today's Journal' in the nav-button row to create today's file at spice/journal/YYYY/MM-MMMM/Journal-YYYY-MM-DD.md. Manual file creation under spice/journal/ auto-applies the template (via Templater folder-template registration). Frontmatter cross-links to that day's daily note via [[<DayName>-YYYY-MM-DD]] when daily blueprint is installed."
     }
   ],
   "rule_fragments": []

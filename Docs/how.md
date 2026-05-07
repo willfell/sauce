@@ -41,23 +41,23 @@ A blueprint lives at `platform/blueprints/<name>/` with:
 - `variants.json` — declares aliases (e.g., headspace renames `project` → `side-quest`).
 - `manifest.json` — version + install steps.
 
-### Module directory under `beacon/` namespace (blueprint-only invariant)
+### Module directory under `spice/` namespace (blueprint-only invariant)
 
-Every **blueprint** owns ONE directory at `beacon/<module_directory>/` in the consumer vault. All files the blueprint materializes — at install time via `files[]`, OR at runtime via templates / commands / nav-button click actions — land under that one directory. Cross-module data flows via wikilinks only; no blueprint writes into another's directory.
+Every **blueprint** owns ONE directory at `spice/<module_directory>/` in the consumer vault. All files the blueprint materializes — at install time via `files[]`, OR at runtime via templates / commands / nav-button click actions — land under that one directory. Cross-module data flows via wikilinks only; no blueprint writes into another's directory.
 
-The `beacon/` parent namespace demarcates platform-managed content from the consumer's personal content. Consumers keep any other top-level structure they want (e.g., `Timestamps/`, `Resources/`) — `beacon/` is the contract boundary.
+The `spice/` parent namespace demarcates platform-managed content from the consumer's personal content. Consumers keep any other top-level structure they want (e.g., `Timestamps/`, `Resources/`) — `spice/` is the contract boundary.
 
-Each blueprint manifest declares `module_directory: "<name>"` (required, enforced by installer). The installer derives the full materialization root as `<vault_root>/beacon/<module_directory>/`. Examples: `beacon/boards/` for the boards blueprint (v0.2.0), `beacon/to-do/` / `beacon/projects/` / `beacon/trips/` / `beacon/finance/` for future blueprints.
+Each blueprint manifest declares `module_directory: "<name>"` (required, enforced by installer). The installer derives the full materialization root as `<vault_root>/spice/<module_directory>/`. Examples: `spice/boards/` for the boards blueprint (v0.2.0), `spice/to-do/` / `spice/projects/` / `spice/trips/` / `spice/finance/` for future blueprints.
 
 **Why:**
-- Install / update / uninstall a blueprint = touch one directory at `beacon/<module>/`. Predictable.
+- Install / update / uninstall a blueprint = touch one directory at `spice/<module>/`. Predictable.
 - Cross-module name collisions become impossible by construction.
-- Platform-managed content is cleanly demarcated from consumer-personal content via the `beacon/` namespace.
-- New blueprints get a clean recipe — pick a directory name under `beacon/`, own it.
+- Platform-managed content is cleanly demarcated from consumer-personal content via the `spice/` namespace.
+- New blueprints get a clean recipe — pick a directory name under `spice/`, own it.
 
-**Mechanisms are exempt.** Mechanisms (`customjs-guard`, `validator`, `audit`, `nav-buttons`) are shared infrastructure landing under `ranch/Scripts/`, `ranch/Views/`, `ranch/Templater/` — not module-scoped, not under `beacon/`.
+**Mechanisms are exempt.** Mechanisms (`customjs-guard`, `validator`, `audit`, `nav-buttons`) are shared infrastructure landing under `ranch/Scripts/`, `ranch/Views/`, `ranch/Templater/` — not module-scoped, not under `spice/`.
 
-Codified as landmine #11 + a CLAUDE.md non-negotiable. Decision rationale and shape at `Docs/plans/2026-05-03-boards-blueprint-design.md`. Refined 2026-05-04 to add the `beacon/` namespace prefix.
+Codified as landmine #11 + a CLAUDE.md non-negotiable. Decision rationale and shape at `Docs/plans/2026-05-03-boards-blueprint-design.md`. Refined 2026-05-04 to add the `spice/` namespace prefix.
 
 ### Subscription
 Per-consumer-vault `ranch/platform-subscription.json` declaring which mechanisms + blueprints this vault adopts and at which versions:
@@ -125,7 +125,7 @@ Steps the canonical installer performs:
 4. Resolve workshop absolute path via `app.vault.adapter.basePath` + `config.workshop_relative_path`.
 5. Read `<workshop>/platform/manifest.json`.
 5a. **Validate `module_directory` on every subscribed blueprint manifest** (added v0.2.0). Missing or empty → record `error / module_directory_missing`, skip that blueprint. Two blueprints declaring the same value → record `warning / module_directory_collision`, first-wins by topo order (skip the second). Mechanisms exempt.
-5b. **Build per-blueprint substitution overlay** (added v0.2.0). For each blueprint, set `{{module_directory}}` → `beacon/<bare-name>` in a shallow-copy variables overlay; mechanisms continue to receive the unmutated base variables.
+5b. **Build per-blueprint substitution overlay** (added v0.2.0). For each blueprint, set `{{module_directory}}` → `spice/<bare-name>` in a shallow-copy variables overlay; mechanisms continue to receive the unmutated base variables.
 6. For each subscribed mechanism / non-skipped blueprint:
    a. Look up in workshop manifest. Skip if version mismatch with subscription.
    b. Compare with installed; skip if already at this version.
@@ -147,9 +147,9 @@ Steps the canonical installer performs:
 > - `templater_hotkeys[]` (added v0.1.3) — list of `{ template: "<basename>.md" }` entries the installer registers in Templater's Template Hotkeys, populating `.obsidian/plugins/templater-obsidian/data.json:enabled_templates_hotkeys[]` so per-template `Insert <name>` commands surface in the palette.
 > - `slash_commander_bindings[]` (added v0.1.3) — list of `{ name, template }` entries the installer registers in Slash Commander, populating `.obsidian/plugins/slash-commander/data.json:bindings[]`. The `name` is the slash trigger (user types `/<name>`); installer derives the full SC binding shape (`name`, `id`, `action`, `icon: "templater-icon"`, `mode: "any"`, `triggerMode: "anywhere"`) and computes `id = action = "templater-obsidian:" + <full-template-path>` from the basename + `variables.templates_path`.
 > - Both fields cross-validate against the manifest's `files[]` (or each other) — a binding referencing a template the manifest doesn't ship surfaces a warning + skip.
-> - `module_directory` (added v0.2.0; **REQUIRED on every blueprint**, mechanisms exempt) — bare directory name (e.g., `"boards"`). Installer derives the full namespaced path `beacon/<bare-name>` for the per-blueprint `{{module_directory}}` substitution variable. Two blueprints declaring the same value collide and the second is skipped (first-wins). See landmine #11.
+> - `module_directory` (added v0.2.0; **REQUIRED on every blueprint**, mechanisms exempt) — bare directory name (e.g., `"boards"`). Installer derives the full namespaced path `spice/<bare-name>` for the per-blueprint `{{module_directory}}` substitution variable. Two blueprints declaring the same value collide and the second is skipped (first-wins). See landmine #11.
 > - `pre_install[]` (added v0.2.0) — list of pre-files-loop actions to run for stale-file cleanup or migration. Currently one action type: `{ type: "delete", path: "<dest-relative-with-substitution>", reason: "<why>" }`. Path goes through `substituteStrict`. Existing target file is read, sha256-hashed, backed up to `<path>.pre_install_bak`, then removed via `adapter.remove`. Absent target is a no-op (idempotent). Directory target surfaces a warning and skips. Unknown action types surface a warning and skip. One-shot per blueprint version per consumer (gated by the existing version-skip mechanic in step 6.b).
-> - `core_plugin_settings[]` (added v0.3.0) — list of `{ id, settings }` entries the installer additive-shallow-merges into Obsidian core-plugin data files at `.obsidian/<id>.json`. Top-level keys in `settings` overwrite existing top-level keys; nested objects are replaced wholesale; pre-existing keys not declared by the manifest are preserved. Settings string values pass through `substituteLenient` using the per-item variables overlay (so blueprints get `{{module_directory}}` resolved). Idempotent skip-write when merged === existing; backup-on-edit to `<target>.beacon-backup` only when there is pre-existing content to back up. Honors landmine #12's four safety mechanics. First use: daily blueprint v0.1.0 writes `.obsidian/daily-notes.json` (`folder` / `format` / `template`).
+> - `core_plugin_settings[]` (added v0.3.0) — list of `{ id, settings }` entries the installer additive-shallow-merges into Obsidian core-plugin data files at `.obsidian/<id>.json`. Top-level keys in `settings` overwrite existing top-level keys; nested objects are replaced wholesale; pre-existing keys not declared by the manifest are preserved. Settings string values pass through `substituteLenient` using the per-item variables overlay (so blueprints get `{{module_directory}}` resolved). Idempotent skip-write when merged === existing; backup-on-edit to `<target>.sauce-backup` only when there is pre-existing content to back up. Honors landmine #12's four safety mechanics. First use: daily blueprint v0.1.0 writes `.obsidian/daily-notes.json` (`folder` / `format` / `template`).
 > - `templater_folder_templates[]` (added v0.4.0) — list of `{ folder, template }` entries the installer additive-merges into `.obsidian/plugins/templater-obsidian/data.json:folder_templates[]`. Files manually created in the listed folders auto-apply the listed template via Templater's "Folder Templates" feature — backstop for the canonical `runTemplaterTemplate` nav-button creation path so the blueprint's module directory always produces template-shaped files regardless of how the file was created. Both `folder` and `template` string values pass through `substituteLenient` (resolves `{{module_directory}}` / `{{templates_path}}`). Match-by-`folder`; first-wins idempotency: if `folder` already exists with the same `template`, the entry is skipped (`info, action: "skipped_existing"`); if `folder` matches but `template` differs, the user override is preserved (`warning`). Empty-default Templater placeholder `{folder:"", template:""}` is replaced on first-write rather than appended-alongside. Honors landmine #12's four safety mechanics; writes to the same allowlisted templater data.json as `templater_hotkeys[]` (no allowlist expansion in v0.4.0).
 > - `nav_buttons[].action.type: "runTemplaterTemplate"` (added v0.4.0; **schema rewritten v0.4.2**) — declarative date-routed runtime-creation surface with literal/moment-format separation. Action shape: `{ type, template_source, folder_prefix (required), folder_date_pattern, filename_prefix, filename_date_pattern, filename_suffix }`. Renderer composes the click-time target as `folder = folder_prefix + (folder_date_pattern ? "/" + moment().format(folder_date_pattern) : "")` and `filename = filename_prefix + (filename_date_pattern ? moment().format(filename_date_pattern) : "") + filename_suffix`. Literal fields (`folder_prefix`, `filename_prefix`, `filename_suffix`) accept `{{...}}` placeholders resolved via `substituteLenient` at install time and NEVER reach `moment.format()` — bracket-escape gap is architecturally impossible by construction. Date-pattern fields accept moment.js format strings verbatim. `validateAndResolve` rewrites `template_source` to `{{templates_path}}/<basename>` at install time and rejects entries missing `folder_prefix` (warning history + skip). v0.4.2 BREAKING: legacy single `folder` / `filename` fields silently ignored; manifests must migrate.
 >
@@ -202,7 +202,7 @@ Load-bearing operational lessons not yet codified elsewhere. Most surfaced acros
 
 7. **NBSP gotcha — widgets are the canonical fix** — manual frontmatter editing introduces U+00A0 NBSPs through chat / markdown copy-paste, corrupting inline-flow YAML arrays. Editor widgets (e.g., BudgetCategoriesEditor / PaycheckExpensesEditor / InvoiceTimeLogEditor) bypass every YAML edge case at the source by mutating frontmatter via `app.fileManager.processFrontMatter`. Surfaced: v0.16.0 → fixed in v0.17.0.
 
-8. **Two backup-suffix conventions** — `.bak` for file-content overwrite (vendored themes; v0.2.0 boards Option B precedent), `.beacon-backup` for plugin-data additive merge. Mixing them is confusing; codified in landmine #12 mechanic #2. Surfaced: v0.19.0.
+8. **Two backup-suffix conventions** — `.bak` for file-content overwrite (vendored themes; v0.2.0 boards Option B precedent), `.sauce-backup` for plugin-data additive merge. Mixing them is confusing; codified in landmine #12 mechanic #2. Surfaced: v0.19.0.
 
 9. **Helpers that materialize new state need explicit prereq gates** — `applyExternalPlugins` only emits warnings; helpers that mkdir + fresh-write must short-circuit at the top via `_externalPluginsSatisfied(tp, manifest)` or equivalent prereq check. Pattern reusable for any future helper whose missing-prereq state isn't recoverable post-hoc. Surfaced: v0.19.0 CF-1.
 
@@ -242,7 +242,7 @@ The wizard handles config + subscription generation on first run, then plugin fe
 4. **Vendors the v0.1.2 thin-stub** at `ranch/Templater/platformInstall.js` if missing (landmine #13 content-static; never re-edits an existing one).
 5. **Fetches the upstream community-plugins index** (`raw.githubusercontent.com/obsidianmd/obsidian-releases/master/community-plugins.json`) for id → repo lookup. Cached for the run.
 6. **Per plugin in (foundational ∪ subscribed `external_plugins[]`):** skip-if-present unless force-redownload selected. Otherwise HTTPS GET `manifest.json` + `main.js` + (optional) `styles.css` from `https://github.com/<repo>/releases/latest/download/<asset>` (follows 302 redirects to GitHub's CDN). Vendors into `<vault>/.obsidian/plugins/<id>/`.
-7. **Merges plugin ids into `community-plugins.json`** (additive; sorted; deduped; `.beacon-backup` of prior).
+7. **Merges plugin ids into `community-plugins.json`** (additive; sorted; deduped; `.sauce-backup` of prior).
 8. **Invokes `runInstall(vaultPath)`** — the existing Node installer — which materializes themes, appearance, style-settings, blueprints, nav-buttons, etc.
 9. **Prints a condensed summary** (Notice lines + Verdict + section counts; ~30-80 lines). Full output tee'd to `ranch/bootstrap-last-install.log` for inspection.
 
@@ -315,8 +315,8 @@ Mirror of `core_plugin_settings[]` exactly except target is `.obsidian/plugins/$
 
 | Helper | Target | Posture |
 |---|---|---|
-| `applyCommunityPluginData` | `.obsidian/plugins/${id}/data.json` | additive shallow merge; substituted (manifest) wins; `.beacon-backup` on edit; idempotent skip on structural equality; broadened prereq gate (any external_plugins[] id absent → skip whole helper); plugin-dir absent → skip per entry; path-traversal validator on `id` |
-| `applyHotkeys` | `.obsidian/hotkeys.json` | additive per-`command_id`; FIRST-WINS (existing user binding always preserved); `.beacon-backup` on edit; malformed-JSON guard; `info/applied` or `info/skipped_existing` history per entry |
+| `applyCommunityPluginData` | `.obsidian/plugins/${id}/data.json` | additive shallow merge; substituted (manifest) wins; `.sauce-backup` on edit; idempotent skip on structural equality; broadened prereq gate (any external_plugins[] id absent → skip whole helper); plugin-dir absent → skip per entry; path-traversal validator on `id` |
+| `applyHotkeys` | `.obsidian/hotkeys.json` | additive per-`command_id`; FIRST-WINS (existing user binding always preserved); `.sauce-backup` on edit; malformed-JSON guard; `info/applied` or `info/skipped_existing` history per entry |
 
 Both wired into `installItem` after `applyCorePluginSettings` (CommunityPluginData, line 616) and after `applyStyleSettings` (Hotkeys, line 620). Helper count is now **9** (allowlist-touching helpers; 10 if you also count `applyExternalPlugins` and 11 if you count `applyNavButtons`).
 

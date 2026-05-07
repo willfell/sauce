@@ -24,7 +24,7 @@ class MeetingsHubCards {
       pending: `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`
     };
 
-    const meetingsRaw = dv.pages('"beacon/meetings/notes"')
+    const meetingsRaw = dv.pages('"spice/meetings/notes"')
       .where(p => p.file.name.endsWith(`-${currentDateStr}`))
       .sort(p => {
         if (p.date) return moment(p.date.toString()).format("HH:mm");

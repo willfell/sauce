@@ -165,7 +165,7 @@ async function phaseRunInstaller(opts) {
 async function phaseWriteActivation(opts) {
     // NEW v0.22.0 (renamed v0.23.0) — generates <workshopAbsPath>/Scripts/{activate.sh, sauce}
     // with absolute paths baked in. Atomic write + backup-on-overwrite to
-    // .beacon-backup (matches landmine #12 mechanic #2).
+    // .sauce-backup (matches landmine #12 mechanic #2).
     const { vaultPath, workshopAbsPath } = opts;
     const scriptsDir = path.join(workshopAbsPath, "Scripts");
     ensureDir(scriptsDir);
@@ -192,7 +192,7 @@ exec node "${cliPath}" "$@"
 
 function _writeWithBackup(p, body) {
     if (fs.existsSync(p)) {
-        const backup = p + ".beacon-backup";
+        const backup = p + ".sauce-backup";
         fs.copyFileSync(p, backup);
     }
     const tmp = p + ".tmp";

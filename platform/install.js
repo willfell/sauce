@@ -232,7 +232,7 @@ module.exports = async function (tp) {
       const itemMan = perItemManifest.get(name);
       try {
         // v0.2.0 T1.2: per-blueprint {{module_directory}} substitution overlay.
-        // Resolves to the namespaced full path "beacon/<bare-name>" (per
+        // Resolves to the namespaced full path "spice/<bare-name>" (per
         // landmine #11 + 2026-05-04 design refinement). The base `variables`
         // object is NEVER mutated — each iteration constructs a fresh shallow
         // copy, so module_directory cannot leak from one blueprint into
@@ -247,7 +247,7 @@ module.exports = async function (tp) {
         // (moduleDirectorySkip short-circuits the rest at line 218).
         let itemVars = variables;
         if (node.target.kind === "blueprint") {
-          itemVars = { ...variables, module_directory: `beacon/${itemMan.module_directory}` };
+          itemVars = { ...variables, module_directory: `spice/${itemMan.module_directory}` };
         }
         const ok = await installItem(tp, workshopPath, node.target, itemMan, itemVars, installedNow.history, git);
         if (ok) {
@@ -404,15 +404,15 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyPreInstall(tp, mech, variables, history, git);
 
   // v0.3.0: ensure the blueprint's module_directory exists at install time.
-  // Codifies landmine #11 — every blueprint owns beacon/<module_directory>/ —
+  // Codifies landmine #11 — every blueprint owns spice/<module_directory>/ —
   // at the installer level. Historically the directory was created as a
   // side-effect of files[] writes there; blueprints whose files all land
   // under ranch/* (e.g., daily — Daily Notes plugin requires
-  // beacon/daily/ to pre-exist) need an explicit mkdir. Mechanisms exempt:
+  // spice/daily/ to pre-exist) need an explicit mkdir. Mechanisms exempt:
   // variables.module_directory is unset for non-blueprint installs per the
   // v0.2.0 T1.2 per-blueprint overlay logic; this guard is just truthiness.
   // Ordering rationale: AFTER applyPreInstall (so a pre_install delete that
-  // cleared a stale beacon/<old-name>/ directory has run before mkdir creates
+  // cleared a stale spice/<old-name>/ directory has run before mkdir creates
   // the new one) and BEFORE the files[] loop (so any files[] dest under
   // {{module_directory}}/sub/... finds the parent already present). Three
   // outcomes — created / already_exists / error — recorded with full git
@@ -520,8 +520,8 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
     // Posture mirrors v0.1.3 helpers (applyTemplaterHotkeys / applySlashCommanderBindings):
     // never throws — read failures + bak write failures degrade to a
     // history error and skip the dest write so we don't half-update.
-    // The .bak suffix here (NOT .beacon-backup) is the file-content-overwrite
-    // convention; v0.1.3's plugin-data convention uses .beacon-backup.
+    // The .bak suffix here (NOT .sauce-backup) is the file-content-overwrite
+    // convention; v0.1.3's plugin-data convention uses .sauce-backup.
     const destExists = await adapter.exists(destPath);
     let priorContent = null;
     if (destExists) {
@@ -1053,7 +1053,7 @@ function validateAndResolve(btn, sourceName, variables, history, git) {
     const contentPath = variables.content_path || "ranch/Content";
     // v0.2.0 fix: substitute {{xxx}} placeholders in the target path using the
     // current item's variables overlay (which already includes the per-blueprint
-    // {{module_directory}} → "beacon/<bare-name>" mapping per T1.2). Stores
+    // {{module_directory}} → "spice/<bare-name>" mapping per T1.2). Stores
     // resolved literals in the registry so the renderer dispatches without
     // needing per-blueprint substitution context at click time.
     const resolvedTarget = substituteLenient(btn.action.target || "", variables);
@@ -1223,7 +1223,7 @@ async function applyExternalPlugins(tp, manifest, history, git) {
 // step in order. Currently the only supported `type` is "delete" — sweep a
 // stale legacy / superseded file before the new contract materializes (e.g.,
 // boards blueprint v0.1.1 → v0.2.0 retires top-level boards/To-Do-Board.md
-// in favor of beacon/boards/To-Do-Board.md). Failure-loud, never throws.
+// in favor of spice/boards/To-Do-Board.md). Failure-loud, never throws.
 //
 // Step shape: { type: "delete", path: "<dest-relative-path>", reason: "<why>" }
 //
@@ -1454,7 +1454,7 @@ async function applyPreInstall(tp, mech, variables, history, git) {
 // read .obsidian/plugins/templater-obsidian/data.json and additive-merge each
 // entry's full template path into enabled_templates_hotkeys[]. Idempotent
 // (skip if already present). Failure-loud (Notice + history). Backup-on-edit
-// to <target>.beacon-backup. Honors landmine #12 — never overwrites a
+// to <target>.sauce-backup. Honors landmine #12 — never overwrites a
 // malformed data.json; never strips user entries.
 //
 // Empty-string entries Templater seeds at first install (`[""]`) are
@@ -1598,7 +1598,7 @@ async function applyTemplaterHotkeys(tp, manifest, variables, history, git) {
 
   // Backup before write (one-deep, overwrite-on-edit).
   try {
-    await adapter.write(`${target}.beacon-backup`, raw);
+    await adapter.write(`${target}.sauce-backup`, raw);
   } catch (e) {
     new Notice(`applyTemplaterHotkeys: backup write failed (${e.message}); aborting modification for ${manifest.name}`, 8000);
     if (history) {
@@ -1775,7 +1775,7 @@ async function applyHotkeys(tp, manifest, history, git) {
   // Backup before write (one-deep, overwrite-on-edit). Only when target pre-existed.
   if (raw !== null) {
     try {
-      await adapter.write(`${target}.beacon-backup`, raw);
+      await adapter.write(`${target}.sauce-backup`, raw);
     } catch (e) {
       new Notice(`applyHotkeys: backup write failed (${e.message}); aborting modification for ${manifest.name}`, 8000);
       if (history) {
@@ -1970,7 +1970,7 @@ async function applyCustomJsSettings(tp, variables, history, git) {
 
   if (raw !== null) {
     try {
-      await adapter.write(`${target}.beacon-backup`, raw);
+      await adapter.write(`${target}.sauce-backup`, raw);
     } catch (e) {
       new Notice(`applyCustomJsSettings: backup write failed (${e.message}); aborting`, 8000);
       if (history) {
@@ -2210,7 +2210,7 @@ async function applySlashCommanderBindings(tp, manifest, variables, history, git
   if (appended === 0) return;
 
   try {
-    await adapter.write(`${target}.beacon-backup`, raw);
+    await adapter.write(`${target}.sauce-backup`, raw);
   } catch (e) {
     if (history) {
       history.push({
@@ -2252,7 +2252,7 @@ async function applySlashCommanderBindings(tp, manifest, variables, history, git
 // and additive-merge each entry into folder_templates[]. Match-by-folder; first-wins
 // idempotency. Empty-default placeholder {folder:"", template:""} is replaced
 // on first-write rather than appended-alongside (Templater seeds it on plugin first-init).
-// Failure-loud (Notice + history). Backup-on-edit to <target>.beacon-backup.
+// Failure-loud (Notice + history). Backup-on-edit to <target>.sauce-backup.
 // Honors landmine #12 — never overwrites a malformed data.json; never strips user entries.
 async function applyTemplaterFolderTemplates(tp, manifest, variables, history, git) {
   if (!manifest || !Array.isArray(manifest.templater_folder_templates) || manifest.templater_folder_templates.length === 0) return;
@@ -2415,7 +2415,7 @@ async function applyTemplaterFolderTemplates(tp, manifest, variables, history, g
   if (appended === 0) return;
 
   try {
-    await adapter.write(`${target}.beacon-backup`, raw);
+    await adapter.write(`${target}.sauce-backup`, raw);
   } catch (e) {
     new Notice(`applyTemplaterFolderTemplates: backup write failed (${e.message}); aborting modification for ${manifest.name}`, 8000);
     if (history) {
@@ -2458,7 +2458,7 @@ async function applyTemplaterFolderTemplates(tp, manifest, variables, history, g
 //   - Idempotent skip-write: if shallow-merged result === existing structurally,
 //     emit info/skipped_existing event and skip both backup write AND target write.
 //   - Backup-on-edit: when there's pre-existing content to back up, write the
-//     raw pre-edit body to <target>.beacon-backup BEFORE overwriting the live file.
+//     raw pre-edit body to <target>.sauce-backup BEFORE overwriting the live file.
 //     If the target file is absent, create it directly with no backup.
 //   - Malformed-JSON guard: never overwrite a file we can't parse; record an
 //     error and skip — no backup, no live write.
@@ -2611,7 +2611,7 @@ async function applyCorePluginSettings(tp, manifest, variables, history, git) {
     // Backup-on-edit: only when there is pre-existing content to back up.
     let backupPath = null;
     if (raw) {
-      backupPath = `${target}.beacon-backup`;
+      backupPath = `${target}.sauce-backup`;
       try {
         await adapter.write(backupPath, raw);
       } catch (e) {
@@ -2674,7 +2674,7 @@ async function applyCorePluginSettings(tp, manifest, variables, history, git) {
 // applyCommunityPluginData — for each item that declares community_plugin_settings[],
 // merge per-plugin settings into .obsidian/plugins/<id>/data.json. Mirrors the
 // applyCorePluginSettings posture (additive shallow merge, backup-on-edit to
-// <target>.beacon-backup, malformed-JSON guard, idempotent skip-write,
+// <target>.sauce-backup, malformed-JSON guard, idempotent skip-write,
 // failure-loud history). Differences from applyCorePluginSettings:
 //   - Target path is .obsidian/plugins/<id>/data.json (NOT .obsidian/<id>.json).
 //   - Prereq gate at the top via _externalPluginsSatisfied (NEW v0.19.0 lesson:
@@ -2886,7 +2886,7 @@ async function applyCommunityPluginData(tp, manifest, variables, history, git) {
     // Backup-on-edit: only when there is pre-existing content to back up.
     let backupPath = null;
     if (raw) {
-      backupPath = `${target}.beacon-backup`;
+      backupPath = `${target}.sauce-backup`;
       try {
         await adapter.write(backupPath, raw);
       } catch (e) {
@@ -2951,7 +2951,7 @@ async function applyCommunityPluginData(tp, manifest, variables, history, git) {
 // consumer's .obsidian/themes/<name>/ via the vault adapter. Mirrors the boards
 // Option B `file_overwrite` posture (sha256 compare; .bak of non-empty prior;
 // replace event), applied per-file under .obsidian/themes/. Suffix is .bak
-// (file-content overwrite convention) NOT .beacon-backup (plugin-data
+// (file-content overwrite convention) NOT .sauce-backup (plugin-data
 // convention; that's reserved for applyTemplaterHotkeys / applySlashCommanderBindings /
 // applyCorePluginSettings under .obsidian/plugins/<id>/data.json or
 // .obsidian/<core-id>.json).
@@ -3314,7 +3314,7 @@ async function applyVendoredThemes(tp, manifest, workshopPath, targetPath, histo
 // never-throws). cssTheme is ALWAYS overridden (single canonical theme per
 // design); enabledCssSnippets is additively unioned (existing-first order
 // preserved); any other keys in `desired` are shallow-merged over the existing
-// object for forward-compat. Backup suffix is .beacon-backup (plugin-data
+// object for forward-compat. Backup suffix is .sauce-backup (plugin-data
 // convention; same as applyCorePluginSettings).
 async function applyAppearance(tp, manifest, history, git) {
   if (!manifest || typeof manifest.appearance !== "object" || manifest.appearance === null || Array.isArray(manifest.appearance)) return;
@@ -3473,7 +3473,7 @@ async function applyAppearance(tp, manifest, history, git) {
   }
 
   // Backup-on-edit: capture pre-edit raw bytes before overwriting.
-  const backupPath = `${target}.beacon-backup`;
+  const backupPath = `${target}.sauce-backup`;
   try {
     await adapter.write(backupPath, raw);
   } catch (e) {
@@ -3760,7 +3760,7 @@ async function applyStyleSettings(tp, manifest, workshopPath, targetPath, histor
 
   // Backup-on-edit BEFORE write. Skip dest write on backup failure so we
   // don't half-update.
-  const bakPath = `${target}.beacon-backup`;
+  const bakPath = `${target}.sauce-backup`;
   try {
     await adapter.write(bakPath, raw);
   } catch (e) {
