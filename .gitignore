@@ -16,13 +16,16 @@ node_modules/
 # mkdirs from a fresh `bash install.sh` land INSIDE this clone instead of at vault
 # root. These entries mask the symptom; on Linux/case-sensitive filesystems they
 # are no-ops. See Docs/install.md and landmines #11 + #18 for context.
+# Patterns are root-anchored (leading /) so they match ONLY at workshop root —
+# nested content like Docs/Meta/Scripts/<mech>/... or platform/blueprints/<bp>/
+# remains tracked normally.
 # Lockstep edit required when adding a new blueprint with a new module_directory.
-Scripts/
-boards/
-daily/
-finance/
-journal/
-meetings/
-projects/
-to-do/
-trips/
+/Scripts/
+/boards/
+/daily/
+/finance/
+/journal/
+/meetings/
+/projects/
+/to-do/
+/trips/
