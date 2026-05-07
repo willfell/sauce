@@ -120,12 +120,21 @@ async function runFirstRunWizard(opts) {
             }
         }
 
-        const selectedMechs = Array.isArray(defaults.mechanisms)
-            ? defaults.mechanisms.slice()
-            : ["customjs-guard"];
-        const selectedBlueprints = Array.isArray(defaults.blueprints)
-            ? defaults.blueprints.slice()
-            : [];
+        // v0.22.1: align nonInteractive default-set with interactive default
+        // (DEFAULT_MECHANISMS_CHECKED — 5 mechs). Honor "all" / [] / array
+        // overrides. Same shape for blueprints (default empty array).
+        const _resolveMechs = (v) => {
+            if (v === "all") return manifestMechs.map((m) => m.name);
+            if (Array.isArray(v)) return v.slice();
+            return DEFAULT_MECHANISMS_CHECKED.slice();
+        };
+        const _resolveBlueprints = (v) => {
+            if (v === "all") return manifestBlueprints.map((b) => b.name);
+            if (Array.isArray(v)) return v.slice();
+            return [];
+        };
+        const selectedMechs = _resolveMechs(defaults && defaults.mechanisms);
+        const selectedBlueprints = _resolveBlueprints(defaults && defaults.blueprints);
 
         return {
             config: {

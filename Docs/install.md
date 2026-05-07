@@ -96,6 +96,11 @@ After a successful run, your vault layout looks like this:
 > [!info] What "git-managed" means
 > The `Beacon/` directory is a real git clone with `origin` pointing at the upstream beacon repo. `beacon update` calls `git fetch + git reset --hard origin/main` inside it. Hand-edits are wiped on the next update — see [landmines.md #18](landmines.md).
 
+> [!warning] macOS APFS case-collision (`Beacon/` vs `beacon/<module>/`)
+> macOS APFS is case-insensitive by default. The workshop clone at `Beacon/` (capital B) and the blueprint module-directory namespace at `beacon/<module>/` (lowercase, per [landmines.md #11](landmines.md)) resolve to the same directory on macOS. Blueprint `module_directory` mkdirs from `bash install.sh` therefore land inside `<vault>/Beacon/` instead of at vault root.
+>
+> The workshop-side `.gitignore` (v0.22.1+) masks the surfaced untracked artifacts so `beacon status` reports clean. Linux and case-sensitive macOS volumes materialize the dirs separately — the `.gitignore` entries are no-ops for them. See also [landmines.md #18](landmines.md) for the inside-vault `Beacon/` git-managed posture.
+
 ---
 
 ## Activation per shell

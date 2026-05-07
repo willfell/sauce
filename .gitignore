@@ -10,3 +10,19 @@ _backups/
 # v0.21.0: bootstrap.js depends on @inquirer/prompts; node_modules vendored locally.
 # package.json + package-lock.json are tracked; node_modules is not.
 node_modules/
+
+# v0.22.1: macOS APFS case-insensitivity collides Beacon/ (workshop clone) with
+# beacon/<module>/ (landmine #11 module_directory invariant). On macOS, blueprint
+# mkdirs from a fresh `bash install.sh` land INSIDE this clone instead of at vault
+# root. These entries mask the symptom; on Linux/case-sensitive filesystems they
+# are no-ops. See Docs/install.md and landmines #11 + #18 for context.
+# Lockstep edit required when adding a new blueprint with a new module_directory.
+Scripts/
+boards/
+daily/
+finance/
+journal/
+meetings/
+projects/
+to-do/
+trips/

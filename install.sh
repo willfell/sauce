@@ -8,11 +8,16 @@ REPO_URL="${BEACON_REPO_URL:-https://github.com/willfell/beacon.git}"
 VAULT="${PWD}"
 NON_INTERACTIVE=0
 OVERWRITE=0
+MECHS_ARG=""; HAS_MECHS=0
+BLUEPRINTS_ARG=""; HAS_BLUEPRINTS=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --vault) VAULT="$2"; shift 2 ;;
+        --vault=*) VAULT="${1#--vault=}"; shift ;;
         --non-interactive) NON_INTERACTIVE=1; shift ;;
         --overwrite) OVERWRITE=1; shift ;;
+        --mechanisms=*) MECHS_ARG="${1#--mechanisms=}"; HAS_MECHS=1; shift ;;
+        --blueprints=*) BLUEPRINTS_ARG="${1#--blueprints=}"; HAS_BLUEPRINTS=1; shift ;;
         *) echo "Unknown arg: $1" >&2; exit 1 ;;
     esac
 done
@@ -128,4 +133,8 @@ printf 'OK\n'
 # [4/4] Hand off to node CLI
 printf '  [4/4] Running first-run wizard...\n\n'
 INSTALL_OK=1
-exec node "$BEACON_DIR/platform/cli/beacon-cli.js" bootstrap --vault "$VAULT"
+NODE_ARGS=("$BEACON_DIR/platform/cli/beacon-cli.js" "bootstrap" "--vault" "$VAULT")
+if [ "$NON_INTERACTIVE" = "1" ]; then NODE_ARGS+=("--non-interactive"); fi
+if [ "$HAS_MECHS" = "1" ]; then NODE_ARGS+=("--mechanisms=$MECHS_ARG"); fi
+if [ "$HAS_BLUEPRINTS" = "1" ]; then NODE_ARGS+=("--blueprints=$BLUEPRINTS_ARG"); fi
+exec node "${NODE_ARGS[@]}"
