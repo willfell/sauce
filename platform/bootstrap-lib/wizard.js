@@ -64,6 +64,29 @@ function _findEntry(list, name) {
     return _safeArray(list).find((x) => x && x.name === name) || null;
 }
 
+/**
+ * v0.26.0 CF-2 — derive a valid Obsidian tag from a vault display name.
+ *
+ * Obsidian tags must contain at least one non-numeric character; numbers-only
+ * tags are rejected at render time (shown with strikethrough). Additionally,
+ * unquoted numeric values in YAML tag arrays parse as integers, mixing types
+ * with sibling string tags and triggering "Type Mismatch" in the Properties
+ * panel.
+ *
+ * Strategy: lowercase + trim, then prefix with "vault-" when the result is
+ * numbers-only, leaving alphanumeric names untouched.
+ *
+ *   "scratch/11"     basename "11"     → "vault-11"
+ *   "MyVault"        basename "MyVault" → "myvault"
+ *   "Personal Notes" basename "Personal Notes" → "personal notes"  (caller may sanitize)
+ */
+function _deriveVaultIdentityTag(displayName) {
+    const lower = String(displayName || "vault").trim().toLowerCase();
+    if (!lower) return "vault";
+    if (/^\d+$/.test(lower)) return `vault-${lower}`;
+    return lower;
+}
+
 function _buildSubscriptionEntries(selectedNames, manifestEntries) {
     const out = [];
     for (const name of _safeArray(selectedNames)) {
@@ -256,7 +279,7 @@ async function runFirstRunWizard(opts) {
                 workshop_relative_path: workshopRelativePath,
                 variables: Object.assign({}, CANONICAL_VARIABLES, {
                     workshop: displayName,
-                    vault_identity_tag: String(displayName).toLowerCase()
+                    vault_identity_tag: _deriveVaultIdentityTag(displayName)
                 })
             },
             subscription: {
@@ -386,7 +409,7 @@ async function runFirstRunWizard(opts) {
             workshop_relative_path: String(workshopRelativePath).trim(),
             variables: Object.assign({}, CANONICAL_VARIABLES, {
                 workshop: String(displayName).trim(),
-                vault_identity_tag: String(displayName).trim().toLowerCase()
+                vault_identity_tag: _deriveVaultIdentityTag(displayName)
             })
         },
         subscription: {
