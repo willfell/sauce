@@ -96,10 +96,18 @@ After a successful run, your vault layout looks like this:
 > [!info] What "git-managed" means
 > The `Beacon/` directory is a real git clone with `origin` pointing at the upstream beacon repo. `beacon update` calls `git fetch + git reset --hard origin/main` inside it. Hand-edits are wiped on the next update — see [landmines.md #18](landmines.md).
 
-> [!warning] macOS APFS case-collision (`Beacon/` vs `beacon/<module>/`)
-> macOS APFS is case-insensitive by default. The workshop clone at `Beacon/` (capital B) and the blueprint module-directory namespace at `beacon/<module>/` (lowercase, per [landmines.md #11](landmines.md)) resolve to the same directory on macOS. Blueprint `module_directory` mkdirs from `bash install.sh` therefore land inside `<vault>/Beacon/` instead of at vault root.
+> [!warning] macOS APFS case-collision breaks blueprint runtime — known issue, fix queued for v0.23.0
+> **Symptom:** On macOS APFS (case-insensitive default), opening Daily Notes / Boards / Meetings / Finance / Journal / To-Do / Trips / Projects produces errors like *"Failed to create daily note. Folder 'beacon/daily' not found."*
 >
-> The workshop-side `.gitignore` (v0.22.1+) masks the surfaced untracked artifacts so `beacon status` reports clean. Linux and case-sensitive macOS volumes materialize the dirs separately — the `.gitignore` entries are no-ops for them. See also [landmines.md #18](landmines.md) for the inside-vault `Beacon/` git-managed posture.
+> **Root cause:** The workshop clone at `Beacon/` (capital B) aliases the entire blueprint module-directory namespace at `beacon/<module>/` (lowercase, per [landmines.md #11](landmines.md)). Blueprint `module_directory` mkdirs from `bash install.sh` land **inside** `<vault>/Beacon/` instead of at vault root. Even though APFS resolves `beacon` ≡ `Beacon` to the same physical inode, **Obsidian's vault index is case-sensitive at the app layer** — the indexed folder is `Beacon/daily`, but the daily-notes plugin's configured `folder` is `beacon/daily`, and the lookup fails.
+>
+> **Workshop-side `.gitignore` (v0.22.1+)** masks the dirty-tree symptom for `beacon status` but does NOT fix the runtime breakage.
+>
+> **Affected:** macOS users on APFS-default volumes (the vast majority). Linux and case-sensitive macOS volumes materialize `<vault>/beacon/<module>/` separately from `<vault>/Beacon/` and work correctly.
+>
+> **Workaround until v0.23.0:** none. Blueprints that materialize content under `beacon/<module>/` are functionally broken on macOS APFS. The `beacon` CLI verbs, `Beacon/Scripts/activate.sh`, and the workshop git tree all work normally — it's blueprint runtime entry points (Daily Notes plugin, Kanban-plugin board files, finance/journal/to-do nav-buttons) that fail.
+>
+> **Fix planned for v0.23.0:** rename the workshop clone dir from `Beacon/` to a non-colliding name (candidates under brainstorm; the lowercase `beacon/` namespace stays per landmine #11). v0.22.0 curl-bootstrapped vaults will need a one-time migration. See [landmines.md #18](landmines.md) for the inside-vault `Beacon/` git-managed posture.
 
 ---
 
