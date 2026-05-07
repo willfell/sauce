@@ -196,10 +196,145 @@ async function caseC10WizardDelegates() {
     });
 }
 
+// C11: cmd-bootstrap parses --non-interactive and threads to runBootstrap
+async function caseC11BootstrapNonInteractive() {
+    const label = "C11 cmd-bootstrap parses --non-interactive";
+    await withTempVault({}, async (vaultPath) => {
+        // Stub workshop manifest so cmd-bootstrap can read banner version.
+        fs.mkdirSync(path.join(vaultPath, "Beacon/platform"), { recursive: true });
+        fs.writeFileSync(path.join(vaultPath, "Beacon/platform/manifest.json"),
+            JSON.stringify({ workshop_version: "0.22.1", mechanisms: [], blueprints: [] }, null, 2));
+
+        // Pre-load bootstrap module + monkey-patch runBootstrap on the resolved module
+        // so we can capture opts. Using `require("../bootstrap.js")` matches what
+        // cmd-bootstrap.js does internally — same module instance.
+        const bootstrap = require("../bootstrap.js");
+        const originalRunBootstrap = bootstrap.runBootstrap;
+        const originalPhaseWriteActivation = bootstrap.phaseWriteActivation;
+        let captured = null;
+        bootstrap.runBootstrap = async (opts) => { captured = opts; return { fetched: [], skipped: [], failed: [] }; };
+        bootstrap.phaseWriteActivation = async () => ({});
+        try {
+            const cmd = require("../cli/cmd-bootstrap.js");
+            const ctx = {
+                vaultPath,
+                workshopPath: path.join(vaultPath, "Beacon"),
+                workshopManifest: { workshop_version: "0.22.1" }
+            };
+            await cmd.run(ctx, ["--vault", vaultPath, "--non-interactive"]);
+            assertTrue(captured !== null, label + ": runBootstrap invoked");
+            assertEqual(captured.nonInteractive, true, label + ": nonInteractive=true");
+        } finally {
+            bootstrap.runBootstrap = originalRunBootstrap;
+            bootstrap.phaseWriteActivation = originalPhaseWriteActivation;
+        }
+    });
+}
+
+// C12: cmd-bootstrap parses --mechanisms=all and threads to runBootstrap.wizardDefaults
+async function caseC12BootstrapMechanismsAll() {
+    const label = "C12 cmd-bootstrap parses --mechanisms=all";
+    await withTempVault({}, async (vaultPath) => {
+        fs.mkdirSync(path.join(vaultPath, "Beacon/platform"), { recursive: true });
+        fs.writeFileSync(path.join(vaultPath, "Beacon/platform/manifest.json"),
+            JSON.stringify({ workshop_version: "0.22.1", mechanisms: [], blueprints: [] }, null, 2));
+        const bootstrap = require("../bootstrap.js");
+        const originalRunBootstrap = bootstrap.runBootstrap;
+        const originalPhaseWriteActivation = bootstrap.phaseWriteActivation;
+        let captured = null;
+        bootstrap.runBootstrap = async (opts) => { captured = opts; return { fetched: [], skipped: [], failed: [] }; };
+        bootstrap.phaseWriteActivation = async () => ({});
+        try {
+            const cmd = require("../cli/cmd-bootstrap.js");
+            const ctx = {
+                vaultPath,
+                workshopPath: path.join(vaultPath, "Beacon"),
+                workshopManifest: { workshop_version: "0.22.1" }
+            };
+            await cmd.run(ctx, ["--vault", vaultPath, "--non-interactive", "--mechanisms=all"]);
+            assertTrue(captured !== null, label + ": runBootstrap invoked");
+            assertTrue(captured.wizardDefaults && captured.wizardDefaults.mechanisms === "all",
+                label + ": wizardDefaults.mechanisms = 'all'");
+        } finally {
+            bootstrap.runBootstrap = originalRunBootstrap;
+            bootstrap.phaseWriteActivation = originalPhaseWriteActivation;
+        }
+    });
+}
+
+// C13: cmd-bootstrap parses --blueprints=daily,journal as CSV
+async function caseC13BootstrapBlueprintsCsv() {
+    const label = "C13 cmd-bootstrap parses --blueprints=daily,journal";
+    await withTempVault({}, async (vaultPath) => {
+        fs.mkdirSync(path.join(vaultPath, "Beacon/platform"), { recursive: true });
+        fs.writeFileSync(path.join(vaultPath, "Beacon/platform/manifest.json"),
+            JSON.stringify({ workshop_version: "0.22.1", mechanisms: [], blueprints: [] }, null, 2));
+        const bootstrap = require("../bootstrap.js");
+        const originalRunBootstrap = bootstrap.runBootstrap;
+        const originalPhaseWriteActivation = bootstrap.phaseWriteActivation;
+        let captured = null;
+        bootstrap.runBootstrap = async (opts) => { captured = opts; return { fetched: [], skipped: [], failed: [] }; };
+        bootstrap.phaseWriteActivation = async () => ({});
+        try {
+            const cmd = require("../cli/cmd-bootstrap.js");
+            const ctx = {
+                vaultPath,
+                workshopPath: path.join(vaultPath, "Beacon"),
+                workshopManifest: { workshop_version: "0.22.1" }
+            };
+            await cmd.run(ctx, ["--vault", vaultPath, "--non-interactive", "--blueprints=daily,journal"]);
+            assertTrue(captured !== null, label + ": runBootstrap invoked");
+            const bp = captured.wizardDefaults && captured.wizardDefaults.blueprints;
+            assertTrue(Array.isArray(bp) && bp.length === 2 && bp[0] === "daily" && bp[1] === "journal",
+                label + ": wizardDefaults.blueprints = ['daily','journal']");
+        } finally {
+            bootstrap.runBootstrap = originalRunBootstrap;
+            bootstrap.phaseWriteActivation = originalPhaseWriteActivation;
+        }
+    });
+}
+
+// C14: wizard nonInteractive branch defaults selectedMechs to DEFAULT_MECHANISMS_CHECKED
+async function caseC14WizardNonInteractiveDefaults() {
+    const label = "C14 wizard nonInteractive defaults match interactive defaults";
+    await withTempVault({}, async (vaultPath) => {
+        // Set up a workshop manifest at the resolved path so the wizard's
+        // CF-3 manifest-load branch finds it (defaults populated for valid pins).
+        fs.mkdirSync(path.join(vaultPath, "Beacon/platform"), { recursive: true });
+        fs.writeFileSync(path.join(vaultPath, "Beacon/platform/manifest.json"),
+            JSON.stringify({
+                workshop_version: "0.22.1",
+                mechanisms: [
+                    { name: "customjs-guard", version: "1.0.0" },
+                    { name: "nav-buttons", version: "2.5.2" },
+                    { name: "cards", version: "0.2.3" },
+                    { name: "beacon-button", version: "0.1.0" },
+                    { name: "styling", version: "0.1.2" },
+                    { name: "validator", version: "0.1.1" }   // NOT in default-checked
+                ],
+                blueprints: []
+            }, null, 2));
+
+        const wizardMod = require("../bootstrap-lib/wizard.js");
+        const r = await wizardMod.runFirstRunWizard({
+            vaultPath,
+            workshopManifest: null,    // force CF-3 manifest-load
+            nonInteractive: true,
+            defaults: {}               // no overrides — exercise default fallback
+        });
+        const subscribedNames = (r.subscription.mechanisms || []).map(m => m.name).sort();
+        const expected = ["beacon-button", "cards", "customjs-guard", "nav-buttons", "styling"];
+        assertEqual(JSON.stringify(subscribedNames), JSON.stringify(expected),
+            label + ": 5 default mechs (NOT including validator)");
+    });
+}
+
 const cases = [
     caseC1AncestorWalk, caseC2BeaconVaultEnv, caseC3NotInVault, caseC4UnknownVerb,
     caseC5StatusClean, caseC6StatusDrift, caseC7UpdateFFOnly, caseC8UpdateDirtyRefusal,
-    caseC9UpdateForceOverride, caseC10WizardDelegates
+    caseC9UpdateForceOverride, caseC10WizardDelegates,
+    caseC11BootstrapNonInteractive, caseC12BootstrapMechanismsAll,
+    caseC13BootstrapBlueprintsCsv, caseC14WizardNonInteractiveDefaults
 ];
 
 async function main() {

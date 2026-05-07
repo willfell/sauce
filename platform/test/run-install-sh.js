@@ -42,6 +42,11 @@ function runInstallSh(env, vaultPath, extraStdin) {
         { env, input: extraStdin || "", encoding: "utf8" });
 }
 
+function runInstallShRaw(env, args) {
+    return spawnSync("bash", [INSTALL_SH].concat(args || []),
+        { env, encoding: "utf8" });
+}
+
 // I1: missing node detected
 function caseI1MissingNode() {
     const label = "I1 install.sh fails loud when node missing";
@@ -67,7 +72,7 @@ function caseI2MissingGit() {
         writeShim(shimDir, "node", "exit 0");
         writeShim(shimDir, "npm", "exit 0");
     }, (tmp, shimDir, env) => {
-        env.PATH = shimDir + ":/bin:/usr/bin";
+        env.PATH = shimDir + ":/bin";  // drop /usr/bin so system git can't be found
         const r = runInstallSh(env, tmp);
         assertTrue(r.status !== 0, label + ": exit non-zero");
         assertTrue(/git/i.test(r.stderr || r.stdout), label + ": message mentions git");
@@ -189,9 +194,81 @@ esac
     });
 }
 
+// I7: install.sh forwards --non-interactive to node CLI argv
+function caseI7NonInteractivePropagation() {
+    const label = "I7 install.sh forwards --non-interactive to node CLI";
+    withShimEnv((tmp, shimDir) => {
+        const vaultPath = path.join(tmp, "vault");
+        fs.mkdirSync(vaultPath, { recursive: true });
+        // git shim — same as I3/I6
+        writeShim(shimDir, "git", `
+case "$1" in
+  clone)
+    shift
+    while [[ "$1" == --* ]]; do shift; done
+    DEST="$2"
+    mkdir -p "$DEST/platform/cli"
+    echo '{ "workshop_version": "0.22.1", "mechanisms": [], "blueprints": [], "foundational_plugins": [] }' > "$DEST/platform/manifest.json"
+    cat > "$DEST/platform/cli/beacon-cli.js" <<'JS'
+require("fs").writeFileSync(require("path").join(process.env.ARGV_MARKER || ".", ".argv"), JSON.stringify(process.argv));
+JS
+    exit 0 ;;
+  *) exit 0 ;;
+esac
+        `);
+        writeShim(shimDir, "npm", "exit 0");
+        writeShim(shimDir, "node", "exec \"" + process.execPath + "\" \"$@\"");
+    }, (tmp, shimDir, env) => {
+        env.PATH = shimDir + ":" + process.env.PATH;
+        env.ARGV_MARKER = tmp;
+        const vaultPath = path.join(tmp, "vault");
+        runInstallShRaw(env, ["--vault", vaultPath, "--non-interactive"]);
+        const argvPath = path.join(tmp, ".argv");
+        assertTrue(fs.existsSync(argvPath), label + ": argv marker written");
+        const argv = JSON.parse(fs.readFileSync(argvPath, "utf8"));
+        assertTrue(argv.includes("--non-interactive"),
+            label + ": node CLI invoked with --non-interactive");
+    });
+}
+
+// I8: install.sh accepts --vault=PATH equals form (IMP-5 from v0.22.0 quality review)
+function caseI8EqualsForm() {
+    const label = "I8 install.sh --vault=PATH equals form";
+    withShimEnv((tmp, shimDir) => {
+        const vaultPath = path.join(tmp, "vault");
+        fs.mkdirSync(vaultPath, { recursive: true });
+        writeShim(shimDir, "git", `
+case "$1" in
+  clone)
+    shift
+    while [[ "$1" == --* ]]; do shift; done
+    DEST="$2"
+    mkdir -p "$DEST/platform/cli"
+    echo '{ "workshop_version": "0.22.1", "mechanisms": [], "blueprints": [], "foundational_plugins": [] }' > "$DEST/platform/manifest.json"
+    cat > "$DEST/platform/cli/beacon-cli.js" <<'JS'
+require("fs").writeFileSync(require("path").join(process.env.HANDOFF_MARKER || ".", ".handoff"), "ok");
+JS
+    exit 0 ;;
+  *) exit 0 ;;
+esac
+        `);
+        writeShim(shimDir, "npm", "exit 0");
+        writeShim(shimDir, "node", "exec \"" + process.execPath + "\" \"$@\"");
+    }, (tmp, shimDir, env) => {
+        env.PATH = shimDir + ":" + process.env.PATH;
+        env.HANDOFF_MARKER = tmp;
+        const vaultPath = path.join(tmp, "vault");
+        const r = runInstallShRaw(env, ["--vault=" + vaultPath, "--non-interactive"]);
+        assertTrue(r.status === 0, label + ": exit zero");
+        assertTrue(fs.existsSync(path.join(tmp, ".handoff")),
+            label + ": handoff marker written (parser accepted equals form)");
+    });
+}
+
 const cases = [
     caseI1MissingNode, caseI2MissingGit, caseI3ClonesIntoVault,
-    caseI4RefusesOverwrite, caseI5OverwriteBackup, caseI6ExecHandoff
+    caseI4RefusesOverwrite, caseI5OverwriteBackup, caseI6ExecHandoff,
+    caseI7NonInteractivePropagation, caseI8EqualsForm
 ];
 
 (async function main() {
