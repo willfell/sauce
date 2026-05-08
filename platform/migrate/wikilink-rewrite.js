@@ -57,6 +57,7 @@ const LEGACY_PATH_SUBSTITUTIONS = [
     { from: /Docs\/Meta\/Templates\//g, to: "ranch/templates/" },
     { from: /Docs\/Meta\/Views\//g, to: "ranch/views/" },
     { from: /[Bb]oards\/planning\//g, to: "spice/projects/" },
+    { from: /[Bb]oards\/trips\//g, to: "spice/trips/" },
     { from: /[Bb]oards\/kanban-cards\//g, to: "spice/boards/kanban-cards/" },
     { from: /[Bb]oards\/to-do\//g, to: "spice/boards/to-do/" },
     { from: /[Bb]oards\/Planning-Hub\.md/g, to: "spice/boards/Planning-Hub.md" },
