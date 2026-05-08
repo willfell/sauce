@@ -92,18 +92,12 @@ function rewriteAll(targetVaultRoot, planEntries) {
         const after = rewriteString(before);
         filesScanned++;
         if (after !== before) {
-            // Capture pre-rewrite mtime so the temp+rename below doesn't
-            // flatten Obsidian recency-sort. Orchestrator already set
-            // target mtime to source mtime in phase 4; we restore it here
-            // post-rewrite. Best-effort utimesSync.
-            let preserveMtime = null;
-            try { preserveMtime = fs.statSync(abs); } catch (_e) {}
             const tmp = abs + ".tmp-" + process.pid + "-" + Date.now();
             fs.writeFileSync(tmp, after, "utf8");
             fs.renameSync(tmp, abs);
-            if (preserveMtime) {
-                try { fs.utimesSync(abs, preserveMtime.atime, preserveMtime.mtime); } catch (_e) {}
-            }
+            // mtime preservation is applied at commit.js phase 4.6 (post-
+            // phase-4.5) so a single utimesSync sweep covers all rewritten
+            // files. In-line preserveMtime here was racing on macOS APFS.
             rewrites++;
         }
     }

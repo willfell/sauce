@@ -248,18 +248,32 @@ function _rewriteBlueprints(plan, paths, opts) {
         const srcAbs = path.join(fromAbs, entry.src);
         if (!fs.existsSync(srcAbs)) throw new Error(`commit rewrite: source missing for ${entry.src}`);
         m.migrate(entry, srcAbs, vaultPath, ctx);
-        // Preserve source mtime on the migrated file. Per-migrator atomic
-        // writes assign mtime=now, which would flatten Obsidian's
-        // recency-sort across an entire migrated batch. Best-effort: we
-        // never abort migration on a stat/utime failure.
-        try {
-            const tgtAbs = path.join(vaultPath, entry.tgt);
-            if (fs.existsSync(tgtAbs)) {
-                const st = fs.statSync(srcAbs);
-                fs.utimesSync(tgtAbs, st.atime, st.mtime);
-            }
-        } catch (_e) { /* best-effort */ }
     }
+    // mtime preservation is applied as the FINAL step in commit() after
+    // phase 4.5 wikilink-rewrite completes — not here. Two-step preservation
+    // (phase 4 + phase 4.5) was racing/failing on macOS APFS for files that
+    // got rewritten in phase 4.5; single post-all-writes utimesSync sweep is
+    // robust.
+}
+
+// Phase 4.6 — restore source mtime on every migrated rewrite_blueprint file
+// after phase 4 + 4.5 are complete. Best-effort: never aborts migration.
+function _preserveMtimes(plan, paths) {
+    const { vaultPath, fromAbs } = paths;
+    let restored = 0;
+    let failed = 0;
+    for (const entry of plan.planEntries) {
+        if (entry.action !== "rewrite_blueprint") continue;
+        try {
+            const srcAbs = path.join(fromAbs, entry.src);
+            const tgtAbs = path.join(vaultPath, entry.tgt);
+            if (!fs.existsSync(srcAbs) || !fs.existsSync(tgtAbs)) { continue; }
+            const st = fs.statSync(srcAbs);
+            fs.utimesSync(tgtAbs, st.atime, st.mtime);
+            restored++;
+        } catch (_e) { failed++; }
+    }
+    return { restored, failed };
 }
 
 // Phase 4.5 — cross-blueprint wikilink rewrite pass.
@@ -357,6 +371,8 @@ async function commit(plan, opts) {
         if (!process.env.SAUCE_TEST_MODE) console.log(`commit phase 4 — blueprint rewrites complete`);
         wikilinkResult = _wikilinkRewritePass(plan, paths);
         if (!process.env.SAUCE_TEST_MODE) console.log(`commit phase 4.5 — wikilink rewrite (${wikilinkResult.rewrites} files updated of ${wikilinkResult.filesScanned} scanned)`);
+        const mtimeResult = _preserveMtimes(plan, paths);
+        if (!process.env.SAUCE_TEST_MODE) console.log(`commit phase 4.6 — mtime preserve (${mtimeResult.restored} restored, ${mtimeResult.failed} failed)`);
     } catch (err) {
         if (!process.env.SAUCE_TEST_MODE) console.error(`commit ABORT: ${err.message}\nrestoring from backup...`);
         try { restoreFromBackup(paths.vaultPath, paths.backupDir); } catch (re) {
