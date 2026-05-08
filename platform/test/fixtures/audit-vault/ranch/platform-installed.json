@@ -1,0 +1,5 @@
+{
+  "blueprints": ["trips", "project", "people", "meetings", "daily"],
+  "mechanisms": [],
+  "workshop_version": "0.29.0"
+}

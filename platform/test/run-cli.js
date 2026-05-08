@@ -658,6 +658,58 @@ async function caseC28HelpMentionsMigrate() {
     assertTrue(/\bmigrate\b/.test(joined), label);
 }
 
+// =====================================================================
+// v0.29.0 — `sauce audit` verb cases (CA1-CA5)
+// =====================================================================
+
+// CA1 — cmd-audit._parseFlags parses --vault <path>
+async function caseCA1AuditParseVaultFlag() {
+    const label = "CA1 cmd-audit._parseFlags parses --vault <path>";
+    const cmdAudit = require("../cli/cmd-audit");
+    const flags = cmdAudit._parseFlags(["--vault", "/tmp/v"]);
+    assertEqual(flags.vault, "/tmp/v", label);
+}
+
+// CA2 — multi-flag together
+async function caseCA2AuditParseMultiFlag() {
+    const label = "CA2 cmd-audit._parseFlags parses multi-flag combo";
+    const cmdAudit = require("../cli/cmd-audit");
+    const flags = cmdAudit._parseFlags(["--blueprint", "trips", "--output-file", "foo.md", "--no-untracked-check", "--quiet"]);
+    assertEqual(flags.blueprint, "trips", label + " --blueprint");
+    assertEqual(flags.outputFile, "foo.md", label + " --output-file");
+    assertEqual(flags.untrackedCheck, false, label + " --no-untracked-check");
+    assertEqual(flags.quiet, true, label + " --quiet");
+}
+
+// CA3 — _runForTest throws exitCode 2 when vault is not sauce
+async function caseCA3AuditExitsWhenNotSauceVault() {
+    const label = "CA3 cmd-audit._runForTest throws exitCode 2 when not a sauce vault";
+    const cmdAudit = require("../cli/cmd-audit");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-cli-ca3-"));
+    try {
+        let exitCode = null;
+        try { await cmdAudit._runForTest({ vaultPath: dir, untrackedCheck: false }); }
+        catch (e) { exitCode = e.exitCode; }
+        assertEqual(exitCode, 2, label);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+}
+
+// CA4 — VERBS registry has audit
+async function caseCA4AuditInVerbsRegistry() {
+    const label = "CA4 sauce-cli.js VERBS includes audit";
+    const cliText = fs.readFileSync(path.join(__dirname, "..", "cli", "sauce-cli.js"), "utf8");
+    assertTrue(/audit\s*:\s*['"]\.\/cmd-audit\.js['"]/.test(cliText), label);
+}
+
+// CA5 — cmd-help.js mentions audit
+async function caseCA5HelpMentionsAudit() {
+    const label = "CA5 cmd-help output lists audit verb";
+    const cmd = require("../cli/cmd-help.js");
+    const out = await cmd.run(null, []);
+    const joined = (out && Array.isArray(out.lines)) ? out.lines.join("\n") : "";
+    assertTrue(/\baudit\b/.test(joined), label);
+}
+
 const cases = [
     caseC1AncestorWalk, caseC2SauceVaultEnv, caseC3NotInVault, caseC4UnknownVerb,
     caseC5StatusClean, caseC6StatusDrift, caseC7UpdateFFOnly, caseC8UpdateDirtyRefusal,
@@ -671,7 +723,10 @@ const cases = [
     caseC22StatusSilentWhenNoDvBlueprint,  // v0.26.1 P1-3c
     caseC23MigrateParseFlagsFromSpace, caseC24MigrateParseFlagsFromEquals,
     caseC25MigrateExitsOnMissingFrom, caseC26MigrateExitsOnNonexistentFrom,
-    caseC27MigrateInVerbsRegistry, caseC28HelpMentionsMigrate  // v0.28.0
+    caseC27MigrateInVerbsRegistry, caseC28HelpMentionsMigrate,  // v0.28.0
+    caseCA1AuditParseVaultFlag, caseCA2AuditParseMultiFlag,
+    caseCA3AuditExitsWhenNotSauceVault, caseCA4AuditInVerbsRegistry,
+    caseCA5HelpMentionsAudit  // v0.29.0
 ];
 
 async function main() {

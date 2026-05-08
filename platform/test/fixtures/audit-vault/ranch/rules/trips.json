@@ -1,0 +1,22 @@
+{
+  "contributions": {
+    "trips": [
+      {
+        "scope": { "path_glob": "spice/trips/*/Trip Atlas.md" },
+        "required_frontmatter": {
+          "type":       { "required": true, "type": "string", "equals": "trip" },
+          "start_date": { "required": true, "type": "string", "matches": "^\\d{4}-\\d{2}-\\d{2}$" },
+          "end_date":   { "required": true, "type": "string", "matches": "^\\d{4}-\\d{2}-\\d{2}$" },
+          "location":   { "required": true, "type": "string" }
+        },
+        "required_tags": [{ "tag": "trip" }]
+      },
+      {
+        "scope": { "path_glob": "spice/trips/Trips.md" },
+        "required_frontmatter": {
+          "cssclasses": { "required": true, "type": "list", "contains": ["wide", "cards"] }
+        }
+      }
+    ]
+  }
+}
