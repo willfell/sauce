@@ -466,7 +466,8 @@ function _coerceScalar(raw) {
 
     // Inline empty list. Sauce templates emit `workstreams: []` for
     // present-but-empty list fields. Distinguish from `workstreams:` (null).
-    if (s === "[]") return [];
+    // Tolerate inner whitespace (`[ ]`, `[  ]`) for hand-edited frontmatter.
+    if (/^\[\s*\]$/.test(s)) return [];
 
     // Double-quoted
     if (s.length >= 2 && s.startsWith('"') && s.endsWith('"')) {

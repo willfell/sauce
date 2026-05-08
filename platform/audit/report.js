@@ -113,6 +113,10 @@ exports.formatReport = function (result, vaultPath) {
         const blueprintNames = Object.keys(grouped).sort();
         for (const bp of blueprintNames) {
             const bucket = grouped[bp];
+            // Stable sort within bucket: by (file, rule). Without this, fs.readdirSync ordering
+            // varies across filesystems (alphabetical on macOS APFS, insertion-order on some Linux ext4)
+            // — diffing reports across machines would show line-shuffles even when violations match.
+            bucket.sort((a, b) => (a.file || "").localeCompare(b.file || "") || (a.rule || "").localeCompare(b.rule || ""));
             lines.push(`### ${bp} (${bucket.length} violation${bucket.length === 1 ? "" : "s"})`);
             lines.push("");
             lines.push("| File | Rule | Severity | Message |");
