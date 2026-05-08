@@ -20,7 +20,7 @@ let passed = 0, failed = 0;
 function assertEqual(a, b, msg) { if (a !== b) { failed++; console.error(`FAIL ${msg}: got ${JSON.stringify(a)} expected ${JSON.stringify(b)}`); } else passed++; }
 function assertTrue(c, msg)     { if (!c)      { failed++; console.error(`FAIL ${msg}`); } else passed++; }
 function assertContains(haystack, needle, msg) { if (!String(haystack).includes(needle)) { failed++; console.error(`FAIL ${msg}: ${JSON.stringify(haystack).slice(0,200)} does not contain ${JSON.stringify(needle)}`); } else passed++; }
-function withTempVault(fn) { const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-audit-")); try { return fn(dir); } finally { fs.rmSync(dir, { recursive: true, force: true }); } }
+async function withTempVault(fn) { const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-audit-")); try { return await fn(dir); } finally { fs.rmSync(dir, { recursive: true, force: true }); } }
 
 function makeSauceVault(dir, opts = {}) {
   // Creates ranch/platform-installed.json + ranch/rules/<bp>.json files
@@ -43,8 +43,12 @@ function writeNote(dir, relPath, frontmatter, body = "") {
   fs.mkdirSync(path.dirname(full), { recursive: true });
   let fm = "---\n";
   for (const [k, v] of Object.entries(frontmatter)) {
-    if (Array.isArray(v)) { fm += `${k}:\n`; for (const x of v) fm += `  - ${JSON.stringify(x)}\n`; }
-    else fm += `${k}: ${JSON.stringify(v)}\n`;
+    if (Array.isArray(v)) {
+      if (v.length === 0) { fm += `${k}: []\n`; }   // empty list → inline form (YAML "key:" alone is null, not empty list)
+      else { fm += `${k}:\n`; for (const x of v) fm += `  - ${JSON.stringify(x)}\n`; }
+    } else {
+      fm += `${k}: ${JSON.stringify(v)}\n`;
+    }
   }
   fm += "---\n" + body;
   fs.writeFileSync(full, fm);
@@ -432,7 +436,7 @@ async function caseAU25() {
       ]
     }];
     makeSauceVault(dir, { rules: { meetings: rules } });
-    writeNote(dir, "spice/meetings/notes/A.md", { type: "meeting", tags: ["meetings-hub"] });  // matches BOTH; first wins → meeting branch
+    writeNote(dir, "spice/meetings/notes/A.md", { type: "meeting", tags: ["meeting", "meetings-hub"] });  // matches BOTH branches' when-predicates; first-match resolution → meeting branch fires; tags satisfy that branch's required_tags → 0 violations
     const { runAudit } = require("../audit/walker");
     const result = await runAudit({ vaultPath: dir, untrackedCheck: false });
     // First branch matches: required_tags includes "meeting"; "meetings-hub" present but not required by first branch.

@@ -1,6 +1,6 @@
 {
   "name": "people",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "kind": "blueprint",
   "module_directory": "people",
   "description": "Per-person notes under spice/people/<First Last>.md, with hub at spice/people/People.md and shared rendering via people-rendering mechanism. Materializes Templater folder template + global People nav-button.",
@@ -37,5 +37,16 @@
       "message": "people@0.1.0 installed. Open spice/people/People.md to see the hub. Click '+ New Person' to create. Existing People notes (if migrated from a consumer vault) survive as long as they live under spice/people/."
     }
   ],
-  "rule_fragments": []
+  "rule_fragments": [
+    {
+      "target": "people",
+      "fragment": {
+        "scope": { "path_glob": "spice/people/*.md", "exclude_basenames": ["People.md"] },
+        "required_frontmatter": {
+          "tags": { "required": true, "type": "list", "contains": ["person"] }
+        },
+        "naming_pattern": "^[A-Z][a-zA-Z'\\- ]+ [A-Z][a-zA-Z'\\- ]+\\.md$"
+      }
+    }
+  ]
 }

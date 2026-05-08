@@ -1,6 +1,6 @@
 {
   "name": "meetings",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "kind": "blueprint",
   "module_directory": "meetings",
   "description": "Hub-centric meeting notes: one Meetings Hub per day at spice/meetings/hubs/YYYY/MM-MMMM/ aggregating individual meeting notes at spice/meetings/notes/ via inline NewMeetingButton + MeetingsHubCards CustomJS classes. v0.1.2: filename pattern <Name>-YYYY-MM-DD (Meetings-YYYY-MM-DD.md hub; <title>-YYYY-MM-DD.md per-meeting); hub folder date-routed; class regex date-extract. v0.2.0: MeetingsHubCards migrated to BeaconCards via row layout + async pre-fetch adapter; per-badge SVG icons + secondaryText subtitle preserved end-to-end. v0.3.0 MINOR: pilot integration with people-rendering@0.1.0 mechanism — MeetingsHubCards subtitle slot renders attendee chips for registered People (those with spice/people/<name>.md notes) via PeopleRendering.renderChip callback (uses cards@0.2.4 subtitle-callback polymorphism); falls back to comma-string when no registered People; new ## Attendees chip-rendering dataviewjs block in Meeting.md template above the bullet list. NewMeetingButton attendee autocomplete deferred to v0.27.x carry.",
@@ -46,5 +46,29 @@
       "message": "Meetings blueprint installed at spice/meetings/. REQUIRED: enable the Templater community plugin if not already enabled. Click 'Meetings' to open today's meetings hub at spice/meetings/hubs/YYYY-MM-DD-Meetings.md. From the hub, click 'New Meeting' to create individual meeting notes at spice/meetings/notes/YYYY/MM-MMMM/YYYY-MM-DD <title>.md (you'll be prompted for title and attendees). Hub renders today's meetings as cards with status badges; meetings also appear in the daily dashboard's Today's Meetings panel."
     }
   ],
-  "rule_fragments": []
+  "rule_fragments": [
+    {
+      "target": "meetings",
+      "fragment": {
+        "scope": { "path_glob": "spice/meetings/notes/**/*.md" },
+        "frontmatter_branch": [
+          {
+            "when": { "frontmatter": { "type": "meeting" } },
+            "required_frontmatter": {
+              "date":      { "required": true, "type": "string" },
+              "attendees": { "required": true, "type": "list" }
+            },
+            "required_tags": [{ "tag": "meeting" }]
+          }
+        ]
+      }
+    },
+    {
+      "target": "meetings",
+      "fragment": {
+        "scope": { "path_glob": "spice/meetings/hubs/**/*.md" },
+        "required_tags": [{ "tag": "meetings-hub" }]
+      }
+    }
+  ]
 }

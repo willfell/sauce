@@ -12,6 +12,10 @@
 //   });
 //
 // Returns: { fixes: [{file, op, ...}], violations: [{rule, severity, message}] }
+//
+// v0.29.0 — additive predicates (equals / matches / contains) added to checkFrontmatter
+// for read-side compatibility with the new rule_fragments schema. Full audit logic
+// lives in platform/audit/rule-runner.js (Node CLI); shared core extraction deferred to v0.29.1.
 
 function resolveTFile(input, app) {
   if (!input) return app.workspace.getActiveFile() || null;
@@ -100,6 +104,17 @@ async function checkFrontmatter(ctx, gr, mr) {
           message: `Field ${key} should be ${spec.type}, got ${actual}`,
         });
       }
+    }
+    // NEW v0.29.0 — additive predicates
+    if (spec.equals !== undefined && ctx.fm[key] !== undefined && ctx.fm[key] !== spec.equals) {
+      ctx.result.violations.push({ rule: `required_frontmatter.${key}.equals`, severity: "error", message: `Field ${key} must equal ${JSON.stringify(spec.equals)}` });
+    }
+    if (spec.matches && typeof ctx.fm[key] === "string" && !new RegExp(spec.matches).test(ctx.fm[key])) {
+      ctx.result.violations.push({ rule: `required_frontmatter.${key}.matches`, severity: "error", message: `Field ${key} does not match pattern ${spec.matches}` });
+    }
+    if (spec.contains && Array.isArray(ctx.fm[key]) && !spec.contains.every(x => ctx.fm[key].includes(x))) {
+      const missing = spec.contains.filter(x => !ctx.fm[key].includes(x));
+      ctx.result.violations.push({ rule: `required_frontmatter.${key}.contains`, severity: "error", message: `Field ${key} missing: ${missing.join(", ")}` });
     }
   }
 }

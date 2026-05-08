@@ -923,7 +923,12 @@ async function applyRuleFragment(tp, frag, sourceName, variables, history, git) 
     }
   }
   existing.contributions = existing.contributions || {};
-  existing.contributions[sourceName] = frag.fragment;
+  existing.contributions[sourceName] = existing.contributions[sourceName] || [];
+  if (!Array.isArray(existing.contributions[sourceName])) {
+    // Backward-compat: legacy single-value contribution. Wrap.
+    existing.contributions[sourceName] = [existing.contributions[sourceName]];
+  }
+  existing.contributions[sourceName].push(frag.fragment);
   await adapter.write(rulePath, JSON.stringify(existing, null, 2));
 }
 
@@ -4511,6 +4516,11 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     // run-install.js relies on (it expects `require(installerPath)` to return
     // a function), while also exposing `.runInstall(vaultPath, opts)` for
     // bootstrap.js to invoke.
+    //
+    // v0.29.0 S2.5 — additively expose `applyRuleFragment` for unit testing
+    // by run-helper-cases.js (HC-RF1/HC-RF2/HC-RF3 cover the array-support
+    // patch). Pure additive; does not affect the function-as-default export.
+    module.exports.applyRuleFragment = applyRuleFragment;
     //
     // CF-2: by default, capture run-install.js's stdio (Phase B/C surfaced
     // 2200-line JSON dumps mixed into the user's terminal). We tee the

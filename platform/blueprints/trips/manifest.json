@@ -1,6 +1,6 @@
 {
   "name": "trips",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "kind": "blueprint",
   "module_directory": "trips",
   "description": "Per-trip ecosystem under spice/trips/<slug>/. Each trip is a flat folder with an atlas note + 5 baseline sections (Flights, Stay, Packing List, To Do, Notes). Hub at spice/trips/Trips.md lists trips as BeaconCards row-layout cards sorted upcoming-first. 'New Trip' button scaffolds the directory tree from a name + dates + location dialog. Per-trip nav buttons auto-discover sibling sections.",
@@ -40,5 +40,28 @@
       "message": "Trips blueprint v0.1.0 installed at spice/trips/. Open spice/trips/Trips.md and click 'New Trip' to scaffold your first trip. Each trip lives at spice/trips/<slug>/ with an atlas + 5 section notes; per-trip nav buttons auto-discover sibling sections so user-added files get nav coverage automatically. Cmd+R required after this install to load TripsHubCards + TripNavButtons CustomJS classes."
     }
   ],
-  "rule_fragments": []
+  "rule_fragments": [
+    {
+      "target": "trips",
+      "fragment": {
+        "scope": { "path_glob": "spice/trips/*/Trip Atlas.md" },
+        "required_frontmatter": {
+          "type":       { "required": true, "type": "string", "equals": "trip" },
+          "start_date": { "required": true, "type": "string", "matches": "^\\d{4}-\\d{2}-\\d{2}$" },
+          "end_date":   { "required": true, "type": "string", "matches": "^\\d{4}-\\d{2}-\\d{2}$" },
+          "location":   { "required": true, "type": "string" }
+        },
+        "required_tags": [{ "tag": "trip" }]
+      }
+    },
+    {
+      "target": "trips",
+      "fragment": {
+        "scope": { "path_glob": "spice/trips/Trips.md" },
+        "required_frontmatter": {
+          "cssclasses": { "required": true, "type": "list", "contains": ["wide", "cards"] }
+        }
+      }
+    }
+  ]
 }

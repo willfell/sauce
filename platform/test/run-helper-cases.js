@@ -58,6 +58,48 @@ function assertTrue(label, cond, hint) {
   return true;
 }
 
+// v0.29.0 S2.5 — assertEqual/withTempVault/makeTpStub helpers for HC-RF{1,2,3}
+// (test the install.js applyRuleFragment array-support patch). These are
+// additive — preexisting cases use assertEq/assertTrue + scaffoldVault.
+function assertEqual(actual, expected, label) {
+  // Note: argument order matches the v0.29.0 plan's HC-RF case bodies
+  // (actual, expected, label) — distinct from the older `assertEq(label, actual, expected)`.
+  const a = JSON.stringify(actual);
+  const e = JSON.stringify(expected);
+  if (a !== e) {
+    fail++;
+    failures.push(`FAIL: ${label}\n  expected ${e}\n  actual   ${a}`);
+    return false;
+  }
+  pass++;
+  console.log(`  PASS: ${label}`);
+  return true;
+}
+
+async function withTempVault(fn) {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-rf-"));
+  try {
+    await fn(dir);
+  } finally {
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_e) {}
+  }
+}
+
+function makeTpStub(dir) {
+  return {
+    app: {
+      vault: {
+        adapter: {
+          async exists(p)         { return fs.existsSync(path.join(dir, p)); },
+          async mkdir(p)          { fs.mkdirSync(path.join(dir, p), { recursive: true }); },
+          async read(p)           { return fs.readFileSync(path.join(dir, p), "utf8"); },
+          async write(p, content) { fs.writeFileSync(path.join(dir, p), content); },
+        },
+      },
+    },
+  };
+}
+
 async function scaffoldVault(scratchDir, opts) {
   // opts = { templaterData, slashCommanderData, manifest }
   await fsp.mkdir(path.join(scratchDir, "ranch/templater"), { recursive: true });
@@ -3596,6 +3638,59 @@ async function caseTW1TemplatesNoTrailingWhitespace() {
   console.log(`  ${label}: ${filesScanned} files scanned, ${totalViolations} violations`);
 }
 
+// ============================================================
+// v0.29.0 S2.5 — applyRuleFragment array-support cases (HC-RF1/2/3)
+// Tests the install.js patch that makes contributions[sourceName] accumulate
+// as an array (was: overwrite). Multiple rule_fragments[] from the same
+// source (trips has 2, meetings has 2) now coexist instead of last-wins.
+// ============================================================
+
+// HC-RF1 — applyRuleFragment writes contributions[sourceName] as ARRAY (not single value)
+async function caseHCRF1() {
+  console.log("\n--- Case HC-RF1: applyRuleFragment writes contributions[sourceName] as ARRAY ---");
+  await withTempVault(async (dir) => {
+    fs.mkdirSync(path.join(dir, "ranch/rules"), { recursive: true });
+    const tp = makeTpStub(dir);
+    const { applyRuleFragment } = require("../install");
+    const frag = { target: "trips", fragment: { required_tags: [{ tag: "trip" }] } };
+    await applyRuleFragment(tp, frag, "trips", { rules_path: "ranch/rules" }, [], { commit: "x", tag: "x", dirty: false });
+    const written = JSON.parse(fs.readFileSync(path.join(dir, "ranch/rules/trips.json"), "utf8"));
+    assertTrue("HC-RF1: contributions[trips] is array", Array.isArray(written.contributions.trips));
+    assertEqual(written.contributions.trips.length, 1, "HC-RF1: one fragment recorded");
+  });
+}
+
+// HC-RF2 — second call from same source APPENDS (does not overwrite)
+async function caseHCRF2() {
+  console.log("\n--- Case HC-RF2: second call from same source APPENDS (does not overwrite) ---");
+  await withTempVault(async (dir) => {
+    fs.mkdirSync(path.join(dir, "ranch/rules"), { recursive: true });
+    const tp = makeTpStub(dir);
+    const { applyRuleFragment } = require("../install");
+    await applyRuleFragment(tp, { target: "trips", fragment: { required_tags: [{ tag: "trip" }] } }, "trips", { rules_path: "ranch/rules" }, [], { commit: "x", tag: "x", dirty: false });
+    await applyRuleFragment(tp, { target: "trips", fragment: { naming_pattern: "^.*\\.md$" } }, "trips", { rules_path: "ranch/rules" }, [], { commit: "x", tag: "x", dirty: false });
+    const written = JSON.parse(fs.readFileSync(path.join(dir, "ranch/rules/trips.json"), "utf8"));
+    assertEqual(written.contributions.trips.length, 2, "HC-RF2: two fragments accumulated");
+  });
+}
+
+// HC-RF3 — legacy single-value contribution gets wrapped on next call
+async function caseHCRF3() {
+  console.log("\n--- Case HC-RF3: legacy single-value contribution gets wrapped on next call ---");
+  await withTempVault(async (dir) => {
+    fs.mkdirSync(path.join(dir, "ranch/rules"), { recursive: true });
+    // Pre-seed a legacy single-value contribution (pre-S2.5 shape).
+    fs.writeFileSync(path.join(dir, "ranch/rules/trips.json"),
+      JSON.stringify({ contributions: { trips: { naming_pattern: "old" } } }, null, 2));
+    const tp = makeTpStub(dir);
+    const { applyRuleFragment } = require("../install");
+    await applyRuleFragment(tp, { target: "trips", fragment: { required_tags: [{ tag: "trip" }] } }, "trips", { rules_path: "ranch/rules" }, [], { commit: "x", tag: "x", dirty: false });
+    const written = JSON.parse(fs.readFileSync(path.join(dir, "ranch/rules/trips.json"), "utf8"));
+    assertTrue("HC-RF3: legacy contribution wrapped in array", Array.isArray(written.contributions.trips));
+    assertEqual(written.contributions.trips.length, 2, "HC-RF3: legacy + new both present");
+  });
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -3675,6 +3770,11 @@ async function caseTW1TemplatesNoTrailingWhitespace() {
   await caseAS3PreservesNonDeclared();
   await caseAS4MalformedJsonGuard();
   await caseAS5BackupBeforeEdit();
+
+  // v0.29.0 S2.5 — applyRuleFragment array-support patch.
+  await caseHCRF1();
+  await caseHCRF2();
+  await caseHCRF3();
 
   // v0.20.0 docs polish cycle — trailing-whitespace lint.
   await caseTW1TemplatesNoTrailingWhitespace();
