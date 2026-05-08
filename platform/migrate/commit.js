@@ -281,8 +281,72 @@ function _wikilinkRewritePass(plan, paths) {
     return wikilinkRewrite.rewriteAll(paths.vaultPath, plan.planEntries);
 }
 
+// Phase 4.7 — post-write target verification. Walks every plan entry whose
+// action wrote a file (copy_verbatim or rewrite_blueprint) and asserts the
+// target exists at vault. Returns { verified, missing[] }. Never aborts —
+// we surface the report via console + migration.log so the user can manually
+// resolve drops without losing the rest of the migration. Discovered as
+// CF-10 in v0.28.0: 2 silent file-drops surfaced during real-vault runs
+// (Planning-Board.md verbatim + Find passport.md boards-rewrite). Isolated
+// reruns of the migrators succeed; the drops are full-run-environmental.
+function _verifyTargets(plan, paths) {
+    const { vaultPath } = paths;
+    const verified = [];
+    const missing = [];
+    for (const entry of plan.planEntries) {
+        if (entry.action !== "copy_verbatim" && entry.action !== "rewrite_blueprint") continue;
+        if (!entry.tgt) continue;
+        const tgtAbs = path.join(vaultPath, entry.tgt);
+        if (fs.existsSync(tgtAbs)) {
+            verified.push(entry.tgt);
+        } else {
+            missing.push({ src: entry.src, tgt: entry.tgt, action: entry.action, migrator: entry.migrator });
+        }
+    }
+    return { verified: verified.length, missing };
+}
+
+// Phase 4.8 — recover any phase 4.7 misses by re-invoking the appropriate
+// migrator (or verbatim) for each missing entry. Best-effort: per-entry
+// failures degrade to remaining-missing; never aborts. Returns the residual
+// missing[] after recovery attempts.
+function _recoverMissing(missingEntries, paths) {
+    if (!missingEntries || missingEntries.length === 0) return { recovered: 0, stillMissing: [] };
+    const { vaultPath, fromAbs } = paths;
+    const verbatim = require("./verbatim");
+    const migratorsDir = path.join(__dirname, "migrators");
+    const cache = {};
+    function _loadByName(name) {
+        if (name === "verbatim") return verbatim;
+        if (cache[name]) return cache[name];
+        const tryPath = path.join(migratorsDir, name + ".js");
+        if (fs.existsSync(tryPath)) {
+            cache[name] = require(tryPath);
+            return cache[name];
+        }
+        return null;
+    }
+    let recovered = 0;
+    const stillMissing = [];
+    for (const entry of missingEntries) {
+        try {
+            const m = entry.action === "copy_verbatim" ? verbatim : _loadByName(entry.migrator);
+            if (!m) { stillMissing.push(entry); continue; }
+            const srcAbs = path.join(fromAbs, entry.src);
+            if (!fs.existsSync(srcAbs)) { stillMissing.push(entry); continue; }
+            m.migrate(entry, srcAbs, vaultPath, {});
+            const tgtAbs = path.join(vaultPath, entry.tgt);
+            if (fs.existsSync(tgtAbs)) recovered++;
+            else stillMissing.push(entry);
+        } catch (_e) {
+            stillMissing.push(entry);
+        }
+    }
+    return { recovered, stillMissing };
+}
+
 // Phase 5 — finalize. Write migration.log + migration-plan.json.
-function _finalize(plan, paths, wikilinkResult) {
+function _finalize(plan, paths, wikilinkResult, verifyResult) {
     const { vaultPath, backupDir, fromAbs } = paths;
     const counts = {};
     for (const e of plan.planEntries) {
@@ -297,7 +361,8 @@ function _finalize(plan, paths, wikilinkResult) {
         counts,
         warnings: plan.warnings || [],
         collisions: plan.collisions || [],
-        wikilinkRewrites: wikilinkResult || null
+        wikilinkRewrites: wikilinkResult || null,
+        verification: verifyResult || null
     };
     try {
         _writeJsonAtomic(path.join(vaultPath, "migration.log"), log);
@@ -381,10 +446,28 @@ async function commit(plan, opts) {
         throw err;
     }
 
-    _finalize(plan, paths, wikilinkResult);
+    let verifyResult = _verifyTargets(plan, paths);
+    if (!process.env.SAUCE_TEST_MODE) console.log(`commit phase 4.7 — verify (${verifyResult.verified} verified, ${verifyResult.missing.length} missing)`);
+    if (verifyResult.missing.length > 0) {
+        const recoverResult = _recoverMissing(verifyResult.missing, paths);
+        if (!process.env.SAUCE_TEST_MODE) console.log(`commit phase 4.8 — recover (${recoverResult.recovered} recovered, ${recoverResult.stillMissing.length} still missing)`);
+        verifyResult = {
+            verified: verifyResult.verified + recoverResult.recovered,
+            missing: recoverResult.stillMissing,
+            recovered: recoverResult.recovered
+        };
+        if (recoverResult.stillMissing.length > 0 && !process.env.SAUCE_TEST_MODE) {
+            console.error(`commit phase 4.8 WARNING — ${recoverResult.stillMissing.length} target(s) still missing after recovery:`);
+            for (const e of recoverResult.stillMissing) {
+                console.error(`  ${e.action} ${e.migrator || "?"}: ${e.src} → ${e.tgt}`);
+            }
+        }
+    }
+
+    _finalize(plan, paths, wikilinkResult, verifyResult);
     if (!process.env.SAUCE_TEST_MODE) console.log(`commit phase 5 — finalize complete (migration.log + migration-plan.json written)`);
 
-    return { paths, wikilinkResult, ok: true };
+    return { paths, wikilinkResult, verifyResult, ok: true };
 }
 
-module.exports = { commit, restoreFromBackup, _precheck, _backup, _bootstrap, _carryVerbatim, _rewriteBlueprints, _wikilinkRewritePass, _finalize };
+module.exports = { commit, restoreFromBackup, _precheck, _backup, _bootstrap, _carryVerbatim, _rewriteBlueprints, _wikilinkRewritePass, _preserveMtimes, _verifyTargets, _recoverMissing, _finalize };

@@ -634,6 +634,83 @@ async function caseCM3RestoreOnFailure() {
     assertTrue(typeof c.restoreFromBackup === "function" || typeof c._restoreFromBackup === "function", "CM3 restore helper exposed");
 }
 
+// CF-10 coverage: phase 4.7 post-write verification + phase 4.8 recovery.
+async function caseCM4VerifyTargetsShape() {
+    console.log("=== CM4 — _verifyTargets returns {verified, missing[]} for plan entries ===");
+    const c = tryRequire("../migrate/commit");
+    if (c.__error) { _failed++; console.log("    FAIL CM4: unavailable"); return; }
+    assertTrue(typeof c._verifyTargets === "function", "CM4 _verifyTargets exposed");
+    return withTempVault(async (root) => {
+        const fromAbs = path.join(root, "src");
+        const tgt = path.join(root, "tgt");
+        fs.mkdirSync(fromAbs); fs.mkdirSync(tgt);
+        // Pre-create only one target.
+        fs.mkdirSync(path.join(tgt, "spice/x"), { recursive: true });
+        fs.writeFileSync(path.join(tgt, "spice/x/present.md"), "ok");
+        const plan = { planEntries: [
+            { action: "rewrite_blueprint", migrator: "boards", src: "src/p.md", tgt: "spice/x/present.md" },
+            { action: "rewrite_blueprint", migrator: "boards", src: "src/m.md", tgt: "spice/x/missing.md" },
+            { action: "copy_verbatim",     migrator: "verbatim", src: "src/v.md", tgt: "spice/x/missing-verbatim.md" }
+        ]};
+        const r = c._verifyTargets(plan, { vaultPath: tgt, fromAbs });
+        assertEqual(r.verified, 1, "CM4 1 verified");
+        assertEqual(r.missing.length, 2, "CM4 2 missing");
+        const tgts = r.missing.map(e => e.tgt).sort();
+        assertEqual(tgts, ["spice/x/missing-verbatim.md", "spice/x/missing.md"], "CM4 missing tgts captured");
+    });
+}
+
+async function caseCM5RecoverMissingReinvokesMigrator() {
+    console.log("=== CM5 — _recoverMissing re-invokes migrator (or verbatim) for each missing entry ===");
+    const c = tryRequire("../migrate/commit");
+    if (c.__error) { _failed++; console.log("    FAIL CM5: unavailable"); return; }
+    assertTrue(typeof c._recoverMissing === "function", "CM5 _recoverMissing exposed");
+    return withTempVault(async (root) => {
+        const fromAbs = path.join(root, "src");
+        const tgt = path.join(root, "tgt");
+        fs.mkdirSync(fromAbs); fs.mkdirSync(tgt);
+        // Source for verbatim recovery.
+        fs.mkdirSync(path.join(fromAbs, "boards/planning"), { recursive: true });
+        fs.writeFileSync(path.join(fromAbs, "boards/planning/Planning-Board.md"), "verbatim body");
+        // Source for boards rewrite recovery.
+        fs.mkdirSync(path.join(fromAbs, "boards/to-do-cards/2026/4/15"), { recursive: true });
+        fs.writeFileSync(path.join(fromAbs, "boards/to-do-cards/2026/4/15/Find passport.md"), "rewrite body");
+        const missing = [
+            { action: "copy_verbatim", migrator: "verbatim", src: "boards/planning/Planning-Board.md", tgt: "boards/planning/Planning-Board.md" },
+            { action: "rewrite_blueprint", migrator: "boards", src: "boards/to-do-cards/2026/4/15/Find passport.md", tgt: "spice/boards/to-do-cards/2026/4/15/Find passport.md" }
+        ];
+        const r = c._recoverMissing(missing, { vaultPath: tgt, fromAbs });
+        assertEqual(r.recovered, 2, "CM5 both recovered");
+        assertEqual(r.stillMissing.length, 0, "CM5 nothing still missing");
+        assertTrue(fs.existsSync(path.join(tgt, "boards/planning/Planning-Board.md")), "CM5 verbatim file exists post-recovery");
+        assertTrue(fs.existsSync(path.join(tgt, "spice/boards/to-do-cards/2026/4/15/Find passport.md")), "CM5 rewrite file exists post-recovery");
+    });
+}
+
+async function caseCM6SameFolderMultiWrite() {
+    console.log("=== CM6 — boards rewrite_blueprint same-folder multi-write lands all targets (CF-10 regression guard) ===");
+    const c = tryRequire("../migrate/commit");
+    if (c.__error) { _failed++; console.log("    FAIL CM6: unavailable"); return; }
+    return withTempVault(async (root) => {
+        const fromAbs = path.join(root, "src");
+        const tgt = path.join(root, "tgt");
+        fs.mkdirSync(fromAbs); fs.mkdirSync(tgt);
+        const srcDir = path.join(fromAbs, "boards/to-do-cards/2026/4/15");
+        fs.mkdirSync(srcDir, { recursive: true });
+        // Mirror the real headspace shape that surfaced CF-10.
+        fs.writeFileSync(path.join(srcDir, "Create DMV Appointment.md"), "create body");
+        fs.writeFileSync(path.join(srcDir, "Find passport.md"), "find body");
+        const plan = { planEntries: [
+            { action: "rewrite_blueprint", migrator: "boards", src: "boards/to-do-cards/2026/4/15/Create DMV Appointment.md", tgt: "spice/boards/to-do-cards/2026/4/15/Create DMV Appointment.md" },
+            { action: "rewrite_blueprint", migrator: "boards", src: "boards/to-do-cards/2026/4/15/Find passport.md", tgt: "spice/boards/to-do-cards/2026/4/15/Find passport.md" }
+        ]};
+        c._rewriteBlueprints(plan, { vaultPath: tgt, fromAbs }, {});
+        const v = c._verifyTargets(plan, { vaultPath: tgt, fromAbs });
+        assertEqual(v.missing.length, 0, "CM6 no targets missing after rewrite (CF-10 regression guard)");
+        assertEqual(v.verified, 2, "CM6 both targets verified");
+    });
+}
+
 // =====================================================================
 // Selector dispatch
 // =====================================================================
@@ -647,7 +724,7 @@ const SELECTORS = {
     "meetings-hub":   [caseMMH1HubCanHandle, caseMMH2HubFilenameAndFolder, caseMMH3HubBodyFullyRegenerated, caseMMH4HubCssclassesPreserved],
     "to-do":          [caseMT1ToDoCanHandle, caseMT2ToDoFilenameAndFolder, caseMT3ToDoTasksPreserved, caseMT4ToDoBackButtonRegenerated],
     "wikilink":       [caseWL1DailyPrefixToSuffix, caseWL2HubPrefixToSuffix, caseWL3ToDoPrefixToSuffix, caseWL4FullyQualifiedPath, caseWL5IdempotentAndNonMatching],
-    "commit":         [caseCM1DryRunNoWrites, caseCM2CommitOrchestratorShape, caseCM3RestoreOnFailure],
+    "commit":         [caseCM1DryRunNoWrites, caseCM2CommitOrchestratorShape, caseCM3RestoreOnFailure, caseCM4VerifyTargetsShape, caseCM5RecoverMissingReinvokesMigrator, caseCM6SameFolderMultiWrite],
 };
 
 (async () => {
