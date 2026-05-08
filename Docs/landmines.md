@@ -291,6 +291,16 @@ Then sed-sweep across all source files (template bodies, CustomJS class string l
 
 **Surface this every time.** When reviewing any migrator code change (boards.js, project.js, trips.js, etc.), grep the diff for `writeFileSync` / `appendFileSync` / `truncateSync` / `unlinkSync` / `renameSync` / `rmSync` and verify every call uses a `tgtRoot`-rooted path, never a `srcAbsPath`-rooted path.
 
+### 21. `sauce audit` is read-only against the audited vault
+
+`sauce audit` (v0.29.0) walks `<vault>/spice/<bp>/**/*.md`, reads `<vault>/ranch/rules/<bp>.json`, applies rule_fragments[], and emits a markdown report — but MUST NEVER write to anywhere under `<vault>`. The audit pipeline (`platform/cli/cmd-audit.js` + `platform/audit/{walker,rule-runner,report,sanctioned-dirs}.js`) is read-only by contract. The single carve-out is `--output-file <path>`: when that path falls inside the audited vault, the user has explicitly requested the write. That's the ONLY exception.
+
+**Codified in v0.29.0 design Section 4 + cmd-audit.js:54 (single fs.writeFileSync call, gated by `--output-file` flag).** Walker, rule-runner, report, sanctioned-dirs all do reads only — no `fs.writeFileSync` / `fs.appendFileSync` / `fs.mkdirSync` / `fs.rmSync` / `fs.unlinkSync` / `fs.renameSync` against the audited vault path. The S2.10 quality reviewer verified this via grep at S2 close.
+
+**Why this matters.** Audit is meant for inspection. Mutating the audited vault from inside the audit pipeline would couple detection to fix logic and create surprise side effects (e.g., a bug in rule-runner could inadvertently rewrite a violating file's frontmatter). v0.29.0 is detection-only by design; auto-fix tooling is a separate feature surface that gets its own design + cycle once we know what real-world violations actually surface. Mirrors landmine #20 posture for `sauce migrate` source vaults — generalized here.
+
+**Surface this every time.** When reviewing any code change under `platform/audit/`, grep the diff for `writeFileSync` / `appendFileSync` / `truncateSync` / `unlinkSync` / `renameSync` / `rmSync` / `mkdirSync` and verify the only hit (if any) is `cmd-audit.js`'s `--output-file` write at line 54-ish. Reject PRs that introduce other writes against the audited vault.
+
 ## Operational gotchas
 
 ### CustomJS scan folder is per-vault and configured in `.obsidian/plugins/customjs/data.json`

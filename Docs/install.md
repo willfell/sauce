@@ -178,6 +178,28 @@ The next install run materializes the lowercase variants and updates `<vault>/ra
 
 ---
 
+## Upgrading from v0.28.0 to v0.29.0
+
+v0.29.0 ships the `sauce audit` CLI verb — a programmatic vault conformance auditor (detection-only). Run `sauce update --force` to pull v0.29.0 and let the installer apply the new state additively.
+
+What's new:
+
+- **NEW `sauce audit [--vault PATH] [--blueprint NAME] [--output-file PATH] [--no-untracked-check] [--quiet]` verb.** Reads consumer's `ranch/rules/<bp>.json`, walks `<vault>/spice/<bp>/**/*.md`, applies rule_fragments[], reports per-blueprint structural violations + untracked top-level directories. Exit 0/1/2. See `Docs/audit.md` for the user guide.
+- **NEW `rule_fragments[]` shipped on 5 blueprints with PATCH bumps:** trips@0.1.5→0.1.6, project@1.3.6→1.3.7, people@0.1.0→0.1.1, meetings@0.3.0→0.3.1, daily@0.2.3→0.2.4. Auto-merged into `ranch/rules/<bp>.json` on `sauce update`.
+- **NEW additive validator schema extensions:** `equals`, `matches`, `contains`, `scope.path_glob`, `scope.exclude_basenames`, `frontmatter_branch[]`. Read-side compatible with pre-v0.29.0 rule files (old rules without these fields produce identical violation output).
+- **NEW landmine #21:** `sauce audit` is read-only against the audited vault (mirrors landmine #20 for `sauce migrate` source).
+
+> [!warning] Audit is detection-only
+> v0.29.0's audit reports violations; it does NOT auto-fix. Cleanup happens manually (or session-by-session with Claude editing files). Auto-fix tooling deferred to a future cycle.
+
+> [!info] install.js applyRuleFragment now array-supporting
+> Pre-v0.29.0 install.js wrote single-value contributions; v0.29.0 patches to array-support so multiple fragments per blueprint accumulate. Backward-compatible read: legacy single-value contributions are wrapped in `[value]` on next install.
+
+> [!info] Coverage is partial — 5 of 9 blueprints
+> rule_fragments shipped for trips/project/people/meetings/daily this cycle. journal/to-do/boards/finance get their fragments in v0.29.1+ PATCH cycles (pure-additive).
+
+---
+
 ## Upgrading from v0.27.0 to v0.28.0
 
 v0.28.0 ships the `sauce migrate` CLI verb + 8 per-blueprint migrators + 5-phase atomic --commit orchestrator + cross-blueprint wikilink-rewrite + phase 4.7 post-write verification + phase 4.8 auto-recovery. **No vault layout changes**, no schema changes for existing consumers; the migrate verb is a NEW capability that converts a real source vault (Accuris/Ero/Headspace shape) into a fresh sauce-managed vault. Existing v0.27.0 consumers run `sauce update --force` to refresh the CLI; nothing else changes.
