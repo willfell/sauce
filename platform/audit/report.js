@@ -23,9 +23,15 @@ function readInstalledMeta(vaultPath) {
     try {
         const raw = fs.readFileSync(installedPath, "utf8");
         const parsed = JSON.parse(raw);
+        // Normalize blueprint entries: real consumer ranch/platform-installed.json uses
+        // [{name, version, installed_at}, ...]; test fixtures use ["string", ...]. Accept both.
+        const rawBps = Array.isArray(parsed.blueprints) ? parsed.blueprints : [];
+        const blueprints = rawBps
+            .map(b => (typeof b === "string" ? b : (b && b.name) || null))
+            .filter(n => n !== null);
         return {
             workshopVersion: parsed.workshop_version || "unknown",
-            blueprints: Array.isArray(parsed.blueprints) ? parsed.blueprints : []
+            blueprints
         };
     } catch (e) {
         return { workshopVersion: "unknown", blueprints: [] };
