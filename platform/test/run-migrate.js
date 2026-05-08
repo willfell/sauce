@@ -37,9 +37,9 @@ async function expectNoThrow(fn, label) {
     catch (e) { _failed++; _failures.push(label + ": " + e.message); console.log("    FAIL: " + label + ": " + e.message); return null; }
 }
 
-function withTempVault(fn) {
+async function withTempVault(fn) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-migrate-"));
-    try { return fn(dir); } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+    try { return await fn(dir); } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
 
 function tryRequire(modPath) {
