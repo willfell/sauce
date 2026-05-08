@@ -130,7 +130,7 @@ function _backup(paths) {
 async function _bootstrap(paths, opts) {
     const { vaultPath, workshopPath, backupDir } = paths;
     const ctx = (opts && opts.ctx) || {};
-    const variables = (ctx.config && ctx.config.variables) || {};
+    const legacyVars = (ctx.config && ctx.config.variables) || {};
     const workshopManifest = ctx.workshopManifest || _readJson(path.join(workshopPath, "platform/manifest.json"));
 
     // Resolve workshop_relative_path: prefer existing config, else compute
@@ -138,19 +138,24 @@ async function _bootstrap(paths, opts) {
     const wrp = (ctx.config && ctx.config.workshop_relative_path)
         || path.relative(vaultPath, workshopPath).replace(/\\/g, "/");
 
-    // 2a. ranch/platform-config.json
+    // 2a. ranch/platform-config.json — write CANONICAL Sauce paths only.
+    // Migration cycles BRING vaults up to current schema; legacy variables
+    // (e.g., Extras/Scripts, Extras/Templates, ranch/Templater uppercase)
+    // pre-date v0.24.0/v0.25.0 lowercase + spice/ namespace renames and
+    // would point at directories that no longer exist post-wipe. Only
+    // vault_identity_tag (a per-vault identifier) is preserved from legacy.
     const config = {
         workshop_relative_path: wrp,
-        vault_identity: variables.vault_identity_tag || "accuris",
-        variables: Object.assign({
+        vault_identity: legacyVars.vault_identity_tag || "accuris",
+        variables: {
             views_path: "ranch/views",
             templater_scripts_path: "ranch/templater",
             scripts_path: "ranch/scripts",
             rules_path: "ranch/rules",
             templates_path: "ranch/templates",
             commands_path: "commands",
-            vault_identity_tag: "accuris"
-        }, variables)
+            vault_identity_tag: legacyVars.vault_identity_tag || "accuris"
+        }
     };
     _ensureDir(path.join(vaultPath, "ranch"));
     _writeJsonAtomic(path.join(vaultPath, "ranch/platform-config.json"), config);
@@ -164,9 +169,28 @@ async function _bootstrap(paths, opts) {
 
     // 2c. Restore .obsidian/ from backup if present (preserves user's
     // vault-level Obsidian config + plugin installs without re-fetching).
+    // After restore, scrub installer-managed plugin data files (allowlist
+    // #12) so the installer's helpers write canonical entries fresh —
+    // legacy paths from a pre-Sauce-rebrand consumer would otherwise win
+    // first-wins merges and prevent canonical paths from being applied.
     const backupObsidian = path.join(backupDir, ".obsidian");
     if (fs.existsSync(backupObsidian)) {
         _cpRecursive(backupObsidian, path.join(vaultPath, ".obsidian"));
+        const ALLOWLIST_MANAGED_PATHS = [
+            ".obsidian/plugins/templater-obsidian/data.json",
+            ".obsidian/plugins/slash-commander/data.json",
+            ".obsidian/daily-notes.json",
+            ".obsidian/appearance.json",
+            ".obsidian/plugins/obsidian-style-settings/data.json",
+            ".obsidian/hotkeys.json",
+            ".obsidian/plugins/dataview/data.json",
+            ".obsidian/plugins/customjs/data.json",
+            ".obsidian/app.json"
+        ];
+        for (const rel of ALLOWLIST_MANAGED_PATHS) {
+            const abs = path.join(vaultPath, rel);
+            if (fs.existsSync(abs)) fs.rmSync(abs, { force: true });
+        }
     }
 
     // 2d. Materialize thin stub at ranch/templater/platformInstall.js.
