@@ -55,6 +55,15 @@ Phase 3 — carry-verbatim   cp source → target for every non-blueprint file
 Phase 4 — rewrite-blueprint For each migrator, transform source → target shape
 Phase 4.5 — wikilink-rewrite Cross-blueprint pass for prefix→suffix daily/hub/
                              to-do filename references + Extras/People→spice/people
+                             + namespace path subs (Extras/Scripts→ranch/scripts,
+                             boards/planning→spice/projects, etc.)
+Phase 4.6 — mtime-preserve  utimesSync sweep across every rewritten file (single
+                            sweep AFTER phases 4 + 4.5 — race-free on macOS APFS)
+Phase 4.7 — verify          Walk every plan entry; assert tgt exists at vault.
+                            Report {verified, missing[]}.
+Phase 4.8 — recover         Re-invoke migrator (or verbatim) for any phase-4.7
+                            misses. Per-entry failures degrade to remaining-missing
+                            without aborting. Logged in migration.log.verification.
 Phase 5 — finalize         Write migration.log + migration-plan.json
 ```
 
@@ -71,6 +80,9 @@ Atomic per-phase. Failure-loud abort + restore-from-backup on phase 2-4 errors. 
 | `Timestamps/Meetings/<YYYY-MM-DD> <title>.md` | `spice/meetings/notes/<YYYY>/<MM-MMMM>/<title>-<YYYY-MM-DD>.md` | Filename prefix→suffix; prepend `## Attendees` chip block; drop legacy MOC line + Date line; preserve agenda/notes/action items + person/X frontmatter tags. |
 | `Timestamps/MeetingHubs/<YYYY-MM-DD>-Meetings.md` | `spice/meetings/hubs/<YYYY>/<MM-MMMM>/Meetings-<YYYY-MM-DD>.md` | Body 100% regenerated from current Sauce hub template. |
 | `Timestamps/ToDo/<YYYY-MM-DD>-ToDo.md` | `spice/to-do/<YYYY>/<MM-MMMM>/ToDo-<YYYY-MM-DD>.md` | Filename prefix→suffix; preserve `## Today's Tasks`; regenerate back-button. |
+| `[Bb]oards/<rest>` (excludes `[Bb]oards/planning/<slug>/`, `[Bb]oards/trips/<slug>/`) | `spice/boards/<rest>` | Path-translation only; body unchanged (legacy path-string substitutions handled by phase 4.5). |
+| `[Bb]oards/planning/<slug>/<rest>` AND `Projects/<slug>/<rest>` | `spice/projects/<slug>/<rest>` | Path-translation only; full Sauce shape (Atlas / Map / Board / tasks subdirs) deferred to v0.29.x. |
+| `[Bb]oards/trips/<slug>/<rest>` | `spice/trips/<slug>/<rest>` | Path-translation only. |
 | (everything else) | same relative path | Verbatim cp + mtime preservation. |
 
 **Skip-list** (excluded from migration entirely):
@@ -82,12 +94,11 @@ Atomic per-phase. Failure-loud abort + restore-from-backup on phase 2-4 errors. 
 - `*.tmp` (Templater intermediate files)
 - `*.pyc` (Python bytecode)
 
-**Coverage gaps** (v0.28.x carries):
-- `project` migrator (Accuris uses `Planning/<slug>/`)
-- `boards` migrator (Accuris boards = different Kanban shape)
-- `journal` migrator (no Accuris source)
-- `finance` + `trips` migrators (no Accuris source)
-- `ero` + `headspace` source-detection (different layouts: `Resources/People/` for Headspace)
+**Coverage gaps** (v0.28.x / v0.29.x carries):
+- `journal` migrator (Headspace + Ero have `Timestamps/Journal/<file>.md` non-Sauce filename pattern; currently fall to verbatim) — v0.28.x
+- `meetings-hub` for Ero / Headspace (source pattern differs from `Timestamps/MeetingHubs/<YYYY-MM-DD>-Meetings.md`) — v0.28.x
+- `finance` migrator (no Accuris/Ero/Headspace source has Sauce-shape finance content) — v0.29.x
+- Full Sauce-shape project ecosystem (Atlas / Map / Board / tasks subdir generation; current project migrator is path-translation only) — v0.29.x
 
 ---
 
@@ -162,15 +173,17 @@ Per-file restore: copy individual files from the backup sibling to the vault pat
 | people | ✅ shipped v0.28.0 | — |
 | daily | ✅ shipped v0.28.0 | — |
 | meetings-note | ✅ shipped v0.28.0 | — |
-| meetings-hub | ✅ shipped v0.28.0 | — |
+| meetings-hub (Accuris pattern) | ✅ shipped v0.28.0 | — |
 | to-do | ✅ shipped v0.28.0 | — |
-| project | DEFERRED | v0.28.x |
-| boards | DEFERRED | v0.28.x |
-| journal | DEFERRED | v0.29.x |
-| finance | DEFERRED | v0.29.x |
-| trips | DEFERRED | v0.29.x |
-| ero source-detection | DEFERRED | v0.28.x |
-| headspace source-detection | DEFERRED | v0.29.x |
+| boards | ✅ shipped v0.28.0 (path-translation only) | — |
+| project | ✅ shipped v0.28.0 (path-translation only) | full Sauce shape: v0.29.x |
+| trips | ✅ shipped v0.28.0 (path-translation only) | — |
+| ero source-detection | ✅ shipped v0.28.0 CF-7 (case-insensitive `Boards/` + `Projects/` top-level) | — |
+| headspace source-detection | ✅ shipped v0.28.0 CF-7..CF-9 | — |
+| journal (Headspace + Ero `Timestamps/Journal/<file>.md`) | DEFERRED | v0.28.x |
+| meetings-hub (Ero + Headspace patterns differ from Accuris) | DEFERRED | v0.28.x |
+| finance | DEFERRED (no source content in any vault) | v0.29.x |
+| Full Sauce project shape (Atlas/Map/Board/tasks) | DEFERRED | v0.29.x |
 
 ---
 

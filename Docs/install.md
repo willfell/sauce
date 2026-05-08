@@ -178,6 +178,25 @@ The next install run materializes the lowercase variants and updates `<vault>/ra
 
 ---
 
+## Upgrading from v0.27.0 to v0.28.0
+
+v0.28.0 ships the `sauce migrate` CLI verb + 8 per-blueprint migrators + 5-phase atomic --commit orchestrator + cross-blueprint wikilink-rewrite + phase 4.7 post-write verification + phase 4.8 auto-recovery. **No vault layout changes**, no schema changes for existing consumers; the migrate verb is a NEW capability that converts a real source vault (Accuris/Ero/Headspace shape) into a fresh sauce-managed vault. Existing v0.27.0 consumers run `sauce update --force` to refresh the CLI; nothing else changes.
+
+What's new:
+
+- **NEW `sauce migrate --from <source> [--commit]` verb.** Dry-run by default emits `migration-plan.json`; `--commit` triggers the 5-phase atomic write (precheck → backup → bootstrap → carry-verbatim → rewrite-blueprint → wikilink-rewrite → mtime-preserve → verify → recover → finalize). Source vault is NEVER modified (landmine #20). Target vault is wiped in-place + rebuilt; sibling backup at `<vault>.pre-migration-<ts>/`. See `Docs/migrate.md` for the full user guide.
+- **8 per-blueprint migrators**: people / daily / meetings-note / meetings-hub (Accuris pattern) / to-do / boards / project (path-translation only; full Sauce shape v0.29.x) / trips. Verbatim fallback claims everything else.
+- **NEW phase 4.7 post-write verification + phase 4.8 auto-recovery** (CF-10): walks every plan entry post-write; re-invokes the appropriate migrator for any missing target. Logged in `migration.log.verification: {verified, missing, recovered}`.
+- **NEW landmine #20**: source vault MUST never be modified by migration tooling. Future migrator code review must reject any `srcAbsPath`-rooted write.
+
+> [!warning] Source vault is read-only
+> The migrator never writes to `--from <path>`. If a future migrator change introduces a write to the source path, that's a critical bug — the source IS your only intact copy of pre-migration content. Code review must grep for `writeFileSync` / `appendFileSync` / `truncateSync` / `unlinkSync` / `renameSync` / `rmSync` and verify every call uses a target-rooted path.
+
+> [!info] Three real vaults migrated in v0.28.0
+> v0.28.0 migrated `/sync/accuris/` (1.5GB; 1670 entries), `/sync/ero/` (55MB; 489 entries), `/sync/headspace/` (120MB; 759 entries) into `/sync/sauce/<name>-sauce/`. Phase 4.7 verification on re-run reports `verified=plan_count, missing=0` for all three. User-confirmed phone-Sync visual smoke PASS for accuris-sauce.
+
+---
+
 ## Upgrading from v0.26.1 to v0.27.0
 
 v0.27.0 ships the People mechanism + blueprint + meetings pilot integration. Pure-additive at the install layer (no new state-materializing helpers; no allowlist additions; no schema breaks). Run `sauce update --force` to pull v0.27.0 and let the installer apply the new state additively.

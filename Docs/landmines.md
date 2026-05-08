@@ -281,6 +281,16 @@ Then sed-sweep across all source files (template bodies, CustomJS class string l
 
 **Codified in v0.26.0** — the cycle that did the canonical lowercase sweep of `ranch/Templater|Scripts|Templates|Views`. Future blueprints / mechanisms authoring under `pantry/`, `ranch/`, or `spice/` MUST use lowercase directory names from the start.
 
+### 20. Source vault is read-only during `sauce migrate`
+
+`sauce migrate` (v0.28.0) reads its `--from <source>` argument; it MUST NEVER write to that path. The migration tool's contract is "transform source → target", with target = the sauce-managed cwd vault. If a future migrator's `migrate(planEntry, srcAbsPath, tgtRoot, ctx)` ever calls `fs.writeFileSync(srcAbsPath, ...)` or otherwise mutates a path under `fromAbs`, that's a critical bug — the user has no way to recover the original source content if migration corrupts it.
+
+**Codified in v0.28.0 design Section 4 + commit.js phase 0/1/2/3/4 contracts.** The `_carryVerbatim` and `_rewriteBlueprints` loops both pass `srcAbsPath` only to `fs.readFileSync` / `fs.copyFileSync(src, dst)`; never as a destination argument. The `_assertTargetWithinRoot(vaultPath, entry.tgt)` belt-and-suspenders check at the orchestrator level catches any planEntry tgt that escapes the vault root, but doesn't catch source mutations. **Any new migrator code must ALWAYS pair `srcAbsPath` with read-only fs calls.** Code review must reject any PR that uses `srcAbsPath` as a write destination.
+
+**Why this matters.** The user expects to be able to roll back a migration by deleting the target + restoring the sibling backup. If the source is also corrupted, that recovery is impossible — the source IS the user's only intact copy of the content (the prior backup is the pre-migration dest snapshot, NOT the source). A bug here is permanent data loss.
+
+**Surface this every time.** When reviewing any migrator code change (boards.js, project.js, trips.js, etc.), grep the diff for `writeFileSync` / `appendFileSync` / `truncateSync` / `unlinkSync` / `renameSync` / `rmSync` and verify every call uses a `tgtRoot`-rooted path, never a `srcAbsPath`-rooted path.
+
 ## Operational gotchas
 
 ### CustomJS scan folder is per-vault and configured in `.obsidian/plugins/customjs/data.json`
