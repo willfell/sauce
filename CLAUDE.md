@@ -6,13 +6,17 @@ This is the **workshop vault** for the **Sauce** platform — the canonical home
 
 - **Project name:** `sauce` (rebranded from `beacon` in v0.23.0)
 - **GitHub remote:** `git@github-personal:willfell/sauce.git` (HTTPS: `https://github.com/willfell/sauce`) — personal account `willfellhoelter@gmail.com`
-- **Local path:** `/Users/willfell/Documents/obsidian/sync/workshop/beacon` (renamed from `poc-vault` 2026-05-05; sibling consumer vaults: `barebones-beacon-poc` + `accuris-beacon-poc`).
+- **Local paths (this machine):**
+  - **Workshop dev repo:** `/Users/willfellhoelter/projects/repos/sauce` (this directory — canonical platform source-of-truth; also self-installs as the workshop dogfood vault). All `cd` / harness invocations in docs assume this path.
+  - **Consumer vaults:** `/Users/willfellhoelter/notes/sauce/barebones` (primary regression target), `/Users/willfellhoelter/notes/sauce/accuris-sauce`, `/Users/willfellhoelter/notes/sauce/ero-sauce`, `/Users/willfellhoelter/notes/sauce/headspace-sauce` — post-v0.28.0 migrated Sauce-shape vaults.
+  - **Legacy source vaults (READ-ONLY per landmine #20):** `/Users/willfellhoelter/notes/accuris`, `/Users/willfellhoelter/notes/ero-sync/ero`, `/Users/willfellhoelter/notes/headspace` — only ever inputs to `sauce migrate --from <path>`; never written to.
+  - **Predecessor-machine paths (historical):** `/Users/willfell/Documents/obsidian/sync/workshop/beacon` (workshop) + siblings `barebones-beacon-poc` / `accuris-beacon-poc`. Referenced by closed-cycle plan/result/handoff docs in `Docs/plans/` + `Docs/prompts/`; do NOT edit those for path-update churn.
 - **Distribution model (post-v0.1.2 S2):** each consumer's `Docs/Meta/Templater/platformInstall.js` is a ~12-line content-static thin stub that dispatches at runtime to canonical `<workshop>/platform/install.js` via `require()`. Bootstrap-copy × 3 resync ritual retired (last stage was v0.1.2 S1). Updates reach consumers via `git pull` of the workshop repo + a fresh install run; the stub itself never changes (landmine #13).
 - **Consumer-side namespace:** every blueprint materializes content under `beacon/<module_directory>/...` in the consumer vault (NOT at vault root). This keeps platform-managed content cleanly demarcated from the consumer's personal content.
 
 ## Vault identity check
 
-Before any write, run `ls /Users/willfell/Documents/obsidian/sync/workshop/beacon` (or the equivalent path on your machine). Expected top-level: `CLAUDE.md`, `platform/`, `commands/`, `Docs/`, `.obsidian/`. If you see `Boards/`, `Timestamps/`, `Finance/`, `Resources/` at root, you're in a CONSUMER vault, NOT the workshop. STOP.
+Before any write, run `ls /Users/willfellhoelter/projects/repos/sauce` (or the equivalent workshop dev-repo path on your machine). Expected top-level: `CLAUDE.md`, `platform/`, `commands/`, `Docs/`, `.obsidian/`, `ranch/`, `package.json`, `install.sh`. If you see `Boards/`, `Timestamps/`, `Finance/`, `Resources/` at root, you're in a CONSUMER vault, NOT the workshop. STOP.
 
 ## Where to read for context
 

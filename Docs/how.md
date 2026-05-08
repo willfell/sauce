@@ -2,18 +2,35 @@
 
 ## Vault topology
 
+Two distinct postures co-exist post-v0.21.0:
+
+**Posture A — workshop dev repo separate from consumer vaults (current machine):**
+
 ```
-~/notes/                              parent dir, identical layout per machine
-  workshop/poc-vault/                 canonical platform host (this vault)
-  accuris/                            consumer
-  headspace/                          consumer
-  ero/                                consumer
-  workshop/tmp-acc-vault/             test mirror of accuris (sandbox for onboarding)
+~/projects/repos/sauce/               canonical platform source-of-truth (git-tracked) + self-installs as workshop dogfood
+~/notes/sauce/
+  barebones/                          primary regression target (Sauce-shape from scratch)
+  accuris-sauce/                      Sauce-shape consumer (post-v0.28.0 migrated)
+  ero-sauce/                          Sauce-shape consumer (post-v0.28.0 migrated)
+  headspace-sauce/                    Sauce-shape consumer (post-v0.28.0 migrated)
+~/notes/                              legacy source vaults (READ-ONLY per landmine #20)
+  accuris/                            sauce migrate input only
+  ero-sync/ero/                       sauce migrate input only
+  headspace/                          sauce migrate input only
 ```
 
-All five vaults are independent Obsidian Sync targets. The workshop is **always** at a known relative path from the consumers (`../workshop/poc-vault`) so the installer can find it via filesystem.
+The bootstrap layer (`platform/bootstrap.js` since v0.21.0) clones the workshop into the consumer vault on first run, decoupling consumer location from workshop location. Consumers point at the cloned-in workshop via `workshop_relative_path` in their `platform-config.json`.
 
-Per-machine path differences (e.g., `/Users/willfell/Documents/obsidian/sync/...` vs `/Users/willfellhoelter/notes/...`) only affect absolute references. The relative layout is identical.
+**Posture B — sibling-of-workshop (legacy, predecessor machine):**
+
+```
+~/Documents/obsidian/sync/
+  workshop/beacon/                    canonical workshop (this vault)
+  barebones-beacon-poc/                primary regression target
+  accuris-beacon-poc/                 legacy consumer
+```
+
+Used by closed-cycle plans/prompts in `Docs/plans/` + `Docs/prompts/` — do NOT edit those for path-update churn. The relative layout under each parent is identical; only absolute prefixes differ per machine.
 
 ## Three concepts
 
@@ -219,7 +236,7 @@ Sauce vault platform ships an interactive Node-based bootstrap orchestrator at `
 
 ```bash
 # One-time workshop setup
-cd <workshop-path>           # e.g., /Users/willfell/Documents/obsidian/sync/workshop/sauce
+cd <workshop-path>           # e.g., /Users/willfellhoelter/projects/repos/sauce
 npm install
 
 # Consumer-side, from inside any consumer vault

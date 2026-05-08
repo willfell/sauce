@@ -13,7 +13,7 @@ canonical: yes
 ## Step 1 — Pre-flight (do this FIRST, before any work)
 
 ```bash
-cd /Users/willfell/Documents/obsidian/sync/workshop/beacon
+cd /Users/willfellhoelter/projects/repos/sauce   # workshop dev repo on the current machine; substitute the equivalent path elsewhere
 git fetch origin && git status     # expect: clean tree (only pre-existing dogfood drift)
 git log --oneline -10              # confirm latest commits + tag
 ```
