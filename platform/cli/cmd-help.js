@@ -32,6 +32,7 @@ async function run(ctx, args) {
         "  update      Pull origin/main of the workshop clone + re-run the installer.",
         "  status      Read-only: show vault/workshop git head, drift, subscription counts.",
         "  wizard      Re-run the first-run wizard to edit subscription or config.",
+        "  migrate     Migrate a real source vault (e.g., legacy Accuris layout) into this sauce vault. Dry-run by default; pass --commit to write.",
         "  help        Print this screen.",
         "",
         "Examples:",

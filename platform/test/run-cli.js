@@ -599,6 +599,65 @@ async function caseC22StatusSilentWhenNoDvBlueprint() {
     });
 }
 
+// =====================================================================
+// v0.28.0 — `sauce migrate` verb cases (C23-C28)
+// =====================================================================
+
+async function caseC23MigrateParseFlagsFromSpace() {
+    const label = "C23 cmd-migrate._parseFlags parses --from <path>";
+    const cmd = require("../cli/cmd-migrate.js");
+    const flags = cmd._parseFlags(["--from", "/tmp/source"]);
+    assertEqual(flags.from, "/tmp/source", label + " from value");
+    assertEqual(flags.commit, false, label + " commit default false");
+}
+
+async function caseC24MigrateParseFlagsFromEquals() {
+    const label = "C24 cmd-migrate._parseFlags parses --from=<path> equals form";
+    const cmd = require("../cli/cmd-migrate.js");
+    const flags = cmd._parseFlags(["--from=/tmp/equals"]);
+    assertEqual(flags.from, "/tmp/equals", label + " from value");
+    const flagsCommit = cmd._parseFlags(["--from=/x", "--commit"]);
+    assertEqual(flagsCommit.commit, true, label + " --commit recognized");
+}
+
+async function caseC25MigrateExitsOnMissingFrom() {
+    const label = "C25 cmd-migrate.run exits 2 when --from missing";
+    const cmd = require("../cli/cmd-migrate.js");
+    const origExit = process.exit;
+    let exitCode = null;
+    process.exit = (c) => { exitCode = c; throw new Error("__exit__"); };
+    try { await cmd.run({}, []); }
+    catch (e) { /* swallow exit-throw */ }
+    finally { process.exit = origExit; }
+    assertEqual(exitCode, 2, label);
+}
+
+async function caseC26MigrateExitsOnNonexistentFrom() {
+    const label = "C26 cmd-migrate.run exits 2 when --from path does not exist";
+    const cmd = require("../cli/cmd-migrate.js");
+    const origExit = process.exit;
+    let exitCode = null;
+    process.exit = (c) => { exitCode = c; throw new Error("__exit__"); };
+    try { await cmd.run({}, ["--from", "/definitely/nonexistent/path/" + Date.now()]); }
+    catch (_e) {}
+    finally { process.exit = origExit; }
+    assertEqual(exitCode, 2, label);
+}
+
+async function caseC27MigrateInVerbsRegistry() {
+    const label = "C27 sauce-cli.js VERBS includes migrate";
+    const cliSource = fs.readFileSync(path.join(__dirname, "..", "cli", "sauce-cli.js"), "utf8");
+    assertTrue(/migrate:\s*"\.\/cmd-migrate\.js"/.test(cliSource), label);
+}
+
+async function caseC28HelpMentionsMigrate() {
+    const label = "C28 cmd-help output lists migrate verb";
+    const cmd = require("../cli/cmd-help.js");
+    const out = await cmd.run(null, []);
+    const joined = (out && Array.isArray(out.lines)) ? out.lines.join("\n") : "";
+    assertTrue(/\bmigrate\b/.test(joined), label);
+}
+
 const cases = [
     caseC1AncestorWalk, caseC2SauceVaultEnv, caseC3NotInVault, caseC4UnknownVerb,
     caseC5StatusClean, caseC6StatusDrift, caseC7UpdateFFOnly, caseC8UpdateDirtyRefusal,
@@ -609,7 +668,10 @@ const cases = [
     caseC16HelpVerbOutput, caseC17BareSauceRoutesToHelp,
     caseC18LongAndShortHelpFlags, caseC19HelpWorksOutsideVault,  // v0.26.1 P1-3a
     caseC20StatusWarnsConvenienceMissing, caseC21StatusSilentWhenConvenienceSubscribed,
-    caseC22StatusSilentWhenNoDvBlueprint  // v0.26.1 P1-3c
+    caseC22StatusSilentWhenNoDvBlueprint,  // v0.26.1 P1-3c
+    caseC23MigrateParseFlagsFromSpace, caseC24MigrateParseFlagsFromEquals,
+    caseC25MigrateExitsOnMissingFrom, caseC26MigrateExitsOnNonexistentFrom,
+    caseC27MigrateInVerbsRegistry, caseC28HelpMentionsMigrate  // v0.28.0
 ];
 
 async function main() {

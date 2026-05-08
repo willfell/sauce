@@ -11,6 +11,7 @@ const VERBS = {
     update:    "./cmd-update.js",
     status:    "./cmd-status.js",
     wizard:    "./cmd-wizard.js",
+    migrate:   "./cmd-migrate.js",
     help:      "./cmd-help.js"
 };
 
@@ -87,7 +88,7 @@ async function dispatch(argv, opts) {
         return;
     }
     if (!VERBS[verb]) {
-        throw new Error(`unknown verb: ${verb}\nUsage: sauce <bootstrap|update|status|wizard|help>`);
+        throw new Error(`unknown verb: ${verb}\nUsage: sauce <bootstrap|update|status|wizard|migrate|help>`);
     }
     let ctx;
     if (verb === "bootstrap") {
@@ -104,7 +105,7 @@ async function dispatch(argv, opts) {
 }
 
 function printUsage() {
-    console.log("Usage: sauce <verb> [args]\n\nVerbs:\n  bootstrap  First-run install (rare; called by install.sh)\n  update     Pull latest workshop + reinstall\n  status     Show vault + workshop state\n  wizard     Interactive subscription / config editor\n");
+    console.log("Usage: sauce <verb> [args]\n\nVerbs:\n  bootstrap  First-run install (rare; called by install.sh)\n  update     Pull latest workshop + reinstall\n  status     Show vault + workshop state\n  wizard     Interactive subscription / config editor\n  migrate    Migrate a source vault into this sauce vault (v0.28.0+)\n");
 }
 
 if (require.main === module) {
