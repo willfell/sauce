@@ -20,7 +20,12 @@
 const fs = require("fs");
 const path = require("path");
 
-const SRC_RE = /^boards\/planning\/([^\/]+)\/(.+)$/;
+// Two source patterns:
+//   1. `[Bb]oards/planning/<slug>/<rest>` — Accuris (lowercase) + Ero (capital)
+//   2. `Projects/<slug>/<rest>`          — Ero top-level Projects/ surface
+// Both target `spice/projects/<slug>/<rest>`.
+const SRC_BOARDS_PLANNING_RE = /^[Bb]oards\/planning\/([^\/]+)\/(.+)$/;
+const SRC_PROJECTS_TOP_RE = /^Projects\/([^\/]+)\/(.+)$/;
 
 function _validateRel(p) {
     const segs = p.replace(/\\/g, "/").split("/");
@@ -42,18 +47,18 @@ module.exports = {
         if (srcStat && typeof srcStat.isDirectory === "function" && srcStat.isDirectory()) return false;
         const norm = srcRelPath.replace(/\\/g, "/");
         if (!norm.endsWith(".md")) return false;
-        return SRC_RE.test(norm);
+        return SRC_BOARDS_PLANNING_RE.test(norm) || SRC_PROJECTS_TOP_RE.test(norm);
     },
     plan(srcRelPath, _srcAbsPath, _ctx) {
         _validateRel(srcRelPath);
         const norm = srcRelPath.replace(/\\/g, "/");
-        const m = norm.match(SRC_RE);
+        const m = norm.match(SRC_BOARDS_PLANNING_RE) || norm.match(SRC_PROJECTS_TOP_RE);
         if (!m) {
             return {
                 action: "skip",
                 src: srcRelPath,
                 tgt: null,
-                warnings: [`project.plan: srcRelPath did not match boards/planning/<slug>/<rest>: ${srcRelPath}`],
+                warnings: [`project.plan: srcRelPath did not match [Bb]oards/planning/<slug>/ or Projects/<slug>/: ${srcRelPath}`],
                 rewrite_summary: ""
             };
         }

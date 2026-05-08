@@ -56,11 +56,15 @@ const LEGACY_PATH_SUBSTITUTIONS = [
     { from: /Docs\/Meta\/Scripts\//g, to: "ranch/scripts/" },
     { from: /Docs\/Meta\/Templates\//g, to: "ranch/templates/" },
     { from: /Docs\/Meta\/Views\//g, to: "ranch/views/" },
-    { from: /boards\/planning\//g, to: "spice/projects/" },
-    { from: /boards\/kanban-cards\//g, to: "spice/boards/kanban-cards/" },
-    { from: /boards\/to-do\//g, to: "spice/boards/to-do/" },
-    { from: /boards\/Planning-Hub\.md/g, to: "spice/boards/Planning-Hub.md" },
-    { from: /boards\/To-Do-Board\.md/g, to: "spice/boards/To-Do-Board.md" }
+    { from: /[Bb]oards\/planning\//g, to: "spice/projects/" },
+    { from: /[Bb]oards\/kanban-cards\//g, to: "spice/boards/kanban-cards/" },
+    { from: /[Bb]oards\/to-do\//g, to: "spice/boards/to-do/" },
+    { from: /[Bb]oards\/Planning-Hub\.md/g, to: "spice/boards/Planning-Hub.md" },
+    { from: /[Bb]oards\/Projects-Hub\.md/g, to: "spice/boards/Projects-Hub.md" },
+    { from: /[Bb]oards\/Projects\.md/g, to: "spice/boards/Projects.md" },
+    { from: /[Bb]oards\/Project Work\.md/g, to: "spice/boards/Project Work.md" },
+    { from: /[Bb]oards\/To-Do-Board\.md/g, to: "spice/boards/To-Do-Board.md" },
+    { from: /(?<![/\w])Projects\/([^\/\s"'`]+)\//g, to: "spice/projects/$1/" }
 ];
 
 function rewriteString(body) {

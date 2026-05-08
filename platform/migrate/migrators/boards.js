@@ -17,8 +17,11 @@
 const fs = require("fs");
 const path = require("path");
 
-const SRC_RE = /^boards\//;
-const PLANNING_RE = /^boards\/planning\//;
+// Case-insensitive root: Accuris uses lowercase `boards/`, Ero uses
+// capital `Boards/`. Both are claimed by this migrator (paths NOT under
+// `<root>/planning/<slug>/` which is owned by project migrator).
+const SRC_RE = /^[Bb]oards\//;
+const PLANNING_RE = /^[Bb]oards\/planning\//;
 
 function _validateRel(p) {
     const segs = p.replace(/\\/g, "/").split("/");
@@ -46,6 +49,7 @@ module.exports = {
     plan(srcRelPath, _srcAbsPath, _ctx) {
         _validateRel(srcRelPath);
         const norm = srcRelPath.replace(/\\/g, "/");
+        // Strip the leading `boards/` or `Boards/` prefix; preserve sub-path.
         const tail = norm.replace(SRC_RE, "");
         const tgt = `spice/boards/${tail}`;
         return {
