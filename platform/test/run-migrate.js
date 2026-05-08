@@ -97,7 +97,7 @@ async function caseM3DispatcherCollisionAborts() {
 }
 
 async function caseM4DispatcherSkipList() {
-    console.log("=== M4 — skip-list excludes .obsidian / *.tmp / Invalid date / ===");
+    console.log("=== M4 — skip-list excludes .obsidian / *.tmp / Invalid date / venv / .venv / __pycache__ / .smart-env / *.pyc ===");
     const dispatcher = tryRequire("../migrate/dispatcher");
     if (dispatcher.__error) { _failed++; console.log("    FAIL M4: dispatcher unavailable"); return; }
     let plan;
@@ -108,6 +108,11 @@ async function caseM4DispatcherSkipList() {
     assertTrue(!sources.some(s => s.includes(".obsidian/")), "M4 .obsidian/ excluded");
     assertTrue(!sources.some(s => s.endsWith(".tmp")), "M4 *.tmp excluded");
     assertTrue(!sources.some(s => s.includes("Invalid date/")), "M4 Invalid date/ excluded");
+    assertTrue(!sources.some(s => s.includes("venv/")), "M4 venv/ excluded");
+    assertTrue(!sources.some(s => s.includes(".venv/")), "M4 .venv/ excluded");
+    assertTrue(!sources.some(s => s.includes("__pycache__/")), "M4 __pycache__/ excluded");
+    assertTrue(!sources.some(s => s.includes(".smart-env/")), "M4 .smart-env/ excluded");
+    assertTrue(!sources.some(s => s.endsWith(".pyc")), "M4 *.pyc excluded");
 }
 
 async function caseM5DispatcherReturnsShape() {

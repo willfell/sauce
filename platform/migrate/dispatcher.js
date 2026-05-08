@@ -13,8 +13,20 @@
 const fs = require("fs");
 const path = require("path");
 
-const SKIP_DIR_NAMES = new Set([".obsidian", ".git", ".DS_Store", "node_modules", "Invalid date"]);
-const SKIP_EXT = new Set([".tmp"]);
+// Skip-list. Directories named here (anywhere in the source tree) are
+// excluded from migration entirely. Includes:
+//   - Obsidian/git internals: .obsidian, .git, .DS_Store
+//   - Plugin caches that rebuild on demand: .smart-env, .smart-connections
+//   - Build/runtime cruft: node_modules, venv, .venv, __pycache__
+//   - Source-corruption sentinel: Invalid date (Templater bad-output marker)
+// Source vaults that are 1.5GB+ (e.g., real Accuris) shrink ~30x post-skip.
+const SKIP_DIR_NAMES = new Set([
+    ".obsidian", ".git", ".DS_Store",
+    "node_modules", "venv", ".venv", "__pycache__",
+    ".smart-env", ".smart-connections", ".trash",
+    "Invalid date"
+]);
+const SKIP_EXT = new Set([".tmp", ".pyc"]);
 
 function _loadMigrators() {
     const migratorsDir = path.join(__dirname, "migrators");
