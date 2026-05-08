@@ -248,6 +248,17 @@ function _rewriteBlueprints(plan, paths, opts) {
         const srcAbs = path.join(fromAbs, entry.src);
         if (!fs.existsSync(srcAbs)) throw new Error(`commit rewrite: source missing for ${entry.src}`);
         m.migrate(entry, srcAbs, vaultPath, ctx);
+        // Preserve source mtime on the migrated file. Per-migrator atomic
+        // writes assign mtime=now, which would flatten Obsidian's
+        // recency-sort across an entire migrated batch. Best-effort: we
+        // never abort migration on a stat/utime failure.
+        try {
+            const tgtAbs = path.join(vaultPath, entry.tgt);
+            if (fs.existsSync(tgtAbs)) {
+                const st = fs.statSync(srcAbs);
+                fs.utimesSync(tgtAbs, st.atime, st.mtime);
+            }
+        } catch (_e) { /* best-effort */ }
     }
 }
 
