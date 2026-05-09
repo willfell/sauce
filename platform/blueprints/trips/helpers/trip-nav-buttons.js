@@ -84,14 +84,14 @@ class TripNavButtons {
         }
 
         const icons = this._icons();
-        const DEFAULT_ORDER = ["Flights", "Stay", "Packing List", "To Do", "Notes"];
+        const DEFAULT_ORDER = ["Trip Flights", "Trip Stay", "Trip Packing List", "Trip To Do", "Trip Notes"];
         const sectionIconFor = (name) => {
             const map = {
-                "Flights": icons.flights,
-                "Stay": icons.stay,
-                "Packing List": icons.packing,
-                "To Do": icons.todo,
-                "Notes": icons.notes
+                "Trip Flights": icons.flights,
+                "Trip Stay": icons.stay,
+                "Trip Packing List": icons.packing,
+                "Trip To Do": icons.todo,
+                "Trip Notes": icons.notes
             };
             return map[name] || icons.section;
         };
@@ -508,12 +508,12 @@ await dv.view("ranch/views/customjs-guard", { class: "TripNavButtons" });
             return targetPath;
         };
 
-        const atlasPath = await writeTpl("Template, Trip Atlas.md", `${name}.md`);
-        await writeTpl("Template, Trip Flights.md", "Flights.md");
-        await writeTpl("Template, Trip Stay.md", "Stay.md");
-        await writeTpl("Template, Trip Packing List.md", "Packing List.md");
-        await writeTpl("Template, Trip To Do.md", "To Do.md");
-        await writeTpl("Template, Trip Notes.md", "Notes.md");
+        const atlasPath = await writeTpl("Template, Trip Atlas.md", "Trip Atlas.md");
+        await writeTpl("Template, Trip Flights.md", "Trip Flights.md");
+        await writeTpl("Template, Trip Stay.md", "Trip Stay.md");
+        await writeTpl("Template, Trip Packing List.md", "Trip Packing List.md");
+        await writeTpl("Template, Trip To Do.md", "Trip To Do.md");
+        await writeTpl("Template, Trip Notes.md", "Trip Notes.md");
         await writeTpl("Template, Trip Board.md", `board/${slug}-board.md`);
 
         return atlasPath;

@@ -1,6 +1,6 @@
 {
   "name": "trips",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "kind": "blueprint",
   "module_directory": "trips",
   "description": "Per-trip ecosystem under spice/trips/<slug>/. Each trip is a flat folder with an atlas note + 5 baseline sections (Flights, Stay, Packing List, To Do, Notes). Hub at spice/trips/Trips.md lists trips as BeaconCards row-layout cards sorted upcoming-first. 'New Trip' button scaffolds the directory tree from a name + dates + location dialog. Per-trip nav buttons auto-discover sibling sections.",

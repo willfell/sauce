@@ -43,7 +43,7 @@ class TripsHubCards {
       pages: trips.array(),
       layout: "row",
       group: groupOf,
-      title: (p) => p.file.name,
+      title: (p) => p.name || p.file.name,
       icon: () => planeIcon,
       subtitle: (p) => p.location || null,
       meta: (p) => {

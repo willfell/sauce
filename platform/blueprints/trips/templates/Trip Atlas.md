@@ -1,5 +1,6 @@
 ---
 type: trip
+name: "{{NAME}}"
 created: {{DATE}}
 start_date: {{START_DATE}}
 end_date: {{END_DATE}}
