@@ -203,6 +203,27 @@ After the rollup reaches "done" criterion, v0.30.0 opens with new functionality 
   - Trips.md hub canonical (cssclasses [wide, cards] + 3 dataviewjs blocks).
   - In-vault `ranch/scripts/trips/*` + `ranch/templates/Template, Trip Atlas.md` byte-equivalent to canonical workshop trips@0.1.7 — `sauce update` will be a no-op-effectively for these files.
   - Workshop trips@0.1.7 PATCH committed + pushed to `origin/main` (`06356d1`). Long-term reliability achieved: `sauce update` durably ships the canonical schema; New Trip button henceforth creates canonical-shape trips out of the box.
+- **Phase 9 — "why didn't my board items migrate?" diagnosis + project@1.3.8 PATCH + LEGACY_PATH_SUBSTITUTIONS extensions.**
+  - **User question** prompted by Planning Board (`spice/boards/Planning-Board.md`) showing zero project cards despite the 12 .md from `boards/planning/` having migrated to `spice/projects/`.
+  - **Root cause:** the migrated Planning-Board.md still queried `dv.pages('"boards/planning"')` — the OLD pre-migration path. The migrator's `LEGACY_PATH_SUBSTITUTIONS` rule `/[Bb]oards\/planning\//g` requires a TRAILING SLASH to match, but `dv.pages('"boards/planning"')` ends with a closing quote (no slash). So the rewrite missed it. Same shape miss for any `boards/<X>` dv.pages call. Plus the table never had rules for `boards/side-quests/` or `boards/to-do-cards/` at all (44 spice/ files were touched manually in Phase 4 to fix these).
+  - **Workshop LEGACY_PATH_SUBSTITUTIONS extensions** (`platform/migrate/wikilink-rewrite.js:52`):
+    - Added headspace-shape rules: `Resources/Views/customjs-guard`, `Resources/Templates/`, `Resources/Scripts/`, `Resources/Views/` (from Phase 2A's hand-rewrite work).
+    - Added missing path rules: `boards/to-do-cards/` → `spice/boards/to-do-cards/`, `boards/side-quests/` → `spice/boards/side-quests/` (from Phase 4's hand-rewrite work).
+    - Added **no-trailing-slash variants** for the dv.pages call shape: `boards/planning` → `spice/projects`, `boards/trips` → `spice/trips`, `boards/side-quests` → `spice/boards/side-quests` (uses lookbehind `(?<![/\w])` + lookahead `(?![/\w-])` so they only match the closing-quote/whitespace boundaries, not as substrings of longer paths).
+  - **Project@1.3.8 PATCH** (parallel to trips@0.1.7 — same schema-split, same fix shape):
+    - Surfaced the same internal inconsistency the trips blueprint had: rule_fragment `path_glob: "spice/projects/*/Project.md"` vs `_createProject` flow at `project-nav-buttons.js:340` creating atlas as `${name}.md`. After v0.29.0 added rule_fragments[] to project, the rule could never match.
+    - `templates/Project.md` — added `type: project` + `name: "{{NAME}}"` to canonical project atlas template (existing template variable).
+    - `helpers/projects-hub-cards.js:54` — `title: (p) => p.file.name` → `p.name || p.file.name`.
+    - `helpers/project-nav-buttons.js:340-341` — New Project writeTpl: atlas `${name}.md` → `Project.md`; map `${name} - Map.md` → `Project Map.md`. Board file unchanged at `${slug}-board.md`.
+    - `manifest.json` 1.3.7 → 1.3.8; `platform/manifest.json` catalogue + CLAUDE.md Status updated.
+  - **Headspace project schema migration:**
+    - Renamed both project atlases: `obsidian-refinement.md` + `Claude CoWork.md` → `Project.md` (each in their slug folder).
+    - Added missing rule_fragment frontmatter: `type: project`, `name: "<display>"`, `description: ""`, `workstreams: []` (claude-cowork already had description; obsidian-refinement was missing all four).
+    - Vault-wide wikilink rewrite (5 files touched): `[[obsidian-refinement]]` / `[[Claude CoWork]]` / `[[…|display]]` → `[[<slug>/Project|<original-display>]]` to disambiguate the now-shared `Project.md` filename.
+    - Patched in-vault `ranch/scripts/project/projects-hub-cards.js:54`, `ranch/scripts/project/project-nav-buttons.js:340-341`, `ranch/templates/Template, Project.md` to match the new project@1.3.8 spec — same byte-equivalence pattern as trips so `sauce update` is a no-op-effectively.
+    - Also fixed `spice/boards/Planning-Board.md` dv.pages call: `'"boards/planning"'` → `'"spice/projects"'` (the immediate user-visible bug).
+  - **Harness verification:** all 7 harnesses GREEN — bootstrap 58/0, cli 58/0, install-sh 14/0, helper-cases 429/0, migrate 104/0, audit 41/0, renderer 30 cases. **704 whole-suite sub-asserts + 30 renderer cases preserved across this PATCH** (no rule fragments changed, no fixture content moved — the table extension is purely additive new substitution rules).
+  - **Net result for headspace's projects:** Planning-Board now resolves to `spice/projects` and shows both project cards. Projects.md hub renders cards via ProjectsHubCards with display names from `name:` field. Both projects conform to rule_fragment `spice/projects/*/Project.md` requirements. Long-term `sauce update` reliability matches the trips story — workshop ships canonical schema; in-vault patches survive install cycles.
 
 (Append entries here per session. Template:
 

@@ -1,4 +1,6 @@
 ---
+type: project
+name: "{{NAME}}"
 created: {{DATE}}
 description: ""
 tags:

@@ -51,7 +51,7 @@ class ProjectsHubCards {
         await customJS.BeaconCards.render(dv, {
             pages: enriched.map(e => e.project),
             layout: "row",
-            title: (p) => p.file.name,
+            title: (p) => p.name || p.file.name,
             icon:  () => briefcase,
             subtitle: (p) => p.description || null,
             meta: (p) => {

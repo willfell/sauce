@@ -337,8 +337,8 @@ class ProjectNavButtons {
             return targetPath;
         };
 
-        const atlasPath = await writeTpl("Template, Project.md", `${name}.md`);
-        await writeTpl("Template, Project Map.md", `${name} - Map.md`);
+        const atlasPath = await writeTpl("Template, Project.md", "Project.md");
+        await writeTpl("Template, Project Map.md", "Project Map.md");
         await writeTpl("Template, Project Board.md", `${slug}-board.md`);
 
         return atlasPath;
