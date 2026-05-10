@@ -38,7 +38,7 @@ Pulls every Brex-visible card limit + outstanding balance, computes per-card uti
 
 - `markdown` (string): a single `> [!info]+ CC debt snapshot` callout, paste-ready.
 - `total_usd` (number): aggregate CC debt total in dollars.
-- `on_pace` (boolean): for `weekly` / `monthly-close` modes, true when paydown vs the previous period meets the $455/week ($1,964/month) target. Always `false` for `daily` mode.
+- `on_pace` (boolean): for `weekly` / `monthly-close` modes, true when paydown vs the previous period meets the `$ {{life_debt_weekly_target_usd}}/week` (`$ {{life_debt_monthly_target_usd}}/month`) target. Always `false` for `daily` mode.
 - Side effect: writes today's snapshot JSON to `spice/cowork/snapshots/cc-debt/{{date_today}}.json` for tomorrow's diff. Schema: `{ "date": "YYYY-MM-DD", "cards": [{ "id", "name", "last4", "balance_usd", "limit_usd" }], "total_usd": <number> }`. When `append_to_tracker = true`, also appends one row to `spice/finance/debt/Credit Debt Payoff Tracker.md` Progress log.
 
 ## Steps

@@ -25,7 +25,7 @@ ERO work-scope morning briefing. Reads calendar + project boards + active thread
 
 ## Write
 
-1. Use Skill `cowork:write-callout-morning-briefing-ero` with `{ date: <date>, weekday: <weekday>, month_name: <month_name>, is_monday: <is_monday>, is_25th_or_later: <is_25th_or_later>, calendar: <Gather step 1.markdown>, gmail: "", projects: <projects rendered as markdown>, threads_digest: <Gather step 3.markdown>, invoice_status: "[[<invoice_path basename>|<month_name> <year> Invoice]] -- <hours_logged> hrs logged ($<amount_logged> at $150/hr)." }`. Capture the returned `markdown` as `callout_markdown`.
+1. Use Skill `cowork:write-callout-morning-briefing-ero` with `{ date: <date>, weekday: <weekday>, month_name: <month_name>, is_monday: <is_monday>, is_25th_or_later: <is_25th_or_later>, calendar: <Gather step 1.markdown>, gmail: "", projects: <projects rendered as markdown>, threads_digest: <Gather step 3.markdown>, invoice_status: "[[<invoice_path basename>|<month_name> <year> Invoice]] -- <hours_logged> hrs logged ($<amount_logged> at ${{ero_hourly_rate_usd}}/hr)." }`. Capture the returned `markdown` as `callout_markdown`.
 2. Use Skill `cowork:patch-daily-callouts` with `{ daily_path: <daily_path>, callouts: [{ id: "morning-briefing", body: <callout_markdown> }] }`. The sub-skill handles marker location, idempotent replace-by-id, and `## Notes` fallback.
 
 ## State

@@ -82,7 +82,7 @@ Stale thread table with thread, age, recommendation.
 | Date | Meeting | Key Outcome | Open Action Items |
 
 ## Invoice Check
-[[YYYY-MM-Invoice]] - X hrs logged of ~Y expected ($X at $150/hr).
+[[YYYY-MM-Invoice]] - X hrs logged of ~Y expected ($X at ${{ero_hourly_rate_usd}}/hr).
 On pace / behind / ahead. Submission status if past 25th.
 
 ## Next Week

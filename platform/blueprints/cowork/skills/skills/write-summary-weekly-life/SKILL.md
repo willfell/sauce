@@ -73,7 +73,7 @@ Markdown body MUST contain these sections in this order, every run:
 - Top 3 problem categories
 - Credit card balance table (last week, now, change)
 - Interest charges MTD
-- Debt payoff progress (one sentence + weekly Δ vs ~$455/week target)
+- Debt payoff progress (one sentence + weekly Δ vs ~${{life_debt_weekly_target_usd}}/week target)
 
 ## Habit Check
 - Journaling streak / daily-note streak / todo engagement

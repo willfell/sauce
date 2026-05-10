@@ -11,7 +11,7 @@ inputs:
 outputs:
   markdown: string
   charges: list[object]
-  scheels_total: number
+  top_merchant_today_total: number
   mtd_discretionary: number
   days_since_splurge_pre: number
 tags: [cowork, gather]
@@ -34,7 +34,7 @@ Same shape as `cowork:gather-finance-yesterday` but bounded to *today* and limit
 
 - `markdown` (string): a single `> [!info]+ Today's credit card activity` callout, paste-ready.
 - `charges` (list[object]): structured charges, each `{ time_local, merchant, amount_usd, category, card_last4, card_name, status, severity, transaction_id }`. The midday tripwire orchestrator filters this list to dispatch RED/YELLOW write-callout sub-skills.
-- `scheels_total` (number): running SCHEELS spend total today in dollars.
+- `top_merchant_today_total` (number): running top-merchant spend total today in dollars (highest cumulative-spend merchant on active cards).
 - `mtd_discretionary` (number): month-to-date discretionary total.
 - `days_since_splurge_pre` (number): days since last discretionary splurge, computed BEFORE today's charges.
 

@@ -20,7 +20,7 @@ Compiles the month's invoice from EOD Time Log entries, cross-references the inv
 
 ## Inputs
 - `month`: target month in `YYYY-MM` form (e.g. `2026-05`). Caller supplies; do not infer from system clock.
-- `rate`: hourly rate in dollars. Defaults to `150` if absent (current ERO rate). Caller may override.
+- `rate`: hourly rate in dollars. Defaults to `{{ero_hourly_rate_usd}}` if absent (consumer-configured ERO rate). Caller may override.
 
 ## Outputs
 - `invoice_path`: vault-relative path to the invoice note.
@@ -39,7 +39,7 @@ Compiles the month's invoice from EOD Time Log entries, cross-references the inv
    date: 2026-05-01
    hours: 0
    amount: 0
-   rate: 150
+   rate: {{ero_hourly_rate_usd}}
    tags: [invoice, finance]
    ---
    ```
@@ -103,3 +103,4 @@ Compiles the month's invoice from EOD Time Log entries, cross-references the inv
 ## Template variables
 
 - `{{ero_ap_email}}` is substituted at install time from the consumer's `platform-config.json` variables block.
+- `{{ero_hourly_rate_usd}}` is substituted at install time from the consumer's `platform-config.json` variables block.

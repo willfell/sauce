@@ -73,7 +73,7 @@ Markdown body MUST contain these sections in this order, every run:
 
 ## Monthly Billable Summary
 - Total hours: X.X / target Y.Y (delta)
-- Total billable: $X,XXX at $150/hr
+- Total billable: $X,XXX at ${{ero_hourly_rate_usd}}/hr
 - Hours by week (table: W1 / W2 / W3 / W4 / W5)
 - Gaps: weeks below pace
 

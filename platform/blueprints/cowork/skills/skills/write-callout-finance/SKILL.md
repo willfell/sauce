@@ -51,7 +51,7 @@ Literal output shape (single outer callout, sub-sections separated by `> ---`, a
 >
 > ---
 >
-> **Credit-debt payoff (focused attack on Cap1 Platinum)**
+> **Credit-debt payoff (focused attack on {{life_cc_focus_card}})**
 >
 {{CC_DEBT_SNAPSHOT}}
 ```

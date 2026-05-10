@@ -55,7 +55,6 @@ Literal output shape (deterministic order, no emoji, no em dashes, absolute date
 
 ```markdown
 > [!abstract]+ {{DATE}} morning briefing - {{WEEKDAY}}
-> Direct read of the day. Lead with what needs attention.
 >
 > - One-sentence shape of the day, derived from highest-priority gather signal.
 

@@ -32,7 +32,7 @@ Composition-only sub-skill for the ero (work) daily note. Stitches normalized ga
 - `gmail` (string, optional) - markdown fragment from `cowork:gather-gmail` filtered to ero scope.
 - `projects` (string, optional) - markdown fragment from `cowork:gather-projects`. Active-projects table + per-project In-Progress / Blocked detail with wikilinked card notes.
 - `threads_digest` (string, optional) - markdown fragment from `cowork:gather-threads` filtered to ero scope.
-- `invoice_status` (string, optional) - single-line summary like `[[YYYY-MM-Invoice|Month YYYY Invoice]] - X hrs logged ($X at $150/hr).`
+- `invoice_status` (string, optional) - single-line summary like `[[YYYY-MM-Invoice|Month YYYY Invoice]] - X hrs logged ($X at ${{ero_hourly_rate_usd}}/hr).`
 
 ## Outputs
 
@@ -52,7 +52,6 @@ Literal output shape (deterministic order, wikilinks for note refs, 24-hour time
 
 ```markdown
 > [!abstract]+ {{DATE}} ero morning - {{WEEKDAY}}
-> ERO work briefing. Lead with what's blocked.
 
 > [!example]+ Schedule
 {{CALENDAR}}

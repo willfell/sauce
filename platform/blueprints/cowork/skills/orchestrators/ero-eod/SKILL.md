@@ -21,7 +21,7 @@ ERO work-scope EOD review. Writes one collapsed `[!example]- EOD Review` callout
 1. Use Skill `cowork:gather-projects` with `{ scope: "work", filter: "today-status", today: <today>, thresholds: { blocked_age_days: 3, stale_card_days: 5 } }`. Capture `{ projects, thread_triggers, completed, incomplete }`. Diff against the morning briefing's project state via `cowork:update-active-projects` read snapshot if needed (sub-skill exposes the read path); the orchestrator does NOT inline raw `mcp__obsidian__*` reads.
 2. Use Skill `cowork:gather-threads` with `{ date_today: <today>, mode: "eod-reconcile", scope: "work", auto_create: <thread_triggers>, auto_resolve_hints: <projects.completed_today_cards> }`. Capture `{ open_threads, resolved_today, new_threads, snoozed_to_open, markdown }`.
 3. Determine session hours: rely on the daily note's `[!abstract]+ Time Log` table (set explicitly during the day). The orchestrator does NOT inline reads; instead pass `time_log_present: false` to the writer and let `cowork:write-callout-eod-ero` render the unmissable Fill-This-In placeholder. (Future v0.31.0: a dedicated `cowork:gather-time-log` sub-skill will own the parse.)
-4. If `is_25th_or_later`, use Skill `cowork:invoice-prep` with `{ month: "<YYYY>-<month_num>", rate: 150 }`. Capture the full payload `{ invoice_path, hours, amount, line_items, gaps, summary_markdown }`.
+4. If `is_25th_or_later`, use Skill `cowork:invoice-prep` with `{ month: "<YYYY>-<month_num>", rate: {{ero_hourly_rate_usd}} }`. Capture the full payload `{ invoice_path, hours, amount, line_items, gaps, summary_markdown }`.
 
 ## Write
 

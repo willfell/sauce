@@ -18,7 +18,7 @@ Composition-only sub-skill. Emits the loud, short red-severity tripwire callout.
 
 Red triggers, evaluated by orchestrator from `cowork:gather-finance-cc-today`:
 
-- Any charge of any amount on a card marked `locked` in `spice/finance/debt/Credit Debt Payoff Tracker.md` (Apple Card, Discover, Cap1 Platinum, Cap1 Quicksilver).
+- Any charge of any amount on a card marked `locked` in `spice/finance/debt/Credit Debt Payoff Tracker.md` (locked-card list configured via `{{life_cc_locked_cards}}` in platform-config.json).
 - Any single charge `>= $200` on any card.
 - Any locked-card balance ticking up by `> $5` vs yesterday's snapshot when not attributable to interest.
 
@@ -57,7 +57,7 @@ Literal output shape (single outer `[!danger]+` callout, no nested callouts, act
 > - Move any recurring/auto-pay off this card if it's a subscription charge.
 > - Pay the exact charge amount to the card today and treat the locked card as a charge card.
 >
-> Do not let this become "a small one I'll catch later." That's the rationalization the tripwire exists to interrupt.
+> Course-correct now while it's still cheap.
 ```
 
 ## Errors
