@@ -71,7 +71,7 @@ Stop and ask the user before any of:
 - Editing or removing files inside `platform/mechanisms/*/` after a version has been promoted to a consumer.
 - Editing a consumer's `platform-installed.json` by hand (it's auto-managed by the installer).
 - **Force-pushing or rewriting history** on `origin/main` of the `sauce` remote (`git push --force`, `git reset --hard origin/...`, `git rebase -i` on already-pushed commits, etc.).
-- **Sanctioned new top-level vault dirs:** `spice/<module>/` (blueprint content; landmine #11; renamed from `beacon/<module>/` in v0.25.0) AND `pantry/` (workshop clone for inside-vault layout; renamed from `Beacon/` in v0.23.0 to resolve macOS APFS case-collision) AND `ranch/` (runtime plumbing; renamed from `Docs/Meta/` in v0.24.0). Other top-level dirs still require approval. The `pantry/` + `ranch/` + `spice/` namespace tripod is the canonical layout post-v0.25.0.
+- **Sanctioned new top-level vault dirs:** `spice/<module>/` (blueprint content; landmine #11; renamed from `beacon/<module>/` in v0.25.0) AND `pantry/` (workshop clone for inside-vault layout; renamed from `Beacon/` in v0.23.0 to resolve macOS APFS case-collision) AND `ranch/` (runtime plumbing; renamed from `Docs/Meta/` in v0.24.0) AND `.claude/skills/<blueprint>/` (native Claude Code skill bodies materialized by `materializeSkills`; added in v0.30.0 for cowork; landmine #12 + #19). Other top-level dirs still require approval. The `pantry/` + `ranch/` + `spice/` + `.claude/skills/` namespace tetrad is the canonical layout post-v0.30.0.
 
 ## Directory map
 
