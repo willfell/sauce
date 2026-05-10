@@ -253,6 +253,14 @@ module.exports = async function (tp) {
         let itemVars = variables;
         if (node.target.kind === "blueprint") {
           itemVars = { ...variables, module_directory: `spice/${itemMan.module_directory}` };
+          // v0.30.0 — overlay skills_dir for blueprints that ship native Claude
+          // Code skills via the new manifest.skills[] field. Pattern mirrors
+          // module_directory overlay above; mechanisms never receive
+          // skills_dir, so substituteStrict would fail loud on any mechanism
+          // body that misuses the variable.
+          if (typeof itemMan.skills_dir === "string" && itemMan.skills_dir.length > 0) {
+            itemVars.skills_dir = itemMan.skills_dir;
+          }
         }
         const ok = await installItem(tp, workshopPath, node.target, itemMan, itemVars, installedNow.history, git);
         if (ok) {
@@ -632,6 +640,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyAppearance(tp, mech, history, git);                                  // NEW v0.19.0
   await applyStyleSettings(tp, mech, workshopPath, target.path, history, git);    // NEW v0.19.0
   await applyHotkeys(tp, mech, history, git);                                     // NEW v0.21.1
+  await materializeSkills(tp, workshopPath, target.path, mech, variables, history, git);  // NEW v0.30.0
 
   return true;
 }
@@ -2054,6 +2063,156 @@ async function applyHotkeys(tp, manifest, history, git) {
         git_dirty: git.dirty,
         attempted_at: new Date().toISOString(),
       });
+    }
+  }
+}
+
+// materializeSkills — copy <workshop>/platform/<bp>/<entry.source> →
+// <vault>/<entry.dest> for each item in manifest.skills[]. Mirrors the
+// installItem files[] loop's Option B overwrite mechanics (identical-skip,
+// .bak-on-edit, no-bak on fresh/zero-byte). NEW v0.30.0 for the cowork
+// blueprint which materializes native Claude Code skill bodies into
+// <vault>/.claude/skills/<subtree>/. Skill bodies are markdown with YAML
+// frontmatter; the Option B + .bak posture matches files[] so users hand-
+// editing a SKILL.md get their edits backed up on next sauce update.
+//
+// Posture vs files[]: invalid entries (missing source/dest) record a history
+// warning and SKIP rather than abort, because skill arrays may grow to 30+
+// entries and one bad row shouldn't block the rest. files[] aborts on bad
+// rows because it's a smaller, hand-curated list.
+async function materializeSkills(tp, workshopPath, targetPath, mech, variables, history, git) {
+  if (!mech || !Array.isArray(mech.skills) || mech.skills.length === 0) return;
+  const adapter = tp.app.vault.adapter;
+  for (const entry of mech.skills) {
+    if (!entry || typeof entry.source !== "string" || entry.source.length === 0 ||
+        typeof entry.dest !== "string" || entry.dest.length === 0) {
+      if (history) {
+        history.push({
+          event: "warning",
+          step: "materialize_skill_invalid_entry",
+          name: mech.name,
+          message: `skipping skill entry: missing source or dest (source=${entry && entry.source}, dest=${entry && entry.dest})`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      continue;
+    }
+    const sourceAbs = `${workshopPath}/platform/${targetPath}/${entry.source}`;
+    const sourceText = await readAbsolute(sourceAbs);
+    if (sourceText === null) {
+      new Notice(`materializeSkills: source missing: ${sourceAbs}`, 4000);
+      if (history) {
+        history.push({
+          event: "error",
+          step: "materialize_skill_source_missing",
+          name: mech.name,
+          source: entry.source,
+          message: `source absent at ${sourceAbs}`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      continue;
+    }
+    let destPath, substituted;
+    try {
+      destPath = substituteStrict(entry.dest, variables);
+    } catch (e) {
+      new Notice(`materializeSkills: ${mech.name} ${entry.source} dest path — ${e.message}`, 8000);
+      if (history) {
+        history.push({
+          event: "error",
+          step: "materialize_skill_substitution",
+          name: mech.name,
+          source: entry.source,
+          message: e.message,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      continue;
+    }
+    substituted = substituteLenient(sourceText, variables);
+
+    const destDir = destPath.includes("/") ? destPath.substring(0, destPath.lastIndexOf("/")) : "";
+    if (destDir && !(await adapter.exists(destDir))) {
+      await adapter.mkdir(destDir);
+    }
+
+    const destExists = await adapter.exists(destPath);
+    let priorContent = null;
+    if (destExists) {
+      try {
+        priorContent = await adapter.read(destPath);
+      } catch (e) {
+        if (history) {
+          history.push({
+            event: "warning",
+            step: "materialize_skill_overwrite",
+            name: mech.name,
+            dest: destPath,
+            message: `read failed before overwrite check: ${e.message}`,
+            git_commit: git.commit,
+            git_tag: git.tag,
+            git_dirty: git.dirty,
+            attempted_at: new Date().toISOString(),
+          });
+        }
+      }
+    }
+    if (priorContent !== null && priorContent === substituted) {
+      // Identical — idempotent skip.
+      continue;
+    }
+    if (priorContent !== null && priorContent.length > 0) {
+      const crypto = require("crypto");
+      const priorSha = crypto.createHash("sha256").update(priorContent).digest("hex");
+      const newSha = crypto.createHash("sha256").update(substituted).digest("hex");
+      const bakPath = `${destPath}.bak`;
+      try {
+        await adapter.write(bakPath, priorContent);
+      } catch (e) {
+        new Notice(`materializeSkills: bak write failed for ${destPath} — ${e.message}`, 8000);
+        if (history) {
+          history.push({
+            event: "error",
+            step: "materialize_skill_overwrite",
+            name: mech.name,
+            dest: destPath,
+            message: `bak write failed: ${e.message}`,
+            git_commit: git.commit,
+            git_tag: git.tag,
+            git_dirty: git.dirty,
+            attempted_at: new Date().toISOString(),
+          });
+        }
+        continue;
+      }
+      await adapter.write(destPath, substituted);
+      if (history) {
+        history.push({
+          event: "replace",
+          step: "materialize_skill_overwrite",
+          name: mech.name,
+          dest: destPath,
+          prior_sha: priorSha,
+          new_sha: newSha,
+          bak_path: bakPath,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    } else {
+      await adapter.write(destPath, substituted);
     }
   }
 }
@@ -4521,6 +4680,9 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     // by run-helper-cases.js (HC-RF1/HC-RF2/HC-RF3 cover the array-support
     // patch). Pure additive; does not affect the function-as-default export.
     module.exports.applyRuleFragment = applyRuleFragment;
+    // v0.30.0 S1.5 — expose materializeSkills for HC-MS1..HC-MS5 in
+    // run-helper-cases.js. Pure additive; does not affect the function-as-default export.
+    module.exports.materializeSkills = materializeSkills;
     //
     // CF-2: by default, capture run-install.js's stdio (Phase B/C surfaced
     // 2200-line JSON dumps mixed into the user's terminal). We tee the

@@ -3691,6 +3691,148 @@ async function caseHCRF3() {
   });
 }
 
+// v0.30.0 S1.5 — TDD-first cases for materializeSkills (cowork blueprint
+// helper that copies <workshop>/platform/<bp>/skills/<src> → <vault>/<dest>
+// with {{skills_dir}} substitution + Option B overwrite semantics).
+// Mirrors HC-RF pattern: withTempVault + makeTpStub + direct require.
+
+async function caseHCMS1OrchestratorWrite() {
+  console.log("\n--- Case HC-MS1: materializeSkills writes orchestrator SKILL.md to .claude/skills/<dir>/<id>/ ---");
+  await withTempVault(async (dir) => {
+    // Seed a fake workshop with one orchestrator source file.
+    const workshop = path.join(dir, "_fake-workshop");
+    const bpRel = "blueprints/cowork-test";
+    const orchDir = path.join(workshop, "platform", bpRel, "skills/orchestrators/morning-briefing");
+    fs.mkdirSync(orchDir, { recursive: true });
+    fs.writeFileSync(path.join(orchDir, "SKILL.md"), "---\nname: cowork:morning-briefing\ndescription: stub\n---\n# cowork:morning-briefing\nbody\n");
+
+    const mech = {
+      name: "cowork-test",
+      skills_dir: ".claude/skills/cowork",
+      skills: [
+        { source: "skills/orchestrators/morning-briefing/SKILL.md", dest: "{{skills_dir}}/morning-briefing/SKILL.md" },
+      ],
+    };
+    const tp = makeTpStub(dir);
+    const { materializeSkills } = require("../install");
+    const history = [];
+    await materializeSkills(tp, workshop, bpRel, mech, { skills_dir: mech.skills_dir }, history, { commit: "x", tag: "x", dirty: false });
+
+    const dest = path.join(dir, ".claude/skills/cowork/morning-briefing/SKILL.md");
+    assertTrue("HC-MS1: dest SKILL.md exists", fs.existsSync(dest));
+    const written = fs.readFileSync(dest, "utf8");
+    assertTrue("HC-MS1: dest body matches source", /cowork:morning-briefing/.test(written));
+  });
+}
+
+async function caseHCMS2SubSkillNestedPath() {
+  console.log("\n--- Case HC-MS2: materializeSkills writes sub-skill to .claude/skills/<dir>/skills/<id>/ ---");
+  await withTempVault(async (dir) => {
+    const workshop = path.join(dir, "_fake-workshop");
+    const bpRel = "blueprints/cowork-test";
+    const subDir = path.join(workshop, "platform", bpRel, "skills/skills/check-vault-routing");
+    fs.mkdirSync(subDir, { recursive: true });
+    fs.writeFileSync(path.join(subDir, "SKILL.md"), "---\nname: cowork:check-vault-routing\ndescription: stub\n---\nbody\n");
+
+    const mech = {
+      name: "cowork-test",
+      skills_dir: ".claude/skills/cowork",
+      skills: [
+        { source: "skills/skills/check-vault-routing/SKILL.md", dest: "{{skills_dir}}/skills/check-vault-routing/SKILL.md" },
+      ],
+    };
+    const tp = makeTpStub(dir);
+    const { materializeSkills } = require("../install");
+    await materializeSkills(tp, workshop, bpRel, mech, { skills_dir: mech.skills_dir }, [], { commit: "x", tag: "x", dirty: false });
+
+    const dest = path.join(dir, ".claude/skills/cowork/skills/check-vault-routing/SKILL.md");
+    assertTrue("HC-MS2: nested sub-skill dest exists", fs.existsSync(dest));
+  });
+}
+
+async function caseHCMS3SkillsDirSubstitution() {
+  console.log("\n--- Case HC-MS3: {{skills_dir}} substitutes from variables ---");
+  await withTempVault(async (dir) => {
+    const workshop = path.join(dir, "_fake-workshop");
+    const bpRel = "blueprints/cowork-test";
+    const orchDir = path.join(workshop, "platform", bpRel, "skills/orchestrators/morning-briefing");
+    fs.mkdirSync(orchDir, { recursive: true });
+    fs.writeFileSync(path.join(orchDir, "SKILL.md"), "stub\n");
+
+    // Override skills_dir via variables to confirm substitution is dynamic (not literal).
+    const mech = {
+      name: "cowork-test",
+      skills_dir: ".claude/skills/cowork",
+      skills: [
+        { source: "skills/orchestrators/morning-briefing/SKILL.md", dest: "{{skills_dir}}/morning-briefing/SKILL.md" },
+      ],
+    };
+    const tp = makeTpStub(dir);
+    const { materializeSkills } = require("../install");
+    await materializeSkills(tp, workshop, bpRel, mech, { skills_dir: ".claude/skills/cowork-override" }, [], { commit: "x", tag: "x", dirty: false });
+
+    const overridden = path.join(dir, ".claude/skills/cowork-override/morning-briefing/SKILL.md");
+    const original = path.join(dir, ".claude/skills/cowork/morning-briefing/SKILL.md");
+    assertTrue("HC-MS3: substituted dest exists", fs.existsSync(overridden));
+    assertTrue("HC-MS3: literal/default dest does NOT exist", !fs.existsSync(original));
+  });
+}
+
+async function caseHCMS4Idempotent() {
+  console.log("\n--- Case HC-MS4: re-running materializeSkills is idempotent (no .bak on identical re-run) ---");
+  await withTempVault(async (dir) => {
+    const workshop = path.join(dir, "_fake-workshop");
+    const bpRel = "blueprints/cowork-test";
+    const orchDir = path.join(workshop, "platform", bpRel, "skills/orchestrators/morning-briefing");
+    fs.mkdirSync(orchDir, { recursive: true });
+    fs.writeFileSync(path.join(orchDir, "SKILL.md"), "body-v1\n");
+
+    const mech = {
+      name: "cowork-test",
+      skills_dir: ".claude/skills/cowork",
+      skills: [{ source: "skills/orchestrators/morning-briefing/SKILL.md", dest: "{{skills_dir}}/morning-briefing/SKILL.md" }],
+    };
+    const tp = makeTpStub(dir);
+    const { materializeSkills } = require("../install");
+    await materializeSkills(tp, workshop, bpRel, mech, { skills_dir: mech.skills_dir }, [], { commit: "x", tag: "x", dirty: false });
+    await materializeSkills(tp, workshop, bpRel, mech, { skills_dir: mech.skills_dir }, [], { commit: "x", tag: "x", dirty: false });
+
+    const dest = path.join(dir, ".claude/skills/cowork/morning-briefing/SKILL.md");
+    const bak = `${dest}.bak`;
+    assertTrue("HC-MS4: dest exists after re-run", fs.existsSync(dest));
+    assertTrue("HC-MS4: no .bak on identical re-run", !fs.existsSync(bak));
+  });
+}
+
+async function caseHCMS5InvalidEntrySkippedWithWarning() {
+  console.log("\n--- Case HC-MS5: entries missing source or dest are skipped with a history warning ---");
+  await withTempVault(async (dir) => {
+    const workshop = path.join(dir, "_fake-workshop");
+    const bpRel = "blueprints/cowork-test";
+    fs.mkdirSync(path.join(workshop, "platform", bpRel, "skills/orchestrators/morning-briefing"), { recursive: true });
+    fs.writeFileSync(path.join(workshop, "platform", bpRel, "skills/orchestrators/morning-briefing/SKILL.md"), "stub\n");
+
+    const mech = {
+      name: "cowork-test",
+      skills_dir: ".claude/skills/cowork",
+      skills: [
+        { source: "", dest: "{{skills_dir}}/orphan/SKILL.md" },                                                    // missing source
+        { source: "skills/orchestrators/morning-briefing/SKILL.md", dest: "" },                                    // missing dest
+        { source: "skills/orchestrators/morning-briefing/SKILL.md", dest: "{{skills_dir}}/morning-briefing/SKILL.md" }, // valid sibling
+      ],
+    };
+    const tp = makeTpStub(dir);
+    const { materializeSkills } = require("../install");
+    const history = [];
+    await materializeSkills(tp, workshop, bpRel, mech, { skills_dir: mech.skills_dir }, history, { commit: "x", tag: "x", dirty: false });
+
+    const warnings = history.filter((h) => h.event === "warning" && h.step === "materialize_skill_invalid_entry");
+    assertEqual(warnings.length, 2, "HC-MS5: two invalid entries recorded as warnings");
+    const validDest = path.join(dir, ".claude/skills/cowork/morning-briefing/SKILL.md");
+    assertTrue("HC-MS5: valid sibling still wrote", fs.existsSync(validDest));
+  });
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -3775,6 +3917,13 @@ async function caseHCRF3() {
   await caseHCRF1();
   await caseHCRF2();
   await caseHCRF3();
+
+  // v0.30.0 S1.5 — materializeSkills (cowork blueprint installer helper).
+  await caseHCMS1OrchestratorWrite();
+  await caseHCMS2SubSkillNestedPath();
+  await caseHCMS3SkillsDirSubstitution();
+  await caseHCMS4Idempotent();
+  await caseHCMS5InvalidEntrySkippedWithWarning();
 
   // v0.20.0 docs polish cycle — trailing-whitespace lint.
   await caseTW1TemplatesNoTrailingWhitespace();
