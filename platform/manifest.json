@@ -33,7 +33,7 @@
   "blueprints": [
     { "name": "boards", "version": "0.1.0", "path": "blueprints/boards" },
     { "name": "cowork", "version": "0.1.0", "path": "blueprints/cowork" },
-    { "name": "daily", "version": "0.2.4", "path": "blueprints/daily" },
+    { "name": "daily", "version": "0.2.5", "path": "blueprints/daily" },
     { "name": "meetings", "version": "0.3.1", "path": "blueprints/meetings" },
     { "name": "people", "version": "0.1.1", "path": "blueprints/people" },
     { "name": "project", "version": "1.3.8", "path": "blueprints/project" },
