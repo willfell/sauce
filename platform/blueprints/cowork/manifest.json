@@ -1,0 +1,92 @@
+{
+  "name": "cowork",
+  "version": "0.1.0",
+  "kind": "blueprint",
+  "module_directory": "cowork",
+  "skills_dir": ".claude/skills/cowork",
+  "description": "Productizes the cowork automation layer as native Claude Code skills materialized to <vault>/.claude/skills/cowork/. 9 orchestrators (life: morning-briefing, midday-tripwire, eod-review, weekly-review, monthly-review; work: ero-morning, ero-eod, ero-weekly, ero-monthly) + 26 sub-skills.",
+  "depends_on": [
+    { "name": "daily",           "range": ">=0.2.5" },
+    { "name": "customjs-guard",  "range": ">=1.0.0" },
+    { "name": "nav-buttons",     "range": ">=2.5.3" }
+  ],
+  "files": [
+    { "source": "content/Cowork.md",                          "dest": "{{module_directory}}/Cowork.md" },
+    { "source": "content/context/README.md",                  "dest": "{{module_directory}}/context/README.md" },
+    { "source": "content/context/obsidian-vault-guide.md",    "dest": "{{module_directory}}/context/obsidian-vault-guide.md" }
+  ],
+  "skills": [
+    { "source": "skills/orchestrators/morning-briefing/SKILL.md",                "dest": "{{skills_dir}}/morning-briefing/SKILL.md" },
+    { "source": "skills/orchestrators/midday-tripwire/SKILL.md",                 "dest": "{{skills_dir}}/midday-tripwire/SKILL.md" },
+    { "source": "skills/orchestrators/eod-review/SKILL.md",                      "dest": "{{skills_dir}}/eod-review/SKILL.md" },
+    { "source": "skills/orchestrators/weekly-review/SKILL.md",                   "dest": "{{skills_dir}}/weekly-review/SKILL.md" },
+    { "source": "skills/orchestrators/monthly-review/SKILL.md",                  "dest": "{{skills_dir}}/monthly-review/SKILL.md" },
+    { "source": "skills/orchestrators/ero-morning/SKILL.md",                     "dest": "{{skills_dir}}/ero-morning/SKILL.md" },
+    { "source": "skills/orchestrators/ero-eod/SKILL.md",                         "dest": "{{skills_dir}}/ero-eod/SKILL.md" },
+    { "source": "skills/orchestrators/ero-weekly/SKILL.md",                      "dest": "{{skills_dir}}/ero-weekly/SKILL.md" },
+    { "source": "skills/orchestrators/ero-monthly/SKILL.md",                     "dest": "{{skills_dir}}/ero-monthly/SKILL.md" },
+    { "source": "skills/skills/check-vault-routing/SKILL.md",                    "dest": "{{skills_dir}}/skills/check-vault-routing/SKILL.md" },
+    { "source": "skills/skills/date-context/SKILL.md",                           "dest": "{{skills_dir}}/skills/date-context/SKILL.md" },
+    { "source": "skills/skills/ensure-daily-note/SKILL.md",                      "dest": "{{skills_dir}}/skills/ensure-daily-note/SKILL.md" },
+    { "source": "skills/skills/gather-weather/SKILL.md",                         "dest": "{{skills_dir}}/skills/gather-weather/SKILL.md" },
+    { "source": "skills/skills/gather-calendar/SKILL.md",                        "dest": "{{skills_dir}}/skills/gather-calendar/SKILL.md" },
+    { "source": "skills/skills/gather-gmail/SKILL.md",                           "dest": "{{skills_dir}}/skills/gather-gmail/SKILL.md" },
+    { "source": "skills/skills/gather-imessage/SKILL.md",                        "dest": "{{skills_dir}}/skills/gather-imessage/SKILL.md" },
+    { "source": "skills/skills/gather-finance-yesterday/SKILL.md",               "dest": "{{skills_dir}}/skills/gather-finance-yesterday/SKILL.md" },
+    { "source": "skills/skills/gather-finance-cc-today/SKILL.md",                "dest": "{{skills_dir}}/skills/gather-finance-cc-today/SKILL.md" },
+    { "source": "skills/skills/gather-cc-debt-snapshot/SKILL.md",                "dest": "{{skills_dir}}/skills/gather-cc-debt-snapshot/SKILL.md" },
+    { "source": "skills/skills/gather-projects/SKILL.md",                        "dest": "{{skills_dir}}/skills/gather-projects/SKILL.md" },
+    { "source": "skills/skills/gather-threads/SKILL.md",                         "dest": "{{skills_dir}}/skills/gather-threads/SKILL.md" },
+    { "source": "skills/skills/write-callout-morning-briefing-life/SKILL.md",    "dest": "{{skills_dir}}/skills/write-callout-morning-briefing-life/SKILL.md" },
+    { "source": "skills/skills/write-callout-morning-briefing-ero/SKILL.md",     "dest": "{{skills_dir}}/skills/write-callout-morning-briefing-ero/SKILL.md" },
+    { "source": "skills/skills/write-callout-finance/SKILL.md",                  "dest": "{{skills_dir}}/skills/write-callout-finance/SKILL.md" },
+    { "source": "skills/skills/write-callout-tripwire-red/SKILL.md",             "dest": "{{skills_dir}}/skills/write-callout-tripwire-red/SKILL.md" },
+    { "source": "skills/skills/write-callout-tripwire-yellow/SKILL.md",          "dest": "{{skills_dir}}/skills/write-callout-tripwire-yellow/SKILL.md" },
+    { "source": "skills/skills/write-callout-eod-life/SKILL.md",                 "dest": "{{skills_dir}}/skills/write-callout-eod-life/SKILL.md" },
+    { "source": "skills/skills/write-callout-eod-ero/SKILL.md",                  "dest": "{{skills_dir}}/skills/write-callout-eod-ero/SKILL.md" },
+    { "source": "skills/skills/write-summary-weekly-life/SKILL.md",              "dest": "{{skills_dir}}/skills/write-summary-weekly-life/SKILL.md" },
+    { "source": "skills/skills/write-summary-weekly-ero/SKILL.md",               "dest": "{{skills_dir}}/skills/write-summary-weekly-ero/SKILL.md" },
+    { "source": "skills/skills/write-summary-monthly-life/SKILL.md",             "dest": "{{skills_dir}}/skills/write-summary-monthly-life/SKILL.md" },
+    { "source": "skills/skills/write-summary-monthly-ero/SKILL.md",              "dest": "{{skills_dir}}/skills/write-summary-monthly-ero/SKILL.md" },
+    { "source": "skills/skills/update-active-threads/SKILL.md",                  "dest": "{{skills_dir}}/skills/update-active-threads/SKILL.md" },
+    { "source": "skills/skills/update-weekly-snapshot/SKILL.md",                 "dest": "{{skills_dir}}/skills/update-weekly-snapshot/SKILL.md" },
+    { "source": "skills/skills/invoice-prep/SKILL.md",                           "dest": "{{skills_dir}}/skills/invoice-prep/SKILL.md" }
+  ],
+  "rule_fragments": [
+    {
+      "target": "cowork",
+      "fragment": {
+        "scope": { "path_glob": "spice/cowork/Cowork.md" },
+        "required_frontmatter": { "type": { "required": true, "type": "string" } },
+        "required_tags": [{ "tag": "cowork-hub" }]
+      }
+    },
+    {
+      "target": "cowork",
+      "fragment": {
+        "scope": { "path_glob": "spice/cowork/context/active-threads.md" },
+        "required_frontmatter": {
+          "type":       { "required": true, "type": "string", "equals": "cowork-threads" },
+          "updated":    { "required": true, "type": "string" },
+          "updated_by": { "required": true, "type": "string" }
+        }
+      }
+    },
+    {
+      "target": "cowork",
+      "fragment": {
+        "scope": { "path_glob": ".claude/skills/cowork/*/SKILL.md" },
+        "required_frontmatter": {
+          "name":        { "required": true, "type": "string" },
+          "description": { "required": true, "type": "string" }
+        }
+      }
+    }
+  ],
+  "post_install": [
+    {
+      "type": "notice",
+      "message": "cowork@0.1.0 installed. 35 skills materialized to <vault>/.claude/skills/cowork/. Open spice/cowork/Cowork.md for the hub. Cron orchestrators must be updated to invoke skills via 'cowork:<id>' (see Docs/plans/2026-05-10-v0.30.0-cowork-blueprint-result.md)."
+    }
+  ]
+}
