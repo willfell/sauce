@@ -1,0 +1,37 @@
+{
+  "id": "consulting",
+  "version": "0.1.0",
+  "schema_version": 1,
+  "label": "Consulting / contract work",
+  "consumes": ["daily", "meetings", "project", "to-do", "people", "finance"],
+  "required_fields": [
+    { "id": "role",            "type": "string", "prompt": "Your role on this engagement (e.g., \"Staff Engineer (contract)\")" },
+    { "id": "primary_client",  "type": "string", "prompt": "Primary client name" },
+    { "id": "hourly_rate_usd", "type": "number", "prompt": "Hourly rate in USD (numeric)" },
+    { "id": "ap_email",        "type": "string", "prompt": "Accounts-payable email at the client (where invoices go)" },
+    { "id": "invoice_cadence", "type": "string", "prompt": "Invoice cadence (e.g., \"weekly\", \"biweekly\", \"monthly\")" }
+  ],
+  "optional_fields": [
+    { "id": "billing_anchor_day", "type": "number",   "prompt": "Day of week/month invoices anchor to (numeric; blank = none)" },
+    { "id": "secondary_clients",  "type": "string[]", "prompt": "Other concurrent clients (comma-separated)" },
+    { "id": "brex_enabled",       "type": "boolean",  "prompt": "Use Brex MCP for expense tracking? (true/false)", "default_value": false },
+    { "id": "stakeholders",       "type": "string[]", "prompt": "Key stakeholders at the client (comma-separated names)" },
+    { "id": "gmail_label",        "type": "string",   "prompt": "Gmail label scoping this engagement's email (e.g., \"Clients/Acme\")" },
+    { "id": "calendar_id",        "type": "string",   "prompt": "Calendar ID scoping this engagement's events" }
+  ],
+  "supported_cadences": ["morning", "eod", "weekly", "monthly"],
+  "default_cadences": {
+    "morning": true,
+    "midday":  false,
+    "eod":     true,
+    "weekly":  true,
+    "monthly": true
+  },
+  "render_aspects": {
+    "finance_block":          "include",
+    "invoice_prep":           "include",
+    "ai_committee":           "include",
+    "kanban_projects":        "include",
+    "inner_circle_imessage":  "skip"
+  }
+}

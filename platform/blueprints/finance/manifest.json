@@ -78,5 +78,15 @@
       "message": "Finance blueprint v0.1.0 installed at spice/finance/. Open spice/finance/Finance.md and click 'New Budget' / 'New Paycheck' / 'New Invoice' to scaffold entries. Status pills (Planning/In Progress/Done) derive from frontmatter at render time. Cmd+R required after this install to load 9 CustomJS classes."
     }
   ],
+  "bootstrap_contributions": [
+    { "kind": "engagement_field_offer", "engagement_field_id": "finance.cc_active_cards",          "type": "string[]", "prompt": "Cards you actively spend from (comma-separated)",                "consumed_by_types": ["personal", "consulting"] },
+    { "kind": "engagement_field_offer", "engagement_field_id": "finance.cc_locked_cards",          "type": "string[]", "prompt": "Cards you've frozen (comma-separated)",                          "consumed_by_types": ["personal", "consulting"] },
+    { "kind": "engagement_field_offer", "engagement_field_id": "finance.cc_ignored_cards",         "type": "string[]", "prompt": "Cards you don't track (comma-separated)",                        "consumed_by_types": ["personal", "consulting"] },
+    { "kind": "engagement_field_offer", "engagement_field_id": "finance.cc_focus_card",            "type": "string",   "prompt": "Highest-priority locked card name (single)",                     "consumed_by_types": ["personal", "consulting"] },
+    { "kind": "engagement_field_offer", "engagement_field_id": "finance.debt_weekly_target_usd",   "type": "number",   "prompt": "Weekly debt-paydown target in USD (numeric)",                    "consumed_by_types": ["personal", "consulting"] },
+    { "kind": "engagement_field_offer", "engagement_field_id": "finance.debt_monthly_target_usd",  "type": "number",   "prompt": "Monthly debt-paydown target in USD (numeric)",                   "consumed_by_types": ["personal", "consulting"] },
+    { "kind": "engagement_field_offer", "engagement_field_id": "finance.discretionary_categories", "type": "string[]", "prompt": "Discretionary spending categories (comma-separated)",            "consumed_by_types": ["personal"] },
+    { "kind": "context_file_offer",     "path_template": "spice/cowork/context/{{engagement_id}}/finance-guide.md", "source_template": "engagement-templates/personal/finance-guide.md",            "consumed_by_types": ["personal", "consulting"] }
+  ],
   "rule_fragments": []
 }

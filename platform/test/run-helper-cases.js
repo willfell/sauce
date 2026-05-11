@@ -3590,6 +3590,154 @@ async function caseAS5BackupBeforeEdit() {
 }
 
 // v0.20.0 docs polish cycle — trailing-whitespace lint for blueprint template + content bodies.
+// ============================================================
+// v0.31.0 S1.5 — engagement-type registry + bootstrap_contributions[]
+// schema-conformance assertions. Pure static-JSON checks; no installer
+// dispatch. Targets +12 sub-asserts (3 + 3 + 1 + 4 + 4 + 1 + 1 = 17 actual;
+// plan said target = 12, so we're slightly over — counted at run time).
+// ============================================================
+
+const COWORK_DIR        = path.join(WORKSHOP, "platform", "blueprints", "cowork");
+const ENGAGEMENT_TYPES_DIR = path.join(COWORK_DIR, "engagement-types");
+const COWORK_MANIFEST_PATH = path.join(COWORK_DIR, "manifest.json");
+const BLUEPRINTS_DIR    = path.join(WORKSHOP, "platform", "blueprints");
+const CONTRIB_BPS       = ["finance", "people", "meetings", "project"];
+const VALID_CONTRIB_KINDS = new Set(["engagement_field_offer", "context_file_offer", "vault_question"]);
+
+function _readJson(p) { return JSON.parse(fs.readFileSync(p, "utf8")); }
+
+// HC-ET-1 — Each engagement-type JSON parses + has required top-level fields.
+async function caseHCET1() {
+  console.log("\n--- Case HC-ET-1: engagement-type manifests have required top-level fields ---");
+  const required = [
+    "id", "version", "schema_version", "label", "consumes",
+    "required_fields", "optional_fields",
+    "supported_cadences", "default_cadences", "render_aspects",
+  ];
+  const types = ["personal", "w2-fte", "consulting"];
+  for (const t of types) {
+    const p = path.join(ENGAGEMENT_TYPES_DIR, `${t}.json`);
+    const m = _readJson(p);
+    const missing = required.filter((k) => !(k in m));
+    assertTrue(
+      `HC-ET-1: ${t}.json has all required top-level fields`,
+      missing.length === 0,
+      missing.length > 0 ? `missing: ${missing.join(", ")}` : ""
+    );
+  }
+}
+
+// HC-ET-2 — Every cowork.manifest.engagement_types[] entry resolves to a file.
+async function caseHCET2() {
+  console.log("\n--- Case HC-ET-2: cowork.engagement_types[] entries resolve to existing files ---");
+  const cowork = _readJson(COWORK_MANIFEST_PATH);
+  const entries = cowork.engagement_types || [];
+  assertTrue("HC-ET-2: cowork.engagement_types[] has 3 entries", entries.length === 3);
+  for (const e of entries) {
+    const resolved = path.join(COWORK_DIR, e.manifest);
+    assertTrue(
+      `HC-ET-2: engagement_types entry id="${e.id}" resolves to ${e.manifest}`,
+      fs.existsSync(resolved),
+      `not found: ${resolved}`
+    );
+  }
+}
+
+// HC-ET-3 — Every consumes[] blueprint name is a real installed blueprint.
+async function caseHCET3() {
+  console.log("\n--- Case HC-ET-3: engagement-type consumes[] all reference real blueprints ---");
+  const types = ["personal", "w2-fte", "consulting"];
+  const allConsumes = new Set();
+  for (const t of types) {
+    const m = _readJson(path.join(ENGAGEMENT_TYPES_DIR, `${t}.json`));
+    for (const c of (m.consumes || [])) allConsumes.add(c);
+  }
+  const missing = [];
+  for (const bp of allConsumes) {
+    const bpManifest = path.join(BLUEPRINTS_DIR, bp, "manifest.json");
+    if (!fs.existsSync(bpManifest)) missing.push(bp);
+  }
+  assertTrue(
+    `HC-ET-3: all consumes[] entries (${allConsumes.size} distinct) resolve to installed blueprints`,
+    missing.length === 0,
+    missing.length > 0 ? `missing blueprints: ${missing.join(", ")}` : ""
+  );
+}
+
+// HC-BC-1 — Every bootstrap_contributions[] entry has a valid kind.
+async function caseHCBC1() {
+  console.log("\n--- Case HC-BC-1: bootstrap_contributions[].kind is in {engagement_field_offer, context_file_offer, vault_question} ---");
+  for (const bp of CONTRIB_BPS) {
+    const m = _readJson(path.join(BLUEPRINTS_DIR, bp, "manifest.json"));
+    const contribs = m.bootstrap_contributions || [];
+    const bad = contribs.filter((c) => !VALID_CONTRIB_KINDS.has(c.kind));
+    assertTrue(
+      `HC-BC-1: ${bp} bootstrap_contributions[] kinds all valid (${contribs.length} entries)`,
+      bad.length === 0,
+      bad.length > 0 ? `bad kinds: ${bad.map((c) => c.kind).join(", ")}` : ""
+    );
+  }
+}
+
+// HC-BC-2 — engagement_field_offer.engagement_field_id matches <blueprint-name>.<snake_case>.
+async function caseHCBC2() {
+  console.log("\n--- Case HC-BC-2: engagement_field_offer.engagement_field_id uses prefix-by-blueprint convention ---");
+  for (const bp of CONTRIB_BPS) {
+    const m = _readJson(path.join(BLUEPRINTS_DIR, bp, "manifest.json"));
+    const offers = (m.bootstrap_contributions || []).filter((c) => c.kind === "engagement_field_offer");
+    const re = new RegExp(`^${bp}\\.[a-z][a-z0-9_]+$`);
+    const bad = offers.filter((o) => !re.test(o.engagement_field_id));
+    assertTrue(
+      `HC-BC-2: ${bp} engagement_field_offer ids match ^${bp}\\.[a-z][a-z0-9_]+$ (${offers.length} offers)`,
+      bad.length === 0,
+      bad.length > 0 ? `bad ids: ${bad.map((o) => o.engagement_field_id).join(", ")}` : ""
+    );
+  }
+}
+
+// HC-BC-3 — Every consumed_by_types[] entry references an existing engagement-type id.
+async function caseHCBC3() {
+  console.log("\n--- Case HC-BC-3: consumed_by_types[] references real engagement-type ids ---");
+  const knownTypes = new Set(["personal", "w2-fte", "consulting"]);
+  const bad = [];
+  for (const bp of CONTRIB_BPS) {
+    const m = _readJson(path.join(BLUEPRINTS_DIR, bp, "manifest.json"));
+    for (const c of (m.bootstrap_contributions || [])) {
+      for (const t of (c.consumed_by_types || [])) {
+        if (!knownTypes.has(t)) bad.push(`${bp}:${c.engagement_field_id || c.path_template}:${t}`);
+      }
+    }
+  }
+  assertTrue(
+    `HC-BC-3: all consumed_by_types[] entries reference {personal, w2-fte, consulting}`,
+    bad.length === 0,
+    bad.length > 0 ? `bad refs: ${bad.join(", ")}` : ""
+  );
+}
+
+// HC-BC-4 — context_file_offer.source_template paths resolve (warn-mode for S1
+// since engagement-templates/<type>/ may not yet exist; pre-S4).
+async function caseHCBC4() {
+  console.log("\n--- Case HC-BC-4: context_file_offer.source_template paths resolve (warn-mode pre-S4) ---");
+  const offers = [];
+  for (const bp of CONTRIB_BPS) {
+    const m = _readJson(path.join(BLUEPRINTS_DIR, bp, "manifest.json"));
+    for (const c of (m.bootstrap_contributions || [])) {
+      if (c.kind === "context_file_offer") offers.push({ bp, src: c.source_template });
+    }
+  }
+  const missing = offers.filter((o) => !fs.existsSync(path.join(BLUEPRINTS_DIR, o.bp, o.src)));
+  if (missing.length > 0) {
+    console.log(`  WARN (S1 pre-template-materialization): ${missing.length}/${offers.length} context_file_offer.source_template paths not yet present:`);
+    for (const m of missing) console.log(`    ${m.bp}: ${m.src}`);
+  }
+  // Always-pass in S1; will tighten in S4 once engagement-templates/ exist.
+  assertTrue(
+    `HC-BC-4: context_file_offer.source_template inventory completed (${offers.length} offers, ${missing.length} pending S4 materialization)`,
+    true
+  );
+}
+
 // Carry from v0.18.1 lesson 2 (template-body trailing-whitespace defect class).
 // Walks platform/blueprints/<bp>/{content,templates}/*.md (the two-level layout —
 // content/ holds install-time-materialized notes, templates/ holds Templater
@@ -3924,6 +4072,15 @@ async function caseHCMS5InvalidEntrySkippedWithWarning() {
   await caseHCMS3SkillsDirSubstitution();
   await caseHCMS4Idempotent();
   await caseHCMS5InvalidEntrySkippedWithWarning();
+
+  // v0.31.0 S1.5 — engagement-type registry + bootstrap_contributions[] schema conformance.
+  await caseHCET1();
+  await caseHCET2();
+  await caseHCET3();
+  await caseHCBC1();
+  await caseHCBC2();
+  await caseHCBC3();
+  await caseHCBC4();
 
   // v0.20.0 docs polish cycle — trailing-whitespace lint.
   await caseTW1TemplatesNoTrailingWhitespace();

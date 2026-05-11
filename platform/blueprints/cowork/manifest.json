@@ -1,8 +1,9 @@
 {
   "name": "cowork",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "kind": "blueprint",
   "module_directory": "cowork",
+  "engagement_types_dir": "engagement-types",
   "skills_dir": ".claude/skills/cowork",
   "description": "Productizes the cowork automation layer as native Claude Code skills materialized to <vault>/.claude/skills/cowork/. 10 orchestrators (bootstrap-vault user-invoked + life: morning-briefing, midday-tripwire, eod-review, weekly-review, monthly-review + work: ero-morning, ero-eod, ero-weekly, ero-monthly) + 28 sub-skills.",
   "depends_on": [
@@ -71,6 +72,11 @@
     { "source": "skills/skills/update-weekly-snapshot/SKILL.md",                 "dest": "{{skills_dir}}/skills/update-weekly-snapshot/SKILL.md" },
     { "source": "skills/skills/patch-daily-callouts/SKILL.md",                   "dest": "{{skills_dir}}/skills/patch-daily-callouts/SKILL.md" },
     { "source": "skills/skills/invoice-prep/SKILL.md",                           "dest": "{{skills_dir}}/skills/invoice-prep/SKILL.md" }
+  ],
+  "engagement_types": [
+    { "id": "personal",   "manifest": "engagement-types/personal.json" },
+    { "id": "w2-fte",     "manifest": "engagement-types/w2-fte.json" },
+    { "id": "consulting", "manifest": "engagement-types/consulting.json" }
   ],
   "rule_fragments": [
     {

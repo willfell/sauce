@@ -1,0 +1,37 @@
+{
+  "id": "personal",
+  "version": "0.1.0",
+  "schema_version": 1,
+  "label": "Personal life",
+  "consumes": ["finance", "to-do", "daily", "people", "journal"],
+  "required_fields": [
+    { "id": "owner_name", "type": "string", "prompt": "Your name" },
+    { "id": "home_city",  "type": "string", "prompt": "City (used by gather-weather)" }
+  ],
+  "optional_fields": [
+    { "id": "cc_active_cards",            "type": "string[]", "prompt": "Cards you actively spend from (comma-separated)" },
+    { "id": "cc_locked_cards",            "type": "string[]", "prompt": "Cards you've frozen (comma-separated)" },
+    { "id": "cc_ignored_cards",           "type": "string[]", "prompt": "Cards you don't track (comma-separated)" },
+    { "id": "cc_focus_card",              "type": "string",   "prompt": "Highest-priority locked card name (single)" },
+    { "id": "debt_weekly_target_usd",     "type": "number",   "prompt": "Weekly debt-paydown target in USD (numeric)" },
+    { "id": "debt_monthly_target_usd",    "type": "number",   "prompt": "Monthly debt-paydown target in USD (numeric)" },
+    { "id": "inner_circle_people",        "type": "string[]", "prompt": "Inner-circle people for iMessage filtering (comma-separated names)" },
+    { "id": "includes_wellness_prompts",  "type": "boolean",  "prompt": "Include wellness prompts in EOD review? (true/false)", "default_value": true },
+    { "id": "discretionary_categories",   "type": "string[]", "prompt": "Discretionary spending categories (comma-separated)" }
+  ],
+  "supported_cadences": ["morning", "midday", "eod", "weekly", "monthly"],
+  "default_cadences": {
+    "morning": true,
+    "midday":  true,
+    "eod":     true,
+    "weekly":  true,
+    "monthly": true
+  },
+  "render_aspects": {
+    "finance_block":          "include",
+    "invoice_prep":           "skip",
+    "ai_committee":           "skip",
+    "kanban_projects":        "include",
+    "inner_circle_imessage":  "include"
+  }
+}

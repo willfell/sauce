@@ -46,6 +46,11 @@
       "message": "Meetings blueprint installed at spice/meetings/. REQUIRED: enable the Templater community plugin if not already enabled. Click 'Meetings' to open today's meetings hub at spice/meetings/hubs/YYYY-MM-DD-Meetings.md. From the hub, click 'New Meeting' to create individual meeting notes at spice/meetings/notes/YYYY/MM-MMMM/YYYY-MM-DD <title>.md (you'll be prompted for title and attendees). Hub renders today's meetings as cards with status badges; meetings also appear in the daily dashboard's Today's Meetings panel."
     }
   ],
+  "bootstrap_contributions": [
+    { "kind": "engagement_field_offer", "engagement_field_id": "meetings.gmail_label",          "type": "string", "prompt": "Gmail label scoping for this engagement's meeting threads (e.g., \"Work\", \"Clients/Acme\")", "consumed_by_types": ["w2-fte", "consulting"] },
+    { "kind": "engagement_field_offer", "engagement_field_id": "meetings.calendar_id",          "type": "string", "prompt": "Calendar ID scoping for this engagement's events (e.g., \"willfellhoelter@gmail.com\")",     "consumed_by_types": ["w2-fte", "consulting"] },
+    { "kind": "engagement_field_offer", "engagement_field_id": "meetings.ai_committee_pattern", "type": "string", "prompt": "Regex/substring identifying \"AI committee\" events (blank = none)",                       "consumed_by_types": ["w2-fte", "consulting"] }
+  ],
   "rule_fragments": [
     {
       "target": "meetings",

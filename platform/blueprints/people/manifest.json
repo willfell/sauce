@@ -37,6 +37,10 @@
       "message": "people@0.1.0 installed. Open spice/people/People.md to see the hub. Click '+ New Person' to create. Existing People notes (if migrated from a consumer vault) survive as long as they live under spice/people/."
     }
   ],
+  "bootstrap_contributions": [
+    { "kind": "engagement_field_offer", "engagement_field_id": "people.inner_circle_people", "type": "string[]", "prompt": "Inner-circle people for iMessage filtering (comma-separated names)", "consumed_by_types": ["personal"] },
+    { "kind": "context_file_offer",     "path_template": "spice/cowork/context/{{engagement_id}}/people.md",     "source_template": "engagement-templates/personal/people.md", "consumed_by_types": ["personal"] }
+  ],
   "rule_fragments": [
     {
       "target": "people",
