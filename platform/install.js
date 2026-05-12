@@ -4569,6 +4569,206 @@ async function applyStyleSettings(tp, manifest, workshopPath, targetPath, histor
   }
 }
 
+// ============================================================
+// v0.32.0 S2 — aggregateClaudeSurface
+//
+// Walks the subscribed mechanisms + blueprints, harvests each item's
+// `claude_surface[]` array, substitutes per-item variables ({{module_directory}}
+// for blueprints with module_directory; {{skills_dir}} for items with
+// skills_dir), categorizes entries into:
+//
+//   - materializeList: { kind, source, dest, version, owner } for kinds
+//       command | skill | context_doc (files to copy in S3 materializer).
+//   - rows: { 'directory-map': [...], 'resolvers': [...], 'skills-index': [...] }
+//       table-keyed buckets for kind=claude_md_row.
+//
+// Returns { registry, materializeList, rows } where registry is the canonical
+// shape persisted to ranch/claude-surface-registry.json in S3:
+//   { schema_version: 1, generated_at, workshop_version, contributions: {<name>:[...]} }
+//
+// Behavior contract:
+//   - Subscription-aware: items present in perItemManifest but absent from
+//     subscription.mechanisms/blueprints are NOT included.
+//   - Destination path allowlist: only `.claude/`, `<module_directory>/`
+//     (resolved to spice/<bare>/), `Docs/Meta/`, `ranch/` prefixes accepted
+//     for kinds command|skill|context_doc. Disallowed dests log an
+//     `error` event with step `claude_surface_dest_disallowed` and are
+//     skipped (not in materializeList, not in registry contributions).
+//   - claude_md_row entries: any string field in `row` undergoes
+//     substituteLenient with the item's overlay vars so {{module_directory}}
+//     in `row.path` resolves to spice/<bare>/.
+//   - rows[<table>] is sorted alphabetically by primary key after
+//     aggregation: topic for resolvers, command for skills-index, path for
+//     directory-map. Stable for ties.
+//   - history: pushes aggregator summary event + per-skip error events.
+//
+// Pure function — no filesystem I/O. Callers (install.js step 6b in S3,
+// run-claude-surface.js harness) pass in the already-loaded perItemManifest.
+//
+// Inputs:
+//   perItemManifest: Map<name, manifest>
+//   subscription:    { mechanisms: [{name,version}], blueprints: [{name,version}] }
+//   history:         array; aggregator pushes events onto it
+//   git:             { commit, tag, dirty } — included on every event push
+//   opts (optional): { workshop_version } — stamped into registry top-level
+//
+// Output:
+//   { registry, materializeList, rows }
+// ============================================================
+const CLAUDE_SURFACE_ALLOWED_DEST_PREFIXES = [".claude/", "Docs/Meta/", "ranch/"];
+const CLAUDE_SURFACE_ROW_SORT_KEY = {
+  "resolvers": "topic",
+  "skills-index": "command",
+  "directory-map": "path",
+};
+
+async function aggregateClaudeSurface(perItemManifest, subscription, history, git, opts) {
+  opts = opts || {};
+  const out = {
+    registry: {
+      schema_version: 1,
+      generated_at: new Date().toISOString(),
+      workshop_version: opts.workshop_version || null,
+      contributions: {},
+    },
+    materializeList: [],
+    rows: {
+      "directory-map": [],
+      "resolvers": [],
+      "skills-index": [],
+    },
+  };
+
+  // Build subscribed-name set keyed by name; preserve { name, version, kind }.
+  const subscribed = new Map();
+  for (const m of (subscription && subscription.mechanisms) || []) {
+    subscribed.set(m.name, { name: m.name, version: m.version, kind: "mechanism" });
+  }
+  for (const b of (subscription && subscription.blueprints) || []) {
+    subscribed.set(b.name, { name: b.name, version: b.version, kind: "blueprint" });
+  }
+
+  let entryCount = 0;
+  let rejectCount = 0;
+
+  for (const [name, subEntry] of subscribed) {
+    const itemMan = perItemManifest.get(name);
+    if (!itemMan) continue;
+    const cs = itemMan.claude_surface;
+    if (!Array.isArray(cs) || cs.length === 0) continue;
+
+    // Build the item's substitution overlay — mirrors the install-loop
+    // overlay at install.js step 6 (lines ~385-400). Blueprint with a
+    // module_directory gets {{module_directory}} → spice/<bare>. Any item
+    // (blueprint or mechanism) with skills_dir gets {{skills_dir}}.
+    const itemVars = {};
+    if (subEntry.kind === "blueprint" && typeof itemMan.module_directory === "string" && itemMan.module_directory.length > 0) {
+      itemVars.module_directory = `spice/${itemMan.module_directory}`;
+    }
+    if (typeof itemMan.skills_dir === "string" && itemMan.skills_dir.length > 0) {
+      itemVars.skills_dir = itemMan.skills_dir;
+    }
+
+    const contributions = [];
+    for (let i = 0; i < cs.length; i++) {
+      const entry = cs[i];
+      if (!entry || typeof entry !== "object") continue;
+      const kind = entry.kind;
+
+      if (kind === "command" || kind === "skill" || kind === "context_doc") {
+        if (typeof entry.source !== "string" || typeof entry.dest !== "string") continue;
+        const dest = substituteLenient(entry.dest, itemVars);
+
+        // Destination allowlist: explicit prefix check. The item's own
+        // module_directory (spice/<bare>/) is a sanctioned prefix because
+        // it resolves via substituteLenient above; we check explicitly.
+        const moduleDirPrefix = itemVars.module_directory ? `${itemVars.module_directory}/` : null;
+        const allowed =
+          CLAUDE_SURFACE_ALLOWED_DEST_PREFIXES.some((p) => dest.startsWith(p)) ||
+          (moduleDirPrefix && dest.startsWith(moduleDirPrefix));
+
+        if (!allowed) {
+          rejectCount++;
+          if (history) {
+            history.push({
+              event: "error",
+              step: "claude_surface_dest_disallowed",
+              name,
+              index: i,
+              kind,
+              dest,
+              message: `${name} claude_surface[${i}] dest "${dest}" is not within an allowlisted prefix (.claude/, Docs/Meta/, ranch/, or <module_directory>/)`,
+              git_commit: git ? git.commit : null,
+              git_tag: git ? git.tag : null,
+              git_dirty: git ? git.dirty : null,
+              attempted_at: new Date().toISOString(),
+            });
+          }
+          continue;
+        }
+
+        const matEntry = {
+          kind,
+          source: entry.source,
+          dest,
+          version: subEntry.version,
+          owner: name,
+        };
+        out.materializeList.push(matEntry);
+        contributions.push({ kind, source: entry.source, dest, version: subEntry.version });
+        entryCount++;
+      } else if (kind === "claude_md_row") {
+        const table = entry.table;
+        if (typeof table !== "string" || !(table in out.rows)) continue;
+        if (!entry.row || typeof entry.row !== "object" || Array.isArray(entry.row)) continue;
+
+        // Substitute string-valued row fields lenient-style with itemVars
+        // so {{module_directory}} → spice/<bare>/ resolves in row.path.
+        const substRow = {};
+        for (const [k, v] of Object.entries(entry.row)) {
+          if (typeof v === "string") substRow[k] = substituteLenient(v, itemVars);
+          else substRow[k] = v;
+        }
+        const rowOut = { ...substRow, owner: name };
+        out.rows[table].push(rowOut);
+        contributions.push({ kind, table, row: substRow });
+        entryCount++;
+      }
+    }
+
+    if (contributions.length > 0) {
+      out.registry.contributions[name] = contributions;
+    }
+  }
+
+  // Sort each table's rows alphabetically by its primary key.
+  for (const [table, primaryKey] of Object.entries(CLAUDE_SURFACE_ROW_SORT_KEY)) {
+    out.rows[table].sort((a, b) => {
+      const ak = (a && typeof a[primaryKey] === "string") ? a[primaryKey] : "";
+      const bk = (b && typeof b[primaryKey] === "string") ? b[primaryKey] : "";
+      if (ak < bk) return -1;
+      if (ak > bk) return 1;
+      return 0;
+    });
+  }
+
+  if (history) {
+    history.push({
+      event: "aggregate",
+      step: "claude_surface_aggregate",
+      contributions: Object.keys(out.registry.contributions).length,
+      entries: entryCount,
+      rejected: rejectCount,
+      git_commit: git ? git.commit : null,
+      git_tag: git ? git.tag : null,
+      git_dirty: git ? git.dirty : null,
+      attempted_at: new Date().toISOString(),
+    });
+  }
+
+  return out;
+}
+
 // pruneNavButtonsRegistry — drop contributions.<X> for any X not in the current
 // subscription. Called once at the end of the install loop. Honors C4 hardening:
 // a malformed pre-existing registry is left untouched and reported.
@@ -4846,6 +5046,9 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     // v0.30.0 S1.5 — expose materializeSkills for HC-MS1..HC-MS5 in
     // run-helper-cases.js. Pure additive; does not affect the function-as-default export.
     module.exports.materializeSkills = materializeSkills;
+    // v0.32.0 S2 — expose aggregateClaudeSurface for run-claude-surface.js
+    // (CS-AG-1..7). Pure additive; does not affect the function-as-default export.
+    module.exports.aggregateClaudeSurface = aggregateClaudeSurface;
     //
     // CF-2: by default, capture run-install.js's stdio (Phase B/C surfaced
     // 2200-line JSON dumps mixed into the user's terminal). We tee the
