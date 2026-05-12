@@ -9,13 +9,24 @@
  */
 class ProjectsHubCards {
     async render(dv) {
-        // v1.4.0: filter by frontmatter `type: project` (the canonical hub-note
-        // discriminator) rather than filename. Filename-as-name (S6.5) means
-        // the hub note is no longer guaranteed to be named "Project.md".
-        // The Projects hub itself is excluded via `type: projects-hub`.
+        // v1.4.1 (S6.5 CF-1): match the hub note via EITHER the new canonical
+        // `type: project` discriminator (v1.4.0+) OR the legacy `#project` tag
+        // (pre-v1.4.0). Older projects in long-running consumer vaults don't
+        // have `type: project` yet; the OR keeps them surfaced.
+        //
+        // Defensive type-exclusions handle dataview's nested-tag expansion:
+        // `tags: [project/widget]` produces etags `[#project, #project/widget]`,
+        // which means Project Map.md (type: map) and Project Board.md (type: kanban)
+        // would be falsely included by the etag check alone. Filter them out by
+        // explicit type, plus the legacy `-board` filename guard for safety.
         const projectHubs = dv.pages('"spice/projects"')
-            .where(p => p.type === "project"
-                     && !p.file.path.includes("/steps/"));
+            .where(p => (p.type === "project"
+                      || (p.file.etags.includes("#project")
+                          && p.type !== "map"
+                          && p.type !== "kanban"))
+                     && p.file.name !== "Projects"
+                     && !p.file.path.includes("/steps/")
+                     && !p.file.name.toLowerCase().endsWith("-board"));
 
         const enriched = [];
         for (const project of projectHubs) {

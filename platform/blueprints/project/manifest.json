@@ -1,9 +1,9 @@
 {
   "name": "project",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "kind": "blueprint",
   "module_directory": "projects",
-  "description": "Per-project atlas + map + Kanban board with hierarchical tasks, workstream-tagged cards, and All-Projects hub. v1.4.0 MINOR (v0.31.0 S6.5): hub note filename now defaults to the user-typed project name (e.g. 'Testing It All Out.md' under spice/projects/testing-it-all-out/) for native Obsidian tab title display. Configurable HUB_NOTE_FILENAME_STYLE constant in project-nav-buttons.js (name|slug|fixed). Rule_fragment refactored to type-discrimination via frontmatter_branch so audit + hub-cards filters are filename-independent.",
+  "description": "Per-project atlas + map + Kanban board with hierarchical tasks, workstream-tagged cards, and All-Projects hub. v1.4.0 MINOR (v0.31.0 S6.5): hub note filename now defaults to the user-typed project name (e.g. 'Testing It All Out.md' under spice/projects/testing-it-all-out/) for native Obsidian tab title display. Configurable HUB_NOTE_FILENAME_STYLE constant in project-nav-buttons.js (name|slug|fixed). Rule_fragment refactored to type-discrimination via frontmatter_branch so audit + hub-cards filters are filename-independent. v1.4.1 PATCH CF-1: projects-hub-cards.js filter restored to match EITHER type:project OR legacy #project tag (older hub notes without type:project frontmatter were excluded from the Projects.md card grid); defensive type:map/kanban exclusions handle dataview's nested-tag expansion (#project/<slug> would otherwise falsely include Project Map + Project Board).",
   "depends_on": [
     { "name": "nav-buttons",    "range": ">=2.3.0" },
     { "name": "customjs-guard", "range": ">=1.0.0" },
