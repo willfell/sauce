@@ -855,6 +855,131 @@ async function caseAU40() {
   });
 }
 
+// v0.32.0 S7.A — claude-surface walker cases (AU-CS-1..6).
+// Tests walkClaudeSurface() against fixtures that scaffold a vault with
+// ranch/claude-surface-registry.json + .claude/commands/ + .claude/skills/.
+const { walkClaudeSurface } = require("../mechanisms/audit/claude-surface-walker");
+
+function writeRegistry(dir, contributions) {
+  const reg = {
+    schema_version: 1,
+    generated_at: "2026-05-12T00:00:00.000Z",
+    workshop_version: "0.32.0",
+    contributions,
+  };
+  fs.mkdirSync(path.join(dir, "ranch"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "ranch/claude-surface-registry.json"), JSON.stringify(reg, null, 2));
+}
+
+// AU-CS-1 — dead_path when registry entry's dest is missing on FS
+async function caseAUCS1() {
+  await withTempVault(async (dir) => {
+    writeRegistry(dir, {
+      "test-mech": [
+        { kind: "command", source: "commands/foo.md", dest: ".claude/commands/foo.md", version: "0.1.0" },
+      ],
+    });
+    const result = await walkClaudeSurface(dir, {});
+    const dp = result.findings.filter(f => f.severity === "dead_path" && f.path === ".claude/commands/foo.md");
+    assertEqual(dp.length, 1, "AU-CS-1: dead_path finding surfaced for missing dest");
+    assertEqual(result.counts.dead_path, 1, "AU-CS-1: counts.dead_path === 1");
+  });
+}
+
+// AU-CS-2 — orphan when FS has .claude/commands/orphan.md not in registry
+async function caseAUCS2() {
+  await withTempVault(async (dir) => {
+    writeRegistry(dir, {});
+    fs.mkdirSync(path.join(dir, ".claude/commands"), { recursive: true });
+    fs.writeFileSync(path.join(dir, ".claude/commands/orphan.md"), "# orphan\n");
+    const result = await walkClaudeSurface(dir, {});
+    const orph = result.findings.filter(f => f.severity === "orphan");
+    assertEqual(orph.length, 1, "AU-CS-2: single orphan finding");
+    assertContains(orph[0].path, "orphan.md", "AU-CS-2: orphan path mentions orphan.md");
+    assertEqual(result.counts.orphan, 1, "AU-CS-2: counts.orphan === 1");
+  });
+}
+
+// AU-CS-3 — stale_but_valid when body @claude-surface:version != registry version
+async function caseAUCS3() {
+  await withTempVault(async (dir) => {
+    writeRegistry(dir, {
+      "test-mech": [
+        { kind: "command", source: "commands/x.md", dest: ".claude/commands/x.md", version: "0.2.0" },
+      ],
+    });
+    fs.mkdirSync(path.join(dir, ".claude/commands"), { recursive: true });
+    fs.writeFileSync(path.join(dir, ".claude/commands/x.md"),
+      "---\ndescription: x\n---\n\n<!-- @claude-surface:version 0.1.0 -->\n\n# x\n");
+    const result = await walkClaudeSurface(dir, {});
+    const stale = result.findings.filter(f => f.severity === "stale_but_valid");
+    assertEqual(stale.length, 1, "AU-CS-3: single stale_but_valid finding");
+    assertEqual(stale[0].expected, "0.2.0", "AU-CS-3: expected=0.2.0");
+    assertEqual(stale[0].found, "0.1.0", "AU-CS-3: found=0.1.0");
+  });
+}
+
+// AU-CS-4 — consumer_edit_at_risk: deployed body != source, no .local/ shadow
+async function caseAUCS4() {
+  await withTempVault(async (dir) => {
+    // Fake workshop with source content.
+    const workshopDir = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-ws-"));
+    try {
+      const srcDir = path.join(workshopDir, "platform/mechanisms/test-mech/commands");
+      fs.mkdirSync(srcDir, { recursive: true });
+      fs.writeFileSync(path.join(srcDir, "y.md"), "# source body\n");
+      writeRegistry(dir, {
+        "test-mech": [
+          { kind: "command", source: "commands/y.md", dest: ".claude/commands/y.md", version: "0.1.0" },
+        ],
+      });
+      fs.mkdirSync(path.join(dir, ".claude/commands"), { recursive: true });
+      fs.writeFileSync(path.join(dir, ".claude/commands/y.md"), "# CONSUMER EDITED body\n");
+      const result = await walkClaudeSurface(dir, { workshopPath: workshopDir });
+      const cear = result.findings.filter(f => f.severity === "consumer_edit_at_risk");
+      assertEqual(cear.length, 1, "AU-CS-4: single consumer_edit_at_risk finding");
+      // With .local/ shadow → NOT flagged.
+      fs.mkdirSync(path.join(dir, ".claude/commands.local"), { recursive: true });
+      fs.writeFileSync(path.join(dir, ".claude/commands.local/y.md"), "# CONSUMER EDITED body\n");
+      const result2 = await walkClaudeSurface(dir, { workshopPath: workshopDir });
+      const cear2 = result2.findings.filter(f => f.severity === "consumer_edit_at_risk");
+      assertEqual(cear2.length, 0, "AU-CS-4b: .local/ shadow suppresses consumer_edit_at_risk");
+    } finally {
+      fs.rmSync(workshopDir, { recursive: true, force: true });
+    }
+  });
+}
+
+// AU-CS-5 — aligned count = entries with no severity raised
+async function caseAUCS5() {
+  await withTempVault(async (dir) => {
+    writeRegistry(dir, {
+      "test-mech": [
+        { kind: "command", source: "commands/a.md", dest: ".claude/commands/a.md", version: "0.1.0" },
+        { kind: "command", source: "commands/b.md", dest: ".claude/commands/b.md", version: "0.1.0" },
+      ],
+    });
+    fs.mkdirSync(path.join(dir, ".claude/commands"), { recursive: true });
+    fs.writeFileSync(path.join(dir, ".claude/commands/a.md"), "# a\n");
+    fs.writeFileSync(path.join(dir, ".claude/commands/b.md"), "# b\n");
+    const result = await walkClaudeSurface(dir, {});
+    assertEqual(result.counts.aligned, 2, "AU-CS-5: 2 aligned entries");
+    assertEqual(result.findings.length, 0, "AU-CS-5: no findings when both aligned");
+  });
+}
+
+// AU-CS-6 — missing registry → single dead_path finding for the registry itself
+async function caseAUCS6() {
+  await withTempVault(async (dir) => {
+    // Don't write the registry file at all.
+    const result = await walkClaudeSurface(dir, {});
+    assertEqual(result.findings.length, 1, "AU-CS-6: single finding when registry missing");
+    assertEqual(result.findings[0].kind, "registry", "AU-CS-6: kind=registry");
+    assertEqual(result.findings[0].severity, "dead_path", "AU-CS-6: severity=dead_path");
+    assertEqual(result.counts.dead_path, 1, "AU-CS-6: counts.dead_path === 1");
+  });
+}
+
 // Per-case error firewall: a thrown error inside any case body (including
 // the deliberate "Cannot find module ../audit/walker" RED-state throws)
 // counts as exactly one failed sub-assert and does NOT abort the harness.
@@ -881,6 +1006,15 @@ const selector = process.argv[2] || "all";
   if (selector === "items_schema" || selector === "all") { for (let i = 33; i <= 38; i++) await runCase(`AU${i}`, eval(`caseAU${i}`)); }
   // v0.31.0 S4 — engagement-templates path-glob cases
   if (selector === "engagement_templates" || selector === "all") { for (let i = 39; i <= 40; i++) await runCase(`AU${i}`, eval(`caseAU${i}`)); }
+  // v0.32.0 S7.A — claude-surface walker cases (AU-CS-1..6)
+  if (selector === "claude_surface" || selector === "all") {
+    await runCase("AU-CS-1", caseAUCS1);
+    await runCase("AU-CS-2", caseAUCS2);
+    await runCase("AU-CS-3", caseAUCS3);
+    await runCase("AU-CS-4", caseAUCS4);
+    await runCase("AU-CS-5", caseAUCS5);
+    await runCase("AU-CS-6", caseAUCS6);
+  }
   console.log(`========\nResult: ${passed} passed, ${failed} failed.`);
   process.exit(failed === 0 ? 0 : 1);
 })();

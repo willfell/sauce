@@ -1,10 +1,16 @@
 {
   "name": "audit",
-  "version": "0.1.1",
-  "description": "Walks every .md file, runs validator, reports violations + platform drift to Timestamps/Audits/YYYY-MM-DD-audit.md.",
+  "version": "0.2.0",
+  "description": "Walks every .md file, runs validator, reports violations + platform drift to Timestamps/Audits/YYYY-MM-DD-audit.md. v0.2.0 adds /audit slash command + claude-surface drift walker for the deployed .claude/ surface.",
+  "skills_dir": ".claude/skills/audit",
   "files": [
     { "source": "audit-walker.js", "dest": "{{templater_scripts_path}}/audit-walker.js" },
     { "source": "templates/Audit.md", "dest": "{{templates_path}}/Audit.md" }
+  ],
+  "claude_surface": [
+    { "kind": "command", "source": "commands/audit.md",     "dest": ".claude/commands/audit.md" },
+    { "kind": "skill",   "source": "skills/drift/SKILL.md", "dest": "{{skills_dir}}/drift/SKILL.md" },
+    { "kind": "claude_md_row", "table": "resolvers", "row": { "topic": "Audit", "path": "audit", "command": "/audit" } }
   ],
   "external_plugins": [
     { "id": "slash-commander", "required": true, "reason": "Surface /audit slash command for the audit walker." }

@@ -22,7 +22,7 @@
   "mechanisms": [
     { "name": "customjs-guard", "version": "1.0.0", "path": "mechanisms/customjs-guard" },
     { "name": "validator", "version": "0.1.2", "path": "mechanisms/validator" },
-    { "name": "audit", "version": "0.1.1", "path": "mechanisms/audit" },
+    { "name": "audit", "version": "0.2.0", "path": "mechanisms/audit" },
     { "name": "nav-buttons", "version": "2.6.0", "path": "mechanisms/nav-buttons" },
     { "name": "cards", "version": "0.2.4", "path": "mechanisms/cards" },
     { "name": "accent-button", "version": "0.1.0", "path": "mechanisms/accent-button" },

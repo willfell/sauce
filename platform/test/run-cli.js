@@ -710,6 +710,118 @@ async function caseCA5HelpMentionsAudit() {
     assertTrue(/\baudit\b/.test(joined), label);
 }
 
+// v0.32.0 S7 — claude-surface flag cases (CA-CS-1..3)
+
+// CA-CS-1 — `sauce audit --claude-surface` exits 0 on clean vault.
+async function caseCACS1AuditClaudeSurfaceClean() {
+    const label = "CA-CS-1 sauce audit --claude-surface exits 0 on clean vault";
+    const cmdAudit = require("../cli/cmd-audit");
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-cli-cs1-"));
+    try {
+        // Minimal sauce vault: platform-installed.json + a registry that points
+        // at a deployed command that we also place on disk → clean state.
+        fs.mkdirSync(path.join(tmp, "ranch"), { recursive: true });
+        fs.writeFileSync(path.join(tmp, "ranch/platform-installed.json"),
+            JSON.stringify({ mechanisms: [], blueprints: [] }, null, 2));
+        fs.writeFileSync(path.join(tmp, "ranch/claude-surface-registry.json"),
+            JSON.stringify({
+                schema_version: 1,
+                generated_at: "2026-05-12T00:00:00Z",
+                workshop_version: "0.32.0",
+                contributions: {
+                    "test-mech": [
+                        { kind: "command", source: "commands/c.md", dest: ".claude/commands/c.md", version: "0.1.0" },
+                    ],
+                },
+            }, null, 2));
+        fs.mkdirSync(path.join(tmp, ".claude/commands"), { recursive: true });
+        fs.writeFileSync(path.join(tmp, ".claude/commands/c.md"), "# c\n");
+
+        let exitCode = 0;
+        try {
+            await cmdAudit._runForTest({
+                vaultPath: tmp,
+                claudeSurface: true,
+                untrackedCheck: false,
+                quiet: true,
+            });
+        } catch (e) { exitCode = e.exitCode || 2; }
+        assertEqual(exitCode, 0, label);
+    } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+    }
+}
+
+// CA-CS-2 — findings present → exit 1 (legacy semantics; --strict is reserved).
+async function caseCACS2AuditClaudeSurfaceStrict() {
+    const label = "CA-CS-2 sauce audit --claude-surface exits 1 when findings present";
+    const cmdAudit = require("../cli/cmd-audit");
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-cli-cs2-"));
+    try {
+        fs.mkdirSync(path.join(tmp, "ranch"), { recursive: true });
+        fs.writeFileSync(path.join(tmp, "ranch/platform-installed.json"),
+            JSON.stringify({ mechanisms: [], blueprints: [] }, null, 2));
+        // Registry points at a dest that DOES NOT exist → dead_path finding.
+        fs.writeFileSync(path.join(tmp, "ranch/claude-surface-registry.json"),
+            JSON.stringify({
+                schema_version: 1,
+                generated_at: "2026-05-12T00:00:00Z",
+                workshop_version: "0.32.0",
+                contributions: {
+                    "test-mech": [
+                        { kind: "command", source: "commands/missing.md", dest: ".claude/commands/missing.md", version: "0.1.0" },
+                    ],
+                },
+            }, null, 2));
+
+        let exitCode = 0;
+        try {
+            await cmdAudit._runForTest({
+                vaultPath: tmp,
+                claudeSurface: true,
+                strict: true,
+                untrackedCheck: false,
+                quiet: true,
+            });
+        } catch (e) { exitCode = e.exitCode || 2; }
+        assertEqual(exitCode, 1, label);
+    } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+    }
+}
+
+// CA-CS-3 — `--output-file` writes the report file.
+async function caseCACS3AuditClaudeSurfaceOutputFile() {
+    const label = "CA-CS-3 sauce audit --claude-surface --output-file writes report";
+    const cmdAudit = require("../cli/cmd-audit");
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-cli-cs3-"));
+    try {
+        fs.mkdirSync(path.join(tmp, "ranch"), { recursive: true });
+        fs.writeFileSync(path.join(tmp, "ranch/platform-installed.json"),
+            JSON.stringify({ mechanisms: [], blueprints: [] }, null, 2));
+        fs.writeFileSync(path.join(tmp, "ranch/claude-surface-registry.json"),
+            JSON.stringify({
+                schema_version: 1, generated_at: "2026-05-12T00:00:00Z",
+                workshop_version: "0.32.0", contributions: {},
+            }, null, 2));
+        const reportFile = path.join(tmp, "report.md");
+        try {
+            await cmdAudit._runForTest({
+                vaultPath: tmp,
+                claudeSurface: true,
+                outputFile: reportFile,
+                untrackedCheck: false,
+                quiet: true,
+            });
+        } catch (e) { /* may throw exitCode=1 if findings; ignore for write check */ }
+        assertTrue(fs.existsSync(reportFile), label);
+        const body = fs.readFileSync(reportFile, "utf8");
+        assertTrue(/sauce audit --claude-surface/.test(body), "CA-CS-3 body contains report header");
+    } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+    }
+}
+
 const cases = [
     caseC1AncestorWalk, caseC2SauceVaultEnv, caseC3NotInVault, caseC4UnknownVerb,
     caseC5StatusClean, caseC6StatusDrift, caseC7UpdateFFOnly, caseC8UpdateDirtyRefusal,
@@ -726,7 +838,10 @@ const cases = [
     caseC27MigrateInVerbsRegistry, caseC28HelpMentionsMigrate,  // v0.28.0
     caseCA1AuditParseVaultFlag, caseCA2AuditParseMultiFlag,
     caseCA3AuditExitsWhenNotSauceVault, caseCA4AuditInVerbsRegistry,
-    caseCA5HelpMentionsAudit  // v0.29.0
+    caseCA5HelpMentionsAudit,  // v0.29.0
+    caseCACS1AuditClaudeSurfaceClean,
+    caseCACS2AuditClaudeSurfaceStrict,
+    caseCACS3AuditClaudeSurfaceOutputFile,  // v0.32.0 S7
 ];
 
 async function main() {

@@ -4,7 +4,7 @@
   "mechanisms": [
     { "name": "customjs-guard", "version": "1.0.0" },
     { "name": "validator", "version": "0.1.1" },
-    { "name": "audit", "version": "0.1.1" },
+    { "name": "audit", "version": "0.2.0" },
     { "name": "nav-buttons", "version": "2.5.3" },
     { "name": "cards", "version": "0.2.4" },
     { "name": "accent-button", "version": "0.1.0" },
