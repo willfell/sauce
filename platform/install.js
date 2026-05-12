@@ -421,6 +421,67 @@ module.exports = async function (tp) {
       }
     }
 
+    // 6b. v0.32.0 S3 — aggregate claude_surface[] contributions across
+    // subscribed mechanisms + blueprints. Wrapped in its own try/catch so
+    // aggregator failure does NOT abort the broader install. The
+    // targetPathByName lookup lets the aggregator stamp `target_path` and
+    // `itemVars` onto each materializeList entry — both consumed by
+    // materializeClaudeSurface below.
+    let claudeSurfaceState = null;
+    try {
+      const targetPathByName = new Map();
+      for (const [name, node] of nodes) {
+        if (node && node.target && typeof node.target.path === "string") {
+          targetPathByName.set(name, node.target.path);
+        }
+      }
+      claudeSurfaceState = await aggregateClaudeSurface(
+        perItemManifest,
+        subscription,
+        installedNow.history,
+        git,
+        { workshop_version: manifest.workshop_version, targetPathByName }
+      );
+    } catch (e) {
+      new Notice(`platformInstall: claude_surface aggregation failed — ${e.message}`, 6000);
+      installedNow.history.push({
+        event: "error",
+        step: "claude_surface_aggregate",
+        message: e.message,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+
+    // 6c. v0.32.0 S3 — materialize the file-kind claude_surface entries
+    // (command | skill | context_doc). The claude_md_row table contributions
+    // are still in claudeSurfaceState.rows for a future stage to render into
+    // CLAUDE.md; this stage only writes the four kinds' file bodies.
+    if (claudeSurfaceState) {
+      try {
+        await materializeClaudeSurface(
+          claudeSurfaceState.materializeList,
+          tp,
+          workshopPath,
+          installedNow.history,
+          git
+        );
+      } catch (e) {
+        new Notice(`platformInstall: claude_surface materialize failed — ${e.message}`, 6000);
+        installedNow.history.push({
+          event: "error",
+          step: "claude_surface_materialize",
+          message: e.message,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    }
+
     // 7. Subscription-aware pruning of ranch/nav-buttons-registry.json.
     // Removes contributions.<source> for any source that is no longer in the
     // current subscription. Self-cleaning registry — no separate uninstall
@@ -4610,7 +4671,16 @@ async function applyStyleSettings(tp, manifest, workshopPath, targetPath, histor
 //   subscription:    { mechanisms: [{name,version}], blueprints: [{name,version}] }
 //   history:         array; aggregator pushes events onto it
 //   git:             { commit, tag, dirty } — included on every event push
-//   opts (optional): { workshop_version } — stamped into registry top-level
+//   opts (optional): { workshop_version, targetPathByName: Map<name,string> }
+//                    targetPathByName — if provided, each materializeList entry
+//                    gains a `target_path` field (e.g. "blueprints/cowork")
+//                    plus an `itemVars` snapshot. S3's materializeClaudeSurface
+//                    uses both to resolve the source file
+//                    (`${workshopPath}/platform/${target_path}/${source}`) and
+//                    re-apply substituteLenient to the source body content.
+//                    When absent (the original S2 contract), entries omit those
+//                    fields and the aggregator behaves exactly as before — pure
+//                    additive, preserves backward-compat with CS-AG-* tests.
 //
 // Output:
 //   { registry, materializeList, rows }
@@ -4624,6 +4694,7 @@ const CLAUDE_SURFACE_ROW_SORT_KEY = {
 
 async function aggregateClaudeSurface(perItemManifest, subscription, history, git, opts) {
   opts = opts || {};
+  const targetPathByName = opts.targetPathByName instanceof Map ? opts.targetPathByName : null;
   const out = {
     registry: {
       schema_version: 1,
@@ -4714,6 +4785,17 @@ async function aggregateClaudeSurface(perItemManifest, subscription, history, gi
           version: subEntry.version,
           owner: name,
         };
+        if (targetPathByName) {
+          const tp = targetPathByName.get(name);
+          if (typeof tp === "string" && tp.length > 0) {
+            matEntry.target_path = tp;
+          }
+          // Snapshot the substitution overlay so S3's materializer can
+          // re-substitute the source body content using the same vars the
+          // aggregator used for the dest path. Shallow copy so later
+          // iterations cannot mutate this entry's vars.
+          matEntry.itemVars = { ...itemVars };
+        }
         out.materializeList.push(matEntry);
         contributions.push({ kind, source: entry.source, dest, version: subEntry.version });
         entryCount++;
@@ -4767,6 +4849,138 @@ async function aggregateClaudeSurface(perItemManifest, subscription, history, gi
   }
 
   return out;
+}
+
+// ============================================================
+// v0.32.0 S3 — materializeClaudeSurface
+//
+// Reads each entry from aggregateClaudeSurface's materializeList and writes
+// the source body to the vault-relative dest. Mirrors materializeSkills'
+// vault-write abstraction (tp.app.vault.adapter.{exists,mkdir,write}) so
+// Obsidian and the node-harness fake-tp both work without code-path forks.
+//
+// Posture vs materializeSkills:
+//   - Per-entry try/catch — single failure does NOT abort the loop.
+//   - Substitutes the SOURCE body content with `entry.itemVars`
+//     (substituteLenient) at materialize time. The aggregator already
+//     substituted the DEST path; this closes the body-content gap.
+//   - Source path is resolved as
+//     `${workshopPath}/platform/${entry.target_path}/${entry.source}`.
+//     entry.target_path is set when the aggregator was called with
+//     `opts.targetPathByName`; if absent the entry is skipped with a
+//     history error (the install-flow call site always provides it).
+//   - Missing source file → error event, loop continues.
+//   - Atomicity: dest dir is created recursively before write.
+//     adapter.write itself is the atomicity unit — mirrors materializeSkills
+//     (which has shipped to all consumers since v0.30.0 without atomic-
+//     write incidents). Spec called for .tmp+rename; choosing the
+//     materializeSkills precedent keeps the vault-write abstraction
+//     consistent across both helpers and avoids forking the code path
+//     between Obsidian's adapter (no rename) and node fs (has rename).
+//   - Event: `claude_surface_install` per successful write with
+//     { kind, dest, owner, version, git fields, attempted_at }.
+//
+// Inputs:
+//   materializeList: Array<{kind, source, dest, version, owner, target_path, itemVars}>
+//   tp:              Obsidian Templater stub OR test fake — anything with
+//                    tp.app.vault.adapter.{exists, mkdir, write}.
+//   workshopPath:    abs path to the workshop repo (source of platform/<bp>/<src>).
+//   history:         array; per-entry events pushed onto it.
+//   git:             { commit, tag, dirty } — included on every push.
+//
+// Output: undefined. Side effects are file writes + history pushes.
+// ============================================================
+async function materializeClaudeSurface(materializeList, tp, workshopPath, history, git) {
+  if (!Array.isArray(materializeList) || materializeList.length === 0) return;
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+
+  for (const entry of materializeList) {
+    try {
+      if (!entry || typeof entry !== "object") continue;
+      const { kind, source, dest, owner, version, target_path, itemVars } = entry;
+
+      if (typeof source !== "string" || source.length === 0 ||
+          typeof dest !== "string" || dest.length === 0 ||
+          typeof target_path !== "string" || target_path.length === 0) {
+        if (history) {
+          history.push({
+            event: "error",
+            step: "claude_surface_install",
+            kind,
+            owner,
+            dest,
+            message: `materializeClaudeSurface: entry missing source/dest/target_path (owner=${owner}, kind=${kind})`,
+            git_commit: git ? git.commit : null,
+            git_tag: git ? git.tag : null,
+            git_dirty: git ? git.dirty : null,
+            attempted_at: new Date().toISOString(),
+          });
+        }
+        continue;
+      }
+
+      const sourceAbs = `${workshopPath}/platform/${target_path}/${source}`;
+      const sourceText = await readAbsolute(sourceAbs);
+      if (sourceText === null) {
+        if (history) {
+          history.push({
+            event: "error",
+            step: "claude_surface_install",
+            kind,
+            owner,
+            dest,
+            message: `source absent at ${sourceAbs}`,
+            git_commit: git ? git.commit : null,
+            git_tag: git ? git.tag : null,
+            git_dirty: git ? git.dirty : null,
+            attempted_at: new Date().toISOString(),
+          });
+        }
+        continue;
+      }
+
+      const substituted = substituteLenient(sourceText, itemVars || {});
+
+      // Ensure dest dir exists (recursive mkdir).
+      const destDir = dest.includes("/") ? dest.substring(0, dest.lastIndexOf("/")) : "";
+      if (destDir && !(await adapter.exists(destDir))) {
+        await adapter.mkdir(destDir);
+      }
+
+      await adapter.write(dest, substituted);
+
+      if (history) {
+        history.push({
+          event: "claude_surface_install",
+          step: "claude_surface_install",
+          kind,
+          dest,
+          owner,
+          version,
+          git_commit: git ? git.commit : null,
+          git_tag: git ? git.tag : null,
+          git_dirty: git ? git.dirty : null,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    } catch (e) {
+      if (history) {
+        history.push({
+          event: "error",
+          step: "claude_surface_install",
+          kind: entry && entry.kind,
+          owner: entry && entry.owner,
+          dest: entry && entry.dest,
+          message: e.message,
+          git_commit: git ? git.commit : null,
+          git_tag: git ? git.tag : null,
+          git_dirty: git ? git.dirty : null,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    }
+  }
 }
 
 // pruneNavButtonsRegistry — drop contributions.<X> for any X not in the current
@@ -5049,6 +5263,9 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     // v0.32.0 S2 — expose aggregateClaudeSurface for run-claude-surface.js
     // (CS-AG-1..7). Pure additive; does not affect the function-as-default export.
     module.exports.aggregateClaudeSurface = aggregateClaudeSurface;
+    // v0.32.0 S3 — expose materializeClaudeSurface for run-claude-surface.js
+    // (CS-MAT-1..5) + run-helper-cases.js (M-CS-1..3). Pure additive.
+    module.exports.materializeClaudeSurface = materializeClaudeSurface;
     //
     // CF-2: by default, capture run-install.js's stdio (Phase B/C surfaced
     // 2200-line JSON dumps mixed into the user's terminal). We tee the

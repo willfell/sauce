@@ -1,9 +1,16 @@
 #!/usr/bin/env node
-// run-claude-surface.js — v0.32.0 S2 sub-asserts for aggregateClaudeSurface.
+// run-claude-surface.js — v0.32.0 S2/S3 sub-asserts for aggregateClaudeSurface
+// + materializeClaudeSurface.
 //
-// Tests the registry builder in isolation: imports aggregateClaudeSurface
-// from platform/install.js and exercises it with constructed Map<name,manifest>
-// + subscription fixtures. No install-flow integration in S2 — that's S3.
+// S2 (CS-AG-*): tests the registry builder in isolation: imports
+// aggregateClaudeSurface from platform/install.js and exercises it with
+// constructed Map<name,manifest> + subscription fixtures.
+//
+// S3 (CS-MAT-*): tests the per-entry file materializer. Each case scaffolds
+// a tmpdir vault + fake-workshop layout, builds a materializeList entry
+// shape (mirrors aggregator output with target_path + itemVars), invokes
+// materializeClaudeSurface directly, and asserts on file contents +
+// history events.
 //
 // Cases:
 //   CS-AG-1  zero subscribed items → empty registry + materializeList + rows
@@ -14,6 +21,11 @@
 //   CS-AG-5  dest "/etc/passwd" rejected (error event in history; not in materializeList)
 //   CS-AG-6  rows.resolvers sorted alphabetically by topic
 //   CS-AG-7  unsubscribed item with claude_surface[] in manifest map → NOT in registry
+//   CS-MAT-1 command kind materializes .claude/commands/<x>.md with body substitution
+//   CS-MAT-2 skill kind materializes <skills_dir>/<x>/SKILL.md
+//   CS-MAT-3 context_doc kind materializes <module_dir>/context/<x>.md
+//   CS-MAT-4 missing source file → error event; other entries still materialize
+//   CS-MAT-5 no orphan .tmp file left behind after success
 //
 // Usage: node platform/test/run-claude-surface.js
 // Exit: 0 = all pass; 1 = any fail.
@@ -21,12 +33,44 @@
 "use strict";
 
 const path = require("path");
+const fs = require("fs");
+const fsp = fs.promises;
+const os = require("os");
 
 const WORKSHOP = path.resolve(__dirname, "../..");
 const INSTALLER_PATH = path.join(WORKSHOP, "platform/install.js");
 
 const installer = require(INSTALLER_PATH);
 const aggregateClaudeSurface = installer.aggregateClaudeSurface;
+const materializeClaudeSurface = installer.materializeClaudeSurface;
+
+function makeTpStub(dir) {
+  return {
+    app: {
+      vault: {
+        adapter: {
+          async exists(p)         { return fs.existsSync(path.join(dir, p)); },
+          async mkdir(p)          { fs.mkdirSync(path.join(dir, p), { recursive: true }); },
+          async read(p)           { return fs.readFileSync(path.join(dir, p), "utf8"); },
+          async write(p, content) {
+            const abs = path.join(dir, p);
+            fs.mkdirSync(path.dirname(abs), { recursive: true });
+            fs.writeFileSync(abs, content);
+          },
+        },
+      },
+    },
+  };
+}
+
+async function withTempFixture(fn) {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), "cs-mat-"));
+  try {
+    return await fn(dir);
+  } finally {
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch (_e) {}
+  }
+}
 
 let pass = 0;
 let fail = 0;
@@ -234,9 +278,203 @@ async function caseCSAG7Unsubscribed() {
   assertEq("CS-AG-7: materializeList only includes subscribed entry", out.materializeList.length, 1);
 }
 
+// ============================================================
+// CS-MAT-1: command kind → .claude/commands/<x>.md with body substitution
+// ============================================================
+async function caseCSMAT1Command() {
+  console.log("\n--- Case CS-MAT-1: command kind materializes with body substitution ---");
+  await withTempFixture(async (dir) => {
+    const workshop = path.join(dir, "_fake-workshop");
+    const targetPath = "blueprints/test-bp";
+    const sourceDir = path.join(workshop, "platform", targetPath, "commands");
+    fs.mkdirSync(sourceDir, { recursive: true });
+    // Body content references {{module_directory}} — must be substituted at materialize time.
+    fs.writeFileSync(path.join(sourceDir, "foo.md"), "# foo\nrefers to {{module_directory}}/index.md\n");
+
+    const tp = makeTpStub(dir);
+    const history = [];
+    const matList = [{
+      kind: "command",
+      source: "commands/foo.md",
+      dest: ".claude/commands/foo.md",
+      owner: "test-bp",
+      version: "0.1.0",
+      target_path: targetPath,
+      itemVars: { module_directory: "spice/testbp" },
+    }];
+
+    await materializeClaudeSurface(matList, tp, workshop, history, { commit: "x", tag: null, dirty: false });
+
+    const destAbs = path.join(dir, ".claude/commands/foo.md");
+    assertTrue("CS-MAT-1: dest file exists", fs.existsSync(destAbs));
+    const body = fs.readFileSync(destAbs, "utf8");
+    assertTrue("CS-MAT-1: body has substituted module_directory", body.includes("spice/testbp/index.md"));
+    assertTrue("CS-MAT-1: body has NO literal {{module_directory}}", !body.includes("{{module_directory}}"));
+    const events = history.filter((h) => h.event === "claude_surface_install");
+    assertEq("CS-MAT-1: one install event recorded", events.length, 1);
+    assertEq("CS-MAT-1: event kind is command", events[0].kind, "command");
+    assertEq("CS-MAT-1: event dest matches", events[0].dest, ".claude/commands/foo.md");
+    assertEq("CS-MAT-1: event owner matches", events[0].owner, "test-bp");
+    assertEq("CS-MAT-1: event version matches", events[0].version, "0.1.0");
+  });
+}
+
+// ============================================================
+// CS-MAT-2: skill kind → <skills_dir>/<x>/SKILL.md
+// ============================================================
+async function caseCSMAT2Skill() {
+  console.log("\n--- Case CS-MAT-2: skill kind materializes to <skills_dir>/<x>/SKILL.md ---");
+  await withTempFixture(async (dir) => {
+    const workshop = path.join(dir, "_fake-workshop");
+    const targetPath = "mechanisms/test-mech";
+    const sourceDir = path.join(workshop, "platform", targetPath, "skills/bar");
+    fs.mkdirSync(sourceDir, { recursive: true });
+    fs.writeFileSync(path.join(sourceDir, "SKILL.md"), "---\nname: bar\n---\nbody\n");
+
+    const tp = makeTpStub(dir);
+    const history = [];
+    const matList = [{
+      kind: "skill",
+      source: "skills/bar/SKILL.md",
+      dest: ".claude/skills/sauce/bar/SKILL.md",
+      owner: "test-mech",
+      version: "0.1.0",
+      target_path: targetPath,
+      itemVars: { skills_dir: ".claude/skills/sauce" },
+    }];
+
+    await materializeClaudeSurface(matList, tp, workshop, history, { commit: "x", tag: null, dirty: false });
+
+    const destAbs = path.join(dir, ".claude/skills/sauce/bar/SKILL.md");
+    assertTrue("CS-MAT-2: skill SKILL.md exists at dest", fs.existsSync(destAbs));
+    const events = history.filter((h) => h.event === "claude_surface_install" && h.kind === "skill");
+    assertEq("CS-MAT-2: one skill install event recorded", events.length, 1);
+  });
+}
+
+// ============================================================
+// CS-MAT-3: context_doc kind → <module_dir>/context/<x>.md
+// ============================================================
+async function caseCSMAT3ContextDoc() {
+  console.log("\n--- Case CS-MAT-3: context_doc kind materializes to <module_dir>/context/<x>.md ---");
+  await withTempFixture(async (dir) => {
+    const workshop = path.join(dir, "_fake-workshop");
+    const targetPath = "blueprints/project";
+    const sourceDir = path.join(workshop, "platform", targetPath, "context");
+    fs.mkdirSync(sourceDir, { recursive: true });
+    fs.writeFileSync(path.join(sourceDir, "PROJECT.md"), "Project context for {{module_directory}}\n");
+
+    const tp = makeTpStub(dir);
+    const history = [];
+    const matList = [{
+      kind: "context_doc",
+      source: "context/PROJECT.md",
+      dest: "spice/projects/context/PROJECT.md",
+      owner: "project",
+      version: "1.4.0",
+      target_path: targetPath,
+      itemVars: { module_directory: "spice/projects" },
+    }];
+
+    await materializeClaudeSurface(matList, tp, workshop, history, { commit: "x", tag: null, dirty: false });
+
+    const destAbs = path.join(dir, "spice/projects/context/PROJECT.md");
+    assertTrue("CS-MAT-3: context_doc exists at dest", fs.existsSync(destAbs));
+    const body = fs.readFileSync(destAbs, "utf8");
+    assertTrue("CS-MAT-3: body has substituted module_directory", body.includes("spice/projects"));
+  });
+}
+
+// ============================================================
+// CS-MAT-4: missing source file → error event; other entries still materialize
+// ============================================================
+async function caseCSMAT4MissingSourceLoopContinues() {
+  console.log("\n--- Case CS-MAT-4: missing source logs error; sibling entries still materialize ---");
+  await withTempFixture(async (dir) => {
+    const workshop = path.join(dir, "_fake-workshop");
+    const targetPath = "blueprints/bp";
+    const sourceDir = path.join(workshop, "platform", targetPath, "commands");
+    fs.mkdirSync(sourceDir, { recursive: true });
+    // Only sibling source exists — first entry's source is intentionally absent.
+    fs.writeFileSync(path.join(sourceDir, "sibling.md"), "# sibling\n");
+
+    const tp = makeTpStub(dir);
+    const history = [];
+    const matList = [
+      {
+        kind: "command",
+        source: "commands/missing.md",
+        dest: ".claude/commands/missing.md",
+        owner: "bp",
+        version: "0.1.0",
+        target_path: targetPath,
+        itemVars: {},
+      },
+      {
+        kind: "command",
+        source: "commands/sibling.md",
+        dest: ".claude/commands/sibling.md",
+        owner: "bp",
+        version: "0.1.0",
+        target_path: targetPath,
+        itemVars: {},
+      },
+    ];
+
+    await materializeClaudeSurface(matList, tp, workshop, history, { commit: "x", tag: null, dirty: false });
+
+    const missingDest = path.join(dir, ".claude/commands/missing.md");
+    const siblingDest = path.join(dir, ".claude/commands/sibling.md");
+    assertTrue("CS-MAT-4: missing-source dest NOT written", !fs.existsSync(missingDest));
+    assertTrue("CS-MAT-4: sibling dest WAS written", fs.existsSync(siblingDest));
+
+    const errs = history.filter((h) => h.event === "error" && h.step === "claude_surface_install");
+    assertEq("CS-MAT-4: exactly one error event for the missing source", errs.length, 1);
+    const installs = history.filter((h) => h.event === "claude_surface_install");
+    assertEq("CS-MAT-4: exactly one successful install event (sibling)", installs.length, 1);
+  });
+}
+
+// ============================================================
+// CS-MAT-5: no orphan .tmp file left behind after success
+// ============================================================
+async function caseCSMAT5NoTmpLeftBehind() {
+  console.log("\n--- Case CS-MAT-5: no orphan .tmp file alongside dest after success ---");
+  await withTempFixture(async (dir) => {
+    const workshop = path.join(dir, "_fake-workshop");
+    const targetPath = "blueprints/bp";
+    const sourceDir = path.join(workshop, "platform", targetPath, "commands");
+    fs.mkdirSync(sourceDir, { recursive: true });
+    fs.writeFileSync(path.join(sourceDir, "x.md"), "# x\n");
+
+    const tp = makeTpStub(dir);
+    const history = [];
+    const matList = [{
+      kind: "command",
+      source: "commands/x.md",
+      dest: ".claude/commands/x.md",
+      owner: "bp",
+      version: "0.1.0",
+      target_path: targetPath,
+      itemVars: {},
+    }];
+
+    await materializeClaudeSurface(matList, tp, workshop, history, { commit: "x", tag: null, dirty: false });
+
+    const destAbs = path.join(dir, ".claude/commands/x.md");
+    const tmpAbs = `${destAbs}.tmp`;
+    assertTrue("CS-MAT-5: dest exists after success", fs.existsSync(destAbs));
+    assertTrue("CS-MAT-5: no orphan .tmp file beside dest", !fs.existsSync(tmpAbs));
+  });
+}
+
 async function main() {
   if (typeof aggregateClaudeSurface !== "function") {
     console.error("FATAL: aggregateClaudeSurface is not exported from install.js");
+    process.exit(1);
+  }
+  if (typeof materializeClaudeSurface !== "function") {
+    console.error("FATAL: materializeClaudeSurface is not exported from install.js");
     process.exit(1);
   }
 
@@ -247,6 +485,11 @@ async function main() {
   await caseCSAG5DestPathRejected();
   await caseCSAG6RowSort();
   await caseCSAG7Unsubscribed();
+  await caseCSMAT1Command();
+  await caseCSMAT2Skill();
+  await caseCSMAT3ContextDoc();
+  await caseCSMAT4MissingSourceLoopContinues();
+  await caseCSMAT5NoTmpLeftBehind();
 
   console.log("\n========================================");
   console.log(`run-claude-surface: ${pass} passed, ${fail} failed`);

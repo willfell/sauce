@@ -4390,6 +4390,147 @@ async function caseHCSD1MechanismReceivesSkillsDir() {
   }
 }
 
+// ============================================================
+// v0.32.0 S3 — end-to-end installer integration cases for claude_surface[]
+// four-kind materialization (steps 6b + 6c).
+//
+// M-CS-1: blueprint declares claude_surface command + skill + context_doc;
+//         after install all three files appear at the expected destinations
+//         in the consumer vault.
+// M-CS-2: body substitution at materialize time — source file references
+//         {{module_directory}}; the on-disk dest body has the substituted
+//         spice/<bare>/... value.
+// M-CS-3: missing source file produces an error history event; sibling
+//         valid entries still materialize.
+// ============================================================
+
+async function caseMCS1FourKindMaterializeE2E() {
+  console.log("\n--- Case M-CS-1: blueprint claude_surface[] command + skill + context_doc all materialize end-to-end ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-m-cs-1-"));
+  try {
+    await scaffoldBlueprintVault(scratch, [
+      {
+        name: "test-fixture-mcs1",
+        version: "0.1.0",
+        manifest: {
+          name: "test-fixture-mcs1",
+          version: "0.1.0",
+          kind: "blueprint",
+          module_directory: "mcs1",
+          skills_dir: ".claude/skills/sauce",
+          claude_surface: [
+            { kind: "command", source: "commands/mcs1.md", dest: ".claude/commands/mcs1.md" },
+            { kind: "skill", source: "skills/mcs1-skill/SKILL.md", dest: "{{skills_dir}}/mcs1-skill/SKILL.md" },
+            { kind: "context_doc", source: "context/mcs1.md", dest: "{{module_directory}}/context/mcs1.md" },
+          ],
+          files: []
+        },
+        sourceFiles: [
+          { relPath: "commands/mcs1.md", body: "# /mcs1 command\n" },
+          { relPath: "skills/mcs1-skill/SKILL.md", body: "---\nname: mcs1-skill\n---\nbody\n" },
+          { relPath: "context/mcs1.md", body: "context for mcs1\n" },
+        ]
+      }
+    ]);
+    const result = await runHarness(scratch);
+    assertTrue("M-CS-1: platform-installed.json was written", result !== null);
+
+    const cmdDest = path.join(scratch, ".claude/commands/mcs1.md");
+    const skillDest = path.join(scratch, ".claude/skills/sauce/mcs1-skill/SKILL.md");
+    const ctxDest = path.join(scratch, "spice/mcs1/context/mcs1.md");
+    assertTrue("M-CS-1: command dest exists", fs.existsSync(cmdDest));
+    assertTrue("M-CS-1: skill dest exists at substituted skills_dir", fs.existsSync(skillDest));
+    assertTrue("M-CS-1: context_doc dest exists at spice/mcs1/...", fs.existsSync(ctxDest));
+
+    const installs = (result && result.history || []).filter((h) => h.event === "claude_surface_install");
+    assertEq("M-CS-1: three claude_surface_install events recorded", installs.length, 3);
+    const kinds = installs.map((h) => h.kind).sort();
+    assertEq("M-CS-1: events cover command/skill/context_doc", kinds, ["command", "context_doc", "skill"]);
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseMCS2BodySubstitutionAtMaterializeTime() {
+  console.log("\n--- Case M-CS-2: source body references {{module_directory}}; dest body has substituted value ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-m-cs-2-"));
+  try {
+    await scaffoldBlueprintVault(scratch, [
+      {
+        name: "test-fixture-mcs2",
+        version: "0.1.0",
+        manifest: {
+          name: "test-fixture-mcs2",
+          version: "0.1.0",
+          kind: "blueprint",
+          module_directory: "mcs2",
+          claude_surface: [
+            { kind: "context_doc", source: "context/mcs2.md", dest: "{{module_directory}}/context/mcs2.md" }
+          ],
+          files: []
+        },
+        sourceFiles: [
+          { relPath: "context/mcs2.md", body: "see also {{module_directory}}/Index.md\n" }
+        ]
+      }
+    ]);
+    const result = await runHarness(scratch);
+    assertTrue("M-CS-2: platform-installed.json was written", result !== null);
+
+    const ctxDest = path.join(scratch, "spice/mcs2/context/mcs2.md");
+    assertTrue("M-CS-2: context_doc dest exists", fs.existsSync(ctxDest));
+    if (fs.existsSync(ctxDest)) {
+      const body = await readRaw(ctxDest);
+      assertTrue("M-CS-2: body contains substituted spice/mcs2/", body.includes("spice/mcs2/Index.md"));
+      assertTrue("M-CS-2: body does NOT contain literal {{module_directory}}", !body.includes("{{module_directory}}"));
+    }
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseMCS3MissingSourceLogsErrorContinuesLoop() {
+  console.log("\n--- Case M-CS-3: missing source file logs error event; sibling entries still materialize ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-m-cs-3-"));
+  try {
+    await scaffoldBlueprintVault(scratch, [
+      {
+        name: "test-fixture-mcs3",
+        version: "0.1.0",
+        manifest: {
+          name: "test-fixture-mcs3",
+          version: "0.1.0",
+          kind: "blueprint",
+          module_directory: "mcs3",
+          claude_surface: [
+            { kind: "command", source: "commands/missing.md", dest: ".claude/commands/missing.md" },
+            { kind: "command", source: "commands/sibling.md", dest: ".claude/commands/sibling.md" }
+          ],
+          files: []
+        },
+        sourceFiles: [
+          // Intentionally omit commands/missing.md to trigger the error path.
+          { relPath: "commands/sibling.md", body: "# sibling\n" }
+        ]
+      }
+    ]);
+    const result = await runHarness(scratch);
+    assertTrue("M-CS-3: platform-installed.json was written", result !== null);
+
+    const missingDest = path.join(scratch, ".claude/commands/missing.md");
+    const siblingDest = path.join(scratch, ".claude/commands/sibling.md");
+    assertTrue("M-CS-3: missing-source dest NOT written", !fs.existsSync(missingDest));
+    assertTrue("M-CS-3: sibling dest WAS written", fs.existsSync(siblingDest));
+
+    const errs = (result && result.history || []).filter(
+      (h) => h.event === "error" && h.step === "claude_surface_install"
+    );
+    assertEq("M-CS-3: exactly one claude_surface_install error event", errs.length, 1);
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -4506,6 +4647,11 @@ async function caseHCSD1MechanismReceivesSkillsDir() {
   await caseHCCS4ValidClaudeMdRow();
   await caseHCCS5UnknownKindFails();
   await caseHCSD1MechanismReceivesSkillsDir();
+
+  // v0.32.0 S3 — claude_surface[] four-kind end-to-end materialization.
+  await caseMCS1FourKindMaterializeE2E();
+  await caseMCS2BodySubstitutionAtMaterializeTime();
+  await caseMCS3MissingSourceLogsErrorContinuesLoop();
 
   // v0.20.0 docs polish cycle — trailing-whitespace lint.
   await caseTW1TemplatesNoTrailingWhitespace();
