@@ -56,6 +56,7 @@ platform/cli/shell-helpers/sauce.fish      # fish equivalent (forecast)
 - `sauce-refresh()` — pull + reset + npm install + update --force
 - `sauce-here()` — print resolved vault + pantry sha + sub-pin
 - `sauce-bootstrap()` — curl wrapper for fresh-vault bootstrap
+- `sauce-pin <name> <version>` — update one mech/blueprint subscription pin (edits the JSON via node, not sed). Plus `--diff` (read-only drift report between pins and catalog) and `--catalog` (bulk bump all pins to current catalog versions). Surfaced from v0.31.0 S6.5 friction where pin bumps were the gating step for every blueprint upgrade and users were reaching for sed.
 
 ### Materialization helper
 
@@ -73,9 +74,14 @@ Add a workshop-level installer helper `installShellHelpers(tp, manifest, options
   - Sentinel-comment idempotency (skip-if-present).
 - Opt-in not opt-out — first invocation prompts for consent unless `--non-interactive --install-shell-helpers=yes` was passed to `install.sh`.
 
-### New CLI verb
+### New CLI verbs
 
-`sauce install-shell-helpers [--shell <bash|zsh|fish|auto>]` — invokes the same helper. Lets existing-vault users opt in without re-bootstrapping.
+- `sauce install-shell-helpers [--shell <bash|zsh|fish|auto>]` — invokes the helper-install logic above. Lets existing-vault users opt in without re-bootstrapping.
+- `sauce pin <name> <version>` — bump one subscription pin (mech or blueprint). Replaces the need to hand-edit `ranch/platform-subscription.json` or use sed. Same writer-with-validation pattern as cmd-wizard.js' subscription editor.
+- `sauce pin --diff` — read-only drift report between subscription pins and the workshop catalog. Useful pre-flight before `sauce update`.
+- `sauce pin --catalog` — bulk bump all pins to whatever the local pantry's `platform/manifest.json` declares. Useful when adopting a new workshop version wholesale.
+
+These three sub-verbs replace the manual subscription editing surface today. The shell helpers (Material section above) prefigure them — once shipped in the CLI, the shell helpers proxy to the canonical CLI implementation.
 
 ## Landmines / open questions
 
