@@ -15,6 +15,16 @@
  * v0.2.1 (S3.4.1 inline-CF): tasks panel reverted from BeaconCards to bullet
  * <ul> per user feedback — at-a-glance compact list is the right primitive
  * for tasks; cards bloat the visual.
+ *
+ * v0.2.6 (v0.31.0 S6.6 — daily dashboard polish):
+ * - Meeting filter: file.name.startsWith(today) → file.name.includes(today).
+ *   Picks up both leading-date "2026-05-12 Foo.md" and trailing-date
+ *   "Foo-2026-05-12.md" naming conventions (accuris uses the latter).
+ * - Dashboard container: added box-sizing: border-box + width: 100% +
+ *   max-width: 100% + overflow-x: hidden. Prevents horizontal scroll when
+ *   the parent column is narrow (padding no longer adds to width).
+ * - Task <li>: added word-break: break-word + overflow-wrap: anywhere so
+ *   long URL-y / no-space task strings wrap instead of forcing a scrollbar.
  */
 class SpaceDailyDashboard {
   async render(dv) {
@@ -35,8 +45,12 @@ class SpaceDailyDashboard {
 
     const getMeetings = () => {
       if (!config.meetingsPath) return [];
+      // v0.2.6: match meetings whose filename CONTAINS today's date (covers
+      // both leading-date "2026-05-12 Foo.md" and trailing-date "Foo-2026-05-12.md"
+      // conventions). Previously matched only leading-date — accuris-style
+      // trailing-date names were silently dropped.
       const pages = dv.pages(`"${config.meetingsPath}"`)
-        .where(p => p.file.name.startsWith(today))
+        .where(p => p.file.name.includes(today))
         .sort(p => p.file.name, "asc");
       return pages.array();
     };
@@ -68,12 +82,21 @@ class SpaceDailyDashboard {
     if (existing) existing.remove();
 
     const container = dv.el("div", "", { cls: "space-daily-dashboard" });
+    // v0.2.6: prevent horizontal scroll at narrow widths.
+    // - box-sizing: border-box → padding folds into width, not adds to it
+    // - max-width: 100% → can't exceed parent width
+    // - overflow-x: hidden → defensive cap if a card or task text would still overflow
+    // - width: 100% → fills the dataviewjs viewport
     container.style.cssText = `
       background-color: var(--background-secondary);
       border-radius: 12px;
       padding: 20px;
       margin: 8px 0 16px 0;
       border: 1px solid var(--background-modifier-border);
+      box-sizing: border-box;
+      width: 100%;
+      max-width: 100%;
+      overflow-x: hidden;
     `;
 
     if (tasks.length > 0) {
@@ -97,7 +120,9 @@ class SpaceDailyDashboard {
 
       for (const task of tasks) {
         const li = tasksList.createEl("li");
-        li.style.cssText = "margin: 6px 0; font-size: 0.9em; cursor: pointer;";
+        // v0.2.6: word-break + overflow-wrap protect against long task strings
+        // (URLs, hashes, no-space text) overflowing the dashboard.
+        li.style.cssText = "margin: 6px 0; font-size: 0.9em; cursor: pointer; word-break: break-word; overflow-wrap: anywhere;";
         li.innerText = task.text;
         li.onclick = () => app.workspace.openLinkText(task.parentPath, "");
       }
