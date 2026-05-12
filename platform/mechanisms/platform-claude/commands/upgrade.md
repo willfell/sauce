@@ -12,6 +12,6 @@ Interactive upgrade flow:
 2. Surface blueprints/mechanisms with available updates (subscription version < catalogue version).
 3. Prompt for which to upgrade and to what target version.
 4. Update `ranch/platform-subscription.json`.
-5. Invoke `sauce install` (via the `/install` skill) to apply.
+5. Invoke `sauce update` (via the `/install` skill) to apply.
 
 The skill at `.claude/skills/platform/upgrade/SKILL.md` orchestrates the interaction.

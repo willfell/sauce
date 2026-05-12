@@ -1,6 +1,6 @@
 ---
 name: install
-description: Re-run sauce installer against the current vault's subscription. Invokes `sauce install --vault $(pwd)` and renders the install-ledger delta as a callout.
+description: Re-run sauce installer against the current vault's subscription. Invokes `sauce update --vault $(pwd)` and renders the install-ledger delta as a callout.
 ---
 
 # platform:install
@@ -17,7 +17,7 @@ Re-runs the sauce installer against the current vault. Captures the install-ledg
 
 ## Run
 
-3. **Shell out.** Run `sauce install --vault "$(pwd)"` via the Bash tool. Capture stdout, stderr, and exit code. If exit code is non-zero, render the captured stderr as a `[!failure]` callout and stop. Do NOT proceed to the diff step — the ledger may be partially written.
+3. **Shell out.** Run `sauce update --vault "$(pwd)"` via the Bash tool. Capture stdout, stderr, and exit code. If exit code is non-zero, render the captured stderr as a `[!failure]` callout and stop. Do NOT proceed to the diff step — the ledger may be partially written.
 
 ## Diff
 
@@ -34,7 +34,7 @@ Re-runs the sauce installer against the current vault. Captures the install-ledg
 7. **Emit summary callout.** A two-section markdown response:
 
    ```
-   > [!success] /install — sauce install complete
+   > [!success] /install — sauce update complete
    > **Installed:** <comma-list of newly-installed name@version, or "none">
    > **Upgraded:** <comma-list of upgraded name from→to, or "none">
    > **Unchanged:** <count> items

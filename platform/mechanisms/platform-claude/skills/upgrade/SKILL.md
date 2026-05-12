@@ -1,11 +1,11 @@
 ---
 name: upgrade
-description: Interactively upgrade one or more blueprints/mechanisms. Walks subscription vs. catalogue, prompts for targets, edits subscription, invokes `sauce install`.
+description: Interactively upgrade one or more blueprints/mechanisms. Walks subscription vs. catalogue, prompts for targets, edits subscription, invokes `sauce update`.
 ---
 
 # platform:upgrade
 
-Interactive upgrade flow. Reads the current vault's subscription, compares against the workshop catalogue, lets the user pick which items to upgrade and to what version, atomically edits `ranch/platform-subscription.json`, then invokes `sauce install`.
+Interactive upgrade flow. Reads the current vault's subscription, compares against the workshop catalogue, lets the user pick which items to upgrade and to what version, atomically edits `ranch/platform-subscription.json`, then invokes `sauce update`.
 
 ## Pre-flight
 
@@ -48,7 +48,7 @@ Interactive upgrade flow. Reads the current vault's subscription, compares again
 
 ## Apply
 
-10. **Invoke install.** Shell `sauce install --vault "$(pwd)"`. Capture stdout/stderr/exit code. If non-zero, surface stderr as `[!failure]` and stop — the subscription is updated but the install did not complete.
+10. **Invoke install.** Shell `sauce update --vault "$(pwd)"`. Capture stdout/stderr/exit code. If non-zero, surface stderr as `[!failure]` and stop — the subscription is updated but the install did not complete.
 
 ## Report
 

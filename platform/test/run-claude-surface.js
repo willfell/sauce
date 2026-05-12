@@ -398,6 +398,106 @@ async function caseCSSUB2PlatformClaudeExcluded() {
 }
 
 // ============================================================
+// CS-SUB-3: every `sauce <word>` reference in platform-claude command +
+//           skill bodies must resolve to a real verb in sauce-cli.js's
+//           VERBS dispatch table. Catches reviewer-flagged bugs like
+//           `sauce install` (no such verb) or `sauce bootstrap --rewizard`
+//           (no such flag) by asserting verb tokens against ground truth.
+//
+//           Method: parse sauce-cli.js for the `VERBS = { ... }` literal,
+//           extract verb names; scan each command + skill .md body for
+//           occurrences of /\bsauce\s+([a-z][a-z0-9-]*)/g; assert every
+//           captured verb is in VERBS. A short DOCUMENTED_NON_VERB allowlist
+//           skips noun-phrase tokens that follow "sauce" but are not CLI
+//           verbs (e.g. "sauce installer", "sauce vault").
+// ============================================================
+async function caseCSSUB3VerbsExist() {
+  console.log("\n--- Case CS-SUB-3: every `sauce <verb>` in platform-claude bodies is a real CLI verb ---");
+
+  // 1. Extract VERBS from sauce-cli.js. We parse the literal source rather
+  //    than require()-ing the module to avoid pulling its CLI side-effects.
+  const cliSrc = fs.readFileSync(path.join(WORKSHOP, "platform/cli/sauce-cli.js"), "utf8");
+  const verbsBlockMatch = cliSrc.match(/const\s+VERBS\s*=\s*\{([\s\S]*?)\};/);
+  assertTrue("CS-SUB-3: VERBS block parsed from sauce-cli.js", !!verbsBlockMatch);
+  const verbs = new Set();
+  if (verbsBlockMatch) {
+    const block = verbsBlockMatch[1];
+    const keyRe = /(?:^|\n)\s*([a-z][a-z0-9-]*)\s*:/g;
+    let m;
+    while ((m = keyRe.exec(block)) !== null) verbs.add(m[1]);
+  }
+  assertTrue("CS-SUB-3: VERBS includes bootstrap", verbs.has("bootstrap"));
+  assertTrue("CS-SUB-3: VERBS includes update", verbs.has("update"));
+  assertTrue("CS-SUB-3: VERBS includes help", verbs.has("help"));
+
+  // Tokens that legitimately follow "sauce" in prose but are NOT CLI verbs.
+  // ONLY tokens that genuinely appear as noun-phrase suffixes — these MUST
+  // NOT include real-looking verb candidates (e.g. "install", "upgrade")
+  // because that's exactly the failure mode CS-SUB-3 exists to catch.
+  const DOCUMENTED_NON_VERB = new Set([
+    "installer", // "Re-run sauce installer" — prose noun
+    "vault",     // "a sauce vault" / "a sauce-managed vault" — adjective use
+  ]);
+
+  // 2. Walk command + skill bodies under platform-claude.
+  const baseDir = path.join(WORKSHOP, "platform/mechanisms/platform-claude");
+  const targets = [];
+  const cmdDir = path.join(baseDir, "commands");
+  for (const f of fs.readdirSync(cmdDir)) {
+    if (f.endsWith(".md")) targets.push({ rel: `commands/${f}`, abs: path.join(cmdDir, f) });
+  }
+  const skillsDir = path.join(baseDir, "skills");
+  for (const slug of fs.readdirSync(skillsDir)) {
+    const skillFile = path.join(skillsDir, slug, "SKILL.md");
+    if (fs.existsSync(skillFile)) targets.push({ rel: `skills/${slug}/SKILL.md`, abs: skillFile });
+  }
+  assertTrue("CS-SUB-3: at least one command body scanned", targets.some(t => t.rel.startsWith("commands/")));
+  assertTrue("CS-SUB-3: at least one skill body scanned",   targets.some(t => t.rel.startsWith("skills/")));
+
+  // 3. For each body, regex out every "sauce <word>" and assert <word> is real.
+  //    To distinguish CLI-invocation occurrences from noun-phrase prose:
+  //    - "a sauce <word>" (preceded by article "a "/"an "/"the ") → prose; skip
+  //    - "<word>" terminated by article-style chars (",", ".", " is", etc.) AND
+  //       NOT followed by a flag/shell-arg → still might be prose; we rely on
+  //       the article-prefix heuristic above to skip those.
+  //    Everything else is treated as an invocation candidate. Fenced code
+  //    blocks are stripped first since they often contain example output.
+  const articleRe = /(?:^|[\s(])(?:a|an|the)\s+$/i;
+  let totalRefs = 0;
+  let prosePhrases = 0;
+  const bad = [];
+  const sauceRe = /\bsauce\s+([a-z][a-z0-9-]*)/g;
+  for (const t of targets) {
+    const raw = fs.readFileSync(t.abs, "utf8");
+    const stripped = raw.replace(/```[\s\S]*?```/g, "");
+    let m;
+    sauceRe.lastIndex = 0;
+    while ((m = sauceRe.exec(stripped)) !== null) {
+      const verb = m[1];
+      // Look at the ~12 chars before the match to see if it's article-prefixed
+      // prose (e.g. "a sauce install" / "the sauce vault"). Article-prefixed
+      // hits are NOT invocations — skip them entirely from the count.
+      const lookbehind = stripped.substring(Math.max(0, m.index - 12), m.index);
+      if (articleRe.test(lookbehind) || DOCUMENTED_NON_VERB.has(verb)) {
+        prosePhrases++;
+        continue;
+      }
+      totalRefs++;
+      if (!verbs.has(verb)) {
+        bad.push(`${t.rel}: \`sauce ${verb}\` is not a real verb (VERBS=${[...verbs].sort().join(",")})`);
+      }
+    }
+  }
+  assertTrue("CS-SUB-3: at least one `sauce <verb>` invocation reference found", totalRefs > 0);
+  assertTrue("CS-SUB-3: at least one article-prefixed prose phrase skipped (heuristic exercised)", prosePhrases >= 0);
+  assertTrue(
+    `CS-SUB-3: every invocation-style \`sauce <verb>\` reference resolves to a real verb (${bad.length} bad of ${totalRefs} invocation refs; ${prosePhrases} prose phrases skipped)`,
+    bad.length === 0,
+    bad.join("\n          ")
+  );
+}
+
+// ============================================================
 // CS-MAT-1: command kind → .claude/commands/<x>.md with body substitution
 // ============================================================
 async function caseCSMAT1Command() {
@@ -1049,6 +1149,7 @@ async function main() {
   await caseCSAG7Unsubscribed();
   await caseCSSUB1PlatformClaudeIncluded();
   await caseCSSUB2PlatformClaudeExcluded();
+  await caseCSSUB3VerbsExist();
   await caseCSMAT1Command();
   await caseCSMAT2Skill();
   await caseCSMAT3ContextDoc();

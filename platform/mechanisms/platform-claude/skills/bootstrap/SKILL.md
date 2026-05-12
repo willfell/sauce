@@ -28,7 +28,7 @@ Slash commands don't exist until bootstrap has run at least once (the canonical 
    > Run `sauce bootstrap` from a terminal in this directory for first-touch, then come back.
    ```
 
-   And stop. Do NOT shell out — `sauce bootstrap --rewizard` against a non-sauce vault is undefined behavior.
+   And stop. Do NOT shell out — `sauce bootstrap` against a non-sauce vault must come from `install.sh` (which knows the workshop clone path), not from this skill.
 
 2. **Surface the asymmetry.** Emit a `[!warning]` callout to the user:
 
@@ -40,8 +40,8 @@ Slash commands don't exist until bootstrap has run at least once (the canonical 
 
 ## Run
 
-3. **Shell out.** Run `sauce bootstrap --vault "$(pwd)" --rewizard` via the Bash tool. Capture stdout, stderr, and exit code. The `--rewizard` flag tells the CLI to treat this as a re-bootstrap (not first-touch).
-4. **Stream output.** As bootstrap may prompt interactively, surface the captured output to the user as it lands. If the CLI requires a TTY for interactive prompts, abort with `[!info] /bootstrap requires a terminal — re-run \`sauce bootstrap --rewizard\` directly from a shell in this vault.` and stop.
+3. **Shell out.** Run `sauce bootstrap --vault "$(pwd)"` via the Bash tool. Capture stdout, stderr, and exit code. The CLI auto-detects the existing `ranch/platform-config.json` + `ranch/platform-subscription.json` and surfaces its re-run wizard menu (edit subscription, edit config, force-redownload, quit) instead of running first-touch. No extra flag is required.
+4. **Stream output.** As bootstrap may prompt interactively, surface the captured output to the user as it lands. If the CLI requires a TTY for interactive prompts, abort with `[!info] /bootstrap requires a terminal — re-run \`sauce bootstrap\` directly from a shell in this vault.` and stop.
 
 ## Report
 
