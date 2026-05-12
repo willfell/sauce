@@ -59,7 +59,7 @@ Primary source for all personal finance data. Reads from a local SQLite cache th
 
 ## Gmail MCP
 
-- Connected account: {{life_gmail_account}}.
+- Connected account: {{gmail_account}}.
 - Daily-digest filter: `-category:promotions -category:social -category:updates -category:forums newer_than:1d`.
 - Prioritize senders listed in `people.md`.
 - Never send emails without explicit permission.

@@ -17,9 +17,9 @@ One-line statement of the owner's current top-priority finance goal (e.g. "pay d
 
 ## Income
 
-- Salary: {{life_income_salary}}
-- Side income: {{life_income_side}}
-- Other: {{life_income_other}}
+- Salary: {{income_salary}}
+- Side income: {{income_side}}
+- Other: {{income_other}}
 
 ---
 
@@ -29,20 +29,20 @@ One-line statement of the owner's current top-priority finance goal (e.g. "pay d
 
 | Institution | Account | Balance | Notes |
 |:------------|:--------|:--------|:------|
-| {{life_bank_1_name}} | {{life_bank_1_acct}} | {{life_bank_1_balance}} | {{life_bank_1_notes}} |
-| {{life_bank_2_name}} | {{life_bank_2_acct}} | {{life_bank_2_balance}} | {{life_bank_2_notes}} |
+| {{bank_1_name}} | {{bank_1_acct}} | {{bank_1_balance}} | {{bank_1_notes}} |
+| {{bank_2_name}} | {{bank_2_acct}} | {{bank_2_balance}} | {{bank_2_notes}} |
 
 ### Credit Cards (debt)
 
 | Card | Last 4 | Balance | Limit | APR | Status |
 |:-----|:-------|:--------|:------|:----|:-------|
-| {{life_cc_1_name}} | {{life_cc_1_last4}} | {{life_cc_1_balance}} | {{life_cc_1_limit}} | {{life_cc_1_apr}} | {{life_cc_1_status}} |
-| {{life_cc_2_name}} | {{life_cc_2_last4}} | {{life_cc_2_balance}} | {{life_cc_2_limit}} | {{life_cc_2_apr}} | {{life_cc_2_status}} |
+| {{cc_1_name}} | {{cc_1_last4}} | {{cc_1_balance}} | {{cc_1_limit}} | {{cc_1_apr}} | {{cc_1_status}} |
+| {{cc_2_name}} | {{cc_2_last4}} | {{cc_2_balance}} | {{cc_2_limit}} | {{cc_2_apr}} | {{cc_2_status}} |
 
-**Locked cards** (no new charges should appear): {{life_locked_cards_list}}
-**Active daily driver:** {{life_active_card}}
-**Current payoff target:** {{life_payoff_target_card}}
-**Monthly payoff attack:** {{life_monthly_payoff_target_usd}}
+**Locked cards** (no new charges should appear): {{locked_cards_list}}
+**Active daily driver:** {{active_card}}
+**Current payoff target:** {{payoff_target_card}}
+**Monthly payoff attack:** {{monthly_payoff_target_usd}}
 
 ---
 
@@ -50,15 +50,15 @@ One-line statement of the owner's current top-priority finance goal (e.g. "pay d
 
 | Goal | Target | Current | Notes |
 |:-----|:-------|:--------|:------|
-| {{life_savings_goal_1_name}} | {{life_savings_goal_1_target}} | {{life_savings_goal_1_current}} | {{life_savings_goal_1_notes}} |
+| {{savings_goal_1_name}} | {{savings_goal_1_target}} | {{savings_goal_1_current}} | {{savings_goal_1_notes}} |
 
 ---
 
 ## Spending Rules
 
-- {{life_spending_rule_1}}
-- {{life_spending_rule_2}}
-- {{life_spending_rule_3}}
+- {{spending_rule_1}}
+- {{spending_rule_2}}
+- {{spending_rule_3}}
 
 Default stance: don't spend it. Necessities only: rent, groceries, gas, utilities, insurance. Anything else flagged for review.
 

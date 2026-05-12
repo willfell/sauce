@@ -791,6 +791,53 @@ async function caseAU32() {
   });
 }
 
+// -------------------------------------------------------------------------
+// v0.31.0 S4 — engagement-templates path-glob cases
+// -------------------------------------------------------------------------
+//
+// Verifies path_glob scoping fires correctly against the nested per-engagement
+// context dir shape introduced by the cowork@0.2.0 restructure.
+
+// AU39 — per-type engagement-templates path_glob limits scope to one type's dir.
+async function caseAU39() {
+  await withTempVault(async (dir) => {
+    const rules = [{
+      scope: { path_glob: "spice/cowork/context/engagement-templates/w2-fte/*.md" },
+      required_frontmatter: { type: { required: true, type: "string", equals: "scheduled-context" } }
+    }];
+    makeSauceVault(dir, { blueprints: ["cowork"], rules: { cowork: rules } });
+    writeNote(dir, "spice/cowork/context/engagement-templates/w2-fte/about.md",          { type: "scheduled-context" });        // matches glob, conforms → 0 violations
+    writeNote(dir, "spice/cowork/context/engagement-templates/w2-fte/working-style.md",  { type: "wrong-type" });                // matches glob, equals fails → 1 violation
+    writeNote(dir, "spice/cowork/context/engagement-templates/personal/about.md",        { type: "wrong-type" });                // sibling type dir, doesn't match w2-fte glob → 0 violations
+    const { runAudit } = require("../audit/walker");
+    const result = await runAudit({ vaultPath: dir, untrackedCheck: false });
+    assertEqual(result.violations.filter(v => v.rule === "required_frontmatter.type.equals").length, 1,
+      "AU39: engagement-templates path_glob scopes to one type's dir only");
+    assertEqual(result.violations.filter(v => v.blueprint === "cowork" && v.file.includes("personal/")).length, 0,
+      "AU39b: personal/ dir not flagged by w2-fte-scoped rule");
+  });
+}
+
+// AU40 — per-engagement-id materialized path_glob matches deep paths.
+async function caseAU40() {
+  await withTempVault(async (dir) => {
+    const rules = [{
+      scope: { path_glob: "spice/cowork/context/*/about.md" },
+      required_frontmatter: { type: { required: true, type: "string" } }
+    }];
+    makeSauceVault(dir, { blueprints: ["cowork"], rules: { cowork: rules } });
+    writeNote(dir, "spice/cowork/context/accuris/about.md",  { type: "scheduled-context" });   // matches glob, conforms → 0
+    writeNote(dir, "spice/cowork/context/personal/about.md", { /* type missing */ });          // matches glob, required missing → 1
+    writeNote(dir, "spice/cowork/context/active-threads.md", { /* type missing */ });          // does NOT match glob (no <id>/) → 0
+    const { runAudit } = require("../audit/walker");
+    const result = await runAudit({ vaultPath: dir, untrackedCheck: false });
+    assertEqual(result.violations.filter(v => v.rule === "required_frontmatter.type").length, 1,
+      "AU40: per-engagement <id>/about.md glob matches deep paths");
+    assertEqual(result.violations.filter(v => v.file && v.file.endsWith("active-threads.md")).length, 0,
+      "AU40b: vault-wide siblings not flagged by <id>/ glob");
+  });
+}
+
 // Per-case error firewall: a thrown error inside any case body (including
 // the deliberate "Cannot find module ../audit/walker" RED-state throws)
 // counts as exactly one failed sub-assert and does NOT abort the harness.
@@ -815,6 +862,8 @@ const selector = process.argv[2] || "all";
   if (selector === "positive"   || selector === "all") { await runCase("AU31", caseAU31); await runCase("AU32", caseAU32); }
   // v0.31.0 S2.6 — min_length + items_schema predicate cases
   if (selector === "items_schema" || selector === "all") { for (let i = 33; i <= 38; i++) await runCase(`AU${i}`, eval(`caseAU${i}`)); }
+  // v0.31.0 S4 — engagement-templates path-glob cases
+  if (selector === "engagement_templates" || selector === "all") { for (let i = 39; i <= 40; i++) await runCase(`AU${i}`, eval(`caseAU${i}`)); }
   console.log(`========\nResult: ${passed} passed, ${failed} failed.`);
   process.exit(failed === 0 ? 0 : 1);
 })();

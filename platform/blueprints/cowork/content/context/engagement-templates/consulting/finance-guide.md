@@ -40,14 +40,14 @@ tags:
 
 1. Compile hours and line items from `## Session End` sections in daily notes (`spice/daily/<YYYY>/<MM-Month>/`) under the `### Time Log` subsection.
 2. Update `hours` and `amount` fields in the invoice note frontmatter.
-3. Submit via {{ero_billing_platform}}.
-4. Notify {{ero_ap_email}}.
+3. Submit via {{billing_platform}}.
+4. Notify {{ap_email}}.
 
 ---
 
 ## Rate
 
-{{ero_hourly_rate_usd}}/hr -- multiply total hours by {{ero_hourly_rate_usd}} to get the invoice amount.
+{{hourly_rate_usd}}/hr -- multiply total hours by {{hourly_rate_usd}} to get the invoice amount.
 
 ---
 
@@ -59,6 +59,6 @@ Hours are captured in `## Session End` sections in daily notes. The `cowork:skil
 
 ## Billing thresholds + cadence
 
-- **Invoice cadence:** {{ero_invoice_cadence}}.
-- **Minimum billing increment:** {{ero_min_billing_increment}}.
-- **Billing threshold:** {{ero_billing_threshold_notes}}.
+- **Invoice cadence:** {{invoice_cadence}}.
+- **Minimum billing increment:** {{min_billing_increment}}.
+- **Billing threshold:** {{billing_threshold_notes}}.
