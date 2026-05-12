@@ -83,6 +83,21 @@ Add a workshop-level installer helper `installShellHelpers(tp, manifest, options
 
 These three sub-verbs replace the manual subscription editing surface today. The shell helpers (Material section above) prefigure them — once shipped in the CLI, the shell helpers proxy to the canonical CLI implementation.
 
+## Related installer bug — ledger-based idempotency check ignores disk state
+
+Surfaced 2026-05-12 during accuris's orphan-cleanup workaround:
+
+- After `rm -rf <vault>/.claude/skills/cowork/`, running `sauce-refresh` would report `clean run — exit 0` but NOT re-materialize the skills.
+- Root cause: `runInstall` checks `ranch/platform-installed.json` ledger for "is this item version already installed?". Since the ledger still listed `cowork@0.2.0`, the install short-circuited.
+- The check ignores whether the materialized files actually exist on disk.
+
+User workaround today: hand-edit `ranch/platform-installed.json` to drop the stale ledger entry, then `sauce-refresh` re-materializes.
+
+Fix forecast (v0.31.x):
+- Extend idempotency check to verify a `tripwire` file exists per item (e.g., the first `files[]` entry's dest, or a manifest-declared sentinel).
+- On missing tripwire, treat the item as not-installed and proceed with materialization.
+- History event `info / step: idempotency_tripwire_missing` so it's visible in install logs.
+
 ## Related installer bug — materializeSkills doesn't clean stale entries
 
 Surfaced 2026-05-12 during accuris's cowork@0.1.0 → 0.2.0 install:
