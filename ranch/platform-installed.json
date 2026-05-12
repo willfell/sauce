@@ -17,13 +17,13 @@
     },
     {
       "name": "nav-buttons",
-      "version": "2.5.2",
-      "installed_at": "2026-05-05T19:13:18.931Z"
+      "version": "2.5.3",
+      "installed_at": "2026-05-10T23:44:53.596Z"
     },
     {
       "name": "cards",
-      "version": "0.2.3",
-      "installed_at": "2026-05-05T22:15:53.617Z"
+      "version": "0.2.4",
+      "installed_at": "2026-05-10T23:44:53.597Z"
     },
     {
       "name": "styling",
@@ -39,6 +39,11 @@
       "name": "accent-button",
       "version": "0.1.0",
       "installed_at": "2026-05-07T15:46:37.751Z"
+    },
+    {
+      "name": "people-rendering",
+      "version": "0.1.0",
+      "installed_at": "2026-05-10T23:44:53.598Z"
     }
   ],
   "blueprints": [],
@@ -851,6 +856,120 @@
       "git_tag": null,
       "git_dirty": true,
       "attempted_at": "2026-05-07T15:46:37.751Z"
+    },
+    {
+      "event": "info",
+      "step": "customjs_settings",
+      "action": "skipped_user_customized",
+      "jsFolder": "ranch/Scripts",
+      "git_commit": "afe241e6d5b948289f1120ad63a18c92ce42e99b",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-05-10T23:44:53.587Z"
+    },
+    {
+      "event": "info",
+      "step": "app_settings",
+      "action": "applied",
+      "keys_written": [
+        "alwaysOpenInNewTab"
+      ],
+      "git_commit": "afe241e6d5b948289f1120ad63a18c92ce42e99b",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-05-10T23:44:53.589Z"
+    },
+    {
+      "event": "replace",
+      "step": "file_overwrite",
+      "name": "nav-buttons",
+      "dest": "ranch/scripts/nav-buttons/space-nav-buttons.js",
+      "prior_sha": "db7d9376595c0cb016f27c9231cc254665ed4af0ba900530797e425cc5e90705",
+      "new_sha": "fe763df5adb657e0669a9f3c0636b1d216579f7994aadbe69fde60c1da7cf7a6",
+      "bak_path": "ranch/scripts/nav-buttons/space-nav-buttons.js.bak",
+      "git_commit": "afe241e6d5b948289f1120ad63a18c92ce42e99b",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-05-10T23:44:53.594Z"
+    },
+    {
+      "event": "info",
+      "step": "scaffold_foundational",
+      "name": "nav-buttons",
+      "item": "nav-buttons",
+      "id": "templater-obsidian",
+      "action": "skipped_already_present",
+      "git_commit": "afe241e6d5b948289f1120ad63a18c92ce42e99b",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-05-10T23:44:53.595Z"
+    },
+    {
+      "event": "install",
+      "kind": "mechanism",
+      "name": "nav-buttons",
+      "version": "2.5.3",
+      "installed_at": "2026-05-10T23:44:53.596Z",
+      "git_commit": "afe241e6d5b948289f1120ad63a18c92ce42e99b",
+      "git_tag": null,
+      "git_dirty": false
+    },
+    {
+      "event": "replace",
+      "step": "file_overwrite",
+      "name": "cards",
+      "dest": "ranch/scripts/cards/beacon-cards.js",
+      "prior_sha": "35cb318a14fe5298b39fccfb761e6f001d49ba64701166366a04ac45072137ef",
+      "new_sha": "aa4cf5e733ddd578af107da3835c5f2bf54cab6b0ba742495e908fe132f8e070",
+      "bak_path": "ranch/scripts/cards/beacon-cards.js.bak",
+      "git_commit": "afe241e6d5b948289f1120ad63a18c92ce42e99b",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-05-10T23:44:53.597Z"
+    },
+    {
+      "event": "info",
+      "step": "scaffold_foundational",
+      "name": "cards",
+      "item": "cards",
+      "id": "templater-obsidian",
+      "action": "skipped_already_present",
+      "git_commit": "afe241e6d5b948289f1120ad63a18c92ce42e99b",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-05-10T23:44:53.597Z"
+    },
+    {
+      "event": "install",
+      "kind": "mechanism",
+      "name": "cards",
+      "version": "0.2.4",
+      "installed_at": "2026-05-10T23:44:53.597Z",
+      "git_commit": "afe241e6d5b948289f1120ad63a18c92ce42e99b",
+      "git_tag": null,
+      "git_dirty": false
+    },
+    {
+      "event": "info",
+      "step": "scaffold_foundational",
+      "name": "people-rendering",
+      "item": "people-rendering",
+      "id": "templater-obsidian",
+      "action": "skipped_already_present",
+      "git_commit": "afe241e6d5b948289f1120ad63a18c92ce42e99b",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-05-10T23:44:53.598Z"
+    },
+    {
+      "event": "install",
+      "kind": "mechanism",
+      "name": "people-rendering",
+      "version": "0.1.0",
+      "installed_at": "2026-05-10T23:44:53.598Z",
+      "git_commit": "afe241e6d5b948289f1120ad63a18c92ce42e99b",
+      "git_tag": null,
+      "git_dirty": false
     }
   ]
 }
