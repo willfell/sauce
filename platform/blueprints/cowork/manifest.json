@@ -71,6 +71,7 @@
     { "source": "skills/skills/update-active-projects/SKILL.md",                 "dest": "{{skills_dir}}/skills/update-active-projects/SKILL.md" },
     { "source": "skills/skills/update-weekly-snapshot/SKILL.md",                 "dest": "{{skills_dir}}/skills/update-weekly-snapshot/SKILL.md" },
     { "source": "skills/skills/patch-daily-callouts/SKILL.md",                   "dest": "{{skills_dir}}/skills/patch-daily-callouts/SKILL.md" },
+    { "source": "skills/skills/run-audit-receipt/SKILL.md",                      "dest": "{{skills_dir}}/skills/run-audit-receipt/SKILL.md" },
     { "source": "skills/skills/invoice-prep/SKILL.md",                           "dest": "{{skills_dir}}/skills/invoice-prep/SKILL.md" }
   ],
   "engagement_types": [
@@ -116,6 +117,30 @@
         "required_frontmatter": {
           "name":        { "required": true, "type": "string" },
           "description": { "required": true, "type": "string" }
+        }
+      }
+    },
+    {
+      "target": "cowork",
+      "fragment": {
+        "scope": { "path_glob": "spice/cowork/context/vault-config.md" },
+        "required_frontmatter": {
+          "type":        { "required": true, "type": "string", "equals": "cowork-vault-config" },
+          "updated":     { "required": true, "type": "string", "matches": "^\\d{4}-\\d{2}-\\d{2}$" },
+          "updated_by":  { "required": true, "type": "string" },
+          "engagements": {
+            "required": true,
+            "type": "list",
+            "min_length": 1,
+            "items_schema": {
+              "discriminator": "type",
+              "by_type_source": "engagement-types/<type>.json#required_fields",
+              "common_required": {
+                "id":   { "required": true, "type": "string", "matches": "^[a-z][a-z0-9-]+$" },
+                "type": { "required": true, "type": "string" }
+              }
+            }
+          }
         }
       }
     }

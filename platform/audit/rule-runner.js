@@ -39,6 +39,9 @@
 //   - if equals set, value !== equals → violation rule="required_frontmatter.<key>.equals"
 //   - if matches set, !new RegExp(matches).test(value) → violation rule="required_frontmatter.<key>.matches"
 //   - if contains set, !contains.every(x => value.includes(x)) → violation rule="required_frontmatter.<key>.contains"
+//   - if min_length set, value.length < N → violation rule="required_frontmatter.<key>.min_length"  (v0.31.0)
+//   - if items_schema set, applies discriminated-union per-item validator (v0.31.0); rule paths
+//     are indexed as "required_frontmatter.<key>[<idx>].<inner_rule>".
 //
 // required_tags[i] checks:
 //   - if !tags.includes(spec.tag) → violation rule="required_tags.missing", message includes tag name
@@ -57,14 +60,26 @@
 //     log a warning to stderr and SKIP the fragment (no violations emitted for it).
 //   - Per-key required_frontmatter.matches compilation errors are caught the same way.
 
+const fs = require("fs");
 const path = require("path");
 
 // Cache: per-fragment compiled glob regex (keyed by the Fragment object identity via WeakMap).
 const _globCache = new WeakMap();
+// Cache: per-type-manifest JSON parse results, keyed by absolute path.
+const _typeManifestCache = new Map();
 
-exports.applyRules = function (rules, fileRecord) {
+// Resolve the workshop root for CLI audit `by_type_source` lookups.
+// Strategy: SAUCE_WORKSHOP_ROOT env var wins; otherwise climb from this file
+// (platform/audit/rule-runner.js → platform/ → workshop root).
+function _resolveWorkshopRoot() {
+  if (process.env.SAUCE_WORKSHOP_ROOT) return process.env.SAUCE_WORKSHOP_ROOT;
+  return path.resolve(__dirname, "../..");
+}
+
+exports.applyRules = function (rules, fileRecord, opts) {
   const violations = [];
   if (!Array.isArray(rules)) return violations;
+  const workshopRoot = (opts && opts.workshopRoot) || _resolveWorkshopRoot();
   for (const fragment of rules) {
     if (!fragment || typeof fragment !== "object") continue;
     const scopeOk = _matchesScope(fragment, fileRecord);
@@ -72,9 +87,9 @@ exports.applyRules = function (rules, fileRecord) {
     if (!scopeOk) continue;
     if (fragment.frontmatter_branch) {
       const branch = _pickFirstMatchingBranch(fragment.frontmatter_branch, fileRecord);
-      if (branch) _applyRequirements(branch, fileRecord, violations);
+      if (branch) _applyRequirements(branch, fileRecord, violations, workshopRoot);
     } else {
-      _applyRequirements(fragment, fileRecord, violations);
+      _applyRequirements(fragment, fileRecord, violations, workshopRoot);
     }
   }
   return violations;
@@ -139,11 +154,11 @@ function _pickFirstMatchingBranch(branches, fileRecord) {
   return null;
 }
 
-function _applyRequirements(spec, fileRecord, violations) {
+function _applyRequirements(spec, fileRecord, violations, workshopRoot) {
   // required_frontmatter / required_tags / naming_pattern
   if (spec.required_frontmatter && typeof spec.required_frontmatter === "object") {
     for (const [key, k] of Object.entries(spec.required_frontmatter)) {
-      _checkFmKey(key, k, fileRecord, violations);
+      _checkFmKey(key, k, fileRecord, violations, workshopRoot);
     }
   }
   if (spec.required_tags && Array.isArray(spec.required_tags)) {
@@ -182,7 +197,7 @@ function _applyRequirements(spec, fileRecord, violations) {
   }
 }
 
-function _checkFmKey(key, k, fileRecord, violations) {
+function _checkFmKey(key, k, fileRecord, violations, workshopRoot) {
   if (!k || typeof k !== "object") return;
   const fm = fileRecord.frontmatter || {};
   const val = fm[key];
@@ -247,6 +262,159 @@ function _checkFmKey(key, k, fileRecord, violations) {
       severity: "error",
       message: `Field ${key} missing required values: ${missing.join(", ")}`,
     });
+  }
+  // NEW v0.31.0 — min_length predicate (list-type values)
+  if (typeof k.min_length === "number" && Array.isArray(val) && val.length < k.min_length) {
+    violations.push({
+      file: fileRecord.relPath,
+      blueprint: fileRecord.blueprint,
+      rule: `required_frontmatter.${key}.min_length`,
+      severity: "error",
+      message: `Field ${key} must have at least ${k.min_length} entries, got ${val.length}`,
+    });
+  }
+  // NEW v0.31.0 — items_schema predicate (discriminated-union per-item validator)
+  if (k.items_schema && Array.isArray(val)) {
+    _checkItemsSchema(fileRecord, key, k.items_schema, val, violations, workshopRoot);
+  }
+}
+
+// v0.31.0 — discriminated-union per-item validator (CLI audit path).
+// Resolves `by_type_source` against the workshop tree at
+// <workshopRoot>/platform/blueprints/<fileRecord.blueprint>/<path>. The blueprint
+// shipping the rule_fragment IS the blueprint being audited; for cowork's
+// vault-config.md rule_fragment, this resolves engagement-types/<type>.json
+// under platform/blueprints/cowork/.
+function _checkItemsSchema(fileRecord, key, schemaSpec, items, violations, workshopRoot) {
+  if (!schemaSpec || typeof schemaSpec !== "object") return;
+  const discriminator = schemaSpec.discriminator;
+  const commonRequired = schemaSpec.common_required || null;
+  const bySource = schemaSpec.by_type_source || null;
+  const blueprint = fileRecord.blueprint;
+
+  const CAP = 100;
+  const limit = Math.min(items.length, CAP);
+  for (let idx = 0; idx < limit; idx++) {
+    const item = items[idx];
+    if (!item || typeof item !== "object") {
+      violations.push({
+        file: fileRecord.relPath,
+        blueprint,
+        rule: `required_frontmatter.${key}[${idx}].not_object`,
+        severity: "error",
+        message: `Item at index ${idx} is not an object`,
+      });
+      continue;
+    }
+    // 1. common_required checks
+    if (commonRequired && typeof commonRequired === "object") {
+      for (const [fieldKey, fieldSpec] of Object.entries(commonRequired)) {
+        _checkInnerField(fileRecord, `${key}[${idx}].${fieldKey}`, fieldSpec, item[fieldKey], violations);
+      }
+    }
+    // 2. by_type_source per-type required-fields lookup
+    if (bySource && discriminator) {
+      const typeValue = item[discriminator];
+      if (typeof typeValue !== "string" || typeValue.length === 0) {
+        // discriminator missing — common_required already surfaced (if required).
+        continue;
+      }
+      const hashIdx = bySource.indexOf("#");
+      const pathExpr = hashIdx === -1 ? bySource : bySource.slice(0, hashIdx);
+      const concretePath = pathExpr.replace("<type>", typeValue);
+      const absPath = path.join(workshopRoot, "platform/blueprints", blueprint, concretePath);
+      let typeManifest = null;
+      if (_typeManifestCache.has(absPath)) {
+        typeManifest = _typeManifestCache.get(absPath);
+      } else {
+        try {
+          if (fs.existsSync(absPath)) {
+            typeManifest = JSON.parse(fs.readFileSync(absPath, "utf8"));
+          }
+        } catch (_e) {
+          typeManifest = null;
+        }
+        _typeManifestCache.set(absPath, typeManifest);
+      }
+      if (!typeManifest) {
+        violations.push({
+          file: fileRecord.relPath,
+          blueprint,
+          rule: `required_frontmatter.${key}[${idx}].items_schema.by_type_source.unresolved`,
+          severity: "warn",
+          message: `Could not resolve engagement-type manifest for type "${typeValue}" at ${absPath}`,
+        });
+        continue;
+      }
+      const reqFields = Array.isArray(typeManifest.required_fields) ? typeManifest.required_fields : [];
+      for (const f of reqFields) {
+        if (!f || typeof f !== "object" || typeof f.id !== "string") continue;
+        const fieldSpec = { required: true };
+        if (typeof f.type === "string") fieldSpec.type = f.type;
+        _checkInnerField(fileRecord, `${key}[${idx}].${f.id}`, fieldSpec, item[f.id], violations);
+      }
+    }
+  }
+}
+
+// Inner-field assertion for items_schema (CLI audit path).
+// Supports required + type predicates only — mirrors _checkFmKey's required/type
+// branches but scoped to discriminated-union members. Engagement-type manifest
+// fields use "string[]" for list-of-string; we normalize to "array".
+function _checkInnerField(fileRecord, rulePath, fieldSpec, value, violations) {
+  if (!fieldSpec || typeof fieldSpec !== "object") return;
+  if (fieldSpec.required && (value === undefined || value === null || value === "")) {
+    violations.push({
+      file: fileRecord.relPath,
+      blueprint: fileRecord.blueprint,
+      rule: `required_frontmatter.${rulePath}`,
+      severity: "error",
+      message: `Missing required field: ${rulePath}`,
+    });
+    return;
+  }
+  if (value === undefined || value === null) return;
+  if (fieldSpec.type) {
+    const declared = fieldSpec.type === "string[]" ? "array"
+                   : fieldSpec.type === "list"     ? "array"
+                   : fieldSpec.type === "datetime" ? "string"
+                   : fieldSpec.type;
+    const actual = Array.isArray(value) ? "array" : typeof value;
+    if (actual !== declared) {
+      violations.push({
+        file: fileRecord.relPath,
+        blueprint: fileRecord.blueprint,
+        rule: `required_frontmatter.${rulePath}.type`,
+        severity: "warn",
+        message: `Field ${rulePath} should be ${fieldSpec.type}, got ${actual}`,
+      });
+    }
+  }
+  if (fieldSpec.equals !== undefined && value !== fieldSpec.equals) {
+    violations.push({
+      file: fileRecord.relPath,
+      blueprint: fileRecord.blueprint,
+      rule: `required_frontmatter.${rulePath}.equals`,
+      severity: "error",
+      message: `Field ${rulePath} must equal ${JSON.stringify(fieldSpec.equals)}, got ${JSON.stringify(value)}`,
+    });
+  }
+  if (fieldSpec.matches && typeof value === "string") {
+    let re;
+    try {
+      re = new RegExp(fieldSpec.matches);
+    } catch (_err) {
+      re = null;
+    }
+    if (re && !re.test(value)) {
+      violations.push({
+        file: fileRecord.relPath,
+        blueprint: fileRecord.blueprint,
+        rule: `required_frontmatter.${rulePath}.matches`,
+        severity: "error",
+        message: `Field ${rulePath} does not match pattern ${fieldSpec.matches}: got ${JSON.stringify(value)}`,
+      });
+    }
   }
 }
 

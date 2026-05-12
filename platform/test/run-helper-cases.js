@@ -3738,6 +3738,103 @@ async function caseHCBC4() {
   );
 }
 
+// ============================================================
+// v0.31.0 S2.6 — validator predicate additions (min_length + items_schema)
+// ============================================================
+// Direct exercise of platform/audit/rule-runner.js predicate handlers — same
+// engine the in-vault validator and the CLI auditor share for v0.31.0+.
+// Inline fragments avoid temp-vault scaffolding overhead.
+
+const _ruleRunner = require(path.join(WORKSHOP, "platform/audit/rule-runner.js"));
+
+// HC-PR-1 — min_length predicate semantics across 3 list sizes.
+async function caseHCPR1MinLength() {
+  console.log("\n--- Case HC-PR-1: min_length predicate semantics ---");
+  const fragments = [{
+    scope: { path_glob: "spice/cowork/context/vault-config.md" },
+    required_frontmatter: {
+      engagements: { required: true, type: "list", min_length: 2 }
+    }
+  }];
+  const mkRecord = (eng) => ({
+    relPath: "spice/cowork/context/vault-config.md",
+    frontmatter: { engagements: eng },
+    body: "",
+    blueprint: "cowork",
+  });
+  // N-1 entries (1 < min 2) → min_length violation
+  const v1 = _ruleRunner.applyRules(fragments, mkRecord([{ id: "a", type: "personal" }]), { workshopRoot: WORKSHOP });
+  assertTrue("HC-PR-1: list with 1 entry violates min_length: 2",
+    v1.some((v) => v.rule === "required_frontmatter.engagements.min_length"));
+  // N entries (2 == min 2) → passes
+  const v2 = _ruleRunner.applyRules(fragments, mkRecord([{ id: "a", type: "personal" }, { id: "b", type: "w2-fte" }]), { workshopRoot: WORKSHOP });
+  assertTrue("HC-PR-1: list with 2 entries passes min_length: 2",
+    !v2.some((v) => v.rule === "required_frontmatter.engagements.min_length"));
+  // N+1 entries → passes
+  const v3 = _ruleRunner.applyRules(fragments, mkRecord([{ id: "a", type: "personal" }, { id: "b", type: "w2-fte" }, { id: "c", type: "consulting" }]), { workshopRoot: WORKSHOP });
+  assertTrue("HC-PR-1: list with 3 entries passes min_length: 2",
+    !v3.some((v) => v.rule === "required_frontmatter.engagements.min_length"));
+}
+
+// HC-PR-2 — items_schema discriminator + by_type_source + common_required.
+async function caseHCPR2ItemsSchema() {
+  console.log("\n--- Case HC-PR-2: items_schema discriminator + by_type_source + common_required ---");
+  const fragments = [{
+    scope: { path_glob: "spice/cowork/context/vault-config.md" },
+    required_frontmatter: {
+      engagements: {
+        required: true,
+        type: "list",
+        items_schema: {
+          discriminator: "type",
+          by_type_source: "engagement-types/<type>.json#required_fields",
+          common_required: {
+            id:   { required: true, type: "string", matches: "^[a-z][a-z0-9-]+$" },
+            type: { required: true, type: "string" }
+          }
+        }
+      }
+    }
+  }];
+  const mkRecord = (engagements) => ({
+    relPath: "spice/cowork/context/vault-config.md",
+    frontmatter: { engagements },
+    body: "",
+    blueprint: "cowork",
+  });
+  // (1) Fully valid w2-fte engagement → zero items_schema violations
+  const vOk = _ruleRunner.applyRules(fragments, mkRecord([
+    { id: "accuris", type: "w2-fte", role: "Engineer", employer: "Acme", stakeholders: ["A","B"] }
+  ]), { workshopRoot: WORKSHOP });
+  const itemsViolationsOk = vOk.filter((v) => v.rule.startsWith("required_frontmatter.engagements["));
+  assertTrue("HC-PR-2: fully valid w2-fte engagement passes items_schema",
+    itemsViolationsOk.length === 0);
+  // (2) Missing id (common_required) → indexed violation
+  const vMissingId = _ruleRunner.applyRules(fragments, mkRecord([
+    { type: "w2-fte", role: "Engineer", employer: "Acme", stakeholders: ["A"] }
+  ]), { workshopRoot: WORKSHOP });
+  assertTrue("HC-PR-2: missing id surfaces required_frontmatter.engagements[0].id",
+    vMissingId.some((v) => v.rule === "required_frontmatter.engagements[0].id"));
+  // (3) Missing `role` (by_type_source for w2-fte) → indexed role violation
+  const vMissingRole = _ruleRunner.applyRules(fragments, mkRecord([
+    { id: "accuris", type: "w2-fte", employer: "Acme", stakeholders: ["A"] }
+  ]), { workshopRoot: WORKSHOP });
+  assertTrue("HC-PR-2: missing role for w2-fte surfaces required_frontmatter.engagements[0].role",
+    vMissingRole.some((v) => v.rule === "required_frontmatter.engagements[0].role"));
+  // (4) Bad id format (matches predicate via common_required) → matches-violation
+  const vBadId = _ruleRunner.applyRules(fragments, mkRecord([
+    { id: "BadCaps", type: "w2-fte", role: "Engineer", employer: "Acme", stakeholders: ["A"] }
+  ]), { workshopRoot: WORKSHOP });
+  assertTrue("HC-PR-2: id failing matches pattern surfaces required_frontmatter.engagements[0].id.matches",
+    vBadId.some((v) => v.rule === "required_frontmatter.engagements[0].id.matches"));
+  // (5) Unknown discriminator value → unresolved warning
+  const vUnknown = _ruleRunner.applyRules(fragments, mkRecord([
+    { id: "weird", type: "nonexistent-type" }
+  ]), { workshopRoot: WORKSHOP });
+  assertTrue("HC-PR-2: unknown discriminator value surfaces unresolved warning",
+    vUnknown.some((v) => v.rule.includes("items_schema.by_type_source.unresolved") && v.severity === "warn"));
+}
+
 // Carry from v0.18.1 lesson 2 (template-body trailing-whitespace defect class).
 // Walks platform/blueprints/<bp>/{content,templates}/*.md (the two-level layout —
 // content/ holds install-time-materialized notes, templates/ holds Templater
@@ -4081,6 +4178,10 @@ async function caseHCMS5InvalidEntrySkippedWithWarning() {
   await caseHCBC2();
   await caseHCBC3();
   await caseHCBC4();
+
+  // v0.31.0 S2.6 — validator predicate additions (min_length + items_schema).
+  await caseHCPR1MinLength();
+  await caseHCPR2ItemsSchema();
 
   // v0.20.0 docs polish cycle — trailing-whitespace lint.
   await caseTW1TemplatesNoTrailingWhitespace();

@@ -538,6 +538,237 @@ async function caseAU31() {
   });
 }
 
+// -------------------------------------------------------------------------
+// v0.31.0 S2 — new predicate cases (min_length + items_schema)
+// -------------------------------------------------------------------------
+//
+// Helper for cowork-vault-config fixtures: writes a vault-config.md with
+// engagements[] inline-flow JSON (since the harness's writeNote() helper only
+// handles scalar + list-of-scalar, not list-of-object). We emit raw YAML using
+// JSON syntax for object items — works because the walker's YAML parser hits a
+// frontmatter_parse violation for nested-object lists. So instead we write the
+// file directly via fs without going through writeNote().
+
+function writeRawNote(dir, relPath, rawBody) {
+  const full = path.join(dir, relPath);
+  fs.mkdirSync(path.dirname(full), { recursive: true });
+  fs.writeFileSync(full, rawBody);
+}
+
+// AU33 — min_length predicate: list shorter than min_length triggers violation.
+async function caseAU33() {
+  await withTempVault(async (dir) => {
+    const rules = [{
+      scope: { path_glob: "spice/trips/Trips.md" },
+      required_frontmatter: {
+        cssclasses: { required: true, type: "list", min_length: 2 }
+      }
+    }];
+    makeSauceVault(dir, { rules: { trips: rules } });
+    // list with 1 entry → violates min_length: 2
+    writeNote(dir, "spice/trips/Trips.md", { cssclasses: ["wide"] });
+    const { runAudit } = require("../audit/walker");
+    const result = await runAudit({ vaultPath: dir, untrackedCheck: false });
+    assertTrue(result.violations.some(v => v.rule === "required_frontmatter.cssclasses.min_length"),
+      "AU33: min_length violation surfaced for short list");
+  });
+}
+
+// AU34 — min_length predicate: list meeting threshold passes.
+async function caseAU34() {
+  await withTempVault(async (dir) => {
+    const rules = [{
+      scope: { path_glob: "spice/trips/Trips.md" },
+      required_frontmatter: {
+        cssclasses: { required: true, type: "list", min_length: 2 }
+      }
+    }];
+    makeSauceVault(dir, { rules: { trips: rules } });
+    writeNote(dir, "spice/trips/Trips.md", { cssclasses: ["wide", "cards"] });
+    const { runAudit } = require("../audit/walker");
+    const result = await runAudit({ vaultPath: dir, untrackedCheck: false });
+    assertEqual(result.violations.filter(v => v.rule === "required_frontmatter.cssclasses.min_length").length, 0,
+      "AU34: list meeting min_length passes");
+  });
+}
+
+// AU35 — items_schema common_required: each engagement item must have id + type.
+// Engagement with missing id triggers required_frontmatter.engagements[0].id violation.
+async function caseAU35() {
+  await withTempVault(async (dir) => {
+    // Use the in-tree cowork rule_fragment for vault-config.md by installing cowork.
+    const installed = { blueprints: ["cowork"], mechanisms: [], workshop_version: "0.31.0" };
+    fs.mkdirSync(path.join(dir, "ranch"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "ranch/platform-installed.json"), JSON.stringify(installed, null, 2));
+    fs.mkdirSync(path.join(dir, "ranch/rules"), { recursive: true });
+    // Embed the cowork rule_fragment under contributions.cowork (array form).
+    const coworkRule = {
+      contributions: {
+        cowork: [{
+          scope: { path_glob: "spice/cowork/context/vault-config.md" },
+          required_frontmatter: {
+            engagements: {
+              required: true,
+              type: "list",
+              min_length: 1,
+              items_schema: {
+                discriminator: "type",
+                by_type_source: "engagement-types/<type>.json#required_fields",
+                common_required: {
+                  id:   { required: true, type: "string", matches: "^[a-z][a-z0-9-]+$" },
+                  type: { required: true, type: "string" }
+                }
+              }
+            }
+          }
+        }]
+      }
+    };
+    fs.writeFileSync(path.join(dir, "ranch/rules/cowork.json"), JSON.stringify(coworkRule, null, 2));
+    // Write vault-config.md with an engagement missing `id`.
+    // The walker's YAML parser supports list-of-scalar but NOT list-of-mapping.
+    // To stay within parser scope, we test the simpler shape: discriminator absent.
+    // Use plain list-of-string trick: emit one engagement as plain mapping using
+    // a list of mapping keys — but parser rejects that. Instead: place the engagement
+    // as a list of inline-mapped scalars won't work either. Solution: validate the
+    // shape via a direct rule-runner call rather than the walker.
+    const ruleRunner = require("../audit/rule-runner");
+    const fileRecord = {
+      relPath: "spice/cowork/context/vault-config.md",
+      frontmatter: {
+        type: "cowork-vault-config",
+        updated: "2026-05-11",
+        updated_by: "test",
+        engagements: [
+          { type: "w2-fte", role: "Engineer", employer: "Acme", stakeholders: ["A"] }  // missing id
+        ]
+      },
+      body: "",
+      blueprint: "cowork",
+    };
+    const fragments = coworkRule.contributions.cowork;
+    const violations = ruleRunner.applyRules(fragments, fileRecord, { workshopRoot: ROOT });
+    assertTrue(violations.some(v => v.rule === "required_frontmatter.engagements[0].id"),
+      "AU35: items_schema common_required surfaces missing id");
+  });
+}
+
+// AU36 — items_schema by_type_source: w2-fte engagement missing required `role`
+// surfaces an indexed violation rule.
+async function caseAU36() {
+  await withTempVault(async (dir) => {
+    const fragments = [{
+      scope: { path_glob: "spice/cowork/context/vault-config.md" },
+      required_frontmatter: {
+        engagements: {
+          required: true,
+          type: "list",
+          min_length: 1,
+          items_schema: {
+            discriminator: "type",
+            by_type_source: "engagement-types/<type>.json#required_fields",
+            common_required: {
+              id:   { required: true, type: "string" },
+              type: { required: true, type: "string" }
+            }
+          }
+        }
+      }
+    }];
+    const ruleRunner = require("../audit/rule-runner");
+    const fileRecord = {
+      relPath: "spice/cowork/context/vault-config.md",
+      frontmatter: {
+        engagements: [
+          { id: "accuris", type: "w2-fte", employer: "Acme", stakeholders: ["A"] }  // missing `role`
+        ]
+      },
+      body: "",
+      blueprint: "cowork",
+    };
+    const violations = ruleRunner.applyRules(fragments, fileRecord, { workshopRoot: ROOT });
+    assertTrue(violations.some(v => v.rule === "required_frontmatter.engagements[0].role"),
+      "AU36: items_schema by_type_source surfaces missing role for w2-fte");
+  });
+}
+
+// AU37 — items_schema by_type_source: unknown discriminator value surfaces warn-severity
+// "unresolved" violation (not a hard error — type manifest just can't be found).
+async function caseAU37() {
+  await withTempVault(async (dir) => {
+    const fragments = [{
+      scope: { path_glob: "spice/cowork/context/vault-config.md" },
+      required_frontmatter: {
+        engagements: {
+          required: true,
+          type: "list",
+          items_schema: {
+            discriminator: "type",
+            by_type_source: "engagement-types/<type>.json#required_fields",
+            common_required: {
+              id:   { required: true, type: "string" },
+              type: { required: true, type: "string" }
+            }
+          }
+        }
+      }
+    }];
+    const ruleRunner = require("../audit/rule-runner");
+    const fileRecord = {
+      relPath: "spice/cowork/context/vault-config.md",
+      frontmatter: {
+        engagements: [
+          { id: "weird", type: "nonexistent-type" }
+        ]
+      },
+      body: "",
+      blueprint: "cowork",
+    };
+    const violations = ruleRunner.applyRules(fragments, fileRecord, { workshopRoot: ROOT });
+    const u = violations.find(v => v.rule.includes("items_schema.by_type_source.unresolved"));
+    assertTrue(!!u, "AU37: unknown discriminator value surfaces unresolved warning");
+    assertEqual(u && u.severity, "warn", "AU37: unresolved violation is warn-severity");
+  });
+}
+
+// AU38 — items_schema valid fixture: w2-fte engagement with all required fields → zero items violations.
+async function caseAU38() {
+  await withTempVault(async (dir) => {
+    const fragments = [{
+      scope: { path_glob: "spice/cowork/context/vault-config.md" },
+      required_frontmatter: {
+        engagements: {
+          required: true,
+          type: "list",
+          min_length: 1,
+          items_schema: {
+            discriminator: "type",
+            by_type_source: "engagement-types/<type>.json#required_fields",
+            common_required: {
+              id:   { required: true, type: "string" },
+              type: { required: true, type: "string" }
+            }
+          }
+        }
+      }
+    }];
+    const ruleRunner = require("../audit/rule-runner");
+    const fileRecord = {
+      relPath: "spice/cowork/context/vault-config.md",
+      frontmatter: {
+        engagements: [
+          { id: "accuris", type: "w2-fte", role: "Engineer", employer: "Acme", stakeholders: ["A","B"] }
+        ]
+      },
+      body: "",
+      blueprint: "cowork",
+    };
+    const violations = ruleRunner.applyRules(fragments, fileRecord, { workshopRoot: ROOT });
+    const itemsViolations = violations.filter(v => v.rule.startsWith("required_frontmatter.engagements["));
+    assertEqual(itemsViolations.length, 0, "AU38: valid w2-fte engagement passes items_schema");
+  });
+}
+
 // AU32 — canonical conforming project fixture → zero project violations
 async function caseAU32() {
   await withTempVault(async (dir) => {
@@ -582,6 +813,8 @@ const selector = process.argv[2] || "all";
   if (selector === "exits"      || selector === "all") { for (let i = 26; i <= 28; i++) await runCase(`AU${i}`, eval(`caseAU${i}`)); }
   if (selector === "report"     || selector === "all") { await runCase("AU29", caseAU29); await runCase("AU30", caseAU30); }
   if (selector === "positive"   || selector === "all") { await runCase("AU31", caseAU31); await runCase("AU32", caseAU32); }
+  // v0.31.0 S2.6 — min_length + items_schema predicate cases
+  if (selector === "items_schema" || selector === "all") { for (let i = 33; i <= 38; i++) await runCase(`AU${i}`, eval(`caseAU${i}`)); }
   console.log(`========\nResult: ${passed} passed, ${failed} failed.`);
   process.exit(failed === 0 ? 0 : 1);
 })();

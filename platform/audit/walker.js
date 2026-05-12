@@ -192,6 +192,42 @@ exports.runAudit = async function (opts) {
         }
     }
 
+    // ---- Phase 4b (v0.31.0): per-engagement context-dir soft-audit ----
+    // If cowork is installed AND spice/cowork/context/vault-config.md exists with
+    // a parseable engagements[] array, warn for each engagement whose
+    // spice/cowork/context/<id>/ directory is missing. Additive — existing audit
+    // behavior unchanged when cowork is absent or vault-config.md is absent.
+    if (blueprints.includes("cowork")) {
+        const vaultConfigRel = "spice/cowork/context/vault-config.md";
+        const vaultConfigAbs = path.join(vaultPath, vaultConfigRel);
+        if (fs.existsSync(vaultConfigAbs)) {
+            let raw;
+            try { raw = fs.readFileSync(vaultConfigAbs, "utf8"); } catch (_e) { raw = null; }
+            if (raw !== null) {
+                const split = _splitFrontmatter(raw);
+                let fm = null;
+                try { fm = split.fm === null ? null : _parseFrontmatterYaml(split.fm); } catch (_e) { fm = null; }
+                if (fm && Array.isArray(fm.engagements)) {
+                    for (const eng of fm.engagements) {
+                        if (!eng || typeof eng !== "object") continue;
+                        const id = eng.id;
+                        if (typeof id !== "string" || id.length === 0) continue;
+                        const dirAbs = path.join(vaultPath, "spice/cowork/context", id);
+                        if (!fs.existsSync(dirAbs)) {
+                            violations.push({
+                                file: "spice/cowork/context/",
+                                blueprint: "cowork",
+                                rule: "per_engagement_context_dir",
+                                severity: "warn",
+                                message: `Engagement '${id}' has no context dir at spice/cowork/context/${id}/ — bootstrap-vault should re-materialize`,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // ---- Phase 5: untracked-dir scan ----
     if (untrackedCheck) {
         let entries = [];

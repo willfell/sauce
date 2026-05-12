@@ -1,6 +1,6 @@
 {
   "name": "validator",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Rule-engine validator + Templater hook handler. Reads ranch/rules/* and validates a file.",
   "files": [
     { "source": "validate.js", "dest": "{{templater_scripts_path}}/validate.js" },
