@@ -20,7 +20,7 @@ Runs the claude-surface audit pass against the current vault. Parses the CLI rep
 
 ## Parse
 
-3. **Read the report.** stdout contains a markdown report keyed by severity sections. The CLI also emits a single-line JSON summary on the last stdout line of the form `{"counts":{...},"findings_total":N}`. Use that for the counts; use the section bodies for the per-finding details.
+3. **Read the report.** stdout contains a markdown report keyed by severity sections (`## dead_path`, `## orphan`, `## stale_but_valid`, `## consumer_edit_at_risk`). The CLI also emits a final-line HTML comment of the form `<!-- summary:{"counts":{...},"findings_total":N} -->`. Strip the `<!-- summary:` prefix + ` -->` suffix and parse the embedded JSON for counts; use the section bodies for the per-finding details. The HTML comment is invisible in rendered markdown — intentional so the report stays clean when piped to `--output-file`.
 
 ## Render
 
