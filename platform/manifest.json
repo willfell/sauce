@@ -28,7 +28,8 @@
     { "name": "accent-button", "version": "0.1.0", "path": "mechanisms/accent-button" },
     { "name": "people-rendering", "version": "0.1.0", "path": "mechanisms/people-rendering" },
     { "name": "styling", "version": "0.1.2", "path": "mechanisms/styling" },
-    { "name": "convenience", "version": "0.1.0", "path": "mechanisms/convenience" }
+    { "name": "convenience", "version": "0.1.0", "path": "mechanisms/convenience" },
+    { "name": "platform-claude", "version": "0.1.0", "path": "mechanisms/platform-claude" }
   ],
   "blueprints": [
     { "name": "boards", "version": "0.1.0", "path": "blueprints/boards" },

@@ -10,7 +10,8 @@
     { "name": "accent-button", "version": "0.1.0" },
     { "name": "people-rendering", "version": "0.1.0" },
     { "name": "styling", "version": "0.1.2" },
-    { "name": "convenience", "version": "0.1.0" }
+    { "name": "convenience", "version": "0.1.0" },
+    { "name": "platform-claude", "version": "0.1.0" }
   ],
   "blueprints": []
 }

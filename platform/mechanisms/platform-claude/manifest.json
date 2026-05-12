@@ -1,0 +1,23 @@
+{
+  "name": "platform-claude",
+  "version": "0.1.0",
+  "kind": "mechanism",
+  "skills_dir": ".claude/skills/platform",
+  "description": "Lifecycle slash commands (/install, /upgrade, /bootstrap) for managing sauce from inside Claude Code. Owns claude-md-renderer.js (consumed by install.js step 6d). Always-on posture — subscribe in every consumer.",
+  "depends_on": [],
+  "files": [],
+  "claude_surface": [
+    { "kind": "command", "source": "commands/install.md",   "dest": ".claude/commands/install.md" },
+    { "kind": "command", "source": "commands/upgrade.md",   "dest": ".claude/commands/upgrade.md" },
+    { "kind": "command", "source": "commands/bootstrap.md", "dest": ".claude/commands/bootstrap.md" },
+    { "kind": "skill",   "source": "skills/install/SKILL.md",   "dest": "{{skills_dir}}/install/SKILL.md" },
+    { "kind": "skill",   "source": "skills/upgrade/SKILL.md",   "dest": "{{skills_dir}}/upgrade/SKILL.md" },
+    { "kind": "skill",   "source": "skills/bootstrap/SKILL.md", "dest": "{{skills_dir}}/bootstrap/SKILL.md" },
+    { "kind": "claude_md_row", "table": "resolvers", "row": { "topic": "Install",   "path": "platform-claude", "command": "/install"   } },
+    { "kind": "claude_md_row", "table": "resolvers", "row": { "topic": "Upgrade",   "path": "platform-claude", "command": "/upgrade"   } },
+    { "kind": "claude_md_row", "table": "resolvers", "row": { "topic": "Bootstrap", "path": "platform-claude", "command": "/bootstrap" } }
+  ],
+  "post_install": [
+    { "type": "notice", "message": "platform-claude@0.1.0 installed. Lifecycle slash commands /install /upgrade /bootstrap now available in Claude Code." }
+  ]
+}

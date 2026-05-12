@@ -315,6 +315,89 @@ async function caseCSAG7Unsubscribed() {
 }
 
 // ============================================================
+// CS-SUB-1: real platform-claude manifest loaded; subscription includes it →
+//           registry.contributions["platform-claude"] has 9 entries
+//           (3 commands + 3 skills + 3 claude_md_row).
+// ============================================================
+async function caseCSSUB1PlatformClaudeIncluded() {
+  console.log("\n--- Case CS-SUB-1: subscription with platform-claude → 9 contributions ---");
+  const mechManifestPath = path.join(WORKSHOP, "platform/mechanisms/platform-claude/manifest.json");
+  assertTrue("CS-SUB-1: platform-claude manifest.json exists", fs.existsSync(mechManifestPath));
+  const mechMan = JSON.parse(fs.readFileSync(mechManifestPath, "utf8"));
+
+  const perItemManifest = new Map();
+  perItemManifest.set("platform-claude", mechMan);
+
+  const subscription = {
+    mechanisms: [{ name: "platform-claude", version: "0.1.0" }],
+    blueprints: [],
+  };
+  const history = [];
+  const out = await aggregateClaudeSurface(perItemManifest, subscription, history, mkGit(), { workshop_version: "0.0.0-test" });
+
+  assertTrue("CS-SUB-1: registry has platform-claude key",
+    Array.isArray(out.registry.contributions["platform-claude"]));
+  assertEq("CS-SUB-1: 9 contributions total (3 cmd + 3 skill + 3 row)",
+    out.registry.contributions["platform-claude"].length, 9);
+
+  const cmdEntries = out.materializeList.filter((e) => e.owner === "platform-claude" && e.kind === "command");
+  const skillEntries = out.materializeList.filter((e) => e.owner === "platform-claude" && e.kind === "skill");
+  assertEq("CS-SUB-1: 3 command entries in materializeList", cmdEntries.length, 3);
+  assertEq("CS-SUB-1: 3 skill entries in materializeList", skillEntries.length, 3);
+
+  // Skill dests should have {{skills_dir}} substituted to ".claude/skills/platform".
+  for (const e of skillEntries) {
+    assertTrue(`CS-SUB-1: skill dest ${e.dest} starts with .claude/skills/platform/`,
+      e.dest.startsWith(".claude/skills/platform/"));
+  }
+
+  // claude_md_row entries appear under rows.resolvers.
+  const platRows = out.rows.resolvers.filter((r) => r.owner === "platform-claude");
+  assertEq("CS-SUB-1: 3 resolver rows owned by platform-claude", platRows.length, 3);
+  const topics = platRows.map((r) => r.topic).sort();
+  assertEq("CS-SUB-1: resolver topics are Bootstrap/Install/Upgrade",
+    topics, ["Bootstrap", "Install", "Upgrade"]);
+}
+
+// ============================================================
+// CS-SUB-2: real platform-claude manifest loaded BUT subscription does NOT
+//           include it → registry.contributions has no platform-claude key
+//           and materializeList has zero platform-claude entries.
+// ============================================================
+async function caseCSSUB2PlatformClaudeExcluded() {
+  console.log("\n--- Case CS-SUB-2: subscription omits platform-claude → not in registry ---");
+  const mechManifestPath = path.join(WORKSHOP, "platform/mechanisms/platform-claude/manifest.json");
+  const mechMan = JSON.parse(fs.readFileSync(mechManifestPath, "utf8"));
+
+  const perItemManifest = new Map();
+  perItemManifest.set("platform-claude", mechMan);
+  // Also seed an unrelated mechanism so the subscription has SOMETHING.
+  perItemManifest.set("other", {
+    name: "other", version: "0.1.0", kind: "mechanism",
+    claude_surface: [
+      { kind: "command", source: "x.md", dest: ".claude/commands/x.md" },
+    ],
+  });
+
+  const subscription = {
+    mechanisms: [{ name: "other", version: "0.1.0" }],
+    blueprints: [],
+  };
+  const history = [];
+  const out = await aggregateClaudeSurface(perItemManifest, subscription, history, mkGit(), { workshop_version: "0.0.0-test" });
+
+  assertTrue("CS-SUB-2: platform-claude NOT in registry.contributions",
+    out.registry.contributions["platform-claude"] === undefined);
+  const platMat = out.materializeList.filter((e) => e.owner === "platform-claude");
+  assertEq("CS-SUB-2: 0 platform-claude entries in materializeList", platMat.length, 0);
+  const platRows = out.rows.resolvers.filter((r) => r.owner === "platform-claude");
+  assertEq("CS-SUB-2: 0 platform-claude resolver rows", platRows.length, 0);
+  // The other mechanism's single command should still be present.
+  assertTrue("CS-SUB-2: 'other' mechanism is in registry",
+    Array.isArray(out.registry.contributions["other"]));
+}
+
+// ============================================================
 // CS-MAT-1: command kind → .claude/commands/<x>.md with body substitution
 // ============================================================
 async function caseCSMAT1Command() {
@@ -964,6 +1047,8 @@ async function main() {
   await caseCSAG5DestPathRejected();
   await caseCSAG6RowSort();
   await caseCSAG7Unsubscribed();
+  await caseCSSUB1PlatformClaudeIncluded();
+  await caseCSSUB2PlatformClaudeExcluded();
   await caseCSMAT1Command();
   await caseCSMAT2Skill();
   await caseCSMAT3ContextDoc();
