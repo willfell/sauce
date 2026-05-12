@@ -2,12 +2,13 @@
 name: cowork:gather-weather
 description: Fetch current weather + 2-day forecast for a city, return a paste-ready Weather callout block.
 inputs:
+  engagement_id: string
   city: string
   days_ahead: number
   units: string
 outputs:
   markdown: string
-tags: [cowork, gather]
+tags: [cowork, gather, engagement-aware]
 ---
 
 # cowork:gather-weather
@@ -16,7 +17,8 @@ Fetches current conditions plus a 2-day forecast from `wttr.in` (no API key requ
 
 ## Inputs
 
-- `city` (string, required): location string. Example: `"Evergreen, CO"` or `"80439"`. May contain spaces and a comma; the skill URL-encodes it before pasting into the wttr.in URL.
+- `engagement_id` (string, required): id of the engagement this gather runs for. **Type-gated**: early-exit silently with `{ markdown: "" }` if `engagement.type != "personal"` (weather is only included in personal-engagement morning briefings; w2-fte / consulting types skip).
+- `city` (string, optional): explicit city override. When absent, uses `engagement.home_city` from the resolved engagement record. Example: `"Evergreen, CO"` or `"80439"`. May contain spaces and a comma; the skill URL-encodes it before pasting into the wttr.in URL.
 - `days_ahead` (number, optional, default `2`): how many days of forecast to render in the output table. Range `0..3`.
 - `units` (string, optional, default `"F"`): `F` for Fahrenheit, `C` for Celsius.
 

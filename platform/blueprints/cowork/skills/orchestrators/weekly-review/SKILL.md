@@ -1,37 +1,51 @@
 ---
 name: cowork:weekly-review
-description: Compose weekly summary (spending, habits, projects, threads, people, next-week); patch link callout; refresh ctx.
-schedule: Sundays 6:00 PM MT (~2.5min jitter)
-scope: life
-tags: [cowork, orchestrator, life, weekly]
+description: Engagement-aware weekly review. Composes a standalone weekly summary note for one engagement plus a link callout in today's daily note. Phrasings = "weekly review for <engagement>", "<engagement> weekly", "weekly summary for <engagement>".
+schedule: Cron-driven per enabled (engagement, weekly) pair (typically Sundays for personal; Fridays for w2-fte / consulting)
+scope: shared
+tags: [cowork, orchestrator, weekly, engagement-aware]
 ---
 
 # cowork:weekly-review
 
-Sunday end-of-week deep pass. Creates a standalone weekly summary note at `spice/cowork/summaries/weekly/<YYYY-Www>.md`, then patches a link callout into today's daily note. Refreshes `active-threads.md`, `weekly-snapshot.md`, and `finance-goals.md`. Idempotent: re-runs replace the summary file content and the daily-note link callout.
+End-of-week deep pass for one engagement. Creates a standalone weekly summary note at `spice/cowork/summaries/weekly/<engagement.id>/<YYYY-Www>.md`, then patches a link callout into today's daily note under `## Weekly — <engagement.label>`. Refreshes `active-threads.md` + `weekly-snapshot.md` for this engagement's slice. Idempotent: re-runs replace the summary file content and the daily-note link callout.
+
+## Inputs
+
+```
+{
+  engagement_id: string
+}
+```
 
 ## Pre-flight
-1. Use Skill `cowork:check-vault-routing` with `{ required: ["obsidian", "gmail", "google-calendar", "brex", "imessage"] }`. If not `"ready"`, emit Notice `cowork:weekly-review aborted -- <status>` and exit.
-2. Use Skill `cowork:date-context` with `{}`. Capture `context` (today, dddd, week_of, week_range, week_start, week_end, daily_path, iso_week_label).
-3. Use Skill `cowork:ensure-daily-note` with `{ date: context.today, weekday: context.dddd, month_name: context["MM-Month"].split("-")[1], path: context.daily_path }`.
+
+1. Use Skill `cowork:check-vault-routing` with `{ required: ["obsidian"] }`. If not `"ready"`, emit Notice `cowork:weekly-review aborted -- <status>` and exit.
+2. **Resolve engagement.** Read vault-config.md; look up engagement by id; load type manifest; capture `engagement` + `render_aspects`.
+3. Use Skill `cowork:date-context` with `{}`. Capture `context` (today, dddd, week_of, week_range, week_start, week_end, daily_path, iso_week_label).
+4. Use Skill `cowork:ensure-daily-note` with `{ date: context.today, weekday: context.dddd, month_name: context["MM-Month"].split("-")[1], path: context.daily_path }`.
 
 ## Gather
-4. Use Skill `cowork:gather-finance-yesterday` with `{ date_yesterday: context.today, scope: "life", mode: "full-week", week_range: { start: context.week_start, end: context.week_end } }`. Returns per-category spend table this-week vs last-week, week-over-week total, top problem categories, current CC balance table, interest-this-month-so-far, debt-payoff trajectory.
-5. Use Skill `cowork:gather-cc-debt-snapshot` with `{ date_today: context.today, mode: "weekly", append_to_tracker: true, week_range: { start: context.week_start, end: context.week_end } }`. Sub-skill appends a row to `spice/finance/debt/Credit Debt Payoff Tracker.md` Progress log and returns `{ markdown, total_usd, on_pace }`.
-6. Use Skill `cowork:gather-calendar` with `{ date_today: context.today, scope: "life", horizon: "next-week", range_start: context.next_week_start, range_end: context.next_week_end, timezone: "America/Denver" }`.
-7. Use Skill `cowork:gather-gmail` with `{ window: "newer_than:7d", filters: ["-category:promotions", "-category:social", "-category:updates", "-category:forums"] }`.
-8. Use Skill `cowork:gather-imessage` with `{ window_days: 7, scope: "inner-circle" }`.
-9. Use Skill `cowork:gather-projects` with `{ scope: "life", filter: "weekly", week_range: { start: context.week_start, end: context.week_end } }`. Returns daily/journal/todo counts + kanban completed-this-week + side-quest movement (under `spice/boards/side-quests/`) + task velocity.
-10. Use Skill `cowork:gather-threads` with `{ date_today: context.today, mode: "weekly-audit", scope: "life", week_range: { start: context.week_start, end: context.week_end } }`.
+
+5. If `render_aspects.finance_block == "include"`: use Skill `cowork:gather-finance-yesterday` with `{ engagement_id, date_yesterday: context.today, mode: "full-week", week_range: { start: context.week_start, end: context.week_end } }`.
+6. If `render_aspects.finance_block == "include"`: use Skill `cowork:gather-cc-debt-snapshot` with `{ engagement_id, date_today: context.today, mode: "weekly", append_to_tracker: true, week_range: { start: context.week_start, end: context.week_end } }`.
+7. Use Skill `cowork:gather-calendar` with `{ engagement_id, date_today: context.today, horizon: "next-week", range_start: context.next_week_start, range_end: context.next_week_end, timezone: "America/Denver" }`.
+8. Use Skill `cowork:gather-gmail` with `{ engagement_id, window: "newer_than:7d" }`.
+9. Use Skill `cowork:gather-imessage` with `{ engagement_id, window_days: 7, scope: "inner-circle" }` (gated: skipped when engagement.type != "personal").
+10. Use Skill `cowork:gather-projects` with `{ engagement_id, filter: "weekly", week_range: { start: context.week_start, end: context.week_end } }`.
+11. Use Skill `cowork:gather-threads` with `{ engagement_id, date_today: context.today, mode: "weekly-audit", week_range: { start: context.week_start, end: context.week_end } }`.
+12. If `render_aspects.invoice_prep == "include"`: use Skill `cowork:write-summary-invoice-prep` with `{ engagement, date_today: context.today, mode: "weekly" }` IF `engagement.invoice_cadence` indicates weekly invoicing. Capture `invoice_block` (markdown). Else `invoice_block = ""`.
+13. If `render_aspects.invoice_prep == "skip"` AND `engagement.type == "w2-fte"`: use Skill `cowork:write-summary-fte-status` with `{ engagement, date_today: context.today, mode: "weekly" }`. Capture `fte_status_block`. Else `fte_status_block = ""`.
 
 ## Write
-11. Use Skill `cowork:write-summary-weekly-life` with `{ date: context.today, week_start: context.week_start, week_end: context.week_end, finance: <step 4>, cc_debt: <step 5>, calendar: <step 6>, email_metrics: <step 7>, people_pulse: <step 8>, projects: <step 9>, threads: <step 10> }`. The sub-skill writes the summary note to `spice/cowork/summaries/weekly/<YYYY-Www>.md` and returns `{ summary_path, markdown }`. The orchestrator does NOT write the summary file - the sub-skill owns the write.
-12. Compose the daily-note link callout inline as `> [!abstract]- Weekly Review\n> [[<summary_path basename>|Full Weekly Review]]`.
-13. Use Skill `cowork:patch-daily-callouts` with `{ daily_path: context.daily_path, callouts: [{ id: "weekly-review", body: <link callout from step 12> }] }`. Idempotent replace-by-id.
+
+14. Use Skill `cowork:write-summary-weekly` with `{ engagement, render_aspects, date: context.today, week_start: context.week_start, week_end: context.week_end, finance: <step 5 or null>, cc_debt: <step 6 or null>, calendar: <step 7>, email_metrics: <step 8>, people_pulse: <step 9 or null>, projects: <step 10>, threads: <step 11>, invoice_block, fte_status_block }`. The sub-skill writes the summary note to `spice/cowork/summaries/weekly/<engagement.id>/<YYYY-Www>.md` and returns `{ summary_path, markdown }`. Internal type-branch picks the section layout.
+15. Compose the daily-note link callout: `> [!abstract]- Weekly Review — <engagement.label>\n> [[<summary_path basename>|Full Weekly Review]]`.
+16. Use Skill `cowork:patch-daily-callouts` with `{ engagement_id, daily_path: context.daily_path, callouts: [{ id: "weekly-review", body: <link callout> }] }`.
 
 ## State
-14. Use Skill `cowork:update-active-threads` with `{ scope: "life", phase: "weekly-refresh", date_today: context.today, writer: "cowork:weekly-review", changes: { archive_resolved_older_than_days: 14, stale_recommendations: <step 10.stale_over_7d>, snoozed_to_open: <step 10.snoozed_to_open>, financial_state_refresh: { finance: <step 4 condensed>, cc_debt: <step 5 condensed> } } }`.
-15. Use Skill `cowork:update-weekly-snapshot` with `{ scope: "life", phase: "weekly-close", date_today: context.today, writer: "cowork:weekly-review", snapshot_data: { week_of: context.week_of, archive_to_previous: true, totals: { wtd_spend: <step 4.total_usd>, cc_total: <step 5.total_usd>, journaled_days: <step 9.journal_count>, daily_note_days: <step 9.daily_count>, todo_days: <step 9.todo_count>, threads_opened: <step 10.opened_this_week.length>, threads_resolved: <step 10.resolved_this_week.length> } } }`.
-16. Refresh `spice/cowork/context/finance-goals.md` (BALANCES_START / BUDGET_ANALYSIS_START markers). This is currently a documented gap - defer to a follow-up `cowork:update-finance-goals` sub-skill (S2.B follow-up). For v0.30.0, surface as a Notice if balances shifted >$500 vs the prior weekly snapshot; do NOT inline an MCP write.
+
+17. Use Skill `cowork:update-active-threads` with `{ engagement_id, phase: "weekly-refresh", date_today: context.today, writer: "cowork:weekly-review", changes: { archive_resolved_older_than_days: 14, stale_recommendations: <step 11.stale_over_7d>, snoozed_to_open: <step 11.snoozed_to_open>, financial_state_refresh: <step 5 and 6 condensed or null> } }`.
+18. Use Skill `cowork:update-weekly-snapshot` with `{ engagement_id, phase: "weekly-close", date_today: context.today, writer: "cowork:weekly-review", snapshot_data: { week_of: context.week_of, archive_to_previous: true, totals: { ...condensed metrics... } } }`.
 
 ## Done

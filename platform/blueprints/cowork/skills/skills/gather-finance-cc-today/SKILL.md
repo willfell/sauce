@@ -2,6 +2,7 @@
 name: cowork:gather-finance-cc-today
 description: Pull today's CC activity (settled + pending) for the midday tripwire, emit finance callout.
 inputs:
+  engagement_id: string
   date_today: string
   lookback_start: string
   timezone: string
@@ -14,7 +15,7 @@ outputs:
   top_merchant_today_total: number
   mtd_discretionary: number
   days_since_splurge_pre: number
-tags: [cowork, gather]
+tags: [cowork, gather, engagement-aware]
 ---
 
 # cowork:gather-finance-cc-today
@@ -27,7 +28,7 @@ Same shape as `cowork:gather-finance-yesterday` but bounded to *today* and limit
 - `lookback_start` (string, optional, default `"06:00"`): local clock-time `HH:MM` at which the lookback window opens. Default `06:00` covers pre-7am posts that the morning briefing might have missed.
 - `timezone` (string, optional, default `"America/Denver"`): IANA timezone.
 - `classify` (boolean, optional, default `true`): when true, tag each charge `severity: "RED" | "YELLOW" | "GREEN"` per the cards classification (see `cards` input).
-- `cards` (object, optional): `{ active: [string], locked: [string], ignore: [string] }` - card-name lists that drive the severity classifier. Charges on `locked` cards → RED. Charges on `active` cards in discretionary categories → YELLOW (or RED at `>= flag_threshold`). Charges on `ignore` cards are dropped from output. Defaults are template-substituted at install time: `active: {{life_cc_active_cards}}`, `locked: {{life_cc_locked_cards}}`, `ignore: {{life_cc_ignored_cards}}`. Consumers populate these in `platform-config.json`'s variables block.
+- `cards` (object, optional): `{ active: [string], locked: [string], ignore: [string] }` — card-name lists that drive the severity classifier. Charges on `locked` cards → RED. Charges on `active` cards in discretionary categories → YELLOW (or RED at `>= flag_threshold`). Charges on `ignore` cards are dropped from output. Defaults sourced from the resolved engagement record: `active: engagement.cc_active_cards`, `locked: engagement.cc_locked_cards`, `ignore: engagement.cc_ignored_cards` (engagement-type `personal` optional fields). Caller may override per invocation.
 - `flag_threshold` (number, optional, default `200`): USD threshold for the `[!warning] Flagged` sub-block (and red severity escalation regardless of card).
 
 ## Outputs

@@ -2,13 +2,14 @@
 name: cowork:gather-imessage
 description: Pull last-24h unresponded inbound iMessage threads and emit an iMessages callout block.
 inputs:
+  engagement_id: string
   window_days: number
   scope: string
   inner_circle: string
 outputs:
   markdown: string
   unanswered_count: number
-tags: [cowork, gather]
+tags: [cowork, gather, engagement-aware]
 ---
 
 # cowork:gather-imessage
@@ -19,6 +20,7 @@ Surfaces inbound iMessage threads from the last `lookback_hours` where the user 
 
 ## Inputs
 
+- `engagement_id` (string, required): id of the engagement this gather runs for. **Type-gated**: early-exit silently with `{ markdown: "", unanswered_count: 0 }` if `engagement.type != "personal"` (iMessage gathering only applies to personal engagements; w2-fte / consulting types use different communication channels).
 - `window_days` (number, optional, default `1`): window for the inbound scan, in days. Morning briefing typically passes `3`; weekly review passes `7`; monthly review passes `31`.
 - `scope` (string, optional, default `"inner-circle-and-groups"`): one of `"inner-circle"` | `"inner-circle-and-groups"`. Constrains which threads are surfaced; weekly/monthly typically pass `"inner-circle"` for a frequency map.
 - `inner_circle` (string, optional): comma-separated E.164 phone numbers (e.g. `+13035551212,+17205551313`) the orchestrator wants surfaced first when an MCP becomes available.

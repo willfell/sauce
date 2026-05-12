@@ -2,8 +2,8 @@
 name: cowork:gather-finance-yesterday
 description: Pull yesterday's Brex card+banking transactions, summarize, emit Yesterday's finance callout.
 inputs:
+  engagement_id: string
   date_yesterday: string
-  scope: string
   mode: string
   week_range: object
   month_range: object
@@ -17,7 +17,7 @@ outputs:
   hours_logged: number
   amount_logged: number
   invoice_submitted: boolean
-tags: [cowork, gather]
+tags: [cowork, gather, engagement-aware]
 ---
 
 # cowork:gather-finance-yesterday
@@ -26,12 +26,12 @@ Aggregates yesterday's Brex card expenses and banking transactions into a normal
 
 ## Inputs
 
+- `engagement_id` (string, required): id of the engagement this gather runs for. Resolves engagement record (used for `hourly_rate_usd`, `invoice_cadence`, optional card lists). Type-gated: returns the unavailable callout for engagements whose `render_aspects.finance_block != "include"`.
 - `date_yesterday` (string, required): target day in `YYYY-MM-DD` form. Caller computes via `cowork:date-context`.
-- `scope` (string, optional, default `"life"`): one of `"life"` | `"work"`. `work` (ero) constrains to ERO invoice pulse and skips life-side card categories.
 - `mode` (string, optional, default `"daily"`): one of `"daily"` | `"full-week"` | `"full-month"`. `full-week` widens the query window to `week_range` and emits per-category week-over-week deltas. `full-month` widens to `month_range` and emits month-over-month deltas + budget adherence.
 - `week_range` (object, optional): `{ start: "YYYY-MM-DD", end: "YYYY-MM-DD" }` Mon..Sun. Required when `mode = "full-week"`.
 - `month_range` (object, optional): `{ start: "YYYY-MM-DD", end: "YYYY-MM-DD" }` first..last. Required when `mode = "full-month"`.
-- `include_invoice_pulse` (boolean, optional, default `false`): when true (typically with `scope: "work"`), additionally read `spice/finance/<YYYY-MM>/<YYYY-MM>-Invoice.md` and surface invoice path / hours-logged / amount / submission status. Used by ero-morning.
+- `include_invoice_pulse` (boolean, optional, default `false`): when true (typically when `engagement.type == "consulting"`), additionally read `spice/finance/<YYYY-MM>/<YYYY-MM>-Invoice.md` and surface invoice path / hours-logged / amount / submission status. Used by morning-briefing for consulting engagements.
 - `timezone` (string, optional, default `"America/Denver"`): IANA timezone used to bound the day window.
 - `flag_threshold` (number, optional, default `200`): USD threshold; transactions whose absolute amount is at or above this raise a `[!warning]` Flagged sub-block.
 

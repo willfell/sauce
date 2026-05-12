@@ -2,7 +2,7 @@
 name: cowork:update-weekly-snapshot
 description: Mutate weekly-snapshot.md preserving scheduled-context schema; read, parse, mutate, validate, write.
 inputs:
-  scope: string
+  engagement_id: string
   phase: string
   date_today: string
   writer: string
@@ -19,10 +19,10 @@ Deterministic state mutator for the rolling weekly-snapshot context file. Read �
 
 ## Inputs
 
-- `scope` (string, optional, default `"life"`): one of `"life"` | `"work"`. Selects the canonical section sequence (life vs ERO variant).
+- `engagement_id` (string, required): id of the engagement this snapshot update targets. The weekly-snapshot.md file is vault-wide; per-engagement metrics are namespaced under `## <Engagement Label>` sub-sections within the snapshot body. Section sequence (which metrics appear) is selected by the resolved engagement's `render_aspects`.
 - `phase` (string, required): one of `"morning"` | `"eod"` | `"weekly-close"` | `"monthly-reset"` | `"weekly-reset"` | `"archive-and-reset"` | `"section-update"`. Aliases:
   - `"morning"` / `"eod"` → light section-update + frontmatter bump.
-  - `"weekly-close"` → archive prior week and reseed baselines for the new week (life: archive under `## Previous Weeks`; ero: write fresh rolling-week baseline).
+  - `"weekly-close"` → archive prior week and reseed baselines for the new week.
   - `"monthly-reset"` → archive the closed month's snapshot and reseed for the new month.
   - `"weekly-reset"` / `"archive-and-reset"` / `"section-update"` preserved for back-compat.
 - `date_today` (string, required): today as `YYYY-MM-DD`. Used to populate `fm.updated`.
@@ -82,7 +82,7 @@ Canonical section sequence (ERO variant):
 ## Next Week Highlights
 ```
 
-The skill detects variant from `scope` + `writer` (`scope: "work"` or `writer` matching `cowork:ero-*` → ERO variant; otherwise life variant).
+The skill resolves the engagement record from `engagement_id` and derives the section sequence from `engagement.type` + `render_aspects` (consulting / w2-fte engagements get a leaner section list; personal engagements get the full sequence including spending/debt rows).
 
 ```
 { "status": "ok" | "schema-error:<reason>" }

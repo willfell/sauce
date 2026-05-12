@@ -18,7 +18,7 @@ Composition-only sub-skill. Emits the loud, short red-severity tripwire callout.
 
 Red triggers, evaluated by orchestrator from `cowork:gather-finance-cc-today`:
 
-- Any charge of any amount on a card marked `locked` in `spice/finance/debt/Credit Debt Payoff Tracker.md` (locked-card list configured via `{{life_cc_locked_cards}}` in platform-config.json).
+- Any charge of any amount on a card marked `locked` in `spice/finance/debt/Credit Debt Payoff Tracker.md` (locked-card list configured via `engagement.cc_locked_cards` in the resolved engagement record).
 - Any single charge `>= $200` on any card.
 - Any locked-card balance ticking up by `> $5` vs yesterday's snapshot when not attributable to interest.
 

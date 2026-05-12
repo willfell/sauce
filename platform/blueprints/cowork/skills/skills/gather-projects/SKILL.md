@@ -2,7 +2,7 @@
 name: cowork:gather-projects
 description: Scan spice/projects/ kanban boards + card notes; return normalized per-project state for callout writers.
 inputs:
-  scope: string
+  engagement_id: string
   filter: string
   today: string
   week_range: object
@@ -26,7 +26,7 @@ outputs:
   journal_count: number
   todo_count: number
   task_velocity: object
-tags: [cowork, gather, projects]
+tags: [cowork, gather, projects, engagement-aware]
 ---
 
 # cowork:gather-projects
@@ -34,7 +34,7 @@ tags: [cowork, gather, projects]
 Reads every project under `spice/projects/<slug>/`, parses its kanban board, walks In Progress + Blocked card notes, and synthesizes the data the morning/eod/weekly callout writers need. FAT: orchestrator never parses kanban markdown; this sub-skill emits a fully normalized list.
 
 ## Inputs
-- `scope` (string, optional, default `"life"`): one of `"life"` | `"work"`. `work` constrains scanning to ero (currently all `spice/projects/` content is work-scope). `life` widens to side-quests + life-scope kanban + carried-over todos from yesterday's daily note.
+- `engagement_id` (string, required): id of the engagement this gather runs for. Projects in `spice/projects/<slug>/` may be tagged with `engagement_id` frontmatter; this gather filters to projects matching the given engagement (untagged projects are treated as vault-wide and included for all engagements). For personal engagements, also walks side-quests + carried-over todos from yesterday's daily note.
 - `filter` (string, optional, default `"active"`): one of `"active"` | `"today-status"` | `"weekly"` | `"monthly"`.
   - `"active"` - morning-briefing usage. Returns currently active projects + in-progress + blocked + people-nudge candidates + carried-over todos from `carry_over_from`.
   - `"today-status"` - eod-review usage. Returns `completed` (today's `- [x]`), `incomplete` (today's `- [ ]`), `kanban_in_progress`, `kanban_to_do`, `kanban_blocked`.

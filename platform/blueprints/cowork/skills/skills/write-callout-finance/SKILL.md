@@ -1,15 +1,15 @@
 ---
 name: cowork:write-callout-finance
-description: Compose finance callout (yesterday transactions + credit-debt payoff snapshot) for life-vault morning/midday flows.
+description: Compose finance callout (yesterday transactions + credit-debt payoff snapshot) for engagements with render_aspects.finance_block == "include" (personal + consulting).
 inputs:
+  engagement: object
   date: string
-  scope: string
   finance_yesterday: string
   cc_debt_snapshot: string
   flagged_block: string
 outputs:
   markdown: string
-tags: [cowork, write-callout]
+tags: [cowork, write-callout, engagement-aware]
 ---
 
 # cowork:write-callout-finance
@@ -18,8 +18,8 @@ Composition-only sub-skill that produces the standard finance callout block. Use
 
 ## Inputs
 
+- `engagement` (object, required) — engagement record from vault-config.md. Used for label substitution + `engagement.cc_focus_card` lookup in the credit-debt section.
 - `date` (string, required) - absolute `YYYY-MM-DD`. The callout reports yesterday's activity but is filed under `date` (today).
-- `scope` (string, optional, default `"life"`) - one of `"life"` | `"work"`. Currently informational; reserved for future ero-variant differentiation.
 - `finance_yesterday` (string, optional) - markdown fragment from `cowork:gather-finance-yesterday`. Transactions table + week-to-date table.
 - `cc_debt_snapshot` (string, optional) - markdown fragment from `cowork:gather-cc-debt-snapshot`. Per-card balances, target-card focus row, days-since-splurge counter.
 - `flagged_block` (string, optional) - pre-rendered nested-warning fragment for flagged transactions (locked-card charges, large charges, etc.). Caller decides whether to populate.
@@ -51,7 +51,7 @@ Literal output shape (single outer callout, sub-sections separated by `> ---`, a
 >
 > ---
 >
-> **Credit-debt payoff (focused attack on {{life_cc_focus_card}})**
+> **Credit-debt payoff (focused attack on {{engagement.cc_focus_card}})**
 >
 {{CC_DEBT_SNAPSHOT}}
 ```

@@ -2,9 +2,9 @@
 name: cowork:gather-threads
 description: Read active-threads.md, classify threads by status, return digest markdown block for orchestrator paste.
 inputs:
+  engagement_id: string
   date_today: string
   mode: string
-  scope: string
   week_range: object
   month_range: object
   auto_create: list[object]
@@ -28,7 +28,7 @@ outputs:
   stale_over_7d: list[object]
   longest_running: object
   average_resolution_days: number
-tags: [cowork, gather]
+tags: [cowork, gather, engagement-aware]
 ---
 
 # cowork:gather-threads
@@ -37,9 +37,9 @@ Read-only digest of the active-threads ledger. Returns a `[!example]+` callout g
 
 ## Inputs
 
+- `engagement_id` (string, required): id of the engagement this gather runs for. Threads in `active-threads.md` may be tagged with `engagement_id`; this gather filters to threads matching the given engagement (untagged threads are treated as vault-wide and included for all engagements).
 - `date_today` (string, required): today as `YYYY-MM-DD`. Anchors age computations.
-- `mode` (string, optional, default `"morning-surface"`): one of `"morning-surface"` | `"eod-reconcile"` | `"weekly-audit"` | `"monthly-audit"`. (Aliases: `"morning"`, `"eod"`, `"weekly"`, `"monthly"` - same semantics.)
-- `scope` (string, optional, default `"life"`): one of `"life"` | `"work"`.
+- `mode` (string, optional, default `"morning-surface"`): one of `"morning-surface"` | `"eod-reconcile"` | `"weekly-audit"` | `"monthly-audit"`. (Aliases: `"morning"`, `"eod"`, `"weekly"`, `"monthly"` — same semantics.)
 - `week_range` (object, optional): `{ start, end }`. Required for `weekly-audit`.
 - `month_range` (object, optional): `{ start, end }` or `{ range_start, range_end }`. Required for `monthly-audit`.
 - `auto_create` (list[object], optional): thread-trigger candidates supplied by the caller (e.g., from `cowork:gather-projects.thread_triggers`) to be promoted to new threads.

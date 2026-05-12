@@ -2,7 +2,7 @@
 name: cowork:update-active-threads
 description: Mutate active-threads.md preserving cowork-threads schema; read, parse, mutate, validate, write atomically.
 inputs:
-  scope: string
+  engagement_id: string
   phase: string
   date_today: string
   writer: string
@@ -20,7 +20,7 @@ Deterministic state mutator for the active-threads ledger. Read → parse → mu
 
 ## Inputs
 
-- `scope` (string, optional, default `"life"`): one of `"life"` | `"work"`. Currently informational (the same active-threads.md file is shared); reserved for future per-scope partitioning.
+- `engagement_id` (string, required): id of the engagement whose threads this update targets. New threads written by this call are tagged with `engagement_id` in their thread frontmatter so downstream gather-threads can filter per-engagement. The active-threads.md file is vault-wide; per-engagement scoping is by frontmatter tagging.
 - `phase` (string, required): one of `"morning-pass"` | `"eod-pass"` | `"weekly-pass"` | `"monthly-pass"` | `"weekly-refresh"` | `"monthly-refresh"` | `"explicit-update"`. (Aliases preserved for back-compat.)
 - `date_today` (string, required): today as `YYYY-MM-DD`. Used to populate `fm.updated`.
 - `writer` (string, required): caller skill id (e.g., `"cowork:morning-briefing"`, `"cowork:ero-eod"`, `"ero-morning"`). Used to populate `fm.updated_by`. Bare-name forms (without `cowork:` prefix) are accepted.

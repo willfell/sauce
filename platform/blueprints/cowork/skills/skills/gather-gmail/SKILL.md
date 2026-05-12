@@ -1,7 +1,8 @@
 ---
 name: cowork:gather-gmail
-description: Pull last-24h Gmail threads, categorize Action / Awaiting / FYI, emit Inbox digest callout.
+description: Pull last-window Gmail threads for one engagement (scoped by engagement.gmail_label when set), categorize Action / Awaiting / FYI, emit Inbox digest callout.
 inputs:
+  engagement_id: string
   window: string
   filters: list[string]
   max_threads: number
@@ -10,7 +11,7 @@ outputs:
   markdown: string
   action_required: list[object]
   fyi: list[object]
-tags: [cowork, gather]
+tags: [cowork, gather, engagement-aware]
 ---
 
 # cowork:gather-gmail
@@ -19,6 +20,7 @@ Searches Gmail for human-relevant threads from the last `lookback` window, categ
 
 ## Inputs
 
+- `engagement_id` (string, required): id of the engagement this gather runs for. Resolves to per-engagement Gmail scope.
 - `window` (string, optional, default `"newer_than:1d"`): a Gmail search-query fragment specifying the time window. Examples: `"newer_than:1d"`, `"newer_than:12h"`, `"newer_than:7d"`. Caller passes the full `newer_than:<value>` clause.
 - `filters` (list[string], optional, default `["-category:promotions", "-category:social", "-category:updates", "-category:forums"]`): list of additional Gmail search-query fragments appended verbatim. Caller controls exclusion / inclusion patterns.
 - `exclude_categories` (list[string], optional): alternate input shape for the same purpose as `filters`. When both are present, `filters` wins.
@@ -32,8 +34,9 @@ Searches Gmail for human-relevant threads from the last `lookback` window, categ
 
 ## Steps
 
-1. Compose query: `{{window}} <space-joined filters>`. (When only `exclude_categories` is provided, treat it as the filter list.)
-2. Call `mcp__claude_ai_Gmail__search_threads` with `query: <composed>`, `max_results: {{max_threads}}`.
+1. **Resolve engagement.** Read `<vault>/spice/cowork/context/vault-config.md` via `mcp__obsidian__get_frontmatter`. Look up `engagements[]` entry where `id == engagement_id`. Capture `engagement`. If not found, return the Gmail-unavailable warning callout + Notice `cowork:gather-gmail — engagement '<id>' not in vault-config.md`.
+2. Compose query: `{{window}} <space-joined filters>`. If `engagement.gmail_label` is set, append `label:<engagement.gmail_label>` to the filter list. (When only `exclude_categories` is provided, treat it as the filter list.)
+3. Call `mcp__claude_ai_Gmail__search_threads` with `query: <composed>`, `max_results: {{max_threads}}`.
 3. For each returned thread id, call `mcp__claude_ai_Gmail__get_thread` with `thread_id: <id>` and capture: latest `from`, `subject`, `snippet`, whether the user is the latest sender (= awaiting reply from them) or recipient (= action may be needed).
 4. Classify each thread:
    - **Action needed**: latest message is FROM someone else AND snippet contains imperative phrasing (`please`, `can you`, `need`, `?`, `due`, `deadline`, `confirm`, `reply`).
