@@ -482,6 +482,29 @@ module.exports = async function (tp) {
       }
     }
 
+    // 6d. v0.32.0 S4 — regenerate marker-bounded sections of CLAUDE.md from
+    // the aggregator's rows output. Wrapped in its own try/catch so a CLAUDE.md
+    // regen failure does NOT abort the nav-buttons prune or ledger prune
+    // below. The renderer is a no-op when CLAUDE.md is absent in the vault
+    // (first-touch scaffold ships in S6).
+    if (claudeSurfaceState) {
+      try {
+        const { regenerateClaudeMd } = require("./mechanisms/platform-claude/claude-md-renderer.js");
+        await regenerateClaudeMd(claudeSurfaceState.rows, tp, installedNow.history, git);
+      } catch (e) {
+        new Notice(`platformInstall: CLAUDE.md regen failed — ${e.message}`, 6000);
+        installedNow.history.push({
+          event: "error",
+          step: "claude_md_regen",
+          message: e.message,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    }
+
     // 7. Subscription-aware pruning of ranch/nav-buttons-registry.json.
     // Removes contributions.<source> for any source that is no longer in the
     // current subscription. Self-cleaning registry — no separate uninstall

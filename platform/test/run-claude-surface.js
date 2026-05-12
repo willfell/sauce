@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// run-claude-surface.js — v0.32.0 S2/S3 sub-asserts for aggregateClaudeSurface
-// + materializeClaudeSurface.
+// run-claude-surface.js — v0.32.0 S2/S3/S4 sub-asserts for aggregateClaudeSurface
+// + materializeClaudeSurface + regenerateClaudeMd (CLAUDE.md marker renderer).
 //
 // S2 (CS-AG-*): tests the registry builder in isolation: imports
 // aggregateClaudeSurface from platform/install.js and exercises it with
@@ -26,6 +26,13 @@
 //   CS-MAT-3 context_doc kind materializes <module_dir>/context/<x>.md
 //   CS-MAT-4 missing source file → error event; other entries still materialize
 //   CS-MAT-5 no orphan .tmp file left behind after success
+//   CS-MD-1  marker pair present → content replaced; surrounds preserved
+//   CS-MD-2  missing marker pair → section appended at end with markers
+//   CS-MD-3  half-open marker (BEGIN w/o END) → throws explicit Error
+//   CS-MD-4  outside-marker content preserved bit-for-bit
+//   CS-MD-5  pre-seeded directory-map rows always present
+//   CS-MD-6  alphabetic order honored within contributed rows
+//   CS-MD-7  rendered table shape (headers, separator, data rows)
 //
 // Usage: node platform/test/run-claude-surface.js
 // Exit: 0 = all pass; 1 = any fail.
@@ -43,6 +50,9 @@ const INSTALLER_PATH = path.join(WORKSHOP, "platform/install.js");
 const installer = require(INSTALLER_PATH);
 const aggregateClaudeSurface = installer.aggregateClaudeSurface;
 const materializeClaudeSurface = installer.materializeClaudeSurface;
+const { regenerateClaudeMd, beginMarker, endMarker } = require(
+  path.join(WORKSHOP, "platform/mechanisms/platform-claude/claude-md-renderer.js")
+);
 
 function makeTpStub(dir) {
   return {
@@ -468,6 +478,232 @@ async function caseCSMAT5NoTmpLeftBehind() {
   });
 }
 
+// ============================================================
+// CS-MD-1: marker pair present → content between markers replaced cleanly;
+//          pre/post-marker content preserved verbatim.
+// ============================================================
+async function caseCSMD1MarkerReplace() {
+  console.log("\n--- Case CS-MD-1: marker pair present → content replaced; surrounds preserved ---");
+  await withTempFixture(async (dir) => {
+    const pre  = "# Project README\n\nIntro paragraph.\n\n";
+    const post = "\n\n## Trailing section\n\nbody body body.\n";
+    const initial = `${pre}${beginMarker("resolvers")}\nSTALE CONTENT\n${endMarker("resolvers")}${post}`;
+    fs.writeFileSync(path.join(dir, "CLAUDE.md"), initial);
+
+    const tp = makeTpStub(dir);
+    const history = [];
+    const rows = {
+      "directory-map": [],
+      "resolvers":     [{ topic: "alpha", path: "spice/alpha", command: "/alpha" }],
+      "skills-index":  [],
+    };
+    await regenerateClaudeMd(rows, tp, history, mkGit());
+
+    const out = fs.readFileSync(path.join(dir, "CLAUDE.md"), "utf8");
+    assertTrue("CS-MD-1: pre-marker prose preserved", out.startsWith(pre));
+    assertTrue("CS-MD-1: post-marker prose preserved", out.includes(post));
+    assertTrue("CS-MD-1: STALE CONTENT no longer present", !out.includes("STALE CONTENT"));
+    assertTrue("CS-MD-1: rendered resolver row present", out.includes("| alpha | spice/alpha | /alpha |"));
+    assertTrue("CS-MD-1: BEGIN marker preserved", out.includes(beginMarker("resolvers")));
+    assertTrue("CS-MD-1: END marker preserved", out.includes(endMarker("resolvers")));
+  });
+}
+
+// ============================================================
+// CS-MD-2: missing marker pair → new section appended at end with markers
+// ============================================================
+async function caseCSMD2AppendSection() {
+  console.log("\n--- Case CS-MD-2: missing marker pair → section appended at end ---");
+  await withTempFixture(async (dir) => {
+    const initial = "# README\n\nNo markers here.\n";
+    fs.writeFileSync(path.join(dir, "CLAUDE.md"), initial);
+
+    const tp = makeTpStub(dir);
+    const history = [];
+    const rows = {
+      "directory-map": [],
+      "resolvers":     [{ topic: "beta", path: "spice/beta", command: "/beta" }],
+      "skills-index":  [],
+    };
+    await regenerateClaudeMd(rows, tp, history, mkGit());
+
+    const out = fs.readFileSync(path.join(dir, "CLAUDE.md"), "utf8");
+    assertTrue("CS-MD-2: original prose preserved at start", out.startsWith(initial));
+    assertTrue("CS-MD-2: resolvers BEGIN marker appended", out.includes(beginMarker("resolvers")));
+    assertTrue("CS-MD-2: resolvers END marker appended",   out.includes(endMarker("resolvers")));
+    assertTrue("CS-MD-2: directory-map BEGIN marker appended", out.includes(beginMarker("directory-map")));
+    assertTrue("CS-MD-2: skills-index BEGIN marker appended",  out.includes(beginMarker("skills-index")));
+    assertTrue("CS-MD-2: resolver row body appended", out.includes("| beta | spice/beta | /beta |"));
+  });
+}
+
+// ============================================================
+// CS-MD-3: half-open marker (BEGIN without END) → throws
+// ============================================================
+async function caseCSMD3HalfOpenThrows() {
+  console.log("\n--- Case CS-MD-3: half-open marker (BEGIN w/o END) → throws explicit Error ---");
+  await withTempFixture(async (dir) => {
+    const initial = `# README\n\n${beginMarker("resolvers")}\nno end marker here\n`;
+    fs.writeFileSync(path.join(dir, "CLAUDE.md"), initial);
+
+    const tp = makeTpStub(dir);
+    const history = [];
+    const rows = { "directory-map": [], "resolvers": [], "skills-index": [] };
+    let threw = false;
+    let msg = "";
+    try {
+      await regenerateClaudeMd(rows, tp, history, mkGit());
+    } catch (e) {
+      threw = true;
+      msg = e && e.message ? e.message : "";
+    }
+    assertTrue("CS-MD-3: regenerateClaudeMd threw on half-open marker", threw);
+    assertTrue("CS-MD-3: error message mentions half-open / matching", /half-open|matching/i.test(msg));
+  });
+}
+
+// ============================================================
+// CS-MD-4: content OUTSIDE markers preserved bit-for-bit
+// ============================================================
+async function caseCSMD4OutsideBitForBit() {
+  console.log("\n--- Case CS-MD-4: outside-marker content preserved bit-for-bit ---");
+  await withTempFixture(async (dir) => {
+    const pre  = "# Top\n\nLine one.\nLine two with `code`.\n\n";
+    const mid  = `${beginMarker("resolvers")}\nold\n${endMarker("resolvers")}`;
+    const post = "\n\nTail: 0xDEADBEEF  NBSP—em-dash.\n";
+    const initial = `${pre}${mid}${post}`;
+    fs.writeFileSync(path.join(dir, "CLAUDE.md"), initial);
+
+    const tp = makeTpStub(dir);
+    const history = [];
+    const rows = {
+      "directory-map": [],
+      "resolvers":     [{ topic: "x", path: "y", command: "/z" }],
+      "skills-index":  [],
+    };
+    await regenerateClaudeMd(rows, tp, history, mkGit());
+    const out = fs.readFileSync(path.join(dir, "CLAUDE.md"), "utf8");
+
+    // Locate the new resolvers block in `out`; everything before its BEGIN
+    // marker must equal `pre`, and everything after its END marker must
+    // contain `post` somewhere (the renderer may append the OTHER two tables
+    // after, with a leading newline between them).
+    const bIdx = out.indexOf(beginMarker("resolvers"));
+    const eIdx = out.indexOf(endMarker("resolvers"));
+    assertTrue("CS-MD-4: both resolver markers found", bIdx !== -1 && eIdx !== -1 && eIdx > bIdx);
+    const outPre  = out.substring(0, bIdx);
+    const outPost = out.substring(eIdx + endMarker("resolvers").length);
+    assertEq("CS-MD-4: pre-marker bytes identical", outPre, pre);
+    assertTrue("CS-MD-4: post-marker prose still embedded verbatim", outPost.includes(post));
+  });
+}
+
+// ============================================================
+// CS-MD-5: pre-seeded directory-map rows always present, even with zero
+//          contributed rows
+// ============================================================
+async function caseCSMD5SeedRows() {
+  console.log("\n--- Case CS-MD-5: pre-seeded directory-map rows present with zero contributions ---");
+  await withTempFixture(async (dir) => {
+    const initial = `# R\n\n${beginMarker("directory-map")}\nstale\n${endMarker("directory-map")}\n`;
+    fs.writeFileSync(path.join(dir, "CLAUDE.md"), initial);
+    const tp = makeTpStub(dir);
+    const history = [];
+    const rows = { "directory-map": [], "resolvers": [], "skills-index": [] };
+    await regenerateClaudeMd(rows, tp, history, mkGit());
+    const out = fs.readFileSync(path.join(dir, "CLAUDE.md"), "utf8");
+
+    assertTrue("CS-MD-5: spice/ seed row present", out.includes("| spice/ | (platform) |"));
+    assertTrue("CS-MD-5: ranch/ seed row present", out.includes("| ranch/ | (platform) |"));
+    assertTrue("CS-MD-5: .claude/commands/ seed row present", out.includes("| .claude/commands/ | (platform) |"));
+    assertTrue("CS-MD-5: .claude/skills/ seed row present",  out.includes("| .claude/skills/ | (platform) |"));
+  });
+}
+
+// ============================================================
+// CS-MD-6: alphabetic order preserved across contributed rows (resolvers).
+//          The aggregator pre-sorts; the renderer must not re-order or
+//          mangle the ordering.
+// ============================================================
+async function caseCSMD6AlphabeticOrder() {
+  console.log("\n--- Case CS-MD-6: alphabetic order honored within resolvers table ---");
+  await withTempFixture(async (dir) => {
+    const initial = `# R\n${beginMarker("resolvers")}\nstale\n${endMarker("resolvers")}\n`;
+    fs.writeFileSync(path.join(dir, "CLAUDE.md"), initial);
+    const tp = makeTpStub(dir);
+    const history = [];
+    // Aggregator sorts; here we simulate already-sorted input (Apple < Zebra).
+    const rows = {
+      "directory-map": [],
+      "resolvers":     [
+        { topic: "Apple", path: "spice/apple", command: "/apple" },
+        { topic: "Zebra", path: "spice/zebra", command: "/zebra" },
+      ],
+      "skills-index":  [],
+    };
+    await regenerateClaudeMd(rows, tp, history, mkGit());
+    const out = fs.readFileSync(path.join(dir, "CLAUDE.md"), "utf8");
+    const aIdx = out.indexOf("| Apple |");
+    const zIdx = out.indexOf("| Zebra |");
+    assertTrue("CS-MD-6: Apple row present", aIdx !== -1);
+    assertTrue("CS-MD-6: Zebra row present", zIdx !== -1);
+    assertTrue("CS-MD-6: Apple appears before Zebra", aIdx < zIdx);
+  });
+}
+
+// ============================================================
+// CS-MD-7: markdown-table shape — headers, separator, data rows all correctly
+//          formatted for each of the three tables.
+// ============================================================
+async function caseCSMD7TableShape() {
+  console.log("\n--- Case CS-MD-7: rendered table shape (headers, separator, data rows) ---");
+  await withTempFixture(async (dir) => {
+    // Seed all three marker pairs so we replace rather than append.
+    const initial = [
+      "# R",
+      `${beginMarker("directory-map")}`,
+      "stale",
+      `${endMarker("directory-map")}`,
+      `${beginMarker("resolvers")}`,
+      "stale",
+      `${endMarker("resolvers")}`,
+      `${beginMarker("skills-index")}`,
+      "stale",
+      `${endMarker("skills-index")}`,
+      "",
+    ].join("\n");
+    fs.writeFileSync(path.join(dir, "CLAUDE.md"), initial);
+    const tp = makeTpStub(dir);
+    const history = [];
+    const rows = {
+      "directory-map": [{ path: "spice/x", owner: "x", purpose: "test row" }],
+      "resolvers":     [{ topic: "alpha", path: "spice/a", command: "/a" }],
+      "skills-index":  [{ command: "/foo", skill_path: ".claude/skills/sauce/foo/SKILL.md", owner: "foo" }],
+    };
+    await regenerateClaudeMd(rows, tp, history, mkGit());
+    const out = fs.readFileSync(path.join(dir, "CLAUDE.md"), "utf8");
+
+    // directory-map headers + separator
+    assertTrue("CS-MD-7: directory-map header present", out.includes("| Path | Blueprint | Purpose |"));
+    // resolvers headers
+    assertTrue("CS-MD-7: resolvers header present",     out.includes("| Topic | Path | Slash command |"));
+    // skills-index headers
+    assertTrue("CS-MD-7: skills-index header present",  out.includes("| Command | SKILL.md | Blueprint/Mechanism |"));
+    // each header followed by separator row "| --- | --- | --- |"
+    const sepCount = (out.match(/\| --- \| --- \| --- \|/g) || []).length;
+    assertTrue("CS-MD-7: at least three separator rows present (one per table)", sepCount >= 3);
+
+    // claude_md_regen event recorded
+    const evts = history.filter((h) => h.event === "claude_md_regen");
+    assertEq("CS-MD-7: one regen event recorded", evts.length, 1);
+    assertTrue("CS-MD-7: regen event lists all three tables",
+      evts[0].tables_updated && evts[0].tables_updated.length === 3 &&
+      evts[0].tables_updated.includes("directory-map") &&
+      evts[0].tables_updated.includes("resolvers") &&
+      evts[0].tables_updated.includes("skills-index"));
+  });
+}
+
 async function main() {
   if (typeof aggregateClaudeSurface !== "function") {
     console.error("FATAL: aggregateClaudeSurface is not exported from install.js");
@@ -475,6 +711,10 @@ async function main() {
   }
   if (typeof materializeClaudeSurface !== "function") {
     console.error("FATAL: materializeClaudeSurface is not exported from install.js");
+    process.exit(1);
+  }
+  if (typeof regenerateClaudeMd !== "function") {
+    console.error("FATAL: regenerateClaudeMd is not exported from claude-md-renderer.js");
     process.exit(1);
   }
 
@@ -490,6 +730,13 @@ async function main() {
   await caseCSMAT3ContextDoc();
   await caseCSMAT4MissingSourceLoopContinues();
   await caseCSMAT5NoTmpLeftBehind();
+  await caseCSMD1MarkerReplace();
+  await caseCSMD2AppendSection();
+  await caseCSMD3HalfOpenThrows();
+  await caseCSMD4OutsideBitForBit();
+  await caseCSMD5SeedRows();
+  await caseCSMD6AlphabeticOrder();
+  await caseCSMD7TableShape();
 
   console.log("\n========================================");
   console.log(`run-claude-surface: ${pass} passed, ${fail} failed`);
