@@ -50,6 +50,8 @@ const INSTALLER_PATH = path.join(WORKSHOP, "platform/install.js");
 const installer = require(INSTALLER_PATH);
 const aggregateClaudeSurface = installer.aggregateClaudeSurface;
 const materializeClaudeSurface = installer.materializeClaudeSurface;
+const pruneClaudeSurface = installer.pruneClaudeSurface;
+const applyLocalShadows = installer.applyLocalShadows;
 const { regenerateClaudeMd, beginMarker, endMarker } = require(
   path.join(WORKSHOP, "platform/mechanisms/platform-claude/claude-md-renderer.js")
 );
@@ -66,6 +68,30 @@ function makeTpStub(dir) {
             const abs = path.join(dir, p);
             fs.mkdirSync(path.dirname(abs), { recursive: true });
             fs.writeFileSync(abs, content);
+          },
+          // v0.32.0 S5 — mirror Obsidian's FileSystemAdapter.list shape:
+          // returns { files: string[], folders: string[] } with VAULT-RELATIVE
+          // path strings (no leading slash, no trailing slash on folders).
+          async list(p) {
+            const abs = path.join(dir, p);
+            if (!fs.existsSync(abs)) {
+              const err = new Error(`ENOENT: no such file or directory, scandir '${abs}'`);
+              err.code = "ENOENT";
+              throw err;
+            }
+            const entries = fs.readdirSync(abs, { withFileTypes: true });
+            const files = [];
+            const folders = [];
+            for (const e of entries) {
+              const rel = p ? `${p}/${e.name}` : e.name;
+              if (e.isDirectory()) folders.push(rel);
+              else files.push(rel);
+            }
+            return { files, folders };
+          },
+          async remove(p) {
+            const abs = path.join(dir, p);
+            fs.unlinkSync(abs);
           },
         },
       },
@@ -704,6 +730,211 @@ async function caseCSMD7TableShape() {
   });
 }
 
+// ============================================================
+// CS-PR-1: owner present in prev registry but absent from new → all of its
+//          file-kind dests are deleted from the filesystem.
+// ============================================================
+async function caseCSPR1OwnerGone() {
+  console.log("\n--- Case CS-PR-1: owner removed → all its dest files deleted ---");
+  await withTempFixture(async (dir) => {
+    // Pre-seed two on-disk files that the prev registry claims belong to "old-bp".
+    const fileA = ".claude/commands/old-a.md";
+    const fileB = ".claude/skills/sauce/old-b/SKILL.md";
+    fs.mkdirSync(path.join(dir, ".claude/commands"), { recursive: true });
+    fs.mkdirSync(path.join(dir, ".claude/skills/sauce/old-b"), { recursive: true });
+    fs.writeFileSync(path.join(dir, fileA), "# old A\n");
+    fs.writeFileSync(path.join(dir, fileB), "# old B SKILL\n");
+
+    const prev = {
+      schema_version: 1,
+      contributions: {
+        "old-bp": [
+          { kind: "command", source: "commands/old-a.md", dest: fileA, version: "0.1.0" },
+          { kind: "skill", source: "skills/old-b/SKILL.md", dest: fileB, version: "0.1.0" },
+        ],
+      },
+    };
+    const next = { schema_version: 1, contributions: {} };
+
+    const tp = makeTpStub(dir);
+    const history = [];
+    await pruneClaudeSurface(prev, next, tp, history, mkGit());
+
+    assertTrue("CS-PR-1: old-a.md deleted", !fs.existsSync(path.join(dir, fileA)));
+    assertTrue("CS-PR-1: old-b SKILL.md deleted", !fs.existsSync(path.join(dir, fileB)));
+    const evts = history.filter((h) => h.event === "claude_surface_prune");
+    assertEq("CS-PR-1: two prune events recorded", evts.length, 2);
+    assertTrue("CS-PR-1: prune event names removed_from owner",
+      evts.every((e) => e.removed_from === "old-bp"));
+  });
+}
+
+// ============================================================
+// CS-PR-2: owner shared between prev and new but new has fewer entries →
+//          orphan entries (in prev[owner] but not new[owner], keyed by dest)
+//          are deleted; surviving entries' files are NOT touched.
+// ============================================================
+async function caseCSPR2OrphanEntries() {
+  console.log("\n--- Case CS-PR-2: shared owner, orphan entries deleted ---");
+  await withTempFixture(async (dir) => {
+    const kept = ".claude/commands/kept.md";
+    const dropped = ".claude/commands/dropped.md";
+    fs.mkdirSync(path.join(dir, ".claude/commands"), { recursive: true });
+    fs.writeFileSync(path.join(dir, kept), "# kept\n");
+    fs.writeFileSync(path.join(dir, dropped), "# dropped\n");
+
+    const prev = {
+      schema_version: 1,
+      contributions: {
+        "bp": [
+          { kind: "command", source: "commands/kept.md", dest: kept, version: "0.1.0" },
+          { kind: "command", source: "commands/dropped.md", dest: dropped, version: "0.1.0" },
+        ],
+      },
+    };
+    const next = {
+      schema_version: 1,
+      contributions: {
+        "bp": [
+          { kind: "command", source: "commands/kept.md", dest: kept, version: "0.2.0" },
+        ],
+      },
+    };
+
+    const tp = makeTpStub(dir);
+    const history = [];
+    await pruneClaudeSurface(prev, next, tp, history, mkGit());
+
+    assertTrue("CS-PR-2: kept.md preserved", fs.existsSync(path.join(dir, kept)));
+    assertTrue("CS-PR-2: dropped.md deleted", !fs.existsSync(path.join(dir, dropped)));
+    const evts = history.filter((h) => h.event === "claude_surface_prune");
+    assertEq("CS-PR-2: one prune event recorded (only dropped)", evts.length, 1);
+    assertEq("CS-PR-2: prune event dest matches dropped", evts[0].dest, dropped);
+  });
+}
+
+// ============================================================
+// CS-PR-3: malformed prev registry (no contributions field) → warning event
+//          emitted; no abort.
+// ============================================================
+async function caseCSPR3MalformedPrev() {
+  console.log("\n--- Case CS-PR-3: malformed prev registry → warning event, no abort ---");
+  await withTempFixture(async (dir) => {
+    const tp = makeTpStub(dir);
+    const history = [];
+    // Shape: not an object — array.
+    let threw = false;
+    try {
+      await pruneClaudeSurface(["not", "an", "object"], { schema_version: 1, contributions: {} }, tp, history, mkGit());
+    } catch (_e) { threw = true; }
+    assertTrue("CS-PR-3: did NOT throw on malformed prev", !threw);
+    const warnings = history.filter((h) => h.event === "warning" && h.step === "claude_surface_prune_malformed_prev");
+    assertEq("CS-PR-3: warning event recorded", warnings.length, 1);
+
+    // Second flavor: object missing contributions field.
+    const history2 = [];
+    await pruneClaudeSurface({ schema_version: 1 }, { schema_version: 1, contributions: {} }, tp, history2, mkGit());
+    const warnings2 = history2.filter((h) => h.event === "warning" && h.step === "claude_surface_prune_malformed_prev");
+    assertEq("CS-PR-3: warning event for missing contributions", warnings2.length, 1);
+  });
+}
+
+// ============================================================
+// CS-SH-1: .claude/commands.local/foo.md overrides .claude/commands/foo.md
+// ============================================================
+async function caseCSSH1CommandShadow() {
+  console.log("\n--- Case CS-SH-1: commands.local/foo.md overwrites canonical ---");
+  await withTempFixture(async (dir) => {
+    fs.mkdirSync(path.join(dir, ".claude/commands"), { recursive: true });
+    fs.mkdirSync(path.join(dir, ".claude/commands.local"), { recursive: true });
+    fs.writeFileSync(path.join(dir, ".claude/commands/foo.md"), "# CANONICAL\n");
+    fs.writeFileSync(path.join(dir, ".claude/commands.local/foo.md"), "# LOCAL OVERRIDE\n");
+
+    const tp = makeTpStub(dir);
+    const history = [];
+    await applyLocalShadows(tp, history, mkGit());
+
+    const body = fs.readFileSync(path.join(dir, ".claude/commands/foo.md"), "utf8");
+    assertEq("CS-SH-1: canonical replaced with local content", body, "# LOCAL OVERRIDE\n");
+    const evts = history.filter((h) => h.event === "claude_local_shadow");
+    assertEq("CS-SH-1: one shadow event recorded", evts.length, 1);
+    assertEq("CS-SH-1: event kind is command", evts[0].kind, "command");
+    assertEq("CS-SH-1: event dest matches canonical", evts[0].dest, ".claude/commands/foo.md");
+  });
+}
+
+// ============================================================
+// CS-SH-2: nested skills.local/<bp>/<x>/SKILL.md shadows canonical
+// ============================================================
+async function caseCSSH2SkillShadow() {
+  console.log("\n--- Case CS-SH-2: skills.local/<bp>/<x>/SKILL.md overwrites canonical ---");
+  await withTempFixture(async (dir) => {
+    const canonRel = ".claude/skills/sauce/bar/SKILL.md";
+    const localRel = ".claude/skills.local/sauce/bar/SKILL.md";
+    fs.mkdirSync(path.join(dir, path.dirname(canonRel)), { recursive: true });
+    fs.mkdirSync(path.join(dir, path.dirname(localRel)), { recursive: true });
+    fs.writeFileSync(path.join(dir, canonRel), "---\nname: bar\n---\nCANONICAL BODY\n");
+    fs.writeFileSync(path.join(dir, localRel), "---\nname: bar\n---\nLOCAL BODY\n");
+
+    const tp = makeTpStub(dir);
+    const history = [];
+    await applyLocalShadows(tp, history, mkGit());
+
+    const body = fs.readFileSync(path.join(dir, canonRel), "utf8");
+    assertTrue("CS-SH-2: canonical now contains LOCAL BODY", body.includes("LOCAL BODY"));
+    assertTrue("CS-SH-2: canonical no longer contains CANONICAL BODY", !body.includes("CANONICAL BODY"));
+    const evts = history.filter((h) => h.event === "claude_local_shadow" && h.kind === "skill");
+    assertEq("CS-SH-2: one skill shadow event recorded", evts.length, 1);
+    assertEq("CS-SH-2: event dest matches canonical", evts[0].dest, canonRel);
+  });
+}
+
+// ============================================================
+// CS-SH-3: no .local/ directories → no error events, no shadow events.
+// ============================================================
+async function caseCSSH3NoLocalDirs() {
+  console.log("\n--- Case CS-SH-3: no .local/ directories → silent no-op ---");
+  await withTempFixture(async (dir) => {
+    // Vault has nothing under .claude/.
+    const tp = makeTpStub(dir);
+    const history = [];
+    await applyLocalShadows(tp, history, mkGit());
+
+    const errs = history.filter((h) => h.event === "error");
+    assertEq("CS-SH-3: no error events", errs.length, 0);
+    const shadows = history.filter((h) => h.event === "claude_local_shadow");
+    assertEq("CS-SH-3: no shadow events", shadows.length, 0);
+  });
+}
+
+// ============================================================
+// CS-SH-4: ordering check — local content replaces canonical even when
+//          materialize wrote the canonical first. We simulate materialize by
+//          writing a "canonical" string, then apply shadows; final content
+//          must equal the .local/ content.
+// ============================================================
+async function caseCSSH4OrderingMaterializeThenShadow() {
+  console.log("\n--- Case CS-SH-4: shadow OVERWRITES content written by materialize ---");
+  await withTempFixture(async (dir) => {
+    const canonRel = ".claude/commands/baz.md";
+    const localRel = ".claude/commands.local/baz.md";
+    fs.mkdirSync(path.join(dir, ".claude/commands"), { recursive: true });
+    fs.mkdirSync(path.join(dir, ".claude/commands.local"), { recursive: true });
+
+    // Step 1: simulate materializeClaudeSurface writing the canonical body.
+    fs.writeFileSync(path.join(dir, canonRel), "# CANONICAL (materialized)\n");
+    // Step 2: .local/ shadow body that should win.
+    fs.writeFileSync(path.join(dir, localRel), "# LOCAL WINS\n");
+
+    const tp = makeTpStub(dir);
+    const history = [];
+    await applyLocalShadows(tp, history, mkGit());
+
+    const finalBody = fs.readFileSync(path.join(dir, canonRel), "utf8");
+    assertEq("CS-SH-4: final canonical equals .local/ content", finalBody, "# LOCAL WINS\n");
+  });
+}
+
 async function main() {
   if (typeof aggregateClaudeSurface !== "function") {
     console.error("FATAL: aggregateClaudeSurface is not exported from install.js");
@@ -711,6 +942,14 @@ async function main() {
   }
   if (typeof materializeClaudeSurface !== "function") {
     console.error("FATAL: materializeClaudeSurface is not exported from install.js");
+    process.exit(1);
+  }
+  if (typeof pruneClaudeSurface !== "function") {
+    console.error("FATAL: pruneClaudeSurface is not exported from install.js");
+    process.exit(1);
+  }
+  if (typeof applyLocalShadows !== "function") {
+    console.error("FATAL: applyLocalShadows is not exported from install.js");
     process.exit(1);
   }
   if (typeof regenerateClaudeMd !== "function") {
@@ -737,6 +976,13 @@ async function main() {
   await caseCSMD5SeedRows();
   await caseCSMD6AlphabeticOrder();
   await caseCSMD7TableShape();
+  await caseCSPR1OwnerGone();
+  await caseCSPR2OrphanEntries();
+  await caseCSPR3MalformedPrev();
+  await caseCSSH1CommandShadow();
+  await caseCSSH2SkillShadow();
+  await caseCSSH3NoLocalDirs();
+  await caseCSSH4OrderingMaterializeThenShadow();
 
   console.log("\n========================================");
   console.log(`run-claude-surface: ${pass} passed, ${fail} failed`);

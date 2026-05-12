@@ -505,6 +505,97 @@ module.exports = async function (tp) {
       }
     }
 
+    // 6e. v0.32.0 S5 — subscription-aware prune of the claude_surface
+    // registry. Reads the prior on-disk registry, diffs against the freshly
+    // built one from step 6b, and deletes orphaned dest files. Wrapped in
+    // its own try/catch so a prune failure does NOT abort downstream steps.
+    const claudeSurfaceRegistryPath = "ranch/claude-surface-registry.json";
+    let prevClaudeSurfaceRegistry = null;
+    try {
+      if (await tp.app.vault.adapter.exists(claudeSurfaceRegistryPath)) {
+        const raw = await tp.app.vault.adapter.read(claudeSurfaceRegistryPath);
+        prevClaudeSurfaceRegistry = JSON.parse(raw);
+      }
+    } catch (e) {
+      installedNow.history.push({
+        event: "warning",
+        step: "claude_surface_prune_prev_read",
+        message: `could not read prev ${claudeSurfaceRegistryPath}: ${e.message}`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    if (claudeSurfaceState && prevClaudeSurfaceRegistry) {
+      try {
+        await pruneClaudeSurface(
+          prevClaudeSurfaceRegistry,
+          claudeSurfaceState.registry,
+          tp,
+          installedNow.history,
+          git
+        );
+      } catch (e) {
+        new Notice(`platformInstall: claude_surface prune failed — ${e.message}`, 6000);
+        installedNow.history.push({
+          event: "error",
+          step: "claude_surface_prune",
+          message: e.message,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    }
+
+    // 6f. v0.32.0 S5 — apply .claude/commands.local/ + .claude/skills.local/
+    // shadow overrides (overwrites canonical with consumer customizations).
+    // Runs AFTER 6c materialize so the canonical files are on disk and ready
+    // to be overwritten. Independent try/catch — failures don't abort the
+    // downstream registry write.
+    try {
+      await applyLocalShadows(tp, installedNow.history, git);
+    } catch (e) {
+      new Notice(`platformInstall: local shadows failed — ${e.message}`, 6000);
+      installedNow.history.push({
+        event: "error",
+        step: "claude_local_shadow",
+        message: e.message,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+
+    // 6g. v0.32.0 S5 — persist the new claude_surface registry to disk so
+    // the next install's prune step has a baseline to diff against.
+    if (claudeSurfaceState) {
+      try {
+        const registryDir = "ranch";
+        if (!(await tp.app.vault.adapter.exists(registryDir))) {
+          await tp.app.vault.adapter.mkdir(registryDir);
+        }
+        await tp.app.vault.adapter.write(
+          claudeSurfaceRegistryPath,
+          JSON.stringify(claudeSurfaceState.registry, null, 2) + "\n"
+        );
+      } catch (e) {
+        new Notice(`platformInstall: claude_surface registry write failed — ${e.message}`, 6000);
+        installedNow.history.push({
+          event: "error",
+          step: "claude_surface_registry_write",
+          message: e.message,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    }
+
     // 7. Subscription-aware pruning of ranch/nav-buttons-registry.json.
     // Removes contributions.<source> for any source that is no longer in the
     // current subscription. Self-cleaning registry — no separate uninstall
@@ -5207,6 +5298,276 @@ async function pruneInstalledLedger(tp, subscription, installedNow, git) {
   void mutated;
 }
 
+// ============================================================
+// v0.32.0 S5 — pruneClaudeSurface
+//
+// Subscription-aware diff prune for the claude_surface registry. Mirrors
+// pruneNavButtonsRegistry's C4 hardening posture: any malformed input is
+// reported via a `warning` event and the function returns cleanly — it
+// never aborts the broader install.
+//
+// Behavior:
+//   1. prevRegistry null/undefined → return (first install case).
+//   2. prevRegistry malformed (not a plain object, or missing `contributions`
+//      object) → emit { event: "warning", step: "claude_surface_prune_malformed_prev" }
+//      and return.
+//   3. Compute the per-owner diff:
+//        - Owner present in prev but absent in new → walk every file-kind
+//          entry (those with a `dest` string) and delete the dest file.
+//        - Owner present in both → compute dest-keyed set difference
+//          (prev[owner].dest \ new[owner].dest); delete the orphans.
+//      claude_md_row entries are skipped (they have no `dest`; rows are
+//      dropped from CLAUDE.md by the regen step).
+//   4. Each adapter.remove() is wrapped in its own try/catch. ENOENT (file
+//      already gone) is logged as a `warning`; other errors emit `error`.
+//      Successful deletes emit { event: "claude_surface_prune", surface_kind,
+//      dest, removed_from, ... }.
+//
+// Inputs:
+//   prevRegistry: prior on-disk registry (parsed JSON object) or null.
+//   newRegistry:  freshly-built registry from aggregateClaudeSurface.
+//   tp:           Templater stub OR test fake — anything with tp.app.vault.adapter.
+//   history:      array; events pushed onto it.
+//   git:          { commit, tag, dirty } — included on every push.
+//
+// Output: undefined.
+// ============================================================
+async function pruneClaudeSurface(prevRegistry, newRegistry, tp, history, git) {
+  if (prevRegistry === null || prevRegistry === undefined) return;
+
+  const malformed =
+    prevRegistry === null ||
+    typeof prevRegistry !== "object" ||
+    Array.isArray(prevRegistry) ||
+    !prevRegistry.contributions ||
+    typeof prevRegistry.contributions !== "object" ||
+    Array.isArray(prevRegistry.contributions);
+
+  if (malformed) {
+    if (history) {
+      history.push({
+        event: "warning",
+        step: "claude_surface_prune_malformed_prev",
+        message: "prev claude-surface-registry has unexpected shape (expected object with contributions field); skipping prune",
+        git_commit: git ? git.commit : null,
+        git_tag: git ? git.tag : null,
+        git_dirty: git ? git.dirty : null,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+
+  const prevContribs = prevRegistry.contributions || {};
+  const newContribs = (newRegistry && newRegistry.contributions) || {};
+
+  // Helper — collect the file-kind dests for an owner's contribution array.
+  // Returns Map<dest, {kind}>. claude_md_row entries (no dest) are skipped.
+  const destMap = (arr) => {
+    const m = new Map();
+    if (!Array.isArray(arr)) return m;
+    for (const entry of arr) {
+      if (!entry || typeof entry !== "object") continue;
+      if (typeof entry.dest !== "string" || entry.dest.length === 0) continue;
+      m.set(entry.dest, { kind: entry.kind });
+    }
+    return m;
+  };
+
+  // Helper — delete a single dest with full hardening.
+  const tryDelete = async (dest, surfaceKind, owner) => {
+    try {
+      const exists = await adapter.exists(dest);
+      if (!exists) {
+        if (history) {
+          history.push({
+            event: "warning",
+            step: "claude_surface_prune",
+            surface_kind: surfaceKind,
+            dest,
+            removed_from: owner,
+            message: "file already absent at delete time",
+            git_commit: git ? git.commit : null,
+            git_tag: git ? git.tag : null,
+            git_dirty: git ? git.dirty : null,
+            attempted_at: new Date().toISOString(),
+          });
+        }
+        return;
+      }
+      await adapter.remove(dest);
+      if (history) {
+        history.push({
+          event: "claude_surface_prune",
+          step: "claude_surface_prune",
+          surface_kind: surfaceKind,
+          dest,
+          removed_from: owner,
+          git_commit: git ? git.commit : null,
+          git_tag: git ? git.tag : null,
+          git_dirty: git ? git.dirty : null,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    } catch (e) {
+      if (history) {
+        history.push({
+          event: "warning",
+          step: "claude_surface_prune",
+          surface_kind: surfaceKind,
+          dest,
+          removed_from: owner,
+          message: `delete failed: ${e.message}`,
+          git_commit: git ? git.commit : null,
+          git_tag: git ? git.tag : null,
+          git_dirty: git ? git.dirty : null,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    }
+  };
+
+  for (const owner of Object.keys(prevContribs)) {
+    const prevDests = destMap(prevContribs[owner]);
+    const newDests = destMap(newContribs[owner]);
+    for (const [dest, info] of prevDests) {
+      if (!newDests.has(dest)) {
+        await tryDelete(dest, info.kind, owner);
+      }
+    }
+  }
+}
+
+// ============================================================
+// v0.32.0 S5 — applyLocalShadows
+//
+// Consumer override seam. Walks `.claude/commands.local/**` and
+// `.claude/skills.local/**` for `.md` files; for each, reads the body and
+// OVERWRITES the parallel canonical path under `.claude/commands/` or
+// `.claude/skills/`. Bodies are copied verbatim — no substitution — because
+// .local/ is raw consumer content.
+//
+// Posture:
+//   - Step runs AFTER materializeClaudeSurface in install.js (step 6f),
+//     so canonical files are already on disk when shadows are applied.
+//   - Missing .local/ directories → silent (first-install case).
+//   - Adapter errors during walk or write → `error` event with step
+//     "claude_local_shadow"; loop continues.
+//   - Successful overwrites → `claude_local_shadow` event per file.
+//
+// Inputs:
+//   tp:      Templater stub OR test fake — tp.app.vault.adapter.{exists,list,read,write,mkdir}.
+//   history: array; events pushed onto it.
+//   git:     { commit, tag, dirty } — included on every push.
+//
+// Output: undefined.
+// ============================================================
+async function applyLocalShadows(tp, history, git) {
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+
+  // Recursive walk via adapter.list() — returns { files, folders } of
+  // vault-relative path strings. Builds a flat string[] of every file path
+  // beneath `rootRel`.
+  async function walkFiles(rootRel) {
+    const out = [];
+    const stack = [rootRel];
+    while (stack.length > 0) {
+      const cur = stack.pop();
+      let listing;
+      try {
+        listing = await adapter.list(cur);
+      } catch (e) {
+        // Treat list-failures on subdirs as walk errors (the root-exists
+        // check is upstream, so this should be rare).
+        if (history) {
+          history.push({
+            event: "error",
+            step: "claude_local_shadow",
+            message: `list failed for ${cur}: ${e.message}`,
+            git_commit: git ? git.commit : null,
+            git_tag: git ? git.tag : null,
+            git_dirty: git ? git.dirty : null,
+            attempted_at: new Date().toISOString(),
+          });
+        }
+        continue;
+      }
+      for (const f of listing.files || []) out.push(f);
+      for (const d of listing.folders || []) stack.push(d);
+    }
+    return out;
+  }
+
+  const shadowRoots = [
+    { localRoot: ".claude/commands.local", canonRoot: ".claude/commands", kind: "command" },
+    { localRoot: ".claude/skills.local", canonRoot: ".claude/skills", kind: "skill" },
+  ];
+
+  for (const { localRoot, canonRoot, kind } of shadowRoots) {
+    try {
+      if (!(await adapter.exists(localRoot))) continue;
+      const files = await walkFiles(localRoot);
+      for (const srcPath of files) {
+        try {
+          if (!srcPath.endsWith(".md")) continue;
+          // Compute canonical = srcPath with localRoot/ → canonRoot/.
+          const canonDest = canonRoot + srcPath.substring(localRoot.length);
+          const content = await adapter.read(srcPath);
+          const canonDir = canonDest.includes("/") ? canonDest.substring(0, canonDest.lastIndexOf("/")) : "";
+          if (canonDir && !(await adapter.exists(canonDir))) {
+            await adapter.mkdir(canonDir);
+          }
+          await adapter.write(canonDest, content);
+          if (history) {
+            history.push({
+              event: "claude_local_shadow",
+              step: "claude_local_shadow",
+              kind,
+              dest: canonDest,
+              source: srcPath,
+              git_commit: git ? git.commit : null,
+              git_tag: git ? git.tag : null,
+              git_dirty: git ? git.dirty : null,
+              attempted_at: new Date().toISOString(),
+            });
+          }
+        } catch (e) {
+          if (history) {
+            history.push({
+              event: "error",
+              step: "claude_local_shadow",
+              kind,
+              source: srcPath,
+              message: e.message,
+              git_commit: git ? git.commit : null,
+              git_tag: git ? git.tag : null,
+              git_dirty: git ? git.dirty : null,
+              attempted_at: new Date().toISOString(),
+            });
+          }
+        }
+      }
+    } catch (e) {
+      if (history) {
+        history.push({
+          event: "error",
+          step: "claude_local_shadow",
+          kind,
+          message: `shadow walk failed for ${localRoot}: ${e.message}`,
+          git_commit: git ? git.commit : null,
+          git_tag: git ? git.tag : null,
+          git_dirty: git ? git.dirty : null,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    }
+  }
+}
+
 async function enableSnippet(tp, snippet, approvalRequired, sourceName, history, git) {
   const adapter = tp.app.vault.adapter;
   const path = ".obsidian/appearance.json";
@@ -5289,6 +5650,10 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     // v0.32.0 S3 — expose materializeClaudeSurface for run-claude-surface.js
     // (CS-MAT-1..5) + run-helper-cases.js (M-CS-1..3). Pure additive.
     module.exports.materializeClaudeSurface = materializeClaudeSurface;
+    // v0.32.0 S5 — expose pruneClaudeSurface + applyLocalShadows for
+    // run-claude-surface.js (CS-PR-1..3, CS-SH-1..4). Pure additive.
+    module.exports.pruneClaudeSurface = pruneClaudeSurface;
+    module.exports.applyLocalShadows = applyLocalShadows;
     //
     // CF-2: by default, capture run-install.js's stdio (Phase B/C surfaced
     // 2200-line JSON dumps mixed into the user's terminal). We tee the
