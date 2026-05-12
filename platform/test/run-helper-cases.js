@@ -2261,6 +2261,103 @@ async function caseR6OpenLinkTargetSubstitution() {
   }
 }
 
+// v0.31.0 S3.2 — nav-buttons@2.6.0: invoke_command.args literal passthrough.
+async function caseHCNBArgs1InvokeCommandArgs() {
+  console.log("\n--- Case HC-NB-ARGS-1: validateAndResolve invoke_command optional args (valid / absent / malformed) ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseHCNBARGS1-"));
+  try {
+    await scaffoldBlueprintVault(scratch, [
+      {
+        name: "test-fixture-nbargs",
+        version: "0.1.0",
+        manifest: {
+          name: "test-fixture-nbargs",
+          version: "0.1.0",
+          kind: "blueprint",
+          module_directory: "cowork",
+          files: [],
+          nav_buttons: [
+            {
+              id: "cowork-bootstrap-accuris",
+              label: "Bootstrap (accuris)",
+              icon: "plus",
+              order: 10,
+              action: {
+                type: "invoke_command",
+                command_id: "cowork:bootstrap-vault",
+                args: { engagement_id: "accuris" },
+              },
+            },
+            {
+              id: "cowork-bootstrap-no-args",
+              label: "Bootstrap (no args)",
+              icon: "plus",
+              order: 11,
+              action: {
+                type: "invoke_command",
+                command_id: "cowork:bootstrap-vault",
+              },
+            },
+            {
+              id: "cowork-bootstrap-malformed",
+              label: "Bootstrap (malformed)",
+              icon: "plus",
+              order: 12,
+              action: {
+                type: "invoke_command",
+                command_id: "cowork:bootstrap-vault",
+                args: { nested: { not: "a string" } },
+              },
+            },
+          ],
+        },
+      },
+    ]);
+
+    const result = await runHarness(scratch);
+    assertTrue("HC-NB-ARGS-1: platform-installed.json written (install proceeded)", result !== null);
+
+    const registry = await readJson(path.join(scratch, "ranch/nav-buttons-registry.json"));
+    const contribs = registry.contributions["test-fixture-nbargs"];
+    assertTrue("HC-NB-ARGS-1: registry has contributions for test-fixture-nbargs", Array.isArray(contribs) && contribs.length === 3);
+
+    // (1) Valid args → object passes through unchanged.
+    const validContrib = contribs.find((c) => c.id === "cowork-bootstrap-accuris");
+    assertTrue("HC-NB-ARGS-1: valid-args entry present in registry", !!validContrib);
+    assertEq(
+      "HC-NB-ARGS-1: valid args.engagement_id preserved verbatim (no substitution)",
+      validContrib && validContrib.action && validContrib.action.args && validContrib.action.args.engagement_id,
+      "accuris"
+    );
+
+    // (2) Missing args → entry has no `args` key (NOT undefined; key omitted).
+    const noArgsContrib = contribs.find((c) => c.id === "cowork-bootstrap-no-args");
+    assertTrue("HC-NB-ARGS-1: no-args entry present in registry", !!noArgsContrib);
+    assertTrue(
+      "HC-NB-ARGS-1: no-args entry has no `args` key (key omitted, not set to undefined)",
+      noArgsContrib && noArgsContrib.action && !Object.prototype.hasOwnProperty.call(noArgsContrib.action, "args")
+    );
+
+    // (3) Malformed args → args dropped, install proceeds, history records warning.
+    const malformedContrib = contribs.find((c) => c.id === "cowork-bootstrap-malformed");
+    assertTrue("HC-NB-ARGS-1: malformed-args entry still present in registry (install proceeded)", !!malformedContrib);
+    assertTrue(
+      "HC-NB-ARGS-1: malformed args were dropped from the resolved entry",
+      malformedContrib && malformedContrib.action && !Object.prototype.hasOwnProperty.call(malformedContrib.action, "args")
+    );
+    const malformedWarnings = (result && result.history || []).filter(
+      (h) => h.event === "warning" && h.step === "nav_buttons" && h.name === "test-fixture-nbargs"
+            && typeof h.reason === "string" && h.reason.includes("cowork-bootstrap-malformed")
+    );
+    assertTrue(
+      "HC-NB-ARGS-1: history records a warning naming the malformed entry",
+      malformedWarnings.length >= 1
+    );
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
 async function case4BackupOnEdit() {
   console.log("\n--- Case 4: backup-on-edit ---");
   const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-case4-"));
@@ -4114,6 +4211,9 @@ async function caseHCMS5InvalidEntrySkippedWithWarning() {
   await caseR4MissingFolderPrefix();
   await caseR5InvokeCommandPassthrough();
   await caseR6OpenLinkTargetSubstitution();
+
+  // v0.31.0 S3.2 — nav-buttons@2.6.0: invoke_command.args literal passthrough.
+  await caseHCNBArgs1InvokeCommandArgs();
 
   // v0.19.0 styling cycle — TDD-first cases for applyVendoredThemes / applyAppearance / applyStyleSettings.
   await caseVT1FreshWriteToEmptyConsumer();

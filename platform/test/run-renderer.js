@@ -488,6 +488,92 @@ async function testUnknownAction() {
   });
 }
 
+// R-INVOKE-ARGS — invoke_command action with args object dispatches and writes scratchpad.
+//
+// v0.31.0 S3.2 / nav-buttons@2.6.0: when action.args is a valid {[string]:string}
+// map, the renderer (1) writes <vault>/.scratch/nav-button-pending-args.json
+// containing {command_id, args, dispatched_at}, AND (2) calls
+// app.commands.executeCommandById(command_id, args). When args is absent, only
+// (2) fires with a single arg.
+async function testInvokeCommandArgs() {
+  console.log('\n=== R-INVOKE-ARGS — invoke_command with args writes scratchpad + dispatches command (v2.6.0) ===');
+  reset();
+  const synthetic = JSON.stringify({
+    schema_version: 1,
+    contributions: {
+      cowork: [
+        {
+          id: 'cowork-bootstrap-accuris',
+          label: 'Bootstrap',
+          icon: 'plus',
+          order: 50,
+          action: {
+            type: 'invoke_command',
+            command_id: 'cowork:bootstrap-vault',
+            args: { engagement_id: 'accuris' },
+          },
+        },
+      ],
+    },
+  });
+  return await withTempRegistry(synthetic, async () => {
+    const app = makeApp();
+    // Stub commands surface used by the renderer.
+    const dispatched = [];
+    app.commands = {
+      commands: { 'cowork:bootstrap-vault': { id: 'cowork:bootstrap-vault' } },
+      executeCommandById(id, args) { dispatched.push({ id, args }); },
+    };
+    // Stub adapter.mkdir (renderer calls it to ensure .scratch exists).
+    app.vault.adapter.mkdir = async function (_p) { /* capture-only via writes */ };
+
+    const Cls = loadRendererClass(app, FakeNotice);
+    const dv = makeDv();
+    const sn = new Cls();
+    await sn.render(dv);
+    const btn = findButtonByLabel(dv.container, 'Bootstrap');
+    if (!btn) {
+      console.log('  FAIL — Bootstrap button not rendered');
+      return false;
+    }
+    await btn.onclick();
+
+    const writes = app.__captured_writes.filter(
+      (w) => w.method === 'adapter.write' && w.path === '.scratch/nav-button-pending-args.json'
+    );
+    const scratchOk = writes.length === 1;
+    let scratchPayloadOk = false;
+    if (scratchOk) {
+      try {
+        const parsed = JSON.parse(writes[0].body);
+        scratchPayloadOk =
+          parsed.command_id === 'cowork:bootstrap-vault' &&
+          parsed.args &&
+          parsed.args.engagement_id === 'accuris' &&
+          typeof parsed.dispatched_at === 'string';
+      } catch (_) {
+        scratchPayloadOk = false;
+      }
+    }
+    const dispatchedOk =
+      dispatched.length === 1 &&
+      dispatched[0].id === 'cowork:bootstrap-vault' &&
+      dispatched[0].args &&
+      dispatched[0].args.engagement_id === 'accuris';
+    const noticesOk = captured_notices.length === 0;
+
+    console.log(`  scratchpad writes: ${writes.length} (expect 1)`);
+    console.log(`  scratchpad payload valid: ${scratchPayloadOk}`);
+    console.log(`  command dispatches: ${dispatched.length} (expect 1)`);
+    console.log(`  dispatched args.engagement_id: ${dispatched[0] && dispatched[0].args && dispatched[0].args.engagement_id}`);
+    console.log(`  notices: ${captured_notices.length} (expect 0)`);
+
+    const pass = scratchOk && scratchPayloadOk && dispatchedOk && noticesOk;
+    console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+    return pass;
+  });
+}
+
 // T4.0 — lazy-scaffold dispatch via createFromTemplate.
 //
 // Synthetic registry with a Board entry whose template_source points at the
@@ -1344,6 +1430,7 @@ async function testFF3HubAreaRowIcons() {
     if (which === 'empty' || which === 'all') results.push(['T2.5 empty', await testEmpty()]);
     if (which === 'malformed' || which === 'all') results.push(['T2.6 malformed', await testMalformed()]);
     if (which === 'unknown-action' || which === 'all') results.push(['T2.7 unknown-action', await testUnknownAction()]);
+    if (which === 'invoke-command-args' || which === 'all') results.push(['R-INVOKE-ARGS invoke-command-args', await testInvokeCommandArgs()]);
     if (which === 'lazy-scaffold' || which === 'all') results.push(['T4.0 lazy-scaffold', await testLazyScaffold()]);
     if (which === 'beacon-cards' || which === 'all') {
       results.push(['BC1 subtitle-object', await testBC1SubtitleObject()]);

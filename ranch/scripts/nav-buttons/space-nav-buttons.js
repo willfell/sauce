@@ -14,7 +14,7 @@
  *     - v2.5.0: action date is sourced from the active file's basename if it matches /(\d{4}-\d{2}-\d{2})/
  *       AND parses as a valid ISO date; falls back to today otherwise. Lets users prepare future-dated
  *       to-do/meetings/journal files by clicking nav buttons on a future-dated daily note.
- *   - invoke_command       { command_id }       (v2.3.0)
+ *   - invoke_command       { command_id, args? } (v2.3.0; v2.6.0 adds optional args: {[k:string]:string})
  *
  * v2.3.0 also adds a top arrow row for daily-nav (prev/next-day with
  * skip-to-nearest-existing + grey-out) when daily blueprint installed.
@@ -390,7 +390,42 @@ class SpaceNavButtons {
         new Notice(`nav-buttons: command not found "${action.command_id}" (from ${btn._source})`, 8000);
         return;
       }
-      app.commands.executeCommandById(action.command_id);
+      // v2.6.0: optional args object (string→string map). Validate shape; on
+      // malformed, fall back to no-args dispatch (do NOT throw). On valid args,
+      // best-effort dual-write: (1) JSON scratchpad at <vault>/.scratch/nav-button-pending-args.json
+      // since Obsidian's current executeCommandById ignores extra args; (2) pass
+      // args as second arg to executeCommandById for future-proofing.
+      let argsToDispatch = null;
+      if (action.args !== undefined && action.args !== null) {
+        const isPlainObject = typeof action.args === "object" && !Array.isArray(action.args);
+        const allStringValues = isPlainObject
+          && Object.values(action.args).every((v) => typeof v === "string");
+        if (isPlainObject && allStringValues && Object.keys(action.args).length > 0) {
+          argsToDispatch = action.args;
+        } else if (isPlainObject && Object.keys(action.args).length === 0) {
+          // empty object → behave like no args (no scratchpad write)
+          argsToDispatch = null;
+        } else {
+          new Notice(`nav-button invoke_command: invalid args shape, dispatching without args`, 8000);
+          argsToDispatch = null;
+        }
+      }
+      if (argsToDispatch) {
+        try {
+          await app.vault.adapter.mkdir(".scratch").catch(() => {});
+          const payload = JSON.stringify({
+            command_id: action.command_id,
+            args: argsToDispatch,
+            dispatched_at: new Date().toISOString(),
+          }, null, 2);
+          await app.vault.adapter.write(".scratch/nav-button-pending-args.json", payload);
+        } catch (e) {
+          // Best-effort; do not block command dispatch on scratchpad failure.
+        }
+        app.commands.executeCommandById(action.command_id, argsToDispatch);
+      } else {
+        app.commands.executeCommandById(action.command_id);
+      }
       return;
     }
 

@@ -1127,7 +1127,34 @@ function validateAndResolve(btn, sourceName, variables, history, git) {
     };
   }
   if (btn.action.type === "invoke_command" && btn.action.command_id) {
-    return btn;  // passthrough; command_id preserved literally for runtime dispatch
+    // v0.31.0 / nav-buttons@2.6.0: optional args object (string→string map).
+    // Literal passthrough — values are user-authored at manifest time and reach
+    // the renderer as-typed (NO substituteLenient). Malformed args (non-object
+    // or non-string values) are dropped with a history warning; install proceeds.
+    if (btn.action.args === undefined || btn.action.args === null) {
+      return btn;  // passthrough; command_id preserved literally for runtime dispatch
+    }
+    const isPlainObject = typeof btn.action.args === "object" && !Array.isArray(btn.action.args);
+    const allStringValues = isPlainObject
+      && Object.values(btn.action.args).every((v) => typeof v === "string");
+    if (!isPlainObject || !allStringValues) {
+      new Notice(`nav-buttons: invoke_command args malformed in ${sourceName} (entry ${btn.id}); dropping args`, 8000);
+      if (history) {
+        history.push({
+          event: "warning",
+          step: "nav_buttons",
+          name: sourceName,
+          reason: `entry ${btn.id} invoke_command args malformed (must be {[string]: string}); dropped`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      const { args: _drop, ...restAction } = btn.action;
+      return { ...btn, action: restAction };
+    }
+    return btn;  // valid args: literal passthrough (no substitution)
   }
   return btn;
 }
