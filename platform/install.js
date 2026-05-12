@@ -207,6 +207,138 @@ module.exports = async function (tp) {
       }
     }
 
+    // 3b. validate claude_surface[] on every item manifest (v0.32.0 S1.1).
+    //
+    // Both blueprints AND mechanisms may declare a `claude_surface[]` field
+    // that enumerates contributions to the Claude agent surface (slash
+    // commands, SKILL.md bodies, CLAUDE.md rows, operator context docs).
+    // The materializer + registry come in S2-S5; S1 is purely additive
+    // validation — error events surface in history but never abort install
+    // or skip the offending item.
+    //
+    // Schema:
+    //   manifest.claude_surface (optional) — if present, MUST be an array.
+    //   Each entry MUST have a `kind` in {command, skill, context_doc,
+    //   claude_md_row} and the kind-specific required fields:
+    //     - command       : { source: string, dest: string }
+    //     - skill         : { source: string, dest: string }   (dest may contain {{skills_dir}})
+    //     - context_doc   : { source: string, dest: string }   (dest may contain {{module_directory}})
+    //     - claude_md_row : { table: "directory-map"|"resolvers"|"skills-index", row: object }
+    //
+    // Posture mirrors the module_directory validation pass: failure-loud
+    // Notice + full git fields on every history push + attempted_at. Defensive
+    // try/catch so a thrown validation never aborts the broader install.
+    const VALID_CLAUDE_SURFACE_KINDS = new Set(["command", "skill", "context_doc", "claude_md_row"]);
+    const VALID_CLAUDE_MD_TABLES = new Set(["directory-map", "resolvers", "skills-index"]);
+    for (const [name, node] of nodes) {
+      const itemMan = perItemManifest.get(name);
+      if (!itemMan) continue;
+      if (!("claude_surface" in itemMan)) continue;
+      try {
+        const cs = itemMan.claude_surface;
+        if (!Array.isArray(cs)) {
+          new Notice(`platformInstall: ${name} claude_surface must be an array; skipping field.`, 8000);
+          installedNow.history.push({
+            event: "error",
+            step: "claude_surface_invalid",
+            name,
+            message: `${name} manifest.claude_surface must be an array (got ${typeof cs})`,
+            git_commit: git.commit,
+            git_tag: git.tag,
+            git_dirty: git.dirty,
+            attempted_at: new Date().toISOString(),
+          });
+          continue;
+        }
+        for (let i = 0; i < cs.length; i++) {
+          const entry = cs[i];
+          if (!entry || typeof entry !== "object") {
+            installedNow.history.push({
+              event: "error",
+              step: "claude_surface_invalid",
+              name,
+              index: i,
+              message: `${name} claude_surface[${i}] is not an object`,
+              git_commit: git.commit,
+              git_tag: git.tag,
+              git_dirty: git.dirty,
+              attempted_at: new Date().toISOString(),
+            });
+            continue;
+          }
+          const kind = entry.kind;
+          if (typeof kind !== "string" || !VALID_CLAUDE_SURFACE_KINDS.has(kind)) {
+            new Notice(`platformInstall: ${name} claude_surface[${i}] has unknown kind "${kind}".`, 6000);
+            installedNow.history.push({
+              event: "error",
+              step: "claude_surface_invalid",
+              name,
+              index: i,
+              kind,
+              message: `${name} claude_surface[${i}] has invalid kind "${kind}" (must be one of: command, skill, context_doc, claude_md_row)`,
+              git_commit: git.commit,
+              git_tag: git.tag,
+              git_dirty: git.dirty,
+              attempted_at: new Date().toISOString(),
+            });
+            continue;
+          }
+          if (kind === "command" || kind === "skill" || kind === "context_doc") {
+            const missing = [];
+            if (typeof entry.source !== "string" || entry.source.length === 0) missing.push("source");
+            if (typeof entry.dest !== "string" || entry.dest.length === 0) missing.push("dest");
+            if (missing.length > 0) {
+              installedNow.history.push({
+                event: "error",
+                step: "claude_surface_invalid",
+                name,
+                index: i,
+                kind,
+                message: `${name} claude_surface[${i}] kind=${kind} missing required field(s): ${missing.join(", ")}`,
+                git_commit: git.commit,
+                git_tag: git.tag,
+                git_dirty: git.dirty,
+                attempted_at: new Date().toISOString(),
+              });
+            }
+          } else if (kind === "claude_md_row") {
+            const missing = [];
+            if (typeof entry.table !== "string" || !VALID_CLAUDE_MD_TABLES.has(entry.table)) {
+              missing.push(`table (must be one of: directory-map, resolvers, skills-index)`);
+            }
+            if (!entry.row || typeof entry.row !== "object" || Array.isArray(entry.row)) {
+              missing.push("row (must be object)");
+            }
+            if (missing.length > 0) {
+              installedNow.history.push({
+                event: "error",
+                step: "claude_surface_invalid",
+                name,
+                index: i,
+                kind,
+                message: `${name} claude_surface[${i}] kind=claude_md_row missing/invalid field(s): ${missing.join("; ")}`,
+                git_commit: git.commit,
+                git_tag: git.tag,
+                git_dirty: git.dirty,
+                attempted_at: new Date().toISOString(),
+              });
+            }
+          }
+        }
+      } catch (e) {
+        installedNow.history.push({
+          event: "warning",
+          step: "claude_surface_validation",
+          name,
+          message: `claude_surface validation threw: ${e.message}`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    }
+
     // 4. topo sort
     const { order, cycle } = topoSort(nodes);
     if (cycle) {
@@ -253,14 +385,18 @@ module.exports = async function (tp) {
         let itemVars = variables;
         if (node.target.kind === "blueprint") {
           itemVars = { ...variables, module_directory: `spice/${itemMan.module_directory}` };
-          // v0.30.0 — overlay skills_dir for blueprints that ship native Claude
-          // Code skills via the new manifest.skills[] field. Pattern mirrors
-          // module_directory overlay above; mechanisms never receive
-          // skills_dir, so substituteStrict would fail loud on any mechanism
-          // body that misuses the variable.
-          if (typeof itemMan.skills_dir === "string" && itemMan.skills_dir.length > 0) {
-            itemVars.skills_dir = itemMan.skills_dir;
+        }
+        // v0.32.0 S1.2 — overlay skills_dir for ANY item (blueprint or
+        // mechanism) that declares a non-empty skills_dir field. Generalized
+        // from v0.30.0's blueprint-only form so mechanisms shipping Claude
+        // Code skills via the new claude_surface[] manifest field can also
+        // substitute {{skills_dir}} in their file destinations. The
+        // module_directory overlay above remains blueprint-only.
+        if (typeof itemMan.skills_dir === "string" && itemMan.skills_dir.length > 0) {
+          if (itemVars === variables) {
+            itemVars = { ...variables };
           }
+          itemVars.skills_dir = itemMan.skills_dir;
         }
         const ok = await installItem(tp, workshopPath, node.target, itemMan, itemVars, installedNow.history, git);
         if (ok) {

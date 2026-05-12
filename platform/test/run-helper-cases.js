@@ -4175,6 +4175,221 @@ async function caseHCMS5InvalidEntrySkippedWithWarning() {
   });
 }
 
+// ============================================================
+// v0.32.0 S1.3 — claude_surface[] manifest validation + skills_dir
+// substitution overlay generalized to mechanisms.
+// HC-CS-1..4 — each valid claude_surface[] entry kind passes (no error event)
+// HC-CS-5   — entry with unknown kind="bogus" fails (error event recorded)
+// HC-SD-1   — mechanism with skills_dir field receives the variable in
+//             substitution context (today only blueprints did).
+// ============================================================
+
+async function caseHCCS1ValidCommand() {
+  console.log("\n--- Case HC-CS-1: claude_surface[] entry kind=command passes validation ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-hc-cs-1-"));
+  try {
+    await scaffoldBlueprintVault(scratch, [
+      {
+        name: "test-fixture-cs1",
+        version: "0.1.0",
+        manifest: {
+          name: "test-fixture-cs1",
+          version: "0.1.0",
+          kind: "blueprint",
+          module_directory: "cs1",
+          claude_surface: [
+            { kind: "command", source: "commands/foo.md", dest: ".claude/commands/foo.md" }
+          ],
+          files: []
+        }
+      }
+    ]);
+    const result = await runHarness(scratch);
+    assertTrue("HC-CS-1: platform-installed.json was written", result !== null);
+    const errs = (result && result.history || []).filter(
+      (h) => h.event === "error" && h.step === "claude_surface_invalid" && h.name === "test-fixture-cs1"
+    );
+    assertEq("HC-CS-1: NO claude_surface_invalid error event for valid command entry", errs.length, 0);
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseHCCS2ValidSkill() {
+  console.log("\n--- Case HC-CS-2: claude_surface[] entry kind=skill passes validation ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-hc-cs-2-"));
+  try {
+    await scaffoldBlueprintVault(scratch, [
+      {
+        name: "test-fixture-cs2",
+        version: "0.1.0",
+        manifest: {
+          name: "test-fixture-cs2",
+          version: "0.1.0",
+          kind: "blueprint",
+          module_directory: "cs2",
+          claude_surface: [
+            { kind: "skill", source: "skills/foo/SKILL.md", dest: "{{skills_dir}}/foo/SKILL.md" }
+          ],
+          files: []
+        }
+      }
+    ]);
+    const result = await runHarness(scratch);
+    assertTrue("HC-CS-2: platform-installed.json was written", result !== null);
+    const errs = (result && result.history || []).filter(
+      (h) => h.event === "error" && h.step === "claude_surface_invalid" && h.name === "test-fixture-cs2"
+    );
+    assertEq("HC-CS-2: NO claude_surface_invalid error event for valid skill entry", errs.length, 0);
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseHCCS3ValidContextDoc() {
+  console.log("\n--- Case HC-CS-3: claude_surface[] entry kind=context_doc passes validation ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-hc-cs-3-"));
+  try {
+    await scaffoldBlueprintVault(scratch, [
+      {
+        name: "test-fixture-cs3",
+        version: "0.1.0",
+        manifest: {
+          name: "test-fixture-cs3",
+          version: "0.1.0",
+          kind: "blueprint",
+          module_directory: "cs3",
+          claude_surface: [
+            { kind: "context_doc", source: "docs/operator.md", dest: "{{module_directory}}/operator.md" }
+          ],
+          files: []
+        }
+      }
+    ]);
+    const result = await runHarness(scratch);
+    assertTrue("HC-CS-3: platform-installed.json was written", result !== null);
+    const errs = (result && result.history || []).filter(
+      (h) => h.event === "error" && h.step === "claude_surface_invalid" && h.name === "test-fixture-cs3"
+    );
+    assertEq("HC-CS-3: NO claude_surface_invalid error event for valid context_doc entry", errs.length, 0);
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseHCCS4ValidClaudeMdRow() {
+  console.log("\n--- Case HC-CS-4: claude_surface[] entry kind=claude_md_row passes validation ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-hc-cs-4-"));
+  try {
+    await scaffoldBlueprintVault(scratch, [
+      {
+        name: "test-fixture-cs4",
+        version: "0.1.0",
+        manifest: {
+          name: "test-fixture-cs4",
+          version: "0.1.0",
+          kind: "blueprint",
+          module_directory: "cs4",
+          claude_surface: [
+            { kind: "claude_md_row", table: "resolvers", row: { trigger: "foo", skill: "foo:bar" } }
+          ],
+          files: []
+        }
+      }
+    ]);
+    const result = await runHarness(scratch);
+    assertTrue("HC-CS-4: platform-installed.json was written", result !== null);
+    const errs = (result && result.history || []).filter(
+      (h) => h.event === "error" && h.step === "claude_surface_invalid" && h.name === "test-fixture-cs4"
+    );
+    assertEq("HC-CS-4: NO claude_surface_invalid error event for valid claude_md_row entry", errs.length, 0);
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseHCCS5UnknownKindFails() {
+  console.log("\n--- Case HC-CS-5: claude_surface[] entry with unknown kind=\"bogus\" fails validation ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-hc-cs-5-"));
+  try {
+    await scaffoldBlueprintVault(scratch, [
+      {
+        name: "test-fixture-cs5",
+        version: "0.1.0",
+        manifest: {
+          name: "test-fixture-cs5",
+          version: "0.1.0",
+          kind: "blueprint",
+          module_directory: "cs5",
+          claude_surface: [
+            { kind: "bogus", source: "x", dest: "y" }
+          ],
+          files: []
+        }
+      }
+    ]);
+    const result = await runHarness(scratch);
+    assertTrue("HC-CS-5: platform-installed.json was written", result !== null);
+    const errs = (result && result.history || []).filter(
+      (h) => h.event === "error" && h.step === "claude_surface_invalid" && h.name === "test-fixture-cs5"
+    );
+    assertEq("HC-CS-5: exactly one claude_surface_invalid error event", errs.length, 1);
+    if (errs.length === 1) {
+      const e = errs[0];
+      assertTrue("HC-CS-5: error event has git_commit field", "git_commit" in e);
+      assertTrue("HC-CS-5: error event has git_tag field", "git_tag" in e);
+      assertTrue("HC-CS-5: error event has git_dirty field", "git_dirty" in e);
+      assertTrue("HC-CS-5: error event has attempted_at field", typeof e.attempted_at === "string");
+      assertTrue("HC-CS-5: error message references bogus kind", typeof e.message === "string" && e.message.includes("bogus"));
+    }
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseHCSD1MechanismReceivesSkillsDir() {
+  console.log("\n--- Case HC-SD-1: mechanism with skills_dir field receives the variable in substitution context ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-hc-sd-1-"));
+  try {
+    await scaffoldBlueprintVault(scratch, [], {
+      extraMechanisms: [
+        {
+          name: "test-fixture-mech-skills",
+          version: "0.1.0",
+          manifest: {
+            name: "test-fixture-mech-skills",
+            version: "0.1.0",
+            skills_dir: ".claude/skills/mech-test",
+            files: [{ source: "content/probe.md", dest: "{{scripts_path}}/probe.md" }]
+          },
+          sourceFiles: [
+            { relPath: "content/probe.md", body: "skills dir is {{skills_dir}}\n" }
+          ]
+        }
+      ]
+    });
+    const result = await runHarness(scratch);
+    assertTrue("HC-SD-1: platform-installed.json was written", result !== null);
+
+    const installedMech = (result && result.mechanisms || []).find((m) => m.name === "test-fixture-mech-skills");
+    assertTrue("HC-SD-1: mechanism installed", installedMech !== undefined && installedMech.version === "0.1.0");
+
+    const destAbs = path.join(scratch, "ranch/scripts/probe.md");
+    assertTrue("HC-SD-1: mechanism dest file exists", fs.existsSync(destAbs));
+
+    if (fs.existsSync(destAbs)) {
+      const body = await readRaw(destAbs);
+      assertTrue(
+        "HC-SD-1: mechanism body has substituted .claude/skills/mech-test (NOT literal {{skills_dir}})",
+        body.includes(".claude/skills/mech-test") && !body.includes("{{skills_dir}}"),
+        `body was: ${body.trim()}`
+      );
+    }
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -4282,6 +4497,15 @@ async function caseHCMS5InvalidEntrySkippedWithWarning() {
   // v0.31.0 S2.6 — validator predicate additions (min_length + items_schema).
   await caseHCPR1MinLength();
   await caseHCPR2ItemsSchema();
+
+  // v0.32.0 S1.3 — claude_surface[] manifest validation + skills_dir
+  // substitution overlay generalized to mechanisms.
+  await caseHCCS1ValidCommand();
+  await caseHCCS2ValidSkill();
+  await caseHCCS3ValidContextDoc();
+  await caseHCCS4ValidClaudeMdRow();
+  await caseHCCS5UnknownKindFails();
+  await caseHCSD1MechanismReceivesSkillsDir();
 
   // v0.20.0 docs polish cycle — trailing-whitespace lint.
   await caseTW1TemplatesNoTrailingWhitespace();
