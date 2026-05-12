@@ -21,31 +21,29 @@ related:
 
 ---
 
-## Step 0 — locate the vault + verify shell helpers exist on this machine
+## Step 0 — fresh machine setup
+
+The canonical fresh-machine setup is documented at:
+**`pantry/Docs/prompts/2026-05-12-fresh-machine-setup.md`**
+
+Run that doc's Path A or Path B end-to-end on the other machine. After step 6 of that doc, you have `sauce`, `sauce-refresh`, `sauce-pin`, `sauce-here`, `sauce-bootstrap` shell helpers + a bootstrapped headspace vault. Return here for Steps 1+ (which are mostly verification — the heavy lifting is in the fresh-machine doc).
+
+Short version (Path A from the fresh-machine doc, paraphrased):
 
 ```bash
-# Find the headspace-sauce vault on this machine
-ls -d ~/Documents/obsidian/sync/sauce/headspace-sauce 2>/dev/null || \
-  find ~ -maxdepth 6 -type d -name headspace-sauce 2>/dev/null | head -3
+# Install helpers globally
+mkdir -p ~/.alias-config && \
+  curl -fsSL https://raw.githubusercontent.com/willfell/sauce/main/platform/cli/shell-helpers/sauce.sh \
+    -o ~/.alias-config/sauce.sh
 
-# Once found, cd into it:
-cd <path-to-headspace-sauce>
+# Auto-source loop in ~/.aliases if missing (see fresh-machine doc)
+# Reload shell, verify type sauce
 
-# Check whether shell helpers are loaded on this machine
-type sauce && type sauce-refresh && type sauce-pin && type sauce-here
+# Bootstrap the vault
+cd /path/to/headspace-sauce
+sauce-bootstrap        # if pantry/ missing
+sauce-refresh          # pull + auto-bump pins + install
 ```
-
-If shell helpers are missing on this machine, install them. The canonical helpers file lives in the workshop repo at `platform/cli/...` (planned ship; see roadmap doc) — until that ships, the helpers are a hand-rolled file at `~/.alias-config/sauce.sh`. Two options:
-
-**Option A — sync the helpers file from the primary machine** (dotfiles sync / scp):
-```bash
-# From primary machine:
-# scp ~/.alias-config/sauce.sh otheruser@othermachine:~/.alias-config/sauce.sh
-```
-
-**Option B — recreate by hand** on the other machine. Source content lives in the workshop repo's `Docs/plans/2026-05-12-installer-shell-helpers-design.md` (forecast roadmap doc) and was discussed in the 2026-05-12 session. Easiest copy source: pull from the workshop pantry on this machine after Step 1 below, then copy `~/.alias-config/sauce.sh` into place. (TODO: ship the helpers file as a workshop artifact under platform/cli/shell-helpers/sauce.sh in a future cycle so it's a one-line cp.)
-
-After installing, ensure `~/.aliases` (or this machine's equivalent) sources `~/.alias-config/*.sh`. Confirm `type sauce` shows "shell function".
 
 ---
 
@@ -120,12 +118,19 @@ If any of the above is missing/empty: STOP. Investigate.
 
 ---
 
-## Step 4 — invoke cowork:bootstrap-vault (interactive)
+## Step 4 — invoke cowork bootstrap (interactive)
 
-In Obsidian's Claude integration on this machine, invoke:
+Open a fresh Claude Code window pointing at the headspace-sauce vault. Type:
 
 ```
-cowork:bootstrap-vault
+/cowork
+```
+
+The `/cowork` slash command (shipped at `<vault>/.claude/commands/cowork.md` by cowork@0.2.0+ install) dispatches to the `cowork:bootstrap-vault` skill. If `/cowork` is missing from your vault's `.claude/commands/`, hand-copy it from the workshop tree first:
+
+```bash
+mkdir -p .claude/commands
+cp pantry/platform/blueprints/cowork/commands/cowork.md .claude/commands/cowork.md
 ```
 
 The skill is the same 25-step engagement-aware interview as accuris's session. For headspace, the engagement type is `personal`, not `w2-fte`. Per `platform/blueprints/cowork/engagement-types/personal.json`:

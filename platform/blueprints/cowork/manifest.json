@@ -1,6 +1,6 @@
 {
   "name": "cowork",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "kind": "blueprint",
   "module_directory": "cowork",
   "engagement_types_dir": "engagement-types",
@@ -15,6 +15,8 @@
     { "source": "content/Cowork.md",                                                            "dest": "{{module_directory}}/Cowork.md" },
     { "source": "content/context/README.md",                                                    "dest": "{{module_directory}}/context/README.md" },
     { "source": "content/context/obsidian-vault-guide.md",                                      "dest": "{{module_directory}}/context/obsidian-vault-guide.md" },
+
+    { "source": "commands/cowork.md",                                                           "dest": ".claude/commands/cowork.md" },
 
     { "source": "content/context/engagement-templates/personal/about.md",                       "dest": "{{module_directory}}/context/engagement-templates/personal/about.md" },
     { "source": "content/context/engagement-templates/personal/brand-voice.md",                 "dest": "{{module_directory}}/context/engagement-templates/personal/brand-voice.md" },

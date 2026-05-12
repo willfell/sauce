@@ -97,12 +97,20 @@ If any of the above is missing or empty: STOP. The cowork install didn't take. I
 
 ---
 
-## Step 3 — invoke the bootstrap-vault skill (interactive)
+## Step 3 — invoke the bootstrap interview
 
-In Obsidian's Claude integration (the materialized skill at `<vault>/.claude/skills/cowork/bootstrap-vault/SKILL.md` is what Claude reads at runtime), invoke:
+Open a fresh Claude Code window with cwd inside accuris-sauce. Type:
 
 ```
-cowork:bootstrap-vault
+/cowork
+```
+
+The `/cowork` slash command lives at `<vault>/.claude/commands/cowork.md` (added 2026-05-12 session) and dispatches to the canonical `cowork:bootstrap-vault` skill materialized at `<vault>/.claude/skills/cowork/bootstrap-vault/SKILL.md`. The skill content is what drives the actual interview.
+
+If `/cowork` is missing for some reason (e.g., you re-bootstrapped and the slash command file got wiped), hand-copy it:
+
+```bash
+cp pantry/platform/blueprints/cowork/commands/cowork.md .claude/commands/cowork.md
 ```
 
 The skill is a **25-step engagement-aware interview**. Per `Docs/plans/2026-05-11-v0.31.0-bootstrap-vault-skill-spec.md`, it:
