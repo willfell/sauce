@@ -104,32 +104,43 @@ async function caseAU3() {
   });
 }
 
-// AU4 — project entity missing description
+// AU4 — project entity missing description (v1.4.0 — type-discriminator, name-as-filename)
 async function caseAU4() {
   await withTempVault(async (dir) => {
     const rules = [{
-      scope: { path_glob: "spice/projects/*/Project.md" },
-      required_frontmatter: { description: { required: true, type: "string" } }
+      scope: { path_glob: "spice/projects/*/*.md" },
+      frontmatter_branch: [
+        {
+          when: { frontmatter: { type: "project" } },
+          required_frontmatter: { description: { required: true, type: "string" } }
+        }
+      ]
     }];
     makeSauceVault(dir, { rules: { project: rules } });
-    writeNote(dir, "spice/projects/widget/Project.md",
-      { created: "2026-05-01", workstreams: [], tags: ["project"] });
+    // v1.4.0 filename-as-name: file basename is the project name, not "Project.md"
+    writeNote(dir, "spice/projects/widget/Widget.md",
+      { type: "project", created: "2026-05-01", workstreams: [], tags: ["project"] });
     const { runAudit } = require("../audit/walker");
     const result = await runAudit({ vaultPath: dir, untrackedCheck: false });
     assertTrue(result.violations.some(v => v.rule === "required_frontmatter.description"), "AU4: project description missing");
   });
 }
 
-// AU5 — project entity wrong tag (positive: "project" present matches)
+// AU5 — project entity wrong tag (v1.4.0 — type-discriminator, name-as-filename)
 async function caseAU5() {
   await withTempVault(async (dir) => {
     const rules = [{
-      scope: { path_glob: "spice/projects/*/Project.md" },
-      required_tags: [{ tag: "project" }]
+      scope: { path_glob: "spice/projects/*/*.md" },
+      frontmatter_branch: [
+        {
+          when: { frontmatter: { type: "project" } },
+          required_tags: [{ tag: "project" }]
+        }
+      ]
     }];
     makeSauceVault(dir, { rules: { project: rules } });
-    writeNote(dir, "spice/projects/widget/Project.md",
-      { tags: ["initiative"] });  // missing "project" tag
+    writeNote(dir, "spice/projects/widget/Widget.md",
+      { type: "project", tags: ["initiative"] });  // missing "project" tag
     const { runAudit } = require("../audit/walker");
     const result = await runAudit({ vaultPath: dir, untrackedCheck: false });
     assertTrue(result.violations.some(v => v.rule === "required_tags.missing"), "AU5: project tag missing");
@@ -769,21 +780,27 @@ async function caseAU38() {
   });
 }
 
-// AU32 — canonical conforming project fixture → zero project violations
+// AU32 — canonical conforming project fixture (v1.4.0 — type-discriminator, name-as-filename) → zero project violations
 async function caseAU32() {
   await withTempVault(async (dir) => {
     const rules = [{
-      scope: { path_glob: "spice/projects/*/Project.md" },
-      required_frontmatter: {
-        created: { required: true, type: "string" },
-        description: { required: true, type: "string" },
-        workstreams: { required: true, type: "list" }
-      },
-      required_tags: [{ tag: "project" }]
+      scope: { path_glob: "spice/projects/*/*.md" },
+      frontmatter_branch: [
+        {
+          when: { frontmatter: { type: "project" } },
+          required_frontmatter: {
+            created: { required: true, type: "string" },
+            description: { required: true, type: "string" },
+            workstreams: { required: true, type: "list" }
+          },
+          required_tags: [{ tag: "project" }]
+        }
+      ]
     }];
     makeSauceVault(dir, { rules: { project: rules } });
-    writeNote(dir, "spice/projects/widget/Project.md", {
-      created: "2026-05-08", description: "Widget redesign", workstreams: [], tags: ["project"]
+    // v1.4.0 filename-as-name: file basename is the project name, not "Project.md"
+    writeNote(dir, "spice/projects/widget/Widget.md", {
+      type: "project", created: "2026-05-08", description: "Widget redesign", workstreams: [], tags: ["project"]
     });
     const { runAudit } = require("../audit/walker");
     const result = await runAudit({ vaultPath: dir, untrackedCheck: false });

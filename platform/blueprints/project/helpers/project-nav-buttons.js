@@ -303,6 +303,39 @@ class ProjectNavButtons {
     }
 
     async _createProject({ name, slug }) {
+        // HUB_NOTE_FILENAME_STYLE — single switch controlling per-project hub-note basename.
+        // Audit + hub-cards filters discriminate on `type: project` frontmatter so this is
+        // safe to flip at any time; new projects use the new style, existing hub notes keep
+        // their filenames. (Pre-v1.4.0 default was "fixed".)
+        //   "name"  → use the user's input verbatim (Title Case as typed; filesystem-sanitized).
+        //             Example: spice/projects/testing-it-all-out/Testing It All Out.md
+        //             Native Obsidian tab title shows the project name; wikilinks render
+        //             [[Testing It All Out]] without aliasing.
+        //   "slug"  → use the kebab slug (matches directory name).
+        //             Example: spice/projects/testing-it-all-out/testing-it-all-out.md
+        //   "fixed" → legacy "Project.md" literal. Pre-v1.4.0 behavior.
+        const HUB_NOTE_FILENAME_STYLE = "name";
+
+        // Filesystem-safe sanitization for the Title Case filename:
+        // strip characters Obsidian / macOS / Windows reject in basenames, collapse
+        // whitespace, trim. If the result is empty (e.g. all-punctuation input),
+        // fall back to slug. Never throws.
+        const sanitizeForFilename = (s) => {
+            const cleaned = String(s || "")
+                .replace(/[\/\\:*?"<>|#^[\]]/g, "")  // forbidden chars across major filesystems + Obsidian-reserved
+                .replace(/\s+/g, " ")
+                .trim();
+            return cleaned || slug;
+        };
+
+        let hubBasename;
+        switch (HUB_NOTE_FILENAME_STYLE) {
+            case "name":  hubBasename = `${sanitizeForFilename(name)}.md`; break;
+            case "slug":  hubBasename = `${slug}.md`; break;
+            case "fixed": hubBasename = "Project.md"; break;
+            default:      hubBasename = `${sanitizeForFilename(name)}.md`;
+        }
+
         const projectDir = `spice/projects/${slug}`;
         const tasksDir = `${projectDir}/tasks`;
         for (const dir of [projectDir, tasksDir]) {
@@ -337,7 +370,7 @@ class ProjectNavButtons {
             return targetPath;
         };
 
-        const atlasPath = await writeTpl("Template, Project.md", "Project.md");
+        const atlasPath = await writeTpl("Template, Project.md", hubBasename);
         await writeTpl("Template, Project Map.md", "Project Map.md");
         await writeTpl("Template, Project Board.md", `${slug}-board.md`);
 

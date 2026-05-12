@@ -9,12 +9,13 @@
  */
 class ProjectsHubCards {
     async render(dv) {
+        // v1.4.0: filter by frontmatter `type: project` (the canonical hub-note
+        // discriminator) rather than filename. Filename-as-name (S6.5) means
+        // the hub note is no longer guaranteed to be named "Project.md".
+        // The Projects hub itself is excluded via `type: projects-hub`.
         const projectHubs = dv.pages('"spice/projects"')
-            .where(p => p.file.etags.includes("#project")
-                     && p.file.name !== "Projects"
-                     && !p.file.path.includes("/steps/")
-                     && !p.file.name.toLowerCase().endsWith("-board")
-                     && !p.file.name.endsWith("- Map"));
+            .where(p => p.type === "project"
+                     && !p.file.path.includes("/steps/"));
 
         const enriched = [];
         for (const project of projectHubs) {
