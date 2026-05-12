@@ -83,6 +83,31 @@ Add a workshop-level installer helper `installShellHelpers(tp, manifest, options
 
 These three sub-verbs replace the manual subscription editing surface today. The shell helpers (Material section above) prefigure them — once shipped in the CLI, the shell helpers proxy to the canonical CLI implementation.
 
+## Related installer bug — materializeSkills doesn't clean stale entries
+
+Surfaced 2026-05-12 during accuris's cowork@0.1.0 → 0.2.0 install:
+
+- `platform/install.js :: materializeSkills` writes every `manifest.skills[]` entry's `SKILL.md` to the vault under `.claude/skills/<subtree>/<id>/SKILL.md`.
+- It does NOT delete skill files that were materialized by a PRIOR install but are no longer in the current `manifest.skills[]`.
+- Real example: cowork@0.1.0 shipped 38 skills (incl. `ero-morning`, `write-callout-morning-briefing-life`, etc.). cowork@0.2.0 ships 32 (S5 collapsed orphans into engagement-aware merged sub-skills). After `sauce-refresh`, the vault has **45 SKILL.md** files — the 32 current + 13 orphaned.
+
+User workaround today: `rm -rf <vault>/.claude/skills/cowork && sauce-refresh` — full re-materialize from current manifest.
+
+Fix forecast (v0.31.x or v0.32.x):
+- Track manifest-declared dests per item across runs (via `ranch/platform-installed.json` enrichment).
+- At install time, compute `prev_dests - current_dests = orphan_set` and delete orphans (with `.sauce-backup` per safety mechanic #2).
+- Failure-loud history when an orphan delete fails.
+
+## Auto-pin-bump in sauce-refresh (LANDED 2026-05-12)
+
+Surfaced 2026-05-12 during accuris's repeated install attempts:
+
+The shell helper `sauce-refresh` was: `git fetch + reset --hard + npm install + sauce update --force`. Every new mechanism/blueprint version pushed to origin/main caused the user to hit `[Notice] platformInstall: skipping <X> — subscription pins X@<old> but workshop has <new>` and re-run `sauce-pin --catalog` manually. After three round-trips in one session the friction was unacceptable.
+
+Fixed in `~/.alias-config/sauce.sh`: `sauce-refresh` now inserts `sauce-pin --catalog` between npm-install and sauce-update. Opt out per-call via `NO_BUMP_PINS=1 sauce-refresh` for the rare case where a user wants the pre-fix posture.
+
+Roadmap implication: the canonical CLI `sauce update` could grow a `--bump-pins-to-catalog` flag (mirrors the new shell behavior) so the helper-vs-CLI surface stays symmetric.
+
 ## Landmines / open questions
 
 - **`~/` writes are outside the vault.** Today's landmine #12 allowlist is `.obsidian/` + `.claude/skills/`-scoped. Writing to `~/.alias-config/` + `~/.zshrc` crosses the vault boundary. Mitigation:
