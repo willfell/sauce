@@ -26,9 +26,9 @@ class ScratchHubCards {
             const m = window.moment(e.day, "YYYY-MM-DD", true);
             const dayName = m.isValid() ? m.format("dddd") : "Unknown";
             const monthFolder = m.isValid() ? m.format("YYYY/MM-MMMM") : "";
-            const dayIndexPath = `spice/scratch/${monthFolder}/${e.day}/${dayName}-${e.day}.md`;
+            const dayHubPath = `spice/scratch/${monthFolder}/${e.day}/Scratch-Day-${e.day}.md`;
             return {
-                file: { name: `${dayName} ${e.day}`, path: dayIndexPath, mtime: { ts: e.latestMtime } },
+                file: { name: `${dayName} ${e.day}`, path: dayHubPath, mtime: { ts: e.latestMtime } },
                 _count: e.count,
                 _day: e.day,
                 _dayName: dayName
