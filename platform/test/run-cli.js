@@ -882,6 +882,62 @@ async function caseV3VaultRemove() {
     });
 }
 
+// =====================================================================
+// v0.36.0 S3.1 — `sauce reinstall <--all|--vault>` verb cases (I1-I3)
+// Failing-first: cmd-reinstall.js + the reinstall verb arrive in S3.2.
+// Until then these cases fail because the dispatcher throws
+// `unknown verb: reinstall`.
+// =====================================================================
+
+async function caseI1ReinstallVault() {
+    const label = "I1 sauce reinstall --vault <p> calls installer once for that vault";
+    await withTempHome(async () => {
+        await withTempVault({}, async (vaultPath) => {
+            delete require.cache[require.resolve("../cli/registry.js")];
+            delete require.cache[require.resolve("../cli/sauce-cli.js")];
+            const cli = require("../cli/sauce-cli.js");
+            const calls = [];
+            await cli.dispatch(["reinstall", "--vault", vaultPath], {
+                _runInstaller: async (opts) => { calls.push(opts.vaultPath); }
+            });
+            assertEqual(calls.length, 1, label + " — call count");
+            assertEqual(calls[0], vaultPath, label + " — target path");
+        });
+    });
+}
+
+async function caseI2ReinstallAll() {
+    const label = "I2 sauce reinstall --all iterates registry";
+    await withTempHome(async () => {
+        await withTempVault({}, async (v1) => {
+            await withTempVault({}, async (v2) => {
+                delete require.cache[require.resolve("../cli/registry.js")];
+                delete require.cache[require.resolve("../cli/sauce-cli.js")];
+                require("../cli/registry.js").add(v1);
+                require("../cli/registry.js").add(v2);
+                const calls = [];
+                const cli = require("../cli/sauce-cli.js");
+                await cli.dispatch(["reinstall", "--all"], {
+                    _runInstaller: async (opts) => { calls.push(opts.vaultPath); }
+                });
+                assertEqual(calls.length, 2, label + " — call count");
+            });
+        });
+    });
+}
+
+async function caseI3ReinstallAllPrunes() {
+    const label = "I3 reinstall --all prunes missing paths from registry";
+    await withTempHome(async () => {
+        delete require.cache[require.resolve("../cli/registry.js")];
+        delete require.cache[require.resolve("../cli/sauce-cli.js")];
+        require("../cli/registry.js").add("/nonexistent/sauce-12345");
+        const cli = require("../cli/sauce-cli.js");
+        await cli.dispatch(["reinstall", "--all"], { _runInstaller: async () => {} });
+        assertEqual(require("../cli/registry.js").read().vaults.length, 0, label + " — pruned to empty");
+    });
+}
+
 const cases = [
     caseC1AncestorWalk, caseC2SauceVaultEnv, caseC3NotInVault, caseC4UnknownVerb,
     caseC5StatusClean, caseC6StatusDrift, caseC7UpdateFFOnly, caseC8UpdateDirtyRefusal,
@@ -903,6 +959,7 @@ const cases = [
     caseCACS2AuditClaudeSurfaceStrict,
     caseCACS3AuditClaudeSurfaceOutputFile,  // v0.32.0 S7
     caseV1VaultAdd, caseV2VaultList, caseV3VaultRemove,  // v0.36.0 S2.1 (failing-first)
+    caseI1ReinstallVault, caseI2ReinstallAll, caseI3ReinstallAllPrunes,  // v0.36.0 S3.1 (failing-first)
 ];
 
 async function main() {
