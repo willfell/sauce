@@ -47,7 +47,7 @@ function runCli(args, opts = {}) {
 
 withTempHomeAndVault(({ home, vault }) => {
     // Step 1: bootstrap
-    const bootstrap = runCli(["bootstrap", "--vault", vault, "--non-interactive", "--no-register"]);
+    const bootstrap = runCli(["bootstrap", "--vault", vault, "--non-interactive", "--no-register", "--mechanisms=all"]);
     ok("smoke-1 bootstrap exit 0", bootstrap.code === 0,
         `stdout=${bootstrap.stdout.slice(-300)} stderr=${bootstrap.stderr.slice(-300)}`);
     ok("smoke-2 bootstrap created ranch/platform-installed.json",

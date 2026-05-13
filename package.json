@@ -15,7 +15,8 @@
     "test:registry": "node platform/test/run-registry.js",
     "test:migrate-layout": "node platform/test/run-migrate-layout.js",
     "test:seed": "node platform/test/run-seed.js",
-    "release:preflight": "npm run test:helpers && npm run test:bootstrap && npm run test:registry && npm run test:migrate-layout && node platform/test/run-cli.js && node platform/test/run-migrate.js && node platform/test/run-audit.js && node platform/test/run-claude-surface.js && node platform/test/run-renderer.js && node platform/test/run-install-sh.js && node platform/test/run-cowork-smoke.js && node platform/test/run-doctor-self.js && node platform/test/run-seed.js"
+    "test:smoke": "node platform/test/run-integration-smoke.js",
+    "release:preflight": "npm run test:helpers && npm run test:bootstrap && npm run test:registry && npm run test:migrate-layout && node platform/test/run-cli.js && node platform/test/run-migrate.js && node platform/test/run-audit.js && node platform/test/run-claude-surface.js && node platform/test/run-renderer.js && node platform/test/run-install-sh.js && node platform/test/run-cowork-smoke.js && node platform/test/run-doctor-self.js && node platform/test/run-seed.js && node platform/test/run-integration-smoke.js"
   },
   "dependencies": {
     "@inquirer/prompts": "^7.0.0"
