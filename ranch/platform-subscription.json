@@ -14,6 +14,7 @@
     { "name": "platform-claude", "version": "0.1.0" }
   ],
   "blueprints": [
-    { "name": "project", "version": "1.5.0" }
+    { "name": "project", "version": "1.5.0" },
+    { "name": "daily", "version": "0.3.0" }
   ]
 }

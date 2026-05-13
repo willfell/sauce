@@ -39,6 +39,7 @@ Before any write, run `ls /Users/willfellhoelter/projects/repos/sauce` (or the e
 | --- | --- | --- |
 | Audit | audit | /audit |
 | Bootstrap | platform-claude | /bootstrap |
+| Daily | spice/daily | /daily |
 | Install | platform-claude | /install |
 | Projects | spice/projects | /project |
 | Upgrade | platform-claude | /upgrade |

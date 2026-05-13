@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-05-13T01:34:01.831Z",
+  "generated_at": "2026-05-13T01:39:51.814Z",
   "workshop_version": "0.32.0",
   "contributions": {
     "audit": [
@@ -111,6 +111,29 @@
           "topic": "Projects",
           "path": "spice/projects",
           "command": "/project"
+        }
+      }
+    ],
+    "daily": [
+      {
+        "kind": "command",
+        "source": "commands/daily.md",
+        "dest": ".claude/commands/daily.md",
+        "version": "0.3.0"
+      },
+      {
+        "kind": "skill",
+        "source": "skills/open-today/SKILL.md",
+        "dest": ".claude/skills/daily/open-today/SKILL.md",
+        "version": "0.3.0"
+      },
+      {
+        "kind": "claude_md_row",
+        "table": "resolvers",
+        "row": {
+          "topic": "Daily",
+          "path": "spice/daily",
+          "command": "/daily"
         }
       }
     ]
