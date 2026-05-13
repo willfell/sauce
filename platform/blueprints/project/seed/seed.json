@@ -1,0 +1,24 @@
+{
+    "schema_version": 1,
+    "kind": "declarative",
+    "notes": [
+        {
+            "path": "spice/projects/Acme-Migration/Project.md",
+            "vars": { "slug": "Acme-Migration", "title": "Acme Migration", "status": "active" },
+            "frontmatter": { "type": "project", "status": "{{status}}", "started": "2026-04-15", "title": "{{title}}" },
+            "body_template": "templates/Project.md"
+        },
+        {
+            "path": "spice/projects/North-Star-Refactor/Project.md",
+            "vars": { "slug": "North-Star-Refactor", "title": "North Star Refactor", "status": "planning" },
+            "frontmatter": { "type": "project", "status": "{{status}}", "started": "2026-05-01", "title": "{{title}}" },
+            "body_template": "templates/Project.md"
+        },
+        {
+            "path": "spice/projects/Q1-2026-Audit/Project.md",
+            "vars": { "slug": "Q1-2026-Audit", "title": "Q1 2026 Audit", "status": "archived" },
+            "frontmatter": { "type": "project", "status": "{{status}}", "started": "2026-01-08", "title": "{{title}}" },
+            "body_template": "templates/Project.md"
+        }
+    ]
+}
