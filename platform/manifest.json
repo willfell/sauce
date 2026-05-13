@@ -43,7 +43,7 @@
     { "name": "journal", "version": "0.1.2", "path": "blueprints/journal" },
     { "name": "trips", "version": "0.1.7", "path": "blueprints/trips" },
     { "name": "finance", "version": "0.2.10", "path": "blueprints/finance" },
-    { "name": "scratch", "version": "0.1.0", "path": "blueprints/scratch" },
+    { "name": "scratch", "version": "0.2.0", "path": "blueprints/scratch" },
     { "name": "teams", "version": "0.1.0", "path": "blueprints/teams" }
   ]
 }

@@ -1,23 +1,25 @@
 {
   "name": "scratch",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "kind": "blueprint",
   "module_directory": "scratch",
   "skills_dir": ".claude/skills/scratch",
-  "description": "Low-friction quick-capture scratch notes. Per-day sub-folders under spice/scratch/YYYY/MM-MMMM/YYYY-MM-DD/. Filename Scratch-YYYY-MM-DD-HH-mm.md. Day-index + global hub via Dataview cards. Ships /scratch slash command + new-scratch SKILL.md via claude_surface[] (cohesion-aligned).",
+  "description": "Low-friction quick-capture scratch notes. Per-day sub-folders under spice/scratch/YYYY/MM-MMMM/YYYY-MM-DD/. v0.2.0 redesign: nav-button now opens-or-creates today's day-hub Scratch-Day-YYYY-MM-DD.md (collision-free with daily note); day-hub embeds ScratchNewButton (NEW helper using customJS.AccentButton) that creates timestamped Scratch-YYYY-MM-DD-HH-mm.md siblings. Retires Scratch Day.md template. ScratchHubCards target path fixed.",
   "depends_on": [
     { "name": "nav-buttons",     "range": ">=2.6.0" },
     { "name": "customjs-guard",  "range": ">=1.0.0" },
     { "name": "cards",           "range": ">=0.2.4" },
+    { "name": "accent-button",   "range": ">=0.1.0" },
     { "name": "platform-claude", "range": ">=0.1.1" }
   ],
-  "customjs_classes": ["ScratchHubCards", "ScratchDayList"],
+  "customjs_classes": ["ScratchHubCards", "ScratchDayList", "ScratchNewButton"],
   "files": [
-    { "source": "templates/Scratch.md",         "dest": "{{templates_path}}/Scratch.md" },
-    { "source": "templates/Scratch Day.md",     "dest": "{{templates_path}}/Scratch Day.md" },
-    { "source": "templates/Scratch Hub.md",     "dest": "{{module_directory}}/Scratch.md" },
-    { "source": "helpers/scratch-hub-cards.js", "dest": "{{scripts_path}}/scratch/scratch-hub-cards.js" },
-    { "source": "helpers/scratch-day-list.js",  "dest": "{{scripts_path}}/scratch/scratch-day-list.js" }
+    { "source": "templates/Scratch.md",            "dest": "{{templates_path}}/Scratch.md" },
+    { "source": "templates/Scratch Day Hub.md",    "dest": "{{templates_path}}/Scratch Day Hub.md" },
+    { "source": "templates/Scratch Hub.md",        "dest": "{{module_directory}}/Scratch.md" },
+    { "source": "helpers/scratch-hub-cards.js",    "dest": "{{scripts_path}}/scratch/scratch-hub-cards.js" },
+    { "source": "helpers/scratch-day-list.js",     "dest": "{{scripts_path}}/scratch/scratch-day-list.js" },
+    { "source": "helpers/scratch-new-button.js",   "dest": "{{scripts_path}}/scratch/scratch-new-button.js" }
   ],
   "claude_surface": [
     { "kind": "command", "source": "commands/scratch.md",          "dest": ".claude/commands/scratch.md" },
@@ -26,17 +28,17 @@
   ],
   "nav_buttons": [
     {
-      "id": "scratch-new",
+      "id": "scratch-day-hub",
       "label": "Scratch",
       "icon": "edit-3",
       "order": 130,
       "action": {
         "type": "runTemplaterTemplate",
-        "template_source": "Scratch.md",
+        "template_source": "Scratch Day Hub.md",
         "folder_prefix": "{{module_directory}}",
         "folder_date_pattern": "YYYY/MM-MMMM/YYYY-MM-DD",
-        "filename_prefix": "Scratch-",
-        "filename_date_pattern": "YYYY-MM-DD-HH-mm",
+        "filename_prefix": "Scratch-Day-",
+        "filename_date_pattern": "YYYY-MM-DD",
         "filename_suffix": ""
       }
     }
@@ -55,6 +57,18 @@
           "day":     { "required": true, "type": "string" }
         },
         "naming_pattern": "^Scratch-\\d{4}-\\d{2}-\\d{2}-\\d{2}-\\d{2}\\.md$"
+      }
+    },
+    {
+      "target": "scratch-day-hub",
+      "fragment": {
+        "scope": { "path_glob": "spice/scratch/**/Scratch-Day-*.md" },
+        "required_frontmatter": {
+          "created": { "required": true, "type": "string" },
+          "type":    { "required": true, "equals": "scratch-day" },
+          "day":     { "required": true, "type": "string" }
+        },
+        "naming_pattern": "^Scratch-Day-\\d{4}-\\d{2}-\\d{2}\\.md$"
       }
     }
   ]
