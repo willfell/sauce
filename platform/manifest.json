@@ -1,15 +1,29 @@
 {
   "_comment": "Workshop platform manifest. Each mechanism + blueprint has its own version.",
-  "workshop_version": "0.38.1",
+  "workshop_version": "0.40.0",
   "date": "2026-05-13",
   "foundational_plugins": [
-    { "id": "templater-obsidian" },
-    { "id": "customjs" },
-    { "id": "dataview" },
-    { "id": "obsidian-admonition" },
-    { "id": "calendar" },
-    { "id": "obsidian-tasks-plugin" },
-    { "id": "url-into-selection" }
+    {
+      "id": "templater-obsidian"
+    },
+    {
+      "id": "customjs"
+    },
+    {
+      "id": "dataview"
+    },
+    {
+      "id": "obsidian-admonition"
+    },
+    {
+      "id": "calendar"
+    },
+    {
+      "id": "obsidian-tasks-plugin"
+    },
+    {
+      "id": "url-into-selection"
+    }
   ],
   "app_settings": {
     "alwaysOpenInNewTab": true
@@ -20,30 +34,122 @@
     "bootstrap_dest": "{{templater_scripts_path}}/platformInstall.js"
   },
   "mechanisms": [
-    { "name": "customjs-guard", "version": "1.0.0", "path": "mechanisms/customjs-guard" },
-    { "name": "validator", "version": "0.1.2", "path": "mechanisms/validator" },
-    { "name": "audit", "version": "0.2.1", "path": "mechanisms/audit" },
-    { "name": "nav-buttons", "version": "2.6.0", "path": "mechanisms/nav-buttons" },
-    { "name": "cards", "version": "0.2.4", "path": "mechanisms/cards" },
-    { "name": "accent-button", "version": "0.1.0", "path": "mechanisms/accent-button" },
-    { "name": "people-rendering", "version": "0.1.0", "path": "mechanisms/people-rendering" },
-    { "name": "styling", "version": "0.1.2", "path": "mechanisms/styling" },
-    { "name": "convenience", "version": "0.1.0", "path": "mechanisms/convenience" },
-    { "name": "platform-claude", "version": "0.1.1", "path": "mechanisms/platform-claude" }
+    {
+      "name": "customjs-guard",
+      "version": "1.0.0",
+      "path": "mechanisms/customjs-guard"
+    },
+    {
+      "name": "validator",
+      "version": "0.1.2",
+      "path": "mechanisms/validator"
+    },
+    {
+      "name": "audit",
+      "version": "0.2.1",
+      "path": "mechanisms/audit"
+    },
+    {
+      "name": "nav-buttons",
+      "version": "2.6.0",
+      "path": "mechanisms/nav-buttons"
+    },
+    {
+      "name": "cards",
+      "version": "0.2.4",
+      "path": "mechanisms/cards"
+    },
+    {
+      "name": "accent-button",
+      "version": "0.1.0",
+      "path": "mechanisms/accent-button"
+    },
+    {
+      "name": "people-rendering",
+      "version": "0.1.0",
+      "path": "mechanisms/people-rendering"
+    },
+    {
+      "name": "styling",
+      "version": "0.1.2",
+      "path": "mechanisms/styling"
+    },
+    {
+      "name": "convenience",
+      "version": "0.1.0",
+      "path": "mechanisms/convenience"
+    },
+    {
+      "name": "platform-claude",
+      "version": "0.1.1",
+      "path": "mechanisms/platform-claude"
+    }
   ],
   "blueprints": [
-    { "name": "boards", "version": "0.1.0", "path": "blueprints/boards" },
-    { "name": "cowork", "version": "0.3.0", "path": "blueprints/cowork" },
-    { "name": "daily", "version": "0.3.0", "path": "blueprints/daily" },
-    { "name": "meetings", "version": "0.4.0", "path": "blueprints/meetings" },
-    { "name": "people", "version": "0.1.1", "path": "blueprints/people" },
-    { "name": "products", "version": "0.1.0", "path": "blueprints/products" },
-    { "name": "project", "version": "1.6.0", "path": "blueprints/project" },
-    { "name": "to-do", "version": "0.1.4", "path": "blueprints/to-do" },
-    { "name": "journal", "version": "0.1.2", "path": "blueprints/journal" },
-    { "name": "trips", "version": "0.1.7", "path": "blueprints/trips" },
-    { "name": "finance", "version": "0.2.10", "path": "blueprints/finance" },
-    { "name": "scratch", "version": "0.2.0", "path": "blueprints/scratch" },
-    { "name": "teams", "version": "0.1.0", "path": "blueprints/teams" }
+    {
+      "name": "boards",
+      "version": "0.1.0",
+      "path": "blueprints/boards"
+    },
+    {
+      "name": "cowork",
+      "version": "0.3.0",
+      "path": "blueprints/cowork"
+    },
+    {
+      "name": "daily",
+      "version": "0.3.0",
+      "path": "blueprints/daily"
+    },
+    {
+      "name": "meetings",
+      "version": "0.4.0",
+      "path": "blueprints/meetings"
+    },
+    {
+      "name": "people",
+      "version": "0.1.1",
+      "path": "blueprints/people"
+    },
+    {
+      "name": "products",
+      "version": "0.1.0",
+      "path": "blueprints/products"
+    },
+    {
+      "name": "project",
+      "version": "1.6.0",
+      "path": "blueprints/project"
+    },
+    {
+      "name": "to-do",
+      "version": "0.1.4",
+      "path": "blueprints/to-do"
+    },
+    {
+      "name": "journal",
+      "version": "0.1.2",
+      "path": "blueprints/journal"
+    },
+    {
+      "name": "trips",
+      "version": "0.1.7",
+      "path": "blueprints/trips"
+    },
+    {
+      "name": "finance",
+      "version": "0.2.10",
+      "path": "blueprints/finance"
+    },
+    {
+      "name": "scratch",
+      "version": "0.2.0",
+      "path": "blueprints/scratch"
+    },
+    {
+      "name": "teams",
+      "version": "0.1.0",
+      "path": "blueprints/teams"
+    }
   ]
 }

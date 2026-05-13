@@ -1,22 +1,64 @@
 {
   "_comment": "Workshop self-subscription. Pinned to the workshop's own manifest version.",
-  "workshop_version": "0.37.0",
+  "workshop_version": "0.40.0",
   "mechanisms": [
-    { "name": "customjs-guard", "version": "1.0.0" },
-    { "name": "validator", "version": "0.1.2" },
-    { "name": "audit", "version": "0.2.1" },
-    { "name": "nav-buttons", "version": "2.6.0" },
-    { "name": "cards", "version": "0.2.4" },
-    { "name": "accent-button", "version": "0.1.0" },
-    { "name": "people-rendering", "version": "0.1.0" },
-    { "name": "styling", "version": "0.1.2" },
-    { "name": "convenience", "version": "0.1.0" },
-    { "name": "platform-claude", "version": "0.1.1" }
+    {
+      "name": "customjs-guard",
+      "version": "1.0.0"
+    },
+    {
+      "name": "validator",
+      "version": "0.1.2"
+    },
+    {
+      "name": "audit",
+      "version": "0.2.1"
+    },
+    {
+      "name": "nav-buttons",
+      "version": "2.6.0"
+    },
+    {
+      "name": "cards",
+      "version": "0.2.4"
+    },
+    {
+      "name": "accent-button",
+      "version": "0.1.0"
+    },
+    {
+      "name": "people-rendering",
+      "version": "0.1.0"
+    },
+    {
+      "name": "styling",
+      "version": "0.1.2"
+    },
+    {
+      "name": "convenience",
+      "version": "0.1.0"
+    },
+    {
+      "name": "platform-claude",
+      "version": "0.1.1"
+    }
   ],
   "blueprints": [
-    { "name": "project", "version": "1.5.0" },
-    { "name": "daily", "version": "0.3.0" },
-    { "name": "meetings", "version": "0.4.0" },
-    { "name": "scratch", "version": "0.2.0" }
+    {
+      "name": "project",
+      "version": "1.5.0"
+    },
+    {
+      "name": "daily",
+      "version": "0.3.0"
+    },
+    {
+      "name": "meetings",
+      "version": "0.4.0"
+    },
+    {
+      "name": "scratch",
+      "version": "0.2.0"
+    }
   ]
 }
