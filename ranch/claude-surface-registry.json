@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-05-13T00:06:42.958Z",
-  "workshop_version": "0.29.0",
+  "generated_at": "2026-05-13T01:34:01.831Z",
+  "workshop_version": "0.32.0",
   "contributions": {
     "audit": [
       {
@@ -88,6 +88,29 @@
           "topic": "Bootstrap",
           "path": "platform-claude",
           "command": "/bootstrap"
+        }
+      }
+    ],
+    "project": [
+      {
+        "kind": "command",
+        "source": "commands/project.md",
+        "dest": ".claude/commands/project.md",
+        "version": "1.5.0"
+      },
+      {
+        "kind": "skill",
+        "source": "skills/new-project/SKILL.md",
+        "dest": ".claude/skills/project/new-project/SKILL.md",
+        "version": "1.5.0"
+      },
+      {
+        "kind": "claude_md_row",
+        "table": "resolvers",
+        "row": {
+          "topic": "Projects",
+          "path": "spice/projects",
+          "command": "/project"
         }
       }
     ]

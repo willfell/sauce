@@ -1,9 +1,10 @@
 {
   "name": "project",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "kind": "blueprint",
   "module_directory": "projects",
-  "description": "Per-project atlas + map + Kanban board with hierarchical tasks, workstream-tagged cards, and All-Projects hub. v1.4.0 MINOR (v0.31.0 S6.5): hub note filename now defaults to the user-typed project name (e.g. 'Testing It All Out.md' under spice/projects/testing-it-all-out/) for native Obsidian tab title display. Configurable HUB_NOTE_FILENAME_STYLE constant in project-nav-buttons.js (name|slug|fixed). Rule_fragment refactored to type-discrimination via frontmatter_branch so audit + hub-cards filters are filename-independent. v1.4.1 PATCH CF-1: projects-hub-cards.js filter restored to match EITHER type:project OR legacy #project tag (older hub notes without type:project frontmatter were excluded from the Projects.md card grid); defensive type:map/kanban exclusions handle dataview's nested-tag expansion (#project/<slug> would otherwise falsely include Project Map + Project Board).",
+  "skills_dir": ".claude/skills/project",
+  "description": "Per-project atlas + map + Kanban board with hierarchical tasks, workstream-tagged cards, and All-Projects hub. v1.4.0 MINOR (v0.31.0 S6.5): hub note filename now defaults to the user-typed project name (e.g. 'Testing It All Out.md' under spice/projects/testing-it-all-out/) for native Obsidian tab title display. Configurable HUB_NOTE_FILENAME_STYLE constant in project-nav-buttons.js (name|slug|fixed). Rule_fragment refactored to type-discrimination via frontmatter_branch so audit + hub-cards filters are filename-independent. v1.4.1 PATCH CF-1: projects-hub-cards.js filter restored to match EITHER type:project OR legacy #project tag (older hub notes without type:project frontmatter were excluded from the Projects.md card grid); defensive type:map/kanban exclusions handle dataview's nested-tag expansion (#project/<slug> would otherwise falsely include Project Map + Project Board). v1.5.0 MINOR (v0.33.0 cohesion wave 2): adopts claude_surface[] — ships canonical /project slash command + new-project SKILL.md + resolvers row. Stale consumer-side .claude/commands/project.md bodies overwritten on next install.",
   "depends_on": [
     { "name": "nav-buttons",    "range": ">=2.3.0" },
     { "name": "customjs-guard", "range": ">=1.0.0" },
@@ -37,6 +38,11 @@
     { "source": "helpers/project-notes-cards.js",        "dest": "{{scripts_path}}/project/project-notes-cards.js" },
     { "source": "helpers/project-referenced-by-cards.js","dest": "{{scripts_path}}/project/project-referenced-by-cards.js" },
     { "source": "content/Projects.md",                   "dest": "{{module_directory}}/Projects.md" }
+  ],
+  "claude_surface": [
+    { "kind": "command", "source": "commands/project.md", "dest": ".claude/commands/project.md" },
+    { "kind": "skill",   "source": "skills/new-project/SKILL.md", "dest": "{{skills_dir}}/new-project/SKILL.md" },
+    { "kind": "claude_md_row", "table": "resolvers", "row": { "topic": "Projects", "path": "{{module_directory}}", "command": "/project" } }
   ],
   "nav_buttons": [
     {

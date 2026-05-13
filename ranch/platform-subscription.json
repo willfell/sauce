@@ -13,5 +13,7 @@
     { "name": "convenience", "version": "0.1.0" },
     { "name": "platform-claude", "version": "0.1.0" }
   ],
-  "blueprints": []
+  "blueprints": [
+    { "name": "project", "version": "1.5.0" }
+  ]
 }
