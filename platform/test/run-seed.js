@@ -208,5 +208,53 @@ ok("DT-2 makeDateLike MM-MMMM", dl.format("MM-MMMM") === "05-May");
 // DT-3 makeDateLike formats nested
 ok("DT-3 makeDateLike nested", dl.format("YYYY/MM-MMMM/YYYY-MM-DD") === "2026/05-May/2026-05-12");
 
+const { execFileSync } = require("child_process");
+
+function runCli(args, env = {}) {
+    try {
+        const out = execFileSync("node", ["platform/cli/sauce-cli.js", ...args], {
+            env: Object.assign({}, process.env, env),
+            stdio: ["ignore", "pipe", "pipe"],
+            encoding: "utf8",
+        });
+        return { code: 0, stdout: out, stderr: "" };
+    } catch (e) {
+        return { code: e.status || 1, stdout: (e.stdout && e.stdout.toString()) || "", stderr: (e.stderr && e.stderr.toString()) || "" };
+    }
+}
+
+// R-1 --reset refused on vault without vault_kind:test
+withTempVault((vault) => {
+    fs.mkdirSync(path.join(vault, "ranch"), { recursive: true });
+    fs.writeFileSync(path.join(vault, "ranch", "platform-config.json"), JSON.stringify({}));
+    const r = runCli(["seed", "--vault", vault, "--reset"]);
+    ok("R-1 --reset refused on production vault",
+        r.code === 2 && /refusing to --reset/.test(r.stderr));
+});
+
+// R-2 --reset allowed on vault_kind:test — nukes the project module dir
+withTempVault((vault) => {
+    fs.mkdirSync(path.join(vault, "ranch"), { recursive: true });
+    fs.mkdirSync(path.join(vault, "spice", "projects", "Foo"), { recursive: true });
+    fs.writeFileSync(path.join(vault, "spice", "projects", "Foo", "Project.md"), "x");
+    fs.writeFileSync(path.join(vault, "ranch", "platform-config.json"), JSON.stringify({ vault_kind: "test" }));
+    const r = runCli(["seed", "--vault", vault, "--reset", "--blueprint", "project", "--dry-run"]);
+    ok("R-2a --reset on test vault removed dir", !fs.existsSync(path.join(vault, "spice", "projects")));
+    ok("R-2b --reset succeeded (exit 0)", r.code === 0);
+});
+
+// R-3 --reset only nukes specified blueprints
+withTempVault((vault) => {
+    fs.mkdirSync(path.join(vault, "ranch"), { recursive: true });
+    fs.mkdirSync(path.join(vault, "spice", "projects"), { recursive: true });
+    fs.mkdirSync(path.join(vault, "spice", "daily"), { recursive: true });
+    fs.writeFileSync(path.join(vault, "spice", "projects", "X.md"), "x");
+    fs.writeFileSync(path.join(vault, "spice", "daily", "Y.md"), "y");
+    fs.writeFileSync(path.join(vault, "ranch", "platform-config.json"), JSON.stringify({ vault_kind: "test" }));
+    runCli(["seed", "--vault", vault, "--reset", "--blueprint", "project", "--dry-run"]);
+    ok("R-3a --reset nuked project", !fs.existsSync(path.join(vault, "spice", "projects")));
+    ok("R-3b --reset spared daily", fs.existsSync(path.join(vault, "spice", "daily", "Y.md")));
+});
+
 console.log(`\nrun-seed.js: ${pass} pass · ${fail} fail`);
 process.exit(fail === 0 ? 0 : 1);
