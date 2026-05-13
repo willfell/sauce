@@ -15,8 +15,12 @@
   "enable_folder_templates": true,
   "folder_templates": [
     {
-      "folder": "",
-      "template": ""
+      "folder": "spice/meetings/notes",
+      "template": "ranch/templates/Meeting.md"
+    },
+    {
+      "folder": "spice/meetings/hubs",
+      "template": "ranch/templates/Meeting Hub.md"
     }
   ],
   "enable_file_templates": false,
@@ -31,7 +35,9 @@
   "enabled_templates_hotkeys": [
     "",
     "Docs/Meta/Templates/Validate.md",
-    "Docs/Meta/Templates/Audit.md"
+    "Docs/Meta/Templates/Audit.md",
+    "ranch/templates/Validate.md",
+    "ranch/templates/Audit.md"
   ],
   "startup_templates": [
     ""
