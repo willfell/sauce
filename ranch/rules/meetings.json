@@ -1,0 +1,45 @@
+{
+  "contributions": {
+    "meetings": [
+      {
+        "scope": {
+          "path_glob": "spice/meetings/notes/**/*.md"
+        },
+        "frontmatter_branch": [
+          {
+            "when": {
+              "frontmatter": {
+                "type": "meeting"
+              }
+            },
+            "required_frontmatter": {
+              "date": {
+                "required": true,
+                "type": "string"
+              },
+              "attendees": {
+                "required": true,
+                "type": "list"
+              }
+            },
+            "required_tags": [
+              {
+                "tag": "meeting"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "scope": {
+          "path_glob": "spice/meetings/hubs/**/*.md"
+        },
+        "required_tags": [
+          {
+            "tag": "meetings-hub"
+          }
+        ]
+      }
+    ]
+  }
+}

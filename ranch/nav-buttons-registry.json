@@ -24,6 +24,23 @@
           "command_id": "daily-notes"
         }
       }
+    ],
+    "meetings": [
+      {
+        "id": "meetings-hub",
+        "label": "Meetings",
+        "icon": "meetings",
+        "order": 120,
+        "action": {
+          "type": "runTemplaterTemplate",
+          "template_source": "ranch/templates/Meeting Hub.md",
+          "folder_prefix": "spice/meetings/hubs",
+          "folder_date_pattern": "YYYY/MM-MMMM",
+          "filename_prefix": "Meetings-",
+          "filename_date_pattern": "YYYY-MM-DD",
+          "filename_suffix": ""
+        }
+      }
     ]
   }
 }
