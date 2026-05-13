@@ -1,27 +1,27 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-05-13T01:48:01.231Z",
-  "workshop_version": "0.32.0",
+  "generated_at": "2026-05-13T03:17:59.269Z",
+  "workshop_version": "0.33.1",
   "contributions": {
     "audit": [
       {
         "kind": "command",
         "source": "commands/audit.md",
         "dest": ".claude/commands/audit.md",
-        "version": "0.2.0"
+        "version": "0.2.1"
       },
       {
         "kind": "skill",
         "source": "skills/drift/SKILL.md",
         "dest": ".claude/skills/audit/drift/SKILL.md",
-        "version": "0.2.0"
+        "version": "0.2.1"
       },
       {
         "kind": "claude_md_row",
         "table": "resolvers",
         "row": {
           "topic": "Audit",
-          "path": "audit",
+          "path": ".claude/commands/audit.md",
           "command": "/audit"
         }
       }
@@ -31,44 +31,44 @@
         "kind": "command",
         "source": "commands/install.md",
         "dest": ".claude/commands/install.md",
-        "version": "0.1.0"
+        "version": "0.1.1"
       },
       {
         "kind": "command",
         "source": "commands/upgrade.md",
         "dest": ".claude/commands/upgrade.md",
-        "version": "0.1.0"
+        "version": "0.1.1"
       },
       {
         "kind": "command",
         "source": "commands/bootstrap.md",
         "dest": ".claude/commands/bootstrap.md",
-        "version": "0.1.0"
+        "version": "0.1.1"
       },
       {
         "kind": "skill",
         "source": "skills/install/SKILL.md",
         "dest": ".claude/skills/platform/install/SKILL.md",
-        "version": "0.1.0"
+        "version": "0.1.1"
       },
       {
         "kind": "skill",
         "source": "skills/upgrade/SKILL.md",
         "dest": ".claude/skills/platform/upgrade/SKILL.md",
-        "version": "0.1.0"
+        "version": "0.1.1"
       },
       {
         "kind": "skill",
         "source": "skills/bootstrap/SKILL.md",
         "dest": ".claude/skills/platform/bootstrap/SKILL.md",
-        "version": "0.1.0"
+        "version": "0.1.1"
       },
       {
         "kind": "claude_md_row",
         "table": "resolvers",
         "row": {
           "topic": "Install",
-          "path": "platform-claude",
+          "path": ".claude/commands/install.md",
           "command": "/install"
         }
       },
@@ -77,7 +77,7 @@
         "table": "resolvers",
         "row": {
           "topic": "Upgrade",
-          "path": "platform-claude",
+          "path": ".claude/commands/upgrade.md",
           "command": "/upgrade"
         }
       },
@@ -86,7 +86,7 @@
         "table": "resolvers",
         "row": {
           "topic": "Bootstrap",
-          "path": "platform-claude",
+          "path": ".claude/commands/bootstrap.md",
           "command": "/bootstrap"
         }
       }
