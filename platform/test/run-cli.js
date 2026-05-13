@@ -1331,6 +1331,53 @@ async function caseBF1BootstrapFreshVaultViaBrew() {
     });
 }
 
+// S-1 sauce seed --help prints usage line (works outside any vault; context-free verb)
+async function caseS1SeedHelp() {
+    const label = "S-1 sauce seed --help prints usage line";
+    delete require.cache[require.resolve("../cli/sauce-cli.js")];
+    delete require.cache[require.resolve("../cli/cmd-seed.js")];
+    const cli = require("../cli/sauce-cli.js");
+    const out = [];
+    const origLog = console.log; console.log = (s) => out.push(String(s));
+    try {
+        await cli.dispatch(["seed", "--help"]);
+    } finally { console.log = origLog; }
+    assertTrue(/usage: sauce seed/.test(out.join("\n")), label);
+}
+
+// S-2 sauce seed errors when no vault registered and no --vault supplied
+async function caseS2SeedNoVault() {
+    const label = "S-2 sauce seed errors when no vault registered and no --vault";
+    await withTempHome(async () => {
+        delete require.cache[require.resolve("../cli/sauce-cli.js")];
+        delete require.cache[require.resolve("../cli/cmd-seed.js")];
+        delete require.cache[require.resolve("../cli/registry.js")];
+        const cli = require("../cli/sauce-cli.js");
+        let threw = false, msg = "";
+        try {
+            await cli.dispatch(["seed"]);
+        } catch (e) { threw = true; msg = e.message || String(e); }
+        assertTrue(threw && /no vaults registered/.test(msg), label);
+    });
+}
+
+// S-3 sauce seed --vault <tmp> --dry-run prints header line (no seedable blueprints yet → header-only output)
+async function caseS3SeedDryRun() {
+    const label = "S-3 sauce seed --vault <tmp> --dry-run prints header line";
+    await withTempVault({}, async (vaultPath) => {
+        delete require.cache[require.resolve("../cli/sauce-cli.js")];
+        delete require.cache[require.resolve("../cli/cmd-seed.js")];
+        const cli = require("../cli/sauce-cli.js");
+        const out = [];
+        const origLog = console.log; console.log = (s) => out.push(String(s));
+        try {
+            await cli.dispatch(["seed", "--vault", vaultPath, "--dry-run"]);
+        } finally { console.log = origLog; }
+        const joined = out.join("\n");
+        assertTrue(/sauce seed:/.test(joined) && joined.includes(vaultPath), label);
+    });
+}
+
 const cases = [
     caseC1AncestorWalk, caseC2SauceVaultEnv, caseC3NotInVault, caseC4UnknownVerb,
     caseC5StatusClean, caseC6StatusDrift, caseC7UpdateFFOnly, caseC8UpdateDirtyRefusal,
@@ -1363,6 +1410,7 @@ const cases = [
     caseSH3ShimReturnsBrewWhenDangling,  // v0.36.0 S6.3 (failing-first)
     caseIR1BootstrapRegistersVault, caseIR2BootstrapNoRegisterFlag,  // v0.36.0 S7
     caseBF1BootstrapFreshVaultViaBrew,  // v0.36.0 S9.4 hotfix (will ship in v0.36.1)
+    caseS1SeedHelp, caseS2SeedNoVault, caseS3SeedDryRun,  // v0.38.0 S2.3
 ];
 
 async function main() {
