@@ -15,6 +15,7 @@
   ],
   "blueprints": [
     { "name": "project", "version": "1.5.0" },
-    { "name": "daily", "version": "0.3.0" }
+    { "name": "daily", "version": "0.3.0" },
+    { "name": "meetings", "version": "0.4.0" }
   ]
 }

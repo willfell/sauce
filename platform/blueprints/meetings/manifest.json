@@ -1,9 +1,10 @@
 {
   "name": "meetings",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "kind": "blueprint",
   "module_directory": "meetings",
-  "description": "Hub-centric meeting notes: one Meetings Hub per day at spice/meetings/hubs/YYYY/MM-MMMM/ aggregating individual meeting notes at spice/meetings/notes/ via inline NewMeetingButton + MeetingsHubCards CustomJS classes. v0.1.2: filename pattern <Name>-YYYY-MM-DD (Meetings-YYYY-MM-DD.md hub; <title>-YYYY-MM-DD.md per-meeting); hub folder date-routed; class regex date-extract. v0.2.0: MeetingsHubCards migrated to BeaconCards via row layout + async pre-fetch adapter; per-badge SVG icons + secondaryText subtitle preserved end-to-end. v0.3.0 MINOR: pilot integration with people-rendering@0.1.0 mechanism — MeetingsHubCards subtitle slot renders attendee chips for registered People (those with spice/people/<name>.md notes) via PeopleRendering.renderChip callback (uses cards@0.2.4 subtitle-callback polymorphism); falls back to comma-string when no registered People; new ## Attendees chip-rendering dataviewjs block in Meeting.md template above the bullet list. NewMeetingButton attendee autocomplete deferred to v0.27.x carry.",
+  "skills_dir": ".claude/skills/meetings",
+  "description": "Hub-centric meeting notes: one Meetings Hub per day at spice/meetings/hubs/YYYY/MM-MMMM/ aggregating individual meeting notes at spice/meetings/notes/ via inline NewMeetingButton + MeetingsHubCards CustomJS classes. v0.1.2: filename pattern <Name>-YYYY-MM-DD (Meetings-YYYY-MM-DD.md hub; <title>-YYYY-MM-DD.md per-meeting); hub folder date-routed; class regex date-extract. v0.2.0: MeetingsHubCards migrated to BeaconCards via row layout + async pre-fetch adapter; per-badge SVG icons + secondaryText subtitle preserved end-to-end. v0.3.0 MINOR: pilot integration with people-rendering@0.1.0 mechanism — MeetingsHubCards subtitle slot renders attendee chips for registered People (those with spice/people/<name>.md notes) via PeopleRendering.renderChip callback (uses cards@0.2.4 subtitle-callback polymorphism); falls back to comma-string when no registered People; new ## Attendees chip-rendering dataviewjs block in Meeting.md template above the bullet list. NewMeetingButton attendee autocomplete deferred to v0.27.x carry. v0.4.0 MINOR (v0.33.0 wave 2): adopts claude_surface[] — ships canonical /meetings slash command + new-meeting SKILL.md + resolvers row.",
   "depends_on": [
     { "name": "nav-buttons",      "range": ">=2.2.0" },
     { "name": "customjs-guard",   "range": ">=1.0.0" },
@@ -18,6 +19,11 @@
     { "source": "templates/Meeting Hub.md",     "dest": "{{templates_path}}/Meeting Hub.md" },
     { "source": "helpers/meetings-hub-cards.js", "dest": "{{scripts_path}}/meetings/meetings-hub-cards.js" },
     { "source": "helpers/new-meeting-button.js", "dest": "{{scripts_path}}/meetings/new-meeting-button.js" }
+  ],
+  "claude_surface": [
+    { "kind": "command", "source": "commands/meetings.md", "dest": ".claude/commands/meetings.md" },
+    { "kind": "skill",   "source": "skills/new-meeting/SKILL.md", "dest": "{{skills_dir}}/new-meeting/SKILL.md" },
+    { "kind": "claude_md_row", "table": "resolvers", "row": { "topic": "Meetings", "path": "{{module_directory}}", "command": "/meetings" } }
   ],
   "nav_buttons": [
     {
