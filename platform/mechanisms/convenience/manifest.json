@@ -1,6 +1,6 @@
 {
   "name": "convenience",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "kind": "mechanism",
   "description": "Consumer-convenience defaults: workspace copy-path hotkeys (Cmd+- / Cmd+=) + Cmd+T -> today's daily + Dataview JS enable + Tasks plugin taskFormat=dataview (suppresses emoji suggester) + sauce-tasks-icons CSS snippet (legacy-emoji-task render fallback). v0.2.1 PATCH (v0.41.2): community_plugin_settings[] +1 entry obsidian-tasks-plugin taskFormat=dataview — switches Tasks plugin from tasksPluginEmoji format to dataview inline-field format; suggester popup shows text labels (\"due date\" / \"high priority\") instead of emoji-prefixed labels; new tasks stored as `[due:: 2026-05-13]` syntax; existing emoji-tasks remain parseable (backwards-compatible). Per-entry plugin-dir-absent guard means workshop without tasks plugin gets graceful skip. v0.2.0 MINOR (v0.41.0): hotkeys[] +1 entry binding Cmd+T to daily-notes:goto-today (inherits new-tab semantics from alwaysOpenInNewTab); NEW manifest field snippets[] + appearance.enabledCssSnippets[] piggybacks on existing applyAppearance helper to register sauce-tasks-icons; NEW installer helper applySnippets (helper count 13 -> 14) copies declared CSS assets to .obsidian/snippets/sauce-*.css mirroring applyVendoredThemes sha256-compare overwrite-with-backup posture; landmine #12 allowlist 17 -> 18 with carve-out narrowing user-owned snippets to anything NOT matching sauce-*.css. v0.21.1 origin (carried over): introduces hotkeys[] + community_plugin_settings[] manifest fields + applyHotkeys + applyCommunityPluginData installer helpers.",
   "depends_on": [],
@@ -8,10 +8,11 @@
     { "id": "dataview" }
   ],
   "hotkeys": [
-    { "command_id": "workspace:copy-full-path", "modifiers": ["Mod"], "key": "-" },
-    { "command_id": "workspace:copy-path",      "modifiers": ["Mod"], "key": "=" },
-    { "command_id": "daily-notes:goto-today",   "modifiers": ["Mod"], "key": "t" },
-    { "command_id": "markdown:toggle-preview",  "modifiers": ["Mod"], "key": "e" }
+    { "command_id": "workspace:copy-full-path",          "modifiers": ["Mod"],         "key": "-" },
+    { "command_id": "workspace:copy-path",               "modifiers": ["Mod"],         "key": "=" },
+    { "command_id": "daily-notes:goto-today",            "modifiers": ["Mod"],         "key": "t" },
+    { "command_id": "markdown:toggle-preview",           "modifiers": ["Mod"],         "key": "e" },
+    { "command_id": "obsidian-tasks-plugin:edit-task",   "modifiers": ["Mod","Shift"], "key": "t" }
   ],
   "community_plugin_settings": [
     {

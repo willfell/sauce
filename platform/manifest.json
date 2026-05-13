@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop platform manifest. Each mechanism + blueprint has its own version.",
-  "workshop_version": "0.41.4",
+  "workshop_version": "0.41.5",
   "date": "2026-05-13",
   "foundational_plugins": [
     {
@@ -78,7 +78,7 @@
     },
     {
       "name": "convenience",
-      "version": "0.2.3",
+      "version": "0.2.4",
       "path": "mechanisms/convenience"
     },
     {
