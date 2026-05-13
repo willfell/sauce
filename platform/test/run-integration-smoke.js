@@ -85,6 +85,7 @@ withTempHomeAndVault(({ home, vault }) => {
         { blueprint: "project", moduleDir: "projects", minNotes: 3 },
         { blueprint: "daily",   moduleDir: "daily",    minNotes: 30 },
         { blueprint: "meetings",moduleDir: "meetings", minNotes: 4 },
+        { blueprint: "people",  moduleDir: "people",   minNotes: 3 },
     ];
     for (const e of expectations) {
         const dir = path.join(vault, "spice", e.moduleDir);
