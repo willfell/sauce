@@ -55,31 +55,19 @@ async function run(ctx, args) {
         return;
     }
     const vaultPath = resolveTargetVault(opts);
-    const workshopRoot = ctx && ctx._sauceDir
+    const workshopRoot = ctx._sauceDir
         ? path.resolve(ctx._sauceDir, "..")
         : path.resolve(__dirname, "..", "..");
 
     if (opts.reset) {
+        // S4 wires this branch — placeholder until then
         const kind = readVaultKind(vaultPath);
         if (kind !== "test") {
             console.error(`refusing to --reset against a non-test vault (${vaultPath}); add "vault_kind":"test" to ranch/platform-config.json or omit --reset`);
             process.exit(2);
         }
-        // Compute target blueprints (same resolution as the seed run below) and nuke their dirs.
-        const workshopRootForReset = ctx && ctx._sauceDir
-            ? path.resolve(ctx._sauceDir, "..")
-            : path.resolve(__dirname, "..", "..");
-        const bpsToReset = (opts.blueprints && opts.blueprints.length)
-            ? opts.blueprints
-            : seeder.listSeedableBlueprints(workshopRootForReset);
-        for (const bp of bpsToReset) {
-            const moduleDir = seeder.readBlueprintModuleDir(workshopRootForReset, bp);
-            const target = path.join(vaultPath, "spice", moduleDir);
-            if (fs.existsSync(target)) {
-                fs.rmSync(target, { recursive: true, force: true });
-                console.log(`[${bp.padEnd(10)}] reset: removed spice/${moduleDir}/`);
-            }
-        }
+        // delete-then-seed wired in S4
+        throw new Error("--reset path not implemented until S4");
     }
 
     const result = seeder.seedVault({
