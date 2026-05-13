@@ -219,8 +219,22 @@ class ProjectsHubCards {
         }
         const briefcase = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--interactive-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>`;
         const lookup = this._lookup;
+        // v0.39.0 S6.7: within-group sort — status priority ascending then
+        // status_changed_at descending. status_changed_at is read as a string
+        // and compared via localeCompare for type-stability (CLAUDE.md
+        // gotcha: YAML auto-parses YYYY-MM-DD to Date|Luxon; coerce to string
+        // before compare).
+        const PRIORITY = { "in-progress": 0, "planning": 1, "blocked": 2, "idea": 3, "done": 4, "superseded": 5, "cancelled": 6 };
+        const sorted = [...pages].sort((a, b) => {
+            const pa = PRIORITY[a.status] ?? 99;
+            const pb = PRIORITY[b.status] ?? 99;
+            if (pa !== pb) return pa - pb;
+            const da = String(a.status_changed_at || "1970-01-01");
+            const db = String(b.status_changed_at || "1970-01-01");
+            return db.localeCompare(da);
+        });
         await customJS.BeaconCards.render(dv, {
-            pages,
+            pages: sorted,
             layout: "row",
             title: (p) => p.name || p.file.name,
             icon:  () => briefcase,
@@ -247,12 +261,7 @@ class ProjectsHubCards {
                 const e = lookup.get(p.file.path);
                 return e.total > 0 ? { done: e.done, total: e.total } : null;
             },
-            target: (p) => p.file.path,
-            sort: (a, b) => {
-                const ea = lookup.get(a.file.path);
-                const eb = lookup.get(b.file.path);
-                return eb.latestMtime - ea.latestMtime;
-            }
+            target: (p) => p.file.path
         });
     }
 }
