@@ -25,13 +25,9 @@ class ScratchNewButton {
         const monthFolder = m.format("YYYY/MM-MMMM");
         const folder = `spice/scratch/${monthFolder}/${day}`;
 
-        const btn = dv.container.createEl("button", {
-            text: "+ New Scratch",
-            cls: "beacon-accent-button"
-        });
-        btn.style.cssText = "margin: 0.5em 0; padding: 0.4em 0.9em; cursor: pointer;";
+        const pencilPlusIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4Z"/><line x1="20" y1="2" x2="20" y2="8"/><line x1="23" y1="5" x2="17" y2="5"/></svg>`;
 
-        btn.onclick = async () => {
+        const onClick = async () => {
             const tpPlugin = app.plugins.plugins["templater-obsidian"];
             if (!tpPlugin || !tpPlugin.templater) {
                 new Notice("ScratchNewButton: Templater plugin not enabled.", 8000);
@@ -68,5 +64,11 @@ class ScratchNewButton {
                 new Notice(`ScratchNewButton: Templater create failed — ${msg}`, 8000);
             }
         };
+
+        customJS.AccentButton.render(dv.container, {
+            label: "+ New Scratch",
+            icon: pencilPlusIcon,
+            onClick: onClick,
+        });
     }
 }
