@@ -4756,6 +4756,57 @@ async function caseProd3RuleFragmentAggregated() {
   }
 }
 
+// ============================================================
+// v0.39.0 S2.4 — products@0.1.0 validator green/red cases.
+// Direct exercise of platform/audit/rule-runner.js with the real
+// rule_fragment loaded from platform/blueprints/products/manifest.json.
+// Same engine the in-vault validator + CLI auditor both use, so a green
+// here = green in production at install/audit time. Mirrors HC-PR-1/2
+// pattern (no temp-vault scaffolding needed; in-memory record + fragment).
+// ============================================================
+async function caseProd4ValidatorAcceptsWellFormedProduct() {
+  console.log("\n--- Case PROD-4: products validator accepts a well-formed Product note ---");
+  const manifestPath = path.join(WORKSHOP, "platform/blueprints/products/manifest.json");
+  const manifest = _readJson(manifestPath);
+  const fragments = manifest.rule_fragments.map((rf) => rf.fragment);
+  const record = {
+    relPath: "spice/products/Sauce.md",
+    frontmatter: {
+      type: "product",
+      name: "Sauce",
+      created: "2026-05-12",
+      tags: ["product"],
+    },
+    body: "# Sauce\n",
+    blueprint: "products",
+  };
+  const violations = _ruleRunner.applyRules(fragments, record, { workshopRoot: WORKSHOP });
+  assertEqual(violations.length, 0,
+    "PROD-4: well-formed Product note produces zero violations");
+}
+
+async function caseProd5ValidatorRejectsProductMissingTag() {
+  console.log("\n--- Case PROD-5: products validator rejects a Product note missing required tag ---");
+  const manifestPath = path.join(WORKSHOP, "platform/blueprints/products/manifest.json");
+  const manifest = _readJson(manifestPath);
+  const fragments = manifest.rule_fragments.map((rf) => rf.fragment);
+  // Same as PROD-4 minus the required `product` tag.
+  const record = {
+    relPath: "spice/products/Acme.md",
+    frontmatter: {
+      type: "product",
+      name: "Acme",
+      created: "2026-05-12",
+      // tags omitted on purpose
+    },
+    body: "# Acme\n",
+    blueprint: "products",
+  };
+  const violations = _ruleRunner.applyRules(fragments, record, { workshopRoot: WORKSHOP });
+  assertTrue("PROD-5: missing-tag Product note surfaces required_tags.missing",
+    violations.some((v) => v.rule === "required_tags.missing" && /product/.test(v.message || "")));
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -4893,6 +4944,11 @@ async function caseProd3RuleFragmentAggregated() {
   await caseProd1FilesMaterialize();
   await caseProd2NavButtonRegistry();
   await caseProd3RuleFragmentAggregated();
+
+  // v0.39.0 S2.4 — products@0.1.0 validator green/red on Product notes
+  // using the real rule_fragment loaded from the products manifest.
+  await caseProd4ValidatorAcceptsWellFormedProduct();
+  await caseProd5ValidatorRejectsProductMissingTag();
 
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
