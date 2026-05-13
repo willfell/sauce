@@ -296,3 +296,30 @@ Builds the substrate for closing the "is the brewed sauce-after-upgrade actually
 - (e) **OAuth-token push restrictions for `.github/workflows/` files.** HTTPS origin's GitHub OAuth token without the `workflow` scope can't push commits that modify `.github/workflows/*.yml`. SSH-based push (or a Personal Access Token with `workflow` scope) is required. Document this in cycle-close protocol for any cycle that touches CI.
 
 Plan: `Docs/plans/2026-05-12-v0.38.0-deploy-confidence-substrate-plan.md`. Spec: `Docs/plans/2026-05-12-deploy-confidence-substrate-design.md`. Result: `Docs/plans/2026-05-13-v0.38.0-result.md`. Handoff: `Docs/prompts/2026-05-13-v0.38.0-execution-handoff.md` (autonomous-execution variant).
+
+
+---
+
+## v0.38.1 people α-seed CLOSED 2026-05-13
+
+First application of the v0.38.0 deploy-confidence substrate to a non-pilot blueprint. Three declarative entries — Alice / Bob / Carol — land in `platform/blueprints/people/seed/seed.json`, materializing as `spice/people/<Name>.md` with `tags: [person]`, `company`, and `title` frontmatter. The names match the `[[Person]]` wikilinks already shipped in `platform/blueprints/meetings/seed/seed.json`, retiring v0.38.0's known-limitation dangling-link warnings on the meetings α-seed.
+
+`platform/test/run-integration-smoke.js` grows `15 → 17 pass · 0 fail` via `+2` expectations (`smoke-bp-people-exists` + `smoke-bp-people-count>=3`); the harness's seed total line moves `37 → 40 notes across 4 blueprints` and the smoke-4 regex `total: \d+ notes` still matches. Workshop self-install via `sauce reinstall --vault $PWD` clean post-bump.
+
+**Workshop dogfood (T3):** `sauce reinstall --vault $PWD` clean. Workshop materialization touched `ranch/bootstrap-last-install.log` + `ranch/claude-surface-registry.json` + `ranch/platform-installed.json` — bundled into T4 cycle-close commit per handoff guidance.
+
+**Versions (T3 lockstep):** `workshop_version 0.38.0 → 0.38.1`, `package.json version 0.38.0 → 0.38.1`, `platform/blueprints/people/manifest.json version 0.1.1 → 0.1.2`. Manifest `date: "2026-05-13"`. Tag `v0.38.1` annotated, pushed; `.github/workflows/release.yml` preflight → bump-tap chain triggered to auto-bump `Formula/sauce.rb` in `willfell/homebrew-sauce`.
+
+**Stage commits on origin/main:** T1 `721dfb1` people seed.json; T2 `6e7e314` smoke +2 expectations; T3 `7912ff9` version bump lockstep. T4 close bundle commit follows this archive write.
+
+**Whole-suite preflight delta:** `run-integration-smoke.js 15 → 17 pass`. All other harnesses UNCHANGED. Whole-suite total `1216 → 1218 sub-asserts + 36 renderer cases` across 14 harnesses. Mechanisms catalogue UNCHANGED (10). Blueprints catalogue UNCHANGED at 11 entries; `people` is the only PATCH-bumped blueprint.
+
+**Pacing rhythm:** Controller-direct execution (no subagents, no reviewers). Test-pass output is the spec gate for T1 (`3 notes created, 0 skipped` + tmp-vault `ls` shows Alice.md / Bob.md / Carol.md) and T2 (smoke 15 → 17). Per the handoff's cadence guidance — for a tightly-specified substrate-application cycle of this size, controller-direct is the fastest path. Subagent dispatch would have added overhead without quality gain.
+
+**Lessons (v0.38.1):**
+- (a) **The substrate scales as designed.** Adding a new blueprint seed is now ≈3 file edits (seed.json + smoke expectations + version triple) plus a tmp-vault smoke validation. No design judgment, no architectural decisions, no plan beyond the handoff doc.
+- (b) **Templater-literal frontmatter is harmless and accepted.** Seeded `Alice.md` shows the seed-managed frontmatter block (`company: Acme`, `tags: [person]`, `title: Engineering Manager`) followed by the template's own Templater-literal block (`<% tp.file.title %>` etc.). substituteLenient only replaces `{{var}}` shape, not Templater syntax. v0.38.0 daily β-seed accepted this posture; v0.38.1 carries it forward without fighting it.
+- (c) **Wikilink resolution is basename-keyed.** Obsidian's link resolver matches `[[Alice]]` against any vault file with basename `Alice.md` — no path-prefix matching needed. The meetings seed's dangling-wikilink warnings retire automatically the moment people files exist at any vault location; ours land at `spice/people/Alice.md` per the module-directory invariant.
+- (d) **No-handoff-needed cycles still benefit from a written handoff.** This cycle's `Docs/prompts/2026-05-13-v0.38.1-people-seed-handoff.md` was the operational spec — file paths quoted, JSON content embedded, expected smoke counts predicted. A single session closed the cycle without clarification questions or re-planning. The handoff is the proof that v0.38.0 left a substrate that an agent can apply mechanically.
+
+Plan: (none — handoff doc IS the plan). Handoff: `Docs/prompts/2026-05-13-v0.38.1-people-seed-handoff.md`. Result: `Docs/plans/2026-05-13-v0.38.1-result.md`.
