@@ -938,6 +938,36 @@ async function caseI3ReinstallAllPrunes() {
     });
 }
 
+// U1: update prints migration hint when git fetch fails (v0.36.0 S4.4)
+async function caseU1UpdateHintsMigration() {
+    const label = "U1 sauce update prints migration hint when git fetch fails";
+    await withTempHome(async () => {
+        await withTempVault({}, async (vaultPath) => {
+            // Workshop dir exists (resolveContext walks for it). Create minimal pantry/ shape.
+            fs.mkdirSync(path.join(vaultPath, "pantry"), { recursive: true });
+            fs.writeFileSync(path.join(vaultPath, "pantry/.gitkeep"), "");
+            delete require.cache[require.resolve("../cli/sauce-cli.js")];
+            delete require.cache[require.resolve("../cli/cmd-update.js")];
+            const cli = require("../cli/sauce-cli.js");
+            const captured = [];
+            const origLog = console.log; console.log = (s) => captured.push(String(s));
+            let threw = false;
+            try {
+                await cli.dispatch(["update"], {
+                    cwd: vaultPath,
+                    _gitExec: (args) => {
+                        if (args[0] === "fetch") return { code: 1, stdout: "", stderr: "could not read pack" };
+                        return { code: 0, stdout: "", stderr: "" };
+                    }
+                });
+            } catch (_e) { threw = true; }
+            finally { console.log = origLog; }
+            assertTrue(threw, label + " — fetch failure still throws");
+            assertTrue(captured.some(l => l.includes("sauce migrate-layout")), label + " — hint mentions migrate-layout");
+        });
+    });
+}
+
 const cases = [
     caseC1AncestorWalk, caseC2SauceVaultEnv, caseC3NotInVault, caseC4UnknownVerb,
     caseC5StatusClean, caseC6StatusDrift, caseC7UpdateFFOnly, caseC8UpdateDirtyRefusal,
@@ -960,6 +990,7 @@ const cases = [
     caseCACS3AuditClaudeSurfaceOutputFile,  // v0.32.0 S7
     caseV1VaultAdd, caseV2VaultList, caseV3VaultRemove,  // v0.36.0 S2.1 (failing-first)
     caseI1ReinstallVault, caseI2ReinstallAll, caseI3ReinstallAllPrunes,  // v0.36.0 S3.1 (failing-first)
+    caseU1UpdateHintsMigration,  // v0.36.0 S4.4
 ];
 
 async function main() {

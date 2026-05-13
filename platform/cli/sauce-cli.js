@@ -129,6 +129,17 @@ async function dispatch(argv, opts) {
     } else {
         ctx = await resolveContext(opts);
     }
+    // Forward test hooks (underscore-prefixed callables) from opts onto the
+    // resolved ctx so harness fixtures can stub git/npm/installer without
+    // shelling out. Only underscore-prefixed function-valued entries are
+    // copied — never overrides resolved fields like vaultPath/workshopPath.
+    if (opts && typeof opts === "object") {
+        for (const k of Object.keys(opts)) {
+            if (k.startsWith("_") && typeof opts[k] === "function" && !(k in ctx)) {
+                ctx[k] = opts[k];
+            }
+        }
+    }
     const mod = require(VERBS[verb]);
     await mod.run(ctx, rest);
 }

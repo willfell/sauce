@@ -17,6 +17,7 @@ async function run(ctx, args) {
     const fetched = _gitExec(ctx, ["fetch", "origin", "main"]);
     if (fetched.code !== 0) {
         console.log(section.fail());
+        _printMigrationHint();
         throw new Error("git fetch failed: " + fetched.stderr);
     }
     console.log(section.ok());
@@ -24,6 +25,11 @@ async function run(ctx, args) {
     process.stdout.write("  " + section.step(2, total, "Checking working tree...") + "  ");
     const status = _gitExec(ctx, ["status", "--short"]);
     const dirty = (status.stdout || "").trim().length > 0;
+    const dirtyLines = (status.stdout || "").trim().split("\n").filter(Boolean);
+    if (dirty && dirtyLines.length > 20) {
+        _printMigrationHint();
+        // continue with existing dirty-tree behavior — don't override
+    }
     if (dirty && !force) {
         console.log(section.fail("dirty"));
         const detail = (status.stdout || "").trim().split("\n").map(l => "    " + l).join("\n");
@@ -69,6 +75,15 @@ async function _runInstaller(ctx) {
     if (typeof ctx._runInstaller === "function") return ctx._runInstaller();
     const bootstrap = require("../bootstrap.js");
     await bootstrap.phaseRunInstaller({ vaultPath: ctx.vaultPath });
+}
+
+function _printMigrationHint() {
+    console.log("");
+    console.log("  Hint: This pantry/ working tree looks like the pre-v0.36 layout.");
+    console.log("        Sauce now distributes pantry via Homebrew.");
+    console.log("        Migrate: sauce migrate-layout --vault <path>");
+    console.log("        Docs:    Docs/plans/2026-05-12-sauce-homebrew-distribution-design.md");
+    console.log("");
 }
 
 module.exports = { run };
