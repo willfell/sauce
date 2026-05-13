@@ -4,13 +4,13 @@
  * Auto-hides the button for the current note type.
  *
  * Usage in DataviewJS:
- *   await dv.view("Extras/Scripts/customjs-guard", { class: "ProjectNavButtons" });
+ *   await dv.view("ranch/views/customjs-guard", { class: "ProjectNavButtons" });
  *
  * Expected file paths:
- *   boards/planning/<slug>/<atlas|structure|board>.md
- *   boards/planning/<slug>/tasks/<TaskName>.md                    (legacy flat tasks)
- *   boards/planning/<slug>/tasks/<TaskName>/<TaskName>.md         (new task-folder convention)
- *   boards/planning/<slug>/tasks/<TaskName>/<sub-note>.md         (sub-notes peer to a task)
+ *   spice/projects/<slug>/<atlas|map|board>.md
+ *   spice/projects/<slug>/tasks/<TaskName>.md                    (legacy flat tasks)
+ *   spice/projects/<slug>/tasks/<TaskName>/<TaskName>.md         (new task-folder convention)
+ *   spice/projects/<slug>/tasks/<TaskName>/<sub-note>.md         (sub-notes peer to a task)
  *
  * Sub-note detection: a file inside tasks/<X>/ whose basename != X.
  * For sub-notes, prepends a "Task: <X>" button only if <X>.md exists in that folder.
@@ -18,7 +18,7 @@
 class ProjectNavButtons {
     detectContext(filePath, dv) {
         const pathParts = filePath.split("/");
-        const planningIdx = pathParts.indexOf("planning");
+        const planningIdx = pathParts.indexOf("projects");
         if (planningIdx < 0 || planningIdx + 1 >= pathParts.length) return { context: "non-project", pathParts, planningIdx };
 
         const slugIndex = planningIdx + 1;
@@ -27,16 +27,16 @@ class ProjectNavButtons {
         const tasksIdx = planningIdx + 2;
 
         const basename = dv.current().file.name;
-        const isStructure = basename.endsWith("- Structure");
+        const isMap = basename.endsWith("- Map");
 
         // Project board: <slug>-board.md directly under project dir
         if (basename.endsWith("-board") && pathParts.length === planningIdx + 3) {
             return { context: "project-board", pathParts, planningIdx, projectSlug, projectDir };
         }
 
-        // Project structure
-        if (isStructure && pathParts.length === planningIdx + 3) {
-            return { context: "project-structure", pathParts, planningIdx, projectSlug, projectDir };
+        // Project map
+        if (isMap && pathParts.length === planningIdx + 3) {
+            return { context: "project-map", pathParts, planningIdx, projectSlug, projectDir };
         }
 
         // Inside tasks/?
@@ -75,6 +75,11 @@ class ProjectNavButtons {
         const tags = cache?.frontmatter?.tags || [];
         if (Array.isArray(tags) && tags.includes("project") && pathParts.length === planningIdx + 3) {
             return { context: "project-hub", pathParts, planningIdx, projectSlug, projectDir };
+        }
+
+        // Projects hub: spice/projects/Projects.md (single fixed-path hub note)
+        if (pathParts.length === planningIdx + 2 && basename === "Projects") {
+            return { context: "projects-hub", pathParts, planningIdx };
         }
 
         return { context: "unknown", pathParts, planningIdx, projectSlug, projectDir };
@@ -154,8 +159,88 @@ class ProjectNavButtons {
         });
     }
 
+    async _promptForProjectName() {
+        return new Promise((resolve) => {
+            const overlay = document.createElement("div");
+            overlay.style.cssText = "position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; display: flex; align-items: center; justify-content: center;";
+            const dialog = document.createElement("div");
+            dialog.style.cssText = "background: var(--background-primary); border-radius: 12px; padding: 24px; min-width: 360px; max-width: 480px; box-shadow: 0 8px 32px rgba(0,0,0,0.3);";
+
+            const heading = document.createElement("div");
+            heading.textContent = "New Project";
+            heading.style.cssText = "font-size: 1.1em; font-weight: 600; margin-bottom: 12px;";
+            dialog.appendChild(heading);
+
+            const input = document.createElement("input");
+            input.type = "text";
+            input.placeholder = "Project name";
+            input.style.cssText = "width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--background-modifier-border); background: var(--background-secondary); color: var(--text-normal); font-size: 1em; margin-bottom: 6px;";
+            dialog.appendChild(input);
+
+            const slugDisplay = document.createElement("div");
+            slugDisplay.style.cssText = "font-size: 0.78em; color: var(--text-muted); margin-bottom: 6px;";
+            slugDisplay.textContent = "Slug:";
+            dialog.appendChild(slugDisplay);
+
+            const status = document.createElement("div");
+            status.style.cssText = "font-size: 0.8em; color: var(--text-muted); min-height: 1.2em; margin-bottom: 12px;";
+            dialog.appendChild(status);
+
+            const slugify = (name) => name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+
+            const refresh = () => {
+                const name = input.value.trim();
+                const slug = slugify(name);
+                slugDisplay.textContent = slug ? `Slug: spice/projects/${slug}/` : "Slug:";
+                if (!name) { status.textContent = ""; return; }
+                const existing = app.vault.getAbstractFileByPath(`spice/projects/${slug}`);
+                if (existing) {
+                    status.textContent = `"${slug}" already exists. Try a different name.`;
+                    status.style.color = "var(--text-error)";
+                } else {
+                    status.textContent = "";
+                }
+            };
+            input.addEventListener("input", refresh);
+
+            const btnRow = document.createElement("div");
+            btnRow.style.cssText = "display: flex; gap: 8px; justify-content: flex-end;";
+
+            const cancelBtn = document.createElement("button");
+            cancelBtn.textContent = "Cancel";
+            cancelBtn.style.cssText = "padding: 6px 14px; border-radius: 6px; cursor: pointer; border: 1px solid var(--background-modifier-border); background: var(--background-primary); color: var(--text-muted);";
+            cancelBtn.onclick = () => { document.body.removeChild(overlay); resolve(null); };
+
+            const okBtn = document.createElement("button");
+            okBtn.textContent = "Create";
+            okBtn.style.cssText = "padding: 6px 14px; border-radius: 6px; cursor: pointer; border: 1px solid var(--interactive-accent); background: var(--interactive-accent); color: var(--text-on-accent);";
+            okBtn.onclick = () => {
+                const name = input.value.trim();
+                if (!name) return;
+                const slug = slugify(name);
+                if (!slug) { status.textContent = "Name must contain alphanumerics."; status.style.color = "var(--text-error)"; return; }
+                if (app.vault.getAbstractFileByPath(`spice/projects/${slug}`)) { refresh(); input.focus(); return; }
+                document.body.removeChild(overlay);
+                resolve({ name, slug });
+            };
+
+            input.addEventListener("keydown", (e) => {
+                if (e.key === "Enter") okBtn.click();
+                if (e.key === "Escape") cancelBtn.click();
+            });
+
+            btnRow.appendChild(cancelBtn);
+            btnRow.appendChild(okBtn);
+            dialog.appendChild(btnRow);
+            overlay.appendChild(dialog);
+            overlay.addEventListener("click", (e) => { if (e.target === overlay) cancelBtn.click(); });
+            document.body.appendChild(overlay);
+            setTimeout(() => input.focus(), 0);
+        });
+    }
+
     async _createTaskNote(notesFolder, title, projectSlug, taskFolder, taskHubPath) {
-        const tplPath = "Extras/Templates/Template, Task Note.md";
+        const tplPath = "ranch/templates/Template, Task Note.md";
         const tplFile = app.vault.getAbstractFileByPath(tplPath);
         if (!tplFile) {
             new Notice(`Template missing: ${tplPath}`);
@@ -185,7 +270,7 @@ class ProjectNavButtons {
     }
 
     async _createTaskBoard(projectDir, taskFolder) {
-        const tplPath = "Extras/Templates/Template, Task Board.md";
+        const tplPath = "ranch/templates/Template, Task Board.md";
         const tplFile = app.vault.getAbstractFileByPath(tplPath);
         if (!tplFile) {
             new Notice(`Template missing: ${tplPath}`);
@@ -217,37 +302,86 @@ class ProjectNavButtons {
         return targetPath;
     }
 
-    async _openAsKanban(filePath) {
-        // Force the kanban view for the file. When a kanban .md file is created
-        // via vault.create, Obsidian sometimes opens it in markdown mode by
-        // default. Setting the view state explicitly ensures the kanban plugin
-        // takes over the leaf.
-        const file = app.vault.getAbstractFileByPath(filePath);
-        if (!file) {
-            app.workspace.openLinkText(filePath, "");
-            return;
+    async _createProject({ name, slug }) {
+        // HUB_NOTE_FILENAME_STYLE — single switch controlling per-project hub-note basename.
+        // Audit + hub-cards filters discriminate on `type: project` frontmatter so this is
+        // safe to flip at any time; new projects use the new style, existing hub notes keep
+        // their filenames. (Pre-v1.4.0 default was "fixed".)
+        //   "name"  → use the user's input verbatim (Title Case as typed; filesystem-sanitized).
+        //             Example: spice/projects/testing-it-all-out/Testing It All Out.md
+        //             Native Obsidian tab title shows the project name; wikilinks render
+        //             [[Testing It All Out]] without aliasing.
+        //   "slug"  → use the kebab slug (matches directory name).
+        //             Example: spice/projects/testing-it-all-out/testing-it-all-out.md
+        //   "fixed" → legacy "Project.md" literal. Pre-v1.4.0 behavior.
+        const HUB_NOTE_FILENAME_STYLE = "name";
+
+        // Filesystem-safe sanitization for the Title Case filename:
+        // strip characters Obsidian / macOS / Windows reject in basenames, collapse
+        // whitespace, trim. If the result is empty (e.g. all-punctuation input),
+        // fall back to slug. Never throws.
+        const sanitizeForFilename = (s) => {
+            const cleaned = String(s || "")
+                .replace(/[\/\\:*?"<>|#^[\]]/g, "")  // forbidden chars across major filesystems + Obsidian-reserved
+                .replace(/\s+/g, " ")
+                .trim();
+            return cleaned || slug;
+        };
+
+        let hubBasename;
+        switch (HUB_NOTE_FILENAME_STYLE) {
+            case "name":  hubBasename = `${sanitizeForFilename(name)}.md`; break;
+            case "slug":  hubBasename = `${slug}.md`; break;
+            case "fixed": hubBasename = "Project.md"; break;
+            default:      hubBasename = `${sanitizeForFilename(name)}.md`;
         }
-        const leaf = app.workspace.getLeaf();
-        await leaf.openFile(file);
-        try {
-            await leaf.setViewState({
-                type: "kanban",
-                state: { file: filePath },
-                active: true,
-            });
-        } catch (e) {
-            // Kanban plugin not installed or view-type mismatch — fall back silently.
+
+        const projectDir = `spice/projects/${slug}`;
+        const tasksDir = `${projectDir}/tasks`;
+        for (const dir of [projectDir, tasksDir]) {
+            if (!app.vault.getAbstractFileByPath(dir)) {
+                await app.vault.createFolder(dir);
+            }
         }
+
+        const tplBase = "ranch/templates";
+        const now = new Date();
+        const pad = (n) => String(n).padStart(2, "0");
+        const dateStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+        const dateTag = `${now.getFullYear()}/${pad(now.getMonth() + 1)}/${pad(now.getDate())}`;
+
+        const subs = (s) => s
+            .replaceAll("{{NAME}}", name)
+            .replaceAll("{{SLUG}}", slug)
+            .replaceAll("{{DATE}}", dateStr)
+            .replaceAll("{{DATE_TAG}}", dateTag);
+
+        const writeTpl = async (tplName, destBasename) => {
+            const tplFile = app.vault.getAbstractFileByPath(`${tplBase}/${tplName}`);
+            if (!tplFile) {
+                new Notice(`Template missing: ${tplBase}/${tplName}`);
+                return null;
+            }
+            const tpl = await app.vault.read(tplFile);
+            const content = subs(tpl);
+            const targetPath = `${projectDir}/${destBasename}`;
+            if (app.vault.getAbstractFileByPath(targetPath)) return targetPath;
+            await app.vault.create(targetPath, content);
+            return targetPath;
+        };
+
+        const atlasPath = await writeTpl("Template, Project.md", hubBasename);
+        await writeTpl("Template, Project Map.md", "Project Map.md");
+        await writeTpl("Template, Project Board.md", `${slug}-board.md`);
+
+        return atlasPath;
     }
 
-    _renderActionButton(container, label, icon, onClick) {
-        const btn = container.createEl("button");
-        btn.innerHTML = icon + `<span>${label}</span>`;
-        btn.style.cssText = `cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 6px 14px; border-radius: 6px; border: 1px solid var(--interactive-accent); background: var(--background-primary); color: var(--interactive-accent); font-size: 0.82em; font-weight: 500; font-family: inherit; letter-spacing: 0.01em; transition: all 0.15s ease; flex: 1; min-width: 0;`;
-        btn.onmouseenter = () => { btn.style.background = "var(--interactive-accent)"; btn.style.color = "var(--text-on-accent)"; };
-        btn.onmouseleave = () => { btn.style.background = "var(--background-primary)"; btn.style.color = "var(--interactive-accent)"; };
-        btn.onclick = onClick;
-        return btn;
+    async _openAsKanban(filePath) {
+        // Kanban plugin auto-detects `kanban-plugin: board` frontmatter and
+        // takes over the leaf. Explicit setViewState raced with file-body load
+        // and produced blank panes; openLinkText alone is sufficient.
+        app.workspace.openLinkText(filePath, "");
     }
 
     async renderTaskNoteTiles(parent, notesFolder, currentPath) {
@@ -295,13 +429,16 @@ class ProjectNavButtons {
     async render(dv) {
         const icons = {
             project: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>`,
-            structure: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12h-8"/><path d="M21 6H8"/><path d="M21 18h-8"/><path d="M3 6v4c0 1.1.9 2 2 2h3"/><path d="M3 10v6c0 1.1.9 2 2 2h3"/></svg>`,
+            map: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12h-8"/><path d="M21 6H8"/><path d="M21 18h-8"/><path d="M3 6v4c0 1.1.9 2 2 2h3"/><path d="M3 10v6c0 1.1.9 2 2 2h3"/></svg>`,
             board: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>`,
             task: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="m9 12 2 2 4-4"/></svg>`
         };
 
         const filePath = dv.current().file.path;
         const ctx = this.detectContext(filePath, dv);
+        if (ctx.context === "projects-hub") {
+            return await this._renderProjectsHub(dv);
+        }
         if (ctx.context === "non-project" || ctx.context === "unknown") return;
 
         const { pathParts, planningIdx, projectSlug, projectDir } = ctx;
@@ -317,15 +454,15 @@ class ProjectNavButtons {
             return tags.includes("project");
         });
 
-        const structureNote = projectFiles.find(f => f.basename.endsWith("- Structure"));
+        const mapNote = projectFiles.find(f => f.basename.endsWith("- Map"));
 
         const isMainNote = mainNote && filePath === mainNote.path;
-        const isStructure = dv.current().file.name.endsWith("- Structure");
+        const isMap = dv.current().file.name.endsWith("- Map");
         const isBoard = dv.current().file.name.endsWith("-board");
 
         // ── Sub-note detection ──────────────────────────────────────────────
-        // Path shape for a sub-note: boards/planning/<slug>/tasks/<TaskName>/<other>.md
-        // Path shape for a task note: boards/planning/<slug>/tasks/<TaskName>/<TaskName>.md
+        // Path shape for a sub-note: spice/projects/<slug>/tasks/<TaskName>/<other>.md
+        // Path shape for a task note: spice/projects/<slug>/tasks/<TaskName>/<TaskName>.md
         // Only render the Task button when (a) we're nested under tasks/<X>/ AND
         // (b) basename != X AND (c) <X>.md exists in that folder (skip for legacy
         // sub-folders like doc-db-testing/ that have no matching task note).
@@ -353,8 +490,8 @@ class ProjectNavButtons {
         if (!isMainNote && mainNote) {
             buttons.push({ label: mainNote.basename, icon: icons.project, path: mainNote.path });
         }
-        if (!isStructure && structureNote) {
-            buttons.push({ label: "Structure", icon: icons.structure, path: structureNote.path });
+        if (!isMap && mapNote) {
+            buttons.push({ label: "Map", icon: icons.map, path: mapNote.path });
         }
         if (!isBoard) {
             buttons.push({ label: "Project Board", icon: icons.board, path: boardPath });
@@ -371,10 +508,10 @@ class ProjectNavButtons {
         }
 
         // task-board: shown buttons should be Task: <X> · Project Hub · Project Board
-        // (Structure button is removed because the task-board doesn't need it)
+        // (Map button is removed because the task-board doesn't need it)
         if (ctx.context === "task-board") {
             const taskHubPath = `${projectDir}/tasks/${ctx.taskFolder}/${ctx.taskFolder}.md`;
-            const filteredButtons = buttons.filter(b => b.label !== "Structure");
+            const filteredButtons = buttons.filter(b => b.label !== "Map");
             if (app.vault.getAbstractFileByPath(taskHubPath) && !filteredButtons.some(b => b.path === taskHubPath)) {
                 filteredButtons.unshift({ label: `Task: ${ctx.taskFolder}`, icon: icons.task, path: taskHubPath });
             }
@@ -404,10 +541,17 @@ class ProjectNavButtons {
         // (esp. on file-modified events triggered by our own processFrontMatter
         // calls in the workstream widget). Wrap all our output in a single
         // removable root so re-renders replace previous output instead of
-        // appending. See Docs/Meta/Plugins.md for the landmine writeup.
+        // appending. See ranch/Plugins.md for the landmine writeup.
         const previousRoot = dv.container.querySelector(":scope > .pnb-root");
         if (previousRoot) previousRoot.remove();
         const root = dv.container.createEl("div", { cls: "pnb-root" });
+
+        const topDivider = root.createEl("hr");
+        topDivider.style.cssText = "border: none; border-top: 1px solid var(--background-modifier-border); margin: 8px 0 6px 0;";
+
+        const sectionLabel = root.createEl("div");
+        sectionLabel.textContent = "Project";
+        sectionLabel.style.cssText = "font-size: 0.72em; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;";
 
         const container = root.createEl("div");
         container.style.cssText = `
@@ -455,7 +599,7 @@ class ProjectNavButtons {
         }
 
         // --- Workstream widget (card notes only) ---
-        const isCardNote = !isMainNote && !isStructure && !isBoard && dv.current().source_board;
+        const isCardNote = !isMainNote && !isMap && !isBoard && dv.current().source_board;
         if (isCardNote && mainNote) {
             // (Dedupe handled by the root-level cleanup at the top of render.)
             const atlasCache = app.metadataCache.getFileCache(mainNote);
@@ -593,14 +737,19 @@ class ProjectNavButtons {
             const actionRow = root.createEl("div");
             actionRow.style.cssText = "display: flex; flex-wrap: nowrap; gap: 6px; margin-bottom: 4px;";
 
-            this._renderActionButton(actionRow, "New Note", plusIcon, async () => {
-                const title = await this._promptForTitle(notesFolder);
-                if (!title) return;
-                const targetPath = await this._createTaskNote(notesFolder, title, projectSlug, ctx.taskFolder, taskHubPath);
-                if (targetPath) {
-                    new Notice(`Created: ${title}`);
-                    app.workspace.openLinkText(targetPath, "");
-                }
+            customJS.AccentButton.render(actionRow, {
+                label: "New Note",
+                icon: plusIcon,
+                onClick: async () => {
+                    const title = await this._promptForTitle(notesFolder);
+                    if (!title) return;
+                    const targetPath = await this._createTaskNote(notesFolder, title, projectSlug, ctx.taskFolder, taskHubPath);
+                    if (targetPath) {
+                        new Notice(`Created: ${title}`);
+                        app.workspace.openLinkText(targetPath, "");
+                    }
+                },
+                flex: true
             });
 
             if (ctx.context === "task-hub") {
@@ -609,16 +758,26 @@ class ProjectNavButtons {
                 const boardIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>`;
 
                 if (boardExists) {
-                    this._renderActionButton(actionRow, "Open Board", boardIcon, async () => {
-                        await this._openAsKanban(boardPath);
+                    customJS.AccentButton.render(actionRow, {
+                        label: "Open Board",
+                        icon: boardIcon,
+                        onClick: async () => {
+                            await this._openAsKanban(boardPath);
+                        },
+                        flex: true
                     });
                 } else {
-                    this._renderActionButton(actionRow, "Create Board", boardIcon, async () => {
-                        const created = await this._createTaskBoard(projectDir, ctx.taskFolder);
-                        if (created) {
-                            new Notice("Task board created.");
-                            await this._openAsKanban(created);
-                        }
+                    customJS.AccentButton.render(actionRow, {
+                        label: "Create Board",
+                        icon: boardIcon,
+                        onClick: async () => {
+                            const created = await this._createTaskBoard(projectDir, ctx.taskFolder);
+                            if (created) {
+                                new Notice("Task board created.");
+                                await this._openAsKanban(created);
+                            }
+                        },
+                        flex: true
                     });
                 }
             }
@@ -629,5 +788,31 @@ class ProjectNavButtons {
             const notesFolder = `${projectDir}/tasks/${ctx.taskFolder}/notes`;
             await this.renderTaskNoteTiles(root, notesFolder, filePath);
         }
+    }
+
+    async _renderProjectsHub(dv) {
+        const previousRoot = dv.container.querySelector(":scope > .pnb-root");
+        if (previousRoot) previousRoot.remove();
+        const root = dv.container.createEl("div", { cls: "pnb-root" });
+
+        const actionRow = root.createEl("div");
+        actionRow.style.cssText = "display: flex; gap: 8px; margin-bottom: 8px;";
+
+        const plusIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>`;
+
+        customJS.AccentButton.render(actionRow, {
+            label: "New Project",
+            icon: plusIcon,
+            onClick: async () => {
+                const projectInfo = await this._promptForProjectName();
+                if (!projectInfo) return;
+                const targetPath = await this._createProject(projectInfo);
+                if (targetPath) {
+                    new Notice(`Created project: ${projectInfo.name}`);
+                    app.workspace.openLinkText(targetPath, "");
+                }
+            },
+            flex: true
+        });
     }
 }

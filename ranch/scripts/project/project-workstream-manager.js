@@ -5,7 +5,7 @@
  * Uses app.fileManager.processFrontMatter() for safe YAML serialization.
  *
  * Usage in DataviewJS (atlas note):
- *   await dv.view("Extras/Scripts/customjs-guard", { class: "ProjectWorkstreamManager" });
+ *   await dv.view("ranch/views/customjs-guard", { class: "ProjectWorkstreamManager" });
  */
 class ProjectWorkstreamManager {
     async render(dv) {
@@ -55,7 +55,7 @@ class ProjectWorkstreamManager {
             .where(p => {
                 if (p.file.path === filePath) return false;
                 if (p.file.name.endsWith("-board")) return false;
-                if (p.file.name.endsWith("- Structure")) return false;
+                if (p.file.name.endsWith("- Map")) return false;
                 return p.source_board !== undefined || p.workstream !== undefined;
             });
 
@@ -80,13 +80,13 @@ class ProjectWorkstreamManager {
         const blockedAll = boardTasks.filter(t => t.lane === "Blocked").length;
         const inProgressAll = boardTasks.filter(t => t.lane === "In Progress").length;
 
-        const findStructureNote = () => {
+        const findMapNote = () => {
             return app.vault.getFiles().find(f =>
                 f.path.startsWith(projectDir + "/") &&
                 !f.path.includes("/tasks/") &&
                 (() => {
                     const cache = app.metadataCache.getFileCache(f);
-                    return cache?.frontmatter?.type === "structure";
+                    return cache?.frontmatter?.type === "map";
                 })()
             );
         };
@@ -94,8 +94,8 @@ class ProjectWorkstreamManager {
         const updateWorkstreams = async (newWs) => {
             const atlasFile = app.vault.getAbstractFileByPath(filePath);
             if (atlasFile) await app.fileManager.processFrontMatter(atlasFile, fm => { fm.workstreams = newWs; });
-            const structureFile = findStructureNote();
-            if (structureFile) await app.fileManager.processFrontMatter(structureFile, fm => { fm.workstreams = newWs; });
+            const mapFile = findMapNote();
+            if (mapFile) await app.fileManager.processFrontMatter(mapFile, fm => { fm.workstreams = newWs; });
         };
 
         const slugify = (str) => {
@@ -177,13 +177,11 @@ class ProjectWorkstreamManager {
         const btnRow = root.createEl("div");
         btnRow.style.cssText = "display: flex; gap: 8px; margin-bottom: 10px;";
 
-        const addBtn = btnRow.createEl("button", { text: "+ Add" });
-        addBtn.style.cssText = "padding: 4px 12px; border-radius: 6px; cursor: pointer; font-size: 0.82em; background: var(--interactive-accent); color: var(--text-on-accent); border: none; font-weight: 500;";
-        addBtn.onclick = addWorkstream;
+        const plusIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>`;
+        const minusIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></svg>`;
 
-        const rmBtn = btnRow.createEl("button", { text: "\u2212 Remove" });
-        rmBtn.style.cssText = "padding: 4px 12px; border-radius: 6px; cursor: pointer; font-size: 0.82em; background: var(--background-secondary); color: var(--text-muted); border: 1px solid var(--background-modifier-border);";
-        rmBtn.onclick = removeWorkstream;
+        customJS.AccentButton.render(btnRow, { label: "Add", icon: plusIcon, onClick: addWorkstream });
+        customJS.AccentButton.render(btnRow, { label: "Remove", icon: minusIcon, onClick: removeWorkstream });
 
         if (totalAll > 0) {
             const pct = Math.round((completedAll / totalAll) * 100);

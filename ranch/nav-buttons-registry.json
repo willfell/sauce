@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "contributions": {
+    "project": [
+      {
+        "id": "projects-hub",
+        "label": "Projects",
+        "icon": "projects",
+        "order": 100,
+        "action": {
+          "type": "openLink",
+          "target": "spice/projects/Projects.md"
+        }
+      }
+    ]
+  }
+}

@@ -2,17 +2,37 @@
   "schema_version": 1,
   "name": "project",
   "applies_to": {
-    "frontmatter_tag_any_of": ["project"],
-    "path_glob_any_of": ["boards/planning/*/*.md"]
+    "frontmatter_tag_any_of": [
+      "project"
+    ],
+    "path_glob_any_of": [
+      "boards/planning/*/*.md"
+    ]
   },
   "required_frontmatter": {
     "type": "project",
-    "tags": ["project", "{{vault_identity_tag}}"],
-    "status": ["active", "paused", "shipped", "shelved"]
+    "tags": [
+      "project",
+      "{{vault_identity_tag}}"
+    ],
+    "status": [
+      "active",
+      "paused",
+      "shipped",
+      "shelved"
+    ]
   },
   "required_blocks": [
-    { "kind": "dataviewjs", "must_call": "customJS.SpaceNavButtons", "via": "customjs-guard" },
-    { "kind": "dataviewjs", "must_call": "customJS.ProjectNavButtons", "via": "customjs-guard" }
+    {
+      "kind": "dataviewjs",
+      "must_call": "customJS.SpaceNavButtons",
+      "via": "customjs-guard"
+    },
+    {
+      "kind": "dataviewjs",
+      "must_call": "customJS.ProjectNavButtons",
+      "via": "customjs-guard"
+    }
   ],
   "naming": {
     "folder": "boards/planning/<slug>/",
@@ -20,7 +40,50 @@
     "slug_format": "kebab-case"
   },
   "auto_fixes": [
-    { "when": "missing_frontmatter.type", "set": "project" },
-    { "when": "missing_frontmatter.status", "set": "active" }
-  ]
+    {
+      "when": "missing_frontmatter.type",
+      "set": "project"
+    },
+    {
+      "when": "missing_frontmatter.status",
+      "set": "active"
+    }
+  ],
+  "contributions": {
+    "project": [
+      {
+        "scope": {
+          "path_glob": "spice/projects/*/*.md"
+        },
+        "frontmatter_branch": [
+          {
+            "when": {
+              "frontmatter": {
+                "type": "project"
+              }
+            },
+            "required_frontmatter": {
+              "created": {
+                "required": true,
+                "type": "string"
+              },
+              "description": {
+                "required": true,
+                "type": "string"
+              },
+              "workstreams": {
+                "required": true,
+                "type": "list"
+              }
+            },
+            "required_tags": [
+              {
+                "tag": "project"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
 }
