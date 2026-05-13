@@ -13,6 +13,7 @@ const VERBS = {
     wizard:    "./cmd-wizard.js",
     migrate:   "./cmd-migrate.js",
     audit:     "./cmd-audit.js",
+    vault:     "./cmd-vault.js",
     help:      "./cmd-help.js"
 };
 
@@ -88,8 +89,14 @@ async function dispatch(argv, opts) {
         process.exitCode = 0;
         return;
     }
+    if (verb === "vault") {
+        const cmd = require(VERBS.vault);
+        await cmd.run(null, rest);
+        process.exitCode = 0;
+        return;
+    }
     if (!VERBS[verb]) {
-        throw new Error(`unknown verb: ${verb}\nUsage: sauce <bootstrap|update|status|wizard|migrate|audit|help>`);
+        throw new Error(`unknown verb: ${verb}\nUsage: sauce <bootstrap|update|status|wizard|migrate|audit|vault|help>`);
     }
     let ctx;
     if (verb === "bootstrap") {
@@ -106,7 +113,7 @@ async function dispatch(argv, opts) {
 }
 
 function printUsage() {
-    console.log("Usage: sauce <verb> [args]\n\nVerbs:\n  bootstrap  First-run install (rare; called by install.sh)\n  update     Pull latest workshop + reinstall\n  status     Show vault + workshop state\n  wizard     Interactive subscription / config editor\n  migrate    Migrate a source vault into this sauce vault (v0.28.0+)\n  audit      Audit a vault for blueprint conformance + untracked dirs (v0.29.0+)\n");
+    console.log("Usage: sauce <verb> [args]\n\nVerbs:\n  bootstrap  First-run install (rare; called by install.sh)\n  update     Pull latest workshop + reinstall\n  status     Show vault + workshop state\n  wizard     Interactive subscription / config editor\n  migrate    Migrate a source vault into this sauce vault (v0.28.0+)\n  audit      Audit a vault for blueprint conformance + untracked dirs (v0.29.0+)\n  vault      Manage the per-machine vault registry (add|list|remove)\n");
 }
 
 if (require.main === module) {
