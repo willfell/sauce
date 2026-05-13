@@ -3944,7 +3944,7 @@ async function caseSHCS1ManifestFields() {
   assertTrue("SHC-S1: scratch/manifest.json exists on disk", fs.existsSync(p));
   const m = _readJson(p);
   assertEqual(m.name, "scratch", "SHC-S1: manifest.name === \"scratch\"");
-  assertEqual(m.version, "0.2.0", "SHC-S1: manifest.version === \"0.2.0\"");
+  assertEqual(m.version, "0.2.1", "SHC-S1: manifest.version === \"0.2.1\"");
   assertEqual(m.module_directory, "scratch", "SHC-S1: manifest.module_directory === \"scratch\"");
 }
 
