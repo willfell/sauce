@@ -1,6 +1,6 @@
 {
   "name": "project",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "kind": "blueprint",
   "module_directory": "projects",
   "skills_dir": ".claude/skills/project",
@@ -10,9 +10,7 @@
     { "name": "customjs-guard", "range": ">=1.0.0" },
     { "name": "cards",          "range": ">=0.1.1" },
     { "name": "accent-button",  "range": ">=0.1.0" },
-    { "name": "convenience",    "range": ">=0.1.0" },
-    { "name": "products",       "range": ">=0.1.0" },
-    { "name": "teams",          "range": ">=0.1.0" }
+    { "name": "convenience",    "range": ">=0.1.0" }
   ],
   "customjs_classes": [
     "ProjectNavButtons",
