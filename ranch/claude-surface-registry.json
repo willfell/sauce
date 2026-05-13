@@ -1,0 +1,95 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-05-13T00:06:42.958Z",
+  "workshop_version": "0.29.0",
+  "contributions": {
+    "audit": [
+      {
+        "kind": "command",
+        "source": "commands/audit.md",
+        "dest": ".claude/commands/audit.md",
+        "version": "0.2.0"
+      },
+      {
+        "kind": "skill",
+        "source": "skills/drift/SKILL.md",
+        "dest": ".claude/skills/audit/drift/SKILL.md",
+        "version": "0.2.0"
+      },
+      {
+        "kind": "claude_md_row",
+        "table": "resolvers",
+        "row": {
+          "topic": "Audit",
+          "path": "audit",
+          "command": "/audit"
+        }
+      }
+    ],
+    "platform-claude": [
+      {
+        "kind": "command",
+        "source": "commands/install.md",
+        "dest": ".claude/commands/install.md",
+        "version": "0.1.0"
+      },
+      {
+        "kind": "command",
+        "source": "commands/upgrade.md",
+        "dest": ".claude/commands/upgrade.md",
+        "version": "0.1.0"
+      },
+      {
+        "kind": "command",
+        "source": "commands/bootstrap.md",
+        "dest": ".claude/commands/bootstrap.md",
+        "version": "0.1.0"
+      },
+      {
+        "kind": "skill",
+        "source": "skills/install/SKILL.md",
+        "dest": ".claude/skills/platform/install/SKILL.md",
+        "version": "0.1.0"
+      },
+      {
+        "kind": "skill",
+        "source": "skills/upgrade/SKILL.md",
+        "dest": ".claude/skills/platform/upgrade/SKILL.md",
+        "version": "0.1.0"
+      },
+      {
+        "kind": "skill",
+        "source": "skills/bootstrap/SKILL.md",
+        "dest": ".claude/skills/platform/bootstrap/SKILL.md",
+        "version": "0.1.0"
+      },
+      {
+        "kind": "claude_md_row",
+        "table": "resolvers",
+        "row": {
+          "topic": "Install",
+          "path": "platform-claude",
+          "command": "/install"
+        }
+      },
+      {
+        "kind": "claude_md_row",
+        "table": "resolvers",
+        "row": {
+          "topic": "Upgrade",
+          "path": "platform-claude",
+          "command": "/upgrade"
+        }
+      },
+      {
+        "kind": "claude_md_row",
+        "table": "resolvers",
+        "row": {
+          "topic": "Bootstrap",
+          "path": "platform-claude",
+          "command": "/bootstrap"
+        }
+      }
+    ]
+  }
+}
