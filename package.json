@@ -11,7 +11,8 @@
     "test:install": "node platform/test/run-install.js .",
     "test:helpers": "node platform/test/run-helper-cases.js",
     "test:renderer": "node platform/test/run-renderer.js",
-    "test:bootstrap": "node platform/test/run-bootstrap.js"
+    "test:bootstrap": "node platform/test/run-bootstrap.js",
+    "test:registry": "node platform/test/run-registry.js"
   },
   "dependencies": {
     "@inquirer/prompts": "^7.0.0"
