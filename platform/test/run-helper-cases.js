@@ -2615,6 +2615,129 @@ async function caseVT5MultipleFilesAllOverwritten() {
   }
 }
 
+// ---------- applySnippets (SN1-SN3) — NEW v0.41.0 ----------
+// Mirrors applyVendoredThemes posture: sha256-compare overwrite-with-backup,
+// .sauce-backup suffix on overwrite. Source asset staged in the fake workshop
+// at platform/mechanisms/test-fixture/<entry.source>; dest at
+// <vault>/.obsidian/snippets/<entry.name>.css.
+
+const SNIPPET_BODY_V1 = "/* sauce-tasks-icons v1 */\n.task-due:before { content: ''; }\n";
+const SNIPPET_BODY_V2 = "/* sauce-tasks-icons v2 — DIVERGENT */\n.task-due:before { content: 'X'; }\n";
+
+function snippetManifest(extra) {
+  return Object.assign({
+    name: "test-fixture",
+    version: "0.1.0",
+    files: [],
+    snippets: [{ source: "assets/snippets/sauce-tasks-icons.css", name: "sauce-tasks-icons" }],
+  }, extra || {});
+}
+
+async function _stageSnippetSource(scratchDir, srcRel, body) {
+  const fullPath = path.join(scratchDir, "_fake-workshop/platform/mechanisms/test-fixture", srcRel);
+  await fsp.mkdir(path.dirname(fullPath), { recursive: true });
+  await fsp.writeFile(fullPath, body, "utf8");
+}
+
+async function caseSN1FreshWriteToEmptyConsumer() {
+  console.log("\n--- Case SN1: applySnippets fresh write to consumer with no .obsidian/snippets/ ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "sauce-caseSN1-"));
+  try {
+    const manifest = snippetManifest();
+    await scaffoldVault(scratch, { templaterData: TEMPLATER_DEFAULT, slashCommanderData: SC_DEFAULT, manifest });
+    await _stageSnippetSource(scratch, "assets/snippets/sauce-tasks-icons.css", SNIPPET_BODY_V1);
+
+    const result = await runHarness(scratch);
+    assertTrue("SN1: platform-installed.json was written", result !== null);
+
+    const appliedEvts = (result && result.history || []).filter(
+      (h) => h.event === "info" && h.step === "snippets" && h.action === "applied"
+    );
+    assertTrue("SN1: at least one info/snippets/applied recorded", appliedEvts.length >= 1, `got ${appliedEvts.length}`);
+
+    const destPath = path.join(scratch, ".obsidian/snippets/sauce-tasks-icons.css");
+    assertTrue("SN1: snippet materialized in consumer", fs.existsSync(destPath));
+    if (fs.existsSync(destPath)) {
+      const body = await readRaw(destPath);
+      assertEq("SN1: snippet body byte-equal to source", body, SNIPPET_BODY_V1);
+    }
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseSN2IdempotentSkipsOverwriteOnSha256Match() {
+  console.log("\n--- Case SN2: applySnippets sha256-match skips overwrite on re-run ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "sauce-caseSN2-"));
+  try {
+    const manifest = snippetManifest();
+    await scaffoldVault(scratch, { templaterData: TEMPLATER_DEFAULT, slashCommanderData: SC_DEFAULT, manifest });
+    await _stageSnippetSource(scratch, "assets/snippets/sauce-tasks-icons.css", SNIPPET_BODY_V1);
+
+    const first = await runHarness(scratch);
+    const firstApplied = (first && first.history || []).filter(
+      (h) => h.event === "info" && h.step === "snippets" && h.action === "applied"
+    );
+    assertTrue("SN2: first run wrote snippet", firstApplied.length >= 1, `got ${firstApplied.length}`);
+
+    // Bump fixture version so the install loop re-processes (gotcha 9).
+    const fixtureManifest2 = Object.assign({}, manifest, { version: "0.1.1" });
+    await fsp.writeFile(path.join(scratch, "_fake-workshop/platform/manifest.json"), JSON.stringify({
+      workshop_version: "0.0.0-test",
+      mechanisms: [{ name: "test-fixture", version: "0.1.1", path: "mechanisms/test-fixture" }],
+      blueprints: [],
+    }, null, 2), "utf8");
+    await fsp.writeFile(path.join(scratch, "_fake-workshop/platform/mechanisms/test-fixture/manifest.json"), JSON.stringify(fixtureManifest2, null, 2), "utf8");
+    await fsp.writeFile(path.join(scratch, "ranch/platform-subscription.json"), JSON.stringify({
+      mechanisms: [{ name: "test-fixture", version: "0.1.1" }],
+      blueprints: [],
+    }, null, 2), "utf8");
+
+    const second = await runHarness(scratch);
+    const newOnSecond = (second && second.history || []).slice((first && first.history || []).length);
+    const secondApplied = newOnSecond.filter(
+      (h) => h.event === "info" && h.step === "snippets" && (h.action === "applied" || h.action === "overwrote")
+    );
+    const secondSkips = newOnSecond.filter(
+      (h) => h.event === "info" && h.step === "snippets" && h.action === "skipped_identical"
+    );
+    assertEq("SN2: second run records 0 applied/overwrote events (sha256 match)", secondApplied.length, 0);
+    assertTrue("SN2: second run records at least one skipped_identical", secondSkips.length >= 1);
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseSN3OverwriteCreatesBackup() {
+  console.log("\n--- Case SN3: applySnippets overwrite creates .sauce-backup when prior content differs ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "sauce-caseSN3-"));
+  try {
+    const manifest = snippetManifest();
+    await scaffoldVault(scratch, { templaterData: TEMPLATER_DEFAULT, slashCommanderData: SC_DEFAULT, manifest });
+    await _stageSnippetSource(scratch, "assets/snippets/sauce-tasks-icons.css", SNIPPET_BODY_V1);
+
+    // Pre-existing divergent content at the dest.
+    const destPath = path.join(scratch, ".obsidian/snippets/sauce-tasks-icons.css");
+    await fsp.mkdir(path.dirname(destPath), { recursive: true });
+    await fsp.writeFile(destPath, SNIPPET_BODY_V2, "utf8");
+
+    const result = await runHarness(scratch);
+    assertTrue("SN3: install ran", result !== null);
+
+    const bakPath = `${destPath}.sauce-backup`;
+    assertTrue("SN3: .sauce-backup created (prior content backed up)", fs.existsSync(bakPath));
+    if (fs.existsSync(bakPath)) {
+      const bak = await readRaw(bakPath);
+      assertEq("SN3: backup body byte-equal to prior consumer content", bak, SNIPPET_BODY_V2);
+    }
+
+    const live = await readRaw(destPath);
+    assertEq("SN3: live snippet body byte-equal to source v1", live, SNIPPET_BODY_V1);
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
 // ---------- applyAppearance (AP1-AP5) ----------
 
 async function caseAP1FreshWriteCreatesAppearanceJson() {
@@ -5235,6 +5358,12 @@ async function caseProj3ValidatorRejectsProjectInvalidStatusEnum() {
   await caseVT3SubsequentOverwriteCreatesBak();
   await caseVT4MissingSourceFailsLoud();
   await caseVT5MultipleFilesAllOverwritten();
+
+  // v0.41.0 — applySnippets installer helper (sauce-* CSS to .obsidian/snippets/).
+  await caseSN1FreshWriteToEmptyConsumer();
+  await caseSN2IdempotentSkipsOverwriteOnSha256Match();
+  await caseSN3OverwriteCreatesBackup();
+
   await caseAP1FreshWriteCreatesAppearanceJson();
   await caseAP2AdditiveSnippetUnion();
   await caseAP3CssThemeAlwaysOverridden();
