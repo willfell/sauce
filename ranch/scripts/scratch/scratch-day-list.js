@@ -54,9 +54,15 @@ class ScratchDayList {
 
     async render(dv, args) {
         if (dv.container.closest(".markdown-embed")) return;
+
+        const myGen = (dv.container.__scratchRenderGen || 0) + 1;
+        dv.container.__scratchRenderGen = myGen;
+        const isStale = () => dv.container.__scratchRenderGen !== myGen;
+
         while (dv.container.firstChild) dv.container.removeChild(dv.container.firstChild);
 
         const day = await this._pollForDayArg(args, dv);
+        if (isStale()) return;
         if (!day) {
             dv.paragraph("ScratchDayList: missing `day` arg.");
             return;
@@ -83,6 +89,8 @@ class ScratchDayList {
                 _mtime: (s.file.mtime && s.file.mtime.ts) || 0
             });
         }
+
+        if (isStale()) return;
 
         await customJS.BeaconCards.render(dv, {
             pages: items,

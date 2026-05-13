@@ -1,6 +1,6 @@
 {
   "name": "sauce",
-  "version": "0.40.6",
+  "version": "0.40.7",
   "private": true,
   "description": "Sauce vault platform workshop (canonical source). bootstrap.js requires @inquirer/prompts; harnesses (run-helper-cases/run-renderer/run-bootstrap) stay zero-dep.",
   "engines": {
