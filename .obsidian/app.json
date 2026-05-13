@@ -1,3 +1,5 @@
 {
-  "alwaysOpenInNewTab": true
+  "alwaysOpenInNewTab": true,
+  "defaultViewMode": "preview",
+  "livePreview": false
 }

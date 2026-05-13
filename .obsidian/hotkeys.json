@@ -22,5 +22,13 @@
       ],
       "key": "["
     }
+  ],
+  "daily-notes:goto-today": [
+    {
+      "modifiers": [
+        "Mod"
+      ],
+      "key": "t"
+    }
   ]
 }
