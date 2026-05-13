@@ -1,0 +1,24 @@
+{
+    "schema_version": 1,
+    "kind": "declarative",
+    "notes": [
+        {
+            "path": "spice/people/Alice.md",
+            "vars": { "name": "Alice", "title": "Engineering Manager", "company": "Acme" },
+            "frontmatter": { "company": "{{company}}", "title": "{{title}}", "tags": ["person"] },
+            "body_template": "templates/Template, People.md"
+        },
+        {
+            "path": "spice/people/Bob.md",
+            "vars": { "name": "Bob", "title": "Staff Engineer", "company": "Acme" },
+            "frontmatter": { "company": "{{company}}", "title": "{{title}}", "tags": ["person"] },
+            "body_template": "templates/Template, People.md"
+        },
+        {
+            "path": "spice/people/Carol.md",
+            "vars": { "name": "Carol", "title": "Director of Product", "company": "Beacon" },
+            "frontmatter": { "company": "{{company}}", "title": "{{title}}", "tags": ["person"] },
+            "body_template": "templates/Template, People.md"
+        }
+    ]
+}
