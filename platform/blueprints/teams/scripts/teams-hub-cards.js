@@ -43,7 +43,7 @@ class TeamsHubCards {
     // Group by product link path
     const groups = new Map();
     enriched.forEach(e => {
-      const key = e.team.product ? e.team.product.path : "(no product)";
+      const key = (e.team.product && e.team.product.path) ? e.team.product.path : "(no product)";
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key).push(e);
     });
@@ -52,7 +52,8 @@ class TeamsHubCards {
     const sortedKeys = [...groups.keys()].sort();
 
     for (const key of sortedKeys) {
-      const header = dv.container.createEl("h2", { text: key === "(no product)" ? key : `[[${key.replace(/\.md$/, "")}]]` });
+      const displayName = key === "(no product)" ? key : key.split("/").pop().replace(/\.md$/, "");
+      const header = dv.container.createEl("h2", { text: displayName });
       header.style.cssText = "margin-top: 16px; margin-bottom: 4px;";
       const groupTeams = groups.get(key);
       groupTeams.sort((a, b) => a.team.file.name.localeCompare(b.team.file.name));
