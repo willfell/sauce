@@ -948,6 +948,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyCorePluginSettings(tp, mech, variables, history, git);        // NEW v0.3.0
   await applyCommunityPluginData(tp, mech, variables, history, git);       // NEW v0.21.1
   await applyVendoredThemes(tp, mech, workshopPath, target.path, history, git);  // NEW v0.19.0
+  await applySnippets(tp, mech, workshopPath, target.path, history, git);         // NEW v0.41.0
   await applyAppearance(tp, mech, history, git);                                  // NEW v0.19.0
   await applyStyleSettings(tp, mech, workshopPath, target.path, history, git);    // NEW v0.19.0
   await applyHotkeys(tp, mech, history, git);                                     // NEW v0.21.1
@@ -4234,6 +4235,212 @@ async function applyVendoredThemes(tp, manifest, workshopPath, targetPath, histo
           });
         }
       }
+    }
+  }
+}
+
+// applySnippets — for each item that declares manifest.snippets[], copy the
+// source CSS asset to <vault>/.obsidian/snippets/<name>.css. Platform-vendored
+// snippets only — entry.name MUST match /^sauce-[A-Za-z0-9._-]+$/ (carve-out
+// codified in landmine #12 v0.41.0 amendment so consumer-authored snippets at
+// other names are never touched). Mirrors applyVendoredThemes posture:
+// sha256-compare overwrite-with-backup (`.sauce-backup` suffix on overwrite of
+// non-empty prior content), failure-loud history (Notice + history.error on
+// read/write failures; aborts modification on backup-write failure), never-
+// throws. Registration in .obsidian/appearance.json's enabledCssSnippets[]
+// piggybacks on the existing applyAppearance helper — callers declare
+// `appearance.enabledCssSnippets` in the same manifest. NEW v0.41.0.
+async function applySnippets(tp, manifest, workshopPath, targetPath, history, git) {
+  if (!manifest || !Array.isArray(manifest.snippets) || manifest.snippets.length === 0) return;
+  const adapter = tp.app.vault.adapter;
+  const fs = require("fs");
+  const fsp = fs.promises;
+  const nodePath = require("path");
+  const crypto = require("crypto");
+
+  const sha256 = (buf) => crypto.createHash("sha256").update(buf).digest("hex");
+
+  for (const entry of manifest.snippets) {
+    const valid =
+      entry &&
+      typeof entry.source === "string" && entry.source.length > 0 &&
+      typeof entry.name === "string" && entry.name.length > 0 &&
+      /^sauce-[A-Za-z0-9._-]+$/.test(entry.name);
+
+    if (!valid) {
+      new Notice(`applySnippets: ${manifest.name} invalid snippet entry; skipped`, 6000);
+      if (history) {
+        history.push({
+          event: "warning",
+          step: "snippets",
+          name: manifest.name,
+          message: "invalid_entry",
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      continue;
+    }
+
+    const srcAbs = nodePath.join(workshopPath, "platform", targetPath, entry.source);
+    if (!fs.existsSync(srcAbs)) {
+      new Notice(`applySnippets: source absent ${srcAbs} for ${manifest.name}/${entry.name}`, 8000);
+      if (history) {
+        history.push({
+          event: "error",
+          step: "snippets",
+          name: manifest.name,
+          message: `source absent: ${srcAbs}`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      continue;
+    }
+
+    let srcBody;
+    try {
+      srcBody = await fsp.readFile(srcAbs, "utf8");
+    } catch (e) {
+      new Notice(`applySnippets: read source failed for ${srcAbs} (${e.message})`, 8000);
+      if (history) {
+        history.push({
+          event: "error",
+          step: "snippets",
+          name: manifest.name,
+          message: `read source failed: ${e.message}`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      continue;
+    }
+
+    const destRel = `.obsidian/snippets/${entry.name}.css`;
+
+    // Ensure dest dir exists (mkdir-already-exists is non-fatal).
+    try {
+      await adapter.mkdir(".obsidian/snippets");
+    } catch (e) {
+      if (!/exists|EEXIST/i.test(e.message || "")) {
+        new Notice(`applySnippets: mkdir .obsidian/snippets failed (${e.message})`, 8000);
+        if (history) {
+          history.push({
+            event: "error",
+            step: "snippets",
+            name: manifest.name,
+            message: `mkdir failed: ${e.message}`,
+            git_commit: git.commit,
+            git_tag: git.tag,
+            git_dirty: git.dirty,
+            attempted_at: new Date().toISOString(),
+          });
+        }
+        continue;
+      }
+    }
+
+    const exists = await adapter.exists(destRel);
+    if (exists) {
+      let existingBody;
+      try {
+        existingBody = await adapter.read(destRel);
+      } catch (e) {
+        new Notice(`applySnippets: read dest failed for ${destRel} (${e.message})`, 8000);
+        if (history) {
+          history.push({
+            event: "error",
+            step: "snippets",
+            name: manifest.name,
+            message: `read dest failed: ${e.message}`,
+            git_commit: git.commit,
+            git_tag: git.tag,
+            git_dirty: git.dirty,
+            attempted_at: new Date().toISOString(),
+          });
+        }
+        continue;
+      }
+
+      const existingHash = sha256(Buffer.from(existingBody, "utf8"));
+      const srcHash = sha256(Buffer.from(srcBody, "utf8"));
+      if (existingHash === srcHash) {
+        if (history) {
+          history.push({
+            event: "info",
+            step: "snippets",
+            name: manifest.name,
+            snippet: entry.name,
+            action: "skipped_identical",
+            git_commit: git.commit,
+            git_tag: git.tag,
+            git_dirty: git.dirty,
+            attempted_at: new Date().toISOString(),
+          });
+        }
+        continue;
+      }
+
+      // Divergent: backup non-empty prior content before overwrite.
+      if (existingBody && existingBody.length > 0) {
+        try {
+          await adapter.write(`${destRel}.sauce-backup`, existingBody);
+        } catch (e) {
+          new Notice(`applySnippets: backup write failed for ${destRel}.sauce-backup (${e.message}); aborting overwrite`, 8000);
+          if (history) {
+            history.push({
+              event: "error",
+              step: "snippets",
+              name: manifest.name,
+              message: `backup write failed: ${e.message}`,
+              git_commit: git.commit,
+              git_tag: git.tag,
+              git_dirty: git.dirty,
+              attempted_at: new Date().toISOString(),
+            });
+          }
+          continue;
+        }
+      }
+    }
+
+    try {
+      await adapter.write(destRel, srcBody);
+    } catch (e) {
+      new Notice(`applySnippets: dest write failed for ${destRel} (${e.message})`, 8000);
+      if (history) {
+        history.push({
+          event: "error",
+          step: "snippets",
+          name: manifest.name,
+          message: `dest write failed: ${e.message}`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      continue;
+    }
+
+    if (history) {
+      history.push({
+        event: "info",
+        step: "snippets",
+        name: manifest.name,
+        snippet: entry.name,
+        action: exists ? "overwrote" : "applied",
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
     }
   }
 }
