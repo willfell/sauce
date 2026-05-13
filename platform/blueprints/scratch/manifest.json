@@ -50,7 +50,7 @@
     {
       "target": "scratch",
       "fragment": {
-        "scope": { "path_glob": "spice/scratch/**/Scratch-*.md" },
+        "scope": { "path_glob": "spice/scratch/**/Scratch-2*.md" },
         "required_frontmatter": {
           "created": { "required": true, "type": "string" },
           "type":    { "required": true, "equals": "scratch" },
