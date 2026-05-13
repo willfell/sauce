@@ -89,12 +89,33 @@ async function caseR5PruneMissing() {
     });
 }
 
+async function caseR6CorruptJson() {
+    const label = "R6 read() salvages corrupt JSON aside and returns empty";
+    await withTempHome(async (home) => {
+        const dir = path.join(home, ".sauce");
+        fs.mkdirSync(dir, { recursive: true });
+        const file = path.join(dir, "vaults.json");
+        fs.writeFileSync(file, "{not valid json at all");
+        // Suppress the console.warn salvage notice during the test
+        const origWarn = console.warn; console.warn = () => {};
+        const reg = require("../cli/registry.js");
+        try {
+            const r = reg.read();
+            assertEqual(r.version, 1, label + " — version");
+            assertEqual(r.vaults.length, 0, label + " — empty");
+            const sibs = fs.readdirSync(dir).filter(f => f.startsWith("vaults.json.corrupt-"));
+            assertEqual(sibs.length, 1, label + " — one salvage file");
+        } finally { console.warn = origWarn; }
+    });
+}
+
 (async () => {
     await caseR1ReadMissing();
     await caseR2AddVault();
     await caseR3RemoveVault();
     await caseR4AtomicWrite();
     await caseR5PruneMissing();
+    await caseR6CorruptJson();
     console.log(`\n  ${pass} pass · ${fail} fail`);
     process.exit(fail > 0 ? 1 : 0);
 })();

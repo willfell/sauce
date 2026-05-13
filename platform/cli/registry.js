@@ -12,7 +12,15 @@ function read() {
     const p = registryPath();
     if (!fs.existsSync(p)) return { version: 1, vaults: [] };
     try { return JSON.parse(fs.readFileSync(p, "utf8")); }
-    catch (_e) { return { version: 1, vaults: [] }; }
+    catch (_e) {
+        // Salvage-copy aside before any subsequent write() overwrites the corrupt file.
+        try {
+            const bak = p + ".corrupt-" + new Date().toISOString().replace(/[:.]/g, "-");
+            fs.copyFileSync(p, bak);
+            console.warn("  WARN: " + p + " was unparseable; salvaged to " + bak);
+        } catch (_e2) { /* best-effort; don't block read() */ }
+        return { version: 1, vaults: [] };
+    }
 }
 
 function write(reg) {
