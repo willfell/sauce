@@ -1,0 +1,76 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  bump-tap:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Compute tarball sha256 + URL
+        id: sha
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          URL="https://github.com/willfell/sauce/archive/refs/tags/${GITHUB_REF_NAME}.tar.gz"
+          # Retry up to 5 times with 5s backoff — GitHub tag tarball may take a few seconds to be ready
+          SHA=""
+          for i in 1 2 3 4 5; do
+            if SHA=$(curl -fsSL "$URL" | shasum -a 256 | awk '{print $1}'); then
+              if [ -n "$SHA" ] && [ "$SHA" != "" ]; then break; fi
+            fi
+            echo "Retry $i: tarball not ready, sleeping 5s..."
+            sleep 5
+          done
+          if [ -z "$SHA" ]; then
+            echo "ERROR: failed to compute tarball sha after 5 retries" >&2
+            exit 1
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "sha=${SHA}"         >> "$GITHUB_OUTPUT"
+          echo "url=${URL}"         >> "$GITHUB_OUTPUT"
+          echo "Computed sha256: ${SHA}"
+
+      - name: Checkout tap
+        uses: actions/checkout@v4
+        with:
+          repository: willfell/homebrew-sauce
+          token: ${{ secrets.TAP_PR_TOKEN }}
+          path: tap
+
+      - name: Patch Formula/sauce.rb
+        run: |
+          cd tap
+          FORMULA="Formula/sauce.rb"
+          if [ ! -f "$FORMULA" ]; then
+            echo "ERROR: $FORMULA not found in tap repo" >&2
+            exit 1
+          fi
+          # Replace url and sha256 lines. Use a temp file to avoid sed -i portability issues.
+          awk -v url='${{ steps.sha.outputs.url }}' \
+              -v sha='${{ steps.sha.outputs.sha }}' '
+            /^  url "/   { print "  url \"" url "\""; next }
+            /^  sha256 / { print "  sha256 \"" sha "\""; next }
+                         { print }
+          ' "$FORMULA" > "${FORMULA}.new"
+          mv "${FORMULA}.new" "$FORMULA"
+          echo "----- patched ${FORMULA} -----"
+          head -8 "$FORMULA"
+
+      - name: Open PR in tap
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.TAP_PR_TOKEN }}
+          path: tap
+          branch: bump-v${{ steps.sha.outputs.version }}
+          delete-branch: true
+          commit-message: "feat: sauce v${{ steps.sha.outputs.version }} formula"
+          title: "sauce v${{ steps.sha.outputs.version }}"
+          body: |
+            Auto-generated bump from `willfell/sauce` tag push (`${{ github.ref_name }}`).
+
+            - URL: `${{ steps.sha.outputs.url }}`
+            - SHA256: `${{ steps.sha.outputs.sha }}`
+
+            Merge to ship `brew upgrade sauce` to consumers.
