@@ -10,6 +10,7 @@
  *
  * Selectors: trips | project | people | meetings | daily | untracked |
  *            flags | errors | predicates | exits | report | positive |
+ *            items_schema | engagement_templates | claude_surface | scratch |
  *            all (default)
  */
 
@@ -980,6 +981,110 @@ async function caseAUCS6() {
   });
 }
 
+// ============================================================
+// v0.37.0 S3.3 — Scratch blueprint rule_fragment audit cases (SA-S1..S6).
+// Six per-rule-shape assertions: positive case + 5 negatives (3 required-fm,
+// 2 naming-pattern). Fragment shape mirrors blueprints/scratch/manifest.json:
+//   scope.path_glob: spice/scratch/**/Scratch-*.md
+//   required_frontmatter: { created: type:string, type: equals:"scratch", day: type:string }
+//   naming_pattern: ^Scratch-\d{4}-\d{2}-\d{2}-\d{2}-\d{2}\.md$
+// ============================================================
+const SCRATCH_FRAGMENT = [{
+  scope: { path_glob: "spice/scratch/**/Scratch-*.md" },
+  required_frontmatter: {
+    created: { required: true, type: "string" },
+    type:    { required: true, equals: "scratch" },
+    day:     { required: true, type: "string" }
+  },
+  naming_pattern: "^Scratch-\\d{4}-\\d{2}-\\d{2}-\\d{2}-\\d{2}\\.md$"
+}];
+
+// SA-S1 — valid scratch frontmatter + valid filename → 0 violations.
+async function caseSAS1() {
+  await withTempVault(async (dir) => {
+    makeSauceVault(dir, { blueprints: ["scratch"], rules: { scratch: SCRATCH_FRAGMENT } });
+    writeNote(dir, "spice/scratch/2026/05-May/2026-05-12/Scratch-2026-05-12-09-15.md",
+      { created: "2026-05-12T09:15:00", type: "scratch", day: "2026-05-12", time: "09:15" });
+    const { runAudit } = require("../audit/walker");
+    const result = await runAudit({ vaultPath: dir, untrackedCheck: false });
+    const scratchViolations = result.violations.filter(v => v.blueprint === "scratch");
+    assertEqual(scratchViolations.length, 0, "SA-S1: valid scratch note has zero violations");
+  });
+}
+
+// SA-S2 — missing day field → required_frontmatter.day violation.
+async function caseSAS2() {
+  await withTempVault(async (dir) => {
+    makeSauceVault(dir, { blueprints: ["scratch"], rules: { scratch: SCRATCH_FRAGMENT } });
+    writeNote(dir, "spice/scratch/2026/05-May/2026-05-12/Scratch-2026-05-12-09-15.md",
+      { created: "2026-05-12T09:15:00", type: "scratch", time: "09:15" });
+    const { runAudit } = require("../audit/walker");
+    const result = await runAudit({ vaultPath: dir, untrackedCheck: false });
+    assertTrue(result.violations.some(v => v.rule === "required_frontmatter.day"),
+      "SA-S2: missing day field surfaces required_frontmatter.day");
+  });
+}
+
+// SA-S3 — missing type field → required_frontmatter.type violation.
+async function caseSAS3() {
+  await withTempVault(async (dir) => {
+    makeSauceVault(dir, { blueprints: ["scratch"], rules: { scratch: SCRATCH_FRAGMENT } });
+    writeNote(dir, "spice/scratch/2026/05-May/2026-05-12/Scratch-2026-05-12-09-15.md",
+      { created: "2026-05-12T09:15:00", day: "2026-05-12", time: "09:15" });
+    const { runAudit } = require("../audit/walker");
+    const result = await runAudit({ vaultPath: dir, untrackedCheck: false });
+    assertTrue(result.violations.some(v => v.rule === "required_frontmatter.type"),
+      "SA-S3: missing type field surfaces required_frontmatter.type");
+  });
+}
+
+// SA-S4 — wrong type value ("notscratch") → equals-predicate violation.
+async function caseSAS4() {
+  await withTempVault(async (dir) => {
+    makeSauceVault(dir, { blueprints: ["scratch"], rules: { scratch: SCRATCH_FRAGMENT } });
+    writeNote(dir, "spice/scratch/2026/05-May/2026-05-12/Scratch-2026-05-12-09-15.md",
+      { created: "2026-05-12T09:15:00", type: "notscratch", day: "2026-05-12" });
+    const { runAudit } = require("../audit/walker");
+    const result = await runAudit({ vaultPath: dir, untrackedCheck: false });
+    assertTrue(result.violations.some(v => v.rule === "required_frontmatter.type.equals"),
+      "SA-S4: wrong type value surfaces required_frontmatter.type.equals");
+  });
+}
+
+// SA-S5 — filename without HH-mm suffix → naming_pattern violation.
+async function caseSAS5() {
+  await withTempVault(async (dir) => {
+    makeSauceVault(dir, { blueprints: ["scratch"], rules: { scratch: SCRATCH_FRAGMENT } });
+    writeNote(dir, "spice/scratch/2026/05-May/2026-05-12/Scratch-2026-05-12.md",
+      { created: "2026-05-12T09:15:00", type: "scratch", day: "2026-05-12" });
+    const { runAudit } = require("../audit/walker");
+    const result = await runAudit({ vaultPath: dir, untrackedCheck: false });
+    assertTrue(
+      result.violations.some(v => v.rule === "naming_pattern" && v.file.endsWith("Scratch-2026-05-12.md")),
+      "SA-S5: filename without HH-mm surfaces naming_pattern violation"
+    );
+  });
+}
+
+// SA-S6 — non-zero-padded hour component → naming_pattern violation.
+// (The path_glob `Scratch-*.md` is case-sensitive, so a lowercase-prefix
+// filename would fall out of scope and produce no violation; this test keeps
+// the Scratch- prefix so the scope-match fires, but breaks the digit
+// component grammar `\d{2}-\d{2}` with a single-digit hour `9-15`.)
+async function caseSAS6() {
+  await withTempVault(async (dir) => {
+    makeSauceVault(dir, { blueprints: ["scratch"], rules: { scratch: SCRATCH_FRAGMENT } });
+    writeNote(dir, "spice/scratch/2026/05-May/2026-05-12/Scratch-2026-05-12-9-15.md",
+      { created: "2026-05-12T09:15:00", type: "scratch", day: "2026-05-12" });
+    const { runAudit } = require("../audit/walker");
+    const result = await runAudit({ vaultPath: dir, untrackedCheck: false });
+    assertTrue(
+      result.violations.some(v => v.rule === "naming_pattern" && v.file.endsWith("Scratch-2026-05-12-9-15.md")),
+      "SA-S6: non-zero-padded hour component surfaces naming_pattern violation"
+    );
+  });
+}
+
 // Per-case error firewall: a thrown error inside any case body (including
 // the deliberate "Cannot find module ../audit/walker" RED-state throws)
 // counts as exactly one failed sub-assert and does NOT abort the harness.
@@ -1014,6 +1119,15 @@ const selector = process.argv[2] || "all";
     await runCase("AU-CS-4", caseAUCS4);
     await runCase("AU-CS-5", caseAUCS5);
     await runCase("AU-CS-6", caseAUCS6);
+  }
+  // v0.37.0 S3.3 — scratch blueprint rule_fragment audit cases (SA-S1..6)
+  if (selector === "scratch" || selector === "all") {
+    await runCase("SA-S1", caseSAS1);
+    await runCase("SA-S2", caseSAS2);
+    await runCase("SA-S3", caseSAS3);
+    await runCase("SA-S4", caseSAS4);
+    await runCase("SA-S5", caseSAS5);
+    await runCase("SA-S6", caseSAS6);
   }
   console.log(`========\nResult: ${passed} passed, ${failed} failed.`);
   process.exit(failed === 0 ? 0 : 1);
