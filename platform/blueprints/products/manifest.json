@@ -1,0 +1,60 @@
+{
+  "name": "products",
+  "version": "0.1.0",
+  "kind": "blueprint",
+  "module_directory": "products",
+  "skills_dir": ".claude/skills/products",
+  "description": "Org-chart apex entity. Flat notes under spice/products/<Name>.md with hub at spice/products/Products.md. Referenced by teams (each Team has exactly one product) and projects (Project carries optional products: [] list). Per-Product page rolls up member teams + projects touching the product (direct membership union transitive via teams).",
+  "depends_on": [
+    { "name": "customjs-guard", "range": ">=1.0.0" },
+    { "name": "nav-buttons",    "range": ">=2.6.0" },
+    { "name": "accent-button",  "range": ">=0.1.0" },
+    { "name": "cards",          "range": ">=0.2.4" }
+  ],
+  "customjs_classes": ["ProductsHubCards", "ProductPageCards", "ProductActionButtons"],
+  "files": [
+    { "source": "scripts/products-hub-cards.js",      "dest": "{{scripts_path}}/products/products-hub-cards.js" },
+    { "source": "scripts/product-page-cards.js",      "dest": "{{scripts_path}}/products/product-page-cards.js" },
+    { "source": "scripts/product-action-buttons.js",  "dest": "{{scripts_path}}/products/product-action-buttons.js" },
+    { "source": "templates/Template, Product.md",     "dest": "{{templates_path}}/Template, Product.md" },
+    { "source": "content/Products.md",                "dest": "{{module_directory}}/Products.md" }
+  ],
+  "templater_folder_templates": [
+    { "folder": "{{module_directory}}", "template": "{{templates_path}}/Template, Product.md" }
+  ],
+  "nav_buttons": [
+    {
+      "id": "products-hub",
+      "label": "Products",
+      "icon": "package",
+      "order": 70,
+      "action": { "type": "openLink", "target": "{{module_directory}}/Products.md" }
+    }
+  ],
+  "claude_surface": [
+    { "kind": "command", "source": "commands/products.md",                "dest": ".claude/commands/products.md" },
+    { "kind": "skill",   "source": "skills/new-product/SKILL.md",         "dest": "{{skills_dir}}/new-product/SKILL.md" },
+    { "kind": "claude_md_row", "table": "resolvers", "row": { "topic": "Products", "path": "{{module_directory}}", "command": "/products" } }
+  ],
+  "post_install": [
+    {
+      "type": "notice",
+      "message": "products@0.1.0 installed at spice/products/. Open Products.md to see the hub. Use /products or click + New Product to create your first."
+    }
+  ],
+  "rule_fragments": [
+    {
+      "target": "products",
+      "fragment": {
+        "scope": { "path_glob": "spice/products/*.md", "exclude_basenames": ["Products.md"] },
+        "required_frontmatter": {
+          "type":    { "required": true, "type": "string", "equals": "product" },
+          "name":    { "required": true, "type": "string" },
+          "created": { "required": true, "type": "string", "matches": "^\\d{4}-\\d{2}-\\d{2}$" }
+        },
+        "required_tags": [{ "tag": "product" }],
+        "naming_pattern": "^[A-Z][\\w '\\-&]+\\.md$"
+      }
+    }
+  ]
+}
