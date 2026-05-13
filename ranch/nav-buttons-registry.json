@@ -44,17 +44,17 @@
     ],
     "scratch": [
       {
-        "id": "scratch-new",
+        "id": "scratch-day-hub",
         "label": "Scratch",
         "icon": "edit-3",
         "order": 130,
         "action": {
           "type": "runTemplaterTemplate",
-          "template_source": "ranch/templates/Scratch.md",
+          "template_source": "ranch/templates/Scratch Day Hub.md",
           "folder_prefix": "spice/scratch",
           "folder_date_pattern": "YYYY/MM-MMMM/YYYY-MM-DD",
-          "filename_prefix": "Scratch-",
-          "filename_date_pattern": "YYYY-MM-DD-HH-mm",
+          "filename_prefix": "Scratch-Day-",
+          "filename_date_pattern": "YYYY-MM-DD",
           "filename_suffix": ""
         }
       }

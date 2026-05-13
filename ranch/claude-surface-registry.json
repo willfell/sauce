@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-05-13T07:17:19.120Z",
+  "generated_at": "2026-05-13T17:14:16.326Z",
   "workshop_version": "0.38.1",
   "contributions": {
     "audit": [
@@ -91,29 +91,6 @@
         }
       }
     ],
-    "project": [
-      {
-        "kind": "command",
-        "source": "commands/project.md",
-        "dest": ".claude/commands/project.md",
-        "version": "1.5.0"
-      },
-      {
-        "kind": "skill",
-        "source": "skills/new-project/SKILL.md",
-        "dest": ".claude/skills/project/new-project/SKILL.md",
-        "version": "1.5.0"
-      },
-      {
-        "kind": "claude_md_row",
-        "table": "resolvers",
-        "row": {
-          "topic": "Projects",
-          "path": "spice/projects",
-          "command": "/project"
-        }
-      }
-    ],
     "daily": [
       {
         "kind": "command",
@@ -165,13 +142,13 @@
         "kind": "command",
         "source": "commands/scratch.md",
         "dest": ".claude/commands/scratch.md",
-        "version": "0.1.0"
+        "version": "0.2.0"
       },
       {
         "kind": "skill",
         "source": "skills/new-scratch/SKILL.md",
         "dest": ".claude/skills/scratch/new-scratch/SKILL.md",
-        "version": "0.1.0"
+        "version": "0.2.0"
       },
       {
         "kind": "claude_md_row",

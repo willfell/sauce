@@ -10,6 +10,10 @@ day: <% tp.date.now("YYYY-MM-DD") %>
 await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 ```
 
+```dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "ScratchNewButton" });
+```
+
 ---
 
 ```dataviewjs
@@ -18,4 +22,4 @@ await dv.view("ranch/views/customjs-guard", { class: "ScratchDayList", args: { d
 
 ---
 
-[[Scratch|← All scratches]]
+← [[Scratch|Hub]]
