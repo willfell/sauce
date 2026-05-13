@@ -28,6 +28,16 @@ class ProjectsHubCards {
     }
 
     async render(dv) {
+        // v0.39.0 S6.3: default scope filter — hide terminal statuses unless
+        // the chip UI (rendered in S6.4) toggles them on. Records WITHOUT a
+        // `status` field (legacy `#project` tag-only notes pre-v0.38.0)
+        // short-circuit the Set lookup and still render — they surface with
+        // a "?" status pill rather than being filtered out (preserves
+        // v1.4.1 CF-1 legacy-tag-compat posture).
+        if (!this._activeStatuses) {
+            this._activeStatuses = new Set(["idea", "planning", "in-progress", "blocked"]);
+        }
+
         // v1.4.1 (S6.5 CF-1): match the hub note via EITHER the new canonical
         // `type: project` discriminator (v1.4.0+) OR the legacy `#project` tag
         // (pre-v1.4.0). Older projects in long-running consumer vaults don't
@@ -45,7 +55,8 @@ class ProjectsHubCards {
                           && p.type !== "kanban"))
                      && p.file.name !== "Projects"
                      && !p.file.path.includes("/steps/")
-                     && !p.file.name.toLowerCase().endsWith("-board"));
+                     && !p.file.name.toLowerCase().endsWith("-board"))
+            .where(p => !p.status || this._activeStatuses.has(p.status));
 
         const enriched = [];
         for (const project of projectHubs) {
