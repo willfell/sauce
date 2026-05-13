@@ -84,6 +84,23 @@ class ProjectsHubCards {
         renderLinkChips("Products", allProducts, this._activeProducts);
     }
 
+    _renderGroupSelector(dv) {
+        const wrap = dv.container.createEl("div");
+        wrap.style.cssText = "margin-bottom:10px;";
+        const lbl = wrap.createEl("span", { text: "Group by: " });
+        lbl.style.cssText = "color:var(--text-muted);font-size:0.85em;margin-right:6px;";
+        const select = wrap.createEl("select");
+        ["none", "status", "team", "product"].forEach(opt => {
+            const o = select.createEl("option", { text: opt, value: opt });
+            if (opt === (this._groupBy || "status")) o.selected = true;
+        });
+        select.addEventListener("change", async (e) => {
+            this._groupBy = e.target.value;
+            dv.container.empty();
+            await this.render(dv, {});
+        });
+    }
+
     async render(dv) {
         // v0.39.0 S6.3: default scope filter — hide terminal statuses unless
         // the chip UI (rendered in S6.4) toggles them on. Records WITHOUT a
@@ -119,6 +136,9 @@ class ProjectsHubCards {
         // of hub. Team/product chip set is derived from the status-filtered
         // projects so the chip universe is responsive to status toggles.
         this._renderChips(dv, statusFiltered);
+
+        // v0.39.0 S6.6: render group-by dropdown (default: status).
+        this._renderGroupSelector(dv);
 
         // v0.39.0 S6.5: apply team/product filter (OR-mode multi-select).
         // Projects with neither teams nor products surface unconditionally
@@ -158,12 +178,49 @@ class ProjectsHubCards {
             enriched.push({ project, latestMtime, total, done, blocked });
         }
 
-        const lookup = new Map(enriched.map(e => [e.project.file.path, e]));
+        this._lookup = new Map(enriched.map(e => [e.project.file.path, e]));
 
+        // v0.39.0 S6.6: dispatch on this._groupBy. "none" renders all
+        // projects as a single grid (preserves existing behavior). "status"
+        // (default) / "team" / "product" emit an <h3> header per group with
+        // a card list below. Status groups are ordered by STATUS_ORDER
+        // priority; team/product groups are alphabetical.
+        const groupBy = this._groupBy || "status";
+        const pages = enriched.map(e => e.project);
+        if (groupBy === "none" || pages.length === 0) {
+            await this._renderCards(dv, pages);
+        } else {
+            const groups = new Map();
+            for (const p of pages) {
+                let key;
+                if (groupBy === "status") key = p.status || "(no status)";
+                else if (groupBy === "team") key = (p.teams || []).map(l => l.path.split("/").pop().replace(/\.md$/, "")).join(", ") || "(no team)";
+                else if (groupBy === "product") key = (p.products || []).map(l => l.path.split("/").pop().replace(/\.md$/, "")).join(", ") || "(no product)";
+                if (!groups.has(key)) groups.set(key, []);
+                groups.get(key).push(p);
+            }
+            const STATUS_ORDER = ["in-progress", "planning", "blocked", "idea", "done", "superseded", "cancelled", "(no status)"];
+            const sortedKeys = groupBy === "status"
+                ? STATUS_ORDER.filter(s => groups.has(s))
+                : [...groups.keys()].sort();
+            for (const key of sortedKeys) {
+                const header = dv.container.createEl("h3", { text: key });
+                header.style.cssText = "margin-top:16px;margin-bottom:6px;color:var(--text-muted);";
+                await this._renderCards(dv, groups.get(key));
+            }
+        }
+    }
+
+    async _renderCards(dv, pages) {
+        if (!pages || !pages.length) {
+            const empty = dv.container.createEl("div", { text: "No projects yet. Create one to get started." });
+            empty.style.cssText = "color:var(--text-muted);font-style:italic;padding:8px 0;";
+            return;
+        }
         const briefcase = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--interactive-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>`;
-
+        const lookup = this._lookup;
         await customJS.BeaconCards.render(dv, {
-            pages: enriched.map(e => e.project),
+            pages,
             layout: "row",
             title: (p) => p.name || p.file.name,
             icon:  () => briefcase,
@@ -195,8 +252,7 @@ class ProjectsHubCards {
                 const ea = lookup.get(a.file.path);
                 const eb = lookup.get(b.file.path);
                 return eb.latestMtime - ea.latestMtime;
-            },
-            empty: "No projects yet. Create one to get started."
+            }
         });
     }
 }
