@@ -12,6 +12,18 @@
           "target": "spice/projects/Projects.md"
         }
       }
+    ],
+    "daily": [
+      {
+        "id": "daily-today",
+        "label": "Daily",
+        "icon": "daily",
+        "order": 50,
+        "action": {
+          "type": "invoke_command",
+          "command_id": "daily-notes"
+        }
+      }
     ]
   }
 }

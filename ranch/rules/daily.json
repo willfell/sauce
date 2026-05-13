@@ -1,0 +1,23 @@
+{
+  "contributions": {
+    "daily": [
+      {
+        "scope": {
+          "path_glob": "spice/daily/**/*.md"
+        },
+        "required_frontmatter": {
+          "created": {
+            "required": true,
+            "type": "string"
+          }
+        },
+        "required_tags": [
+          {
+            "tag": "daily"
+          }
+        ],
+        "naming_pattern": "^\\d{4}-\\d{2}-\\d{2}\\.md$"
+      }
+    ]
+  }
+}
