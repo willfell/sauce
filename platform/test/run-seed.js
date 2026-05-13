@@ -38,5 +38,37 @@ ok("HEL-4 emitFrontmatter bool-shape quoted",
     /flag: "true"/.test(fm2),
     `got: ${JSON.stringify(fm2)}`);
 
+// MD-1 writeNote rejects path outside module_directory
+withTempVault((vault) => {
+    const ctx = { vaultPath: vault, moduleDir: "projects" };
+    let threw = false;
+    try {
+        helpers.writeNote(ctx, { path: "spice/daily/2026-05-12.md", frontmatter: {}, body: "x" });
+    } catch (e) {
+        threw = e instanceof helpers.ModuleDirectoryEscapeError;
+    }
+    ok("MD-1 writeNote rejects cross-module path", threw);
+});
+
+// MD-2 writeNote allows path inside module_directory
+withTempVault((vault) => {
+    const ctx = { vaultPath: vault, moduleDir: "projects" };
+    const r = helpers.writeNote(ctx, { path: "spice/projects/Foo/Project.md", frontmatter: { type: "project" }, body: "body" });
+    ok("MD-2 writeNote inside module ok", !r.skipped);
+    const written = fs.readFileSync(path.join(vault, "spice/projects/Foo/Project.md"), "utf8");
+    ok("MD-3 writeNote produced file with frontmatter",
+        written.startsWith("---\n") && written.includes("type: project"));
+});
+
+// MD-4 writeNote skips if file exists (additive default)
+withTempVault((vault) => {
+    const ctx = { vaultPath: vault, moduleDir: "projects" };
+    helpers.writeNote(ctx, { path: "spice/projects/A/Project.md", frontmatter: { type: "project" }, body: "v1" });
+    const r = helpers.writeNote(ctx, { path: "spice/projects/A/Project.md", frontmatter: { type: "project" }, body: "v2" });
+    ok("MD-4 writeNote additive skip", r.skipped === true);
+    const stillV1 = fs.readFileSync(path.join(vault, "spice/projects/A/Project.md"), "utf8").includes("v1");
+    ok("MD-5 additive skip preserved original body", stillV1);
+});
+
 console.log(`\nrun-seed.js: ${pass} pass · ${fail} fail`);
 process.exit(fail === 0 ? 0 : 1);
