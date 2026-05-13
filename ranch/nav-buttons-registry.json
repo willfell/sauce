@@ -46,7 +46,7 @@
       {
         "id": "scratch-day-hub",
         "label": "Scratch",
-        "icon": "edit-3",
+        "icon": "scratch",
         "order": 130,
         "action": {
           "type": "runTemplaterTemplate",

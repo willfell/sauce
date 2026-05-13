@@ -1,12 +1,12 @@
 {
   "name": "scratch",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "kind": "blueprint",
   "module_directory": "scratch",
   "skills_dir": ".claude/skills/scratch",
-  "description": "Low-friction quick-capture scratch notes. Per-day sub-folders under spice/scratch/YYYY/MM-MMMM/YYYY-MM-DD/. v0.2.0 redesign: nav-button now opens-or-creates today's day-hub Scratch-Day-YYYY-MM-DD.md (collision-free with daily note); day-hub embeds ScratchNewButton (NEW helper using customJS.AccentButton) that creates timestamped Scratch-YYYY-MM-DD-HH-mm.md siblings. Retires Scratch Day.md template. ScratchHubCards target path fixed.",
+  "description": "Low-friction quick-capture scratch notes. Per-day sub-folders under spice/scratch/YYYY/MM-MMMM/YYYY-MM-DD/. v0.2.0 redesign: nav-button opens-or-creates today's day-hub Scratch-Day-YYYY-MM-DD.md (collision-free with daily note); day-hub embeds ScratchNewButton (helper using customJS.AccentButton) for timestamped Scratch-YYYY-MM-DD-HH-mm.md siblings; ScratchHubCards target path fixed. v0.2.1 patch: (a) Scratch Day Hub.md ScratchDayList args wrapped in array (customjs-guard requires Array); (b) nav-button icon set to 'scratch' (new ICONS entry in nav-buttons@2.6.1).",
   "depends_on": [
-    { "name": "nav-buttons",     "range": ">=2.6.0" },
+    { "name": "nav-buttons",     "range": ">=2.6.1" },
     { "name": "customjs-guard",  "range": ">=1.0.0" },
     { "name": "cards",           "range": ">=0.2.4" },
     { "name": "accent-button",   "range": ">=0.1.0" },
@@ -30,7 +30,7 @@
     {
       "id": "scratch-day-hub",
       "label": "Scratch",
-      "icon": "edit-3",
+      "icon": "scratch",
       "order": 130,
       "action": {
         "type": "runTemplaterTemplate",

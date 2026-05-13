@@ -17,7 +17,7 @@ await dv.view("ranch/views/customjs-guard", { class: "ScratchNewButton" });
 ---
 
 ```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "ScratchDayList", args: { day: dv.current().day } });
+await dv.view("ranch/views/customjs-guard", { class: "ScratchDayList", args: [{ day: dv.current().day }] });
 ```
 
 ---

@@ -42,7 +42,6 @@ Before any write, run `ls /Users/willfellhoelter/projects/repos/sauce` (or the e
 | Daily | spice/daily | /daily |
 | Install | .claude/commands/install.md | /install |
 | Meetings | spice/meetings | /meetings |
-| Projects | spice/projects | /project |
 | Scratch | spice/scratch | /scratch |
 | Upgrade | .claude/commands/upgrade.md | /upgrade |
 <!-- @claude-surface:resolvers END -->
