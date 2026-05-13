@@ -1,15 +1,16 @@
 {
   "name": "convenience",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "kind": "mechanism",
-  "description": "Consumer-convenience defaults: workspace copy-path hotkeys (Cmd+- copy full path; Cmd+= copy vault-relative path) + Dataview JS enable. NEW v0.21.1: introduces hotkeys[] + community_plugin_settings[] manifest fields + applyHotkeys + applyCommunityPluginData installer helpers. Allowlist 9 -> 11 (.obsidian/plugins/dataview/data.json + .obsidian/hotkeys.json); helper count 7 -> 9. applyCommunityPluginData short-circuits when any external_plugins[] id is absent from .obsidian/community-plugins.json (broadened gate vs styling helpers' required:true semantic, since materializing into a missing plugin's data.json is a wasted write).",
+  "description": "Consumer-convenience defaults: workspace copy-path hotkeys (Cmd+- / Cmd+=) + Cmd+T -> today's daily + Dataview JS enable + sauce-tasks-icons CSS snippet (Tasks plugin emoji -> Lucide icons). v0.2.0 MINOR (v0.41.0): hotkeys[] +1 entry binding Cmd+T to daily-notes:goto-today (inherits new-tab semantics from alwaysOpenInNewTab); NEW manifest field snippets[] + appearance.enabledCssSnippets[] piggybacks on existing applyAppearance helper to register sauce-tasks-icons; NEW installer helper applySnippets (helper count 13 -> 14) copies declared CSS assets to .obsidian/snippets/sauce-*.css mirroring applyVendoredThemes sha256-compare overwrite-with-backup posture; landmine #12 allowlist 17 -> 18 with carve-out narrowing user-owned snippets to anything NOT matching sauce-*.css. v0.21.1 origin (carried over): introduces hotkeys[] + community_plugin_settings[] manifest fields + applyHotkeys + applyCommunityPluginData installer helpers.",
   "depends_on": [],
   "external_plugins": [
     { "id": "dataview" }
   ],
   "hotkeys": [
     { "command_id": "workspace:copy-full-path", "modifiers": ["Mod"], "key": "-" },
-    { "command_id": "workspace:copy-path",      "modifiers": ["Mod"], "key": "=" }
+    { "command_id": "workspace:copy-path",      "modifiers": ["Mod"], "key": "=" },
+    { "command_id": "daily-notes:goto-today",   "modifiers": ["Mod"], "key": "t" }
   ],
   "community_plugin_settings": [
     {
@@ -20,5 +21,14 @@
       }
     }
   ],
+  "snippets": [
+    {
+      "source": "assets/snippets/sauce-tasks-icons.css",
+      "name":   "sauce-tasks-icons"
+    }
+  ],
+  "appearance": {
+    "enabledCssSnippets": ["sauce-tasks-icons"]
+  },
   "files": []
 }
