@@ -3944,7 +3944,7 @@ async function caseSHCS1ManifestFields() {
   assertTrue("SHC-S1: scratch/manifest.json exists on disk", fs.existsSync(p));
   const m = _readJson(p);
   assertEqual(m.name, "scratch", "SHC-S1: manifest.name === \"scratch\"");
-  assertEqual(m.version, "0.2.1", "SHC-S1: manifest.version === \"0.2.1\"");
+  assertEqual(m.version, "0.2.2", "SHC-S1: manifest.version === \"0.2.2\"");
   assertEqual(m.module_directory, "scratch", "SHC-S1: manifest.module_directory === \"scratch\"");
 }
 
@@ -3961,13 +3961,13 @@ async function caseSHCS2ScratchTemplate() {
 }
 
 async function caseSHCS3ScratchDayHubTemplate() {
-  console.log("\n--- Case SHC-S3: templates/Scratch Day Hub.md type + ScratchNewButton + ScratchDayList calls ---");
+  console.log("\n--- Case SHC-S3: templates/Scratch Day Hub.md type + ScratchDayActions + ScratchDayList calls ---");
   const p = path.join(BLUEPRINTS_DIR, "scratch", "templates", "Scratch Day Hub.md");
   assertTrue("SHC-S3: Scratch Day Hub.md exists on disk", fs.existsSync(p));
   const body = fs.readFileSync(p, "utf8");
   assertTrue("SHC-S3: Scratch Day Hub.md contains type: scratch-day", body.includes("type: scratch-day"));
-  assertTrue("SHC-S3: Scratch Day Hub.md invokes ScratchNewButton via dv.view",
-    /class:\s*"ScratchNewButton"/.test(body));
+  assertTrue("SHC-S3: Scratch Day Hub.md invokes ScratchDayActions via dv.view",
+    /class:\s*"ScratchDayActions"/.test(body));
   assertTrue("SHC-S3: Scratch Day Hub.md invokes ScratchDayList via dv.view",
     /class:\s*"ScratchDayList"/.test(body));
 }

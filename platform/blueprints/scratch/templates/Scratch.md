@@ -1,8 +1,8 @@
 ---
-created: <% tp.date.now("YYYY-MM-DDTHH:mm:ss") %>
+created: "<% tp.date.now("YYYY-MM-DDTHH:mm:ss") %>"
 type: scratch
-day: <% tp.date.now("YYYY-MM-DD") %>
-time: <% tp.date.now("HH:mm") %>
+day: "<% tp.date.now("YYYY-MM-DD") %>"
+time: "<% tp.date.now("HH:mm") %>"
 day_link: "[[Scratch-Day-<% tp.date.now('YYYY-MM-DD') %>]]"
 ---
 

@@ -9,16 +9,28 @@
  *   });
  */
 class ScratchDayList {
+    _coerceDay(raw) {
+        if (typeof raw === "string") return raw.slice(0, 10);
+        if (raw && typeof raw.toISODate === "function") return raw.toISODate();
+        if (raw instanceof Date && !isNaN(raw)) {
+            const y = raw.getFullYear();
+            const m = String(raw.getMonth() + 1).padStart(2, "0");
+            const d = String(raw.getDate()).padStart(2, "0");
+            return `${y}-${m}-${d}`;
+        }
+        return null;
+    }
+
     async render(dv, args) {
         if (dv.container.closest(".markdown-embed")) return;
-        const day = args && args.day;
+        const day = this._coerceDay(args && args.day);
         if (!day) {
             dv.paragraph("ScratchDayList: missing `day` arg.");
             return;
         }
 
         const scratches = dv.pages('"spice/scratch"')
-            .where(p => p.type === "scratch" && p.day === day);
+            .where(p => p.type === "scratch" && this._coerceDay(p.day) === day);
 
         const items = [];
         for (const s of scratches) {

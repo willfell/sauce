@@ -1,7 +1,7 @@
 ---
-created: <% tp.date.now("YYYY-MM-DDTHH:mm:ss") %>
+created: "<% tp.date.now("YYYY-MM-DDTHH:mm:ss") %>"
 type: scratch-day
-day: <% tp.date.now("YYYY-MM-DD") %>
+day: "<% tp.date.now("YYYY-MM-DD") %>"
 ---
 
 # <% tp.date.now("dddd, MMMM Do YYYY") %>
@@ -11,7 +11,7 @@ await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 ```
 
 ```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "ScratchNewButton" });
+await dv.view("ranch/views/customjs-guard", { class: "ScratchDayActions" });
 ```
 
 ---
@@ -19,7 +19,3 @@ await dv.view("ranch/views/customjs-guard", { class: "ScratchNewButton" });
 ```dataviewjs
 await dv.view("ranch/views/customjs-guard", { class: "ScratchDayList", args: [{ day: dv.current().day }] });
 ```
-
----
-
-← [[Scratch|Hub]]
