@@ -14,6 +14,7 @@ const VERBS = {
     migrate:   "./cmd-migrate.js",
     audit:     "./cmd-audit.js",
     vault:     "./cmd-vault.js",
+    reinstall: "./cmd-reinstall.js",
     help:      "./cmd-help.js"
 };
 
@@ -95,8 +96,17 @@ async function dispatch(argv, opts) {
         process.exitCode = 0;
         return;
     }
+    if (verb === "reinstall") {
+        const cmd = require(VERBS.reinstall);
+        // Forward test hooks (e.g. _runInstaller) via the opts arg to dispatch().
+        // reinstall is context-free (operates on the registry, not a vault).
+        const testCtx = opts || {};
+        await cmd.run(testCtx, rest);
+        process.exitCode = 0;
+        return;
+    }
     if (!VERBS[verb]) {
-        throw new Error(`unknown verb: ${verb}\nUsage: sauce <bootstrap|update|status|wizard|migrate|audit|vault|help>`);
+        throw new Error(`unknown verb: ${verb}\nUsage: sauce <bootstrap|update|status|wizard|migrate|audit|vault|reinstall|help>`);
     }
     let ctx;
     if (verb === "bootstrap") {
@@ -113,7 +123,7 @@ async function dispatch(argv, opts) {
 }
 
 function printUsage() {
-    console.log("Usage: sauce <verb> [args]\n\nVerbs:\n  bootstrap  First-run install (rare; called by install.sh)\n  update     Pull latest workshop + reinstall\n  status     Show vault + workshop state\n  wizard     Interactive subscription / config editor\n  migrate    Migrate a source vault into this sauce vault (v0.28.0+)\n  audit      Audit a vault for blueprint conformance + untracked dirs (v0.29.0+)\n  vault      Manage the per-machine vault registry (add|list|remove)\n");
+    console.log("Usage: sauce <verb> [args]\n\nVerbs:\n  bootstrap  First-run install (rare; called by install.sh)\n  update     Pull latest workshop + reinstall\n  status     Show vault + workshop state\n  wizard     Interactive subscription / config editor\n  migrate    Migrate a source vault into this sauce vault (v0.28.0+)\n  audit      Audit a vault for blueprint conformance + untracked dirs (v0.29.0+)\n  vault      Manage the per-machine vault registry (add|list|remove)\n  reinstall  Re-run installer against --all registered vaults or --vault <p>\n");
 }
 
 if (require.main === module) {
