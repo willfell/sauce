@@ -41,6 +41,7 @@
     { "name": "to-do", "version": "0.1.4", "path": "blueprints/to-do" },
     { "name": "journal", "version": "0.1.2", "path": "blueprints/journal" },
     { "name": "trips", "version": "0.1.7", "path": "blueprints/trips" },
-    { "name": "finance", "version": "0.2.10", "path": "blueprints/finance" }
+    { "name": "finance", "version": "0.2.10", "path": "blueprints/finance" },
+    { "name": "scratch", "version": "0.1.0", "path": "blueprints/scratch" }
   ]
 }
