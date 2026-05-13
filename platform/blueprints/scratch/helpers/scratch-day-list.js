@@ -43,11 +43,20 @@ class ScratchDayList {
         return "";
     }
 
+    async _pollForDayArg(args, dv) {
+        let day = this._coerceDay(args && args.day);
+        for (let i = 0; i < 40 && (!day || !/^\d{4}-\d{2}-\d{2}$/.test(day)); i++) {
+            await new Promise(r => setTimeout(r, 50));
+            day = this._coerceDay(dv.current().day);
+        }
+        return day;
+    }
+
     async render(dv, args) {
         if (dv.container.closest(".markdown-embed")) return;
         while (dv.container.firstChild) dv.container.removeChild(dv.container.firstChild);
 
-        const day = this._coerceDay(args && args.day);
+        const day = await this._pollForDayArg(args, dv);
         if (!day) {
             dv.paragraph("ScratchDayList: missing `day` arg.");
             return;
