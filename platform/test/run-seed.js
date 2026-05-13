@@ -137,5 +137,76 @@ withTempVault((root) => {
     ok("LD-5 listSeedableBlueprints filters", found.length === 1 && found[0] === "with");
 });
 
+const programmatic = require("../seeder/programmatic.js");
+
+// PR-1 loadProgrammaticSeed null on missing
+withTempVault((root) => {
+    fs.mkdirSync(path.join(root, "platform", "blueprints", "fake"), { recursive: true });
+    ok("PR-1 loadProgrammaticSeed null missing",
+        programmatic.loadProgrammaticSeed(path.join(root, "platform", "blueprints", "fake")) === null);
+});
+
+// PR-2 loadProgrammaticSeed throws on missing seed() function
+withTempVault((root) => {
+    const bp = path.join(root, "platform", "blueprints", "broken");
+    fs.mkdirSync(path.join(bp, "seed"), { recursive: true });
+    fs.writeFileSync(path.join(bp, "seed", "seed.js"), "module.exports = { schema_version: 1, kind: 'programmatic' };");
+    let threw = false;
+    try { programmatic.loadProgrammaticSeed(bp); } catch (e) { threw = /seed\(ctx\)/.test(e.message); }
+    ok("PR-2 loadProgrammaticSeed throws on missing seed()", threw);
+});
+
+// PR-3 materializeProgrammatic invokes seed() and writes notes
+withTempVault((root) => {
+    const bp = path.join(root, "platform", "blueprints", "ok");
+    fs.mkdirSync(path.join(bp, "seed"), { recursive: true });
+    fs.writeFileSync(path.join(bp, "seed", "seed.js"), `
+module.exports = {
+    schema_version: 1, kind: "programmatic",
+    seed(ctx) {
+        ctx.writeNote({ path: "spice/ok/A.md", frontmatter: {}, body: "X" });
+        return { notesCreated: 1 };
+    }
+};
+`);
+    const vault = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-seed-vault-"));
+    try {
+        const mod = programmatic.loadProgrammaticSeed(bp);
+        const baseCtx = { vaultPath: vault, moduleDir: "ok", anchorDate: "2026-05-12", stockVars: {} };
+        const r = programmatic.materializeProgrammatic(mod, baseCtx, "ok", bp, false);
+        ok("PR-3a materializeProgrammatic created", r.created === 1);
+        ok("PR-3b materializeProgrammatic file present", fs.existsSync(path.join(vault, "spice/ok/A.md")));
+    } finally {
+        fs.rmSync(vault, { recursive: true, force: true });
+    }
+});
+
+// RNG-1 fixedRng deterministic across calls
+const r1 = helpers.fixedRng("daily", "2026-05-12");
+const r2 = helpers.fixedRng("daily", "2026-05-12");
+const seq1 = [r1(), r1(), r1()];
+const seq2 = [r2(), r2(), r2()];
+ok("RNG-1 fixedRng deterministic", JSON.stringify(seq1) === JSON.stringify(seq2));
+
+// RNG-2 fixedRng differs across blueprints
+const r3 = helpers.fixedRng("project", "2026-05-12");
+const seq3 = [r3(), r3(), r3()];
+ok("RNG-2 fixedRng varies by blueprint", JSON.stringify(seq1) !== JSON.stringify(seq3));
+
+// RNG-3 fixedRng differs across anchor dates
+const r4 = helpers.fixedRng("daily", "2026-05-13");
+const seq4 = [r4(), r4(), r4()];
+ok("RNG-3 fixedRng varies by anchor", JSON.stringify(seq1) !== JSON.stringify(seq4));
+
+// DT-1 makeDateLike formats YYYY-MM-DD
+const dl = programmatic.makeDateLike(new Date("2026-05-12T00:00:00Z"));
+ok("DT-1 makeDateLike YYYY-MM-DD", dl.format("YYYY-MM-DD") === "2026-05-12");
+
+// DT-2 makeDateLike formats MM-MMMM
+ok("DT-2 makeDateLike MM-MMMM", dl.format("MM-MMMM") === "05-May");
+
+// DT-3 makeDateLike formats nested
+ok("DT-3 makeDateLike nested", dl.format("YYYY/MM-MMMM/YYYY-MM-DD") === "2026/05-May/2026-05-12");
+
 console.log(`\nrun-seed.js: ${pass} pass · ${fail} fail`);
 process.exit(fail === 0 ? 0 : 1);
