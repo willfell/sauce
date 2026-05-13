@@ -1266,6 +1266,36 @@ async function caseIR2BootstrapNoRegisterFlag() {
     });
 }
 
+// BF1: sauce bootstrap creates a fresh vault dir + resolves workshop from
+// __dirname (NOT <vault>/pantry/). Reproduces the v0.36.0 brew-smoke blocker.
+async function caseBF1BootstrapFreshVaultViaBrew() {
+    const label = "BF1 sauce bootstrap creates fresh vault without legacy <vault>/pantry/";
+    await withTempHome(async () => {
+        const freshVault = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "sauce-fresh-")), "newvault");
+        // Note: freshVault does NOT exist yet — bootstrap should create it.
+        delete require.cache[require.resolve("../cli/sauce-cli.js")];
+        delete require.cache[require.resolve("../cli/cmd-bootstrap.js")];
+        delete require.cache[require.resolve("../bootstrap.js")];
+        const bootstrap = require("../bootstrap.js");
+        // Monkey-patch to no-op the heavy parts (mirrors C11/C12/C13).
+        const origRun = bootstrap.runBootstrap;
+        const origWrite = bootstrap.phaseWriteActivation;
+        bootstrap.runBootstrap = async () => {};
+        bootstrap.phaseWriteActivation = async () => {};
+        try {
+            const cli = require("../cli/sauce-cli.js");
+            const origLog = console.log; console.log = () => {};
+            try { await cli.dispatch(["bootstrap", "--vault", freshVault, "--non-interactive", "--no-register"]); }
+            finally { console.log = origLog; }
+            assertEqual(fs.existsSync(freshVault), true, label + " — vault dir created");
+        } finally {
+            bootstrap.runBootstrap = origRun;
+            bootstrap.phaseWriteActivation = origWrite;
+            fs.rmSync(path.dirname(freshVault), { recursive: true, force: true });
+        }
+    });
+}
+
 const cases = [
     caseC1AncestorWalk, caseC2SauceVaultEnv, caseC3NotInVault, caseC4UnknownVerb,
     caseC5StatusClean, caseC6StatusDrift, caseC7UpdateFFOnly, caseC8UpdateDirtyRefusal,
@@ -1296,6 +1326,7 @@ const cases = [
     caseSH1ShimReturnsActivePantry, caseSH2ShimReturnsBrewLibexec,
     caseSH3ShimReturnsBrewWhenDangling,  // v0.36.0 S6.3 (failing-first)
     caseIR1BootstrapRegistersVault, caseIR2BootstrapNoRegisterFlag,  // v0.36.0 S7
+    caseBF1BootstrapFreshVaultViaBrew,  // v0.36.0 S9.4 hotfix (will ship in v0.36.1)
 ];
 
 async function main() {

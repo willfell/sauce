@@ -45,6 +45,11 @@ async function run(ctx, args) {
     if (mechs !== undefined) wizardDefaults.mechanisms = mechs;
     const bps = _resolveListArg(blueprintsArg);
     if (bps !== undefined) wizardDefaults.blueprints = bps;
+    // v0.36.0 hotfix: thread the resolved workshopPath (set by
+    // bootstrapCtxFromArgs from __dirname) through the wizard so first-run
+    // doesn't default workshop_relative_path back to literal "pantry".
+    // Universal for brew / dev-link / legacy install modes.
+    if (ctx && ctx.workshopPath) wizardDefaults.workshopRelativePath = ctx.workshopPath;
 
     console.log(banner.render({
         version: (ctx.workshopManifest && ctx.workshopManifest.workshop_version) || ""

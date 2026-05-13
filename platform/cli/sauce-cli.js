@@ -67,14 +67,23 @@ function bootstrapCtxFromArgs(rest) {
         }
     }
     if (!vaultPath) return null;
-    if (!fs.existsSync(vaultPath)) return null;
-    // Workshop is the cloned pantry/ inside the vault per install.sh contract.
-    const workshopPath = path.join(vaultPath, "pantry");
+    if (!fs.existsSync(vaultPath)) {
+        // v0.36.0: tolerate non-existent vault dirs for fresh-vault bootstrap.
+        // Create the dir; the installer expects it to exist for its own ranch/ writes.
+        try { fs.mkdirSync(vaultPath, { recursive: true }); }
+        catch (_e) { return null; }
+    }
+    // v0.36.0: workshop is wherever this sauce-cli.js was invoked from.
+    // Works for all install modes:
+    //   brew:    <brew>/libexec/platform/cli/sauce-cli.js  →  workshop = <brew>/libexec
+    //   dev:     <active-pantry>/platform/cli/sauce-cli.js →  workshop = <active-pantry>
+    //   legacy:  <vault>/pantry/platform/cli/sauce-cli.js  →  workshop = <vault>/pantry
+    const workshopPath = path.resolve(__dirname, "..", "..");
     const wmPath = path.join(workshopPath, "platform/manifest.json");
     const workshopManifest = fs.existsSync(wmPath) ? readJson(wmPath) : null;
     return {
         vaultPath,
-        config: { workshop_relative_path: "pantry", variables: {} },
+        config: { workshop_relative_path: workshopPath, variables: {} },
         subscription: { mechanisms: [], blueprints: [] },
         workshopPath,
         workshopManifest
