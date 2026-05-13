@@ -53,35 +53,22 @@ Day-hub filename **`Scratch-Day-YYYY-MM-DD.md`** — collision-free with daily n
 
 ---
 
-## Mechanism delta — `nav-buttons@2.6.0 → 2.7.0` MINOR
+## Mechanism delta — NONE
 
-> [!info] Additive `if_exists` field on `runTemplaterTemplate` action
-> Default `"create-new"` preserves every existing button across all blueprints.
+> [!success] No `nav-buttons` bump needed
+> Initial design assumed `nav-buttons@2.6.0 → 2.7.0` MINOR with a new `if_exists` field. Reading `platform/mechanisms/nav-buttons/space-nav-buttons.js:348-352` shows the renderer **already** does open-if-exists for `runTemplaterTemplate`:
+>
+> ```js
+> const existingTarget = app.vault.getAbstractFileByPath(target);
+> if (existingTarget) {
+>   app.workspace.openLinkText(target, "");
+>   return;
+> }
+> ```
+>
+> The behavior is dormant for `scratch@0.1.0` because the current nav-button's filename suffix is `HH-mm`, making every click a unique path. Drop the time suffix from the nav-button's filename composition (target `Scratch-Day-YYYY-MM-DD` instead of `Scratch-YYYY-MM-DD-HH-mm`), and open-if-exists kicks in for free.
 
-Schema:
-
-```json
-{
-  "type": "runTemplaterTemplate",
-  "template_source": "Scratch Day Hub.md",
-  "folder_prefix": "spice/scratch",
-  "folder_date_pattern": "YYYY/MM-MMMM/YYYY-MM-DD",
-  "filename_prefix": "Scratch-Day-",
-  "filename_date_pattern": "YYYY-MM-DD",
-  "filename_suffix": "",
-  "if_exists": "open"
-}
-```
-
-Renderer logic (`ranch/scripts/nav-buttons/space-nav-buttons.js`, click handler for `runTemplaterTemplate`):
-1. Compose target path from `folder_prefix + moment.format(folder_date_pattern) + "/" + filename_prefix + moment.format(filename_date_pattern) + filename_suffix + ".md"`.
-2. If `if_exists === "open"`:
-   - `const f = app.vault.getAbstractFileByPath(path);`
-   - If `f instanceof TFile`: `await app.workspace.openLinkText(path, "", false); return;`
-   - Else: fall through to create-new path.
-3. If `if_exists === "create-new"` (default) or absent: existing behavior unchanged.
-
-Validator (`platform/install.js validateAndResolve`) accepts the new field as an enum (`"open" | "create-new"`); unknown values fail loud with a `Notice` + history warning + null return (matches existing validation posture for runTemplaterTemplate fields).
+**Result:** cycle scope collapses to a single blueprint MINOR. No mechanism risk surface.
 
 ---
 
@@ -187,7 +174,7 @@ class ScratchNewButton {
 ### Manifest changes
 
 - `version: "0.1.0" → "0.2.0"`
-- `depends_on.nav-buttons: ">=2.6.0" → ">=2.7.0"`
+- `depends_on.nav-buttons: ">=2.6.0"` (UNCHANGED — renderer already does open-if-exists)
 - `customjs_classes: [...]` add `"ScratchNewButton"`
 - `files[]` add `helpers/scratch-new-button.js` mapping
 - `files[]` rename `Scratch Day.md` → `Scratch Day Hub.md` (template source rename)
@@ -219,8 +206,8 @@ class ScratchNewButton {
 ## Test deltas
 
 > [!todo] Test surface additions
-> - [ ] `run-renderer.js` — `+R-NAV-IFEXISTS` case: `runTemplaterTemplate.if_exists: "open"` composes path correctly; mock `app.vault.getAbstractFileByPath` to assert both branches (open existing vs. fall-through-create).
-> - [ ] `run-helper-cases.js` — `+SHC-S40-*` cases: `Scratch Day Hub.md` template aggregation; `helpers/scratch-new-button.js` aggregation; retired-lazy-create assertion on `Scratch.md`.
+> - [ ] `run-helper-cases.js` — `+SHC-S40-*` cases: `Scratch Day Hub.md` template aggregation; `helpers/scratch-new-button.js` aggregation; retired-lazy-create assertion on `Scratch.md`; nav-button manifest target verified as `Scratch-Day-` + `YYYY-MM-DD` (no HH-mm).
+> - [ ] `run-renderer.js` — `+R-SCRATCH-DAYHUB` case: scratch's nav-button composes path `spice/scratch/YYYY/MM-MMMM/YYYY-MM-DD/Scratch-Day-YYYY-MM-DD.md` (no time suffix). Asserts the *path string*, not behavior — existing open-if-exists branch is renderer-side and already covered by run-renderer scratch case from v0.37.0.
 > - [ ] `run-audit.js` — `+SA-S40-*` cases: orphan `<dddd>-YYYY-MM-DD.md` rule fires; `Scratch-Day-*.md` filename pattern accepted; `type: scratch-day` frontmatter validated.
 > - [ ] `run-claude-surface.js` — UNCHANGED (no `claude_surface[]` schema change).
 
@@ -228,12 +215,13 @@ class ScratchNewButton {
 
 ## Stage shape (writing-plans expands)
 
-> [!todo] Cycle v0.40.0 stages
-> - [ ] **S1** — `nav-buttons@2.7.0`: manifest bump, renderer `if_exists` branch, validator accept-list, renderer test, helper-cases aggregation.
-> - [ ] **S2** — `scratch@0.2.0` template + helper rework: new `Scratch Day Hub.md`, retired lazy-create in `Scratch.md`, `ScratchNewButton` helper, `ScratchHubCards` path fix, manifest bump (version + depends_on + customjs_classes + files + nav_buttons + rule_fragments).
-> - [ ] **S3** — Test harness deltas (renderer + helper-cases + audit).
-> - [ ] **S4** — Workshop self-install + housekeeping commits (materialize templates + helpers, ledger update).
-> - [ ] **S5** — Tag + release workflow → brew formula auto-bump.
+> [!todo] Cycle v0.40.0 stages (mechanism bump dropped after renderer review)
+> - [ ] **S1** — `scratch@0.2.0` template rework: new `Scratch Day Hub.md`, retired lazy-create in `Scratch.md`, fixed back-link wikilinks.
+> - [ ] **S2** — `scratch@0.2.0` helper rework: NEW `ScratchNewButton`, `ScratchHubCards` target path fix.
+> - [ ] **S3** — Manifest bump (version + customjs_classes + files + nav_buttons[0] filename composition + rule_fragments).
+> - [ ] **S4** — Test harness deltas (renderer + helper-cases + audit).
+> - [ ] **S5** — Workshop self-install + housekeeping commits (materialize templates + helpers, ledger update).
+> - [ ] **S6** — Tag + release workflow → brew formula auto-bump.
 
 ---
 
