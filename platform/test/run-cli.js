@@ -1071,6 +1071,138 @@ async function caseD5AllGreen() {
     });
 }
 
+// =====================================================================
+// v0.36.0 S6.1 — `sauce link <path>` / `sauce unlink` / status link visibility
+// Failing-first: cmd-link.js + cmd-unlink.js + cmd-status link line arrive in S6.2.
+// =====================================================================
+
+async function caseL1LinkCreatesSymlink() {
+    const label = "L1 sauce link <checkout> creates ~/.sauce/active-pantry symlink";
+    await withTempHome(async (home) => {
+        // Build a fake workshop checkout (must have platform/manifest.json + platform/cli/sauce-cli.js)
+        const checkout = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-coN-"));
+        try {
+            fs.mkdirSync(path.join(checkout, "platform/cli"), { recursive: true });
+            fs.writeFileSync(path.join(checkout, "platform/manifest.json"), JSON.stringify({ workshop_version: "0.36.0" }));
+            fs.writeFileSync(path.join(checkout, "platform/cli/sauce-cli.js"), "// stub");
+            delete require.cache[require.resolve("../cli/sauce-cli.js")];
+            delete require.cache[require.resolve("../cli/cmd-link.js")];
+            const cli = require("../cli/sauce-cli.js");
+            await cli.dispatch(["link", checkout]);
+            const active = path.join(home, ".sauce/active-pantry");
+            assertTrue(fs.lstatSync(active).isSymbolicLink(), label + " — symlink created");
+            assertEqual(fs.readlinkSync(active), checkout, label + " — target matches");
+        } finally { fs.rmSync(checkout, { recursive: true, force: true }); }
+    });
+}
+
+async function caseL2LinkRefusesBadTarget() {
+    const label = "L2 sauce link refuses target missing platform/manifest.json";
+    await withTempHome(async () => {
+        const checkout = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-bad-"));
+        try {
+            delete require.cache[require.resolve("../cli/sauce-cli.js")];
+            delete require.cache[require.resolve("../cli/cmd-link.js")];
+            const cli = require("../cli/sauce-cli.js");
+            let threw = false;
+            try { await cli.dispatch(["link", checkout]); } catch (_e) { threw = true; }
+            assertTrue(threw, label + " — threw");
+        } finally { fs.rmSync(checkout, { recursive: true, force: true }); }
+    });
+}
+
+async function caseL3UnlinkRemovesSymlink() {
+    const label = "L3 sauce unlink removes ~/.sauce/active-pantry";
+    await withTempHome(async (home) => {
+        const sauceDir = path.join(home, ".sauce");
+        fs.mkdirSync(sauceDir, { recursive: true });
+        const target = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-link-"));
+        try {
+            fs.symlinkSync(target, path.join(sauceDir, "active-pantry"));
+            delete require.cache[require.resolve("../cli/sauce-cli.js")];
+            delete require.cache[require.resolve("../cli/cmd-unlink.js")];
+            const cli = require("../cli/sauce-cli.js");
+            await cli.dispatch(["unlink"]);
+            assertEqual(fs.existsSync(path.join(sauceDir, "active-pantry")), false, label + " — removed");
+        } finally { fs.rmSync(target, { recursive: true, force: true }); }
+    });
+}
+
+async function caseL4StatusReportsLink() {
+    const label = "L4 sauce status surfaces active-pantry link target when present";
+    await withTempHome(async (home) => {
+        await withTempVault({}, async (vaultPath) => {
+            // Workshop dir is required by status — point at vaultPath/pantry stub.
+            fs.mkdirSync(path.join(vaultPath, "pantry/platform"), { recursive: true });
+            fs.writeFileSync(path.join(vaultPath, "pantry/platform/manifest.json"),
+                JSON.stringify({ workshop_version: "0.36.0" }));
+            // Set up the link
+            const sauceDir = path.join(home, ".sauce");
+            fs.mkdirSync(sauceDir, { recursive: true });
+            const linkTarget = "/some/dev/checkout";
+            fs.symlinkSync(linkTarget, path.join(sauceDir, "active-pantry"));
+            delete require.cache[require.resolve("../cli/sauce-cli.js")];
+            delete require.cache[require.resolve("../cli/cmd-status.js")];
+            const cli = require("../cli/sauce-cli.js");
+            const out = [];
+            const origLog = console.log; console.log = (s) => out.push(String(s));
+            try {
+                await cli.dispatch(["status"], {
+                    cwd: vaultPath,
+                    _gitExec: () => ({ code: 0, stdout: "", stderr: "" })
+                });
+            } finally { console.log = origLog; }
+            assertTrue(out.join("\n").includes("active-pantry"), label + " — output mentions active-pantry");
+            assertTrue(out.join("\n").includes(linkTarget), label + " — output names target");
+        });
+    });
+}
+
+// =====================================================================
+// v0.36.0 S6.3 — resolve-sauce-dir.js shim resolver (SH1-SH3)
+// Failing-first: resolve-sauce-dir.js arrives in S6.2.
+// =====================================================================
+
+async function caseSH1ShimReturnsActivePantry() {
+    const label = "SH1 resolve() returns active-pantry when symlink → real directory";
+    delete require.cache[require.resolve("../cli/resolve-sauce-dir.js")];
+    const { resolve } = require("../cli/resolve-sauce-dir.js");
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-rsh-"));
+    try {
+        fs.mkdirSync(path.join(tmpHome, ".sauce"), { recursive: true });
+        const realDir = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-rsd-"));
+        try {
+            fs.symlinkSync(realDir, path.join(tmpHome, ".sauce/active-pantry"));
+            const got = resolve({ home: tmpHome, brewPrefix: "/opt/brew" });
+            assertEqual(got, path.join(tmpHome, ".sauce/active-pantry"), label);
+        } finally { fs.rmSync(realDir, { recursive: true, force: true }); }
+    } finally { fs.rmSync(tmpHome, { recursive: true, force: true }); }
+}
+
+async function caseSH2ShimReturnsBrewLibexec() {
+    const label = "SH2 resolve() returns brewPrefix/libexec when no active-pantry";
+    delete require.cache[require.resolve("../cli/resolve-sauce-dir.js")];
+    const { resolve } = require("../cli/resolve-sauce-dir.js");
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-rsh-"));
+    try {
+        const got = resolve({ home: tmpHome, brewPrefix: "/opt/brew" });
+        assertEqual(got, "/opt/brew/libexec", label);
+    } finally { fs.rmSync(tmpHome, { recursive: true, force: true }); }
+}
+
+async function caseSH3ShimReturnsBrewWhenDangling() {
+    const label = "SH3 resolve() returns brewPrefix/libexec when active-pantry dangles";
+    delete require.cache[require.resolve("../cli/resolve-sauce-dir.js")];
+    const { resolve } = require("../cli/resolve-sauce-dir.js");
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-rsh-"));
+    try {
+        fs.mkdirSync(path.join(tmpHome, ".sauce"), { recursive: true });
+        fs.symlinkSync("/never/exists/" + Math.random(), path.join(tmpHome, ".sauce/active-pantry"));
+        const got = resolve({ home: tmpHome, brewPrefix: "/opt/brew" });
+        assertEqual(got, "/opt/brew/libexec", label);
+    } finally { fs.rmSync(tmpHome, { recursive: true, force: true }); }
+}
+
 const cases = [
     caseC1AncestorWalk, caseC2SauceVaultEnv, caseC3NotInVault, caseC4UnknownVerb,
     caseC5StatusClean, caseC6StatusDrift, caseC7UpdateFFOnly, caseC8UpdateDirtyRefusal,
@@ -1096,6 +1228,10 @@ const cases = [
     caseU1UpdateHintsMigration,  // v0.36.0 S4.4
     caseD1BrewMissing, caseD2NodeOld, caseD3MissingVault,
     caseD4DanglingActivePantry, caseD5AllGreen,  // v0.36.0 S5
+    caseL1LinkCreatesSymlink, caseL2LinkRefusesBadTarget,
+    caseL3UnlinkRemovesSymlink, caseL4StatusReportsLink,  // v0.36.0 S6.1 (failing-first)
+    caseSH1ShimReturnsActivePantry, caseSH2ShimReturnsBrewLibexec,
+    caseSH3ShimReturnsBrewWhenDangling,  // v0.36.0 S6.3 (failing-first)
 ];
 
 async function main() {
