@@ -1,5 +1,8 @@
 # Installing Sauce (v0.23.0+)
 
+> [!warning] Superseded as of v0.36.0
+> The curl|bash inside-vault flow described in this document is **deprecated**. Sauce now distributes via Homebrew (`brew install willfell/sauce/sauce`) with the pantry under the brew prefix instead of `<vault>/pantry/`. See **[use.md](use.md#install-v0360)** for the current install + update + migrate-layout flow. The body below is retained as a historical reference for vaults still on the pre-v0.36 inside-vault layout.
+
 This is the user-facing install reference for the **inside-vault layout** introduced in v0.22.0 — a single curl one-liner clones the workshop into `<vault>/pantry/`, npm-installs, and runs the first-run wizard.
 
 For architectural context see [how.md](how.md). For ongoing operations see [use.md](use.md).

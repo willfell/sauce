@@ -2,141 +2,101 @@
 
 This doc covers daily operations. For architectural background, see [how.md](how.md).
 
-## Onboarding via curl one-liner (v0.22.0+)
+## Install (v0.36.0+)
 
-The fastest way to onboard a fresh consumer vault is the inside-vault layout introduced in v0.22.0 — a single curl one-liner clones the workshop into `<vault>/pantry/`, npm-installs, and runs the first-run wizard.
+Sauce distributes via a personal Homebrew tap. The pantry lives once under the brew prefix; vaults are pure consumer content with `ranch/` state only.
 
-> [!success] One command
+> [!success] First-time install on any Mac
 > ```bash
-> cd /path/to/your/vault
-> curl -fsSL https://raw.githubusercontent.com/willfell/sauce/main/install.sh | bash
+> brew tap willfell/sauce
+> brew install willfell/sauce/sauce
+> sauce bootstrap --vault <path-to-your-vault>
 > ```
 
+After install, your machine has:
+
+- `sauce` binary on PATH (`/opt/homebrew/bin/sauce`).
+- Pantry under the brew prefix (`/opt/homebrew/opt/sauce/libexec` or equivalent on Intel Macs).
+- `~/.sauce/vaults.json` — per-machine registry of installed vaults (every bootstrap appends an entry).
+- (optional) `~/.sauce/active-pantry` symlink for dev mode (see "Dev mode" below).
+
 > [!info] Prerequisites
-> - **Node.js 18 or newer** (`brew install node` on macOS, `apt-get install -y nodejs npm` on Debian/Ubuntu, `dnf install -y nodejs npm` on Fedora/RHEL).
-> - **git 2.30 or newer** (`brew install git` / `apt-get install -y git` / `dnf install -y git`).
->
-> The installer fails loud at phase `[1/4]` if either binary is missing.
+> - **macOS with Homebrew** — `brew --version` should report 4.x+.
+> - **Node.js 18+** — brought in as a brew dependency of the `sauce` formula; no separate install needed.
 
-### What the wizard prompts for
+> [!tip] What `sauce bootstrap` does
+> Reads / writes `<vault>/ranch/platform-{config,subscription,installed}.json`, scaffolds foundational plugin data files in `<vault>/.obsidian/` (additive merge per landmine #12), runs the first-run wizard for mechanism + blueprint selection, and records the vault in `~/.sauce/vaults.json`.
 
-After the curl one-liner clones + npm-installs, the existing first-run wizard runs (5 prompts via `@inquirer/prompts`):
+### Update flow
 
-1. **Workshop relative path** (defaults to `pantry` for the inside-vault layout)
-2. **Vault display name** (defaults to vault dirname)
-3. **Mechanisms checkbox** (defaults: customjs-guard, nav-buttons, cards, accent-button, styling, convenience)
-4. **Blueprints checkbox** (defaults: none — opt-in per blueprint)
-5. **Confirm summary**
+```bash
+brew upgrade sauce       # refresh pantry under the brew prefix
+sauce reinstall --all    # re-materialize every registered vault
+```
 
-> [!info] Multi-theme presets DEFERRED
-> v0.22.0 keeps the existing free-form mechanism + blueprint picker. Multi-theme subscription presets (rose-pine-dawn / melange-dark / one-dark / tokyo-night-storm packaged as one-click subscriptions) are DEFERRED to v0.23.0+ per user direction.
+`sauce reinstall --all` walks `~/.sauce/vaults.json` and re-runs the installer against each registered vault — your subscriptions stay pinned, but any post-bump materialization deltas (new mechanism files, new blueprint scaffolding, claude_surface[] re-render) land in one pass.
 
-### Where the workshop lands
+### Migrating from the pre-v0.36 `<vault>/pantry/` layout
+
+Vaults bootstrapped before v0.36.0 carry an in-tree `<vault>/pantry/` clone. The migrator archives it and re-registers against the brew-installed pantry:
+
+```bash
+sauce migrate-layout --vault <path-to-legacy-vault>
+```
+
+Effects (in order):
+
+1. Archives `<vault>/pantry/` → `<vault>/pantry.legacy.<timestamp>.bak/`.
+2. Registers the vault in `~/.sauce/vaults.json` (if not already present).
+3. Re-runs the installer against the brew-installed pantry.
+4. Runs `sauce audit` to confirm the result is clean.
+
+Useful flags:
+
+- `--dry-run` — preview every write without touching disk.
+- `--purge` — remove the `pantry.legacy.<ts>.bak/` archive after a clean audit.
+
+> [!warning] Sanity check before `--purge`
+> Run without `--purge` first. Confirm the vault opens in Obsidian and `sauce audit` is green. Then re-run with `--purge` (or just `rm -rf` the timestamped backup) once you're satisfied.
+
+### Dev mode (working on the platform itself)
+
+When you're iterating on the workshop code, you don't want every `sauce` invocation to hit the brew-installed pantry. Use `sauce link` to redirect dispatch through your checkout:
+
+```bash
+sauce link <path-to-your-sauce-checkout>   # symlinks ~/.sauce/active-pantry → checkout
+sauce unlink                                # revert to brew-installed pantry
+```
+
+When `~/.sauce/active-pantry` exists, every `sauce` subcommand dispatches through your checkout — useful when iterating on workshop code without `brew upgrade`'ing on every change.
+
+### Where vault state lives
 
 ```
 <vault>/
-├── pantry/                               NEW — workshop clone
-│   ├── platform/                         CLI verbs, install.js, mechanisms, blueprints
-│   ├── Scripts/{activate.sh, sauce}      NEW — activation + CLI wrapper
-│   ├── node_modules/                     npm install --omit=dev artifact
-│   └── .git/                             clone --depth=1 history
-└── ranch/platform-{config,subscription,installed}.json       Consumer-side state
+├── ranch/                                Consumer-side state (no platform code)
+│   ├── platform-config.json              Variables + workshop pointer
+│   ├── platform-subscription.json        Pinned mechanism + blueprint versions
+│   ├── platform-installed.json           Auto-managed install ledger (do NOT hand-edit)
+│   ├── templates/                        Materialized Templater templates
+│   ├── scripts/                          Materialized CustomJS classes
+│   ├── views/                            Materialized Dataview views
+│   ├── rules/                            Rule registry (_global.json + per-blueprint)
+│   └── nav-buttons-registry.json         Renderer-resolved nav button registry
+├── spice/<module>/                       Per-blueprint module directories (landmine #11)
+├── .claude/
+│   ├── commands/                         Slash commands (managed; landmine #22)
+│   ├── commands.local/                   Consumer overrides (the override seam)
+│   ├── skills/<bp>/                      Skill bodies (managed)
+│   └── skills.local/<bp>/                Consumer overrides (the override seam)
+└── CLAUDE.md                             Hand-authored prose + claude_surface[] marker regions
 ```
 
-### Activation per shell
+The pantry itself (platform source) does NOT live in the vault any more — it's under the brew prefix.
 
-The install does NOT modify `~/.zshrc` or `~/.bashrc`. Each new shell needs:
+### Legacy install (pre-v0.36)
 
-```bash
-source <vault>/pantry/Scripts/activate.sh
-```
-
-After that, the `sauce` CLI is on your PATH:
-
-- `sauce status` — read-only state report
-- `sauce update` — `git fetch + git reset --hard origin/main` inside `pantry/` + re-run installer
-- `sauce update --force` — discard dirty working tree before reset
-- `sauce wizard` — re-run the subscription / config prompts
-
-> [!tip] Full reference
-> See [install.md](install.md) for the full reference — sync-exclusion guides for Obsidian Sync / iCloud / Dropbox, troubleshooting, uninstall steps.
-
----
-
-## Onboarding a new consumer vault (post-v0.1.2)
-
-> [!info] When to use this flow vs the curl one-liner
-> The curl one-liner above is the canonical flow for fresh consumer vaults. Use the manual flow below when you're (a) maintaining an existing POC vault that uses the legacy sibling-of-workshop layout, (b) onboarding into an environment without internet access, or (c) explicitly want the legacy `workshop_relative_path: "../beacon"` shape rather than the inside-vault `pantry/` shape.
-
-
-
-Before v0.1.2 the onboarding flow required cp'ing a 1300-line `install.js` into each consumer's `ranch/templater/platformInstall.js` (the bootstrap-copy × 3 ritual). v0.1.2 retires that — consumers now use a 20-line content-static thin stub that dispatches at runtime.
-
-### 1. Clone the workshop repo
-
-On the consumer machine, ensure the Sauce workshop is cloned at a known relative path. The convention is `../workshop/poc-vault` from each consumer vault root, but any path works as long as it's recorded in `platform-config.json` (step 2):
-
-```bash
-git clone git@github-personal:willfell/sauce.git /path/to/workshop/poc-vault
-```
-
-### 2. Create the consumer's bootstrap state files
-
-In the new vault's `ranch/`, create three JSON files (all platform metadata is JSON per landmine #6):
-
-- **`platform-config.json`** — at minimum:
-  ```json
-  {
-    "workshop_relative_path": "../workshop/poc-vault",
-    "variables": {
-      "templates_path": "ranch/templates",
-      "scripts_path": "ranch/scripts",
-      "rules_path": "ranch/rules"
-    }
-  }
-  ```
-- **`platform-subscription.json`** — list mechanisms + blueprints to install with version pins:
-  ```json
-  {
-    "workshop_version": "0.5.0",
-    "mechanisms": [
-      { "name": "customjs-guard", "version": "1.0.0" },
-      { "name": "validator", "version": "0.1.1" },
-      { "name": "audit", "version": "0.1.1" }
-    ],
-    "blueprints": []
-  }
-  ```
-- `platform-installed.json` is auto-managed; the installer creates it on first run.
-
-### 3. Drop in the thin stub
-
-Copy the canonical stub from the workshop:
-
-```bash
-cp /path/to/workshop/poc-vault/platform/installer-stub.js \
-   /path/to/consumer/ranch/templater/platformInstall.js
-```
-
-Verify md5 matches the canonical:
-```bash
-md5sum /path/to/workshop/poc-vault/platform/installer-stub.js \
-       /path/to/consumer/ranch/templater/platformInstall.js
-```
-
-The stub is content-static per landmine #13 — never edit it per-consumer. Future workshop updates reach the consumer via `git pull` in the workshop repo + a fresh install run; the stub itself doesn't change.
-
-### 4. Install Slash Commander (community plugin)
-
-In Obsidian: Settings → Community plugins → Browse → "Slash Commander" → Install + Enable. This is irreducible per Obsidian's plugin-install API not being script-accessible (the only manual plugin step left in the consumer flow).
-
-### 5. Run the installer
-
-Open the Templater command palette and run `_install-platform`. The thin stub reads `platform-config.json`, resolves the workshop path, and dispatches to canonical `<workshop>/platform/install.js`. The canonical installer materializes mechanisms + blueprints, applies external-plugin checks, registers Templater hotkeys + Slash Commander bindings (v0.1.3), and records the run in `platform-installed.json` history with `git_commit / git_tag / git_dirty` (v0.1.2).
-
-### 6. Reload Obsidian
-
-Cmd+R (or Ctrl+R) — picks up newly registered Templater hotkeys + Slash Commander bindings. The slash commands `/validate`, `/audit`, and any blueprint-declared bindings go live.
+The `install.sh` curl|bash flow was the install entry point from v0.22.0 through v0.35.x. It is deprecated as of v0.36.0; running `bash install.sh` now exits 2 with a pointer at `brew install willfell/sauce/sauce`. The pre-v0.1.2 `tp.user.platformInstall(tp)` Templater flow is also retired — `git log -- install.sh Docs/use.md` recovers the historical walkthroughs if you need them.
 
 ---
 
