@@ -968,6 +968,109 @@ async function caseU1UpdateHintsMigration() {
     });
 }
 
+async function caseD1BrewMissing() {
+    const label = "D1 doctor FAILs when brew prefix missing";
+    await withTempHome(async () => {
+        delete require.cache[require.resolve("../cli/sauce-cli.js")];
+        delete require.cache[require.resolve("../cli/cmd-doctor.js")];
+        const cli = require("../cli/sauce-cli.js");
+        const out = [];
+        const origLog = console.log; console.log = (s) => out.push(String(s));
+        let threw = false;
+        try {
+            await cli.dispatch(["doctor"], {
+                _brewPrefix: () => null,
+                _nodeVersion: () => "20.0.0"
+            });
+        } catch (_e) { threw = true; }
+        finally { console.log = origLog; }
+        // Doctor sets process.exitCode (non-throw); inspect output instead
+        assertTrue(out.join("\n").includes("FAIL"), label + " — output has a FAIL row");
+        assertTrue(out.join("\n").toLowerCase().includes("brew"), label + " — names brew");
+    });
+}
+
+async function caseD2NodeOld() {
+    const label = "D2 doctor FAILs when node < 18";
+    await withTempHome(async () => {
+        delete require.cache[require.resolve("../cli/cmd-doctor.js")];
+        delete require.cache[require.resolve("../cli/sauce-cli.js")];
+        const cli = require("../cli/sauce-cli.js");
+        const out = [];
+        const origLog = console.log; console.log = (s) => out.push(String(s));
+        try {
+            await cli.dispatch(["doctor"], {
+                _brewPrefix: () => "/opt/test/Cellar/sauce/0.36.0",
+                _nodeVersion: () => "16.20.0"
+            });
+        } finally { console.log = origLog; }
+        assertTrue(out.join("\n").includes("FAIL"), label + " — has FAIL row");
+        assertTrue(out.join("\n").toLowerCase().includes("node"), label + " — names node");
+    });
+}
+
+async function caseD3MissingVault() {
+    const label = "D3 doctor WARNs when a registry vault is missing on disk";
+    await withTempHome(async () => {
+        delete require.cache[require.resolve("../cli/cmd-doctor.js")];
+        delete require.cache[require.resolve("../cli/sauce-cli.js")];
+        delete require.cache[require.resolve("../cli/registry.js")];
+        require("../cli/registry.js").add("/nonexistent/path/sauce-12345");
+        const cli = require("../cli/sauce-cli.js");
+        const out = [];
+        const origLog = console.log; console.log = (s) => out.push(String(s));
+        try {
+            await cli.dispatch(["doctor"], {
+                _brewPrefix: () => "/opt/test/Cellar/sauce/0.36.0",
+                _nodeVersion: () => "20.0.0"
+            });
+        } finally { console.log = origLog; }
+        assertTrue(out.join("\n").includes("WARN"), label + " — has WARN row");
+        assertTrue(out.join("\n").includes("/nonexistent/path/sauce-12345"), label + " — names missing path");
+    });
+}
+
+async function caseD4DanglingActivePantry() {
+    const label = "D4 doctor FAILs when ~/.sauce/active-pantry is dangling";
+    await withTempHome(async (home) => {
+        delete require.cache[require.resolve("../cli/cmd-doctor.js")];
+        delete require.cache[require.resolve("../cli/sauce-cli.js")];
+        const sauceDir = path.join(home, ".sauce");
+        fs.mkdirSync(sauceDir, { recursive: true });
+        const target = path.join(home, "nonexistent-checkout");
+        fs.symlinkSync(target, path.join(sauceDir, "active-pantry"));
+        const cli = require("../cli/sauce-cli.js");
+        const out = [];
+        const origLog = console.log; console.log = (s) => out.push(String(s));
+        try {
+            await cli.dispatch(["doctor"], {
+                _brewPrefix: () => "/opt/test/Cellar/sauce/0.36.0",
+                _nodeVersion: () => "20.0.0"
+            });
+        } finally { console.log = origLog; }
+        assertTrue(out.join("\n").includes("FAIL"), label + " — has FAIL row");
+        assertTrue(out.join("\n").toLowerCase().includes("active-pantry"), label + " — names active-pantry");
+    });
+}
+
+async function caseD5AllGreen() {
+    const label = "D5 doctor exits 0 when everything healthy (no FAIL rows)";
+    await withTempHome(async () => {
+        delete require.cache[require.resolve("../cli/cmd-doctor.js")];
+        delete require.cache[require.resolve("../cli/sauce-cli.js")];
+        const cli = require("../cli/sauce-cli.js");
+        const out = [];
+        const origLog = console.log; console.log = (s) => out.push(String(s));
+        try {
+            await cli.dispatch(["doctor"], {
+                _brewPrefix: () => "/opt/test/Cellar/sauce/0.36.0",
+                _nodeVersion: () => "20.0.0"
+            });
+        } finally { console.log = origLog; }
+        assertTrue(!out.join("\n").includes("FAIL"), label + " — zero FAIL rows");
+    });
+}
+
 const cases = [
     caseC1AncestorWalk, caseC2SauceVaultEnv, caseC3NotInVault, caseC4UnknownVerb,
     caseC5StatusClean, caseC6StatusDrift, caseC7UpdateFFOnly, caseC8UpdateDirtyRefusal,
@@ -991,6 +1094,8 @@ const cases = [
     caseV1VaultAdd, caseV2VaultList, caseV3VaultRemove,  // v0.36.0 S2.1 (failing-first)
     caseI1ReinstallVault, caseI2ReinstallAll, caseI3ReinstallAllPrunes,  // v0.36.0 S3.1 (failing-first)
     caseU1UpdateHintsMigration,  // v0.36.0 S4.4
+    caseD1BrewMissing, caseD2NodeOld, caseD3MissingVault,
+    caseD4DanglingActivePantry, caseD5AllGreen,  // v0.36.0 S5
 ];
 
 async function main() {
