@@ -5007,6 +5007,82 @@ async function caseProd5ValidatorRejectsProductMissingTag() {
     violations.some((v) => v.rule === "required_tags.missing" && /product/.test(v.message || "")));
 }
 
+// ============================================================
+// v0.39.0 S4.4 — teams@0.1.0 validator green/red cases.
+// Direct exercise of platform/audit/rule-runner.js with the real
+// rule_fragment loaded from platform/blueprints/teams/manifest.json.
+// Mirrors PROD-4/PROD-5 pattern (in-memory record + fragment; no temp-vault).
+// TEAM-4 green = well-formed Team record; TEAM-5 red = missing required
+// `product:` wikilink; TEAM-6 red = missing required `team` tag.
+// ============================================================
+async function caseTeam4ValidatorAcceptsWellFormedTeam() {
+  console.log("\n--- Case TEAM-4: teams validator accepts a well-formed Team note ---");
+  const manifestPath = path.join(WORKSHOP, "platform/blueprints/teams/manifest.json");
+  const manifest = _readJson(manifestPath);
+  const fragments = manifest.rule_fragments.map((rf) => rf.fragment);
+  const record = {
+    relPath: "spice/teams/Platform Engineering.md",
+    frontmatter: {
+      type: "team",
+      name: "Platform Engineering",
+      created: "2026-05-12",
+      tags: ["team"],
+      product: "[[Sauce]]",
+    },
+    body: "# Platform Engineering\n",
+    blueprint: "teams",
+  };
+  const violations = _ruleRunner.applyRules(fragments, record, { workshopRoot: WORKSHOP });
+  assertEqual(violations.length, 0,
+    "TEAM-4: well-formed Team note produces zero violations");
+}
+
+async function caseTeam5ValidatorRejectsTeamMissingProduct() {
+  console.log("\n--- Case TEAM-5: teams validator rejects a Team note missing required product: field ---");
+  const manifestPath = path.join(WORKSHOP, "platform/blueprints/teams/manifest.json");
+  const manifest = _readJson(manifestPath);
+  const fragments = manifest.rule_fragments.map((rf) => rf.fragment);
+  // Same as TEAM-4 minus the required `product:` wikilink.
+  const record = {
+    relPath: "spice/teams/Orphan.md",
+    frontmatter: {
+      type: "team",
+      name: "Orphan",
+      created: "2026-05-12",
+      tags: ["team"],
+      // product omitted on purpose
+    },
+    body: "# Orphan\n",
+    blueprint: "teams",
+  };
+  const violations = _ruleRunner.applyRules(fragments, record, { workshopRoot: WORKSHOP });
+  assertTrue("TEAM-5: missing-product Team note surfaces required_frontmatter.product",
+    violations.some((v) => v.rule === "required_frontmatter.product"));
+}
+
+async function caseTeam6ValidatorRejectsTeamMissingTag() {
+  console.log("\n--- Case TEAM-6: teams validator rejects a Team note missing required tag ---");
+  const manifestPath = path.join(WORKSHOP, "platform/blueprints/teams/manifest.json");
+  const manifest = _readJson(manifestPath);
+  const fragments = manifest.rule_fragments.map((rf) => rf.fragment);
+  // Same as TEAM-4 minus the required `team` tag.
+  const record = {
+    relPath: "spice/teams/Mobile.md",
+    frontmatter: {
+      type: "team",
+      name: "Mobile",
+      created: "2026-05-12",
+      product: "[[Sauce]]",
+      // tags omitted on purpose
+    },
+    body: "# Mobile\n",
+    blueprint: "teams",
+  };
+  const violations = _ruleRunner.applyRules(fragments, record, { workshopRoot: WORKSHOP });
+  assertTrue("TEAM-6: missing-tag Team note surfaces required_tags.missing",
+    violations.some((v) => v.rule === "required_tags.missing" && /team/.test(v.message || "")));
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -5155,6 +5231,12 @@ async function caseProd5ValidatorRejectsProductMissingTag() {
   await caseTeam1FilesMaterialize();
   await caseTeam2NavButtonRegistry();
   await caseTeam3RuleFragmentRequiresProduct();
+
+  // v0.39.0 S4.4 — teams@0.1.0 validator green/red on Team notes
+  // using the real rule_fragment loaded from the teams manifest.
+  await caseTeam4ValidatorAcceptsWellFormedTeam();
+  await caseTeam5ValidatorRejectsTeamMissingProduct();
+  await caseTeam6ValidatorRejectsTeamMissingTag();
 
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
