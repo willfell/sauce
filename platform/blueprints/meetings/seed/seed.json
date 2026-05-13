@@ -1,0 +1,30 @@
+{
+    "schema_version": 1,
+    "kind": "declarative",
+    "notes": [
+        {
+            "path": "spice/meetings/2026-05-01-Acme-Kickoff.md",
+            "vars": { "title": "Acme Kickoff", "date": "2026-05-01", "attendees": "[[Alice]], [[Bob]]" },
+            "frontmatter": { "type": "meeting", "date": "{{date}}", "title": "{{title}}", "attendees": "{{attendees}}" },
+            "body_template": "templates/Meeting.md"
+        },
+        {
+            "path": "spice/meetings/2026-05-05-Weekly-Standup.md",
+            "vars": { "title": "Weekly Standup", "date": "2026-05-05", "attendees": "[[Alice]], [[Carol]]" },
+            "frontmatter": { "type": "meeting", "date": "{{date}}", "title": "{{title}}", "attendees": "{{attendees}}", "recurring": "weekly" },
+            "body_template": "templates/Meeting.md"
+        },
+        {
+            "path": "spice/meetings/2026-05-10-Solo-Planning.md",
+            "vars": { "title": "Solo Planning", "date": "2026-05-10", "attendees": "" },
+            "frontmatter": { "type": "meeting", "date": "{{date}}", "title": "{{title}}" },
+            "body_template": "templates/Meeting.md"
+        },
+        {
+            "path": "spice/meetings/2026-05-12-Acme-Status.md",
+            "vars": { "title": "Acme Status", "date": "2026-05-12", "attendees": "[[Alice]]" },
+            "frontmatter": { "type": "meeting", "date": "{{date}}", "title": "{{title}}", "attendees": "{{attendees}}" },
+            "body_template": "templates/Meeting.md"
+        }
+    ]
+}
