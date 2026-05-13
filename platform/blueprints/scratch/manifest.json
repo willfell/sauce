@@ -1,6 +1,6 @@
 {
   "name": "scratch",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "kind": "blueprint",
   "module_directory": "scratch",
   "skills_dir": ".claude/skills/scratch",
@@ -12,7 +12,7 @@
     { "name": "accent-button",   "range": ">=0.1.0" },
     { "name": "platform-claude", "range": ">=0.1.1" }
   ],
-  "customjs_classes": ["ScratchHubCards", "ScratchDayList", "ScratchNewButton", "ScratchDayActions"],
+  "customjs_classes": ["ScratchHubCards", "ScratchDayList", "ScratchNewButton", "ScratchDayActions", "ScratchLeafActions", "ScratchHubActions"],
   "files": [
     { "source": "templates/Scratch.md",             "dest": "{{templates_path}}/Scratch.md" },
     { "source": "templates/Scratch Day Hub.md",     "dest": "{{templates_path}}/Scratch Day Hub.md" },
@@ -20,7 +20,9 @@
     { "source": "helpers/scratch-hub-cards.js",     "dest": "{{scripts_path}}/scratch/scratch-hub-cards.js" },
     { "source": "helpers/scratch-day-list.js",      "dest": "{{scripts_path}}/scratch/scratch-day-list.js" },
     { "source": "helpers/scratch-new-button.js",    "dest": "{{scripts_path}}/scratch/scratch-new-button.js" },
-    { "source": "helpers/scratch-day-actions.js",   "dest": "{{scripts_path}}/scratch/scratch-day-actions.js" }
+    { "source": "helpers/scratch-day-actions.js",   "dest": "{{scripts_path}}/scratch/scratch-day-actions.js" },
+    { "source": "helpers/scratch-leaf-actions.js",  "dest": "{{scripts_path}}/scratch/scratch-leaf-actions.js" },
+    { "source": "helpers/scratch-hub-actions.js",   "dest": "{{scripts_path}}/scratch/scratch-hub-actions.js" }
   ],
   "claude_surface": [
     { "kind": "command", "source": "commands/scratch.md",          "dest": ".claude/commands/scratch.md" },

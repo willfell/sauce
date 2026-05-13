@@ -12,8 +12,9 @@ await dv.view("{{views_path}}/customjs-guard", { class: "SpaceNavButtons" });
 
 ---
 
-
+```dataviewjs
+await dv.view("{{views_path}}/customjs-guard", { class: "ScratchLeafActions" });
+```
 
 ---
 
-← [[Scratch-Day-<% tp.date.now("YYYY-MM-DD") %>|Back to day]] · [[Scratch|Hub]]

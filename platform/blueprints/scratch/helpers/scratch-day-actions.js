@@ -1,8 +1,11 @@
 /**
  * ScratchDayActions (CustomJS)
- * Renders TWO accent-styled buttons in a flex row on a scratch day-hub note:
+ * Renders TWO accent-styled buttons in a centered flex row on a scratch day-hub:
  *   1. "+ New Scratch" — creates Scratch-YYYY-MM-DD-HH-mm.md in same folder
  *   2. "Hub" — navigates to spice/scratch/Scratch.md
+ *
+ * Empties dv.container before rendering to avoid Dataview's dual-fire
+ * lifecycle producing duplicated button rows.
  *
  * Tolerates `day` frontmatter as string, Date, or Luxon — normalizes to
  * YYYY-MM-DD before validation (Obsidian auto-parses unquoted YAML dates).
@@ -26,6 +29,8 @@ class ScratchDayActions {
     async render(dv) {
         if (dv.container.closest(".markdown-embed")) return;
 
+        while (dv.container.firstChild) dv.container.removeChild(dv.container.firstChild);
+
         const day = this._coerceDay(dv.current().day);
         if (!day || !/^\d{4}-\d{2}-\d{2}$/.test(day)) {
             dv.paragraph("ScratchDayActions: missing or invalid `day` frontmatter (expected YYYY-MM-DD).");
@@ -44,7 +49,7 @@ class ScratchDayActions {
         const homeIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>`;
 
         const row = dv.container.createEl("div");
-        row.style.cssText = "display: flex; gap: 8px; margin: 0.5em 0; flex-wrap: wrap;";
+        row.style.cssText = "display: flex; gap: 12px; margin: 0.5em auto; justify-content: center; align-items: stretch; max-width: 600px;";
 
         const newScratch = async () => {
             const tpPlugin = app.plugins.plugins["templater-obsidian"];
@@ -85,7 +90,7 @@ class ScratchDayActions {
             app.workspace.openLinkText("spice/scratch/Scratch.md", "");
         };
 
-        customJS.AccentButton.render(row, { label: "+ New Scratch", icon: pencilPlusIcon, onClick: newScratch });
-        customJS.AccentButton.render(row, { label: "Hub", icon: homeIcon, onClick: goToHub });
+        customJS.AccentButton.render(row, { label: "+ New Scratch", icon: pencilPlusIcon, onClick: newScratch, flex: true });
+        customJS.AccentButton.render(row, { label: "Hub", icon: homeIcon, onClick: goToHub, flex: true });
     }
 }

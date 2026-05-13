@@ -10,6 +10,8 @@ day: "<% tp.date.now("YYYY-MM-DD") %>"
 await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 ```
 
+---
+
 ```dataviewjs
 await dv.view("ranch/views/customjs-guard", { class: "ScratchDayActions" });
 ```

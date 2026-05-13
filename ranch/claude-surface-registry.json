@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-05-13T21:19:32.579Z",
-  "workshop_version": "0.40.3",
+  "generated_at": "2026-05-13T21:30:22.844Z",
+  "workshop_version": "0.40.4",
   "contributions": {
     "audit": [
       {
@@ -142,13 +142,13 @@
         "kind": "command",
         "source": "commands/scratch.md",
         "dest": ".claude/commands/scratch.md",
-        "version": "0.2.2"
+        "version": "0.2.3"
       },
       {
         "kind": "skill",
         "source": "skills/new-scratch/SKILL.md",
         "dest": ".claude/skills/scratch/new-scratch/SKILL.md",
-        "version": "0.2.2"
+        "version": "0.2.3"
       },
       {
         "kind": "claude_md_row",
