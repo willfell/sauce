@@ -21,6 +21,10 @@
     {
       "folder": "spice/meetings/hubs",
       "template": "ranch/templates/Meeting Hub.md"
+    },
+    {
+      "folder": "spice/scratch",
+      "template": "ranch/templates/Scratch.md"
     }
   ],
   "enable_file_templates": false,
