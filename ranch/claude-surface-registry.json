@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-05-13T03:17:59.269Z",
-  "workshop_version": "0.33.1",
+  "generated_at": "2026-05-13T04:54:09.338Z",
+  "workshop_version": "0.36.1",
   "contributions": {
     "audit": [
       {
@@ -157,6 +157,29 @@
           "topic": "Meetings",
           "path": "spice/meetings",
           "command": "/meetings"
+        }
+      }
+    ],
+    "scratch": [
+      {
+        "kind": "command",
+        "source": "commands/scratch.md",
+        "dest": ".claude/commands/scratch.md",
+        "version": "0.1.0"
+      },
+      {
+        "kind": "skill",
+        "source": "skills/new-scratch/SKILL.md",
+        "dest": ".claude/skills/scratch/new-scratch/SKILL.md",
+        "version": "0.1.0"
+      },
+      {
+        "kind": "claude_md_row",
+        "table": "resolvers",
+        "row": {
+          "topic": "Scratch",
+          "path": "spice/scratch",
+          "command": "/scratch"
         }
       }
     ]
