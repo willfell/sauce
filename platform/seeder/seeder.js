@@ -14,6 +14,9 @@ function listSeedableBlueprints(workshopRoot) {
 }
 
 function readBlueprintModuleDir(workshopRoot, blueprint) {
+    if (!/^[a-zA-Z0-9_-]+$/.test(blueprint)) {
+        throw new Error(`invalid blueprint name '${blueprint}': must match /^[a-zA-Z0-9_-]+$/`);
+    }
     const m = require(path.join(workshopRoot, "platform", "blueprints", blueprint, "manifest.json"));
     if (!m.module_directory) throw new Error(`blueprint ${blueprint} has no module_directory`);
     return m.module_directory;

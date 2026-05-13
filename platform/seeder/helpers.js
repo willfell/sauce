@@ -27,7 +27,7 @@ function emitFrontmatter(fm) {
 
 function quoteIfNeeded(s) {
     if (NEEDS_QUOTE.test(s)) return `"${s}"`;
-    if (s.includes(":") || s.includes("#") || s.startsWith(" ") || s.endsWith(" ")) return `"${s.replace(/"/g, '\\"')}"`;
+    if (s === "" || s.includes(":") || s.includes("#") || s.startsWith(" ") || s.endsWith(" ")) return `"${s.replace(/"/g, '\\"')}"`;
     return s;
 }
 
@@ -43,7 +43,8 @@ function writeNote(ctx, opts) {
     const moduleDir = ctx.moduleDir;
     if (!moduleDir) throw new Error("writeNote: ctx.moduleDir is required");
     // path may be relative — interpret as relative to vaultPath. Then enforce moduleDir prefix.
-    const rel = opts.path.replace(/^\/+/, "");
+    const rawRel = opts.path.replace(/^\/+/, "");
+    const rel = path.posix.normalize(rawRel);
     const expectedPrefix = path.posix.join("spice", moduleDir);
     if (!rel.startsWith(expectedPrefix + "/") && rel !== `${expectedPrefix}.md`) {
         throw new ModuleDirectoryEscapeError(
