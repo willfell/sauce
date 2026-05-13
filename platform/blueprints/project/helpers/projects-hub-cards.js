@@ -27,15 +27,17 @@ class ProjectsHubCards {
         return links.map(l => `<span style="background:var(--background-secondary);padding:1px 6px;border-radius:4px;font-size:0.8em;margin-right:4px;">${l.path.split("/").pop().replace(/\.md$/, "")}</span>`).join("");
     }
 
-    _renderChips(dv) {
+    _renderChips(dv, projects) {
         const STATUSES = ["idea", "planning", "in-progress", "blocked", "done", "superseded", "cancelled"];
-        const bar = dv.container.createEl("div");
-        bar.style.cssText = "display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;align-items:center;";
-        const label = bar.createEl("span", { text: "Status: " });
-        label.style.cssText = "color:var(--text-muted);font-size:0.85em;margin-right:4px;";
+
+        // Status chip bar
+        const statusBar = dv.container.createEl("div");
+        statusBar.style.cssText = "display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;align-items:center;";
+        const statusLabel = statusBar.createEl("span", { text: "Status: " });
+        statusLabel.style.cssText = "color:var(--text-muted);font-size:0.85em;margin-right:4px;";
         STATUSES.forEach(s => {
             const isActive = this._activeStatuses.has(s);
-            const chip = bar.createEl("span", { text: s });
+            const chip = statusBar.createEl("span", { text: s });
             chip.style.cssText = `cursor:pointer;padding:2px 10px;border-radius:12px;font-size:0.8em;${
                 isActive ? "background:var(--interactive-accent);color:var(--text-on-accent);" : "background:var(--background-secondary);color:var(--text-muted);"
             }`;
@@ -46,6 +48,40 @@ class ProjectsHubCards {
                 await this.render(dv, {});
             });
         });
+
+        // Compute team + product chip universe from current (status-filtered) projects.
+        const allTeams = new Set();
+        const allProducts = new Set();
+        for (const p of projects) {
+            (p.teams || []).forEach(l => allTeams.add(l.path));
+            (p.products || []).forEach(l => allProducts.add(l.path));
+        }
+        if (!this._activeTeams)    this._activeTeams    = new Set(allTeams);
+        if (!this._activeProducts) this._activeProducts = new Set(allProducts);
+
+        const renderLinkChips = (labelText, allSet, activeSet) => {
+            if (!allSet.size) return;
+            const bar = dv.container.createEl("div");
+            bar.style.cssText = "display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;align-items:center;";
+            const lbl = bar.createEl("span", { text: `${labelText}: ` });
+            lbl.style.cssText = "color:var(--text-muted);font-size:0.85em;margin-right:4px;";
+            [...allSet].sort().forEach(path => {
+                const display = path.split("/").pop().replace(/\.md$/, "");
+                const isActive = activeSet.has(path);
+                const chip = bar.createEl("span", { text: display });
+                chip.style.cssText = `cursor:pointer;padding:2px 10px;border-radius:12px;font-size:0.8em;${
+                    isActive ? "background:var(--interactive-accent);color:var(--text-on-accent);" : "background:var(--background-secondary);color:var(--text-muted);"
+                }`;
+                chip.addEventListener("click", async () => {
+                    if (activeSet.has(path)) activeSet.delete(path);
+                    else activeSet.add(path);
+                    dv.container.empty();
+                    await this.render(dv, {});
+                });
+            });
+        };
+        renderLinkChips("Teams", allTeams, this._activeTeams);
+        renderLinkChips("Products", allProducts, this._activeProducts);
     }
 
     async render(dv) {
@@ -59,11 +95,6 @@ class ProjectsHubCards {
             this._activeStatuses = new Set(["idea", "planning", "in-progress", "blocked"]);
         }
 
-        // v0.39.0 S6.4: render status filter chip bar at top of hub. Chips
-        // are click-toggle; click handler mutates this._activeStatuses then
-        // empties the container and re-renders the whole hub.
-        this._renderChips(dv);
-
         // v1.4.1 (S6.5 CF-1): match the hub note via EITHER the new canonical
         // `type: project` discriminator (v1.4.0+) OR the legacy `#project` tag
         // (pre-v1.4.0). Older projects in long-running consumer vaults don't
@@ -74,7 +105,7 @@ class ProjectsHubCards {
         // which means Project Map.md (type: map) and Project Board.md (type: kanban)
         // would be falsely included by the etag check alone. Filter them out by
         // explicit type, plus the legacy `-board` filename guard for safety.
-        const projectHubs = dv.pages('"spice/projects"')
+        const statusFiltered = dv.pages('"spice/projects"')
             .where(p => (p.type === "project"
                       || (p.file.etags.includes("#project")
                           && p.type !== "map"
@@ -83,6 +114,21 @@ class ProjectsHubCards {
                      && !p.file.path.includes("/steps/")
                      && !p.file.name.toLowerCase().endsWith("-board"))
             .where(p => !p.status || this._activeStatuses.has(p.status));
+
+        // v0.39.0 S6.4/S6.5: render status + team + product chip bars at top
+        // of hub. Team/product chip set is derived from the status-filtered
+        // projects so the chip universe is responsive to status toggles.
+        this._renderChips(dv, statusFiltered);
+
+        // v0.39.0 S6.5: apply team/product filter (OR-mode multi-select).
+        // Projects with neither teams nor products surface unconditionally
+        // (unassigned-shown posture).
+        const projectHubs = statusFiltered.where(p => {
+            const teams = (p.teams || []).map(l => l.path);
+            const products = (p.products || []).map(l => l.path);
+            if (teams.length === 0 && products.length === 0) return true;
+            return teams.some(t => this._activeTeams.has(t)) || products.some(pr => this._activeProducts.has(pr));
+        });
 
         const enriched = [];
         for (const project of projectHubs) {
