@@ -4592,6 +4592,170 @@ async function caseMCS3MissingSourceLogsErrorContinuesLoop() {
   }
 }
 
+// ============================================================
+// v0.39.0 S1.6 — products@0.1.0 install coverage (3 cases).
+// Mirrors the harness's scaffoldBlueprintVault + runHarness pattern (see M3/R6).
+// Cases validate the structural invariants the products manifest declares:
+//   PROD-1: files[] entries materialize at substituted paths (scripts + content + commands + skills)
+//   PROD-2: nav_buttons[] entries register into ranch/nav-buttons-registry.json
+//   PROD-3: rule_fragments[] entries aggregate into ranch/rules/<target>.json
+// Each case uses a fake-fixture blueprint whose manifest mirrors the
+// real products manifest shape (kind=blueprint, module_directory=products,
+// the same nav_buttons + rule_fragments shape), proving the install path
+// honors what the real manifest will encounter at install time.
+// ============================================================
+
+async function caseProd1FilesMaterialize() {
+  console.log("\n--- Case PROD-1: products@0.1.0 install — files materialize at expected paths ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-prod1-"));
+  try {
+    await scaffoldBlueprintVault(scratch, [
+      {
+        name: "products",
+        version: "0.1.0",
+        manifest: {
+          name: "products",
+          version: "0.1.0",
+          kind: "blueprint",
+          module_directory: "products",
+          skills_dir: ".claude/skills/products",
+          files: [
+            { source: "scripts/products-hub-cards.js",     "dest": "{{scripts_path}}/products/products-hub-cards.js" },
+            { source: "scripts/product-page-cards.js",     "dest": "{{scripts_path}}/products/product-page-cards.js" },
+            { source: "scripts/product-action-buttons.js", "dest": "{{scripts_path}}/products/product-action-buttons.js" },
+            { source: "templates/Template, Product.md",    "dest": "{{templates_path}}/Template, Product.md" },
+            { source: "content/Products.md",               "dest": "{{module_directory}}/Products.md" }
+          ],
+          claude_surface: [
+            { kind: "command", source: "commands/products.md",        dest: ".claude/commands/products.md" },
+            { kind: "skill",   source: "skills/new-product/SKILL.md", dest: "{{skills_dir}}/new-product/SKILL.md" }
+          ]
+        },
+        sourceFiles: [
+          { relPath: "scripts/products-hub-cards.js",      body: "// hub cards stub\n" },
+          { relPath: "scripts/product-page-cards.js",      body: "// page cards stub\n" },
+          { relPath: "scripts/product-action-buttons.js",  body: "// action buttons stub\n" },
+          { relPath: "templates/Template, Product.md",     body: "stub template\n" },
+          { relPath: "content/Products.md",                body: "# Products\nhub\n" },
+          { relPath: "commands/products.md",               body: "---\ndescription: products\n---\nstub\n" },
+          { relPath: "skills/new-product/SKILL.md",        body: "---\nname: new-product\ndescription: stub\n---\nbody\n" }
+        ]
+      }
+    ]);
+    const result = await runHarness(scratch);
+    assertTrue("PROD-1: platform-installed.json was written", result !== null);
+
+    assertTrue("PROD-1: hub note materialized at spice/products/Products.md",
+      fs.existsSync(path.join(scratch, "spice/products/Products.md")));
+    assertTrue("PROD-1: hub-cards script materialized at ranch/scripts/products/products-hub-cards.js",
+      fs.existsSync(path.join(scratch, "ranch/scripts/products/products-hub-cards.js")));
+    assertTrue("PROD-1: page-cards script materialized",
+      fs.existsSync(path.join(scratch, "ranch/scripts/products/product-page-cards.js")));
+    assertTrue("PROD-1: action-buttons script materialized",
+      fs.existsSync(path.join(scratch, "ranch/scripts/products/product-action-buttons.js")));
+    assertTrue("PROD-1: Product template materialized at ranch/templates/Template, Product.md",
+      fs.existsSync(path.join(scratch, "ranch/templates/Template, Product.md")));
+    assertTrue("PROD-1: /products slash command materialized at .claude/commands/products.md",
+      fs.existsSync(path.join(scratch, ".claude/commands/products.md")));
+    assertTrue("PROD-1: new-product SKILL.md materialized at .claude/skills/products/new-product/SKILL.md",
+      fs.existsSync(path.join(scratch, ".claude/skills/products/new-product/SKILL.md")));
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseProd2NavButtonRegistry() {
+  console.log("\n--- Case PROD-2: products@0.1.0 install — nav-button registry includes products-hub ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-prod2-"));
+  try {
+    await scaffoldBlueprintVault(scratch, [
+      {
+        name: "products",
+        version: "0.1.0",
+        manifest: {
+          name: "products",
+          version: "0.1.0",
+          kind: "blueprint",
+          module_directory: "products",
+          files: [],
+          nav_buttons: [
+            {
+              id: "products-hub",
+              label: "Products",
+              icon: "package",
+              order: 70,
+              action: { type: "openLink", target: "{{module_directory}}/Products.md" }
+            }
+          ]
+        }
+      }
+    ]);
+    const result = await runHarness(scratch);
+    assertTrue("PROD-2: platform-installed.json was written", result !== null);
+
+    const registry = await readJson(path.join(scratch, "ranch/nav-buttons-registry.json"));
+    const contribs = registry.contributions["products"];
+    assertTrue("PROD-2: registry has contributions for products", Array.isArray(contribs) && contribs.length >= 1);
+    const hubBtn = contribs.find((c) => c.id === "products-hub");
+    assertTrue("PROD-2: registry contains products-hub button entry", !!hubBtn);
+    assertEq("PROD-2: action.target has {{module_directory}} substituted to spice/products",
+      hubBtn.action.target, "spice/products/Products.md");
+    assertEq("PROD-2: label preserved", hubBtn.label, "Products");
+    assertEq("PROD-2: icon preserved", hubBtn.icon, "package");
+    assertEq("PROD-2: order preserved", hubBtn.order, 70);
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseProd3RuleFragmentAggregated() {
+  console.log("\n--- Case PROD-3: products@0.1.0 install — rule_fragment aggregated into ranch/rules/products.json ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-prod3-"));
+  try {
+    await scaffoldBlueprintVault(scratch, [
+      {
+        name: "products",
+        version: "0.1.0",
+        manifest: {
+          name: "products",
+          version: "0.1.0",
+          kind: "blueprint",
+          module_directory: "products",
+          files: [],
+          rule_fragments: [
+            {
+              target: "products",
+              fragment: {
+                scope: { path_glob: "spice/products/*.md", exclude_basenames: ["Products.md"] },
+                required_frontmatter: {
+                  type:    { required: true, type: "string", equals: "product" },
+                  name:    { required: true, type: "string" },
+                  created: { required: true, type: "string", matches: "^\\d{4}-\\d{2}-\\d{2}$" }
+                },
+                required_tags: [{ tag: "product" }],
+                naming_pattern: "^[A-Z][\\w '\\-&]+\\.md$"
+              }
+            }
+          ]
+        }
+      }
+    ]);
+    const result = await runHarness(scratch);
+    assertTrue("PROD-3: platform-installed.json was written", result !== null);
+
+    const rulePath = path.join(scratch, "ranch/rules/products.json");
+    assertTrue("PROD-3: ranch/rules/products.json was written", fs.existsSync(rulePath));
+    const rule = await readJson(rulePath);
+    assertTrue("PROD-3: contributions.products is an array", Array.isArray(rule.contributions && rule.contributions.products));
+    assertEq("PROD-3: contributions.products has exactly one fragment", rule.contributions.products.length, 1);
+    const frag = rule.contributions.products[0];
+    assertEq("PROD-3: scope.path_glob preserved", frag.scope.path_glob, "spice/products/*.md");
+    assertEq("PROD-3: required_frontmatter.type.equals === product", frag.required_frontmatter.type.equals, "product");
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -4724,6 +4888,11 @@ async function caseMCS3MissingSourceLogsErrorContinuesLoop() {
 
   // v0.20.0 docs polish cycle — trailing-whitespace lint.
   await caseTW1TemplatesNoTrailingWhitespace();
+
+  // v0.39.0 S1.6 — products@0.1.0 install coverage.
+  await caseProd1FilesMaterialize();
+  await caseProd2NavButtonRegistry();
+  await caseProd3RuleFragmentAggregated();
 
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
