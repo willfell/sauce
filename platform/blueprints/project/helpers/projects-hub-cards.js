@@ -8,6 +8,25 @@
  *   await dv.view("ranch/views/customjs-guard", { class: "ProjectsHubCards" });
  */
 class ProjectsHubCards {
+    _statusPill(status) {
+        const colors = {
+            "in-progress": "var(--color-green)",
+            "planning":    "var(--color-cyan)",
+            "blocked":     "var(--color-yellow)",
+            "idea":        "var(--text-muted)",
+            "done":        "var(--text-faint)",
+            "superseded":  "var(--text-faint)",
+            "cancelled":   "var(--text-faint)"
+        };
+        const color = colors[status] || "var(--text-muted)";
+        return `<span style="background:${color}1A;color:${color};padding:2px 8px;border-radius:10px;font-size:0.8em;font-weight:600;">${status || "?"}</span>`;
+    }
+
+    _chipList(links) {
+        if (!links || !links.length) return "";
+        return links.map(l => `<span style="background:var(--background-secondary);padding:1px 6px;border-radius:4px;font-size:0.8em;margin-right:4px;">${l.path.split("/").pop().replace(/\.md$/, "")}</span>`).join("");
+    }
+
     async render(dv) {
         // v1.4.1 (S6.5 CF-1): match the hub note via EITHER the new canonical
         // `type: project` discriminator (v1.4.0+) OR the legacy `#project` tag
@@ -69,7 +88,14 @@ class ProjectsHubCards {
             meta: (p) => {
                 const e = lookup.get(p.file.path);
                 const time = window.moment(e.latestMtime.ts).fromNow();
-                let html = `<span title="Last activity">${time}</span>`;
+                const pill = this._statusPill(p.status);
+                const teamChips = this._chipList(p.teams || []);
+                const productChips = this._chipList(p.products || []);
+                const recency = p.status_changed_at ? ` &middot; ${p.status_changed_at}` : "";
+                let html = `<span>${pill}</span>`;
+                if (teamChips) html += `<span>${teamChips}</span>`;
+                if (productChips) html += `<span>${productChips}</span>`;
+                html += `<span title="Last activity">${time}${recency}</span>`;
                 if (e.total > 0) {
                     const pct = Math.round((e.done / e.total) * 100);
                     html += `<span>${e.done}/${e.total} &middot; ${pct}%</span>`;
