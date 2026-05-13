@@ -38,7 +38,7 @@
     { "name": "meetings", "version": "0.4.0", "path": "blueprints/meetings" },
     { "name": "people", "version": "0.1.1", "path": "blueprints/people" },
     { "name": "products", "version": "0.1.0", "path": "blueprints/products" },
-    { "name": "project", "version": "1.5.0", "path": "blueprints/project" },
+    { "name": "project", "version": "1.6.0", "path": "blueprints/project" },
     { "name": "to-do", "version": "0.1.4", "path": "blueprints/to-do" },
     { "name": "journal", "version": "0.1.2", "path": "blueprints/journal" },
     { "name": "trips", "version": "0.1.7", "path": "blueprints/trips" },
