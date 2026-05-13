@@ -12,7 +12,8 @@
     "test:helpers": "node platform/test/run-helper-cases.js",
     "test:renderer": "node platform/test/run-renderer.js",
     "test:bootstrap": "node platform/test/run-bootstrap.js",
-    "test:registry": "node platform/test/run-registry.js"
+    "test:registry": "node platform/test/run-registry.js",
+    "test:migrate-layout": "node platform/test/run-migrate-layout.js"
   },
   "dependencies": {
     "@inquirer/prompts": "^7.0.0"
