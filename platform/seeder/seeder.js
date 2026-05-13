@@ -3,6 +3,7 @@
 const fs = require("fs");
 const path = require("path");
 const declarative = require("./declarative.js");
+const programmatic = require("./programmatic.js");
 
 function listSeedableBlueprints(workshopRoot) {
     const dir = path.join(workshopRoot, "platform", "blueprints");
@@ -49,8 +50,13 @@ function seedVault(opts) {
             }
             continue;
         }
-        // programmatic branch added in S3
-        results.push({ blueprint: bp, kind: "unknown", created: 0, skipped: 0, warning: "no declarative seed" });
+        const prog = programmatic.loadProgrammaticSeed(bpRoot);
+        if (prog) {
+            const r = programmatic.materializeProgrammatic(prog, ctx, bp, bpRoot, opts.dryRun);
+            results.push({ blueprint: bp, kind: "programmatic", created: r.created, skipped: r.skipped, programmatic_dry_run: r.programmatic_dry_run });
+            continue;
+        }
+        results.push({ blueprint: bp, kind: "unknown", created: 0, skipped: 0, warning: "no seed contribution" });
     }
     return { vaultPath, anchorDate, results };
 }
