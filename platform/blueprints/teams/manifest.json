@@ -1,0 +1,62 @@
+{
+  "name": "teams",
+  "version": "0.1.0",
+  "kind": "blueprint",
+  "module_directory": "teams",
+  "skills_dir": ".claude/skills/teams",
+  "description": "Org-chart middle tier. Flat notes under spice/teams/<Name>.md with hub at spice/teams/Teams.md. Each Team belongs to exactly one Product (required wikilink). Projects optionally tag a team via teams: [] list. Hub groups teams by Product; per-team page rolls up member projects.",
+  "depends_on": [
+    { "name": "customjs-guard", "range": ">=1.0.0" },
+    { "name": "nav-buttons",    "range": ">=2.6.0" },
+    { "name": "accent-button",  "range": ">=0.1.0" },
+    { "name": "cards",          "range": ">=0.2.4" },
+    { "name": "products",       "range": ">=0.1.0" }
+  ],
+  "customjs_classes": ["TeamsHubCards", "TeamPageCards", "TeamActionButtons"],
+  "files": [
+    { "source": "scripts/teams-hub-cards.js",      "dest": "{{scripts_path}}/teams/teams-hub-cards.js" },
+    { "source": "scripts/team-page-cards.js",      "dest": "{{scripts_path}}/teams/team-page-cards.js" },
+    { "source": "scripts/team-action-buttons.js",  "dest": "{{scripts_path}}/teams/team-action-buttons.js" },
+    { "source": "templates/Template, Team.md",     "dest": "{{templates_path}}/Template, Team.md" },
+    { "source": "content/Teams.md",                "dest": "{{module_directory}}/Teams.md" }
+  ],
+  "templater_folder_templates": [
+    { "folder": "{{module_directory}}", "template": "{{templates_path}}/Template, Team.md" }
+  ],
+  "nav_buttons": [
+    {
+      "id": "teams-hub",
+      "label": "Teams",
+      "icon": "users",
+      "order": 75,
+      "action": { "type": "openLink", "target": "{{module_directory}}/Teams.md" }
+    }
+  ],
+  "claude_surface": [
+    { "kind": "command", "source": "commands/teams.md",                  "dest": ".claude/commands/teams.md" },
+    { "kind": "skill",   "source": "skills/new-team/SKILL.md",           "dest": "{{skills_dir}}/new-team/SKILL.md" },
+    { "kind": "claude_md_row", "table": "resolvers", "row": { "topic": "Teams", "path": "{{module_directory}}", "command": "/teams" } }
+  ],
+  "post_install": [
+    {
+      "type": "notice",
+      "message": "teams@0.1.0 installed at spice/teams/. Create at least one Product first (/products), then use /teams or click + New Team — each Team requires a product: wikilink."
+    }
+  ],
+  "rule_fragments": [
+    {
+      "target": "teams",
+      "fragment": {
+        "scope": { "path_glob": "spice/teams/*.md", "exclude_basenames": ["Teams.md"] },
+        "required_frontmatter": {
+          "type":    { "required": true, "type": "string", "equals": "team" },
+          "name":    { "required": true, "type": "string" },
+          "created": { "required": true, "type": "string", "matches": "^\\d{4}-\\d{2}-\\d{2}$" },
+          "product": { "required": true, "type": "string" }
+        },
+        "required_tags": [{ "tag": "team" }],
+        "naming_pattern": "^[A-Z][\\w '\\-&]+\\.md$"
+      }
+    }
+  ]
+}
