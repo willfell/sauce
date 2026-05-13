@@ -4839,7 +4839,33 @@ async function aggregateClaudeSurface(perItemManifest, subscription, history, gi
   for (const [name, subEntry] of subscribed) {
     const itemMan = perItemManifest.get(name);
     if (!itemMan) continue;
-    const cs = itemMan.claude_surface;
+
+    // v0.32.0 S8 — backwards-compat shim: legacy `manifest.skills[]` field
+    // (pre-S1 cowork shape) is processed as if its entries were
+    // `claude_surface[]` entries of kind=skill. Emits a deprecation event on
+    // every shimmed manifest so the drift is visible in install history.
+    // Removal target: v0.34.0 (wave 3). After cowork's S8 dogfood migration,
+    // no blueprint in tree uses manifest.skills[]; this shim only fires if
+    // someone copy-pastes the legacy shape into a new blueprint.
+    let cs = itemMan.claude_surface;
+    if (Array.isArray(itemMan.skills) && itemMan.skills.length > 0) {
+      if (history) {
+        history.push({
+          event: "deprecation",
+          step: "manifest_skills_legacy",
+          name,
+          message: `${name} manifest.skills[] is deprecated; use claude_surface[] kind=skill (removal target v0.34.0)`,
+          git_commit: git ? git.commit : null,
+          git_tag: git ? git.tag : null,
+          git_dirty: git ? git.dirty : null,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      const shimmed = itemMan.skills
+        .filter((s) => s && typeof s.source === "string" && typeof s.dest === "string")
+        .map((s) => ({ kind: "skill", source: s.source, dest: s.dest }));
+      cs = Array.isArray(cs) && cs.length > 0 ? cs.concat(shimmed) : shimmed;
+    }
     if (!Array.isArray(cs) || cs.length === 0) continue;
 
     // Build the item's substitution overlay — mirrors the install-loop

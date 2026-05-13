@@ -498,6 +498,155 @@ async function caseCSSUB3VerbsExist() {
 }
 
 // ============================================================
+// CS-MIG-1: cowork@0.3.0 manifest with claude_surface[] entries → aggregator
+//           yields contributions including all 32 skill entries + 1 command
+//           + 1 claude_md_row (resolvers). v0.32.0 S8 dogfood migration of
+//           the legacy skills[] + files[] command shape to claude_surface[].
+// ============================================================
+async function caseCSMIG1CoworkAggregation() {
+  console.log("\n--- Case CS-MIG-1: cowork manifest claude_surface[] yields 34 contributions ---");
+  const bpManifestPath = path.join(WORKSHOP, "platform/blueprints/cowork/manifest.json");
+  assertTrue("CS-MIG-1: cowork manifest.json exists", fs.existsSync(bpManifestPath));
+  const bpMan = JSON.parse(fs.readFileSync(bpManifestPath, "utf8"));
+
+  assertEq("CS-MIG-1: cowork version bumped to 0.3.0", bpMan.version, "0.3.0");
+  assertTrue("CS-MIG-1: cowork manifest no longer has skills[] field", !("skills" in bpMan));
+  assertTrue("CS-MIG-1: cowork manifest has claude_surface[]", Array.isArray(bpMan.claude_surface));
+
+  const perItemManifest = new Map();
+  perItemManifest.set("cowork", bpMan);
+  const subscription = {
+    mechanisms: [],
+    blueprints: [{ name: "cowork", version: "0.3.0" }],
+  };
+  const history = [];
+  const out = await aggregateClaudeSurface(perItemManifest, subscription, history, mkGit(), { workshop_version: "0.0.0-test" });
+
+  assertTrue("CS-MIG-1: cowork in registry.contributions",
+    Array.isArray(out.registry.contributions["cowork"]));
+  assertEq("CS-MIG-1: cowork has 34 contributions (32 skill + 1 command + 1 claude_md_row)",
+    out.registry.contributions["cowork"].length, 34);
+
+  const skillEntries = out.materializeList.filter((e) => e.owner === "cowork" && e.kind === "skill");
+  const cmdEntries = out.materializeList.filter((e) => e.owner === "cowork" && e.kind === "command");
+  assertEq("CS-MIG-1: 32 skill entries in materializeList", skillEntries.length, 32);
+  assertEq("CS-MIG-1: 1 command entry in materializeList", cmdEntries.length, 1);
+
+  // Skill dests should have {{skills_dir}} substituted to ".claude/skills/cowork".
+  for (const e of skillEntries) {
+    assertTrue(`CS-MIG-1: skill dest ${e.dest} starts with .claude/skills/cowork/`,
+      e.dest.startsWith(".claude/skills/cowork/"));
+  }
+
+  // claude_md_row resolver entry contributes a single row for cowork.
+  const coworkRows = out.rows.resolvers.filter((r) => r.owner === "cowork");
+  assertEq("CS-MIG-1: exactly 1 resolver row owned by cowork", coworkRows.length, 1);
+  assertEq("CS-MIG-1: cowork resolver topic is 'Cowork'", coworkRows[0].topic, "Cowork");
+  assertEq("CS-MIG-1: cowork resolver command is '/cowork'", coworkRows[0].command, "/cowork");
+  assertEq("CS-MIG-1: cowork resolver path substituted to spice/cowork",
+    coworkRows[0].path, "spice/cowork");
+}
+
+// ============================================================
+// CS-MIG-2: cowork's .claude/commands/cowork.md materializes from
+//           claude_surface[] (kind=command path), not from files[]. The
+//           single command entry in cowork's claude_surface[] should be
+//           the sole owner of the .claude/commands/cowork.md dest.
+// ============================================================
+async function caseCSMIG2CoworkCommandFromSurface() {
+  console.log("\n--- Case CS-MIG-2: cowork.md command materializes via claude_surface, not files[] ---");
+  const bpManifestPath = path.join(WORKSHOP, "platform/blueprints/cowork/manifest.json");
+  const bpMan = JSON.parse(fs.readFileSync(bpManifestPath, "utf8"));
+
+  // files[] must NOT contain a .claude/commands/cowork.md entry anymore.
+  const filesCmdEntries = (bpMan.files || []).filter(
+    (f) => typeof f.dest === "string" && f.dest === ".claude/commands/cowork.md"
+  );
+  assertEq("CS-MIG-2: files[] no longer has the cowork.md command entry",
+    filesCmdEntries.length, 0);
+
+  // claude_surface[] kind=command for that exact dest must be present.
+  const csCmdEntries = (bpMan.claude_surface || []).filter(
+    (e) => e && e.kind === "command" && e.dest === ".claude/commands/cowork.md"
+  );
+  assertEq("CS-MIG-2: claude_surface[] has the cowork.md command entry",
+    csCmdEntries.length, 1);
+  assertEq("CS-MIG-2: command entry source is commands/cowork.md",
+    csCmdEntries[0].source, "commands/cowork.md");
+
+  // Aggregator emits one command materialize entry for cowork.md.
+  const perItemManifest = new Map();
+  perItemManifest.set("cowork", bpMan);
+  const subscription = {
+    mechanisms: [],
+    blueprints: [{ name: "cowork", version: "0.3.0" }],
+  };
+  const history = [];
+  const out = await aggregateClaudeSurface(perItemManifest, subscription, history, mkGit(), { workshop_version: "0.0.0-test" });
+
+  const cmdMat = out.materializeList.filter(
+    (e) => e.owner === "cowork" && e.kind === "command" && e.dest === ".claude/commands/cowork.md"
+  );
+  assertEq("CS-MIG-2: aggregator produced 1 command materialize entry for cowork.md",
+    cmdMat.length, 1);
+}
+
+// ============================================================
+// CS-MIG-3: backwards-compat shim — a synthesized manifest with BOTH legacy
+//           skills[] AND new claude_surface[] triggers a deprecation event
+//           and merges the shimmed entries into the contributions list.
+// ============================================================
+async function caseCSMIG3DeprecationShim() {
+  console.log("\n--- Case CS-MIG-3: legacy skills[] shimmed; deprecation event emitted ---");
+  const perItemManifest = new Map();
+  perItemManifest.set("legacy-bp", {
+    name: "legacy-bp",
+    version: "0.1.0",
+    kind: "blueprint",
+    module_directory: "legacybp",
+    skills_dir: ".claude/skills/legacy",
+    // Legacy field — should be shimmed in.
+    skills: [
+      { source: "skills/foo/SKILL.md", dest: "{{skills_dir}}/foo/SKILL.md" },
+      { source: "skills/bar/SKILL.md", dest: "{{skills_dir}}/bar/SKILL.md" },
+    ],
+    // New field — should coexist with shim entries.
+    claude_surface: [
+      { kind: "command", source: "commands/legacy.md", dest: ".claude/commands/legacy.md" },
+    ],
+  });
+  const subscription = {
+    mechanisms: [],
+    blueprints: [{ name: "legacy-bp", version: "0.1.0" }],
+  };
+  const history = [];
+  const out = await aggregateClaudeSurface(perItemManifest, subscription, history, mkGit(), { workshop_version: "0.0.0-test" });
+
+  const deprecations = history.filter(
+    (h) => h.event === "deprecation" && h.step === "manifest_skills_legacy"
+  );
+  assertEq("CS-MIG-3: exactly one deprecation event recorded", deprecations.length, 1);
+  assertEq("CS-MIG-3: deprecation event names the offending item",
+    deprecations[0].name, "legacy-bp");
+
+  // Contributions include the new command + 2 shimmed skills = 3 total.
+  assertTrue("CS-MIG-3: legacy-bp in registry.contributions",
+    Array.isArray(out.registry.contributions["legacy-bp"]));
+  assertEq("CS-MIG-3: contributions length is 3 (1 command + 2 shimmed skills)",
+    out.registry.contributions["legacy-bp"].length, 3);
+
+  // Shimmed skill dests have {{skills_dir}} substituted.
+  const shimmedSkills = out.materializeList.filter(
+    (e) => e.owner === "legacy-bp" && e.kind === "skill"
+  );
+  assertEq("CS-MIG-3: 2 shimmed skill entries in materializeList", shimmedSkills.length, 2);
+  for (const e of shimmedSkills) {
+    assertTrue(`CS-MIG-3: shimmed skill dest ${e.dest} resolved skills_dir`,
+      e.dest.startsWith(".claude/skills/legacy/"));
+  }
+}
+
+// ============================================================
 // CS-MAT-1: command kind → .claude/commands/<x>.md with body substitution
 // ============================================================
 async function caseCSMAT1Command() {
@@ -1150,6 +1299,9 @@ async function main() {
   await caseCSSUB1PlatformClaudeIncluded();
   await caseCSSUB2PlatformClaudeExcluded();
   await caseCSSUB3VerbsExist();
+  await caseCSMIG1CoworkAggregation();
+  await caseCSMIG2CoworkCommandFromSurface();
+  await caseCSMIG3DeprecationShim();
   await caseCSMAT1Command();
   await caseCSMAT2Skill();
   await caseCSMAT3ContextDoc();

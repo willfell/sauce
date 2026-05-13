@@ -106,8 +106,12 @@ const FIXTURES = [
 function checkSharedContracts() {
   const manifest = loadManifest();
 
+  // v0.32.0 S8 — cowork@0.3.0 migrated manifest.skills[] → claude_surface[]
+  // with kind=skill entries. Filter to kind=skill to recover the source list.
   // S1 — orchestrator + key sub-skills present
-  const skillSources = manifest.skills.map(s => s.source);
+  const skillSources = Array.isArray(manifest.claude_surface)
+    ? manifest.claude_surface.filter(e => e && e.kind === "skill").map(e => e.source)
+    : (Array.isArray(manifest.skills) ? manifest.skills.map(s => s.source) : []);
   assertTrue(skillSources.includes("skills/orchestrators/morning-briefing/SKILL.md"),
     "S1: manifest exposes morning-briefing orchestrator");
   assertTrue(skillSources.includes("skills/skills/write-callout-morning-briefing/SKILL.md"),
