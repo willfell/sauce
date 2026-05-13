@@ -4757,6 +4757,206 @@ async function caseProd3RuleFragmentAggregated() {
 }
 
 // ============================================================
+// v0.39.0 S3.6 — teams@0.1.0 install coverage (3 cases).
+// Mirrors PROD-1/PROD-2/PROD-3 with teams substituted for products + an
+// extra products fixture co-subscribed (teams depends_on products).
+// Cases validate the structural invariants the teams manifest declares:
+//   TEAM-1: files[] entries materialize at substituted paths
+//   TEAM-2: nav_buttons[] entries register into ranch/nav-buttons-registry.json
+//   TEAM-3: rule_fragments[] include the required product: field
+// ============================================================
+
+async function caseTeam1FilesMaterialize() {
+  console.log("\n--- Case TEAM-1: teams@0.1.0 install — files materialize at expected paths ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-team1-"));
+  try {
+    await scaffoldBlueprintVault(scratch, [
+      {
+        name: "products",
+        version: "0.1.0",
+        manifest: {
+          name: "products",
+          version: "0.1.0",
+          kind: "blueprint",
+          module_directory: "products",
+          files: []
+        }
+      },
+      {
+        name: "teams",
+        version: "0.1.0",
+        manifest: {
+          name: "teams",
+          version: "0.1.0",
+          kind: "blueprint",
+          module_directory: "teams",
+          skills_dir: ".claude/skills/teams",
+          depends_on: [{ name: "products", range: ">=0.1.0" }],
+          files: [
+            { source: "scripts/teams-hub-cards.js",     "dest": "{{scripts_path}}/teams/teams-hub-cards.js" },
+            { source: "scripts/team-page-cards.js",     "dest": "{{scripts_path}}/teams/team-page-cards.js" },
+            { source: "scripts/team-action-buttons.js", "dest": "{{scripts_path}}/teams/team-action-buttons.js" },
+            { source: "templates/Template, Team.md",    "dest": "{{templates_path}}/Template, Team.md" },
+            { source: "content/Teams.md",               "dest": "{{module_directory}}/Teams.md" }
+          ],
+          claude_surface: [
+            { kind: "command", source: "commands/teams.md",        dest: ".claude/commands/teams.md" },
+            { kind: "skill",   source: "skills/new-team/SKILL.md", dest: "{{skills_dir}}/new-team/SKILL.md" }
+          ]
+        },
+        sourceFiles: [
+          { relPath: "scripts/teams-hub-cards.js",     body: "// hub cards stub\n" },
+          { relPath: "scripts/team-page-cards.js",     body: "// page cards stub\n" },
+          { relPath: "scripts/team-action-buttons.js", body: "// action buttons stub\n" },
+          { relPath: "templates/Template, Team.md",    body: "stub template\n" },
+          { relPath: "content/Teams.md",               body: "# Teams\nhub\n" },
+          { relPath: "commands/teams.md",              body: "---\ndescription: teams\n---\nstub\n" },
+          { relPath: "skills/new-team/SKILL.md",       body: "---\nname: new-team\ndescription: stub\n---\nbody\n" }
+        ]
+      }
+    ]);
+    const result = await runHarness(scratch);
+    assertTrue("TEAM-1: platform-installed.json was written", result !== null);
+
+    assertTrue("TEAM-1: hub note materialized at spice/teams/Teams.md",
+      fs.existsSync(path.join(scratch, "spice/teams/Teams.md")));
+    assertTrue("TEAM-1: hub-cards script materialized at ranch/scripts/teams/teams-hub-cards.js",
+      fs.existsSync(path.join(scratch, "ranch/scripts/teams/teams-hub-cards.js")));
+    assertTrue("TEAM-1: page-cards script materialized",
+      fs.existsSync(path.join(scratch, "ranch/scripts/teams/team-page-cards.js")));
+    assertTrue("TEAM-1: action-buttons script materialized",
+      fs.existsSync(path.join(scratch, "ranch/scripts/teams/team-action-buttons.js")));
+    assertTrue("TEAM-1: Team template materialized at ranch/templates/Template, Team.md",
+      fs.existsSync(path.join(scratch, "ranch/templates/Template, Team.md")));
+    assertTrue("TEAM-1: /teams slash command materialized at .claude/commands/teams.md",
+      fs.existsSync(path.join(scratch, ".claude/commands/teams.md")));
+    assertTrue("TEAM-1: new-team SKILL.md materialized at .claude/skills/teams/new-team/SKILL.md",
+      fs.existsSync(path.join(scratch, ".claude/skills/teams/new-team/SKILL.md")));
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseTeam2NavButtonRegistry() {
+  console.log("\n--- Case TEAM-2: teams@0.1.0 install — nav-button registry includes teams-hub ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-team2-"));
+  try {
+    await scaffoldBlueprintVault(scratch, [
+      {
+        name: "products",
+        version: "0.1.0",
+        manifest: {
+          name: "products",
+          version: "0.1.0",
+          kind: "blueprint",
+          module_directory: "products",
+          files: []
+        }
+      },
+      {
+        name: "teams",
+        version: "0.1.0",
+        manifest: {
+          name: "teams",
+          version: "0.1.0",
+          kind: "blueprint",
+          module_directory: "teams",
+          depends_on: [{ name: "products", range: ">=0.1.0" }],
+          files: [],
+          nav_buttons: [
+            {
+              id: "teams-hub",
+              label: "Teams",
+              icon: "users",
+              order: 75,
+              action: { type: "openLink", target: "{{module_directory}}/Teams.md" }
+            }
+          ]
+        }
+      }
+    ]);
+    const result = await runHarness(scratch);
+    assertTrue("TEAM-2: platform-installed.json was written", result !== null);
+
+    const registry = await readJson(path.join(scratch, "ranch/nav-buttons-registry.json"));
+    const contribs = registry.contributions["teams"];
+    assertTrue("TEAM-2: registry has contributions for teams", Array.isArray(contribs) && contribs.length >= 1);
+    const hubBtn = contribs.find((c) => c.id === "teams-hub");
+    assertTrue("TEAM-2: registry contains teams-hub button entry", !!hubBtn);
+    assertEq("TEAM-2: action.target has {{module_directory}} substituted to spice/teams",
+      hubBtn.action.target, "spice/teams/Teams.md");
+    assertEq("TEAM-2: label preserved", hubBtn.label, "Teams");
+    assertEq("TEAM-2: icon preserved", hubBtn.icon, "users");
+    assertEq("TEAM-2: order preserved", hubBtn.order, 75);
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseTeam3RuleFragmentRequiresProduct() {
+  console.log("\n--- Case TEAM-3: teams@0.1.0 install — rule_fragment aggregated into ranch/rules/teams.json with required product field ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-team3-"));
+  try {
+    await scaffoldBlueprintVault(scratch, [
+      {
+        name: "products",
+        version: "0.1.0",
+        manifest: {
+          name: "products",
+          version: "0.1.0",
+          kind: "blueprint",
+          module_directory: "products",
+          files: []
+        }
+      },
+      {
+        name: "teams",
+        version: "0.1.0",
+        manifest: {
+          name: "teams",
+          version: "0.1.0",
+          kind: "blueprint",
+          module_directory: "teams",
+          depends_on: [{ name: "products", range: ">=0.1.0" }],
+          files: [],
+          rule_fragments: [
+            {
+              target: "teams",
+              fragment: {
+                scope: { path_glob: "spice/teams/*.md", exclude_basenames: ["Teams.md"] },
+                required_frontmatter: {
+                  type:    { required: true, type: "string", equals: "team" },
+                  name:    { required: true, type: "string" },
+                  created: { required: true, type: "string", matches: "^\\d{4}-\\d{2}-\\d{2}$" },
+                  product: { required: true, type: "string" }
+                },
+                required_tags: [{ tag: "team" }],
+                naming_pattern: "^[A-Z][\\w '\\-&]+\\.md$"
+              }
+            }
+          ]
+        }
+      }
+    ]);
+    const result = await runHarness(scratch);
+    assertTrue("TEAM-3: platform-installed.json was written", result !== null);
+
+    const rulePath = path.join(scratch, "ranch/rules/teams.json");
+    assertTrue("TEAM-3: ranch/rules/teams.json was written", fs.existsSync(rulePath));
+    const rule = await readJson(rulePath);
+    assertTrue("TEAM-3: contributions.teams is an array", Array.isArray(rule.contributions && rule.contributions.teams));
+    assertEq("TEAM-3: contributions.teams has exactly one fragment", rule.contributions.teams.length, 1);
+    const frag = rule.contributions.teams[0];
+    assertEq("TEAM-3: scope.path_glob preserved", frag.scope.path_glob, "spice/teams/*.md");
+    assertEq("TEAM-3: required_frontmatter.type.equals === team", frag.required_frontmatter.type.equals, "team");
+    assertTrue("TEAM-3: required_frontmatter.product.required === true",
+      frag.required_frontmatter.product && frag.required_frontmatter.product.required === true);
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+// ============================================================
 // v0.39.0 S2.4 — products@0.1.0 validator green/red cases.
 // Direct exercise of platform/audit/rule-runner.js with the real
 // rule_fragment loaded from platform/blueprints/products/manifest.json.
@@ -4949,6 +5149,12 @@ async function caseProd5ValidatorRejectsProductMissingTag() {
   // using the real rule_fragment loaded from the products manifest.
   await caseProd4ValidatorAcceptsWellFormedProduct();
   await caseProd5ValidatorRejectsProductMissingTag();
+
+  // v0.39.0 S3.6 — teams@0.1.0 install coverage (3 cases mirroring PROD-1/2/3).
+  // Co-subscribes products in the fake fixture since teams depends_on products.
+  await caseTeam1FilesMaterialize();
+  await caseTeam2NavButtonRegistry();
+  await caseTeam3RuleFragmentRequiresProduct();
 
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
