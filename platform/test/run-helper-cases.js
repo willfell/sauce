@@ -5083,6 +5083,95 @@ async function caseTeam6ValidatorRejectsTeamMissingTag() {
     violations.some((v) => v.rule === "required_tags.missing" && /team/.test(v.message || "")));
 }
 
+// ============================================================
+// v0.39.0 S5.4 — project@1.6.0 validator green/red cases for the
+// expanded frontmatter (status enum + status_changed_at + teams[] +
+// products[]). Mirrors PROD-4/5 + TEAM-4/5/6 pattern — in-memory
+// record + fragment loaded from platform/blueprints/project/manifest.json.
+// Project's rule_fragment uses frontmatter_branch[0] (when type:project)
+// — rule-runner auto-resolves the branch from the record's frontmatter,
+// so the whole fragment is passed unchanged to applyRules.
+// PROJ-1 green = well-formed project record; PROJ-2 red = missing status;
+// PROJ-3 red = invalid status enum value.
+// ============================================================
+async function caseProj1ValidatorAcceptsWellFormedProject() {
+  console.log("\n--- Case PROJ-1: project validator accepts a well-formed project note with v1.6.0 frontmatter ---");
+  const manifestPath = path.join(WORKSHOP, "platform/blueprints/project/manifest.json");
+  const manifest = _readJson(manifestPath);
+  const fragments = manifest.rule_fragments.map((rf) => rf.fragment);
+  const record = {
+    relPath: "spice/projects/foo-launch/Foo Launch.md",
+    frontmatter: {
+      type: "project",
+      name: "Foo Launch",
+      created: "2026-05-12",
+      description: "ship Foo",
+      tags: ["project", "project/foo-launch", "2026/2026-05"],
+      workstreams: [],
+      status: "planning",
+      status_changed_at: "2026-05-12",
+      teams: ["[[Platform Engineering]]"],
+      products: ["[[Sauce]]"],
+    },
+    body: "# Foo Launch\n",
+    blueprint: "project",
+  };
+  const violations = _ruleRunner.applyRules(fragments, record, { workshopRoot: WORKSHOP });
+  assertEqual(violations.length, 0,
+    "PROJ-1: well-formed project note produces zero violations");
+}
+
+async function caseProj2ValidatorRejectsProjectMissingStatus() {
+  console.log("\n--- Case PROJ-2: project validator rejects a project note missing required status ---");
+  const manifestPath = path.join(WORKSHOP, "platform/blueprints/project/manifest.json");
+  const manifest = _readJson(manifestPath);
+  const fragments = manifest.rule_fragments.map((rf) => rf.fragment);
+  // Same as PROJ-1 minus status + status_changed_at + teams + products.
+  const record = {
+    relPath: "spice/projects/bar-launch/Bar Launch.md",
+    frontmatter: {
+      type: "project",
+      name: "Bar Launch",
+      created: "2026-05-12",
+      description: "",
+      tags: ["project"],
+      workstreams: [],
+      // status omitted on purpose
+    },
+    body: "# Bar Launch\n",
+    blueprint: "project",
+  };
+  const violations = _ruleRunner.applyRules(fragments, record, { workshopRoot: WORKSHOP });
+  assertTrue("PROJ-2: missing-status project note surfaces required_frontmatter.status",
+    violations.some((v) => v.rule === "required_frontmatter.status"));
+}
+
+async function caseProj3ValidatorRejectsProjectInvalidStatusEnum() {
+  console.log("\n--- Case PROJ-3: project validator rejects a project note with invalid status enum value ---");
+  const manifestPath = path.join(WORKSHOP, "platform/blueprints/project/manifest.json");
+  const manifest = _readJson(manifestPath);
+  const fragments = manifest.rule_fragments.map((rf) => rf.fragment);
+  // status: "wibble" — not in the 7-state enum.
+  const record = {
+    relPath: "spice/projects/baz/Baz.md",
+    frontmatter: {
+      type: "project",
+      name: "Baz",
+      created: "2026-05-12",
+      description: "",
+      tags: ["project"],
+      workstreams: [],
+      status: "wibble",
+      status_changed_at: "2026-05-12",
+    },
+    body: "# Baz\n",
+    blueprint: "project",
+  };
+  const violations = _ruleRunner.applyRules(fragments, record, { workshopRoot: WORKSHOP });
+  assertTrue("PROJ-3: invalid-status-enum project note surfaces required_frontmatter.status.matches",
+    violations.some((v) => v.rule === "required_frontmatter.status.matches"));
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -5237,6 +5326,14 @@ async function caseTeam6ValidatorRejectsTeamMissingTag() {
   await caseTeam4ValidatorAcceptsWellFormedTeam();
   await caseTeam5ValidatorRejectsTeamMissingProduct();
   await caseTeam6ValidatorRejectsTeamMissingTag();
+
+  // v0.39.0 S5.4 — project@1.6.0 validator green/red on project notes
+  // for the expanded frontmatter (status enum + status_changed_at +
+  // teams[] + products[]) using the real rule_fragment loaded from
+  // the project manifest.
+  await caseProj1ValidatorAcceptsWellFormedProject();
+  await caseProj2ValidatorRejectsProjectMissingStatus();
+  await caseProj3ValidatorRejectsProjectInvalidStatusEnum();
 
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
