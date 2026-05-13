@@ -3944,25 +3944,31 @@ async function caseSHCS1ManifestFields() {
   assertTrue("SHC-S1: scratch/manifest.json exists on disk", fs.existsSync(p));
   const m = _readJson(p);
   assertEqual(m.name, "scratch", "SHC-S1: manifest.name === \"scratch\"");
-  assertEqual(m.version, "0.1.0", "SHC-S1: manifest.version === \"0.1.0\"");
+  assertEqual(m.version, "0.2.0", "SHC-S1: manifest.version === \"0.2.0\"");
   assertEqual(m.module_directory, "scratch", "SHC-S1: manifest.module_directory === \"scratch\"");
 }
 
 async function caseSHCS2ScratchTemplate() {
-  console.log("\n--- Case SHC-S2: templates/Scratch.md frontmatter + Templater block ---");
+  console.log("\n--- Case SHC-S2: templates/Scratch.md frontmatter + retired-lazy-create + Scratch-Day back-link ---");
   const p = path.join(BLUEPRINTS_DIR, "scratch", "templates", "Scratch.md");
   const body = fs.readFileSync(p, "utf8");
   assertTrue("SHC-S2: Scratch.md first line is ---", body.split("\n")[0] === "---");
   assertTrue("SHC-S2: Scratch.md contains type: scratch", body.includes("type: scratch"));
-  assertTrue("SHC-S2: Scratch.md contains a <%* %> Templater block", /<%\*[\s\S]*?%>/.test(body));
+  assertTrue("SHC-S2: Scratch.md no longer contains <%* %> Templater block (lazy-create retired in v0.2.0)",
+    !/<%\*[\s\S]*?%>/.test(body));
+  assertTrue("SHC-S2: Scratch.md back-link wikilink uses Scratch-Day- prefix",
+    /\[\[Scratch-Day-/.test(body));
 }
 
-async function caseSHCS3ScratchDayTemplate() {
-  console.log("\n--- Case SHC-S3: templates/Scratch Day.md type + ScratchDayList Dataview call ---");
-  const p = path.join(BLUEPRINTS_DIR, "scratch", "templates", "Scratch Day.md");
+async function caseSHCS3ScratchDayHubTemplate() {
+  console.log("\n--- Case SHC-S3: templates/Scratch Day Hub.md type + ScratchNewButton + ScratchDayList calls ---");
+  const p = path.join(BLUEPRINTS_DIR, "scratch", "templates", "Scratch Day Hub.md");
+  assertTrue("SHC-S3: Scratch Day Hub.md exists on disk", fs.existsSync(p));
   const body = fs.readFileSync(p, "utf8");
-  assertTrue("SHC-S3: Scratch Day.md contains type: scratch-day", body.includes("type: scratch-day"));
-  assertTrue("SHC-S3: Scratch Day.md invokes ScratchDayList via dv.view",
+  assertTrue("SHC-S3: Scratch Day Hub.md contains type: scratch-day", body.includes("type: scratch-day"));
+  assertTrue("SHC-S3: Scratch Day Hub.md invokes ScratchNewButton via dv.view",
+    /class:\s*"ScratchNewButton"/.test(body));
+  assertTrue("SHC-S3: Scratch Day Hub.md invokes ScratchDayList via dv.view",
     /class:\s*"ScratchDayList"/.test(body));
 }
 
@@ -3991,6 +3997,17 @@ async function caseSHCS6ScratchDayListHelper() {
   const body = fs.readFileSync(p, "utf8");
   assertTrue("SHC-S6: scratch-day-list.js declares class ScratchDayList",
     /^class\s+ScratchDayList\b/m.test(body));
+}
+
+async function caseSHCS7ScratchNewButtonHelper() {
+  console.log("\n--- Case SHC-S7: helpers/scratch-new-button.js declares class ScratchNewButton ---");
+  const p = path.join(BLUEPRINTS_DIR, "scratch", "helpers", "scratch-new-button.js");
+  assertTrue("SHC-S7: scratch-new-button.js exists on disk", fs.existsSync(p));
+  const body = fs.readFileSync(p, "utf8");
+  assertTrue("SHC-S7: scratch-new-button.js declares class ScratchNewButton",
+    /^class\s+ScratchNewButton\b/m.test(body));
+  assertTrue("SHC-S7: scratch-new-button.js uses customJS.AccentButton.render",
+    /customJS\.AccentButton\.render/.test(body));
 }
 
 // Carry from v0.18.1 lesson 2 (template-body trailing-whitespace defect class).
@@ -5297,10 +5314,11 @@ async function caseProj3ValidatorRejectsProjectInvalidStatusEnum() {
   // v0.37.0 S3.1 — scratch blueprint file-presence + shape cases.
   await caseSHCS1ManifestFields();
   await caseSHCS2ScratchTemplate();
-  await caseSHCS3ScratchDayTemplate();
+  await caseSHCS3ScratchDayHubTemplate();
   await caseSHCS4ScratchHubTemplate();
   await caseSHCS5ScratchHubCardsHelper();
   await caseSHCS6ScratchDayListHelper();
+  await caseSHCS7ScratchNewButtonHelper();
 
   // v0.20.0 docs polish cycle — trailing-whitespace lint.
   await caseTW1TemplatesNoTrailingWhitespace();

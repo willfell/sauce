@@ -990,13 +990,28 @@ async function caseAUCS6() {
 //   naming_pattern: ^Scratch-\d{4}-\d{2}-\d{2}-\d{2}-\d{2}\.md$
 // ============================================================
 const SCRATCH_FRAGMENT = [{
-  scope: { path_glob: "spice/scratch/**/Scratch-*.md" },
+  scope: { path_glob: "spice/scratch/**/Scratch-2*.md" },
   required_frontmatter: {
     created: { required: true, type: "string" },
     type:    { required: true, equals: "scratch" },
     day:     { required: true, type: "string" }
   },
   naming_pattern: "^Scratch-\\d{4}-\\d{2}-\\d{2}-\\d{2}-\\d{2}\\.md$"
+}];
+
+// v0.40.0 S4.3 — Scratch Day Hub rule_fragment shape for SA-S7/S8.
+// Mirrors blueprints/scratch/manifest.json's "scratch-day-hub" rule_fragment:
+//   scope.path_glob: spice/scratch/**/Scratch-Day-*.md
+//   required_frontmatter: { created: type:string, type: equals:"scratch-day", day: type:string }
+//   naming_pattern: ^Scratch-Day-\d{4}-\d{2}-\d{2}\.md$
+const SCRATCH_DAY_HUB_FRAGMENT = [{
+  scope: { path_glob: "spice/scratch/**/Scratch-Day-*.md" },
+  required_frontmatter: {
+    created: { required: true, type: "string" },
+    type:    { required: true, equals: "scratch-day" },
+    day:     { required: true, type: "string" }
+  },
+  naming_pattern: "^Scratch-Day-\\d{4}-\\d{2}-\\d{2}\\.md$"
 }];
 
 // SA-S1 — valid scratch frontmatter + valid filename → 0 violations.
@@ -1085,6 +1100,48 @@ async function caseSAS6() {
   });
 }
 
+// v0.40.0 S4.3 — Scratch Day Hub rule_fragment audit cases (SA-S7/S8).
+// Manifest semantics: scratch blueprint contributes BOTH fragments
+// (scratch-leaf + scratch-day-hub) under the same "scratch" rule namespace —
+// the walker reads ranch/rules/scratch.json and applies all fragments to every
+// .md file under spice/scratch/. Disjoint path_globs (Scratch-2*.md vs
+// Scratch-Day-*.md, narrowed by 73a08cc) ensure each fragment only matches
+// the corresponding note kind.
+
+// SA-S7 — valid scratch-day-hub frontmatter + valid filename → 0 violations.
+async function caseSAS7DayHubValid() {
+  await withTempVault(async (dir) => {
+    makeSauceVault(dir, {
+      blueprints: ["scratch"],
+      rules: { scratch: [...SCRATCH_FRAGMENT, ...SCRATCH_DAY_HUB_FRAGMENT] },
+    });
+    writeNote(dir, "spice/scratch/2026/05-May/2026-05-12/Scratch-Day-2026-05-12.md",
+      { created: "2026-05-12T09:15:00", type: "scratch-day", day: "2026-05-12" });
+    const { runAudit } = require("../audit/walker");
+    const result = await runAudit({ vaultPath: dir, untrackedCheck: false });
+    const violations = result.violations.filter(v => v.file.endsWith("Scratch-Day-2026-05-12.md"));
+    assertEqual(violations.length, 0, "SA-S7: valid day-hub note has zero violations");
+  });
+}
+
+// SA-S8 — wrong type field (type: scratch instead of scratch-day) → violation.
+async function caseSAS8DayHubBadType() {
+  await withTempVault(async (dir) => {
+    makeSauceVault(dir, {
+      blueprints: ["scratch"],
+      rules: { scratch: [...SCRATCH_FRAGMENT, ...SCRATCH_DAY_HUB_FRAGMENT] },
+    });
+    writeNote(dir, "spice/scratch/2026/05-May/2026-05-12/Scratch-Day-2026-05-12.md",
+      { created: "2026-05-12T09:15:00", type: "scratch", day: "2026-05-12" });
+    const { runAudit } = require("../audit/walker");
+    const result = await runAudit({ vaultPath: dir, untrackedCheck: false });
+    const violations = result.violations.filter(v => v.file.endsWith("Scratch-Day-2026-05-12.md"));
+    assertTrue(violations.length > 0, "SA-S8: wrong type yields at least one violation");
+    assertTrue(violations.some(v => /type/i.test(JSON.stringify(v))),
+      "SA-S8: violation references the type field");
+  });
+}
+
 // Per-case error firewall: a thrown error inside any case body (including
 // the deliberate "Cannot find module ../audit/walker" RED-state throws)
 // counts as exactly one failed sub-assert and does NOT abort the harness.
@@ -1128,6 +1185,8 @@ const selector = process.argv[2] || "all";
     await runCase("SA-S4", caseSAS4);
     await runCase("SA-S5", caseSAS5);
     await runCase("SA-S6", caseSAS6);
+    await runCase("SA-S7", caseSAS7DayHubValid);
+    await runCase("SA-S8", caseSAS8DayHubBadType);
   }
   console.log(`========\nResult: ${passed} passed, ${failed} failed.`);
   process.exit(failed === 0 ? 0 : 1);

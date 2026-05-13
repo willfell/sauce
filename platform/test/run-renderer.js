@@ -18,7 +18,7 @@
  *   T2.5  empty               empty install (no registry file) → renders nothing
  *   T2.6  malformed           malformed registry JSON → single error chip
  *   T2.7  unknown-action      synthetic registry, unknown action.type → click Notice
- *   R-SCRATCH-NEW scratch-new runTemplaterTemplate composes three-level folder + timestamped filename (v0.37.0)
+ *   R-SCRATCH-DAYHUB scratch-day-hub runTemplaterTemplate composes three-level folder + date-only filename (v0.40.0)
  *   T4.0  lazy-scaffold       createFromTemplate dispatch → folder/file create + open
  *   T4.4  barebones-one-button   barebones's real registry → exactly one Board button
  *   BC1   subtitle-object       subtitle returning {text, secondaryText} → two subtitle elements
@@ -575,26 +575,27 @@ async function testInvokeCommandArgs() {
   });
 }
 
-// R-SCRATCH-NEW — runTemplaterTemplate action for scratch-new composes the
-// three-level folder path (folder_prefix + YYYY/MM-MMMM/YYYY-MM-DD) and the
-// timestamped filename (Scratch-YYYY-MM-DD-HH-mm) and dispatches Templater.
+// R-SCRATCH-DAYHUB — runTemplaterTemplate action for scratch-day-hub composes
+// the three-level folder path (folder_prefix + YYYY/MM-MMMM/YYYY-MM-DD) and the
+// date-only filename (Scratch-Day-YYYY-MM-DD — NO time suffix) and dispatches
+// Templater.
 //
-// v0.37.0 S3.2 — scratch blueprint sole nav-button entry. The registry stores
-// already-resolved fields (folder_prefix === "spice/scratch"); the renderer
-// must (1) call createFolder with the deepest day-folder, (2) invoke the
-// Templater plugin's create_new_note_from_template with filename matching
-// Scratch-YYYY-MM-DD-HH-mm. Uses a local moment stub rich enough for the
-// renderer's two format() patterns + an HH/mm component derived from the test's
-// frozen instant.
-async function testScratchNewRunTemplaterTemplate() {
-  console.log('\n=== R-SCRATCH-NEW — scratch-new runTemplaterTemplate composes three-level folder + timestamped filename ===');
+// v0.40.0 S4 — scratch blueprint sole nav-button entry, renamed from scratch-new
+// to scratch-day-hub. Filename change from Scratch-YYYY-MM-DD-HH-mm to
+// Scratch-Day-YYYY-MM-DD activates the dormant open-if-exists branch at
+// space-nav-buttons.js:348-352, so a second click on the same day opens the
+// existing day-hub instead of failing. The registry stores already-resolved
+// fields (folder_prefix === "spice/scratch"); the renderer must (1) call
+// createFolder with the deepest day-folder, (2) invoke the Templater plugin's
+// create_new_note_from_template with filename matching Scratch-Day-YYYY-MM-DD.
+async function testScratchDayHubRunTemplaterTemplate() {
+  console.log('\n=== R-SCRATCH-DAYHUB — scratch-day-hub runTemplaterTemplate composes three-level folder + date-only filename ===');
   reset();
 
-  // Frozen instant for deterministic assertions: 2026-05-12 09:15.
+  // Frozen instant for deterministic assertions: 2026-05-12.
   const FROZEN_ISO = '2026-05-12';
-  const FROZEN_HHMM = '09-15';
   const EXPECTED_FOLDER = 'spice/scratch/2026/05-May/2026-05-12';
-  const EXPECTED_FILENAME_NO_EXT = `Scratch-${FROZEN_ISO}-${FROZEN_HHMM}`;
+  const EXPECTED_FILENAME_NO_EXT = `Scratch-Day-${FROZEN_ISO}`;
 
   // Local moment stub honoring the two patterns the renderer uses for this
   // action: "YYYY/MM-MMMM/YYYY-MM-DD" + "YYYY-MM-DD-HH-mm". Strict-validate
@@ -607,30 +608,30 @@ async function testScratchNewRunTemplaterTemplate() {
         isValid: () => validIso,
         format: function (pattern) {
           if (pattern === 'YYYY/MM-MMMM/YYYY-MM-DD') return '2026/05-May/2026-05-12';
-          if (pattern === 'YYYY-MM-DD-HH-mm') return `${FROZEN_ISO}-${FROZEN_HHMM}`;
+          if (pattern === 'YYYY-MM-DD') return FROZEN_ISO;
           return '';
         },
       };
     },
   };
 
-  // Synthetic registry containing the resolved scratch-new entry.
+  // Synthetic registry containing the resolved scratch-day-hub entry.
   const synthetic = JSON.stringify({
     schema_version: 1,
     contributions: {
       scratch: [
         {
-          id: 'scratch-new',
+          id: 'scratch-day-hub',
           label: 'Scratch',
           icon: 'edit-3',
           order: 130,
           action: {
             type: 'runTemplaterTemplate',
-            template_source: 'Scratch.md',
+            template_source: 'Scratch Day Hub.md',
             folder_prefix: 'spice/scratch',
             folder_date_pattern: 'YYYY/MM-MMMM/YYYY-MM-DD',
-            filename_prefix: 'Scratch-',
-            filename_date_pattern: 'YYYY-MM-DD-HH-mm',
+            filename_prefix: 'Scratch-Day-',
+            filename_date_pattern: 'YYYY-MM-DD',
             filename_suffix: '',
           },
         },
@@ -647,7 +648,7 @@ async function testScratchNewRunTemplaterTemplate() {
           // folder must NOT exist (so renderer calls createFolder).
           if (p === EXPECTED_FOLDER) return null;
           // template must exist (renderer dereferences it as a TFile).
-          if (p === 'Scratch.md') return { path: 'Scratch.md' };
+          if (p === 'Scratch Day Hub.md') return { path: 'Scratch Day Hub.md' };
           return undefined;
         },
       });
@@ -689,7 +690,7 @@ async function testScratchNewRunTemplaterTemplate() {
       const folderOk = folderCreates.length === 1;
       const tcOk = templaterCalls.length === 1;
       const tcCall = templaterCalls[0] || {};
-      const templatePathOk = tcCall.template_path === 'Scratch.md';
+      const templatePathOk = tcCall.template_path === 'Scratch Day Hub.md';
       const folderArgOk = tcCall.folder === EXPECTED_FOLDER;
       const filenameOk = tcCall.filename === EXPECTED_FILENAME_NO_EXT;
       const noticesOk = captured_notices.length === 0;
@@ -1565,7 +1566,7 @@ async function testFF3HubAreaRowIcons() {
     if (which === 'malformed' || which === 'all') results.push(['T2.6 malformed', await testMalformed()]);
     if (which === 'unknown-action' || which === 'all') results.push(['T2.7 unknown-action', await testUnknownAction()]);
     if (which === 'invoke-command-args' || which === 'all') results.push(['R-INVOKE-ARGS invoke-command-args', await testInvokeCommandArgs()]);
-    if (which === 'scratch-new' || which === 'all') results.push(['R-SCRATCH-NEW scratch-new-templater', await testScratchNewRunTemplaterTemplate()]);
+    if (which === 'scratch-day-hub' || which === 'all') results.push(['R-SCRATCH-DAYHUB scratch-day-hub-templater', await testScratchDayHubRunTemplaterTemplate()]);
     if (which === 'lazy-scaffold' || which === 'all') results.push(['T4.0 lazy-scaffold', await testLazyScaffold()]);
     if (which === 'beacon-cards' || which === 'all') {
       results.push(['BC1 subtitle-object', await testBC1SubtitleObject()]);
