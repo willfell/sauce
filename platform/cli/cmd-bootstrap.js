@@ -7,17 +7,20 @@
 const path = require("path");
 const banner = require("../visual/banner.js");
 const section = require("../visual/section.js");
+const registry = require("./registry.js");
 
 function _parseFlags(args) {
     let nonInteractive = false;
+    let noRegister = false;
     let mechanismsArg, blueprintsArg;
     for (let i = 0; i < args.length; i++) {
         const a = args[i];
         if (a === "--non-interactive") nonInteractive = true;
+        else if (a === "--no-register") noRegister = true;
         else if (a.startsWith("--mechanisms=")) mechanismsArg = a.slice("--mechanisms=".length);
         else if (a.startsWith("--blueprints=")) blueprintsArg = a.slice("--blueprints=".length);
     }
-    return { nonInteractive, mechanismsArg, blueprintsArg };
+    return { nonInteractive, noRegister, mechanismsArg, blueprintsArg };
 }
 
 function _resolveListArg(arg) {
@@ -36,7 +39,7 @@ async function run(ctx, args) {
     // platform-subscription.json yet. We accept ctx.vaultPath and call the
     // existing runBootstrap, which handles first-run wizard internally.
     const bootstrap = require("../bootstrap.js");
-    const { nonInteractive, mechanismsArg, blueprintsArg } = _parseFlags(args || []);
+    const { nonInteractive, noRegister, mechanismsArg, blueprintsArg } = _parseFlags(args || []);
     const wizardDefaults = {};
     const mechs = _resolveListArg(mechanismsArg);
     if (mechs !== undefined) wizardDefaults.mechanisms = mechs;
@@ -60,6 +63,19 @@ async function run(ctx, args) {
         workshopAbsPath: ctx.workshopPath
     });
     console.log(section.ok());
+
+    // v0.36.0 S7: register the vault in the per-machine ~/.sauce/vaults.json
+    // registry so `sauce reinstall --all` can find it later. Suppressed by
+    // --no-register (CI / ephemeral vaults). Best-effort: a registry write
+    // failure must NOT fail the install.
+    if (!noRegister && ctx && ctx.vaultPath) {
+        try {
+            registry.add(ctx.vaultPath);
+            console.log("  Registered vault in ~/.sauce/vaults.json: " + ctx.vaultPath);
+        } catch (e) {
+            console.log("  WARN: could not update registry (" + e.message + ")");
+        }
+    }
 
     console.log("");
     console.log("  Sauce installed at " + ctx.workshopPath);

@@ -1203,6 +1203,69 @@ async function caseSH3ShimReturnsBrewWhenDangling() {
     } finally { fs.rmSync(tmpHome, { recursive: true, force: true }); }
 }
 
+// =====================================================================
+// v0.36.0 S7 — `sauce bootstrap` auto-registers vault in ~/.sauce/vaults.json
+// IR1: success path adds to registry.
+// IR2: --no-register suppresses.
+// Mocks bootstrap.runBootstrap + phaseWriteActivation so no real install runs.
+// =====================================================================
+
+async function caseIR1BootstrapRegistersVault() {
+    const label = "IR1 sauce bootstrap registers vault in ~/.sauce/vaults.json on success";
+    await withTempHome(async () => {
+        await withTempVault({}, async (vaultPath) => {
+            // Clear require caches so registry sees the freshly-set HOME and
+            // cmd-bootstrap.js re-requires bootstrap.js with our monkey-patch.
+            delete require.cache[require.resolve("../cli/registry.js")];
+            delete require.cache[require.resolve("../cli/sauce-cli.js")];
+            delete require.cache[require.resolve("../cli/cmd-bootstrap.js")];
+            const bootstrap = require("../bootstrap.js");
+            const originalRunBootstrap = bootstrap.runBootstrap;
+            const originalPhaseWriteActivation = bootstrap.phaseWriteActivation;
+            bootstrap.runBootstrap = async () => ({ fetched: [], skipped: [], failed: [] });
+            bootstrap.phaseWriteActivation = async () => ({});
+            try {
+                const cli = require("../cli/sauce-cli.js");
+                const origLog = console.log; console.log = () => {};
+                try { await cli.dispatch(["bootstrap", "--vault", vaultPath, "--non-interactive"]); }
+                finally { console.log = origLog; }
+                const reg = require("../cli/registry.js").read();
+                assertEqual(reg.vaults.length, 1, label + " — registered");
+                assertEqual(reg.vaults[0].path, vaultPath, label + " — path");
+            } finally {
+                bootstrap.runBootstrap = originalRunBootstrap;
+                bootstrap.phaseWriteActivation = originalPhaseWriteActivation;
+            }
+        });
+    });
+}
+
+async function caseIR2BootstrapNoRegisterFlag() {
+    const label = "IR2 --no-register suppresses registry add";
+    await withTempHome(async () => {
+        await withTempVault({}, async (vaultPath) => {
+            delete require.cache[require.resolve("../cli/registry.js")];
+            delete require.cache[require.resolve("../cli/sauce-cli.js")];
+            delete require.cache[require.resolve("../cli/cmd-bootstrap.js")];
+            const bootstrap = require("../bootstrap.js");
+            const originalRunBootstrap = bootstrap.runBootstrap;
+            const originalPhaseWriteActivation = bootstrap.phaseWriteActivation;
+            bootstrap.runBootstrap = async () => ({ fetched: [], skipped: [], failed: [] });
+            bootstrap.phaseWriteActivation = async () => ({});
+            try {
+                const cli = require("../cli/sauce-cli.js");
+                const origLog = console.log; console.log = () => {};
+                try { await cli.dispatch(["bootstrap", "--vault", vaultPath, "--non-interactive", "--no-register"]); }
+                finally { console.log = origLog; }
+                assertEqual(require("../cli/registry.js").read().vaults.length, 0, label + " — empty");
+            } finally {
+                bootstrap.runBootstrap = originalRunBootstrap;
+                bootstrap.phaseWriteActivation = originalPhaseWriteActivation;
+            }
+        });
+    });
+}
+
 const cases = [
     caseC1AncestorWalk, caseC2SauceVaultEnv, caseC3NotInVault, caseC4UnknownVerb,
     caseC5StatusClean, caseC6StatusDrift, caseC7UpdateFFOnly, caseC8UpdateDirtyRefusal,
@@ -1232,6 +1295,7 @@ const cases = [
     caseL3UnlinkRemovesSymlink, caseL4StatusReportsLink,  // v0.36.0 S6.1 (failing-first)
     caseSH1ShimReturnsActivePantry, caseSH2ShimReturnsBrewLibexec,
     caseSH3ShimReturnsBrewWhenDangling,  // v0.36.0 S6.3 (failing-first)
+    caseIR1BootstrapRegistersVault, caseIR2BootstrapNoRegisterFlag,  // v0.36.0 S7
 ];
 
 async function main() {
