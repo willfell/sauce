@@ -1,7 +1,7 @@
 ---
 title: Projects Org-Chart + Lifecycle — Design
 date: 2026-05-12
-version_target: v0.37.0 (foundation), v0.38.0 (polish + sharp ops)
+version_target: v0.39.0 (foundation), v0.40.0 (polish + sharp ops)
 status: design-locked
 supersedes: undifferentiated card grid in `spice/projects/Projects.md`; absence of project status, archive semantics, and cross-project relationship vocabulary
 ---
@@ -9,7 +9,7 @@ supersedes: undifferentiated card grid in `spice/projects/Projects.md`; absence 
 # Projects Org-Chart + Lifecycle — Design
 
 > [!abstract] Goal
-> Make the projects hub organize-able, filterable, and grounded in a lightweight org-chart of **Products** and **Teams**. Give every Project a 7-state lifecycle (status) and the action surface to move through it. Add a per-project **Brainstorm** companion note. Handle scope creep via explicit relationship vocabulary (`parent_project`, `related_projects`, `superseded_by`) rather than destructive merge. Ship over two cycles: v0.37.0 lays the org + lifecycle foundation; v0.38.0 layers on relationships, brainstorm, rename, delete.
+> Make the projects hub organize-able, filterable, and grounded in a lightweight org-chart of **Products** and **Teams**. Give every Project a 7-state lifecycle (status) and the action surface to move through it. Add a per-project **Brainstorm** companion note. Handle scope creep via explicit relationship vocabulary (`parent_project`, `related_projects`, `superseded_by`) rather than destructive merge. Ship over two cycles: v0.39.0 lays the org + lifecycle foundation; v0.40.0 layers on relationships, brainstorm, rename, delete.
 
 > [!info] Driving inputs
 > - User brainstorm 2026-05-12 (this session): "better organize the data in projects, structure the hub, filter, group by teams, archive completed projects, combine/relate projects, per-project brainstorm space, action buttons"
@@ -34,7 +34,7 @@ supersedes: undifferentiated card grid in `spice/projects/Projects.md`; absence 
 | **(i) Rename safety** | Rename hub note via Obsidian's rename API (inbound wikilinks auto-update). Folder slug stays put — decouples display name from path so dataview-by-path queries don't break. Tradeoff: folder name can drift from display over time. Acknowledged. |
 | **(j) Delete safety** | Two-step confirm modal — "Show impact" (inbound wikilink count + folder contents summary) → "Confirm delete". No silent action. |
 | **(k) Cross-link validator** | Out of scope. Today's validator checks shape only; "wikilink must resolve to a `type:product` note" is a future enhancement candidate. |
-| **(l) Cycle split** | Two cycles. v0.37.0 = foundation (org-chart + status + hub upgrades + Tier 1 status/team/product buttons). v0.38.0 = relationships + brainstorm + Tier 2 sharp ops. Each cycle is independently reviewable and delivers standalone user value. |
+| **(l) Cycle split** | Two cycles. v0.39.0 = foundation (org-chart + status + hub upgrades + Tier 1 status/team/product buttons). v0.40.0 = relationships + brainstorm + Tier 2 sharp ops. Each cycle is independently reviewable and delivers standalone user value. (Slots originally drafted as v0.37.0/v0.38.0; reslotted after discovering repo is at workshop_version 0.38.1 — three undocumented cycles closed since CLAUDE.md last refresh.) |
 
 ---
 
@@ -129,11 +129,11 @@ Naming pattern: same shape as products.
 - `claude_surface`: `/teams` command, `new-team` skill, resolvers row
 - Global `nav_buttons`: "Teams" jump button
 
-### 3.3 `project@1.5.0 → 1.6.0` (MINOR, v0.37.0) → `1.7.0` (MINOR, v0.38.0)
+### 3.3 `project@1.5.0 → 1.6.0` (MINOR, v0.39.0) → `1.7.0` (MINOR, v0.40.0)
 
 `depends_on` adds `teams>=0.1.0`, `products>=0.1.0`.
 
-**NEW frontmatter fields on Project hub notes (v0.37.0 unless noted)**
+**NEW frontmatter fields on Project hub notes (v0.39.0 unless noted)**
 
 | Field | Type | Required | Default | Notes |
 |---|---|---|---|---|
@@ -141,13 +141,13 @@ Naming pattern: same shape as products.
 | `status_changed_at` | string (YYYY-MM-DD) | YES | `{{DATE}}` at creation | Auto-stamped on every status flip via Bump Status button |
 | `teams` | list of wikilinks | NO | `[]` | Empty OK |
 | `products` | list of wikilinks | NO | `[]` | Empty OK |
-| `parent_project` | wikilink | NO | absent | **v0.38.0**. Single. |
-| `related_projects` | list of wikilinks | NO | `[]` | **v0.38.0**. |
-| `superseded_by` | wikilink | NO | absent | **v0.38.0**. Single. Soft cross-field warn: if set, `status` should be `superseded` (and vice versa) — validator warns, doesn't error. |
+| `parent_project` | wikilink | NO | absent | **v0.40.0**. Single. |
+| `related_projects` | list of wikilinks | NO | `[]` | **v0.40.0**. |
+| `superseded_by` | wikilink | NO | absent | **v0.40.0**. Single. Soft cross-field warn: if set, `status` should be `superseded` (and vice versa) — validator warns, doesn't error. |
 
 **Existing fields unchanged**: `type`, `name`, `created`, `description`, `tags`, `workstreams` (note: `workstreams` are project-internal threads, NOT teams — naming-collision risk; calling out in §9).
 
-**Template `Template, Project.md` updated (v0.37.0):**
+**Template `Template, Project.md` updated (v0.39.0):**
 ```yaml
 ---
 type: project
@@ -166,14 +166,14 @@ products: []
 ---
 ```
 
-New-project Templater flow additionally materializes (v0.38.0):
+New-project Templater flow additionally materializes (v0.40.0):
 - `spice/projects/<slug>/Brainstorm.md` from `Template, Project Brainstorm.md`
 
 ---
 
 ## 4. Projects hub upgrades (`spice/projects/Projects.md`)
 
-**v0.37.0 capabilities** (rendered by upgraded `ProjectsHubCards`):
+**v0.39.0 capabilities** (rendered by upgraded `ProjectsHubCards`):
 - Default scope: non-terminal statuses (`idea | planning | in-progress | blocked`); terminal (`superseded | cancelled | done`) hidden behind a chip toggle
 - Filter chips at top:
   - **Status** (7 chips, multi-select; default-on: 4 active statuses)
@@ -184,7 +184,7 @@ New-project Templater flow additionally materializes (v0.38.0):
 - Search-by-name input (substring filter on `name` frontmatter)
 - Card layout (per card): name, **status pill**, description, team chips, product chips, last-touched recency stamp
 
-**v0.38.0 additions**:
+**v0.40.0 additions**:
 - Group-by toggle adds `parent_project` (sub-projects nest visually under their parent card)
 - Sub-project nesting display (children indent under parent card when grouped by parent_project)
 
@@ -198,15 +198,15 @@ Rendered as accent-button-styled action row on every `type:project` hub note. Sp
 
 | Button | Ships | Action |
 |---|---|---|
-| **Bump Status** | v0.37.0 | 7-option picker; writes `status:` + auto-stamps `status_changed_at: <today>` |
-| **Set Teams** | v0.37.0 | Multi-select against `spice/teams/`; writes `teams: [[A]], [[B]]` |
-| **Set Products** | v0.37.0 | Multi-select against `spice/products/`; writes `products:` |
-| **Set Parent** | v0.38.0 | Single picker against other Projects (excludes self + descendants); writes `parent_project: [[X]]` |
-| **Add Related** | v0.38.0 | Picker; appends to `related_projects: []` |
-| **Mark Superseded By** | v0.38.0 | Picker against other Projects; writes `superseded_by: [[Y]]` AND flips `status: superseded` in one shot, stamps `status_changed_at` |
-| **Open Brainstorm** | v0.38.0 | Nav-jump to `<slug>/Brainstorm.md` |
+| **Bump Status** | v0.39.0 | 7-option picker; writes `status:` + auto-stamps `status_changed_at: <today>` |
+| **Set Teams** | v0.39.0 | Multi-select against `spice/teams/`; writes `teams: [[A]], [[B]]` |
+| **Set Products** | v0.39.0 | Multi-select against `spice/products/`; writes `products:` |
+| **Set Parent** | v0.40.0 | Single picker against other Projects (excludes self + descendants); writes `parent_project: [[X]]` |
+| **Add Related** | v0.40.0 | Picker; appends to `related_projects: []` |
+| **Mark Superseded By** | v0.40.0 | Picker against other Projects; writes `superseded_by: [[Y]]` AND flips `status: superseded` in one shot, stamps `status_changed_at` |
+| **Open Brainstorm** | v0.40.0 | Nav-jump to `<slug>/Brainstorm.md` |
 
-### 5.2 Tier 2 — filesystem ops (confirm modal required) — v0.38.0
+### 5.2 Tier 2 — filesystem ops (confirm modal required) — v0.40.0
 
 | Button | Action | Risk surface |
 |---|---|---|
@@ -215,7 +215,7 @@ Rendered as accent-button-styled action row on every `type:project` hub note. Sp
 
 ---
 
-## 6. Brainstorm companion (v0.38.0)
+## 6. Brainstorm companion (v0.40.0)
 
 NEW template `Template, Project Brainstorm.md` at `{{templates_path}}/`. Auto-materialized at project creation → `spice/projects/<slug>/Brainstorm.md`.
 
@@ -243,7 +243,7 @@ project: "[[<HUB>]]"
 
 ---
 
-## 7. Relationship surfaces (`ProjectRelationships`, v0.38.0)
+## 7. Relationship surfaces (`ProjectRelationships`, v0.40.0)
 
 Composite renderer on every `type:project` hub, below the existing Workstreams section.
 
@@ -292,7 +292,7 @@ Composite renderer on every `type:project` hub, below the existing Workstreams s
 }
 ```
 
-### 8.3 Extended project rule_fragment (v0.37.0 + v0.38.0 fields)
+### 8.3 Extended project rule_fragment (v0.39.0 + v0.40.0 fields)
 
 ```json
 {
@@ -332,19 +332,19 @@ Cross-field warnings (logged, non-blocking, future enhancement to be wired into 
 |---|---|---|
 | Q1 | Cross-link validator — confirm a Team's `product` wikilink resolves to a `type:product` note (and similar for Project's `teams`/`products`). Possible v0.40.0+ validator enhancement. | DEFERRED |
 | Q2 | Stale-team / stale-product detection — `/audit` flags projects linking nonexistent `[[Team]]`. | DEFERRED |
-| Q3 | Status transition constraints — should `done → idea` be disallowed? v0.37.0 allows all transitions; future tightening possible. | DEFERRED |
-| Q4 | Workstream vs Team naming collision — `workstreams` (project-internal threads) and `teams` (org-chart entities) are easy to confuse. CLAUDE.md callout in v0.37.0 ship notes. | DOCUMENT |
-| Q5 | Bidirectional `related_projects` auto-mirror — risks edit-loops; v0.38.0 keeps manual + display-bidirectional. | DEFERRED |
-| Q6 | Brainstorm cross-project — should multiple projects share a Brainstorm? v0.38.0 = one-per-project. If demand surfaces, links back to the deferred idea-capture / inbox thread. | DEFERRED |
+| Q3 | Status transition constraints — should `done → idea` be disallowed? v0.39.0 allows all transitions; future tightening possible. | DEFERRED |
+| Q4 | Workstream vs Team naming collision — `workstreams` (project-internal threads) and `teams` (org-chart entities) are easy to confuse. CLAUDE.md callout in v0.39.0 ship notes. | DOCUMENT |
+| Q5 | Bidirectional `related_projects` auto-mirror — risks edit-loops; v0.40.0 keeps manual + display-bidirectional. | DEFERRED |
+| Q6 | Brainstorm cross-project — should multiple projects share a Brainstorm? v0.40.0 = one-per-project. If demand surfaces, links back to the deferred idea-capture / inbox thread. | DEFERRED |
 | Q7 | `equals_one_of` validator predicate — cleaner than regex-alternation for enums. MINOR validator bump candidate. | DEFERRED |
 | Q8 | Rename: full folder rename + dataview-path audit — alternative to "rename hub-note only" if/when dataview-by-path queries become rare. | DEFERRED |
-| Q9 | Inbound-link impact preview for Delete — vault-wide grep performance on 10k+ note vaults. Acceptable for v0.38.0 scope. | ACCEPT |
+| Q9 | Inbound-link impact preview for Delete — vault-wide grep performance on 10k+ note vaults. Acceptable for v0.40.0 scope. | ACCEPT |
 
 ---
 
 ## 10. Migration
 
-NEW CLI verb `sauce migrate-projects` ships in v0.37.0.
+NEW CLI verb `sauce migrate-projects` ships in v0.39.0.
 
 **Behavior**
 - Walk every `spice/projects/*/*.md` matching `type:project` in the target vault
@@ -355,34 +355,39 @@ NEW CLI verb `sauce migrate-projects` ships in v0.37.0.
 - Flag: `--dry-run` (preview only, no writes)
 
 **Rollout**
-- Workshop self-runs `sauce migrate-projects` as part of v0.37.0 dogfood
+- Workshop self-runs `sauce migrate-projects` as part of v0.39.0 dogfood
 - Consumer flow: `git pull && sauce reinstall --vault <path> && sauce migrate-projects --vault <path>`
-- Install Notice in v0.37.0 surfaces the required migration step loud-and-clear
+- Install Notice in v0.39.0 surfaces the required migration step loud-and-clear
 
 ---
 
 ## 11. Cycle decomposition
 
-### v0.37.0 — Foundation (target close ~2026-05-14)
+### v0.39.0 — Foundation (target close ~2026-05-14)
 
 **NEW**
 - `products@0.1.0` blueprint (manifest, templates, hub, helpers, claude_surface, nav-buttons)
 - `teams@0.1.0` blueprint (manifest, templates, hub, helpers, claude_surface, nav-buttons)
 - CLI verb `sauce migrate-projects` (new module `platform/cli/migrate-projects.js` + harness `platform/test/run-migrate-projects.js`)
+- α-seeds for products + teams (declarative seed fixtures under `platform/seed/`, mirroring v0.38.0 project/daily/meetings α-seed pattern)
 
 **CHANGED**
-- `project@1.5.0 → 1.6.0` (MINOR) — adds `status`, `status_changed_at`, `teams[]`, `products[]` frontmatter + Tier 1 buttons (Bump Status, Set Teams, Set Products) + hub filter chips + group-by toggle + status pill + team/product chips
-- `cards@0.2.4 → 0.2.5` (PATCH, if needed) — extends card cell renderers for status pill, chip cells, last-touched recency. Only if the current shared cell API isn't enough. (Eval during S1 of v0.37.0.)
+- `project@1.5.0 → 1.6.0` (MINOR) — adds `status`, `status_changed_at`, `teams[]`, `products[]` frontmatter + Tier 1 buttons (Bump Status, Set Teams, Set Products) + hub filter chips + group-by toggle + status pill + team/product chips. Re-seed project α-seed to include the new fields.
+- `cards@0.2.4 → 0.2.5` (PATCH, if needed) — extends card cell renderers for status pill, chip cells, last-touched recency. Only if the current shared cell API isn't enough. (Eval during S1 of v0.39.0.)
 - Workshop subscription: +products, +teams entries; bump project to 1.6.0
-- `workshop_version 0.36.1 → 0.37.0`
-- `package.json` version bump
+- `workshop_version 0.38.1 → 0.39.0`
+- `package.json` version bump (gated by existing `check-version-sync.js`)
+- `run-integration-smoke.js`: +N cases for products/teams roundtrip via `sauce seed` + install + validator
 
 **Harnesses to extend / add**
 - `run-helper-cases.js`: +new install paths for products/teams blueprints, +new fields on project rule_fragment
-- `run-cli.js`: +M (migrate-projects) sub-cases
+- `run-cli.js`: +M-cases (migrate-projects), +S-cases (sauce seed with products/teams kinds)
+- `run-seed.js`: +α-seed sub-asserts for products + teams (mirrors existing project α-seed cases)
+- `run-integration-smoke.js`: +expectation counts (new note types from products + teams seeds)
 - NEW `run-migrate-projects.js` (dedicated harness — mirrors `run-migrate.js` pattern)
+- `release:preflight` npm script: includes the new harness automatically (it's a wildcard expander) — verify after S1
 
-### v0.38.0 — Lifecycle polish + brainstorm + sharp ops
+### v0.40.0 — Lifecycle polish + brainstorm + sharp ops
 
 **CHANGED**
 - `project@1.6.0 → 1.7.0` (MINOR; new template + new customjs class + new manifest fields warrants MINOR)
@@ -392,16 +397,16 @@ NEW CLI verb `sauce migrate-projects` ships in v0.37.0.
   - NEW customjs class `ProjectRelationships`
   - ProjectActionButtons extended: Set Parent, Add Related, Mark Superseded By, Open Brainstorm (Tier 1); Rename, Delete (Tier 2)
   - Group-by toggle adds `parent_project`
-- `workshop_version 0.37.0 → 0.38.0`
+- `workshop_version 0.39.0 → 0.40.0`
 
 **Why split this way**
-- v0.37.0 alone makes `Projects.md` dramatically more useful — coherent standalone ship (team/product structure, status lifecycle, hub organization).
-- v0.38.0 layers on relationship UX + brainstorm + the riskier filesystem buttons — best done with v0.37.0 baked in dogfood so the patterns are stable.
-- Mirrors recent sauce cadence (v0.36.0 → v0.36.1 patch follow-up). Each cycle reviewable in one pass.
+- v0.39.0 alone makes `Projects.md` dramatically more useful — coherent standalone ship (team/product structure, status lifecycle, hub organization).
+- v0.40.0 layers on relationship UX + brainstorm + the riskier filesystem buttons — best done with v0.39.0 baked in dogfood so the patterns are stable.
+- Mirrors recent sauce cadence (v0.36.0 → v0.36.1 patch; v0.38.0 → v0.38.1 patch). Each cycle reviewable in one pass.
 
 ---
 
-## 12. Non-goals (v0.37.0 + v0.38.0)
+## 12. Non-goals (v0.39.0 + v0.40.0)
 
 - Cross-blueprint attribute system (a future cycle could promote `status` / `teams` / `products` into a shared `attributes` registry — brainstorm-thread A, out of scope here)
 - Idea-capture / inbox / triage pipeline (brainstorm-thread B, deferred)
@@ -416,8 +421,9 @@ NEW CLI verb `sauce migrate-projects` ships in v0.37.0.
 
 | Risk | Mitigation |
 |---|---|
-| Existing projects fail validator until migration runs | `sauce migrate-projects` ships in v0.37.0; loud Install Notice; idempotent; dry-run preview flag |
+| Existing projects fail validator until migration runs | `sauce migrate-projects` ships in v0.39.0; loud Install Notice; idempotent; dry-run preview flag |
 | Folder name drifts from display name over time (Rename only touches hub note) | Acknowledged tradeoff; avoids dataview-by-path breakage. Full-folder-rename can be a future cycle if drift becomes a real problem |
-| Delete impact-preview is slow on huge vaults (10k+ notes) | Acceptable for v0.38.0 scope; vault-walking happens only on explicit "Show impact" click; users can cancel |
-| `workstreams` vs `teams` naming collision confuses new users | CLAUDE.md callout in v0.37.0 ship notes; install Notice flags both concepts; future cycle could rename `workstreams` to `tracks` or similar if confusion persists |
-| First-time consumer install of v0.37.0 + the two new blueprints touches many files | Standard sauce install posture (failure-loud, idempotent, backup-on-edit per landmine #12); workshop dogfoods first |
+| Delete impact-preview is slow on huge vaults (10k+ notes) | Acceptable for v0.40.0 scope; vault-walking happens only on explicit "Show impact" click; users can cancel |
+| `workstreams` vs `teams` naming collision confuses new users | CLAUDE.md callout in v0.39.0 ship notes; install Notice flags both concepts; future cycle could rename `workstreams` to `tracks` or similar if confusion persists |
+| First-time consumer install of v0.39.0 + the two new blueprints touches many files | Standard sauce install posture (failure-loud, idempotent, backup-on-edit per landmine #12); workshop dogfoods first |
+| **CLAUDE.md "Status (live)" section is stale by 3 cycles** (last refresh = v0.36.1; actual repo = v0.38.1 with `sauce seed`, integration-smoke, release-preflight, version-sync gate, macOS+Linux CI matrix, people α-seed all shipped but unmentioned) | Out-of-scope for v0.39.0 itself; flag to user for a separate CLAUDE.md refresh pass — ideally before v0.39.0 close so the v0.39.0 status entry can rest on a clean baseline |
