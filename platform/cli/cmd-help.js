@@ -34,6 +34,7 @@ async function run(ctx, args) {
         "  wizard      Re-run the first-run wizard to edit subscription or config.",
         "  migrate     Migrate a real source vault (e.g., legacy Accuris layout) into this sauce vault. Dry-run by default; pass --commit to write.",
         "  audit       Audit a vault for blueprint conformance + untracked dirs. Read-only; flags: --vault <path> --blueprint <name> --output-file <path> --no-untracked-check --quiet. Exit: 0 = clean, 1 = violations, 2 = error.",
+        "  seed        Materialize per-blueprint seed contributions into a vault (workshop-only).",
         "  help        Print this screen.",
         "",
         "Examples:",
