@@ -175,3 +175,63 @@ If you need to fully reset a consumer's platform state:
 1. Delete `ranch/platform-installed.json`.
 2. Optionally delete `ranch/templater/{validate,hook-validate,audit-walker}.js`, `ranch/views/customjs-guard/view.js`, `.obsidian/snippets/customjs-loader.css`.
 3. Re-run `tp.user.platformInstall(tp)`. Everything re-installs from scratch.
+
+## Releasing a version
+
+The release pipeline is gated. A tag push only ships a Formula bump if preflight is green.
+
+### Gate sequence
+
+1. **Bump versions in lockstep.**
+   - `platform/manifest.json` `workshop_version` → new version
+   - `package.json` `version` → same value
+   - The `scripts/check-version-sync.js` gate (first step of `release:preflight`) fails the chain if these drift.
+
+2. **Run preflight locally.**
+   ```bash
+   npm run release:preflight
+   ```
+   Must exit 0. Includes 14 harnesses + integration smoke (~30s end-to-end).
+
+3. **Commit + push to `main`.** Wait for `ci` workflow green on both `macos-latest` and `ubuntu-latest`.
+
+4. **Tag + push.**
+   ```bash
+   git tag -a v.X.Y.Z -m "v.X.Y.Z — <one-line summary>"
+   git push origin v.X.Y.Z
+   ```
+
+5. **`release.yml` runs.** First job: `preflight` (full chain). If green: `bump-tap` opens a PR in `willfell/homebrew-sauce` with the new SHA + URL.
+
+6. **Merge tap PR.** This is the publish step. After merge, `brew upgrade sauce` ships the new version to consumers.
+
+7. **Verify locally.**
+   ```bash
+   brew upgrade sauce
+   sauce help | head -2
+   ```
+
+### Recovery: tag pushed against red preflight
+
+If a tag pushes and `release.yml`'s `preflight` job fails, no formula bump happens. Recover:
+
+```bash
+git tag -d v.X.Y.Z
+git push --delete origin v.X.Y.Z
+# fix the underlying issue
+git tag -a v.X.Y.Z -m "..."
+git push origin v.X.Y.Z
+```
+
+## Recommended GitHub branch protection (one-time UI setup)
+
+These are flipped on manually in the GitHub UI under **Settings → Branches → Branch protection rules → Add rule** for `main`. They are not configured in-repo because branch protection is a per-repo GitHub setting, not a file.
+
+- ☑ **Require a pull request before merging** (skip if single-developer; current workflow is direct push to main).
+- ☑ **Require status checks to pass before merging:**
+  - `preflight (macos-latest)`
+  - `preflight (ubuntu-latest)`
+  - Toggle "Require branches to be up to date before merging".
+- ☑ **Require linear history** (matches the project's no-merge-commits convention).
+- ☑ **Restrict who can push to matching branches** — limit to your account.
+- (Optional) **Require signed commits** if you use a GPG/SSH signing key.
