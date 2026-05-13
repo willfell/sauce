@@ -6,6 +6,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const os = require("os");
 const { spawnSync } = require("child_process");
 const banner = require("../visual/banner.js");
 
@@ -72,6 +73,15 @@ async function run(ctx, args) {
         lines.push(`  [warn] Blueprint(s) ${missing.join(", ")} depend on convenience but it is not subscribed.`);
         lines.push("         Run `sauce wizard` to add it.");
     }
+
+    // v0.36.0 S6.2 — surface the dev-mode active-pantry symlink if present.
+    const activeLink = path.join(os.homedir(), ".sauce/active-pantry");
+    try {
+        if (fs.lstatSync(activeLink).isSymbolicLink()) {
+            const target = fs.readlinkSync(activeLink);
+            lines.push(`  active-pantry: ${target}`);
+        }
+    } catch (_e) { /* no link — no output */ }
 
     if (!process.env.SAUCE_TEST_MODE) {
         for (const l of lines) console.log(l);

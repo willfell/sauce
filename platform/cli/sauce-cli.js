@@ -17,6 +17,8 @@ const VERBS = {
     reinstall: "./cmd-reinstall.js",
     "migrate-layout": "./cmd-migrate-layout.js",
     doctor:    "./cmd-doctor.js",
+    link:      "./cmd-link.js",
+    unlink:    "./cmd-unlink.js",
     help:      "./cmd-help.js"
 };
 
@@ -125,8 +127,18 @@ async function dispatch(argv, opts) {
         await cmd.run(testCtx, rest);
         return;
     }
+    if (verb === "link") {
+        const cmd = require(VERBS.link);
+        await cmd.run(null, rest);
+        return;
+    }
+    if (verb === "unlink") {
+        const cmd = require(VERBS.unlink);
+        await cmd.run(null, rest);
+        return;
+    }
     if (!VERBS[verb]) {
-        throw new Error(`unknown verb: ${verb}\nUsage: sauce <bootstrap|update|status|wizard|migrate|migrate-layout|audit|vault|reinstall|doctor|help>`);
+        throw new Error(`unknown verb: ${verb}\nUsage: sauce <bootstrap|update|status|wizard|migrate|migrate-layout|audit|vault|reinstall|doctor|link|unlink|help>`);
     }
     let ctx;
     if (verb === "bootstrap") {
@@ -154,7 +166,7 @@ async function dispatch(argv, opts) {
 }
 
 function printUsage() {
-    console.log("Usage: sauce <verb> [args]\n\nVerbs:\n  bootstrap        First-run install (rare; called by install.sh)\n  update           Pull latest workshop + reinstall\n  status           Show vault + workshop state\n  wizard           Interactive subscription / config editor\n  migrate          Migrate a source vault into this sauce vault (v0.28.0+)\n  migrate-layout   Move legacy <vault>/pantry/ → brew-installed layout (v0.36.0+)\n  audit            Audit a vault for blueprint conformance + untracked dirs (v0.29.0+)\n  vault            Manage the per-machine vault registry (add|list|remove)\n  reinstall        Re-run installer against --all registered vaults or --vault <p>\n  doctor           Read-only platform health check (v0.36.0+)\n");
+    console.log("Usage: sauce <verb> [args]\n\nVerbs:\n  bootstrap        First-run install (rare; called by install.sh)\n  update           Pull latest workshop + reinstall\n  status           Show vault + workshop state\n  wizard           Interactive subscription / config editor\n  migrate          Migrate a source vault into this sauce vault (v0.28.0+)\n  migrate-layout   Move legacy <vault>/pantry/ → brew-installed layout (v0.36.0+)\n  audit            Audit a vault for blueprint conformance + untracked dirs (v0.29.0+)\n  vault            Manage the per-machine vault registry (add|list|remove)\n  reinstall        Re-run installer against --all registered vaults or --vault <p>\n  doctor           Read-only platform health check (v0.36.0+)\n  link             Point ~/.sauce/active-pantry at a dev checkout (v0.36.0+)\n  unlink           Remove ~/.sauce/active-pantry symlink (v0.36.0+)\n");
 }
 
 if (require.main === module) {
