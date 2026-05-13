@@ -27,6 +27,27 @@ class ProjectsHubCards {
         return links.map(l => `<span style="background:var(--background-secondary);padding:1px 6px;border-radius:4px;font-size:0.8em;margin-right:4px;">${l.path.split("/").pop().replace(/\.md$/, "")}</span>`).join("");
     }
 
+    _renderChips(dv) {
+        const STATUSES = ["idea", "planning", "in-progress", "blocked", "done", "superseded", "cancelled"];
+        const bar = dv.container.createEl("div");
+        bar.style.cssText = "display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;align-items:center;";
+        const label = bar.createEl("span", { text: "Status: " });
+        label.style.cssText = "color:var(--text-muted);font-size:0.85em;margin-right:4px;";
+        STATUSES.forEach(s => {
+            const isActive = this._activeStatuses.has(s);
+            const chip = bar.createEl("span", { text: s });
+            chip.style.cssText = `cursor:pointer;padding:2px 10px;border-radius:12px;font-size:0.8em;${
+                isActive ? "background:var(--interactive-accent);color:var(--text-on-accent);" : "background:var(--background-secondary);color:var(--text-muted);"
+            }`;
+            chip.addEventListener("click", async () => {
+                if (this._activeStatuses.has(s)) this._activeStatuses.delete(s);
+                else this._activeStatuses.add(s);
+                dv.container.empty();
+                await this.render(dv, {});
+            });
+        });
+    }
+
     async render(dv) {
         // v0.39.0 S6.3: default scope filter — hide terminal statuses unless
         // the chip UI (rendered in S6.4) toggles them on. Records WITHOUT a
@@ -37,6 +58,11 @@ class ProjectsHubCards {
         if (!this._activeStatuses) {
             this._activeStatuses = new Set(["idea", "planning", "in-progress", "blocked"]);
         }
+
+        // v0.39.0 S6.4: render status filter chip bar at top of hub. Chips
+        // are click-toggle; click handler mutates this._activeStatuses then
+        // empties the container and re-renders the whole hub.
+        this._renderChips(dv);
 
         // v1.4.1 (S6.5 CF-1): match the hub note via EITHER the new canonical
         // `type: project` discriminator (v1.4.0+) OR the legacy `#project` tag
