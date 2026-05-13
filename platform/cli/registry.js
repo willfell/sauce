@@ -52,11 +52,19 @@ function remove(vaultPath) {
 function list() { return read().vaults; }
 
 function pruneMissing() {
+    // v0.36.1 I4 fix: existence alone is insufficient — a `mv` of the vault
+    // dir would leave the path resolving to some other directory. Require
+    // one of the two sauce-vault markers (post-install installed.json OR
+    // pre-install config.json) for the entry to qualify as a real sauce
+    // vault. Either marker is sufficient.
     const reg = read();
     const kept = [], removed = [];
     for (const v of reg.vaults) {
-        if (fs.existsSync(v.path)) kept.push(v); else removed.push(v.path);
+        const isVault = fs.existsSync(path.join(v.path, "ranch/platform-installed.json"))
+                     || fs.existsSync(path.join(v.path, "ranch/platform-config.json"));
+        if (isVault) kept.push(v); else removed.push(v.path);
     }
+    if (removed.length === 0) return removed;
     reg.vaults = kept;
     write(reg);
     return removed;

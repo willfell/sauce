@@ -66,10 +66,13 @@ async function _runInstaller(ctx, opts) {
 
 async function _auditStrict(ctx, vaultPath) {
     if (ctx && typeof ctx._auditStrict === "function") return ctx._auditStrict(vaultPath);
-    // TODO: cmd-audit.js doesn't currently expose a programmatic strict-check
-    // function. Production path returns ok:true for now; wire to the real
-    // audit in a follow-up if needed. Tests always use the mock.
-    return { ok: true };
+    // v0.36.1 I3 honesty pass: cmd-audit.js does not currently expose a
+    // programmatic strict-check function. Production audit integration
+    // deferred to a future cycle (FIX-LATER-NOTE). Production callers must
+    // NOT treat this as a real audit gate — `--purge` now uses step 1-7
+    // success as its precondition instead (see run() below). Test harnesses
+    // still inject `ctx._auditStrict` to exercise the gate semantics.
+    return { ok: true, _stub: true };
 }
 
 function timestampedBakName() {
@@ -156,10 +159,18 @@ async function run(ctx, args) {
     await _runInstaller(ctx, { vaultPath });
     console.log(`  Installer complete.`);
 
-    // Step 8: audit
+    // Step 8: audit (test-only real-audit hook; production stub is a no-op).
+    // v0.36.1 I3 honesty pass: in production, `_auditStrict` returns
+    // `{ok: true, _stub: true}` — so `--purge` MUST NOT key off it. The
+    // precondition for purge is "steps 1-7 succeeded", which is implicit
+    // by virtue of reaching this point (any failure in 1-7 throws).
     const audit = await _auditStrict(ctx, vaultPath);
     if (audit && audit.ok) {
-        console.log("  Audit: OK");
+        if (audit._stub) {
+            console.log("  Audit: skipped (production audit integration deferred — see FIX-LATER-NOTE).");
+        } else {
+            console.log("  Audit: OK");
+        }
         if (purge) {
             fs.rmSync(bakPath, { recursive: true, force: true });
             console.log(`  Purged: ${bakName}`);

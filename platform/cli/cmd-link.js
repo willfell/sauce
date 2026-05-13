@@ -13,7 +13,23 @@ function expandTilde(p) {
     return p;
 }
 
-async function run(_ctx, args) {
+// v0.36.1 I5: resolve the brew-installed `libexec` path so we can refuse a
+// link target that would defeat brew upgrades. Mockable via `ctx._brewPrefix`
+// for unit-testing without invoking real homebrew.
+function _brewLibexec(ctx) {
+    if (ctx && typeof ctx._brewPrefix === "function") {
+        const p = ctx._brewPrefix("sauce");
+        return p ? path.join(p, "libexec") : null;
+    }
+    const { spawnSync } = require("child_process");
+    const r = spawnSync("brew", ["--prefix", "sauce"], { encoding: "utf8" });
+    if (r.status !== 0) return null;
+    const out = (r.stdout || "").trim();
+    if (!out) return null;
+    return path.join(out, "libexec");
+}
+
+async function run(ctx, args) {
     const raw = (args || [])[0];
     if (!raw) throw new Error("usage: sauce link <path-to-workshop-checkout>");
     const target = path.resolve(expandTilde(raw));
@@ -22,6 +38,12 @@ async function run(_ctx, args) {
     }
     if (!fs.existsSync(path.join(target, "platform/cli/sauce-cli.js"))) {
         throw new Error(`not a sauce workshop checkout (missing platform/cli/sauce-cli.js): ${target}`);
+    }
+    // v0.36.1 I5: refuse to link to the brew-installed pantry. The link would
+    // win over brew's bin shim resolution, silently defeating `brew upgrade`.
+    const brewLibexec = _brewLibexec(ctx);
+    if (brewLibexec && (target === brewLibexec || target === path.resolve(brewLibexec))) {
+        throw new Error(`refusing to link to the brew-installed pantry (${brewLibexec}). Use the symlink only for dev checkouts; brew upgrades manage libexec themselves.`);
     }
     const sauceDir = path.join(os.homedir(), ".sauce");
     if (!fs.existsSync(sauceDir)) fs.mkdirSync(sauceDir, { recursive: true });

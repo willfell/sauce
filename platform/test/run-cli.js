@@ -18,7 +18,7 @@ function assertEqual(actual, expected, label) {
 }
 
 async function withTempVault(setup, fn) {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "beacon-cli-"));
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-cli-"));
     try {
         fs.mkdirSync(path.join(tmp, "ranch"), { recursive: true });
         fs.writeFileSync(path.join(tmp, "ranch/platform-config.json"),
@@ -205,100 +205,110 @@ async function caseC10WizardDelegates() {
 }
 
 // C11: cmd-bootstrap parses --non-interactive and threads to runBootstrap
+// v0.36.1 C1 fix: wrapped in withTempHome so cmd-bootstrap's registry.add()
+// writes to a tempdir, not the developer's real ~/.sauce/vaults.json.
 async function caseC11BootstrapNonInteractive() {
     const label = "C11 cmd-bootstrap parses --non-interactive";
-    await withTempVault({}, async (vaultPath) => {
-        // Stub workshop manifest so cmd-bootstrap can read banner version.
-        fs.mkdirSync(path.join(vaultPath, "pantry/platform"), { recursive: true });
-        fs.writeFileSync(path.join(vaultPath, "pantry/platform/manifest.json"),
-            JSON.stringify({ workshop_version: "0.22.1", mechanisms: [], blueprints: [] }, null, 2));
+    await withTempHome(async () => {
+        await withTempVault({}, async (vaultPath) => {
+            // Stub workshop manifest so cmd-bootstrap can read banner version.
+            fs.mkdirSync(path.join(vaultPath, "pantry/platform"), { recursive: true });
+            fs.writeFileSync(path.join(vaultPath, "pantry/platform/manifest.json"),
+                JSON.stringify({ workshop_version: "0.22.1", mechanisms: [], blueprints: [] }, null, 2));
 
-        // Pre-load bootstrap module + monkey-patch runBootstrap on the resolved module
-        // so we can capture opts. Using `require("../bootstrap.js")` matches what
-        // cmd-bootstrap.js does internally — same module instance.
-        const bootstrap = require("../bootstrap.js");
-        const originalRunBootstrap = bootstrap.runBootstrap;
-        const originalPhaseWriteActivation = bootstrap.phaseWriteActivation;
-        let captured = null;
-        bootstrap.runBootstrap = async (opts) => { captured = opts; return { fetched: [], skipped: [], failed: [] }; };
-        bootstrap.phaseWriteActivation = async () => ({});
-        try {
-            const cmd = require("../cli/cmd-bootstrap.js");
-            const ctx = {
-                vaultPath,
-                workshopPath: path.join(vaultPath, "pantry"),
-                workshopManifest: { workshop_version: "0.22.1" }
-            };
-            await cmd.run(ctx, ["--vault", vaultPath, "--non-interactive"]);
-            assertTrue(captured !== null, label + ": runBootstrap invoked");
-            assertEqual(captured.nonInteractive, true, label + ": nonInteractive=true");
-        } finally {
-            bootstrap.runBootstrap = originalRunBootstrap;
-            bootstrap.phaseWriteActivation = originalPhaseWriteActivation;
-        }
+            // Pre-load bootstrap module + monkey-patch runBootstrap on the resolved module
+            // so we can capture opts. Using `require("../bootstrap.js")` matches what
+            // cmd-bootstrap.js does internally — same module instance.
+            const bootstrap = require("../bootstrap.js");
+            const originalRunBootstrap = bootstrap.runBootstrap;
+            const originalPhaseWriteActivation = bootstrap.phaseWriteActivation;
+            let captured = null;
+            bootstrap.runBootstrap = async (opts) => { captured = opts; return { fetched: [], skipped: [], failed: [] }; };
+            bootstrap.phaseWriteActivation = async () => ({});
+            try {
+                const cmd = require("../cli/cmd-bootstrap.js");
+                const ctx = {
+                    vaultPath,
+                    workshopPath: path.join(vaultPath, "pantry"),
+                    workshopManifest: { workshop_version: "0.22.1" }
+                };
+                await cmd.run(ctx, ["--vault", vaultPath, "--non-interactive"]);
+                assertTrue(captured !== null, label + ": runBootstrap invoked");
+                assertEqual(captured.nonInteractive, true, label + ": nonInteractive=true");
+            } finally {
+                bootstrap.runBootstrap = originalRunBootstrap;
+                bootstrap.phaseWriteActivation = originalPhaseWriteActivation;
+            }
+        });
     });
 }
 
 // C12: cmd-bootstrap parses --mechanisms=all and threads to runBootstrap.wizardDefaults
+// v0.36.1 C1 fix: wrapped in withTempHome (see C11).
 async function caseC12BootstrapMechanismsAll() {
     const label = "C12 cmd-bootstrap parses --mechanisms=all";
-    await withTempVault({}, async (vaultPath) => {
-        fs.mkdirSync(path.join(vaultPath, "pantry/platform"), { recursive: true });
-        fs.writeFileSync(path.join(vaultPath, "pantry/platform/manifest.json"),
-            JSON.stringify({ workshop_version: "0.22.1", mechanisms: [], blueprints: [] }, null, 2));
-        const bootstrap = require("../bootstrap.js");
-        const originalRunBootstrap = bootstrap.runBootstrap;
-        const originalPhaseWriteActivation = bootstrap.phaseWriteActivation;
-        let captured = null;
-        bootstrap.runBootstrap = async (opts) => { captured = opts; return { fetched: [], skipped: [], failed: [] }; };
-        bootstrap.phaseWriteActivation = async () => ({});
-        try {
-            const cmd = require("../cli/cmd-bootstrap.js");
-            const ctx = {
-                vaultPath,
-                workshopPath: path.join(vaultPath, "pantry"),
-                workshopManifest: { workshop_version: "0.22.1" }
-            };
-            await cmd.run(ctx, ["--vault", vaultPath, "--non-interactive", "--mechanisms=all"]);
-            assertTrue(captured !== null, label + ": runBootstrap invoked");
-            assertTrue(captured.wizardDefaults && captured.wizardDefaults.mechanisms === "all",
-                label + ": wizardDefaults.mechanisms = 'all'");
-        } finally {
-            bootstrap.runBootstrap = originalRunBootstrap;
-            bootstrap.phaseWriteActivation = originalPhaseWriteActivation;
-        }
+    await withTempHome(async () => {
+        await withTempVault({}, async (vaultPath) => {
+            fs.mkdirSync(path.join(vaultPath, "pantry/platform"), { recursive: true });
+            fs.writeFileSync(path.join(vaultPath, "pantry/platform/manifest.json"),
+                JSON.stringify({ workshop_version: "0.22.1", mechanisms: [], blueprints: [] }, null, 2));
+            const bootstrap = require("../bootstrap.js");
+            const originalRunBootstrap = bootstrap.runBootstrap;
+            const originalPhaseWriteActivation = bootstrap.phaseWriteActivation;
+            let captured = null;
+            bootstrap.runBootstrap = async (opts) => { captured = opts; return { fetched: [], skipped: [], failed: [] }; };
+            bootstrap.phaseWriteActivation = async () => ({});
+            try {
+                const cmd = require("../cli/cmd-bootstrap.js");
+                const ctx = {
+                    vaultPath,
+                    workshopPath: path.join(vaultPath, "pantry"),
+                    workshopManifest: { workshop_version: "0.22.1" }
+                };
+                await cmd.run(ctx, ["--vault", vaultPath, "--non-interactive", "--mechanisms=all"]);
+                assertTrue(captured !== null, label + ": runBootstrap invoked");
+                assertTrue(captured.wizardDefaults && captured.wizardDefaults.mechanisms === "all",
+                    label + ": wizardDefaults.mechanisms = 'all'");
+            } finally {
+                bootstrap.runBootstrap = originalRunBootstrap;
+                bootstrap.phaseWriteActivation = originalPhaseWriteActivation;
+            }
+        });
     });
 }
 
 // C13: cmd-bootstrap parses --blueprints=daily,journal as CSV
+// v0.36.1 C1 fix: wrapped in withTempHome (see C11).
 async function caseC13BootstrapBlueprintsCsv() {
     const label = "C13 cmd-bootstrap parses --blueprints=daily,journal";
-    await withTempVault({}, async (vaultPath) => {
-        fs.mkdirSync(path.join(vaultPath, "pantry/platform"), { recursive: true });
-        fs.writeFileSync(path.join(vaultPath, "pantry/platform/manifest.json"),
-            JSON.stringify({ workshop_version: "0.22.1", mechanisms: [], blueprints: [] }, null, 2));
-        const bootstrap = require("../bootstrap.js");
-        const originalRunBootstrap = bootstrap.runBootstrap;
-        const originalPhaseWriteActivation = bootstrap.phaseWriteActivation;
-        let captured = null;
-        bootstrap.runBootstrap = async (opts) => { captured = opts; return { fetched: [], skipped: [], failed: [] }; };
-        bootstrap.phaseWriteActivation = async () => ({});
-        try {
-            const cmd = require("../cli/cmd-bootstrap.js");
-            const ctx = {
-                vaultPath,
-                workshopPath: path.join(vaultPath, "pantry"),
-                workshopManifest: { workshop_version: "0.22.1" }
-            };
-            await cmd.run(ctx, ["--vault", vaultPath, "--non-interactive", "--blueprints=daily,journal"]);
-            assertTrue(captured !== null, label + ": runBootstrap invoked");
-            const bp = captured.wizardDefaults && captured.wizardDefaults.blueprints;
-            assertTrue(Array.isArray(bp) && bp.length === 2 && bp[0] === "daily" && bp[1] === "journal",
-                label + ": wizardDefaults.blueprints = ['daily','journal']");
-        } finally {
-            bootstrap.runBootstrap = originalRunBootstrap;
-            bootstrap.phaseWriteActivation = originalPhaseWriteActivation;
-        }
+    await withTempHome(async () => {
+        await withTempVault({}, async (vaultPath) => {
+            fs.mkdirSync(path.join(vaultPath, "pantry/platform"), { recursive: true });
+            fs.writeFileSync(path.join(vaultPath, "pantry/platform/manifest.json"),
+                JSON.stringify({ workshop_version: "0.22.1", mechanisms: [], blueprints: [] }, null, 2));
+            const bootstrap = require("../bootstrap.js");
+            const originalRunBootstrap = bootstrap.runBootstrap;
+            const originalPhaseWriteActivation = bootstrap.phaseWriteActivation;
+            let captured = null;
+            bootstrap.runBootstrap = async (opts) => { captured = opts; return { fetched: [], skipped: [], failed: [] }; };
+            bootstrap.phaseWriteActivation = async () => ({});
+            try {
+                const cmd = require("../cli/cmd-bootstrap.js");
+                const ctx = {
+                    vaultPath,
+                    workshopPath: path.join(vaultPath, "pantry"),
+                    workshopManifest: { workshop_version: "0.22.1" }
+                };
+                await cmd.run(ctx, ["--vault", vaultPath, "--non-interactive", "--blueprints=daily,journal"]);
+                assertTrue(captured !== null, label + ": runBootstrap invoked");
+                const bp = captured.wizardDefaults && captured.wizardDefaults.blueprints;
+                assertTrue(Array.isArray(bp) && bp.length === 2 && bp[0] === "daily" && bp[1] === "journal",
+                    label + ": wizardDefaults.blueprints = ['daily','journal']");
+            } finally {
+                bootstrap.runBootstrap = originalRunBootstrap;
+                bootstrap.phaseWriteActivation = originalPhaseWriteActivation;
+            }
+        });
     });
 }
 
@@ -1128,6 +1138,31 @@ async function caseL3UnlinkRemovesSymlink() {
     });
 }
 
+// v0.36.1 I5: refusing to link a brew-installed pantry. The link would defeat
+// `brew upgrade` (active-pantry symlink wins over brew's bin shim resolution).
+async function caseL5LinkRefusesBrewPrefix() {
+    const label = "L5 sauce link refuses brew-installed pantry as target";
+    await withTempHome(async () => {
+        const fakeBrew = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-brewx-"));
+        const fakeLibexec = path.join(fakeBrew, "libexec");
+        fs.mkdirSync(path.join(fakeLibexec, "platform/cli"), { recursive: true });
+        fs.writeFileSync(path.join(fakeLibexec, "platform/manifest.json"), "{}");
+        fs.writeFileSync(path.join(fakeLibexec, "platform/cli/sauce-cli.js"), "");
+        delete require.cache[require.resolve("../cli/sauce-cli.js")];
+        delete require.cache[require.resolve("../cli/cmd-link.js")];
+        const cli = require("../cli/sauce-cli.js");
+        let threw = false; let msg = "";
+        try {
+            await cli.dispatch(["link", fakeLibexec], {
+                _brewPrefix: () => fakeBrew
+            });
+        } catch (e) { threw = true; msg = e.message || ""; }
+        assertTrue(threw, label + " — threw");
+        assertTrue(msg.includes("brew-installed"), label + " — names refusal");
+        fs.rmSync(fakeBrew, { recursive: true, force: true });
+    });
+}
+
 async function caseL4StatusReportsLink() {
     const label = "L4 sauce status surfaces active-pantry link target when present";
     await withTempHome(async (home) => {
@@ -1323,6 +1358,7 @@ const cases = [
     caseD4DanglingActivePantry, caseD5AllGreen,  // v0.36.0 S5
     caseL1LinkCreatesSymlink, caseL2LinkRefusesBadTarget,
     caseL3UnlinkRemovesSymlink, caseL4StatusReportsLink,  // v0.36.0 S6.1 (failing-first)
+    caseL5LinkRefusesBrewPrefix,  // v0.36.1 I5
     caseSH1ShimReturnsActivePantry, caseSH2ShimReturnsBrewLibexec,
     caseSH3ShimReturnsBrewWhenDangling,  // v0.36.0 S6.3 (failing-first)
     caseIR1BootstrapRegistersVault, caseIR2BootstrapNoRegisterFlag,  // v0.36.0 S7
@@ -1330,10 +1366,36 @@ const cases = [
 ];
 
 async function main() {
+    // v0.36.1 C1 invariant: snapshot the developer's real ~/.sauce/vaults.json
+    // mtime + content size BEFORE any test runs. After the suite, assert they
+    // are unchanged — proves no test wrote into the production registry.
+    const prodRegistryPath = path.join(os.homedir(), ".sauce/vaults.json");
+    let prodSnapshot = null;
+    try {
+        const st = fs.statSync(prodRegistryPath);
+        prodSnapshot = { mtimeMs: st.mtimeMs, size: st.size };
+    } catch (_e) { /* missing is fine; absent-then-still-absent is the invariant */ }
+
     for (const c of cases) {
         try { await c(); }
         catch (e) { fail++; console.log("  FAIL  " + c.name + ": " + (e.message || e)); }
     }
+
+    // Invariant: production registry untouched across the suite.
+    try {
+        const after = fs.existsSync(prodRegistryPath) ? fs.statSync(prodRegistryPath) : null;
+        if (prodSnapshot === null) {
+            assertTrue(after === null, "INV production ~/.sauce/vaults.json must not be created by tests");
+        } else {
+            assertTrue(after !== null
+                && after.mtimeMs === prodSnapshot.mtimeMs
+                && after.size === prodSnapshot.size,
+                "INV production ~/.sauce/vaults.json mtime+size unchanged across test suite");
+        }
+    } catch (e) {
+        fail++; console.log("  FAIL  INV registry-untouched: " + (e.message || e));
+    }
+
     console.log("\n========\nResult: " + pass + " passed, " + fail + " failed.");
     process.exitCode = fail > 0 ? 1 : 0;
 }

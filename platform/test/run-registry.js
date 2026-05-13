@@ -76,9 +76,15 @@ async function caseR4AtomicWrite() {
 
 async function caseR5PruneMissing() {
     const label = "R5 pruneMissing() drops entries whose path no longer exists";
+    // v0.36.1 I4 update: real vaults need ranch/ markers to qualify.
     await withTempHome(async () => {
+        // Clear require.cache so registry.js picks up new HOME inside this case.
+        delete require.cache[require.resolve("../cli/registry.js")];
         const reg = require("../cli/registry.js");
         const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-vault-"));
+        // Seed a ranch/platform-config.json marker so this path qualifies as a vault.
+        fs.mkdirSync(path.join(tmp, "ranch"), { recursive: true });
+        fs.writeFileSync(path.join(tmp, "ranch/platform-config.json"), "{}");
         reg.add(tmp); reg.add("/nonexistent/path/12345");
         const removed = reg.pruneMissing();
         const r = reg.read();
@@ -109,6 +115,22 @@ async function caseR6CorruptJson() {
     });
 }
 
+// v0.36.1 I4: pruneMissing must reject paths that exist but lack ranch/ markers.
+async function caseR7PruneRequiresVaultMarker() {
+    const label = "R7 pruneMissing drops paths that exist but lack ranch/ markers";
+    await withTempHome(async () => {
+        delete require.cache[require.resolve("../cli/registry.js")];
+        const reg = require("../cli/registry.js");
+        const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-fake-"));
+        // Path exists but has no ranch/ → not a sauce vault.
+        reg.add(tmp);
+        const removed = reg.pruneMissing();
+        assertEqual(removed.length, 1, label + " — pruned");
+        assertEqual(removed[0], tmp, label + " — correct path");
+        fs.rmSync(tmp, { recursive: true, force: true });
+    });
+}
+
 (async () => {
     await caseR1ReadMissing();
     await caseR2AddVault();
@@ -116,6 +138,7 @@ async function caseR6CorruptJson() {
     await caseR4AtomicWrite();
     await caseR5PruneMissing();
     await caseR6CorruptJson();
+    await caseR7PruneRequiresVaultMarker();
     console.log(`\n  ${pass} pass · ${fail} fail`);
     process.exit(fail > 0 ? 1 : 0);
 })();

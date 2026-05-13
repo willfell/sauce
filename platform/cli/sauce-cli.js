@@ -138,7 +138,10 @@ async function dispatch(argv, opts) {
     }
     if (verb === "link") {
         const cmd = require(VERBS.link);
-        await cmd.run(null, rest);
+        // v0.36.1 I5: forward test hooks (e.g. _brewPrefix) via opts so the
+        // brew-pantry refusal can be exercised without invoking real brew.
+        const testCtx = opts || {};
+        await cmd.run(testCtx, rest);
         return;
     }
     if (verb === "unlink") {
