@@ -1,6 +1,6 @@
 {
   "name": "people",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "kind": "blueprint",
   "module_directory": "people",
   "description": "Per-person notes under spice/people/<First Last>.md, with hub at spice/people/People.md and shared rendering via people-rendering mechanism. Materializes Templater folder template + global People nav-button.",
