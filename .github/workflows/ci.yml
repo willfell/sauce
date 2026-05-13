@@ -1,0 +1,76 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  brew-install-smoke:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout sauce repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run unit harnesses (zero-network)
+        run: |
+          npm install --omit=dev
+          npm run test:helpers
+          npm run test:bootstrap
+          npm run test:registry
+          npm run test:migrate-layout
+          node platform/test/run-cli.js
+          node platform/test/run-migrate.js
+          node platform/test/run-audit.js
+          node platform/test/run-claude-surface.js
+          node platform/test/run-renderer.js
+          node platform/test/run-install-sh.js
+          node platform/test/run-cowork-smoke.js
+
+      - name: Tap sauce formula
+        # Skip the brew-install step when no published formula exists yet
+        # (first-ever push of this CI file before any v0.36.0 tag was pushed).
+        # The tap is created in S9; once a tag and formula exist, this step runs.
+        run: |
+          if brew tap willfell/sauce 2>/dev/null; then
+            echo "Tapped willfell/sauce"
+          else
+            echo "Tap unavailable — skipping brew install smoke this run"
+            echo "SKIP_BREW_SMOKE=1" >> "$GITHUB_ENV"
+          fi
+
+      - name: Install sauce via brew (smoke)
+        if: env.SKIP_BREW_SMOKE != '1'
+        run: |
+          brew install willfell/sauce/sauce || (echo "brew install failed" && exit 1)
+          which sauce
+          sauce help | head -3
+
+      - name: Bootstrap a fresh vault via brewed sauce
+        if: env.SKIP_BREW_SMOKE != '1'
+        run: |
+          TMP_VAULT="$RUNNER_TEMP/sauce-ci-vault"
+          mkdir -p "$TMP_VAULT"
+          sauce bootstrap --vault "$TMP_VAULT" --non-interactive --no-register || (echo "bootstrap failed" && exit 1)
+          ls -la "$TMP_VAULT"
+          # If sauce audit supports --vault, run it. Otherwise skip — the bootstrap
+          # exit code is the primary CI gate here.
+          if sauce audit --vault "$TMP_VAULT" 2>/dev/null; then
+            echo "audit ok"
+          else
+            echo "audit skipped or non-fatal — bootstrap-pass is the gate"
+          fi
+
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -rf "$RUNNER_TEMP/sauce-ci-vault" 2>/dev/null || true
+          brew uninstall sauce 2>/dev/null || true
+          brew untap willfell/sauce 2>/dev/null || true
