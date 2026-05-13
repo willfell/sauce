@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop platform manifest. Each mechanism + blueprint has its own version.",
-  "workshop_version": "0.33.0",
+  "workshop_version": "0.33.1",
   "date": "2026-05-12",
   "foundational_plugins": [
     { "id": "templater-obsidian" },
@@ -22,14 +22,14 @@
   "mechanisms": [
     { "name": "customjs-guard", "version": "1.0.0", "path": "mechanisms/customjs-guard" },
     { "name": "validator", "version": "0.1.2", "path": "mechanisms/validator" },
-    { "name": "audit", "version": "0.2.0", "path": "mechanisms/audit" },
+    { "name": "audit", "version": "0.2.1", "path": "mechanisms/audit" },
     { "name": "nav-buttons", "version": "2.6.0", "path": "mechanisms/nav-buttons" },
     { "name": "cards", "version": "0.2.4", "path": "mechanisms/cards" },
     { "name": "accent-button", "version": "0.1.0", "path": "mechanisms/accent-button" },
     { "name": "people-rendering", "version": "0.1.0", "path": "mechanisms/people-rendering" },
     { "name": "styling", "version": "0.1.2", "path": "mechanisms/styling" },
     { "name": "convenience", "version": "0.1.0", "path": "mechanisms/convenience" },
-    { "name": "platform-claude", "version": "0.1.0", "path": "mechanisms/platform-claude" }
+    { "name": "platform-claude", "version": "0.1.1", "path": "mechanisms/platform-claude" }
   ],
   "blueprints": [
     { "name": "boards", "version": "0.1.0", "path": "blueprints/boards" },

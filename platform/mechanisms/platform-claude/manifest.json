@@ -1,9 +1,9 @@
 {
   "name": "platform-claude",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "kind": "mechanism",
   "skills_dir": ".claude/skills/platform",
-  "description": "Lifecycle slash commands (/install, /upgrade, /bootstrap) for managing sauce from inside Claude Code. Owns claude-md-renderer.js (consumed by install.js step 6d). Always-on posture — subscribe in every consumer.",
+  "description": "Lifecycle slash commands (/install, /upgrade, /bootstrap) for managing sauce from inside Claude Code. Owns claude-md-renderer.js (consumed by install.js step 6d). Always-on posture — subscribe in every consumer. v0.1.1 PATCH (v0.33.1): claude_md_row.row.path corrected from mechanism slug 'platform-claude' to canonical command body dest paths ('.claude/commands/<verb>.md') so /audit --claude-surface resolves to a real file and lands in `aligned` rather than `dead_path` severity bucket.",
   "depends_on": [],
   "files": [],
   "claude_surface": [
@@ -13,9 +13,9 @@
     { "kind": "skill",   "source": "skills/install/SKILL.md",   "dest": "{{skills_dir}}/install/SKILL.md" },
     { "kind": "skill",   "source": "skills/upgrade/SKILL.md",   "dest": "{{skills_dir}}/upgrade/SKILL.md" },
     { "kind": "skill",   "source": "skills/bootstrap/SKILL.md", "dest": "{{skills_dir}}/bootstrap/SKILL.md" },
-    { "kind": "claude_md_row", "table": "resolvers", "row": { "topic": "Install",   "path": "platform-claude", "command": "/install"   } },
-    { "kind": "claude_md_row", "table": "resolvers", "row": { "topic": "Upgrade",   "path": "platform-claude", "command": "/upgrade"   } },
-    { "kind": "claude_md_row", "table": "resolvers", "row": { "topic": "Bootstrap", "path": "platform-claude", "command": "/bootstrap" } }
+    { "kind": "claude_md_row", "table": "resolvers", "row": { "topic": "Install",   "path": ".claude/commands/install.md",   "command": "/install"   } },
+    { "kind": "claude_md_row", "table": "resolvers", "row": { "topic": "Upgrade",   "path": ".claude/commands/upgrade.md",   "command": "/upgrade"   } },
+    { "kind": "claude_md_row", "table": "resolvers", "row": { "topic": "Bootstrap", "path": ".claude/commands/bootstrap.md", "command": "/bootstrap" } }
   ],
   "post_install": [
     { "type": "notice", "message": "platform-claude@0.1.0 installed. Lifecycle slash commands /install /upgrade /bootstrap now available in Claude Code." }

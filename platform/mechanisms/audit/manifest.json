@@ -1,7 +1,7 @@
 {
   "name": "audit",
-  "version": "0.2.0",
-  "description": "Walks every .md file, runs validator, reports violations + platform drift to Timestamps/Audits/YYYY-MM-DD-audit.md. v0.2.0 adds /audit slash command + claude-surface drift walker for the deployed .claude/ surface.",
+  "version": "0.2.1",
+  "description": "Walks every .md file, runs validator, reports violations + platform drift to Timestamps/Audits/YYYY-MM-DD-audit.md. v0.2.0 adds /audit slash command + claude-surface drift walker for the deployed .claude/ surface. v0.2.1 PATCH (v0.33.1): claude_md_row.row.path corrected from mechanism slug 'audit' to canonical command body dest path '.claude/commands/audit.md' so /audit --claude-surface resolves to a real file and lands in `aligned` rather than `dead_path` severity bucket.",
   "skills_dir": ".claude/skills/audit",
   "files": [
     { "source": "audit-walker.js", "dest": "{{templater_scripts_path}}/audit-walker.js" },
@@ -10,7 +10,7 @@
   "claude_surface": [
     { "kind": "command", "source": "commands/audit.md",     "dest": ".claude/commands/audit.md" },
     { "kind": "skill",   "source": "skills/drift/SKILL.md", "dest": "{{skills_dir}}/drift/SKILL.md" },
-    { "kind": "claude_md_row", "table": "resolvers", "row": { "topic": "Audit", "path": "audit", "command": "/audit" } }
+    { "kind": "claude_md_row", "table": "resolvers", "row": { "topic": "Audit", "path": ".claude/commands/audit.md", "command": "/audit" } }
   ],
   "external_plugins": [
     { "id": "slash-commander", "required": true, "reason": "Surface /audit slash command for the audit walker." }
