@@ -1,14 +1,14 @@
 /**
  * ScratchDayList (CustomJS)
  * Renders all scratches for a given day as BeaconCards in row layout.
- * Title = first-line preview snippet (or filename if empty).
+ * Title = p.title frontmatter if present, else first non-fenced body line,
+ *         else filename.
  * Meta = "edited X ago" relative time from file mtime.
  * Sort = mtime descending (most-recently-edited first).
  *
- * Tolerates day arg + p.day frontmatter as string | Date | Luxon
- * (Obsidian auto-parses unquoted YAML dates).
+ * Tolerates day arg + p.day frontmatter as string | Date | Luxon.
  *
- * Usage in DataviewJS (via customjs-guard):
+ * Usage:
  *   await dv.view("ranch/views/customjs-guard", {
  *     class: "ScratchDayList",
  *     args: [{ day: dv.current().day }]
@@ -27,9 +27,24 @@ class ScratchDayList {
         return null;
     }
 
+    _extractPreviewFromBody(raw) {
+        const afterFrontmatter = raw.split(/^---\s*$/m).slice(2).join("---");
+        const lines = afterFrontmatter.split("\n");
+        let inFence = false;
+        for (const rawLine of lines) {
+            const l = rawLine.trim();
+            if (l.startsWith("```")) { inFence = !inFence; continue; }
+            if (inFence) continue;
+            if (!l) continue;
+            if (l.startsWith("---")) continue;
+            if (l.startsWith("← ") || l.startsWith("[[")) continue;
+            return l.slice(0, 80);
+        }
+        return "";
+    }
+
     async render(dv, args) {
         if (dv.container.closest(".markdown-embed")) return;
-
         while (dv.container.firstChild) dv.container.removeChild(dv.container.firstChild);
 
         const day = this._coerceDay(args && args.day);
@@ -43,18 +58,19 @@ class ScratchDayList {
 
         const items = [];
         for (const s of scratches) {
-            let preview = "";
-            try {
-                const raw = await app.vault.read(app.vault.getAbstractFileByPath(s.file.path));
-                const body = raw.split(/^---\s*$/m).slice(2).join("---");
-                const firstLine = body.split("\n").map(l => l.trim()).find(l => l && !l.startsWith("```") && !l.startsWith("---") && !l.startsWith("← ") && !l.startsWith("[["));
-                preview = (firstLine || s.file.name).slice(0, 80);
-            } catch (e) {
-                preview = s.file.name;
+            let title = (s.title && String(s.title).trim()) || "";
+            if (!title) {
+                try {
+                    const raw = await app.vault.read(app.vault.getAbstractFileByPath(s.file.path));
+                    title = this._extractPreviewFromBody(raw);
+                } catch (e) {
+                    title = "";
+                }
             }
+            if (!title) title = s.file.name;
             items.push({
                 file: s.file,
-                _preview: preview,
+                _title: title,
                 _mtime: (s.file.mtime && s.file.mtime.ts) || 0
             });
         }
@@ -62,7 +78,7 @@ class ScratchDayList {
         await customJS.BeaconCards.render(dv, {
             pages: items,
             layout: "row",
-            title: (p) => p._preview,
+            title: (p) => p._title,
             meta: (p) => {
                 const when = p._mtime ? window.moment(p._mtime).fromNow() : "(unknown)";
                 return `<span title="Last edited">edited ${when}</span>`;

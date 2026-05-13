@@ -7,13 +7,26 @@
  *   await dv.view("ranch/views/customjs-guard", { class: "ScratchHubCards" });
  */
 class ScratchHubCards {
+    _coerceDay(raw) {
+        if (typeof raw === "string") return raw.slice(0, 10);
+        if (raw && typeof raw.toISODate === "function") return raw.toISODate();
+        if (raw instanceof Date && !isNaN(raw)) {
+            const y = raw.getFullYear();
+            const m = String(raw.getMonth() + 1).padStart(2, "0");
+            const d = String(raw.getDate()).padStart(2, "0");
+            return `${y}-${m}-${d}`;
+        }
+        return null;
+    }
+
     async render(dv) {
         if (dv.container.closest(".markdown-embed")) return;
+        while (dv.container.firstChild) dv.container.removeChild(dv.container.firstChild);
 
         const scratches = dv.pages('"spice/scratch"').where(p => p.type === "scratch");
         const byDay = new Map();
         for (const s of scratches) {
-            const k = s.day;
+            const k = this._coerceDay(s.day);
             if (!k) continue;
             if (!byDay.has(k)) byDay.set(k, { day: k, count: 0, latestMtime: 0, sample: null });
             const e = byDay.get(k);
