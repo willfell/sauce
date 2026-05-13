@@ -32,6 +32,14 @@ async function withTempVault(setup, fn) {
     }
 }
 
+async function withTempHome(fn) {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-cli-home-"));
+    const origHome = process.env.HOME;
+    process.env.HOME = tmp;
+    try { await fn(tmp); }
+    finally { process.env.HOME = origHome; fs.rmSync(tmp, { recursive: true, force: true }); }
+}
+
 // C1: dispatcher walks cwd ancestors to find vault
 async function caseC1AncestorWalk() {
     const label = "C1 dispatcher walks cwd ancestors to find vault";
@@ -822,6 +830,58 @@ async function caseCACS3AuditClaudeSurfaceOutputFile() {
     }
 }
 
+// =====================================================================
+// v0.36.0 S2.1 — `sauce vault <add|list|remove>` verb cases (V1-V3)
+// Failing-first: cmd-vault.js + the vault verb arrive in S2.2. Until then
+// these cases fail because the dispatcher throws `unknown verb: vault`.
+// =====================================================================
+
+async function caseV1VaultAdd() {
+    const label = "V1 sauce vault add <path> writes registry";
+    await withTempHome(async () => {
+        await withTempVault({}, async (vaultPath) => {
+            // Clear require cache so registry module sees the freshly-set HOME
+            delete require.cache[require.resolve("../cli/registry.js")];
+            delete require.cache[require.resolve("../cli/sauce-cli.js")];
+            const cli = require("../cli/sauce-cli.js");
+            await cli.dispatch(["vault", "add", vaultPath]);
+            const reg = require("../cli/registry.js").read();
+            assertEqual(reg.vaults.length, 1, label + " — count");
+            assertEqual(reg.vaults[0].path, vaultPath, label + " — path");
+        });
+    });
+}
+
+async function caseV2VaultList() {
+    const label = "V2 sauce vault list prints registered vaults";
+    await withTempHome(async () => {
+        await withTempVault({}, async (vaultPath) => {
+            delete require.cache[require.resolve("../cli/registry.js")];
+            delete require.cache[require.resolve("../cli/sauce-cli.js")];
+            require("../cli/registry.js").add(vaultPath);
+            const out = [];
+            const origLog = console.log; console.log = (s) => out.push(String(s));
+            const cli = require("../cli/sauce-cli.js");
+            try { await cli.dispatch(["vault", "list"]); } finally { console.log = origLog; }
+            assertTrue(out.join("\n").includes(vaultPath), label + " — output contains path");
+        });
+    });
+}
+
+async function caseV3VaultRemove() {
+    const label = "V3 sauce vault remove <path> drops entry";
+    await withTempHome(async () => {
+        await withTempVault({}, async (vaultPath) => {
+            delete require.cache[require.resolve("../cli/registry.js")];
+            delete require.cache[require.resolve("../cli/sauce-cli.js")];
+            require("../cli/registry.js").add(vaultPath);
+            const cli = require("../cli/sauce-cli.js");
+            await cli.dispatch(["vault", "remove", vaultPath]);
+            assertEqual(require("../cli/registry.js").read().vaults.length, 0, label + " — empty");
+        });
+    });
+}
+
 const cases = [
     caseC1AncestorWalk, caseC2SauceVaultEnv, caseC3NotInVault, caseC4UnknownVerb,
     caseC5StatusClean, caseC6StatusDrift, caseC7UpdateFFOnly, caseC8UpdateDirtyRefusal,
@@ -842,6 +902,7 @@ const cases = [
     caseCACS1AuditClaudeSurfaceClean,
     caseCACS2AuditClaudeSurfaceStrict,
     caseCACS3AuditClaudeSurfaceOutputFile,  // v0.32.0 S7
+    caseV1VaultAdd, caseV2VaultList, caseV3VaultRemove,  // v0.36.0 S2.1 (failing-first)
 ];
 
 async function main() {
