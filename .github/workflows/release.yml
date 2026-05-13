@@ -6,7 +6,25 @@ on:
       - 'v*.*.*'
 
 jobs:
+  preflight:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout sauce repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dev deps
+        run: npm install --omit=dev
+
+      - name: Run release:preflight (full chain incl. integration smoke)
+        run: npm run release:preflight
+
   bump-tap:
+    needs: preflight
     runs-on: ubuntu-latest
     steps:
       - name: Compute tarball sha256 + URL
