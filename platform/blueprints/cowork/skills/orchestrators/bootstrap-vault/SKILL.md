@@ -31,7 +31,7 @@ If `resume_from_step` is set, skip steps `< resume_from_step` and pick up from t
 
 2. Use Skill `cowork:date-context` with `{}`. Capture `context`. If `context.error` exists, emit Notice and exit.
 
-3. Read `<vault>/ranch/platform-installed.json` via `mcp__obsidian__read_note`. If the cowork blueprint is NOT in the `blueprints[]` array, emit Notice `cowork not installed in this vault; run "sauce install cowork" first` and exit.
+3. Read `<vault>/ranch/platform-installed.json` via `mcp__obsidian__read_note`. If the cowork blueprint is NOT in the `blueprints[]` array, emit Notice `cowork not installed in this vault; add cowork to subscription then run "sauce update" first` and exit.
 
 4. Check for prior bootstrap state via `mcp__obsidian__get_notes_info` on `<vault>/spice/cowork/context/vault-config.md`.
 

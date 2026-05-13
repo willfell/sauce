@@ -398,19 +398,75 @@ async function caseCSSUB2PlatformClaudeExcluded() {
 }
 
 // ============================================================
-// CS-SUB-3: every `sauce <word>` reference in platform-claude command +
-//           skill bodies must resolve to a real verb in sauce-cli.js's
-//           VERBS dispatch table. Catches reviewer-flagged bugs like
-//           `sauce install` (no such verb) or `sauce bootstrap --rewizard`
-//           (no such flag) by asserting verb tokens against ground truth.
+// CS-SUB-3: every `sauce <word>` reference in EVERY mechanism + blueprint
+//           claude_surface[] command + skill body must resolve to a real
+//           verb in sauce-cli.js's VERBS dispatch table. Catches
+//           reviewer-flagged bugs like `sauce install` (no such verb) or
+//           `sauce bootstrap --rewizard` (no such flag) by asserting verb
+//           tokens against ground truth.
 //
 //           Method: parse sauce-cli.js for the `VERBS = { ... }` literal,
-//           extract verb names; scan each command + skill .md body for
-//           occurrences of /\bsauce\s+([a-z][a-z0-9-]*)/g; assert every
-//           captured verb is in VERBS. A short DOCUMENTED_NON_VERB allowlist
-//           skips noun-phrase tokens that follow "sauce" but are not CLI
-//           verbs (e.g. "sauce installer", "sauce vault").
+//           extract verb names; walk every manifest with claude_surface[]
+//           (mechanisms + blueprints) and scan each command + skill .md
+//           body for occurrences of /\bsauce\s+([a-z][a-z0-9-]*)/g; assert
+//           every captured verb is in VERBS. A short DOCUMENTED_NON_VERB
+//           allowlist skips noun-phrase tokens that follow "sauce" but are
+//           not CLI verbs (e.g. "sauce installer", "sauce vault").
+//
+//           v0.33.0 S1.2 generalization: scanner was previously hard-scoped
+//           to platform/mechanisms/platform-claude/{commands,skills}. Now
+//           iterates every manifest carrying claude_surface[] so wave 2
+//           blueprint bodies (project / daily / meetings) and any future
+//           addition are covered without further harness edits.
 // ============================================================
+
+// Walk every manifest with claude_surface[] and return the set of materialized
+// command + skill body absolute paths. Mechanisms AND blueprints.
+function walkClaudeSurfaceBodies(workshopRoot, manifestEntries) {
+  const out = [];
+  for (const entry of manifestEntries) {
+    const baseDir = path.join(workshopRoot, entry.path || `blueprints/${entry.name}`);
+    const manifestPath = path.join(baseDir, "manifest.json");
+    if (!fs.existsSync(manifestPath)) continue;
+    let manifest;
+    try { manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")); } catch { continue; }
+    const surface = Array.isArray(manifest.claude_surface) ? manifest.claude_surface : [];
+    for (const item of surface) {
+      if (item.kind !== "command" && item.kind !== "skill") continue;
+      const bodyPath = path.join(baseDir, item.source);
+      if (!fs.existsSync(bodyPath)) continue;
+      out.push({
+        rel: `${entry.name}/${item.source}`,
+        abs: bodyPath,
+        owner: entry.name
+      });
+    }
+  }
+  return out;
+}
+
+// For each body, regex out "sauce <word>", classify (article-prefixed → prose),
+// and return an array of bad-verb messages.
+function scanBodyForBadVerbs(bodies, verbs, documentedNonVerb) {
+  const articleRe = /(?:^|[\s(])(?:a|an|the)\s+$/i;
+  const sauceRe = /\bsauce\s+([a-z][a-z0-9-]*)/g;
+  const bad = [];
+  for (const t of bodies) {
+    const raw = fs.readFileSync(t.abs, "utf8");
+    const stripped = raw.replace(/```[\s\S]*?```/g, "");
+    let m; sauceRe.lastIndex = 0;
+    while ((m = sauceRe.exec(stripped)) !== null) {
+      const verb = m[1];
+      const lookbehind = stripped.substring(Math.max(0, m.index - 12), m.index);
+      if (articleRe.test(lookbehind) || documentedNonVerb.has(verb)) continue;
+      if (!verbs.has(verb)) {
+        bad.push(`${t.rel}: \`sauce ${verb}\` is not a real verb (VERBS=${[...verbs].sort().join(",")})`);
+      }
+    }
+  }
+  return bad;
+}
+
 async function caseCSSUB3VerbsExist() {
   console.log("\n--- Case CS-SUB-3: every `sauce <verb>` in platform-claude bodies is a real CLI verb ---");
 
@@ -439,62 +495,44 @@ async function caseCSSUB3VerbsExist() {
     "vault",     // "a sauce vault" / "a sauce-managed vault" — adjective use
   ]);
 
-  // 2. Walk command + skill bodies under platform-claude.
-  const baseDir = path.join(WORKSHOP, "platform/mechanisms/platform-claude");
-  const targets = [];
-  const cmdDir = path.join(baseDir, "commands");
-  for (const f of fs.readdirSync(cmdDir)) {
-    if (f.endsWith(".md")) targets.push({ rel: `commands/${f}`, abs: path.join(cmdDir, f) });
-  }
-  const skillsDir = path.join(baseDir, "skills");
-  for (const slug of fs.readdirSync(skillsDir)) {
-    const skillFile = path.join(skillsDir, slug, "SKILL.md");
-    if (fs.existsSync(skillFile)) targets.push({ rel: `skills/${slug}/SKILL.md`, abs: skillFile });
-  }
-  assertTrue("CS-SUB-3: at least one command body scanned", targets.some(t => t.rel.startsWith("commands/")));
-  assertTrue("CS-SUB-3: at least one skill body scanned",   targets.some(t => t.rel.startsWith("skills/")));
+  // 2. Walk every mechanism + blueprint with claude_surface[].
+  const platformManifest = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
+  const all = [
+    ...(platformManifest.mechanisms || []).map(m => ({ ...m, path: `platform/mechanisms/${m.name}` })),
+    ...(platformManifest.blueprints || []).map(b => ({ ...b, path: `platform/blueprints/${b.name}` }))
+  ];
+  const targets = walkClaudeSurfaceBodies(WORKSHOP, all);
+  assertTrue("CS-SUB-3: at least one command body scanned across platform", targets.some(t => t.rel.includes("/commands/")));
+  assertTrue("CS-SUB-3: at least one skill body scanned across platform",   targets.some(t => t.rel.includes("/skills/")));
 
-  // 3. For each body, regex out every "sauce <word>" and assert <word> is real.
-  //    To distinguish CLI-invocation occurrences from noun-phrase prose:
-  //    - "a sauce <word>" (preceded by article "a "/"an "/"the ") → prose; skip
-  //    - "<word>" terminated by article-style chars (",", ".", " is", etc.) AND
-  //       NOT followed by a flag/shell-arg → still might be prose; we rely on
-  //       the article-prefix heuristic above to skip those.
-  //    Everything else is treated as an invocation candidate. Fenced code
-  //    blocks are stripped first since they often contain example output.
-  const articleRe = /(?:^|[\s(])(?:a|an|the)\s+$/i;
-  let totalRefs = 0;
-  let prosePhrases = 0;
-  const bad = [];
-  const sauceRe = /\bsauce\s+([a-z][a-z0-9-]*)/g;
-  for (const t of targets) {
-    const raw = fs.readFileSync(t.abs, "utf8");
-    const stripped = raw.replace(/```[\s\S]*?```/g, "");
-    let m;
-    sauceRe.lastIndex = 0;
-    while ((m = sauceRe.exec(stripped)) !== null) {
-      const verb = m[1];
-      // Look at the ~12 chars before the match to see if it's article-prefixed
-      // prose (e.g. "a sauce install" / "the sauce vault"). Article-prefixed
-      // hits are NOT invocations — skip them entirely from the count.
-      const lookbehind = stripped.substring(Math.max(0, m.index - 12), m.index);
-      if (articleRe.test(lookbehind) || DOCUMENTED_NON_VERB.has(verb)) {
-        prosePhrases++;
-        continue;
-      }
-      totalRefs++;
-      if (!verbs.has(verb)) {
-        bad.push(`${t.rel}: \`sauce ${verb}\` is not a real verb (VERBS=${[...verbs].sort().join(",")})`);
-      }
-    }
-  }
-  assertTrue("CS-SUB-3: at least one `sauce <verb>` invocation reference found", totalRefs > 0);
-  assertTrue("CS-SUB-3: at least one article-prefixed prose phrase skipped (heuristic exercised)", prosePhrases >= 0);
+  // 3. Scan + assert no bad verbs.
+  const bad = scanBodyForBadVerbs(targets, verbs, DOCUMENTED_NON_VERB);
   assertTrue(
-    `CS-SUB-3: every invocation-style \`sauce <verb>\` reference resolves to a real verb (${bad.length} bad of ${totalRefs} invocation refs; ${prosePhrases} prose phrases skipped)`,
+    `CS-SUB-3: every invocation-style \`sauce <verb>\` resolves to a real verb (${bad.length} bad of ${targets.length} bodies scanned)`,
     bad.length === 0,
     bad.join("\n          ")
   );
+
+  // CS-SUB-3b: the walker scans bodies OUTSIDE platform-claude too.
+  // Plant a temp blueprint manifest pointing at a body containing
+  // `sauce nopevern` and assert the walker reports it.
+  {
+    const tmpDir = path.join(os.tmpdir(), `sauce-cssub3b-${Date.now()}`);
+    fs.mkdirSync(path.join(tmpDir, "blueprints/sentinel/commands"), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, "blueprints/sentinel/manifest.json"), JSON.stringify({
+      name: "sentinel", version: "0.0.1", kind: "blueprint", module_directory: "sentinel",
+      claude_surface: [{ kind: "command", source: "commands/sentinel.md", dest: ".claude/commands/sentinel.md" }]
+    }));
+    fs.writeFileSync(path.join(tmpDir, "blueprints/sentinel/commands/sentinel.md"),
+      "Run `sauce nopevern --foo` to do the thing.\n");
+    const found = walkClaudeSurfaceBodies(tmpDir, [{ name: "sentinel", path: "blueprints/sentinel" }]);
+    assertTrue("CS-SUB-3b: walker discovered the sentinel body",
+      found.some(f => f.rel.endsWith("sentinel.md")));
+    const badRefs = scanBodyForBadVerbs(found, verbs, DOCUMENTED_NON_VERB);
+    assertTrue("CS-SUB-3b: walker flagged `sauce nopevern` as bad",
+      badRefs.some(b => b.includes("nopevern")));
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 }
 
 // ============================================================
