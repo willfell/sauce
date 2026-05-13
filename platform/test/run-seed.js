@@ -70,5 +70,72 @@ withTempVault((vault) => {
     ok("MD-5 additive skip preserved original body", stillV1);
 });
 
+const declarative = require("../seeder/declarative.js");
+const seeder = require("../seeder/seeder.js");
+
+// LD-1 loadDeclarativeSeed returns null if no seed dir
+withTempVault((root) => {
+    fs.mkdirSync(path.join(root, "platform", "blueprints", "fake"), { recursive: true });
+    const r = declarative.loadDeclarativeSeed(path.join(root, "platform", "blueprints", "fake"));
+    ok("LD-1 loadDeclarativeSeed returns null when missing", r === null);
+});
+
+// LD-2 loadDeclarativeSeed throws on malformed json
+withTempVault((root) => {
+    const bp = path.join(root, "platform", "blueprints", "bad");
+    fs.mkdirSync(path.join(bp, "seed"), { recursive: true });
+    fs.writeFileSync(path.join(bp, "seed", "seed.json"), "not-json");
+    let threw = false;
+    try { declarative.loadDeclarativeSeed(bp); } catch (e) { threw = /malformed/.test(e.message); }
+    ok("LD-2 loadDeclarativeSeed throws on malformed json", threw);
+});
+
+// LD-3 loadDeclarativeSeed returns null when kind != declarative
+withTempVault((root) => {
+    const bp = path.join(root, "platform", "blueprints", "prog");
+    fs.mkdirSync(path.join(bp, "seed"), { recursive: true });
+    fs.writeFileSync(path.join(bp, "seed", "seed.json"), JSON.stringify({ schema_version: 1, kind: "programmatic" }));
+    const r = declarative.loadDeclarativeSeed(bp);
+    ok("LD-3 loadDeclarativeSeed null for non-declarative kind", r === null);
+});
+
+// LD-4 materializeDeclarative writes the declared notes
+withTempVault((root) => {
+    const bp = path.join(root, "platform", "blueprints", "ok");
+    fs.mkdirSync(path.join(bp, "seed"), { recursive: true });
+    fs.mkdirSync(path.join(bp, "templates"), { recursive: true });
+    fs.writeFileSync(path.join(bp, "templates", "Body.md"), "Hello {{slug}}");
+    fs.writeFileSync(path.join(bp, "seed", "seed.json"), JSON.stringify({
+        schema_version: 1, kind: "declarative",
+        notes: [{
+            path: "spice/ok/{{slug}}/Note.md",
+            vars: { slug: "Acme" },
+            frontmatter: { type: "ok" },
+            body_template: "templates/Body.md"
+        }]
+    }));
+    const vault = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-seed-vault-"));
+    try {
+        const parsed = declarative.loadDeclarativeSeed(bp);
+        const ctx = { vaultPath: vault, moduleDir: "ok", stockVars: {} };
+        const r = declarative.materializeDeclarative(parsed, ctx, bp);
+        ok("LD-4a materializeDeclarative created 1", r.created === 1 && r.skipped === 0);
+        const out = fs.readFileSync(path.join(vault, "spice/ok/Acme/Note.md"), "utf8");
+        ok("LD-4b materializeDeclarative path-substituted", fs.existsSync(path.join(vault, "spice/ok/Acme/Note.md")));
+        ok("LD-4c materializeDeclarative body rendered", out.includes("Hello Acme"));
+    } finally {
+        fs.rmSync(vault, { recursive: true, force: true });
+    }
+});
+
+// LD-5 listSeedableBlueprints filters to dirs with seed/
+withTempVault((root) => {
+    fs.mkdirSync(path.join(root, "platform", "blueprints", "with"), { recursive: true });
+    fs.mkdirSync(path.join(root, "platform", "blueprints", "with", "seed"));
+    fs.mkdirSync(path.join(root, "platform", "blueprints", "without"), { recursive: true });
+    const found = seeder.listSeedableBlueprints(root);
+    ok("LD-5 listSeedableBlueprints filters", found.length === 1 && found[0] === "with");
+});
+
 console.log(`\nrun-seed.js: ${pass} pass · ${fail} fail`);
 process.exit(fail === 0 ? 0 : 1);
