@@ -111,6 +111,23 @@ withTempHomeAndVault(({ home, vault }) => {
         fs.existsSync(path.join(coworkDir, "Monthly Hub.md")),
         `path=${path.join(coworkDir, "Monthly Hub.md")}`);
 
+    // v0.43.0: nav-button consolidation. cowork@0.5.0 contributes exactly
+    // 1 global nav-button (cowork-hub); the v0.4.0 cowork-weekly-this +
+    // cowork-monthly-this entries should NOT appear in the registry after
+    // a fresh install.
+    const navRegPath = path.join(vault, "ranch", "nav-buttons-registry.json");
+    let navReg = null;
+    try { navReg = JSON.parse(fs.readFileSync(navRegPath, "utf8")); }
+    catch (e) { /* leave null; assertion below will surface */ }
+    const coworkContribs = (navReg && navReg.contributions && Array.isArray(navReg.contributions.cowork))
+        ? navReg.contributions.cowork : [];
+    ok("smoke-cowork-nav-contributions-length-1",
+        coworkContribs.length === 1,
+        `expected contributions.cowork[].length === 1, got ${coworkContribs.length} (registry path=${navRegPath})`);
+    ok("smoke-cowork-nav-only-cowork-hub",
+        coworkContribs.length === 1 && coworkContribs[0] && coworkContribs[0].id === "cowork-hub",
+        `expected contributions.cowork[0].id === "cowork-hub", got id=${coworkContribs[0] && coworkContribs[0].id}`);
+
     // Step 5: post-conditions on seeded notes
     const expectations = [
         { blueprint: "project", moduleDir: "projects", minNotes: 3 },
