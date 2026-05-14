@@ -322,6 +322,62 @@ function checkTimeframeContracts() {
 }
 
 // -------------------------------------------------------------------------
+// v0.44.0 S9 — UX polish shape asserts
+// -------------------------------------------------------------------------
+
+function assertCoworkV044Shape() {
+  console.log("--- v0.44.0 UX polish shape ---");
+  const cowork = BP;
+  // --- About Cowork.md materialized ---
+  const aboutPath = path.join(cowork, "content/About Cowork.md");
+  assertTrue(fs.existsSync(aboutPath), "v0.44.0: About Cowork.md exists");
+  if (fs.existsSync(aboutPath)) {
+    const about = fs.readFileSync(aboutPath, "utf8");
+    assertContains(about, "type: cowork-about", "v0.44.0: About Cowork frontmatter type");
+    assertContains(about, "What is cowork?", "v0.44.0: About Cowork holds the abstract");
+    assertContains(about, "Orchestrators (5)", "v0.44.0: About Cowork holds orchestrators table");
+    assertContains(about, "Sub-skills (27)", "v0.44.0: About Cowork holds sub-skills table");
+    assertContains(about, "## Getting started", "v0.44.0: About Cowork holds getting-started section");
+  }
+  // --- Cowork.md hub stripped of docs ---
+  const hubPath = path.join(cowork, "content/Cowork.md");
+  const hub = fs.readFileSync(hubPath, "utf8");
+  assertTrue(!hub.includes("What is cowork?"), "v0.44.0: Cowork.md no longer holds 'What is cowork?' abstract");
+  assertTrue(!hub.includes("Orchestrators (5)"), "v0.44.0: Cowork.md no longer holds skills tables");
+  assertTrue(!hub.includes("## Getting started"), "v0.44.0: Cowork.md no longer holds getting-started");
+  assertContains(hub, "CoworkHubNav", "v0.44.0: Cowork.md invokes CoworkHubNav");
+  assertContains(hub, "About Cowork.md", "v0.44.0: Cowork.md links to About Cowork.md");
+  // --- CoworkHubNav helper materialized ---
+  const navPath = path.join(cowork, "helpers/cowork-hub-nav.js");
+  assertTrue(fs.existsSync(navPath), "v0.44.0: cowork-hub-nav.js exists");
+  if (fs.existsSync(navPath)) {
+    const nav = fs.readFileSync(navPath, "utf8");
+    assertContains(nav, "class CoworkHubNav", "v0.44.0: CoworkHubNav class declared");
+    assertContains(nav, "you are here", "v0.44.0: CoworkHubNav has 'you are here' subtitle marker");
+  }
+  // --- Daily/Weekly/Monthly Hub all use CoworkHubNav, dropped text-link row ---
+  for (const name of ["Daily Hub", "Weekly Hub", "Monthly Hub"]) {
+    const body = fs.readFileSync(path.join(cowork, `content/${name}.md`), "utf8");
+    assertContains(body, "CoworkHubNav", `v0.44.0: ${name}.md invokes CoworkHubNav`);
+    assertTrue(!body.includes("◀ Cowork"), `v0.44.0: ${name}.md no longer has '◀ Cowork' text-link row`);
+  }
+  // --- Cards helpers use correct BeaconCards API (fix for v0.44.0) ---
+  for (const f of ["cowork-daily-hub-cards.js", "cowork-weekly-hub-cards.js", "cowork-monthly-hub-cards.js"]) {
+    const body = fs.readFileSync(path.join(cowork, `helpers/${f}`), "utf8");
+    assertTrue(!/\bitems:\s*cardItems/.test(body), `v0.44.0: ${f} no longer uses 'items:' (was wrong BeaconCards key)`);
+    assertTrue(!/\btitleField\b/.test(body), `v0.44.0: ${f} no longer uses 'titleField:'`);
+    assertTrue(!/\bbodyField\b/.test(body), `v0.44.0: ${f} no longer uses 'bodyField:'`);
+    assertTrue(!/\blinkField\b/.test(body), `v0.44.0: ${f} no longer uses 'linkField:'`);
+    assertContains(body, "pages: cardItems", `v0.44.0: ${f} uses 'pages: cardItems'`);
+  }
+  // --- Manifest icon is briefcase ---
+  const m = loadManifest();
+  assertTrue(m.version === "0.6.0", "v0.44.0: cowork manifest version is 0.6.0");
+  const hubNav = (m.nav_buttons || []).find(b => b.id === "cowork-hub");
+  assertTrue(hubNav && hubNav.icon === "briefcase", "v0.44.0: cowork-hub nav-button icon is 'briefcase'");
+}
+
+// -------------------------------------------------------------------------
 // Main
 // -------------------------------------------------------------------------
 
@@ -330,6 +386,7 @@ function checkTimeframeContracts() {
   checkSharedContracts();
   for (const fix of FIXTURES) checkFixture(fix);
   checkTimeframeContracts();
+  assertCoworkV044Shape();
   console.log(`========\nResult: ${passed} passed, ${failed} failed.`);
   process.exit(failed === 0 ? 0 : 1);
 })();

@@ -111,6 +111,12 @@ withTempHomeAndVault(({ home, vault }) => {
         fs.existsSync(path.join(coworkDir, "Monthly Hub.md")),
         `path=${path.join(coworkDir, "Monthly Hub.md")}`);
 
+    // v0.44.0 S9 — About Cowork.md materialized at spice/cowork/ after reinstall
+    // (relocated documentation from the trimmed Cowork.md hub).
+    ok("smoke-cowork-about-exists",
+        fs.existsSync(path.join(coworkDir, "About Cowork.md")),
+        `path=${path.join(coworkDir, "About Cowork.md")}`);
+
     // v0.43.0: nav-button consolidation. cowork@0.5.0 contributes exactly
     // 1 global nav-button (cowork-hub); the v0.4.0 cowork-weekly-this +
     // cowork-monthly-this entries should NOT appear in the registry after

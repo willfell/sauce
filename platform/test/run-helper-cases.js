@@ -4329,6 +4329,43 @@ async function caseCOWORKMonthly6NoTrailWs() {
   assertTrue("COWORK-MONTHLY-6: no trailing whitespace", !/[ \t]+$/m.test(body));
 }
 
+// v0.44.0 S9 — cowork UX polish helper-shape asserts.
+//
+// COWORK-HUBNAV-1: cowork-hub-nav.js lints clean (no trailing whitespace, no
+// tab/space mix on any line — match the per-helper lint case posture).
+async function caseCOWORKHubNav1Lints() {
+  console.log("\n--- Case COWORK-HUBNAV-1: cowork-hub-nav.js lints clean ---");
+  const p = path.join(BLUEPRINTS_DIR, "cowork", "helpers", "cowork-hub-nav.js");
+  assertTrue("COWORK-HUBNAV-1: file exists on disk", fs.existsSync(p));
+  const body = fs.readFileSync(p, "utf8");
+  assertTrue("COWORK-HUBNAV-1: no trailing whitespace", !/[ \t]+$/m.test(body));
+  assertTrue("COWORK-HUBNAV-1: no tab/space mix on any line",
+    !/^( +\t|\t+ )/m.test(body));
+  assertTrue("COWORK-HUBNAV-1: class CoworkHubNav declared", /class\s+CoworkHubNav\b/.test(body));
+}
+
+// COWORK-CARDS-API: 3 cards helpers use the correct BeaconCards API
+// (regex: pages: cardItems, NOT items: cardItems).
+async function caseCOWORKCardsAPIPagesNotItems() {
+  console.log("\n--- Case COWORK-CARDS-API: cowork-*-hub-cards.js use 'pages: cardItems' not 'items: cardItems' ---");
+  for (const f of ["cowork-daily-hub-cards.js", "cowork-weekly-hub-cards.js", "cowork-monthly-hub-cards.js"]) {
+    const body = fs.readFileSync(path.join(BLUEPRINTS_DIR, "cowork", "helpers", f), "utf8");
+    assertTrue(`COWORK-CARDS-API: ${f} uses 'pages: cardItems'`, /pages:\s*cardItems/.test(body));
+    assertTrue(`COWORK-CARDS-API: ${f} no longer uses 'items: cardItems'`, !/\bitems:\s*cardItems/.test(body));
+  }
+}
+
+// COWORK-TF-NO-ARROWS: cowork-timeframe-buttons.js dropped → arrows from
+// the "This Week" / "This Month" labels (v0.44.0 S4).
+async function caseCOWORKTimeframeNoArrows() {
+  console.log("\n--- Case COWORK-TF-NO-ARROWS: cowork-timeframe-buttons.js dropped → arrows ---");
+  const p = path.join(BLUEPRINTS_DIR, "cowork", "helpers", "cowork-timeframe-buttons.js");
+  assertTrue("COWORK-TF-NO-ARROWS: file exists on disk", fs.existsSync(p));
+  const body = fs.readFileSync(p, "utf8");
+  assertTrue("COWORK-TF-NO-ARROWS: body no longer contains 'This Week →'", !body.includes("This Week →"));
+  assertTrue("COWORK-TF-NO-ARROWS: body no longer contains 'This Month →'", !body.includes("This Month →"));
+}
+
 // Carry from v0.18.1 lesson 2 (template-body trailing-whitespace defect class).
 // Walks platform/blueprints/<bp>/{content,templates}/*.md (the two-level layout —
 // content/ holds install-time-materialized notes, templates/ holds Templater
@@ -5664,6 +5701,11 @@ async function caseProj3ValidatorRejectsProjectInvalidStatusEnum() {
   await caseCOWORKMonthly4UsesBeaconCards();
   await caseCOWORKMonthly5SkipsEmbed();
   await caseCOWORKMonthly6NoTrailWs();
+
+  // v0.44.0 S9 — cowork UX polish helper-shape asserts.
+  await caseCOWORKHubNav1Lints();
+  await caseCOWORKCardsAPIPagesNotItems();
+  await caseCOWORKTimeframeNoArrows();
 
   // v0.20.0 docs polish cycle — trailing-whitespace lint.
   await caseTW1TemplatesNoTrailingWhitespace();

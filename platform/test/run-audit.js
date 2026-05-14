@@ -1381,6 +1381,44 @@ async function caseCW12PromptMissingPromptFor() {
   });
 }
 
+// ============================================================
+// v0.44.0 S9 — cowork-about rule_fragment audit cases (CW-13..14).
+// Mirrors the CW-1/2 hub-fragment posture for the NEW About Cowork.md note
+// rule_fragment added in v0.44.0 S7 (cowork manifest@0.6.0).
+// ============================================================
+
+const COWORK_ABOUT_FRAGMENT = [{
+  scope: { path_glob: "spice/cowork/About Cowork.md" },
+  required_frontmatter: { type: { required: true, type: "string", equals: "cowork-about" } },
+  required_tags: [{ tag: "cowork-about" }]
+}];
+
+// CW-13 — audit-cowork-about-valid: conforming About Cowork → 0 violations
+async function caseCW13AboutValid() {
+  await withTempVault(async (dir) => {
+    makeSauceVault(dir, { blueprints: ["cowork"], rules: { cowork: COWORK_ABOUT_FRAGMENT } });
+    writeNote(dir, "spice/cowork/About Cowork.md",
+      { type: "cowork-about", tags: ["cowork-about"] });
+    const { runAudit } = require("../audit/walker");
+    const result = await runAudit({ vaultPath: dir, untrackedCheck: false });
+    const violations = result.violations.filter(v => v.file && v.file.endsWith("About Cowork.md"));
+    assertEqual(violations.length, 0, "audit-cowork-about-valid: conforming About Cowork has zero violations");
+  });
+}
+
+// CW-14 — audit-cowork-about-missing-tag: About Cowork without cowork-about tag → violation
+async function caseCW14AboutMissingTag() {
+  await withTempVault(async (dir) => {
+    makeSauceVault(dir, { blueprints: ["cowork"], rules: { cowork: COWORK_ABOUT_FRAGMENT } });
+    writeNote(dir, "spice/cowork/About Cowork.md",
+      { type: "cowork-about", tags: [] });  // missing cowork-about tag
+    const { runAudit } = require("../audit/walker");
+    const result = await runAudit({ vaultPath: dir, untrackedCheck: false });
+    assertTrue(result.violations.some(v => v.rule === "required_tags.missing" && v.file && v.file.endsWith("About Cowork.md")),
+      "audit-cowork-about-missing-tag: missing cowork-about tag surfaces required_tags.missing violation");
+  });
+}
+
 // Per-case error firewall: a thrown error inside any case body (including
 // the deliberate "Cannot find module ../audit/walker" RED-state throws)
 // counts as exactly one failed sub-assert and does NOT abort the harness.
@@ -1441,6 +1479,9 @@ const selector = process.argv[2] || "all";
     await runCase("CW-10", caseCW10MonthlyBadFilename);
     await runCase("CW-11", caseCW11PromptValid);
     await runCase("CW-12", caseCW12PromptMissingPromptFor);
+    // v0.44.0 S9 — cowork-about rule_fragment audit cases
+    await runCase("CW-13", caseCW13AboutValid);
+    await runCase("CW-14", caseCW14AboutMissingTag);
   }
   console.log(`========\nResult: ${passed} passed, ${failed} failed.`);
   process.exit(failed === 0 ? 0 : 1);

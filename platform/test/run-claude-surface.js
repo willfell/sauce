@@ -542,12 +542,12 @@ async function caseCSSUB3VerbsExist() {
 //           the legacy skills[] + files[] command shape to claude_surface[].
 // ============================================================
 async function caseCSMIG1CoworkAggregation() {
-  console.log("\n--- Case CS-MIG-1: cowork manifest claude_surface[] yields 41 contributions (v0.4.0) ---");
+  console.log("\n--- Case CS-MIG-1: cowork manifest claude_surface[] yields 42 contributions (v0.6.0) ---");
   const bpManifestPath = path.join(WORKSHOP, "platform/blueprints/cowork/manifest.json");
   assertTrue("CS-MIG-1: cowork manifest.json exists", fs.existsSync(bpManifestPath));
   const bpMan = JSON.parse(fs.readFileSync(bpManifestPath, "utf8"));
 
-  assertEq("CS-MIG-1: cowork version is 0.5.0", bpMan.version, "0.5.0");
+  assertEq("CS-MIG-1: cowork version is 0.6.0", bpMan.version, "0.6.0");
   assertTrue("CS-MIG-1: cowork manifest no longer has skills[] field", !("skills" in bpMan));
   assertTrue("CS-MIG-1: cowork manifest has claude_surface[]", Array.isArray(bpMan.claude_surface));
 
@@ -555,15 +555,15 @@ async function caseCSMIG1CoworkAggregation() {
   perItemManifest.set("cowork", bpMan);
   const subscription = {
     mechanisms: [],
-    blueprints: [{ name: "cowork", version: "0.5.0" }],
+    blueprints: [{ name: "cowork", version: "0.6.0" }],
   };
   const history = [];
   const out = await aggregateClaudeSurface(perItemManifest, subscription, history, mkGit(), { workshop_version: "0.0.0-test" });
 
   assertTrue("CS-MIG-1: cowork in registry.contributions",
     Array.isArray(out.registry.contributions["cowork"]));
-  assertEq("CS-MIG-1: cowork has 41 contributions (33 skill + 3 command + 5 claude_md_row)",
-    out.registry.contributions["cowork"].length, 41);
+  assertEq("CS-MIG-1: cowork has 42 contributions (33 skill + 3 command + 6 claude_md_row)",
+    out.registry.contributions["cowork"].length, 42);
 
   const skillEntries = out.materializeList.filter((e) => e.owner === "cowork" && e.kind === "skill");
   const cmdEntries = out.materializeList.filter((e) => e.owner === "cowork" && e.kind === "command");
@@ -576,14 +576,20 @@ async function caseCSMIG1CoworkAggregation() {
       e.dest.startsWith(".claude/skills/cowork/"));
   }
 
-  // claude_md_row resolver entries — v0.4.0 ships 5 (Cowork + Daily Hub + Weekly Hub + Monthly Hub + Prompts).
+  // claude_md_row resolver entries — v0.6.0 ships 6 (v0.4.0's 5 Cowork + Daily Hub + Weekly Hub + Monthly Hub + Prompts, plus v0.44.0's new Cowork About).
   const coworkRows = out.rows.resolvers.filter((r) => r.owner === "cowork");
-  assertEq("CS-MIG-1: exactly 5 resolver rows owned by cowork", coworkRows.length, 5);
+  assertEq("CS-MIG-1: exactly 6 resolver rows owned by cowork", coworkRows.length, 6);
   const coworkHubRow = coworkRows.find((r) => r.topic === "Cowork");
   assertTrue("CS-MIG-1: Cowork resolver row present", !!coworkHubRow);
   assertEq("CS-MIG-1: Cowork resolver command is '/cowork'", coworkHubRow && coworkHubRow.command, "/cowork");
   assertEq("CS-MIG-1: Cowork resolver path substituted to spice/cowork",
     coworkHubRow && coworkHubRow.path, "spice/cowork");
+
+  // v0.44.0 S9 — NEW Cowork About resolver row.
+  const coworkAboutRow = coworkRows.find((r) => r.topic === "Cowork About");
+  assertTrue("CS-MIG-1: 'Cowork About' resolver row present (v0.44.0)", !!coworkAboutRow);
+  assertEq("CS-MIG-1: 'Cowork About' resolver path substituted to spice/cowork/About Cowork.md",
+    coworkAboutRow && coworkAboutRow.path, "spice/cowork/About Cowork.md");
 }
 
 // ============================================================
