@@ -6,6 +6,12 @@ tags: [cowork-hub]
 # Cowork
 
 ```dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+```
+
+---
+
+```dataviewjs
 await dv.view("ranch/views/customjs-guard", { class: "CoworkHubNav" });
 ```
 

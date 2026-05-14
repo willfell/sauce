@@ -4,6 +4,12 @@ tags: [cowork-hub, weekly-hub]
 ---
 
 ```dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+```
+
+---
+
+```dataviewjs
 await dv.view("ranch/views/customjs-guard", { class: "CoworkHubNav" });
 ```
 
