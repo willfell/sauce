@@ -50,21 +50,16 @@ class CoworkWeeklyHubCards {
 
             if (typeof window.customJS !== "undefined" && window.customJS.BeaconCards) {
                 await window.customJS.BeaconCards.render(dv, {
-                    items: cardItems,
-                    titleField: p => p.file.name,
-                    subtitleField: p => p._subtitle,
-                    bodyField: p => p._snippet,
-                    linkField: p => p.file.path,
+                    pages: cardItems,
+                    title: p => p.file.name,
+                    subtitle: p => p._subtitle,
+                    target: p => p.file.path,
                 });
             } else {
                 for (const item of cardItems) {
                     dv.paragraph(`- [[${item.file.path}|${item.file.name}]] — ${item._subtitle}`);
                 }
             }
-        }
-
-        if (sortedYears.length === 0) {
-            dv.paragraph("> [!info]+ No weekly notes yet · Click **This Week** in the nav row to create one.");
         }
     }
 }
