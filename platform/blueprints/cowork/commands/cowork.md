@@ -6,6 +6,16 @@ description: "Engagement-aware cowork bootstrap interview. Drives the 25-step `c
 
 Drives the v0.31.0+ cowork bootstrap-vault skill against the current vault.
 
+## Timeframes
+
+The cowork blueprint owns three timeframe sub-hubs under `spice/cowork/`:
+
+- `[[Daily Hub]]` — card-listed index of `spice/daily/**/*.md` notes (read-only view; daily blueprint owns the writes).
+- `[[Weekly Hub]]` — card-listed index of `spice/cowork/weekly/**/*.md`. Use `/weekly` to open this week's note; `/weekly hub` to open this index.
+- `[[Monthly Hub]]` — card-listed index of `spice/cowork/monthly/**/*.md`. Use `/monthly` to open this month's note; `/monthly hub` to open this index.
+
+The `cowork:scaffold-timeframes` skill creates this-week's + this-month's notes on demand. `cowork:bootstrap-vault` calls it as a final step.
+
 ## What this does
 
 Invokes the canonical `cowork:bootstrap-vault` SKILL.md materialized at `<vault>/.claude/skills/cowork/bootstrap-vault/SKILL.md`. The skill is the 25-step engagement-aware interview (per `pantry/Docs/plans/2026-05-11-v0.31.0-bootstrap-vault-skill-spec.md`):
