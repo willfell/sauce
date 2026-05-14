@@ -2,8 +2,8 @@
  * CoworkTimeframeButtons (CustomJS)
  * Renders the inline Timeframes block on spice/cowork/Cowork.md.
  *
- * Five cards in one row (Candidate A from the v0.43.0 design):
- *   Daily Hub | Weekly Hub | This Week | Monthly Hub | This Month
+ * Six cards in one row (v0.45.0 expansion adds Today):
+ *   Daily Hub | Today | Weekly Hub | This Week | Monthly Hub | This Month
  *
  * Behaviour:
  *   - 3 navigation cards default through BeaconCards' openLinkText to the hub.
@@ -22,9 +22,12 @@ class CoworkTimeframeButtons {
     const year = now.format("YYYY");
     const isoWeekLabel = now.format("YYYY-[W]ww");
     const monthLabel   = now.format("YYYY-MM");
+    const dayLabel     = now.format("YYYY-MM-DD");
+    const monthFolder  = now.format("YYYY/MM-MMMM");
 
     const items = [
       { _kind: "openLink",      file: { name: "Daily Hub",    path: "spice/cowork/Daily Hub.md"   }, _subtitle: "Card index of dailies" },
+      { _kind: "createDaily",   file: { name: "Today",       path: `spice/cowork/daily/${monthFolder}/${dayLabel}.md` }, _subtitle: `Open or create ${dayLabel}.md`, _templateSource: "ranch/templates/Daily Note.md", _folder: `spice/cowork/daily/${monthFolder}`, _filenameNoExt: dayLabel },
       { _kind: "openLink",      file: { name: "Weekly Hub",   path: "spice/cowork/Weekly Hub.md"  }, _subtitle: "Card index of weekly notes" },
       { _kind: "createWeekly",  file: { name: "This Week",  path: `spice/cowork/weekly/${year}/${isoWeekLabel}.md` }, _subtitle: `Open or create ${isoWeekLabel}.md`, _templateSource: "ranch/templates/Weekly Note.md", _folder: `spice/cowork/weekly/${year}`, _filenameNoExt: isoWeekLabel },
       { _kind: "openLink",      file: { name: "Monthly Hub",  path: "spice/cowork/Monthly Hub.md" }, _subtitle: "Card index of monthly notes" },
