@@ -1,19 +1,39 @@
+<%*
+const wk = tp.date.now("YYYY-[W]ww", 0, tp.file.title, "YYYY-[W]ww");
+const m = tp.file.title.match(/^(\d{4})-W(\d{2})$/);
+const year = m ? m[1] : window.moment().format("YYYY");
+const weekNum = m ? m[2] : window.moment().format("ww");
+const isoMoment = window.moment(`${year}-W${weekNum}-1`, "YYYY-[W]ww-E");
+const weekStart = isoMoment.clone().startOf("isoWeek");
+const weekEnd   = isoMoment.clone().endOf("isoWeek");
+const startStr  = weekStart.format("MMM D");
+const endStr    = weekEnd.format("MMM D");
+const friendly  = `Week ${weekNum} · ${startStr}–${endStr}, ${year}`;
+const created   = window.moment().format("YYYY-MM-DDTHH:mm:ss");
+-%>
 ---
-created: <% tp.file.creation_date("YYYY-MM-DD HH:mm") %>
 type: cowork-weekly
-tags: ["{{vault_identity_tag}}", weekly]
-week_label: <% moment(tp.file.title, "YYYY-[W]ww").format("YYYY-[W]ww") %>
-week_start: <% moment(tp.file.title, "YYYY-[W]ww").startOf("isoWeek").format("YYYY-MM-DD") %>
-week_end: <% moment(tp.file.title, "YYYY-[W]ww").endOf("isoWeek").format("YYYY-MM-DD") %>
+tags: [cowork-weekly, weekly]
+week_label: "<% friendly %>"
+week_iso: "<% year %>-W<% weekNum %>"
+week_start: "<% weekStart.format("YYYY-MM-DD") %>"
+week_end: "<% weekEnd.format("YYYY-MM-DD") %>"
+created: "<% created %>"
 ---
-
-> [[Cowork|◀ Cowork]] · [[Daily Hub]] · [[Weekly Hub]] · [[Monthly Hub]]
-
-# <% tp.file.title %>
 
 ```dataviewjs
-await dv.view("{{views_path}}/customjs-guard", { class: "SpaceNavButtons" });
+await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 ```
+
+---
+
+```dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "CoworkHubNav" });
+```
+
+---
+
+# <% friendly %>
 
 <!-- COWORK_CALLOUTS -->
 

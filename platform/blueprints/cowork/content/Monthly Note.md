@@ -1,19 +1,37 @@
+<%*
+const m = tp.file.title.match(/^(\d{4})-(\d{2})$/);
+const year = m ? m[1] : window.moment().format("YYYY");
+const month = m ? m[2] : window.moment().format("MM");
+const mo = window.moment(`${year}-${month}-01`, "YYYY-MM-DD");
+const monthName = mo.format("MMMM");
+const friendly = `${monthName} ${year}`;
+const monthStart = mo.clone().startOf("month").format("YYYY-MM-DD");
+const monthEnd = mo.clone().endOf("month").format("YYYY-MM-DD");
+const created = window.moment().format("YYYY-MM-DDTHH:mm:ss");
+-%>
 ---
-created: <% tp.file.creation_date("YYYY-MM-DD HH:mm") %>
 type: cowork-monthly
-tags: ["{{vault_identity_tag}}", monthly]
-month_label: <% moment(tp.file.title, "YYYY-MM").format("YYYY-MM") %>
-month_start: <% moment(tp.file.title, "YYYY-MM").startOf("month").format("YYYY-MM-DD") %>
-month_end: <% moment(tp.file.title, "YYYY-MM").endOf("month").format("YYYY-MM-DD") %>
+tags: [cowork-monthly, monthly]
+month_label: "<% friendly %>"
+month_iso: "<% year %>-<% month %>"
+month_start: "<% monthStart %>"
+month_end: "<% monthEnd %>"
+created: "<% created %>"
 ---
-
-> [[Cowork|◀ Cowork]] · [[Daily Hub]] · [[Weekly Hub]] · [[Monthly Hub]]
-
-# <% tp.file.title %>
 
 ```dataviewjs
-await dv.view("{{views_path}}/customjs-guard", { class: "SpaceNavButtons" });
+await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 ```
+
+---
+
+```dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "CoworkHubNav" });
+```
+
+---
+
+# <% friendly %>
 
 <!-- COWORK_CALLOUTS -->
 
