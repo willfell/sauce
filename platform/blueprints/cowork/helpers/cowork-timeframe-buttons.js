@@ -3,7 +3,7 @@
  * Renders the inline Timeframes block on spice/cowork/Cowork.md.
  *
  * Five cards in one row (Candidate A from the v0.43.0 design):
- *   Daily Hub | Weekly Hub | This Week → | Monthly Hub | This Month →
+ *   Daily Hub | Weekly Hub | This Week | Monthly Hub | This Month
  *
  * Behaviour:
  *   - 3 navigation cards default through BeaconCards' openLinkText to the hub.
@@ -26,9 +26,9 @@ class CoworkTimeframeButtons {
     const items = [
       { _kind: "openLink",      file: { name: "Daily Hub",    path: "spice/cowork/Daily Hub.md"   }, _subtitle: "Card index of dailies" },
       { _kind: "openLink",      file: { name: "Weekly Hub",   path: "spice/cowork/Weekly Hub.md"  }, _subtitle: "Card index of weekly notes" },
-      { _kind: "createWeekly",  file: { name: "This Week →",  path: `spice/cowork/weekly/${year}/${isoWeekLabel}.md` }, _subtitle: `Open or create ${isoWeekLabel}.md`, _templateSource: "ranch/templates/Weekly Note.md", _folder: `spice/cowork/weekly/${year}`, _filenameNoExt: isoWeekLabel },
+      { _kind: "createWeekly",  file: { name: "This Week",  path: `spice/cowork/weekly/${year}/${isoWeekLabel}.md` }, _subtitle: `Open or create ${isoWeekLabel}.md`, _templateSource: "ranch/templates/Weekly Note.md", _folder: `spice/cowork/weekly/${year}`, _filenameNoExt: isoWeekLabel },
       { _kind: "openLink",      file: { name: "Monthly Hub",  path: "spice/cowork/Monthly Hub.md" }, _subtitle: "Card index of monthly notes" },
-      { _kind: "createMonthly", file: { name: "This Month →", path: `spice/cowork/monthly/${year}/${monthLabel}.md` }, _subtitle: `Open or create ${monthLabel}.md`, _templateSource: "ranch/templates/Monthly Note.md", _folder: `spice/cowork/monthly/${year}`, _filenameNoExt: monthLabel }
+      { _kind: "createMonthly", file: { name: "This Month", path: `spice/cowork/monthly/${year}/${monthLabel}.md` }, _subtitle: `Open or create ${monthLabel}.md`, _templateSource: "ranch/templates/Monthly Note.md", _folder: `spice/cowork/monthly/${year}`, _filenameNoExt: monthLabel }
     ];
 
     if (typeof window.customJS === "undefined" || !window.customJS.BeaconCards) {
