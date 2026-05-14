@@ -281,6 +281,44 @@ function checkTimeframeContracts() {
   assertTrue(!!scaffoldSkill, "T6: claude_surface[] declares scaffold-timeframes skill");
   const scaffoldSrc = path.join(BP, "skills/skills/scaffold-timeframes/SKILL.md");
   assertTrue(fs.existsSync(scaffoldSrc), "T6: scaffold-timeframes SKILL.md source file exists");
+
+  // T7 — v0.43.0: CoworkTimeframeButtons helper file exists + manifest registers it.
+  const tfHelperSrc = path.join(BP, "helpers/cowork-timeframe-buttons.js");
+  assertTrue(fs.existsSync(tfHelperSrc), "T7: helpers/cowork-timeframe-buttons.js source exists");
+  const tfHelperBody = fs.existsSync(tfHelperSrc) ? fs.readFileSync(tfHelperSrc, "utf8") : "";
+  assertTrue(/class\s+CoworkTimeframeButtons\b/.test(tfHelperBody),
+    "T7: helper body declares class CoworkTimeframeButtons");
+  assertTrue(/_dispatch\s*\(/.test(tfHelperBody),
+    "T7: helper body has _dispatch method");
+  assertTrue(/create_new_note_from_template/.test(tfHelperBody),
+    "T7: helper body invokes Templater.create_new_note_from_template (runTemplaterTemplate mirror)");
+  const tfHelperEntry = filesArr.find(f => f.source === "helpers/cowork-timeframe-buttons.js");
+  assertTrue(!!tfHelperEntry && tfHelperEntry.dest === "{{scripts_path}}/cowork/cowork-timeframe-buttons.js",
+    "T7: manifest files[] maps helper to {{scripts_path}}/cowork/cowork-timeframe-buttons.js");
+  const cjsClasses = manifest.customjs_classes || [];
+  assertTrue(cjsClasses.includes("CoworkTimeframeButtons"),
+    "T7: manifest customjs_classes[] includes CoworkTimeframeButtons");
+
+  // T8 — v0.43.0: Cowork.md Timeframes section delegates via customjs-guard
+  // to CoworkTimeframeButtons (replaces the v0.42.0 inline 3-card block).
+  const coworkMdSrc = path.join(BP, "content/Cowork.md");
+  const coworkMdBody = fs.existsSync(coworkMdSrc) ? fs.readFileSync(coworkMdSrc, "utf8") : "";
+  assertTrue(/^##\s+Timeframes\s*$/m.test(coworkMdBody),
+    "T8: Cowork.md retains the ## Timeframes heading");
+  assertTrue(/customjs-guard.*class:\s*"CoworkTimeframeButtons"/.test(coworkMdBody),
+    "T8: Cowork.md Timeframes section delegates to CoworkTimeframeButtons via customjs-guard");
+  assertTrue(!/items:\s*cardItems/.test(coworkMdBody) && !/titleField/.test(coworkMdBody) && !/subtitleField/.test(coworkMdBody) && !/linkField/.test(coworkMdBody),
+    "T8: Cowork.md no longer contains the v0.42.0 broken BeaconCards call (items/titleField/subtitleField/linkField)");
+
+  // T9 — v0.43.0: nav_buttons[] retains only cowork-hub (the 2 timeframe-creation
+  // buttons moved inside Cowork.md as cards in T2).
+  const navBtns = manifest.nav_buttons || [];
+  assertTrue(navBtns.length === 1,
+    `T9: manifest.nav_buttons[].length === 1 (got ${navBtns.length})`);
+  assertTrue(navBtns[0] && navBtns[0].id === "cowork-hub",
+    "T9: nav_buttons[0].id === 'cowork-hub'");
+  assertTrue(!navBtns.some(b => b.id === "cowork-weekly-this" || b.id === "cowork-monthly-this"),
+    "T9: nav_buttons[] no longer contains cowork-weekly-this or cowork-monthly-this");
 }
 
 // -------------------------------------------------------------------------
