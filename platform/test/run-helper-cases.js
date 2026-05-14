@@ -4133,6 +4133,202 @@ async function caseSHCS7ScratchNewButtonHelper() {
     /customJS\.AccentButton\.render/.test(body));
 }
 
+// ============================================================
+// v0.42.0 S9 — CoworkDailyHubCards / CoworkWeeklyHubCards / CoworkMonthlyHubCards
+// helper structural checks. 6 sub-asserts × 3 helpers = 18 sub-asserts.
+// Mirrors SHC-S5/S6 pattern (from-disk static analysis) plus a scaffolded
+// install to verify materialization at ranch/scripts/cowork/<name>.js.
+// ============================================================
+
+async function caseCOWORKDaily1Materialized() {
+  console.log("\n--- Case COWORK-DAILY-1: cowork-daily-hub-cards.js materializes at ranch/scripts/cowork/ ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-cowork-daily1-"));
+  try {
+    await scaffoldBlueprintVault(scratch, [
+      {
+        name: "cowork",
+        version: "0.4.0",
+        manifest: {
+          name: "cowork",
+          version: "0.4.0",
+          kind: "blueprint",
+          module_directory: "cowork",
+          files: [
+            { source: "helpers/cowork-daily-hub-cards.js", dest: "{{scripts_path}}/cowork/cowork-daily-hub-cards.js" }
+          ]
+        },
+        sourceFiles: [
+          { relPath: "helpers/cowork-daily-hub-cards.js", body: fs.readFileSync(path.join(BLUEPRINTS_DIR, "cowork", "helpers", "cowork-daily-hub-cards.js"), "utf8") }
+        ]
+      }
+    ]);
+    const result = await runHarness(scratch);
+    assertTrue("COWORK-DAILY-1: platform-installed.json was written", result !== null);
+    assertTrue("COWORK-DAILY-1: cowork-daily-hub-cards.js materialized at ranch/scripts/cowork/",
+      fs.existsSync(path.join(scratch, "ranch/scripts/cowork/cowork-daily-hub-cards.js")));
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseCOWORKDaily2ClassDeclared() {
+  console.log("\n--- Case COWORK-DAILY-2: cowork-daily-hub-cards.js declares class CoworkDailyHubCards ---");
+  const p = path.join(BLUEPRINTS_DIR, "cowork", "helpers", "cowork-daily-hub-cards.js");
+  assertTrue("COWORK-DAILY-2: file exists on disk", fs.existsSync(p));
+  const body = fs.readFileSync(p, "utf8");
+  assertTrue("COWORK-DAILY-2: class CoworkDailyHubCards declared", /^class\s+CoworkDailyHubCards\b/m.test(body));
+}
+
+async function caseCOWORKDaily3HasRender() {
+  console.log("\n--- Case COWORK-DAILY-3: cowork-daily-hub-cards.js has async render( method ---");
+  const body = fs.readFileSync(path.join(BLUEPRINTS_DIR, "cowork", "helpers", "cowork-daily-hub-cards.js"), "utf8");
+  assertTrue("COWORK-DAILY-3: async render( method present", /async\s+render\s*\(/.test(body));
+}
+
+async function caseCOWORKDaily4UsesBeaconCards() {
+  console.log("\n--- Case COWORK-DAILY-4: cowork-daily-hub-cards.js uses BeaconCards ---");
+  const body = fs.readFileSync(path.join(BLUEPRINTS_DIR, "cowork", "helpers", "cowork-daily-hub-cards.js"), "utf8");
+  assertTrue("COWORK-DAILY-4: BeaconCards referenced", body.includes("BeaconCards"));
+}
+
+async function caseCOWORKDaily5SkipsEmbed() {
+  console.log("\n--- Case COWORK-DAILY-5: cowork-daily-hub-cards.js skips markdown-embed context ---");
+  const body = fs.readFileSync(path.join(BLUEPRINTS_DIR, "cowork", "helpers", "cowork-daily-hub-cards.js"), "utf8");
+  assertTrue("COWORK-DAILY-5: markdown-embed guard present", body.includes("markdown-embed"));
+}
+
+async function caseCOWORKDaily6NoTrailWs() {
+  console.log("\n--- Case COWORK-DAILY-6: cowork-daily-hub-cards.js has no trailing whitespace ---");
+  const body = fs.readFileSync(path.join(BLUEPRINTS_DIR, "cowork", "helpers", "cowork-daily-hub-cards.js"), "utf8");
+  assertTrue("COWORK-DAILY-6: no trailing whitespace", !/[ \t]+$/m.test(body));
+}
+
+async function caseCOWORKWeekly1Materialized() {
+  console.log("\n--- Case COWORK-WEEKLY-1: cowork-weekly-hub-cards.js materializes at ranch/scripts/cowork/ ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-cowork-weekly1-"));
+  try {
+    await scaffoldBlueprintVault(scratch, [
+      {
+        name: "cowork",
+        version: "0.4.0",
+        manifest: {
+          name: "cowork",
+          version: "0.4.0",
+          kind: "blueprint",
+          module_directory: "cowork",
+          files: [
+            { source: "helpers/cowork-weekly-hub-cards.js", dest: "{{scripts_path}}/cowork/cowork-weekly-hub-cards.js" }
+          ]
+        },
+        sourceFiles: [
+          { relPath: "helpers/cowork-weekly-hub-cards.js", body: fs.readFileSync(path.join(BLUEPRINTS_DIR, "cowork", "helpers", "cowork-weekly-hub-cards.js"), "utf8") }
+        ]
+      }
+    ]);
+    const result = await runHarness(scratch);
+    assertTrue("COWORK-WEEKLY-1: platform-installed.json was written", result !== null);
+    assertTrue("COWORK-WEEKLY-1: cowork-weekly-hub-cards.js materialized at ranch/scripts/cowork/",
+      fs.existsSync(path.join(scratch, "ranch/scripts/cowork/cowork-weekly-hub-cards.js")));
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseCOWORKWeekly2ClassDeclared() {
+  console.log("\n--- Case COWORK-WEEKLY-2: cowork-weekly-hub-cards.js declares class CoworkWeeklyHubCards ---");
+  const p = path.join(BLUEPRINTS_DIR, "cowork", "helpers", "cowork-weekly-hub-cards.js");
+  assertTrue("COWORK-WEEKLY-2: file exists on disk", fs.existsSync(p));
+  const body = fs.readFileSync(p, "utf8");
+  assertTrue("COWORK-WEEKLY-2: class CoworkWeeklyHubCards declared", /^class\s+CoworkWeeklyHubCards\b/m.test(body));
+}
+
+async function caseCOWORKWeekly3HasRender() {
+  console.log("\n--- Case COWORK-WEEKLY-3: cowork-weekly-hub-cards.js has async render( method ---");
+  const body = fs.readFileSync(path.join(BLUEPRINTS_DIR, "cowork", "helpers", "cowork-weekly-hub-cards.js"), "utf8");
+  assertTrue("COWORK-WEEKLY-3: async render( method present", /async\s+render\s*\(/.test(body));
+}
+
+async function caseCOWORKWeekly4UsesBeaconCards() {
+  console.log("\n--- Case COWORK-WEEKLY-4: cowork-weekly-hub-cards.js uses BeaconCards ---");
+  const body = fs.readFileSync(path.join(BLUEPRINTS_DIR, "cowork", "helpers", "cowork-weekly-hub-cards.js"), "utf8");
+  assertTrue("COWORK-WEEKLY-4: BeaconCards referenced", body.includes("BeaconCards"));
+}
+
+async function caseCOWORKWeekly5SkipsEmbed() {
+  console.log("\n--- Case COWORK-WEEKLY-5: cowork-weekly-hub-cards.js skips markdown-embed context ---");
+  const body = fs.readFileSync(path.join(BLUEPRINTS_DIR, "cowork", "helpers", "cowork-weekly-hub-cards.js"), "utf8");
+  assertTrue("COWORK-WEEKLY-5: markdown-embed guard present", body.includes("markdown-embed"));
+}
+
+async function caseCOWORKWeekly6NoTrailWs() {
+  console.log("\n--- Case COWORK-WEEKLY-6: cowork-weekly-hub-cards.js has no trailing whitespace ---");
+  const body = fs.readFileSync(path.join(BLUEPRINTS_DIR, "cowork", "helpers", "cowork-weekly-hub-cards.js"), "utf8");
+  assertTrue("COWORK-WEEKLY-6: no trailing whitespace", !/[ \t]+$/m.test(body));
+}
+
+async function caseCOWORKMonthly1Materialized() {
+  console.log("\n--- Case COWORK-MONTHLY-1: cowork-monthly-hub-cards.js materializes at ranch/scripts/cowork/ ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-cowork-monthly1-"));
+  try {
+    await scaffoldBlueprintVault(scratch, [
+      {
+        name: "cowork",
+        version: "0.4.0",
+        manifest: {
+          name: "cowork",
+          version: "0.4.0",
+          kind: "blueprint",
+          module_directory: "cowork",
+          files: [
+            { source: "helpers/cowork-monthly-hub-cards.js", dest: "{{scripts_path}}/cowork/cowork-monthly-hub-cards.js" }
+          ]
+        },
+        sourceFiles: [
+          { relPath: "helpers/cowork-monthly-hub-cards.js", body: fs.readFileSync(path.join(BLUEPRINTS_DIR, "cowork", "helpers", "cowork-monthly-hub-cards.js"), "utf8") }
+        ]
+      }
+    ]);
+    const result = await runHarness(scratch);
+    assertTrue("COWORK-MONTHLY-1: platform-installed.json was written", result !== null);
+    assertTrue("COWORK-MONTHLY-1: cowork-monthly-hub-cards.js materialized at ranch/scripts/cowork/",
+      fs.existsSync(path.join(scratch, "ranch/scripts/cowork/cowork-monthly-hub-cards.js")));
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+async function caseCOWORKMonthly2ClassDeclared() {
+  console.log("\n--- Case COWORK-MONTHLY-2: cowork-monthly-hub-cards.js declares class CoworkMonthlyHubCards ---");
+  const p = path.join(BLUEPRINTS_DIR, "cowork", "helpers", "cowork-monthly-hub-cards.js");
+  assertTrue("COWORK-MONTHLY-2: file exists on disk", fs.existsSync(p));
+  const body = fs.readFileSync(p, "utf8");
+  assertTrue("COWORK-MONTHLY-2: class CoworkMonthlyHubCards declared", /^class\s+CoworkMonthlyHubCards\b/m.test(body));
+}
+
+async function caseCOWORKMonthly3HasRender() {
+  console.log("\n--- Case COWORK-MONTHLY-3: cowork-monthly-hub-cards.js has async render( method ---");
+  const body = fs.readFileSync(path.join(BLUEPRINTS_DIR, "cowork", "helpers", "cowork-monthly-hub-cards.js"), "utf8");
+  assertTrue("COWORK-MONTHLY-3: async render( method present", /async\s+render\s*\(/.test(body));
+}
+
+async function caseCOWORKMonthly4UsesBeaconCards() {
+  console.log("\n--- Case COWORK-MONTHLY-4: cowork-monthly-hub-cards.js uses BeaconCards ---");
+  const body = fs.readFileSync(path.join(BLUEPRINTS_DIR, "cowork", "helpers", "cowork-monthly-hub-cards.js"), "utf8");
+  assertTrue("COWORK-MONTHLY-4: BeaconCards referenced", body.includes("BeaconCards"));
+}
+
+async function caseCOWORKMonthly5SkipsEmbed() {
+  console.log("\n--- Case COWORK-MONTHLY-5: cowork-monthly-hub-cards.js skips markdown-embed context ---");
+  const body = fs.readFileSync(path.join(BLUEPRINTS_DIR, "cowork", "helpers", "cowork-monthly-hub-cards.js"), "utf8");
+  assertTrue("COWORK-MONTHLY-5: markdown-embed guard present", body.includes("markdown-embed"));
+}
+
+async function caseCOWORKMonthly6NoTrailWs() {
+  console.log("\n--- Case COWORK-MONTHLY-6: cowork-monthly-hub-cards.js has no trailing whitespace ---");
+  const body = fs.readFileSync(path.join(BLUEPRINTS_DIR, "cowork", "helpers", "cowork-monthly-hub-cards.js"), "utf8");
+  assertTrue("COWORK-MONTHLY-6: no trailing whitespace", !/[ \t]+$/m.test(body));
+}
+
 // Carry from v0.18.1 lesson 2 (template-body trailing-whitespace defect class).
 // Walks platform/blueprints/<bp>/{content,templates}/*.md (the two-level layout —
 // content/ holds install-time-materialized notes, templates/ holds Templater
@@ -5448,6 +5644,26 @@ async function caseProj3ValidatorRejectsProjectInvalidStatusEnum() {
   await caseSHCS5ScratchHubCardsHelper();
   await caseSHCS6ScratchDayListHelper();
   await caseSHCS7ScratchNewButtonHelper();
+
+  // v0.42.0 S9 — cowork@0.4.0 helper structural/materialization checks (18 sub-asserts).
+  await caseCOWORKDaily1Materialized();
+  await caseCOWORKDaily2ClassDeclared();
+  await caseCOWORKDaily3HasRender();
+  await caseCOWORKDaily4UsesBeaconCards();
+  await caseCOWORKDaily5SkipsEmbed();
+  await caseCOWORKDaily6NoTrailWs();
+  await caseCOWORKWeekly1Materialized();
+  await caseCOWORKWeekly2ClassDeclared();
+  await caseCOWORKWeekly3HasRender();
+  await caseCOWORKWeekly4UsesBeaconCards();
+  await caseCOWORKWeekly5SkipsEmbed();
+  await caseCOWORKWeekly6NoTrailWs();
+  await caseCOWORKMonthly1Materialized();
+  await caseCOWORKMonthly2ClassDeclared();
+  await caseCOWORKMonthly3HasRender();
+  await caseCOWORKMonthly4UsesBeaconCards();
+  await caseCOWORKMonthly5SkipsEmbed();
+  await caseCOWORKMonthly6NoTrailWs();
 
   // v0.20.0 docs polish cycle — trailing-whitespace lint.
   await caseTW1TemplatesNoTrailingWhitespace();

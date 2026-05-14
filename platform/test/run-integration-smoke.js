@@ -80,6 +80,37 @@ withTempHomeAndVault(({ home, vault }) => {
         ok("smoke-8 registry not created (--no-register opt-out)", true);
     }
 
+    // Step 4b: v0.42.0 S9 — cowork@0.4.0 hub files. The bootstrap uses
+    // --mechanisms=all but a default non-interactive bootstrap subscribes
+    // blueprints via a second targeted install that only subscribes cowork.
+    // We run a reinstall with cowork subscription to materialize hub files.
+    // Since the install path for a pre-configured vault (config+sub already
+    // written by bootstrap) re-reads subscription from disk, we patch the
+    // subscription to add cowork + its dependency (daily), then reinstall.
+    const subPath = path.join(vault, "ranch", "platform-subscription.json");
+    const sub = JSON.parse(fs.readFileSync(subPath, "utf8"));
+    const wsmf = JSON.parse(fs.readFileSync(path.join(path.resolve(__dirname, "../.."), "platform/manifest.json"), "utf8"));
+    const dailyEntry = wsmf.blueprints.find(b => b.name === "daily");
+    const coworkEntry = wsmf.blueprints.find(b => b.name === "cowork");
+    if (dailyEntry && !sub.blueprints.find(b => b.name === "daily")) {
+        sub.blueprints.push({ name: dailyEntry.name, version: dailyEntry.version });
+    }
+    if (coworkEntry && !sub.blueprints.find(b => b.name === "cowork")) {
+        sub.blueprints.push({ name: coworkEntry.name, version: coworkEntry.version });
+    }
+    fs.writeFileSync(subPath, JSON.stringify(sub, null, 2), "utf8");
+    const reinstall = runCli(["reinstall", "--vault", vault]);
+    const coworkDir = path.join(vault, "spice", "cowork");
+    ok("smoke-cowork-daily-hub-exists",
+        fs.existsSync(path.join(coworkDir, "Daily Hub.md")),
+        `reinstall exit=${reinstall.code} stdout=${reinstall.stdout.slice(-200)} path=${path.join(coworkDir, "Daily Hub.md")}`);
+    ok("smoke-cowork-weekly-hub-exists",
+        fs.existsSync(path.join(coworkDir, "Weekly Hub.md")),
+        `path=${path.join(coworkDir, "Weekly Hub.md")}`);
+    ok("smoke-cowork-monthly-hub-exists",
+        fs.existsSync(path.join(coworkDir, "Monthly Hub.md")),
+        `path=${path.join(coworkDir, "Monthly Hub.md")}`);
+
     // Step 5: post-conditions on seeded notes
     const expectations = [
         { blueprint: "project", moduleDir: "projects", minNotes: 3 },

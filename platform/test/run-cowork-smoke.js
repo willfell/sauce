@@ -234,6 +234,56 @@ function checkFixture(fix) {
 }
 
 // -------------------------------------------------------------------------
+// v0.42.0 S9 — Timeframe surface contracts (6 sub-asserts)
+// Verifies the three hub content sources + two template sources exist and
+// the skill source file is present. Also confirms manifest files[] declares
+// the correct dest for each so the installer will materialize them correctly.
+// -------------------------------------------------------------------------
+
+function checkTimeframeContracts() {
+  console.log("--- v0.42.0 timeframe surface contracts ---");
+  const manifest = loadManifest();
+  const filesArr = manifest.files || [];
+
+  // T1 — Daily Hub source exists + manifest declares dest {{module_directory}}/Daily Hub.md
+  const dailyHubSrc = path.join(BP, "content/Daily Hub.md");
+  assertTrue(fs.existsSync(dailyHubSrc), "T1: content/Daily Hub.md source exists");
+  const dailyHubEntry = filesArr.find(f => f.source === "content/Daily Hub.md");
+  assertTrue(!!dailyHubEntry && dailyHubEntry.dest === "{{module_directory}}/Daily Hub.md",
+    "T1: manifest files[] maps Daily Hub to {{module_directory}}/Daily Hub.md");
+
+  // T2 — Weekly Hub source exists
+  const weeklyHubSrc = path.join(BP, "content/Weekly Hub.md");
+  assertTrue(fs.existsSync(weeklyHubSrc), "T2: content/Weekly Hub.md source exists");
+  const weeklyHubEntry = filesArr.find(f => f.source === "content/Weekly Hub.md");
+  assertTrue(!!weeklyHubEntry && weeklyHubEntry.dest === "{{module_directory}}/Weekly Hub.md",
+    "T2: manifest files[] maps Weekly Hub to {{module_directory}}/Weekly Hub.md");
+
+  // T3 — Monthly Hub source exists
+  const monthlyHubSrc = path.join(BP, "content/Monthly Hub.md");
+  assertTrue(fs.existsSync(monthlyHubSrc), "T3: content/Monthly Hub.md source exists");
+
+  // T4 — Weekly Note template source exists + manifest maps to {{templates_path}}/Weekly Note.md
+  const weeklyNoteSrc = path.join(BP, "content/Weekly Note.md");
+  assertTrue(fs.existsSync(weeklyNoteSrc), "T4: content/Weekly Note.md source exists");
+  const weeklyNoteEntry = filesArr.find(f => f.source === "content/Weekly Note.md");
+  assertTrue(!!weeklyNoteEntry && weeklyNoteEntry.dest === "{{templates_path}}/Weekly Note.md",
+    "T4: manifest files[] maps Weekly Note to {{templates_path}}/Weekly Note.md");
+
+  // T5 — Monthly Note template source exists
+  const monthlyNoteSrc = path.join(BP, "content/Monthly Note.md");
+  assertTrue(fs.existsSync(monthlyNoteSrc), "T5: content/Monthly Note.md source exists");
+
+  // T6 — scaffold-timeframes SKILL.md source exists in claude_surface[]
+  const scaffoldSkill = (manifest.claude_surface || []).find(
+    e => e.kind === "skill" && e.source === "skills/skills/scaffold-timeframes/SKILL.md"
+  );
+  assertTrue(!!scaffoldSkill, "T6: claude_surface[] declares scaffold-timeframes skill");
+  const scaffoldSrc = path.join(BP, "skills/skills/scaffold-timeframes/SKILL.md");
+  assertTrue(fs.existsSync(scaffoldSrc), "T6: scaffold-timeframes SKILL.md source file exists");
+}
+
+// -------------------------------------------------------------------------
 // Main
 // -------------------------------------------------------------------------
 
@@ -241,6 +291,7 @@ function checkFixture(fix) {
   console.log("--- shared contracts ---");
   checkSharedContracts();
   for (const fix of FIXTURES) checkFixture(fix);
+  checkTimeframeContracts();
   console.log(`========\nResult: ${passed} passed, ${failed} failed.`);
   process.exit(failed === 0 ? 0 : 1);
 })();
