@@ -6,6 +6,9 @@ tags: [cowork-hub]
 # Cowork
 
 ```dataviewjs
+// Scaffold-status callout (v0.42.0): detects missing engagements + missing
+// timeframe notes + missing prompt stubs; renders a single ! callout listing
+// gaps + the Claude invocation to run. Renders nothing when scaffolding complete.
 const vaultConfig = app.vault.getAbstractFileByPath("spice/cowork/context/vault-config.md");
 let bootstrapped = false;
 if (vaultConfig) {
@@ -13,8 +16,24 @@ if (vaultConfig) {
   const engagements = cache?.frontmatter?.engagements;
   bootstrapped = Array.isArray(engagements) && engagements.length > 0;
 }
-if (!bootstrapped) {
-  dv.paragraph("> [!warning]+ This vault has not been bootstrapped yet\n> Run `cowork:bootstrap-vault` to interview yourself and materialize per-engagement context files + the nav-button table below.\n> Until bootstrap runs, the orchestrators in the table below have nothing to dispatch against.");
+
+const now = window.moment();
+const isoWeekLabel = now.format("YYYY-[W]ww");
+const monthLabel = now.format("YYYY-MM");
+const year = now.format("YYYY");
+const weeklyExists = !!app.vault.getAbstractFileByPath(`spice/cowork/weekly/${year}/${isoWeekLabel}.md`);
+const monthlyExists = !!app.vault.getAbstractFileByPath(`spice/cowork/monthly/${year}/${monthLabel}.md`);
+const promptNames = ["morning-briefing", "eod-review", "weekly-review", "monthly-review"];
+const missingPrompts = promptNames.filter(n => !app.vault.getAbstractFileByPath(`spice/cowork/prompts/${n}.md`));
+
+const gaps = [];
+if (!bootstrapped)   gaps.push("Engagements (run `cowork:bootstrap-vault` to interview)");
+if (!weeklyExists)   gaps.push(`This week's note (\`${isoWeekLabel}.md\`) — run \`cowork:scaffold-timeframes\``);
+if (!monthlyExists)  gaps.push(`This month's note (\`${monthLabel}.md\`) — run \`cowork:scaffold-timeframes\``);
+if (missingPrompts.length) gaps.push("Prompt stubs: " + missingPrompts.join(", ") + " — re-run `sauce reinstall`");
+
+if (gaps.length > 0) {
+  dv.paragraph("> [!warning]+ Cowork scaffold incomplete\n> " + gaps.map(g => "- [ ] " + g).join("\n> ") + "\n> \n> Run `cowork:bootstrap-vault` in a Claude session inside this vault to address everything at once.");
 }
 ```
 
@@ -22,6 +41,32 @@ if (!bootstrapped) {
 > The cowork blueprint is the automation layer that lets Claude run scheduled jobs against your vault using your connected MCP servers. Each orchestrator is a native Claude Code skill materialized to `<vault>/.claude/skills/cowork/` at install time. A cron schedule fires Claude with a one-line invocation (e.g. `cowork:morning-briefing --engagement_id accuris`); Claude loads the orchestrator's SKILL.md, resolves the engagement from `vault-config.md`, delegates to sub-skills for gathering + writing, and patches your daily note, weekly summary, or context state.
 >
 > Cowork is **engagement-aware**. A vault may host one or more engagements (`personal`, `w2-fte`, `consulting`) — each is a named slice with its own MCP scoping (gmail label, calendar id), render-aspects (which sections to compose), and cadence enablement. Every orchestrator takes `engagement_id` as input; outputs flow into per-engagement H2 sections within the daily note's `<!-- COWORK_CALLOUTS -->` block.
+
+---
+
+## Timeframes
+
+```dataviewjs
+const subs = [
+  { name: "Daily Hub",   path: "spice/cowork/Daily Hub.md",   blurb: "Card index of dailies (spice/daily/**/*.md)" },
+  { name: "Weekly Hub",  path: "spice/cowork/Weekly Hub.md",  blurb: "Card index of weekly notes (spice/cowork/weekly/)" },
+  { name: "Monthly Hub", path: "spice/cowork/Monthly Hub.md", blurb: "Card index of monthly notes (spice/cowork/monthly/)" }
+];
+const cardItems = subs.map(s => ({
+  file: { name: s.name, path: s.path, mtime: null },
+  _blurb: s.blurb
+}));
+if (typeof window.customJS !== "undefined" && window.customJS.BeaconCards) {
+  await window.customJS.BeaconCards.render(dv, {
+    items: cardItems,
+    titleField: p => p.file.name,
+    subtitleField: p => p._blurb,
+    linkField: p => p.file.path
+  });
+} else {
+  for (const s of subs) dv.paragraph(`- [[${s.path}|${s.name}]] — ${s.blurb}`);
+}
+```
 
 ---
 
