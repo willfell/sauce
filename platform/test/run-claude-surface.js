@@ -542,12 +542,12 @@ async function caseCSSUB3VerbsExist() {
 //           the legacy skills[] + files[] command shape to claude_surface[].
 // ============================================================
 async function caseCSMIG1CoworkAggregation() {
-  console.log("\n--- Case CS-MIG-1: cowork manifest claude_surface[] yields 42 contributions (v0.6.0) ---");
+  console.log("\n--- Case CS-MIG-1: cowork manifest claude_surface[] yields 42 contributions (v0.7.0) ---");
   const bpManifestPath = path.join(WORKSHOP, "platform/blueprints/cowork/manifest.json");
   assertTrue("CS-MIG-1: cowork manifest.json exists", fs.existsSync(bpManifestPath));
   const bpMan = JSON.parse(fs.readFileSync(bpManifestPath, "utf8"));
 
-  assertEq("CS-MIG-1: cowork version is 0.6.0", bpMan.version, "0.6.0");
+  assertEq("CS-MIG-1: cowork version is 0.7.0", bpMan.version, "0.7.0");
   assertTrue("CS-MIG-1: cowork manifest no longer has skills[] field", !("skills" in bpMan));
   assertTrue("CS-MIG-1: cowork manifest has claude_surface[]", Array.isArray(bpMan.claude_surface));
 
@@ -555,7 +555,7 @@ async function caseCSMIG1CoworkAggregation() {
   perItemManifest.set("cowork", bpMan);
   const subscription = {
     mechanisms: [],
-    blueprints: [{ name: "cowork", version: "0.6.0" }],
+    blueprints: [{ name: "cowork", version: "0.7.0" }],
   };
   const history = [];
   const out = await aggregateClaudeSurface(perItemManifest, subscription, history, mkGit(), { workshop_version: "0.0.0-test" });

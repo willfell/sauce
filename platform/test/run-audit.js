@@ -1419,6 +1419,53 @@ async function caseCW14AboutMissingTag() {
   });
 }
 
+// ============================================================
+// v0.45.0 S8 — cowork-daily rule_fragment audit cases (CW-15..16).
+// Mirrors the CW-7/8 weekly-fragment posture for the NEW cowork-daily
+// rule_fragment added in v0.45.0 S7 (cowork manifest@0.7.0).
+// ============================================================
+
+const COWORK_DAILY_FRAGMENT = [{
+  scope: { path_glob: "spice/cowork/daily/**/*.md" },
+  required_frontmatter: {
+    type:    { required: true, type: "string", equals: "cowork-daily" },
+    day:     { required: true, type: "string", matches: "^\\d{4}-\\d{2}-\\d{2}$" },
+    created: { required: true, type: "string" }
+  },
+  required_tags: [{ tag: "cowork-daily" }],
+  naming_pattern: "^\\d{4}-\\d{2}-\\d{2}\\.md$"
+}];
+
+// CW-15 — audit-cowork-daily-valid: conforming cowork-daily note → 0 violations
+async function caseCW15DailyValid() {
+  await withTempVault(async (dir) => {
+    makeSauceVault(dir, { blueprints: ["cowork"], rules: { cowork: COWORK_DAILY_FRAGMENT } });
+    writeNote(dir, "spice/cowork/daily/2026/05-May/2026-05-14.md", {
+      type: "cowork-daily", day: "2026-05-14",
+      created: "2026-05-14T10:00:00", tags: ["cowork-daily"]
+    });
+    const { runAudit } = require("../audit/walker");
+    const result = await runAudit({ vaultPath: dir, untrackedCheck: false });
+    const violations = result.violations.filter(v => v.file && v.file.endsWith("2026-05-14.md"));
+    assertEqual(violations.length, 0, "audit-cowork-daily-valid: fully conforming cowork-daily note has zero violations");
+  });
+}
+
+// CW-16 — audit-cowork-daily-bad-type: wrong type (cowork-weekly) → type violation
+async function caseCW16DailyBadType() {
+  await withTempVault(async (dir) => {
+    makeSauceVault(dir, { blueprints: ["cowork"], rules: { cowork: COWORK_DAILY_FRAGMENT } });
+    writeNote(dir, "spice/cowork/daily/2026/05-May/2026-05-14.md", {
+      type: "cowork-weekly", day: "2026-05-14",
+      created: "2026-05-14T10:00:00", tags: ["cowork-daily"]
+    });
+    const { runAudit } = require("../audit/walker");
+    const result = await runAudit({ vaultPath: dir, untrackedCheck: false });
+    assertTrue(result.violations.some(v => v.rule === "required_frontmatter.type.equals" && v.file && v.file.endsWith("2026-05-14.md")),
+      "audit-cowork-daily-bad-type: wrong type surfaces required_frontmatter.type.equals violation");
+  });
+}
+
 // Per-case error firewall: a thrown error inside any case body (including
 // the deliberate "Cannot find module ../audit/walker" RED-state throws)
 // counts as exactly one failed sub-assert and does NOT abort the harness.
@@ -1482,6 +1529,9 @@ const selector = process.argv[2] || "all";
     // v0.44.0 S9 — cowork-about rule_fragment audit cases
     await runCase("CW-13", caseCW13AboutValid);
     await runCase("CW-14", caseCW14AboutMissingTag);
+    // v0.45.0 S8 — cowork-daily rule_fragment audit cases
+    await runCase("CW-15", caseCW15DailyValid);
+    await runCase("CW-16", caseCW16DailyBadType);
   }
   console.log(`========\nResult: ${passed} passed, ${failed} failed.`);
   process.exit(failed === 0 ? 0 : 1);

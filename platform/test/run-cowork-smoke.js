@@ -353,7 +353,8 @@ function assertCoworkV044Shape() {
   if (fs.existsSync(navPath)) {
     const nav = fs.readFileSync(navPath, "utf8");
     assertContains(nav, "class CoworkHubNav", "v0.44.0: CoworkHubNav class declared");
-    assertContains(nav, "you are here", "v0.44.0: CoworkHubNav has 'you are here' subtitle marker");
+    // v0.45.0 S1: subtitle 'you are here' removed; CoworkHubNav now an AccentButton row.
+    // The v0.7.0+ posture is exercised by assertCoworkV045Shape below.
   }
   // --- Daily/Weekly/Monthly Hub all use CoworkHubNav, dropped text-link row ---
   for (const name of ["Daily Hub", "Weekly Hub", "Monthly Hub"]) {
@@ -371,10 +372,67 @@ function assertCoworkV044Shape() {
     assertContains(body, "pages: cardItems", `v0.44.0: ${f} uses 'pages: cardItems'`);
   }
   // --- Manifest icon is briefcase ---
+  // v0.45.0: version assertion bumped to assertCoworkV045Shape (which checks 0.7.0).
   const m = loadManifest();
-  assertTrue(m.version === "0.6.0", "v0.44.0: cowork manifest version is 0.6.0");
   const hubNav = (m.nav_buttons || []).find(b => b.id === "cowork-hub");
   assertTrue(hubNav && hubNav.icon === "briefcase", "v0.44.0: cowork-hub nav-button icon is 'briefcase'");
+}
+
+// -------------------------------------------------------------------------
+// v0.45.0 S8 — Self-contained cowork shape asserts
+// -------------------------------------------------------------------------
+
+function assertCoworkV045Shape() {
+  console.log("--- v0.45.0 self-contained shape ---");
+  const cowork = BP;
+
+  // --- Daily Note.md template ---
+  const dailyTemplatePath = path.join(cowork, "content/Daily Note.md");
+  assertTrue(fs.existsSync(dailyTemplatePath), "v0.45.0: content/Daily Note.md exists");
+  if (fs.existsSync(dailyTemplatePath)) {
+    const body = fs.readFileSync(dailyTemplatePath, "utf8");
+    assertContains(body, "type: cowork-daily", "v0.45.0: Daily Note template type=cowork-daily");
+    assertContains(body, "SpaceNavButtons", "v0.45.0: Daily Note template has SpaceNavButtons");
+    assertContains(body, "CoworkHubNav", "v0.45.0: Daily Note template has CoworkHubNav");
+  }
+
+  // --- CoworkDailyActions helper ---
+  const dailyActionsPath = path.join(cowork, "helpers/cowork-daily-actions.js");
+  assertTrue(fs.existsSync(dailyActionsPath), "v0.45.0: cowork-daily-actions.js exists");
+
+  // --- CoworkHubNav uses AccentButton ---
+  const hubNav = fs.readFileSync(path.join(cowork, "helpers/cowork-hub-nav.js"), "utf8");
+  assertContains(hubNav, "AccentButton.render", "v0.45.0: CoworkHubNav uses AccentButton.render");
+  assertTrue(!hubNav.includes("you are here"), "v0.45.0: CoworkHubNav no longer has 'you are here'");
+  assertTrue(!/BeaconCards\.render/.test(hubNav), "v0.45.0: CoworkHubNav no longer calls BeaconCards.render");
+
+  // --- Daily hub cards retargeted ---
+  const dailyCards = fs.readFileSync(path.join(cowork, "helpers/cowork-daily-hub-cards.js"), "utf8");
+  assertContains(dailyCards, "spice/cowork/daily", "v0.45.0: cowork-daily-hub-cards reads spice/cowork/daily");
+  assertTrue(!/dv\.pages\('"spice\/daily"'\)/.test(dailyCards), "v0.45.0: cowork-daily-hub-cards no longer reads spice/daily");
+
+  // --- Nav pattern on all 5 hubs + 3 templates ---
+  const navPatternFiles = [
+    "content/Cowork.md", "content/About Cowork.md", "content/Daily Hub.md",
+    "content/Weekly Hub.md", "content/Monthly Hub.md",
+    "content/Daily Note.md", "content/Weekly Note.md", "content/Monthly Note.md"
+  ];
+  for (const rel of navPatternFiles) {
+    const body = fs.readFileSync(path.join(cowork, rel), "utf8");
+    assertContains(body, "SpaceNavButtons", `v0.45.0: ${rel} has SpaceNavButtons block`);
+    assertContains(body, "CoworkHubNav", `v0.45.0: ${rel} has CoworkHubNav block`);
+  }
+
+  // --- Timeframes 6-card row ---
+  const tfButtons = fs.readFileSync(path.join(cowork, "helpers/cowork-timeframe-buttons.js"), "utf8");
+  assertContains(tfButtons, "createDaily", "v0.45.0: Timeframes has createDaily card");
+  assertContains(tfButtons, '"Today"', "v0.45.0: Timeframes has Today label");
+
+  // --- Manifest version + depends_on ---
+  const m = loadManifest();
+  assertTrue(m.version === "0.7.0", "v0.45.0: cowork manifest version is 0.7.0");
+  const hasAccentDep = (m.depends_on || []).some(d => d.name === "accent-button");
+  assertTrue(hasAccentDep, "v0.45.0: cowork depends_on accent-button");
 }
 
 // -------------------------------------------------------------------------
@@ -387,6 +445,7 @@ function assertCoworkV044Shape() {
   for (const fix of FIXTURES) checkFixture(fix);
   checkTimeframeContracts();
   assertCoworkV044Shape();
+  assertCoworkV045Shape();
   console.log(`========\nResult: ${passed} passed, ${failed} failed.`);
   process.exit(failed === 0 ? 0 : 1);
 })();

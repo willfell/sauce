@@ -4355,6 +4355,42 @@ async function caseCOWORKCardsAPIPagesNotItems() {
   }
 }
 
+// v0.45.0 S8 — cowork self-contained helper-shape asserts.
+// COWORK-V045-1: cowork-daily-actions.js lints clean + declares its class.
+async function caseCOWORKV045DailyActionsLints() {
+  console.log("\n--- Case COWORK-V045-1: cowork-daily-actions.js lints clean ---");
+  const p = path.join(BLUEPRINTS_DIR, "cowork", "helpers", "cowork-daily-actions.js");
+  assertTrue("COWORK-V045-1: file exists on disk", fs.existsSync(p));
+  const body = fs.readFileSync(p, "utf8");
+  assertTrue("COWORK-V045-1: no trailing whitespace", !/[ \t]+$/m.test(body));
+  assertTrue("COWORK-V045-1: no tab/space mix on any line", !/^( +\t|\t+ )/m.test(body));
+  assertTrue("COWORK-V045-1: class CoworkDailyActions declared", /class\s+CoworkDailyActions\b/.test(body));
+}
+
+// COWORK-V045-2: cowork-hub-nav.js uses customJS.AccentButton.render
+// AND no longer uses BeaconCards.render (S1 AccentButton rewrite).
+async function caseCOWORKV045HubNavAccentButton() {
+  console.log("\n--- Case COWORK-V045-2: cowork-hub-nav.js uses AccentButton, not BeaconCards ---");
+  const p = path.join(BLUEPRINTS_DIR, "cowork", "helpers", "cowork-hub-nav.js");
+  const body = fs.readFileSync(p, "utf8");
+  assertTrue("COWORK-V045-2: body matches /customJS\\.AccentButton\\.render/",
+    /customJS\.AccentButton\.render/.test(body));
+  assertTrue("COWORK-V045-2: body no longer matches /BeaconCards\\.render/",
+    !/BeaconCards\.render/.test(body));
+}
+
+// COWORK-V045-3: cowork-daily-hub-cards.js reads spice/cowork/daily
+// AND no longer reads spice/daily (S3 retarget).
+async function caseCOWORKV045DailyCardsRetarget() {
+  console.log("\n--- Case COWORK-V045-3: cowork-daily-hub-cards.js retargeted to spice/cowork/daily ---");
+  const p = path.join(BLUEPRINTS_DIR, "cowork", "helpers", "cowork-daily-hub-cards.js");
+  const body = fs.readFileSync(p, "utf8");
+  assertTrue("COWORK-V045-3: body contains 'spice/cowork/daily'",
+    body.includes("spice/cowork/daily"));
+  assertTrue("COWORK-V045-3: body no longer contains the old dv.pages('\"spice/daily\"') call",
+    !/dv\.pages\('"spice\/daily"'\)/.test(body));
+}
+
 // COWORK-TF-NO-ARROWS: cowork-timeframe-buttons.js dropped → arrows from
 // the "This Week" / "This Month" labels (v0.44.0 S4).
 async function caseCOWORKTimeframeNoArrows() {
@@ -5706,6 +5742,11 @@ async function caseProj3ValidatorRejectsProjectInvalidStatusEnum() {
   await caseCOWORKHubNav1Lints();
   await caseCOWORKCardsAPIPagesNotItems();
   await caseCOWORKTimeframeNoArrows();
+
+  // v0.45.0 S8 — cowork self-contained helper-shape asserts.
+  await caseCOWORKV045DailyActionsLints();
+  await caseCOWORKV045HubNavAccentButton();
+  await caseCOWORKV045DailyCardsRetarget();
 
   // v0.20.0 docs polish cycle — trailing-whitespace lint.
   await caseTW1TemplatesNoTrailingWhitespace();

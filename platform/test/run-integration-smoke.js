@@ -117,6 +117,13 @@ withTempHomeAndVault(({ home, vault }) => {
         fs.existsSync(path.join(coworkDir, "About Cowork.md")),
         `path=${path.join(coworkDir, "About Cowork.md")}`);
 
+    // v0.45.0 S8 — Daily Note.md template materialized into ranch/templates/
+    // (NEW in v0.45.0 — Templater template for cowork-owned daily notes).
+    const dailyNoteTpl = path.join(vault, "ranch", "templates", "Daily Note.md");
+    ok("smoke-cowork-daily-note-template-exists",
+        fs.existsSync(dailyNoteTpl),
+        `path=${dailyNoteTpl}`);
+
     // v0.43.0: nav-button consolidation. cowork@0.5.0 contributes exactly
     // 1 global nav-button (cowork-hub); the v0.4.0 cowork-weekly-this +
     // cowork-monthly-this entries should NOT appear in the registry after
