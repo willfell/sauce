@@ -219,9 +219,11 @@ If `resume_from_step` is set, skip steps `< resume_from_step` and pick up from t
     - **§6 Audit receipt** — verbatim `receipt_lines` from step 23 (or the degraded-mode instruction if Bash was unavailable).
     - **§7 Manual Obsidian + natural-language parity** — pointer to `spice/cowork/Cowork.md` (nav-button table) + NL phrasing examples (drawn from `.claude/cowork-routing.md` written in step 21) + scheduled cron pointer to §3.
 
+25. Use Skill `cowork:scaffold-timeframes` with `{}`. Capture the receipt as `timeframe_scaffold`. Include it in the final bootstrap report under "Timeframe scaffold" heading: list `created` + `existed` + `missing_prompts` arrays.
+
 ## Done
 
-25. Emit final Notice: `Bootstrap complete (<engagement_count> engagement(s)). Open spice/cowork/bootstrap-report.md for next steps.` This orchestrator never patches the daily note and never mutates `active-threads.md` or `weekly-snapshot.md` beyond the empty-schema seed in step 19. Cadenced state writes are owned by the cron-scheduled orchestrators.
+26. Emit final Notice: `Bootstrap complete (<engagement_count> engagement(s)). Open spice/cowork/bootstrap-report.md for next steps.` This orchestrator never patches the daily note and never mutates `active-threads.md` or `weekly-snapshot.md` beyond the empty-schema seed in step 19. Cadenced state writes are owned by the cron-scheduled orchestrators.
 
 ## Dependencies
 
