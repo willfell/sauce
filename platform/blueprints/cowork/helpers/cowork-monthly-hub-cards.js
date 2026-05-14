@@ -16,6 +16,13 @@ class CoworkMonthlyHubCards {
         return m.isValid() ? m.format("MMMM YYYY") : monthName;
     }
 
+    _friendlyMonthName(fname) {
+        const m = fname.match(/^(\d{4})-(\d{2})$/);
+        if (!m) return fname;
+        const mo = window.moment(`${m[1]}-${m[2]}-01`, "YYYY-MM-DD");
+        return mo.isValid() ? mo.format("MMMM YYYY") : fname;
+    }
+
     async render(dv, opts) {
         if (dv.container.closest(".markdown-embed")) return;
         while (dv.container.firstChild) dv.container.removeChild(dv.container.firstChild);
@@ -37,7 +44,7 @@ class CoworkMonthlyHubCards {
             dv.header(3, year);
 
             const cardItems = items.map(p => ({
-                file: { name: this._monthLabel(p.file.name), path: p.file.path, mtime: p.file.mtime },
+                file: { name: p.month_label || this._friendlyMonthName(p.file.name), path: p.file.path, mtime: p.file.mtime },
                 _subtitle: p.file.name,
                 _snippet: this._stripNotesSnippet(p.file && p.file.contents)
             }));

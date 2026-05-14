@@ -1,6 +1,6 @@
 /**
  * CoworkDailyHubCards (CustomJS)
- * Renders cards for daily notes at spice/daily/**\/*.md, grouped by year/month, recent-first.
+ * Renders cards for daily notes at spice/cowork/daily/**\/*.md, grouped by year/month, recent-first.
  * Click a card → opens that daily note.
  *
  * Usage in DataviewJS (via customjs-guard):
@@ -29,18 +29,19 @@ class CoworkDailyHubCards {
         if (dv.container.closest(".markdown-embed")) return;
         while (dv.container.firstChild) dv.container.removeChild(dv.container.firstChild);
 
-        const dailies = dv.pages('"spice/daily"').where(p =>
-            /^\w+-\d{4}-\d{2}-\d{2}$/.test(p.file.name)
+        const dailies = dv.pages('"spice/cowork/daily"').where(p =>
+            /^\d{4}-\d{2}-\d{2}$/.test(p.file.name)
         );
 
         const groups = new Map();
         for (const p of dailies) {
-            const m = p.file.name.match(/^(\w+)-(\d{4}-\d{2}-\d{2})$/);
+            const m = p.file.name.match(/^(\d{4}-\d{2}-\d{2})$/);
             if (!m) continue;
-            const day = m[2];
+            const day = m[1];
             const yyyymm = day.slice(0, 7);
+            const weekday = window.moment(day, "YYYY-MM-DD").format("dddd");
             if (!groups.has(yyyymm)) groups.set(yyyymm, []);
-            groups.get(yyyymm).push({ page: p, day, weekday: m[1] });
+            groups.get(yyyymm).push({ page: p, day, weekday });
         }
 
         const sortedKeys = [...groups.keys()].sort().reverse();
@@ -50,7 +51,7 @@ class CoworkDailyHubCards {
             dv.header(3, monthLabel);
 
             const cardItems = items.map(({ page, day, weekday }) => ({
-                file: { name: weekday + " · " + day, path: page.file.path, mtime: page.file.mtime },
+                file: { name: weekday + ", " + window.moment(day, "YYYY-MM-DD").format("MMMM D, YYYY"), path: page.file.path, mtime: page.file.mtime },
                 _subtitle: this._relativeLabel(day),
                 _snippet: this._stripNotesSnippet(page.file && page.file.contents)
             }));

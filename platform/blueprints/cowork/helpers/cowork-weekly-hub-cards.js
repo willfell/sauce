@@ -11,6 +11,12 @@ class CoworkWeeklyHubCards {
         return m[1].replace(/[#>\-*\[\]]/g, " ").trim().slice(0, 120);
     }
 
+    _friendlyWeekName(fname) {
+        const m = fname.match(/^(\d{4})-W(\d{2})$/);
+        if (!m) return fname;
+        return `Week ${m[2]}, ${m[1]}`;
+    }
+
     _dateRangeLabel(weekLabel, weekStart, weekEnd) {
         if (weekStart && weekEnd) {
             const s = window.moment(weekStart, "YYYY-MM-DD");
@@ -43,7 +49,7 @@ class CoworkWeeklyHubCards {
             dv.header(3, year);
 
             const cardItems = items.map(p => ({
-                file: { name: p.file.name, path: p.file.path, mtime: p.file.mtime },
+                file: { name: p.week_label || this._friendlyWeekName(p.file.name), path: p.file.path, mtime: p.file.mtime },
                 _subtitle: this._dateRangeLabel(p.week_label, p.week_start, p.week_end),
                 _snippet: this._stripNotesSnippet(p.file && p.file.contents)
             }));
