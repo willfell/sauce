@@ -26,12 +26,12 @@
       "order": 60,
       "action": {
         "type": "runTemplaterTemplate",
-        "folder_prefix": "{{module_directory}}/weekly/",
+        "folder_prefix": "{{module_directory}}/weekly",
         "folder_date_pattern": "YYYY",
         "filename_prefix": "",
         "filename_date_pattern": "YYYY-[W]ww",
         "filename_suffix": "",
-        "template": "Weekly Note"
+        "template_source": "Weekly Note.md"
       }
     },
     {
@@ -41,12 +41,12 @@
       "order": 65,
       "action": {
         "type": "runTemplaterTemplate",
-        "folder_prefix": "{{module_directory}}/monthly/",
+        "folder_prefix": "{{module_directory}}/monthly",
         "folder_date_pattern": "YYYY",
         "filename_prefix": "",
         "filename_date_pattern": "YYYY-MM",
         "filename_suffix": "",
-        "template": "Monthly Note"
+        "template_source": "Monthly Note.md"
       }
     }
   ],
