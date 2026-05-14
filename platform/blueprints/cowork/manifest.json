@@ -216,6 +216,72 @@
           }
         }
       }
+    },
+    {
+      "target": "cowork",
+      "fragment": {
+        "scope": { "path_glob": "spice/cowork/Daily Hub.md" },
+        "required_frontmatter": { "type": { "required": true, "type": "string", "equals": "cowork-daily-hub" } },
+        "required_tags": [{ "tag": "cowork-hub" }, { "tag": "daily-hub" }]
+      }
+    },
+    {
+      "target": "cowork",
+      "fragment": {
+        "scope": { "path_glob": "spice/cowork/Weekly Hub.md" },
+        "required_frontmatter": { "type": { "required": true, "type": "string", "equals": "cowork-weekly-hub" } },
+        "required_tags": [{ "tag": "cowork-hub" }, { "tag": "weekly-hub" }]
+      }
+    },
+    {
+      "target": "cowork",
+      "fragment": {
+        "scope": { "path_glob": "spice/cowork/Monthly Hub.md" },
+        "required_frontmatter": { "type": { "required": true, "type": "string", "equals": "cowork-monthly-hub" } },
+        "required_tags": [{ "tag": "cowork-hub" }, { "tag": "monthly-hub" }]
+      }
+    },
+    {
+      "target": "cowork",
+      "fragment": {
+        "scope": { "path_glob": "spice/cowork/weekly/**/*.md" },
+        "required_frontmatter": {
+          "type":       { "required": true, "type": "string", "equals": "cowork-weekly" },
+          "week_label": { "required": true, "type": "string" },
+          "week_start": { "required": true, "type": "string" },
+          "week_end":   { "required": true, "type": "string" },
+          "created":    { "required": true, "type": "string" }
+        },
+        "required_tags": [{ "tag": "weekly" }],
+        "naming_pattern": "^\\d{4}-W\\d{2}\\.md$"
+      }
+    },
+    {
+      "target": "cowork",
+      "fragment": {
+        "scope": { "path_glob": "spice/cowork/monthly/**/*.md" },
+        "required_frontmatter": {
+          "type":        { "required": true, "type": "string", "equals": "cowork-monthly" },
+          "month_label": { "required": true, "type": "string" },
+          "month_start": { "required": true, "type": "string" },
+          "month_end":   { "required": true, "type": "string" },
+          "created":     { "required": true, "type": "string" }
+        },
+        "required_tags": [{ "tag": "monthly" }],
+        "naming_pattern": "^\\d{4}-\\d{2}\\.md$"
+      }
+    },
+    {
+      "target": "cowork",
+      "fragment": {
+        "scope": { "path_glob": "spice/cowork/prompts/*.md" },
+        "required_frontmatter": {
+          "type":       { "required": true, "type": "string", "equals": "cowork-prompt" },
+          "prompt_for": { "required": true, "type": "string" },
+          "updated":    { "required": true, "type": "string" },
+          "updated_by": { "required": true, "type": "string" }
+        }
+      }
     }
   ],
   "post_install": [

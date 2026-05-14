@@ -1142,6 +1142,245 @@ async function caseSAS8DayHubBadType() {
   });
 }
 
+// ============================================================
+// v0.42.0 S7 — Cowork timeframe rule_fragment audit cases (CW-1..12).
+// Six new rule_fragments added to cowork/manifest.json:
+//   1. Daily Hub     — scope: spice/cowork/Daily Hub.md
+//   2. Weekly Hub    — scope: spice/cowork/Weekly Hub.md
+//   3. Monthly Hub   — scope: spice/cowork/Monthly Hub.md
+//   4. Weekly note   — scope: spice/cowork/weekly/**/*.md + naming_pattern
+//   5. Monthly note  — scope: spice/cowork/monthly/**/*.md + naming_pattern
+//   6. Prompt stub   — scope: spice/cowork/prompts/*.md
+// 12 sub-asserts: 6 happy-path (zero violations) + 6 failure-path.
+// ============================================================
+
+const COWORK_DAILY_HUB_FRAGMENT = [{
+  scope: { path_glob: "spice/cowork/Daily Hub.md" },
+  required_frontmatter: { type: { required: true, type: "string", equals: "cowork-daily-hub" } },
+  required_tags: [{ tag: "cowork-hub" }, { tag: "daily-hub" }]
+}];
+
+const COWORK_WEEKLY_HUB_FRAGMENT = [{
+  scope: { path_glob: "spice/cowork/Weekly Hub.md" },
+  required_frontmatter: { type: { required: true, type: "string", equals: "cowork-weekly-hub" } },
+  required_tags: [{ tag: "cowork-hub" }, { tag: "weekly-hub" }]
+}];
+
+const COWORK_MONTHLY_HUB_FRAGMENT = [{
+  scope: { path_glob: "spice/cowork/Monthly Hub.md" },
+  required_frontmatter: { type: { required: true, type: "string", equals: "cowork-monthly-hub" } },
+  required_tags: [{ tag: "cowork-hub" }, { tag: "monthly-hub" }]
+}];
+
+const COWORK_WEEKLY_FRAGMENT = [{
+  scope: { path_glob: "spice/cowork/weekly/**/*.md" },
+  required_frontmatter: {
+    type:       { required: true, type: "string", equals: "cowork-weekly" },
+    week_label: { required: true, type: "string" },
+    week_start: { required: true, type: "string" },
+    week_end:   { required: true, type: "string" },
+    created:    { required: true, type: "string" }
+  },
+  required_tags: [{ tag: "weekly" }],
+  naming_pattern: "^\\d{4}-W\\d{2}\\.md$"
+}];
+
+const COWORK_MONTHLY_FRAGMENT = [{
+  scope: { path_glob: "spice/cowork/monthly/**/*.md" },
+  required_frontmatter: {
+    type:        { required: true, type: "string", equals: "cowork-monthly" },
+    month_label: { required: true, type: "string" },
+    month_start: { required: true, type: "string" },
+    month_end:   { required: true, type: "string" },
+    created:     { required: true, type: "string" }
+  },
+  required_tags: [{ tag: "monthly" }],
+  naming_pattern: "^\\d{4}-\\d{2}\\.md$"
+}];
+
+const COWORK_PROMPT_FRAGMENT = [{
+  scope: { path_glob: "spice/cowork/prompts/*.md" },
+  required_frontmatter: {
+    type:       { required: true, type: "string", equals: "cowork-prompt" },
+    prompt_for: { required: true, type: "string" },
+    updated:    { required: true, type: "string" },
+    updated_by: { required: true, type: "string" }
+  }
+}];
+
+// CW-1 — audit-daily-hub-valid: conforming Daily Hub → 0 violations
+async function caseCW1DailyHubValid() {
+  await withTempVault(async (dir) => {
+    makeSauceVault(dir, { blueprints: ["cowork"], rules: { cowork: COWORK_DAILY_HUB_FRAGMENT } });
+    writeNote(dir, "spice/cowork/Daily Hub.md",
+      { type: "cowork-daily-hub", tags: ["cowork-hub", "daily-hub"] });
+    const { runAudit } = require("../audit/walker");
+    const result = await runAudit({ vaultPath: dir, untrackedCheck: false });
+    const violations = result.violations.filter(v => v.file && v.file.endsWith("Daily Hub.md"));
+    assertEqual(violations.length, 0, "audit-daily-hub-valid: conforming Daily Hub has zero violations");
+  });
+}
+
+// CW-2 — audit-daily-hub-missing-type: Daily Hub without type frontmatter → violation
+async function caseCW2DailyHubMissingType() {
+  await withTempVault(async (dir) => {
+    makeSauceVault(dir, { blueprints: ["cowork"], rules: { cowork: COWORK_DAILY_HUB_FRAGMENT } });
+    writeNote(dir, "spice/cowork/Daily Hub.md",
+      { tags: ["cowork-hub", "daily-hub"] });  // missing type
+    const { runAudit } = require("../audit/walker");
+    const result = await runAudit({ vaultPath: dir, untrackedCheck: false });
+    assertTrue(result.violations.some(v => v.rule === "required_frontmatter.type"),
+      "audit-daily-hub-missing-type: missing type field surfaces violation");
+  });
+}
+
+// CW-3 — audit-weekly-hub-valid: conforming Weekly Hub → 0 violations
+async function caseCW3WeeklyHubValid() {
+  await withTempVault(async (dir) => {
+    makeSauceVault(dir, { blueprints: ["cowork"], rules: { cowork: COWORK_WEEKLY_HUB_FRAGMENT } });
+    writeNote(dir, "spice/cowork/Weekly Hub.md",
+      { type: "cowork-weekly-hub", tags: ["cowork-hub", "weekly-hub"] });
+    const { runAudit } = require("../audit/walker");
+    const result = await runAudit({ vaultPath: dir, untrackedCheck: false });
+    const violations = result.violations.filter(v => v.file && v.file.endsWith("Weekly Hub.md"));
+    assertEqual(violations.length, 0, "audit-weekly-hub-valid: conforming Weekly Hub has zero violations");
+  });
+}
+
+// CW-4 — audit-weekly-hub-missing-tags: Weekly Hub missing both cowork tags → violation
+async function caseCW4WeeklyHubMissingTags() {
+  await withTempVault(async (dir) => {
+    makeSauceVault(dir, { blueprints: ["cowork"], rules: { cowork: COWORK_WEEKLY_HUB_FRAGMENT } });
+    writeNote(dir, "spice/cowork/Weekly Hub.md",
+      { type: "cowork-weekly-hub", tags: [] });  // missing required tags
+    const { runAudit } = require("../audit/walker");
+    const result = await runAudit({ vaultPath: dir, untrackedCheck: false });
+    assertTrue(result.violations.some(v => v.rule === "required_tags.missing" && v.file && v.file.endsWith("Weekly Hub.md")),
+      "audit-weekly-hub-missing-tags: missing tags violation surfaced for Weekly Hub");
+  });
+}
+
+// CW-5 — audit-monthly-hub-valid: conforming Monthly Hub → 0 violations
+async function caseCW5MonthlyHubValid() {
+  await withTempVault(async (dir) => {
+    makeSauceVault(dir, { blueprints: ["cowork"], rules: { cowork: COWORK_MONTHLY_HUB_FRAGMENT } });
+    writeNote(dir, "spice/cowork/Monthly Hub.md",
+      { type: "cowork-monthly-hub", tags: ["cowork-hub", "monthly-hub"] });
+    const { runAudit } = require("../audit/walker");
+    const result = await runAudit({ vaultPath: dir, untrackedCheck: false });
+    const violations = result.violations.filter(v => v.file && v.file.endsWith("Monthly Hub.md"));
+    assertEqual(violations.length, 0, "audit-monthly-hub-valid: conforming Monthly Hub has zero violations");
+  });
+}
+
+// CW-6 — audit-monthly-hub-missing-tags: Monthly Hub missing monthly-hub tag → violation
+async function caseCW6MonthlyHubMissingTags() {
+  await withTempVault(async (dir) => {
+    makeSauceVault(dir, { blueprints: ["cowork"], rules: { cowork: COWORK_MONTHLY_HUB_FRAGMENT } });
+    writeNote(dir, "spice/cowork/Monthly Hub.md",
+      { type: "cowork-monthly-hub", tags: ["cowork-hub"] });  // missing monthly-hub
+    const { runAudit } = require("../audit/walker");
+    const result = await runAudit({ vaultPath: dir, untrackedCheck: false });
+    assertTrue(result.violations.some(v => v.rule === "required_tags.missing" && v.message && v.message.includes("monthly-hub")),
+      "audit-monthly-hub-missing-tags: missing monthly-hub tag surfaced");
+  });
+}
+
+// CW-7 — audit-weekly-valid: full conforming weekly note → 0 violations
+async function caseCW7WeeklyValid() {
+  await withTempVault(async (dir) => {
+    makeSauceVault(dir, { blueprints: ["cowork"], rules: { cowork: COWORK_WEEKLY_FRAGMENT } });
+    writeNote(dir, "spice/cowork/weekly/2026/2026-W20.md", {
+      type: "cowork-weekly", week_label: "Week 20 · May 2026",
+      week_start: "2026-05-11", week_end: "2026-05-17",
+      created: "2026-05-11", tags: ["weekly"]
+    });
+    const { runAudit } = require("../audit/walker");
+    const result = await runAudit({ vaultPath: dir, untrackedCheck: false });
+    const violations = result.violations.filter(v => v.file && v.file.endsWith("2026-W20.md"));
+    assertEqual(violations.length, 0, "audit-weekly-valid: fully conforming weekly note has zero violations");
+  });
+}
+
+// CW-8 — audit-weekly-missing-week-start: weekly note without week_start → violation
+async function caseCW8WeeklyMissingWeekStart() {
+  await withTempVault(async (dir) => {
+    makeSauceVault(dir, { blueprints: ["cowork"], rules: { cowork: COWORK_WEEKLY_FRAGMENT } });
+    writeNote(dir, "spice/cowork/weekly/2026/2026-W20.md", {
+      type: "cowork-weekly", week_label: "Week 20 · May 2026",
+      // week_start intentionally omitted
+      week_end: "2026-05-17", created: "2026-05-11", tags: ["weekly"]
+    });
+    const { runAudit } = require("../audit/walker");
+    const result = await runAudit({ vaultPath: dir, untrackedCheck: false });
+    assertTrue(result.violations.some(v => v.rule === "required_frontmatter.week_start"),
+      "audit-weekly-missing-week-start: missing week_start surfaces violation");
+  });
+}
+
+// CW-9 — audit-monthly-valid: full conforming monthly note → 0 violations
+async function caseCW9MonthlyValid() {
+  await withTempVault(async (dir) => {
+    makeSauceVault(dir, { blueprints: ["cowork"], rules: { cowork: COWORK_MONTHLY_FRAGMENT } });
+    writeNote(dir, "spice/cowork/monthly/2026/2026-05.md", {
+      type: "cowork-monthly", month_label: "May 2026",
+      month_start: "2026-05-01", month_end: "2026-05-31",
+      created: "2026-05-01", tags: ["monthly"]
+    });
+    const { runAudit } = require("../audit/walker");
+    const result = await runAudit({ vaultPath: dir, untrackedCheck: false });
+    const violations = result.violations.filter(v => v.file && v.file.endsWith("2026-05.md"));
+    assertEqual(violations.length, 0, "audit-monthly-valid: fully conforming monthly note has zero violations");
+  });
+}
+
+// CW-10 — audit-monthly-bad-filename: monthly note with non-matching filename → naming_pattern violation
+async function caseCW10MonthlyBadFilename() {
+  await withTempVault(async (dir) => {
+    makeSauceVault(dir, { blueprints: ["cowork"], rules: { cowork: COWORK_MONTHLY_FRAGMENT } });
+    writeNote(dir, "spice/cowork/monthly/2026/notmatching.md", {
+      type: "cowork-monthly", month_label: "May 2026",
+      month_start: "2026-05-01", month_end: "2026-05-31",
+      created: "2026-05-01", tags: ["monthly"]
+    });
+    const { runAudit } = require("../audit/walker");
+    const result = await runAudit({ vaultPath: dir, untrackedCheck: false });
+    assertTrue(result.violations.some(v => v.rule === "naming_pattern" && v.file && v.file.endsWith("notmatching.md")),
+      "audit-monthly-bad-filename: non-matching filename surfaces naming_pattern violation");
+  });
+}
+
+// CW-11 — audit-prompt-valid: conforming prompt stub → 0 violations
+async function caseCW11PromptValid() {
+  await withTempVault(async (dir) => {
+    makeSauceVault(dir, { blueprints: ["cowork"], rules: { cowork: COWORK_PROMPT_FRAGMENT } });
+    writeNote(dir, "spice/cowork/prompts/morning-briefing.md", {
+      type: "cowork-prompt", prompt_for: "morning-briefing",
+      updated: "2026-05-13", updated_by: "scaffold"
+    });
+    const { runAudit } = require("../audit/walker");
+    const result = await runAudit({ vaultPath: dir, untrackedCheck: false });
+    const violations = result.violations.filter(v => v.file && v.file.endsWith("morning-briefing.md"));
+    assertEqual(violations.length, 0, "audit-prompt-valid: conforming prompt stub has zero violations");
+  });
+}
+
+// CW-12 — audit-prompt-missing-prompt-for: prompt stub without prompt_for → violation
+async function caseCW12PromptMissingPromptFor() {
+  await withTempVault(async (dir) => {
+    makeSauceVault(dir, { blueprints: ["cowork"], rules: { cowork: COWORK_PROMPT_FRAGMENT } });
+    writeNote(dir, "spice/cowork/prompts/morning-briefing.md", {
+      type: "cowork-prompt",
+      // prompt_for intentionally omitted
+      updated: "2026-05-13", updated_by: "scaffold"
+    });
+    const { runAudit } = require("../audit/walker");
+    const result = await runAudit({ vaultPath: dir, untrackedCheck: false });
+    assertTrue(result.violations.some(v => v.rule === "required_frontmatter.prompt_for"),
+      "audit-prompt-missing-prompt-for: missing prompt_for field surfaces violation");
+  });
+}
+
 // Per-case error firewall: a thrown error inside any case body (including
 // the deliberate "Cannot find module ../audit/walker" RED-state throws)
 // counts as exactly one failed sub-assert and does NOT abort the harness.
@@ -1187,6 +1426,21 @@ const selector = process.argv[2] || "all";
     await runCase("SA-S6", caseSAS6);
     await runCase("SA-S7", caseSAS7DayHubValid);
     await runCase("SA-S8", caseSAS8DayHubBadType);
+  }
+  // v0.42.0 S7 — cowork timeframe rule_fragment audit cases (CW-1..12)
+  if (selector === "cowork" || selector === "all") {
+    await runCase("CW-1",  caseCW1DailyHubValid);
+    await runCase("CW-2",  caseCW2DailyHubMissingType);
+    await runCase("CW-3",  caseCW3WeeklyHubValid);
+    await runCase("CW-4",  caseCW4WeeklyHubMissingTags);
+    await runCase("CW-5",  caseCW5MonthlyHubValid);
+    await runCase("CW-6",  caseCW6MonthlyHubMissingTags);
+    await runCase("CW-7",  caseCW7WeeklyValid);
+    await runCase("CW-8",  caseCW8WeeklyMissingWeekStart);
+    await runCase("CW-9",  caseCW9MonthlyValid);
+    await runCase("CW-10", caseCW10MonthlyBadFilename);
+    await runCase("CW-11", caseCW11PromptValid);
+    await runCase("CW-12", caseCW12PromptMissingPromptFor);
   }
   console.log(`========\nResult: ${passed} passed, ${failed} failed.`);
   process.exit(failed === 0 ? 0 : 1);
