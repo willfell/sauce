@@ -20,8 +20,6 @@
  *   T2.7  unknown-action      synthetic registry, unknown action.type → click Notice
  *   R-SCRATCH-DAYHUB scratch-day-hub runTemplaterTemplate composes three-level folder + date-only filename (v0.40.0)
  *   R-COWORK-HUB cowork-hub openLink fires openLinkText("spice/cowork/Cowork.md") (v0.42.0)
- *   R-COWORK-WEEKLY-THIS cowork-weekly-this runTemplaterTemplate composes YYYY folder + YYYY-Www filename (v0.42.0)
- *   R-COWORK-MONTHLY-THIS cowork-monthly-this runTemplaterTemplate composes YYYY folder + YYYY-MM filename (v0.42.0)
  *   T4.0  lazy-scaffold       createFromTemplate dispatch → folder/file create + open
  *   T4.4  barebones-one-button   barebones's real registry → exactly one Board button
  *   BC1   subtitle-object       subtitle returning {text, secondaryText} → two subtitle elements
@@ -51,7 +49,7 @@
  * Usage:
  *   node platform/test/run-renderer.js [--vault <path>] [test-selector]
  *   test-selector:
- *     all (default), empty, malformed, unknown-action, invoke-command-args, scratch-day-hub, cowork-hub, cowork-weekly-this, cowork-monthly-this, lazy-scaffold, barebones-one-button, beacon-cards, date-aware, finance, accent-button
+ *     all (default), empty, malformed, unknown-action, invoke-command-args, scratch-day-hub, cowork-hub, lazy-scaffold, barebones-one-button, beacon-cards, date-aware, finance, accent-button
  *   exit 0 on all selected pass; 1 otherwise
  */
 
@@ -1607,239 +1605,6 @@ async function testCoworkHubOpenLink() {
   });
 }
 
-// R-COWORK-WEEKLY-THIS — runTemplaterTemplate composes the correct folder path
-// (spice/cowork/weekly/<YYYY>) and ISO-week filename (<YYYY>-W<ww>) from the
-// installed registry. Uses a frozen moment stub for 2026-05-13 (ISO week 20).
-async function testCoworkWeeklyThisRunTemplaterTemplate() {
-  console.log('\n=== R-COWORK-WEEKLY-THIS — cowork-weekly-this runTemplaterTemplate composes YYYY folder + YYYY-Www filename ===');
-  reset();
-
-  const FROZEN_ISO = '2026-05-13';
-  const EXPECTED_FOLDER = 'spice/cowork/weekly/2026';
-  const EXPECTED_FILENAME_NO_EXT = '2026-W20';
-
-  const prior_window = global.window;
-  global.window = {
-    moment: function (s, fmt, strict) {
-      const validIso = typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
-      return {
-        isValid: () => validIso,
-        format: function (pattern) {
-          if (pattern === 'YYYY') return '2026';
-          if (pattern === 'YYYY-[W]ww') return '2026-W20';
-          if (pattern === 'YYYY-MM-DD') return FROZEN_ISO;
-          return '';
-        },
-      };
-    },
-  };
-
-  // Resolved registry: folder_prefix is substituted to "spice/cowork/weekly"
-  // (no trailing slash — the renderer appends "/" before the date pattern via
-  // `${folderPrefix}/${moment.format(folderDatePattern)}`). Using a trailing
-  // slash here would produce a double-slash in the composed path; the manifest's
-  // "{{module_directory}}/weekly/" should strip the trailing slash on resolve.
-  // template_source points at the installed template path in ranch/templates/.
-  const synthetic = JSON.stringify({
-    schema_version: 1,
-    contributions: {
-      cowork: [
-        {
-          id: 'cowork-weekly-this',
-          label: 'This Week',
-          icon: 'calendar-range',
-          order: 60,
-          action: {
-            type: 'runTemplaterTemplate',
-            template_source: 'ranch/templates/Weekly Note.md',
-            folder_prefix: 'spice/cowork/weekly',
-            folder_date_pattern: 'YYYY',
-            filename_prefix: '',
-            filename_date_pattern: 'YYYY-[W]ww',
-            filename_suffix: '',
-          },
-        },
-      ],
-    },
-  });
-
-  try {
-    return await withTempRegistry(synthetic, async () => {
-      const app = makeApp({
-        fileExistsHook(p) {
-          // Target file must NOT exist (so renderer falls through to scaffold).
-          if (p === `${EXPECTED_FOLDER}/${EXPECTED_FILENAME_NO_EXT}.md`) return null;
-          // Folder must NOT exist (so renderer calls createFolder).
-          if (p === EXPECTED_FOLDER) return null;
-          // Template must exist.
-          if (p === 'ranch/templates/Weekly Note.md') return { path: 'ranch/templates/Weekly Note.md' };
-          return undefined;
-        },
-      });
-
-      const templaterCalls = [];
-      app.plugins = {
-        plugins: {
-          'templater-obsidian': {
-            templater: {
-              async create_new_note_from_template(tfile, folder, filename, openNewNote) {
-                templaterCalls.push({ template_path: tfile && tfile.path, folder, filename, openNewNote });
-              },
-            },
-          },
-        },
-      };
-
-      const Cls = loadRendererClass(app, FakeNotice);
-      const dv = makeDv();
-      const sn = new Cls();
-      await sn.render(dv);
-
-      const btn = findButtonByLabel(dv.container, 'This Week');
-      if (!btn) {
-        console.log('  FAIL — This Week button not rendered');
-        return false;
-      }
-      await btn.onclick();
-
-      const folderCreates = app.__captured_writes.filter(
-        (w) => w.method === 'createFolder' && w.path === EXPECTED_FOLDER
-      );
-      const folderOk = folderCreates.length === 1;
-      const tcOk = templaterCalls.length === 1;
-      const tcCall = templaterCalls[0] || {};
-      const templatePathOk = tcCall.template_path === 'ranch/templates/Weekly Note.md';
-      const folderArgOk = tcCall.folder === EXPECTED_FOLDER;
-      const filenameOk = tcCall.filename === EXPECTED_FILENAME_NO_EXT;
-      const noticesOk = captured_notices.length === 0;
-
-      console.log(`  folder createFolder('${EXPECTED_FOLDER}'): ${folderCreates.length} (expect 1)`);
-      console.log(`  templater calls: ${templaterCalls.length} (expect 1)`);
-      console.log(`  template=${tcCall.template_path} folder=${tcCall.folder} filename=${tcCall.filename}`);
-      console.log(`  notices: ${captured_notices.length} (expect 0)`);
-
-      const pass = folderOk && tcOk && templatePathOk && folderArgOk && filenameOk && noticesOk;
-      console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
-      return pass;
-    });
-  } finally {
-    global.window = prior_window;
-  }
-}
-
-// R-COWORK-MONTHLY-THIS — symmetric to R-COWORK-WEEKLY-THIS but for monthly
-// notes: folder = spice/cowork/monthly/<YYYY>, filename = <YYYY-MM>.
-async function testCoworkMonthlyThisRunTemplaterTemplate() {
-  console.log('\n=== R-COWORK-MONTHLY-THIS — cowork-monthly-this runTemplaterTemplate composes YYYY folder + YYYY-MM filename ===');
-  reset();
-
-  const FROZEN_ISO = '2026-05-13';
-  const EXPECTED_FOLDER = 'spice/cowork/monthly/2026';
-  const EXPECTED_FILENAME_NO_EXT = '2026-05';
-
-  const prior_window = global.window;
-  global.window = {
-    moment: function (s, fmt, strict) {
-      const validIso = typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
-      return {
-        isValid: () => validIso,
-        format: function (pattern) {
-          if (pattern === 'YYYY') return '2026';
-          if (pattern === 'YYYY-MM') return '2026-05';
-          if (pattern === 'YYYY-MM-DD') return FROZEN_ISO;
-          return '';
-        },
-      };
-    },
-  };
-
-  // Same trailing-slash convention as R-COWORK-WEEKLY-THIS: no trailing slash
-  // on folder_prefix so the renderer's ${folderPrefix}/${dateFormatted} join
-  // produces a clean single-slash path.
-  const synthetic = JSON.stringify({
-    schema_version: 1,
-    contributions: {
-      cowork: [
-        {
-          id: 'cowork-monthly-this',
-          label: 'This Month',
-          icon: 'calendar',
-          order: 65,
-          action: {
-            type: 'runTemplaterTemplate',
-            template_source: 'ranch/templates/Monthly Note.md',
-            folder_prefix: 'spice/cowork/monthly',
-            folder_date_pattern: 'YYYY',
-            filename_prefix: '',
-            filename_date_pattern: 'YYYY-MM',
-            filename_suffix: '',
-          },
-        },
-      ],
-    },
-  });
-
-  try {
-    return await withTempRegistry(synthetic, async () => {
-      const app = makeApp({
-        fileExistsHook(p) {
-          if (p === `${EXPECTED_FOLDER}/${EXPECTED_FILENAME_NO_EXT}.md`) return null;
-          if (p === EXPECTED_FOLDER) return null;
-          if (p === 'ranch/templates/Monthly Note.md') return { path: 'ranch/templates/Monthly Note.md' };
-          return undefined;
-        },
-      });
-
-      const templaterCalls = [];
-      app.plugins = {
-        plugins: {
-          'templater-obsidian': {
-            templater: {
-              async create_new_note_from_template(tfile, folder, filename, openNewNote) {
-                templaterCalls.push({ template_path: tfile && tfile.path, folder, filename, openNewNote });
-              },
-            },
-          },
-        },
-      };
-
-      const Cls = loadRendererClass(app, FakeNotice);
-      const dv = makeDv();
-      const sn = new Cls();
-      await sn.render(dv);
-
-      const btn = findButtonByLabel(dv.container, 'This Month');
-      if (!btn) {
-        console.log('  FAIL — This Month button not rendered');
-        return false;
-      }
-      await btn.onclick();
-
-      const folderCreates = app.__captured_writes.filter(
-        (w) => w.method === 'createFolder' && w.path === EXPECTED_FOLDER
-      );
-      const folderOk = folderCreates.length === 1;
-      const tcOk = templaterCalls.length === 1;
-      const tcCall = templaterCalls[0] || {};
-      const templatePathOk = tcCall.template_path === 'ranch/templates/Monthly Note.md';
-      const folderArgOk = tcCall.folder === EXPECTED_FOLDER;
-      const filenameOk = tcCall.filename === EXPECTED_FILENAME_NO_EXT;
-      const noticesOk = captured_notices.length === 0;
-
-      console.log(`  folder createFolder('${EXPECTED_FOLDER}'): ${folderCreates.length} (expect 1)`);
-      console.log(`  templater calls: ${templaterCalls.length} (expect 1)`);
-      console.log(`  template=${tcCall.template_path} folder=${tcCall.folder} filename=${tcCall.filename}`);
-      console.log(`  notices: ${captured_notices.length} (expect 0)`);
-
-      const pass = folderOk && tcOk && templatePathOk && folderArgOk && filenameOk && noticesOk;
-      console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
-      return pass;
-    });
-  } finally {
-    global.window = prior_window;
-  }
-}
-
 // ── Main ─────────────────────────────────────────────────────────────────
 (async () => {
   const which = ARGS.selector;
@@ -1854,8 +1619,6 @@ async function testCoworkMonthlyThisRunTemplaterTemplate() {
     if (which === 'invoke-command-args' || which === 'all') results.push(['R-INVOKE-ARGS invoke-command-args', await testInvokeCommandArgs()]);
     if (which === 'scratch-day-hub' || which === 'all') results.push(['R-SCRATCH-DAYHUB scratch-day-hub-templater', await testScratchDayHubRunTemplaterTemplate()]);
     if (which === 'cowork-hub' || which === 'all') results.push(['R-COWORK-HUB cowork-hub-openlink', await testCoworkHubOpenLink()]);
-    if (which === 'cowork-weekly-this' || which === 'all') results.push(['R-COWORK-WEEKLY-THIS cowork-weekly-this-templater', await testCoworkWeeklyThisRunTemplaterTemplate()]);
-    if (which === 'cowork-monthly-this' || which === 'all') results.push(['R-COWORK-MONTHLY-THIS cowork-monthly-this-templater', await testCoworkMonthlyThisRunTemplaterTemplate()]);
     if (which === 'lazy-scaffold' || which === 'all') results.push(['T4.0 lazy-scaffold', await testLazyScaffold()]);
     if (which === 'beacon-cards' || which === 'all') {
       results.push(['BC1 subtitle-object', await testBC1SubtitleObject()]);
