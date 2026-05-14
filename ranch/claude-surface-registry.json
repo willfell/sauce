@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-05-13T22:08:51.581Z",
-  "workshop_version": "0.41.0",
+  "generated_at": "2026-05-14T21:09:04.381Z",
+  "workshop_version": "0.44.0",
   "contributions": {
     "audit": [
       {
