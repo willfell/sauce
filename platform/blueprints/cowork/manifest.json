@@ -1,15 +1,60 @@
 {
   "name": "cowork",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "kind": "blueprint",
   "module_directory": "cowork",
   "engagement_types_dir": "engagement-types",
   "skills_dir": ".claude/skills/cowork",
-  "description": "Productizes the cowork automation layer as native Claude Code skills materialized to <vault>/.claude/skills/cowork/. 10 orchestrators (bootstrap-vault user-invoked + life: morning-briefing, midday-tripwire, eod-review, weekly-review, monthly-review + work: ero-morning, ero-eod, ero-weekly, ero-monthly) + 28 sub-skills.",
+  "description": "Engagement-aware automation layer + timeframe scaffolding. v0.4.0 (MINOR): adds Daily / Weekly / Monthly hub-and-spoke navigation surface — Daily Hub (cards over spice/daily/), Weekly Hub + weekly note shells at spice/cowork/weekly/, Monthly Hub + monthly note shells at spice/cowork/monthly/, four prompt-file stubs at spice/cowork/prompts/, three global nav-buttons (Cowork / This Week / This Month), two new slash commands (/weekly, /monthly), one new sub-skill cowork:scaffold-timeframes composed into bootstrap-vault, three new CustomJS hub-card helpers, six new rule_fragments. Pure-additive: no existing files removed; engagement system + summaries/ unchanged. v0.3.0 (MINOR): 10 orchestrators (bootstrap-vault user-invoked + life: morning-briefing, midday-tripwire, eod-review, weekly-review, monthly-review + work: ero-morning, ero-eod, ero-weekly, ero-monthly) + 28 sub-skills.",
+  "customjs_classes": [
+    "CoworkDailyHubCards",
+    "CoworkWeeklyHubCards",
+    "CoworkMonthlyHubCards"
+  ],
+  "nav_buttons": [
+    {
+      "id": "cowork-hub",
+      "label": "Cowork",
+      "icon": "users-round",
+      "order": 51,
+      "action": { "type": "openLink", "target": "{{module_directory}}/Cowork.md" }
+    },
+    {
+      "id": "cowork-weekly-this",
+      "label": "This Week",
+      "icon": "calendar-range",
+      "order": 60,
+      "action": {
+        "type": "runTemplaterTemplate",
+        "folder_prefix": "{{module_directory}}/weekly/",
+        "folder_date_pattern": "YYYY",
+        "filename_prefix": "",
+        "filename_date_pattern": "YYYY-[W]ww",
+        "filename_suffix": "",
+        "template": "Weekly Note"
+      }
+    },
+    {
+      "id": "cowork-monthly-this",
+      "label": "This Month",
+      "icon": "calendar",
+      "order": 65,
+      "action": {
+        "type": "runTemplaterTemplate",
+        "folder_prefix": "{{module_directory}}/monthly/",
+        "folder_date_pattern": "YYYY",
+        "filename_prefix": "",
+        "filename_date_pattern": "YYYY-MM",
+        "filename_suffix": "",
+        "template": "Monthly Note"
+      }
+    }
+  ],
   "depends_on": [
     { "name": "daily",           "range": ">=0.2.5" },
     { "name": "customjs-guard",  "range": ">=1.0.0" },
-    { "name": "nav-buttons",     "range": ">=2.5.3" }
+    { "name": "nav-buttons",     "range": ">=2.5.3" },
+    { "name": "cards",           "range": ">=0.2.4" }
   ],
   "files": [
     { "source": "content/Cowork.md",                                                            "dest": "{{module_directory}}/Cowork.md" },
@@ -39,7 +84,20 @@
 
     { "source": "content/context/engagement-shared-templates/active-threads.md",                "dest": "{{module_directory}}/context/engagement-shared-templates/active-threads.md" },
     { "source": "content/context/engagement-shared-templates/vault-config.md",                  "dest": "{{module_directory}}/context/engagement-shared-templates/vault-config.md" },
-    { "source": "content/context/engagement-shared-templates/weekly-snapshot.md",               "dest": "{{module_directory}}/context/engagement-shared-templates/weekly-snapshot.md" }
+    { "source": "content/context/engagement-shared-templates/weekly-snapshot.md",               "dest": "{{module_directory}}/context/engagement-shared-templates/weekly-snapshot.md" },
+
+    { "source": "content/Daily Hub.md",                                "dest": "{{module_directory}}/Daily Hub.md" },
+    { "source": "content/Weekly Hub.md",                               "dest": "{{module_directory}}/Weekly Hub.md" },
+    { "source": "content/Monthly Hub.md",                              "dest": "{{module_directory}}/Monthly Hub.md" },
+    { "source": "content/Weekly Note.md",                              "dest": "{{templates_path}}/Weekly Note.md" },
+    { "source": "content/Monthly Note.md",                             "dest": "{{templates_path}}/Monthly Note.md" },
+    { "source": "content/prompts/morning-briefing.md",                 "dest": "{{module_directory}}/prompts/morning-briefing.md" },
+    { "source": "content/prompts/eod-review.md",                       "dest": "{{module_directory}}/prompts/eod-review.md" },
+    { "source": "content/prompts/weekly-review.md",                    "dest": "{{module_directory}}/prompts/weekly-review.md" },
+    { "source": "content/prompts/monthly-review.md",                   "dest": "{{module_directory}}/prompts/monthly-review.md" },
+    { "source": "helpers/cowork-daily-hub-cards.js",                   "dest": "{{scripts_path}}/cowork/cowork-daily-hub-cards.js" },
+    { "source": "helpers/cowork-weekly-hub-cards.js",                  "dest": "{{scripts_path}}/cowork/cowork-weekly-hub-cards.js" },
+    { "source": "helpers/cowork-monthly-hub-cards.js",                 "dest": "{{scripts_path}}/cowork/cowork-monthly-hub-cards.js" }
   ],
   "claude_surface": [
     { "kind": "command", "source": "commands/cowork.md", "dest": ".claude/commands/cowork.md" },
@@ -77,7 +135,17 @@
     { "kind": "skill", "source": "skills/skills/update-active-projects/SKILL.md",                 "dest": "{{skills_dir}}/skills/update-active-projects/SKILL.md" },
     { "kind": "skill", "source": "skills/skills/update-weekly-snapshot/SKILL.md",                 "dest": "{{skills_dir}}/skills/update-weekly-snapshot/SKILL.md" },
     { "kind": "skill", "source": "skills/skills/patch-daily-callouts/SKILL.md",                   "dest": "{{skills_dir}}/skills/patch-daily-callouts/SKILL.md" },
-    { "kind": "skill", "source": "skills/skills/run-audit-receipt/SKILL.md",                      "dest": "{{skills_dir}}/skills/run-audit-receipt/SKILL.md" }
+    { "kind": "skill", "source": "skills/skills/run-audit-receipt/SKILL.md",                      "dest": "{{skills_dir}}/skills/run-audit-receipt/SKILL.md" },
+
+    { "kind": "command", "source": "commands/weekly.md",  "dest": ".claude/commands/weekly.md" },
+    { "kind": "command", "source": "commands/monthly.md", "dest": ".claude/commands/monthly.md" },
+
+    { "kind": "skill", "source": "skills/skills/scaffold-timeframes/SKILL.md", "dest": "{{skills_dir}}/skills/scaffold-timeframes/SKILL.md" },
+
+    { "kind": "claude_md_row", "table": "resolvers", "row": { "topic": "Cowork Daily Hub",   "path": "{{module_directory}}/Daily Hub.md",   "command": "/cowork" } },
+    { "kind": "claude_md_row", "table": "resolvers", "row": { "topic": "Cowork Weekly Hub",  "path": "{{module_directory}}/Weekly Hub.md",  "command": "/weekly hub" } },
+    { "kind": "claude_md_row", "table": "resolvers", "row": { "topic": "Cowork Monthly Hub", "path": "{{module_directory}}/Monthly Hub.md", "command": "/monthly hub" } },
+    { "kind": "claude_md_row", "table": "resolvers", "row": { "topic": "Cowork Prompts",     "path": "{{module_directory}}/prompts/",       "command": "/cowork prompts" } }
   ],
   "engagement_types": [
     { "id": "personal",   "manifest": "engagement-types/personal.json" },
@@ -153,7 +221,7 @@
   "post_install": [
     {
       "type": "notice",
-      "message": "cowork@0.1.0 installed. 37 skills materialized to <vault>/.claude/skills/cowork/. Open spice/cowork/Cowork.md for the hub. Cron orchestrators must be updated to invoke skills via 'cowork:<id>' (see Docs/plans/2026-05-10-v0.30.0-cowork-blueprint-result.md)."
+      "message": "cowork@0.4.0 installed. Timeframe surface scaffolded: spice/cowork/{Daily Hub,Weekly Hub,Monthly Hub}.md materialized; weekly/ + monthly/ directories created lazily on first note; 4 prompt stubs at spice/cowork/prompts/. Three new nav-buttons (Cowork / This Week / This Month); two new commands (/weekly /monthly); one new sub-skill cowork:scaffold-timeframes. Run cowork:scaffold-timeframes in a Claude session inside this vault to create this-week's + this-month's notes from templates (or it'll happen automatically next time you run cowork:bootstrap-vault). 38 sub-skills total (37 from v0.3.0 + scaffold-timeframes)."
     }
   ]
 }
