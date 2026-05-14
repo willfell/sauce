@@ -1,15 +1,16 @@
 {
   "name": "cowork",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "kind": "blueprint",
   "module_directory": "cowork",
   "engagement_types_dir": "engagement-types",
   "skills_dir": ".claude/skills/cowork",
-  "description": "Engagement-aware automation layer + timeframe scaffolding. v0.4.0 (MINOR): adds Daily / Weekly / Monthly hub-and-spoke navigation surface — Daily Hub (cards over spice/daily/), Weekly Hub + weekly note shells at spice/cowork/weekly/, Monthly Hub + monthly note shells at spice/cowork/monthly/, four prompt-file stubs at spice/cowork/prompts/, three global nav-buttons (Cowork / This Week / This Month), two new slash commands (/weekly, /monthly), one new sub-skill cowork:scaffold-timeframes composed into bootstrap-vault, three new CustomJS hub-card helpers, six new rule_fragments. Pure-additive: no existing files removed; engagement system + summaries/ unchanged. v0.3.0 (MINOR): 10 orchestrators (bootstrap-vault user-invoked + life: morning-briefing, midday-tripwire, eod-review, weekly-review, monthly-review + work: ero-morning, ero-eod, ero-weekly, ero-monthly) + 28 sub-skills.",
+  "description": "Engagement-aware automation layer + timeframe scaffolding. v0.5.0 (MINOR): consolidates global nav footprint to 1 button (cowork-hub); the v0.4.0 cowork-weekly-this + cowork-monthly-this global nav-buttons are removed and their open-or-create-this-period behavior re-materializes inside Cowork.md as 2 of 5 BeaconCards in the Timeframes section (5-card row: Daily Hub | Weekly Hub | This Week → | Monthly Hub | This Month →). New CustomJS class CoworkTimeframeButtons mirrors space-nav-buttons.js runTemplaterTemplate semantics for the 2 create-this-period cards. Pure-additive otherwise — no path conventions changed, no skill APIs changed, no rule_fragments changed. v0.4.0 (MINOR): timeframe scaffolding — Daily / Weekly / Monthly hub-and-spoke, weekly + monthly note shells, prompt stubs, scaffold-timeframes sub-skill. v0.3.0 (MINOR): 10 orchestrators + 28 sub-skills.",
   "customjs_classes": [
     "CoworkDailyHubCards",
     "CoworkWeeklyHubCards",
-    "CoworkMonthlyHubCards"
+    "CoworkMonthlyHubCards",
+    "CoworkTimeframeButtons"
   ],
   "nav_buttons": [
     {
@@ -18,36 +19,6 @@
       "icon": "users-round",
       "order": 51,
       "action": { "type": "openLink", "target": "{{module_directory}}/Cowork.md" }
-    },
-    {
-      "id": "cowork-weekly-this",
-      "label": "This Week",
-      "icon": "calendar-range",
-      "order": 60,
-      "action": {
-        "type": "runTemplaterTemplate",
-        "folder_prefix": "{{module_directory}}/weekly",
-        "folder_date_pattern": "YYYY",
-        "filename_prefix": "",
-        "filename_date_pattern": "YYYY-[W]ww",
-        "filename_suffix": "",
-        "template_source": "Weekly Note.md"
-      }
-    },
-    {
-      "id": "cowork-monthly-this",
-      "label": "This Month",
-      "icon": "calendar",
-      "order": 65,
-      "action": {
-        "type": "runTemplaterTemplate",
-        "folder_prefix": "{{module_directory}}/monthly",
-        "folder_date_pattern": "YYYY",
-        "filename_prefix": "",
-        "filename_date_pattern": "YYYY-MM",
-        "filename_suffix": "",
-        "template_source": "Monthly Note.md"
-      }
     }
   ],
   "depends_on": [
@@ -97,7 +68,8 @@
     { "source": "content/prompts/monthly-review.md",                   "dest": "{{module_directory}}/prompts/monthly-review.md" },
     { "source": "helpers/cowork-daily-hub-cards.js",                   "dest": "{{scripts_path}}/cowork/cowork-daily-hub-cards.js" },
     { "source": "helpers/cowork-weekly-hub-cards.js",                  "dest": "{{scripts_path}}/cowork/cowork-weekly-hub-cards.js" },
-    { "source": "helpers/cowork-monthly-hub-cards.js",                 "dest": "{{scripts_path}}/cowork/cowork-monthly-hub-cards.js" }
+    { "source": "helpers/cowork-monthly-hub-cards.js",                 "dest": "{{scripts_path}}/cowork/cowork-monthly-hub-cards.js" },
+    { "source": "helpers/cowork-timeframe-buttons.js",                 "dest": "{{scripts_path}}/cowork/cowork-timeframe-buttons.js" }
   ],
   "claude_surface": [
     { "kind": "command", "source": "commands/cowork.md", "dest": ".claude/commands/cowork.md" },
@@ -287,7 +259,7 @@
   "post_install": [
     {
       "type": "notice",
-      "message": "cowork@0.4.0 installed. Timeframe surface scaffolded: spice/cowork/{Daily Hub,Weekly Hub,Monthly Hub}.md materialized; weekly/ + monthly/ directories created lazily on first note; 4 prompt stubs at spice/cowork/prompts/. Three new nav-buttons (Cowork / This Week / This Month); two new commands (/weekly /monthly); one new sub-skill cowork:scaffold-timeframes. Run cowork:scaffold-timeframes in a Claude session inside this vault to create this-week's + this-month's notes from templates (or it'll happen automatically next time you run cowork:bootstrap-vault). 38 sub-skills total (37 from v0.3.0 + scaffold-timeframes)."
+      "message": "cowork@0.5.0 installed. Global nav-bar footprint reduced: only the Cowork button remains (the v0.4.0 This Week + This Month global buttons are removed). Their open-or-create behavior is now inside spice/cowork/Cowork.md as 2 of 5 cards in the Timeframes section (Daily Hub | Weekly Hub | This Week → | Monthly Hub | This Month →). Path conventions unchanged (spice/cowork/{weekly,monthly}/YYYY/...) — existing weekly/monthly notes still open via the new cards. Re-render Cowork.md to see the new section."
     }
   ]
 }
