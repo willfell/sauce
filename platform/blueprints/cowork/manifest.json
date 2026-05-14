@@ -1,17 +1,18 @@
 {
   "name": "cowork",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "kind": "blueprint",
   "module_directory": "cowork",
   "engagement_types_dir": "engagement-types",
   "skills_dir": ".claude/skills/cowork",
-  "description": "Engagement-aware automation layer + timeframe scaffolding. v0.6.0 (MINOR): UX polish + character pass — strips documentation prose from the Cowork.md hub (What is cowork? · Skills · Context · Getting started) and relocates it to a new About Cowork.md file; adds a new CoworkHubNav CustomJS class rendering a 4-card cross-hub nav row (Cowork | Daily Hub | Weekly Hub | Monthly Hub) at the top of all 4 cowork hubs (replacing the v0.4.0 markdown text-link row); fixes the BeaconCards API mismatch in cowork-{daily,weekly,monthly}-hub-cards.js (items/titleField → pages/title) that was rendering 'Nothing here yet' under every month/year heading; drops the dead empty-state callouts that referenced retired v0.4.0 nav-buttons; drops the → arrow glyph from the Timeframes row's create-this-period labels; swaps the nav-bar icon from users-round (unknown — fell back to a 'C' letter) to briefcase (added to nav-buttons@2.6.2's ICONS map). v0.5.0 (MINOR): consolidates global nav footprint to 1 button. v0.4.0 (MINOR): timeframe scaffolding. v0.3.0 (MINOR): 10 orchestrators + 28 sub-skills.",
+  "description": "Engagement-aware automation layer + self-contained timeframe system. v0.7.0 (MINOR): cowork is now self-contained — NEW path convention spice/cowork/daily/YYYY/MM-MMMM/YYYY-MM-DD.md for cowork-owned daily notes; NEW CoworkDailyActions CustomJS class + Daily Note.md Templater template wire the create-flow; cowork-daily-hub-cards retargets from spice/daily → spice/cowork/daily (closes the daily-blueprint cross-reach); CoworkHubNav rewritten from BeaconCards 4-card row → AccentButton centered flex row (matches ScratchDayActions aesthetic), drops 'you are here', OMITS the current-hub button so each hub renders 3 buttons pointing at the other 3; universal nav-pattern (SpaceNavButtons → --- → CoworkHubNav → --- → content) across all 5 hubs + 3 note templates; Weekly/Monthly Note templates compute friendly H1 titles via Templater (Week 20 · May 11–17, 2026 / May 2026); Daily Note H1 (Thursday, May 14, 2026); Timeframes row grows 5 → 6 cards (Daily Hub | Today | Weekly Hub | This Week | Monthly Hub | This Month); NEW cowork-daily rule_fragment. v0.6.0 (MINOR v0.44.0): UX polish + character pass. v0.5.0: nav consolidation. v0.4.0: timeframe scaffolding. v0.3.0: 10 orchestrators + 28 sub-skills.",
   "customjs_classes": [
     "CoworkDailyHubCards",
     "CoworkWeeklyHubCards",
     "CoworkMonthlyHubCards",
     "CoworkTimeframeButtons",
-    "CoworkHubNav"
+    "CoworkHubNav",
+    "CoworkDailyActions"
   ],
   "nav_buttons": [
     {
@@ -26,7 +27,8 @@
     { "name": "daily",           "range": ">=0.2.5" },
     { "name": "customjs-guard",  "range": ">=1.0.0" },
     { "name": "nav-buttons",     "range": ">=2.6.2" },
-    { "name": "cards",           "range": ">=0.2.4" }
+    { "name": "cards",           "range": ">=0.2.4" },
+    { "name": "accent-button",   "range": ">=0.1.0" }
   ],
   "files": [
     { "source": "content/Cowork.md",                                                            "dest": "{{module_directory}}/Cowork.md" },
@@ -72,7 +74,9 @@
     { "source": "helpers/cowork-monthly-hub-cards.js",                 "dest": "{{scripts_path}}/cowork/cowork-monthly-hub-cards.js" },
     { "source": "helpers/cowork-timeframe-buttons.js",                 "dest": "{{scripts_path}}/cowork/cowork-timeframe-buttons.js" },
     { "source": "content/About Cowork.md",                            "dest": "{{module_directory}}/About Cowork.md" },
-    { "source": "helpers/cowork-hub-nav.js",                          "dest": "{{scripts_path}}/cowork/cowork-hub-nav.js" }
+    { "source": "helpers/cowork-hub-nav.js",                          "dest": "{{scripts_path}}/cowork/cowork-hub-nav.js" },
+    { "source": "content/Daily Note.md",                              "dest": "{{templates_path}}/Daily Note.md" },
+    { "source": "helpers/cowork-daily-actions.js",                    "dest": "{{scripts_path}}/cowork/cowork-daily-actions.js" }
   ],
   "claude_surface": [
     { "kind": "command", "source": "commands/cowork.md", "dest": ".claude/commands/cowork.md" },
@@ -258,6 +262,19 @@
     {
       "target": "cowork",
       "fragment": {
+        "scope": { "path_glob": "spice/cowork/daily/**/*.md" },
+        "required_frontmatter": {
+          "type":      { "required": true, "type": "string", "equals": "cowork-daily" },
+          "day":       { "required": true, "type": "string", "matches": "^\\d{4}-\\d{2}-\\d{2}$" },
+          "created":   { "required": true, "type": "string" }
+        },
+        "required_tags": [{ "tag": "cowork-daily" }],
+        "naming_pattern": "^\\d{4}-\\d{2}-\\d{2}\\.md$"
+      }
+    },
+    {
+      "target": "cowork",
+      "fragment": {
         "scope": { "path_glob": "spice/cowork/prompts/*.md" },
         "required_frontmatter": {
           "type":       { "required": true, "type": "string", "equals": "cowork-prompt" },
@@ -271,7 +288,7 @@
   "post_install": [
     {
       "type": "notice",
-      "message": "cowork@0.6.0 installed. UX polish + character pass: nav-bar icon is now a briefcase (was 'C' letter fallback); Cowork.md hub strips documentation prose to a new About Cowork.md (one card at the bottom of the hub opens it); all 4 cowork hubs (Cowork / Daily / Weekly / Monthly) get a 4-card cross-hub nav row at the top via the new CoworkHubNav helper; the broken 'Nothing here yet' repeats under every month in the sub-hubs are fixed (BeaconCards API mismatch). Re-render the 4 cowork hubs to see all changes."
+      "message": "cowork@0.7.0 installed. Self-contained pass: cowork now owns its own daily notes at spice/cowork/daily/YYYY/MM-MMMM/YYYY-MM-DD.md (mirrors daily-blueprint shape but inside cowork's own dir). NEW CoworkDailyActions helper renders a '+ Today' button on the Daily Hub. CoworkHubNav rewrites to AccentButton-row aesthetic (matches scratch); drops 'you are here'; OMITS the current-hub button. All 5 cowork hubs + 3 note templates carry the universal nav-pattern (SpaceNavButtons → --- → CoworkHubNav → --- → content). Weekly/Monthly/Daily note templates compute friendly H1 titles via Templater. Timeframes row 5 → 6 cards. Re-render all cowork notes to see the new layout."
     }
   ]
 }
