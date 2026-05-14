@@ -3,10 +3,12 @@ type: cowork-weekly-hub
 tags: [cowork-hub, weekly-hub]
 ---
 
-> [[Cowork|◀ Cowork]] · [[Daily Hub]] · [[Weekly Hub]] · [[Monthly Hub]]
+```dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "CoworkHubNav" });
+```
 
 # Weekly Notes
 
 ```dataviewjs
-await dv.view("{{views_path}}/customjs-guard", { class: "CoworkWeeklyHubCards" });
+await dv.view("ranch/views/customjs-guard", { class: "CoworkWeeklyHubCards" });
 ```
