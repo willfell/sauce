@@ -1,22 +1,23 @@
 {
   "name": "cowork",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "kind": "blueprint",
   "module_directory": "cowork",
   "engagement_types_dir": "engagement-types",
   "skills_dir": ".claude/skills/cowork",
-  "description": "Engagement-aware automation layer + timeframe scaffolding. v0.5.0 (MINOR): consolidates global nav footprint to 1 button (cowork-hub); the v0.4.0 cowork-weekly-this + cowork-monthly-this global nav-buttons are removed and their open-or-create-this-period behavior re-materializes inside Cowork.md as 2 of 5 BeaconCards in the Timeframes section (5-card row: Daily Hub | Weekly Hub | This Week → | Monthly Hub | This Month →). New CustomJS class CoworkTimeframeButtons mirrors space-nav-buttons.js runTemplaterTemplate semantics for the 2 create-this-period cards. Pure-additive otherwise — no path conventions changed, no skill APIs changed, no rule_fragments changed. v0.4.0 (MINOR): timeframe scaffolding — Daily / Weekly / Monthly hub-and-spoke, weekly + monthly note shells, prompt stubs, scaffold-timeframes sub-skill. v0.3.0 (MINOR): 10 orchestrators + 28 sub-skills.",
+  "description": "Engagement-aware automation layer + timeframe scaffolding. v0.6.0 (MINOR): UX polish + character pass — strips documentation prose from the Cowork.md hub (What is cowork? · Skills · Context · Getting started) and relocates it to a new About Cowork.md file; adds a new CoworkHubNav CustomJS class rendering a 4-card cross-hub nav row (Cowork | Daily Hub | Weekly Hub | Monthly Hub) at the top of all 4 cowork hubs (replacing the v0.4.0 markdown text-link row); fixes the BeaconCards API mismatch in cowork-{daily,weekly,monthly}-hub-cards.js (items/titleField → pages/title) that was rendering 'Nothing here yet' under every month/year heading; drops the dead empty-state callouts that referenced retired v0.4.0 nav-buttons; drops the → arrow glyph from the Timeframes row's create-this-period labels; swaps the nav-bar icon from users-round (unknown — fell back to a 'C' letter) to briefcase (added to nav-buttons@2.6.2's ICONS map). v0.5.0 (MINOR): consolidates global nav footprint to 1 button. v0.4.0 (MINOR): timeframe scaffolding. v0.3.0 (MINOR): 10 orchestrators + 28 sub-skills.",
   "customjs_classes": [
     "CoworkDailyHubCards",
     "CoworkWeeklyHubCards",
     "CoworkMonthlyHubCards",
-    "CoworkTimeframeButtons"
+    "CoworkTimeframeButtons",
+    "CoworkHubNav"
   ],
   "nav_buttons": [
     {
       "id": "cowork-hub",
       "label": "Cowork",
-      "icon": "users-round",
+      "icon": "briefcase",
       "order": 51,
       "action": { "type": "openLink", "target": "{{module_directory}}/Cowork.md" }
     }
@@ -24,7 +25,7 @@
   "depends_on": [
     { "name": "daily",           "range": ">=0.2.5" },
     { "name": "customjs-guard",  "range": ">=1.0.0" },
-    { "name": "nav-buttons",     "range": ">=2.5.3" },
+    { "name": "nav-buttons",     "range": ">=2.6.2" },
     { "name": "cards",           "range": ">=0.2.4" }
   ],
   "files": [
@@ -69,7 +70,9 @@
     { "source": "helpers/cowork-daily-hub-cards.js",                   "dest": "{{scripts_path}}/cowork/cowork-daily-hub-cards.js" },
     { "source": "helpers/cowork-weekly-hub-cards.js",                  "dest": "{{scripts_path}}/cowork/cowork-weekly-hub-cards.js" },
     { "source": "helpers/cowork-monthly-hub-cards.js",                 "dest": "{{scripts_path}}/cowork/cowork-monthly-hub-cards.js" },
-    { "source": "helpers/cowork-timeframe-buttons.js",                 "dest": "{{scripts_path}}/cowork/cowork-timeframe-buttons.js" }
+    { "source": "helpers/cowork-timeframe-buttons.js",                 "dest": "{{scripts_path}}/cowork/cowork-timeframe-buttons.js" },
+    { "source": "content/About Cowork.md",                            "dest": "{{module_directory}}/About Cowork.md" },
+    { "source": "helpers/cowork-hub-nav.js",                          "dest": "{{scripts_path}}/cowork/cowork-hub-nav.js" }
   ],
   "claude_surface": [
     { "kind": "command", "source": "commands/cowork.md", "dest": ".claude/commands/cowork.md" },
@@ -117,7 +120,8 @@
     { "kind": "claude_md_row", "table": "resolvers", "row": { "topic": "Cowork Daily Hub",   "path": "{{module_directory}}/Daily Hub.md",   "command": "/cowork" } },
     { "kind": "claude_md_row", "table": "resolvers", "row": { "topic": "Cowork Weekly Hub",  "path": "{{module_directory}}/Weekly Hub.md",  "command": "/weekly hub" } },
     { "kind": "claude_md_row", "table": "resolvers", "row": { "topic": "Cowork Monthly Hub", "path": "{{module_directory}}/Monthly Hub.md", "command": "/monthly hub" } },
-    { "kind": "claude_md_row", "table": "resolvers", "row": { "topic": "Cowork Prompts",     "path": "{{module_directory}}/prompts/",       "command": "/cowork prompts" } }
+    { "kind": "claude_md_row", "table": "resolvers", "row": { "topic": "Cowork Prompts",     "path": "{{module_directory}}/prompts/",       "command": "/cowork prompts" } },
+    { "kind": "claude_md_row", "table": "resolvers", "row": { "topic": "Cowork About", "path": "{{module_directory}}/About Cowork.md", "command": "/cowork about" } }
   ],
   "engagement_types": [
     { "id": "personal",   "manifest": "engagement-types/personal.json" },
@@ -216,6 +220,14 @@
     {
       "target": "cowork",
       "fragment": {
+        "scope": { "path_glob": "spice/cowork/About Cowork.md" },
+        "required_frontmatter": { "type": { "required": true, "type": "string", "equals": "cowork-about" } },
+        "required_tags": [{ "tag": "cowork-about" }]
+      }
+    },
+    {
+      "target": "cowork",
+      "fragment": {
         "scope": { "path_glob": "spice/cowork/weekly/**/*.md" },
         "required_frontmatter": {
           "type":       { "required": true, "type": "string", "equals": "cowork-weekly" },
@@ -259,7 +271,7 @@
   "post_install": [
     {
       "type": "notice",
-      "message": "cowork@0.5.0 installed. Global nav-bar footprint reduced: only the Cowork button remains (the v0.4.0 This Week + This Month global buttons are removed). Their open-or-create behavior is now inside spice/cowork/Cowork.md as 2 of 5 cards in the Timeframes section (Daily Hub | Weekly Hub | This Week → | Monthly Hub | This Month →). Path conventions unchanged (spice/cowork/{weekly,monthly}/YYYY/...) — existing weekly/monthly notes still open via the new cards. Re-render Cowork.md to see the new section."
+      "message": "cowork@0.6.0 installed. UX polish + character pass: nav-bar icon is now a briefcase (was 'C' letter fallback); Cowork.md hub strips documentation prose to a new About Cowork.md (one card at the bottom of the hub opens it); all 4 cowork hubs (Cowork / Daily / Weekly / Monthly) get a 4-card cross-hub nav row at the top via the new CoworkHubNav helper; the broken 'Nothing here yet' repeats under every month in the sub-hubs are fixed (BeaconCards API mismatch). Re-render the 4 cowork hubs to see all changes."
     }
   ]
 }
