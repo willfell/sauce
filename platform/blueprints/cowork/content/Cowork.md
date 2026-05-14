@@ -47,25 +47,7 @@ if (gaps.length > 0) {
 ## Timeframes
 
 ```dataviewjs
-const subs = [
-  { name: "Daily Hub",   path: "spice/cowork/Daily Hub.md",   blurb: "Card index of dailies (spice/daily/**/*.md)" },
-  { name: "Weekly Hub",  path: "spice/cowork/Weekly Hub.md",  blurb: "Card index of weekly notes (spice/cowork/weekly/)" },
-  { name: "Monthly Hub", path: "spice/cowork/Monthly Hub.md", blurb: "Card index of monthly notes (spice/cowork/monthly/)" }
-];
-const cardItems = subs.map(s => ({
-  file: { name: s.name, path: s.path, mtime: null },
-  _blurb: s.blurb
-}));
-if (typeof window.customJS !== "undefined" && window.customJS.BeaconCards) {
-  await window.customJS.BeaconCards.render(dv, {
-    items: cardItems,
-    titleField: p => p.file.name,
-    subtitleField: p => p._blurb,
-    linkField: p => p.file.path
-  });
-} else {
-  for (const s of subs) dv.paragraph(`- [[${s.path}|${s.name}]] — ${s.blurb}`);
-}
+await dv.view("ranch/views/customjs-guard", { class: "CoworkTimeframeButtons" });
 ```
 
 ---
