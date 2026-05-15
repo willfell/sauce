@@ -1,9 +1,9 @@
 {
   "name": "finance",
-  "version": "0.2.10",
+  "version": "0.3.0",
   "kind": "blueprint",
   "module_directory": "finance",
-  "description": "Finance blueprint covering Budgets + Paychecks + Invoices under spice/finance/. Top hub Finance.md aggregates pending items from all three sub-areas. Budgets/Paychecks are flat dated entities; Invoices use a per-month folder ecosystem mirroring trips/<slug>/. Status pills (Planning/In Progress/Done) derived from frontmatter via shared FinanceStatus helper. v0.2.7 PATCH: 8 outline-accent button call sites migrated to customJS.AccentButton.render. v0.2.8 PATCH (in-cycle CF-1): InvoiceControls Save now also recomputes amount = round(rate * hours, 2) on save; Save's enabled state additionally considers amount drift (enabled when stored amount != rate * hours) so stale-amount entities can be re-synced without changing the rate. Misleading caveat note removed. v0.46.0 S8 (finance@0.2.10 retained until S10): Budget create flow migrated to entity-create@0.1.0; NewBudgetButton class deleted. v0.46.0 S9 (finance@0.2.10 retained until S10): Paycheck create flow migrated; exercises date/number prompt types + validate gte/min predicates + |number substitution pipe.",
+  "description": "Finance blueprint covering Budgets + Paychecks + Invoices under spice/finance/. Top hub Finance.md aggregates pending items from all three sub-areas. Budgets/Paychecks are flat dated entities; Invoices use a per-month folder ecosystem mirroring trips/<slug>/. Status pills (Planning/In Progress/Done) derived from frontmatter via shared FinanceStatus helper. v0.2.7 PATCH: 8 outline-accent button call sites migrated to customJS.AccentButton.render. v0.2.8 PATCH (in-cycle CF-1): InvoiceControls Save now also recomputes amount = round(rate * hours, 2) on save; Save's enabled state additionally considers amount drift (enabled when stored amount != rate * hours) so stale-amount entities can be re-synced without changing the rate. Misleading caveat note removed. v0.3.0 MINOR (v0.46.0 S8+S9+S10): three New*Button classes (NewBudgetButton/NewPaycheckButton/NewInvoiceButton) deleted; manifest declares new_entity_buttons[] entries for budget/paycheck/invoice via entity-create@0.1.0 mechanism — schema extensions exercised: month/number prompt types, validate gte/min predicates, |number substitution pipe, inline_body, extra_files[] (invoice scaffolds Time-Log + Board sidecars). Total ~500 LOC of overlay-dialog code retired.",
   "depends_on": [
     { "name": "nav-buttons",    "range": ">=2.5.2" },
     { "name": "cards",          "range": ">=0.2.3" },
@@ -17,7 +17,6 @@
     "BudgetsCards",
     "PaychecksCards",
     "InvoicesCards",
-    "NewInvoiceButton",
     "InvoiceNavButtons",
     "FinanceFrontmatter",
     "BudgetNavButtons",
@@ -33,7 +32,6 @@
     { "source": "helpers/budgets-cards.js",        "dest": "{{scripts_path}}/finance/budgets-cards.js" },
     { "source": "helpers/paychecks-cards.js",      "dest": "{{scripts_path}}/finance/paychecks-cards.js" },
     { "source": "helpers/invoices-cards.js",       "dest": "{{scripts_path}}/finance/invoices-cards.js" },
-    { "source": "helpers/new-invoice-button.js",   "dest": "{{scripts_path}}/finance/new-invoice-button.js" },
     { "source": "helpers/invoice-nav-buttons.js",  "dest": "{{scripts_path}}/finance/invoice-nav-buttons.js" },
     { "source": "helpers/finance-frontmatter.js",       "dest": "{{scripts_path}}/finance/finance-frontmatter.js" },
     { "source": "helpers/budget-nav-buttons.js",        "dest": "{{scripts_path}}/finance/budget-nav-buttons.js" },
@@ -132,6 +130,59 @@
       },
       "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PaycheckNavButtons\" });\n```\n\n```dataviewjs\nawait customJS.FinanceStatus.renderBadge(dv, \"paycheck\");\n```\n\n## Expenses\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PaycheckExpensesEditor\" });\n```\n",
       "render_in": { "kind": "hub", "target_path": "content/Paychecks.md" }
+    },
+    {
+      "id": "invoice",
+      "label": "New Invoice",
+      "icon": "file-plus",
+      "prompts": [
+        { "key": "month", "label": "Month", "type": "month", "required": true, "default": "{{now.YYYY-MM}}" }
+      ],
+      "destination": {
+        "folder_prefix": "spice/finance/invoices/{{prompts.month}}",
+        "filename_prefix": "Invoice-{{prompts.month}}"
+      },
+      "frontmatter_template": {
+        "type": "invoice",
+        "month": "{{prompts.month}}",
+        "date": "{{prompts.month}}-01",
+        "rate": 0,
+        "hours": 0,
+        "amount": 0,
+        "submitted_date": null,
+        "created": "{{now.YYYY-MM-DD}}",
+        "tags": ["finance", "invoice"],
+        "cssclasses": ["wide"]
+      },
+      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"InvoiceNavButtons\" });\n```\n\n```dataviewjs\nawait customJS.FinanceStatus.renderBadge(dv, \"invoice\");\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"InvoiceControls\" });\n```\n",
+      "extra_files": [
+        {
+          "filename_pattern": "Time-Log-{{prompts.month}}.md",
+          "frontmatter_template": {
+            "type": "time-log",
+            "month": "{{prompts.month}}",
+            "date": "{{prompts.month}}-01",
+            "total_hours": 0,
+            "entries": [],
+            "created": "{{now.YYYY-MM-DD}}",
+            "tags": ["finance", "time-log"],
+            "cssclasses": ["wide"]
+          },
+          "inline_body": "%% nav buttons rendered conditionally — suppressed when this note is embedded elsewhere %%\n```dataviewjs\nconst isEmbedded = dv.container.closest(\".markdown-embed\") != null;\nif (!isEmbedded) {\n    await dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n    await dv.view(\"ranch/views/customjs-guard\", { class: \"InvoiceNavButtons\" });\n}\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"InvoiceTimeLogEditor\" });\n```\n"
+        },
+        {
+          "filename_pattern": "Board-{{prompts.month}}.md",
+          "subfolder": "board",
+          "frontmatter_template": {
+            "kanban-plugin": "board",
+            "title": "Invoice {{prompts.month}} Board",
+            "type": "kanban",
+            "tags": ["board", "finance", "invoice/{{prompts.month}}"]
+          },
+          "inline_body": "## To Do\n\n## In Progress\n\n## Completed\n\n%% kanban:settings\n```\n{\"kanban-plugin\":\"board\",\"list-collapse\":[false,false,false],\"new-note-folder\":\"spice/finance/invoices/{{prompts.month}}/board\",\"new-note-template\":\"ranch/templates/Template, Invoice Board Card.md\"}\n```\n%%\n"
+        }
+      ],
+      "render_in": { "kind": "hub", "target_path": "content/Invoices.md" }
     }
   ],
   "rule_fragments": []
