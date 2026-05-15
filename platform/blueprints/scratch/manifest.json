@@ -1,10 +1,10 @@
 {
   "name": "scratch",
-  "version": "0.2.6",
+  "version": "0.3.0",
   "kind": "blueprint",
   "module_directory": "scratch",
   "skills_dir": ".claude/skills/scratch",
-  "description": "Low-friction quick-capture scratch notes. Per-day sub-folders under spice/scratch/YYYY/MM-MMMM/YYYY-MM-DD/. v0.2.0 redesign: nav-button opens-or-creates today's day-hub Scratch-Day-YYYY-MM-DD.md (collision-free with daily note); day-hub embeds ScratchNewButton (helper using customJS.AccentButton) for timestamped Scratch-YYYY-MM-DD-HH-mm.md siblings; ScratchHubCards target path fixed. v0.2.1 patch: (a) Scratch Day Hub.md ScratchDayList args wrapped in array (customjs-guard requires Array); (b) nav-button icon set to 'scratch' (new ICONS entry in nav-buttons@2.6.1). v0.2.2 patch: (a) frontmatter date values now quoted (Obsidian auto-parses unquoted YYYY-MM-DD to Date objects, broke dv.current().day === string equality); (b) ScratchDayList + new ScratchDayActions helpers normalize day across string/Date/Luxon via _coerceDay shim; (c) Scratch Day Hub.md replaces stacked ScratchNewButton + markdown Hub link with single ScratchDayActions helper that renders + New Scratch and Hub buttons inline below the nav row.",
+  "description": "Low-friction quick-capture scratch notes. Per-day sub-folders under spice/scratch/YYYY/MM-MMMM/YYYY-MM-DD/. v0.2.0 redesign: nav-button opens-or-creates today's day-hub Scratch-Day-YYYY-MM-DD.md (collision-free with daily note); day-hub embeds ScratchNewButton (helper using customJS.AccentButton) for timestamped Scratch-YYYY-MM-DD-HH-mm.md siblings; ScratchHubCards target path fixed. v0.2.1 patch: (a) Scratch Day Hub.md ScratchDayList args wrapped in array (customjs-guard requires Array); (b) nav-button icon set to 'scratch' (new ICONS entry in nav-buttons@2.6.1). v0.2.2 patch: (a) frontmatter date values now quoted (Obsidian auto-parses unquoted YYYY-MM-DD to Date objects, broke dv.current().day === string equality); (b) ScratchDayList + new ScratchDayActions helpers normalize day across string/Date/Luxon via _coerceDay shim; (c) Scratch Day Hub.md replaces stacked ScratchNewButton + markdown Hub link with single ScratchDayActions helper that renders + New Scratch and Hub buttons inline below the nav row. v0.3.0 MINOR: migrate create flow to entity-create@0.1.0; delete legacy helpers/scratch-new-button.js (unreferenced since v0.2.2); trim ScratchDayActions to Hub-button-only (newScratch + _openTitleDialog + _buildScratchBody removed); Scratch Day Hub.md gains <!-- entity-create:scratch --> marker adjacent to ScratchDayActions block; new_entity_buttons[] entry with Path C body_template treatment (body_template dropped — Scratch.md uses Templater <%* %> syntax incompatible with entity-create; inline_body carries SpaceNavButtons + ScratchLeafActions dataviewjs blocks); {{current_file.frontmatter.day}} substitution token exercises schema extension #2 (day-hub frontmatter seeds per-scratch folder + filename).",
   "depends_on": [
     {
       "name": "nav-buttons",
@@ -30,7 +30,6 @@
   "customjs_classes": [
     "ScratchHubCards",
     "ScratchDayList",
-    "ScratchNewButton",
     "ScratchDayActions",
     "ScratchLeafActions",
     "ScratchHubActions"
@@ -55,10 +54,6 @@
     {
       "source": "helpers/scratch-day-list.js",
       "dest": "{{scripts_path}}/scratch/scratch-day-list.js"
-    },
-    {
-      "source": "helpers/scratch-new-button.js",
-      "dest": "{{scripts_path}}/scratch/scratch-new-button.js"
     },
     {
       "source": "helpers/scratch-day-actions.js",
@@ -109,6 +104,29 @@
         "filename_date_pattern": "YYYY-MM-DD",
         "filename_suffix": ""
       }
+    }
+  ],
+  "new_entity_buttons": [
+    {
+      "id": "scratch",
+      "label": "+ New Scratch",
+      "icon": "pencil-plus",
+      "prompts": [
+        { "key": "title", "label": "Scratch title (optional)", "type": "string", "required": false }
+      ],
+      "destination": {
+        "folder_prefix": "spice/scratch/{{current_file.frontmatter.day}}-routed",
+        "filename_prefix": "Scratch-{{current_file.frontmatter.day}}-",
+        "filename_date_pattern": "HH-mm",
+        "filename_suffix": ""
+      },
+      "frontmatter_template": {
+        "type": "scratch",
+        "day": "{{current_file.frontmatter.day}}",
+        "created": "{{now.YYYY-MM-DDTHH:mm:ss}}"
+      },
+      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n---\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ScratchLeafActions\" });\n```\n\n---\n",
+      "render_in": { "kind": "hub", "target_path": "templates/Scratch Day Hub.md" }
     }
   ],
   "templater_folder_templates": [

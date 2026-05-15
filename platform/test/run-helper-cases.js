@@ -4067,7 +4067,7 @@ async function caseSHCS1ManifestFields() {
   assertTrue("SHC-S1: scratch/manifest.json exists on disk", fs.existsSync(p));
   const m = _readJson(p);
   assertEqual(m.name, "scratch", "SHC-S1: manifest.name === \"scratch\"");
-  assertEqual(m.version, "0.2.6", "SHC-S1: manifest.version === \"0.2.4\"");
+  assertEqual(m.version, "0.3.0", "SHC-S1: manifest.version === \"0.3.0\"");
   assertEqual(m.module_directory, "scratch", "SHC-S1: manifest.module_directory === \"scratch\"");
 }
 
@@ -4123,14 +4123,15 @@ async function caseSHCS6ScratchDayListHelper() {
 }
 
 async function caseSHCS7ScratchNewButtonHelper() {
-  console.log("\n--- Case SHC-S7: helpers/scratch-new-button.js declares class ScratchNewButton ---");
+  console.log("\n--- Case SHC-S7: scratch-new-button.js deleted (v0.46.0 S7 — migrated to entity-create) ---");
   const p = path.join(BLUEPRINTS_DIR, "scratch", "helpers", "scratch-new-button.js");
-  assertTrue("SHC-S7: scratch-new-button.js exists on disk", fs.existsSync(p));
-  const body = fs.readFileSync(p, "utf8");
-  assertTrue("SHC-S7: scratch-new-button.js declares class ScratchNewButton",
-    /^class\s+ScratchNewButton\b/m.test(body));
-  assertTrue("SHC-S7: scratch-new-button.js uses customJS.AccentButton.render",
-    /customJS\.AccentButton\.render/.test(body));
+  assertTrue("SHC-S7: scratch-new-button.js has been deleted (legacy, unreferenced since v0.2.2)", !fs.existsSync(p));
+  const manifestPath = path.join(BLUEPRINTS_DIR, "scratch", "manifest.json");
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  assertTrue("SHC-S7: ScratchNewButton removed from manifest customjs_classes",
+    !(manifest.customjs_classes || []).includes("ScratchNewButton"));
+  assertTrue("SHC-S7: scratch-new-button.js removed from manifest files[]",
+    !(manifest.files || []).some(f => f.source && f.source.includes("scratch-new-button")));
 }
 
 // ============================================================
