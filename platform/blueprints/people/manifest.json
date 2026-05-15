@@ -1,9 +1,9 @@
 {
   "name": "people",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "kind": "blueprint",
   "module_directory": "people",
-  "description": "Per-person notes under spice/people/<First Last>.md, with hub at spice/people/People.md and shared rendering via people-rendering mechanism. Materializes Templater folder template + global People nav-button.",
+  "description": "Per-person notes under spice/people/<First Last>.md, with hub at spice/people/People.md and shared rendering via people-rendering mechanism. Materializes Templater folder template + global People nav-button. v0.2.0: migrated NewPersonButton dataviewjs helper to entity-create@0.1.0 declarative new_entity_buttons[] with safe-filename validate predicate; scripts/new-person-button.js deleted.",
   "depends_on": [
     { "name": "people-rendering", "range": ">=0.1.0" },
     { "name": "customjs-guard",   "range": ">=1.0.0" },
@@ -11,10 +11,9 @@
     { "name": "accent-button",    "range": ">=0.1.0" },
     { "name": "cards",            "range": ">=0.2.4" }
   ],
-  "customjs_classes": ["PeopleHubCards", "NewPersonButton", "PersonNavButtons"],
+  "customjs_classes": ["PeopleHubCards", "PersonNavButtons"],
   "files": [
     { "source": "scripts/people-hub-cards.js",     "dest": "{{scripts_path}}/people/people-hub-cards.js" },
-    { "source": "scripts/new-person-button.js",    "dest": "{{scripts_path}}/people/new-person-button.js" },
     { "source": "scripts/person-nav-buttons.js",   "dest": "{{scripts_path}}/people/person-nav-buttons.js" },
     { "source": "templates/Template, People.md",   "dest": "{{templates_path}}/Template, People.md" },
     { "source": "content/People.md",               "dest": "{{module_directory}}/People.md" }
@@ -29,6 +28,23 @@
       "icon": "people",
       "order": 60,
       "action": { "type": "openLink", "target": "{{module_directory}}/People.md" }
+    }
+  ],
+  "new_entity_buttons": [
+    {
+      "id": "person",
+      "label": "+ New Person",
+      "icon": "user-plus",
+      "prompts": [
+        { "key": "name", "label": "Name", "type": "string", "required": true, "validate": "safe-filename" }
+      ],
+      "destination": {
+        "folder_prefix": "{{module_directory}}",
+        "filename_prefix": "{{prompts.name}}"
+      },
+      "frontmatter_template": {},
+      "body_template": "Template, People.md",
+      "render_in": { "kind": "hub", "target_path": "content/People.md" }
     }
   ],
   "post_install": [
