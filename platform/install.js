@@ -940,6 +940,13 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   // Failure here records history but does NOT throw — install of this item
   // is otherwise complete, and the registry is regenerated on every install.
   await applyNavButtons(tp, mech, variables, history, git);
+  // v0.46.0 S2 — symmetric per-item step for new_entity_buttons[]. Writes
+  // ranch/entity-create-registry.json (read-modify-write so the registry
+  // accumulates across the install loop, with prune-on-empty for re-installs)
+  // and injects an idempotent AccentButton dataviewjs block at any hub-kind
+  // render_in.target_path. nav_buttons-kind render_in is schema-reserved but
+  // installer-rejected with a deferred warning for Cycle 1.
+  await applyNewEntityButtons(tp, mech, variables, history, git);
   await applyExternalPlugins(tp, mech, history, git);
   await scaffoldFoundationalPluginData(tp, mech, workshopPath, variables, history, git);  // NEW v0.26.0
   await applyTemplaterHotkeys(tp, mech, variables, history, git);          // NEW v0.1.3
@@ -1357,6 +1364,372 @@ async function applyNavButtons(tp, manifest, variables, history, git) {
 
   registry.contributions[manifest.name] = validated;
   await adapter.write(registryPath, JSON.stringify(registry, null, 2));
+}
+
+// applyNewEntityButtons — v0.46.0 S2. Aggregates this item's
+// new_entity_buttons[] declarations into ranch/entity-create-registry.json
+// under contributions.<name>, flattens a top-level entries[] view for the
+// EntityCreate runtime, and (for render_in.kind === "hub") injects an
+// idempotent AccentButton dataviewjs block at render_in.target_path. Mirrors
+// applyNavButtons in posture: malformed pre-existing JSON is preserved
+// (no silent overwrite); per-entry validation skips bad entries without
+// taking the whole contribution down; failures record history but do not
+// throw. An empty/missing new_entity_buttons[] on a re-installing item
+// PRUNES that item's prior contribution (otherwise stale entries from
+// earlier versions persist forever — symmetric with applyNavButtons' v0.2.0
+// prune fix).
+async function applyNewEntityButtons(tp, manifest, variables, history, git) {
+  if (!manifest) return;
+  const declared = Array.isArray(manifest.new_entity_buttons) ? manifest.new_entity_buttons : [];
+  const adapter = tp.app.vault.adapter;
+  const registryPath = "ranch/entity-create-registry.json";
+
+  let registry = { schema_version: 1, contributions: {}, entries: [] };
+  if (await adapter.exists(registryPath)) {
+    let raw;
+    try {
+      raw = await adapter.read(registryPath);
+    } catch (e) {
+      new Notice(`applyNewEntityButtons: cannot read ${registryPath} (${e.message}). Skipping contribution from ${manifest.name}.`, 8000);
+      if (history) {
+        history.push({
+          event: "error",
+          step: "new_entity_buttons",
+          name: manifest.name,
+          message: `read failed for ${registryPath}: ${e.message}`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      return;
+    }
+    try {
+      const parsed = JSON.parse(raw);
+      // Tolerant of two prior shapes: bare array (legacy) OR
+      // {schema_version, contributions, entries}. Both normalize into the
+      // current contribution-keyed form so a hand-authored bare-array
+      // registry isn't silently dropped on first install.
+      if (Array.isArray(parsed)) {
+        registry = { schema_version: 1, contributions: {}, entries: parsed.slice() };
+      } else if (parsed && typeof parsed === "object") {
+        registry = parsed;
+        registry.contributions = registry.contributions || {};
+        registry.entries = Array.isArray(registry.entries) ? registry.entries : [];
+      }
+    } catch (e) {
+      // Match applyNavButtons C4 posture: do NOT silently overwrite a
+      // malformed pre-existing registry file.
+      new Notice(`applyNewEntityButtons: ${registryPath} is malformed JSON (${e.message}). Skipping contribution from ${manifest.name}.`, 8000);
+      if (history) {
+        history.push({
+          event: "error",
+          step: "new_entity_buttons",
+          name: manifest.name,
+          message: `${registryPath} is malformed JSON: ${e.message}`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      return;
+    }
+  }
+  registry.contributions = registry.contributions || {};
+
+  // Empty declared new_entity_buttons[] → prune any prior contribution +
+  // rewrite flattened entries[]. No write when there was nothing to prune
+  // AND the registry file is absent.
+  if (declared.length === 0) {
+    if (manifest.name in registry.contributions) {
+      delete registry.contributions[manifest.name];
+      registry.entries = Object.values(registry.contributions).flat();
+      await adapter.write(registryPath, JSON.stringify(registry, null, 2));
+      if (history) {
+        history.push({
+          event: "info",
+          step: "new_entity_buttons",
+          name: manifest.name,
+          action: "pruned_empty_declaration",
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    }
+    return;
+  }
+
+  const validated = declared
+    .map((entry) => resolveEntityCreateEntry(entry, variables, manifest.name, history, git))
+    .filter(Boolean);
+
+  if (validated.length === 0) {
+    if (history) {
+      history.push({
+        event: "error",
+        step: "new_entity_buttons",
+        name: manifest.name,
+        reason: "all entries invalid",
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  // Materialize render_in side-effects BEFORE writing the registry. A render
+  // failure for one entry must not corrupt the registry; injectAccentButtonBlock
+  // is already failure-loud + try/catch'd internally so it never throws.
+  for (const entry of validated) {
+    if (!entry.render_in || typeof entry.render_in !== "object") continue;
+    if (entry.render_in.kind === "hub") {
+      await injectAccentButtonBlock(tp, entry.render_in.target_path, entry.id, manifest.name, history, git);
+    } else if (entry.render_in.kind === "nav_buttons") {
+      // v0.46.0 Cycle 1 decision: render_in.kind === "nav_buttons" is
+      // schema-reserved but installer rejects it as deferred. All 7 in-scope
+      // sites use kind: "hub". Schema-declared but installer rejects with a
+      // clear warning so the registry entry survives but no nav-buttons
+      // synthesis happens.
+      new Notice(`applyNewEntityButtons: render_in.kind="nav_buttons" deferred to future cycle (entry ${entry.id} in ${manifest.name})`, 8000);
+      if (history) {
+        history.push({
+          event: "warning",
+          step: "new_entity_buttons",
+          name: manifest.name,
+          reason: `entry ${entry.id} render_in.kind="nav_buttons" deferred to future cycle`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    }
+  }
+
+  // Stamp the blueprint name onto each entry for downstream introspection
+  // (audit, doctor, future prune-by-source diagnostics). The contributions
+  // map already keys by sourceName, but flattened entries[] loses that
+  // grouping otherwise.
+  const stamped = validated.map((e) => ({ blueprint: manifest.name, ...e }));
+  registry.contributions[manifest.name] = stamped;
+  registry.entries = Object.values(registry.contributions).flat();
+  await adapter.write(registryPath, JSON.stringify(registry, null, 2));
+}
+
+// resolveEntityCreateEntry — per-entry validation + lenient substitution.
+// Returns null for malformed entries (Notice fired + warning history entry);
+// otherwise returns the resolved entry with path fields substituted. Required
+// keys check matches the new-entity-buttons schema's `required` arrays at the
+// top + destination + render_in levels; the deep shape validator (oneOf,
+// prompts type enum, etc.) is deferred to S3.
+function resolveEntityCreateEntry(entry, variables, sourceName, history, git) {
+  const fail = (reason) => {
+    new Notice(`new_entity_buttons: invalid entry in ${sourceName} (${reason})`, 8000);
+    if (history) {
+      history.push({
+        event: "warning",
+        step: "new_entity_buttons",
+        name: sourceName,
+        reason: `entry ${(entry && entry.id) || "<no-id>"}: ${reason}`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return null;
+  };
+
+  if (!entry || typeof entry !== "object") return fail("entry is not an object");
+  if (!entry.id || typeof entry.id !== "string") return fail("missing id");
+  if (!entry.label || typeof entry.label !== "string") return fail("missing label");
+  if (!Array.isArray(entry.prompts)) return fail("prompts must be an array");
+  if (!entry.destination || typeof entry.destination !== "object") return fail("missing destination");
+  if (typeof entry.destination.folder_prefix !== "string" || entry.destination.folder_prefix.length === 0) {
+    return fail("missing destination.folder_prefix");
+  }
+  if (typeof entry.destination.filename_prefix !== "string") return fail("missing destination.filename_prefix");
+  if (!entry.frontmatter_template || typeof entry.frontmatter_template !== "object") {
+    return fail("missing frontmatter_template");
+  }
+  if (!entry.render_in || typeof entry.render_in !== "object") return fail("missing render_in");
+  if (entry.render_in.kind !== "hub" && entry.render_in.kind !== "nav_buttons") {
+    return fail(`render_in.kind must be "hub" or "nav_buttons"`);
+  }
+  if (entry.render_in.kind === "hub" && (typeof entry.render_in.target_path !== "string" || entry.render_in.target_path.length === 0)) {
+    return fail(`render_in.kind="hub" requires target_path`);
+  }
+
+  // Lenient substitution on every path-bearing field. Frontmatter values,
+  // prompts, inline_body, body_template content are NOT substituted here —
+  // they are user-authored runtime templates rendered by EntityCreate using
+  // its own placeholder syntax (e.g., {{date}}, {{title}}). Only path-shape
+  // fields go through substituteLenient so {{module_directory}} resolves at
+  // install time.
+  const destination = {
+    folder_prefix:         substituteLenient(entry.destination.folder_prefix, variables),
+    filename_prefix:       substituteLenient(entry.destination.filename_prefix, variables),
+  };
+  if (typeof entry.destination.folder_date_pattern === "string") {
+    destination.folder_date_pattern = entry.destination.folder_date_pattern;
+  }
+  if (typeof entry.destination.filename_date_pattern === "string") {
+    destination.filename_date_pattern = entry.destination.filename_date_pattern;
+  }
+  if (typeof entry.destination.filename_suffix === "string") {
+    destination.filename_suffix = substituteLenient(entry.destination.filename_suffix, variables);
+  }
+
+  const resolved = {
+    ...entry,
+    destination,
+  };
+  if (typeof entry.body_template === "string") {
+    resolved.body_template = substituteLenient(entry.body_template, variables);
+  }
+  if (entry.render_in.kind === "hub") {
+    resolved.render_in = {
+      ...entry.render_in,
+      target_path: substituteLenient(entry.render_in.target_path, variables),
+    };
+  }
+  if (Array.isArray(entry.extra_files)) {
+    resolved.extra_files = entry.extra_files.map((ef) => {
+      if (!ef || typeof ef !== "object") return ef;
+      const out = { ...ef };
+      if (typeof ef.filename_pattern === "string") {
+        out.filename_pattern = substituteLenient(ef.filename_pattern, variables);
+      }
+      if (typeof ef.subfolder === "string") {
+        out.subfolder = substituteLenient(ef.subfolder, variables);
+      }
+      if (typeof ef.body_template === "string") {
+        out.body_template = substituteLenient(ef.body_template, variables);
+      }
+      return out;
+    });
+  }
+  return resolved;
+}
+
+// injectAccentButtonBlock — idempotent block-injection for render_in.kind === "hub".
+// Anchors on the marker `<!-- entity-create:<id> -->`:
+//   - If the marker is present in the file body: replace the marker AND the
+//     immediately-following fenced code block (allowing optional blank lines
+//     between marker and fence) with a fresh canonical block. The fence is
+//     matched lazily so the closing ``` of the FIRST fenced block after the
+//     marker terminates the replacement region — any user content beyond the
+//     closing fence is preserved bit-for-bit.
+//   - If the marker is present but no fenced block follows: replace just the
+//     marker line with the canonical block.
+//   - If the marker is absent: APPEND marker + canonical block at the bottom
+//     of the body (separated by a blank line if the body is non-empty).
+// targetPath is lenient-substituted by the caller, so this function receives a
+// vault-relative path ready for adapter read/write. The function never throws —
+// missing target file, read failures, and write failures all push an error
+// history entry and return.
+async function injectAccentButtonBlock(tp, targetPath, instanceId, sourceName, history, git) {
+  const adapter = tp.app.vault.adapter;
+  const pushErr = (msg) => {
+    new Notice(`injectAccentButtonBlock: ${msg}`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "new_entity_buttons.inject",
+        name: sourceName,
+        target: targetPath,
+        message: msg,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+  };
+
+  if (typeof targetPath !== "string" || targetPath.length === 0) {
+    return pushErr(`target_path missing for entry ${instanceId} (${sourceName})`);
+  }
+  if (!(await adapter.exists(targetPath))) {
+    return pushErr(`target_path ${targetPath} does not exist (entry ${instanceId} in ${sourceName})`);
+  }
+
+  let body;
+  try {
+    body = await adapter.read(targetPath);
+  } catch (e) {
+    return pushErr(`read failed for ${targetPath}: ${e.message}`);
+  }
+
+  const escId = instanceId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const marker = `<!-- entity-create:${instanceId} -->`;
+  const canonical =
+    `<!-- entity-create:${instanceId} -->\n` +
+    "```dataviewjs\n" +
+    `await customJS.EntityCreate.render(dv, { instance: "${instanceId}" });\n` +
+    "```";
+
+  // Greedy-anchor the marker; then a lazy match for an optional immediately-
+  // following fenced code block (any language tag, not just dataviewjs — a
+  // user could have edited it). The lazy `[\s\S]*?` stops at the FIRST
+  // newline-bounded ``` close fence.
+  const markerWithBlockRe = new RegExp(
+    "<!-- entity-create:" + escId + " -->[ \\t]*\\r?\\n" +
+    "(?:[ \\t]*\\r?\\n)*" +     // optional blank lines between marker and fence
+    "```[a-zA-Z0-9_-]*[ \\t]*\\r?\\n" +
+    "[\\s\\S]*?" +
+    "\\n```",                   // closing fence on its own line
+    ""
+  );
+  const markerOnlyRe = new RegExp(
+    "<!-- entity-create:" + escId + " -->[ \\t]*",
+    ""
+  );
+
+  let next;
+  if (markerWithBlockRe.test(body)) {
+    next = body.replace(markerWithBlockRe, canonical);
+  } else if (markerOnlyRe.test(body)) {
+    next = body.replace(markerOnlyRe, canonical);
+  } else {
+    // Marker absent → append at bottom. Trim trailing whitespace then add a
+    // blank-line separator if body is non-empty. Trailing newline preserved
+    // so the file ends cleanly.
+    const trimmed = body.replace(/[\s\r\n]*$/, "");
+    const sep = trimmed.length > 0 ? "\n\n" : "";
+    next = trimmed + sep + canonical + "\n";
+  }
+
+  if (next === body) {
+    // Already canonical — nothing to write. Idempotency fast-path.
+    return;
+  }
+
+  try {
+    await adapter.write(targetPath, next);
+  } catch (e) {
+    return pushErr(`write failed for ${targetPath}: ${e.message}`);
+  }
+  if (history) {
+    history.push({
+      event: "materialize",
+      step: "new_entity_buttons.inject",
+      name: sourceName,
+      source: sourceName,
+      target: targetPath,
+      instance: instanceId,
+      git_commit: git.commit,
+      git_tag: git.tag,
+      git_dirty: git.dirty,
+      attempted_at: new Date().toISOString(),
+    });
+  }
 }
 
 // validateAndResolve — per-entry validation. Returns null for malformed entries
