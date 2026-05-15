@@ -1,6 +1,6 @@
 {
   "name": "entity-create",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Declarative entity-creation buttons. Each consuming blueprint declares new_entity_buttons[] in its manifest; installer materializes either a nav_buttons action (kind: nav_buttons) or an injected AccentButton block into a target file (kind: hub). The EntityCreate CustomJS class executes prompts → frontmatter hydration → file create → open. Replaces 7 hand-authored New<X>Button classes across meetings/people/project/scratch/finance.",
   "depends_on": [
     { "name": "customjs-guard", "range": ">=1.0.0" },

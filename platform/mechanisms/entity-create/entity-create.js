@@ -96,7 +96,10 @@ class EntityCreate {
             const reg = JSON.parse(raw);
             const list = Array.isArray(reg) ? reg : (reg && Array.isArray(reg.entries) ? reg.entries : []);
             return list.find(e => e && e.id === instance) || null;
-        } catch (_e) {
+        } catch (e) {
+            const msg = (e && e.message) ? e.message : String(e);
+            console.error("entity-create: malformed registry JSON — " + msg);
+            new Notice("entity-create: registry JSON parse error — check console", 8000);
             return null;
         }
     }
@@ -171,7 +174,7 @@ class EntityCreate {
                     status.textContent = `${p.label || p.key} is required.`;
                     return;
                 }
-                if (!required && (!raw || raw.trim() === "")) {
+                if (!required && (!raw || (typeof raw === "string" && raw.trim() === ""))) {
                     close(); resolve(""); return;
                 }
                 const err = this._runValidate(p, raw, ctx);
