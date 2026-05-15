@@ -100,6 +100,15 @@ const ACCENT_BUTTON_SRC = fs.existsSync(ACCENT_BUTTON_FILE) ? fs.readFileSync(AC
 const PEOPLE_RENDERING_FILE = path.join(WORKSHOP, 'platform', 'mechanisms', 'people-rendering', 'people-rendering.js');
 const PEOPLE_RENDERING_SRC = fs.existsSync(PEOPLE_RENDERING_FILE) ? fs.readFileSync(PEOPLE_RENDERING_FILE, 'utf8') : '';
 
+const ICONS_FILE = path.join(WORKSHOP, 'platform', 'mechanisms', 'icons', 'icons.js');
+const ICONS_SRC = fs.existsSync(ICONS_FILE) ? fs.readFileSync(ICONS_FILE, 'utf8') : '';
+function makeIconsInstance() {
+  if (!ICONS_SRC) return { resolve: () => null };
+  const fn = new Function(`${ICONS_SRC}\nreturn new Icons();`);
+  return fn();
+}
+const ICONS_INSTANCE = makeIconsInstance();
+
 // ── DOM stub ─────────────────────────────────────────────────────────────
 function makeEl(tag, opts) {
   const el = {
@@ -245,8 +254,9 @@ function makeApp(opts) {
 
 // ── Load renderer class ──────────────────────────────────────────────────
 function loadRendererClass(app, Notice) {
-  const fn = new Function('app', 'Notice', `${RENDERER_SRC}\nreturn SpaceNavButtons;`);
-  return fn(app, Notice);
+  const customJS = { Icons: ICONS_INSTANCE };
+  const fn = new Function('app', 'Notice', 'customJS', `${RENDERER_SRC}\nreturn SpaceNavButtons;`);
+  return fn(app, Notice, customJS);
 }
 
 function loadBeaconCardsClass(app) {
