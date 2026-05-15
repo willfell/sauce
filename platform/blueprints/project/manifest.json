@@ -1,10 +1,10 @@
 {
   "name": "project",
-  "version": "1.6.1",
+  "version": "1.7.0",
   "kind": "blueprint",
   "module_directory": "projects",
   "skills_dir": ".claude/skills/project",
-  "description": "Per-project atlas + map + Kanban board with hierarchical tasks, workstream-tagged cards, and All-Projects hub. v1.4.0 MINOR (v0.31.0 S6.5): hub note filename now defaults to the user-typed project name (e.g. 'Testing It All Out.md' under spice/projects/testing-it-all-out/) for native Obsidian tab title display. Configurable HUB_NOTE_FILENAME_STYLE constant in project-nav-buttons.js (name|slug|fixed). Rule_fragment refactored to type-discrimination via frontmatter_branch so audit + hub-cards filters are filename-independent. v1.4.1 PATCH CF-1: projects-hub-cards.js filter restored to match EITHER type:project OR legacy #project tag (older hub notes without type:project frontmatter were excluded from the Projects.md card grid); defensive type:map/kanban exclusions handle dataview's nested-tag expansion (#project/<slug> would otherwise falsely include Project Map + Project Board). v1.5.0 MINOR (v0.33.0 cohesion wave 2): adopts claude_surface[] — ships canonical /project slash command + new-project SKILL.md + resolvers row. Stale consumer-side .claude/commands/project.md bodies overwritten on next install. v1.6.0 MINOR (v0.39.0): NEW frontmatter fields status (7-state enum, required) + status_changed_at (YYYY-MM-DD, required) + teams[] + products[] (both optional wikilink lists). Default-active hub scope hides terminal statuses (superseded/cancelled/done). Tier 1 action buttons (Bump Status / Set Teams / Set Products) ship via ProjectActionButtons customjs class (S7).",
+  "description": "Per-project atlas + map + Kanban board with hierarchical tasks, workstream-tagged cards, and All-Projects hub. v1.4.0 MINOR (v0.31.0 S6.5): hub note filename now defaults to the user-typed project name (e.g. 'Testing It All Out.md' under spice/projects/testing-it-all-out/) for native Obsidian tab title display. Configurable HUB_NOTE_FILENAME_STYLE constant in project-nav-buttons.js (name|slug|fixed). Rule_fragment refactored to type-discrimination via frontmatter_branch so audit + hub-cards filters are filename-independent. v1.4.1 PATCH CF-1: projects-hub-cards.js filter restored to match EITHER type:project OR legacy #project tag (older hub notes without type:project frontmatter were excluded from the Projects.md card grid); defensive type:map/kanban exclusions handle dataview's nested-tag expansion (#project/<slug> would otherwise falsely include Project Map + Project Board). v1.5.0 MINOR (v0.33.0 cohesion wave 2): adopts claude_surface[] — ships canonical /project slash command + new-project SKILL.md + resolvers row. Stale consumer-side .claude/commands/project.md bodies overwritten on next install. v1.6.0 MINOR (v0.39.0): NEW frontmatter fields status (7-state enum, required) + status_changed_at (YYYY-MM-DD, required) + teams[] + products[] (both optional wikilink lists). Default-active hub scope hides terminal statuses (superseded/cancelled/done). Tier 1 action buttons (Bump Status / Set Teams / Set Products) ship via ProjectActionButtons customjs class (S7). v1.7.0 MINOR (v0.46.0 S6): New Project create flow extracted to entity-create@0.1.0 mechanism — ProjectNavButtons._promptForProjectName / _createProject / _renderProjectsHub deleted (~184 LOC stripped), the class retains task-note + workstream + nav-row rendering only. Manifest declares new_entity_buttons[] with id=project, exercising three schema extensions for the first time: prompts[].derive (slugify(prompts.name)), extra_files[] for the Project Map + <slug>-board sidecars, and frontmatter_template with literal defaults (status:idea, status_changed_at:{{now.YYYY-MM-DD}}, workstreams:[]). content/Projects.md swaps the inline ProjectNavButtons-dispatched dataviewjs block for an <!-- entity-create:project --> marker.",
   "depends_on": [
     { "name": "nav-buttons",    "range": ">=2.3.0" },
     { "name": "customjs-guard", "range": ">=1.0.0" },
@@ -45,6 +45,38 @@
     { "kind": "command", "source": "commands/project.md", "dest": ".claude/commands/project.md" },
     { "kind": "skill",   "source": "skills/new-project/SKILL.md", "dest": "{{skills_dir}}/new-project/SKILL.md" },
     { "kind": "claude_md_row", "table": "resolvers", "row": { "topic": "Projects", "path": "{{module_directory}}", "command": "/project" } }
+  ],
+  "new_entity_buttons": [
+    {
+      "id": "project",
+      "label": "New Project",
+      "icon": "folder-plus",
+      "prompts": [
+        { "key": "name", "label": "Project name", "type": "string", "required": true },
+        { "key": "slug", "type": "string", "derive": "slugify(prompts.name)" }
+      ],
+      "destination": {
+        "folder_prefix": "spice/projects/{{prompts.slug}}",
+        "filename_prefix": "{{prompts.name|sanitize-filename}}"
+      },
+      "frontmatter_template": {
+        "type": "project",
+        "description": "",
+        "status": "idea",
+        "status_changed_at": "{{now.YYYY-MM-DD}}",
+        "workstreams": [],
+        "teams": [],
+        "products": [],
+        "created": "{{now.YYYY-MM-DD HH:mm}}",
+        "tags": ["project"]
+      },
+      "body_template": "Template, Project.md",
+      "extra_files": [
+        { "filename_pattern": "Project Map.md", "body_template": "Template, Project Map.md" },
+        { "filename_pattern": "{{prompts.slug}}-board.md", "body_template": "Template, Project Board.md" }
+      ],
+      "render_in": { "kind": "hub", "target_path": "content/Projects.md" }
+    }
   ],
   "nav_buttons": [
     {
