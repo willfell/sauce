@@ -35,7 +35,7 @@ Tokens resolved at create-time inside `frontmatter_template`, `destination.*`, `
 | `{{prompts.<key>\|number}}` | emit unquoted YAML numeric scalar (handled at frontmatter emission) |
 | `{{now.<moment-format>}}` | `ctx.now.format(<moment-format>)` |
 | `{{current_file.frontmatter.<key>}}` | read frontmatter `<key>` from the note hosting the button |
-| `{{current_file.frontmatter.<key>}}-routed` | expand `YYYY-MM-DD` date string to `YYYY/MM-MMM/YYYY-MM-DD` |
+| `{{current_file.frontmatter.<key>}}-routed` | expand `YYYY-MM-DD` date string to `YYYY/MM-MMMM/YYYY-MM-DD` |
 
 ### Derive DSL (prompts[].derive)
 

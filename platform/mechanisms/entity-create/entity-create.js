@@ -24,7 +24,7 @@
  *   {{current_file.frontmatter.<key>}}      — read frontmatter of the note
  *                                             whose dv container hosts the button
  *   {{current_file.frontmatter.<key>}}-routed — expand YYYY-MM-DD date string into
- *                                             3-level routed form YYYY/MM-MMM/YYYY-MM-DD
+ *                                             3-level routed form YYYY/MM-MMMM/YYYY-MM-DD
  *
  * Derive DSL (prompts[].derive):
  *   slugify(prompts.<key>)            — lowercase + dasherize
