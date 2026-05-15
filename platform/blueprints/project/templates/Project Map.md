@@ -1,8 +1,8 @@
 ---
-created: {{DATE}}
+created: {{now.YYYY-MM-DD HH:mm}}
 type: map
 tags:
-  - project/{{SLUG}}
+  - project/{{prompts.slug}}
 workstreams: []
 ---
 

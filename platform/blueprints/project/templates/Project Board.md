@@ -1,11 +1,11 @@
 ---
 
 kanban-plugin: board
-title: {{NAME}} Board
+title: {{prompts.name}} Board
 type: kanban
 tags:
   - board
-  - project/{{SLUG}}
+  - project/{{prompts.slug}}
 
 ---
 
@@ -19,6 +19,6 @@ tags:
 
 %% kanban:settings
 ```
-{"kanban-plugin":"board","list-collapse":[false,false,false,false],"mark-cards-complete":true,"new-note-folder":"spice/projects/{{SLUG}}/tasks","new-note-template":"{{templates_path}}/Template, Kanban Card.md"}
+{"kanban-plugin":"board","list-collapse":[false,false,false,false],"mark-cards-complete":true,"new-note-folder":"spice/projects/{{prompts.slug}}/tasks","new-note-template":"{{templates_path}}/Template, Kanban Card.md"}
 ```
 %%
