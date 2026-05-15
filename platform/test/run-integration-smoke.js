@@ -105,12 +105,11 @@ withTempHomeAndVault(({ home, vault }) => {
     if (ecMech && !sub.mechanisms.find(m => m.name === "entity-create")) {
         sub.mechanisms.push({ name: ecMech.name, version: ecMech.version });
     }
-    for (const bpName of ["meetings", "people", "scratch", "finance"]) {
-        // Note: project is intentionally excluded — project@1.7.0 references
-        // helpers/project-action-buttons.js which is not yet committed in
-        // this cycle (FIX-LATER pre-existing v0.39.0 S7 leftover). The smoke
-        // post-conditions below adjust to expect 6 entries (no project) until
-        // that bug is reconciled in a follow-up cycle.
+    for (const bpName of ["meetings", "people", "project", "scratch", "finance"]) {
+        // v0.46.2: project re-included after FLN-f fix (stale
+        // helpers/project-action-buttons.js reference removed from project's
+        // manifest customjs_classes[] + files[]). Project's entity-create
+        // entry now materializes into the registry alongside the other 6.
         const entry = wsmf.blueprints.find(b => b.name === bpName);
         if (entry && !sub.blueprints.find(b => b.name === bpName)) {
             sub.blueprints.push({ name: entry.name, version: entry.version });
@@ -213,11 +212,11 @@ withTempHomeAndVault(({ home, vault }) => {
     try { ecRegistry = JSON.parse(fs.readFileSync(ecRegistryPath, "utf8")); }
     catch (e) { /* leave null; assertion below will surface */ }
     const ecEntries = (ecRegistry && Array.isArray(ecRegistry.entries)) ? ecRegistry.entries : [];
-    // 6 expected ids — project deferred (see note above).
-    const expectedEcIds = ["meeting", "person", "scratch", "budget", "paycheck", "invoice"];
+    // 7 expected ids — project re-included in v0.46.2 (FLN-f fix).
+    const expectedEcIds = ["meeting", "person", "project", "scratch", "budget", "paycheck", "invoice"];
     const haveAllExpectedIds = expectedEcIds.every(id => ecEntries.some(e => e && e.id === id));
     ok("smoke-ec-registry-has-subscribed-entries",
-        ecEntries.length >= 6 && haveAllExpectedIds,
+        ecEntries.length >= 7 && haveAllExpectedIds,
         `entries=${ecEntries.length} ids=${JSON.stringify(ecEntries.map(e => e && e.id))}`);
 
     // entity-create mechanism source is shipped in the workshop catalogue.

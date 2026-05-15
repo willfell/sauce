@@ -1,6 +1,6 @@
 {
   "name": "project",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "kind": "blueprint",
   "module_directory": "projects",
   "skills_dir": ".claude/skills/project",
@@ -18,8 +18,7 @@
     "ProjectWorkstreamManager",
     "ProjectsHubCards",
     "ProjectNotesCards",
-    "ProjectReferencedByCards",
-    "ProjectActionButtons"
+    "ProjectReferencedByCards"
   ],
   "pre_install": [
     { "type": "delete", "path": "boards/To-Do-Board.md" }
@@ -38,7 +37,6 @@
     { "source": "helpers/projects-hub-cards.js",         "dest": "{{scripts_path}}/project/projects-hub-cards.js" },
     { "source": "helpers/project-notes-cards.js",        "dest": "{{scripts_path}}/project/project-notes-cards.js" },
     { "source": "helpers/project-referenced-by-cards.js","dest": "{{scripts_path}}/project/project-referenced-by-cards.js" },
-    { "source": "helpers/project-action-buttons.js",     "dest": "{{scripts_path}}/project/project-action-buttons.js" },
     { "source": "content/Projects.md",                   "dest": "{{module_directory}}/Projects.md" }
   ],
   "claude_surface": [
