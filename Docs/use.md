@@ -128,6 +128,22 @@ Consumer is at version A; workshop has version B (newer):
 4. Run `tp.user.platformInstall(tp)` in the consumer. It detects the version delta and re-installs.
 5. `platform-installed.json` records the new version + a new history entry.
 
+## Known flow changes (v0.46.0+)
+
+### Entity creation moved to declarative AccentButtons (meetings · people · project · scratch · finance)
+
+v0.46.0 extracted the "create a new entity" pattern into the `entity-create` mechanism. Each affected blueprint now declares a `new_entity_buttons[]` entry in its manifest; the installer injects an AccentButton fence into the entry's hub note, and the `EntityCreate` CustomJS class drives prompts → frontmatter → file create → open at click time.
+
+The retired per-blueprint `New<X>Button` helpers (NewMeetingButton, NewPersonButton, ProjectNavButtons' `_createProject`, ScratchNewButton, NewBudget/Paycheck/InvoiceButton) are gone; the registry-driven flow replaces them.
+
+**Templater `<%* %>` regression for meetings / people / scratch (Path C posture — by design):**
+
+Templates in these three blueprints used Templater's `<%* %>` syntax (attendees prompt for meetings, `tp.file.move` auto-promote for scratch). Templater code is incompatible with the entity-create substitution catalogue, so the v0.46.0 manifests dropped `body_template` for these three blueprints in favour of `frontmatter_template` + `inline_body` (covers ~95% of the original behaviour).
+
+The Templater templates (`ranch/templates/Meeting.md`, `ranch/templates/People.md`, `ranch/templates/Scratch.md`) remain in each blueprint's `files[]` for **manual invocation only** — open the empty note created by the AccentButton, then run Obsidian's "Templates: Insert template" command and select the relevant template. The `<%* %>` block fires at that point.
+
+This is documented posture, not a bug. Project's templates were token-translated (Path A) and have no regression. Auto-template-on-creation is a candidate for a future v0.47.x cycle (would require adding Templater-flow support to the entity-create runtime).
+
 ## Adding a new mechanism
 
 1. In `workshop/platform/mechanisms/<new-name>/`:
