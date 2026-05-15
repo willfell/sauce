@@ -11,9 +11,7 @@ cssclasses:
 await dv.view("{{views_path}}/customjs-guard", { class: "SpaceNavButtons" });
 ```
 
-```dataviewjs
-await dv.view("{{views_path}}/customjs-guard", { class: "NewBudgetButton" });
-```
+<!-- entity-create:budget -->
 
 ```dataviewjs
 await dv.view("{{views_path}}/customjs-guard", { class: "BudgetsCards" });

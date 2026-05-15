@@ -3,7 +3,7 @@
   "version": "0.2.10",
   "kind": "blueprint",
   "module_directory": "finance",
-  "description": "Finance blueprint covering Budgets + Paychecks + Invoices under spice/finance/. Top hub Finance.md aggregates pending items from all three sub-areas. Budgets/Paychecks are flat dated entities; Invoices use a per-month folder ecosystem mirroring trips/<slug>/. Status pills (Planning/In Progress/Done) derived from frontmatter via shared FinanceStatus helper. v0.2.7 PATCH: 8 outline-accent button call sites migrated to customJS.AccentButton.render. v0.2.8 PATCH (in-cycle CF-1): InvoiceControls Save now also recomputes amount = round(rate * hours, 2) on save; Save's enabled state additionally considers amount drift (enabled when stored amount != rate * hours) so stale-amount entities can be re-synced without changing the rate. Misleading caveat note removed.",
+  "description": "Finance blueprint covering Budgets + Paychecks + Invoices under spice/finance/. Top hub Finance.md aggregates pending items from all three sub-areas. Budgets/Paychecks are flat dated entities; Invoices use a per-month folder ecosystem mirroring trips/<slug>/. Status pills (Planning/In Progress/Done) derived from frontmatter via shared FinanceStatus helper. v0.2.7 PATCH: 8 outline-accent button call sites migrated to customJS.AccentButton.render. v0.2.8 PATCH (in-cycle CF-1): InvoiceControls Save now also recomputes amount = round(rate * hours, 2) on save; Save's enabled state additionally considers amount drift (enabled when stored amount != rate * hours) so stale-amount entities can be re-synced without changing the rate. Misleading caveat note removed. v0.46.0 S8 (finance@0.2.10 retained until S10): Budget create flow migrated to entity-create@0.1.0; NewBudgetButton class deleted.",
   "depends_on": [
     { "name": "nav-buttons",    "range": ">=2.5.2" },
     { "name": "cards",          "range": ">=0.2.3" },
@@ -17,7 +17,6 @@
     "BudgetsCards",
     "PaychecksCards",
     "InvoicesCards",
-    "NewBudgetButton",
     "NewPaycheckButton",
     "NewInvoiceButton",
     "InvoiceNavButtons",
@@ -35,7 +34,6 @@
     { "source": "helpers/budgets-cards.js",        "dest": "{{scripts_path}}/finance/budgets-cards.js" },
     { "source": "helpers/paychecks-cards.js",      "dest": "{{scripts_path}}/finance/paychecks-cards.js" },
     { "source": "helpers/invoices-cards.js",       "dest": "{{scripts_path}}/finance/invoices-cards.js" },
-    { "source": "helpers/new-budget-button.js",    "dest": "{{scripts_path}}/finance/new-budget-button.js" },
     { "source": "helpers/new-paycheck-button.js",  "dest": "{{scripts_path}}/finance/new-paycheck-button.js" },
     { "source": "helpers/new-invoice-button.js",   "dest": "{{scripts_path}}/finance/new-invoice-button.js" },
     { "source": "helpers/invoice-nav-buttons.js",  "dest": "{{scripts_path}}/finance/invoice-nav-buttons.js" },
@@ -87,6 +85,30 @@
     { "kind": "engagement_field_offer", "engagement_field_id": "finance.debt_monthly_target_usd",  "type": "number",   "prompt": "Monthly debt-paydown target in USD (numeric)",                   "consumed_by_types": ["personal", "consulting"] },
     { "kind": "engagement_field_offer", "engagement_field_id": "finance.discretionary_categories", "type": "string[]", "prompt": "Discretionary spending categories (comma-separated)",            "consumed_by_types": ["personal"] },
     { "kind": "context_file_offer",     "path_template": "spice/cowork/context/{{engagement_id}}/finance-guide.md", "source_template": "engagement-templates/personal/finance-guide.md",            "consumed_by_types": ["personal", "consulting"] }
+  ],
+  "new_entity_buttons": [
+    {
+      "id": "budget",
+      "label": "New Budget",
+      "icon": "wallet-plus",
+      "prompts": [
+        { "key": "month", "label": "Month", "type": "month", "required": true, "default": "{{now.YYYY-MM}}" }
+      ],
+      "destination": {
+        "folder_prefix": "spice/finance/budgets/{{prompts.month}}",
+        "filename_prefix": "Budget-{{prompts.month}}"
+      },
+      "frontmatter_template": {
+        "type": "budget",
+        "budget_month": "{{prompts.month}}",
+        "categories": [],
+        "created": "{{now.YYYY-MM-DD}}",
+        "tags": ["finance", "budget"],
+        "cssclasses": ["wide"]
+      },
+      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"BudgetNavButtons\" });\n```\n\n```dataviewjs\nawait customJS.FinanceStatus.renderBadge(dv, \"budget\");\n```\n\n## Categories\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"BudgetCategoriesEditor\" });\n```\n",
+      "render_in": { "kind": "hub", "target_path": "content/Budgets.md" }
+    }
   ],
   "rule_fragments": []
 }
