@@ -406,6 +406,14 @@ module.exports = async function (tp) {
           // audit walker has a stable single-source-of-truth surface to read
           // at audit time. Deep-copy to insulate the registry from later
           // manifest mutation. Omit when absent.
+          //
+          // v0.47.0 S5 invariant: store RAW manifest values (bare basenames for
+          // body_template + extra_files[].body_template), NOT the resolved
+          // {{templates_path}}/-prefixed forms. The audit walker
+          // (platform/audit/entity-create-walker.js) reads from installed.json
+          // and joins TEMPLATES_REL itself — embedding resolved paths here
+          // would produce double-prefixed values like
+          // "ranch/templates/ranch/templates/Foo.md" inside the walker.
           if (Array.isArray(itemMan.new_entity_buttons)) {
             entry.new_entity_buttons = JSON.parse(JSON.stringify(itemMan.new_entity_buttons));
           }
@@ -1553,8 +1561,14 @@ async function applyNewEntityButtons(tp, manifest, variables, history, git) {
 
 // Convention: body_template values are blueprint-template basenames.
 // If the substituted value has no path separator, prepend templates_path.
-// Pre-existing values containing '/' pass through untouched — schema
-// rejects them at validate time, but the helper is defensive.
+// Pre-existing values containing '/' pass through untouched — defensive
+// pass-through for forward-compat; the JSON schema at
+// platform/mechanisms/entity-create/schema/new-entity-buttons.json
+// documents the basename-only constraint but is not currently loaded by
+// a runtime validator. THIS HELPER is the operative enforcement; if/when
+// the validator mechanism wires up schema-driven manifest validation,
+// path-shaped values will be rejected upstream and this branch becomes
+// belt-and-suspenders.
 //
 // Called by resolveEntityCreateEntry for body_template + extra_files[].body_template.
 function _resolveBodyTemplatePath(value, variables) {
