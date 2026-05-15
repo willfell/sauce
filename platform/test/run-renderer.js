@@ -1605,6 +1605,122 @@ async function testCoworkHubOpenLink() {
   });
 }
 
+// ── v0.46.0 S11 — entity-create injected-block shape tests ──────────────
+// These test the install-time injection of the AccentButton dataviewjs block
+// authored by `injectAccentButtonBlock` (install.js) for each new_entity_buttons[]
+// entry with render_in.kind === "hub". The renderer harness validates the
+// resulting markdown shape — marker anchor, dataviewjs fence body, AccentButton
+// row layout, and idempotency under re-injection.
+
+// Lightweight inline reimplementation of injectAccentButtonBlock's canonical-
+// block + marker semantics — mirrors install.js lines around 1700-1800. The
+// real installer reads/writes via tp.app.vault.adapter; here we operate on a
+// string buffer so we can assert structural properties without scaffolding a
+// full vault.
+function entityCreateInjectBlock(body, instanceId) {
+  const escId = instanceId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const canonical =
+    `<!-- entity-create:${instanceId} -->\n` +
+    "```dataviewjs\n" +
+    `await customJS.EntityCreate.render(dv, { instance: "${instanceId}" });\n` +
+    "```";
+  const markerWithBlockRe = new RegExp(
+    "<!-- entity-create:" + escId + " -->[ \\t]*\\r?\\n" +
+    "(?:[ \\t]*\\r?\\n)*" +
+    "```[a-zA-Z0-9_-]*[ \\t]*\\r?\\n" +
+    "[\\s\\S]*?" +
+    "```",
+    "m"
+  );
+  if (markerWithBlockRe.test(body)) return body.replace(markerWithBlockRe, canonical);
+  const markerOnlyRe = new RegExp("<!-- entity-create:" + escId + " -->", "m");
+  if (markerOnlyRe.test(body)) return body.replace(markerOnlyRe, canonical);
+  return body.length === 0 ? canonical : body + "\n\n" + canonical;
+}
+
+async function testREntityCreateMarkerAnchored() {
+  console.log('\n=== R-EC-MARKER — entity-create marker anchors injected block ===');
+  const before = "## Hub\n\nSome content.\n";
+  const after = entityCreateInjectBlock(before, "meeting");
+  const hasMarker = /<!-- entity-create:meeting -->/.test(after);
+  const hasBlock = /```dataviewjs[\s\S]*```/.test(after);
+  const markerBeforeBlock = after.indexOf("<!-- entity-create:meeting -->") < after.indexOf("```dataviewjs");
+  console.log(`  marker present: ${hasMarker}`);
+  console.log(`  dataviewjs block present: ${hasBlock}`);
+  console.log(`  marker precedes block: ${markerBeforeBlock}`);
+  const pass = hasMarker && hasBlock && markerBeforeBlock;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
+async function testREntityCreateInjectedBlockShape() {
+  console.log('\n=== R-EC-SHAPE — injected block calls customJS.EntityCreate.render(dv, { instance: "<id>" }) literally ===');
+  const after = entityCreateInjectBlock("", "person");
+  const literal = `customJS.EntityCreate.render(dv, { instance: "person" })`;
+  const containsCall = after.includes(literal);
+  console.log(`  contains literal call: ${containsCall}`);
+  const pass = containsCall;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
+async function testREntityCreateIdempotentReInject() {
+  console.log('\n=== R-EC-IDEM — re-injecting same id does not duplicate the block ===');
+  const before = "## Hub\n";
+  const once = entityCreateInjectBlock(before, "budget");
+  const twice = entityCreateInjectBlock(once, "budget");
+  // Count occurrences of the marker; expect 1 in both `once` and `twice`.
+  const onceCount = (once.match(/<!-- entity-create:budget -->/g) || []).length;
+  const twiceCount = (twice.match(/<!-- entity-create:budget -->/g) || []).length;
+  console.log(`  marker count after first inject: ${onceCount} (expect 1)`);
+  console.log(`  marker count after second inject: ${twiceCount} (expect 1)`);
+  // Also confirm the canonical block content is identical.
+  const identical = once === twice;
+  console.log(`  re-inject produced byte-identical result: ${identical}`);
+  const pass = onceCount === 1 && twiceCount === 1 && identical;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
+async function testREntityCreateAccentButtonRowAlignment() {
+  console.log('\n=== R-EC-ROW — injected block AccentButton dispatch matches universal call shape ===');
+  // The injected block is a dataviewjs fence whose body invokes
+  // customJS.EntityCreate.render(dv, {instance:"<id>"}). At runtime,
+  // EntityCreate.render delegates to customJS.AccentButton.render with the
+  // {label, icon, onClick} schema (see entity-create.js ~line 46). Static
+  // assertion: the source file exposes that call shape and no other delegate.
+  const ecSrc = fs.readFileSync(path.join(WORKSHOP, 'platform', 'mechanisms', 'entity-create', 'entity-create.js'), 'utf8');
+  const callsAccent = /customJS\.AccentButton\.render\s*\(/.test(ecSrc);
+  const usesLabel  = /label:\s*spec\.label/.test(ecSrc);
+  const usesIcon   = /icon:\s*spec\.icon/.test(ecSrc);
+  const usesOnClick = /onClick:\s*\(\)\s*=>/.test(ecSrc);
+  console.log(`  customJS.AccentButton.render called: ${callsAccent}`);
+  console.log(`  passes {label, icon, onClick} schema: ${usesLabel && usesIcon && usesOnClick}`);
+  const pass = callsAccent && usesLabel && usesIcon && usesOnClick;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
+async function testREntityCreateMarkerPreservedAcrossReInject() {
+  console.log('\n=== R-EC-PRESERVE — marker anchor preserved (not drifted) across re-inject ===');
+  // Surround the marker with user content; verify the marker stays in place
+  // and user content above + below is preserved bit-for-bit (installer's
+  // append-only-on-absence + replace-only-marker+fence-on-presence semantics).
+  const userTop = "## Hub\n\nUser text above.\n\n";
+  const userBottom = "\n\n## Footer\nUser text below.\n";
+  const initial = userTop + "<!-- entity-create:invoice -->\n```dataviewjs\nold block content\n```" + userBottom;
+  const after = entityCreateInjectBlock(initial, "invoice");
+  const topPreserved = after.startsWith(userTop);
+  const bottomPreserved = after.endsWith(userBottom);
+  const blockReplaced = after.includes("await customJS.EntityCreate.render(dv, { instance: \"invoice\" });") && !after.includes("old block content");
+  console.log(`  user content above preserved: ${topPreserved}`);
+  console.log(`  user content below preserved: ${bottomPreserved}`);
+  console.log(`  stale block content replaced with canonical: ${blockReplaced}`);
+  const pass = topPreserved && bottomPreserved && blockReplaced;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
 // ── Main ─────────────────────────────────────────────────────────────────
 (async () => {
   const which = ARGS.selector;
@@ -1649,6 +1765,13 @@ async function testCoworkHubOpenLink() {
     if (which === 'date-aware' || which === 'all') {
       results.push(['DA1 active-file-with-date', await testDA1ActiveFileWithDate()]);
       results.push(['DA2 active-file-without-date', await testDA2ActiveFileWithoutDate()]);
+    }
+    if (which === 'entity-create' || which === 'all') {
+      results.push(['R-EC-MARKER marker-anchored', await testREntityCreateMarkerAnchored()]);
+      results.push(['R-EC-SHAPE injected-block-shape', await testREntityCreateInjectedBlockShape()]);
+      results.push(['R-EC-IDEM idempotent-re-inject', await testREntityCreateIdempotentReInject()]);
+      results.push(['R-EC-ROW accent-button-row-alignment', await testREntityCreateAccentButtonRowAlignment()]);
+      results.push(['R-EC-PRESERVE marker-preserved-across-reinject', await testREntityCreateMarkerPreservedAcrossReInject()]);
     }
     if (which === 'finance' || which === 'all') {
       results.push(['FF1 budget-nav-in-path', await testFF1BudgetNavInPath()]);

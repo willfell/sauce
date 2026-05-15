@@ -1466,6 +1466,166 @@ async function caseCW16DailyBadType() {
   });
 }
 
+// ============================================================
+// v0.46.0 S11 — entity-create-walker audit cases (AU-EC-1..6)
+// ============================================================
+
+function seedEntityCreateVault(dir, setup) {
+  // Seeds installed.json + scripts + dirs + templates for walkEntityCreate tests.
+  fs.mkdirSync(path.join(dir, "ranch"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "ranch/platform-installed.json"),
+    JSON.stringify(setup.installed, null, 2));
+  if (setup.scripts) {
+    for (const [bp, files] of Object.entries(setup.scripts)) {
+      const sd = path.join(dir, "ranch/scripts", bp);
+      fs.mkdirSync(sd, { recursive: true });
+      for (const [fname, body] of Object.entries(files)) {
+        fs.writeFileSync(path.join(sd, fname), body);
+      }
+    }
+  }
+  if (setup.dirs) {
+    for (const rel of setup.dirs) {
+      fs.mkdirSync(path.join(dir, rel), { recursive: true });
+    }
+  }
+  if (setup.templates) {
+    const td = path.join(dir, "ranch/templates");
+    fs.mkdirSync(td, { recursive: true });
+    for (const [name, body] of Object.entries(setup.templates)) {
+      fs.writeFileSync(path.join(td, name), body);
+    }
+  }
+}
+
+// AU-EC-1 — walkEntityCreate is callable as a node module
+async function caseAUEC1() {
+  const mod = require("../audit/entity-create-walker");
+  assertTrue(typeof mod.walkEntityCreate === "function",
+    "AU-EC-1: walkEntityCreate exported as a function");
+}
+
+// AU-EC-2 — HIGH finding raised when New*Button class exists without manifest entry
+async function caseAUEC2() {
+  await withTempVault(async (dir) => {
+    seedEntityCreateVault(dir, {
+      installed: { blueprints: [{ name: "foo", version: "0.1.0" }], mechanisms: [] },
+      scripts: { foo: { "new-foo-button.js": "class NewFooButton { render() {} }\n" } },
+    });
+    const { walkEntityCreate } = require("../audit/entity-create-walker");
+    const result = await walkEntityCreate(dir);
+    const hi = result.findings.find(f => f.severity === "manual_implementation_at_risk" && f.blueprint === "foo");
+    assertTrue(!!hi, "AU-EC-2: HIGH manual_implementation_at_risk finding raised for class-without-entry");
+    assertTrue(result.counts.manual_implementation_at_risk >= 1,
+      "AU-EC-2: counts.manual_implementation_at_risk >= 1");
+  });
+}
+
+// AU-EC-3 — INFO finding raised when both class + entry coexist
+async function caseAUEC3() {
+  await withTempVault(async (dir) => {
+    seedEntityCreateVault(dir, {
+      installed: {
+        blueprints: [{
+          name: "foo", version: "0.1.0",
+          new_entity_buttons: [{
+            id: "foo", label: "New Foo",
+            destination: { folder_prefix: "spice/foo", filename_prefix: "F" },
+            frontmatter_template: { type: "foo" },
+            render_in: { kind: "hub", target_path: "spice/foo/Foo.md" },
+          }],
+        }],
+        mechanisms: [],
+      },
+      scripts: { foo: { "new-foo-button.js": "class NewFooButton { render() {} }\n" } },
+      dirs: ["spice/foo"],
+    });
+    const { walkEntityCreate } = require("../audit/entity-create-walker");
+    const result = await walkEntityCreate(dir);
+    const info = result.findings.find(f => f.severity === "escape_hatch_used" && f.blueprint === "foo");
+    assertTrue(!!info, "AU-EC-3: INFO escape_hatch_used finding raised when both coexist");
+  });
+}
+
+// AU-EC-4 — MEDIUM dead_path for bogus body_template
+async function caseAUEC4() {
+  await withTempVault(async (dir) => {
+    seedEntityCreateVault(dir, {
+      installed: {
+        blueprints: [{
+          name: "bar", version: "0.1.0",
+          new_entity_buttons: [{
+            id: "bar", label: "New Bar",
+            destination: { folder_prefix: "spice/bar", filename_prefix: "B" },
+            frontmatter_template: { type: "bar" },
+            body_template: "no-such-template.md",
+            render_in: { kind: "hub", target_path: "spice/bar/Bar.md" },
+          }],
+        }],
+        mechanisms: [],
+      },
+      dirs: ["spice/bar"],
+    });
+    const { walkEntityCreate } = require("../audit/entity-create-walker");
+    const result = await walkEntityCreate(dir);
+    const dp = result.findings.find(f => f.severity === "dead_path" && /body_template/.test(f.message || ""));
+    assertTrue(!!dp, "AU-EC-4: MEDIUM dead_path finding raised for bogus body_template");
+  });
+}
+
+// AU-EC-5 — MEDIUM dead_path for bogus destination.folder_prefix
+async function caseAUEC5() {
+  await withTempVault(async (dir) => {
+    seedEntityCreateVault(dir, {
+      installed: {
+        blueprints: [{
+          name: "baz", version: "0.1.0",
+          new_entity_buttons: [{
+            id: "baz", label: "New Baz",
+            destination: { folder_prefix: "no-such-dir/baz", filename_prefix: "Z" },
+            frontmatter_template: { type: "baz" },
+            render_in: { kind: "hub", target_path: "no-such-dir/baz/Baz.md" },
+          }],
+        }],
+        mechanisms: [],
+      },
+      // No `dirs: [...]` → folder_prefix "no-such-dir/baz" does not resolve.
+    });
+    const { walkEntityCreate } = require("../audit/entity-create-walker");
+    const result = await walkEntityCreate(dir);
+    const dp = result.findings.find(f => f.severity === "dead_path"
+      && /folder_prefix/.test(f.message || "")
+      && /no-such-dir\/baz/.test(f.message || ""));
+    assertTrue(!!dp, "AU-EC-5: MEDIUM dead_path finding raised for bogus folder_prefix");
+  });
+}
+
+// AU-EC-6 — Clean vault with declared entries that resolve → all-aligned report
+async function caseAUEC6() {
+  await withTempVault(async (dir) => {
+    seedEntityCreateVault(dir, {
+      installed: {
+        blueprints: [{
+          name: "ok", version: "0.1.0",
+          new_entity_buttons: [{
+            id: "ok", label: "New OK",
+            destination: { folder_prefix: "spice/ok", filename_prefix: "O" },
+            frontmatter_template: { type: "ok" },
+            render_in: { kind: "hub", target_path: "spice/ok/OK.md" },
+          }],
+        }],
+        mechanisms: [],
+      },
+      dirs: ["spice/ok"],
+      // No scripts directory at all → no New*Button class → no findings.
+    });
+    const { walkEntityCreate } = require("../audit/entity-create-walker");
+    const result = await walkEntityCreate(dir);
+    assertEqual(result.findings.length, 0, "AU-EC-6: clean vault has zero findings");
+    assertTrue(result.counts.aligned >= 1, "AU-EC-6: clean vault has aligned >= 1");
+  });
+}
+
 // Per-case error firewall: a thrown error inside any case body (including
 // the deliberate "Cannot find module ../audit/walker" RED-state throws)
 // counts as exactly one failed sub-assert and does NOT abort the harness.
@@ -1532,6 +1692,15 @@ const selector = process.argv[2] || "all";
     // v0.45.0 S8 — cowork-daily rule_fragment audit cases
     await runCase("CW-15", caseCW15DailyValid);
     await runCase("CW-16", caseCW16DailyBadType);
+  }
+  // v0.46.0 S11 — entity-create-walker audit cases (AU-EC-1..6)
+  if (selector === "entity_create" || selector === "all") {
+    await runCase("AU-EC-1", caseAUEC1);
+    await runCase("AU-EC-2", caseAUEC2);
+    await runCase("AU-EC-3", caseAUEC3);
+    await runCase("AU-EC-4", caseAUEC4);
+    await runCase("AU-EC-5", caseAUEC5);
+    await runCase("AU-EC-6", caseAUEC6);
   }
   console.log(`========\nResult: ${passed} passed, ${failed} failed.`);
   process.exit(failed === 0 ? 0 : 1);

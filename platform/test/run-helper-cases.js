@@ -4135,6 +4135,87 @@ async function caseSHCS7ScratchNewButtonHelper() {
 }
 
 // ============================================================
+// v0.46.0 S11 — entity-create migration orphan-class scan across the 5
+// migrated blueprints (meetings / people / project / scratch / finance).
+// Each case asserts the legacy New*Button helper file is ABSENT (deleted in
+// its respective migration stage S4-S10), plus two cases that validate the
+// entity-create mechanism's source surface parses cleanly.
+// ============================================================
+
+async function caseSHCS11Meetings() {
+  console.log("\n--- Case SHC-S11-meetings: new-meeting-button.js deleted (v0.46.0 S4) ---");
+  const p = path.join(BLUEPRINTS_DIR, "meetings", "helpers", "new-meeting-button.js");
+  assertTrue("SHC-S11-meetings: meetings/helpers/new-meeting-button.js absent", !fs.existsSync(p));
+}
+
+async function caseSHCS11People() {
+  console.log("\n--- Case SHC-S11-people: new-person-button.js deleted (v0.46.0 S5) ---");
+  const p = path.join(BLUEPRINTS_DIR, "people", "helpers", "new-person-button.js");
+  assertTrue("SHC-S11-people: people/helpers/new-person-button.js absent", !fs.existsSync(p));
+}
+
+async function caseSHCS11ProjectNavButtonsNoCreate() {
+  console.log("\n--- Case SHC-S11-project-nav: project-nav-buttons.js no _createProject/_promptForProjectName/_renderProjectsHub (v0.46.0 S6) ---");
+  const p = path.join(BLUEPRINTS_DIR, "project", "helpers", "project-nav-buttons.js");
+  assertTrue("SHC-S11-project-nav: source file exists", fs.existsSync(p));
+  const body = fs.readFileSync(p, "utf8");
+  assertTrue("SHC-S11-project-nav: project-nav-buttons.js no longer has _createProject / _promptForProjectName / _renderProjectsHub method bodies",
+    !/_createProject\s*\(/.test(body) && !/_promptForProjectName\s*\(/.test(body) && !/_renderProjectsHub\s*\(/.test(body));
+}
+
+async function caseSHCS11ScratchDayActionsNoNewScratch() {
+  console.log("\n--- Case SHC-S11-scratch-day-actions: scratch-day-actions.js no newScratch method (v0.46.0 S7) ---");
+  const p = path.join(BLUEPRINTS_DIR, "scratch", "helpers", "scratch-day-actions.js");
+  assertTrue("SHC-S11-scratch-day-actions: source file exists", fs.existsSync(p));
+  const body = fs.readFileSync(p, "utf8");
+  assertTrue("SHC-S11-scratch-day-actions: scratch-day-actions.js no longer has newScratch method body",
+    !/\bnewScratch\s*\(/.test(body));
+}
+
+async function caseSHCS11FinanceBudget() {
+  console.log("\n--- Case SHC-S11-finance-budget: new-budget-button.js deleted (v0.46.0 S8) ---");
+  const p = path.join(BLUEPRINTS_DIR, "finance", "helpers", "new-budget-button.js");
+  assertTrue("SHC-S11-finance-budget: finance/helpers/new-budget-button.js absent", !fs.existsSync(p));
+}
+
+async function caseSHCS11FinancePaycheck() {
+  console.log("\n--- Case SHC-S11-finance-paycheck: new-paycheck-button.js deleted (v0.46.0 S9) ---");
+  const p = path.join(BLUEPRINTS_DIR, "finance", "helpers", "new-paycheck-button.js");
+  assertTrue("SHC-S11-finance-paycheck: finance/helpers/new-paycheck-button.js absent", !fs.existsSync(p));
+}
+
+async function caseSHCS11FinanceInvoice() {
+  console.log("\n--- Case SHC-S11-finance-invoice: new-invoice-button.js deleted (v0.46.0 S10) ---");
+  const p = path.join(BLUEPRINTS_DIR, "finance", "helpers", "new-invoice-button.js");
+  assertTrue("SHC-S11-finance-invoice: finance/helpers/new-invoice-button.js absent", !fs.existsSync(p));
+}
+
+async function caseSHCS11EntityCreateMechanismParses() {
+  console.log("\n--- Case SHC-S11-entity-create-js: entity-create.js parses via new Function() ---");
+  const p = path.join(WORKSHOP, "platform", "mechanisms", "entity-create", "entity-create.js");
+  assertTrue("SHC-S11-entity-create-js: mechanism source exists", fs.existsSync(p));
+  const body = fs.readFileSync(p, "utf8");
+  let threw = false;
+  try {
+    // Wrap with stub free-variables; class body itself must parse.
+    new Function("app", "customJS", "Notice", "window", body + "\nreturn EntityCreate;");
+  } catch (e) {
+    threw = true;
+  }
+  assertTrue("SHC-S11-entity-create-js: entity-create.js wraps in new Function() without throwing", !threw);
+}
+
+async function caseSHCS11EntityCreateSchemaParses() {
+  console.log("\n--- Case SHC-S11-entity-create-schema: new-entity-buttons.json parses + has $schema ---");
+  const p = path.join(WORKSHOP, "platform", "mechanisms", "entity-create", "schema", "new-entity-buttons.json");
+  assertTrue("SHC-S11-entity-create-schema: schema file exists", fs.existsSync(p));
+  let parsed = null, threw = false;
+  try { parsed = JSON.parse(fs.readFileSync(p, "utf8")); } catch (e) { threw = true; }
+  assertTrue("SHC-S11-entity-create-schema: JSON.parse succeeds + top-level $schema key present",
+    !threw && parsed && typeof parsed.$schema === "string" && parsed.$schema.length > 0);
+}
+
+// ============================================================
 // v0.42.0 S9 — CoworkDailyHubCards / CoworkWeeklyHubCards / CoworkMonthlyHubCards
 // helper structural checks. 6 sub-asserts × 3 helpers = 18 sub-asserts.
 // Mirrors SHC-S5/S6 pattern (from-disk static analysis) plus a scaffolded
@@ -5718,6 +5799,16 @@ async function caseProj3ValidatorRejectsProjectInvalidStatusEnum() {
   await caseSHCS5ScratchHubCardsHelper();
   await caseSHCS6ScratchDayListHelper();
   await caseSHCS7ScratchNewButtonHelper();
+  // v0.46.0 S11 — entity-create migration scan (orphan New*Button + entity-create source surface).
+  await caseSHCS11Meetings();
+  await caseSHCS11People();
+  await caseSHCS11ProjectNavButtonsNoCreate();
+  await caseSHCS11ScratchDayActionsNoNewScratch();
+  await caseSHCS11FinanceBudget();
+  await caseSHCS11FinancePaycheck();
+  await caseSHCS11FinanceInvoice();
+  await caseSHCS11EntityCreateMechanismParses();
+  await caseSHCS11EntityCreateSchemaParses();
 
   // v0.42.0 S9 — cowork@0.4.0 helper structural/materialization checks (18 sub-asserts).
   await caseCOWORKDaily1Materialized();
