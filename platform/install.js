@@ -1545,10 +1545,18 @@ async function applyNewEntityButtons(tp, manifest, variables, history, git) {
 
 // resolveEntityCreateEntry — per-entry validation + lenient substitution.
 // Returns null for malformed entries (Notice fired + warning history entry);
-// otherwise returns the resolved entry with path fields substituted. Required
-// keys check matches the new-entity-buttons schema's `required` arrays at the
-// top + destination + render_in levels; the deep shape validator (oneOf,
-// prompts type enum, etc.) is deferred to S3.
+// otherwise returns the resolved entry with path fields substituted.
+//
+// Validation layers (v0.46.0 S3 — deep shape validator added):
+//   Layer 1 (S2): required-key check at top + destination + render_in levels.
+//   Layer 2 (S3): deep shape: id pattern, prompts[].type enum +
+//     prompts[].key pattern, render_in.kind oneOf, extra_files[].filename_pattern
+//     required. Mirrors the validateAndResolve / validateAndResolveButton posture
+//     for nav-buttons: warn-and-skip on any shape failure, install proceeds.
+const _EC_ID_RE = /^[a-z][a-z0-9_-]*$/;
+const _EC_KEY_RE = /^[a-z][a-z0-9_]*$/;
+const _EC_PROMPT_TYPES = new Set(["string", "date", "month", "number", "select"]);
+
 function resolveEntityCreateEntry(entry, variables, sourceName, history, git) {
   const fail = (reason) => {
     new Notice(`new_entity_buttons: invalid entry in ${sourceName} (${reason})`, 8000);
@@ -1567,6 +1575,7 @@ function resolveEntityCreateEntry(entry, variables, sourceName, history, git) {
     return null;
   };
 
+  // --- Layer 1: required-key checks (S2) ---
   if (!entry || typeof entry !== "object") return fail("entry is not an object");
   if (!entry.id || typeof entry.id !== "string") return fail("missing id");
   if (!entry.label || typeof entry.label !== "string") return fail("missing label");
@@ -1585,6 +1594,38 @@ function resolveEntityCreateEntry(entry, variables, sourceName, history, git) {
   }
   if (entry.render_in.kind === "hub" && (typeof entry.render_in.target_path !== "string" || entry.render_in.target_path.length === 0)) {
     return fail(`render_in.kind="hub" requires target_path`);
+  }
+
+  // --- Layer 2: deep shape checks (S3) ---
+  // id must match ^[a-z][a-z0-9_-]*$ per schema.
+  if (!_EC_ID_RE.test(entry.id)) {
+    return fail(`id "${entry.id}" does not match ^[a-z][a-z0-9_-]*$`);
+  }
+  // prompts[] per-entry: type enum + key pattern.
+  for (let _pi = 0; _pi < entry.prompts.length; _pi++) {
+    const p = entry.prompts[_pi];
+    if (!p || typeof p !== "object") return fail(`prompts[${_pi}] is not an object`);
+    if (!_EC_PROMPT_TYPES.has(p.type)) {
+      return fail(`prompts[${_pi}].type "${p.type}" is not one of ${[..._EC_PROMPT_TYPES].join(", ")}`);
+    }
+    if (typeof p.key !== "string" || !_EC_KEY_RE.test(p.key)) {
+      return fail(`prompts[${_pi}].key "${p.key}" does not match ^[a-z][a-z0-9_]*$`);
+    }
+  }
+  // frontmatter_template must be a plain object (not Array, not null — already
+  // checked above for object but exclude arrays explicitly).
+  if (Array.isArray(entry.frontmatter_template)) {
+    return fail("frontmatter_template must be a plain object, not an array");
+  }
+  // extra_files[] per-entry: filename_pattern required.
+  if (Array.isArray(entry.extra_files)) {
+    for (let _ei = 0; _ei < entry.extra_files.length; _ei++) {
+      const ef = entry.extra_files[_ei];
+      if (!ef || typeof ef !== "object") return fail(`extra_files[${_ei}] is not an object`);
+      if (typeof ef.filename_pattern !== "string" || ef.filename_pattern.length === 0) {
+        return fail(`extra_files[${_ei}].filename_pattern is required`);
+      }
+    }
   }
 
   // Lenient substitution on every path-bearing field (folder_prefix,

@@ -1,6 +1,7 @@
-// platform/cli/cmd-audit.js — `sauce audit` verb (v0.29.0; --claude-surface added v0.32.0 S7).
+// platform/cli/cmd-audit.js — `sauce audit` verb (v0.29.0; --claude-surface added v0.32.0 S7;
+//                              --entity-create added v0.46.0 S3).
 //
-// Detection-only vault auditor. Two passes:
+// Detection-only vault auditor. Three passes:
 //
 //   (1) Default rule-fragment pass (v0.29.0): walks the vault, applies
 //       rule_fragments per blueprint, surfaces violations + untracked
@@ -8,8 +9,12 @@
 //   (2) --claude-surface pass (v0.32.0 S7): walks ranch/claude-surface-registry.json
 //       against the filesystem + bodies + workshop source to surface
 //       dead_path / orphan / stale_but_valid / consumer_edit_at_risk drift.
+//   (3) --entity-create pass (v0.46.0 S3): walks ranch/platform-installed.json +
+//       ranch/scripts/<blueprint>/ to surface entity-create modularization drift:
+//       manual_implementation_at_risk (HIGH) / escape_hatch_used (INFO) /
+//       dead_path (MEDIUM). 4-level severity; JSON summary footer for skill parsers.
 //
-// Both passes are READ-ONLY against the audited vault (landmine #21). The
+// All passes are READ-ONLY against the audited vault (landmine #21). The
 // only optional write is the --output-file destination.
 
 const path = require("path"), fs = require("fs");
@@ -22,12 +27,15 @@ exports._parseFlags = function(argv) {
         untrackedCheck: true,
         quiet: false,
         claudeSurface: false,
+        entityCreate: false,
         workshopPath: null,
         strict: false,
+        help: false,
     };
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
-        if (a === "--vault") flags.vault = argv[++i];
+        if (a === "--help" || a === "-h") flags.help = true;
+        else if (a === "--vault") flags.vault = argv[++i];
         else if (a.startsWith("--vault=")) flags.vault = a.slice(8);
         else if (a === "--blueprint") flags.blueprint = argv[++i];
         else if (a.startsWith("--blueprint=")) flags.blueprint = a.slice(12);
@@ -36,6 +44,7 @@ exports._parseFlags = function(argv) {
         else if (a === "--no-untracked-check") flags.untrackedCheck = false;
         else if (a === "--quiet") flags.quiet = true;
         else if (a === "--claude-surface") flags.claudeSurface = true;
+        else if (a === "--entity-create") flags.entityCreate = true;
         else if (a === "--workshop") flags.workshopPath = argv[++i];
         else if (a.startsWith("--workshop=")) flags.workshopPath = a.slice(11);
         else if (a === "--strict") flags.strict = true;
@@ -50,6 +59,16 @@ const CS_SEVERITY_LABEL = {
     orphan: "Orphans (disk has it; registry never mentioned it)",
     stale_but_valid: "Stale but valid (body version comment != registry version)",
     consumer_edit_at_risk: "Consumer edits at risk (deployed body differs from source; no .local/ shadow)",
+};
+
+// Entity-create severity constants (v0.46.0 S3).
+// HIGH / MEDIUM / INFO map to the 3 rule-fragment severities; aligned is the
+// implicit 4th level (no finding emitted). Ordered from most severe to least.
+const EC_SEVERITY_ORDER = ["manual_implementation_at_risk", "dead_path", "escape_hatch_used"];
+const EC_SEVERITY_LABEL = {
+    manual_implementation_at_risk: "Manual implementation at risk (HIGH) — New*Button class exists but no new_entity_buttons[] entry; migration incomplete",
+    dead_path: "Dead paths (MEDIUM) — destination.folder_prefix or body_template does not resolve on disk",
+    escape_hatch_used: "Escape hatch used (INFO) — New*Button class coexists with new_entity_buttons[]; intentional but requires justification",
 };
 
 function formatClaudeSurfaceReport(result) {
@@ -81,7 +100,36 @@ function formatClaudeSurfaceReport(result) {
     return lines.join("\n") + "\n";
 }
 
-exports._runForTest = async function({ vaultPath, blueprintFilter, outputFile, untrackedCheck, quiet, claudeSurface, workshopPath, strict }) {
+function formatEntityCreateReport(result) {
+    const { findings, counts } = result;
+    const lines = [];
+    lines.push(`# sauce audit --entity-create`);
+    lines.push("");
+    lines.push(`Counts: manual_implementation_at_risk=${counts.manual_implementation_at_risk}, dead_path=${counts.dead_path}, escape_hatch_used=${counts.escape_hatch_used}, aligned=${counts.aligned}`);
+    lines.push("");
+    for (const sev of EC_SEVERITY_ORDER) {
+        const rows = findings.filter(f => f.severity === sev);
+        if (rows.length === 0) continue;
+        lines.push(`## ${sev} (${rows.length})`);
+        lines.push("");
+        lines.push(`_${EC_SEVERITY_LABEL[sev]}_`);
+        lines.push("");
+        for (let i = 0; i < rows.length; i++) {
+            const r = rows[i];
+            lines.push(`${i + 1}. \`${r.path}\` — ${r.message}`);
+        }
+        lines.push("");
+    }
+    if (findings.length === 0) {
+        lines.push(`No entity-create drift detected. ${counts.aligned} aligned entries.`);
+        lines.push("");
+    }
+    // JSON summary footer for skill parsers.
+    lines.push(`<!-- entity-create-summary:${JSON.stringify({ counts, findings_total: findings.length })} -->`);
+    return lines.join("\n") + "\n";
+}
+
+exports._runForTest = async function({ vaultPath, blueprintFilter, outputFile, untrackedCheck, quiet, claudeSurface, entityCreate, workshopPath, strict }) {
     // Test entry-point used by run-audit.js / run-cli.js. Throws Error with
     // .exitCode set (1 = violations, 2 = error) instead of calling process.exit.
     const installedJsonPath = path.join(vaultPath, "ranch/platform-installed.json");
@@ -95,22 +143,25 @@ exports._runForTest = async function({ vaultPath, blueprintFilter, outputFile, u
     let combinedMd = "";
     let hasFindings = false;
 
-    // (1) Default rule-fragment pass — always runs unless --claude-surface is set alone.
-    // To preserve original behavior, the default pass runs when --claude-surface is
-    // NOT set OR when both are requested. For now, --claude-surface ALONE skips
-    // the default pass (concession: user can run both passes explicitly by omitting
-    // --claude-surface to get default, or pass --claude-surface for the new pass).
-    if (!claudeSurface) {
+    // (1) Default rule-fragment pass — runs unless an explicit pass flag is set alone.
+    // To preserve original behavior, the default pass runs when neither --claude-surface
+    // nor --entity-create is set. When a specific flag is set, only that pass runs.
+    if (!claudeSurface && !entityCreate) {
         const { runAudit } = require("../audit/walker");
         const { formatReport } = require("../audit/report");
         const result = await runAudit({ vaultPath, blueprintFilter, untrackedCheck });
         combinedMd += formatReport(result, vaultPath);
         if (result.violations.length > 0 || result.untracked.length > 0) hasFindings = true;
-    } else {
+    } else if (claudeSurface) {
         const { walkClaudeSurface } = require("../mechanisms/audit/claude-surface-walker");
         const csResult = await walkClaudeSurface(vaultPath, { workshopPath });
         combinedMd += formatClaudeSurfaceReport(csResult);
         if (csResult.findings.length > 0) hasFindings = true;
+    } else if (entityCreate) {
+        const { walkEntityCreate } = require("../audit/entity-create-walker");
+        const ecResult = await walkEntityCreate(vaultPath, { workshopPath });
+        combinedMd += formatEntityCreateReport(ecResult);
+        if (ecResult.findings.length > 0) hasFindings = true;
     }
 
     let summary = null;
@@ -141,6 +192,27 @@ exports._runForTest = async function({ vaultPath, blueprintFilter, outputFile, u
 
 exports.run = async function(ctx, args) {
     const flags = exports._parseFlags(args);
+    if (flags.help) {
+        console.log(
+            "usage: sauce audit [--vault <path>] [--blueprint <name>] [--output-file <path>]\n" +
+            "                   [--no-untracked-check] [--quiet] [--strict]\n" +
+            "                   [--claude-surface [--workshop <path>]]\n" +
+            "                   [--entity-create]\n" +
+            "\n" +
+            "Passes (mutually exclusive; default = rule-fragment pass):\n" +
+            "  (default)         Rule-fragment audit: blueprint conformance + untracked dirs.\n" +
+            "  --claude-surface  Claude-surface drift: dead_path / orphan / stale_but_valid /\n" +
+            "                    consumer_edit_at_risk.  --workshop <path> enables body-diff checks.\n" +
+            "  --entity-create   Entity-create modularization drift:\n" +
+            "                    manual_implementation_at_risk (HIGH) — New*Button class with no\n" +
+            "                      new_entity_buttons[] declaration.\n" +
+            "                    dead_path (MEDIUM) — folder_prefix or body_template unresolved.\n" +
+            "                    escape_hatch_used (INFO) — New*Button + declaration coexist.\n" +
+            "\n" +
+            "Exit codes: 0 = clean, 1 = findings, 2 = error."
+        );
+        return;
+    }
     const vaultPath = flags.vault ? path.resolve(process.cwd(), flags.vault) : process.cwd();
     try {
         await exports._runForTest({
@@ -150,6 +222,7 @@ exports.run = async function(ctx, args) {
             untrackedCheck: flags.untrackedCheck,
             quiet: flags.quiet,
             claudeSurface: flags.claudeSurface,
+            entityCreate: flags.entityCreate,
             workshopPath: flags.workshopPath ? path.resolve(process.cwd(), flags.workshopPath) : null,
             strict: flags.strict,
         });
