@@ -616,6 +616,27 @@ module.exports = async function (tp) {
       });
     }
 
+    // 7b. Subscription-aware pruning of ranch/entity-create-registry.json.
+    // Symmetric with the nav-buttons prune above: removes contributions.<source>
+    // for any source no longer in the current subscription. Closes the
+    // "entirely unsubscribed blueprint" gap that applyNewEntityButtons can't
+    // see (it only runs for items still in the subscription). Wrapped in its
+    // own try/catch so a malformed registry never aborts the broader install.
+    try {
+      await pruneEntityCreateRegistry(tp, subscription, installedNow.history, git);
+    } catch (e) {
+      new Notice(`platformInstall: entity-create registry prune failed — ${e.message}`, 6000);
+      installedNow.history.push({
+        event: "error",
+        step: "entity_create_prune",
+        message: e.message,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+
     // 8. Subscription-aware pruning of ranch/platform-installed.json
     // bucket arrays (mechanisms[], blueprints[]). Symmetric with the
     // nav-buttons-registry prune above: drops install ledger entries whose
@@ -1566,12 +1587,13 @@ function resolveEntityCreateEntry(entry, variables, sourceName, history, git) {
     return fail(`render_in.kind="hub" requires target_path`);
   }
 
-  // Lenient substitution on every path-bearing field. Frontmatter values,
-  // prompts, inline_body, body_template content are NOT substituted here —
-  // they are user-authored runtime templates rendered by EntityCreate using
-  // its own placeholder syntax (e.g., {{date}}, {{title}}). Only path-shape
-  // fields go through substituteLenient so {{module_directory}} resolves at
-  // install time.
+  // Lenient substitution on every path-bearing field (folder_prefix,
+  // filename_prefix, filename_suffix, render_in.target_path, body_template,
+  // extra_files[].filename_pattern / .subfolder / .body_template) so
+  // {{module_directory}} et al. resolve at install time. Frontmatter values,
+  // prompts, and inline_body are NOT substituted here — they are user-authored
+  // runtime templates rendered by EntityCreate using its own placeholder syntax
+  // (e.g., {{date}}, {{title}}).
   const destination = {
     folder_prefix:         substituteLenient(entry.destination.folder_prefix, variables),
     filename_prefix:       substituteLenient(entry.destination.filename_prefix, variables),
@@ -5778,6 +5800,109 @@ async function pruneNavButtonsRegistry(tp, subscription, history, git) {
   }
 
   if (mutated) {
+    await adapter.write(registryPath, JSON.stringify(registry, null, 2));
+  }
+}
+
+// pruneEntityCreateRegistry — drop contributions.<X> for any X not in the
+// current subscription. Symmetric with pruneNavButtonsRegistry: same C4
+// hardening, same Notice + history posture, same idempotency. Closes the
+// "consumer unsubscribes from a blueprint entirely" gap that applyNewEntityButtons
+// alone can't see (applyNewEntityButtons only runs for items still in the
+// subscription, so an entirely-removed blueprint's prior contribution would
+// otherwise persist forever in the registry). Mirrors the v0.2.0+ nav-buttons
+// subscription-aware prune pattern.
+//
+// Registry shape: { schema_version, contributions: { <name>: [...] }, entries: [...] }.
+// When a contribution is pruned, the flattened entries[] view is rebuilt from
+// the remaining contributions so the EntityCreate runtime view stays coherent.
+async function pruneEntityCreateRegistry(tp, subscription, history, git) {
+  const adapter = tp.app.vault.adapter;
+  const registryPath = "ranch/entity-create-registry.json";
+  if (!(await adapter.exists(registryPath))) return;
+
+  let raw;
+  try {
+    raw = await adapter.read(registryPath);
+  } catch (e) {
+    new Notice(`pruneEntityCreateRegistry: cannot read ${registryPath} (${e.message}). Skipping prune.`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "entity_create_prune",
+        message: `read failed for ${registryPath}: ${e.message}`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+  let registry;
+  try {
+    registry = JSON.parse(raw);
+  } catch (e) {
+    new Notice(`pruneEntityCreateRegistry: ${registryPath} is malformed JSON (${e.message}). Skipping prune.`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "entity_create_prune",
+        message: `${registryPath} is malformed JSON: ${e.message}`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+  if (registry === null || typeof registry !== "object" || Array.isArray(registry)) {
+    new Notice(`pruneEntityCreateRegistry: ${registryPath} parsed but has unexpected shape (expected object). Skipping prune.`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "entity_create_prune",
+        message: `${registryPath} parsed but has unexpected shape (expected object)`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+  if (!registry.contributions || typeof registry.contributions !== "object") return;
+
+  const subscribedNames = new Set([
+    ...((subscription && subscription.mechanisms) || []).map((m) => m.name),
+    ...((subscription && subscription.blueprints) || []).map((b) => b.name),
+  ]);
+
+  let mutated = false;
+  for (const source of Object.keys(registry.contributions)) {
+    if (!subscribedNames.has(source)) {
+      delete registry.contributions[source];
+      mutated = true;
+      if (history) {
+        history.push({
+          event: "info",
+          step: "entity_create_prune",
+          action: "pruned_unsubscribed_blueprint",
+          source,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    }
+  }
+
+  if (mutated) {
+    // Rewrite the flattened entries[] view so EntityCreate runtime stays
+    // coherent with the pruned contributions map.
+    registry.entries = Object.values(registry.contributions).flat();
     await adapter.write(registryPath, JSON.stringify(registry, null, 2));
   }
 }
