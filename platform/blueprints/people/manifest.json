@@ -53,7 +53,7 @@
         "tags": ["person"]
       },
       "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PersonNavButtons\" });\n```\n\n# [[{{prompts.name}}]]\n\n## Notes\n-\n\n## Meetings\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"PeopleRendering\",\n  method: \"renderMentionList\",\n  args: [dv, { mode: \"mentioning_person\", personLink: dv.current().file.link, scopePath: \"spice/meetings\" }, { style: \"cards\", limit: 50 }]\n});\n```\n\n## Daily Mentions\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"PeopleRendering\",\n  method: \"renderMentionList\",\n  args: [dv, { mode: \"mentioning_person\", personLink: dv.current().file.link, scopePath: \"spice/daily\" }, { style: \"list\", limit: 30 }]\n});\n```\n",
-      "render_in": { "kind": "hub", "target_path": "content/People.md" }
+      "render_in": { "kind": "hub", "target_path": "{{module_directory}}/People.md" }
     }
   ],
   "post_install": [

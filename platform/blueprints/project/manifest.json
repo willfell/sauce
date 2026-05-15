@@ -75,7 +75,7 @@
         { "filename_pattern": "Project Map.md", "body_template": "Template, Project Map.md" },
         { "filename_pattern": "{{prompts.slug}}-board.md", "body_template": "Template, Project Board.md" }
       ],
-      "render_in": { "kind": "hub", "target_path": "content/Projects.md" }
+      "render_in": { "kind": "hub", "target_path": "{{module_directory}}/Projects.md" }
     }
   ],
   "nav_buttons": [

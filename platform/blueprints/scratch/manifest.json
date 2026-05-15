@@ -126,7 +126,7 @@
         "created": "{{now.YYYY-MM-DDTHH:mm:ss}}"
       },
       "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n---\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ScratchLeafActions\" });\n```\n\n---\n",
-      "render_in": { "kind": "hub", "target_path": "templates/Scratch Day Hub.md" }
+      "render_in": { "kind": "hub", "target_path": "{{templates_path}}/Scratch Day Hub.md" }
     }
   ],
   "templater_folder_templates": [

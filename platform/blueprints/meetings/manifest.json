@@ -48,7 +48,7 @@
         "cssclasses": ["wide"]
       },
       "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n",
-      "render_in": { "kind": "hub", "target_path": "templates/Meeting Hub.md" }
+      "render_in": { "kind": "hub", "target_path": "{{templates_path}}/Meeting Hub.md" }
     }
   ],
   "nav_buttons": [
