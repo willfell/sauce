@@ -1551,6 +1551,19 @@ async function applyNewEntityButtons(tp, manifest, variables, history, git) {
   await adapter.write(registryPath, JSON.stringify(registry, null, 2));
 }
 
+// Convention: body_template values are blueprint-template basenames.
+// If the substituted value has no path separator, prepend templates_path.
+// Pre-existing values containing '/' pass through untouched — schema
+// rejects them at validate time, but the helper is defensive.
+//
+// Called by resolveEntityCreateEntry for body_template + extra_files[].body_template.
+function _resolveBodyTemplatePath(value, variables) {
+  if (typeof value !== "string" || !value) return value;
+  if (value.includes("/") || value.includes("\\")) return value;
+  const templatesPath = (variables && variables.templates_path) || "ranch/templates";
+  return `${templatesPath}/${value}`;
+}
+
 // resolveEntityCreateEntry — per-entry validation + lenient substitution.
 // Returns null for malformed entries (Notice fired + warning history entry);
 // otherwise returns the resolved entry with path fields substituted.
@@ -1662,7 +1675,8 @@ function resolveEntityCreateEntry(entry, variables, sourceName, history, git) {
     destination,
   };
   if (typeof entry.body_template === "string") {
-    resolved.body_template = substituteLenient(entry.body_template, variables);
+    const substituted = substituteLenient(entry.body_template, variables);
+    resolved.body_template = _resolveBodyTemplatePath(substituted, variables);
   }
   if (entry.render_in.kind === "hub") {
     resolved.render_in = {
@@ -1681,7 +1695,8 @@ function resolveEntityCreateEntry(entry, variables, sourceName, history, git) {
         out.subfolder = substituteLenient(ef.subfolder, variables);
       }
       if (typeof ef.body_template === "string") {
-        out.body_template = substituteLenient(ef.body_template, variables);
+        const substituted = substituteLenient(ef.body_template, variables);
+        out.body_template = _resolveBodyTemplatePath(substituted, variables);
       }
       return out;
     });

@@ -42,7 +42,11 @@
         }
       },
       "frontmatter_template": { "type": "object" },
-      "body_template":        { "type": "string" },
+      "body_template": {
+        "type": "string",
+        "pattern": "^[^/\\\\]+\\.md$",
+        "description": "Blueprint-template basename (no path separators). Installer auto-prepends {{templates_path}}/ at registry-write time. Pattern rejects '/' and '\\\\' characters and requires .md extension."
+      },
       "inline_body":          { "type": "string" },
       "extra_files": {
         "type": "array",
@@ -54,7 +58,11 @@
             "subfolder":            { "type": "string" },
             "frontmatter_template": { "type": "object" },
             "inline_body":          { "type": "string" },
-            "body_template":        { "type": "string" }
+            "body_template": {
+              "type": "string",
+              "pattern": "^[^/\\\\]+\\.md$",
+              "description": "Blueprint-template basename (no path separators). Installer auto-prepends {{templates_path}}/ at registry-write time. Pattern rejects '/' and '\\\\' characters and requires .md extension."
+            }
           }
         }
       },

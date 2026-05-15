@@ -474,19 +474,21 @@ function extractFn(src, name) {
 }
 
 const resolveFnSrc      = extractFn(installSrc, "resolveEntityCreateEntry");
+const resolveBodySrc    = extractFn(installSrc, "_resolveBodyTemplatePath");
 const substituteSrc     = extractFn(installSrc, "substituteLenient");
 const idReSrc           = installSrc.match(/const\s+_EC_ID_RE\s*=[^;]+;/);
 const keyReSrc          = installSrc.match(/const\s+_EC_KEY_RE\s*=[^;]+;/);
 const promptTypesSrc    = installSrc.match(/const\s+_EC_PROMPT_TYPES\s*=[^;]+;/);
 
 let resolveEntityCreateEntry = null;
-if (resolveFnSrc && substituteSrc && idReSrc && keyReSrc && promptTypesSrc) {
+if (resolveFnSrc && substituteSrc && idReSrc && keyReSrc && promptTypesSrc && resolveBodySrc) {
     const wrapped =
         `"use strict";\n` +
         `${substituteSrc}\n` +
         `${idReSrc[0]}\n` +
         `${keyReSrc[0]}\n` +
         `${promptTypesSrc[0]}\n` +
+        `${resolveBodySrc}\n` +
         `${resolveFnSrc}\n` +
         `return resolveEntityCreateEntry;`;
     const NoticeStub = function (msg) { (NoticeStub.captured ||= []).push(String(msg)); };
