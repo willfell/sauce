@@ -67,6 +67,11 @@
       "path": "mechanisms/accent-button"
     },
     {
+      "name": "icons",
+      "version": "0.1.0",
+      "path": "mechanisms/icons"
+    },
+    {
       "name": "entity-create",
       "version": "0.1.1",
       "path": "mechanisms/entity-create"
