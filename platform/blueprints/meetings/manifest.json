@@ -1,10 +1,10 @@
 {
   "name": "meetings",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "kind": "blueprint",
   "module_directory": "meetings",
   "skills_dir": ".claude/skills/meetings",
-  "description": "Hub-centric meeting notes: one Meetings Hub per day at spice/meetings/hubs/YYYY/MM-MMMM/ aggregating individual meeting notes at spice/meetings/notes/ via inline NewMeetingButton + MeetingsHubCards CustomJS classes. v0.1.2: filename pattern <Name>-YYYY-MM-DD (Meetings-YYYY-MM-DD.md hub; <title>-YYYY-MM-DD.md per-meeting); hub folder date-routed; class regex date-extract. v0.2.0: MeetingsHubCards migrated to BeaconCards via row layout + async pre-fetch adapter; per-badge SVG icons + secondaryText subtitle preserved end-to-end. v0.3.0 MINOR: pilot integration with people-rendering@0.1.0 mechanism — MeetingsHubCards subtitle slot renders attendee chips for registered People (those with spice/people/<name>.md notes) via PeopleRendering.renderChip callback (uses cards@0.2.4 subtitle-callback polymorphism); falls back to comma-string when no registered People; new ## Attendees chip-rendering dataviewjs block in Meeting.md template above the bullet list. NewMeetingButton attendee autocomplete deferred to v0.27.x carry. v0.4.0 MINOR (v0.33.0 wave 2): adopts claude_surface[] — ships canonical /meetings slash command + new-meeting SKILL.md + resolvers row.",
+  "description": "Hub-centric meeting notes: one Meetings Hub per day at spice/meetings/hubs/YYYY/MM-MMMM/ aggregating individual meeting notes at spice/meetings/notes/ via MeetingsHubCards CustomJS class + entity-create@0.1.0 button. v0.1.2: filename pattern <Name>-YYYY-MM-DD (Meetings-YYYY-MM-DD.md hub; <title>-YYYY-MM-DD.md per-meeting); hub folder date-routed; class regex date-extract. v0.2.0: MeetingsHubCards migrated to BeaconCards via row layout + async pre-fetch adapter; per-badge SVG icons + secondaryText subtitle preserved end-to-end. v0.3.0 MINOR: pilot integration with people-rendering@0.1.0 mechanism — MeetingsHubCards subtitle slot renders attendee chips for registered People (those with spice/people/<name>.md notes) via PeopleRendering.renderChip callback (uses cards@0.2.4 subtitle-callback polymorphism); falls back to comma-string when no registered People; new ## Attendees chip-rendering dataviewjs block in Meeting.md template above the bullet list. Attendee autocomplete deferred to v0.27.x carry. v0.4.0 MINOR (v0.33.0 wave 2): adopts claude_surface[] — ships canonical /meetings slash command + new-meeting SKILL.md + resolvers row. v0.5.0 MINOR: inline create-button class deleted; manifest declares new_entity_buttons[] via entity-create@0.1.0 mechanism; Meeting Hub template now uses entity-create marker.",
   "depends_on": [
     { "name": "nav-buttons",      "range": ">=2.2.0" },
     { "name": "customjs-guard",   "range": ">=1.0.0" },
@@ -13,17 +13,36 @@
     { "name": "people-rendering", "range": ">=0.1.0" },
     { "name": "cards",            "range": ">=0.2.4" }
   ],
-  "customjs_classes": ["MeetingsHubCards", "NewMeetingButton"],
+  "customjs_classes": ["MeetingsHubCards"],
   "files": [
     { "source": "templates/Meeting.md",         "dest": "{{templates_path}}/Meeting.md" },
     { "source": "templates/Meeting Hub.md",     "dest": "{{templates_path}}/Meeting Hub.md" },
-    { "source": "helpers/meetings-hub-cards.js", "dest": "{{scripts_path}}/meetings/meetings-hub-cards.js" },
-    { "source": "helpers/new-meeting-button.js", "dest": "{{scripts_path}}/meetings/new-meeting-button.js" }
+    { "source": "helpers/meetings-hub-cards.js", "dest": "{{scripts_path}}/meetings/meetings-hub-cards.js" }
   ],
   "claude_surface": [
     { "kind": "command", "source": "commands/meetings.md", "dest": ".claude/commands/meetings.md" },
     { "kind": "skill",   "source": "skills/new-meeting/SKILL.md", "dest": "{{skills_dir}}/new-meeting/SKILL.md" },
     { "kind": "claude_md_row", "table": "resolvers", "row": { "topic": "Meetings", "path": "{{module_directory}}", "command": "/meetings" } }
+  ],
+  "new_entity_buttons": [
+    {
+      "id": "meeting",
+      "label": "New Meeting",
+      "icon": "users-plus",
+      "prompts": [
+        { "key": "title", "label": "Meeting title", "type": "string", "required": true }
+      ],
+      "destination": {
+        "folder_prefix": "{{module_directory}}/notes",
+        "folder_date_pattern": "YYYY/MM-MMMM",
+        "filename_prefix": "{{prompts.title}}-",
+        "filename_date_pattern": "YYYY-MM-DD",
+        "filename_suffix": ""
+      },
+      "frontmatter_template": {},
+      "body_template": "Meeting.md",
+      "render_in": { "kind": "hub", "target_path": "templates/Meeting Hub.md" }
+    }
   ],
   "nav_buttons": [
     {
@@ -49,7 +68,7 @@
   "post_install": [
     {
       "type": "notice",
-      "message": "Meetings blueprint installed at spice/meetings/. REQUIRED: enable the Templater community plugin if not already enabled. Click 'Meetings' to open today's meetings hub at spice/meetings/hubs/YYYY-MM-DD-Meetings.md. From the hub, click 'New Meeting' to create individual meeting notes at spice/meetings/notes/YYYY/MM-MMMM/YYYY-MM-DD <title>.md (you'll be prompted for title and attendees). Hub renders today's meetings as cards with status badges; meetings also appear in the daily dashboard's Today's Meetings panel."
+      "message": "Meetings blueprint installed at spice/meetings/. REQUIRED: enable the Templater community plugin if not already enabled. Click 'Meetings' to open today's meetings hub at spice/meetings/hubs/YYYY-MM-DD-Meetings.md. From the hub, click 'New Meeting' (powered by entity-create@0.1.0) to create individual meeting notes at spice/meetings/notes/YYYY/MM-MMMM/YYYY-MM-DD <title>.md (you'll be prompted for title). Hub renders today's meetings as cards with status badges; meetings also appear in the daily dashboard's Today's Meetings panel."
     }
   ],
   "bootstrap_contributions": [
