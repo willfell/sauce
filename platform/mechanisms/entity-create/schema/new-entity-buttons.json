@@ -1,0 +1,76 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://sauce.dev/schema/new-entity-buttons.json",
+  "title": "new_entity_buttons[] manifest field",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": ["id", "label", "prompts", "destination", "frontmatter_template", "render_in"],
+    "additionalProperties": false,
+    "properties": {
+      "id":    { "type": "string", "pattern": "^[a-z][a-z0-9_-]*$" },
+      "label": { "type": "string", "minLength": 1 },
+      "icon":  { "type": "string" },
+      "prompts": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": ["key", "label", "type"],
+          "properties": {
+            "key":      { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+            "label":    { "type": "string" },
+            "type":     { "enum": ["string", "date", "month", "number", "select"] },
+            "required": { "type": "boolean", "default": true },
+            "default":  { "type": "string" },
+            "options":  { "type": "array", "items": { "type": "string" } },
+            "min":      { "type": "number" },
+            "max":      { "type": "number" },
+            "validate": { "type": "string" },
+            "derive":   { "type": "string" }
+          }
+        }
+      },
+      "destination": {
+        "type": "object",
+        "required": ["folder_prefix", "filename_prefix"],
+        "properties": {
+          "folder_prefix":         { "type": "string" },
+          "folder_date_pattern":   { "type": "string" },
+          "filename_prefix":       { "type": "string" },
+          "filename_date_pattern": { "type": "string" },
+          "filename_suffix":       { "type": "string" }
+        }
+      },
+      "frontmatter_template": { "type": "object" },
+      "body_template":        { "type": "string" },
+      "inline_body":          { "type": "string" },
+      "extra_files": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": ["filename_pattern"],
+          "properties": {
+            "filename_pattern":     { "type": "string" },
+            "subfolder":            { "type": "string" },
+            "frontmatter_template": { "type": "object" },
+            "inline_body":          { "type": "string" },
+            "body_template":        { "type": "string" }
+          }
+        }
+      },
+      "render_in": {
+        "oneOf": [
+          { "type": "object", "properties": { "kind": { "const": "nav_buttons" } }, "required": ["kind"] },
+          {
+            "type": "object",
+            "properties": {
+              "kind":        { "const": "hub" },
+              "target_path": { "type": "string" }
+            },
+            "required": ["kind", "target_path"]
+          }
+        ]
+      }
+    }
+  }
+}
