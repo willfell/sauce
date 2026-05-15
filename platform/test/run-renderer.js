@@ -1737,6 +1737,49 @@ async function testREntityCreateMarkerPreservedAcrossReInject() {
   return pass;
 }
 
+// ── R-EC-ICON-1..7 — DOM-icon assert per entity-create site ────────────────
+// For each of the 7 entity-create sites, exercise the Icons → AccentButton
+// chain that EntityCreate.render() composes in v0.2.0 (post-S2):
+//   resolved = customJS.Icons.resolve(spec.icon)
+//   customJS.AccentButton.render(container, { label, icon: resolved, onClick })
+// Asserts that the rendered button's innerHTML contains <svg AND does NOT
+// contain the literal kebab name (the BUG-1 regression class — pre-S2,
+// the kebab string was passed through to btn.innerHTML as literal text).
+// Icon kebabs come from each blueprint's new_entity_buttons[*].icon field
+// in its manifest.json (confirmed pre-S4 to match this table).
+const ENTITY_CREATE_SITES = [
+  { instance: 'meeting',  icon: 'users-plus' },
+  { instance: 'person',   icon: 'user-plus' },
+  { instance: 'project',  icon: 'folder-plus' },
+  { instance: 'scratch',  icon: 'pencil-plus' },
+  { instance: 'budget',   icon: 'wallet-plus' },
+  { instance: 'paycheck', icon: 'wallet-plus' },
+  { instance: 'invoice',  icon: 'file-plus' }
+];
+
+async function testREntityCreateIconRendersSvg(siteIndex, site) {
+  const caseId = `R-EC-ICON-${siteIndex}`;
+  console.log(`\n=== ${caseId} — ${site.instance} button (icon: ${site.icon}) renders SVG, not literal kebab ===`);
+  const app = makeApp();
+  const Cls = loadAccentButtonClass(app);
+  if (!Cls) { console.log('  FAIL — AccentButton class not loaded'); return false; }
+  const resolved = ICONS_INSTANCE.resolve(site.icon);
+  if (typeof resolved !== 'string' || resolved.length === 0) {
+    console.log(`  FAIL — Icons.resolve("${site.icon}") returned null/empty (Tier 1 miss)`);
+    return false;
+  }
+  const parent = makeEl('div', {});
+  const btn = new Cls().render(parent, { label: `+ New ${site.instance}`, icon: resolved, onClick: () => {} });
+  const html = (btn && btn.innerHTML) || '';
+  const containsSvg = html.includes('<svg');
+  const containsKebab = html.includes(site.icon);
+  console.log(`  innerHTML head: ${html.slice(0, 80)}...`);
+  console.log(`  contains <svg: ${containsSvg}; contains literal "${site.icon}": ${containsKebab}`);
+  const pass = containsSvg && !containsKebab;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
 // ── Main ─────────────────────────────────────────────────────────────────
 (async () => {
   const which = ARGS.selector;
@@ -1788,6 +1831,10 @@ async function testREntityCreateMarkerPreservedAcrossReInject() {
       results.push(['R-EC-IDEM idempotent-re-inject', await testREntityCreateIdempotentReInject()]);
       results.push(['R-EC-ROW accent-button-row-alignment', await testREntityCreateAccentButtonRowAlignment()]);
       results.push(['R-EC-PRESERVE marker-preserved-across-reinject', await testREntityCreateMarkerPreservedAcrossReInject()]);
+      for (let i = 0; i < ENTITY_CREATE_SITES.length; i++) {
+        const site = ENTITY_CREATE_SITES[i];
+        results.push([`R-EC-ICON-${i + 1} ${site.instance}-icon-renders-svg`, await testREntityCreateIconRendersSvg(i + 1, site)]);
+      }
     }
     if (which === 'finance' || which === 'all') {
       results.push(['FF1 budget-nav-in-path', await testFF1BudgetNavInPath()]);
