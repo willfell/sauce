@@ -401,6 +401,14 @@ module.exports = async function (tp) {
         const ok = await installItem(tp, workshopPath, node.target, itemMan, itemVars, installedNow.history, git);
         if (ok) {
           const entry = { name, version: node.sub.version, installed_at: new Date().toISOString() };
+          // v0.46.0 S3 follow-up (C1): embed new_entity_buttons[] declarations
+          // into the installed.json blueprints[] entry so the entity-create
+          // audit walker has a stable single-source-of-truth surface to read
+          // at audit time. Deep-copy to insulate the registry from later
+          // manifest mutation. Omit when absent.
+          if (Array.isArray(itemMan.new_entity_buttons)) {
+            entry.new_entity_buttons = JSON.parse(JSON.stringify(itemMan.new_entity_buttons));
+          }
           const idx = installedNow[bucketKey].findIndex((m) => m.name === name);
           if (idx >= 0) installedNow[bucketKey][idx] = entry;
           else installedNow[bucketKey].push(entry);

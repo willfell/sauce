@@ -105,7 +105,11 @@ function formatEntityCreateReport(result) {
     const lines = [];
     lines.push(`# sauce audit --entity-create`);
     lines.push("");
-    lines.push(`Counts: manual_implementation_at_risk=${counts.manual_implementation_at_risk}, dead_path=${counts.dead_path}, escape_hatch_used=${counts.escape_hatch_used}, aligned=${counts.aligned}`);
+    // v0.46.0 S3 follow-up (I4): surface unverifiable count alongside aligned.
+    // Defaults to 0 for backwards-compat with older walker outputs that don't
+    // emit the field.
+    const unverifiable = (counts && typeof counts.unverifiable === "number") ? counts.unverifiable : 0;
+    lines.push(`Counts: manual_implementation_at_risk=${counts.manual_implementation_at_risk}, dead_path=${counts.dead_path}, escape_hatch_used=${counts.escape_hatch_used}, aligned=${counts.aligned}, unverifiable=${unverifiable}`);
     lines.push("");
     for (const sev of EC_SEVERITY_ORDER) {
         const rows = findings.filter(f => f.severity === sev);
