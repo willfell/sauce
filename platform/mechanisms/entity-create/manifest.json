@@ -1,10 +1,11 @@
 {
   "name": "entity-create",
-  "version": "0.1.1",
-  "description": "Declarative entity-creation buttons. Each consuming blueprint declares new_entity_buttons[] in its manifest; installer materializes either a nav_buttons action (kind: nav_buttons) or an injected AccentButton block into a target file (kind: hub). The EntityCreate CustomJS class executes prompts → frontmatter hydration → file create → open. Replaces 7 hand-authored New<X>Button classes across meetings/people/project/scratch/finance.",
+  "version": "0.2.0",
+  "description": "Declarative entity-creation buttons. Each consuming blueprint declares new_entity_buttons[] in its manifest; installer materializes either a nav_buttons action (kind: nav_buttons) or an injected AccentButton block into a target file (kind: hub). The EntityCreate CustomJS class executes prompts → frontmatter hydration → file create → open. Replaces 7 hand-authored New<X>Button classes across meetings/people/project/scratch/finance. v0.2.0 MINOR (v0.47.0): render() consumes customJS.Icons.resolve for kebab-name → SVG translation (fixes BUG-1 from headspace Phase 3); JSON-schema tightens body_template + extra_files[].body_template to basename-only (fixes BUG-3/4 path-resolution mismatch).",
   "depends_on": [
     { "name": "customjs-guard", "range": ">=1.0.0" },
-    { "name": "accent-button",  "range": ">=0.1.0" }
+    { "name": "accent-button",  "range": ">=0.1.0" },
+    { "name": "icons",          "range": ">=0.1.0" }
   ],
   "customjs_classes": ["EntityCreate"],
   "files": [

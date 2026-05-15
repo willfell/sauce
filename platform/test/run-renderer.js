@@ -1687,16 +1687,22 @@ async function testREntityCreateAccentButtonRowAlignment() {
   // The injected block is a dataviewjs fence whose body invokes
   // customJS.EntityCreate.render(dv, {instance:"<id>"}). At runtime,
   // EntityCreate.render delegates to customJS.AccentButton.render with the
-  // {label, icon, onClick} schema (see entity-create.js ~line 46). Static
-  // assertion: the source file exposes that call shape and no other delegate.
+  // {label, icon, onClick} schema (see entity-create.js). Static assertion:
+  // the source file exposes that call shape. As of v0.2.0 (S2), the icon
+  // field is resolved via customJS.Icons.resolve before passing to AccentButton
+  // (BUG-1 fix: kebab names no longer render as literal text).
   const ecSrc = fs.readFileSync(path.join(WORKSHOP, 'platform', 'mechanisms', 'entity-create', 'entity-create.js'), 'utf8');
-  const callsAccent = /customJS\.AccentButton\.render\s*\(/.test(ecSrc);
-  const usesLabel  = /label:\s*spec\.label/.test(ecSrc);
-  const usesIcon   = /icon:\s*spec\.icon/.test(ecSrc);
-  const usesOnClick = /onClick:\s*\(\)\s*=>/.test(ecSrc);
+  const callsAccent  = /customJS\.AccentButton\.render\s*\(/.test(ecSrc);
+  const usesLabel    = /label:\s*spec\.label/.test(ecSrc);
+  const callsResolve = /customJS\.Icons\.resolve\s*\(spec\.icon\)/.test(ecSrc);
+  const usesResolved = /icon:\s*resolved\s*\|\|\s*plusIcon/.test(ecSrc);
+  const usesOnClick  = /onClick:\s*\(\)\s*=>/.test(ecSrc);
   console.log(`  customJS.AccentButton.render called: ${callsAccent}`);
-  console.log(`  passes {label, icon, onClick} schema: ${usesLabel && usesIcon && usesOnClick}`);
-  const pass = callsAccent && usesLabel && usesIcon && usesOnClick;
+  console.log(`  label: spec.label: ${usesLabel}`);
+  console.log(`  customJS.Icons.resolve(spec.icon) called: ${callsResolve}`);
+  console.log(`  icon: resolved || plusIcon: ${usesResolved}`);
+  console.log(`  passes {label, icon, onClick} schema: ${usesLabel && usesResolved && usesOnClick}`);
+  const pass = callsAccent && usesLabel && callsResolve && usesResolved && usesOnClick;
   console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
   return pass;
 }
