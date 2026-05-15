@@ -529,6 +529,114 @@ if (resolveEntityCreateEntry) {
 }
 
 // -------------------------------------------------------------------------
+// 33-38. v0.47.0 S5 — _resolveBodyTemplatePath helper + auto-prepend +
+//                     JSON-schema basename-only enforcement
+// -------------------------------------------------------------------------
+
+// Reconstitute the helper as a callable function for direct unit tests.
+let _resolveBodyTemplatePathFn = null;
+if (resolveBodySrc) {
+    const wrapped = `${resolveBodySrc}\nreturn _resolveBodyTemplatePath;`;
+    try { _resolveBodyTemplatePathFn = new Function(wrapped)(); }
+    catch (_e) { _resolveBodyTemplatePathFn = null; }
+}
+
+// 33. _resolveBodyTemplatePath prepends templates_path on bare basename.
+if (_resolveBodyTemplatePathFn) {
+    const r = _resolveBodyTemplatePathFn("Template, Project.md", { templates_path: "ranch/templates" });
+    ok("EC-33 _resolveBodyTemplatePath prepends templates_path on bare basename",
+        r === "ranch/templates/Template, Project.md", `got ${JSON.stringify(r)}`);
+} else {
+    ok("EC-33 _resolveBodyTemplatePath prepends templates_path on bare basename",
+        false, "helper not extracted");
+}
+
+// 34. _resolveBodyTemplatePath pass-through when path separator already present.
+if (_resolveBodyTemplatePathFn) {
+    const r = _resolveBodyTemplatePathFn("ranch/templates/Foo.md", { templates_path: "ranch/templates" });
+    ok("EC-34 _resolveBodyTemplatePath pass-through when path separator present",
+        r === "ranch/templates/Foo.md", `got ${JSON.stringify(r)}`);
+} else {
+    ok("EC-34 _resolveBodyTemplatePath pass-through when path separator present",
+        false, "helper not extracted");
+}
+
+// 35. _resolveBodyTemplatePath empty-string no-op.
+if (_resolveBodyTemplatePathFn) {
+    const r = _resolveBodyTemplatePathFn("", { templates_path: "ranch/templates" });
+    ok("EC-35 _resolveBodyTemplatePath empty-string no-op",
+        r === "", `got ${JSON.stringify(r)}`);
+} else {
+    ok("EC-35 _resolveBodyTemplatePath empty-string no-op",
+        false, "helper not extracted");
+}
+
+// 36. resolveEntityCreateEntry applies the helper to body_template end-to-end.
+if (resolveEntityCreateEntry) {
+    const history = [];
+    const git = { commit: "0", tag: "x", dirty: false };
+    const entry = {
+        id: "x", label: "L",
+        prompts: [],
+        destination: { folder_prefix: "spice/x", filename_prefix: "X" },
+        frontmatter_template: { type: "x" },
+        body_template: "Foo.md",
+        render_in: { kind: "hub", target_path: "spice/x/X.md" },
+    };
+    const r = resolveEntityCreateEntry(entry, { templates_path: "ranch/templates" }, "test-bp", history, git);
+    ok("EC-36 resolveEntityCreateEntry applies _resolveBodyTemplatePath to body_template",
+        r && r.body_template === "ranch/templates/Foo.md",
+        `body_template=${r && JSON.stringify(r.body_template)} history=${JSON.stringify(history)}`);
+} else {
+    ok("EC-36 resolveEntityCreateEntry applies _resolveBodyTemplatePath to body_template",
+        false, "could not extract resolveEntityCreateEntry");
+}
+
+// 37. resolveEntityCreateEntry applies the helper to extra_files[].body_template.
+if (resolveEntityCreateEntry) {
+    const history = [];
+    const git = { commit: "0", tag: "x", dirty: false };
+    const entry = {
+        id: "x", label: "L",
+        prompts: [],
+        destination: { folder_prefix: "spice/x", filename_prefix: "X" },
+        frontmatter_template: { type: "x" },
+        body_template: "Foo.md",
+        extra_files: [{ filename_pattern: "Y.md", body_template: "Sidecar.md" }],
+        render_in: { kind: "hub", target_path: "spice/x/X.md" },
+    };
+    const r = resolveEntityCreateEntry(entry, { templates_path: "ranch/templates" }, "test-bp", history, git);
+    const ef0bt = r && Array.isArray(r.extra_files) && r.extra_files[0] && r.extra_files[0].body_template;
+    ok("EC-37 resolveEntityCreateEntry applies _resolveBodyTemplatePath to extra_files[].body_template",
+        ef0bt === "ranch/templates/Sidecar.md",
+        `extra_files[0].body_template=${JSON.stringify(ef0bt)}`);
+} else {
+    ok("EC-37 resolveEntityCreateEntry applies _resolveBodyTemplatePath to extra_files[].body_template",
+        false, "could not extract resolveEntityCreateEntry");
+}
+
+// 38. JSON-schema body_template pattern rejects '/'-containing values
+//     and accepts bare basenames. Pattern is documentation today (no runtime
+//     validator loads the schema) but the regex IS the documented constraint;
+//     this case proves the regex matches the convention.
+{
+    const schemaObj = JSON.parse(schemaRaw);
+    const topPattern = schemaObj.items.properties.body_template.pattern;
+    const efPattern = schemaObj.items.properties.extra_files.items.properties.body_template.pattern;
+    const patternsAgree = topPattern === efPattern;
+    const re = new RegExp(topPattern);
+    const acceptsBasename   = re.test("Foo.md") && re.test("Template, Project.md");
+    const rejectsSlash      = !re.test("ranch/templates/Foo.md");
+    const rejectsBackslash  = !re.test("ranch\\templates\\Foo.md");
+    const rejectsNonMd      = !re.test("Foo.txt");
+    ok("EC-38 JSON-schema body_template pattern rejects path-shaped values",
+        patternsAgree && acceptsBasename && rejectsSlash && rejectsBackslash && rejectsNonMd,
+        `topPattern=${JSON.stringify(topPattern)} efPattern=${JSON.stringify(efPattern)} ` +
+        `acceptsBasename=${acceptsBasename} rejectsSlash=${rejectsSlash} ` +
+        `rejectsBackslash=${rejectsBackslash} rejectsNonMd=${rejectsNonMd}`);
+}
+
+// -------------------------------------------------------------------------
 // 30 + 31 + 32. Audit walker fixture seeds
 // -------------------------------------------------------------------------
 
