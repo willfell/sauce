@@ -72,6 +72,59 @@
           "target_path": "ranch/templates/Scratch Day Hub.md"
         }
       }
+    ],
+    "project": [
+      {
+        "blueprint": "project",
+        "id": "project",
+        "label": "New Project",
+        "icon": "folder-plus",
+        "prompts": [
+          {
+            "key": "name",
+            "label": "Project name",
+            "type": "string",
+            "required": true
+          },
+          {
+            "key": "slug",
+            "type": "string",
+            "derive": "slugify(prompts.name)"
+          }
+        ],
+        "destination": {
+          "folder_prefix": "spice/projects/{{prompts.slug}}",
+          "filename_prefix": "{{prompts.name|sanitize-filename}}"
+        },
+        "frontmatter_template": {
+          "type": "project",
+          "description": "",
+          "status": "idea",
+          "status_changed_at": "{{now.YYYY-MM-DD}}",
+          "workstreams": [],
+          "teams": [],
+          "products": [],
+          "created": "{{now.YYYY-MM-DD HH:mm}}",
+          "tags": [
+            "project"
+          ]
+        },
+        "body_template": "ranch/templates/Template, Project.md",
+        "extra_files": [
+          {
+            "filename_pattern": "Project Map.md",
+            "body_template": "ranch/templates/Template, Project Map.md"
+          },
+          {
+            "filename_pattern": "{{prompts.slug}}-board.md",
+            "body_template": "ranch/templates/Template, Project Board.md"
+          }
+        ],
+        "render_in": {
+          "kind": "hub",
+          "target_path": "spice/projects/Projects.md"
+        }
+      }
     ]
   },
   "entries": [
@@ -141,6 +194,57 @@
       "render_in": {
         "kind": "hub",
         "target_path": "ranch/templates/Scratch Day Hub.md"
+      }
+    },
+    {
+      "blueprint": "project",
+      "id": "project",
+      "label": "New Project",
+      "icon": "folder-plus",
+      "prompts": [
+        {
+          "key": "name",
+          "label": "Project name",
+          "type": "string",
+          "required": true
+        },
+        {
+          "key": "slug",
+          "type": "string",
+          "derive": "slugify(prompts.name)"
+        }
+      ],
+      "destination": {
+        "folder_prefix": "spice/projects/{{prompts.slug}}",
+        "filename_prefix": "{{prompts.name|sanitize-filename}}"
+      },
+      "frontmatter_template": {
+        "type": "project",
+        "description": "",
+        "status": "idea",
+        "status_changed_at": "{{now.YYYY-MM-DD}}",
+        "workstreams": [],
+        "teams": [],
+        "products": [],
+        "created": "{{now.YYYY-MM-DD HH:mm}}",
+        "tags": [
+          "project"
+        ]
+      },
+      "body_template": "ranch/templates/Template, Project.md",
+      "extra_files": [
+        {
+          "filename_pattern": "Project Map.md",
+          "body_template": "ranch/templates/Template, Project Map.md"
+        },
+        {
+          "filename_pattern": "{{prompts.slug}}-board.md",
+          "body_template": "ranch/templates/Template, Project Board.md"
+        }
+      ],
+      "render_in": {
+        "kind": "hub",
+        "target_path": "spice/projects/Projects.md"
       }
     }
   ]

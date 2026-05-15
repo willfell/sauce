@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop platform manifest. Each mechanism + blueprint has its own version.",
-  "workshop_version": "0.46.2",
+  "workshop_version": "0.47.0",
   "date": "2026-05-15",
   "foundational_plugins": [
     {
@@ -43,7 +43,7 @@
     },
     {
       "name": "validator",
-      "version": "0.1.2",
+      "version": "0.2.0",
       "path": "mechanisms/validator"
     },
     {
@@ -53,7 +53,7 @@
     },
     {
       "name": "nav-buttons",
-      "version": "2.6.2",
+      "version": "2.7.0",
       "path": "mechanisms/nav-buttons"
     },
     {
@@ -73,7 +73,7 @@
     },
     {
       "name": "entity-create",
-      "version": "0.1.1",
+      "version": "0.2.0",
       "path": "mechanisms/entity-create"
     },
     {
@@ -120,7 +120,7 @@
     },
     {
       "name": "people",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "path": "blueprints/people"
     },
     {
@@ -130,7 +130,7 @@
     },
     {
       "name": "project",
-      "version": "1.7.1",
+      "version": "1.7.2",
       "path": "blueprints/project"
     },
     {
