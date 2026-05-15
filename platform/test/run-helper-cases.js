@@ -5663,6 +5663,99 @@ async function caseProj3ValidatorRejectsProjectInvalidStatusEnum() {
     violations.some((v) => v.rule === "required_frontmatter.status.matches"));
 }
 
+// -------------------------------------------------------------------------
+// v0.47.0 S8 — TYPE-1/2/3: validator Layer 2 type-field convention rule.
+// Extracts _validateTypeFieldConvention from platform/install.js (the rule
+// lives upstream of the validator mechanism because validate.js operates
+// per-file; manifest-level enforcement is install-time). Tests both fixture
+// manifests and the real post-S7 people manifest.
+// -------------------------------------------------------------------------
+function _loadValidateTypeFieldConvention() {
+  const installSrc = fs.readFileSync(CANONICAL_INSTALLER, "utf8");
+  const startIdx = installSrc.search(/function\s+_validateTypeFieldConvention\s*\(/);
+  if (startIdx < 0) return null;
+  let i = installSrc.indexOf("{", startIdx);
+  if (i < 0) return null;
+  let depth = 0;
+  for (; i < installSrc.length; i++) {
+    if (installSrc[i] === "{") depth++;
+    else if (installSrc[i] === "}") { depth--; if (depth === 0) { i++; break; } }
+  }
+  const src = installSrc.slice(startIdx, i);
+  const NoticeStub = function (msg) { (NoticeStub.captured ||= []).push(String(msg)); };
+  return new Function("Notice", `"use strict";\n${src}\nreturn _validateTypeFieldConvention;`)(NoticeStub);
+}
+
+async function caseType1PositiveFixtureWithTypeAlignedButtonPasses() {
+  console.log("\n--- Case TYPE-1: validator type-field rule passes on aligned fixture ---");
+  const fn = _loadValidateTypeFieldConvention();
+  if (!fn) { assertTrue("TYPE-1: _validateTypeFieldConvention extracted", false, "could not extract"); return; }
+  const manifest = {
+    name: "fixture-aligned",
+    rule_fragments: [
+      { target: "fixture-aligned", fragment: { when: { frontmatter: { type: "person" } } } }
+    ],
+    new_entity_buttons: [
+      {
+        id: "person",
+        label: "+ New Person",
+        frontmatter_template: { type: "person", company: "" }
+      }
+    ]
+  };
+  const history = [];
+  const git = { commit: "0", tag: "x", dirty: false };
+  const result = fn(manifest, history, git);
+  assertTrue("TYPE-1: aligned manifest passes the rule (returns true)", result === true);
+  assertTrue("TYPE-1: aligned manifest produces no history error", history.length === 0,
+    `history=${JSON.stringify(history)}`);
+}
+
+async function caseType2NegativeFixtureMissingTypeFails() {
+  console.log("\n--- Case TYPE-2: validator type-field rule fails on fixture missing type ---");
+  const fn = _loadValidateTypeFieldConvention();
+  if (!fn) { assertTrue("TYPE-2: _validateTypeFieldConvention extracted", false, "could not extract"); return; }
+  const manifest = {
+    name: "fixture-missing-type",
+    rule_fragments: [
+      { target: "fixture-missing-type", fragment: { when: { frontmatter: { type: "person" } } } }
+    ],
+    new_entity_buttons: [
+      {
+        id: "person",
+        label: "+ New Person",
+        frontmatter_template: { company: "" /* type intentionally omitted */ }
+      }
+    ]
+  };
+  const history = [];
+  const git = { commit: "0", tag: "x", dirty: false };
+  const result = fn(manifest, history, git);
+  const errored = history.length === 1 && history[0].event === "error" && history[0].rule === "type_field_convention";
+  const msgMentions = errored && /type/i.test(history[0].message || "") && /new_entity_buttons/i.test(history[0].message || "");
+  assertTrue("TYPE-2: missing-type manifest fails the rule (returns false)", result === false);
+  assertTrue("TYPE-2: history error names rule + mentions 'type' and 'new_entity_buttons'", errored && msgMentions,
+    `history=${JSON.stringify(history)}`);
+}
+
+async function caseType3RealPeopleManifestPostPatchPasses() {
+  console.log("\n--- Case TYPE-3: validator type-field rule passes on real post-patch people manifest ---");
+  const fn = _loadValidateTypeFieldConvention();
+  if (!fn) { assertTrue("TYPE-3: _validateTypeFieldConvention extracted", false, "could not extract"); return; }
+  const peopleManifest = JSON.parse(fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/people/manifest.json"), "utf8"));
+  const history = [];
+  const git = { commit: "0", tag: "x", dirty: false };
+  const result = fn(peopleManifest, history, git);
+  // People's rule_fragment does NOT declare when.frontmatter.type at v0.47.0
+  // (it uses scope.path_glob), so the rule's gate is not tripped → trivially
+  // passes. This case proves the rule is non-disruptive on the real manifest
+  // shape post-S7, complementing TYPE-1/2's synthetic fixtures.
+  assertTrue("TYPE-3: real post-patch people manifest passes the rule (returns true)", result === true);
+  assertTrue("TYPE-3: real post-patch people manifest produces no history error", history.length === 0,
+    `history=${JSON.stringify(history)}`);
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -5872,6 +5965,12 @@ async function caseProj3ValidatorRejectsProjectInvalidStatusEnum() {
   await caseProj1ValidatorAcceptsWellFormedProject();
   await caseProj2ValidatorRejectsProjectMissingStatus();
   await caseProj3ValidatorRejectsProjectInvalidStatusEnum();
+
+  // v0.47.0 S8 — validator Layer 2 type-field convention rule
+  // (_validateTypeFieldConvention extracted from install.js).
+  await caseType1PositiveFixtureWithTypeAlignedButtonPasses();
+  await caseType2NegativeFixtureMissingTypeFails();
+  await caseType3RealPeopleManifestPostPatchPasses();
 
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
