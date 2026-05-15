@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop self-subscription. Pinned to the workshop's own manifest version.",
-  "workshop_version": "0.41.5",
+  "workshop_version": "0.46.0",
   "mechanisms": [
     {
       "name": "customjs-guard",
@@ -41,12 +41,16 @@
     {
       "name": "platform-claude",
       "version": "0.1.1"
+    },
+    {
+      "name": "entity-create",
+      "version": "0.1.0"
     }
   ],
   "blueprints": [
     {
       "name": "project",
-      "version": "1.5.0"
+      "version": "1.7.0"
     },
     {
       "name": "daily",
@@ -54,11 +58,11 @@
     },
     {
       "name": "meetings",
-      "version": "0.4.0"
+      "version": "0.5.0"
     },
     {
       "name": "scratch",
-      "version": "0.2.6"
+      "version": "0.3.0"
     }
   ]
 }

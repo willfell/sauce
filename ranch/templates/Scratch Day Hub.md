@@ -12,8 +12,9 @@ await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 
 ---
 
+<!-- entity-create:scratch -->
 ```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "ScratchDayActions" });
+await customJS.EntityCreate.render(dv, { instance: "scratch" });
 ```
 
 ---

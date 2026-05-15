@@ -159,86 +159,6 @@ class ProjectNavButtons {
         });
     }
 
-    async _promptForProjectName() {
-        return new Promise((resolve) => {
-            const overlay = document.createElement("div");
-            overlay.style.cssText = "position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; display: flex; align-items: center; justify-content: center;";
-            const dialog = document.createElement("div");
-            dialog.style.cssText = "background: var(--background-primary); border-radius: 12px; padding: 24px; min-width: 360px; max-width: 480px; box-shadow: 0 8px 32px rgba(0,0,0,0.3);";
-
-            const heading = document.createElement("div");
-            heading.textContent = "New Project";
-            heading.style.cssText = "font-size: 1.1em; font-weight: 600; margin-bottom: 12px;";
-            dialog.appendChild(heading);
-
-            const input = document.createElement("input");
-            input.type = "text";
-            input.placeholder = "Project name";
-            input.style.cssText = "width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--background-modifier-border); background: var(--background-secondary); color: var(--text-normal); font-size: 1em; margin-bottom: 6px;";
-            dialog.appendChild(input);
-
-            const slugDisplay = document.createElement("div");
-            slugDisplay.style.cssText = "font-size: 0.78em; color: var(--text-muted); margin-bottom: 6px;";
-            slugDisplay.textContent = "Slug:";
-            dialog.appendChild(slugDisplay);
-
-            const status = document.createElement("div");
-            status.style.cssText = "font-size: 0.8em; color: var(--text-muted); min-height: 1.2em; margin-bottom: 12px;";
-            dialog.appendChild(status);
-
-            const slugify = (name) => name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-
-            const refresh = () => {
-                const name = input.value.trim();
-                const slug = slugify(name);
-                slugDisplay.textContent = slug ? `Slug: spice/projects/${slug}/` : "Slug:";
-                if (!name) { status.textContent = ""; return; }
-                const existing = app.vault.getAbstractFileByPath(`spice/projects/${slug}`);
-                if (existing) {
-                    status.textContent = `"${slug}" already exists. Try a different name.`;
-                    status.style.color = "var(--text-error)";
-                } else {
-                    status.textContent = "";
-                }
-            };
-            input.addEventListener("input", refresh);
-
-            const btnRow = document.createElement("div");
-            btnRow.style.cssText = "display: flex; gap: 8px; justify-content: flex-end;";
-
-            const cancelBtn = document.createElement("button");
-            cancelBtn.textContent = "Cancel";
-            cancelBtn.style.cssText = "padding: 6px 14px; border-radius: 6px; cursor: pointer; border: 1px solid var(--background-modifier-border); background: var(--background-primary); color: var(--text-muted);";
-            cancelBtn.onclick = () => { document.body.removeChild(overlay); resolve(null); };
-
-            const okBtn = document.createElement("button");
-            okBtn.textContent = "Create";
-            okBtn.style.cssText = "padding: 6px 14px; border-radius: 6px; cursor: pointer; border: 1px solid var(--interactive-accent); background: var(--interactive-accent); color: var(--text-on-accent);";
-            okBtn.onclick = () => {
-                const name = input.value.trim();
-                if (!name) return;
-                const slug = slugify(name);
-                if (!slug) { status.textContent = "Name must contain alphanumerics."; status.style.color = "var(--text-error)"; return; }
-                if (app.vault.getAbstractFileByPath(`spice/projects/${slug}`)) { refresh(); input.focus(); return; }
-                document.body.removeChild(overlay);
-                resolve({ name, slug });
-            };
-
-            input.addEventListener("keydown", (e) => {
-                if (e.key === "Enter") okBtn.click();
-                if (e.key === "Escape") cancelBtn.click();
-            });
-
-            btnRow.appendChild(cancelBtn);
-            btnRow.appendChild(okBtn);
-            dialog.appendChild(btnRow);
-            overlay.appendChild(dialog);
-            overlay.addEventListener("click", (e) => { if (e.target === overlay) cancelBtn.click(); });
-            document.body.appendChild(overlay);
-            setTimeout(() => input.focus(), 0);
-        });
-    }
-
     async _createTaskNote(notesFolder, title, projectSlug, taskFolder, taskHubPath) {
         const tplPath = "ranch/templates/Template, Task Note.md";
         const tplFile = app.vault.getAbstractFileByPath(tplPath);
@@ -302,81 +222,6 @@ class ProjectNavButtons {
         return targetPath;
     }
 
-    async _createProject({ name, slug }) {
-        // HUB_NOTE_FILENAME_STYLE — single switch controlling per-project hub-note basename.
-        // Audit + hub-cards filters discriminate on `type: project` frontmatter so this is
-        // safe to flip at any time; new projects use the new style, existing hub notes keep
-        // their filenames. (Pre-v1.4.0 default was "fixed".)
-        //   "name"  → use the user's input verbatim (Title Case as typed; filesystem-sanitized).
-        //             Example: spice/projects/testing-it-all-out/Testing It All Out.md
-        //             Native Obsidian tab title shows the project name; wikilinks render
-        //             [[Testing It All Out]] without aliasing.
-        //   "slug"  → use the kebab slug (matches directory name).
-        //             Example: spice/projects/testing-it-all-out/testing-it-all-out.md
-        //   "fixed" → legacy "Project.md" literal. Pre-v1.4.0 behavior.
-        const HUB_NOTE_FILENAME_STYLE = "name";
-
-        // Filesystem-safe sanitization for the Title Case filename:
-        // strip characters Obsidian / macOS / Windows reject in basenames, collapse
-        // whitespace, trim. If the result is empty (e.g. all-punctuation input),
-        // fall back to slug. Never throws.
-        const sanitizeForFilename = (s) => {
-            const cleaned = String(s || "")
-                .replace(/[\/\\:*?"<>|#^[\]]/g, "")  // forbidden chars across major filesystems + Obsidian-reserved
-                .replace(/\s+/g, " ")
-                .trim();
-            return cleaned || slug;
-        };
-
-        let hubBasename;
-        switch (HUB_NOTE_FILENAME_STYLE) {
-            case "name":  hubBasename = `${sanitizeForFilename(name)}.md`; break;
-            case "slug":  hubBasename = `${slug}.md`; break;
-            case "fixed": hubBasename = "Project.md"; break;
-            default:      hubBasename = `${sanitizeForFilename(name)}.md`;
-        }
-
-        const projectDir = `spice/projects/${slug}`;
-        const tasksDir = `${projectDir}/tasks`;
-        for (const dir of [projectDir, tasksDir]) {
-            if (!app.vault.getAbstractFileByPath(dir)) {
-                await app.vault.createFolder(dir);
-            }
-        }
-
-        const tplBase = "ranch/templates";
-        const now = new Date();
-        const pad = (n) => String(n).padStart(2, "0");
-        const dateStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
-        const dateTag = `${now.getFullYear()}/${pad(now.getMonth() + 1)}/${pad(now.getDate())}`;
-
-        const subs = (s) => s
-            .replaceAll("{{NAME}}", name)
-            .replaceAll("{{SLUG}}", slug)
-            .replaceAll("{{DATE}}", dateStr)
-            .replaceAll("{{DATE_TAG}}", dateTag);
-
-        const writeTpl = async (tplName, destBasename) => {
-            const tplFile = app.vault.getAbstractFileByPath(`${tplBase}/${tplName}`);
-            if (!tplFile) {
-                new Notice(`Template missing: ${tplBase}/${tplName}`);
-                return null;
-            }
-            const tpl = await app.vault.read(tplFile);
-            const content = subs(tpl);
-            const targetPath = `${projectDir}/${destBasename}`;
-            if (app.vault.getAbstractFileByPath(targetPath)) return targetPath;
-            await app.vault.create(targetPath, content);
-            return targetPath;
-        };
-
-        const atlasPath = await writeTpl("Template, Project.md", hubBasename);
-        await writeTpl("Template, Project Map.md", "Project Map.md");
-        await writeTpl("Template, Project Board.md", `${slug}-board.md`);
-
-        return atlasPath;
-    }
-
     async _openAsKanban(filePath) {
         // Kanban plugin auto-detects `kanban-plugin: board` frontmatter and
         // takes over the leaf. Explicit setViewState raced with file-body load
@@ -436,10 +281,7 @@ class ProjectNavButtons {
 
         const filePath = dv.current().file.path;
         const ctx = this.detectContext(filePath, dv);
-        if (ctx.context === "projects-hub") {
-            return await this._renderProjectsHub(dv);
-        }
-        if (ctx.context === "non-project" || ctx.context === "unknown") return;
+        if (ctx.context === "non-project" || ctx.context === "unknown" || ctx.context === "projects-hub") return;
 
         const { pathParts, planningIdx, projectSlug, projectDir } = ctx;
         const boardPath = `${projectDir}/${projectSlug}-board.md`;
@@ -790,29 +632,4 @@ class ProjectNavButtons {
         }
     }
 
-    async _renderProjectsHub(dv) {
-        const previousRoot = dv.container.querySelector(":scope > .pnb-root");
-        if (previousRoot) previousRoot.remove();
-        const root = dv.container.createEl("div", { cls: "pnb-root" });
-
-        const actionRow = root.createEl("div");
-        actionRow.style.cssText = "display: flex; gap: 8px; margin-bottom: 8px;";
-
-        const plusIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>`;
-
-        customJS.AccentButton.render(actionRow, {
-            label: "New Project",
-            icon: plusIcon,
-            onClick: async () => {
-                const projectInfo = await this._promptForProjectName();
-                if (!projectInfo) return;
-                const targetPath = await this._createProject(projectInfo);
-                if (targetPath) {
-                    new Notice(`Created project: ${projectInfo.name}`);
-                    app.workspace.openLinkText(targetPath, "");
-                }
-            },
-            flex: true
-        });
-    }
 }

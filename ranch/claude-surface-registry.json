@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-05-14T22:06:46.804Z",
-  "workshop_version": "0.45.0",
+  "generated_at": "2026-05-15T15:50:22.764Z",
+  "workshop_version": "0.46.0",
   "contributions": {
     "audit": [
       {
@@ -91,6 +91,29 @@
         }
       }
     ],
+    "project": [
+      {
+        "kind": "command",
+        "source": "commands/project.md",
+        "dest": ".claude/commands/project.md",
+        "version": "1.7.0"
+      },
+      {
+        "kind": "skill",
+        "source": "skills/new-project/SKILL.md",
+        "dest": ".claude/skills/project/new-project/SKILL.md",
+        "version": "1.7.0"
+      },
+      {
+        "kind": "claude_md_row",
+        "table": "resolvers",
+        "row": {
+          "topic": "Projects",
+          "path": "spice/projects",
+          "command": "/project"
+        }
+      }
+    ],
     "daily": [
       {
         "kind": "command",
@@ -119,13 +142,13 @@
         "kind": "command",
         "source": "commands/meetings.md",
         "dest": ".claude/commands/meetings.md",
-        "version": "0.4.0"
+        "version": "0.5.0"
       },
       {
         "kind": "skill",
         "source": "skills/new-meeting/SKILL.md",
         "dest": ".claude/skills/meetings/new-meeting/SKILL.md",
-        "version": "0.4.0"
+        "version": "0.5.0"
       },
       {
         "kind": "claude_md_row",
@@ -142,13 +165,13 @@
         "kind": "command",
         "source": "commands/scratch.md",
         "dest": ".claude/commands/scratch.md",
-        "version": "0.2.6"
+        "version": "0.3.0"
       },
       {
         "kind": "skill",
         "source": "skills/new-scratch/SKILL.md",
         "dest": ".claude/skills/scratch/new-scratch/SKILL.md",
-        "version": "0.2.6"
+        "version": "0.3.0"
       },
       {
         "kind": "claude_md_row",

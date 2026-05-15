@@ -1,15 +1,3 @@
----
-type: project
-name: "{{NAME}}"
-created: {{DATE}}
-description: ""
-tags:
-  - project
-  - project/{{SLUG}}
-  - {{DATE_TAG}}
-workstreams: []
----
-
 ```dataviewjs
 await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 ```
