@@ -1418,6 +1418,12 @@ async function applyNavButtons(tp, manifest, variables, history, git) {
 async function applyNewEntityButtons(tp, manifest, variables, history, git) {
   if (!manifest) return;
   const declared = Array.isArray(manifest.new_entity_buttons) ? manifest.new_entity_buttons : [];
+  // v0.47.0 S7 — Layer 2 type-field convention gate. Bails before any
+  // registry mutation if a blueprint with a when.frontmatter.type-keyed
+  // rule_fragment ships new_entity_buttons[] missing the matching type
+  // value in frontmatter_template. Forward-defense; no current blueprint
+  // trips this gate at v0.47.0 (BUG-2 fixed independently in people manifest).
+  if (!_validateTypeFieldConvention(manifest, history, git)) return;
   const adapter = tp.app.vault.adapter;
   const registryPath = "ranch/entity-create-registry.json";
 
@@ -1557,6 +1563,66 @@ async function applyNewEntityButtons(tp, manifest, variables, history, git) {
   registry.contributions[manifest.name] = stamped;
   registry.entries = Object.values(registry.contributions).flat();
   await adapter.write(registryPath, JSON.stringify(registry, null, 2));
+}
+
+// v0.47.0 S7 — Layer 2 type-field convention rule (validator@0.2.0).
+//
+// For every blueprint that
+//   1. Declares at least one rule_fragments[*] entry whose body contains
+//      when.frontmatter.type === "<value>" (forward-defense — the convention
+//      is "if a fragment filters by type, every new_entity_buttons must
+//      emit that type"), AND
+//   2. Declares a new_entity_buttons[] array,
+// every new_entity_buttons[*].frontmatter_template MUST declare
+// "type": "<value>" matching ONE of the rule_fragments' when-keyed type
+// values. Closes BUG-2 (people manifest shipped without type:person; the
+// type-filtered People hub queries skipped new entries).
+//
+// At v0.47.0 no existing blueprint uses when.frontmatter.type — the rule
+// is forward-defense. people's BUG-2 fix is the manifest patch (type:person
+// added to frontmatter_template) directly. If a future blueprint adopts the
+// when.frontmatter.type pattern, this rule fires and blocks install with a
+// loud notice + history error.
+//
+// Returns true on pass; pushes a history error + returns false on violation.
+function _validateTypeFieldConvention(manifest, history, git) {
+  const fragments = Array.isArray(manifest && manifest.rule_fragments) ? manifest.rule_fragments : [];
+  const buttons = Array.isArray(manifest && manifest.new_entity_buttons) ? manifest.new_entity_buttons : [];
+  if (!buttons.length) return true;
+  const declaredTypes = new Set();
+  for (const fr of fragments) {
+    const frag = fr && (fr.fragment || fr);
+    const when = frag && frag.when;
+    const t = when && when.frontmatter && when.frontmatter.type;
+    if (typeof t === "string" && t.length > 0) declaredTypes.add(t);
+  }
+  if (!declaredTypes.size) return true;
+  for (const btn of buttons) {
+    const fm = btn && btn.frontmatter_template;
+    const fmType = (fm && typeof fm === "object") ? fm.type : undefined;
+    if (typeof fmType !== "string" || !declaredTypes.has(fmType)) {
+      const declared = [...declaredTypes].join(", ");
+      const got = (typeof fmType === "string" && fmType.length > 0) ? fmType : "MISSING";
+      const message = `new_entity_buttons[${btn && btn.id}].frontmatter_template must declare "type" matching one of rule_fragments' when.frontmatter.type values (declared: ${declared}; got: ${got})`;
+      new Notice(`${manifest.name}: ${message}`, 10000);
+      if (history) {
+        history.push({
+          event: "error",
+          step: "new_entity_buttons",
+          rule: "type_field_convention",
+          name: manifest.name,
+          button_id: btn && btn.id,
+          message,
+          git_commit: git && git.commit,
+          git_tag: git && git.tag,
+          git_dirty: git && git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      return false;
+    }
+  }
+  return true;
 }
 
 // Convention: body_template values are blueprint-template basenames.
