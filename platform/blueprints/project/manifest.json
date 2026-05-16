@@ -1,6 +1,6 @@
 {
   "name": "project",
-  "version": "1.9.2",
+  "version": "1.10.0",
   "kind": "blueprint",
   "module_directory": "projects",
   "skills_dir": ".claude/skills/project",
@@ -20,7 +20,8 @@
     "ProjectNotesCards",
     "ProjectReferencedByCards",
     "ProjectTaskCreateListener",
-    "ProjectTaskCreateListenerInit"
+    "ProjectTaskCreateListenerInit",
+    "ProjectWikiCards"
   ],
   "pre_install": [
     { "type": "delete", "path": "boards/To-Do-Board.md" }
@@ -42,7 +43,10 @@
     { "source": "helpers/project-task-create-listener.js","dest": "{{scripts_path}}/project/project-task-create-listener.js" },
     { "source": "helpers/project-task-create-listener-init.js","dest": "{{scripts_path}}/project/project-task-create-listener-init.js" },
     { "source": "templates/Project Task Create Listener.md", "dest": "{{templates_path}}/Template, Project Task Create Listener.md" },
-    { "source": "content/Projects.md",                   "dest": "{{module_directory}}/Projects.md" }
+    { "source": "content/Projects.md",                   "dest": "{{module_directory}}/Projects.md" },
+    { "source": "templates/Wiki Hub.md",                 "dest": "{{templates_path}}/Template, Wiki Hub.md" },
+    { "source": "templates/Wiki Note.md",                "dest": "{{templates_path}}/Template, Wiki Note.md" },
+    { "source": "helpers/project-wiki-cards.js",         "dest": "{{scripts_path}}/project/project-wiki-cards.js" }
   ],
   "templater_startup_templates": [
     "{{templates_path}}/Template, Project Task Create Listener.md"
@@ -82,9 +86,31 @@
       "body_template": "Template, Project.md",
       "extra_files": [
         { "filename_pattern": "Project Map.md", "body_template": "Template, Project Map.md" },
-        { "filename_pattern": "{{prompts.slug}}-board.md", "body_template": "Template, Project Board.md" }
+        { "filename_pattern": "{{prompts.slug}}-board.md", "body_template": "Template, Project Board.md" },
+        { "filename_pattern": "wiki/Wiki.md", "body_template": "Template, Wiki Hub.md" }
       ],
       "render_in": { "kind": "hub", "target_path": "{{module_directory}}/Projects.md" }
+    },
+    {
+      "id": "wiki-note",
+      "label": "+ New Wiki Note",
+      "icon": "file-plus",
+      "prompts": [
+        { "key": "title", "label": "Wiki note title", "type": "string", "required": true, "validate": "safe-filename" }
+      ],
+      "destination": {
+        "folder_prefix": "spice/projects/{{current_file.frontmatter.project_slug}}/wiki",
+        "filename_prefix": "{{prompts.title|sanitize-filename}}"
+      },
+      "frontmatter_template": {
+        "type": "wiki-note",
+        "project": "[[{{current_file.frontmatter.project_name}}]]",
+        "project_slug": "{{current_file.frontmatter.project_slug}}",
+        "created": "{{now.YYYY-MM-DD HH:mm}}",
+        "tags": ["wiki-note"]
+      },
+      "body_template": "Template, Wiki Note.md",
+      "render_in": { "kind": "hub", "target_path": "{{templates_path}}/Template, Wiki Hub.md" }
     }
   ],
   "nav_buttons": [
@@ -123,6 +149,42 @@
               "products":          { "required": false, "type": "list" }
             },
             "required_tags": [{ "tag": "project" }]
+          }
+        ]
+      }
+    },
+    {
+      "target": "wiki-hub",
+      "fragment": {
+        "scope": { "path_glob": "spice/projects/*/wiki/Wiki.md" },
+        "frontmatter_branch": [
+          {
+            "when": { "frontmatter": { "type": "wiki-hub" } },
+            "required_frontmatter": {
+              "type":         { "required": true, "type": "string", "matches": "^wiki-hub$" },
+              "project_slug": { "required": true, "type": "string" },
+              "project_name": { "required": true, "type": "string" },
+              "created":      { "required": true, "type": "string" }
+            },
+            "required_tags": [{ "tag": "wiki-hub" }]
+          }
+        ]
+      }
+    },
+    {
+      "target": "wiki-note",
+      "fragment": {
+        "scope": { "path_glob": "spice/projects/*/wiki/*.md", "exclude_basenames": ["Wiki.md"] },
+        "frontmatter_branch": [
+          {
+            "when": { "frontmatter": { "type": "wiki-note" } },
+            "required_frontmatter": {
+              "type":         { "required": true, "type": "string", "matches": "^wiki-note$" },
+              "project":      { "required": true, "type": "string" },
+              "project_slug": { "required": true, "type": "string" },
+              "created":      { "required": true, "type": "string" }
+            },
+            "required_tags": [{ "tag": "wiki-note" }]
           }
         ]
       }
