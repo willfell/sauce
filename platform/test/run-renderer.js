@@ -1748,14 +1748,35 @@ async function testREntityCreateMarkerPreservedAcrossReInject() {
 // Icon kebabs come from each blueprint's new_entity_buttons[*].icon field
 // in its manifest.json (confirmed pre-S4 to match this table).
 const ENTITY_CREATE_SITES = [
-  { instance: 'meeting',  icon: 'users-plus' },
-  { instance: 'person',   icon: 'user-plus' },
-  { instance: 'project',  icon: 'folder-plus' },
-  { instance: 'scratch',  icon: 'pencil-plus' },
-  { instance: 'budget',   icon: 'wallet-plus' },
-  { instance: 'paycheck', icon: 'wallet-plus' },
-  { instance: 'invoice',  icon: 'file-plus' }
+  { instance: 'meeting',   icon: 'users-plus' },
+  { instance: 'person',    icon: 'user-plus' },
+  { instance: 'project',   icon: 'folder-plus' },
+  { instance: 'scratch',   icon: 'pencil-plus' },
+  { instance: 'budget',    icon: 'wallet-plus' },
+  { instance: 'paycheck',  icon: 'wallet-plus' },
+  { instance: 'invoice',   icon: 'file-plus' },
+  { instance: 'wiki-note', icon: 'file-plus' }  // v0.50.0
 ];
+
+// v0.50.0 — R-WIKI-1: Template, Wiki Hub.md body includes ProjectWikiCards
+// dispatch + inside-block entity-create:wiki-note sentinel.
+async function testRWikiHubTemplateBody() {
+  console.log('\n=== R-WIKI-1 — Template, Wiki Hub.md body includes ProjectWikiCards + wiki-note sentinel ===');
+  const templatePath = path.resolve(WORKSHOP, 'platform/blueprints/project/templates/Wiki Hub.md');
+  if (!fs.existsSync(templatePath)) {
+    console.log(`  FAIL — template missing: ${templatePath}`);
+    return false;
+  }
+  const body = fs.readFileSync(templatePath, 'utf8');
+  const hasCardsDispatch = /class:\s*["']ProjectWikiCards["']/.test(body);
+  const hasSentinel = /\/\/\s*entity-create:wiki-note/.test(body);
+  const hasAccentButton = /class:\s*["']AccentButton["']/.test(body);
+  const hasIdWikiNote = /id:\s*["']wiki-note["']/.test(body);
+  const allPass = hasCardsDispatch && hasSentinel && hasAccentButton && hasIdWikiNote;
+  console.log(`  hasCardsDispatch=${hasCardsDispatch} hasSentinel=${hasSentinel} hasAccentButton=${hasAccentButton} hasIdWikiNote=${hasIdWikiNote}`);
+  console.log(`  ${allPass ? 'PASS' : 'FAIL'}`);
+  return allPass;
+}
 
 async function testREntityCreateIconRendersSvg(siteIndex, site) {
   const caseId = `R-EC-ICON-${siteIndex}`;
@@ -1835,6 +1856,9 @@ async function testREntityCreateIconRendersSvg(siteIndex, site) {
         const site = ENTITY_CREATE_SITES[i];
         results.push([`R-EC-ICON-${i + 1} ${site.instance}-icon-renders-svg`, await testREntityCreateIconRendersSvg(i + 1, site)]);
       }
+    }
+    if (which === 'wiki' || which === 'all') {
+      results.push(['R-WIKI-1 wiki-hub-template-body', await testRWikiHubTemplateBody()]);
     }
     if (which === 'finance' || which === 'all') {
       results.push(['FF1 budget-nav-in-path', await testFF1BudgetNavInPath()]);

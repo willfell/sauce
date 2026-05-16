@@ -760,6 +760,59 @@ function seedVault(setup) {
 }
 
 // -------------------------------------------------------------------------
+// WIKI-1..6 — v0.50.0 project wiki-note entity-create entry
+// -------------------------------------------------------------------------
+{
+    const projectManifest = JSON.parse(fs.readFileSync(
+        path.join(__dirname, "..", "blueprints", "project", "manifest.json"), "utf8"));
+
+    const wikiEntry = (projectManifest.new_entity_buttons || []).find((e) => e.id === "wiki-note");
+    ok("WIKI-1 project manifest declares id=wiki-note entity-create entry",
+        !!wikiEntry, `entries=${(projectManifest.new_entity_buttons || []).map(e => e.id).join(",")}`);
+
+    if (wikiEntry) {
+        ok("WIKI-2 wiki-note destination.folder_prefix uses {{current_file.frontmatter.project_slug}}",
+            wikiEntry.destination &&
+            wikiEntry.destination.folder_prefix === "spice/projects/{{current_file.frontmatter.project_slug}}/wiki",
+            `got ${JSON.stringify(wikiEntry.destination && wikiEntry.destination.folder_prefix)}`);
+
+        ok("WIKI-3 wiki-note frontmatter_template.project uses {{current_file.frontmatter.project_name}}",
+            wikiEntry.frontmatter_template &&
+            wikiEntry.frontmatter_template.project === "[[{{current_file.frontmatter.project_name}}]]",
+            `got ${JSON.stringify(wikiEntry.frontmatter_template && wikiEntry.frontmatter_template.project)}`);
+
+        ok("WIKI-4 wiki-note render_in.target_path points at Template, Wiki Hub.md",
+            wikiEntry.render_in &&
+            wikiEntry.render_in.target_path === "{{templates_path}}/Template, Wiki Hub.md",
+            `got ${JSON.stringify(wikiEntry.render_in && wikiEntry.render_in.target_path)}`);
+    } else {
+        ok("WIKI-2 wiki-note destination.folder_prefix uses {{current_file.frontmatter.project_slug}}", false, "no wiki-note entry");
+        ok("WIKI-3 wiki-note frontmatter_template.project uses {{current_file.frontmatter.project_name}}", false, "no wiki-note entry");
+        ok("WIKI-4 wiki-note render_in.target_path points at Template, Wiki Hub.md", false, "no wiki-note entry");
+    }
+
+    const projectEntry = (projectManifest.new_entity_buttons || []).find((e) => e.id === "project");
+    const wikiSidecar = projectEntry && projectEntry.extra_files &&
+        projectEntry.extra_files.find((x) => x.filename_pattern === "wiki/Wiki.md");
+    ok("WIKI-5 project entity's extra_files[] contains wiki/Wiki.md mapping",
+        wikiSidecar && wikiSidecar.body_template === "Template, Wiki Hub.md",
+        `wikiSidecar=${JSON.stringify(wikiSidecar)}`);
+
+    // WIKI-6: resolveEntityCreateEntry resolves the wiki-note entry cleanly
+    if (resolveEntityCreateEntry && wikiEntry) {
+        const history = [];
+        const git = { commit: "0", tag: "x", dirty: false };
+        const r = resolveEntityCreateEntry(wikiEntry, { templates_path: "ranch/templates" }, "project", history, git);
+        ok("WIKI-6 wiki-note entry resolves cleanly via resolveEntityCreateEntry",
+            r !== null && r.body_template === "ranch/templates/Template, Wiki Note.md",
+            `r=${r === null ? "null" : "ok"} body_template=${r && JSON.stringify(r.body_template)} history=${JSON.stringify(history)}`);
+    } else {
+        ok("WIKI-6 wiki-note entry resolves cleanly via resolveEntityCreateEntry",
+            false, "resolveEntityCreateEntry or wiki-note entry not available");
+    }
+}
+
+// -------------------------------------------------------------------------
 // Drain pending promises before exiting. The audit walker tests + _loadSpec
 // tests are async; we await one tick by deferring the summary via setImmediate
 // chained twice to flush microtasks.

@@ -5965,6 +5965,50 @@ async function caseICN1Tier1ReferenceCount() {
     refs <= 3, `body excerpt: ${body.slice(0, 200)}`);
 }
 
+// -------------------------------------------------------------------------
+// v0.50.0 S5 — PWC-1..4: ProjectWikiCards class surface asserts.
+// Source extracted from helpers/project-wiki-cards.js. Static-string asserts;
+// no runtime CustomJS plumbing needed.
+// -------------------------------------------------------------------------
+async function casePWC1ClassDefined() {
+  console.log("\n--- Case PWC-1: ProjectWikiCards class definition present ---");
+  const src = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/project/helpers/project-wiki-cards.js"),
+    "utf8"
+  );
+  assertTrue("PWC-1: class ProjectWikiCards declared", /class\s+ProjectWikiCards\s*\{/.test(src));
+}
+
+async function casePWC2FiltersByType() {
+  console.log("\n--- Case PWC-2: ProjectWikiCards filters by type === \"wiki-note\" ---");
+  const src = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/project/helpers/project-wiki-cards.js"),
+    "utf8"
+  );
+  assertTrue("PWC-2: where(p => p.type === \"wiki-note\") present",
+    /p\.type\s*===\s*["']wiki-note["']/.test(src));
+}
+
+async function casePWC3SortsByCreatedDesc() {
+  console.log("\n--- Case PWC-3: ProjectWikiCards sorts by created desc ---");
+  const src = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/project/helpers/project-wiki-cards.js"),
+    "utf8"
+  );
+  assertTrue("PWC-3: .sort((p) => p.created, \"desc\") present",
+    /\.sort\(\s*\(p\)\s*=>\s*p\.created\s*,\s*["']desc["']/.test(src));
+}
+
+async function casePWC4EmptyStateCallout() {
+  console.log("\n--- Case PWC-4: ProjectWikiCards empty-state callout ---");
+  const src = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/project/helpers/project-wiki-cards.js"),
+    "utf8"
+  );
+  assertTrue("PWC-4: \"No wiki notes yet\" callout text present",
+    /No wiki notes yet/.test(src));
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -6204,6 +6248,12 @@ async function caseICN1Tier1ReferenceCount() {
   await caseCSS1Idempotent();
   await caseCSS2AdditiveMerge();
   await caseCSS3AbsentArrayDefaultEmpty();
+
+  // v0.50.0 S5 — PWC-1..4: ProjectWikiCards class surface asserts.
+  await casePWC1ClassDefined();
+  await casePWC2FiltersByType();
+  await casePWC3SortsByCreatedDesc();
+  await casePWC4EmptyStateCallout();
 
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);

@@ -366,6 +366,64 @@ withTempHomeAndVault(({ home, vault }) => {
     ok("smoke-prj-customjs-startup",
         prjCustomjsStartupOk,
         prjCustomjsStartupDetail);
+
+    // v0.50.0 S5 — WIKI-INT-1..3: applyWikiBackfill side effects.
+    // After the reinstall above, project blueprint is subscribed; the
+    // applyWikiBackfill helper should have walked spice/projects/*/ and
+    // created wiki/Wiki.md per pre-existing seeded project (3 projects:
+    // Acme-Migration, North-Star-Refactor, Q1-2026-Audit).
+    const seededProjectSlugs = ["Acme-Migration", "North-Star-Refactor", "Q1-2026-Audit"];
+    const backfillsMaterialized = seededProjectSlugs.every(slug =>
+        fs.existsSync(path.join(vault, "spice", "projects", slug, "wiki", "Wiki.md"))
+    );
+    ok("WIKI-INT-1 applyWikiBackfill materialized wiki/Wiki.md for each seeded project",
+        backfillsMaterialized,
+        `slugs=${JSON.stringify(seededProjectSlugs.map(s => ({ s, exists: fs.existsSync(path.join(vault, "spice", "projects", s, "wiki", "Wiki.md")) })))}`);
+
+    // WIKI-INT-2: the materialized Wiki.md body contains the entity-create
+    // wiki-note sentinel + ProjectWikiCards dispatch + correct project_slug
+    // in frontmatter.
+    let wikiContentOk = true;
+    let wikiContentDetail = "";
+    for (const slug of seededProjectSlugs) {
+        const wikiPath = path.join(vault, "spice", "projects", slug, "wiki", "Wiki.md");
+        if (!fs.existsSync(wikiPath)) { wikiContentOk = false; wikiContentDetail = `missing ${wikiPath}`; break; }
+        const body = fs.readFileSync(wikiPath, "utf8");
+        const hasSentinel = /\/\/\s*entity-create:wiki-note/.test(body);
+        const hasCards = /class:\s*["']ProjectWikiCards["']/.test(body);
+        const hasSlug = new RegExp(`project_slug:\\s*${slug}`).test(body);
+        if (!hasSentinel || !hasCards || !hasSlug) {
+            wikiContentOk = false;
+            wikiContentDetail = `${slug}: sentinel=${hasSentinel} cards=${hasCards} slug=${hasSlug}`;
+            break;
+        }
+    }
+    ok("WIKI-INT-2 materialized Wiki.md contains sentinel + ProjectWikiCards + project_slug",
+        wikiContentOk, wikiContentDetail);
+
+    // WIKI-INT-3: re-running install does NOT modify existing Wiki.md (idempotent).
+    // Capture mtime of one materialized file, reinstall, and verify mtime
+    // unchanged.
+    const sampleWikiPath = path.join(vault, "spice", "projects", "Acme-Migration", "wiki", "Wiki.md");
+    let wikiIdempotent = true;
+    let wikiIdempotentDetail = "";
+    if (fs.existsSync(sampleWikiPath)) {
+        const mtimeBefore = fs.statSync(sampleWikiPath).mtimeMs;
+        const reinstall3 = runCli(["reinstall", "--vault", vault]);
+        if (reinstall3.code !== 0) {
+            wikiIdempotent = false;
+            wikiIdempotentDetail = `reinstall #3 failed exit=${reinstall3.code}`;
+        } else {
+            const mtimeAfter = fs.statSync(sampleWikiPath).mtimeMs;
+            wikiIdempotent = mtimeBefore === mtimeAfter;
+            if (!wikiIdempotent) wikiIdempotentDetail = `mtime changed: before=${mtimeBefore} after=${mtimeAfter}`;
+        }
+    } else {
+        wikiIdempotent = false;
+        wikiIdempotentDetail = `sample wiki path missing: ${sampleWikiPath}`;
+    }
+    ok("WIKI-INT-3 applyWikiBackfill is idempotent (mtime unchanged on re-run)",
+        wikiIdempotent, wikiIdempotentDetail);
 });
 
 console.log(`\nrun-integration-smoke.js: ${pass} pass · ${fail} fail`);
