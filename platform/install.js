@@ -989,6 +989,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyTemplaterHotkeys(tp, mech, variables, history, git);          // NEW v0.1.3
   await applySlashCommanderBindings(tp, mech, variables, history, git);    // NEW v0.1.3
   await applyTemplaterFolderTemplates(tp, mech, variables, history, git);  // NEW v0.4.0
+  await applyTemplaterStartupTemplates(tp, mech, variables, history, git); // NEW v0.48.0
   await applyCorePluginSettings(tp, mech, variables, history, git);        // NEW v0.3.0
   await applyCommunityPluginData(tp, mech, variables, history, git);       // NEW v0.21.1
   await applyVendoredThemes(tp, mech, workshopPath, target.path, history, git);  // NEW v0.19.0
@@ -3909,6 +3910,189 @@ async function applyTemplaterFolderTemplates(tp, manifest, variables, history, g
       history.push({
         event: "error",
         step: "templater_folder_templates",
+        name: manifest.name,
+        message: `write failed: ${e.message}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+  }
+}
+
+// applyTemplaterStartupTemplates — for each item that declares
+// templater_startup_templates[], read .obsidian/plugins/templater-obsidian/data.json
+// and additive-merge each entry into startup_templates[]. Match-by-string-equality;
+// first-wins idempotency. Failure-loud (Notice + history). Backup-on-edit to
+// <target>.sauce-backup. Honors landmine #12 — never overwrites a malformed
+// data.json; never strips user entries.
+//
+// Parallels applyTemplaterFolderTemplates (install.js:3727) but for the
+// startup_templates field (array of strings, each a template path).
+//
+// Why same data.json target: Templater's settings live in one file; this is
+// a different field within the same file. Backup is shared (sequential helpers
+// in the install pipeline each write their own .sauce-backup as last-write-wins;
+// the LAST helper to modify the file owns the backup snapshot from immediately
+// before its own write — sufficient for rollback if last-helper failure is the
+// failure mode worth recovering from).
+async function applyTemplaterStartupTemplates(tp, manifest, variables, history, git) {
+  if (!manifest || !Array.isArray(manifest.templater_startup_templates) || manifest.templater_startup_templates.length === 0) return;
+  const adapter = tp.app.vault.adapter;
+  const target = ".obsidian/plugins/templater-obsidian/data.json";
+
+  if (!(await adapter.exists(target))) {
+    new Notice(`applyTemplaterStartupTemplates: ${target} absent; cannot register startup-templates for ${manifest.name}`, 6000);
+    if (history) {
+      history.push({
+        event: "warning",
+        step: "templater_startup_templates",
+        name: manifest.name,
+        message: `${target} absent`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  let raw;
+  try {
+    raw = await adapter.read(target);
+  } catch (e) {
+    new Notice(`applyTemplaterStartupTemplates: cannot read ${target} (${e.message}); skipping for ${manifest.name}`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "templater_startup_templates",
+        name: manifest.name,
+        message: `read failed for ${target}: ${e.message}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch (e) {
+    new Notice(`applyTemplaterStartupTemplates: ${target} malformed JSON (${e.message}); skipping for ${manifest.name}`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "templater_startup_templates",
+        name: manifest.name,
+        message: `${target} malformed JSON: ${e.message}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  if (!Array.isArray(data.startup_templates)) {
+    new Notice(`applyTemplaterStartupTemplates: ${target} parsed but startup_templates not an array; skipping for ${manifest.name}`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "templater_startup_templates",
+        name: manifest.name,
+        message: `${target} startup_templates not an array`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  let appended = 0;
+  for (const entry of manifest.templater_startup_templates) {
+    if (typeof entry !== "string" || !entry.trim()) {
+      if (history) {
+        history.push({
+          event: "warning",
+          step: "templater_startup_templates",
+          name: manifest.name,
+          message: "invalid entry shape (expected non-empty string)",
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      continue;
+    }
+    const resolved = substituteLenient(entry, variables);
+    if (!resolved) {
+      if (history) {
+        history.push({
+          event: "warning",
+          step: "templater_startup_templates",
+          name: manifest.name,
+          message: "empty entry after substitution",
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      continue;
+    }
+
+    if (data.startup_templates.includes(resolved)) {
+      if (history) {
+        history.push({
+          event: "info",
+          step: "templater_startup_templates",
+          name: manifest.name,
+          template: resolved,
+          action: "skipped_existing",
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      continue;
+    }
+
+    data.startup_templates.push(resolved);
+    appended++;
+    if (history) {
+      history.push({
+        event: "info",
+        step: "templater_startup_templates",
+        name: manifest.name,
+        template: resolved,
+        action: "applied",
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+  }
+
+  if (appended === 0) return;
+
+  try {
+    await adapter.write(`${target}.sauce-backup`, raw);
+  } catch (e) {
+    new Notice(`applyTemplaterStartupTemplates: backup write failed (${e.message}); aborting modification for ${manifest.name}`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "templater_startup_templates",
+        name: manifest.name,
+        message: `backup write failed: ${e.message}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  try {
+    await adapter.write(target, JSON.stringify(data, null, 2));
+  } catch (e) {
+    new Notice(`applyTemplaterStartupTemplates: write failed (${e.message}) for ${manifest.name}`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "templater_startup_templates",
         name: manifest.name,
         message: `write failed: ${e.message}`,
         git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
