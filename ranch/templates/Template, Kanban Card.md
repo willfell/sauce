@@ -62,11 +62,34 @@ if (planIdx >= 0 && planIdx + 1 < parts.length) {
             }
         } catch(e) { /* all strategies failed */ }
 
-        if (ws.length > 0) {
+        if (ws.length === 0) {
+            new Notice("No workstreams defined on this project's atlas. Define one (or pick '+ Create new' on next task) to enable workstream tagging.", 8000);
+        } else if (ws.length > 0) {
             const names = ws.map(w => w.name);
             const ids = ws.map(w => w.id);
+            const CREATE_NEW = '__create_new__';
+            names.push('+ Create new workstream');
+            ids.push(CREATE_NEW);
             const picked = await tp.system.suggester(names, ids, false, "Select workstream (Esc to skip)");
-            if (picked) workstreamValue = picked;
+            if (picked === CREATE_NEW) {
+                const newName = await tp.system.prompt("New workstream name");
+                if (newName && newName.trim()) {
+                    const trimmedName = newName.trim();
+                    const newSlug = trimmedName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+                    if (newSlug && !ws.find(w => w.id === newSlug)) {
+                        await app.fileManager.processFrontMatter(atlasNote, fm => {
+                            fm.workstreams = [...(fm.workstreams || []), { id: newSlug, name: trimmedName }];
+                        });
+                        workstreamValue = newSlug;
+                        new Notice(`Workstream added: ${trimmedName}`);
+                    } else if (newSlug) {
+                        // Re-use existing id with same slug (idempotency)
+                        workstreamValue = newSlug;
+                    }
+                }
+            } else if (picked) {
+                workstreamValue = picked;
+            }
         }
     }
 }

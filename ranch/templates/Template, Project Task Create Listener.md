@@ -1,0 +1,3 @@
+<%*
+customJS.ProjectTaskCreateListener.init();
+-%>
