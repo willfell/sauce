@@ -251,3 +251,73 @@ These are flipped on manually in the GitHub UI under **Settings → Branches →
 - ☑ **Require linear history** (matches the project's no-merge-commits convention).
 - ☑ **Restrict who can push to matching branches** — limit to your account.
 - (Optional) **Require signed commits** if you use a GPG/SSH signing key.
+
+## Sauce Pipeline
+
+The **Sauce Pipeline** is an endless self-pacing loop that picks one card off the project board at `~/notes/sauce/headspace-sauce/spice/projects/sauce/`, runs a full Sauce cycle on it, and writes a handoff for the next round. Full design rationale: `Docs/plans/2026-05-15-sauce-pipeline-design.md`. Slash command body: `.claude/commands/sauce-pipeline.md`.
+
+### Start the loop
+
+```
+/loop /sauce-pipeline
+```
+
+`/loop` (no interval) self-paces — it sleeps after each round and wakes up to fire `/sauce-pipeline` again. The user picks which card to work on at the start of every round; the rest is autonomous through tag + push + handoff.
+
+### Stop the loop
+
+- Type `/loop stop` in the active chat.
+- Close the chat.
+- Pick `skip (end the loop)` at any round's Phase B pick prompt.
+- A blocked card or empty Planning column also halts the loop (no wake-up scheduled).
+
+### What one round does
+
+A round is 5 phases. See `.claude/commands/sauce-pipeline.md` for the operational instructions.
+
+| Phase | What | Interactive? |
+|---|---|---|
+| A — Orient | Read the latest handoff in `Docs/prompts/`. Read board state from the consumer vault. | No |
+| B — Pick | Present the Planning column + a recommendation; user picks. Move card to In Progress. | **Yes** |
+| C — Cycle | Run brainstorming → design → plan → stages → tag → push. Existing Sauce discipline. | No (autonomous) |
+| D — Close | Move card to Completed on both boards. Set `completed_in_version` frontmatter. Append 2-line summary block to card body. | No |
+| E — Handoff | Write `Docs/prompts/YYYY-MM-DD-sauce-pipeline-vNN-handoff.md`. Commit + push. Schedule next wake-up. | No |
+
+### Where state lives
+
+- **Handoff archive:** `Docs/prompts/sauce-pipeline-*-handoff.md` (workshop repo). One file per round; latest by filename = current.
+- **Board state:** consumer vault — top-level `sauce-board.md` + workstream sub-boards (file-level writes; vault is not git-tracked).
+- **Cycle artifacts:** `Docs/plans/<date>-<topic>-design.md`, `<date>-vNN-<topic>-plan.md`, `<date>-vNN-result.md` (existing Sauce convention).
+- **Audit trail:** `git log` + `git tag` on `origin/main`.
+
+### Cautions
+
+- **Do NOT hand-edit the consumer vault while the loop is running.** Concurrent edits could conflict with the loop's writes. Pause first.
+- **The loop bumps `workshop_version` per round.** Each card shipped becomes one tagged release.
+- **Some cards are too big for one round.** Phase B has a sanity-check that asks you to scope-narrow before moving such a card to In Progress.
+- **Mid-cycle blockers move the card to a Blocked column and stop the loop.** You unblock manually + restart.
+
+### First-run smoke procedure
+
+The first time you run `/loop /sauce-pipeline`, verify each phase fires correctly. Do this with a small card to keep the cycle short.
+
+1. **Confirm board state.** Open `~/notes/sauce/headspace-sauce/spice/projects/sauce/sauce-board.md` in Obsidian. Confirm at least one card is in the In Planning column. Recommended pick for first smoke: **"Frontmatter Default Doesn't Show"** under the Convenience Functionality workstream — narrow scope, single setting flip.
+2. **Open a fresh chat in the workshop repo.** `cd ~/projects/repos/sauce` and start a new Claude Code session.
+3. **Type `/loop /sauce-pipeline`.** The loop starts.
+4. **Phase A check.** Claude reports: "No prior handoff found (first round). Planning column has: [list of cards]." (For first-ever invocation only.)
+5. **Phase B check.** Claude calls `AskUserQuestion` with each Planning card as an option + a recommendation marked. Pick the small card. Claude moves it to In Progress on both the project board AND the workstream sub-board, and sets `status: in_progress` on the card frontmatter.
+6. **Phase C check (long).** Claude invokes `superpowers:brainstorming`, then `superpowers:writing-plans`, then executes the plan. This is a full Sauce cycle — could take 30 min to several hours depending on card. Verify per-stage commits land on `origin/main`.
+7. **Phase D check.** After the cycle tags (e.g. `v0.47.0`), the card moves Completed on both boards. The 2-line summary block is appended to the card body. The frontmatter has `completed_in_version: v0.47.0`.
+8. **Phase E check.** A new handoff exists at `Docs/prompts/YYYY-MM-DD-sauce-pipeline-v0.47.0-handoff.md`, is committed, and pushed.
+9. **Wake-up check.** Claude calls `ScheduleWakeup(delaySeconds=270, prompt="/sauce-pipeline", reason=...)` at round end. Within ~5 min, round 2 fires automatically.
+10. **Stop the loop.** Type `/loop stop` once smoke is verified. The loop ends without firing further rounds.
+
+### Dry-run smoke (faster — Phases A + B only)
+
+If you want to verify the orient + pick phases without committing to a full cycle:
+
+1. Run `/loop /sauce-pipeline`.
+2. Verify Phase A reads board correctly.
+3. At the Phase B AskUserQuestion prompt, pick `skip (end the loop)`.
+4. Verify the loop writes a "user skipped" handoff and does NOT call ScheduleWakeup.
+5. Loop dies clean. Phase A + B verified without running a real cycle.
