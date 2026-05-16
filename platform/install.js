@@ -1840,7 +1840,7 @@ async function injectAccentButtonBlock(tp, targetPath, instanceId, sourceName, h
     if (history) {
       history.push({
         event: "error",
-        step: "entity_create_block_missing",
+        step: "entity_create_block_error",
         name: sourceName,
         target: targetPath,
         instance: instanceId,
