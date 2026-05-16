@@ -1,8 +1,20 @@
 <%*
-// Use target_file (the note being created) — most reliable in Templater new-file context
+// Source-board detection. When kanban-plugin invokes Templater's
+// create-new-note-from-template, Templater sets tp.config.active_file to the
+// file the user was viewing — i.e., the kanban board the user clicked
+// "+ Add a card" on. This is the most reliable source for deriving the
+// project dir, since tp.config.target_file is the NEW file (which may
+// land at vault root when Templater controls the folder, not under
+// spice/projects/<slug>/tasks/).
+//
+// v0.49.1 fix: previously detectPath = targetPath || activePath, which
+// produced "nono.md" (vault root) for kanban-plugin-created files. The
+// new ordering prefers tp.config.active_file (the source board) so the
+// workstream picker + auto-promote work regardless of where Templater
+// initially placed the file.
 const targetPath = tp.config.target_file?.path || "";
-const activePath = app.workspace.getActiveFile()?.path || "";
-const detectPath = targetPath || activePath;
+const activePath = tp.config.active_file?.path || app.workspace.getActiveFile()?.path || "";
+const detectPath = activePath || targetPath;
 const sourceBoard = activePath || targetPath;
 
 // Workstream picker: detect project dir and read atlas note directly
@@ -105,21 +117,28 @@ tags:
 ---
 <%*
 // Auto-promote into per-task folder convention.
-// Kanban creates the file flat at spice/projects/<slug>/tasks/<TaskName>.md.
-// Move it into spice/projects/<slug>/tasks/<TaskName>/<TaskName>.md so the task
-// note and any sub-notes live together. Idempotent: skips if already inside a
-// folder of the same name, or if the target file already exists.
-const newFilePath = tp.config.target_file?.path || "";
-if (newFilePath.includes("/tasks/")) {
+//
+// v0.49.1 fix: derive projectDir from the SOURCE BOARD path (via
+// tp.config.active_file) rather than from the NEW file path. When
+// kanban-plugin invokes Templater's create-new-note-from-template,
+// Templater may place the new file at vault root (default folder)
+// instead of inside the kanban board's `new-note-folder` setting.
+// Previously the auto-promote gated on `/tasks/` in the new file's
+// path, which failed for vault-root-placed files. The new logic
+// always moves the file to <projectDir>/tasks/<title>/<title>.md
+// when the source board is under spice/projects/<slug>/.
+//
+// Idempotent: skips if target already exists.
+const sourceBoardPath = tp.config.active_file?.path || app.workspace.getActiveFile()?.path || "";
+const sourceParts = sourceBoardPath.split("/");
+const projectsIdx = sourceParts.indexOf("projects");
+if (projectsIdx >= 0 && projectsIdx + 1 < sourceParts.length) {
+    const projectDir = sourceParts.slice(0, projectsIdx + 2).join("/");
     const fileName = tp.file.title;
-    const folder = newFilePath.substring(0, newFilePath.lastIndexOf("/"));
-    const folderBasename = folder.substring(folder.lastIndexOf("/") + 1);
-    if (folderBasename !== fileName) {
-        const targetPath = folder + "/" + fileName + "/" + fileName;
-        const existing = app.vault.getAbstractFileByPath(targetPath + ".md");
-        if (!existing) {
-            await tp.file.move(targetPath);
-        }
+    const targetPath = `${projectDir}/tasks/${fileName}/${fileName}`;
+    const existing = app.vault.getAbstractFileByPath(targetPath + ".md");
+    if (!existing) {
+        await tp.file.move(targetPath);
     }
 }
 -%>
