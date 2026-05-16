@@ -149,10 +149,10 @@ for (const [label, p] of mechFiles) {
 }
 ok("EC-1 entity-create mechanism dir + 4 files present", fs.existsSync(MECH_DIR) && allPresent);
 
-// 2. manifest parses, version is "0.3.1" (PATCH v0.50.1 BUG-B _readBody fallback)
+// 2. manifest parses, version is "0.3.2" (PATCH v0.50.4 embedded-subfolder guard)
 const manifest = JSON.parse(fs.readFileSync(path.join(MECH_DIR, "manifest.json"), "utf8"));
-ok("EC-2 entity-create manifest parses + version === 0.3.1",
-    manifest && manifest.name === "entity-create" && manifest.version === "0.3.1",
+ok("EC-2 entity-create manifest parses + version === 0.3.2",
+    manifest && manifest.name === "entity-create" && manifest.version === "0.3.2",
     `got name=${manifest && manifest.name} version=${manifest && manifest.version}`);
 
 // 3. json-schema parses + has 7 extension shapes
@@ -792,10 +792,12 @@ function seedVault(setup) {
     }
 
     const projectEntry = (projectManifest.new_entity_buttons || []).find((e) => e.id === "project");
+    // Find the wiki sidecar by body_template (stable across the v0.50.4
+    // filename_pattern → subfolder canonicalization).
     const wikiSidecar = projectEntry && projectEntry.extra_files &&
-        projectEntry.extra_files.find((x) => x.filename_pattern === "wiki/Wiki.md");
-    ok("WIKI-5 project entity's extra_files[] contains wiki/Wiki.md mapping",
-        wikiSidecar && wikiSidecar.body_template === "Template, Wiki Hub.md",
+        projectEntry.extra_files.find((x) => x.body_template === "Template, Wiki Hub.md");
+    ok("WIKI-5 project entity's extra_files[] maps to Template, Wiki Hub.md",
+        !!wikiSidecar,
         `wikiSidecar=${JSON.stringify(wikiSidecar)}`);
 
     // WIKI-6: resolveEntityCreateEntry resolves the wiki-note entry cleanly
@@ -833,6 +835,49 @@ function seedVault(setup) {
     ok("EC-RB-2 _readBody uses app.vault.adapter.read",
         readBodyMatch && /app\.vault\.adapter\.read/.test(readBodyMatch[0]),
         readBodyMatch ? `adapter.read present: ${/app\.vault\.adapter\.read/.test(readBodyMatch[0])}` : "_readBody not found");
+}
+
+// -------------------------------------------------------------------------
+// v0.50.4 — _createExtra ensures parent dir when filename_pattern itself
+// embeds a subfolder (e.g. "wiki/Wiki.md"). Regression for the case where
+// only the outer xFolder was ensured and vault.create silently left an
+// empty file in real Obsidian. Stub vault records createFolder calls so we
+// can assert the embedded "wiki" subdir was ensured before the file write.
+// -------------------------------------------------------------------------
+{
+    const ec39 = loadEntityCreate({
+        vaultFiles: {
+            "ranch/templates/Template, Wiki Hub.md": "FAKE WIKI HUB BODY",
+        },
+    });
+    const inst39 = new ec39.Cls();
+    const xf = { filename_pattern: "wiki/Wiki.md", body_template: "ranch/templates/Template, Wiki Hub.md" };
+    const ctx39 = baseCtx({ prompts: { slug: "demo" } });
+    const folder39 = "spice/projects/demo";
+    inst39._createExtra(xf, ctx39, folder39).then(() => {
+        const wrote = ec39.vaultFiles["spice/projects/demo/wiki/Wiki.md"];
+        const wikiDir = ec39.vaultFiles["spice/projects/demo/wiki"];
+        ok("EC-39 _createExtra ensures parent dir for filename_pattern with embedded subfolder",
+            wikiDir && wikiDir.__folder === true &&
+            typeof wrote === "string" && wrote.includes("FAKE WIKI HUB BODY"),
+            `wikiDir=${JSON.stringify(wikiDir)} wrote=${typeof wrote === "string" ? `len=${wrote.length}` : JSON.stringify(wrote)}`);
+    });
+}
+
+// -------------------------------------------------------------------------
+// v0.50.4 — project blueprint's wiki extra_file uses the canonical
+// subfolder field (not an embedded slash in filename_pattern). EC-39 above
+// covers the mechanism-side robustness; this asserts the in-tree manifest
+// adopts the schema-canonical form.
+// -------------------------------------------------------------------------
+{
+    const pm = JSON.parse(fs.readFileSync(path.join(ROOT, "platform/blueprints/project/manifest.json"), "utf8"));
+    const pe = (pm.new_entity_buttons || []).find((e) => e.id === "project");
+    const wikiXf = pe && pe.extra_files &&
+        pe.extra_files.find((x) => x.body_template === "Template, Wiki Hub.md");
+    ok("EC-40 project wiki extra_file uses canonical subfolder field (v0.50.4)",
+        wikiXf && wikiXf.subfolder === "wiki" && wikiXf.filename_pattern === "Wiki.md",
+        `wikiXf=${JSON.stringify(wikiXf)}`);
 }
 
 // -------------------------------------------------------------------------
