@@ -5756,6 +5756,134 @@ async function caseType3RealPeopleManifestPostPatchPasses() {
     `history=${JSON.stringify(history)}`);
 }
 
+// -------------------------------------------------------------------------
+// v0.48.0 S5 — PTCL-1..5: ProjectTaskCreateListener path-regex + idempotency
+// + command-id literal. Source extracted from helpers/project-task-create-listener.js
+// since the class is browser-side (no module exports). Tests don't fire
+// app.vault.on directly — that requires Obsidian's runtime — they assert
+// the constructor's static fields and idempotency-flag mechanics.
+//
+// _loadProjectTaskCreateListener(appOverride?) — accepts an optional app stub
+// so callers control which `app` the loaded class's init() body sees. The src
+// uses `app` as a free variable in the new Function scope, so the injected
+// stub must be passed at load time (not via global.app patching).
+// -------------------------------------------------------------------------
+function _loadProjectTaskCreateListener(appOverride) {
+  const src = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/project/helpers/project-task-create-listener.js"),
+    "utf8"
+  );
+  const NoticeStub = function (msg) { (NoticeStub.captured ||= []).push(String(msg)); };
+  const appStub = appOverride || { vault: { on: function (evt, cb) { (appStub.vault._handlers ||= []).push({ evt, cb }); } } };
+  return new Function("Notice", "app", "console", `"use strict";\n${src}\nreturn ProjectTaskCreateListener;`)(NoticeStub, appStub, console);
+}
+
+async function casePTCL1Idempotent() {
+  console.log("\n--- Case PTCL-1: ProjectTaskCreateListener.init() is idempotent ---");
+  let subscribes = 0;
+  const fakeApp = { vault: { on: () => { subscribes++; } } };
+  // Pass fakeApp at load time so the class's init() body sees it as `app`.
+  const Cls = _loadProjectTaskCreateListener(fakeApp);
+  const inst = new Cls();
+  inst.init();
+  inst.init();
+  assertEq("PTCL-1: subscribe count after two init() calls", subscribes, 1);
+}
+
+async function casePTCL2PathRegexMatches() {
+  console.log("\n--- Case PTCL-2: path regex matches top-level task file ---");
+  const Cls = _loadProjectTaskCreateListener();
+  const inst = new Cls();
+  assertTrue("PTCL-2: matches spice/projects/foo/tasks/Bar.md", inst._pathRegex.test("spice/projects/foo/tasks/Bar.md"));
+}
+
+async function casePTCL3PathRegexExcludesNested() {
+  console.log("\n--- Case PTCL-3: path regex EXCLUDES nested task file ---");
+  const Cls = _loadProjectTaskCreateListener();
+  const inst = new Cls();
+  assertTrue("PTCL-3: does NOT match spice/projects/foo/tasks/Bar/Bar.md (nested)",
+    !inst._pathRegex.test("spice/projects/foo/tasks/Bar/Bar.md"));
+}
+
+async function casePTCL4PathRegexExcludesAtlas() {
+  console.log("\n--- Case PTCL-4: path regex EXCLUDES atlas (not under tasks/) ---");
+  const Cls = _loadProjectTaskCreateListener();
+  const inst = new Cls();
+  assertTrue("PTCL-4: does NOT match spice/projects/foo/Bar.md (atlas, no tasks/)",
+    !inst._pathRegex.test("spice/projects/foo/Bar.md"));
+}
+
+async function casePTCL5TemplaterCommandIdLiteral() {
+  console.log("\n--- Case PTCL-5: Templater command id literal correct ---");
+  const Cls = _loadProjectTaskCreateListener();
+  const inst = new Cls();
+  assertEq("PTCL-5: _templaterCommandId literal", inst._templaterCommandId, "templater-obsidian:replace-in-file-templater");
+}
+
+// -------------------------------------------------------------------------
+// v0.48.0 S5 — KC-1..3: Kanban Card template enhancements (source-string
+// asserts on the Templater template body — Templater syntax is not
+// statically analyzable, so we verify presence of the v0.48.0 added pieces).
+// -------------------------------------------------------------------------
+async function caseKC1SentinelPresent() {
+  console.log("\n--- Case KC-1: Kanban Card sentinel '+ Create new workstream' present ---");
+  const body = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/project/templates/Kanban Card.md"),
+    "utf8"
+  );
+  assertTrue("KC-1: sentinel string present in Kanban Card body",
+    body.includes("+ Create new workstream"), `body length: ${body.length}`);
+}
+
+async function caseKC2CreateNewConstDeclared() {
+  console.log("\n--- Case KC-2: CREATE_NEW sentinel constant declared ---");
+  const body = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/project/templates/Kanban Card.md"),
+    "utf8"
+  );
+  assertTrue("KC-2: CREATE_NEW = '__create_new__' const declared",
+    body.includes("CREATE_NEW = '__create_new__'"));
+}
+
+async function caseKC3EmptyWorkstreamsNoticePresent() {
+  console.log("\n--- Case KC-3: empty-workstreams Notice present ---");
+  const body = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/project/templates/Kanban Card.md"),
+    "utf8"
+  );
+  assertTrue("KC-3: 'No workstreams defined on this project' Notice present",
+    body.includes("No workstreams defined on this project"));
+}
+
+// -------------------------------------------------------------------------
+// v0.48.0 S5 — ICN-1: icons.js _tier1 reference count regression guard.
+// FLN-a (v0.47.0) flagged that icons.js resolve() body called this._tier1
+// 3x via getter. S6 of v0.48.0 will refactor to capture once. This guard
+// uses ≤ 3 so preflight stays green at S5 close (current state = 3 refs);
+// after S6's refactor the count drops to ≤ 2 and the guard remains green.
+// A future cycle can tighten to ≤ 2 once S6 ships. Threshold > 3 = regression.
+// -------------------------------------------------------------------------
+async function caseICN1Tier1ReferenceCount() {
+  console.log("\n--- Case ICN-1: Icons.resolve() this._tier1 reference count ---");
+  const src = fs.readFileSync(
+    path.join(WORKSHOP, "platform/mechanisms/icons/icons.js"),
+    "utf8"
+  );
+  // Match resolve() body: from "resolve(...) {" through its matching "}".
+  const startIdx = src.search(/resolve\s*\(/);
+  if (startIdx < 0) { assertTrue("ICN-1: resolve() found in icons.js", false); return; }
+  let i = src.indexOf("{", startIdx);
+  let depth = 0;
+  for (; i < src.length; i++) {
+    if (src[i] === "{") depth++;
+    else if (src[i] === "}") { depth--; if (depth === 0) { i++; break; } }
+  }
+  const body = src.slice(startIdx, i);
+  const refs = (body.match(/this\._tier1/g) || []).length;
+  assertTrue(`ICN-1: this._tier1 refs in resolve() body should be ≤ 3 (got ${refs}); regressed if > 3`,
+    refs <= 3, `body excerpt: ${body.slice(0, 200)}`);
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -5971,6 +6099,21 @@ async function caseType3RealPeopleManifestPostPatchPasses() {
   await caseType1PositiveFixtureWithTypeAlignedButtonPasses();
   await caseType2NegativeFixtureMissingTypeFails();
   await caseType3RealPeopleManifestPostPatchPasses();
+
+  // v0.48.0 S5 — PTCL-1..5: ProjectTaskCreateListener (idempotency + path-regex + command-id literal).
+  await casePTCL1Idempotent();
+  await casePTCL2PathRegexMatches();
+  await casePTCL3PathRegexExcludesNested();
+  await casePTCL4PathRegexExcludesAtlas();
+  await casePTCL5TemplaterCommandIdLiteral();
+
+  // v0.48.0 S5 — KC-1..3: Kanban Card source-string asserts (sentinel + CREATE_NEW const + empty-toast).
+  await caseKC1SentinelPresent();
+  await caseKC2CreateNewConstDeclared();
+  await caseKC3EmptyWorkstreamsNoticePresent();
+
+  // v0.48.0 S5 — ICN-1: Icons.resolve() this._tier1 reference count regression guard (FLN-a).
+  await caseICN1Tier1ReferenceCount();
 
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);

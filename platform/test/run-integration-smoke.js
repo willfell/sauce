@@ -312,6 +312,34 @@ withTempHomeAndVault(({ home, vault }) => {
     ok("smoke-ec-no-orphan-newxbutton-helpers",
         orphans.length === 0,
         orphans.length > 0 ? `orphans: ${orphans.join(", ")}` : "");
+
+    // v0.48.0 S5 — smoke-prj-startup-tpl: post-bootstrap (and post-cowork-reinstall +
+    // post-entity-create reinstall above), verify Templater plugin's data.json
+    // startup_templates[] contains project's listener template path. project's
+    // manifest declares templater_startup_templates[] (v0.48.0 S3); the new
+    // applyTemplaterStartupTemplates installer helper (v0.48.0 S4) wires it
+    // into Templater's data.json field at install time.
+    const templaterDataPath = path.join(vault, ".obsidian/plugins/templater-obsidian/data.json");
+    let prjStartupOk = false;
+    let prjStartupDetail = "";
+    if (fs.existsSync(templaterDataPath)) {
+        try {
+            const td = JSON.parse(fs.readFileSync(templaterDataPath, "utf8"));
+            const expected = "ranch/templates/Template, Project Task Create Listener.md";
+            if (Array.isArray(td.startup_templates) && td.startup_templates.includes(expected)) {
+                prjStartupOk = true;
+            } else {
+                prjStartupDetail = `expected ${JSON.stringify(expected)} in startup_templates; got ${JSON.stringify(td.startup_templates)}`;
+            }
+        } catch (e) {
+            prjStartupDetail = `data.json parse error: ${e.message}`;
+        }
+    } else {
+        prjStartupDetail = `data.json absent at ${templaterDataPath}`;
+    }
+    ok("smoke-prj-startup-tpl",
+        prjStartupOk,
+        prjStartupDetail);
 });
 
 console.log(`\nrun-integration-smoke.js: ${pass} pass · ${fail} fail`);
