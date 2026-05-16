@@ -13,7 +13,7 @@
 - Consumer vault: `~/notes/sauce/headspace-sauce/` (NOT a git repo; synced by Obsidian Sync / iCloud).
 - Project root note: `~/notes/sauce/headspace-sauce/spice/projects/sauce/Sauce.md`.
 - Project board (top-level kanban): `~/notes/sauce/headspace-sauce/spice/projects/sauce/sauce-board.md`.
-- Workstream sub-boards: `~/notes/sauce/headspace-sauce/spice/projects/sauce/tasks/<Workstream>/board/<Workstream>-board.md` (6 of them — Projects Blueprint, To-Do Blueprint, Daily-Hub Blueprint, Convenience Functionality, Blueprint Orchestration, Cowork Brainstorming).
+- Workstream sub-boards: `~/notes/sauce/headspace-sauce/spice/projects/sauce/tasks/<Workstream>/board/<Workstream>-board.md` (7 of them as of 2026-05-16 — Projects Blueprint, To-Do Blueprint, Daily-Hub Blueprint, Convenience Functionality, Blueprint Orchestration, Cowork Brainstorming, Scratch Blueprint).
 - Card files: `~/notes/sauce/headspace-sauce/spice/projects/sauce/tasks/<Workstream>/board/<Card>/<Card>.md`.
 - Card frontmatter `source_board` field encodes which workstream the card belongs to.
 - Handoff archive: `~/projects/repos/sauce/Docs/prompts/sauce-pipeline-*-handoff.md`.
@@ -24,7 +24,14 @@
 - Sauce per-cycle commit + tag + push discipline: `CLAUDE.md` ("Git workflow" section).
 - Installer command-pruning logic: `platform/install.js:6210` (`pruneClaudeSurface`) and `platform/install.js:6343` (`applyLocalShadows`) — both confirmed to leave unmanaged `.claude/commands/sauce-pipeline.md` alone.
 
-**No version bump.** This work adds workshop-internal tooling. It is not a mechanism or blueprint source change. `workshop_version` stays at `0.46.2` until the pipeline ships its first real card (which will be its OWN Sauce cycle and bump in the normal way).
+**No version bump.** This work adds workshop-internal tooling. It is not a mechanism or blueprint source change. `workshop_version` stays at its current value (`0.49.2` as of 2026-05-16) until the pipeline ships its first real card (which will be its OWN Sauce cycle and bump in the normal way).
+
+**Post-plan-authoring context (v0.47.0 → v0.49.2):** Between the original plan-authoring date (2026-05-15) and now, three project-blueprint cycles shipped that are tangentially relevant:
+- **v0.48.0** — adds `ProjectTaskCreateListener` customjs class that fires on new task-board card file creation (path-regex matched). Currently used to launch a workstream-picker dialog inside Obsidian when a user clicks "+ Add a card" on a project kanban board.
+- **v0.49.0** — listener registration via customjs `startupScriptNames[]` (L2). Adds `customjs_startup_scripts[]` manifest field + `applyCustomJsStartupScripts` installer helper. Unrelated bundled fixes: BUG-7 (Create Board gate) + BUG-8 (entity-create sentinel relocation).
+- **v0.49.2** — `Template, Kanban Card.md` source-board detection via vault-scan (scans all `.md` files for kanban boards linking to the new card's filename).
+
+**Why this matters for the pipeline:** the pipeline interacts with the project blueprint via *direct markdown edits to existing files* (column moves, frontmatter status changes). These do NOT trigger the v0.48.0 listener (which watches for file CREATION, not file edits). The pipeline does NOT use the obsidian-kanban "+ Add a card" UI flow. The only flow that previously *might* have created files programmatically was Phase B Step 6 "Scope-narrow" — refactored in this update to defer card creation to the user via Obsidian's UI, sidestepping the listener interaction entirely. See Task 2.2 Phase B Step 6 below.
 
 ---
 
@@ -97,7 +104,7 @@ A round is 5 phases. See `.claude/commands/sauce-pipeline.md` for the operationa
 
 - **Do NOT hand-edit the consumer vault while the loop is running.** Concurrent edits could conflict with the loop's writes. Pause first.
 - **The loop bumps `workshop_version` per round.** Each card shipped becomes one tagged release.
-- **Some cards are too big for one round.** Phase B has a sanity-check that asks you to scope-narrow before moving such a card to In Progress.
+- **Some cards are too big for one round.** Phase B has a sanity-check that gives you three choices before moving the card to In Progress: proceed anyway, pause for you to add smaller cards via Obsidian, or pick something else. The pipeline never creates cards programmatically — that path goes through the v0.48.0+v0.49.2 listener flow which expects interactive Obsidian context.
 - **Mid-cycle blockers move the card to a Blocked column and stop the loop.** You unblock manually + restart.
 
 ### First-run smoke procedure
@@ -233,10 +240,15 @@ A round is 5 phases. **Always** execute them in order A → B → C → D → E.
    - Header: "Card scope"
    - Options:
      - "Proceed anyway" — description: "Run a full cycle on the card as-is. May be a long round."
-     - "Scope-narrow as a sub-card" — description: "Add a smaller new card on the board for this round; the original stays in Planning."
+     - "Pause for user to add smaller cards via Obsidian" — description: "End the round cleanly. Add smaller cards in Obsidian, then restart the loop."
      - "Pick something smaller" — description: "Re-loop to the pick prompt."
-   - On "Scope-narrow": prompt the user via `AskUserQuestion` (free-form fallback) for the sub-task scope. Create a NEW card on the board (top-level + workstream sub-board) following the existing Kanban Card template at `~/notes/sauce/headspace-sauce/ranch/templates/Template, Kanban Card.md` (or the closest convention used by sibling cards). Set the new card as the picked card.
+   - On "Pause for user to add smaller cards via Obsidian": **the pipeline does NOT create new cards programmatically.** The supported card-creation path is obsidian-kanban's "+ Add a card" UI, which delegates to Templater + the v0.48.0 `ProjectTaskCreateListener` + the v0.49.2 vault-scan source-board detection — all interactive Obsidian flows. The pipeline bypassing them would either skip the listener wiring (creating out-of-shape cards) or fire the listener with no human at the workstream-picker dialog. Instead:
+     a. Write a paused-for-scope handoff at `~/projects/repos/sauce/Docs/prompts/YYYY-MM-DD-sauce-pipeline-paused-for-scope-handoff.md`. Use Phase E's handoff format but with a `## Status: PAUSED FOR SCOPE` block at the top, the originally-picked card name, and the user-described sub-task scopes (captured via `AskUserQuestion` free-form). Footer: "## Next action: add cards via Obsidian, then `/loop /sauce-pipeline`".
+     b. Commit + push the handoff (single workshop commit).
+     c. Output to the user: "Paused for scope. Open Obsidian, add smaller cards to the project board's In Planning column via '+ Add a card'. v0.49.2's source-board detection will route them correctly under `tasks/<Workstream>/board/`. Restart with `/loop /sauce-pipeline`."
+     d. **Do NOT call `ScheduleWakeup`.** Exit.
    - On "Pick something smaller": go back to step 3.
+   - **Note:** the picked card has NOT been moved to In Progress yet at this point — Step 7's board writes happen AFTER this sanity check. So no rollback is needed for the pause-for-scope or pick-smaller branches.
 
 7. **Move the picked card on the boards.** Three edits:
    a. Top-level project board: edit `~/notes/sauce/headspace-sauce/spice/projects/sauce/sauce-board.md`. Find the line `- [ ] [[<Card name>]]` under `## In Planning` and remove it. Add the line at the END of the `## In Progress` section (before the blank line that precedes `## Blocked`).
@@ -366,7 +378,7 @@ The card body describes WHAT to build. Execute a full Sauce cycle:
 | 1 | First round, no prior handoff | Phase A skips the "last round closed X" framing. Phase B presents Planning with no recommendation. |
 | 2 | Planning column empty | Phase B writes "no work" handoff, no `ScheduleWakeup`, exits. |
 | 3 | User picks `skip` | Phase B writes "user skipped" handoff, no `ScheduleWakeup`, exits. |
-| 4 | Picked card too big | Phase B sanity-check; user chooses proceed / scope-narrow / pick-smaller. |
+| 4 | Picked card too big | Phase B sanity-check; user chooses proceed / pause-for-Obsidian-add / pick-smaller. On "pause-for-Obsidian-add" pipeline writes a paused-for-scope handoff and exits without `ScheduleWakeup` (pipeline never creates cards programmatically). |
 | 5 | Mid-cycle blocker | Phase C moves card to Blocked, commits partial work (no tag), writes blocked handoff, no `ScheduleWakeup`, exits. |
 | 6 | Push fails / network down | Retry once. Still failing → Case 5 (blocked, reason = "unpushed commits, network down"). Vault writes still proceed. |
 
@@ -460,7 +472,7 @@ In the fresh session, type:
 Expected sequence:
 - The loop fires `/sauce-pipeline` immediately (round 1).
 - Claude reports Phase A actions: "No prior handoff found (first round). Reading sauce-board.md..." — confirms it's reading the consumer vault.
-- Claude reports the Planning column contents — should match the 6 cards currently in Planning on `sauce-board.md` (Projects Blueprint, To-Do Blueprint, Daily-Hub Blueprint, Convenience Functionality, Blueprint Orchestration, Cowork Brainstorming).
+- Claude reports the Planning column contents — should match the 7 cards currently in Planning on `sauce-board.md` (Projects Blueprint, To-Do Blueprint, Daily-Hub Blueprint, Convenience Functionality, Blueprint Orchestration, Cowork Brainstorming, Scratch Blueprint).
 - **Note:** these are the workstream-card-level entries, not the leaf task-board cards. Phase B should ask which workstream-card to work on. (The pipeline operates at the project-board level; per-task work happens during Phase C as part of the cycle.)
 
 Wait — that's an important clarification. Re-read the project board:
@@ -469,11 +481,11 @@ Wait — that's an important clarification. Re-read the project board:
 cat ~/notes/sauce/headspace-sauce/spice/projects/sauce/sauce-board.md
 ```
 
-Confirm: the `## In Planning` column lists the 6 workstream-cards (e.g. `[[Projects Blueprint]]`), not individual task-board cards.
+Confirm: the `## In Planning` column lists the 7 workstream-cards (e.g. `[[Projects Blueprint]]`, `[[Scratch Blueprint]]`), not individual task-board cards.
 
 - [ ] **Step 4.3: Verify Phase B presents AskUserQuestion**
 
-Claude should call `AskUserQuestion` with the 6 workstream-cards as options + a recommendation + a `skip` option. Verify the question text is sensible.
+Claude should call `AskUserQuestion` with the 7 workstream-cards as options + a recommendation + a `skip` option. (`AskUserQuestion`'s 4-option max means the pipeline should present 3 workstreams + a "show all" / "Other from Planning column" fourth option + skip. Verify the question text is sensible.)
 
 - [ ] **Step 4.4: Pick `skip (end the loop)`**
 
