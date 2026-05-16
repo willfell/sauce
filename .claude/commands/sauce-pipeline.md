@@ -40,13 +40,15 @@ A round is 5 phases. **Always** execute them in order A → B → C → D → E.
    - If a previous handoff exists with a `## Recommended next` section naming a card still in Planning, that's the recommendation.
    - Otherwise, pick the first card in In Planning order.
 
-3. **Use `AskUserQuestion`** to ask the user:
+3. **Use `AskUserQuestion`** to ask the user. **`AskUserQuestion` has a hard 4-option max** — always present exactly 4 options, composed as follows based on Planning column size:
    - Question: "Which card should this round work on? (Planning column from sauce-board.md)"
    - Header: "Pick card"
-   - Options:
-     - First option: the recommendation, labeled `<Card name> (Recommended)` with description = recommendation reason.
-     - Up to 3 more options: other cards from In Planning. (If In Planning has more than 4 cards total, present 3 + a fourth option labeled `Other from Planning column` with description = "Pick from full list".)
-     - LAST option: `skip (end the loop)` with description = "Stops the loop. No wake-up scheduled. Restart with /loop /sauce-pipeline."
+   - Slot 1: the recommendation, labeled `<Card name> (Recommended)` with description = recommendation reason.
+   - Slots 2-3: other Planning cards.
+     - If Planning has 1-2 *other* cards (3 total or fewer): fill slot 2 (and slot 3 if available) with those cards; slot 4 = `skip`.
+     - If Planning has 3+ *other* cards (4 total or more): slot 2 = the next most-promising other card (heuristic: first in Planning order that isn't the recommendation); slot 3 = `Other from Planning column` with description = "Pick from full list"; slot 4 = `skip`.
+   - Slot 4 (always last): `skip (end the loop)` with description = "Stops the loop. No wake-up scheduled. Restart with /loop /sauce-pipeline."
+   - This guarantees the first prompt is always ≤4 options. The `Other from Planning column` slot covers any overflow via a follow-up question (see Step 5).
 
 4. **If the user picks `skip`:** Write a "user skipped" handoff. Commit + push it. **Do NOT call `ScheduleWakeup`.** Exit.
 
