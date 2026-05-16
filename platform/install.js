@@ -990,6 +990,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applySlashCommanderBindings(tp, mech, variables, history, git);    // NEW v0.1.3
   await applyTemplaterFolderTemplates(tp, mech, variables, history, git);  // NEW v0.4.0
   await applyTemplaterStartupTemplates(tp, mech, variables, history, git); // NEW v0.48.0
+  await applyCustomJsStartupScripts(tp, mech, variables, history, git);    // NEW v0.49.0
   await applyCorePluginSettings(tp, mech, variables, history, git);        // NEW v0.3.0
   await applyCommunityPluginData(tp, mech, variables, history, git);       // NEW v0.21.1
   await applyVendoredThemes(tp, mech, workshopPath, target.path, history, git);  // NEW v0.19.0
@@ -4093,6 +4094,180 @@ async function applyTemplaterStartupTemplates(tp, manifest, variables, history, 
       history.push({
         event: "error",
         step: "templater_startup_templates",
+        name: manifest.name,
+        message: `write failed: ${e.message}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+  }
+}
+
+// applyCustomJsStartupScripts — for each item that declares
+// customjs_startup_scripts[], read .obsidian/plugins/customjs/data.json
+// and additive-merge each entry into startupScriptNames[]. Match-by-string-equality;
+// first-wins idempotency. Failure-loud (Notice + history). Backup-on-edit to
+// <target>.sauce-backup. Honors landmine #12 — never overwrites a malformed
+// data.json; never strips user entries.
+//
+// Parallels applyTemplaterStartupTemplates (install.js:3938) but for the
+// customjs plugin's startupScriptNames[] field. customjs is a different plugin
+// from Templater — it's bound to its own load lifecycle, which empirically fires
+// reliably at vault boot (validated at v0.49.0 S0 gate; v0.48.0's Templater
+// startup_templates path was unreliable at consumer vaults).
+//
+// Why same data.json target file pattern: customjs's settings live in one file;
+// startupScriptNames[] is a top-level array within it. Backup is shared with
+// applyCustomJsSettings (which also writes to this file) — sequential helpers
+// in the install pipeline each write their own .sauce-backup as last-write-wins.
+async function applyCustomJsStartupScripts(tp, manifest, variables, history, git) {
+  if (!manifest || !Array.isArray(manifest.customjs_startup_scripts) || manifest.customjs_startup_scripts.length === 0) return;
+  const adapter = tp.app.vault.adapter;
+  const target = ".obsidian/plugins/customjs/data.json";
+
+  if (!(await adapter.exists(target))) {
+    new Notice(`applyCustomJsStartupScripts: ${target} absent; cannot register startup-scripts for ${manifest.name}`, 6000);
+    if (history) {
+      history.push({
+        event: "warning",
+        step: "customjs_startup_scripts",
+        name: manifest.name,
+        message: `${target} absent`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  let raw;
+  try {
+    raw = await adapter.read(target);
+  } catch (e) {
+    new Notice(`applyCustomJsStartupScripts: cannot read ${target} (${e.message}); skipping for ${manifest.name}`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "customjs_startup_scripts",
+        name: manifest.name,
+        message: `read failed for ${target}: ${e.message}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch (e) {
+    new Notice(`applyCustomJsStartupScripts: ${target} malformed JSON (${e.message}); skipping for ${manifest.name}`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "customjs_startup_scripts",
+        name: manifest.name,
+        message: `${target} malformed JSON: ${e.message}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  if (!Array.isArray(data.startupScriptNames)) {
+    // customjs may have an empty/absent field on first-init; default to empty array.
+    data.startupScriptNames = [];
+  }
+
+  let appended = 0;
+  for (const entry of manifest.customjs_startup_scripts) {
+    if (typeof entry !== "string" || !entry.trim()) {
+      if (history) {
+        history.push({
+          event: "warning",
+          step: "customjs_startup_scripts",
+          name: manifest.name,
+          message: "invalid entry shape (expected non-empty string)",
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      continue;
+    }
+    const resolved = substituteLenient(entry, variables);
+    if (!resolved || !resolved.trim()) {
+      if (history) {
+        history.push({
+          event: "warning",
+          step: "customjs_startup_scripts",
+          name: manifest.name,
+          message: "empty entry after substitution",
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      continue;
+    }
+
+    if (data.startupScriptNames.includes(resolved)) {
+      if (history) {
+        history.push({
+          event: "info",
+          step: "customjs_startup_scripts",
+          name: manifest.name,
+          script: resolved,
+          action: "skipped_existing",
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      continue;
+    }
+
+    data.startupScriptNames.push(resolved);
+    appended++;
+    if (history) {
+      history.push({
+        event: "info",
+        step: "customjs_startup_scripts",
+        name: manifest.name,
+        script: resolved,
+        action: "applied",
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+  }
+
+  if (appended === 0) return;
+
+  try {
+    await adapter.write(`${target}.sauce-backup`, raw);
+  } catch (e) {
+    new Notice(`applyCustomJsStartupScripts: backup write failed (${e.message}); aborting modification for ${manifest.name}`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "customjs_startup_scripts",
+        name: manifest.name,
+        message: `backup write failed: ${e.message}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  try {
+    await adapter.write(target, JSON.stringify(data, null, 2));
+  } catch (e) {
+    new Notice(`applyCustomJsStartupScripts: write failed (${e.message}) for ${manifest.name}`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "customjs_startup_scripts",
         name: manifest.name,
         message: `write failed: ${e.message}`,
         git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
