@@ -120,7 +120,8 @@
             "body_template": "ranch/templates/Template, Project Board.md"
           },
           {
-            "filename_pattern": "wiki/Wiki.md",
+            "subfolder": "wiki",
+            "filename_pattern": "Wiki.md",
             "body_template": "ranch/templates/Template, Wiki Hub.md"
           }
         ],
@@ -279,7 +280,8 @@
           "body_template": "ranch/templates/Template, Project Board.md"
         },
         {
-          "filename_pattern": "wiki/Wiki.md",
+          "subfolder": "wiki",
+          "filename_pattern": "Wiki.md",
           "body_template": "ranch/templates/Template, Wiki Hub.md"
         }
       ],
