@@ -1,7 +1,7 @@
 {
   "name": "icons",
-  "version": "0.1.0",
-  "description": "Lucide kebab-name → SVG HTML resolver. Two-tier resolution: Tier 1 ~21 vendored SVGs (lifted verbatim from nav-buttons ICONS map + 6 entity-create kebabs); Tier 2 Obsidian setIcon() runtime fallback. Single API: customJS.Icons.resolve(name) → string|null. Consumed by entity-create (in render()) and nav-buttons (in render's iconHtml lookup). Replaces three pre-existing icon-resolution patterns: entity-create string-passthrough bug, AccentButton raw-SVG contract (unchanged), and nav-buttons hardcoded ICONS map.",
+  "version": "0.1.1",
+  "description": "Lucide kebab-name → SVG HTML resolver. Two-tier resolution: Tier 1 ~21 vendored SVGs (lifted verbatim from nav-buttons ICONS map + 6 entity-create kebabs); Tier 2 Obsidian setIcon() runtime fallback. Single API: customJS.Icons.resolve(name) → string|null. Consumed by entity-create (in render()) and nav-buttons (in render's iconHtml lookup). Replaces three pre-existing icon-resolution patterns: entity-create string-passthrough bug, AccentButton raw-SVG contract (unchanged), and nav-buttons hardcoded ICONS map. v0.1.1 PATCH (v0.48.0 S6): FLN-a — _tier1 captured to local once per resolve() call (was triple-call via getter); FLN-b — __cache renamed _cache for sauce single-underscore convention. Behavior-preserving.",
   "depends_on": [
     { "name": "customjs-guard", "range": ">=1.0.0" }
   ],
