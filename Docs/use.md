@@ -270,6 +270,7 @@ The **Sauce Pipeline** is an endless self-pacing loop that picks one card off th
 - Close the chat.
 - Pick `skip (end the loop)` at any round's Phase B pick prompt.
 - A blocked card or empty Planning column also halts the loop (no wake-up scheduled).
+- A non-empty In Progress column at Phase A start (carry-over from a prior round that didn't close cleanly) halts the loop — resume the carry-over card or move it back to Planning manually before restarting.
 
 ### What one round does
 
