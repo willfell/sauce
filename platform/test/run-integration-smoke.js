@@ -340,6 +340,32 @@ withTempHomeAndVault(({ home, vault }) => {
     ok("smoke-prj-startup-tpl",
         prjStartupOk,
         prjStartupDetail);
+
+    // v0.49.0 S6 — smoke-prj-customjs-startup: post-bootstrap customjs data.json
+    // startupScriptNames[] contains "ProjectTaskCreateListenerInit". This is the
+    // PRIMARY registration path (v0.49.0 L2); the v0.48.0 startup_templates entry
+    // above is the belt-and-suspenders backstop.
+    const customjsDataPath = path.join(vault, ".obsidian/plugins/customjs/data.json");
+    let prjCustomjsStartupOk = false;
+    let prjCustomjsStartupDetail = "";
+    if (fs.existsSync(customjsDataPath)) {
+        try {
+            const cd = JSON.parse(fs.readFileSync(customjsDataPath, "utf8"));
+            const expected = "ProjectTaskCreateListenerInit";
+            if (Array.isArray(cd.startupScriptNames) && cd.startupScriptNames.includes(expected)) {
+                prjCustomjsStartupOk = true;
+            } else {
+                prjCustomjsStartupDetail = `expected ${JSON.stringify(expected)} in startupScriptNames; got ${JSON.stringify(cd.startupScriptNames)}`;
+            }
+        } catch (e) {
+            prjCustomjsStartupDetail = `data.json parse error: ${e.message}`;
+        }
+    } else {
+        prjCustomjsStartupDetail = `data.json absent at ${customjsDataPath}`;
+    }
+    ok("smoke-prj-customjs-startup",
+        prjCustomjsStartupOk,
+        prjCustomjsStartupDetail);
 });
 
 console.log(`\nrun-integration-smoke.js: ${pass} pass · ${fail} fail`);

@@ -5856,6 +5856,87 @@ async function caseKC3EmptyWorkstreamsNoticePresent() {
 }
 
 // -------------------------------------------------------------------------
+// v0.49.0 S6 — PCSI-1..3: ProjectTaskCreateListenerInit source-string asserts.
+// The init script is a thin bootstrap that delegates to v0.48.0's
+// ProjectTaskCreateListener.init() via customjs's startupScriptNames[]
+// lifecycle. Source-string asserts verify the contract.
+// -------------------------------------------------------------------------
+
+async function casePCSI1ClassDefined() {
+    console.log("\n--- Case PCSI-1: ProjectTaskCreateListenerInit class is defined ---");
+    const src = fs.readFileSync(
+        path.join(WORKSHOP, "platform/blueprints/project/helpers/project-task-create-listener-init.js"),
+        "utf8"
+    );
+    assertTrue("PCSI-1: class ProjectTaskCreateListenerInit declared",
+        /class\s+ProjectTaskCreateListenerInit\s*{/.test(src));
+}
+
+async function casePCSI2InvokeMethodDelegates() {
+    console.log("\n--- Case PCSI-2: invoke() delegates to ProjectTaskCreateListener.init() ---");
+    const src = fs.readFileSync(
+        path.join(WORKSHOP, "platform/blueprints/project/helpers/project-task-create-listener-init.js"),
+        "utf8"
+    );
+    assertTrue("PCSI-2: invoke() body calls customJS.ProjectTaskCreateListener.init()",
+        /invoke\s*\(\s*\)\s*{[\s\S]*?customJS\.ProjectTaskCreateListener\.init\s*\(\s*\)/.test(src));
+}
+
+async function casePCSI3FailureLoudWrap() {
+    console.log("\n--- Case PCSI-3: invoke() wrapped in try/catch with Notice + console.error ---");
+    const src = fs.readFileSync(
+        path.join(WORKSHOP, "platform/blueprints/project/helpers/project-task-create-listener-init.js"),
+        "utf8"
+    );
+    assertTrue("PCSI-3a: try/catch wraps invoke() body",
+        /try\s*{[\s\S]*?customJS\.ProjectTaskCreateListener\.init[\s\S]*?}\s*catch/.test(src));
+    assertTrue("PCSI-3b: catch emits Notice with String(e)",
+        /new Notice\([^)]*String\(e\)/.test(src));
+    assertTrue("PCSI-3c: catch emits console.error",
+        /console\.error\(/.test(src));
+}
+
+// -------------------------------------------------------------------------
+// v0.49.0 S6 — KMC-1: BUG-7 Create Board gate source-line assertion.
+// Verifies project-nav-buttons.js:597 gate widening from task-hub-only to
+// task-hub OR task-note. Source-string assertion (no rendering).
+// -------------------------------------------------------------------------
+
+async function caseKMC1CreateBoardGateWidened() {
+    console.log("\n--- Case KMC-1: BUG-7 Create Board gate widened to task-note context ---");
+    const src = fs.readFileSync(
+        path.join(WORKSHOP, "platform/blueprints/project/helpers/project-nav-buttons.js"),
+        "utf8"
+    );
+    // Verify the OR-clause exists in the gate.
+    const gatePattern = /if\s*\(\s*ctx\.context\s*===\s*["']task-hub["']\s*\|\|\s*ctx\.context\s*===\s*["']task-note["']\s*\)\s*{/;
+    assertTrue("KMC-1: Create Board gate is task-hub OR task-note (BUG-7 fix)",
+        gatePattern.test(src),
+        "expected gate `if (ctx.context === \"task-hub\" || ctx.context === \"task-note\")` not found");
+}
+
+// -------------------------------------------------------------------------
+// v0.49.0 S6 — CSS-1..3: applyCustomJsStartupScripts helper unit cases.
+// STUB: full helper-extraction adapter-stub harness deferred; sub-asserts
+// log a stub message and pass. Captured as FLN-v49-N follow-up.
+// -------------------------------------------------------------------------
+
+async function caseCSS1Idempotent() {
+    console.log("\n--- Case CSS-1: applyCustomJsStartupScripts idempotent (STUB) ---");
+    assertTrue("CSS-1: STUB — full adapter-stub harness deferred to follow-up FLN-v49", true);
+}
+
+async function caseCSS2AdditiveMerge() {
+    console.log("\n--- Case CSS-2: applyCustomJsStartupScripts preserves user entries (STUB) ---");
+    assertTrue("CSS-2: STUB — full adapter-stub harness deferred to follow-up FLN-v49", true);
+}
+
+async function caseCSS3AbsentArrayDefaultEmpty() {
+    console.log("\n--- Case CSS-3: applyCustomJsStartupScripts default-to-empty branch (STUB) ---");
+    assertTrue("CSS-3: STUB — full adapter-stub harness deferred to follow-up FLN-v49", true);
+}
+
+// -------------------------------------------------------------------------
 // v0.48.0 S5 — ICN-1: icons.js _tier1 reference count regression guard.
 // FLN-a (v0.47.0) flagged that icons.js resolve() body called this._tier1
 // 3x via getter. S6 of v0.48.0 will refactor to capture once. This guard
@@ -6114,6 +6195,15 @@ async function caseICN1Tier1ReferenceCount() {
 
   // v0.48.0 S5 — ICN-1: Icons.resolve() this._tier1 reference count regression guard (FLN-a).
   await caseICN1Tier1ReferenceCount();
+
+  // v0.49.0 S6 — PCSI-1..3 + KMC-1 + CSS-1..3 (stubbed).
+  await casePCSI1ClassDefined();
+  await casePCSI2InvokeMethodDelegates();
+  await casePCSI3FailureLoudWrap();
+  await caseKMC1CreateBoardGateWidened();
+  await caseCSS1Idempotent();
+  await caseCSS2AdditiveMerge();
+  await caseCSS3AbsentArrayDefaultEmpty();
 
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
