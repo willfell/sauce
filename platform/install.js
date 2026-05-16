@@ -1534,7 +1534,10 @@ async function applyWikiBackfill(tp, manifest, variables, history, git) {
         const fmMatch = fileBody.match(/^---\n([\s\S]*?)\n---/);
         if (!fmMatch) continue;
         const fmBlock = fmMatch[1];
-        if (!/^type:\s*project\s*$/m.test(fmBlock)) continue;
+        // Tolerate quoted ("project" / 'project') and unquoted (project) YAML
+        // forms. Entity-create-emitted notes quote string scalars; pre-v0.50.0
+        // hand-authored project roots don't. BUG-C fix (v0.50.2).
+        if (!/^type:\s*["']?project["']?\s*$/m.test(fmBlock)) continue;
         const nameMatch = fmBlock.match(/^name:\s*(.+?)\s*$/m);
         projectName = nameMatch
           ? nameMatch[1].replace(/^["']|["']$/g, "")
