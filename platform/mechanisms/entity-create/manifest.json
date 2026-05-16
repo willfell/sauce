@@ -1,6 +1,6 @@
 {
   "name": "entity-create",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Declarative entity-creation buttons. Each consuming blueprint declares new_entity_buttons[] in its manifest; installer materializes either a nav_buttons action (kind: nav_buttons) or an injected AccentButton block into a target file (kind: hub). The EntityCreate CustomJS class executes prompts → frontmatter hydration → file create → open. Replaces 7 hand-authored New<X>Button classes across meetings/people/project/scratch/finance. v0.2.0 MINOR (v0.47.0): render() consumes customJS.Icons.resolve for kebab-name → SVG translation (fixes BUG-1 from headspace Phase 3); JSON-schema tightens body_template + extra_files[].body_template to basename-only (fixes BUG-3/4 path-resolution mismatch). v0.2.1 PATCH (v0.48.0 S7): FLN-c — plusIcon SVG 16x16 → 15x15 for size consistency with Tier 1 vendored icons in icons mechanism (all 21 Tier 1 SVGs are 15x15). Behavior-preserving 1px change in the fallback path (when Icons.resolve returns null).",
   "depends_on": [
     { "name": "customjs-guard", "range": ">=1.0.0" },

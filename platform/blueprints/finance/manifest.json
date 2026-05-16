@@ -1,6 +1,6 @@
 {
   "name": "finance",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "kind": "blueprint",
   "module_directory": "finance",
   "description": "Finance blueprint covering Budgets + Paychecks + Invoices under spice/finance/. Top hub Finance.md aggregates pending items from all three sub-areas. Budgets/Paychecks are flat dated entities; Invoices use a per-month folder ecosystem mirroring trips/<slug>/. Status pills (Planning/In Progress/Done) derived from frontmatter via shared FinanceStatus helper. v0.2.7 PATCH: 8 outline-accent button call sites migrated to customJS.AccentButton.render. v0.2.8 PATCH (in-cycle CF-1): InvoiceControls Save now also recomputes amount = round(rate * hours, 2) on save; Save's enabled state additionally considers amount drift (enabled when stored amount != rate * hours) so stale-amount entities can be re-synced without changing the rate. Misleading caveat note removed. v0.3.0 MINOR (v0.46.0 S8+S9+S10): three New*Button classes (NewBudgetButton/NewPaycheckButton/NewInvoiceButton) deleted; manifest declares new_entity_buttons[] entries for budget/paycheck/invoice via entity-create@0.1.0 mechanism — schema extensions exercised: month/number prompt types, validate gte/min predicates, |number substitution pipe, inline_body, extra_files[] (invoice scaffolds Time-Log + Board sidecars). Total ~500 LOC of overlay-dialog code retired.",

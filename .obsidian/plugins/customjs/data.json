@@ -1,7 +1,9 @@
 {
   "jsFiles": "",
   "jsFolder": "ranch/Scripts",
-  "startupScriptNames": [],
+  "startupScriptNames": [
+    "ProjectTaskCreateListenerInit"
+  ],
   "registeredInvocableScriptNames": [],
   "rerunStartupScriptsOnFileChange": false
 }

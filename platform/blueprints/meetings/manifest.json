@@ -1,6 +1,6 @@
 {
   "name": "meetings",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "kind": "blueprint",
   "module_directory": "meetings",
   "skills_dir": ".claude/skills/meetings",

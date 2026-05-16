@@ -594,7 +594,7 @@ class ProjectNavButtons {
                 flex: true
             });
 
-            if (ctx.context === "task-hub") {
+            if (ctx.context === "task-hub" || ctx.context === "task-note") {
                 const boardPath = `${projectDir}/tasks/${ctx.taskFolder}/board/${ctx.taskFolder}-board.md`;
                 const boardExists = !!app.vault.getAbstractFileByPath(boardPath);
                 const boardIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>`;

@@ -16,8 +16,8 @@ await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 
 ---
 
-<!-- entity-create:meeting -->
 ```dataviewjs
+// entity-create:meeting — installer-managed; do not delete this comment
 await customJS.EntityCreate.render(dv, { instance: "meeting" });
 ```
 
