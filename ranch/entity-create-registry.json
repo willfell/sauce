@@ -118,11 +118,48 @@
           {
             "filename_pattern": "{{prompts.slug}}-board.md",
             "body_template": "ranch/templates/Template, Project Board.md"
+          },
+          {
+            "filename_pattern": "wiki/Wiki.md",
+            "body_template": "ranch/templates/Template, Wiki Hub.md"
           }
         ],
         "render_in": {
           "kind": "hub",
           "target_path": "spice/projects/Projects.md"
+        }
+      },
+      {
+        "blueprint": "project",
+        "id": "wiki-note",
+        "label": "+ New Wiki Note",
+        "icon": "file-plus",
+        "prompts": [
+          {
+            "key": "title",
+            "label": "Wiki note title",
+            "type": "string",
+            "required": true,
+            "validate": "safe-filename"
+          }
+        ],
+        "destination": {
+          "folder_prefix": "spice/projects/{{current_file.frontmatter.project_slug}}/wiki",
+          "filename_prefix": "{{prompts.title|sanitize-filename}}"
+        },
+        "frontmatter_template": {
+          "type": "wiki-note",
+          "project": "[[{{current_file.frontmatter.project_name}}]]",
+          "project_slug": "{{current_file.frontmatter.project_slug}}",
+          "created": "{{now.YYYY-MM-DD HH:mm}}",
+          "tags": [
+            "wiki-note"
+          ]
+        },
+        "body_template": "ranch/templates/Template, Wiki Note.md",
+        "render_in": {
+          "kind": "hub",
+          "target_path": "ranch/templates/Template, Wiki Hub.md"
         }
       }
     ]
@@ -240,11 +277,48 @@
         {
           "filename_pattern": "{{prompts.slug}}-board.md",
           "body_template": "ranch/templates/Template, Project Board.md"
+        },
+        {
+          "filename_pattern": "wiki/Wiki.md",
+          "body_template": "ranch/templates/Template, Wiki Hub.md"
         }
       ],
       "render_in": {
         "kind": "hub",
         "target_path": "spice/projects/Projects.md"
+      }
+    },
+    {
+      "blueprint": "project",
+      "id": "wiki-note",
+      "label": "+ New Wiki Note",
+      "icon": "file-plus",
+      "prompts": [
+        {
+          "key": "title",
+          "label": "Wiki note title",
+          "type": "string",
+          "required": true,
+          "validate": "safe-filename"
+        }
+      ],
+      "destination": {
+        "folder_prefix": "spice/projects/{{current_file.frontmatter.project_slug}}/wiki",
+        "filename_prefix": "{{prompts.title|sanitize-filename}}"
+      },
+      "frontmatter_template": {
+        "type": "wiki-note",
+        "project": "[[{{current_file.frontmatter.project_name}}]]",
+        "project_slug": "{{current_file.frontmatter.project_slug}}",
+        "created": "{{now.YYYY-MM-DD HH:mm}}",
+        "tags": [
+          "wiki-note"
+        ]
+      },
+      "body_template": "ranch/templates/Template, Wiki Note.md",
+      "render_in": {
+        "kind": "hub",
+        "target_path": "ranch/templates/Template, Wiki Hub.md"
       }
     }
   ]
