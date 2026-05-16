@@ -1,19 +1,49 @@
 <%*
-// Source-board detection. When kanban-plugin invokes Templater's
-// create-new-note-from-template, Templater sets tp.config.active_file to the
-// file the user was viewing — i.e., the kanban board the user clicked
-// "+ Add a card" on. This is the most reliable source for deriving the
-// project dir, since tp.config.target_file is the NEW file (which may
-// land at vault root when Templater controls the folder, not under
-// spice/projects/<slug>/tasks/).
+// Source-board detection. The obsidian-kanban plugin's flow for
+// "+ Add a card" with new-note-template set:
+//   1. Create empty new file (at vault root or new-note-folder)
+//   2. Open the new file as the active leaf
+//   3. Call templaterPlugin.append_template_to_active_file(template)
+// By the time this template body runs, app.workspace.getActiveFile()
+// IS the new file, and tp.config.active_file ALSO points at the new
+// file (Templater's "active file" is whoever's active right now).
+// The kanban board's source identity is LOST in this flow.
 //
-// v0.49.1 fix: previously detectPath = targetPath || activePath, which
-// produced "nono.md" (vault root) for kanban-plugin-created files. The
-// new ordering prefers tp.config.active_file (the source board) so the
-// workstream picker + auto-promote work regardless of where Templater
-// initially placed the file.
+// v0.49.2 fix: detect source board by SCANNING THE VAULT for kanban-plugin
+// boards that just got a link to the new card's title. When kanban-plugin
+// adds a card, it appends [[<title>]] to the board's body — so we search
+// for the board file that contains [[<title>]] and was most recently
+// modified. This is robust to vault-root file placement, multiple open
+// boards, and kanban-plugin's internal flow.
+//
+// v0.49.1 (superseded) tried tp.config.active_file which is the NEW file
+// in this flow — symptom: card files landing at vault root with no
+// workstream picker.
+async function _findSourceKanbanBoard(title) {
+    if (!title) return "";
+    const candidates = [];
+    const files = app.vault.getMarkdownFiles();
+    for (const f of files) {
+        const cache = app.metadataCache.getFileCache(f);
+        const isKanban = cache?.frontmatter?.["kanban-plugin"] === "board"
+            || f.path.endsWith("-board.md");
+        if (!isKanban) continue;
+        try {
+            const body = await app.vault.read(f);
+            if (body.includes(`[[${title}]]`)) {
+                candidates.push({ path: f.path, mtime: f.stat?.mtime || 0 });
+            }
+        } catch (_) { /* ignore unreadable */ }
+    }
+    if (candidates.length === 0) return "";
+    candidates.sort((a, b) => b.mtime - a.mtime);
+    return candidates[0].path;
+}
 const targetPath = tp.config.target_file?.path || "";
-const activePath = tp.config.active_file?.path || app.workspace.getActiveFile()?.path || "";
+const activePath = await _findSourceKanbanBoard(tp.file.title)
+    || tp.config.active_file?.path
+    || app.workspace.getActiveFile()?.path
+    || "";
 const detectPath = activePath || targetPath;
 const sourceBoard = activePath || targetPath;
 
@@ -118,27 +148,27 @@ tags:
 <%*
 // Auto-promote into per-task folder convention.
 //
-// v0.49.1 fix: derive projectDir from the SOURCE BOARD path (via
-// tp.config.active_file) rather than from the NEW file path. When
-// kanban-plugin invokes Templater's create-new-note-from-template,
-// Templater may place the new file at vault root (default folder)
-// instead of inside the kanban board's `new-note-folder` setting.
-// Previously the auto-promote gated on `/tasks/` in the new file's
-// path, which failed for vault-root-placed files. The new logic
-// always moves the file to <projectDir>/tasks/<title>/<title>.md
-// when the source board is under spice/projects/<slug>/.
+// v0.49.2 fix: reuses the source-board path detected in the top block
+// via vault scan (`activePath` from above). When the source board is
+// under spice/projects/<slug>/, moves the new file (wherever Templater
+// placed it — typically vault root) to <projectDir>/tasks/<title>/<title>.md.
 //
-// Idempotent: skips if target already exists.
-const sourceBoardPath = tp.config.active_file?.path || app.workspace.getActiveFile()?.path || "";
-const sourceParts = sourceBoardPath.split("/");
+// v0.49.1 (superseded) used tp.config.active_file which is the NEW
+// file in the kanban-plugin → Templater flow — symptom: auto-promote
+// never fired, file stayed at vault root.
+//
+// Idempotent: skips if target already exists. If source board not
+// detected (e.g., card created from a non-project kanban board),
+// auto-promote silently skips.
+const sourceParts = activePath.split("/");
 const projectsIdx = sourceParts.indexOf("projects");
 if (projectsIdx >= 0 && projectsIdx + 1 < sourceParts.length) {
     const projectDir = sourceParts.slice(0, projectsIdx + 2).join("/");
     const fileName = tp.file.title;
-    const targetPath = `${projectDir}/tasks/${fileName}/${fileName}`;
-    const existing = app.vault.getAbstractFileByPath(targetPath + ".md");
+    const newTargetPath = `${projectDir}/tasks/${fileName}/${fileName}`;
+    const existing = app.vault.getAbstractFileByPath(newTargetPath + ".md");
     if (!existing) {
-        await tp.file.move(targetPath);
+        await tp.file.move(newTargetPath);
     }
 }
 -%>
