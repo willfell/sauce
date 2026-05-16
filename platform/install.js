@@ -984,6 +984,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   // render_in.target_path. nav_buttons-kind render_in is schema-reserved but
   // installer-rejected with a deferred warning for Cycle 1.
   await applyNewEntityButtons(tp, mech, variables, history, git);
+  await applyWikiBackfill(tp, mech, variables, history, git);          // NEW v0.50.0
   await applyExternalPlugins(tp, mech, history, git);
   await scaffoldFoundationalPluginData(tp, mech, workshopPath, variables, history, git);  // NEW v0.26.0
   await applyTemplaterHotkeys(tp, mech, variables, history, git);          // NEW v0.1.3
@@ -1403,6 +1404,211 @@ async function applyNavButtons(tp, manifest, variables, history, git) {
 
   registry.contributions[manifest.name] = validated;
   await adapter.write(registryPath, JSON.stringify(registry, null, 2));
+}
+
+// applyWikiBackfill — v0.50.0. Walks `spice/projects/*/` and creates
+// `wiki/Wiki.md` per pre-existing project that lacks one. Gated by
+// manifest.name === "project" so it only fires for the project blueprint's
+// per-blueprint pipeline. Idempotent: skips projects whose wiki/Wiki.md
+// already exists. Failure-loud per-project: catches per-entry exceptions,
+// logs warning to history, continues.
+//
+// Project-root heuristic: scans *.md files directly inside each project dir
+// (non-recursive — tasks/, board/, wiki/ stay in `folders`) and matches the
+// first one with `type: project` in its frontmatter block. project_slug =
+// dir basename; project_name = frontmatter `name:` value (fallback: filename
+// without .md extension).
+//
+// install.js cannot use Obsidian's parseYaml (per the top-of-file note);
+// frontmatter is matched via a narrow regex against the leading `---` block.
+async function applyWikiBackfill(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "project") return;
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+
+  const projectsRoot = "spice/projects";
+  if (!(await adapter.exists(projectsRoot))) {
+    if (history) {
+      history.push({
+        event: "info",
+        step: "wiki_backfill",
+        name: "project",
+        reason: `projects root ${projectsRoot} absent — nothing to backfill`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  let projectsList;
+  try {
+    projectsList = await adapter.list(projectsRoot);
+  } catch (e) {
+    if (history) {
+      history.push({
+        event: "warning",
+        step: "wiki_backfill",
+        name: "project",
+        reason: `list failed for ${projectsRoot}: ${e.message}`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  const projectDirs = (projectsList.folders || []).filter((d) => {
+    const base = d.split("/").pop();
+    return base !== "All Projects";
+  });
+
+  const templatePath = `${variables.templates_path}/Template, Wiki Hub.md`;
+  if (!(await adapter.exists(templatePath))) {
+    if (history) {
+      history.push({
+        event: "error",
+        step: "wiki_backfill",
+        name: "project",
+        reason: `template missing: ${templatePath}`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+  let templateBody;
+  try {
+    templateBody = await adapter.read(templatePath);
+  } catch (e) {
+    if (history) {
+      history.push({
+        event: "error",
+        step: "wiki_backfill",
+        name: "project",
+        reason: `template read failed: ${e.message}`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  let backfilledCount = 0;
+  let skippedCount = 0;
+  let warnCount = 0;
+
+  for (const projectDir of projectDirs) {
+    try {
+      const wikiPath = `${projectDir}/wiki/Wiki.md`;
+      if (await adapter.exists(wikiPath)) {
+        skippedCount += 1;
+        continue;
+      }
+
+      let dirListing;
+      try {
+        dirListing = await adapter.list(projectDir);
+      } catch (e) {
+        warnCount += 1;
+        continue;
+      }
+      const mdFiles = (dirListing.files || []).filter((f) => f.endsWith(".md"));
+
+      let projectName = null;
+      for (const mdFile of mdFiles) {
+        let fileBody;
+        try {
+          fileBody = await adapter.read(mdFile);
+        } catch (e) {
+          continue;
+        }
+        const fmMatch = fileBody.match(/^---\n([\s\S]*?)\n---/);
+        if (!fmMatch) continue;
+        const fmBlock = fmMatch[1];
+        if (!/^type:\s*project\s*$/m.test(fmBlock)) continue;
+        const nameMatch = fmBlock.match(/^name:\s*(.+?)\s*$/m);
+        projectName = nameMatch
+          ? nameMatch[1].replace(/^["']|["']$/g, "")
+          : mdFile.split("/").pop().replace(/\.md$/, "");
+        break;
+      }
+
+      if (!projectName) {
+        warnCount += 1;
+        if (history) {
+          history.push({
+            event: "warning",
+            step: "wiki_backfill",
+            name: "project",
+            reason: `no project root found in ${projectDir} — skipping`,
+            git_commit: git.commit,
+            git_tag: git.tag,
+            git_dirty: git.dirty,
+            attempted_at: new Date().toISOString(),
+          });
+        }
+        continue;
+      }
+
+      const projectSlug = projectDir.split("/").pop();
+      const now = new Date();
+      const yyyy = now.getFullYear();
+      const mm = String(now.getMonth() + 1).padStart(2, "0");
+      const dd = String(now.getDate()).padStart(2, "0");
+      const hh = String(now.getHours()).padStart(2, "0");
+      const mi = String(now.getMinutes()).padStart(2, "0");
+      const nowStr = `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
+
+      const substituted = templateBody
+        .replace(/\{\{prompts\.slug\}\}/g, projectSlug)
+        .replace(/\{\{prompts\.name\}\}/g, projectName)
+        .replace(/\{\{now\.YYYY-MM-DD HH:mm\}\}/g, nowStr);
+
+      const wikiDir = `${projectDir}/wiki`;
+      if (!(await adapter.exists(wikiDir))) {
+        await adapter.mkdir(wikiDir);
+      }
+
+      await adapter.write(wikiPath, substituted);
+      backfilledCount += 1;
+    } catch (e) {
+      warnCount += 1;
+      if (history) {
+        history.push({
+          event: "warning",
+          step: "wiki_backfill",
+          name: "project",
+          reason: `backfill failed for ${projectDir}: ${e && e.message ? e.message : String(e)}`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    }
+  }
+
+  if (history) {
+    history.push({
+      event: "info",
+      step: "wiki_backfill",
+      name: "project",
+      reason: `backfilled ${backfilledCount} project(s); skipped ${skippedCount} (already had Wiki.md); ${warnCount} warning(s)`,
+      git_commit: git.commit,
+      git_tag: git.tag,
+      git_dirty: git.dirty,
+      attempted_at: new Date().toISOString(),
+    });
+  }
 }
 
 // applyNewEntityButtons — v0.46.0 S2. Aggregates this item's
