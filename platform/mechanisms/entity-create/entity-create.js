@@ -595,6 +595,11 @@ class EntityCreate {
         const filename = this._substitute(xf.filename_pattern, ctx);
         const xPath = `${xFolder}/${filename}`;
         if (app.vault.getAbstractFileByPath(xPath)) return; // skip existing
+        // filename_pattern may itself embed a subfolder (e.g. "wiki/Wiki.md").
+        // app.vault.create requires the parent dir to exist; pre-create it.
+        const lastSlash = xPath.lastIndexOf("/");
+        const xParent = lastSlash > 0 ? xPath.substring(0, lastSlash) : "";
+        if (xParent && xParent !== xFolder) await this._ensureFolder(xParent);
         const fm = xf.frontmatter_template ? this._renderFrontmatter(xf.frontmatter_template, ctx) : "";
         const body = xf.body_template
             ? await this._readBody(xf.body_template, ctx)
