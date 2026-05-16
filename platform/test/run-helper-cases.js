@@ -6009,6 +6009,20 @@ async function casePWC4EmptyStateCallout() {
     /No wiki notes yet/.test(src));
 }
 
+// v0.50.1 BUG-A: customjs-guard dispatches via `render` method by default.
+// PWC-5 guards against regressions to `view` (which all sibling helpers like
+// ScratchHubCards / ProjectNotesCards / ProjectsHubCards use as `render`).
+async function casePWC5RenderMethodNotView() {
+  console.log("\n--- Case PWC-5: ProjectWikiCards uses render method (not view) ---");
+  const src = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/project/helpers/project-wiki-cards.js"),
+    "utf8"
+  );
+  assertTrue("PWC-5: declares async render (not view)",
+    /async\s+render\s*\(/.test(src) && !/async\s+view\s*\(/.test(src),
+    `source contains async render: ${/async\s+render\s*\(/.test(src)}; async view: ${/async\s+view\s*\(/.test(src)}`);
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -6254,6 +6268,8 @@ async function casePWC4EmptyStateCallout() {
   await casePWC2FiltersByType();
   await casePWC3SortsByCreatedDesc();
   await casePWC4EmptyStateCallout();
+  // v0.50.1 BUG-A: PWC-5 guards against view-method regression.
+  await casePWC5RenderMethodNotView();
 
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);

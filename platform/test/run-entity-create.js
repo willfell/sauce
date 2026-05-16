@@ -149,10 +149,10 @@ for (const [label, p] of mechFiles) {
 }
 ok("EC-1 entity-create mechanism dir + 4 files present", fs.existsSync(MECH_DIR) && allPresent);
 
-// 2. manifest parses, version is "0.3.0" (bumped in v0.49.0 S7 — sentinel format change MINOR)
+// 2. manifest parses, version is "0.3.1" (PATCH v0.50.1 BUG-B _readBody fallback)
 const manifest = JSON.parse(fs.readFileSync(path.join(MECH_DIR, "manifest.json"), "utf8"));
-ok("EC-2 entity-create manifest parses + version === 0.3.0",
-    manifest && manifest.name === "entity-create" && manifest.version === "0.3.0",
+ok("EC-2 entity-create manifest parses + version === 0.3.1",
+    manifest && manifest.name === "entity-create" && manifest.version === "0.3.1",
     `got name=${manifest && manifest.name} version=${manifest && manifest.version}`);
 
 // 3. json-schema parses + has 7 extension shapes
@@ -810,6 +810,29 @@ function seedVault(setup) {
         ok("WIKI-6 wiki-note entry resolves cleanly via resolveEntityCreateEntry",
             false, "resolveEntityCreateEntry or wiki-note entry not available");
     }
+}
+
+// -------------------------------------------------------------------------
+// v0.50.1 BUG-B: _readBody no longer gates on app.vault.getAbstractFileByPath.
+// Obsidian's metadata cache lags newly-materialized files in the same install
+// run (templates added at v0.50.0 weren't indexed by the time the user clicked
+// New Project, so getAbstractFileByPath returned null and Wiki.md ended up
+// empty). adapter.read hits the filesystem directly regardless of index state.
+// -------------------------------------------------------------------------
+{
+    const ecSrc = fs.readFileSync(
+        path.join(__dirname, "..", "mechanisms", "entity-create", "entity-create.js"), "utf8");
+    const readBodyMatch = ecSrc.match(/async _readBody\([\s\S]*?\n    \}/);
+    // Anti-pattern: a CALL to app.vault.getAbstractFileByPath(...). The comment
+    // documenting why the call was removed remains in the body (mentions the
+    // name), so the assertion checks for the actual call shape, not just the
+    // identifier substring.
+    ok("EC-RB-1 _readBody no longer CALLS app.vault.getAbstractFileByPath",
+        readBodyMatch && !/app\.vault\.getAbstractFileByPath\s*\(/.test(readBodyMatch[0]),
+        readBodyMatch ? `match: ${/app\.vault\.getAbstractFileByPath\s*\(/.test(readBodyMatch[0])}` : "_readBody not found");
+    ok("EC-RB-2 _readBody uses app.vault.adapter.read",
+        readBodyMatch && /app\.vault\.adapter\.read/.test(readBodyMatch[0]),
+        readBodyMatch ? `adapter.read present: ${/app\.vault\.adapter\.read/.test(readBodyMatch[0])}` : "_readBody not found");
 }
 
 // -------------------------------------------------------------------------

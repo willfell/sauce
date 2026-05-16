@@ -1,5 +1,5 @@
 class ProjectWikiCards {
-  async view(dv) {
+  async render(dv) {
     const currentFile = dv.current()?.file;
     if (!currentFile) return;
     const wikiFolder = currentFile.folder;

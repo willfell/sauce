@@ -41,6 +41,47 @@
             ]
           }
         ]
+      },
+      {
+        "scope": {
+          "path_glob": "spice/projects/*/wiki/*.md",
+          "exclude_basenames": [
+            "Wiki.md"
+          ]
+        },
+        "frontmatter_branch": [
+          {
+            "when": {
+              "frontmatter": {
+                "type": "wiki-note"
+              }
+            },
+            "required_frontmatter": {
+              "type": {
+                "required": true,
+                "type": "string",
+                "matches": "^wiki-note$"
+              },
+              "project": {
+                "required": true,
+                "type": "string"
+              },
+              "project_slug": {
+                "required": true,
+                "type": "string"
+              },
+              "created": {
+                "required": true,
+                "type": "string"
+              }
+            },
+            "required_tags": [
+              {
+                "tag": "wiki-note"
+              }
+            ]
+          }
+        ]
       }
     ]
   }

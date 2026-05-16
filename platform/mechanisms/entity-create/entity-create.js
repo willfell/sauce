@@ -574,9 +574,11 @@ class EntityCreate {
             const subbed = this._substitute(relPath, ctx);
             // relPath is expected to be a vault-relative path (the installer
             // substitutes {{templates_path}} at install time so this arrives
-            // pre-resolved). Read and substitute the body content.
-            const file = app.vault.getAbstractFileByPath(subbed);
-            if (!file) return "";
+            // pre-resolved). Read via adapter directly — getAbstractFileByPath
+            // gates on Obsidian's vault index, which lags newly-materialized
+            // files (e.g. templates added in the same install run before user
+            // click). adapter.read hits the filesystem regardless of index
+            // state and throws on truly-missing files (caught below).
             const raw = await app.vault.adapter.read(subbed);
             return this._substitute(raw, ctx);
         } catch (_e) {
