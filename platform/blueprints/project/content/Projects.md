@@ -8,7 +8,10 @@ tags:
 await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 ```
 
-<!-- entity-create:project -->
+```dataviewjs
+// entity-create:project — installer-managed; do not delete this comment
+await customJS.EntityCreate.render(dv, { instance: "project" });
+```
 
 ---
 

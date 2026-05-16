@@ -239,7 +239,7 @@ withTempHomeAndVault(({ home, vault }) => {
     //
     // Map entry.id -> expected materialized hub path. These mirror the
     // blueprint manifest files[] dest entries for the hub files that host
-    // each entry's <!-- entity-create:<id> --> marker.
+    // each entry's // entity-create:<id> inside-block JS comment sentinel (v0.49.0+).
     const ecHubPaths = {
         meeting:  "ranch/templates/Meeting Hub.md",
         person:   "spice/people/People.md",
@@ -259,7 +259,7 @@ withTempHomeAndVault(({ home, vault }) => {
         if (!fs.existsSync(tp)) { allMarkersPresent = false; missingMarker = `${e.id}: hub file missing at ${rel}`; break; }
         const body = fs.readFileSync(tp, "utf8");
         const escId = e.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        const markerCount = (body.match(new RegExp(`<!-- entity-create:${escId} -->`, "g")) || []).length;
+        const markerCount = (body.match(new RegExp("```dataviewjs[\\s\\S]*?// entity-create:" + escId + "[\\s\\S]*?\\n```", "g")) || []).length;
         if (markerCount !== 1) {
             allMarkersPresent = false;
             missingMarker = `${e.id}: marker count=${markerCount} in ${rel}`;
@@ -284,7 +284,7 @@ withTempHomeAndVault(({ home, vault }) => {
             if (!fs.existsSync(tp)) continue;
             const body = fs.readFileSync(tp, "utf8");
             const escId = e.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-            const markerCount = (body.match(new RegExp(`<!-- entity-create:${escId} -->`, "g")) || []).length;
+            const markerCount = (body.match(new RegExp("```dataviewjs[\\s\\S]*?// entity-create:" + escId + "[\\s\\S]*?\\n```", "g")) || []).length;
             if (markerCount !== 1) { idempotent = false; dupTarget = `${e.id}: marker count=${markerCount} in ${rel} after 2nd install`; break; }
         }
     } else {
