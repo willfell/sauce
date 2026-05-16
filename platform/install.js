@@ -1786,32 +1786,64 @@ function resolveEntityCreateEntry(entry, variables, sourceName, history, git) {
   return resolved;
 }
 
-// injectAccentButtonBlock — idempotent block-injection for render_in.kind === "hub".
-// Anchors on the marker `<!-- entity-create:<id> -->`:
-//   - If the marker is present in the file body: replace the marker AND the
-//     immediately-following fenced code block (allowing optional blank lines
-//     between marker and fence) with a fresh canonical block. The fence is
-//     matched lazily so the closing ``` of the FIRST fenced block after the
-//     marker terminates the replacement region — any user content beyond the
-//     closing fence is preserved bit-for-bit.
-//   - If the marker is present but no fenced block follows: replace just the
-//     marker line with the canonical block.
-//   - If the marker is absent: APPEND marker + canonical block at the bottom
-//     of the body (separated by a blank line if the body is non-empty).
-// targetPath is lenient-substituted by the caller, so this function receives a
-// vault-relative path ready for adapter read/write. The function never throws —
-// missing target file, read failures, and write failures all push an error
-// history entry and return.
+// injectAccentButtonBlock — VERIFY-ONLY since v0.49.0.
+//
+// v0.49.0 architectural change (Choice A from v0.49.0 design): hub source files
+// own the AccentButton dataviewjs block (each blueprint's content/<Hub>.md
+// hand-authors the block with the inside-block JS comment sentinel as its
+// first content line). The installer's role is reduced to verifying that the
+// expected block exists at the target path; it never edits the file.
+//
+// Sentinel format change vs v0.46.0+:
+//   OLD (outside-block HTML comment):  <!-- entity-create:<id> -->
+//   NEW (inside-block JS comment):    // entity-create:<id>
+//
+// Why the change: the outside-block HTML comment was visible in source/edit
+// mode of the hub file (HTML comments render in Obsidian's source view). The
+// inside-block JS comment is invisible in BOTH source AND reading modes
+// (JS comments inside dataviewjs fences are part of the script body, not
+// surfaced as document content). Surfaced as BUG-8 during v0.48.0 S10 manual
+// smoke at headspace.
+//
+// Behavior:
+//   - target file absent → warning + history entry; return.
+//   - target file read failure → error + history entry; return.
+//   - sentinel found inside any dataviewjs fence → success (info history entry,
+//     action: "verified_present"); return.
+//   - sentinel NOT found → warning + history entry, action:
+//     "missing_skip_inject". The hub source file is missing the block; manifest/
+//     source mismatch needing hand-fix.
+//
+// Function never throws; never edits the file. Idempotent by construction.
 async function injectAccentButtonBlock(tp, targetPath, instanceId, sourceName, history, git) {
   const adapter = tp.app.vault.adapter;
+  const pushWarn = (msg, action) => {
+    new Notice(`injectAccentButtonBlock: ${msg}`, 8000);
+    if (history) {
+      history.push({
+        event: "warning",
+        step: "entity_create_block_missing",
+        name: sourceName,
+        target: targetPath,
+        instance: instanceId,
+        message: msg,
+        action,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+  };
   const pushErr = (msg) => {
     new Notice(`injectAccentButtonBlock: ${msg}`, 8000);
     if (history) {
       history.push({
         event: "error",
-        step: "new_entity_buttons.inject",
+        step: "entity_create_block_missing",
         name: sourceName,
         target: targetPath,
+        instance: instanceId,
         message: msg,
         git_commit: git.commit,
         git_tag: git.tag,
@@ -1825,7 +1857,10 @@ async function injectAccentButtonBlock(tp, targetPath, instanceId, sourceName, h
     return pushErr(`target_path missing for entry ${instanceId} (${sourceName})`);
   }
   if (!(await adapter.exists(targetPath))) {
-    return pushErr(`target_path ${targetPath} does not exist (entry ${instanceId} in ${sourceName})`);
+    return pushWarn(
+      `target_path ${targetPath} does not exist (entry ${instanceId} in ${sourceName})`,
+      "target_absent"
+    );
   }
 
   let body;
@@ -1835,69 +1870,42 @@ async function injectAccentButtonBlock(tp, targetPath, instanceId, sourceName, h
     return pushErr(`read failed for ${targetPath}: ${e.message}`);
   }
 
-  const escId = instanceId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const marker = `<!-- entity-create:${instanceId} -->`;
-  const canonical =
-    `<!-- entity-create:${instanceId} -->\n` +
-    "```dataviewjs\n" +
-    `await customJS.EntityCreate.render(dv, { instance: "${instanceId}" });\n` +
-    "```";
-
-  // Greedy-anchor the marker; then a lazy match for an optional immediately-
-  // following fenced code block (any language tag, not just dataviewjs — a
-  // user could have edited it). The lazy `[\s\S]*?` stops at the FIRST
-  // newline-bounded ``` close fence.
-  const markerWithBlockRe = new RegExp(
-    "<!-- entity-create:" + escId + " -->[ \\t]*\\r?\\n" +
-    "(?:[ \\t]*\\r?\\n)*" +     // optional blank lines between marker and fence
-    "```[a-zA-Z0-9_-]*[ \\t]*\\r?\\n" +
+  const sentinel = `// entity-create:${instanceId}`;
+  const escSentinel = sentinel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // Match any dataviewjs fence containing the sentinel comment as one of its
+  // body lines. The sentinel must be on its own logical line within the fence.
+  const blockRegex = new RegExp(
+    "```dataviewjs[ \\t]*\\r?\\n" +
     "[\\s\\S]*?" +
-    "\\n```",                   // closing fence on its own line
-    ""
-  );
-  const markerOnlyRe = new RegExp(
-    "<!-- entity-create:" + escId + " -->[ \\t]*",
+    escSentinel +
+    "[\\s\\S]*?" +
+    "\\n```",
     ""
   );
 
-  let next;
-  if (markerWithBlockRe.test(body)) {
-    next = body.replace(markerWithBlockRe, canonical);
-  } else if (markerOnlyRe.test(body)) {
-    next = body.replace(markerOnlyRe, canonical);
-  } else {
-    // Marker absent → append at bottom. Trim trailing whitespace then add a
-    // blank-line separator if body is non-empty. Trailing newline preserved
-    // so the file ends cleanly.
-    const trimmed = body.replace(/[\s\r\n]*$/, "");
-    const sep = trimmed.length > 0 ? "\n\n" : "";
-    next = trimmed + sep + canonical + "\n";
-  }
-
-  if (next === body) {
-    // Already canonical — nothing to write. Idempotency fast-path.
+  if (blockRegex.test(body)) {
+    if (history) {
+      history.push({
+        event: "info",
+        step: "entity_create_block_verified",
+        name: sourceName,
+        target: targetPath,
+        instance: instanceId,
+        sentinel,
+        action: "verified_present",
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
     return;
   }
 
-  try {
-    await adapter.write(targetPath, next);
-  } catch (e) {
-    return pushErr(`write failed for ${targetPath}: ${e.message}`);
-  }
-  if (history) {
-    history.push({
-      event: "materialize",
-      step: "new_entity_buttons.inject",
-      name: sourceName,
-      source: sourceName,
-      target: targetPath,
-      instance: instanceId,
-      git_commit: git.commit,
-      git_tag: git.tag,
-      git_dirty: git.dirty,
-      attempted_at: new Date().toISOString(),
-    });
-  }
+  pushWarn(
+    `entity-create block missing in ${targetPath}: expected sentinel "${sentinel}" inside a dataviewjs fence (entry ${instanceId} in ${sourceName})`,
+    "missing_skip_inject"
+  );
 }
 
 // validateAndResolve — per-entry validation. Returns null for malformed entries
