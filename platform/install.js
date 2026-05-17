@@ -385,6 +385,14 @@ module.exports = async function (tp) {
         let itemVars = variables;
         if (node.target.kind === "blueprint") {
           itemVars = { ...variables, module_directory: `spice/${itemMan.module_directory}` };
+          // v0.53.0 (FA-1): Layer 2 canonical-vocab opt-in/out gate. Warns
+          // (no install fail) when a blueprint neither opts into
+          // `_canonical-vocab` via rule_fragments[*].fragment.extends nor
+          // declares canonical_vocab_opt_out: { reason: "..." }. Forward
+          // defense — at v0.53.0 no blueprint opts in, so this surfaces a
+          // warning row per blueprint in install history. Promoted to a hard
+          // fail in a post-FA-7 cycle once all consumer vaults are migrated.
+          _validateCanonicalVocab(itemMan, installedNow.history, git);
         }
         // v0.32.0 S1.2 — overlay skills_dir for ANY item (blueprint or
         // mechanism) that declares a non-empty skills_dir field. Generalized
@@ -2040,6 +2048,48 @@ async function applyNewEntityButtons(tp, manifest, variables, history, git) {
 // loud notice + history error.
 //
 // Returns true on pass; pushes a history error + returns false on violation.
+// v0.53.0 (FA-1) Layer 2 canonical-vocab opt-in/out gate.
+// Every blueprint manifest is expected to either:
+//   (a) opt into the canonical vocab by declaring at least one rule_fragment
+//       with `extends: "_canonical-vocab"` on its inner fragment shape; OR
+//   (b) explicitly declare why it doesn't via a top-level
+//       `canonical_vocab_opt_out: { reason: "<one-line explanation>" }`.
+//
+// At v0.53.0 no blueprint opts in (FA-2..FA-7 do that per-blueprint). The
+// function emits a warning row into install history but does NOT fail the
+// install. A post-FA-7 cycle promotes the warning to a hard fail once all
+// consumer vaults are confirmed migrated.
+//
+// Always returns true — caller must NOT gate install on this value. The
+// return is kept for symmetry with _validateTypeFieldConvention's signature.
+function _validateCanonicalVocab(manifest, history, git) {
+  if (!manifest || typeof manifest !== "object") return true;
+  const fragments = Array.isArray(manifest.rule_fragments) ? manifest.rule_fragments : [];
+  const optIn = fragments.some(fr => {
+    const frag = fr && (fr.fragment || fr);
+    return frag && typeof frag.extends === "string" && frag.extends === "_canonical-vocab";
+  });
+  const optOut = manifest.canonical_vocab_opt_out
+    && typeof manifest.canonical_vocab_opt_out === "object"
+    && typeof manifest.canonical_vocab_opt_out.reason === "string"
+    && manifest.canonical_vocab_opt_out.reason.length > 0;
+  if (optIn || optOut) return true;
+  if (history) {
+    history.push({
+      event: "warning",
+      step: "canonical_vocab",
+      rule: "canonical_vocab_opt_in_required",
+      name: manifest.name,
+      message: `blueprint ${manifest.name} neither opts into _canonical-vocab via rule_fragments[*].fragment.extends="_canonical-vocab" nor declares canonical_vocab_opt_out:{reason:"..."}; expected before FA-2..FA-7 deployment.`,
+      git_commit: git && git.commit,
+      git_tag: git && git.tag,
+      git_dirty: git && git.dirty,
+      attempted_at: new Date().toISOString(),
+    });
+  }
+  return true;
+}
+
 function _validateTypeFieldConvention(manifest, history, git) {
   const fragments = Array.isArray(manifest && manifest.rule_fragments) ? manifest.rule_fragments : [];
   const buttons = Array.isArray(manifest && manifest.new_entity_buttons) ? manifest.new_entity_buttons : [];
