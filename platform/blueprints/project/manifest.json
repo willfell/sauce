@@ -1,6 +1,6 @@
 {
   "name": "project",
-  "version": "1.11.1",
+  "version": "1.12.0",
   "kind": "blueprint",
   "module_directory": "projects",
   "skills_dir": ".claude/skills/project",
