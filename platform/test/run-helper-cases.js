@@ -4067,7 +4067,7 @@ async function caseSHCS1ManifestFields() {
   assertTrue("SHC-S1: scratch/manifest.json exists on disk", fs.existsSync(p));
   const m = _readJson(p);
   assertEqual(m.name, "scratch", "SHC-S1: manifest.name === \"scratch\"");
-  assertEqual(m.version, "0.3.1", "SHC-S1: manifest.version === \"0.3.1\"");
+  assertEqual(m.version, "0.4.0", "SHC-S1: manifest.version === \"0.4.0\"");
   assertEqual(m.module_directory, "scratch", "SHC-S1: manifest.module_directory === \"scratch\"");
 }
 
@@ -6326,6 +6326,53 @@ async function caseFA3TaskBoardCardRegexFix() {
     !/\^beacon\\\/projects/.test(body));
 }
 
+// ============================================================
+// v0.56.0 FA-4 — Timeline wave canonical vocab asserts
+// ============================================================
+
+async function caseFA4TimelineManifests() {
+  console.log("\n--- Case FA4-MANIFESTS: 3 timeline blueprints bumped ---");
+  for (const [bp, expected] of [["daily", "0.4.0"], ["journal", "0.2.0"], ["scratch", "0.4.0"]]) {
+    const m = JSON.parse(fs.readFileSync(
+      path.join(WORKSHOP, `platform/blueprints/${bp}/manifest.json`), "utf8"));
+    assertTrue(`FA4-MANIFEST-${bp}: version ${expected}`, m.version === expected,
+      `got: ${m.version}`);
+  }
+}
+
+async function caseFA4TimelineTemplates() {
+  console.log("\n--- Case FA4-TEMPLATES: timeline templates use canonical created_at ---");
+  const checks = [
+    ["daily/content/daily-template.md", "daily"],
+    ["journal/templates/Today Journal.md", "journal"],
+    ["scratch/templates/Scratch.md", "scratch"],
+    ["scratch/templates/Scratch Day Hub.md", "scratch-day"],
+  ];
+  for (const [rel, expectedType] of checks) {
+    const body = fs.readFileSync(
+      path.join(WORKSHOP, "platform/blueprints", rel), "utf8");
+    assertTrue(`FA4-TPL-${rel} declares created_at`,
+      /^created_at:/m.test(body) && !/^created:\s/m.test(body),
+      `template ${rel} fm header:\n${body.slice(0, 300)}`);
+    assertTrue(`FA4-TPL-${rel} declares type: ${expectedType}`,
+      new RegExp(`^type:\\s*${expectedType}\\b`, "m").test(body),
+      `template ${rel} fm header:\n${body.slice(0, 300)}`);
+  }
+}
+
+async function caseFA4TimelineRuleFragmentsExtends() {
+  console.log("\n--- Case FA4-EXTENDS: timeline rule_fragments declare extends ---");
+  for (const bp of ["daily", "journal", "scratch"]) {
+    const m = JSON.parse(fs.readFileSync(
+      path.join(WORKSHOP, `platform/blueprints/${bp}/manifest.json`), "utf8"));
+    const allExtend = m.rule_fragments.every(rf =>
+      rf.fragment && rf.fragment.extends === "_canonical-vocab");
+    assertTrue(`FA4-EXTENDS-${bp}: all rule_fragments declare extends`,
+      allExtend && m.rule_fragments.length >= 1,
+      `${bp}: ${JSON.stringify(m.rule_fragments.map(r => r.fragment.extends))}`);
+  }
+}
+
 async function caseFA3RuleFragmentsExtends() {
   console.log("\n--- Case FA3-EXTENDS: 3 project rule_fragments declare extends ---");
   const m = JSON.parse(fs.readFileSync(
@@ -6638,6 +6685,11 @@ async function caseFA2RuleFragmentsExtends() {
   await caseFA3ProjectTemplates();
   await caseFA3TaskBoardCardRegexFix();
   await caseFA3RuleFragmentsExtends();
+
+  // v0.56.0 FA-4 — timeline wave canonical vocab (daily + journal + scratch)
+  await caseFA4TimelineManifests();
+  await caseFA4TimelineTemplates();
+  await caseFA4TimelineRuleFragmentsExtends();
 
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
