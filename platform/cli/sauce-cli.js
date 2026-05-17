@@ -20,6 +20,7 @@ const VERBS = {
     link:      "./cmd-link.js",
     unlink:    "./cmd-unlink.js",
     seed:      "./cmd-seed.js",
+    "migrate-frontmatter": "./cmd-migrate-frontmatter.js",
     help:      "./cmd-help.js"
 };
 
@@ -158,8 +159,16 @@ async function dispatch(argv, opts) {
         await cmd.run(testCtx, rest);
         return;
     }
+    if (verb === "migrate-frontmatter") {
+        const cmd = require(VERBS["migrate-frontmatter"]);
+        // Context-free: operates against an explicit --vault path (or single
+        // registered vault). Forward test hooks via the opts arg to dispatch().
+        const testCtx = opts || {};
+        await cmd.run(testCtx, rest);
+        return;
+    }
     if (!VERBS[verb]) {
-        throw new Error(`unknown verb: ${verb}\nUsage: sauce <bootstrap|update|status|wizard|migrate|migrate-layout|audit|vault|reinstall|doctor|link|unlink|seed|help>`);
+        throw new Error(`unknown verb: ${verb}\nUsage: sauce <bootstrap|update|status|wizard|migrate|migrate-layout|migrate-frontmatter|audit|vault|reinstall|doctor|link|unlink|seed|help>`);
     }
     let ctx;
     if (verb === "bootstrap") {
@@ -187,7 +196,7 @@ async function dispatch(argv, opts) {
 }
 
 function printUsage() {
-    console.log("Usage: sauce <verb> [args]\n\nVerbs:\n  bootstrap        First-run install (rare; called by install.sh)\n  update           Pull latest workshop + reinstall\n  status           Show vault + workshop state\n  wizard           Interactive subscription / config editor\n  migrate          Migrate a source vault into this sauce vault (v0.28.0+)\n  migrate-layout   Move legacy <vault>/pantry/ → brew-installed layout (v0.36.0+)\n  audit            Audit a vault for blueprint conformance + untracked dirs (v0.29.0+)\n  vault            Manage the per-machine vault registry (add|list|remove)\n  reinstall        Re-run installer against --all registered vaults or --vault <p>\n  doctor           Read-only platform health check (v0.36.0+)\n  link             Point ~/.sauce/active-pantry at a dev checkout (v0.36.0+)\n  unlink           Remove ~/.sauce/active-pantry symlink (v0.36.0+)\n  seed             Materialize per-blueprint seed contributions into a vault (v0.38.0+)\n");
+    console.log("Usage: sauce <verb> [args]\n\nVerbs:\n  bootstrap            First-run install (rare; called by install.sh)\n  update               Pull latest workshop + reinstall\n  status               Show vault + workshop state\n  wizard               Interactive subscription / config editor\n  migrate              Migrate a source vault into this sauce vault (v0.28.0+)\n  migrate-layout       Move legacy <vault>/pantry/ → brew-installed layout (v0.36.0+)\n  migrate-frontmatter  Apply canonical frontmatter vocab migration (v0.53.0+)\n  audit                Audit a vault for blueprint conformance + untracked dirs (v0.29.0+)\n  vault                Manage the per-machine vault registry (add|list|remove)\n  reinstall            Re-run installer against --all registered vaults or --vault <p>\n  doctor               Read-only platform health check (v0.36.0+)\n  link                 Point ~/.sauce/active-pantry at a dev checkout (v0.36.0+)\n  unlink               Remove ~/.sauce/active-pantry symlink (v0.36.0+)\n  seed                 Materialize per-blueprint seed contributions into a vault (v0.38.0+)\n");
 }
 
 if (require.main === module) {
