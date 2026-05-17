@@ -6,10 +6,7 @@ rate: 0
 hours: 0
 amount: 0
 submitted_date:
-created: <% tp.date.now("YYYY-MM-DD") %>
-tags:
-  - finance
-  - invoice
+created_at: "<% tp.file.creation_date("YYYY-MM-DDTHH:mm:ssZ") %>"
 cssclasses:
   - wide
 ---

@@ -1,8 +1,8 @@
 ---
 type: budgets-hub
+created_at: "2026-05-17T16:45:00-06:00"
 tags:
-  - finance
-  - budget
+  - finance-hub
 cssclasses:
   - wide
 ---

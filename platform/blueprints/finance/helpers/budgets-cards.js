@@ -21,7 +21,7 @@ class BudgetsCards {
         await customJS.BeaconCards.render(dv, {
             pages: filtered,
             layout: "row",
-            title: p => `Budget — ${customJS.FinanceStatus.formatDate(p.budget_month, "YYYY-MM") || p.file.name}`,
+            title: p => `Budget — ${customJS.FinanceStatus.formatDate((p.month || p.budget_month), "YYYY-MM") || p.file.name}`,
             subtitle: p => {
                 const cats = Array.isArray(p.categories) ? p.categories : [];
                 const planned = cats.reduce((s, c) => s + Number(c.planned || 0), 0);

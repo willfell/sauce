@@ -39,7 +39,7 @@ class FinanceStatus {
     derive(page, type) {
         const today = window.moment().startOf("day");
         if (type === "budget") {
-            const m = this._toMoment(page.budget_month);
+            const m = this._toMoment(page.month || page.budget_month);
             if (!m || !m.isValid()) return { label: "Planning", tone: "muted" };
             if (m.isBefore(today, "month")) return { label: "Done", tone: "success" };
             if (m.isSame(today, "month"))   return { label: "In Progress", tone: "warn" };

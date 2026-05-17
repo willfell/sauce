@@ -4,10 +4,7 @@ month: <% tp.date.now("YYYY-MM") %>
 date: <% tp.date.now("YYYY-MM") %>-01
 total_hours: 0
 entries: []
-created: <% tp.date.now("YYYY-MM-DD") %>
-tags:
-  - finance
-  - time-log
+created_at: "<% tp.file.creation_date("YYYY-MM-DDTHH:mm:ssZ") %>"
 cssclasses:
   - wide
 ---

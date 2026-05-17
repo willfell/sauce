@@ -6547,6 +6547,83 @@ async function caseFA6DomainRuleFragments() {
     boards.rule_fragments[0].fragment.scope.path_glob === "spice/boards/cards/**/*.md");
 }
 
+// ============================================================
+// v0.59.0 FA-7 — Finance canonical vocab adoption
+// ============================================================
+
+async function caseFA7FinanceManifest() {
+  console.log("\n--- Case FA7-MANIFEST: finance bumped to 0.4.0 ---");
+  const m = JSON.parse(fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
+  assertTrue("FA7-MANIFEST-1: finance@0.4.0", m.version === "0.4.0",
+    `got: ${m.version}`);
+}
+
+async function caseFA7FinanceTemplates() {
+  console.log("\n--- Case FA7-TEMPLATES: finance templates use canonical created_at ---");
+  const checks = [
+    ["finance/templates/Budget Template.md", "budget"],
+    ["finance/templates/Paycheck Template.md", "paycheck"],
+    ["finance/templates/Invoice Template.md", "invoice"],
+    ["finance/templates/Time Log Template.md", "time-log"],
+    ["finance/templates/Invoice Board Card.md", "invoice-board-card"],
+  ];
+  for (const [rel, expectedType] of checks) {
+    const body = fs.readFileSync(
+      path.join(WORKSHOP, "platform/blueprints", rel), "utf8");
+    assertTrue(`FA7-TPL-${rel} declares created_at`,
+      /^created_at:/m.test(body) && !/^created:\s/m.test(body),
+      `template ${rel} fm header:\n${body.slice(0, 300)}`);
+    assertTrue(`FA7-TPL-${rel} declares type: ${expectedType}`,
+      new RegExp(`^type:\\s*${expectedType}\\b`, "m").test(body),
+      `template ${rel} fm header:\n${body.slice(0, 300)}`);
+  }
+  // Budget template: budget_month → month canonical alignment (with cowork)
+  const budget = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/finance/templates/Budget Template.md"), "utf8");
+  assertTrue("FA7-TPL-BUDGET-month: Budget Template emits canonical month: (was budget_month:)",
+    /^month:/m.test(budget) && !/^budget_month:/m.test(budget),
+    `budget fm:\n${budget.slice(0, 300)}`);
+}
+
+async function caseFA7FinanceEntityCreate() {
+  console.log("\n--- Case FA7-ENTITY: entity-create entries emit canonical created_at ---");
+  const m = JSON.parse(fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
+  const entries = m.new_entity_buttons || [];
+  assertTrue("FA7-ENTITY-count: 3 entity-create entries",
+    entries.length === 3);
+  for (const e of entries) {
+    const ft = e.frontmatter_template || {};
+    assertTrue(`FA7-ENTITY-${e.id}-created_at: emits canonical created_at`,
+      typeof ft.created_at === "string" && /\{\{now\.YYYY-MM-DDTHH:mm:ssZ\}\}/.test(ft.created_at),
+      `frontmatter_template: ${JSON.stringify(ft)}`);
+    assertTrue(`FA7-ENTITY-${e.id}-drops-created: drops legacy created:`,
+      !ft.hasOwnProperty("created"));
+  }
+  // Budget canonical month: alignment (was budget_month)
+  const budget = entries.find(e => e.id === "budget");
+  assertTrue("FA7-ENTITY-budget-month: budget emits canonical month: (was budget_month)",
+    "month" in budget.frontmatter_template && !("budget_month" in budget.frontmatter_template));
+}
+
+async function caseFA7FinanceRuleFragments() {
+  console.log("\n--- Case FA7-EXTENDS: NEW finance rule_fragments extend canonical-vocab ---");
+  const m = JSON.parse(fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
+  const frags = m.rule_fragments || [];
+  assertTrue("FA7-EXTENDS-count: 4 rule_fragments",
+    frags.length === 4, `got: ${frags.length}`);
+  assertTrue("FA7-EXTENDS-all: all rule_fragments declare extends",
+    frags.every(rf => rf.fragment.extends === "_canonical-vocab"));
+  // Verify per-sub-flow scopes
+  const scopes = frags.map(rf => rf.fragment.scope.path_glob);
+  for (const s of ["spice/finance/budgets/**/*.md", "spice/finance/paychecks/**/*.md", "spice/finance/invoices/*/Invoice-*.md", "spice/finance/invoices/*/Time-Log-*.md"]) {
+    assertTrue(`FA7-EXTENDS-scope-${s.split('/').pop()}: ${s} fragment present`,
+      scopes.includes(s));
+  }
+}
+
 async function caseFA2RuleFragmentsExtends() {
   console.log("\n--- Case FA2-EXTENDS: all 4 blueprints' rule_fragments declare extends ---");
   const blueprints = ["meetings", "people", "products", "teams"];
@@ -6858,6 +6935,12 @@ async function caseFA2RuleFragmentsExtends() {
   await caseFA6DomainManifests();
   await caseFA6DomainTemplates();
   await caseFA6DomainRuleFragments();
+
+  // v0.59.0 FA-7 — finance canonical vocab
+  await caseFA7FinanceManifest();
+  await caseFA7FinanceTemplates();
+  await caseFA7FinanceEntityCreate();
+  await caseFA7FinanceRuleFragments();
 
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);

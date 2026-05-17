@@ -1,9 +1,9 @@
 ---
-created: <% tp.file.creation_date("YYYY-MM-DD HH:mm") %>
+type: invoice-board-card
+created_at: "<% tp.file.creation_date("YYYY-MM-DDTHH:mm:ssZ") %>"
 tags:
   - kanban-card
   - invoice-card
-  - <% tp.date.now("YYYY/MM/DD") %>
 ---
 <%*
 const newFilePath = tp.config.target_file?.path || "";

@@ -1,11 +1,8 @@
 ---
 type: budget
-budget_month: <% tp.date.now("YYYY-MM") %>
+month: <% tp.date.now("YYYY-MM") %>
 categories: []
-created: <% tp.date.now("YYYY-MM-DD") %>
-tags:
-  - finance
-  - budget
+created_at: "<% tp.file.creation_date("YYYY-MM-DDTHH:mm:ssZ") %>"
 cssclasses:
   - wide
 ---

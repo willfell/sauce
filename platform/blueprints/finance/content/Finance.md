@@ -1,7 +1,8 @@
 ---
 type: finance-hub
+created_at: "2026-05-17T16:45:00-06:00"
 tags:
-  - finance
+  - finance-hub
 cssclasses:
   - wide
 ---

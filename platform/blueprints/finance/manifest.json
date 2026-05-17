@@ -1,6 +1,6 @@
 {
   "name": "finance",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "kind": "blueprint",
   "module_directory": "finance",
   "description": "Finance blueprint covering Budgets + Paychecks + Invoices under spice/finance/. Top hub Finance.md aggregates pending items from all three sub-areas. Budgets/Paychecks are flat dated entities; Invoices use a per-month folder ecosystem mirroring trips/<slug>/. Status pills (Planning/In Progress/Done) derived from frontmatter via shared FinanceStatus helper. v0.2.7 PATCH: 8 outline-accent button call sites migrated to customJS.AccentButton.render. v0.2.8 PATCH (in-cycle CF-1): InvoiceControls Save now also recomputes amount = round(rate * hours, 2) on save; Save's enabled state additionally considers amount drift (enabled when stored amount != rate * hours) so stale-amount entities can be re-synced without changing the rate. Misleading caveat note removed. v0.3.0 MINOR (v0.46.0 S8+S9+S10): three New*Button classes (NewBudgetButton/NewPaycheckButton/NewInvoiceButton) deleted; manifest declares new_entity_buttons[] entries for budget/paycheck/invoice via entity-create@0.1.0 mechanism — schema extensions exercised: month/number prompt types, validate gte/min predicates, |number substitution pipe, inline_body, extra_files[] (invoice scaffolds Time-Log + Board sidecars). Total ~500 LOC of overlay-dialog code retired.",
@@ -96,10 +96,9 @@
       },
       "frontmatter_template": {
         "type": "budget",
-        "budget_month": "{{prompts.month}}",
+        "month": "{{prompts.month}}",
         "categories": [],
-        "created": "{{now.YYYY-MM-DD}}",
-        "tags": ["finance", "budget"],
+        "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
         "cssclasses": ["wide"]
       },
       "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"BudgetNavButtons\" });\n```\n\n```dataviewjs\nawait customJS.FinanceStatus.renderBadge(dv, \"budget\");\n```\n\n## Categories\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"BudgetCategoriesEditor\" });\n```\n",
@@ -124,8 +123,7 @@
         "pay_period_end": "{{prompts.end_date}}",
         "paycheck_amount": "{{prompts.amount|number}}",
         "expenses": [],
-        "created": "{{now.YYYY-MM-DD}}",
-        "tags": ["finance", "paycheck"],
+        "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
         "cssclasses": ["wide"]
       },
       "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PaycheckNavButtons\" });\n```\n\n```dataviewjs\nawait customJS.FinanceStatus.renderBadge(dv, \"paycheck\");\n```\n\n## Expenses\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PaycheckExpensesEditor\" });\n```\n",
@@ -150,8 +148,7 @@
         "hours": 0,
         "amount": 0,
         "submitted_date": null,
-        "created": "{{now.YYYY-MM-DD}}",
-        "tags": ["finance", "invoice"],
+        "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
         "cssclasses": ["wide"]
       },
       "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"InvoiceNavButtons\" });\n```\n\n```dataviewjs\nawait customJS.FinanceStatus.renderBadge(dv, \"invoice\");\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"InvoiceControls\" });\n```\n",
@@ -164,8 +161,7 @@
             "date": "{{prompts.month}}-01",
             "total_hours": 0,
             "entries": [],
-            "created": "{{now.YYYY-MM-DD}}",
-            "tags": ["finance", "time-log"],
+            "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
             "cssclasses": ["wide"]
           },
           "inline_body": "%% nav buttons rendered conditionally — suppressed when this note is embedded elsewhere %%\n```dataviewjs\nconst isEmbedded = dv.container.closest(\".markdown-embed\") != null;\nif (!isEmbedded) {\n    await dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n    await dv.view(\"ranch/views/customjs-guard\", { class: \"InvoiceNavButtons\" });\n}\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"InvoiceTimeLogEditor\" });\n```\n"
@@ -177,7 +173,8 @@
             "kanban-plugin": "board",
             "title": "Invoice {{prompts.month}} Board",
             "type": "kanban",
-            "tags": ["board", "finance", "invoice/{{prompts.month}}"]
+            "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+            "tags": ["invoice/{{prompts.month}}"]
           },
           "inline_body": "## To Do\n\n## In Progress\n\n## Completed\n\n%% kanban:settings\n```\n{\"kanban-plugin\":\"board\",\"list-collapse\":[false,false,false],\"new-note-folder\":\"spice/finance/invoices/{{prompts.month}}/board\",\"new-note-template\":\"ranch/templates/Template, Invoice Board Card.md\"}\n```\n%%\n"
         }
@@ -185,5 +182,54 @@
       "render_in": { "kind": "hub", "target_path": "{{module_directory}}/invoices/Invoices.md" }
     }
   ],
-  "rule_fragments": []
+  "rule_fragments": [
+    {
+      "target": "finance",
+      "fragment": {
+        "scope": { "path_glob": "spice/finance/budgets/**/*.md" },
+        "extends": "_canonical-vocab",
+        "required_frontmatter": {
+          "type":  { "required": true, "type": "string", "equals": "budget" },
+          "month": { "required": true, "type": "string", "matches": "^\\d{4}-\\d{2}$" }
+        },
+        "naming_pattern": "^Budget-\\d{4}-\\d{2}\\.md$"
+      }
+    },
+    {
+      "target": "finance",
+      "fragment": {
+        "scope": { "path_glob": "spice/finance/paychecks/**/*.md" },
+        "extends": "_canonical-vocab",
+        "required_frontmatter": {
+          "type":             { "required": true, "type": "string", "equals": "paycheck" },
+          "pay_period_start": { "required": true, "type": "string", "matches": "^\\d{4}-\\d{2}-\\d{2}$" },
+          "pay_period_end":   { "required": true, "type": "string", "matches": "^\\d{4}-\\d{2}-\\d{2}$" }
+        },
+        "naming_pattern": "^Paycheck-\\d{4}-\\d{2}-\\d{2}\\.md$"
+      }
+    },
+    {
+      "target": "finance",
+      "fragment": {
+        "scope": { "path_glob": "spice/finance/invoices/*/Invoice-*.md" },
+        "extends": "_canonical-vocab",
+        "required_frontmatter": {
+          "type":  { "required": true, "type": "string", "equals": "invoice" },
+          "month": { "required": true, "type": "string", "matches": "^\\d{4}-\\d{2}$" },
+          "date":  { "required": true, "type": "string", "matches": "^\\d{4}-\\d{2}-\\d{2}$" }
+        }
+      }
+    },
+    {
+      "target": "finance",
+      "fragment": {
+        "scope": { "path_glob": "spice/finance/invoices/*/Time-Log-*.md" },
+        "extends": "_canonical-vocab",
+        "required_frontmatter": {
+          "type":  { "required": true, "type": "string", "equals": "time-log" },
+          "month": { "required": true, "type": "string", "matches": "^\\d{4}-\\d{2}$" }
+        }
+      }
+    }
+  ]
 }
