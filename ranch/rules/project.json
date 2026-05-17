@@ -746,6 +746,49 @@
             ]
           }
         ]
+      },
+      {
+        "scope": {
+          "path_glob": "spice/projects/*/*.md"
+        },
+        "extends": "_canonical-vocab",
+        "frontmatter_branch": [
+          {
+            "when": {
+              "frontmatter": {
+                "type": "project"
+              }
+            },
+            "required_frontmatter": {
+              "description": {
+                "required": true,
+                "type": "string"
+              },
+              "workstreams": {
+                "required": true,
+                "type": "list"
+              },
+              "status": {
+                "required": true,
+                "type": "string",
+                "matches": "^(idea|planning|in-progress|blocked|superseded|cancelled|done)$"
+              },
+              "status_changed_at": {
+                "required": true,
+                "type": "string",
+                "matches": "^\\d{4}-\\d{2}-\\d{2}$"
+              },
+              "teams": {
+                "required": false,
+                "type": "list"
+              },
+              "products": {
+                "required": false,
+                "type": "list"
+              }
+            }
+          }
+        ]
       }
     ]
   }

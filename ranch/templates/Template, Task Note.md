@@ -1,11 +1,11 @@
 ---
-created: {{DATE}}
+type: task-note
+created_at: {{DATE}}
 task_parent: {{TASK_PARENT_PATH}}
 aliases:
   - "{{ALIAS}}"
 tags:
   - task-note
-  - {{DATE_TAG}}
 ---
 
 ```dataviewjs

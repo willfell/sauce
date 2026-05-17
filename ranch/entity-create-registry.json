@@ -98,16 +98,14 @@
         },
         "frontmatter_template": {
           "type": "project",
+          "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
           "description": "",
           "status": "idea",
           "status_changed_at": "{{now.YYYY-MM-DD}}",
           "workstreams": [],
           "teams": [],
           "products": [],
-          "created": "{{now.YYYY-MM-DD HH:mm}}",
-          "tags": [
-            "project"
-          ]
+          "tags": []
         },
         "body_template": "ranch/templates/Template, Project.md",
         "extra_files": [
@@ -150,9 +148,9 @@
         },
         "frontmatter_template": {
           "type": "doc-note",
+          "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
           "project": "[[{{current_file.frontmatter.project_name}}]]",
           "project_slug": "{{current_file.frontmatter.project_slug}}",
-          "created": "{{now.YYYY-MM-DD HH:mm}}",
           "tags": [
             "doc-note"
           ]
@@ -258,16 +256,14 @@
       },
       "frontmatter_template": {
         "type": "project",
+        "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
         "description": "",
         "status": "idea",
         "status_changed_at": "{{now.YYYY-MM-DD}}",
         "workstreams": [],
         "teams": [],
         "products": [],
-        "created": "{{now.YYYY-MM-DD HH:mm}}",
-        "tags": [
-          "project"
-        ]
+        "tags": []
       },
       "body_template": "ranch/templates/Template, Project.md",
       "extra_files": [
@@ -310,9 +306,9 @@
       },
       "frontmatter_template": {
         "type": "doc-note",
+        "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
         "project": "[[{{current_file.frontmatter.project_name}}]]",
         "project_slug": "{{current_file.frontmatter.project_slug}}",
-        "created": "{{now.YYYY-MM-DD HH:mm}}",
         "tags": [
           "doc-note"
         ]

@@ -3,8 +3,8 @@
 kanban-plugin: board
 title: {{prompts.name}} Board
 type: kanban
+created_at: "{{now.YYYY-MM-DDTHH:mm:ssZ}}"
 tags:
-  - board
   - project/{{prompts.slug}}
 
 ---

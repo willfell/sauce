@@ -64,8 +64,8 @@
   "blueprints": [
     {
       "name": "project",
-      "version": "1.12.1",
-      "installed_at": "2026-05-17T07:45:35.614Z",
+      "version": "1.13.0",
+      "installed_at": "2026-05-17T17:12:15.200Z",
       "new_entity_buttons": [
         {
           "id": "project",
@@ -90,16 +90,14 @@
           },
           "frontmatter_template": {
             "type": "project",
+            "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
             "description": "",
             "status": "idea",
             "status_changed_at": "{{now.YYYY-MM-DD}}",
             "workstreams": [],
             "teams": [],
             "products": [],
-            "created": "{{now.YYYY-MM-DD HH:mm}}",
-            "tags": [
-              "project"
-            ]
+            "tags": []
           },
           "body_template": "Template, Project.md",
           "extra_files": [
@@ -141,9 +139,9 @@
           },
           "frontmatter_template": {
             "type": "doc-note",
+            "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
             "project": "[[{{current_file.frontmatter.project_name}}]]",
             "project_slug": "{{current_file.frontmatter.project_slug}}",
-            "created": "{{now.YYYY-MM-DD HH:mm}}",
             "tags": [
               "doc-note"
             ]
@@ -14832,6 +14830,538 @@
       "git_tag": null,
       "git_dirty": true,
       "attempted_at": "2026-05-17T15:50:58.617Z"
+    },
+    {
+      "event": "info",
+      "step": "customjs_settings",
+      "action": "skipped_user_customized",
+      "jsFolder": "ranch/Scripts",
+      "git_commit": "aa39302ffbc3fbb40be37ed28046fef7a9a56cf3",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T17:12:15.166Z"
+    },
+    {
+      "event": "info",
+      "step": "app_settings",
+      "action": "applied",
+      "keys_written": [
+        "alwaysOpenInNewTab",
+        "defaultViewMode",
+        "livePreview"
+      ],
+      "git_commit": "aa39302ffbc3fbb40be37ed28046fef7a9a56cf3",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T17:12:15.167Z"
+    },
+    {
+      "event": "info",
+      "step": "pre_install_delete_skip",
+      "name": "project",
+      "path": "boards/To-Do-Board.md",
+      "reason": null,
+      "message": "file already absent",
+      "git_commit": "aa39302ffbc3fbb40be37ed28046fef7a9a56cf3",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T17:12:15.176Z"
+    },
+    {
+      "event": "info",
+      "step": "module_directory",
+      "name": "project",
+      "path": "spice/projects",
+      "action": "already_exists",
+      "git_commit": "aa39302ffbc3fbb40be37ed28046fef7a9a56cf3",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T17:12:15.176Z"
+    },
+    {
+      "event": "replace",
+      "step": "file_overwrite",
+      "name": "project",
+      "dest": "ranch/templates/Template, Project Map.md",
+      "prior_sha": "58dd1c5f6d040d30ad6261cb1f15231521e032b7d0723359c70bbdb96d4edbd1",
+      "new_sha": "14542d12e8c7e6802d4e206503efd3756d1b1dbd8357601d121a268c0c7cb3bc",
+      "bak_path": "ranch/templates/Template, Project Map.md.bak",
+      "git_commit": "aa39302ffbc3fbb40be37ed28046fef7a9a56cf3",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T17:12:15.178Z"
+    },
+    {
+      "event": "replace",
+      "step": "file_overwrite",
+      "name": "project",
+      "dest": "ranch/templates/Template, Project Board.md",
+      "prior_sha": "4f6e4aa85da6c6c1060e312258e7ca15129aac6bbef1ceaa77553640325ab095",
+      "new_sha": "529a4d80d00d1b03fd1dc5cfe35a03bee494d55d101f2f1c09d569d1bace0660",
+      "bak_path": "ranch/templates/Template, Project Board.md.bak",
+      "git_commit": "aa39302ffbc3fbb40be37ed28046fef7a9a56cf3",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T17:12:15.179Z"
+    },
+    {
+      "event": "replace",
+      "step": "file_overwrite",
+      "name": "project",
+      "dest": "ranch/templates/Template, Kanban Card.md",
+      "prior_sha": "d11ba0274940c1d4594a2de44c876496b574b7ae24aa7572d9f68868e04477bc",
+      "new_sha": "28df970b4b5f5d603ce9817587219006b44b905ff84749cdecf7adabd33c2b03",
+      "bak_path": "ranch/templates/Template, Kanban Card.md.bak",
+      "git_commit": "aa39302ffbc3fbb40be37ed28046fef7a9a56cf3",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T17:12:15.181Z"
+    },
+    {
+      "event": "replace",
+      "step": "file_overwrite",
+      "name": "project",
+      "dest": "ranch/templates/Template, Task Note.md",
+      "prior_sha": "a3f9ceaeb855c2b55e6da843903d7bb6baff1d7dc62ecd4191fe433739cfa152",
+      "new_sha": "5a06940fc994007603d806a6274df3d2ce4bf8273117ef49b23cc75f7b7b9f00",
+      "bak_path": "ranch/templates/Template, Task Note.md.bak",
+      "git_commit": "aa39302ffbc3fbb40be37ed28046fef7a9a56cf3",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T17:12:15.181Z"
+    },
+    {
+      "event": "replace",
+      "step": "file_overwrite",
+      "name": "project",
+      "dest": "ranch/templates/Template, Task Board.md",
+      "prior_sha": "0e6d060608d978bb9b6427941cdfc4e39641143993c0aaab62b95edef13e7dac",
+      "new_sha": "b1d7a1d8880d7f838942a6c2b3273cf1c19bdaa33aa01eb4e5a081b556e7fc3d",
+      "bak_path": "ranch/templates/Template, Task Board.md.bak",
+      "git_commit": "aa39302ffbc3fbb40be37ed28046fef7a9a56cf3",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T17:12:15.182Z"
+    },
+    {
+      "event": "replace",
+      "step": "file_overwrite",
+      "name": "project",
+      "dest": "ranch/templates/Template, Task Board Card.md",
+      "prior_sha": "bf19d0f4655ae8d5bbbaf70134a2e3000f7fae52d55b8068d12261162a05f644",
+      "new_sha": "e58338492f007c8e740b5f47a5f4c3f3f90d68c85ec072927f00d7397900caef",
+      "bak_path": "ranch/templates/Template, Task Board Card.md.bak",
+      "git_commit": "aa39302ffbc3fbb40be37ed28046fef7a9a56cf3",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T17:12:15.183Z"
+    },
+    {
+      "event": "replace",
+      "step": "file_overwrite",
+      "name": "project",
+      "dest": "ranch/templates/Template, Docs Hub.md",
+      "prior_sha": "8af06bdf8bfa4ea12c0f3cccf6427c7f6cd8f64bc7c887c277dd60a164f99cff",
+      "new_sha": "ceb84ea89653e86e98dd8a629340d6f233b2c7dc747a6e8ec60107e2cd8210bc",
+      "bak_path": "ranch/templates/Template, Docs Hub.md.bak",
+      "git_commit": "aa39302ffbc3fbb40be37ed28046fef7a9a56cf3",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T17:12:15.188Z"
+    },
+    {
+      "event": "info",
+      "step": "entity_create_block_verified",
+      "name": "project",
+      "target": "spice/projects/Projects.md",
+      "instance": "project",
+      "sentinel": "// entity-create:project",
+      "action": "verified_present",
+      "git_commit": "aa39302ffbc3fbb40be37ed28046fef7a9a56cf3",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T17:12:15.196Z"
+    },
+    {
+      "event": "info",
+      "step": "entity_create_block_verified",
+      "name": "project",
+      "target": "ranch/templates/Template, Docs Hub.md",
+      "instance": "doc-note",
+      "sentinel": "// entity-create:doc-note",
+      "action": "verified_present",
+      "git_commit": "aa39302ffbc3fbb40be37ed28046fef7a9a56cf3",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T17:12:15.196Z"
+    },
+    {
+      "event": "info",
+      "step": "wiki_to_docs_migration",
+      "name": "project",
+      "reason": "migrated 0; skipped-already-migrated 0; skipped-no-wiki 0; warn-coexist 0; warn-fail 0",
+      "git_commit": "aa39302ffbc3fbb40be37ed28046fef7a9a56cf3",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T17:12:15.197Z"
+    },
+    {
+      "event": "info",
+      "step": "docs_backfill",
+      "name": "project",
+      "reason": "backfilled 0 project(s); skipped 0 (already had Docs.md); 0 warning(s)",
+      "git_commit": "aa39302ffbc3fbb40be37ed28046fef7a9a56cf3",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T17:12:15.197Z"
+    },
+    {
+      "event": "info",
+      "step": "scaffold_foundational",
+      "name": "project",
+      "item": "project",
+      "id": "templater-obsidian",
+      "action": "skipped_already_present",
+      "git_commit": "aa39302ffbc3fbb40be37ed28046fef7a9a56cf3",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T17:12:15.198Z"
+    },
+    {
+      "event": "info",
+      "step": "templater_startup_templates",
+      "name": "project",
+      "template": "ranch/templates/Template, Project Task Create Listener.md",
+      "action": "skipped_existing",
+      "git_commit": "aa39302ffbc3fbb40be37ed28046fef7a9a56cf3",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T17:12:15.199Z"
+    },
+    {
+      "event": "info",
+      "step": "customjs_startup_scripts",
+      "name": "project",
+      "script": "ProjectTaskCreateListenerInit",
+      "action": "skipped_existing",
+      "git_commit": "aa39302ffbc3fbb40be37ed28046fef7a9a56cf3",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T17:12:15.199Z"
+    },
+    {
+      "event": "install",
+      "kind": "blueprint",
+      "name": "project",
+      "version": "1.13.0",
+      "installed_at": "2026-05-17T17:12:15.200Z",
+      "new_entity_buttons": [
+        {
+          "id": "project",
+          "label": "New Project",
+          "icon": "folder-plus",
+          "prompts": [
+            {
+              "key": "name",
+              "label": "Project name",
+              "type": "string",
+              "required": true
+            },
+            {
+              "key": "slug",
+              "type": "string",
+              "derive": "slugify(prompts.name)"
+            }
+          ],
+          "destination": {
+            "folder_prefix": "spice/projects/{{prompts.slug}}",
+            "filename_prefix": "{{prompts.name|sanitize-filename}}"
+          },
+          "frontmatter_template": {
+            "type": "project",
+            "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+            "description": "",
+            "status": "idea",
+            "status_changed_at": "{{now.YYYY-MM-DD}}",
+            "workstreams": [],
+            "teams": [],
+            "products": [],
+            "tags": []
+          },
+          "body_template": "Template, Project.md",
+          "extra_files": [
+            {
+              "filename_pattern": "Project Map.md",
+              "body_template": "Template, Project Map.md"
+            },
+            {
+              "filename_pattern": "{{prompts.slug}}-board.md",
+              "body_template": "Template, Project Board.md"
+            },
+            {
+              "subfolder": "docs",
+              "filename_pattern": "Docs.md",
+              "body_template": "Template, Docs Hub.md"
+            }
+          ],
+          "render_in": {
+            "kind": "hub",
+            "target_path": "{{module_directory}}/Projects.md"
+          }
+        },
+        {
+          "id": "doc-note",
+          "label": "+ New Doc",
+          "icon": "file-plus",
+          "prompts": [
+            {
+              "key": "title",
+              "label": "Doc title",
+              "type": "string",
+              "required": true,
+              "validate": "safe-filename"
+            }
+          ],
+          "destination": {
+            "folder_prefix": "spice/projects/{{current_file.frontmatter.project_slug}}/docs",
+            "filename_prefix": "{{prompts.title|sanitize-filename}}"
+          },
+          "frontmatter_template": {
+            "type": "doc-note",
+            "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+            "project": "[[{{current_file.frontmatter.project_name}}]]",
+            "project_slug": "{{current_file.frontmatter.project_slug}}",
+            "tags": [
+              "doc-note"
+            ]
+          },
+          "body_template": "Template, Doc Note.md",
+          "render_in": {
+            "kind": "hub",
+            "target_path": "{{templates_path}}/Template, Docs Hub.md"
+          }
+        }
+      ],
+      "git_commit": "aa39302ffbc3fbb40be37ed28046fef7a9a56cf3",
+      "git_tag": null,
+      "git_dirty": true
+    },
+    {
+      "event": "aggregate",
+      "step": "claude_surface_aggregate",
+      "contributions": 6,
+      "entries": 24,
+      "rejected": 0,
+      "git_commit": "aa39302ffbc3fbb40be37ed28046fef7a9a56cf3",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T17:12:15.200Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/audit.md",
+      "owner": "audit",
+      "version": "0.3.0",
+      "git_commit": "aa39302ffbc3fbb40be37ed28046fef7a9a56cf3",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T17:12:15.201Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/audit/drift/SKILL.md",
+      "owner": "audit",
+      "version": "0.3.0",
+      "git_commit": "aa39302ffbc3fbb40be37ed28046fef7a9a56cf3",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T17:12:15.201Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/install.md",
+      "owner": "platform-claude",
+      "version": "0.1.1",
+      "git_commit": "aa39302ffbc3fbb40be37ed28046fef7a9a56cf3",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T17:12:15.201Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/upgrade.md",
+      "owner": "platform-claude",
+      "version": "0.1.1",
+      "git_commit": "aa39302ffbc3fbb40be37ed28046fef7a9a56cf3",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T17:12:15.202Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/bootstrap.md",
+      "owner": "platform-claude",
+      "version": "0.1.1",
+      "git_commit": "aa39302ffbc3fbb40be37ed28046fef7a9a56cf3",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T17:12:15.203Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/platform/install/SKILL.md",
+      "owner": "platform-claude",
+      "version": "0.1.1",
+      "git_commit": "aa39302ffbc3fbb40be37ed28046fef7a9a56cf3",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T17:12:15.203Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/platform/upgrade/SKILL.md",
+      "owner": "platform-claude",
+      "version": "0.1.1",
+      "git_commit": "aa39302ffbc3fbb40be37ed28046fef7a9a56cf3",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T17:12:15.204Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/platform/bootstrap/SKILL.md",
+      "owner": "platform-claude",
+      "version": "0.1.1",
+      "git_commit": "aa39302ffbc3fbb40be37ed28046fef7a9a56cf3",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T17:12:15.204Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/project.md",
+      "owner": "project",
+      "version": "1.13.0",
+      "git_commit": "aa39302ffbc3fbb40be37ed28046fef7a9a56cf3",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T17:12:15.204Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/project/new-project/SKILL.md",
+      "owner": "project",
+      "version": "1.13.0",
+      "git_commit": "aa39302ffbc3fbb40be37ed28046fef7a9a56cf3",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T17:12:15.204Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/daily.md",
+      "owner": "daily",
+      "version": "0.3.0",
+      "git_commit": "aa39302ffbc3fbb40be37ed28046fef7a9a56cf3",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T17:12:15.205Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/daily/open-today/SKILL.md",
+      "owner": "daily",
+      "version": "0.3.0",
+      "git_commit": "aa39302ffbc3fbb40be37ed28046fef7a9a56cf3",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T17:12:15.205Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/meetings.md",
+      "owner": "meetings",
+      "version": "0.6.0",
+      "git_commit": "aa39302ffbc3fbb40be37ed28046fef7a9a56cf3",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T17:12:15.205Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/meetings/new-meeting/SKILL.md",
+      "owner": "meetings",
+      "version": "0.6.0",
+      "git_commit": "aa39302ffbc3fbb40be37ed28046fef7a9a56cf3",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T17:12:15.206Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/scratch.md",
+      "owner": "scratch",
+      "version": "0.3.1",
+      "git_commit": "aa39302ffbc3fbb40be37ed28046fef7a9a56cf3",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T17:12:15.206Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/scratch/new-scratch/SKILL.md",
+      "owner": "scratch",
+      "version": "0.3.1",
+      "git_commit": "aa39302ffbc3fbb40be37ed28046fef7a9a56cf3",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T17:12:15.206Z"
+    },
+    {
+      "event": "claude_md_regen",
+      "step": "claude_md_regen",
+      "tables_updated": [
+        "directory-map",
+        "resolvers",
+        "skills-index"
+      ],
+      "rows_total": 12,
+      "git_commit": "aa39302ffbc3fbb40be37ed28046fef7a9a56cf3",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T17:12:15.208Z"
     }
   ]
 }

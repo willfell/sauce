@@ -6278,6 +6278,70 @@ async function caseFA2TeamsCanonical() {
     !rule.required_frontmatter.product);
 }
 
+// ============================================================
+// v0.55.0 FA-3 — canonical vocab adoption asserts (project)
+// ============================================================
+
+async function caseFA3ProjectManifest() {
+  console.log("\n--- Case FA3-PROJECT-MANIFEST: project@1.13.0 canonical vocab ---");
+  const m = JSON.parse(fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/project/manifest.json"), "utf8"));
+  assertTrue("FA3-PROJ-1: project version 1.13.0", m.version === "1.13.0",
+    `got: ${m.version}`);
+  const ec0 = m.new_entity_buttons[0].frontmatter_template;
+  assertTrue("FA3-PROJ-2: project entity-create has created_at canonical",
+    typeof ec0.created_at === "string" && /\{\{now\.YYYY-MM-DDTHH:mm:ssZ\}\}/.test(ec0.created_at));
+  assertTrue("FA3-PROJ-3: project entity-create drops 'project' discriminator tag",
+    Array.isArray(ec0.tags) && !ec0.tags.includes("project"));
+  assertTrue("FA3-PROJ-4: project entity-create has no legacy 'created' key",
+    !("created" in ec0));
+  const ec1 = m.new_entity_buttons[1].frontmatter_template;
+  assertTrue("FA3-PROJ-5: doc-note entity-create has created_at canonical",
+    typeof ec1.created_at === "string" && /\{\{now\./.test(ec1.created_at));
+  assertTrue("FA3-PROJ-6: doc-note entity-create has no legacy 'created' key",
+    !("created" in ec1));
+}
+
+async function caseFA3ProjectTemplates() {
+  console.log("\n--- Case FA3-PROJECT-TEMPLATES: 5 template families use canonical fields ---");
+  const tplDir = path.join(WORKSHOP, "platform/blueprints/project/templates");
+  const families = ["Project Map.md", "Project Board.md", "Kanban Card.md",
+                    "Task Note.md", "Task Board.md", "Task Board Card.md", "Docs Hub.md"];
+  for (const f of families) {
+    const body = fs.readFileSync(path.join(tplDir, f), "utf8");
+    assertTrue(`FA3-TPL-${f}: declares created_at (not legacy 'created:')`,
+      /^created_at:/m.test(body) && !/^created:\s/m.test(body),
+      `template ${f} fm header excerpt:\n${body.slice(0, 250)}`);
+  }
+}
+
+async function caseFA3TaskBoardCardRegexFix() {
+  console.log("\n--- Case FA3-DRIVEBY: Task Board Card.md regex 'beacon/projects/' → 'spice/projects/' ---");
+  const body = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/project/templates/Task Board Card.md"), "utf8");
+  assertTrue("FA3-DRIVEBY-1: regex matches '^spice/projects/' (not 'beacon')",
+    /\^spice\\\/projects\\\//.test(body),
+    `got body excerpt:\n${body.slice(0, 600)}`);
+  assertTrue("FA3-DRIVEBY-2: no stale 'beacon/projects/' regex remains",
+    !/\^beacon\\\/projects/.test(body));
+}
+
+async function caseFA3RuleFragmentsExtends() {
+  console.log("\n--- Case FA3-EXTENDS: 3 project rule_fragments declare extends ---");
+  const m = JSON.parse(fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/project/manifest.json"), "utf8"));
+  assertTrue("FA3-EXTENDS-1: all 3 rule_fragments declare extends:'_canonical-vocab'",
+    m.rule_fragments.every(rf => rf.fragment.extends === "_canonical-vocab"),
+    `got extends: ${JSON.stringify(m.rule_fragments.map(r => r.fragment.extends))}`);
+  // project rule (frontmatter_branch); created should be dropped
+  const projRule = m.rule_fragments.find(rf => rf.target === "project");
+  const projBranch = projRule.fragment.frontmatter_branch[0];
+  assertTrue("FA3-EXTENDS-2: project rule branch no longer requires legacy 'created'",
+    !projBranch.required_frontmatter.created);
+  assertTrue("FA3-EXTENDS-3: project rule branch no longer requires_tags 'project'",
+    !projBranch.required_tags || !projBranch.required_tags.some(t => t.tag === "project"));
+}
+
 async function caseFA2RuleFragmentsExtends() {
   console.log("\n--- Case FA2-EXTENDS: all 4 blueprints' rule_fragments declare extends ---");
   const blueprints = ["meetings", "people", "products", "teams"];
@@ -6568,6 +6632,12 @@ async function caseFA2RuleFragmentsExtends() {
   await caseFA2ProductsCanonical();
   await caseFA2TeamsCanonical();
   await caseFA2RuleFragmentsExtends();
+
+  // v0.55.0 FA-3 — canonical vocab adoption asserts (project — 5 template families)
+  await caseFA3ProjectManifest();
+  await caseFA3ProjectTemplates();
+  await caseFA3TaskBoardCardRegexFix();
+  await caseFA3RuleFragmentsExtends();
 
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
