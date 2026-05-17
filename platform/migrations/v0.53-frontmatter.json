@@ -5,7 +5,9 @@
     { "from": "created", "to": "created_at", "coerce": "iso8601-with-tz" },
     { "from": "attending", "to": "people", "scope": { "type": "trip" } },
     { "from": "product", "to": "products", "scope": { "type": "team" }, "coerce": "wrap-as-list" },
-    { "from": "month", "to": "month_label", "scope": { "type": "cowork-monthly" } }
+    { "from": "month", "to": "month_label", "scope": { "type": "cowork-monthly" } },
+    { "from": "month_iso", "to": "month", "scope": { "type": "cowork-monthly" } },
+    { "from": "budget_month", "to": "month", "scope": { "type": "budget" } }
   ],
   "date_reformat": [
     "created_at",
