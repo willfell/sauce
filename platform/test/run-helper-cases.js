@@ -5856,6 +5856,44 @@ async function caseKC3EmptyWorkstreamsNoticePresent() {
 }
 
 // -------------------------------------------------------------------------
+// v0.51.1 — KC-4..6: hybrid cache-first source-board detection.
+// Cache path (app.metadataCache.getBacklinksForFile) tried first; vault-scan
+// (v0.49.2 behavior, app.vault.getMarkdownFiles) preserved as fallback.
+// -------------------------------------------------------------------------
+async function caseKC4HybridCachePathPresent() {
+  console.log("\n--- Case KC-4: hybrid cache path getBacklinksForFile present ---");
+  const body = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/project/templates/Kanban Card.md"),
+    "utf8"
+  );
+  assertTrue("KC-4: app.metadataCache.getBacklinksForFile call present",
+    body.includes("app.metadataCache.getBacklinksForFile"));
+}
+
+async function caseKC5VaultScanFallbackRetained() {
+  console.log("\n--- Case KC-5: vault-scan fallback (v0.49.2 behavior) retained ---");
+  const body = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/project/templates/Kanban Card.md"),
+    "utf8"
+  );
+  assertTrue("KC-5: vault-scan fallback app.vault.getMarkdownFiles() still present",
+    body.includes("app.vault.getMarkdownFiles()"));
+}
+
+async function caseKC6CacheBeforeVaultScan() {
+  console.log("\n--- Case KC-6: cache path appears before vault-scan in source order ---");
+  const body = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/project/templates/Kanban Card.md"),
+    "utf8"
+  );
+  const cacheIdx = body.indexOf("app.metadataCache.getBacklinksForFile");
+  const scanIdx = body.indexOf("app.vault.getMarkdownFiles");
+  assertTrue("KC-6: cache attempt precedes vault-scan fallback in source order",
+    cacheIdx >= 0 && scanIdx >= 0 && cacheIdx < scanIdx,
+    `cacheIdx=${cacheIdx} scanIdx=${scanIdx}`);
+}
+
+// -------------------------------------------------------------------------
 // v0.49.0 S6 — PCSI-1..3: ProjectTaskCreateListenerInit source-string asserts.
 // The init script is a thin bootstrap that delegates to v0.48.0's
 // ProjectTaskCreateListener.init() via customjs's startupScriptNames[]
@@ -6369,6 +6407,11 @@ async function casePWC5RenderMethodNotView() {
   await caseKC1SentinelPresent();
   await caseKC2CreateNewConstDeclared();
   await caseKC3EmptyWorkstreamsNoticePresent();
+
+  // v0.51.1 — KC-4..6: hybrid cache-first source-board detection.
+  await caseKC4HybridCachePathPresent();
+  await caseKC5VaultScanFallbackRetained();
+  await caseKC6CacheBeforeVaultScan();
 
   // v0.48.0 S5 — ICN-1: Icons.resolve() this._tier1 reference count regression guard (FLN-a).
   await caseICN1Tier1ReferenceCount();
