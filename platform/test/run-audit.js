@@ -1627,6 +1627,194 @@ async function caseAUEC6() {
 }
 
 // ============================================================
+// v0.53.0 FA-1 S7 — AU-FA-1..12: frontmatter-alignment walker cases.
+// ============================================================
+
+// Seed a minimal sauce vault under tmpdir with one installed blueprint.
+// The walker uses the workshop fallback for canonical-vocab when vault override is absent.
+function seedFrontmatterAlignmentVault(dir, opts) {
+  const blueprints = (opts && opts.blueprints) || [{ name: "meetings", version: "0.5.0" }];
+  fs.mkdirSync(path.join(dir, "ranch"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "ranch/platform-installed.json"),
+    JSON.stringify({ blueprints, mechanisms: [], workshop_version: "0.53.0" }, null, 2));
+  for (const b of blueprints) {
+    const name = typeof b === "string" ? b : b.name;
+    fs.mkdirSync(path.join(dir, `spice/${name === "project" ? "projects" : name}`), { recursive: true });
+  }
+}
+
+function writeRawNote(dir, relPath, raw) {
+  const full = path.join(dir, relPath);
+  fs.mkdirSync(path.dirname(full), { recursive: true });
+  fs.writeFileSync(full, raw);
+}
+
+// AU-FA-1 — module loads + legacy_key_used HIGH fires on `created:`
+async function caseAUFA1() {
+  await withTempVault(async (dir) => {
+    const mod = require("../audit/frontmatter-alignment-walker");
+    assertTrue(typeof mod.walkFrontmatterAlignment === "function",
+      "AU-FA-1a: walkFrontmatterAlignment exported as a function");
+    seedFrontmatterAlignmentVault(dir);
+    writeRawNote(dir, "spice/meetings/m.md",
+      "---\ntype: meeting\ncreated: 2026-05-15\n---\nbody\n");
+    const result = await mod.walkFrontmatterAlignment(dir);
+    const hi = result.findings.find(f => f.severity === "legacy_key_used" && /created/.test(f.message));
+    assertTrue(!!hi, "AU-FA-1b: legacy_key_used HIGH fires on `created:` key");
+  });
+}
+
+// AU-FA-2 — non_iso_timestamp HIGH for malformed created_at
+async function caseAUFA2() {
+  await withTempVault(async (dir) => {
+    seedFrontmatterAlignmentVault(dir);
+    writeRawNote(dir, "spice/meetings/m2.md",
+      "---\ntype: meeting\ncreated_at: 2026-05-15\n---\nbody\n");
+    const { walkFrontmatterAlignment } = require("../audit/frontmatter-alignment-walker");
+    const result = await walkFrontmatterAlignment(dir);
+    const found = result.findings.find(f => f.severity === "non_iso_timestamp");
+    assertTrue(!!found, "AU-FA-2: non_iso_timestamp HIGH fires on malformed created_at");
+  });
+}
+
+// AU-FA-3 — unquoted_wikilink MEDIUM for bare [[X]] in people block
+async function caseAUFA3() {
+  await withTempVault(async (dir) => {
+    seedFrontmatterAlignmentVault(dir);
+    writeRawNote(dir, "spice/meetings/m3.md",
+      "---\ntype: meeting\ncreated_at: \"2026-05-15T09:30:00-07:00\"\npeople:\n  - [[Alice]]\n---\nbody\n");
+    const { walkFrontmatterAlignment } = require("../audit/frontmatter-alignment-walker");
+    const result = await walkFrontmatterAlignment(dir);
+    const found = result.findings.find(f => f.severity === "unquoted_wikilink");
+    assertTrue(!!found, "AU-FA-3: unquoted_wikilink MEDIUM fires on bare [[X]] in people");
+  });
+}
+
+// AU-FA-4 — discriminator_tag_present INFO
+async function caseAUFA4() {
+  await withTempVault(async (dir) => {
+    seedFrontmatterAlignmentVault(dir);
+    writeRawNote(dir, "spice/meetings/m4.md",
+      "---\ntype: meeting\ncreated_at: \"2026-05-15T09:30:00-07:00\"\ntags:\n  - meeting\n---\nbody\n");
+    const { walkFrontmatterAlignment } = require("../audit/frontmatter-alignment-walker");
+    const result = await walkFrontmatterAlignment(dir);
+    const found = result.findings.find(f => f.severity === "discriminator_tag_present");
+    assertTrue(!!found, "AU-FA-4: discriminator_tag_present INFO fires on tags: [meeting]");
+  });
+}
+
+// AU-FA-5 — temporal_tag_present INFO
+async function caseAUFA5() {
+  await withTempVault(async (dir) => {
+    seedFrontmatterAlignmentVault(dir);
+    writeRawNote(dir, "spice/meetings/m5.md",
+      "---\ntype: meeting\ncreated_at: \"2026-05-15T09:30:00-07:00\"\ntags:\n  - 2026/05/17\n---\nbody\n");
+    const { walkFrontmatterAlignment } = require("../audit/frontmatter-alignment-walker");
+    const result = await walkFrontmatterAlignment(dir);
+    const found = result.findings.find(f => f.severity === "temporal_tag_present");
+    assertTrue(!!found, "AU-FA-5: temporal_tag_present INFO fires on tags: [2026/05/17]");
+  });
+}
+
+// AU-FA-6 — missing_canonical_key MEDIUM (type set, created_at absent)
+async function caseAUFA6() {
+  await withTempVault(async (dir) => {
+    seedFrontmatterAlignmentVault(dir);
+    writeRawNote(dir, "spice/meetings/m6.md",
+      "---\ntype: meeting\nstatus: scheduled\n---\nbody\n");
+    const { walkFrontmatterAlignment } = require("../audit/frontmatter-alignment-walker");
+    const result = await walkFrontmatterAlignment(dir);
+    const found = result.findings.find(f => f.severity === "missing_canonical_key");
+    assertTrue(!!found, "AU-FA-6: missing_canonical_key MEDIUM fires when type set but created_at absent");
+  });
+}
+
+// AU-FA-7 — happy: clean canonical note has no findings, counts.aligned incremented
+async function caseAUFA7() {
+  await withTempVault(async (dir) => {
+    seedFrontmatterAlignmentVault(dir);
+    writeRawNote(dir, "spice/meetings/clean.md",
+      "---\ntype: meeting\ncreated_at: \"2026-05-15T09:30:00-07:00\"\nattendees:\n  - \"[[Alice]]\"\n---\nbody\n");
+    const { walkFrontmatterAlignment } = require("../audit/frontmatter-alignment-walker");
+    const result = await walkFrontmatterAlignment(dir);
+    assertEqual(result.findings.length, 0, "AU-FA-7a: canonical note produces zero findings");
+    assertTrue(result.counts.aligned >= 1, "AU-FA-7b: counts.aligned >= 1 for clean note");
+  });
+}
+
+// AU-FA-8 — non-sauce vault throws exitCode=2
+async function caseAUFA8() {
+  await withTempVault(async (dir) => {
+    // No ranch/platform-installed.json
+    const { walkFrontmatterAlignment } = require("../audit/frontmatter-alignment-walker");
+    let threw = false;
+    try { await walkFrontmatterAlignment(dir); }
+    catch (e) { threw = e && e.exitCode === 2; }
+    assertTrue(threw, "AU-FA-8: non-sauce vault throws exitCode=2");
+  });
+}
+
+// AU-FA-9 — legacy_key_used: singular `product:` on type:team
+async function caseAUFA9() {
+  await withTempVault(async (dir) => {
+    seedFrontmatterAlignmentVault(dir, { blueprints: [{ name: "teams", version: "0.1.0" }] });
+    writeRawNote(dir, "spice/teams/t.md",
+      "---\ntype: team\ncreated_at: \"2026-05-15T09:30:00-07:00\"\nproduct: \"[[ACME]]\"\n---\nbody\n");
+    const { walkFrontmatterAlignment } = require("../audit/frontmatter-alignment-walker");
+    const result = await walkFrontmatterAlignment(dir);
+    const found = result.findings.find(f => f.severity === "legacy_key_used" && /product/.test(f.message));
+    assertTrue(!!found, "AU-FA-9: legacy_key_used HIGH fires on singular product: on type:team");
+  });
+}
+
+// AU-FA-10 — canonical ISO+TZ created_at produces no non_iso finding
+async function caseAUFA10() {
+  await withTempVault(async (dir) => {
+    seedFrontmatterAlignmentVault(dir);
+    writeRawNote(dir, "spice/meetings/ok.md",
+      "---\ntype: meeting\ncreated_at: \"2026-05-15T09:30:00-07:00\"\nattendees:\n  - \"[[Alice]]\"\n---\nbody\n");
+    const { walkFrontmatterAlignment } = require("../audit/frontmatter-alignment-walker");
+    const result = await walkFrontmatterAlignment(dir);
+    const niFinding = result.findings.find(f => f.severity === "non_iso_timestamp");
+    assertTrue(!niFinding, "AU-FA-10: canonical ISO+TZ created_at produces no non_iso finding");
+  });
+}
+
+// AU-FA-11 — report formatter emits counts line + JSON summary footer
+async function caseAUFA11() {
+  await withTempVault(async (dir) => {
+    seedFrontmatterAlignmentVault(dir);
+    writeRawNote(dir, "spice/meetings/m.md",
+      "---\ntype: meeting\ncreated: 2026-05-15\n---\nbody\n");
+    const cmd = require("../cli/cmd-audit");
+    const outputFile = path.join(dir, "out.md");
+    try {
+      await cmd._runForTest({
+        vaultPath: dir, blueprintFilter: null, outputFile,
+        untrackedCheck: false, quiet: true,
+        frontmatterAlignment: true, workshopPath: ROOT, strict: false,
+      });
+    } catch (e) { /* exit code 1 from findings is expected; outputFile still written */ }
+    const md = fs.readFileSync(outputFile, "utf8");
+    assertContains(md, "sauce audit --frontmatter-alignment", "AU-FA-11a: report header present");
+    assertContains(md, "frontmatter-alignment-summary:", "AU-FA-11b: JSON summary footer present");
+  });
+}
+
+// AU-FA-12 — preserve_tags allowlist: tags:[kanban-card] doesn't trigger discriminator finding
+async function caseAUFA12() {
+  await withTempVault(async (dir) => {
+    seedFrontmatterAlignmentVault(dir);
+    writeRawNote(dir, "spice/meetings/p.md",
+      "---\ntype: meeting\ncreated_at: \"2026-05-15T09:30:00-07:00\"\ntags:\n  - kanban-card\n---\nbody\n");
+    const { walkFrontmatterAlignment } = require("../audit/frontmatter-alignment-walker");
+    const result = await walkFrontmatterAlignment(dir);
+    const discFinding = result.findings.find(f => f.severity === "discriminator_tag_present");
+    assertTrue(!discFinding, "AU-FA-12: preserve_tags allowlist excludes kanban-card from discriminator finding");
+  });
+}
+
+// ============================================================
 // v0.50.0 S5 (renamed v0.52.0) — AU-DOCS-1..4: docs rule_fragment audit cases.
 // ============================================================
 
@@ -1783,6 +1971,21 @@ const selector = process.argv[2] || "all";
     await runCase("AU-EC-4", caseAUEC4);
     await runCase("AU-EC-5", caseAUEC5);
     await runCase("AU-EC-6", caseAUEC6);
+  }
+  // v0.53.0 FA-1 S7 — frontmatter-alignment-walker audit cases (AU-FA-1..12)
+  if (selector === "frontmatter_alignment" || selector === "all") {
+    await runCase("AU-FA-1",  caseAUFA1);
+    await runCase("AU-FA-2",  caseAUFA2);
+    await runCase("AU-FA-3",  caseAUFA3);
+    await runCase("AU-FA-4",  caseAUFA4);
+    await runCase("AU-FA-5",  caseAUFA5);
+    await runCase("AU-FA-6",  caseAUFA6);
+    await runCase("AU-FA-7",  caseAUFA7);
+    await runCase("AU-FA-8",  caseAUFA8);
+    await runCase("AU-FA-9",  caseAUFA9);
+    await runCase("AU-FA-10", caseAUFA10);
+    await runCase("AU-FA-11", caseAUFA11);
+    await runCase("AU-FA-12", caseAUFA12);
   }
   // v0.50.0 S5 (renamed v0.52.0) — docs rule_fragment audit cases (AU-DOCS-1..4)
   if (selector === "wiki" || selector === "docs" || selector === "all") {
