@@ -1,0 +1,67 @@
+{
+  "_comment": "Declarative migration spec for v0.53.0 FA-1 (Frontmatter Alignment foundation). Consumed by cmd-migrate-frontmatter.js. Renames, date coercion, tag cleanup, wikilink quoting, and backfill rules are version-frozen at this file's ship point; future migration cycles (FA-2..FA-7) reference this spec but may layer additional per-blueprint rules. See Docs/plans/2026-05-16-frontmatter-alignment-design.md §B.1.",
+  "version": "0.53.0",
+  "renames": [
+    { "from": "created", "to": "created_at", "coerce": "iso8601-with-tz" },
+    { "from": "attending", "to": "people", "scope": { "type": "trip" } },
+    { "from": "product", "to": "products", "scope": { "type": "team" }, "coerce": "wrap-as-list" },
+    { "from": "month", "to": "month_label", "scope": { "type": "cowork-monthly" } }
+  ],
+  "date_reformat": [
+    "created_at",
+    "updated_at",
+    "date",
+    "start_date",
+    "end_date"
+  ],
+  "tag_cleanup": {
+    "strip_discriminator": [
+      "meeting",
+      "person",
+      "project",
+      "product",
+      "team",
+      "trip",
+      "budget",
+      "paycheck",
+      "invoice",
+      "daily",
+      "journal",
+      "scratch",
+      "scratch-day",
+      "cowork-daily",
+      "cowork-weekly",
+      "cowork-monthly",
+      "to-do",
+      "board"
+    ],
+    "strip_temporal_patterns": [
+      "^\\d{4}/\\d{2}/\\d{2}$",
+      "^\\d{4}/\\d{2}$",
+      "^\\d{4}$"
+    ],
+    "preserve": [
+      "kanban-card",
+      "project-card",
+      "task-board-card",
+      "task-board",
+      "kanban-plugin"
+    ]
+  },
+  "wikilink_quote_keys": [
+    "people",
+    "projects",
+    "teams",
+    "products",
+    "trips",
+    "meetings",
+    "attendees",
+    "daily_note",
+    "day_link",
+    "created_by"
+  ],
+  "backfill": {
+    "type": { "infer_from": ["path", "template-marker", "tags"] },
+    "created_at": { "infer_from": "file-mtime" }
+  }
+}

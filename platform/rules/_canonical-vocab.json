@@ -1,0 +1,62 @@
+{
+  "_comment": "Shared canonical frontmatter vocabulary. v0.53.0 FA-1 (Frontmatter Alignment foundation cycle). Consumed by: (1) blueprint rule_fragments via 'extends: _canonical-vocab' (required-key + shape validation), (2) frontmatter-alignment-walker.js (legacy/unquoted/missing detection), (3) cmd-migrate-frontmatter.js (canonical destination during apply). See Docs/plans/2026-05-16-frontmatter-alignment-design.md.",
+  "id": "_canonical-vocab",
+  "version": "0.53.0",
+  "required_frontmatter": {
+    "type": {
+      "required": true,
+      "type": "string",
+      "matches": "^[a-z][a-z0-9-]*$"
+    },
+    "created_at": {
+      "required": true,
+      "type": "string",
+      "matches": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}([+-]\\d{2}:\\d{2}|Z)$"
+    }
+  },
+  "legacy_keys": ["created", "attending"],
+  "wikilink_keys": [
+    "people",
+    "projects",
+    "teams",
+    "products",
+    "trips",
+    "meetings",
+    "attendees",
+    "daily_note",
+    "day_link",
+    "created_by"
+  ],
+  "discriminator_tags": [
+    "meeting",
+    "person",
+    "project",
+    "product",
+    "team",
+    "trip",
+    "budget",
+    "paycheck",
+    "invoice",
+    "daily",
+    "journal",
+    "scratch",
+    "scratch-day",
+    "cowork-daily",
+    "cowork-weekly",
+    "cowork-monthly",
+    "to-do",
+    "board"
+  ],
+  "temporal_tag_patterns": [
+    "^\\d{4}/\\d{2}/\\d{2}$",
+    "^\\d{4}/\\d{2}$",
+    "^\\d{4}$"
+  ],
+  "preserve_tags": [
+    "kanban-card",
+    "project-card",
+    "task-board-card",
+    "task-board",
+    "kanban-plugin"
+  ]
+}
