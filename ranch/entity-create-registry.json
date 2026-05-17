@@ -23,13 +23,13 @@
           "filename_suffix": ""
         },
         "frontmatter_template": {
-          "date": "{{now.YYYY-MM-DD HH:mm}}",
+          "date": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+          "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
           "type": "meeting",
           "summary": "",
           "attendees": [],
-          "tags": [
-            "meeting"
-          ],
+          "people": [],
+          "tags": [],
           "cssclasses": [
             "wide"
           ]
@@ -187,13 +187,13 @@
         "filename_suffix": ""
       },
       "frontmatter_template": {
-        "date": "{{now.YYYY-MM-DD HH:mm}}",
+        "date": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+        "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
         "type": "meeting",
         "summary": "",
         "attendees": [],
-        "tags": [
-          "meeting"
-        ],
+        "people": [],
+        "tags": [],
         "cssclasses": [
           "wide"
         ]

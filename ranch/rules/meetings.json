@@ -117,6 +117,42 @@
             "tag": "meetings-hub"
           }
         ]
+      },
+      {
+        "scope": {
+          "path_glob": "spice/meetings/notes/**/*.md"
+        },
+        "extends": "_canonical-vocab",
+        "frontmatter_branch": [
+          {
+            "when": {
+              "frontmatter": {
+                "type": "meeting"
+              }
+            },
+            "required_frontmatter": {
+              "date": {
+                "required": true,
+                "type": "string"
+              },
+              "attendees": {
+                "required": true,
+                "type": "list"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "scope": {
+          "path_glob": "spice/meetings/hubs/**/*.md"
+        },
+        "extends": "_canonical-vocab",
+        "required_tags": [
+          {
+            "tag": "meetings-hub"
+          }
+        ]
       }
     ]
   }

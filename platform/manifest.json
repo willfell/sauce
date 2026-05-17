@@ -115,17 +115,17 @@
     },
     {
       "name": "meetings",
-      "version": "0.5.1",
+      "version": "0.6.0",
       "path": "blueprints/meetings"
     },
     {
       "name": "people",
-      "version": "0.2.2",
+      "version": "0.3.0",
       "path": "blueprints/people"
     },
     {
       "name": "products",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "path": "blueprints/products"
     },
     {
@@ -160,7 +160,7 @@
     },
     {
       "name": "teams",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "path": "blueprints/teams"
     }
   ]
