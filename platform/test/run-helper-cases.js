@@ -5956,6 +5956,85 @@ async function casePNBWrap3LabelNowrap() {
 }
 
 // -------------------------------------------------------------------------
+// v0.51.0 — PSW-1..6: ProjectStatusWidget surface + manifest + template
+// asserts. Source-string checks; runtime DOM behavior tested in Obsidian.
+// -------------------------------------------------------------------------
+
+async function casePSW1ClassDefined() {
+    console.log("\n--- Case PSW-1: project-status-widget.js declares class with render() ---");
+    const src = fs.readFileSync(
+        path.join(WORKSHOP, "platform/blueprints/project/helpers/project-status-widget.js"),
+        "utf8"
+    );
+    const hasClass = /class\s+ProjectStatusWidget\s*\{/.test(src);
+    const hasRender = /async\s+render\s*\(\s*dv\s*\)/.test(src);
+    assertTrue("PSW-1: project-status-widget.js declares class ProjectStatusWidget with async render(dv)",
+        hasClass && hasRender,
+        `class=${hasClass} render=${hasRender}`);
+}
+
+async function casePSW2StatusesArray() {
+    console.log("\n--- Case PSW-2: project-status-widget.js defines all 7 statuses ---");
+    const src = fs.readFileSync(
+        path.join(WORKSHOP, "platform/blueprints/project/helpers/project-status-widget.js"),
+        "utf8"
+    );
+    const expected = ["idea", "planning", "in-progress", "blocked", "superseded", "cancelled", "done"];
+    const missing = expected.filter(s => !src.includes(`"${s}"`));
+    assertTrue("PSW-2: project-status-widget.js STATUSES contains all 7 expected values",
+        missing.length === 0,
+        `missing: ${JSON.stringify(missing)}`);
+}
+
+async function casePSW3UsesProcessFrontMatter() {
+    console.log("\n--- Case PSW-3: project-status-widget.js uses processFrontMatter ---");
+    const src = fs.readFileSync(
+        path.join(WORKSHOP, "platform/blueprints/project/helpers/project-status-widget.js"),
+        "utf8"
+    );
+    assertTrue("PSW-3: project-status-widget.js calls app.fileManager.processFrontMatter",
+        /app\.fileManager\.processFrontMatter\s*\(/.test(src),
+        "processFrontMatter call missing");
+}
+
+async function casePSW4WritesBothKeys() {
+    console.log("\n--- Case PSW-4: project-status-widget.js writes status + status_changed_at ---");
+    const src = fs.readFileSync(
+        path.join(WORKSHOP, "platform/blueprints/project/helpers/project-status-widget.js"),
+        "utf8"
+    );
+    const writesStatus = /fm\.status\s*=/.test(src);
+    const writesChangedAt = /fm\.status_changed_at\s*=/.test(src);
+    assertTrue("PSW-4: project-status-widget.js writes both fm.status and fm.status_changed_at",
+        writesStatus && writesChangedAt,
+        `status=${writesStatus} changed_at=${writesChangedAt}`);
+}
+
+async function casePSW5ManifestRegistration() {
+    console.log("\n--- Case PSW-5: project manifest registers ProjectStatusWidget ---");
+    const manifestPath = path.join(WORKSHOP, "platform/blueprints/project/manifest.json");
+    const m = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+    const inClasses = Array.isArray(m.customjs_classes) && m.customjs_classes.includes("ProjectStatusWidget");
+    const fileEntry = Array.isArray(m.files) && m.files.some(f =>
+        f.source === "helpers/project-status-widget.js" &&
+        f.dest === "{{scripts_path}}/project/project-status-widget.js");
+    assertTrue("PSW-5: manifest customjs_classes + files[] register ProjectStatusWidget",
+        inClasses && fileEntry,
+        `inClasses=${inClasses} fileEntry=${fileEntry}`);
+}
+
+async function casePSW6TemplateBlock() {
+    console.log("\n--- Case PSW-6: Template, Project.md includes ProjectStatusWidget block ---");
+    const tplPath = path.join(WORKSHOP, "platform/blueprints/project/templates/Project.md");
+    const src = fs.readFileSync(tplPath, "utf8");
+    const hasHeading = /^## Status\s*$/m.test(src);
+    const hasBlock = /class:\s*"ProjectStatusWidget"/.test(src);
+    assertTrue("PSW-6: Template, Project.md has ## Status heading + ProjectStatusWidget dataviewjs block",
+        hasHeading && hasBlock,
+        `heading=${hasHeading} block=${hasBlock}`);
+}
+
+// -------------------------------------------------------------------------
 // v0.49.0 S6 — CSS-1..3: applyCustomJsStartupScripts helper unit cases.
 // STUB: full helper-extraction adapter-stub harness deferred; sub-asserts
 // log a stub message and pass. Captured as FLN-v49-N follow-up.
@@ -6307,6 +6386,14 @@ async function casePWC5RenderMethodNotView() {
   await casePNBWrap1FlexWrap();
   await casePNBWrap2ButtonFlexAuto();
   await casePNBWrap3LabelNowrap();
+
+  // v0.51.0 — PSW-1..6: ProjectStatusWidget surface coverage.
+  await casePSW1ClassDefined();
+  await casePSW2StatusesArray();
+  await casePSW3UsesProcessFrontMatter();
+  await casePSW4WritesBothKeys();
+  await casePSW5ManifestRegistration();
+  await casePSW6TemplateBlock();
 
   // v0.50.0 S5 — PWC-1..4: ProjectWikiCards class surface asserts.
   await casePWC1ClassDefined();
