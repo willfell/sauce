@@ -1,6 +1,6 @@
 {
   "name": "journal",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "kind": "blueprint",
   "module_directory": "journal",
   "description": "Date-routed daily journal entries under spice/journal/. Filename pattern Journal-YYYY-MM-DD per gotcha 8 platform invariant. Nav-button-driven creation via runTemplaterTemplate; manual creation under spice/journal/ auto-applies template via templater_folder_templates.",
@@ -38,5 +38,14 @@
       "message": "Journal blueprint installed at spice/journal/. REQUIRED: enable the Templater community plugin if not already enabled. Click '+ Today's Journal' in the nav-button row to create today's file at spice/journal/YYYY/MM-MMMM/Journal-YYYY-MM-DD.md. Manual file creation under spice/journal/ auto-applies the template (via Templater folder-template registration). Frontmatter cross-links to that day's daily note via [[<DayName>-YYYY-MM-DD]] when daily blueprint is installed."
     }
   ],
-  "rule_fragments": []
+  "rule_fragments": [
+    {
+      "target": "journal",
+      "fragment": {
+        "scope": { "path_glob": "spice/journal/**/Journal-*.md" },
+        "extends": "_canonical-vocab",
+        "naming_pattern": "^Journal-\\d{4}-\\d{2}-\\d{2}\\.md$"
+      }
+    }
+  ]
 }

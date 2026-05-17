@@ -180,6 +180,23 @@
           }
         },
         "naming_pattern": "^Scratch-Day-\\d{4}-\\d{2}-\\d{2}\\.md$"
+      },
+      {
+        "scope": {
+          "path_glob": "spice/scratch/**/Scratch-Day-*.md"
+        },
+        "extends": "_canonical-vocab",
+        "required_frontmatter": {
+          "type": {
+            "required": true,
+            "equals": "scratch-day"
+          },
+          "day": {
+            "required": true,
+            "type": "string"
+          }
+        },
+        "naming_pattern": "^Scratch-Day-\\d{4}-\\d{2}-\\d{2}\\.md$"
       }
     ]
   }

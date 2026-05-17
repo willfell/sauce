@@ -1,9 +1,8 @@
 ---
-created: <% tp.file.creation_date("YYYY-MM-DD HH:mm") %>
+type: daily
+created_at: "<% tp.file.creation_date("YYYY-MM-DDTHH:mm:ssZ") %>"
 tags:
   - "{{vault_identity_tag}}"
-  - daily
-  - "<% tp.date.now('YYYY/MM/DD') %>"
 cssclasses:
   - wide
 ---

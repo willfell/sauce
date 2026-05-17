@@ -1,6 +1,6 @@
 {
   "name": "scratch",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "kind": "blueprint",
   "module_directory": "scratch",
   "skills_dir": ".claude/skills/scratch",
@@ -122,8 +122,8 @@
       },
       "frontmatter_template": {
         "type": "scratch",
-        "day": "{{current_file.frontmatter.day}}",
-        "created": "{{now.YYYY-MM-DDTHH:mm:ss}}"
+        "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+        "day": "{{current_file.frontmatter.day}}"
       },
       "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n---\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ScratchLeafActions\" });\n```\n\n---\n",
       "render_in": { "kind": "hub", "target_path": "{{templates_path}}/Scratch Day Hub.md" }
@@ -139,22 +139,11 @@
     {
       "target": "scratch",
       "fragment": {
-        "scope": {
-          "path_glob": "spice/scratch/**/Scratch-2*.md"
-        },
+        "scope": { "path_glob": "spice/scratch/**/Scratch-2*.md" },
+        "extends": "_canonical-vocab",
         "required_frontmatter": {
-          "created": {
-            "required": true,
-            "type": "string"
-          },
-          "type": {
-            "required": true,
-            "equals": "scratch"
-          },
-          "day": {
-            "required": true,
-            "type": "string"
-          }
+          "type": { "required": true, "equals": "scratch" },
+          "day":  { "required": true, "type": "string" }
         },
         "naming_pattern": "^Scratch-\\d{4}-\\d{2}-\\d{2}-\\d{2}-\\d{2}\\.md$"
       }
@@ -162,22 +151,11 @@
     {
       "target": "scratch-day-hub",
       "fragment": {
-        "scope": {
-          "path_glob": "spice/scratch/**/Scratch-Day-*.md"
-        },
+        "scope": { "path_glob": "spice/scratch/**/Scratch-Day-*.md" },
+        "extends": "_canonical-vocab",
         "required_frontmatter": {
-          "created": {
-            "required": true,
-            "type": "string"
-          },
-          "type": {
-            "required": true,
-            "equals": "scratch-day"
-          },
-          "day": {
-            "required": true,
-            "type": "string"
-          }
+          "type": { "required": true, "equals": "scratch-day" },
+          "day":  { "required": true, "type": "string" }
         },
         "naming_pattern": "^Scratch-Day-\\d{4}-\\d{2}-\\d{2}\\.md$"
       }

@@ -1,10 +1,9 @@
 ---
-created: <% tp.date.now("YYYY-MM-DD HH:mm") %>
+type: journal
+created_at: "<% tp.file.creation_date("YYYY-MM-DDTHH:mm:ssZ") %>"
 daily_note: "[[<% tp.date.now("dddd-YYYY-MM-DD") %>]]"
 tags:
   - life
-  - journal
-  - <% tp.date.now("YYYY/MM/DD") %>
 ---
 
 ```dataviewjs
