@@ -984,7 +984,8 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   // render_in.target_path. nav_buttons-kind render_in is schema-reserved but
   // installer-rejected with a deferred warning for Cycle 1.
   await applyNewEntityButtons(tp, mech, variables, history, git);
-  await applyWikiBackfill(tp, mech, variables, history, git);          // NEW v0.50.0
+  await applyWikiToDocsMigration(tp, mech, variables, history, git);   // NEW v0.52.0 — must run BEFORE applyDocsBackfill
+  await applyDocsBackfill(tp, mech, variables, history, git);          // NEW v0.50.0; renamed from applyWikiBackfill v0.52.0
   await applyExternalPlugins(tp, mech, history, git);
   await scaffoldFoundationalPluginData(tp, mech, workshopPath, variables, history, git);  // NEW v0.26.0
   await applyTemplaterHotkeys(tp, mech, variables, history, git);          // NEW v0.1.3
@@ -1406,22 +1407,240 @@ async function applyNavButtons(tp, manifest, variables, history, git) {
   await adapter.write(registryPath, JSON.stringify(registry, null, 2));
 }
 
-// applyWikiBackfill — v0.50.0. Walks `spice/projects/*/` and creates
-// `wiki/Wiki.md` per pre-existing project that lacks one. Gated by
-// manifest.name === "project" so it only fires for the project blueprint's
-// per-blueprint pipeline. Idempotent: skips projects whose wiki/Wiki.md
-// already exists. Failure-loud per-project: catches per-entry exceptions,
-// logs warning to history, continues.
+// applyWikiToDocsMigration — v0.52.0. One-time per-project migration that
+// renames spice/projects/<slug>/wiki/ → docs/, Wiki.md → Docs.md, rewrites
+// frontmatter (type wiki-hub → docs-hub, wiki-note → doc-note + tags),
+// and rewrites customJS.ProjectWikiCards → ProjectDocsCards references in
+// migrated .md bodies. Gated by manifest.name === "project".
+//
+// Posture mirrors applyDocsBackfill (formerly applyWikiBackfill):
+// - Failure-loud per-project (try/catch per slug); does NOT halt install.
+// - Idempotent: skips if docs/ already exists at the target path.
+// - Backup: before any destructive op, copies wiki/ → .sauce-backup/<slug>/wiki/<ts>/.
+// - Co-existence safety: if BOTH wiki/ and docs/ exist for the same project,
+//   skips with a history warning (user manually started a docs/ pre-migration).
+//
+// install.js cannot use Obsidian's parseYaml; frontmatter rewrite uses regex
+// against the leading `---` block, matching the pattern of applyDocsBackfill.
+async function applyWikiToDocsMigration(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "project") return;
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+
+  const projectsRoot = "spice/projects";
+  if (!(await adapter.exists(projectsRoot))) return;
+
+  let projectsList;
+  try {
+    projectsList = await adapter.list(projectsRoot);
+  } catch (_) {
+    return;
+  }
+
+  const projectDirs = (projectsList.folders || []).filter((d) => {
+    const base = d.split("/").pop();
+    return base !== "All Projects";
+  });
+
+  let migratedCount = 0;
+  let skippedExistsCount = 0;
+  let skippedNoWikiCount = 0;
+  let warnCoexistCount = 0;
+  let warnFailCount = 0;
+
+  const ts = (() => {
+    const n = new Date();
+    const z = (x) => String(x).padStart(2, "0");
+    return `${n.getFullYear()}${z(n.getMonth() + 1)}${z(n.getDate())}-${z(n.getHours())}${z(n.getMinutes())}${z(n.getSeconds())}`;
+  })();
+
+  for (const projectDir of projectDirs) {
+    const slug = projectDir.split("/").pop();
+    const wikiDir = `${projectDir}/wiki`;
+    const docsDir = `${projectDir}/docs`;
+
+    try {
+      const wikiExists = await adapter.exists(wikiDir);
+      const docsExists = await adapter.exists(docsDir);
+
+      if (!wikiExists && !docsExists) {
+        skippedNoWikiCount += 1;
+        continue;
+      }
+      if (!wikiExists && docsExists) {
+        // Already migrated OR user-created docs/ from day one.
+        skippedExistsCount += 1;
+        continue;
+      }
+      if (wikiExists && docsExists) {
+        // Co-existence: don't touch either. User started a docs/ pre-migration.
+        warnCoexistCount += 1;
+        if (history) {
+          history.push({
+            event: "warning",
+            step: "wiki_to_docs_migration",
+            name: "project",
+            reason: `co-existence: both wiki/ and docs/ exist for ${slug} — skipping migration; user must resolve manually`,
+            git_commit: git.commit,
+            git_tag: git.tag,
+            git_dirty: git.dirty,
+            attempted_at: new Date().toISOString(),
+          });
+        }
+        continue;
+      }
+
+      // From here: wikiExists && !docsExists. Perform migration.
+
+      // 1. Backup
+      const backupDir = `.sauce-backup/${slug}/wiki/${ts}`;
+      await _copyDirRecursive(adapter, wikiDir, backupDir);
+
+      // 2. List wiki/ contents (before rename so we know what to rewrite later)
+      const wikiListing = await adapter.list(wikiDir);
+      const wikiMdFiles = (wikiListing.files || []).filter((f) => f.endsWith(".md"));
+
+      // 3. Rename wiki/ → docs/ via copy + delete (adapter doesn't have rename)
+      await _copyDirRecursive(adapter, wikiDir, docsDir);
+      await _rmDirRecursive(adapter, wikiDir);
+
+      // 4. Inside docs/, rename Wiki.md → Docs.md if present
+      const docsWikiHubPath = `${docsDir}/Wiki.md`;
+      const docsDocsHubPath = `${docsDir}/Docs.md`;
+      if (await adapter.exists(docsWikiHubPath) && !(await adapter.exists(docsDocsHubPath))) {
+        const hubBody = await adapter.read(docsWikiHubPath);
+        await adapter.write(docsDocsHubPath, hubBody);
+        await adapter.remove(docsWikiHubPath);
+      }
+
+      // 5. Rewrite frontmatter + customJS class refs in each .md inside docs/
+      const docsListing = await adapter.list(docsDir);
+      const docsMdFiles = (docsListing.files || []).filter((f) => f.endsWith(".md"));
+      for (const mdFile of docsMdFiles) {
+        let body;
+        try { body = await adapter.read(mdFile); } catch (_) { continue; }
+        const newBody = _rewriteWikiToDocsBody(body);
+        if (newBody !== body) {
+          await adapter.write(mdFile, newBody);
+        }
+      }
+
+      migratedCount += 1;
+      if (history) {
+        history.push({
+          event: "info",
+          step: "wiki_to_docs_migration",
+          name: "project",
+          reason: `migrated ${slug}: wiki/ → docs/ (${wikiMdFiles.length} .md files; backup at ${backupDir})`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    } catch (e) {
+      warnFailCount += 1;
+      if (history) {
+        history.push({
+          event: "warning",
+          step: "wiki_to_docs_migration",
+          name: "project",
+          reason: `migration failed for ${slug}: ${e && e.message ? e.message : String(e)}`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    }
+  }
+
+  if (history) {
+    history.push({
+      event: "info",
+      step: "wiki_to_docs_migration",
+      name: "project",
+      reason: `migrated ${migratedCount}; skipped-already-migrated ${skippedExistsCount}; skipped-no-wiki ${skippedNoWikiCount}; warn-coexist ${warnCoexistCount}; warn-fail ${warnFailCount}`,
+      git_commit: git.commit,
+      git_tag: git.tag,
+      git_dirty: git.dirty,
+      attempted_at: new Date().toISOString(),
+    });
+  }
+}
+
+// Helper: rewrite a markdown body's frontmatter type/tags + dataviewjs class refs.
+// Exported for unit tests in run-wiki-to-docs-migration.js.
+function _rewriteWikiToDocsBody(body) {
+  // 1. type: wiki-hub → docs-hub (frontmatter line, with or without quotes)
+  body = body.replace(/^type:\s*["']?wiki-hub["']?\s*$/m, 'type: docs-hub');
+  // 2. type: wiki-note → doc-note
+  body = body.replace(/^type:\s*["']?wiki-note["']?\s*$/m, 'type: doc-note');
+  // 3. tags array: wiki-hub → docs-hub (anywhere in a tags YAML block, supports
+  //    both bullet form `- wiki-hub` and inline-flow `tags: [wiki-hub, ...]`)
+  body = body.replace(/(\btags\s*:[\s\S]*?)(["']?)wiki-hub\2/g, '$1$2docs-hub$2');
+  // 4. tags array: wiki-note → doc-note (same)
+  body = body.replace(/(\btags\s*:[\s\S]*?)(["']?)wiki-note\2/g, '$1$2doc-note$2');
+  // 5. customJS class refs in dataviewjs blocks
+  body = body.replace(/customJS\.ProjectWikiCards/g, 'customJS.ProjectDocsCards');
+  body = body.replace(/class:\s*"ProjectWikiCards"/g, 'class: "ProjectDocsCards"');
+  // 6. entity-create sentinel comment (defensive)
+  body = body.replace(/entity-create:wiki-note/g, 'entity-create:doc-note');
+  return body;
+}
+
+// Helpers for recursive copy/remove against tp.app.vault.adapter.
+async function _copyDirRecursive(adapter, srcDir, destDir) {
+  if (!(await adapter.exists(destDir))) await adapter.mkdir(destDir);
+  const listing = await adapter.list(srcDir);
+  for (const f of (listing.files || [])) {
+    const rel = f.substring(srcDir.length + 1);
+    const target = `${destDir}/${rel}`;
+    const body = await adapter.read(f);
+    await adapter.write(target, body);
+  }
+  for (const sub of (listing.folders || [])) {
+    const rel = sub.substring(srcDir.length + 1);
+    const target = `${destDir}/${rel}`;
+    await _copyDirRecursive(adapter, sub, target);
+  }
+}
+
+async function _rmDirRecursive(adapter, dir) {
+  if (!(await adapter.exists(dir))) return;
+  const listing = await adapter.list(dir);
+  for (const f of (listing.files || [])) {
+    await adapter.remove(f);
+  }
+  for (const sub of (listing.folders || [])) {
+    await _rmDirRecursive(adapter, sub);
+  }
+  await adapter.rmdir(dir);
+}
+
+// applyDocsBackfill — v0.52.0 (renamed from applyWikiBackfill, v0.50.0).
+// Walks `spice/projects/*/` and creates `docs/Docs.md` per pre-existing
+// project that lacks one. Gated by manifest.name === "project" so it only
+// fires for the project blueprint's per-blueprint pipeline.
+//
+// v0.52.0 changes vs prior applyWikiBackfill:
+// - Path: wiki/Wiki.md → docs/Docs.md
+// - Step name in history: "wiki_backfill" → "docs_backfill"
+// - Template path: Template, Wiki Hub.md → Template, Docs Hub.md
+// - FLN-1 fold-in: now ALSO repairs 0-byte Docs.md (treats them as missing).
+//
+// Idempotent: skips projects whose docs/Docs.md already exists AND is non-empty.
+// Failure-loud per-project: catches per-entry exceptions, logs warning to
+// history, continues.
 //
 // Project-root heuristic: scans *.md files directly inside each project dir
-// (non-recursive — tasks/, board/, wiki/ stay in `folders`) and matches the
-// first one with `type: project` in its frontmatter block. project_slug =
-// dir basename; project_name = frontmatter `name:` value (fallback: filename
-// without .md extension).
+// (non-recursive) and matches the first one with `type: project` in its
+// frontmatter block. project_slug = dir basename; project_name = frontmatter
+// `name:` value (fallback: filename without .md extension).
 //
 // install.js cannot use Obsidian's parseYaml (per the top-of-file note);
 // frontmatter is matched via a narrow regex against the leading `---` block.
-async function applyWikiBackfill(tp, manifest, variables, history, git) {
+async function applyDocsBackfill(tp, manifest, variables, history, git) {
   if (!manifest || manifest.name !== "project") return;
   if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
   const adapter = tp.app.vault.adapter;
@@ -1431,7 +1650,7 @@ async function applyWikiBackfill(tp, manifest, variables, history, git) {
     if (history) {
       history.push({
         event: "info",
-        step: "wiki_backfill",
+        step: "docs_backfill",
         name: "project",
         reason: `projects root ${projectsRoot} absent — nothing to backfill`,
         git_commit: git.commit,
@@ -1450,7 +1669,7 @@ async function applyWikiBackfill(tp, manifest, variables, history, git) {
     if (history) {
       history.push({
         event: "warning",
-        step: "wiki_backfill",
+        step: "docs_backfill",
         name: "project",
         reason: `list failed for ${projectsRoot}: ${e.message}`,
         git_commit: git.commit,
@@ -1467,12 +1686,12 @@ async function applyWikiBackfill(tp, manifest, variables, history, git) {
     return base !== "All Projects";
   });
 
-  const templatePath = `${variables.templates_path}/Template, Wiki Hub.md`;
+  const templatePath = `${variables.templates_path}/Template, Docs Hub.md`;
   if (!(await adapter.exists(templatePath))) {
     if (history) {
       history.push({
         event: "error",
-        step: "wiki_backfill",
+        step: "docs_backfill",
         name: "project",
         reason: `template missing: ${templatePath}`,
         git_commit: git.commit,
@@ -1490,7 +1709,7 @@ async function applyWikiBackfill(tp, manifest, variables, history, git) {
     if (history) {
       history.push({
         event: "error",
-        step: "wiki_backfill",
+        step: "docs_backfill",
         name: "project",
         reason: `template read failed: ${e.message}`,
         git_commit: git.commit,
@@ -1508,10 +1727,18 @@ async function applyWikiBackfill(tp, manifest, variables, history, git) {
 
   for (const projectDir of projectDirs) {
     try {
-      const wikiPath = `${projectDir}/wiki/Wiki.md`;
-      if (await adapter.exists(wikiPath)) {
-        skippedCount += 1;
-        continue;
+      const docsPath = `${projectDir}/docs/Docs.md`;
+      if (await adapter.exists(docsPath)) {
+        // FLN-1 fold-in: a 0-byte Docs.md is treated as missing (repair path).
+        // Otherwise prior-failed installs leave a useless empty Docs.md that
+        // skip-if-exists masks indefinitely.
+        let existingBody = "";
+        try { existingBody = await adapter.read(docsPath); } catch (_) { existingBody = ""; }
+        if (existingBody.length > 0) {
+          skippedCount += 1;
+          continue;
+        }
+        // 0-byte: fall through to (re)write below.
       }
 
       let dirListing;
@@ -1550,7 +1777,7 @@ async function applyWikiBackfill(tp, manifest, variables, history, git) {
         if (history) {
           history.push({
             event: "warning",
-            step: "wiki_backfill",
+            step: "docs_backfill",
             name: "project",
             reason: `no project root found in ${projectDir} — skipping`,
             git_commit: git.commit,
@@ -1576,19 +1803,19 @@ async function applyWikiBackfill(tp, manifest, variables, history, git) {
         .replace(/\{\{prompts\.name\}\}/g, projectName)
         .replace(/\{\{now\.YYYY-MM-DD HH:mm\}\}/g, nowStr);
 
-      const wikiDir = `${projectDir}/wiki`;
-      if (!(await adapter.exists(wikiDir))) {
-        await adapter.mkdir(wikiDir);
+      const docsDir = `${projectDir}/docs`;
+      if (!(await adapter.exists(docsDir))) {
+        await adapter.mkdir(docsDir);
       }
 
-      await adapter.write(wikiPath, substituted);
+      await adapter.write(docsPath, substituted);
       backfilledCount += 1;
     } catch (e) {
       warnCount += 1;
       if (history) {
         history.push({
           event: "warning",
-          step: "wiki_backfill",
+          step: "docs_backfill",
           name: "project",
           reason: `backfill failed for ${projectDir}: ${e && e.message ? e.message : String(e)}`,
           git_commit: git.commit,
@@ -1603,9 +1830,9 @@ async function applyWikiBackfill(tp, manifest, variables, history, git) {
   if (history) {
     history.push({
       event: "info",
-      step: "wiki_backfill",
+      step: "docs_backfill",
       name: "project",
-      reason: `backfilled ${backfilledCount} project(s); skipped ${skippedCount} (already had Wiki.md); ${warnCount} warning(s)`,
+      reason: `backfilled ${backfilledCount} project(s); skipped ${skippedCount} (already had Docs.md); ${warnCount} warning(s)`,
       git_commit: git.commit,
       git_tag: git.tag,
       git_dirty: git.dirty,
