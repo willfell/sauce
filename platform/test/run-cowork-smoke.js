@@ -430,9 +430,72 @@ function assertCoworkV045Shape() {
 
   // --- Manifest version + depends_on ---
   const m = loadManifest();
-  assertTrue(m.version === "0.7.0", "v0.45.0: cowork manifest version is 0.7.0");
+  assertTrue(m.version === "0.8.0", "v0.57.0: cowork manifest version is 0.8.0");
   const hasAccentDep = (m.depends_on || []).some(d => d.name === "accent-button");
   assertTrue(hasAccentDep, "v0.45.0: cowork depends_on accent-button");
+}
+
+// -------------------------------------------------------------------------
+// v0.57.0 (FA-5) — canonical-vocab adoption shape
+// -------------------------------------------------------------------------
+
+function assertCoworkV057Shape() {
+  console.log("--- v0.57.0 (FA-5) canonical-vocab shape ---");
+  const cowork = BP;
+
+  // --- 3 note templates emit canonical created_at + drop discriminator tags ---
+  const dailyTpl = fs.readFileSync(path.join(cowork, "content/Daily Note.md"), "utf8");
+  assertContains(dailyTpl, "created_at:", "v0.57.0: Daily Note template emits created_at:");
+  assertTrue(!/^created:\s/m.test(dailyTpl), "v0.57.0: Daily Note template drops legacy created:");
+  assertContains(dailyTpl, "tags: [daily]", "v0.57.0: Daily Note template tags is [daily] (no cowork-daily)");
+
+  const weeklyTpl = fs.readFileSync(path.join(cowork, "content/Weekly Note.md"), "utf8");
+  assertContains(weeklyTpl, "created_at:", "v0.57.0: Weekly Note template emits created_at:");
+  assertContains(weeklyTpl, "tags: [weekly]", "v0.57.0: Weekly Note template tags is [weekly]");
+
+  const monthlyTpl = fs.readFileSync(path.join(cowork, "content/Monthly Note.md"), "utf8");
+  assertContains(monthlyTpl, "created_at:", "v0.57.0: Monthly Note template emits created_at:");
+  assertContains(monthlyTpl, "tags: [monthly]", "v0.57.0: Monthly Note template tags is [monthly]");
+  assertContains(monthlyTpl, 'month: "<%', "v0.57.0: Monthly Note template emits canonical month:");
+  assertContains(monthlyTpl, "month_label:", "v0.57.0: Monthly Note template retains friendly month_label:");
+  assertTrue(!/month_iso:/.test(monthlyTpl), "v0.57.0: Monthly Note template drops month_iso:");
+
+  // --- 5 hub files carry static created_at: ---
+  for (const hub of ["Cowork.md", "Daily Hub.md", "Weekly Hub.md", "Monthly Hub.md", "About Cowork.md"]) {
+    const body = fs.readFileSync(path.join(cowork, "content", hub), "utf8");
+    assertContains(body, 'created_at: "2026-', `v0.57.0: ${hub} carries static created_at:`);
+  }
+
+  // --- 4 prompt stubs carry static created_at: ---
+  for (const prompt of ["morning-briefing", "eod-review", "weekly-review", "monthly-review"]) {
+    const body = fs.readFileSync(path.join(cowork, "content/prompts", `${prompt}.md`), "utf8");
+    assertContains(body, 'created_at: "2026-', `v0.57.0: prompts/${prompt}.md carries static created_at:`);
+  }
+
+  // --- rule_fragments: 12 of 13 have extends; SKILL.md fragment is the one exception ---
+  const m = loadManifest();
+  const fragments = m.rule_fragments || [];
+  assertTrue(fragments.length === 13, `v0.57.0: cowork has 13 rule_fragments (got ${fragments.length})`);
+  const withExtends = fragments.filter(rf => rf.fragment && rf.fragment.extends === "_canonical-vocab");
+  assertTrue(withExtends.length === 12, `v0.57.0: 12 of 13 rule_fragments extend _canonical-vocab (got ${withExtends.length})`);
+  const skillFrag = fragments.find(rf => rf.fragment && rf.fragment.scope && /SKILL\.md/.test(rf.fragment.scope.path_glob || ""));
+  assertTrue(skillFrag && !skillFrag.fragment.extends, "v0.57.0: SKILL.md rule_fragment does NOT extend _canonical-vocab");
+
+  // --- daily/weekly/monthly fragments drop legacy `created` requirement ---
+  for (const scope of ["spice/cowork/daily/**/*.md", "spice/cowork/weekly/**/*.md", "spice/cowork/monthly/**/*.md"]) {
+    const frag = fragments.find(rf => rf.fragment.scope.path_glob === scope);
+    assertTrue(frag && !((frag.fragment.required_frontmatter || {}).created), `v0.57.0: ${scope} fragment drops required created`);
+  }
+
+  // --- daily fragment drops required_tags: [{ tag: "cowork-daily" }] ---
+  const dailyFrag = fragments.find(rf => rf.fragment.scope.path_glob === "spice/cowork/daily/**/*.md");
+  const dailyRequiredTags = (dailyFrag.fragment.required_tags || []).map(t => t.tag);
+  assertTrue(!dailyRequiredTags.includes("cowork-daily"), "v0.57.0: daily fragment drops cowork-daily required_tag");
+
+  // --- monthly fragment adds canonical month: with YYYY-MM regex ---
+  const monthlyFrag = fragments.find(rf => rf.fragment.scope.path_glob === "spice/cowork/monthly/**/*.md");
+  const monthSpec = (monthlyFrag.fragment.required_frontmatter || {}).month;
+  assertTrue(monthSpec && monthSpec.matches === "^\\d{4}-\\d{2}$", "v0.57.0: monthly fragment validates canonical month: regex");
 }
 
 // -------------------------------------------------------------------------
@@ -446,6 +509,7 @@ function assertCoworkV045Shape() {
   checkTimeframeContracts();
   assertCoworkV044Shape();
   assertCoworkV045Shape();
+  assertCoworkV057Shape();
   console.log(`========\nResult: ${passed} passed, ${failed} failed.`);
   process.exit(failed === 0 ? 0 : 1);
 })();

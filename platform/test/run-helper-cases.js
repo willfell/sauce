@@ -6389,6 +6389,83 @@ async function caseFA3RuleFragmentsExtends() {
     !projBranch.required_tags || !projBranch.required_tags.some(t => t.tag === "project"));
 }
 
+// ============================================================
+// v0.57.0 FA-5 — Cowork canonical-vocab adoption
+// ============================================================
+
+async function caseFA5CoworkManifest() {
+  console.log("\n--- Case FA5-MANIFEST: cowork bumped to 0.8.0 ---");
+  const m = JSON.parse(fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/cowork/manifest.json"), "utf8"));
+  assertTrue("FA5-MANIFEST-1: cowork@0.8.0", m.version === "0.8.0",
+    `got: ${m.version}`);
+}
+
+async function caseFA5CoworkTemplates() {
+  console.log("\n--- Case FA5-TEMPLATES: cowork note templates use canonical created_at ---");
+  const checks = [
+    ["cowork/content/Daily Note.md", "cowork-daily", "[daily]"],
+    ["cowork/content/Weekly Note.md", "cowork-weekly", "[weekly]"],
+    ["cowork/content/Monthly Note.md", "cowork-monthly", "[monthly]"],
+  ];
+  for (const [rel, expectedType, expectedTags] of checks) {
+    const body = fs.readFileSync(
+      path.join(WORKSHOP, "platform/blueprints", rel), "utf8");
+    assertTrue(`FA5-TPL-${rel} declares created_at`,
+      /^created_at:/m.test(body) && !/^created:\s/m.test(body),
+      `template ${rel} fm header:\n${body.slice(0, 300)}`);
+    assertTrue(`FA5-TPL-${rel} declares type: ${expectedType}`,
+      new RegExp(`^type:\\s*${expectedType}\\b`, "m").test(body),
+      `template ${rel} fm header:\n${body.slice(0, 300)}`);
+    assertTrue(`FA5-TPL-${rel} tags is ${expectedTags}`,
+      body.includes(`tags: ${expectedTags}`),
+      `template ${rel} fm header:\n${body.slice(0, 300)}`);
+  }
+  // Monthly template: canonical month: + retained month_label; month_iso dropped
+  const monthly = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/cowork/content/Monthly Note.md"), "utf8");
+  assertTrue("FA5-TPL-MONTH-canonical: Monthly Note emits month: \"YYYY-MM\"",
+    /^month:\s*"<%/m.test(monthly),
+    `monthly fm header:\n${monthly.slice(0, 400)}`);
+  assertTrue("FA5-TPL-MONTH-label: Monthly Note retains month_label:",
+    /^month_label:/m.test(monthly));
+  assertTrue("FA5-TPL-MONTH-drops-iso: Monthly Note drops month_iso:",
+    !/month_iso:/.test(monthly));
+}
+
+async function caseFA5CoworkRuleFragments() {
+  console.log("\n--- Case FA5-EXTENDS: cowork rule_fragments declare extends (12 of 13) ---");
+  const m = JSON.parse(fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/cowork/manifest.json"), "utf8"));
+  const frags = m.rule_fragments || [];
+  assertTrue("FA5-EXTENDS-1: cowork has 13 rule_fragments",
+    frags.length === 13, `got: ${frags.length}`);
+  const withExtends = frags.filter(rf => rf.fragment && rf.fragment.extends === "_canonical-vocab");
+  assertTrue("FA5-EXTENDS-2: 12 of 13 rule_fragments extend _canonical-vocab",
+    withExtends.length === 12,
+    `got: ${withExtends.length}; missing extends: ${JSON.stringify(frags.filter(rf => !(rf.fragment && rf.fragment.extends === "_canonical-vocab")).map(rf => rf.fragment.scope.path_glob))}`);
+  // The SKILL.md fragment is the one without extends (different frontmatter schema)
+  const skillFrag = frags.find(rf => rf.fragment.scope && /SKILL\.md/.test(rf.fragment.scope.path_glob || ""));
+  assertTrue("FA5-EXTENDS-3: SKILL.md fragment does NOT extend _canonical-vocab",
+    skillFrag && !skillFrag.fragment.extends);
+  // Daily/weekly/monthly fragments drop legacy `created` requirement
+  for (const scope of ["spice/cowork/daily/**/*.md", "spice/cowork/weekly/**/*.md", "spice/cowork/monthly/**/*.md"]) {
+    const frag = frags.find(rf => rf.fragment.scope.path_glob === scope);
+    assertTrue(`FA5-EXTENDS-${scope.split('/').pop()}-drop-created: ${scope} drops required created`,
+      frag && !((frag.fragment.required_frontmatter || {}).created));
+  }
+  // Daily fragment drops cowork-daily required_tag
+  const dailyFrag = frags.find(rf => rf.fragment.scope.path_glob === "spice/cowork/daily/**/*.md");
+  const tags = (dailyFrag.fragment.required_tags || []).map(t => t.tag);
+  assertTrue("FA5-EXTENDS-daily-drop-tag: daily fragment drops cowork-daily required_tag",
+    !tags.includes("cowork-daily"));
+  // Monthly fragment validates canonical month: regex
+  const monthlyFrag = frags.find(rf => rf.fragment.scope.path_glob === "spice/cowork/monthly/**/*.md");
+  const monthSpec = (monthlyFrag.fragment.required_frontmatter || {}).month;
+  assertTrue("FA5-EXTENDS-monthly-month: monthly fragment validates month: '^\\d{4}-\\d{2}$'",
+    monthSpec && monthSpec.matches === "^\\d{4}-\\d{2}$");
+}
+
 async function caseFA2RuleFragmentsExtends() {
   console.log("\n--- Case FA2-EXTENDS: all 4 blueprints' rule_fragments declare extends ---");
   const blueprints = ["meetings", "people", "products", "teams"];
@@ -6690,6 +6767,11 @@ async function caseFA2RuleFragmentsExtends() {
   await caseFA4TimelineManifests();
   await caseFA4TimelineTemplates();
   await caseFA4TimelineRuleFragmentsExtends();
+
+  // v0.57.0 FA-5 — cowork canonical vocab adoption
+  await caseFA5CoworkManifest();
+  await caseFA5CoworkTemplates();
+  await caseFA5CoworkRuleFragments();
 
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
