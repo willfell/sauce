@@ -8,6 +8,14 @@ await dv.view("ranch/views/customjs-guard", { class: "ProjectNavButtons" });
 
 ---
 
+## Status
+
+```dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "ProjectStatusWidget" });
+```
+
+---
+
 ## Workstreams
 
 ```dataviewjs
