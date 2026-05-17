@@ -116,10 +116,68 @@ async function caseWTDMIG3CoExistence() {
   ok("WTD-MIG-3.3 history warning recorded for co-existence", !!warnNote);
 }
 
+// WTD-MIG-4 — v0.52.1 hot-fix: _rmDirRecursive falls back to Node fs when
+// the adapter doesn't expose .rmdir (CLI-mode). The in-memory stub above
+// can't model real filesystem behavior, so this case writes to a real
+// tmpdir, deletes the stub's rmdir method, and asserts the fallback path
+// actually removes the directory on disk.
+async function caseWTDMIG4RmdirFallback() {
+  console.log("\n--- Case WTD-MIG-4: _rmDirRecursive Node fs fallback when adapter.rmdir absent ---");
+  const fs = require("fs");
+  const path = require("path");
+  const os = require("os");
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "wtd-mig-4-"));
+
+  // Build a real-fs-backed adapter that exposes basePath but NO rmdir.
+  // Mirrors the install-time CLI adapter shape (per ranch/templater/platformInstall.js).
+  const adapter = {
+    basePath: tmpRoot,
+    async exists(p) { return fs.existsSync(path.join(tmpRoot, p)); },
+    async list(p) {
+      const abs = path.join(tmpRoot, p);
+      if (!fs.existsSync(abs)) return { folders: [], files: [] };
+      const entries = fs.readdirSync(abs, { withFileTypes: true });
+      const folders = entries.filter((e) => e.isDirectory()).map((e) => `${p}/${e.name}`);
+      const files = entries.filter((e) => e.isFile()).map((e) => `${p}/${e.name}`);
+      return { folders, files };
+    },
+    async read(p) { return fs.readFileSync(path.join(tmpRoot, p), "utf8"); },
+    async write(p, body) {
+      const abs = path.join(tmpRoot, p);
+      fs.mkdirSync(path.dirname(abs), { recursive: true });
+      fs.writeFileSync(abs, body);
+    },
+    async remove(p) { fs.unlinkSync(path.join(tmpRoot, p)); },
+    async mkdir(p) { fs.mkdirSync(path.join(tmpRoot, p), { recursive: true }); },
+    // No rmdir — exercises the fallback path.
+  };
+
+  // Seed: spice/projects/test/wiki/ with a hub + a note.
+  await adapter.write("spice/projects/test/test.md", '---\ntype: project\nname: "Test"\n---\nbody');
+  await adapter.write("spice/projects/test/wiki/Wiki.md", '---\ntype: wiki-hub\ntags:\n  - wiki-hub\n---\nhub');
+  await adapter.write("spice/projects/test/wiki/Thought.md", '---\ntype: wiki-note\ntags:\n  - wiki-note\n---\nnote');
+
+  const tp = { app: { vault: { adapter } } };
+  const history = [];
+  await applyWikiToDocsMigration(tp, mockManifest, mockVariables, history, mockGit);
+
+  const wikiAbs = path.join(tmpRoot, "spice/projects/test/wiki");
+  const docsAbs = path.join(tmpRoot, "spice/projects/test/docs");
+  ok("WTD-MIG-4.1 wiki/ directory removed via Node fs fallback", !fs.existsSync(wikiAbs));
+  ok("WTD-MIG-4.2 docs/Docs.md created at new path", fs.existsSync(path.join(docsAbs, "Docs.md")));
+  ok("WTD-MIG-4.3 docs/Thought.md created at new path", fs.existsSync(path.join(docsAbs, "Thought.md")));
+  const migInfo = history.find((e) => e.step === "wiki_to_docs_migration" && /migrated test/.test(e.reason || ""));
+  ok("WTD-MIG-4.4 migration recorded info entry (no rmdir warning)", !!migInfo);
+
+  // Cleanup tmpdir
+  fs.rmSync(tmpRoot, { recursive: true, force: true });
+}
+
 (async () => {
   await caseWTDMIG1HappyPath();
   await caseWTDMIG2Idempotent();
   await caseWTDMIG3CoExistence();
+  await caseWTDMIG4RmdirFallback();
   console.log(`\nrun-wiki-to-docs-migration.js: ${passed} pass · ${failed} fail`);
   process.exit(failed === 0 ? 0 : 1);
 })();

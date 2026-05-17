@@ -1615,7 +1615,24 @@ async function _rmDirRecursive(adapter, dir) {
   for (const sub of (listing.folders || [])) {
     await _rmDirRecursive(adapter, sub);
   }
-  await adapter.rmdir(dir);
+  // v0.52.1 hybrid: adapter.rmdir exists on Obsidian's runtime adapter but
+  // NOT on CLI-mode (sauce update). Fall back to Node fs against the
+  // absolute vault path; last-resort leaves an empty dir (harmless except
+  // co-existence guard would skip future migrations).
+  if (typeof adapter.rmdir === "function") {
+    await adapter.rmdir(dir);
+    return;
+  }
+  const basePath = adapter.basePath
+    || (typeof adapter.getBasePath === "function" ? adapter.getBasePath() : null);
+  if (basePath) {
+    const fs = require("fs");
+    const path = require("path");
+    const absDir = path.join(basePath, dir);
+    if (fs.existsSync(absDir)) {
+      fs.rmSync(absDir, { recursive: true, force: true });
+    }
+  }
 }
 
 // applyDocsBackfill — v0.52.0 (renamed from applyWikiBackfill, v0.50.0).
