@@ -1,9 +1,9 @@
 ---
-created: <% tp.file.creation_date("YYYY-MM-DD HH:mm") %>
+created_at: "<% tp.file.creation_date("YYYY-MM-DDTHH:mm:ssZ") %>"
+type: trip-board-card
 tags:
   - kanban-card
   - trip-card
-  - <% tp.date.now("YYYY/MM/DD") %>
 ---
 <%*
 const newFilePath = tp.config.target_file?.path || "";

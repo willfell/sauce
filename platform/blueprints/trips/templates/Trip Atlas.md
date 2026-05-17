@@ -1,13 +1,11 @@
 ---
 type: trip
 name: "{{NAME}}"
-created: {{DATE}}
+created_at: "{{DATE}}"
 start_date: {{START_DATE}}
 end_date: {{END_DATE}}
 location: "{{LOCATION}}"
-attending:
-tags:
-  - trip
+people: []
 cssclasses:
   - wide
 ---

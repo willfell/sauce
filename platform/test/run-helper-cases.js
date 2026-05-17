@@ -6466,6 +6466,87 @@ async function caseFA5CoworkRuleFragments() {
     monthSpec && monthSpec.matches === "^\\d{4}-\\d{2}$");
 }
 
+// ============================================================
+// v0.58.0 FA-6 — Domain wave (trips + to-do + boards) canonical vocab
+// ============================================================
+
+async function caseFA6DomainManifests() {
+  console.log("\n--- Case FA6-MANIFESTS: 3 domain blueprints bumped ---");
+  for (const [bp, expected] of [["trips", "0.2.0"], ["to-do", "0.2.0"], ["boards", "0.2.0"]]) {
+    const m = JSON.parse(fs.readFileSync(
+      path.join(WORKSHOP, `platform/blueprints/${bp}/manifest.json`), "utf8"));
+    assertTrue(`FA6-MANIFEST-${bp}: version ${expected}`, m.version === expected,
+      `got: ${m.version}`);
+  }
+}
+
+async function caseFA6DomainTemplates() {
+  console.log("\n--- Case FA6-TEMPLATES: domain templates use canonical created_at ---");
+  const checks = [
+    ["trips/templates/Trip Atlas.md", "trip"],
+    ["trips/templates/Trip Board Card.md", "trip-board-card"],
+    ["to-do/templates/Today To-Do.md", "to-do"],
+    ["boards/templates/Template, Board Card.md", "board-card"],
+  ];
+  for (const [rel, expectedType] of checks) {
+    const body = fs.readFileSync(
+      path.join(WORKSHOP, "platform/blueprints", rel), "utf8");
+    assertTrue(`FA6-TPL-${rel} declares created_at`,
+      /^created_at:/m.test(body) && !/^created:\s/m.test(body),
+      `template ${rel} fm header:\n${body.slice(0, 300)}`);
+    assertTrue(`FA6-TPL-${rel} declares type: ${expectedType}`,
+      new RegExp(`^type:\\s*${expectedType}\\b`, "m").test(body),
+      `template ${rel} fm header:\n${body.slice(0, 300)}`);
+  }
+  // Trip Atlas: attending → people canonical alignment (the FA-6 marquee rename).
+  const tripAtlas = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/trips/templates/Trip Atlas.md"), "utf8");
+  assertTrue("FA6-TPL-TRIP-people: Trip Atlas emits canonical people: (was attending:)",
+    /^people:/m.test(tripAtlas),
+    `trip atlas fm:\n${tripAtlas.slice(0, 300)}`);
+  assertTrue("FA6-TPL-TRIP-drops-attending: Trip Atlas drops legacy attending:",
+    !/^attending:/m.test(tripAtlas));
+  // to-do: was missing type: discriminator pre-FA-6.
+  const todoTpl = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/to-do/templates/Today To-Do.md"), "utf8");
+  assertTrue("FA6-TPL-TODO-type: Today To-Do emits canonical type: to-do",
+    /^type:\s*to-do\b/m.test(todoTpl));
+}
+
+async function caseFA6DomainRuleFragments() {
+  console.log("\n--- Case FA6-EXTENDS: 3 domain blueprints declare extends ---");
+  // trips: 2 existing rules; both extend
+  const trips = JSON.parse(fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/trips/manifest.json"), "utf8"));
+  assertTrue("FA6-EXTENDS-trips: 2 rule_fragments",
+    trips.rule_fragments.length === 2,
+    `got: ${trips.rule_fragments.length}`);
+  assertTrue("FA6-EXTENDS-trips: all rule_fragments declare extends",
+    trips.rule_fragments.every(rf => rf.fragment.extends === "_canonical-vocab"));
+  // trips Trip Atlas rule drops attending requirement + drops trip required_tag
+  const tripAtlasFrag = trips.rule_fragments.find(rf => /Trip Atlas\.md/.test(rf.fragment.scope.path_glob));
+  assertTrue("FA6-EXTENDS-trips: Trip Atlas rule drops attending requirement",
+    !(tripAtlasFrag.fragment.required_frontmatter || {}).attending);
+  assertTrue("FA6-EXTENDS-trips: Trip Atlas rule drops trip required_tag",
+    !(tripAtlasFrag.fragment.required_tags || []).some(t => t.tag === "trip"));
+  // to-do: NEW rule_fragment (was empty)
+  const todo = JSON.parse(fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/to-do/manifest.json"), "utf8"));
+  assertTrue("FA6-EXTENDS-to-do: NEW rule_fragment exists",
+    todo.rule_fragments.length === 1);
+  assertTrue("FA6-EXTENDS-to-do: rule_fragment declares extends",
+    todo.rule_fragments[0].fragment.extends === "_canonical-vocab");
+  // boards: NEW rule_fragment scoping cards
+  const boards = JSON.parse(fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/boards/manifest.json"), "utf8"));
+  assertTrue("FA6-EXTENDS-boards: NEW rule_fragment exists",
+    boards.rule_fragments.length === 1);
+  assertTrue("FA6-EXTENDS-boards: rule_fragment declares extends",
+    boards.rule_fragments[0].fragment.extends === "_canonical-vocab");
+  assertTrue("FA6-EXTENDS-boards: scope spice/boards/cards/**/*.md",
+    boards.rule_fragments[0].fragment.scope.path_glob === "spice/boards/cards/**/*.md");
+}
+
 async function caseFA2RuleFragmentsExtends() {
   console.log("\n--- Case FA2-EXTENDS: all 4 blueprints' rule_fragments declare extends ---");
   const blueprints = ["meetings", "people", "products", "teams"];
@@ -6772,6 +6853,11 @@ async function caseFA2RuleFragmentsExtends() {
   await caseFA5CoworkManifest();
   await caseFA5CoworkTemplates();
   await caseFA5CoworkRuleFragments();
+
+  // v0.58.0 FA-6 — domain wave (trips + to-do + boards) canonical vocab
+  await caseFA6DomainManifests();
+  await caseFA6DomainTemplates();
+  await caseFA6DomainRuleFragments();
 
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);

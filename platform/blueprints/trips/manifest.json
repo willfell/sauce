@@ -1,9 +1,9 @@
 {
   "name": "trips",
-  "version": "0.1.7",
+  "version": "0.2.0",
   "kind": "blueprint",
   "module_directory": "trips",
-  "description": "Per-trip ecosystem under spice/trips/<slug>/. Each trip is a flat folder with an atlas note + 5 baseline sections (Flights, Stay, Packing List, To Do, Notes). Hub at spice/trips/Trips.md lists trips as BeaconCards row-layout cards sorted upcoming-first. 'New Trip' button scaffolds the directory tree from a name + dates + location dialog. Per-trip nav buttons auto-discover sibling sections.",
+  "description": "Per-trip ecosystem under spice/trips/<slug>/. Each trip is a flat folder with an atlas note + 5 baseline sections (Flights, Stay, Packing List, To Do, Notes). Hub at spice/trips/Trips.md lists trips as BeaconCards row-layout cards sorted upcoming-first. 'New Trip' button scaffolds the directory tree from a name + dates + location dialog. Per-trip nav buttons auto-discover sibling sections. v0.2.0 MINOR (v0.58.0 FA-6): canonical-vocab adoption per Frontmatter Alignment workstream. Trip Atlas + Trip Board Card templates emit canonical created_at: (ISO+TZ; replaces legacy created:). Trip Atlas attending: renamed to canonical people: (plural wikilink list per canonical narrowing — entity-people is the cross-blueprint canonical key; trips' attending was the legacy semantic narrowing). Discriminator tag trip stripped from Trip Atlas template (functional kanban-card / trip-card / trips-hub tags retained). Trip Board Card temporal date tag stripped. TripNavButtons helper emits ISO+TZ created_at via NEW _isoWithTz method (replaces legacy YYYY-MM-DD HH:mm dateStr). 2 existing rule_fragments declare extends: _canonical-vocab; Trip Atlas rule drops attending requirement + adds optional people requirement + drops trip required_tag.",
   "depends_on": [
     { "name": "nav-buttons",    "range": ">=2.5.1" },
     { "name": "customjs-guard", "range": ">=1.0.0" },
@@ -45,21 +45,22 @@
       "target": "trips",
       "fragment": {
         "scope": { "path_glob": "spice/trips/*/Trip Atlas.md" },
+        "extends": "_canonical-vocab",
         "required_frontmatter": {
           "type":       { "required": true, "type": "string", "equals": "trip" },
           "start_date": { "required": true, "type": "string", "matches": "^\\d{4}-\\d{2}-\\d{2}$" },
           "end_date":   { "required": true, "type": "string", "matches": "^\\d{4}-\\d{2}-\\d{2}$" },
           "location":   { "required": true, "type": "string" }
-        },
-        "required_tags": [{ "tag": "trip" }]
+        }
       }
     },
     {
       "target": "trips",
       "fragment": {
         "scope": { "path_glob": "spice/trips/Trips.md" },
+        "extends": "_canonical-vocab",
         "required_frontmatter": {
-          "cssclasses": { "required": true, "type": "list", "contains": ["wide", "cards"] }
+          "cssclasses": { "required": true, "type": "list", "contains": ["wide"] }
         }
       }
     }

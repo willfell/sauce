@@ -450,14 +450,11 @@ class TripNavButtons {
         const targetPath = `${tripDir}/${title}.md`;
         if (app.vault.getAbstractFileByPath(targetPath)) return targetPath;
 
-        const now = new Date();
-        const pad = (n) => String(n).padStart(2, "0");
-        const dateStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+        const isoTz = this._isoWithTz(new Date());
 
         const body = `---
-created: ${dateStr}
-tags:
-  - trip
+type: trip-section
+created_at: "${isoTz}"
 ---
 
 \`\`\`dataviewjs
@@ -483,14 +480,12 @@ await dv.view("ranch/views/customjs-guard", { class: "TripNavButtons" });
         }
 
         const tplBase = "ranch/templates";
-        const now = new Date();
-        const pad = (n) => String(n).padStart(2, "0");
-        const dateStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+        const isoTz = this._isoWithTz(new Date());
 
         const subs = (s) => s
             .replaceAll("{{NAME}}", name)
             .replaceAll("{{SLUG}}", slug)
-            .replaceAll("{{DATE}}", dateStr)
+            .replaceAll("{{DATE}}", isoTz)
             .replaceAll("{{START_DATE}}", start_date)
             .replaceAll("{{END_DATE}}", end_date)
             .replaceAll("{{LOCATION}}", location);
@@ -517,5 +512,18 @@ await dv.view("ranch/views/customjs-guard", { class: "TripNavButtons" });
         await writeTpl("Template, Trip Board.md", `board/${slug}-board.md`);
 
         return atlasPath;
+    }
+
+    // v0.58.0 FA-6: canonical created_at format — ISO-8601 with TZ offset.
+    // Matches _canonical-vocab.json's required regex
+    //   ^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}([+-]\d{2}:\d{2}|Z)$
+    _isoWithTz(d) {
+        const pad = (n) => String(n).padStart(2, "0");
+        const off = -d.getTimezoneOffset();
+        const sign = off >= 0 ? "+" : "-";
+        const oa = Math.abs(off);
+        const oh = pad(Math.floor(oa / 60));
+        const om = pad(oa % 60);
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}${sign}${oh}:${om}`;
     }
 }

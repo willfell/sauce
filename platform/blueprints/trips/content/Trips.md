@@ -1,5 +1,6 @@
 ---
 type: trips-hub
+created_at: "2026-05-17T15:30:00-06:00"
 tags:
   - trips-hub
 cssclasses:

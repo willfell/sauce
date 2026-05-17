@@ -3,9 +3,9 @@
 kanban-plugin: board
 title: To Do Board
 type: kanban
+created_at: "2026-05-17T15:30:00-06:00"
 tags:
   - "{{vault_identity_tag}}"
-  - board
 
 ---
 

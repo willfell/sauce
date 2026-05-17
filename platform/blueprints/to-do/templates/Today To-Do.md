@@ -1,9 +1,8 @@
 ---
-created: <% tp.date.now("YYYY-MM-DD HH:mm") %>
+type: to-do
+created_at: "<% tp.file.creation_date("YYYY-MM-DDTHH:mm:ssZ") %>"
 tags:
   - "{{vault_identity_tag}}"
-  - todo
-  - <% tp.date.now("YYYY/MM/DD") %>
 cssclasses:
   - wide
 ---

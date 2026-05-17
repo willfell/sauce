@@ -1,9 +1,9 @@
 {
   "name": "to-do",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "kind": "blueprint",
   "module_directory": "to-do",
-  "description": "Date-routed daily to-do notes feeding SpaceDailyDashboard's tasks panel under spice/to-do/. v0.1.2: filename pattern <Name>-YYYY-MM-DD (filename_prefix \"ToDo-\") per v0.4.2 platform invariant.",
+  "description": "Date-routed daily to-do notes feeding SpaceDailyDashboard's tasks panel under spice/to-do/. v0.1.2: filename pattern <Name>-YYYY-MM-DD (filename_prefix \"ToDo-\") per v0.4.2 platform invariant. v0.2.0 MINOR (v0.58.0 FA-6): canonical-vocab adoption per Frontmatter Alignment. Template now emits type: \"to-do\" (was the ONE blueprint missing the canonical type discriminator per FA audit) + canonical created_at: (ISO+TZ; replaces legacy created:). Discriminator tag todo stripped; temporal YYYY/MM/DD tag stripped. NEW canonical-vocab rule_fragment (to-do had no rule fragments before).",
   "depends_on": [
     { "name": "nav-buttons",    "range": ">=2.2.0" },
     { "name": "customjs-guard", "range": ">=1.0.0" }
@@ -37,5 +37,17 @@
       "message": "To-do blueprint installed at spice/to-do/. REQUIRED: enable the Templater community plugin if not already enabled. Click '+ Today's To-Do' in the nav-button row to create today's file at spice/to-do/YYYY/MM-MMMM/YYYY-MM-DD-ToDo.md. Manual file creation in spice/to-do/ now also auto-applies the template (via Templater folder-template registration). Tasks added in today's file appear in the daily dashboard's Today's Tasks panel."
     }
   ],
-  "rule_fragments": []
+  "rule_fragments": [
+    {
+      "target": "to-do",
+      "fragment": {
+        "scope": { "path_glob": "spice/to-do/**/*.md" },
+        "extends": "_canonical-vocab",
+        "required_frontmatter": {
+          "type": { "required": true, "type": "string", "equals": "to-do" }
+        },
+        "naming_pattern": "^ToDo-\\d{4}-\\d{2}-\\d{2}\\.md$"
+      }
+    }
+  ]
 }
