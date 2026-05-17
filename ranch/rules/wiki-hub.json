@@ -190,6 +190,44 @@
             ]
           }
         ]
+      },
+      {
+        "scope": {
+          "path_glob": "spice/projects/*/wiki/Wiki.md"
+        },
+        "frontmatter_branch": [
+          {
+            "when": {
+              "frontmatter": {
+                "type": "wiki-hub"
+              }
+            },
+            "required_frontmatter": {
+              "type": {
+                "required": true,
+                "type": "string",
+                "matches": "^wiki-hub$"
+              },
+              "project_slug": {
+                "required": true,
+                "type": "string"
+              },
+              "project_name": {
+                "required": true,
+                "type": "string"
+              },
+              "created": {
+                "required": true,
+                "type": "string"
+              }
+            },
+            "required_tags": [
+              {
+                "tag": "wiki-hub"
+              }
+            ]
+          }
+        ]
       }
     ]
   }

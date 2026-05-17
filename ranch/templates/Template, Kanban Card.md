@@ -19,8 +19,44 @@
 // v0.49.1 (superseded) tried tp.config.active_file which is the NEW file
 // in this flow — symptom: card files landing at vault root with no
 // workstream picker.
+//
+// v0.51.1 patch: cache-first via app.metadataCache.getBacklinksForFile;
+// falls back to v0.49.2 vault-scan on cache miss. The cache path is O(K)
+// where K = backlink count on the new file (usually 1), vs. the vault-scan's
+// O(N) read of every kanban-plugin file body. Cache is identity-based, so
+// title collisions across the vault resolve correctly. Fallback preserved
+// byte-for-byte for cold-cache safety (kanban modifies the board immediately
+// before invoking Templater; metadataCache reindex is event-driven and
+// typically — but not guaranteed — current by template-run time).
 async function _findSourceKanbanBoard(title) {
     if (!title) return "";
+
+    // --- Cache-first path: query indexed backlinks on the new file ---
+    const newFile = tp.config.target_file
+        || tp.file.find_tfile(tp.file.path(true));
+    if (newFile) {
+        try {
+            const backlinks = app.metadataCache.getBacklinksForFile(newFile);
+            const sources = backlinks?.data ? Object.keys(backlinks.data) : [];
+            const cacheCandidates = [];
+            for (const srcPath of sources) {
+                const srcFile = app.vault.getAbstractFileByPath(srcPath);
+                if (!srcFile || !srcFile.stat) continue;
+                const cache = app.metadataCache.getFileCache(srcFile);
+                const isKanban = cache?.frontmatter?.["kanban-plugin"] === "board"
+                    || srcPath.endsWith("-board.md");
+                if (isKanban) {
+                    cacheCandidates.push({ path: srcPath, mtime: srcFile.stat.mtime || 0 });
+                }
+            }
+            if (cacheCandidates.length > 0) {
+                cacheCandidates.sort((a, b) => b.mtime - a.mtime);
+                return cacheCandidates[0].path;
+            }
+        } catch (_) { /* cache path failed; fall through to vault scan */ }
+    }
+
+    // --- Vault-scan fallback (v0.49.2 behavior; cold-cache safety net) ---
     const candidates = [];
     const files = app.vault.getMarkdownFiles();
     for (const f of files) {
