@@ -4,7 +4,10 @@ const sourceBoard = app.workspace.getActiveFile()?.path || targetPath;
 
 // Derive project slug + task folder from the path:
 // spice/projects/<project>/tasks/<Task>/board/<Card>.md
-const m = (targetPath || "").match(/^beacon\/projects\/([^/]+)\/tasks\/([^/]+)\/board\/([^/]+)$/);
+// v0.55.0 FA-3 drive-by: regex was '^beacon/projects/' (stale from pre-v0.23.0
+// rebrand) which never matched post-v0.23.0 paths — task_parent was empty on
+// every new card. Now matches the live spice/projects/ convention.
+const m = (targetPath || "").match(/^spice\/projects\/([^/]+)\/tasks\/([^/]+)\/board\/([^/]+)$/);
 const projectSlug = m?.[1] || "";
 const taskFolder = m?.[2] || "";
 const cardName = tp.file.title;
@@ -18,7 +21,7 @@ const alias = projectSlug && taskFolder
     : cardName;
 -%>
 ---
-created: <% tp.date.now("YYYY-MM-DD HH:mm") %>
+created_at: "<% tp.file.creation_date("YYYY-MM-DDTHH:mm:ssZ") %>"
 task_parent: <% taskParent %>
 source_board: <% sourceBoard %>
 status: planning
@@ -26,7 +29,6 @@ aliases:
   - "<% alias %>"
 tags:
   - task-board-card
-  - <% tp.date.now("YYYY/MM/DD") %>
 ---
 <%*
 // Auto-promote into per-task folder convention.

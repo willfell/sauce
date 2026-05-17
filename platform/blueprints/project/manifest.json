@@ -1,6 +1,6 @@
 {
   "name": "project",
-  "version": "1.12.1",
+  "version": "1.13.0",
   "kind": "blueprint",
   "module_directory": "projects",
   "skills_dir": ".claude/skills/project",
@@ -76,14 +76,14 @@
       },
       "frontmatter_template": {
         "type": "project",
+        "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
         "description": "",
         "status": "idea",
         "status_changed_at": "{{now.YYYY-MM-DD}}",
         "workstreams": [],
         "teams": [],
         "products": [],
-        "created": "{{now.YYYY-MM-DD HH:mm}}",
-        "tags": ["project"]
+        "tags": []
       },
       "body_template": "Template, Project.md",
       "extra_files": [
@@ -106,9 +106,9 @@
       },
       "frontmatter_template": {
         "type": "doc-note",
+        "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
         "project": "[[{{current_file.frontmatter.project_name}}]]",
         "project_slug": "{{current_file.frontmatter.project_slug}}",
-        "created": "{{now.YYYY-MM-DD HH:mm}}",
         "tags": ["doc-note"]
       },
       "body_template": "Template, Doc Note.md",
@@ -138,19 +138,18 @@
       "target": "project",
       "fragment": {
         "scope": { "path_glob": "spice/projects/*/*.md" },
+        "extends": "_canonical-vocab",
         "frontmatter_branch": [
           {
             "when": { "frontmatter": { "type": "project" } },
             "required_frontmatter": {
-              "created":           { "required": true,  "type": "string" },
               "description":       { "required": true,  "type": "string" },
               "workstreams":       { "required": true,  "type": "list" },
               "status":            { "required": true,  "type": "string", "matches": "^(idea|planning|in-progress|blocked|superseded|cancelled|done)$" },
               "status_changed_at": { "required": true,  "type": "string", "matches": "^\\d{4}-\\d{2}-\\d{2}$" },
               "teams":             { "required": false, "type": "list" },
               "products":          { "required": false, "type": "list" }
-            },
-            "required_tags": [{ "tag": "project" }]
+            }
           }
         ]
       }
@@ -159,14 +158,14 @@
       "target": "docs-hub",
       "fragment": {
         "scope": { "path_glob": "spice/projects/*/docs/Docs.md" },
+        "extends": "_canonical-vocab",
         "frontmatter_branch": [
           {
             "when": { "frontmatter": { "type": "docs-hub" } },
             "required_frontmatter": {
               "type":         { "required": true, "type": "string", "matches": "^docs-hub$" },
               "project_slug": { "required": true, "type": "string" },
-              "project_name": { "required": true, "type": "string" },
-              "created":      { "required": true, "type": "string" }
+              "project_name": { "required": true, "type": "string" }
             },
             "required_tags": [{ "tag": "docs-hub" }]
           }
@@ -177,14 +176,14 @@
       "target": "doc-note",
       "fragment": {
         "scope": { "path_glob": "spice/projects/*/docs/*.md", "exclude_basenames": ["Docs.md"] },
+        "extends": "_canonical-vocab",
         "frontmatter_branch": [
           {
             "when": { "frontmatter": { "type": "doc-note" } },
             "required_frontmatter": {
               "type":         { "required": true, "type": "string", "matches": "^doc-note$" },
               "project":      { "required": true, "type": "string" },
-              "project_slug": { "required": true, "type": "string" },
-              "created":      { "required": true, "type": "string" }
+              "project_slug": { "required": true, "type": "string" }
             },
             "required_tags": [{ "tag": "doc-note" }]
           }

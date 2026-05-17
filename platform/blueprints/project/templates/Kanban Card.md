@@ -173,13 +173,12 @@ if (planIdx >= 0 && planIdx + 1 < parts.length) {
 }
 -%>
 ---
-created: <% tp.file.creation_date("YYYY-MM-DD HH:mm") %>
+created_at: "<% tp.file.creation_date("YYYY-MM-DDTHH:mm:ssZ") %>"
 source_board: <% sourceBoard %>
 workstream: <% workstreamValue %>
 tags:
   - kanban-card
   - project-card
-  - <% tp.date.now("YYYY/MM/DD") %>
 ---
 <%*
 // Auto-promote into per-task folder convention.

@@ -2,9 +2,9 @@
 kanban-plugin: board
 title: {{TASK_NAME}} Task Board
 type: kanban
+created_at: {{DATE}}
 tags:
   - task-board
-  - {{DATE_TAG}}
 ---
 
 ## Planning

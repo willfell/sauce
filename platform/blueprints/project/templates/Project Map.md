@@ -1,6 +1,6 @@
 ---
-created: {{now.YYYY-MM-DD HH:mm}}
 type: map
+created_at: "{{now.YYYY-MM-DDTHH:mm:ssZ}}"
 tags:
   - project/{{prompts.slug}}
 workstreams: []
