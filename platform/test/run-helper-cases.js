@@ -5456,7 +5456,7 @@ async function caseTeam3RuleFragmentRequiresProduct() {
 // pattern (no temp-vault scaffolding needed; in-memory record + fragment).
 // ============================================================
 async function caseProd4ValidatorAcceptsWellFormedProduct() {
-  console.log("\n--- Case PROD-4: products validator accepts a well-formed Product note ---");
+  console.log("\n--- Case PROD-4: products validator accepts a well-formed Product note (v0.54.0 canonical) ---");
   const manifestPath = path.join(WORKSHOP, "platform/blueprints/products/manifest.json");
   const manifest = _readJson(manifestPath);
   const fragments = manifest.rule_fragments.map((rf) => rf.fragment);
@@ -5465,37 +5465,37 @@ async function caseProd4ValidatorAcceptsWellFormedProduct() {
     frontmatter: {
       type: "product",
       name: "Sauce",
-      created: "2026-05-12",
-      tags: ["product"],
+      created_at: "2026-05-12T09:30:00-07:00",
     },
     body: "# Sauce\n",
     blueprint: "products",
   };
-  const violations = _ruleRunner.applyRules(fragments, record, { workshopRoot: WORKSHOP });
+  const violations = _ruleRunner.applyRules(fragments, record,
+    { workshopRoot: WORKSHOP, vaultPath: null });
   assertEqual(violations.length, 0,
     "PROD-4: well-formed Product note produces zero violations");
 }
 
-async function caseProd5ValidatorRejectsProductMissingTag() {
-  console.log("\n--- Case PROD-5: products validator rejects a Product note missing required tag ---");
+async function caseProd5ValidatorRejectsProductMissingCreatedAt() {
+  console.log("\n--- Case PROD-5: products validator rejects a Product note missing required created_at (canonical) ---");
   const manifestPath = path.join(WORKSHOP, "platform/blueprints/products/manifest.json");
   const manifest = _readJson(manifestPath);
   const fragments = manifest.rule_fragments.map((rf) => rf.fragment);
-  // Same as PROD-4 minus the required `product` tag.
+  // Missing created_at — canonical-vocab extends declares it required.
   const record = {
     relPath: "spice/products/Acme.md",
     frontmatter: {
       type: "product",
       name: "Acme",
-      created: "2026-05-12",
-      // tags omitted on purpose
+      // created_at omitted on purpose
     },
     body: "# Acme\n",
     blueprint: "products",
   };
-  const violations = _ruleRunner.applyRules(fragments, record, { workshopRoot: WORKSHOP });
-  assertTrue("PROD-5: missing-tag Product note surfaces required_tags.missing",
-    violations.some((v) => v.rule === "required_tags.missing" && /product/.test(v.message || "")));
+  const violations = _ruleRunner.applyRules(fragments, record,
+    { workshopRoot: WORKSHOP, vaultPath: null });
+  assertTrue("PROD-5: missing-created_at Product surfaces required_frontmatter.created_at via extends",
+    violations.some((v) => v.rule === "required_frontmatter.created_at"));
 }
 
 // ============================================================
@@ -5507,7 +5507,7 @@ async function caseProd5ValidatorRejectsProductMissingTag() {
 // `product:` wikilink; TEAM-6 red = missing required `team` tag.
 // ============================================================
 async function caseTeam4ValidatorAcceptsWellFormedTeam() {
-  console.log("\n--- Case TEAM-4: teams validator accepts a well-formed Team note ---");
+  console.log("\n--- Case TEAM-4: teams validator accepts a well-formed Team note (v0.54.0 canonical) ---");
   const manifestPath = path.join(WORKSHOP, "platform/blueprints/teams/manifest.json");
   const manifest = _readJson(manifestPath);
   const fragments = manifest.rule_fragments.map((rf) => rf.fragment);
@@ -5516,62 +5516,62 @@ async function caseTeam4ValidatorAcceptsWellFormedTeam() {
     frontmatter: {
       type: "team",
       name: "Platform Engineering",
-      created: "2026-05-12",
-      tags: ["team"],
-      product: "[[Sauce]]",
+      created_at: "2026-05-12T09:30:00-07:00",
+      products: ["[[Sauce]]"],
     },
     body: "# Platform Engineering\n",
     blueprint: "teams",
   };
-  const violations = _ruleRunner.applyRules(fragments, record, { workshopRoot: WORKSHOP });
+  const violations = _ruleRunner.applyRules(fragments, record,
+    { workshopRoot: WORKSHOP, vaultPath: null });
   assertEqual(violations.length, 0,
     "TEAM-4: well-formed Team note produces zero violations");
 }
 
-async function caseTeam5ValidatorRejectsTeamMissingProduct() {
-  console.log("\n--- Case TEAM-5: teams validator rejects a Team note missing required product: field ---");
+async function caseTeam5ValidatorRejectsTeamMissingProducts() {
+  console.log("\n--- Case TEAM-5: teams validator rejects a Team note missing required products: list (canonical) ---");
   const manifestPath = path.join(WORKSHOP, "platform/blueprints/teams/manifest.json");
   const manifest = _readJson(manifestPath);
   const fragments = manifest.rule_fragments.map((rf) => rf.fragment);
-  // Same as TEAM-4 minus the required `product:` wikilink.
+  // Missing products list (was: missing singular product wikilink pre-FA-2).
   const record = {
     relPath: "spice/teams/Orphan.md",
     frontmatter: {
       type: "team",
       name: "Orphan",
-      created: "2026-05-12",
-      tags: ["team"],
-      // product omitted on purpose
+      created_at: "2026-05-12T09:30:00-07:00",
+      // products omitted on purpose
     },
     body: "# Orphan\n",
     blueprint: "teams",
   };
-  const violations = _ruleRunner.applyRules(fragments, record, { workshopRoot: WORKSHOP });
-  assertTrue("TEAM-5: missing-product Team note surfaces required_frontmatter.product",
-    violations.some((v) => v.rule === "required_frontmatter.product"));
+  const violations = _ruleRunner.applyRules(fragments, record,
+    { workshopRoot: WORKSHOP, vaultPath: null });
+  assertTrue("TEAM-5: missing-products Team surfaces required_frontmatter.products",
+    violations.some((v) => v.rule === "required_frontmatter.products"));
 }
 
-async function caseTeam6ValidatorRejectsTeamMissingTag() {
-  console.log("\n--- Case TEAM-6: teams validator rejects a Team note missing required tag ---");
+async function caseTeam6ValidatorRejectsTeamMissingCreatedAt() {
+  console.log("\n--- Case TEAM-6: teams validator rejects a Team note missing canonical created_at ---");
   const manifestPath = path.join(WORKSHOP, "platform/blueprints/teams/manifest.json");
   const manifest = _readJson(manifestPath);
   const fragments = manifest.rule_fragments.map((rf) => rf.fragment);
-  // Same as TEAM-4 minus the required `team` tag.
+  // Missing created_at — canonical-vocab extends declares it required.
   const record = {
     relPath: "spice/teams/Mobile.md",
     frontmatter: {
       type: "team",
       name: "Mobile",
-      created: "2026-05-12",
-      product: "[[Sauce]]",
-      // tags omitted on purpose
+      products: ["[[Sauce]]"],
+      // created_at omitted on purpose
     },
     body: "# Mobile\n",
     blueprint: "teams",
   };
-  const violations = _ruleRunner.applyRules(fragments, record, { workshopRoot: WORKSHOP });
-  assertTrue("TEAM-6: missing-tag Team note surfaces required_tags.missing",
-    violations.some((v) => v.rule === "required_tags.missing" && /team/.test(v.message || "")));
+  const violations = _ruleRunner.applyRules(fragments, record,
+    { workshopRoot: WORKSHOP, vaultPath: null });
+  assertTrue("TEAM-6: missing-created_at Team surfaces required_frontmatter.created_at via extends",
+    violations.some((v) => v.rule === "required_frontmatter.created_at"));
 }
 
 // ============================================================
@@ -6206,6 +6206,92 @@ async function casePDC7NavButtonsRenamedToDocs() {
     `label=${hasDocsLabel} icon=${hasDocsIcon} path=${hasDocsPath} guard=${hasDocsContextGuard} clean=${noWikiRemaining}`);
 }
 
+// ============================================================
+// v0.54.0 FA-2 — canonical vocab adoption asserts (meetings + people + products + teams)
+// ============================================================
+
+async function caseFA2MeetingsCanonical() {
+  console.log("\n--- Case FA2-MEETINGS: meetings@0.6.0 canonical vocab adoption ---");
+  const manifest = JSON.parse(fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/meetings/manifest.json"), "utf8"));
+  assertTrue("FA2-MEETINGS-1: meetings version 0.6.0", manifest.version === "0.6.0",
+    `got: ${manifest.version}`);
+  const ec = manifest.new_entity_buttons[0].frontmatter_template;
+  assertTrue("FA2-MEETINGS-2: entity-create frontmatter_template has created_at",
+    typeof ec.created_at === "string" && /\{\{now\.YYYY-MM-DDTHH:mm:ssZ\}\}/.test(ec.created_at),
+    `got: ${ec.created_at}`);
+  assertTrue("FA2-MEETINGS-3: entity-create frontmatter_template drops 'meeting' discriminator tag",
+    Array.isArray(ec.tags) && !ec.tags.includes("meeting"),
+    `got tags: ${JSON.stringify(ec.tags)}`);
+}
+
+async function caseFA2PeopleCanonical() {
+  console.log("\n--- Case FA2-PEOPLE: people@0.3.0 canonical vocab adoption ---");
+  const manifest = JSON.parse(fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/people/manifest.json"), "utf8"));
+  assertTrue("FA2-PEOPLE-1: people version 0.3.0", manifest.version === "0.3.0",
+    `got: ${manifest.version}`);
+  const ec = manifest.new_entity_buttons[0].frontmatter_template;
+  assertTrue("FA2-PEOPLE-2: entity-create frontmatter_template has type:person",
+    ec.type === "person");
+  assertTrue("FA2-PEOPLE-3: entity-create frontmatter_template has created_at",
+    typeof ec.created_at === "string" && /\{\{now\./.test(ec.created_at));
+  assertTrue("FA2-PEOPLE-4: entity-create frontmatter_template drops 'person' discriminator tag",
+    Array.isArray(ec.tags) && !ec.tags.includes("person"),
+    `got tags: ${JSON.stringify(ec.tags)}`);
+}
+
+async function caseFA2ProductsCanonical() {
+  console.log("\n--- Case FA2-PRODUCTS: products@0.2.0 canonical vocab adoption ---");
+  const manifest = JSON.parse(fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/products/manifest.json"), "utf8"));
+  assertTrue("FA2-PRODUCTS-1: products version 0.2.0", manifest.version === "0.2.0",
+    `got: ${manifest.version}`);
+  const tmpl = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/products/templates/Template, Product.md"), "utf8");
+  assertTrue("FA2-PRODUCTS-2: Template, Product.md uses created_at (not created)",
+    /created_at:/.test(tmpl) && !/^created:/m.test(tmpl));
+  assertTrue("FA2-PRODUCTS-3: Template, Product.md drops 'product' discriminator tag",
+    !/\n\s+- product\s*$/m.test(tmpl) || /tags:\s*$/m.test(tmpl));
+}
+
+async function caseFA2TeamsCanonical() {
+  console.log("\n--- Case FA2-TEAMS: teams@0.2.0 canonical vocab adoption + product→products ---");
+  const manifest = JSON.parse(fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/teams/manifest.json"), "utf8"));
+  assertTrue("FA2-TEAMS-1: teams version 0.2.0", manifest.version === "0.2.0",
+    `got: ${manifest.version}`);
+  const tmpl = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/teams/templates/Template, Team.md"), "utf8");
+  assertTrue("FA2-TEAMS-2: Template, Team.md uses created_at (not created)",
+    /created_at:/.test(tmpl));
+  assertTrue("FA2-TEAMS-3: Template, Team.md emits products: list (not product: scalar)",
+    /products:\n\s+- "\[\[/.test(tmpl));
+  assertTrue("FA2-TEAMS-4: Template, Team.md no singular product: line outside the products list",
+    !/^product: /m.test(tmpl));
+  const rule = manifest.rule_fragments[0].fragment;
+  assertTrue("FA2-TEAMS-5: rule_fragment products field is type:list min_length 1",
+    rule.required_frontmatter && rule.required_frontmatter.products &&
+    rule.required_frontmatter.products.type === "list" &&
+    rule.required_frontmatter.products.min_length === 1);
+  assertTrue("FA2-TEAMS-6: rule_fragment no longer declares 'product' (singular)",
+    !rule.required_frontmatter.product);
+}
+
+async function caseFA2RuleFragmentsExtends() {
+  console.log("\n--- Case FA2-EXTENDS: all 4 blueprints' rule_fragments declare extends ---");
+  const blueprints = ["meetings", "people", "products", "teams"];
+  for (const bp of blueprints) {
+    const manifest = JSON.parse(fs.readFileSync(
+      path.join(WORKSHOP, "platform/blueprints", bp, "manifest.json"), "utf8"));
+    const allExtend = manifest.rule_fragments.every(rf =>
+      rf.fragment && rf.fragment.extends === "_canonical-vocab");
+    assertTrue(`FA2-EXTENDS-${bp}: all rule_fragments declare extends:"_canonical-vocab"`,
+      allExtend,
+      `manifest rule_fragments: ${JSON.stringify(manifest.rule_fragments.map(r => r.fragment.extends))}`);
+  }
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -6394,7 +6480,7 @@ async function casePDC7NavButtonsRenamedToDocs() {
   // v0.39.0 S2.4 — products@0.1.0 validator green/red on Product notes
   // using the real rule_fragment loaded from the products manifest.
   await caseProd4ValidatorAcceptsWellFormedProduct();
-  await caseProd5ValidatorRejectsProductMissingTag();
+  await caseProd5ValidatorRejectsProductMissingCreatedAt();
 
   // v0.39.0 S3.6 — teams@0.1.0 install coverage (3 cases mirroring PROD-1/2/3).
   // Co-subscribes products in the fake fixture since teams depends_on products.
@@ -6405,8 +6491,8 @@ async function casePDC7NavButtonsRenamedToDocs() {
   // v0.39.0 S4.4 — teams@0.1.0 validator green/red on Team notes
   // using the real rule_fragment loaded from the teams manifest.
   await caseTeam4ValidatorAcceptsWellFormedTeam();
-  await caseTeam5ValidatorRejectsTeamMissingProduct();
-  await caseTeam6ValidatorRejectsTeamMissingTag();
+  await caseTeam5ValidatorRejectsTeamMissingProducts();
+  await caseTeam6ValidatorRejectsTeamMissingCreatedAt();
 
   // v0.39.0 S5.4 — project@1.6.0 validator green/red on project notes
   // for the expanded frontmatter (status enum + status_changed_at +
@@ -6475,6 +6561,13 @@ async function casePDC7NavButtonsRenamedToDocs() {
   // v0.52.0 — PDC-6 + PDC-7 new asserts.
   await casePDC6PathConventionDocs();
   await casePDC7NavButtonsRenamedToDocs();
+
+  // v0.54.0 FA-2 — canonical vocab adoption asserts (meetings + people + products + teams)
+  await caseFA2MeetingsCanonical();
+  await caseFA2PeopleCanonical();
+  await caseFA2ProductsCanonical();
+  await caseFA2TeamsCanonical();
+  await caseFA2RuleFragmentsExtends();
 
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
