@@ -120,9 +120,9 @@
             "body_template": "ranch/templates/Template, Project Board.md"
           },
           {
-            "subfolder": "wiki",
-            "filename_pattern": "Wiki.md",
-            "body_template": "ranch/templates/Template, Wiki Hub.md"
+            "subfolder": "docs",
+            "filename_pattern": "Docs.md",
+            "body_template": "ranch/templates/Template, Docs Hub.md"
           }
         ],
         "render_in": {
@@ -132,35 +132,35 @@
       },
       {
         "blueprint": "project",
-        "id": "wiki-note",
-        "label": "+ New Wiki Note",
+        "id": "doc-note",
+        "label": "+ New Doc",
         "icon": "file-plus",
         "prompts": [
           {
             "key": "title",
-            "label": "Wiki note title",
+            "label": "Doc title",
             "type": "string",
             "required": true,
             "validate": "safe-filename"
           }
         ],
         "destination": {
-          "folder_prefix": "spice/projects/{{current_file.frontmatter.project_slug}}/wiki",
+          "folder_prefix": "spice/projects/{{current_file.frontmatter.project_slug}}/docs",
           "filename_prefix": "{{prompts.title|sanitize-filename}}"
         },
         "frontmatter_template": {
-          "type": "wiki-note",
+          "type": "doc-note",
           "project": "[[{{current_file.frontmatter.project_name}}]]",
           "project_slug": "{{current_file.frontmatter.project_slug}}",
           "created": "{{now.YYYY-MM-DD HH:mm}}",
           "tags": [
-            "wiki-note"
+            "doc-note"
           ]
         },
-        "body_template": "ranch/templates/Template, Wiki Note.md",
+        "body_template": "ranch/templates/Template, Doc Note.md",
         "render_in": {
           "kind": "hub",
-          "target_path": "ranch/templates/Template, Wiki Hub.md"
+          "target_path": "ranch/templates/Template, Docs Hub.md"
         }
       }
     ]
@@ -280,9 +280,9 @@
           "body_template": "ranch/templates/Template, Project Board.md"
         },
         {
-          "subfolder": "wiki",
-          "filename_pattern": "Wiki.md",
-          "body_template": "ranch/templates/Template, Wiki Hub.md"
+          "subfolder": "docs",
+          "filename_pattern": "Docs.md",
+          "body_template": "ranch/templates/Template, Docs Hub.md"
         }
       ],
       "render_in": {
@@ -292,35 +292,35 @@
     },
     {
       "blueprint": "project",
-      "id": "wiki-note",
-      "label": "+ New Wiki Note",
+      "id": "doc-note",
+      "label": "+ New Doc",
       "icon": "file-plus",
       "prompts": [
         {
           "key": "title",
-          "label": "Wiki note title",
+          "label": "Doc title",
           "type": "string",
           "required": true,
           "validate": "safe-filename"
         }
       ],
       "destination": {
-        "folder_prefix": "spice/projects/{{current_file.frontmatter.project_slug}}/wiki",
+        "folder_prefix": "spice/projects/{{current_file.frontmatter.project_slug}}/docs",
         "filename_prefix": "{{prompts.title|sanitize-filename}}"
       },
       "frontmatter_template": {
-        "type": "wiki-note",
+        "type": "doc-note",
         "project": "[[{{current_file.frontmatter.project_name}}]]",
         "project_slug": "{{current_file.frontmatter.project_slug}}",
         "created": "{{now.YYYY-MM-DD HH:mm}}",
         "tags": [
-          "wiki-note"
+          "doc-note"
         ]
       },
-      "body_template": "ranch/templates/Template, Wiki Note.md",
+      "body_template": "ranch/templates/Template, Doc Note.md",
       "render_in": {
         "kind": "hub",
-        "target_path": "ranch/templates/Template, Wiki Hub.md"
+        "target_path": "ranch/templates/Template, Docs Hub.md"
       }
     }
   ]

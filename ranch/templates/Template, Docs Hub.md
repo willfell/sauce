@@ -1,11 +1,11 @@
 ---
-type: wiki-hub
+type: docs-hub
 project: "[[{{prompts.name}}]]"
 project_slug: {{prompts.slug}}
 project_name: {{prompts.name}}
 created: {{now.YYYY-MM-DD HH:mm}}
 tags:
-  - wiki-hub
+  - docs-hub
 ---
 
 ```dataviewjs
@@ -19,12 +19,12 @@ await dv.view("ranch/views/customjs-guard", { class: "ProjectNavButtons" });
 ---
 
 ```dataviewjs
-// entity-create:wiki-note — installer-managed; do not delete this comment
-await dv.view("ranch/views/customjs-guard", { class: "AccentButton", args: [{ id: "wiki-note", label: "+ New Wiki Note", icon: "file-plus" }] });
+// entity-create:doc-note — installer-managed; do not delete this comment
+await dv.view("ranch/views/customjs-guard", { class: "AccentButton", args: [{ id: "doc-note", label: "+ New Doc", icon: "file-plus" }] });
 ```
 
 ---
 
 ```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "ProjectWikiCards" });
+await dv.view("ranch/views/customjs-guard", { class: "ProjectDocsCards" });
 ```

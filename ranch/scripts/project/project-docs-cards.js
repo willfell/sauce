@@ -1,16 +1,16 @@
-class ProjectWikiCards {
+class ProjectDocsCards {
   async render(dv) {
     const currentFile = dv.current()?.file;
     if (!currentFile) return;
-    const wikiFolder = currentFile.folder;
+    const docsFolder = currentFile.folder;
 
     const siblings = dv
-      .pages(`"${wikiFolder}"`)
-      .where((p) => p.type === "wiki-note")
+      .pages(`"${docsFolder}"`)
+      .where((p) => p.type === "doc-note")
       .sort((p) => p.created, "desc");
 
     if (siblings.length === 0) {
-      dv.paragraph("> [!info] No wiki notes yet · Click \"+ New Wiki Note\" above to create one");
+      dv.paragraph("> [!info] No docs yet · Click \"+ New Doc\" above to create one");
       return;
     }
 

@@ -70,14 +70,14 @@ class ProjectNavButtons {
             }
         }
 
-        // v0.50.0 — Inside wiki/?
-        // wiki-hub:  spice/projects/<slug>/wiki/Wiki.md
-        // wiki-note: spice/projects/<slug>/wiki/<Title>.md
-        if (pathParts[tasksIdx] === "wiki" && pathParts.length === planningIdx + 4) {
-            if (basename === "Wiki") {
-                return { context: "wiki-hub", pathParts, planningIdx, projectSlug, projectDir };
+        // v0.52.0 — Inside docs/?
+        // docs-hub:  spice/projects/<slug>/docs/Docs.md
+        // doc-note:  spice/projects/<slug>/docs/<Title>.md
+        if (pathParts[tasksIdx] === "docs" && pathParts.length === planningIdx + 4) {
+            if (basename === "Docs") {
+                return { context: "docs-hub", pathParts, planningIdx, projectSlug, projectDir };
             }
-            return { context: "wiki-note", pathParts, planningIdx, projectSlug, projectDir };
+            return { context: "doc-note", pathParts, planningIdx, projectSlug, projectDir };
         }
 
         // Project hub: lives directly under project dir, has #project tag
@@ -287,7 +287,7 @@ class ProjectNavButtons {
             map: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12h-8"/><path d="M21 6H8"/><path d="M21 18h-8"/><path d="M3 6v4c0 1.1.9 2 2 2h3"/><path d="M3 10v6c0 1.1.9 2 2 2h3"/></svg>`,
             board: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>`,
             task: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="m9 12 2 2 4-4"/></svg>`,
-            wiki: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg>`
+            docs: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg>`
         };
 
         const filePath = dv.current().file.path;
@@ -349,12 +349,12 @@ class ProjectNavButtons {
         if (!isBoard) {
             buttons.push({ label: "Project Board", icon: icons.board, path: boardPath });
         }
-        // v0.50.0 — Wiki button: shown on every project context except wiki-hub itself.
+        // v0.52.0 — Docs button: shown on every project context except docs-hub itself.
         // Hidden on projects-hub / task-board / task-board-card (those branches reset
         // buttons[] below). Visible on project-hub, project-map, project-board,
-        // task-hub, task-note, legacy-sub-note, wiki-note.
-        if (ctx.context !== "wiki-hub") {
-            buttons.push({ label: "Wiki", icon: icons.wiki, path: `${projectDir}/wiki/Wiki.md` });
+        // task-hub, task-note, legacy-sub-note, doc-note.
+        if (ctx.context !== "docs-hub") {
+            buttons.push({ label: "Docs", icon: icons.docs, path: `${projectDir}/docs/Docs.md` });
         }
 
         // Task-note context: ensure a Task: <X> button leads back to the parent task hub.
