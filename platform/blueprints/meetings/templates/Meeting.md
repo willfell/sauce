@@ -3,18 +3,17 @@ const attendeesInput = await tp.system.prompt("Attendees (comma-separated, e.g.,
 const attendees = attendeesInput ? attendeesInput.split(",").map(a => a.trim()).filter(a => a.length > 0) : [];
 -%>
 ---
-date: <% tp.file.creation_date("YYYY-MM-DD HH:mm") %>
+date: <% tp.file.creation_date("YYYY-MM-DDTHH:mm:ssZ") %>
+created_at: "<% tp.file.creation_date("YYYY-MM-DDTHH:mm:ssZ") %>"
 type: meeting
 tags:
   - "{{vault_identity_tag}}"
-  - meeting
-  - <% tp.date.now("YYYY/MM/DD") %>
-<%* for (const attendee of attendees) {
-  const tagName = attendee.replace(/\s+/g, "-");
-  tR += `  - person/${tagName}\n`;
-} -%>
 summary: ""
 attendees:
+<%* for (const attendee of attendees) {
+  tR += `  - "[[${attendee}]]"\n`;
+} -%>
+people:
 <%* for (const attendee of attendees) {
   tR += `  - "[[${attendee}]]"\n`;
 } -%>

@@ -1,6 +1,6 @@
 {
   "name": "meetings",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "kind": "blueprint",
   "module_directory": "meetings",
   "skills_dir": ".claude/skills/meetings",
@@ -40,11 +40,13 @@
         "filename_suffix": ""
       },
       "frontmatter_template": {
-        "date": "{{now.YYYY-MM-DD HH:mm}}",
+        "date": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+        "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
         "type": "meeting",
         "summary": "",
         "attendees": [],
-        "tags": ["meeting"],
+        "people": [],
+        "tags": [],
         "cssclasses": ["wide"]
       },
       "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n",
@@ -88,14 +90,14 @@
       "target": "meetings",
       "fragment": {
         "scope": { "path_glob": "spice/meetings/notes/**/*.md" },
+        "extends": "_canonical-vocab",
         "frontmatter_branch": [
           {
             "when": { "frontmatter": { "type": "meeting" } },
             "required_frontmatter": {
               "date":      { "required": true, "type": "string" },
               "attendees": { "required": true, "type": "list" }
-            },
-            "required_tags": [{ "tag": "meeting" }]
+            }
           }
         ]
       }
@@ -104,6 +106,7 @@
       "target": "meetings",
       "fragment": {
         "scope": { "path_glob": "spice/meetings/hubs/**/*.md" },
+        "extends": "_canonical-vocab",
         "required_tags": [{ "tag": "meetings-hub" }]
       }
     }
