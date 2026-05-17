@@ -1,5 +1,6 @@
 ---
 type: cowork-about
+created_at: "2026-05-17T15:03:00-06:00"
 tags: [cowork-about]
 ---
 

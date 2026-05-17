@@ -9,16 +9,16 @@ const weekEnd   = isoMoment.clone().endOf("isoWeek");
 const startStr  = weekStart.format("MMM D");
 const endStr    = weekEnd.format("MMM D");
 const friendly  = `Week ${weekNum} · ${startStr}–${endStr}, ${year}`;
-const created   = window.moment().format("YYYY-MM-DDTHH:mm:ss");
+const created   = window.moment().format("YYYY-MM-DDTHH:mm:ssZ");
 -%>
 ---
 type: cowork-weekly
-tags: [cowork-weekly, weekly]
+tags: [weekly]
 week_label: "<% friendly %>"
 week_iso: "<% year %>-W<% weekNum %>"
 week_start: "<% weekStart.format("YYYY-MM-DD") %>"
 week_end: "<% weekEnd.format("YYYY-MM-DD") %>"
-created: "<% created %>"
+created_at: "<% created %>"
 ---
 
 ```dataviewjs

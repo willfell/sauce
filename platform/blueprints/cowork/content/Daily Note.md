@@ -6,14 +6,14 @@ const monthName = dayMoment.format("MMMM");
 const dayNum = dayMoment.format("D");
 const year = dayMoment.format("YYYY");
 const friendly = `${weekday}, ${monthName} ${dayNum}, ${year}`;
-const created = window.moment().format("YYYY-MM-DDTHH:mm:ss");
+const created = window.moment().format("YYYY-MM-DDTHH:mm:ssZ");
 -%>
 ---
 type: cowork-daily
-tags: [cowork-daily, daily]
+tags: [daily]
 day: "<% day %>"
 day_label: "<% friendly %>"
-created: "<% created %>"
+created_at: "<% created %>"
 ---
 
 ```dataviewjs

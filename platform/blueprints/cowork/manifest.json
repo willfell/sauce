@@ -1,11 +1,11 @@
 {
   "name": "cowork",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "kind": "blueprint",
   "module_directory": "cowork",
   "engagement_types_dir": "engagement-types",
   "skills_dir": ".claude/skills/cowork",
-  "description": "Engagement-aware automation layer + self-contained timeframe system. v0.7.0 (MINOR): cowork is now self-contained — NEW path convention spice/cowork/daily/YYYY/MM-MMMM/YYYY-MM-DD.md for cowork-owned daily notes; NEW CoworkDailyActions CustomJS class + Daily Note.md Templater template wire the create-flow; cowork-daily-hub-cards retargets from spice/daily → spice/cowork/daily (closes the daily-blueprint cross-reach); CoworkHubNav rewritten from BeaconCards 4-card row → AccentButton centered flex row (matches ScratchDayActions aesthetic), drops 'you are here', OMITS the current-hub button so each hub renders 3 buttons pointing at the other 3; universal nav-pattern (SpaceNavButtons → --- → CoworkHubNav → --- → content) across all 5 hubs + 3 note templates; Weekly/Monthly Note templates compute friendly H1 titles via Templater (Week 20 · May 11–17, 2026 / May 2026); Daily Note H1 (Thursday, May 14, 2026); Timeframes row grows 5 → 6 cards (Daily Hub | Today | Weekly Hub | This Week | Monthly Hub | This Month); NEW cowork-daily rule_fragment. v0.6.0 (MINOR v0.44.0): UX polish + character pass. v0.5.0: nav consolidation. v0.4.0: timeframe scaffolding. v0.3.0: 10 orchestrators + 28 sub-skills.",
+  "description": "Engagement-aware automation layer + self-contained timeframe system. v0.8.0 (MINOR v0.57.0 FA-5): canonical-vocab adoption per Frontmatter Alignment workstream. All 3 note templates (Daily/Weekly/Monthly Note) and 5 hub files + 4 prompt stubs now emit canonical `created_at:` (ISO+TZ; replaces legacy `created:`); discriminator tags `cowork-daily`/`cowork-weekly`/`cowork-monthly` stripped from templates (functional `daily`/`weekly`/`monthly` retained per _canonical-vocab non-discriminator status); Monthly Note canonical `month: \"YYYY-MM\"` introduced as parallel key alongside friendly `month_label:` (resolves cross-blueprint `month:` clash with finance); 12 of 13 rule_fragments declare `extends: _canonical-vocab` (SKILL.md fragment excluded — different schema); daily/weekly/monthly rule fragments drop `required_frontmatter.created` (extends covers); daily rule drops `required_tags: [{ tag: cowork-daily }]` (template no longer emits); monthly rule adds `month:` regex validation. Helper code unchanged this cycle — helpers already read `month_label` / `week_label` / file-name canonical keys. v0.7.0 (MINOR): cowork is now self-contained — NEW path convention spice/cowork/daily/YYYY/MM-MMMM/YYYY-MM-DD.md for cowork-owned daily notes; NEW CoworkDailyActions CustomJS class + Daily Note.md Templater template wire the create-flow; cowork-daily-hub-cards retargets from spice/daily → spice/cowork/daily (closes the daily-blueprint cross-reach); CoworkHubNav rewritten from BeaconCards 4-card row → AccentButton centered flex row (matches ScratchDayActions aesthetic), drops 'you are here', OMITS the current-hub button so each hub renders 3 buttons pointing at the other 3; universal nav-pattern (SpaceNavButtons → --- → CoworkHubNav → --- → content) across all 5 hubs + 3 note templates; Weekly/Monthly Note templates compute friendly H1 titles via Templater (Week 20 · May 11–17, 2026 / May 2026); Daily Note H1 (Thursday, May 14, 2026); Timeframes row grows 5 → 6 cards (Daily Hub | Today | Weekly Hub | This Week | Monthly Hub | This Month); NEW cowork-daily rule_fragment. v0.6.0 (MINOR v0.44.0): UX polish + character pass. v0.5.0: nav consolidation. v0.4.0: timeframe scaffolding. v0.3.0: 10 orchestrators + 28 sub-skills.",
   "customjs_classes": [
     "CoworkDailyHubCards",
     "CoworkWeeklyHubCards",
@@ -137,6 +137,7 @@
       "target": "cowork",
       "fragment": {
         "scope": { "path_glob": "spice/cowork/Cowork.md" },
+        "extends": "_canonical-vocab",
         "required_frontmatter": { "type": { "required": true, "type": "string" } },
         "required_tags": [{ "tag": "cowork-hub" }]
       }
@@ -145,6 +146,7 @@
       "target": "cowork",
       "fragment": {
         "scope": { "path_glob": "spice/cowork/context/active-threads.md" },
+        "extends": "_canonical-vocab",
         "required_frontmatter": {
           "type":       { "required": true, "type": "string", "equals": "cowork-threads" },
           "updated":    { "required": true, "type": "string" },
@@ -156,6 +158,7 @@
       "target": "cowork",
       "fragment": {
         "scope": { "path_glob": "spice/cowork/context/active-projects.md" },
+        "extends": "_canonical-vocab",
         "required_frontmatter": {
           "type":       { "required": true, "type": "string", "equals": "cowork-active-projects" },
           "updated":    { "required": true, "type": "string" },
@@ -177,6 +180,7 @@
       "target": "cowork",
       "fragment": {
         "scope": { "path_glob": "spice/cowork/context/vault-config.md" },
+        "extends": "_canonical-vocab",
         "required_frontmatter": {
           "type":        { "required": true, "type": "string", "equals": "cowork-vault-config" },
           "updated":     { "required": true, "type": "string", "matches": "^\\d{4}-\\d{2}-\\d{2}$" },
@@ -201,6 +205,7 @@
       "target": "cowork",
       "fragment": {
         "scope": { "path_glob": "spice/cowork/Daily Hub.md" },
+        "extends": "_canonical-vocab",
         "required_frontmatter": { "type": { "required": true, "type": "string", "equals": "cowork-daily-hub" } },
         "required_tags": [{ "tag": "cowork-hub" }, { "tag": "daily-hub" }]
       }
@@ -209,6 +214,7 @@
       "target": "cowork",
       "fragment": {
         "scope": { "path_glob": "spice/cowork/Weekly Hub.md" },
+        "extends": "_canonical-vocab",
         "required_frontmatter": { "type": { "required": true, "type": "string", "equals": "cowork-weekly-hub" } },
         "required_tags": [{ "tag": "cowork-hub" }, { "tag": "weekly-hub" }]
       }
@@ -217,6 +223,7 @@
       "target": "cowork",
       "fragment": {
         "scope": { "path_glob": "spice/cowork/Monthly Hub.md" },
+        "extends": "_canonical-vocab",
         "required_frontmatter": { "type": { "required": true, "type": "string", "equals": "cowork-monthly-hub" } },
         "required_tags": [{ "tag": "cowork-hub" }, { "tag": "monthly-hub" }]
       }
@@ -225,6 +232,7 @@
       "target": "cowork",
       "fragment": {
         "scope": { "path_glob": "spice/cowork/About Cowork.md" },
+        "extends": "_canonical-vocab",
         "required_frontmatter": { "type": { "required": true, "type": "string", "equals": "cowork-about" } },
         "required_tags": [{ "tag": "cowork-about" }]
       }
@@ -233,12 +241,12 @@
       "target": "cowork",
       "fragment": {
         "scope": { "path_glob": "spice/cowork/weekly/**/*.md" },
+        "extends": "_canonical-vocab",
         "required_frontmatter": {
           "type":       { "required": true, "type": "string", "equals": "cowork-weekly" },
           "week_label": { "required": true, "type": "string" },
           "week_start": { "required": true, "type": "string" },
-          "week_end":   { "required": true, "type": "string" },
-          "created":    { "required": true, "type": "string" }
+          "week_end":   { "required": true, "type": "string" }
         },
         "required_tags": [{ "tag": "weekly" }],
         "naming_pattern": "^\\d{4}-W\\d{2}\\.md$"
@@ -248,12 +256,13 @@
       "target": "cowork",
       "fragment": {
         "scope": { "path_glob": "spice/cowork/monthly/**/*.md" },
+        "extends": "_canonical-vocab",
         "required_frontmatter": {
           "type":        { "required": true, "type": "string", "equals": "cowork-monthly" },
+          "month":       { "required": true, "type": "string", "matches": "^\\d{4}-\\d{2}$" },
           "month_label": { "required": true, "type": "string" },
           "month_start": { "required": true, "type": "string" },
-          "month_end":   { "required": true, "type": "string" },
-          "created":     { "required": true, "type": "string" }
+          "month_end":   { "required": true, "type": "string" }
         },
         "required_tags": [{ "tag": "monthly" }],
         "naming_pattern": "^\\d{4}-\\d{2}\\.md$"
@@ -263,12 +272,11 @@
       "target": "cowork",
       "fragment": {
         "scope": { "path_glob": "spice/cowork/daily/**/*.md" },
+        "extends": "_canonical-vocab",
         "required_frontmatter": {
           "type":      { "required": true, "type": "string", "equals": "cowork-daily" },
-          "day":       { "required": true, "type": "string", "matches": "^\\d{4}-\\d{2}-\\d{2}$" },
-          "created":   { "required": true, "type": "string" }
+          "day":       { "required": true, "type": "string", "matches": "^\\d{4}-\\d{2}-\\d{2}$" }
         },
-        "required_tags": [{ "tag": "cowork-daily" }],
         "naming_pattern": "^\\d{4}-\\d{2}-\\d{2}\\.md$"
       }
     },
@@ -276,6 +284,7 @@
       "target": "cowork",
       "fragment": {
         "scope": { "path_glob": "spice/cowork/prompts/*.md" },
+        "extends": "_canonical-vocab",
         "required_frontmatter": {
           "type":       { "required": true, "type": "string", "equals": "cowork-prompt" },
           "prompt_for": { "required": true, "type": "string" },
@@ -288,7 +297,7 @@
   "post_install": [
     {
       "type": "notice",
-      "message": "cowork@0.7.0 installed. Self-contained pass: cowork now owns its own daily notes at spice/cowork/daily/YYYY/MM-MMMM/YYYY-MM-DD.md (mirrors daily-blueprint shape but inside cowork's own dir). NEW CoworkDailyActions helper renders a '+ Today' button on the Daily Hub. CoworkHubNav rewrites to AccentButton-row aesthetic (matches scratch); drops 'you are here'; OMITS the current-hub button. All 5 cowork hubs + 3 note templates carry the universal nav-pattern (SpaceNavButtons → --- → CoworkHubNav → --- → content). Weekly/Monthly/Daily note templates compute friendly H1 titles via Templater. Timeframes row 5 → 6 cards. Re-render all cowork notes to see the new layout."
+      "message": "cowork@0.8.0 installed (FA-5 canonical-vocab adoption). 3 note templates now emit canonical created_at: (ISO+TZ) replacing legacy created:. Monthly Note adds canonical month: \"YYYY-MM\" alongside friendly month_label:. Discriminator tags (cowork-daily/cowork-weekly/cowork-monthly) stripped from templates. 12 of 13 rule_fragments now extend _canonical-vocab. Existing cowork notes in your vault should be migrated via: sauce migrate-frontmatter --vault <vault> --blueprint cowork --apply. Helper code unchanged."
     }
   ]
 }

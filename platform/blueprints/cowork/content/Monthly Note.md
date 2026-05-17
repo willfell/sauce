@@ -7,16 +7,16 @@ const monthName = mo.format("MMMM");
 const friendly = `${monthName} ${year}`;
 const monthStart = mo.clone().startOf("month").format("YYYY-MM-DD");
 const monthEnd = mo.clone().endOf("month").format("YYYY-MM-DD");
-const created = window.moment().format("YYYY-MM-DDTHH:mm:ss");
+const created = window.moment().format("YYYY-MM-DDTHH:mm:ssZ");
 -%>
 ---
 type: cowork-monthly
-tags: [cowork-monthly, monthly]
+tags: [monthly]
 month_label: "<% friendly %>"
-month_iso: "<% year %>-<% month %>"
+month: "<% year %>-<% month %>"
 month_start: "<% monthStart %>"
 month_end: "<% monthEnd %>"
-created: "<% created %>"
+created_at: "<% created %>"
 ---
 
 ```dataviewjs
