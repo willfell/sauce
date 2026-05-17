@@ -424,21 +424,30 @@ withTempVault((vault) => {
 });
 
 withTempVault((vault) => {
-    // Parse error halts on --apply
-    const absPath = path.join(vault, "spice/meetings/bad.md");
-    fs.mkdirSync(path.dirname(absPath), { recursive: true });
-    // Frontmatter with a nested mapping that the parser rejects.
-    fs.writeFileSync(absPath, "---\nattendees:\n  alice:\n    role: lead\n---\nbody\n");
+    // v0.55.0 FA-3: --apply now SKIPS parse-error files (was: halt with exitCode 2).
+    // The narrow YAML parser misses object-list keys like
+    // `workstreams: [{id, name}]` in real-world project notes; halting blocked
+    // migration of the surrounding well-formed files. Now: skip + count + log.
+    const badPath = path.join(vault, "spice/meetings/bad.md");
+    const goodPath = path.join(vault, "spice/meetings/good.md");
+    fs.mkdirSync(path.dirname(badPath), { recursive: true });
+    fs.writeFileSync(badPath, "---\nattendees:\n  alice:\n    role: lead\n---\nbody\n");
+    fs.writeFileSync(goodPath, "---\nstatus: x\ncreated: 2026-05-15\n---\nbody\n");
     let threw = false;
+    let logMsg = "";
     try {
         cmd._runMigration({
             vaultPath: vault, workshopRoot: WORKSHOP_ROOT,
-            blueprint: null, apply: true, log: () => {}
+            blueprint: null, apply: true, log: (msg) => { logMsg = msg; }
         });
     } catch (e) {
-        threw = e.exitCode === 2 && /YAML parse error/.test(e.message);
+        threw = true;
     }
-    ok("MF-AP-4 --apply halts on YAML parse error with exitCode 2", threw);
+    ok("MF-AP-4 --apply does NOT halt on parse error (skips file)", !threw);
+    ok("MF-AP-4b --apply reports parse-error count in log", /parse-error/.test(logMsg),
+        `logMsg: ${logMsg}`);
+    const goodRewritten = fs.readFileSync(goodPath, "utf8").includes("created_at:");
+    ok("MF-AP-4c --apply still migrates the well-formed sibling", goodRewritten);
 });
 
 console.log(`\nrun-migrate-frontmatter.js: ${pass} pass · ${fail} fail`);

@@ -670,12 +670,12 @@ function runMigration({ vaultPath, workshopRoot, blueprint, apply, reportPath, l
         let fm;
         try { fm = parseFrontmatterYaml(split.fm); }
         catch (e) {
+            // v0.55.0 FA-3 softening: --apply skips parse-error files instead of
+            // halting (the YAML parser's narrow scope misses object-list keys
+            // like `workstreams: [{id, name, description}]` that exist in
+            // real-world project notes; halting would block migration of the
+            // surrounding 96+ well-formed files). Counted in apply summary.
             fileResults.push({ absPath, relPath, error: e.message });
-            if (apply) {
-                const err = new Error(`YAML parse error in ${relPath}: ${e.message}`);
-                err.exitCode = 2;
-                throw err;
-            }
             continue;
         }
 
@@ -688,7 +688,9 @@ function runMigration({ vaultPath, workshopRoot, blueprint, apply, reportPath, l
     if (apply) {
         const ts = `${new Date().toISOString().replace(/[-:T.Z]/g, "").slice(0, 14)}`;
         let applied = 0;
+        let parseErrors = 0;
         for (const r of fileResults) {
+            if (r.error) { parseErrors++; continue; }
             if (!r.ops || r.ops.length === 0) continue;
             const raw = fs.readFileSync(r.absPath, "utf8");
             const split = splitFrontmatter(raw);
@@ -697,7 +699,8 @@ function runMigration({ vaultPath, workshopRoot, blueprint, apply, reportPath, l
             applyChanges(vaultPath, r.absPath, raw, newRaw, ts);
             applied++;
         }
-        log(`apply: ${applied} files rewritten; backups under .sauce-backup/`);
+        const errorSuffix = parseErrors > 0 ? `; ${parseErrors} parse-error files SKIPPED (hand-edit required)` : "";
+        log(`apply: ${applied} files rewritten; backups under .sauce-backup/${errorSuffix}`);
     } else {
         const out = reportPath || path.join(vaultPath, "sauce-migration-report.md");
         const md = renderReport(fileResults, migrationSpec, vaultPath, "dry-run");
