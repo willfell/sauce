@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-05-17T07:45:35.614Z",
+  "generated_at": "2026-05-17T08:28:30.797Z",
   "workshop_version": "0.52.1",
   "contributions": {
     "audit": [
@@ -8,13 +8,13 @@
         "kind": "command",
         "source": "commands/audit.md",
         "dest": ".claude/commands/audit.md",
-        "version": "0.2.1"
+        "version": "0.3.0"
       },
       {
         "kind": "skill",
         "source": "skills/drift/SKILL.md",
         "dest": ".claude/skills/audit/drift/SKILL.md",
-        "version": "0.2.1"
+        "version": "0.3.0"
       },
       {
         "kind": "claude_md_row",

@@ -43,12 +43,12 @@
     },
     {
       "name": "validator",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "path": "mechanisms/validator"
     },
     {
       "name": "audit",
-      "version": "0.2.1",
+      "version": "0.3.0",
       "path": "mechanisms/audit"
     },
     {

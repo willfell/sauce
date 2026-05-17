@@ -7,13 +7,13 @@
     },
     {
       "name": "validator",
-      "version": "0.2.0",
-      "installed_at": "2026-05-15T23:13:48.823Z"
+      "version": "0.3.0",
+      "installed_at": "2026-05-17T08:28:30.796Z"
     },
     {
       "name": "audit",
-      "version": "0.2.1",
-      "installed_at": "2026-05-13T03:17:27.749Z"
+      "version": "0.3.0",
+      "installed_at": "2026-05-17T08:28:30.797Z"
     },
     {
       "name": "nav-buttons",
@@ -14107,6 +14107,368 @@
       "git_tag": null,
       "git_dirty": true,
       "attempted_at": "2026-05-17T07:45:35.622Z"
+    },
+    {
+      "event": "info",
+      "step": "customjs_settings",
+      "action": "skipped_user_customized",
+      "jsFolder": "ranch/Scripts",
+      "git_commit": "e729ef979832bf3287334d1ec190e9f50e158fe5",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T08:28:30.779Z"
+    },
+    {
+      "event": "info",
+      "step": "app_settings",
+      "action": "applied",
+      "keys_written": [
+        "alwaysOpenInNewTab",
+        "defaultViewMode",
+        "livePreview"
+      ],
+      "git_commit": "e729ef979832bf3287334d1ec190e9f50e158fe5",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T08:28:30.781Z"
+    },
+    {
+      "event": "replace",
+      "step": "file_overwrite",
+      "name": "validator",
+      "dest": "ranch/templater/validate.js",
+      "prior_sha": "356f1bc0ffc11d402b5ab6403bda5a4599646f6a51538e9466cfe1a0e4f3c2f3",
+      "new_sha": "e5102164bc7e4cbd8d9f65d22b5ef664c22d2236faad644003925668632fa257",
+      "bak_path": "ranch/templater/validate.js.bak",
+      "git_commit": "e729ef979832bf3287334d1ec190e9f50e158fe5",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T08:28:30.791Z"
+    },
+    {
+      "event": "warning",
+      "step": "external_plugins",
+      "name": "validator",
+      "plugin_id": "slash-commander",
+      "reason": "Surface /validate slash command for ad-hoc validation.",
+      "git_commit": "e729ef979832bf3287334d1ec190e9f50e158fe5",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T08:28:30.793Z"
+    },
+    {
+      "event": "info",
+      "step": "scaffold_foundational",
+      "name": "validator",
+      "item": "validator",
+      "id": "templater-obsidian",
+      "action": "skipped_already_present",
+      "git_commit": "e729ef979832bf3287334d1ec190e9f50e158fe5",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T08:28:30.794Z"
+    },
+    {
+      "event": "info",
+      "step": "templater_hotkeys",
+      "name": "validator",
+      "template_path": "ranch/templates/Validate.md",
+      "action": "skipped_existing",
+      "git_commit": "e729ef979832bf3287334d1ec190e9f50e158fe5",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T08:28:30.794Z"
+    },
+    {
+      "event": "warning",
+      "step": "slash_commander_bindings",
+      "name": "validator",
+      "message": ".obsidian/plugins/slash-commander/data.json absent",
+      "git_commit": "e729ef979832bf3287334d1ec190e9f50e158fe5",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T08:28:30.794Z"
+    },
+    {
+      "event": "install",
+      "kind": "mechanism",
+      "name": "validator",
+      "version": "0.3.0",
+      "installed_at": "2026-05-17T08:28:30.796Z",
+      "git_commit": "e729ef979832bf3287334d1ec190e9f50e158fe5",
+      "git_tag": null,
+      "git_dirty": true
+    },
+    {
+      "event": "warning",
+      "step": "external_plugins",
+      "name": "audit",
+      "plugin_id": "slash-commander",
+      "reason": "Surface /audit slash command for the audit walker.",
+      "git_commit": "e729ef979832bf3287334d1ec190e9f50e158fe5",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T08:28:30.797Z"
+    },
+    {
+      "event": "info",
+      "step": "scaffold_foundational",
+      "name": "audit",
+      "item": "audit",
+      "id": "templater-obsidian",
+      "action": "skipped_already_present",
+      "git_commit": "e729ef979832bf3287334d1ec190e9f50e158fe5",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T08:28:30.797Z"
+    },
+    {
+      "event": "info",
+      "step": "templater_hotkeys",
+      "name": "audit",
+      "template_path": "ranch/templates/Audit.md",
+      "action": "skipped_existing",
+      "git_commit": "e729ef979832bf3287334d1ec190e9f50e158fe5",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T08:28:30.797Z"
+    },
+    {
+      "event": "warning",
+      "step": "slash_commander_bindings",
+      "name": "audit",
+      "message": ".obsidian/plugins/slash-commander/data.json absent",
+      "git_commit": "e729ef979832bf3287334d1ec190e9f50e158fe5",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T08:28:30.797Z"
+    },
+    {
+      "event": "install",
+      "kind": "mechanism",
+      "name": "audit",
+      "version": "0.3.0",
+      "installed_at": "2026-05-17T08:28:30.797Z",
+      "git_commit": "e729ef979832bf3287334d1ec190e9f50e158fe5",
+      "git_tag": null,
+      "git_dirty": true
+    },
+    {
+      "event": "aggregate",
+      "step": "claude_surface_aggregate",
+      "contributions": 6,
+      "entries": 24,
+      "rejected": 0,
+      "git_commit": "e729ef979832bf3287334d1ec190e9f50e158fe5",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T08:28:30.797Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/audit.md",
+      "owner": "audit",
+      "version": "0.3.0",
+      "git_commit": "e729ef979832bf3287334d1ec190e9f50e158fe5",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T08:28:30.798Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/audit/drift/SKILL.md",
+      "owner": "audit",
+      "version": "0.3.0",
+      "git_commit": "e729ef979832bf3287334d1ec190e9f50e158fe5",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T08:28:30.798Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/install.md",
+      "owner": "platform-claude",
+      "version": "0.1.1",
+      "git_commit": "e729ef979832bf3287334d1ec190e9f50e158fe5",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T08:28:30.799Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/upgrade.md",
+      "owner": "platform-claude",
+      "version": "0.1.1",
+      "git_commit": "e729ef979832bf3287334d1ec190e9f50e158fe5",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T08:28:30.799Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/bootstrap.md",
+      "owner": "platform-claude",
+      "version": "0.1.1",
+      "git_commit": "e729ef979832bf3287334d1ec190e9f50e158fe5",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T08:28:30.799Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/platform/install/SKILL.md",
+      "owner": "platform-claude",
+      "version": "0.1.1",
+      "git_commit": "e729ef979832bf3287334d1ec190e9f50e158fe5",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T08:28:30.800Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/platform/upgrade/SKILL.md",
+      "owner": "platform-claude",
+      "version": "0.1.1",
+      "git_commit": "e729ef979832bf3287334d1ec190e9f50e158fe5",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T08:28:30.800Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/platform/bootstrap/SKILL.md",
+      "owner": "platform-claude",
+      "version": "0.1.1",
+      "git_commit": "e729ef979832bf3287334d1ec190e9f50e158fe5",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T08:28:30.801Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/project.md",
+      "owner": "project",
+      "version": "1.12.1",
+      "git_commit": "e729ef979832bf3287334d1ec190e9f50e158fe5",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T08:28:30.801Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/project/new-project/SKILL.md",
+      "owner": "project",
+      "version": "1.12.1",
+      "git_commit": "e729ef979832bf3287334d1ec190e9f50e158fe5",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T08:28:30.801Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/daily.md",
+      "owner": "daily",
+      "version": "0.3.0",
+      "git_commit": "e729ef979832bf3287334d1ec190e9f50e158fe5",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T08:28:30.801Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/daily/open-today/SKILL.md",
+      "owner": "daily",
+      "version": "0.3.0",
+      "git_commit": "e729ef979832bf3287334d1ec190e9f50e158fe5",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T08:28:30.802Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/meetings.md",
+      "owner": "meetings",
+      "version": "0.5.1",
+      "git_commit": "e729ef979832bf3287334d1ec190e9f50e158fe5",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T08:28:30.802Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/meetings/new-meeting/SKILL.md",
+      "owner": "meetings",
+      "version": "0.5.1",
+      "git_commit": "e729ef979832bf3287334d1ec190e9f50e158fe5",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T08:28:30.802Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/scratch.md",
+      "owner": "scratch",
+      "version": "0.3.1",
+      "git_commit": "e729ef979832bf3287334d1ec190e9f50e158fe5",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T08:28:30.803Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/scratch/new-scratch/SKILL.md",
+      "owner": "scratch",
+      "version": "0.3.1",
+      "git_commit": "e729ef979832bf3287334d1ec190e9f50e158fe5",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T08:28:30.803Z"
+    },
+    {
+      "event": "claude_md_regen",
+      "step": "claude_md_regen",
+      "tables_updated": [
+        "directory-map",
+        "resolvers",
+        "skills-index"
+      ],
+      "rows_total": 12,
+      "git_commit": "e729ef979832bf3287334d1ec190e9f50e158fe5",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-05-17T08:28:30.805Z"
     }
   ]
 }
