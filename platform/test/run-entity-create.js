@@ -760,57 +760,57 @@ function seedVault(setup) {
 }
 
 // -------------------------------------------------------------------------
-// WIKI-1..6 — v0.50.0 project wiki-note entity-create entry
+// DOC-1..6 — v0.50.0 project doc-note entity-create entry (renamed from WIKI in v0.52.0)
 // -------------------------------------------------------------------------
 {
     const projectManifest = JSON.parse(fs.readFileSync(
         path.join(__dirname, "..", "blueprints", "project", "manifest.json"), "utf8"));
 
-    const wikiEntry = (projectManifest.new_entity_buttons || []).find((e) => e.id === "wiki-note");
-    ok("WIKI-1 project manifest declares id=wiki-note entity-create entry",
-        !!wikiEntry, `entries=${(projectManifest.new_entity_buttons || []).map(e => e.id).join(",")}`);
+    const docEntry = (projectManifest.new_entity_buttons || []).find((e) => e.id === "doc-note");
+    ok("DOC-1 project manifest declares id=doc-note entity-create entry",
+        !!docEntry, `entries=${(projectManifest.new_entity_buttons || []).map(e => e.id).join(",")}`);
 
-    if (wikiEntry) {
-        ok("WIKI-2 wiki-note destination.folder_prefix uses {{current_file.frontmatter.project_slug}}",
-            wikiEntry.destination &&
-            wikiEntry.destination.folder_prefix === "spice/projects/{{current_file.frontmatter.project_slug}}/wiki",
-            `got ${JSON.stringify(wikiEntry.destination && wikiEntry.destination.folder_prefix)}`);
+    if (docEntry) {
+        ok("DOC-2 doc-note destination.folder_prefix uses {{current_file.frontmatter.project_slug}}",
+            docEntry.destination &&
+            docEntry.destination.folder_prefix === "spice/projects/{{current_file.frontmatter.project_slug}}/docs",
+            `got ${JSON.stringify(docEntry.destination && docEntry.destination.folder_prefix)}`);
 
-        ok("WIKI-3 wiki-note frontmatter_template.project uses {{current_file.frontmatter.project_name}}",
-            wikiEntry.frontmatter_template &&
-            wikiEntry.frontmatter_template.project === "[[{{current_file.frontmatter.project_name}}]]",
-            `got ${JSON.stringify(wikiEntry.frontmatter_template && wikiEntry.frontmatter_template.project)}`);
+        ok("DOC-3 doc-note frontmatter_template.project uses {{current_file.frontmatter.project_name}}",
+            docEntry.frontmatter_template &&
+            docEntry.frontmatter_template.project === "[[{{current_file.frontmatter.project_name}}]]",
+            `got ${JSON.stringify(docEntry.frontmatter_template && docEntry.frontmatter_template.project)}`);
 
-        ok("WIKI-4 wiki-note render_in.target_path points at Template, Wiki Hub.md",
-            wikiEntry.render_in &&
-            wikiEntry.render_in.target_path === "{{templates_path}}/Template, Wiki Hub.md",
-            `got ${JSON.stringify(wikiEntry.render_in && wikiEntry.render_in.target_path)}`);
+        ok("DOC-4 doc-note render_in.target_path points at Template, Docs Hub.md",
+            docEntry.render_in &&
+            docEntry.render_in.target_path === "{{templates_path}}/Template, Docs Hub.md",
+            `got ${JSON.stringify(docEntry.render_in && docEntry.render_in.target_path)}`);
     } else {
-        ok("WIKI-2 wiki-note destination.folder_prefix uses {{current_file.frontmatter.project_slug}}", false, "no wiki-note entry");
-        ok("WIKI-3 wiki-note frontmatter_template.project uses {{current_file.frontmatter.project_name}}", false, "no wiki-note entry");
-        ok("WIKI-4 wiki-note render_in.target_path points at Template, Wiki Hub.md", false, "no wiki-note entry");
+        ok("DOC-2 doc-note destination.folder_prefix uses {{current_file.frontmatter.project_slug}}", false, "no doc-note entry");
+        ok("DOC-3 doc-note frontmatter_template.project uses {{current_file.frontmatter.project_name}}", false, "no doc-note entry");
+        ok("DOC-4 doc-note render_in.target_path points at Template, Docs Hub.md", false, "no doc-note entry");
     }
 
     const projectEntry = (projectManifest.new_entity_buttons || []).find((e) => e.id === "project");
-    // Find the wiki sidecar by body_template (stable across the v0.50.4
+    // Find the docs sidecar by body_template (stable across the v0.50.4
     // filename_pattern → subfolder canonicalization).
-    const wikiSidecar = projectEntry && projectEntry.extra_files &&
-        projectEntry.extra_files.find((x) => x.body_template === "Template, Wiki Hub.md");
-    ok("WIKI-5 project entity's extra_files[] maps to Template, Wiki Hub.md",
-        !!wikiSidecar,
-        `wikiSidecar=${JSON.stringify(wikiSidecar)}`);
+    const docsSidecar = projectEntry && projectEntry.extra_files &&
+        projectEntry.extra_files.find((x) => x.body_template === "Template, Docs Hub.md");
+    ok("DOC-5 project entity's extra_files[] maps to Template, Docs Hub.md",
+        !!docsSidecar,
+        `docsSidecar=${JSON.stringify(docsSidecar)}`);
 
-    // WIKI-6: resolveEntityCreateEntry resolves the wiki-note entry cleanly
-    if (resolveEntityCreateEntry && wikiEntry) {
+    // DOC-6: resolveEntityCreateEntry resolves the doc-note entry cleanly
+    if (resolveEntityCreateEntry && docEntry) {
         const history = [];
         const git = { commit: "0", tag: "x", dirty: false };
-        const r = resolveEntityCreateEntry(wikiEntry, { templates_path: "ranch/templates" }, "project", history, git);
-        ok("WIKI-6 wiki-note entry resolves cleanly via resolveEntityCreateEntry",
-            r !== null && r.body_template === "ranch/templates/Template, Wiki Note.md",
+        const r = resolveEntityCreateEntry(docEntry, { templates_path: "ranch/templates" }, "project", history, git);
+        ok("DOC-6 doc-note entry resolves cleanly via resolveEntityCreateEntry",
+            r !== null && r.body_template === "ranch/templates/Template, Doc Note.md",
             `r=${r === null ? "null" : "ok"} body_template=${r && JSON.stringify(r.body_template)} history=${JSON.stringify(history)}`);
     } else {
-        ok("WIKI-6 wiki-note entry resolves cleanly via resolveEntityCreateEntry",
-            false, "resolveEntityCreateEntry or wiki-note entry not available");
+        ok("DOC-6 doc-note entry resolves cleanly via resolveEntityCreateEntry",
+            false, "resolveEntityCreateEntry or doc-note entry not available");
     }
 }
 
@@ -839,33 +839,33 @@ function seedVault(setup) {
 
 // -------------------------------------------------------------------------
 // v0.50.4 — _createExtra ensures parent dir when filename_pattern itself
-// embeds a subfolder (e.g. "wiki/Wiki.md"). Regression for the case where
+// embeds a subfolder (e.g. "docs/Docs.md"). Regression for the case where
 // only the outer xFolder was ensured and vault.create silently left an
 // empty file in real Obsidian. Stub vault records createFolder calls so we
-// can assert the embedded "wiki" subdir was ensured before the file write.
+// can assert the embedded "docs" subdir was ensured before the file write.
 // -------------------------------------------------------------------------
 {
     const ec39 = loadEntityCreate({
         vaultFiles: {
-            "ranch/templates/Template, Wiki Hub.md": "FAKE WIKI HUB BODY",
+            "ranch/templates/Template, Docs Hub.md": "FAKE DOCS HUB BODY",
         },
     });
     const inst39 = new ec39.Cls();
-    const xf = { filename_pattern: "wiki/Wiki.md", body_template: "ranch/templates/Template, Wiki Hub.md" };
+    const xf = { filename_pattern: "docs/Docs.md", body_template: "ranch/templates/Template, Docs Hub.md" };
     const ctx39 = baseCtx({ prompts: { slug: "demo" } });
     const folder39 = "spice/projects/demo";
     inst39._createExtra(xf, ctx39, folder39).then(() => {
-        const wrote = ec39.vaultFiles["spice/projects/demo/wiki/Wiki.md"];
-        const wikiDir = ec39.vaultFiles["spice/projects/demo/wiki"];
+        const wrote = ec39.vaultFiles["spice/projects/demo/docs/Docs.md"];
+        const docsDir = ec39.vaultFiles["spice/projects/demo/docs"];
         ok("EC-39 _createExtra ensures parent dir for filename_pattern with embedded subfolder",
-            wikiDir && wikiDir.__folder === true &&
-            typeof wrote === "string" && wrote.includes("FAKE WIKI HUB BODY"),
-            `wikiDir=${JSON.stringify(wikiDir)} wrote=${typeof wrote === "string" ? `len=${wrote.length}` : JSON.stringify(wrote)}`);
+            docsDir && docsDir.__folder === true &&
+            typeof wrote === "string" && wrote.includes("FAKE DOCS HUB BODY"),
+            `docsDir=${JSON.stringify(docsDir)} wrote=${typeof wrote === "string" ? `len=${wrote.length}` : JSON.stringify(wrote)}`);
     });
 }
 
 // -------------------------------------------------------------------------
-// v0.50.4 — project blueprint's wiki extra_file uses the canonical
+// v0.50.4 — project blueprint's docs extra_file uses the canonical
 // subfolder field (not an embedded slash in filename_pattern). EC-39 above
 // covers the mechanism-side robustness; this asserts the in-tree manifest
 // adopts the schema-canonical form.
@@ -873,11 +873,11 @@ function seedVault(setup) {
 {
     const pm = JSON.parse(fs.readFileSync(path.join(ROOT, "platform/blueprints/project/manifest.json"), "utf8"));
     const pe = (pm.new_entity_buttons || []).find((e) => e.id === "project");
-    const wikiXf = pe && pe.extra_files &&
-        pe.extra_files.find((x) => x.body_template === "Template, Wiki Hub.md");
-    ok("EC-40 project wiki extra_file uses canonical subfolder field (v0.50.4)",
-        wikiXf && wikiXf.subfolder === "wiki" && wikiXf.filename_pattern === "Wiki.md",
-        `wikiXf=${JSON.stringify(wikiXf)}`);
+    const docsXf = pe && pe.extra_files &&
+        pe.extra_files.find((x) => x.body_template === "Template, Docs Hub.md");
+    ok("EC-40 project docs extra_file uses canonical subfolder field (v0.50.4)",
+        docsXf && docsXf.subfolder === "docs" && docsXf.filename_pattern === "Docs.md",
+        `docsXf=${JSON.stringify(docsXf)}`);
 }
 
 // -------------------------------------------------------------------------

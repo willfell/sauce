@@ -6123,61 +6123,87 @@ async function caseICN1Tier1ReferenceCount() {
 }
 
 // -------------------------------------------------------------------------
-// v0.50.0 S5 — PWC-1..4: ProjectWikiCards class surface asserts.
-// Source extracted from helpers/project-wiki-cards.js. Static-string asserts;
+// v0.50.0 S5 — PDC-1..4: ProjectDocsCards class surface asserts (renamed from PWC in v0.52.0).
+// Source extracted from helpers/project-docs-cards.js. Static-string asserts;
 // no runtime CustomJS plumbing needed.
 // -------------------------------------------------------------------------
-async function casePWC1ClassDefined() {
-  console.log("\n--- Case PWC-1: ProjectWikiCards class definition present ---");
+async function casePDC1ClassDefined() {
+  console.log("\n--- Case PDC-1: ProjectDocsCards class definition present ---");
   const src = fs.readFileSync(
-    path.join(WORKSHOP, "platform/blueprints/project/helpers/project-wiki-cards.js"),
+    path.join(WORKSHOP, "platform/blueprints/project/helpers/project-docs-cards.js"),
     "utf8"
   );
-  assertTrue("PWC-1: class ProjectWikiCards declared", /class\s+ProjectWikiCards\s*\{/.test(src));
+  assertTrue("PDC-1: class ProjectDocsCards declared", /class\s+ProjectDocsCards\s*\{/.test(src));
 }
 
-async function casePWC2FiltersByType() {
-  console.log("\n--- Case PWC-2: ProjectWikiCards filters by type === \"wiki-note\" ---");
+async function casePDC2FiltersByType() {
+  console.log("\n--- Case PDC-2: ProjectDocsCards filters by type === \"doc-note\" ---");
   const src = fs.readFileSync(
-    path.join(WORKSHOP, "platform/blueprints/project/helpers/project-wiki-cards.js"),
+    path.join(WORKSHOP, "platform/blueprints/project/helpers/project-docs-cards.js"),
     "utf8"
   );
-  assertTrue("PWC-2: where(p => p.type === \"wiki-note\") present",
-    /p\.type\s*===\s*["']wiki-note["']/.test(src));
+  assertTrue("PDC-2: where(p => p.type === \"doc-note\") present",
+    /p\.type\s*===\s*["']doc-note["']/.test(src));
 }
 
-async function casePWC3SortsByCreatedDesc() {
-  console.log("\n--- Case PWC-3: ProjectWikiCards sorts by created desc ---");
+async function casePDC3SortsByCreatedDesc() {
+  console.log("\n--- Case PDC-3: ProjectDocsCards sorts by created desc ---");
   const src = fs.readFileSync(
-    path.join(WORKSHOP, "platform/blueprints/project/helpers/project-wiki-cards.js"),
+    path.join(WORKSHOP, "platform/blueprints/project/helpers/project-docs-cards.js"),
     "utf8"
   );
-  assertTrue("PWC-3: .sort((p) => p.created, \"desc\") present",
+  assertTrue("PDC-3: .sort((p) => p.created, \"desc\") present",
     /\.sort\(\s*\(p\)\s*=>\s*p\.created\s*,\s*["']desc["']/.test(src));
 }
 
-async function casePWC4EmptyStateCallout() {
-  console.log("\n--- Case PWC-4: ProjectWikiCards empty-state callout ---");
+async function casePDC4EmptyStateCallout() {
+  console.log("\n--- Case PDC-4: ProjectDocsCards empty-state callout ---");
   const src = fs.readFileSync(
-    path.join(WORKSHOP, "platform/blueprints/project/helpers/project-wiki-cards.js"),
+    path.join(WORKSHOP, "platform/blueprints/project/helpers/project-docs-cards.js"),
     "utf8"
   );
-  assertTrue("PWC-4: \"No wiki notes yet\" callout text present",
-    /No wiki notes yet/.test(src));
+  assertTrue("PDC-4: \"No docs yet\" callout text present",
+    /No docs yet/.test(src));
 }
 
 // v0.50.1 BUG-A: customjs-guard dispatches via `render` method by default.
-// PWC-5 guards against regressions to `view` (which all sibling helpers like
+// PDC-5 guards against regressions to `view` (which all sibling helpers like
 // ScratchHubCards / ProjectNotesCards / ProjectsHubCards use as `render`).
-async function casePWC5RenderMethodNotView() {
-  console.log("\n--- Case PWC-5: ProjectWikiCards uses render method (not view) ---");
+async function casePDC5RenderMethodNotView() {
+  console.log("\n--- Case PDC-5: ProjectDocsCards uses render method (not view) ---");
   const src = fs.readFileSync(
-    path.join(WORKSHOP, "platform/blueprints/project/helpers/project-wiki-cards.js"),
+    path.join(WORKSHOP, "platform/blueprints/project/helpers/project-docs-cards.js"),
     "utf8"
   );
-  assertTrue("PWC-5: declares async render (not view)",
+  assertTrue("PDC-5: declares async render (not view)",
     /async\s+render\s*\(/.test(src) && !/async\s+view\s*\(/.test(src),
     `source contains async render: ${/async\s+render\s*\(/.test(src)}; async view: ${/async\s+view\s*\(/.test(src)}`);
+}
+
+async function casePDC6PathConventionDocs() {
+  console.log("\n--- Case PDC-6: ProjectDocsCards class uses docs path convention ---");
+  const src = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/project/helpers/project-docs-cards.js"),
+    "utf8"
+  );
+  assertTrue("PDC-6: filters by p.type === 'doc-note' (not wiki-note)",
+    /p\.type\s*===\s*["']doc-note["']/.test(src) && !/wiki-note/.test(src));
+}
+
+async function casePDC7NavButtonsRenamedToDocs() {
+  console.log("\n--- Case PDC-7: project-nav-buttons.js renamed Wiki button → Docs ---");
+  const src = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/project/helpers/project-nav-buttons.js"),
+    "utf8"
+  );
+  const hasDocsLabel = /label:\s*"Docs"/.test(src);
+  const hasDocsIcon = /icons\.docs/.test(src);
+  const hasDocsPath = /docs\/Docs\.md/.test(src);
+  const hasDocsContextGuard = /ctx\.context\s*!==\s*"docs-hub"/.test(src);
+  const noWikiRemaining = !/wiki|Wiki/.test(src);
+  assertTrue("PDC-7: Docs label + icons.docs + docs path + docs-hub guard, no Wiki strings",
+    hasDocsLabel && hasDocsIcon && hasDocsPath && hasDocsContextGuard && noWikiRemaining,
+    `label=${hasDocsLabel} icon=${hasDocsIcon} path=${hasDocsPath} guard=${hasDocsContextGuard} clean=${noWikiRemaining}`);
 }
 
 (async function main() {
@@ -6438,13 +6464,17 @@ async function casePWC5RenderMethodNotView() {
   await casePSW5ManifestRegistration();
   await casePSW6TemplateBlock();
 
-  // v0.50.0 S5 — PWC-1..4: ProjectWikiCards class surface asserts.
-  await casePWC1ClassDefined();
-  await casePWC2FiltersByType();
-  await casePWC3SortsByCreatedDesc();
-  await casePWC4EmptyStateCallout();
-  // v0.50.1 BUG-A: PWC-5 guards against view-method regression.
-  await casePWC5RenderMethodNotView();
+  // v0.50.0 S5 — PDC-1..4 (renamed from PWC in v0.52.0): ProjectDocsCards class surface asserts.
+  await casePDC1ClassDefined();
+  await casePDC2FiltersByType();
+  await casePDC3SortsByCreatedDesc();
+  await casePDC4EmptyStateCallout();
+  // v0.50.1 BUG-A: PDC-5 guards against view-method regression.
+  await casePDC5RenderMethodNotView();
+
+  // v0.52.0 — PDC-6 + PDC-7 new asserts.
+  await casePDC6PathConventionDocs();
+  await casePDC7NavButtonsRenamedToDocs();
 
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);

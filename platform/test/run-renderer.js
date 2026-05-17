@@ -1755,25 +1755,25 @@ const ENTITY_CREATE_SITES = [
   { instance: 'budget',    icon: 'wallet-plus' },
   { instance: 'paycheck',  icon: 'wallet-plus' },
   { instance: 'invoice',   icon: 'file-plus' },
-  { instance: 'wiki-note', icon: 'file-plus' }  // v0.50.0
+  { instance: 'doc-note', icon: 'file-plus' }  // v0.50.0; renamed doc-note in v0.52.0
 ];
 
-// v0.50.0 — R-WIKI-1: Template, Wiki Hub.md body includes ProjectWikiCards
-// dispatch + inside-block entity-create:wiki-note sentinel.
+// v0.50.0 — R-WIKI-1 (renamed R-DOCS-1 in v0.52.0): Template, Docs Hub.md body includes
+// ProjectDocsCards dispatch + inside-block entity-create:doc-note sentinel.
 async function testRWikiHubTemplateBody() {
-  console.log('\n=== R-WIKI-1 — Template, Wiki Hub.md body includes ProjectWikiCards + wiki-note sentinel ===');
-  const templatePath = path.resolve(WORKSHOP, 'platform/blueprints/project/templates/Wiki Hub.md');
+  console.log('\n=== R-WIKI-1 — Template, Docs Hub.md body includes ProjectDocsCards + doc-note sentinel ===');
+  const templatePath = path.resolve(WORKSHOP, 'platform/blueprints/project/templates/Docs Hub.md');
   if (!fs.existsSync(templatePath)) {
     console.log(`  FAIL — template missing: ${templatePath}`);
     return false;
   }
   const body = fs.readFileSync(templatePath, 'utf8');
-  const hasCardsDispatch = /class:\s*["']ProjectWikiCards["']/.test(body);
-  const hasSentinel = /\/\/\s*entity-create:wiki-note/.test(body);
+  const hasCardsDispatch = /class:\s*["']ProjectDocsCards["']/.test(body);
+  const hasSentinel = /\/\/\s*entity-create:doc-note/.test(body);
   const hasAccentButton = /class:\s*["']AccentButton["']/.test(body);
-  const hasIdWikiNote = /id:\s*["']wiki-note["']/.test(body);
-  const allPass = hasCardsDispatch && hasSentinel && hasAccentButton && hasIdWikiNote;
-  console.log(`  hasCardsDispatch=${hasCardsDispatch} hasSentinel=${hasSentinel} hasAccentButton=${hasAccentButton} hasIdWikiNote=${hasIdWikiNote}`);
+  const hasIdDocNote = /id:\s*["']doc-note["']/.test(body);
+  const allPass = hasCardsDispatch && hasSentinel && hasAccentButton && hasIdDocNote;
+  console.log(`  hasCardsDispatch=${hasCardsDispatch} hasSentinel=${hasSentinel} hasAccentButton=${hasAccentButton} hasIdDocNote=${hasIdDocNote}`);
   console.log(`  ${allPass ? 'PASS' : 'FAIL'}`);
   return allPass;
 }
@@ -1858,7 +1858,7 @@ async function testREntityCreateIconRendersSvg(siteIndex, site) {
       }
     }
     if (which === 'wiki' || which === 'all') {
-      results.push(['R-WIKI-1 wiki-hub-template-body', await testRWikiHubTemplateBody()]);
+      results.push(['R-WIKI-1 docs-hub-template-body', await testRWikiHubTemplateBody()]);
     }
     if (which === 'finance' || which === 'all') {
       results.push(['FF1 budget-nav-in-path', await testFF1BudgetNavInPath()]);

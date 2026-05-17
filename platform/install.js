@@ -7332,6 +7332,11 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     // run-claude-surface.js (CS-PR-1..3, CS-SH-1..4). Pure additive.
     module.exports.pruneClaudeSurface = pruneClaudeSurface;
     module.exports.applyLocalShadows = applyLocalShadows;
+    // v0.52.0 S5 — expose migration helpers for run-wiki-to-docs-migration.js
+    // (WTD-MIG-1..3). Pure additive; does not affect the function-as-default export.
+    module.exports.applyWikiToDocsMigration = applyWikiToDocsMigration;
+    module.exports.applyDocsBackfill = applyDocsBackfill;
+    module.exports._rewriteWikiToDocsBody = _rewriteWikiToDocsBody;
     //
     // CF-2: by default, capture run-install.js's stdio (Phase B/C surfaced
     // 2200-line JSON dumps mixed into the user's terminal). We tee the

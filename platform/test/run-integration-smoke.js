@@ -367,63 +367,75 @@ withTempHomeAndVault(({ home, vault }) => {
         prjCustomjsStartupOk,
         prjCustomjsStartupDetail);
 
-    // v0.50.0 S5 — WIKI-INT-1..3: applyWikiBackfill side effects.
+    // v0.50.0 S5 (renamed v0.52.0) — DOCS-INT-1..3: applyDocsBackfill side effects.
     // After the reinstall above, project blueprint is subscribed; the
-    // applyWikiBackfill helper should have walked spice/projects/*/ and
-    // created wiki/Wiki.md per pre-existing seeded project (3 projects:
+    // applyDocsBackfill helper should have walked spice/projects/*/ and
+    // created docs/Docs.md per pre-existing seeded project (3 projects:
     // Acme-Migration, North-Star-Refactor, Q1-2026-Audit).
     const seededProjectSlugs = ["Acme-Migration", "North-Star-Refactor", "Q1-2026-Audit"];
     const backfillsMaterialized = seededProjectSlugs.every(slug =>
-        fs.existsSync(path.join(vault, "spice", "projects", slug, "wiki", "Wiki.md"))
+        fs.existsSync(path.join(vault, "spice", "projects", slug, "docs", "Docs.md"))
     );
-    ok("WIKI-INT-1 applyWikiBackfill materialized wiki/Wiki.md for each seeded project",
+    ok("DOCS-INT-1 applyDocsBackfill materialized docs/Docs.md for each seeded project",
         backfillsMaterialized,
-        `slugs=${JSON.stringify(seededProjectSlugs.map(s => ({ s, exists: fs.existsSync(path.join(vault, "spice", "projects", s, "wiki", "Wiki.md")) })))}`);
+        `slugs=${JSON.stringify(seededProjectSlugs.map(s => ({ s, exists: fs.existsSync(path.join(vault, "spice", "projects", s, "docs", "Docs.md")) })))}`);
 
-    // WIKI-INT-2: the materialized Wiki.md body contains the entity-create
-    // wiki-note sentinel + ProjectWikiCards dispatch + correct project_slug
+    // DOCS-INT-2: the materialized Docs.md body contains the entity-create
+    // doc-note sentinel + ProjectDocsCards dispatch + correct project_slug
     // in frontmatter.
-    let wikiContentOk = true;
-    let wikiContentDetail = "";
+    let docsContentOk = true;
+    let docsContentDetail = "";
     for (const slug of seededProjectSlugs) {
-        const wikiPath = path.join(vault, "spice", "projects", slug, "wiki", "Wiki.md");
-        if (!fs.existsSync(wikiPath)) { wikiContentOk = false; wikiContentDetail = `missing ${wikiPath}`; break; }
-        const body = fs.readFileSync(wikiPath, "utf8");
-        const hasSentinel = /\/\/\s*entity-create:wiki-note/.test(body);
-        const hasCards = /class:\s*["']ProjectWikiCards["']/.test(body);
+        const docsPath = path.join(vault, "spice", "projects", slug, "docs", "Docs.md");
+        if (!fs.existsSync(docsPath)) { docsContentOk = false; docsContentDetail = `missing ${docsPath}`; break; }
+        const body = fs.readFileSync(docsPath, "utf8");
+        const hasSentinel = /\/\/\s*entity-create:doc-note/.test(body);
+        const hasCards = /class:\s*["']ProjectDocsCards["']/.test(body);
         const hasSlug = new RegExp(`project_slug:\\s*${slug}`).test(body);
         if (!hasSentinel || !hasCards || !hasSlug) {
-            wikiContentOk = false;
-            wikiContentDetail = `${slug}: sentinel=${hasSentinel} cards=${hasCards} slug=${hasSlug}`;
+            docsContentOk = false;
+            docsContentDetail = `${slug}: sentinel=${hasSentinel} cards=${hasCards} slug=${hasSlug}`;
             break;
         }
     }
-    ok("WIKI-INT-2 materialized Wiki.md contains sentinel + ProjectWikiCards + project_slug",
-        wikiContentOk, wikiContentDetail);
+    ok("DOCS-INT-2 materialized Docs.md contains sentinel + ProjectDocsCards + project_slug",
+        docsContentOk, docsContentDetail);
 
-    // WIKI-INT-3: re-running install does NOT modify existing Wiki.md (idempotent).
+    // DOCS-INT-3: re-running install does NOT modify existing Docs.md (idempotent).
     // Capture mtime of one materialized file, reinstall, and verify mtime
     // unchanged.
-    const sampleWikiPath = path.join(vault, "spice", "projects", "Acme-Migration", "wiki", "Wiki.md");
-    let wikiIdempotent = true;
-    let wikiIdempotentDetail = "";
-    if (fs.existsSync(sampleWikiPath)) {
-        const mtimeBefore = fs.statSync(sampleWikiPath).mtimeMs;
+    const sampleDocsPath = path.join(vault, "spice", "projects", "Acme-Migration", "docs", "Docs.md");
+    let docsIdempotent = true;
+    let docsIdempotentDetail = "";
+    if (fs.existsSync(sampleDocsPath)) {
+        const mtimeBefore = fs.statSync(sampleDocsPath).mtimeMs;
         const reinstall3 = runCli(["reinstall", "--vault", vault]);
         if (reinstall3.code !== 0) {
-            wikiIdempotent = false;
-            wikiIdempotentDetail = `reinstall #3 failed exit=${reinstall3.code}`;
+            docsIdempotent = false;
+            docsIdempotentDetail = `reinstall #3 failed exit=${reinstall3.code}`;
         } else {
-            const mtimeAfter = fs.statSync(sampleWikiPath).mtimeMs;
-            wikiIdempotent = mtimeBefore === mtimeAfter;
-            if (!wikiIdempotent) wikiIdempotentDetail = `mtime changed: before=${mtimeBefore} after=${mtimeAfter}`;
+            const mtimeAfter = fs.statSync(sampleDocsPath).mtimeMs;
+            docsIdempotent = mtimeBefore === mtimeAfter;
+            if (!docsIdempotent) docsIdempotentDetail = `mtime changed: before=${mtimeBefore} after=${mtimeAfter}`;
         }
     } else {
-        wikiIdempotent = false;
-        wikiIdempotentDetail = `sample wiki path missing: ${sampleWikiPath}`;
+        docsIdempotent = false;
+        docsIdempotentDetail = `sample docs path missing: ${sampleDocsPath}`;
     }
-    ok("WIKI-INT-3 applyWikiBackfill is idempotent (mtime unchanged on re-run)",
-        wikiIdempotent, wikiIdempotentDetail);
+    ok("DOCS-INT-3 applyDocsBackfill is idempotent (mtime unchanged on re-run)",
+        docsIdempotent, docsIdempotentDetail);
+
+    // v0.52.0 — DOCS-INT-4: post-install, the materialized project-nav-buttons.js
+    // (in ranch/scripts/project/) contains the renamed Docs button (label "Docs"
+    // + docs/Docs.md path) — sanity that the rename reached the consumer pipeline.
+    const materializedNavBtns = path.join(vault, "ranch", "scripts", "project", "project-nav-buttons.js");
+    let navBtnsBody = "";
+    try { navBtnsBody = fs.readFileSync(materializedNavBtns, "utf8"); } catch (_) {}
+    const hasDocsLabel = /label:\s*"Docs"/.test(navBtnsBody);
+    const hasDocsPath = /docs\/Docs\.md/.test(navBtnsBody);
+    ok("DOCS-INT-4 materialized project-nav-buttons.js contains Docs button (label + path)",
+        hasDocsLabel && hasDocsPath,
+        `body length: ${navBtnsBody.length}; label=${hasDocsLabel} path=${hasDocsPath}`);
 });
 
 console.log(`\nrun-integration-smoke.js: ${pass} pass · ${fail} fail`);

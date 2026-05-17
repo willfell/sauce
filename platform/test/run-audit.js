@@ -1627,84 +1627,84 @@ async function caseAUEC6() {
 }
 
 // ============================================================
-// v0.50.0 S5 — AU-WIKI-1..4: wiki rule_fragment audit cases.
+// v0.50.0 S5 (renamed v0.52.0) — AU-DOCS-1..4: docs rule_fragment audit cases.
 // ============================================================
 
 const WIKI_HUB_FRAGMENT = [{
-  scope: { path_glob: "spice/projects/*/wiki/Wiki.md" },
+  scope: { path_glob: "spice/projects/*/docs/Docs.md" },
   required_frontmatter: {
-    type:         { required: true, type: "string", equals: "wiki-hub" },
+    type:         { required: true, type: "string", equals: "docs-hub" },
     project_slug: { required: true, type: "string" },
     project_name: { required: true, type: "string" },
     created:      { required: true, type: "string" }
   },
-  required_tags: [{ tag: "wiki-hub" }]
+  required_tags: [{ tag: "docs-hub" }]
 }];
 
 const WIKI_NOTE_FRAGMENT = [{
-  scope: { path_glob: "spice/projects/*/wiki/*.md", exclude_basenames: ["Wiki.md"] },
+  scope: { path_glob: "spice/projects/*/docs/*.md", exclude_basenames: ["Docs.md"] },
   required_frontmatter: {
-    type:         { required: true, type: "string", equals: "wiki-note" },
+    type:         { required: true, type: "string", equals: "doc-note" },
     project:      { required: true, type: "string" },
     project_slug: { required: true, type: "string" },
     created:      { required: true, type: "string" }
   },
-  required_tags: [{ tag: "wiki-note" }]
+  required_tags: [{ tag: "doc-note" }]
 }];
 
-// AU-WIKI-1: valid wiki-hub → zero violations
+// AU-DOCS-1: valid docs-hub → zero violations
 async function caseAUWIKI1WikiHubValid() {
   await withTempVault(async (dir) => {
     makeSauceVault(dir, { blueprints: ["project"], rules: { project: WIKI_HUB_FRAGMENT } });
-    writeNote(dir, "spice/projects/test-proj/wiki/Wiki.md",
-      { type: "wiki-hub", project_slug: "test-proj", project_name: "Test Proj", created: "2026-05-16 12:00", tags: ["wiki-hub"] });
+    writeNote(dir, "spice/projects/test-proj/docs/Docs.md",
+      { type: "docs-hub", project_slug: "test-proj", project_name: "Test Proj", created: "2026-05-16 12:00", tags: ["docs-hub"] });
     const { runAudit } = require("../audit/walker");
     const result = await runAudit({ vaultPath: dir, untrackedCheck: false });
-    const violations = result.violations.filter(v => v.file && v.file.endsWith("Wiki.md"));
-    assertEqual(violations.length, 0, "AU-WIKI-1: valid wiki-hub has zero violations");
+    const violations = result.violations.filter(v => v.file && v.file.endsWith("Docs.md"));
+    assertEqual(violations.length, 0, "AU-DOCS-1: valid docs-hub has zero violations");
   });
 }
 
-// AU-WIKI-2: wiki-hub missing project_slug → violation
+// AU-DOCS-2: docs-hub missing project_slug → violation
 async function caseAUWIKI2WikiHubMissingSlug() {
   await withTempVault(async (dir) => {
     makeSauceVault(dir, { blueprints: ["project"], rules: { project: WIKI_HUB_FRAGMENT } });
-    writeNote(dir, "spice/projects/test-proj/wiki/Wiki.md",
-      { type: "wiki-hub", project_name: "Test Proj", created: "2026-05-16 12:00", tags: ["wiki-hub"] });  // missing project_slug
+    writeNote(dir, "spice/projects/test-proj/docs/Docs.md",
+      { type: "docs-hub", project_name: "Test Proj", created: "2026-05-16 12:00", tags: ["docs-hub"] });  // missing project_slug
     const { runAudit } = require("../audit/walker");
     const result = await runAudit({ vaultPath: dir, untrackedCheck: false });
     assertTrue(result.violations.some(v => /project_slug/i.test(JSON.stringify(v))),
-      "AU-WIKI-2: missing project_slug surfaces violation");
+      "AU-DOCS-2: missing project_slug surfaces violation");
   });
 }
 
-// AU-WIKI-3: valid wiki-note → zero violations
+// AU-DOCS-3: valid doc-note → zero violations
 async function caseAUWIKI3WikiNoteValid() {
   await withTempVault(async (dir) => {
     makeSauceVault(dir, { blueprints: ["project"], rules: { project: WIKI_NOTE_FRAGMENT } });
-    writeNote(dir, "spice/projects/test-proj/wiki/Some Thought.md",
-      { type: "wiki-note", project: "[[Test Proj]]", project_slug: "test-proj", created: "2026-05-16 12:00", tags: ["wiki-note"] });
+    writeNote(dir, "spice/projects/test-proj/docs/Some Thought.md",
+      { type: "doc-note", project: "[[Test Proj]]", project_slug: "test-proj", created: "2026-05-16 12:00", tags: ["doc-note"] });
     const { runAudit } = require("../audit/walker");
     const result = await runAudit({ vaultPath: dir, untrackedCheck: false });
     const violations = result.violations.filter(v => v.file && v.file.endsWith("Some Thought.md"));
-    assertEqual(violations.length, 0, "AU-WIKI-3: valid wiki-note has zero violations");
+    assertEqual(violations.length, 0, "AU-DOCS-3: valid doc-note has zero violations");
   });
 }
 
-// AU-WIKI-4: wiki-note rule respects exclude_basenames — a Wiki.md in the
-// same folder is NOT subject to the wiki-note rule (no spurious violation
-// on Wiki.md when only the wiki-note fragment is active).
+// AU-DOCS-4: doc-note rule respects exclude_basenames — a Docs.md in the
+// same folder is NOT subject to the doc-note rule (no spurious violation
+// on Docs.md when only the doc-note fragment is active).
 async function caseAUWIKI4ExcludeBasenamesHonored() {
   await withTempVault(async (dir) => {
     makeSauceVault(dir, { blueprints: ["project"], rules: { project: WIKI_NOTE_FRAGMENT } });
-    // Wiki.md has wiki-hub-shaped frontmatter (NOT wiki-note). Under the
-    // wiki-note fragment alone, exclude_basenames must drop it from scope.
-    writeNote(dir, "spice/projects/test-proj/wiki/Wiki.md",
-      { type: "wiki-hub", project_slug: "test-proj", project_name: "Test Proj", created: "2026-05-16 12:00", tags: ["wiki-hub"] });
+    // Docs.md has docs-hub-shaped frontmatter (NOT doc-note). Under the
+    // doc-note fragment alone, exclude_basenames must drop it from scope.
+    writeNote(dir, "spice/projects/test-proj/docs/Docs.md",
+      { type: "docs-hub", project_slug: "test-proj", project_name: "Test Proj", created: "2026-05-16 12:00", tags: ["docs-hub"] });
     const { runAudit } = require("../audit/walker");
     const result = await runAudit({ vaultPath: dir, untrackedCheck: false });
-    const wikiViolations = result.violations.filter(v => v.file && v.file.endsWith("Wiki.md"));
-    assertEqual(wikiViolations.length, 0, "AU-WIKI-4: exclude_basenames excludes Wiki.md from wiki-note rule");
+    const wikiViolations = result.violations.filter(v => v.file && v.file.endsWith("Docs.md"));
+    assertEqual(wikiViolations.length, 0, "AU-DOCS-4: exclude_basenames excludes Docs.md from doc-note rule");
   });
 }
 
@@ -1784,12 +1784,12 @@ const selector = process.argv[2] || "all";
     await runCase("AU-EC-5", caseAUEC5);
     await runCase("AU-EC-6", caseAUEC6);
   }
-  // v0.50.0 S5 — wiki rule_fragment audit cases (AU-WIKI-1..4)
-  if (selector === "wiki" || selector === "all") {
-    await runCase("AU-WIKI-1", caseAUWIKI1WikiHubValid);
-    await runCase("AU-WIKI-2", caseAUWIKI2WikiHubMissingSlug);
-    await runCase("AU-WIKI-3", caseAUWIKI3WikiNoteValid);
-    await runCase("AU-WIKI-4", caseAUWIKI4ExcludeBasenamesHonored);
+  // v0.50.0 S5 (renamed v0.52.0) — docs rule_fragment audit cases (AU-DOCS-1..4)
+  if (selector === "wiki" || selector === "docs" || selector === "all") {
+    await runCase("AU-DOCS-1", caseAUWIKI1WikiHubValid);
+    await runCase("AU-DOCS-2", caseAUWIKI2WikiHubMissingSlug);
+    await runCase("AU-DOCS-3", caseAUWIKI3WikiNoteValid);
+    await runCase("AU-DOCS-4", caseAUWIKI4ExcludeBasenamesHonored);
   }
   console.log(`========\nResult: ${passed} passed, ${failed} failed.`);
   process.exit(failed === 0 ? 0 : 1);
