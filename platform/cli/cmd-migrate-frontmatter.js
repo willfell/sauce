@@ -152,8 +152,12 @@ function tzOffsetString(d) {
 }
 
 function mtimeIsoWithTz(absPath) {
-    const stat = fs.statSync(absPath);
-    return `${stat.mtime.toISOString().slice(0, 19)}Z`.replace(/Z$/, "Z");
+    try {
+        const stat = fs.statSync(absPath);
+        return `${stat.mtime.toISOString().slice(0, 19)}Z`;
+    } catch (_e) {
+        return null;
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -362,7 +366,7 @@ function computeTransforms(frontmatter, migrationSpec, opts) {
     // 6. Backfill created_at (from file mtime; only if BOTH created_at and created are missing)
     if (!("created_at" in fm) && !("created" in fm)) {
         const mtime = mtimeIsoWithTz(opts.absPath);
-        ops.push({ kind: "append_key", key: "created_at", value: mtime });
+        if (mtime) ops.push({ kind: "append_key", key: "created_at", value: mtime });
     }
 
     return ops;
@@ -639,7 +643,7 @@ function renderOpDescription(op) {
 // Core runner (callable from CLI + tests)
 // ---------------------------------------------------------------------------
 
-async function runMigration({ vaultPath, workshopRoot, blueprint, apply, reportPath, log }) {
+function runMigration({ vaultPath, workshopRoot, blueprint, apply, reportPath, log }) {
     log = log || (() => {});
     const migrationSpec = loadMigrationSpec(workshopRoot);
     const canonicalVocab = loadCanonicalVocab(workshopRoot);
@@ -725,7 +729,7 @@ async function run(ctx, args) {
         ? path.resolve(ctx._sauceDir, "..")
         : path.resolve(__dirname, "..", "..");
     const apply = opts.apply && !opts.dryRun;
-    await runMigration({
+    runMigration({
         vaultPath,
         workshopRoot,
         blueprint: opts.blueprint,
