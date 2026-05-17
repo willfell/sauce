@@ -1,7 +1,7 @@
 {
   "name": "audit",
-  "version": "0.2.1",
-  "description": "Walks every .md file, runs validator, reports violations + platform drift to Timestamps/Audits/YYYY-MM-DD-audit.md. v0.2.0 adds /audit slash command + claude-surface drift walker for the deployed .claude/ surface. v0.2.1 PATCH (v0.33.1): claude_md_row.row.path corrected from mechanism slug 'audit' to canonical command body dest path '.claude/commands/audit.md' so /audit --claude-surface resolves to a real file and lands in `aligned` rather than `dead_path` severity bucket.",
+  "version": "0.3.0",
+  "description": "Walks every .md file, runs validator, reports violations + platform drift to Timestamps/Audits/YYYY-MM-DD-audit.md. v0.3.0 MINOR (v0.53.0 FA-1): NEW frontmatter-alignment-walker.js (6 finding types: legacy_key_used HIGH, non_iso_timestamp HIGH, unquoted_wikilink MEDIUM, missing_canonical_key MEDIUM, discriminator_tag_present INFO, temporal_tag_present INFO) + `sauce audit --frontmatter-alignment` CLI flag (third walker alongside --claude-surface and --entity-create). v0.2.0 adds /audit slash command + claude-surface drift walker for the deployed .claude/ surface. v0.2.1 PATCH (v0.33.1): claude_md_row.row.path corrected from mechanism slug 'audit' to canonical command body dest path '.claude/commands/audit.md' so /audit --claude-surface resolves to a real file and lands in `aligned` rather than `dead_path` severity bucket.",
   "skills_dir": ".claude/skills/audit",
   "files": [
     { "source": "audit-walker.js", "dest": "{{templater_scripts_path}}/audit-walker.js" },

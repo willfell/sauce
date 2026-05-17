@@ -28,6 +28,7 @@ exports._parseFlags = function(argv) {
         quiet: false,
         claudeSurface: false,
         entityCreate: false,
+        frontmatterAlignment: false,
         workshopPath: null,
         strict: false,
         help: false,
@@ -45,6 +46,7 @@ exports._parseFlags = function(argv) {
         else if (a === "--quiet") flags.quiet = true;
         else if (a === "--claude-surface") flags.claudeSurface = true;
         else if (a === "--entity-create") flags.entityCreate = true;
+        else if (a === "--frontmatter-alignment") flags.frontmatterAlignment = true;
         else if (a === "--workshop") flags.workshopPath = argv[++i];
         else if (a.startsWith("--workshop=")) flags.workshopPath = a.slice(11);
         else if (a === "--strict") flags.strict = true;
@@ -69,6 +71,26 @@ const EC_SEVERITY_LABEL = {
     manual_implementation_at_risk: "Manual implementation at risk (HIGH) — New*Button class exists but no new_entity_buttons[] entry; migration incomplete",
     dead_path: "Dead paths (MEDIUM) — destination.folder_prefix or body_template does not resolve on disk",
     escape_hatch_used: "Escape hatch used (INFO) — New*Button class coexists with new_entity_buttons[]; intentional but requires justification",
+};
+
+// Frontmatter-alignment severity constants (v0.53.0 FA-1).
+// HIGH = legacy_key_used + non_iso_timestamp; MEDIUM = unquoted_wikilink +
+// missing_canonical_key; INFO = discriminator_tag_present + temporal_tag_present.
+const FA_SEVERITY_ORDER = [
+    "legacy_key_used",
+    "non_iso_timestamp",
+    "unquoted_wikilink",
+    "missing_canonical_key",
+    "discriminator_tag_present",
+    "temporal_tag_present",
+];
+const FA_SEVERITY_LABEL = {
+    legacy_key_used: "Legacy key used (HIGH) — created / attending / singular-product; expected migration to canonical form",
+    non_iso_timestamp: "Non-ISO timestamp (HIGH) — created_at value doesn't match ISO-8601 with TZ",
+    unquoted_wikilink: "Unquoted wikilink (MEDIUM) — cross-ref value is bare [[X]] instead of \"[[X]]\"",
+    missing_canonical_key: "Missing canonical key (MEDIUM) — note has type but no created_at",
+    discriminator_tag_present: "Discriminator tag present (INFO) — tags contains a type discriminator that duplicates type:",
+    temporal_tag_present: "Temporal tag present (INFO) — tags contains a date pattern",
 };
 
 function formatClaudeSurfaceReport(result) {
@@ -97,6 +119,34 @@ function formatClaudeSurfaceReport(result) {
     }
     // JSON summary line for the skill parser.
     lines.push(`<!-- summary:${JSON.stringify({ counts, findings_total: findings.length })} -->`);
+    return lines.join("\n") + "\n";
+}
+
+function formatFrontmatterAlignmentReport(result) {
+    const { findings, counts } = result;
+    const lines = [];
+    lines.push(`# sauce audit --frontmatter-alignment`);
+    lines.push("");
+    lines.push(`Counts: legacy_key_used=${counts.legacy_key_used}, non_iso_timestamp=${counts.non_iso_timestamp}, unquoted_wikilink=${counts.unquoted_wikilink}, missing_canonical_key=${counts.missing_canonical_key}, discriminator_tag_present=${counts.discriminator_tag_present}, temporal_tag_present=${counts.temporal_tag_present}, aligned=${counts.aligned}`);
+    lines.push("");
+    for (const sev of FA_SEVERITY_ORDER) {
+        const rows = findings.filter(f => f.severity === sev);
+        if (rows.length === 0) continue;
+        lines.push(`## ${sev} (${rows.length})`);
+        lines.push("");
+        lines.push(`_${FA_SEVERITY_LABEL[sev]}_`);
+        lines.push("");
+        for (let i = 0; i < rows.length; i++) {
+            const r = rows[i];
+            lines.push(`${i + 1}. \`${r.path}\` — ${r.message}`);
+        }
+        lines.push("");
+    }
+    if (findings.length === 0) {
+        lines.push(`No frontmatter-alignment drift detected. ${counts.aligned} aligned notes.`);
+        lines.push("");
+    }
+    lines.push(`<!-- frontmatter-alignment-summary:${JSON.stringify({ counts, findings_total: findings.length })} -->`);
     return lines.join("\n") + "\n";
 }
 
@@ -133,7 +183,7 @@ function formatEntityCreateReport(result) {
     return lines.join("\n") + "\n";
 }
 
-exports._runForTest = async function({ vaultPath, blueprintFilter, outputFile, untrackedCheck, quiet, claudeSurface, entityCreate, workshopPath, strict }) {
+exports._runForTest = async function({ vaultPath, blueprintFilter, outputFile, untrackedCheck, quiet, claudeSurface, entityCreate, frontmatterAlignment, workshopPath, strict }) {
     // Test entry-point used by run-audit.js / run-cli.js. Throws Error with
     // .exitCode set (1 = violations, 2 = error) instead of calling process.exit.
     const installedJsonPath = path.join(vaultPath, "ranch/platform-installed.json");
@@ -148,9 +198,10 @@ exports._runForTest = async function({ vaultPath, blueprintFilter, outputFile, u
     let hasFindings = false;
 
     // (1) Default rule-fragment pass — runs unless an explicit pass flag is set alone.
-    // To preserve original behavior, the default pass runs when neither --claude-surface
-    // nor --entity-create is set. When a specific flag is set, only that pass runs.
-    if (!claudeSurface && !entityCreate) {
+    // To preserve original behavior, the default pass runs when none of the explicit
+    // pass flags is set. When a specific flag is set, only that pass runs.
+    const anyExplicitPass = claudeSurface || entityCreate || frontmatterAlignment;
+    if (!anyExplicitPass) {
         const { runAudit } = require("../audit/walker");
         const { formatReport } = require("../audit/report");
         const result = await runAudit({ vaultPath, blueprintFilter, untrackedCheck });
@@ -166,6 +217,11 @@ exports._runForTest = async function({ vaultPath, blueprintFilter, outputFile, u
         const ecResult = await walkEntityCreate(vaultPath, { workshopPath });
         combinedMd += formatEntityCreateReport(ecResult);
         if (ecResult.findings.length > 0) hasFindings = true;
+    } else if (frontmatterAlignment) {
+        const { walkFrontmatterAlignment } = require("../audit/frontmatter-alignment-walker");
+        const faResult = await walkFrontmatterAlignment(vaultPath, { workshopPath });
+        combinedMd += formatFrontmatterAlignmentReport(faResult);
+        if (faResult.findings.length > 0) hasFindings = true;
     }
 
     let summary = null;
@@ -201,17 +257,21 @@ exports.run = async function(ctx, args) {
             "usage: sauce audit [--vault <path>] [--blueprint <name>] [--output-file <path>]\n" +
             "                   [--no-untracked-check] [--quiet] [--strict]\n" +
             "                   [--claude-surface [--workshop <path>]]\n" +
-            "                   [--entity-create]\n" +
+            "                   [--entity-create] [--frontmatter-alignment]\n" +
             "\n" +
             "Passes (mutually exclusive; default = rule-fragment pass):\n" +
-            "  (default)         Rule-fragment audit: blueprint conformance + untracked dirs.\n" +
-            "  --claude-surface  Claude-surface drift: dead_path / orphan / stale_but_valid /\n" +
-            "                    consumer_edit_at_risk.  --workshop <path> enables body-diff checks.\n" +
-            "  --entity-create   Entity-create modularization drift:\n" +
-            "                    manual_implementation_at_risk (HIGH) — New*Button class with no\n" +
-            "                      new_entity_buttons[] declaration.\n" +
-            "                    dead_path (MEDIUM) — folder_prefix or body_template unresolved.\n" +
-            "                    escape_hatch_used (INFO) — New*Button + declaration coexist.\n" +
+            "  (default)               Rule-fragment audit: blueprint conformance + untracked dirs.\n" +
+            "  --claude-surface        Claude-surface drift: dead_path / orphan / stale_but_valid /\n" +
+            "                          consumer_edit_at_risk.  --workshop <path> enables body-diff checks.\n" +
+            "  --entity-create         Entity-create modularization drift:\n" +
+            "                          manual_implementation_at_risk (HIGH) — New*Button class with no\n" +
+            "                            new_entity_buttons[] declaration.\n" +
+            "                          dead_path (MEDIUM) — folder_prefix or body_template unresolved.\n" +
+            "                          escape_hatch_used (INFO) — New*Button + declaration coexist.\n" +
+            "  --frontmatter-alignment Frontmatter canonical-vocab drift (v0.53.0+):\n" +
+            "                          legacy_key_used (HIGH), non_iso_timestamp (HIGH),\n" +
+            "                          unquoted_wikilink (MEDIUM), missing_canonical_key (MEDIUM),\n" +
+            "                          discriminator_tag_present (INFO), temporal_tag_present (INFO).\n" +
             "\n" +
             "Exit codes: 0 = clean, 1 = findings, 2 = error."
         );
@@ -227,6 +287,7 @@ exports.run = async function(ctx, args) {
             quiet: flags.quiet,
             claudeSurface: flags.claudeSurface,
             entityCreate: flags.entityCreate,
+            frontmatterAlignment: flags.frontmatterAlignment,
             workshopPath: flags.workshopPath ? path.resolve(process.cwd(), flags.workshopPath) : null,
             strict: flags.strict,
         });
