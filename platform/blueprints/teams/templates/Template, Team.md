@@ -14,10 +14,10 @@ await tp.file.rename(name);
 %>---
 type: team
 name: "<% name %>"
-created: <% tp.date.now("YYYY-MM-DD") %>
+created_at: "<% tp.file.creation_date("YYYY-MM-DDTHH:mm:ssZ") %>"
 tags:
-  - team
-product: "[[<% product %>]]"
+products:
+  - "[[<% product %>]]"
 ---
 
 ```dataviewjs

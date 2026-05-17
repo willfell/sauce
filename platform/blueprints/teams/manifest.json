@@ -1,6 +1,6 @@
 {
   "name": "teams",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "kind": "blueprint",
   "module_directory": "teams",
   "skills_dir": ".claude/skills/teams",
@@ -48,13 +48,12 @@
       "target": "teams",
       "fragment": {
         "scope": { "path_glob": "spice/teams/*.md", "exclude_basenames": ["Teams.md"] },
+        "extends": "_canonical-vocab",
         "required_frontmatter": {
-          "type":    { "required": true, "type": "string", "equals": "team" },
-          "name":    { "required": true, "type": "string" },
-          "created": { "required": true, "type": "string", "matches": "^\\d{4}-\\d{2}-\\d{2}$" },
-          "product": { "required": true, "type": "string" }
+          "type":     { "required": true, "type": "string", "equals": "team" },
+          "name":     { "required": true, "type": "string" },
+          "products": { "required": true, "type": "list", "min_length": 1 }
         },
-        "required_tags": [{ "tag": "team" }],
         "naming_pattern": "^[A-Z][\\w '\\-&]+\\.md$"
       }
     }
