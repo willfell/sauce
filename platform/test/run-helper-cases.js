@@ -5916,6 +5916,46 @@ async function caseKMC1CreateBoardGateWidened() {
 }
 
 // -------------------------------------------------------------------------
+// v0.50.5 — PNB-WRAP-1..3: ProjectNavButtons main button row wraps on narrow
+// widths. CSS-only fix: flex-wrap: wrap on the container; flex: 0 1 auto on
+// each button; white-space: nowrap on the label span (so a long-label button
+// wraps to a new flex row instead of the label wrapping inside the button).
+// -------------------------------------------------------------------------
+
+async function casePNBWrap1FlexWrap() {
+    console.log("\n--- Case PNB-WRAP-1: project-nav-buttons.js container flex-wraps ---");
+    const src = fs.readFileSync(
+        path.join(WORKSHOP, "platform/blueprints/project/helpers/project-nav-buttons.js"),
+        "utf8"
+    );
+    assertTrue("PNB-WRAP-1: project-nav-buttons.js sets flex-wrap: wrap on main button container",
+        /flex-wrap:\s*wrap/.test(src),
+        "expected `flex-wrap: wrap` not found");
+}
+
+async function casePNBWrap2ButtonFlexAuto() {
+    console.log("\n--- Case PNB-WRAP-2: project-nav-buttons.js button uses flex: 0 1 auto ---");
+    const src = fs.readFileSync(
+        path.join(WORKSHOP, "platform/blueprints/project/helpers/project-nav-buttons.js"),
+        "utf8"
+    );
+    assertTrue("PNB-WRAP-2: project-nav-buttons.js sets flex: 0 1 auto on the button style",
+        /flex:\s*0\s+1\s+auto/.test(src),
+        "expected `flex: 0 1 auto` not found");
+}
+
+async function casePNBWrap3LabelNowrap() {
+    console.log("\n--- Case PNB-WRAP-3: project-nav-buttons.js label span has white-space: nowrap ---");
+    const src = fs.readFileSync(
+        path.join(WORKSHOP, "platform/blueprints/project/helpers/project-nav-buttons.js"),
+        "utf8"
+    );
+    assertTrue("PNB-WRAP-3: project-nav-buttons.js sets white-space: nowrap on the label span",
+        /white-space:\s*nowrap/.test(src),
+        "expected `white-space: nowrap` (on label span) not found");
+}
+
+// -------------------------------------------------------------------------
 // v0.49.0 S6 — CSS-1..3: applyCustomJsStartupScripts helper unit cases.
 // STUB: full helper-extraction adapter-stub harness deferred; sub-asserts
 // log a stub message and pass. Captured as FLN-v49-N follow-up.
@@ -6262,6 +6302,11 @@ async function casePWC5RenderMethodNotView() {
   await caseCSS1Idempotent();
   await caseCSS2AdditiveMerge();
   await caseCSS3AbsentArrayDefaultEmpty();
+
+  // v0.50.5 — PNB-WRAP-1..3: ProjectNavButtons main button row wraps.
+  await casePNBWrap1FlexWrap();
+  await casePNBWrap2ButtonFlexAuto();
+  await casePNBWrap3LabelNowrap();
 
   // v0.50.0 S5 — PWC-1..4: ProjectWikiCards class surface asserts.
   await casePWC1ClassDefined();
