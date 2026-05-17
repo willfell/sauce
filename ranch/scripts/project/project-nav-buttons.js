@@ -416,7 +416,7 @@ class ProjectNavButtons {
         const container = root.createEl("div");
         container.style.cssText = `
             display: flex;
-            flex-wrap: nowrap;
+            flex-wrap: wrap;
             gap: 6px;
             margin-bottom: 4px;
         `;
@@ -437,13 +437,12 @@ class ProjectNavButtons {
             font-family: inherit;
             letter-spacing: 0.01em;
             transition: all 0.15s ease;
-            flex: 1;
-            min-width: 0;
+            flex: 0 1 auto;
         `;
 
         for (const btn of buttons) {
             const el = container.createEl("button");
-            el.innerHTML = btn.icon + `<span>${btn.label}</span>`;
+            el.innerHTML = btn.icon + `<span style="white-space: nowrap;">${btn.label}</span>`;
             el.style.cssText = btnStyle;
             el.onmouseenter = () => {
                 el.style.background = "var(--interactive-accent)";
