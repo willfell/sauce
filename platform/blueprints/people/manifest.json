@@ -1,6 +1,6 @@
 {
   "name": "people",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "kind": "blueprint",
   "module_directory": "people",
   "description": "Per-person notes under spice/people/<First Last>.md, with hub at spice/people/People.md and shared rendering via people-rendering mechanism. Materializes Templater folder template + global People nav-button. v0.2.0: migrated NewPersonButton dataviewjs helper to entity-create@0.1.0 declarative new_entity_buttons[] with safe-filename validate predicate; scripts/new-person-button.js deleted. v0.2.0 follow-up: removed body_template (Template, People.md Templater syntax + own-frontmatter block incompatible with entity-create); frontmatter_template carries the static-known person fields (company/location/title/email/website/aliases/phone/tags); inline_body carries the PersonNavButtons + PeopleRendering mention-list dataviewjs blocks. Legacy auto-move directive is redundant because entity-create's destination already writes the file at spice/people/<name>.md. v0.2.1 PATCH (v0.47.0): added \"type\": \"person\" to new_entity_buttons[0].frontmatter_template. Fixes BUG-2 from headspace Phase 3 (person notes created via the + New Person button were missing the type frontmatter; type-filtered People hub queries skipped them). v0.47.0 also lands a validator Layer 2 type-field convention rule (forward-defense) to prevent this omission from recurring in future blueprints.",
@@ -44,6 +44,7 @@
       },
       "frontmatter_template": {
         "type": "person",
+        "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
         "company": "",
         "location": "",
         "title": "",
@@ -51,7 +52,7 @@
         "website": "",
         "aliases": [],
         "phone": "",
-        "tags": ["person"]
+        "tags": []
       },
       "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PersonNavButtons\" });\n```\n\n# [[{{prompts.name}}]]\n\n## Notes\n-\n\n## Meetings\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"PeopleRendering\",\n  method: \"renderMentionList\",\n  args: [dv, { mode: \"mentioning_person\", personLink: dv.current().file.link, scopePath: \"spice/meetings\" }, { style: \"cards\", limit: 50 }]\n});\n```\n\n## Daily Mentions\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"PeopleRendering\",\n  method: \"renderMentionList\",\n  args: [dv, { mode: \"mentioning_person\", personLink: dv.current().file.link, scopePath: \"spice/daily\" }, { style: \"list\", limit: 30 }]\n});\n```\n",
       "render_in": { "kind": "hub", "target_path": "{{module_directory}}/People.md" }
@@ -72,9 +73,7 @@
       "target": "people",
       "fragment": {
         "scope": { "path_glob": "spice/people/*.md", "exclude_basenames": ["People.md"] },
-        "required_frontmatter": {
-          "tags": { "required": true, "type": "list", "contains": ["person"] }
-        },
+        "extends": "_canonical-vocab",
         "naming_pattern": "^[A-Z][a-zA-Z'\\- ]+ [A-Z][a-zA-Z'\\- ]+\\.md$"
       }
     }

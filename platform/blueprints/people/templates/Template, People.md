@@ -1,4 +1,6 @@
 ---
+type: person
+created_at: "<% tp.file.creation_date("YYYY-MM-DDTHH:mm:ssZ") %>"
 company:
 location:
 title:
@@ -7,7 +9,6 @@ website:
 aliases:
 phone:
 tags:
-  - person
 ---
 ```dataviewjs
 await dv.view("{{views_path}}/customjs-guard", { class: "PersonNavButtons" });
