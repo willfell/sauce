@@ -185,7 +185,9 @@ exports.runAudit = async function (opts) {
                 body: split.body,
                 blueprint: bp,
             };
-            const fileViolations = ruleRunner.applyRules(rules, fileRecord);
+            // v0.53.0 (FA-1): pass vaultPath so rule-runner can resolve
+            // `extends:` against <vault>/ranch/rules/<name>.json first.
+            const fileViolations = ruleRunner.applyRules(rules, fileRecord, { vaultPath });
             if (Array.isArray(fileViolations)) {
                 for (const v of fileViolations) violations.push(v);
             }

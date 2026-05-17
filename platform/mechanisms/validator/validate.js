@@ -84,11 +84,45 @@ async function loadRule(app, rulesPath, name) {
   const tfile = app.vault.getAbstractFileByPath(`${rulesPath}/${name}.json`);
   if (!tfile) return null;
   const text = await app.vault.read(tfile);
+  let parsed;
   try {
-    return JSON.parse(text);
+    parsed = JSON.parse(text);
   } catch (e) {
     return null;
   }
+  // v0.53.0 (FA-1): top-level `extends:` merges a shared base template's
+  // required_frontmatter into this rule, with fragment-wins precedence on
+  // key conflicts. Failure-soft if base missing or malformed.
+  if (parsed && typeof parsed === "object" && typeof parsed.extends === "string" && parsed.extends.length > 0) {
+    const baseName = parsed.extends;
+    const baseFile = app.vault.getAbstractFileByPath(`${rulesPath}/${baseName}.json`);
+    if (baseFile) {
+      try {
+        const baseText = await app.vault.read(baseFile);
+        const base = JSON.parse(baseText);
+        if (base && typeof base === "object") {
+          return _mergeRules(base, parsed);
+        }
+      } catch (_e) {
+        // fall through to parsed-only
+      }
+    }
+  }
+  return parsed;
+}
+
+// v0.53.0 (FA-1): rule-merge helper. Base's required_frontmatter is unioned
+// with fragment's required_frontmatter; fragment values win on key conflict.
+function _mergeRules(base, fragment) {
+  const out = Object.assign({}, fragment);
+  if (base.required_frontmatter || fragment.required_frontmatter) {
+    out.required_frontmatter = Object.assign(
+      {},
+      base.required_frontmatter || {},
+      fragment.required_frontmatter || {}
+    );
+  }
+  return out;
 }
 
 async function checkFrontmatter(ctx, gr, mr) {

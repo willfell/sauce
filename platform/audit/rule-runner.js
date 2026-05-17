@@ -80,8 +80,13 @@ exports.applyRules = function (rules, fileRecord, opts) {
   const violations = [];
   if (!Array.isArray(rules)) return violations;
   const workshopRoot = (opts && opts.workshopRoot) || _resolveWorkshopRoot();
-  for (const fragment of rules) {
+  const vaultPath = opts && opts.vaultPath;
+  for (let fragment of rules) {
     if (!fragment || typeof fragment !== "object") continue;
+    // v0.53.0 (FA-1): resolve `extends:` per-fragment. The loader merges a
+    // shared rule template (e.g. ranch/rules/_canonical-vocab.json) into the
+    // fragment's required_frontmatter. Per-fragment overrides win on conflict.
+    fragment = _resolveExtends(fragment, vaultPath, workshopRoot);
     const scopeOk = _matchesScope(fragment, fileRecord);
     if (scopeOk === "error") continue; // malformed glob → skip fragment entirely
     if (!scopeOk) continue;
@@ -94,6 +99,54 @@ exports.applyRules = function (rules, fileRecord, opts) {
   }
   return violations;
 };
+
+// v0.53.0 (FA-1): cache parsed extends-base templates. Keyed by absolute path
+// of the resolved template file; entries are the parsed JSON object.
+const _extendsCache = new Map();
+
+// v0.53.0 (FA-1): resolve `extends:` field on a rule fragment.
+// Looks up <vaultPath>/ranch/rules/<name>.json first (consumer-vault), then
+// falls back to <workshopRoot>/platform/rules/<name>.json (workshop). If found,
+// merges the base's required_frontmatter into the fragment with fragment-wins
+// precedence. Returns the fragment unchanged if extends is absent or base
+// cannot be resolved (failure-soft: do not refuse to apply the fragment).
+function _resolveExtends(fragment, vaultPath, workshopRoot) {
+  if (!fragment || typeof fragment.extends !== "string" || fragment.extends.length === 0) {
+    return fragment;
+  }
+  const baseName = fragment.extends;
+  const candidates = [];
+  if (vaultPath) candidates.push(path.join(vaultPath, "ranch", "rules", `${baseName}.json`));
+  if (workshopRoot) candidates.push(path.join(workshopRoot, "platform", "rules", `${baseName}.json`));
+  let base = null;
+  for (const p of candidates) {
+    if (_extendsCache.has(p)) { base = _extendsCache.get(p); break; }
+    if (!fs.existsSync(p)) continue;
+    try {
+      base = JSON.parse(fs.readFileSync(p, "utf8"));
+      _extendsCache.set(p, base);
+      break;
+    } catch (_e) {
+      // malformed JSON — leave base null and continue to next candidate.
+      base = null;
+    }
+  }
+  if (!base || typeof base !== "object") return fragment;
+  const merged = Object.assign({}, fragment);
+  if (base.required_frontmatter || fragment.required_frontmatter) {
+    merged.required_frontmatter = Object.assign(
+      {},
+      base.required_frontmatter || {},
+      fragment.required_frontmatter || {}
+    );
+  }
+  return merged;
+}
+
+// v0.53.0 (FA-1): exposed for harness use; clears the cached extends-base
+// JSON objects so subsequent tests can verify load behavior in isolation.
+exports._clearExtendsCache = function () { _extendsCache.clear(); };
+exports._resolveExtends = _resolveExtends;
 
 function _matchesScope(fragment, fileRecord) {
   const scope = fragment.scope;
