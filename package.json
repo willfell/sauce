@@ -17,7 +17,7 @@
     "test:seed": "node platform/test/run-seed.js",
     "test:entity-create": "node platform/test/run-entity-create.js",
     "test:smoke": "node platform/test/run-integration-smoke.js",
-    "release:preflight": "node scripts/check-version-sync.js && npm run test:helpers && npm run test:bootstrap && npm run test:registry && npm run test:migrate-layout && node platform/test/run-cli.js && node platform/test/run-migrate.js && node platform/test/run-audit.js && node platform/test/run-claude-surface.js && node platform/test/run-renderer.js && node platform/test/run-install-sh.js && node platform/test/run-cowork-smoke.js && node platform/test/run-doctor-self.js && node platform/test/run-seed.js && node platform/test/run-entity-create.js && node platform/test/run-integration-smoke.js && node platform/test/run-wiki-to-docs-migration.js && node platform/test/run-migrate-frontmatter.js"
+    "release:preflight": "node scripts/check-version-sync.js && npm run test:helpers && npm run test:bootstrap && npm run test:registry && npm run test:migrate-layout && node platform/test/run-cli.js && node platform/test/run-migrate.js && node platform/test/run-audit.js && node platform/test/run-claude-surface.js && node platform/test/run-renderer.js && node platform/test/run-install-sh.js && node platform/test/run-cowork-smoke.js && node platform/test/run-doctor-self.js && node platform/test/run-seed.js && node platform/test/run-entity-create.js && node platform/test/run-integration-smoke.js && node platform/test/run-wiki-to-docs-migration.js && node platform/test/run-migrate-frontmatter.js && node platform/test/run-validator.js"
   },
   "dependencies": {
     "@inquirer/prompts": "^7.0.0"
