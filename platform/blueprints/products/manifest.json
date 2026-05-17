@@ -1,6 +1,6 @@
 {
   "name": "products",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "kind": "blueprint",
   "module_directory": "products",
   "skills_dir": ".claude/skills/products",
@@ -47,12 +47,11 @@
       "target": "products",
       "fragment": {
         "scope": { "path_glob": "spice/products/*.md", "exclude_basenames": ["Products.md"] },
+        "extends": "_canonical-vocab",
         "required_frontmatter": {
-          "type":    { "required": true, "type": "string", "equals": "product" },
-          "name":    { "required": true, "type": "string" },
-          "created": { "required": true, "type": "string", "matches": "^\\d{4}-\\d{2}-\\d{2}$" }
+          "type": { "required": true, "type": "string", "equals": "product" },
+          "name": { "required": true, "type": "string" }
         },
-        "required_tags": [{ "tag": "product" }],
         "naming_pattern": "^[A-Z][\\w '\\-&]+\\.md$"
       }
     }

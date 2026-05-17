@@ -5,9 +5,8 @@ await tp.file.rename(name);
 %>---
 type: product
 name: "<% name %>"
-created: <% tp.date.now("YYYY-MM-DD") %>
+created_at: "<% tp.file.creation_date("YYYY-MM-DDTHH:mm:ssZ") %>"
 tags:
-  - product
 ---
 
 ```dataviewjs
