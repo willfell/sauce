@@ -80,10 +80,17 @@ class ProjectNavButtons {
             return { context: "doc-note", pathParts, planningIdx, projectSlug, projectDir };
         }
 
-        // Project hub: lives directly under project dir, has #project tag
+        // Project hub: lives directly under project dir, has canonical type:project
+        // OR (legacy compat) #project tag. v0.56.1 PATCH (FA-3 fallout): the
+        // post-canonical-vocab atlas notes have type:project but no longer carry
+        // the 'project' tag — checking tag-only previously left atlas pages in
+        // unknown context with zero rendered buttons.
         const cache = app.metadataCache.getFileCache(dv.current().file);
-        const tags = cache?.frontmatter?.tags || [];
-        if (Array.isArray(tags) && tags.includes("project") && pathParts.length === planningIdx + 3) {
+        const fm = cache?.frontmatter || {};
+        const tags = fm.tags || [];
+        const isAtlasShape = fm.type === "project"
+            || (Array.isArray(tags) && tags.includes("project"));
+        if (isAtlasShape && pathParts.length === planningIdx + 3) {
             return { context: "project-hub", pathParts, planningIdx, projectSlug, projectDir };
         }
 
@@ -302,9 +309,16 @@ class ProjectNavButtons {
             !f.basename.endsWith("-board")
         );
 
+        // v0.56.1 PATCH (FA-3 fallout): atlas-detection reads canonical
+        // type:project FIRST and falls back to legacy 'project' tag — the
+        // FA-3 migration stripped the tag, so tag-only detection returned
+        // undefined and the "Project Hub" back-button vanished from every
+        // task/board/sub-note context.
         const mainNote = projectFiles.find(f => {
-            const tags = app.metadataCache.getFileCache(f)?.frontmatter?.tags || [];
-            return tags.includes("project");
+            const fm = app.metadataCache.getFileCache(f)?.frontmatter || {};
+            const tags = fm.tags || [];
+            return fm.type === "project"
+                || (Array.isArray(tags) && tags.includes("project"));
         });
 
         const mapNote = projectFiles.find(f => f.basename.endsWith("- Map"));

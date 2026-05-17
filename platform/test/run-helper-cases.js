@@ -6286,7 +6286,7 @@ async function caseFA3ProjectManifest() {
   console.log("\n--- Case FA3-PROJECT-MANIFEST: project@1.13.0 canonical vocab ---");
   const m = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/project/manifest.json"), "utf8"));
-  assertTrue("FA3-PROJ-1: project version 1.13.0", m.version === "1.13.0",
+  assertTrue("FA3-PROJ-1: project version >= 1.13.0", /^1\.13\.\d+$/.test(m.version),
     `got: ${m.version}`);
   const ec0 = m.new_entity_buttons[0].frontmatter_template;
   assertTrue("FA3-PROJ-2: project entity-create has created_at canonical",

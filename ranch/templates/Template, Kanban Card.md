@@ -100,9 +100,16 @@ if (planIdx >= 0 && planIdx + 1 < parts.length) {
         !f.basename.includes("Map")
     );
 
+    // v0.56.1 PATCH (FA-3 fallout): the FA-3 migration stripped the `project`
+    // discriminator tag from atlas frontmatter, so tag-based detection picks
+    // candidates[0] which is often `docs/Docs.md` → workstream picker reads
+    // the wrong file → "No workstreams defined" Notice on every new card.
+    // Now reads canonical `type: "project"` first, falls back to legacy tag.
     const atlasNote = candidates.find(f => {
-        const c = app.metadataCache.getFileCache(f);
-        return c?.frontmatter?.tags?.includes?.("project");
+        const fm = app.metadataCache.getFileCache(f)?.frontmatter || {};
+        const tags = fm.tags || [];
+        return fm.type === "project"
+            || (Array.isArray(tags) && tags.includes("project"));
     }) || candidates[0];
 
     if (atlasNote) {

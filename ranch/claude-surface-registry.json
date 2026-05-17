@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-05-17T17:33:50.142Z",
-  "workshop_version": "0.55.0",
+  "generated_at": "2026-05-17T18:50:42.384Z",
+  "workshop_version": "0.56.1",
   "contributions": {
     "audit": [
       {
@@ -96,13 +96,13 @@
         "kind": "command",
         "source": "commands/project.md",
         "dest": ".claude/commands/project.md",
-        "version": "1.13.0"
+        "version": "1.13.1"
       },
       {
         "kind": "skill",
         "source": "skills/new-project/SKILL.md",
         "dest": ".claude/skills/project/new-project/SKILL.md",
-        "version": "1.13.0"
+        "version": "1.13.1"
       },
       {
         "kind": "claude_md_row",

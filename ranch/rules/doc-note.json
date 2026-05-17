@@ -120,6 +120,44 @@
             ]
           }
         ]
+      },
+      {
+        "scope": {
+          "path_glob": "spice/projects/*/docs/*.md",
+          "exclude_basenames": [
+            "Docs.md"
+          ]
+        },
+        "extends": "_canonical-vocab",
+        "frontmatter_branch": [
+          {
+            "when": {
+              "frontmatter": {
+                "type": "doc-note"
+              }
+            },
+            "required_frontmatter": {
+              "type": {
+                "required": true,
+                "type": "string",
+                "matches": "^doc-note$"
+              },
+              "project": {
+                "required": true,
+                "type": "string"
+              },
+              "project_slug": {
+                "required": true,
+                "type": "string"
+              }
+            },
+            "required_tags": [
+              {
+                "tag": "doc-note"
+              }
+            ]
+          }
+        ]
       }
     ]
   }
