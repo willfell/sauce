@@ -56,24 +56,52 @@ async function _findSourceKanbanBoard(title) {
         } catch (_) { /* cache path failed; fall through to vault scan */ }
     }
 
-    // --- Vault-scan fallback (v0.49.2 behavior; cold-cache safety net) ---
-    const candidates = [];
+    // --- Vault-scan: prefer boards that contain [[title]], fall back to mtime ---
+    //
+    // v0.56.2 PATCH: kanban-plugin v2.0.51's actual flow (verified by reading
+    // main.js around the `yb()` template-apply helper) is:
+    //   1. createNewMarkdownFile(folder, title)   ← new file created
+    //   2. openFile(newFile)                      ← made active leaf
+    //   3. yb(stateManager, templatePath)         ← Templater fires HERE
+    //   4. n.updateItem(r, updateItemContent(t, "[[link]]"))
+    //                                             ← board's card text becomes [[title]]
+    //
+    // The `[[<title>]]` link is written to the board AFTER Templater finishes.
+    // The v0.49.2 vault-scan `body.includes("[[<title>]]")` never matched
+    // because the link wasn't there yet — every new card ended up with the
+    // sourceBoard fallback to the new file's own path, no auto-promote,
+    // orphaned at vault root.
+    //
+    // New strategy: enumerate kanban boards, prefer the one with [[title]]
+    // (covers the "card already existed before file creation" path used by
+    // the right-click "New note from card" menu), fall back to the
+    // most-recently-modified kanban board (covers the inline "+ Add a card"
+    // flow where the board mtime got bumped by the in-progress card edit
+    // even if [[title]] isn't yet on disk).
+    const allKanbanBoards = [];
+    const linkedKanbanBoards = [];
     const files = app.vault.getMarkdownFiles();
     for (const f of files) {
         const cache = app.metadataCache.getFileCache(f);
         const isKanban = cache?.frontmatter?.["kanban-plugin"] === "board"
             || f.path.endsWith("-board.md");
         if (!isKanban) continue;
+        const mtime = f.stat?.mtime || 0;
+        allKanbanBoards.push({ path: f.path, mtime });
         try {
             const body = await app.vault.read(f);
             if (body.includes(`[[${title}]]`)) {
-                candidates.push({ path: f.path, mtime: f.stat?.mtime || 0 });
+                linkedKanbanBoards.push({ path: f.path, mtime });
             }
         } catch (_) { /* ignore unreadable */ }
     }
-    if (candidates.length === 0) return "";
-    candidates.sort((a, b) => b.mtime - a.mtime);
-    return candidates[0].path;
+    if (linkedKanbanBoards.length > 0) {
+        linkedKanbanBoards.sort((a, b) => b.mtime - a.mtime);
+        return linkedKanbanBoards[0].path;
+    }
+    if (allKanbanBoards.length === 0) return "";
+    allKanbanBoards.sort((a, b) => b.mtime - a.mtime);
+    return allKanbanBoards[0].path;
 }
 const targetPath = tp.config.target_file?.path || "";
 const activePath = await _findSourceKanbanBoard(tp.file.title)
