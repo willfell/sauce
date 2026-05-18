@@ -82,31 +82,33 @@ if (token) {
 
 | Category | Tracked file count |
 |---|---:|
-| Personal email (`willfellhoelter@gmail.com`) | 24 |
-| Absolute personal paths (`/Users/willfellhoelter`) | 165 |
+| Personal email (`willfellhoelter@gmail.com`) | 25 |
+| Absolute personal paths (`/Users/willfellhoelter`) | 166 |
 | Identity name `ERO` (case-sensitive whole-word) | 39 |
 | Identity name `accuris` (case-insensitive) | 187 |
 | Identity name `headspace` (case-insensitive) | 153 |
 
+Note: this report file itself contributes one hit each to the email and absolute-path categories (the table above and the executive summary reference both); the pre-commit baseline was 24 / 165. Re-running the same `git grep -lI ...` pipeline after landing this commit reproduces 25 / 166.
+
 ### Heatmaps
 
-**Personal email — 24 files:**
+**Personal email — 25 files (post-commit):**
 
 | Directory | Files |
 |---|---:|
 | `Docs/prompts/` | 17 |
-| `Docs/plans/` | 4 |
+| `Docs/plans/` | 5 |
 | `SECURITY.md` | 1 |
 | `platform/blueprints/` | 1 |
 | `CLAUDE.md` | 1 |
 
 `SECURITY.md` intentionally lists the email as the disclosure channel — keep. The other 23 are historical references that would need a separate scrub cycle.
 
-**Absolute personal paths — 165 files (top directories):**
+**Absolute personal paths — 166 files (post-commit; top directories):**
 
 | Directory | Files |
 |---|---:|
-| `Docs/plans/` | 93 |
+| `Docs/plans/` | 94 |
 | `Docs/prompts/` | 68 |
 | `ranch/bootstrap-last-install.log` | 1 |
 | `Docs/how.md` | 1 |
@@ -193,9 +195,9 @@ Then write `export SAUCE_VAULT=${shellSingleQuote(vaultPath)}` (no outer double 
 
 **Severity:** medium (same defense-in-depth class as F-1; persistent file makes the failure mode slightly worse than a one-shot `execSync`).
 
-#### F-2 (low) — `platform/test/run-audit.js:1909-1924` — `eval` inside test-runner dispatch
+#### F-2 (low) — `platform/test/run-audit.js:1909-1924 et seq.` — `eval` inside test-runner dispatch
 
-The audit test runner dispatches to per-category case fixtures with `eval(\`caseAU${i}\`)`, where `i` is a counter from a literal range. The CLI argument `selector` chooses the range, not the eval-payload, so the eval string is fully determined by a number in a hardcoded loop.
+The audit test runner dispatches to per-category case fixtures with `eval(\`caseAU${i}\`)`, where `i` is a counter from a literal range. The CLI argument `selector` chooses the range, not the eval-payload, so the eval string is fully determined by a number in a hardcoded loop. The same pattern recurs in additional selector branches past line 1924 — a CodeQL scan will surface every instance.
 
 **Why this matters:** `eval` is a code-smell signal; static analysis flags it. It is not user-input-driven here, but the pattern triggers reviewers / GitHub's CodeQL scan and is less readable than a switch.
 
@@ -248,7 +250,7 @@ For audit-trail completeness, these patterns were searched and produced no findi
 
 ## Section 4 — Follow-up triage list
 
-Recommended order if the user chooses to act:
+Recommended order if the user chooses to act. The table is ordered by suggested action priority (medium-severity code findings first, then policy decisions, then info-class cleanup), not by F-number; full details for each item — including the "why this matters" and the proposed fix — are in the per-finding entries in Section 3.
 
 | # | Title | File:line | Severity | Suggested cycle |
 |---|---|---|---|---|
