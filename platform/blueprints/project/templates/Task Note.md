@@ -1,6 +1,6 @@
 ---
 type: task-note
-created_at: {{DATE}}
+created_at: "{{DATE}}"
 task_parent: {{TASK_PARENT_PATH}}
 aliases:
   - "{{ALIAS}}"

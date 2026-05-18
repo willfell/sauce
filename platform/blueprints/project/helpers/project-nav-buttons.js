@@ -187,7 +187,8 @@ class ProjectNavButtons {
         const tpl = await app.vault.read(tplFile);
         const now = new Date();
         const pad = (n) => String(n).padStart(2, "0");
-        const dateStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+        // v0.59.3: emit canonical ISO+TZ created_at (was legacy "YYYY-MM-DD HH:mm").
+        const dateStr = this._isoWithTz(now);
         const dateTag = `${now.getFullYear()}/${pad(now.getMonth() + 1)}/${pad(now.getDate())}`;
         const alias = `${projectSlug}-${taskFolder}: ${title}`;
 
@@ -218,6 +219,7 @@ class ProjectNavButtons {
         const now = new Date();
         const pad = (n) => String(n).padStart(2, "0");
         const dateTag = `${now.getFullYear()}/${pad(now.getMonth() + 1)}/${pad(now.getDate())}`;
+        const dateStr = this._isoWithTz(now);
 
         const boardFolder = `${projectDir}/tasks/${taskFolder}/board`;
         if (!app.vault.getAbstractFileByPath(boardFolder)) {
@@ -225,8 +227,11 @@ class ProjectNavButtons {
         }
 
         const newNoteFolder = boardFolder;
+        // v0.59.3 BUG-A fix: substitute {{DATE}} (was never substituted; YAML
+        // parsed unquoted `{{DATE}}` as a malformed inline-flow mapping).
         const content = tpl
             .replaceAll("{{TASK_NAME}}", taskFolder)
+            .replaceAll("{{DATE}}", dateStr)
             .replaceAll("{{DATE_TAG}}", dateTag)
             .replaceAll("{{NEW_NOTE_FOLDER}}", newNoteFolder);
 
@@ -663,4 +668,16 @@ class ProjectNavButtons {
         }
     }
 
+    // v0.59.3: canonical created_at — ISO-8601 with TZ offset.
+    // Matches _canonical-vocab.json regex:
+    //   ^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}([+-]\d{2}:\d{2}|Z)$
+    _isoWithTz(d) {
+        const pad = (n) => String(n).padStart(2, "0");
+        const off = -d.getTimezoneOffset();
+        const sign = off >= 0 ? "+" : "-";
+        const oa = Math.abs(off);
+        const oh = pad(Math.floor(oa / 60));
+        const om = pad(oa % 60);
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}${sign}${oh}:${om}`;
+    }
 }
