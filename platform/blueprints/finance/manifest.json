@@ -202,8 +202,8 @@
         "extends": "_canonical-vocab",
         "required_frontmatter": {
           "type":             { "required": true, "type": "string", "equals": "paycheck" },
-          "pay_period_start": { "required": true, "type": "string", "matches": "^\\d{4}-\\d{2}-\\d{2}$" },
-          "pay_period_end":   { "required": true, "type": "string", "matches": "^\\d{4}-\\d{2}-\\d{2}$" }
+          "pay_period_start": { "required": true, "type": "string", "matches": "^\\d{4}-\\d{2}-\\d{2}(T.*)?$" },
+          "pay_period_end":   { "required": true, "type": "string", "matches": "^\\d{4}-\\d{2}-\\d{2}(T.*)?$" }
         },
         "naming_pattern": "^Paycheck-\\d{4}-\\d{2}-\\d{2}\\.md$"
       }
@@ -216,7 +216,7 @@
         "required_frontmatter": {
           "type":  { "required": true, "type": "string", "equals": "invoice" },
           "month": { "required": true, "type": "string", "matches": "^\\d{4}-\\d{2}$" },
-          "date":  { "required": true, "type": "string", "matches": "^\\d{4}-\\d{2}-\\d{2}$" }
+          "date":  { "required": true, "type": "string", "matches": "^\\d{4}-\\d{2}-\\d{2}(T.*)?$" }
         }
       }
     },
