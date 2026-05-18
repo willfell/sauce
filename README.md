@@ -23,7 +23,7 @@ The `bootstrap` command launches an interactive wizard that walks you through pi
 1. Pick an Obsidian vault you want to convert (or create a new one).
 2. Run `sauce bootstrap --vault <path>` and accept the defaults for a first run.
 3. Open the vault in Obsidian and let the plugins finish loading.
-4. Open the command palette and run **Sauce: Audit** to verify the install.
+4. In any note, type `/audit` (via Slash Commander) to run the built-in audit and verify the install.
 5. Open your chosen blueprint's hub (for example `spice/cowork/Daily Hub.md`) — that's your starting point.
 
 To upgrade later:

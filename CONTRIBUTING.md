@@ -20,7 +20,7 @@ If you want to understand how the codebase is organized before contributing:
 ## Running the test suite
 
 ```bash
-npm install --omit=dev
+npm install
 npm run release:preflight
 ```
 

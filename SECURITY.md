@@ -8,9 +8,9 @@ Sauce is solo-developed and ships from `main`. Security fixes are applied to the
 
 Please report security issues privately via GitHub Security Advisories:
 
-  https://github.com/willfell/sauce/security/advisories/new
+<https://github.com/willfell/sauce/security/advisories/new>
 
-If you cannot use Security Advisories, email: willfellhoelter@gmail.com
+If you cannot use Security Advisories, email: <willfellhoelter@gmail.com>
 
 I aim to acknowledge reports within 7 days and ship coordinated fixes within 90 days of disclosure.
 
