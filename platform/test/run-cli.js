@@ -1443,13 +1443,16 @@ async function caseCPT3ApplyRemovesWrongType() {
 async function caseCPT4TagBasedDetection() {
     const label = "CPT-4 --apply strips depth-2 kanban-card (legacy structure)";
     await withTempVault({}, async (vaultPath) => {
-        // Real atlas at depth-2 with project/<slug> tag:
+        // Real atlas at depth-2 with project/<slug> tag + status + workstreams (atlas-shape):
         const atlas = path.join(vaultPath, "spice/projects/mythic/Mythic Atlas.md");
         fs.mkdirSync(path.dirname(atlas), { recursive: true });
-        fs.writeFileSync(atlas, "---\ntype: project\ntags:\n  - accuris\n  - project/mythic\n---\nbody\n");
+        fs.writeFileSync(atlas, "---\ntype: project\nstatus: in-progress\nworkstreams: []\ntags:\n  - accuris\n  - project/mythic\n---\nbody\n");
         // Card at depth-2 (legacy accuris-style structure — sub-files not in /tasks/):
         const card = path.join(vaultPath, "spice/projects/mythic/Some Random Task.md");
         fs.writeFileSync(card, "---\ntype: project\nsource_board: spice/projects/mythic/foo.md\ntags:\n  - accuris\n  - kanban-card\n---\nbody\n");
+        // Free-form note at depth-2 with project/<slug> tag but no atlas keys (v0.59.7):
+        const note = path.join(vaultPath, "spice/projects/mythic/Reference Notes.md");
+        fs.writeFileSync(note, "---\ntype: project\ndescription: some reference\ntags:\n  - accuris\n  - project/mythic\n---\nbody\n");
         delete require.cache[require.resolve("../cli/sauce-cli.js")];
         delete require.cache[require.resolve("../cli/cmd-cleanup-project-type.js")];
         const cli = require("../cli/sauce-cli.js");
@@ -1459,9 +1462,11 @@ async function caseCPT4TagBasedDetection() {
         finally { console.log = origLog; }
         const atlasAfter = fs.readFileSync(atlas, "utf8");
         const cardAfter = fs.readFileSync(card, "utf8");
+        const noteAfter = fs.readFileSync(note, "utf8");
         assertTrue(
-            atlasAfter.includes("type: project")            // atlas preserved (project/mythic tag)
-            && !cardAfter.includes("type: project"),         // depth-2 card cleaned (kanban-card tag)
+            atlasAfter.includes("type: project")            // atlas preserved (status + workstreams)
+            && !cardAfter.includes("type: project")          // card cleaned (kanban-card tag)
+            && !noteAfter.includes("type: project"),         // free-form note cleaned (project/<slug> tag but no atlas keys)
             label
         );
     });

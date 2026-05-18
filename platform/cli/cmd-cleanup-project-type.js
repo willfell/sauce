@@ -133,26 +133,45 @@ function parseFrontmatterTags(fmLines) {
   return null;
 }
 
-// Classifies a file with `type: project`. Returns true if the file is a
-// legitimate project atlas; false if it's a sub-file (card / task / etc.)
-// whose `type: project` was wrongly backfilled by FA-3 migration.
-//
-// Strategy:
-//   1) Strong negative tag signals → not-atlas (kanban-card, task-board-card,
-//      task-note, project-card, doc-note). These are explicit sub-type markers
-//      emitted by the project blueprint's per-sub-type templates.
-//   2) Strong positive tag signal: `project/<slug>` nested tag (canonical
-//      project atlas marker emitted by atlas templates).
-//   3) Fallback (no tag signals): depth-based heuristic — depth-2 file
-//      under spice/projects/<slug>/ that isn't Project Map or <slug>-board.
-function isAtlas(relPath, fmTags) {
-  const negativeMarkers = ["kanban-card", "task-board-card", "task-note", "project-card", "doc-note"];
-  if (Array.isArray(fmTags)) {
-    if (fmTags.some(t => negativeMarkers.includes(t))) return false;
-    if (fmTags.some(t => /^project\//.test(t))) return true;
+// Returns true if frontmatter has a top-level key with the given name.
+function fmHasKey(fmLines, key) {
+  const re = new RegExp(`^${key}:\\s`);
+  for (const ln of fmLines) {
+    if (re.test(ln)) return true;
+    if (new RegExp(`^${key}:\\s*$`).test(ln)) return true;
   }
+  return false;
+}
+
+// Classifies a file with `type: project`. Returns true if the file is a
+// legitimate project atlas; false if it's a sub-file (card / task / free-form
+// note) whose `type: project` was wrongly backfilled by FA-3 migration.
+//
+// Signal cascade (most reliable first):
+//   1) Has `source_board:` or `task_parent:` keys     → NOT atlas (card/task)
+//   2) Has explicit negative tag (kanban-card / task-board-card / task-note /
+//      project-card / doc-note)                       → NOT atlas
+//   3) Has `status:` enum OR `workstreams:` list      → IS atlas
+//   4) Has `project/<slug>` nested tag (no structural keys per #3)
+//      → tagged-for-association, NOT atlas (user-tagged free-form note)
+//   5) Fallback: depth-2 path heuristic
+//      (depth-2, NOT Project Map, NOT <slug>-board)   → IS atlas
+//
+// Signals #3+#4 together solve the accuris case: free-form notes tagged with
+// `project/<slug>` for cross-referencing but lacking the project entity shape.
+function isAtlas(relPath, fmTags, fmLines) {
+  if (Array.isArray(fmLines)) {
+    if (fmHasKey(fmLines, "source_board")) return false;
+    if (fmHasKey(fmLines, "task_parent")) return false;
+  }
+  const negativeMarkers = ["kanban-card", "task-board-card", "task-note", "project-card", "doc-note"];
+  if (Array.isArray(fmTags) && fmTags.some(t => negativeMarkers.includes(t))) return false;
+  if (Array.isArray(fmLines)) {
+    if (fmHasKey(fmLines, "status") || fmHasKey(fmLines, "workstreams")) return true;
+  }
+  if (Array.isArray(fmTags) && fmTags.some(t => /^project\//.test(t))) return false;
   const m = relPath.match(/^spice\/projects\/([^/]+)\/([^/]+)\.md$/);
-  if (!m) return false;                         // depth-3+
+  if (!m) return false;
   const filename = m[2];
   if (filename === "Project Map") return false;
   if (/-board$/.test(filename)) return false;
@@ -193,7 +212,7 @@ async function run(ctx, argv) {
     const idx = findTypeProjectLine(fm.fmLines);
     if (idx < 0) { continue; }  // No type: project line, nothing to clean
     const tags = parseFrontmatterTags(fm.fmLines);
-    if (isAtlas(f.rel, tags)) {
+    if (isAtlas(f.rel, tags, fm.fmLines)) {
       actions.push({ rel: f.rel, action: "skip-atlas" });
       continue;
     }
