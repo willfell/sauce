@@ -44,8 +44,7 @@
     "ranch/templates/Audit.md"
   ],
   "startup_templates": [
-    "",
-    "ranch/templates/Template, Project Task Create Listener.md"
+    ""
   ],
   "intellisense_render": 1,
   "ignore_folders_on_creation": [
