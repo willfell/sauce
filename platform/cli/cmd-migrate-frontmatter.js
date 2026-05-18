@@ -376,6 +376,18 @@ function inferTypeFromPath(relPath) {
     const m = relPath.match(/^spice\/([^/]+)/);
     if (!m) return null;
     const moduleDir = m[1];
+    // v0.59.4 FLN-FA3-2 fix: projects has user-content (task notes, kanban
+    // cards, board sub-files, doc notes, etc.) under spice/projects/<slug>/.
+    // Blanket "anything under spice/projects/ → project" pollutes the keyspace.
+    // Only backfill type:project for the atlas pattern <slug>/<slug>.md (folder
+    // basename == file basename). All other sub-paths return null — let
+    // user-content keep its existing type (or stay typeless until a future
+    // canonical-sub-type backfill cycle).
+    if (moduleDir === "projects") {
+        const atlas = relPath.match(/^spice\/projects\/([^/]+)\/([^/]+)\.md$/);
+        if (atlas && atlas[1] === atlas[2]) return "project";
+        return null;
+    }
     const t = PATH_TO_TYPE[moduleDir];
     if (t !== undefined) return t;
     return null;

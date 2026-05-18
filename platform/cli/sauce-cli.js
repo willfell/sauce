@@ -21,6 +21,7 @@ const VERBS = {
     unlink:    "./cmd-unlink.js",
     seed:      "./cmd-seed.js",
     "migrate-frontmatter": "./cmd-migrate-frontmatter.js",
+    "cleanup-project-type": "./cmd-cleanup-project-type.js",
     help:      "./cmd-help.js"
 };
 
@@ -167,8 +168,15 @@ async function dispatch(argv, opts) {
         await cmd.run(testCtx, rest);
         return;
     }
+    if (verb === "cleanup-project-type") {
+        const cmd = require(VERBS["cleanup-project-type"]);
+        // Context-free: operates against an explicit --vault path.
+        const testCtx = opts || {};
+        await cmd.run(testCtx, rest);
+        return;
+    }
     if (!VERBS[verb]) {
-        throw new Error(`unknown verb: ${verb}\nUsage: sauce <bootstrap|update|status|wizard|migrate|migrate-layout|migrate-frontmatter|audit|vault|reinstall|doctor|link|unlink|seed|help>`);
+        throw new Error(`unknown verb: ${verb}\nUsage: sauce <bootstrap|update|status|wizard|migrate|migrate-layout|migrate-frontmatter|cleanup-project-type|audit|vault|reinstall|doctor|link|unlink|seed|help>`);
     }
     let ctx;
     if (verb === "bootstrap") {

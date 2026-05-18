@@ -1378,6 +1378,67 @@ async function caseS3SeedDryRun() {
     });
 }
 
+// v0.59.4 — sauce cleanup-project-type CLI verb (FLN-FA3-2 follow-up)
+async function caseCPT1Help() {
+    const label = "CPT-1 sauce cleanup-project-type --help prints usage";
+    delete require.cache[require.resolve("../cli/sauce-cli.js")];
+    delete require.cache[require.resolve("../cli/cmd-cleanup-project-type.js")];
+    const cli = require("../cli/sauce-cli.js");
+    const out = [];
+    const origLog = console.log; console.log = (s) => out.push(String(s));
+    try { await cli.dispatch(["cleanup-project-type", "--help"]); }
+    finally { console.log = origLog; }
+    assertTrue(/Usage: sauce cleanup-project-type/.test(out.join("\n")), label);
+}
+async function caseCPT2DryRunCleanVault() {
+    const label = "CPT-2 dry-run on empty vault reports 0 would_remove";
+    await withTempVault({}, async (vaultPath) => {
+        // Empty spice/projects → no files; cleanup is a no-op.
+        const projectsDir = path.join(vaultPath, "spice/projects");
+        fs.mkdirSync(projectsDir, { recursive: true });
+        delete require.cache[require.resolve("../cli/sauce-cli.js")];
+        delete require.cache[require.resolve("../cli/cmd-cleanup-project-type.js")];
+        const cli = require("../cli/sauce-cli.js");
+        const out = [];
+        const origLog = console.log; console.log = (s) => out.push(String(s));
+        try { await cli.dispatch(["cleanup-project-type", "--vault", vaultPath]); }
+        finally { console.log = origLog; }
+        const joined = out.join("\n");
+        assertTrue(/would clean.*: 0/.test(joined) && joined.includes(vaultPath), label);
+    });
+}
+async function caseCPT3ApplyRemovesWrongType() {
+    const label = "CPT-3 --apply removes type:project from non-atlas + preserves atlas";
+    await withTempVault({}, async (vaultPath) => {
+        // Atlas (should be preserved):
+        const atlas = path.join(vaultPath, "spice/projects/foo/foo.md");
+        fs.mkdirSync(path.dirname(atlas), { recursive: true });
+        fs.writeFileSync(atlas, "---\ntype: project\nstatus: idea\n---\nbody\n");
+        // Non-atlas (should be cleaned):
+        const card = path.join(vaultPath, "spice/projects/foo/tasks/bar/board/baz.md");
+        fs.mkdirSync(path.dirname(card), { recursive: true });
+        fs.writeFileSync(card, "---\ntype: project\ntags:\n  - kanban-card\n---\nbody\n");
+        delete require.cache[require.resolve("../cli/sauce-cli.js")];
+        delete require.cache[require.resolve("../cli/cmd-cleanup-project-type.js")];
+        const cli = require("../cli/sauce-cli.js");
+        const out = [];
+        const origLog = console.log; console.log = (s) => out.push(String(s));
+        try { await cli.dispatch(["cleanup-project-type", "--vault", vaultPath, "--apply"]); }
+        finally { console.log = origLog; }
+        const atlasAfter = fs.readFileSync(atlas, "utf8");
+        const cardAfter = fs.readFileSync(card, "utf8");
+        const backupExists = fs.existsSync(path.join(vaultPath, ".sauce-backup"))
+            && fs.readdirSync(path.join(vaultPath, ".sauce-backup")).length > 0;
+        assertTrue(
+            atlasAfter.includes("type: project")            // atlas kept
+            && !cardAfter.includes("type: project")          // non-atlas cleaned
+            && cardAfter.includes("kanban-card")             // body untouched
+            && backupExists,                                  // backup written
+            label
+        );
+    });
+}
+
 const cases = [
     caseC1AncestorWalk, caseC2SauceVaultEnv, caseC3NotInVault, caseC4UnknownVerb,
     caseC5StatusClean, caseC6StatusDrift, caseC7UpdateFFOnly, caseC8UpdateDirtyRefusal,
@@ -1411,6 +1472,7 @@ const cases = [
     caseIR1BootstrapRegistersVault, caseIR2BootstrapNoRegisterFlag,  // v0.36.0 S7
     caseBF1BootstrapFreshVaultViaBrew,  // v0.36.0 S9.4 hotfix (will ship in v0.36.1)
     caseS1SeedHelp, caseS2SeedNoVault, caseS3SeedDryRun,  // v0.38.0 S2.3
+    caseCPT1Help, caseCPT2DryRunCleanVault, caseCPT3ApplyRemovesWrongType,  // v0.59.4
 ];
 
 async function main() {

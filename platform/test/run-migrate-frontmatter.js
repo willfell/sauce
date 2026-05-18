@@ -450,5 +450,30 @@ withTempVault((vault) => {
     ok("MF-AP-4c --apply still migrates the well-formed sibling", goodRewritten);
 });
 
+// v0.59.4 FLN-FA3-2 fix: inferTypeFromPath is shape-aware for projects.
+{
+    ok("MF-PROJ-1 atlas <slug>/<slug>.md → 'project'",
+        cmd._inferTypeFromPath("spice/projects/foo/foo.md") === "project");
+    const nonAtlas = [
+        "spice/projects/foo/Project Map.md",
+        "spice/projects/foo/tasks/bar/bar.md",
+        "spice/projects/foo/tasks/bar/board/baz.md",
+        "spice/projects/foo/tasks/bar/board/baz/baz.md",
+        "spice/projects/foo/docs/Docs.md",
+        "spice/projects/foo/docs/some-note.md",
+        "spice/projects/foo/foo-board.md",
+    ];
+    for (const p of nonAtlas) {
+        ok(`MF-PROJ-2 non-atlas '${p}' → null`,
+            cmd._inferTypeFromPath(p) === null);
+    }
+    ok("MF-PROJ-3a people → 'person'",
+        cmd._inferTypeFromPath("spice/people/Alice.md") === "person");
+    ok("MF-PROJ-3b trips → 'trip'",
+        cmd._inferTypeFromPath("spice/trips/foo/Trip Atlas.md") === "trip");
+    ok("MF-PROJ-3c to-do → 'to-do'",
+        cmd._inferTypeFromPath("spice/to-do/2026/05-May/ToDo-2026-05-18.md") === "to-do");
+}
+
 console.log(`\nrun-migrate-frontmatter.js: ${pass} pass · ${fail} fail`);
 if (fail > 0) process.exit(1);
