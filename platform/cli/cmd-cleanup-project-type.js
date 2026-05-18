@@ -14,7 +14,6 @@
 const fs = require("fs");
 const path = require("path");
 
-const RE_ATLAS = /^spice\/projects\/([^/]+)\/([^/]+)\.md$/;
 const RE_TYPE_LINE = /^type:\s*project\s*$/;
 
 function parseArgs(argv) {
@@ -28,9 +27,25 @@ function parseArgs(argv) {
   return out;
 }
 
+// Atlas-detection heuristic for `type: project` cleanup.
+//
+// A project's atlas file lives at depth-2 under spice/projects/, but the
+// filename can vary by creation-vintage:
+//   - v0.50.0+ entity-create flow: spice/projects/<slug>/<spaced display name>.md
+//     (folder slugified; filename retains user's spaces, e.g. `you know.md`)
+//   - pre-v0.50.0 legacy flow: spice/projects/<slug>/Project.md
+//   - any other depth-2 user-named atlas .md
+//
+// So we conservatively preserve any depth-2 file UNLESS it's a known
+// canonical sub-type (Project Map.md → type:map; <slug>-board.md → type:kanban).
+// Files at depth-3+ (tasks/, board/, docs/, steps/) are sub-files — strip.
 function isAtlasPath(relPath) {
-  const m = relPath.match(RE_ATLAS);
-  return Boolean(m && m[1] === m[2]);
+  const m = relPath.match(/^spice\/projects\/([^/]+)\/([^/]+)\.md$/);
+  if (!m) return false;                         // depth-3+ = not atlas
+  const [, , filename] = m;
+  if (filename === "Project Map") return false; // canonical map; should be type:map
+  if (/-board$/.test(filename)) return false;   // kanban board; should be type:kanban
+  return true;                                   // anything else at depth-2 → atlas
 }
 
 // Walk spice/projects/**/*.md → array of {abs, rel}.

@@ -376,17 +376,27 @@ function inferTypeFromPath(relPath) {
     const m = relPath.match(/^spice\/([^/]+)/);
     if (!m) return null;
     const moduleDir = m[1];
-    // v0.59.4 FLN-FA3-2 fix: projects has user-content (task notes, kanban
-    // cards, board sub-files, doc notes, etc.) under spice/projects/<slug>/.
-    // Blanket "anything under spice/projects/ → project" pollutes the keyspace.
-    // Only backfill type:project for the atlas pattern <slug>/<slug>.md (folder
-    // basename == file basename). All other sub-paths return null — let
-    // user-content keep its existing type (or stay typeless until a future
-    // canonical-sub-type backfill cycle).
+    // v0.59.4 FLN-FA3-2 fix (refined v0.59.5): projects has user-content
+    // (task notes, kanban cards, board sub-files, doc notes, etc.) under
+    // spice/projects/<slug>/. Blanket "anything under spice/projects/ →
+    // project" pollutes the keyspace.
+    //
+    // Project atlas filename varies by creation vintage:
+    //   - v0.50.0+ entity-create flow: <slug>/<spaced display name>.md
+    //   - pre-v0.50.0 legacy:          <slug>/Project.md
+    //   - any other depth-2 user-named atlas .md
+    //
+    // Conservative atlas detection: depth-2 file UNLESS it's the canonical
+    // map (Project Map.md → type:map) or a kanban board (<slug>-board.md →
+    // type:kanban). Files at depth-3+ return null (sub-files; let them
+    // keep their existing type or stay typeless).
     if (moduleDir === "projects") {
-        const atlas = relPath.match(/^spice\/projects\/([^/]+)\/([^/]+)\.md$/);
-        if (atlas && atlas[1] === atlas[2]) return "project";
-        return null;
+        const m = relPath.match(/^spice\/projects\/([^/]+)\/([^/]+)\.md$/);
+        if (!m) return null;                              // depth-3+
+        const filename = m[2];
+        if (filename === "Project Map") return null;      // canonical map
+        if (/-board$/.test(filename)) return null;        // kanban board
+        return "project";
     }
     const t = PATH_TO_TYPE[moduleDir];
     if (t !== undefined) return t;

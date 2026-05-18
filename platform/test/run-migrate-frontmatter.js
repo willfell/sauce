@@ -450,18 +450,30 @@ withTempVault((vault) => {
     ok("MF-AP-4c --apply still migrates the well-formed sibling", goodRewritten);
 });
 
-// v0.59.4 FLN-FA3-2 fix: inferTypeFromPath is shape-aware for projects.
+// v0.59.4+v0.59.5 FLN-FA3-2 fix: inferTypeFromPath is shape-aware for projects.
+// Atlas filename varies (entity-create vs legacy Project.md vs spaced display
+// names), so detect by depth-2 + reject canonical sub-types.
 {
-    ok("MF-PROJ-1 atlas <slug>/<slug>.md → 'project'",
-        cmd._inferTypeFromPath("spice/projects/foo/foo.md") === "project");
+    // Atlases at depth-2 (various naming conventions):
+    const atlasCases = [
+        "spice/projects/foo/foo.md",         // slug == filename
+        "spice/projects/foo/Project.md",     // legacy naming
+        "spice/projects/you-know/you know.md", // entity-create spaced display name
+        "spice/projects/aligning-claude/Aligning Claude with Sauce.md",
+    ];
+    for (const p of atlasCases) {
+        ok(`MF-PROJ-1 atlas '${p}' → 'project'`,
+            cmd._inferTypeFromPath(p) === "project");
+    }
+    // Non-atlas paths (sub-files OR canonical sub-types at depth-2):
     const nonAtlas = [
-        "spice/projects/foo/Project Map.md",
-        "spice/projects/foo/tasks/bar/bar.md",
+        "spice/projects/foo/Project Map.md",     // canonical map
+        "spice/projects/foo/foo-board.md",       // kanban board
+        "spice/projects/foo/tasks/bar/bar.md",   // task
         "spice/projects/foo/tasks/bar/board/baz.md",
         "spice/projects/foo/tasks/bar/board/baz/baz.md",
         "spice/projects/foo/docs/Docs.md",
         "spice/projects/foo/docs/some-note.md",
-        "spice/projects/foo/foo-board.md",
     ];
     for (const p of nonAtlas) {
         ok(`MF-PROJ-2 non-atlas '${p}' → null`,
