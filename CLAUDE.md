@@ -16,7 +16,7 @@ This is the **workshop vault** for the **Sauce** platform — the canonical home
 
 ## Vault identity check
 
-Before any write, run `ls /Users/willfellhoelter/projects/repos/sauce` (or the equivalent workshop dev-repo path on your machine). Expected top-level: `CLAUDE.md`, `platform/`, `commands/`, `Docs/`, `.obsidian/`, `ranch/`, `package.json`, `install.sh`. If you see `Boards/`, `Timestamps/`, `Finance/`, `Resources/` at root, you're in a CONSUMER vault, NOT the workshop. STOP.
+Before any write, run `ls /Users/willfellhoelter/projects/repos/sauce` (or the equivalent workshop dev-repo path on your machine). Expected top-level: `CLAUDE.md`, `README.md`, `LICENSE`, `SECURITY.md`, `CONTRIBUTING.md`, `platform/`, `commands/`, `Docs/`, `.obsidian/`, `ranch/`, `package.json`, `install.sh`. If you see `Boards/`, `Timestamps/`, `Finance/`, `Resources/` at root, you're in a CONSUMER vault, NOT the workshop. STOP.
 
 ## Where to read for context
 
@@ -87,6 +87,7 @@ Stop and ask the user before any of:
 - Editing a consumer's `platform-installed.json` by hand (it's auto-managed by the installer).
 - **Force-pushing or rewriting history** on `origin/main` of the `sauce` remote (`git push --force`, `git reset --hard origin/...`, `git rebase -i` on already-pushed commits, etc.).
 - **Sanctioned new top-level vault dirs:** `spice/<module>/` (blueprint content; landmine #11; renamed from `beacon/<module>/` in v0.25.0) AND `pantry/` (workshop clone for inside-vault layout; renamed from `Beacon/` in v0.23.0 to resolve macOS APFS case-collision) AND `ranch/` (runtime plumbing; renamed from `Docs/Meta/` in v0.24.0) AND `.claude/skills/<blueprint>/` (native Claude Code skill bodies materialized by `materializeSkills`; added in v0.30.0 for cowork; landmine #12 + #19). Other top-level dirs still require approval. The `pantry/` + `ranch/` + `spice/` + `.claude/skills/` namespace tetrad is the canonical layout post-v0.30.0.
+- **Sanctioned new top-level files (added 2026-05-18 for public-readiness):** `README.md` · `LICENSE` · `SECURITY.md` · `CONTRIBUTING.md` — public-readiness docs added pre-public-launch (companion design at `Docs/plans/2026-05-18-public-readiness-design.md`). Any OTHER new top-level file still requires approval.
 - **Direct edits to canonical `.claude/commands/<x>.md` or `.claude/skills/<bp>/**/SKILL.md`** in any consumer vault — these are REVERTED on next install per landmine #22. Use `.claude/commands.local/` or `.claude/skills.local/` as the override seam instead. (`/audit` surfaces direct-canonical edits as `consumer_edit_at_risk` before work is lost.)
 - **Editing CLAUDE.md outside marker-bounded regions** when the change is meant to be reflected via the claude_surface renderer. The renderer rewrites ONLY content between `<!-- @claude-surface:<table> BEGIN/END -->` marker pairs (directory-map / resolvers / skills-index per landmine #12 v0.32.0 amendment); outside-marker prose is preserved bit-for-bit and is hand-authored. Marker pairs in CLAUDE.md are managed; outside-marker prose is yours.
 

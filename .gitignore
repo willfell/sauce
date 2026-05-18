@@ -28,3 +28,6 @@ node_modules/
 # as its own consumer). Root-anchored to mask only at workshop root, not nested
 # /Scripts/ paths anywhere else in the tree.
 /Scripts/
+
+# macOS Finder noise
+.DS_Store
