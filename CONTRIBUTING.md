@@ -13,6 +13,7 @@ If you want to understand how the codebase is organized before contributing:
 - [`Docs/Index.md`](Docs/Index.md) — start here
 - [`Docs/why.md`](Docs/why.md) — purpose and end goal
 - [`Docs/how.md`](Docs/how.md) — architecture
+- [`Docs/use.md`](Docs/use.md) — operational guide
 - [`Docs/landmines.md`](Docs/landmines.md) — known footguns to avoid
 - [`Docs/plans/`](Docs/plans/) — chronological cycle history
 
