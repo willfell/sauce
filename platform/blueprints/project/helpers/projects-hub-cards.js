@@ -236,16 +236,29 @@ class ProjectsHubCards {
         await customJS.BeaconCards.render(dv, {
             pages: sorted,
             layout: "row",
+            // v0.59.10: titleWrap=true so long project display-names (e.g.
+            // "Denali - Migrate Content-Registry to GH Actions") are NOT
+            // ellipsis-truncated. Multi-line wrap preferred over hidden text.
+            titleWrap: true,
             title: (p) => p.name || p.file.name,
             icon:  () => briefcase,
-            subtitle: (p) => p.description || null,
+            // v0.59.10: subtitle (description) dropped from the hub list — long
+            // descriptions inflated each card vertically and cluttered the
+            // overview. Click into a project to see its full description.
+            subtitle: () => null,
             meta: (p) => {
                 const e = lookup.get(p.file.path);
                 const time = window.moment(e.latestMtime.ts).fromNow();
                 const pill = this._statusPill(p.status);
                 const teamChips = this._chipList(p.teams || []);
                 const productChips = this._chipList(p.products || []);
-                const recency = p.status_changed_at ? ` &middot; ${p.status_changed_at}` : "";
+                // v0.59.10: format status_changed_at as YYYY-MM-DD only (new
+                // v0.59.x projects emit full ISO+TZ via entity-create; truncate
+                // to date for hub display).
+                const scaDate = p.status_changed_at
+                    ? String(p.status_changed_at).slice(0, 10)
+                    : null;
+                const recency = scaDate ? ` &middot; ${scaDate}` : "";
                 let html = `<span>${pill}</span>`;
                 if (teamChips) html += `<span>${teamChips}</span>`;
                 if (productChips) html += `<span>${productChips}</span>`;

@@ -1,6 +1,6 @@
 {
   "name": "cards",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "Shared mobile-aware card renderer (BeaconCards). Any blueprint listing related notes calls customJS.BeaconCards.render(dv, opts) instead of Dataview tables. Decoupled from Dataview semantics; caller supplies pages array. v0.2.3 ADDITIVE: optional badges[].style (\"fill\"|\"outline\") for Linear/Github-style status pills (dot + alpha-bg + 999px border-radius). Default \"fill\" preserves prior behavior. v0.2.4 PATCH: subtitle accepts (parent) => void callback in addition to string | null | {text, secondaryText}.",
   "depends_on": [
     { "name": "customjs-guard", "range": ">=1.0.0" }
