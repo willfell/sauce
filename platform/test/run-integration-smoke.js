@@ -313,31 +313,36 @@ withTempHomeAndVault(({ home, vault }) => {
         orphans.length === 0,
         orphans.length > 0 ? `orphans: ${orphans.join(", ")}` : "");
 
-    // v0.48.0 S5 — smoke-prj-startup-tpl: post-bootstrap (and post-cowork-reinstall +
-    // post-entity-create reinstall above), verify Templater plugin's data.json
-    // startup_templates[] contains project's listener template path. project's
-    // manifest declares templater_startup_templates[] (v0.48.0 S3); the new
-    // applyTemplaterStartupTemplates installer helper (v0.48.0 S4) wires it
-    // into Templater's data.json field at install time.
+    // v0.59.8 — smoke-prj-startup-tpl-pruned: the v0.48.0 belt-and-suspenders
+    // Templater startup_templates[] entry for ProjectTaskCreateListener was
+    // retired in project@1.13.4 because the template body throws at boot
+    // (customJS classes aren't loaded when Templater fires startup templates).
+    // v0.49.0's customjs startupScriptNames[] path remains as the real
+    // registration. The NEW pruneTemplaterStartupOrphans installer step
+    // (install.js step 6a2) removes the orphan from each consumer's data.json
+    // on next install. This assertion verifies the orphan is ABSENT.
     const templaterDataPath = path.join(vault, ".obsidian/plugins/templater-obsidian/data.json");
     let prjStartupOk = false;
     let prjStartupDetail = "";
     if (fs.existsSync(templaterDataPath)) {
         try {
             const td = JSON.parse(fs.readFileSync(templaterDataPath, "utf8"));
-            const expected = "ranch/templates/Template, Project Task Create Listener.md";
-            if (Array.isArray(td.startup_templates) && td.startup_templates.includes(expected)) {
+            const orphan = "ranch/templates/Template, Project Task Create Listener.md";
+            const list = Array.isArray(td.startup_templates) ? td.startup_templates : [];
+            if (!list.includes(orphan)) {
                 prjStartupOk = true;
             } else {
-                prjStartupDetail = `expected ${JSON.stringify(expected)} in startup_templates; got ${JSON.stringify(td.startup_templates)}`;
+                prjStartupDetail = `orphan ${JSON.stringify(orphan)} still present in startup_templates; got ${JSON.stringify(list)}`;
             }
         } catch (e) {
             prjStartupDetail = `data.json parse error: ${e.message}`;
         }
     } else {
-        prjStartupDetail = `data.json absent at ${templaterDataPath}`;
+        // data.json absent is acceptable post-prune (Templater plugin not installed
+        // in the fresh vault). The orphan can't exist if the file doesn't exist.
+        prjStartupOk = true;
     }
-    ok("smoke-prj-startup-tpl",
+    ok("smoke-prj-startup-tpl-pruned",
         prjStartupOk,
         prjStartupDetail);
 

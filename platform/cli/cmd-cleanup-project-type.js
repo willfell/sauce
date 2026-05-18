@@ -147,35 +147,65 @@ function fmHasKey(fmLines, key) {
 // legitimate project atlas; false if it's a sub-file (card / task / free-form
 // note) whose `type: project` was wrongly backfilled by FA-3 migration.
 //
-// Signal cascade (most reliable first):
-//   1) Has `source_board:` or `task_parent:` keys     → NOT atlas (card/task)
-//   2) Has explicit negative tag (kanban-card / task-board-card / task-note /
-//      project-card / doc-note)                       → NOT atlas
-//   3) Has `status:` enum OR `workstreams:` list      → IS atlas
-//   4) Has `project/<slug>` nested tag (no structural keys per #3)
-//      → tagged-for-association, NOT atlas (user-tagged free-form note)
-//   5) Fallback: depth-2 path heuristic
-//      (depth-2, NOT Project Map, NOT <slug>-board)   → IS atlas
+// Two-stage cascade:
 //
-// Signals #3+#4 together solve the accuris case: free-form notes tagged with
-// `project/<slug>` for cross-referencing but lacking the project entity shape.
-function isAtlas(relPath, fmTags, fmLines) {
+// STAGE 1 — definite signals (per-file):
+//   - source_board: or task_parent: key       → NOT atlas (card/task indicator)
+//   - explicit negative tag (kanban-card etc.)→ NOT atlas
+//   - canonical sub-type filename (Project Map.md, *-board.md) → NOT atlas
+//   - depth-3+ (under tasks/, board/, docs/)  → NOT atlas
+//
+// STAGE 2 — folder-relative one-atlas rule (for depth-2 ambiguous cases):
+//   Among files with type:project in the same project folder, the atlas is:
+//   1. <folder>.md if it exists (slug == filename)
+//   2. <Display Name>.md where slugify(name) == folder (entity-create flow)
+//   3. Project.md legacy fallback
+//   All other depth-2 files with type:project are stripped.
+//
+// STAGE 2 needs the per-folder file list, so isAtlas accepts an optional
+// folderCandidates array (basenames of depth-2 .md files in this folder).
+function isAtlas(relPath, fmTags, fmLines, folderCandidates) {
+  // STAGE 1
   if (Array.isArray(fmLines)) {
     if (fmHasKey(fmLines, "source_board")) return false;
     if (fmHasKey(fmLines, "task_parent")) return false;
   }
   const negativeMarkers = ["kanban-card", "task-board-card", "task-note", "project-card", "doc-note"];
   if (Array.isArray(fmTags) && fmTags.some(t => negativeMarkers.includes(t))) return false;
-  if (Array.isArray(fmLines)) {
-    if (fmHasKey(fmLines, "status") || fmHasKey(fmLines, "workstreams")) return true;
-  }
-  if (Array.isArray(fmTags) && fmTags.some(t => /^project\//.test(t))) return false;
   const m = relPath.match(/^spice\/projects\/([^/]+)\/([^/]+)\.md$/);
-  if (!m) return false;
-  const filename = m[2];
+  if (!m) return false;                           // depth-3+
+  const [, folder, filename] = m;
   if (filename === "Project Map") return false;
   if (/-board$/.test(filename)) return false;
-  return true;
+
+  // STAGE 2 — folder-relative one-atlas rule
+  if (Array.isArray(folderCandidates) && folderCandidates.length > 0) {
+    const designatedAtlas = pickDesignatedAtlas(folder, folderCandidates);
+    return designatedAtlas === `${filename}.md`;
+  }
+  return true;                                    // no folder context → fall back to preserve
+}
+
+// Slugify mimicking what the project entity-create slugifies to (lowercase,
+// non-alphanumeric → dash, collapse + trim).
+function slugify(s) {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+// Among basenames in a project folder, pick the one most likely to be the atlas.
+// Returns the basename including .md, or null if nothing in folder qualifies.
+function pickDesignatedAtlas(folder, basenames) {
+  const mds = basenames.filter(b => b.endsWith(".md"));
+  // 1) Exact <folder>.md
+  if (mds.includes(`${folder}.md`)) return `${folder}.md`;
+  // 2) Display-name match: filename's slug equals folder
+  for (const b of mds) {
+    const stem = b.replace(/\.md$/, "");
+    if (slugify(stem) === folder) return b;
+  }
+  // 3) Project.md legacy fallback
+  if (mds.includes("Project.md")) return "Project.md";
+  return null;
 }
 
 // Backup a file's pre-edit content under <vault>/.sauce-backup/<rel>/<ts>/
@@ -205,18 +235,69 @@ async function run(ctx, argv) {
   const files = walkProjects(vault);
   const actions = []; // {rel, action: "skip-atlas"|"skip-no-type"|"remove"}
 
+  // First pass: read each file's frontmatter, build per-folder candidate sets.
+  // folderTypedFiles[slug] = array of basenames (with .md) that currently
+  // carry `type: project` AND would pass STAGE 1 (no source_board / task_parent /
+  // negative tags / Project Map / -board). These are atlas candidates.
+  const fileMeta = new Map(); // abs → {fm, tags, idx, content, folder, filename}
+  const folderCandidates = new Map(); // folder → basenames[]
+
   for (const f of files) {
     const content = fs.readFileSync(f.abs, "utf8");
     const fm = splitFrontmatter(content);
-    if (!fm) { continue; }
+    if (!fm) continue;
     const idx = findTypeProjectLine(fm.fmLines);
-    if (idx < 0) { continue; }  // No type: project line, nothing to clean
+    if (idx < 0) continue;
     const tags = parseFrontmatterTags(fm.fmLines);
-    if (isAtlas(f.rel, tags, fm.fmLines)) {
-      actions.push({ rel: f.rel, action: "skip-atlas" });
+    const m = f.rel.match(/^spice\/projects\/([^/]+)\/([^/]+)\.md$/);
+    if (!m) {
+      // depth-3+ — never an atlas; record for stripping
+      fileMeta.set(f.abs, { rel: f.rel, fm, tags, idx, content, isStage1Atlas: false });
       continue;
     }
-    actions.push({ rel: f.rel, action: "remove", _abs: f.abs, _idx: idx, _fm: fm, _content: content });
+    const [, folder, filename] = m;
+    // STAGE 1 filter
+    let s1NotAtlas = false;
+    if (fmHasKey(fm.fmLines, "source_board") || fmHasKey(fm.fmLines, "task_parent")) s1NotAtlas = true;
+    const negativeMarkers = ["kanban-card", "task-board-card", "task-note", "project-card", "doc-note"];
+    if (Array.isArray(tags) && tags.some(t => negativeMarkers.includes(t))) s1NotAtlas = true;
+    if (filename === "Project Map" || /-board$/.test(filename)) s1NotAtlas = true;
+
+    fileMeta.set(f.abs, { rel: f.rel, fm, tags, idx, content, folder, filename, s1NotAtlas });
+    if (!s1NotAtlas) {
+      if (!folderCandidates.has(folder)) folderCandidates.set(folder, []);
+      folderCandidates.get(folder).push(`${filename}.md`);
+    }
+  }
+
+  // Second pass: classify each candidate using folder context.
+  for (const [abs, meta] of fileMeta) {
+    if (meta.s1NotAtlas || !meta.folder) {
+      // STAGE 1 reject OR depth-3+ → strip
+      actions.push({ rel: meta.rel, action: "remove", _abs: abs, _idx: meta.idx, _fm: meta.fm, _content: meta.content });
+      continue;
+    }
+    const candidates = folderCandidates.get(meta.folder) || [];
+    const designated = pickDesignatedAtlas(meta.folder, candidates);
+    // If a canonical atlas exists in this folder, only IT is atlas — others stripped.
+    if (designated) {
+      if (designated === `${meta.filename}.md`) {
+        actions.push({ rel: meta.rel, action: "skip-atlas" });
+      } else {
+        actions.push({ rel: meta.rel, action: "remove", _abs: abs, _idx: meta.idx, _fm: meta.fm, _content: meta.content });
+      }
+      continue;
+    }
+    // No designated atlas detected — singleton-fallback: if this is the only
+    // candidate in the folder, it's the atlas (user used a non-canonical name).
+    if (candidates.length === 1) {
+      actions.push({ rel: meta.rel, action: "skip-atlas" });
+      continue;
+    }
+    // Multiple candidates with no canonical detection → ambiguous, preserve all
+    // (defensive — don't over-strip on first pass; manual cleanup or future
+    // cycle can resolve).
+    actions.push({ rel: meta.rel, action: "skip-atlas" });
   }
 
   const toRemove = actions.filter(a => a.action === "remove");

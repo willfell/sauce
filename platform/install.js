@@ -445,6 +445,26 @@ module.exports = async function (tp) {
       }
     }
 
+    // 6a2. v0.59.8 — one-shot orphan-prune of Templater startup_templates[].
+    // Removes entries Sauce previously added (e.g. v0.48.0's
+    // Template, Project Task Create Listener.md backstop) that no longer ship.
+    // Wrapped in try/catch so prune failure doesn't abort downstream steps.
+    // SUNSET ≥v0.62.0 — once all consumer vaults have run ≥v0.59.8 once.
+    try {
+      await pruneTemplaterStartupOrphans(tp, installedNow.history, git);
+    } catch (e) {
+      new Notice(`pruneTemplaterStartupOrphans crashed: ${e.message}`, 8000);
+      installedNow.history.push({
+        event: "error",
+        step: "templater_startup_orphans_prune",
+        message: e.message,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+
     // 6b. v0.32.0 S3 — aggregate claude_surface[] contributions across
     // subscribed mechanisms + blueprints. Wrapped in its own try/catch so
     // aggregator failure does NOT abort the broader install. The
@@ -4606,6 +4626,117 @@ async function applyTemplaterStartupTemplates(tp, manifest, variables, history, 
         event: "error",
         step: "templater_startup_templates",
         name: manifest.name,
+        message: `write failed: ${e.message}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+  }
+}
+
+// pruneTemplaterStartupOrphans — v0.59.8: one-shot installer step that removes
+// orphaned entries from .obsidian/plugins/templater-obsidian/data.json
+// startup_templates[] that Sauce previously added but no longer ships.
+//
+// Why this exists: applyTemplaterStartupTemplates above is additive-only — it
+// returns early when a manifest declares no startup templates, so it cannot
+// clean up entries the project blueprint USED to ship (v0.48.0 belt-and-suspenders
+// backstop for ProjectTaskCreateListener.init()). The backstop template tries to
+// call customJS.ProjectTaskCreateListener.init() at Templater startup, but customJS
+// hasn't loaded its classes yet at that point → "Cannot read properties of undefined
+// (reading 'init')" on every vault load. v0.49.0's customjs startupScriptNames[]
+// path is the working registration; the Templater entry is pure noise.
+//
+// SUNSET: delete this helper + its wire-up after a couple releases (target ≥v0.62.0)
+// once all consumer vaults have run an install at v0.59.8 or later. Until then it
+// runs once per install as a no-op for vaults already pruned (the orphan won't be
+// present), so the cost is one cheap data.json read on each install.
+//
+// Failure posture: failure-loud (Notice + history entry) but never throws —
+// matches applyTemplaterStartupTemplates' shape so an orphan-prune error never
+// aborts the broader install. Backup-on-edit to <target>.sauce-backup.
+async function pruneTemplaterStartupOrphans(tp, history, git) {
+  const adapter = tp.app.vault.adapter;
+  const target = ".obsidian/plugins/templater-obsidian/data.json";
+  const orphans = [
+    "ranch/templates/Template, Project Task Create Listener.md", // v0.48.0 backstop retired in v1.13.4 (v0.59.8)
+  ];
+
+  if (!(await adapter.exists(target))) return; // no Templater data.json → nothing to prune
+
+  let raw;
+  try {
+    raw = await adapter.read(target);
+  } catch (e) {
+    if (history) {
+      history.push({
+        event: "warning",
+        step: "templater_startup_orphans_prune",
+        message: `read failed for ${target}: ${e.message}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch (e) {
+    if (history) {
+      history.push({
+        event: "warning",
+        step: "templater_startup_orphans_prune",
+        message: `${target} malformed JSON: ${e.message}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  if (!Array.isArray(data.startup_templates)) return; // nothing to prune
+
+  const before = data.startup_templates.length;
+  data.startup_templates = data.startup_templates.filter((e) => !orphans.includes(e));
+  const removed = before - data.startup_templates.length;
+  if (removed === 0) return; // no-op when already pruned
+
+  try {
+    await adapter.write(`${target}.sauce-backup`, raw);
+  } catch (e) {
+    new Notice(`pruneTemplaterStartupOrphans: backup write failed (${e.message}); aborting`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "templater_startup_orphans_prune",
+        message: `backup write failed: ${e.message}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  try {
+    await adapter.write(target, JSON.stringify(data, null, 2));
+    if (history) {
+      history.push({
+        event: "info",
+        step: "templater_startup_orphans_prune",
+        removed_count: removed,
+        action: "applied",
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+  } catch (e) {
+    new Notice(`pruneTemplaterStartupOrphans: write failed (${e.message})`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "templater_startup_orphans_prune",
         message: `write failed: ${e.message}`,
         git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
         attempted_at: new Date().toISOString(),

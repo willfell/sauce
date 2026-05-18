@@ -1443,16 +1443,18 @@ async function caseCPT3ApplyRemovesWrongType() {
 async function caseCPT4TagBasedDetection() {
     const label = "CPT-4 --apply strips depth-2 kanban-card (legacy structure)";
     await withTempVault({}, async (vaultPath) => {
-        // Real atlas at depth-2 with project/<slug> tag + status + workstreams (atlas-shape):
-        const atlas = path.join(vaultPath, "spice/projects/mythic/Mythic Atlas.md");
+        // Real atlas at depth-2 with display name that slugifies to folder name:
+        const atlas = path.join(vaultPath, "spice/projects/mythic-quest/Mythic Quest.md");
         fs.mkdirSync(path.dirname(atlas), { recursive: true });
-        fs.writeFileSync(atlas, "---\ntype: project\nstatus: in-progress\nworkstreams: []\ntags:\n  - accuris\n  - project/mythic\n---\nbody\n");
-        // Card at depth-2 (legacy accuris-style structure — sub-files not in /tasks/):
-        const card = path.join(vaultPath, "spice/projects/mythic/Some Random Task.md");
-        fs.writeFileSync(card, "---\ntype: project\nsource_board: spice/projects/mythic/foo.md\ntags:\n  - accuris\n  - kanban-card\n---\nbody\n");
-        // Free-form note at depth-2 with project/<slug> tag but no atlas keys (v0.59.7):
-        const note = path.join(vaultPath, "spice/projects/mythic/Reference Notes.md");
-        fs.writeFileSync(note, "---\ntype: project\ndescription: some reference\ntags:\n  - accuris\n  - project/mythic\n---\nbody\n");
+        fs.writeFileSync(atlas, "---\ntype: project\nstatus: in-progress\ntags:\n  - accuris\n  - project/mythic-quest\n---\nbody\n");
+        // Card at depth-2 (legacy accuris-style — kanban-card tag + source_board):
+        const card = path.join(vaultPath, "spice/projects/mythic-quest/Some Random Task.md");
+        fs.writeFileSync(card, "---\ntype: project\nsource_board: spice/projects/mythic-quest/foo.md\ntags:\n  - accuris\n  - kanban-card\n---\nbody\n");
+        // Free-form note at depth-2 with project/<slug> tag but no atlas naming
+        // (v0.59.7→v0.59.8: must lose type:project since a canonical-named atlas
+        // exists in the same folder):
+        const note = path.join(vaultPath, "spice/projects/mythic-quest/Reference Notes.md");
+        fs.writeFileSync(note, "---\ntype: project\ndescription: some reference\ntags:\n  - accuris\n  - project/mythic-quest\n---\nbody\n");
         delete require.cache[require.resolve("../cli/sauce-cli.js")];
         delete require.cache[require.resolve("../cli/cmd-cleanup-project-type.js")];
         const cli = require("../cli/sauce-cli.js");
