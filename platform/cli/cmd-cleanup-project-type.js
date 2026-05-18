@@ -105,6 +105,60 @@ function findTypeProjectLine(fmLines) {
   return -1;
 }
 
+// Parse the `tags:` array from frontmatter lines (top-level only). Handles
+// both inline form `tags: [a, b]` and block form (`tags:` followed by `- x`
+// indented items). Returns string[] or null if no tags key present.
+function parseFrontmatterTags(fmLines) {
+  for (let i = 0; i < fmLines.length; i++) {
+    const ln = fmLines[i];
+    const inline = ln.match(/^tags:\s*\[(.*)\]\s*$/);
+    if (inline) {
+      return inline[1].split(",")
+        .map(s => s.trim().replace(/^["']|["']$/g, ""))
+        .filter(Boolean);
+    }
+    if (/^tags:\s*$/.test(ln)) {
+      const out = [];
+      for (let j = i + 1; j < fmLines.length; j++) {
+        const sub = fmLines[j];
+        if (/^[A-Za-z_]/.test(sub)) break;  // next top-level key
+        const item = sub.match(/^\s+-\s*(.+?)\s*$/);
+        if (item) {
+          out.push(item[1].replace(/^["']|["']$/g, ""));
+        }
+      }
+      return out;
+    }
+  }
+  return null;
+}
+
+// Classifies a file with `type: project`. Returns true if the file is a
+// legitimate project atlas; false if it's a sub-file (card / task / etc.)
+// whose `type: project` was wrongly backfilled by FA-3 migration.
+//
+// Strategy:
+//   1) Strong negative tag signals → not-atlas (kanban-card, task-board-card,
+//      task-note, project-card, doc-note). These are explicit sub-type markers
+//      emitted by the project blueprint's per-sub-type templates.
+//   2) Strong positive tag signal: `project/<slug>` nested tag (canonical
+//      project atlas marker emitted by atlas templates).
+//   3) Fallback (no tag signals): depth-based heuristic — depth-2 file
+//      under spice/projects/<slug>/ that isn't Project Map or <slug>-board.
+function isAtlas(relPath, fmTags) {
+  const negativeMarkers = ["kanban-card", "task-board-card", "task-note", "project-card", "doc-note"];
+  if (Array.isArray(fmTags)) {
+    if (fmTags.some(t => negativeMarkers.includes(t))) return false;
+    if (fmTags.some(t => /^project\//.test(t))) return true;
+  }
+  const m = relPath.match(/^spice\/projects\/([^/]+)\/([^/]+)\.md$/);
+  if (!m) return false;                         // depth-3+
+  const filename = m[2];
+  if (filename === "Project Map") return false;
+  if (/-board$/.test(filename)) return false;
+  return true;
+}
+
 // Backup a file's pre-edit content under <vault>/.sauce-backup/<rel>/<ts>/
 function writeBackup(vault, rel, originalContent, ts) {
   const backupDir = path.join(vault, ".sauce-backup", rel, ts);
@@ -138,7 +192,8 @@ async function run(ctx, argv) {
     if (!fm) { continue; }
     const idx = findTypeProjectLine(fm.fmLines);
     if (idx < 0) { continue; }  // No type: project line, nothing to clean
-    if (isAtlasPath(f.rel)) {
+    const tags = parseFrontmatterTags(fm.fmLines);
+    if (isAtlas(f.rel, tags)) {
       actions.push({ rel: f.rel, action: "skip-atlas" });
       continue;
     }
@@ -178,8 +233,10 @@ async function run(ctx, argv) {
 module.exports = {
   run,
   // Test hooks
-  _isAtlasPath: isAtlasPath,
+  _isAtlas: isAtlas,
+  _isAtlasPath: isAtlas,  // back-compat alias for v0.59.4/0.59.5 callers
   _splitFrontmatter: splitFrontmatter,
   _findTypeProjectLine: findTypeProjectLine,
+  _parseFrontmatterTags: parseFrontmatterTags,
   _walkProjects: walkProjects,
 };

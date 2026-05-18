@@ -1439,6 +1439,34 @@ async function caseCPT3ApplyRemovesWrongType() {
     });
 }
 
+// v0.59.6 — tag-based detection covers depth-2 cards that bypass path heuristic.
+async function caseCPT4TagBasedDetection() {
+    const label = "CPT-4 --apply strips depth-2 kanban-card (legacy structure)";
+    await withTempVault({}, async (vaultPath) => {
+        // Real atlas at depth-2 with project/<slug> tag:
+        const atlas = path.join(vaultPath, "spice/projects/mythic/Mythic Atlas.md");
+        fs.mkdirSync(path.dirname(atlas), { recursive: true });
+        fs.writeFileSync(atlas, "---\ntype: project\ntags:\n  - accuris\n  - project/mythic\n---\nbody\n");
+        // Card at depth-2 (legacy accuris-style structure — sub-files not in /tasks/):
+        const card = path.join(vaultPath, "spice/projects/mythic/Some Random Task.md");
+        fs.writeFileSync(card, "---\ntype: project\nsource_board: spice/projects/mythic/foo.md\ntags:\n  - accuris\n  - kanban-card\n---\nbody\n");
+        delete require.cache[require.resolve("../cli/sauce-cli.js")];
+        delete require.cache[require.resolve("../cli/cmd-cleanup-project-type.js")];
+        const cli = require("../cli/sauce-cli.js");
+        const out = [];
+        const origLog = console.log; console.log = (s) => out.push(String(s));
+        try { await cli.dispatch(["cleanup-project-type", "--vault", vaultPath, "--apply"]); }
+        finally { console.log = origLog; }
+        const atlasAfter = fs.readFileSync(atlas, "utf8");
+        const cardAfter = fs.readFileSync(card, "utf8");
+        assertTrue(
+            atlasAfter.includes("type: project")            // atlas preserved (project/mythic tag)
+            && !cardAfter.includes("type: project"),         // depth-2 card cleaned (kanban-card tag)
+            label
+        );
+    });
+}
+
 const cases = [
     caseC1AncestorWalk, caseC2SauceVaultEnv, caseC3NotInVault, caseC4UnknownVerb,
     caseC5StatusClean, caseC6StatusDrift, caseC7UpdateFFOnly, caseC8UpdateDirtyRefusal,
@@ -1473,6 +1501,7 @@ const cases = [
     caseBF1BootstrapFreshVaultViaBrew,  // v0.36.0 S9.4 hotfix (will ship in v0.36.1)
     caseS1SeedHelp, caseS2SeedNoVault, caseS3SeedDryRun,  // v0.38.0 S2.3
     caseCPT1Help, caseCPT2DryRunCleanVault, caseCPT3ApplyRemovesWrongType,  // v0.59.4
+    caseCPT4TagBasedDetection,  // v0.59.6
 ];
 
 async function main() {
