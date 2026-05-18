@@ -1088,6 +1088,97 @@ async function caseO5SubstitutionAffectsSha() {
   }
 }
 
+// v0.59.9 — files[] entry with `materialize_once: true` preserves user content.
+async function caseO6MaterializeOncePreservesUserContent() {
+  console.log("\n--- Case O6: materialize_once + dest exists → skip overwrite, emit skipped_materialize_once ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseO6-"));
+  try {
+    const newBody = "fresh workshop template";
+    const userBody = "user-edited kanban board with [[card links]]";
+    await scaffoldBlueprintVault(scratch, [
+      {
+        name: "test-fixture-o6",
+        version: "0.1.0",
+        manifest: {
+          name: "test-fixture-o6",
+          version: "0.1.0",
+          kind: "blueprint",
+          module_directory: "o6",
+          files: [{
+            source: "content/board.md",
+            dest: "{{module_directory}}/board.md",
+            materialize_once: true,
+          }]
+        },
+        sourceFiles: [{ relPath: "content/board.md", body: newBody }]
+      }
+    ]);
+    const destAbs = path.join(scratch, "spice/o6/board.md");
+    await fsp.mkdir(path.dirname(destAbs), { recursive: true });
+    await fsp.writeFile(destAbs, userBody, "utf8");
+
+    const result = await runHarness(scratch);
+    assertTrue("O6: platform-installed.json was written", result !== null);
+
+    const finalBody = await readRaw(destAbs);
+    assertEq("O6: final dest content === user-edited body (NOT clobbered)",
+      finalBody, userBody);
+
+    const bakAbs = `${destAbs}.bak`;
+    assertTrue("O6: <dest>.bak NOT created (no overwrite happened)",
+      !fs.existsSync(bakAbs));
+
+    const replaces = (result && result.history || []).filter(
+      (h) => h.event === "replace" && h.step === "file_overwrite"
+    );
+    assertEq("O6: NO replace/file_overwrite event", replaces.length, 0);
+
+    const skips = (result && result.history || []).filter(
+      (h) => h.action === "skipped_materialize_once"
+    );
+    assertEq("O6: exactly one skipped_materialize_once history entry", skips.length, 1);
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
+// v0.59.9 — materialize_once on FIRST install (dest absent) still writes.
+async function caseO7MaterializeOnceFirstInstallWrites() {
+  console.log("\n--- Case O7: materialize_once + dest absent → fresh write (first install) ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseO7-"));
+  try {
+    const body = "freshly seeded kanban board";
+    await scaffoldBlueprintVault(scratch, [
+      {
+        name: "test-fixture-o7",
+        version: "0.1.0",
+        manifest: {
+          name: "test-fixture-o7",
+          version: "0.1.0",
+          kind: "blueprint",
+          module_directory: "o7",
+          files: [{
+            source: "content/board.md",
+            dest: "{{module_directory}}/board.md",
+            materialize_once: true,
+          }]
+        },
+        sourceFiles: [{ relPath: "content/board.md", body }]
+      }
+    ]);
+    const destAbs = path.join(scratch, "spice/o7/board.md");
+    // Do NOT pre-create dest. First install should write it.
+
+    const result = await runHarness(scratch);
+    assertTrue("O7: platform-installed.json was written", result !== null);
+
+    const finalBody = await readRaw(destAbs);
+    assertEq("O7: dest seeded with source body on first install", finalBody, body);
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
 // --------------------------------------------------------------------------
 // v0.2.0 T1.4: pre_install[] schema with type: "delete" action (P1-P4)
 // --------------------------------------------------------------------------
@@ -6472,7 +6563,7 @@ async function caseFA5CoworkRuleFragments() {
 
 async function caseFA6DomainManifests() {
   console.log("\n--- Case FA6-MANIFESTS: 3 domain blueprints bumped ---");
-  for (const [bp, expected] of [["trips", "0.2.0"], ["to-do", "0.2.0"], ["boards", "0.2.0"]]) {
+  for (const [bp, expected] of [["trips", "0.2.0"], ["to-do", "0.2.0"], ["boards", "0.2.1"]]) {
     const m = JSON.parse(fs.readFileSync(
       path.join(WORKSHOP, `platform/blueprints/${bp}/manifest.json`), "utf8"));
     assertTrue(`FA6-MANIFEST-${bp}: version ${expected}`, m.version === expected,
@@ -6654,6 +6745,8 @@ async function caseFA2RuleFragmentsExtends() {
   await caseO3ZeroByteDestNoBackup();
   await caseO4FreshWriteNoReplace();
   await caseO5SubstitutionAffectsSha();
+  await caseO6MaterializeOncePreservesUserContent();
+  await caseO7MaterializeOnceFirstInstallWrites();
   await caseP1PreInstallDeletesExistingFile();
   await caseP2PreInstallDeleteAbsentFile();
   await caseP3PreInstallDeleteDirectoryTarget();

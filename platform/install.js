@@ -912,6 +912,32 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
     // The .bak suffix here (NOT .sauce-backup) is the file-content-overwrite
     // convention; v0.1.3's plugin-data convention uses .sauce-backup.
     const destExists = await adapter.exists(destPath);
+
+    // v0.59.9: `materialize_once: true` on a files[] entry means materialize
+    // on FIRST install only — never overwrite a pre-existing dest. Protects
+    // user-mutable content that the platform seeds once but the user (or a
+    // plugin like obsidian-kanban) mutates afterwards. Without this guard,
+    // every reinstall clobbers the dest with the workshop template body and
+    // destroys accumulated user content (kanban card links, board column
+    // assignments, etc.).
+    if (f.materialize_once && destExists) {
+      if (history) {
+        history.push({
+          event: "info",
+          step: "file_overwrite",
+          name: mech.name,
+          dest: destPath,
+          action: "skipped_materialize_once",
+          message: "file declares materialize_once=true and dest exists; preserving user content",
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      continue;
+    }
+
     let priorContent = null;
     if (destExists) {
       try {
