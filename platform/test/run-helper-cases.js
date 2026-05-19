@@ -5985,6 +5985,43 @@ async function caseKC6CacheBeforeVaultScan() {
 }
 
 // -------------------------------------------------------------------------
+// v0.59.11 — KC-7..8: name-collision fix. Strategy 0 sibling-board detection
+// (runs before cache-first) + auto-promote suffix-disambiguation loop.
+// -------------------------------------------------------------------------
+async function caseKC7Strategy0SiblingBoardDetection() {
+  console.log("\n--- Case KC-7: Strategy 0 sibling-board detection present + ordered ---");
+  const body = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/project/templates/Kanban Card.md"),
+    "utf8"
+  );
+  assertTrue("KC-7a: Strategy 0 sibling-board comment marker present",
+    body.includes("Strategy 0: directory-of-target sibling-board detection"));
+  assertTrue("KC-7b: Strategy 0 siblingBoards.length === 1 early return present",
+    /siblingBoards\.length\s*===\s*1/.test(body));
+  const s0Idx = body.indexOf("Strategy 0: directory-of-target");
+  const s1Idx = body.indexOf("Cache-first path: query indexed backlinks");
+  assertTrue("KC-7c: Strategy 0 appears BEFORE Strategy 1 cache-first path",
+    s0Idx >= 0 && s1Idx >= 0 && s0Idx < s1Idx,
+    `s0Idx=${s0Idx} s1Idx=${s1Idx}`);
+}
+
+async function caseKC8AutoPromoteSuffixDisambiguation() {
+  console.log("\n--- Case KC-8: auto-promote suffix-disambiguation loop present ---");
+  const body = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/project/templates/Kanban Card.md"),
+    "utf8"
+  );
+  assertTrue("KC-8a: chosenName variable declared",
+    /let\s+chosenName\s*=\s*fileName/.test(body));
+  assertTrue("KC-8b: suffix loop bounded at <= 999",
+    /suffix\s*<=\s*999/.test(body));
+  assertTrue("KC-8c: name-collision Notice fires on rename",
+    /Saved as "\$\{chosenName\}"/.test(body));
+  assertTrue("KC-8d: legacy `const existing = ...; if (!existing)` single-attempt skip removed",
+    !/const existing = app\.vault\.getAbstractFileByPath\(newTargetPath \+ "\.md"\);\s*\n\s*if \(!existing\)/.test(body));
+}
+
+// -------------------------------------------------------------------------
 // v0.49.0 S6 — PCSI-1..3: ProjectTaskCreateListenerInit source-string asserts.
 // The init script is a thin bootstrap that delegates to v0.48.0's
 // ProjectTaskCreateListener.init() via customjs's startupScriptNames[]
@@ -6963,6 +7000,10 @@ async function caseFA2RuleFragmentsExtends() {
   await caseKC4HybridCachePathPresent();
   await caseKC5VaultScanFallbackRetained();
   await caseKC6CacheBeforeVaultScan();
+
+  // v0.59.11 — KC-7..8: name-collision fix (Strategy 0 + suffix-loop).
+  await caseKC7Strategy0SiblingBoardDetection();
+  await caseKC8AutoPromoteSuffixDisambiguation();
 
   // v0.48.0 S5 — ICN-1: Icons.resolve() this._tier1 reference count regression guard (FLN-a).
   await caseICN1Tier1ReferenceCount();
