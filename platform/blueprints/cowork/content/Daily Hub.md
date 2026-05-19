@@ -25,3 +25,13 @@ await dv.view("ranch/views/customjs-guard", { class: "CoworkDailyActions" });
 ```dataviewjs
 await dv.view("ranch/views/customjs-guard", { class: "CoworkDailyHubCards" });
 ```
+
+## Today's Activity
+
+```dataviewjs
+await dv.view("ranch/views/customjs-guard", {
+  class: "ActivityFeed",
+  method: "render",
+  args: [{ scope: "today", groupBy: "hour", limit: 50 }]
+});
+```
