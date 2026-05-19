@@ -39,9 +39,9 @@ First-of-month deep pass for one engagement. Reviews the PREVIOUS month. Creates
 
 ## Write
 
-14. Use Skill `cowork:write-summary-monthly` with `{ engagement, render_aspects, today: context.today, prev_month_label: context.prev_month_label, prev_month_yyyymm: context.prev_month_yyyymm, finance: <step 5 or null>, cc_debt: <step 6 or null>, next_month_calendar: <step 7>, people_pulse: <step 8 or null>, projects: <step 9>, threads: <step 10>, forward_look_stressors: <step 11>, invoice_block: <step 12 or "">, fte_status_block: <step 13 or ""> }`. The sub-skill writes the summary note to `spice/cowork/summaries/monthly/<engagement.id>/<prev_month_yyyymm>.md` and returns `{ summary_path, markdown }`.
-15. Compose the daily-note link callout: `> [!abstract]- Monthly Review — <engagement.label> <prev_month_label>\n> [[<summary_path basename>|Full Monthly Review]]`.
-16. Use Skill `cowork:patch-daily-callouts` with `{ engagement_id, daily_path: context.daily_path, callouts: [{ id: "monthly-review", body: <link callout> }] }`.
+14. **Read prompt body** via `mcp__obsidian__get_file_contents` at `spice/cowork/prompts/monthly-review.md`. Strip frontmatter; capture body as `prompt_body` (or empty when missing).
+15. **Compose run-note body** per `prompt_body` instructions interpolating month-summary gather outputs. When empty: `warning = "empty_prompt"`. Otherwise `warning = null`.
+16. Use Skill `cowork:write-run-note-monthly-review` with `{ engagement, month: context.iso_month, year: context.year, body: run_body, prompt_source: "spice/cowork/prompts/monthly-review.md", warning }`. Capture `status`. If `status` starts with `"failed:"`, emit Notice `cowork:monthly-review aborted -- write failed: <status>` and exit.
 
 ## State
 
