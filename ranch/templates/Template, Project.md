@@ -24,6 +24,18 @@ await dv.view("ranch/views/customjs-guard", { class: "ProjectWorkstreamManager" 
 
 ---
 
+## Mentions
+
+```dataviewjs
+await dv.view("ranch/views/customjs-guard", {
+  class: "BacklinkPanel",
+  method: "render",
+  args: [{ entityType: "project", groupBy: "type" }]
+});
+```
+
+---
+
 > [!example]- Project Notes & Referenced By
 >
 > #### Project Notes

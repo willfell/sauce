@@ -51,6 +51,7 @@ class BeaconCards {
         const progressFn = opts.progress || (() => null);
         const targetFn   = opts.target   || ((p) => p.file && p.file.path);
         const groupFn    = opts.group    || (() => null);
+        const titleWrap  = !!opts.titleWrap;
         const emptyMsg   = opts.empty    || "Nothing here yet.";
         const layout     = opts.layout   || "stacked";
         const columns    = opts.columns  || (layout === "row" ? 1 : "auto");
@@ -100,7 +101,7 @@ class BeaconCards {
             groupRoot.style.cssText = gridStyle;
 
             for (const page of grouped[gk]) {
-                this._renderCard(groupRoot, page, { titleFn, subtitleFn, iconFn, metaFn, badgesFn, progressFn, targetFn, onClick, isMobile, layout });
+                this._renderCard(groupRoot, page, { titleFn, subtitleFn, iconFn, metaFn, badgesFn, progressFn, targetFn, onClick, isMobile, layout, titleWrap });
             }
         }
     }
@@ -150,7 +151,10 @@ class BeaconCards {
         const titleText = ctx.titleFn(page) || "(untitled)";
         const titleEl = left.createEl("div");
         titleEl.style.cssText = "font-size: 1em; font-weight: 600; color: var(--text-normal); display: flex; align-items: center; gap: 8px;";
-        const titleSpan = `<span style="overflow: hidden; text-overflow: ellipsis; ${isMobile ? "white-space: normal; word-break: break-word;" : "white-space: nowrap;"}">${this._escape(titleText)}</span>`;
+        // v0.59.10: titleWrap opt forces wrap-style (mobile-equivalent) on desktop too,
+        // so long titles like project display-names aren't ellipsis-truncated.
+        const wrapTitle = ctx.titleWrap || isMobile;
+        const titleSpan = `<span style="overflow: hidden; text-overflow: ellipsis; ${wrapTitle ? "white-space: normal; word-break: break-word;" : "white-space: nowrap;"}">${this._escape(titleText)}</span>`;
         titleEl.innerHTML = `${iconHtml}${titleSpan}`;
 
         const indentCss = iconHtml ? "padding-left: 24px;" : "";

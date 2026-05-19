@@ -125,17 +125,17 @@
     },
     {
       "name": "people",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "path": "blueprints/people"
     },
     {
       "name": "products",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "path": "blueprints/products"
     },
     {
       "name": "project",
-      "version": "1.13.6",
+      "version": "1.14.0",
       "path": "blueprints/project"
     },
     {
@@ -150,7 +150,7 @@
     },
     {
       "name": "trips",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "path": "blueprints/trips"
     },
     {
@@ -165,7 +165,7 @@
     },
     {
       "name": "teams",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "path": "blueprints/teams"
     }
   ]
