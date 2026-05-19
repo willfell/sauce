@@ -25,12 +25,20 @@
  *   the parent column is narrow (padding no longer adds to width).
  * - Task <li>: added word-break: break-word + overflow-wrap: anywhere so
  *   long URL-y / no-space task strings wrap instead of forcing a scrollbar.
+ *
+ * v0.3.0 (v0.64.0): third Activity panel below meetings. Delegates to
+ * customJS.ActivityFeed.render(...) with { scope: "today", asOf:
+ * <day-from-filename>, includeMtime: true, groupBy: "blueprint" }. Excludes
+ * daily/cowork-daily/cowork-weekly/cowork-monthly types from the scan so
+ * the daily note doesn't self-reference. hasContent gate widened to
+ * include activityCount. Tasks + meetings panels unchanged.
  */
 class SpaceDailyDashboard {
   async render(dv) {
     const icons = {
       calendar: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>`,
-      checkSquare: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="m9 12 2 2 4-4"/></svg>`
+      checkSquare: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="m9 12 2 2 4-4"/></svg>`,
+      zap: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>`
     };
 
     const currentFile = dv.current();
@@ -75,7 +83,8 @@ class SpaceDailyDashboard {
 
     const meetings = getMeetings();
     const tasks = getTasks();
-    const hasContent = meetings.length > 0 || tasks.length > 0;
+    const activityCount = await this._getActivityCount(dv, today);
+    const hasContent = meetings.length > 0 || tasks.length > 0 || activityCount > 0;
     if (!hasContent) return;
 
     const existing = dv.container.querySelector(".space-daily-dashboard");
@@ -158,5 +167,80 @@ class SpaceDailyDashboard {
         empty: "(no meetings — should not render due to outer hasContent guard)"
       });
     }
+
+    if (activityCount > 0) {
+      const activitySection = container.createEl("div", { cls: "section" });
+      activitySection.style.cssText = "margin-top: 16px;";
+
+      const activityHeader = activitySection.createEl("div", { cls: "section-header" });
+      activityHeader.innerHTML = `${icons.zap} <span>Today's Activity</span>`;
+      activityHeader.style.cssText = `
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.95em;
+        font-weight: 600;
+        color: var(--text-normal);
+        margin-bottom: 10px;
+      `;
+
+      const activityPanel = activitySection.createEl("div");
+      const activityShim = { container: activityPanel };
+      if (customJS && customJS.ActivityFeed && typeof customJS.ActivityFeed.render === "function") {
+        await customJS.ActivityFeed.render(activityShim, {
+          scope: "today",
+          asOf: today,
+          includeMtime: true,
+          groupBy: "blueprint",
+          blueprints: this._DEFAULT_DASHBOARD_BLUEPRINTS,
+        });
+      } else {
+        const warn = activityPanel.createEl("p");
+        warn.style.cssText = "color: var(--text-muted); font-style: italic; margin: 0.5em 0;";
+        warn.textContent = "ActivityFeed mechanism unavailable.";
+      }
+    }
+  }
+
+  /**
+   * Pre-count activity matches for the hasContent gate. Mirrors
+   * ActivityFeed._query semantics but returns just the length, so we can
+   * short-circuit the dashboard render when nothing matches.
+   */
+  async _getActivityCount(dv, today) {
+    const startIso = window.moment(today, "YYYY-MM-DD").startOf("day").format();
+    const endIso   = window.moment(today, "YYYY-MM-DD").endOf("day").format();
+    const allowed  = this._DEFAULT_DASHBOARD_BLUEPRINTS;
+    const inDay = (p) => {
+      if (!p) return false;
+      if (allowed.indexOf(String(p.type)) < 0) return false;
+      const tsRaw = p.created_at;
+      if (tsRaw) {
+        const ts = String(tsRaw);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(ts)) {
+          if (ts >= startIso.slice(0, 10) && ts <= endIso.slice(0, 10)) return true;
+        } else if (ts >= startIso && ts <= endIso) {
+          return true;
+        }
+      }
+      if (p.file && p.file.mtime) {
+        const mIso = (typeof p.file.mtime.toISO === "function") ? p.file.mtime.toISO() : String(p.file.mtime);
+        if (mIso >= startIso && mIso <= endIso) return true;
+      }
+      return false;
+    };
+    let count = 0;
+    for (const p of dv.pages()) {
+      if (inDay(p)) count++;
+    }
+    return count;
+  }
+
+  get _DEFAULT_DASHBOARD_BLUEPRINTS() {
+    return [
+      "meeting", "scratch", "scratch-day", "to-do", "journal",
+      "project", "person", "team", "product", "trip",
+      "budget", "paycheck", "invoice"
+    ];
   }
 }

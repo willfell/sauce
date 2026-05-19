@@ -1,5 +1,5 @@
 /**
- * activity-feed@0.1.0 — universal cross-blueprint activity feed renderer (FA-9a).
+ * activity-feed@0.1.1 — universal cross-blueprint activity feed renderer (FA-9a).
  *
  * Loaded via customjs-guard (avoids landmines #1 / #2 cold-load TDZ). Three
  * closure args are visible in scope per the loader contract: `app`, `customJS`,
@@ -18,6 +18,17 @@
  *                        comparison uses `status_changed_at` instead of
  *                        `created_at` (FA-9a "Today's project status changes"
  *                        section).
+ *   asOf:                string|moment (default: now())
+ *                        Anchors the time window to this date. When set,
+ *                        time-window resolution computes start/end around
+ *                        this anchor instead of window.moment(). Accepts
+ *                        any value window.moment() accepts (ISO string,
+ *                        "YYYY-MM-DD", moment object).
+ *
+ *   includeMtime:        boolean (default false) — when true, a page matches
+ *                        if EITHER its tsKey timestamp OR its file.mtime
+ *                        falls in the window. Catches "edited today but
+ *                        created earlier" notes.
  *   title:               string (optional) — emits an H3 above the panel
  *
  * Per landmine #11: spice/ module-directory namespace is conceptual;
@@ -41,6 +52,8 @@ class ActivityFeed {
       ? safeOpts.limit
       : 50;
     const useStatusChangedAt = safeOpts.useStatusChangedAt === true;
+    const asOf = safeOpts.asOf;
+    const includeMtime = safeOpts.includeMtime === true;
     const blueprints = Array.isArray(safeOpts.blueprints) && safeOpts.blueprints.length > 0
       ? safeOpts.blueprints.map(String)
       : this._DEFAULT_BLUEPRINTS;
@@ -53,7 +66,7 @@ class ActivityFeed {
 
     let timeWindow;
     try {
-      timeWindow = this._resolveTimeWindow(scope);
+      timeWindow = this._resolveTimeWindow(scope, asOf);
     } catch (e) {
       new Notice("ActivityFeed: time-window resolve failed — " + (e && e.message ? e.message : String(e)));
       return;
@@ -65,7 +78,7 @@ class ActivityFeed {
 
     let pages;
     try {
-      pages = this._query(dv, blueprints, timeWindow, useStatusChangedAt, limit);
+      pages = this._query(dv, blueprints, timeWindow, useStatusChangedAt, includeMtime, limit);
     } catch (e) {
       new Notice("ActivityFeed: query failed — " + (e && e.message ? e.message : String(e)));
       return;
@@ -91,12 +104,13 @@ class ActivityFeed {
    * Resolve {startIso, endIso} for the requested scope using window.moment.
    * Falls back to native Date when moment is unavailable.
    * @param {string} scope
+   * @param {string|object} [asOf] — optional anchor; defaults to "now".
    * @returns {{startIso: string, endIso: string} | null}
    */
-  _resolveTimeWindow(scope) {
+  _resolveTimeWindow(scope, asOf) {
     const useMoment = typeof window !== "undefined" && window.moment;
     if (useMoment) {
-      const now = window.moment();
+      const now = asOf ? window.moment(asOf) : window.moment();
       if (scope === "today") {
         return { startIso: now.clone().startOf("day").format(), endIso: now.clone().endOf("day").format() };
       }
@@ -109,7 +123,7 @@ class ActivityFeed {
       return null;
     }
     // Native fallback — coarser, no isoWeek support.
-    const now = new Date();
+    const now = asOf ? new Date(asOf) : new Date();
     if (scope === "today") {
       const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
       const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
@@ -139,10 +153,11 @@ class ActivityFeed {
    * @param {string[]} blueprints
    * @param {{startIso, endIso}} timeWindow
    * @param {boolean} useStatusChangedAt
+   * @param {boolean} includeMtime — when true, OR file.mtime into the predicate.
    * @param {number} limit
    * @returns {Array}
    */
-  _query(dv, blueprints, timeWindow, useStatusChangedAt, limit) {
+  _query(dv, blueprints, timeWindow, useStatusChangedAt, includeMtime, limit) {
     const start = timeWindow.startIso;
     const end = timeWindow.endIso;
     const tsKey = useStatusChangedAt ? "status_changed_at" : "created_at";
@@ -151,15 +166,25 @@ class ActivityFeed {
       .where((p) => {
         if (!p) return false;
         if (blueprints.indexOf(String(p.type)) < 0) return false;
+        // ts-window predicate (created_at: or status_changed_at:)
         const tsRaw = p[tsKey];
-        if (!tsRaw) return false;
-        const ts = String(tsRaw);
-        // Lexicographic compare works for ISO-8601 with TZ AND YYYY-MM-DD.
-        // For YYYY-MM-DD compare against the date portion of start/end.
-        if (/^\d{4}-\d{2}-\d{2}$/.test(ts)) {
-          return ts >= start.slice(0, 10) && ts <= end.slice(0, 10);
+        let tsHit = false;
+        if (tsRaw) {
+          const ts = String(tsRaw);
+          if (/^\d{4}-\d{2}-\d{2}$/.test(ts)) {
+            tsHit = ts >= start.slice(0, 10) && ts <= end.slice(0, 10);
+          } else {
+            tsHit = ts >= start && ts <= end;
+          }
         }
-        return ts >= start && ts <= end;
+        if (tsHit) return true;
+        // mtime predicate (file.mtime), opt-in via includeMtime
+        if (!includeMtime) return false;
+        if (!p.file || !p.file.mtime) return false;
+        const mIso = (typeof p.file.mtime.toISO === "function")
+          ? p.file.mtime.toISO()
+          : String(p.file.mtime);
+        return mIso >= start && mIso <= end;
       })
       .sort((p) => {
         const v = p && p[tsKey];

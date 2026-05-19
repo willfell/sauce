@@ -1,5 +1,6 @@
 {
   "alwaysOpenInNewTab": true,
   "defaultViewMode": "preview",
-  "livePreview": true
+  "livePreview": true,
+  "propertiesInDocument": "visible"
 }
