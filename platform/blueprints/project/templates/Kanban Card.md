@@ -261,18 +261,33 @@ tags:
 // file in the kanban-plugin → Templater flow — symptom: auto-promote
 // never fired, file stayed at vault root.
 //
-// Idempotent: skips if target already exists. If source board not
-// detected (e.g., card created from a non-project kanban board),
-// auto-promote silently skips.
+// v0.59.11 fix: name-collision disambiguation. When the per-task folder
+// + file already exists (most often: another task with the same title in
+// this same project, or sometimes a different project routed wrongly by
+// source-board detection), append `-2`, `-3`, ... until a free slot is
+// found. Surface the rename via Notice so the user knows. Bound the loop
+// at 999 — pathologically deep collisions stop the move rather than
+// looping forever.
 const sourceParts = activePath.split("/");
 const projectsIdx = sourceParts.indexOf("projects");
 if (projectsIdx >= 0 && projectsIdx + 1 < sourceParts.length) {
     const projectDir = sourceParts.slice(0, projectsIdx + 2).join("/");
     const fileName = tp.file.title;
-    const newTargetPath = `${projectDir}/tasks/${fileName}/${fileName}`;
-    const existing = app.vault.getAbstractFileByPath(newTargetPath + ".md");
-    if (!existing) {
+    let chosenName = fileName;
+    let suffix = 2;
+    while (
+        app.vault.getAbstractFileByPath(`${projectDir}/tasks/${chosenName}/${chosenName}.md`)
+        && suffix <= 999
+    ) {
+        chosenName = `${fileName}-${suffix}`;
+        suffix++;
+    }
+    const newTargetPath = `${projectDir}/tasks/${chosenName}/${chosenName}`;
+    if (!app.vault.getAbstractFileByPath(newTargetPath + ".md")) {
         await tp.file.move(newTargetPath);
+        if (chosenName !== fileName) {
+            new Notice(`Task name "${fileName}" already exists in this project. Saved as "${chosenName}".`, 6000);
+        }
     }
 }
 -%>
