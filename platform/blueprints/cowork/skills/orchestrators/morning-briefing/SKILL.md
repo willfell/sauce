@@ -40,10 +40,10 @@ Each gather call passes `engagement_id`. The sub-skill reads per-engagement MCP-
 
 ## Write
 
-13. If `render_aspects.finance_block == "include"`: use Skill `cowork:write-callout-finance` with `{ engagement, date: context.today, finance_yesterday: <step 9.markdown>, cc_debt_snapshot: <step 10.markdown> }`. Capture `finance_block`. Else `finance_block = ""`.
-14. Use Skill `cowork:write-callout-morning-briefing` with `{ engagement, render_aspects: type_manifest.render_aspects, date: context.today, weekday: context.dddd, weather: <step 5.markdown or "">, calendar: <step 6.markdown>, gmail: <step 7.markdown>, imessage: <step 8.markdown or "">, threads_digest: <step 12.markdown>, finance_block, tasks: <step 11 rendered as markdown>, people: <step 11.people_nudges rendered as markdown> }`. Capture `briefing_markdown`. The sub-skill internally branches on `engagement.type` to pick the per-type callout shape.
-15. Compose the Open Threads tail callout from step 12; if no open threads, `tail_blocks = []`.
-16. Use Skill `cowork:patch-daily-callouts` with `{ engagement_id, daily_path: context.daily_path, callouts: [{ id: "morning-briefing", body: <briefing_markdown> }], tail_blocks: <tail_blocks> }`. The sub-skill writes the morning H2 block under `## Morning — <engagement.label>` within the `%% COWORK_CALLOUTS %%` block; idempotent replace by `(cadence, engagement_id)`.
+13. **Read prompt body** via `mcp__obsidian__get_file_contents` at `spice/cowork/prompts/morning-briefing.md`. Strip leading frontmatter block. Capture body trimmed of leading/trailing whitespace as `prompt_body`. If file is missing, treat as `prompt_body = ""`.
+14. **Compose run-note body** from the gather outputs (steps 5–12), interpolating per `prompt_body` instructions. When `prompt_body` is empty, set `run_body = ""` and `warning = "empty_prompt"`. Otherwise `warning = null`. The composition pattern follows the prompt body's instructions (the user-editable prompt drives shape); for empty prompts, the sub-skill renders the stub literal.
+15. **If `render_aspects.finance_block == "include"`:** use Skill `cowork:write-run-note-finance` with `{ engagement, date: context.today, weekday: context.dddd, month_name: context["MM-Month"].split("-")[1], body: <step 9.markdown + step 10.markdown>, prompt_source: null, warning: null }`. Best-effort: log status but do not abort if status starts with `"failed:"`.
+16. Use Skill `cowork:write-run-note-morning-briefing` with `{ engagement, date: context.today, weekday: context.dddd, month_name: context["MM-Month"].split("-")[1], body: run_body, prompt_source: "spice/cowork/prompts/morning-briefing.md", warning }`. Capture `status`. If `status` starts with `"failed:"`, emit Notice `cowork:morning-briefing aborted -- write failed: <status>` and exit. Do not run state-update steps after a failed write.
 
 ## State
 
