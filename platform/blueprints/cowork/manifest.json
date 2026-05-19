@@ -71,6 +71,7 @@
     { "source": "content/prompts/eod-review.md",                       "dest": "{{module_directory}}/prompts/eod-review.md" },
     { "source": "content/prompts/weekly-review.md",                    "dest": "{{module_directory}}/prompts/weekly-review.md" },
     { "source": "content/prompts/monthly-review.md",                   "dest": "{{module_directory}}/prompts/monthly-review.md" },
+    { "source": "content/prompts/midday-tripwire.md",              "dest": "{{module_directory}}/prompts/midday-tripwire.md" },
     { "source": "helpers/cowork-daily-hub-cards.js",                   "dest": "{{scripts_path}}/cowork/cowork-daily-hub-cards.js" },
     { "source": "helpers/cowork-weekly-hub-cards.js",                  "dest": "{{scripts_path}}/cowork/cowork-weekly-hub-cards.js" },
     { "source": "helpers/cowork-monthly-hub-cards.js",                 "dest": "{{scripts_path}}/cowork/cowork-monthly-hub-cards.js" },
