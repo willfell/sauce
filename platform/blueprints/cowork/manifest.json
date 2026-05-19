@@ -12,7 +12,8 @@
     "CoworkMonthlyHubCards",
     "CoworkTimeframeButtons",
     "CoworkHubNav",
-    "CoworkDailyActions"
+    "CoworkDailyActions",
+    "CoworkReadiness"
   ],
   "nav_buttons": [
     {
@@ -78,7 +79,8 @@
     { "source": "helpers/cowork-timeframe-buttons.js",                 "dest": "{{scripts_path}}/cowork/cowork-timeframe-buttons.js" },
     { "source": "content/About Cowork.md",                            "dest": "{{module_directory}}/About Cowork.md" },
     { "source": "helpers/cowork-hub-nav.js",                          "dest": "{{scripts_path}}/cowork/cowork-hub-nav.js" },
-    { "source": "helpers/cowork-daily-actions.js",                    "dest": "{{scripts_path}}/cowork/cowork-daily-actions.js" }
+    { "source": "helpers/cowork-daily-actions.js",                    "dest": "{{scripts_path}}/cowork/cowork-daily-actions.js" },
+    { "source": "helpers/cowork-readiness.js",                       "dest": "{{scripts_path}}/cowork/cowork-readiness.js" }
   ],
   "claude_surface": [
     { "kind": "command", "source": "commands/cowork.md", "dest": ".claude/commands/cowork.md" },
