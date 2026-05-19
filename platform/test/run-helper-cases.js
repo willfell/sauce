@@ -6864,6 +6864,39 @@ async function caseFA7FinanceRuleFragments() {
   }
 }
 
+// v0.63.0 S7 — TD-HC-1: to-do v0.3.0 manifest schema clean.
+async function caseTodoManifestV3() {
+  console.log("\n--- Case TD-HC-1: to-do v0.3.0 manifest schema clean ---");
+  const m = JSON.parse(fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/to-do/manifest.json"), "utf8"));
+
+  assertTrue("TD-HC-1 version is 0.3.0", m.version === "0.3.0", `got ${m.version}`);
+  assertTrue("TD-HC-1 customjs_classes includes ToDoMigrateInit",
+    Array.isArray(m.customjs_classes) && m.customjs_classes.includes("ToDoMigrateInit"));
+  assertTrue("TD-HC-1 customjs_startup_scripts has ToDoMigrateInit",
+    Array.isArray(m.customjs_startup_scripts) && m.customjs_startup_scripts.includes("ToDoMigrateInit"));
+
+  const navIds = (m.nav_buttons || []).map(b => b.id);
+  assertTrue("TD-HC-1 nav_buttons has todo-all", navIds.includes("todo-all"));
+  assertTrue("TD-HC-1 nav_buttons has todo-migrate", navIds.includes("todo-migrate"));
+
+  const todoAll = (m.nav_buttons || []).find(b => b.id === "todo-all");
+  assertTrue("TD-HC-1 todo-all uses openLink action",
+    todoAll && todoAll.action && todoAll.action.type === "openLink",
+    `got ${todoAll && todoAll.action && todoAll.action.type}`);
+
+  const todoMigrate = (m.nav_buttons || []).find(b => b.id === "todo-migrate");
+  assertTrue("TD-HC-1 todo-migrate uses invoke_command action",
+    todoMigrate && todoMigrate.action && todoMigrate.action.type === "invoke_command" &&
+    todoMigrate.action.command_id === "sauce:to-do-migrate",
+    `got ${JSON.stringify(todoMigrate && todoMigrate.action)}`);
+
+  const scope = m.rule_fragments && m.rule_fragments[0] && m.rule_fragments[0].fragment.scope.path_glob;
+  assertTrue("TD-HC-1 rule scope is tightened",
+    scope === "spice/to-do/**/ToDo-*.md",
+    `got ${scope}`);
+}
+
 async function caseFA2RuleFragmentsExtends() {
   console.log("\n--- Case FA2-EXTENDS: all 4 blueprints' rule_fragments declare extends ---");
   const blueprints = ["meetings", "people", "products", "teams"];
@@ -7197,6 +7230,9 @@ async function caseFA2RuleFragmentsExtends() {
   await caseFA7FinanceTemplates();
   await caseFA7FinanceEntityCreate();
   await caseFA7FinanceRuleFragments();
+
+  // v0.63.0 S7 — TD-HC-1: to-do v0.3.0 manifest schema clean
+  await caseTodoManifestV3();
 
   // v0.60.0 SQ — shellSingleQuote helper round-trips through bash
   await caseV60ShellSingleQuote();

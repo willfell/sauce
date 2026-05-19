@@ -105,11 +105,12 @@ withTempHomeAndVault(({ home, vault }) => {
     if (ecMech && !sub.mechanisms.find(m => m.name === "entity-create")) {
         sub.mechanisms.push({ name: ecMech.name, version: ecMech.version });
     }
-    for (const bpName of ["meetings", "people", "project", "scratch", "finance"]) {
+    for (const bpName of ["meetings", "people", "project", "scratch", "finance", "to-do"]) {
         // v0.46.2: project re-included after FLN-f fix (stale
         // helpers/project-action-buttons.js reference removed from project's
         // manifest customjs_classes[] + files[]). Project's entity-create
         // entry now materializes into the registry alongside the other 6.
+        // v0.63.0 S7: to-do added so All-ToDos.md + helper scripts materialize.
         const entry = wsmf.blueprints.find(b => b.name === bpName);
         if (entry && !sub.blueprints.find(b => b.name === bpName)) {
             sub.blueprints.push({ name: entry.name, version: entry.version });
@@ -371,6 +372,12 @@ withTempHomeAndVault(({ home, vault }) => {
     ok("smoke-prj-customjs-startup",
         prjCustomjsStartupOk,
         prjCustomjsStartupDetail);
+
+    // v0.63.0 S7 — smoke-todo-allhub: post-reinstall All-ToDos.md materialized
+    // at spice/to-do/All-ToDos.md (to-do blueprint subscribed above).
+    ok("smoke-todo-allhub All-ToDos.md materialized",
+        fs.existsSync(path.join(vault, "spice/to-do/All-ToDos.md")),
+        `path=${path.join(vault, "spice/to-do/All-ToDos.md")}`);
 
     // v0.50.0 S5 (renamed v0.52.0) — DOCS-INT-1..3: applyDocsBackfill side effects.
     // After the reinstall above, project blueprint is subscribed; the

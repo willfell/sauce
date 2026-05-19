@@ -1439,6 +1439,75 @@ async function caseCPT3ApplyRemovesWrongType() {
     });
 }
 
+// v0.63.0 S7 — TD-CLI-1..3: to-do v0.3.0 post-install file materialization.
+// Runs a real reinstall (via sauce-cli.js execFileSync) against a temp vault
+// subscribed to all mechanisms + to-do blueprint, then asserts the three new
+// artifacts materialize: All-ToDos.md, ToDoMigrateInit in customjs/data.json,
+// and all 4 helper scripts under ranch/scripts/to-do/.
+async function caseTD1ToDoPostInstall() {
+    const label = "TD post-install: to-do v0.3.0 artifacts materialize";
+    const { execFileSync } = require("child_process");
+    const workshopRoot = path.resolve(__dirname, "../..");
+    const manifest = JSON.parse(fs.readFileSync(path.join(workshopRoot, "platform/manifest.json"), "utf8"));
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-td-cli-"));
+    const origHome = process.env.HOME;
+    const fakeHome = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-td-home-"));
+    process.env.HOME = fakeHome;
+    try {
+        // Bootstrap the temp vault (mechanisms=all, no blueprints yet).
+        execFileSync("node", [path.join(workshopRoot, "platform/cli/sauce-cli.js"),
+            "bootstrap", "--vault", tempDir, "--non-interactive", "--no-register",
+            "--mechanisms=all"],
+            { stdio: "pipe", encoding: "utf8" });
+
+        // Patch the subscription to include the to-do blueprint.
+        const subPath = path.join(tempDir, "ranch/platform-subscription.json");
+        const sub = JSON.parse(fs.readFileSync(subPath, "utf8"));
+        const todoEntry = manifest.blueprints.find(b => b.name === "to-do");
+        if (todoEntry && !sub.blueprints.find(b => b.name === "to-do")) {
+            sub.blueprints.push({ name: todoEntry.name, version: todoEntry.version });
+        }
+        fs.writeFileSync(subPath, JSON.stringify(sub, null, 2), "utf8");
+
+        // Reinstall so the installer sees the new blueprint in the subscription.
+        execFileSync("node", [path.join(workshopRoot, "platform/cli/sauce-cli.js"),
+            "reinstall", "--vault", tempDir],
+            { stdio: "pipe", encoding: "utf8" });
+
+        // TD-CLI-1: All-ToDos.md materialized at spice/to-do/All-ToDos.md
+        const allTodosPath = path.join(tempDir, "spice/to-do/All-ToDos.md");
+        assertTrue(fs.existsSync(allTodosPath),
+            "TD-CLI-1 All-ToDos.md materialized at spice/to-do/All-ToDos.md");
+
+        // TD-CLI-2: customjs/data.json startupScriptNames[] includes ToDoMigrateInit
+        const dataJsonPath = path.join(tempDir, ".obsidian/plugins/customjs/data.json");
+        if (fs.existsSync(dataJsonPath)) {
+            const data = JSON.parse(fs.readFileSync(dataJsonPath, "utf8"));
+            const list = Array.isArray(data.startupScriptNames) ? data.startupScriptNames : [];
+            assertTrue(list.includes("ToDoMigrateInit"),
+                "TD-CLI-2 ToDoMigrateInit in customjs startupScriptNames");
+        } else {
+            assertTrue(false, "TD-CLI-2 ToDoMigrateInit in customjs startupScriptNames — data.json absent");
+        }
+
+        // TD-CLI-3: all 4 helper scripts materialized under ranch/scripts/to-do/
+        const helpers = [
+            "ranch/scripts/to-do/todo-hub-actions.js",
+            "ranch/scripts/to-do/todo-all-list.js",
+            "ranch/scripts/to-do/todo-migrate-modal.js",
+            "ranch/scripts/to-do/todo-migrate-init.js",
+        ];
+        for (const rel of helpers) {
+            assertTrue(fs.existsSync(path.join(tempDir, rel)),
+                `TD-CLI-3 ${rel} materialized`);
+        }
+    } finally {
+        process.env.HOME = origHome;
+        try { fs.rmSync(tempDir, { recursive: true, force: true }); } catch (_) {}
+        try { fs.rmSync(fakeHome, { recursive: true, force: true }); } catch (_) {}
+    }
+}
+
 // v0.59.6 — tag-based detection covers depth-2 cards that bypass path heuristic.
 async function caseCPT4TagBasedDetection() {
     const label = "CPT-4 --apply strips depth-2 kanban-card (legacy structure)";
@@ -1509,6 +1578,7 @@ const cases = [
     caseS1SeedHelp, caseS2SeedNoVault, caseS3SeedDryRun,  // v0.38.0 S2.3
     caseCPT1Help, caseCPT2DryRunCleanVault, caseCPT3ApplyRemovesWrongType,  // v0.59.4
     caseCPT4TagBasedDetection,  // v0.59.6
+    caseTD1ToDoPostInstall,  // v0.63.0 S7
 ];
 
 async function main() {
