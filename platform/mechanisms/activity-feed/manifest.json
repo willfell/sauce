@@ -1,8 +1,8 @@
 {
   "name": "activity-feed",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "kind": "mechanism",
-  "description": "Universal cross-blueprint activity feed renderer. ActivityFeed.render(dv, opts) — time-windowed query (today/week/month) across the canonical type:/created_at: vocab shipped FA-1..FA-7. Renders via customJS.BeaconCards. Materialized on cowork Daily/Weekly/Monthly hubs + NEW Today.md landing surface (FA-9a, v0.62.0).",
+  "description": "Universal cross-blueprint activity feed renderer. ActivityFeed.render(dv, opts) — time-windowed query (today/week/month) across the canonical type:/created_at: vocab shipped FA-1..FA-7. Renders via customJS.BeaconCards. Materialized on cowork Daily/Weekly/Monthly hubs + NEW Today.md landing surface (FA-9a, v0.62.0). v0.1.1 PATCH (v0.64.0): two additive render-opts — asOf (anchor time window to a specific date, default now) + includeMtime (OR file.mtime into the time-window predicate, catching edited-not-just-created notes). Backwards-compatible — existing callers passing no new opts get v0.1.0 behavior unchanged. Consumed by daily@0.5.0 SpaceDailyDashboard activity panel.",
   "depends_on": [
     { "name": "customjs-guard", "range": ">=1.0.0" },
     { "name": "cards",          "range": ">=0.2.5" }
