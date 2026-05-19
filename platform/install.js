@@ -26,17 +26,30 @@
 // Pre-resolution push sites (step: read_config, step: read_subscription) MUST
 // record git_commit:null, git_tag:null, git_dirty:null explicitly.
 function gitState(workshopPath) {
-  const { execSync } = require("child_process");
+  // v0.60.0 — array-form spawnSync replaces execSync template-literal calls
+  // (F-1 in 2026-05-18 security report). Skips shell parsing entirely; no
+  // quoting concerns regardless of what workshopPath contains.
+  const { spawnSync } = require("child_process");
+  function _git(args, stderrMode) {
+    const r = spawnSync("git", ["-C", workshopPath, ...args], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", stderrMode || "pipe"]
+    });
+    if (r.status !== 0) throw new Error(r.stderr || `git ${args.join(" ")} failed`);
+    return (r.stdout || "").trim();
+  }
   const result = { commit: null, tag: null, dirty: null };
   try {
-    result.commit = execSync(`git -C "${workshopPath}" rev-parse HEAD`, { encoding: "utf8" }).trim();
+    result.commit = _git(["rev-parse", "HEAD"]);
   } catch { /* not a git repo, or git unavailable; leave null */ }
   try {
-    const out = execSync(`git -C "${workshopPath}" describe --tags --exact-match HEAD 2>/dev/null`, { encoding: "utf8" }).trim();
+    // Equivalent of the prior `2>/dev/null` shell redirection — `describe`
+    // emits a non-fatal stderr line when HEAD has no exact-match tag.
+    const out = _git(["describe", "--tags", "--exact-match", "HEAD"], "ignore");
     result.tag = out.length > 0 ? out : null;
   } catch { /* HEAD has no exact tag; leave null */ }
   try {
-    const status = execSync(`git -C "${workshopPath}" status --porcelain`, { encoding: "utf8" });
+    const status = _git(["status", "--porcelain"]);
     result.dirty = status.length > 0;
   } catch { /* leave null */ }
   return result;

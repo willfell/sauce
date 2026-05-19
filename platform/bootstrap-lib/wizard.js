@@ -35,6 +35,11 @@ function _loadInquirer() {
 
 const DEFAULT_MECHANISMS_CHECKED = [
     "customjs-guard",
+    "icons",         // v0.60.0 — nav-buttons depends on icons since v0.21.0;
+                     // omission caused fresh-vault bootstrap CI to fail with
+                     // "skipping nav-buttons — depends on icons >=0.1.0 but it
+                     // is not subscribed". Must precede nav-buttons for
+                     // deps-first install ordering.
     "nav-buttons",
     "cards",
     "accent-button",

@@ -340,6 +340,43 @@ async function case3AdditivePreservesUserEntries() {
 }
 
 // --------------------------------------------------------------------------
+// v0.60.0 SQ: _shellSingleQuote helper from platform/bootstrap.js round-trips
+// every interesting metacharacter through bash literal-print without any
+// expansion. Defense-in-depth coverage for the activation-file generator.
+async function caseV60ShellSingleQuote() {
+  console.log("\n--- Case V60-SQ: _shellSingleQuote round-trips through bash ---");
+  const bootstrap = require(path.join(WORKSHOP, "platform/bootstrap.js"));
+  const sq = bootstrap._shellSingleQuote;
+  assertTrue("V60-SQ-0: _shellSingleQuote is exported", typeof sq === "function");
+  if (typeof sq !== "function") return;
+
+  const cases = [
+    { input: "foo/bar",              label: "plain path" },
+    { input: "hello world",          label: "spaces" },
+    { input: "$HOME/foo",            label: "dollar sign (must not expand)" },
+    { input: "`date`",               label: "backticks (must not exec)" },
+    { input: 'say "hi"',             label: "double quotes" },
+    { input: "it's",                 label: "single quote" },
+    { input: "a\\b",                 label: "backslash" },
+    { input: '"; rm -rf ~; #',       label: "injection attempt (must round-trip literally)" }
+  ];
+
+  const tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), "v60-sq-"));
+  try {
+    for (let i = 0; i < cases.length; i++) {
+      const { input, label } = cases[i];
+      const quoted = sq(input);
+      const script = path.join(tmpDir, `c${i}.sh`);
+      fs.writeFileSync(script, `printf '%s' ${quoted}\n`);
+      const out = execFileSync("bash", [script], { encoding: "utf8" });
+      assertEq(`V60-SQ-${i + 1}: ${label}`, out, input);
+    }
+  } finally {
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_e) {}
+  }
+}
+
+// --------------------------------------------------------------------------
 // v0.2.0 T1.1: module_directory field validation cases (M1, M2)
 // --------------------------------------------------------------------------
 //
@@ -7075,6 +7112,9 @@ async function caseFA2RuleFragmentsExtends() {
   await caseFA7FinanceTemplates();
   await caseFA7FinanceEntityCreate();
   await caseFA7FinanceRuleFragments();
+
+  // v0.60.0 SQ — shellSingleQuote helper round-trips through bash
+  await caseV60ShellSingleQuote();
 
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);

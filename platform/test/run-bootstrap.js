@@ -463,7 +463,10 @@ async function caseBS10ActivationArtifacts() {
         assertTrue(fs.existsSync(binPath), label + ": Scripts/sauce exists");
         const actBody = fs.readFileSync(actPath, "utf8");
         assertTrue(actBody.includes(workshopAbs + "/Scripts"), label + ": activate.sh has absolute Scripts path");
-        assertTrue(actBody.includes('SAUCE_VAULT="' + vaultPath + '"'), label + ": activate.sh exports SAUCE_VAULT");
+        // v0.60.0: SAUCE_VAULT now uses POSIX-safe single-quote + split export
+        // (was: export SAUCE_VAULT="${vaultPath}" — vulnerable to $/`/\ in path).
+        assertTrue(actBody.includes("SAUCE_VAULT='" + vaultPath + "'"), label + ": activate.sh assigns SAUCE_VAULT single-quoted");
+        assertTrue(actBody.includes("export SAUCE_VAULT"), label + ": activate.sh exports SAUCE_VAULT");
         const binStat = fs.statSync(binPath);
         assertEqual(binStat.mode & 0o777, 0o755, label + ": Scripts/sauce is chmod 0755");
     });
