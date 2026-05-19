@@ -44,6 +44,12 @@
     "cowork-daily",
     "cowork-weekly",
     "cowork-monthly",
+    "cowork-morning-briefing",
+    "cowork-midday-tripwire",
+    "cowork-eod-review",
+    "cowork-finance-snapshot",
+    "cowork-weekly-review",
+    "cowork-monthly-review",
     "to-do",
     "board"
   ],
