@@ -31,6 +31,40 @@
 async function _findSourceKanbanBoard(title) {
     if (!title) return "";
 
+    // --- Strategy 0: directory-of-target sibling-board detection ---
+    //
+    // v0.59.11 fix: when kanban-plugin v2.0.51 creates the new file under
+    // a board's `new-note-folder`, the new file ends up a SIBLING of its
+    // source board (same parent directory). Detect this case by path —
+    // it's bullet-proof against title collisions because the path is
+    // unique even when the title isn't.
+    //
+    // Falls through when:
+    //   (a) new file at vault root (Templater default placement)
+    //   (b) multiple boards in same dir (ambiguous — Strategy 1/2 resolve)
+    //   (c) zero boards in same dir (e.g. file already moved elsewhere)
+    const newFileForStrategy0 = tp.config.target_file
+        || tp.file.find_tfile(tp.file.path(true));
+    if (newFileForStrategy0) {
+        const targetPath = newFileForStrategy0.path || "";
+        const lastSlash = targetPath.lastIndexOf("/");
+        const targetDir = lastSlash >= 0 ? targetPath.substring(0, lastSlash) : "";
+        if (targetDir) {
+            const siblingBoards = app.vault.getMarkdownFiles().filter(f => {
+                if (!f.path.startsWith(targetDir + "/")) return false;
+                if (f.path === targetPath) return false;
+                const rest = f.path.substring(targetDir.length + 1);
+                if (rest.includes("/")) return false;
+                const cache = app.metadataCache.getFileCache(f);
+                return cache?.frontmatter?.["kanban-plugin"] === "board"
+                    || f.path.endsWith("-board.md");
+            });
+            if (siblingBoards.length === 1) {
+                return siblingBoards[0].path;
+            }
+        }
+    }
+
     // --- Cache-first path: query indexed backlinks on the new file ---
     const newFile = tp.config.target_file
         || tp.file.find_tfile(tp.file.path(true));
@@ -227,18 +261,33 @@ tags:
 // file in the kanban-plugin → Templater flow — symptom: auto-promote
 // never fired, file stayed at vault root.
 //
-// Idempotent: skips if target already exists. If source board not
-// detected (e.g., card created from a non-project kanban board),
-// auto-promote silently skips.
+// v0.59.11 fix: name-collision disambiguation. When the per-task folder
+// + file already exists (most often: another task with the same title in
+// this same project, or sometimes a different project routed wrongly by
+// source-board detection), append `-2`, `-3`, ... until a free slot is
+// found. Surface the rename via Notice so the user knows. Bound the loop
+// at 999 — pathologically deep collisions stop the move rather than
+// looping forever.
 const sourceParts = activePath.split("/");
 const projectsIdx = sourceParts.indexOf("projects");
 if (projectsIdx >= 0 && projectsIdx + 1 < sourceParts.length) {
     const projectDir = sourceParts.slice(0, projectsIdx + 2).join("/");
     const fileName = tp.file.title;
-    const newTargetPath = `${projectDir}/tasks/${fileName}/${fileName}`;
-    const existing = app.vault.getAbstractFileByPath(newTargetPath + ".md");
-    if (!existing) {
+    let chosenName = fileName;
+    let suffix = 2;
+    while (
+        app.vault.getAbstractFileByPath(`${projectDir}/tasks/${chosenName}/${chosenName}.md`)
+        && suffix <= 999
+    ) {
+        chosenName = `${fileName}-${suffix}`;
+        suffix++;
+    }
+    const newTargetPath = `${projectDir}/tasks/${chosenName}/${chosenName}`;
+    if (!app.vault.getAbstractFileByPath(newTargetPath + ".md")) {
         await tp.file.move(newTargetPath);
+        if (chosenName !== fileName) {
+            new Notice(`Task name "${fileName}" already exists in this project. Saved as "${chosenName}".`, 6000);
+        }
     }
 }
 -%>
