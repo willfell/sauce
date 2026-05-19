@@ -4416,6 +4416,46 @@ async function caseAFLint3DefaultBlueprints() {
 }
 
 // ============================================================
+// v0.64.0 S5 — daily-template + SpaceDailyDashboard activity-panel
+// shape asserts (DD-T1 + DD-A1). DD-T1 pins the rewritten daily
+// template's structural markers (Templater preamble + cowork-flavor
+// frontmatter + SpaceDailyDashboard delegation + COWORK_CALLOUTS
+// marker + ABSENCE of CoworkHubNav now that cowork no longer
+// materializes Daily Note.md). DD-A1 pins the new Activity panel
+// inside SpaceDailyDashboard (delegates to ActivityFeed.render with
+// the _DEFAULT_DASHBOARD_BLUEPRINTS allowlist + icons.zap header).
+// ============================================================
+
+async function caseDDT1DailyTemplateShape() {
+  console.log("\n--- Case DD-T1: daily-template.md content shape ---");
+  const p = path.join(BLUEPRINTS_DIR, "daily", "content", "daily-template.md");
+  assertTrue("DD-T1: daily-template.md source exists", fs.existsSync(p));
+  const body = fs.readFileSync(p, "utf8");
+  const ok =
+    /tp\.date\.now\("YYYY-MM-DD"/.test(body) &&
+    /^type: cowork-daily$/m.test(body) &&
+    /<!-- COWORK_CALLOUTS -->/.test(body) &&
+    /SpaceDailyDashboard/.test(body) &&
+    !/CoworkHubNav/.test(body);
+  assertTrue("DD-T1: daily-template.md content shape regressed", ok);
+}
+
+async function caseDDA1DashboardActivityPanel() {
+  console.log("\n--- Case DD-A1: SpaceDailyDashboard activity panel structure ---");
+  const p = path.join(BLUEPRINTS_DIR, "daily", "helpers", "space-daily-dashboard.js");
+  assertTrue("DD-A1: space-daily-dashboard.js source exists", fs.existsSync(p));
+  const body = fs.readFileSync(p, "utf8");
+  const defaultDashboardMatches = body.match(/_DEFAULT_DASHBOARD_BLUEPRINTS/g) || [];
+  const ok =
+    /customJS\.ActivityFeed\.render/.test(body) &&
+    defaultDashboardMatches.length >= 3 &&
+    /Today's Activity/.test(body) &&
+    /hasContent\s*=.*activityCount/.test(body) &&
+    /icons\.zap/.test(body);
+  assertTrue("DD-A1: SpaceDailyDashboard activity panel structure regressed", ok);
+}
+
+// ============================================================
 // v0.42.0 S9 — CoworkDailyHubCards / CoworkWeeklyHubCards / CoworkMonthlyHubCards
 // helper structural checks. 6 sub-asserts × 3 helpers = 18 sub-asserts.
 // Mirrors SHC-S5/S6 pattern (from-disk static analysis) plus a scaffolded
@@ -6569,18 +6609,27 @@ async function caseFA3TaskBoardCardRegexFix() {
 
 async function caseFA4TimelineManifests() {
   console.log("\n--- Case FA4-MANIFESTS: 3 timeline blueprints bumped ---");
-  for (const [bp, expected] of [["daily", "0.4.0"], ["journal", "0.2.0"], ["scratch", "0.4.0"]]) {
+  // v0.64.0 S5 baseline widening: daily bumped 0.4.0 → 0.5.0 in S4 (template
+  // reclaim + Activity panel). Accept any >= floor instead of strict-equal so
+  // future PATCH/MINOR bumps don't re-trigger this baseline.
+  const floors = { daily: "0.5.0", journal: "0.2.0", scratch: "0.4.0" };
+  for (const bp of Object.keys(floors)) {
     const m = JSON.parse(fs.readFileSync(
       path.join(WORKSHOP, `platform/blueprints/${bp}/manifest.json`), "utf8"));
-    assertTrue(`FA4-MANIFEST-${bp}: version ${expected}`, m.version === expected,
+    assertTrue(`FA4-MANIFEST-${bp}: version >= ${floors[bp]}`,
+      typeof m.version === "string" && m.version >= floors[bp],
       `got: ${m.version}`);
   }
 }
 
 async function caseFA4TimelineTemplates() {
   console.log("\n--- Case FA4-TEMPLATES: timeline templates use canonical created_at ---");
+  // v0.64.0 S5 baseline widening: daily-template.md type changed from
+  // "daily" to "cowork-daily" in S4 (template reclaim absorbed cowork's
+  // flavor; resolves the destination collision). The structural pin for
+  // the cowork-daily shape moved to DD-T1 above.
   const checks = [
-    ["daily/content/daily-template.md", "daily"],
+    ["daily/content/daily-template.md", "cowork-daily"],
     ["journal/templates/Today Journal.md", "journal"],
     ["scratch/templates/Scratch.md", "scratch"],
     ["scratch/templates/Scratch Day Hub.md", "scratch-day"],
@@ -6640,8 +6689,11 @@ async function caseFA5CoworkManifest() {
 
 async function caseFA5CoworkTemplates() {
   console.log("\n--- Case FA5-TEMPLATES: cowork note templates use canonical created_at ---");
+  // v0.64.0 S5 baseline widening: cowork/content/Daily Note.md dropped from
+  // the cowork blueprint (template ownership returned to daily@0.5.0). The
+  // canonical type=cowork-daily / tags=[daily] / created_at shape now lives
+  // at daily/content/daily-template.md and is pinned by DD-T1 above.
   const checks = [
-    ["cowork/content/Daily Note.md", "cowork-daily", "[daily]"],
     ["cowork/content/Weekly Note.md", "cowork-weekly", "[weekly]"],
     ["cowork/content/Monthly Note.md", "cowork-monthly", "[monthly]"],
   ];
@@ -7070,6 +7122,10 @@ async function caseFA2RuleFragmentsExtends() {
   await caseAFLint1Parses();
   await caseAFLint2OneClass();
   await caseAFLint3DefaultBlueprints();
+
+  // v0.64.0 S5 — daily-template + SpaceDailyDashboard activity-panel (2 sub-asserts).
+  await caseDDT1DailyTemplateShape();
+  await caseDDA1DashboardActivityPanel();
 
   // v0.42.0 S9 — cowork@0.4.0 helper structural/materialization checks (18 sub-asserts).
   await caseCOWORKDaily1Materialized();

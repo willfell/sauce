@@ -387,14 +387,13 @@ function assertCoworkV045Shape() {
   const cowork = BP;
 
   // --- Daily Note.md template ---
-  const dailyTemplatePath = path.join(cowork, "content/Daily Note.md");
-  assertTrue(fs.existsSync(dailyTemplatePath), "v0.45.0: content/Daily Note.md exists");
-  if (fs.existsSync(dailyTemplatePath)) {
-    const body = fs.readFileSync(dailyTemplatePath, "utf8");
-    assertContains(body, "type: cowork-daily", "v0.45.0: Daily Note template type=cowork-daily");
-    assertContains(body, "SpaceNavButtons", "v0.45.0: Daily Note template has SpaceNavButtons");
-    assertContains(body, "CoworkHubNav", "v0.45.0: Daily Note template has CoworkHubNav");
-  }
+  // v0.64.0 S5 baseline widening: cowork@0.9.1 no longer owns the daily
+  // template (template ownership returned to daily@0.5.0 to resolve the
+  // destination collision at ranch/templates/Daily Note.md). The
+  // type=cowork-daily / SpaceNavButtons / created_at shape now lives in
+  // daily/content/daily-template.md and is pinned by DD-T1 in
+  // run-helper-cases.js. CoworkHubNav DELIBERATELY no longer appears in
+  // the daily template (still present in cowork hub files).
 
   // --- CoworkDailyActions helper ---
   const dailyActionsPath = path.join(cowork, "helpers/cowork-daily-actions.js");
@@ -411,11 +410,15 @@ function assertCoworkV045Shape() {
   assertContains(dailyCards, "spice/cowork/daily", "v0.45.0: cowork-daily-hub-cards reads spice/cowork/daily");
   assertTrue(!/dv\.pages\('"spice\/daily"'\)/.test(dailyCards), "v0.45.0: cowork-daily-hub-cards no longer reads spice/daily");
 
-  // --- Nav pattern on all 5 hubs + 3 templates ---
+  // --- Nav pattern on all 5 hubs + 2 templates (Weekly + Monthly Note) ---
+  // v0.64.0 S5 baseline widening: content/Daily Note.md dropped from the
+  // nav-pattern loop; cowork no longer materializes that template
+  // (daily@0.5.0 now owns it, and per design CoworkHubNav is absent from
+  // the daily-note template).
   const navPatternFiles = [
     "content/Cowork.md", "content/About Cowork.md", "content/Daily Hub.md",
     "content/Weekly Hub.md", "content/Monthly Hub.md",
-    "content/Daily Note.md", "content/Weekly Note.md", "content/Monthly Note.md"
+    "content/Weekly Note.md", "content/Monthly Note.md"
   ];
   for (const rel of navPatternFiles) {
     const body = fs.readFileSync(path.join(cowork, rel), "utf8");
@@ -443,12 +446,10 @@ function assertCoworkV057Shape() {
   console.log("--- v0.57.0 (FA-5) canonical-vocab shape ---");
   const cowork = BP;
 
-  // --- 3 note templates emit canonical created_at + drop discriminator tags ---
-  const dailyTpl = fs.readFileSync(path.join(cowork, "content/Daily Note.md"), "utf8");
-  assertContains(dailyTpl, "created_at:", "v0.57.0: Daily Note template emits created_at:");
-  assertTrue(!/^created:\s/m.test(dailyTpl), "v0.57.0: Daily Note template drops legacy created:");
-  assertContains(dailyTpl, "tags: [daily]", "v0.57.0: Daily Note template tags is [daily] (no cowork-daily)");
-
+  // --- 2 note templates emit canonical created_at + drop discriminator tags ---
+  // v0.64.0 S5 baseline widening: Daily Note.md ownership returned to
+  // daily@0.5.0 (DD-T1 in run-helper-cases.js pins the canonical
+  // created_at: + tags: [daily] + type: cowork-daily shape there).
   const weeklyTpl = fs.readFileSync(path.join(cowork, "content/Weekly Note.md"), "utf8");
   assertContains(weeklyTpl, "created_at:", "v0.57.0: Weekly Note template emits created_at:");
   assertContains(weeklyTpl, "tags: [weekly]", "v0.57.0: Weekly Note template tags is [weekly]");
@@ -500,6 +501,19 @@ function assertCoworkV057Shape() {
 }
 
 // -------------------------------------------------------------------------
+// v0.64.0 S5 — cowork manifest no-Daily-Note assertion
+// -------------------------------------------------------------------------
+
+function assertCoworkV064NoDailyNote() {
+  console.log("--- v0.64.0 (S5) cowork no longer materializes Daily Note.md ---");
+  const manifest = loadManifest();
+  const filesArr = Array.isArray(manifest.files) ? manifest.files : [];
+  const stillMaterializes = filesArr.some(f => f && f.dest === "{{templates_path}}/Daily Note.md");
+  assertTrue(!stillMaterializes,
+    "COWORK-NDN-1: cowork manifest still materializes templates/Daily Note.md");
+}
+
+// -------------------------------------------------------------------------
 // Main
 // -------------------------------------------------------------------------
 
@@ -546,6 +560,7 @@ function assertCoworkV062Shape() {
   assertCoworkV045Shape();
   assertCoworkV057Shape();
   assertCoworkV062Shape();
+  assertCoworkV064NoDailyNote();
   console.log(`========\nResult: ${passed} passed, ${failed} failed.`);
   process.exit(failed === 0 ? 0 : 1);
 })();

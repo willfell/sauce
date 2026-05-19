@@ -38,6 +38,21 @@ const installSh = path.join(repoRoot, "install.sh");
     // I5: message mentions migrate-layout for legacy users
     assertTrue(all.includes("sauce migrate-layout"), "I5 message points legacy users at migrate-layout");
 
+    // PID-1 (v0.64.0 S5): post-install .obsidian/app.json contains
+    // "propertiesInDocument": "visible". Reads the workshop's own
+    // self-installed app.json (workshop dogfoods every release).
+    // EXPECTED TO FAIL until S6 lands app_settings.propertiesInDocument
+    // in platform/manifest.json + reinstall propagates the value.
+    const appJsonPath = path.join(repoRoot, ".obsidian", "app.json");
+    let pidOk = false;
+    try {
+        const obj = JSON.parse(fs.readFileSync(appJsonPath, "utf8"));
+        pidOk = obj && obj.propertiesInDocument === "visible";
+    } catch (e) {
+        pidOk = false;
+    }
+    assertTrue(pidOk, "PID-1: propertiesInDocument not set to \"visible\" after install");
+
     console.log(`\n  ${pass} pass · ${fail} fail`);
     process.exit(fail > 0 ? 1 : 0);
 })();
