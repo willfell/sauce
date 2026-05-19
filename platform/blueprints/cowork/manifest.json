@@ -241,6 +241,96 @@
     {
       "target": "cowork",
       "fragment": {
+        "scope": "spice/cowork/daily/**/*/morning-briefing.md",
+        "extends": "_canonical-vocab",
+        "required_frontmatter": {
+          "type":           { "required": true, "type": "string", "equals": "cowork-morning-briefing" },
+          "engagement_id":  { "required": true, "type": "string" },
+          "day":            { "required": true, "type": "string", "matches": "^\\d{4}-\\d{2}-\\d{2}$" },
+          "generator":      { "required": true, "type": "string" },
+          "prompt_source":  { "required": true, "type": "string" }
+        },
+        "naming_pattern": "^morning-briefing\\.md$"
+      }
+    },
+    {
+      "target": "cowork",
+      "fragment": {
+        "scope": "spice/cowork/daily/**/*/midday-tripwire.md",
+        "extends": "_canonical-vocab",
+        "required_frontmatter": {
+          "type":           { "required": true, "type": "string", "equals": "cowork-midday-tripwire" },
+          "engagement_id":  { "required": true, "type": "string" },
+          "day":            { "required": true, "type": "string", "matches": "^\\d{4}-\\d{2}-\\d{2}$" },
+          "severity":       { "required": true, "type": "string", "matches": "^(yellow|red)$" },
+          "generator":      { "required": true, "type": "string" },
+          "prompt_source":  { "required": true, "type": "string" }
+        },
+        "naming_pattern": "^midday-tripwire\\.md$"
+      }
+    },
+    {
+      "target": "cowork",
+      "fragment": {
+        "scope": "spice/cowork/daily/**/*/eod-review.md",
+        "extends": "_canonical-vocab",
+        "required_frontmatter": {
+          "type":           { "required": true, "type": "string", "equals": "cowork-eod-review" },
+          "engagement_id":  { "required": true, "type": "string" },
+          "day":            { "required": true, "type": "string", "matches": "^\\d{4}-\\d{2}-\\d{2}$" },
+          "generator":      { "required": true, "type": "string" },
+          "prompt_source":  { "required": true, "type": "string" }
+        },
+        "naming_pattern": "^eod-review\\.md$"
+      }
+    },
+    {
+      "target": "cowork",
+      "fragment": {
+        "scope": "spice/cowork/daily/**/*/finance.md",
+        "extends": "_canonical-vocab",
+        "required_frontmatter": {
+          "type":           { "required": true, "type": "string", "equals": "cowork-finance-snapshot" },
+          "engagement_id":  { "required": true, "type": "string" },
+          "day":            { "required": true, "type": "string", "matches": "^\\d{4}-\\d{2}-\\d{2}$" },
+          "generator":      { "required": true, "type": "string" }
+        },
+        "naming_pattern": "^finance\\.md$"
+      }
+    },
+    {
+      "target": "cowork",
+      "fragment": {
+        "scope": "spice/cowork/weekly/**/*/weekly-review.md",
+        "extends": "_canonical-vocab",
+        "required_frontmatter": {
+          "type":           { "required": true, "type": "string", "equals": "cowork-weekly-review" },
+          "engagement_id":  { "required": true, "type": "string" },
+          "week":           { "required": true, "type": "string", "matches": "^\\d{4}-W\\d{2}$" },
+          "generator":      { "required": true, "type": "string" },
+          "prompt_source":  { "required": true, "type": "string" }
+        },
+        "naming_pattern": "^weekly-review\\.md$"
+      }
+    },
+    {
+      "target": "cowork",
+      "fragment": {
+        "scope": "spice/cowork/monthly/**/*/monthly-review.md",
+        "extends": "_canonical-vocab",
+        "required_frontmatter": {
+          "type":           { "required": true, "type": "string", "equals": "cowork-monthly-review" },
+          "engagement_id":  { "required": true, "type": "string" },
+          "month":          { "required": true, "type": "string", "matches": "^\\d{4}-\\d{2}$" },
+          "generator":      { "required": true, "type": "string" },
+          "prompt_source":  { "required": true, "type": "string" }
+        },
+        "naming_pattern": "^monthly-review\\.md$"
+      }
+    },
+    {
+      "target": "cowork",
+      "fragment": {
         "scope": { "path_glob": "spice/cowork/About Cowork.md" },
         "extends": "_canonical-vocab",
         "required_frontmatter": { "type": { "required": true, "type": "string", "equals": "cowork-about" } },
