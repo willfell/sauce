@@ -114,8 +114,8 @@ function checkSharedContracts() {
     : (Array.isArray(manifest.skills) ? manifest.skills.map(s => s.source) : []);
   assertTrue(skillSources.includes("skills/orchestrators/morning-briefing/SKILL.md"),
     "S1: manifest exposes morning-briefing orchestrator");
-  assertTrue(skillSources.includes("skills/skills/write-callout-morning-briefing/SKILL.md"),
-    "S1: manifest exposes write-callout-morning-briefing (merged form)");
+  assertTrue(skillSources.includes("skills/skills/write-run-note-morning-briefing/SKILL.md"),
+    "S1: manifest exposes write-run-note-morning-briefing (v0.65.0 run-note form)");
   assertTrue(skillSources.includes("skills/skills/patch-daily-callouts/SKILL.md"),
     "S1: manifest exposes patch-daily-callouts");
 
@@ -142,16 +142,16 @@ function checkSharedContracts() {
   assertTrue(Array.isArray(manifest.engagement_types) && manifest.engagement_types.length === 3,
     "S4: manifest declares 3 engagement_types");
 
-  // S5 — merged write-callout-morning-briefing exposes all 3 per-type shape markers
-  const wcb = readSkill("skills/skills/write-callout-morning-briefing/SKILL.md");
-  assertContains(wcb, "### personal shape",   "S5: write-callout-morning-briefing has personal shape");
-  assertContains(wcb, "### w2-fte shape",     "S5: write-callout-morning-briefing has w2-fte shape");
-  assertContains(wcb, "### consulting shape", "S5: write-callout-morning-briefing has consulting shape");
+  // S5 — write-run-note-morning-briefing (v0.65.0 run-note form) has canonical frontmatter fields
+  const wcb = readSkill("skills/skills/write-run-note-morning-briefing/SKILL.md");
+  assertContains(wcb, "cowork:write-run-note-morning-briefing", "S5: write-run-note-morning-briefing has canonical name");
+  assertContains(wcb, "created_at",                             "S5: write-run-note-morning-briefing references created_at");
+  assertContains(wcb, "engagement-aware",                       "S5: write-run-note-morning-briefing tagged engagement-aware");
 
   // S6 — orchestrator declares engagement_id intake
   const morning = readSkill("skills/orchestrators/morning-briefing/SKILL.md");
   assertContains(morning, "engagement_id: string", "S6: morning-briefing orchestrator declares engagement_id input");
-  assertContains(morning, "cowork:write-callout-morning-briefing", "S6: morning-briefing dispatches merged write-callout");
+  assertContains(morning, "cowork:write-run-note-morning-briefing", "S6: morning-briefing dispatches write-run-note-morning-briefing");
   assertContains(morning, "Resolve engagement", "S6: morning-briefing has Resolve engagement pre-flight step");
 
   // S7 — every gather sub-skill referenced by orchestrators declares engagement_id
@@ -202,10 +202,10 @@ function checkFixture(fix) {
       `F3[${fix.engagement.type}]: fixture engagement has required field '${rf.id}'`);
   }
 
-  // F4 — merged write-callout exposes the matching per-type shape
-  const wcb = readSkill("skills/skills/write-callout-morning-briefing/SKILL.md");
-  assertContains(wcb, fix.expected_shape_marker,
-    `F4[${fix.engagement.type}]: write-callout exposes ${fix.expected_shape_marker}`);
+  // F4 — write-run-note-morning-briefing (v0.65.0) exists and is engagement-aware
+  const wcb = readSkill("skills/skills/write-run-note-morning-briefing/SKILL.md");
+  assertContains(wcb, "engagement-aware",
+    `F4[${fix.engagement.type}]: write-run-note-morning-briefing tagged engagement-aware`);
 
   // F5 — render_aspects-driven gating predicates expected for this type
   const ra = typeManifest.render_aspects;
@@ -551,6 +551,113 @@ function assertCoworkV062Shape() {
   assertTrue(activityFeedBlocks >= 4, `COWORK-AF-4h: Today.md has >= 4 ActivityFeed blocks (got ${activityFeedBlocks})`);
 }
 
+// -------------------------------------------------------------------------
+// v0.65.0 cowork-scheduling-cycle: write-run-note + onboard + readiness
+// -------------------------------------------------------------------------
+
+function assertCoworkV065Shape() {
+  console.log("--- v0.65.0 cowork-scheduling-cycle: write-run-note + onboard + readiness ---");
+  const cowork = BP;
+
+  // S2: 6 write-run-note-* sub-skill bodies present
+  const subSkills = [
+    "write-run-note-morning-briefing",
+    "write-run-note-midday-tripwire",
+    "write-run-note-eod-review",
+    "write-run-note-finance",
+    "write-run-note-weekly-review",
+    "write-run-note-monthly-review",
+  ];
+  for (const slug of subSkills) {
+    const p = path.join(cowork, "skills/skills", slug, "SKILL.md");
+    assertTrue(fs.existsSync(p), `v065-S2: sub-skill ${slug}/SKILL.md exists`);
+    const body = fs.readFileSync(p, "utf8");
+    assertTrue(body.startsWith("---"), `v065-S2: ${slug} starts with frontmatter`);
+    assertTrue(/^name: cowork:write-run-note-/m.test(body), `v065-S2: ${slug} name frontmatter matches`);
+  }
+
+  // S3.8: 7 legacy sub-skill directories absent (out-of-scope extras fte-status/invoice-prep NOT checked)
+  const legacy = [
+    "write-callout-morning-briefing",
+    "write-callout-eod-review",
+    "write-callout-tripwire-yellow",
+    "write-callout-tripwire-red",
+    "write-callout-finance",
+    "write-summary-weekly",
+    "write-summary-monthly",
+  ];
+  for (const slug of legacy) {
+    const p = path.join(cowork, "skills/skills", slug);
+    assertTrue(!fs.existsSync(p), `v065-S3.8: legacy sub-skill ${slug} removed`);
+  }
+
+  // S3.1..S3.6: orchestrator step lists reference new sub-skills, not legacy
+  const orchRewires = [
+    { orch: "morning-briefing", expect: "write-run-note-morning-briefing", forbid: "write-callout-morning-briefing" },
+    { orch: "eod-review",       expect: "write-run-note-eod-review",       forbid: "write-callout-eod-review" },
+    { orch: "midday-tripwire",  expect: "write-run-note-midday-tripwire",  forbid: "write-callout-tripwire" },
+    { orch: "weekly-review",    expect: "write-run-note-weekly-review",    forbid: "write-summary-weekly" },
+    { orch: "monthly-review",   expect: "write-run-note-monthly-review",   forbid: "write-summary-monthly" },
+  ];
+  for (const o of orchRewires) {
+    const p = path.join(cowork, "skills/orchestrators", o.orch, "SKILL.md");
+    const body = fs.readFileSync(p, "utf8");
+    assertContains(body, o.expect, `v065-S3: orchestrator ${o.orch} references ${o.expect}`);
+    assertTrue(!body.includes(o.forbid), `v065-S3: orchestrator ${o.orch} no longer references ${o.forbid}`);
+  }
+
+  // S3.4: midday-tripwire prompt stub
+  const tripStub = path.join(cowork, "content/prompts/midday-tripwire.md");
+  assertTrue(fs.existsSync(tripStub), `v065-S3.4: midday-tripwire prompt stub exists`);
+
+  // S6: CoworkReadiness helper + Cowork.md embed
+  const readinessHelper = path.join(cowork, "helpers/cowork-readiness.js");
+  assertTrue(fs.existsSync(readinessHelper), `v065-S6: cowork-readiness.js helper exists`);
+  const coworkMd = fs.readFileSync(path.join(cowork, "content/Cowork.md"), "utf8");
+  assertContains(coworkMd, "CoworkReadiness", `v065-S6: Cowork.md embeds CoworkReadiness`);
+
+  // S6.2 manifest: customjs_classes includes CoworkReadiness
+  const manifest = JSON.parse(fs.readFileSync(path.join(cowork, "manifest.json"), "utf8"));
+  assertTrue(Array.isArray(manifest.customjs_classes) && manifest.customjs_classes.includes("CoworkReadiness"),
+    `v065-S6.2: manifest.customjs_classes includes CoworkReadiness`);
+
+  // S1.2 + S6.5.3 Manifest: 6 run-note rule_fragments + 1 scheduled-jobs rule_fragment
+  const rfTypes = (manifest.rule_fragments || [])
+    .map(rf => rf?.fragment?.required_frontmatter?.type?.equals)
+    .filter(Boolean);
+  for (const t of [
+    "cowork-morning-briefing", "cowork-midday-tripwire", "cowork-eod-review",
+    "cowork-finance-snapshot", "cowork-weekly-review", "cowork-monthly-review",
+    "cowork-scheduled-jobs",
+  ]) {
+    assertTrue(rfTypes.includes(t), `v065-S1.2/S6.5.3: rule_fragment for type ${t} registered`);
+  }
+
+  // S6.5.1: cowork:onboard-scheduled-jobs orchestrator present
+  const onboardSkill = path.join(cowork, "skills/orchestrators/onboard-scheduled-jobs/SKILL.md");
+  assertTrue(fs.existsSync(onboardSkill), `v065-S6.5.1: cowork:onboard-scheduled-jobs orchestrator SKILL.md exists`);
+  const onboardBody = fs.readFileSync(onboardSkill, "utf8");
+  assertTrue(/^name: cowork:onboard-scheduled-jobs/m.test(onboardBody),
+    `v065-S6.5.1: onboard-scheduled-jobs name frontmatter matches`);
+  assertContains(onboardBody, "scheduled-tasks",
+    `v065-S6.5.1: onboard-scheduled-jobs references scheduled-tasks MCP`);
+  assertTrue(onboardBody.includes("paste") && onboardBody.includes("direct"),
+    `v065-S6.5.1: onboard-scheduled-jobs documents both modes (direct + paste)`);
+
+  // S6.5.2 + S6.5.3: scheduled-jobs.md template + claude_surface registration
+  const sjTemplate = path.join(cowork, "content/scheduled-jobs.md");
+  assertTrue(fs.existsSync(sjTemplate), `v065-S6.5.2: content/scheduled-jobs.md template exists`);
+  const claudeSurface = manifest.claude_surface || [];
+  const hasOnboardCS = claudeSurface.some(cs =>
+    cs?.source?.includes("onboard-scheduled-jobs/SKILL.md"));
+  assertTrue(hasOnboardCS, `v065-S6.5.3: claude_surface[] includes onboard-scheduled-jobs orchestrator`);
+
+  // S6.5.4: CoworkReadiness 5th row references scheduled-jobs
+  const readinessBody = fs.readFileSync(path.join(cowork, "helpers/cowork-readiness.js"), "utf8");
+  assertContains(readinessBody, "scheduled-jobs",
+    `v065-S6.5.4: CoworkReadiness helper reads scheduled-jobs.md (5th row)`);
+}
+
 (function main() {
   console.log("--- shared contracts ---");
   checkSharedContracts();
@@ -561,6 +668,7 @@ function assertCoworkV062Shape() {
   assertCoworkV057Shape();
   assertCoworkV062Shape();
   assertCoworkV064NoDailyNote();
+  assertCoworkV065Shape();
   console.log(`========\nResult: ${passed} passed, ${failed} failed.`);
   process.exit(failed === 0 ? 0 : 1);
 })();
