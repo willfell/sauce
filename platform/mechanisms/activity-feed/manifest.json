@@ -1,0 +1,16 @@
+{
+  "name": "activity-feed",
+  "version": "0.1.0",
+  "kind": "mechanism",
+  "description": "Universal cross-blueprint activity feed renderer. ActivityFeed.render(dv, opts) — time-windowed query (today/week/month) across the canonical type:/created_at: vocab shipped FA-1..FA-7. Renders via customJS.BeaconCards. Materialized on cowork Daily/Weekly/Monthly hubs + NEW Today.md landing surface (FA-9a, v0.62.0).",
+  "depends_on": [
+    { "name": "customjs-guard", "range": ">=1.0.0" },
+    { "name": "cards",          "range": ">=0.2.5" }
+  ],
+  "customjs_classes": ["ActivityFeed"],
+  "files": [
+    { "source": "activity-feed.js", "dest": "{{scripts_path}}/activity-feed/activity-feed.js" }
+  ],
+  "post_install": [],
+  "rule_fragments": []
+}
