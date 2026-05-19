@@ -389,6 +389,21 @@ try {
   );
 }
 
+// AF-V065: _DEFAULT_BLUEPRINTS widening for 6 cowork run-note types
+{
+  const src = fs.readFileSync("platform/mechanisms/activity-feed/activity-feed.js", "utf8");
+  const types = [
+    "cowork-morning-briefing", "cowork-midday-tripwire", "cowork-eod-review",
+    "cowork-finance-snapshot", "cowork-weekly-review", "cowork-monthly-review",
+  ];
+  for (const t of types) {
+    assertTrue(`AF-V065: _DEFAULT_BLUEPRINTS contains "${t}"`, src.includes(`"${t}"`));
+  }
+  const manifest = JSON.parse(fs.readFileSync("platform/mechanisms/activity-feed/manifest.json", "utf8"));
+  assertEq("AF-V065: activity-feed manifest version is 0.2.0", manifest.version, "0.2.0");
+  assertTrue("AF-V065: activity-feed description mentions 0.2.0", typeof manifest.description === "string" && manifest.description.includes("0.2.0"));
+}
+
 // ── Summary ───────────────────────────────────────────────────────────────
 
 console.log(`\nrun-activity-feed.js: ${pass} pass · ${fail} fail`);
