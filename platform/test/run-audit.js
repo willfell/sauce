@@ -1994,6 +1994,21 @@ const selector = process.argv[2] || "all";
     await runCase("AU-DOCS-3", caseAUWIKI3WikiNoteValid);
     await runCase("AU-DOCS-4", caseAUWIKI4ExcludeBasenamesHonored);
   }
+  // AUDIT-V065: 6 new cowork run-note rule_fragments registered
+  {
+    const manifest = JSON.parse(fs.readFileSync("platform/blueprints/cowork/manifest.json", "utf8"));
+    const registeredTypes = (manifest.rule_fragments || [])
+      .map(rf => rf?.fragment?.required_frontmatter?.type?.equals)
+      .filter(Boolean);
+    const expectedTypes = [
+      "cowork-morning-briefing", "cowork-midday-tripwire", "cowork-eod-review",
+      "cowork-finance-snapshot", "cowork-weekly-review", "cowork-monthly-review",
+    ];
+    for (const t of expectedTypes) {
+      assertTrue(registeredTypes.includes(t), `AUDIT-V065: cowork manifest registers rule_fragment for ${t}`);
+    }
+  }
+
   console.log(`========\nResult: ${passed} passed, ${failed} failed.`);
   process.exit(failed === 0 ? 0 : 1);
 })();
