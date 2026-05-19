@@ -21,7 +21,7 @@ class ToDoMigrateInit {
                 name: "Sauce: Migrate to-dos to tomorrow",
                 callback: () => {
                     try {
-                        new customJS.ToDoMigrateModal().open();
+                        customJS.ToDoMigrateModal.open();
                     } catch (e) {
                         new Notice(`ToDoMigrateModal open failed: ${String(e)}`, 8000);
                         console.error('[ToDoMigrateInit] modal open error', e);

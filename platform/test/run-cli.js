@@ -1490,9 +1490,10 @@ async function caseTD1ToDoPostInstall() {
             assertTrue(false, "TD-CLI-2 ToDoMigrateInit in customjs startupScriptNames — data.json absent");
         }
 
-        // TD-CLI-3: all 4 helper scripts materialized under ranch/scripts/to-do/
+        // TD-CLI-3: all 5 helper scripts materialized under ranch/scripts/to-do/ (v0.63.1 adds todo-leaf-actions.js)
         const helpers = [
             "ranch/scripts/to-do/todo-hub-actions.js",
+            "ranch/scripts/to-do/todo-leaf-actions.js",
             "ranch/scripts/to-do/todo-all-list.js",
             "ranch/scripts/to-do/todo-migrate-modal.js",
             "ranch/scripts/to-do/todo-migrate-init.js",

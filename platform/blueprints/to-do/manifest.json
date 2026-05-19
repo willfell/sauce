@@ -1,9 +1,9 @@
 {
   "name": "to-do",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "kind": "blueprint",
   "module_directory": "to-do",
-  "description": "Date-routed daily to-do notes feeding SpaceDailyDashboard's tasks panel under spice/to-do/. v0.1.2: filename pattern <Name>-YYYY-MM-DD (filename_prefix \"ToDo-\") per v0.4.2 platform invariant. v0.2.0 MINOR (v0.58.0 FA-6): canonical-vocab adoption per Frontmatter Alignment. Template now emits type: \"to-do\" + canonical created_at: (ISO+TZ; replaces legacy created:). Discriminator tag todo stripped; temporal YYYY/MM/DD tag stripped. NEW canonical-vocab rule_fragment. v0.3.0 MINOR (v0.63.0): All-To-Dos aggregator at spice/to-do/All-ToDos.md (live Dataview, uncompleted tasks from prior days grouped by source date, excludes today); Migrate-to-tomorrow dialog (modal task picker; selected tasks + indented children moved from today to tomorrow's note, creating tomorrow from template if absent). Adds 2 nav-buttons (todo-all + todo-migrate) + 4 CustomJS classes (ToDoHubActions, ToDoAllList, ToDoMigrateModal, ToDoMigrateInit) + 1 startup-init script (ToDoMigrateInit registers sauce:to-do-migrate command via customjs_startup_scripts[]). Rule-fragment scope tightened from spice/to-do/**/*.md to spice/to-do/**/ToDo-*.md so the new All-ToDos.md hub isn't validated against the daily-note naming pattern.",
+  "description": "Date-routed daily to-do notes feeding SpaceDailyDashboard's tasks panel under spice/to-do/. v0.1.2: filename pattern <Name>-YYYY-MM-DD (filename_prefix \"ToDo-\") per v0.4.2 platform invariant. v0.2.0 MINOR (v0.58.0 FA-6): canonical-vocab adoption per Frontmatter Alignment. Template now emits type: \"to-do\" + canonical created_at: (ISO+TZ; replaces legacy created:). Discriminator tag todo stripped; temporal YYYY/MM/DD tag stripped. NEW canonical-vocab rule_fragment. v0.3.0 MINOR (v0.63.0): All-To-Dos aggregator at spice/to-do/All-ToDos.md (live Dataview, uncompleted tasks from prior days grouped by source date, excludes today); Migrate-to-tomorrow dialog (modal task picker; selected tasks + indented children moved from today to tomorrow's note, creating tomorrow from template if absent). v0.3.1 PATCH (v0.63.1): (1) fix customJS singleton-instance bug — todo-migrate-init.js used `new customJS.ToDoMigrateModal()` but customjs auto-instantiates; corrected to `customJS.ToDoMigrateModal.open()`. (2) scope re-balance — All-To-Dos + Migrate buttons removed from global nav_buttons[] (where they appeared on every note via SpaceNavButtons) and moved to NEW ToDoLeafActions CustomJS class that renders them as AccentButtons inline under the nav row in Today To-Do.md only. Mirrors ScratchLeafActions pattern. Rule-fragment scope tightened from spice/to-do/**/*.md to spice/to-do/**/ToDo-*.md so the new All-ToDos.md hub isn't validated against the daily-note naming pattern.",
   "depends_on": [
     { "name": "nav-buttons",    "range": ">=2.2.0" },
     { "name": "customjs-guard", "range": ">=1.0.0" },
@@ -11,18 +11,20 @@
   ],
   "customjs_classes": [
     "ToDoHubActions",
+    "ToDoLeafActions",
     "ToDoAllList",
     "ToDoMigrateModal",
     "ToDoMigrateInit"
   ],
   "customjs_startup_scripts": ["ToDoMigrateInit"],
   "files": [
-    { "source": "templates/Today To-Do.md",     "dest": "{{templates_path}}/Today To-Do.md" },
-    { "source": "templates/All To-Dos.md",      "dest": "{{module_directory}}/All-ToDos.md" },
-    { "source": "helpers/todo-hub-actions.js",  "dest": "{{scripts_path}}/to-do/todo-hub-actions.js" },
-    { "source": "helpers/todo-all-list.js",     "dest": "{{scripts_path}}/to-do/todo-all-list.js" },
-    { "source": "helpers/todo-migrate-modal.js","dest": "{{scripts_path}}/to-do/todo-migrate-modal.js" },
-    { "source": "helpers/todo-migrate-init.js", "dest": "{{scripts_path}}/to-do/todo-migrate-init.js" }
+    { "source": "templates/Today To-Do.md",      "dest": "{{templates_path}}/Today To-Do.md" },
+    { "source": "templates/All To-Dos.md",       "dest": "{{module_directory}}/All-ToDos.md" },
+    { "source": "helpers/todo-hub-actions.js",   "dest": "{{scripts_path}}/to-do/todo-hub-actions.js" },
+    { "source": "helpers/todo-leaf-actions.js",  "dest": "{{scripts_path}}/to-do/todo-leaf-actions.js" },
+    { "source": "helpers/todo-all-list.js",      "dest": "{{scripts_path}}/to-do/todo-all-list.js" },
+    { "source": "helpers/todo-migrate-modal.js", "dest": "{{scripts_path}}/to-do/todo-migrate-modal.js" },
+    { "source": "helpers/todo-migrate-init.js",  "dest": "{{scripts_path}}/to-do/todo-migrate-init.js" }
   ],
   "nav_buttons": [
     {
@@ -39,26 +41,6 @@
         "filename_date_pattern": "YYYY-MM-DD",
         "filename_suffix": ""
       }
-    },
-    {
-      "id": "todo-all",
-      "label": "All To-Dos",
-      "icon": "list",
-      "order": 111,
-      "action": {
-        "type": "openLink",
-        "target": "{{module_directory}}/All-ToDos.md"
-      }
-    },
-    {
-      "id": "todo-migrate",
-      "label": "Migrate",
-      "icon": "arrow-right",
-      "order": 112,
-      "action": {
-        "type": "invoke_command",
-        "command_id": "sauce:to-do-migrate"
-      }
     }
   ],
   "templater_folder_templates": [
@@ -67,7 +49,7 @@
   "post_install": [
     {
       "type": "notice",
-      "message": "To-do blueprint v0.3.0 installed at spice/to-do/. Daily note: click 'To Do' nav-button to create today's file. NEW: 'All To-Dos' nav-button opens spice/to-do/All-ToDos.md showing uncompleted tasks from prior days; 'Migrate' nav-button opens a dialog to move unchecked tasks to tomorrow."
+      "message": "To-do blueprint v0.3.1 installed at spice/to-do/. Daily note: click 'To Do' nav-button to create today's file. Inside the daily note, two inline AccentButtons appear: 'All To-Dos' (opens spice/to-do/All-ToDos.md — backlog of uncompleted tasks from prior days) and 'Migrate' (opens a dialog to move unchecked tasks to tomorrow). Buttons only render on daily to-do notes; not visible elsewhere."
     }
   ],
   "rule_fragments": [

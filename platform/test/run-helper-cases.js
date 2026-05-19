@@ -6712,7 +6712,7 @@ async function caseFA5CoworkRuleFragments() {
 
 async function caseFA6DomainManifests() {
   console.log("\n--- Case FA6-MANIFESTS: 3 domain blueprints bumped ---");
-  for (const [bp, expected] of [["trips", "0.3.0"], ["to-do", "0.3.0"], ["boards", "0.2.1"]]) {
+  for (const [bp, expected] of [["trips", "0.3.0"], ["to-do", "0.3.1"], ["boards", "0.2.1"]]) {
     const m = JSON.parse(fs.readFileSync(
       path.join(WORKSHOP, `platform/blueprints/${bp}/manifest.json`), "utf8"));
     assertTrue(`FA6-MANIFEST-${bp}: version ${expected}`, m.version === expected,
@@ -6864,32 +6864,33 @@ async function caseFA7FinanceRuleFragments() {
   }
 }
 
-// v0.63.0 S7 — TD-HC-1: to-do v0.3.0 manifest schema clean.
+// v0.63.0 S7 — TD-HC-1: to-do v0.3.x manifest schema clean.
+// v0.63.1 PATCH amendment: All-To-Dos + Migrate moved from global nav-buttons to inline ToDoLeafActions
+// AccentButtons (Today To-Do.md embeds a ToDoLeafActions dataviewjs block). nav_buttons[] reverts to
+// the single todo-today entry; customjs_classes[] grows ToDoLeafActions.
 async function caseTodoManifestV3() {
-  console.log("\n--- Case TD-HC-1: to-do v0.3.0 manifest schema clean ---");
+  console.log("\n--- Case TD-HC-1: to-do v0.3.x manifest schema clean ---");
   const m = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/to-do/manifest.json"), "utf8"));
 
-  assertTrue("TD-HC-1 version is 0.3.0", m.version === "0.3.0", `got ${m.version}`);
+  assertTrue("TD-HC-1 version is 0.3.1", m.version === "0.3.1", `got ${m.version}`);
   assertTrue("TD-HC-1 customjs_classes includes ToDoMigrateInit",
     Array.isArray(m.customjs_classes) && m.customjs_classes.includes("ToDoMigrateInit"));
+  assertTrue("TD-HC-1 customjs_classes includes ToDoLeafActions (v0.63.1)",
+    Array.isArray(m.customjs_classes) && m.customjs_classes.includes("ToDoLeafActions"));
   assertTrue("TD-HC-1 customjs_startup_scripts has ToDoMigrateInit",
     Array.isArray(m.customjs_startup_scripts) && m.customjs_startup_scripts.includes("ToDoMigrateInit"));
 
   const navIds = (m.nav_buttons || []).map(b => b.id);
-  assertTrue("TD-HC-1 nav_buttons has todo-all", navIds.includes("todo-all"));
-  assertTrue("TD-HC-1 nav_buttons has todo-migrate", navIds.includes("todo-migrate"));
+  assertTrue("TD-HC-1 nav_buttons has todo-today", navIds.includes("todo-today"));
+  assertTrue("TD-HC-1 nav_buttons does NOT have todo-all (moved to ToDoLeafActions)",
+    !navIds.includes("todo-all"), `got navIds=${JSON.stringify(navIds)}`);
+  assertTrue("TD-HC-1 nav_buttons does NOT have todo-migrate (moved to ToDoLeafActions)",
+    !navIds.includes("todo-migrate"), `got navIds=${JSON.stringify(navIds)}`);
 
-  const todoAll = (m.nav_buttons || []).find(b => b.id === "todo-all");
-  assertTrue("TD-HC-1 todo-all uses openLink action",
-    todoAll && todoAll.action && todoAll.action.type === "openLink",
-    `got ${todoAll && todoAll.action && todoAll.action.type}`);
-
-  const todoMigrate = (m.nav_buttons || []).find(b => b.id === "todo-migrate");
-  assertTrue("TD-HC-1 todo-migrate uses invoke_command action",
-    todoMigrate && todoMigrate.action && todoMigrate.action.type === "invoke_command" &&
-    todoMigrate.action.command_id === "sauce:to-do-migrate",
-    `got ${JSON.stringify(todoMigrate && todoMigrate.action)}`);
+  const fileSources = (m.files || []).map(f => f.source);
+  assertTrue("TD-HC-1 files[] includes helpers/todo-leaf-actions.js (v0.63.1)",
+    fileSources.includes("helpers/todo-leaf-actions.js"));
 
   const scope = m.rule_fragments && m.rule_fragments[0] && m.rule_fragments[0].fragment.scope.path_glob;
   assertTrue("TD-HC-1 rule scope is tightened",
