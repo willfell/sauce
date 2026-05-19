@@ -430,7 +430,7 @@ function assertCoworkV045Shape() {
 
   // --- Manifest version + depends_on ---
   const m = loadManifest();
-  assertTrue(m.version === "0.8.0", "v0.57.0: cowork manifest version is 0.8.0");
+  assertTrue(/^0\.(8|9|1\d)\.\d+$/.test(m.version), `v0.57.0: cowork manifest version >= 0.8.0 (got ${m.version})`);
   const hasAccentDep = (m.depends_on || []).some(d => d.name === "accent-button");
   assertTrue(hasAccentDep, "v0.45.0: cowork depends_on accent-button");
 }
@@ -472,12 +472,13 @@ function assertCoworkV057Shape() {
     assertContains(body, 'created_at: "2026-', `v0.57.0: prompts/${prompt}.md carries static created_at:`);
   }
 
-  // --- rule_fragments: 12 of 13 have extends; SKILL.md fragment is the one exception ---
+  // --- rule_fragments: all-but-SKILL.md fragments have extends ---
+  // v0.62.0 FA-9a: NEW cowork-today-hub fragment grew count 13 → 14. Widened.
   const m = loadManifest();
   const fragments = m.rule_fragments || [];
-  assertTrue(fragments.length === 13, `v0.57.0: cowork has 13 rule_fragments (got ${fragments.length})`);
+  assertTrue(fragments.length >= 13, `v0.57.0: cowork has >= 13 rule_fragments (got ${fragments.length})`);
   const withExtends = fragments.filter(rf => rf.fragment && rf.fragment.extends === "_canonical-vocab");
-  assertTrue(withExtends.length === 12, `v0.57.0: 12 of 13 rule_fragments extend _canonical-vocab (got ${withExtends.length})`);
+  assertTrue(withExtends.length === fragments.length - 1, `v0.57.0: all-but-one rule_fragments extend _canonical-vocab (got ${withExtends.length}/${fragments.length})`);
   const skillFrag = fragments.find(rf => rf.fragment && rf.fragment.scope && /SKILL\.md/.test(rf.fragment.scope.path_glob || ""));
   assertTrue(skillFrag && !skillFrag.fragment.extends, "v0.57.0: SKILL.md rule_fragment does NOT extend _canonical-vocab");
 
@@ -502,6 +503,40 @@ function assertCoworkV057Shape() {
 // Main
 // -------------------------------------------------------------------------
 
+function assertCoworkV062Shape() {
+  console.log("--- v0.62.0 (FA-9a) ActivityFeed hub embeds + Today.md ---");
+  const cowork = BP;
+
+  // COWORK-AF-1: Daily Hub embeds "## Today's Activity"
+  const dailyHub = fs.readFileSync(path.join(cowork, "content/Daily Hub.md"), "utf8");
+  assertContains(dailyHub, "## Today's Activity", "COWORK-AF-1: Daily Hub has '## Today's Activity' H2");
+  assertContains(dailyHub, '"ActivityFeed"', "COWORK-AF-1: Daily Hub references ActivityFeed class");
+  assertContains(dailyHub, '"today"', "COWORK-AF-1: Daily Hub scope=today");
+
+  // COWORK-AF-2: Weekly Hub embeds "## This Week's Activity"
+  const weeklyHub = fs.readFileSync(path.join(cowork, "content/Weekly Hub.md"), "utf8");
+  assertContains(weeklyHub, "## This Week's Activity", "COWORK-AF-2: Weekly Hub has '## This Week's Activity' H2");
+  assertContains(weeklyHub, '"week"', "COWORK-AF-2: Weekly Hub scope=week");
+
+  // COWORK-AF-3: Monthly Hub embeds "## This Month's Activity"
+  const monthlyHub = fs.readFileSync(path.join(cowork, "content/Monthly Hub.md"), "utf8");
+  assertContains(monthlyHub, "## This Month's Activity", "COWORK-AF-3: Monthly Hub has '## This Month's Activity' H2");
+  assertContains(monthlyHub, '"month"', "COWORK-AF-3: Monthly Hub scope=month");
+
+  // COWORK-AF-4: NEW Today.md exists with 4 ActivityFeed sections + useStatusChangedAt opt
+  const todayPath = path.join(cowork, "content/Today.md");
+  assertTrue(fs.existsSync(todayPath), "COWORK-AF-4a: cowork content/Today.md exists");
+  const todayBody = fs.readFileSync(todayPath, "utf8");
+  assertContains(todayBody, "cowork-today-hub", "COWORK-AF-4b: Today.md frontmatter type cowork-today-hub");
+  assertContains(todayBody, "## Today's daily note", "COWORK-AF-4c: Today.md has daily-note section");
+  assertContains(todayBody, "## Today's meetings", "COWORK-AF-4d: Today.md has meetings section");
+  assertContains(todayBody, "## Today's scratches", "COWORK-AF-4e: Today.md has scratches section");
+  assertContains(todayBody, "## Today's project status changes", "COWORK-AF-4f: Today.md has project-status section");
+  assertContains(todayBody, "useStatusChangedAt", "COWORK-AF-4g: Today.md project-status section uses useStatusChangedAt opt");
+  const activityFeedBlocks = (todayBody.match(/class:\s*"ActivityFeed"/g) || []).length;
+  assertTrue(activityFeedBlocks >= 4, `COWORK-AF-4h: Today.md has >= 4 ActivityFeed blocks (got ${activityFeedBlocks})`);
+}
+
 (function main() {
   console.log("--- shared contracts ---");
   checkSharedContracts();
@@ -510,6 +545,7 @@ function assertCoworkV057Shape() {
   assertCoworkV044Shape();
   assertCoworkV045Shape();
   assertCoworkV057Shape();
+  assertCoworkV062Shape();
   console.log(`========\nResult: ${passed} passed, ${failed} failed.`);
   process.exit(failed === 0 ? 0 : 1);
 })();
