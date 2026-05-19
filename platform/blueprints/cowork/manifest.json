@@ -80,7 +80,8 @@
     { "source": "content/About Cowork.md",                            "dest": "{{module_directory}}/About Cowork.md" },
     { "source": "helpers/cowork-hub-nav.js",                          "dest": "{{scripts_path}}/cowork/cowork-hub-nav.js" },
     { "source": "helpers/cowork-daily-actions.js",                    "dest": "{{scripts_path}}/cowork/cowork-daily-actions.js" },
-    { "source": "helpers/cowork-readiness.js",                       "dest": "{{scripts_path}}/cowork/cowork-readiness.js" }
+    { "source": "helpers/cowork-readiness.js",                       "dest": "{{scripts_path}}/cowork/cowork-readiness.js" },
+    { "source": "content/scheduled-jobs.md",                          "dest": "{{module_directory}}/scheduled-jobs.md" }
   ],
   "claude_surface": [
     { "kind": "command", "source": "commands/cowork.md", "dest": ".claude/commands/cowork.md" },
@@ -93,6 +94,7 @@
     { "kind": "skill", "source": "skills/orchestrators/eod-review/SKILL.md",                      "dest": "{{skills_dir}}/eod-review/SKILL.md" },
     { "kind": "skill", "source": "skills/orchestrators/weekly-review/SKILL.md",                   "dest": "{{skills_dir}}/weekly-review/SKILL.md" },
     { "kind": "skill", "source": "skills/orchestrators/monthly-review/SKILL.md",                  "dest": "{{skills_dir}}/monthly-review/SKILL.md" },
+    { "kind": "skill", "source": "skills/orchestrators/onboard-scheduled-jobs/SKILL.md",   "dest": "{{skills_dir}}/onboard-scheduled-jobs/SKILL.md" },
     { "kind": "skill", "source": "skills/skills/check-vault-routing/SKILL.md",                    "dest": "{{skills_dir}}/skills/check-vault-routing/SKILL.md" },
     { "kind": "skill", "source": "skills/skills/date-context/SKILL.md",                           "dest": "{{skills_dir}}/skills/date-context/SKILL.md" },
     { "kind": "skill", "source": "skills/skills/ensure-daily-note/SKILL.md",                      "dest": "{{skills_dir}}/skills/ensure-daily-note/SKILL.md" },
@@ -328,6 +330,19 @@
           "prompt_source":  { "required": true, "type": "string" }
         },
         "naming_pattern": "^monthly-review\\.md$"
+      }
+    },
+    {
+      "target": "cowork",
+      "fragment": {
+        "scope": "spice/cowork/scheduled-jobs.md",
+        "extends": "_canonical-vocab",
+        "required_frontmatter": {
+          "type":           { "required": true, "type": "string", "equals": "cowork-scheduled-jobs" },
+          "engagement_id":  { "required": true, "type": "string" },
+          "mcp_backend":    { "required": false, "type": "string" }
+        },
+        "naming_pattern": "^scheduled-jobs\\.md$"
       }
     },
     {
