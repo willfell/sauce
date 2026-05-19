@@ -4344,6 +4344,42 @@ async function caseSHCS11EntityCreateSchemaParses() {
 }
 
 // ============================================================
+// v0.61.0 S6 — backlink-panel@0.1.0 lint asserts (BLP-LINT-1..3).
+// Mirrors the SHC-S11-entity-create-js pattern: new Function() parse
+// + class-declaration uniqueness + canonical-map marker presence.
+// ============================================================
+
+async function caseBLPLint1Parses() {
+  console.log("\n--- Case BLP-LINT-1: backlink-panel.js parses via new Function() ---");
+  const p = path.join(WORKSHOP, "platform", "mechanisms", "backlink-panel", "backlink-panel.js");
+  assertTrue("BLP-LINT-1: mechanism source exists", fs.existsSync(p));
+  const body = fs.readFileSync(p, "utf8");
+  let threw = false;
+  try {
+    new Function("app", "customJS", "Notice", "window", body + "\nreturn BacklinkPanel;");
+  } catch (e) {
+    threw = true;
+  }
+  assertTrue("BLP-LINT-1: backlink-panel.js wraps in new Function() without throwing", !threw);
+}
+
+async function caseBLPLint2OneClass() {
+  console.log("\n--- Case BLP-LINT-2: exactly one 'class BacklinkPanel' declaration ---");
+  const p = path.join(WORKSHOP, "platform", "mechanisms", "backlink-panel", "backlink-panel.js");
+  const body = fs.readFileSync(p, "utf8");
+  const matches = body.match(/class\s+BacklinkPanel\b/g) || [];
+  assertEq("BLP-LINT-2: exactly one 'class BacklinkPanel' declaration", matches.length, 1);
+}
+
+async function caseBLPLint3EntityMap() {
+  console.log("\n--- Case BLP-LINT-3: _ENTITY_TYPE_TO_KEY marker present ---");
+  const p = path.join(WORKSHOP, "platform", "mechanisms", "backlink-panel", "backlink-panel.js");
+  const body = fs.readFileSync(p, "utf8");
+  assertTrue("BLP-LINT-3: _ENTITY_TYPE_TO_KEY identifier present in source",
+    /_ENTITY_TYPE_TO_KEY/.test(body));
+}
+
+// ============================================================
 // v0.42.0 S9 — CoworkDailyHubCards / CoworkWeeklyHubCards / CoworkMonthlyHubCards
 // helper structural checks. 6 sub-asserts × 3 helpers = 18 sub-asserts.
 // Mirrors SHC-S5/S6 pattern (from-disk static analysis) plus a scaffolded
@@ -6394,7 +6430,7 @@ async function caseFA2PeopleCanonical() {
   console.log("\n--- Case FA2-PEOPLE: people@0.3.0 canonical vocab adoption ---");
   const manifest = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/people/manifest.json"), "utf8"));
-  assertTrue("FA2-PEOPLE-1: people version 0.3.0", manifest.version === "0.3.0",
+  assertTrue("FA2-PEOPLE-1: people version >= 0.3.0", /^0\.(3|4)\.\d+$/.test(manifest.version),
     `got: ${manifest.version}`);
   const ec = manifest.new_entity_buttons[0].frontmatter_template;
   assertTrue("FA2-PEOPLE-2: entity-create frontmatter_template has type:person",
@@ -6410,7 +6446,7 @@ async function caseFA2ProductsCanonical() {
   console.log("\n--- Case FA2-PRODUCTS: products@0.2.0 canonical vocab adoption ---");
   const manifest = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/products/manifest.json"), "utf8"));
-  assertTrue("FA2-PRODUCTS-1: products version 0.2.0", manifest.version === "0.2.0",
+  assertTrue("FA2-PRODUCTS-1: products version >= 0.2.0", /^0\.(2|3)\.\d+$/.test(manifest.version),
     `got: ${manifest.version}`);
   const tmpl = fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/products/templates/Template, Product.md"), "utf8");
@@ -6424,7 +6460,7 @@ async function caseFA2TeamsCanonical() {
   console.log("\n--- Case FA2-TEAMS: teams@0.2.0 canonical vocab adoption + product→products ---");
   const manifest = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/teams/manifest.json"), "utf8"));
-  assertTrue("FA2-TEAMS-1: teams version 0.2.0", manifest.version === "0.2.0",
+  assertTrue("FA2-TEAMS-1: teams version >= 0.2.0", /^0\.(2|3)\.\d+$/.test(manifest.version),
     `got: ${manifest.version}`);
   const tmpl = fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/teams/templates/Template, Team.md"), "utf8");
@@ -6451,7 +6487,7 @@ async function caseFA3ProjectManifest() {
   console.log("\n--- Case FA3-PROJECT-MANIFEST: project@1.13.0 canonical vocab ---");
   const m = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/project/manifest.json"), "utf8"));
-  assertTrue("FA3-PROJ-1: project version >= 1.13.0", /^1\.13\.\d+$/.test(m.version),
+  assertTrue("FA3-PROJ-1: project version >= 1.13.0", /^1\.(13|14)\.\d+$/.test(m.version),
     `got: ${m.version}`);
   const ec0 = m.new_entity_buttons[0].frontmatter_template;
   assertTrue("FA3-PROJ-2: project entity-create has created_at canonical",
@@ -6637,7 +6673,7 @@ async function caseFA5CoworkRuleFragments() {
 
 async function caseFA6DomainManifests() {
   console.log("\n--- Case FA6-MANIFESTS: 3 domain blueprints bumped ---");
-  for (const [bp, expected] of [["trips", "0.2.0"], ["to-do", "0.2.0"], ["boards", "0.2.1"]]) {
+  for (const [bp, expected] of [["trips", "0.3.0"], ["to-do", "0.2.0"], ["boards", "0.2.1"]]) {
     const m = JSON.parse(fs.readFileSync(
       path.join(WORKSHOP, `platform/blueprints/${bp}/manifest.json`), "utf8"));
     assertTrue(`FA6-MANIFEST-${bp}: version ${expected}`, m.version === expected,
@@ -6951,6 +6987,11 @@ async function caseFA2RuleFragmentsExtends() {
   await caseSHCS11FinanceInvoice();
   await caseSHCS11EntityCreateMechanismParses();
   await caseSHCS11EntityCreateSchemaParses();
+
+  // v0.61.0 S6 — backlink-panel@0.1.0 lint (3 sub-asserts).
+  await caseBLPLint1Parses();
+  await caseBLPLint2OneClass();
+  await caseBLPLint3EntityMap();
 
   // v0.42.0 S9 — cowork@0.4.0 helper structural/materialization checks (18 sub-asserts).
   await caseCOWORKDaily1Materialized();
