@@ -26,6 +26,17 @@
  * - Task <li>: added word-break: break-word + overflow-wrap: anywhere so
  *   long URL-y / no-space task strings wrap instead of forcing a scrollbar.
  *
+ * v0.3.3 (v0.64.3) PATCH:
+ *  - BUGFIX `_resolveTitle` was crashing with `aliases.values is not a
+ *    function` when scratch / meeting notes had no `aliases:` frontmatter.
+ *    Dataview's `p.file.aliases` is a Proxy/DataArray where `.values` is
+ *    a non-callable property (not Array.prototype.values). The throw
+ *    aborted BeaconCards mid-render, leaving the activity-panel cards
+ *    visually empty. Wrapped resolver in try-catch + simplified aliases
+ *    probe to length-only.
+ *  - Allowlist drops `meeting` — already has its own dedicated top-level
+ *    "Today's Meetings" panel; duplicate inside Activity was noise.
+ *
  * v0.3.2 (v0.64.2) PATCH:
  *  - Activity panel allowlist drops `scratch-day` + `to-do` — both are
  *    per-day auto-created notes that flood the activity stream with
@@ -309,8 +320,10 @@ class SpaceDailyDashboard {
     // The user creates a fresh ToDo-YYYY-MM-DD.md every morning and a
     // Scratch-Day-YYYY-MM-DD.md whenever a scratch is taken; neither is a
     // meaningful "activity" signal.
+    // v0.5.3 (v0.64.3): drop `meeting` — already has its own dedicated top-level
+    // panel ("Today's Meetings"); duplicating inside Activity is noise.
     return [
-      "meeting", "scratch", "journal",
+      "scratch", "journal",
       "project", "person", "team", "product", "trip",
       "budget", "paycheck", "invoice"
     ];
@@ -349,21 +362,34 @@ class SpaceDailyDashboard {
    *   2. frontmatter `aliases[0]`
    *   3. first heading in `file.outline` (Dataview-supplied)
    *   4. `file.name` (always present)
+   *
+   * v0.5.3 (v0.64.3): wrapped in try-catch + simplified aliases probe.
+   * Dataview's `p.file.aliases` is a Proxy/DataArray that exposes `.values`
+   * as a non-callable property (NOT Array.prototype.values), so the prior
+   * fallback `aliases.values && aliases.values()[0]` threw
+   * "aliases.values is not a function" and aborted BeaconCards rendering.
+   * Now: just length-probe + index-zero access, and ANY throw falls back
+   * to filename so a single bad frontmatter never breaks the dashboard.
    */
   _resolveTitle(p) {
-    if (!p) return "";
-    if (p.title && String(p.title).trim()) return String(p.title).trim();
-    const aliases = p.file && p.file.aliases;
-    if (aliases) {
-      const a0 = aliases.length > 0 ? aliases[0] : (aliases.values && aliases.values()[0]);
-      if (a0 && String(a0).trim()) return String(a0).trim();
+    try {
+      if (!p) return "";
+      const title = p.title;
+      if (title && String(title).trim()) return String(title).trim();
+      const aliases = p.file && p.file.aliases;
+      if (aliases && typeof aliases.length === "number" && aliases.length > 0) {
+        const a0 = aliases[0];
+        if (a0 && String(a0).trim()) return String(a0).trim();
+      }
+      const outline = p.file && p.file.outline;
+      if (outline && typeof outline.length === "number" && outline.length > 0) {
+        const t0 = outline[0] && (outline[0].text || outline[0].name);
+        if (t0 && String(t0).trim()) return String(t0).trim();
+      }
+      return p.file && p.file.name ? String(p.file.name) : "";
+    } catch (e) {
+      return (p && p.file && p.file.name) ? String(p.file.name) : "";
     }
-    const outline = p.file && p.file.outline;
-    if (Array.isArray(outline) && outline.length > 0) {
-      const t0 = outline[0] && (outline[0].text || outline[0].name);
-      if (t0 && String(t0).trim()) return String(t0).trim();
-    }
-    return p.file && p.file.name ? String(p.file.name) : "";
   }
 
   /**

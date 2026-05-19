@@ -4486,7 +4486,8 @@ async function caseDDA3TaskMarkdownRenderHelper() {
 
 async function caseDDA4DashboardAllowlist() {
   // v0.5.2 (v0.64.2): _DEFAULT_DASHBOARD_BLUEPRINTS drops scratch-day + to-do.
-  console.log("\n--- Case DD-A4: dashboard allowlist drops scratch-day + to-do ---");
+  // v0.5.3 (v0.64.3): also drops `meeting` — has its own dedicated panel.
+  console.log("\n--- Case DD-A4: dashboard allowlist drops scratch-day + to-do + meeting ---");
   const p = path.join(BLUEPRINTS_DIR, "daily", "helpers", "space-daily-dashboard.js");
   const body = fs.readFileSync(p, "utf8");
   const getterMatch = body.match(/_DEFAULT_DASHBOARD_BLUEPRINTS\s*\(\)\s*\{[\s\S]*?return\s*\[([\s\S]*?)\]/);
@@ -4498,9 +4499,32 @@ async function caseDDA4DashboardAllowlist() {
   const hasScratchDay = /"scratch-day"/.test(listSource);
   const hasToDo = /"to-do"/.test(listSource);
   const hasMeeting = /"meeting"/.test(listSource);
+  const hasScratch = /"scratch"/.test(listSource);
   const hasProject = /"project"/.test(listSource);
-  const ok = !hasScratchDay && !hasToDo && hasMeeting && hasProject;
-  assertTrue("DD-A4: allowlist still contains scratch-day or to-do (noise types)", ok);
+  const ok = !hasScratchDay && !hasToDo && !hasMeeting && hasScratch && hasProject;
+  assertTrue("DD-A4: allowlist still contains scratch-day, to-do, or meeting (noise/duplicate types)", ok);
+}
+
+async function caseDDA6ResolveTitleDefensive() {
+  // v0.5.3 (v0.64.3) BUGFIX guard. v0.5.2 _resolveTitle crashed with
+  // "aliases.values is not a function" on Dataview Proxy aliases. Now
+  // wrapped in try-catch + length-probe only (no .values() fallback).
+  console.log("\n--- Case DD-A6: _resolveTitle is defensive (try-catch + no .values()) ---");
+  const p = path.join(BLUEPRINTS_DIR, "daily", "helpers", "space-daily-dashboard.js");
+  const body = fs.readFileSync(p, "utf8");
+  // Extract just the _resolveTitle method body.
+  const m = body.match(/_resolveTitle\s*\(p\)\s*\{([\s\S]*?)\n  \}\n/);
+  if (!m) {
+    assertTrue("DD-A6: _resolveTitle method not found", false);
+    return;
+  }
+  const methodBody = m[1];
+  const ok =
+    /try\s*\{/.test(methodBody) &&
+    /catch\s*\(/.test(methodBody) &&
+    !/aliases\.values\s*\(\s*\)/.test(methodBody) &&
+    /typeof\s+aliases\.length\s*===\s*["']number["']/.test(methodBody);
+  assertTrue("DD-A6: _resolveTitle missing try-catch or still calls aliases.values()", ok);
 }
 
 async function caseDDA5DashboardPolish() {
@@ -7191,12 +7215,14 @@ async function caseFA2RuleFragmentsExtends() {
   // v0.64.0 S5 — daily-template + SpaceDailyDashboard activity-panel (2 sub-asserts).
   // v0.64.1 (v0.5.1) — +2 BUGFIX guards (DD-A2 shim.pages delegate; DD-A3 markdown helper).
   // v0.64.2 (v0.5.2) — +2 polish guards (DD-A4 allowlist; DD-A5 title resolver + details).
+  // v0.64.3 (v0.5.3) — +1 BUGFIX guard (DD-A6 _resolveTitle defensive).
   await caseDDT1DailyTemplateShape();
   await caseDDA1DashboardActivityPanel();
   await caseDDA2ActivityShimPagesDelegate();
   await caseDDA3TaskMarkdownRenderHelper();
   await caseDDA4DashboardAllowlist();
   await caseDDA5DashboardPolish();
+  await caseDDA6ResolveTitleDefensive();
 
   // v0.42.0 S9 — cowork@0.4.0 helper structural/materialization checks (18 sub-asserts).
   await caseCOWORKDaily1Materialized();
