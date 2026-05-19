@@ -322,3 +322,7 @@ If you want to verify the orient + pick phases without committing to a full cycl
 3. At the Phase B AskUserQuestion prompt, pick `skip (end the loop)`.
 4. Verify the loop writes a "user skipped" handoff and does NOT call ScheduleWakeup.
 5. Loop dies clean. Phase A + B verified without running a real cycle.
+
+## Connecting Claude Cowork (scheduled jobs)
+
+See `Docs/cowork-onboarding.md` for the 5-step checklist that connects a sauce-installed vault to Claude Cowork (or any scheduler). See `Docs/cowork-consumer-extensions.md` for the worked sprint-sync example showing how to add custom scheduled jobs on top of the sauce-shipped orchestrators.
