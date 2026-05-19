@@ -376,6 +376,15 @@ class ToDoMigrateModal {
             ? `Migrated ${moved} task(s) to ToDo-${tomorrowStr}.`
             : `Migrated ${moved} of ${total}; ${unmatched.length} could not be matched (note may have been edited).`;
         new Notice(msg);
+
+        // Open tomorrow's note in the workspace so the user immediately sees the result.
+        // Without this, the user has to manually navigate to spice/to-do/<YYYY>/<MM-MMMM>/
+        // to find the newly-created or newly-updated file — confusing on first encounter.
+        try {
+            await app.workspace.openLinkText(tomorrowFile.path, '');
+        } catch (e) {
+            console.warn('[ToDoMigrateModal] could not open tomorrow note', e);
+        }
     }
 
     async _ensureFolder(folder) {
@@ -417,6 +426,10 @@ class ToDoMigrateModal {
         lines.push('');
         lines.push('```dataviewjs');
         lines.push('await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });');
+        lines.push('```');
+        lines.push('');
+        lines.push('```dataviewjs');
+        lines.push('await dv.view("ranch/views/customjs-guard", { class: "ToDoLeafActions" });');
         lines.push('```');
         lines.push('');
         lines.push('## Tasks');

@@ -6712,7 +6712,7 @@ async function caseFA5CoworkRuleFragments() {
 
 async function caseFA6DomainManifests() {
   console.log("\n--- Case FA6-MANIFESTS: 3 domain blueprints bumped ---");
-  for (const [bp, expected] of [["trips", "0.3.0"], ["to-do", "0.3.1"], ["boards", "0.2.1"]]) {
+  for (const [bp, expected] of [["trips", "0.3.0"], ["to-do", "0.3.2"], ["boards", "0.2.1"]]) {
     const m = JSON.parse(fs.readFileSync(
       path.join(WORKSHOP, `platform/blueprints/${bp}/manifest.json`), "utf8"));
     assertTrue(`FA6-MANIFEST-${bp}: version ${expected}`, m.version === expected,
@@ -6873,7 +6873,7 @@ async function caseTodoManifestV3() {
   const m = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/to-do/manifest.json"), "utf8"));
 
-  assertTrue("TD-HC-1 version is 0.3.1", m.version === "0.3.1", `got ${m.version}`);
+  assertTrue("TD-HC-1 version is 0.3.2", m.version === "0.3.2", `got ${m.version}`);
   assertTrue("TD-HC-1 customjs_classes includes ToDoMigrateInit",
     Array.isArray(m.customjs_classes) && m.customjs_classes.includes("ToDoMigrateInit"));
   assertTrue("TD-HC-1 customjs_classes includes ToDoLeafActions (v0.63.1)",

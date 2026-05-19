@@ -28,8 +28,49 @@ class ToDoLeafActions {
         const row = dv.container.createEl('div');
         row.style.cssText = 'display: flex; gap: 12px; margin: 0.5em auto; justify-content: center; align-items: stretch; max-width: 600px; flex-wrap: wrap;';
 
-        const openAllToDos = () => {
-            app.workspace.openLinkText('spice/to-do/All-ToDos.md', '');
+        const openAllToDos = async () => {
+            // v0.63.2 PATCH: Obsidian's openLinkText creates an empty placeholder if the
+            // target file doesn't exist (or has been deleted by the user). The installer's
+            // {{module_directory}}-scoped destinations are idempotent (skip-if-exists), so
+            // a deleted-then-re-clicked hub note stays empty forever otherwise. Detect
+            // missing OR empty file and write the canonical body inline before opening.
+            const path = 'spice/to-do/All-ToDos.md';
+            const file = app.vault.getAbstractFileByPath(path);
+            const body = [
+                '---',
+                'type: to-do-hub',
+                `created_at: "${window.moment().format('YYYY-MM-DDTHH:mm:ssZZ')}"`,
+                'cssclasses:',
+                '  - wide',
+                '---',
+                '',
+                '```dataviewjs',
+                'await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });',
+                '```',
+                '',
+                '```dataviewjs',
+                'await dv.view("ranch/views/customjs-guard", { class: "ToDoHubActions" });',
+                '```',
+                '',
+                '```dataviewjs',
+                'await dv.view("ranch/views/customjs-guard", { class: "ToDoAllList" });',
+                '```',
+                '',
+            ].join('\n');
+            try {
+                if (!file) {
+                    await app.vault.create(path, body);
+                } else {
+                    const content = await app.vault.read(file);
+                    if (!content.trim() || !/^---\s*$/m.test(content) || !/ToDoAllList/.test(content)) {
+                        await app.vault.modify(file, body);
+                        new Notice('All-ToDos.md was empty or missing the aggregator block — restored from template.', 6000);
+                    }
+                }
+            } catch (e) {
+                console.warn('[ToDoLeafActions] could not (re)write All-ToDos.md', e);
+            }
+            app.workspace.openLinkText(path, '');
         };
 
         const openMigrate = () => {
