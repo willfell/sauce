@@ -52,6 +52,11 @@
       "path": "mechanisms/audit"
     },
     {
+      "name": "backlink-panel",
+      "version": "0.1.0",
+      "path": "mechanisms/backlink-panel"
+    },
+    {
       "name": "nav-buttons",
       "version": "2.7.0",
       "path": "mechanisms/nav-buttons"
