@@ -39,9 +39,9 @@ End-of-week deep pass for one engagement. Creates a standalone weekly summary no
 
 ## Write
 
-14. Use Skill `cowork:write-summary-weekly` with `{ engagement, render_aspects, date: context.today, week_start: context.week_start, week_end: context.week_end, finance: <step 5 or null>, cc_debt: <step 6 or null>, calendar: <step 7>, email_metrics: <step 8>, people_pulse: <step 9 or null>, projects: <step 10>, threads: <step 11>, invoice_block, fte_status_block }`. The sub-skill writes the summary note to `spice/cowork/summaries/weekly/<engagement.id>/<YYYY-Www>.md` and returns `{ summary_path, markdown }`. Internal type-branch picks the section layout.
-15. Compose the daily-note link callout: `> [!abstract]- Weekly Review — <engagement.label>\n> [[<summary_path basename>|Full Weekly Review]]`.
-16. Use Skill `cowork:patch-daily-callouts` with `{ engagement_id, daily_path: context.daily_path, callouts: [{ id: "weekly-review", body: <link callout> }] }`.
+14. **Read prompt body** via `mcp__obsidian__get_file_contents` at `spice/cowork/prompts/weekly-review.md`. Strip frontmatter; capture body as `prompt_body` (or empty when missing).
+15. **Compose run-note body** per `prompt_body` instructions interpolating week-summary gather outputs. When empty: `warning = "empty_prompt"`. Otherwise `warning = null`.
+16. Use Skill `cowork:write-run-note-weekly-review` with `{ engagement, week: context.iso_week, year: context.year, body: run_body, prompt_source: "spice/cowork/prompts/weekly-review.md", warning }`. Capture `status`. If `status` starts with `"failed:"`, emit Notice `cowork:weekly-review aborted -- write failed: <status>` and exit.
 
 ## State
 
