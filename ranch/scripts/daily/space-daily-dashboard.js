@@ -322,10 +322,15 @@ class SpaceDailyDashboard {
     // meaningful "activity" signal.
     // v0.5.3 (v0.64.3): drop `meeting` — already has its own dedicated top-level
     // panel ("Today's Meetings"); duplicating inside Activity is noise.
+    // v0.6.0 (v0.65.0 cowork-scheduling-cycle): add 6 cowork run-note types so
+    // scheduled-job atomic notes surface under their own groups in the
+    // "Today's Activity" panel (groupBy: "blueprint" already on).
     return [
       "scratch", "journal",
       "project", "person", "team", "product", "trip",
-      "budget", "paycheck", "invoice"
+      "budget", "paycheck", "invoice",
+      "cowork-morning-briefing", "cowork-midday-tripwire", "cowork-eod-review",
+      "cowork-finance-snapshot", "cowork-weekly-review", "cowork-monthly-review"
     ];
   }
 
