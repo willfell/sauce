@@ -7391,6 +7391,34 @@ async function caseFA2RuleFragmentsExtends() {
   // v0.60.0 SQ — shellSingleQuote helper round-trips through bash
   await caseV60ShellSingleQuote();
 
+  // v0.65.0 HC-V065-RUN-NOTE: write-run-note-* sub-skill lint
+  {
+    const slugs = [
+      "write-run-note-morning-briefing",
+      "write-run-note-midday-tripwire",
+      "write-run-note-eod-review",
+      "write-run-note-finance",
+      "write-run-note-weekly-review",
+      "write-run-note-monthly-review",
+    ];
+    for (const slug of slugs) {
+      const p = `platform/blueprints/cowork/skills/skills/${slug}/SKILL.md`;
+      assertTrue(`HC-V065-RUN-NOTE: ${slug} exists`, fs.existsSync(p));
+      const body = fs.readFileSync(p, "utf8");
+      assertTrue(`HC-V065-RUN-NOTE: ${slug} name field correct`, /^name: cowork:write-run-note-/m.test(body));
+      assertTrue(`HC-V065-RUN-NOTE: ${slug} references created_at`, /created_at/.test(body));
+    }
+  }
+
+  // v0.65.0 HC-V065-DASHBOARD: SpaceDailyDashboard cowork allowlist-add
+  {
+    const src = fs.readFileSync("platform/blueprints/daily/helpers/space-daily-dashboard.js", "utf8");
+    assertTrue("HC-V065-DASHBOARD: _DEFAULT_DASHBOARD_BLUEPRINTS getter present", src.includes("_DEFAULT_DASHBOARD_BLUEPRINTS"));
+    assertTrue("HC-V065-DASHBOARD: allowlist includes cowork-morning-briefing", src.includes('"cowork-morning-briefing"'));
+    assertTrue("HC-V065-DASHBOARD: allowlist includes cowork-eod-review", src.includes('"cowork-eod-review"'));
+    assertTrue("HC-V065-DASHBOARD: allowlist includes cowork-finance-snapshot", src.includes('"cowork-finance-snapshot"'));
+  }
+
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
   if (fail > 0) {
