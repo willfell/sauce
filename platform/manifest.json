@@ -1,7 +1,7 @@
 {
   "_comment": "Workshop platform manifest. Each mechanism + blueprint has its own version.",
-  "workshop_version": "0.63.3",
-  "date": "2026-05-18",
+  "workshop_version": "0.64.0",
+  "date": "2026-05-19",
   "foundational_plugins": [
     {
       "id": "templater-obsidian"
@@ -28,7 +28,8 @@
   "app_settings": {
     "alwaysOpenInNewTab": true,
     "defaultViewMode": "preview",
-    "livePreview": true
+    "livePreview": true,
+    "propertiesInDocument": "visible"
   },
   "installer": {
     "source": "install.js",
@@ -48,7 +49,7 @@
     },
     {
       "name": "activity-feed",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "path": "mechanisms/activity-feed"
     },
     {
@@ -115,12 +116,12 @@
     },
     {
       "name": "cowork",
-      "version": "0.9.0",
+      "version": "0.9.1",
       "path": "blueprints/cowork"
     },
     {
       "name": "daily",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "path": "blueprints/daily"
     },
     {
