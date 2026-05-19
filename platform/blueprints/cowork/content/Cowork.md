@@ -50,6 +50,14 @@ if (gaps.length > 0) {
 
 ---
 
+## Readiness
+
+```dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "CoworkReadiness" });
+```
+
+---
+
 ## Timeframes
 
 ```dataviewjs
