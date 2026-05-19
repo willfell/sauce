@@ -4484,6 +4484,42 @@ async function caseDDA3TaskMarkdownRenderHelper() {
   assertTrue("DD-A3: tasks panel markdown render helper / LI rewire regressed", ok);
 }
 
+async function caseDDA4DashboardAllowlist() {
+  // v0.5.2 (v0.64.2): _DEFAULT_DASHBOARD_BLUEPRINTS drops scratch-day + to-do.
+  console.log("\n--- Case DD-A4: dashboard allowlist drops scratch-day + to-do ---");
+  const p = path.join(BLUEPRINTS_DIR, "daily", "helpers", "space-daily-dashboard.js");
+  const body = fs.readFileSync(p, "utf8");
+  const getterMatch = body.match(/_DEFAULT_DASHBOARD_BLUEPRINTS\s*\(\)\s*\{[\s\S]*?return\s*\[([\s\S]*?)\]/);
+  if (!getterMatch) {
+    assertTrue("DD-A4: _DEFAULT_DASHBOARD_BLUEPRINTS getter not found", false);
+    return;
+  }
+  const listSource = getterMatch[1];
+  const hasScratchDay = /"scratch-day"/.test(listSource);
+  const hasToDo = /"to-do"/.test(listSource);
+  const hasMeeting = /"meeting"/.test(listSource);
+  const hasProject = /"project"/.test(listSource);
+  const ok = !hasScratchDay && !hasToDo && hasMeeting && hasProject;
+  assertTrue("DD-A4: allowlist still contains scratch-day or to-do (noise types)", ok);
+}
+
+async function caseDDA5DashboardPolish() {
+  // v0.5.2 (v0.64.2): smart title resolver + collapsible main sections +
+  // color map present.
+  console.log("\n--- Case DD-A5: dashboard polish (title resolver + collapsible + colors) ---");
+  const p = path.join(BLUEPRINTS_DIR, "daily", "helpers", "space-daily-dashboard.js");
+  const body = fs.readFileSync(p, "utf8");
+  const ok =
+    /_resolveTitle\s*\(/.test(body) &&
+    /_BLUEPRINT_COLORS\s*\(\)/.test(body) &&
+    /createEl\("details"/.test(body) &&
+    /createEl\("summary"/.test(body) &&
+    /collapsible:\s*true/.test(body) &&
+    /colorByType:\s*this\._BLUEPRINT_COLORS/.test(body) &&
+    /getTitle:\s*\(p\)\s*=>\s*this\._resolveTitle\(p\)/.test(body);
+  assertTrue("DD-A5: dashboard polish (title resolver / details wrappers / color map) regressed", ok);
+}
+
 // ============================================================
 // v0.42.0 S9 — CoworkDailyHubCards / CoworkWeeklyHubCards / CoworkMonthlyHubCards
 // helper structural checks. 6 sub-asserts × 3 helpers = 18 sub-asserts.
@@ -7154,10 +7190,13 @@ async function caseFA2RuleFragmentsExtends() {
 
   // v0.64.0 S5 — daily-template + SpaceDailyDashboard activity-panel (2 sub-asserts).
   // v0.64.1 (v0.5.1) — +2 BUGFIX guards (DD-A2 shim.pages delegate; DD-A3 markdown helper).
+  // v0.64.2 (v0.5.2) — +2 polish guards (DD-A4 allowlist; DD-A5 title resolver + details).
   await caseDDT1DailyTemplateShape();
   await caseDDA1DashboardActivityPanel();
   await caseDDA2ActivityShimPagesDelegate();
   await caseDDA3TaskMarkdownRenderHelper();
+  await caseDDA4DashboardAllowlist();
+  await caseDDA5DashboardPolish();
 
   // v0.42.0 S9 — cowork@0.4.0 helper structural/materialization checks (18 sub-asserts).
   await caseCOWORKDaily1Materialized();

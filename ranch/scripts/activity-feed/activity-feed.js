@@ -29,6 +29,24 @@
  *                        if EITHER its tsKey timestamp OR its file.mtime
  *                        falls in the window. Catches "edited today but
  *                        created earlier" notes.
+ *
+ *   getTitle:            function(p) → string (optional) — override the
+ *                        default card title (`p.file.name`). Use to surface
+ *                        frontmatter `title:` / `aliases[0]` / first heading
+ *                        for prettier display when the filename is opaque
+ *                        (e.g. timestamp-based scratch filenames). Added v0.1.2.
+ *
+ *   collapsible:         boolean (default false) — when true and groupBy is
+ *                        "blueprint", wrap each group in a `<details>` /
+ *                        `<summary>` block (closed by default; the summary
+ *                        line shows blueprint name + count). Added v0.1.2.
+ *
+ *   colorByType:         object (optional) — `{ [type]: cssColor }` map.
+ *                        When collapsible is true, each group's `<details>`
+ *                        wrapper gets `border-left: 4px solid <color>`.
+ *                        Unknown types fall back to var(--color-base-50).
+ *                        Added v0.1.2.
+ *
  *   title:               string (optional) — emits an H3 above the panel
  *
  * Per landmine #11: spice/ module-directory namespace is conceptual;
@@ -54,6 +72,10 @@ class ActivityFeed {
     const useStatusChangedAt = safeOpts.useStatusChangedAt === true;
     const asOf = safeOpts.asOf;
     const includeMtime = safeOpts.includeMtime === true;
+    // v0.1.2 additive opts
+    const getTitle = typeof safeOpts.getTitle === "function" ? safeOpts.getTitle : null;
+    const collapsible = safeOpts.collapsible === true;
+    const colorByType = (safeOpts.colorByType && typeof safeOpts.colorByType === "object") ? safeOpts.colorByType : null;
     const blueprints = Array.isArray(safeOpts.blueprints) && safeOpts.blueprints.length > 0
       ? safeOpts.blueprints.map(String)
       : this._DEFAULT_BLUEPRINTS;
@@ -90,12 +112,12 @@ class ActivityFeed {
     }
 
     if (groupBy === "hour") {
-      return this._renderGroupedByHour(dv, pages, useStatusChangedAt);
+      return this._renderGroupedByHour(dv, pages, useStatusChangedAt, getTitle);
     }
     if (groupBy === "blueprint") {
-      return this._renderGroupedByBlueprint(dv, pages);
+      return this._renderGroupedByBlueprint(dv, pages, { getTitle, collapsible, colorByType });
     }
-    return this._renderFlat(dv, pages);
+    return this._renderFlat(dv, pages, getTitle);
   }
 
   // ── Time window ────────────────────────────────────────────────────────────
@@ -205,24 +227,34 @@ class ActivityFeed {
     p.textContent = "No activity in this " + scope + ".";
   }
 
-  _renderFlat(dv, pages) {
+  _renderFlat(dv, pages, getTitle) {
     if (!customJS || !customJS.BeaconCards || typeof customJS.BeaconCards.render !== "function") {
       new Notice("ActivityFeed: cards mechanism (BeaconCards) unavailable");
       return;
     }
+    const titleFn = (typeof getTitle === "function")
+      ? getTitle
+      : (p) => p && p.file && p.file.name;
     return customJS.BeaconCards.render(dv, {
       pages,
       layout: "row",
-      title: (p) => p && p.file && p.file.name,
+      title: titleFn,
       meta: (p) => (p && p.type) ? String(p.type) : "",
     });
   }
 
-  _renderGroupedByBlueprint(dv, pages) {
+  _renderGroupedByBlueprint(dv, pages, opts) {
     if (!customJS || !customJS.BeaconCards || typeof customJS.BeaconCards.render !== "function") {
       new Notice("ActivityFeed: cards mechanism (BeaconCards) unavailable");
       return;
     }
+    const safe = opts || {};
+    const titleFn = (typeof safe.getTitle === "function")
+      ? safe.getTitle
+      : (p) => p && p.file && p.file.name;
+    const collapsible = safe.collapsible === true;
+    const colorByType = (safe.colorByType && typeof safe.colorByType === "object") ? safe.colorByType : null;
+
     const groups = new Map();
     for (const p of pages) {
       const t = (p && p.type) ? String(p.type) : "(untyped)";
@@ -231,22 +263,41 @@ class ActivityFeed {
     }
     const sortedKeys = Array.from(groups.keys()).sort();
     for (const t of sortedKeys) {
-      const h = dv.container.createEl("h4");
-      h.textContent = t;
-      h.style.cssText = "margin: 0.8em 0 0.3em 0;";
-      customJS.BeaconCards.render(dv, {
-        pages: groups.get(t),
-        layout: "row",
-        title: (p) => p && p.file && p.file.name,
-      });
+      if (collapsible) {
+        const details = dv.container.createEl("details");
+        details.open = false;
+        const color = (colorByType && colorByType[t]) ? colorByType[t] : "var(--color-base-50)";
+        details.style.cssText = "margin: 0.4em 0; padding: 0.3em 0.5em; border-left: 4px solid " + color + "; background: var(--background-secondary); border-radius: 4px;";
+        const summary = details.createEl("summary");
+        summary.style.cssText = "cursor: pointer; font-weight: 600; font-size: 0.9em; color: var(--text-normal); user-select: none;";
+        summary.textContent = t + " (" + groups.get(t).length + ")";
+        const cardsShim = { container: details };
+        customJS.BeaconCards.render(cardsShim, {
+          pages: groups.get(t),
+          layout: "row",
+          title: titleFn,
+        });
+      } else {
+        const h = dv.container.createEl("h4");
+        h.textContent = t;
+        h.style.cssText = "margin: 0.8em 0 0.3em 0;";
+        customJS.BeaconCards.render(dv, {
+          pages: groups.get(t),
+          layout: "row",
+          title: titleFn,
+        });
+      }
     }
   }
 
-  _renderGroupedByHour(dv, pages, useStatusChangedAt) {
+  _renderGroupedByHour(dv, pages, useStatusChangedAt, getTitle) {
     if (!customJS || !customJS.BeaconCards || typeof customJS.BeaconCards.render !== "function") {
       new Notice("ActivityFeed: cards mechanism (BeaconCards) unavailable");
       return;
     }
+    const titleFn = (typeof getTitle === "function")
+      ? getTitle
+      : (p) => p && p.file && p.file.name;
     const tsKey = useStatusChangedAt ? "status_changed_at" : "created_at";
     const groups = new Map();
     for (const p of pages) {
@@ -273,7 +324,7 @@ class ActivityFeed {
       customJS.BeaconCards.render(dv, {
         pages: groups.get(k),
         layout: "row",
-        title: (p) => p && p.file && p.file.name,
+        title: titleFn,
         meta: (p) => (p && p.type) ? String(p.type) : "",
       });
     }

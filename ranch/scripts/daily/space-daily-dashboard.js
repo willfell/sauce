@@ -26,6 +26,21 @@
  * - Task <li>: added word-break: break-word + overflow-wrap: anywhere so
  *   long URL-y / no-space task strings wrap instead of forcing a scrollbar.
  *
+ * v0.3.2 (v0.64.2) PATCH:
+ *  - Activity panel allowlist drops `scratch-day` + `to-do` — both are
+ *    per-day auto-created notes that flood the activity stream with
+ *    predictable daily noise (one new entry every morning each).
+ *  - Smart title resolver `_resolveTitle(p)` — tries `title:` frontmatter,
+ *    then `aliases[0]`, then first heading in `file.outline`, then falls
+ *    back to filename. Surfaces user-meaningful titles for timestamp-named
+ *    scratches once the user adds `title:` or `aliases:`.
+ *  - Visual polish: each of the 3 main sections (Tasks / Meetings /
+ *    Activity) wrapped in `<details>` with a colored left border
+ *    (cyan / blue / purple); default open. Activity sub-groups (one per
+ *    blueprint type) wrapped in `<details>` via ActivityFeed's new
+ *    `collapsible: true` + `colorByType` opts; default closed; summary line
+ *    shows blueprint name + count + colored stripe.
+ *
  * v0.3.1 (v0.64.1) PATCH:
  *  - BUGFIX: activityShim now delegates `.pages` to the real dv (was a thin
  *    {container} shim, which broke ActivityFeed._query's `dv.pages()` call
@@ -118,11 +133,15 @@ class SpaceDailyDashboard {
     `;
 
     if (tasks.length > 0) {
-      const tasksSection = container.createEl("div", { cls: "section" });
-      tasksSection.style.cssText = "margin-bottom: 16px;";
+      // v0.5.2 (v0.64.2): wrap each main section in <details> for collapsibility;
+      // default OPEN so the dashboard is immediately useful at-a-glance.
+      const tasksSection = container.createEl("details", { cls: "section" });
+      tasksSection.open = true;
+      const tasksColor = this._BLUEPRINT_COLORS.tasks;
+      tasksSection.style.cssText = `margin-bottom: 16px; padding: 0.5em 0.75em; border-left: 4px solid ${tasksColor}; background: var(--background-primary-alt); border-radius: 4px;`;
 
-      const tasksHeader = tasksSection.createEl("div", { cls: "section-header" });
-      tasksHeader.innerHTML = `${icons.checkSquare} <span>Today's Tasks</span>`;
+      const tasksHeader = tasksSection.createEl("summary", { cls: "section-header" });
+      tasksHeader.innerHTML = `${icons.checkSquare} <span>Today's Tasks (${tasks.length})</span>`;
       tasksHeader.style.cssText = `
         display: flex;
         align-items: center;
@@ -131,6 +150,8 @@ class SpaceDailyDashboard {
         font-weight: 600;
         color: var(--text-normal);
         margin-bottom: 10px;
+        cursor: pointer;
+        user-select: none;
       `;
 
       const tasksList = tasksSection.createEl("ul");
@@ -164,10 +185,13 @@ class SpaceDailyDashboard {
     }
 
     if (meetings.length > 0) {
-      const meetingsSection = container.createEl("div", { cls: "section" });
+      const meetingsSection = container.createEl("details", { cls: "section" });
+      meetingsSection.open = true;
+      const meetingsColor = this._BLUEPRINT_COLORS.meetings;
+      meetingsSection.style.cssText = `margin-bottom: 16px; padding: 0.5em 0.75em; border-left: 4px solid ${meetingsColor}; background: var(--background-primary-alt); border-radius: 4px;`;
 
-      const meetingsHeader = meetingsSection.createEl("div", { cls: "section-header" });
-      meetingsHeader.innerHTML = `${icons.calendar} <span>Today's Meetings</span>`;
+      const meetingsHeader = meetingsSection.createEl("summary", { cls: "section-header" });
+      meetingsHeader.innerHTML = `${icons.calendar} <span>Today's Meetings (${meetings.length})</span>`;
       meetingsHeader.style.cssText = `
         display: flex;
         align-items: center;
@@ -176,6 +200,8 @@ class SpaceDailyDashboard {
         font-weight: 600;
         color: var(--text-normal);
         margin-bottom: 10px;
+        cursor: pointer;
+        user-select: none;
       `;
 
       const meetingsPanel = meetingsSection.createEl("div");
@@ -195,11 +221,13 @@ class SpaceDailyDashboard {
     }
 
     if (activityCount > 0) {
-      const activitySection = container.createEl("div", { cls: "section" });
-      activitySection.style.cssText = "margin-top: 16px;";
+      const activitySection = container.createEl("details", { cls: "section" });
+      activitySection.open = true;
+      const activityColor = this._BLUEPRINT_COLORS.activity;
+      activitySection.style.cssText = `margin-top: 16px; padding: 0.5em 0.75em; border-left: 4px solid ${activityColor}; background: var(--background-primary-alt); border-radius: 4px;`;
 
-      const activityHeader = activitySection.createEl("div", { cls: "section-header" });
-      activityHeader.innerHTML = `${icons.zap} <span>Today's Activity</span>`;
+      const activityHeader = activitySection.createEl("summary", { cls: "section-header" });
+      activityHeader.innerHTML = `${icons.zap} <span>Today's Activity (${activityCount})</span>`;
       activityHeader.style.cssText = `
         display: flex;
         align-items: center;
@@ -208,6 +236,8 @@ class SpaceDailyDashboard {
         font-weight: 600;
         color: var(--text-normal);
         margin-bottom: 10px;
+        cursor: pointer;
+        user-select: none;
       `;
 
       const activityPanel = activitySection.createEl("div");
@@ -226,6 +256,10 @@ class SpaceDailyDashboard {
           includeMtime: true,
           groupBy: "blueprint",
           blueprints: this._DEFAULT_DASHBOARD_BLUEPRINTS,
+          // v0.5.2 (v0.64.2): smart title resolver + collapsible sub-groups + color stripes
+          getTitle: (p) => this._resolveTitle(p),
+          collapsible: true,
+          colorByType: this._BLUEPRINT_COLORS,
         });
       } else {
         const warn = activityPanel.createEl("p");
@@ -270,11 +304,66 @@ class SpaceDailyDashboard {
   }
 
   get _DEFAULT_DASHBOARD_BLUEPRINTS() {
+    // v0.5.2 (v0.64.2): drop scratch-day + to-do — both are per-day auto-created
+    // notes that pollute the activity panel with predictable daily noise.
+    // The user creates a fresh ToDo-YYYY-MM-DD.md every morning and a
+    // Scratch-Day-YYYY-MM-DD.md whenever a scratch is taken; neither is a
+    // meaningful "activity" signal.
     return [
-      "meeting", "scratch", "scratch-day", "to-do", "journal",
+      "meeting", "scratch", "journal",
       "project", "person", "team", "product", "trip",
       "budget", "paycheck", "invoice"
     ];
+  }
+
+  /**
+   * v0.5.2 (v0.64.2): per-blueprint accent color map. Drives the left-border
+   * stripe on each collapsible activity sub-group + the main-section borders
+   * (Tasks / Meetings / Activity). Obsidian theme variables themable.
+   */
+  get _BLUEPRINT_COLORS() {
+    return {
+      // Activity-feed groups
+      meeting:   "var(--color-blue)",
+      scratch:   "var(--color-orange)",
+      project:   "var(--color-green)",
+      person:    "var(--color-purple)",
+      team:      "var(--color-pink)",
+      product:   "var(--color-yellow)",
+      trip:      "var(--color-cyan)",
+      journal:   "var(--color-red)",
+      budget:    "var(--color-green)",
+      paycheck:  "var(--color-green)",
+      invoice:   "var(--color-green)",
+      // Main dashboard sections (used by the 3 main wrappers)
+      tasks:     "var(--color-cyan)",
+      meetings:  "var(--color-blue)",
+      activity:  "var(--color-purple)",
+    };
+  }
+
+  /**
+   * v0.5.2 (v0.64.2): smart title resolver. Falls back to filename when
+   * no friendlier source is available. Order:
+   *   1. frontmatter `title:`
+   *   2. frontmatter `aliases[0]`
+   *   3. first heading in `file.outline` (Dataview-supplied)
+   *   4. `file.name` (always present)
+   */
+  _resolveTitle(p) {
+    if (!p) return "";
+    if (p.title && String(p.title).trim()) return String(p.title).trim();
+    const aliases = p.file && p.file.aliases;
+    if (aliases) {
+      const a0 = aliases.length > 0 ? aliases[0] : (aliases.values && aliases.values()[0]);
+      if (a0 && String(a0).trim()) return String(a0).trim();
+    }
+    const outline = p.file && p.file.outline;
+    if (Array.isArray(outline) && outline.length > 0) {
+      const t0 = outline[0] && (outline[0].text || outline[0].name);
+      if (t0 && String(t0).trim()) return String(t0).trim();
+    }
+    return p.file && p.file.name ? String(p.file.name) : "";
   }
 
   /**
