@@ -1,0 +1,16 @@
+{
+  "name": "backlink-panel",
+  "version": "0.1.0",
+  "kind": "mechanism",
+  "description": "Universal cross-blueprint backlink renderer. BacklinkPanel.render(dv, opts) — reverse-queries the 6 canonical cross-ref keys (people:/projects:/teams:/products:/trips:/meetings:) and renders matching notes via customJS.BeaconCards. One Dataview query template parameterized by entityType. Materialized on Person/Project/Team/Product/Trip atlas pages from FA-8 payoff cycle (v0.61.0).",
+  "depends_on": [
+    { "name": "customjs-guard", "range": ">=1.0.0" },
+    { "name": "cards",          "range": ">=0.2.5" }
+  ],
+  "customjs_classes": ["BacklinkPanel"],
+  "files": [
+    { "source": "backlink-panel.js", "dest": "{{scripts_path}}/backlink-panel/backlink-panel.js" }
+  ],
+  "post_install": [],
+  "rule_fragments": []
+}
