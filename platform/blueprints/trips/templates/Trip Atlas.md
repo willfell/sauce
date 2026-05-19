@@ -23,3 +23,13 @@ await dv.view("ranch/views/customjs-guard", { class: "TripNavButtons" });
 ```dataviewjs
 await dv.view("ranch/views/customjs-guard", { class: "TripSectionsCards" });
 ```
+
+## Mentions
+
+```dataviewjs
+await dv.view("ranch/views/customjs-guard", {
+  class: "BacklinkPanel",
+  method: "render",
+  args: [{ entityType: "trip" }]
+});
+```

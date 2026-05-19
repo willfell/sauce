@@ -1,14 +1,15 @@
 {
   "name": "trips",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "kind": "blueprint",
   "module_directory": "trips",
-  "description": "Per-trip ecosystem under spice/trips/<slug>/. Each trip is a flat folder with an atlas note + 5 baseline sections (Flights, Stay, Packing List, To Do, Notes). Hub at spice/trips/Trips.md lists trips as BeaconCards row-layout cards sorted upcoming-first. 'New Trip' button scaffolds the directory tree from a name + dates + location dialog. Per-trip nav buttons auto-discover sibling sections. v0.2.0 MINOR (v0.58.0 FA-6): canonical-vocab adoption per Frontmatter Alignment workstream. Trip Atlas + Trip Board Card templates emit canonical created_at: (ISO+TZ; replaces legacy created:). Trip Atlas attending: renamed to canonical people: (plural wikilink list per canonical narrowing — entity-people is the cross-blueprint canonical key; trips' attending was the legacy semantic narrowing). Discriminator tag trip stripped from Trip Atlas template (functional kanban-card / trip-card / trips-hub tags retained). Trip Board Card temporal date tag stripped. TripNavButtons helper emits ISO+TZ created_at via NEW _isoWithTz method (replaces legacy YYYY-MM-DD HH:mm dateStr). 2 existing rule_fragments declare extends: _canonical-vocab; Trip Atlas rule drops attending requirement + adds optional people requirement + drops trip required_tag.",
+  "description": "Per-trip ecosystem under spice/trips/<slug>/. Each trip is a flat folder with an atlas note + 5 baseline sections (Flights, Stay, Packing List, To Do, Notes). Hub at spice/trips/Trips.md lists trips as BeaconCards row-layout cards sorted upcoming-first. 'New Trip' button scaffolds the directory tree from a name + dates + location dialog. Per-trip nav buttons auto-discover sibling sections. v0.2.0 MINOR (v0.58.0 FA-6): canonical-vocab adoption per Frontmatter Alignment workstream. Trip Atlas + Trip Board Card templates emit canonical created_at: (ISO+TZ; replaces legacy created:). Trip Atlas attending: renamed to canonical people: (plural wikilink list per canonical narrowing — entity-people is the cross-blueprint canonical key; trips' attending was the legacy semantic narrowing). Discriminator tag trip stripped from Trip Atlas template (functional kanban-card / trip-card / trips-hub tags retained). Trip Board Card temporal date tag stripped. TripNavButtons helper emits ISO+TZ created_at via NEW _isoWithTz method (replaces legacy YYYY-MM-DD HH:mm dateStr). 2 existing rule_fragments declare extends: _canonical-vocab; Trip Atlas rule drops attending requirement + adds optional people requirement + drops trip required_tag. v0.3.0 MINOR (v0.61.0 FA-8): depends_on backlink-panel >=0.1.0; Trip Atlas template grows ## Mentions H2 below TripSectionsCards block — universal cross-blueprint backlink panel via canonical trips: cross-ref reverse query.",
   "depends_on": [
-    { "name": "nav-buttons",    "range": ">=2.5.1" },
-    { "name": "customjs-guard", "range": ">=1.0.0" },
-    { "name": "cards",          "range": ">=0.1.1" },
-    { "name": "convenience",    "range": ">=0.1.0" }
+    { "name": "nav-buttons",     "range": ">=2.5.1" },
+    { "name": "customjs-guard",  "range": ">=1.0.0" },
+    { "name": "cards",           "range": ">=0.1.1" },
+    { "name": "convenience",     "range": ">=0.1.0" },
+    { "name": "backlink-panel",  "range": ">=0.1.0" }
   ],
   "customjs_classes": ["TripsHubCards", "TripNavButtons", "TripSectionsCards"],
   "files": [
