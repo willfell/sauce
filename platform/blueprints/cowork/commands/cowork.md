@@ -6,6 +6,10 @@ description: "Engagement-aware cowork bootstrap interview. Drives the 25-step `c
 
 Drives the v0.31.0+ cowork bootstrap-vault skill against the current vault.
 
+## Readiness panel (v0.65.0+)
+
+The Cowork hub now surfaces a live readiness panel — engagement bootstrap status, prompt-stub presence, MCP-routing status, and per-orchestrator last-run timestamps. Open `Cowork.md` to view.
+
 ## Timeframes
 
 The cowork blueprint owns three timeframe sub-hubs under `spice/cowork/`:
