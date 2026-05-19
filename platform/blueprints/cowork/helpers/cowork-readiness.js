@@ -103,5 +103,39 @@ class CoworkReadiness {
       }
       runsList.createEl("li").innerText = lastLine;
     }
+
+    // Row 5: Expected jobs (parsed from scheduled-jobs.md, cross-checked vs last-runs)
+    const jobsHeader = container.createEl("div");
+    jobsHeader.innerText = "Expected jobs:";
+    jobsHeader.style.cssText = "margin-top: 12px; font-weight: 600; font-size: 0.95em;";
+    let jobsLine = "(no scheduled-jobs.md — run cowork:onboard-scheduled-jobs)";
+    try {
+      const jobsPages = dv.pages('"spice/cowork"').where(p => p.file.name === "scheduled-jobs").array();
+      const jobsNote = jobsPages[0];
+      if (jobsNote && Array.isArray(jobsNote.file.tasks) === false) {
+        // Count table rows minus header — naive but works for our shipped template
+        const body = jobsNote.file.text || "";
+        const tableRows = (body.match(/^\|\s*cowork:/gm) || []).length;
+        if (tableRows === 0) {
+          jobsLine = "Expected jobs: 0 configured — run cowork:onboard-scheduled-jobs";
+        } else {
+          // Cross-check against last-runs: count how many of `orchestrators` have a recent run today
+          let firedToday = 0;
+          const todayYMD = window.moment().format("YYYY-MM-DD");
+          for (const orch of orchestrators) {
+            const recent = dv.pages('"spice/cowork"')
+              .where(p => p.type === orch.type && typeof p.created_at === "string" && p.created_at.startsWith(todayYMD))
+              .array();
+            if (recent.length > 0) firedToday++;
+          }
+          jobsLine = `Expected jobs: ${tableRows} configured · ${firedToday} fired today`;
+        }
+      }
+    } catch (e) {
+      // leave fallback
+    }
+    const jobsRowEl = container.createEl("div");
+    jobsRowEl.innerText = jobsLine;
+    jobsRowEl.style.cssText = "margin: 4px 0 0 0; font-size: 0.9em;";
   }
 }
