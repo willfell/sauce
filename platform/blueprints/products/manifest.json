@@ -1,15 +1,16 @@
 {
   "name": "products",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "kind": "blueprint",
   "module_directory": "products",
   "skills_dir": ".claude/skills/products",
-  "description": "Org-chart apex entity. Flat notes under spice/products/<Name>.md with hub at spice/products/Products.md. Referenced by teams (each Team has exactly one product) and projects (Project carries optional products: [] list). Per-Product page rolls up member teams + projects touching the product (direct membership union transitive via teams).",
+  "description": "Org-chart apex entity. Flat notes under spice/products/<Name>.md with hub at spice/products/Products.md. Referenced by teams (each Team has exactly one product) and projects (Project carries optional products: [] list). Per-Product page rolls up member teams + projects touching the product (direct membership union transitive via teams). v0.3.0 MINOR (v0.61.0 FA-8): depends_on backlink-panel >=0.1.0; Template, Product.md grows ## Mentions H2 below ProductPageCards block — universal cross-blueprint backlink panel via canonical products: cross-ref reverse query.",
   "depends_on": [
-    { "name": "customjs-guard", "range": ">=1.0.0" },
-    { "name": "nav-buttons",    "range": ">=2.6.0" },
-    { "name": "accent-button",  "range": ">=0.1.0" },
-    { "name": "cards",          "range": ">=0.2.4" }
+    { "name": "customjs-guard",  "range": ">=1.0.0" },
+    { "name": "nav-buttons",     "range": ">=2.6.0" },
+    { "name": "accent-button",   "range": ">=0.1.0" },
+    { "name": "cards",           "range": ">=0.2.4" },
+    { "name": "backlink-panel",  "range": ">=0.1.0" }
   ],
   "customjs_classes": ["ProductsHubCards", "ProductPageCards", "ProductActionButtons"],
   "files": [
