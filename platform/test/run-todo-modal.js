@@ -150,6 +150,60 @@ console.log('run-todo-modal:');
     assert('TM-5 migrated appears after placeholder', migratedIdx > placeholderIdx, `placeholder=${placeholderIdx} migrated=${migratedIdx}`);
 })();
 
+// --- TM-6: applyMigration against minimal-template tomorrow (no ## Tasks heading)
+//     appends at end of body (v0.63.3 minimal template path) ---
+(() => {
+    const today = [
+        '---',
+        'type: to-do',
+        '---',
+        '',
+        '```dataviewjs',
+        'await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });',
+        '```',
+        '',
+        '- [ ] free-form task',
+    ].join('\n');
+    const tomorrow = [
+        '---',
+        'type: to-do',
+        '---',
+        '',
+        '```dataviewjs',
+        'await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });',
+        '```',
+        '',
+    ].join('\n');
+    const blocks = ToDoMigrateModal.parseTasks(today);
+    assert('TM-6 parser finds task without ## Tasks heading', blocks.length === 1, `got ${blocks.length}`);
+    const result = ToDoMigrateModal.applyMigration(today, tomorrow, [0]);
+    assert('TM-6 today removes migrated', !result.today.includes('free-form task'), 'today:\n' + result.today);
+    assert('TM-6 tomorrow appended at end', /- \[ \] free-form task\n?$/.test(result.tomorrow.replace(/\s+$/, '\n')),
+        'tomorrow:\n' + result.tomorrow);
+    assert('TM-6 tomorrow preserves frontmatter', result.tomorrow.startsWith('---\ntype: to-do'));
+    assert('TM-6 tomorrow preserves dataviewjs', result.tomorrow.includes('SpaceNavButtons'));
+})();
+
+// --- TM-7: parseTasks finds tasks in a minimal-template source (no ## Tasks heading)
+//     AND correctly skips frontmatter when scanning ---
+(() => {
+    const md = [
+        '---',
+        'type: to-do',
+        'tags:',
+        '  - "- [ ] not-a-task-just-frontmatter"',
+        '---',
+        '',
+        '- [ ] real-task-1',
+        '- [ ] real-task-2',
+        '    - indented child of task-2',
+    ].join('\n');
+    const blocks = ToDoMigrateModal.parseTasks(md);
+    assert('TM-7 finds exactly 2 free-form tasks', blocks.length === 2, `got ${blocks.length}`);
+    assert('TM-7 first task text', blocks[0] && blocks[0].topLine === '- [ ] real-task-1');
+    assert('TM-7 second task with child', blocks[1] && blocks[1].childLines.length === 1);
+})();
+
 if (failures) {
     console.log(`run-todo-modal: ${failures} FAILURES`);
     process.exit(1);

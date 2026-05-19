@@ -41,7 +41,10 @@ class ToDoMigrateModal {
      */
     static parseTasks(content) {
         const lines = content.split('\n');
-        // Find ## Tasks section bounds.
+        // Find ## Tasks section bounds. If no `## Tasks` heading exists (e.g., the
+        // v0.63.3 minimal template removed `## Tasks` / `## Notes` / `- [ ]`
+        // placeholder), fall back to scanning the whole body after frontmatter so
+        // free-form tasks added directly under the dataviewjs blocks are findable.
         let tasksStart = -1;
         let tasksEnd = lines.length; // exclusive
         for (let i = 0; i < lines.length; i++) {
@@ -50,11 +53,24 @@ class ToDoMigrateModal {
                 break;
             }
         }
-        if (tasksStart === -1) return [];
-        for (let i = tasksStart; i < lines.length; i++) {
-            if (/^## /.test(lines[i])) {
-                tasksEnd = i;
-                break;
+        if (tasksStart === -1) {
+            // No heading — start after frontmatter (or at 0 if no frontmatter).
+            if (lines[0] !== undefined && lines[0].trim() === '---') {
+                for (let i = 1; i < lines.length; i++) {
+                    if (lines[i].trim() === '---') {
+                        tasksStart = i + 1;
+                        break;
+                    }
+                }
+            }
+            if (tasksStart === -1) tasksStart = 0;
+            tasksEnd = lines.length;
+        } else {
+            for (let i = tasksStart; i < lines.length; i++) {
+                if (/^## /.test(lines[i])) {
+                    tasksEnd = i;
+                    break;
+                }
             }
         }
 
@@ -106,20 +122,20 @@ class ToDoMigrateModal {
 
     /**
      * applyMigration: produce { today, tomorrow } string pair after moving the
-     * selected blocks from today to the end of tomorrow's ## Tasks section.
+     * selected blocks from today to tomorrow.
      *
      * - selectedIndices: array of block indices into parseTasks(today).
      * - Removes the (topLine + childLines) range from today's lines (using the
      *   startIdx/endIdx the parser returned).
-     * - Appends each block's topLine + childLines to the end of tomorrow's
-     *   ## Tasks section (immediately before the next `## ` heading or EOF).
-     * - Tomorrow MUST contain a `## Tasks` heading. If absent, returns tomorrow
-     *   unchanged (caller should have created it from template first).
+     * - If tomorrow has a `## Tasks` heading, appends migrated blocks at end of
+     *   that section (immediately before the next `## ` heading or EOF).
+     * - If tomorrow has no `## Tasks` heading (v0.63.3 minimal template), appends
+     *   migrated blocks at end of the file body, after one blank-line separator.
      */
     static applyMigration(todayContent, tomorrowContent, selectedIndices) {
         const blocks = ToDoMigrateModal.parseTasks(todayContent);
         const indices = [...selectedIndices].sort((a, b) => a - b);
-        // 1) Strip selected blocks from today (back-to-front so indices stay valid).
+        // 1) Strip selected blocks from today.
         const todayLines = todayContent.split('\n');
         const toRemove = new Set();
         for (const idx of indices) {
@@ -130,7 +146,15 @@ class ToDoMigrateModal {
         const todayKept = todayLines.filter((_, i) => !toRemove.has(i));
         const todayOut = todayKept.join('\n');
 
-        // 2) Append selected blocks to end of tomorrow's ## Tasks section.
+        // 2) Collect migrated content.
+        const appended = [];
+        for (const idx of indices) {
+            const b = blocks[idx];
+            if (!b) continue;
+            appended.push(b.topLine, ...b.childLines);
+        }
+
+        // 3) Locate tomorrow's `## Tasks` heading, if any.
         const tomorrowLines = tomorrowContent.split('\n');
         let tasksStart = -1;
         let tasksEnd = tomorrowLines.length;
@@ -140,31 +164,32 @@ class ToDoMigrateModal {
                 break;
             }
         }
+
+        let tomorrowOut;
         if (tasksStart === -1) {
-            return { today: todayOut, tomorrow: tomorrowContent };
-        }
-        for (let i = tasksStart; i < tomorrowLines.length; i++) {
-            if (/^## /.test(tomorrowLines[i])) {
-                tasksEnd = i;
-                break;
+            // No `## Tasks` heading — append migrated blocks at end of file
+            // body with one blank-line separator. v0.63.3 minimal template
+            // path; the migrated tasks become free-form bullets the user can
+            // organize manually.
+            const trimmed = tomorrowContent.replace(/\n+$/, '');
+            const sep = trimmed.length ? '\n\n' : '';
+            tomorrowOut = trimmed + sep + appended.join('\n') + '\n';
+        } else {
+            for (let i = tasksStart; i < tomorrowLines.length; i++) {
+                if (/^## /.test(tomorrowLines[i])) {
+                    tasksEnd = i;
+                    break;
+                }
             }
+            // Insertion point: just before tasksEnd, skipping trailing blanks.
+            let insertAt = tasksEnd;
+            while (insertAt > tasksStart && tomorrowLines[insertAt - 1].trim() === '') {
+                insertAt--;
+            }
+            const before = tomorrowLines.slice(0, insertAt);
+            const after = tomorrowLines.slice(insertAt);
+            tomorrowOut = [...before, ...appended, ...after].join('\n');
         }
-        // Insertion point: just before tasksEnd, but skip trailing blank lines
-        // that immediately precede the next heading, so appended tasks attach
-        // cleanly to the task list.
-        let insertAt = tasksEnd;
-        while (insertAt > tasksStart && tomorrowLines[insertAt - 1].trim() === '') {
-            insertAt--;
-        }
-        const appended = [];
-        for (const idx of indices) {
-            const b = blocks[idx];
-            if (!b) continue;
-            appended.push(b.topLine, ...b.childLines);
-        }
-        const before = tomorrowLines.slice(0, insertAt);
-        const after = tomorrowLines.slice(insertAt);
-        const tomorrowOut = [...before, ...appended, ...after].join('\n');
 
         return { today: todayOut, tomorrow: tomorrowOut };
     }
@@ -431,12 +456,6 @@ class ToDoMigrateModal {
         lines.push('```dataviewjs');
         lines.push('await dv.view("ranch/views/customjs-guard", { class: "ToDoLeafActions" });');
         lines.push('```');
-        lines.push('');
-        lines.push('## Tasks');
-        lines.push('');
-        lines.push('- [ ]');
-        lines.push('');
-        lines.push('## Notes');
         lines.push('');
         return lines.join('\n');
     }
