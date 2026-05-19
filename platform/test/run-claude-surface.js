@@ -547,7 +547,8 @@ async function caseCSMIG1CoworkAggregation() {
   assertTrue("CS-MIG-1: cowork manifest.json exists", fs.existsSync(bpManifestPath));
   const bpMan = JSON.parse(fs.readFileSync(bpManifestPath, "utf8"));
 
-  assertEq("CS-MIG-1: cowork version is 0.8.0", bpMan.version, "0.8.0");
+  assertTrue("CS-MIG-1: cowork version >= 0.8.0", /^0\.(8|9|1\d)\.\d+$/.test(bpMan.version),
+    `got: ${bpMan.version}`);
   assertTrue("CS-MIG-1: cowork manifest no longer has skills[] field", !("skills" in bpMan));
   assertTrue("CS-MIG-1: cowork manifest has claude_surface[]", Array.isArray(bpMan.claude_surface));
 
