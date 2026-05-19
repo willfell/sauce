@@ -62,10 +62,10 @@ If the panel does not render (or appears with stale data), trigger Cmd+R after i
 
 ## Cowork callout anchor
 
-A hidden HTML anchor is materialized above the `## Notes` heading in the daily template (v0.2.5 contract):
+A hidden Obsidian-comment anchor is materialized above the `## Notes` heading in the daily template (v0.2.5 contract; switched from HTML-comment to Obsidian `%% %%` syntax in v0.5.1 / v0.64.1 so the anchor is invisible in BOTH source AND reading mode):
 
 ```
-<!-- COWORK_CALLOUTS -->
+%% COWORK_CALLOUTS %%
 
 ## Notes
 ```

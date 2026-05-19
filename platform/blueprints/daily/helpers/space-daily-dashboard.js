@@ -26,6 +26,15 @@
  * - Task <li>: added word-break: break-word + overflow-wrap: anywhere so
  *   long URL-y / no-space task strings wrap instead of forcing a scrollbar.
  *
+ * v0.3.1 (v0.64.1) PATCH:
+ *  - BUGFIX: activityShim now delegates `.pages` to the real dv (was a thin
+ *    {container} shim, which broke ActivityFeed._query's `dv.pages()` call
+ *    with "dv.pages is not a function" — Activity panel never rendered).
+ *  - Tasks panel: render markdown links `[text](url)` + wikilinks `[[target]]`
+ *    as clickable HTML anchors via new `_renderTaskHTML(text)` helper. LI
+ *    click still opens the parent daily note for clicks outside any anchor;
+ *    wikilink anchors wire onclick → app.workspace.openLinkText.
+ *
  * v0.3.0 (v0.64.0): third Activity panel below meetings. Delegates to
  * customJS.ActivityFeed.render(...) with { scope: "today", asOf:
  * <day-from-filename>, includeMtime: true, groupBy: "blueprint" }. Excludes
@@ -132,8 +141,25 @@ class SpaceDailyDashboard {
         // v0.2.6: word-break + overflow-wrap protect against long task strings
         // (URLs, hashes, no-space text) overflowing the dashboard.
         li.style.cssText = "margin: 6px 0; font-size: 0.9em; cursor: pointer; word-break: break-word; overflow-wrap: anywhere;";
-        li.innerText = task.text;
-        li.onclick = () => app.workspace.openLinkText(task.parentPath, "");
+        // v0.5.1 (v0.64.1): render markdown links + wikilinks as clickable
+        // anchors. Plain-text clicks (outside any <a>) still open the parent
+        // daily note via the LI's onclick.
+        li.innerHTML = this._renderTaskHTML(task.text);
+        li.onclick = (e) => {
+          // Don't intercept clicks that land on inline anchors.
+          if (e.target && (e.target.tagName === "A" || (e.target.closest && e.target.closest("a")))) return;
+          app.workspace.openLinkText(task.parentPath, "");
+        };
+        // Wire wikilink anchors to Obsidian's link-open API.
+        const wikilinks = li.querySelectorAll("a.internal-link");
+        for (const a of wikilinks) {
+          a.onclick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const target = a.getAttribute("data-href") || a.textContent || "";
+            app.workspace.openLinkText(target, task.parentPath);
+          };
+        }
       }
     }
 
@@ -185,7 +211,14 @@ class SpaceDailyDashboard {
       `;
 
       const activityPanel = activitySection.createEl("div");
-      const activityShim = { container: activityPanel };
+      // v0.5.1 (v0.64.1) bugfix: shim must delegate `.pages` to the real dv —
+      // ActivityFeed.render() calls dv.pages().where(...).sort(...).slice(...)
+      // internally. The v0.5.0 shim only had `.container`, so the query failed
+      // with "dv.pages is not a function" and the panel never rendered.
+      const activityShim = {
+        container: activityPanel,
+        pages: (...args) => dv.pages(...args),
+      };
       if (customJS && customJS.ActivityFeed && typeof customJS.ActivityFeed.render === "function") {
         await customJS.ActivityFeed.render(activityShim, {
           scope: "today",
@@ -242,5 +275,74 @@ class SpaceDailyDashboard {
       "project", "person", "team", "product", "trip",
       "budget", "paycheck", "invoice"
     ];
+  }
+
+  /**
+   * v0.5.1 (v0.64.1): convert task text containing markdown links + wikilinks
+   * into safe HTML for innerHTML rendering. All non-link content is HTML-escaped.
+   *  - `[text](url)` → external <a target="_blank">
+   *  - `[[target]]` / `[[target|alias]]` → internal <a class="internal-link">
+   *    (caller wires onclick → app.workspace.openLinkText)
+   */
+  _renderTaskHTML(text) {
+    const escapeHtml = (s) => String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+
+    // Process in segments: split on link tokens, escape literal segments,
+    // emit anchor HTML for link tokens. Two-pass scan keeps wikilink matches
+    // from interfering with markdown-link matches (and vice versa).
+    const tokens = [];
+    let i = 0;
+    while (i < text.length) {
+      // Try wikilink [[...]] first (must come before markdown-link probe
+      // because [[x]] starts with [[ which markdown-link's [ would also match).
+      if (text.charAt(i) === "[" && text.charAt(i + 1) === "[") {
+        const end = text.indexOf("]]", i + 2);
+        if (end >= 0) {
+          const inner = text.slice(i + 2, end);
+          const pipe = inner.indexOf("|");
+          const target = (pipe >= 0 ? inner.slice(0, pipe) : inner).trim();
+          const alias  = pipe >= 0 ? inner.slice(pipe + 1).trim() : target;
+          tokens.push({ kind: "wikilink", target, alias });
+          i = end + 2;
+          continue;
+        }
+      }
+      // Markdown link [text](url)
+      if (text.charAt(i) === "[") {
+        const closeBracket = text.indexOf("]", i + 1);
+        if (closeBracket >= 0 && text.charAt(closeBracket + 1) === "(") {
+          const closeParen = text.indexOf(")", closeBracket + 2);
+          if (closeParen >= 0) {
+            const linkText = text.slice(i + 1, closeBracket);
+            const url      = text.slice(closeBracket + 2, closeParen);
+            tokens.push({ kind: "mdlink", text: linkText, url });
+            i = closeParen + 1;
+            continue;
+          }
+        }
+      }
+      // Literal char — accumulate to next token
+      let j = i;
+      while (j < text.length && text.charAt(j) !== "[") j++;
+      if (j === i) j = i + 1; // safety against zero-width
+      tokens.push({ kind: "text", value: text.slice(i, j) });
+      i = j;
+    }
+
+    let html = "";
+    for (const tok of tokens) {
+      if (tok.kind === "text") {
+        html += escapeHtml(tok.value);
+      } else if (tok.kind === "mdlink") {
+        html += `<a href="${escapeHtml(tok.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(tok.text)}</a>`;
+      } else if (tok.kind === "wikilink") {
+        html += `<a href="#" class="internal-link" data-href="${escapeHtml(tok.target)}">${escapeHtml(tok.alias)}</a>`;
+      }
+    }
+    return html;
   }
 }

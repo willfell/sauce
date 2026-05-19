@@ -4434,7 +4434,7 @@ async function caseDDT1DailyTemplateShape() {
   const ok =
     /tp\.date\.now\("YYYY-MM-DD"/.test(body) &&
     /^type: cowork-daily$/m.test(body) &&
-    /<!-- COWORK_CALLOUTS -->/.test(body) &&
+    /%% COWORK_CALLOUTS %%/.test(body) &&
     /SpaceDailyDashboard/.test(body) &&
     !/CoworkHubNav/.test(body);
   assertTrue("DD-T1: daily-template.md content shape regressed", ok);
@@ -4453,6 +4453,35 @@ async function caseDDA1DashboardActivityPanel() {
     /hasContent\s*=.*activityCount/.test(body) &&
     /icons\.zap/.test(body);
   assertTrue("DD-A1: SpaceDailyDashboard activity panel structure regressed", ok);
+}
+
+async function caseDDA2ActivityShimPagesDelegate() {
+  // v0.5.1 (v0.64.1) BUGFIX guard. v0.5.0 shim was `{ container: activityPanel }`
+  // only; ActivityFeed._query calls dv.pages() and failed with
+  // "dv.pages is not a function". Shim MUST delegate .pages to the real dv.
+  console.log("\n--- Case DD-A2: activity-panel shim delegates .pages to real dv ---");
+  const p = path.join(BLUEPRINTS_DIR, "daily", "helpers", "space-daily-dashboard.js");
+  const body = fs.readFileSync(p, "utf8");
+  const ok =
+    /pages\s*:\s*\([^)]*\)\s*=>\s*dv\.pages\(/.test(body) ||
+    /pages\s*:\s*function/.test(body) ||
+    /pages\s*:\s*dv\.pages\.bind/.test(body);
+  assertTrue("DD-A2: activity-panel shim missing .pages delegate (v0.5.0 regression)", ok);
+}
+
+async function caseDDA3TaskMarkdownRenderHelper() {
+  // v0.5.1 (v0.64.1): tasks panel renders markdown links + wikilinks as
+  // clickable HTML anchors via _renderTaskHTML(text). Guards the helper
+  // exists + LI uses innerHTML + LI onclick guards against anchor clicks.
+  console.log("\n--- Case DD-A3: tasks panel markdown link rendering ---");
+  const p = path.join(BLUEPRINTS_DIR, "daily", "helpers", "space-daily-dashboard.js");
+  const body = fs.readFileSync(p, "utf8");
+  const ok =
+    /_renderTaskHTML\s*\(/.test(body) &&
+    /li\.innerHTML\s*=\s*this\._renderTaskHTML\(task\.text\)/.test(body) &&
+    /closest\s*\(\s*["']a["']\s*\)/.test(body) &&
+    /a\.internal-link/.test(body);
+  assertTrue("DD-A3: tasks panel markdown render helper / LI rewire regressed", ok);
 }
 
 // ============================================================
@@ -7124,8 +7153,11 @@ async function caseFA2RuleFragmentsExtends() {
   await caseAFLint3DefaultBlueprints();
 
   // v0.64.0 S5 — daily-template + SpaceDailyDashboard activity-panel (2 sub-asserts).
+  // v0.64.1 (v0.5.1) — +2 BUGFIX guards (DD-A2 shim.pages delegate; DD-A3 markdown helper).
   await caseDDT1DailyTemplateShape();
   await caseDDA1DashboardActivityPanel();
+  await caseDDA2ActivityShimPagesDelegate();
+  await caseDDA3TaskMarkdownRenderHelper();
 
   // v0.42.0 S9 — cowork@0.4.0 helper structural/materialization checks (18 sub-asserts).
   await caseCOWORKDaily1Materialized();

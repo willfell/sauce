@@ -8,7 +8,7 @@ tags: [cowork, orchestrator, morning, engagement-aware]
 
 # cowork:morning-briefing
 
-Composes a morning callout block for one engagement (Morning Briefing + optional Finance + optional Email + optional Messages) and an Open Threads tail, then patches them into today's daily note. The first four callouts go above the `<!-- COWORK_CALLOUTS -->` marker; Open Threads goes at the bottom after `## Notes`. Aborts cleanly on MCP unavailability — never partially writes. Re-runs are idempotent: the morning H2 block for this `(cadence, engagement_id)` pair is replaced if it already exists for today.
+Composes a morning callout block for one engagement (Morning Briefing + optional Finance + optional Email + optional Messages) and an Open Threads tail, then patches them into today's daily note. The first four callouts go above the `%% COWORK_CALLOUTS %%` marker; Open Threads goes at the bottom after `## Notes`. Aborts cleanly on MCP unavailability — never partially writes. Re-runs are idempotent: the morning H2 block for this `(cadence, engagement_id)` pair is replaced if it already exists for today.
 
 ## Inputs
 
@@ -43,7 +43,7 @@ Each gather call passes `engagement_id`. The sub-skill reads per-engagement MCP-
 13. If `render_aspects.finance_block == "include"`: use Skill `cowork:write-callout-finance` with `{ engagement, date: context.today, finance_yesterday: <step 9.markdown>, cc_debt_snapshot: <step 10.markdown> }`. Capture `finance_block`. Else `finance_block = ""`.
 14. Use Skill `cowork:write-callout-morning-briefing` with `{ engagement, render_aspects: type_manifest.render_aspects, date: context.today, weekday: context.dddd, weather: <step 5.markdown or "">, calendar: <step 6.markdown>, gmail: <step 7.markdown>, imessage: <step 8.markdown or "">, threads_digest: <step 12.markdown>, finance_block, tasks: <step 11 rendered as markdown>, people: <step 11.people_nudges rendered as markdown> }`. Capture `briefing_markdown`. The sub-skill internally branches on `engagement.type` to pick the per-type callout shape.
 15. Compose the Open Threads tail callout from step 12; if no open threads, `tail_blocks = []`.
-16. Use Skill `cowork:patch-daily-callouts` with `{ engagement_id, daily_path: context.daily_path, callouts: [{ id: "morning-briefing", body: <briefing_markdown> }], tail_blocks: <tail_blocks> }`. The sub-skill writes the morning H2 block under `## Morning — <engagement.label>` within the `<!-- COWORK_CALLOUTS -->` block; idempotent replace by `(cadence, engagement_id)`.
+16. Use Skill `cowork:patch-daily-callouts` with `{ engagement_id, daily_path: context.daily_path, callouts: [{ id: "morning-briefing", body: <briefing_markdown> }], tail_blocks: <tail_blocks> }`. The sub-skill writes the morning H2 block under `## Morning — <engagement.label>` within the `%% COWORK_CALLOUTS %%` block; idempotent replace by `(cadence, engagement_id)`.
 
 ## State
 

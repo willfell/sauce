@@ -40,7 +40,7 @@ Skipped (early-exit silently) for engagements whose `render_aspects.finance_bloc
 
 8. If `red_charges.length > 0`: use Skill `cowork:write-callout-tripwire-red` with `{ engagement, date: context.today, charges: <red_charges as md table>, trigger_reason: "Locked card charged" }`. Capture `red_md`.
 9. If `yellow_charges.length > 0`: use Skill `cowork:write-callout-tripwire-yellow` with `{ engagement, date: context.today, charges: <yellow_charges as md table>, top_merchant_today_total: "$<step 5.top_merchant_today_total>", mtd_discretionary: "Discretionary month-to-date: $<step 5.mtd_discretionary>.", days_since_last_splurge: "<step 5.days_since_splurge_pre> days clean before this charge." }`. Capture `yellow_md`.
-10. Use Skill `cowork:patch-daily-callouts` with `{ engagement_id, daily_path: context.daily_path, callouts: [{ id: "tripwire-red", body: <red_md or ""> }, { id: "tripwire-yellow", body: <yellow_md or ""> }] }`. Tripwire callouts nest under the `## Midday — <engagement.label>` H2 within the `<!-- COWORK_CALLOUTS -->` block.
+10. Use Skill `cowork:patch-daily-callouts` with `{ engagement_id, daily_path: context.daily_path, callouts: [{ id: "tripwire-red", body: <red_md or ""> }, { id: "tripwire-yellow", body: <yellow_md or ""> }] }`. Tripwire callouts nest under the `## Midday — <engagement.label>` H2 within the `%% COWORK_CALLOUTS %%` block.
 
 ## State
 

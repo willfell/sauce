@@ -81,7 +81,7 @@ If `resume_from_step` is set, skip steps `< resume_from_step` and pick up from t
      - If `bootstrap_contributions[]` field is present + non-empty, accumulate into `contributions_registry = { <blueprint>: [...], ... }`.
      - Absent or empty → passive blueprint, skip.
 
-10. Probe vault surface via `mcp__obsidian__list_directory` at `spice/`. For each `<module>` dir present, shallow `list_directory` to count entries. Capture `vault_surface = { <module>_count, ... }`. Read `<vault>/ranch/templates/Daily Note.md` and confirm `<!-- COWORK_CALLOUTS -->` anchor is present — if missing, emit the following Notice verbatim and exit:
+10. Probe vault surface via `mcp__obsidian__list_directory` at `spice/`. For each `<module>` dir present, shallow `list_directory` to count entries. Capture `vault_surface = { <module>_count, ... }`. Read `<vault>/ranch/templates/Daily Note.md` and confirm `%% COWORK_CALLOUTS %%` anchor is present — if missing, emit the following Notice verbatim and exit:
 
     ```
     cowork:bootstrap-vault aborted -- daily blueprint upgrade required; run "sauce update" and re-invoke
@@ -259,7 +259,7 @@ This orchestrator does NOT write to:
 | `obsidian` MCP missing | Step 1 exits cleanly with Notice. No state written. |
 | `platform-installed.json` lacks cowork | Step 3 exits cleanly with Notice. |
 | v0.30.0 legacy state detected | Step 4 exits cleanly with the detailed Notice. No state mutated. |
-| `<!-- COWORK_CALLOUTS -->` anchor missing in daily template | Step 10 exits cleanly with Notice prompting `sauce update`. |
+| `%% COWORK_CALLOUTS %%` anchor missing in daily template | Step 10 exits cleanly with Notice prompting `sauce update`. |
 | User-supplied invalid engagement ID | Step 13a re-asks until valid. |
 | User-supplied unregistered engagement type | Step 13b re-asks until valid. |
 | Required field left blank | Step 13c re-asks (required fields cannot default). |

@@ -32,7 +32,7 @@ Idempotently guarantees today's daily note exists at the sauce-shape path so dow
    - On success: return `{ path, status: "exists" }`. STOP.
    - On not-found error: continue to step 3.
    - On other error (auth, timeout, malformed): return `{ path, status: "failed:read-error" }`. Do not attempt creation.
-3. Read the canonical daily template at `ranch/templates/Daily Note.md` via `mcp__obsidian__read_note`. This template is materialized by the `daily` blueprint and ships the `<!-- COWORK_CALLOUTS -->` anchor (daily@0.2.5+).
+3. Read the canonical daily template at `ranch/templates/Daily Note.md` via `mcp__obsidian__read_note`. This template is materialized by the `daily` blueprint and ships the `%% COWORK_CALLOUTS %%` anchor (daily@0.2.5+; switched from `<!-- HTML comment -->` to Obsidian `%% %%` syntax in daily@0.5.1 / v0.64.1).
    - If template missing: return `{ path, status: "failed:template-missing" }`. Do not write a hand-rolled note - the cowork callout writers depend on the anchor + nav-buttons block.
 4. Substitute date variables in the template body. The daily template uses Templater syntax (`<% tp.date.now(...) %>`) but cron-fired sessions cannot run Templater, so this skill must perform string substitution BEFORE writing:
    - Replace `<% tp.date.now("YYYY-MM-DD") %>` and `<% tp.file.title %>`-derived expressions with the supplied `date`.

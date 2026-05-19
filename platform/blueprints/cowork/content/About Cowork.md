@@ -21,7 +21,7 @@ await dv.view("ranch/views/customjs-guard", { class: "CoworkHubNav" });
 > [!abstract] What is cowork?
 > The cowork blueprint is the automation layer that lets Claude run scheduled jobs against your vault using your connected MCP servers. Each orchestrator is a native Claude Code skill materialized to `<vault>/.claude/skills/cowork/` at install time. A cron schedule fires Claude with a one-line invocation (e.g. `cowork:morning-briefing --engagement_id accuris`); Claude loads the orchestrator's SKILL.md, resolves the engagement from `vault-config.md`, delegates to sub-skills for gathering + writing, and patches your daily note, weekly summary, or context state.
 >
-> Cowork is **engagement-aware**. A vault may host one or more engagements (`personal`, `w2-fte`, `consulting`) — each is a named slice with its own MCP scoping (gmail label, calendar id), render-aspects (which sections to compose), and cadence enablement. Every orchestrator takes `engagement_id` as input; outputs flow into per-engagement H2 sections within the daily note's `<!-- COWORK_CALLOUTS -->` block.
+> Cowork is **engagement-aware**. A vault may host one or more engagements (`personal`, `w2-fte`, `consulting`) — each is a named slice with its own MCP scoping (gmail label, calendar id), render-aspects (which sections to compose), and cadence enablement. Every orchestrator takes `engagement_id` as input; outputs flow into per-engagement H2 sections within the daily note's `%% COWORK_CALLOUTS %%` block.
 
 ---
 
