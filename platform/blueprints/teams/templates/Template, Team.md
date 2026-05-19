@@ -29,3 +29,13 @@ await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 ```dataviewjs
 await dv.view("ranch/views/customjs-guard", { class: "TeamPageCards" });
 ```
+
+## Mentions
+
+```dataviewjs
+await dv.view("ranch/views/customjs-guard", {
+  class: "BacklinkPanel",
+  method: "render",
+  args: [{ entityType: "team" }]
+});
+```
