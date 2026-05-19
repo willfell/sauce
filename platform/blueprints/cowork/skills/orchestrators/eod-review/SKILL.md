@@ -35,12 +35,13 @@ Closes the day for one engagement. Compiles completed/incomplete tasks, compares
 
 ## Write
 
-10. Use Skill `cowork:write-callout-eod-review` with `{ engagement, render_aspects, date: context.today, tomorrow_date: context.tomorrow, tomorrow_weekday: context.tomorrow_weekday, completed: <step 5.completed as md>, carrying_over: <step 5.incomplete as md>, morning_followup: <step 9 as md>, threads_changes: <step 8 as md>, tomorrow_calendar: <step 6.markdown>, late_emails: <step 7.markdown filtered to late window> }`. Capture `eod_markdown`. Internal type-branch picks the per-type callout shape (e.g. wellness prompts for personal-type only).
-11. Use Skill `cowork:patch-daily-callouts` with `{ engagement_id, daily_path: context.daily_path, callouts: [{ id: "eod-review", body: <eod_markdown> }] }`.
+10. **Read prompt body** via `mcp__obsidian__get_file_contents` at `spice/cowork/prompts/eod-review.md`. Strip frontmatter; capture body as `prompt_body` (or empty when missing).
+11. **Compose run-note body** per `prompt_body` instructions interpolating gather outputs. When empty: `run_body = ""`, `warning = "empty_prompt"`. Otherwise `warning = null`.
+12. Use Skill `cowork:write-run-note-eod-review` with `{ engagement, date: context.today, weekday: context.dddd, month_name: context["MM-Month"].split("-")[1], body: run_body, prompt_source: "spice/cowork/prompts/eod-review.md", warning }`. Capture `status`. If `status` starts with `"failed:"`, emit Notice `cowork:eod-review aborted -- write failed: <status>` and exit.
 
 ## State
 
-12. Use Skill `cowork:update-active-threads` with `{ engagement_id, phase: "eod-pass", date_today: context.today, writer: "cowork:eod-review", changes: { resolved: <step 8.resolved_today>, snoozed_to_open: <step 8.snoozed_today>, new_threads: <step 8.auto_created_eod> } }`.
-13. Use Skill `cowork:update-weekly-snapshot` with `{ engagement_id, phase: "eod", date_today: context.today, writer: "cowork:eod-review", snapshot_data: { completed_count: <step 5.completed.length>, carryover_count: <step 5.incomplete.length>, threads_resolved_today: <step 8.resolved_today.length> } }`.
+13. Use Skill `cowork:update-active-threads` with `{ engagement_id, phase: "eod-pass", date_today: context.today, writer: "cowork:eod-review", changes: { resolved: <step 8.resolved_today>, snoozed_to_open: <step 8.snoozed_today>, new_threads: <step 8.auto_created_eod> } }`.
+14. Use Skill `cowork:update-weekly-snapshot` with `{ engagement_id, phase: "eod", date_today: context.today, writer: "cowork:eod-review", snapshot_data: { completed_count: <step 5.completed.length>, carryover_count: <step 5.incomplete.length>, threads_resolved_today: <step 8.resolved_today.length> } }`.
 
 ## Done
