@@ -31,6 +31,40 @@
 async function _findSourceKanbanBoard(title) {
     if (!title) return "";
 
+    // --- Strategy 0: directory-of-target sibling-board detection ---
+    //
+    // v0.59.11 fix: when kanban-plugin v2.0.51 creates the new file under
+    // a board's `new-note-folder`, the new file ends up a SIBLING of its
+    // source board (same parent directory). Detect this case by path —
+    // it's bullet-proof against title collisions because the path is
+    // unique even when the title isn't.
+    //
+    // Falls through when:
+    //   (a) new file at vault root (Templater default placement)
+    //   (b) multiple boards in same dir (ambiguous — Strategy 1/2 resolve)
+    //   (c) zero boards in same dir (e.g. file already moved elsewhere)
+    const newFileForStrategy0 = tp.config.target_file
+        || tp.file.find_tfile(tp.file.path(true));
+    if (newFileForStrategy0) {
+        const targetPath = newFileForStrategy0.path || "";
+        const lastSlash = targetPath.lastIndexOf("/");
+        const targetDir = lastSlash >= 0 ? targetPath.substring(0, lastSlash) : "";
+        if (targetDir) {
+            const siblingBoards = app.vault.getMarkdownFiles().filter(f => {
+                if (!f.path.startsWith(targetDir + "/")) return false;
+                if (f.path === targetPath) return false;
+                const rest = f.path.substring(targetDir.length + 1);
+                if (rest.includes("/")) return false;
+                const cache = app.metadataCache.getFileCache(f);
+                return cache?.frontmatter?.["kanban-plugin"] === "board"
+                    || f.path.endsWith("-board.md");
+            });
+            if (siblingBoards.length === 1) {
+                return siblingBoards[0].path;
+            }
+        }
+    }
+
     // --- Cache-first path: query indexed backlinks on the new file ---
     const newFile = tp.config.target_file
         || tp.file.find_tfile(tp.file.path(true));
