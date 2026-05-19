@@ -38,12 +38,9 @@ Skipped (early-exit silently) for engagements whose `render_aspects.finance_bloc
 
 ## Write
 
-8. If `red_charges.length > 0`: use Skill `cowork:write-callout-tripwire-red` with `{ engagement, date: context.today, charges: <red_charges as md table>, trigger_reason: "Locked card charged" }`. Capture `red_md`.
-9. If `yellow_charges.length > 0`: use Skill `cowork:write-callout-tripwire-yellow` with `{ engagement, date: context.today, charges: <yellow_charges as md table>, top_merchant_today_total: "$<step 5.top_merchant_today_total>", mtd_discretionary: "Discretionary month-to-date: $<step 5.mtd_discretionary>.", days_since_last_splurge: "<step 5.days_since_splurge_pre> days clean before this charge." }`. Capture `yellow_md`.
-10. Use Skill `cowork:patch-daily-callouts` with `{ engagement_id, daily_path: context.daily_path, callouts: [{ id: "tripwire-red", body: <red_md or ""> }, { id: "tripwire-yellow", body: <yellow_md or ""> }] }`. Tripwire callouts nest under the `## Midday — <engagement.label>` H2 within the `%% COWORK_CALLOUTS %%` block.
-
-## State
-
-11. No thread-file or weekly-snapshot mutation. Tripwire is intentionally write-only at the daily-note layer; escalations roll into the morning briefing's thread-create logic on the next day.
+8. **Determine severity.** From threshold-eval gather outputs (existing earlier steps), set `severity = "red" | "yellow"` per the existing branching logic. If severity is "green" (no flags), emit Notice `cowork:midday-tripwire green -- nothing to flag` and exit cleanly. Do NOT write a run-note for green.
+9. **Read prompt body** via `mcp__obsidian__get_file_contents` at `spice/cowork/prompts/midday-tripwire.md`. Strip frontmatter; capture body as `prompt_body` (or empty when missing).
+10. **Compose run-note body** per `prompt_body` + the flagged-event details from the gather steps. When prompt is empty, `warning = "empty_prompt"` and `run_body` is a terse literal summarizing the flagged events. Otherwise `warning = null`.
+11. Use Skill `cowork:write-run-note-midday-tripwire` with `{ engagement, date: context.today, weekday: context.dddd, month_name: context["MM-Month"].split("-")[1], severity, body: run_body, prompt_source: "spice/cowork/prompts/midday-tripwire.md", warning }`. Capture `status`. If `status` starts with `"failed:"`, emit Notice `cowork:midday-tripwire aborted -- write failed: <status>` and exit.
 
 ## Done
