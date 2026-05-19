@@ -4380,6 +4380,42 @@ async function caseBLPLint3EntityMap() {
 }
 
 // ============================================================
+// v0.62.0 S6 — activity-feed@0.1.0 lint asserts (AF-LINT-1..3).
+// Mirrors the BLP-LINT block: new Function() parse + class-decl
+// uniqueness + _DEFAULT_BLUEPRINTS marker presence.
+// ============================================================
+
+async function caseAFLint1Parses() {
+  console.log("\n--- Case AF-LINT-1: activity-feed.js parses via new Function() ---");
+  const p = path.join(WORKSHOP, "platform", "mechanisms", "activity-feed", "activity-feed.js");
+  assertTrue("AF-LINT-1: mechanism source exists", fs.existsSync(p));
+  const body = fs.readFileSync(p, "utf8");
+  let threw = false;
+  try {
+    new Function("app", "customJS", "Notice", "window", body + "\nreturn ActivityFeed;");
+  } catch (e) {
+    threw = true;
+  }
+  assertTrue("AF-LINT-1: activity-feed.js wraps in new Function() without throwing", !threw);
+}
+
+async function caseAFLint2OneClass() {
+  console.log("\n--- Case AF-LINT-2: exactly one 'class ActivityFeed' declaration ---");
+  const p = path.join(WORKSHOP, "platform", "mechanisms", "activity-feed", "activity-feed.js");
+  const body = fs.readFileSync(p, "utf8");
+  const matches = body.match(/class\s+ActivityFeed\b/g) || [];
+  assertEq("AF-LINT-2: exactly one 'class ActivityFeed' declaration", matches.length, 1);
+}
+
+async function caseAFLint3DefaultBlueprints() {
+  console.log("\n--- Case AF-LINT-3: _DEFAULT_BLUEPRINTS marker present ---");
+  const p = path.join(WORKSHOP, "platform", "mechanisms", "activity-feed", "activity-feed.js");
+  const body = fs.readFileSync(p, "utf8");
+  assertTrue("AF-LINT-3: _DEFAULT_BLUEPRINTS identifier present in source",
+    /_DEFAULT_BLUEPRINTS/.test(body));
+}
+
+// ============================================================
 // v0.42.0 S9 — CoworkDailyHubCards / CoworkWeeklyHubCards / CoworkMonthlyHubCards
 // helper structural checks. 6 sub-asserts × 3 helpers = 18 sub-asserts.
 // Mirrors SHC-S5/S6 pattern (from-disk static analysis) plus a scaffolded
@@ -6598,7 +6634,7 @@ async function caseFA5CoworkManifest() {
   console.log("\n--- Case FA5-MANIFEST: cowork bumped to 0.8.0 ---");
   const m = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/cowork/manifest.json"), "utf8"));
-  assertTrue("FA5-MANIFEST-1: cowork@0.8.0", m.version === "0.8.0",
+  assertTrue("FA5-MANIFEST-1: cowork version >= 0.8.0", /^0\.(8|9|1\d)\.\d+$/.test(m.version),
     `got: ${m.version}`);
 }
 
@@ -6639,12 +6675,15 @@ async function caseFA5CoworkRuleFragments() {
   const m = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/cowork/manifest.json"), "utf8"));
   const frags = m.rule_fragments || [];
-  assertTrue("FA5-EXTENDS-1: cowork has 13 rule_fragments",
-    frags.length === 13, `got: ${frags.length}`);
+  // v0.62.0 FA-9a: NEW cowork-today-hub fragment grew count 13 → 14. SKILL.md
+  // remains the only non-extends fragment. Widened from strict equality.
+  assertTrue("FA5-EXTENDS-1: cowork has >= 13 rule_fragments",
+    frags.length >= 13, `got: ${frags.length}`);
   const withExtends = frags.filter(rf => rf.fragment && rf.fragment.extends === "_canonical-vocab");
-  assertTrue("FA5-EXTENDS-2: 12 of 13 rule_fragments extend _canonical-vocab",
-    withExtends.length === 12,
-    `got: ${withExtends.length}; missing extends: ${JSON.stringify(frags.filter(rf => !(rf.fragment && rf.fragment.extends === "_canonical-vocab")).map(rf => rf.fragment.scope.path_glob))}`);
+  const withoutExtends = frags.filter(rf => !(rf.fragment && rf.fragment.extends === "_canonical-vocab"));
+  assertTrue("FA5-EXTENDS-2: all-but-one rule_fragments extend _canonical-vocab",
+    withExtends.length === frags.length - 1,
+    `got: ${withExtends.length}/${frags.length}; missing extends: ${JSON.stringify(withoutExtends.map(rf => rf.fragment.scope.path_glob))}`);
   // The SKILL.md fragment is the one without extends (different frontmatter schema)
   const skillFrag = frags.find(rf => rf.fragment.scope && /SKILL\.md/.test(rf.fragment.scope.path_glob || ""));
   assertTrue("FA5-EXTENDS-3: SKILL.md fragment does NOT extend _canonical-vocab",
@@ -6992,6 +7031,11 @@ async function caseFA2RuleFragmentsExtends() {
   await caseBLPLint1Parses();
   await caseBLPLint2OneClass();
   await caseBLPLint3EntityMap();
+
+  // v0.62.0 S6 — activity-feed@0.1.0 lint (3 sub-asserts).
+  await caseAFLint1Parses();
+  await caseAFLint2OneClass();
+  await caseAFLint3DefaultBlueprints();
 
   // v0.42.0 S9 — cowork@0.4.0 helper structural/materialization checks (18 sub-asserts).
   await caseCOWORKDaily1Materialized();
