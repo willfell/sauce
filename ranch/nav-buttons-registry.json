@@ -58,6 +58,18 @@
           "filename_suffix": ""
         }
       }
+    ],
+    "cowork": [
+      {
+        "id": "cowork-hub",
+        "label": "Cowork",
+        "icon": "briefcase",
+        "order": 51,
+        "action": {
+          "type": "openLink",
+          "target": "spice/cowork/Cowork.md"
+        }
+      }
     ]
   }
 }

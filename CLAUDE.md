@@ -28,6 +28,12 @@ Before any write, run `ls /Users/willfellhoelter/projects/repos/sauce`. Expected
 | --- | --- | --- |
 | Audit | .claude/commands/audit.md | /audit |
 | Bootstrap | .claude/commands/bootstrap.md | /bootstrap |
+| Cowork | spice/cowork | /cowork |
+| Cowork About | spice/cowork/About Cowork.md | /cowork about |
+| Cowork Daily Hub | spice/cowork/Daily Hub.md | /cowork |
+| Cowork Monthly Hub | spice/cowork/Monthly Hub.md | /monthly hub |
+| Cowork Prompts | spice/cowork/prompts/ | /cowork prompts |
+| Cowork Weekly Hub | spice/cowork/Weekly Hub.md | /weekly hub |
 | Daily | spice/daily | /daily |
 | Install | .claude/commands/install.md | /install |
 | Meetings | spice/meetings | /meetings |
