@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop platform manifest. Each mechanism + blueprint has its own version.",
-  "workshop_version": "0.66.1",
+  "workshop_version": "0.66.2",
   "date": "2026-05-19",
   "foundational_plugins": [
     {
@@ -166,7 +166,7 @@
     },
     {
       "name": "scratch",
-      "version": "0.4.0",
+      "version": "0.4.1",
       "path": "blueprints/scratch"
     },
     {
