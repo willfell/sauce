@@ -282,6 +282,10 @@ class ActivityFeed {
           const synthetic = {
             file: root.file,
             type: root.type,
+            // v0.3.1 (v0.66.1): include name field for project-blueprint hubs
+            // (filename literally "Project.md"; real name lives in frontmatter
+            // `name:`). Without this, _resolveTitle falls through to filename.
+            name: root.name,
             title: root.title,
             aliases: root.file && root.file.aliases,
             created_at: (latest && latest[tsKey]) ? latest[tsKey] : root[tsKey],
