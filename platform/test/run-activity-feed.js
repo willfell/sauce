@@ -63,7 +63,7 @@ try {
 if (manifest) {
   assertTrue("AF-1b: manifest.json parses as JSON", true);
   assertEq("AF-1c: manifest.name === 'activity-feed'", manifest.name, "activity-feed");
-  assertEq("AF-1d: manifest.version === '0.3.2'", manifest.version, "0.3.2");
+  assertEq("AF-1d: manifest.version === '0.4.0'", manifest.version, "0.4.0");
   assertEq("AF-1e: manifest.kind === 'mechanism'", manifest.kind, "mechanism");
 
   assertEq("AF-2: customjs_classes is ['ActivityFeed']", manifest.customjs_classes, ["ActivityFeed"]);
@@ -754,6 +754,246 @@ try {
     dv.container.innerHTML.indexOf("Sauce") >= 0);
 } catch (e) {
   assertTrue("AF-V067-RUC-5: render with no metaBuilder emits root card", false, e && e.message);
+}
+
+// ── Pass 5: v0.70.0 — bucketRules / groupOrder / defaultClosed / framed ────
+
+console.log("\n--- Pass 5: v0.70.0 framed renderer + bucketing + ordering ---");
+
+// AF-V070-BUCKET-1: bucketRules merges cowork-* into a single "cowork" group
+try {
+  const pA = { file: { path: "spice/cowork/eod.md",     name: "eod"     }, type: "cowork-eod-review",       created_at: "2026-05-19T17:00:00Z" };
+  const pB = { file: { path: "spice/cowork/morning.md", name: "morning" }, type: "cowork-morning-briefing", created_at: "2026-05-19T04:30:00Z" };
+  const dv = v066_makeFakeDv([pA, pB]);
+  const ActivityFeed = v066_loadAF();
+  const af = new ActivityFeed();
+  af.render(dv, {
+    scope: "today",
+    asOf: "2026-05-19",
+    blueprints: ["cowork-eod-review", "cowork-morning-briefing"],
+    framed: true,
+    bucketRules: [{ bucketKey: "cowork", match: (t) => t.indexOf("cowork-") === 0 }],
+  });
+  const html = dv.container.innerHTML;
+  const coworkGroups = (html.match(/data-group="cowork"/g) || []).length;
+  const subGroups    = (html.match(/data-group="cowork-/g) || []).length;
+  assertTrue("AF-V070-BUCKET-1a: exactly one data-group=\"cowork\" emitted", coworkGroups === 1);
+  assertTrue("AF-V070-BUCKET-1b: no data-group=\"cowork-...\" sub-group survives", subGroups === 0);
+  assertTrue("AF-V070-BUCKET-1c: both child titles render inside the bucket",
+    html.indexOf("eod") >= 0 && html.indexOf("morning") >= 0);
+} catch (e) {
+  assertTrue("AF-V070-BUCKET-1: bucketRules merge", false, e && e.message);
+}
+
+// AF-V070-ORDER-1: groupOrder pins keys to the top in given order; middle alphabetical; groupOrderBottom pinned last
+try {
+  const pages = [
+    { file: { path: "j.md", name: "j" }, type: "journal", created_at: "2026-05-19T09:00:00Z" },
+    { file: { path: "s.md", name: "s" }, type: "scratch", created_at: "2026-05-19T10:00:00Z" },
+    { file: { path: "c.md", name: "c" }, type: "cowork",  created_at: "2026-05-19T11:00:00Z" },
+    { file: { path: "p.md", name: "p" }, type: "project", created_at: "2026-05-19T12:00:00Z" },
+  ];
+  const dv = v066_makeFakeDv(pages);
+  const ActivityFeed = v066_loadAF();
+  const af = new ActivityFeed();
+  af.render(dv, {
+    scope: "today",
+    asOf: "2026-05-19",
+    blueprints: ["journal", "scratch", "cowork", "project"],
+    framed: true,
+    groupOrder: ["cowork", "project"],
+    groupOrderBottom: ["scratch"],
+  });
+  const html = dv.container.innerHTML;
+  const order = [];
+  const re = /data-group="([^"]+)"/g;
+  let m; while ((m = re.exec(html)) !== null) order.push(m[1]);
+  assertEq("AF-V070-ORDER-1: group order = [cowork, project, journal, scratch]",
+    order, ["cowork", "project", "journal", "scratch"]);
+} catch (e) {
+  assertTrue("AF-V070-ORDER-1: group order", false, e && e.message);
+}
+
+// AF-V070-ORDER-2: empty groupOrder entry is silently skipped
+try {
+  const pages = [
+    { file: { path: "c.md", name: "c" }, type: "cowork", created_at: "2026-05-19T11:00:00Z" },
+  ];
+  const dv = v066_makeFakeDv(pages);
+  const ActivityFeed = v066_loadAF();
+  const af = new ActivityFeed();
+  af.render(dv, {
+    scope: "today",
+    asOf: "2026-05-19",
+    blueprints: ["cowork", "project"],
+    framed: true,
+    groupOrder: ["cowork", "project", "trip"],
+  });
+  const html = dv.container.innerHTML;
+  assertTrue("AF-V070-ORDER-2a: cowork group emitted",  /data-group="cowork"/.test(html));
+  assertTrue("AF-V070-ORDER-2b: empty project group not emitted", !/data-group="project"/.test(html));
+  assertTrue("AF-V070-ORDER-2c: empty trip group not emitted",    !/data-group="trip"/.test(html));
+} catch (e) {
+  assertTrue("AF-V070-ORDER-2: empty groupOrder entries skipped", false, e && e.message);
+}
+
+// AF-V070-CLOSED-1: defaultClosed keys omit the `open` attribute on <details>
+try {
+  const pages = [
+    { file: { path: "c.md", name: "c" }, type: "cowork",  created_at: "2026-05-19T11:00:00Z" },
+    { file: { path: "s.md", name: "s" }, type: "scratch", created_at: "2026-05-19T10:00:00Z" },
+  ];
+  const dv = v066_makeFakeDv(pages);
+  const ActivityFeed = v066_loadAF();
+  const af = new ActivityFeed();
+  af.render(dv, {
+    scope: "today",
+    asOf: "2026-05-19",
+    blueprints: ["cowork", "scratch"],
+    framed: true,
+    groupOrder: ["cowork"],
+    groupOrderBottom: ["scratch"],
+    defaultClosed: ["scratch"],
+  });
+  const findGroups = (el) => {
+    const out = [];
+    for (const c of (el._children || [])) {
+      if (c.tag === "div" && (c.dataset && c.dataset.group)) out.push(c);
+      out.push(...findGroups(c));
+    }
+    return out;
+  };
+  const findDetails = (el) => {
+    for (const c of (el._children || [])) {
+      if (c.tag === "details") return c;
+      const inner = findDetails(c);
+      if (inner) return inner;
+    }
+    return null;
+  };
+  const groupEls = findGroups(dv.container);
+  const byKey = {};
+  for (const g of groupEls) byKey[g.dataset.group] = findDetails(g);
+  assertTrue("AF-V070-CLOSED-1a: cowork <details> has open=true",  byKey.cowork  && byKey.cowork.open === true);
+  assertTrue("AF-V070-CLOSED-1b: scratch <details> has open=false", byKey.scratch && byKey.scratch.open === false);
+} catch (e) {
+  assertTrue("AF-V070-CLOSED-1: defaultClosed", false, e && e.message);
+}
+
+// AF-V070-FRAMED-1: framed DOM emits .sauce-group > details > summary.sauce-group-header + .sauce-group-body
+try {
+  const pages = [
+    { file: { path: "c.md", name: "c" }, type: "cowork", created_at: "2026-05-19T11:00:00Z" },
+  ];
+  const dv = v066_makeFakeDv(pages);
+  const ActivityFeed = v066_loadAF();
+  const af = new ActivityFeed();
+  af.render(dv, {
+    scope: "today",
+    asOf: "2026-05-19",
+    blueprints: ["cowork"],
+    framed: true,
+  });
+  const html = dv.container.innerHTML;
+  assertTrue("AF-V070-FRAMED-1a: structural <details> emitted under .sauce-group", html.indexOf("<details") >= 0);
+  assertTrue("AF-V070-FRAMED-1b: <summary> emitted",                                 html.indexOf("<summary") >= 0);
+  assertTrue("AF-V070-FRAMED-1c: data-group attribute carries the group key",        html.indexOf("cowork") >= 0);
+} catch (e) {
+  assertTrue("AF-V070-FRAMED-1: framed DOM shape", false, e && e.message);
+}
+
+// AF-V070-FRAMED-2: framed renderer does NOT call BeaconCards.render for inner rows
+try {
+  const pages = [
+    { file: { path: "c.md", name: "c" }, type: "cowork", created_at: "2026-05-19T11:00:00Z" },
+  ];
+  const dv = v066_makeFakeDv(pages);
+  let beaconCalled = false;
+  const customJsShim = {
+    BeaconCards: {
+      render(_dv, _opts) { beaconCalled = true; },
+    },
+  };
+  const factory = new Function("app", "customJS", "Notice", "window", src + "\nreturn ActivityFeed;");
+  const ActivityFeed = factory({}, customJsShim, function(){}, windowShim);
+  const af = new ActivityFeed();
+  af.render(dv, {
+    scope: "today",
+    asOf: "2026-05-19",
+    blueprints: ["cowork"],
+    framed: true,
+  });
+  assertTrue("AF-V070-FRAMED-2: framed path does not delegate inner rows to BeaconCards", beaconCalled === false);
+} catch (e) {
+  assertTrue("AF-V070-FRAMED-2: framed path bypasses BeaconCards", false, e && e.message);
+}
+
+// AF-V070-META-1: metaBuilder is invoked with (page, parentEl) per row under framed
+try {
+  const pages = [
+    { file: { path: "a.md", name: "a" }, type: "cowork", created_at: "2026-05-19T11:00:00Z" },
+    { file: { path: "b.md", name: "b" }, type: "cowork", created_at: "2026-05-19T10:00:00Z" },
+  ];
+  const dv = v066_makeFakeDv(pages);
+  const ActivityFeed = v066_loadAF();
+  const af = new ActivityFeed();
+  const seen = [];
+  af.render(dv, {
+    scope: "today",
+    asOf: "2026-05-19",
+    blueprints: ["cowork"],
+    framed: true,
+    metaBuilder: (p, el) => { seen.push({ path: p.file.path, hasEl: !!el }); el.textContent = "meta"; },
+  });
+  assertTrue("AF-V070-META-1a: metaBuilder invoked twice",       seen.length === 2);
+  assertTrue("AF-V070-META-1b: metaBuilder received an element", seen.every(s => s.hasEl === true));
+} catch (e) {
+  assertTrue("AF-V070-META-1: metaBuilder under framed", false, e && e.message);
+}
+
+// AF-V070-FLAT-1: flatGrouped opt is now ignored (no-op) — the framed path is the only group renderer
+try {
+  const pages = [
+    { file: { path: "c.md", name: "c" }, type: "cowork", created_at: "2026-05-19T11:00:00Z" },
+  ];
+  const dv = v066_makeFakeDv(pages);
+  const ActivityFeed = v066_loadAF();
+  const af = new ActivityFeed();
+  af.render(dv, {
+    scope: "today",
+    asOf: "2026-05-19",
+    blueprints: ["cowork"],
+    flatGrouped: true,
+  });
+  const html = dv.container.innerHTML;
+  assertTrue("AF-V070-FLAT-1: flatGrouped no longer emits sauce-group-header", !/sauce-group-header/.test(html));
+} catch (e) {
+  assertTrue("AF-V070-FLAT-1: flatGrouped removed", false, e && e.message);
+}
+
+// AF-V070-CONFLICT-1: when groupOrder + groupOrderBottom both list the same key, top wins
+try {
+  const pages = [
+    { file: { path: "c.md", name: "c" }, type: "cowork", created_at: "2026-05-19T11:00:00Z" },
+    { file: { path: "s.md", name: "s" }, type: "scratch", created_at: "2026-05-19T10:00:00Z" },
+  ];
+  const dv = v066_makeFakeDv(pages);
+  const ActivityFeed = v066_loadAF();
+  const af = new ActivityFeed();
+  af.render(dv, {
+    scope: "today",
+    asOf: "2026-05-19",
+    blueprints: ["cowork", "scratch"],
+    framed: true,
+    groupOrder: ["cowork"],
+    groupOrderBottom: ["cowork", "scratch"],
+  });
+  const html = dv.container.innerHTML;
+  const cIdx = html.indexOf('data-group="cowork"');
+  const sIdx = html.indexOf('data-group="scratch"');
+  assertTrue("AF-V070-CONFLICT-1: top wins when key listed in both arrays", cIdx >= 0 && sIdx > cIdx);
+} catch (e) {
+  assertTrue("AF-V070-CONFLICT-1: ordering conflict resolution", false, e && e.message);
 }
 
 // ── Summary ───────────────────────────────────────────────────────────────

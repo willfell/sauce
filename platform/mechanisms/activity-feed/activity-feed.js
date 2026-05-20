@@ -67,6 +67,33 @@
  *                        Caller-driven per-card meta rendering. Requires
  *                        cards@0.2.6.
  *
+ *   bucketRules:         Array of {bucketKey: string, match: (type) => bool}
+ *                        (optional, added v0.4.0). Applied after grouping by
+ *                        p.type. Each rule folds any matching type-key into
+ *                        the rule's bucketKey, merging their pages and
+ *                        re-sorting by created_at desc inside the bucket.
+ *
+ *   groupOrder:          string[] (optional, added v0.4.0). Group keys (post-
+ *                        bucket-merge) to render first, in the given order.
+ *                        Keys with no cards are silently skipped.
+ *
+ *   groupOrderBottom:    string[] (optional, added v0.4.0). Group keys to
+ *                        render last, in the given order. Conflict with
+ *                        groupOrder → groupOrder wins.
+ *
+ *   defaultClosed:       string[] (optional, added v0.4.0). Group keys whose
+ *                        <details> element renders without the `open`
+ *                        attribute. Only meaningful when framed:true.
+ *
+ *   framed:              boolean (default false, added v0.4.0). When true
+ *                        AND groupBy="blueprint", each group renders as a
+ *                        framed section: bg-tint + left-accent stripe,
+ *                        clickable summary (chevron + dot + label + count),
+ *                        flat list of rows (no per-row backgrounds; hairline
+ *                        divider between rows). REPLACES the v0.3.0
+ *                        flatGrouped opt — `flatGrouped:true` callers now
+ *                        fall through to the v0.1.0 h4 path silently.
+ *
  *   title:               string (optional) — emits an H3 above the panel
  *
  * Per landmine #11: spice/ module-directory namespace is conceptual;
@@ -97,7 +124,6 @@ class ActivityFeed {
     const collapsible = safeOpts.collapsible === true;
     const colorByType = (safeOpts.colorByType && typeof safeOpts.colorByType === "object") ? safeOpts.colorByType : null;
     // v0.3.0 additive opts
-    const flatGrouped = safeOpts.flatGrouped === true;
     const metaBuilder = (typeof safeOpts.metaBuilder === "function" && safeOpts.metaBuilder.length >= 2) ? safeOpts.metaBuilder : null;
     const rollUpRoots = Array.isArray(safeOpts.rollUpRoots) ? safeOpts.rollUpRoots : null;
 
@@ -140,7 +166,14 @@ class ActivityFeed {
       return this._renderGroupedByHour(dv, pages, useStatusChangedAt, getTitle, metaBuilder);
     }
     if (groupBy === "blueprint") {
-      return this._renderGroupedByBlueprint(dv, pages, { getTitle, collapsible, colorByType, flatGrouped, metaBuilder });
+      return this._renderGroupedByBlueprint(dv, pages, {
+        getTitle, collapsible, colorByType, metaBuilder,
+        framed: safeOpts.framed === true,
+        bucketRules: Array.isArray(safeOpts.bucketRules) ? safeOpts.bucketRules : null,
+        groupOrder: Array.isArray(safeOpts.groupOrder) ? safeOpts.groupOrder : null,
+        groupOrderBottom: Array.isArray(safeOpts.groupOrderBottom) ? safeOpts.groupOrderBottom : null,
+        defaultClosed: Array.isArray(safeOpts.defaultClosed) ? safeOpts.defaultClosed : null,
+      });
     }
     return this._renderFlat(dv, pages, getTitle, metaBuilder);
   }
@@ -346,45 +379,87 @@ class ActivityFeed {
       ? safe.getTitle
       : (p) => p && p.file && p.file.name;
     const collapsible = safe.collapsible === true;
-    const flatGrouped = safe.flatGrouped === true;  // NEW v0.3.0
+    const framed = safe.framed === true;  // NEW v0.4.0 — supersedes flatGrouped
     const colorByType = (safe.colorByType && typeof safe.colorByType === "object") ? safe.colorByType : null;
-    const metaBuilder = (typeof safe.metaBuilder === "function" && safe.metaBuilder.length >= 2) ? safe.metaBuilder : null;  // NEW v0.3.0
+    const metaBuilder = (typeof safe.metaBuilder === "function" && safe.metaBuilder.length >= 2) ? safe.metaBuilder : null;
+    const bucketRules = Array.isArray(safe.bucketRules) ? safe.bucketRules : null;            // NEW v0.4.0
+    const groupOrder = Array.isArray(safe.groupOrder) ? safe.groupOrder.map(String) : [];     // NEW v0.4.0
+    const groupOrderBottom = Array.isArray(safe.groupOrderBottom) ? safe.groupOrderBottom.map(String) : [];  // NEW v0.4.0
+    const defaultClosed = new Set(Array.isArray(safe.defaultClosed) ? safe.defaultClosed.map(String) : []);  // NEW v0.4.0
 
+    // Pass A — initial grouping by p.type (unchanged from v0.3.0)
     const groups = new Map();
     for (const p of pages) {
       const t = (p && p.type) ? String(p.type) : "(untyped)";
       if (!groups.has(t)) groups.set(t, []);
       groups.get(t).push(p);
     }
-    const sortedKeys = Array.from(groups.keys()).sort();
 
+    // Pass B — apply bucketRules (NEW v0.4.0). Each rule folds matching keys
+    // into the rule's bucketKey. Pages inside the bucket are sorted by
+    // created_at desc (mirrors the outer-feed sort).
+    if (bucketRules && bucketRules.length > 0) {
+      for (const rule of bucketRules) {
+        if (!rule || typeof rule.bucketKey !== "string" || typeof rule.match !== "function") continue;
+        const bucketKey = rule.bucketKey;
+        let bucketPages = groups.get(bucketKey) ? groups.get(bucketKey).slice() : [];
+        const consumed = [];
+        for (const [k, list] of groups) {
+          if (k === bucketKey) continue;
+          let matched = false;
+          try { matched = rule.match(k) === true; } catch (_) { matched = false; }
+          if (!matched) continue;
+          bucketPages = bucketPages.concat(list);
+          consumed.push(k);
+        }
+        if (consumed.length === 0 && !groups.has(bucketKey)) continue;
+        bucketPages.sort((a, b) => {
+          const av = (a && a.created_at) ? String(a.created_at) : "";
+          const bv = (b && b.created_at) ? String(b.created_at) : "";
+          return bv.localeCompare(av);
+        });
+        groups.set(bucketKey, bucketPages);
+        for (const k of consumed) groups.delete(k);
+      }
+    }
+
+    // Pass C — resolve render order. Top-pinned first (in given order),
+    // alphabetical middle, bottom-pinned last (in given order). Empty
+    // groups (no pages) are silently skipped. If a key appears in both
+    // groupOrder and groupOrderBottom, top wins.
+    const topSet = new Set();
+    const orderedTop = [];
+    for (const k of groupOrder) {
+      if (groups.has(k) && !topSet.has(k)) {
+        orderedTop.push(k);
+        topSet.add(k);
+      }
+    }
+    const bottomSet = new Set();
+    const orderedBottom = [];
+    for (const k of groupOrderBottom) {
+      if (topSet.has(k)) continue;
+      if (groups.has(k) && !bottomSet.has(k)) {
+        orderedBottom.push(k);
+        bottomSet.add(k);
+      }
+    }
+    const middle = Array.from(groups.keys())
+      .filter(k => !topSet.has(k) && !bottomSet.has(k))
+      .sort();
+    const sortedKeys = orderedTop.concat(middle).concat(orderedBottom);
+
+    // Pass D — render each group via the selected path.
     for (const t of sortedKeys) {
       const groupPages = groups.get(t);
       const color = (colorByType && colorByType[t]) ? colorByType[t] : "var(--color-base-50)";
+      const isClosed = defaultClosed.has(t);
 
-      if (flatGrouped) {
-        // v0.3.0 — muted uppercase header + cards directly below. No nested <details>.
-        const header = dv.container.createEl("div");
-        header.className = "sauce-group-header";
-        const dot = header.createEl("span");
-        dot.className = "sauce-group-dot";
-        dot.style.background = color;
-        // Label text as a span (node-harness-safe; avoids document.createTextNode)
-        const labelSpan = header.createEl("span");
-        labelSpan.textContent = t + " ";
-        const countSpan = header.createEl("span");
-        countSpan.className = "sauce-group-count";
-        countSpan.textContent = "(" + groupPages.length + ")";
-
-        const cardsShim = { container: dv.container };
-        customJS.BeaconCards.render(cardsShim, {
-          pages: groupPages,
-          layout: "row",
-          title: titleFn,
-          meta: metaBuilder ? metaBuilder : ((p) => (p && p.type) ? String(p.type) : ""),
-        });
+      if (framed) {
+        this._renderFramedGroup(dv, { key: t, pages: groupPages, color, isClosed, titleFn, metaBuilder });
       } else if (collapsible) {
-        // v0.1.2 path — preserved unchanged.
+        // v0.1.2 legacy path — preserved for callers that prefer nested
+        // <details> without framing. No known caller today.
         const details = dv.container.createEl("details");
         details.open = false;
         details.style.cssText = "margin: 0.4em 0; padding: 0.3em 0.5em; border-left: 4px solid " + color + "; background: var(--background-secondary); border-radius: 4px;";
@@ -399,7 +474,8 @@ class ActivityFeed {
           meta: metaBuilder ? metaBuilder : undefined,
         });
       } else {
-        // v0.1.0 path — preserved unchanged.
+        // v0.1.0 path — h4 + BeaconCards. No known active caller; kept
+        // as the renderer's groupBy:"blueprint" default fallback.
         const h = dv.container.createEl("h4");
         h.textContent = t;
         h.style.cssText = "margin: 0.8em 0 0.3em 0;";
@@ -408,6 +484,87 @@ class ActivityFeed {
           layout: "row",
           title: titleFn,
           meta: metaBuilder ? metaBuilder : undefined,
+        });
+      }
+    }
+  }
+
+  /**
+   * v0.4.0: render one Activity sub-group as a framed section:
+   * wrapper div (bg + left-accent stripe), clickable summary (chevron +
+   * dot + label + count), flat list of rows (no per-row backgrounds;
+   * hairline divider between rows). Title + meta are caller-supplied;
+   * click-to-open is wired here so callers don't need to handle it.
+   *
+   * Rows are structured as:
+   *   .sauce-group-row              ← flex-direction: column container
+   *     .sauce-group-row-line       ← flex-row: title + meta
+   *       .sauce-group-row-title
+   *       .sauce-group-row-meta     ← metaBuilder writes here
+   *
+   * This shape ensures `_renderActivityMeta`'s parentElement.parentElement
+   * walk (used to attach the drill-in panel) lands at .sauce-group-row,
+   * which is column-oriented and can hold the drill-in below the line.
+   */
+  _renderFramedGroup(dv, { key, pages, color, isClosed, titleFn, metaBuilder }) {
+    const group = dv.container.createEl("div");
+    group.className = "sauce-group";
+    group.dataset.group = key;
+    // Emit data-group attr into _html so Node test shim's innerHTML captures it.
+    if (typeof group._html !== "undefined") group._html += ' data-group="' + key + '"';
+    if (typeof group.style.setProperty === "function") {
+      group.style.setProperty("--group-accent", color);
+    } else {
+      group.style.cssText = "--group-accent: " + color + ";";
+    }
+
+    const details = group.createEl("details");
+    if (!isClosed) details.open = true;
+
+    const summary = details.createEl("summary");
+    summary.className = "sauce-group-header";
+    const chevron = summary.createEl("span");
+    chevron.className = "sauce-group-chevron";
+    chevron.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>`;
+    const dot = summary.createEl("span");
+    dot.className = "sauce-group-dot";
+    dot.style.background = color;
+    const label = summary.createEl("span");
+    label.className = "sauce-group-label";
+    label.textContent = key;
+    const count = summary.createEl("span");
+    count.className = "sauce-group-count";
+    count.textContent = "(" + pages.length + ")";
+
+    const body = details.createEl("div");
+    body.className = "sauce-group-body";
+
+    for (const p of pages) {
+      const row = body.createEl("div");
+      row.className = "sauce-group-row";
+      const line = row.createEl("div");
+      line.className = "sauce-group-row-line";
+      const titleEl = line.createEl("span");
+      titleEl.className = "sauce-group-row-title";
+      const titleText = (typeof titleFn === "function" ? titleFn(p) : (p && p.file && p.file.name)) || "";
+      titleEl.textContent = String(titleText);
+      const metaEl = line.createEl("span");
+      metaEl.className = "sauce-group-row-meta";
+      if (typeof metaBuilder === "function") {
+        try { metaBuilder(p, metaEl); } catch (_) { /* swallow — never break a single row */ }
+      }
+      // Click-to-open on the line. Anchors/breadcrumbs inside meta
+      // call stopPropagation themselves; this handler defends with a
+      // best-effort closest("a") probe in case a shim lacks it.
+      if (typeof line.addEventListener === "function") {
+        line.addEventListener("click", (ev) => {
+          try {
+            const target = ev.target;
+            if (target && typeof target.closest === "function" && target.closest("a")) return;
+            if (p && p.file && p.file.path && typeof app !== "undefined" && app && app.workspace && typeof app.workspace.openLinkText === "function") {
+              app.workspace.openLinkText(p.file.path, "");
+            }
+          } catch (_) { /* ignore */ }
         });
       }
     }
