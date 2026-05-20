@@ -13,6 +13,9 @@
 .space-daily-dashboard .sauce-section[data-accent="cyan"]   { border-left: 4px solid var(--color-cyan); }
 .space-daily-dashboard .sauce-section[data-accent="blue"]   { border-left: 4px solid var(--color-blue); }
 .space-daily-dashboard .sauce-section[data-accent="purple"] { border-left: 4px solid var(--color-purple); }
+/* v0.8.3 (v0.67.3): subtle grey accent for Activity section. Replaces the
+ * v0.8.0 segmented per-blueprint gradient (retired per user feedback). */
+.space-daily-dashboard .sauce-section[data-accent="grey"]   { border-left: 4px solid var(--text-faint); }
 .space-daily-dashboard .sauce-section > details { padding: 0.55em 0.85em; }
 
 /* ── Custom chevron — hide native, render Lucide instead ───────────────── */
