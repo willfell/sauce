@@ -63,7 +63,7 @@ try {
 if (manifest) {
   assertTrue("AF-1b: manifest.json parses as JSON", true);
   assertEq("AF-1c: manifest.name === 'activity-feed'", manifest.name, "activity-feed");
-  assertEq("AF-1d: manifest.version === '0.3.1'", manifest.version, "0.3.1");
+  assertEq("AF-1d: manifest.version === '0.3.2'", manifest.version, "0.3.2");
   assertEq("AF-1e: manifest.kind === 'mechanism'", manifest.kind, "mechanism");
 
   assertEq("AF-2: customjs_classes is ['ActivityFeed']", manifest.customjs_classes, ["ActivityFeed"]);
@@ -402,7 +402,7 @@ try {
     assertTrue(`AF-V065: _DEFAULT_BLUEPRINTS contains "${t}"`, src.includes(`"${t}"`));
   }
   const manifest = JSON.parse(fs.readFileSync("platform/mechanisms/activity-feed/manifest.json", "utf8"));
-  assertEq("AF-V065: activity-feed manifest version is 0.3.1", manifest.version, "0.3.1");
+  assertEq("AF-V065: activity-feed manifest version is 0.3.2", manifest.version, "0.3.2");
   assertTrue("AF-V065: activity-feed description mentions 0.2.0", typeof manifest.description === "string" && manifest.description.includes("0.2.0"));
 }
 
@@ -615,6 +615,145 @@ try {
   assertTrue("AF-V066-RU-6: empty rollUpRoots renders normally", dv6.container.innerHTML.indexOf("Sauce") >= 0);
 } catch (e) {
   assertTrue("AF-V066-RU-6: empty rollUpRoots renders normally", false, e && e.message);
+}
+
+// AF-V067-RUC-1: synthetic page carries _rollUpChildrenPages as array
+try {
+  const root = { file: { path: "spice/projects/sauce/Sauce.md", name: "Sauce", mtime: { toISO: () => "2026-05-19T08:00:00Z" } }, type: "project", created_at: "2026-05-18" };
+  const c1 = { file: { path: "spice/projects/sauce/tasks/a/a.md", name: "a", mtime: { toISO: () => "2026-05-19T10:00:00Z" } }, type: "project-task", created_at: "2026-05-19T10:00:00Z" };
+  const c2 = { file: { path: "spice/projects/sauce/tasks/b/b.md", name: "b", mtime: { toISO: () => "2026-05-19T11:00:00Z" } }, type: "project-task", created_at: "2026-05-19T11:00:00Z" };
+  const dv = v066_makeFakeDv([root, c1, c2]);
+  const ActivityFeed = v066_loadAF();
+  const af = new ActivityFeed();
+  let capturedPage = null;
+  af.render(dv, {
+    scope: "today",
+    asOf: "2026-05-19",
+    blueprints: ["project"],
+    flatGrouped: true,
+    rollUpRoots: [{
+      type: "project",
+      childMatch: (p) => /^spice\/projects\/sauce\/tasks\//.test(p.file.path),
+      rootPath:   (p) => "spice/projects/sauce/Sauce.md",
+    }],
+    metaBuilder: (p, el) => { if (p && p._isRollUp) capturedPage = p; },
+  });
+  assertTrue("AF-V067-RUC-1a: synthetic page captured", !!capturedPage);
+  assertTrue("AF-V067-RUC-1b: _rollUpChildrenPages is an array",
+    capturedPage && Array.isArray(capturedPage._rollUpChildrenPages));
+} catch (e) {
+  assertTrue("AF-V067-RUC-1a: synthetic page captured", false, e && e.message);
+  assertTrue("AF-V067-RUC-1b: _rollUpChildrenPages is an array", false, e && e.message);
+}
+
+// AF-V067-RUC-2: _rollUpChildrenPages.length === _rollUpChildren
+try {
+  const root = { file: { path: "spice/projects/sauce/Sauce.md", name: "Sauce", mtime: { toISO: () => "2026-05-19T08:00:00Z" } }, type: "project", created_at: "2026-05-18" };
+  const c1 = { file: { path: "spice/projects/sauce/tasks/a/a.md", name: "a", mtime: { toISO: () => "2026-05-19T10:00:00Z" } }, type: "project-task", created_at: "2026-05-19T10:00:00Z" };
+  const c2 = { file: { path: "spice/projects/sauce/tasks/b/b.md", name: "b", mtime: { toISO: () => "2026-05-19T11:00:00Z" } }, type: "project-task", created_at: "2026-05-19T11:00:00Z" };
+  const dv = v066_makeFakeDv([root, c1, c2]);
+  const ActivityFeed = v066_loadAF();
+  const af = new ActivityFeed();
+  let capturedPage = null;
+  af.render(dv, {
+    scope: "today",
+    asOf: "2026-05-19",
+    blueprints: ["project"],
+    flatGrouped: true,
+    rollUpRoots: [{
+      type: "project",
+      childMatch: (p) => /^spice\/projects\/sauce\/tasks\//.test(p.file.path),
+      rootPath:   (p) => "spice/projects/sauce/Sauce.md",
+    }],
+    metaBuilder: (p, el) => { if (p && p._isRollUp) capturedPage = p; },
+  });
+  assertTrue("AF-V067-RUC-2: _rollUpChildrenPages.length === _rollUpChildren",
+    capturedPage && capturedPage._rollUpChildrenPages.length === capturedPage._rollUpChildren);
+} catch (e) {
+  assertTrue("AF-V067-RUC-2: _rollUpChildrenPages.length === _rollUpChildren", false, e && e.message);
+}
+
+// AF-V067-RUC-3: every entry in _rollUpChildrenPages matches an original child page by path
+try {
+  const root = { file: { path: "spice/projects/sauce/Sauce.md", name: "Sauce", mtime: { toISO: () => "2026-05-19T08:00:00Z" } }, type: "project", created_at: "2026-05-18" };
+  const c1 = { file: { path: "spice/projects/sauce/tasks/a/a.md", name: "a", mtime: { toISO: () => "2026-05-19T10:00:00Z" } }, type: "project-task", created_at: "2026-05-19T10:00:00Z" };
+  const c2 = { file: { path: "spice/projects/sauce/tasks/b/b.md", name: "b", mtime: { toISO: () => "2026-05-19T11:00:00Z" } }, type: "project-task", created_at: "2026-05-19T11:00:00Z" };
+  const dv = v066_makeFakeDv([root, c1, c2]);
+  const ActivityFeed = v066_loadAF();
+  const af = new ActivityFeed();
+  let capturedPage = null;
+  af.render(dv, {
+    scope: "today",
+    asOf: "2026-05-19",
+    blueprints: ["project"],
+    flatGrouped: true,
+    rollUpRoots: [{
+      type: "project",
+      childMatch: (p) => /^spice\/projects\/sauce\/tasks\//.test(p.file.path),
+      rootPath:   (p) => "spice/projects/sauce/Sauce.md",
+    }],
+    metaBuilder: (p, el) => { if (p && p._isRollUp) capturedPage = p; },
+  });
+  const expectedPaths = ["spice/projects/sauce/tasks/a/a.md", "spice/projects/sauce/tasks/b/b.md"].sort();
+  const actualPaths = (capturedPage && capturedPage._rollUpChildrenPages.map(c => c.file.path).sort()) || [];
+  assertEq("AF-V067-RUC-3: child paths match original pages", actualPaths, expectedPaths);
+} catch (e) {
+  assertTrue("AF-V067-RUC-3: child paths match original pages", false, e && e.message);
+}
+
+// AF-V067-RUC-4: decorated-existing-survivor branch also carries _rollUpChildrenPages
+try {
+  const root = { file: { path: "spice/projects/sauce/Sauce.md", name: "Sauce", mtime: { toISO: () => "2026-05-19T08:00:00Z" } }, type: "project", created_at: "2026-05-19T08:00:00Z" };
+  const c1 = { file: { path: "spice/projects/sauce/tasks/a/a.md", name: "a", mtime: { toISO: () => "2026-05-19T10:00:00Z" } }, type: "project-task", created_at: "2026-05-19T10:00:00Z" };
+  const dv = v066_makeFakeDv([root, c1]);
+  const ActivityFeed = v066_loadAF();
+  const af = new ActivityFeed();
+  let capturedPage = null;
+  af.render(dv, {
+    scope: "today",
+    asOf: "2026-05-19",
+    blueprints: ["project"],
+    flatGrouped: true,
+    rollUpRoots: [{
+      type: "project",
+      childMatch: (p) => /^spice\/projects\/sauce\/tasks\//.test(p.file.path),
+      rootPath:   (p) => "spice/projects/sauce/Sauce.md",
+    }],
+    metaBuilder: (p, el) => { if (p && p._isRollUp) capturedPage = p; },
+  });
+  // Root IS in windowed (created_at on 2026-05-19), so existing-survivor branch fires.
+  assertTrue("AF-V067-RUC-4a: decorated page is the survivor root",
+    capturedPage && capturedPage.file && capturedPage.file.path === "spice/projects/sauce/Sauce.md");
+  assertTrue("AF-V067-RUC-4b: decorated page carries _rollUpChildrenPages",
+    capturedPage && Array.isArray(capturedPage._rollUpChildrenPages) && capturedPage._rollUpChildrenPages.length === 1);
+} catch (e) {
+  assertTrue("AF-V067-RUC-4a: decorated page is the survivor root", false, e && e.message);
+  assertTrue("AF-V067-RUC-4b: decorated page carries _rollUpChildrenPages", false, e && e.message);
+}
+
+// AF-V067-RUC-5: backwards-compat — caller that doesn't read _rollUpChildrenPages sees unchanged HTML
+try {
+  const root = { file: { path: "spice/projects/sauce/Sauce.md", name: "Sauce", mtime: { toISO: () => "2026-05-19T08:00:00Z" } }, type: "project", created_at: "2026-05-18" };
+  const c1 = { file: { path: "spice/projects/sauce/tasks/a/a.md", name: "a", mtime: { toISO: () => "2026-05-19T10:00:00Z" } }, type: "project-task", created_at: "2026-05-19T10:00:00Z" };
+  const dv = v066_makeFakeDv([root, c1]);
+  const ActivityFeed = v066_loadAF();
+  const af = new ActivityFeed();
+  af.render(dv, {
+    scope: "today",
+    asOf: "2026-05-19",
+    blueprints: ["project"],
+    flatGrouped: true,
+    rollUpRoots: [{
+      type: "project",
+      childMatch: (p) => /^spice\/projects\/sauce\/tasks\//.test(p.file.path),
+      rootPath:   (p) => "spice/projects/sauce/Sauce.md",
+    }],
+  });
+  // No metaBuilder; render must still complete and emit the root card.
+  assertTrue("AF-V067-RUC-5: render with no metaBuilder emits root card",
+    dv.container.innerHTML.indexOf("Sauce") >= 0);
+} catch (e) {
+  assertTrue("AF-V067-RUC-5: render with no metaBuilder emits root card", false, e && e.message);
 }
 
 // ── Summary ───────────────────────────────────────────────────────────────
