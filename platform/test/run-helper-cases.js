@@ -4848,6 +4848,22 @@ async function caseCOWORKV045DailyActionsLints() {
   assertTrue("COWORK-V045-1: class CoworkDailyActions declared", /class\s+CoworkDailyActions\b/.test(body));
 }
 
+// COWORK-V068-LR: cowork-latest-runs.js lints clean + declares its class +
+// queries the 5 canonical cowork-* run-note types (v0.68.0 S5).
+async function caseCOWORKV068LatestRunsLints() {
+  console.log("\n--- Case COWORK-V068-LR: cowork-latest-runs.js lints clean ---");
+  const p = path.join(BLUEPRINTS_DIR, "cowork", "helpers", "cowork-latest-runs.js");
+  assertTrue("COWORK-V068-LR: file exists on disk", fs.existsSync(p));
+  const body = fs.readFileSync(p, "utf8");
+  assertTrue("COWORK-V068-LR: no trailing whitespace", !/[ \t]+$/m.test(body));
+  assertTrue("COWORK-V068-LR: no tab/space mix on any line", !/^( +\t|\t+ )/m.test(body));
+  assertTrue("COWORK-V068-LR: class CoworkLatestRuns declared", /class\s+CoworkLatestRuns\b/.test(body));
+  for (const o of ["morning-briefing", "midday-tripwire", "eod-review", "weekly-review", "monthly-review"]) {
+    assertTrue(`COWORK-V068-LR: queries cowork-${o} run-note type`, body.includes(`cowork-${o}`));
+  }
+  assertTrue("COWORK-V068-LR: defines async render(dv)", /async\s+render\s*\(\s*dv\s*\)/.test(body));
+}
+
 // COWORK-V045-2: cowork-hub-nav.js uses customJS.AccentButton.render
 // AND no longer uses BeaconCards.render (S1 AccentButton rewrite).
 async function caseCOWORKV045HubNavAccentButton() {
@@ -7327,6 +7343,9 @@ async function caseFA2RuleFragmentsExtends() {
   await caseCOWORKV045DailyActionsLints();
   await caseCOWORKV045HubNavAccentButton();
   await caseCOWORKV045DailyCardsRetarget();
+
+  // v0.68.0 S8 — CoworkLatestRuns helper lint.
+  await caseCOWORKV068LatestRunsLints();
 
   // v0.20.0 docs polish cycle — trailing-whitespace lint.
   await caseTW1TemplatesNoTrailingWhitespace();

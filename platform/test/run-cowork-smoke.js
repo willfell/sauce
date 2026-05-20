@@ -715,6 +715,127 @@ function assertCoworkV067Shape() {
   }
 }
 
+// ── v0.68.0 ─────────────────────────────────────────────────────────────────
+// cowork-orchestrator-cohesion cycle: orchestrator descriptions aligned to
+// v0.65.0 atomic-note contract; patch-daily-callouts orphan deleted; 15
+// engagement-type default prompts shipped; CoworkLatestRuns helper added.
+
+function assertCoworkV068Shape() {
+  console.log("--- v0.68.0 cowork-orchestrator-cohesion: descriptions + defaults + latest-runs ---");
+
+  // V068-DESC-1..5: each per-job orchestrator SKILL.md description + opening
+  // prose mentions "atomic note" / "atomic-note write contract" and does NOT
+  // describe legacy callout-patching surface.
+  const orchs = ["morning-briefing", "midday-tripwire", "eod-review", "weekly-review", "monthly-review"];
+  for (const o of orchs) {
+    const body = readSkill(`skills/orchestrators/${o}/SKILL.md`);
+    const top = body.split("## ")[0]; // description-frontmatter + opening prose; stops at first H2
+    assertTrue(
+      /atomic note|atomic-note write contract/i.test(top),
+      `V068-DESC-${o}: description/intro mentions atomic-note write contract`
+    );
+    assertTrue(
+      !/patches it into|appends a tripwire callout|patches a link callout|patches them into|patches the daily note(?!'s callouts)|composes the morning callout|composes the EOD callout/i.test(top),
+      `V068-DESC-${o}: description/intro does NOT describe legacy callout-patching surface`
+    );
+    assertContains(
+      top,
+      "atomic-note write contract is the only output surface",
+      `V068-DESC-${o}: opening prose explicitly disclaims legacy callout-patching`
+    );
+  }
+
+  // V068-ORPHAN-1: patch-daily-callouts directory absent on disk.
+  const orphanPath = path.join(BP, "skills/skills/patch-daily-callouts");
+  assertTrue(!fs.existsSync(orphanPath),
+    "V068-ORPHAN-1: skills/skills/patch-daily-callouts/ directory deleted from workshop tree");
+
+  // V068-ORPHAN-2: patch-daily-callouts claude_surface entry absent from manifest.
+  const manifest = loadManifest();
+  const skillSources = Array.isArray(manifest.claude_surface)
+    ? manifest.claude_surface.filter(e => e && e.kind === "skill").map(e => e.source)
+    : [];
+  assertTrue(!skillSources.some(s => /patch-daily-callouts/.test(s)),
+    "V068-ORPHAN-2: manifest claude_surface no longer references patch-daily-callouts");
+
+  // V068-ORPHAN-3: About Cowork.md skills catalogue no longer lists the row.
+  const aboutCowork = fs.readFileSync(path.join(BP, "content/About Cowork.md"), "utf8");
+  assertTrue(!/patch-daily-callouts/.test(aboutCowork),
+    "V068-ORPHAN-3: About Cowork.md skills catalogue no longer lists patch-daily-callouts row");
+
+  // V068-DEFAULTS-1..15: each of 3 engagement_types × 5 orchestrators ships
+  // a default prompt file with non-empty body + canonical frontmatter shape.
+  const types = ["personal", "w2-fte", "consulting"];
+  for (const t of types) {
+    for (const o of orchs) {
+      const p = path.join(BP, `content/context/engagement-templates/${t}/prompts/${o}.md`);
+      assertTrue(fs.existsSync(p),
+        `V068-DEFAULTS-${t}-${o}: engagement-templates/${t}/prompts/${o}.md exists`);
+      if (fs.existsSync(p)) {
+        const body = fs.readFileSync(p, "utf8");
+        assertTrue(body.length > 200,
+          `V068-DEFAULTS-${t}-${o}-NONEMPTY: ${t}/prompts/${o}.md is non-trivial (>200 chars)`);
+        // V068-DEFAULTS-CLEAN: forbidden legacy-surface phrases absent
+        assertTrue(!/\bcallout\b|patch the daily|Timestamps\/|append to|into today|into the daily|\bsummaries\//i.test(body),
+          `V068-DEFAULTS-${t}-${o}-CLEAN: prompt body free of legacy-surface phrases`);
+      }
+    }
+  }
+
+  // V068-DEFAULTS-MANIFEST: cowork manifest files[] declares all 15 default prompts.
+  const fileSources = Array.isArray(manifest.files) ? manifest.files.map(f => f.source) : [];
+  for (const t of types) {
+    for (const o of orchs) {
+      const src = `content/context/engagement-templates/${t}/prompts/${o}.md`;
+      assertTrue(fileSources.includes(src),
+        `V068-DEFAULTS-MANIFEST-${t}-${o}: manifest files[] declares ${src}`);
+    }
+  }
+
+  // V068-ONBOARD-GUARD: onboard-scheduled-jobs SKILL.md step 6(c) includes
+  // the contract-guard scan describing legacy-surface phrase detection.
+  const onboard = readSkill("skills/orchestrators/onboard-scheduled-jobs/SKILL.md");
+  assertContains(onboard, "Contract-guard the response",
+    "V068-ONBOARD-GUARD: onboard-scheduled-jobs step 6(c) declares contract-guard");
+  assertContains(onboard, "writes ONE atomic note at",
+    "V068-ONBOARD-GUARD-MSG: onboard skill rephrases user description toward atomic-note contract");
+
+  // V068-LATEST-RUNS-1: CoworkLatestRuns helper file exists on disk.
+  const latestRunsPath = path.join(BP, "helpers/cowork-latest-runs.js");
+  assertTrue(fs.existsSync(latestRunsPath),
+    "V068-LATEST-RUNS-1: helpers/cowork-latest-runs.js exists");
+
+  // V068-LATEST-RUNS-2: CoworkLatestRuns class declared in customjs_classes[].
+  const classes = Array.isArray(manifest.customjs_classes) ? manifest.customjs_classes : [];
+  assertTrue(classes.includes("CoworkLatestRuns"),
+    "V068-LATEST-RUNS-2: manifest customjs_classes[] declares CoworkLatestRuns");
+
+  // V068-LATEST-RUNS-3: helper file declares CoworkLatestRuns class body
+  // with a 5-orchestrator iteration shape.
+  if (fs.existsSync(latestRunsPath)) {
+    const lrBody = fs.readFileSync(latestRunsPath, "utf8");
+    assertContains(lrBody, "class CoworkLatestRuns",
+      "V068-LATEST-RUNS-3: helper declares CoworkLatestRuns class");
+    for (const o of orchs) {
+      assertContains(lrBody, `cowork-${o}`,
+        `V068-LATEST-RUNS-TYPES-${o}: helper queries cowork-${o} run-note type`);
+    }
+  }
+
+  // V068-LATEST-RUNS-4: Cowork.md embeds the CoworkLatestRuns dataviewjs block.
+  const coworkHub = fs.readFileSync(path.join(BP, "content/Cowork.md"), "utf8");
+  assertContains(coworkHub, 'class: "CoworkLatestRuns"',
+    "V068-LATEST-RUNS-4: Cowork.md embeds CoworkLatestRuns block");
+
+  // V068-MANIFEST-FILES: manifest files[] declares the helper.
+  assertTrue(fileSources.includes("helpers/cowork-latest-runs.js"),
+    "V068-MANIFEST-FILES: manifest files[] declares helpers/cowork-latest-runs.js");
+
+  // V068-VERSION: cowork blueprint version bumped to 0.11.0.
+  assertTrue(manifest.version === "0.11.0",
+    `V068-VERSION: cowork manifest.version === "0.11.0" (got ${JSON.stringify(manifest.version)})`);
+}
+
 (function main() {
   console.log("--- shared contracts ---");
   checkSharedContracts();
@@ -728,6 +849,7 @@ function assertCoworkV067Shape() {
   assertCoworkV065Shape();
   assertCoworkV066Shape();
   assertCoworkV067Shape();
+  assertCoworkV068Shape();
   console.log(`========\nResult: ${passed} passed, ${failed} failed.`);
   process.exit(failed === 0 ? 0 : 1);
 })();
