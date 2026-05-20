@@ -1,6 +1,6 @@
 ---
 name: cowork:monthly-review
-description: Engagement-aware monthly review. Composes a standalone monthly summary note for one engagement (reviews the PREVIOUS month) plus a link callout in today's daily note. Phrasings = "monthly review for <engagement>", "<engagement> monthly", "monthly summary for <engagement>".
+description: Engagement-aware monthly review. Reviews the PREVIOUS month. Writes one atomic note at spice/cowork/monthly/YYYY/YYYY-MM/monthly-review.md per scheduled invocation; frontmatter `type: cowork-monthly-review`. Body composed from month-summary gather outputs (finance, calendar, imessage, projects, threads, forward-stressors, optional invoice-prep or fte-status) interpolated through the user's prompt body at spice/cowork/prompts/monthly-review.md. Phrasings = "monthly review for <engagement>", "<engagement> monthly", "monthly summary for <engagement>".
 schedule: Cron-driven per enabled (engagement, monthly) pair (typically 1st of month for personal + consulting)
 scope: shared
 tags: [cowork, orchestrator, monthly, engagement-aware]
@@ -8,7 +8,9 @@ tags: [cowork, orchestrator, monthly, engagement-aware]
 
 # cowork:monthly-review
 
-First-of-month deep pass for one engagement. Reviews the PREVIOUS month. Creates a standalone monthly review note at `spice/cowork/summaries/monthly/<engagement.id>/<prev_month_yyyymm>.md`, patches a link callout into today's daily note under `## Monthly — <engagement.label>`, and refreshes `active-threads.md` + `weekly-snapshot.md`. For finance-tracking engagements, the Credit Debt Payoff month-close is the authoritative reconciliation moment for the zero-CC-debt goal.
+First-of-month deep pass for one engagement. Reviews the PREVIOUS month. Writes ONE atomic note at `spice/cowork/monthly/YYYY/YYYY-MM/monthly-review.md` (deterministic path per `(orchestrator, month)`; overwrite-last-write-wins idempotency). Body shape follows the user's prompt body at `spice/cowork/prompts/monthly-review.md`; when the prompt body is empty, emits a no-op note with `warning: empty_prompt`. For finance-tracking engagements, this is the authoritative Credit Debt Payoff reconciliation moment. Refreshes `active-threads.md` + `weekly-snapshot.md` for this engagement's slice as a side effect.
+
+This orchestrator NEVER patches the daily note's callouts, edits the daily-note template, writes "link callouts", or writes to legacy paths like `spice/cowork/summaries/`. The v0.65.0 atomic-note write contract is the only output surface.
 
 ## Inputs
 

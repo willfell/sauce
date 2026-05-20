@@ -1,6 +1,6 @@
 ---
 name: cowork:morning-briefing
-description: Engagement-aware morning briefing. Composes the morning callout block (briefing + finance + email + messages + open threads) for one engagement and patches it into today's daily note. Phrasings = "morning briefing for <engagement>", "give me today's morning for <engagement>", "<engagement> morning briefing".
+description: Engagement-aware morning briefing. Writes one atomic note at spice/cowork/daily/YYYY/MM-MMMM/YYYY-MM-DD/morning-briefing.md per scheduled invocation; frontmatter `type: cowork-morning-briefing`. Body composed from gather outputs (calendar/email/messages/finance/projects/threads) interpolated through the user's prompt body at spice/cowork/prompts/morning-briefing.md. Phrasings = "morning briefing for <engagement>", "give me today's morning for <engagement>", "<engagement> morning briefing".
 schedule: Cron-driven per enabled (engagement, morning) pair (paste-blocks emitted by cowork:bootstrap-vault step 22)
 scope: shared
 tags: [cowork, orchestrator, morning, engagement-aware]
@@ -8,7 +8,9 @@ tags: [cowork, orchestrator, morning, engagement-aware]
 
 # cowork:morning-briefing
 
-Composes a morning callout block for one engagement (Morning Briefing + optional Finance + optional Email + optional Messages) and an Open Threads tail, then patches them into today's daily note. The first four callouts go above the `[//]: # (COWORK_CALLOUTS)` marker; Open Threads goes at the bottom after `## Notes`. Aborts cleanly on MCP unavailability — never partially writes. Re-runs are idempotent: the morning H2 block for this `(cadence, engagement_id)` pair is replaced if it already exists for today.
+Composes a morning briefing for one engagement (calendar + email + optional Finance + optional Messages + Open Threads) and writes ONE atomic note at `spice/cowork/daily/YYYY/MM-MMMM/YYYY-MM-DD/morning-briefing.md` (deterministic path per `(orchestrator, day)`; overwrite-last-write-wins idempotency). Body shape follows the user's prompt body at `spice/cowork/prompts/morning-briefing.md`; when the prompt body is empty, emits a no-op note with `warning: empty_prompt` frontmatter.
+
+This orchestrator NEVER patches the daily note's callouts, edits the daily-note template, or writes to legacy paths like `Timestamps/Summary/...`. The v0.65.0 atomic-note write contract is the only output surface. Aborts cleanly on MCP unavailability — never partially writes.
 
 ## Inputs
 

@@ -1,6 +1,6 @@
 ---
 name: cowork:eod-review
-description: Engagement-aware end-of-day review. Composes the EOD callout (todo status, morning follow-up, tomorrow preview, late emails) for one engagement and patches it into today's daily note. Phrasings = "eod for <engagement>", "<engagement> eod review", "give me today's eod for <engagement>".
+description: Engagement-aware end-of-day review. Writes one atomic note at spice/cowork/daily/YYYY/MM-MMMM/YYYY-MM-DD/eod-review.md per scheduled invocation; frontmatter `type: cowork-eod-review`. Body composed from gather outputs (todo status, morning follow-up, tomorrow preview, late emails, threads) interpolated through the user's prompt body at spice/cowork/prompts/eod-review.md. Phrasings = "eod for <engagement>", "<engagement> eod review", "give me today's eod for <engagement>".
 schedule: Cron-driven per enabled (engagement, eod) pair
 scope: shared
 tags: [cowork, orchestrator, eod, engagement-aware]
@@ -8,7 +8,9 @@ tags: [cowork, orchestrator, eod, engagement-aware]
 
 # cowork:eod-review
 
-Closes the day for one engagement. Compiles completed/incomplete tasks, compares against the morning briefing's flagged items, previews tomorrow's calendar, surfaces late emails, and updates the active-threads ledger. Writes one `[!example]-` callout to today's daily note under `## EOD — <engagement.label>` within the `[//]: # (COWORK_CALLOUTS)` block. Re-run replaces the block in place.
+Closes the day for one engagement. Compiles completed/incomplete tasks, compares against the morning briefing's flagged items, previews tomorrow's calendar, surfaces late emails, and updates the active-threads ledger. Writes ONE atomic note at `spice/cowork/daily/YYYY/MM-MMMM/YYYY-MM-DD/eod-review.md` (deterministic path per `(orchestrator, day)`; overwrite-last-write-wins idempotency). Body shape follows the user's prompt body at `spice/cowork/prompts/eod-review.md`; when the prompt body is empty, emits a no-op note with `warning: empty_prompt`.
+
+This orchestrator NEVER patches the daily note's callouts, edits the daily-note template, or writes to legacy paths. The v0.65.0 atomic-note write contract is the only output surface.
 
 ## Inputs
 

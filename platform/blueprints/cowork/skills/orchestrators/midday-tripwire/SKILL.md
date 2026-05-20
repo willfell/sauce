@@ -1,6 +1,6 @@
 ---
 name: cowork:midday-tripwire
-description: Engagement-aware midday CC tripwire. Detects today's locked-card or discretionary CC charges since morning for one engagement and appends a tripwire callout to today's daily note. Personal-engagement only (gated by render_aspects.finance_block). Phrasings = "midday tripwire for <engagement>", "<engagement> midday check", "midday cc check".
+description: Engagement-aware midday CC tripwire. Writes one atomic note at spice/cowork/daily/YYYY/MM-MMMM/YYYY-MM-DD/midday-tripwire.md per scheduled invocation when severity == yellow or red; frontmatter `type: cowork-midday-tripwire` + `severity:`. Silent (no note written) when severity == green. Personal-engagement only (gated by render_aspects.finance_block). Body composed from gather outputs interpolated through the user's prompt body at spice/cowork/prompts/midday-tripwire.md. Phrasings = "midday tripwire for <engagement>", "<engagement> midday check", "midday cc check".
 schedule: Cron-driven per enabled (engagement, midday) pair (typically only personal-type engagements enable midday)
 scope: shared
 tags: [cowork, orchestrator, midday, finance, engagement-aware]
@@ -8,9 +8,11 @@ tags: [cowork, orchestrator, midday, finance, engagement-aware]
 
 # cowork:midday-tripwire
 
-Real-time mid-day check for credit-card charges that violate the active payoff plan, scoped to a single engagement. Pulls today's CC transactions for the engagement's finance scope, classifies each as RED (locked-card charge), YELLOW (active-card discretionary >= threshold), or GREEN. Writes ONLY when at least one RED or YELLOW exists — silent otherwise. Idempotent on re-run via `transaction_id` dedupe.
+Real-time mid-day check for credit-card charges that violate the active payoff plan, scoped to a single engagement. Pulls today's CC transactions for the engagement's finance scope, classifies each as RED (locked-card charge), YELLOW (active-card discretionary >= threshold), or GREEN. Writes ONLY when at least one RED or YELLOW exists — when severity is green, NO atomic note is written (presence of a tripwire note = something to flag). When a write fires, the note lands at `spice/cowork/daily/YYYY/MM-MMMM/YYYY-MM-DD/midday-tripwire.md` (deterministic path per `(orchestrator, day)`; re-run replaces).
 
 Skipped (early-exit silently) for engagements whose `render_aspects.finance_block != "include"`.
+
+This orchestrator NEVER patches the daily note's callouts, edits the daily-note template, or writes to legacy paths. The v0.65.0 atomic-note write contract is the only output surface.
 
 ## Inputs
 

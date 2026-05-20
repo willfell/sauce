@@ -1,6 +1,6 @@
 ---
 name: cowork:weekly-review
-description: Engagement-aware weekly review. Composes a standalone weekly summary note for one engagement plus a link callout in today's daily note. Phrasings = "weekly review for <engagement>", "<engagement> weekly", "weekly summary for <engagement>".
+description: Engagement-aware weekly review. Writes one atomic note at spice/cowork/weekly/YYYY/YYYY-Www/weekly-review.md per scheduled invocation; frontmatter `type: cowork-weekly-review`. Body composed from week-summary gather outputs (finance, calendar, gmail, imessage, projects, threads, optional invoice-prep or fte-status) interpolated through the user's prompt body at spice/cowork/prompts/weekly-review.md. Phrasings = "weekly review for <engagement>", "<engagement> weekly", "weekly summary for <engagement>".
 schedule: Cron-driven per enabled (engagement, weekly) pair (typically Sundays for personal; Fridays for w2-fte / consulting)
 scope: shared
 tags: [cowork, orchestrator, weekly, engagement-aware]
@@ -8,7 +8,9 @@ tags: [cowork, orchestrator, weekly, engagement-aware]
 
 # cowork:weekly-review
 
-End-of-week deep pass for one engagement. Creates a standalone weekly summary note at `spice/cowork/summaries/weekly/<engagement.id>/<YYYY-Www>.md`, then patches a link callout into today's daily note under `## Weekly — <engagement.label>`. Refreshes `active-threads.md` + `weekly-snapshot.md` for this engagement's slice. Idempotent: re-runs replace the summary file content and the daily-note link callout.
+End-of-week deep pass for one engagement. Writes ONE atomic note at `spice/cowork/weekly/YYYY/YYYY-Www/weekly-review.md` (deterministic path per `(orchestrator, week)`; overwrite-last-write-wins idempotency). Body shape follows the user's prompt body at `spice/cowork/prompts/weekly-review.md`; when the prompt body is empty, emits a no-op note with `warning: empty_prompt`. Refreshes `active-threads.md` + `weekly-snapshot.md` for this engagement's slice as a side effect.
+
+This orchestrator NEVER patches the daily note's callouts, edits the daily-note template, writes "link callouts", or writes to legacy paths like `spice/cowork/summaries/`. The v0.65.0 atomic-note write contract is the only output surface.
 
 ## Inputs
 
