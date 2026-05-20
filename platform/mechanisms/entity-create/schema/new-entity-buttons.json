@@ -5,7 +5,7 @@
   "type": "array",
   "items": {
     "type": "object",
-    "required": ["id", "label", "prompts", "destination", "frontmatter_template", "render_in"],
+    "required": ["id", "label", "prompts", "destination", "frontmatter_template"],
     "additionalProperties": false,
     "properties": {
       "id":    { "type": "string", "pattern": "^[a-z][a-z0-9_-]*$" },

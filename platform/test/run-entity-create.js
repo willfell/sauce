@@ -149,10 +149,10 @@ for (const [label, p] of mechFiles) {
 }
 ok("EC-1 entity-create mechanism dir + 4 files present", fs.existsSync(MECH_DIR) && allPresent);
 
-// 2. manifest parses, version is "0.3.2" (PATCH v0.50.4 embedded-subfolder guard)
+// 2. manifest parses, version is "0.4.0" (MINOR v0.68.0 — render_in optional)
 const manifest = JSON.parse(fs.readFileSync(path.join(MECH_DIR, "manifest.json"), "utf8"));
-ok("EC-2 entity-create manifest parses + version === 0.3.2",
-    manifest && manifest.name === "entity-create" && manifest.version === "0.3.2",
+ok("EC-2 entity-create manifest parses + version === 0.4.0",
+    manifest && manifest.name === "entity-create" && manifest.version === "0.4.0",
     `got name=${manifest && manifest.name} version=${manifest && manifest.version}`);
 
 // 3. json-schema parses + has 7 extension shapes
@@ -525,6 +525,37 @@ if (resolveEntityCreateEntry) {
         `r=${r} history=${JSON.stringify(history)}`);
 } else {
     ok("EC-29 resolveEntityCreateEntry: render_in.kind bogus returns null + warning",
+        false, "could not extract resolveEntityCreateEntry");
+}
+
+// 41. resolveEntityCreateEntry: render_in absent → entry validates; resolved has no render_in
+// v0.4.0 (entity-create MINOR, v0.68.0): render_in is optional. Registry-only
+// entries are valid — useful when a blueprint renders the button itself
+// inside a custom flex-row layout (scratch v0.5.0).
+if (resolveEntityCreateEntry) {
+    const history = [];
+    const git = { commit: "0", tag: "x", dirty: false };
+    const variables = { templates_path: "ranch/templates", module_directory: "spice/foo" };
+    const entry = {
+        id: "foo",
+        label: "+ New Foo",
+        prompts: [],
+        destination: { folder_prefix: "spice/foo", filename_prefix: "Foo-" },
+        frontmatter_template: { type: "foo" },
+        // render_in intentionally absent
+    };
+    const r = resolveEntityCreateEntry(entry, variables, "test-foo", history, git);
+    ok("EC-41 resolveEntityCreateEntry: render_in absent returns resolved entry (no validation failure)",
+        r !== null && typeof r === "object",
+        `r=${JSON.stringify(r)} history=${JSON.stringify(history)}`);
+    ok("EC-41 resolved entry has no render_in field when source had none",
+        r && !("render_in" in r),
+        `keys=${r ? Object.keys(r).join(",") : "(null)"}`);
+    ok("EC-41 no validation-failure history rows for the absent render_in",
+        !history.some(h => /render_in/.test(h.reason || "")),
+        `history=${JSON.stringify(history)}`);
+} else {
+    ok("EC-41 resolveEntityCreateEntry: render_in absent returns resolved entry (no validation failure)",
         false, "could not extract resolveEntityCreateEntry");
 }
 

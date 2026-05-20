@@ -2253,12 +2253,20 @@ function resolveEntityCreateEntry(entry, variables, sourceName, history, git) {
   if (!entry.frontmatter_template || typeof entry.frontmatter_template !== "object") {
     return fail("missing frontmatter_template");
   }
-  if (!entry.render_in || typeof entry.render_in !== "object") return fail("missing render_in");
-  if (entry.render_in.kind !== "hub" && entry.render_in.kind !== "nav_buttons") {
-    return fail(`render_in.kind must be "hub" or "nav_buttons"`);
-  }
-  if (entry.render_in.kind === "hub" && (typeof entry.render_in.target_path !== "string" || entry.render_in.target_path.length === 0)) {
-    return fail(`render_in.kind="hub" requires target_path`);
+  // v0.4.0 (entity-create MINOR): render_in is optional. Entries with no render_in
+  // are registry-only — EntityCreate.create() dispatch works because the spec is
+  // still materialized into ranch/entity-create-registry.json; the materializer
+  // loop above simply skips the injection call when render_in is absent. Useful
+  // when a blueprint renders the button itself (e.g., scratch's ScratchDayActions
+  // hosts the button inside a custom flex row).
+  if (entry.render_in !== undefined && entry.render_in !== null) {
+    if (typeof entry.render_in !== "object") return fail("render_in must be an object when present");
+    if (entry.render_in.kind !== "hub" && entry.render_in.kind !== "nav_buttons") {
+      return fail(`render_in.kind must be "hub" or "nav_buttons"`);
+    }
+    if (entry.render_in.kind === "hub" && (typeof entry.render_in.target_path !== "string" || entry.render_in.target_path.length === 0)) {
+      return fail(`render_in.kind="hub" requires target_path`);
+    }
   }
 
   // --- Layer 2: deep shape checks (S3) ---
@@ -2322,7 +2330,7 @@ function resolveEntityCreateEntry(entry, variables, sourceName, history, git) {
     const substituted = substituteLenient(entry.body_template, variables);
     resolved.body_template = _resolveBodyTemplatePath(substituted, variables);
   }
-  if (entry.render_in.kind === "hub") {
+  if (entry.render_in && entry.render_in.kind === "hub") {
     resolved.render_in = {
       ...entry.render_in,
       target_path: substituteLenient(entry.render_in.target_path, variables),
