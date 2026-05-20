@@ -1,6 +1,6 @@
 {
   "name": "cowork",
-  "version": "0.10.2",
+  "version": "0.11.0",
   "kind": "blueprint",
   "module_directory": "cowork",
   "engagement_types_dir": "engagement-types",
@@ -13,7 +13,8 @@
     "CoworkTimeframeButtons",
     "CoworkHubNav",
     "CoworkDailyActions",
-    "CoworkReadiness"
+    "CoworkReadiness",
+    "CoworkLatestRuns"
   ],
   "nav_buttons": [
     {
@@ -99,6 +100,7 @@
     { "source": "helpers/cowork-hub-nav.js",                          "dest": "{{scripts_path}}/cowork/cowork-hub-nav.js" },
     { "source": "helpers/cowork-daily-actions.js",                    "dest": "{{scripts_path}}/cowork/cowork-daily-actions.js" },
     { "source": "helpers/cowork-readiness.js",                       "dest": "{{scripts_path}}/cowork/cowork-readiness.js" },
+    { "source": "helpers/cowork-latest-runs.js",                     "dest": "{{scripts_path}}/cowork/cowork-latest-runs.js" },
     { "source": "content/scheduled-jobs.md",                          "dest": "{{module_directory}}/scheduled-jobs.md" }
   ],
   "claude_surface": [

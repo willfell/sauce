@@ -56,6 +56,10 @@ if (gaps.length > 0) {
 await dv.view("ranch/views/customjs-guard", { class: "CoworkReadiness" });
 ```
 
+```dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "CoworkLatestRuns" });
+```
+
 ---
 
 ## Timeframes
