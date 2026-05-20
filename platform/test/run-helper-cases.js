@@ -4314,6 +4314,19 @@ async function caseSHCS12ScratchDayActionsRowOfTwo() {
   assertTrue("SHC-S12: scratch-day-actions.js missing new-scratch+hub flex-row pair or EntityCreate delegate", ok);
 }
 
+async function caseSHCS13ScratchDayHubNoEntityCreateBlock() {
+  console.log("\n--- Case SHC-S13: Scratch Day Hub.md no longer carries the entity-create:scratch sentinel ---");
+  const p = path.join(BLUEPRINTS_DIR, "scratch", "templates", "Scratch Day Hub.md");
+  assertTrue("SHC-S13: Scratch Day Hub.md exists on disk", fs.existsSync(p));
+  const body = fs.readFileSync(p, "utf8");
+  assertTrue("SHC-S13: Scratch Day Hub.md must NOT contain `// entity-create:scratch` sentinel (block ownership moved to ScratchDayActions in scratch v0.5.0)",
+    !/\/\/\s*entity-create:scratch\b/.test(body));
+  assertTrue("SHC-S13: Scratch Day Hub.md must NOT call customJS.EntityCreate.render (button is rendered by ScratchDayActions)",
+    !/customJS\.EntityCreate\.render/.test(body));
+  assertTrue("SHC-S13: ScratchDayActions block still present (Task 2 regression)",
+    /class:\s*"ScratchDayActions"/.test(body));
+}
+
 async function caseSHCS11FinanceBudget() {
   console.log("\n--- Case SHC-S11-finance-budget: new-budget-button.js deleted (v0.46.0 S8) ---");
   const p = path.join(BLUEPRINTS_DIR, "finance", "helpers", "new-budget-button.js");
@@ -7212,6 +7225,7 @@ async function caseFA2RuleFragmentsExtends() {
   await caseSHCS11ProjectNavButtonsNoCreate();
   await caseSHCS11ScratchDayActionsNoNewScratch();
   await caseSHCS12ScratchDayActionsRowOfTwo();
+  await caseSHCS13ScratchDayHubNoEntityCreateBlock();
   await caseSHCS11FinanceBudget();
   await caseSHCS11FinancePaycheck();
   await caseSHCS11FinanceInvoice();
