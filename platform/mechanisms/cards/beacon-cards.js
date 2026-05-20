@@ -17,7 +17,9 @@
  *              v0.2.4: function form is a caller-driven render callback; receives the
  *              subtitle parent element and renders into it directly (caller owns styling).
  *   icon     — (page) => string (optional; inline SVG HTML rendered left of title)
- *   meta     — (page) => string (optional; HTML rendered right of title row when layout="row")
+ *   meta     — (page) => string | (page, parentEl) => void (optional; HTML rendered right of title row when layout="row")
+ *              v0.2.6: function-form (arity >= 2) receives the meta parent element and renders into it directly;
+ *              caller owns content. Mirrors the v0.2.4 subtitle-callback pattern. String form unchanged.
  *   badges   — (page) => Array<{label, tone?, icon?, style?}> (optional; tone: "accent"|"warn"|"error"|"success"|"muted")
  *              v0.2.0: optional icon (inline SVG HTML) prepended inside chip.
  *              v0.2.3: optional style ("fill"|"outline"); default "fill" preserves prior behavior.
@@ -160,11 +162,26 @@ class BeaconCards {
         const indentCss = iconHtml ? "padding-left: 24px;" : "";
         this._renderSubtitle(left, page, ctx, { indent: indentCss });
 
-        const metaHtml = ctx.metaFn(page) || "";
-        if (metaHtml) {
+        // v0.2.6 (v0.66.0): meta accepts function-form (page, parentEl) => void in
+        // addition to (page) => string. Arity-2 detection mirrors v0.2.4 subtitle.
+        // String form drops white-space: nowrap so multi-pill meta lines can wrap.
+        if (typeof ctx.metaFn === "function" && ctx.metaFn.length >= 2) {
             const meta = row.createEl("div");
-            meta.style.cssText = `display: flex; gap: ${isMobile ? "12px" : "16px"}; font-size: 0.8em; color: var(--text-muted); flex-shrink: 0; white-space: nowrap; ${isMobile && iconHtml ? "padding-left: 24px;" : ""}`;
-            meta.innerHTML = metaHtml;
+            meta.style.cssText = `display: flex; gap: ${isMobile ? "12px" : "16px"}; font-size: 0.8em; color: var(--text-muted); flex-shrink: 0; ${isMobile && iconHtml ? "padding-left: 24px;" : ""}`;
+            try {
+                ctx.metaFn(page, meta);
+            } catch (e) {
+                // Don't let a single bad meta callback abort the whole card render.
+                meta.textContent = "";
+                if (typeof console !== "undefined") console.warn("BeaconCards meta callback threw:", e && e.message);
+            }
+        } else {
+            const metaHtml = ctx.metaFn(page) || "";
+            if (metaHtml) {
+                const meta = row.createEl("div");
+                meta.style.cssText = `display: flex; gap: ${isMobile ? "12px" : "16px"}; font-size: 0.8em; color: var(--text-muted); flex-shrink: 0; white-space: nowrap; ${isMobile && iconHtml ? "padding-left: 24px;" : ""}`;
+                meta.innerHTML = metaHtml;
+            }
         }
 
         this._renderBadges(card, page, ctx);

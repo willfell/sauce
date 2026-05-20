@@ -29,6 +29,7 @@
  *   BC5   badge-no-icon         badges[] without icon renders text-only chip (regression)
  *   BC6   synthetic-page-onclick synthetic page + custom onClick fires
  *   BC7   success-tone          badges[].tone === "success" renders green (#16a34a) chip
+ *   BC9   meta-function-form    REND-V066-PILL-1a+1b: meta (page, parentEl) => void callback invoked with parentEl (v0.2.6)
  *   DA1   active-file-with-date  dv.current() basename matches /(\d{4}-\d{2}-\d{2})/ → helper returns extracted ISO
  *   DA2   active-file-without-date  dv.current() basename has no date → helper falls back to today (window.moment stub)
  *   FF1   budget-nav-in-path         BudgetNavButtons on Budget atlas path → 2 buttons (active hidden)
@@ -1082,6 +1083,43 @@ async function testBC8SubtitleCallback() {
   return pass;
 }
 
+// ── REND-V066-PILL-1: BeaconCards meta accepts function-form (arity >= 2) ─────
+// v0.66.0 prerequisite for daily-dashboard cohesion cycle. The daily blueprint
+// will pass a (page, parentEl) callback as `meta` to ActivityFeed which
+// delegates to BeaconCards. Mirrors v0.2.4 subtitle-callback pattern.
+async function testBC9MetaFunctionForm() {
+  console.log('\n=== BC9 / REND-V066-PILL-1 — meta (page, parentEl) => void callback form fires and receives parentEl ===');
+  const app = makeApp();
+  const Cls = loadBeaconCardsClass(app);
+  const dv = makeDv();
+  const cards = new Cls();
+  let metaCalls = 0;
+  let metaArity = null;
+  let metaParentEl = null;
+  const fakeMetaFn = function (page, parentEl) {
+    metaCalls++;
+    metaArity = arguments.length;
+    metaParentEl = parentEl;
+    parentEl.textContent = 'via-fn';
+  };
+  await cards.render(dv, {
+    pages: [{ file: { name: 'x', path: 'x.md' } }],
+    title: (p) => p.file.name,
+    meta: fakeMetaFn,
+    layout: 'row',
+  });
+  console.log(`  meta callback invocations: ${metaCalls}`);
+  console.log(`  meta callback arity: ${metaArity}`);
+  console.log(`  meta parentEl non-null: ${metaParentEl !== null}`);
+  const pill1a = metaCalls === 1;
+  const pill1b = metaArity === 2 && metaParentEl !== null;
+  console.log(`  REND-V066-PILL-1a (invoked exactly once): ${pill1a ? 'PASS' : 'FAIL'}`);
+  console.log(`  REND-V066-PILL-1b (receives parentEl as 2nd arg): ${pill1b ? 'PASS' : 'FAIL'}`);
+  const pass = pill1a && pill1b;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
 // ── people-rendering mechanism (v0.27.0) ────────────────────────────────
 async function testPR1ChipResolved() {
   console.log('\n=== PR1 — renderChip with valid personLink returns <span> with name + tooltip from frontmatter ===');
@@ -1825,6 +1863,7 @@ async function testREntityCreateIconRendersSvg(siteIndex, site) {
       results.push(['BC6 synthetic-page-onclick', await testBC6SyntheticPageOnClick()]);
       results.push(['BC7 success-tone', await testBC7SuccessTone()]);
       results.push(['BC8 subtitle-callback', await testBC8SubtitleCallback()]);
+      results.push(['BC9 meta-function-form (REND-V066-PILL-1a+1b)', await testBC9MetaFunctionForm()]);
     }
     if (which === 'people-rendering' || which === 'all') {
       results.push(['PR1 chip-resolved', await testPR1ChipResolved()]);
