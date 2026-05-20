@@ -31,3 +31,6 @@ node_modules/
 
 # macOS Finder noise
 .DS_Store
+
+# Claude Code per-session scheduler lock (runtime state; never tracked)
+.claude/scheduled_tasks.lock
