@@ -4300,6 +4300,20 @@ async function caseSHCS11ScratchDayActionsNoNewScratch() {
     !/\bnewScratch\s*\(/.test(body));
 }
 
+async function caseSHCS12ScratchDayActionsRowOfTwo() {
+  console.log("\n--- Case SHC-S12: scratch-day-actions.js renders + New Scratch + Hub in one flex row ---");
+  const p = path.join(BLUEPRINTS_DIR, "scratch", "helpers", "scratch-day-actions.js");
+  assertTrue("SHC-S12: source file exists", fs.existsSync(p));
+  const body = fs.readFileSync(p, "utf8");
+  const newScratchLabel = /label:\s*["']\+ New Scratch["']/.test(body);
+  const hubLabel = /label:\s*["']Hub["']/.test(body);
+  const delegatesToEntityCreate = /customJS\.EntityCreate\.create\(\s*\{\s*instance:\s*["']scratch["']/.test(body);
+  const flexRow = /display:\s*flex.*max-width:\s*600px/.test(body);
+  const bothFlexTrue = (body.match(/flex:\s*true/g) || []).length >= 2;
+  const ok = newScratchLabel && hubLabel && delegatesToEntityCreate && flexRow && bothFlexTrue;
+  assertTrue("SHC-S12: scratch-day-actions.js missing new-scratch+hub flex-row pair or EntityCreate delegate", ok);
+}
+
 async function caseSHCS11FinanceBudget() {
   console.log("\n--- Case SHC-S11-finance-budget: new-budget-button.js deleted (v0.46.0 S8) ---");
   const p = path.join(BLUEPRINTS_DIR, "finance", "helpers", "new-budget-button.js");
@@ -7197,6 +7211,7 @@ async function caseFA2RuleFragmentsExtends() {
   await caseSHCS11People();
   await caseSHCS11ProjectNavButtonsNoCreate();
   await caseSHCS11ScratchDayActionsNoNewScratch();
+  await caseSHCS12ScratchDayActionsRowOfTwo();
   await caseSHCS11FinanceBudget();
   await caseSHCS11FinancePaycheck();
   await caseSHCS11FinanceInvoice();
