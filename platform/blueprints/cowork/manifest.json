@@ -58,6 +58,24 @@
     { "source": "content/context/engagement-templates/consulting/stakeholders.md",              "dest": "{{module_directory}}/context/engagement-templates/consulting/stakeholders.md" },
     { "source": "content/context/engagement-templates/consulting/working-style.md",             "dest": "{{module_directory}}/context/engagement-templates/consulting/working-style.md" },
 
+    { "source": "content/context/engagement-templates/personal/prompts/morning-briefing.md",    "dest": "{{module_directory}}/context/engagement-templates/personal/prompts/morning-briefing.md" },
+    { "source": "content/context/engagement-templates/personal/prompts/midday-tripwire.md",     "dest": "{{module_directory}}/context/engagement-templates/personal/prompts/midday-tripwire.md" },
+    { "source": "content/context/engagement-templates/personal/prompts/eod-review.md",          "dest": "{{module_directory}}/context/engagement-templates/personal/prompts/eod-review.md" },
+    { "source": "content/context/engagement-templates/personal/prompts/weekly-review.md",       "dest": "{{module_directory}}/context/engagement-templates/personal/prompts/weekly-review.md" },
+    { "source": "content/context/engagement-templates/personal/prompts/monthly-review.md",      "dest": "{{module_directory}}/context/engagement-templates/personal/prompts/monthly-review.md" },
+
+    { "source": "content/context/engagement-templates/w2-fte/prompts/morning-briefing.md",      "dest": "{{module_directory}}/context/engagement-templates/w2-fte/prompts/morning-briefing.md" },
+    { "source": "content/context/engagement-templates/w2-fte/prompts/midday-tripwire.md",       "dest": "{{module_directory}}/context/engagement-templates/w2-fte/prompts/midday-tripwire.md" },
+    { "source": "content/context/engagement-templates/w2-fte/prompts/eod-review.md",            "dest": "{{module_directory}}/context/engagement-templates/w2-fte/prompts/eod-review.md" },
+    { "source": "content/context/engagement-templates/w2-fte/prompts/weekly-review.md",         "dest": "{{module_directory}}/context/engagement-templates/w2-fte/prompts/weekly-review.md" },
+    { "source": "content/context/engagement-templates/w2-fte/prompts/monthly-review.md",        "dest": "{{module_directory}}/context/engagement-templates/w2-fte/prompts/monthly-review.md" },
+
+    { "source": "content/context/engagement-templates/consulting/prompts/morning-briefing.md",  "dest": "{{module_directory}}/context/engagement-templates/consulting/prompts/morning-briefing.md" },
+    { "source": "content/context/engagement-templates/consulting/prompts/midday-tripwire.md",   "dest": "{{module_directory}}/context/engagement-templates/consulting/prompts/midday-tripwire.md" },
+    { "source": "content/context/engagement-templates/consulting/prompts/eod-review.md",        "dest": "{{module_directory}}/context/engagement-templates/consulting/prompts/eod-review.md" },
+    { "source": "content/context/engagement-templates/consulting/prompts/weekly-review.md",     "dest": "{{module_directory}}/context/engagement-templates/consulting/prompts/weekly-review.md" },
+    { "source": "content/context/engagement-templates/consulting/prompts/monthly-review.md",    "dest": "{{module_directory}}/context/engagement-templates/consulting/prompts/monthly-review.md" },
+
     { "source": "content/context/engagement-shared-templates/active-threads.md",                "dest": "{{module_directory}}/context/engagement-shared-templates/active-threads.md" },
     { "source": "content/context/engagement-shared-templates/vault-config.md",                  "dest": "{{module_directory}}/context/engagement-shared-templates/vault-config.md" },
     { "source": "content/context/engagement-shared-templates/weekly-snapshot.md",               "dest": "{{module_directory}}/context/engagement-shared-templates/weekly-snapshot.md" },
