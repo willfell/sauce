@@ -4195,7 +4195,7 @@ async function caseSHCS1ManifestFields() {
   assertTrue("SHC-S1: scratch/manifest.json exists on disk", fs.existsSync(p));
   const m = _readJson(p);
   assertEqual(m.name, "scratch", "SHC-S1: manifest.name === \"scratch\"");
-  assertEqual(m.version, "0.5.0", "SHC-S1: manifest.version === \"0.5.0\"");
+  assertEqual(m.version, "0.5.1", "SHC-S1: manifest.version === \"0.5.1\"");
   assertEqual(m.module_directory, "scratch", "SHC-S1: manifest.module_directory === \"scratch\"");
 }
 
@@ -4325,6 +4325,24 @@ async function caseSHCS13ScratchDayHubNoEntityCreateBlock() {
     !/customJS\.EntityCreate\.render/.test(body));
   assertTrue("SHC-S13: ScratchDayActions block still present (Task 2 regression)",
     /class:\s*"ScratchDayActions"/.test(body));
+}
+
+async function caseSHCS14ScratchDayActionsSelfHeal() {
+  // v0.5.1 PATCH (sauce v0.69.0): ScratchDayActions self-heals existing day-hub
+  // notes carrying the legacy entity-create:scratch dataviewjs block (created
+  // from v0.4.x templates). Asserts the helper has _stripLegacyEntityCreateBlock,
+  // calls it from render() before the row layout, anchors on the sentinel
+  // comment, and uses app.vault.modify to write the cleaned body.
+  console.log("\n--- Case SHC-S14: scratch-day-actions.js self-heals legacy entity-create:scratch block ---");
+  const p = path.join(BLUEPRINTS_DIR, "scratch", "helpers", "scratch-day-actions.js");
+  const body = fs.readFileSync(p, "utf8");
+  const hasHelper = /_stripLegacyEntityCreateBlock\s*\(/.test(body);
+  const callsHelper = /await\s+this\._stripLegacyEntityCreateBlock\s*\(\s*dv\s*\)/.test(body);
+  const anchorsOnSentinel = /entity-create:scratch/.test(body);
+  const usesVaultModify = /app\.vault\.modify\s*\(/.test(body);
+  const ok = hasHelper && callsHelper && anchorsOnSentinel && usesVaultModify;
+  assertTrue("SHC-S14: scratch-day-actions.js missing self-heal helper or call-site or sentinel anchor or vault.modify",
+    ok);
 }
 
 async function caseSHCS11FinanceBudget() {
@@ -7284,6 +7302,7 @@ async function caseFA2RuleFragmentsExtends() {
   await caseSHCS11ScratchDayActionsNoNewScratch();
   await caseSHCS12ScratchDayActionsRowOfTwo();
   await caseSHCS13ScratchDayHubNoEntityCreateBlock();
+  await caseSHCS14ScratchDayActionsSelfHeal();
   await caseSHCS11FinanceBudget();
   await caseSHCS11FinancePaycheck();
   await caseSHCS11FinanceInvoice();
@@ -7517,7 +7536,7 @@ async function caseFA2RuleFragmentsExtends() {
   // cards untouched per Approach A)
   {
     const pins = [
-      ["daily",         "platform/blueprints/daily/manifest.json",            "0.8.3"],
+      ["daily",         "platform/blueprints/daily/manifest.json",            "0.9.0"],
       ["activity-feed", "platform/mechanisms/activity-feed/manifest.json",    "0.3.2"],
       ["cards",         "platform/mechanisms/cards/manifest.json",            "0.2.6"],
     ];
