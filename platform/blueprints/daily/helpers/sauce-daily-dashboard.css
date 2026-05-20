@@ -29,6 +29,16 @@
 }
 .space-daily-dashboard .sauce-section-summary::-webkit-details-marker { display: none; }
 .space-daily-dashboard .sauce-section-summary::marker { display: none; }
+/* v0.8.1 (v0.67.1): section icon baseline-aligned with the title text.
+ * The summary's align-items: center centers the wrapping span, but the inline
+ * SVG inside the span had a small baseline offset. Force the icon span to be
+ * inline-flex + the SVG to display:block to remove the inline baseline gap. */
+.space-daily-dashboard .sauce-section-icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.space-daily-dashboard .sauce-section-icon svg { display: block; }
 .space-daily-dashboard .sauce-section-chevron {
   display: inline-flex;
   margin-left: auto;
@@ -98,10 +108,15 @@
 .space-daily-dashboard .sauce-bread[data-expanded="true"] .sauce-bread-chevron {
   transform: rotate(90deg);
 }
+/* v0.8.1 (v0.67.1): display:flex moved into :not([hidden]) so the [hidden]
+ * attribute's UA `display: none` actually wins. The pre-existing rule's
+ * `display: flex` clobbered [hidden], leaving the drill-in always visible. */
 .space-daily-dashboard .sauce-drill-in {
   width: 100%;
   margin: 6px 0 2px 0;
   padding: 4px 0 0 12px;
+}
+.space-daily-dashboard .sauce-drill-in:not([hidden]) {
   display: flex;
   flex-direction: column;
   gap: 2px;

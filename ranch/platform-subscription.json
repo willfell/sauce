@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop self-subscription. Pinned to the workshop's own manifest version.",
-  "workshop_version": "0.67.0",
+  "workshop_version": "0.67.1",
   "mechanisms": [
     {
       "name": "customjs-guard",
@@ -66,7 +66,7 @@
     },
     {
       "name": "daily",
-      "version": "0.8.0"
+      "version": "0.8.1"
     },
     {
       "name": "meetings",

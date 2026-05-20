@@ -7424,7 +7424,7 @@ async function caseFA2RuleFragmentsExtends() {
   // cards untouched per Approach A)
   {
     const pins = [
-      ["daily",         "platform/blueprints/daily/manifest.json",            "0.8.0"],
+      ["daily",         "platform/blueprints/daily/manifest.json",            "0.8.1"],
       ["activity-feed", "platform/mechanisms/activity-feed/manifest.json",    "0.3.2"],
       ["cards",         "platform/mechanisms/cards/manifest.json",            "0.2.6"],
     ];
