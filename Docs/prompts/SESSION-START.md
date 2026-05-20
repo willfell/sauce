@@ -6,7 +6,7 @@ canonical: yes
 # Sauce — session-start recipe
 
 > [!abstract] Use this when starting any fresh session
-> This file codifies the durable session-start protocol so future sessions don't need a custom multi-paragraph onboarding prompt. Combined with `CLAUDE.md` (live state) + the most recent `Docs/prompts/<date>-post-v<X.Y.Z>-next-cycle-handoff.md` (cycle-specific carry), this is enough context to safely pick up any cycle.
+> This file codifies the durable session-start protocol so future sessions don't need a custom multi-paragraph onboarding prompt. Combined with `CLAUDE.md` (thin router) + `Docs/agent-guides/cycle-status.md` (live workshop state) + the most recent `Docs/prompts/<date>-post-v<X.Y.Z>-next-cycle-handoff.md` (cycle-specific carry), this is enough context to safely pick up any cycle.
 
 ---
 
@@ -25,12 +25,13 @@ If working tree shows other modifications, STOP and surface to user before proce
 ## Step 2 — Read the cycle context
 
 > [!todo] In this order
-> 1. **`CLAUDE.md`** — non-negotiables + live state (workshop version, mechanisms, blueprints, harness counts, landmines summary, next-TBD pointer).
-> 2. **`Docs/prompts/<date>-post-v<X.Y.Z>-next-cycle-handoff.md`** — the most recent dated handoff doc (sort by name desc; pick latest).
+> 1. **`CLAUDE.md`** — thin router. Names the agent guides + canonical Docs to read next; carries non-negotiables only in summary form.
+> 2. **`Docs/agent-guides/cycle-status.md`** — live workshop state (workshop version, mechanisms, blueprints, harness counts, landmines summary, in-flight queue).
+> 3. **`Docs/prompts/<date>-post-v<X.Y.Z>-next-cycle-handoff.md`** — the most recent dated handoff doc (sort by name desc; pick latest).
 >    - Locate via: `ls -t Docs/prompts/*-next-cycle-handoff.md | head -1`
 >    - This doc contains the CYCLE-SPECIFIC carry: which cycle is next, recommended candidates, design considerations, slash command for the next session.
-> 3. **`Docs/cycle-history.md`** — archived per-cycle status snapshots (v0.1.0 through most recent close). Reference for past lessons + cycle-shape patterns.
-> 4. **`Docs/landmines.md`** — 19+ entries codifying traps from prior cycles. Always non-negotiable.
+> 4. **`Docs/cycle-history.md`** — archived per-cycle status snapshots (v0.1.0 through most recent close). Reference for past lessons + cycle-shape patterns.
+> 5. **`Docs/landmines.md`** — 22 entries codifying traps from prior cycles. Always non-negotiable.
 
 ## Step 3 — Check for open dated plans without result-doc siblings
 
@@ -56,7 +57,7 @@ node platform/test/run-helper-cases.js 2>&1 | tail -2
 node platform/test/run-renderer.js    && echo "renderer exit 0"
 ```
 
-Expected counts move per-cycle. Reference the live `CLAUDE.md` Harness summary line for current numbers. Any harness FAIL on a fresh checkout means something regressed since last close — STOP + investigate.
+Expected counts move per-cycle. Reference `Docs/agent-guides/cycle-status.md` § Test harnesses for current numbers. Any harness FAIL on a fresh checkout means something regressed since last close — STOP + investigate.
 
 ## Step 5 — Follow the handoff doc
 
@@ -73,13 +74,16 @@ End-of-cycle artifact list:
 1. **`Docs/plans/<YYYY-MM-DD>-v<X.Y.Z>-<topic>-result.md`** — what shipped, what surfaces hit, NEW lessons, carry-forward items, commits.
 2. **`Docs/plans/<YYYY-MM-DD>-v<X.Y.Z>-<topic>-plan.md`** — implementation plan (created during cycle).
 3. **`Docs/plans/<YYYY-MM-DD>-v<X.Y.Z>-<topic>-design.md`** — design doc (created during cycle).
-4. **`CLAUDE.md`** — status pointers updated (cycle order, workshop version, mechanisms, blueprints, harness counts, landmines summary, next-TBD pointer).
-5. **`Docs/install.md`** — Upgrading-from-vX.Y.Z section.
-6. **`Docs/landmines.md`** — history block updates (#12 + others as relevant).
-7. **`Docs/prompts/<YYYY-MM-DD>-post-v<X.Y.Z>-next-cycle-handoff.md`** — NEXT cycle's onboarding doc (this is what Step 2 reads). Always written; never optional.
-8. **Annotated git tag** `v<X.Y.Z>` at HEAD (REQUIRES user approval per CLAUDE.md ask-before-acting).
+4. **`Docs/cycle-history.md`** — append a new `## v<X.Y.Z> <topic> CLOSED <YYYY-MM-DD>` section with the cycle summary (chronological close order; do NOT edit existing sections).
+5. **`Docs/agent-guides/cycle-status.md`** — live pointers updated (Current section · Cycle order line · Mechanisms/Blueprints tables if any version changed · Test harnesses count · Landmines section · In-flight / next-candidate queue).
+6. **`Docs/install.md`** — Upgrading-from-vX.Y.Z section.
+7. **`Docs/landmines.md`** — history block updates (#12 + others as relevant).
+8. **`Docs/prompts/<YYYY-MM-DD>-post-v<X.Y.Z>-next-cycle-handoff.md`** — NEXT cycle's onboarding doc (this is what Step 2 reads). Always written; never optional.
+9. **Annotated git tag** `v<X.Y.Z>` at HEAD (REQUIRES user approval per `Docs/agent-guides/asking-before-acting.md`).
 
-**Single cycle-close commit** bundling artifacts 1, 4, 5, 6, 7. Then push to origin/main, then tag (after user approval). Optionally bundle `chore(docs):` updates into the same commit.
+`CLAUDE.md` itself does NOT need touching for cycle-close status updates — its markered surfaces (`resolvers` / `directory-map` / `skills-index`) are regenerated by the `platform-claude` mechanism on each install, and outside-marker prose is hand-authored and stable across cycles.
+
+**Single cycle-close commit** bundling artifacts 1, 4, 5, 6, 7, 8. Then push to origin/main, then tag (after user approval). Optionally bundle `chore(docs):` updates into the same commit.
 
 ---
 
@@ -93,7 +97,7 @@ The cycle-close convention (above) requires every cycle to author the next hando
 
 ## Anti-patterns to avoid
 
-- **Don't pre-emptively bump versions** before completing the cycle. Workshop_version is held until S3 close (USER APPROVAL gate per CLAUDE.md).
+- **Don't pre-emptively bump versions** before completing the cycle. Workshop_version is held until S3 close (USER APPROVAL gate per `Docs/agent-guides/asking-before-acting.md`).
 - **Don't `git add -A`** — always stage explicit files (per v0.23.0 lesson g; reaffirmed at v0.26.0 commit `dea7c41`).
 - **Don't dispatch parallel implementer subagents on coupled tasks** — only when files are 800+ LOC apart and posture is shared (v0.21.1 lesson a; reaffirmed v0.27.0 lesson b).
 - **Don't skip two-stage subagent review at S2 close** — spec + quality reviewers serve different functions; both required (v0.20.0 lesson d; 8 data points reaffirmation).

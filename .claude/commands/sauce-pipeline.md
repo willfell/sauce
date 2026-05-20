@@ -84,7 +84,7 @@ The card body describes WHAT to build. Execute a full Sauce cycle:
 
 2. **Plan.** Invoke the `superpowers:writing-plans` skill. Save the plan to `Docs/plans/YYYY-MM-DD-vNN.NN.NN-<topic>-plan.md`. Commit + push the plan.
 
-3. **Execute.** Use either controller-direct edits or `superpowers:subagent-driven-development` per existing Sauce cadence (see CLAUDE.md "Status (live)" cycle summaries for the per-cycle pattern). Each stage = one commit per existing discipline. Push after each commit.
+3. **Execute.** Use either controller-direct edits or `superpowers:subagent-driven-development` per existing Sauce cadence (see `Docs/cycle-history.md` cycle summaries for the per-cycle pattern). Each stage = one commit per existing discipline. Push after each commit.
 
 4. **Bump versions.** In `platform/manifest.json`, set `workshop_version` to the new tag (e.g. `0.47.0`). In `package.json`, set `version` to the same value (`scripts/check-version-sync.js` enforces lockstep; `npm run release:preflight` will fail if they drift).
 
