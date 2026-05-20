@@ -658,6 +658,42 @@ function assertCoworkV065Shape() {
     `v065-S6.5.4: CoworkReadiness helper reads scheduled-jobs.md (5th row)`);
 }
 
+// ── v0.66.0 ─────────────────────────────────────────────────────────────────
+
+function assertCoworkV066Shape() {
+  // COWORK-V066-AFC-1: cowork callers don't use activity-feed@0.3.0-only opts
+  //
+  // Cowork invokes ActivityFeed via the customjs-guard dataviewjs pattern in
+  // content .md files (args: [{ scope, groupBy, ... }]).  None of the new
+  // v0.3.0 opts (rollUpRoots / flatGrouped / metaBuilder) should appear in
+  // any of those args objects — confirming the additive-compat contract holds.
+  const coworkContent = [
+    "content/Daily Hub.md",
+    "content/Weekly Hub.md",
+    "content/Monthly Hub.md",
+    "content/Today.md",
+  ];
+  let checked = 0;
+  for (const rel of coworkContent) {
+    const abs = path.join(BP, rel);
+    if (!fs.existsSync(abs)) continue;
+    const src = fs.readFileSync(abs, "utf8");
+    // Scan every args: [...] block that passes options to ActivityFeed
+    const blocks = src.match(/args:\s*\[\s*\{([\s\S]*?)\}\s*\]/g) || [];
+    for (const block of blocks) {
+      checked++;
+      assertTrue(!block.includes("rollUpRoots"),
+        `COWORK-V066-AFC-1 [${rel}]: args block has no rollUpRoots`);
+      assertTrue(!block.includes("flatGrouped"),
+        `COWORK-V066-AFC-1 [${rel}]: args block has no flatGrouped`);
+      assertTrue(!block.includes("metaBuilder"),
+        `COWORK-V066-AFC-1 [${rel}]: args block has no metaBuilder`);
+    }
+  }
+  assertTrue(checked >= 1,
+    "COWORK-V066-AFC-1: scanned at least one ActivityFeed args block for additive-compat regression");
+}
+
 (function main() {
   console.log("--- shared contracts ---");
   checkSharedContracts();
@@ -669,6 +705,7 @@ function assertCoworkV065Shape() {
   assertCoworkV062Shape();
   assertCoworkV064NoDailyNote();
   assertCoworkV065Shape();
+  assertCoworkV066Shape();
   console.log(`========\nResult: ${passed} passed, ${failed} failed.`);
   process.exit(failed === 0 ? 0 : 1);
 })();

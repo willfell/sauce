@@ -7419,6 +7419,60 @@ async function caseFA2RuleFragmentsExtends() {
     assertTrue("HC-V065-DASHBOARD: allowlist includes cowork-finance-snapshot", src.includes('"cowork-finance-snapshot"'));
   }
 
+  // v0.66.0 FA6-MANIFEST version pins — daily / activity-feed / cards
+  // (pins reflect the versions established by S1–S4; daily will be bumped to
+  // 0.7.0 in S6 alongside the catalogue lockstep; this pin captures 0.6.0 for
+  // the S5 green-gate and will be bumped there too)
+  {
+    const pins = [
+      ["daily",         "platform/blueprints/daily/manifest.json",            "0.6.0"],
+      ["activity-feed", "platform/mechanisms/activity-feed/manifest.json",    "0.3.0"],
+      ["cards",         "platform/mechanisms/cards/manifest.json",            "0.2.6"],
+    ];
+    for (const [name, relPath, expected] of pins) {
+      const m = JSON.parse(fs.readFileSync(path.join(WORKSHOP, relPath), "utf8"));
+      assertTrue(`FA6-MANIFEST-${name}: version ${expected}`, m.version === expected,
+        `got: ${m.version}`);
+    }
+  }
+
+  // v0.66.0 HC-V066-1: daily blueprint ships sauce-daily-dashboard CSS snippet
+  {
+    console.log("\n--- Case HC-V066-1: daily blueprint declares sauce-daily-dashboard snippet ---");
+    const dailyManifestPath = path.join(WORKSHOP, "platform/blueprints/daily/manifest.json");
+    const m = JSON.parse(fs.readFileSync(dailyManifestPath, "utf8"));
+
+    const snippets = Array.isArray(m.snippets) ? m.snippets : [];
+    const snip = snippets.find(s => s && s.name === "sauce-daily-dashboard");
+    assertTrue("HC-V066-1a: daily manifest declares sauce-daily-dashboard snippet", !!snip);
+    assertTrue("HC-V066-1b: snippet source = helpers/sauce-daily-dashboard.css",
+      !!snip && snip.source === "helpers/sauce-daily-dashboard.css");
+    const enabled = (m.appearance && Array.isArray(m.appearance.enabledCssSnippets))
+      ? m.appearance.enabledCssSnippets
+      : [];
+    assertTrue("HC-V066-1c: enabledCssSnippets includes sauce-daily-dashboard",
+      enabled.indexOf("sauce-daily-dashboard") >= 0);
+    const cssAbs = path.join(WORKSHOP, "platform/blueprints/daily",
+      snip ? snip.source : "helpers/sauce-daily-dashboard.css");
+    assertTrue("HC-V066-1d: snippet source file exists on disk", fs.existsSync(cssAbs));
+  }
+
+  // v0.66.0 HC-V066-2: _DEFAULT_DASHBOARD_BLUEPRINTS preserves project + trip
+  {
+    console.log("\n--- Case HC-V066-2: _DEFAULT_DASHBOARD_BLUEPRINTS preserves project + trip ---");
+    const src = fs.readFileSync(
+      path.join(WORKSHOP, "platform/blueprints/daily/helpers/space-daily-dashboard.js"),
+      "utf8"
+    );
+    const m = src.match(/_DEFAULT_DASHBOARD_BLUEPRINTS[\s\S]*?return\s*\[([\s\S]*?)\]/);
+    assertTrue("HC-V066-2a: _DEFAULT_DASHBOARD_BLUEPRINTS getter found", !!m);
+    if (m) {
+      const body = m[1];
+      assertTrue("HC-V066-2b: allowlist includes 'project'", body.indexOf('"project"') >= 0);
+      assertTrue("HC-V066-2c: allowlist includes 'trip'",    body.indexOf('"trip"')    >= 0);
+    }
+  }
+
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
   if (fail > 0) {
