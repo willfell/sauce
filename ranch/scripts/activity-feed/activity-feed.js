@@ -276,6 +276,7 @@ class ActivityFeed {
         if (existing) {
           existing._isRollUp = true;
           existing._rollUpChildren = children.length;
+          existing._rollUpChildrenPages = children;
           existing._rollUpLatest = pickLatest(children);
         } else {
           const latest = pickLatest(children);
@@ -292,6 +293,7 @@ class ActivityFeed {
             status_changed_at: root.status_changed_at,
             _isRollUp: true,
             _rollUpChildren: children.length,
+            _rollUpChildrenPages: children,
             _rollUpLatest: latest,
           };
           survivors.push(synthetic);
