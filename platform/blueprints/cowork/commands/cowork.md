@@ -41,11 +41,11 @@ Invokes the canonical `cowork:bootstrap-vault` SKILL.md materialized at `<vault>
 The skill assumes the vault is up-to-date with the workshop. From a terminal in the vault root:
 
 ```bash
-sauce-refresh
-find .claude/skills/cowork -name SKILL.md | wc -l    # expect: 32
+sauce update
+find .claude/skills/cowork -name SKILL.md | wc -l    # expect: 32+
 ```
 
-If the count is less than 32 (or you've never installed cowork@0.2.0+), run `sauce-refresh` until clean. Then return to this slash command.
+If the count is less than 32 (or you've never installed cowork@0.2.0+), run `sauce update` until clean. If `sauce update` reports `skip <name> — subscription pins X but workshop has Y`, run `sauce wizard` first to refresh the vault's subscription pins against the current workshop catalogue, then `sauce update` again. Then return to this slash command.
 
 ## How to invoke
 

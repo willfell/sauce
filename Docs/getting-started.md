@@ -143,6 +143,23 @@ sauce update
 
 `sauce update` pulls the workshop's `origin/main`, re-runs the installer, and reports what changed in `ranch/bootstrap-last-install.log`. Your `spice/` content is never touched — only the platform-managed plumbing under `ranch/`, the plugin configs in `.obsidian/`, and the slash commands / skills in `.claude/`.
 
+### Picking up a stale vault on a new device
+
+If you've installed sauce fresh on a new machine and your vault hasn't been updated in a while, `sauce update` may report `skip <name> — subscription pins X but workshop has Y` for every blueprint that's had a version bump since you last installed. That's the vault's `ranch/platform-subscription.json` pinning old versions.
+
+The fix is two commands:
+
+```bash
+cd <vault>
+sauce status            # shows what's pinned vs the current workshop
+sauce wizard            # interactive: refresh subscription pins against the current catalogue
+sauce update            # materialize the new platform
+```
+
+`sauce wizard` is the canonical "I have a stale vault, refresh its subscription" entry point. It walks the workshop catalogue, asks which newly-added blueprints to subscribe to, drops removed ones, and rewrites the subscription file with current pins. After that, `sauce update` will materialize cleanly.
+
+If `sauce wizard` isn't available or you'd rather hand-edit, open `ranch/platform-subscription.json`, bump `workshop_version` plus the version of each blueprint and mechanism to match the workshop's current values (visible from `sauce status` or from `platform/manifest.json` of the brew-installed workshop at `/opt/homebrew/opt/sauce/libexec/platform/manifest.json`), then `sauce update`.
+
 ## What's next
 
 - **Customize prompts.** Edit `spice/cowork/prompts/*.md` to control what each orchestrator emits. Empty prompts produce stub notes; populated prompts drive the actual analysis.
