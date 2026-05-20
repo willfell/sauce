@@ -85,6 +85,24 @@
  * daily/cowork-daily/cowork-weekly/cowork-monthly types from the scan so
  * the daily note doesn't self-reference. hasContent gate widened to
  * include activityCount. Tasks + meetings panels unchanged.
+ *
+ * v0.9.0 (sauce v0.68.0): board activity in the daily Activity panel.
+ *  - Allowlist gains "kanban" + "board-card" — the boards blueprint's two
+ *    surfaced types (single hub at spice/boards/To-Do-Board.md + per-card
+ *    files under spice/boards/cards/YYYY/MM-MMMM/<title>.md).
+ *  - Blueprint color map gains kanban -> var(--color-pink). board-card has
+ *    no entry because it always rolls up.
+ *  - Rollup rules gain a third entry that funnels any page under
+ *    spice/boards/cards/ into the hardcoded root path
+ *    spice/boards/To-Do-Board.md. Single-board case — the root path is a
+ *    constant lookup, unlike the project/trip rules which derive the slug
+ *    from the child file path.
+ *  - Existing activity-count dedup logic (drop direct hits whose path is in
+ *    rolledRootPaths, then add synthetic rollup roots) keeps the surface at
+ *    one card per board even when both the hub mtime AND card creations match
+ *    today. Title resolves via the kanban hub's `title: To Do Board`
+ *    frontmatter (existing resolver `title:` branch). Drill-in row click
+ *    handler opens individual card files unchanged.
  */
 class SpaceDailyDashboard {
   async render(dv) {
@@ -368,6 +386,7 @@ class SpaceDailyDashboard {
       "scratch", "journal",
       "project", "person", "team", "product", "trip",
       "budget", "paycheck", "invoice",
+      "kanban", "board-card",
       "cowork-morning-briefing", "cowork-midday-tripwire", "cowork-eod-review",
       "cowork-finance-snapshot", "cowork-weekly-review", "cowork-monthly-review"
     ];
@@ -392,6 +411,7 @@ class SpaceDailyDashboard {
       budget:    "var(--color-green)",
       paycheck:  "var(--color-green)",
       invoice:   "var(--color-green)",
+      kanban:    "var(--color-pink)",
       // Main dashboard sections (used by the 3 main wrappers)
       tasks:     "var(--color-cyan)",
       meetings:  "var(--color-blue)",
@@ -458,6 +478,12 @@ class SpaceDailyDashboard {
           }
           return hubs[0].file.path;
         },
+        excludeTemplate: (name) => typeof name === "string" && /^Template,/i.test(name),
+      },
+      {
+        type: "kanban",
+        childMatchTemplate: (path) => /^spice\/boards\/cards\//.test(path),
+        rootPathFromDv: (_dv, _p) => "spice/boards/To-Do-Board.md",
         excludeTemplate: (name) => typeof name === "string" && /^Template,/i.test(name),
       },
     ];

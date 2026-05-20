@@ -4572,6 +4572,48 @@ async function caseDDA5DashboardPolish() {
   assertTrue("DD-A5: dashboard polish (title resolver / details wrappers / color map) regressed", ok);
 }
 
+async function caseDDA7DashboardAllowlistIncludesBoards() {
+  // v0.9.0 (sauce v0.68.0): _DEFAULT_DASHBOARD_BLUEPRINTS adds kanban + board-card
+  // so board activity (hub edits + new card creations) surfaces in the daily
+  // Activity panel. board-card rolls up into the kanban hub via _ROLLUP_RULES.
+  console.log("\n--- Case DD-A7: dashboard allowlist includes kanban + board-card ---");
+  const p = path.join(BLUEPRINTS_DIR, "daily", "helpers", "space-daily-dashboard.js");
+  const body = fs.readFileSync(p, "utf8");
+  const getterMatch = body.match(/_DEFAULT_DASHBOARD_BLUEPRINTS\s*\(\)\s*\{[\s\S]*?return\s*\[([\s\S]*?)\]/);
+  if (!getterMatch) {
+    assertTrue("DD-A7: _DEFAULT_DASHBOARD_BLUEPRINTS getter not found", false);
+    return;
+  }
+  const listSource = getterMatch[1];
+  const hasKanban = /"kanban"/.test(listSource);
+  const hasBoardCard = /"board-card"/.test(listSource);
+  assertTrue("DD-A7: allowlist missing kanban or board-card", hasKanban && hasBoardCard);
+}
+
+async function caseDDA8DashboardKanbanRollupRule() {
+  // v0.9.0 (sauce v0.68.0): _ROLLUP_RULES adds a kanban rule with hardcoded
+  // rootPathFromDv returning "spice/boards/To-Do-Board.md". board-card files
+  // under spice/boards/cards/** coalesce into a single rolled-up "To Do Board"
+  // activity card.
+  console.log("\n--- Case DD-A8: dashboard rollup rules include single-board kanban entry ---");
+  const p = path.join(BLUEPRINTS_DIR, "daily", "helpers", "space-daily-dashboard.js");
+  const body = fs.readFileSync(p, "utf8");
+  // Capture from `get _ROLLUP_RULES() {` to the matching `\n  }\n` (method
+  // close at 2-space indent). Non-greedy `[\s\S]*?` would stop at the first
+  // `];` inside `m[1];`, missing the actual array body.
+  const rulesMatch = body.match(/get\s+_ROLLUP_RULES\s*\(\)\s*\{([\s\S]*?)\n  \}\n/);
+  if (!rulesMatch) {
+    assertTrue("DD-A8: _ROLLUP_RULES getter not found", false);
+    return;
+  }
+  const rulesSource = rulesMatch[1];
+  const hasKanbanType = /type:\s*["']kanban["']/.test(rulesSource);
+  const hasBoardsChildGlob = /\/\^spice\\\/boards\\\/cards\\\//.test(rulesSource);
+  const hasTodoBoardRoot = /spice\/boards\/To-Do-Board\.md/.test(rulesSource);
+  assertTrue("DD-A8: kanban rollup rule missing type:'kanban' or boards-card child match or To-Do-Board root path",
+    hasKanbanType && hasBoardsChildGlob && hasTodoBoardRoot);
+}
+
 // ============================================================
 // v0.42.0 S9 — CoworkDailyHubCards / CoworkWeeklyHubCards / CoworkMonthlyHubCards
 // helper structural checks. 6 sub-asserts × 3 helpers = 18 sub-asserts.
@@ -7253,6 +7295,8 @@ async function caseFA2RuleFragmentsExtends() {
   await caseDDA4DashboardAllowlist();
   await caseDDA5DashboardPolish();
   await caseDDA6ResolveTitleDefensive();
+  await caseDDA7DashboardAllowlistIncludesBoards();
+  await caseDDA8DashboardKanbanRollupRule();
 
   // v0.42.0 S9 — cowork@0.4.0 helper structural/materialization checks (18 sub-asserts).
   await caseCOWORKDaily1Materialized();
