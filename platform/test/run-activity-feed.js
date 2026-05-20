@@ -63,7 +63,7 @@ try {
 if (manifest) {
   assertTrue("AF-1b: manifest.json parses as JSON", true);
   assertEq("AF-1c: manifest.name === 'activity-feed'", manifest.name, "activity-feed");
-  assertEq("AF-1d: manifest.version === '0.2.0'", manifest.version, "0.2.0");
+  assertEq("AF-1d: manifest.version === '0.3.0'", manifest.version, "0.3.0");
   assertEq("AF-1e: manifest.kind === 'mechanism'", manifest.kind, "mechanism");
 
   assertEq("AF-2: customjs_classes is ['ActivityFeed']", manifest.customjs_classes, ["ActivityFeed"]);
@@ -247,6 +247,7 @@ function makeDvPages(arr) {
     slice(start, end) {
       return makeDvPages(nativeSlice.call(items, start, end));
     },
+    array() { return nativeSlice.call(items); },
   };
 }
 
@@ -295,6 +296,7 @@ function renderAndCapture(opts, pagesSeed) {
   const dv = {
     container,
     pages: () => makeDvPages(pagesSeed),
+    page: (path) => pagesSeed.find(p => p && p.file && p.file.path === path) || null,
   };
   feed.render(dv, opts);
   return container.textContent;
@@ -400,8 +402,219 @@ try {
     assertTrue(`AF-V065: _DEFAULT_BLUEPRINTS contains "${t}"`, src.includes(`"${t}"`));
   }
   const manifest = JSON.parse(fs.readFileSync("platform/mechanisms/activity-feed/manifest.json", "utf8"));
-  assertEq("AF-V065: activity-feed manifest version is 0.2.0", manifest.version, "0.2.0");
+  assertEq("AF-V065: activity-feed manifest version is 0.3.0", manifest.version, "0.3.0");
   assertTrue("AF-V065: activity-feed description mentions 0.2.0", typeof manifest.description === "string" && manifest.description.includes("0.2.0"));
+}
+
+// ── Pass 4: v0.66.0 rollUpRoots + flatGrouped + metaBuilder ──────────────
+
+console.log("\n--- Pass 4: v0.66.0 rollUpRoots + flatGrouped + metaBuilder ---");
+
+// Fake-element shim for Pass 4 (node-harness-safe; uses createEl + textContent only).
+// innerHTML tracks both structural tags AND text set via textContent, so assertions
+// like indexOf("Sauce") work correctly.
+function v066_makeFakeEl() {
+  const el = {
+    tag: "div",
+    style: {},
+    dataset: {},
+    _html: "",
+    _children: [],
+    _text: "",
+    className: "",
+    open: false,
+    classList: { add: () => {}, remove: () => {} },
+  };
+  Object.defineProperty(el, "innerHTML", {
+    get() {
+      // Include own _text then recurse through children.
+      return el._text + el._html + el._children.map(c => c.innerHTML).join("");
+    },
+    set(v) { el._html = String(v || ""); el._text = ""; el._children = []; },
+  });
+  Object.defineProperty(el, "textContent", {
+    get() { return el._text + el._children.map(c => c.textContent).join(""); },
+    set(v) { el._text = String(v == null ? "" : v); el._children = []; },
+  });
+  el.createEl = (t) => { const c = v066_makeFakeEl(); c.tag = t; el._children.push(c); el._html += "<" + t + ">"; return c; };
+  el.appendChild = (c) => { el._children.push(c); return c; };
+  return el;
+}
+
+// Fake-DV shim for Pass 4: supports pages(), page(), container, and the
+// chainable .where().array() pattern that the new _query uses.
+function v066_makeFakeDv(pages) {
+  const arr = pages.slice();
+  function chainOver(items) {
+    const c = {
+      _arr: items.slice(),
+      where(fn) { return chainOver(this._arr.filter(fn)); },
+      sort(fn) { const s = this._arr.slice(); try { s.sort((a,b) => { const av = fn(a); const bv = fn(b); return av > bv ? 1 : av < bv ? -1 : 0; }); } catch(_) {} return chainOver(s); },
+      slice(a, b) { return chainOver(this._arr.slice(a, b)); },
+      array() { return this._arr.slice(); },
+    };
+    c[Symbol.iterator] = function* () { for (const p of c._arr) yield p; };
+    Object.defineProperty(c, "length", { get() { return c._arr.length; } });
+    return c;
+  }
+  const container = v066_makeFakeEl();
+  return {
+    container,
+    pages: () => chainOver(arr),
+    page:  (path) => arr.find(p => p && p.file && p.file.path === path) || null,
+    el:    (t) => container.createEl(t),
+  };
+}
+
+// Load ActivityFeed for Pass 4 tests (uses same src + shims as Pass 3)
+function v066_loadAF() {
+  const customJsShim = {
+    BeaconCards: {
+      render(dv, opts) {
+        const container = dv.container || dv;
+        for (const p of (opts && opts.pages) || []) {
+          const card = container.createEl("div");
+          const name = (opts.title ? opts.title(p) : (p.file && p.file.name)) || "";
+          card.textContent = name;
+          if (typeof opts.meta === "function") {
+            const metaEl = card.createEl("span");
+            opts.meta(p, metaEl);
+          }
+        }
+      },
+    },
+  };
+  const factory = new Function(
+    "app", "customJS", "Notice", "window",
+    src + "\nreturn ActivityFeed;"
+  );
+  return factory({}, customJsShim, function(){}, windowShim);
+}
+
+// AF-V066-RU-1: single child rolls up into synthetic page (root not in window)
+try {
+  const root = { file: { path: "spice/projects/sauce/Sauce.md", name: "Sauce", mtime: { toISO: () => "2026-05-19T08:00:00Z" } }, type: "project", created_at: "2026-05-18" };
+  const child = { file: { path: "spice/projects/sauce/tasks/foo/foo.md", name: "foo", mtime: { toISO: () => "2026-05-19T10:24:00Z" } }, type: "project-task", created_at: "2026-05-19T10:24:00Z" };
+  const dv = v066_makeFakeDv([root, child]);
+  const ActivityFeed = v066_loadAF();
+  const af = new ActivityFeed();
+  af.render(dv, {
+    scope: "today",
+    asOf: "2026-05-19",
+    blueprints: ["project"],
+    flatGrouped: true,
+    includeMtime: true,
+    rollUpRoots: [{
+      type: "project",
+      childMatch: (p) => /^spice\/projects\/[^/]+\//.test(p.file.path) && p.type !== "project",
+      rootPath: (p) => "spice/projects/sauce/Sauce.md",
+    }],
+  });
+  assertTrue("AF-V066-RU-1: child rolls up into root card (no 'foo' in HTML)",
+    dv.container.innerHTML.indexOf("Sauce") >= 0 &&
+    dv.container.innerHTML.indexOf("foo") < 0);
+} catch (e) {
+  assertTrue("AF-V066-RU-1: child rolls up into root card (no 'foo' in HTML)", false, e && e.message);
+}
+
+// AF-V066-RU-2: root + child both in window → root is decorated, not duplicated
+try {
+  const root2 = { file: { path: "spice/projects/sauce/Sauce.md", name: "Sauce", mtime: { toISO: () => "2026-05-19T08:00:00Z" } }, type: "project", created_at: "2026-05-19T07:00:00Z" };
+  const child2 = { file: { path: "spice/projects/sauce/tasks/foo/foo.md", name: "foo", mtime: { toISO: () => "2026-05-19T10:24:00Z" } }, type: "project-task", created_at: "2026-05-19T10:24:00Z" };
+  const dv2 = v066_makeFakeDv([root2, child2]);
+  const ActivityFeed2 = v066_loadAF();
+  const af2 = new ActivityFeed2();
+  let metaPages = [];
+  af2.render(dv2, {
+    scope: "today",
+    asOf: "2026-05-19",
+    blueprints: ["project"],
+    flatGrouped: true,
+    includeMtime: true,
+    rollUpRoots: [{
+      type: "project",
+      childMatch: (p) => /^spice\/projects\/[^/]+\//.test(p.file.path) && p.type !== "project",
+      rootPath: (p) => "spice/projects/sauce/Sauce.md",
+    }],
+    metaBuilder: (p, el) => { metaPages.push(p); el.textContent = (p._isRollUp ? "rollup-" + p._rollUpChildren : "raw"); },
+  });
+  assertTrue("AF-V066-RU-2a: root surfaces once (no dup)", metaPages.length === 1);
+  assertTrue("AF-V066-RU-2b: root decorated with _isRollUp",  metaPages[0] && metaPages[0]._isRollUp === true);
+  assertTrue("AF-V066-RU-2c: _rollUpChildren counts child",   metaPages[0] && metaPages[0]._rollUpChildren === 1);
+} catch (e) {
+  assertTrue("AF-V066-RU-2a: root surfaces once (no dup)", false, e && e.message);
+  assertTrue("AF-V066-RU-2b: root decorated with _isRollUp", false, e && e.message);
+  assertTrue("AF-V066-RU-2c: _rollUpChildren counts child", false, e && e.message);
+}
+
+// AF-V066-RU-3: exclude() strips template-named children
+try {
+  const root3 = { file: { path: "spice/trips/big/big.md", name: "big" }, type: "trip", created_at: "2026-05-19" };
+  const tpl3  = { file: { path: "spice/trips/big/Template, Trip Atlas.md", name: "Template, Trip Atlas" }, type: "trip", created_at: "2026-05-19" };
+  const dv3 = v066_makeFakeDv([root3, tpl3]);
+  const ActivityFeed3 = v066_loadAF();
+  const af3 = new ActivityFeed3();
+  af3.render(dv3, {
+    scope: "today",
+    asOf: "2026-05-19",
+    blueprints: ["trip"],
+    flatGrouped: true,
+    rollUpRoots: [{
+      type: "trip",
+      childMatch: (p) => /^spice\/trips\/[^/]+\//.test(p.file.path) && p.file.path !== "spice/trips/big/big.md",
+      rootPath:   (p) => "spice/trips/big/big.md",
+      exclude:    (p) => /^Template,/i.test(p.file.name),
+    }],
+  });
+  assertTrue("AF-V066-RU-3: template-named child excluded", dv3.container.innerHTML.indexOf("Template") < 0);
+} catch (e) {
+  assertTrue("AF-V066-RU-3: template-named child excluded", false, e && e.message);
+}
+
+// AF-V066-RU-4: flatGrouped renders NO inner <details>
+try {
+  const root4 = { file: { path: "spice/projects/sauce/Sauce.md", name: "Sauce" }, type: "project", created_at: "2026-05-19" };
+  const dv4 = v066_makeFakeDv([root4]);
+  const ActivityFeed4 = v066_loadAF();
+  const af4 = new ActivityFeed4();
+  af4.render(dv4, { scope: "today", asOf: "2026-05-19", blueprints: ["project"], flatGrouped: true, groupBy: "blueprint" });
+  const detailsCount = (dv4.container.innerHTML.match(/<details/g) || []).length;
+  assertTrue("AF-V066-RU-4: flatGrouped emits no inner <details>", detailsCount === 0);
+} catch (e) {
+  assertTrue("AF-V066-RU-4: flatGrouped emits no inner <details>", false, e && e.message);
+}
+
+// AF-V066-RU-5: metaBuilder invoked with (page, parentEl)
+try {
+  const root5 = { file: { path: "spice/projects/sauce/Sauce.md", name: "Sauce" }, type: "project", created_at: "2026-05-19" };
+  const dv5 = v066_makeFakeDv([root5]);
+  const ActivityFeed5 = v066_loadAF();
+  const af5 = new ActivityFeed5();
+  let lastArgs = null;
+  af5.render(dv5, {
+    scope: "today",
+    asOf: "2026-05-19",
+    blueprints: ["project"],
+    flatGrouped: true,
+    metaBuilder: function (p, el) { lastArgs = { arity: arguments.length, p, el }; },
+  });
+  assertTrue("AF-V066-RU-5a: metaBuilder receives 2 args", lastArgs && lastArgs.arity === 2);
+  assertTrue("AF-V066-RU-5b: metaBuilder page is the root", lastArgs && lastArgs.p && lastArgs.p.file && lastArgs.p.file.path === "spice/projects/sauce/Sauce.md");
+} catch (e) {
+  assertTrue("AF-V066-RU-5a: metaBuilder receives 2 args", false, e && e.message);
+  assertTrue("AF-V066-RU-5b: metaBuilder page is the root", false, e && e.message);
+}
+
+// AF-V066-RU-6: empty rollUpRoots is a no-op
+try {
+  const root6 = { file: { path: "spice/projects/sauce/Sauce.md", name: "Sauce" }, type: "project", created_at: "2026-05-19" };
+  const dv6 = v066_makeFakeDv([root6]);
+  const ActivityFeed6 = v066_loadAF();
+  const af6 = new ActivityFeed6();
+  af6.render(dv6, { scope: "today", asOf: "2026-05-19", blueprints: ["project"], rollUpRoots: [] });
+  assertTrue("AF-V066-RU-6: empty rollUpRoots renders normally", dv6.container.innerHTML.indexOf("Sauce") >= 0);
+} catch (e) {
+  assertTrue("AF-V066-RU-6: empty rollUpRoots renders normally", false, e && e.message);
 }
 
 // ── Summary ───────────────────────────────────────────────────────────────
