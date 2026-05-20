@@ -4451,7 +4451,7 @@ async function caseDDA1DashboardActivityPanel() {
     defaultDashboardMatches.length >= 3 &&
     /Today's Activity/.test(body) &&
     /hasContent\s*=.*activityCount/.test(body) &&
-    /icons\.zap/.test(body);
+    /icons\.activity/.test(body);
   assertTrue("DD-A1: SpaceDailyDashboard activity panel structure regressed", ok);
 }
 

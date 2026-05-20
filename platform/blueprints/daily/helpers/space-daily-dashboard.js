@@ -91,7 +91,6 @@ class SpaceDailyDashboard {
     const icons = {
       calendar: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>`,
       checkSquare: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="m9 12 2 2 4-4"/></svg>`,
-      zap: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>`,
       activity: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.5.5 0 0 1-.96 0L9.24 2.18a.5.5 0 0 0-.96 0l-2.35 8.36A2 2 0 0 1 4 12H2"/></svg>`,
       square: `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/></svg>`
     };
@@ -138,7 +137,9 @@ class SpaceDailyDashboard {
 
     const meetings = getMeetings();
     const tasks = getTasks();
-    const activityCount = await this._getActivityCount(dv, today);
+    const activityResult = await this._getActivityCount(dv, today);
+    const activityCount = activityResult.total;
+    const activityByBlueprint = activityResult.byBlueprint;
     const hasContent = meetings.length > 0 || tasks.length > 0 || activityCount > 0;
     if (!hasContent) return;
 
@@ -217,6 +218,7 @@ class SpaceDailyDashboard {
           const s = p.summary || "";
           return (typeof s === "string" && s.trim()) ? s.trim() : null;
         },
+        meta: (p, el) => this._renderTodoBadge(p, el, icons.square),
         target: p => p.file.path,
         empty: "(no meetings — should not render due to outer hasContent guard)"
       });
@@ -225,9 +227,10 @@ class SpaceDailyDashboard {
     if (activityCount > 0) {
       const activityBody = this._renderSection(container, {
         accent: "purple",
-        iconHtml: icons.zap,
+        iconHtml: icons.activity,
         title: `Activity (${activityCount})`,
-        defaultOpen: false,
+        defaultOpen: true,
+        accentSegments: this._buildAccentSegments(activityByBlueprint),
       });
 
       // v0.5.1 (v0.64.1) bugfix: shim must delegate `.pages` to the real dv —
@@ -252,7 +255,7 @@ class SpaceDailyDashboard {
           flatGrouped: true,
           colorByType: this._BLUEPRINT_COLORS,
           rollUpRoots: this._buildRollupRules(dv),
-          metaBuilder: (p, el) => this._renderActivityMeta(p, el),
+          metaBuilder: (p, el) => this._renderActivityMeta(p, el, icons.square, this._CHEVRON_SVG),
         });
       } else {
         const warn = activityBody.createEl("p");
@@ -289,11 +292,16 @@ class SpaceDailyDashboard {
       }
       return false;
     };
-    let count = 0;
+    const filtered = [];
     for (const p of dv.pages()) {
-      if (inDay(p)) count++;
+      if (inDay(p)) filtered.push(p);
     }
-    return count;
+    const byBlueprint = {};
+    for (const p of filtered) {
+      const t = p && p.type ? String(p.type) : "(unknown)";
+      byBlueprint[t] = (byBlueprint[t] || 0) + 1;
+    }
+    return { total: filtered.length, byBlueprint };
   }
 
   get _DEFAULT_DASHBOARD_BLUEPRINTS() {
@@ -553,19 +561,16 @@ class SpaceDailyDashboard {
    * Renders time · type-pill · breadcrumb into the supplied parentEl.
    * Wired via BeaconCards' v0.2.6 function-form `meta` opt.
    */
-  _renderActivityMeta(p, parentEl) {
+  _renderActivityMeta(p, parentEl, squareIcon, chevronSvg) {
     parentEl.className = "sauce-meta";
     parentEl.innerHTML = "";
 
     // Time stamp (created_at preferred, file.mtime fallback)
     const tsRaw = p && (p.created_at || (p.file && p.file.mtime));
-    if (tsRaw) {
-      let m = null;
-      try { m = window.moment(tsRaw); } catch (_) { /* ignore */ }
-      if (m && m.isValid()) {
-        const t = parentEl.createEl("time");
-        t.textContent = m.format("h:mm A");
-      }
+    const formatted = this._formatTime(tsRaw);
+    if (formatted) {
+      const t = parentEl.createEl("time");
+      t.textContent = formatted;
     }
 
     // Type pill
@@ -581,11 +586,29 @@ class SpaceDailyDashboard {
       label.textContent = type;
     }
 
-    // Roll-up breadcrumb
+    // Open-todo badge (v0.8.0 — universal across Meetings + Activity)
+    this._renderTodoBadge(p, parentEl, squareIcon);
+
+    // Roll-up breadcrumb + drill-in
     if (p && p._isRollUp && typeof p._rollUpChildren === "number" && p._rollUpChildren > 0) {
       const bread = parentEl.createEl("span");
       bread.className = "sauce-bread";
-      bread.textContent = "· " + p._rollUpChildren + " " + (p._rollUpChildren === 1 ? "child" : "children") + " touched";
+      bread.dataset.expanded = "false";
+      const label = (p._rollUpChildren === 1 ? "note" : "notes");
+      bread.innerHTML = `· ${p._rollUpChildren} ${label} touched <span class="sauce-bread-chevron">${chevronSvg}</span>`;
+
+      const drillIn = parentEl.createEl("div");
+      drillIn.className = "sauce-drill-in";
+      drillIn.hidden = true;
+      const rootPath = p.file && p.file.path;
+      this._renderDrillInList(drillIn, p._rollUpChildrenPages || [], rootPath);
+
+      bread.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        const expanded = bread.dataset.expanded === "true";
+        bread.dataset.expanded = String(!expanded);
+        drillIn.hidden = expanded;
+      });
     }
   }
 
@@ -597,10 +620,14 @@ class SpaceDailyDashboard {
    * Visual styling lives in .obsidian/snippets/sauce-daily-dashboard.css
    * (installed via daily.manifest.json's snippets[] + appearance.enabledCssSnippets[]).
    */
-  _renderSection(container, { accent, iconHtml, title, defaultOpen }) {
+  _renderSection(container, { accent, iconHtml, title, defaultOpen, accentSegments }) {
     const section = container.createEl("div");
     section.className = "sauce-section";
     section.dataset.accent = accent;
+    if (accentSegments) {
+      section.dataset.segmented = "true";
+      section.style.setProperty("--sauce-accent-segments", accentSegments);
+    }
     const details = section.createEl("details");
     if (defaultOpen) details.open = true;
     const summary = details.createEl("summary");
