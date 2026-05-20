@@ -6,8 +6,10 @@ This is the **workshop vault** — the canonical home for the vault platform. Me
 
 | If you're … | Read |
 |---|---|
-| New to the platform | [why.md](why.md) → [how.md](how.md) → [use.md](use.md) |
+| **New here, setting up your first vault** | **[getting-started.md](getting-started.md)** (end-to-end ~20-min walkthrough) |
+| Going deeper after the quickstart | [why.md](why.md) → [how.md](how.md) → [use.md](use.md) |
 | Onboarding a new consumer vault | [use.md](use.md) → [landmines.md](landmines.md) |
+| Setting up Claude Cowork scheduled jobs | [cowork-onboarding.md](cowork-onboarding.md) → [cowork-consumer-extensions.md](cowork-consumer-extensions.md) |
 | Adding a new mechanism or blueprint | [how.md](how.md) → [landmines.md](landmines.md) → [plans/2026-05-02-vault-platform-design.md](plans/2026-05-02-vault-platform-design.md) |
 | Debugging a failed install | [landmines.md](landmines.md) → [how.md](how.md) (installer section) |
 | Catching up on history | [plans/2026-05-02-customjs-guard-rollout.md](plans/2026-05-02-customjs-guard-rollout.md) → [plans/2026-05-02-vault-platform-design.md](plans/2026-05-02-vault-platform-design.md) → [plans/2026-05-02-vault-platform-implementation.md](plans/2026-05-02-vault-platform-implementation.md) |

@@ -46,10 +46,12 @@ sauce install --vault <path>
 
 ## Documentation
 
-- [`Docs/Index.md`](Docs/Index.md) — start here
+- [`Docs/getting-started.md`](Docs/getting-started.md) — **new here? start here.** Zero to a working vault with Claude-driven automation, end-to-end (~20 min).
+- [`Docs/Index.md`](Docs/Index.md) — full doc index
 - [`Docs/why.md`](Docs/why.md) — purpose and end goal
 - [`Docs/how.md`](Docs/how.md) — architecture and concepts
 - [`Docs/use.md`](Docs/use.md) — operational guide
+- [`Docs/cowork-onboarding.md`](Docs/cowork-onboarding.md) — connect Claude Cowork to your vault
 - [`Docs/landmines.md`](Docs/landmines.md) — known footguns to avoid
 
 ## Status
