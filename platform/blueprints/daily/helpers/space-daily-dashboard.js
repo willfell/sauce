@@ -422,8 +422,10 @@ class SpaceDailyDashboard {
 
   /**
    * v0.8.0 (v0.67.0): duck-type Luxon DateTime vs moment-friendly input.
-   * Returns "h:mm a"-formatted string or null. Used by both _renderActivityMeta
-   * (card timestamp) and _renderDrillInList (drill-in row timestamps).
+   * Returns a "h:mm A"-style string (e.g., `8:30 AM`) or null. Used by both
+   * _renderActivityMeta (card timestamp) and _renderDrillInList (drill-in row
+   * timestamps). Note: both Luxon `"h:mm a"` and moment `"h:mm A"` tokens
+   * produce uppercase AM/PM output.
    *
    * Background: Dataview parses ISO frontmatter (`created_at: "2026-05-19T..."`)
    * and file.mtime into Luxon DateTime objects, NOT strings. `window.moment(luxon)`
@@ -448,8 +450,14 @@ class SpaceDailyDashboard {
    */
   _renderTodoBadge(p, parentEl, squareIcon) {
     const tasks = p && p.file && p.file.tasks;
-    if (!Array.isArray(tasks)) return;
-    const open = tasks.filter(t => t && !t.completed).length;
+    if (!tasks || typeof tasks.length !== "number") return;
+    // Dataview p.file.tasks is a DataArray (Proxy) with .where() — not a native
+    // array — so Array.isArray() returns false. Prefer .where() when available;
+    // fall back to .filter() for unit tests that pass plain arrays.
+    const unchecked = (typeof tasks.where === "function")
+      ? tasks.where(t => t && !t.completed)
+      : tasks.filter(t => t && !t.completed);
+    const open = unchecked.length;
     if (open <= 0) return;
     const pill = parentEl.createEl("span");
     pill.className = "sauce-todo-pill";
