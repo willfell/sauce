@@ -1,6 +1,7 @@
 {
   "enabledCssSnippets": [
     "customjs-loader",
-    "sauce-tasks-icons"
+    "sauce-tasks-icons",
+    "sauce-daily-dashboard"
   ]
 }

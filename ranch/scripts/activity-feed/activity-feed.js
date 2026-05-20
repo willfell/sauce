@@ -47,6 +47,26 @@
  *                        Unknown types fall back to var(--color-base-50).
  *                        Added v0.1.2.
  *
+ *   rollUpRoots:         Array of {type, childMatch, rootPath, exclude?}
+ *                        (optional, added v0.3.0). Coalesces descendant pages
+ *                        of a matched root file into a single synthetic page
+ *                        for the root. Each rule: childMatch(p)→bool selects
+ *                        child pages; rootPath(p)→string returns the root file
+ *                        path; exclude?(p)→bool strips pages before matching.
+ *                        Decorated root page gets _isRollUp:true +
+ *                        _rollUpChildren:count. Additive — callers passing no
+ *                        rollUpRoots get prior behavior unchanged.
+ *
+ *   flatGrouped:         boolean (default false, added v0.3.0) — when true
+ *                        (and groupBy="blueprint"), render groups as muted
+ *                        uppercase headers with colored dots instead of nested
+ *                        <details> blocks.
+ *
+ *   metaBuilder:         function(page, parentEl) → void (optional, v0.3.0)
+ *                        Forwarded to BeaconCards' function-form `meta` opt.
+ *                        Caller-driven per-card meta rendering. Requires
+ *                        cards@0.2.6.
+ *
  *   title:               string (optional) — emits an H3 above the panel
  *
  * Per landmine #11: spice/ module-directory namespace is conceptual;
@@ -76,6 +96,11 @@ class ActivityFeed {
     const getTitle = typeof safeOpts.getTitle === "function" ? safeOpts.getTitle : null;
     const collapsible = safeOpts.collapsible === true;
     const colorByType = (safeOpts.colorByType && typeof safeOpts.colorByType === "object") ? safeOpts.colorByType : null;
+    // v0.3.0 additive opts
+    const flatGrouped = safeOpts.flatGrouped === true;
+    const metaBuilder = (typeof safeOpts.metaBuilder === "function" && safeOpts.metaBuilder.length >= 2) ? safeOpts.metaBuilder : null;
+    const rollUpRoots = Array.isArray(safeOpts.rollUpRoots) ? safeOpts.rollUpRoots : null;
+
     const blueprints = Array.isArray(safeOpts.blueprints) && safeOpts.blueprints.length > 0
       ? safeOpts.blueprints.map(String)
       : this._DEFAULT_BLUEPRINTS;
@@ -100,7 +125,7 @@ class ActivityFeed {
 
     let pages;
     try {
-      pages = this._query(dv, blueprints, timeWindow, useStatusChangedAt, includeMtime, limit);
+      pages = this._query(dv, blueprints, timeWindow, useStatusChangedAt, includeMtime, limit, rollUpRoots);
     } catch (e) {
       new Notice("ActivityFeed: query failed — " + (e && e.message ? e.message : String(e)));
       return;
@@ -112,12 +137,12 @@ class ActivityFeed {
     }
 
     if (groupBy === "hour") {
-      return this._renderGroupedByHour(dv, pages, useStatusChangedAt, getTitle);
+      return this._renderGroupedByHour(dv, pages, useStatusChangedAt, getTitle, metaBuilder);
     }
     if (groupBy === "blueprint") {
-      return this._renderGroupedByBlueprint(dv, pages, { getTitle, collapsible, colorByType });
+      return this._renderGroupedByBlueprint(dv, pages, { getTitle, collapsible, colorByType, flatGrouped, metaBuilder });
     }
-    return this._renderFlat(dv, pages, getTitle);
+    return this._renderFlat(dv, pages, getTitle, metaBuilder);
   }
 
   // ── Time window ────────────────────────────────────────────────────────────
@@ -171,52 +196,114 @@ class ActivityFeed {
 
   /**
    * Filter pages by blueprint type + time window. Sort by created_at desc.
+   * v0.3.0: accepts rollUpRoots[] to coalesce descendant pages under root files.
    * @param {object} dv
    * @param {string[]} blueprints
    * @param {{startIso, endIso}} timeWindow
    * @param {boolean} useStatusChangedAt
    * @param {boolean} includeMtime — when true, OR file.mtime into the predicate.
    * @param {number} limit
+   * @param {Array|null} rollUpRoots — optional rollup rules (v0.3.0).
    * @returns {Array}
    */
-  _query(dv, blueprints, timeWindow, useStatusChangedAt, includeMtime, limit) {
+  _query(dv, blueprints, timeWindow, useStatusChangedAt, includeMtime, limit, rollUpRoots) {
     const start = timeWindow.startIso;
     const end = timeWindow.endIso;
     const tsKey = useStatusChangedAt ? "status_changed_at" : "created_at";
 
-    const chain = dv.pages()
-      .where((p) => {
-        if (!p) return false;
-        if (blueprints.indexOf(String(p.type)) < 0) return false;
-        // ts-window predicate (created_at: or status_changed_at:)
-        const tsRaw = p[tsKey];
-        let tsHit = false;
-        if (tsRaw) {
-          const ts = String(tsRaw);
-          if (/^\d{4}-\d{2}-\d{2}$/.test(ts)) {
-            tsHit = ts >= start.slice(0, 10) && ts <= end.slice(0, 10);
-          } else {
-            tsHit = ts >= start && ts <= end;
-          }
-        }
-        if (tsHit) return true;
-        // mtime predicate (file.mtime), opt-in via includeMtime
-        if (!includeMtime) return false;
-        if (!p.file || !p.file.mtime) return false;
-        const mIso = (typeof p.file.mtime.toISO === "function")
-          ? p.file.mtime.toISO()
-          : String(p.file.mtime);
-        return mIso >= start && mIso <= end;
-      })
-      .sort((p) => {
-        const v = p && p[tsKey];
-        return v ? String(v) : "";
-      }, "desc")
-      .slice(0, limit);
+    // Pass 1: window filter only (NOT type allowlist — rollup children may have
+    // types outside the allowlist; we allowlist-filter the SURVIVORS post-rollup).
+    const inWindow = (p) => {
+      if (!p) return false;
+      const tsRaw = p[tsKey];
+      if (tsRaw) {
+        const ts = String(tsRaw);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(ts)) {
+          if (ts >= start.slice(0, 10) && ts <= end.slice(0, 10)) return true;
+        } else if (ts >= start && ts <= end) return true;
+      }
+      if (!includeMtime) return false;
+      if (!p.file || !p.file.mtime) return false;
+      const mIso = (typeof p.file.mtime.toISO === "function") ? p.file.mtime.toISO() : String(p.file.mtime);
+      return mIso >= start && mIso <= end;
+    };
 
-    return Array.isArray(chain)
-      ? chain
-      : (chain && typeof chain.length === "number" ? Array.from(chain) : []);
+    const windowed = dv.pages().where(inWindow).array();
+    const allowSet = new Set(blueprints.map(String));
+    const hasRollup = Array.isArray(rollUpRoots) && rollUpRoots.length > 0;
+
+    let filtered;
+    if (!hasRollup) {
+      filtered = windowed.filter(p => allowSet.has(String(p.type)));
+    } else {
+      const buckets = new Map(); // rootPath -> { root, children }
+      const survivors = [];
+
+      for (const p of windowed) {
+        let consumed = false;
+        for (const rule of rollUpRoots) {
+          if (typeof rule.exclude === "function" && rule.exclude(p)) { consumed = true; break; }
+          if (typeof rule.childMatch !== "function" || !rule.childMatch(p)) continue;
+          let rootPath = null;
+          try { rootPath = rule.rootPath(p); } catch (_) {}
+          if (!rootPath) continue;
+          if (rootPath === p.file.path) continue; // no self-rollup
+          if (!buckets.has(rootPath)) {
+            const rootPage = dv.page(rootPath);
+            if (!rootPage) { consumed = true; break; }
+            buckets.set(rootPath, { root: rootPage, children: [] });
+          }
+          buckets.get(rootPath).children.push(p);
+          consumed = true;
+          break;
+        }
+        if (!consumed) survivors.push(p);
+      }
+
+      const pickLatest = (children) => {
+        let best = null, bestKey = "";
+        for (const c of children) {
+          const v = c[tsKey] ? String(c[tsKey])
+                  : (c.file && c.file.mtime && typeof c.file.mtime.toISO === "function" ? c.file.mtime.toISO()
+                  : "");
+          if (v > bestKey) { bestKey = v; best = c; }
+        }
+        return best;
+      };
+
+      for (const [rootPath, { root, children }] of buckets) {
+        const existing = survivors.find(s => s.file && s.file.path === rootPath);
+        if (existing) {
+          existing._isRollUp = true;
+          existing._rollUpChildren = children.length;
+          existing._rollUpLatest = pickLatest(children);
+        } else {
+          const latest = pickLatest(children);
+          const synthetic = {
+            file: root.file,
+            type: root.type,
+            title: root.title,
+            aliases: root.file && root.file.aliases,
+            created_at: (latest && latest[tsKey]) ? latest[tsKey] : root[tsKey],
+            status_changed_at: root.status_changed_at,
+            _isRollUp: true,
+            _rollUpChildren: children.length,
+            _rollUpLatest: latest,
+          };
+          survivors.push(synthetic);
+        }
+      }
+
+      filtered = survivors.filter(p => allowSet.has(String(p.type)));
+    }
+
+    // Sort by tsKey desc, then slice
+    filtered.sort((a, b) => {
+      const av = (a && a[tsKey]) ? String(a[tsKey]) : "";
+      const bv = (b && b[tsKey]) ? String(b[tsKey]) : "";
+      return bv.localeCompare(av);
+    });
+    return filtered.slice(0, limit);
   }
 
   // ── Renderers ──────────────────────────────────────────────────────────────
@@ -227,7 +314,7 @@ class ActivityFeed {
     p.textContent = "No activity in this " + scope + ".";
   }
 
-  _renderFlat(dv, pages, getTitle) {
+  _renderFlat(dv, pages, getTitle, metaBuilder) {
     if (!customJS || !customJS.BeaconCards || typeof customJS.BeaconCards.render !== "function") {
       new Notice("ActivityFeed: cards mechanism (BeaconCards) unavailable");
       return;
@@ -239,7 +326,7 @@ class ActivityFeed {
       pages,
       layout: "row",
       title: titleFn,
-      meta: (p) => (p && p.type) ? String(p.type) : "",
+      meta: metaBuilder ? metaBuilder : ((p) => (p && p.type) ? String(p.type) : ""),
     });
   }
 
@@ -253,7 +340,9 @@ class ActivityFeed {
       ? safe.getTitle
       : (p) => p && p.file && p.file.name;
     const collapsible = safe.collapsible === true;
+    const flatGrouped = safe.flatGrouped === true;  // NEW v0.3.0
     const colorByType = (safe.colorByType && typeof safe.colorByType === "object") ? safe.colorByType : null;
+    const metaBuilder = (typeof safe.metaBuilder === "function" && safe.metaBuilder.length >= 2) ? safe.metaBuilder : null;  // NEW v0.3.0
 
     const groups = new Map();
     for (const p of pages) {
@@ -262,35 +351,63 @@ class ActivityFeed {
       groups.get(t).push(p);
     }
     const sortedKeys = Array.from(groups.keys()).sort();
+
     for (const t of sortedKeys) {
-      if (collapsible) {
+      const groupPages = groups.get(t);
+      const color = (colorByType && colorByType[t]) ? colorByType[t] : "var(--color-base-50)";
+
+      if (flatGrouped) {
+        // v0.3.0 — muted uppercase header + cards directly below. No nested <details>.
+        const header = dv.container.createEl("div");
+        header.className = "sauce-group-header";
+        const dot = header.createEl("span");
+        dot.className = "sauce-group-dot";
+        dot.style.background = color;
+        // Label text as a span (node-harness-safe; avoids document.createTextNode)
+        const labelSpan = header.createEl("span");
+        labelSpan.textContent = t + " ";
+        const countSpan = header.createEl("span");
+        countSpan.className = "sauce-group-count";
+        countSpan.textContent = "(" + groupPages.length + ")";
+
+        const cardsShim = { container: dv.container };
+        customJS.BeaconCards.render(cardsShim, {
+          pages: groupPages,
+          layout: "row",
+          title: titleFn,
+          meta: metaBuilder ? metaBuilder : ((p) => (p && p.type) ? String(p.type) : ""),
+        });
+      } else if (collapsible) {
+        // v0.1.2 path — preserved unchanged.
         const details = dv.container.createEl("details");
         details.open = false;
-        const color = (colorByType && colorByType[t]) ? colorByType[t] : "var(--color-base-50)";
         details.style.cssText = "margin: 0.4em 0; padding: 0.3em 0.5em; border-left: 4px solid " + color + "; background: var(--background-secondary); border-radius: 4px;";
         const summary = details.createEl("summary");
         summary.style.cssText = "cursor: pointer; font-weight: 600; font-size: 0.9em; color: var(--text-normal); user-select: none;";
-        summary.textContent = t + " (" + groups.get(t).length + ")";
+        summary.textContent = t + " (" + groupPages.length + ")";
         const cardsShim = { container: details };
         customJS.BeaconCards.render(cardsShim, {
-          pages: groups.get(t),
+          pages: groupPages,
           layout: "row",
           title: titleFn,
+          meta: metaBuilder ? metaBuilder : undefined,
         });
       } else {
+        // v0.1.0 path — preserved unchanged.
         const h = dv.container.createEl("h4");
         h.textContent = t;
         h.style.cssText = "margin: 0.8em 0 0.3em 0;";
         customJS.BeaconCards.render(dv, {
-          pages: groups.get(t),
+          pages: groupPages,
           layout: "row",
           title: titleFn,
+          meta: metaBuilder ? metaBuilder : undefined,
         });
       }
     }
   }
 
-  _renderGroupedByHour(dv, pages, useStatusChangedAt, getTitle) {
+  _renderGroupedByHour(dv, pages, useStatusChangedAt, getTitle, metaBuilder) {
     if (!customJS || !customJS.BeaconCards || typeof customJS.BeaconCards.render !== "function") {
       new Notice("ActivityFeed: cards mechanism (BeaconCards) unavailable");
       return;
@@ -325,7 +442,7 @@ class ActivityFeed {
         pages: groups.get(k),
         layout: "row",
         title: titleFn,
-        meta: (p) => (p && p.type) ? String(p.type) : "",
+        meta: metaBuilder ? metaBuilder : ((p) => (p && p.type) ? String(p.type) : ""),
       });
     }
   }

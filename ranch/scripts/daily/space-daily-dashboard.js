@@ -61,6 +61,24 @@
  *    click still opens the parent daily note for clicks outside any anchor;
  *    wikilink anchors wire onclick → app.workspace.openLinkText.
  *
+ * v0.7.0 (v0.66.0): Activity Dashboard Cohesion cycle.
+ *  - Sections (Tasks/Meetings/Activity) render via _renderSection helper +
+ *    the sauce-daily-dashboard.css snippet (chevron-right SVG rotates 90°
+ *    on [open]; native browser triangle hidden via list-style + ::marker
+ *    + ::-webkit-details-marker selectors).
+ *  - Activity panel uses ActivityFeed's new v0.3.0 opts:
+ *    - rollUpRoots: project + trip child edits coalesce into one hub card
+ *      (closes FLN-v64-8 — "edits within projects don't surface").
+ *    - flatGrouped: muted uppercase headers replace nested <details>
+ *      sub-groups (single-tap reveal at outer-section level).
+ *    - metaBuilder: each card gets time · type pill · breadcrumb meta
+ *      line via _renderActivityMeta (depends on cards@0.2.6 meta-function
+ *      form).
+ *  - Mobile pass: CSS @media (max-width: 480px) shrinks paddings + meta
+ *    gap; BeaconCards isMobile column-stacking unchanged.
+ *  - Section inline styles removed; sauce-section / sauce-section-summary
+ *    / sauce-section-chevron classes carry all visual treatment.
+ *
  * v0.3.0 (v0.64.0): third Activity panel below meetings. Delegates to
  * customJS.ActivityFeed.render(...) with { scope: "today", asOf:
  * <day-from-filename>, includeMtime: true, groupBy: "blueprint" }. Excludes
@@ -144,28 +162,14 @@ class SpaceDailyDashboard {
     `;
 
     if (tasks.length > 0) {
-      // v0.5.2 (v0.64.2): wrap each main section in <details> for collapsibility;
-      // default OPEN so the dashboard is immediately useful at-a-glance.
-      const tasksSection = container.createEl("details", { cls: "section" });
-      tasksSection.open = true;
-      const tasksColor = this._BLUEPRINT_COLORS.tasks;
-      tasksSection.style.cssText = `margin-bottom: 16px; padding: 0.5em 0.75em; border-left: 4px solid ${tasksColor}; background: var(--background-primary-alt); border-radius: 4px;`;
+      const tasksBody = this._renderSection(container, {
+        accent: "cyan",
+        iconHtml: icons.checkSquare,
+        title: `Today's Tasks (${tasks.length})`,
+        defaultOpen: true,
+      });
 
-      const tasksHeader = tasksSection.createEl("summary", { cls: "section-header" });
-      tasksHeader.innerHTML = `${icons.checkSquare} <span>Today's Tasks (${tasks.length})</span>`;
-      tasksHeader.style.cssText = `
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        font-size: 0.95em;
-        font-weight: 600;
-        color: var(--text-normal);
-        margin-bottom: 10px;
-        cursor: pointer;
-        user-select: none;
-      `;
-
-      const tasksList = tasksSection.createEl("ul");
+      const tasksList = tasksBody.createEl("ul");
       tasksList.style.cssText = "margin: 0; padding-left: 20px; list-style-type: disc;";
 
       for (const task of tasks) {
@@ -178,11 +182,9 @@ class SpaceDailyDashboard {
         // daily note via the LI's onclick.
         li.innerHTML = this._renderTaskHTML(task.text);
         li.onclick = (e) => {
-          // Don't intercept clicks that land on inline anchors.
           if (e.target && (e.target.tagName === "A" || (e.target.closest && e.target.closest("a")))) return;
           app.workspace.openLinkText(task.parentPath, "");
         };
-        // Wire wikilink anchors to Obsidian's link-open API.
         const wikilinks = li.querySelectorAll("a.internal-link");
         for (const a of wikilinks) {
           a.onclick = (e) => {
@@ -196,27 +198,14 @@ class SpaceDailyDashboard {
     }
 
     if (meetings.length > 0) {
-      const meetingsSection = container.createEl("details", { cls: "section" });
-      meetingsSection.open = true;
-      const meetingsColor = this._BLUEPRINT_COLORS.meetings;
-      meetingsSection.style.cssText = `margin-bottom: 16px; padding: 0.5em 0.75em; border-left: 4px solid ${meetingsColor}; background: var(--background-primary-alt); border-radius: 4px;`;
+      const meetingsBody = this._renderSection(container, {
+        accent: "blue",
+        iconHtml: icons.calendar,
+        title: `Today's Meetings (${meetings.length})`,
+        defaultOpen: true,
+      });
 
-      const meetingsHeader = meetingsSection.createEl("summary", { cls: "section-header" });
-      meetingsHeader.innerHTML = `${icons.calendar} <span>Today's Meetings (${meetings.length})</span>`;
-      meetingsHeader.style.cssText = `
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        font-size: 0.95em;
-        font-weight: 600;
-        color: var(--text-normal);
-        margin-bottom: 10px;
-        cursor: pointer;
-        user-select: none;
-      `;
-
-      const meetingsPanel = meetingsSection.createEl("div");
-      const meetingsShim = { container: meetingsPanel };
+      const meetingsShim = { container: meetingsBody };
       await customJS.BeaconCards.render(meetingsShim, {
         pages: meetings,
         layout: "stacked",
@@ -232,33 +221,22 @@ class SpaceDailyDashboard {
     }
 
     if (activityCount > 0) {
-      const activitySection = container.createEl("details", { cls: "section" });
-      activitySection.open = true;
-      const activityColor = this._BLUEPRINT_COLORS.activity;
-      activitySection.style.cssText = `margin-top: 16px; padding: 0.5em 0.75em; border-left: 4px solid ${activityColor}; background: var(--background-primary-alt); border-radius: 4px;`;
+      const activityBody = this._renderSection(container, {
+        accent: "purple",
+        iconHtml: icons.zap,
+        title: `Today's Activity (${activityCount})`,
+        defaultOpen: true,
+      });
 
-      const activityHeader = activitySection.createEl("summary", { cls: "section-header" });
-      activityHeader.innerHTML = `${icons.zap} <span>Today's Activity (${activityCount})</span>`;
-      activityHeader.style.cssText = `
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        font-size: 0.95em;
-        font-weight: 600;
-        color: var(--text-normal);
-        margin-bottom: 10px;
-        cursor: pointer;
-        user-select: none;
-      `;
-
-      const activityPanel = activitySection.createEl("div");
       // v0.5.1 (v0.64.1) bugfix: shim must delegate `.pages` to the real dv —
       // ActivityFeed.render() calls dv.pages().where(...).sort(...).slice(...)
-      // internally. The v0.5.0 shim only had `.container`, so the query failed
-      // with "dv.pages is not a function" and the panel never rendered.
+      // internally. v0.7.0 (v0.66.0): also delegate `.page` for rollup root
+      // lookups (ActivityFeed._query calls dv.page(rootPath) per bucket).
       const activityShim = {
-        container: activityPanel,
+        container: activityBody,
         pages: (...args) => dv.pages(...args),
+        page:  (path) => dv.page(path),
+        el:    (tag) => activityBody.createEl(tag),
       };
       if (customJS && customJS.ActivityFeed && typeof customJS.ActivityFeed.render === "function") {
         await customJS.ActivityFeed.render(activityShim, {
@@ -267,13 +245,15 @@ class SpaceDailyDashboard {
           includeMtime: true,
           groupBy: "blueprint",
           blueprints: this._DEFAULT_DASHBOARD_BLUEPRINTS,
-          // v0.5.2 (v0.64.2): smart title resolver + collapsible sub-groups + color stripes
           getTitle: (p) => this._resolveTitle(p),
-          collapsible: true,
+          // v0.7.0 (v0.66.0) — replaces collapsible:true (renderer side)
+          flatGrouped: true,
           colorByType: this._BLUEPRINT_COLORS,
+          rollUpRoots: this._buildRollupRules(dv),
+          metaBuilder: (p, el) => this._renderActivityMeta(p, el),
         });
       } else {
-        const warn = activityPanel.createEl("p");
+        const warn = activityBody.createEl("p");
         warn.style.cssText = "color: var(--text-muted); font-style: italic; margin: 0.5em 0;";
         warn.textContent = "ActivityFeed mechanism unavailable.";
       }
@@ -358,6 +338,154 @@ class SpaceDailyDashboard {
       meetings:  "var(--color-blue)",
       activity:  "var(--color-purple)",
     };
+  }
+
+  /**
+   * v0.7.0 (v0.66.0): Lucide chevron-right SVG. CSS rotates 90° on [open]
+   * via .sauce-section-chevron + .sauce-section > details[open] rules in
+   * the sauce-daily-dashboard.css snippet.
+   */
+  get _CHEVRON_SVG() {
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"></polyline></svg>`;
+  }
+
+  /**
+   * v0.7.0 (v0.66.0): pill-color map. Mirrors _BLUEPRINT_COLORS today; a
+   * separate name lets future cycles diverge (e.g., higher-saturation pill
+   * dots vs subtle border colors).
+   */
+  get _BLUEPRINT_PILL_COLORS() {
+    return this._BLUEPRINT_COLORS;
+  }
+
+  /**
+   * v0.7.0 (v0.66.0): rollup rule templates. Each rule's childMatch and
+   * rootPath are wrapped at call-time with the live dv via _buildRollupRules.
+   * (_ROLLUP_RULES alone is dv-agnostic so it stays cacheable.)
+   */
+  get _ROLLUP_RULES() {
+    return [
+      {
+        type: "project",
+        childMatchTemplate: (path) => /^spice\/projects\/[^/]+\//.test(path),
+        rootPathFromDv: (dv, p) => {
+          const m = String(p.file.path).match(/^spice\/projects\/([^/]+)\//);
+          if (!m) return null;
+          const slug = m[1];
+          const hubs = dv.pages('"spice/projects/' + slug + '"')
+            .where(pg => pg.type === "project")
+            .array();
+          if (hubs.length === 0) return null;
+          if (hubs.length > 1 && typeof console !== "undefined") {
+            console.warn("SpaceDailyDashboard rollup: multiple hubs in spice/projects/" + slug + "; using " + hubs[0].file.path);
+          }
+          return hubs[0].file.path;
+        },
+        excludeTemplate: (name) => typeof name === "string" && /^Template,/i.test(name),
+      },
+      {
+        type: "trip",
+        childMatchTemplate: (path) => /^spice\/trips\/[^/]+\//.test(path),
+        rootPathFromDv: (dv, p) => {
+          const m = String(p.file.path).match(/^spice\/trips\/([^/]+)\//);
+          if (!m) return null;
+          const slug = m[1];
+          const hubs = dv.pages('"spice/trips/' + slug + '"')
+            .where(pg => pg.type === "trip")
+            .array();
+          if (hubs.length === 0) return null;
+          if (hubs.length > 1 && typeof console !== "undefined") {
+            console.warn("SpaceDailyDashboard rollup: multiple hubs in spice/trips/" + slug + "; using " + hubs[0].file.path);
+          }
+          return hubs[0].file.path;
+        },
+        excludeTemplate: (name) => typeof name === "string" && /^Template,/i.test(name),
+      },
+    ];
+  }
+
+  /**
+   * v0.7.0 (v0.66.0): bind the live `dv` to each rollup-rule's child/root
+   * callbacks. Yields the {type, childMatch, rootPath, exclude} shape
+   * ActivityFeed.render expects.
+   */
+  _buildRollupRules(dv) {
+    return this._ROLLUP_RULES.map(rule => ({
+      type: rule.type,
+      childMatch: (p) => p && p.file && rule.childMatchTemplate(String(p.file.path)),
+      rootPath:   (p) => rule.rootPathFromDv(dv, p),
+      exclude:    (p) => p && p.file && rule.excludeTemplate(p.file.name),
+    }));
+  }
+
+  /**
+   * v0.7.0 (v0.66.0): caller-driven meta line for ActivityFeed cards.
+   * Renders time · type-pill · breadcrumb into the supplied parentEl.
+   * Wired via BeaconCards' v0.2.6 function-form `meta` opt.
+   */
+  _renderActivityMeta(p, parentEl) {
+    parentEl.className = "sauce-meta";
+    parentEl.innerHTML = "";
+
+    // Time stamp (created_at preferred, file.mtime fallback)
+    const tsRaw = p && (p.created_at || (p.file && p.file.mtime));
+    if (tsRaw) {
+      let m = null;
+      try { m = window.moment(tsRaw); } catch (_) { /* ignore */ }
+      if (m && m.isValid()) {
+        const t = parentEl.createEl("time");
+        t.textContent = m.format("h:mm A");
+      }
+    }
+
+    // Type pill
+    const type = p && p.type ? String(p.type) : null;
+    if (type) {
+      const pill = parentEl.createEl("span");
+      pill.className = "sauce-pill";
+      const dot = pill.createEl("span");
+      dot.className = "sauce-pill-dot";
+      const colorMap = this._BLUEPRINT_PILL_COLORS;
+      dot.style.background = (colorMap && colorMap[type]) || "var(--color-base-50)";
+      const label = pill.createEl("span");
+      label.textContent = type;
+    }
+
+    // Roll-up breadcrumb
+    if (p && p._isRollUp && typeof p._rollUpChildren === "number" && p._rollUpChildren > 0) {
+      const bread = parentEl.createEl("span");
+      bread.className = "sauce-bread";
+      bread.textContent = "· " + p._rollUpChildren + " " + (p._rollUpChildren === 1 ? "child" : "children") + " touched";
+    }
+  }
+
+  /**
+   * v0.7.0 (v0.66.0): single helper that builds a sauce-section + details
+   * + summary scaffold for Tasks / Meetings / Activity. Returns the inner
+   * body div so the caller can append section-specific content.
+   *
+   * Visual styling lives in .obsidian/snippets/sauce-daily-dashboard.css
+   * (installed via daily.manifest.json's snippets[] + appearance.enabledCssSnippets[]).
+   */
+  _renderSection(container, { accent, iconHtml, title, defaultOpen }) {
+    const section = container.createEl("div");
+    section.className = "sauce-section";
+    section.dataset.accent = accent;
+    const details = section.createEl("details");
+    if (defaultOpen) details.open = true;
+    const summary = details.createEl("summary");
+    summary.className = "sauce-section-summary";
+    summary.innerHTML =
+      `<span class="sauce-section-icon">${iconHtml}</span>` +
+      `<span>${this._escapeHtml(title)}</span>` +
+      `<span class="sauce-section-chevron">${this._CHEVRON_SVG}</span>`;
+    const body = details.createEl("div");
+    body.className = "sauce-section-body";
+    return body;
+  }
+
+  _escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
   }
 
   /**

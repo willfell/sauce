@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-05-19T23:18:14.247Z",
-  "workshop_version": "0.65.0",
+  "generated_at": "2026-05-20T01:07:01.135Z",
+  "workshop_version": "0.66.0",
   "contributions": {
     "audit": [
       {
@@ -119,13 +119,13 @@
         "kind": "command",
         "source": "commands/daily.md",
         "dest": ".claude/commands/daily.md",
-        "version": "0.6.0"
+        "version": "0.7.0"
       },
       {
         "kind": "skill",
         "source": "skills/open-today/SKILL.md",
         "dest": ".claude/skills/daily/open-today/SKILL.md",
-        "version": "0.6.0"
+        "version": "0.7.0"
       },
       {
         "kind": "claude_md_row",
