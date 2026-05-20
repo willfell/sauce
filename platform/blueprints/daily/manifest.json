@@ -25,6 +25,15 @@
   "hotkeys": [
     { "command_id": "daily-notes", "modifiers": ["Mod"], "key": "[" }
   ],
+  "snippets": [
+    {
+      "source": "helpers/sauce-daily-dashboard.css",
+      "name":   "sauce-daily-dashboard"
+    }
+  ],
+  "appearance": {
+    "enabledCssSnippets": ["sauce-daily-dashboard"]
+  },
   "customjs_classes": [
     "SpaceDailyDashboard"
   ],
