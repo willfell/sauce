@@ -165,7 +165,7 @@ class SpaceDailyDashboard {
       const tasksBody = this._renderSection(container, {
         accent: "cyan",
         iconHtml: icons.checkSquare,
-        title: `Today's Tasks (${tasks.length})`,
+        title: `Tasks (${tasks.length})`,
         defaultOpen: true,
       });
 
@@ -201,7 +201,7 @@ class SpaceDailyDashboard {
       const meetingsBody = this._renderSection(container, {
         accent: "blue",
         iconHtml: icons.calendar,
-        title: `Today's Meetings (${meetings.length})`,
+        title: `Meetings (${meetings.length})`,
         defaultOpen: true,
       });
 
@@ -224,8 +224,8 @@ class SpaceDailyDashboard {
       const activityBody = this._renderSection(container, {
         accent: "purple",
         iconHtml: icons.zap,
-        title: `Today's Activity (${activityCount})`,
-        defaultOpen: true,
+        title: `Activity (${activityCount})`,
+        defaultOpen: false,
       });
 
       // v0.5.1 (v0.64.1) bugfix: shim must delegate `.pages` to the real dv —
@@ -491,10 +491,13 @@ class SpaceDailyDashboard {
   /**
    * v0.5.2 (v0.64.2): smart title resolver. Falls back to filename when
    * no friendlier source is available. Order:
-   *   1. frontmatter `title:`
-   *   2. frontmatter `aliases[0]`
-   *   3. first heading in `file.outline` (Dataview-supplied)
-   *   4. `file.name` (always present)
+   *   1. frontmatter `name:`   (NEW v0.7.1 — project blueprint convention,
+   *                              fixes literal "Project" titles on rolled-up
+   *                              project hubs at spice/projects/<slug>/Project.md)
+   *   2. frontmatter `title:`
+   *   3. frontmatter `aliases[0]`
+   *   4. first heading in `file.outline` (Dataview-supplied)
+   *   5. `file.name` (always present)
    *
    * v0.5.3 (v0.64.3): wrapped in try-catch + simplified aliases probe.
    * Dataview's `p.file.aliases` is a Proxy/DataArray that exposes `.values`
@@ -507,6 +510,11 @@ class SpaceDailyDashboard {
   _resolveTitle(p) {
     try {
       if (!p) return "";
+      // v0.7.1 (v0.66.1): project blueprint stores name: in frontmatter, not
+      // title:. Without this branch, project hubs at <slug>/Project.md
+      // resolve to the literal filename "Project" via the final fallback.
+      const name = p.name;
+      if (name && String(name).trim()) return String(name).trim();
       const title = p.title;
       if (title && String(title).trim()) return String(title).trim();
       const aliases = p.file && p.file.aliases;

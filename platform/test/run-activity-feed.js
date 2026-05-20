@@ -63,7 +63,7 @@ try {
 if (manifest) {
   assertTrue("AF-1b: manifest.json parses as JSON", true);
   assertEq("AF-1c: manifest.name === 'activity-feed'", manifest.name, "activity-feed");
-  assertEq("AF-1d: manifest.version === '0.3.0'", manifest.version, "0.3.0");
+  assertEq("AF-1d: manifest.version === '0.3.1'", manifest.version, "0.3.1");
   assertEq("AF-1e: manifest.kind === 'mechanism'", manifest.kind, "mechanism");
 
   assertEq("AF-2: customjs_classes is ['ActivityFeed']", manifest.customjs_classes, ["ActivityFeed"]);
@@ -402,7 +402,7 @@ try {
     assertTrue(`AF-V065: _DEFAULT_BLUEPRINTS contains "${t}"`, src.includes(`"${t}"`));
   }
   const manifest = JSON.parse(fs.readFileSync("platform/mechanisms/activity-feed/manifest.json", "utf8"));
-  assertEq("AF-V065: activity-feed manifest version is 0.3.0", manifest.version, "0.3.0");
+  assertEq("AF-V065: activity-feed manifest version is 0.3.1", manifest.version, "0.3.1");
   assertTrue("AF-V065: activity-feed description mentions 0.2.0", typeof manifest.description === "string" && manifest.description.includes("0.2.0"));
 }
 

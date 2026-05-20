@@ -7425,8 +7425,8 @@ async function caseFA2RuleFragmentsExtends() {
   // the S5 green-gate and will be bumped there too)
   {
     const pins = [
-      ["daily",         "platform/blueprints/daily/manifest.json",            "0.7.0"],
-      ["activity-feed", "platform/mechanisms/activity-feed/manifest.json",    "0.3.0"],
+      ["daily",         "platform/blueprints/daily/manifest.json",            "0.7.1"],
+      ["activity-feed", "platform/mechanisms/activity-feed/manifest.json",    "0.3.1"],
       ["cards",         "platform/mechanisms/cards/manifest.json",            "0.2.6"],
     ];
     for (const [name, relPath, expected] of pins) {
