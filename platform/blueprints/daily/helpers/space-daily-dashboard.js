@@ -91,7 +91,9 @@ class SpaceDailyDashboard {
     const icons = {
       calendar: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>`,
       checkSquare: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="m9 12 2 2 4-4"/></svg>`,
-      zap: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>`
+      zap: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>`,
+      activity: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.5.5 0 0 1-.96 0L9.24 2.18a.5.5 0 0 0-.96 0l-2.35 8.36A2 2 0 0 1 4 12H2"/></svg>`,
+      square: `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/></svg>`
     };
 
     const currentFile = dv.current();
@@ -416,6 +418,126 @@ class SpaceDailyDashboard {
       rootPath:   (p) => rule.rootPathFromDv(dv, p),
       exclude:    (p) => p && p.file && rule.excludeTemplate(p.file.name),
     }));
+  }
+
+  /**
+   * v0.8.0 (v0.67.0): duck-type Luxon DateTime vs moment-friendly input.
+   * Returns "h:mm a"-formatted string or null. Used by both _renderActivityMeta
+   * (card timestamp) and _renderDrillInList (drill-in row timestamps).
+   *
+   * Background: Dataview parses ISO frontmatter (`created_at: "2026-05-19T..."`)
+   * and file.mtime into Luxon DateTime objects, NOT strings. `window.moment(luxon)`
+   * silently produces an invalid value that .format("h:mm A") renders as "12:00 AM".
+   * The fix is to detect Luxon via duck-type and call its native toFormat().
+   */
+  _formatTime(tsRaw) {
+    if (!tsRaw) return null;
+    try {
+      if (typeof tsRaw.toFormat === "function") return tsRaw.toFormat("h:mm a");
+      const m = window.moment(tsRaw);
+      if (m && m.isValid()) return m.format("h:mm A");
+    } catch (_) { /* fall through to null */ }
+    return null;
+  }
+
+  /**
+   * v0.8.0 (v0.67.0): render an open-todo pill ("☐ N") into parentEl when
+   * p.file.tasks contains at least one unchecked task. Silent return on
+   * zero/missing. Used by Meetings panel meta + Activity meta-line. Excluded
+   * from Tasks panel (circular — Tasks IS the open-task surface).
+   */
+  _renderTodoBadge(p, parentEl, squareIcon) {
+    const tasks = p && p.file && p.file.tasks;
+    if (!Array.isArray(tasks)) return;
+    const open = tasks.filter(t => t && !t.completed).length;
+    if (open <= 0) return;
+    const pill = parentEl.createEl("span");
+    pill.className = "sauce-todo-pill";
+    pill.title = `${open} open task${open === 1 ? "" : "s"}`;
+    pill.innerHTML = `<span class="sauce-todo-icon">${squareIcon}</span><span class="sauce-todo-count">${open}</span>`;
+  }
+
+  /**
+   * v0.8.0 (v0.67.0): render an inline drill-in list of rollup children.
+   * Sorts by file.mtime DESC; caps at 12 visible + "+N more" label.
+   * Each row links to the child file. Hidden by default — the breadcrumb
+   * click handler in _renderActivityMeta toggles visibility.
+   */
+  _renderDrillInList(parentEl, children, rootPath) {
+    if (!Array.isArray(children) || children.length === 0) return;
+    const CAP = 12;
+    const toIso = (p) => {
+      const m = p && p.file && p.file.mtime;
+      if (m && typeof m.toISO === "function") return m.toISO();
+      if (typeof m === "string") return m;
+      return "";
+    };
+    const sorted = children.slice().sort((a, b) => {
+      const av = toIso(a);
+      const bv = toIso(b);
+      return bv.localeCompare(av);
+    });
+    const visible = sorted.slice(0, CAP);
+    const overflow = sorted.length - visible.length;
+    const rootDir = (rootPath && typeof rootPath === "string")
+      ? rootPath.replace(/\/[^/]+$/, "/")
+      : "";
+    for (const c of visible) {
+      if (!c || !c.file || !c.file.path) continue;
+      const row = parentEl.createEl("a");
+      row.className = "sauce-drill-row";
+      row.href = "#";
+      let rel = c.file.path;
+      if (rootDir && rel.indexOf(rootDir) === 0) rel = rel.slice(rootDir.length);
+      else rel = (c.file.name || rel);
+      rel = rel.replace(/\.md$/i, "");
+      const tsRaw = c && (c.created_at || (c.file && c.file.mtime));
+      const time = this._formatTime(tsRaw) || "";
+      const nameEl = row.createEl("span");
+      nameEl.className = "sauce-drill-name";
+      nameEl.textContent = rel;
+      const timeEl = row.createEl("span");
+      timeEl.className = "sauce-drill-time";
+      timeEl.textContent = time;
+      row.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        try {
+          if (typeof app !== "undefined" && app && app.workspace && typeof app.workspace.openLinkText === "function") {
+            app.workspace.openLinkText(c.file.path, "");
+          }
+        } catch (_) { /* ignore */ }
+      });
+    }
+    if (overflow > 0) {
+      const more = parentEl.createEl("span");
+      more.className = "sauce-drill-more";
+      more.textContent = `+${overflow} more`;
+    }
+  }
+
+  /**
+   * v0.8.0 (v0.67.0): build a linear-gradient string from a byBlueprint count
+   * map. Returns null when no entries (caller falls through to single-color
+   * border-left). Used only by the Activity section — Tasks/Meetings stay
+   * with the existing border-left single-color rule.
+   */
+  _buildAccentSegments(byBlueprint) {
+    if (!byBlueprint || typeof byBlueprint !== "object") return null;
+    const entries = Object.entries(byBlueprint).filter(([, n]) => n > 0);
+    if (entries.length === 0) return null;
+    const total = entries.reduce((s, [, n]) => s + n, 0);
+    const colors = this._BLUEPRINT_PILL_COLORS || {};
+    const stops = [];
+    let cursor = 0;
+    for (const [type, count] of entries) {
+      const color = colors[type] || "var(--color-base-50)";
+      const start = (cursor * 100).toFixed(2) + "%";
+      cursor += count / total;
+      const end = (cursor * 100).toFixed(2) + "%";
+      stops.push(`${color} ${start}, ${color} ${end}`);
+    }
+    return `linear-gradient(to bottom, ${stops.join(", ")})`;
   }
 
   /**
