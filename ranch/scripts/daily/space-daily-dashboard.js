@@ -226,11 +226,10 @@ class SpaceDailyDashboard {
 
     if (activityCount > 0) {
       const activityBody = this._renderSection(container, {
-        accent: "purple",
+        accent: "grey",
         iconHtml: icons.activity,
         title: `Activity (${activityCount})`,
         defaultOpen: true,
-        accentSegments: this._buildAccentSegments(activityByBlueprint),
       });
 
       // v0.5.1 (v0.64.1) bugfix: shim must delegate `.pages` to the real dv —
