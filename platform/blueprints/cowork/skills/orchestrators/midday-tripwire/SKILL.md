@@ -32,11 +32,11 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
 ## Gather
 
 5. Use Skill `cowork:gather-finance-cc-today` with `{ engagement_id, date_today: context.today, lookback_start: "06:00", timezone: "America/Denver", classify: true, cards: { active: engagement.cc_active_cards, locked: engagement.cc_locked_cards, ignore: engagement.cc_ignored_cards } }`. Capture `{ markdown, charges, top_merchant_today_total, mtd_discretionary, days_since_splurge_pre }`.
-6. Read today's daily note (via `patch-daily-callouts` dry-read OR a single MCP read) and extract `transaction_id`s already surfaced in the current `(midday, engagement_id)` block. Filter `step 5.charges` to drop dedupes.
+6. (Dedupe is implicit in the v0.65.0 atomic-note contract — the deterministic path `spice/cowork/daily/.../YYYY-MM-DD/midday-tripwire.md` is overwrite-last-write-wins, so each fire produces a fresh snapshot of currently-flagged charges. No per-run state read needed; `step 5.charges` is used as-is.)
 
 ## Decide
 
-7. Partition filtered charges into `red_charges` (severity == RED) and `yellow_charges` (severity == YELLOW). If both empty: exit silently. Do NOT write a "nothing happened" callout.
+7. Partition `step 5.charges` into `red_charges` (severity == RED) and `yellow_charges` (severity == YELLOW). If both empty: exit silently. Do NOT write a "nothing flagged" run-note (atomic-note absence = green; presence = something to flag).
 
 ## Write
 

@@ -116,8 +116,8 @@ function checkSharedContracts() {
     "S1: manifest exposes morning-briefing orchestrator");
   assertTrue(skillSources.includes("skills/skills/write-run-note-morning-briefing/SKILL.md"),
     "S1: manifest exposes write-run-note-morning-briefing (v0.65.0 run-note form)");
-  assertTrue(skillSources.includes("skills/skills/patch-daily-callouts/SKILL.md"),
-    "S1: manifest exposes patch-daily-callouts");
+  assertTrue(!skillSources.includes("skills/skills/patch-daily-callouts/SKILL.md"),
+    "S1: manifest no longer exposes patch-daily-callouts (v0.68.0 — orphan removed)");
 
   // S2 — manifest dropped the 4 deleted ero-* orchestrators
   for (const dropped of ["ero-morning", "ero-eod", "ero-weekly", "ero-monthly"]) {
@@ -166,10 +166,8 @@ function checkSharedContracts() {
     assertContains(body, "engagement-aware", `S7: ${g} tagged engagement-aware`);
   }
 
-  // S8 — patch-daily-callouts is engagement-aware
-  const patch = readSkill("skills/skills/patch-daily-callouts/SKILL.md");
-  assertContains(patch, "engagement_id: string", "S8: patch-daily-callouts declares engagement_id input");
-  assertContains(patch, "## <Cadence> — <engagement.label>", "S8: patch-daily-callouts uses per-engagement H2 layout");
+  // S8 — patch-daily-callouts removed in v0.68.0 (orphan deletion; atomic-note
+  // contract retired callout-patching surface). Asserted absent in S1 above.
 }
 
 // -------------------------------------------------------------------------

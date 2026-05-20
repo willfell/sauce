@@ -75,7 +75,6 @@ Sub-skills are composable building blocks. Orchestrators call them in sequence; 
 | `cowork:skills/update-active-threads`               | State         | Patches `active-threads.md` (open/resolve/snooze + engagement_id tag). |
 | `cowork:skills/update-active-projects`              | State         | (legacy — orphaned in v0.31.0; deprecation TBD)                  |
 | `cowork:skills/update-weekly-snapshot`              | State         | Refreshes the rolling `weekly-snapshot.md` per-engagement section. |
-| `cowork:skills/patch-daily-callouts`                | Helper        | Idempotent insert-or-replace under `## <Cadence> — <engagement.label>` H2. |
 | `cowork:skills/run-audit-receipt`                   | Helper        | Runs `sauce audit --only cowork` and returns formatted receipt for bootstrap report. |
 | `cowork:skills/scaffold-timeframes`                 | Helper        | Idempotent this-week + this-month note creation from templates.  |
 

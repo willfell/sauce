@@ -118,7 +118,6 @@
     { "kind": "skill", "source": "skills/skills/update-active-threads/SKILL.md",                  "dest": "{{skills_dir}}/skills/update-active-threads/SKILL.md" },
     { "kind": "skill", "source": "skills/skills/update-active-projects/SKILL.md",                 "dest": "{{skills_dir}}/skills/update-active-projects/SKILL.md" },
     { "kind": "skill", "source": "skills/skills/update-weekly-snapshot/SKILL.md",                 "dest": "{{skills_dir}}/skills/update-weekly-snapshot/SKILL.md" },
-    { "kind": "skill", "source": "skills/skills/patch-daily-callouts/SKILL.md",                   "dest": "{{skills_dir}}/skills/patch-daily-callouts/SKILL.md" },
     { "kind": "skill", "source": "skills/skills/run-audit-receipt/SKILL.md",                      "dest": "{{skills_dir}}/skills/run-audit-receipt/SKILL.md" },
 
     { "kind": "command", "source": "commands/weekly.md",  "dest": ".claude/commands/weekly.md" },
