@@ -64,7 +64,8 @@
         "frontmatter_template": {
           "type": "scratch",
           "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
-          "day": "{{current_file.frontmatter.day}}"
+          "day": "{{current_file.frontmatter.day}}",
+          "title": "{{prompts.title}}"
         },
         "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n---\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ScratchLeafActions\" });\n```\n\n---\n",
         "render_in": {
@@ -224,7 +225,8 @@
       "frontmatter_template": {
         "type": "scratch",
         "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
-        "day": "{{current_file.frontmatter.day}}"
+        "day": "{{current_file.frontmatter.day}}",
+        "title": "{{prompts.title}}"
       },
       "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n---\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ScratchLeafActions\" });\n```\n\n---\n",
       "render_in": {
