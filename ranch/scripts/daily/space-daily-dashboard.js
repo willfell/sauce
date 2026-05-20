@@ -274,9 +274,10 @@ class SpaceDailyDashboard {
     const startIso = window.moment(today, "YYYY-MM-DD").startOf("day").format();
     const endIso   = window.moment(today, "YYYY-MM-DD").endOf("day").format();
     const allowed  = this._DEFAULT_DASHBOARD_BLUEPRINTS;
-    const inDay = (p) => {
+    const rollupRules = this._buildRollupRules(dv);
+
+    const inWindow = (p) => {
       if (!p) return false;
-      if (allowed.indexOf(String(p.type)) < 0) return false;
       const tsRaw = p.created_at;
       if (tsRaw) {
         const ts = String(tsRaw);
@@ -292,16 +293,65 @@ class SpaceDailyDashboard {
       }
       return false;
     };
+    const inDay = (p) => {
+      if (!p) return false;
+      if (allowed.indexOf(String(p.type)) < 0) return false;
+      return inWindow(p);
+    };
+
+    // v0.8.1 (v0.67.1): apply ActivityFeed's rollup logic so the count + byBlueprint
+    // reflect the cards that will actually render. Pre-v0.8.1, count was raw filtered
+    // pages (e.g., project hub if edited) without rollup coalescing — when only
+    // project task children were edited (no direct hub edit), the project rollup
+    // card would render but `_getActivityCount` would miss it entirely, leading to
+    // a single-color segmented accent (FLN-v67-4 observed by user smoke).
     const filtered = [];
     for (const p of dv.pages()) {
       if (inDay(p)) filtered.push(p);
     }
-    const byBlueprint = {};
-    for (const p of filtered) {
-      const t = p && p.type ? String(p.type) : "(unknown)";
-      byBlueprint[t] = (byBlueprint[t] || 0) + 1;
+
+    const rolledUpRoots = new Map(); // rootPath -> rule.type
+    for (const p of dv.pages()) {
+      if (!inWindow(p)) continue;
+      // Skip pages already in `filtered` — they're directly counted via their own type
+      const path = p && p.file && p.file.path;
+      if (!path) continue;
+      if (filtered.some(f => f.file && f.file.path === path)) continue;
+      for (const rule of rollupRules) {
+        if (typeof rule.exclude === "function" && rule.exclude(p)) break;
+        if (typeof rule.childMatch !== "function" || !rule.childMatch(p)) continue;
+        let rootPath = null;
+        try { rootPath = rule.rootPath(p); } catch (_) {}
+        if (!rootPath) continue;
+        if (rootPath === path) continue;
+        if (!rolledUpRoots.has(rootPath)) rolledUpRoots.set(rootPath, rule.type);
+        break;
+      }
     }
-    return { total: filtered.length, byBlueprint };
+
+    // Remove direct hits whose root is also being rolled up (avoid double-count)
+    const rolledRootPaths = new Set(rolledUpRoots.keys());
+    const survivors = filtered.filter(p => !(p.file && rolledRootPaths.has(p.file.path)));
+
+    // Final card-count = surviving direct hits + synthetic rollup roots
+    const byBlueprint = {};
+    const bucket = (t) => {
+      if (!t) return "(unknown)";
+      const s = String(t);
+      if (s === "project" || s.startsWith("project-")) return "project";
+      if (s === "trip" || s.startsWith("trip-")) return "trip";
+      return s;
+    };
+    for (const p of survivors) {
+      const blueprint = bucket(p && p.type);
+      byBlueprint[blueprint] = (byBlueprint[blueprint] || 0) + 1;
+    }
+    for (const [, type] of rolledUpRoots) {
+      const blueprint = bucket(type);
+      byBlueprint[blueprint] = (byBlueprint[blueprint] || 0) + 1;
+    }
+    const total = survivors.length + rolledUpRoots.size;
+    return { total, byBlueprint };
   }
 
   get _DEFAULT_DASHBOARD_BLUEPRINTS() {
@@ -597,7 +647,12 @@ class SpaceDailyDashboard {
       const label = (p._rollUpChildren === 1 ? "note" : "notes");
       bread.innerHTML = `· ${p._rollUpChildren} ${label} touched <span class="sauce-bread-chevron">${chevronSvg}</span>`;
 
-      const drillIn = parentEl.createEl("div");
+      // v0.8.1 (v0.67.1): append drill-in to the CARD root, not the meta row.
+      // BeaconCards' row layout puts title/left + meta side-by-side; rendering
+      // drill-in inside parentEl (meta) squeezes the title to ellipsis.
+      // DOM: parentEl(meta) → row → card. Walk 2 levels up; fall back to parentEl.
+      const cardEl = (parentEl && parentEl.parentElement && parentEl.parentElement.parentElement) || parentEl;
+      const drillIn = cardEl.createEl("div");
       drillIn.className = "sauce-drill-in";
       drillIn.hidden = true;
       const rootPath = p.file && p.file.path;
