@@ -8,7 +8,7 @@ tags: [cowork, orchestrator, eod, engagement-aware]
 
 # cowork:eod-review
 
-Closes the day for one engagement. Compiles completed/incomplete tasks, compares against the morning briefing's flagged items, previews tomorrow's calendar, surfaces late emails, and updates the active-threads ledger. Writes one `[!example]-` callout to today's daily note under `## EOD — <engagement.label>` within the `%% COWORK_CALLOUTS %%` block. Re-run replaces the block in place.
+Closes the day for one engagement. Compiles completed/incomplete tasks, compares against the morning briefing's flagged items, previews tomorrow's calendar, surfaces late emails, and updates the active-threads ledger. Writes one `[!example]-` callout to today's daily note under `## EOD — <engagement.label>` within the `[//]: # (COWORK_CALLOUTS)` block. Re-run replaces the block in place.
 
 ## Inputs
 

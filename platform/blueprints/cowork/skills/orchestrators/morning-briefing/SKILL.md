@@ -8,7 +8,7 @@ tags: [cowork, orchestrator, morning, engagement-aware]
 
 # cowork:morning-briefing
 
-Composes a morning callout block for one engagement (Morning Briefing + optional Finance + optional Email + optional Messages) and an Open Threads tail, then patches them into today's daily note. The first four callouts go above the `%% COWORK_CALLOUTS %%` marker; Open Threads goes at the bottom after `## Notes`. Aborts cleanly on MCP unavailability — never partially writes. Re-runs are idempotent: the morning H2 block for this `(cadence, engagement_id)` pair is replaced if it already exists for today.
+Composes a morning callout block for one engagement (Morning Briefing + optional Finance + optional Email + optional Messages) and an Open Threads tail, then patches them into today's daily note. The first four callouts go above the `[//]: # (COWORK_CALLOUTS)` marker; Open Threads goes at the bottom after `## Notes`. Aborts cleanly on MCP unavailability — never partially writes. Re-runs are idempotent: the morning H2 block for this `(cadence, engagement_id)` pair is replaced if it already exists for today.
 
 ## Inputs
 

@@ -4434,7 +4434,7 @@ async function caseDDT1DailyTemplateShape() {
   const ok =
     /tp\.date\.now\("YYYY-MM-DD"/.test(body) &&
     /^type: cowork-daily$/m.test(body) &&
-    /%% COWORK_CALLOUTS %%/.test(body) &&
+    /\[\/\/\]: # \(COWORK_CALLOUTS\)/.test(body) &&
     /SpaceDailyDashboard/.test(body) &&
     !/CoworkHubNav/.test(body);
   assertTrue("DD-T1: daily-template.md content shape regressed", ok);
@@ -7424,7 +7424,7 @@ async function caseFA2RuleFragmentsExtends() {
   // cards untouched per Approach A)
   {
     const pins = [
-      ["daily",         "platform/blueprints/daily/manifest.json",            "0.8.1"],
+      ["daily",         "platform/blueprints/daily/manifest.json",            "0.8.2"],
       ["activity-feed", "platform/mechanisms/activity-feed/manifest.json",    "0.3.2"],
       ["cards",         "platform/mechanisms/cards/manifest.json",            "0.2.6"],
     ];

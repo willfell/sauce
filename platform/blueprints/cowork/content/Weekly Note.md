@@ -35,6 +35,6 @@ await dv.view("ranch/views/customjs-guard", { class: "CoworkHubNav" });
 
 # <% friendly %>
 
-%% COWORK_CALLOUTS %%
+[//]: # (COWORK_CALLOUTS)
 
 ## Notes
