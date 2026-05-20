@@ -694,6 +694,29 @@ function assertCoworkV066Shape() {
     "COWORK-V066-AFC-1: scanned at least one ActivityFeed args block for additive-compat regression");
 }
 
+// ── v0.67.0 ─────────────────────────────────────────────────────────────────
+
+function assertCoworkV067Shape() {
+  // COWORK-V067-AFC-1: cowork content/*.md still doesn't pass v0.67.0 render-opts
+  // (additive-compat regression — _rollUpChildrenPages is a render-output field,
+  // not a render-input; cowork callers should not regress to pass v0.67.0 inputs)
+  try {
+    const coworkDir = path.join(BP, "content");
+    const files = fs.existsSync(coworkDir) ? fs.readdirSync(coworkDir).filter(f => f.endsWith(".md")) : [];
+    let coworkPassesNewOpts = false;
+    for (const f of files) {
+      const body = fs.readFileSync(path.join(coworkDir, f), "utf8");
+      // Regression guard: cowork shouldn't have added accentSegments to its ActivityFeed.render calls
+      if (/accentSegments\s*:/.test(body)) { coworkPassesNewOpts = true; break; }
+    }
+    assertTrue(!coworkPassesNewOpts,
+      "COWORK-V067-AFC-1: cowork content does not pass v0.67.0-specific opts");
+  } catch (e) {
+    assertTrue(false,
+      `COWORK-V067-AFC-1: cowork content does not pass v0.67.0-specific opts — ${e && e.message}`);
+  }
+}
+
 (function main() {
   console.log("--- shared contracts ---");
   checkSharedContracts();
@@ -706,6 +729,7 @@ function assertCoworkV066Shape() {
   assertCoworkV064NoDailyNote();
   assertCoworkV065Shape();
   assertCoworkV066Shape();
+  assertCoworkV067Shape();
   console.log(`========\nResult: ${passed} passed, ${failed} failed.`);
   process.exit(failed === 0 ? 0 : 1);
 })();

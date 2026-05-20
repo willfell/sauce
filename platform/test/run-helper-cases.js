@@ -7419,13 +7419,12 @@ async function caseFA2RuleFragmentsExtends() {
     assertTrue("HC-V065-DASHBOARD: allowlist includes cowork-finance-snapshot", src.includes('"cowork-finance-snapshot"'));
   }
 
-  // v0.66.0 FA6-MANIFEST version pins — daily / activity-feed / cards
-  // (pins reflect the versions established by S1–S4; daily will be bumped to
-  // 0.7.0 in S6 alongside the catalogue lockstep; this pin captures 0.6.0 for
-  // the S5 green-gate and will be bumped there too)
+  // v0.67.0 FA6-MANIFEST version pins — daily / activity-feed / cards
+  // (bumped from v0.66.x by daily 0.7.1 → 0.8.0 + activity-feed 0.3.1 → 0.3.2;
+  // cards untouched per Approach A)
   {
     const pins = [
-      ["daily",         "platform/blueprints/daily/manifest.json",            "0.7.1"],
+      ["daily",         "platform/blueprints/daily/manifest.json",            "0.8.0"],
       ["activity-feed", "platform/mechanisms/activity-feed/manifest.json",    "0.3.2"],
       ["cards",         "platform/mechanisms/cards/manifest.json",            "0.2.6"],
     ];
@@ -7471,6 +7470,50 @@ async function caseFA2RuleFragmentsExtends() {
       assertTrue("HC-V066-2b: allowlist includes 'project'", body.indexOf('"project"') >= 0);
       assertTrue("HC-V066-2c: allowlist includes 'trip'",    body.indexOf('"trip"')    >= 0);
     }
+  }
+
+  // v0.67.0 HC-V067-1: new pure helpers declared on SpaceDailyDashboard
+  {
+    console.log("\n--- Case HC-V067-1: daily blueprint declares v0.8.0 helpers ---");
+    const src = fs.readFileSync(
+      path.join(WORKSHOP, "platform/blueprints/daily/helpers/space-daily-dashboard.js"),
+      "utf8"
+    );
+    assertTrue("HC-V067-1a: _formatTime method declared", /_formatTime\s*\(/.test(src));
+    assertTrue("HC-V067-1b: _renderTodoBadge method declared", /_renderTodoBadge\s*\(/.test(src));
+    assertTrue("HC-V067-1c: _renderDrillInList method declared", /_renderDrillInList\s*\(/.test(src));
+    assertTrue("HC-V067-1d: _buildAccentSegments method declared", /_buildAccentSegments\s*\(/.test(src));
+  }
+
+  // v0.67.0 HC-V067-2: sauce-daily-dashboard.css contains new selectors
+  {
+    console.log("\n--- Case HC-V067-2: dashboard CSS contains drill-in + todo + segmented selectors ---");
+    const css = fs.readFileSync(
+      path.join(WORKSHOP, "platform/blueprints/daily/helpers/sauce-daily-dashboard.css"),
+      "utf8"
+    );
+    assertTrue("HC-V067-2a: .sauce-drill-in selector present", /\.sauce-drill-in\s*\{/.test(css));
+    assertTrue("HC-V067-2b: .sauce-todo-pill selector present", /\.sauce-todo-pill\s*\{/.test(css));
+    assertTrue("HC-V067-2c: [data-segmented='true']::before present",
+      /\[data-segmented="true"\]::before/.test(css));
+  }
+
+  // v0.67.0 HC-V067-3: icons object swap (zap removed, activity + square added)
+  {
+    console.log("\n--- Case HC-V067-3: inline icons object swap ---");
+    const src = fs.readFileSync(
+      path.join(WORKSHOP, "platform/blueprints/daily/helpers/space-daily-dashboard.js"),
+      "utf8"
+    );
+    // Activity SVG: Lucide heartbeat path signature "M22 12h-2.48"
+    assertTrue("HC-V067-3a: icons.activity SVG present",
+      /activity:\s*`[^`]*M22 12h-2\.48/.test(src));
+    // Square SVG: 12x12 rect path
+    assertTrue("HC-V067-3b: icons.square SVG present",
+      /square:\s*`[^`]*width="12"\s+height="12"/.test(src));
+    // zap entry removed
+    assertTrue("HC-V067-3c: icons.zap entry absent",
+      !/^\s*zap:\s*`</m.test(src));
   }
 
   console.log(`\n========`);

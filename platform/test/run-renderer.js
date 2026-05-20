@@ -1839,6 +1839,141 @@ async function testREntityCreateIconRendersSvg(siteIndex, site) {
   return pass;
 }
 
+// ── REND-V067-TIME-1: SpaceDailyDashboard._formatTime duck-types Luxon + moment ──
+// v0.67.0: _formatTime must accept a Luxon DateTime (has .toFormat()), a
+// moment-compatible string, and return null for null/undefined.
+async function testRendV067Time1() {
+  console.log('\n=== REND-V067-TIME-1 — _formatTime duck-types Luxon + moment ===');
+  let ok = true;
+  try {
+    const dailySrc = fs.readFileSync(
+      path.join(WORKSHOP, "platform/blueprints/daily/helpers/space-daily-dashboard.js"),
+      "utf8"
+    );
+    const factory = new Function(
+      "window",
+      dailySrc + "\nreturn SpaceDailyDashboard;"
+    );
+    const windowShim = {
+      moment: (input) => {
+        const d = (input instanceof Date) ? input : new Date(input);
+        if (isNaN(d.getTime())) return { isValid: () => false };
+        return {
+          isValid: () => true,
+          format: (fmt) => {
+            let h = d.getHours();
+            const ampm = h >= 12 ? "PM" : "AM";
+            h = h % 12 || 12;
+            const m = d.getMinutes().toString().padStart(2, "0");
+            return `${h}:${m} ${ampm}`;
+          },
+        };
+      },
+    };
+    const Klass = factory(windowShim);
+    const inst = new Klass();
+
+    // Luxon mock: object with toFormat method
+    const luxonMock = { toFormat: (fmt) => "9:00 pm" };
+    const luxonOut = inst._formatTime(luxonMock);
+    const sub1a = luxonOut === "9:00 pm";
+    console.log(`  REND-V067-TIME-1a (Luxon DateTime mock formats via toFormat): ${sub1a ? 'PASS' : 'FAIL'}`);
+    ok = ok && sub1a;
+
+    // String input falls through to moment
+    const stringOut = inst._formatTime("2026-05-19T14:30:00");
+    const sub1b = typeof stringOut === "string" && /\d{1,2}:\d{2}\s+(AM|PM)/.test(stringOut);
+    console.log(`  REND-V067-TIME-1b (string input formats via moment): ${sub1b ? 'PASS' : 'FAIL'}`);
+    ok = ok && sub1b;
+
+    // Null / undefined returns null
+    const sub1c = inst._formatTime(null) === null;
+    console.log(`  REND-V067-TIME-1c (null returns null): ${sub1c ? 'PASS' : 'FAIL'}`);
+    ok = ok && sub1c;
+
+    const sub1d = inst._formatTime(undefined) === null;
+    console.log(`  REND-V067-TIME-1d (undefined returns null): ${sub1d ? 'PASS' : 'FAIL'}`);
+    ok = ok && sub1d;
+  } catch (e) {
+    console.log(`  REND-V067-TIME-1a (Luxon DateTime mock formats via toFormat): FAIL — ${e && e.message}`);
+    ok = false;
+  }
+  console.log(`  ${ok ? 'PASS' : 'FAIL'}`);
+  return ok;
+}
+
+// ── REND-V067-TODO-1: SpaceDailyDashboard._renderTodoBadge pill when open > 0 ──
+// v0.67.0: _renderTodoBadge renders a .sauce-todo-pill pill when open tasks > 0;
+// is silent when zero open tasks or tasks array absent.
+async function testRendV067Todo1() {
+  console.log('\n=== REND-V067-TODO-1 — _renderTodoBadge renders pill when open > 0 ===');
+  let ok = true;
+  try {
+    const dailySrc = fs.readFileSync(
+      path.join(WORKSHOP, "platform/blueprints/daily/helpers/space-daily-dashboard.js"),
+      "utf8"
+    );
+    const factory = new Function(
+      "window",
+      dailySrc + "\nreturn SpaceDailyDashboard;"
+    );
+    const Klass = factory({ moment: () => ({ isValid: () => false }) });
+    const inst = new Klass();
+
+    function makeEl() {
+      return {
+        _children: [],
+        _attrs: {},
+        _innerHTML: "",
+        createEl(tag) { const c = makeEl(); c._tag = tag; this._children.push(c); return c; },
+        set innerHTML(v) { this._innerHTML = v; },
+        get innerHTML() { return this._innerHTML; },
+        set className(v) { this._attrs.className = v; },
+        get className() { return this._attrs.className; },
+        set title(v) { this._attrs.title = v; },
+        get title() { return this._attrs.title; },
+      };
+    }
+
+    // Case 1: open tasks > 0 → pill rendered
+    const el1 = makeEl();
+    const p1 = { file: { tasks: [{ completed: false }, { completed: false }, { completed: true }] } };
+    inst._renderTodoBadge(p1, el1, "<svg/>");
+    const sub1a = el1._children.length === 1;
+    console.log(`  REND-V067-TODO-1a (pill rendered when open > 0): ${sub1a ? 'PASS' : 'FAIL'}`);
+    ok = ok && sub1a;
+
+    const sub1b = el1._children[0]._attrs.className === "sauce-todo-pill";
+    console.log(`  REND-V067-TODO-1b (pill className is sauce-todo-pill): ${sub1b ? 'PASS' : 'FAIL'}`);
+    ok = ok && sub1b;
+
+    const sub1c = el1._children[0]._attrs.title === "2 open tasks";
+    console.log(`  REND-V067-TODO-1c (title says '2 open tasks'): ${sub1c ? 'PASS' : 'FAIL'}`);
+    ok = ok && sub1c;
+
+    // Case 2: zero open → silent
+    const el2 = makeEl();
+    const p2 = { file: { tasks: [{ completed: true }, { completed: true }] } };
+    inst._renderTodoBadge(p2, el2, "<svg/>");
+    const sub1d = el2._children.length === 0;
+    console.log(`  REND-V067-TODO-1d (silent when zero open): ${sub1d ? 'PASS' : 'FAIL'}`);
+    ok = ok && sub1d;
+
+    // Case 3: no tasks array → silent
+    const el3 = makeEl();
+    const p3 = { file: {} };
+    inst._renderTodoBadge(p3, el3, "<svg/>");
+    const sub1e = el3._children.length === 0;
+    console.log(`  REND-V067-TODO-1e (silent when no tasks array): ${sub1e ? 'PASS' : 'FAIL'}`);
+    ok = ok && sub1e;
+  } catch (e) {
+    console.log(`  REND-V067-TODO-1a (pill rendered when open > 0): FAIL — ${e && e.message}`);
+    ok = false;
+  }
+  console.log(`  ${ok ? 'PASS' : 'FAIL'}`);
+  return ok;
+}
+
 // ── Main ─────────────────────────────────────────────────────────────────
 (async () => {
   const which = ARGS.selector;
@@ -1919,6 +2054,10 @@ async function testREntityCreateIconRendersSvg(siteIndex, site) {
         const why = isWorkshop ? 'VAULT === workshop (workshop has no registry contributors)' : 'no registry at ' + REGISTRY_ABS;
         console.log(`\n=== T4.4 — barebones-one-button SKIPPED (${why}) ===`);
       }
+    }
+    if (which === 'daily' || which === 'all') {
+      results.push(['REND-V067-TIME-1 _formatTime duck-types Luxon + moment', await testRendV067Time1()]);
+      results.push(['REND-V067-TODO-1 _renderTodoBadge pill when open > 0', await testRendV067Todo1()]);
     }
   } catch (e) {
     console.error(`\nFATAL: ${e.message}`);
