@@ -590,7 +590,13 @@ class SpaceDailyDashboard {
    */
   _buildAccentSegments(byBlueprint) {
     if (!byBlueprint || typeof byBlueprint !== "object") return null;
-    const entries = Object.entries(byBlueprint).filter(([, n]) => n > 0);
+    // v0.8.2 (v0.67.2): sort entries alphabetically by key so segment order
+    // matches ActivityFeed's group rendering order (which renders blueprints
+    // alphabetically). Pre-v0.8.2 order depended on Map iteration which mixed
+    // direct-hits before rollups, producing inverted segments vs. visual content.
+    const entries = Object.entries(byBlueprint)
+      .filter(([, n]) => n > 0)
+      .sort(([a], [b]) => a.localeCompare(b));
     if (entries.length === 0) return null;
     const total = entries.reduce((s, [, n]) => s + n, 0);
     const colors = this._BLUEPRINT_PILL_COLORS || {};
