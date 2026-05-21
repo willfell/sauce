@@ -126,17 +126,23 @@
  * Dataview query scope is vault-wide.
  */
 
-// v0.5.0: Title-Case a kebab/snake key for the default group-label fallback
-// when groupLabels[key] is absent. e.g., "cowork-morning-briefing" →
-// "Cowork Morning Briefing", "project" → "Project".
-function _humanCase(key) {
-  if (typeof key !== "string" || key.length === 0) return key;
-  return key.split(/[-_]/).map(function (w) {
-    return w.length === 0 ? w : (w.charAt(0).toUpperCase() + w.slice(1));
-  }).join(" ");
-}
-
 class ActivityFeed {
+  // v0.5.1 (sauce v0.71.1) BUGFIX: _humanCase moved from file-scope to instance
+  // method to satisfy customJS's class-file contract. customJS loads each .js
+  // file under `(${file})` (parenthesized single-expression), so a file-scope
+  // helper preceding the class declaration causes SyntaxError: Unexpected
+  // token 'class' — the file fails to register, and the daily dashboard emits
+  // "ActivityFeed mechanism unavailable" wherever it depends on customJS.ActivityFeed.
+  //
+  // v0.5.0: Title-Case a kebab/snake key for the default group-label fallback
+  // when groupLabels[key] is absent. e.g., "cowork-morning-briefing" →
+  // "Cowork Morning Briefing", "project" → "Project".
+  _humanCase(key) {
+    if (typeof key !== "string" || key.length === 0) return key;
+    return key.split(/[-_]/).map(function (w) {
+      return w.length === 0 ? w : (w.charAt(0).toUpperCase() + w.slice(1));
+    }).join(" ");
+  }
   /**
    * Render a time-windowed activity feed across blueprints.
    * @param {object} dv  — Dataview API in dataviewjs scope
@@ -585,7 +591,7 @@ class ActivityFeed {
     const groupLabelMap = (groupLabels && typeof groupLabels === "object" && !Array.isArray(groupLabels)) ? groupLabels : {};
     const labelText = (typeof groupLabelMap[key] === "string" && groupLabelMap[key].length > 0)
       ? groupLabelMap[key]
-      : _humanCase(key);
+      : this._humanCase(key);
     label.textContent = labelText;
     // v0.5.0: groupPreviewBuilder appends a one-line preview to defaultClosed
     // group headers. Gated on closed-group membership so open groups stay terse.

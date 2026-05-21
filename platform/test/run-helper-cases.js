@@ -7540,7 +7540,7 @@ async function caseFA2RuleFragmentsExtends() {
   {
     const pins = [
       ["daily",         "platform/blueprints/daily/manifest.json",            "0.11.0"],
-      ["activity-feed", "platform/mechanisms/activity-feed/manifest.json",    "0.5.0"],
+      ["activity-feed", "platform/mechanisms/activity-feed/manifest.json",    "0.5.1"],
       ["cards",         "platform/mechanisms/cards/manifest.json",            "0.2.6"],
     ];
     for (const [name, relPath, expected] of pins) {

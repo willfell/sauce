@@ -63,7 +63,7 @@ try {
 if (manifest) {
   assertTrue("AF-1b: manifest.json parses as JSON", true);
   assertEq("AF-1c: manifest.name === 'activity-feed'", manifest.name, "activity-feed");
-  assertEq("AF-1d: manifest.version === '0.5.0'", manifest.version, "0.5.0");
+  assertEq("AF-1d: manifest.version === '0.5.1'", manifest.version, "0.5.1");
   assertEq("AF-1e: manifest.kind === 'mechanism'", manifest.kind, "mechanism");
 
   assertEq("AF-2: customjs_classes is ['ActivityFeed']", manifest.customjs_classes, ["ActivityFeed"]);
@@ -405,7 +405,7 @@ try {
     assertTrue(`AF-V065: _DEFAULT_BLUEPRINTS contains "${t}"`, src.includes(`"${t}"`));
   }
   const manifest = JSON.parse(fs.readFileSync("platform/mechanisms/activity-feed/manifest.json", "utf8"));
-  assertEq("AF-V065: activity-feed manifest version is 0.5.0", manifest.version, "0.5.0");
+  assertEq("AF-V065: activity-feed manifest version is 0.5.1", manifest.version, "0.5.1");
   assertTrue("AF-V065: activity-feed description mentions 0.2.0", typeof manifest.description === "string" && manifest.description.includes("0.2.0"));
 }
 
@@ -1310,6 +1310,37 @@ try {
     html.indexOf("today's lead from frontmatter") >= 0);
 } catch (e) {
   assertTrue("AF-V0710-SUBTITLE-1: getSubtitle preference", false, e && e.message);
+}
+
+// AF-V0710-CUSTOMJS-1 (v0.5.1 regression guard): file MUST evaluate as a single
+// class expression under the customJS contract eval(`(${file})`). v0.5.0 broke
+// this with a file-scope _humanCase helper before the class declaration —
+// wrapping in parens produced SyntaxError: Unexpected token 'class'. customJS
+// then silently fails to register the class, and downstream callers see
+// `customJS.ActivityFeed === undefined` (daily dashboard emits "ActivityFeed
+// mechanism unavailable"). This assert prevents the regression.
+try {
+  const srcPath = path.join(WORKSHOP, "platform/mechanisms/activity-feed/activity-feed.js");
+  const customJSsrc = fs.readFileSync(srcPath, "utf8");
+  let def, instance;
+  try {
+    def = eval("(" + customJSsrc + ")");
+    instance = new def();
+  } catch (e) {
+    assertTrue("AF-V0710-CUSTOMJS-1: file loads under customJS (`(${file})`) contract", false, e && e.message);
+  }
+  if (instance) {
+    assertTrue("AF-V0710-CUSTOMJS-1a: instance.constructor.name === 'ActivityFeed'",
+      instance.constructor && instance.constructor.name === "ActivityFeed");
+    assertTrue("AF-V0710-CUSTOMJS-1b: instance.render is a function",
+      typeof instance.render === "function");
+    assertTrue("AF-V0710-CUSTOMJS-1c: instance._humanCase is a method (not a file-scope binding)",
+      typeof instance._humanCase === "function");
+    assertTrue("AF-V0710-CUSTOMJS-1d: _humanCase('cowork-morning-briefing') === 'Cowork Morning Briefing'",
+      instance._humanCase("cowork-morning-briefing") === "Cowork Morning Briefing");
+  }
+} catch (e) {
+  assertTrue("AF-V0710-CUSTOMJS-1: regression guard for customJS file contract", false, e && e.message);
 }
 
 // ── Summary ───────────────────────────────────────────────────────────────
