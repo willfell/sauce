@@ -6806,7 +6806,7 @@ async function caseFA4TimelineManifests() {
   // reclaim + Activity panel). Accept any >= floor instead of strict-equal so
   // future PATCH/MINOR bumps don't re-trigger this baseline. v0.70.0 S5: daily
   // bumped 0.9.0 → 0.10.0 (activity-feed framed renderer); floor updated.
-  const floors = { daily: "0.10.2", journal: "0.2.0", scratch: "0.4.0" };
+  const floors = { daily: "0.10.3", journal: "0.2.0", scratch: "0.4.0" };
   for (const bp of Object.keys(floors)) {
     const m = JSON.parse(fs.readFileSync(
       path.join(WORKSHOP, `platform/blueprints/${bp}/manifest.json`), "utf8"));
@@ -7538,7 +7538,7 @@ async function caseFA2RuleFragmentsExtends() {
   // cards untouched.
   {
     const pins = [
-      ["daily",         "platform/blueprints/daily/manifest.json",            "0.10.2"],
+      ["daily",         "platform/blueprints/daily/manifest.json",            "0.10.3"],
       ["activity-feed", "platform/mechanisms/activity-feed/manifest.json",    "0.4.0"],
       ["cards",         "platform/mechanisms/cards/manifest.json",            "0.2.6"],
     ];
@@ -7713,6 +7713,38 @@ async function caseFA2RuleFragmentsExtends() {
       assertTrue("HC-V072-1f: mobile no longer sets .sauce-group { margin-bottom: ... } directly",
         !/\.sauce-group\s*\{\s*margin-bottom:/.test(mb));
     }
+  }
+
+  // v0.70.3 HC-V073-1: outer sections adopt the same thin full-wrap border treatment + empty-state panel
+  {
+    console.log("\n--- Case HC-V073-1: outer sections full border + empty-state panel ---");
+    const cssPath = path.join(WORKSHOP, "platform/blueprints/daily/helpers/sauce-daily-dashboard.css");
+    const css = fs.readFileSync(cssPath, "utf8");
+    // Each outer-section accent variant uses `border: 1px solid …` (full wrap), NOT `border-left: …`
+    assertTrue("HC-V073-1a: .sauce-section[data-accent=cyan] uses full 1px border",
+      /\.sauce-section\[data-accent="cyan"\]\s*\{[^}]*border:\s*1px\s+solid\s+var\(--color-cyan\)/.test(css));
+    assertTrue("HC-V073-1b: .sauce-section[data-accent=blue] uses full 1px border",
+      /\.sauce-section\[data-accent="blue"\]\s*\{[^}]*border:\s*1px\s+solid\s+var\(--color-blue\)/.test(css));
+    assertTrue("HC-V073-1c: .sauce-section[data-accent=grey] uses full 1px border",
+      /\.sauce-section\[data-accent="grey"\]\s*\{[^}]*border:\s*1px\s+solid\s+var\(--text-faint\)/.test(css));
+    // Legacy 4px left stripe removed from outer-section accent rules
+    assertTrue("HC-V073-1d: legacy border-left: 4px on .sauce-section accents removed",
+      !/\.sauce-section\[data-accent="[^"]+"\]\s*\{[^}]*border-left:\s*4px/.test(css));
+    // Outer section margin-bottom uses the shared --sauce-section-gap token
+    assertTrue("HC-V073-1e: .sauce-section margin-bottom uses var(--sauce-section-gap)",
+      /\.sauce-section\s*\{[\s\S]*?margin-bottom:\s*var\(--sauce-section-gap/.test(css));
+    // Empty-state panel CSS present
+    assertTrue("HC-V073-1f: .sauce-empty-state selector present",
+      /\.sauce-empty-state\s*\{/.test(css));
+    assertTrue("HC-V073-1g: .sauce-empty-state uses a dashed border accent",
+      /\.sauce-empty-state\s*\{[\s\S]*?border:\s*1px\s+dashed/.test(css));
+    // Helper renders the empty-state branch + the literal phrase
+    const jsPath = path.join(WORKSHOP, "platform/blueprints/daily/helpers/space-daily-dashboard.js");
+    const js = fs.readFileSync(jsPath, "utf8");
+    assertTrue("HC-V073-1h: helper renders sauce-empty-state when !hasContent",
+      /if\s*\(!hasContent\)\s*\{[\s\S]*?sauce-empty-state/.test(js));
+    assertTrue("HC-V073-1i: helper emits the 'No activity recorded yet' phrase",
+      /No activity recorded yet/.test(js));
   }
 
   console.log(`\n========`);

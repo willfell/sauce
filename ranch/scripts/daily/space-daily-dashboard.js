@@ -156,7 +156,6 @@ class SpaceDailyDashboard {
     const activityResult = await this._getActivityCount(dv, today);
     const activityCount = activityResult.total;
     const hasContent = meetings.length > 0 || tasks.length > 0 || activityCount > 0;
-    if (!hasContent) return;
 
     const existing = dv.container.querySelector(".space-daily-dashboard");
     if (existing) existing.remove();
@@ -178,6 +177,16 @@ class SpaceDailyDashboard {
       max-width: 100%;
       overflow-x: hidden;
     `;
+
+    // v0.10.3 (sauce v0.70.3): render a polished empty-state panel when
+    // the day has no tasks, meetings, or activity. Replaces the prior
+    // silent early-return so the user always gets a visible signal.
+    if (!hasContent) {
+      const empty = container.createEl("div");
+      empty.className = "sauce-empty-state";
+      empty.innerHTML = `${icons.activity}<span>No activity recorded yet</span>`;
+      return;
+    }
 
     if (tasks.length > 0) {
       const tasksBody = this._renderSection(container, {
