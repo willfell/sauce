@@ -7972,6 +7972,40 @@ async function caseFA2RuleFragmentsExtends() {
     assertTrue("HC-V0710-6: default prompts MCP-agnostic + gather-skipped aware", false, e && e.message);
   }
 
+  // HC-V0710-7: 3 cowork hub templates pass framed:true + scoped blueprints:[] + groupOrder + groupLabels
+  try {
+    const hubDir = path.join(WORKSHOP, "platform/blueprints/cowork/content");
+    const hubs = [
+      { file: "Daily Hub.md",   scope: "today" },
+      { file: "Weekly Hub.md",  scope: "week"  },
+      { file: "Monthly Hub.md", scope: "month" },
+    ];
+    const coworkTypes = [
+      "cowork-morning-briefing", "cowork-midday-tripwire", "cowork-eod-review",
+      "cowork-finance-snapshot", "cowork-weekly-review", "cowork-monthly-review",
+    ];
+    for (const h of hubs) {
+      const body = fs.readFileSync(path.join(hubDir, h.file), "utf8");
+      // Find the ActivityFeed call in the file (allow either inline or via classname pattern)
+      const afCall = body.match(/class:\s*"ActivityFeed"[\s\S]*?\}\s*\)\s*;?/);
+      assertTrue("HC-V0710-7a: " + h.file + " contains ActivityFeed call", !!afCall);
+      if (!afCall) continue;
+      const call = afCall[0];
+      assertTrue("HC-V0710-7b: " + h.file + " passes scope: \"" + h.scope + "\"",
+        call.indexOf('scope: "' + h.scope + '"') >= 0 || call.indexOf("scope: '" + h.scope + "'") >= 0);
+      assertTrue("HC-V0710-7c: " + h.file + " passes framed: true",
+        /framed:\s*true/.test(call));
+      assertTrue("HC-V0710-7d: " + h.file + " passes blueprints: array with 6 cowork-* types",
+        coworkTypes.every(function (t) { return call.indexOf('"' + t + '"') >= 0; }));
+      assertTrue("HC-V0710-7e: " + h.file + " passes groupOrder:",
+        /groupOrder\s*:/.test(call));
+      assertTrue("HC-V0710-7f: " + h.file + " passes groupLabels:",
+        /groupLabels\s*:/.test(call));
+    }
+  } catch (e) {
+    assertTrue("HC-V0710-7: cowork hub ActivityFeed scoping", false, e && e.message);
+  }
+
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
   if (fail > 0) {
