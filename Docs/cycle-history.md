@@ -453,3 +453,19 @@ See `Docs/plans/2026-05-20-v0.70.1-daily-activity-cohesion-patch-result.md` for 
 
 See `Docs/plans/2026-05-21-v0.71.0-cowork-presentation-polish-result.md` for the full record.
 
+## v0.71.1 customjs-class-file-contract CLOSED 2026-05-21
+
+**Workshop:** 0.71.0 → 0.71.1
+**Mechanism:** activity-feed 0.5.0 → 0.5.1
+
+**Headline:** v0.71.0 S2 introduced a file-scope `_humanCase` helper above the `ActivityFeed` class declaration. customJS loads each .js file under `eval(`(${file})`)` — a file-scope helper preceding the class causes `SyntaxError: Unexpected token 'class'`, customJS silently fails to register the class, and downstream consumers (SpaceDailyDashboard) emit "ActivityFeed mechanism unavailable" on the daily note. Bug shipped to all vaults at v0.71.0 but was masked where customJS still held the v0.4.1 instance in memory.
+
+**Fix:** `_humanCase` moved inside `ActivityFeed` as an instance method; call site uses `this._humanCase(key)`. NEW regression test `AF-V0710-CUSTOMJS-1` (4 sub-asserts) loads the file under customJS's `(${file})` contract.
+
+**Lessons:**
+1. customJS class-file contract: each .js file under `jsFolder` must be a single class expression. NO file-scope helpers; every helper lives inside the class. Code-quality review for v0.5.0 flagged file-scope `_humanCase` as a "new precedent" minor issue but missed the contract violation.
+2. Consumer subscription bump still manual (FLN-v67-7 unresolved). Each vault's `ranch/platform-subscription.json` activity-feed pin needs bumping 0.5.0 → 0.5.1 before `sauce update`.
+3. FLN-v68-3 Edit-tool revert pattern recurred multiple times during this patch. Mitigation: grep-verify immediately after every Edit AND before staging; commit ASAP in a single batch.
+
+See `Docs/plans/2026-05-21-v0.71.1-customjs-class-file-contract-result.md` for the full record.
+

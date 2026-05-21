@@ -503,3 +503,19 @@ Visual changes you will see:
 - **Cowork Daily/Weekly/Monthly Hub:** Activity panels now show ONLY cowork-* runs, grouped by cadence with prettified headers ("Morning Briefing" / "Midday Tripwire" / "EOD Review" / "Finance Snapshot" / "Weekly Review" / "Monthly Review"). Today.md (the cross-blueprint landing) and per-day daily notes intentionally keep the cross-blueprint allowlist.
 - **Cowork atomic notes** (morning-briefing.md / etc.): now open with a SpaceNavButtons block (consistent with scratch / project / meeting / etc.); body uses Obsidian admonitions (`> [!info]-` synopsis, `> [!example]+` per-section blocks with markdown tables, `> [!tip]` close). Notes carry a 1-2 sentence `summary:` frontmatter field that surfaces on CoworkLatestRuns and the daily dashboard Activity panel rows.
 - **Accuris (w2-fte) jobs:** no more "failed to pull google calendar" noise. The calendar section renders as a `> [!warning] Calendar unavailable` admonition when no calendar MCP is wired, and the rest of the briefing composes normally. Same pattern for gmail + imessage when the respective MCP isn't wired.
+
+### Upgrading from v0.71.0 → v0.71.1
+
+PATCH BUGFIX. activity-feed 0.5.0 → 0.5.1: `_humanCase` moved inside `ActivityFeed` class to satisfy customJS's `eval(`(${file})`)` class-file contract. v0.71.0 shipped a file-scope helper that prevented customJS from registering the class, causing "ActivityFeed mechanism unavailable" on daily notes after a customJS reload.
+
+```bash
+brew upgrade sauce        # 0.71.0 → 0.71.1
+# Bump consumer subscription pin first (FLN-v67-7 manual workaround):
+#   activity-feed: 0.5.0 → 0.5.1
+sauce update              # picks up the fix
+# In Obsidian: reload customJS or restart to clear the cached pre-fix ActivityFeed instance
+```
+
+Verifying the fix: open today's daily note. The Activity panel should render the cowork bucket + other groups normally. If you still see "ActivityFeed mechanism unavailable", check that `ranch/scripts/activity-feed/activity-feed.js` has `_humanCase(key)` as a method INSIDE `class ActivityFeed` (not as a `function _humanCase()` declaration above the class).
+
+Regression guard: `AF-V0710-CUSTOMJS-1` in `run-activity-feed.js` asserts the file remains customJS-loadable across future cycles.
