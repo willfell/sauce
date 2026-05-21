@@ -6806,7 +6806,7 @@ async function caseFA4TimelineManifests() {
   // reclaim + Activity panel). Accept any >= floor instead of strict-equal so
   // future PATCH/MINOR bumps don't re-trigger this baseline. v0.70.0 S5: daily
   // bumped 0.9.0 → 0.10.0 (activity-feed framed renderer); floor updated.
-  const floors = { daily: "0.10.4", journal: "0.2.0", scratch: "0.4.0" };
+  const floors = { daily: "0.10.5", journal: "0.2.0", scratch: "0.4.0" };
   for (const bp of Object.keys(floors)) {
     const m = JSON.parse(fs.readFileSync(
       path.join(WORKSHOP, `platform/blueprints/${bp}/manifest.json`), "utf8"));
@@ -7538,7 +7538,7 @@ async function caseFA2RuleFragmentsExtends() {
   // cards untouched.
   {
     const pins = [
-      ["daily",         "platform/blueprints/daily/manifest.json",            "0.10.4"],
+      ["daily",         "platform/blueprints/daily/manifest.json",            "0.10.5"],
       ["activity-feed", "platform/mechanisms/activity-feed/manifest.json",    "0.4.0"],
       ["cards",         "platform/mechanisms/cards/manifest.json",            "0.2.6"],
     ];
@@ -7754,6 +7754,42 @@ async function caseFA2RuleFragmentsExtends() {
       /if\s*\(!hasContent\)\s*\{[\s\S]*?sauce-empty-state/.test(js));
     assertTrue("HC-V073-1i: helper emits the 'No activity recorded yet' phrase",
       /No activity recorded yet/.test(js));
+  }
+
+  // v0.70.5 HC-V075-1: meeting cards on the daily dashboard surface badges + attendees
+  {
+    console.log("\n--- Case HC-V075-1: dashboard meeting cards — badges + attendees ---");
+    const jsPath = path.join(WORKSHOP, "platform/blueprints/daily/helpers/space-daily-dashboard.js");
+    const js = fs.readFileSync(jsPath, "utf8");
+    // _enrichMeeting helper declared
+    assertTrue("HC-V075-1a: _enrichMeeting method declared",
+      /async\s+_enrichMeeting\s*\(p\)/.test(js));
+    // meetings render block awaits Promise.all over _enrichMeeting
+    assertTrue("HC-V075-1b: meetings block enriches pages via Promise.all(_enrichMeeting)",
+      /await\s+Promise\.all\(meetings\.map\(p\s*=>\s*this\._enrichMeeting\(p\)\)\)/.test(js));
+    // badges callback emits "open" + "Notes" pills
+    assertTrue("HC-V075-1c: badges callback emits '{N} open' pill for openTasks",
+      /label:\s*`\$\{p\.openTasks\}\s+open`/.test(js));
+    assertTrue("HC-V075-1d: badges callback emits 'Notes' pill when hasNotes",
+      /label:\s*"Notes"/.test(js));
+    // outline-style pills (Quiet Frames aesthetic)
+    assertTrue("HC-V075-1e: badges use outline style (matches Quiet Frames)",
+      /style:\s*"outline"/.test(js));
+    // warn tone for open tasks (amber, not loud red)
+    assertTrue("HC-V075-1f: open-tasks pill uses warn tone (amber)",
+      /label:\s*`\$\{p\.openTasks\}\s+open`,\s*tone:\s*"warn"/.test(js));
+    // subtitle now prefers attendees
+    assertTrue("HC-V075-1g: subtitle prefers attendees over summary",
+      /subtitle:\s*p\s*=>\s*\{[\s\S]*?const\s+att\s*=\s*Array\.isArray\(p\.attendees\)/.test(js));
+    // _enrichMeeting reads frontmatter attendees first
+    assertTrue("HC-V075-1h: _enrichMeeting prefers frontmatter p.attendees",
+      /p\.attendees\s*&&\s*typeof\s+p\.attendees\.length\s*===\s*"number"/.test(js));
+    // _enrichMeeting falls back to body ## Attendees section
+    assertTrue("HC-V075-1i: _enrichMeeting falls back to body ## Attendees section",
+      /content\.match\(\/## Attendees/.test(js));
+    // _enrichMeeting computes openTasks from body
+    assertTrue("HC-V075-1j: _enrichMeeting counts body `- [ ]` tokens for openTasks",
+      /content\.match\(\/-\s\\\[\s\\\]/.test(js));
   }
 
   console.log(`\n========`);

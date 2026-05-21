@@ -232,17 +232,42 @@ class SpaceDailyDashboard {
         defaultOpen: true,
       });
 
+      // v0.10.5: enrich each meeting page (read body, parse attendees + tasks +
+      // notes) so the meeting card surfaces an attendees subtitle + open-tasks
+      // pill + notes pill — mirroring the meetings-hub chrome, with outline
+      // pills calibrated for the dashboard's Quiet Frames aesthetic.
+      const enrichedMeetings = await Promise.all(meetings.map(p => this._enrichMeeting(p)));
+
       const meetingsShim = { container: meetingsBody };
       await customJS.BeaconCards.render(meetingsShim, {
-        pages: meetings,
+        pages: enrichedMeetings,
         layout: "stacked",
         columns: 1,
-        title: p => p.file.name.replace(`${today} `, ""),
-        subtitle: p => {
-          const s = p.summary || "";
-          return (typeof s === "string" && s.trim()) ? s.trim() : null;
+        title: p => {
+          // Strip both leading "YYYY-MM-DD " (legacy) and trailing "-YYYY-MM-DD" (current)
+          let name = String(p.file.name || "");
+          name = name.replace(`${today} `, "");
+          name = name.replace(/-\d{4}-\d{2}-\d{2}$/, "");
+          return name || p.file.name;
         },
-        meta: (p, el) => this._renderTodoBadge(p, el, icons.square),
+        subtitle: p => {
+          // Prefer attendees over summary — they're higher signal at a glance.
+          const att = Array.isArray(p.attendees) ? p.attendees : [];
+          if (att.length > 0) {
+            const max = 3;
+            return att.length <= max
+              ? att.join(", ")
+              : `${att.slice(0, max - 1).join(", ")}, +${att.length - (max - 1)}`;
+          }
+          const s = (p.summary && String(p.summary).trim()) || "";
+          return s || null;
+        },
+        badges: p => {
+          const out = [];
+          if (p.hasNotes)      out.push({ label: "Notes",                 tone: "accent", style: "outline" });
+          if (p.openTasks > 0) out.push({ label: `${p.openTasks} open`,   tone: "warn",   style: "outline" });
+          return out;
+        },
         target: p => p.file.path,
         empty: "(no meetings — should not render due to outer hasContent guard)"
       });
@@ -708,6 +733,86 @@ class SpaceDailyDashboard {
 
   _escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+  }
+
+  /**
+   * v0.10.5 (sauce v0.70.5): read meeting body + derive attendees, open-task
+   * count, and a "has notes" flag for the daily-dashboard Meetings panel.
+   * Mirrors the meetings-hub enrichment pattern. Returns a synthetic page
+   * (preserves `file` + `summary` from the original Dataview page; adds
+   * `attendees`, `openTasks`, `hasNotes`) suitable for BeaconCards.
+   *
+   * Attendees resolution:
+   *   1. Frontmatter `attendees:` array (Dataview's `p.attendees` DataArray) —
+   *      preferred. Wikilink tokens like "[[Jason Batai]]" are stripped to
+   *      bare display names.
+   *   2. Fallback: `## Attendees` body section with `- [[Name]]` bullets.
+   *
+   * Has-notes heuristic:
+   *   - `## Notes` heading with >5 chars of content → true.
+   *   - Otherwise, body content (frontmatter + dataviewjs blocks + task
+   *     lines + heading markers stripped) with >20 non-whitespace chars → true.
+   *   The body fallback catches the common heading-less bullet-style notes.
+   */
+  async _enrichMeeting(p) {
+    let content = "";
+    try {
+      if (typeof app !== "undefined" && app && app.vault && p && p.file && p.file.path) {
+        const file = app.vault.getAbstractFileByPath(p.file.path);
+        if (file && typeof app.vault.read === "function") {
+          content = await app.vault.read(file);
+        }
+      }
+    } catch (_) { /* leave empty */ }
+
+    const stripWikilink = (s) => {
+      const str = String(s);
+      const m = str.match(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/);
+      return m ? (m[2] || m[1]) : str;
+    };
+
+    let attendees = [];
+    if (p && p.attendees && typeof p.attendees.length === "number" && p.attendees.length > 0) {
+      for (let i = 0; i < p.attendees.length; i++) {
+        const name = stripWikilink(p.attendees[i]).trim();
+        if (name) attendees.push(name);
+      }
+    } else if (content) {
+      const attendeesMatch = content.match(/## Attendees\s*([\s\S]*?)(?=---|##|$)/);
+      if (attendeesMatch) {
+        const lines = attendeesMatch[1].match(/- \[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g);
+        if (lines) {
+          attendees = lines.map(l => {
+            const m = l.match(/- \[\[([^\]|]+)(?:\|([^\]]+))?\]\]/);
+            return m ? (m[2] || m[1]) : "";
+          }).filter(a => a);
+        }
+      }
+    }
+
+    const openTasks = (content.match(/- \[ \]/g) || []).length;
+
+    let hasNotes = false;
+    const notesMatch = content.match(/## Notes\s*([\s\S]*?)(?=---|##|$)/);
+    if (notesMatch && notesMatch[1].trim().length > 5) {
+      hasNotes = true;
+    } else if (content) {
+      let body = content;
+      const fmEnd = body.indexOf("\n---", 4);
+      if (body.indexOf("---") === 0 && fmEnd >= 0) body = body.slice(fmEnd + 4);
+      body = body.replace(/```[\s\S]*?```/g, "");
+      body = body.split("\n").filter(l => !/^\s*-\s*\[[ xX]\]/.test(l)).join("\n");
+      body = body.replace(/^#+\s.*$/gm, "");
+      if (body.replace(/\s/g, "").length > 20) hasNotes = true;
+    }
+
+    return {
+      file: p.file,
+      summary: p.summary || "",
+      attendees,
+      openTasks,
+      hasNotes,
+    };
   }
 
   /**
