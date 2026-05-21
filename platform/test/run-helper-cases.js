@@ -7877,6 +7877,48 @@ async function caseFA2RuleFragmentsExtends() {
     }
   }
 
+  // HC-V0710-3: each write-run-note-* SKILL.md body shows the SpaceNavButtons block
+  // inside its Body shape section (nav-button must appear textually before per-section H2s).
+  try {
+    const orchs = ["morning-briefing", "midday-tripwire", "eod-review", "finance", "weekly-review", "monthly-review"];
+    for (const o of orchs) {
+      const skillPath = path.join(WORKSHOP, "platform/blueprints/cowork/skills/skills/write-run-note-" + o + "/SKILL.md");
+      const body = fs.readFileSync(skillPath, "utf8");
+      assertTrue("HC-V0710-3a: " + o + " mentions SpaceNavButtons dataviewjs block",
+        body.indexOf('await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" })') >= 0);
+      const bodyShapeIdx = body.indexOf("## Body shape");
+      assertTrue("HC-V0710-3b: " + o + " has '## Body shape' section", bodyShapeIdx >= 0);
+      if (bodyShapeIdx < 0) continue;
+      const afterBodyShape = body.slice(bodyShapeIdx);
+      assertTrue("HC-V0710-3c: " + o + " nav-button referenced inside Body shape section",
+        afterBodyShape.indexOf("SpaceNavButtons") >= 0);
+    }
+  } catch (e) {
+    assertTrue("HC-V0710-3: write-run-note nav-button instruction", false, e && e.message);
+  }
+
+  // HC-V0710-4: each write-run-note-* SKILL.md shows the full body-shape contract markers
+  try {
+    const orchs = ["morning-briefing", "midday-tripwire", "eod-review", "finance", "weekly-review", "monthly-review"];
+    const requiredMarkers = [
+      "> [!info]- Today at a glance",
+      "> [!example]+",
+      "> [!tip]",
+      "> [!warning]",
+      "summary:",
+    ];
+    for (const o of orchs) {
+      const skillPath = path.join(WORKSHOP, "platform/blueprints/cowork/skills/skills/write-run-note-" + o + "/SKILL.md");
+      const body = fs.readFileSync(skillPath, "utf8");
+      for (const marker of requiredMarkers) {
+        assertTrue("HC-V0710-4: " + o + " body shows marker " + JSON.stringify(marker),
+          body.indexOf(marker) >= 0);
+      }
+    }
+  } catch (e) {
+    assertTrue("HC-V0710-4: write-run-note body-shape markers", false, e && e.message);
+  }
+
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
   if (fail > 0) {

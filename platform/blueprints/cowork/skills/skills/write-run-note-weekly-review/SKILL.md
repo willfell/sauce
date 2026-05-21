@@ -56,3 +56,72 @@ Atomic-note writer for the weekly-review run. Composes canonical frontmatter, st
 ## Returns
 
 `{ path: "<vault-relative path>", status: "written" | "failed:<reason>" }`.
+
+## Body shape
+
+After frontmatter close, emit these elements in this order. Every cowork atomic note follows the same shape.
+
+### 1. SpaceNavButtons block (always first)
+
+Immediately after the closing `---` of the frontmatter, before any heading:
+
+````
+```dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+```
+````
+
+### 2. Top-of-body synopsis admonition
+
+A collapsible info admonition with the one-paragraph synopsis of today's headline:
+
+```
+> [!info]- Today at a glance
+> <one paragraph distilled from gather outputs>
+```
+
+### 3. Per-section blocks
+
+Each section that has data renders as a collapsible example admonition wrapping a markdown table OR a short bullet list:
+
+```
+> [!example]+ <emoji> <Section title>
+> <table or bullets>
+```
+
+Table column headers — use these literally so renderers and downstream readers stay consistent:
+
+- **Calendar:**       `| Time | Event | Attendees | Link |`
+- **Email triage:**   `| Subject | Sender | Intent |`
+- **Project status:** `| Project | Status | Next action |`
+- **Open threads:**   bulleted list (no table — items are heterogeneous)
+- **Finance accounts:**     `| Account | Balance | Δ this week |`
+- **Finance transactions:** `| Date | Merchant | Amount | Category |`
+
+Skip a section entirely when its gather output is empty. If a section's data exists but is too small for a table (e.g., 1–2 calendar events), use bullets inside the admonition.
+
+### 4. Warnings (only when any gather emitted gather-skipped)
+
+When a gather skill emitted `gather-skipped: <reason>` (because no MCP was available, or it self-determined no data was reachable), emit a warning admonition at the position the affected section would have rendered:
+
+```
+> [!warning] <Section name> unavailable
+> <one-line reason from the gather output>
+```
+
+Also append the reason to the atomic note's `warnings:` frontmatter array (e.g., `warnings: [calendar_unavailable]`).
+
+### 5. Closing focus admonition
+
+A tip admonition with the closing 2–3 sentence focus paragraph + a concrete first-action recommendation:
+
+```
+> [!tip] <emoji> Today's focus
+> <closing paragraph + first-action recommendation>
+```
+
+### 6. summary: frontmatter emission
+
+After the body is fully composed, write a 1–2 sentence summary (~150–250 characters) into the frontmatter `summary:` field. The summary is the curated TL;DR surfaced by CoworkLatestRuns and the daily/cowork-hub Activity panels.
+
+**Per-cadence lead-in (weekly review):** Lead with the week's headline outcome — the biggest shipped deliverable + the biggest carryover. Example: "Shipped denali content-registry migration; carrying mcp-mesh prod approval queue and Hayden PR #152927 cleanup into next week."
