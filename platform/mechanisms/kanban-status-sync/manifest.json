@@ -1,0 +1,15 @@
+{
+  "name": "kanban-status-sync",
+  "version": "0.1.0",
+  "kind": "mechanism",
+  "description": "Syncs obsidian-kanban board column positions to `status:` frontmatter on moved cards. KanbanStatusSync.syncBoard(boardPath) — parses board columns via parseBoardColumns, derives status slugs via slugifyStatus, computes frontmatter diffs via computeDiff, and applies patches. Materialized on kanban board notes to keep frontmatter status in sync with visual column position (v0.72.0 / FA-10).",
+  "depends_on": [
+    { "name": "customjs-guard", "range": ">=1.0.0" }
+  ],
+  "customjs_classes": ["KanbanStatusSync"],
+  "files": [
+    { "source": "kanban-status-sync.js", "dest": "{{scripts_path}}/kanban-status-sync/kanban-status-sync.js" }
+  ],
+  "post_install": [],
+  "rule_fragments": []
+}
