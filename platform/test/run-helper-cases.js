@@ -6806,7 +6806,7 @@ async function caseFA4TimelineManifests() {
   // reclaim + Activity panel). Accept any >= floor instead of strict-equal so
   // future PATCH/MINOR bumps don't re-trigger this baseline. v0.70.0 S5: daily
   // bumped 0.9.0 → 0.10.0 (activity-feed framed renderer); floor updated.
-  const floors = { daily: "0.10.5", journal: "0.2.0", scratch: "0.4.0" };
+  const floors = { daily: "0.10.6", journal: "0.2.0", scratch: "0.4.0" };
   for (const bp of Object.keys(floors)) {
     const m = JSON.parse(fs.readFileSync(
       path.join(WORKSHOP, `platform/blueprints/${bp}/manifest.json`), "utf8"));
@@ -7538,7 +7538,7 @@ async function caseFA2RuleFragmentsExtends() {
   // cards untouched.
   {
     const pins = [
-      ["daily",         "platform/blueprints/daily/manifest.json",            "0.10.5"],
+      ["daily",         "platform/blueprints/daily/manifest.json",            "0.10.6"],
       ["activity-feed", "platform/mechanisms/activity-feed/manifest.json",    "0.4.0"],
       ["cards",         "platform/mechanisms/cards/manifest.json",            "0.2.6"],
     ];
@@ -7790,6 +7790,31 @@ async function caseFA2RuleFragmentsExtends() {
     // _enrichMeeting computes openTasks from body
     assertTrue("HC-V075-1j: _enrichMeeting counts body `- [ ]` tokens for openTasks",
       /content\.match\(\/-\s\\\[\s\\\]/.test(js));
+  }
+
+  // v0.70.6 HC-V076-1: robust currentFile resolver (mobile dv.current() staleness fix)
+  {
+    console.log("\n--- Case HC-V076-1: robust currentFile resolver ---");
+    const jsPath = path.join(WORKSHOP, "platform/blueprints/daily/helpers/space-daily-dashboard.js");
+    const js = fs.readFileSync(jsPath, "utf8");
+    // _resolveCurrentFileName helper declared
+    assertTrue("HC-V076-1a: _resolveCurrentFileName method declared",
+      /_resolveCurrentFileName\s*\(dv\)/.test(js));
+    // Walks markdown leaves via app.workspace.getLeavesOfType("markdown")
+    assertTrue("HC-V076-1b: walks markdown leaves via app.workspace.getLeavesOfType(\"markdown\")",
+      /app\.workspace\.getLeavesOfType\(["']markdown["']\)/.test(js));
+    // Matches the leaf whose contentEl contains dv.container
+    assertTrue("HC-V076-1c: matches leaf via contentEl.contains(dv.container)",
+      /leaf\.view\.contentEl\.contains\(dv\.container\)/.test(js));
+    // Prefers leaf.view.file.basename
+    assertTrue("HC-V076-1d: returns leaf.view.file.basename when matched",
+      /leaf\.view\.file\.basename/.test(js));
+    // Falls back to dv.current() when leaf walk fails
+    assertTrue("HC-V076-1e: falls back to dv.current().file.name",
+      /dv\.current\(\)[\s\S]{0,80}file\.name/.test(js));
+    // Dashboard render() now uses _resolveCurrentFileName instead of dv.current() directly for today computation
+    assertTrue("HC-V076-1f: dashboard render() uses _resolveCurrentFileName for the today regex source",
+      /const\s+fileName\s*=\s*this\._resolveCurrentFileName\(dv\)/.test(js));
   }
 
   console.log(`\n========`);

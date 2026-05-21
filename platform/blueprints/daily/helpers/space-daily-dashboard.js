@@ -111,8 +111,14 @@ class SpaceDailyDashboard {
       square: `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/></svg>`
     };
 
-    const currentFile = dv.current();
-    const fileName = currentFile.file.name;
+    // v0.10.6 (sauce v0.70.6): resolve the file containing THIS dataviewjs
+    // block via DOM ancestry, not `dv.current()`. Obsidian Mobile has been
+    // observed returning a stale `dv.current()` (the previously-focused
+    // leaf's file rather than the embedding note) on rapid leaf navigation
+    // and/or when deferred-loading plugins (Smart Connections etc.) reorder
+    // render. Walking up from `dv.container` to find the markdown leaf that
+    // actually contains us is authoritative regardless of focus state.
+    const fileName = this._resolveCurrentFileName(dv);
     const dateMatch = fileName.match(/(\d{4}-\d{2}-\d{2})/);
     const today = dateMatch ? dateMatch[1] : moment().format("YYYY-MM-DD");
 
@@ -733,6 +739,42 @@ class SpaceDailyDashboard {
 
   _escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+  }
+
+  /**
+   * v0.10.6 (sauce v0.70.6): resolve the file basename containing this
+   * dataviewjs block by walking the markdown leaves and finding the one
+   * whose contentEl actually contains `dv.container`. Authoritative
+   * regardless of `dv.current()` staleness — which has been observed on
+   * Obsidian Mobile when the user navigates between daily notes quickly
+   * (the prior leaf's file leaks into `dv.current()`).
+   *
+   * Returns the file BASENAME (no .md extension), to match the previous
+   * call-site contract (`currentFile.file.name`). Falls back to
+   * `dv.current().file.name` if the leaf walk fails (e.g., in unit-test
+   * shims with no `app.workspace`).
+   */
+  _resolveCurrentFileName(dv) {
+    try {
+      if (typeof app !== "undefined" && app && app.workspace
+          && typeof app.workspace.getLeavesOfType === "function"
+          && dv && dv.container) {
+        const leaves = app.workspace.getLeavesOfType("markdown");
+        for (const leaf of leaves) {
+          if (leaf && leaf.view && leaf.view.contentEl
+              && typeof leaf.view.contentEl.contains === "function"
+              && leaf.view.contentEl.contains(dv.container)
+              && leaf.view.file && leaf.view.file.basename) {
+            return String(leaf.view.file.basename);
+          }
+        }
+      }
+    } catch (_) { /* fall through to dv.current() fallback */ }
+    try {
+      const cur = dv.current();
+      if (cur && cur.file && cur.file.name) return String(cur.file.name);
+    } catch (_) {}
+    return "";
   }
 
   /**
