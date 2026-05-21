@@ -113,8 +113,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 8px 14px;
+  gap: 16px;
+  padding: 10px 16px;
 }
 .space-daily-dashboard .sauce-group-row-title {
   flex: 1;
@@ -129,9 +129,19 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px 10px;
+  justify-content: flex-end;
+  gap: 8px 14px;
   font-size: 0.78em;
   color: var(--text-muted);
+}
+/* v0.10.1 — anchor the time element to a fixed-width right-aligned cell so
+ * times line up vertically across rows in the same group. tabular-nums
+ * makes "1:30 PM" and "12:22 PM" share digit widths. */
+.space-daily-dashboard .sauce-group-row-meta > time {
+  min-width: 56px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 /* ── Per-card meta line ────────────────────────────────────────────────── */
@@ -255,6 +265,30 @@
   .space-daily-dashboard .sauce-todo-pill { padding: 1px 7px 1px 5px; font-size: 0.88em; }
   .space-daily-dashboard .sauce-group { margin-bottom: 8px; }
   .space-daily-dashboard .sauce-group-header { padding: 8px 10px; gap: 6px; }
-  .space-daily-dashboard .sauce-group-row-line { padding: 6px 10px; gap: 8px; }
+  /* v0.10.1 — on mobile, stack title above meta and let the title use the full
+   * row width with wrapping. Pre-v0.10.1 the flex-row layout collapsed titles
+   * to width:0 (showing "..." or nothing) whenever the meta cluster was wide
+   * enough — most visibly on the kanban "To Do Board" row. */
+  .space-daily-dashboard .sauce-group-row-line {
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: flex-start;
+    gap: 4px;
+    padding: 8px 12px;
+  }
+  .space-daily-dashboard .sauce-group-row-title {
+    width: 100%;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+  }
+  .space-daily-dashboard .sauce-group-row-meta {
+    width: 100%;
+    justify-content: flex-start;
+  }
+  .space-daily-dashboard .sauce-group-row-meta > time {
+    min-width: auto;
+    text-align: left;
+  }
   .space-daily-dashboard .sauce-group-dot { width: 7px; height: 7px; }
 }

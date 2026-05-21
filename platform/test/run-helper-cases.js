@@ -6806,7 +6806,7 @@ async function caseFA4TimelineManifests() {
   // reclaim + Activity panel). Accept any >= floor instead of strict-equal so
   // future PATCH/MINOR bumps don't re-trigger this baseline. v0.70.0 S5: daily
   // bumped 0.9.0 → 0.10.0 (activity-feed framed renderer); floor updated.
-  const floors = { daily: "0.10.0", journal: "0.2.0", scratch: "0.4.0" };
+  const floors = { daily: "0.10.1", journal: "0.2.0", scratch: "0.4.0" };
   for (const bp of Object.keys(floors)) {
     const m = JSON.parse(fs.readFileSync(
       path.join(WORKSHOP, `platform/blueprints/${bp}/manifest.json`), "utf8"));
@@ -7538,7 +7538,7 @@ async function caseFA2RuleFragmentsExtends() {
   // cards untouched.
   {
     const pins = [
-      ["daily",         "platform/blueprints/daily/manifest.json",            "0.10.0"],
+      ["daily",         "platform/blueprints/daily/manifest.json",            "0.10.1"],
       ["activity-feed", "platform/mechanisms/activity-feed/manifest.json",    "0.4.0"],
       ["cards",         "platform/mechanisms/cards/manifest.json",            "0.2.6"],
     ];
@@ -7656,6 +7656,35 @@ async function caseFA2RuleFragmentsExtends() {
     assertTrue("HC-V070-1f: _BLUEPRINT_COLORS contains cowork entry",         /cowork:\s*"var\(--color-blue\)"/.test(src));
     assertTrue("HC-V070-1g: flatGrouped:true no longer present",              !/flatGrouped:\s*true/.test(src));
     assertTrue("HC-V070-1h: _buildAccentSegments helper removed",             !/_buildAccentSegments\s*\(/.test(src));
+  }
+
+  // v0.70.1 HC-V071-1: alignment + mobile-stack polish in sauce-daily-dashboard.css
+  {
+    console.log("\n--- Case HC-V071-1: alignment + mobile-stack polish ---");
+    const cssPath = path.join(WORKSHOP, "platform/blueprints/daily/helpers/sauce-daily-dashboard.css");
+    const css = fs.readFileSync(cssPath, "utf8");
+    // Desktop time anchor — fixed-width right-aligned cell so times align vertically across rows
+    assertTrue("HC-V071-1a: time element min-width anchor present",
+      /sauce-group-row-meta\s*>\s*time\s*\{[\s\S]*?min-width:\s*56px/.test(css));
+    assertTrue("HC-V071-1b: time element text-align right present",
+      /sauce-group-row-meta\s*>\s*time\s*\{[\s\S]*?text-align:\s*right/.test(css));
+    assertTrue("HC-V071-1c: time element tabular-nums for digit alignment",
+      /sauce-group-row-meta\s*>\s*time\s*\{[\s\S]*?font-variant-numeric:\s*tabular-nums/.test(css));
+    // Meta cluster pulls right (justify-content: flex-end) on desktop
+    assertTrue("HC-V071-1d: desktop meta cluster justify-content flex-end",
+      /\.sauce-group-row-meta\s*\{[\s\S]*?justify-content:\s*flex-end/.test(css));
+    // Mobile stack — row-line goes flex-direction column inside the @media block
+    const mobileBlock = css.match(/@media\s*\(max-width:\s*480px\)\s*\{[\s\S]*?\n\}/);
+    assertTrue("HC-V071-1e: mobile media block present", !!mobileBlock);
+    if (mobileBlock) {
+      const mb = mobileBlock[0];
+      assertTrue("HC-V071-1f: mobile row-line uses flex-direction: column",
+        /\.sauce-group-row-line\s*\{[\s\S]*?flex-direction:\s*column/.test(mb));
+      assertTrue("HC-V071-1g: mobile row-title allowed to wrap (white-space: normal)",
+        /\.sauce-group-row-title\s*\{[\s\S]*?white-space:\s*normal/.test(mb));
+      assertTrue("HC-V071-1h: mobile row-meta override (width: 100%) present",
+        /\.sauce-group-row-meta\s*\{[\s\S]*?width:\s*100%/.test(mb));
+    }
   }
 
   console.log(`\n========`);
