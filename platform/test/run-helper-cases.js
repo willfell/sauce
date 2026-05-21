@@ -7533,13 +7533,13 @@ async function caseFA2RuleFragmentsExtends() {
   }
 
   // FA6-MANIFEST version pins — daily / activity-feed / cards
-  // Updated per cycle as manifests bump. activity-feed last bumped to
-  // 0.4.0 in v0.70.0 (S2); daily will bump to 0.10.0 in v0.70.0 (S5);
-  // cards untouched.
+  // Updated per cycle as manifests bump. activity-feed bumped to 0.5.0
+  // in v0.71.0 (S3, groupLabels + groupPreviewBuilder); daily at 0.10.7
+  // pending v0.71.0 S11 bump to 0.11.0; cards untouched.
   {
     const pins = [
       ["daily",         "platform/blueprints/daily/manifest.json",            "0.10.7"],
-      ["activity-feed", "platform/mechanisms/activity-feed/manifest.json",    "0.4.1"],
+      ["activity-feed", "platform/mechanisms/activity-feed/manifest.json",    "0.5.0"],
       ["cards",         "platform/mechanisms/cards/manifest.json",            "0.2.6"],
     ];
     for (const [name, relPath, expected] of pins) {
