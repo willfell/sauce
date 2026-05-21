@@ -437,6 +437,9 @@ function v066_makeFakeEl() {
       // set directly (e.g., chevron SVG); _text holds textContent.
       const serializeChild = (c) => {
         let attrs = "";
+        if (typeof c.className === "string" && c.className.length > 0) {
+          attrs += ' class="' + c.className + '"';
+        }
         if (c.dataset && typeof c.dataset === "object") {
           for (const k of Object.keys(c.dataset)) {
             attrs += ' data-' + k + '="' + String(c.dataset[k]) + '"';
@@ -1103,6 +1106,210 @@ try {
     html.indexOf("fresh") >= 0);
 } catch (e) {
   assertTrue("AF-V071-3: created_at wins over mtime", false, e && e.message);
+}
+
+// ── Pass 7: v0.5.0 — groupLabels / groupPreviewBuilder / getSubtitle ─────
+
+console.log("\n--- Pass 7: v0.5.0 groupLabels + groupPreviewBuilder + getSubtitle ---");
+
+// AF-V0710-LABELS-1: groupLabels resolves the framed group header text
+try {
+  const pA = { file: { path: "spice/cowork/m.md", name: "m" }, type: "cowork-morning-briefing", created_at: "2026-05-21T07:00:00Z" };
+  const pB = { file: { path: "spice/cowork/e.md", name: "e" }, type: "cowork-eod-review",       created_at: "2026-05-21T17:00:00Z" };
+  const dv = v066_makeFakeDv([pA, pB]);
+  const ActivityFeed = v066_loadAF();
+  const af = new ActivityFeed();
+  af.render(dv, {
+    scope: "today",
+    asOf: "2026-05-21",
+    blueprints: ["cowork-morning-briefing", "cowork-eod-review"],
+    framed: true,
+    groupBy: "blueprint",
+    groupLabels: {
+      "cowork-morning-briefing": "Morning Briefing",
+      "cowork-eod-review":       "EOD Review",
+    },
+  });
+  const html = dv.container.innerHTML;
+  assertTrue("AF-V0710-LABELS-1a: rendered label 'Morning Briefing'", html.indexOf("Morning Briefing") >= 0);
+  assertTrue("AF-V0710-LABELS-1b: rendered label 'EOD Review'",       html.indexOf("EOD Review") >= 0);
+  assertTrue("AF-V0710-LABELS-1c: kebab type-key not surfaced in header",
+    !/sauce-group-label[^>]*>cowork-morning-briefing</.test(html));
+} catch (e) {
+  assertTrue("AF-V0710-LABELS-1: groupLabels resolves header text", false, e && e.message);
+}
+
+// AF-V0710-LABELS-2: humanCase fallback when key absent from groupLabels
+try {
+  const p = { file: { path: "spice/p.md", name: "p" }, type: "project", created_at: "2026-05-21T09:00:00Z" };
+  const dv = v066_makeFakeDv([p]);
+  const ActivityFeed = v066_loadAF();
+  const af = new ActivityFeed();
+  af.render(dv, {
+    scope: "today",
+    asOf: "2026-05-21",
+    blueprints: ["project"],
+    framed: true,
+    groupBy: "blueprint",
+    groupLabels: {},  // empty map
+  });
+  const html = dv.container.innerHTML;
+  assertTrue("AF-V0710-LABELS-2: fallback to humanCase('project') = 'Project'",
+    /sauce-group-label[^>]*>Project/.test(html));
+} catch (e) {
+  assertTrue("AF-V0710-LABELS-2: humanCase fallback", false, e && e.message);
+}
+
+// AF-V0710-PREVIEW-1: groupPreviewBuilder appends preview text to a defaultClosed group header
+try {
+  const pA = { file: { path: "spice/s/a.md", name: "a" }, type: "scratch", frontmatter: { summary: "Migrating mesh state to prod" }, created_at: "2026-05-21T10:00:00Z" };
+  const pB = { file: { path: "spice/s/b.md", name: "b" }, type: "scratch", frontmatter: { summary: "Reviewing PR backlog" },         created_at: "2026-05-21T11:00:00Z" };
+  const dv = v066_makeFakeDv([pA, pB]);
+  const ActivityFeed = v066_loadAF();
+  const af = new ActivityFeed();
+  af.render(dv, {
+    scope: "today",
+    asOf: "2026-05-21",
+    blueprints: ["scratch"],
+    framed: true,
+    groupBy: "blueprint",
+    defaultClosed: ["scratch"],
+    groupPreviewBuilder: function (pages) {
+      return (pages[0] && pages[0].frontmatter && pages[0].frontmatter.summary) || "";
+    },
+  });
+  const html = dv.container.innerHTML;
+  // Most-recent (pB) sorts first in the existing tsKey-desc ordering
+  assertTrue("AF-V0710-PREVIEW-1a: preview text from latest page summary appears in header",
+    html.indexOf("Reviewing PR backlog") >= 0);
+  assertTrue("AF-V0710-PREVIEW-1b: preview emitted as ' — <text>' suffix",
+    /\(\d+\)\s+—\s+Reviewing PR backlog/.test(html));
+} catch (e) {
+  assertTrue("AF-V0710-PREVIEW-1: groupPreviewBuilder preview text", false, e && e.message);
+}
+
+// AF-V0710-PREVIEW-2: 80-char truncation + trailing ellipsis
+try {
+  const longSummary = "x".repeat(120);
+  const p = { file: { path: "spice/s/a.md", name: "a" }, type: "scratch", frontmatter: { summary: longSummary }, created_at: "2026-05-21T10:00:00Z" };
+  const dv = v066_makeFakeDv([p]);
+  const ActivityFeed = v066_loadAF();
+  const af = new ActivityFeed();
+  af.render(dv, {
+    scope: "today",
+    asOf: "2026-05-21",
+    blueprints: ["scratch"],
+    framed: true,
+    groupBy: "blueprint",
+    defaultClosed: ["scratch"],
+    groupPreviewBuilder: function (pages) {
+      return pages[0].frontmatter.summary;
+    },
+  });
+  const html = dv.container.innerHTML;
+  // Find the truncated form: exactly 80 x's followed by an ellipsis char
+  assertTrue("AF-V0710-PREVIEW-2a: 80-char truncation present",
+    html.indexOf("x".repeat(80) + "…") >= 0);
+  assertTrue("AF-V0710-PREVIEW-2b: 81-char run absent (means truncation worked)",
+    html.indexOf("x".repeat(81)) < 0);
+} catch (e) {
+  assertTrue("AF-V0710-PREVIEW-2: 80-char truncation", false, e && e.message);
+}
+
+// AF-V0710-PREVIEW-3: builder returning empty string preserves count-only header
+try {
+  const p = { file: { path: "spice/s/a.md", name: "a" }, type: "scratch", created_at: "2026-05-21T10:00:00Z" };
+  const dv = v066_makeFakeDv([p]);
+  const ActivityFeed = v066_loadAF();
+  const af = new ActivityFeed();
+  af.render(dv, {
+    scope: "today",
+    asOf: "2026-05-21",
+    blueprints: ["scratch"],
+    framed: true,
+    groupBy: "blueprint",
+    defaultClosed: ["scratch"],
+    groupPreviewBuilder: function () { return ""; },
+  });
+  const html = dv.container.innerHTML;
+  assertTrue("AF-V0710-PREVIEW-3a: no em-dash suffix when builder returns empty",
+    !/\(\d+\)\s+—/.test(html));
+} catch (e) {
+  assertTrue("AF-V0710-PREVIEW-3: empty-builder fallback", false, e && e.message);
+}
+
+// AF-V0710-PREVIEW-4: opt omitted entirely preserves count-only header
+try {
+  const p = { file: { path: "spice/s/a.md", name: "a" }, type: "scratch", created_at: "2026-05-21T10:00:00Z" };
+  const dv = v066_makeFakeDv([p]);
+  const ActivityFeed = v066_loadAF();
+  const af = new ActivityFeed();
+  af.render(dv, {
+    scope: "today",
+    asOf: "2026-05-21",
+    blueprints: ["scratch"],
+    framed: true,
+    groupBy: "blueprint",
+    defaultClosed: ["scratch"],
+    // no groupPreviewBuilder
+  });
+  const html = dv.container.innerHTML;
+  assertTrue("AF-V0710-PREVIEW-4: no em-dash suffix when builder omitted",
+    !/\(\d+\)\s+—/.test(html));
+} catch (e) {
+  assertTrue("AF-V0710-PREVIEW-4: omitted-builder fallback", false, e && e.message);
+}
+
+// AF-V0710-PREVIEW-5: builder NOT invoked for an open group (only fires on defaultClosed groups)
+try {
+  let calls = 0;
+  const p = { file: { path: "spice/c/a.md", name: "a" }, type: "cowork", frontmatter: { summary: "open-group summary" }, created_at: "2026-05-21T10:00:00Z" };
+  const dv = v066_makeFakeDv([p]);
+  const ActivityFeed = v066_loadAF();
+  const af = new ActivityFeed();
+  af.render(dv, {
+    scope: "today",
+    asOf: "2026-05-21",
+    blueprints: ["cowork"],
+    framed: true,
+    groupBy: "blueprint",
+    // no defaultClosed — group opens by default
+    groupPreviewBuilder: function () { calls++; return "should-not-appear"; },
+  });
+  const html = dv.container.innerHTML;
+  assertTrue("AF-V0710-PREVIEW-5a: builder not invoked on open group", calls === 0);
+  assertTrue("AF-V0710-PREVIEW-5b: 'should-not-appear' not in DOM",
+    html.indexOf("should-not-appear") < 0);
+} catch (e) {
+  assertTrue("AF-V0710-PREVIEW-5: builder gated to closed groups", false, e && e.message);
+}
+
+// AF-V0710-SUBTITLE-1: getSubtitle overrides the meta builder's default subtitle
+try {
+  const p = {
+    file: { path: "spice/c/m.md", name: "m" },
+    type: "cowork-morning-briefing",
+    frontmatter: { summary: "today's lead from frontmatter" },
+    created_at: "2026-05-21T07:00:00Z",
+  };
+  const dv = v066_makeFakeDv([p]);
+  const ActivityFeed = v066_loadAF();
+  const af = new ActivityFeed();
+  af.render(dv, {
+    scope: "today",
+    asOf: "2026-05-21",
+    blueprints: ["cowork-morning-briefing"],
+    framed: true,
+    groupBy: "blueprint",
+    getSubtitle: function (page) {
+      return (page.frontmatter && page.frontmatter.summary) || "";
+    },
+  });
+  const html = dv.container.innerHTML;
+  assertTrue("AF-V0710-SUBTITLE-1: getSubtitle reading frontmatter.summary surfaces in row meta",
+    html.indexOf("today's lead from frontmatter") >= 0);
+} catch (e) {
+  assertTrue("AF-V0710-SUBTITLE-1: getSubtitle preference", false, e && e.message);
 }
 
 // ── Summary ───────────────────────────────────────────────────────────────

@@ -85,6 +85,32 @@
  *                        <details> element renders without the `open`
  *                        attribute. Only meaningful when framed:true.
  *
+ *   groupLabels:         Record<string, string> (default {}, added v0.5.0).
+ *                        Maps group keys (post-bucket-merge) to display
+ *                        text rendered in the framed group's
+ *                        .sauce-group-label. Activity-feed stays
+ *                        type-agnostic — caller supplies the map. Keys not
+ *                        present in the map fall back to _humanCase(key).
+ *
+ *   groupPreviewBuilder: (pages: Page[]) => string (default undefined,
+ *                        added v0.5.0). When supplied AND the group is in
+ *                        defaultClosed[], the renderer invokes the builder
+ *                        with the group's pages (tsKey desc) and appends
+ *                        ' — <text>' to the group header after the count.
+ *                        Returned text is truncated to 80 chars; longer
+ *                        strings get a single trailing ellipsis (…). When
+ *                        the builder returns an empty string or the opt is
+ *                        omitted, the existing count-only header is
+ *                        preserved. Builder is NOT invoked for open
+ *                        groups (gated to defaultClosed members only).
+ *
+ *   getSubtitle:         (page: Page) => string (default undefined,
+ *                        added v0.5.0). When supplied AND framed:true,
+ *                        the renderer writes the returned string into
+ *                        the per-row .sauce-group-row-meta element when
+ *                        no metaBuilder is set. metaBuilder takes
+ *                        precedence when both are supplied.
+ *
  *   framed:              boolean (default false, added v0.4.0). When true
  *                        AND groupBy="blueprint", each group renders as a
  *                        framed section: bg-tint + left-accent stripe,
@@ -99,6 +125,17 @@
  * Per landmine #11: spice/ module-directory namespace is conceptual;
  * Dataview query scope is vault-wide.
  */
+
+// v0.5.0: Title-Case a kebab/snake key for the default group-label fallback
+// when groupLabels[key] is absent. e.g., "cowork-morning-briefing" →
+// "Cowork Morning Briefing", "project" → "Project".
+function _humanCase(key) {
+  if (typeof key !== "string" || key.length === 0) return key;
+  return key.split(/[-_]/).map(function (w) {
+    return w.length === 0 ? w : (w.charAt(0).toUpperCase() + w.slice(1));
+  }).join(" ");
+}
+
 class ActivityFeed {
   /**
    * Render a time-windowed activity feed across blueprints.
@@ -173,6 +210,10 @@ class ActivityFeed {
         groupOrder: Array.isArray(safeOpts.groupOrder) ? safeOpts.groupOrder : null,
         groupOrderBottom: Array.isArray(safeOpts.groupOrderBottom) ? safeOpts.groupOrderBottom : null,
         defaultClosed: Array.isArray(safeOpts.defaultClosed) ? safeOpts.defaultClosed : null,
+        // v0.5.0 additive opts
+        groupLabels: (safeOpts.groupLabels && typeof safeOpts.groupLabels === "object" && !Array.isArray(safeOpts.groupLabels)) ? safeOpts.groupLabels : null,
+        groupPreviewBuilder: (typeof safeOpts.groupPreviewBuilder === "function") ? safeOpts.groupPreviewBuilder : null,
+        getSubtitle: (typeof safeOpts.getSubtitle === "function") ? safeOpts.getSubtitle : null,
       });
     }
     return this._renderFlat(dv, pages, getTitle, metaBuilder);
@@ -396,6 +437,10 @@ class ActivityFeed {
     const groupOrder = Array.isArray(safe.groupOrder) ? safe.groupOrder.map(String) : [];     // NEW v0.4.0
     const groupOrderBottom = Array.isArray(safe.groupOrderBottom) ? safe.groupOrderBottom.map(String) : [];  // NEW v0.4.0
     const defaultClosed = new Set(Array.isArray(safe.defaultClosed) ? safe.defaultClosed.map(String) : []);  // NEW v0.4.0
+    // NEW v0.5.0 additive opts
+    const groupLabels = (safe.groupLabels && typeof safe.groupLabels === "object" && !Array.isArray(safe.groupLabels)) ? safe.groupLabels : {};
+    const groupPreviewBuilder = (typeof safe.groupPreviewBuilder === "function") ? safe.groupPreviewBuilder : null;
+    const getSubtitle = (typeof safe.getSubtitle === "function") ? safe.getSubtitle : null;
 
     // Pass A — initial grouping by p.type (unchanged from v0.3.0)
     const groups = new Map();
@@ -466,7 +511,7 @@ class ActivityFeed {
       const isClosed = defaultClosed.has(t);
 
       if (framed) {
-        this._renderFramedGroup(dv, { key: t, pages: groupPages, color, isClosed, titleFn, metaBuilder });
+        this._renderFramedGroup(dv, { key: t, pages: groupPages, color, isClosed, titleFn, metaBuilder, groupLabels, groupPreviewBuilder, getSubtitle });
       } else if (collapsible) {
         // v0.1.2 legacy path — preserved for callers that prefer nested
         // <details> without framing. No known caller today.
@@ -516,7 +561,7 @@ class ActivityFeed {
    * walk (used to attach the drill-in panel) lands at .sauce-group-row,
    * which is column-oriented and can hold the drill-in below the line.
    */
-  _renderFramedGroup(dv, { key, pages, color, isClosed, titleFn, metaBuilder }) {
+  _renderFramedGroup(dv, { key, pages, color, isClosed, titleFn, metaBuilder, groupLabels, groupPreviewBuilder, getSubtitle }) {
     const group = dv.container.createEl("div");
     group.className = "sauce-group";
     group.dataset.group = key;
@@ -535,10 +580,38 @@ class ActivityFeed {
     dot.style.background = color;
     const label = summary.createEl("span");
     label.className = "sauce-group-label";
-    label.textContent = key;
+    // v0.5.0: groupLabels resolves the visible group header text;
+    // fall back to _humanCase(key) when absent.
+    const groupLabelMap = (groupLabels && typeof groupLabels === "object" && !Array.isArray(groupLabels)) ? groupLabels : {};
+    const labelText = (typeof groupLabelMap[key] === "string" && groupLabelMap[key].length > 0)
+      ? groupLabelMap[key]
+      : _humanCase(key);
+    label.textContent = labelText;
+    // v0.5.0: groupPreviewBuilder appends a one-line preview to defaultClosed
+    // group headers. Gated on closed-group membership so open groups stay terse.
+    // Compute first so we can fold the " — <text>" suffix into the count
+    // element's textContent (avoids a stray <span> separating "(N)" from the
+    // em-dash, which would otherwise defeat downstream " — " regex checks).
+    let previewSuffix = "";
+    if (isClosed && typeof groupPreviewBuilder === "function") {
+      let previewText;
+      try {
+        previewText = groupPreviewBuilder(pages.slice());  // defensive copy
+      } catch (_) {
+        previewText = "";
+      }
+      if (typeof previewText === "string" && previewText.length > 0) {
+        // 80-char hard truncation + trailing ellipsis (single char U+2026)
+        const TRUNC_AT = 80;
+        const safeText = (previewText.length > TRUNC_AT)
+          ? (previewText.slice(0, TRUNC_AT) + "…")
+          : previewText;
+        previewSuffix = " — " + safeText;
+      }
+    }
     const count = summary.createEl("span");
     count.className = "sauce-group-count";
-    count.textContent = "(" + pages.length + ")";
+    count.textContent = "(" + pages.length + ")" + previewSuffix;
 
     const body = details.createEl("div");
     body.className = "sauce-group-body";
@@ -556,6 +629,14 @@ class ActivityFeed {
       metaEl.className = "sauce-group-row-meta";
       if (typeof metaBuilder === "function") {
         try { metaBuilder(p, metaEl); } catch (_) { /* swallow — never break a single row */ }
+      } else if (typeof getSubtitle === "function") {
+        // v0.5.0: when no metaBuilder is set, getSubtitle populates row meta.
+        try {
+          const subtitle = getSubtitle(p);
+          if (typeof subtitle === "string" && subtitle.length > 0) {
+            metaEl.textContent = subtitle;
+          }
+        } catch (_) { /* swallow — never break a single row */ }
       }
       // Click-to-open on the line. Anchors/breadcrumbs inside meta
       // call stopPropagation themselves; this handler defends with a
