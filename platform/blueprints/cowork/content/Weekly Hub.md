@@ -61,10 +61,10 @@ await dv.view("ranch/views/customjs-guard", {
       "cowork-monthly-review":   "Monthly Review",
     },
     getTitle: function (p) {
-      return (p.frontmatter && p.frontmatter.engagement_id) || (p.file && p.file.name) || "(unknown)";
+      return p.engagement_id || (p.file && p.file.name) || "(unknown)";
     },
     getSubtitle: function (p) {
-      return (p.frontmatter && p.frontmatter.summary) || "";
+      return (typeof p.summary === "string" && p.summary) || "";
     }
   }]
 });
