@@ -7531,13 +7531,14 @@ async function caseFA2RuleFragmentsExtends() {
     assertTrue("HC-V065-DASHBOARD: allowlist includes cowork-finance-snapshot", src.includes('"cowork-finance-snapshot"'));
   }
 
-  // v0.67.0 FA6-MANIFEST version pins — daily / activity-feed / cards
-  // (bumped from v0.66.x by daily 0.7.1 → 0.8.0 + activity-feed 0.3.1 → 0.3.2;
-  // cards untouched per Approach A)
+  // FA6-MANIFEST version pins — daily / activity-feed / cards
+  // Updated per cycle as manifests bump. activity-feed last bumped to
+  // 0.4.0 in v0.70.0 (S2); daily will bump to 0.10.0 in v0.70.0 (S5);
+  // cards untouched.
   {
     const pins = [
       ["daily",         "platform/blueprints/daily/manifest.json",            "0.9.0"],
-      ["activity-feed", "platform/mechanisms/activity-feed/manifest.json",    "0.3.2"],
+      ["activity-feed", "platform/mechanisms/activity-feed/manifest.json",    "0.4.0"],
       ["cards",         "platform/mechanisms/cards/manifest.json",            "0.2.6"],
     ];
     for (const [name, relPath, expected] of pins) {
