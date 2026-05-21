@@ -316,6 +316,33 @@ class SpaceDailyDashboard {
           colorByType: this._BLUEPRINT_COLORS,
           rollUpRoots: this._buildRollupRules(dv),
           metaBuilder: (p, el) => this._renderActivityMeta(p, el, icons.square, this._CHEVRON_SVG),
+          // v0.11.0 (sauce v0.71.0) — surface cowork-* atomic note summary
+          // as the row subtitle for cowork-* pages. NOTE: activity-feed v0.5.0
+          // semantics give metaBuilder precedence over getSubtitle (only one
+          // fires per row), so this opt is currently dormant — the actual
+          // cowork-summary surfacing happens inside _renderActivityMeta below.
+          // Plumbed here for clarity + future-proofing if metaBuilder is ever
+          // removed; activity-feed will then fall back to getSubtitle.
+          getSubtitle: (p) => {
+            if (p && p.type && typeof p.type === "string" &&
+                p.type.indexOf("cowork-") === 0 &&
+                typeof p.summary === "string" && p.summary.length > 0) {
+              return p.summary;
+            }
+            return "";
+          },
+          // v0.11.0 (sauce v0.71.0) — collapsed groups show a one-line preview
+          // from the most-recent page's summary. Activity-feed only invokes
+          // this builder for defaultClosed groups (currently scratch), so the
+          // cowork bucket (open by default) won't trigger it.
+          groupPreviewBuilder: (pages) => {
+            if (!Array.isArray(pages) || pages.length === 0) return "";
+            const top = pages[0];
+            if (top && typeof top.summary === "string") {
+              return top.summary;
+            }
+            return "";
+          },
         });
       } else {
         const warn = activityBody.createEl("p");
@@ -480,9 +507,24 @@ class SpaceDailyDashboard {
    * v0.7.0 (v0.66.0): pill-color map. Mirrors _BLUEPRINT_COLORS today; a
    * separate name lets future cycles diverge (e.g., higher-saturation pill
    * dots vs subtle border colors).
+   *
+   * v0.11.0 (sauce v0.71.0): grows 6 cowork-* sub-type entries so per-row
+   * pills inside the bucket-merged Cowork group carry cadence signal.
+   * The cowork BUCKET key (group container) still uses
+   * _BLUEPRINT_COLORS.cowork = blue; the sub-type pills below are for rows
+   * inside the bucket (consumer reads p.type, which is the original
+   * cowork-* sub-type, not the synthetic bucket key).
    */
   get _BLUEPRINT_PILL_COLORS() {
-    return this._BLUEPRINT_COLORS;
+    return {
+      ...this._BLUEPRINT_COLORS,
+      "cowork-morning-briefing": "var(--color-blue)",
+      "cowork-midday-tripwire":  "var(--color-yellow)",
+      "cowork-eod-review":       "var(--color-purple)",
+      "cowork-finance-snapshot": "var(--color-cyan)",
+      "cowork-weekly-review":    "var(--color-pink)",
+      "cowork-monthly-review":   "var(--color-red)",
+    };
   }
 
   /**
@@ -687,6 +729,20 @@ class SpaceDailyDashboard {
 
     // Open-todo badge (v0.8.0 — universal across Meetings + Activity)
     this._renderTodoBadge(p, parentEl, squareIcon);
+
+    // v0.11.0 (sauce v0.71.0) — cowork-* atomic notes carry a curated
+    // `summary:` frontmatter field; surface it as the row subtitle inside the
+    // bucket-merged Cowork group. metaBuilder takes precedence over
+    // getSubtitle in activity-feed v0.5.0, so we inline the cowork-summary
+    // path here. Non-cowork rows are unaffected.
+    if (type && type.indexOf("cowork-") === 0) {
+      const summary = (p && typeof p.summary === "string") ? p.summary.trim() : "";
+      if (summary) {
+        const sub = parentEl.createEl("span");
+        sub.className = "sauce-meta-subtitle";
+        sub.textContent = summary;
+      }
+    }
 
     // Roll-up breadcrumb + drill-in
     if (p && p._isRollUp && typeof p._rollUpChildren === "number" && p._rollUpChildren > 0) {
