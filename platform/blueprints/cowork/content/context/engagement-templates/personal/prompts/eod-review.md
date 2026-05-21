@@ -41,3 +41,5 @@ One 2–3 sentence reflective paragraph — what energized vs drained today. End
 ---
 
 Tone: reflective. Brief; the daily review is for self-tracking, not exhaustive logging.
+
+**Gather-skipped handling:** If any section's gather skill emitted `gather-skipped: <reason>` (calendar / gmail / imessage MCP unavailable, or finance source unreachable), render that section as a single `> [!warning] <Section name> unavailable` admonition naming the reason — do NOT omit the section silently. Continue composing the rest of the briefing normally.

@@ -37,3 +37,5 @@ One 2–3 sentence paragraph naming the day's main deliverable for the w2 role. 
 ---
 
 Tone: professional but human. Skip a section entirely when its gather output is empty. Don't include personal-life content (no finance, no inner-circle imessage — engagement-type's render_aspects skip those).
+
+**Gather-skipped handling:** If any section's gather skill emitted `gather-skipped: <reason>` (e.g. the calendar MCP was unavailable in this runtime), render that section as a single `> [!warning] <Section name> unavailable` admonition naming the reason — do NOT omit the section silently. Continue composing the rest of the briefing normally.

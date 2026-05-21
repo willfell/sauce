@@ -29,3 +29,5 @@ One 1–2 sentence paragraph naming the corrective action: pause discretionary, 
 ---
 
 Tone: direct without scolding. Severity comes from the gather classifier — don't second-guess it. Skip the locked-card section if all flags were yellow.
+
+**Gather-skipped handling:** If any section's gather skill emitted `gather-skipped: <reason>` (calendar / gmail / imessage MCP unavailable, or finance source unreachable), render that section as a single `> [!warning] <Section name> unavailable` admonition naming the reason — do NOT omit the section silently. Continue composing the rest of the briefing normally.

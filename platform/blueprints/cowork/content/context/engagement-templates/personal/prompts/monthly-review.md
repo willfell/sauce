@@ -41,3 +41,5 @@ One 3–5 sentence paragraph naming the next month's main objective. End with a 
 ---
 
 Tone: long view. This is the most retrospective of the five cadences — write it as if you're advising a friend on what to do next.
+
+**Gather-skipped handling:** If any section's gather skill emitted `gather-skipped: <reason>` (calendar / gmail / imessage MCP unavailable, or finance source unreachable), render that section as a single `> [!warning] <Section name> unavailable` admonition naming the reason — do NOT omit the section silently. Continue composing the rest of the briefing normally.

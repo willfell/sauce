@@ -41,3 +41,5 @@ If any communication with `stakeholders[]` or `manager` happened today, summariz
 ---
 
 Tone: status-report concise. The w2 EOD feeds into the weekly review's FTE status block.
+
+**Gather-skipped handling:** If any section's gather skill emitted `gather-skipped: <reason>` (e.g. the calendar MCP was unavailable in this runtime), render that section as a single `> [!warning] <Section name> unavailable` admonition naming the reason — do NOT omit the section silently. Continue composing the rest of the briefing normally.

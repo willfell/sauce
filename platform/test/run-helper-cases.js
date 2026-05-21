@@ -7948,6 +7948,30 @@ async function caseFA2RuleFragmentsExtends() {
     assertTrue("HC-V0710-5: gather-* MCP-routing contract", false, e && e.message);
   }
 
+  // HC-V0710-6: 15 default prompts drop hardcoded MCP names + add gather-skipped handling
+  try {
+    const types     = ["personal", "w2-fte", "consulting"];
+    const cadences  = ["morning-briefing", "midday-tripwire", "eod-review", "weekly-review", "monthly-review"];
+    const promptRoot = path.join(WORKSHOP, "platform/blueprints/cowork/content/context/engagement-templates");
+    for (const t of types) {
+      for (const c of cadences) {
+        const promptPath = path.join(promptRoot, t, "prompts", c + ".md");
+        const body = fs.readFileSync(promptPath, "utf8");
+        // No hardcoded Google Calendar
+        assertTrue("HC-V0710-6a: " + t + "/" + c + " drops 'Google Calendar' hardcode",
+          body.indexOf("Google Calendar") < 0);
+        // No mcp__claude_ai_Google_Calendar__ tool name in prose
+        assertTrue("HC-V0710-6b: " + t + "/" + c + " drops 'mcp__claude_ai_Google_Calendar__' hardcode",
+          body.indexOf("mcp__claude_ai_Google_Calendar__") < 0);
+        // Has gather-skipped handling instruction
+        assertTrue("HC-V0710-6c: " + t + "/" + c + " mentions gather-skipped handling",
+          body.indexOf("gather-skipped") >= 0);
+      }
+    }
+  } catch (e) {
+    assertTrue("HC-V0710-6: default prompts MCP-agnostic + gather-skipped aware", false, e && e.message);
+  }
+
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
   if (fail > 0) {

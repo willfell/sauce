@@ -8,7 +8,7 @@ updated_by: cowork@0.11.0 installer
 
 # Weekly review — personal
 
-Compose this week's review body using the gather outputs (finance full-week, cc-debt-snapshot weekly, calendar next-week, gmail newer_than:7d, imessage 7-day, projects weekly, threads weekly-audit). Body shape:
+Compose this week's review body using the gather outputs (finance full-week, cc-debt-snapshot weekly, calendar next-week, gmail 7-day, imessage 7-day, projects weekly, threads weekly-audit). Body shape:
 
 ## 📆 Week in review
 
@@ -41,3 +41,5 @@ One 2–3 sentence paragraph naming the next week's main objective. End with a c
 ---
 
 Tone: zoomed-out and honest. Numbers matter (spend + payoff progress); the rest can be qualitative.
+
+**Gather-skipped handling:** If any section's gather skill emitted `gather-skipped: <reason>` (calendar / gmail / imessage MCP unavailable, or finance source unreachable), render that section as a single `> [!warning] <Section name> unavailable` admonition naming the reason — do NOT omit the section silently. Continue composing the rest of the briefing normally.

@@ -20,7 +20,7 @@ Bulleted list of today's events with HH:MM prefix. Include conference / Zoom / m
 
 ## 📨 Email triage
 
-Top 3–5 unread or starred emails from gather-gmail (newer_than:1d window). Each bullet: subject · sender · brief intent (5–10 words).
+Top 3–5 unread or starred emails from gather-gmail (1-day window — the skill picks the right MCP and translates the window to provider-specific syntax). Each bullet: subject · sender · brief intent (5–10 words).
 
 ## 💸 Finance check
 
@@ -41,3 +41,5 @@ One 2–3 sentence paragraph naming the day's main objective. End with a concret
 ---
 
 Tone: warm but terse. Skip a section entirely when its gather output is empty (don't print empty H2 headings).
+
+**Gather-skipped handling:** If any section's gather skill emitted `gather-skipped: <reason>` (calendar / gmail / imessage MCP unavailable, or finance source unreachable), render that section as a single `> [!warning] <Section name> unavailable` admonition naming the reason — do NOT omit the section silently. Continue composing the rest of the briefing normally.
