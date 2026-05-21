@@ -7594,7 +7594,6 @@ async function caseFA2RuleFragmentsExtends() {
     assertTrue("HC-V067-1a: _formatTime method declared", /_formatTime\s*\(/.test(src));
     assertTrue("HC-V067-1b: _renderTodoBadge method declared", /_renderTodoBadge\s*\(/.test(src));
     assertTrue("HC-V067-1c: _renderDrillInList method declared", /_renderDrillInList\s*\(/.test(src));
-    assertTrue("HC-V067-1d: _buildAccentSegments method declared", /_buildAccentSegments\s*\(/.test(src));
   }
 
   // v0.67.0 HC-V067-2: sauce-daily-dashboard.css contains new selectors
@@ -7626,6 +7625,23 @@ async function caseFA2RuleFragmentsExtends() {
     // zap entry removed
     assertTrue("HC-V067-3c: icons.zap entry absent",
       !/^\s*zap:\s*`</m.test(src));
+  }
+
+  // v0.70.0 HC-V070-1: SpaceDailyDashboard adopts framed renderer + new opts
+  {
+    console.log("\n--- Case HC-V070-1: daily dashboard adopts framed renderer + v0.4.0 opts ---");
+    const src = fs.readFileSync(
+      path.join(WORKSHOP, "platform/blueprints/daily/helpers/space-daily-dashboard.js"),
+      "utf8"
+    );
+    assertTrue("HC-V070-1a: passes framed: true to ActivityFeed.render",      /framed:\s*true/.test(src));
+    assertTrue("HC-V070-1b: passes bucketRules with cowork bucketKey",        /bucketKey:\s*"cowork"/.test(src));
+    assertTrue("HC-V070-1c: passes groupOrder array starting with cowork",    /groupOrder:\s*\[\s*"cowork"/.test(src));
+    assertTrue("HC-V070-1d: passes groupOrderBottom containing scratch",      /groupOrderBottom:\s*\[\s*"scratch"\s*\]/.test(src));
+    assertTrue("HC-V070-1e: passes defaultClosed containing scratch",         /defaultClosed:\s*\[\s*"scratch"\s*\]/.test(src));
+    assertTrue("HC-V070-1f: _BLUEPRINT_COLORS contains cowork entry",         /cowork:\s*"var\(--color-blue\)"/.test(src));
+    assertTrue("HC-V070-1g: flatGrouped:true no longer present",              !/flatGrouped:\s*true/.test(src));
+    assertTrue("HC-V070-1h: _buildAccentSegments helper removed",             !/_buildAccentSegments\s*\(/.test(src));
   }
 
   console.log(`\n========`);

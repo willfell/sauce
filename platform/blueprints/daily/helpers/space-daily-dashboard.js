@@ -69,8 +69,6 @@
  *  - Activity panel uses ActivityFeed's new v0.3.0 opts:
  *    - rollUpRoots: project + trip child edits coalesce into one hub card
  *      (closes FLN-v64-8 — "edits within projects don't surface").
- *    - flatGrouped: muted uppercase headers replace nested <details>
- *      sub-groups (single-tap reveal at outer-section level).
  *    - metaBuilder: each card gets time · type pill · breadcrumb meta
  *      line via _renderActivityMeta (depends on cards@0.2.6 meta-function
  *      form).
@@ -157,7 +155,6 @@ class SpaceDailyDashboard {
     const tasks = getTasks();
     const activityResult = await this._getActivityCount(dv, today);
     const activityCount = activityResult.total;
-    const activityByBlueprint = activityResult.byBlueprint;
     const hasContent = meetings.length > 0 || tasks.length > 0 || activityCount > 0;
     if (!hasContent) return;
 
@@ -268,8 +265,14 @@ class SpaceDailyDashboard {
           groupBy: "blueprint",
           blueprints: this._DEFAULT_DASHBOARD_BLUEPRINTS,
           getTitle: (p) => this._resolveTitle(p),
-          // v0.7.0 (v0.66.0) — replaces collapsible:true (renderer side)
-          flatGrouped: true,
+          // v0.10.0 (sauce v0.70.0) — framed renderer + cowork bucket + pin order + scratch closed
+          framed: true,
+          bucketRules: [
+            { bucketKey: "cowork", match: (t) => typeof t === "string" && t.indexOf("cowork-") === 0 },
+          ],
+          groupOrder: ["cowork", "project", "kanban", "trip"],
+          groupOrderBottom: ["scratch"],
+          defaultClosed: ["scratch"],
           colorByType: this._BLUEPRINT_COLORS,
           rollUpRoots: this._buildRollupRules(dv),
           metaBuilder: (p, el) => this._renderActivityMeta(p, el, icons.square, this._CHEVRON_SVG),
@@ -400,6 +403,7 @@ class SpaceDailyDashboard {
   get _BLUEPRINT_COLORS() {
     return {
       // Activity-feed groups
+      cowork:    "var(--color-blue)",   // v0.10.0 — synthetic bucket from bucketRules; sub-type pills stay neutral
       meeting:   "var(--color-blue)",
       scratch:   "var(--color-orange)",
       project:   "var(--color-green)",
@@ -608,36 +612,6 @@ class SpaceDailyDashboard {
   }
 
   /**
-   * v0.8.0 (v0.67.0): build a linear-gradient string from a byBlueprint count
-   * map. Returns null when no entries (caller falls through to single-color
-   * border-left). Used only by the Activity section — Tasks/Meetings stay
-   * with the existing border-left single-color rule.
-   */
-  _buildAccentSegments(byBlueprint) {
-    if (!byBlueprint || typeof byBlueprint !== "object") return null;
-    // v0.8.2 (v0.67.2): sort entries alphabetically by key so segment order
-    // matches ActivityFeed's group rendering order (which renders blueprints
-    // alphabetically). Pre-v0.8.2 order depended on Map iteration which mixed
-    // direct-hits before rollups, producing inverted segments vs. visual content.
-    const entries = Object.entries(byBlueprint)
-      .filter(([, n]) => n > 0)
-      .sort(([a], [b]) => a.localeCompare(b));
-    if (entries.length === 0) return null;
-    const total = entries.reduce((s, [, n]) => s + n, 0);
-    const colors = this._BLUEPRINT_PILL_COLORS || {};
-    const stops = [];
-    let cursor = 0;
-    for (const [type, count] of entries) {
-      const color = colors[type] || "var(--color-base-50)";
-      const start = (cursor * 100).toFixed(2) + "%";
-      cursor += count / total;
-      const end = (cursor * 100).toFixed(2) + "%";
-      stops.push(`${color} ${start}, ${color} ${end}`);
-    }
-    return `linear-gradient(to bottom, ${stops.join(", ")})`;
-  }
-
-  /**
    * v0.7.0 (v0.66.0): caller-driven meta line for ActivityFeed cards.
    * Renders time · type-pill · breadcrumb into the supplied parentEl.
    * Wired via BeaconCards' v0.2.6 function-form `meta` opt.
@@ -706,14 +680,10 @@ class SpaceDailyDashboard {
    * Visual styling lives in .obsidian/snippets/sauce-daily-dashboard.css
    * (installed via daily.manifest.json's snippets[] + appearance.enabledCssSnippets[]).
    */
-  _renderSection(container, { accent, iconHtml, title, defaultOpen, accentSegments }) {
+  _renderSection(container, { accent, iconHtml, title, defaultOpen }) {
     const section = container.createEl("div");
     section.className = "sauce-section";
     section.dataset.accent = accent;
-    if (accentSegments) {
-      section.dataset.segmented = "true";
-      section.style.setProperty("--sauce-accent-segments", accentSegments);
-    }
     const details = section.createEl("details");
     if (defaultOpen) details.open = true;
     const summary = details.createEl("summary");
