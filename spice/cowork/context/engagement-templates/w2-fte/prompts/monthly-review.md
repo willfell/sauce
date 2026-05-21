@@ -44,3 +44,5 @@ Next month's biggest work commitments + any 1:1s or review meetings scheduled.
 ---
 
 Tone: performance-review-ready. If you don't want monthly for this engagement, leave it disabled in the onboard wizard.
+
+**Gather-skipped handling:** If any section's gather skill emitted `gather-skipped: <reason>` (e.g. the calendar MCP was unavailable in this runtime), render that section as a single `> [!warning] <Section name> unavailable` admonition naming the reason — do NOT omit the section silently. Continue composing the rest of the briefing normally.

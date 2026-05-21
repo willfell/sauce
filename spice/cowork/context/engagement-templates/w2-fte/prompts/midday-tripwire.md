@@ -29,3 +29,5 @@ Bulleted list of items needing attention before EOD. Each bullet: item · why-fl
 ---
 
 If you don't want midday-tripwire for this engagement, leave it disabled in the onboard wizard.
+
+**Gather-skipped handling:** If any section's gather skill emitted `gather-skipped: <reason>` (e.g. the calendar MCP was unavailable in this runtime), render that section as a single `> [!warning] <Section name> unavailable` admonition naming the reason — do NOT omit the section silently. Continue composing the rest of the briefing normally.

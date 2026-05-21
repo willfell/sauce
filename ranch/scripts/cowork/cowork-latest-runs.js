@@ -86,20 +86,27 @@ class CoworkLatestRuns {
         });
       }
 
-      // Body preview — first ~200 chars after frontmatter
+      // v0.12.0 (sauce v0.71.0): prefer the curated 1-2 sentence summary
+      // frontmatter field (per the cowork atomic-note contract). Falls back
+      // to the first ~200 chars after frontmatter for pre-v0.12.0 atomic
+      // notes that may not yet carry a summary field.
       let preview = "";
       try {
-        const body = (latest.file && typeof latest.file.text === "string") ? latest.file.text : "";
-        // Strip leading YAML frontmatter block (--- ... ---)
-        let afterFm = body;
-        if (body.startsWith("---")) {
-          const closeIdx = body.indexOf("\n---", 3);
-          if (closeIdx !== -1) {
-            afterFm = body.slice(closeIdx + 4);
+        if (typeof latest.summary === "string" && latest.summary.trim().length > 0) {
+          preview = latest.summary.trim();
+        } else {
+          const body = (latest.file && typeof latest.file.text === "string") ? latest.file.text : "";
+          // Strip leading YAML frontmatter block (--- ... ---)
+          let afterFm = body;
+          if (body.startsWith("---")) {
+            const closeIdx = body.indexOf("\n---", 3);
+            if (closeIdx !== -1) {
+              afterFm = body.slice(closeIdx + 4);
+            }
           }
+          preview = afterFm.trim().replace(/\s+/g, " ").slice(0, 200);
+          if (preview.length === 200) preview += "…";
         }
-        preview = afterFm.trim().replace(/\s+/g, " ").slice(0, 200);
-        if (preview.length === 200) preview += "…";
       } catch (e) {
         preview = "";
       }

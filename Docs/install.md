@@ -485,3 +485,21 @@ CSS-only PATCH. Run `sauce install` (or `brew upgrade sauce && sauce install`) �
 Visual changes:
 - **Desktop:** times in the Activity panel now align vertically across rows within the same sub-group (e.g., "2:48 AM" and "1:30 PM" share the same right edge). Slightly more breathing room around rows and between meta tokens.
 - **Mobile:** sub-group rows now stack — title on top with full-width wrapping, meta tokens (time, pill, todo-badge, breadcrumb) wrap below. Fixes the v0.70.0 issue where wide-meta rows (like the kanban "To Do Board" row with a breadcrumb) lost their title to flex shrinkage on narrow viewports.
+
+### Upgrading from v0.70.x → v0.71.0
+
+MINOR cycle. Run `sauce update` (or `brew upgrade sauce && sauce update`) to pick up:
+- `activity-feed@0.5.0`: two additive opts on the v0.4.0 framed renderer — `groupLabels: Record<string,string>` (caller-supplied display-name map; falls back to `_humanCase(key)` when absent) and `groupPreviewBuilder: (pages) => string` (collapsed-group one-line preview after the `(N)` count, 80-char truncation with `…` ellipsis).
+- `cowork@0.12.0`: atomic-note contract requires `summary:` + declares optional `warnings:`; 6 write-run-note sub-skills emit Obsidian-native body shape (admonitions + markdown tables); 3 gather skills do runtime MCP-availability detection (no more "failed to pull google calendar" on w2-fte engagements without Google Calendar); 15 per-engagement default prompts drop hardcoded MCP names; cowork Daily/Weekly/Monthly Hub ActivityFeed panels switch to the framed renderer scoped to cowork-* types only, with cadence-ordered groups and prettified display names.
+- `daily@0.11.0`: SpaceDailyDashboard consumes the activity-feed v0.5.0 opts and adds 6 cowork-* sub-type pill colors (morning=blue, midday=yellow, eod=purple, finance=cyan, weekly=pink, monthly=red).
+
+**User-side follow-up — re-onboard scheduled jobs:**
+After `sauce update` succeeds, re-run `cowork:onboard-scheduled-jobs` against each subscribed vault and pick option **(a)** when prompted to overwrite the v0.68.0-era prompts in `spice/cowork/prompts/*.md` with the new v0.71.0 defaults (drops hardcoded MCP names, adds gather-skipped handling). Users who customized their per-engagement prompt via option (c) at bootstrap time keep their custom prompt — the v0.71.0 body-shape contract still ships via the workshop-side `write-run-note-*` sub-skills, so polished output still renders.
+
+**FLN-v68-1 cleanup (accuris-sauce only):** if you have an `accuris` engagement that was bootstrapped pre-v0.65, re-run `cowork:bootstrap-vault {engagement_id: "accuris"}` to clear the pre-v0.65 headspace-dated contamination in `spice/cowork/context/weekly-snapshot.md`.
+
+Visual changes you will see:
+- **Daily dashboard Activity panel:** all `cowork-*` runs merged into one "Cowork" group at the top, with per-row pills now color-tinted by cadence (blue/yellow/purple/cyan/pink/red). Row subtitle reads the curated 1-2 sentence summary, not a body slice. Collapsed groups (scratch) show a one-line preview after the count.
+- **Cowork Daily/Weekly/Monthly Hub:** Activity panels now show ONLY cowork-* runs, grouped by cadence with prettified headers ("Morning Briefing" / "Midday Tripwire" / "EOD Review" / "Finance Snapshot" / "Weekly Review" / "Monthly Review"). Today.md (the cross-blueprint landing) and per-day daily notes intentionally keep the cross-blueprint allowlist.
+- **Cowork atomic notes** (morning-briefing.md / etc.): now open with a SpaceNavButtons block (consistent with scratch / project / meeting / etc.); body uses Obsidian admonitions (`> [!info]-` synopsis, `> [!example]+` per-section blocks with markdown tables, `> [!tip]` close). Notes carry a 1-2 sentence `summary:` frontmatter field that surfaces on CoworkLatestRuns and the daily dashboard Activity panel rows.
+- **Accuris (w2-fte) jobs:** no more "failed to pull google calendar" noise. The calendar section renders as a `> [!warning] Calendar unavailable` admonition when no calendar MCP is wired, and the rest of the briefing composes normally. Same pattern for gmail + imessage when the respective MCP isn't wired.

@@ -433,3 +433,23 @@ See `Docs/plans/2026-05-20-v0.70.0-daily-activity-cohesion-{design,plan,result}.
 
 See `Docs/plans/2026-05-20-v0.70.1-daily-activity-cohesion-patch-result.md` for the full record.
 
+## v0.71.0 cowork-presentation-polish CLOSED 2026-05-21
+
+**Workshop:** 0.70.7 → 0.71.0
+**Mechanism:** activity-feed 0.4.1 → 0.5.0
+**Blueprints:** cowork 0.11.0 → 0.12.0, daily 0.10.7 → 0.11.0
+**Rules:** `_canonical-vocab.json` grows `display_names` map
+
+**Headline:** six presentation-layer changes for cowork plus two v0.70.0 carry-forward closures. Atomic-note contract requires `summary:` + declares `warnings:` optional; 6 write-run-note sub-skills emit Obsidian-native body shape (admonitions + markdown tables); 3 gather skills detect MCP availability at runtime and emit `gather-skipped:` cleanly when none wired (closes accuris "failed to pull google calendar" landmine); 15 per-engagement default prompts drop hardcoded MCP names; 3 cowork hub templates adopt the framed renderer with cadence-ordered groups and prettified display names. Daily SpaceDailyDashboard consumes the new activity-feed opts (`getSubtitle` + `groupPreviewBuilder`) and adds 6 cowork-* sub-type pill colors (closes v0.70.0 carry-forwards "one-line preview for collapsed groups" + "color individual cowork-* sub-type pills").
+
+**Harnesses:** +13 Pass 7 sub-asserts in `run-activity-feed.js` (AF-V0710-LABELS/PREVIEW/SUBTITLE). +120+ HC-V0710-1..7 sub-asserts in `run-helper-cases.js`. V068-VERSION pin renamed to V071-VERSION (cowork 0.11.0 → 0.12.0). FA6 + FA4 pins bumped: daily 0.10.7 → 0.11.0, activity-feed 0.4.1 → 0.5.0. 22-harness count unchanged.
+
+**Lesson chain (3 plan-vs-reality mismatches surfaced + 1 plan gap + 1 cross-harness pin cascade recurrence):**
+1. Test-label prefix scheme `HC-V07X` ambiguous — `V071` collides between v0.70.1 patch and v0.71.0 minor. Renamed new asserts to `HC-V0710-*` (4-digit zero-padded). Errata-2 commit `67f07be`.
+2. `_canonical-vocab.json` uses `discriminator_tags`, not the fictional `types` the plan referenced. Errata-3 commit `6908096`.
+3. Dataview frontmatter exposed at `p.<field>` (not `p.frontmatter.<field>`). 3 cowork hub templates fixed in S10 follow-up `ee4e5d7`.
+4. CoworkLatestRuns helper missing from the plan's file list — bundled into S10 follow-up `ee4e5d7` (summary-preference for row preview).
+5. v0.70.0 lesson #4 recurrence — S3 missed `FA6-MANIFEST-activity-feed` in `run-helper-cases.js`. Fixed as S3 follow-up `dbafc51`. Worth elevating into `build-test-verify.md` as a pre-stage-commit checklist item.
+
+See `Docs/plans/2026-05-21-v0.71.0-cowork-presentation-polish-result.md` for the full record.
+

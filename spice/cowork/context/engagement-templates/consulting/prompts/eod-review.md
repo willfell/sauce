@@ -41,3 +41,5 @@ If you track billable hours per day, note today's total and any context for the 
 ---
 
 Tone: client-aware status report. Outputs from this EOD feed the weekly invoice-prep when `invoice_prep: include`.
+
+**Gather-skipped handling:** If any section's gather skill emitted `gather-skipped: <reason>` (calendar or email MCP unavailable, or any consulting-specific source unreachable), render that section as a single `> [!warning] <Section name> unavailable` admonition naming the reason — do NOT omit the section silently. Continue composing the rest of the briefing normally.

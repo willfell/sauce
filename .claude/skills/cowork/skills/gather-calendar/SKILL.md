@@ -1,6 +1,6 @@
 ---
 name: cowork:gather-calendar
-description: Fetch one engagement's Google Calendar events (scoped by engagement.calendar_id when set) for the given horizon and emit a paste-ready calendar callout block.
+description: Fetch one engagement's calendar events (scoped by engagement.calendar_id when set) for the given horizon and emit a paste-ready calendar callout block. Uses whichever calendar MCP is available at runtime per the ## MCP routing section.
 inputs:
   engagement_id: string
   date_today: string
@@ -21,7 +21,7 @@ tags: [cowork, gather, engagement-aware]
 
 # cowork:gather-calendar
 
-Pulls every event scheduled for `date` from Google Calendar via the Anthropic-managed Google Calendar MCP and emits a normalized `[!example]+` callout. The orchestrator pastes the result directly under the Morning Briefing's Schedule sub-block.
+Pulls every event scheduled for `date` from whichever calendar MCP is available at runtime (per the `## MCP routing` section below) and emits a normalized `[!example]+` callout. The orchestrator pastes the result directly under the Morning Briefing's Schedule sub-block.
 
 ## Inputs
 
@@ -50,12 +50,14 @@ Pulls every event scheduled for `date` from Google Calendar via the Anthropic-ma
    - If `range_start` and `range_end` are both provided, use them.
    - Else derive from `horizon`: `today` → `[date_today, date_today]`; `today+next-2-days` → `[date_today, date_today + 2d]`; `next-week` and `next-month` REQUIRE explicit `range_start` / `range_end` from the caller.
    Then compute `time_min = <range_start>T00:00:00` and `time_max = <range_end>T23:59:59` in `timezone`.
-4. Call `mcp__claude_ai_Google_Calendar__list_events` with arguments:
+4. Resolve which calendar MCP to use via the `## MCP routing` section below. Call its `list_events`-equivalent tool with arguments:
    - `calendar_id`: `{{calendar_id from step 2}}`
    - `time_min`: ISO-8601 string with timezone offset
    - `time_max`: ISO-8601 string with timezone offset
    - `single_events`: `true` (expand recurring)
    - `order_by`: `startTime`
+
+   If no calendar MCP is available, follow the skip path in `## MCP routing` (emit `gather-skipped: no calendar MCP available in this Claude Code runtime` and pass `warning: calendar_unavailable` up to the orchestrator) and exit.
 3. For each returned event extract: `start.dateTime` (or `start.date` for all-day), `summary`, `location`, `attendees[].email`.
 4. Convert each `start.dateTime` to `HH:MM` in `timezone` (24h). All-day events render as `all-day`.
 5. For attendees, drop the user's own email; render the remaining as a comma-separated list (max 3, then `+N more`). If no attendees, render `solo`.
@@ -82,14 +84,31 @@ Empty case:
 
 ## Errors
 
-- **Google Calendar MCP unavailable / not authenticated / API error:** return:
+- **Calendar MCP unavailable / not authenticated / API error:** return:
   ```markdown
   > [!warning]+ Calendar unavailable
-  > Google Calendar MCP not connected. Re-authenticate via the Anthropic connectors UI.
+  > No calendar MCP connected in this runtime. See the `## MCP routing` section for which MCPs this skill can use.
   ```
+  Also emit `gather-skipped: no calendar MCP available in this Claude Code runtime` and pass `warning: calendar_unavailable` to the orchestrator.
 - **Missing `date_today` or `timezone`:** return:
   ```markdown
   > [!warning]+ Calendar unavailable
   > Missing `date_today` or `timezone` input - orchestrator must call cowork:date-context first.
   ```
 - Never throw. Always return a paste-ready string.
+
+## MCP routing
+
+This skill can pull calendar data from any of the following MCPs, in priority order:
+
+1. **Google Calendar** — `mcp__claude_ai_Google_Calendar__list_events` (Anthropic-managed; available in headspace-style personal vault setups).
+2. **Outlook** — `mcp__claude_ai_Outlook__*` (when wired by the user; common in w2-fte employer-managed runtimes).
+3. **Apple Calendar** — `mcp__claude_ai_Apple_Calendar__*` (when wired by the user).
+
+At runtime: introspect on the available tool list. Pick the first MCP whose primary `list_events`-equivalent tool is available. If none are available, do **NOT** attempt the call. Instead emit a single line:
+
+  gather-skipped: no calendar MCP available in this Claude Code runtime
+
+Also pass `warning: calendar_unavailable` up to the orchestrator so the atomic note's frontmatter `warnings:` array records the skip and the body's calendar section renders as a `> [!warning] Calendar unavailable` admonition (per the write-run-note body-shape contract).
+
+When a higher-priority MCP IS available but its call returns empty (no events on the requested day), that is NOT a skip — emit the gather output normally with an empty events list. Skip is reserved for MCP unavailability, not empty data.

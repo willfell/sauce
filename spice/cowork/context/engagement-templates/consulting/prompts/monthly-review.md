@@ -49,3 +49,5 @@ One 3–5 sentence paragraph naming the next month's main objective for this cli
 ---
 
 Tone: long-view client-aware. This is the most retrospective of the four cadences for consulting; write it as if briefing yourself ahead of a quarterly business review.
+
+**Gather-skipped handling:** If any section's gather skill emitted `gather-skipped: <reason>` (calendar or email MCP unavailable, or any consulting-specific source unreachable), render that section as a single `> [!warning] <Section name> unavailable` admonition naming the reason — do NOT omit the section silently. Continue composing the rest of the briefing normally.

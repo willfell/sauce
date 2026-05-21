@@ -80,3 +80,16 @@ Empty case:
   ```
 - **Missing `window`:** fall back to `"newer_than:1d"` silently (no warning).
 - Never throw; always return a paste-ready callout string.
+
+## MCP routing
+
+This skill can pull email data from any of the following MCPs, in priority order:
+
+1. **Gmail** — `mcp__claude_ai_Gmail__search_threads` (Anthropic-managed; available in personal vaults).
+2. **Outlook mail** — `mcp__claude_ai_Outlook__*` (when wired by the user).
+
+At runtime: introspect on the available tool list. Pick the first MCP whose primary thread-search tool is available. If none are available, do **NOT** attempt the call. Instead emit:
+
+  gather-skipped: no email MCP available in this Claude Code runtime
+
+Pass `warning: gmail_unavailable` (or `warning: email_unavailable` for non-Gmail providers — the orchestrator normalizes) up to the orchestrator.
