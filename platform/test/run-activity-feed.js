@@ -427,8 +427,19 @@ function v066_makeFakeEl() {
   };
   Object.defineProperty(el, "innerHTML", {
     get() {
-      // Include own _text then recurse through children.
-      return el._text + el._html + el._children.map(c => c.innerHTML).join("");
+      // Lazy serialization: emit each child's open-tag with its dataset
+      // attributes, then recurse. _html holds any innerHTML that was
+      // set directly (e.g., chevron SVG); _text holds textContent.
+      const serializeChild = (c) => {
+        let attrs = "";
+        if (c.dataset && typeof c.dataset === "object") {
+          for (const k of Object.keys(c.dataset)) {
+            attrs += ' data-' + k + '="' + String(c.dataset[k]) + '"';
+          }
+        }
+        return "<" + c.tag + attrs + ">" + c.innerHTML;
+      };
+      return el._text + el._html + el._children.map(serializeChild).join("");
     },
     set(v) { el._html = String(v || ""); el._text = ""; el._children = []; },
   });
@@ -436,7 +447,7 @@ function v066_makeFakeEl() {
     get() { return el._text + el._children.map(c => c.textContent).join(""); },
     set(v) { el._text = String(v == null ? "" : v); el._children = []; },
   });
-  el.createEl = (t) => { const c = v066_makeFakeEl(); c.tag = t; el._children.push(c); el._html += "<" + t + ">"; return c; };
+  el.createEl = (t) => { const c = v066_makeFakeEl(); c.tag = t; el._children.push(c); return c; };
   el.appendChild = (c) => { el._children.push(c); return c; };
   return el;
 }

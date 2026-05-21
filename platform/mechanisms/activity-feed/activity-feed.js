@@ -510,8 +510,6 @@ class ActivityFeed {
     const group = dv.container.createEl("div");
     group.className = "sauce-group";
     group.dataset.group = key;
-    // Emit data-group attr into _html so Node test shim's innerHTML captures it.
-    if (typeof group._html !== "undefined") group._html += ' data-group="' + key + '"';
     if (typeof group.style.setProperty === "function") {
       group.style.setProperty("--group-accent", color);
     } else {
