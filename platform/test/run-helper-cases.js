@@ -7847,6 +7847,36 @@ async function caseFA2RuleFragmentsExtends() {
     }
   }
 
+  // v0.71.0 HC-V0710-2: cowork rule_fragments require summary + declare warnings optional
+  {
+    console.log("\n--- Case HC-V0710-2: cowork atomic-note summary/warnings contract ---");
+    try {
+      const manifest = JSON.parse(fs.readFileSync(
+        path.join(WORKSHOP, "platform/blueprints/cowork/manifest.json"), "utf8"
+      ));
+      const targetTypes = [
+        "cowork-morning-briefing", "cowork-midday-tripwire", "cowork-eod-review",
+        "cowork-finance-snapshot", "cowork-weekly-review", "cowork-monthly-review",
+      ];
+      const fragments = (manifest.validator_rule_fragments || manifest.rule_fragments || []);
+      for (const t of targetTypes) {
+        const frag = fragments.find(function (f) {
+          const eq = f && f.fragment && f.fragment.required_frontmatter && f.fragment.required_frontmatter.type && f.fragment.required_frontmatter.type.equals;
+          return eq === t;
+        });
+        assertTrue("HC-V0710-2a: rule_fragment found for " + t, !!frag);
+        if (!frag) continue;
+        const rf = frag.fragment.required_frontmatter;
+        assertTrue("HC-V0710-2b: " + t + " requires summary",
+          rf.summary && rf.summary.required === true && rf.summary.type === "string");
+        assertTrue("HC-V0710-2c: " + t + " declares warnings (optional, string[])",
+          rf.warnings && rf.warnings.required === false && rf.warnings.type === "string[]");
+      }
+    } catch (e) {
+      assertTrue("HC-V0710-2: cowork rule_fragments contract", false, e && e.message);
+    }
+  }
+
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
   if (fail > 0) {
