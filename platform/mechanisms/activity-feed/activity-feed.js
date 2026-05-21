@@ -400,7 +400,7 @@ class ActivityFeed {
     // created_at desc (mirrors the outer-feed sort).
     if (bucketRules && bucketRules.length > 0) {
       for (const rule of bucketRules) {
-        if (!rule || typeof rule.bucketKey !== "string" || typeof rule.match !== "function") continue;
+        if (!rule || typeof rule.bucketKey !== "string" || rule.bucketKey === "" || typeof rule.match !== "function") continue;
         const bucketKey = rule.bucketKey;
         let bucketPages = groups.get(bucketKey) ? groups.get(bucketKey).slice() : [];
         const consumed = [];
@@ -510,11 +510,7 @@ class ActivityFeed {
     const group = dv.container.createEl("div");
     group.className = "sauce-group";
     group.dataset.group = key;
-    if (typeof group.style.setProperty === "function") {
-      group.style.setProperty("--group-accent", color);
-    } else {
-      group.style.cssText = "--group-accent: " + color + ";";
-    }
+    group.style.setProperty("--group-accent", color);
 
     const details = group.createEl("details");
     if (!isClosed) details.open = true;
@@ -553,18 +549,16 @@ class ActivityFeed {
       }
       // Click-to-open on the line. Anchors/breadcrumbs inside meta
       // call stopPropagation themselves; this handler defends with a
-      // best-effort closest("a") probe in case a shim lacks it.
-      if (typeof line.addEventListener === "function") {
-        line.addEventListener("click", (ev) => {
-          try {
-            const target = ev.target;
-            if (target && typeof target.closest === "function" && target.closest("a")) return;
-            if (p && p.file && p.file.path && typeof app !== "undefined" && app && app.workspace && typeof app.workspace.openLinkText === "function") {
-              app.workspace.openLinkText(p.file.path, "");
-            }
-          } catch (_) { /* ignore */ }
-        });
-      }
+      // best-effort closest("a") probe.
+      line.addEventListener("click", (ev) => {
+        try {
+          const target = ev.target;
+          if (target && target.closest && target.closest("a")) return;
+          if (p && p.file && p.file.path && typeof app !== "undefined" && app && app.workspace && typeof app.workspace.openLinkText === "function") {
+            app.workspace.openLinkText(p.file.path, "");
+          }
+        } catch (_) { /* ignore */ }
+      });
     }
   }
 

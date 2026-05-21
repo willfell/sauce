@@ -416,7 +416,9 @@ console.log("\n--- Pass 4: v0.66.0 rollUpRoots + flatGrouped + metaBuilder ---")
 function v066_makeFakeEl() {
   const el = {
     tag: "div",
-    style: {},
+    style: {
+      setProperty(_k, _v) { /* no-op for the harness; production hits real DOM */ },
+    },
     dataset: {},
     _html: "",
     _children: [],
@@ -449,6 +451,8 @@ function v066_makeFakeEl() {
   });
   el.createEl = (t) => { const c = v066_makeFakeEl(); c.tag = t; el._children.push(c); return c; };
   el.appendChild = (c) => { el._children.push(c); return c; };
+  el.closest = (_sel) => null;  // node-harness no-op; production hits real DOM
+  el.addEventListener = (_type, _fn) => { /* no-op; tests don't dispatch events */ };
   return el;
 }
 
