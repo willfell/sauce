@@ -59,7 +59,7 @@ Per-mechanism version history is in `Docs/cycle-history.md`. Current canonical c
 | Name | Version | Slash command | Module dir |
 | --- | --- | --- | --- |
 | `boards` | 0.1.0 | — | `spice/boards/` |
-| `cowork` | 0.7.0 | — | `spice/cowork/` |
+| `cowork` | 0.12.0 | — | `spice/cowork/` |
 | `daily` | 0.10.7 | `/daily` | `spice/daily/` |
 | `journal` | 0.1.2 | — | `spice/journal/` |
 | `meetings` | 0.5.1 | `/meetings` | `spice/meetings/` |
