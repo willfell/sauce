@@ -477,3 +477,11 @@ Visual changes you will see in today's daily note:
 - Each sub-group renders as a framed section with a colored left stripe; cards inside are now list-style rows with no per-row backgrounds.
 
 If you're a downstream consumer with a CustomJS surface that calls `ActivityFeed.render(..., { flatGrouped: true })` — `flatGrouped` is now a silent no-op (falls through to the legacy `<h4>` renderer). Switch to `framed: true` + the new ordering opts to keep current behavior.
+
+### Upgrading from v0.70.0 → v0.70.1
+
+CSS-only PATCH. Run `sauce install` (or `brew upgrade sauce && sauce install`) — the workshop's installer rewrites `.obsidian/snippets/sauce-daily-dashboard.css` in-place. No JS files change; no API change; no vault-side migration.
+
+Visual changes:
+- **Desktop:** times in the Activity panel now align vertically across rows within the same sub-group (e.g., "2:48 AM" and "1:30 PM" share the same right edge). Slightly more breathing room around rows and between meta tokens.
+- **Mobile:** sub-group rows now stack — title on top with full-width wrapping, meta tokens (time, pill, todo-badge, breadcrumb) wrap below. Fixes the v0.70.0 issue where wide-meta rows (like the kanban "To Do Board" row with a breadcrumb) lost their title to flex shrinkage on narrow viewports.

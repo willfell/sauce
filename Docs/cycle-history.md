@@ -421,3 +421,15 @@ Bulk-move of the v0.48.0 → v0.67.3 per-cycle narrative bullets that previously
 
 See `Docs/plans/2026-05-20-v0.70.0-daily-activity-cohesion-{design,plan,result}.md` for the full record.
 
+## v0.70.1 daily-activity-cohesion PATCH CLOSED 2026-05-20
+
+**Blueprint:** daily 0.10.0 → 0.10.1 (CSS-only polish on v0.70.0 framed-group rendering)
+
+**Headline:** desktop time columns now anchor to a fixed-width right-aligned cell with tabular-nums so they align vertically across rows; mobile rows stack title-above-meta with title wrap, fixing the v0.70.0 regression where wide-meta rows collapsed titles to 0 px on narrow viewports (the kanban "To Do Board" row appeared title-less).
+
+**Harnesses:** +8 `HC-V071-1*` sub-asserts in `run-helper-cases.js` (alignment + mobile-stack checks). FA6 + FA4 daily pins bumped 0.10.0 → 0.10.1. 22-harness count unchanged.
+
+**Lesson:** workshop catalogue (`platform/manifest.json` `blueprints[]`) and per-component manifest must bump in lockstep — the installer reads versions from the catalogue; bumping only the per-component manifest leaves it skipped with `subscription pins X@0.10.1 but workshop has 0.10.0`.
+
+See `Docs/plans/2026-05-20-v0.70.1-daily-activity-cohesion-patch-result.md` for the full record.
+
