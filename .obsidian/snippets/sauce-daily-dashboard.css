@@ -4,21 +4,26 @@
  * Scopes ALL rules under .space-daily-dashboard so nothing leaks. */
 
 /* ── Section frame ─────────────────────────────────────────────────────── *
- * v0.10.3 (sauce v0.70.3): outer sections now use the same thin (1px)
- * full-wrap accent border treatment as inner .sauce-group, matching the
- * single unified visual language across the dashboard. Spacing between
- * sibling sections shares the --sauce-section-gap token defined on
- * .space-daily-dashboard. */
+ * v0.10.4 (sauce v0.70.4): "Quiet Frames" — neutral 1px border around every
+ * section + sub-group; accent color migrates OFF the frame and onto the
+ * section icon (outer) / dot (inner). Goal: let neutrals handle structure,
+ * let color become punctuation, not background. Spacing between sibling
+ * sections shares the --sauce-section-gap token. */
 .space-daily-dashboard .sauce-section {
   background: var(--background-primary-alt);
-  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
   margin-bottom: var(--sauce-section-gap, 12px);
   padding: 0;
 }
-.space-daily-dashboard .sauce-section[data-accent="cyan"]   { border: 1px solid var(--color-cyan); }
-.space-daily-dashboard .sauce-section[data-accent="blue"]   { border: 1px solid var(--color-blue); }
-.space-daily-dashboard .sauce-section[data-accent="purple"] { border: 1px solid var(--color-purple); }
-.space-daily-dashboard .sauce-section[data-accent="grey"]   { border: 1px solid var(--text-faint); }
+/* Accent per section maps to a custom property; consumed by the section icon. */
+.space-daily-dashboard .sauce-section[data-accent="cyan"]   { --section-accent: var(--color-cyan); }
+.space-daily-dashboard .sauce-section[data-accent="blue"]   { --section-accent: var(--color-blue); }
+.space-daily-dashboard .sauce-section[data-accent="purple"] { --section-accent: var(--color-purple); }
+.space-daily-dashboard .sauce-section[data-accent="grey"]   { --section-accent: var(--text-faint); }
+.space-daily-dashboard .sauce-section[data-accent] .sauce-section-icon {
+  color: var(--section-accent, var(--text-faint));
+}
 .space-daily-dashboard .sauce-section > details { padding: 0.55em 0.85em; }
 
 /* ── Custom chevron — hide native, render Lucide instead ───────────────── */
@@ -62,11 +67,14 @@
  * unified via --sauce-section-gap token. */
 .space-daily-dashboard { --sauce-section-gap: 12px; }
 .space-daily-dashboard .sauce-group {
-  background: var(--background-primary-alt);
+  background: transparent;
   border-radius: 6px;
-  border: 1px solid var(--group-accent, var(--color-base-50));
+  border: 1px solid var(--background-modifier-border);
   margin: var(--sauce-section-gap, 12px) 0;
 }
+/* v0.10.4: --group-accent is still applied as an inline style by the
+ * renderer; the inner `.sauce-group-dot` consumes it for its background.
+ * The frame stays neutral so the dot carries the blueprint identity. */
 .space-daily-dashboard .sauce-group > details { padding: 0; }
 .space-daily-dashboard .sauce-group-header {
   list-style: none;

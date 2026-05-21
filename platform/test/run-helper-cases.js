@@ -6806,7 +6806,7 @@ async function caseFA4TimelineManifests() {
   // reclaim + Activity panel). Accept any >= floor instead of strict-equal so
   // future PATCH/MINOR bumps don't re-trigger this baseline. v0.70.0 S5: daily
   // bumped 0.9.0 → 0.10.0 (activity-feed framed renderer); floor updated.
-  const floors = { daily: "0.10.3", journal: "0.2.0", scratch: "0.4.0" };
+  const floors = { daily: "0.10.4", journal: "0.2.0", scratch: "0.4.0" };
   for (const bp of Object.keys(floors)) {
     const m = JSON.parse(fs.readFileSync(
       path.join(WORKSHOP, `platform/blueprints/${bp}/manifest.json`), "utf8"));
@@ -7538,7 +7538,7 @@ async function caseFA2RuleFragmentsExtends() {
   // cards untouched.
   {
     const pins = [
-      ["daily",         "platform/blueprints/daily/manifest.json",            "0.10.3"],
+      ["daily",         "platform/blueprints/daily/manifest.json",            "0.10.4"],
       ["activity-feed", "platform/mechanisms/activity-feed/manifest.json",    "0.4.0"],
       ["cards",         "platform/mechanisms/cards/manifest.json",            "0.2.6"],
     ];
@@ -7696,11 +7696,12 @@ async function caseFA2RuleFragmentsExtends() {
     assertTrue("HC-V072-1a: --sauce-section-gap custom property defined on .space-daily-dashboard",
       /\.space-daily-dashboard\s*\{[^}]*--sauce-section-gap\s*:/.test(css));
     // .sauce-group uses a full 1px border in the accent color, NOT border-left
-    assertTrue("HC-V072-1b: .sauce-group uses `border: 1px solid var(--group-accent` (full wrap)",
-      /\.sauce-group\s*\{[\s\S]*?border:\s*1px\s+solid\s+var\(--group-accent/.test(css));
-    // No `border-left: 4px solid var(--group-accent` remains on .sauce-group
-    assertTrue("HC-V072-1c: legacy `border-left: 4px solid var(--group-accent` removed from .sauce-group",
-      !/\.sauce-group\s*\{[\s\S]*?border-left:\s*4px\s+solid\s+var\(--group-accent/.test(css));
+    assertTrue("HC-V072-1b: .sauce-group uses neutral 1px border (accent migrated to .sauce-group-dot)",
+      /\.sauce-group\s*\{[\s\S]*?border:\s*1px\s+solid\s+var\(--background-modifier-border\)/.test(css));
+    // No `border-left: 4px solid` or accent-colored border remains on .sauce-group
+    assertTrue("HC-V072-1c: legacy `border-left: 4px` + colored full border removed from .sauce-group",
+      !/\.sauce-group\s*\{[\s\S]*?border-left:\s*4px/.test(css) &&
+      !/\.sauce-group\s*\{[\s\S]*?border:\s*1px\s+solid\s+var\(--group-accent/.test(css));
     // .sauce-group margin uses the token
     assertTrue("HC-V072-1d: .sauce-group margin uses var(--sauce-section-gap)",
       /\.sauce-group\s*\{[\s\S]*?margin:\s*var\(--sauce-section-gap/.test(css));
@@ -7720,16 +7721,24 @@ async function caseFA2RuleFragmentsExtends() {
     console.log("\n--- Case HC-V073-1: outer sections full border + empty-state panel ---");
     const cssPath = path.join(WORKSHOP, "platform/blueprints/daily/helpers/sauce-daily-dashboard.css");
     const css = fs.readFileSync(cssPath, "utf8");
-    // Each outer-section accent variant uses `border: 1px solid …` (full wrap), NOT `border-left: …`
-    assertTrue("HC-V073-1a: .sauce-section[data-accent=cyan] uses full 1px border",
-      /\.sauce-section\[data-accent="cyan"\]\s*\{[^}]*border:\s*1px\s+solid\s+var\(--color-cyan\)/.test(css));
-    assertTrue("HC-V073-1b: .sauce-section[data-accent=blue] uses full 1px border",
-      /\.sauce-section\[data-accent="blue"\]\s*\{[^}]*border:\s*1px\s+solid\s+var\(--color-blue\)/.test(css));
-    assertTrue("HC-V073-1c: .sauce-section[data-accent=grey] uses full 1px border",
-      /\.sauce-section\[data-accent="grey"\]\s*\{[^}]*border:\s*1px\s+solid\s+var\(--text-faint\)/.test(css));
-    // Legacy 4px left stripe removed from outer-section accent rules
-    assertTrue("HC-V073-1d: legacy border-left: 4px on .sauce-section accents removed",
-      !/\.sauce-section\[data-accent="[^"]+"\]\s*\{[^}]*border-left:\s*4px/.test(css));
+    // v0.10.4 quiet-frames: each [data-accent] variant defines a --section-accent custom property
+    // (consumed by the section icon), NOT a colored border. The frame is neutral.
+    assertTrue("HC-V073-1a: .sauce-section[data-accent=cyan] sets --section-accent token",
+      /\.sauce-section\[data-accent="cyan"\]\s*\{[^}]*--section-accent\s*:\s*var\(--color-cyan\)/.test(css));
+    assertTrue("HC-V073-1b: .sauce-section[data-accent=blue] sets --section-accent token",
+      /\.sauce-section\[data-accent="blue"\]\s*\{[^}]*--section-accent\s*:\s*var\(--color-blue\)/.test(css));
+    assertTrue("HC-V073-1c: .sauce-section[data-accent=grey] sets --section-accent token",
+      /\.sauce-section\[data-accent="grey"\]\s*\{[^}]*--section-accent\s*:\s*var\(--text-faint\)/.test(css));
+    // Outer .sauce-section frame is now neutral (no accent-colored border)
+    assertTrue("HC-V073-1d: legacy colored border (border-left: 4px AND border: 1px solid var(--color-*)) removed from .sauce-section accents",
+      !/\.sauce-section\[data-accent="[^"]+"\]\s*\{[^}]*border-left:\s*4px/.test(css) &&
+      !/\.sauce-section\[data-accent="[^"]+"\]\s*\{[^}]*border:\s*1px\s+solid\s+var\(--color-/.test(css));
+    // Outer .sauce-section base rule now uses the neutral --background-modifier-border
+    assertTrue("HC-V073-1j: .sauce-section base rule uses neutral --background-modifier-border",
+      /\.sauce-section\s*\{[\s\S]*?border:\s*1px\s+solid\s+var\(--background-modifier-border\)/.test(css));
+    // Section icon consumes the --section-accent token (color migration)
+    assertTrue("HC-V073-1k: .sauce-section-icon color binds to var(--section-accent)",
+      /\.sauce-section-icon\s*\{[^}]*color:\s*var\(--section-accent/.test(css));
     // Outer section margin-bottom uses the shared --sauce-section-gap token
     assertTrue("HC-V073-1e: .sauce-section margin-bottom uses var(--sauce-section-gap)",
       /\.sauce-section\s*\{[\s\S]*?margin-bottom:\s*var\(--sauce-section-gap/.test(css));
