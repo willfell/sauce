@@ -340,6 +340,43 @@ This is the seam by design — blueprint authors own the canonical body, consume
 
 Codified in v0.32.0 alongside the landmine #12 allowlist expansion for `.claude/commands.local/**` + `.claude/skills.local/**`.
 
+### 23. `file.mtime` is unreliable on Obsidian Mobile — `created_at` is the only authoritative "created today" signal
+
+Obsidian Mobile rewrites file mtimes when sync pulls a file onto the device. The mobile-side `p.file.mtime` reflects the **sync time**, not the original write time. A scratch created on Wednesday will, on the user's phone, have an mtime equal to whenever Mobile last synced — even though `created_at:` in the frontmatter still says Wednesday. Desktop preserves mtimes from the original write, so the difference is invisible there.
+
+**Symptom that exposed this.** v0.70.6 had both `ActivityFeed._query.inWindow` and `SpaceDailyDashboard._getActivityCount.inWindow` accept a page if EITHER `created_at` OR `file.mtime` fell in the time window (via `includeMtime: true`). On the headspace mobile vault, Thursday's daily rendered Wednesday's 4 scratches + 3 cowork run-notes because their mobile mtime was Thursday's sync time. Friday's daily worked because Wednesday's files still had a Thursday mtime, which is out of Friday's window. Desktop was unaffected throughout.
+
+**Fix shipped in v0.70.7.** When `created_at` (or whichever `tsKey` is being filtered on) is present on the page, it is **authoritative**. Do NOT fall through to `file.mtime` when the canonical timestamp is set-but-out-of-window. The mtime fallback is reserved exclusively for LEGACY pages that lack the canonical timestamp field.
+
+**How to apply.** Any new time-windowed filter over Dataview pages must follow this shape:
+
+```js
+const inWindow = (p) => {
+  if (!p) return false;
+  const tsRaw = p[tsKey];           // created_at, status_changed_at, etc.
+  if (tsRaw) {                       // present? it wins, period
+    const ts = String(tsRaw);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(ts)) return ts >= startISODate && ts <= endISODate;
+    return ts >= startISO && ts <= endISO;
+  }
+  // mtime fallback ONLY for legacy pages without the canonical timestamp
+  if (!p.file || !p.file.mtime) return false;
+  const mIso = (typeof p.file.mtime.toISO === "function") ? p.file.mtime.toISO() : String(p.file.mtime);
+  return mIso >= startISO && mIso <= endISO;
+};
+```
+
+The shape is: if `tsRaw` is set, return its in-window check directly. Never OR with mtime when `tsRaw` is present.
+
+**Reason this is non-negotiable.** Every entity-shape and timeline-shape note shipped by the sauce blueprints sets `created_at:` (per the canonical-vocab rule). Mobile sync mtime is a noisy, environment-dependent signal that must NOT be allowed to override the durable `created_at`. Any "OR-on-mtime" predicate will reintroduce the v0.70.x mobile regression — and the test harness can't catch it because Node-side mtimes are honest.
+
+**Surfaces touched today (gates the regression):**
+- `platform/mechanisms/activity-feed/activity-feed.js` — `_query.inWindow` (v0.4.1)
+- `platform/blueprints/daily/helpers/space-daily-dashboard.js` — `_getActivityCount.inWindow` (v0.10.7)
+- Tests: `AF-V071-1/2/3` in `run-activity-feed.js` lock the strict semantics + legacy fallback contract. Any future in-window predicate should add a parallel test set.
+
+When you write a third time-window predicate (weekly/monthly hub renderer, future ranking surfaces, etc.), copy the shape above. Mobile smoke is mandatory before close on any cycle that touches this path — Node-side preflight cannot reproduce the failure mode.
+
 ## Operational gotchas
 
 ### CustomJS scan folder is per-vault and configured in `.obsidian/plugins/customjs/data.json`
