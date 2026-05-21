@@ -6806,7 +6806,7 @@ async function caseFA4TimelineManifests() {
   // reclaim + Activity panel). Accept any >= floor instead of strict-equal so
   // future PATCH/MINOR bumps don't re-trigger this baseline. v0.70.0 S5: daily
   // bumped 0.9.0 → 0.10.0 (activity-feed framed renderer); floor updated.
-  const floors = { daily: "0.10.6", journal: "0.2.0", scratch: "0.4.0" };
+  const floors = { daily: "0.10.7", journal: "0.2.0", scratch: "0.4.0" };
   for (const bp of Object.keys(floors)) {
     const m = JSON.parse(fs.readFileSync(
       path.join(WORKSHOP, `platform/blueprints/${bp}/manifest.json`), "utf8"));
@@ -7538,8 +7538,8 @@ async function caseFA2RuleFragmentsExtends() {
   // cards untouched.
   {
     const pins = [
-      ["daily",         "platform/blueprints/daily/manifest.json",            "0.10.6"],
-      ["activity-feed", "platform/mechanisms/activity-feed/manifest.json",    "0.4.0"],
+      ["daily",         "platform/blueprints/daily/manifest.json",            "0.10.7"],
+      ["activity-feed", "platform/mechanisms/activity-feed/manifest.json",    "0.4.1"],
       ["cards",         "platform/mechanisms/cards/manifest.json",            "0.2.6"],
     ];
     for (const [name, relPath, expected] of pins) {

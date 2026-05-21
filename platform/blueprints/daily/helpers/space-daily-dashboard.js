@@ -336,16 +336,20 @@ class SpaceDailyDashboard {
     const allowed  = this._DEFAULT_DASHBOARD_BLUEPRINTS;
     const rollupRules = this._buildRollupRules(dv);
 
+    // v0.10.7 (sauce v0.70.7): mirror activity-feed@0.4.1's strict
+    // created_at semantics — when created_at is present, it's authoritative
+    // and we do NOT fall through to mtime (which is unreliable on Obsidian
+    // Mobile after sync). mtime is consulted only for legacy pages without
+    // a created_at field.
     const inWindow = (p) => {
       if (!p) return false;
       const tsRaw = p.created_at;
       if (tsRaw) {
         const ts = String(tsRaw);
         if (/^\d{4}-\d{2}-\d{2}$/.test(ts)) {
-          if (ts >= startIso.slice(0, 10) && ts <= endIso.slice(0, 10)) return true;
-        } else if (ts >= startIso && ts <= endIso) {
-          return true;
+          return ts >= startIso.slice(0, 10) && ts <= endIso.slice(0, 10);
         }
+        return ts >= startIso && ts <= endIso;
       }
       if (p.file && p.file.mtime) {
         const mIso = (typeof p.file.mtime.toISO === "function") ? p.file.mtime.toISO() : String(p.file.mtime);

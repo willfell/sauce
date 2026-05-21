@@ -9,12 +9,12 @@ load_when: Starting a session, picking the next cycle, or sanity-checking the cu
 
 ## Current
 
-- **Workshop version:** `0.70.6` (closed 2026-05-21)
-- **Most recent cycle:** v0.70.6 daily-activity-cohesion PATCH — BUGFIX: robust currentFile resolver. The dashboard now walks `dv.container`'s ancestry to find the markdown leaf that actually contains the dataviewjs block instead of trusting `dv.current()`, which has been observed returning a stale (previously-focused) leaf's file on Obsidian Mobile when navigating quickly between daily notes. New `_resolveCurrentFileName(dv)` helper (daily 0.10.5 → 0.10.6). Follows v0.70.5, v0.70.4, v0.70.3, v0.70.2, v0.70.1, v0.70.0. See `Docs/cycle-history.md` for full narrative.
+- **Workshop version:** `0.70.7` (closed 2026-05-21)
+- **Most recent cycle:** v0.70.7 daily-activity-cohesion PATCH — BUGFIX: strict created_at semantics. `created_at` (where present) is now authoritative in the in-window check; mtime fallback is reserved for legacy pages without the field. Fixes Obsidian Mobile rendering yesterday's content into today's daily because Mobile sync re-touches files (mobile-side mtime = sync time, not write time, so includeMtime was matching pages whose created_at clearly excluded them). Touches both `activity-feed._query.inWindow` (0.4.0 → 0.4.1) and `SpaceDailyDashboard._getActivityCount.inWindow` (daily 0.10.6 → 0.10.7). Follows v0.70.6, v0.70.5, v0.70.4, v0.70.3, v0.70.2, v0.70.1, v0.70.0. See `Docs/cycle-history.md` for full narrative.
 
 ## Cycle order (chronological)
 
-v0.1.0 → v0.1.1 → v0.1.x → v0.1.3 → v0.1.2 → v0.2.0 → v0.3.0 → v0.4.0 → v0.3.2 → v0.4.2 → v0.5.0 → v0.11.0 → v0.12.0 → v0.13.0 → v0.14.0 → v0.6.0 → v0.16.0 → v0.17.0 → v0.18.0/.1/.2 → v0.19.0 → v0.20.0 → v0.21.0/.1 → v0.22.0/.1 → v0.23.0 → v0.24.0 → v0.25.0 → v0.26.0/.1 → v0.27.0 → v0.28.0 → v0.29.0 → v0.30.0 ⏭️ → v0.31.0 → v0.32.0 → v0.33.0/.1 → v0.36.0/.1 → v0.37.0 → v0.38.0/.1 → v0.40.0 → v0.41.0/.5 → v0.42.0 → v0.43.0 → v0.44.0 → v0.45.0 → v0.46.0/.1/.2 → v0.47.0 → v0.48.0 → v0.49.0 → v0.49.1 ⏭️ → v0.49.2 → (v0.50.0–v0.62.0 narratives lost; pre-v0.63 narrative below resumes) → v0.63.0 → v0.63.1 → v0.63.2 → v0.63.3 → v0.64.0 → v0.64.1 → v0.64.2 → v0.64.3 → v0.65.0 → v0.66.0 → v0.66.1 → v0.66.2 → v0.67.0 → v0.67.1 → v0.67.2 → v0.67.3 → v0.70.0 → v0.70.1 → v0.70.2 → v0.70.3 → v0.70.4 → v0.70.5 → v0.70.6 (current).
+v0.1.0 → v0.1.1 → v0.1.x → v0.1.3 → v0.1.2 → v0.2.0 → v0.3.0 → v0.4.0 → v0.3.2 → v0.4.2 → v0.5.0 → v0.11.0 → v0.12.0 → v0.13.0 → v0.14.0 → v0.6.0 → v0.16.0 → v0.17.0 → v0.18.0/.1/.2 → v0.19.0 → v0.20.0 → v0.21.0/.1 → v0.22.0/.1 → v0.23.0 → v0.24.0 → v0.25.0 → v0.26.0/.1 → v0.27.0 → v0.28.0 → v0.29.0 → v0.30.0 ⏭️ → v0.31.0 → v0.32.0 → v0.33.0/.1 → v0.36.0/.1 → v0.37.0 → v0.38.0/.1 → v0.40.0 → v0.41.0/.5 → v0.42.0 → v0.43.0 → v0.44.0 → v0.45.0 → v0.46.0/.1/.2 → v0.47.0 → v0.48.0 → v0.49.0 → v0.49.1 ⏭️ → v0.49.2 → (v0.50.0–v0.62.0 narratives lost; pre-v0.63 narrative below resumes) → v0.63.0 → v0.63.1 → v0.63.2 → v0.63.3 → v0.64.0 → v0.64.1 → v0.64.2 → v0.64.3 → v0.65.0 → v0.66.0 → v0.66.1 → v0.66.2 → v0.67.0 → v0.67.1 → v0.67.2 → v0.67.3 → v0.70.0 → v0.70.1 → v0.70.2 → v0.70.3 → v0.70.4 → v0.70.5 → v0.70.6 → v0.70.7 (current).
 
 > Gap note: per `Docs/cycle-history.md` line count (57 closed-cycle sections ending at v0.47.0, plus a v0.48–v0.67.3 archive), the v0.50.0 → v0.62.0 narratives were not captured in cycle-history.md during their respective closes. The CLAUDE.md claim that they were "archived to Docs/cycle-history.md" was stale. Backfill from `Docs/plans/` is possible but deferred.
 
@@ -41,7 +41,7 @@ Live brainstorm list (also referenced in `Docs/plans/` and brainstorm shelf file
 | `validator` | 0.2.0 | Per-file rules engine + Layer 2 manifest-convention rules |
 | `audit` | 0.2.0 | `claude-surface` walker + entity-create walker + `/audit` slash command |
 | `nav-buttons` | 2.7.0 | Registry-driven nav-button renderer; consumes icons mechanism |
-| `activity-feed` | 0.4.0 | Bucketed activity-feed renderer; bucketRules + groupOrder + framed renderer |
+| `activity-feed` | 0.4.1 | Bucketed activity-feed renderer; bucketRules + groupOrder + framed renderer |
 | `cards` | 0.2.4 | BeaconCards row/stacked layouts |
 | `accent-button` | 0.1.0 | AccentButton render helper |
 | `icons` | 0.1.1 | Lucide kebab → SVG resolver; ~21 vendored Tier 1 SVGs + Obsidian `setIcon` Tier 2 fallback |
@@ -60,7 +60,7 @@ Per-mechanism version history is in `Docs/cycle-history.md`. Current canonical c
 | --- | --- | --- | --- |
 | `boards` | 0.1.0 | — | `spice/boards/` |
 | `cowork` | 0.7.0 | — | `spice/cowork/` |
-| `daily` | 0.10.6 | `/daily` | `spice/daily/` |
+| `daily` | 0.10.7 | `/daily` | `spice/daily/` |
 | `journal` | 0.1.2 | — | `spice/journal/` |
 | `meetings` | 0.5.1 | `/meetings` | `spice/meetings/` |
 | `people` | 0.2.2 | — | `spice/people/` |

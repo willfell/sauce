@@ -246,14 +246,24 @@ class ActivityFeed {
 
     // Pass 1: window filter only (NOT type allowlist — rollup children may have
     // types outside the allowlist; we allowlist-filter the SURVIVORS post-rollup).
+    //
+    // v0.4.1 (sauce v0.70.7): created_at (tsKey) is AUTHORITATIVE when present.
+    // If a page has a tsKey field, the in-window check is purely tsKey-based —
+    // we no longer fall through to file.mtime when tsKey is out-of-window.
+    // mtime is consulted only for LEGACY pages that lack the tsKey field.
+    // Fixes Obsidian Mobile rendering yesterday's content into today's daily
+    // when mobile sync re-touched the files (mobile-side mtime = sync time,
+    // not original write time, so includeMtime was matching files whose
+    // created_at clearly excluded them).
     const inWindow = (p) => {
       if (!p) return false;
       const tsRaw = p[tsKey];
       if (tsRaw) {
         const ts = String(tsRaw);
         if (/^\d{4}-\d{2}-\d{2}$/.test(ts)) {
-          if (ts >= start.slice(0, 10) && ts <= end.slice(0, 10)) return true;
-        } else if (ts >= start && ts <= end) return true;
+          return ts >= start.slice(0, 10) && ts <= end.slice(0, 10);
+        }
+        return ts >= start && ts <= end;
       }
       if (!includeMtime) return false;
       if (!p.file || !p.file.mtime) return false;

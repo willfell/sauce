@@ -63,7 +63,7 @@ try {
 if (manifest) {
   assertTrue("AF-1b: manifest.json parses as JSON", true);
   assertEq("AF-1c: manifest.name === 'activity-feed'", manifest.name, "activity-feed");
-  assertEq("AF-1d: manifest.version === '0.4.0'", manifest.version, "0.4.0");
+  assertEq("AF-1d: manifest.version === '0.4.1'", manifest.version, "0.4.1");
   assertEq("AF-1e: manifest.kind === 'mechanism'", manifest.kind, "mechanism");
 
   assertEq("AF-2: customjs_classes is ['ActivityFeed']", manifest.customjs_classes, ["ActivityFeed"]);
@@ -333,11 +333,14 @@ try {
   );
 }
 
-// AF-M1 — includeMtime: true catches mtime hits.
+// AF-M1 — includeMtime: true catches mtime hits for LEGACY pages without
+// `created_at`. v0.4.1 fixture update: removed the out-of-window created_at
+// (which v0.4.1 now treats as authoritative). Without created_at, the page
+// falls back to mtime as designed.
 try {
   const pageZ = {
     type: "project",
-    created_at: "2026-05-01T10:00:00-06:00",
+    // intentionally no created_at — legacy page
     file: {
       name: "page-z.md",
       path: "page-z.md",
@@ -350,15 +353,15 @@ try {
   );
   const hasZ = text.indexOf("page-z.md") >= 0;
   assertTrue(
-    "AF-M1: includeMtime ORs file.mtime into time-window predicate",
+    "AF-M1: includeMtime falls back to file.mtime when created_at is absent",
     hasZ,
-    "AF-M1: includeMtime did not OR file.mtime into the time-window predicate"
+    "AF-M1: includeMtime mtime-fallback did not surface a legacy page (no created_at) with in-window mtime"
   );
 } catch (e) {
   assertTrue(
-    "AF-M1: includeMtime ORs file.mtime into time-window predicate",
+    "AF-M1: includeMtime falls back to file.mtime when created_at is absent",
     false,
-    "AF-M1: includeMtime did not OR file.mtime into the time-window predicate (threw: " + (e && e.message) + ")"
+    "AF-M1: includeMtime mtime-fallback path threw: " + (e && e.message)
   );
 }
 
@@ -402,7 +405,7 @@ try {
     assertTrue(`AF-V065: _DEFAULT_BLUEPRINTS contains "${t}"`, src.includes(`"${t}"`));
   }
   const manifest = JSON.parse(fs.readFileSync("platform/mechanisms/activity-feed/manifest.json", "utf8"));
-  assertEq("AF-V065: activity-feed manifest version is 0.4.0", manifest.version, "0.4.0");
+  assertEq("AF-V065: activity-feed manifest version is 0.4.1", manifest.version, "0.4.1");
   assertTrue("AF-V065: activity-feed description mentions 0.2.0", typeof manifest.description === "string" && manifest.description.includes("0.2.0"));
 }
 
@@ -1009,6 +1012,97 @@ try {
   assertTrue("AF-V070-CONFLICT-1: top wins when key listed in both arrays", cIdx >= 0 && sIdx > cIdx);
 } catch (e) {
   assertTrue("AF-V070-CONFLICT-1: ordering conflict resolution", false, e && e.message);
+}
+
+// ── Pass 6: v0.4.1 — strict created_at semantics (mobile mtime fix) ─────────
+
+console.log("\n--- Pass 6: v0.4.1 strict created_at semantics ---");
+
+// AF-V071-1: page with out-of-window created_at + in-window mtime is REJECTED.
+// Pre-v0.4.1 it was incorrectly ACCEPTED via the mtime fallback — that
+// caused Obsidian Mobile to show yesterday's content in today's daily when
+// Mobile sync had re-touched the files.
+try {
+  const page = {
+    type: "scratch",
+    created_at: "2026-05-20T16:44:15-06:00",                 // yesterday
+    file: {
+      path: "stale.md",
+      name: "stale.md",
+      mtime: { toISO: () => "2026-05-21T11:00:00-06:00" },   // today (mobile sync time)
+    },
+  };
+  const dv = v066_makeFakeDv([page]);
+  const ActivityFeed = v066_loadAF();
+  const af = new ActivityFeed();
+  af.render(dv, {
+    scope: "today",
+    asOf: "2026-05-21",
+    blueprints: ["scratch"],
+    includeMtime: true,
+    framed: true,
+  });
+  const html = dv.container.innerHTML;
+  assertTrue("AF-V071-1: page with out-of-window created_at + in-window mtime is REJECTED (created_at authoritative)",
+    html.indexOf("stale") < 0);
+} catch (e) {
+  assertTrue("AF-V071-1: strict created_at rejection", false, e && e.message);
+}
+
+// AF-V071-2: legacy page WITHOUT created_at — mtime fallback still works.
+try {
+  const page = {
+    type: "scratch",
+    file: {
+      path: "legacy.md",
+      name: "legacy.md",
+      mtime: { toISO: () => "2026-05-21T11:00:00-06:00" },   // today
+    },
+  };
+  const dv = v066_makeFakeDv([page]);
+  const ActivityFeed = v066_loadAF();
+  const af = new ActivityFeed();
+  af.render(dv, {
+    scope: "today",
+    asOf: "2026-05-21",
+    blueprints: ["scratch"],
+    includeMtime: true,
+    framed: true,
+  });
+  const html = dv.container.innerHTML;
+  assertTrue("AF-V071-2: legacy page without created_at falls back to mtime (still accepts)",
+    html.indexOf("legacy") >= 0);
+} catch (e) {
+  assertTrue("AF-V071-2: legacy mtime fallback", false, e && e.message);
+}
+
+// AF-V071-3: page with in-window created_at + out-of-window mtime is ACCEPTED.
+// (created_at wins; mtime being old shouldn't disqualify a newly-created note.)
+try {
+  const page = {
+    type: "scratch",
+    created_at: "2026-05-21T09:00:00-06:00",                 // today
+    file: {
+      path: "fresh.md",
+      name: "fresh.md",
+      mtime: { toISO: () => "2026-05-19T10:00:00-06:00" },   // 2 days ago
+    },
+  };
+  const dv = v066_makeFakeDv([page]);
+  const ActivityFeed = v066_loadAF();
+  const af = new ActivityFeed();
+  af.render(dv, {
+    scope: "today",
+    asOf: "2026-05-21",
+    blueprints: ["scratch"],
+    includeMtime: true,
+    framed: true,
+  });
+  const html = dv.container.innerHTML;
+  assertTrue("AF-V071-3: page with in-window created_at + out-of-window mtime is ACCEPTED (created_at wins)",
+    html.indexOf("fresh") >= 0);
+} catch (e) {
+  assertTrue("AF-V071-3: created_at wins over mtime", false, e && e.message);
 }
 
 // ── Summary ───────────────────────────────────────────────────────────────
