@@ -464,3 +464,16 @@ The v0.22.0 inside-vault layout is **one of two supported shapes**:
 Both shapes use the same canonical `install.js` at runtime via the v0.1.2 thin-stub dispatch — no code paths diverge based on layout. The only difference is the value stored in `workshop_relative_path`.
 
 For the legacy onboarding flow (manual git clone + manual config files + manual stub copy), see [use.md → "Onboarding a new consumer vault (post-v0.1.2)"](use.md).
+
+---
+
+### Upgrading from v0.69.0 → v0.70.0
+
+Run `sauce install` (or `brew upgrade sauce && sauce install`) — the workshop's installer rewrites `ranch/scripts/activity-feed/activity-feed.js`, `ranch/scripts/daily/space-daily-dashboard.js`, and `.obsidian/snippets/sauce-daily-dashboard.css` in-place. No vault-side migration required; the new opts are additive and the daily dashboard adopts them automatically.
+
+Visual changes you will see in today's daily note:
+- The Activity panel groups all `cowork-*` notes under a single "Cowork" header.
+- Cowork → Project → Kanban → Trip are pinned at the top; Scratch is pinned at the bottom and collapsed by default.
+- Each sub-group renders as a framed section with a colored left stripe; cards inside are now list-style rows with no per-row backgrounds.
+
+If you're a downstream consumer with a CustomJS surface that calls `ActivityFeed.render(..., { flatGrouped: true })` — `flatGrouped` is now a silent no-op (falls through to the legacy `<h4>` renderer). Switch to `framed: true` + the new ordering opts to keep current behavior.
