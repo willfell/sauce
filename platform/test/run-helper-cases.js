@@ -6806,7 +6806,7 @@ async function caseFA4TimelineManifests() {
   // reclaim + Activity panel). Accept any >= floor instead of strict-equal so
   // future PATCH/MINOR bumps don't re-trigger this baseline. v0.70.0 S5: daily
   // bumped 0.9.0 → 0.10.0 (activity-feed framed renderer); floor updated.
-  const floors = { daily: "0.10.1", journal: "0.2.0", scratch: "0.4.0" };
+  const floors = { daily: "0.10.2", journal: "0.2.0", scratch: "0.4.0" };
   for (const bp of Object.keys(floors)) {
     const m = JSON.parse(fs.readFileSync(
       path.join(WORKSHOP, `platform/blueprints/${bp}/manifest.json`), "utf8"));
@@ -7538,7 +7538,7 @@ async function caseFA2RuleFragmentsExtends() {
   // cards untouched.
   {
     const pins = [
-      ["daily",         "platform/blueprints/daily/manifest.json",            "0.10.1"],
+      ["daily",         "platform/blueprints/daily/manifest.json",            "0.10.2"],
       ["activity-feed", "platform/mechanisms/activity-feed/manifest.json",    "0.4.0"],
       ["cards",         "platform/mechanisms/cards/manifest.json",            "0.2.6"],
     ];
@@ -7684,6 +7684,34 @@ async function caseFA2RuleFragmentsExtends() {
         /\.sauce-group-row-title\s*\{[\s\S]*?white-space:\s*normal/.test(mb));
       assertTrue("HC-V071-1h: mobile row-meta override (width: 100%) present",
         /\.sauce-group-row-meta\s*\{[\s\S]*?width:\s*100%/.test(mb));
+    }
+  }
+
+  // v0.70.2 HC-V072-1: inner group — thin full border + defined --sauce-section-gap token
+  {
+    console.log("\n--- Case HC-V072-1: inner group thin full border + section-gap token ---");
+    const cssPath = path.join(WORKSHOP, "platform/blueprints/daily/helpers/sauce-daily-dashboard.css");
+    const css = fs.readFileSync(cssPath, "utf8");
+    // --sauce-section-gap custom property defined on the dashboard root
+    assertTrue("HC-V072-1a: --sauce-section-gap custom property defined on .space-daily-dashboard",
+      /\.space-daily-dashboard\s*\{[^}]*--sauce-section-gap\s*:/.test(css));
+    // .sauce-group uses a full 1px border in the accent color, NOT border-left
+    assertTrue("HC-V072-1b: .sauce-group uses `border: 1px solid var(--group-accent` (full wrap)",
+      /\.sauce-group\s*\{[\s\S]*?border:\s*1px\s+solid\s+var\(--group-accent/.test(css));
+    // No `border-left: 4px solid var(--group-accent` remains on .sauce-group
+    assertTrue("HC-V072-1c: legacy `border-left: 4px solid var(--group-accent` removed from .sauce-group",
+      !/\.sauce-group\s*\{[\s\S]*?border-left:\s*4px\s+solid\s+var\(--group-accent/.test(css));
+    // .sauce-group margin uses the token
+    assertTrue("HC-V072-1d: .sauce-group margin uses var(--sauce-section-gap)",
+      /\.sauce-group\s*\{[\s\S]*?margin:\s*var\(--sauce-section-gap/.test(css));
+    // Mobile media block overrides the token to a smaller value, not the old margin-bottom rule
+    const mobileBlock = css.match(/@media\s*\(max-width:\s*480px\)\s*\{[\s\S]*?\n\}/);
+    if (mobileBlock) {
+      const mb = mobileBlock[0];
+      assertTrue("HC-V072-1e: mobile overrides --sauce-section-gap (tighter spacing)",
+        /--sauce-section-gap\s*:/.test(mb));
+      assertTrue("HC-V072-1f: mobile no longer sets .sauce-group { margin-bottom: ... } directly",
+        !/\.sauce-group\s*\{\s*margin-bottom:/.test(mb));
     }
   }
 

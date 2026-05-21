@@ -52,12 +52,17 @@
   transform: rotate(90deg);
 }
 
-/* ── Framed group (v0.10.0 sauce v0.70.0) ──────────────────────────────── */
+/* ── Framed group (v0.10.0 sauce v0.70.0, refined v0.10.2 sauce v0.70.2) ───
+ * v0.10.2: accent moved from a 4px left stripe to a thin (1px) border
+ * wrapping all four sides of the group; vertical spacing between sibling
+ * groups (and between the outer section header and the first inner group)
+ * unified via --sauce-section-gap token. */
+.space-daily-dashboard { --sauce-section-gap: 12px; }
 .space-daily-dashboard .sauce-group {
   background: var(--background-primary-alt);
   border-radius: 6px;
-  border-left: 4px solid var(--group-accent, var(--color-base-50));
-  margin-bottom: 10px;
+  border: 1px solid var(--group-accent, var(--color-base-50));
+  margin: var(--sauce-section-gap, 12px) 0;
 }
 .space-daily-dashboard .sauce-group > details { padding: 0; }
 .space-daily-dashboard .sauce-group-header {
@@ -263,7 +268,7 @@
   .space-daily-dashboard .sauce-drill-row { font-size: 0.9em; padding: 2px 4px; }
   .space-daily-dashboard .sauce-drill-time { margin-left: 8px; }
   .space-daily-dashboard .sauce-todo-pill { padding: 1px 7px 1px 5px; font-size: 0.88em; }
-  .space-daily-dashboard .sauce-group { margin-bottom: 8px; }
+  .space-daily-dashboard { --sauce-section-gap: 8px; }
   .space-daily-dashboard .sauce-group-header { padding: 8px 10px; gap: 6px; }
   /* v0.10.1 — on mobile, stack title above meta and let the title use the full
    * row width with wrapping. Pre-v0.10.1 the flex-row layout collapsed titles
