@@ -7606,8 +7606,20 @@ async function caseFA2RuleFragmentsExtends() {
     );
     assertTrue("HC-V067-2a: .sauce-drill-in selector present", /\.sauce-drill-in\s*\{/.test(css));
     assertTrue("HC-V067-2b: .sauce-todo-pill selector present", /\.sauce-todo-pill\s*\{/.test(css));
-    assertTrue("HC-V067-2c: [data-segmented='true']::before present",
-      /\[data-segmented="true"\]::before/.test(css));
+    // v0.70.0 HC-V070-2: framed-group CSS rules present; old flat + segmented rules absent
+    assertTrue("HC-V070-2a: .sauce-group selector present",         /\.sauce-group\s*\{/.test(css));
+    assertTrue("HC-V070-2b: .sauce-group-header selector present",  /\.sauce-group-header\s*\{/.test(css));
+    assertTrue("HC-V070-2c: .sauce-group-body selector present",    /\.sauce-group-body\s*\{/.test(css));
+    assertTrue("HC-V070-2d: .sauce-group-row selector present",     /\.sauce-group-row\s*\{/.test(css));
+    assertTrue("HC-V070-2e: .sauce-group-row-line selector present",/\.sauce-group-row-line\s*\{/.test(css));
+    assertTrue("HC-V070-2f: chevron rotation rule on [open] present",
+      /sauce-group\s*>\s*details\[open\][\s\S]*sauce-group-chevron[\s\S]*rotate\(90deg\)/.test(css));
+    assertTrue("HC-V070-2g: hairline divider on consecutive rows present",
+      /\.sauce-group-row\s*\+\s*\.sauce-group-row\s*\{[\s\S]*border-top/.test(css));
+    assertTrue("HC-V070-2h: legacy [data-segmented='true']::before rule absent",
+      !/\[data-segmented=['"]true['"]\]\s*::?before/.test(css));
+    assertTrue("HC-V070-2i: legacy 'Inner group headers (flatGrouped)' section header absent",
+      !/flatGrouped/.test(css));
   }
 
   // v0.67.0 HC-V067-3: icons object swap (zap removed, activity + square added)

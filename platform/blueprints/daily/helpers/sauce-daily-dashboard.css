@@ -52,20 +52,87 @@
   transform: rotate(90deg);
 }
 
-/* ── Inner group headers (flatGrouped) ─────────────────────────────────── */
+/* ── Framed group (v0.10.0 sauce v0.70.0) ──────────────────────────────── */
+.space-daily-dashboard .sauce-group {
+  background: var(--background-primary-alt);
+  border-radius: 6px;
+  border-left: 4px solid var(--group-accent, var(--color-base-50));
+  margin-bottom: 10px;
+}
+.space-daily-dashboard .sauce-group > details { padding: 0; }
 .space-daily-dashboard .sauce-group-header {
-  font-size: 0.75em;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-muted);
-  margin: 12px 0 6px 0;
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  padding: 10px 14px;
+  font-weight: 600;
+  font-size: 0.9em;
+  color: var(--text-normal);
 }
-.space-daily-dashboard .sauce-group-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
-.space-daily-dashboard .sauce-group-count { color: var(--text-faint); font-weight: 500; }
+.space-daily-dashboard .sauce-group-header::-webkit-details-marker { display: none; }
+.space-daily-dashboard .sauce-group-header::marker { display: none; }
+.space-daily-dashboard .sauce-group-chevron {
+  display: inline-flex;
+  color: var(--text-muted);
+  transition: transform 0.18s ease;
+}
+.space-daily-dashboard .sauce-group > details[open] > .sauce-group-header .sauce-group-chevron {
+  transform: rotate(90deg);
+}
+.space-daily-dashboard .sauce-group-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.space-daily-dashboard .sauce-group-label { letter-spacing: 0.01em; }
+.space-daily-dashboard .sauce-group-count {
+  color: var(--text-faint);
+  font-weight: 500;
+  margin-left: 2px;
+}
+.space-daily-dashboard .sauce-group-body {
+  display: flex;
+  flex-direction: column;
+}
+.space-daily-dashboard .sauce-group-row {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  position: relative;
+  cursor: pointer;
+}
+.space-daily-dashboard .sauce-group-row + .sauce-group-row {
+  border-top: 1px solid var(--background-modifier-border);
+}
+.space-daily-dashboard .sauce-group-row:hover { background: var(--background-modifier-hover); }
+.space-daily-dashboard .sauce-group-row-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 14px;
+}
+.space-daily-dashboard .sauce-group-row-title {
+  flex: 1;
+  min-width: 0;
+  font-weight: 500;
+  color: var(--text-normal);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.space-daily-dashboard .sauce-group-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  font-size: 0.78em;
+  color: var(--text-muted);
+}
 
 /* ── Per-card meta line ────────────────────────────────────────────────── */
 .space-daily-dashboard .sauce-meta {
@@ -175,21 +242,6 @@
 }
 .space-daily-dashboard .sauce-todo-count { font-variant-numeric: tabular-nums; }
 
-/* ── Segmented accent line (Activity only — Tasks/Meetings keep single-color) ── */
-.space-daily-dashboard .sauce-section[data-segmented="true"] {
-  position: relative;
-  border-left: none;
-}
-.space-daily-dashboard .sauce-section[data-segmented="true"]::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 4px;
-  background-image: var(--sauce-accent-segments);
-  border-radius: 6px 0 0 6px;
-}
 
 /* ── Mobile pass — narrow viewports ────────────────────────────────────── */
 @media (max-width: 480px) {
@@ -201,5 +253,8 @@
   .space-daily-dashboard .sauce-drill-row { font-size: 0.9em; padding: 2px 4px; }
   .space-daily-dashboard .sauce-drill-time { margin-left: 8px; }
   .space-daily-dashboard .sauce-todo-pill { padding: 1px 7px 1px 5px; font-size: 0.88em; }
-  .space-daily-dashboard .sauce-section[data-segmented="true"]::before { width: 3px; }
+  .space-daily-dashboard .sauce-group { margin-bottom: 8px; }
+  .space-daily-dashboard .sauce-group-header { padding: 8px 10px; gap: 6px; }
+  .space-daily-dashboard .sauce-group-row-line { padding: 6px 10px; gap: 8px; }
+  .space-daily-dashboard .sauce-group-dot { width: 7px; height: 7px; }
 }
