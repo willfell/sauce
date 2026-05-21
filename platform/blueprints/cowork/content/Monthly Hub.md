@@ -35,7 +35,7 @@ await dv.view("ranch/views/customjs-guard", {
     scope: "month",
     groupBy: "blueprint",
     framed: true,
-    limit: 50,
+    limit: 200,
     blueprints: [
       "cowork-morning-briefing",
       "cowork-midday-tripwire",
