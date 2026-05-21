@@ -9,12 +9,12 @@ load_when: Starting a session, picking the next cycle, or sanity-checking the cu
 
 ## Current
 
-- **Workshop version:** `0.67.3` (closed 2026-05-20)
-- **Most recent cycle:** v0.67.x arc — Activity Drill-In + Polish (1 MINOR + 3 PATCHes over ~24h). See `Docs/cycle-history.md` § v0.48.0 → v0.67.3 archive for the full narrative.
+- **Workshop version:** `0.70.0` (closed 2026-05-20)
+- **Most recent cycle:** v0.70.0 daily-activity-cohesion — framed activity-feed renderer + daily framed-group adoption (activity-feed 0.3.2 → 0.4.0; daily 0.9.0 → 0.10.0). See `Docs/cycle-history.md` for full narrative.
 
 ## Cycle order (chronological)
 
-v0.1.0 → v0.1.1 → v0.1.x → v0.1.3 → v0.1.2 → v0.2.0 → v0.3.0 → v0.4.0 → v0.3.2 → v0.4.2 → v0.5.0 → v0.11.0 → v0.12.0 → v0.13.0 → v0.14.0 → v0.6.0 → v0.16.0 → v0.17.0 → v0.18.0/.1/.2 → v0.19.0 → v0.20.0 → v0.21.0/.1 → v0.22.0/.1 → v0.23.0 → v0.24.0 → v0.25.0 → v0.26.0/.1 → v0.27.0 → v0.28.0 → v0.29.0 → v0.30.0 ⏭️ → v0.31.0 → v0.32.0 → v0.33.0/.1 → v0.36.0/.1 → v0.37.0 → v0.38.0/.1 → v0.40.0 → v0.41.0/.5 → v0.42.0 → v0.43.0 → v0.44.0 → v0.45.0 → v0.46.0/.1/.2 → v0.47.0 → v0.48.0 → v0.49.0 → v0.49.1 ⏭️ → v0.49.2 → (v0.50.0–v0.62.0 narratives lost; pre-v0.63 narrative below resumes) → v0.63.0 → v0.63.1 → v0.63.2 → v0.63.3 → v0.64.0 → v0.64.1 → v0.64.2 → v0.64.3 → v0.65.0 → v0.66.0 → v0.66.1 → v0.66.2 → v0.67.0 → v0.67.1 → v0.67.2 → v0.67.3 (current).
+v0.1.0 → v0.1.1 → v0.1.x → v0.1.3 → v0.1.2 → v0.2.0 → v0.3.0 → v0.4.0 → v0.3.2 → v0.4.2 → v0.5.0 → v0.11.0 → v0.12.0 → v0.13.0 → v0.14.0 → v0.6.0 → v0.16.0 → v0.17.0 → v0.18.0/.1/.2 → v0.19.0 → v0.20.0 → v0.21.0/.1 → v0.22.0/.1 → v0.23.0 → v0.24.0 → v0.25.0 → v0.26.0/.1 → v0.27.0 → v0.28.0 → v0.29.0 → v0.30.0 ⏭️ → v0.31.0 → v0.32.0 → v0.33.0/.1 → v0.36.0/.1 → v0.37.0 → v0.38.0/.1 → v0.40.0 → v0.41.0/.5 → v0.42.0 → v0.43.0 → v0.44.0 → v0.45.0 → v0.46.0/.1/.2 → v0.47.0 → v0.48.0 → v0.49.0 → v0.49.1 ⏭️ → v0.49.2 → (v0.50.0–v0.62.0 narratives lost; pre-v0.63 narrative below resumes) → v0.63.0 → v0.63.1 → v0.63.2 → v0.63.3 → v0.64.0 → v0.64.1 → v0.64.2 → v0.64.3 → v0.65.0 → v0.66.0 → v0.66.1 → v0.66.2 → v0.67.0 → v0.67.1 → v0.67.2 → v0.67.3 → v0.70.0 (current).
 
 > Gap note: per `Docs/cycle-history.md` line count (57 closed-cycle sections ending at v0.47.0, plus a v0.48–v0.67.3 archive), the v0.50.0 → v0.62.0 narratives were not captured in cycle-history.md during their respective closes. The CLAUDE.md claim that they were "archived to Docs/cycle-history.md" was stale. Backfill from `Docs/plans/` is possible but deferred.
 
@@ -33,7 +33,7 @@ Live brainstorm list (also referenced in `Docs/plans/` and brainstorm shelf file
 - **FLN-v64-6** — scratch body-first-line title fallback for legacy untitled scratches
 - **FLN-v67-7** — `sauce update --bump-pins` flag candidate for consumer subscription auto-bump
 
-## Mechanisms (12)
+## Mechanisms (14)
 
 | Name | Version | Role |
 | --- | --- | --- |
@@ -41,6 +41,7 @@ Live brainstorm list (also referenced in `Docs/plans/` and brainstorm shelf file
 | `validator` | 0.2.0 | Per-file rules engine + Layer 2 manifest-convention rules |
 | `audit` | 0.2.0 | `claude-surface` walker + entity-create walker + `/audit` slash command |
 | `nav-buttons` | 2.7.0 | Registry-driven nav-button renderer; consumes icons mechanism |
+| `activity-feed` | 0.4.0 | Bucketed activity-feed renderer; bucketRules + groupOrder + framed renderer |
 | `cards` | 0.2.4 | BeaconCards row/stacked layouts |
 | `accent-button` | 0.1.0 | AccentButton render helper |
 | `icons` | 0.1.1 | Lucide kebab → SVG resolver; ~21 vendored Tier 1 SVGs + Obsidian `setIcon` Tier 2 fallback |
@@ -49,6 +50,7 @@ Live brainstorm list (also referenced in `Docs/plans/` and brainstorm shelf file
 | `convenience` | 0.2.4 | Consumer-default hotkeys/snippets/app-settings |
 | `platform-claude` | 0.1.0 | `/install` `/upgrade` `/bootstrap` lifecycle slash commands + CLAUDE.md marker renderer |
 | `entity-create` | 0.3.0 | Declarative `new_entity_buttons[]` spec; inside-block JS-comment sentinel; substitution catalogue with `derive`/`validate`/`inline_body` extensions |
+| `backlink-panel` | 0.1.0 | Backlink panel renderer |
 
 Per-mechanism version history is in `Docs/cycle-history.md`. Current canonical catalogue lives at `platform/manifest.json`.
 
@@ -58,7 +60,7 @@ Per-mechanism version history is in `Docs/cycle-history.md`. Current canonical c
 | --- | --- | --- | --- |
 | `boards` | 0.1.0 | — | `spice/boards/` |
 | `cowork` | 0.7.0 | — | `spice/cowork/` |
-| `daily` | 0.3.0 | `/daily` | `spice/daily/` |
+| `daily` | 0.10.0 | `/daily` | `spice/daily/` |
 | `journal` | 0.1.2 | — | `spice/journal/` |
 | `meetings` | 0.5.1 | `/meetings` | `spice/meetings/` |
 | `people` | 0.2.2 | — | `spice/people/` |
