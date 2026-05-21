@@ -72,3 +72,17 @@ Empty case:
   > iMessage MCP error during fetch. Skipped this run.
   ```
 - Never throw; always return a paste-ready callout string.
+
+## MCP routing
+
+This skill can pull iMessage data from any of the following MCPs, in priority order:
+
+1. **Apple iMessage** — `mcp__claude_ai_iMessage__*` or equivalent (when wired by the user; macOS-host-bound).
+
+At runtime: introspect on the available tool list. If the iMessage MCP is not available, do **NOT** attempt the call. Instead emit:
+
+  gather-skipped: no imessage MCP available in this Claude Code runtime
+
+Pass `warning: imessage_unavailable` up to the orchestrator.
+
+iMessage is the most-likely-to-be-unavailable gather (the MCP is macOS-host-bound and not typically wired in remote runtimes). The orchestrator should treat the skip as routine and not surface it as a degraded run — the absence of inner-circle iMessage data is the common case, not the exception.

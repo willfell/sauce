@@ -7919,6 +7919,35 @@ async function caseFA2RuleFragmentsExtends() {
     assertTrue("HC-V0710-4: write-run-note body-shape markers", false, e && e.message);
   }
 
+  // HC-V0710-5: each gather-* SKILL.md has a ## MCP routing section with detection + skip pattern,
+  // and no hardcoded provider-specific MCP tool name in mandate prose (gather-calendar specific)
+  try {
+    const skills = ["gather-calendar", "gather-gmail", "gather-imessage"];
+    for (const s of skills) {
+      const skillPath = path.join(WORKSHOP, "platform/blueprints/cowork/skills/skills/" + s + "/SKILL.md");
+      const body = fs.readFileSync(skillPath, "utf8");
+      assertTrue("HC-V0710-5a: " + s + " has '## MCP routing' section",
+        body.indexOf("## MCP routing") >= 0);
+      assertTrue("HC-V0710-5b: " + s + " explains gather-skipped emission",
+        body.indexOf("gather-skipped:") >= 0);
+      assertTrue("HC-V0710-5c: " + s + " instructs runtime introspection",
+        /introspect|tool list|available/i.test(body));
+      // gather-calendar specifically must NOT mandate Google Calendar in the mandate prose
+      // (the MCP routing section may list it as an option, but the body before that section
+      //  must not hardcode it)
+      if (s === "gather-calendar") {
+        const routingIdx = body.indexOf("## MCP routing");
+        const beforeRouting = routingIdx >= 0 ? body.slice(0, routingIdx) : body;
+        assertTrue("HC-V0710-5d: gather-calendar mandate prose drops 'Google Calendar' hardcode",
+          beforeRouting.indexOf("Google Calendar") < 0);
+        assertTrue("HC-V0710-5e: gather-calendar mandate prose drops 'mcp__claude_ai_Google_Calendar__' hardcode",
+          beforeRouting.indexOf("mcp__claude_ai_Google_Calendar__") < 0);
+      }
+    }
+  } catch (e) {
+    assertTrue("HC-V0710-5: gather-* MCP-routing contract", false, e && e.message);
+  }
+
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
   if (fail > 0) {
