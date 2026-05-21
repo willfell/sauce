@@ -7817,6 +7817,36 @@ async function caseFA2RuleFragmentsExtends() {
       /const\s+fileName\s*=\s*this\._resolveCurrentFileName\(dv\)/.test(js));
   }
 
+  // v0.71.0 HC-V0710-1: canonical-vocab carries display_names for the 6 cowork-* atomic-note types
+  {
+    console.log("\n--- Case HC-V0710-1: canonical-vocab display_names map ---");
+    try {
+      const vocab = JSON.parse(fs.readFileSync(
+        path.join(WORKSHOP, "platform/rules/_canonical-vocab.json"), "utf8"
+      ));
+      assertTrue("HC-V0710-1a: display_names is a plain object",
+        vocab.display_names && typeof vocab.display_names === "object" && !Array.isArray(vocab.display_names));
+      const expected = {
+        "cowork-morning-briefing": "Morning Briefing",
+        "cowork-midday-tripwire":  "Midday Tripwire",
+        "cowork-eod-review":       "EOD Review",
+        "cowork-finance-snapshot": "Finance Snapshot",
+        "cowork-weekly-review":    "Weekly Review",
+        "cowork-monthly-review":   "Monthly Review",
+      };
+      for (const k of Object.keys(expected)) {
+        assertEq("HC-V0710-1b:" + k, vocab.display_names && vocab.display_names[k], expected[k]);
+      }
+      // Every key in display_names must also be in the discriminator_tags array (no orphans)
+      for (const k of Object.keys(vocab.display_names || {})) {
+        assertTrue("HC-V0710-1c: " + k + " also listed in discriminator_tags[]",
+          Array.isArray(vocab.discriminator_tags) && vocab.discriminator_tags.indexOf(k) >= 0);
+      }
+    } catch (e) {
+      assertTrue("HC-V0710-1: canonical-vocab display_names contract", false, e && e.message);
+    }
+  }
+
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
   if (fail > 0) {

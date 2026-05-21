@@ -54,6 +54,14 @@
     "to-do",
     "board"
   ],
+  "display_names": {
+    "cowork-morning-briefing": "Morning Briefing",
+    "cowork-midday-tripwire":  "Midday Tripwire",
+    "cowork-eod-review":       "EOD Review",
+    "cowork-finance-snapshot": "Finance Snapshot",
+    "cowork-weekly-review":    "Weekly Review",
+    "cowork-monthly-review":   "Monthly Review"
+  },
   "temporal_tag_patterns": [
     "^\\d{4}/\\d{2}/\\d{2}$",
     "^\\d{4}/\\d{2}$",
