@@ -46,6 +46,20 @@ Reads every project under `spice/projects/<slug>/`, parses its kanban board, wal
 - `carry_over_from` (string, optional): vault-relative path to yesterday's daily note. When provided, `active` filter populates `carried_over` from yesterday's `- [ ]` items.
 - `thresholds` (object, optional, default `{ blocked_age_days: 3, stale_card_days: 5 }`): work-scope thread-trigger thresholds.
 
+## Modes
+
+When the caller passes `mode: "tripwire-delta"` with `since: <ISO timestamp>`, restrict the gather to items added or transitioned into `["approval_requested", "review_pending", "blocked"]` states SINCE the `since` anchor. Return:
+
+```
+{
+  markdown: <one-paragraph delta summary>,
+  new_count: <integer; count of items matching since the anchor>,
+  items: [{ id, title, state, source, url, since_state_changed_at }]
+}
+```
+
+When `mode` is unset (default), behavior is unchanged — return the active-project snapshot for the engagement.
+
 ## Outputs
 - `projects` (list[object]): one entry per project with In Progress or Blocked tasks (work-scope). Planning-only and completed-only projects are filtered out.
 - `thread_triggers` (list[object]): cards that crossed thread thresholds during this scan, ready for `cowork:update-active-threads`.
