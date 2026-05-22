@@ -792,13 +792,16 @@ function assertCoworkV068Shape() {
     }
   }
 
-  // V068-ONBOARD-GUARD: onboard-scheduled-jobs SKILL.md step 6(c) includes
-  // the contract-guard scan describing legacy-surface phrase detection.
+  // V068-ONBOARD-GUARD: onboard-scheduled-jobs SKILL.md core structural invariants.
+  // Updated for v0.74.0 S6: the file was fully rewritten; the old step 6(c) contract-guard
+  // scan and "writes ONE atomic note at" phrasing were removed. Assertions updated to match
+  // the v0.74.0 contract: re-runnable entry-point that delegates to cowork:bootstrap-vault
+  // when not-bootstrapped, then registers tasks via scheduled-tasks MCP.
   const onboard = readSkill("skills/orchestrators/onboard-scheduled-jobs/SKILL.md");
-  assertContains(onboard, "Contract-guard the response",
-    "V068-ONBOARD-GUARD: onboard-scheduled-jobs step 6(c) declares contract-guard");
-  assertContains(onboard, "writes ONE atomic note at",
-    "V068-ONBOARD-GUARD-MSG: onboard skill rephrases user description toward atomic-note contract");
+  assertContains(onboard, "cowork:bootstrap-vault",
+    "V068-ONBOARD-GUARD: onboard-scheduled-jobs delegates to cowork:bootstrap-vault when not-bootstrapped");
+  assertContains(onboard, "scheduled-tasks",
+    "V068-ONBOARD-GUARD-MSG: onboard skill registers schedules via scheduled-tasks MCP");
 
   // V068-LATEST-RUNS-1: CoworkLatestRuns helper file exists on disk.
   const latestRunsPath = path.join(BP, "helpers/cowork-latest-runs.js");

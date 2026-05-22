@@ -7879,7 +7879,9 @@ async function caseFA2RuleFragmentsExtends() {
   }
 
   // HC-V0710-3: each write-run-note-* SKILL.md body shows the SpaceNavButtons block
-  // inside its Body shape section (nav-button must appear textually before per-section H2s).
+  // inside its body-shape section (nav-button must appear textually before per-section H2s).
+  // HC-V0710-3b and HC-V0710-3c superseded by HC-V0740-5 (v0.74.0 S4 renamed '## Body shape'
+  // to '## Adaptive body skeleton'; HC-V0740-5 asserts that section + SpaceNavButtons marker).
   try {
     const orchs = ["morning-briefing", "midday-tripwire", "eod-review", "finance", "weekly-review", "monthly-review"];
     for (const o of orchs) {
@@ -7887,38 +7889,14 @@ async function caseFA2RuleFragmentsExtends() {
       const body = fs.readFileSync(skillPath, "utf8");
       assertTrue("HC-V0710-3a: " + o + " mentions SpaceNavButtons dataviewjs block",
         body.indexOf('await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" })') >= 0);
-      const bodyShapeIdx = body.indexOf("## Body shape");
-      assertTrue("HC-V0710-3b: " + o + " has '## Body shape' section", bodyShapeIdx >= 0);
-      if (bodyShapeIdx < 0) continue;
-      const afterBodyShape = body.slice(bodyShapeIdx);
-      assertTrue("HC-V0710-3c: " + o + " nav-button referenced inside Body shape section",
-        afterBodyShape.indexOf("SpaceNavButtons") >= 0);
     }
   } catch (e) {
     assertTrue("HC-V0710-3: write-run-note nav-button instruction", false, e && e.message);
   }
 
-  // HC-V0710-4: each write-run-note-* SKILL.md shows the full body-shape contract markers
-  try {
-    const orchs = ["morning-briefing", "midday-tripwire", "eod-review", "finance", "weekly-review", "monthly-review"];
-    const requiredMarkers = [
-      "> [!info]- Today at a glance",
-      "> [!example]+",
-      "> [!tip]",
-      "> [!warning]",
-      "summary:",
-    ];
-    for (const o of orchs) {
-      const skillPath = path.join(WORKSHOP, "platform/blueprints/cowork/skills/skills/write-run-note-" + o + "/SKILL.md");
-      const body = fs.readFileSync(skillPath, "utf8");
-      for (const marker of requiredMarkers) {
-        assertTrue("HC-V0710-4: " + o + " body shows marker " + JSON.stringify(marker),
-          body.indexOf(marker) >= 0);
-      }
-    }
-  } catch (e) {
-    assertTrue("HC-V0710-4: write-run-note body-shape markers", false, e && e.message);
-  }
+  // HC-V0710-4: superseded by HC-V0740-5 (v0.74.0 S4 polish changed the '> [!info]-' label
+  // from 'Today at a glance' to cadence-appropriate labels; HC-V0740-5 asserts '> [!info]-'
+  // prefix + all other markers in the Adaptive body skeleton section).
 
   // HC-V0710-5: each gather-* SKILL.md has a ## MCP routing section with detection + skip pattern,
   // and no hardcoded provider-specific MCP tool name in mandate prose (gather-calendar specific)
