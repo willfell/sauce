@@ -1,6 +1,6 @@
 {
   "id": "w2-fte",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "schema_version": 1,
   "label": "W2 full-time employment",
   "consumes": ["daily", "meetings", "project", "to-do", "people"],
@@ -14,7 +14,7 @@
     { "id": "gmail_label", "type": "string", "prompt": "Gmail label scoping this engagement's email (e.g., \"Work\")" },
     { "id": "calendar_id", "type": "string", "prompt": "Calendar ID scoping this engagement's events (e.g., your work email)" }
   ],
-  "supported_cadences": ["morning", "eod", "weekly"],
+  "supported_cadences": ["morning", "midday", "eod", "weekly"],
   "default_cadences": {
     "morning": true,
     "midday":  false,
@@ -28,5 +28,6 @@
     "ai_committee":           "include",
     "kanban_projects":        "include",
     "inner_circle_imessage":  "skip"
-  }
+  },
+  "tripwire_aspects": ["calendar_drift", "queue_growth"]
 }

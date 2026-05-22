@@ -1,6 +1,6 @@
 {
   "id": "consulting",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "schema_version": 1,
   "label": "Consulting / contract work",
   "consumes": ["daily", "meetings", "project", "to-do", "people", "finance"],
@@ -19,7 +19,7 @@
     { "id": "gmail_label",        "type": "string",   "prompt": "Gmail label scoping this engagement's email (e.g., \"Clients/Acme\")" },
     { "id": "calendar_id",        "type": "string",   "prompt": "Calendar ID scoping this engagement's events" }
   ],
-  "supported_cadences": ["morning", "eod", "weekly", "monthly"],
+  "supported_cadences": ["morning", "midday", "eod", "weekly", "monthly"],
   "default_cadences": {
     "morning": true,
     "midday":  false,
@@ -33,5 +33,6 @@
     "ai_committee":           "include",
     "kanban_projects":        "include",
     "inner_circle_imessage":  "skip"
-  }
+  },
+  "tripwire_aspects": ["cc_drift", "calendar_drift", "queue_growth"]
 }
