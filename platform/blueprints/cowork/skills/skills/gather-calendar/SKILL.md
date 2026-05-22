@@ -111,6 +111,8 @@ When the caller passes `mode: "drift-check"`, scope the gather to the `horizon` 
 
 Drift sources to detect when available: events moved to a different start time since the morning briefing snapshot; events cancelled; events running long (current_end > scheduled_end by ≥15 min). If no calendar MCP is available, emit `gather-skipped: no calendar MCP available in this Claude Code runtime` per the MCP routing pattern below.
 
+When drift-check completes successfully but no drift is detected in the horizon window, return `{ markdown: "", drift_minutes: 0, drifted_events: [] }` (not null). The orchestrator distinguishes this empty-success from `gather-skipped` via the latter's structured warning payload — only `gather-skipped` produces a null `calendar_signal` upstream.
+
 When `mode` is unset (default), behavior is unchanged — return the daily calendar snapshot as today.
 
 ## MCP routing

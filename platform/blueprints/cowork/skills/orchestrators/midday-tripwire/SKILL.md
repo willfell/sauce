@@ -3,7 +3,7 @@ name: cowork:midday-tripwire
 description: Engagement-aware midday CC tripwire. Writes one atomic note at spice/cowork/daily/YYYY/MM-MMMM/YYYY-MM-DD/midday-tripwire.md per scheduled invocation when severity == yellow or red; frontmatter `type: cowork-midday-tripwire` + `severity:`. Silent (no note written) when severity == green. Engagement-aware — fires when engagement.tripwire_aspects is non-empty (personal=cc, w2-fte=calendar/queue, consulting=all). Severity = warn|alert. Body composed from gather outputs interpolated through the user's prompt body at spice/cowork/prompts/midday-tripwire.md. Phrasings = "midday tripwire for <engagement>", "<engagement> midday check", "midday cc check".
 schedule: Cron-driven per enabled (engagement, midday) pair (typically only personal-type engagements enable midday)
 scope: shared
-tags: [cowork, orchestrator, midday, finance, engagement-aware]
+tags: [cowork, orchestrator, midday, engagement-aware, tripwire-aspects]
 ---
 
 # cowork:midday-tripwire
@@ -40,6 +40,7 @@ Each gather call passes `engagement_id`. The orchestrator branches per-aspect fr
 ## Decide
 
 8. **Compute severity** from collected signals:
+   (Vocab: `RED`/`YELLOW` below refer to per-charge classifications returned by `gather-finance-cc-today`; `alert`/`warn`/`green` are the orchestrator-level severity values written to the atomic note's `severity:` frontmatter.)
    - `alert` if any of: cc_signal contains a RED-class charge, calendar_signal.drift_minutes >= 60, queue_signal.new_count >= 10
    - `warn`  if any of: cc_signal contains only YELLOW-class charges, calendar_signal.drift_minutes in [30, 59], queue_signal.new_count in [3, 9]
    - `green` if none of the above
