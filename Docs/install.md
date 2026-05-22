@@ -554,3 +554,53 @@ Verifying the fix:
 **Behavior notes (intentional):**
 - `groupPreviewBuilder` still fires only for groups in the manifest's `defaultClosed[]` (e.g., `scratch`). User-toggled state does not change which groups show a preview suffix — by design.
 - First daily-note render of a session may show stale kanban frontmatter (the startup sync runs at vault boot but may not have completed by the first render); subsequent renders are correct. If this matters, use the manual re-sync command.
+
+### Upgrading from v0.73.0 → v0.74.0
+
+MINOR cycle. Three workstreams: body-shape enforcement in 6 write-run-note-* skills; tripwire-aspects model broadening midday-tripwire beyond finance; filesystem-first write path + unified onboarding entry-point.
+
+```bash
+brew upgrade sauce        # 0.73.0 → 0.74.0
+# Bump cowork pin in each consumer vault's ranch/platform-subscription.json:
+#   "cowork": "0.12.0" → "0.13.0"
+# (manual until FLN-v67-7 adds sauce update --bump-pins)
+cd /path/to/your/vault    # critical — sauce update reads cwd ancestry
+sauce update              # picks up the cycle
+# Re-run the onboarding flow (see below)
+cowork:onboard-scheduled-jobs   # invoke in Claude Code / Claude for Obsidian
+```
+
+**What you get:**
+
+**Workstream A — body-shape enforcement.** All six cowork cadence-note skills now self-check before writing: title must match the deterministic formula (`{engagement_id} — {Cadence Label} — YYYY-MM-DD`), and the body must include five structural markers (summary frontmatter + `> [!info]- Synopsis` + `> [!example]+` section blocks + `> [!tip]` close). Any miss returns `failed:contract-violation:<field>` and halts — no partial files. The cowork manifest enforces `title: required` on all 6 atomic-note rule_fragments.
+
+**Workstream B — tripwire-aspects model.** The midday-tripwire orchestrator now fires for w2-fte and consulting engagements, not only personal/finance. New `tripwire_aspects[]` field in engagement-type JSON files:
+- `personal`: `["cc_drift"]` (unchanged behavior)
+- `w2-fte`: `["calendar_drift", "queue_growth"]` — fires when meetings change or open task count grows
+- `consulting`: `["cc_drift", "calendar_drift", "queue_growth"]` — all three aspects
+
+Severity vocabulary simplified: `yellow|red` → `warn|alert`.
+
+`cowork:gather-calendar` gains a `drift-check` mode (48-hour meeting-change window). `cowork:gather-projects` gains a `tripwire-delta` mode (open-count growth since last run).
+
+**Workstream C — filesystem-first writes + unified onboarding.** All six `write-run-note-*` skills no longer use `mcp__obsidian__create_note`. They now write via `Bash mkdir -p` → `Write` → `wc -c` byte-count assertion. Notes are written even when the Obsidian REST API is unavailable (e.g., vault not open, or running from a remote Claude Code session).
+
+`cowork:onboard-scheduled-jobs` is rewritten as the single conversational entry-point post-upgrade:
+
+1. Prints a welcome explaining what it will write.
+2. Checks if `vault-config.md` exists; if not, auto-delegates to `cowork:bootstrap-vault` first.
+3. Detects re-runs (prompts before overwriting customized prompts).
+4. Asks one bulk-defaults question: **(a)** use all workshop defaults or **(b)** customize per-cadence.
+5. Copies per-cadence prompt files from workshop defaults into `spice/cowork/context/{engagement_id}/prompts/` via filesystem Read+Write with byte-count assertion.
+6. Prints a summary table of what was written / skipped.
+
+**Verifying the upgrade:**
+
+1. `sauce update` exits 0; `ranch/platform-installed.json` shows `cowork@0.13.0` and `workshop_version: 0.74.0`.
+2. Run `cowork:onboard-scheduled-jobs` — it should complete without prompting for MCP credentials and write all enabled-cadence prompt files.
+3. Trigger a morning-briefing run. The output note should: have `title:` frontmatter matching `{id} — Morning Briefing — YYYY-MM-DD`; open with `> [!info]- Synopsis`; close with `> [!tip]`.
+4. If you have a w2-fte or consulting engagement, trigger `cowork:midday-tripwire` — it should now gate on `tripwire_aspects.length > 0` and run the appropriate gather/decide branches.
+
+**Behavior notes (intentional):**
+- Consumer subscription cowork pin still requires a manual edit until FLN-v67-7 lands. Edit `ranch/platform-subscription.json` → `pinned.cowork: "0.13.0"` in each consumer vault before running `sauce update`.
+- Existing customized prompt files (prompts whose byte count diverges from the workshop default) are skipped by `cowork:onboard-scheduled-jobs` unless you explicitly confirm overwrite. Your customizations are preserved.

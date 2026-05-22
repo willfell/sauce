@@ -505,3 +505,33 @@ See `Docs/plans/2026-05-21-activity-feed-kanban-progress-design.md` + `-plan.md`
 
 See `Docs/plans/2026-05-22-v0.73.0-kanban-progress-architectural-cleanup-{design,plan,result}.md`.
 
+## v0.74.0 cowork-orchestrator-rigor MINOR CLOSED 2026-05-22
+
+**Workshop:** 0.73.0 → 0.74.0
+**Blueprint:** cowork 0.12.0 → 0.13.0
+**Engagement-types:** personal / w2-fte / consulting 0.1.0 → 0.2.0 (additive `tripwire_aspects[]`)
+**Mechanism bumps:** none
+**Harnesses:** +14 HC-V0740-1..14 in `run-helper-cases.js`; `V071-VERSION` renamed `V074-VERSION` in `run-cowork-smoke.js`; stale HC-V0710-3b/3c/4 + V068-ONBOARD-GUARD fixed (follow-up `b69572f`). 22-harness count unchanged.
+
+**Headline:** Three workstreams bundling body-shape enforcement, a tripwire-aspects model for non-finance engagements, and filesystem-first write tooling with a unified onboarding entry-point.
+
+- **Workstream A (body-shape enforcement):** six `write-run-note-*` skills gain three new sections — `## Title composition` (deterministic `{engagement_id} — {cadence} — {date}` formula), `## Adaptive body skeleton` (five structural markers including `summary:` frontmatter + Obsidian admonitions), `## Pre-write self-check` (five-item checklist; on miss returns `failed:contract-violation:<field>` and halts). The cowork manifest grows `title: required` on all 6 atomic-note rule_fragments. Four orchestrators (`morning-briefing`, `eod-review`, `weekly-review`, `monthly-review`) handle `failed:contract-violation:*` and produce skeleton-compliant stub notes on empty-prompt branches.
+
+- **Workstream B (tripwire-aspects model):** three engagement-type JSON files gain `tripwire_aspects[]` arrays: personal=`["cc_drift"]`; w2-fte=`["calendar_drift", "queue_growth"]` (+ midday in `supported_cadences`); consulting=`["cc_drift", "calendar_drift", "queue_growth"]` (+ midday in `supported_cadences`). `cowork:midday-tripwire` orchestrator rewrites its preflight gate from `engagement_type === "personal"` to `tripwire_aspects.length > 0`, enabling it for all three types. Severity vocabulary flattens from `yellow|red` to `warn|alert`. `cowork:gather-calendar` gains a `drift-check` mode; `cowork:gather-projects` gains a `tripwire-delta` mode.
+
+- **Workstream C (filesystem-first + single-command onboarding):** all six `write-run-note-*` skills migrate from `mcp__obsidian__create_note` to `Bash mkdir -p` + `Write` + `wc -c` byte-count assertion. `cowork:check-vault-routing` gains a `{ required: ["filesystem"] }` mode. `cowork:onboard-scheduled-jobs` receives a full rewrite: 5-step conversational flow (Welcome → preflight auto-delegate → bulk-defaults question → per-cadence preambles → filesystem Read+Write copy with byte-count assertion + re-runnable detection → final summary). This is now the single entry-point post-`brew upgrade sauce`.
+
+**Commits (S0–S11):** `ef5995e` (S1), `b4b344e` + `8063e16` + `2b1da92` (S2 + follow-ups), `89c7a17` (S3), `087b78d` (S3b), `7d81225` + `21cd1c9` (S4), `271640f` (S5), `3b96bcc` (S6), `1ce2cd1` (S7), `bc60491` + `b69572f` (S8 + follow-up), `1c64b4b` + `b60bbe7` (S9 + follow-up), `9ff9060` + `e796933` (S10 + follow-up), S11 this commit.
+
+**Smoke:** `sauce update` clean — 70 new history entries; `workshop_version: 0.74.0`; cowork surface markers verified. Preflight GREEN across all 22 harnesses. Visual smoke (Obsidian) pending user-side post-tag: `brew upgrade sauce` → bump cowork pins 0.12.0 → 0.13.0 per vault (manual; FLN-v67-7) → `sauce update` → `cowork:onboard-scheduled-jobs` (new conversational flow) → next scheduled fire passes all 5 self-checks; midday-tripwire fires on w2-fte + consulting engagements.
+
+**Lessons:**
+1. Cross-cycle test-assertion staleness: when a contract changes, audit ALL `HC-*` assertions for stale literals BEFORE preflight, not after. (HC-V0710-3b/3c/4 hit this pattern; v0.71.0 also hit with `discriminator_tags` errata-3.)
+2. Plan-doc references to deprecated install commands (`./install.sh` vs `sauce update`) cause friction. Plan boilerplate for S10 dogfood should reference the canonical command.
+3. S10 dogfood install touches 28+ consumer-mirror files (`.claude/skills/cowork/*`, engagement-templates, rules) beyond the 3 ranch state files the plan named. Future S10 plans should enumerate the full mirror set.
+4. `ranch/platform-subscription.json` has a top-level `workshop_version` field independent of the `pinned` map — both must be bumped at S9.
+5. Plan-time pin-location assumptions for FA4/FA6 cowork version tests were stale; actual pin lived in FA5 regex. Grep-verify before writing the plan step.
+6. Count assertions should use safety margin (`>= N-1`) rather than exact equality to tolerate file-set drift (15 prompt files vs expected 14).
+
+See `Docs/plans/2026-05-22-v0.74.0-cowork-orchestrator-rigor-{design,plan,result}.md`.
+
