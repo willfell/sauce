@@ -7533,14 +7533,13 @@ async function caseFA2RuleFragmentsExtends() {
   }
 
   // FA6-MANIFEST version pins — daily / activity-feed / cards
-  // Updated per cycle as manifests bump. activity-feed at 0.5.0
-  // (v0.71.0 S3 — groupLabels + groupPreviewBuilder); daily at 0.11.0
-  // (v0.71.0 S11 — SpaceDailyDashboard consumes new opts + cowork pill
-  // colors); cards untouched.
+  // Updated per cycle as manifests bump. activity-feed at 0.6.0
+  // (v0.72.0 S7 — tsKeys opt + KanbanStatusSync consumer); daily at 0.12.0
+  // (v0.72.0 S7 — kanban sync trigger + transition drill-in); cards untouched.
   {
     const pins = [
-      ["daily",         "platform/blueprints/daily/manifest.json",            "0.11.0"],
-      ["activity-feed", "platform/mechanisms/activity-feed/manifest.json",    "0.5.1"],
+      ["daily",         "platform/blueprints/daily/manifest.json",            "0.12.0"],
+      ["activity-feed", "platform/mechanisms/activity-feed/manifest.json",    "0.6.0"],
       ["cards",         "platform/mechanisms/cards/manifest.json",            "0.2.6"],
     ];
     for (const [name, relPath, expected] of pins) {
@@ -8005,6 +8004,34 @@ async function caseFA2RuleFragmentsExtends() {
     }
   } catch (e) {
     assertTrue("HC-V0710-7: cowork hub ActivityFeed scoping", false, e && e.message);
+  }
+
+  // v0.72.0 HC-V072-KANBAN: SpaceDailyDashboard kanban progress integration
+  // — sync trigger + tsKeys multi-key filter + transition drill-in.
+  {
+    const src = fs.readFileSync(
+      path.join(WORKSHOP, "platform/blueprints/daily/helpers/space-daily-dashboard.js"),
+      "utf8"
+    );
+
+    // DD-K1: helper invokes KanbanStatusSync.syncAllBoards before ActivityFeed.render
+    assertTrue("DD-K1: SpaceDailyDashboard invokes KanbanStatusSync.syncAllBoards",
+      /customJS\.KanbanStatusSync\.syncAllBoards/.test(src));
+
+    // DD-K2: tsKeys array passed for activity-feed call with both created_at and status_changed_at
+    assertTrue("DD-K2: tsKeys: ['created_at', 'status_changed_at'] referenced in source",
+      /tsKeys[\s\S]{0,200}created_at[\s\S]{0,80}status_changed_at/.test(src));
+
+    // DD-K3: _renderKanbanDrillInList helper present
+    assertTrue("DD-K3: _renderKanbanDrillInList helper present",
+      /_renderKanbanDrillInList/.test(src));
+
+    // DD-K4: render helper uses status_prev + status to compose transition text
+    assertTrue("DD-K4: drill-in transition uses status_prev/status pair",
+      /status_prev[\s\S]{0,400}\bstatus\b|\bstatus\b[\s\S]{0,400}status_prev/.test(src));
+
+    // DD-K5: archive label rendered
+    assertTrue("DD-K5: 'archived' label literal present in dashboard", /['"]archived['"]/.test(src));
   }
 
   console.log(`\n========`);

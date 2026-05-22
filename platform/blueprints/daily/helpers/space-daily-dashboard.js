@@ -297,6 +297,18 @@ class SpaceDailyDashboard {
         page:  (path) => dv.page(path),
         el:    (tag) => activityBody.createEl(tag),
       };
+      // v0.12.0 (sauce v0.72.0): sync kanban card frontmatter to current board
+      // column placement BEFORE the activity-feed query runs, so cards moved
+      // today surface via status_changed_at in the same render.
+      if (customJS && customJS.KanbanStatusSync && typeof customJS.KanbanStatusSync.syncAllBoards === "function") {
+        try {
+          await customJS.KanbanStatusSync.syncAllBoards(dv, today);
+        } catch (e) {
+          if (typeof console !== "undefined") {
+            console.warn("[SpaceDailyDashboard] KanbanStatusSync.syncAllBoards failed: " + (e && e.message));
+          }
+        }
+      }
       if (customJS && customJS.ActivityFeed && typeof customJS.ActivityFeed.render === "function") {
         await customJS.ActivityFeed.render(activityShim, {
           scope: "today",
@@ -316,6 +328,10 @@ class SpaceDailyDashboard {
           colorByType: this._BLUEPRINT_COLORS,
           rollUpRoots: this._buildRollupRules(dv),
           metaBuilder: (p, el) => this._renderActivityMeta(p, el, icons.square, this._CHEVRON_SVG),
+          // v0.12.0 (sauce v0.72.0): kanban group surfaces cards moved today via
+          // status_changed_at OR created today via created_at. Activity-feed
+          // v0.6.0 tsKeys opt applies the OR semantics.
+          tsKeys: ["created_at", "status_changed_at"],
           // v0.11.0 (sauce v0.71.0) — surface cowork-* atomic note summary
           // as the row subtitle for cowork-* pages. NOTE: activity-feed v0.5.0
           // semantics give metaBuilder precedence over getSubtitle (only one
@@ -698,6 +714,66 @@ class SpaceDailyDashboard {
   }
 
   /**
+   * v0.12.0 (sauce v0.72.0): kanban-flavored drill-in row renderer.
+   * Each child card surfaces its today's transition: move (from → to), create,
+   * or archive. Mirrors _renderDrillInList structure but emits a transition
+   * line instead of a bare file link + time.
+   *
+   * Precedence (multiple states on same card today): archive > move > create.
+   */
+  _renderKanbanDrillInList(parentEl, children, _rootPath) {
+    if (!Array.isArray(children) || children.length === 0) return;
+    const CAP = 12;
+    const visible = children.slice(0, CAP);
+
+    const ul = parentEl.createEl("ul");
+    ul.className = "sauce-drill-in-list";
+
+    for (const c of visible) {
+      const li = ul.createEl("li");
+      li.className = "sauce-drill-in-row";
+      const title = this._resolveTitle(c);
+      const fm = c || {};
+      const status = typeof fm.status === "string" ? fm.status : "";
+      const prev = typeof fm.status_prev === "string" ? fm.status_prev : "";
+      const column = typeof fm.kanban_column === "string" ? fm.kanban_column : "";
+
+      // Precedence
+      let transition;
+      if (status === "archived") {
+        transition = "archived";
+      } else if (prev && prev !== status && prev !== "archived") {
+        // Move — humanise from-slug, prefer raw current column label.
+        const fromLabel = prev.replace(/-/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
+        transition = fromLabel + " → " + (column || status);
+      } else {
+        // Create — first-ever placement or returning from archive.
+        transition = "— created in " + (column || status);
+      }
+
+      const a = li.createEl("a");
+      a.className = "sauce-drill-in-link";
+      a.textContent = title;
+      a.onclick = (ev) => {
+        ev.preventDefault();
+        if (app && app.workspace && c.file && c.file.path) {
+          app.workspace.openLinkText(c.file.path, "", false);
+        }
+      };
+
+      const meta = li.createEl("span");
+      meta.className = "sauce-drill-in-transition";
+      meta.textContent = "  " + transition;
+    }
+
+    if (children.length > CAP) {
+      const more = parentEl.createEl("div");
+      more.className = "sauce-drill-in-more";
+      more.textContent = "+" + (children.length - CAP) + " more";
+    }
+  }
+
+  /**
    * v0.7.0 (v0.66.0): caller-driven meta line for ActivityFeed cards.
    * Renders time · type-pill · breadcrumb into the supplied parentEl.
    * Wired via BeaconCards' v0.2.6 function-form `meta` opt.
@@ -761,7 +837,12 @@ class SpaceDailyDashboard {
       drillIn.className = "sauce-drill-in";
       drillIn.hidden = true;
       const rootPath = p.file && p.file.path;
-      this._renderDrillInList(drillIn, p._rollUpChildrenPages || [], rootPath);
+      // v0.12.0 (sauce v0.72.0): kanban rollups use the transition-aware drill-in.
+      if (p && p.type === "kanban") {
+        this._renderKanbanDrillInList(drillIn, p._rollUpChildrenPages || [], rootPath);
+      } else {
+        this._renderDrillInList(drillIn, p._rollUpChildrenPages || [], rootPath);
+      }
 
       bread.addEventListener("click", (ev) => {
         ev.stopPropagation();
