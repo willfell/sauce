@@ -2,7 +2,7 @@
   "name": "kanban-status-sync",
   "version": "0.1.0",
   "kind": "mechanism",
-  "description": "Syncs obsidian-kanban board column positions to `status:` frontmatter on moved cards. KanbanStatusSync.syncBoard(boardPath) — parses board columns via parseBoardColumns, derives status slugs via slugifyStatus, computes frontmatter diffs via computeDiff, and applies patches. Materialized on kanban board notes to keep frontmatter status in sync with visual column position (v0.72.0 / FA-10).",
+  "description": "Syncs obsidian-kanban board column positions to `status:` frontmatter on moved cards. KanbanStatusSync.syncAllBoards(dv, today) discovers boards via `dv.pages().where(p => p['kanban-plugin'] === 'board')` and calls syncBoard(boardPath, today) for each. syncBoard parses board columns via parseBoardColumns, derives status slugs via slugifyStatus, then performs a forward pass (cards present in board — write status/status_prev/status_changed_at if column changed via app.fileManager.processFrontMatter) + reverse pass (orphaned cards previously linked to this board — mark archived). Idempotent: if nothing changed, no writes. Mobile-safe — never reads file.mtime (landmine #23). Pure static helpers (Node-testable): parseBoardColumns, slugifyStatus, computeDiff (computeDiff is exported for caller composition; syncBoard inlines its own forward/reverse passes rather than composing computeDiff). v0.1.0 (workshop v0.72.0): initial release. Consumed by daily@0.12.0 as a side-effect of SpaceDailyDashboard rendering.",
   "depends_on": [
     { "name": "customjs-guard", "range": ">=1.0.0" }
   ],
