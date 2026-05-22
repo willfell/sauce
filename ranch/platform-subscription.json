@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop self-subscription. Pinned to the workshop's own manifest version.",
-  "workshop_version": "0.71.1",
+  "workshop_version": "0.72.0",
   "mechanisms": [
     {
       "name": "customjs-guard",
@@ -56,7 +56,11 @@
     },
     {
       "name": "activity-feed",
-      "version": "0.5.1"
+      "version": "0.6.0"
+    },
+    {
+      "name": "kanban-status-sync",
+      "version": "0.1.0"
     }
   ],
   "blueprints": [
@@ -66,7 +70,7 @@
     },
     {
       "name": "daily",
-      "version": "0.11.0"
+      "version": "0.12.0"
     },
     {
       "name": "meetings",
