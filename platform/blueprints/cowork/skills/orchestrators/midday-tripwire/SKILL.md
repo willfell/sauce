@@ -10,7 +10,7 @@ tags: [cowork, orchestrator, midday, finance, engagement-aware]
 
 Real-time mid-day check for credit-card charges that violate the active payoff plan, scoped to a single engagement. Pulls today's CC transactions for the engagement's finance scope, classifies each as RED (locked-card charge), YELLOW (active-card discretionary >= threshold), or GREEN. Writes ONLY when at least one RED or YELLOW exists — when severity is green, NO atomic note is written (presence of a tripwire note = something to flag). When a write fires, the note lands at `spice/cowork/daily/YYYY/MM-MMMM/YYYY-MM-DD/midday-tripwire.md` (deterministic path per `(orchestrator, day)`; re-run replaces).
 
-Skipped (early-exit silently) for engagements whose `render_aspects.finance_block != "include"`.
+Skipped (early-exit silently) for engagements whose `tripwire_aspects` is empty (field absent or `[]`).
 
 This orchestrator NEVER patches the daily note's callouts, edits the daily-note template, or writes to legacy paths. The v0.65.0 atomic-note write contract is the only output surface.
 
@@ -47,7 +47,6 @@ Each gather call passes `engagement_id`. The orchestrator branches per-aspect fr
 
 ## Write
 
-8. **Determine severity.** From threshold-eval gather outputs (existing earlier steps), set `severity = "red" | "yellow"` per the existing branching logic. If severity is "green" (no flags), emit Notice `cowork:midday-tripwire green -- nothing to flag` and exit cleanly. Do NOT write a run-note for green.
 9. **Read prompt body** via `mcp__obsidian__get_file_contents` at `spice/cowork/prompts/midday-tripwire.md`. Strip frontmatter; capture body as `prompt_body` (or empty when missing).
 10. **Compose run-note body** per `prompt_body` + the flagged-event details from the gather steps. When prompt is empty, `warning = "empty_prompt"` and `run_body` is a terse literal summarizing the flagged events. Otherwise `warning = null`.
 11. Use Skill `cowork:write-run-note-midday-tripwire` with `{ engagement, date: context.today, weekday: context.dddd, month_name: context["MM-Month"].split("-")[1], severity, signals: { cc: cc_signal, calendar: calendar_signal, queue: queue_signal }, body: run_body, prompt_source: "spice/cowork/prompts/midday-tripwire.md", warning, warnings: warnings_array }`. The `signals` arg is an opaque structured handoff write-run-note uses to compose the summary line; `warnings_array` is the optional list of `<aspect>_unavailable` strings from gather-skipped returns. Capture `status`. If `status` starts with `"failed:contract-violation:"`, emit Notice `cowork:midday-tripwire aborted -- contract violation: <field>` and exit non-zero. Else if `status` starts with `"failed:"`, emit Notice `cowork:midday-tripwire aborted -- write failed: <status>` and exit. Do not run state-update steps after a failed write.
