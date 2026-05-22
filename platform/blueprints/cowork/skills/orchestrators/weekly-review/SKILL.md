@@ -42,8 +42,15 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
 ## Write
 
 14. **Read prompt body** via `mcp__obsidian__get_file_contents` at `spice/cowork/prompts/weekly-review.md`. Strip frontmatter; capture body as `prompt_body` (or empty when missing).
-15. **Compose run-note body** per `prompt_body` instructions interpolating week-summary gather outputs. When empty: `warning = "empty_prompt"`. Otherwise `warning = null`.
-16. Use Skill `cowork:write-run-note-weekly-review` with `{ engagement, week: context.iso_week, year: context.year, body: run_body, prompt_source: "spice/cowork/prompts/weekly-review.md", warning }`. Capture `status`. If `status` starts with `"failed:"`, emit Notice `cowork:weekly-review aborted -- write failed: <status>` and exit.
+15. **Compose run-note body** per `prompt_body` instructions interpolating week-summary gather outputs. When `prompt_body` is empty, do NOT freelance content — compose a skeleton-compliant STUB body:
+    - `SpaceNavButtons` dataviewjs block (verbatim).
+    - `> [!info]- This week at a glance\n> (Prompt body empty — edit spice/cowork/prompts/weekly-review.md to customize what this run emits.)`
+    - `> [!example]+ 📋 Status\n> No prompt body to drive content; this run is a placeholder.`
+    - `> [!tip] ✏️ Next action\n> Edit \`spice/cowork/prompts/weekly-review.md\` to define what this scheduled job should emit when it fires.`
+    Set `warning = "empty_prompt"` and pass `summary = "Stub run — weekly-review prompt body at spice/cowork/prompts/weekly-review.md is empty."` to write-run-note via its `summary` arg. The write-run-note self-check passes (5 markers + summary + title all present).
+    When `prompt_body` is non-empty, set `warning = null` and compose the body per the prompt's instructions, respecting the adaptive body skeleton in write-run-note-weekly-review's `## Adaptive body skeleton` section.
+16. Use Skill `cowork:write-run-note-weekly-review` with `{ engagement, week: context.iso_week, year: context.year, body: run_body, prompt_source: "spice/cowork/prompts/weekly-review.md", warning }`. Capture `status`. If `status` starts with `"failed:contract-violation:"`, emit Notice `cowork:weekly-review aborted -- contract violation: <field>` (where `<field>` is the part after `failed:contract-violation:`). Do not run state-update steps. Exit non-zero.
+    Else if `status` starts with `"failed:"` (e.g. `failed:filesystem:permission`, `failed:write-undersized:285`), emit Notice `cowork:weekly-review aborted -- write failed: <status>` and exit. Do not run state-update steps after a failed write.
 
 ## State
 

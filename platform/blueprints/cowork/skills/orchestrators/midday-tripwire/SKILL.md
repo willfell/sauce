@@ -49,7 +49,13 @@ Each gather call passes `engagement_id`. The orchestrator branches per-aspect fr
 ## Write
 
 9. **Read prompt body** via `mcp__obsidian__get_file_contents` at `spice/cowork/prompts/midday-tripwire.md`. Strip frontmatter; capture body as `prompt_body` (or empty when missing).
-10. **Compose run-note body** per `prompt_body` + the flagged-event details from the gather steps. When prompt is empty, `warning = "empty_prompt"` and `run_body` is a terse literal summarizing the flagged events. Otherwise `warning = null`.
+10. **Compose run-note body** per `prompt_body` + the flagged-event details from the gather steps. When `prompt_body` is empty, do NOT freelance content — compose a skeleton-compliant STUB body:
+    - `SpaceNavButtons` dataviewjs block (verbatim).
+    - `> [!info]- Today at a glance\n> Tripwire fired (severity: <severity>). Prompt body empty — edit spice/cowork/prompts/midday-tripwire.md to customize what this run emits.`
+    - `> [!example]+ 🚨 Tripwire fired\n> Severity: <severity>. <one-line aspect summary>. Prompt body empty — see spice/cowork/prompts/midday-tripwire.md to customize what this run emits.`
+    - `> [!tip] ✏️ Next action\n> Edit \`spice/cowork/prompts/midday-tripwire.md\` to define what this tripwire should emit when it fires.`
+    Set `warning = "empty_prompt"` and pass `summary = "Stub run — prompt body at spice/cowork/prompts/midday-tripwire.md is empty."` to write-run-note via its `summary` arg. The write-run-note self-check passes (5 markers + summary + title all present).
+    When `prompt_body` is non-empty, set `warning = null` and compose the body per the prompt's instructions, respecting the adaptive body skeleton in write-run-note-midday-tripwire's `## Adaptive body skeleton` section.
 11. Use Skill `cowork:write-run-note-midday-tripwire` with `{ engagement, date: context.today, weekday: context.dddd, month_name: context["MM-Month"].split("-")[1], severity, signals: { cc: cc_signal, calendar: calendar_signal, queue: queue_signal }, body: run_body, prompt_source: "spice/cowork/prompts/midday-tripwire.md", warning, warnings: warnings_array }`. The `signals` arg is an opaque structured handoff write-run-note uses to compose the summary line; `warnings_array` is the optional list of `<aspect>_unavailable` strings from gather-skipped returns. Capture `status`. If `status` starts with `"failed:contract-violation:"`, emit Notice `cowork:midday-tripwire aborted -- contract violation: <field>` and exit non-zero. Else if `status` starts with `"failed:"`, emit Notice `cowork:midday-tripwire aborted -- write failed: <status>` and exit. Do not run state-update steps after a failed write.
 
 ## Done
