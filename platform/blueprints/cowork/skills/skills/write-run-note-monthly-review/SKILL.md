@@ -78,10 +78,10 @@ The body MUST contain these 5 structural markers in this order; CONTENT inside e
    ```
    ````
 
-2. **`> [!info]- Today at a glance`** admonition — one paragraph synopsis distilled from gather outputs:
+2. **`> [!info]- This month at a glance`** admonition — one paragraph synopsis distilled from gather outputs:
 
    ```
-   > [!info]- Today at a glance
+   > [!info]- This month at a glance
    > <one-paragraph synopsis>
    ```
 
@@ -95,7 +95,7 @@ The body MUST contain these 5 structural markers in this order; CONTENT inside e
 
 4. **`> [!warning] <section> unavailable`** blocks for any `gather-skipped` returns, at the position the affected section would have rendered. Also append the reason to frontmatter `warnings:` array.
 
-5. **`> [!tip] <emoji> Today's focus`** closing admonition — 2-3 sentence focus paragraph + concrete first action.
+5. **`> [!tip] <emoji> This month's priorities`** closing admonition — 2-3 sentence focus paragraph + concrete first action.
 
 When `prompt_body` was empty upstream (`warning == "empty_prompt"`), the orchestrator composes a skeleton-compliant stub: info admonition body reads `(Prompt body empty — edit <prompt_source> to customize what this run emits.)`; example block reads `No prompt body to drive content; this run is a placeholder.`; tip block recommends editing the prompt source. Frontmatter `summary` reads `Stub run — prompt body at <prompt_source> is empty.` The self-check passes (5 markers + summary + title all present).
 

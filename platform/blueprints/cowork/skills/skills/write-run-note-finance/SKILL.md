@@ -47,7 +47,7 @@ Atomic-note writer for the finance run. Composes canonical frontmatter, stitches
    created_at: "<ISO+TZ>"
    engagement_id: "<engagement.id>"
    day: "<date>"
-   generator: "cowork:morning-briefing@1.0.0"
+   generator: "cowork:finance-snapshot@1.0.0"
    prompt_source: "<prompt_source>"
    ```
    (only emit `prompt_source` when non-null). If `warning` is set, append `warning: "<warning>"` as the last frontmatter key. Close with `---`.
