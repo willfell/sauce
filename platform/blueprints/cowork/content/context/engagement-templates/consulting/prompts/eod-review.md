@@ -8,7 +8,7 @@ updated_by: cowork@0.11.0 installer
 
 # End-of-day review — consulting
 
-Compose today's EOD for the consulting engagement using the gather outputs (projects today-status, calendar tomorrow-horizon, gmail late-emails, threads eod-reconcile). Body shape:
+Compose today's EOD for the consulting engagement using the gather outputs (projects today-status, calendar tomorrow-horizon, gmail late-emails, threads eod-reconcile).
 
 ## ✅ Today's deliverables
 

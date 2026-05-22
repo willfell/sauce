@@ -8,7 +8,7 @@ updated_by: cowork@0.11.0 installer
 
 # Weekly review — personal
 
-Compose this week's review body using the gather outputs (finance full-week, cc-debt-snapshot weekly, calendar next-week, gmail 7-day, imessage 7-day, projects weekly, threads weekly-audit). Body shape:
+Compose this week's review body using the gather outputs (finance full-week, cc-debt-snapshot weekly, calendar next-week, gmail 7-day, imessage 7-day, projects weekly, threads weekly-audit).
 
 ## 📆 Week in review
 

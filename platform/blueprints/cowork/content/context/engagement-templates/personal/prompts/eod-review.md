@@ -8,7 +8,7 @@ updated_by: cowork@0.11.0 installer
 
 # End-of-day review — personal
 
-Compose today's EOD body using the gather outputs (projects today-status, calendar tomorrow-horizon, gmail late-emails, threads eod-reconcile). Body shape:
+Compose today's EOD body using the gather outputs (projects today-status, calendar tomorrow-horizon, gmail late-emails, threads eod-reconcile).
 
 ## ✅ Today's wins
 

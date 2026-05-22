@@ -8,7 +8,7 @@ updated_by: cowork@0.11.0 installer
 
 # Morning briefing — consulting
 
-Compose today's morning briefing for the consulting engagement using the gather outputs (calendar scoped to `calendar_id`, gmail scoped to `gmail_label`, projects, finance-yesterday + cc-debt-snapshot if finance_block: include, threads). Body shape:
+Compose today's morning briefing for the consulting engagement using the gather outputs (calendar scoped to `calendar_id`, gmail scoped to `gmail_label`, projects, finance-yesterday + cc-debt-snapshot if finance_block: include, threads).
 
 ## ☀️ Today at a glance
 
