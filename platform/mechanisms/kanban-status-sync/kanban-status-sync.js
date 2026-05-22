@@ -84,7 +84,51 @@ class KanbanStatusSync {
       .replace(/-+/g, "-")
       .replace(/^-+|-+$/g, "");
   }
-  static computeDiff(_curMap, _priorMap) {
-    return { moves: [], creates: [], archives: [] };
+  /**
+   * Compute the diff between the board's current column placement and each card's
+   * prior frontmatter state.
+   *
+   * currentMap: { [linkpath]: rawColumnName }  — from parseBoardColumns()
+   * priorMap:   { [linkpath]: { status: slug, column: rawColumnName | null } }
+   *
+   * Returns: { moves: [...], creates: [...], archives: [...] }
+   * - moves: prior status was non-archived AND ≠ current slug
+   * - creates: linkpath absent from prior, OR prior status was 'archived'
+   * - archives: linkpath present in prior (non-archived) but absent from current
+   */
+  static computeDiff(currentMap, priorMap) {
+    const moves = [];
+    const creates = [];
+    const archives = [];
+    const cur = currentMap || {};
+    const prior = priorMap || {};
+
+    for (const linkpath of Object.keys(cur)) {
+      const toColumn = cur[linkpath];
+      const toStatus = KanbanStatusSync.slugifyStatus(toColumn);
+      const p = prior[linkpath];
+      if (!p || p.status === "archived") {
+        creates.push({ linkpath, toStatus, toColumn });
+        continue;
+      }
+      if (p.status !== toStatus) {
+        moves.push({
+          linkpath,
+          fromStatus: p.status,
+          fromColumn: p.column || null,
+          toStatus,
+          toColumn,
+        });
+      }
+    }
+
+    for (const linkpath of Object.keys(prior)) {
+      const p = prior[linkpath];
+      if (!p || p.status === "archived") continue;
+      if (!Object.prototype.hasOwnProperty.call(cur, linkpath)) {
+        archives.push({ linkpath, fromStatus: p.status, fromColumn: p.column || null });
+      }
+    }
+    return { moves, creates, archives };
   }
 }

@@ -155,6 +155,58 @@ if (KanbanStatusSync) {
     KanbanStatusSync.slugifyStatus(""), "");
 }
 
+// ── Pass 3c: KanbanStatusSync.computeDiff ─────────────────────────────────
+
+console.log("\n--- Pass 3c: KanbanStatusSync.computeDiff ---");
+
+if (KanbanStatusSync) {
+  // currentMap shape: { [linkpath]: rawColumnLabel }
+  // priorMap shape:   { [linkpath]: { status: <slug or 'archived'>, column: <raw> | null } }
+
+  // KSS-D1: pure move
+  assertEq("KSS-D1: move detected",
+    KanbanStatusSync.computeDiff(
+      { "card-a": "In Progress" },
+      { "card-a": { status: "in-planning", column: "In Planning" } }),
+    { moves: [{ linkpath: "card-a", fromStatus: "in-planning", fromColumn: "In Planning", toStatus: "in-progress", toColumn: "In Progress" }],
+      creates: [],
+      archives: [] });
+
+  // KSS-D2: pure create (no prior entry)
+  assertEq("KSS-D2: create detected (no prior entry)",
+    KanbanStatusSync.computeDiff(
+      { "card-b": "In Planning" },
+      {}),
+    { moves: [],
+      creates: [{ linkpath: "card-b", toStatus: "in-planning", toColumn: "In Planning" }],
+      archives: [] });
+
+  // KSS-D3: pure archive (prior present, current missing)
+  assertEq("KSS-D3: archive detected (prior present, current missing)",
+    KanbanStatusSync.computeDiff(
+      {},
+      { "card-c": { status: "in-progress", column: "In Progress" } }),
+    { moves: [],
+      creates: [],
+      archives: [{ linkpath: "card-c", fromStatus: "in-progress", fromColumn: "In Progress" }] });
+
+  // KSS-D4: no-op (same column)
+  assertEq("KSS-D4: no diff when status unchanged",
+    KanbanStatusSync.computeDiff(
+      { "card-d": "Done" },
+      { "card-d": { status: "done", column: "Done" } }),
+    { moves: [], creates: [], archives: [] });
+
+  // KSS-D5: archived card returning to the board → counted as create
+  assertEq("KSS-D5: archived card returning → create",
+    KanbanStatusSync.computeDiff(
+      { "card-e": "In Progress" },
+      { "card-e": { status: "archived", column: null } }),
+    { moves: [],
+      creates: [{ linkpath: "card-e", toStatus: "in-progress", toColumn: "In Progress" }],
+      archives: [] });
+}
+
 // ── Summary ───────────────────────────────────────────────────────────────
 
 console.log(`\nrun-kanban-status-sync.js: ${pass} pass · ${fail} fail`);
