@@ -31,7 +31,8 @@ re-run me later to change anything. Let's start.
 
 ## Step 1 — Pre-flight
 
-Use Skill `cowork:check-vault-routing` with `{ required: ["filesystem"], bootstrapped_required: true }`.
+READ `.claude/skills/cowork/skills/check-vault-routing/SKILL.md` in full and follow
+its `## Steps` section with `{ required: ["filesystem"], bootstrapped_required: true }`.
 
 - If status is `"not-bootstrapped"`: print preamble:
   ```
@@ -40,7 +41,8 @@ Use Skill `cowork:check-vault-routing` with `{ required: ["filesystem"], bootstr
   consulting client) before scheduling. I'll run the bootstrap interview
   now, then come back to scheduling. Continue? (y/n)
   ```
-  - On `y`: use Skill `cowork:bootstrap-vault` interactively. On its successful completion, resume at Step 2.
+  - On `y`: READ `.claude/skills/cowork/skills/orchestrators/bootstrap-vault/SKILL.md` in full and follow
+    its `## Steps` section interactively. On its successful completion, resume at Step 2.
   - On `n`: print pointer `"Run cowork:bootstrap-vault when ready, then re-run cowork:onboard-scheduled-jobs."` Exit.
 - If status is `"not-vault-root"` or `"read-only"`: emit Notice `cowork:onboard-scheduled-jobs aborted -- vault not writable from cwd` and exit.
 - If status is `"ready"`: proceed to Step 2.
