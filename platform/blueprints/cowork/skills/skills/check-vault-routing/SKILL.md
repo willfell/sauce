@@ -28,6 +28,24 @@ Confirms the orchestrator can proceed by probing each named MCP backend with a l
   bootstrap-state check is skipped — `cowork:bootstrap-vault` itself uses this path to
   invoke routing without recursion.
 
+### `filesystem` mode
+
+Pass `{ required: ["filesystem"] }` to check whether the current working directory is a writable Sauce vault root. The sentinel is the presence of `spice/cowork/context/vault-config.md`. The skill:
+
+1. Resolve `cwd` via Bash `pwd`.
+2. Check `test -f spice/cowork/context/vault-config.md`.
+3. Check write permissions: Bash `test -w spice/cowork`.
+
+Return values:
+- `"ready"` — sentinel present AND vault writable.
+- `"not-bootstrapped"` — `spice/cowork/` directory exists but `vault-config.md` is missing (vault has been created but cowork:bootstrap-vault hasn't been run yet).
+- `"not-vault-root"` — sentinel not found AND `spice/cowork/` directory is also absent (cwd is not a Sauce vault).
+- `"read-only"` — sentinel present but `spice/cowork/` is not writable.
+
+Callers compose `required:` arrays — `{ required: ["filesystem"] }` is sufficient for filesystem-write skills (write-run-note-* family). `{ required: ["filesystem", "obsidian"] }` requires both for skills that also need REST/MCP (ensure-daily-note, bootstrap-vault).
+
+When `bootstrapped_required: true` AND status is `"not-bootstrapped"`, the caller should auto-delegate to `cowork:bootstrap-vault` (the onboard-scheduled-jobs pattern).
+
 > [!warning]+ Personal-card debt tracking is DEGRADED
 > Personal cards (Apple, Discover, Capital One, SCHEELS) have NO MCP integration in the Anthropic-managed catalog at this time. The `brex` probe only validates Brex-issued card connectivity. `cowork:gather-cc-debt-snapshot` returns partial data (Brex totals only) and renders a `> [!warning]+` callout in place of the missing personal-card block. See `gather-cc-debt-snapshot/SKILL.md:24` `# TODO(cycle)` for the integration gap.
 
