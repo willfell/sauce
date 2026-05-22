@@ -97,6 +97,24 @@ Empty case:
   ```
 - Never throw. Always return a paste-ready string.
 
+## Modes
+
+When the caller passes `mode: "drift-check"`, scope the gather to the `horizon` window (e.g. `"today+4h"`) and return a delta-shaped object instead of the default daily snapshot:
+
+```
+{
+  markdown: <one-paragraph drift summary>,
+  drift_minutes: <integer; minutes of drift detected in the horizon window>,
+  drifted_events: [{ event_id, original_start, current_start, drift_minutes, reason }]
+}
+```
+
+Drift sources to detect when available: events moved to a different start time since the morning briefing snapshot; events cancelled; events running long (current_end > scheduled_end by ≥15 min). If no calendar MCP is available, emit `gather-skipped: no calendar MCP available in this Claude Code runtime` per the MCP routing pattern below.
+
+When drift-check completes successfully but no drift is detected in the horizon window, return `{ markdown: "", drift_minutes: 0, drifted_events: [] }` (not null). The orchestrator distinguishes this empty-success from `gather-skipped` via the latter's structured warning payload — only `gather-skipped` produces a null `calendar_signal` upstream.
+
+When `mode` is unset (default), behavior is unchanged — return the daily calendar snapshot as today.
+
 ## MCP routing
 
 This skill can pull calendar data from any of the following MCPs, in priority order:

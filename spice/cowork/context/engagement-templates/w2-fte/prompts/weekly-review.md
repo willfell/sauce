@@ -8,7 +8,7 @@ updated_by: cowork@0.11.0 installer
 
 # Weekly review — w2-fte
 
-Compose this week's review for the w2 engagement using the gather outputs (calendar next-week, gmail 7-day, projects weekly, threads weekly-audit) + FTE status block from `write-summary-fte-status`. Body shape:
+Compose this week's review for the w2 engagement using the gather outputs (calendar next-week, gmail 7-day, projects weekly, threads weekly-audit) + FTE status block from `write-summary-fte-status`.
 
 ## 📆 Week status
 

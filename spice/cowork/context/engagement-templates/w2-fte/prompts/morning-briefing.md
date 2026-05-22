@@ -8,7 +8,7 @@ updated_by: cowork@0.11.0 installer
 
 # Morning briefing — w2-fte
 
-Compose today's morning briefing for the w2 engagement using the gather outputs (calendar scoped to `calendar_id`, gmail scoped to `gmail_label`, projects with kanban_projects: include, threads). Body shape:
+Compose today's morning briefing for the w2 engagement using the gather outputs (calendar scoped to `calendar_id`, gmail scoped to `gmail_label`, projects with kanban_projects: include, threads).
 
 ## ☀️ Today at a glance
 

@@ -8,7 +8,7 @@ updated_by: cowork@0.11.0 installer
 
 # Monthly review — consulting (PREVIOUS month)
 
-Reviewing the PREVIOUS month for the consulting engagement using the gather outputs (finance full-month, cc-debt-snapshot monthly-close, calendar next-month, projects monthly, threads monthly-audit, forward-stressors) + invoice block from `write-summary-invoice-prep` when `invoice_cadence == "monthly"`. Body shape:
+Reviewing the PREVIOUS month for the consulting engagement using the gather outputs (finance full-month, cc-debt-snapshot monthly-close, calendar next-month, projects monthly, threads monthly-audit, forward-stressors) + invoice block from `write-summary-invoice-prep` when `invoice_cadence == "monthly"`.
 
 ## 🗓️ Month in review
 

@@ -8,11 +8,11 @@ updated_by: cowork@0.11.0 installer
 
 # Midday tripwire — personal
 
-Compose the tripwire body using the gather-finance-cc-today output. This run-note ONLY exists when at least one charge is yellow or red severity — if everything is green, the orchestrator skips the write entirely. Body shape:
+Compose the tripwire body using the gather-finance-cc-today output. This run-note ONLY exists when at least one charge is `warn` or `alert` severity — if everything is green, the orchestrator skips the write entirely.
 
 ## 🚨 Flagged charges
 
-For each yellow + red charge: amount (USD) · merchant · card name · severity (yellow/red) · one-sentence rationale (e.g., "locked-card breach", "discretionary >$X threshold", "splurge category"). Group reds first.
+For each `warn` + `alert` charge: amount (USD) · merchant · card name · severity (warn/alert) · one-sentence rationale (e.g., "locked-card breach", "discretionary >$X threshold", "splurge category"). Group alerts first.
 
 ## 🕒 Days since last splurge
 
@@ -20,7 +20,7 @@ Single line from the gather output: `days_since_splurge_pre` value (or note "fir
 
 ## 🔒 Locked-card breaches
 
-Only if at least one red charge hit a locked card. List each locked-card transaction separately with merchant + amount. Skip section if zero red charges.
+Only if at least one `alert` charge hit a locked card. List each locked-card transaction separately with merchant + amount. Skip section if zero alert charges.
 
 ## 🎯 Recommended action
 
@@ -28,6 +28,6 @@ One 1–2 sentence paragraph naming the corrective action: pause discretionary, 
 
 ---
 
-Tone: direct without scolding. Severity comes from the gather classifier — don't second-guess it. Skip the locked-card section if all flags were yellow.
+Tone: direct without scolding. Severity comes from the gather classifier — don't second-guess it. Skip the locked-card section if all flags were warn.
 
 **Gather-skipped handling:** If any section's gather skill emitted `gather-skipped: <reason>` (calendar / gmail / imessage MCP unavailable, or finance source unreachable), render that section as a single `> [!warning] <Section name> unavailable` admonition naming the reason — do NOT omit the section silently. Continue composing the rest of the briefing normally.

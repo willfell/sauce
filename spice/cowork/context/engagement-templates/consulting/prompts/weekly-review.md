@@ -8,7 +8,7 @@ updated_by: cowork@0.11.0 installer
 
 # Weekly review — consulting
 
-Compose this week's review for the consulting engagement using the gather outputs (finance full-week, cc-debt-snapshot weekly, calendar next-week, gmail 7-day, projects weekly, threads weekly-audit) + invoice block from `write-summary-invoice-prep` when `invoice_cadence == "weekly"`. Body shape:
+Compose this week's review for the consulting engagement using the gather outputs (finance full-week, cc-debt-snapshot weekly, calendar next-week, gmail 7-day, projects weekly, threads weekly-audit) + invoice block from `write-summary-invoice-prep` when `invoice_cadence == "weekly"`.
 
 ## 📆 Week in review
 

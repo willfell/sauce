@@ -8,7 +8,7 @@ updated_by: cowork@0.11.0 installer
 
 # Monthly review — personal (PREVIOUS month)
 
-Reviewing the PREVIOUS month. Compose using the gather outputs (finance full-month, cc-debt-snapshot monthly-close, calendar next-month, imessage 31-day, projects monthly, threads monthly-audit, forward-stressors). Body shape:
+Reviewing the PREVIOUS month. Compose using the gather outputs (finance full-month, cc-debt-snapshot monthly-close, calendar next-month, imessage 31-day, projects monthly, threads monthly-audit, forward-stressors).
 
 ## 🗓️ Month in review
 

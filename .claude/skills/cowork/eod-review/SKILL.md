@@ -38,8 +38,15 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
 ## Write
 
 10. **Read prompt body** via `mcp__obsidian__get_file_contents` at `spice/cowork/prompts/eod-review.md`. Strip frontmatter; capture body as `prompt_body` (or empty when missing).
-11. **Compose run-note body** per `prompt_body` instructions interpolating gather outputs. When empty: `run_body = ""`, `warning = "empty_prompt"`. Otherwise `warning = null`.
-12. Use Skill `cowork:write-run-note-eod-review` with `{ engagement, date: context.today, weekday: context.dddd, month_name: context["MM-Month"].split("-")[1], body: run_body, prompt_source: "spice/cowork/prompts/eod-review.md", warning }`. Capture `status`. If `status` starts with `"failed:"`, emit Notice `cowork:eod-review aborted -- write failed: <status>` and exit.
+11. **Compose run-note body** per `prompt_body` instructions interpolating gather outputs. When `prompt_body` is empty, do NOT freelance content — compose a skeleton-compliant STUB body:
+    - `SpaceNavButtons` dataviewjs block (verbatim).
+    - `> [!info]- Today at a glance\n> (Prompt body empty — edit spice/cowork/prompts/eod-review.md to customize what this run emits.)`
+    - `> [!example]+ 📋 Status\n> No prompt body to drive content; this run is a placeholder.`
+    - `> [!tip] ✏️ Next action\n> Edit \`spice/cowork/prompts/eod-review.md\` to define what this scheduled job should emit when it fires.`
+    Set `warning = "empty_prompt"` and pass `summary = "Stub run — prompt body at spice/cowork/prompts/eod-review.md is empty."` to write-run-note via its `summary` arg. The write-run-note self-check passes (5 markers + summary + title all present).
+    When `prompt_body` is non-empty, set `warning = null` and compose the body per the prompt's instructions, respecting the adaptive body skeleton in write-run-note-eod-review's `## Adaptive body skeleton` section.
+12. Use Skill `cowork:write-run-note-eod-review` with `{ engagement, date: context.today, weekday: context.dddd, month_name: context["MM-Month"].split("-")[1], body: run_body, prompt_source: "spice/cowork/prompts/eod-review.md", warning }`. Capture `status`. If `status` starts with `"failed:contract-violation:"`, emit Notice `cowork:eod-review aborted -- contract violation: <field>` (where `<field>` is the part after `failed:contract-violation:`). Do not run state-update steps. Exit non-zero.
+    Else if `status` starts with `"failed:"` (e.g. `failed:filesystem:permission`, `failed:write-undersized:285`), emit Notice `cowork:eod-review aborted -- write failed: <status>` and exit. Do not run state-update steps after a failed write.
 
 ## State
 
