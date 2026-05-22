@@ -9,12 +9,12 @@ load_when: Starting a session, picking the next cycle, or sanity-checking the cu
 
 ## Current
 
-- **Workshop version:** `0.71.1` (closed 2026-05-21)
-- **Most recent cycle:** v0.71.1 customjs-class-file-contract PATCH — BUGFIX: `_humanCase` in `activity-feed.js` moved from file-scope to instance method. customJS loads each .js file under `eval(`(${file})`)` — a file-scope helper preceding the class declaration causes `SyntaxError: Unexpected token 'class'`, the file fails to register, and downstream consumers see `customJS.ActivityFeed === undefined` (daily dashboard emits "ActivityFeed mechanism unavailable"). Bug shipped in v0.71.0 S2 (`activity-feed@0.5.0`); was masked in vaults where customJS still held the v0.4.1 ActivityFeed in memory until a manual reload. NEW regression test `AF-V0710-CUSTOMJS-1` in `run-activity-feed.js` asserts the file remains customJS-loadable across future cycles. Touches `activity-feed.js` + `run-activity-feed.js`. Mechanism: activity-feed 0.5.0 → 0.5.1. Previous cycle: v0.71.0 cowork-presentation-polish MINOR (closed 2026-05-21).
+- **Workshop version:** `0.73.0` (closed 2026-05-22)
+- **Most recent cycle:** v0.73.0 kanban-progress-architectural-cleanup MINOR — Part A: NEW `KanbanStatusSyncInit` customjs startup-script class (`kanban-status-sync@0.2.0`) moves `syncAllBoards` out of `SpaceDailyDashboard.render`; runs once at vault boot via Dataview-ready retry-with-backoff (max 30s). Removes our code from the hot path of every Dataview re-execution. Part B: `<details>` open/closed state persists across re-renders via `ranch/cache/dashboard-section-state.json` (best-effort; namespaced keys `sauce-daily-dashboard:<section>` + `sauce-activity-feed:<bucketKey>`). Part C: Obsidian command "Sauce: Re-sync kanban boards" (id `kanban-status-sync:resync-now`) bypasses the once-per-day cache. Part D: activity-feed audit pass — precedence comments, short-circuit annotation, manifest description trim, 3 NEW runtime asserts (AF-V073-1/2/3). Plus `Pass 1b` (`KSS-INIT-1..9`) added to the kanban-status-sync harness. Mechanisms: `kanban-status-sync` 0.1.1 → 0.2.0, `activity-feed` 0.6.0 → 0.7.0. Blueprints: `daily` 0.12.0 → 0.13.0. Shipped to all 4 consumer vaults; byte-equal `activity-feed.js`, `space-daily-dashboard.js`, `kanban-status-sync-init.js` verified across barebones/accuris-sauce/ero-sauce/headspace-sauce; `KanbanStatusSyncInit` present in each consumer's `customjs.startupScriptNames[]`. Previous cycle: v0.72.1 kanban-status-sync once-per-day cache PATCH (closed 2026-05-22).
 
 ## Cycle order (chronological)
 
-v0.1.0 → v0.1.1 → v0.1.x → v0.1.3 → v0.1.2 → v0.2.0 → v0.3.0 → v0.4.0 → v0.3.2 → v0.4.2 → v0.5.0 → v0.11.0 → v0.12.0 → v0.13.0 → v0.14.0 → v0.6.0 → v0.16.0 → v0.17.0 → v0.18.0/.1/.2 → v0.19.0 → v0.20.0 → v0.21.0/.1 → v0.22.0/.1 → v0.23.0 → v0.24.0 → v0.25.0 → v0.26.0/.1 → v0.27.0 → v0.28.0 → v0.29.0 → v0.30.0 ⏭️ → v0.31.0 → v0.32.0 → v0.33.0/.1 → v0.36.0/.1 → v0.37.0 → v0.38.0/.1 → v0.40.0 → v0.41.0/.5 → v0.42.0 → v0.43.0 → v0.44.0 → v0.45.0 → v0.46.0/.1/.2 → v0.47.0 → v0.48.0 → v0.49.0 → v0.49.1 ⏭️ → v0.49.2 → (v0.50.0–v0.62.0 narratives lost; pre-v0.63 narrative below resumes) → v0.63.0 → v0.63.1 → v0.63.2 → v0.63.3 → v0.64.0 → v0.64.1 → v0.64.2 → v0.64.3 → v0.65.0 → v0.66.0 → v0.66.1 → v0.66.2 → v0.67.0 → v0.67.1 → v0.67.2 → v0.67.3 → v0.70.0 → v0.70.1 → v0.70.2 → v0.70.3 → v0.70.4 → v0.70.5 → v0.70.6 → v0.70.7 → v0.71.0 → v0.71.1 (current).
+v0.1.0 → v0.1.1 → v0.1.x → v0.1.3 → v0.1.2 → v0.2.0 → v0.3.0 → v0.4.0 → v0.3.2 → v0.4.2 → v0.5.0 → v0.11.0 → v0.12.0 → v0.13.0 → v0.14.0 → v0.6.0 → v0.16.0 → v0.17.0 → v0.18.0/.1/.2 → v0.19.0 → v0.20.0 → v0.21.0/.1 → v0.22.0/.1 → v0.23.0 → v0.24.0 → v0.25.0 → v0.26.0/.1 → v0.27.0 → v0.28.0 → v0.29.0 → v0.30.0 ⏭️ → v0.31.0 → v0.32.0 → v0.33.0/.1 → v0.36.0/.1 → v0.37.0 → v0.38.0/.1 → v0.40.0 → v0.41.0/.5 → v0.42.0 → v0.43.0 → v0.44.0 → v0.45.0 → v0.46.0/.1/.2 → v0.47.0 → v0.48.0 → v0.49.0 → v0.49.1 ⏭️ → v0.49.2 → (v0.50.0–v0.62.0 narratives lost; pre-v0.63 narrative below resumes) → v0.63.0 → v0.63.1 → v0.63.2 → v0.63.3 → v0.64.0 → v0.64.1 → v0.64.2 → v0.64.3 → v0.65.0 → v0.66.0 → v0.66.1 → v0.66.2 → v0.67.0 → v0.67.1 → v0.67.2 → v0.67.3 → v0.70.0 → v0.70.1 → v0.70.2 → v0.70.3 → v0.70.4 → v0.70.5 → v0.70.6 → v0.70.7 → v0.71.0 → v0.71.1 → v0.72.0 → v0.72.1 → v0.73.0 (current).
 
 > Gap note: per `Docs/cycle-history.md` line count (57 closed-cycle sections ending at v0.47.0, plus a v0.48–v0.67.3 archive), the v0.50.0 → v0.62.0 narratives were not captured in cycle-history.md during their respective closes. The CLAUDE.md claim that they were "archived to Docs/cycle-history.md" was stale. Backfill from `Docs/plans/` is possible but deferred.
 
@@ -33,42 +33,45 @@ Live brainstorm list (also referenced in `Docs/plans/` and brainstorm shelf file
 - **FLN-v64-6** — scratch body-first-line title fallback for legacy untitled scratches
 - **FLN-v67-7** — `sauce update --bump-pins` flag candidate for consumer subscription auto-bump
 
-## Mechanisms (14)
+## Mechanisms (15)
 
 | Name | Version | Role |
 | --- | --- | --- |
 | `customjs-guard` | 1.0.0 | Cold-load TDZ guard for Dataview views |
-| `validator` | 0.2.0 | Per-file rules engine + Layer 2 manifest-convention rules |
-| `audit` | 0.2.0 | `claude-surface` walker + entity-create walker + `/audit` slash command |
+| `validator` | 0.3.0 | Per-file rules engine + Layer 2 manifest-convention rules |
+| `audit` | 0.3.0 | `claude-surface` walker + entity-create walker + `/audit` slash command |
 | `nav-buttons` | 2.7.0 | Registry-driven nav-button renderer; consumes icons mechanism |
-| `activity-feed` | 0.4.1 | Bucketed activity-feed renderer; bucketRules + groupOrder + framed renderer |
-| `cards` | 0.2.4 | BeaconCards row/stacked layouts |
+| `activity-feed` | 0.7.0 | Bucketed activity-feed renderer; framed groups; persisted `<details>` state across re-renders (v0.7.0) |
+| `kanban-status-sync` | 0.2.0 | Syncs obsidian-kanban column → frontmatter; NEW `KanbanStatusSyncInit` startup-script class moves sync out of render hot path (v0.2.0) |
+| `cards` | 0.2.6 | BeaconCards row/stacked layouts; function-form `meta` opt |
 | `accent-button` | 0.1.0 | AccentButton render helper |
 | `icons` | 0.1.1 | Lucide kebab → SVG resolver; ~21 vendored Tier 1 SVGs + Obsidian `setIcon` Tier 2 fallback |
 | `people-rendering` | 0.1.0 | People page renderers |
 | `styling` | 0.1.2 | Vendored sauce theme + CSS variables |
 | `convenience` | 0.2.4 | Consumer-default hotkeys/snippets/app-settings |
-| `platform-claude` | 0.1.0 | `/install` `/upgrade` `/bootstrap` lifecycle slash commands + CLAUDE.md marker renderer |
-| `entity-create` | 0.3.0 | Declarative `new_entity_buttons[]` spec; inside-block JS-comment sentinel; substitution catalogue with `derive`/`validate`/`inline_body` extensions |
+| `platform-claude` | 0.1.1 | `/install` `/upgrade` `/bootstrap` lifecycle slash commands + CLAUDE.md marker renderer |
+| `entity-create` | 0.4.0 | Declarative `new_entity_buttons[]` spec; inside-block JS-comment sentinel; substitution catalogue with `derive`/`validate`/`inline_body` extensions |
 | `backlink-panel` | 0.1.0 | Backlink panel renderer |
 
 Per-mechanism version history is in `Docs/cycle-history.md`. Current canonical catalogue lives at `platform/manifest.json`.
 
-## Blueprints (11)
+## Blueprints (13)
 
 | Name | Version | Slash command | Module dir |
 | --- | --- | --- | --- |
-| `boards` | 0.1.0 | — | `spice/boards/` |
+| `boards` | 0.2.1 | — | `spice/boards/` |
 | `cowork` | 0.12.0 | — | `spice/cowork/` |
-| `daily` | 0.10.7 | `/daily` | `spice/daily/` |
-| `journal` | 0.1.2 | — | `spice/journal/` |
-| `meetings` | 0.5.1 | `/meetings` | `spice/meetings/` |
-| `people` | 0.2.2 | — | `spice/people/` |
-| `project` | 1.9.2 | `/project` | `spice/projects/` |
-| `scratch` | 0.3.1 | `/scratch` | `spice/scratch/` |
+| `daily` | 0.13.0 | `/daily` | `spice/daily/` |
+| `journal` | 0.2.0 | — | `spice/journal/` |
+| `meetings` | 0.6.0 | `/meetings` | `spice/meetings/` |
+| `people` | 0.4.0 | — | `spice/people/` |
+| `products` | 0.3.0 | — | `spice/products/` |
+| `project` | 1.14.0 | `/project` | `spice/projects/` |
+| `scratch` | 0.5.1 | `/scratch` | `spice/scratch/` |
+| `teams` | 0.3.0 | — | `spice/teams/` |
 | `to-do` | 0.3.3 | — | `spice/to-do/` |
-| `trips` | 0.1.7 | — | `spice/trips/` |
-| `finance` | 0.3.1 | — | `spice/finance/` |
+| `trips` | 0.3.0 | — | `spice/trips/` |
+| `finance` | 0.4.0 | — | `spice/finance/` |
 
 > Note: this table's blueprint versions track `platform/manifest.json`'s catalogue, not the per-blueprint `manifest.json`. The two must match (lockstep gate); if you see drift, that's a `check-version-sync.js` violation. Per-blueprint version history is in `Docs/cycle-history.md`.
 

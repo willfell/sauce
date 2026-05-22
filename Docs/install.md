@@ -519,3 +519,38 @@ sauce update              # picks up the fix
 Verifying the fix: open today's daily note. The Activity panel should render the cowork bucket + other groups normally. If you still see "ActivityFeed mechanism unavailable", check that `ranch/scripts/activity-feed/activity-feed.js` has `_humanCase(key)` as a method INSIDE `class ActivityFeed` (not as a `function _humanCase()` declaration above the class).
 
 Regression guard: `AF-V0710-CUSTOMJS-1` in `run-activity-feed.js` asserts the file remains customJS-loadable across future cycles.
+
+### Upgrading from v0.72.x → v0.73.0
+
+MINOR cycle. Four-part bundle: architectural cleanup of the kanban-progress surface + activity-feed efficiency pass.
+
+```bash
+brew upgrade sauce        # 0.72.x → 0.73.0
+# Bump consumer subscription pins (workshop_version, kanban-status-sync,
+# activity-feed, daily) — see the node one-liner in the cycle handoff or
+# edit ranch/platform-subscription.json directly.
+cd /path/to/your/vault    # critical — sauce update reads cwd ancestry
+sauce update --force      # picks up the cycle
+# In Obsidian: reload customJS to register KanbanStatusSyncInit + clear
+# any cached pre-fix activity-feed instance.
+```
+
+What you get:
+
+**Part A — `kanban-status-sync@0.2.0`: startup-script architecture.** The board-to-card frontmatter sync no longer runs inline inside the daily-dashboard's render path. A NEW `KanbanStatusSyncInit` customjs class is registered in `.obsidian/plugins/customjs/data.json`'s `startupScriptNames[]` and runs once at vault boot (Dataview-ready retry-with-backoff, max 30s). Subsequent `customJS.KanbanStatusSync.syncAllBoards` invocations are cache-hits. Eliminates the re-render storm pattern: when an external plugin (e.g., smart-connections embedding queue) causes Dataview to re-execute the dashboard's dataviewjs block, our code is no longer in the hot path.
+
+**Part B — `activity-feed@0.7.0` + `daily@0.13.0`: persisted `<details>` state.** Section + group open/closed toggles now survive Dataview re-renders. State persists to `ranch/cache/dashboard-section-state.json` (best-effort; missing-file or malformed-JSON falls back to default-open semantics). Namespaced keys: `sauce-daily-dashboard:tasks` / `:meetings` / `:activity` for top-level dashboard sections; `sauce-activity-feed:<bucketKey>` (e.g., `:cowork`, `:project`, `:kanban`, `:scratch`) for inner activity-feed groups. Last-write-wins on toggle.
+
+**Part C — manual re-sync command.** Cmd+P → "Sauce: Re-sync kanban boards" (id `kanban-status-sync:resync-now`) bypasses the once-per-day cache and forces a fresh sweep. Useful when you move a card mid-session and want it to surface in the activity feed without restarting Obsidian.
+
+**Part D — activity-feed efficiency audit.** Precedence comments (metaBuilder vs getSubtitle), short-circuit annotation in `_query.inWindow`, manifest description trim. NEW runtime asserts AF-V073-1/2/3 (tsKeys 3-key any-in-window semantics, groupPreviewBuilder gating to manifest-`defaultClosed[]` only, native-Date `_resolveTimeWindow` fallback reachability).
+
+Verifying the fix:
+1. Open today's daily note. Toggle the Activity section closed. Switch to another note and back. The section should stay closed.
+2. Toggle a single activity-feed group (e.g., `kanban`) closed. The state persists across re-renders.
+3. Cmd+P → start typing "Sauce: Re-sync" — the command should appear in the palette.
+4. Inspect `.obsidian/plugins/customjs/data.json` → `startupScriptNames[]` should include `KanbanStatusSyncInit`.
+
+**Behavior notes (intentional):**
+- `groupPreviewBuilder` still fires only for groups in the manifest's `defaultClosed[]` (e.g., `scratch`). User-toggled state does not change which groups show a preview suffix — by design.
+- First daily-note render of a session may show stale kanban frontmatter (the startup sync runs at vault boot but may not have completed by the first render); subsequent renders are correct. If this matters, use the manual re-sync command.

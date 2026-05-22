@@ -469,3 +469,39 @@ See `Docs/plans/2026-05-21-v0.71.0-cowork-presentation-polish-result.md` for the
 
 See `Docs/plans/2026-05-21-v0.71.1-customjs-class-file-contract-result.md` for the full record.
 
+## v0.72.0 kanban-progress-surfacing MINOR CLOSED 2026-05-22
+
+**Workshop:** 0.71.1 → 0.72.0 (intermediate; v0.72.1 PATCH followed same day).
+**Mechanism:** NEW `kanban-status-sync@0.1.0` (later bumped to 0.1.1 inside cycle for the once-per-day cache) + `activity-feed` 0.5.1 → 0.6.0.
+**Blueprint:** `daily` 0.11.0 → 0.12.0.
+
+**Headline:** Surfaced kanban-board column-moves in the daily-dashboard Activity panel. Each card carries `status:` + `status_prev:` + `status_changed_at:` written by `KanbanStatusSync.syncAllBoards(dv, today)` (parses each `kanban-plugin: board` page, slugifies the column header, writes only-on-change via `app.fileManager.processFrontMatter`). The dashboard called `syncAllBoards` BEFORE `ActivityFeed.render`, then passed `tsKeys: ["created_at", "status_changed_at"]` to surface today's moves alongside today's creates. NEW `_renderKanbanDrillInList` emitted per-card transition lines (move/create/archive precedence: archive > move > create).
+
+**v0.72.1 follow-up (same day):** added a once-per-day in-singleton cache to `syncAllBoards` after the user reported a 283-card write storm on accuris' first run of the day. Subsequent re-renders within the same customjs-singleton lifetime returned the cached `{synced, archived, boards}` result instantly. Did NOT fix the underlying re-render cause (smart-connections embedding queue suspected).
+
+See `Docs/plans/2026-05-21-activity-feed-kanban-progress-design.md` + `-plan.md`.
+
+## v0.73.0 kanban-progress-architectural-cleanup MINOR CLOSED 2026-05-22
+
+**Workshop:** 0.72.1 → 0.73.0
+**Mechanism:** `kanban-status-sync` 0.1.1 → 0.2.0 (NEW `KanbanStatusSyncInit` customjs startup-script class); `activity-feed` 0.6.0 → 0.7.0 (persisted `<details>` state + audit pass).
+**Blueprint:** `daily` 0.12.0 → 0.13.0 (removed inline syncAllBoards call; `_renderSection` honors persisted state).
+
+**Headline:** Four-part architectural cleanup of the kanban-progress surface plus an efficiency audit pass on activity-feed.
+
+- **Part A (kanban-status-sync@0.2.0):** moved the `syncAllBoards` trigger out of `SpaceDailyDashboard.render` and into a NEW customjs startup-script class `KanbanStatusSyncInit`. The init class is registered in `customjs.startupScriptNames[]` via the manifest's `customjs_startup_scripts[]` field, runs once at vault boot (Dataview-ready retry-with-backoff, max 30s), and is a cache-hit on subsequent invocations (per the v0.72.1 once-per-day cache). Removes our code from the hot path of every Dataview re-execution — closes the "scroll resets to top of daily" UX regression triggered by external plugins (e.g., smart-connections embedding queue) invalidating the dataviewjs subscription.
+- **Part B (activity-feed@0.7.0 + daily@0.13.0):** persisted `<details>` open/closed state across re-renders via `ranch/cache/dashboard-section-state.json`. Namespaced keys: `sauce-daily-dashboard:<section>` for top-level Tasks/Meetings/Activity panels; `sauce-activity-feed:<bucketKey>` for inner activity-feed groups. Best-effort read/write; missing file or malformed JSON falls back to default-open semantics. Last-write-wins on toggle. New helpers `_readSectionState` + `_writeSectionStateKey` (dashboard), `_readGroupState` + `_writeGroupStateKey` (activity-feed). `render()` becomes `async`; the await is guarded behind a real `app.vault.adapter` check so the Node harness path stays synchronous.
+- **Part C (Obsidian command):** Cmd+P → "Sauce: Re-sync kanban boards" (id `kanban-status-sync:resync-now`) registered inside `KanbanStatusSyncInit._registerResyncCommand`. Bypasses the once-per-day cache (nulls `_lastSyncDay`/`_lastSyncResult` on the singleton) and forces a fresh sweep. Surfaces the result via Notice.
+- **Part D (activity-feed audit):** precedence comments (metaBuilder vs getSubtitle), short-circuit annotation in `_query.inWindow`, manifest description trim. THREE new runtime asserts in `run-activity-feed.js`: AF-V073-1 (tsKeys with 3 distinct keys, any-in-window semantics), AF-V073-2 (groupPreviewBuilder fires for `defaultClosed[]` groups + post-bucket key matches), AF-V073-3 (native-Date `_resolveTimeWindow` fallback reachable from Node harness). `kanban-status-sync` harness gains `Pass 1b` (`KSS-INIT-1..9`) covering manifest + init-class source lint.
+
+**Deploy:** workshop tag v0.73.0 pushed; homebrew-sauce tap PR #92 merged; `brew upgrade sauce` to 0.73.0; pins bumped + `sauce update --force` against all 4 consumer vaults (barebones / accuris-sauce / ero-sauce / headspace-sauce). Byte-level cmp verified `activity-feed.js`, `space-daily-dashboard.js`, and `kanban-status-sync-init.js` match workshop sources across all 4 consumers. `KanbanStatusSyncInit` present in `startupScriptNames[]` for each.
+
+**Lessons / carry-forwards:**
+1. The render-time-sync pattern shipped in v0.72.0 was a structural mistake. Even with a perfect cache, putting work inside the dataviewjs hot path makes it vulnerable to external re-render triggers we can't control. Future: any persistent bookkeeping that touches frontmatter should run at startup, not at render.
+2. `app` is shimmed as `{}` in the test harness — type-of guards must check for a real `vault.adapter`, not just `app`, when deciding whether to enter an await path. Otherwise an async function yields on the first await and breaks sync harness assertions.
+3. Landmine #16 strikes again — workshop self-install short-circuited until the version bump landed. Plan accommodated this by running self-install AFTER the cycle-close bumps.
+4. AF-V065 (description-mentions-"0.2.0") was a stale regression-protection assertion that the trim made false. Replaced with a forward-looking assertion (description mentions current-shipping `v0.7.0`).
+5. `groupPreviewBuilder` gating decision (manifest-`defaultClosed[]` only, not state-closed) documented inline in `_renderFramedGroup` AND in this entry — stable rule going forward.
+
+See `Docs/plans/2026-05-22-v0.73.0-kanban-progress-architectural-cleanup-{design,plan,result}.md`.
+
