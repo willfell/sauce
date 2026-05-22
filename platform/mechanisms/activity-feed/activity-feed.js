@@ -111,6 +111,14 @@
  *                        no metaBuilder is set. metaBuilder takes
  *                        precedence when both are supplied.
  *
+ *   tsKeys:              string[] (default undefined, added v0.6.0 — sauce
+ *                        v0.72.0). When provided, the in-window check tests
+ *                        EVERY listed timestamp field and passes if ANY is
+ *                        in-window. Used by the kanban group to match cards
+ *                        whose either created_at OR status_changed_at is
+ *                        today. When absent, behavior unchanged from v0.5.1
+ *                        (single key per useStatusChangedAt).
+ *
  *   framed:              boolean (default false, added v0.4.0). When true
  *                        AND groupBy="blueprint", each group renders as a
  *                        framed section: bg-tint + left-accent stripe,
@@ -194,7 +202,7 @@ class ActivityFeed {
 
     let pages;
     try {
-      pages = this._query(dv, blueprints, timeWindow, useStatusChangedAt, includeMtime, limit, rollUpRoots);
+      pages = this._query(dv, blueprints, timeWindow, useStatusChangedAt, includeMtime, limit, rollUpRoots, opts);
     } catch (e) {
       new Notice("ActivityFeed: query failed — " + (e && e.message ? e.message : String(e)));
       return;
@@ -286,32 +294,49 @@ class ActivityFeed {
    * @param {Array|null} rollUpRoots — optional rollup rules (v0.3.0).
    * @returns {Array}
    */
-  _query(dv, blueprints, timeWindow, useStatusChangedAt, includeMtime, limit, rollUpRoots) {
+  _query(dv, blueprints, timeWindow, useStatusChangedAt, includeMtime, limit, rollUpRoots, opts) {
     const start = timeWindow.startIso;
     const end = timeWindow.endIso;
-    const tsKey = useStatusChangedAt ? "status_changed_at" : "created_at";
+
+    // v0.6.0 (sauce v0.72.0): tsKeys opt — when provided, the in-window check
+    // tests EVERY listed timestamp field and passes if ANY is in-window. Used by
+    // the kanban-group filter to surface cards that either were created today
+    // OR had their status_changed_at land today. When tsKeys is absent, behavior
+    // matches v0.5.1 exactly (uses [tsKey] = either created_at or status_changed_at
+    // per useStatusChangedAt).
+    const tsKeysOpt = (opts && Array.isArray(opts.tsKeys) && opts.tsKeys.length > 0)
+      ? opts.tsKeys.slice()
+      : [useStatusChangedAt ? "status_changed_at" : "created_at"];
+    // Back-compat: keep `tsKey` defined to the FIRST tsKeys entry — `pickLatest`
+    // and any other site that reads tsKey see a stable key.
+    const tsKey = tsKeysOpt[0];
 
     // Pass 1: window filter only (NOT type allowlist — rollup children may have
     // types outside the allowlist; we allowlist-filter the SURVIVORS post-rollup).
     //
-    // v0.4.1 (sauce v0.70.7): created_at (tsKey) is AUTHORITATIVE when present.
-    // If a page has a tsKey field, the in-window check is purely tsKey-based —
-    // we no longer fall through to file.mtime when tsKey is out-of-window.
-    // mtime is consulted only for LEGACY pages that lack the tsKey field.
-    // Fixes Obsidian Mobile rendering yesterday's content into today's daily
-    // when mobile sync re-touched the files (mobile-side mtime = sync time,
-    // not original write time, so includeMtime was matching files whose
-    // created_at clearly excluded them).
+    // v0.6.0 in-window check tests ALL tsKeysOpt entries; passes if any is in-window.
+    // mtime fallback (includeMtime:true) is preserved for legacy pages without any
+    // tsKeys field. Mobile-mtime warning carries over from v0.4.1.
+    //
+    // Authoritative semantics (v0.4.1): if ANY tsKeysOpt field is PRESENT on the
+    // page (even if its value is out-of-window), the timestamp fields are
+    // authoritative and mtime fallback is suppressed. The mtime path executes only
+    // for legacy pages that have NONE of the tsKeysOpt fields.
     const inWindow = (p) => {
       if (!p) return false;
-      const tsRaw = p[tsKey];
-      if (tsRaw) {
+      let anyFieldPresent = false;
+      for (const key of tsKeysOpt) {
+        const tsRaw = p[key];
+        if (!tsRaw) continue;
+        anyFieldPresent = true;
         const ts = String(tsRaw);
         if (/^\d{4}-\d{2}-\d{2}$/.test(ts)) {
-          return ts >= start.slice(0, 10) && ts <= end.slice(0, 10);
+          if (ts >= start.slice(0, 10) && ts <= end.slice(0, 10)) return true;
+        } else if (ts >= start && ts <= end) {
+          return true;
         }
-        return ts >= start && ts <= end;
       }
+      if (anyFieldPresent) return false; // authoritative: at least one field found, none in-window
       if (!includeMtime) return false;
       if (!p.file || !p.file.mtime) return false;
       const mIso = (typeof p.file.mtime.toISO === "function") ? p.file.mtime.toISO() : String(p.file.mtime);
@@ -353,9 +378,13 @@ class ActivityFeed {
       const pickLatest = (children) => {
         let best = null, bestKey = "";
         for (const c of children) {
-          const v = c[tsKey] ? String(c[tsKey])
-                  : (c.file && c.file.mtime && typeof c.file.mtime.toISO === "function" ? c.file.mtime.toISO()
-                  : "");
+          let v = "";
+          for (const k of tsKeysOpt) {
+            if (c[k]) { v = String(c[k]); break; }
+          }
+          if (!v && c.file && c.file.mtime && typeof c.file.mtime.toISO === "function") {
+            v = c.file.mtime.toISO();
+          }
           if (v > bestKey) { bestKey = v; best = c; }
         }
         return best;

@@ -63,7 +63,7 @@ try {
 if (manifest) {
   assertTrue("AF-1b: manifest.json parses as JSON", true);
   assertEq("AF-1c: manifest.name === 'activity-feed'", manifest.name, "activity-feed");
-  assertEq("AF-1d: manifest.version === '0.5.1'", manifest.version, "0.5.1");
+  assertEq("AF-1d: manifest.version === '0.6.0'", manifest.version, "0.6.0");
   assertEq("AF-1e: manifest.kind === 'mechanism'", manifest.kind, "mechanism");
 
   assertEq("AF-2: customjs_classes is ['ActivityFeed']", manifest.customjs_classes, ["ActivityFeed"]);
@@ -154,6 +154,20 @@ if (src.length > 0) {
     /unable to resolve|invalid scope|time-window/i.test(src));
   assertTrue("AF-15b: Notice on BeaconCards unavailable present",
     /BeaconCards.*unavailable|unavailable.*BeaconCards/i.test(src));
+
+  // AF-tsKeys-1: tsKeys opt referenced
+  assertTrue("AF-tsKeys-1: tsKeys opt referenced in source", /\btsKeys\b/.test(src));
+
+  // AF-tsKeys-2: inWindow predicate accepts multi-key array
+  assertTrue("AF-tsKeys-2: inWindow handles tsKeys array",
+    /Array\.isArray\(\s*opts\.tsKeys\s*\)|Array\.isArray\(\s*tsKeys\s*\)/.test(src));
+
+  // AF-tsKeys-3: comment naming both keys present
+  assertTrue("AF-tsKeys-3: both created_at + status_changed_at mentioned in tsKeys context",
+    /tsKeys[\s\S]{0,400}created_at/.test(src) && /tsKeys[\s\S]{0,400}status_changed_at/.test(src));
+
+  // AF-tsKeys-4: v0.6.0 marker in description / docstring
+  assertTrue("AF-tsKeys-4: v0.6.0 marker present in source comments", /v0\.6\.0/.test(src));
 }
 
 // ── Pass 3: runtime render — asOf + includeMtime ─────────────────────────
@@ -405,7 +419,7 @@ try {
     assertTrue(`AF-V065: _DEFAULT_BLUEPRINTS contains "${t}"`, src.includes(`"${t}"`));
   }
   const manifest = JSON.parse(fs.readFileSync("platform/mechanisms/activity-feed/manifest.json", "utf8"));
-  assertEq("AF-V065: activity-feed manifest version is 0.5.1", manifest.version, "0.5.1");
+  assertEq("AF-V065: activity-feed manifest version is 0.6.0", manifest.version, "0.6.0");
   assertTrue("AF-V065: activity-feed description mentions 0.2.0", typeof manifest.description === "string" && manifest.description.includes("0.2.0"));
 }
 
