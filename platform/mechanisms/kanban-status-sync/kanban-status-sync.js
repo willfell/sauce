@@ -16,15 +16,117 @@
  *   KanbanStatusSync.slugifyStatus(name)         → string (lowercase, hyphenated)
  *   KanbanStatusSync.computeDiff(curMap, prior)  → { moves, creates, archives }
  *
- * NEVER reads file.mtime (mobile sync time, unreliable — landmine #23).
+ * NEVER reads the mtime property off a TFile (mobile sync time, unreliable — landmine #23).
  * Frontmatter writes use app.fileManager.processFrontMatter (atomic).
  */
 class KanbanStatusSync {
-  async syncAllBoards(_dv, _today) {
-    return { synced: 0, archived: 0, boards: 0 };
+  /**
+   * Discover every kanban board (file with frontmatter `kanban-plugin: board`)
+   * and sync each card's frontmatter to its current column.
+   *
+   * Returns { synced, archived, boards } aggregated across all boards.
+   */
+  async syncAllBoards(dv, today) {
+    if (!dv || typeof dv.pages !== "function") {
+      return { synced: 0, archived: 0, boards: 0 };
+    }
+    // Dataview field access for hyphenated frontmatter keys uses bracket form.
+    const boards = dv.pages().where(p => p && p["kanban-plugin"] === "board").array();
+    let synced = 0;
+    let archived = 0;
+    for (const board of boards) {
+      if (!board.file || !board.file.path) continue;
+      try {
+        const r = await this.syncBoard(board.file.path, today);
+        synced += r.synced || 0;
+        archived += r.archived || 0;
+      } catch (e) {
+        if (typeof console !== "undefined") {
+          console.warn("[kanban-status-sync] syncBoard failed for " + board.file.path + ": " + (e && e.message));
+        }
+      }
+    }
+    return { synced, archived, boards: boards.length };
   }
-  async syncBoard(_boardPath, _today) {
-    return { synced: 0, archived: 0 };
+
+  /**
+   * Sync one board file.
+   *
+   * Forward pass: walk each card in the board, write frontmatter if column changed.
+   * Reverse pass: query dv for cards previously linked to this board but missing
+   *               from the current placement; mark archived.
+   */
+  async syncBoard(boardPath, today) {
+    if (!app || !app.vault || !app.metadataCache) return { synced: 0, archived: 0 };
+    const boardFile = app.vault.getAbstractFileByPath(boardPath);
+    if (!boardFile || !("extension" in boardFile)) return { synced: 0, archived: 0 };
+
+    const boardSrc = await app.vault.read(boardFile);
+    const currentMap = KanbanStatusSync.parseBoardColumns(boardSrc);
+
+    // Resolve linkpaths → vault paths via metadataCache (sourcePath = boardPath).
+    const resolved = {};
+    for (const linkpath of Object.keys(currentMap)) {
+      const dest = app.metadataCache.getFirstLinkpathDest(linkpath, boardPath);
+      if (dest && dest.path) {
+        resolved[dest.path] = currentMap[linkpath];
+      } else if (typeof console !== "undefined") {
+        console.warn("[kanban-status-sync] unresolved wikilink '" + linkpath + "' in board " + boardPath);
+      }
+    }
+
+    let synced = 0;
+    let archived = 0;
+
+    // Forward pass.
+    for (const cardPath of Object.keys(resolved)) {
+      const cardFile = app.vault.getAbstractFileByPath(cardPath);
+      if (!cardFile) continue;
+      const cache = app.metadataCache.getFileCache(cardFile) || {};
+      const fm = cache.frontmatter || {};
+      const desired = KanbanStatusSync.slugifyStatus(resolved[cardPath]);
+      const sameBoard = fm.kanban_board === boardPath;
+      const sameStatus = fm.status === desired;
+      if (sameBoard && sameStatus) continue;
+      const prev = (typeof fm.status === "string") ? fm.status : null;
+      await app.fileManager.processFrontMatter(cardFile, (cur) => {
+        cur.kanban_board = boardPath;
+        cur.kanban_column = resolved[cardPath];
+        cur.status_prev = prev;
+        cur.status = desired;
+        cur.status_changed_at = today;
+      });
+      synced++;
+    }
+
+    // Reverse pass: cards previously tracked to this board but now missing.
+    let dvApi = null;
+    if (typeof window !== "undefined" && window.app && window.app.plugins &&
+        window.app.plugins.plugins && window.app.plugins.plugins.dataview) {
+      dvApi = window.app.plugins.plugins.dataview.api;
+    }
+    if (dvApi && typeof dvApi.pages === "function") {
+      const orphans = dvApi.pages()
+        .where(p => p && p.kanban_board === boardPath && p.status !== "archived")
+        .array();
+      for (const p of orphans) {
+        if (!p.file || !p.file.path) continue;
+        if (Object.prototype.hasOwnProperty.call(resolved, p.file.path)) continue;
+        const cardFile = app.vault.getAbstractFileByPath(p.file.path);
+        if (!cardFile) continue;
+        const cache = app.metadataCache.getFileCache(cardFile) || {};
+        const fm = cache.frontmatter || {};
+        const prev = (typeof fm.status === "string") ? fm.status : null;
+        await app.fileManager.processFrontMatter(cardFile, (cur) => {
+          cur.status_prev = prev;
+          cur.status = "archived";
+          cur.kanban_column = null;
+          cur.status_changed_at = today;
+        });
+        archived++;
+      }
+    }
+    return { synced, archived };
   }
   /**
    * Parse an obsidian-kanban board's markdown source into a {cardLinkpath: columnName} map.

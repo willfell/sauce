@@ -85,6 +85,44 @@ if (manifest) {
   assertTrue("KSS-3b: files[] declares kanban-status-sync.js → scripts_path/kanban-status-sync/", hasJsEntry);
 }
 
+// ── Pass 2: class source lint ─────────────────────────────────────────────
+
+console.log("\n--- Pass 2: kanban-status-sync.js source lint ---");
+
+let _kssSrc = "";
+try { _kssSrc = fs.readFileSync(SOURCE_PATH, "utf8"); }
+catch (e) { assertTrue("KSS-L0: readFileSync succeeds", false, e && e.message); }
+
+if (_kssSrc.length > 0) {
+  let parseErr = null;
+  try {
+    new Function("app", "customJS", "Notice", "window", _kssSrc + "\nreturn KanbanStatusSync;");
+  } catch (e) { parseErr = e; }
+  assertTrue("KSS-L1: source parses via new Function() without throwing",
+    !parseErr, parseErr && parseErr.message);
+
+  const classMatches = _kssSrc.match(/class\s+KanbanStatusSync\b/g) || [];
+  assertEq("KSS-L2: exactly one 'class KanbanStatusSync' declaration", classMatches.length, 1);
+
+  assertTrue("KSS-L3: syncAllBoards method present", /\bsyncAllBoards\s*\(/.test(_kssSrc));
+  assertTrue("KSS-L4: syncBoard method present",     /\bsyncBoard\s*\(/.test(_kssSrc));
+
+  assertTrue("KSS-L5: app.fileManager.processFrontMatter used for FM writes",
+    /app\.fileManager\.processFrontMatter/.test(_kssSrc));
+
+  assertTrue("KSS-L6: board discovery queries kanban-plugin frontmatter",
+    /['"]kanban-plugin['"]/.test(_kssSrc) && /['"]board['"]/.test(_kssSrc));
+
+  // BANNED: file.mtime — mobile-unreliable per landmine #23.
+  assertTrue("KSS-L7: NO file.mtime usage (landmine #23)", !/file\.mtime/.test(_kssSrc));
+
+  // Frontmatter fields the I/O code is expected to write.
+  for (const field of ["status", "status_prev", "status_changed_at", "kanban_board", "kanban_column"]) {
+    assertTrue(`KSS-L8.${field}: writes frontmatter field '${field}'`,
+      new RegExp("\\b" + field + "\\b").test(_kssSrc));
+  }
+}
+
 // ── Helper: load the KanbanStatusSync class from source via `new Function` with stub
 // free vars. Mirrors the loadActivityFeedClass pattern in run-activity-feed.js Pass 3.
 // Stubs are sufficient for pure static methods (parseBoardColumns, slugifyStatus,
