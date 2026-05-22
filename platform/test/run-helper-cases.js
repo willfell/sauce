@@ -7533,13 +7533,14 @@ async function caseFA2RuleFragmentsExtends() {
   }
 
   // FA6-MANIFEST version pins — daily / activity-feed / cards
-  // Updated per cycle as manifests bump. activity-feed at 0.6.0
-  // (v0.72.0 S7 — tsKeys opt + KanbanStatusSync consumer); daily at 0.12.0
-  // (v0.72.0 S7 — kanban sync trigger + transition drill-in); cards untouched.
+  // Updated per cycle as manifests bump. activity-feed at 0.7.0
+  // (sauce v0.73.0 — <details> state persistence + audit pass); daily at 0.13.0
+  // (sauce v0.73.0 — Part A removes syncAllBoards from render hot-path,
+  // Part B persists section state); cards untouched.
   {
     const pins = [
-      ["daily",         "platform/blueprints/daily/manifest.json",            "0.12.0"],
-      ["activity-feed", "platform/mechanisms/activity-feed/manifest.json",    "0.6.0"],
+      ["daily",         "platform/blueprints/daily/manifest.json",            "0.13.0"],
+      ["activity-feed", "platform/mechanisms/activity-feed/manifest.json",    "0.7.0"],
       ["cards",         "platform/mechanisms/cards/manifest.json",            "0.2.6"],
     ];
     for (const [name, relPath, expected] of pins) {
@@ -8014,9 +8015,12 @@ async function caseFA2RuleFragmentsExtends() {
       "utf8"
     );
 
-    // DD-K1: helper invokes KanbanStatusSync.syncAllBoards before ActivityFeed.render
-    assertTrue("DD-K1: SpaceDailyDashboard invokes KanbanStatusSync.syncAllBoards",
-      /customJS\.KanbanStatusSync\.syncAllBoards/.test(src));
+    // DD-K1 (v0.13.0, sauce v0.73.0): helper NO LONGER invokes
+    // KanbanStatusSync.syncAllBoards — Part A moved the call to the
+    // KanbanStatusSyncInit customjs startup-script. Dashboard reads
+    // pre-synced frontmatter, never triggers the sync inline.
+    assertTrue("DD-K1: SpaceDailyDashboard does NOT invoke KanbanStatusSync.syncAllBoards (v0.13.0 architectural move)",
+      !/customJS\.KanbanStatusSync\.syncAllBoards/.test(src));
 
     // DD-K2: tsKeys array passed for activity-feed call with both created_at and status_changed_at
     assertTrue("DD-K2: tsKeys: ['created_at', 'status_changed_at'] referenced in source",

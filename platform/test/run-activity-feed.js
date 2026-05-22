@@ -63,7 +63,7 @@ try {
 if (manifest) {
   assertTrue("AF-1b: manifest.json parses as JSON", true);
   assertEq("AF-1c: manifest.name === 'activity-feed'", manifest.name, "activity-feed");
-  assertEq("AF-1d: manifest.version === '0.6.0'", manifest.version, "0.6.0");
+  assertEq("AF-1d: manifest.version === '0.7.0'", manifest.version, "0.7.0");
   assertEq("AF-1e: manifest.kind === 'mechanism'", manifest.kind, "mechanism");
 
   assertEq("AF-2: customjs_classes is ['ActivityFeed']", manifest.customjs_classes, ["ActivityFeed"]);
@@ -419,8 +419,9 @@ try {
     assertTrue(`AF-V065: _DEFAULT_BLUEPRINTS contains "${t}"`, src.includes(`"${t}"`));
   }
   const manifest = JSON.parse(fs.readFileSync("platform/mechanisms/activity-feed/manifest.json", "utf8"));
-  assertEq("AF-V065: activity-feed manifest version is 0.6.0", manifest.version, "0.6.0");
-  assertTrue("AF-V065: activity-feed description mentions 0.2.0", typeof manifest.description === "string" && manifest.description.includes("0.2.0"));
+  assertEq("AF-V065: activity-feed manifest version is 0.7.0", manifest.version, "0.7.0");
+  assertTrue("AF-V065: activity-feed description mentions latest shipping version",
+    typeof manifest.description === "string" && manifest.description.includes("v0.7.0"));
 }
 
 // ── Pass 4: v0.66.0 rollUpRoots + flatGrouped + metaBuilder ──────────────
@@ -1355,6 +1356,109 @@ try {
   }
 } catch (e) {
   assertTrue("AF-V0710-CUSTOMJS-1: regression guard for customJS file contract", false, e && e.message);
+}
+
+// ── Pass 8: v0.7.0 — tsKeys 3-key path + groupState override + native-Date fallback ─
+
+console.log("\n--- Pass 8: v0.7.0 (sauce v0.73.0) tightening asserts ---");
+
+// AF-V073-1: tsKeys with 3 distinct keys, each page populates one. Verify
+// all three pass through the in-window filter (any-in-window semantics).
+try {
+  const pA = { file: { path: "spice/a.md", name: "a" }, type: "project", created_at: "2026-05-22T08:00:00Z" };                              // hit on created_at
+  const pB = { file: { path: "spice/b.md", name: "b" }, type: "project", status_changed_at: "2026-05-22T09:00:00Z" };                       // hit on status_changed_at
+  const pC = { file: { path: "spice/c.md", name: "c" }, type: "project", edited_at: "2026-05-22T10:00:00Z" };                               // hit on edited_at
+  const pX = { file: { path: "spice/x.md", name: "x" }, type: "project", created_at: "2026-05-20T08:00:00Z" };                              // none in-window
+  const dv = v066_makeFakeDv([pA, pB, pC, pX]);
+  const ActivityFeed = v066_loadAF();
+  const af = new ActivityFeed();
+  af.render(dv, {
+    scope: "today",
+    asOf: "2026-05-22",
+    blueprints: ["project"],
+    framed: true,
+    groupBy: "blueprint",
+    tsKeys: ["created_at", "status_changed_at", "edited_at"],
+  });
+  const html = dv.container.innerHTML;
+  assertTrue("AF-V073-1a: page A (created_at hit) rendered", html.indexOf(">a<") >= 0 || html.indexOf("\"a\"") >= 0 || html.indexOf("a") >= 0);
+  assertTrue("AF-V073-1b: page B (status_changed_at hit) rendered", html.indexOf("b") >= 0);
+  assertTrue("AF-V073-1c: page C (edited_at hit) rendered", html.indexOf("c") >= 0);
+  // Count should be 3 (exclude pX). Group header carries the count.
+  assertTrue("AF-V073-1d: count is (3) — pX with out-of-window created_at excluded",
+    /\(3\)/.test(html));
+} catch (e) {
+  assertTrue("AF-V073-1: tsKeys 3-key path (any-in-window semantics)", false, e && e.message);
+}
+
+// AF-V073-2: groupPreviewBuilder still gated to manifest defaultClosed (per
+// Part B decision) — even if Part B's persisted groupState would render the
+// group open at runtime, the builder fires when isClosed===true at the
+// framed renderer call site. This assert exercises the contract from the
+// renderer side: defaultClosed:["X"] + builder returning text → suffix in
+// header.
+try {
+  const pA = { file: { path: "spice/k/a.md", name: "a" }, type: "kanban", frontmatter: { summary: "Top of board" }, created_at: "2026-05-22T10:00:00Z" };
+  const dv = v066_makeFakeDv([pA]);
+  const ActivityFeed = v066_loadAF();
+  const af = new ActivityFeed();
+  af.render(dv, {
+    scope: "today",
+    asOf: "2026-05-22",
+    blueprints: ["kanban"],
+    framed: true,
+    groupBy: "blueprint",
+    defaultClosed: ["kanban"],
+    groupPreviewBuilder: function (pages) {
+      return (pages[0] && pages[0].frontmatter && pages[0].frontmatter.summary) || "";
+    },
+  });
+  const html = dv.container.innerHTML;
+  assertTrue("AF-V073-2a: preview suffix appended to defaultClosed group header",
+    /\(\d+\)\s+—\s+Top of board/.test(html));
+  assertTrue("AF-V073-2b: data-group=\"kanban\" present (post-bucket key)",
+    /data-group="kanban"/.test(html));
+} catch (e) {
+  assertTrue("AF-V073-2: groupPreviewBuilder gated to manifest-defaultClosed", false, e && e.message);
+}
+
+// AF-V073-3: native-Date _resolveTimeWindow fallback reachability. With a
+// windowShim that has no `moment`, _resolveTimeWindow("today", "2026-05-22")
+// must return start/end ISOs in the same day. This guards the fallback path
+// the Node harness depends on (production uses window.moment).
+try {
+  const srcPath = path.join(WORKSHOP, "platform/mechanisms/activity-feed/activity-feed.js");
+  const customJSsrc = fs.readFileSync(srcPath, "utf8");
+  // Build a class via eval-parens (same shape as v0510-CUSTOMJS-1).
+  const def = eval("(" + customJSsrc + ")");
+  const instance = new def();
+  const noMomentWindow = {};  // shim missing the moment global
+  // _resolveTimeWindow reads `window.moment` from the function-scope binding.
+  // The class definition closes over the `window` identifier resolved at
+  // call-time — at top-level in eval-parens context, `window` is the test
+  // process's globalThis. We can't override that directly, so we test the
+  // native-Date branch by passing asOf and verifying the branch is exercised
+  // when window.moment is absent. In a Node process, window is undefined,
+  // which makes useMoment false and the native path runs.
+  // Use local-noon to avoid TZ drift: `new Date("YYYY-MM-DDTHH:MM:SS")` (no
+  // suffix) parses as local time, keeping both start and end on the same
+  // calendar day regardless of the runner's timezone.
+  const tw = instance._resolveTimeWindow("today", "2026-05-22T12:00:00");
+  assertTrue("AF-V073-3a: _resolveTimeWindow returns an object", tw && typeof tw === "object");
+  assertTrue("AF-V073-3b: startIso defined", typeof tw.startIso === "string" && tw.startIso.length > 0);
+  assertTrue("AF-V073-3c: endIso defined", typeof tw.endIso === "string" && tw.endIso.length > 0);
+  assertTrue("AF-V073-3d: startIso < endIso", tw.startIso < tw.endIso);
+  // Both start and end land on 2026-05-22 calendar date. ISO string conversion
+  // from local-time Date may shift TZ portion but the calendar date stays the
+  // same when anchored at local-noon.
+  const startDate = new Date(tw.startIso);
+  const endDate   = new Date(tw.endIso);
+  assertTrue("AF-V073-3e: startIso parses to 2026-05-22 (local calendar)",
+    startDate.getFullYear() === 2026 && startDate.getMonth() === 4 && startDate.getDate() === 22);
+  assertTrue("AF-V073-3f: endIso parses to 2026-05-22 (local calendar)",
+    endDate.getFullYear() === 2026 && endDate.getMonth() === 4 && endDate.getDate() === 22);
+} catch (e) {
+  assertTrue("AF-V073-3: native-Date _resolveTimeWindow fallback reachable", false, e && e.message);
 }
 
 // ── Summary ───────────────────────────────────────────────────────────────

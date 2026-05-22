@@ -2,7 +2,8 @@
   "jsFiles": "",
   "jsFolder": "ranch/Scripts",
   "startupScriptNames": [
-    "ProjectTaskCreateListenerInit"
+    "ProjectTaskCreateListenerInit",
+    "KanbanStatusSyncInit"
   ],
   "registeredInvocableScriptNames": [],
   "rerunStartupScriptsOnFileChange": false

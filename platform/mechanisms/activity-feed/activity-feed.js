@@ -156,7 +156,7 @@ class ActivityFeed {
    * @param {object} dv  — Dataview API in dataviewjs scope
    * @param {object} opts
    */
-  render(dv, opts) {
+  async render(dv, opts) {
     const safeOpts = opts || {};
     const scope = (safeOpts.scope === "week" || safeOpts.scope === "month")
       ? safeOpts.scope
@@ -217,6 +217,20 @@ class ActivityFeed {
       return this._renderGroupedByHour(dv, pages, useStatusChangedAt, getTitle, metaBuilder);
     }
     if (groupBy === "blueprint") {
+      // v0.7.0 (sauce v0.73.0): read persisted group <details> state once
+      // per render. Each framed group overrides its default-open posture
+      // based on this map; toggle events write back. Best-effort — read
+      // failures fall through to defaultClosed semantics.
+      //
+      // The guard checks for a real vault adapter (not just `app` defined).
+      // The Node test harness shims `app` as {} so a plain typeof-check
+      // would fire the await and yield control, breaking sync harness
+      // asserts. Production has a real adapter and gets the await path.
+      let groupState = {};
+      const _adapter = (typeof app !== "undefined" && app && app.vault) ? app.vault.adapter : null;
+      if (_adapter && typeof _adapter.read === "function") {
+        try { groupState = await this._readGroupState(); } catch (_) {}
+      }
       return this._renderGroupedByBlueprint(dv, pages, {
         getTitle, collapsible, colorByType, metaBuilder,
         framed: safeOpts.framed === true,
@@ -228,6 +242,9 @@ class ActivityFeed {
         groupLabels: (safeOpts.groupLabels && typeof safeOpts.groupLabels === "object" && !Array.isArray(safeOpts.groupLabels)) ? safeOpts.groupLabels : null,
         groupPreviewBuilder: (typeof safeOpts.groupPreviewBuilder === "function") ? safeOpts.groupPreviewBuilder : null,
         getSubtitle: (typeof safeOpts.getSubtitle === "function") ? safeOpts.getSubtitle : null,
+        // v0.7.0 (sauce v0.73.0): persisted <details> state map from
+        // ranch/cache/dashboard-section-state.json (sauce-activity-feed:<key>).
+        groupState,
       });
     }
     return this._renderFlat(dv, pages, getTitle, metaBuilder);
@@ -322,6 +339,13 @@ class ActivityFeed {
     // page (even if its value is out-of-window), the timestamp fields are
     // authoritative and mtime fallback is suppressed. The mtime path executes only
     // for legacy pages that have NONE of the tsKeysOpt fields.
+    // v0.7.0 (sauce v0.73.0) audit note: this predicate short-circuits on the
+    // first in-window match. We CANNOT break the loop on a present-but-out-of-window
+    // hit because we still need to set anyFieldPresent across all listed keys
+    // (so a later in-window match against a different key wins). The
+    // anyFieldPresent flag, once true, suppresses the mtime fallback below
+    // for that page even if no listed key was in-window — strict semantics
+    // per landmine #23.
     const inWindow = (p) => {
       if (!p) return false;
       let anyFieldPresent = false;
@@ -476,6 +500,8 @@ class ActivityFeed {
     const groupLabels = (safe.groupLabels && typeof safe.groupLabels === "object" && !Array.isArray(safe.groupLabels)) ? safe.groupLabels : {};
     const groupPreviewBuilder = (typeof safe.groupPreviewBuilder === "function") ? safe.groupPreviewBuilder : null;
     const getSubtitle = (typeof safe.getSubtitle === "function") ? safe.getSubtitle : null;
+    // v0.7.0 (sauce v0.73.0): persisted group state map. Forwarded from render().
+    const groupState = (safe.groupState && typeof safe.groupState === "object" && !Array.isArray(safe.groupState)) ? safe.groupState : null;
 
     // Pass A — initial grouping by p.type (unchanged from v0.3.0)
     const groups = new Map();
@@ -546,7 +572,7 @@ class ActivityFeed {
       const isClosed = defaultClosed.has(t);
 
       if (framed) {
-        this._renderFramedGroup(dv, { key: t, pages: groupPages, color, isClosed, titleFn, metaBuilder, groupLabels, groupPreviewBuilder, getSubtitle });
+        this._renderFramedGroup(dv, { key: t, pages: groupPages, color, isClosed, titleFn, metaBuilder, groupLabels, groupPreviewBuilder, getSubtitle, groupState });
       } else if (collapsible) {
         // v0.1.2 legacy path — preserved for callers that prefer nested
         // <details> without framing. No known caller today.
@@ -596,14 +622,25 @@ class ActivityFeed {
    * walk (used to attach the drill-in panel) lands at .sauce-group-row,
    * which is column-oriented and can hold the drill-in below the line.
    */
-  _renderFramedGroup(dv, { key, pages, color, isClosed, titleFn, metaBuilder, groupLabels, groupPreviewBuilder, getSubtitle }) {
+  _renderFramedGroup(dv, { key, pages, color, isClosed, titleFn, metaBuilder, groupLabels, groupPreviewBuilder, getSubtitle, groupState }) {
     const group = dv.container.createEl("div");
     group.className = "sauce-group";
     group.dataset.group = key;
     group.style.setProperty("--group-accent", color);
 
     const details = group.createEl("details");
-    if (!isClosed) details.open = true;
+    // v0.7.0 (sauce v0.73.0): override the !isClosed default when persisted
+    // state has a value for this group's key. Falls back to manifest-defined
+    // defaultClosed semantics on miss.
+    const stateKey = "sauce-activity-feed:" + key;
+    let initialOpen = !isClosed;
+    if (groupState && Object.prototype.hasOwnProperty.call(groupState, stateKey)) {
+      initialOpen = !!groupState[stateKey];
+    }
+    if (initialOpen) details.open = true;
+    details.addEventListener("toggle", () => {
+      this._writeGroupStateKey(stateKey, details.open);
+    });
 
     const summary = details.createEl("summary");
     summary.className = "sauce-group-header";
@@ -627,6 +664,11 @@ class ActivityFeed {
     // Compute first so we can fold the " — <text>" suffix into the count
     // element's textContent (avoids a stray <span> separating "(N)" from the
     // em-dash, which would otherwise defeat downstream " — " regex checks).
+    // v0.7.0 (sauce v0.73.0) decision: groupPreviewBuilder fires for groups
+    // listed in the manifest's defaultClosed[] set (isClosed=true here), NOT
+    // for groups closed at render-time per persisted state. The builder is a
+    // curated default-view affordance; user-toggled state should not change
+    // what the preview shows. Stable rule.
     let previewSuffix = "";
     if (isClosed && typeof groupPreviewBuilder === "function") {
       let previewText;
@@ -662,6 +704,9 @@ class ActivityFeed {
       titleEl.textContent = String(titleText);
       const metaEl = line.createEl("span");
       metaEl.className = "sauce-group-row-meta";
+      // Precedence (v0.5.0): metaBuilder wins over getSubtitle. Only one
+      // fires per row. SpaceDailyDashboard inlines a cowork-summary path in
+      // its metaBuilder (daily@0.11.0) and relies on this stable rule.
       if (typeof metaBuilder === "function") {
         try { metaBuilder(p, metaEl); } catch (_) { /* swallow — never break a single row */ }
       } else if (typeof getSubtitle === "function") {
@@ -726,6 +771,64 @@ class ActivityFeed {
         meta: metaBuilder ? metaBuilder : ((p) => (p && p.type) ? String(p.type) : ""),
       });
     }
+  }
+
+  // ── Persisted <details> state (v0.7.0 / sauce v0.73.0) ────────────────────
+
+  /**
+   * Read persisted group <details> state map. Same file + schema as
+   * SpaceDailyDashboard's dashboard-section state — namespaced keys
+   * (sauce-activity-feed:<bucketKey>) keep inner groups distinct from
+   * top-level sections (sauce-daily-dashboard:<section>).
+   * Returns {} silently on missing file / malformed JSON / no app.
+   */
+  async _readGroupState() {
+    try {
+      if (typeof app === "undefined" || !app.vault || !app.vault.adapter) return {};
+      const path = "ranch/cache/dashboard-section-state.json";
+      if (typeof app.vault.adapter.exists === "function") {
+        const ex = await app.vault.adapter.exists(path);
+        if (!ex) return {};
+      }
+      const raw = await app.vault.adapter.read(path);
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object" && parsed.states && typeof parsed.states === "object") {
+        return parsed.states;
+      }
+      return {};
+    } catch (_) { return {}; }
+  }
+
+  /**
+   * Write one state key. Last-write-wins; reads current file, mutates one
+   * key, writes the whole thing. Creates ranch/cache/ on first write.
+   * Errors swallowed silently — state persistence is best-effort UX polish.
+   */
+  async _writeGroupStateKey(key, value) {
+    try {
+      if (typeof app === "undefined" || !app.vault || !app.vault.adapter) return;
+      const path = "ranch/cache/dashboard-section-state.json";
+      let cur = {};
+      try {
+        if (typeof app.vault.adapter.exists === "function") {
+          const ex = await app.vault.adapter.exists(path);
+          if (ex) {
+            const raw = await app.vault.adapter.read(path);
+            const parsed = JSON.parse(raw);
+            if (parsed && typeof parsed === "object" && parsed.states && typeof parsed.states === "object") {
+              cur = parsed.states;
+            }
+          }
+        }
+      } catch (_) { cur = {}; }
+      cur[key] = !!value;
+      try {
+        if (typeof app.vault.adapter.mkdir === "function") {
+          await app.vault.adapter.mkdir("ranch/cache");
+        }
+      } catch (_) {}
+      await app.vault.adapter.write(path, JSON.stringify({ _version: 1, states: cur }, null, 2));
+    } catch (_) {}
   }
 
   // ── Constants ──────────────────────────────────────────────────────────────

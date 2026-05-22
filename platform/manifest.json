@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop platform manifest. Each mechanism + blueprint has its own version.",
-  "workshop_version": "0.72.1",
+  "workshop_version": "0.73.0",
   "date": "2026-05-22",
   "foundational_plugins": [
     {
@@ -49,12 +49,12 @@
     },
     {
       "name": "activity-feed",
-      "version": "0.6.0",
+      "version": "0.7.0",
       "path": "mechanisms/activity-feed"
     },
     {
       "name": "kanban-status-sync",
-      "version": "0.1.1",
+      "version": "0.2.0",
       "path": "mechanisms/kanban-status-sync"
     },
     {
@@ -126,7 +126,7 @@
     },
     {
       "name": "daily",
-      "version": "0.12.0",
+      "version": "0.13.0",
       "path": "blueprints/daily"
     },
     {

@@ -67,10 +67,12 @@ try {
 if (manifest) {
   assertTrue("KSS-1b: manifest.json parses as JSON", true);
   assertEq("KSS-1c: manifest.name === 'kanban-status-sync'", manifest.name, "kanban-status-sync");
-  assertEq("KSS-1d: manifest.version === '0.1.1'", manifest.version, "0.1.1");
+  assertEq("KSS-1d: manifest.version === '0.2.0'", manifest.version, "0.2.0");
   assertEq("KSS-1e: manifest.kind === 'mechanism'", manifest.kind, "mechanism");
 
-  assertEq("KSS-2: customjs_classes is ['KanbanStatusSync']", manifest.customjs_classes, ["KanbanStatusSync"]);
+  // KSS-2 expanded in v0.2.0 (sauce v0.73.0) to include KanbanStatusSyncInit.
+  assertEq("KSS-2: customjs_classes is ['KanbanStatusSync','KanbanStatusSyncInit']",
+    manifest.customjs_classes, ["KanbanStatusSync", "KanbanStatusSyncInit"]);
 
   const deps = manifest.depends_on || [];
   const depNames = deps.map((d) => d && d.name).filter(Boolean);
@@ -83,6 +85,68 @@ if (manifest) {
     f.dest.indexOf("kanban-status-sync/kanban-status-sync.js") >= 0
   );
   assertTrue("KSS-3b: files[] declares kanban-status-sync.js → scripts_path/kanban-status-sync/", hasJsEntry);
+
+  // KSS-INIT-* (v0.2.0 sauce v0.73.0): NEW startup-script class wiring.
+  assertEq("KSS-INIT-1: customjs_startup_scripts === ['KanbanStatusSyncInit']",
+    manifest.customjs_startup_scripts, ["KanbanStatusSyncInit"]);
+  const hasInitFileEntry = files.some((f) =>
+    f && f.source === "kanban-status-sync-init.js" &&
+    typeof f.dest === "string" &&
+    f.dest.indexOf("kanban-status-sync/kanban-status-sync-init.js") >= 0
+  );
+  assertTrue("KSS-INIT-2: files[] declares kanban-status-sync-init.js entry", hasInitFileEntry);
+}
+
+// ── Pass 1b: KanbanStatusSyncInit source lint ─────────────────────────────
+
+console.log("\n--- Pass 1b: kanban-status-sync-init.js source lint (v0.2.0) ---");
+
+const INIT_PATH = path.join(MECH_DIR, "kanban-status-sync-init.js");
+assertTrue("KSS-INIT-3a: kanban-status-sync-init.js exists", fs.existsSync(INIT_PATH));
+
+if (fs.existsSync(INIT_PATH)) {
+  let initSrc = "";
+  try { initSrc = fs.readFileSync(INIT_PATH, "utf8"); }
+  catch (e) { assertTrue("KSS-INIT-3b: readFileSync succeeds", false, e && e.message); }
+
+  if (initSrc.length > 0) {
+    let initParseErr = null;
+    try {
+      new Function("app", "customJS", "Notice", "window", initSrc + "\nreturn KanbanStatusSyncInit;");
+    } catch (e) { initParseErr = e; }
+    assertTrue("KSS-INIT-3c: init source parses via new Function() without throwing",
+      !initParseErr, initParseErr && initParseErr.message);
+
+    // CustomJS file contract — must be a single class expression.
+    let cjsErr = null;
+    let cjsClass = null;
+    try { cjsClass = eval("(" + initSrc + ")"); }
+    catch (e) { cjsErr = e; }
+    assertTrue("KSS-INIT-3d: file loads under customJS `(${file})` contract",
+      !cjsErr, cjsErr && cjsErr.message);
+    if (cjsClass) {
+      const inst = new cjsClass();
+      assertTrue("KSS-INIT-3e: class name === 'KanbanStatusSyncInit'",
+        inst.constructor && inst.constructor.name === "KanbanStatusSyncInit");
+      assertTrue("KSS-INIT-3f: instance.invoke is a function",
+        typeof inst.invoke === "function");
+    }
+
+    // Behavior: must register the resync command + retry-with-backoff for dataview.
+    assertTrue("KSS-INIT-4: registers app.commands.addCommand call",
+      /app\.commands\.addCommand\(/.test(initSrc));
+    assertTrue("KSS-INIT-5: command id matches 'kanban-status-sync:resync-now'",
+      /['"]kanban-status-sync:resync-now['"]/.test(initSrc));
+    assertTrue("KSS-INIT-6: command name surfaces 'Sauce: Re-sync kanban boards'",
+      /Sauce: Re-sync kanban boards/.test(initSrc));
+    assertTrue("KSS-INIT-7: dataview-readiness retry helper present (_waitForDataview)",
+      /_waitForDataview/.test(initSrc));
+    assertTrue("KSS-INIT-8: calls customJS.KanbanStatusSync.syncAllBoards",
+      /customJS\.KanbanStatusSync\.syncAllBoards/.test(initSrc));
+    // Mobile safety / landmine #23: must NOT read file.mtime.
+    assertTrue("KSS-INIT-9: NO file.mtime usage in init (landmine #23)",
+      !/file\.mtime/.test(initSrc));
+  }
 }
 
 // ── Pass 2: class source lint ─────────────────────────────────────────────

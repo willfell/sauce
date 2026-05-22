@@ -84,6 +84,14 @@
  * the daily note doesn't self-reference. hasContent gate widened to
  * include activityCount. Tasks + meetings panels unchanged.
  *
+ * v0.13.0 (sauce v0.73.0): Part A — syncAllBoards moved out of render to
+ *  KanbanStatusSyncInit customjs startup-script. Dashboard reads pre-synced
+ *  frontmatter, never triggers the sync inline. Manual cache-bypass available
+ *  via Cmd+P → "Sauce: Re-sync kanban boards".
+ *  Part B — _renderSection reads/writes ranch/cache/dashboard-section-state.json
+ *  so user-toggled <details> open/closed state survives Dataview re-renders.
+ *  Namespaced keys: sauce-daily-dashboard:tasks / :meetings / :activity.
+ *
  * v0.9.0 (sauce v0.68.0): board activity in the daily Activity panel.
  *  - Allowlist gains "kanban" + "board-card" — the boards blueprint's two
  *    surfaced types (single hub at spice/boards/To-Do-Board.md + per-card
@@ -163,6 +171,10 @@ class SpaceDailyDashboard {
     const activityCount = activityResult.total;
     const hasContent = meetings.length > 0 || tasks.length > 0 || activityCount > 0;
 
+    // v0.13.0 (sauce v0.73.0): persisted <details> state map. Read once per
+    // render so the 3 _renderSection calls don't each hit the adapter.
+    const sectionState = await this._readSectionState();
+
     const existing = dv.container.querySelector(".space-daily-dashboard");
     if (existing) existing.remove();
 
@@ -200,6 +212,8 @@ class SpaceDailyDashboard {
         iconHtml: icons.checkSquare,
         title: `Tasks (${tasks.length})`,
         defaultOpen: true,
+        stateKey: "sauce-daily-dashboard:tasks",
+        sectionState,
       });
 
       const tasksList = tasksBody.createEl("ul");
@@ -236,6 +250,8 @@ class SpaceDailyDashboard {
         iconHtml: icons.calendar,
         title: `Meetings (${meetings.length})`,
         defaultOpen: true,
+        stateKey: "sauce-daily-dashboard:meetings",
+        sectionState,
       });
 
       // v0.10.5: enrich each meeting page (read body, parse attendees + tasks +
@@ -285,6 +301,8 @@ class SpaceDailyDashboard {
         iconHtml: icons.activity,
         title: `Activity (${activityCount})`,
         defaultOpen: true,
+        stateKey: "sauce-daily-dashboard:activity",
+        sectionState,
       });
 
       // v0.5.1 (v0.64.1) bugfix: shim must delegate `.pages` to the real dv —
@@ -297,18 +315,12 @@ class SpaceDailyDashboard {
         page:  (path) => dv.page(path),
         el:    (tag) => activityBody.createEl(tag),
       };
-      // v0.12.0 (sauce v0.72.0): sync kanban card frontmatter to current board
-      // column placement BEFORE the activity-feed query runs, so cards moved
-      // today surface via status_changed_at in the same render.
-      if (customJS && customJS.KanbanStatusSync && typeof customJS.KanbanStatusSync.syncAllBoards === "function") {
-        try {
-          await customJS.KanbanStatusSync.syncAllBoards(dv, today);
-        } catch (e) {
-          if (typeof console !== "undefined") {
-            console.warn("[SpaceDailyDashboard] KanbanStatusSync.syncAllBoards failed: " + (e && e.message));
-          }
-        }
-      }
+      // v0.13.0 (sauce v0.73.0): syncAllBoards moved out of render to the
+      // NEW KanbanStatusSyncInit customjs startup-script (runs once at vault
+      // boot). Dashboard reads pre-synced frontmatter; never triggers the
+      // sync inline. Removes our code from the hot path of every Dataview
+      // re-execution. Manual cache-bypass available via Cmd+P → "Sauce:
+      // Re-sync kanban boards".
       if (customJS && customJS.ActivityFeed && typeof customJS.ActivityFeed.render === "function") {
         await customJS.ActivityFeed.render(activityShim, {
           scope: "today",
@@ -861,12 +873,18 @@ class SpaceDailyDashboard {
    * Visual styling lives in .obsidian/snippets/sauce-daily-dashboard.css
    * (installed via daily.manifest.json's snippets[] + appearance.enabledCssSnippets[]).
    */
-  _renderSection(container, { accent, iconHtml, title, defaultOpen }) {
+  _renderSection(container, { accent, iconHtml, title, defaultOpen, stateKey, sectionState }) {
     const section = container.createEl("div");
     section.className = "sauce-section";
     section.dataset.accent = accent;
     const details = section.createEl("details");
-    if (defaultOpen) details.open = true;
+    // v0.13.0 (sauce v0.73.0): override defaultOpen when persisted state has
+    // a value for this section's stateKey. Falls back to defaultOpen on miss.
+    let initialOpen = !!defaultOpen;
+    if (stateKey && sectionState && Object.prototype.hasOwnProperty.call(sectionState, stateKey)) {
+      initialOpen = !!sectionState[stateKey];
+    }
+    if (initialOpen) details.open = true;
     const summary = details.createEl("summary");
     summary.className = "sauce-section-summary";
     summary.innerHTML =
@@ -875,7 +893,66 @@ class SpaceDailyDashboard {
       `<span class="sauce-section-chevron">${this._CHEVRON_SVG}</span>`;
     const body = details.createEl("div");
     body.className = "sauce-section-body";
+    if (stateKey) {
+      details.addEventListener("toggle", () => {
+        this._writeSectionStateKey(stateKey, details.open);
+      });
+    }
     return body;
+  }
+
+  /**
+   * v0.13.0 (sauce v0.73.0): read persisted <details> state map from
+   * ranch/cache/dashboard-section-state.json. Missing file or malformed JSON
+   * returns {} silently — state persistence is best-effort UX polish.
+   */
+  async _readSectionState() {
+    try {
+      if (typeof app === "undefined" || !app.vault || !app.vault.adapter) return {};
+      const path = "ranch/cache/dashboard-section-state.json";
+      if (typeof app.vault.adapter.exists === "function") {
+        const ex = await app.vault.adapter.exists(path);
+        if (!ex) return {};
+      }
+      const raw = await app.vault.adapter.read(path);
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object" && parsed.states && typeof parsed.states === "object") {
+        return parsed.states;
+      }
+      return {};
+    } catch (_) { return {}; }
+  }
+
+  /**
+   * v0.13.0 (sauce v0.73.0): write a single state key. Last-write-wins —
+   * reads the current file, mutates one key, writes the whole thing.
+   * Creates ranch/cache/ on first write. Errors swallowed silently.
+   */
+  async _writeSectionStateKey(key, value) {
+    try {
+      if (typeof app === "undefined" || !app.vault || !app.vault.adapter) return;
+      const path = "ranch/cache/dashboard-section-state.json";
+      let cur = {};
+      try {
+        if (typeof app.vault.adapter.exists === "function") {
+          const ex = await app.vault.adapter.exists(path);
+          if (ex) {
+            const raw = await app.vault.adapter.read(path);
+            const parsed = JSON.parse(raw);
+            if (parsed && typeof parsed === "object" && parsed.states && typeof parsed.states === "object") {
+              cur = parsed.states;
+            }
+          }
+        }
+      } catch (_) { cur = {}; }
+      cur[key] = !!value;
+      try {
+        if (typeof app.vault.adapter.mkdir === "function") {
+          await app.vault.adapter.mkdir("ranch/cache");
+        }
+      } catch (_) { /* dir may exist; ignore */ }
+      await app.vault.adapter.write(path, JSON.stringify({ _version: 1, states: cur }, null, 2));
+    } catch (_) { /* swallow */ }
   }
 
   _escapeHtml(s) {

@@ -1,14 +1,16 @@
 {
   "name": "kanban-status-sync",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "kind": "mechanism",
-  "description": "Syncs obsidian-kanban board column positions to `status:` frontmatter on moved cards. KanbanStatusSync.syncAllBoards(dv, today) discovers boards via `dv.pages().where(p => p['kanban-plugin'] === 'board')` and calls syncBoard(boardPath, today) for each. syncBoard parses board columns via parseBoardColumns, derives status slugs via slugifyStatus, then performs a forward pass (cards present in board — write status/status_prev/status_changed_at if column changed via app.fileManager.processFrontMatter) + reverse pass (orphaned cards previously linked to this board — mark archived). Idempotent: if nothing changed, no writes. Mobile-safe — never reads file.mtime (landmine #23). Pure static helpers (Node-testable): parseBoardColumns, slugifyStatus, computeDiff (computeDiff is exported for caller composition; syncBoard inlines its own forward/reverse passes rather than composing computeDiff). v0.1.0 (workshop v0.72.0): initial release. v0.1.1 PATCH (workshop v0.72.1): adds an instance-level once-per-day cache to syncAllBoards. The first call of the day runs the full sweep; subsequent calls within the same CustomJS-singleton lifetime return the cached {synced, archived, boards} result instantly. Prevents the daily-dashboard re-render cascade from iterating every card on every board on every Dataview re-index. Cards moved in the same session aren't picked up until next day OR CustomJS plugin toggle. Consumed by daily@0.12.0 as a side-effect of SpaceDailyDashboard rendering.",
+  "description": "Syncs obsidian-kanban board column positions to `status:` frontmatter on moved cards. KanbanStatusSync.syncAllBoards(dv, today) discovers boards via `dv.pages().where(p => p['kanban-plugin'] === 'board')` and calls syncBoard(boardPath, today) for each. syncBoard parses board columns via parseBoardColumns, derives status slugs via slugifyStatus, then performs a forward pass (cards present in board — write status/status_prev/status_changed_at if column changed via app.fileManager.processFrontMatter) + reverse pass (orphaned cards previously linked to this board — mark archived). Idempotent: if nothing changed, no writes. Mobile-safe — never reads file.mtime (landmine #23). Pure static helpers (Node-testable): parseBoardColumns, slugifyStatus, computeDiff (computeDiff is exported for caller composition; syncBoard inlines its own forward/reverse passes rather than composing computeDiff). v0.1.1 PATCH (workshop v0.72.1): adds instance-level once-per-day cache to syncAllBoards. Cards moved in the same session aren't picked up until next day OR CustomJS plugin toggle. v0.2.0 (sauce v0.73.0): NEW KanbanStatusSyncInit customjs startup-script class. Moves the syncAllBoards trigger out of the daily-dashboard render path; runs once at vault boot (Dataview-ready retry-with-backoff, max 30s). Also registers Obsidian command 'Sauce: Re-sync kanban boards' (id kanban-status-sync:resync-now) for manual cache-bypass re-sync. customjs_classes grows to ['KanbanStatusSync','KanbanStatusSyncInit']; customjs_startup_scripts adds 'KanbanStatusSyncInit'; new files[] entry for the init helper. Daily dashboard (daily@0.13.0) no longer triggers the sync inline.",
   "depends_on": [
     { "name": "customjs-guard", "range": ">=1.0.0" }
   ],
-  "customjs_classes": ["KanbanStatusSync"],
+  "customjs_classes": ["KanbanStatusSync", "KanbanStatusSyncInit"],
+  "customjs_startup_scripts": ["KanbanStatusSyncInit"],
   "files": [
-    { "source": "kanban-status-sync.js", "dest": "{{scripts_path}}/kanban-status-sync/kanban-status-sync.js" }
+    { "source": "kanban-status-sync.js", "dest": "{{scripts_path}}/kanban-status-sync/kanban-status-sync.js" },
+    { "source": "kanban-status-sync-init.js", "dest": "{{scripts_path}}/kanban-status-sync/kanban-status-sync-init.js" }
   ],
   "post_install": [],
   "rule_fragments": []
