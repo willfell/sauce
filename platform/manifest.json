@@ -1,7 +1,7 @@
 {
   "_comment": "Workshop platform manifest. Each mechanism + blueprint has its own version.",
-  "workshop_version": "0.72.0",
-  "date": "2026-05-21",
+  "workshop_version": "0.72.1",
+  "date": "2026-05-22",
   "foundational_plugins": [
     {
       "id": "templater-obsidian"
@@ -54,7 +54,7 @@
     },
     {
       "name": "kanban-status-sync",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "path": "mechanisms/kanban-status-sync"
     },
     {

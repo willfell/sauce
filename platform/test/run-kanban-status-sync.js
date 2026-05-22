@@ -67,7 +67,7 @@ try {
 if (manifest) {
   assertTrue("KSS-1b: manifest.json parses as JSON", true);
   assertEq("KSS-1c: manifest.name === 'kanban-status-sync'", manifest.name, "kanban-status-sync");
-  assertEq("KSS-1d: manifest.version === '0.1.0'", manifest.version, "0.1.0");
+  assertEq("KSS-1d: manifest.version === '0.1.1'", manifest.version, "0.1.1");
   assertEq("KSS-1e: manifest.kind === 'mechanism'", manifest.kind, "mechanism");
 
   assertEq("KSS-2: customjs_classes is ['KanbanStatusSync']", manifest.customjs_classes, ["KanbanStatusSync"]);

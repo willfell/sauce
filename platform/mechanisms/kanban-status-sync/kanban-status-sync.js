@@ -25,8 +25,21 @@ class KanbanStatusSync {
    * and sync each card's frontmatter to its current column.
    *
    * Returns { synced, archived, boards } aggregated across all boards.
+   *
+   * v0.1.1 (sauce v0.72.1): cached at most once per (today, customjs-singleton
+   * lifetime). The daily/weekly dashboard re-renders whenever Dataview re-indexes
+   * the vault — on a vault with many cards, the first-day sync (e.g., 283 cards)
+   * is followed by a cascade of re-renders that each call syncAllBoards. The
+   * forward pass is idempotent and writes zero on those re-renders, but each
+   * still iterates every card on every board. The cache returns the prior
+   * result instantly. Cards moved in the same session won't be picked up until
+   * the next day OR until the CustomJS plugin is toggled off/on (which clears
+   * the singleton instance).
    */
   async syncAllBoards(dv, today) {
+    if (this._lastSyncDay === today && this._lastSyncResult) {
+      return this._lastSyncResult;
+    }
     if (!dv || typeof dv.pages !== "function") {
       return { synced: 0, archived: 0, boards: 0 };
     }
@@ -46,7 +59,10 @@ class KanbanStatusSync {
         }
       }
     }
-    return { synced, archived, boards: boards.length };
+    const result = { synced, archived, boards: boards.length };
+    this._lastSyncDay = today;
+    this._lastSyncResult = result;
+    return result;
   }
 
   /**
