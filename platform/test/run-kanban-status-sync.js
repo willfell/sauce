@@ -1,8 +1,13 @@
 #!/usr/bin/env node
-// run-kanban-status-sync.js — sub-asserts for v0.72.0's NEW kanban-status-sync
-// mechanism. Three passes: manifest sanity (KSS-1..3) + class runtime
-// (KSS-P1..P5 for parseBoardColumns, KSS-S1..S4 for slugifyStatus).
-// No Obsidian runtime needed — Node-only.
+// run-kanban-status-sync.js — sub-asserts for the v0.72.0 kanban-status-sync mechanism.
+// Currently shipped passes:
+//   Pass 1 — manifest sanity (KSS-1..3)
+//   Pass 3 — runtime asserts for pure static helpers (KSS-P1..P5 parseBoardColumns,
+//            KSS-S1..S4 slugifyStatus)
+// Pass 2 (source lint KSS-L1..L8) is added by the syncBoard / syncAllBoards task.
+// Pass 3c (computeDiff KSS-D1..D5) is added by the computeDiff task.
+//
+// Mirrors run-activity-feed.js structure.
 //
 // Usage: node platform/test/run-kanban-status-sync.js
 // Exit: 0 = all pass; 1 = any fail.
@@ -102,27 +107,37 @@ try {
 }
 
 if (KanbanStatusSync) {
+  // KSS-P1: simple 2-column board, 2 cards
   const board1 = [
-    "## Backlog",
-    "- [ ] [[Note A]]",
-    "- [ ] [[Note B]]",
-    "## In Progress",
-    "- [ ] [[Note C]]",
-    "## Done",
-    "- [x] [[Note D]]",
+    "---", "kanban-plugin: board", "---", "",
+    "## In Planning", "", "- [[Refactor auth flow]]", "",
+    "## In Progress", "", "- [[Write migration plan]]", "",
   ].join("\n");
+  assertEq("KSS-P1: parse 2 columns, 2 cards",
+    KanbanStatusSync.parseBoardColumns(board1),
+    { "Refactor auth flow": "In Planning", "Write migration plan": "In Progress" });
 
-  const cols1 = KanbanStatusSync.parseBoardColumns(board1);
-  assertEq("KSS-P1: parseBoardColumns returns 4 entries for 3-column board",
-    cols1.length, 4);
-  assertEq("KSS-P2: first entry column is 'Backlog'",
-    cols1[0] && cols1[0].column, "Backlog");
-  assertEq("KSS-P3: first entry path is 'Note A'",
-    cols1[0] && cols1[0].path, "Note A");
-  assertEq("KSS-P4: third entry column is 'In Progress'",
-    cols1[2] && cols1[2].column, "In Progress");
-  assertEq("KSS-P5: parseBoardColumns([]) returns []",
-    KanbanStatusSync.parseBoardColumns(""), []);
+  // KSS-P2: bare wikilinks (not in list items) are NOT cards
+  const board2 = "## A\n- [[only-this]]\n[[ignored]]\n";
+  assertEq("KSS-P2: bare wikilinks under a heading are not cards",
+    KanbanStatusSync.parseBoardColumns(board2),
+    { "only-this": "A" });
+
+  // KSS-P3: wikilink with alias — basename only is stored
+  const board3 = "## Done\n- [[some/long/path|Alias]]\n";
+  assertEq("KSS-P3: wikilink alias stripped, linkpath preserved",
+    KanbanStatusSync.parseBoardColumns(board3),
+    { "some/long/path": "Done" });
+
+  // KSS-P4: empty board returns {}
+  assertEq("KSS-P4: empty board → empty map",
+    KanbanStatusSync.parseBoardColumns(""), {});
+
+  // KSS-P5: ignore frontmatter content; only ## headings count
+  const board5 = "---\nkanban-plugin: board\nfoo: '## Not A Column'\n---\n## Real\n- [[x]]\n";
+  assertEq("KSS-P5: frontmatter content not parsed as headings",
+    KanbanStatusSync.parseBoardColumns(board5),
+    { "x": "Real" });
 }
 
 // ── Pass 3b: KanbanStatusSync.slugifyStatus ───────────────────────────────

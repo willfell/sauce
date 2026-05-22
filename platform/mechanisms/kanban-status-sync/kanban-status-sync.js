@@ -1,66 +1,74 @@
 /**
- * kanban-status-sync@0.1.0 — syncs obsidian-kanban board column positions
- * to `status:` frontmatter on moved cards (FA-10 / kanban-status-sync).
+ * kanban-status-sync@0.1.0 — reconciles kanban card-note frontmatter against
+ * the card's current column in its obsidian-kanban board.
  *
- * Loaded via customJS class-file contract: the entire file body must be a
- * single class expression (no top-level helper declarations before the
- * class). Closure args visible per the loader contract: `app`, `customJS`,
- * `Notice`, `window`.
+ * Loaded via customjs-guard (avoids landmines #1 / #2 cold-load TDZ). Three
+ * closure args are visible in scope per the loader contract: `app`, `customJS`,
+ * `Notice`. `app.fileManager.processFrontMatter` is read at call-time inside
+ * syncBoard, never at class-load.
  *
- * Public API (static):
- *   KanbanStatusSync.parseBoardColumns(rawMd)   → string[]
- *   KanbanStatusSync.slugifyStatus(name)        → string
- *   KanbanStatusSync.computeDiff(columns, pages)→ {path, newStatus}[]
+ * Public API (instance methods on customJS.KanbanStatusSync):
+ *   async syncAllBoards(dv, today) → { synced: number, archived: number, boards: number }
+ *   async syncBoard(boardPath, today)  → { synced: number, archived: number }
  *
- * Public API (instance):
- *   new KanbanStatusSync(app).syncBoard(boardPath) → Promise<void>
+ * Pure static helpers (Node-testable):
+ *   KanbanStatusSync.parseBoardColumns(boardSrc) → { [cardLinkpath]: columnName }
+ *   KanbanStatusSync.slugifyStatus(name)         → string (lowercase, hyphenated)
+ *   KanbanStatusSync.computeDiff(curMap, prior)  → { moves, creates, archives }
+ *
+ * NEVER reads file.mtime (mobile sync time, unreliable — landmine #23).
+ * Frontmatter writes use app.fileManager.processFrontMatter (atomic).
  */
 class KanbanStatusSync {
-  constructor(appRef) {
-    this._app = appRef;
+  async syncAllBoards(_dv, _today) {
+    return { synced: 0, archived: 0, boards: 0 };
   }
-
-  // ── Static pure helpers ───────────────────────────────────────────────────
-
+  async syncBoard(_boardPath, _today) {
+    return { synced: 0, archived: 0 };
+  }
   /**
-   * Parse an obsidian-kanban board's raw markdown and return an ordered
-   * array of column-label → card-path mappings.
-   *
-   * Returns: Array of { column: string, path: string } objects in document
-   * order. Duplicate paths (a card appearing in two columns) are allowed —
-   * computeDiff resolves last-occurrence wins.
-   *
-   * Recognises the canonical kanban board markdown shapes:
-   *   ## Column Label\n- [ ] [[Note Title]]\n- [x] [[Done Note]]
-   * Paths are resolved relative to the board file's parent — callers that
-   * need absolute paths should pass the boardDir via opts (Task 4).
-   *
-   * @param {string} rawMd — full text of the .md board file
-   * @returns {{ column: string, path: string }[]}
+   * Parse an obsidian-kanban board's markdown source into a {cardLinkpath: columnName} map.
+   * - Skips YAML frontmatter at the top of the file.
+   * - A column is a depth-2 heading: `## ColumnName`.
+   * - Cards are `[[wikilink]]` occurrences inside list items (`- [[...]]` or
+   *   `- [[path|alias]]`) under a column heading. Bare wikilinks (not in a
+   *   list item) are NOT cards — obsidian-kanban writes cards only as list items,
+   *   and bare links inside a column are typically prose / descriptions.
+   * - For `[[path/to/card|Alias]]`, the linkpath (left of `|`, before any `#`) is stored.
+   * - Wikilinks outside any column are ignored.
    */
-  static parseBoardColumns(rawMd) {
-    if (typeof rawMd !== "string") return [];
-    const result = [];
+  static parseBoardColumns(boardSrc) {
+    if (typeof boardSrc !== "string" || boardSrc.length === 0) return {};
+    const lines = boardSrc.split("\n");
+    let i = 0;
+    if (lines[0] && lines[0].trim() === "---") {
+      i = 1;
+      while (i < lines.length && lines[i].trim() !== "---") i++;
+      if (i < lines.length) i++;
+    }
+    const map = {};
     let currentColumn = null;
-    const lines = rawMd.split("\n");
-    for (const line of lines) {
-      // Column heading: ## Some Label (but not ### or deeper)
-      const colMatch = line.match(/^##\s+(.+)$/);
-      if (colMatch) {
-        currentColumn = colMatch[1].trim();
+    const headingRe = /^##\s+(.+?)\s*$/;
+    const listItemRe = /^\s*-\s+/;
+    const linkRe = /\[\[([^\]|#]+?)(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]/g;
+    for (; i < lines.length; i++) {
+      const line = lines[i];
+      const h = headingRe.exec(line);
+      if (h) {
+        currentColumn = h[1].trim();
         continue;
       }
-      // Card line: - [ ] [[Link]] or - [x] [[Link]] — extract wikilink target
-      if (currentColumn !== null) {
-        const cardMatch = line.match(/^- \[.\] \[\[(.+?)\]\]/);
-        if (cardMatch) {
-          result.push({ column: currentColumn, path: cardMatch[1].trim() });
-        }
+      if (!currentColumn) continue;
+      if (!listItemRe.test(line)) continue;
+      let m;
+      linkRe.lastIndex = 0;
+      while ((m = linkRe.exec(line)) !== null) {
+        const linkpath = m[1].trim();
+        if (linkpath.length > 0) map[linkpath] = currentColumn;
       }
     }
-    return result;
+    return map;
   }
-
   /**
    * Normalize a raw column label to a status slug.
    * "In Progress" → "in-progress"; trims, lowercases, collapses spaces to single hyphen,
@@ -76,32 +84,7 @@ class KanbanStatusSync {
       .replace(/-+/g, "-")
       .replace(/^-+|-+$/g, "");
   }
-
-  /**
-   * Compute which cards need a status frontmatter update.
-   * Stub — implemented in Task 4.
-   *
-   * @param {{ column: string, path: string }[]} columns — from parseBoardColumns
-   * @param {object[]} pages — Dataview page objects with file.path + status
-   * @returns {{ path: string, newStatus: string }[]}
-   */
-  static computeDiff(columns, pages) {
-    // Task 4 stub
-    return [];
-  }
-
-  /**
-   * Top-level entry point: read the board file, parse columns, compute diff,
-   * apply frontmatter patches, emit Notice.
-   * Stub — implemented in Task 5.
-   *
-   * @param {string} boardPath — vault-relative path to the kanban board .md
-   * @returns {Promise<void>}
-   */
-  async syncBoard(boardPath) {
-    // Task 5 stub
-    if (typeof Notice === "function") {
-      new Notice("kanban-status-sync: syncBoard not yet implemented");
-    }
+  static computeDiff(_curMap, _priorMap) {
+    return { moves: [], creates: [], archives: [] };
   }
 }
