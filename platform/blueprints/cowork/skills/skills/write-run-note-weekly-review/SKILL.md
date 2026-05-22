@@ -51,77 +51,78 @@ Atomic-note writer for the weekly-review run. Composes canonical frontmatter, st
    ```
    (Prompt body empty — edit `<prompt_source>` to customize what this run emits.)
    ```
-5. Write to the composed path via `mcp__obsidian__create_note` (or backend-equivalent `obsidian_put_content` with overwrite). On success return `{ path, status: "written" }`. On write error return `{ path, status: "failed:<reason>" }` where `<reason>` is normalized (`auth`, `timeout`, `path-collision`, `unknown`).
+5. **Write the file** (3 sub-steps):
+   a. **Ensure parent directory exists.** Use the Bash tool: `mkdir -p "<dirname(path)>"` where `<path>` is the composed vault-relative path resolved against cwd (the bash sandbox boundary IS the vault root for scheduled-jobs invocations).
+   b. **Write the file.** Use the Write tool with `file_path: <path>` and the composed contents (frontmatter + body). The Write tool overwrites existing files (matches v0.65.0 atomic-note contract: overwrite-last-write-wins).
+   c. **Verify.** Use the Bash tool: `wc -c "<path>"` and confirm the byte count is ≥ 500 (frontmatter alone is ~300; a real note clears). On undersized return `{ path, status: "failed:write-undersized:<bytes>" }`. On any Write tool failure return `{ path, status: "failed:filesystem:<reason>" }` where `<reason>` is normalized (`permission`, `enospc`, `path-collision`, `unknown`). On success return `{ path, status: "written" }`.
+
+Pre-write self-check (see `## Pre-write self-check` below) MUST pass before sub-step (a). On self-check failure return `{ path, status: "failed:contract-violation:<field>" }` and do NOT call Bash or Write.
 
 ## Returns
 
 `{ path: "<vault-relative path>", status: "written" | "failed:<reason>" }`.
 
-## Body shape
+## Title composition
 
-After frontmatter close, emit these elements in this order. Every cowork atomic note follows the same shape.
+Before composing the body, set frontmatter `title` to: `Weekly Review — Week <##>, <Month> <D>–<D2>, <year>` where the week range is the Mon-Sun span, `<##>` is the ISO week number (no leading zero for single-digit weeks), and `<year>` is the 4-digit year. For this skill the display-name literal is **`Weekly Review`**. Use the `week_label` input (passed by the orchestrator per v0.71.0 conventions) to anchor the week range. Example for week 2026-W21 (Mon May 18 – Sun May 24): `"Weekly Review — Week 21, May 18–24, 2026"`.
 
-### 1. SpaceNavButtons block (always first)
+## Adaptive body skeleton
 
-Immediately after the closing `---` of the frontmatter, before any heading:
+The body MUST contain these 5 structural markers in this order; CONTENT inside each marker adapts to the engagement and the gather outputs. Skip sections whose gather output is empty; add custom sections inside `> [!example]+` blocks when the engagement has signal the standard sections don't cover.
 
-````
-```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
-```
-````
+1. **SpaceNavButtons dataviewjs block** (verbatim, first thing after frontmatter close):
 
-### 2. Top-of-body synopsis admonition
+   ````
+   ```dataviewjs
+   await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+   ```
+   ````
 
-A collapsible info admonition with the one-paragraph synopsis of today's headline:
+2. **`> [!info]- Today at a glance`** admonition — one paragraph synopsis distilled from gather outputs:
 
-```
-> [!info]- Today at a glance
-> <one paragraph distilled from gather outputs>
-```
+   ```
+   > [!info]- Today at a glance
+   > <one-paragraph synopsis>
+   ```
 
-### 3. Per-section blocks
+3. **≥1 `> [!example]+ <emoji> <Section title>`** per-section block with markdown table OR bullets. Standard sections (calendar / email / projects / threads / finance) are emitted ONLY when their gather has data. Table column headers (use literally):
+   - Calendar: `| Time | Event | Attendees | Link |`
+   - Email triage: `| Subject | Sender | Intent |`
+   - Project status: `| Project | Status | Next action |`
+   - Finance accounts: `| Account | Balance | Δ this week |`
+   - Finance transactions: `| Date | Merchant | Amount | Category |`
+   - Open threads: bulleted list (no table — items are heterogeneous)
 
-Each section that has data renders as a collapsible example admonition wrapping a markdown table OR a short bullet list:
+4. **`> [!warning] <section> unavailable`** blocks for any `gather-skipped` returns, at the position the affected section would have rendered. Also append the reason to frontmatter `warnings:` array.
 
-```
-> [!example]+ <emoji> <Section title>
-> <table or bullets>
-```
+5. **`> [!tip] <emoji> Today's focus`** closing admonition — 2-3 sentence focus paragraph + concrete first action.
 
-Table column headers — use these literally so renderers and downstream readers stay consistent:
+When `prompt_body` was empty upstream (`warning == "empty_prompt"`), the orchestrator composes a skeleton-compliant stub: info admonition body reads `(Prompt body empty — edit <prompt_source> to customize what this run emits.)`; example block reads `No prompt body to drive content; this run is a placeholder.`; tip block recommends editing the prompt source. Frontmatter `summary` reads `Stub run — prompt body at <prompt_source> is empty.` The self-check passes (5 markers + summary + title all present).
 
-- **Calendar:**       `| Time | Event | Attendees | Link |`
-- **Email triage:**   `| Subject | Sender | Intent |`
-- **Project status:** `| Project | Status | Next action |`
-- **Open threads:**   bulleted list (no table — items are heterogeneous)
-- **Finance accounts:**     `| Account | Balance | Δ this week |`
-- **Finance transactions:** `| Date | Merchant | Amount | Category |`
+## Pre-write self-check
 
-Skip a section entirely when its gather output is empty. If a section's data exists but is too small for a table (e.g., 1–2 calendar events), use bullets inside the admonition.
+BEFORE calling the Write tool, verify your composed output against this checklist. If any item fails, return `{ path, status: "failed:contract-violation:<field>" }` and do NOT write.
 
-### 4. Warnings (only when any gather emitted gather-skipped)
+**Frontmatter checks:**
+- [ ] `type:` matches the canonical value for this skill (`cowork-weekly-review`)
+- [ ] `title:` is present and non-empty (the formula-composed title from above)
+- [ ] `summary:` is present and non-empty (1-2 sentences, ~150-250 chars)
+- [ ] `engagement_id:`, `week:`, `generator:`, `prompt_source:` present
 
-When a gather skill emitted `gather-skipped: <reason>` (because no MCP was available, or it self-determined no data was reachable), emit a warning admonition at the position the affected section would have rendered:
+**Body checks (regex-scan the composed body string):**
+- [ ] First non-frontmatter line opens a `SpaceNavButtons` dataviewjs fence (i.e. the line starts with ` ```dataviewjs` and is followed within 3 lines by `class: "SpaceNavButtons"`)
+- [ ] At least one `> [!info]-` admonition present
+- [ ] At least one `> [!example]+` admonition present
+- [ ] Closing `> [!tip]` admonition present (last admonition in the body)
+- [ ] For each entry in `warnings[]` (passed via frontmatter), a matching `> [!warning]` admonition is present in the body
 
-```
-> [!warning] <Section name> unavailable
-> <one-line reason from the gather output>
-```
+On any failure, the returned `status` field names which check failed using a stable identifier:
+- `failed:contract-violation:frontmatter-missing-title`
+- `failed:contract-violation:frontmatter-missing-summary`
+- `failed:contract-violation:body-missing-navbuttons`
+- `failed:contract-violation:body-missing-info-admonition`
+- `failed:contract-violation:body-missing-example-admonition`
+- `failed:contract-violation:body-missing-tip-admonition`
+- `failed:contract-violation:body-missing-warning-admonition-for-<key>`
 
-Also append the reason to the atomic note's `warnings:` frontmatter array (e.g., `warnings: [calendar_unavailable]`).
-
-### 5. Closing focus admonition
-
-A tip admonition with the closing 2–3 sentence focus paragraph + a concrete first-action recommendation:
-
-```
-> [!tip] <emoji> Today's focus
-> <closing paragraph + first-action recommendation>
-```
-
-### 6. summary: frontmatter emission
-
-After the body is fully composed, write a 1–2 sentence summary (~150–250 characters) into the frontmatter `summary:` field. The summary is the curated TL;DR surfaced by CoworkLatestRuns and the daily/cowork-hub Activity panels.
-
-**Per-cadence lead-in (weekly review):** Lead with the week's headline outcome — the biggest shipped deliverable + the biggest carryover. Example: "Shipped denali content-registry migration; carrying mcp-mesh prod approval queue and Hayden PR #152927 cleanup into next week."
+The orchestrator surfaces this in a Notice and skips downstream state-update steps.
