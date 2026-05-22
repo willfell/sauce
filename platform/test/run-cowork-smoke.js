@@ -831,9 +831,9 @@ function assertCoworkV068Shape() {
   assertTrue(fileSources.includes("helpers/cowork-latest-runs.js"),
     "V068-MANIFEST-FILES: manifest files[] declares helpers/cowork-latest-runs.js");
 
-  // V071-VERSION: cowork blueprint version bumped to 0.12.0 (was 0.11.0 in v0.68.0).
-  assertTrue(manifest.version === "0.12.0",
-    `V071-VERSION: cowork manifest.version === "0.12.0" (got ${JSON.stringify(manifest.version)})`);
+  // V074-VERSION: cowork blueprint version bumped to 0.13.0 (was 0.12.0 in v0.71.0).
+  assertTrue(manifest.version === "0.13.0",
+    `V074-VERSION: cowork manifest.version === "0.13.0" (got ${JSON.stringify(manifest.version)})`);
 }
 
 (function main() {

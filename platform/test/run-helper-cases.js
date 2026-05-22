@@ -8038,6 +8038,310 @@ async function caseFA2RuleFragmentsExtends() {
     assertTrue("DD-K5: 'archived' label literal present in dashboard", /['"]archived['"]/.test(src));
   }
 
+  // v0.74.0 HC-V0740-1: engagement-type tripwire_aspects + supported_cadences widening
+  {
+    console.log("\n--- Case HC-V0740-1: engagement-type tripwire_aspects + supported_cadences widening ---");
+    try {
+      const personal = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/cowork/engagement-types/personal.json"), "utf8"));
+      const w2fte   = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/cowork/engagement-types/w2-fte.json"), "utf8"));
+      const consul  = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/cowork/engagement-types/consulting.json"), "utf8"));
+
+      assertTrue("HC-V0740-1: personal.tripwire_aspects === ['cc_drift']",
+        JSON.stringify(personal.tripwire_aspects) === JSON.stringify(["cc_drift"]));
+      assertTrue("HC-V0740-1: w2-fte.tripwire_aspects === ['calendar_drift', 'queue_growth']",
+        JSON.stringify(w2fte.tripwire_aspects) === JSON.stringify(["calendar_drift", "queue_growth"]));
+      assertTrue("HC-V0740-1: consulting.tripwire_aspects === ['cc_drift', 'calendar_drift', 'queue_growth']",
+        JSON.stringify(consul.tripwire_aspects) === JSON.stringify(["cc_drift", "calendar_drift", "queue_growth"]));
+
+      assertTrue("HC-V0740-1: w2-fte supported_cadences must include midday",
+        Array.isArray(w2fte.supported_cadences) && w2fte.supported_cadences.includes("midday"));
+      assertTrue("HC-V0740-1: consulting supported_cadences must include midday",
+        Array.isArray(consul.supported_cadences) && consul.supported_cadences.includes("midday"));
+
+      assertTrue("HC-V0740-1: personal.version must be 0.2.0", personal.version === "0.2.0");
+      assertTrue("HC-V0740-1: w2-fte.version must be 0.2.0", w2fte.version === "0.2.0");
+      assertTrue("HC-V0740-1: consulting.version must be 0.2.0", consul.version === "0.2.0");
+    } catch (e) {
+      assertTrue("HC-V0740-1: engagement-type tripwire_aspects contract", false, e && e.message);
+    }
+  }
+
+  // v0.74.0 HC-V0740-2: title required on 6 cowork atomic-note rule_fragments
+  {
+    console.log("\n--- Case HC-V0740-2: title required on 6 cowork atomic-note rule_fragments ---");
+    try {
+      const manifest = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/cowork/manifest.json"), "utf8"));
+      const sixTypes = [
+        "cowork-morning-briefing", "cowork-midday-tripwire", "cowork-eod-review",
+        "cowork-finance-snapshot", "cowork-weekly-review", "cowork-monthly-review"
+      ];
+      const fragments = manifest.validator_rule_fragments || manifest.rule_fragments || [];
+      for (const t of sixTypes) {
+        const frag = fragments.find(rf =>
+          rf.fragment && rf.fragment.required_frontmatter
+            && rf.fragment.required_frontmatter.type
+            && rf.fragment.required_frontmatter.type.equals === t
+        );
+        assertTrue(`HC-V0740-2: rule_fragment for ${t} not found`, !!frag);
+        if (!frag) continue;
+        const title = frag.fragment.required_frontmatter.title;
+        assertTrue(`HC-V0740-2: rule_fragment for ${t} missing title:`, !!title);
+        if (!title) continue;
+        assertTrue(`HC-V0740-2: ${t} title.required must be true`, title.required === true);
+        assertTrue(`HC-V0740-2: ${t} title.type must be string`, title.type === "string");
+      }
+    } catch (e) {
+      assertTrue("HC-V0740-2: cowork rule_fragments title contract", false, e && e.message);
+    }
+  }
+
+  // v0.74.0 HC-V0740-3: midday-tripwire severity pattern widened to warn|alert
+  {
+    console.log("\n--- Case HC-V0740-3: midday-tripwire severity pattern widened to warn|alert ---");
+    try {
+      const manifest = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/cowork/manifest.json"), "utf8"));
+      const fragments = manifest.validator_rule_fragments || manifest.rule_fragments || [];
+      const frag = fragments.find(rf =>
+        rf.fragment && rf.fragment.required_frontmatter
+          && rf.fragment.required_frontmatter.type
+          && rf.fragment.required_frontmatter.type.equals === "cowork-midday-tripwire"
+      );
+      assertTrue("HC-V0740-3: midday-tripwire rule_fragment not found", !!frag);
+      if (frag) {
+        const sev = frag.fragment.required_frontmatter.severity;
+        assertTrue("HC-V0740-3: severity field not found", !!sev);
+        if (sev) {
+          assertTrue('HC-V0740-3: severity pattern must be ^(warn|alert)$', sev.matches === "^(warn|alert)$");
+        }
+      }
+    } catch (e) {
+      assertTrue("HC-V0740-3: midday-tripwire severity pattern contract", false, e && e.message);
+    }
+  }
+
+  // v0.74.0 HC-V0740-4: write-run-note Title composition + per-skill display-name literal
+  {
+    console.log("\n--- Case HC-V0740-4: write-run-note Title composition + per-skill display-name literal ---");
+    try {
+      const displayNames = {
+        "write-run-note-morning-briefing": "Morning Briefing",
+        "write-run-note-midday-tripwire":  "Midday Tripwire",
+        "write-run-note-eod-review":       "EOD Review",
+        "write-run-note-finance":          "Finance Snapshot",
+        "write-run-note-weekly-review":    "Weekly Review",
+        "write-run-note-monthly-review":   "Monthly Review"
+      };
+      for (const [skill, literal] of Object.entries(displayNames)) {
+        const p = path.join(WORKSHOP, `platform/blueprints/cowork/skills/skills/${skill}/SKILL.md`);
+        const body = fs.readFileSync(p, "utf8");
+        assertTrue(`HC-V0740-4: ${skill} missing '## Title composition' heading`,
+          /^## Title composition\b/m.test(body));
+        assertTrue(`HC-V0740-4: ${skill} missing display-name literal '${literal}'`,
+          body.includes(literal));
+      }
+    } catch (e) {
+      assertTrue("HC-V0740-4: write-run-note Title composition contract", false, e && e.message);
+    }
+  }
+
+  // v0.74.0 HC-V0740-5: write-run-note Adaptive body skeleton + 5-marker list
+  {
+    console.log("\n--- Case HC-V0740-5: write-run-note Adaptive body skeleton + 5-marker list ---");
+    try {
+      const skills = [
+        "write-run-note-morning-briefing", "write-run-note-midday-tripwire",
+        "write-run-note-eod-review",       "write-run-note-finance",
+        "write-run-note-weekly-review",    "write-run-note-monthly-review"
+      ];
+      const markers = ["SpaceNavButtons", "> [!info]-", "> [!example]+", "> [!warning]", "> [!tip]"];
+      for (const skill of skills) {
+        const p = path.join(WORKSHOP, `platform/blueprints/cowork/skills/skills/${skill}/SKILL.md`);
+        const body = fs.readFileSync(p, "utf8");
+        assertTrue(`HC-V0740-5: ${skill} missing '## Adaptive body skeleton' heading`,
+          /^## Adaptive body skeleton\b/m.test(body));
+        for (const m of markers) {
+          assertTrue(`HC-V0740-5: ${skill} missing marker '${m}' in skeleton section`,
+            body.includes(m));
+        }
+      }
+    } catch (e) {
+      assertTrue("HC-V0740-5: write-run-note Adaptive body skeleton contract", false, e && e.message);
+    }
+  }
+
+  // v0.74.0 HC-V0740-6: write-run-note Pre-write self-check + failed:contract-violation literal
+  {
+    console.log("\n--- Case HC-V0740-6: write-run-note Pre-write self-check + failed:contract-violation literal ---");
+    try {
+      const skills = [
+        "write-run-note-morning-briefing", "write-run-note-midday-tripwire",
+        "write-run-note-eod-review",       "write-run-note-finance",
+        "write-run-note-weekly-review",    "write-run-note-monthly-review"
+      ];
+      for (const skill of skills) {
+        const p = path.join(WORKSHOP, `platform/blueprints/cowork/skills/skills/${skill}/SKILL.md`);
+        const body = fs.readFileSync(p, "utf8");
+        assertTrue(`HC-V0740-6: ${skill} missing '## Pre-write self-check' heading`,
+          /^## Pre-write self-check\b/m.test(body));
+        assertTrue(`HC-V0740-6: ${skill} missing failed:contract-violation: literal`,
+          body.includes("failed:contract-violation:"));
+      }
+    } catch (e) {
+      assertTrue("HC-V0740-6: write-run-note Pre-write self-check contract", false, e && e.message);
+    }
+  }
+
+  // v0.74.0 HC-V0740-7: write-run-note uses Write tool in steps; no obsidian MCP in write step
+  {
+    console.log("\n--- Case HC-V0740-7: write-run-note uses Write tool; no obsidian MCP in Steps section ---");
+    try {
+      const skills = [
+        "write-run-note-morning-briefing", "write-run-note-midday-tripwire",
+        "write-run-note-eod-review",       "write-run-note-finance",
+        "write-run-note-weekly-review",    "write-run-note-monthly-review"
+      ];
+      for (const skill of skills) {
+        const p = path.join(WORKSHOP, `platform/blueprints/cowork/skills/skills/${skill}/SKILL.md`);
+        const body = fs.readFileSync(p, "utf8");
+        // Slice from '## Steps' to next '## ' heading (no /m flag — $ means true end-of-string)
+        const stepsIdx = body.indexOf("## Steps");
+        assertTrue(`HC-V0740-7: ${skill} missing '## Steps' section`, stepsIdx >= 0);
+        if (stepsIdx < 0) continue;
+        const afterSteps = body.slice(stepsIdx + "## Steps".length);
+        const nextH2 = afterSteps.search(/\n## /);
+        const stepsBody = nextH2 >= 0 ? afterSteps.slice(0, nextH2) : afterSteps;
+        assertTrue(`HC-V0740-7: ${skill} '## Steps' must reference 'Write tool'`,
+          /Write tool/.test(stepsBody));
+        assertTrue(`HC-V0740-7: ${skill} '## Steps' must NOT reference mcp__obsidian__create_note or obsidian_put_content`,
+          !/mcp__obsidian__create_note|obsidian_put_content/.test(stepsBody));
+      }
+    } catch (e) {
+      assertTrue("HC-V0740-7: write-run-note filesystem write contract", false, e && e.message);
+    }
+  }
+
+  // v0.74.0 HC-V0740-8: midday-tripwire orchestrator preflight broadened
+  {
+    console.log("\n--- Case HC-V0740-8: midday-tripwire orchestrator preflight broadened ---");
+    try {
+      const p = path.join(WORKSHOP, "platform/blueprints/cowork/skills/orchestrators/midday-tripwire/SKILL.md");
+      const body = fs.readFileSync(p, "utf8");
+      const preflight = body.match(/## Pre-flight\b([\s\S]*?)(?=^## )/m);
+      assertTrue("HC-V0740-8: midday-tripwire missing '## Pre-flight' section", !!preflight);
+      if (preflight) {
+        assertTrue("HC-V0740-8: preflight must reference tripwire_aspects",
+          /tripwire_aspects/.test(preflight[1]));
+        assertTrue('HC-V0740-8: preflight must NOT use finance_block != include as the gate',
+          !/finance_block != "include"/.test(preflight[1]));
+      }
+    } catch (e) {
+      assertTrue("HC-V0740-8: midday-tripwire preflight contract", false, e && e.message);
+    }
+  }
+
+  // v0.74.0 HC-V0740-9: onboard-scheduled-jobs bulk-defaults question + 4 options
+  {
+    console.log("\n--- Case HC-V0740-9: onboard-scheduled-jobs bulk-defaults question + 4 options ---");
+    try {
+      const p = path.join(WORKSHOP, "platform/blueprints/cowork/skills/orchestrators/onboard-scheduled-jobs/SKILL.md");
+      const body = fs.readFileSync(p, "utf8");
+      assertTrue("HC-V0740-9: bulk-defaults question text missing",
+        body.includes("Apply engagement-type defaults to ALL prompts now"));
+      for (const opt of ["(a) Yes", "(b) Yes", "(c) No", "(d) No"]) {
+        assertTrue(`HC-V0740-9: bulk-defaults option ${opt} missing`, body.includes(opt));
+      }
+    } catch (e) {
+      assertTrue("HC-V0740-9: onboard-scheduled-jobs bulk-defaults contract", false, e && e.message);
+    }
+  }
+
+  // v0.74.0 HC-V0740-10: onboard-scheduled-jobs preflight auto-delegate
+  {
+    console.log("\n--- Case HC-V0740-10: onboard-scheduled-jobs preflight auto-delegate ---");
+    try {
+      const p = path.join(WORKSHOP, "platform/blueprints/cowork/skills/orchestrators/onboard-scheduled-jobs/SKILL.md");
+      const body = fs.readFileSync(p, "utf8");
+      assertTrue("HC-V0740-10: preflight must detect not-bootstrapped status",
+        body.includes("not-bootstrapped"));
+      assertTrue("HC-V0740-10: preflight must delegate to cowork:bootstrap-vault",
+        body.includes("cowork:bootstrap-vault"));
+    } catch (e) {
+      assertTrue("HC-V0740-10: onboard-scheduled-jobs preflight auto-delegate contract", false, e && e.message);
+    }
+  }
+
+  // v0.74.0 HC-V0740-11: onboard-scheduled-jobs uses filesystem ops (Read+Write); no obsidian_put_content
+  {
+    console.log("\n--- Case HC-V0740-11: onboard-scheduled-jobs uses filesystem ops; no obsidian_put_content ---");
+    try {
+      const p = path.join(WORKSHOP, "platform/blueprints/cowork/skills/orchestrators/onboard-scheduled-jobs/SKILL.md");
+      const body = fs.readFileSync(p, "utf8");
+      assertTrue("HC-V0740-11: onboard-scheduled-jobs must reference Read/Write tools for prompt-file ops",
+        /Read tool|Write tool/.test(body));
+      assertTrue("HC-V0740-11: onboard-scheduled-jobs must NOT use obsidian_put_content or mcp__obsidian__create_note",
+        !/obsidian_put_content|mcp__obsidian__create_note/.test(body));
+    } catch (e) {
+      assertTrue("HC-V0740-11: onboard-scheduled-jobs filesystem ops contract", false, e && e.message);
+    }
+  }
+
+  // v0.74.0 HC-V0740-12: check-vault-routing filesystem mode
+  {
+    console.log("\n--- Case HC-V0740-12: check-vault-routing filesystem mode ---");
+    try {
+      const p = path.join(WORKSHOP, "platform/blueprints/cowork/skills/skills/check-vault-routing/SKILL.md");
+      const body = fs.readFileSync(p, "utf8");
+      assertTrue('HC-V0740-12: check-vault-routing must document { required: [\'filesystem\'] } mode',
+        /required: \["filesystem"\]|required: \['filesystem'\]/.test(body));
+      assertTrue("HC-V0740-12: filesystem mode must reference vault-config.md sentinel",
+        body.includes("vault-config.md"));
+    } catch (e) {
+      assertTrue("HC-V0740-12: check-vault-routing filesystem mode contract", false, e && e.message);
+    }
+  }
+
+  // v0.74.0 HC-V0740-13: 5 cadence orchestrators handle failed:contract-violation
+  {
+    console.log("\n--- Case HC-V0740-13: 5 cadence orchestrators handle failed:contract-violation ---");
+    try {
+      const orchs = ["morning-briefing", "midday-tripwire", "eod-review", "weekly-review", "monthly-review"];
+      for (const o of orchs) {
+        const p = path.join(WORKSHOP, `platform/blueprints/cowork/skills/orchestrators/${o}/SKILL.md`);
+        const body = fs.readFileSync(p, "utf8");
+        assertTrue(`HC-V0740-13: ${o} orchestrator must handle failed:contract-violation status`,
+          body.includes("failed:contract-violation"));
+      }
+    } catch (e) {
+      assertTrue("HC-V0740-13: cadence orchestrators contract-violation handling", false, e && e.message);
+    }
+  }
+
+  // v0.74.0 HC-V0740-14: engagement-template prompts trimmed
+  {
+    console.log("\n--- Case HC-V0740-14: engagement-template prompts trimmed ---");
+    try {
+      const promptDir = path.join(WORKSHOP, "platform/blueprints/cowork/content/context/engagement-templates");
+      const types = ["personal", "w2-fte", "consulting"];
+      let trimmedFiles = 0;
+      for (const t of types) {
+        const dir = path.join(promptDir, t, "prompts");
+        if (!fs.existsSync(dir)) continue;
+        for (const f of fs.readdirSync(dir)) {
+          if (!f.endsWith(".md")) continue;
+          const body = fs.readFileSync(path.join(dir, f), "utf8");
+          const hasMarkerInstructions = /emit a `> \[!info\]-`|use the SpaceNavButtons|markdown table with columns/i.test(body);
+          assertTrue(`HC-V0740-14: ${t}/${f} still describes body-shape markers (should be trimmed)`,
+            !hasMarkerInstructions);
+          trimmedFiles++;
+        }
+      }
+      assertTrue(`HC-V0740-14: expected >=13 engagement-template prompts; found ${trimmedFiles}`,
+        trimmedFiles >= 13);
+    } catch (e) {
+      assertTrue("HC-V0740-14: engagement-template prompts trimmed contract", false, e && e.message);
+    }
+  }
+
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
   if (fail > 0) {
