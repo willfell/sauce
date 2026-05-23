@@ -66,11 +66,33 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
     before performing the write described in its `## Steps` section with `{ engagement, month: context.iso_month, year: context.year, body: run_body, prompt_source: "spice/cowork/prompts/monthly-review.md", warning }`. Capture `status`. If `status` starts with `"failed:contract-violation:"`, emit Notice `cowork:monthly-review aborted -- contract violation: <field>` (where `<field>` is the part after `failed:contract-violation:`). Do not run state-update steps. Exit non-zero.
     Else if `status` starts with `"failed:"` (e.g. `failed:filesystem:permission`, `failed:write-undersized:285`), emit Notice `cowork:monthly-review aborted -- write failed: <status>` and exit. Do not run state-update steps after a failed write.
 
+## Verify
+
+17. **Re-read + structural verify.** After `write-run-note-monthly-review` returns a non-`"failed:"` status:
+
+   a. Read the just-written file via the Read tool at `spice/cowork/monthly/<YYYY>/<YYYY-MM>/monthly-review.md` (substituting the values from `context`).
+   b. Parse leading frontmatter (YAML between `---` markers) as `parsed_frontmatter`; capture the remainder as `body`.
+   c. Assert required frontmatter fields exist and are non-empty strings:
+      - `title:`
+      - `summary:`
+      - `type:` (must equal `cowork-monthly-review`)
+      - `warning:` only when the orchestrator passed a non-null `warning` to write-run-note (otherwise the field is allowed to be absent or `null`).
+   d. Regex-scan `body` for required structural markers:
+      - SpaceNavButtons block: `/```dataviewjs\n[\s\S]*?SpaceNavButtons[\s\S]*?```/`
+      - At least one Synopsis callout: `/^> \[!info\]- /m`
+      - At least one example callout: `/^> \[!example\]\+ /m`
+      - Closing tip callout: `/^> \[!tip\] /m`
+   e. On ANY frontmatter-field miss or marker miss:
+      - Use Bash to delete the file: `rm -f spice/cowork/monthly/<YYYY>/<YYYY-MM>/monthly-review.md`
+      - Emit Obsidian Notice: `cowork:monthly-review aborted -- contract-violation: <missing-field-or-marker-name>`
+      - Exit non-zero. Do NOT run subsequent state-update steps.
+   f. On all-pass: continue to the State section per the existing flow.
+
 ## State
 
-17. READ `.claude/skills/cowork/skills/update-active-threads/SKILL.md` in full and follow
+18. READ `.claude/skills/cowork/skills/update-active-threads/SKILL.md` in full and follow
     its `## Steps` section with `{ engagement_id, phase: "monthly-refresh", date_today: context.today, writer: "cowork:monthly-review", changes: { archive_resolved_older_than_days: 14, audit_full: true, financial_state_refresh: <step 5 and 6 condensed or null> } }`.
-18. READ `.claude/skills/cowork/skills/update-weekly-snapshot/SKILL.md` in full and follow
+19. READ `.claude/skills/cowork/skills/update-weekly-snapshot/SKILL.md` in full and follow
     its `## Steps` section with `{ engagement_id, phase: "monthly-reset", date_today: context.today, writer: "cowork:monthly-review", snapshot_data: { archive_previous_month: true, prev_month_yyyymm: context.prev_month_yyyymm } }`.
 
 ## Done

@@ -67,4 +67,28 @@ Each gather call passes `engagement_id`. The orchestrator branches per-aspect fr
     `## Adaptive body skeleton`, and `## Pre-write self-check` sections — then apply those contracts
     before performing the write described in its `## Steps` section with `{ engagement, date: context.today, weekday: context.dddd, month_name: context["MM-Month"].split("-")[1], severity, signals: { cc: cc_signal, calendar: calendar_signal, queue: queue_signal }, body: run_body, prompt_source: "spice/cowork/prompts/midday-tripwire.md", warning, warnings: warnings_array }`. The `signals` arg is an opaque structured handoff write-run-note uses to compose the summary line; `warnings_array` is the optional list of `<aspect>_unavailable` strings from gather-skipped returns. Capture `status`. If `status` starts with `"failed:contract-violation:"`, emit Notice `cowork:midday-tripwire aborted -- contract violation: <field>` and exit non-zero. Else if `status` starts with `"failed:"`, emit Notice `cowork:midday-tripwire aborted -- write failed: <status>` and exit. Do not run state-update steps after a failed write.
 
+## Verify
+
+12. **Re-read + structural verify.** After `write-run-note-midday-tripwire` returns a non-`"failed:"` status:
+
+   a. Read the just-written file via the Read tool at `spice/cowork/daily/<YYYY>/<MM-Month>/<YYYY-MM-DD>/midday-tripwire.md` (substituting the values from `context`).
+   b. Parse leading frontmatter (YAML between `---` markers) as `parsed_frontmatter`; capture the remainder as `body`.
+   c. Assert required frontmatter fields exist and are non-empty strings:
+      - `title:`
+      - `summary:`
+      - `type:` (must equal `cowork-midday-tripwire`)
+      - `severity:` (must match `/^(warn|alert)$/`)
+      - `warning:` only when the orchestrator passed a non-null `warning` to write-run-note (otherwise the field is allowed to be absent or `null`).
+   d. Regex-scan `body` for required structural markers:
+      - SpaceNavButtons block: `/```dataviewjs\n[\s\S]*?SpaceNavButtons[\s\S]*?```/`
+      - At least one Synopsis callout: `/^> \[!info\]- /m`
+      - At least one example callout: `/^> \[!example\]\+ /m`
+      - Closing tip callout: `/^> \[!tip\] /m`
+      - Severity-specific marker: at least one `> [!warning] ` callout OR `> [!example]+ 🚨` callout (regex: `/^> \[!warning\] |^> \[!example\]\+ 🚨/m`).
+   e. On ANY frontmatter-field miss or marker miss:
+      - Use Bash to delete the file: `rm -f spice/cowork/daily/<YYYY>/<MM-Month>/<YYYY-MM-DD>/midday-tripwire.md`
+      - Emit Obsidian Notice: `cowork:midday-tripwire aborted -- contract-violation: <missing-field-or-marker-name>` (when the miss is the severity-specific marker, reference it explicitly as `severity-marker`)
+      - Exit non-zero. Do NOT run subsequent steps.
+   f. On all-pass: continue to Done per the existing flow.
+
 ## Done

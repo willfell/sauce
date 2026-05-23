@@ -71,11 +71,33 @@ Each gather call passes `engagement_id`. The sub-skill reads per-engagement MCP-
     before performing the write described in its `## Steps` section with `{ engagement, date: context.today, weekday: context.dddd, month_name: context["MM-Month"].split("-")[1], body: run_body, prompt_source: "spice/cowork/prompts/morning-briefing.md", warning }`. Capture `status`. If `status` starts with `"failed:contract-violation:"`, emit Notice `cowork:morning-briefing aborted -- contract violation: <field>` (where `<field>` is the part after `failed:contract-violation:`). Do not run state-update steps. Exit non-zero.
     Else if `status` starts with `"failed:"` (e.g. `failed:filesystem:permission`, `failed:write-undersized:285`), emit Notice `cowork:morning-briefing aborted -- write failed: <status>` and exit. Do not run state-update steps after a failed write.
 
+## Verify
+
+17. **Re-read + structural verify.** After `write-run-note-morning-briefing` returns a non-`"failed:"` status:
+
+   a. Read the just-written file via the Read tool at `spice/cowork/daily/<YYYY>/<MM-Month>/<YYYY-MM-DD>/morning-briefing.md` (substituting the values from `context`).
+   b. Parse leading frontmatter (YAML between `---` markers) as `parsed_frontmatter`; capture the remainder as `body`.
+   c. Assert required frontmatter fields exist and are non-empty strings:
+      - `title:`
+      - `summary:`
+      - `type:` (must equal `cowork-morning-briefing`)
+      - `warning:` only when the orchestrator passed a non-null `warning` to write-run-note (otherwise the field is allowed to be absent or `null`).
+   d. Regex-scan `body` for required structural markers:
+      - SpaceNavButtons block: `/```dataviewjs\n[\s\S]*?SpaceNavButtons[\s\S]*?```/`
+      - At least one Synopsis callout: `/^> \[!info\]- /m`
+      - At least one example callout: `/^> \[!example\]\+ /m`
+      - Closing tip callout: `/^> \[!tip\] /m`
+   e. On ANY frontmatter-field miss or marker miss:
+      - Use Bash to delete the file: `rm -f spice/cowork/daily/<YYYY>/<MM-Month>/<YYYY-MM-DD>/morning-briefing.md`
+      - Emit Obsidian Notice: `cowork:morning-briefing aborted -- contract-violation: <missing-field-or-marker-name>`
+      - Exit non-zero. Do NOT run subsequent state-update steps.
+   f. On all-pass: continue to the State section per the existing flow.
+
 ## State
 
-17. READ `.claude/skills/cowork/skills/update-active-threads/SKILL.md` in full and follow
+18. READ `.claude/skills/cowork/skills/update-active-threads/SKILL.md` in full and follow
     its `## Steps` section with `{ engagement_id, phase: "morning-pass", date_today: context.today, writer: "cowork:morning-briefing", changes: { new_threads: <step 12.new_threads>, snoozed_to_open: <step 12.snoozed_to_open>, surface_open: true } }`.
-18. READ `.claude/skills/cowork/skills/update-weekly-snapshot/SKILL.md` in full and follow
+19. READ `.claude/skills/cowork/skills/update-weekly-snapshot/SKILL.md` in full and follow
     its `## Steps` section with `{ engagement_id, phase: "morning", date_today: context.today, writer: "cowork:morning-briefing", snapshot_data: { week_of: context.week_of, wtd_spend: <step 9.total_usd or null>, cc_total: <step 10.total_usd or null>, journaled_today: false } }`.
 
 ## Done
