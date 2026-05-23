@@ -8242,7 +8242,7 @@ async function caseFA2RuleFragmentsExtends() {
       assertTrue("HC-V0740-10: preflight must detect not-bootstrapped status",
         body.includes("not-bootstrapped"));
       assertTrue("HC-V0740-10: preflight must delegate to cowork:bootstrap-vault",
-        body.includes("cowork:bootstrap-vault"));
+        body.includes(".claude/skills/cowork/bootstrap-vault/SKILL.md"));
     } catch (e) {
       assertTrue("HC-V0740-10: onboard-scheduled-jobs preflight auto-delegate contract", false, e && e.message);
     }

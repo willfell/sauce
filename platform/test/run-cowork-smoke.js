@@ -151,7 +151,7 @@ function checkSharedContracts() {
   // S6 — orchestrator declares engagement_id intake
   const morning = readSkill("skills/orchestrators/morning-briefing/SKILL.md");
   assertContains(morning, "engagement_id: string", "S6: morning-briefing orchestrator declares engagement_id input");
-  assertContains(morning, "cowork:write-run-note-morning-briefing", "S6: morning-briefing dispatches write-run-note-morning-briefing");
+  assertContains(morning, ".claude/skills/cowork/skills/write-run-note-morning-briefing/SKILL.md", "S6: morning-briefing dispatches write-run-note-morning-briefing");
   assertContains(morning, "Resolve engagement", "S6: morning-briefing has Resolve engagement pre-flight step");
 
   // S7 — every gather sub-skill referenced by orchestrators declares engagement_id
@@ -798,7 +798,7 @@ function assertCoworkV068Shape() {
   // the v0.74.0 contract: re-runnable entry-point that delegates to cowork:bootstrap-vault
   // when not-bootstrapped, then registers tasks via scheduled-tasks MCP.
   const onboard = readSkill("skills/orchestrators/onboard-scheduled-jobs/SKILL.md");
-  assertContains(onboard, "cowork:bootstrap-vault",
+  assertContains(onboard, ".claude/skills/cowork/bootstrap-vault/SKILL.md",
     "V068-ONBOARD-GUARD: onboard-scheduled-jobs delegates to cowork:bootstrap-vault when not-bootstrapped");
   assertContains(onboard, "scheduled-tasks",
     "V068-ONBOARD-GUARD-MSG: onboard skill registers schedules via scheduled-tasks MCP");
