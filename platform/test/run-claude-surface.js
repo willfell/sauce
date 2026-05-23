@@ -548,7 +548,7 @@ async function caseCSSUB3VerbsExist() {
 //           34 skill entries (was 33) → 43 contributions (was 42).
 // ============================================================
 async function caseCSMIG1CoworkAggregation() {
-  console.log("\n--- Case CS-MIG-1: cowork manifest claude_surface[] yields 43 contributions (v0.76.0) ---");
+  console.log("\n--- Case CS-MIG-1: cowork manifest claude_surface[] yields 43 contributions (v0.77.0) ---");
   const bpManifestPath = path.join(WORKSHOP, "platform/blueprints/cowork/manifest.json");
   assertTrue("CS-MIG-1: cowork manifest.json exists", fs.existsSync(bpManifestPath));
   const bpMan = JSON.parse(fs.readFileSync(bpManifestPath, "utf8"));

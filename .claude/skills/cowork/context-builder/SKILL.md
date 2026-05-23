@@ -40,19 +40,60 @@ Writes `spice/cowork/context/user-preferences.md` — a user-owned file that NEV
 
 ## Detect
 
-4. **Enumerate available MCP tools.** Inspect your current tool list. For each tool whose name starts with `mcp__`, capture the namespace segment (e.g., `mcp__Google_Calendar__list_events` → namespace `Google_Calendar`). Build `available_mcp_namespaces[]` deduplicated.
+4. **Enumerate available MCP tools.** Inspect your current tool list. For each tool whose name starts with `mcp__`, capture the FULL name string (e.g., `mcp__Google_Calendar__list_events`). Build `available_tools[]`. Do NOT pre-strip namespaces — the helper handles namespace splitting.
 
-5. **Map namespaces to MCP-kinds.** For each entry in `mcp_skill_map`, check whether its `mcp_namespace_match` regex matches ANY string in `available_mcp_namespaces[]`. Build `detected_mcp_kinds[]` (set of mcp_kinds with at least one matching namespace). Each kind has a corresponding `gather_skill` from the map.
+5. **Read MCP-skill map.** Use Read on `spice/cowork/context/mcp-skill-map.json`. Verify `map.version === "2.0.0"`. Parse the `kinds[]` array; each entry has `kind`, `required_tools`, optional `tool_alternatives`, `gather_skill`, optional `rename_from_v1`.
 
-   When `dry_run_answers` is provided, replace this whole step with: `detected_mcp_kinds = dry_run_answers.detected_mcps`.
+6. **Detect capabilities.** Invoke the helper at `.local/blueprints/cowork/helpers/context-builder-dry-run.js` (or the materialized path in your vault) — specifically the `detectCapabilities(available_tools, map)` export. It returns `{ detected: [{kind, served_by, matched_tools, gather_skill}], unmapped_namespaces: [<ns>, ...] }`. Capability-subset model: a single namespace can satisfy multiple kinds (Outlook UUID = calendar + email + chat, all from one MCP).
 
-6. **List unmapped MCPs.** For each namespace in `available_mcp_namespaces[]` not matched by any map entry, collect in `unmapped_namespaces[]`. These are reported in the audit-receipt but no questions are asked.
+   If running interactively without direct Node access to the helper, replicate the algorithm:
+   - Group `available_tools[]` by namespace (the segment between `mcp__` and the right-most `__`).
+   - For each `kind` in the map: a namespace satisfies the kind when (a) ALL of `required_tools` are present in the namespace's tool set, AND (b) at least one branch of `tool_alternatives[][]` is fully present (when `tool_alternatives` is defined).
+   - Record `detected[]` entries. Any namespace not satisfying any kind goes in `unmapped_namespaces[]`.
+
+   When `dry_run_answers` is provided, replace this whole step with: `detected = dry_run_answers.detected_mcps.map(k => ({kind: k, served_by: "<harness-supplied>", ...}))`. Unmapped namespaces become `[]`.
+
+## Unknown-MCP loop
+
+7. **For each `ns` in `unmapped_namespaces[]`:** the MCP is connected but doesn't match any known capability pattern. Surface it to the user for classification.
+
+   For each unmapped namespace, gather the tool list for that namespace from `available_tools[]` (the tools whose name starts with `mcp__<ns>__`). Compose a prompt and ask via `AskUserQuestion`:
+
+   > MCP `<ns>` is connected. Its tools:
+   >   - <tool_a>
+   >   - <tool_b>
+   >   - <tool_c>
+   >
+   > Classify this MCP:
+   >   - calendar — use the calendar question set
+   >   - email — use the email question set
+   >   - chat — use the chat question set
+   >   - finance — use the finance question set
+   >   - custom — define a new kind inline
+   >   - skip — don't capture preferences for this MCP
+
+   On a known classification (calendar / email / chat / finance):
+   - Walk the matching `## Question set — <kind>` section below for this namespace.
+   - Capture answers as `unknown_namespace_classifications[<ns>] = [{ kind: <known>, classification: "known-override", answers: <walked answers> }]`.
+   - The user can supply MULTIPLE classifications for the same `<ns>` if it logically serves multiple kinds (e.g., classify Outlook UUID as `calendar` AND `email`) — re-prompt until the user picks `skip` or moves on.
+
+   On `custom`:
+   - Ask Q1: `What's a short name for this kind? (e.g., ado, newrelic, backstage)` — capture as `<custom-name>`.
+   - Ask Q2: `Briefly describe what you care about from this MCP. (1-3 sentences)` — capture as `<what-matters-text>`.
+   - Ask Q3: `Add another custom kind for this same MCP, or move on?` — options: `same-MCP-different-kind` (loop back to Q1 with a hint) | `move-on` (exit sub-flow for this namespace).
+   - Append `unknown_namespace_classifications[<ns>] ||= []; unknown_namespace_classifications[<ns>].push({ kind: <custom-name>, classification: "custom", what_matters: <what-matters-text> });`.
+
+   On `skip`: no entry — namespace stays in `unmapped_namespaces[]` for the audit-receipt only.
+
+   When `dry_run_answers` is provided, replace this entire step with: take `dry_run_answers.unknown_namespace_classifications` (a `{ <ns>: [classification, ...] }` map) verbatim.
+
+   After this loop, `detected[]` covers known-pattern matches; `unknown_namespace_classifications` covers user-classified namespaces (custom or known-override).
 
 ## Interview — per-MCP
 
-7. **Order MCPs.** Sort `detected_mcp_kinds[]` by `existing_prefs.priorities` order (kinds appearing first in priorities go first); kinds not in priorities go last in alphabetical order. This gives the user a stable, intuitive walk order across runs.
+8. **Order MCPs.** Sort `detected_mcp_kinds[]` by `existing_prefs.priorities` order (kinds appearing first in priorities go first); kinds not in priorities go last in alphabetical order. This gives the user a stable, intuitive walk order across runs.
 
-8. **For each MCP-kind, decide action:**
+9. **For each MCP-kind, decide action:**
    - **NEW (no existing block)**: action = "Walk".
    - **Existing block, MCP currently connected**: ask `AskUserQuestion`:
      > Update preferences for {{mcp_kind}}? (configured {{existing_prefs.mcps[mcp_kind].captured_at}})
@@ -64,22 +105,22 @@ Writes `spice/cowork/context/user-preferences.md` — a user-owned file that NEV
 
    When `dry_run_answers` is provided, replace this whole step with: action = `dry_run_answers.per_mcp_actions[mcp_kind] || "Walk"`.
 
-9. **For each MCP-kind where action ∈ {Walk, Update}, walk the question set** described in the `## Question set — <mcp_kind>` section below. Each question is asked one at a time via `AskUserQuestion` (unless `dry_run_answers` is provided, in which case the answers come directly from `dry_run_answers.per_mcp_answers[mcp_kind]`). Capture answers into the per-MCP block.
+10. **For each MCP-kind where action ∈ {Walk, Update}, walk the question set** described in the `## Question set — <mcp_kind>` section below. Each question is asked one at a time via `AskUserQuestion` (unless `dry_run_answers` is provided, in which case the answers come directly from `dry_run_answers.per_mcp_answers[mcp_kind]`). Capture answers into the per-MCP block.
 
-10. **For each MCP-kind where action = "Clear"**, delete the block (it will be absent from the next file write).
+11. **For each MCP-kind where action = "Clear"**, delete the block (it will be absent from the next file write).
 
-11. **For each MCP-kind where action = "Skip" or "PreserveDisconnected"**, leave the existing block unchanged.
+12. **For each MCP-kind where action = "Skip" or "PreserveDisconnected"**, leave the existing block unchanged.
 
 ## Cross-cutting questions
 
-12. **Priorities ranking.** Ask via `AskUserQuestion` (multiSelect = true; user reorders mentally and selects in order). Default order from `existing_prefs.priorities`. New MCPs added at the end. Question wording:
+13. **Priorities ranking.** Ask via `AskUserQuestion` (multiSelect = true; user reorders mentally and selects in order). Default order from `existing_prefs.priorities`. New MCPs added at the end. Question wording:
     > Rank these information sources by what you want to see first in your morning briefing. (Select in order: first = most important.)
     > Options = detected_mcp_kinds[] in their current default order.
     Capture as `priorities[]` in user-specified order.
 
     When `dry_run_answers` is provided: `priorities = dry_run_answers.priorities`.
 
-13. **Personality — vibe.** AskUserQuestion (single-select):
+14. **Personality — vibe.** AskUserQuestion (single-select):
     > Voice for your atomic-note narrative (Synopsis + Tip closes):
     >   - encouraging — uplifting; light enthusiasm
     >   - dry-and-factual — neutral; clinical
@@ -87,30 +128,30 @@ Writes `spice/cowork/context/user-preferences.md` — a user-owned file that NEV
     >   - formal — structured; deferential
     Capture as `personality.vibe`. Default from existing if present.
 
-14. **Personality — formality.** AskUserQuestion (single-select):
+15. **Personality — formality.** AskUserQuestion (single-select):
     > Formality level:
     >   - casual
     >   - formal
     Capture as `personality.formality`.
 
-15. **Personality — pep_talk.** AskUserQuestion (single-select):
+16. **Personality — pep_talk.** AskUserQuestion (single-select):
     > Pep-talk closes in `> [!tip]` callouts (yes = motivational; no = action-oriented):
     >   - yes
     >   - no
     Capture as `personality.pep_talk` (boolean).
 
-16. **Personality — length.** AskUserQuestion (single-select):
+17. **Personality — length.** AskUserQuestion (single-select):
     > Narrative length preference:
     >   - terse — 1-2 sentences max per section
     >   - balanced — 2-3 sentences
     >   - thorough — 3-5 sentences with context
     Capture as `personality.length`.
 
-    When `dry_run_answers` is provided, steps 13-16 are replaced by `personality = dry_run_answers.personality`.
+    When `dry_run_answers` is provided, steps 14-17 are replaced by `personality = dry_run_answers.personality`.
 
 ## Compose + Write
 
-17. **Compose new preferences structure.** Build a frontmatter object:
+18. **Compose new preferences structure.** Build a frontmatter object:
     ```
     {
       type: "cowork-user-preferences",
@@ -125,7 +166,7 @@ Writes `spice/cowork/context/user-preferences.md` — a user-owned file that NEV
     }
     ```
 
-18. **Write user-preferences.md.** Delegate to the helper at `platform/blueprints/cowork/helpers/context-builder-dry-run.js`:
+19. **Write user-preferences.md.** Delegate to the helper at `platform/blueprints/cowork/helpers/context-builder-dry-run.js`:
     ```
     const helper = require("<workshop>/platform/blueprints/cowork/helpers/context-builder-dry-run.js");
     helper.run({ vaultRoot, dryRunAnswers: {
@@ -140,7 +181,7 @@ Writes `spice/cowork/context/user-preferences.md` — a user-owned file that NEV
 
 ## Audit
 
-19. **Emit audit-receipt.** Compose a 5-row markdown table summarizing the run:
+20. **Emit audit-receipt.** Compose a 5-row markdown table summarizing the run:
     ```
     | aspect             | value                              |
     | ------------------ | ---------------------------------- |
@@ -154,7 +195,7 @@ Writes `spice/cowork/context/user-preferences.md` — a user-owned file that NEV
 
 ## Done
 
-20. Emit Obsidian Notice: `cowork:context-builder complete — preferences saved to spice/cowork/context/user-preferences.md`.
+21. Emit Obsidian Notice: `cowork:context-builder complete — preferences saved to spice/cowork/context/user-preferences.md`.
 
 ## Question set — calendar
 
@@ -189,7 +230,7 @@ Output field: `mcps.calendar.include_all_day` (boolean)
 
 Output field: `mcps.calendar.quiet_hours_strategy` (string)
 
-## Question set — gmail
+## Question set — email
 
 ### Q1 — surface_kinds (multi-select)
 
@@ -201,7 +242,7 @@ Output field: `mcps.calendar.quiet_hours_strategy` (string)
 - new-threads — newly-started threads (no prior context)
 - attachment-only — emails primarily delivering files
 
-Output field: `mcps.gmail.surface_kinds` (string[])
+Output field: `mcps.email.surface_kinds` (string[])
 
 ### Q2 — inbox_zero_threshold (single-select)
 
@@ -213,13 +254,13 @@ Output field: `mcps.gmail.surface_kinds` (string[])
 - 25
 - not-tracked
 
-Output field: `mcps.gmail.inbox_zero_threshold` (string or int)
+Output field: `mcps.email.inbox_zero_threshold` (string or int)
 
 ### Q3 — vip_senders (free-text)
 
 > List up to 5 sender addresses or names that always count as VIP. (Comma-separated.)
 
-Output field: `mcps.gmail.vip_senders` (string[])
+Output field: `mcps.email.vip_senders` (string[])
 
 ### Q4 — ignore_lists (single-select)
 
@@ -228,15 +269,15 @@ Output field: `mcps.gmail.vip_senders` (string[])
 - yes
 - no — count them but don't elevate
 
-Output field: `mcps.gmail.ignore_lists` (boolean)
+Output field: `mcps.email.ignore_lists` (boolean)
 
-## Question set — imessage
+## Question set — chat
 
 ### Q1 — inner_circle (free-text)
 
-> List up to 8 contact names (Apple Contacts names or numbers) that count as "inner circle". (Comma-separated. Used to elevate their threads.)
+> List up to 8 contact names (names, handles, or IDs from whichever chat MCP you use — iMessage, Teams, Slack, etc.) that count as "inner circle". (Comma-separated. Used to elevate their threads.)
 
-Output field: `mcps.imessage.inner_circle` (string[])
+Output field: `mcps.chat.inner_circle` (string[])
 
 ### Q2 — surface_kinds (multi-select)
 
@@ -244,9 +285,9 @@ Output field: `mcps.imessage.inner_circle` (string[])
 
 - reply-owed-24h — incoming message with no reply >24h from inner circle
 - time-sensitive — messages mentioning today's date or this week
-- group-only — group-chat messages where you were @-mentioned or quoted
+- group-only — messages where you were @-mentioned in a group chat or thread
 
-Output field: `mcps.imessage.surface_kinds` (string[])
+Output field: `mcps.chat.surface_kinds` (string[])
 
 ### Q3 — quiet_hours_imessage (single-select)
 
@@ -255,13 +296,13 @@ Output field: `mcps.imessage.surface_kinds` (string[])
 - yes — skip messages received 10pm-7am local
 - no — count all messages
 
-Output field: `mcps.imessage.suppress_quiet_hours` (boolean)
+Output field: `mcps.chat.suppress_quiet_hours` (boolean)
 
 ## Question set — finance
 
 ### Q1 — cards_mine (free-text)
 
-> List Brex card IDs or last-4-digits that count as "yours". (Comma-separated. Used to filter from a shared account view.)
+> List card IDs, last-4-digits, or account labels that count as "yours" (from whichever finance MCP you use — Brex, Mercury, etc.). (Comma-separated. Used to filter from a shared account view.)
 
 Output field: `mcps.finance.cards_mine` (string[])
 

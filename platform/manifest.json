@@ -1,7 +1,7 @@
 {
   "_comment": "Workshop platform manifest. Each mechanism + blueprint has its own version.",
-  "workshop_version": "0.76.0",
-  "date": "2026-05-22",
+  "workshop_version": "0.77.0",
+  "date": "2026-05-23",
   "foundational_plugins": [
     {
       "id": "templater-obsidian"
@@ -126,7 +126,7 @@
     },
     {
       "name": "cowork",
-      "version": "0.15.0",
+      "version": "0.16.0",
       "path": "blueprints/cowork"
     },
     {
