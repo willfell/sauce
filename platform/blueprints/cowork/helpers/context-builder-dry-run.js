@@ -36,6 +36,25 @@ function parseYamlIsh(yaml) {
         if (!flat) { i++; continue; }
         const [, key, valRaw] = flat;
         const val = valRaw.trim();
+        if (val === "|") {
+            // YAML literal block scalar — gather subsequent indented lines as the value
+            i++;
+            const blockLines = [];
+            let blockIndent = null;
+            while (i < lines.length) {
+                const ln = lines[i];
+                if (ln.trim() === "") { blockLines.push(""); i++; continue; }
+                const indentMatch = ln.match(/^(\s+)/);
+                const indent = indentMatch ? indentMatch[1].length : 0;
+                if (blockIndent === null) blockIndent = indent;
+                if (indent < blockIndent) break;
+                blockLines.push(ln.substring(blockIndent));
+                i++;
+            }
+            while (blockLines.length && blockLines[blockLines.length - 1] === "") blockLines.pop();
+            out[key] = blockLines.join("\n");
+            continue;
+        }
         if (val === "") {
             // Could be a nested object or a list — peek ahead
             const nextLines = [];
@@ -87,8 +106,14 @@ function composeYaml(prefs) {
         for (const [k, v] of Object.entries(block)) {
             if (Array.isArray(v)) {
                 lines.push(`    ${k}: [${v.map(x => JSON.stringify(x)).join(", ")}]`);
-            } else if (typeof v === "boolean" || typeof v === "number") {
+            } else if (typeof v === "boolean" || typeof v === "number" || v === null) {
                 lines.push(`    ${k}: ${v}`);
+            } else if (typeof v === "string" && v.includes("\n")) {
+                // YAML literal block scalar for multi-line strings (used by what_matters).
+                lines.push(`    ${k}: |`);
+                for (const ln of v.split("\n")) {
+                    lines.push(`      ${ln}`);
+                }
             } else {
                 lines.push(`    ${k}: ${JSON.stringify(v)}`);
             }
@@ -269,6 +294,33 @@ function run(opts) {
         if (newMcps[kind]) continue;  // already handled above
         const ans = answers[kind] || {};
         newMcps[kind] = Object.assign({ captured_at: TODAY_YMD() }, ans);
+    }
+
+    // v0.77.0 Workstream C: process unknown_namespace_classifications. Each entry
+    // is an array of {kind, classification, what_matters?, answers?} for a single
+    // namespace (one namespace can supply multiple kinds).
+    const unknownClassifications = dryRunAnswers.unknown_namespace_classifications || {};
+    for (const [ns, classifications] of Object.entries(unknownClassifications)) {
+        for (const c of (Array.isArray(classifications) ? classifications : [classifications])) {
+            if (!c || !c.kind || !c.classification) continue;
+            if (c.classification === "skip") continue;
+            const block = {
+                served_by: ns,
+                captured_at: TODAY_YMD(),
+            };
+            if (c.classification === "custom") {
+                block.custom_kind = true;
+                if (typeof c.what_matters === "string") block.what_matters = c.what_matters;
+            } else if (c.classification === "known-override") {
+                block.override_classified = true;
+                if (c.answers && typeof c.answers === "object") {
+                    for (const [k, v] of Object.entries(c.answers)) {
+                        block[k] = v;
+                    }
+                }
+            }
+            newMcps[c.kind] = block;
+        }
     }
 
     const newPrefs = {
