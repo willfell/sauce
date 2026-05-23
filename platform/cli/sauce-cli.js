@@ -112,6 +112,17 @@ async function dispatch(argv, opts) {
         process.exitCode = 0;
         return;
     }
+    // v0.75.0 S13: `sauce update --bump-pins` is context-free — it detects the
+    // consumer vault itself (via ranch/platform-subscription.json in cwd) and
+    // must work even outside a sauce-managed vault (so it can emit the correct
+    // error message rather than the generic resolveContext failure).
+    if (verb === "update" && rest.includes("--bump-pins")) {
+        const cmd = require(VERBS.update);
+        const testCtx = Object.assign({ vaultPath: process.cwd() }, opts || {});
+        await cmd.run(testCtx, rest);
+        process.exitCode = process.exitCode || 0;
+        return;
+    }
     if (verb === "reinstall") {
         const cmd = require(VERBS.reinstall);
         // Forward test hooks (e.g. _runInstaller) via the opts arg to dispatch().

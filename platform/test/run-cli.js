@@ -16,6 +16,10 @@ function assertEqual(actual, expected, label) {
     if (actual === expected) { pass++; console.log("  PASS: " + label); }
     else { fail++; console.log("  FAIL: " + label + " — expected " + JSON.stringify(expected) + " got " + JSON.stringify(actual)); }
 }
+function assertContains(haystack, needle, label) {
+    if (String(haystack).includes(needle)) { pass++; console.log("  PASS: " + label); }
+    else { fail++; console.log("  FAIL: " + label + " — missing " + JSON.stringify(needle) + " in " + JSON.stringify(String(haystack).slice(0, 200))); }
+}
 
 async function withTempVault(setup, fn) {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-cli-"));
@@ -1544,6 +1548,120 @@ async function caseCPT4TagBasedDetection() {
     });
 }
 
+// ---------------------------------------------------------------------------
+// HC-V0750-D1..D7 — sauce update --bump-pins
+// ---------------------------------------------------------------------------
+
+// Helper: sets up tmp workshop + vault dirs with the given manifest/subscription.
+// Subscription uses the real shape: top-level blueprints[]/mechanisms[] with name field.
+function _bpSetupVault(opts) {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-bump-pins-"));
+    const workshop = path.join(tmp, "workshop");
+    const vault = path.join(tmp, "vault");
+    fs.mkdirSync(path.join(workshop, "platform"), { recursive: true });
+    fs.mkdirSync(path.join(vault, "ranch"), { recursive: true });
+    // Also write platform-config.json so resolveContext can find this vault
+    fs.writeFileSync(path.join(vault, "ranch/platform-config.json"),
+        JSON.stringify({ workshop_relative_path: workshop, variables: {} }, null, 2));
+    fs.writeFileSync(path.join(workshop, "platform/manifest.json"),
+        JSON.stringify(opts.workshopManifest, null, 2));
+    fs.writeFileSync(path.join(vault, "ranch/platform-installed.json"),
+        JSON.stringify(Object.assign({ workshop_path: workshop }, opts.installedExtra || {}), null, 2));
+    fs.writeFileSync(path.join(vault, "ranch/platform-subscription.json"),
+        JSON.stringify(opts.subscription, null, 2));
+    return { tmp, workshop, vault };
+}
+
+// Helper: runs `sauce update --bump-pins [...args]` from inside vault dir.
+function _bpRun(vault, args) {
+    const { spawnSync: sp } = require("child_process");
+    const ROOT = path.resolve(__dirname, "..", "..");
+    const result = sp("node", [path.join(ROOT, "platform/cli/sauce-cli.js"), "update", "--bump-pins", ...args],
+        { cwd: vault, encoding: "utf8" });
+    return { code: result.status, stdout: result.stdout || "", stderr: result.stderr || "" };
+}
+
+async function caseBP1HappyPathWorkshopVersionDiff() {
+    const label = "HC-V0750-D1 workshop_version diff line";
+    const { vault, tmp } = _bpSetupVault({
+        workshopManifest: { workshop_version: "0.75.0", blueprints: [{ name: "cowork", version: "0.14.0" }], mechanisms: [] },
+        subscription: { workshop_version: "0.74.0", blueprints: [{ name: "cowork", version: "0.13.0" }], mechanisms: [] },
+    });
+    const { code, stdout } = _bpRun(vault, ["--dry-run"]);
+    assertTrue(code === 0, label + " (exit 0)");
+    assertContains(stdout, "workshop_version: 0.74.0 -> 0.75.0", label);
+    fs.rmSync(tmp, { recursive: true, force: true });
+}
+
+async function caseBP2BlueprintPinMapBumps() {
+    const label = "HC-V0750-D2 blueprint pin map bumps";
+    const { vault, tmp } = _bpSetupVault({
+        workshopManifest: { workshop_version: "0.75.0", blueprints: [{ name: "cowork", version: "0.14.0" }], mechanisms: [] },
+        subscription: { workshop_version: "0.74.0", blueprints: [{ name: "cowork", version: "0.13.0" }], mechanisms: [] },
+    });
+    const { code, stdout } = _bpRun(vault, ["--dry-run"]);
+    assertTrue(code === 0, label + " (exit 0)");
+    assertContains(stdout, "pinned.blueprints.cowork: 0.13.0 -> 0.14.0", label);
+    fs.rmSync(tmp, { recursive: true, force: true });
+}
+
+async function caseBP3NewMechanismNotAutoSubscribed() {
+    const label = "HC-V0750-D3 new mechanism NOT auto-subscribed";
+    const { vault, tmp } = _bpSetupVault({
+        workshopManifest: { workshop_version: "0.75.0", blueprints: [], mechanisms: [{ name: "smart-connections-bridge", version: "0.1.0" }] },
+        subscription: { workshop_version: "0.74.0", blueprints: [], mechanisms: [] },
+    });
+    const { code, stdout } = _bpRun(vault, ["--dry-run"]);
+    assertTrue(code === 0, label + " (exit 0)");
+    assertContains(stdout, "smart-connections-bridge: (new in workshop — not subscribed", label);
+    fs.rmSync(tmp, { recursive: true, force: true });
+}
+
+async function caseBP4RemovedMechanismWarning() {
+    const label = "HC-V0750-D4 removed-from-workshop mechanism warning";
+    const { vault, tmp } = _bpSetupVault({
+        workshopManifest: { workshop_version: "0.75.0", blueprints: [], mechanisms: [] },
+        subscription: { workshop_version: "0.74.0", blueprints: [], mechanisms: [{ name: "deprecated-mech", version: "0.1.0" }] },
+    });
+    const { code, stdout } = _bpRun(vault, ["--dry-run"]);
+    assertTrue(code === 0, label + " (exit 0)");
+    assertContains(stdout, "deprecated-mech: WARNING", label);
+    fs.rmSync(tmp, { recursive: true, force: true });
+}
+
+async function caseBP5OutsideVaultErrors() {
+    const label = "HC-V0750-D5 outside vault errors with message";
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-not-a-vault-"));
+    const { code, stderr } = _bpRun(tmp, ["--dry-run"]);
+    assertTrue(code !== 0, label + " (non-zero exit)");
+    assertContains(stderr, "--bump-pins requires a consumer vault", label);
+    fs.rmSync(tmp, { recursive: true, force: true });
+}
+
+async function caseBP6KeepComparatorsPreservesPrefix() {
+    const label = "HC-V0750-D6 --keep-comparators preserves ^X.Y.Z";
+    const { vault, tmp } = _bpSetupVault({
+        workshopManifest: { workshop_version: "0.75.0", blueprints: [{ name: "cowork", version: "0.14.0" }], mechanisms: [] },
+        subscription: { workshop_version: "0.74.0", blueprints: [{ name: "cowork", version: "^0.13.0" }], mechanisms: [] },
+    });
+    const { code, stdout } = _bpRun(vault, ["--dry-run", "--keep-comparators"]);
+    assertTrue(code === 0, label + " (exit 0)");
+    assertContains(stdout, "pinned.blueprints.cowork: ^0.13.0 -> ^0.14.0", label);
+    fs.rmSync(tmp, { recursive: true, force: true });
+}
+
+async function caseBP7EmptyDiffNoOp() {
+    const label = "HC-V0750-D7 empty diff — already match, nothing to bump";
+    const { vault, tmp } = _bpSetupVault({
+        workshopManifest: { workshop_version: "0.74.0", blueprints: [{ name: "cowork", version: "0.13.0" }], mechanisms: [] },
+        subscription: { workshop_version: "0.74.0", blueprints: [{ name: "cowork", version: "0.13.0" }], mechanisms: [] },
+    });
+    const { code, stdout } = _bpRun(vault, ["--dry-run"]);
+    assertTrue(code === 0, label + " (exit 0)");
+    assertContains(stdout, "already match workshop; nothing to bump", label);
+    fs.rmSync(tmp, { recursive: true, force: true });
+}
+
 const cases = [
     caseC1AncestorWalk, caseC2SauceVaultEnv, caseC3NotInVault, caseC4UnknownVerb,
     caseC5StatusClean, caseC6StatusDrift, caseC7UpdateFFOnly, caseC8UpdateDirtyRefusal,
@@ -1580,6 +1698,10 @@ const cases = [
     caseCPT1Help, caseCPT2DryRunCleanVault, caseCPT3ApplyRemovesWrongType,  // v0.59.4
     caseCPT4TagBasedDetection,  // v0.59.6
     caseTD1ToDoPostInstall,  // v0.63.0 S7
+    caseBP1HappyPathWorkshopVersionDiff, caseBP2BlueprintPinMapBumps,
+    caseBP3NewMechanismNotAutoSubscribed, caseBP4RemovedMechanismWarning,
+    caseBP5OutsideVaultErrors, caseBP6KeepComparatorsPreservesPrefix,
+    caseBP7EmptyDiffNoOp,  // v0.75.0 S13 HC-V0750-D1..D7
 ];
 
 async function main() {

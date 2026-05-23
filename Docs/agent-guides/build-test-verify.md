@@ -55,7 +55,7 @@ Single-branch direct-push to `origin/main`. No feature branches, no PR review (f
 
 1. Cycle stage commits: bundle per-stage work into one commit each, conventional-commits format (`feat(installer,validator): v0.X.Y patch S1 — ...`). Use HEREDOC for multiline messages.
 2. Push to `origin/main` after each commit. No staging.
-3. At cycle close: bump `workshop_version` in `platform/manifest.json` AND `package.json` AND consumer `platform-subscription.json` files (lockstep — `check-version-sync.js` enforces).
+3. At cycle close: bump `workshop_version` in `platform/manifest.json` AND `package.json`. After `brew upgrade sauce` distributes the new release, run `sauce update --bump-pins` from inside each consumer vault to auto-update `ranch/platform-subscription.json` (replaces the previous manual `vim ranch/platform-subscription.json` step — lockstep enforced by `check-version-sync.js`). See `/install` for full `--bump-pins` flag reference.
 4. Annotated git tag `v<X.Y.Z>` at HEAD — **REQUIRES user approval** per the ask-before-acting list.
 5. `release.yml` GitHub Action fires on tag: runs preflight + `bump-tap` chain that auto-bumps `Formula/sauce.rb` in `willfell/homebrew-sauce` via PR.
 6. Tap PR merge → `brew upgrade sauce` picks up the new release.
