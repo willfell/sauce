@@ -18,9 +18,23 @@ const path = require("path");
 // ---------------------------------------------------------------------------
 function _resolveWorkshopPath(installed, argv, hooks) {
     if (argv && argv.workshopPath) return argv.workshopPath;
-    if (installed && installed.workshop_path) return installed.workshop_path;
-    const startExecPath = (hooks && hooks._execPath) || process.execPath;
-    let dir = path.dirname(startExecPath);
+    // Workstream B (v0.76.0): validate stored path before returning. When brew
+    // cleans up an old keg, installed.workshop_path becomes a dead path;
+    // returning it causes downstream "workshop manifest not parseable" failures.
+    // Probe for platform/manifest.json — falls through to ancestry walk if dead.
+    if (installed && installed.workshop_path) {
+        const stored = installed.workshop_path;
+        const manifestProbe = path.join(stored, "platform", "manifest.json");
+        if (fs.existsSync(manifestProbe)) return stored;
+        // stale: fall through to ancestry walk below
+    }
+    // Workstream A (v0.76.0): walk from __filename, NOT process.execPath.
+    // process.execPath is the Node binary (e.g., /opt/homebrew/Cellar/node/.../bin/node)
+    // whose ancestry contains no libexec/platform — the v0.75.1 helper walked
+    // it pointlessly. cmd-update.js itself lives at <workshop>/platform/cli/cmd-update.js;
+    // walking from __filename reaches the workshop in 3 hops.
+    const startFile = (hooks && hooks._callerFile) || __filename;
+    let dir = path.dirname(startFile);
     const root = path.parse(dir).root;
     while (dir !== root) {
         if (
