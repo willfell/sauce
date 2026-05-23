@@ -1384,6 +1384,157 @@ function assertCoworkV068Shape() {
     );
 }
 
+// HC-V0770-A1..A3: tool-pattern detection (Workstream B)
+// HC-V0770-D1:     schema v2 validation (Workstream F)
+// All exercise the new helper.detectCapabilities() export.
+
+{
+    const label = "HC-V0770-A1 Outlook UUID detected as calendar via tool-pattern set membership";
+    try {
+        const helper = require(path.join(BP, "helpers", "context-builder-dry-run.js"));
+        if (typeof helper.detectCapabilities !== "function") {
+            failed++;
+            console.error(`FAIL  ${label}: helper.detectCapabilities not yet exported (expected — created in S2)`);
+        } else {
+            const availableTools = [
+                "mcp__45224a84-deadbeef__list_events",
+                "mcp__45224a84-deadbeef__create_event",
+                "mcp__45224a84-deadbeef__update_event",
+                "mcp__45224a84-deadbeef__list_messages",
+                "mcp__45224a84-deadbeef__send_message",
+                "mcp__some-other-mcp__do_thing",
+            ];
+            const map = JSON.parse(fs.readFileSync(path.join(BP, "content/context/mcp-skill-map.json"), "utf8"));
+            const result = helper.detectCapabilities(availableTools, map);
+            const calendarDetections = result.detected.filter(d => d.kind === "calendar");
+            assertTrue(
+                calendarDetections.length === 1 && calendarDetections[0].served_by === "45224a84-deadbeef",
+                `${label}: expected 1 calendar detection with served_by=45224a84-deadbeef, got ${JSON.stringify(calendarDetections)}`,
+            );
+        }
+    } catch (e) {
+        if (e.code === "MODULE_NOT_FOUND" || /detectCapabilities is not a function/.test(e.message)) {
+            failed++;
+            console.error(`FAIL  ${label}: ${e.message} (expected until S2)`);
+        } else {
+            throw e;
+        }
+    }
+}
+
+{
+    const label = "HC-V0770-A2 same Outlook UUID also detected as email (capability subset)";
+    try {
+        const helper = require(path.join(BP, "helpers", "context-builder-dry-run.js"));
+        if (typeof helper.detectCapabilities !== "function") {
+            failed++;
+            console.error(`FAIL  ${label}: helper.detectCapabilities not yet exported (expected until S2)`);
+        } else {
+            const availableTools = [
+                "mcp__45224a84-deadbeef__list_events",
+                "mcp__45224a84-deadbeef__create_event",
+                "mcp__45224a84-deadbeef__search_threads",
+                "mcp__45224a84-deadbeef__send_message",
+            ];
+            const map = JSON.parse(fs.readFileSync(path.join(BP, "content/context/mcp-skill-map.json"), "utf8"));
+            const result = helper.detectCapabilities(availableTools, map);
+            const kinds = result.detected.map(d => d.kind);
+            assertTrue(
+                kinds.includes("calendar") && kinds.includes("email"),
+                `${label}: expected both calendar AND email detected from same namespace, got ${JSON.stringify(kinds)}`,
+            );
+            const calendar = result.detected.find(d => d.kind === "calendar");
+            const email = result.detected.find(d => d.kind === "email");
+            assertTrue(
+                calendar.served_by === email.served_by && calendar.served_by === "45224a84-deadbeef",
+                `${label}: both kinds must report same served_by namespace; got calendar=${calendar.served_by}, email=${email.served_by}`,
+            );
+        }
+    } catch (e) {
+        if (e.code === "MODULE_NOT_FOUND" || /detectCapabilities is not a function/.test(e.message)) {
+            failed++;
+            console.error(`FAIL  ${label}: ${e.message} (expected until S2)`);
+        } else {
+            throw e;
+        }
+    }
+}
+
+{
+    const label = "HC-V0770-A3 chat kind matches any of 3 tool_alternatives branches";
+    try {
+        const helper = require(path.join(BP, "helpers", "context-builder-dry-run.js"));
+        if (typeof helper.detectCapabilities !== "function") {
+            failed++;
+            console.error(`FAIL  ${label}: helper.detectCapabilities not yet exported (expected until S2)`);
+        } else {
+            const map = JSON.parse(fs.readFileSync(path.join(BP, "content/context/mcp-skill-map.json"), "utf8"));
+            // iMessage variant
+            const imessageTools = ["mcp__imessage-mcp__send_message", "mcp__imessage-mcp__list_chats"];
+            const r1 = helper.detectCapabilities(imessageTools, map);
+            assertTrue(
+                r1.detected.some(d => d.kind === "chat"),
+                `${label}: iMessage variant (list_chats) must match chat kind`,
+            );
+            // Teams variant
+            const teamsTools = ["mcp__teams-mcp__send_message", "mcp__teams-mcp__list_threads"];
+            const r2 = helper.detectCapabilities(teamsTools, map);
+            assertTrue(
+                r2.detected.some(d => d.kind === "chat"),
+                `${label}: Teams variant (list_threads) must match chat kind`,
+            );
+            // Slack variant
+            const slackTools = ["mcp__slack-mcp__send_message", "mcp__slack-mcp__list_conversations"];
+            const r3 = helper.detectCapabilities(slackTools, map);
+            assertTrue(
+                r3.detected.some(d => d.kind === "chat"),
+                `${label}: Slack variant (list_conversations) must match chat kind`,
+            );
+        }
+    } catch (e) {
+        if (e.code === "MODULE_NOT_FOUND" || /detectCapabilities is not a function/.test(e.message)) {
+            failed++;
+            console.error(`FAIL  ${label}: ${e.message} (expected until S2)`);
+        } else {
+            throw e;
+        }
+    }
+}
+
+{
+    const label = "HC-V0770-D1 mcp-skill-map.json v2.0.0 schema validates";
+    const map = JSON.parse(fs.readFileSync(path.join(BP, "content/context/mcp-skill-map.json"), "utf8"));
+
+    assertTrue(map.version === "2.0.0", `${label}: version field must be "2.0.0"; got "${map.version}"`);
+    assertTrue(Array.isArray(map.kinds) && map.kinds.length > 0, `${label}: kinds[] must be non-empty array; got ${typeof map.kinds}`);
+
+    const missing = [];
+    for (const entry of (map.kinds || [])) {
+        if (typeof entry.kind !== "string") missing.push(`kind:${entry.kind || "<missing>"}: kind must be string`);
+        if (!Array.isArray(entry.required_tools)) missing.push(`kind:${entry.kind}: required_tools must be array`);
+        if (entry.required_tools && !entry.required_tools.every(t => typeof t === "string")) missing.push(`kind:${entry.kind}: required_tools must be array of strings`);
+        if (typeof entry.gather_skill !== "string") missing.push(`kind:${entry.kind}: gather_skill must be string`);
+        if (entry.tool_alternatives !== undefined) {
+            if (!Array.isArray(entry.tool_alternatives)) {
+                missing.push(`kind:${entry.kind}: tool_alternatives must be array of arrays when present`);
+            } else {
+                for (const alt of entry.tool_alternatives) {
+                    if (!Array.isArray(alt) || !alt.every(t => typeof t === "string")) {
+                        missing.push(`kind:${entry.kind}: each tool_alternatives entry must be array of strings`);
+                    }
+                }
+            }
+        }
+        if (entry.rename_from_v1 !== undefined && entry.rename_from_v1 !== null && typeof entry.rename_from_v1 !== "string") {
+            missing.push(`kind:${entry.kind}: rename_from_v1 must be string|null|absent`);
+        }
+    }
+    assertTrue(
+        missing.length === 0,
+        `${label}: schema violations: ${missing.join("; ")}`,
+    );
+}
+
 (function main() {
   console.log("--- shared contracts ---");
   checkSharedContracts();
