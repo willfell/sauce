@@ -1,6 +1,6 @@
 {
   "id": "personal",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "schema_version": 1,
   "label": "Personal life",
   "consumes": ["finance", "to-do", "daily", "people", "journal"],
@@ -32,7 +32,8 @@
     "invoice_prep":           "skip",
     "ai_committee":           "skip",
     "kanban_projects":        "include",
-    "inner_circle_imessage":  "include"
+    "inner_circle_imessage":  "include",
+    "semantic_related":       "include"
   },
   "tripwire_aspects": ["cc_drift"]
 }

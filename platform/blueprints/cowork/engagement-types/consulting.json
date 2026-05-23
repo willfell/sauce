@@ -1,6 +1,6 @@
 {
   "id": "consulting",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "schema_version": 1,
   "label": "Consulting / contract work",
   "consumes": ["daily", "meetings", "project", "to-do", "people", "finance"],
@@ -32,7 +32,8 @@
     "invoice_prep":           "include",
     "ai_committee":           "include",
     "kanban_projects":        "include",
-    "inner_circle_imessage":  "skip"
+    "inner_circle_imessage":  "skip",
+    "semantic_related":       "include"
   },
   "tripwire_aspects": ["cc_drift", "calendar_drift", "queue_growth"]
 }
