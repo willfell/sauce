@@ -1681,6 +1681,183 @@ function assertCoworkV068Shape() {
     }
 }
 
+// HC-V0770-C1..C4: custom-kind / unknown-MCP handling (Workstream C)
+
+{
+    const label = "HC-V0770-C1 custom-kind dry-run writes custom_kind: true + what_matters block";
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-v077-c1-"));
+    try {
+        const vault = path.join(tmp, "vault");
+        fs.mkdirSync(path.join(vault, "spice", "cowork", "context"), { recursive: true });
+
+        const helper = require(path.join(BP, "helpers", "context-builder-dry-run.js"));
+        helper.run({
+            vaultRoot: vault,
+            dryRunAnswers: {
+                detected_mcps: [],
+                per_mcp_answers: {},
+                priorities: ["ado"],
+                personality: { vibe: "dry-and-factual", formality: "casual", pep_talk: false, length: "terse" },
+                unknown_namespace_classifications: {
+                    "986d1053-cafebabe": [
+                        { kind: "ado", classification: "custom", what_matters: "Active PRs waiting on my review.\nMy tickets due this week.\nBlocked tickets with no comment in 3+ days." },
+                    ],
+                },
+            },
+        });
+        const body = fs.readFileSync(path.join(vault, "spice", "cowork", "context", "user-preferences.md"), "utf8");
+        assertTrue(/mcps:\s*\n[\s\S]*ado:/m.test(body), `${label}: mcps.ado block exists`);
+        assertTrue(/custom_kind:\s*true/.test(body), `${label}: custom_kind: true marker present`);
+        assertTrue(/what_matters:\s*\|/.test(body), `${label}: what_matters block uses YAML literal indicator`);
+        assertTrue(/Active PRs waiting on my review/.test(body), `${label}: what_matters content preserved`);
+        assertTrue(/served_by:\s*"986d1053-cafebabe"/.test(body) || /served_by:\s*986d1053-cafebabe/.test(body),
+            `${label}: served_by namespace recorded`);
+    } catch (e) {
+        if (/not yet implemented/.test(e.message) || /Cannot read|unknown_namespace_classifications/.test(e.message)) {
+            failed++;
+            console.error(`FAIL  ${label}: ${e.message} (expected until S6)`);
+        } else {
+            throw e;
+        }
+    } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+    }
+}
+
+{
+    const label = "HC-V0770-C2 custom-kind preserved on re-run with no unknown classifications (Skip equivalent)";
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-v077-c2-"));
+    try {
+        const vault = path.join(tmp, "vault");
+        fs.mkdirSync(path.join(vault, "spice", "cowork", "context"), { recursive: true });
+        const helper = require(path.join(BP, "helpers", "context-builder-dry-run.js"));
+        // First run: capture custom kind
+        helper.run({
+            vaultRoot: vault,
+            dryRunAnswers: {
+                detected_mcps: [],
+                priorities: ["ado"],
+                personality: { vibe: "casual", formality: "casual", pep_talk: false, length: "terse" },
+                unknown_namespace_classifications: {
+                    "986d1053-cafebabe": [{ kind: "ado", classification: "custom", what_matters: "Things I care about." }],
+                },
+            },
+        });
+        const after_first = fs.readFileSync(path.join(vault, "spice", "cowork", "context", "user-preferences.md"), "utf8");
+        // Second run: declared as known/captured this run with action=Skip
+        helper.run({
+            vaultRoot: vault,
+            dryRunAnswers: {
+                detected_mcps: ["ado"],
+                per_mcp_actions: { ado: "Skip" },
+                priorities: ["ado"],
+                personality: { vibe: "casual", formality: "casual", pep_talk: false, length: "terse" },
+            },
+        });
+        const after_second = fs.readFileSync(path.join(vault, "spice", "cowork", "context", "user-preferences.md"), "utf8");
+        const block1 = after_first.match(/ado:[\s\S]*?(?=\n\w|\n---|$)/);
+        const block2 = after_second.match(/ado:[\s\S]*?(?=\n\w|\n---|$)/);
+        assertTrue(
+            block1 && block2 && block1[0] === block2[0],
+            `${label}: mcps.ado block byte-identical after Skip re-run`,
+        );
+    } catch (e) {
+        if (/not yet implemented/.test(e.message) || /Cannot read/.test(e.message)) {
+            failed++;
+            console.error(`FAIL  ${label}: ${e.message} (expected until S6)`);
+        } else {
+            throw e;
+        }
+    } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+    }
+}
+
+{
+    const label = "HC-V0770-C3 custom-kind marked connected: false when MCP no longer detected";
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-v077-c3-"));
+    try {
+        const vault = path.join(tmp, "vault");
+        fs.mkdirSync(path.join(vault, "spice", "cowork", "context"), { recursive: true });
+        const helper = require(path.join(BP, "helpers", "context-builder-dry-run.js"));
+        // First run
+        helper.run({
+            vaultRoot: vault,
+            dryRunAnswers: {
+                detected_mcps: [],
+                priorities: ["ado"],
+                personality: { vibe: "casual", formality: "casual", pep_talk: false, length: "terse" },
+                unknown_namespace_classifications: {
+                    "986d1053-cafebabe": [{ kind: "ado", classification: "custom", what_matters: "Things to watch." }],
+                },
+            },
+        });
+        // Second run: ado NOT in detected_mcps, no classifications
+        helper.run({
+            vaultRoot: vault,
+            dryRunAnswers: {
+                detected_mcps: [],
+                priorities: [],
+                personality: { vibe: "casual", formality: "casual", pep_talk: false, length: "terse" },
+            },
+        });
+        const body = fs.readFileSync(path.join(vault, "spice", "cowork", "context", "user-preferences.md"), "utf8");
+        assertTrue(/ado:/.test(body), `${label}: ado block must persist (PreserveDisconnected)`);
+        assertTrue(/connected:\s*false/.test(body), `${label}: ado must be marked connected: false`);
+        assertTrue(/what_matters/.test(body), `${label}: what_matters content preserved`);
+    } catch (e) {
+        if (/not yet implemented/.test(e.message)) {
+            failed++;
+            console.error(`FAIL  ${label}: ${e.message} (expected until S6)`);
+        } else {
+            throw e;
+        }
+    } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+    }
+}
+
+{
+    const label = "HC-V0770-C4 user picks known-kind classification on unknown MCP → normal block + override_classified: true";
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-v077-c4-"));
+    try {
+        const vault = path.join(tmp, "vault");
+        fs.mkdirSync(path.join(vault, "spice", "cowork", "context"), { recursive: true });
+        const helper = require(path.join(BP, "helpers", "context-builder-dry-run.js"));
+        helper.run({
+            vaultRoot: vault,
+            dryRunAnswers: {
+                detected_mcps: [],
+                per_mcp_answers: {},
+                priorities: ["calendar"],
+                personality: { vibe: "dry-and-factual", formality: "casual", pep_talk: false, length: "terse" },
+                unknown_namespace_classifications: {
+                    "45224a84-deadbeef": [{
+                        kind: "calendar",
+                        classification: "known-override",
+                        answers: { surface_event_kinds: ["conflicts", "prep-needed"], include_all_day: false },
+                    }],
+                },
+            },
+        });
+        const body = fs.readFileSync(path.join(vault, "spice", "cowork", "context", "user-preferences.md"), "utf8");
+        assertTrue(/mcps:\s*\n[\s\S]*calendar:/m.test(body), `${label}: mcps.calendar block exists`);
+        assertTrue(/override_classified:\s*true/.test(body), `${label}: override_classified: true marker present`);
+        assertTrue(!/custom_kind:\s*true/.test(body), `${label}: known-override must NOT be marked custom_kind`);
+        assertTrue(/served_by:\s*"?45224a84-deadbeef/.test(body), `${label}: served_by namespace recorded`);
+        assertTrue(/surface_event_kinds:.*conflicts.*prep-needed/.test(body), `${label}: answers persisted`);
+    } catch (e) {
+        if (/not yet implemented/.test(e.message)) {
+            failed++;
+            console.error(`FAIL  ${label}: ${e.message} (expected until S6)`);
+        } else {
+            throw e;
+        }
+    } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+    }
+}
+
 (function main() {
   console.log("--- shared contracts ---");
   checkSharedContracts();
