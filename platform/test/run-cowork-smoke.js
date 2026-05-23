@@ -1277,6 +1277,30 @@ function assertCoworkV068Shape() {
     }
 }
 
+// HC-V0760-H1: onboard-scheduled-jobs auto-delegation to context-builder
+// Structural assert on the orchestrator SKILL.md: the body must reference
+// the cowork:context-builder skill and gate the delegation on the absence
+// (or seed-stamping) of user-preferences.md.
+
+{
+    const label = "HC-V0760-H1 onboard-scheduled-jobs SKILL.md auto-delegates to cowork:context-builder";
+    const skillPath = path.join(BP, "skills/orchestrators/onboard-scheduled-jobs/SKILL.md");
+    const body = fs.readFileSync(skillPath, "utf8");
+
+    assertTrue(
+        /context-builder/.test(body),
+        `${label}: SKILL.md must reference cowork:context-builder (delegation target)`,
+    );
+    assertTrue(
+        /user-preferences\.md/.test(body),
+        `${label}: SKILL.md must reference spice/cowork/context/user-preferences.md (probe target)`,
+    );
+    assertTrue(
+        /updated_by:\s*install\.js|updated_by: install\.js|seed.*stamped/i.test(body),
+        `${label}: SKILL.md must gate delegation on the seed-stamped condition (updated_by: install.js indicates unpopulated seed)`,
+    );
+}
+
 // ---------------------------------------------------------------------------
 // HC-V0760-A1 — cowork USER-bucket files preserved across sauce reinstall.
 //
