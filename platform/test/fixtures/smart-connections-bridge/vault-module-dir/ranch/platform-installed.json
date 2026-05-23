@@ -1,0 +1,7 @@
+{
+  "workshop_version": "0.75.0",
+  "workshop_path": "/dev/null",
+  "blueprints": [
+    { "id": "cowork", "version": "0.14.0", "module_directory": "spice/cowork" }
+  ]
+}
