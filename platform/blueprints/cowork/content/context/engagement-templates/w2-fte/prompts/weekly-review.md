@@ -43,3 +43,7 @@ One 2–3 sentence paragraph naming next week's main objective. End with a concr
 Tone: status-report tone. This often gets read by your manager — keep wins concrete and blockers actionable.
 
 **Gather-skipped handling:** If any section's gather skill emitted `gather-skipped: <reason>` (e.g. the calendar MCP was unavailable in this runtime), render that section as a single `> [!warning] <Section name> unavailable` admonition naming the reason — do NOT omit the section silently. Continue composing the rest of the briefing normally.
+
+> [!tip] 🧩 Related context
+> When Smart Connections has an up-to-date local index of this vault, a "Related context" block will appear in this run-note's body showing thematically-close notes. The lag-age line in the Synopsis tells you how stale the index is (open Obsidian to refresh).
+
