@@ -4,6 +4,43 @@ This file archives the per-cycle status snapshots that previously lived in `CLAU
 
 ---
 
+## v0.75.1 deploy-cleanup PATCH CLOSED 2026-05-22
+
+**Workshop:** 0.75.0 → 0.75.1
+**Blueprint:** cowork 0.14.0 → 0.14.1
+**Engagement-types:** personal / w2-fte / consulting 0.3.0 → 0.3.1 (93 emoji stripped from 15 prompt files)
+**Mechanism bumps:** smart-connections-bridge 0.1.0 → 0.1.1
+**Harnesses:** HC-V0751-A1 in `run-cowork-smoke.js`; HC-V0751-B1..B4 in `run-cli.js`; HC-V0751-C1..C2 + HC-V0751-E1 in `run-install.js`; HC-V0751-D1 in `run-smart-connections-bridge.js`; HC-V0751-H1..H2 in `run-cowork-smoke.js`. 23 harnesses (unchanged count; new cases only).
+
+**Headline:** Six workstreams closing all v0.75.0 deploy carry-forwards. (A) `_resolveWorkshopPath` four-source precedence helper in `cmd-update.js` — auto-detects brew workshop path from `process.execPath` ancestry when `platform-installed.json` has `workshop_path: null`; exports helper for HC-V0751-B1..B4; `--workshop-path` CLI escape hatch. (B) `sauce update` brew-aware — collapse legacy git-fetch + reset path (dead since v0.36.0 brew distribution) to thin delegation to `bootstrap.phaseRunInstaller`; no more `fatal: not a git repository` against consumer vaults. (D) sc-bridge `--quiet` threads `flags` through `loadIndex`; non-fatal "skipping unparseable .ajson" warning is now actually suppressed. (E) `installed.workshop_version` top-level field refreshed on every install (was always null pre-v0.75.1). (G) 93 emoji characters stripped from all 15 engagement-template prompts; HC-V0751-A1 audit gate fails-closed on reintroduction. (H) Morning-briefing step 14: semantic-warning gate tightened to require step 12b to have run (calendar-empty fires no longer emit a spurious warning); warning text aligned verbatim with `gather-semantic-related` orchestrator integration contract.
+
+- **Workstream A (resolveWorkshopPath):** Four-source helper: argv flag wins, installed.json field fallback, libexec ancestry walk, throw on empty. Exported as `_resolveWorkshopPath` for harness. `--workshop-path <path>` escape hatch. HC-V0751-B1..B4 green. Closes v0.75.0 handoff §1.
+
+- **Workstream B (brew-aware sauce update):** Remove git-fetch + reset + npm-install + migration-hint block (~30 lines). Post-bump-pins flow is now `await _runInstaller(ctx)`. Two stale `require()`s removed. HC-V0751-C1..C2 green. Closes v0.75.0 handoff §2.
+
+- **Workstream D (sc-bridge --quiet):** Thread `flags` through `loadIndex(vaultRoot, flags)`. One guard: `if (!(flags && flags.quiet)) process.stderr.write(...)`. Header JSDoc updated. HC-V0751-D1 green. Closes v0.75.0 handoff §4.
+
+- **Workstream E (workshop_version refresh):** One line before `writeJson` of platform-installed.json: `installedNow.workshop_version = manifest.workshop_version || ...`. HC-V0751-E1 green. Closes v0.75.0 handoff §5.
+
+- **Workstream G (emoji strip):** 93 emoji glyphs removed from all 15 prompt files via one-shot strip script (not committed). HC-V0751-A1 fail-closed audit gate in `run-cowork-smoke.js`. Engagement-type versions 0.3.0 → 0.3.1.
+
+- **Workstream H (semantic-warning misfire + canonical text):** Step 14 condition adds `ONLY IF step 12b ran` gate; `NO warning callout is emitted` on calendar-empty fires. Warning text replaced with canonical `"Smart Connections index absent or anchor not indexed — semantic gather skipped."` (verbatim from gather-semantic-related's orchestrator integration contract). HC-V0751-H1..H2 green. eod-review + weekly-review carry same stale text — v0.75.2 carry-forward.
+
+**Commits (S0–S13):** `e8e2d7c` (S1), `4813ceb` (S2), `48a0fdd` (S3), `90c0580` (S4), `4c20a64` (S5), `601a75b` (S6), `d6bf923` (S7), `c176340` (S8), `dd4a727` (S9), `053b287` (S10), `545dbfb` (S11), `3b33da7` (S12 dogfood), S13 this commit.
+
+**Smoke:** Preflight ALL GREEN across all 23 harnesses. Self-install (`node platform/test/run-install.js .`) clean — exit 0; `workshop_version: 0.75.1` in ranch/platform-installed.json. Consumer vault deploy is now one command (`sauce update --bump-pins`); no jq-patches needed.
+
+**Lessons:**
+1. install.md SOURCE vs DEST: v0.75.0 wrote upgrade docs to the dest (gets wiped on next reinstall). Always write to SOURCE template + rematerialize. Consider check-claude-surface harness.
+2. "93 emoji" = glyph count (regex matches); strip script reports "chars removed" (bytes, not glyphs). Specify units.
+3. Cross-orchestrator stale text: eod-review + weekly-review carry the same pre-v0.75.1 H misfire. v0.75.2 carry-forward.
+4. Test-deletion-on-refactor: HC-V0751-C2 trivially passes after S4 deletes the code it monitored. Confirm test still measures a real invariant after major refactors.
+5. `run-install.js .` as the rematerialization idiom: after editing a platform-claude source template, always run the workshop self-install to sync the dest.
+
+See `Docs/plans/2026-05-22-v0.75.1-deploy-cleanup-{design,plan,result}.md`.
+
+---
+
 ## GitHub remote configured (2026-05-04)
 
 `git@github-personal:willfell/sauce.git`. Workshop is now a real published repo. v0.1.2's "Phase 4 — push to remote" is no longer deferred; v0.1.2 designs around an actual remote rather than local-only git.

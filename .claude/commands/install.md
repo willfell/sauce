@@ -16,52 +16,72 @@ The skill at `.claude/skills/platform/install/SKILL.md` shells out to `sauce upd
 
 ---
 
-### Upgrading from v0.74.0 → v0.75.0
+## Upgrading from v0.74.0 → v0.75.0
 
-The headline change: **cowork orchestrators now refuse to ship non-compliant atomic notes.** Three layers of skill-routing hardening close the multi-context-Claude-Code gap that opened in v0.74.0's body-shape contract.
+> **Note:** This section was backfilled at v0.75.1 — the v0.75.0 cycle only wrote to the dest, not this source template.
 
-**Auto-bump consumer subscription pins:**
+v0.75.0 ships a new `smart-connections-bridge` mechanism. Because `--bump-pins` does not auto-subscribe new mechanisms, you must opt in manually before the first update:
 
+```bash
+# 1. Patch workshop_path into every consumer vault's platform-installed.json
+#    (v0.75.0 deploy found this was null everywhere; --bump-pins needs it)
+BREW_PATH="/opt/homebrew/Cellar/sauce/0.75.0/libexec"
+for vault in <list-of-vault-paths>; do
+  f="$vault/ranch/platform-installed.json"
+  jq --arg p "$BREW_PATH" '.workshop_path = $p' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+done
+
+# 2. Subscribe each vault to smart-connections-bridge@0.1.0
+for vault in <list-of-vault-paths>; do
+  f="$vault/ranch/platform-subscription.json"
+  jq '.mechanisms += [{"name":"smart-connections-bridge","version":"0.1.0"}]' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+done
+
+# 3. Run bump-pins + reinstall per vault
+cd <vault-path>
+sauce update --bump-pins   # bumps pin floors from workshop manifest
+sauce reinstall --vault .  # materializes updated subscription
 ```
-cd /path/to/your/consumer/vault
+
+After install, run `cowork:onboard-scheduled-jobs` (or the Layer 3 manual recipe) to update your scheduled-tasks-MCP entries with the v0.75.0 enriched prompts that instruct the cron-fired agent to READ sub-skill SKILL.md bodies.
+
+**Known issue with `sauce update` in this release:** the standard `sauce update` flow (without `--bump-pins`) attempts a git fetch against the consumer vault, which fails with `fatal: not a git repository` (consumer vaults are not git repos). Workaround: use `sauce reinstall --vault <path>` after `--bump-pins`. Both issues are fixed in v0.75.1.
+
+---
+
+## Upgrading from v0.75.0 → v0.75.1
+
+v0.75.1 fixes the two deploy pain-points documented above. The two manual jq-patches from the v0.75.0 recipe are **no longer needed**.
+
+### What changed
+
+- **`sauce update --bump-pins` auto-detects `workshop_path`** when the field is null in `ranch/platform-installed.json`. It walks the ancestry of `process.execPath` to find the brew-installed `libexec` directory. This means the step-5 `workshop_path` jq-patch is no longer needed.
+- **`sauce update` is brew-aware** (Workstream B). The old git-fetch + reset path has been removed; `sauce update` now delegates directly to `bootstrap.phaseRunInstaller` — the same code-path `sauce reinstall` uses. No more `fatal: not a git repository` errors against consumer vaults.
+- **`installed.workshop_version` is refreshed on every install.** The top-level `workshop_version` field in `ranch/platform-installed.json` now reflects the installed version (was always null in pre-v0.75.1 vaults). You can verify with: `jq -r .workshop_version ranch/platform-installed.json`.
+- **sc-bridge `--quiet` actually suppresses non-fatal stderr.** The "skipping unparseable .ajson" warning is now suppressed when `--quiet` is passed (Workstream D).
+- **93 emoji characters stripped from 15 engagement-template prompts** (Workstream G). Callout titles now rely on Obsidian's built-in SVG icons rather than emoji prefixes.
+- **Morning-briefing semantic-warning misfire fixed** (Workstream H). A calendar-empty fire no longer surfaces a "Semantic index not available" warning; the warning is gated on step 12b having actually run.
+
+### Upgrade procedure
+
+```bash
+# One-command update per vault (no jq-patches needed):
+cd <vault-path>
 sauce update --bump-pins
 ```
 
-This replaces the v0.74.0 manual `vim ranch/platform-subscription.json` step.
+That's it. `--bump-pins` now resolves the workshop path automatically and the subsequent update is brew-aware.
 
-**Immediate-mitigation recipe (existing scheduled-tasks MCP entries):**
+**If auto-detection fails** (e.g., the workshop path is in an unusual location or you are running from the workshop repo itself), use the explicit override:
 
-For each consumer vault with pre-v0.75.0 onboarded cowork schedules, run the manual prompt-edit recipe below. This rewrites the ~20 existing scheduled-tasks MCP entries (5 cadences × 4 vaults) to the new enriched form so cron fires explicitly READ the sub-skill SKILL.md bodies. Going forward, all `cowork:onboard-scheduled-jobs` invocations register the enriched form by default.
-
-If the recipe isn't run, the existing entries continue to use the v0.74.0 prompt — Layer 2's post-write verification step is the durable backstop: any non-compliant body gets deleted and the orchestrator emits `failed:contract-violation:<field>`. The recipe is friction-reduction, not strict-requirement.
-
-#### Per-vault audit
-
-Run from inside Obsidian via Claude Code session in the consumer vault:
-
-```
-mcp__scheduled-tasks__list { }
+```bash
+sauce update --bump-pins --workshop-path /opt/homebrew/Cellar/sauce/0.75.1/libexec
 ```
 
-Filter the returned list for tasks whose name matches `cowork-<orch>-<engagement>`. Expected count per vault:
-- accuris-sauce (w2-fte): 5 tasks
-- ero-sauce (consulting): 5 tasks
-- headspace-sauce (personal): 5 tasks
-- barebones: 0 or up to 5
+### Workshop self-install (workshop-as-vault)
 
-#### Replacement prompt template
+The workshop's own `ranch/platform-installed.json` lacks a `workshop_path` field (it would be circular). Auto-detection looks for a `libexec` ancestor of `process.execPath` — but when running via `node platform/test/run-install.js .` directly (not via a brew-installed binary), there is no such ancestor. Workshop dogfood path remains:
 
-For each task with id `<task_id>`, orchestrator `<orch>`, engagement `<engagement.id>`:
-
+```bash
+node platform/test/run-install.js .
 ```
-mcp__scheduled-tasks__update {
-  task_id: "<task_id>",
-  prompt: "Use skill cowork:<orch> with { engagement_id: \"<engagement.id>\" }. When the orchestrator instructs you to use a sub-skill (cowork:write-run-note-*, cowork:gather-*, etc.), READ that sub-skill's SKILL.md from .claude/skills/cowork/skills/<name>/ and strictly follow its sections including any \"## Pre-write self-check\" checklist before proceeding with the action described in \"## Steps\". Return failed:contract-violation:<field> on any miss."
-}
-```
-
-#### Smart Connections semantic retrieval (optional)
-
-If you have Smart Connections installed and indexed in your consumer vault, morning-briefing / eod-review / weekly-review now surface a `> [!example]+ 🧩 Related context` callout block with thematically-close notes. Lag-age is interpolated into the Synopsis callout. Index-absent vaults degrade gracefully (one-line warning, no abort).
-
-To enable per-engagement, ensure `render_aspects.semantic_related: "include"` is set on your engagement (it's the new default; opt out by setting it to `"skip"` in `vault-config.md`).
