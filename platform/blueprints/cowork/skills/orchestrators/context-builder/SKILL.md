@@ -158,16 +158,137 @@ Writes `spice/cowork/context/user-preferences.md` — a user-owned file that NEV
 
 ## Question set — calendar
 
-(populated in S10 — placeholder until then)
+### Q1 — surface_event_kinds (multi-select)
+
+> Which calendar event kinds matter most for your morning briefing?
+
+- conflicts — overlapping events
+- focus-blocks — 1+ hour gaps marked as focus time
+- prep-needed — meetings missing agenda/notes
+- travel — events with a location field
+- external — events with attendees outside your org
+- all-day — full-day events (out-of-office, holidays)
+
+Output field: `mcps.calendar.surface_event_kinds` (string[])
+
+### Q2 — include_all_day (single-select)
+
+> Include all-day events (OOO, holidays) in the briefing's calendar callout?
+
+- yes
+- no
+
+Output field: `mcps.calendar.include_all_day` (boolean)
+
+### Q3 — quiet_hours (single-select)
+
+> Should the morning briefing surface evening events too, or only working-hours events?
+
+- working-hours-only — 8am-6pm local
+- all-day-window — everything until midnight
+
+Output field: `mcps.calendar.quiet_hours_strategy` (string)
 
 ## Question set — gmail
 
-(populated in S10 — placeholder until then)
+### Q1 — surface_kinds (multi-select)
+
+> What email patterns should the briefing surface?
+
+- unanswered-24h — threads with no outgoing reply >24h
+- action-required — explicit Q to you in last 24h
+- vip-senders — emails from your inner-circle senders
+- new-threads — newly-started threads (no prior context)
+- attachment-only — emails primarily delivering files
+
+Output field: `mcps.gmail.surface_kinds` (string[])
+
+### Q2 — inbox_zero_threshold (single-select)
+
+> What's your inbox-zero target? (Used to flag drift.)
+
+- 0
+- 5
+- 10
+- 25
+- not-tracked
+
+Output field: `mcps.gmail.inbox_zero_threshold` (string or int)
+
+### Q3 — vip_senders (free-text)
+
+> List up to 5 sender addresses or names that always count as VIP. (Comma-separated.)
+
+Output field: `mcps.gmail.vip_senders` (string[])
+
+### Q4 — ignore_lists (single-select)
+
+> Skip newsletters and bulk-sender threads entirely?
+
+- yes
+- no — count them but don't elevate
+
+Output field: `mcps.gmail.ignore_lists` (boolean)
 
 ## Question set — imessage
 
-(populated in S10 — placeholder until then)
+### Q1 — inner_circle (free-text)
+
+> List up to 8 contact names (Apple Contacts names or numbers) that count as "inner circle". (Comma-separated. Used to elevate their threads.)
+
+Output field: `mcps.imessage.inner_circle` (string[])
+
+### Q2 — surface_kinds (multi-select)
+
+> Which message patterns should the briefing surface?
+
+- reply-owed-24h — incoming message with no reply >24h from inner circle
+- time-sensitive — messages mentioning today's date or this week
+- group-only — group-chat messages where you were @-mentioned or quoted
+
+Output field: `mcps.imessage.surface_kinds` (string[])
+
+### Q3 — quiet_hours_imessage (single-select)
+
+> Suppress messages received during your quiet hours (late-night) from the briefing?
+
+- yes — skip messages received 10pm-7am local
+- no — count all messages
+
+Output field: `mcps.imessage.suppress_quiet_hours` (boolean)
 
 ## Question set — finance
 
-(populated in S10 — placeholder until then)
+### Q1 — cards_mine (free-text)
+
+> List Brex card IDs or last-4-digits that count as "yours". (Comma-separated. Used to filter from a shared account view.)
+
+Output field: `mcps.finance.cards_mine` (string[])
+
+### Q2 — surface_kinds (multi-select)
+
+> Which spending patterns should the briefing surface?
+
+- category-outliers — categories ≥2x your trailing-7-day median
+- daily-spend — yesterday's total vs your trailing-7-day average
+- approval-queue — expenses awaiting your approval
+- recurring-changes — recurring charges that changed amount or frequency
+
+Output field: `mcps.finance.surface_kinds` (string[])
+
+### Q3 — daily_threshold_usd (single-select)
+
+> Surface a daily-spend callout only when total exceeds:
+
+- 100
+- 250
+- 500
+- always
+
+Output field: `mcps.finance.daily_threshold_usd` (string or int)
+
+### Q4 — category_ignore (free-text)
+
+> Categories to ignore entirely from outlier detection. (Comma-separated. Examples: "rent", "groceries-amazon".)
+
+Output field: `mcps.finance.category_ignore` (string[])

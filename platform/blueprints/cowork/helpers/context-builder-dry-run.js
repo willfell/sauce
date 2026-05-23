@@ -1,19 +1,169 @@
 // context-builder-dry-run.js
 //
-// Helper invoked by cowork:context-builder SKILL.md (step 18) to perform the
-// final compose + merge + write of spice/cowork/context/user-preferences.md.
-// Same helper backs the live skill AND the HC-V0760-F1..F2 harnesses (which
-// pass a dry_run_answers object directly).
-//
-// S10 fills in the implementation.
+// Implements compose + merge + write for cowork:context-builder. Same code
+// path serves the live skill body (which passes computed answers) and the
+// HC-V0760-F1..F2 harness (which passes canned dry_run_answers directly).
 
 "use strict";
 
 const fs = require("fs");
 const path = require("path");
 
-function run(_opts) {
-    throw new Error("context-builder-dry-run.js: not yet implemented (v0.76.0 S10)");
+const TODAY_YMD = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+
+function readExistingPrefs(prefsPath) {
+    if (!fs.existsSync(prefsPath)) return null;
+    const body = fs.readFileSync(prefsPath, "utf8");
+    const fmMatch = body.match(/^---\n([\s\S]*?)\n---/);
+    if (!fmMatch) return null;
+    return parseYamlIsh(fmMatch[1]);
 }
 
-module.exports = { run };
+// Minimal YAML-ish parser: supports flat keys, nested 2-level under `mcps:`,
+// list values (`- item`), inline `[a, b]` lists, and string values. Not a full
+// YAML parser; sufficient for the user-preferences.md shape.
+function parseYamlIsh(yaml) {
+    const out = {};
+    const lines = yaml.split("\n");
+    let i = 0;
+    while (i < lines.length) {
+        const line = lines[i];
+        if (!line.trim() || line.trim().startsWith("#")) { i++; continue; }
+        const flat = line.match(/^([a-z_]+):\s*(.*)$/);
+        if (!flat) { i++; continue; }
+        const [, key, valRaw] = flat;
+        const val = valRaw.trim();
+        if (val === "") {
+            // Could be a nested object or a list — peek ahead
+            const nextLines = [];
+            i++;
+            while (i < lines.length && (lines[i].startsWith("  ") || lines[i].startsWith("\t") || lines[i].trim() === "")) {
+                nextLines.push(lines[i]);
+                i++;
+            }
+            // List of strings?
+            if (nextLines.every(l => !l.trim() || /^\s+- /.test(l))) {
+                out[key] = nextLines.filter(l => l.trim()).map(l => l.replace(/^\s+-\s*/, "").trim());
+            } else {
+                // Nested map (one level deep for `mcps:` or `personality:`)
+                out[key] = parseYamlIsh(nextLines.map(l => l.replace(/^  /, "")).join("\n"));
+            }
+            continue;
+        }
+        if (val.startsWith("[") && val.endsWith("]")) {
+            out[key] = val.slice(1, -1).split(",").map(s => s.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
+        } else if (val === "true") out[key] = true;
+        else if (val === "false") out[key] = false;
+        else if (val === "null") out[key] = null;
+        else if (/^-?\d+$/.test(val)) out[key] = parseInt(val, 10);
+        else out[key] = val.replace(/^["']|["']$/g, "");
+        i++;
+    }
+    return out;
+}
+
+function composeYaml(prefs) {
+    const lines = [];
+    lines.push("---");
+    lines.push("type: cowork-user-preferences");
+    lines.push(`updated: ${prefs.updated}`);
+    lines.push(`updated_by: ${prefs.updated_by}`);
+    lines.push("");
+    lines.push("priorities:");
+    for (const p of (prefs.priorities || [])) lines.push(`  - ${p}`);
+    lines.push("");
+    lines.push("personality:");
+    lines.push(`  vibe: ${prefs.personality.vibe}`);
+    lines.push(`  formality: ${prefs.personality.formality}`);
+    lines.push(`  pep_talk: ${prefs.personality.pep_talk}`);
+    lines.push(`  length: ${prefs.personality.length}`);
+    lines.push("");
+    lines.push("mcps:");
+    for (const [kind, block] of Object.entries(prefs.mcps || {})) {
+        lines.push(`  ${kind}:`);
+        for (const [k, v] of Object.entries(block)) {
+            if (Array.isArray(v)) {
+                lines.push(`    ${k}: [${v.map(x => JSON.stringify(x)).join(", ")}]`);
+            } else if (typeof v === "boolean" || typeof v === "number") {
+                lines.push(`    ${k}: ${v}`);
+            } else {
+                lines.push(`    ${k}: ${JSON.stringify(v)}`);
+            }
+        }
+    }
+    lines.push("---");
+    lines.push("");
+    return lines.join("\n");
+}
+
+function run(opts) {
+    const { vaultRoot, dryRunAnswers } = opts || {};
+    if (!vaultRoot) throw new Error("context-builder-dry-run.run: vaultRoot is required");
+    if (!dryRunAnswers) throw new Error("context-builder-dry-run.run: dryRunAnswers is required");
+
+    const prefsPath = path.join(vaultRoot, "spice/cowork/context/user-preferences.md");
+    const existing = readExistingPrefs(prefsPath);
+
+    // Build new mcps map: walk-or-update from per_mcp_answers; preserve disconnected;
+    // skip when action == 'Skip' (use existing block); clear when action == 'Clear'.
+    const newMcps = {};
+    const detected = new Set(dryRunAnswers.detected_mcps || []);
+    const actions = dryRunAnswers.per_mcp_actions || {};
+    const answers = dryRunAnswers.per_mcp_answers || {};
+
+    // First, carry forward existing blocks per action (or preserve-disconnected if
+    // not detected this run).
+    if (existing && existing.mcps) {
+        for (const [kind, block] of Object.entries(existing.mcps)) {
+            const detectedThisRun = detected.has(kind);
+            const action = actions[kind];
+            if (!detectedThisRun) {
+                // Preserve disconnected
+                newMcps[kind] = Object.assign({}, block, { connected: false, last_seen: block.captured_at || existing.updated });
+            } else if (action === "Clear") {
+                // drop the block
+            } else if (action === "Skip") {
+                // unchanged
+                newMcps[kind] = block;
+            } else if (action === "Update" && answers[kind]) {
+                newMcps[kind] = Object.assign({ captured_at: TODAY_YMD() }, answers[kind]);
+            } else {
+                // No action specified (treat as Walk if no existing block; else Skip)
+                newMcps[kind] = block;
+            }
+        }
+    }
+
+    // Then, add NEW blocks for detected MCPs that weren't in existing.
+    for (const kind of detected) {
+        if (newMcps[kind]) continue;  // already handled above
+        const ans = answers[kind] || {};
+        newMcps[kind] = Object.assign({ captured_at: TODAY_YMD() }, ans);
+    }
+
+    const newPrefs = {
+        type: "cowork-user-preferences",
+        updated: TODAY_YMD(),
+        updated_by: "cowork:context-builder",
+        priorities: dryRunAnswers.priorities || (existing && existing.priorities) || [],
+        personality: dryRunAnswers.personality || (existing && existing.personality) || {
+            vibe: null, formality: null, pep_talk: null, length: null,
+        },
+        mcps: newMcps,
+    };
+
+    // Ensure directory exists
+    fs.mkdirSync(path.dirname(prefsPath), { recursive: true });
+    fs.writeFileSync(prefsPath, composeYaml(newPrefs), "utf8");
+
+    return {
+        path: prefsPath,
+        mcps_count: Object.keys(newMcps).length,
+        priorities: newPrefs.priorities,
+    };
+}
+
+module.exports = { run, _parseYamlIsh: parseYamlIsh, _composeYaml: composeYaml };
