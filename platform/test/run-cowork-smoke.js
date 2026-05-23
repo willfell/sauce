@@ -954,6 +954,56 @@ function assertCoworkV068Shape() {
 }
 
 // ---------------------------------------------------------------------------
+// HC-V0751-H1 — morning-briefing step 14 gates semantic_index_unavailable on
+// step 12b having actually run (calendar_signal.events.length > 0). A
+// calendar-empty fire must NOT emit the Semantic-index-not-available warning.
+// ---------------------------------------------------------------------------
+{
+    const body = fs.readFileSync(
+        path.join(BP, "skills/orchestrators/morning-briefing/SKILL.md"),
+        "utf8",
+    );
+    // The fixed condition must include both the step-12b-ran gate AND the
+    // skipped-status check. Look for the canonical phrase introduced in S10.
+    assertContains(
+        body,
+        "ONLY IF step 12b ran",
+        "HC-V0751-H1 morning-briefing step 14 carries 'ONLY IF step 12b ran' gate",
+    );
+    assertContains(
+        body,
+        "NO warning callout is emitted",
+        "HC-V0751-H1 morning-briefing step 14 explicitly states no-warning-emitted on calendar-empty",
+    );
+}
+
+// ---------------------------------------------------------------------------
+// HC-V0751-H2 — when the warning callout IS emitted, its text matches the
+// gather-semantic-related sub-skill's canonical contract verbatim. Single
+// source of truth lives with the sub-skill that knows the failure mode.
+// ---------------------------------------------------------------------------
+{
+    const orchBody = fs.readFileSync(
+        path.join(BP, "skills/orchestrators/morning-briefing/SKILL.md"),
+        "utf8",
+    );
+    const subBody = fs.readFileSync(
+        path.join(BP, "skills/skills/gather-semantic-related/SKILL.md"),
+        "utf8",
+    );
+    // Canonical text from gather-semantic-related's orchestrator-integration-contract section.
+    const canonical = "Smart Connections index absent or anchor not indexed — semantic gather skipped.";
+    assertContains(subBody, canonical, "HC-V0751-H2 gather-semantic-related defines canonical warning text");
+    assertContains(orchBody, canonical, "HC-V0751-H2 morning-briefing step 14 copies canonical warning text verbatim");
+    // And the old freelance text must be gone.
+    const stale = "Smart Connections index is not built for this vault. Run the SC index from the Obsidian ribbon";
+    assertTrue(
+        !orchBody.includes(stale),
+        "HC-V0751-H2 morning-briefing step 14 no longer carries stale 'not built for this vault' text",
+    );
+}
+
+// ---------------------------------------------------------------------------
 // HC-V0750-A5 — Verify-step regex patterns accept a compliant body.
 // ---------------------------------------------------------------------------
 {
