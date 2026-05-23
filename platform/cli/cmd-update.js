@@ -10,12 +10,43 @@ const { spawnSync } = require("child_process");
 const section = require("../visual/section.js");
 
 // ---------------------------------------------------------------------------
+// _resolveWorkshopPath — locate the brew-installed workshop without relying on
+// ranch/platform-installed.json's workshop_path field (which is null on every
+// pre-v0.75.1 consumer vault). Precedence:
+//   1. argv.workshopPath  — explicit --workshop-path CLI override
+//   2. installed.workshop_path — preserved when present
+//   3. Ancestry walk from process.execPath (or test hook _execPath)
+//   4. Throw with explicit message
+// Exposed via module.exports._resolveWorkshopPath for HC-V0751-B1..B4.
+// ---------------------------------------------------------------------------
+function _resolveWorkshopPath(installed, argv, hooks) {
+    if (argv && argv.workshopPath) return argv.workshopPath;
+    if (installed && installed.workshop_path) return installed.workshop_path;
+    const startExecPath = (hooks && hooks._execPath) || process.execPath;
+    let dir = path.dirname(startExecPath);
+    const root = path.parse(dir).root;
+    while (dir !== root) {
+        if (
+            path.basename(dir) === "libexec" &&
+            fs.existsSync(path.join(dir, "platform"))
+        ) {
+            return dir;
+        }
+        dir = path.dirname(dir);
+    }
+    throw new Error(
+        "Could not auto-detect workshop_path. Pass --workshop-path <path> explicitly.",
+    );
+}
+
+// ---------------------------------------------------------------------------
 // --bump-pins: reads the brew-installed workshop's platform/manifest.json and
 // rewrites the consumer vault's ranch/platform-subscription.json to match.
 // Returns true if normal update flow should continue, false if the process
 // should stop (--dry-run with a non-empty diff exits 0 here).
 // ---------------------------------------------------------------------------
-function handleBumpPins(cwd, { keepComparators, dryRun }) {
+function handleBumpPins(cwd, opts) {
+    const { keepComparators, dryRun } = opts || {};
     const subscriptionPath = path.join(cwd, "ranch", "platform-subscription.json");
     if (!fs.existsSync(subscriptionPath)) {
         process.stderr.write("sauce: --bump-pins requires a consumer vault; cwd must contain ranch/platform-subscription.json\n");
@@ -27,7 +58,8 @@ function handleBumpPins(cwd, { keepComparators, dryRun }) {
         process.exit(3);
     }
     const installed = JSON.parse(fs.readFileSync(installedPath, "utf8"));
-    const workshopManifestPath = path.join(installed.workshop_path, "platform", "manifest.json");
+    const workshopPath = _resolveWorkshopPath(installed, { workshopPath: opts.workshopPath });
+    const workshopManifestPath = path.join(workshopPath, "platform", "manifest.json");
     let workshopManifest;
     try {
         workshopManifest = JSON.parse(fs.readFileSync(workshopManifestPath, "utf8"));
@@ -117,10 +149,14 @@ async function run(ctx, args) {
     const dryRun = argList.includes("--dry-run");
     const keepComparators = argList.includes("--keep-comparators");
     const force = argList.includes("--force");
+    // --workshop-path <path> — explicit workshop_path override (v0.75.1 Workstream A)
+    let workshopPathFlag = null;
+    const wpIdx = argList.indexOf("--workshop-path");
+    if (wpIdx >= 0 && argList[wpIdx + 1]) workshopPathFlag = argList[wpIdx + 1];
 
     if (bumpPins) {
         const cwd = (ctx && ctx.vaultPath) ? ctx.vaultPath : process.cwd();
-        handleBumpPins(cwd, { keepComparators, dryRun });
+        handleBumpPins(cwd, { keepComparators, dryRun, workshopPath: workshopPathFlag });
         // handleBumpPins exits on --dry-run with a non-empty diff; returns here only to continue
         if (dryRun) return; // --dry-run + no diff (nothing to bump) — don't run normal flow
     }
@@ -199,4 +235,4 @@ function _printMigrationHint() {
     console.log("");
 }
 
-module.exports = { run };
+module.exports = { run, _resolveWorkshopPath };
