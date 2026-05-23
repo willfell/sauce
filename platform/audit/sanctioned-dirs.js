@@ -12,5 +12,6 @@
 //   assets/   — vendored themes / images / static assets
 //   .obsidian — Obsidian app config
 //   .claude   — Claude Code project config
+//   .local/   — mechanism runtime artifacts (smart-connections-bridge sc-bridge; post-v0.75.0)
 
-module.exports = ["spice", "pantry", "ranch", "assets", ".obsidian", ".claude"];
+module.exports = ["spice", "pantry", "ranch", "assets", ".obsidian", ".claude", ".local"];

@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop self-subscription. Pinned to the workshop's own manifest version.",
-  "workshop_version": "0.74.0",
+  "workshop_version": "0.75.0",
   "mechanisms": [
     {
       "name": "customjs-guard",
@@ -61,6 +61,10 @@
     {
       "name": "kanban-status-sync",
       "version": "0.2.0"
+    },
+    {
+      "name": "smart-connections-bridge",
+      "version": "0.1.0"
     }
   ],
   "blueprints": [
@@ -82,7 +86,7 @@
     },
     {
       "name": "cowork",
-      "version": "0.13.0"
+      "version": "0.14.0"
     }
   ]
 }

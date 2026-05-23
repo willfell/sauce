@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop platform manifest. Each mechanism + blueprint has its own version.",
-  "workshop_version": "0.74.0",
+  "workshop_version": "0.75.0",
   "date": "2026-05-22",
   "foundational_plugins": [
     {
@@ -111,6 +111,11 @@
       "name": "platform-claude",
       "version": "0.1.1",
       "path": "mechanisms/platform-claude"
+    },
+    {
+      "name": "smart-connections-bridge",
+      "version": "0.1.0",
+      "path": "mechanisms/smart-connections-bridge"
     }
   ],
   "blueprints": [
@@ -121,7 +126,7 @@
     },
     {
       "name": "cowork",
-      "version": "0.13.0",
+      "version": "0.14.0",
       "path": "blueprints/cowork"
     },
     {
