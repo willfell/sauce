@@ -1168,6 +1168,89 @@ function assertCoworkV068Shape() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// HC-V0760-A1 — cowork USER-bucket files preserved across sauce reinstall.
+//
+// Forward-looking boundary-contract guard. Per the v0.76.0
+// cowork-interactive-context cycle, the cowork blueprint exposes nine
+// USER-owned files (engagement-aware files that accumulate user content
+// over time and must NOT be silently overwritten by `brew upgrade sauce`):
+//
+//   - spice/cowork/context/user-preferences.md  (NEW in v0.76.0; S13 wires)
+//   - spice/cowork/context/vault-config.md
+//   - spice/cowork/context/active-threads.md
+//   - spice/cowork/context/weekly-snapshot.md
+//   - spice/cowork/prompts/morning-briefing.md
+//   - spice/cowork/prompts/midday-tripwire.md
+//   - spice/cowork/prompts/eod-review.md
+//   - spice/cowork/prompts/weekly-review.md
+//   - spice/cowork/prompts/monthly-review.md
+//
+// install.js (line 941, v0.59.9) is the SINGLE mechanism that protects user
+// content across a reinstall: a files[] entry carrying `materialize_once: true`
+// causes install.js to log `action: "skipped_materialize_once"` and skip the
+// overwrite when the dest already exists. Any USER-bucket path that appears
+// as a `dest` in cowork's files[] WITHOUT this flag will get clobbered on
+// every reinstall.
+//
+// What this case enforces — v0.76.0 SCOPE ONLY: the NEW
+// `spice/cowork/context/user-preferences.md` path, once added to files[]
+// by S13, MUST carry materialize_once: true. Today (pre-S13) the path is
+// absent from files[] entirely (bootstrap-vault materializes it). Either
+// state is safe — the guard fires only when it appears in files[] WITHOUT
+// the flag, which is the precise regression S13 must avoid.
+//
+// Out of scope (deliberately): the five prompt files
+// (spice/cowork/prompts/<orch>.md) are currently in files[] without
+// materialize_once — a pre-existing boundary question independent of the
+// v0.76.0 user-preferences workstream. A future cycle that decides to make
+// those user-owned-byte-for-byte can extend FOCUSED_USER_PATHS below and
+// resolve the flag-or-removal question lockstep with the boundary-redefinition.
+//
+// Why structural, not runtime: install.js's materialize_once branch is the
+// ONLY surface that can let a USER file survive a reinstall, so a missing
+// flag IS the only failure mode. Running the full installer against a
+// fixture vault would require materializing platform-installed.json + the
+// workshop manifest + every dep — substantially more scaffolding for the
+// same coverage.
+// ---------------------------------------------------------------------------
+{
+    const label = "HC-V0760-A1 cowork USER files preserved across reinstall";
+
+    // v0.76.0-scope USER paths to enforce. Future cycles may add more; the
+    // out-of-scope list above documents the deliberate narrowing for S7.
+    const FOCUSED_USER_PATHS = [
+        "spice/cowork/context/user-preferences.md",   // v0.76.0 NEW — S13 wires materialize_once: true
+    ];
+
+    const manifest = loadManifest();
+    // {{module_directory}} substitutes to "spice/<module_directory>" per
+    // install.js line 401 (T1.2 per-blueprint overlay). Replicate exactly so
+    // we compare against the SAME post-substitution dest the installer computes.
+    const moduleDir = `spice/${manifest.module_directory}`;
+    const files = Array.isArray(manifest.files) ? manifest.files : [];
+
+    const destToEntry = new Map();
+    for (const f of files) {
+        if (!f || typeof f.dest !== "string") continue;
+        const resolved = f.dest.replace(/\{\{module_directory\}\}/g, moduleDir);
+        destToEntry.set(resolved, f);
+    }
+
+    const violations = [];
+    for (const userPath of FOCUSED_USER_PATHS) {
+        const entry = destToEntry.get(userPath);
+        if (!entry) continue;                         // absent from files[] — bootstrap surface; safe.
+        if (entry.materialize_once === true) continue; // protected by v0.59.9 mechanic; safe.
+        violations.push(userPath);
+    }
+
+    assertTrue(
+        violations.length === 0,
+        `${label}: ${violations.length} USER file(s) appear in cowork files[] without materialize_once: true — reinstall will overwrite user content at: ${violations.join(", ")}`,
+    );
+}
+
 (function main() {
   console.log("--- shared contracts ---");
   checkSharedContracts();

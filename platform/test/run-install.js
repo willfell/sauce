@@ -628,6 +628,148 @@ async function caseV0751E1WorkshopVersionRefresh() {
     }
 }
 
+// HC-V0760-E1 — materialize_once regression for user-preferences.md.
+//
+// Validates that the v0.59.9 `materialize_once: true` files[] flag continues
+// to preserve user content across a second install. The v0.76.0 cycle reuses
+// this flag for the upcoming `user-preferences.md` USER-bucket file (wired by
+// S13). This case constructs a synthetic workshop carrying a minimal
+// blueprint whose single file declares `materialize_once: true`, runs the
+// installer twice — with a user edit between runs — and asserts the user's
+// edit survives the second install byte-for-byte.
+//
+// Posture: regression coverage, NOT TDD failing-first. The mechanic was
+// landed in v0.59.9 and is already green; this case guards against
+// accidental removal in a future refactor and exists primarily so any
+// breakage shows up as a clean harness failure rather than as a subtle
+// dataloss bug in the consumer's user-preferences.md after S13 lands.
+async function caseV0760E1MaterializeOnceForUserPreferences() {
+    const label = "HC-V0760-E1 materialize_once: dest preserved when set on the manifest entry";
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-mat-once-"));
+    try {
+        // Fabricate a minimal workshop carrying one blueprint with a single
+        // materialize_once: true file entry. Mirrors caseV0751E1's
+        // synthetic-workshop shape (workshop + per-blueprint manifests).
+        const workshopDir = path.join(tmp, "workshop");
+        const bpDir = path.join(workshopDir, "platform", "blueprints", "matonce");
+        fs.mkdirSync(path.join(bpDir, "content"), { recursive: true });
+        fs.writeFileSync(
+            path.join(bpDir, "content", "user-state.md"),
+            "---\nseed: true\n---\n\nSEED CONTENT\n",
+        );
+        fs.writeFileSync(
+            path.join(bpDir, "manifest.json"),
+            JSON.stringify({
+                name: "matonce",
+                version: "0.1.0",
+                kind: "blueprint",
+                module_directory: "matonce",
+                files: [
+                    {
+                        source: "content/user-state.md",
+                        dest: "{{module_directory}}/user-state.md",
+                        materialize_once: true,
+                    },
+                ],
+            }, null, 2),
+        );
+        fs.writeFileSync(
+            path.join(workshopDir, "platform", "manifest.json"),
+            JSON.stringify({
+                workshop_version: "0.76.0",
+                mechanisms: [],
+                blueprints: [{ name: "matonce", version: "0.1.0", path: "blueprints/matonce" }],
+            }, null, 2),
+        );
+
+        // Fabricate a consumer vault subscribing to the matonce blueprint.
+        const vaultDir = path.join(tmp, "vault");
+        fs.mkdirSync(path.join(vaultDir, "ranch"), { recursive: true });
+        fs.writeFileSync(
+            path.join(vaultDir, "ranch", "platform-installed.json"),
+            JSON.stringify({ workshop_version: null, blueprints: [], mechanisms: [], history: [] }, null, 2),
+        );
+        fs.writeFileSync(
+            path.join(vaultDir, "ranch", "platform-subscription.json"),
+            JSON.stringify({
+                workshop_version: "0.76.0",
+                mechanisms: [],
+                blueprints: [{ name: "matonce", version: "0.1.0" }],
+            }, null, 2),
+        );
+        fs.writeFileSync(
+            path.join(vaultDir, "ranch", "platform-config.json"),
+            JSON.stringify({ workshop_path: workshopDir, variables: {} }, null, 2),
+        );
+
+        // Build a fake tp wired to vaultDir (mirrors caseV0751E1's helper shape).
+        function vaultAbs(rel) { return path.join(vaultDir, rel); }
+        function vaultExistsSync(rel) {
+            try { fs.accessSync(vaultAbs(rel)); return true; } catch { return false; }
+        }
+        const e1Adapter = {
+            basePath: vaultDir,
+            getBasePath() { return vaultDir; },
+            async read(p) { return fsp.readFile(vaultAbs(p), "utf8"); },
+            async write(p, content) {
+                await fsp.mkdir(path.dirname(vaultAbs(p)), { recursive: true });
+                await fsp.writeFile(vaultAbs(p), content, "utf8");
+            },
+            async exists(p) { return fsp.access(vaultAbs(p)).then(() => true, () => false); },
+            async mkdir(p) { await fsp.mkdir(vaultAbs(p), { recursive: true }); },
+            async remove(p) { await fsp.unlink(vaultAbs(p)); },
+            async stat(p) {
+                try {
+                    const s = await fsp.stat(vaultAbs(p));
+                    return { type: s.isDirectory() ? "folder" : "file", size: s.size, mtime: s.mtimeMs, ctime: s.ctimeMs };
+                } catch { return null; }
+            },
+        };
+        const e1Vault = {
+            adapter: e1Adapter,
+            getAbstractFileByPath(p) { return vaultExistsSync(p) ? { path: p } : null; },
+            async read(file) { return fsp.readFile(vaultAbs(file.path), "utf8"); },
+            async modify(file, text) {
+                await fsp.mkdir(path.dirname(vaultAbs(file.path)), { recursive: true });
+                await fsp.writeFile(vaultAbs(file.path), text, "utf8");
+            },
+            async create(p, text) {
+                await fsp.mkdir(path.dirname(vaultAbs(p)), { recursive: true });
+                await fsp.writeFile(vaultAbs(p), text, "utf8");
+            },
+            async createFolder(p) { await fsp.mkdir(vaultAbs(p), { recursive: true }); },
+        };
+        const e1Tp = {
+            app: { vault: e1Vault },
+            system: { suggester: async (_ti, items) => items[0] },
+            user: {},
+        };
+
+        global.Notice = global.Notice || class Notice { constructor(_msg) { /* suppress */ } };
+        const installerPath = path.join(__dirname, "../install.js");
+        delete require.cache[require.resolve(installerPath)];
+        const installer = require(installerPath);
+
+        // First install — seeds the dest with substituted source content.
+        await installer(e1Tp);
+        const destPath = path.join(vaultDir, "spice", "matonce", "user-state.md");
+        assertTrue(fs.existsSync(destPath), `${label} (first install seeded dest)`);
+
+        // User edits the file — simulates the post-install user content
+        // accumulation that materialize_once is designed to preserve.
+        const userEdit = "---\nseed: true\n---\n\nUSER EDIT — DO NOT WIPE\n";
+        fs.writeFileSync(destPath, userEdit, "utf8");
+
+        // Second install — must NOT overwrite the user edit because the
+        // manifest entry carries materialize_once: true.
+        await installer(e1Tp);
+        const after = fs.readFileSync(destPath, "utf8");
+        assertEqual(after, userEdit, `${label} (second install preserved user edits)`);
+    } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+    }
+}
+
 // ----- unit-test runner (no-positional-arg mode) ----------------------------
 
 async function runUnitTests() {
@@ -635,6 +777,7 @@ async function runUnitTests() {
         caseV0751C1BumpPinsNullWorkshopPath,
         caseV0751C2SauceUpdateNonGitVault,
         caseV0751E1WorkshopVersionRefresh,
+        caseV0760E1MaterializeOnceForUserPreferences,
     ];
     for (const c of cases) {
         try { await c(); }
