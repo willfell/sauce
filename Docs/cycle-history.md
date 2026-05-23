@@ -535,3 +535,38 @@ See `Docs/plans/2026-05-22-v0.73.0-kanban-progress-architectural-cleanup-{design
 
 See `Docs/plans/2026-05-22-v0.74.0-cowork-orchestrator-rigor-{design,plan,result}.md`.
 
+## v0.75.0 cowork-skill-routing-hardening MINOR CLOSED 2026-05-22
+
+**Workshop:** 0.74.0 → 0.75.0
+**Blueprint:** cowork 0.13.0 → 0.14.0
+**Engagement-types:** personal / w2-fte / consulting 0.2.0 → 0.3.0 (additive `render_aspects.semantic_related`)
+**Mechanism bumps:** smart-connections-bridge NEW 0.1.0
+**Harnesses:** HC-V0750-A1..A5 in `run-cowork-smoke.js`; HC-V0750-B1..B12 in new `run-smart-connections-bridge.js`; HC-V0750-D1..D7 in `run-cli.js`; stale S1 READ-form assertions fixed (follow-up `0e75874`). 22 → 23 harnesses.
+
+**Headline:** Four workstreams bundled. (A) Closes the v0.74.0 multi-context-Claude-Code skill-routing gap: three layers of hardening — READ-form rewrites (~60 refs across 6 orchestrator files), post-write structural verification in 5 orchestrators (delete-on-miss + `failed:contract-violation:<field>`), and enriched scheduled-tasks prompts in `onboard-scheduled-jobs` Step 6. A fail-closed audit harness check (HC-V0750-A1) prevents naked `Use Skill cowork:` regressions in future cycles. (B) New `smart-connections-bridge@0.1.0` mechanism: Node CLI sc-bridge over `.smart-env/multi/*.ajson` with `{{module_directory}}` substitution + `TaylorAI/bge-micro-v2` embeddings; new `gather-semantic-related` sub-skill renders `> [!example]+ 🧩 Related context` callout; integrated in morning-briefing (per-event), eod-review (daily note), weekly-review (aggregated). Engagement-aware via `render_aspects.semantic_related`; graceful degradation when SC index absent. (C) `onboard-scheduled-jobs` Step 2 path-resolution fix — uses `workshop_manifest_path` instead of unreachable in-vault path. (D) FLN-v67-7 closed: `sauce update --bump-pins` flag replaces 4-vault manual pin-bump loop.
+
+- **Workstream A (skill-routing hardening, 3 layers):** Layer 1 rewrites all `Use Skill cowork:<X>` references (both cases) in 6 orchestrator SKILL.md bodies to the explicit `READ ... SKILL.md in full ... then apply ...` form. Layer 2 adds a post-write verification step to each of the 5 atomic-note-writing orchestrators: re-reads the written file, regex-scans structural markers + frontmatter, deletes on miss, returns `failed:contract-violation:<field>`. Layer 3 enriches the scheduled-tasks prompts registered by `onboard-scheduled-jobs` Step 6 to explicitly instruct cron-agent sessions to READ sub-skill SKILL.md bodies before acting. HC-V0750-A1 is a fail-closed regression guard using a case-insensitive grep.
+
+- **Workstream B (smart-connections-bridge + gather-semantic-related):** New mechanism `smart-connections-bridge@0.1.0` wraps the SC `.smart-env/multi/*.ajson` corpus with ops: `index-status`, `semantic-search` (cosine similarity, top-K), `find-related` (find-related on a vault note path). Uses `@xenova/transformers` with `TaylorAI/bge-micro-v2` (384-dim; same model as SC). New `cowork:gather-semantic-related` sub-skill calls sc-bridge and renders the callout + lag-line in Synopsis. Morning-briefing adds per-event semantic search; eod-review + weekly-review add find-related. Three engagement-type JSON files gain `render_aspects.semantic_related: "include"` (opt-out via `"skip"`). `.local/` added to `audit/sanctioned-dirs.js`; CS-MIG-1 counts bumped 41→42 / 32→33.
+
+- **Workstream C (engagement-types path fix):** `onboard-scheduled-jobs` Step 2 now resolves engagement-type manifests via `workshop_manifest_path` instead of an in-vault path that doesn't exist at consumer install time.
+
+- **Workstream D (`sauce update --bump-pins`):** New flag reads the brew-installed workshop's `platform/manifest.json`, derives target blueprint/mechanism versions, writes `ranch/platform-subscription.json`, and proceeds with the normal update — replacing the manual per-vault edit ritual. Workshop-self-vault detection is a v0.75.1 carry-forward (the workshop's own `platform-installed.json` lacks a `workshop_path` field, causing a no-op for workshop dogfood runs).
+
+**Commits (S0–S17):** `e54021b` + `643b40b` + `f6992cb` (S1 + follow-ups), `43a98ce` (S2), `7728d4f` (S3), `ecb0f7c` + `0e75874` (S4 + follow-up), `9e4f839` (S5), `8e3d898` (S6), `ef83e4d` (S7), `0799b3a` (S8), `f68f0d2` (S9), `7a2bd85` (S10), `4ee7662` (S11), `f2d4bb6` (S12), `9a50278` (S13), `d73d2b6` (S14), `b974bac` (S15), `9005bc3` (S16 dogfood), S17 this commit.
+
+**Smoke:** Preflight GREEN across all 23 harnesses. `sauce update` dogfood (S16) clean — `workshop_version: 0.75.0`; cowork@0.14.0; smart-connections-bridge@0.1.0 installed. Visual smoke (Obsidian) pending post-tag: `brew upgrade sauce` → `sauce update --bump-pins` per consumer vault → `sauce update` → `cowork:onboard-scheduled-jobs` (or manual Layer 3 recipe) → morning-briefing produces `> [!example]+ 🧩 Related context` callout when SC indexed; degrades gracefully when absent.
+
+**Lessons:**
+1. Cross-cycle test-assertion staleness reactivated by READ-form rewrites. Audit ALL `HC-*` assertions for stale literals BEFORE preflight — same lesson as v0.74.0. Consider a pre-preflight gate in `build-test-verify.md`.
+2. Workshop install path differs from consumer install path: orchestrators drop `skills/orchestrators/` segment on install; sub-skills keep `skills/` segment. Document the two-path invariant in `code-conventions.md`.
+3. Case-insensitive grep needed for `Use Skill` audits. HC-V0750-A1 now uses `-i`; 12 lowercase variants would have escaped a case-sensitive grep.
+4. Synthetic test vectors must match real embedding dimensionality. BGE-micro-v2 is 384-dim; 4-dim fixtures returned garbage cosine similarity.
+5. `@xenova/transformers` caches in `node_modules/.cache/`, not `~/.cache/huggingface/`. Check both Python and JS paths when debugging cache behavior.
+6. `ranch/platform-installed.json` carries `module_directory: null` per-blueprint — not suitable as a source for blueprint metadata. Canonical source: per-blueprint `manifest.json` in `platform/blueprints/<bp>/`.
+7. `sauce update --bump-pins` is a no-op for workshop-self-vault (missing `workshop_path` field). Workshop dogfood stays on `node platform/test/run-install.js .`.
+8. New mechanisms installing to novel top-level directories must add that directory to `audit/sanctioned-dirs.js` in the same stage (sc-bridge → `.local/`).
+9. CS-MIG-1 hardcoded sub-skill counts must be bumped whenever a new sub-skill is added — grep `run-claude-surface.js` in the same commit as the manifest `skills[]` entry.
+
+See `Docs/plans/2026-05-22-v0.75.0-cowork-skill-routing-hardening-{design,plan,result}.md`.
+

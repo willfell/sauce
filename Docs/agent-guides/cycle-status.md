@@ -9,12 +9,12 @@ load_when: Starting a session, picking the next cycle, or sanity-checking the cu
 
 ## Current
 
-- **Workshop version:** `0.74.0` (closed 2026-05-22)
-- **Most recent cycle:** v0.74.0 cowork-orchestrator-rigor MINOR — three workstreams bundled: (A) body-shape enforcement via Claude-side self-check in 6 write-run-note-* skills (5 structural markers + title/summary frontmatter required; on miss return failed:contract-violation:<field>) + title:required on 6 cowork atomic-note rule_fragments; (B) midday-tripwire broadens from finance-only to a tripwire_aspects[] model (personal=cc_drift; w2-fte=calendar_drift+queue_growth; consulting=all three) — severity flatten yellow|red → warn|alert; gather-calendar drift-check + gather-projects tripwire-delta modes added; (C) write path migrates from mcp__obsidian__create_note to native Write tool (filesystem-first; survives Obsidian REST API outages) + cowork:onboard-scheduled-jobs becomes single conversational entry-point post-`brew upgrade sauce` (auto-delegates to bootstrap-vault when not-bootstrapped; bulk-defaults question; per-cadence preambles; filesystem Read+Write prompt copy with byte-count assertion + customization-aware overwrite guard). No mechanism bumps. Cowork 0.12.0 → 0.13.0; engagement-types 0.1.0 → 0.2.0.
+- **Workshop version:** `0.75.0` (closed 2026-05-22)
+- **Most recent cycle:** v0.75.0 cowork-skill-routing-hardening MINOR — four workstreams bundled. (A) Skill-routing hardening: closes the v0.74.0 multi-context-Claude-Code gap via three layers — (1) ~60 `Use Skill cowork:<X>` refs across 6 orchestrator SKILL.md files rewritten to explicit READ form; (2) post-write structural verification in 5 orchestrators (delete-on-miss + `failed:contract-violation:<field>`); (3) enriched scheduled-tasks prompts in `onboard-scheduled-jobs` Step 6. Fail-closed audit harness HC-V0750-A1 prevents future regressions. (B) New mechanism `smart-connections-bridge@0.1.0` (Node CLI sc-bridge over `.smart-env/multi/*.ajson`; `TaylorAI/bge-micro-v2` 384-dim; ops: index-status / semantic-search / find-related); new `cowork:gather-semantic-related` sub-skill renders `> [!example]+ 🧩 Related context` callout; integrated in morning-briefing (per-event), eod-review (daily note find-related), weekly-review (aggregated + deduped); engagement-aware via `render_aspects.semantic_related`; graceful degradation when SC index absent. (C) `onboard-scheduled-jobs` Step 2 path-resolution fix via `workshop_manifest_path`. (D) FLN-v67-7 closed: `sauce update --bump-pins` auto-bumps consumer subscription pins from workshop manifest. Cowork 0.13.0 → 0.14.0; engagement-types 0.2.0 → 0.3.0; smart-connections-bridge NEW 0.1.0.
 
 ## Cycle order (chronological)
 
-v0.1.0 → v0.1.1 → v0.1.x → v0.1.3 → v0.1.2 → v0.2.0 → v0.3.0 → v0.4.0 → v0.3.2 → v0.4.2 → v0.5.0 → v0.11.0 → v0.12.0 → v0.13.0 → v0.14.0 → v0.6.0 → v0.16.0 → v0.17.0 → v0.18.0/.1/.2 → v0.19.0 → v0.20.0 → v0.21.0/.1 → v0.22.0/.1 → v0.23.0 → v0.24.0 → v0.25.0 → v0.26.0/.1 → v0.27.0 → v0.28.0 → v0.29.0 → v0.30.0 ⏭️ → v0.31.0 → v0.32.0 → v0.33.0/.1 → v0.36.0/.1 → v0.37.0 → v0.38.0/.1 → v0.40.0 → v0.41.0/.5 → v0.42.0 → v0.43.0 → v0.44.0 → v0.45.0 → v0.46.0/.1/.2 → v0.47.0 → v0.48.0 → v0.49.0 → v0.49.1 ⏭️ → v0.49.2 → (v0.50.0–v0.62.0 narratives lost; pre-v0.63 narrative below resumes) → v0.63.0 → v0.63.1 → v0.63.2 → v0.63.3 → v0.64.0 → v0.64.1 → v0.64.2 → v0.64.3 → v0.65.0 → v0.66.0 → v0.66.1 → v0.66.2 → v0.67.0 → v0.67.1 → v0.67.2 → v0.67.3 → v0.70.0 → v0.70.1 → v0.70.2 → v0.70.3 → v0.70.4 → v0.70.5 → v0.70.6 → v0.70.7 → v0.71.0 → v0.71.1 → v0.72.0 → v0.72.1 → v0.73.0 → v0.74.0 (current).
+v0.1.0 → v0.1.1 → v0.1.x → v0.1.3 → v0.1.2 → v0.2.0 → v0.3.0 → v0.4.0 → v0.3.2 → v0.4.2 → v0.5.0 → v0.11.0 → v0.12.0 → v0.13.0 → v0.14.0 → v0.6.0 → v0.16.0 → v0.17.0 → v0.18.0/.1/.2 → v0.19.0 → v0.20.0 → v0.21.0/.1 → v0.22.0/.1 → v0.23.0 → v0.24.0 → v0.25.0 → v0.26.0/.1 → v0.27.0 → v0.28.0 → v0.29.0 → v0.30.0 ⏭️ → v0.31.0 → v0.32.0 → v0.33.0/.1 → v0.36.0/.1 → v0.37.0 → v0.38.0/.1 → v0.40.0 → v0.41.0/.5 → v0.42.0 → v0.43.0 → v0.44.0 → v0.45.0 → v0.46.0/.1/.2 → v0.47.0 → v0.48.0 → v0.49.0 → v0.49.1 ⏭️ → v0.49.2 → (v0.50.0–v0.62.0 narratives lost; pre-v0.63 narrative below resumes) → v0.63.0 → v0.63.1 → v0.63.2 → v0.63.3 → v0.64.0 → v0.64.1 → v0.64.2 → v0.64.3 → v0.65.0 → v0.66.0 → v0.66.1 → v0.66.2 → v0.67.0 → v0.67.1 → v0.67.2 → v0.67.3 → v0.70.0 → v0.70.1 → v0.70.2 → v0.70.3 → v0.70.4 → v0.70.5 → v0.70.6 → v0.70.7 → v0.71.0 → v0.71.1 → v0.72.0 → v0.72.1 → v0.73.0 → v0.74.0 → v0.75.0 (current).
 
 > Gap note: per `Docs/cycle-history.md` line count (57 closed-cycle sections ending at v0.47.0, plus a v0.48–v0.67.3 archive), the v0.50.0 → v0.62.0 narratives were not captured in cycle-history.md during their respective closes. The CLAUDE.md claim that they were "archived to Docs/cycle-history.md" was stale. Backfill from `Docs/plans/` is possible but deferred.
 
@@ -31,9 +31,9 @@ Live brainstorm list (also referenced in `Docs/plans/` and brainstorm shelf file
 - **FLN-v66-1 cleanup** — 7 legacy-shape project hubs in accuris/ero use `type: structure`/`project-board` → rollup silently drops them; migration helper or rollup type-predicate widening
 - **FLN-v66-5 audit assert** — every `new_entity_buttons[].prompts[].key` should appear in `frontmatter_template` as `{{prompts.<key>}}` (catches v0.66.2-style wiring gaps platform-wide)
 - **FLN-v64-6** — scratch body-first-line title fallback for legacy untitled scratches
-- **FLN-v67-7** — `sauce update --bump-pins` flag candidate for consumer subscription auto-bump
+- **v0.75.1 candidate** — `sauce update --bump-pins` workshop-self-vault path detection (workshop's `platform-installed.json` lacks `workshop_path`; detect workshop-as-vault via cwd comparison and skip circular self-lookup)
 
-## Mechanisms (15)
+## Mechanisms (16)
 
 | Name | Version | Role |
 | --- | --- | --- |
@@ -52,6 +52,7 @@ Live brainstorm list (also referenced in `Docs/plans/` and brainstorm shelf file
 | `platform-claude` | 0.1.1 | `/install` `/upgrade` `/bootstrap` lifecycle slash commands + CLAUDE.md marker renderer |
 | `entity-create` | 0.4.0 | Declarative `new_entity_buttons[]` spec; inside-block JS-comment sentinel; substitution catalogue with `derive`/`validate`/`inline_body` extensions |
 | `backlink-panel` | 0.1.0 | Backlink panel renderer |
+| `smart-connections-bridge` | 0.1.0 | Node CLI bridge over `.smart-env/multi/*.ajson` for SC semantic retrieval |
 
 Per-mechanism version history is in `Docs/cycle-history.md`. Current canonical catalogue lives at `platform/manifest.json`.
 
@@ -60,7 +61,7 @@ Per-mechanism version history is in `Docs/cycle-history.md`. Current canonical c
 | Name | Version | Slash command | Module dir |
 | --- | --- | --- | --- |
 | `boards` | 0.2.1 | — | `spice/boards/` |
-| `cowork` | 0.13.0 | — | `spice/cowork/` |
+| `cowork` | 0.14.0 | — | `spice/cowork/` |
 | `daily` | 0.13.0 | `/daily` | `spice/daily/` |
 | `journal` | 0.2.0 | — | `spice/journal/` |
 | `meetings` | 0.6.0 | `/meetings` | `spice/meetings/` |
@@ -75,11 +76,11 @@ Per-mechanism version history is in `Docs/cycle-history.md`. Current canonical c
 
 > Note: this table's blueprint versions track `platform/manifest.json`'s catalogue, not the per-blueprint `manifest.json`. The two must match (lockstep gate); if you see drift, that's a `check-version-sync.js` violation. Per-blueprint version history is in `Docs/cycle-history.md`.
 
-## Test harnesses (22)
+## Test harnesses (23)
 
 Whole-suite GREEN preserved v0.21.0 → current. Files in `platform/test/run-*.js`:
 
-`run-activity-feed`, `run-audit`, `run-backlink-panel`, `run-bootstrap`, `run-claude-surface`, `run-cli`, `run-cowork-smoke`, `run-doctor-self`, `run-entity-create`, `run-helper-cases`, `run-install`, `run-install-sh`, `run-integration-smoke`, `run-migrate`, `run-migrate-frontmatter`, `run-migrate-layout`, `run-registry`, `run-renderer`, `run-seed`, `run-todo-modal` (NEW v0.63.0), `run-validator`, `run-wiki-to-docs-migration`.
+`run-activity-feed`, `run-audit`, `run-backlink-panel`, `run-bootstrap`, `run-claude-surface`, `run-cli`, `run-cowork-smoke`, `run-doctor-self`, `run-entity-create`, `run-helper-cases`, `run-install`, `run-install-sh`, `run-integration-smoke`, `run-migrate`, `run-migrate-frontmatter`, `run-migrate-layout`, `run-registry`, `run-renderer`, `run-seed`, `run-smart-connections-bridge` (NEW v0.75.0), `run-todo-modal` (NEW v0.63.0), `run-validator`, `run-wiki-to-docs-migration`.
 
 Per-cycle sub-assert deltas are in `Docs/cycle-history.md`. Run via `npm run release:preflight` (gated first on `scripts/check-version-sync.js` per v0.38.0).
 
