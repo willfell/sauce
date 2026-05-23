@@ -99,6 +99,69 @@ function composeYaml(prefs) {
     return lines.join("\n");
 }
 
+// v0.77.0 Workstream B: tool-pattern detection. Capability-subset model —
+// an MCP namespace satisfies a `kind` when its tool set contains ALL of the
+// kind's `required_tools`, OR fully satisfies any branch of `tool_alternatives`.
+// A single namespace can satisfy multiple kinds (Outlook UUID = calendar + email + chat).
+//
+// availableTools: array of "mcp__<ns>__<tool>" strings (the agent's tool list)
+// mcpSkillMap:    parsed mcp-skill-map.json (v2.0.0 shape)
+//
+// returns: { detected: [{kind, served_by, matched_tools, gather_skill}], unmapped_namespaces: [...] }
+function detectCapabilities(availableTools, mcpSkillMap) {
+    // Group tools by namespace
+    const toolsByNamespace = {};
+    for (const fullName of (availableTools || [])) {
+        if (!fullName.startsWith("mcp__")) continue;
+        const inner = fullName.substring("mcp__".length);
+        const idx = inner.lastIndexOf("__");
+        if (idx < 0) continue;
+        const ns = inner.substring(0, idx);
+        const tool = inner.substring(idx + 2);
+        if (!ns || !tool) continue;
+        if (!toolsByNamespace[ns]) toolsByNamespace[ns] = new Set();
+        toolsByNamespace[ns].add(tool);
+    }
+
+    const detected = [];
+    const bound = new Set(); // ns values that satisfied at least one kind
+
+    for (const entry of (mcpSkillMap.kinds || [])) {
+        const required = entry.required_tools || [];
+        const alts = entry.tool_alternatives || [];
+        for (const ns of Object.keys(toolsByNamespace)) {
+            const tools = toolsByNamespace[ns];
+            const allReq = required.length > 0 && required.every(t => tools.has(t));
+            const anyAlt = alts.length > 0 && alts.some(alt =>
+                Array.isArray(alt) && alt.length > 0 && alt.every(t => tools.has(t))
+            );
+            // A kind with `tool_alternatives` requires both (a) required_tools fully present
+            // AND (b) at least one alt branch fully present. A kind without tool_alternatives
+            // is satisfied by required_tools alone.
+            const matches = alts.length > 0
+                ? (allReq && anyAlt)
+                : allReq;
+            if (matches) {
+                // Compose matched_tools = union of required_tools + matched-alt + optional_tools present
+                const matchedAlts = alts.find(a => a.every(t => tools.has(t))) || [];
+                const optionals = (entry.optional_tools || []).filter(t => tools.has(t));
+                const matched_tools = Array.from(new Set([...required, ...matchedAlts, ...optionals]));
+                detected.push({
+                    kind: entry.kind,
+                    served_by: ns,
+                    matched_tools,
+                    gather_skill: entry.gather_skill,
+                });
+                bound.add(ns);
+            }
+        }
+    }
+
+    const unmapped_namespaces = Object.keys(toolsByNamespace).filter(ns => !bound.has(ns));
+
+    return { detected, unmapped_namespaces };
+}
+
 function run(opts) {
     const { vaultRoot, dryRunAnswers } = opts || {};
     if (!vaultRoot) throw new Error("context-builder-dry-run.run: vaultRoot is required");
@@ -166,4 +229,9 @@ function run(opts) {
     };
 }
 
-module.exports = { run, _parseYamlIsh: parseYamlIsh, _composeYaml: composeYaml };
+module.exports = {
+    run,
+    detectCapabilities,
+    _parseYamlIsh: parseYamlIsh,
+    _composeYaml: composeYaml,
+};

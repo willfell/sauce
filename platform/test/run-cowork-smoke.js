@@ -1189,12 +1189,12 @@ function assertCoworkV068Shape() {
         cbDryRun.run({
             vaultRoot: vault,
             dryRunAnswers: {
-                detected_mcps: ["calendar", "gmail"],
+                detected_mcps: ["calendar", "email"],
                 per_mcp_answers: {
                     calendar: { surface_event_kinds: ["conflicts", "focus-blocks"], include_all_day: false },
-                    gmail: { inbox_zero_threshold: 5, surface_kinds: ["unanswered-24h"] },
+                    email: { inbox_zero_threshold: 5, surface_kinds: ["unanswered-24h"] },
                 },
-                priorities: ["calendar", "gmail"],
+                priorities: ["calendar", "email"],
                 personality: { vibe: "dry-and-factual", formality: "casual", pep_talk: false, length: "terse" },
             },
         });
@@ -1206,9 +1206,9 @@ function assertCoworkV068Shape() {
         assertTrue(/type: cowork-user-preferences/.test(body), `${label}: frontmatter has type:`);
         assertTrue(/updated_by: cowork:context-builder/.test(body), `${label}: frontmatter updated_by:`);
         assertTrue(/mcps:\s*\n[\s\S]*calendar:/m.test(body), `${label}: mcps.calendar block`);
-        assertTrue(/mcps:\s*\n[\s\S]*gmail:/m.test(body), `${label}: mcps.gmail block`);
-        assertTrue(!/imessage:/.test(body), `${label}: imessage NOT present (not detected)`);
-        assertTrue(/priorities:\s*\n\s*- calendar\s*\n\s*- gmail/.test(body), `${label}: priorities ordered`);
+        assertTrue(/mcps:\s*\n[\s\S]*email:/m.test(body), `${label}: mcps.email block`);
+        assertTrue(!/chat:/.test(body), `${label}: chat NOT present (not detected)`);
+        assertTrue(/priorities:\s*\n\s*- calendar\s*\n\s*- email/.test(body), `${label}: priorities ordered`);
         assertTrue(/vibe:\s*dry-and-factual/.test(body), `${label}: personality.vibe`);
     } catch (e) {
         // Module-not-found is the expected failure at this stage. Surface as a
