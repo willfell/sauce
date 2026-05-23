@@ -127,6 +127,7 @@
     { "kind": "skill", "source": "skills/skills/gather-cc-debt-snapshot/SKILL.md",                "dest": "{{skills_dir}}/skills/gather-cc-debt-snapshot/SKILL.md" },
     { "kind": "skill", "source": "skills/skills/gather-projects/SKILL.md",                        "dest": "{{skills_dir}}/skills/gather-projects/SKILL.md" },
     { "kind": "skill", "source": "skills/skills/gather-threads/SKILL.md",                         "dest": "{{skills_dir}}/skills/gather-threads/SKILL.md" },
+    { "kind": "skill", "source": "skills/skills/gather-semantic-related/SKILL.md",               "dest": "{{skills_dir}}/skills/gather-semantic-related/SKILL.md" },
     { "kind": "skill", "source": "skills/skills/write-run-note-morning-briefing/SKILL.md",       "dest": "{{skills_dir}}/skills/write-run-note-morning-briefing/SKILL.md" },
     { "kind": "skill", "source": "skills/skills/write-run-note-eod-review/SKILL.md",             "dest": "{{skills_dir}}/skills/write-run-note-eod-review/SKILL.md" },
     { "kind": "skill", "source": "skills/skills/write-run-note-midday-tripwire/SKILL.md",        "dest": "{{skills_dir}}/skills/write-run-note-midday-tripwire/SKILL.md" },

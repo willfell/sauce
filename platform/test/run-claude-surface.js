@@ -542,9 +542,11 @@ async function caseCSSUB3VerbsExist() {
 //           the legacy skills[] + files[] command shape to claude_surface[].
 //           v0.68.0 (cowork@0.11.0): patch-daily-callouts orphan deleted →
 //           32 skill entries (was 33) → 41 contributions (was 42).
+//           v0.75.0 S8: gather-semantic-related added →
+//           33 skill entries (was 32) → 42 contributions (was 41).
 // ============================================================
 async function caseCSMIG1CoworkAggregation() {
-  console.log("\n--- Case CS-MIG-1: cowork manifest claude_surface[] yields 41 contributions (v0.11.0) ---");
+  console.log("\n--- Case CS-MIG-1: cowork manifest claude_surface[] yields 42 contributions (v0.75.0) ---");
   const bpManifestPath = path.join(WORKSHOP, "platform/blueprints/cowork/manifest.json");
   assertTrue("CS-MIG-1: cowork manifest.json exists", fs.existsSync(bpManifestPath));
   const bpMan = JSON.parse(fs.readFileSync(bpManifestPath, "utf8"));
@@ -565,12 +567,12 @@ async function caseCSMIG1CoworkAggregation() {
 
   assertTrue("CS-MIG-1: cowork in registry.contributions",
     Array.isArray(out.registry.contributions["cowork"]));
-  assertEq("CS-MIG-1: cowork has 41 contributions (32 skill + 3 command + 6 claude_md_row)",
-    out.registry.contributions["cowork"].length, 41);
+  assertEq("CS-MIG-1: cowork has 42 contributions (33 skill + 3 command + 6 claude_md_row)",
+    out.registry.contributions["cowork"].length, 42);
 
   const skillEntries = out.materializeList.filter((e) => e.owner === "cowork" && e.kind === "skill");
   const cmdEntries = out.materializeList.filter((e) => e.owner === "cowork" && e.kind === "command");
-  assertEq("CS-MIG-1: 32 skill entries in materializeList", skillEntries.length, 32);
+  assertEq("CS-MIG-1: 33 skill entries in materializeList", skillEntries.length, 33);
   assertEq("CS-MIG-1: 3 command entries in materializeList", cmdEntries.length, 3);
 
   // Skill dests should have {{skills_dir}} substituted to ".claude/skills/cowork".
