@@ -1,6 +1,6 @@
 {
   "name": "smart-connections-bridge",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "kind": "mechanism",
   "description": "Node CLI bridge (sc-bridge) for reading Smart Connections's local .smart-env/multi/*.ajson vector index. Provides three ops — index-status, semantic-search, find-related — using bge-micro-v2 cosine similarity via @xenova/transformers. v0.1.0 SCAFFOLD: skeleton arg parser + stub op handlers; real implementation lands in S6.",
   "depends_on": [],

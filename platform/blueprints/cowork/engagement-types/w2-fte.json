@@ -1,6 +1,6 @@
 {
   "id": "w2-fte",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "schema_version": 1,
   "label": "W2 full-time employment",
   "consumes": ["daily", "meetings", "project", "to-do", "people"],
