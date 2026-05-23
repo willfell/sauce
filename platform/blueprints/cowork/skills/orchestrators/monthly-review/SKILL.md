@@ -52,7 +52,11 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
 
 ## Write
 
-14. **Read prompt body** via `mcp__obsidian__get_file_contents` at `spice/cowork/prompts/monthly-review.md`. Strip frontmatter; capture body as `prompt_body` (or empty when missing).
+14. **Read prompt body** with fallback chain:
+    - Read `spice/cowork/prompts/monthly-review.md` via `mcp__obsidian__get_file_contents`. Strip frontmatter; capture body as `user_prompt_body` (or empty when missing).
+    - If `user_prompt_body` is empty, read `spice/cowork/context/engagement-templates/<engagement.type>/prompts/monthly-review.md`. Strip frontmatter; capture as `template_prompt_body` (or empty when missing).
+    - Set `prompt_body = user_prompt_body || template_prompt_body`.
+    - Set `prompt_source = (user_prompt_body ? "spice/cowork/prompts/monthly-review.md" : (template_prompt_body ? "spice/cowork/context/engagement-templates/<engagement.type>/prompts/monthly-review.md" : "spice/cowork/prompts/monthly-review.md"))`.
 15. **Compose run-note body** per `prompt_body` instructions interpolating month-summary gather outputs. When `prompt_body` is empty, do NOT freelance content — compose a skeleton-compliant STUB body:
     - `SpaceNavButtons` dataviewjs block (verbatim).
     - `> [!info]- This month at a glance\n> (Prompt body empty — edit spice/cowork/prompts/monthly-review.md to customize what this run emits.)`
@@ -63,7 +67,7 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
 16. READ `.claude/skills/cowork/skills/write-run-note-monthly-review/SKILL.md` in full —
     paying particular attention to its `## Title composition`,
     `## Adaptive body skeleton`, and `## Pre-write self-check` sections — then apply those contracts
-    before performing the write described in its `## Steps` section with `{ engagement, month: context.iso_month, year: context.year, body: run_body, prompt_source: "spice/cowork/prompts/monthly-review.md", warning }`. Capture `status`. If `status` starts with `"failed:contract-violation:"`, emit Notice `cowork:monthly-review aborted -- contract violation: <field>` (where `<field>` is the part after `failed:contract-violation:`). Do not run state-update steps. Exit non-zero.
+    before performing the write described in its `## Steps` section with `{ engagement, month: context.iso_month, year: context.year, body: run_body, prompt_source: prompt_source, warning }`. Capture `status`. If `status` starts with `"failed:contract-violation:"`, emit Notice `cowork:monthly-review aborted -- contract violation: <field>` (where `<field>` is the part after `failed:contract-violation:`). Do not run state-update steps. Exit non-zero.
     Else if `status` starts with `"failed:"` (e.g. `failed:filesystem:permission`, `failed:write-undersized:285`), emit Notice `cowork:monthly-review aborted -- write failed: <status>` and exit. Do not run state-update steps after a failed write.
 
 ## Verify
