@@ -1,0 +1,10 @@
+{
+  "version": "1.0.0",
+  "comment": "Maps MCP server namespaces (mcp__<ns>__*) to cowork gather skills. context-builder uses this to decide which detected MCPs have a 'devoted skill' worth asking preferences for.",
+  "entries": [
+    { "mcp_kind": "calendar", "mcp_namespace_match": "^(plugin_)?[Gg]oogle_?[Cc]alendar$|^(plugin_)?calendar$|^claude_ai_Google_Calendar$", "gather_skill": "cowork:gather-calendar" },
+    { "mcp_kind": "gmail",    "mcp_namespace_match": "^(plugin_)?[Gg]mail$|^claude_ai_Gmail$",                                                  "gather_skill": "cowork:gather-gmail" },
+    { "mcp_kind": "imessage", "mcp_namespace_match": "^(plugin_)?i[Mm]essage$|.*imessage.*",                                                    "gather_skill": "cowork:gather-imessage" },
+    { "mcp_kind": "finance",  "mcp_namespace_match": "^(plugin_)?[Bb]rex$|^claude_ai_Brex$",                                                    "gather_skill": "cowork:gather-finance-yesterday" }
+  ]
+}

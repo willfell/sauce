@@ -1,6 +1,6 @@
 {
   "name": "cowork",
-  "version": "0.14.1",
+  "version": "0.15.0",
   "kind": "blueprint",
   "module_directory": "cowork",
   "engagement_types_dir": "engagement-types",
@@ -37,6 +37,8 @@
     { "source": "content/Cowork.md",                                                            "dest": "{{module_directory}}/Cowork.md" },
     { "source": "content/context/README.md",                                                    "dest": "{{module_directory}}/context/README.md" },
     { "source": "content/context/obsidian-vault-guide.md",                                      "dest": "{{module_directory}}/context/obsidian-vault-guide.md" },
+    { "source": "content/context/user-preferences.md",                                          "dest": "{{module_directory}}/context/user-preferences.md", "materialize_once": true },
+    { "source": "content/context/mcp-skill-map.json",                                           "dest": "{{module_directory}}/context/mcp-skill-map.json" },
 
     { "source": "content/context/engagement-templates/personal/about.md",                       "dest": "{{module_directory}}/context/engagement-templates/personal/about.md" },
     { "source": "content/context/engagement-templates/personal/brand-voice.md",                 "dest": "{{module_directory}}/context/engagement-templates/personal/brand-voice.md" },
@@ -115,6 +117,7 @@
     { "kind": "skill", "source": "skills/orchestrators/weekly-review/SKILL.md",                   "dest": "{{skills_dir}}/weekly-review/SKILL.md" },
     { "kind": "skill", "source": "skills/orchestrators/monthly-review/SKILL.md",                  "dest": "{{skills_dir}}/monthly-review/SKILL.md" },
     { "kind": "skill", "source": "skills/orchestrators/onboard-scheduled-jobs/SKILL.md",   "dest": "{{skills_dir}}/onboard-scheduled-jobs/SKILL.md" },
+    { "kind": "skill", "source": "skills/orchestrators/context-builder/SKILL.md",                "dest": "{{skills_dir}}/context-builder/SKILL.md" },
     { "kind": "skill", "source": "skills/skills/check-vault-routing/SKILL.md",                    "dest": "{{skills_dir}}/skills/check-vault-routing/SKILL.md" },
     { "kind": "skill", "source": "skills/skills/date-context/SKILL.md",                           "dest": "{{skills_dir}}/skills/date-context/SKILL.md" },
     { "kind": "skill", "source": "skills/skills/ensure-daily-note/SKILL.md",                      "dest": "{{skills_dir}}/skills/ensure-daily-note/SKILL.md" },
@@ -223,6 +226,21 @@
               }
             }
           }
+        }
+      }
+    },
+    {
+      "target": "cowork",
+      "fragment": {
+        "scope": { "path_glob": "spice/cowork/context/user-preferences.md" },
+        "extends": "_canonical-vocab",
+        "required_frontmatter": {
+          "type":        { "required": true, "type": "string", "equals": "cowork-user-preferences" },
+          "updated":     { "required": true, "type": "string", "matches": "^\\d{4}-\\d{2}-\\d{2}$" },
+          "updated_by":  { "required": true, "type": "string" },
+          "priorities":  { "required": true, "type": "list" },
+          "personality": { "required": true, "type": "object" },
+          "mcps":        { "required": true, "type": "object" }
         }
       }
     },
