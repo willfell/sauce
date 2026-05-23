@@ -834,9 +834,10 @@ function assertCoworkV068Shape() {
   assertTrue(fileSources.includes("helpers/cowork-latest-runs.js"),
     "V068-MANIFEST-FILES: manifest files[] declares helpers/cowork-latest-runs.js");
 
-  // V074-VERSION: cowork blueprint version bumped to 0.13.0 (was 0.12.0 in v0.71.0).
-  assertTrue(manifest.version === "0.13.0",
-    `V074-VERSION: cowork manifest.version === "0.13.0" (got ${JSON.stringify(manifest.version)})`);
+  // V0750-VERSION: cowork blueprint version bumped to 0.14.0 (was 0.13.0 in v0.74.0).
+  // NOTE: expected to FAIL until S15 lands the cowork manifest version bump.
+  assertTrue(manifest.version === "0.14.0",
+    `V0750-VERSION: cowork manifest.version === "0.14.0" (got ${JSON.stringify(manifest.version)})`);
 }
 
 // ---------------------------------------------------------------------------
@@ -929,6 +930,42 @@ function assertCoworkV068Shape() {
   assertTrue(exampleRe.test(compliantBody),  "HC-V0750-A5 example matches");
   assertTrue(tipRe.test(compliantBody),      "HC-V0750-A5 tip matches");
   assertTrue(navRe.test(compliantBody),      "HC-V0750-A5 SpaceNavButtons matches");
+}
+
+// ---------------------------------------------------------------------------
+// HC-V0750-B13..B21 — SC integration regex-presence in orchestrators +
+// write-run-note skeleton entries.
+// ---------------------------------------------------------------------------
+{
+  const morning = fs.readFileSync(path.join(BP, "skills/orchestrators/morning-briefing/SKILL.md"), "utf8");
+  assertContains(morning, "12b. **Semantic related.**",         "HC-V0750-B13 morning step 12b present");
+  assertContains(morning, "render_aspects.semantic_related",     "HC-V0750-B14 morning gates on render_aspects.semantic_related");
+  assertContains(morning, "first 5",                              "HC-V0750-B15 morning 5-event cap mentioned");
+
+  const eod = fs.readFileSync(path.join(BP, "skills/orchestrators/eod-review/SKILL.md"), "utf8");
+  assertContains(eod, "9b. **Semantic related.**",               "HC-V0750-B16 eod step 9b present");
+  assertContains(eod, "find-related",                             "HC-V0750-B17 eod uses find-related mode");
+
+  const weekly = fs.readFileSync(path.join(BP, "skills/orchestrators/weekly-review/SKILL.md"), "utf8");
+  assertContains(weekly, "11b. **Semantic related",              "HC-V0750-B18 weekly step 11b present");
+  assertContains(weekly, "Emergent themes this week",             "HC-V0750-B19 weekly emergent-themes callout");
+  assertContains(weekly, "coverage",                               "HC-V0750-B20 weekly coverage ranking");
+
+  for (const orch of ["morning-briefing", "eod-review", "weekly-review"]) {
+    const wrn = fs.readFileSync(path.join(BP, `skills/skills/write-run-note-${orch}/SKILL.md`), "utf8");
+    assertContains(wrn, "🧩",                                     `HC-V0750-B21 write-run-note-${orch} skeleton entry`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// HC-V0750-C1..C3 — onboard-scheduled-jobs Step 2 workshop_manifest_path
+// ---------------------------------------------------------------------------
+{
+  const onboard = fs.readFileSync(path.join(BP, "skills/orchestrators/onboard-scheduled-jobs/SKILL.md"), "utf8");
+  assertContains(onboard, "workshop_manifest_path",               "HC-V0750-C1 Step 2 uses workshop_manifest_path");
+  assertTrue(!onboard.includes("in-vault context can only reach"),
+             "HC-V0750-C2 false-premise sentence removed");
+  assertContains(onboard, "consumer wins on conflict",             "HC-V0750-C3 consumer-override merge semantics");
 }
 
 (function main() {
