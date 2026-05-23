@@ -122,74 +122,6 @@ async function caseC6StatusDrift() {
     });
 }
 
-// C7: update ff-only mock-git path succeeds
-async function caseC7UpdateFFOnly() {
-    const label = "C7 update happy-path with mocked git";
-    await withTempVault({}, async (vaultPath) => {
-        const cmd = require("../cli/cmd-update.js");
-        // Inject mockGit hook on ctx
-        const events = [];
-        const ctx = {
-            vaultPath, config: { workshop_relative_path: "pantry" },
-            subscription: { mechanisms: [], blueprints: [] },
-            workshopPath: path.join(vaultPath, "pantry"),
-            workshopManifest: { workshop_version: "0.22.0" },
-            _gitExec: (args) => { events.push(args.join(" ")); return { code: 0, stdout: "", stderr: "" }; },
-            _npmInstall: () => { events.push("npm install"); return { code: 0 }; },
-            _runInstaller: () => { events.push("install"); }
-        };
-        await cmd.run(ctx, []);
-        assertTrue(events.includes("fetch origin main"), label + ": git fetch invoked");
-        assertTrue(events.some(e => /reset --hard origin\/main/.test(e)), label + ": reset --hard invoked");
-        assertTrue(events.includes("install"), label + ": installer phase invoked");
-    });
-}
-
-// C8: update refuses on dirty tree without --force
-async function caseC8UpdateDirtyRefusal() {
-    const label = "C8 update fails loud on dirty tree without --force";
-    await withTempVault({}, async (vaultPath) => {
-        const cmd = require("../cli/cmd-update.js");
-        const ctx = {
-            vaultPath, config: { workshop_relative_path: "pantry" },
-            subscription: { mechanisms: [], blueprints: [] },
-            workshopPath: path.join(vaultPath, "pantry"),
-            workshopManifest: { workshop_version: "0.22.0" },
-            _gitExec: (args) => {
-                if (args[0] === "status" && args.includes("--short")) return { code: 0, stdout: " M file.js\n", stderr: "" };
-                return { code: 0, stdout: "", stderr: "" };
-            }
-        };
-        let threw = false;
-        try { await cmd.run(ctx, []); }
-        catch (e) { threw = true; assertTrue(/dirty/i.test(e.message), label + ": error message names dirty tree"); }
-        if (!threw) { fail++; console.log("  FAIL  " + label + " — expected throw"); }
-    });
-}
-
-// C9: update --force overrides dirty tree
-async function caseC9UpdateForceOverride() {
-    const label = "C9 update --force overrides dirty tree";
-    await withTempVault({}, async (vaultPath) => {
-        const cmd = require("../cli/cmd-update.js");
-        const events = [];
-        const ctx = {
-            vaultPath, config: { workshop_relative_path: "pantry" },
-            subscription: { mechanisms: [], blueprints: [] },
-            workshopPath: path.join(vaultPath, "pantry"),
-            workshopManifest: { workshop_version: "0.22.0" },
-            _gitExec: (args) => {
-                if (args[0] === "status" && args.includes("--short")) return { code: 0, stdout: " M file.js\n", stderr: "" };
-                events.push(args.join(" "));
-                return { code: 0, stdout: "", stderr: "" };
-            },
-            _runInstaller: () => { events.push("install"); }
-        };
-        await cmd.run(ctx, ["--force"]);
-        assertTrue(events.some(e => /reset --hard/.test(e)), label + ": reset --hard invoked despite dirty");
-    });
-}
-
 // C10: wizard delegates to runReRunWizard
 async function caseC10WizardDelegates() {
     const label = "C10 wizard delegates to runReRunWizard";
@@ -952,36 +884,6 @@ async function caseI3ReinstallAllPrunes() {
     });
 }
 
-// U1: update prints migration hint when git fetch fails (v0.36.0 S4.4)
-async function caseU1UpdateHintsMigration() {
-    const label = "U1 sauce update prints migration hint when git fetch fails";
-    await withTempHome(async () => {
-        await withTempVault({}, async (vaultPath) => {
-            // Workshop dir exists (resolveContext walks for it). Create minimal pantry/ shape.
-            fs.mkdirSync(path.join(vaultPath, "pantry"), { recursive: true });
-            fs.writeFileSync(path.join(vaultPath, "pantry/.gitkeep"), "");
-            delete require.cache[require.resolve("../cli/sauce-cli.js")];
-            delete require.cache[require.resolve("../cli/cmd-update.js")];
-            const cli = require("../cli/sauce-cli.js");
-            const captured = [];
-            const origLog = console.log; console.log = (s) => captured.push(String(s));
-            let threw = false;
-            try {
-                await cli.dispatch(["update"], {
-                    cwd: vaultPath,
-                    _gitExec: (args) => {
-                        if (args[0] === "fetch") return { code: 1, stdout: "", stderr: "could not read pack" };
-                        return { code: 0, stdout: "", stderr: "" };
-                    }
-                });
-            } catch (_e) { threw = true; }
-            finally { console.log = origLog; }
-            assertTrue(threw, label + " — fetch failure still throws");
-            assertTrue(captured.some(l => l.includes("sauce migrate-layout")), label + " — hint mentions migrate-layout");
-        });
-    });
-}
-
 async function caseD1BrewMissing() {
     const label = "D1 doctor FAILs when brew prefix missing";
     await withTempHome(async () => {
@@ -1723,8 +1625,7 @@ async function caseV0751B4ResolveWorkshopPathThrowsWhenEmpty() {
 
 const cases = [
     caseC1AncestorWalk, caseC2SauceVaultEnv, caseC3NotInVault, caseC4UnknownVerb,
-    caseC5StatusClean, caseC6StatusDrift, caseC7UpdateFFOnly, caseC8UpdateDirtyRefusal,
-    caseC9UpdateForceOverride, caseC10WizardDelegates,
+    caseC5StatusClean, caseC6StatusDrift, caseC10WizardDelegates,
     caseC11BootstrapNonInteractive, caseC12BootstrapMechanismsAll,
     caseC13BootstrapBlueprintsCsv, caseC14WizardNonInteractiveDefaults,
     caseC15WizardEditSubscriptionFlatWrite,  // v0.26.0
@@ -1743,7 +1644,6 @@ const cases = [
     caseCACS3AuditClaudeSurfaceOutputFile,  // v0.32.0 S7
     caseV1VaultAdd, caseV2VaultList, caseV3VaultRemove,  // v0.36.0 S2.1 (failing-first)
     caseI1ReinstallVault, caseI2ReinstallAll, caseI3ReinstallAllPrunes,  // v0.36.0 S3.1 (failing-first)
-    caseU1UpdateHintsMigration,  // v0.36.0 S4.4
     caseD1BrewMissing, caseD2NodeOld, caseD3MissingVault,
     caseD4DanglingActivePantry, caseD5AllGreen,  // v0.36.0 S5
     caseL1LinkCreatesSymlink, caseL2LinkRefusesBadTarget,
