@@ -50,17 +50,30 @@ Each gather call passes `engagement_id`. The sub-skill reads per-engagement MCP-
     its `## Steps` section with `{ engagement_id, filter: "active", today: context.today, carry_over_from: context.yesterday_daily_path }`.
 12. READ `.claude/skills/cowork/skills/gather-threads/SKILL.md` in full and follow
     its `## Steps` section with `{ engagement_id, date_today: context.today, mode: "morning-surface" }`.
+12b. **Semantic related.** If `render_aspects.semantic_related == "include"` AND `calendar_signal.events.length > 0`:
+     For each event in `calendar_signal.events` (capped at first 5 to bound cost):
+       READ `.claude/skills/cowork/skills/gather-semantic-related/SKILL.md` in full and follow its `## Steps` section with `{
+         mode: "semantic-search",
+         query: "<event.title> <event.attendees joined> <event.description first-200-chars>",
+         top_k: 3,
+         callout_title: "Related to: <event.title>"
+       }`
+     Collect responses as `related_signals[]`. Capture `related_signals[0].index_age_minutes` as `semantic_index_age` (all calls share an age; first is canonical).
 
 ## Write
 
 13. **Read prompt body** via `mcp__obsidian__get_file_contents` at `spice/cowork/prompts/morning-briefing.md`. Strip leading frontmatter block. Capture body trimmed of leading/trailing whitespace as `prompt_body`. If file is missing, treat as `prompt_body = ""`.
-14. **Compose run-note body** from the gather outputs (steps 5–12), interpolating per `prompt_body` instructions. When `prompt_body` is empty, do NOT freelance content — compose a skeleton-compliant STUB body:
+14. **Compose run-note body** from the gather outputs (steps 5–12b), interpolating per `prompt_body` instructions. When `prompt_body` is empty, do NOT freelance content — compose a skeleton-compliant STUB body:
     - `SpaceNavButtons` dataviewjs block (verbatim).
     - `> [!info]- Today at a glance\n> (Prompt body empty — edit spice/cowork/prompts/morning-briefing.md to customize what this run emits.)`
     - `> [!example]+ 📋 Status\n> No prompt body to drive content; this run is a placeholder.`
     - `> [!tip] ✏️ Next action\n> Edit \`spice/cowork/prompts/morning-briefing.md\` to define what this scheduled job should emit when it fires.`
     Set `warning = "empty_prompt"` and pass `summary = "Stub run — prompt body at spice/cowork/prompts/morning-briefing.md is empty."` to write-run-note via its `summary` arg. The write-run-note self-check passes (5 markers + summary + title all present).
     When `prompt_body` is non-empty, set `warning = null` and compose the body per the prompt's instructions, respecting the adaptive body skeleton in write-run-note-morning-briefing's `## Adaptive body skeleton` section.
+    **Semantic interpolation** (applies when `prompt_body` is non-empty and step 12b ran):
+    - If `semantic_index_age` is non-null, append `> Semantic index age: <semantic_index_age>m` as the last line inside the `> [!info]- Synopsis` callout (before its closing blank line).
+    - For each `related_signal` in `related_signals[]` where `related_signal.status == "ready"`, append the markdown block returned by gather-semantic-related as a `> [!example]+ 🧩 Related to: <event.title>` callout immediately after the calendar-event line that matches `event.title`.
+    - If any `related_signal.status` starts with `skipped:no-index` OR `skipped:anchor-not-indexed`, set `semantic_index_unavailable = true`. Append ONE `> [!warning]- Semantic index not available\n> Smart Connections index is not built for this vault. Run the SC index from the Obsidian ribbon to enable related-context callouts.` callout after the Synopsis admonition. Idempotent: never emit more than one such warning callout per run regardless of how many per-event calls skipped.
 15. **If `render_aspects.finance_block == "include"`:** READ `.claude/skills/cowork/skills/write-run-note-finance/SKILL.md` in full —
     paying particular attention to its `## Title composition`,
     `## Adaptive body skeleton`, and `## Pre-write self-check` sections — then apply those contracts

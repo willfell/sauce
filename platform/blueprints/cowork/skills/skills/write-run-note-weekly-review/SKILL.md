@@ -98,6 +98,8 @@ The body MUST contain these 5 structural markers in this order; CONTENT inside e
 
 5. **`> [!tip] <emoji> This week's priorities`** closing admonition — 2-3 sentence focus paragraph + concrete first action.
 
+- Optional `> [!example]+ 🧩 Emergent themes this week` callout, placed AFTER the cadence's primary example block(s) and BEFORE the closing `> [!tip]`. Renders only when gather-semantic-related returned status == "ready". The body-shape pre-write self-check already accepts multiple example markers; no contract change needed.
+
 When `prompt_body` was empty upstream (`warning == "empty_prompt"`), the orchestrator composes a skeleton-compliant stub: info admonition body reads `(Prompt body empty — edit <prompt_source> to customize what this run emits.)`; example block reads `No prompt body to drive content; this run is a placeholder.`; tip block recommends editing the prompt source. Frontmatter `summary` reads `Stub run — prompt body at <prompt_source> is empty.` The self-check passes (5 markers + summary + title all present).
 
 ## Pre-write self-check

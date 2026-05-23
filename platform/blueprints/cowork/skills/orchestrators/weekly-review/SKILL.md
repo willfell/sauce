@@ -46,6 +46,21 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
     its `## Steps` section with `{ engagement_id, filter: "weekly", week_range: { start: context.week_start, end: context.week_end } }`.
 11. READ `.claude/skills/cowork/skills/gather-threads/SKILL.md` in full and follow
     its `## Steps` section with `{ engagement_id, date_today: context.today, mode: "weekly-audit", week_range: { start: context.week_start, end: context.week_end } }`.
+11b. **Semantic related — per-day find-related.** If `render_aspects.semantic_related == "include"`:
+     Build `daily_anchors[]` = list of vault-relative daily-note paths for each day in `context.week_start..context.week_end` where the daily note exists on disk (Bash `test -f`). For each anchor:
+       READ `.claude/skills/cowork/skills/gather-semantic-related/SKILL.md` in full and follow its `## Steps` section with `{ mode: "find-related", anchor: anchor, top_k: 5 }`
+     Collect responses as `week_related_signals[]`. Capture `week_related_signals[0].index_age_minutes` as `semantic_index_age`.
+11c. **Aggregate.** Dedupe `hits[]` across `week_related_signals[]` by `path`. For each unique path:
+       `aggregated_similarity = sum(similarity across signals where path appears)`
+       `coverage = count of days the path surfaced in`
+     Re-rank by `(coverage desc, aggregated_similarity desc)`. Cap to top 10.
+11d. **Compose rolled-up callout.** Build:
+       ```
+       > [!example]+ 🧩 Emergent themes this week
+       > - [[<title>]] — surfaced <coverage> days (sim sum <agg:.2f>) — <snippet>
+       > - ...
+       ```
+     If `aggregated.length == 0`, mark `week_related_status = "skipped:no-hits"`.
 12. If `render_aspects.invoice_prep == "include"`: READ `.claude/skills/cowork/skills/write-summary-invoice-prep/SKILL.md` in full and follow
     its `## Steps` section with `{ engagement, date_today: context.today, mode: "weekly" }` IF `engagement.invoice_cadence` indicates weekly invoicing. Capture `invoice_block` (markdown). Else `invoice_block = ""`.
 13. If `render_aspects.invoice_prep == "skip"` AND `engagement.type == "w2-fte"`: READ `.claude/skills/cowork/skills/write-summary-fte-status/SKILL.md` in full and follow
@@ -61,6 +76,10 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
     - `> [!tip] ✏️ Next action\n> Edit \`spice/cowork/prompts/weekly-review.md\` to define what this scheduled job should emit when it fires.`
     Set `warning = "empty_prompt"` and pass `summary = "Stub run — weekly-review prompt body at spice/cowork/prompts/weekly-review.md is empty."` to write-run-note via its `summary` arg. The write-run-note self-check passes (5 markers + summary + title all present).
     When `prompt_body` is non-empty, set `warning = null` and compose the body per the prompt's instructions, respecting the adaptive body skeleton in write-run-note-weekly-review's `## Adaptive body skeleton` section.
+    **Semantic interpolation** (applies when `prompt_body` is non-empty and steps 11b–11d ran):
+    - If `semantic_index_age` is non-null, append `> Semantic index age: <semantic_index_age>m` as the last line inside the `> [!info]- Synopsis` callout (before its closing blank line).
+    - If `week_related_status != "skipped:no-hits"`, append the rolled-up `> [!example]+ 🧩 Emergent themes this week` callout composed in step 11d, placed after the last primary example block and before the closing `> [!tip]`.
+    - If any `week_related_signals[].status` starts with `skipped:no-index` OR `skipped:anchor-not-indexed`, append ONE `> [!warning]- Semantic index not available\n> Smart Connections index is not built for this vault. Run the SC index from the Obsidian ribbon to enable related-context callouts.` callout after the Synopsis admonition. Idempotent: never emit more than one such warning callout per run regardless of how many per-day calls skipped.
 16. READ `.claude/skills/cowork/skills/write-run-note-weekly-review/SKILL.md` in full —
     paying particular attention to its `## Title composition`,
     `## Adaptive body skeleton`, and `## Pre-write self-check` sections — then apply those contracts

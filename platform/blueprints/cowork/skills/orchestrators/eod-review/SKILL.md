@@ -41,6 +41,14 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
 8. READ `.claude/skills/cowork/skills/gather-threads/SKILL.md` in full and follow
    its `## Steps` section with `{ engagement_id, date_today: context.today, mode: "eod-reconcile" }`.
 9. Compose `morning_followup` summary by reading the matching `## Morning — <engagement.label>` block in today's daily note: `{ flagged_transactions, unanswered_messages, threads: { resolved, snoozed, still_open } }`.
+9b. **Semantic related.** If `render_aspects.semantic_related == "include"`:
+    READ `.claude/skills/cowork/skills/gather-semantic-related/SKILL.md` in full and follow its `## Steps` section with `{
+      mode: "find-related",
+      anchor: context.daily_path,
+      top_k: 5,
+      callout_title: "Notes thematically close to today"
+    }`
+    Capture as `related_signal`. `semantic_index_age = related_signal.index_age_minutes`.
 
 ## Write
 
@@ -52,6 +60,10 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
     - `> [!tip] ✏️ Next action\n> Edit \`spice/cowork/prompts/eod-review.md\` to define what this scheduled job should emit when it fires.`
     Set `warning = "empty_prompt"` and pass `summary = "Stub run — prompt body at spice/cowork/prompts/eod-review.md is empty."` to write-run-note via its `summary` arg. The write-run-note self-check passes (5 markers + summary + title all present).
     When `prompt_body` is non-empty, set `warning = null` and compose the body per the prompt's instructions, respecting the adaptive body skeleton in write-run-note-eod-review's `## Adaptive body skeleton` section.
+    **Semantic interpolation** (applies when `prompt_body` is non-empty and step 9b ran):
+    - If `semantic_index_age` is non-null, append `> Semantic index age: <semantic_index_age>m` as the last line inside the `> [!info]- Synopsis` callout (before its closing blank line).
+    - If `related_signal.status == "ready"`, append the markdown block returned by gather-semantic-related as a `> [!example]+ 🧩 Notes thematically close to today` callout, placed after the last primary example block and before the closing `> [!tip]`.
+    - If `related_signal.status` starts with `skipped:no-index` OR `skipped:anchor-not-indexed`, append ONE `> [!warning]- Semantic index not available\n> Smart Connections index is not built for this vault. Run the SC index from the Obsidian ribbon to enable related-context callouts.` callout after the Synopsis admonition. Idempotent: never emit more than one such warning callout per run.
 12. READ `.claude/skills/cowork/skills/write-run-note-eod-review/SKILL.md` in full —
     paying particular attention to its `## Title composition`,
     `## Adaptive body skeleton`, and `## Pre-write self-check` sections — then apply those contracts
