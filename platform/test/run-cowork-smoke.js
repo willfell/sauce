@@ -1213,9 +1213,9 @@ function assertCoworkV068Shape() {
     } catch (e) {
         // Module-not-found is the expected failure at this stage. Surface as a
         // single FAIL with a clear message; don't crash the suite.
-        if (e && e.code === "MODULE_NOT_FOUND") {
+        if (e && (e.code === "MODULE_NOT_FOUND" || /not yet implemented/.test(e.message))) {
             failed++;
-            console.error(`FAIL ${label}: helper module not found at platform/blueprints/cowork/helpers/context-builder-dry-run.js (expected — created in S9/S10)`);
+            console.error(`FAIL ${label}: helper not yet ready (${e.message}) (expected until S10)`);
         } else {
             throw e;
         }
@@ -1266,9 +1266,9 @@ function assertCoworkV068Shape() {
             `${label}: mcps.calendar block byte-identical after Skip re-run (got first=${JSON.stringify(block1)} second=${JSON.stringify(block2)})`,
         );
     } catch (e) {
-        if (e && e.code === "MODULE_NOT_FOUND") {
+        if (e && (e.code === "MODULE_NOT_FOUND" || /not yet implemented/.test(e.message))) {
             failed++;
-            console.error(`FAIL ${label}: helper module not found (expected — created in S9/S10)`);
+            console.error(`FAIL ${label}: helper not yet ready (${e.message}) (expected until S10)`);
         } else {
             throw e;
         }
