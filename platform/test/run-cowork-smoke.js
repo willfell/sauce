@@ -839,6 +839,98 @@ function assertCoworkV068Shape() {
     `V074-VERSION: cowork manifest.version === "0.13.0" (got ${JSON.stringify(manifest.version)})`);
 }
 
+// ---------------------------------------------------------------------------
+// HC-V0750-A1 — audit-grep: no naked "Use Skill cowork:" references
+// Every "Use Skill cowork:<X>" reference (case-insensitive) must be
+// accompanied by a ".claude/skills/cowork/" or "READ " mention within
+// the next 200 chars.
+// ---------------------------------------------------------------------------
+{
+  const orchestratorFiles = [
+    "skills/orchestrators/morning-briefing/SKILL.md",
+    "skills/orchestrators/midday-tripwire/SKILL.md",
+    "skills/orchestrators/eod-review/SKILL.md",
+    "skills/orchestrators/weekly-review/SKILL.md",
+    "skills/orchestrators/monthly-review/SKILL.md",
+    "skills/orchestrators/onboard-scheduled-jobs/SKILL.md",
+  ];
+  const refRe = /\b[Uu]se [Ss]kill `?cowork:[a-z0-9\-]+/g;
+  for (const rel of orchestratorFiles) {
+    const body = fs.readFileSync(path.join(BP, rel), "utf8");
+    let match;
+    let nakedCount = 0;
+    while ((match = refRe.exec(body)) !== null) {
+      const windowText = body.slice(match.index + match[0].length, match.index + match[0].length + 200);
+      if (!windowText.includes(".claude/skills/cowork/") && !windowText.includes("READ ")) {
+        nakedCount++;
+        console.error(`HC-V0750-A1 naked ref at ${rel} offset ${match.index}: "${match[0]}"`);
+      }
+    }
+    assertTrue(nakedCount === 0, `HC-V0750-A1 ${rel} has no naked "Use Skill cowork:" refs`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// HC-V0750-A2 — Layer 2 post-write verification step present in all 5
+// atomic-note-writing orchestrators.
+// ---------------------------------------------------------------------------
+{
+  const fives = [
+    "skills/orchestrators/morning-briefing/SKILL.md",
+    "skills/orchestrators/midday-tripwire/SKILL.md",
+    "skills/orchestrators/eod-review/SKILL.md",
+    "skills/orchestrators/weekly-review/SKILL.md",
+    "skills/orchestrators/monthly-review/SKILL.md",
+  ];
+  for (const rel of fives) {
+    const body = fs.readFileSync(path.join(BP, rel), "utf8");
+    assertContains(body, "Re-read + structural verify", `HC-V0750-A2 ${rel} contains verify step`);
+    assertContains(body, "rm -f ",                       `HC-V0750-A2 ${rel} contains rm -f delete-on-miss`);
+    assertContains(body, "failed:contract-violation:",   `HC-V0750-A2 ${rel} returns contract-violation status`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// HC-V0750-A3 — onboard-scheduled-jobs Step 6 emits enriched prompts
+// for BOTH direct-mode and paste-mode branches (regex count == 2).
+// ---------------------------------------------------------------------------
+{
+  const body = fs.readFileSync(path.join(BP, "skills/orchestrators/onboard-scheduled-jobs/SKILL.md"), "utf8");
+  const enrichedRe = /READ that sub-skill's SKILL\.md from \.claude\/skills\/cowork\/skills\//g;
+  const matches = body.match(enrichedRe) || [];
+  assertTrue(matches.length === 2, `HC-V0750-A3 onboard-scheduled-jobs Step 6 enriched count == 2 (direct + paste); got ${matches.length}`);
+}
+
+// ---------------------------------------------------------------------------
+// HC-V0750-A4 — Verify-step regex patterns reject a non-compliant body.
+// ---------------------------------------------------------------------------
+{
+  const nonCompliantBody = "# Morning Briefing\n\nHello! Here's today's overview.\n\n## Calendar\n\n- 09:00 - Meeting\n- 10:00 - Other meeting\n\n## Status\n\nThings are good.\n";
+  const synopsisRe   = /^> \[!info\]- /m;
+  const exampleRe    = /^> \[!example\]\+ /m;
+  const tipRe        = /^> \[!tip\] /m;
+  const navRe        = /```dataviewjs\n[\s\S]*?SpaceNavButtons[\s\S]*?```/;
+  assertTrue(!synopsisRe.test(nonCompliantBody), "HC-V0750-A4 synopsis missing");
+  assertTrue(!exampleRe.test(nonCompliantBody),  "HC-V0750-A4 example missing");
+  assertTrue(!tipRe.test(nonCompliantBody),      "HC-V0750-A4 tip missing");
+  assertTrue(!navRe.test(nonCompliantBody),      "HC-V0750-A4 SpaceNavButtons missing");
+}
+
+// ---------------------------------------------------------------------------
+// HC-V0750-A5 — Verify-step regex patterns accept a compliant body.
+// ---------------------------------------------------------------------------
+{
+  const compliantBody = '```dataviewjs\nawait dv.view("SpaceNavButtons", { variant: "atomic" });\n```\n\n> [!info]- Synopsis\n> All good.\n\n> [!example]+ 📋 Status\n> Things are good.\n\n> [!tip] ✏️ Next action\n> Carry on.\n';
+  const synopsisRe   = /^> \[!info\]- /m;
+  const exampleRe    = /^> \[!example\]\+ /m;
+  const tipRe        = /^> \[!tip\] /m;
+  const navRe        = /```dataviewjs\n[\s\S]*?SpaceNavButtons[\s\S]*?```/;
+  assertTrue(synopsisRe.test(compliantBody), "HC-V0750-A5 synopsis matches");
+  assertTrue(exampleRe.test(compliantBody),  "HC-V0750-A5 example matches");
+  assertTrue(tipRe.test(compliantBody),      "HC-V0750-A5 tip matches");
+  assertTrue(navRe.test(compliantBody),      "HC-V0750-A5 SpaceNavButtons matches");
+}
+
 (function main() {
   console.log("--- shared contracts ---");
   checkSharedContracts();
