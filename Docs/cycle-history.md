@@ -4,6 +4,50 @@ This file archives the per-cycle status snapshots that previously lived in `CLAU
 
 ---
 
+## v0.76.0 cowork-interactive-context CLOSED 2026-05-23
+
+**Workshop:** 0.75.1 → 0.76.0
+**Blueprint:** cowork 0.14.1 → 0.15.0
+**Mechanism bumps:** none (smart-connections-bridge unchanged at 0.1.1)
+**Engagement-types:** unchanged at 0.3.1
+**Harnesses:** HC-V0760-A1 + C1..C4 + D1..D3 + F1..F2 + H1 in `run-cowork-smoke.js`; HC-V0760-B1..B4 in `run-cli.js`; HC-V0760-E1 in `run-install.js`. 23 harnesses (unchanged file count; +16 new cases).
+
+**Headline:** Eight workstreams bundle four v0.75.1 carry-forward bug fixes with the first half of cowork's interactive-context personalization feature. (A) `_resolveWorkshopPath` ancestry-walk anchor changed from `process.execPath` to `__filename` — the v0.75.1 helper's bug was hidden by the test mock; real brew installs never resolved the workshop. (B) Stale `installed.workshop_path` values are invalidated via a `platform/manifest.json` existence probe before being returned (handles `brew cleanup` invalidating the path between sauce upgrades). (C) eod-review + weekly-review get the v0.75.1 H morning-briefing fix — semantic-warning gated on the gather step having run + canonical text aligned verbatim with gather-semantic-related's orchestrator integration contract. (D) eod/weekly/monthly orchestrators get explicit engagement-template prompt fallback (fire-time, not just install-time seeding); stub fires only when both sources are empty. (E) Regression coverage for v0.59.9's `materialize_once` flag — discovered during writing-plans that the flag already implements exactly what the v0.76.0 design's `preserve_if_exists` was going to do; reused with no install.js code change. (F) New `cowork:context-builder` orchestrator-tier skill: 14 hand-curated questions across 4 MCP-kinds (calendar 3, gmail 4, imessage 3, finance 4) plus cross-cutting priorities + personality; writes structured preferences into the new user-owned `spice/cowork/context/user-preferences.md` (protected by `materialize_once: true`); companion artifacts `mcp-skill-map.json` and `context-builder-dry-run.js`. (G) New `Docs/agent-guides/cowork-customization-contract.md` documenting STOCK / USER / USER-DRAFTABLE-WITH-BACKUP file categories; the third category surfaces empirically because the 5 cowork prompts are in `files[]` WITHOUT `materialize_once` (they're `.bak`'d-then-overwritten on reinstall via v0.2.0 Option B). (H) `cowork:onboard-scheduled-jobs` gains an auto-delegation phase that probes `user-preferences.md` and delegates to `cowork:context-builder` when absent or seed-stamped (`updated_by: install.js`) — realizing the user's "all in one skill invoke from claude cowork" requirement.
+
+- **Workstream A (`__filename` walk):** Source-of-truth changed from `process.execPath` to `__filename`. On real brew installs the file lives at `/opt/homebrew/Cellar/sauce/<v>/libexec/platform/cli/cmd-update.js`; the walk finds `libexec` at depth 2. Hook renamed `_execPath` → `_callerFile`. HC-V0760-B1..B3 cover argv precedence, valid stored path, and synthetic libexec ancestor. Closes v0.75.1 carry-forward §1.
+
+- **Workstream B (stale-path probe):** After reading `installed.workshop_path`, probe for `platform/manifest.json` at the candidate. If absent, fall through to ancestry walk instead of returning the dead path. HC-V0760-B4 green. Folded into the same commit as A (`04ee3d4`). Closes v0.75.1 carry-forward §2.
+
+- **Workstream C (cross-orch semantic-warning parity):** eod-review step 11 + weekly-review step 15 mirror morning-briefing's v0.75.1 H fix — emission gated on `render_aspects.semantic_related == "include"`, text aligned verbatim with gather-semantic-related's contract (`"Smart Connections index absent or anchor not indexed — semantic gather skipped."`). HC-V0760-C1..C4 green. S3's initial regex literals missed the `"Smart Connections "` prefix; S4's implementer caught and corrected against the canonical (folded into the same commit). monthly-review has no semantic_related step. Closes v0.75.1 carry-forward §3.
+
+- **Workstream D (engagement-template prompt fallback):** Write step of eod/weekly/monthly SKILL.md reads engagement-template prompt as fallback when user prompt is empty; `prompt_source` frontmatter records which source drove the run; stub fires only when both empty. HC-V0760-D1..D3 green. Carry-forward to v0.77.0: apply to morning-briefing + midday-tripwire for 5-orchestrator parity. Closes v0.75.1 carry-forward §4.
+
+- **Workstream E (materialize_once regression + USER preservation):** HC-V0760-E1 in `run-install.js` is a synthetic-blueprint regression test guarding the v0.59.9 `materialize_once: true` mechanic. HC-V0760-A1 in `run-cowork-smoke.js` covers 9 cowork USER files (vault-config, active-threads, weekly-snapshot, 5 user prompts, NEW user-preferences.md) — byte-identical across `sauce reinstall`. The v0.59.9 flag discovery during writing-plans saved ~15 lines of new code and one harness case (E2 deleted).
+
+- **Workstream F (cowork:context-builder skill):** SKILL.md 294 lines, dry-run helper 169 lines, mcp-skill-map.json 10 lines. 14 questions: calendar 3 (time-window, signal-events, dedupe), gmail 4 (folders, signal-senders, brief-words, attach-policy), imessage 3 (threads, signal-keywords, quiet-hours), finance 4 (window, signal-thresholds, categories-roll-up, narrative-format). Cross-cutting: priorities (ordered list of `[!example]+` block labels), personality (free-text voice/tone string). HC-V0760-F1 covers first-run dry-run; HC-V0760-F2 covers re-run idempotency on the calendar block (caught a YAML-ish quoted-scalar round-trip bug — Lesson #4).
+
+- **Workstream G (boundary contract doc):** New `Docs/agent-guides/cowork-customization-contract.md`. The third "USER-DRAFTABLE WITH BACKUP" category documents the empirical hybrid behavior of the 5 cowork prompt files (in `files[]` without `materialize_once`; `.bak`'d-then-overwritten via v0.2.0 Option B). Promotion to strict-USER OR formalization of `.bak` behavior is a v0.77.0 candidate. The contract is the single source of truth for v0.76.0+ user-owned content; future cycles MUST update the contract + HC-V0760-A1 lockstep when adding USER files.
+
+- **Workstream H (onboard auto-delegation):** `cowork:onboard-scheduled-jobs` adds a "Phase: ensure user-preferences captured" between bootstrap-vault and cron-registration. Probes `user-preferences.md`; absent OR seed-stamped (`updated_by: install.js`) → delegates to `cowork:context-builder`; previously captured → offers update path, defaults to skip. HC-V0760-H1 green. Realizes user's "all in one skill invoke from claude cowork" brief.
+
+**Commits (S0–S14):** `9b2b825` (S1), `04ee3d4` (S2), `d3548e9` (S3), `1d3b74f` (S4), `cffd7b4` (S5), `8a157f4` (S6), `04d0ade` (S7), `15b0627` (S8), `2e4d9b5` (S9), `57ac77a` (S10), `8be0427` (S11), `0fdf11b` (S12), `038067d` (S13 dogfood), S14 this commit.
+
+**Smoke:** Preflight ALL GREEN across all 23 harnesses. Self-install (`node platform/test/run-install.js .`) clean — exit 0; `workshop_version: 0.76.0` in ranch/platform-installed.json. user-preferences.md preserved across reinstall via materialize_once.
+
+**Lessons:**
+1. `materialize_once` already existed (v0.59.9, kanban-board); discovered during writing-plans. Reused; saved ~15 lines of new code + one harness case. Scan install.js for existing per-file flags before inventing new ones.
+2. 5 cowork prompts are USER-DRAFTABLE-WITH-BACKUP (`.bak` via v0.2.0 Option B), not strict USER. Boundary contract documents empirical hybrid; v0.77.0 candidate to promote or formalize.
+3. Canonical text has single source of truth (sub-skill's `## Orchestrator integration contract`). Tests should derive from canonical, not paraphrase spec — S3 initial regex literals missed the `"Smart Connections "` prefix; S4 caught and corrected.
+4. Minimal YAML-ish parsers must handle quoted + unquoted scalars symmetrically. Round-trip bug surfaces only on second invocation; HC-V0760-F2's re-run-byte-identical assertion caught it.
+5. TDD red-green discipline held across all 8 workstreams. Fifth consecutive cycle (v0.73.0 → v0.76.0).
+6. Subagent-driven execution: 14 implementer dispatches; lightweight grep-and-preflight reviews (no formal spec-reviewer / code-quality subagents per stage); plan file never enters subagent context.
+7. Cross-workstream parity is recurring carry-forward — v0.75.1 H fix applied to 1 of 3 orchestrators; v0.76.0 D fix applied to 3 of 5 orchestrators; v0.77.0 will close both gaps.
+8. Persisted absolute paths that cross lifecycle boundaries (brew kegs!) MUST be probe-validated, not trusted blindly.
+
+See `Docs/plans/2026-05-23-v0.76.0-cowork-interactive-context-{design,plan,result}.md` + `Docs/plans/2026-05-23-v0.76.0-handoff.md`.
+
+---
+
 ## v0.75.1 deploy-cleanup PATCH CLOSED 2026-05-22
 
 **Workshop:** 0.75.0 → 0.75.1
