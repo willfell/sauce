@@ -22,6 +22,7 @@
  */
 "use strict";
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 
 const ROOT = path.resolve(__dirname, "..", "..");
@@ -1166,6 +1167,114 @@ function assertCoworkV068Shape() {
         /(If|when|If) `?user_prompt_body`? is empty/i.test(body) || /user_prompt_body is empty/i.test(body),
         `${label}: SKILL.md must guard the fallback on user_prompt_body emptiness`,
     );
+}
+
+// HC-V0760-F1..F2: cowork:context-builder dry-run + re-run
+// The skill body is interactive (AskUserQuestion) but supports a non-
+// interactive harness mode via dry_run_answers. F1 = first invocation
+// writes the file. F2 = second invocation with all Skip preserves file.
+
+{
+    const label = "HC-V0760-F1 context-builder dry-run writes user-preferences.md with detected-MCP blocks";
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-cb-f1-"));
+    try {
+        const vault = path.join(tmp, "vault");
+        fs.mkdirSync(path.join(vault, "spice", "cowork", "context"), { recursive: true });
+        fs.writeFileSync(path.join(vault, "spice", "cowork", "context", "vault-config.md"),
+            "---\ntype: cowork-vault-config\nupdated: 2026-05-23\nupdated_by: bootstrap-vault\nengagements:\n  - id: dogfood\n    type: personal\n---\n");
+
+        // The helper module is created in S9 (stub) and implemented in S10.
+        // Before then, this require() throws MODULE_NOT_FOUND — the test FAILs cleanly.
+        const cbDryRun = require(path.join(BP, "helpers", "context-builder-dry-run.js"));
+        cbDryRun.run({
+            vaultRoot: vault,
+            dryRunAnswers: {
+                detected_mcps: ["calendar", "gmail"],
+                per_mcp_answers: {
+                    calendar: { surface_event_kinds: ["conflicts", "focus-blocks"], include_all_day: false },
+                    gmail: { inbox_zero_threshold: 5, surface_kinds: ["unanswered-24h"] },
+                },
+                priorities: ["calendar", "gmail"],
+                personality: { vibe: "dry-and-factual", formality: "casual", pep_talk: false, length: "terse" },
+            },
+        });
+
+        const prefsPath = path.join(vault, "spice", "cowork", "context", "user-preferences.md");
+        assertTrue(fs.existsSync(prefsPath), `${label}: user-preferences.md was written`);
+
+        const body = fs.readFileSync(prefsPath, "utf8");
+        assertTrue(/type: cowork-user-preferences/.test(body), `${label}: frontmatter has type:`);
+        assertTrue(/updated_by: cowork:context-builder/.test(body), `${label}: frontmatter updated_by:`);
+        assertTrue(/mcps:\s*\n[\s\S]*calendar:/m.test(body), `${label}: mcps.calendar block`);
+        assertTrue(/mcps:\s*\n[\s\S]*gmail:/m.test(body), `${label}: mcps.gmail block`);
+        assertTrue(!/imessage:/.test(body), `${label}: imessage NOT present (not detected)`);
+        assertTrue(/priorities:\s*\n\s*- calendar\s*\n\s*- gmail/.test(body), `${label}: priorities ordered`);
+        assertTrue(/vibe:\s*dry-and-factual/.test(body), `${label}: personality.vibe`);
+    } catch (e) {
+        // Module-not-found is the expected failure at this stage. Surface as a
+        // single FAIL with a clear message; don't crash the suite.
+        if (e && e.code === "MODULE_NOT_FOUND") {
+            failed++;
+            console.error(`FAIL ${label}: helper module not found at platform/blueprints/cowork/helpers/context-builder-dry-run.js (expected — created in S9/S10)`);
+        } else {
+            throw e;
+        }
+    } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+    }
+}
+
+{
+    const label = "HC-V0760-F2 context-builder re-run with all-Skip preserves file content (only updated: changes)";
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-cb-f2-"));
+    try {
+        const vault = path.join(tmp, "vault");
+        fs.mkdirSync(path.join(vault, "spice", "cowork", "context"), { recursive: true });
+        fs.writeFileSync(path.join(vault, "spice", "cowork", "context", "vault-config.md"),
+            "---\ntype: cowork-vault-config\nupdated: 2026-05-23\nengagements:\n  - id: dogfood\n    type: personal\n---\n");
+
+        const cbDryRun = require(path.join(BP, "helpers", "context-builder-dry-run.js"));
+        cbDryRun.run({
+            vaultRoot: vault,
+            dryRunAnswers: {
+                detected_mcps: ["calendar"],
+                per_mcp_answers: { calendar: { surface_event_kinds: ["conflicts"], include_all_day: true } },
+                priorities: ["calendar"],
+                personality: { vibe: "dry-and-factual", formality: "formal", pep_talk: false, length: "terse" },
+            },
+        });
+        const prefsPath = path.join(vault, "spice", "cowork", "context", "user-preferences.md");
+        const after_first = fs.readFileSync(prefsPath, "utf8");
+
+        cbDryRun.run({
+            vaultRoot: vault,
+            dryRunAnswers: {
+                detected_mcps: ["calendar"],
+                per_mcp_actions: { calendar: "Skip" },
+                priorities: ["calendar"],
+                personality: { vibe: "dry-and-factual", formality: "formal", pep_talk: false, length: "terse" },
+            },
+        });
+        const after_second = fs.readFileSync(prefsPath, "utf8");
+
+        const calendarBlockMatch1 = after_first.match(/calendar:\s*\n((?: {4}[^\n]*\n?)+)/);
+        const calendarBlockMatch2 = after_second.match(/calendar:\s*\n((?: {4}[^\n]*\n?)+)/);
+        const block1 = calendarBlockMatch1 && calendarBlockMatch1[1];
+        const block2 = calendarBlockMatch2 && calendarBlockMatch2[1];
+        assertTrue(
+            block1 === block2 && block1 !== null && block1 !== undefined,
+            `${label}: mcps.calendar block byte-identical after Skip re-run (got first=${JSON.stringify(block1)} second=${JSON.stringify(block2)})`,
+        );
+    } catch (e) {
+        if (e && e.code === "MODULE_NOT_FOUND") {
+            failed++;
+            console.error(`FAIL ${label}: helper module not found (expected — created in S9/S10)`);
+        } else {
+            throw e;
+        }
+    } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+    }
 }
 
 // ---------------------------------------------------------------------------
