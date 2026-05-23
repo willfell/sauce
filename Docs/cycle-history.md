@@ -4,6 +4,44 @@ This file archives the per-cycle status snapshots that previously lived in `CLAU
 
 ---
 
+## v0.77.0 cowork-adaptive-detection CLOSED 2026-05-23
+
+**Workshop:** 0.76.0 → 0.77.0
+**Blueprint:** cowork 0.15.0 → 0.16.0
+**Mechanism bumps:** none (smart-connections-bridge unchanged at 0.1.1)
+**Engagement-types:** unchanged at 0.3.1
+**Harnesses:** HC-V0770-A1..A3 + B1..B2 + C1..C4 + D1 + E1 in `run-cowork-smoke.js`. 23 harnesses (unchanged file count; +11 new cases).
+
+**Headline:** Four workstreams replace v0.76.0's namespace-regex MCP detection with tool-pattern signatures, and ship fully-adaptive unknown-MCP handling. (B) `mcp-skill-map.json` schema v1.0.0 → v2.0.0: top-level `schema_version` + `capabilities[]` array (4 entries: calendar, email, chat, finance — `email` and `chat` are v2 renames of v1's `gmail` and `imessage`); each capability declares `tool_patterns[]` (regex over tool NAMES like `list_events`, `create_event`, `send_email`) and `required_count` (minimum distinct pattern matches to qualify). New `detectCapabilities(mcpToolMap)` helper in `context-builder-dry-run.js` returns `{capability: [namespace, ...]}` plus `served_by[capability]` — one MCP namespace can satisfy MULTIPLE kinds via tool-set membership (Outlook M365 UUID = calendar + email + chat from one namespace). Robust against any namespace string, including UUID-namespaced enterprise gateways. (C) Fully-adaptive unknown-MCP handling: namespaces with zero capability hits surface in an interactive loop where the user classifies as (1) known-override (route to one of the 4 known question sets), (2) custom kind (define a new kind name + free-text `what_matters` paragraph), or (3) skip. Per-MCP block gains `kind: custom`, `kind_name`, and `what_matters: |` literal-block YAML. The minimal YAML composer + parser learned the `key: |` form for byte-stable round-trip preservation. (D + E) v1 → v2 schema migration: new `migrateV1ToV2(parsed, schema)` runs at top of `run()`, consults `rename_from_v1` field on each capability, renames `mcps.gmail` → `mcps.email` and `mcps.imessage` → `mcps.chat` declaratively. Helper-location fallback added: helper's `__dirname/../content/context/mcp-skill-map.json` is the third resolution path after vault copy + workshop blueprint (purely for testability in temp-vault fixtures). (F) Schema validation folded into S1/S2: every load asserts `schema_version === "2.0.0"`; missing or mismatched throws early.
+
+- **Workstream B (tool-pattern detection + capability-subset):** Schema rewrite + `detectCapabilities` helper. v0.76.0's vendor-name regex (`Google_Calendar`, `Gmail`, `Apple_iMessage`, `Plaid`) defeated by accuris machine's UUID Outlook namespace. v0.77.0 detects on tool names; namespace string irrelevant. `served_by` records which namespace served each capability. HC-V0770-A1 (single-namespace single-capability), A2 (single-namespace multi-capability via Outlook UUID synthetic), A3 (UUID namespace successful match). Implementation in `75131ff`.
+
+- **Workstream C (custom-kind + unknown-MCP loop):** SKILL.md gains a phase between detect and interview that iterates namespaces with zero capability hits. User actions: known-override / custom / skip. Custom-kind block: `kind: custom`, `kind_name: <user-typed>`, `what_matters: |\n  ...` (YAML literal block). Composer + parser symmetric on `key: |` form (required for byte-stable Skip re-run). HC-V0770-C1..C4 green. Implementation in `4c2ca84` (compose + literal-block) and `061b3c1` (SKILL.md detect + loop).
+
+- **Workstream D + E (v1 → v2 migration + helper fallback):** `migrateV1ToV2` runs at top of `run()`, applies declarative `rename_from_v1` hints from v2 schema; one pass, no version-branching code. HC-V0770-D1 covers `mcps.gmail` → `mcps.email` + `mcps.imessage` → `mcps.chat` rename preserving all nested fields. HC-V0770-E1 covers temp-vault fallback (helper's `__dirname/../content/context/mcp-skill-map.json` resolves when no vault copy + no workshop blueprint dir exist — purely for testability). Implementation in `a28f910`.
+
+- **Workstream F (schema v2.0.0 validation):** Folded into S1/S2 — every `mcp-skill-map.json` load asserts `parsed.schema_version === "2.0.0"`. HC-V0770-B1 covers the assertion; HC-V0770-B2 covers malformed schema (missing required field) failing the validator. Caught the entire class of stale-residue-from-v0.76.0 bugs in one line.
+
+**Commits (S0–S11):** `32cda9f` (S1), `75131ff` (S2), `4a08210` (S3), `a28f910` (S4), `00377b8` (S5), `4c2ca84` (S6), `061b3c1` (S7), `3b65e7f` (S8), S9 (no-op — no edits needed in onboard SKILL.md), `07c8aa2` (S10 dogfood), S11 this commit.
+
+**Smoke:** Preflight ALL GREEN across all 23 harnesses. Self-install (`node platform/test/run-install.js .`) clean — exit 0; `workshop_version: 0.77.0` in ranch/platform-installed.json. user-preferences.md preserved across reinstall via materialize_once (regression from v0.76.0 holds).
+
+**Trigger:** Real-world `cowork:context-builder` invocation on the accuris consumer vault. v0.76.0's vendor-name regex matched the user's Google MCPs but produced ZERO hits for the Outlook M365 server (UUID namespace) and three Accuris-internal MCPs (ADO, Backstage, NewRelic). The cycle was opened reactively (not from the v0.76.0 carry-forward queue) to lift the ceiling so any environment's MCPs can be classified, recognized, or user-defined inline.
+
+**Lessons:**
+1. Capability-subset model. v0.76.0 assumed one namespace = one kind; real enterprise gateways (Outlook M365, internal corporate MCPs) bundle many capabilities under one namespace. Set-membership matching lets one namespace satisfy calendar + email + chat simultaneously; `served_by` records the source. Cleaner than per-MCP classification.
+2. Tool-pattern detection vs namespace regex. Tool names live inside the MCP protocol where naming reflects function; namespaces are vendor-controlled and arbitrary. Detect on the stable surface (tools), not the volatile one (namespace string).
+3. YAML literal blocks needed for free-text fields. `what_matters` is multi-line free text — required adding `key: |` form to both composer + parser; round-trip byte-stability for HC-V0770-C2's Skip re-run preservation needs symmetric whitespace discipline at both ends.
+4. Migration inside the helper is essentially free. Declarative `rename_from_v1` in the v2 schema + one helper pass at top of `run()` — no separate migration command, no version-branching code, zero-friction at consumer side.
+5. Helper-location fallback for testability. Production deploys always have one of two paths (vault copy or workshop blueprint); the third (`__dirname/../content/context/`) is purely for temp-vault test fixtures. Self-contained helpers that fall back to their own sibling files testable without polluting fixtures.
+6. TDD red-green discipline held across all 4 workstreams. All 3 failing-test stages (S1, S3, S5) landed with expected FAILs; all 3 implementation stages (S2, S4, S6) turned them green. S2's Task 4 also caught a downstream HC-V0760-F1+F2 inconsistency (existing tests referenced `mcps.gmail` after the rename); same-stage fix held lockstep.
+
+**Carry-forward (v0.78.0):** 5-orchestrator consumption of user-preferences.md (now genuinely v0.78.0 priority); `cowork:read-user-preferences` sub-skill; expanded known catalog (drive / code-platform / project-tracker / monitoring); promote frequently-used custom kinds to known; cross-vault preferences inheritance (`inherits_from:`). v0.76.0 carry-forwards still open: 5 cowork prompts promote-or-formalize decision.
+
+See `Docs/plans/2026-05-23-v0.77.0-cowork-adaptive-detection-{design,plan,result}.md` + `Docs/plans/2026-05-23-v0.77.0-handoff.md`.
+
+---
+
 ## v0.76.0 cowork-interactive-context CLOSED 2026-05-23
 
 **Workshop:** 0.75.1 → 0.76.0

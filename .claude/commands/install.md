@@ -124,3 +124,25 @@ Use Skill cowork:context-builder
 ### Carry-forward
 
 The 5 atomic-note-emitting cowork orchestrators (morning-briefing, midday-tripwire, eod-review, weekly-review, monthly-review) do NOT yet consume `user-preferences.md` in v0.76.0 — that consumption layer is v0.77.0. v0.76.0 stabilizes the file schema; v0.77.0 wires the orchestrators to apply priorities + personality from the file.
+
+---
+
+## Upgrading from v0.76.0 to v0.77.0
+
+`cowork:context-builder` now detects MCPs by tool-pattern signatures
+instead of namespace regex. An MCP exposing `list_events` + `create_event`
+is recognized as `calendar` regardless of its namespace — including UUID-
+namespaced enterprise gateways like Outlook M365.
+
+The v1.0.0 schema's `mcps.gmail` and `mcps.imessage` keys are renamed to
+`mcps.email` and `mcps.chat` lockstep. Existing user-preferences.md files
+migrate automatically on the next `cowork:context-builder` invocation
+(the helper applies rename hints from the v2 schema).
+
+For MCPs that don't match any known capability pattern (ADO, Backstage,
+NewRelic, etc.), the skill now surfaces them with their tool list and
+asks for classification — either route to a known kind's question set,
+or define a custom kind inline with a free-text "what matters" note.
+
+Per-vault upgrade: `sauce update --bump-pins`. No flags needed — A+B
+fixes from v0.76.0 still cover the brew-installed workshop detection.
