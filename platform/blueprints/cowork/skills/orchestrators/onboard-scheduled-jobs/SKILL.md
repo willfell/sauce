@@ -65,11 +65,20 @@ Read `spice/cowork/context/vault-config.md` via the Read tool. Parse the YAML fr
   ```
   Wait for user's number; capture `engagement`.
 
-Load the engagement-type manifest from the registry at `spice/cowork/engagement-types/<engagement.type>.json` (consumer override) or `platform/blueprints/cowork/engagement-types/<engagement.type>.json` (workshop fallback — but in-vault context can only reach the consumer path; check-vault-routing already validated). Capture:
-- `default_cadences`
-- `supported_cadences`
-- `tripwire_aspects`
-- `render_aspects`
+After capturing `engagement`, resolve the engagement-type manifest:
+
+1. Read `ranch/platform-installed.json` via the Read tool; capture `workshop_path` (absolute path to the brew-installed workshop).
+2. Compose `workshop_manifest_path` = `workshop_path` + `"/platform/blueprints/cowork/engagement-types/"` + `engagement.type` + `".json"`.
+3. Read `workshop_manifest_path` via the Read tool; parse JSON. Capture as `type_manifest_workshop`.
+4. Check for consumer override at `spice/cowork/engagement-types/<engagement.type>.json` via Bash `test -f`. If present, Read and parse; capture as `type_manifest_consumer`. Else `type_manifest_consumer = null`.
+5. Merge: `type_manifest = type_manifest_workshop` overlaid with `type_manifest_consumer` (consumer wins on conflict).
+6. Capture from merged: `default_cadences`, `supported_cadences`, `tripwire_aspects`, `render_aspects`.
+
+If `workshop_path` is missing from `ranch/platform-installed.json`, emit Notice `cowork:onboard-scheduled-jobs aborted -- ranch/platform-installed.json missing workshop_path; run sauce update first.` and exit.
+
+If `workshop_manifest_path` does not exist, emit Notice `cowork:onboard-scheduled-jobs aborted -- engagement-type manifest not found at <workshop_manifest_path>; brew-installed workshop may be incomplete.` and exit.
+
+If consumer override file is present but malformed JSON, emit a soft warning and fall back to `type_manifest_workshop` alone.
 
 ## Step 3 — Detect scheduled-tasks MCP availability
 
