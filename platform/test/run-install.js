@@ -534,12 +534,107 @@ async function caseV0751C2SauceUpdateNonGitVault() {
     }
 }
 
+// HC-V0751-E1 — after sauce install (any flow that materializes a vault),
+// ranch/platform-installed.json's top-level workshop_version field MUST be
+// set to the workshop manifest's workshop_version. Pre-v0.75.1 the installer
+// updated per-blueprint and per-mechanism versions but left the top-level
+// field stale/null.
+async function caseV0751E1WorkshopVersionRefresh() {
+    const label = "HC-V0751-E1 installer refreshes ranch/platform-installed.json workshop_version";
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-e1-"));
+    try {
+        // Set up a minimal workshop fixture with a known workshop_version.
+        const workshopDir = path.join(tmp, "workshop");
+        fs.mkdirSync(path.join(workshopDir, "platform"), { recursive: true });
+        fs.writeFileSync(
+            path.join(workshopDir, "platform", "manifest.json"),
+            JSON.stringify({
+                workshop_version: "0.75.1",
+                mechanisms: [],
+                blueprints: [],
+            }, null, 2),
+        );
+        // Set up consumer vault with a stale workshop_version.
+        const vaultDir = path.join(tmp, "vault");
+        fs.mkdirSync(path.join(vaultDir, "ranch"), { recursive: true });
+        fs.writeFileSync(
+            path.join(vaultDir, "ranch", "platform-installed.json"),
+            JSON.stringify({ workshop_version: null, blueprints: [], mechanisms: [], history: [] }, null, 2),
+        );
+        fs.writeFileSync(
+            path.join(vaultDir, "ranch", "platform-subscription.json"),
+            JSON.stringify({ workshop_version: "0.75.1", mechanisms: [], blueprints: [] }, null, 2),
+        );
+        // platform-config.json with absolute workshop_path so the installer
+        // can locate the manifest without relying on phaseRunInstaller's
+        // workshopPath param (which phaseRunInstaller does not forward).
+        fs.writeFileSync(
+            path.join(vaultDir, "ranch", "platform-config.json"),
+            JSON.stringify({ workshop_path: workshopDir, variables: {} }, null, 2),
+        );
+        // Build a minimal fake tp wired to vaultDir (mirrors run-install.js main()).
+        function vaultAbs(rel) { return path.join(vaultDir, rel); }
+        function vaultExistsSync(rel) {
+            try { fs.accessSync(vaultAbs(rel)); return true; } catch { return false; }
+        }
+        const e1Adapter = {
+            basePath: vaultDir,
+            getBasePath() { return vaultDir; },
+            async read(p) { return fsp.readFile(vaultAbs(p), "utf8"); },
+            async write(p, content) {
+                await fsp.mkdir(path.dirname(vaultAbs(p)), { recursive: true });
+                await fsp.writeFile(vaultAbs(p), content, "utf8");
+            },
+            async exists(p) { return fsp.access(vaultAbs(p)).then(() => true, () => false); },
+            async mkdir(p) { await fsp.mkdir(vaultAbs(p), { recursive: true }); },
+            async remove(p) { await fsp.unlink(vaultAbs(p)); },
+            async stat(p) {
+                try {
+                    const s = await fsp.stat(vaultAbs(p));
+                    return { type: s.isDirectory() ? "folder" : "file", size: s.size, mtime: s.mtimeMs, ctime: s.ctimeMs };
+                } catch { return null; }
+            },
+        };
+        const e1Vault = {
+            adapter: e1Adapter,
+            getAbstractFileByPath(p) { return vaultExistsSync(p) ? { path: p } : null; },
+            async read(file) { return fsp.readFile(vaultAbs(file.path), "utf8"); },
+            async modify(file, text) {
+                await fsp.mkdir(path.dirname(vaultAbs(file.path)), { recursive: true });
+                await fsp.writeFile(vaultAbs(file.path), text, "utf8");
+            },
+            async create(p, text) {
+                await fsp.mkdir(path.dirname(vaultAbs(p)), { recursive: true });
+                await fsp.writeFile(vaultAbs(p), text, "utf8");
+            },
+            async createFolder(p) { await fsp.mkdir(vaultAbs(p), { recursive: true }); },
+        };
+        const e1Tp = {
+            app: { vault: e1Vault },
+            system: { suggester: async (_ti, items) => items[0] },
+            user: {},
+        };
+        // Wire Notice globally before loading the installer.
+        global.Notice = global.Notice || class Notice { constructor(msg) { /* suppress */ } };
+        // Load install.js directly (not the vault bootstrap copy).
+        const installerPath = path.join(__dirname, "../install.js");
+        delete require.cache[require.resolve(installerPath)];
+        const installer = require(installerPath);
+        await installer(e1Tp);
+        const after = JSON.parse(fs.readFileSync(path.join(vaultDir, "ranch", "platform-installed.json"), "utf8"));
+        assertEqual(after.workshop_version, "0.75.1", label);
+    } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+    }
+}
+
 // ----- unit-test runner (no-positional-arg mode) ----------------------------
 
 async function runUnitTests() {
     const cases = [
         caseV0751C1BumpPinsNullWorkshopPath,
         caseV0751C2SauceUpdateNonGitVault,
+        caseV0751E1WorkshopVersionRefresh,
     ];
     for (const c of cases) {
         try { await c(); }

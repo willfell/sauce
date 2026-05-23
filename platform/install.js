@@ -74,6 +74,7 @@ module.exports = async function (tp) {
   };
 
   let topLevelOk = false;
+  let manifest = null; // v0.75.1 Workstream E: hoisted so finally block can read manifest.workshop_version
   try {
     const config = await readJson(app, "ranch/platform-config.json");
     const subscription = await readJson(app, "ranch/platform-subscription.json");
@@ -97,7 +98,7 @@ module.exports = async function (tp) {
     // Carried into every installed.history.push() site post-resolution.
     const git = gitState(workshopPath);
 
-    const manifest = await readJsonAbsolute(`${workshopPath}/platform/manifest.json`);
+    manifest = await readJsonAbsolute(`${workshopPath}/platform/manifest.json`);
 
     if (!manifest) {
       new Notice(`platformInstall: cannot read workshop manifest at ${workshopPath}/platform/manifest.json`, 8000);
@@ -741,6 +742,10 @@ module.exports = async function (tp) {
   } finally {
     // ALWAYS persist whatever state we have, success or failure (E1).
     try {
+      // v0.75.1 Workstream E: refresh top-level workshop_version field so
+      // `jq -r .workshop_version platform-installed.json` reflects what's
+      // actually installed, not a stale or null value from a prior install.
+      installedNow.workshop_version = manifest.workshop_version || installedNow.workshop_version || null;
       await writeJson(app, "ranch/platform-installed.json", installedNow);
     } catch (e) {
       new Notice(`platformInstall: failed to write platform-installed.json — ${e.message}`, 8000);
