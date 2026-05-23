@@ -1535,6 +1535,152 @@ function assertCoworkV068Shape() {
     );
 }
 
+// HC-V0770-B1..B2: v1 → v2 schema migration (Workstream D)
+// HC-V0770-E1:     backward-compat read of v0.76.0-shaped user-preferences.md
+
+{
+    const label = "HC-V0770-B1 migrateV1ToV2: mcps.gmail renamed to mcps.email";
+    try {
+        const helper = require(path.join(BP, "helpers", "context-builder-dry-run.js"));
+        if (typeof helper.migrateV1ToV2 !== "function") {
+            failed++;
+            console.error(`FAIL  ${label}: helper.migrateV1ToV2 not yet exported (expected until S4)`);
+        } else {
+            const map = JSON.parse(fs.readFileSync(path.join(BP, "content/context/mcp-skill-map.json"), "utf8"));
+            const existingPrefs = {
+                type: "cowork-user-preferences",
+                updated: "2026-05-23",
+                updated_by: "cowork:context-builder",
+                priorities: ["calendar", "gmail"],
+                personality: { vibe: "dry-and-factual", formality: "casual", pep_talk: false, length: "terse" },
+                mcps: {
+                    calendar: { captured_at: "2026-05-23", surface_event_kinds: ["conflicts"] },
+                    gmail: { captured_at: "2026-05-23", inbox_zero_threshold: 5 },
+                },
+            };
+            const migrated = helper.migrateV1ToV2(existingPrefs, map);
+            assertTrue(
+                migrated.mcps.email && !migrated.mcps.gmail,
+                `${label}: gmail block must rename to email; got mcps=${JSON.stringify(Object.keys(migrated.mcps))}`,
+            );
+            assertTrue(
+                migrated.mcps.email.inbox_zero_threshold === 5,
+                `${label}: renamed block must preserve answers (inbox_zero_threshold=5); got ${JSON.stringify(migrated.mcps.email)}`,
+            );
+            assertTrue(
+                migrated.priorities.includes("email") && !migrated.priorities.includes("gmail"),
+                `${label}: priorities[] must rename gmail→email; got ${JSON.stringify(migrated.priorities)}`,
+            );
+        }
+    } catch (e) {
+        if (e.code === "MODULE_NOT_FOUND" || /migrateV1ToV2 is not a function/.test(e.message)) {
+            failed++;
+            console.error(`FAIL  ${label}: ${e.message} (expected until S4)`);
+        } else {
+            throw e;
+        }
+    }
+}
+
+{
+    const label = "HC-V0770-B2 migrateV1ToV2: mcps.imessage renamed to mcps.chat";
+    try {
+        const helper = require(path.join(BP, "helpers", "context-builder-dry-run.js"));
+        if (typeof helper.migrateV1ToV2 !== "function") {
+            failed++;
+            console.error(`FAIL  ${label}: helper.migrateV1ToV2 not yet exported (expected until S4)`);
+        } else {
+            const map = JSON.parse(fs.readFileSync(path.join(BP, "content/context/mcp-skill-map.json"), "utf8"));
+            const existingPrefs = {
+                type: "cowork-user-preferences",
+                priorities: ["imessage", "calendar"],
+                personality: { vibe: "casual", formality: "casual", pep_talk: true, length: "balanced" },
+                mcps: {
+                    calendar: { captured_at: "2026-05-23", surface_event_kinds: ["conflicts"] },
+                    imessage: { captured_at: "2026-05-23", inner_circle: ["alice", "bob"], suppress_quiet_hours: true },
+                },
+            };
+            const migrated = helper.migrateV1ToV2(existingPrefs, map);
+            assertTrue(
+                migrated.mcps.chat && !migrated.mcps.imessage,
+                `${label}: imessage block must rename to chat; got mcps=${JSON.stringify(Object.keys(migrated.mcps))}`,
+            );
+            assertTrue(
+                Array.isArray(migrated.mcps.chat.inner_circle) && migrated.mcps.chat.inner_circle.length === 2,
+                `${label}: renamed block must preserve inner_circle list; got ${JSON.stringify(migrated.mcps.chat.inner_circle)}`,
+            );
+            assertTrue(
+                migrated.priorities[0] === "chat" && !migrated.priorities.includes("imessage"),
+                `${label}: priorities[] must rename imessage→chat; got ${JSON.stringify(migrated.priorities)}`,
+            );
+        }
+    } catch (e) {
+        if (e.code === "MODULE_NOT_FOUND" || /migrateV1ToV2 is not a function/.test(e.message)) {
+            failed++;
+            console.error(`FAIL  ${label}: ${e.message} (expected until S4)`);
+        } else {
+            throw e;
+        }
+    }
+}
+
+{
+    const label = "HC-V0770-E1 v0.76.0-shaped prefs (mcps.gmail + mcps.imessage) read+rewrite cleanly via run()";
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-v077-e1-"));
+    try {
+        const vault = path.join(tmp, "vault");
+        fs.mkdirSync(path.join(vault, "spice", "cowork", "context"), { recursive: true });
+        const v076Body = "---\n" +
+            "type: cowork-user-preferences\n" +
+            "updated: 2026-05-23\n" +
+            "updated_by: cowork:context-builder\n\n" +
+            "priorities:\n" +
+            "  - gmail\n" +
+            "  - imessage\n\n" +
+            "personality:\n" +
+            "  vibe: dry-and-factual\n" +
+            "  formality: casual\n" +
+            "  pep_talk: false\n" +
+            "  length: terse\n\n" +
+            "mcps:\n" +
+            "  gmail:\n" +
+            "    captured_at: \"2026-05-23\"\n" +
+            "    inbox_zero_threshold: 5\n" +
+            "  imessage:\n" +
+            "    captured_at: \"2026-05-23\"\n" +
+            "    inner_circle: [\"alice\", \"bob\"]\n" +
+            "---\n";
+        fs.writeFileSync(path.join(vault, "spice", "cowork", "context", "user-preferences.md"), v076Body);
+
+        const helper = require(path.join(BP, "helpers", "context-builder-dry-run.js"));
+        helper.run({
+            vaultRoot: vault,
+            dryRunAnswers: {
+                detected_mcps: ["calendar"],
+                per_mcp_answers: { calendar: { surface_event_kinds: ["focus-blocks"] } },
+                priorities: ["calendar"],
+                personality: { vibe: "dry-and-factual", formality: "casual", pep_talk: false, length: "terse" },
+            },
+        });
+        const newBody = fs.readFileSync(path.join(vault, "spice", "cowork", "context", "user-preferences.md"), "utf8");
+        assertTrue(/mcps:\s*\n[\s\S]*email:/.test(newBody), `${label}: rewritten file must have mcps.email block`);
+        assertTrue(/mcps:\s*\n[\s\S]*chat:/.test(newBody), `${label}: rewritten file must have mcps.chat block`);
+        assertTrue(!/^\s*gmail:/m.test(newBody), `${label}: rewritten file must NOT contain mcps.gmail`);
+        assertTrue(!/^\s*imessage:/m.test(newBody), `${label}: rewritten file must NOT contain mcps.imessage`);
+        assertTrue(/inbox_zero_threshold:\s*5/.test(newBody), `${label}: rewritten email block must preserve inbox_zero_threshold=5`);
+        assertTrue(/inner_circle:.*alice.*bob/.test(newBody), `${label}: rewritten chat block must preserve inner_circle list`);
+    } catch (e) {
+        if (/migrateV1ToV2 is not a function/.test(e.message) || /not yet implemented/.test(e.message)) {
+            failed++;
+            console.error(`FAIL  ${label}: ${e.message} (expected until S4)`);
+        } else {
+            throw e;
+        }
+    } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+    }
+}
+
 (function main() {
   console.log("--- shared contracts ---");
   checkSharedContracts();
