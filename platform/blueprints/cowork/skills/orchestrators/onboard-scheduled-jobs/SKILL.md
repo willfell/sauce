@@ -195,6 +195,24 @@ Resolve user's natural-language answer to a cron expression.
 
 If Step 4's path was `(c)` (per-cadence walk), also ask the prompt-body question per-orch with the v0.71.0 (a)/(b)/(c) options + the v0.71.0 contract-guard scan (legacy callout-patching detection) intact. Otherwise (paths a/b/d), skip the per-orch prompt-body question.
 
+## Phase: ensure user-preferences captured
+
+Probe `spice/cowork/context/user-preferences.md`:
+
+- Use Read against `spice/cowork/context/user-preferences.md`.
+- If the file does NOT exist: the vault wasn't previously installed by v0.76.0+. Proceed to delegate.
+- If it exists, parse frontmatter and check the `updated_by:` field:
+  - `updated_by: install.js` (or absent) → seed template; preferences have not been captured. Proceed to delegate.
+  - `updated_by: cowork:context-builder` → preferences captured. Ask via AskUserQuestion:
+    > Preferences captured on {{updated:}}. Update them now?
+    >   - Yes — re-run context-builder
+    >   - No — keep current preferences and continue
+    On Yes, delegate. On No, skip the delegation step.
+
+If delegation should happen, READ `.claude/skills/cowork/context-builder/SKILL.md` in full and follow its `## Steps` section with `{}`. (Live invocation — no `dry_run_answers`.)
+
+After `cowork:context-builder` returns, continue to the cron-registration phase below.
+
 ## Step 6 — Register tasks
 
 **Direct mode (`mode == "direct"`).** For each enabled orchestrator from Step 5:
