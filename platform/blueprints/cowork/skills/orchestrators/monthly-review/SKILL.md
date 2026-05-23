@@ -61,8 +61,8 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
     Set `warning = "empty_prompt"` and pass `summary = "Stub run — monthly-review prompt body at spice/cowork/prompts/monthly-review.md is empty."` to write-run-note via its `summary` arg. The write-run-note self-check passes (5 markers + summary + title all present).
     When `prompt_body` is non-empty, set `warning = null` and compose the body per the prompt's instructions, respecting the adaptive body skeleton in write-run-note-monthly-review's `## Adaptive body skeleton` section.
 16. READ `.claude/skills/cowork/skills/write-run-note-monthly-review/SKILL.md` in full —
-    paying particular attention to its `## Title composition`, `## Adaptive body
-    skeleton`, and `## Pre-write self-check` sections — then apply those contracts
+    paying particular attention to its `## Title composition`,
+    `## Adaptive body skeleton`, and `## Pre-write self-check` sections — then apply those contracts
     before performing the write described in its `## Steps` section with `{ engagement, month: context.iso_month, year: context.year, body: run_body, prompt_source: "spice/cowork/prompts/monthly-review.md", warning }`. Capture `status`. If `status` starts with `"failed:contract-violation:"`, emit Notice `cowork:monthly-review aborted -- contract violation: <field>` (where `<field>` is the part after `failed:contract-violation:`). Do not run state-update steps. Exit non-zero.
     Else if `status` starts with `"failed:"` (e.g. `failed:filesystem:permission`, `failed:write-undersized:285`), emit Notice `cowork:monthly-review aborted -- write failed: <status>` and exit. Do not run state-update steps after a failed write.
 

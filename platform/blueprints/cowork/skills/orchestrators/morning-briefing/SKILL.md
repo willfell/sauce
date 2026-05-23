@@ -62,12 +62,12 @@ Each gather call passes `engagement_id`. The sub-skill reads per-engagement MCP-
     Set `warning = "empty_prompt"` and pass `summary = "Stub run — prompt body at spice/cowork/prompts/morning-briefing.md is empty."` to write-run-note via its `summary` arg. The write-run-note self-check passes (5 markers + summary + title all present).
     When `prompt_body` is non-empty, set `warning = null` and compose the body per the prompt's instructions, respecting the adaptive body skeleton in write-run-note-morning-briefing's `## Adaptive body skeleton` section.
 15. **If `render_aspects.finance_block == "include"`:** READ `.claude/skills/cowork/skills/write-run-note-finance/SKILL.md` in full —
-    paying particular attention to its `## Title composition`, `## Adaptive body
-    skeleton`, and `## Pre-write self-check` sections — then apply those contracts
+    paying particular attention to its `## Title composition`,
+    `## Adaptive body skeleton`, and `## Pre-write self-check` sections — then apply those contracts
     before performing the write described in its `## Steps` section with `{ engagement, date: context.today, weekday: context.dddd, month_name: context["MM-Month"].split("-")[1], body: <step 9.markdown + step 10.markdown>, prompt_source: null, warning: null }`. Best-effort: log status but do not abort if status starts with `"failed:"`.
 16. READ `.claude/skills/cowork/skills/write-run-note-morning-briefing/SKILL.md` in full —
-    paying particular attention to its `## Title composition`, `## Adaptive body
-    skeleton`, and `## Pre-write self-check` sections — then apply those contracts
+    paying particular attention to its `## Title composition`,
+    `## Adaptive body skeleton`, and `## Pre-write self-check` sections — then apply those contracts
     before performing the write described in its `## Steps` section with `{ engagement, date: context.today, weekday: context.dddd, month_name: context["MM-Month"].split("-")[1], body: run_body, prompt_source: "spice/cowork/prompts/morning-briefing.md", warning }`. Capture `status`. If `status` starts with `"failed:contract-violation:"`, emit Notice `cowork:morning-briefing aborted -- contract violation: <field>` (where `<field>` is the part after `failed:contract-violation:`). Do not run state-update steps. Exit non-zero.
     Else if `status` starts with `"failed:"` (e.g. `failed:filesystem:permission`, `failed:write-undersized:285`), emit Notice `cowork:morning-briefing aborted -- write failed: <status>` and exit. Do not run state-update steps after a failed write.
 

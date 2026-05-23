@@ -41,8 +41,8 @@ its `## Steps` section with `{ required: ["filesystem"], bootstrapped_required: 
   consulting client) before scheduling. I'll run the bootstrap interview
   now, then come back to scheduling. Continue? (y/n)
   ```
-  - On `y`: READ `.claude/skills/cowork/bootstrap-vault/SKILL.md` in full and follow
-    its `## Steps` section interactively. On its successful completion, resume at Step 2.
+  - On `y`: READ `.claude/skills/cowork/bootstrap-vault/SKILL.md` in full and execute
+    it interactively. On its successful completion, resume at Step 2.
   - On `n`: print pointer `"Run cowork:bootstrap-vault when ready, then re-run cowork:onboard-scheduled-jobs."` Exit.
 - If status is `"not-vault-root"` or `"read-only"`: emit Notice `cowork:onboard-scheduled-jobs aborted -- vault not writable from cwd` and exit.
 - If status is `"ready"`: proceed to Step 2.
