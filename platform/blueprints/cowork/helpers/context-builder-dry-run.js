@@ -162,13 +162,77 @@ function detectCapabilities(availableTools, mcpSkillMap) {
     return { detected, unmapped_namespaces };
 }
 
+// v0.77.0 Workstream D: migrate v0.76.0-shaped user-preferences.md to v0.77.0
+// shape by renaming kind keys per the rename_from_v1 hints in the v2 map.
+// Idempotent: if the prefs are already v2-shaped, returns them unchanged.
+//
+// existingPrefs: parsed user-preferences.md frontmatter object (may be null)
+// mcpSkillMap:   parsed mcp-skill-map.json (v2.0.0 shape)
+//
+// returns: new prefs object with keys renamed; safe to call repeatedly
+function migrateV1ToV2(existingPrefs, mcpSkillMap) {
+    if (!existingPrefs) return existingPrefs;
+    const renameMap = {}; // old → new
+    for (const entry of (mcpSkillMap.kinds || [])) {
+        if (entry.rename_from_v1 && entry.kind && entry.rename_from_v1 !== entry.kind) {
+            renameMap[entry.rename_from_v1] = entry.kind;
+        }
+    }
+    if (Object.keys(renameMap).length === 0) return existingPrefs;
+
+    // Deep copy to avoid mutating caller's object
+    const next = JSON.parse(JSON.stringify(existingPrefs));
+
+    // Rename mcps.<old> → mcps.<new>
+    if (next.mcps && typeof next.mcps === "object") {
+        for (const oldKey of Object.keys(renameMap)) {
+            const newKey = renameMap[oldKey];
+            if (next.mcps[oldKey] !== undefined && next.mcps[newKey] === undefined) {
+                next.mcps[newKey] = next.mcps[oldKey];
+                delete next.mcps[oldKey];
+            }
+        }
+    }
+
+    // Rename priorities[] entries
+    if (Array.isArray(next.priorities)) {
+        next.priorities = next.priorities.map(p => renameMap[p] || p);
+    }
+
+    return next;
+}
+
 function run(opts) {
     const { vaultRoot, dryRunAnswers } = opts || {};
     if (!vaultRoot) throw new Error("context-builder-dry-run.run: vaultRoot is required");
     if (!dryRunAnswers) throw new Error("context-builder-dry-run.run: dryRunAnswers is required");
 
     const prefsPath = path.join(vaultRoot, "spice/cowork/context/user-preferences.md");
-    const existing = readExistingPrefs(prefsPath);
+    let existing = readExistingPrefs(prefsPath);
+
+    // v0.77.0 Workstream D: migrate any v0.76.0-shaped keys (mcps.gmail →
+    // mcps.email; mcps.imessage → mcps.chat; priorities[] entries) before
+    // merging new answers. Reads the workshop's mcp-skill-map.json to learn
+    // the rename hints; safe to call when no migration is needed (idempotent).
+    if (existing) {
+        // Locate the mcp-skill-map.json: prefer the materialized vault copy,
+        // fall back to the platform/ source when running from workshop dogfood.
+        const mapCandidates = [
+            path.join(vaultRoot, "spice/cowork/context/mcp-skill-map.json"),
+            path.join(vaultRoot, "platform/blueprints/cowork/content/context/mcp-skill-map.json"),
+            path.join(__dirname, "..", "content/context/mcp-skill-map.json"),
+        ];
+        let mcpSkillMap = null;
+        for (const c of mapCandidates) {
+            if (fs.existsSync(c)) {
+                try {
+                    mcpSkillMap = JSON.parse(fs.readFileSync(c, "utf8"));
+                    break;
+                } catch (_e) { /* ignore parse errors; skip migration */ }
+            }
+        }
+        if (mcpSkillMap) existing = migrateV1ToV2(existing, mcpSkillMap);
+    }
 
     // Build new mcps map: walk-or-update from per_mcp_answers; preserve disconnected;
     // skip when action == 'Skip' (use existing block); clear when action == 'Clear'.
@@ -232,6 +296,7 @@ function run(opts) {
 module.exports = {
     run,
     detectCapabilities,
+    migrateV1ToV2,
     _parseYamlIsh: parseYamlIsh,
     _composeYaml: composeYaml,
 };
