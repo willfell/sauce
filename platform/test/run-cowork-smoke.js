@@ -1117,6 +1117,57 @@ function assertCoworkV068Shape() {
     );
 }
 
+// HC-V0760-D1..D3: engagement-template prompt fallback
+// Mirrors morning-briefing's behavior. When spice/cowork/prompts/<orch>.md is
+// empty, fall back to spice/cowork/context/engagement-templates/<type>/prompts/
+// <orch>.md before emitting the stub. Only stub when BOTH are empty.
+
+{
+    const label = "HC-V0760-D1 eod-review: SKILL.md Write phase reads engagement-template prompt as fallback when user-prompt is empty";
+    const skillPath = path.join(BP, "skills/orchestrators/eod-review/SKILL.md");
+    const body = fs.readFileSync(skillPath, "utf8");
+    assertTrue(
+        /engagement-templates\/<engagement\.type>\/prompts\/eod-review\.md/.test(body)
+            || /engagement-templates\/\$\{engagement\.type\}\/prompts\/eod-review\.md/.test(body)
+            || /engagement-templates\/[<>{][^/]+[>}]?\/prompts\/eod-review\.md/.test(body),
+        `${label}: SKILL.md must reference the engagement-template fallback path`,
+    );
+    assertTrue(
+        /(If|when|If) `?user_prompt_body`? is empty/i.test(body) || /user_prompt_body is empty/i.test(body),
+        `${label}: SKILL.md must guard the fallback on user_prompt_body emptiness`,
+    );
+}
+
+{
+    const label = "HC-V0760-D2 weekly-review: SKILL.md Write phase reads engagement-template prompt as fallback";
+    const skillPath = path.join(BP, "skills/orchestrators/weekly-review/SKILL.md");
+    const body = fs.readFileSync(skillPath, "utf8");
+    assertTrue(
+        /engagement-templates\/<engagement\.type>\/prompts\/weekly-review\.md/.test(body)
+            || /engagement-templates\/[<>{][^/]+[>}]?\/prompts\/weekly-review\.md/.test(body),
+        `${label}: SKILL.md must reference the engagement-template fallback path`,
+    );
+    assertTrue(
+        /(If|when|If) `?user_prompt_body`? is empty/i.test(body) || /user_prompt_body is empty/i.test(body),
+        `${label}: SKILL.md must guard the fallback on user_prompt_body emptiness`,
+    );
+}
+
+{
+    const label = "HC-V0760-D3 monthly-review: SKILL.md Write phase reads engagement-template prompt as fallback";
+    const skillPath = path.join(BP, "skills/orchestrators/monthly-review/SKILL.md");
+    const body = fs.readFileSync(skillPath, "utf8");
+    assertTrue(
+        /engagement-templates\/<engagement\.type>\/prompts\/monthly-review\.md/.test(body)
+            || /engagement-templates\/[<>{][^/]+[>}]?\/prompts\/monthly-review\.md/.test(body),
+        `${label}: SKILL.md must reference the engagement-template fallback path`,
+    );
+    assertTrue(
+        /(If|when|If) `?user_prompt_body`? is empty/i.test(body) || /user_prompt_body is empty/i.test(body),
+        `${label}: SKILL.md must guard the fallback on user_prompt_body emptiness`,
+    );
+}
+
 (function main() {
   console.log("--- shared contracts ---");
   checkSharedContracts();
