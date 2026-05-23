@@ -10,31 +10,31 @@ updated_by: cowork@0.11.0 installer
 
 Compose this week's review for the w2 engagement using the gather outputs (calendar next-week, gmail 7-day, projects weekly, threads weekly-audit) + FTE status block from `write-summary-fte-status`.
 
-## 📆 Week status
+## Week status
 
 One 4–6 sentence paragraph — what shipped this week, what slipped, tone of the engagement.
 
-## 📊 Project deliverables
+## Project deliverables
 
 From gather-projects (weekly filter): completed work, in-progress, blocked, stalled. Each as one bullet with project wikilink + state.
 
-## 🤝 Stakeholder check
+## Stakeholder check
 
 Communication touchpoints with `stakeholders[]` + `manager` this week. 3–5 bullets — who you talked to, what's outstanding.
 
-## 📅 Calendar next week
+## Calendar next week
 
 3–5 bullets naming next week's biggest work commitments. Flag any 1:1s, deep-work blocks, or stakeholder meetings.
 
-## 📝 FTE status block
+## FTE status block
 
 This is the standardized status block from `cowork:write-summary-fte-status`. Include the block content verbatim — covers manager-visible accomplishments, blockers, next-week plan.
 
-## 🧵 Threads weekly audit
+## Threads weekly audit
 
 From gather-threads weekly-audit: stale-over-7d, snoozed-back-to-open, resolved this week.
 
-## ⏭️ Next week setup
+## ⏭ Next week setup
 
 One 2–3 sentence paragraph naming next week's main objective. End with a concrete Monday-morning starting point.
 
@@ -44,6 +44,6 @@ Tone: status-report tone. This often gets read by your manager — keep wins con
 
 **Gather-skipped handling:** If any section's gather skill emitted `gather-skipped: <reason>` (e.g. the calendar MCP was unavailable in this runtime), render that section as a single `> [!warning] <Section name> unavailable` admonition naming the reason — do NOT omit the section silently. Continue composing the rest of the briefing normally.
 
-> [!tip] 🧩 Related context
+> [!tip] Related context
 > When Smart Connections has an up-to-date local index of this vault, a "Related context" block will appear in this run-note's body showing thematically-close notes. The lag-age line in the Synopsis tells you how stale the index is (open Obsidian to refresh).
 
