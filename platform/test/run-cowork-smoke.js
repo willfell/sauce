@@ -918,6 +918,42 @@ function assertCoworkV068Shape() {
 }
 
 // ---------------------------------------------------------------------------
+// HC-V0751-A1 — engagement-template prompts contain no emoji glyphs.
+// v0.75.1 G stripped 93 emoji characters from 15 prompt files. This
+// audit-grep fails-closed on any future reintroduction.
+// ---------------------------------------------------------------------------
+{
+    const promptDirs = [
+        "content/context/engagement-templates/personal/prompts",
+        "content/context/engagement-templates/w2-fte/prompts",
+        "content/context/engagement-templates/consulting/prompts",
+    ];
+    const promptFiles = [
+        "morning-briefing.md", "midday-tripwire.md", "eod-review.md",
+        "weekly-review.md", "monthly-review.md",
+    ];
+    // Unicode emoji ranges: symbols+pictographs, misc symbols, dingbats, mahjong/cards, variation selector.
+    const emojiRe = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{1F000}-\u{1F2FF}\u{FE0F}]/gu;
+    let totalEmoji = 0;
+    const violatingFiles = [];
+    for (const dir of promptDirs) {
+        for (const file of promptFiles) {
+            const rel = `${dir}/${file}`;
+            const body = fs.readFileSync(path.join(BP, rel), "utf8");
+            const matches = body.match(emojiRe) || [];
+            if (matches.length > 0) {
+                totalEmoji += matches.length;
+                violatingFiles.push(`${rel} (${matches.length})`);
+            }
+        }
+    }
+    assertTrue(
+        totalEmoji === 0,
+        `HC-V0751-A1 zero emoji in 15 engagement-template prompts; found ${totalEmoji} across ${violatingFiles.length} files: ${violatingFiles.join(", ")}`,
+    );
+}
+
+// ---------------------------------------------------------------------------
 // HC-V0750-A5 — Verify-step regex patterns accept a compliant body.
 // ---------------------------------------------------------------------------
 {
