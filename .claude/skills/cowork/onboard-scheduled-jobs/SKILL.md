@@ -31,7 +31,8 @@ re-run me later to change anything. Let's start.
 
 ## Step 1 — Pre-flight
 
-Use Skill `cowork:check-vault-routing` with `{ required: ["filesystem"], bootstrapped_required: true }`.
+READ `.claude/skills/cowork/skills/check-vault-routing/SKILL.md` in full and follow
+its `## Steps` section with `{ required: ["filesystem"], bootstrapped_required: true }`.
 
 - If status is `"not-bootstrapped"`: print preamble:
   ```
@@ -40,7 +41,8 @@ Use Skill `cowork:check-vault-routing` with `{ required: ["filesystem"], bootstr
   consulting client) before scheduling. I'll run the bootstrap interview
   now, then come back to scheduling. Continue? (y/n)
   ```
-  - On `y`: use Skill `cowork:bootstrap-vault` interactively. On its successful completion, resume at Step 2.
+  - On `y`: READ `.claude/skills/cowork/bootstrap-vault/SKILL.md` in full and execute
+    it interactively. On its successful completion, resume at Step 2.
   - On `n`: print pointer `"Run cowork:bootstrap-vault when ready, then re-run cowork:onboard-scheduled-jobs."` Exit.
 - If status is `"not-vault-root"` or `"read-only"`: emit Notice `cowork:onboard-scheduled-jobs aborted -- vault not writable from cwd` and exit.
 - If status is `"ready"`: proceed to Step 2.
@@ -63,11 +65,20 @@ Read `spice/cowork/context/vault-config.md` via the Read tool. Parse the YAML fr
   ```
   Wait for user's number; capture `engagement`.
 
-Load the engagement-type manifest from the registry at `spice/cowork/engagement-types/<engagement.type>.json` (consumer override) or `platform/blueprints/cowork/engagement-types/<engagement.type>.json` (workshop fallback — but in-vault context can only reach the consumer path; check-vault-routing already validated). Capture:
-- `default_cadences`
-- `supported_cadences`
-- `tripwire_aspects`
-- `render_aspects`
+After capturing `engagement`, resolve the engagement-type manifest:
+
+1. Read `ranch/platform-installed.json` via the Read tool; capture `workshop_path` (absolute path to the brew-installed workshop).
+2. Compose `workshop_manifest_path` = `workshop_path` + `"/platform/blueprints/cowork/engagement-types/"` + `engagement.type` + `".json"`.
+3. Read `workshop_manifest_path` via the Read tool; parse JSON. Capture as `type_manifest_workshop`.
+4. Check for consumer override at `spice/cowork/engagement-types/<engagement.type>.json` via Bash `test -f`. If present, Read and parse; capture as `type_manifest_consumer`. Else `type_manifest_consumer = null`.
+5. Merge: `type_manifest = type_manifest_workshop` overlaid with `type_manifest_consumer` (consumer wins on conflict).
+6. Capture from merged: `default_cadences`, `supported_cadences`, `tripwire_aspects`, `render_aspects`.
+
+If `workshop_path` is missing from `ranch/platform-installed.json`, emit Notice `cowork:onboard-scheduled-jobs aborted -- ranch/platform-installed.json missing workshop_path; run sauce update first.` and exit.
+
+If `workshop_manifest_path` does not exist, emit Notice `cowork:onboard-scheduled-jobs aborted -- engagement-type manifest not found at <workshop_manifest_path>; brew-installed workshop may be incomplete.` and exit.
+
+If consumer override file is present but malformed JSON, emit a soft warning and fall back to `type_manifest_workshop` alone.
 
 ## Step 3 — Detect scheduled-tasks MCP availability
 
@@ -191,7 +202,7 @@ If Step 4's path was `(c)` (per-cadence walk), also ask the prompt-body question
   ```
   name:   cowork-<orch>-<engagement.id>
   cron:   <resolved cron expression>
-  prompt: Use skill cowork:<orch> with { engagement_id: "<engagement.id>" }
+  prompt: Use skill cowork:<orch> with { engagement_id: "<engagement.id>" }. When the orchestrator instructs you to use a sub-skill (cowork:write-run-note-*, cowork:gather-*, etc.), READ that sub-skill's SKILL.md from .claude/skills/cowork/skills/<name>/ and strictly follow its sections including any "## Pre-write self-check" checklist before proceeding with the action described in "## Steps". Return failed:contract-violation:<field> on any miss.
   ```
 - Check `existing_tasks` (from Step 3) for a task with matching `name`:
   - If found: call `mcp__scheduled-tasks__update` with `{ task_id, cron, prompt }`. Capture `task_id`.
@@ -211,7 +222,7 @@ On `y`: call `mcp__scheduled-tasks__delete`; append `{ orch, status: "deleted", 
 Job:        <orch>-<engagement.id>
 Schedule:   <cadence string>
 Cron:       <cron expression>
-Prompt:     Use skill cowork:<orch> with { engagement_id: "<engagement.id>" }
+Prompt:     Use skill cowork:<orch> with { engagement_id: "<engagement.id>" }. When the orchestrator instructs you to use a sub-skill (cowork:write-run-note-*, cowork:gather-*, etc.), READ that sub-skill's SKILL.md from .claude/skills/cowork/skills/<name>/ and strictly follow its sections including any "## Pre-write self-check" checklist before proceeding with the action described in "## Steps". Return failed:contract-violation:<field> on any miss.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 Print all blocks to chat. Append to `register_results[]`: `{ orch, status: "paste-needed", task_id: null, cron, prompt }`.

@@ -47,3 +47,7 @@ One 2–3 sentence paragraph naming next week's main client objective. End with 
 Tone: client-aware status. This often informs invoice prep, so be specific about deliverables shipped.
 
 **Gather-skipped handling:** If any section's gather skill emitted `gather-skipped: <reason>` (calendar or email MCP unavailable, or any consulting-specific source unreachable), render that section as a single `> [!warning] <Section name> unavailable` admonition naming the reason — do NOT omit the section silently. Continue composing the rest of the briefing normally.
+
+> [!tip] 🧩 Related context
+> When Smart Connections has an up-to-date local index of this vault, a "Related context" block will appear in this run-note's body showing thematically-close notes. The lag-age line in the Synopsis tells you how stale the index is (open Obsidian to refresh).
+

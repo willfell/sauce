@@ -22,22 +22,33 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
 
 ## Pre-flight
 
-1. Use Skill `cowork:check-vault-routing` with `{ required: ["obsidian"] }`. If not `"ready"`, emit Notice `cowork:monthly-review aborted -- <status>` and exit.
+1. READ `.claude/skills/cowork/skills/check-vault-routing/SKILL.md` in full and follow
+   its `## Steps` section with `{ required: ["obsidian"] }`. If not `"ready"`, emit Notice `cowork:monthly-review aborted -- <status>` and exit.
 2. **Resolve engagement.** Read vault-config.md; look up engagement by id; load type manifest; capture `engagement` + `render_aspects`.
-3. Use Skill `cowork:date-context` with `{}`. Capture `context` — critically `prev_month_start`, `prev_month_end`, `prev_month_label`, `prev_month_yyyymm`, plus today's `daily_path`.
-4. Use Skill `cowork:ensure-daily-note` with `{ date: context.today, weekday: context.dddd, month_name: context["MM-Month"].split("-")[1], path: context.daily_path }`.
+3. READ `.claude/skills/cowork/skills/date-context/SKILL.md` in full and follow
+   its `## Steps` section with `{}`. Capture `context` — critically `prev_month_start`, `prev_month_end`, `prev_month_label`, `prev_month_yyyymm`, plus today's `daily_path`.
+4. READ `.claude/skills/cowork/skills/ensure-daily-note/SKILL.md` in full and follow
+   its `## Steps` section with `{ date: context.today, weekday: context.dddd, month_name: context["MM-Month"].split("-")[1], path: context.daily_path }`.
 
 ## Gather
 
-5. If `render_aspects.finance_block == "include"`: use Skill `cowork:gather-finance-yesterday` with `{ engagement_id, date_yesterday: context.prev_month_end, mode: "full-month", month_range: { start: context.prev_month_start, end: context.prev_month_end } }`.
-6. If `render_aspects.finance_block == "include"`: use Skill `cowork:gather-cc-debt-snapshot` with `{ engagement_id, date_today: context.today, mode: "monthly-close", month_range: { start: context.prev_month_start, end: context.prev_month_end }, append_to_tracker: true }`.
-7. Use Skill `cowork:gather-calendar` with `{ engagement_id, date_today: context.today, horizon: "next-month", range_start: context.next_month_start, range_end: context.next_month_end, timezone: "America/Denver" }`.
-8. Use Skill `cowork:gather-imessage` with `{ engagement_id, window_days: 31, scope: "inner-circle" }` (gated: personal-only).
-9. Use Skill `cowork:gather-projects` with `{ engagement_id, filter: "monthly", month_range: { start: context.prev_month_start, end: context.prev_month_end } }`.
-10. Use Skill `cowork:gather-threads` with `{ engagement_id, date_today: context.today, mode: "monthly-audit", month_range: { start: context.prev_month_start, end: context.prev_month_end } }`.
+5. If `render_aspects.finance_block == "include"`: READ `.claude/skills/cowork/skills/gather-finance-yesterday/SKILL.md` in full and follow
+   its `## Steps` section with `{ engagement_id, date_yesterday: context.prev_month_end, mode: "full-month", month_range: { start: context.prev_month_start, end: context.prev_month_end } }`.
+6. If `render_aspects.finance_block == "include"`: READ `.claude/skills/cowork/skills/gather-cc-debt-snapshot/SKILL.md` in full and follow
+   its `## Steps` section with `{ engagement_id, date_today: context.today, mode: "monthly-close", month_range: { start: context.prev_month_start, end: context.prev_month_end }, append_to_tracker: true }`.
+7. READ `.claude/skills/cowork/skills/gather-calendar/SKILL.md` in full and follow
+   its `## Steps` section with `{ engagement_id, date_today: context.today, horizon: "next-month", range_start: context.next_month_start, range_end: context.next_month_end, timezone: "America/Denver" }`.
+8. READ `.claude/skills/cowork/skills/gather-imessage/SKILL.md` in full and follow
+   its `## Steps` section with `{ engagement_id, window_days: 31, scope: "inner-circle" }` (gated: personal-only).
+9. READ `.claude/skills/cowork/skills/gather-projects/SKILL.md` in full and follow
+   its `## Steps` section with `{ engagement_id, filter: "monthly", month_range: { start: context.prev_month_start, end: context.prev_month_end } }`.
+10. READ `.claude/skills/cowork/skills/gather-threads/SKILL.md` in full and follow
+    its `## Steps` section with `{ engagement_id, date_today: context.today, mode: "monthly-audit", month_range: { start: context.prev_month_start, end: context.prev_month_end } }`.
 11. Forward-look stressors (inline scan): `spice/trips/` (next 30-45 days), `spice/finance/budgets/` (annual bills next month), explicit "planned purchase" notes. Assemble the Forward look list. (Currently inline; planned `cowork:gather-forward-stressors` sub-skill carry.)
-12. If `render_aspects.invoice_prep == "include"` AND `engagement.invoice_cadence == "monthly"`: use Skill `cowork:write-summary-invoice-prep` with `{ engagement, date_today: context.today, mode: "monthly", month_range: { start: context.prev_month_start, end: context.prev_month_end } }`. Capture `invoice_block`.
-13. If `render_aspects.invoice_prep == "skip"` AND `engagement.type == "w2-fte"`: use Skill `cowork:write-summary-fte-status` with `{ engagement, date_today: context.today, mode: "monthly" }`. Capture `fte_status_block`.
+12. If `render_aspects.invoice_prep == "include"` AND `engagement.invoice_cadence == "monthly"`: READ `.claude/skills/cowork/skills/write-summary-invoice-prep/SKILL.md` in full and follow
+    its `## Steps` section with `{ engagement, date_today: context.today, mode: "monthly", month_range: { start: context.prev_month_start, end: context.prev_month_end } }`. Capture `invoice_block`.
+13. If `render_aspects.invoice_prep == "skip"` AND `engagement.type == "w2-fte"`: READ `.claude/skills/cowork/skills/write-summary-fte-status/SKILL.md` in full and follow
+    its `## Steps` section with `{ engagement, date_today: context.today, mode: "monthly" }`. Capture `fte_status_block`.
 
 ## Write
 
@@ -49,12 +60,39 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
     - `> [!tip] ✏️ Next action\n> Edit \`spice/cowork/prompts/monthly-review.md\` to define what this scheduled job should emit when it fires.`
     Set `warning = "empty_prompt"` and pass `summary = "Stub run — monthly-review prompt body at spice/cowork/prompts/monthly-review.md is empty."` to write-run-note via its `summary` arg. The write-run-note self-check passes (5 markers + summary + title all present).
     When `prompt_body` is non-empty, set `warning = null` and compose the body per the prompt's instructions, respecting the adaptive body skeleton in write-run-note-monthly-review's `## Adaptive body skeleton` section.
-16. Use Skill `cowork:write-run-note-monthly-review` with `{ engagement, month: context.iso_month, year: context.year, body: run_body, prompt_source: "spice/cowork/prompts/monthly-review.md", warning }`. Capture `status`. If `status` starts with `"failed:contract-violation:"`, emit Notice `cowork:monthly-review aborted -- contract violation: <field>` (where `<field>` is the part after `failed:contract-violation:`). Do not run state-update steps. Exit non-zero.
+16. READ `.claude/skills/cowork/skills/write-run-note-monthly-review/SKILL.md` in full —
+    paying particular attention to its `## Title composition`,
+    `## Adaptive body skeleton`, and `## Pre-write self-check` sections — then apply those contracts
+    before performing the write described in its `## Steps` section with `{ engagement, month: context.iso_month, year: context.year, body: run_body, prompt_source: "spice/cowork/prompts/monthly-review.md", warning }`. Capture `status`. If `status` starts with `"failed:contract-violation:"`, emit Notice `cowork:monthly-review aborted -- contract violation: <field>` (where `<field>` is the part after `failed:contract-violation:`). Do not run state-update steps. Exit non-zero.
     Else if `status` starts with `"failed:"` (e.g. `failed:filesystem:permission`, `failed:write-undersized:285`), emit Notice `cowork:monthly-review aborted -- write failed: <status>` and exit. Do not run state-update steps after a failed write.
+
+## Verify
+
+17. **Re-read + structural verify.** After `write-run-note-monthly-review` returns a non-`"failed:"` status:
+
+   a. Read the just-written file via the Read tool at `spice/cowork/monthly/<YYYY>/<YYYY-MM>/monthly-review.md` (substituting the values from `context`).
+   b. Parse leading frontmatter (YAML between `---` markers) as `parsed_frontmatter`; capture the remainder as `body`.
+   c. Assert required frontmatter fields exist and are non-empty strings:
+      - `title:`
+      - `summary:`
+      - `type:` (must equal `cowork-monthly-review`)
+      - `warning:` only when the orchestrator passed a non-null `warning` to write-run-note (otherwise the field is allowed to be absent or `null`).
+   d. Regex-scan `body` for required structural markers:
+      - SpaceNavButtons block: `/```dataviewjs\n[\s\S]*?SpaceNavButtons[\s\S]*?```/`
+      - At least one Synopsis callout: `/^> \[!info\]- /m`
+      - At least one example callout: `/^> \[!example\]\+ /m`
+      - Closing tip callout: `/^> \[!tip\] /m`
+   e. On ANY frontmatter-field miss or marker miss:
+      - Use Bash to delete the file: `rm -f spice/cowork/monthly/<YYYY>/<YYYY-MM>/monthly-review.md`
+      - Emit Obsidian Notice: `cowork:monthly-review aborted -- contract-violation: <missing-field-or-marker-name>`
+      - Exit non-zero. Do NOT run subsequent state-update steps.
+   f. On all-pass: continue to the State section per the existing flow.
 
 ## State
 
-17. Use Skill `cowork:update-active-threads` with `{ engagement_id, phase: "monthly-refresh", date_today: context.today, writer: "cowork:monthly-review", changes: { archive_resolved_older_than_days: 14, audit_full: true, financial_state_refresh: <step 5 and 6 condensed or null> } }`.
-18. Use Skill `cowork:update-weekly-snapshot` with `{ engagement_id, phase: "monthly-reset", date_today: context.today, writer: "cowork:monthly-review", snapshot_data: { archive_previous_month: true, prev_month_yyyymm: context.prev_month_yyyymm } }`.
+18. READ `.claude/skills/cowork/skills/update-active-threads/SKILL.md` in full and follow
+    its `## Steps` section with `{ engagement_id, phase: "monthly-refresh", date_today: context.today, writer: "cowork:monthly-review", changes: { archive_resolved_older_than_days: 14, audit_full: true, financial_state_refresh: <step 5 and 6 condensed or null> } }`.
+19. READ `.claude/skills/cowork/skills/update-weekly-snapshot/SKILL.md` in full and follow
+    its `## Steps` section with `{ engagement_id, phase: "monthly-reset", date_today: context.today, writer: "cowork:monthly-review", snapshot_data: { archive_previous_month: true, prev_month_yyyymm: context.prev_month_yyyymm } }`.
 
 ## Done

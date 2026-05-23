@@ -24,18 +24,24 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
 
 ## Pre-flight
 
-1. Use Skill `cowork:check-vault-routing` with `{ required: ["obsidian"] }`. If not `"ready"`, exit silently.
+1. READ `.claude/skills/cowork/skills/check-vault-routing/SKILL.md` in full and follow
+   its `## Steps` section with `{ required: ["obsidian"] }`. If not `"ready"`, exit silently.
 2. **Resolve engagement.** Read `<vault>/spice/cowork/context/vault-config.md`; look up `engagement` by id. If not found, exit silently. Load engagement-type manifest; capture `render_aspects` AND `tripwire_aspects` (defaults to `[]` when field absent). If `tripwire_aspects.length == 0`, exit silently (engagement has no tripwire signals — tripwire is a no-op).
-3. Use Skill `cowork:date-context` with `{}`. If `context.error`, exit silently.
-4. Use Skill `cowork:ensure-daily-note` with `{ date: context.today, weekday: context.dddd, month_name: context["MM-Month"].split("-")[1], path: context.daily_path }`.
+3. READ `.claude/skills/cowork/skills/date-context/SKILL.md` in full and follow
+   its `## Steps` section with `{}`. If `context.error`, exit silently.
+4. READ `.claude/skills/cowork/skills/ensure-daily-note/SKILL.md` in full and follow
+   its `## Steps` section with `{ date: context.today, weekday: context.dddd, month_name: context["MM-Month"].split("-")[1], path: context.daily_path }`.
 
 ## Gather
 
 Each gather call passes `engagement_id`. The orchestrator branches per-aspect from `engagement.tripwire_aspects`.
 
-5. If `"cc_drift"` in `tripwire_aspects`: use Skill `cowork:gather-finance-cc-today` with `{ engagement_id, date_today: context.today, lookback_start: "06:00", timezone: "America/Denver", classify: true, cards: { active: engagement.cc_active_cards, locked: engagement.cc_locked_cards, ignore: engagement.cc_ignored_cards } }`. Capture `{ markdown, charges, top_merchant_today_total, mtd_discretionary, days_since_splurge_pre }` as `cc_signal`. When CC cards are not configured, treat as `cc_signal = null` (engagement opted into cc_drift but isn't wired yet; surface a one-line Notice and continue).
-6. If `"calendar_drift"` in `tripwire_aspects`: use Skill `cowork:gather-calendar` with `{ engagement_id, mode: "drift-check", horizon: "today+4h", timezone: "America/Denver" }`. Capture `{ markdown, drift_minutes, drifted_events }` as `calendar_signal`. On `gather-skipped`, `calendar_signal = null` and append `calendar_unavailable` to the warnings array passed to write.
-7. If `"queue_growth"` in `tripwire_aspects`: use Skill `cowork:gather-projects` with `{ engagement_id, mode: "tripwire-delta", since: <yesterday EOD ISO> }`. Capture `{ markdown, new_count, items }` as `queue_signal`.
+5. If `"cc_drift"` in `tripwire_aspects`: READ `.claude/skills/cowork/skills/gather-finance-cc-today/SKILL.md` in full and follow
+   its `## Steps` section with `{ engagement_id, date_today: context.today, lookback_start: "06:00", timezone: "America/Denver", classify: true, cards: { active: engagement.cc_active_cards, locked: engagement.cc_locked_cards, ignore: engagement.cc_ignored_cards } }`. Capture `{ markdown, charges, top_merchant_today_total, mtd_discretionary, days_since_splurge_pre }` as `cc_signal`. When CC cards are not configured, treat as `cc_signal = null` (engagement opted into cc_drift but isn't wired yet; surface a one-line Notice and continue).
+6. If `"calendar_drift"` in `tripwire_aspects`: READ `.claude/skills/cowork/skills/gather-calendar/SKILL.md` in full and follow
+   its `## Steps` section with `{ engagement_id, mode: "drift-check", horizon: "today+4h", timezone: "America/Denver" }`. Capture `{ markdown, drift_minutes, drifted_events }` as `calendar_signal`. On `gather-skipped`, `calendar_signal = null` and append `calendar_unavailable` to the warnings array passed to write.
+7. If `"queue_growth"` in `tripwire_aspects`: READ `.claude/skills/cowork/skills/gather-projects/SKILL.md` in full and follow
+   its `## Steps` section with `{ engagement_id, mode: "tripwire-delta", since: <yesterday EOD ISO> }`. Capture `{ markdown, new_count, items }` as `queue_signal`.
 
 ## Decide
 
@@ -56,6 +62,33 @@ Each gather call passes `engagement_id`. The orchestrator branches per-aspect fr
     - `> [!tip] ✏️ Next action\n> Edit \`spice/cowork/prompts/midday-tripwire.md\` to define what this tripwire should emit when it fires.`
     Set `warning = "empty_prompt"` and pass `summary = "Stub run — prompt body at spice/cowork/prompts/midday-tripwire.md is empty."` to write-run-note via its `summary` arg. The write-run-note self-check passes (5 markers + summary + title all present).
     When `prompt_body` is non-empty, set `warning = null` and compose the body per the prompt's instructions, respecting the adaptive body skeleton in write-run-note-midday-tripwire's `## Adaptive body skeleton` section.
-11. Use Skill `cowork:write-run-note-midday-tripwire` with `{ engagement, date: context.today, weekday: context.dddd, month_name: context["MM-Month"].split("-")[1], severity, signals: { cc: cc_signal, calendar: calendar_signal, queue: queue_signal }, body: run_body, prompt_source: "spice/cowork/prompts/midday-tripwire.md", warning, warnings: warnings_array }`. The `signals` arg is an opaque structured handoff write-run-note uses to compose the summary line; `warnings_array` is the optional list of `<aspect>_unavailable` strings from gather-skipped returns. Capture `status`. If `status` starts with `"failed:contract-violation:"`, emit Notice `cowork:midday-tripwire aborted -- contract violation: <field>` and exit non-zero. Else if `status` starts with `"failed:"`, emit Notice `cowork:midday-tripwire aborted -- write failed: <status>` and exit. Do not run state-update steps after a failed write.
+11. READ `.claude/skills/cowork/skills/write-run-note-midday-tripwire/SKILL.md` in full —
+    paying particular attention to its `## Title composition`,
+    `## Adaptive body skeleton`, and `## Pre-write self-check` sections — then apply those contracts
+    before performing the write described in its `## Steps` section with `{ engagement, date: context.today, weekday: context.dddd, month_name: context["MM-Month"].split("-")[1], severity, signals: { cc: cc_signal, calendar: calendar_signal, queue: queue_signal }, body: run_body, prompt_source: "spice/cowork/prompts/midday-tripwire.md", warning, warnings: warnings_array }`. The `signals` arg is an opaque structured handoff write-run-note uses to compose the summary line; `warnings_array` is the optional list of `<aspect>_unavailable` strings from gather-skipped returns. Capture `status`. If `status` starts with `"failed:contract-violation:"`, emit Notice `cowork:midday-tripwire aborted -- contract violation: <field>` and exit non-zero. Else if `status` starts with `"failed:"`, emit Notice `cowork:midday-tripwire aborted -- write failed: <status>` and exit. Do not run state-update steps after a failed write.
+
+## Verify
+
+12. **Re-read + structural verify.** After `write-run-note-midday-tripwire` returns a non-`"failed:"` status:
+
+   a. Read the just-written file via the Read tool at `spice/cowork/daily/<YYYY>/<MM-Month>/<YYYY-MM-DD>/midday-tripwire.md` (substituting the values from `context`).
+   b. Parse leading frontmatter (YAML between `---` markers) as `parsed_frontmatter`; capture the remainder as `body`.
+   c. Assert required frontmatter fields exist and are non-empty strings:
+      - `title:`
+      - `summary:`
+      - `type:` (must equal `cowork-midday-tripwire`)
+      - `severity:` (must match `/^(warn|alert)$/`)
+      - `warning:` only when the orchestrator passed a non-null `warning` to write-run-note (otherwise the field is allowed to be absent or `null`).
+   d. Regex-scan `body` for required structural markers:
+      - SpaceNavButtons block: `/```dataviewjs\n[\s\S]*?SpaceNavButtons[\s\S]*?```/`
+      - At least one Synopsis callout: `/^> \[!info\]- /m`
+      - At least one example callout: `/^> \[!example\]\+ /m`
+      - Closing tip callout: `/^> \[!tip\] /m`
+      - Severity-specific marker: at least one `> [!warning] ` callout OR `> [!example]+ 🚨` callout (regex: `/^> \[!warning\] |^> \[!example\]\+ 🚨/m`).
+   e. On ANY frontmatter-field miss or marker miss:
+      - Use Bash to delete the file: `rm -f spice/cowork/daily/<YYYY>/<MM-Month>/<YYYY-MM-DD>/midday-tripwire.md`
+      - Emit Obsidian Notice: `cowork:midday-tripwire aborted -- contract-violation: <missing-field-or-marker-name>` (when the miss is the severity-specific marker, reference it explicitly as `severity-marker`)
+      - Exit non-zero. Do NOT run subsequent steps.
+   f. On all-pass: continue to Done per the existing flow.
 
 ## Done
