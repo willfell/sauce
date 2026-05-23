@@ -193,7 +193,7 @@ If Step 4's path was `(c)` (per-cadence walk), also ask the prompt-body question
   ```
   name:   cowork-<orch>-<engagement.id>
   cron:   <resolved cron expression>
-  prompt: Use skill cowork:<orch> with { engagement_id: "<engagement.id>" }
+  prompt: Use skill cowork:<orch> with { engagement_id: "<engagement.id>" }. When the orchestrator instructs you to use a sub-skill (cowork:write-run-note-*, cowork:gather-*, etc.), READ that sub-skill's SKILL.md from .claude/skills/cowork/skills/<name>/ and strictly follow its sections including any "## Pre-write self-check" checklist before proceeding with the action described in "## Steps". Return failed:contract-violation:<field> on any miss.
   ```
 - Check `existing_tasks` (from Step 3) for a task with matching `name`:
   - If found: call `mcp__scheduled-tasks__update` with `{ task_id, cron, prompt }`. Capture `task_id`.
@@ -213,7 +213,7 @@ On `y`: call `mcp__scheduled-tasks__delete`; append `{ orch, status: "deleted", 
 Job:        <orch>-<engagement.id>
 Schedule:   <cadence string>
 Cron:       <cron expression>
-Prompt:     Use skill cowork:<orch> with { engagement_id: "<engagement.id>" }
+Prompt:     Use skill cowork:<orch> with { engagement_id: "<engagement.id>" }. When the orchestrator instructs you to use a sub-skill (cowork:write-run-note-*, cowork:gather-*, etc.), READ that sub-skill's SKILL.md from .claude/skills/cowork/skills/<name>/ and strictly follow its sections including any "## Pre-write self-check" checklist before proceeding with the action described in "## Steps". Return failed:contract-violation:<field> on any miss.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 Print all blocks to chat. Append to `register_results[]`: `{ orch, status: "paste-needed", task_id: null, cron, prompt }`.
