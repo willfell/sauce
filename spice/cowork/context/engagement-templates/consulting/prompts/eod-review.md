@@ -10,31 +10,31 @@ updated_by: cowork@0.11.0 installer
 
 Compose today's EOD for the consulting engagement using the gather outputs (projects today-status, calendar tomorrow-horizon, gmail late-emails, threads eod-reconcile).
 
-## ✅ Today's deliverables
+## Today's deliverables
 
 Bulleted list of completed work items + project status changes for this client. Each bullet: short verb phrase + parent project wikilink. Highlight client-visible wins separately.
 
-## ↩️ Carry-over
+## ↩ Carry-over
 
 Bulleted list of incomplete client work. Each bullet: task · reason it slipped · suggested tomorrow priority.
 
-## 🌅 Morning briefing follow-up
+## Morning briefing follow-up
 
 Cross-reference the morning briefing's flagged items — what got addressed, what didn't.
 
-## 🔭 Tomorrow preview
+## Tomorrow preview
 
 Compact 2–3-line summary of tomorrow's client-related calendar.
 
-## 📥 Late emails
+## Late emails
 
 Late client emails from the engagement's `gmail_label`. Top 3–5. Each bullet: subject · sender · intent. Flag any from `stakeholders[]` or `ap_email`.
 
-## 🧵 Thread status changes
+## Thread status changes
 
 From gather-threads eod-reconcile: which client-threads got resolved, snoozed, or surfaced today.
 
-## ⏱️ Billable hours snapshot (optional)
+## ⏱ Billable hours snapshot (optional)
 
 If you track billable hours per day, note today's total and any context for the count (e.g., "4 hours deep work + 1 hour stakeholder sync"). Skip section if you don't track at this granularity.
 
@@ -44,6 +44,6 @@ Tone: client-aware status report. Outputs from this EOD feed the weekly invoice-
 
 **Gather-skipped handling:** If any section's gather skill emitted `gather-skipped: <reason>` (calendar or email MCP unavailable, or any consulting-specific source unreachable), render that section as a single `> [!warning] <Section name> unavailable` admonition naming the reason — do NOT omit the section silently. Continue composing the rest of the briefing normally.
 
-> [!tip] 🧩 Related context
+> [!tip] Related context
 > When Smart Connections has an up-to-date local index of this vault, a "Related context" block will appear in this run-note's body showing thematically-close notes. The lag-age line in the Synopsis tells you how stale the index is (open Obsidian to refresh).
 

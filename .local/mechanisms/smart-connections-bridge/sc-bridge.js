@@ -11,6 +11,11 @@
  * Common flags: --vault <root> (required), --quiet, --json,
  *               --top-k <n>, --min-similarity <f>, --exclude-glob <glob>
  *
+ * --json is accepted for forward-compat but currently no-op: stdout
+ * is JSON regardless. --quiet suppresses non-fatal stderr warnings
+ * (e.g., "skipping unparseable .ajson") but never suppresses fatal
+ * errors (missing vault, bad args, unhandled exceptions).
+ *
  * Exit codes: 0 = ok, 1 = unhandled error, 2 = bad args,
  *             3 = vault not found, 4 = index corrupt/unavailable.
  */
@@ -198,7 +203,7 @@ function resolveModuleDirectory(rawPath, moduleDirMap, vaultRoot) {
 // Index loader
 // ---------------------------------------------------------------------------
 
-function loadIndex(vaultRoot) {
+function loadIndex(vaultRoot, flags) {
   const multiDir = path.join(vaultRoot, ".smart-env", "multi");
   const entries = fs.readdirSync(multiDir).filter((n) => n.endsWith(".ajson"));
   const moduleDirMap = loadModuleDirectoryMap(vaultRoot);
@@ -219,7 +224,9 @@ function loadIndex(vaultRoot) {
       sources.push({ path: resolvedPath, vec });
     } catch (err) {
       parseFailures++;
-      process.stderr.write(`sc-bridge: skipping unparseable .ajson ${fname}: ${err.message}\n`);
+      if (!(flags && flags.quiet)) {
+        process.stderr.write(`sc-bridge: skipping unparseable .ajson ${fname}: ${err.message}\n`);
+      }
     }
   }
   if (sources.length === 0 && entries.length > 0) {
@@ -286,7 +293,7 @@ async function semanticSearch(query, flags) {
   }
   const stat = indexStatusObj(flags.vault);
   if (stat.index_status === "absent") return emit({ ...stat, query, hits: [] });
-  const { sources, allCorrupt } = loadIndex(flags.vault);
+  const { sources, allCorrupt } = loadIndex(flags.vault, flags);
   if (allCorrupt) return emitError(4, { index_status: "error", error: "all-ajson-unparseable", query, hits: [] });
   let queryVec;
   try {
@@ -317,7 +324,7 @@ async function findRelated(anchor, flags) {
   }
   const stat = indexStatusObj(flags.vault);
   if (stat.index_status === "absent") return emit({ ...stat, anchor, hits: [] });
-  const { sources, allCorrupt } = loadIndex(flags.vault);
+  const { sources, allCorrupt } = loadIndex(flags.vault, flags);
   if (allCorrupt) return emitError(4, { index_status: "error", error: "all-ajson-unparseable", anchor, hits: [] });
   const anchorSource = sources.find((s) => s.path === anchor);
   if (!anchorSource) {

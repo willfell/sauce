@@ -10,31 +10,31 @@ updated_by: cowork@0.11.0 installer
 
 Compose today's EOD for the w2 engagement using the gather outputs (projects today-status, calendar tomorrow-horizon, gmail late-emails, threads eod-reconcile).
 
-## ✅ Today's wins
+## Today's wins
 
 Bulleted list of completed work items + project status changes. Each bullet: short verb phrase + parent project wikilink when relevant. Highlight stakeholder-visible wins separately.
 
-## ↩️ Carry-over
+## ↩ Carry-over
 
 Bulleted list of incomplete tasks. Each bullet: task · reason it slipped · suggested tomorrow priority.
 
-## 🌅 Morning briefing follow-up
+## Morning briefing follow-up
 
 Cross-reference the morning briefing's flagged items — which got attention, which didn't.
 
-## 🔭 Tomorrow preview
+## Tomorrow preview
 
 Compact 2–3-line summary of tomorrow's calendar (top 2–3 work commitments).
 
-## 📥 Late emails (work scope)
+## Late emails (work scope)
 
 Emails that arrived after morning briefing in the engagement's `gmail_label`. Top 3–5. Each bullet: subject · sender · intent. Flag any from `stakeholders[]` or `manager`.
 
-## 🧵 Thread status changes
+## Thread status changes
 
 From gather-threads eod-reconcile: which work-threads got resolved, snoozed, or surfaced today.
 
-## 🤝 Stakeholder updates
+## Stakeholder updates
 
 If any communication with `stakeholders[]` or `manager` happened today, summarize the gist (1–3 bullets). Useful for the weekly status block.
 
@@ -44,6 +44,6 @@ Tone: status-report concise. The w2 EOD feeds into the weekly review's FTE statu
 
 **Gather-skipped handling:** If any section's gather skill emitted `gather-skipped: <reason>` (e.g. the calendar MCP was unavailable in this runtime), render that section as a single `> [!warning] <Section name> unavailable` admonition naming the reason — do NOT omit the section silently. Continue composing the rest of the briefing normally.
 
-> [!tip] 🧩 Related context
+> [!tip] Related context
 > When Smart Connections has an up-to-date local index of this vault, a "Related context" block will appear in this run-note's body showing thematically-close notes. The lag-age line in the Synopsis tells you how stale the index is (open Obsidian to refresh).
 

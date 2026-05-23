@@ -17,27 +17,27 @@ updated_by: cowork@0.11.0 installer
 
 Reviewing the PREVIOUS month. Suggested shape:
 
-## 🗓️ Month status
+## Month status
 
 One 4–6 sentence paragraph naming the month's arc — what shipped, performance-relevant wins, blockers cleared.
 
-## 📊 Project status month
+## Project status month
 
 From gather-projects (monthly filter): projects closed, opened, in-progress longstanding. Each bullet with wikilink.
 
-## 🧭 Quarterly trajectory
+## Quarterly trajectory
 
 If this month maps to a sprint/quarter cycle, note where you stand against the cycle's stated goals. 2–3 bullets.
 
-## 🤝 Stakeholder retrospective
+## Stakeholder retrospective
 
 Highlights of stakeholder + manager interactions this month. Useful for performance-review prep.
 
-## 📝 FTE status block (monthly)
+## FTE status block (monthly)
 
 Standardized status block from `cowork:write-summary-fte-status` (monthly mode). Manager-visible accomplishments, blockers, next-month plan.
 
-## 🔭 Forward look
+## Forward look
 
 Next month's biggest work commitments + any 1:1s or review meetings scheduled.
 

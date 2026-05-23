@@ -19,11 +19,11 @@ updated_by: cowork@0.11.0 installer
 
 Customize for your use case. Suggested shape:
 
-## 📍 Midday consulting check-in
+## Midday consulting check-in
 
 One paragraph from the gather outputs — billable-hours so far, client-communication tempo, or whatever you're tracking.
 
-## 🚦 Flagged items
+## Flagged items
 
 Bulleted list of items needing attention before EOD. Each bullet: item · why-flagged · suggested action.
 

@@ -18,11 +18,11 @@ updated_by: cowork@0.11.0 installer
 
 Customize for your use case. Suggested shape:
 
-## 📍 Midday check-in
+## Midday check-in
 
 One paragraph from the gather outputs — what's the state of the work-day so far?
 
-## 🚦 Flagged items
+## Flagged items
 
 Bulleted list of items needing attention before EOD. Each bullet: item · why-flagged · suggested action.
 

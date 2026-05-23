@@ -10,31 +10,31 @@ updated_by: cowork@0.11.0 installer
 
 Compose today's EOD body using the gather outputs (projects today-status, calendar tomorrow-horizon, gmail late-emails, threads eod-reconcile).
 
-## ✅ Today's wins
+## Today's wins
 
 Bulleted list of completed tasks + project status changes from gather-projects. Each bullet: short verb phrase + parent project wikilink when relevant.
 
-## ↩️ Carry-over
+## ↩ Carry-over
 
 Bulleted list of incomplete tasks that didn't ship today. Each bullet: task + reason it slipped (one phrase) + suggested tomorrow priority.
 
-## 🌅 Morning briefing follow-up
+## Morning briefing follow-up
 
 Cross-reference the morning briefing's flagged items: which threads got attention, which finance flags were addressed, which calendar commitments were honored. 3–5 bullets max.
 
-## 🔭 Tomorrow preview
+## Tomorrow preview
 
 Compact 2–3-line summary of tomorrow's calendar from gather-calendar (top 2–3 commitments + any all-day notes).
 
-## 📥 Late emails
+## Late emails
 
 Emails that arrived after the morning briefing. Top 3–5 from late_emails computation. Each bullet: subject · sender · intent.
 
-## 🧵 Thread status changes
+## Thread status changes
 
 From gather-threads eod-reconcile: which threads got resolved, snoozed, or auto-created today. Each as a one-liner. Skip the section if no thread state changed.
 
-## 🌙 Wellness close
+## Wellness close
 
 One 2–3 sentence reflective paragraph — what energized vs drained today. End with a one-line intention for tomorrow.
 
@@ -44,6 +44,6 @@ Tone: reflective. Brief; the daily review is for self-tracking, not exhaustive l
 
 **Gather-skipped handling:** If any section's gather skill emitted `gather-skipped: <reason>` (calendar / gmail / imessage MCP unavailable, or finance source unreachable), render that section as a single `> [!warning] <Section name> unavailable` admonition naming the reason — do NOT omit the section silently. Continue composing the rest of the briefing normally.
 
-> [!tip] 🧩 Related context
+> [!tip] Related context
 > When Smart Connections has an up-to-date local index of this vault, a "Related context" block will appear in this run-note's body showing thematically-close notes. The lag-age line in the Synopsis tells you how stale the index is (open Obsidian to refresh).
 
