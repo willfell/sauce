@@ -230,7 +230,7 @@ Output field: `mcps.calendar.include_all_day` (boolean)
 
 Output field: `mcps.calendar.quiet_hours_strategy` (string)
 
-## Question set — gmail
+## Question set — email
 
 ### Q1 — surface_kinds (multi-select)
 
@@ -242,7 +242,7 @@ Output field: `mcps.calendar.quiet_hours_strategy` (string)
 - new-threads — newly-started threads (no prior context)
 - attachment-only — emails primarily delivering files
 
-Output field: `mcps.gmail.surface_kinds` (string[])
+Output field: `mcps.email.surface_kinds` (string[])
 
 ### Q2 — inbox_zero_threshold (single-select)
 
@@ -254,13 +254,13 @@ Output field: `mcps.gmail.surface_kinds` (string[])
 - 25
 - not-tracked
 
-Output field: `mcps.gmail.inbox_zero_threshold` (string or int)
+Output field: `mcps.email.inbox_zero_threshold` (string or int)
 
 ### Q3 — vip_senders (free-text)
 
 > List up to 5 sender addresses or names that always count as VIP. (Comma-separated.)
 
-Output field: `mcps.gmail.vip_senders` (string[])
+Output field: `mcps.email.vip_senders` (string[])
 
 ### Q4 — ignore_lists (single-select)
 
@@ -269,15 +269,15 @@ Output field: `mcps.gmail.vip_senders` (string[])
 - yes
 - no — count them but don't elevate
 
-Output field: `mcps.gmail.ignore_lists` (boolean)
+Output field: `mcps.email.ignore_lists` (boolean)
 
-## Question set — imessage
+## Question set — chat
 
 ### Q1 — inner_circle (free-text)
 
-> List up to 8 contact names (Apple Contacts names or numbers) that count as "inner circle". (Comma-separated. Used to elevate their threads.)
+> List up to 8 contact names (names, handles, or IDs from whichever chat MCP you use — iMessage, Teams, Slack, etc.) that count as "inner circle". (Comma-separated. Used to elevate their threads.)
 
-Output field: `mcps.imessage.inner_circle` (string[])
+Output field: `mcps.chat.inner_circle` (string[])
 
 ### Q2 — surface_kinds (multi-select)
 
@@ -285,9 +285,9 @@ Output field: `mcps.imessage.inner_circle` (string[])
 
 - reply-owed-24h — incoming message with no reply >24h from inner circle
 - time-sensitive — messages mentioning today's date or this week
-- group-only — group-chat messages where you were @-mentioned or quoted
+- group-only — messages where you were @-mentioned in a group chat or thread
 
-Output field: `mcps.imessage.surface_kinds` (string[])
+Output field: `mcps.chat.surface_kinds` (string[])
 
 ### Q3 — quiet_hours_imessage (single-select)
 
@@ -296,13 +296,13 @@ Output field: `mcps.imessage.surface_kinds` (string[])
 - yes — skip messages received 10pm-7am local
 - no — count all messages
 
-Output field: `mcps.imessage.suppress_quiet_hours` (boolean)
+Output field: `mcps.chat.suppress_quiet_hours` (boolean)
 
 ## Question set — finance
 
 ### Q1 — cards_mine (free-text)
 
-> List Brex card IDs or last-4-digits that count as "yours". (Comma-separated. Used to filter from a shared account view.)
+> List card IDs, last-4-digits, or account labels that count as "yours" (from whichever finance MCP you use — Brex, Mercury, etc.). (Comma-separated. Used to filter from a shared account view.)
 
 Output field: `mcps.finance.cards_mine` (string[])
 
