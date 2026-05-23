@@ -1066,21 +1066,21 @@ function assertCoworkV068Shape() {
     const body = fs.readFileSync(skillPath, "utf8");
     // Step 11 must gate emission on render_aspects.semantic_related == "include"
     // AND on the related_signal.status starting with skipped:no-index OR skipped:anchor-not-indexed
-    const semanticBlock = body.match(/ONLY IF step 9b ran[\s\S]{0,500}Semantic index absent or anchor not indexed/);
+    const semanticBlock = body.match(/ONLY IF step 9b ran[\s\S]{0,500}Smart Connections index absent or anchor not indexed/);
     assertTrue(
         semanticBlock !== null,
-        `${label}: SKILL.md step 11 must carry "ONLY IF step 9b ran" gate AND canonical "Semantic index absent or anchor not indexed" text`,
+        `${label}: SKILL.md step 11 must carry "ONLY IF step 9b ran" gate AND canonical "Smart Connections index absent or anchor not indexed" text`,
     );
 }
 
 // HC-V0760-C2 — eod-review: canonical em-dash text replaces v0.75.1 stale string.
 {
-    const label = "HC-V0760-C2 eod-review: skipped-no-index emits canonical 'Semantic index absent or anchor not indexed — semantic gather skipped' text";
+    const label = "HC-V0760-C2 eod-review: skipped-no-index emits canonical 'Smart Connections index absent or anchor not indexed — semantic gather skipped' text";
     const skillPath = path.join(BP, "skills/orchestrators/eod-review/SKILL.md");
     const body = fs.readFileSync(skillPath, "utf8");
     // Asserting verbatim canonical text presence
     assertTrue(
-        /Semantic index absent or anchor not indexed — semantic gather skipped/.test(body),
+        /Smart Connections index absent or anchor not indexed — semantic gather skipped/.test(body),
         `${label}: SKILL.md must contain the em-dash canonical text matching gather-semantic-related's Orchestrator integration contract`,
     );
     // The stale v0.75.1 text MUST be gone
@@ -1095,7 +1095,7 @@ function assertCoworkV068Shape() {
     const label = "HC-V0760-C3 weekly-review: render_aspects.semantic_related != 'include' emits zero Semantic index not available callouts";
     const skillPath = path.join(BP, "skills/orchestrators/weekly-review/SKILL.md");
     const body = fs.readFileSync(skillPath, "utf8");
-    const semanticBlock = body.match(/ONLY IF step 11b ran[\s\S]{0,500}Semantic index absent or anchor not indexed/);
+    const semanticBlock = body.match(/ONLY IF step 11b ran[\s\S]{0,500}Smart Connections index absent or anchor not indexed/);
     assertTrue(
         semanticBlock !== null,
         `${label}: SKILL.md step 15 must carry "ONLY IF step 11b ran" gate AND canonical text`,
@@ -1108,7 +1108,7 @@ function assertCoworkV068Shape() {
     const skillPath = path.join(BP, "skills/orchestrators/weekly-review/SKILL.md");
     const body = fs.readFileSync(skillPath, "utf8");
     assertTrue(
-        /Semantic index absent or anchor not indexed — semantic gather skipped/.test(body),
+        /Smart Connections index absent or anchor not indexed — semantic gather skipped/.test(body),
         `${label}: SKILL.md must contain canonical em-dash text`,
     );
     assertTrue(
