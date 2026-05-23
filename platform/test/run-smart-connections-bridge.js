@@ -10,6 +10,7 @@
 "use strict";
 const { spawnSync } = require("child_process");
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 
 const ROOT = path.resolve(__dirname, "..", "..");
@@ -22,6 +23,7 @@ function assertEq(actual, expected, msg) {
   if (actual !== expected) { failed++; console.error(`FAIL ${msg} -- expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`); }
   else passed++;
 }
+const assertEqual = assertEq;
 
 function runBridge(args) {
   const r = spawnSync("node", [BRIDGE, ...args], { encoding: "utf8" });
@@ -140,6 +142,36 @@ function runBridge(args) {
   assertTrue(stderr.includes("vault path not found"), "HC-V0750-B12 stderr message");
 }
 
-console.log(`\n=== run-smart-connections-bridge ===`);
-console.log(`passed: ${passed}  failed: ${failed}`);
-process.exit(failed === 0 ? 0 : 1);
+// HC-V0751-D1 — --quiet suppresses the non-fatal "skipping unparseable .ajson"
+// stderr warning. Constructs a vault with one malformed .ajson file then
+// invokes index-status with --quiet and asserts zero stderr bytes.
+async function caseV0751D1QuietSuppressesStderr() {
+    const label = "HC-V0751-D1 sc-bridge --quiet produces zero stderr on parse-skip";
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-d1-"));
+    try {
+        const multiDir = path.join(tmp, ".smart-env", "multi");
+        fs.mkdirSync(multiDir, { recursive: true });
+        // One valid + one malformed .ajson so loadIndex exercises the warn path.
+        fs.writeFileSync(path.join(multiDir, "valid.ajson"),
+            '"a/note.md": {"path": "a/note.md", "embeddings": {"TaylorAI/bge-micro-v2": {"vec": [0.1, 0.2]}}}');
+        fs.writeFileSync(path.join(multiDir, "malformed.ajson"), "not json at all");
+        const bridge = path.join(__dirname, "..", "mechanisms", "smart-connections-bridge", "sc-bridge.js");
+        // Run semantic-search (which exercises loadIndex) with --quiet.
+        const r = spawnSync("node", [bridge, "semantic-search", "test query",
+            "--vault", tmp, "--quiet"], { encoding: "utf8" });
+        assertEqual(r.stderr || "", "", label);
+    } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Async runner for v0.75.1 cases
+// ---------------------------------------------------------------------------
+(async () => {
+  await caseV0751D1QuietSuppressesStderr();
+
+  console.log(`\n=== run-smart-connections-bridge ===`);
+  console.log(`passed: ${passed}  failed: ${failed}`);
+  process.exit(failed === 0 ? 0 : 1);
+})();
