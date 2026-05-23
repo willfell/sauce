@@ -1662,6 +1662,65 @@ async function caseBP7EmptyDiffNoOp() {
     fs.rmSync(tmp, { recursive: true, force: true });
 }
 
+// HC-V0751-B1..B4: resolveWorkshopPath precedence
+// Validates the helper introduced in cmd-update.js v0.75.1 S2.
+async function caseV0751B1ResolveWorkshopPathArgvWins() {
+    const label = "HC-V0751-B1 resolveWorkshopPath: argv.workshopPath wins over installed.workshop_path";
+    const cmdUpdate = require("../cli/cmd-update.js");
+    const installed = { workshop_path: "/should/not/win" };
+    const argv = { workshopPath: "/expected/from/argv" };
+    const result = cmdUpdate._resolveWorkshopPath(installed, argv);
+    assertEqual(result, "/expected/from/argv", label);
+}
+
+async function caseV0751B2ResolveWorkshopPathInstalledWins() {
+    const label = "HC-V0751-B2 resolveWorkshopPath: installed.workshop_path used when argv empty";
+    const cmdUpdate = require("../cli/cmd-update.js");
+    const installed = { workshop_path: "/from/installed/json" };
+    const argv = {};
+    const result = cmdUpdate._resolveWorkshopPath(installed, argv);
+    assertEqual(result, "/from/installed/json", label);
+}
+
+async function caseV0751B3ResolveWorkshopPathAncestryWalk() {
+    const label = "HC-V0751-B3 resolveWorkshopPath: ancestry walk finds libexec ancestor with platform/";
+    const cmdUpdate = require("../cli/cmd-update.js");
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-libexec-"));
+    try {
+        // Fabricate a libexec ancestor that contains a platform/ subdir.
+        const libexec = path.join(tmp, "Cellar", "sauce", "0.75.1", "libexec");
+        fs.mkdirSync(path.join(libexec, "platform"), { recursive: true });
+        // Inject a fake process.execPath ancestor by overriding the helper's _origProcessExecPath hook.
+        const installed = { workshop_path: null };
+        const argv = {};
+        const result = cmdUpdate._resolveWorkshopPath(installed, argv, {
+            _execPath: path.join(libexec, "bin", "sauce"),
+        });
+        assertEqual(result, libexec, label);
+    } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+    }
+}
+
+async function caseV0751B4ResolveWorkshopPathThrowsWhenEmpty() {
+    const label = "HC-V0751-B4 resolveWorkshopPath: throws when all sources empty";
+    const cmdUpdate = require("../cli/cmd-update.js");
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-noanc-"));
+    try {
+        // execPath whose ancestry has no libexec with platform/
+        let threw = false;
+        try {
+            cmdUpdate._resolveWorkshopPath({ workshop_path: null }, {}, { _execPath: path.join(tmp, "bin", "sauce") });
+        } catch (e) {
+            threw = true;
+            assertTrue(/Could not auto-detect workshop_path/.test(e.message), label + ": error message");
+        }
+        if (!threw) { fail++; console.log("  FAIL  " + label + " — expected throw"); }
+    } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+    }
+}
+
 const cases = [
     caseC1AncestorWalk, caseC2SauceVaultEnv, caseC3NotInVault, caseC4UnknownVerb,
     caseC5StatusClean, caseC6StatusDrift, caseC7UpdateFFOnly, caseC8UpdateDirtyRefusal,
@@ -1702,6 +1761,8 @@ const cases = [
     caseBP3NewMechanismNotAutoSubscribed, caseBP4RemovedMechanismWarning,
     caseBP5OutsideVaultErrors, caseBP6KeepComparatorsPreservesPrefix,
     caseBP7EmptyDiffNoOp,  // v0.75.0 S13 HC-V0750-D1..D7
+    caseV0751B1ResolveWorkshopPathArgvWins, caseV0751B2ResolveWorkshopPathInstalledWins,
+    caseV0751B3ResolveWorkshopPathAncestryWalk, caseV0751B4ResolveWorkshopPathThrowsWhenEmpty,  // v0.75.1 S1 HC-V0751-B1..B4
 ];
 
 async function main() {
