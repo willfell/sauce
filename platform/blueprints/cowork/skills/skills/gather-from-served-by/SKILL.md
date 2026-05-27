@@ -1,0 +1,104 @@
+---
+name: cowork:gather-from-served-by
+description: Vendor-agnostic gather sub-skill for `override_classified` and `custom_kind` MCPs. Given { kind_name, kind_title, served_by, what_matters, question_set_answers?, today, range, timezone }, enumerates the agent's mcp__<served_by>__* tools, dispatches a gather per what_matters, returns a `> [!example]+ <kind_title>` markdown callout. Used by atomic-note orchestrators in their priority loop when the canonical-vendor gather path doesn't apply.
+inputs:
+  kind_name: string
+  kind_title: string
+  served_by: string
+  what_matters: string
+  question_set_answers: object | null
+  today: string
+  range: object
+  timezone: string
+outputs:
+  markdown: string
+  status: string
+  served_by_used: string
+  tools_used: list[string]
+  reason: string | null
+tags: [cowork, gather, sub-skill, vendor-agnostic]
+---
+
+# cowork:gather-from-served-by
+
+Generic gather for MCPs whose tool surface doesn't match a canonical vendor (Outlook M365 UUID gateway, internal Azure DevOps gateways, etc.). Replaces the assumption that calendar lives at `mcp__claude_ai_Google_Calendar__*` — instead enumerates whatever tools the served_by namespace exposes and dispatches the gather inline.
+
+## Inputs
+
+- `kind_name` (string, required): one of `calendar` / `email` / `chat` / `finance` (override_classified case) OR a user-defined kind name (custom_kind case).
+- `kind_title` (string, required): markdown section title for the `[!example]+` callout. Title-cased mechanically from `kind_name` for custom kinds; fixed lookup for known kinds (Calendar / Email / Chat / Finance).
+- `served_by` (string, required): MCP namespace string (e.g., `45224a84-ce0e-459b-a016-909ab178ad8c` for M365, `github` for GitHub).
+- `what_matters` (string, required): free-text gather contract pulled from `user-preferences.md` `mcps.<kind>.what_matters`.
+- `question_set_answers` (object, optional): when kind is known (calendar/email/chat/finance), the captured answers for the kind's question set (e.g., `vip_senders`, `surface_event_kinds`). `null` for custom kinds.
+- `today` (string, required): `YYYY-MM-DD` from `cowork:date-context`.
+- `range` (object, required): `{ start: <YYYY-MM-DD>, end: <YYYY-MM-DD> }` window for the gather.
+- `timezone` (string, optional, default `"America/Denver"`): IANA timezone.
+
+## Outputs
+
+- `markdown` (string): one `> [!example]+ <kind_title>` callout, paste-ready.
+- `status` (string): one of `"ready"` | `"skipped:no-tools"` | `"failed:served-by-unreachable"` | `"failed:bad-output"` | `"failed:<reason>"`.
+- `served_by_used` (string): echoes `served_by`.
+- `tools_used` (list[string]): tool names the agent invoked, for audit.
+- `reason` (string | null): present when status != "ready".
+
+## Steps
+
+1. **Enumerate available tools.** Inspect your current tool list. Filter to entries starting with `mcp__<served_by>__`. Capture as `available_tools[]`. If empty, return `{ status: "skipped:no-tools", reason: "served_by namespace exposes no tools in this session", served_by_used: <served_by>, tools_used: [] }`.
+
+2. **Optional reachability probe.** Pick a cheap list/get-style tool from `available_tools` (e.g., `list_*` or `search_*` verb). Call it with a minimal argument. On `MCP_UNAVAILABLE` or equivalent, return `{ status: "failed:served-by-unreachable", reason: "<msg>", served_by_used, tools_used: [<probe_tool>] }`. Skip the probe when no obvious list-verb tool exists — degrade gracefully and let the subsequent gather calls surface unreachability.
+
+3. **Compose dispatch contract (mental, not a tool call).** You are the gathering agent. Frame your gather task internally as:
+
+   ```
+   Gather <kind_name> data for <today> from MCP namespace <served_by>.
+
+   **What matters**:
+   <what_matters verbatim>
+
+   **Captured answers** (if question_set_answers != null):
+   <YAML dump of question_set_answers>
+
+   **Available tools**:
+   <list of available_tools>
+
+   **Output contract**:
+   Return ONE `> [!example]+ <kind_title>` markdown callout.
+   - Aim for ≤200 words.
+   - Bulleted lines preferred (no tables — cross-vendor portability).
+   - Honor what_matters as the gather contract.
+   - Window: <range.start> to <range.end> (timezone: <timezone>).
+   ```
+
+4. **Execute the gather.** Invoke whatever tools from `available_tools[]` best satisfy what_matters within the range/timezone. Compose the markdown callout per the output contract.
+
+5. **Validate output.** The composed markdown MUST:
+   - Start with `> [!example]+ <kind_title>\n`.
+   - Contain no top-level triple-backticks (preserves callout integrity).
+   - Be ≥ 80 characters (one-line "no data" callouts are acceptable; sub-minimum suggests truncation).
+
+6. **On validation failure**, return `{ status: "failed:bad-output", reason: "<which-check-failed>", served_by_used, tools_used }`.
+
+7. **On success**, return `{ status: "ready", markdown: <composed>, served_by_used, tools_used: [<tools you invoked>] }`.
+
+## Dry-run mode
+
+For test harnesses, this skill's helper at `platform/blueprints/cowork/helpers/gather-from-served-by-helper.js` exports `gatherFromServedBy({ ...inputs, dry_run_answers })`. The `dry_run_answers` shape:
+
+```
+dry_run_answers: {
+  available_tools: [<full tool name>, ...],  // pre-supplied; skips step 1's enumeration
+  agent_markdown: <string>,                   // pre-supplied composed markdown; skips step 4
+  tools_used: [<tool name>, ...]              // pre-supplied audit list
+}
+```
+
+The helper performs steps 5-7 (validate + return) but skips steps 1-4 (the live enumeration + agent dispatch).
+
+## Returns
+
+`{ markdown, status, served_by_used, tools_used, reason }` per Outputs.
+
+## Test fixtures
+
+HC-V0780-B1 (chat override), HC-V0780-B2 (ado custom), HC-V0780-B3 (no tools) in `platform/test/run-cowork-smoke.js`.

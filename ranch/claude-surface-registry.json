@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-05-27T23:28:38.014Z",
+  "generated_at": "2026-05-27T23:35:33.883Z",
   "workshop_version": "0.77.0",
   "contributions": {
     "audit": [
@@ -464,6 +464,12 @@
         "kind": "skill",
         "source": "skills/skills/read-user-preferences/SKILL.md",
         "dest": ".claude/skills/cowork/skills/read-user-preferences/SKILL.md",
+        "version": "0.16.0"
+      },
+      {
+        "kind": "skill",
+        "source": "skills/skills/gather-from-served-by/SKILL.md",
+        "dest": ".claude/skills/cowork/skills/gather-from-served-by/SKILL.md",
         "version": "0.16.0"
       }
     ]

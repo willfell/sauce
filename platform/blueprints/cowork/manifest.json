@@ -549,6 +549,11 @@
       "kind": "skill",
       "source": "skills/skills/read-user-preferences/SKILL.md",
       "dest": "{{skills_dir}}/skills/read-user-preferences/SKILL.md"
+    },
+    {
+      "kind": "skill",
+      "source": "skills/skills/gather-from-served-by/SKILL.md",
+      "dest": "{{skills_dir}}/skills/gather-from-served-by/SKILL.md"
     }
   ],
   "engagement_types": [
