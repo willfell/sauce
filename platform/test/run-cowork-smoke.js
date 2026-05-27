@@ -1858,6 +1858,182 @@ function assertCoworkV068Shape() {
     }
 }
 
+// =====================================================================
+// v0.78.0 Workstream A — read-user-preferences parser
+// =====================================================================
+
+// HC-V0780-A1: populated user-preferences.md → status: ok
+{
+    const label = "HC-V0780-A1 populated user-preferences.md parses cleanly";
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "v0780-a1-"));
+    try {
+        const ctxDir = path.join(tmpDir, "spice/cowork/context");
+        fs.mkdirSync(ctxDir, { recursive: true });
+        const populated = [
+            "---",
+            "type: cowork-user-preferences",
+            "updated: 2026-05-27",
+            "updated_by: cowork:context-builder",
+            "priorities:",
+            "  - chat",
+            "  - ado",
+            "  - calendar",
+            "personality:",
+            "  vibe: casual",
+            "  formality: casual",
+            "  pep_talk: false",
+            "  length: balanced",
+            "  notes: |",
+            "    Facts only. No overreach.",
+            "mcps:",
+            "  calendar:",
+            "    served_by: \"45224a84-deadbeef\"",
+            "    override_classified: true",
+            "    connected: true",
+            "    captured_at: 2026-05-27",
+            "    what_matters: |",
+            "      Conflicts are the primary signal.",
+            "  chat:",
+            "    served_by: \"45224a84-deadbeef\"",
+            "    override_classified: true",
+            "    connected: true",
+            "    captured_at: 2026-05-27",
+            "    what_matters: |",
+            "      Teams chat is the BIG priority.",
+            "  ado:",
+            "    served_by: \"1151913a-cafebabe\"",
+            "    custom_kind: true",
+            "    connected: true",
+            "    captured_at: 2026-05-27",
+            "    what_matters: |",
+            "      ADO is for BOARD progress only.",
+            "---",
+            "",
+            "# user-preferences.md",
+            "",
+            "Body content here.",
+        ].join("\n");
+        fs.writeFileSync(path.join(ctxDir, "user-preferences.md"), populated, "utf8");
+
+        let helper;
+        try {
+            helper = require(path.join(BP, "helpers", "read-user-preferences-helper.js"));
+        } catch (e) {
+            failed++;
+            console.error(`FAIL  ${label}: helper not yet created (expected — created in S2): ${e.message}`);
+            throw new Error("__skip__");
+        }
+        if (typeof helper.readUserPreferences !== "function") {
+            failed++;
+            console.error(`FAIL  ${label}: readUserPreferences not exported (expected — created in S2)`);
+            throw new Error("__skip__");
+        }
+        const result = helper.readUserPreferences({ vaultRoot: tmpDir });
+        assertTrue(result.status === "ok", `${label}: expected status ok, got ${result.status} (${result.reason || ""})`);
+        assertTrue(Array.isArray(result.prefs.priorities) && result.prefs.priorities.length === 3,
+            `${label}: expected 3 priorities, got ${JSON.stringify(result.prefs.priorities)}`);
+        assertTrue(result.prefs.priorities[0] === "chat",
+            `${label}: expected priorities[0]=chat, got ${result.prefs.priorities[0]}`);
+        assertTrue(result.prefs.personality && result.prefs.personality.vibe === "casual",
+            `${label}: expected personality.vibe=casual, got ${JSON.stringify(result.prefs.personality)}`);
+        assertTrue(result.prefs.personality.pep_talk === false,
+            `${label}: expected pep_talk=false, got ${result.prefs.personality.pep_talk}`);
+        assertTrue(result.prefs.mcps && result.prefs.mcps.ado && result.prefs.mcps.ado.custom_kind === true,
+            `${label}: expected mcps.ado.custom_kind=true, got ${JSON.stringify(result.prefs.mcps && result.prefs.mcps.ado)}`);
+        assertTrue(result.prefs.mcps.calendar.override_classified === true,
+            `${label}: expected mcps.calendar.override_classified=true`);
+        assertTrue(result.prefs.mcps.ado.what_matters && result.prefs.mcps.ado.what_matters.includes("BOARD progress"),
+            `${label}: expected mcps.ado.what_matters preserved, got ${JSON.stringify(result.prefs.mcps.ado.what_matters)}`);
+    } catch (e) {
+        if (e.message !== "__skip__") {
+            failed++;
+            console.error(`FAIL  ${label}: ${e.message}`);
+        }
+    } finally {
+        try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
+    }
+}
+
+// HC-V0780-A2: missing file → status: empty, reason: file_not_found
+{
+    const label = "HC-V0780-A2 missing user-preferences.md → status: empty";
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "v0780-a2-"));
+    try {
+        let helper;
+        try { helper = require(path.join(BP, "helpers", "read-user-preferences-helper.js")); }
+        catch (e) { failed++; console.error(`FAIL  ${label}: helper not yet created`); throw new Error("__skip__"); }
+        const result = helper.readUserPreferences({ vaultRoot: tmpDir });
+        assertTrue(result.status === "empty", `${label}: expected status empty, got ${result.status}`);
+        assertTrue(result.reason === "file_not_found", `${label}: expected reason file_not_found, got ${result.reason}`);
+    } catch (e) {
+        if (e.message !== "__skip__") { failed++; console.error(`FAIL  ${label}: ${e.message}`); }
+    } finally {
+        try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
+    }
+}
+
+// HC-V0780-A3: workshop-seed shape (priorities: [], mcps: {}) → status: empty, reason: unpopulated_seed
+{
+    const label = "HC-V0780-A3 seed-shape user-preferences.md → status: empty, reason: unpopulated_seed";
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "v0780-a3-"));
+    try {
+        const ctxDir = path.join(tmpDir, "spice/cowork/context");
+        fs.mkdirSync(ctxDir, { recursive: true });
+        const seed = [
+            "---",
+            "type: cowork-user-preferences",
+            "updated: 1970-01-01",
+            "updated_by: install.js",
+            "priorities: []",
+            "personality:",
+            "  vibe: null",
+            "  formality: null",
+            "  pep_talk: null",
+            "  length: null",
+            "mcps: {}",
+            "---",
+            "",
+            "# user-preferences.md",
+        ].join("\n");
+        fs.writeFileSync(path.join(ctxDir, "user-preferences.md"), seed, "utf8");
+        const helper = require(path.join(BP, "helpers", "read-user-preferences-helper.js"));
+        const result = helper.readUserPreferences({ vaultRoot: tmpDir });
+        assertTrue(result.status === "empty", `${label}: expected status empty, got ${result.status}`);
+        assertTrue(result.reason === "unpopulated_seed", `${label}: expected reason unpopulated_seed, got ${result.reason}`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    } finally {
+        try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
+    }
+}
+
+// HC-V0780-A4: malformed YAML (missing closing fence) → status: malformed
+{
+    const label = "HC-V0780-A4 malformed user-preferences.md → status: malformed";
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "v0780-a4-"));
+    try {
+        const ctxDir = path.join(tmpDir, "spice/cowork/context");
+        fs.mkdirSync(ctxDir, { recursive: true });
+        const malformed = [
+            "---",
+            "type: cowork-user-preferences",
+            "priorities:",
+            "- chat",
+            "mcps: {}",
+            "---",
+        ].join("\n");
+        fs.writeFileSync(path.join(ctxDir, "user-preferences.md"), malformed, "utf8");
+        const helper = require(path.join(BP, "helpers", "read-user-preferences-helper.js"));
+        const result = helper.readUserPreferences({ vaultRoot: tmpDir });
+        assertTrue(result.status === "malformed" || (result.status === "empty" && result.reason === "unpopulated_seed"),
+            `${label}: expected malformed (or degraded-to-empty), got status=${result.status}`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    } finally {
+        try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
+    }
+}
+
 (function main() {
   console.log("--- shared contracts ---");
   checkSharedContracts();
