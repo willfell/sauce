@@ -29,10 +29,69 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
 2. **Resolve engagement.** Read `<vault>/spice/cowork/context/vault-config.md`; look up `engagement` by id. If not found, exit silently. Load engagement-type manifest; capture `render_aspects` AND `tripwire_aspects` (defaults to `[]` when field absent). If `tripwire_aspects.length == 0`, exit silently (engagement has no tripwire signals — tripwire is a no-op).
 3. READ `.claude/skills/cowork/skills/date-context/SKILL.md` in full and follow
    its `## Steps` section with `{}`. If `context.error`, exit silently.
+3b. READ `.claude/skills/cowork/skills/read-user-preferences/SKILL.md` in full and follow
+   its `## Steps` section with `{}`. Capture as `prefs_result = { prefs, status, reason }`. Capture `prefs = prefs_result.prefs` (may be null when `status != "ok"`). Do NOT abort on `status != "ok"`; continue with legacy fallback (see step 3c).
+3c. **Plan dispatch.** Determine dispatch mode and build the priority-ordered dispatch plan.
+
+   Compute `dispatch_mode`:
+
+   ```
+   dispatch_mode = (prefs_result.status === "ok") ? "prefs" : "legacy"
+   ```
+
+   When `dispatch_mode == "legacy"`:
+   - Emit Obsidian Notice: `cowork:midday-tripwire -- user-preferences <status> (<reason>); using engagement-template defaults`.
+   - Skip the remainder of step 3c. The legacy gather sequence fires unchanged.
+
+   When `dispatch_mode == "prefs"`:
+   - From `check-vault-routing`'s prior result, capture `reachable_namespaces[]`.
+   - Read `mcp-skill-map.json` from `spice/cowork/context/mcp-skill-map.json` (or fall back to the materialized path `.local/blueprints/cowork/content/context/mcp-skill-map.json`).
+   - Invoke `.local/blueprints/cowork/helpers/dispatch-plan-helper.js`'s `planDispatch({ prefs, reachableNamespaces, mcpSkillMap })`. Capture as `dispatch_plan[]`.
+   - Capture `voice_contract = composeVoiceContract(prefs.personality)`.
 4. READ `.claude/skills/cowork/skills/ensure-daily-note/SKILL.md` in full and follow
    its `## Steps` section with `{ date: context.today, weekday: context.dddd, month_name: context["MM-Month"].split("-")[1], path: context.daily_path }`.
 
 ## Gather
+
+When `dispatch_mode == "legacy"`, execute the v0.77.0 legacy gather sequence below verbatim. `ordered_blocks[]` stays empty.
+
+When `dispatch_mode == "prefs"`, skip the legacy steps; execute the priority-loop:
+
+```
+ordered_blocks = []
+for entry in dispatch_plan:
+  if entry.action == "warn":
+    md = composeWarningCallout({ kind_name, kind_title, reason, mcps_entry })
+    ordered_blocks.push({ kind_name, markdown: md, kind: "warning" })
+  elif entry.action == "gather_canonical":
+    READ `.claude/skills/cowork/skills/<entry.gather_skill-after-cowork-prefix>/SKILL.md`
+    in full and follow its `## Steps` section with the kind's canonical input
+    shape (see the existing legacy gather steps for argument shapes).
+    Push the gather's markdown into ordered_blocks with kind: "example".
+  elif entry.action == "gather_from_served_by":
+    READ `.claude/skills/cowork/skills/gather-from-served-by/SKILL.md` in full
+    and follow its `## Steps` section with {
+      kind_name:            entry.kind_name,
+      kind_title:           entry.kind_title,
+      served_by:            entry.served_by,
+      what_matters:         entry.what_matters,
+      question_set_answers: entry.question_set_answers,
+      today:                context.today,
+      range:                { start: context.today, end: context.today },
+      timezone:             engagement.timezone || "America/Denver"
+    }
+    if result.status == "ready":
+      ordered_blocks.push({ kind_name, markdown: result.markdown, kind: "example" })
+    else:
+      md = composeWarningCallout({ kind_name, kind_title, reason: result.status, mcps_entry })
+      ordered_blocks.push({ kind_name, markdown: md, kind: "warning" })
+
+# After the priority loop, run engagement-type-aspect gathers per existing
+# render_aspects gates. These remain APPENDED AFTER ordered_blocks in the
+# composed body.
+```
+
+*(existing legacy-mode gather steps preserved verbatim below — these fire ONLY when `dispatch_mode == "legacy"`)*
 
 Each gather call passes `engagement_id`. The orchestrator branches per-aspect from `engagement.tripwire_aspects`.
 
@@ -55,7 +114,13 @@ Each gather call passes `engagement_id`. The orchestrator branches per-aspect fr
 ## Write
 
 9. **Read prompt body** via `mcp__obsidian__get_file_contents` at `spice/cowork/prompts/midday-tripwire.md`. Strip frontmatter; capture body as `prompt_body` (or empty when missing).
-10. **Compose run-note body** per `prompt_body` + the flagged-event details from the gather steps. When `prompt_body` is empty, do NOT freelance content — compose a skeleton-compliant STUB body:
+9b. **Voice contract.** If `dispatch_mode == "prefs"` AND `voice_contract != ""`, prepend it to `prompt_body`:
+   `prompt_body = voice_contract + prompt_body`. The combined string is the input to the body-composition step.
+10. **Compose run-note body** per `prompt_body` + the flagged-event details from the gather steps.
+
+   When `dispatch_mode == "prefs"`, compose the body as: SpaceNavButtons → `[!info]- Synopsis` paragraph → `ordered_blocks[]` (priority order, in array order) → engagement-type-aspect blocks (semantic_related, finance from render_aspects) → `[!tip]` closing. `ordered_blocks` entries with `kind: "warning"` render as `[!warning]` callouts in-position. When `dispatch_mode == "legacy"`, use the v0.77.0 composition order verbatim (existing body).
+
+   When `prompt_body` is empty, do NOT freelance content — compose a skeleton-compliant STUB body:
     - `SpaceNavButtons` dataviewjs block (verbatim).
     - `> [!info]- Today at a glance\n> Tripwire fired (severity: <severity>). Prompt body empty — edit spice/cowork/prompts/midday-tripwire.md to customize what this run emits.`
     - `> [!example]+ 🚨 Tripwire fired\n> Severity: <severity>. <one-line aspect summary>. Prompt body empty — see spice/cowork/prompts/midday-tripwire.md to customize what this run emits.`
