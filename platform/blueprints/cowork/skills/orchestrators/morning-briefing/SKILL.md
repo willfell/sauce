@@ -27,10 +27,70 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
 2. **Resolve engagement.** Read `<vault>/spice/cowork/context/vault-config.md` via `mcp__obsidian__get_frontmatter`. Look up `engagements[]` entry where `id == engagement_id`. If not found, emit Notice `cowork:morning-briefing aborted -- engagement '<id>' not found in vault-config.md` and exit. Capture `engagement` (the full record) and load the matching engagement-type manifest from the registry; capture `type_manifest.render_aspects`. The render-aspects map drives which gather + write steps fire (e.g. `finance_block: include` enables the Finance callout; `inner_circle_imessage: include` enables Messages).
 3. READ `.claude/skills/cowork/skills/date-context/SKILL.md` in full and follow
    its `## Steps` section with `{}`. Capture the returned `context` object. If `context.error` exists, emit Notice and exit.
+3b. READ `.claude/skills/cowork/skills/read-user-preferences/SKILL.md` in full and follow
+   its `## Steps` section with `{}`. Capture as `prefs_result = { prefs, status, reason }`. Capture `prefs = prefs_result.prefs` (may be null when `status != "ok"`). Do NOT abort on `status != "ok"`; continue with legacy fallback (see step 3c).
+3c. **Plan dispatch.** Determine dispatch mode and build the priority-ordered dispatch plan.
+
+   Compute `dispatch_mode`:
+
+   ```
+   dispatch_mode = (prefs_result.status === "ok") ? "prefs" : "legacy"
+   ```
+
+   When `dispatch_mode == "legacy"`:
+   - Emit Obsidian Notice: `cowork:morning-briefing -- user-preferences <status> (<reason>); using engagement-template defaults` (where `<status>` and `<reason>` come from `prefs_result`).
+   - Skip the remainder of step 3c. The legacy gather sequence (steps 5-12) fires unchanged.
+
+   When `dispatch_mode == "prefs"`:
+   - From `check-vault-routing`'s prior result, capture `reachable_namespaces[]` (the set of MCP namespaces the agent has tools for in this session).
+   - Read `mcp-skill-map.json` from `spice/cowork/context/mcp-skill-map.json` (or fall back to the materialized path `.local/blueprints/cowork/content/context/mcp-skill-map.json`).
+   - Invoke the helper at `.local/blueprints/cowork/helpers/dispatch-plan-helper.js`'s `planDispatch({ prefs, reachableNamespaces, mcpSkillMap })`. Capture as `dispatch_plan[]`.
+   - Capture `voice_contract = composeVoiceContract(prefs.personality)` (returns "" when personality has no non-null fields).
 4. READ `.claude/skills/cowork/skills/ensure-daily-note/SKILL.md` in full and follow
    its `## Steps` section with `{ date: context.today, weekday: context.dddd, month_name: context["MM-Month"].split("-")[1], path: context.daily_path }`.
 
 ## Gather
+
+When `dispatch_mode == "legacy"`, execute the v0.77.0 legacy gather sequence in steps 5-12 below verbatim. `ordered_blocks[]` stays empty; gather outputs flow through their existing composition slots in step 14.
+
+When `dispatch_mode == "prefs"`, skip steps 5-12 below; instead execute the priority-loop:
+
+```
+ordered_blocks = []
+for entry in dispatch_plan:
+  if entry.action == "warn":
+    md = composeWarningCallout({ kind_name, kind_title, reason, mcps_entry })
+    ordered_blocks.push({ kind_name, markdown: md, kind: "warning" })
+  elif entry.action == "gather_canonical":
+    READ `.claude/skills/cowork/skills/<entry.gather_skill-after-cowork-prefix>/SKILL.md` in full
+    and follow its `## Steps` section with the kind's canonical input shape
+    (engagement_id, date_today, horizon, timezone for calendar; engagement_id,
+    window for email; etc. — see legacy steps 6-7 for argument shapes).
+    Push the gather's markdown into ordered_blocks with kind: "example".
+  elif entry.action == "gather_from_served_by":
+    READ `.claude/skills/cowork/skills/gather-from-served-by/SKILL.md` in full
+    and follow its `## Steps` section with {
+      kind_name:            entry.kind_name,
+      kind_title:           entry.kind_title,
+      served_by:            entry.served_by,
+      what_matters:         entry.what_matters,
+      question_set_answers: entry.question_set_answers,
+      today:                context.today,
+      range:                { start: context.today, end: context.today + 2 days },
+      timezone:             engagement.timezone || "America/Denver"
+    }
+    if result.status == "ready":
+      ordered_blocks.push({ kind_name, markdown: result.markdown, kind: "example" })
+    else:
+      md = composeWarningCallout({ kind_name, kind_title, reason: result.status, mcps_entry })
+      ordered_blocks.push({ kind_name, markdown: md, kind: "warning" })
+
+# After the priority loop, run engagement-type-aspect gathers (semantic, finance)
+# per the existing render_aspects gates from legacy step 12b and step 15.
+# These remain APPENDED AFTER ordered_blocks in the composed body.
+```
+
+Legacy-mode gather steps (executed only when `dispatch_mode == "legacy"`):
 
 Each gather call passes `engagement_id`. The sub-skill reads per-engagement MCP-scoped fields (gmail_label / calendar_id) from vault-config.md and may type-gate (e.g. `gather-imessage` early-exits for non-personal engagements). Renderable steps skip silently when their `render_aspects` flag is `skip`.
 
@@ -63,7 +123,13 @@ Each gather call passes `engagement_id`. The sub-skill reads per-engagement MCP-
 ## Write
 
 13. **Read prompt body** via `mcp__obsidian__get_file_contents` at `spice/cowork/prompts/morning-briefing.md`. Strip leading frontmatter block. Capture body trimmed of leading/trailing whitespace as `prompt_body`. If file is missing, treat as `prompt_body = ""`.
-14. **Compose run-note body** from the gather outputs (steps 5–12b), interpolating per `prompt_body` instructions. When `prompt_body` is empty, do NOT freelance content — compose a skeleton-compliant STUB body:
+13b. **Voice contract.** If `dispatch_mode == "prefs"` AND `voice_contract != ""`, prepend it to `prompt_body`:
+   `prompt_body = voice_contract + prompt_body`. The combined string is the input to step 14 composition. If `voice_contract == ""`, prompt_body passes through unchanged.
+14. **Compose run-note body** from the gather outputs (steps 5–12b), interpolating per `prompt_body` instructions.
+
+   When `dispatch_mode == "prefs"`, compose the body as: SpaceNavButtons → `[!info]- Today at a glance` synopsis → `ordered_blocks[]` (priority order, in array order) → engagement-type-aspect blocks (semantic_related, finance from render_aspects) → `[!tip] Today's focus` closing. ordered_blocks entries with `kind: "warning"` render as `[!warning]` callouts in-position (priority preserved). When `dispatch_mode == "legacy"`, use the v0.77.0 composition order verbatim (existing step 14 body).
+
+   When `prompt_body` is empty, do NOT freelance content — compose a skeleton-compliant STUB body:
     - `SpaceNavButtons` dataviewjs block (verbatim).
     - `> [!info]- Today at a glance\n> (Prompt body empty — edit spice/cowork/prompts/morning-briefing.md to customize what this run emits.)`
     - `> [!example]+ 📋 Status\n> No prompt body to drive content; this run is a placeholder.`

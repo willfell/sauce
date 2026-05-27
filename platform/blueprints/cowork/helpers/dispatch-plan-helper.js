@@ -106,8 +106,74 @@ function planDispatch({ prefs, reachableNamespaces, mcpSkillMap }) {
     return plan;
 }
 
+function decideDispatchMode({ prefsStatus }) {
+    return prefsStatus === "ok" ? "prefs" : "legacy";
+}
+
+function composeVoiceContract(personality) {
+    if (!personality) return "";
+    const has = ["vibe", "formality", "pep_talk", "length", "notes"].some(k => personality[k] !== null && personality[k] !== undefined);
+    if (!has) return "";
+    const fmt = (v) => (v === null || v === undefined) ? "default" : String(v);
+    const pep = personality.pep_talk === true ? "yes" : "no";
+    const notes = personality.notes ? String(personality.notes).replace(/\s+/g, " ").trim() : "";
+    return [
+        "Voice contract (from spice/cowork/context/user-preferences.md):",
+        `- Vibe: ${fmt(personality.vibe)}`,
+        `- Formality: ${fmt(personality.formality)}`,
+        `- Pep talk: ${pep}`,
+        `- Length: ${fmt(personality.length)}`,
+        `- Notes: ${notes || "(none)"}`,
+        "",
+        "Apply this voice ONLY to narrative sections (frontmatter summary, [!info]- synopsis, [!tip] closing). Do NOT apply to tabular [!example]+ blocks (their content comes from gather sub-skills and is contractually shaped).",
+        "",
+        "---",
+        "",
+    ].join("\n");
+}
+
+function composeWarningCallout({ kind_name, kind_title, reason, mcps_entry }) {
+    if (reason === "not_classified") {
+        return [
+            `> [!warning] ${kind_title} not classified`,
+            `> Kind \`${kind_name}\` appears in priorities[] but has no entry in mcps in user-preferences.md.`,
+            `> Run \`/cowork preferences\` to classify this kind.`,
+        ].join("\n");
+    }
+    if (reason === "not_connected") {
+        const cap = (mcps_entry && mcps_entry.captured_at) || "an earlier date";
+        return [
+            `> [!warning] ${kind_title} not connected at capture time`,
+            `> Kind \`${kind_name}\` was captured with \`connected: false\` on ${cap}.`,
+            `> Re-run \`/cowork preferences\` after the MCP is connected.`,
+        ].join("\n");
+    }
+    if (reason === "served_by_unreachable" || reason === "skipped:no-tools" || reason === "failed:served-by-unreachable") {
+        const sb = (mcps_entry && mcps_entry.served_by) || "unknown";
+        return [
+            `> [!warning] ${kind_title} served-by namespace unreachable`,
+            `> Kind \`${kind_name}\` is served by \`${sb}\`, but that MCP namespace is not reachable in this session.`,
+            `> Verify the MCP is connected (check \`claude mcp list\`), then re-run.`,
+        ].join("\n");
+    }
+    if (reason === "failed:bad-output") {
+        return [
+            `> [!warning] ${kind_title} gather failed (output validation)`,
+            `> Kind \`${kind_name}\` gathered from \`${(mcps_entry && mcps_entry.served_by) || "unknown"}\` but the returned markdown failed structural validation.`,
+            `> File a sauce issue if this recurs.`,
+        ].join("\n");
+    }
+    return [
+        `> [!warning] ${kind_title} unavailable`,
+        `> Kind \`${kind_name}\`: ${reason}.`,
+    ].join("\n");
+}
+
 module.exports = {
     planDispatch,
+    decideDispatchMode,
+    composeVoiceContract,
+    composeWarningCallout,
     _titleCase: titleCase,
     _CANONICAL_TITLES: CANONICAL_TITLES,
 };
