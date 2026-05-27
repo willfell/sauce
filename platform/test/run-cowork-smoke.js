@@ -2143,6 +2143,135 @@ function assertCoworkV068Shape() {
     }
 }
 
+// =====================================================================
+// v0.78.0 Workstream A — orchestrator dispatch planning
+// =====================================================================
+
+// HC-V0780-C1: accuris-shape prefs → 5-entry plan in priority order
+//              chat/calendar/email → gather_from_served_by (override)
+//              ado/github → gather_from_served_by (custom)
+//              no warnings
+{
+    const label = "HC-V0780-C1 accuris-shape prefs → 5 priority-ordered dispatch entries";
+    try {
+        let helper;
+        try { helper = require(path.join(BP, "helpers", "dispatch-plan-helper.js")); }
+        catch (e) {
+            failed++;
+            console.error(`FAIL  ${label}: helper not yet created (expected — created in S6): ${e.message}`);
+            throw new Error("__skip__");
+        }
+        if (typeof helper.planDispatch !== "function") {
+            failed++;
+            console.error(`FAIL  ${label}: planDispatch not exported`);
+            throw new Error("__skip__");
+        }
+        const prefs = {
+            priorities: ["chat", "ado", "github", "calendar", "email"],
+            personality: { vibe: "casual" },
+            mcps: {
+                chat:     { served_by: "45224a84-deadbeef", override_classified: true, connected: true, what_matters: "Teams chat priority" },
+                ado:      { served_by: "1151913a-cafebabe", custom_kind: true,         connected: true, what_matters: "ADO board progress" },
+                github:   { served_by: "github",              custom_kind: true,         connected: true, what_matters: "PR review queue" },
+                calendar: { served_by: "45224a84-deadbeef", override_classified: true, connected: true, what_matters: "Conflicts surface" },
+                email:    { served_by: "45224a84-deadbeef", override_classified: true, connected: true, what_matters: "Action required only" },
+            },
+        };
+        const reachable = new Set(["45224a84-deadbeef", "1151913a-cafebabe", "github"]);
+        const mcpSkillMap = JSON.parse(fs.readFileSync(path.join(BP, "content/context/mcp-skill-map.json"), "utf8"));
+        const plan = helper.planDispatch({ prefs, reachableNamespaces: reachable, mcpSkillMap });
+        assertTrue(Array.isArray(plan) && plan.length === 5,
+            `${label}: expected 5-entry plan, got ${plan && plan.length}`);
+        assertTrue(plan[0].kind_name === "chat", `${label}: expected plan[0]=chat, got ${plan[0] && plan[0].kind_name}`);
+        assertTrue(plan[1].kind_name === "ado", `${label}: expected plan[1]=ado, got ${plan[1] && plan[1].kind_name}`);
+        assertTrue(plan[4].kind_name === "email", `${label}: expected plan[4]=email, got ${plan[4] && plan[4].kind_name}`);
+        for (const entry of plan) {
+            assertTrue(entry.action === "gather_from_served_by",
+                `${label}: expected all actions gather_from_served_by, got ${entry.kind_name}→${entry.action}`);
+        }
+        // chat is override_classified → kind_title = "Chat" (canonical)
+        const chatEntry = plan.find(e => e.kind_name === "chat");
+        assertTrue(chatEntry.kind_title === "Chat", `${label}: expected chat kind_title="Chat", got "${chatEntry.kind_title}"`);
+        // ado is custom_kind → kind_title = "Ado" (title-cased)
+        const adoEntry = plan.find(e => e.kind_name === "ado");
+        assertTrue(adoEntry.kind_title === "Ado", `${label}: expected ado kind_title="Ado", got "${adoEntry.kind_title}"`);
+    } catch (e) {
+        if (e.message !== "__skip__") { failed++; console.error(`FAIL  ${label}: ${e.message}`); }
+    }
+}
+
+// HC-V0780-C2: priorities=[chat, calendar] but mcps lacks calendar → warning in-position
+{
+    const label = "HC-V0780-C2 kind in priorities not in mcps → warn entry, not_classified";
+    try {
+        const helper = require(path.join(BP, "helpers", "dispatch-plan-helper.js"));
+        const prefs = {
+            priorities: ["chat", "calendar"],
+            personality: {},
+            mcps: {
+                chat:  { served_by: "ns-a", override_classified: true, connected: true, what_matters: "x" },
+                email: { served_by: "ns-b", override_classified: true, connected: true, what_matters: "y" },  // present but not in priorities
+            },
+        };
+        const reachable = new Set(["ns-a", "ns-b"]);
+        const mcpSkillMap = JSON.parse(fs.readFileSync(path.join(BP, "content/context/mcp-skill-map.json"), "utf8"));
+        const plan = helper.planDispatch({ prefs, reachableNamespaces: reachable, mcpSkillMap });
+        assertTrue(plan.length === 2, `${label}: expected 2 entries, got ${plan.length}`);
+        assertTrue(plan[0].kind_name === "chat" && plan[0].action === "gather_from_served_by",
+            `${label}: expected plan[0]=chat gather, got ${plan[0].kind_name}/${plan[0].action}`);
+        assertTrue(plan[1].kind_name === "calendar" && plan[1].action === "warn",
+            `${label}: expected plan[1]=calendar warn, got ${plan[1].kind_name}/${plan[1].action}`);
+        assertTrue(plan[1].reason === "not_classified",
+            `${label}: expected reason=not_classified, got "${plan[1].reason}"`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0780-C3: mcps[kind].connected=false → warning not_connected
+{
+    const label = "HC-V0780-C3 mcps[kind].connected=false → warn entry, not_connected";
+    try {
+        const helper = require(path.join(BP, "helpers", "dispatch-plan-helper.js"));
+        const prefs = {
+            priorities: ["email"],
+            personality: {},
+            mcps: {
+                email: { served_by: "45224a84", override_classified: true, connected: false, captured_at: "2026-05-20", what_matters: "x" },
+            },
+        };
+        const reachable = new Set(["45224a84"]);
+        const mcpSkillMap = JSON.parse(fs.readFileSync(path.join(BP, "content/context/mcp-skill-map.json"), "utf8"));
+        const plan = helper.planDispatch({ prefs, reachableNamespaces: reachable, mcpSkillMap });
+        assertTrue(plan.length === 1 && plan[0].action === "warn" && plan[0].reason === "not_connected",
+            `${label}: expected warn/not_connected, got ${JSON.stringify(plan[0])}`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0780-C4: served_by not in reachable namespaces → warning served_by_unreachable
+{
+    const label = "HC-V0780-C4 served_by namespace not reachable → warn entry, served_by_unreachable";
+    try {
+        const helper = require(path.join(BP, "helpers", "dispatch-plan-helper.js"));
+        const prefs = {
+            priorities: ["calendar"],
+            personality: {},
+            mcps: {
+                calendar: { served_by: "nonexistent-ns", override_classified: true, connected: true, what_matters: "x" },
+            },
+        };
+        const reachable = new Set(["claude_ai_Gmail", "claude_ai_Google_Calendar"]);
+        const mcpSkillMap = JSON.parse(fs.readFileSync(path.join(BP, "content/context/mcp-skill-map.json"), "utf8"));
+        const plan = helper.planDispatch({ prefs, reachableNamespaces: reachable, mcpSkillMap });
+        assertTrue(plan.length === 1 && plan[0].action === "warn" && plan[0].reason === "served_by_unreachable",
+            `${label}: expected warn/served_by_unreachable, got ${JSON.stringify(plan[0])}`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
 (function main() {
   console.log("--- shared contracts ---");
   checkSharedContracts();
