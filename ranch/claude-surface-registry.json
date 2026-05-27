@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-05-23T19:24:18.702Z",
+  "generated_at": "2026-05-27T23:28:38.014Z",
   "workshop_version": "0.77.0",
   "contributions": {
     "audit": [
@@ -459,6 +459,12 @@
           "path": "spice/cowork/About Cowork.md",
           "command": "/cowork about"
         }
+      },
+      {
+        "kind": "skill",
+        "source": "skills/skills/read-user-preferences/SKILL.md",
+        "dest": ".claude/skills/cowork/skills/read-user-preferences/SKILL.md",
+        "version": "0.16.0"
       }
     ]
   }
