@@ -2034,6 +2034,115 @@ function assertCoworkV068Shape() {
     }
 }
 
+// =====================================================================
+// v0.78.0 Workstream B+C — gather-from-served-by dry-run
+// =====================================================================
+
+// HC-V0780-B1: known-kind override (chat served by M365 UUID) dry-run returns
+//              markdown with `> [!example]+ Chat` prefix, status: ready
+{
+    const label = "HC-V0780-B1 gather-from-served-by chat dry-run returns ready callout";
+    try {
+        let helper;
+        try { helper = require(path.join(BP, "helpers", "gather-from-served-by-helper.js")); }
+        catch (e) {
+            failed++;
+            console.error(`FAIL  ${label}: helper not yet created (expected — created in S4): ${e.message}`);
+            throw new Error("__skip__");
+        }
+        if (typeof helper.gatherFromServedBy !== "function") {
+            failed++;
+            console.error(`FAIL  ${label}: gatherFromServedBy not exported`);
+            throw new Error("__skip__");
+        }
+        const result = helper.gatherFromServedBy({
+            kind_name: "chat",
+            kind_title: "Chat",
+            served_by: "45224a84-deadbeef",
+            what_matters: "Teams chat is the BIG priority for my morning briefing.",
+            question_set_answers: { inner_circle: ["Stefan", "Hayden"], surface_kinds: ["reply-owed-24h"] },
+            today: "2026-05-27",
+            range: { start: "2026-05-27", end: "2026-05-29" },
+            timezone: "America/Denver",
+            dry_run_answers: {
+                available_tools: [
+                    "mcp__45224a84-deadbeef__chat_message_search",
+                    "mcp__45224a84-deadbeef__send_message",
+                ],
+                agent_markdown: "> [!example]+ Chat\n> - **Stefan**: replied about cyan-4 board\n> - **Hayden**: needs your review on PR 234",
+                tools_used: ["mcp__45224a84-deadbeef__chat_message_search"],
+            },
+        });
+        assertTrue(result.status === "ready", `${label}: expected status ready, got ${result.status} (${result.reason || ""})`);
+        assertTrue(/^> \[!example\]\+ Chat\n/.test(result.markdown),
+            `${label}: expected markdown to start with > [!example]+ Chat, got: ${JSON.stringify(result.markdown.slice(0,60))}`);
+        assertTrue(Array.isArray(result.tools_used) && result.tools_used.length >= 1,
+            `${label}: expected tools_used non-empty, got ${JSON.stringify(result.tools_used)}`);
+    } catch (e) {
+        if (e.message !== "__skip__") { failed++; console.error(`FAIL  ${label}: ${e.message}`); }
+    }
+}
+
+// HC-V0780-B2: custom-kind (ado) dry-run returns markdown with title-cased `Ado`
+{
+    const label = "HC-V0780-B2 gather-from-served-by ado (custom) dry-run returns title-cased callout";
+    try {
+        const helper = require(path.join(BP, "helpers", "gather-from-served-by-helper.js"));
+        const result = helper.gatherFromServedBy({
+            kind_name: "ado",
+            kind_title: "Ado",  // title-cased per design Option A
+            served_by: "1151913a-cafebabe",
+            what_matters: "ADO is for BOARD progress only.",
+            question_set_answers: null,
+            today: "2026-05-27",
+            range: { start: "2026-05-27", end: "2026-05-27" },
+            timezone: "America/Denver",
+            dry_run_answers: {
+                available_tools: [
+                    "mcp__1151913a-cafebabe__list_work_items",
+                    "mcp__1151913a-cafebabe__get_work_item",
+                ],
+                agent_markdown: "> [!example]+ Ado\n> - Story 705679 moved to Active by Will Fellhoelter\n> - PR linked: 234",
+                tools_used: ["mcp__1151913a-cafebabe__list_work_items"],
+            },
+        });
+        assertTrue(result.status === "ready", `${label}: expected status ready, got ${result.status}`);
+        assertTrue(/^> \[!example\]\+ Ado\n/.test(result.markdown),
+            `${label}: expected markdown to start with > [!example]+ Ado, got: ${JSON.stringify(result.markdown.slice(0,60))}`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0780-B3: no tools exposed for served_by → skipped:no-tools
+{
+    const label = "HC-V0780-B3 gather-from-served-by with no matching tools → skipped:no-tools";
+    try {
+        const helper = require(path.join(BP, "helpers", "gather-from-served-by-helper.js"));
+        const result = helper.gatherFromServedBy({
+            kind_name: "calendar",
+            kind_title: "Calendar",
+            served_by: "nonexistent-ns",
+            what_matters: "Conflicts are the primary signal.",
+            question_set_answers: null,
+            today: "2026-05-27",
+            range: { start: "2026-05-27", end: "2026-05-29" },
+            timezone: "America/Denver",
+            dry_run_answers: {
+                available_tools: [
+                    "mcp__some-other-ns__do_thing",
+                ],
+                agent_markdown: null,
+                tools_used: [],
+            },
+        });
+        assertTrue(result.status === "skipped:no-tools",
+            `${label}: expected status skipped:no-tools, got ${result.status}`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
 (function main() {
   console.log("--- shared contracts ---");
   checkSharedContracts();
