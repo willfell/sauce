@@ -2309,6 +2309,82 @@ function assertCoworkV068Shape() {
     }
 }
 
+// =====================================================================
+// v0.78.0 Workstream A+B+C — end-to-end body composition
+// =====================================================================
+
+// HC-V0780-E1: simulated morning-briefing body composition produces priority-ordered example blocks + voice-contract prefix
+{
+    const label = "HC-V0780-E1 morning-briefing body composition: 5 priority-ordered example blocks + voice-contract prefix";
+    try {
+        let helper;
+        try { helper = require(path.join(BP, "helpers", "compose-body-helper.js")); }
+        catch (e) {
+            failed++;
+            console.error(`FAIL  ${label}: compose-body-helper not yet created (expected — added in S10): ${e.message}`);
+            throw new Error("__skip__");
+        }
+        if (typeof helper.composeBody !== "function") {
+            failed++; console.error(`FAIL  ${label}: composeBody not exported`); throw new Error("__skip__");
+        }
+        const prefs = {
+            priorities: ["chat", "ado", "github", "calendar", "email"],
+            personality: { vibe: "casual", pep_talk: false, length: "balanced", notes: "Facts only. No overreach." },
+            mcps: {
+                chat:     { served_by: "ns1", override_classified: true, connected: true, what_matters: "Teams priority" },
+                ado:      { served_by: "ns2", custom_kind: true,         connected: true, what_matters: "Board progress" },
+                github:   { served_by: "ns3", custom_kind: true,         connected: true, what_matters: "PR review" },
+                calendar: { served_by: "ns1", override_classified: true, connected: true, what_matters: "Conflicts" },
+                email:    { served_by: "ns1", override_classified: true, connected: true, what_matters: "Action only" },
+            },
+        };
+        const orderedBlocks = [
+            { kind_name: "chat",     markdown: "> [!example]+ Chat\n> - Stefan replied\n> - Hayden needs review", kind: "example" },
+            { kind_name: "ado",      markdown: "> [!example]+ Ado\n> - Story 705679 moved",                       kind: "example" },
+            { kind_name: "github",   markdown: "> [!example]+ Github\n> - PR 234 awaiting review",                kind: "example" },
+            { kind_name: "calendar", markdown: "> [!example]+ Calendar\n> - 9am Standup\n> - 10am conflict",      kind: "example" },
+            { kind_name: "email",    markdown: "> [!example]+ Email\n> - VIP from Stefan",                        kind: "example" },
+        ];
+        const result = helper.composeBody({
+            dispatch_mode: "prefs",
+            prefs,
+            ordered_blocks: orderedBlocks,
+            engagement: { id: "accuris", timezone: "America/Denver" },
+            prompt_body: "Compose today's briefing.",
+            today: "2026-05-27",
+            synopsis: "Today's plan: focused dev work, two meeting blocks, one conflict at 10am.",
+            tip: "First action: reply to Stefan's thread on cyan-4 board.",
+            aspect_blocks: [], // none for accuris (render_aspects skip semantic/finance)
+        });
+        assertTrue(typeof result.body === "string" && result.body.length > 200,
+            `${label}: expected non-trivial body, got length ${result.body && result.body.length}`);
+        // Body shape checks
+        assertTrue(/```dataviewjs[\s\S]*?SpaceNavButtons[\s\S]*?```/.test(result.body),
+            `${label}: body missing SpaceNavButtons block`);
+        assertTrue(/^> \[!info\]- /m.test(result.body),
+            `${label}: body missing [!info]- callout`);
+        assertTrue(/^> \[!tip\] /m.test(result.body),
+            `${label}: body missing [!tip] callout`);
+        // Priority ordering: chat before ado before github before calendar before email
+        const idxChat     = result.body.indexOf("> [!example]+ Chat");
+        const idxAdo      = result.body.indexOf("> [!example]+ Ado");
+        const idxGithub   = result.body.indexOf("> [!example]+ Github");
+        const idxCalendar = result.body.indexOf("> [!example]+ Calendar");
+        const idxEmail    = result.body.indexOf("> [!example]+ Email");
+        assertTrue(idxChat > -1 && idxAdo > -1 && idxGithub > -1 && idxCalendar > -1 && idxEmail > -1,
+            `${label}: missing one or more priority example markers in body`);
+        assertTrue(idxChat < idxAdo && idxAdo < idxGithub && idxGithub < idxCalendar && idxCalendar < idxEmail,
+            `${label}: priority order incorrect (chat→ado→github→calendar→email)`);
+        // Voice contract present in prompt body that was passed to compose
+        assertTrue(typeof result.prompt_body_with_voice === "string" && result.prompt_body_with_voice.startsWith("Voice contract"),
+            `${label}: prompt_body_with_voice missing voice contract prefix`);
+        assertTrue(result.prompt_body_with_voice.includes("Facts only. No overreach."),
+            `${label}: voice contract missing notes`);
+    } catch (e) {
+        if (e.message !== "__skip__") { failed++; console.error(`FAIL  ${label}: ${e.message}`); }
+    }
+}
+
 (function main() {
   console.log("--- shared contracts ---");
   checkSharedContracts();
