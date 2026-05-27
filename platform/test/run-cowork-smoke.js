@@ -2272,6 +2272,43 @@ function assertCoworkV068Shape() {
     }
 }
 
+// =====================================================================
+// v0.78.0 Workstream A — legacy fallback
+// =====================================================================
+
+// HC-V0780-D1: empty prefs → dispatch_mode legacy
+{
+    const label = "HC-V0780-D1 empty user-preferences → dispatch_mode legacy";
+    try {
+        let helper;
+        try { helper = require(path.join(BP, "helpers", "dispatch-plan-helper.js")); }
+        catch (e) { failed++; console.error(`FAIL  ${label}: ${e.message}`); throw new Error("__skip__"); }
+        if (typeof helper.decideDispatchMode !== "function") {
+            failed++;
+            console.error(`FAIL  ${label}: decideDispatchMode not exported (expected — added in S8)`);
+            throw new Error("__skip__");
+        }
+        const mode = helper.decideDispatchMode({ prefsStatus: "empty" });
+        assertTrue(mode === "legacy", `${label}: expected legacy, got ${mode}`);
+    } catch (e) {
+        if (e.message !== "__skip__") { failed++; console.error(`FAIL  ${label}: ${e.message}`); }
+    }
+}
+
+// HC-V0780-D2: malformed prefs → dispatch_mode legacy
+{
+    const label = "HC-V0780-D2 malformed user-preferences → dispatch_mode legacy";
+    try {
+        const helper = require(path.join(BP, "helpers", "dispatch-plan-helper.js"));
+        const mode = helper.decideDispatchMode({ prefsStatus: "malformed" });
+        assertTrue(mode === "legacy", `${label}: expected legacy, got ${mode}`);
+        const okMode = helper.decideDispatchMode({ prefsStatus: "ok" });
+        assertTrue(okMode === "prefs", `${label}: expected prefs for ok, got ${okMode}`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
 (function main() {
   console.log("--- shared contracts ---");
   checkSharedContracts();
