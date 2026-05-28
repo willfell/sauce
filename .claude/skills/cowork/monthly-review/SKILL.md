@@ -26,11 +26,73 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
    its `## Steps` section with `{ required: ["obsidian"] }`. If not `"ready"`, emit Notice `cowork:monthly-review aborted -- <status>` and exit.
 2. **Resolve engagement.** Read vault-config.md; look up engagement by id; load type manifest; capture `engagement` + `render_aspects`.
 3. READ `.claude/skills/cowork/skills/date-context/SKILL.md` in full and follow
-   its `## Steps` section with `{}`. Capture `context` — critically `prev_month_start`, `prev_month_end`, `prev_month_label`, `prev_month_yyyymm`, plus today's `daily_path`.
+   its `## Steps` section with `{}`. Capture `context` — critically `prev_month_start`, `prev_month_end`, `prev_month_label`, `prev_month_yyyymm`, plus today's `daily_path`. Also capture `month_start` / `month_end` (first / last day of `context.today`'s month, used as the prefs-driven dispatch range below).
+3b. READ `.claude/skills/cowork/skills/read-user-preferences/SKILL.md` in full and follow
+   its `## Steps` section with `{}`. Capture as `prefs_result = { prefs, status, reason }`. Capture `prefs = prefs_result.prefs` (may be null when `status != "ok"`). Do NOT abort on `status != "ok"`; continue with legacy fallback (see step 3c).
+3c. **Plan dispatch.** Determine dispatch mode and build the priority-ordered dispatch plan.
+
+   Compute `dispatch_mode`:
+
+   ```
+   dispatch_mode = (prefs_result.status === "ok") ? "prefs" : "legacy"
+   ```
+
+   When `dispatch_mode == "legacy"`:
+   - Emit Obsidian Notice: `cowork:monthly-review -- user-preferences <status> (<reason>); using engagement-template defaults`.
+   - Skip the remainder of step 3c. The legacy gather sequence fires unchanged.
+
+   When `dispatch_mode == "prefs"`:
+   - From `check-vault-routing`'s prior result, capture `reachable_namespaces[]`.
+   - Read `mcp-skill-map.json` from `spice/cowork/context/mcp-skill-map.json` (or fall back to the materialized path `.local/blueprints/cowork/content/context/mcp-skill-map.json`).
+   - Invoke `.local/blueprints/cowork/helpers/dispatch-plan-helper.js`'s `planDispatch({ prefs, reachableNamespaces, mcpSkillMap })`. Capture as `dispatch_plan[]`.
+   - Capture `voice_contract = composeVoiceContract(prefs.personality)`.
+   - Compose the dispatch `range` as the current calendar month:
+     - `range.start = context.month_start` (first day of `context.today`'s month, `YYYY-MM-01`; date-context emits this pre-computed field — equivalent to `context.today.replace(/-\d{2}$/, "-01")`).
+     - `range.end = context.month_end` (last day of `context.today`'s month; date-context emits this pre-computed field — equivalent to `new Date(year, monthIndex + 1, 0)` JS semantics, where passing day=0 to next month yields the last day of current month, handling 28/29/30/31 calendar days).
 4. READ `.claude/skills/cowork/skills/ensure-daily-note/SKILL.md` in full and follow
    its `## Steps` section with `{ date: context.today, weekday: context.dddd, month_name: context["MM-Month"].split("-")[1], path: context.daily_path }`.
 
 ## Gather
+
+When `dispatch_mode == "legacy"`, execute the v0.77.0 legacy gather sequence below verbatim. `ordered_blocks[]` stays empty.
+
+When `dispatch_mode == "prefs"`, skip the legacy steps; execute the priority-loop:
+
+```
+ordered_blocks = []
+for entry in dispatch_plan:
+  if entry.action == "warn":
+    md = composeWarningCallout({ kind_name, kind_title, reason, mcps_entry })
+    ordered_blocks.push({ kind_name, markdown: md, kind: "warning" })
+  elif entry.action == "gather_canonical":
+    READ `.claude/skills/cowork/skills/<entry.gather_skill-after-cowork-prefix>/SKILL.md`
+    in full and follow its `## Steps` section with the kind's canonical input
+    shape (see the existing legacy gather steps for argument shapes).
+    Push the gather's markdown into ordered_blocks with kind: "example".
+  elif entry.action == "gather_from_served_by":
+    READ `.claude/skills/cowork/skills/gather-from-served-by/SKILL.md` in full
+    and follow its `## Steps` section with {
+      kind_name:            entry.kind_name,
+      kind_title:           entry.kind_title,
+      served_by:            entry.served_by,
+      what_matters:         entry.what_matters,
+      question_set_answers: entry.question_set_answers,
+      today:                context.today,
+      range:                { start: context.month_start, end: context.month_end },
+      timezone:             engagement.timezone || "America/Denver"
+    }
+    if result.status == "ready":
+      ordered_blocks.push({ kind_name, markdown: result.markdown, kind: "example" })
+    else:
+      md = composeWarningCallout({ kind_name, kind_title, reason: result.status, mcps_entry })
+      ordered_blocks.push({ kind_name, markdown: md, kind: "warning" })
+
+# After the priority loop, run engagement-type-aspect gathers per existing
+# render_aspects gates. These remain APPENDED AFTER ordered_blocks in the
+# composed body.
+```
+
+*(existing legacy-mode gather steps preserved verbatim below — these fire ONLY when `dispatch_mode == "legacy"`)*
 
 5. If `render_aspects.finance_block == "include"`: READ `.claude/skills/cowork/skills/gather-finance-yesterday/SKILL.md` in full and follow
    its `## Steps` section with `{ engagement_id, date_yesterday: context.prev_month_end, mode: "full-month", month_range: { start: context.prev_month_start, end: context.prev_month_end } }`.
@@ -57,7 +119,13 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
     - If `user_prompt_body` is empty, read `spice/cowork/context/engagement-templates/<engagement.type>/prompts/monthly-review.md`. Strip frontmatter; capture as `template_prompt_body` (or empty when missing).
     - Set `prompt_body = user_prompt_body || template_prompt_body`.
     - Set `prompt_source = (user_prompt_body ? "spice/cowork/prompts/monthly-review.md" : (template_prompt_body ? "spice/cowork/context/engagement-templates/<engagement.type>/prompts/monthly-review.md" : "spice/cowork/prompts/monthly-review.md"))`.
-15. **Compose run-note body** per `prompt_body` instructions interpolating month-summary gather outputs. When `prompt_body` is empty, do NOT freelance content — compose a skeleton-compliant STUB body:
+14b. **Voice contract.** If `dispatch_mode == "prefs"` AND `voice_contract != ""`, prepend it to `prompt_body`:
+   `prompt_body = voice_contract + prompt_body`. The combined string is the input to the body-composition step.
+15. **Compose run-note body** per `prompt_body` instructions interpolating month-summary gather outputs.
+
+    When `dispatch_mode == "prefs"`, compose the body as: SpaceNavButtons → `[!info]- This month at a glance` paragraph → `ordered_blocks[]` (priority order, in array order) → engagement-type-aspect blocks (semantic_related, finance from render_aspects) → `[!tip]` closing. `ordered_blocks` entries with `kind: "warning"` render as `[!warning]` callouts in-position. When `dispatch_mode == "legacy"`, use the v0.77.0 composition order verbatim (existing body).
+
+    When `prompt_body` is empty, do NOT freelance content — compose a skeleton-compliant STUB body:
     - `SpaceNavButtons` dataviewjs block (verbatim).
     - `> [!info]- This month at a glance\n> (Prompt body empty — edit spice/cowork/prompts/monthly-review.md to customize what this run emits.)`
     - `> [!example]+ 📋 Status\n> No prompt body to drive content; this run is a placeholder.`
