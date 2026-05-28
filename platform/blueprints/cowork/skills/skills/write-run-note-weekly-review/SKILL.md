@@ -100,6 +100,16 @@ The body MUST contain these 5 structural markers in this order; CONTENT inside e
 
 - Optional `> [!example]+ 🧩 Emergent themes this week` callout, placed AFTER the cadence's primary example block(s) and BEFORE the closing `> [!tip]`. Renders only when gather-semantic-related returned status == "ready". The body-shape pre-write self-check already accepts multiple example markers; no contract change needed.
 
+### v0.78.0 prefs-driven additions
+
+When the orchestrator passes `ordered_blocks[]` (priority-ordered, from `dispatch_mode == "prefs"`):
+
+- Emit `[!example]+` and `[!warning]` callouts from `ordered_blocks[]` in array order. The first block is the highest-priority kind, the last is the lowest. Engagement-type-aspect blocks (semantic_related, finance_block from render_aspects) render AFTER all priority-ordered blocks.
+- `[!example]+ <title>` callouts no longer require the title to match a known section name. Title may be any short string (≤60 chars, no newlines). The pre-write self-check's `body-missing-example-admonition` rule still applies (≥1 example admonition required), but no longer scopes the match to a fixed title set.
+- When the orchestrator-composed body includes a `Voice contract:` prefix block in the prompt body (introduced by the literal line `Voice contract (from spice/cowork/context/user-preferences.md):`), apply that voice ONLY to: frontmatter `summary` (1-2 sentences), the synopsis paragraph, the closing tip and action. Do NOT apply to: SpaceNavButtons block (verbatim), `[!example]+` callouts (gather-shaped content), `[!warning]` callouts (canonical wording from the orchestrator).
+
+When `dispatch_mode == "legacy"` (no `ordered_blocks[]`), use the v0.77.0 section ordering unchanged.
+
 When `prompt_body` was empty upstream (`warning == "empty_prompt"`), the orchestrator composes a skeleton-compliant stub: info admonition body reads `(Prompt body empty — edit <prompt_source> to customize what this run emits.)`; example block reads `No prompt body to drive content; this run is a placeholder.`; tip block recommends editing the prompt source. Frontmatter `summary` reads `Stub run — prompt body at <prompt_source> is empty.` The self-check passes (5 markers + summary + title all present).
 
 ## Pre-write self-check
