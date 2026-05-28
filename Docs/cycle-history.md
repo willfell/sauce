@@ -4,6 +4,21 @@ This file archives the per-cycle status snapshots that previously lived in `CLAU
 
 ---
 
+## v0.78.0 — cowork-consumption (closed 2026-05-27)
+
+5-orchestrator consumption of user-preferences.md (the file that v0.76.0 introduced + v0.77.0 made adaptive). Two new sub-skills:
+
+- `cowork:read-user-preferences` — parses user-preferences.md, returns `{ prefs, status: ok|empty|malformed }`. Helper at `platform/blueprints/cowork/helpers/read-user-preferences-helper.js` is pure (no MCP calls, no side effects) so HC cases exercise it directly.
+- `cowork:gather-from-served-by` — vendor-agnostic gather for `override_classified` (M365 UUID gateway serves calendar + email + chat) AND `custom_kind` (user-defined ado / github with free-text what_matters). Single sub-skill collapses both paths.
+
+Each of the 5 atomic-note orchestrators gains pre-flight step 3b (read prefs) and step 3c (plan dispatch). The gather phase becomes a priority-ordered loop driven by `prefs.priorities[]` instead of a hardcoded sequence. Voice-contract prefix composed from `prefs.personality` (vibe / formality / pep_talk / length / notes) is prepended to the prompt body before the composing-agent reads — applies to narrative sections only.
+
+Legacy fallback preserved bit-for-bit when prefs are empty / missing / malformed: the v0.77.0 hardcoded gather sequence fires unchanged. In-position `[!warning]` callouts replace example blocks for kinds that are unclassified, disconnected at capture time, or whose `served_by` namespace is unreachable at fire time. 14 new HC-V0780-* test cases distributed in `run-cowork-smoke.js`.
+
+Cowork 0.16.0 → 0.17.0.
+
+---
+
 ## v0.77.0 cowork-adaptive-detection CLOSED 2026-05-23
 
 **Workshop:** 0.76.0 → 0.77.0

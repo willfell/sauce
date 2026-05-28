@@ -146,3 +146,16 @@ or define a custom kind inline with a free-text "what matters" note.
 
 Per-vault upgrade: `sauce update --bump-pins`. No flags needed — A+B
 fixes from v0.76.0 still cover the brew-installed workshop detection.
+
+---
+
+## Upgrading from v0.77.0 → v0.78.0
+
+Atomic-note orchestrators (morning-briefing / midday-tripwire / eod-review / weekly-review / monthly-review) now consume `spice/cowork/context/user-preferences.md` captured by v0.76.0+v0.77.0's context-builder. If you haven't run `/cowork preferences` yet, all 5 orchestrators fall back to v0.77.0 behavior — no change. If you HAVE captured preferences:
+
+- Priority-ordered `[!example]+` callouts per `priorities[]` (first = highest priority, last = lowest).
+- Voice-contract prefix composed from `personality:` (vibe / formality / pep_talk / length / notes) shapes narrative sections (synopsis, tip) — tabular callouts are unaffected.
+- `override_classified: true` kinds (e.g., calendar served by M365 UUID) and `custom_kind: true` kinds (e.g., ado / github) gather via the new `cowork:gather-from-served-by` sub-skill, which dispatches the agent inline against whatever tools the served_by namespace exposes.
+- In-position `[!warning]` callouts replace example blocks for kinds that are unclassified, disconnected at capture time, or unreachable at fire time.
+
+No new manual steps. Run `sauce update`; the orchestrators read prefs automatically on the next scheduled fire.
