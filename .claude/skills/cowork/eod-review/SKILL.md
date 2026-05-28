@@ -27,10 +27,69 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
 2. **Resolve engagement.** Read vault-config.md; look up engagement by id; load type manifest; capture `engagement` + `render_aspects`.
 3. READ `.claude/skills/cowork/skills/date-context/SKILL.md` in full and follow
    its `## Steps` section with `{}`. Capture `context` (today, tomorrow, daily_path, tomorrow_daily_path, tomorrow_weekday).
+3b. READ `.claude/skills/cowork/skills/read-user-preferences/SKILL.md` in full and follow
+   its `## Steps` section with `{}`. Capture as `prefs_result = { prefs, status, reason }`. Capture `prefs = prefs_result.prefs` (may be null when `status != "ok"`). Do NOT abort on `status != "ok"`; continue with legacy fallback (see step 3c).
+3c. **Plan dispatch.** Determine dispatch mode and build the priority-ordered dispatch plan.
+
+   Compute `dispatch_mode`:
+
+   ```
+   dispatch_mode = (prefs_result.status === "ok") ? "prefs" : "legacy"
+   ```
+
+   When `dispatch_mode == "legacy"`:
+   - Emit Obsidian Notice: `cowork:eod-review -- user-preferences <status> (<reason>); using engagement-template defaults`.
+   - Skip the remainder of step 3c. The legacy gather sequence fires unchanged.
+
+   When `dispatch_mode == "prefs"`:
+   - From `check-vault-routing`'s prior result, capture `reachable_namespaces[]`.
+   - Read `mcp-skill-map.json` from `spice/cowork/context/mcp-skill-map.json` (or fall back to the materialized path `.local/blueprints/cowork/content/context/mcp-skill-map.json`).
+   - Invoke `.local/blueprints/cowork/helpers/dispatch-plan-helper.js`'s `planDispatch({ prefs, reachableNamespaces, mcpSkillMap })`. Capture as `dispatch_plan[]`.
+   - Capture `voice_contract = composeVoiceContract(prefs.personality)`.
 4. READ `.claude/skills/cowork/skills/ensure-daily-note/SKILL.md` in full and follow
    its `## Steps` section with `{ date: context.today, weekday: context.dddd, month_name: context["MM-Month"].split("-")[1], path: context.daily_path }`.
 
 ## Gather
+
+When `dispatch_mode == "legacy"`, execute the v0.77.0 legacy gather sequence below verbatim. `ordered_blocks[]` stays empty.
+
+When `dispatch_mode == "prefs"`, skip the legacy steps; execute the priority-loop:
+
+```
+ordered_blocks = []
+for entry in dispatch_plan:
+  if entry.action == "warn":
+    md = composeWarningCallout({ kind_name, kind_title, reason, mcps_entry })
+    ordered_blocks.push({ kind_name, markdown: md, kind: "warning" })
+  elif entry.action == "gather_canonical":
+    READ `.claude/skills/cowork/skills/<entry.gather_skill-after-cowork-prefix>/SKILL.md`
+    in full and follow its `## Steps` section with the kind's canonical input
+    shape (see the existing legacy gather steps for argument shapes).
+    Push the gather's markdown into ordered_blocks with kind: "example".
+  elif entry.action == "gather_from_served_by":
+    READ `.claude/skills/cowork/skills/gather-from-served-by/SKILL.md` in full
+    and follow its `## Steps` section with {
+      kind_name:            entry.kind_name,
+      kind_title:           entry.kind_title,
+      served_by:            entry.served_by,
+      what_matters:         entry.what_matters,
+      question_set_answers: entry.question_set_answers,
+      today:                context.today,
+      range:                { start: context.today, end: context.today },
+      timezone:             engagement.timezone || "America/Denver"
+    }
+    if result.status == "ready":
+      ordered_blocks.push({ kind_name, markdown: result.markdown, kind: "example" })
+    else:
+      md = composeWarningCallout({ kind_name, kind_title, reason: result.status, mcps_entry })
+      ordered_blocks.push({ kind_name, markdown: md, kind: "warning" })
+
+# After the priority loop, run engagement-type-aspect gathers per existing
+# render_aspects gates. These remain APPENDED AFTER ordered_blocks in the
+# composed body.
+```
+
+*(existing legacy-mode gather steps preserved verbatim below — these fire ONLY when `dispatch_mode == "legacy"`)*
 
 5. READ `.claude/skills/cowork/skills/gather-projects/SKILL.md` in full and follow
    its `## Steps` section with `{ engagement_id, filter: "today-status", today: context.today }`. Capture completed / incomplete / kanban buckets.
@@ -57,7 +116,13 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
     - If `user_prompt_body` is empty, read `spice/cowork/context/engagement-templates/<engagement.type>/prompts/eod-review.md` (substitute `<engagement.type>` from the resolved engagement; expected values: `personal`, `w2-fte`, `consulting`). Strip frontmatter; capture as `template_prompt_body` (or empty when missing).
     - Set `prompt_body = user_prompt_body || template_prompt_body` (use user prompt when populated; else fall back to engagement-template prompt; else empty).
     - Set `prompt_source` accordingly: if `user_prompt_body` non-empty, `prompt_source = "spice/cowork/prompts/eod-review.md"`; else if `template_prompt_body` non-empty, `prompt_source = "spice/cowork/context/engagement-templates/<engagement.type>/prompts/eod-review.md"`; else `prompt_source = "spice/cowork/prompts/eod-review.md"` (the user-prompt path is still the canonical pointer when both empty — the stub references it).
-11. **Compose run-note body** per `prompt_body` instructions interpolating gather outputs. When `prompt_body` is empty, do NOT freelance content — compose a skeleton-compliant STUB body:
+10b. **Voice contract.** If `dispatch_mode == "prefs"` AND `voice_contract != ""`, prepend it to `prompt_body`:
+   `prompt_body = voice_contract + prompt_body`. The combined string is the input to the body-composition step.
+11. **Compose run-note body** per `prompt_body` instructions interpolating gather outputs.
+
+   When `dispatch_mode == "prefs"`, compose the body as: SpaceNavButtons → `[!info]- Synopsis` paragraph → `ordered_blocks[]` (priority order, in array order) → engagement-type-aspect blocks (semantic_related, finance from render_aspects) → `[!tip]` closing. `ordered_blocks` entries with `kind: "warning"` render as `[!warning]` callouts in-position. When `dispatch_mode == "legacy"`, use the v0.77.0 composition order verbatim (existing body).
+
+   When `prompt_body` is empty, do NOT freelance content — compose a skeleton-compliant STUB body:
     - `SpaceNavButtons` dataviewjs block (verbatim).
     - `> [!info]- Today at a glance\n> (Prompt body empty — edit spice/cowork/prompts/eod-review.md to customize what this run emits.)`
     - `> [!example]+ 📋 Status\n> No prompt body to drive content; this run is a placeholder.`
