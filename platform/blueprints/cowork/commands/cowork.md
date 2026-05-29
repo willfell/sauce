@@ -57,6 +57,14 @@ In Claude Code (this vault), type:
 
 Claude will read the bootstrap-vault SKILL.md and drive the interview one question at a time. Answer each prompt; the skill will surface USER APPROVAL gates before writing the canonical engagement record + before mutating `Cowork.md`.
 
+## /cowork microscope <kind> (v0.79.0)
+
+```
+/cowork microscope <kind>
+```
+
+Drives the `cowork:edit-microscope` skill materialized at `<vault>/.claude/skills/cowork/edit-microscope/SKILL.md`. It is an MCP-tool-aware, iterative capture loop that authors (or deepens) a USER-OWNED per-kind "microscope" gather contract at `spice/cowork/prompts/per-mcp/<kind>/microscope.md`. The skill enumerates the kind's `served_by` tools, consent-gated samples your real data to ask grounded questions, surfaces data gaps with resolution paths (resolvable-in-gather / MCP-ceiling / user-supplied), and writes the deep contract the atomic-note orchestrators read. When a microscope exists for a prioritized kind, the orchestrators route that kind through `cowork:gather-from-served-by` with the microscope body as the deep `what_matters`. Re-run anytime to go deeper. The microscope file is never overwritten by `sauce update`/`reinstall` (it is not in cowork's `files[]`). If `<kind>` is omitted, the skill lists the kinds in `user-preferences.md` and asks which one.
+
 ## Engagement type quick-reference
 
 | Type | Required fields | Default cadences | Render aspects |

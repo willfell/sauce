@@ -362,6 +362,11 @@
     },
     {
       "kind": "skill",
+      "source": "skills/orchestrators/edit-microscope/SKILL.md",
+      "dest": "{{skills_dir}}/edit-microscope/SKILL.md"
+    },
+    {
+      "kind": "skill",
       "source": "skills/skills/check-vault-routing/SKILL.md",
       "dest": "{{skills_dir}}/skills/check-vault-routing/SKILL.md"
     },
