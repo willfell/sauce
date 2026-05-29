@@ -4,6 +4,18 @@ This file archives the per-cycle status snapshots that previously lived in `CLAU
 
 ---
 
+## v0.78.1 — cowork-consumption-fix (closed 2026-05-29)
+
+SKILL.md prose-only patch closing two v0.78.0 bugs exposed by the accuris 2026-05-28 morning-briefing run.
+
+(A) Agent-side algorithm primary, helper harness-only. The v0.78.0 read-user-preferences/SKILL.md and the 5 orchestrator step 3c blocks told the agent to "delegate to the helper at `.local/blueprints/cowork/helpers/<name>-helper.js`" — but that path never exists in consumer vaults (the v0.78.0 helpers live only in the workshop dev repo under `platform/blueprints/cowork/helpers/` for harness use). The agent treated helper-missing as undeterminable and fell back to legacy mode. v0.78.1 inverts the primary/secondary contract — the agent-side algorithm is now the primary documented behavior; helper-mention moved to a new `## Harness testing` section that explicitly notes the helper is NOT materialized in consumer vaults.
+
+(B) Source URL contract in gather-from-served-by output. The v0.78.0 output contract had no URL requirement, so GitHub PRs came back as link-less prose. v0.78.1 adds a `## Source URL requirements` section with MUST/SHOULD per-kind discipline (github + ado + email = MUST; calendar + chat + finance = SHOULD; custom kinds = SHOULD). Per-kind URL-shape examples + a fallback `_did not expose URL fields_` note pattern for genuinely-no-URL runs.
+
+7 SKILL.md files modified. +2 HC-V0781-* static prose-lint test cases (A1 + B1). No new helpers, no manifest schema change. Workshop `0.78.0` → `0.78.1`; cowork blueprint stays at `0.17.0`.
+
+---
+
 ## v0.78.0 — cowork-consumption (closed 2026-05-27)
 
 5-orchestrator consumption of user-preferences.md (the file that v0.76.0 introduced + v0.77.0 made adaptive). Two new sub-skills:

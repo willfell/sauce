@@ -159,3 +159,15 @@ Atomic-note orchestrators (morning-briefing / midday-tripwire / eod-review / wee
 - In-position `[!warning]` callouts replace example blocks for kinds that are unclassified, disconnected at capture time, or unreachable at fire time.
 
 No new manual steps. Run `sauce update`; the orchestrators read prefs automatically on the next scheduled fire.
+
+---
+
+## Upgrading from v0.78.0 → v0.78.1
+
+SKILL.md prose-only patch. No new files, no schema changes. Two fixes:
+
+1. **Agent-side algorithm primary in `read-user-preferences` + 5 orchestrator step 3c blocks.** v0.78.0 told the agent to "delegate to a helper at `.local/blueprints/cowork/helpers/...`", which never exists in consumer vaults; agents treated helper-missing as a hard failure and fell back to legacy mode. v0.78.1 inverts the contract: the agent-side algorithm is now the primary documented behavior; the helper-mention moves to a `## Harness testing` section that explicitly notes the helper is NOT materialized in consumer vaults.
+
+2. **Source URL contract in `gather-from-served-by`.** New `## Source URL requirements` section. MUST: github / ado / email. SHOULD: calendar / chat / finance / custom kinds. Includes per-kind URL-shape examples + a fallback note for genuinely-no-URL runs.
+
+No manual steps. Run `sauce update --bump-pins`; the orchestrators read the updated SKILL.md on the next scheduled fire.
