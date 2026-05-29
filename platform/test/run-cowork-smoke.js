@@ -2656,6 +2656,43 @@ function assertCoworkV068Shape() {
     }
 }
 
+// =====================================================================
+// v0.79.0 Workstream B — end-to-end emoji scan
+// =====================================================================
+
+// HC-V0790-D1: no_emojis:true → composed prefix + mocked gather callout carry zero emoji
+{
+    const label = "HC-V0790-D1 no_emojis end-to-end → zero pictographs in composed body";
+    try {
+        // Emoji/pictograph codepoint detector (block-scoped to this case)
+        const hasEmoji = (str) =>
+            /[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}\u{FE0F}\u{200D}\u{1F1E6}-\u{1F1FF}\u{2764}]/u.test(str);
+        const rup = require(path.join(BP, "helpers", "read-user-preferences-helper.js"));
+        const dh = require(path.join(BP, "helpers", "gather-from-served-by-helper.js"));
+        const dp = require(path.join(BP, "helpers", "dispatch-plan-helper.js"));
+        const effective = rup.composeEffectiveHardRules({ no_emojis: true, hard_rules: [] });
+        const voice = dp.composeVoiceContract({ vibe: "casual" }, effective);
+        // A compliant gather output (agent honored the no-emoji hard rule)
+        const gather = dh.gatherFromServedBy({
+            kind_name: "finance", kind_title: "Finance", served_by: "copilot-money",
+            what_matters: "transactions", question_set_answers: null, hard_rules: effective,
+            today: "2026-05-29", range: { start: "2026-05-29", end: "2026-05-29" }, timezone: "America/Denver",
+            dry_run_answers: {
+                available_tools: ["mcp__copilot-money__list_transactions"],
+                agent_markdown: "> [!example]+ Finance\n> - Groceries $52 at Walmart\n> - Gas $44 at South Platte\n> - Dining $38 at Sushi Den",
+                tools_used: ["mcp__copilot-money__list_transactions"],
+            },
+        });
+        const composedBody = voice + "\n" + gather.markdown;
+        assertTrue(!hasEmoji(composedBody), `${label}: composed body contains emoji: ${JSON.stringify(composedBody.slice(0,120))}`);
+        assertTrue(/Hard rules/.test(voice), `${label}: expected hard-rules block in voice contract`);
+        // Negative control: a non-compliant gather output WOULD trip the detector
+        assertTrue(hasEmoji("> [!example]+ 💰 Finance\n> - Groceries"), `${label}: detector sanity — should flag emoji`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
 (function main() {
   console.log("--- shared contracts ---");
   checkSharedContracts();
