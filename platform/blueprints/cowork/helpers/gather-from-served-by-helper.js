@@ -23,7 +23,7 @@
 function gatherFromServedBy(input) {
     const {
         kind_name, kind_title, served_by, what_matters,
-        question_set_answers, today, range, timezone,
+        question_set_answers, today, range, timezone, hard_rules,
         dry_run_answers,
     } = input || {};
     if (!kind_name || !kind_title || !served_by) {
@@ -81,6 +81,7 @@ function gatherFromServedBy(input) {
         markdown: md,
         served_by_used: served_by,
         tools_used: dry_run_answers.tools_used || [],
+        hard_rules_applied: Array.isArray(hard_rules) ? hard_rules : [],
     };
 }
 

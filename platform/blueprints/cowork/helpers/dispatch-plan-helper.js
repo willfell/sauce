@@ -110,26 +110,31 @@ function decideDispatchMode({ prefsStatus }) {
     return prefsStatus === "ok" ? "prefs" : "legacy";
 }
 
-function composeVoiceContract(personality) {
-    if (!personality) return "";
-    const has = ["vibe", "formality", "pep_talk", "length", "notes"].some(k => personality[k] !== null && personality[k] !== undefined);
-    if (!has) return "";
+function composeVoiceContract(personality, effectiveHardRules) {
+    const rules = Array.isArray(effectiveHardRules) ? effectiveHardRules.filter(r => typeof r === "string" && r.trim()) : [];
+    const p = personality || {};
+    const hasPersonality = ["vibe", "formality", "pep_talk", "length", "notes"].some(k => p[k] !== null && p[k] !== undefined);
+    if (!hasPersonality && rules.length === 0) return "";
     const fmt = (v) => (v === null || v === undefined) ? "default" : String(v);
-    const pep = personality.pep_talk === true ? "yes" : "no";
-    const notes = personality.notes ? String(personality.notes).replace(/\s+/g, " ").trim() : "";
-    return [
+    const pep = p.pep_talk === true ? "yes" : "no";
+    const notes = p.notes ? String(p.notes).replace(/\s+/g, " ").trim() : "";
+    const lines = [
         "Voice contract (from spice/cowork/context/user-preferences.md):",
-        `- Vibe: ${fmt(personality.vibe)}`,
-        `- Formality: ${fmt(personality.formality)}`,
+        `- Vibe: ${fmt(p.vibe)}`,
+        `- Formality: ${fmt(p.formality)}`,
         `- Pep talk: ${pep}`,
-        `- Length: ${fmt(personality.length)}`,
+        `- Length: ${fmt(p.length)}`,
         `- Notes: ${notes || "(none)"}`,
         "",
         "Apply this voice ONLY to narrative sections (frontmatter summary, [!info]- synopsis, [!tip] closing). Do NOT apply to tabular [!example]+ blocks (their content comes from gather sub-skills and is contractually shaped).",
-        "",
-        "---",
-        "",
-    ].join("\n");
+    ];
+    if (rules.length > 0) {
+        lines.push("");
+        lines.push("Hard rules (non-negotiable, apply verbatim to ALL output — narrative AND callout titles/bodies):");
+        for (const r of rules) lines.push(`- ${r}`);
+    }
+    lines.push("", "---", "");
+    return lines.join("\n");
 }
 
 function composeWarningCallout({ kind_name, kind_title, reason, mcps_entry }) {
