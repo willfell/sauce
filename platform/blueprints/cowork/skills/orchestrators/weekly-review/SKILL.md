@@ -47,6 +47,8 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
 
    2. Read `mcp-skill-map.json` from `spice/cowork/context/mcp-skill-map.json` via the Read tool. Capture as `mcp_skill_map`. (The map is materialized into every consumer vault as a `files[]` entry.)
 
+   2b. **Read per-kind microscope contracts.** For each `kind_name` in `prefs.priorities`, check whether `spice/cowork/prompts/per-mcp/<kind_name>/microscope.md` exists (via `mcp__obsidian__get_file_contents`; treat a not-found error as absent). When present, strip any leading frontmatter and capture the body as `microscopes[kind_name]`. Build the `microscopes` map (kind_name → body string). Kinds without a file are simply absent from the map.
+
    3. Build `dispatch_plan[]` as an ordered array. For each `kind_name` in `prefs.priorities` (in order):
 
       ```
@@ -67,6 +69,21 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
           continue
       if mcps_entry.served_by is set and not in reachable_namespaces:
           push { kind_name, action: "warn", reason: "served_by_unreachable", kind_title, mcps_entry }
+          continue
+      # v0.79.0: a per-kind microscope contract forces served-by routing with the
+      # microscope body as the deep what_matters (notes preserved as baseline_notes)
+      if microscopes[kind_name] is present and non-empty:
+          push {
+            kind_name,
+            action: "gather_from_served_by",
+            served_by: mcps_entry.served_by,
+            what_matters: microscopes[kind_name],
+            baseline_notes: mcps_entry.what_matters or "",
+            question_set_answers: null,
+            kind_title,
+            microscope: true,
+            mcps_entry,
+          }
           continue
       if mcps_entry.custom_kind == true OR mcps_entry.override_classified == true:
           bookkeeping = {served_by, what_matters, connected, captured_at, custom_kind, override_classified}
@@ -95,7 +112,7 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
           push { kind_name, action: "gather_from_served_by", served_by, what_matters, question_set_answers: null, kind_title, mcps_entry }
       ```
 
-   4. Capture `voice_contract` from `prefs.personality`: if every field (`vibe`, `formality`, `pep_talk`, `length`, `notes`) is null/undefined, `voice_contract = ""`. Otherwise compose:
+   4. Capture `voice_contract` from `prefs.personality` and `prefs.effective_hard_rules`: if every personality field (`vibe`, `formality`, `pep_talk`, `length`, `notes`) is null/undefined AND `prefs.effective_hard_rules` is empty, `voice_contract = ""`. Otherwise compose:
 
       ```
       Voice contract (from spice/cowork/context/user-preferences.md):
@@ -106,6 +123,9 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
       - Notes: <prefs.personality.notes verbatim, collapsed to single line>
 
       Apply this voice ONLY to narrative sections (frontmatter summary, [!info]- synopsis, [!tip] closing). Do NOT apply to tabular [!example]+ blocks (their content comes from gather sub-skills and is contractually shaped).
+
+      Hard rules (non-negotiable, apply verbatim to ALL output — narrative AND callout titles/bodies):
+      - <each entry of prefs.effective_hard_rules on its own line; omit this whole block when the list is empty>
 
       ---
 
@@ -138,12 +158,15 @@ for entry in dispatch_plan:
       kind_name:            entry.kind_name,
       kind_title:           entry.kind_title,
       served_by:            entry.served_by,
-      what_matters:         entry.what_matters,
+      what_matters:         entry.what_matters,     # microscope body when entry.microscope == true
       question_set_answers: entry.question_set_answers,
+      hard_rules:           prefs.effective_hard_rules,
       today:                context.today,
       range:                { start: context.week_start, end: context.week_end },
       timezone:             engagement.timezone || "America/Denver"
     }
+    # When entry.baseline_notes is set (microscope-routed kind), treat it as secondary
+    # "baseline preferences" context behind the microscope contract.
     if result.status == "ready":
       ordered_blocks.push({ kind_name, markdown: result.markdown, kind: "example" })
     else:
