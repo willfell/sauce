@@ -23,14 +23,15 @@ None. Vault-relative file path is fixed: `spice/cowork/context/user-preferences.
 {
   prefs: {
     priorities: [<kind_name>, ...],
-    personality: { vibe, formality, pep_talk, length, notes },
+    personality: { vibe, formality, pep_talk, length, notes, no_emojis, hard_rules },
     mcps: {
       <kind_name>: {
         served_by, what_matters, connected, captured_at,
         custom_kind, override_classified,
         ...kind-specific answer fields preserved verbatim
       }
-    }
+    },
+    effective_hard_rules: [<string>, ...]
   } | null,
   status: "ok" | "empty" | "malformed",
   reason: <string when status != "ok">
@@ -38,6 +39,8 @@ None. Vault-relative file path is fixed: `spice/cowork/context/user-preferences.
 ```
 
 When `status != "ok"`, `prefs` is `null` and the caller MUST treat as the legacy-fallback condition.
+
+`effective_hard_rules` = `personality.hard_rules` plus a canonical no-emoji rule when `personality.no_emojis: true`; consumers MUST apply these verbatim to narrative, gather dispatch, and skeleton.
 
 ## Steps
 
@@ -55,6 +58,8 @@ When `status != "ok"`, `prefs` is `null` and the caller MUST treat as the legacy
 
 7. **Coerce optional defaults.**
    - `personality.{vibe, formality, pep_talk, length, notes}` default to `null` when absent.
+   - `personality.no_emojis` defaults to `false` (coerce any non-`true` value to `false`); `personality.hard_rules` defaults to `[]` (coerce any non-array to `[]`).
+   - Compose `effective_hard_rules` = `personality.hard_rules` (string entries, trimmed) plus the canonical no-emoji rule appended when `personality.no_emojis` is `true`. The canonical no-emoji rule is the fixed string: *"Do not use any emoji or pictographic characters anywhere in the output — not in section/callout titles, not in inline prose, not in table cells."* When neither is set, `effective_hard_rules` is `[]`.
    - For each `mcps[<kind>]`: `connected` defaults to `false`, `custom_kind` defaults to `false`, `override_classified` defaults to `false`. Preserve every other field on the mcps entry verbatim (kind-specific answer fields like `vip_senders`, `surface_event_kinds`, `inner_circle`, `inner_circle_channels`, `what_matters` etc.).
 
 8. **Return `{ prefs, status: "ok" }`.** Canonical shape per the Outputs section above.

@@ -22,6 +22,14 @@ const migrateV1ToV2 = ctxHelper.migrateV1ToV2;
 
 const PREFS_RELPATH = "spice/cowork/context/user-preferences.md";
 
+const CANONICAL_NO_EMOJI_RULE =
+    "Do not use any emoji or pictographic characters anywhere in the output — not in section/callout titles, not in inline prose, not in table cells.";
+
+function composeEffectiveHardRules({ no_emojis, hard_rules } = {}) {
+    const base = Array.isArray(hard_rules) ? hard_rules.filter(r => typeof r === "string" && r.trim()) : [];
+    return no_emojis === true ? base.concat([CANONICAL_NO_EMOJI_RULE]) : base.slice();
+}
+
 function readUserPreferences({ vaultRoot }) {
     if (!vaultRoot) {
         return { prefs: null, status: "malformed", reason: "vaultRoot required" };
@@ -69,11 +77,14 @@ function readUserPreferences({ vaultRoot }) {
         return { prefs: null, status: "empty", reason: "unpopulated_seed" };
     }
 
-    // Coerce optional defaults
+    // Coerce optional defaults (v0.79.0 adds no_emojis + hard_rules)
     const personality = Object.assign(
-        { vibe: null, formality: null, pep_talk: null, length: null, notes: null },
+        { vibe: null, formality: null, pep_talk: null, length: null, notes: null, no_emojis: false, hard_rules: [] },
         migrated.personality || {},
     );
+    if (personality.no_emojis !== true) personality.no_emojis = false;
+    if (!Array.isArray(personality.hard_rules)) personality.hard_rules = [];
+    const effective_hard_rules = composeEffectiveHardRules(personality);
     for (const kind of Object.keys(mcps)) {
         const entry = mcps[kind];
         if (entry && typeof entry === "object") {
@@ -84,11 +95,13 @@ function readUserPreferences({ vaultRoot }) {
     }
 
     return {
-        prefs: { priorities, personality, mcps },
+        prefs: { priorities, personality, mcps, effective_hard_rules },
         status: "ok",
     };
 }
 
 module.exports = {
     readUserPreferences,
+    composeEffectiveHardRules,
+    CANONICAL_NO_EMOJI_RULE,
 };
