@@ -2385,6 +2385,70 @@ function assertCoworkV068Shape() {
     }
 }
 
+// =====================================================================
+// v0.78.1 — agent-side algorithm primary + URL contract (prose lints)
+// =====================================================================
+
+// HC-V0781-A1: read-user-preferences + 5 orchestrators describe the
+// agent-side algorithm as primary; helper-mention is harness-only.
+{
+    const label = "HC-V0781-A1 SKILL.md tells agent to execute algorithm directly (no helper-primary)";
+    try {
+        const rpSkill = readSkill("skills/skills/read-user-preferences/SKILL.md");
+        assertTrue(!/Delegate to the helper at `\.local\/blueprints/.test(rpSkill),
+            `${label}: read-user-preferences SKILL.md must not say "Delegate to the helper at \`.local/blueprints/...\`"`);
+        assertTrue(/Read the user-preferences\.md file/i.test(rpSkill),
+            `${label}: read-user-preferences SKILL.md must instruct the agent to read the file directly`);
+        assertTrue(/v1.+v2 migration|gmail.*email|imessage.*chat/i.test(rpSkill),
+            `${label}: read-user-preferences SKILL.md must document v1->v2 migration rules in prose`);
+        assertTrue(/## Harness testing/.test(rpSkill),
+            `${label}: read-user-preferences SKILL.md must have a ## Harness testing section`);
+        assertTrue(/NOT materialized into consumer vaults/i.test(rpSkill),
+            `${label}: read-user-preferences ## Harness testing must state helper is NOT materialized in consumer vaults`);
+
+        const orchestrators = ["morning-briefing", "midday-tripwire", "eod-review", "weekly-review", "monthly-review"];
+        for (const orch of orchestrators) {
+            const orchSkill = readSkill(`skills/orchestrators/${orch}/SKILL.md`);
+            assertTrue(!/Invoke .*`\.local\/blueprints\/cowork\/helpers\/dispatch-plan-helper/.test(orchSkill),
+                `${label}: orchestrators/${orch}/SKILL.md must not say "Invoke ...\`.local/blueprints/cowork/helpers/dispatch-plan-helper..."`);
+            assertTrue(/reachable_namespaces|tool list.*mcp__/i.test(orchSkill),
+                `${label}: orchestrators/${orch}/SKILL.md must document reachable_namespaces extraction from tool list`);
+            assertTrue(/## Harness testing/.test(orchSkill),
+                `${label}: orchestrators/${orch}/SKILL.md must have ## Harness testing section`);
+        }
+    } catch (e) {
+        failed++;
+        console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0781-B1: gather-from-served-by has the Source URL requirements section
+{
+    const label = "HC-V0781-B1 gather-from-served-by SKILL.md has Source URL contract";
+    try {
+        const skill = readSkill("skills/skills/gather-from-served-by/SKILL.md");
+        assertTrue(/## Source URL requirements/.test(skill),
+            `${label}: SKILL.md must have ## Source URL requirements section`);
+        assertTrue(/github[\s\S]{0,80}MUST/i.test(skill),
+            `${label}: github kind must be MUST`);
+        assertTrue(/ado[\s\S]{0,80}MUST/i.test(skill),
+            `${label}: ado kind must be MUST`);
+        assertTrue(/email[\s\S]{0,80}MUST/i.test(skill),
+            `${label}: email kind must be MUST`);
+        assertTrue(/calendar[\s\S]{0,80}SHOULD/i.test(skill),
+            `${label}: calendar kind must be SHOULD`);
+        assertTrue(/chat[\s\S]{0,80}SHOULD/i.test(skill),
+            `${label}: chat kind must be SHOULD`);
+        assertTrue(/\*\*\[[^\]]+\]\(https?:\/\/[^)]+\)\*\*/.test(skill),
+            `${label}: SKILL.md must contain at least one inline-link formatting example`);
+        assertTrue(/did not expose URL/i.test(skill),
+            `${label}: SKILL.md must document the "did not expose URL" fallback note pattern`);
+    } catch (e) {
+        failed++;
+        console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
 (function main() {
   console.log("--- shared contracts ---");
   checkSharedContracts();
