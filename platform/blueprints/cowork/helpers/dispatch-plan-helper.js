@@ -34,7 +34,7 @@ function titleCase(s) {
         .join(" ");
 }
 
-function planDispatch({ prefs, reachableNamespaces, mcpSkillMap }) {
+function planDispatch({ prefs, reachableNamespaces, mcpSkillMap, microscopes }) {
     if (!prefs || !Array.isArray(prefs.priorities)) return [];
     const reachable = reachableNamespaces instanceof Set
         ? reachableNamespaces
@@ -60,6 +60,23 @@ function planDispatch({ prefs, reachableNamespaces, mcpSkillMap }) {
         }
         if (mcps_entry.served_by && !reachable.has(mcps_entry.served_by)) {
             plan.push({ kind_name, action: "warn", reason: "served_by_unreachable", kind_title, mcps_entry });
+            continue;
+        }
+        // v0.79.0: a per-kind microscope contract forces served-by routing with the
+        // microscope body as the primary what_matters (notes preserved as baseline).
+        const microscopeBody = microscopes && typeof microscopes === "object" ? microscopes[kind_name] : undefined;
+        if (microscopeBody && String(microscopeBody).trim()) {
+            plan.push({
+                kind_name,
+                action: "gather_from_served_by",
+                served_by: mcps_entry.served_by,
+                what_matters: String(microscopeBody),
+                baseline_notes: mcps_entry.what_matters || "",
+                question_set_answers: mcps_entry.custom_kind ? null : null,
+                kind_title,
+                microscope: true,
+                mcps_entry,
+            });
             continue;
         }
         if (mcps_entry.custom_kind === true || mcps_entry.override_classified === true) {
