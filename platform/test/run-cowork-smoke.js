@@ -2761,6 +2761,31 @@ function assertCoworkV068Shape() {
     }
 }
 
+// =====================================================================
+// v0.79.0 Workstream C — styling per-type callout-color snippet
+// =====================================================================
+
+// HC-V0790-G1: styling ships sauce-callouts.css and enables it
+{
+    const label = "HC-V0790-G1 styling vendors + enables sauce-callouts.css";
+    try {
+        const cssPath = path.join(__dirname, "..", "mechanisms", "styling", "assets", "snippets", "sauce-callouts.css");
+        assertTrue(fs.existsSync(cssPath), `${label}: sauce-callouts.css not vendored at ${cssPath}`);
+        const css = fs.readFileSync(cssPath, "utf8");
+        assertTrue(/--callout-color/.test(css), `${label}: expected per-type --callout-color rules`);
+        // distinct hues for at least info + warning + tip + example
+        for (const t of ["info", "warning", "tip", "example"]) {
+            assertTrue(new RegExp(`callout-metadata.*${t}|data-callout=["']${t}["']|"${t}"`, "i").test(css) || css.includes(t),
+                `${label}: expected a rule referencing the "${t}" callout type`);
+        }
+        const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "mechanisms", "styling", "manifest.json"), "utf8"));
+        const enabled = (manifest.appearance && manifest.appearance.enabledCssSnippets) || [];
+        assertTrue(enabled.includes("sauce-callouts"), `${label}: sauce-callouts not in appearance.enabledCssSnippets, got ${JSON.stringify(enabled)}`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
 (function main() {
   console.log("--- shared contracts ---");
   checkSharedContracts();
