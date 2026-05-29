@@ -42,10 +42,76 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
    - Skip the remainder of step 3c. The legacy gather sequence fires unchanged.
 
    When `dispatch_mode == "prefs"`:
-   - From `check-vault-routing`'s prior result, capture `reachable_namespaces[]`.
-   - Read `mcp-skill-map.json` from `spice/cowork/context/mcp-skill-map.json` (or fall back to the materialized path `.local/blueprints/cowork/content/context/mcp-skill-map.json`).
-   - Invoke `.local/blueprints/cowork/helpers/dispatch-plan-helper.js`'s `planDispatch({ prefs, reachableNamespaces, mcpSkillMap })`. Capture as `dispatch_plan[]`.
-   - Capture `voice_contract = composeVoiceContract(prefs.personality)`.
+
+   1. From `check-vault-routing`'s prior result (pre-flight step 1), capture `reachable_namespaces` as the set of MCP namespace segments the agent has tools for in this session. Extract by walking your tool list: for every `mcp__<ns>__<tool>` name, add `<ns>` to the set.
+
+   2. Read `mcp-skill-map.json` from `spice/cowork/context/mcp-skill-map.json` via the Read tool. Capture as `mcp_skill_map`. (The map is materialized into every consumer vault as a `files[]` entry.)
+
+   3. Build `dispatch_plan[]` as an ordered array. For each `kind_name` in `prefs.priorities` (in order):
+
+      ```
+      mcps_entry = prefs.mcps[kind_name]    # may be undefined
+
+      # Compute kind_title
+      if kind_name in {calendar, email, chat, finance}:
+          kind_title = canonical lookup ("Calendar", "Email", "Chat", "Finance")
+      else:
+          kind_title = title-case of kind_name (whitespace/underscore-split; "ado" -> "Ado", "github" -> "Github", "monitoring" -> "Monitoring")
+
+      # Determine action
+      if mcps_entry is undefined:
+          push { kind_name, action: "warn", reason: "not_classified", kind_title, mcps_entry: null }
+          continue
+      if mcps_entry.connected == false:
+          push { kind_name, action: "warn", reason: "not_connected", kind_title, mcps_entry }
+          continue
+      if mcps_entry.served_by is set and not in reachable_namespaces:
+          push { kind_name, action: "warn", reason: "served_by_unreachable", kind_title, mcps_entry }
+          continue
+      if mcps_entry.custom_kind == true OR mcps_entry.override_classified == true:
+          bookkeeping = {served_by, what_matters, connected, captured_at, custom_kind, override_classified}
+          question_set_answers = {k: v for k, v in mcps_entry if k not in bookkeeping}
+          push {
+            kind_name,
+            action: "gather_from_served_by",
+            served_by: mcps_entry.served_by,
+            what_matters: mcps_entry.what_matters or "",
+            question_set_answers: mcps_entry.custom_kind ? null : (question_set_answers if non-empty else null),
+            kind_title,
+            mcps_entry,
+          }
+          continue
+      # Default: known canonical-vendor kind (kind_name in mcp_skill_map.kinds[].kind)
+      if any entry in mcp_skill_map.kinds has .kind == kind_name:
+          push {
+            kind_name,
+            action: "gather_canonical",
+            gather_skill: <that entry>.gather_skill,
+            kind_title,
+            mcps_entry,
+          }
+      else:
+          # Rare: kind name not recognized and not flagged custom — treat as gather_from_served_by
+          push { kind_name, action: "gather_from_served_by", served_by, what_matters, question_set_answers: null, kind_title, mcps_entry }
+      ```
+
+   4. Capture `voice_contract` from `prefs.personality`: if every field (`vibe`, `formality`, `pep_talk`, `length`, `notes`) is null/undefined, `voice_contract = ""`. Otherwise compose:
+
+      ```
+      Voice contract (from spice/cowork/context/user-preferences.md):
+      - Vibe: <prefs.personality.vibe or "default">
+      - Formality: <prefs.personality.formality or "default">
+      - Pep talk: <"yes" if prefs.personality.pep_talk else "no">
+      - Length: <prefs.personality.length or "default">
+      - Notes: <prefs.personality.notes verbatim, collapsed to single line>
+
+      Apply this voice ONLY to narrative sections (frontmatter summary, [!info]- synopsis, [!tip] closing). Do NOT apply to tabular [!example]+ blocks (their content comes from gather sub-skills and is contractually shaped).
+
+      ---
+
+      ```
+
+   This step is PURE — no MCP calls, no file writes. It builds in-memory state used by the gather phase.
    - Compose the dispatch `range` as the current calendar month:
      - `range.start = context.month_start` (first day of `context.today`'s month, `YYYY-MM-01`; date-context emits this pre-computed field — equivalent to `context.today.replace(/-\d{2}$/, "-01")`).
      - `range.end = context.month_end` (last day of `context.today`'s month; date-context emits this pre-computed field — equivalent to `new Date(year, monthIndex + 1, 0)` JS semantics, where passing day=0 to next month yields the last day of current month, handling 28/29/30/31 calendar days).
@@ -168,3 +234,7 @@ for entry in dispatch_plan:
     its `## Steps` section with `{ engagement_id, phase: "monthly-reset", date_today: context.today, writer: "cowork:monthly-review", snapshot_data: { archive_previous_month: true, prev_month_yyyymm: context.prev_month_yyyymm } }`.
 
 ## Done
+
+## Harness testing
+
+A helper at `platform/blueprints/cowork/helpers/dispatch-plan-helper.js` exports `planDispatch`, `decideDispatchMode`, `composeVoiceContract`, `composeWarningCallout` for the HC-V0780-C* / D* harness cases. Production agents in consumer vaults execute step 3c's algorithm directly — they do NOT depend on the helper file existing.

@@ -41,19 +41,29 @@ When `status != "ok"`, `prefs` is `null` and the caller MUST treat as the legacy
 
 ## Steps
 
-1. Resolve vault root from the caller's working directory (the bash sandbox boundary IS the vault root for scheduled-jobs invocations).
-2. Delegate to the helper at `.local/blueprints/cowork/helpers/read-user-preferences-helper.js` (or the materialized path), calling `readUserPreferences({ vaultRoot })`.
-3. Return the helper's output verbatim. Do NOT post-process — the caller's dispatch planning (orchestrator step 3c) depends on the canonical shape.
+1. **Read the user-preferences.md file.** Use the Read tool at `spice/cowork/context/user-preferences.md` (or `mcp__obsidian__get_file_contents` with that vault-relative path). If the file does not exist, return `{ prefs: null, status: "empty", reason: "file_not_found" }`.
 
-The helper:
+2. **Extract the leading frontmatter block.** Match the YAML between leading `---` and the next `---` markers. If no frontmatter block is present, return `{ prefs: null, status: "malformed", reason: "no_frontmatter_block" }`.
 
-1. Reads `<vaultRoot>/spice/cowork/context/user-preferences.md` via `fs.readFileSync`. If missing → `{ status: "empty", reason: "file_not_found" }`.
-2. Strips leading `---` … `---`; parses via the shared `parseYamlIsh` helper. On parse error → `{ status: "malformed", reason: "yaml_parse_error: <msg>" }`.
-3. Asserts `type: cowork-user-preferences`. If missing → `{ status: "malformed", reason: "type_tag_missing_or_wrong" }`.
-4. Loads `mcp-skill-map.json` (best-effort from vault path then helper-sibling fallback) and applies `migrateV1ToV2` (renames `mcps.gmail` → `mcps.email`, `mcps.imessage` → `mcps.chat`). Idempotent — calling with already-migrated prefs is a no-op.
-5. If `priorities == []` AND `mcps == {}` → `{ status: "empty", reason: "unpopulated_seed" }`.
-6. Coerces optional defaults: `personality.{vibe,formality,pep_talk,length,notes}` to null; per-mcp `connected` to false, `custom_kind` to false, `override_classified` to false.
-7. Returns `{ prefs, status: "ok" }`.
+3. **Parse the YAML frontmatter.** Treat as YAML 1.1 with the indentation conventions context-builder writes. On parse error, return `{ prefs: null, status: "malformed", reason: "yaml_parse_error: <error message>" }`.
+
+4. **Assert the type tag.** If `type` is missing or not equal to `cowork-user-preferences`, return `{ prefs: null, status: "malformed", reason: "type_tag_missing_or_wrong" }`.
+
+5. **Apply v1→v2 migration (idempotent).** If `mcps.gmail` is present, rename it to `mcps.email`. If `mcps.imessage` is present, rename it to `mcps.chat`. If both source and destination already exist, prefer the destination (don't overwrite). This step is a no-op for v2-shaped prefs (already-migrated).
+
+6. **Apply seed-shape rule.** If after migration `priorities` is `[]` AND `mcps` is `{}`, return `{ prefs: null, status: "empty", reason: "unpopulated_seed" }`. This is the workshop-seed shape that install.js writes — it means context-builder has not been run yet.
+
+7. **Coerce optional defaults.**
+   - `personality.{vibe, formality, pep_talk, length, notes}` default to `null` when absent.
+   - For each `mcps[<kind>]`: `connected` defaults to `false`, `custom_kind` defaults to `false`, `override_classified` defaults to `false`. Preserve every other field on the mcps entry verbatim (kind-specific answer fields like `vip_senders`, `surface_event_kinds`, `inner_circle`, `inner_circle_channels`, `what_matters` etc.).
+
+8. **Return `{ prefs, status: "ok" }`.** Canonical shape per the Outputs section above.
+
+This skill is a PURE read — never modify the file, never write to disk, never call any MCP that mutates state. The orchestrator's dispatch planning depends on the canonical output shape.
+
+## Harness testing
+
+A helper at `platform/blueprints/cowork/helpers/read-user-preferences-helper.js` lives in the workshop dev repo (NOT materialized into consumer vaults) and exports `readUserPreferences({ vaultRoot })` for the HC-V0780-A* harness cases. Production agents in consumer vaults execute the algorithm above directly — they do NOT depend on the helper file existing.
 
 ## Returns
 

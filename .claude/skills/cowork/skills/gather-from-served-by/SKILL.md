@@ -81,6 +81,50 @@ Generic gather for MCPs whose tool surface doesn't match a canonical vendor (Out
 
 7. **On success**, return `{ status: "ready", markdown: <composed>, served_by_used, tools_used: [<tools you invoked>] }`.
 
+## Source URL requirements
+
+The output `markdown` MUST include source URLs when the `served_by` MCP exposes them. The user reads briefings in Obsidian where inline markdown links open in the browser; URL-less prose is much less useful than a one-click jump to the source.
+
+**How to find URLs in tool results:** when invoking tools from `available_tools`, inspect each return value for URL-shaped fields. Common field names across MCPs:
+
+- `url`, `web_url`, `webUrl`, `webLink`, `html_url`, `htmlUrl`
+- `permalink`, `permalink_url`
+- `_links.html.href`, `_links.web.href` (HAL-style)
+- `link`, `href`
+
+If a tool result includes any of these, surface the URL inline in your `[!example]+ <kind_title>` callout as `**[<short-label>](<url>)**: <1-line context>`.
+
+**Per-kind expected URL discipline:**
+
+| kind_name | Strictness | Expected URL shape |
+|---|---|---|
+| `github` | **MUST** | `https://github.com/<owner>/<repo>/pull/<n>` or `/issues/<n>` per PR/issue bullet — `html_url` on GitHub API responses |
+| `ado` | **MUST** | Work-item URL per ticket bullet — typically `https://dev.azure.com/<org>/<proj>/_workitems/edit/<id>`; surfaced as `_links.html.href` or `url` |
+| `email` | **MUST** | Message permalink per surfaced thread — `webLink` field on the message resource (Outlook/M365 Graph) |
+| `calendar` | **SHOULD** | Outlook web event link — `webLink` on the event resource (omit only when MCP genuinely lacks one) |
+| `chat` | **SHOULD** | Teams chat/channel message permalink — `webUrl` on the message resource (omit only when MCP genuinely lacks one) |
+| `finance` | **SHOULD** | Receipt/statement URL when exposed by the MCP |
+| any custom kind beyond the above | **SHOULD** | Any URL field present in tool results |
+
+**If a MUST-kind gather returns markdown with NO URLs:** that's a contract violation. Re-inspect tool results, verify whether the MCP genuinely exposes no URL field (the answer is almost always no for github/ado/email — they all expose URLs). Either include the URLs OR emit a brief explanatory line at the bottom of the callout: `> _Note: <served_by> did not expose URL fields on <tool_name> in this run._`
+
+**Inline-link formatting examples:**
+
+```
+> [!example]+ Github
+> - **[PR 234: Add NSP rules for hpcc-prod](https://github.com/accuris/internal-platform/pull/234)**: Hayden requested your review (filed Wed 16:42); 3 files touched, no test changes
+> - **[PR 247: Decommission old document-registry-stage](https://github.com/accuris/internal-platform/pull/247)**: yours, awaiting Stefan; merged-into-target branch already
+> - **[Issue 89: Bom Reporting CSV export](https://github.com/accuris/bom-reporting/issues/89)**: re-opened by Ying yesterday; you're on the assignees
+```
+
+```
+> [!example]+ Ado
+> - **[705679 — Document Registry Stage cutover bake step](https://dev.azure.com/accuris/EPD/_workitems/edit/705679)**: yours; moved to Active Tue; linked to feature 698094
+> - **[704521 — Azure NSP rules round 5](https://dev.azure.com/accuris/EPD/_workitems/edit/704521)**: Hayden's; closed Wed 16:30
+```
+
+This URL requirement applies regardless of dispatch path. It binds the agent's gather output; the dry-run helper validates the markdown's structural shape but cannot validate URL presence (it can't know what URLs the MCP would have exposed in a real session).
+
 ## Dry-run mode
 
 For test harnesses, this skill's helper at `platform/blueprints/cowork/helpers/gather-from-served-by-helper.js` exports `gatherFromServedBy({ ...inputs, dry_run_answers })`. The `dry_run_answers` shape:
