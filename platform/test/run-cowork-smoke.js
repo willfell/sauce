@@ -2449,6 +2449,97 @@ function assertCoworkV068Shape() {
     }
 }
 
+// =====================================================================
+// v0.79.0 Workstream B — hard_rules + no_emojis parsing
+// =====================================================================
+
+// HC-V0790-A1: hard_rules + no_emojis parsed; effective_hard_rules composes
+{
+    const label = "HC-V0790-A1 hard_rules + no_emojis → effective_hard_rules";
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "v0790-a1-"));
+    try {
+        const ctxDir = path.join(tmpDir, "spice/cowork/context");
+        fs.mkdirSync(ctxDir, { recursive: true });
+        const populated = [
+            "---",
+            "type: cowork-user-preferences",
+            "priorities:",
+            "  - finance",
+            "personality:",
+            "  vibe: encouraging",
+            "  no_emojis: true",
+            "  hard_rules:",
+            "    - 'never use the word leverage'",
+            "mcps:",
+            "  finance:",
+            "    served_by: \"copilot-money\"",
+            "    override_classified: true",
+            "    connected: true",
+            "    what_matters: |",
+            "      Monitor all spend.",
+            "---",
+            "",
+            "# user-preferences.md",
+        ].join("\n");
+        fs.writeFileSync(path.join(ctxDir, "user-preferences.md"), populated, "utf8");
+        const helper = require(path.join(BP, "helpers", "read-user-preferences-helper.js"));
+        const result = helper.readUserPreferences({ vaultRoot: tmpDir });
+        assertTrue(result.status === "ok", `${label}: expected ok, got ${result.status}`);
+        assertTrue(result.prefs.personality.no_emojis === true, `${label}: expected no_emojis=true`);
+        assertTrue(Array.isArray(result.prefs.effective_hard_rules), `${label}: expected effective_hard_rules array`);
+        assertTrue(result.prefs.effective_hard_rules.some(r => /leverage/.test(r)), `${label}: expected user rule preserved`);
+        assertTrue(result.prefs.effective_hard_rules.some(r => r === helper.CANONICAL_NO_EMOJI_RULE),
+            `${label}: expected canonical no-emoji rule appended, got ${JSON.stringify(result.prefs.effective_hard_rules)}`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    } finally {
+        try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
+    }
+}
+
+// HC-V0790-A2: no hard_rules / no_emojis absent → effective_hard_rules == []
+{
+    const label = "HC-V0790-A2 absent hard_rules/no_emojis → empty effective_hard_rules";
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "v0790-a2-"));
+    try {
+        const ctxDir = path.join(tmpDir, "spice/cowork/context");
+        fs.mkdirSync(ctxDir, { recursive: true });
+        const populated = [
+            "---", "type: cowork-user-preferences", "priorities:", "  - finance",
+            "personality:", "  vibe: casual",
+            "mcps:", "  finance:", "    served_by: \"copilot-money\"", "    override_classified: true",
+            "    connected: true", "    what_matters: |", "      x",
+            "---", "", "# user-preferences.md",
+        ].join("\n");
+        fs.writeFileSync(path.join(ctxDir, "user-preferences.md"), populated, "utf8");
+        const helper = require(path.join(BP, "helpers", "read-user-preferences-helper.js"));
+        const result = helper.readUserPreferences({ vaultRoot: tmpDir });
+        assertTrue(result.prefs.personality.no_emojis === false, `${label}: expected no_emojis default false`);
+        assertTrue(Array.isArray(result.prefs.effective_hard_rules) && result.prefs.effective_hard_rules.length === 0,
+            `${label}: expected empty effective_hard_rules, got ${JSON.stringify(result.prefs.effective_hard_rules)}`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    } finally {
+        try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
+    }
+}
+
+// HC-V0790-A3: composeEffectiveHardRules unit
+{
+    const label = "HC-V0790-A3 composeEffectiveHardRules({no_emojis,hard_rules})";
+    try {
+        const helper = require(path.join(BP, "helpers", "read-user-preferences-helper.js"));
+        assertTrue(typeof helper.composeEffectiveHardRules === "function", `${label}: composeEffectiveHardRules not exported`);
+        const r1 = helper.composeEffectiveHardRules({ no_emojis: true, hard_rules: ["a"] });
+        assertTrue(r1.length === 2 && r1[0] === "a" && r1[1] === helper.CANONICAL_NO_EMOJI_RULE,
+            `${label}: expected [a, canonical], got ${JSON.stringify(r1)}`);
+        const r2 = helper.composeEffectiveHardRules({ no_emojis: false, hard_rules: [] });
+        assertTrue(r2.length === 0, `${label}: expected empty, got ${JSON.stringify(r2)}`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
 (function main() {
   console.log("--- shared contracts ---");
   checkSharedContracts();
