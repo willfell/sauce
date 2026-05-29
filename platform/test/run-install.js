@@ -770,6 +770,141 @@ async function caseV0760E1MaterializeOnceForUserPreferences() {
     }
 }
 
+// HC-V0790-F1 — per-mcp/<kind>/microscope.md preserved across reinstall.
+//
+// The v0.79.0 microscope contract lives at
+// spice/cowork/prompts/per-mcp/<kind>/microscope.md. It is authored on demand
+// by cowork:edit-microscope and is deliberately NOT in cowork's files[]. This
+// case proves the install.js mechanic: a file the blueprint never declares is
+// never written, backed up, or removed across a reinstall. Mirrors
+// caseV0760E1's synthetic-workshop scaffold; the only difference is the
+// asserted path is a per-mcp sentinel that no files[] entry declares.
+//
+// Posture: regression guard. Fails closed if a future cycle adds per-mcp
+// content to files[] (which would let reinstall overwrite the sentinel + leave
+// a .bak), pairing with the structural HC-V0760-A1 FOCUSED_USER_PATHS guard.
+async function caseV0790F1PerMcpMicroscopePreserved() {
+    const label = "HC-V0790-F1 per-mcp/<kind>/microscope.md preserved across reinstall";
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-permcp-"));
+    try {
+        // Fabricate a minimal workshop with one ordinary (non-per-mcp) files[]
+        // entry so install genuinely materializes something on each run.
+        const workshopDir = path.join(tmp, "workshop");
+        const bpDir = path.join(workshopDir, "platform", "blueprints", "permcp");
+        fs.mkdirSync(path.join(bpDir, "content"), { recursive: true });
+        fs.writeFileSync(
+            path.join(bpDir, "content", "hub.md"),
+            "---\nseed: true\n---\n\nHUB CONTENT\n",
+        );
+        fs.writeFileSync(
+            path.join(bpDir, "manifest.json"),
+            JSON.stringify({
+                name: "permcp",
+                version: "0.1.0",
+                kind: "blueprint",
+                module_directory: "permcp",
+                files: [
+                    { source: "content/hub.md", dest: "{{module_directory}}/hub.md" },
+                ],
+            }, null, 2),
+        );
+        fs.writeFileSync(
+            path.join(workshopDir, "platform", "manifest.json"),
+            JSON.stringify({
+                workshop_version: "0.79.0",
+                mechanisms: [],
+                blueprints: [{ name: "permcp", version: "0.1.0", path: "blueprints/permcp" }],
+            }, null, 2),
+        );
+
+        const vaultDir = path.join(tmp, "vault");
+        fs.mkdirSync(path.join(vaultDir, "ranch"), { recursive: true });
+        fs.writeFileSync(
+            path.join(vaultDir, "ranch", "platform-installed.json"),
+            JSON.stringify({ workshop_version: null, blueprints: [], mechanisms: [], history: [] }, null, 2),
+        );
+        fs.writeFileSync(
+            path.join(vaultDir, "ranch", "platform-subscription.json"),
+            JSON.stringify({
+                workshop_version: "0.79.0",
+                mechanisms: [],
+                blueprints: [{ name: "permcp", version: "0.1.0" }],
+            }, null, 2),
+        );
+        fs.writeFileSync(
+            path.join(vaultDir, "ranch", "platform-config.json"),
+            JSON.stringify({ workshop_path: workshopDir, variables: {} }, null, 2),
+        );
+
+        function vaultAbs(rel) { return path.join(vaultDir, rel); }
+        function vaultExistsSync(rel) {
+            try { fs.accessSync(vaultAbs(rel)); return true; } catch { return false; }
+        }
+        const f1Adapter = {
+            basePath: vaultDir,
+            getBasePath() { return vaultDir; },
+            async read(p) { return fsp.readFile(vaultAbs(p), "utf8"); },
+            async write(p, content) {
+                await fsp.mkdir(path.dirname(vaultAbs(p)), { recursive: true });
+                await fsp.writeFile(vaultAbs(p), content, "utf8");
+            },
+            async exists(p) { return fsp.access(vaultAbs(p)).then(() => true, () => false); },
+            async mkdir(p) { await fsp.mkdir(vaultAbs(p), { recursive: true }); },
+            async remove(p) { await fsp.unlink(vaultAbs(p)); },
+            async stat(p) {
+                try {
+                    const s = await fsp.stat(vaultAbs(p));
+                    return { type: s.isDirectory() ? "folder" : "file", size: s.size, mtime: s.mtimeMs, ctime: s.ctimeMs };
+                } catch { return null; }
+            },
+        };
+        const f1Vault = {
+            adapter: f1Adapter,
+            getAbstractFileByPath(p) { return vaultExistsSync(p) ? { path: p } : null; },
+            async read(file) { return fsp.readFile(vaultAbs(file.path), "utf8"); },
+            async modify(file, text) {
+                await fsp.mkdir(path.dirname(vaultAbs(file.path)), { recursive: true });
+                await fsp.writeFile(vaultAbs(file.path), text, "utf8");
+            },
+            async create(p, text) {
+                await fsp.mkdir(path.dirname(vaultAbs(p)), { recursive: true });
+                await fsp.writeFile(vaultAbs(p), text, "utf8");
+            },
+            async createFolder(p) { await fsp.mkdir(vaultAbs(p), { recursive: true }); },
+        };
+        const f1Tp = {
+            app: { vault: f1Vault },
+            system: { suggester: async (_ti, items) => items[0] },
+            user: {},
+        };
+
+        global.Notice = global.Notice || class Notice { constructor(_msg) { /* suppress */ } };
+        const installerPath = path.join(__dirname, "../install.js");
+        delete require.cache[require.resolve(installerPath)];
+        const installer = require(installerPath);
+
+        // First install — materializes the declared hub file.
+        await installer(f1Tp);
+
+        // The user runs cowork:edit-microscope, which writes a per-mcp contract
+        // the blueprint never declares in files[].
+        const microscopeRel = path.join("spice", "permcp", "prompts", "per-mcp", "finance", "microscope.md");
+        const microscopeAbs = path.join(vaultDir, microscopeRel);
+        const SENTINEL = "## What matters\nSENTINEL-V0790 deep finance contract.\n";
+        fs.mkdirSync(path.dirname(microscopeAbs), { recursive: true });
+        fs.writeFileSync(microscopeAbs, SENTINEL, "utf8");
+
+        // Reinstall — must NOT touch the per-mcp file (not in files[]).
+        await installer(f1Tp);
+
+        assertTrue(fs.existsSync(microscopeAbs), `${label} (microscope file survives reinstall)`);
+        assertEqual(fs.readFileSync(microscopeAbs, "utf8"), SENTINEL, `${label} (content byte-identical after reinstall)`);
+        assertTrue(!fs.existsSync(microscopeAbs + ".bak"), `${label} (no .bak created — file was never in files[])`);
+    } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+    }
+}
+
 // ----- unit-test runner (no-positional-arg mode) ----------------------------
 
 async function runUnitTests() {
@@ -778,6 +913,7 @@ async function runUnitTests() {
         caseV0751C2SauceUpdateNonGitVault,
         caseV0751E1WorkshopVersionRefresh,
         caseV0760E1MaterializeOnceForUserPreferences,
+        caseV0790F1PerMcpMicroscopePreserved,
     ];
     for (const c of cases) {
         try { await c(); }

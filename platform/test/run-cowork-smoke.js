@@ -1354,6 +1354,7 @@ function assertCoworkV068Shape() {
     // out-of-scope list above documents the deliberate narrowing for S7.
     const FOCUSED_USER_PATHS = [
         "spice/cowork/context/user-preferences.md",   // v0.76.0 NEW — S13 wires materialize_once: true
+        "spice/cowork/prompts/per-mcp/finance/microscope.md",  // v0.79.0 NEW — cowork:edit-microscope writes on demand; NOT in files[] by construction
     ];
 
     const manifest = loadManifest();
