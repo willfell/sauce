@@ -113,6 +113,8 @@ When `dispatch_mode == "legacy"` (no `ordered_blocks[]`), use the v0.77.0 sectio
 
 When `prompt_body` was empty upstream (`warning == "empty_prompt"`), the orchestrator composes a skeleton-compliant stub: info admonition body reads `(Prompt body empty — edit <prompt_source> to customize what this run emits.)`; example block reads `No prompt body to drive content; this run is a placeholder.`; tip block recommends editing the prompt source. Frontmatter `summary` reads `Stub run — prompt body at <prompt_source> is empty.` The self-check passes (5 markers + summary + title all present).
 
+**Addition (v0.79.0): Hard rules bind all agent-authored text.** When the orchestrator-composed body includes a `Hard rules (non-negotiable` block in its voice-contract prefix, those rules bind ALL agent-authored text — including `[!example]+` / `[!info]` / `[!tip]` callout titles and bodies, not only the narrative paragraphs. A `no emoji` hard rule therefore forbids pictographic glyphs in section titles and tables as well. Canonical `[!warning]` callout strings (composed by the orchestrator from a fixed contract) are exempt.
+
 ## Pre-write self-check
 
 BEFORE calling the Write tool, verify your composed output against this checklist. If any item fails, return `{ path, status: "failed:contract-violation:<field>" }` and do NOT write.
