@@ -2540,6 +2540,73 @@ function assertCoworkV068Shape() {
     }
 }
 
+// =====================================================================
+// v0.79.0 Workstream B — hard_rules propagation
+// =====================================================================
+
+// HC-V0790-B1: composeVoiceContract appends a Hard rules block when rules present
+{
+    const label = "HC-V0790-B1 composeVoiceContract appends Hard rules block";
+    try {
+        const dh = require(path.join(BP, "helpers", "dispatch-plan-helper.js"));
+        const vc = dh.composeVoiceContract({ vibe: "casual" }, ["never use leverage", "X"]);
+        assertTrue(/Hard rules \(non-negotiable/.test(vc), `${label}: expected Hard rules header, got: ${vc.slice(0,200)}`);
+        assertTrue(/never use leverage/.test(vc), `${label}: expected rule text present`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0790-B2: composeVoiceContract emits even when personality empty but rules exist
+{
+    const label = "HC-V0790-B2 voice contract emits for rules-only (empty personality)";
+    try {
+        const dh = require(path.join(BP, "helpers", "dispatch-plan-helper.js"));
+        const vc = dh.composeVoiceContract({ vibe: null, formality: null, pep_talk: null, length: null, notes: null }, ["no em-dashes"]);
+        assertTrue(vc !== "" && /no em-dashes/.test(vc), `${label}: expected non-empty contract with rule, got ${JSON.stringify(vc)}`);
+        const vcNone = dh.composeVoiceContract({ vibe: null, formality: null, pep_talk: null, length: null, notes: null }, []);
+        assertTrue(vcNone === "", `${label}: expected empty contract when no personality + no rules`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0790-B3: gather-from-served-by accepts hard_rules input without breaking dry-run
+{
+    const label = "HC-V0790-B3 gather-from-served-by accepts hard_rules input";
+    try {
+        const helper = require(path.join(BP, "helpers", "gather-from-served-by-helper.js"));
+        const result = helper.gatherFromServedBy({
+            kind_name: "finance", kind_title: "Finance", served_by: "copilot-money",
+            what_matters: "Yesterday transactions.", question_set_answers: null,
+            hard_rules: ["no emoji anywhere"],
+            today: "2026-05-29", range: { start: "2026-05-29", end: "2026-05-29" }, timezone: "America/Denver",
+            dry_run_answers: {
+                available_tools: ["mcp__copilot-money__list_transactions"],
+                agent_markdown: "> [!example]+ Finance\n> - Groceries $52 at Walmart\n> - Gas $44 at South Platte\n> - Dining $38 at Sushi Den",
+                tools_used: ["mcp__copilot-money__list_transactions"],
+            },
+        });
+        assertTrue(result.status === "ready", `${label}: expected ready, got ${result.status} (${result.reason||""})`);
+        assertTrue(Array.isArray(result.hard_rules_applied) && result.hard_rules_applied.length === 1,
+            `${label}: expected hard_rules echoed in hard_rules_applied, got ${JSON.stringify(result.hard_rules_applied)}`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0790-B4: gather-from-served-by SKILL.md documents Hard rules binding (prose-lint)
+{
+    const label = "HC-V0790-B4 gather-from-served-by SKILL.md has Hard rules section";
+    try {
+        const skill = fs.readFileSync(path.join(BP, "skills/skills/gather-from-served-by/SKILL.md"), "utf8");
+        assertTrue(/##\s*Hard rules/i.test(skill), `${label}: expected '## Hard rules' section`);
+        assertTrue(/title/i.test(skill) && /hard_rules/.test(skill), `${label}: expected binding mentions title + hard_rules`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
 (function main() {
   console.log("--- shared contracts ---");
   checkSharedContracts();
