@@ -2607,6 +2607,55 @@ function assertCoworkV068Shape() {
     }
 }
 
+// =====================================================================
+// v0.79.0 Workstream A — microscope dispatch routing
+// =====================================================================
+
+// HC-V0790-C1: microscope present for a canonical kind → forced gather_from_served_by
+{
+    const label = "HC-V0790-C1 microscope forces canonical kind through served-by";
+    try {
+        const dh = require(path.join(BP, "helpers", "dispatch-plan-helper.js"));
+        const prefs = {
+            priorities: ["calendar"],
+            personality: {},
+            mcps: { calendar: { served_by: "ns-cal", connected: true, what_matters: "conflicts only" } },
+        };
+        const reachable = new Set(["ns-cal"]);
+        const mcpSkillMap = JSON.parse(fs.readFileSync(path.join(BP, "content/context/mcp-skill-map.json"), "utf8"));
+        const microscopes = { calendar: "## What matters\nDeep calendar contract: surface travel + conflicts + prep gaps." };
+        const plan = dh.planDispatch({ prefs, reachableNamespaces: reachable, mcpSkillMap, microscopes });
+        assertTrue(plan.length === 1, `${label}: expected 1 entry, got ${plan.length}`);
+        assertTrue(plan[0].action === "gather_from_served_by", `${label}: expected forced served-by, got ${plan[0].action}`);
+        assertTrue(plan[0].microscope === true, `${label}: expected microscope flag true`);
+        assertTrue(/Deep calendar contract/.test(plan[0].what_matters), `${label}: expected microscope body as what_matters`);
+        assertTrue(/conflicts only/.test(plan[0].baseline_notes || ""), `${label}: expected notes preserved as baseline_notes`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0790-C2: no microscope → behavior unchanged (canonical stays canonical)
+{
+    const label = "HC-V0790-C2 no microscope → canonical kind unchanged";
+    try {
+        const dh = require(path.join(BP, "helpers", "dispatch-plan-helper.js"));
+        const prefs = {
+            priorities: ["calendar"],
+            personality: {},
+            mcps: { calendar: { served_by: "ns-cal", connected: true, what_matters: "x" } },
+        };
+        const reachable = new Set(["ns-cal"]);
+        const mcpSkillMap = JSON.parse(fs.readFileSync(path.join(BP, "content/context/mcp-skill-map.json"), "utf8"));
+        const plan = dh.planDispatch({ prefs, reachableNamespaces: reachable, mcpSkillMap, microscopes: {} });
+        assertTrue(plan.length === 1, `${label}: expected 1 entry`);
+        assertTrue(plan[0].action === "gather_canonical", `${label}: expected canonical when no microscope, got ${plan[0].action}`);
+        assertTrue(!plan[0].microscope, `${label}: expected no microscope flag`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
 (function main() {
   console.log("--- shared contracts ---");
   checkSharedContracts();
