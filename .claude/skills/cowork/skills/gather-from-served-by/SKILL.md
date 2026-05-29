@@ -7,6 +7,7 @@ inputs:
   served_by: string
   what_matters: string
   question_set_answers: object | null
+  hard_rules: list[string]
   today: string
   range: object
   timezone: string
@@ -124,6 +125,10 @@ If a tool result includes any of these, surface the URL inline in your `[!exampl
 ```
 
 This URL requirement applies regardless of dispatch path. It binds the agent's gather output; the dry-run helper validates the markdown's structural shape but cannot validate URL presence (it can't know what URLs the MCP would have exposed in a real session).
+
+## Hard rules
+
+When the orchestrator passes a non-empty `hard_rules[]` input, inject it into the dispatch contract (Step 3) under `**Hard rules (bind this callout's TITLE and BODY, apply verbatim):**` and obey every rule when composing the `[!example]+ <kind_title>` callout. These bind BOTH the callout title and its body — e.g. a "no emoji anywhere" rule means the title is `> [!example]+ Finance` (never `> [!example]+ 💰 Finance`) and no table cell or bullet carries a pictographic glyph. `hard_rules[]` is sourced from `prefs.effective_hard_rules` (see `cowork:read-user-preferences`). When empty or absent, compose normally.
 
 ## Dry-run mode
 

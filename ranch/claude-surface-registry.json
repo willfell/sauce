@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-05-29T15:00:27.361Z",
+  "generated_at": "2026-05-29T21:51:03.636Z",
   "workshop_version": "0.78.1",
   "contributions": {
     "audit": [
@@ -245,6 +245,12 @@
         "kind": "skill",
         "source": "skills/orchestrators/context-builder/SKILL.md",
         "dest": ".claude/skills/cowork/context-builder/SKILL.md",
+        "version": "0.17.0"
+      },
+      {
+        "kind": "skill",
+        "source": "skills/orchestrators/edit-microscope/SKILL.md",
+        "dest": ".claude/skills/cowork/edit-microscope/SKILL.md",
         "version": "0.17.0"
       },
       {
