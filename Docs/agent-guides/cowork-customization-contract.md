@@ -25,6 +25,7 @@ HC-V0760-A1 preservation harness lockstep.
 | `spice/cowork/context/active-threads.md` | `cowork:bootstrap-vault` writes empty | Not in `files[]`. |
 | `spice/cowork/context/weekly-snapshot.md` | `cowork:bootstrap-vault` writes empty | Not in `files[]`. |
 | `spice/cowork/context/user-preferences.md` | `install.js` seeds from template | `materialize_once: true` in manifest (v0.59.9 flag). |
+| `spice/cowork/prompts/per-mcp/**/*.md` | `cowork:edit-microscope` writes on demand | NOT in `files[]` — created lazily by the capture skill; `update`/`reinstall` never touch it by construction. |
 
 ## USER-DRAFTABLE WITH BACKUP — overwritten on reinstall but prior content preserved as `.bak`
 
@@ -67,6 +68,18 @@ If a future cycle introduces another user-owned file:
    - **`.bak` backup** (file IS in `files[]` without the flag — overwrites with backup, the current default for cowork prompts).
 3. Add the path to `HC-V0760-A1`'s `FOCUSED_USER_PATHS` list in
    `platform/test/run-cowork-smoke.js` if using strict-USER (materialize_once).
+
+**v0.79.0 — `per-mcp/**` microscope contracts.** The per-kind microscope dir
+(`spice/cowork/prompts/per-mcp/<kind>/microscope.md`, authored by
+`cowork:edit-microscope`) uses the **`bootstrap-vault`-style seeding** mechanism
+variant: it is NOT in cowork's `files[]` and is written by a skill on demand, so
+`update`/`reinstall` never touch it by construction (no `materialize_once` flag
+needed — the flag only matters for paths that ARE in `files[]`). It is guarded
+two ways: structurally by the extended `HC-V0760-A1` `FOCUSED_USER_PATHS`
+(fails closed if a future cycle ever adds a per-mcp path to `files[]` without
+`materialize_once`), and behaviorally by `HC-V0790-F1` in
+`platform/test/run-install.js` (a synthetic install→reinstall proving a
+not-in-`files[]` per-mcp file survives byte-identical with no `.bak`).
 
 A future variant: `check-customization-preservation` harness that diffs
 expected-stock vs expected-user file lists against the cowork manifest
