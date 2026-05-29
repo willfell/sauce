@@ -2693,6 +2693,73 @@ function assertCoworkV068Shape() {
     }
 }
 
+// =====================================================================
+// v0.79.0 Workstream A — edit-microscope helper
+// =====================================================================
+
+// HC-V0790-E1: composeMicroscope seeds from notes on first run
+{
+    const label = "HC-V0790-E1 composeMicroscope seeds from notes (first run)";
+    try {
+        const em = require(path.join(BP, "helpers", "edit-microscope-helper.js"));
+        const out = em.composeMicroscope({
+            kind_name: "finance",
+            existing: null,
+            notes: "Monitor all spend; keep debt front and center.",
+            answers: { what_matters: "Yesterday transaction table; category outliers; recurring changes." },
+            tools: ["mcp__copilot-money__list_transactions", "mcp__copilot-money__list_accounts"],
+            gaps: [],
+        });
+        assertTrue(/^##\s*What matters/m.test(out), `${label}: expected '## What matters' section`);
+        assertTrue(/##\s*Tools & how to use them/m.test(out), `${label}: expected Tools section`);
+        assertTrue(/Yesterday transaction table/.test(out), `${label}: expected answers in body`);
+        assertTrue(/Monitor all spend/.test(out), `${label}: expected notes seeded as baseline`);
+        assertTrue(/list_transactions/.test(out), `${label}: expected available tools referenced`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0790-E2: composeMicroscope deepens existing (re-run preserves prior + appends)
+{
+    const label = "HC-V0790-E2 composeMicroscope deepens existing contract";
+    try {
+        const em = require(path.join(BP, "helpers", "edit-microscope-helper.js"));
+        const existing = "## What matters\nPrior contract line ALPHA.\n\n## Tools & how to use them\n- list_transactions\n";
+        const out = em.composeMicroscope({
+            kind_name: "finance", existing, notes: "",
+            answers: { what_matters: "New deeper requirement BETA." },
+            tools: ["mcp__copilot-money__list_transactions"], gaps: [],
+        });
+        assertTrue(/ALPHA/.test(out), `${label}: expected prior content preserved`);
+        assertTrue(/BETA/.test(out), `${label}: expected new content appended`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0790-E3: classifyGap distinguishes resolvable-in-gather vs mcp-ceiling
+{
+    const label = "HC-V0790-E3 classifyGap resolvable vs ceiling";
+    try {
+        const em = require(path.join(BP, "helpers", "edit-microscope-helper.js"));
+        // search_contacts present → number→name gap is resolvable in-gather
+        const g1 = em.classifyGap({
+            gap: "messages show phone numbers, not contact names",
+            tools: ["mcp__imsg__read_imessages", "mcp__imsg__search_contacts"],
+        });
+        assertTrue(g1.resolution === "resolvable-in-gather", `${label}: expected resolvable-in-gather, got ${g1.resolution}`);
+        // no message-content tool → ceiling
+        const g2 = em.classifyGap({
+            gap: "cannot read message content",
+            tools: ["mcp__wa__check-whatsapp-status", "mcp__wa__list-recent-contacts"],
+        });
+        assertTrue(g2.resolution === "mcp-ceiling", `${label}: expected mcp-ceiling, got ${g2.resolution}`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
 (function main() {
   console.log("--- shared contracts ---");
   checkSharedContracts();
