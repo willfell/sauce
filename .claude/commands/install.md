@@ -171,3 +171,21 @@ SKILL.md prose-only patch. No new files, no schema changes. Two fixes:
 2. **Source URL contract in `gather-from-served-by`.** New `## Source URL requirements` section. MUST: github / ado / email. SHOULD: calendar / chat / finance / custom kinds. Includes per-kind URL-shape examples + a fallback note for genuinely-no-URL runs.
 
 No manual steps. Run `sauce update --bump-pins`; the orchestrators read the updated SKILL.md on the next scheduled fire.
+
+---
+
+## Upgrading from v0.78.1 → v0.79.0
+
+Three additive workstreams; no breaking changes. After `sauce update --bump-pins`:
+
+1. **`/cowork microscope <kind>` — per-kind deep gather contracts (WS-A).** New interactive orchestrator `cowork:edit-microscope`. Run `/cowork microscope <kind>` (e.g., `/cowork microscope finance`) to author or deepen a USER-OWNED contract at `spice/cowork/prompts/per-mcp/<kind>/microscope.md`. The skill enumerates the kind's `served_by` MCP tools, consent-gated samples your real data, surfaces gaps with resolution paths (resolvable-in-gather / mcp-ceiling / user-supplied), and composes the contract. When a microscope exists for a prioritized kind, the 5 atomic-note orchestrators (morning-briefing / midday-tripwire / eod-review / weekly-review / monthly-review) route that kind through `gather-from-served-by` with the microscope body as the deep `what_matters` (the kind's prior `notes` carry as `baseline_notes`). The microscope file is NOT in cowork's `files[]` — `update`/`reinstall` never overwrite it (preservation by construction). Re-run anytime to go deeper; the helper preserves prior content and appends a refinement block.
+
+2. **`personality.hard_rules[]` + `personality.no_emojis` (WS-B).** Two new fields in `spice/cowork/context/user-preferences.md`'s `personality` block:
+   - `no_emojis: true` — convenience boolean that appends a canonical no-emoji rule to the effective rule list.
+   - `hard_rules: [<string>, ...]` — arbitrary verbatim do-not-interpret rules (e.g., `- 'never use the word leverage'`).
+
+   `read-user-preferences` composes these into one ordered `effective_hard_rules[]` that the orchestrators propagate to ALL three output layers: the voice-contract prefix gets a `Hard rules (non-negotiable, …)` block; `gather-from-served-by` receives `hard_rules[]` as a dispatch input that binds callout TITLE + BODY; the `write-run-note` skeleton enforces them in `[!example]+` / `[!info]` / `[!tip]` titles and bodies. Canonical `[!warning]` strings are exempt. No manual edit step — add the fields when ready.
+
+3. **Per-type callout colors (WS-C, styling 0.1.2 → 0.2.0).** Ships a new vendored CSS snippet `sauce-callouts.css` at `.obsidian/snippets/` defining per-type `--callout-color` for info / note / tip / success / warning / caution / example / quote / danger across light (rose-pine-light) and dark (melange-dark) schemes. Registered automatically in `.obsidian/appearance.json`'s `enabledCssSnippets[]` by the installer. After upgrade, open any note with multiple callout types (`> [!info]` / `> [!warning]` / `> [!tip]` / `> [!example]`) and confirm four distinct hues. If callouts still look monochrome, the Baseline theme's Monochrome Style-Setting may be overriding the snippet — open Style Settings → Baseline → toggle the relevant callout keys to non-monochrome values.
+
+No new manual steps. Run `sauce update --bump-pins`; the orchestrators read the updated SKILL.md and any present microscopes on the next scheduled fire.
