@@ -3101,6 +3101,50 @@ function assertCoworkV068Shape() {
     }
 }
 
+// =====================================================================
+// v0.80.0 Workstream — end-to-end injection
+// =====================================================================
+
+// HC-V0800-E1: end-to-end — orchestrator dispatch with one sibling carries it verbatim into gather result
+{
+    const label = "HC-V0800-E1 end-to-end sibling injection echoes through helper";
+    try {
+        const helper = require(path.join(BP, "helpers", "gather-from-served-by-helper.js"));
+        const SIB_BODY = "| phone | name |\n|---|---|\n| +1-555-0100 | Alice |\n| +1-555-0101 | Bob |\n";
+        const result = helper.gatherFromServedBy({
+            kind_name: "chat", kind_title: "Chat", served_by: "imsg",
+            what_matters: "Inner-circle threads today.", question_set_answers: null,
+            hard_rules: ["never use the word leverage"],
+            siblings: [{ name: "contacts-map.md", body: SIB_BODY }],
+            today: "2026-05-30", range: { start: "2026-05-30", end: "2026-05-30" }, timezone: "America/Denver",
+            dry_run_answers: {
+                available_tools: ["mcp__imsg__read_imessages", "mcp__imsg__search_contacts"],
+                agent_markdown: "> [!example]+ Chat\n> - Alice: meeting confirmed for two pm tomorrow\n> - Bob: heading out at five thirty for sure today\n> - Carol: project update later this evening",
+                tools_used: ["mcp__imsg__read_imessages", "mcp__imsg__search_contacts"],
+            },
+        });
+        assertTrue(result.status === "ready", `${label}: expected ready, got ${result.status} (${result.reason||""})`);
+        assertTrue(Array.isArray(result.siblings_used) && result.siblings_used[0] === "contacts-map.md",
+            `${label}: expected siblings_used=[contacts-map.md], got ${JSON.stringify(result.siblings_used)}`);
+        assertTrue(Array.isArray(result.hard_rules_applied) && result.hard_rules_applied.length === 1,
+            `${label}: expected hard_rules echoed, got ${JSON.stringify(result.hard_rules_applied)}`);
+        // Negative control: empty siblings → empty siblings_used
+        const r2 = helper.gatherFromServedBy({
+            kind_name: "chat", kind_title: "Chat", served_by: "imsg",
+            what_matters: "x", question_set_answers: null, hard_rules: [],
+            today: "2026-05-30", range: { start: "2026-05-30", end: "2026-05-30" }, timezone: "America/Denver",
+            dry_run_answers: {
+                available_tools: ["mcp__imsg__read_imessages"],
+                agent_markdown: "> [!example]+ Chat\n> - Alice: meeting confirmed for two pm tomorrow\n> - Bob: heading out at five thirty for sure today\n> - Carol: project update later this evening",
+                tools_used: ["mcp__imsg__read_imessages"],
+            },
+        });
+        assertTrue(r2.siblings_used.length === 0, `${label}: expected empty siblings_used when no siblings, got ${JSON.stringify(r2.siblings_used)}`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
 (function main() {
   console.log("--- shared contracts ---");
   checkSharedContracts();
