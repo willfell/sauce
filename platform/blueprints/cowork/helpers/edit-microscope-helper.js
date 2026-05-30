@@ -35,7 +35,7 @@ function classifyGap({ gap, tools }) {
     return { gap, resolution: "user-supplied", note: "maintain a sibling file (e.g. contacts-map.md) the gather reads" };
 }
 
-function composeMicroscope({ kind_name, existing, notes, answers, tools, gaps }) {
+function composeMicroscope({ kind_name, existing, notes, answers, tools, gaps, siblings_to_reference }) {
     const a = answers || {};
     const toolList = Array.isArray(tools) ? tools : [];
     const gapList = Array.isArray(gaps) ? gaps : [];
@@ -69,16 +69,64 @@ function composeMicroscope({ kind_name, existing, notes, answers, tools, gaps })
     sections.push("## Output shape");
     sections.push(a.output_shape ? String(a.output_shape).trim() : "Bulleted, grounded, scannable. Lead with what changed since last run.");
 
+    const refs = Array.isArray(siblings_to_reference) ? siblings_to_reference.filter(r => r && r.name) : [];
+    if (refs.length > 0) {
+        sections.push("");
+        sections.push("## References");
+        for (const r of refs) sections.push(`- **${r.name}** — ${r.role || "(role unspecified)"}`);
+    }
+
     const rendered = sections.join("\n") + "\n";
 
     if (existing && String(existing).trim()) {
         // Deepen: preserve prior content, append a dated refinement block with the new material.
+        const refsBlock = refs.length > 0
+            ? `\n## References (added)\n${refs.map(r => `- **${r.name}** — ${r.role || "(role unspecified)"}`).join("\n")}\n`
+            : "";
         return String(existing).replace(/\s*$/, "") +
             "\n\n<!-- v0.79.0 deepen pass -->\n" +
             (whatMatters ? `## What matters (added)\n${whatMatters}\n` : "") +
-            (a.output_shape ? `\n## Output shape (updated)\n${String(a.output_shape).trim()}\n` : "");
+            (a.output_shape ? `\n## Output shape (updated)\n${String(a.output_shape).trim()}\n` : "") +
+            refsBlock;
     }
     return rendered;
 }
 
-module.exports = { resolveKind, classifyGap, composeMicroscope };
+// v0.80.0: gap-text → column header heuristics for the starter sibling template.
+const COLUMN_HEURISTICS = [
+    { rx: /vip|priority/i,        cols: ["id", "reason"] },
+    { rx: /phone|number/i,        cols: ["phone", "name"] },
+    { rx: /email/i,               cols: ["email", "name"] },
+    { rx: /account|\bid\b|alias/i, cols: ["id", "nickname"] },
+];
+
+function _inferColumns(gap) {
+    const text = String(gap || "");
+    for (const h of COLUMN_HEURISTICS) {
+        if (h.rx.test(text)) return h.cols;
+    }
+    return ["key", "value"];
+}
+
+function composeSibling({ kind_name, gap, suggested_name }) {
+    const name = String(suggested_name || "").trim() || "reference.md";
+    const cols = _inferColumns(gap);
+    const headerRow = `| ${cols.join(" | ")} |`;
+    const sepRow = `|${cols.map(() => "---").join("|")}|`;
+    const titleSlug = name.replace(/\.md$/i, "").replace(/[-_]+/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+    const body = [
+        `# ${titleSlug}`,
+        "",
+        `<!-- USER-OWNED sibling file for kind "${kind_name}". Authored via cowork:edit-microscope. Never overwritten by sauce update/reinstall. -->`,
+        "",
+        `_What this file is for_: ${gap ? String(gap).trim() : "(describe how the gather should use this reference)"}`,
+        "",
+        headerRow,
+        sepRow,
+        `| | |`,
+        "",
+    ].join("\n");
+    return { name, body, status: "ok" };
+}
+
+module.exports = { resolveKind, classifyGap, composeMicroscope, composeSibling };
