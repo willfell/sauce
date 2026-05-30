@@ -189,3 +189,17 @@ Three additive workstreams; no breaking changes. After `sauce update --bump-pins
 3. **Per-type callout colors (WS-C, styling 0.1.2 → 0.2.0).** Ships a new vendored CSS snippet `sauce-callouts.css` at `.obsidian/snippets/` defining per-type `--callout-color` for info / note / tip / success / warning / caution / example / quote / danger across light (rose-pine-light) and dark (melange-dark) schemes. Registered automatically in `.obsidian/appearance.json`'s `enabledCssSnippets[]` by the installer. After upgrade, open any note with multiple callout types (`> [!info]` / `> [!warning]` / `> [!tip]` / `> [!example]`) and confirm four distinct hues. If callouts still look monochrome, the Baseline theme's Monochrome Style-Setting may be overriding the snippet — open Style Settings → Baseline → toggle the relevant callout keys to non-monochrome values.
 
 No new manual steps. Run `sauce update --bump-pins`; the orchestrators read the updated SKILL.md and any present microscopes on the next scheduled fire.
+
+---
+
+## Upgrading from v0.79.0 → v0.80.0
+
+Per-kind sibling-file convention closes the v0.79.0 `user-supplied` resolution path. Pure-additive cowork cycle; no breaking changes. After `sauce update --bump-pins`:
+
+1. **Sibling files.** Any markdown file you place in `spice/cowork/prompts/per-mcp/<kind>/` (e.g. `contacts-map.md`, `vip-list.md`, `account-aliases.md`) — except `microscope.md` itself and any file starting with `_` — is auto-discovered by the 5 atomic-note orchestrators on their next scheduled run and injected verbatim into `cowork:gather-from-served-by`'s dispatch contract under `**User-supplied reference: <filename>**`. The gather agent reads each as additional context and applies it per `microscope.md`'s narrative guidance (so reference your siblings explicitly there: "Use `contacts-map.md` to resolve sender phone numbers to display names before composing the callout"). Same preservation posture as `microscope.md` — NOT in cowork's `files[]`, never touched by `update`/`reinstall`.
+
+2. **`/cowork microscope <kind>` user-supplied gap path.** When `cowork:edit-microscope`'s gap-finding step classifies a gap as `user-supplied`, the skill now offers to scaffold a starter sibling file inline. Heuristic column selection from the gap text: phone/number → `contacts-map.md` (`| phone | name |`); email → `senders-map.md` (`| email | name |`); account/id → `account-aliases.md` (`| id | nickname |`); vip/priority → `vip-list.md` (`| id | reason |`); else `<gap-slug>.md` (`| key | value |`). You confirm or override the filename, the skill writes the starter template, and a one-line reference paragraph is added to `microscope.md`'s `## References` section. You fill in the entries by hand afterward.
+
+3. **Underscore-prefix escape.** Need to keep a sibling file around but NOT inject it (drafts, archives, work-in-progress)? Rename to `_<name>.md`. The orchestrator's step 2c glob excludes `^_.*\.md$`.
+
+No new manual steps. Run `sauce update --bump-pins`; orchestrators discover siblings automatically on the next scheduled fire.
