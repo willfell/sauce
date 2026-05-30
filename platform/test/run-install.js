@@ -905,6 +905,137 @@ async function caseV0790F1PerMcpMicroscopePreserved() {
     }
 }
 
+// HC-V0800-F1 — per-mcp/<kind>/<sibling>.md preserved across reinstall.
+//
+// v0.80.0 generalises v0.79.0's microscope-preservation guard: the same not-in-
+// files[] posture holds for ANY USER-authored markdown file in the per-mcp/<kind>/
+// dir (e.g., vip-list.md, contacts-map.md, account-aliases.md), not just
+// microscope.md. The convention is "anything in per-mcp/<kind>/ except
+// microscope.md and _*.md is a sibling the gather may inject." This case mirrors
+// caseV0790F1's synthetic-workshop scaffold verbatim with a different sentinel
+// filename (vip-list.md) to prove the preservation is per-mcp/**-glob-general,
+// not microscope.md-specific. Same posture: regression guard; passes by
+// construction because no v0.80.0 code adds per-mcp/** to any files[] entry.
+async function caseV0800F1SiblingPreserved() {
+    const label = "HC-V0800-F1 per-mcp/<kind>/<sibling>.md preserved across reinstall";
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-permcp-sib-"));
+    try {
+        const workshopDir = path.join(tmp, "workshop");
+        const bpDir = path.join(workshopDir, "platform", "blueprints", "permcp");
+        fs.mkdirSync(path.join(bpDir, "content"), { recursive: true });
+        fs.writeFileSync(
+            path.join(bpDir, "content", "hub.md"),
+            "---\nseed: true\n---\n\nHUB CONTENT\n",
+        );
+        fs.writeFileSync(
+            path.join(bpDir, "manifest.json"),
+            JSON.stringify({
+                name: "permcp",
+                version: "0.1.0",
+                kind: "blueprint",
+                module_directory: "permcp",
+                files: [
+                    { source: "content/hub.md", dest: "{{module_directory}}/hub.md" },
+                ],
+            }, null, 2),
+        );
+        fs.writeFileSync(
+            path.join(workshopDir, "platform", "manifest.json"),
+            JSON.stringify({
+                workshop_version: "0.80.0",
+                mechanisms: [],
+                blueprints: [{ name: "permcp", version: "0.1.0", path: "blueprints/permcp" }],
+            }, null, 2),
+        );
+
+        const vaultDir = path.join(tmp, "vault");
+        fs.mkdirSync(path.join(vaultDir, "ranch"), { recursive: true });
+        fs.writeFileSync(
+            path.join(vaultDir, "ranch", "platform-installed.json"),
+            JSON.stringify({ workshop_version: null, blueprints: [], mechanisms: [], history: [] }, null, 2),
+        );
+        fs.writeFileSync(
+            path.join(vaultDir, "ranch", "platform-subscription.json"),
+            JSON.stringify({
+                workshop_version: "0.80.0",
+                mechanisms: [],
+                blueprints: [{ name: "permcp", version: "0.1.0" }],
+            }, null, 2),
+        );
+        fs.writeFileSync(
+            path.join(vaultDir, "ranch", "platform-config.json"),
+            JSON.stringify({ workshop_path: workshopDir, variables: {} }, null, 2),
+        );
+
+        function vaultAbs(rel) { return path.join(vaultDir, rel); }
+        function vaultExistsSync(rel) {
+            try { fs.accessSync(vaultAbs(rel)); return true; } catch { return false; }
+        }
+        const f1Adapter = {
+            basePath: vaultDir,
+            getBasePath() { return vaultDir; },
+            async read(p) { return fsp.readFile(vaultAbs(p), "utf8"); },
+            async write(p, content) {
+                await fsp.mkdir(path.dirname(vaultAbs(p)), { recursive: true });
+                await fsp.writeFile(vaultAbs(p), content, "utf8");
+            },
+            async exists(p) { return fsp.access(vaultAbs(p)).then(() => true, () => false); },
+            async mkdir(p) { await fsp.mkdir(vaultAbs(p), { recursive: true }); },
+            async remove(p) { await fsp.unlink(vaultAbs(p)); },
+            async stat(p) {
+                try {
+                    const s = await fsp.stat(vaultAbs(p));
+                    return { type: s.isDirectory() ? "folder" : "file", size: s.size, mtime: s.mtimeMs, ctime: s.ctimeMs };
+                } catch { return null; }
+            },
+        };
+        const f1Vault = {
+            adapter: f1Adapter,
+            getAbstractFileByPath(p) { return vaultExistsSync(p) ? { path: p } : null; },
+            async read(file) { return fsp.readFile(vaultAbs(file.path), "utf8"); },
+            async modify(file, text) {
+                await fsp.mkdir(path.dirname(vaultAbs(file.path)), { recursive: true });
+                await fsp.writeFile(vaultAbs(file.path), text, "utf8");
+            },
+            async create(p, text) {
+                await fsp.mkdir(path.dirname(vaultAbs(p)), { recursive: true });
+                await fsp.writeFile(vaultAbs(p), text, "utf8");
+            },
+            async createFolder(p) { await fsp.mkdir(vaultAbs(p), { recursive: true }); },
+        };
+        const f1Tp = {
+            app: { vault: f1Vault },
+            system: { suggester: async (_ti, items) => items[0] },
+            user: {},
+        };
+
+        global.Notice = global.Notice || class Notice { constructor(_msg) { /* suppress */ } };
+        const installerPath = path.join(__dirname, "../install.js");
+        delete require.cache[require.resolve(installerPath)];
+        const installer = require(installerPath);
+
+        // First install — materializes the declared hub file.
+        await installer(f1Tp);
+
+        // The user (via cowork:edit-microscope's user-supplied sub-flow, OR by hand)
+        // writes a sibling file the blueprint never declares in files[].
+        const sibRel = path.join("spice", "permcp", "prompts", "per-mcp", "chat", "vip-list.md");
+        const sibAbs = path.join(vaultDir, sibRel);
+        const SENTINEL = "# Vip List\n\n| id | reason |\n|---|---|\n| Alice | inner circle |\n| Bob | board member |\n";
+        fs.mkdirSync(path.dirname(sibAbs), { recursive: true });
+        fs.writeFileSync(sibAbs, SENTINEL, "utf8");
+
+        // Reinstall — must NOT touch the sibling file (not in files[]).
+        await installer(f1Tp);
+
+        assertTrue(fs.existsSync(sibAbs), `${label} (sibling file survives reinstall)`);
+        assertEqual(fs.readFileSync(sibAbs, "utf8"), SENTINEL, `${label} (content byte-identical after reinstall)`);
+        assertTrue(!fs.existsSync(sibAbs + ".bak"), `${label} (no .bak created — sibling was never in files[])`);
+    } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+    }
+}
+
 // ----- unit-test runner (no-positional-arg mode) ----------------------------
 
 async function runUnitTests() {
@@ -914,6 +1045,7 @@ async function runUnitTests() {
         caseV0751E1WorkshopVersionRefresh,
         caseV0760E1MaterializeOnceForUserPreferences,
         caseV0790F1PerMcpMicroscopePreserved,
+        caseV0800F1SiblingPreserved,
     ];
     for (const c of cases) {
         try { await c(); }
