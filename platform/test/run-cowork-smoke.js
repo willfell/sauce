@@ -2786,6 +2786,76 @@ function assertCoworkV068Shape() {
     }
 }
 
+// =====================================================================
+// v0.80.0 Workstream — gather-from-served-by accepts siblings[]
+// =====================================================================
+
+// HC-V0800-B1: gather-from-served-by accepts siblings[] input without breaking dry-run
+{
+    const label = "HC-V0800-B1 gather-from-served-by accepts siblings[] input";
+    try {
+        const helper = require(path.join(BP, "helpers", "gather-from-served-by-helper.js"));
+        const result = helper.gatherFromServedBy({
+            kind_name: "chat", kind_title: "Chat", served_by: "imsg",
+            what_matters: "Messages today.", question_set_answers: null,
+            hard_rules: [],
+            siblings: [{ name: "contacts-map.md", body: "| phone | name |\n|---|---|\n| +1-555 | Alice |\n" }],
+            today: "2026-05-30", range: { start: "2026-05-30", end: "2026-05-30" }, timezone: "America/Denver",
+            dry_run_answers: {
+                available_tools: ["mcp__imsg__read_imessages", "mcp__imsg__search_contacts"],
+                agent_markdown: "> [!example]+ Chat\n> - Alice (resolved from +1-555): meeting confirmed\n> - Bob: heading out at five thirty for sure\n> - Carol: project update soon",
+                tools_used: ["mcp__imsg__read_imessages", "mcp__imsg__search_contacts"],
+            },
+        });
+        assertTrue(result.status === "ready", `${label}: expected ready, got ${result.status} (${result.reason||""})`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0800-B2: gather-from-served-by echoes siblings_used[] (filenames) on success
+{
+    const label = "HC-V0800-B2 gather-from-served-by returns siblings_used[]";
+    try {
+        const helper = require(path.join(BP, "helpers", "gather-from-served-by-helper.js"));
+        const result = helper.gatherFromServedBy({
+            kind_name: "chat", kind_title: "Chat", served_by: "imsg",
+            what_matters: "Messages today.", question_set_answers: null,
+            hard_rules: [],
+            siblings: [
+                { name: "contacts-map.md", body: "| phone | name |\n|---|---|\n" },
+                { name: "vip-list.md",     body: "- Alice\n- Bob\n" },
+            ],
+            today: "2026-05-30", range: { start: "2026-05-30", end: "2026-05-30" }, timezone: "America/Denver",
+            dry_run_answers: {
+                available_tools: ["mcp__imsg__read_imessages"],
+                agent_markdown: "> [!example]+ Chat\n> - Alice: meeting confirmed for two pm tomorrow\n> - Bob: heading out at five thirty for sure today\n> - Carol: project update later this evening",
+                tools_used: ["mcp__imsg__read_imessages"],
+            },
+        });
+        assertTrue(result.status === "ready", `${label}: expected ready, got ${result.status} (${result.reason||""})`);
+        assertTrue(Array.isArray(result.siblings_used), `${label}: expected siblings_used array, got ${JSON.stringify(result.siblings_used)}`);
+        assertTrue(result.siblings_used.length === 2 && result.siblings_used[0] === "contacts-map.md" && result.siblings_used[1] === "vip-list.md",
+            `${label}: expected ["contacts-map.md","vip-list.md"], got ${JSON.stringify(result.siblings_used)}`);
+        // Empty/absent siblings → empty array, not undefined
+        const r2 = helper.gatherFromServedBy({
+            kind_name: "chat", kind_title: "Chat", served_by: "imsg",
+            what_matters: "Messages today.", question_set_answers: null,
+            hard_rules: [],
+            today: "2026-05-30", range: { start: "2026-05-30", end: "2026-05-30" }, timezone: "America/Denver",
+            dry_run_answers: {
+                available_tools: ["mcp__imsg__read_imessages"],
+                agent_markdown: "> [!example]+ Chat\n> - Alice: meeting confirmed for two pm tomorrow\n> - Bob: heading out at five thirty for sure today\n> - Carol: project update later this evening",
+                tools_used: ["mcp__imsg__read_imessages"],
+            },
+        });
+        assertTrue(Array.isArray(r2.siblings_used) && r2.siblings_used.length === 0,
+            `${label}: expected empty siblings_used when omitted, got ${JSON.stringify(r2.siblings_used)}`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
 (function main() {
   console.log("--- shared contracts ---");
   checkSharedContracts();
