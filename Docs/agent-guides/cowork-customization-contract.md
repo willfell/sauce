@@ -25,7 +25,7 @@ HC-V0760-A1 preservation harness lockstep.
 | `spice/cowork/context/active-threads.md` | `cowork:bootstrap-vault` writes empty | Not in `files[]`. |
 | `spice/cowork/context/weekly-snapshot.md` | `cowork:bootstrap-vault` writes empty | Not in `files[]`. |
 | `spice/cowork/context/user-preferences.md` | `install.js` seeds from template | `materialize_once: true` in manifest (v0.59.9 flag). |
-| `spice/cowork/prompts/per-mcp/**/*.md` | `cowork:edit-microscope` writes on demand | NOT in `files[]` — created lazily by the capture skill; `update`/`reinstall` never touch it by construction. |
+| `spice/cowork/prompts/per-mcp/**/*.md` | `cowork:edit-microscope` writes on demand (`microscope.md` + siblings) | NOT in `files[]` — created lazily by the capture skill; `update`/`reinstall` never touch it by construction. Siblings alongside `microscope.md` (e.g. `contacts-map.md`, `vip-list.md`) follow the same posture: USER-owned, never overwritten; orchestrators discover them via step 2c (glob `*.md` excluding `microscope.md` and `_*.md`) and `gather-from-served-by` injects each verbatim under `**User-supplied reference: <name>**` blocks. |
 
 ## USER-DRAFTABLE WITH BACKUP — overwritten on reinstall but prior content preserved as `.bak`
 
