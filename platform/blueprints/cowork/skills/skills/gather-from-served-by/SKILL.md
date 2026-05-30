@@ -8,6 +8,7 @@ inputs:
   what_matters: string
   question_set_answers: object | null
   hard_rules: list[string]
+  siblings: list[{name,body}]
   today: string
   range: object
   timezone: string
@@ -129,6 +130,18 @@ This URL requirement applies regardless of dispatch path. It binds the agent's g
 ## Hard rules
 
 When the orchestrator passes a non-empty `hard_rules[]` input, inject it into the dispatch contract (Step 3) under `**Hard rules (bind this callout's TITLE and BODY, apply verbatim):**` and obey every rule when composing the `[!example]+ <kind_title>` callout. These bind BOTH the callout title and its body — e.g. a "no emoji anywhere" rule means the title is `> [!example]+ Finance` (never `> [!example]+ 💰 Finance`) and no table cell or bullet carries a pictographic glyph. `hard_rules[]` is sourced from `prefs.effective_hard_rules` (see `cowork:read-user-preferences`). When empty or absent, compose normally.
+
+## User-supplied reference
+
+When the orchestrator passes a non-empty `siblings[]` input (`list[{name, body}]`), inject each entry into the dispatch contract (Step 3) directly AFTER the `<what_matters verbatim>` block (and after the optional `**Captured answers**` block when `question_set_answers != null`) and BEFORE the `**Hard rules ...**` block, formatted as:
+
+```
+**User-supplied reference: <name>**
+
+<body>
+```
+
+(One block per sibling, in array order, with one blank line between entries.) These are USER-owned context files that live alongside `microscope.md` at `spice/cowork/prompts/per-mcp/<kind>/`. The agent reads each as additional context and applies it per the microscope.md narrative (which by convention names each sibling and its role — e.g., "Use `contacts-map.md` to resolve sender phone numbers to display names before composing the callout"). Empty or absent `siblings[]` → omit the section entirely. Sibling files bind the agent's INPUT, not its OUTPUT structure: do not let them rewrite the `[!example]+ <kind_title>` callout shape. The helper return echoes back the injected filenames as `siblings_used: list[string]`.
 
 ## Dry-run mode
 

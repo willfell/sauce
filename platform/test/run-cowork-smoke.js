@@ -2856,6 +2856,21 @@ function assertCoworkV068Shape() {
     }
 }
 
+// HC-V0800-B3: gather-from-served-by SKILL.md documents siblings injection (prose-lint)
+{
+    const label = "HC-V0800-B3 gather-from-served-by SKILL.md has User-supplied reference section";
+    try {
+        const skill = fs.readFileSync(path.join(BP, "skills/skills/gather-from-served-by/SKILL.md"), "utf8");
+        assertTrue(/##\s*User-supplied reference/i.test(skill), `${label}: expected '## User-supplied reference' section`);
+        assertTrue(/siblings/i.test(skill) && /\*\*User-supplied reference:/i.test(skill),
+            `${label}: expected prose to mention 'siblings' input and the literal '**User-supplied reference:' block format`);
+        assertTrue(/siblings:\s*list\[\{name\s*,\s*body\}\]|siblings:\s*list\[\{name,body\}\]/i.test(skill),
+            `${label}: expected inputs frontmatter to declare 'siblings: list[{name,body}]'`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
 (function main() {
   console.log("--- shared contracts ---");
   checkSharedContracts();
