@@ -51,6 +51,8 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
 
    2b. **Read per-kind microscope contracts.** For each `kind_name` in `prefs.priorities`, check whether `spice/cowork/prompts/per-mcp/<kind_name>/microscope.md` exists (via `mcp__obsidian__get_file_contents`; treat a not-found error as absent). When present, strip any leading frontmatter and capture the body as `microscopes[kind_name]`. Build the `microscopes` map (kind_name → body string). Kinds without a file are simply absent from the map.
 
+   2c. **Read per-kind sibling files.** For each `kind_name` in `prefs.priorities`, list the contents of `spice/cowork/prompts/per-mcp/<kind_name>/` via `mcp__obsidian__list_files_in_dir` (treat dir-not-found as empty). Filter the result to files matching the `per-mcp/<kind_name>/*.md` glob, then exclude `microscope.md` and any filename matching `^_.*\.md$` (underscore-prefix files are user drafts — never injected). For each remaining file, read its body via `mcp__obsidian__get_file_contents`, strip any leading frontmatter, and append `{ name: <filename>, body: <stripped body> }` to `siblings[kind_name]`. Kinds without a per-mcp dir, or with only `microscope.md` + `_*.md` files, get `siblings[kind_name] = []`. This step is PURE — no MCP gather calls, no writes.
+
    3. Build `dispatch_plan[]` as an ordered array. For each `kind_name` in `prefs.priorities` (in order):
 
       ```
@@ -163,6 +165,7 @@ for entry in dispatch_plan:
       what_matters:         entry.what_matters,     # microscope body when entry.microscope == true
       question_set_answers: entry.question_set_answers,
       hard_rules:           prefs.effective_hard_rules,
+      siblings:             siblings[entry.kind_name] || [],
       today:                context.today,
       range:                { start: context.today, end: context.today },
       timezone:             engagement.timezone || "America/Denver"
