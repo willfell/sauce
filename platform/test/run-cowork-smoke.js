@@ -2871,6 +2871,184 @@ function assertCoworkV068Shape() {
     }
 }
 
+// =====================================================================
+// v0.80.0 Workstream — composeSibling helper
+// =====================================================================
+
+// HC-V0800-C1: phone gap → contacts-map.md template with | phone | name |
+{
+    const label = "HC-V0800-C1 composeSibling phone gap → | phone | name | columns";
+    try {
+        const em = require(path.join(BP, "helpers", "edit-microscope-helper.js"));
+        const out = em.composeSibling({
+            kind_name: "chat",
+            gap: "messages show phone numbers, not contact names",
+            suggested_name: "contacts-map.md",
+        });
+        assertTrue(out.status === "ok", `${label}: expected status=ok, got ${out.status}`);
+        assertTrue(out.name === "contacts-map.md", `${label}: expected name preserved, got ${out.name}`);
+        assertTrue(/\| phone \| name \|/.test(out.body) && /\|---\|---\|/.test(out.body),
+            `${label}: expected '| phone | name |' header + separator row, got: ${out.body.slice(0,200)}`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0800-C2: email gap → | email | name |
+{
+    const label = "HC-V0800-C2 composeSibling email gap → | email | name |";
+    try {
+        const em = require(path.join(BP, "helpers", "edit-microscope-helper.js"));
+        const out = em.composeSibling({
+            kind_name: "email",
+            gap: "inbox shows sender email addresses, want display names",
+            suggested_name: "senders-map.md",
+        });
+        assertTrue(/\| email \| name \|/.test(out.body), `${label}: expected '| email | name |' header, got: ${out.body.slice(0,200)}`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0800-C3: id gap → | id | nickname |
+{
+    const label = "HC-V0800-C3 composeSibling account/id gap → | id | nickname |";
+    try {
+        const em = require(path.join(BP, "helpers", "edit-microscope-helper.js"));
+        const out = em.composeSibling({
+            kind_name: "finance",
+            gap: "transactions show account id codes, prefer nicknames",
+            suggested_name: "account-aliases.md",
+        });
+        assertTrue(/\| id \| nickname \|/.test(out.body), `${label}: expected '| id | nickname |' header, got: ${out.body.slice(0,200)}`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0800-C4: vip gap → | id | reason |
+{
+    const label = "HC-V0800-C4 composeSibling vip/priority gap → | id | reason |";
+    try {
+        const em = require(path.join(BP, "helpers", "edit-microscope-helper.js"));
+        const out = em.composeSibling({
+            kind_name: "email",
+            gap: "want VIP highlighting for priority senders",
+            suggested_name: "vip-list.md",
+        });
+        assertTrue(/\| id \| reason \|/.test(out.body), `${label}: expected '| id | reason |' header, got: ${out.body.slice(0,200)}`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0800-C5: no-signal gap → | key | value |
+{
+    const label = "HC-V0800-C5 composeSibling generic gap → | key | value |";
+    try {
+        const em = require(path.join(BP, "helpers", "edit-microscope-helper.js"));
+        const out = em.composeSibling({
+            kind_name: "github",
+            gap: "need a glossary of project shorthand",
+            suggested_name: "glossary.md",
+        });
+        assertTrue(/\| key \| value \|/.test(out.body), `${label}: expected '| key | value |' header, got: ${out.body.slice(0,200)}`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0800-C6: body has heading + preamble + table (structural shape)
+{
+    const label = "HC-V0800-C6 composeSibling body has heading + preamble + table";
+    try {
+        const em = require(path.join(BP, "helpers", "edit-microscope-helper.js"));
+        const out = em.composeSibling({
+            kind_name: "chat",
+            gap: "messages show phone numbers, not contact names",
+            suggested_name: "contacts-map.md",
+        });
+        assertTrue(/^# /m.test(out.body), `${label}: expected a top-level heading`);
+        assertTrue(/USER-OWNED|USER-owned|user-owned/.test(out.body), `${label}: expected USER-OWNED marker in preamble`);
+        assertTrue(/^\|/m.test(out.body), `${label}: expected at least one markdown table row`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// =====================================================================
+// v0.80.0 Workstream — composeMicroscope ## References extension
+// =====================================================================
+
+// HC-V0800-D1: composeMicroscope emits ## References when siblings_to_reference non-empty
+{
+    const label = "HC-V0800-D1 composeMicroscope emits ## References section";
+    try {
+        const em = require(path.join(BP, "helpers", "edit-microscope-helper.js"));
+        const out = em.composeMicroscope({
+            kind_name: "chat",
+            existing: null,
+            notes: "Surface inner-circle threads.",
+            answers: { what_matters: "Inner-circle senders + topics today." },
+            tools: ["mcp__imsg__read_imessages", "mcp__imsg__search_contacts"],
+            gaps: [],
+            siblings_to_reference: [
+                { name: "contacts-map.md", role: "resolve sender phone numbers to display names before summarizing" },
+                { name: "vip-list.md",     role: "elevate any matching sender to the top of the callout" },
+            ],
+        });
+        assertTrue(/^##\s*References\s*$/m.test(out), `${label}: expected '## References' section header`);
+        assertTrue(/- \*\*contacts-map\.md\*\* — resolve sender phone numbers/.test(out),
+            `${label}: expected first sibling entry rendered with role`);
+        assertTrue(/- \*\*vip-list\.md\*\* — elevate any matching sender/.test(out),
+            `${label}: expected second sibling entry rendered with role`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0800-D2: composeMicroscope omits ## References when siblings_to_reference empty/absent
+{
+    const label = "HC-V0800-D2 composeMicroscope omits ## References when no siblings";
+    try {
+        const em = require(path.join(BP, "helpers", "edit-microscope-helper.js"));
+        const out1 = em.composeMicroscope({
+            kind_name: "chat", existing: null, notes: "",
+            answers: { what_matters: "x" }, tools: [], gaps: [],
+            siblings_to_reference: [],
+        });
+        assertTrue(!/^##\s*References/m.test(out1), `${label}: expected NO References section when empty array`);
+        const out2 = em.composeMicroscope({
+            kind_name: "chat", existing: null, notes: "",
+            answers: { what_matters: "x" }, tools: [], gaps: [],
+            // siblings_to_reference absent entirely
+        });
+        assertTrue(!/^##\s*References/m.test(out2), `${label}: expected NO References section when arg absent`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0800-D3: deepen-pass appends ## References (added) to existing content
+{
+    const label = "HC-V0800-D3 composeMicroscope deepen-pass appends ## References (added)";
+    try {
+        const em = require(path.join(BP, "helpers", "edit-microscope-helper.js"));
+        const existing = "## What matters\nPrior contract ALPHA.\n";
+        const out = em.composeMicroscope({
+            kind_name: "chat", existing, notes: "",
+            answers: { what_matters: "deeper BETA" }, tools: [], gaps: [],
+            siblings_to_reference: [{ name: "contacts-map.md", role: "resolve sender numbers" }],
+        });
+        assertTrue(/ALPHA/.test(out), `${label}: expected prior content preserved`);
+        assertTrue(/^##\s*References \(added\)\s*$/m.test(out), `${label}: expected '## References (added)' header in deepen-pass`);
+        assertTrue(/- \*\*contacts-map\.md\*\* — resolve sender numbers/.test(out),
+            `${label}: expected sibling entry rendered in deepen-pass References`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
 (function main() {
   console.log("--- shared contracts ---");
   checkSharedContracts();
