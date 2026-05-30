@@ -3049,6 +3049,58 @@ function assertCoworkV068Shape() {
     }
 }
 
+// =====================================================================
+// v0.80.0 Workstream — orchestrator step 2c (sibling-file discovery)
+// =====================================================================
+
+// HC-V0800-A1: morning-briefing SKILL.md has step 2c (sibling read + glob/exclude prose)
+{
+    const label = "HC-V0800-A1 morning-briefing SKILL.md has step 2c sibling read";
+    try {
+        const skill = fs.readFileSync(path.join(BP, "skills/orchestrators/morning-briefing/SKILL.md"), "utf8");
+        assertTrue(/^\s*2c\.\s+\*\*Read per-kind sibling files\.\*\*/m.test(skill),
+            `${label}: expected '2c. **Read per-kind sibling files.**' sub-step header`);
+        assertTrue(/per-mcp\/<kind_name>\/\*\.md|per-mcp\/<kind>\/\*\.md/.test(skill),
+            `${label}: expected per-mcp glob pattern in step 2c`);
+        assertTrue(/microscope\.md/.test(skill) && /(_\*\.md|underscore-prefix|\^_)/.test(skill),
+            `${label}: expected exclusion of microscope.md and underscore-prefix files`);
+        assertTrue(/siblings\[kind_name\]|siblings\[kind\]/.test(skill),
+            `${label}: expected build of siblings[kind_name] map`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0800-A2: same step 2c prose present in all 4 other orchestrators
+{
+    const label = "HC-V0800-A2 step 2c sibling read in 4 other orchestrators";
+    try {
+        for (const orch of ["midday-tripwire", "eod-review", "weekly-review", "monthly-review"]) {
+            const skill = fs.readFileSync(path.join(BP, `skills/orchestrators/${orch}/SKILL.md`), "utf8");
+            assertTrue(/^\s*2c\.\s+\*\*Read per-kind sibling files\.\*\*/m.test(skill),
+                `${label}: ${orch} missing 2c sub-step header`);
+            assertTrue(/siblings\[kind_name\]|siblings\[kind\]/.test(skill),
+                `${label}: ${orch} missing siblings map build`);
+        }
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0800-A3: gather-loop in all 5 orchestrators passes siblings: siblings[entry.kind_name] || []
+{
+    const label = "HC-V0800-A3 gather loop passes siblings to gather-from-served-by";
+    try {
+        for (const orch of ["morning-briefing", "midday-tripwire", "eod-review", "weekly-review", "monthly-review"]) {
+            const skill = fs.readFileSync(path.join(BP, `skills/orchestrators/${orch}/SKILL.md`), "utf8");
+            assertTrue(/siblings:\s+siblings\[entry\.kind_name\]\s*\|\|\s*\[\]/.test(skill),
+                `${label}: ${orch} missing 'siblings: siblings[entry.kind_name] || []' in gather loop input`);
+        }
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
 (function main() {
   console.log("--- shared contracts ---");
   checkSharedContracts();
