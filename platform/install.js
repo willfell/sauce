@@ -7697,3 +7697,75 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
         }
     };
 }
+
+// ----- CLI handler (v0.80.1, closes FLN-v79-2) ------------------------------
+//
+// When invoked as `node platform/install.js [...flags]` (i.e. require.main is
+// this module), parse minimal CLI flags + delegate to `platform/test/run-install.js`
+// which is the canonical headless harness adapter.
+//
+// Prior to v0.80.1, install.js exported only `async function(tp)` for Templater
+// dispatch. Shell invocations silently no-op'd (the export was returned but never
+// called), trapping mid-cycle stage instructions that wrote
+// `node platform/install.js --vault . --auto-approve`. This handler closes that
+// trap by translating shell flags to a `run-install.js` subprocess invocation.
+//
+// Supported flags:
+//   --vault <path>      REQUIRED. Absolute or relative path to the consumer vault.
+//   --auto-approve      Pass-through to run-install.js (auto-accepts suggester prompts).
+//   --decline-all       Pass-through.
+//   --dry-run           Pass-through.
+//   --verbose           Pass-through.
+//
+// Exit code is the subprocess's exit code (0 on clean install; non-zero on error).
+if (require.main === module) {
+    const { spawnSync } = require("child_process");
+    const path = require("path");
+
+    const argv = process.argv.slice(2);
+    const flags = { vault: null, passthrough: [] };
+    for (let i = 0; i < argv.length; i++) {
+        const a = argv[i];
+        if (a === "--vault") {
+            const v = argv[++i];
+            if (!v || v.startsWith("--")) {
+                console.error("install.js: --vault requires a path argument");
+                console.error("usage: node platform/install.js --vault <path> [--auto-approve|--decline-all] [--dry-run] [--verbose]");
+                process.exit(2);
+            }
+            flags.vault = v;
+        } else if (a === "--auto-approve" || a === "--decline-all" || a === "--dry-run" || a === "--verbose") {
+            flags.passthrough.push(a);
+        } else if (a === "--help" || a === "-h") {
+            console.log("usage: node platform/install.js --vault <path> [--auto-approve|--decline-all] [--dry-run] [--verbose]");
+            process.exit(0);
+        } else {
+            console.error(`install.js: unknown flag ${a}`);
+            console.error("usage: node platform/install.js --vault <path> [--auto-approve|--decline-all] [--dry-run] [--verbose]");
+            process.exit(2);
+        }
+    }
+
+    if (flags.passthrough.includes("--auto-approve") && flags.passthrough.includes("--decline-all")) {
+        console.error("install.js: --auto-approve and --decline-all are mutually exclusive");
+        process.exit(2);
+    }
+
+    if (!flags.vault) {
+        console.error("install.js: --vault <path> is required");
+        console.error("usage: node platform/install.js --vault <path> [--auto-approve|--decline-all] [--dry-run] [--verbose]");
+        process.exit(2);
+    }
+
+    const vaultAbs = path.resolve(flags.vault);
+    const harness = path.join(__dirname, "test", "run-install.js");
+    const subArgs = [harness, vaultAbs, ...flags.passthrough];
+    // Default to --auto-approve if no approval flag was passed, matching the
+    // documented dogfood workflow.
+    if (!flags.passthrough.includes("--auto-approve") && !flags.passthrough.includes("--decline-all")) {
+        subArgs.push("--auto-approve");
+    }
+
+    const result = spawnSync(process.execPath, subArgs, { stdio: "inherit" });
+    process.exit(result.status === null ? 1 : result.status);
+}

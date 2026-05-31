@@ -1087,8 +1087,46 @@ async function caseV0801A1InstallJsCliHandler() {
             JSON.stringify({ workshop_version: null, blueprints: [], mechanisms: [], history: [] }, null, 2));
         fs.writeFileSync(path.join(vaultDir, "ranch", "platform-subscription.json"),
             JSON.stringify({ workshop_version: "0.80.1", mechanisms: [], blueprints: [{ name: "cli01", version: "0.1.0" }] }, null, 2));
+        // platform-config.json — use workshop_relative_path so the canonical
+        // installer-stub.js dispatcher (see seed below) can resolve the workshop.
+        // install.js prefers workshop_path when set, but the thin stub reads
+        // workshop_relative_path; seed both for safety.
+        const workshopRel = path.relative(vaultDir, workshopDir);
         fs.writeFileSync(path.join(vaultDir, "ranch", "platform-config.json"),
-            JSON.stringify({ workshop_path: workshopDir, variables: {} }, null, 2));
+            JSON.stringify({ workshop_path: workshopDir, workshop_relative_path: workshopRel, variables: {} }, null, 2));
+
+        // Seed the synthetic workshop with the canonical install.js next to a
+        // symlink to the real mechanisms/ tree. install.js does
+        // `require("./mechanisms/platform-claude/claude-md-renderer.js")` from
+        // its own directory, so the mechanisms must sit alongside the seeded
+        // install.js for sibling resolution to work.
+        fs.copyFileSync(installJs, path.join(workshopDir, "platform", "install.js"));
+        fs.symlinkSync(
+            path.join(__dirname, "..", "mechanisms"),
+            path.join(workshopDir, "platform", "mechanisms"),
+            "dir",
+        );
+
+        // Seed the bootstrap installer copy — run-install.js (which the CLI
+        // handler delegates to) requires <vault>/ranch/templater/platformInstall.js
+        // as the canonical bootstrap installer; missing → exit 2 "bootstrap installer missing".
+        // Use the canonical installer-stub.js (the thin dispatcher actually shipped
+        // to consumers) — it redispatches to <workshop>/platform/install.js (seeded
+        // above) so sibling requires resolve from the real mechanisms tree.
+        fs.mkdirSync(path.join(vaultDir, "ranch", "templater"), { recursive: true });
+        fs.copyFileSync(
+            path.join(__dirname, "..", "installer-stub.js"),
+            path.join(vaultDir, "ranch", "templater", "platformInstall.js"),
+        );
+
+        // Initialize the workshop fixture as a real git repo with one commit so
+        // gitState() can capture a 40-char sha. run-install.js asserts at least
+        // one new history entry has a real sha (post-T1.3 wire-up); a non-git
+        // workshop yields all-null git fields and the run fails with
+        // "gitState() not capturing on a real-git workshop?".
+        spawnSync("git", ["-c", "init.defaultBranch=main", "init", "-q"], { cwd: workshopDir });
+        spawnSync("git", ["-c", "user.email=test@example.com", "-c", "user.name=test", "add", "-A"], { cwd: workshopDir });
+        spawnSync("git", ["-c", "user.email=test@example.com", "-c", "user.name=test", "commit", "-q", "-m", "fixture"], { cwd: workshopDir });
 
         const realCli = spawnSync(process.execPath, [installJs, "--vault", vaultDir, "--auto-approve"], { encoding: "utf8" });
         assertTrue(realCli.status === 0,
