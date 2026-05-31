@@ -3060,8 +3060,13 @@ function assertCoworkV068Shape() {
         const skill = fs.readFileSync(path.join(BP, "skills/orchestrators/morning-briefing/SKILL.md"), "utf8");
         assertTrue(/^\s*2c\.\s+\*\*Read per-kind sibling files\.\*\*/m.test(skill),
             `${label}: expected '2c. **Read per-kind sibling files.**' sub-step header`);
-        assertTrue(/per-mcp\/<kind_name>\/\*\.md|per-mcp\/<kind>\/\*\.md/.test(skill),
-            `${label}: expected per-mcp glob pattern in step 2c`);
+        // v0.80.1 FLN-v80-1: accept either the literal `per-mcp/<kind_name>/*.md` glob
+        // substring OR a split `per-mcp/<kind_name>/` + "matching `*.md`" phrasing
+        // (both convey the same contract; the plan-template HC skeleton can use either).
+        const hasLiteralGlob = /per-mcp\/<kind_name>\/\*\.md|per-mcp\/<kind>\/\*\.md/.test(skill);
+        const hasSplitPhrasing = /per-mcp\/<kind_name>\//.test(skill) && /matching\s+(the\s+)?`?\*\.md/i.test(skill);
+        assertTrue(hasLiteralGlob || hasSplitPhrasing,
+            `${label}: expected per-mcp glob pattern in step 2c (either literal 'per-mcp/<kind_name>/*.md' OR split 'per-mcp/<kind_name>/' + 'matching \`*.md\`')`);
         assertTrue(/microscope\.md/.test(skill) && /(_\*\.md|underscore-prefix|\^_)/.test(skill),
             `${label}: expected exclusion of microscope.md and underscore-prefix files`);
         assertTrue(/siblings\[kind_name\]|siblings\[kind\]/.test(skill),
