@@ -65,6 +65,19 @@ Claude will read the bootstrap-vault SKILL.md and drive the interview one questi
 
 Drives the `cowork:edit-microscope` skill materialized at `<vault>/.claude/skills/cowork/edit-microscope/SKILL.md`. It is an MCP-tool-aware, iterative capture loop that authors (or deepens) a USER-OWNED per-kind "microscope" gather contract at `spice/cowork/prompts/per-mcp/<kind>/microscope.md`. The skill enumerates the kind's `served_by` tools, consent-gated samples your real data to ask grounded questions, surfaces data gaps with resolution paths (resolvable-in-gather / MCP-ceiling / user-supplied), and writes the deep contract the atomic-note orchestrators read. When a microscope exists for a prioritized kind, the orchestrators route that kind through `cowork:gather-from-served-by` with the microscope body as the deep `what_matters`. Re-run anytime to go deeper. The microscope file is never overwritten by `sauce update`/`reinstall` (it is not in cowork's `files[]`). If `<kind>` is omitted, the skill lists the kinds in `user-preferences.md` and asks which one.
 
+## /cowork audit-siblings [<kind>] (v0.81.0)
+
+```
+/cowork audit-siblings
+/cowork audit-siblings <kind>
+```
+
+Drives the `cowork:audit-siblings` skill materialized at `<vault>/.claude/skills/cowork/audit-siblings/SKILL.md`. It is a PURE READ-ONLY audit that detects (a) **dangling references** — entries in `microscope.md`'s `## References` section naming sibling files that don't exist on disk — and (b) **orphan files** — sibling files in `spice/cowork/prompts/per-mcp/<kind>/` not named in `microscope.md`'s `## References`. Emits one `[!warning]` callout per dangling finding + one `[!info]` callout per orphan + `[!success]` when clean.
+
+No writes, no MCP gather calls. Run after every `/cowork microscope <kind>` round (especially after the user-supplied sibling-scaffold sub-flow) to confirm `microscope.md` and the per-mcp dir are consistent. When `<kind>` is omitted, audits every kind in `user-preferences.md` `priorities:`.
+
+**Em-dash note:** the parser requires em-dash (`—`, U+2014) between `**<name>**` and the role description in `## References` bullets, matching what `composeMicroscope` emits. If you hand-edit a bullet with a hyphen (`-`) or en-dash (`–`), the audit silently flags the sibling as an orphan. Use em-dash.
+
 ## Engagement type quick-reference
 
 | Type | Required fields | Default cadences | Render aspects |
