@@ -367,6 +367,11 @@
     },
     {
       "kind": "skill",
+      "source": "skills/orchestrators/audit-siblings/SKILL.md",
+      "dest": "{{skills_dir}}/audit-siblings/SKILL.md"
+    },
+    {
+      "kind": "skill",
       "source": "skills/skills/check-vault-routing/SKILL.md",
       "dest": "{{skills_dir}}/skills/check-vault-routing/SKILL.md"
     },
