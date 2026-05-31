@@ -203,3 +203,17 @@ Per-kind sibling-file convention closes the v0.79.0 `user-supplied` resolution p
 3. **Underscore-prefix escape.** Need to keep a sibling file around but NOT inject it (drafts, archives, work-in-progress)? Rename to `_<name>.md`. The orchestrator's step 2c glob excludes `^_.*\.md$`.
 
 No new manual steps. Run `sauce update --bump-pins`; orchestrators discover siblings automatically on the next scheduled fire.
+
+---
+
+## Upgrading from v0.80.1 → v0.81.0
+
+New read-only audit skill `cowork:audit-siblings`. Pure-additive cowork cycle; no breaking changes. After `sauce update --bump-pins`:
+
+1. **Run `/cowork audit-siblings`** (or `/cowork audit-siblings <kind>` for a single kind) to verify consistency between `microscope.md`'s `## References` section and the actual sibling files in `spice/cowork/prompts/per-mcp/<kind>/`. The skill is purely read-only — no writes, no MCP gather calls. Findings emit as `[!warning]` (dangling references) or `[!info]` (orphan files); clean state emits `[!success]`.
+
+2. **When to use it:** after any `/cowork microscope <kind>` round, especially after the user-supplied gap path scaffolds new siblings. The audit catches dangling references (sibling deleted/renamed; reference left behind) and orphan files (sibling added by hand; not yet recorded in `## References`).
+
+3. **Em-dash requirement:** the audit parser requires em-dash (`—`, U+2014) between `**<name>**` and the role description in `## References` bullets, matching what `composeMicroscope` emits. If you hand-edit a bullet with a hyphen or en-dash, the audit silently flags the sibling as an orphan. Use em-dash to keep audit-siblings honest.
+
+4. **No manual setup steps.** The skill materializes into `.claude/skills/cowork/audit-siblings/SKILL.md` automatically on install.

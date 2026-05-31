@@ -9,8 +9,12 @@ load_when: Starting a session, picking the next cycle, or sanity-checking the cu
 
 ## Current
 
-- **Workshop version:** `0.80.1` (closed 2026-05-30)
-- **Most recent cycle:** v0.80.1 fln-cleanup-bundle PATCH — closes 5 documented footguns from prior cycles. FLN-v79-2: `install.js` CLI handler so `node install.js --vault . --auto-approve` actually works (was silently no-op'ing); +2 in-stage hardening fixes (--vault no-value, --auto-approve/--decline-all mutual exclusion). FLN-v80-1: softened HC-V0800-A1 per-mcp glob regex to accept split phrasing. FLN-v79-3: 80-char `agent_markdown` floor documented in build-test-verify.md `## Writing HC cases`. FLN-v79-4: orchestrator-vs-sub-skill dest convention in architecture.md. FLN-v80-2: landmine #16 entry updated to note `materializeClaudeSurface` SKILL.md catch-up posture. No contract surface change; pure cleanup. 6 stage commits + S6 cycle-close. Cycle executed subagent-driven-development style. Preflight `version-sync ok: 0.80.1` ALL GREEN.
+- **Workshop version:** `0.81.0` (closed 2026-05-30)
+- **Most recent cycle:** v0.81.0 cowork-audit-siblings MINOR — new pure-read-only `cowork:audit-siblings` orchestrator skill closes the silent-degradation gap v0.80.0 left open. Two-axis check: dangling references (`microscope.md` names a sibling that's absent → `[!warning]`) + orphan files (sibling present but unreferenced → `[!info]`). New helper exports `parseReferences` + `auditSiblings` (pure, deterministic, sorted by (kind, name); em-dash separator required). New SKILL.md at orchestrator-tier dest `{{skills_dir}}/audit-siblings/SKILL.md` with em-dash UX hardening note. cowork@0.19.0 → 0.20.0 MINOR. CS-MIG-1 counts 37→38 / 46→47 (lockstep dance closed). +26 HC-V0810-* sub-asserts in run-cowork-smoke.js + 1 in run-claude-surface.js. 7 stage commits + S8 cycle-close. **FLN-v81-1 surfaced + partially mitigated:** semver-regex assertions across 3 test files widened from 0.8.x-0.19.x to 0.8.x-0.29.x (ceiling now at 0.30.x). Preflight `version-sync ok: 0.81.0` ALL GREEN. Cycle executed subagent-driven-development style.
+
+- **Workshop version (previous):** `0.80.1` (closed 2026-05-30) — v0.80.1 fln-cleanup-bundle PATCH. See `Docs/cycle-history.md` for the v0.80.1 narrative.
+
+- **Workshop version (previous, retained for reference):** v0.80.1 fln-cleanup-bundle PATCH — closes 5 documented footguns from prior cycles. FLN-v79-2: `install.js` CLI handler so `node install.js --vault . --auto-approve` actually works (was silently no-op'ing); +2 in-stage hardening fixes (--vault no-value, --auto-approve/--decline-all mutual exclusion). FLN-v80-1: softened HC-V0800-A1 per-mcp glob regex to accept split phrasing. FLN-v79-3: 80-char `agent_markdown` floor documented in build-test-verify.md `## Writing HC cases`. FLN-v79-4: orchestrator-vs-sub-skill dest convention in architecture.md. FLN-v80-2: landmine #16 entry updated to note `materializeClaudeSurface` SKILL.md catch-up posture. No contract surface change; pure cleanup. 6 stage commits + S6 cycle-close. Cycle executed subagent-driven-development style. Preflight `version-sync ok: 0.80.1` ALL GREEN.
 
 - **Workshop version (previous):** `0.80.0` (closed 2026-05-30) — v0.80.0 cowork-sibling-files MINOR. See `Docs/cycle-history.md` for the v0.80.0 narrative.
 
@@ -22,7 +26,7 @@ load_when: Starting a session, picking the next cycle, or sanity-checking the cu
 
 ## Cycle order (chronological)
 
-v0.1.0 → v0.1.1 → v0.1.x → v0.1.3 → v0.1.2 → v0.2.0 → v0.3.0 → v0.4.0 → v0.3.2 → v0.4.2 → v0.5.0 → v0.11.0 → v0.12.0 → v0.13.0 → v0.14.0 → v0.6.0 → v0.16.0 → v0.17.0 → v0.18.0/.1/.2 → v0.19.0 → v0.20.0 → v0.21.0/.1 → v0.22.0/.1 → v0.23.0 → v0.24.0 → v0.25.0 → v0.26.0/.1 → v0.27.0 → v0.28.0 → v0.29.0 → v0.30.0 ⏭️ → v0.31.0 → v0.32.0 → v0.33.0/.1 → v0.36.0/.1 → v0.37.0 → v0.38.0/.1 → v0.40.0 → v0.41.0/.5 → v0.42.0 → v0.43.0 → v0.44.0 → v0.45.0 → v0.46.0/.1/.2 → v0.47.0 → v0.48.0 → v0.49.0 → v0.49.1 ⏭️ → v0.49.2 → (v0.50.0–v0.62.0 narratives lost; pre-v0.63 narrative below resumes) → v0.63.0 → v0.63.1 → v0.63.2 → v0.63.3 → v0.64.0 → v0.64.1 → v0.64.2 → v0.64.3 → v0.65.0 → v0.66.0 → v0.66.1 → v0.66.2 → v0.67.0 → v0.67.1 → v0.67.2 → v0.67.3 → v0.70.0 → v0.70.1 → v0.70.2 → v0.70.3 → v0.70.4 → v0.70.5 → v0.70.6 → v0.70.7 → v0.71.0 → v0.71.1 → v0.72.0 → v0.72.1 → v0.73.0 → v0.74.0 → v0.75.0 → v0.75.1 → v0.76.0 → v0.77.0 → v0.78.0 → v0.78.1 → v0.79.0 → v0.80.0 → v0.80.1 (current).
+v0.1.0 → v0.1.1 → v0.1.x → v0.1.3 → v0.1.2 → v0.2.0 → v0.3.0 → v0.4.0 → v0.3.2 → v0.4.2 → v0.5.0 → v0.11.0 → v0.12.0 → v0.13.0 → v0.14.0 → v0.6.0 → v0.16.0 → v0.17.0 → v0.18.0/.1/.2 → v0.19.0 → v0.20.0 → v0.21.0/.1 → v0.22.0/.1 → v0.23.0 → v0.24.0 → v0.25.0 → v0.26.0/.1 → v0.27.0 → v0.28.0 → v0.29.0 → v0.30.0 ⏭️ → v0.31.0 → v0.32.0 → v0.33.0/.1 → v0.36.0/.1 → v0.37.0 → v0.38.0/.1 → v0.40.0 → v0.41.0/.5 → v0.42.0 → v0.43.0 → v0.44.0 → v0.45.0 → v0.46.0/.1/.2 → v0.47.0 → v0.48.0 → v0.49.0 → v0.49.1 ⏭️ → v0.49.2 → (v0.50.0–v0.62.0 narratives lost; pre-v0.63 narrative below resumes) → v0.63.0 → v0.63.1 → v0.63.2 → v0.63.3 → v0.64.0 → v0.64.1 → v0.64.2 → v0.64.3 → v0.65.0 → v0.66.0 → v0.66.1 → v0.66.2 → v0.67.0 → v0.67.1 → v0.67.2 → v0.67.3 → v0.70.0 → v0.70.1 → v0.70.2 → v0.70.3 → v0.70.4 → v0.70.5 → v0.70.6 → v0.70.7 → v0.71.0 → v0.71.1 → v0.72.0 → v0.72.1 → v0.73.0 → v0.74.0 → v0.75.0 → v0.75.1 → v0.76.0 → v0.77.0 → v0.78.0 → v0.78.1 → v0.79.0 → v0.80.0 → v0.80.1 → v0.81.0 (current).
 
 > Gap note: per `Docs/cycle-history.md` line count (57 closed-cycle sections ending at v0.47.0, plus a v0.48–v0.67.3 archive), the v0.50.0 → v0.62.0 narratives were not captured in cycle-history.md during their respective closes. The CLAUDE.md claim that they were "archived to Docs/cycle-history.md" was stale. Backfill from `Docs/plans/` is possible but deferred.
 
@@ -63,6 +67,8 @@ Live brainstorm list (also referenced in `Docs/plans/` and brainstorm shelf file
 - ~~**FLN-v79-4: orchestrator-vs-sub-skill dest convention not codified**~~ — CLOSED in v0.80.1. `Docs/agent-guides/architecture.md` now contains an orchestrator-vs-sub-skill dest convention paragraph: orchestrators flatten to `{{skills_dir}}/<name>/SKILL.md`; sub-skills nest under `{{skills_dir}}/skills/<name>/SKILL.md`.
 - **FLN-v79-5: CS-MIG-1 hardcoded counts** require lockstep bumps whenever a cowork claude_surface[] entry is added (v0.79.0 bumped 36→37 / 45→46). Add a plan-template note or auto-derive.
 - **FLN-v79-6: `classifyGap` resolution heuristics are tight** — the v0.79.0 `RESOLVING_TOOL_SIGNALS` + `CONTENT_TOOL_SIGNALS` regex lists cover the two motivating cases (iMessage `search_contacts`, WhatsApp privacy-cap). Easy lift; expand as new MCPs surface.
+- **FLN-v81-1: semver-regex ceiling.** Three test files (`run-cowork-smoke.js`, `run-claude-surface.js`, `run-helper-cases.js`) had assertions `/^0\.(8|9|1\d)\.\d+$/` accepting only cowork versions 0.8.x-0.19.x. Bumping cowork to 0.20.0 broke them; widened inline at S7 to `/^0\.(8|9|[12]\d)\.\d+$/` (accepts up to 0.29.x). Future ceiling at 0.30.x — refactor to a version-comparison helper or compute from manifest.
+- **FLN-v81-2: M3 em-dash UX hardening.** `audit-siblings-helper.js`'s `ENTRY_RX` regex requires em-dash `—` (U+2014; matches `composeMicroscope`'s output) but this requirement is invisible to a user hand-editing `microscope.md`. Folded into SKILL.md prose at S4 as a hardening note. Future plan-template wisdom: when a parser depends on a non-obvious character (em-dash, NBSP, ZWJ), document it in the user-facing SKILL.md prose, not just helper code comments.
 
 ## Mechanisms (16)
 
@@ -92,7 +98,7 @@ Per-mechanism version history is in `Docs/cycle-history.md`. Current canonical c
 | Name | Version | Slash command | Module dir |
 | --- | --- | --- | --- |
 | `boards` | 0.2.1 | — | `spice/boards/` |
-| `cowork` | 0.19.0 | — | `spice/cowork/` |
+| `cowork` | 0.20.0 | — | `spice/cowork/` |
 | `daily` | 0.13.0 | `/daily` | `spice/daily/` |
 | `journal` | 0.2.0 | — | `spice/journal/` |
 | `meetings` | 0.6.0 | `/meetings` | `spice/meetings/` |
@@ -128,6 +134,8 @@ v0.79.0 added ~30 new sub-asserts distributed across run-cowork-smoke.js (28 —
 v0.80.0 added ~43 new sub-asserts in run-cowork-smoke.js (HC-V0800-A1..A3 / B1..B3 / C1..C6 / D1..D3 / E1) + 3 in run-install.js (HC-V0800-F1 mirrors v0.79.0 F1 scaffold with a non-microscope sibling sentinel `vip-list.md` under `chat` kind to prove preservation generality across per-mcp/**). No new harness files; file count stays at 23. No CS-MIG-1 count change (no new claude_surface[] entry — `composeSibling` + `composeMicroscope` extension are helper-only; orchestrator step 2c + edit-microscope SKILL.md step 4 expansion add no new dest). Cowork-smoke final tally: 651 passed / 0 failed.
 
 v0.80.1 added 4 new sub-asserts in run-install.js (HC-V0801-A1 install.js CLI handler — no-args usage hint + real --vault invocation + sentinel-written verification + tightened exit-code-2 pinning, via subprocess spawn against a consumer-bootstrap-shape synthetic fixture). No new cowork-smoke cases; 1 logical relaxation on HC-V0800-A1 (FLN-v80-1 closure; sub-assert count unchanged). No new harness files; file count stays at 23. No CS-MIG-1 count change. Cowork-smoke final tally: 655 passed / 0 failed (+4 from somewhere in the suite during S2/S3 — see harness output); install-harness +4 sub-asserts.
+
+v0.81.0 added ~26 new sub-asserts in run-cowork-smoke.js (HC-V0810-A1..A4 / B1..B6 / C1) + 1 in run-claude-surface.js (CS-MIG-1 count bump for the new audit-siblings claude_surface entry; 37→38 skill entries / 46→47 total contributions). No new harness files; file count stays at 23. New orchestrator-tier skill + helper materialize into `.claude/skills/cowork/audit-siblings/SKILL.md`. Cowork-smoke final tally: ~688 passed / 0 failed.
 
 Per-cycle sub-assert deltas are in `Docs/cycle-history.md`. Run via `npm run release:preflight` (gated first on `scripts/check-version-sync.js` per v0.38.0).
 
