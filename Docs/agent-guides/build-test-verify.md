@@ -85,6 +85,16 @@ Every cycle close MUST produce (canonical list from `Docs/prompts/SESSION-START.
 3. The installer is failure-loud: every error appears in `platform-installed.json`'s history and the console. Don't suppress; investigate.
 4. Common traps (see landmines for full detail): malformed JSON in `.obsidian/` allowlisted paths · mid-substitution literal `{{...}}` that escaped substitution · cross-blueprint write into another module's `module_directory` · `customjs.X` constructor-vs-singleton confusion.
 
+## Writing HC cases
+
+When authoring a new harness case that calls `gather-from-served-by-helper.js`'s `gatherFromServedBy({ ..., dry_run_answers })`:
+
+- The `dry_run_answers.agent_markdown` field MUST be **≥ 80 characters**. The helper's `md.length < 80` floor is a structural guard against accidentally-empty agent outputs — fixtures under that floor return `failed:bad-output` even when every other field is well-formed.
+- The markdown MUST start with `> [!example]+ <kind_title>\n` (per the helper's prefix check).
+- Plausible-looking 4-line fixtures (`> [!example]+ <kind>\n> - bullet one\n> - bullet two\n> - bullet three`) can land under 80 chars depending on bullet lengths — count carefully. Adding one more grounded bullet (`> - <fourth grounded line>`) is the canonical fix and typically pushes the body to ~100-110 chars.
+
+This caveat surfaced as FLN-v79-3 during the v0.79.0 cycle (HC-V0790-B3 / D1 fixtures were initially 78 chars; padded to 106). Apply this rule when writing any new HC case that exercises `gatherFromServedBy`.
+
 ## Anti-patterns (see `Docs/prompts/SESSION-START.md` for the canonical list)
 
 - Don't pre-emptively bump versions before the cycle closes.

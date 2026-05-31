@@ -60,6 +60,15 @@ Three markered surfaces exist in the workshop's `CLAUDE.md`: `resolvers`, `direc
 
 The platform-claude mechanism also materializes `/install`, `/upgrade`, `/bootstrap`, `/audit` slash commands into each consumer's `.claude/commands/`.
 
+### Orchestrator vs sub-skill dest convention
+
+When a cowork (or any blueprint) `claude_surface[]` entry declares a skill, the dest path depends on whether the skill is an **orchestrator** (top-level workflow with a `/<command>` slash command) or a **sub-skill** (helper invoked from an orchestrator's Steps section):
+
+- **Orchestrators** flatten to `{{skills_dir}}/<name>/SKILL.md`. Example: `morning-briefing/SKILL.md`, `edit-microscope/SKILL.md`.
+- **Sub-skills** nest under `{{skills_dir}}/skills/<name>/SKILL.md`. Example: `skills/gather-from-served-by/SKILL.md`, `skills/check-vault-routing/SKILL.md`.
+
+This convention is enforced by the cowork manifest's `claude_surface[]` entries; new skill additions should mirror the existing pattern (re-read a similar entry before writing a new one). Surfaced as FLN-v79-4 during the v0.79.0 cycle when the plan template's default dest used the nested form for an orchestrator.
+
 ## Read these next
 
 - New mechanism or blueprint? → `Docs/how.md` § Adding a contribution + `Docs/landmines.md`.
