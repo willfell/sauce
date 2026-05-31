@@ -353,6 +353,12 @@ Docs/plans/2026-05-30-v0.80.0-handoff.md
 
 This cohort summary (the linear thread):
 Docs/plans/2026-05-30-cowork-cohort-summary-and-headspace-onboarding.md   ← this file
+
+Night plan (tonight's 3-session execution roadmap):
+Docs/plans/2026-05-30-night-plan-design.md
+
+Tomorrow's headspace test plan (the user-facing entry point for the morning test):
+Docs/plans/2026-05-30-headspace-test-plan.md
 ```
 
 ### Key code locations
