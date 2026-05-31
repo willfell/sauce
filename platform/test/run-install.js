@@ -1036,6 +1036,72 @@ async function caseV0800F1SiblingPreserved() {
     }
 }
 
+// HC-V0801-A1 — `node platform/install.js` runs as a CLI script (not silently no-op).
+//
+// FLN-v79-2 closure: prior to v0.80.1, install.js exported `async function(tp)`
+// for Templater and silently ignored shell flags when invoked as
+// `node platform/install.js --vault . --auto-approve`. v0.80.1 adds a CLI
+// handler that detects require.main === module and delegates to run-install.js
+// via subprocess. This case verifies both shapes:
+//   (a) `node install.js` with no args → exit 2 + stderr mentions "vault"
+//   (b) `node install.js --vault <tmp> --auto-approve` → exit 0 + sentinel file written
+async function caseV0801A1InstallJsCliHandler() {
+    const label = "HC-V0801-A1 install.js has CLI handler (delegates to run-install.js)";
+    const { spawnSync } = require("child_process");
+    const installJs = path.join(__dirname, "..", "install.js");
+
+    // (a) No-args invocation must exit with code 2 (S2's CLI handler uses
+    // process.exit(2) for missing/unknown flags; pinning the code catches
+    // future refactors that return a different non-zero status).
+    const noArgs = spawnSync(process.execPath, [installJs], { encoding: "utf8" });
+    assertTrue(noArgs.status === 2, `${label} (no-args: expected exit 2, got ${noArgs.status})`);
+    assertTrue(/vault|usage/i.test((noArgs.stderr || "") + (noArgs.stdout || "")),
+        `${label} (no-args: expected 'vault' or 'usage' in output, got stderr=${JSON.stringify(noArgs.stderr || "")} stdout=${JSON.stringify(noArgs.stdout || "")})`);
+
+    // (b) Real --vault invocation against a synthetic workshop-shaped fixture.
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-installjs-cli-"));
+    try {
+        const workshopDir = path.join(tmp, "workshop");
+        const bpDir = path.join(workshopDir, "platform", "blueprints", "cli01");
+        fs.mkdirSync(path.join(bpDir, "content"), { recursive: true });
+        fs.writeFileSync(path.join(bpDir, "content", "hub.md"), "---\nseed: true\n---\n\nHUB CONTENT\n");
+        fs.writeFileSync(
+            path.join(bpDir, "manifest.json"),
+            JSON.stringify({
+                name: "cli01", version: "0.1.0", kind: "blueprint", module_directory: "cli01",
+                files: [{ source: "content/hub.md", dest: "{{module_directory}}/hub.md" }],
+            }, null, 2),
+        );
+        fs.writeFileSync(
+            path.join(workshopDir, "platform", "manifest.json"),
+            JSON.stringify({
+                workshop_version: "0.80.1",
+                mechanisms: [],
+                blueprints: [{ name: "cli01", version: "0.1.0", path: "blueprints/cli01" }],
+            }, null, 2),
+        );
+
+        const vaultDir = path.join(tmp, "vault");
+        fs.mkdirSync(path.join(vaultDir, "ranch"), { recursive: true });
+        fs.writeFileSync(path.join(vaultDir, "ranch", "platform-installed.json"),
+            JSON.stringify({ workshop_version: null, blueprints: [], mechanisms: [], history: [] }, null, 2));
+        fs.writeFileSync(path.join(vaultDir, "ranch", "platform-subscription.json"),
+            JSON.stringify({ workshop_version: "0.80.1", mechanisms: [], blueprints: [{ name: "cli01", version: "0.1.0" }] }, null, 2));
+        fs.writeFileSync(path.join(vaultDir, "ranch", "platform-config.json"),
+            JSON.stringify({ workshop_path: workshopDir, variables: {} }, null, 2));
+
+        const realCli = spawnSync(process.execPath, [installJs, "--vault", vaultDir, "--auto-approve"], { encoding: "utf8" });
+        assertTrue(realCli.status === 0,
+            `${label} (--vault invocation: expected exit 0, got ${realCli.status}; stderr=${JSON.stringify((realCli.stderr || "").slice(0, 500))})`);
+
+        const sentinelAbs = path.join(vaultDir, "spice", "cli01", "hub.md");
+        assertTrue(fs.existsSync(sentinelAbs),
+            `${label} (--vault invocation: expected sentinel file at ${sentinelAbs} after install)`);
+    } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+    }
+}
+
 // ----- unit-test runner (no-positional-arg mode) ----------------------------
 
 async function runUnitTests() {
@@ -1046,6 +1112,7 @@ async function runUnitTests() {
         caseV0760E1MaterializeOnceForUserPreferences,
         caseV0790F1PerMcpMicroscopePreserved,
         caseV0800F1SiblingPreserved,
+        caseV0801A1InstallJsCliHandler,
     ];
     for (const c of cases) {
         try { await c(); }
