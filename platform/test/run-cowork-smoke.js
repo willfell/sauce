@@ -3367,6 +3367,22 @@ function assertCoworkV068Shape() {
     }
 }
 
+// HC-V0811-A1: /cowork slash body documents audit-siblings sub-command
+{
+    const label = "HC-V0811-A1 /cowork slash body documents audit-siblings sub-command (v0.81.1)";
+    try {
+        const cmdPath = path.join(BP, "commands", "cowork.md");
+        assertTrue(fs.existsSync(cmdPath), `${label}: expected slash command at ${cmdPath}`);
+        const body = fs.readFileSync(cmdPath, "utf8");
+        assertTrue(/##\s+\/cowork audit-siblings/i.test(body),
+            `${label}: expected '## /cowork audit-siblings' section header in slash body`);
+        assertTrue(/cowork:audit-siblings/.test(body),
+            `${label}: expected reference to 'cowork:audit-siblings' skill name in slash body`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
 (function main() {
   console.log("--- shared contracts ---");
   checkSharedContracts();
