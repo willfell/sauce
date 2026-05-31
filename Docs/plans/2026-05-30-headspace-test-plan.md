@@ -241,6 +241,40 @@ The second rule is redundant with `no_emojis: true` (which composes to a canonic
 
 ---
 
+## Step 7 — Audit your sibling files for consistency (NEW v0.81.0)
+
+**Why:** v0.81.0 shipped `cowork:audit-siblings`, a pure read-only check that surfaces (a) `microscope.md` `## References` entries naming sibling files that don't exist on disk and (b) sibling files in `per-mcp/<kind>/` that aren't named in `microscope.md`. Run this after every authoring round to catch typos + drift before they silently degrade your briefings.
+
+**Action:**
+
+1. In a Claude Code session inside the headspace vault, run:
+   ```
+   /cowork audit-siblings
+   ```
+   (Add `<kind>` as an argument to scope to a single kind, e.g. `/cowork audit-siblings chat`.)
+
+2. The skill walks 5 steps: read preferences → resolve scope → list per-mcp dirs + read each microscope.md → call `auditSiblings()` → render findings as Obsidian callouts.
+
+**Expected outcome:**
+
+- If everything is consistent after Steps 2-5, the audit emits a single `[!success]` callout: `Audited <N> kind(s) — no dangling references, no orphan files.`
+- If a microscope.md's `## References` names a sibling that doesn't exist on disk, you get a `[!warning] Dangling sibling reference` per finding. Fix by either re-running `/cowork microscope <kind>` (scaffolds the file) or by hand-editing `microscope.md` to remove the dangling line.
+- If a sibling exists on disk but isn't named in `microscope.md`'s `## References`, you get a `[!info] Orphan sibling file` per finding. The gather still injects orphans (siblings are glob-discovered), but `microscope.md` should document why each sibling exists. Fix by re-running `/cowork microscope <kind>` (records a reference) or hand-adding a `- **<name>** — <role>` line.
+
+**What to do if it's wrong:**
+
+- **Audit silently flags a sibling as orphan even though microscope.md references it:** check that the `## References` bullet uses an em-dash (`—`, U+2014) between `**<name>**` and the role description. If you hand-edited the bullet with a hyphen (`-`) or en-dash (`–`), the parser skips it and the file appears as an orphan. Use em-dash.
+- **`/cowork audit-siblings` says "Kind X is not in your prefs.priorities":** check that the kind name you passed matches what's in `user-preferences.md` `priorities:`. Common typo: `chats` vs `chat`.
+- **No callouts emitted at all:** likely a fresh vault with no kinds authored yet — Steps 2-5 must run first. Audit on an empty per-mcp/ tree is a no-op.
+
+**When to re-run:**
+
+- After every `/cowork microscope <kind>` round (especially after the user-supplied gap path scaffolds new siblings).
+- After hand-editing any sibling file (renamed, deleted, added).
+- Periodically before a high-stakes morning briefing as a sanity check.
+
+---
+
 ## Captured feedback to feed back into the next cycle
 
 After Step 6, capture:
@@ -284,12 +318,13 @@ Drop directly under the `personality:` block in `spice/cowork/context/user-prefe
 
 ## End-of-test checkpoint
 
-When you finish Step 6, the headspace vault should have:
+When you finish Step 7, the headspace vault should have:
 
 - ✅ FLN-v79-1 visual gate cleared (distinct callout colors).
 - ✅ `personality.no_emojis: true` + `personality.hard_rules: [...]` in user-preferences.md.
 - ✅ `spice/cowork/prompts/per-mcp/` directory created with 2-4 `<kind>/microscope.md` files + 0-4 sibling files.
 - ✅ A fresh morning-briefing rendered with deeper finance + name-resolved chat + VIP-elevated email + distinct callout colors.
+- ✅ `/cowork audit-siblings` reports `[!success]` clean state (or all flagged issues hand-resolved).
 - ✅ The delta table filled in, captured to `Docs/plans/2026-05-31-headspace-test-results.md` (in the workshop, not the vault).
 
 That's the success criteria for tomorrow.
