@@ -81,6 +81,16 @@ two ways: structurally by the extended `HC-V0760-A1` `FOCUSED_USER_PATHS`
 `platform/test/run-install.js` (a synthetic install→reinstall proving a
 not-in-`files[]` per-mcp file survives byte-identical with no `.bak`).
 
+**v0.81.0 — `audit-siblings` read-only audit skill.** The new
+`cowork:audit-siblings` orchestrator (`.claude/skills/cowork/audit-siblings/SKILL.md`)
+is pure SAUCE-OWNED: it is a `claude_surface[]`-managed STOCK skill body covered
+by the generic `.claude/skills/cowork/**/SKILL.md` row in the STOCK table above.
+It performs a read-only audit of `spice/cowork/prompts/per-mcp/<kind>/` sibling
+files against `microscope.md`'s `## References` section — it never writes to the
+per-mcp directory. The per-mcp dir contents it reads remain USER-owned per the
+v0.79.0 boundary above. No boundary-contract impact (no new USER paths, no new
+preservation mechanisms).
+
 A future variant: `check-customization-preservation` harness that diffs
 expected-stock vs expected-user file lists against the cowork manifest
 to catch silent drift. Deferred from v0.76.0.

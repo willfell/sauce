@@ -6877,7 +6877,7 @@ async function caseFA5CoworkManifest() {
   console.log("\n--- Case FA5-MANIFEST: cowork bumped to 0.8.0 ---");
   const m = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/cowork/manifest.json"), "utf8"));
-  assertTrue("FA5-MANIFEST-1: cowork version >= 0.8.0", /^0\.(8|9|1\d)\.\d+$/.test(m.version),
+  assertTrue("FA5-MANIFEST-1: cowork version >= 0.8.0", /^0\.(8|9|[12]\d)\.\d+$/.test(m.version),
     `got: ${m.version}`);
 }
 

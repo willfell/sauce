@@ -432,7 +432,7 @@ function assertCoworkV045Shape() {
 
   // --- Manifest version + depends_on ---
   const m = loadManifest();
-  assertTrue(/^0\.(8|9|1\d)\.\d+$/.test(m.version), `v0.57.0: cowork manifest version >= 0.8.0 (got ${m.version})`);
+  assertTrue(/^0\.(8|9|[12]\d)\.\d+$/.test(m.version), `v0.57.0: cowork manifest version >= 0.8.0 (got ${m.version})`);
   const hasAccentDep = (m.depends_on || []).some(d => d.name === "accent-button");
   assertTrue(hasAccentDep, "v0.45.0: cowork depends_on accent-button");
 }
@@ -835,9 +835,9 @@ function assertCoworkV068Shape() {
   assertTrue(fileSources.includes("helpers/cowork-latest-runs.js"),
     "V068-MANIFEST-FILES: manifest files[] declares helpers/cowork-latest-runs.js");
 
-  // V0750-VERSION: cowork blueprint version bumped to 0.19.0 (was 0.18.0 in v0.79.0; v0.80.0 cowork-sibling-files MINOR for per-kind sibling-file convention).
-  assertTrue(manifest.version === "0.19.0",
-    `V0750-VERSION: cowork manifest.version === "0.19.0" (got ${JSON.stringify(manifest.version)})`);
+  // V0750-VERSION: cowork blueprint version bumped to 0.20.0 (was 0.19.0 in v0.80.x; v0.81.0 cowork-audit-siblings MINOR for new read-only audit skill).
+  assertTrue(manifest.version === "0.20.0",
+    `V0750-VERSION: cowork manifest.version === "0.20.0" (got ${JSON.stringify(manifest.version)})`);
 }
 
 // ---------------------------------------------------------------------------
