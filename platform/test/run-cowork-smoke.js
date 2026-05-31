@@ -3345,6 +3345,28 @@ function assertCoworkV068Shape() {
     }
 }
 
+// HC-V0810-C1: audit-siblings/SKILL.md exists at orchestrator-tier dest + declares the expected steps
+{
+    const label = "HC-V0810-C1 audit-siblings/SKILL.md exists + declares References parsing + callout shapes";
+    try {
+        const skillPath = path.join(BP, "skills/orchestrators/audit-siblings/SKILL.md");
+        assertTrue(fs.existsSync(skillPath), `${label}: expected SKILL.md at ${skillPath}`);
+        const skill = fs.readFileSync(skillPath, "utf8");
+        assertTrue(/name:\s*cowork:audit-siblings/.test(skill),
+            `${label}: expected 'name: cowork:audit-siblings' in frontmatter`);
+        assertTrue(/##\s*References/i.test(skill),
+            `${label}: expected mention of '## References' parsing in SKILL.md prose`);
+        assertTrue(/\[!warning\].*Dangling|Dangling.*\[!warning\]/i.test(skill),
+            `${label}: expected [!warning] callout for dangling references`);
+        assertTrue(/\[!info\].*Orphan|Orphan.*\[!info\]/i.test(skill),
+            `${label}: expected [!info] callout for orphan siblings`);
+        assertTrue(/auditSiblings/.test(skill),
+            `${label}: expected reference to auditSiblings helper`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
 (function main() {
   console.log("--- shared contracts ---");
   checkSharedContracts();
