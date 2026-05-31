@@ -3150,6 +3150,201 @@ function assertCoworkV068Shape() {
     }
 }
 
+// =====================================================================
+// v0.81.0 Workstream — audit-siblings-helper.js (parseReferences + auditSiblings)
+// =====================================================================
+
+// HC-V0810-A1: parseReferences extracts names from a seed-pass ## References block
+{
+    const label = "HC-V0810-A1 parseReferences: seed-pass References with 2 entries";
+    try {
+        const h = require(path.join(BP, "helpers", "audit-siblings-helper.js"));
+        const body = [
+            "## What matters",
+            "Inner-circle threads today.",
+            "",
+            "## References",
+            "- **contacts-map.md** — resolve sender phone numbers",
+            "- **vip-list.md** — elevate inner-circle senders",
+            "",
+        ].join("\n");
+        const out = h.parseReferences(body);
+        assertTrue(Array.isArray(out) && out.length === 2, `${label}: expected length 2, got ${JSON.stringify(out)}`);
+        assertTrue(out[0] === "contacts-map.md", `${label}: expected first=contacts-map.md, got ${out[0]}`);
+        assertTrue(out[1] === "vip-list.md", `${label}: expected second=vip-list.md, got ${out[1]}`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0810-A2: parseReferences returns [] when no References section
+{
+    const label = "HC-V0810-A2 parseReferences: no References section → []";
+    try {
+        const h = require(path.join(BP, "helpers", "audit-siblings-helper.js"));
+        const body = "## What matters\nJust some content, no References block.\n";
+        const out = h.parseReferences(body);
+        assertTrue(Array.isArray(out) && out.length === 0, `${label}: expected [], got ${JSON.stringify(out)}`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0810-A3: parseReferences handles deepen-pass `## References (added)` header
+{
+    const label = "HC-V0810-A3 parseReferences: deepen-pass `## References (added)` recognized";
+    try {
+        const h = require(path.join(BP, "helpers", "audit-siblings-helper.js"));
+        const body = [
+            "## What matters",
+            "Prior content.",
+            "",
+            "## References (added)",
+            "- **contacts-map.md** — resolve sender numbers",
+            "",
+        ].join("\n");
+        const out = h.parseReferences(body);
+        assertTrue(out.length === 1 && out[0] === "contacts-map.md", `${label}: expected [contacts-map.md], got ${JSON.stringify(out)}`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0810-A4: parseReferences dedupes across seed + deepen-pass blocks
+{
+    const label = "HC-V0810-A4 parseReferences: dedupe across seed + deepen blocks";
+    try {
+        const h = require(path.join(BP, "helpers", "audit-siblings-helper.js"));
+        const body = [
+            "## References",
+            "- **contacts-map.md** — initial role",
+            "- **vip-list.md** — initial role",
+            "",
+            "## Output shape",
+            "Bulleted, grounded.",
+            "",
+            "## References (added)",
+            "- **contacts-map.md** — refined role",
+            "- **senders-map.md** — new in deepen pass",
+            "",
+        ].join("\n");
+        const out = h.parseReferences(body);
+        assertTrue(out.length === 3, `${label}: expected length 3 (deduped), got ${out.length}: ${JSON.stringify(out)}`);
+        assertTrue(out.includes("contacts-map.md") && out.includes("vip-list.md") && out.includes("senders-map.md"),
+            `${label}: expected all 3 names present, got ${JSON.stringify(out)}`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0810-B1: auditSiblings flags dangling references
+{
+    const label = "HC-V0810-B1 auditSiblings: dangling reference flagged";
+    try {
+        const h = require(path.join(BP, "helpers", "audit-siblings-helper.js"));
+        const out = h.auditSiblings({
+            kinds_dir_listing: { chat: [] },
+            microscope_bodies: { chat: "## References\n- **vip-list.md** — elevate inner-circle\n" },
+        });
+        assertTrue(out.dangling.length === 1, `${label}: expected 1 dangling, got ${out.dangling.length}: ${JSON.stringify(out.dangling)}`);
+        assertTrue(out.dangling[0].kind === "chat" && out.dangling[0].name === "vip-list.md",
+            `${label}: expected {kind:chat, name:vip-list.md}, got ${JSON.stringify(out.dangling[0])}`);
+        assertTrue(out.orphans.length === 0, `${label}: expected 0 orphans, got ${JSON.stringify(out.orphans)}`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0810-B2: auditSiblings flags orphan files
+{
+    const label = "HC-V0810-B2 auditSiblings: orphan file flagged";
+    try {
+        const h = require(path.join(BP, "helpers", "audit-siblings-helper.js"));
+        const out = h.auditSiblings({
+            kinds_dir_listing: { chat: ["vip-list.md"] },
+            microscope_bodies: { chat: "## What matters\nThings.\n" },
+        });
+        assertTrue(out.dangling.length === 0, `${label}: expected 0 dangling, got ${JSON.stringify(out.dangling)}`);
+        assertTrue(out.orphans.length === 1, `${label}: expected 1 orphan, got ${out.orphans.length}: ${JSON.stringify(out.orphans)}`);
+        assertTrue(out.orphans[0].kind === "chat" && out.orphans[0].name === "vip-list.md",
+            `${label}: expected {kind:chat, name:vip-list.md}, got ${JSON.stringify(out.orphans[0])}`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0810-B3: auditSiblings returns clean state when consistent
+{
+    const label = "HC-V0810-B3 auditSiblings: clean state (consistent)";
+    try {
+        const h = require(path.join(BP, "helpers", "audit-siblings-helper.js"));
+        const out = h.auditSiblings({
+            kinds_dir_listing: { chat: ["contacts-map.md", "vip-list.md"] },
+            microscope_bodies: { chat: "## References\n- **contacts-map.md** — resolve numbers\n- **vip-list.md** — elevate\n" },
+        });
+        assertTrue(out.dangling.length === 0 && out.orphans.length === 0,
+            `${label}: expected 0/0, got dangling=${JSON.stringify(out.dangling)} orphans=${JSON.stringify(out.orphans)}`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0810-B4: auditSiblings flags all siblings as orphans when no microscope exists
+{
+    const label = "HC-V0810-B4 auditSiblings: no microscope + siblings → all orphans";
+    try {
+        const h = require(path.join(BP, "helpers", "audit-siblings-helper.js"));
+        const out = h.auditSiblings({
+            kinds_dir_listing: { finance: ["account-aliases.md", "vendor-aliases.md"] },
+            microscope_bodies: {},
+        });
+        assertTrue(out.dangling.length === 0, `${label}: expected 0 dangling, got ${JSON.stringify(out.dangling)}`);
+        assertTrue(out.orphans.length === 2, `${label}: expected 2 orphans, got ${out.orphans.length}`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0810-B5: auditSiblings is a no-op when microscope exists + no siblings
+{
+    const label = "HC-V0810-B5 auditSiblings: microscope + no siblings → 0/0";
+    try {
+        const h = require(path.join(BP, "helpers", "audit-siblings-helper.js"));
+        const out = h.auditSiblings({
+            kinds_dir_listing: { chat: [] },
+            microscope_bodies: { chat: "## What matters\nThings.\n" },
+        });
+        assertTrue(out.dangling.length === 0 && out.orphans.length === 0,
+            `${label}: expected 0/0, got ${JSON.stringify(out)}`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0810-B6: auditSiblings output is deterministically sorted by (kind, name)
+{
+    const label = "HC-V0810-B6 auditSiblings: output sorted by (kind, name)";
+    try {
+        const h = require(path.join(BP, "helpers", "audit-siblings-helper.js"));
+        const out = h.auditSiblings({
+            kinds_dir_listing: {
+                finance: ["zeta.md", "alpha.md"],
+                chat: ["gamma.md"],
+            },
+            microscope_bodies: {},
+        });
+        assertTrue(out.orphans.length === 3, `${label}: expected 3 orphans, got ${out.orphans.length}`);
+        assertTrue(out.orphans[0].kind === "chat" && out.orphans[0].name === "gamma.md",
+            `${label}: expected first chat/gamma.md, got ${JSON.stringify(out.orphans[0])}`);
+        assertTrue(out.orphans[1].kind === "finance" && out.orphans[1].name === "alpha.md",
+            `${label}: expected second finance/alpha.md, got ${JSON.stringify(out.orphans[1])}`);
+        assertTrue(out.orphans[2].kind === "finance" && out.orphans[2].name === "zeta.md",
+            `${label}: expected third finance/zeta.md, got ${JSON.stringify(out.orphans[2])}`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
 (function main() {
   console.log("--- shared contracts ---");
   checkSharedContracts();
