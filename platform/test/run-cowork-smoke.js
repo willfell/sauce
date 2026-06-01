@@ -3383,6 +3383,262 @@ function assertCoworkV068Shape() {
     }
 }
 
+// =====================================================================
+// v0.82.0 Workstream A — per-kind callout_type resolution
+// =====================================================================
+
+// HC-V0820-A1: read-user-preferences-helper parses explicit callout_type override
+{
+    const label = "HC-V0820-A1 read-user-preferences-helper: explicit callout_type override parsed";
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "v0820-a1-"));
+    try {
+        const ctxDir = path.join(tmpDir, "spice/cowork/context");
+        fs.mkdirSync(ctxDir, { recursive: true });
+        const populated = [
+            "---",
+            "type: cowork-user-preferences",
+            "updated: 2026-06-01",
+            "updated_by: cowork:context-builder",
+            "priorities:",
+            "  - chat",
+            "  - finance",
+            "personality:",
+            "  vibe: casual",
+            "  formality: casual",
+            "  pep_talk: false",
+            "  length: balanced",
+            "mcps:",
+            "  chat:",
+            "    served_by: \"test\"",
+            "    callout_type: warning",
+            "    connected: true",
+            "  finance:",
+            "    served_by: \"copilot-money\"",
+            "    connected: true",
+            "---",
+            "",
+            "# user-preferences",
+        ].join("\n");
+        fs.writeFileSync(path.join(ctxDir, "user-preferences.md"), populated, "utf8");
+        const h = require(path.join(BP, "helpers", "read-user-preferences-helper.js"));
+        const out = h.readUserPreferences({ vaultRoot: tmpDir });
+        assertTrue(out.status === "ok", `${label}: expected status=ok, got ${out.status} (${out.reason || ""})`);
+        assertTrue(out.prefs && out.prefs.mcps && out.prefs.mcps.chat && out.prefs.mcps.chat.callout_type === "warning",
+            `${label}: expected chat.callout_type=warning (explicit), got ${JSON.stringify(out.prefs && out.prefs.mcps && out.prefs.mcps.chat)}`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    } finally {
+        try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
+    }
+}
+
+// HC-V0820-A2: default mapping applied when callout_type absent
+{
+    const label = "HC-V0820-A2 read-user-preferences-helper: default callout_type mapping per kind";
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "v0820-a2-"));
+    try {
+        const ctxDir = path.join(tmpDir, "spice/cowork/context");
+        fs.mkdirSync(ctxDir, { recursive: true });
+        const populated = [
+            "---",
+            "type: cowork-user-preferences",
+            "updated: 2026-06-01",
+            "updated_by: cowork:context-builder",
+            "priorities:",
+            "  - chat",
+            "  - finance",
+            "  - calendar",
+            "  - email",
+            "  - ado",
+            "  - github",
+            "personality:",
+            "  vibe: casual",
+            "mcps:",
+            "  chat:",
+            "    served_by: \"a\"",
+            "    connected: true",
+            "  finance:",
+            "    served_by: \"b\"",
+            "    connected: true",
+            "  calendar:",
+            "    served_by: \"c\"",
+            "    connected: true",
+            "  email:",
+            "    served_by: \"d\"",
+            "    connected: true",
+            "  ado:",
+            "    served_by: \"e\"",
+            "    connected: true",
+            "  github:",
+            "    served_by: \"f\"",
+            "    connected: true",
+            "---",
+            "",
+        ].join("\n");
+        fs.writeFileSync(path.join(ctxDir, "user-preferences.md"), populated, "utf8");
+        const h = require(path.join(BP, "helpers", "read-user-preferences-helper.js"));
+        const out = h.readUserPreferences({ vaultRoot: tmpDir });
+        assertTrue(out.status === "ok", `${label}: expected status=ok, got ${out.status} (${out.reason || ""})`);
+        assertTrue(out.prefs.mcps.chat.callout_type === "info",      `${label}: chat default expected info, got ${out.prefs.mcps.chat.callout_type}`);
+        assertTrue(out.prefs.mcps.finance.callout_type === "warning", `${label}: finance default expected warning, got ${out.prefs.mcps.finance.callout_type}`);
+        assertTrue(out.prefs.mcps.calendar.callout_type === "tip",   `${label}: calendar default expected tip, got ${out.prefs.mcps.calendar.callout_type}`);
+        assertTrue(out.prefs.mcps.email.callout_type === "quote",    `${label}: email default expected quote, got ${out.prefs.mcps.email.callout_type}`);
+        assertTrue(out.prefs.mcps.ado.callout_type === "example",    `${label}: ado default expected example, got ${out.prefs.mcps.ado.callout_type}`);
+        assertTrue(out.prefs.mcps.github.callout_type === "note",    `${label}: github default expected note, got ${out.prefs.mcps.github.callout_type}`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    } finally {
+        try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
+    }
+}
+
+// HC-V0820-A3: invalid callout_type falls back to default mapping
+{
+    const label = "HC-V0820-A3 read-user-preferences-helper: invalid callout_type → default";
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "v0820-a3-"));
+    try {
+        const ctxDir = path.join(tmpDir, "spice/cowork/context");
+        fs.mkdirSync(ctxDir, { recursive: true });
+        const populated = [
+            "---",
+            "type: cowork-user-preferences",
+            "updated: 2026-06-01",
+            "updated_by: cowork:context-builder",
+            "priorities:",
+            "  - chat",
+            "personality:",
+            "  vibe: casual",
+            "mcps:",
+            "  chat:",
+            "    served_by: \"a\"",
+            "    callout_type: bogus-not-a-real-type",
+            "    connected: true",
+            "---",
+            "",
+        ].join("\n");
+        fs.writeFileSync(path.join(ctxDir, "user-preferences.md"), populated, "utf8");
+        const h = require(path.join(BP, "helpers", "read-user-preferences-helper.js"));
+        const out = h.readUserPreferences({ vaultRoot: tmpDir });
+        assertTrue(out.status === "ok", `${label}: expected status=ok, got ${out.status} (${out.reason || ""})`);
+        // Invalid → falls back to default mapping for chat = info
+        assertTrue(out.prefs.mcps.chat.callout_type === "info",
+            `${label}: invalid type should fall back to default 'info' for chat, got ${out.prefs.mcps.chat.callout_type}`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    } finally {
+        try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
+    }
+}
+
+// HC-V0820-A4: unknown kind → falls back to "example"
+{
+    const label = "HC-V0820-A4 read-user-preferences-helper: unknown kind → 'example'";
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "v0820-a4-"));
+    try {
+        const ctxDir = path.join(tmpDir, "spice/cowork/context");
+        fs.mkdirSync(ctxDir, { recursive: true });
+        const populated = [
+            "---",
+            "type: cowork-user-preferences",
+            "updated: 2026-06-01",
+            "updated_by: cowork:context-builder",
+            "priorities:",
+            "  - my-custom-kind",
+            "personality:",
+            "  vibe: casual",
+            "mcps:",
+            "  my-custom-kind:",
+            "    served_by: \"x\"",
+            "    connected: true",
+            "---",
+            "",
+        ].join("\n");
+        fs.writeFileSync(path.join(ctxDir, "user-preferences.md"), populated, "utf8");
+        const h = require(path.join(BP, "helpers", "read-user-preferences-helper.js"));
+        const out = h.readUserPreferences({ vaultRoot: tmpDir });
+        assertTrue(out.status === "ok", `${label}: expected status=ok, got ${out.status} (${out.reason || ""})`);
+        assertTrue(out.prefs.mcps["my-custom-kind"].callout_type === "example",
+            `${label}: unknown kind should default to 'example', got ${out.prefs.mcps["my-custom-kind"].callout_type}`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    } finally {
+        try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
+    }
+}
+
+// HC-V0820-B1: gather-from-served-by accepts callout_type input + validates prefix
+{
+    const label = "HC-V0820-B1 gather-from-served-by: callout_type 'warning' → expects '[!warning]+ Finance'";
+    try {
+        const helper = require(path.join(BP, "helpers", "gather-from-served-by-helper.js"));
+        const result = helper.gatherFromServedBy({
+            kind_name: "finance", kind_title: "Finance", served_by: "copilot-money",
+            callout_type: "warning",
+            what_matters: "Daily spend.", question_set_answers: null,
+            hard_rules: [], siblings: [],
+            today: "2026-06-01", range: {start: "2026-06-01", end: "2026-06-01"}, timezone: "America/Denver",
+            dry_run_answers: {
+                available_tools: ["mcp__copilot-money__list_transactions"],
+                agent_markdown: "> [!warning]+ Finance\n> - Daily spend within threshold.\n> - Categories: food, transport.\n> - No category outliers today; rent posted; budget pace +1.2% YTD.",
+                tools_used: ["mcp__copilot-money__list_transactions"],
+            },
+        });
+        assertTrue(result.status === "ready", `${label}: expected ready, got ${result.status} (${result.reason||""})`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0820-B2: gather-from-served-by echoes callout_type_used on success
+{
+    const label = "HC-V0820-B2 gather-from-served-by returns callout_type_used";
+    try {
+        const helper = require(path.join(BP, "helpers", "gather-from-served-by-helper.js"));
+        const result = helper.gatherFromServedBy({
+            kind_name: "chat", kind_title: "Chat", served_by: "imsg",
+            callout_type: "info",
+            what_matters: "Messages.", question_set_answers: null,
+            hard_rules: [], siblings: [],
+            today: "2026-06-01", range: {start: "2026-06-01", end: "2026-06-01"}, timezone: "America/Denver",
+            dry_run_answers: {
+                available_tools: ["mcp__imsg__read_imessages"],
+                agent_markdown: "> [!info]+ Chat\n> - Alice: hello there, this is a long enough message for the floor.\n> - Bob: meeting confirmed.\n> - Carol: project update soon.",
+                tools_used: ["mcp__imsg__read_imessages"],
+            },
+        });
+        assertTrue(result.status === "ready", `${label}: expected ready, got ${result.status}`);
+        assertTrue(result.callout_type_used === "info",
+            `${label}: expected callout_type_used='info', got ${JSON.stringify(result.callout_type_used)}`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0820-B3: gather-from-served-by defaults to "example" when callout_type absent
+{
+    const label = "HC-V0820-B3 gather-from-served-by: missing callout_type → default 'example'";
+    try {
+        const helper = require(path.join(BP, "helpers", "gather-from-served-by-helper.js"));
+        const result = helper.gatherFromServedBy({
+            kind_name: "ado", kind_title: "Ado", served_by: "azure-devops",
+            // callout_type omitted intentionally
+            what_matters: "Board state.", question_set_answers: null,
+            hard_rules: [], siblings: [],
+            today: "2026-06-01", range: {start: "2026-06-01", end: "2026-06-01"}, timezone: "America/Denver",
+            dry_run_answers: {
+                available_tools: ["mcp__azure-devops__list_workitems"],
+                agent_markdown: "> [!example]+ Ado\n> - 705679 in progress.\n> - 707653 new today.\n> - Two blocked items aging.",
+                tools_used: ["mcp__azure-devops__list_workitems"],
+            },
+        });
+        assertTrue(result.status === "ready", `${label}: expected ready (default 'example' accepts [!example]+ prefix), got ${result.status}`);
+        assertTrue(result.callout_type_used === "example",
+            `${label}: expected callout_type_used='example' (default), got ${JSON.stringify(result.callout_type_used)}`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
 (function main() {
   console.log("--- shared contracts ---");
   checkSharedContracts();
