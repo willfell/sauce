@@ -27,7 +27,7 @@ None. Vault-relative file path is fixed: `spice/cowork/context/user-preferences.
     mcps: {
       <kind_name>: {
         served_by, what_matters, connected, captured_at,
-        custom_kind, override_classified,
+        custom_kind, override_classified, callout_type,
         ...kind-specific answer fields preserved verbatim
       }
     },
@@ -41,6 +41,23 @@ None. Vault-relative file path is fixed: `spice/cowork/context/user-preferences.
 When `status != "ok"`, `prefs` is `null` and the caller MUST treat as the legacy-fallback condition.
 
 `effective_hard_rules` = `personality.hard_rules` plus a canonical no-emoji rule when `personality.no_emojis: true`; consumers MUST apply these verbatim to narrative, gather dispatch, and skeleton.
+
+### Callout type per kind (v0.82.0)
+
+Each kind block in `mcps.<kind>` may include an optional `callout_type: <type>` field that determines the Obsidian callout type used when the orchestrator renders that kind's section in atomic notes. Valid values: `info`, `note`, `tip`, `success`, `warning`, `caution`, `example`, `quote`, `danger`.
+
+When absent or invalid, the helper falls back to a default per-kind mapping for visual differentiation:
+
+| Kind | Default callout type | Why |
+|---|---|---|
+| `chat` | `info` | Blue — conversational signals |
+| `finance` | `warning` | Amber — money matters |
+| `calendar` | `tip` | Green — anchors / conflicts |
+| `email` | `quote` | Gray — quiet / filtered |
+| `ado` | `example` | Purple — board state |
+| `github` | `note` | Sky blue — code state |
+
+Unknown kinds default to `example` (preserves pre-v0.82.0 behavior). The resolved `callout_type` is exposed at `prefs.mcps[<kind_name>].callout_type` for orchestrator passthrough into `cowork:gather-from-served-by`.
 
 ## Steps
 
@@ -60,7 +77,7 @@ When `status != "ok"`, `prefs` is `null` and the caller MUST treat as the legacy
    - `personality.{vibe, formality, pep_talk, length, notes}` default to `null` when absent.
    - `personality.no_emojis` defaults to `false` (coerce any non-`true` value to `false`); `personality.hard_rules` defaults to `[]` (coerce any non-array to `[]`).
    - Compose `effective_hard_rules` = `personality.hard_rules` (string entries, trimmed) plus the canonical no-emoji rule appended when `personality.no_emojis` is `true`. The canonical no-emoji rule is the fixed string: *"Do not use any emoji or pictographic characters anywhere in the output — not in section/callout titles, not in inline prose, not in table cells."* When neither is set, `effective_hard_rules` is `[]`.
-   - For each `mcps[<kind>]`: `connected` defaults to `false`, `custom_kind` defaults to `false`, `override_classified` defaults to `false`. Preserve every other field on the mcps entry verbatim (kind-specific answer fields like `vip_senders`, `surface_event_kinds`, `inner_circle`, `inner_circle_channels`, `what_matters` etc.).
+   - For each `mcps[<kind>]`: `connected` defaults to `false`, `custom_kind` defaults to `false`, `override_classified` defaults to `false`. `callout_type` is resolved per the per-kind table above (explicit override coerced to lowercase + validated against the 9 built-in types; default mapping when absent; `example` when both the kind is unknown and no explicit override is given). Preserve every other field on the mcps entry verbatim (kind-specific answer fields like `vip_senders`, `surface_event_kinds`, `inner_circle`, `inner_circle_channels`, `what_matters` etc.).
 
 8. **Return `{ prefs, status: "ok" }`.** Canonical shape per the Outputs section above.
 

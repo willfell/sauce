@@ -9,6 +9,7 @@ inputs:
   question_set_answers: object | null
   hard_rules: list[string]
   siblings: list[{name,body}]
+  callout_type: string
   today: string
   range: object
   timezone: string
@@ -17,6 +18,7 @@ outputs:
   status: string
   served_by_used: string
   tools_used: list[string]
+  callout_type_used: string
   reason: string | null
 tags: [cowork, gather, sub-skill, vendor-agnostic]
 ---
@@ -65,17 +67,17 @@ Generic gather for MCPs whose tool surface doesn't match a canonical vendor (Out
    <list of available_tools>
 
    **Output contract**:
-   Return ONE `> [!example]+ <kind_title>` markdown callout.
+   Return ONE `> [!<callout_type>]+ <kind_title>` markdown callout (where `<callout_type>` is the input field; defaults to `example` when absent or invalid).
    - Aim for ≤200 words.
-   - Bulleted lines preferred (no tables — cross-vendor portability).
-   - Honor what_matters as the gather contract.
+   - Render data in tables OR bullets, whichever gives the highest information density per vertical inch. Use tables for structured data with 3+ columns per item (IDs, timestamps, lanes, links); use bullets for narrative or single-axis lists. Mixed within one callout is fine (e.g., a table for items + bullet narrative for cross-item context).
+   - Honor what_matters as the gather contract — microscope `## Output shape` directives ALWAYS WIN over this default rendering guidance.
    - Window: <range.start> to <range.end> (timezone: <timezone>).
    ```
 
 4. **Execute the gather.** Invoke whatever tools from `available_tools[]` best satisfy what_matters within the range/timezone. Compose the markdown callout per the output contract.
 
 5. **Validate output.** The composed markdown MUST:
-   - Start with `> [!example]+ <kind_title>\n`.
+   - Start with `> [!<callout_type>]+ <kind_title>\n` (where `<callout_type>` is the resolved input field).
    - Contain no top-level triple-backticks (preserves callout integrity).
    - Be ≥ 80 characters (one-line "no data" callouts are acceptable; sub-minimum suggests truncation).
 
