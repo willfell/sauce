@@ -165,6 +165,7 @@ for entry in dispatch_plan:
       question_set_answers: entry.question_set_answers,
       hard_rules:           prefs.effective_hard_rules,
       siblings:             siblings[entry.kind_name] || [],
+      callout_type:         prefs.mcps[entry.kind_name].callout_type,
       today:                context.today,
       range:                { start: context.today, end: context.today + 2 days },
       timezone:             engagement.timezone || "America/Denver"
