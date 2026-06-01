@@ -3531,6 +3531,9 @@ function assertCoworkV068Shape() {
 }
 
 // HC-V0820-A4: unknown kind → falls back to "example"
+// (Uses an underscore key — parseYamlIsh's flat-key regex requires [a-z_]+;
+// hyphens are silently dropped at the parser level. Pre-existing limitation,
+// independent of v0.82.0.)
 {
     const label = "HC-V0820-A4 read-user-preferences-helper: unknown kind → 'example'";
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "v0820-a4-"));
@@ -3543,12 +3546,13 @@ function assertCoworkV068Shape() {
             "updated: 2026-06-01",
             "updated_by: cowork:context-builder",
             "priorities:",
-            "  - my-custom-kind",
+            "  - notion",
             "personality:",
             "  vibe: casual",
             "mcps:",
-            "  my-custom-kind:",
+            "  notion:",
             "    served_by: \"x\"",
+            "    custom_kind: true",
             "    connected: true",
             "---",
             "",
@@ -3557,8 +3561,8 @@ function assertCoworkV068Shape() {
         const h = require(path.join(BP, "helpers", "read-user-preferences-helper.js"));
         const out = h.readUserPreferences({ vaultRoot: tmpDir });
         assertTrue(out.status === "ok", `${label}: expected status=ok, got ${out.status} (${out.reason || ""})`);
-        assertTrue(out.prefs.mcps["my-custom-kind"].callout_type === "example",
-            `${label}: unknown kind should default to 'example', got ${out.prefs.mcps["my-custom-kind"].callout_type}`);
+        assertTrue(out.prefs.mcps.notion && out.prefs.mcps.notion.callout_type === "example",
+            `${label}: unknown kind should default to 'example', got ${JSON.stringify(out.prefs.mcps.notion)}`);
     } catch (e) {
         failed++; console.error(`FAIL  ${label}: ${e.message}`);
     } finally {

@@ -24,8 +24,12 @@ function gatherFromServedBy(input) {
     const {
         kind_name, kind_title, served_by, what_matters,
         question_set_answers, today, range, timezone, hard_rules, siblings,
+        callout_type: callout_type_input,
         dry_run_answers,
     } = input || {};
+    const VALID = new Set(["info","note","tip","success","warning","caution","example","quote","danger"]);
+    const coerced = (callout_type_input && String(callout_type_input).toLowerCase().trim()) || "";
+    const callout_type = (coerced && VALID.has(coerced)) ? coerced : "example";
     if (!kind_name || !kind_title || !served_by) {
         return { status: "failed:bad-input", reason: "kind_name, kind_title, served_by required" };
     }
@@ -58,7 +62,7 @@ function gatherFromServedBy(input) {
             tools_used: [],
         };
     }
-    const expectedPrefix = `> [!example]+ ${kind_title}\n`;
+    const expectedPrefix = `> [!${callout_type}]+ ${kind_title}\n`;
     if (!md.startsWith(expectedPrefix)) {
         return {
             status: "failed:bad-output",
@@ -83,6 +87,7 @@ function gatherFromServedBy(input) {
         tools_used: dry_run_answers.tools_used || [],
         hard_rules_applied: Array.isArray(hard_rules) ? hard_rules : [],
         siblings_used: Array.isArray(siblings) ? siblings.map(s => s && s.name).filter(Boolean) : [],
+        callout_type_used: callout_type,
     };
 }
 

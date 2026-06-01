@@ -30,6 +30,28 @@ function composeEffectiveHardRules({ no_emojis, hard_rules } = {}) {
     return no_emojis === true ? base.concat([CANONICAL_NO_EMOJI_RULE]) : base.slice();
 }
 
+// v0.82.0: default callout type per kind for visual differentiation across atomic notes.
+// Users can override per-kind via mcps.<kind>.callout_type in user-preferences.md.
+const DEFAULT_CALLOUT_TYPE_BY_KIND = {
+    chat: "info",          // blue — conversational signals
+    finance: "warning",    // amber — money matters
+    calendar: "tip",       // green — anchors / conflicts
+    email: "quote",        // gray — quiet / filtered
+    ado: "example",        // purple — board state
+    github: "note",        // sky blue — code state
+};
+
+const VALID_CALLOUT_TYPES = new Set([
+    "info", "note", "tip", "success", "warning", "caution", "example", "quote", "danger",
+]);
+
+function resolveCalloutType(kind_name, kind_block) {
+    const raw = (kind_block && kind_block.callout_type) || "";
+    const explicit = String(raw).toLowerCase().trim();
+    if (explicit && VALID_CALLOUT_TYPES.has(explicit)) return explicit;
+    return DEFAULT_CALLOUT_TYPE_BY_KIND[kind_name] || "example";
+}
+
 function readUserPreferences({ vaultRoot }) {
     if (!vaultRoot) {
         return { prefs: null, status: "malformed", reason: "vaultRoot required" };
@@ -91,6 +113,7 @@ function readUserPreferences({ vaultRoot }) {
             if (entry.connected === undefined) entry.connected = false;
             if (entry.custom_kind === undefined) entry.custom_kind = false;
             if (entry.override_classified === undefined) entry.override_classified = false;
+            entry.callout_type = resolveCalloutType(kind, entry);
         }
     }
 
@@ -103,5 +126,8 @@ function readUserPreferences({ vaultRoot }) {
 module.exports = {
     readUserPreferences,
     composeEffectiveHardRules,
+    resolveCalloutType,
+    DEFAULT_CALLOUT_TYPE_BY_KIND,
+    VALID_CALLOUT_TYPES,
     CANONICAL_NO_EMOJI_RULE,
 };
