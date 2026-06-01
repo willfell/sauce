@@ -14,9 +14,7 @@ tags: [cowork, gather, engagement-aware]
 
 # cowork:gather-imessage
 
-Surfaces inbound iMessage threads from the last `lookback_hours` where the user has NOT yet replied. Emits a `[!example]+ iMessages` callout. Because Anthropic does not currently ship a managed iMessage MCP server, this sub-skill operates in degraded mode by default and emits a warning callout - see Errors.
-
-# TODO(cycle): iMessage MCP integration TBD. Two known third-party variants exist (`mcp__Read_and_Send_iMessages__read_imessages` and `mcp__messages__tool_fuzzy_search_messages`) per the legacy headspace prompt; once one is bundled into the Sauce MCP layer, replace the warning-callout path in Steps + Errors with real tool calls. Until then this skill returns the unavailable callout in all cases.
+Surfaces inbound iMessage threads from the last `lookback_hours` where the user has NOT yet replied. Emits a `[!example]+ iMessages` callout. Preferred backend is the user-wired `apple-mcp` server (supermemoryai/apple-mcp); legacy third-party variants are still probed as a fallback. If no backend is connected the sub-skill operates in degraded mode and emits a warning callout - see Errors.
 
 ## Inputs
 
@@ -32,15 +30,17 @@ Surfaces inbound iMessage threads from the last `lookback_hours` where the user 
 
 ## Steps
 
-1. Detect whether an iMessage MCP is connected. Probe by name:
-   - `mcp__Read_and_Send_iMessages__read_imessages` (Variant A)
-   - `mcp__messages__tool_fuzzy_search_messages` (Variant B)
-2. **If neither available** (current default state): skip remaining steps and return the unavailable callout from Errors.
-3. **(Variant A path, when wired):** call `mcp__Read_and_Send_iMessages__read_imessages` once per inner-circle number with `since_hours: <window_days * 24>`. Aggregate inbound messages where the user has NOT sent a reply after the latest inbound.
-4. **(Variant B path, when wired):** call `mcp__messages__tool_fuzzy_search_messages` with a single query bounded to `since_hours: <window_days * 24>`; filter results to inbound-only and de-duplicate by chat handle. When `scope = "inner-circle"`, additionally filter to inner-circle handles only.
-5. For each unanswered thread build: `**[Contact display]** - [HH:MM] - [first 80 chars of message, ellipsis-truncated]`.
-6. Compose the callout per Returns. Empty list -> empty-case callout.
-7. Return the assembled string.
+1. Detect whether an iMessage MCP is connected. Probe by name, preferring apple-mcp:
+   - `mcp__apple-mcp__messages` (Variant C — preferred; supermemoryai/apple-mcp)
+   - `mcp__Read_and_Send_iMessages__read_imessages` (Variant A — legacy)
+   - `mcp__messages__tool_fuzzy_search_messages` (Variant B — legacy)
+2. **If none available**: skip remaining steps and return the unavailable callout from Errors.
+3. **(Variant C path — preferred):** call `mcp__apple-mcp__messages` with `operation: "unread"` and `limit: 25`. The tool returns inbound unread items with `displayName` already resolved from Contacts. Filter to the lookback window (`window_days * 24h`); when `scope = "inner-circle"`, additionally intersect against `inner_circle` handles. For deeper per-contact context, optionally follow up with `operation: "read"`, `phoneNumber: <e164>`, `limit: 5` per inner-circle number and keep only items where the latest message has `is_from_me: false`.
+4. **(Variant A path — legacy):** call `mcp__Read_and_Send_iMessages__read_imessages` once per inner-circle number with `since_hours: <window_days * 24>`. Aggregate inbound messages where the user has NOT sent a reply after the latest inbound.
+5. **(Variant B path — legacy):** call `mcp__messages__tool_fuzzy_search_messages` with a single query bounded to `since_hours: <window_days * 24>`; filter results to inbound-only and de-duplicate by chat handle. When `scope = "inner-circle"`, additionally filter to inner-circle handles only.
+6. For each unanswered thread build: `**[Contact display]** - [HH:MM] - [first 80 chars of message, ellipsis-truncated]`. Prefer `displayName` from apple-mcp when present; fall back to the E.164 handle.
+7. Compose the callout per Returns. Empty list -> empty-case callout.
+8. Return the assembled string.
 
 ## Returns
 
@@ -61,10 +61,10 @@ Empty case:
 
 ## Errors
 
-- **No iMessage MCP connected (current default):** return:
+- **No iMessage MCP connected** (e.g. remote / sandboxed runtime where `apple-mcp` is not wired): return:
   ```markdown
   > [!warning]+ iMessage unavailable
-  > No iMessage MCP server connected. See cowork:gather-imessage TODO for integration status.
+  > No iMessage MCP server connected on this host.
   ```
 - **MCP tool call fails / returns malformed payload:** return:
   ```markdown
@@ -77,12 +77,14 @@ Empty case:
 
 This skill can pull iMessage data from any of the following MCPs, in priority order:
 
-1. **Apple iMessage** — `mcp__claude_ai_iMessage__*` or equivalent (when wired by the user; macOS-host-bound).
+1. **apple-mcp** (supermemoryai/apple-mcp) — `mcp__apple-mcp__messages` with `operation: "unread" | "read"`. Preferred. Bundles Contacts so `displayName` is resolved automatically.
+2. **Legacy Read_and_Send_iMessages** — `mcp__Read_and_Send_iMessages__read_imessages` (per-number).
+3. **Legacy fuzzy messages** — `mcp__messages__tool_fuzzy_search_messages` (single-query fuzzy).
 
-At runtime: introspect on the available tool list. If the iMessage MCP is not available, do **NOT** attempt the call. Instead emit:
+At runtime: introspect on the available tool list. If no iMessage MCP is available, do **NOT** attempt the call. Instead emit:
 
   gather-skipped: no imessage MCP available in this Claude Code runtime
 
 Pass `warning: imessage_unavailable` up to the orchestrator.
 
-iMessage is the most-likely-to-be-unavailable gather (the MCP is macOS-host-bound and not typically wired in remote runtimes). The orchestrator should treat the skip as routine and not surface it as a degraded run — the absence of inner-circle iMessage data is the common case, not the exception.
+iMessage is macOS-host-bound and not available in remote runtimes. When the host machine has apple-mcp wired, treat unanswered iMessages as a normal gather. When not (remote runtimes, sandboxed CI), treat the skip as routine — the orchestrator should not surface it as a degraded run.
