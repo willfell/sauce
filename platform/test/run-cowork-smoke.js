@@ -3643,6 +3643,46 @@ function assertCoworkV068Shape() {
     }
 }
 
+// HC-V0820-C1: gather-from-served-by SKILL.md dispatch contract uses <callout_type> parameter
+{
+    const label = "HC-V0820-C1 gather-from-served-by SKILL.md: dispatch contract has <callout_type> parameter";
+    try {
+        const skill = fs.readFileSync(path.join(BP, "skills/skills/gather-from-served-by/SKILL.md"), "utf8");
+        assertTrue(/\[!<callout_type>\]\+/.test(skill),
+            `${label}: expected '[!<callout_type>]+' literal in Step 3 dispatch contract`);
+        assertTrue(/callout_type:\s*string/i.test(skill),
+            `${label}: expected 'callout_type: string' in inputs frontmatter`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0820-C2: gather-from-served-by SKILL.md no longer says "no tables"
+{
+    const label = "HC-V0820-C2 gather-from-served-by SKILL.md: 'no tables' prohibition removed";
+    try {
+        const skill = fs.readFileSync(path.join(BP, "skills/skills/gather-from-served-by/SKILL.md"), "utf8");
+        assertTrue(!/no tables — cross-vendor portability|Bulleted lines preferred \(no tables/.test(skill),
+            `${label}: expected the 'no tables' prohibition line to be removed from Step 3`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0820-C3: gather-from-served-by SKILL.md mentions tables OR bullets decision rule
+{
+    const label = "HC-V0820-C3 gather-from-served-by SKILL.md: table-or-bullet decision rule present";
+    try {
+        const skill = fs.readFileSync(path.join(BP, "skills/skills/gather-from-served-by/SKILL.md"), "utf8");
+        assertTrue(/tables?\s+(or|OR)\s+bullets?/i.test(skill),
+            `${label}: expected 'tables OR bullets' decision rule in Step 3`);
+        assertTrue(/information density|structured (data|columns|fields)/i.test(skill),
+            `${label}: expected mention of decision criterion (information density or structured data)`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
 (function main() {
   console.log("--- shared contracts ---");
   checkSharedContracts();
