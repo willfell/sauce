@@ -3683,6 +3683,20 @@ function assertCoworkV068Shape() {
     }
 }
 
+// HC-V0820-D1: 5 orchestrators pass callout_type in gather loop
+{
+    const label = "HC-V0820-D1 5 orchestrators pass callout_type: prefs.mcps[entry.kind_name].callout_type";
+    try {
+        for (const orch of ["morning-briefing", "midday-tripwire", "eod-review", "weekly-review", "monthly-review"]) {
+            const skill = fs.readFileSync(path.join(BP, `skills/orchestrators/${orch}/SKILL.md`), "utf8");
+            assertTrue(/callout_type:\s+prefs\.mcps\[entry\.kind_name\]\.callout_type/.test(skill),
+                `${label}: ${orch} missing 'callout_type: prefs.mcps[entry.kind_name].callout_type' in gather loop input`);
+        }
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
 (function main() {
   console.log("--- shared contracts ---");
   checkSharedContracts();
