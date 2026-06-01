@@ -217,3 +217,17 @@ New read-only audit skill `cowork:audit-siblings`. Pure-additive cowork cycle; n
 3. **Em-dash requirement:** the audit parser requires em-dash (`—`, U+2014) between `**<name>**` and the role description in `## References` bullets, matching what `composeMicroscope` emits. If you hand-edit a bullet with a hyphen or en-dash, the audit silently flags the sibling as an orphan. Use em-dash to keep audit-siblings honest.
 
 4. **No manual setup steps.** The skill materializes into `.claude/skills/cowork/audit-siblings/SKILL.md` automatically on install.
+
+---
+
+## Upgrading from v0.81.1 → v0.82.0
+
+Two coherent UX-polish workstreams (visual differentiation + table support). Pure-additive cowork cycle; no breaking changes. After `sauce update --bump-pins`:
+
+1. **Per-kind callout colors (WS-A).** Each MCP kind now gets a distinct callout type for visual differentiation across atomic notes: chat → `info`, finance → `warning`, calendar → `tip`, email → `quote`, ado → `example`, github → `note`. The 5 atomic-note orchestrators (morning-briefing / midday-tripwire / eod-review / weekly-review / monthly-review) pass the resolved type to `cowork:gather-from-served-by`, which composes `> [!<callout_type>]+ <kind_title>` instead of the v0.79.0+ hard-coded `> [!example]+ <kind_title>`. Result: 5-6 kind sections in 5-6 distinct colors via the existing v0.79.0 per-type CSS. Override per kind by adding `callout_type: <type>` to `mcps.<kind>` in `spice/cowork/context/user-preferences.md` (valid: info / note / tip / success / warning / caution / example / quote / danger). Unknown or invalid values fall back to the default mapping; unknown kinds fall back to `example`.
+
+2. **Tables in gather output (WS-B).** `gather-from-served-by/SKILL.md` Step 3's "Bulleted lines preferred (no tables — cross-vendor portability)" prohibition is replaced with a decision rule: "Render data in tables OR bullets, whichever gives the highest information density per vertical inch. Use tables for structured data with 3+ columns per item (IDs, timestamps, lanes, links); use bullets for narrative or single-axis lists. Mixed within one callout is fine." Microscope `## Output shape` directives explicitly noted as overriding the default. For tabular data (ADO board state, GitHub PR queues, finance category breakdowns), tell the microscope to render tables and the gather contract no longer fights it.
+
+3. **No engagement-type changes in v0.82.0.** The originally-planned w2-fte midday-tripwire fix (WS-C) was DROPPED at S0 investigation — the workshop manifest had the right fields since v0.13.0, but engagement-type JSONs aren't materialized to consumer vaults today (the root cause of the silent no-op is folded into FLN-v82-1 for a v0.83.0+ design cycle). If your accuris midday-tripwire was silent before v0.82.0, it'll still be silent after — sorry, that fix is in flight separately.
+
+No new manual steps. Run `sauce update --bump-pins`; orchestrators pick up the new wiring on the next scheduled fire.
