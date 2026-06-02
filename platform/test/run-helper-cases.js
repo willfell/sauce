@@ -8143,9 +8143,10 @@ async function caseFA2RuleFragmentsExtends() {
       assertTrue("HC-V0740-1: consulting supported_cadences must include midday",
         Array.isArray(consul.supported_cadences) && consul.supported_cadences.includes("midday"));
 
-      assertTrue("HC-V0740-1: personal.version must be 0.3.1", personal.version === "0.3.1");
-      assertTrue("HC-V0740-1: w2-fte.version must be 0.3.1", w2fte.version === "0.3.1");
-      assertTrue("HC-V0740-1: consulting.version must be 0.3.1", consul.version === "0.3.1");
+      // v0.84.0: engagement-type version bumped 0.3.1 -> 0.4.0 (supported_cadences + default_cadences extended with tick + synthesize_day)
+      assertTrue("HC-V0740-1: personal.version must be 0.4.0", personal.version === "0.4.0");
+      assertTrue("HC-V0740-1: w2-fte.version must be 0.4.0", w2fte.version === "0.4.0");
+      assertTrue("HC-V0740-1: consulting.version must be 0.4.0", consul.version === "0.4.0");
     } catch (e) {
       assertTrue("HC-V0740-1: engagement-type tripwire_aspects contract", false, e && e.message);
     }
