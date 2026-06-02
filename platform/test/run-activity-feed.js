@@ -1477,6 +1477,20 @@ assertTrue("HC-V0841-A3.2 source uses Number.isFinite guard on parsed timestamps
 // requires Dataview shim. A3 is a source-lint guard against future
 // regressions to lexicographic ISO compare.
 
+// ── HC-V0841-D1, D2: defaultClosed wins over persisted state ──────────────
+console.log("\n--- HC-V0841-D1/D2: defaultClosed groups stay closed at boot ---");
+
+assertTrue("HC-V0841-D1 source gates groupState override on !isClosed",
+  /if\s*\(\s*!isClosed\s*&&\s*groupState/.test(src) ||
+  /if\s*\(\s*groupState\s*&&[^)]*\)\s*\{[^}]*if\s*\(\s*isClosed\s*\)/.test(src),
+  "_renderFramedGroup must skip persisted-state override when isClosed=true; " +
+  "expected either `if (!isClosed && groupState && ...)` or an inner `if (isClosed) ...` guard");
+
+assertTrue("HC-V0841-D2 _renderFramedGroup retains the toggle event listener",
+  /addEventListener\(["']toggle["']/.test(src),
+  "_renderFramedGroup keeps writing persisted state on user toggle so non-defaultClosed groups still remember; " +
+  "the fix only blocks the READ path for defaultClosed groups, not the WRITE path");
+
 // ── Summary ───────────────────────────────────────────────────────────────
 
 console.log(`\nrun-activity-feed.js: ${pass} pass · ${fail} fail`);

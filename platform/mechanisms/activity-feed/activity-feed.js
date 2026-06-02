@@ -640,9 +640,16 @@ class ActivityFeed {
     // v0.7.0 (sauce v0.73.0): override the !isClosed default when persisted
     // state has a value for this group's key. Falls back to manifest-defined
     // defaultClosed semantics on miss.
+    // v0.7.1 (sauce v0.84.1): defaultClosed groups always start closed at
+    // session boot. Without the `!isClosed` gate, a single past user-toggle
+    // persists `open:true` and defeats the curated default on every
+    // subsequent render — observed for the "scratch" group on the daily
+    // dashboard. User toggles still work within a session (the toggle
+    // listener below still writes), so a re-expanded group stays open until
+    // reload.
     const stateKey = "sauce-activity-feed:" + key;
     let initialOpen = !isClosed;
-    if (groupState && Object.prototype.hasOwnProperty.call(groupState, stateKey)) {
+    if (!isClosed && groupState && Object.prototype.hasOwnProperty.call(groupState, stateKey)) {
       initialOpen = !!groupState[stateKey];
     }
     if (initialOpen) details.open = true;
