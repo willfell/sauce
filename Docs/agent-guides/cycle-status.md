@@ -9,8 +9,12 @@ load_when: Starting a session, picking the next cycle, or sanity-checking the cu
 
 ## Current
 
-- **Workshop version:** `0.84.1` (closed 2026-06-02)
-- **Most recent cycle:** v0.84.1 cleanup-1 PATCH — 4 user-reported fixes: properties bar hidden default (§1); scratch timezone-attribution leak — `_coerceDay` Date-branch removal + `ScratchDayMigrate` startup-script + activity-feed numeric ISO compare (§2.1/§2.2/§2.4); daily-dashboard Tasks header `open · done` count + green pill + celebration form (§3); scratch sub-group auto-collapse regression — `defaultClosed` wins over persisted state (§4). Six lockstep bumps (workshop / platform-claude 0.1.2 / activity-feed 0.7.1 / styling 0.2.1 / daily 0.13.1 / scratch 0.5.2). ~32 HC-V0841-* sub-asserts + 3 in-cycle test-pin updates. 8 stage commits + S8 cycle-close. Preflight `version-sync ok: 0.84.1` ALL GREEN.
+- **Workshop version:** `0.84.3` (closed 2026-06-02)
+- **Most recent cycle:** v0.84.3 header-pills PATCH — right-aligned section-header pills for the daily dashboard. Tasks gets orange (`N Open`, with subtle glow) + optional green (`K Done`); Meetings + Activity get a single subtle neutral count pill. `_renderSection` grows `rightHtml` opt parallel to v0.84.1's `titleHtml`. Retired v0.84.1's `.sauce-tasks-done` inline-span. Two lockstep bumps (workshop / daily 0.13.3). 11 HC-V0843-A* sub-asserts replace the 6 retired HC-V0841-C1 cases; HC-V0842-A1 byte-equal guard retained. Single cycle commit. Preflight `version-sync ok: 0.84.3` ALL GREEN.
+
+- **Workshop version (previous):** `0.84.2` (closed 2026-06-02) — v0.84.2 carryforward PATCH. See `Docs/cycle-history.md` for the v0.84.2 narrative.
+
+- **Workshop version (previous):** `0.84.1` (closed 2026-06-02) — v0.84.1 cleanup-1 PATCH. See `Docs/cycle-history.md` for the v0.84.1 narrative.
 
 - **Workshop version (previous):** `0.84.0` (closed 2026-06-02) — v0.84.0 cowork-memory-layer MINOR. See `Docs/cycle-history.md` for the v0.84.0 narrative.
 
@@ -48,7 +52,7 @@ load_when: Starting a session, picking the next cycle, or sanity-checking the cu
 
 ## Cycle order (chronological)
 
-v0.1.0 → v0.1.1 → v0.1.x → v0.1.3 → v0.1.2 → v0.2.0 → v0.3.0 → v0.4.0 → v0.3.2 → v0.4.2 → v0.5.0 → v0.11.0 → v0.12.0 → v0.13.0 → v0.14.0 → v0.6.0 → v0.16.0 → v0.17.0 → v0.18.0/.1/.2 → v0.19.0 → v0.20.0 → v0.21.0/.1 → v0.22.0/.1 → v0.23.0 → v0.24.0 → v0.25.0 → v0.26.0/.1 → v0.27.0 → v0.28.0 → v0.29.0 → v0.30.0 ⏭️ → v0.31.0 → v0.32.0 → v0.33.0/.1 → v0.36.0/.1 → v0.37.0 → v0.38.0/.1 → v0.40.0 → v0.41.0/.5 → v0.42.0 → v0.43.0 → v0.44.0 → v0.45.0 → v0.46.0/.1/.2 → v0.47.0 → v0.48.0 → v0.49.0 → v0.49.1 ⏭️ → v0.49.2 → (v0.50.0–v0.62.0 narratives lost; pre-v0.63 narrative below resumes) → v0.63.0 → v0.63.1 → v0.63.2 → v0.63.3 → v0.64.0 → v0.64.1 → v0.64.2 → v0.64.3 → v0.65.0 → v0.66.0 → v0.66.1 → v0.66.2 → v0.67.0 → v0.67.1 → v0.67.2 → v0.67.3 → v0.70.0 → v0.70.1 → v0.70.2 → v0.70.3 → v0.70.4 → v0.70.5 → v0.70.6 → v0.70.7 → v0.71.0 → v0.71.1 → v0.72.0 → v0.72.1 → v0.73.0 → v0.74.0 → v0.75.0 → v0.75.1 → v0.76.0 → v0.77.0 → v0.78.0 → v0.78.1 → v0.79.0 → v0.80.0 → v0.80.1 → v0.81.0 → v0.81.1 → v0.82.0 → v0.82.1 → v0.83.0 → v0.84.0 → v0.84.1 (current).
+v0.1.0 → v0.1.1 → v0.1.x → v0.1.3 → v0.1.2 → v0.2.0 → v0.3.0 → v0.4.0 → v0.3.2 → v0.4.2 → v0.5.0 → v0.11.0 → v0.12.0 → v0.13.0 → v0.14.0 → v0.6.0 → v0.16.0 → v0.17.0 → v0.18.0/.1/.2 → v0.19.0 → v0.20.0 → v0.21.0/.1 → v0.22.0/.1 → v0.23.0 → v0.24.0 → v0.25.0 → v0.26.0/.1 → v0.27.0 → v0.28.0 → v0.29.0 → v0.30.0 ⏭️ → v0.31.0 → v0.32.0 → v0.33.0/.1 → v0.36.0/.1 → v0.37.0 → v0.38.0/.1 → v0.40.0 → v0.41.0/.5 → v0.42.0 → v0.43.0 → v0.44.0 → v0.45.0 → v0.46.0/.1/.2 → v0.47.0 → v0.48.0 → v0.49.0 → v0.49.1 ⏭️ → v0.49.2 → (v0.50.0–v0.62.0 narratives lost; pre-v0.63 narrative below resumes) → v0.63.0 → v0.63.1 → v0.63.2 → v0.63.3 → v0.64.0 → v0.64.1 → v0.64.2 → v0.64.3 → v0.65.0 → v0.66.0 → v0.66.1 → v0.66.2 → v0.67.0 → v0.67.1 → v0.67.2 → v0.67.3 → v0.70.0 → v0.70.1 → v0.70.2 → v0.70.3 → v0.70.4 → v0.70.5 → v0.70.6 → v0.70.7 → v0.71.0 → v0.71.1 → v0.72.0 → v0.72.1 → v0.73.0 → v0.74.0 → v0.75.0 → v0.75.1 → v0.76.0 → v0.77.0 → v0.78.0 → v0.78.1 → v0.79.0 → v0.80.0 → v0.80.1 → v0.81.0 → v0.81.1 → v0.82.0 → v0.82.1 → v0.83.0 → v0.84.0 → v0.84.1 → v0.84.2 → v0.84.3 (current).
 
 > Gap note: per `Docs/cycle-history.md` line count (57 closed-cycle sections ending at v0.47.0, plus a v0.48–v0.67.3 archive), the v0.50.0 → v0.62.0 narratives were not captured in cycle-history.md during their respective closes. The CLAUDE.md claim that they were "archived to Docs/cycle-history.md" was stale. Backfill from `Docs/plans/` is possible but deferred.
 

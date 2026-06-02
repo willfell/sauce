@@ -209,27 +209,29 @@ class SpaceDailyDashboard {
     }
 
     if (openTasks.length > 0 || doneTasks.length > 0) {
-      // v0.13.1 (sauce v0.84.1): three header forms based on open/done state.
-      // Use title for plain-text forms (gets _escapeHtml'd) and titleHtml for
-      // the mixed form that needs a raw <span> for the green pill. The
-      // mixed form interpolates only integers — safe to skip the escape.
-      let tasksTitle, tasksTitleHtml;
-      if (openTasks.length === 0 && doneTasks.length > 0) {
-        tasksTitle = `Tasks (all done — ${doneTasks.length} today)`;
-        tasksTitleHtml = undefined;
-      } else if (doneTasks.length > 0) {
-        tasksTitle = undefined;
-        tasksTitleHtml = `Tasks (${openTasks.length} open · <span class="sauce-tasks-done">${doneTasks.length} done</span>)`;
+      // v0.13.3 (sauce v0.84.3): pills move out of the title text and into a
+      // right-aligned sauce-section-counts container. Three forms:
+      //   open > 0 && done > 0 → orange "N Open" + green "K Done"
+      //   open > 0 && done = 0 → orange "N Open" only
+      //   open = 0 && done > 0 → green "K Done" only (the empty body signals all-clear)
+      // Numeric counts interpolated directly into rightHtml are XSS-safe; we control
+      // both arms of the conditional.
+      let tasksRightHtml;
+      if (openTasks.length > 0 && doneTasks.length > 0) {
+        tasksRightHtml =
+          `<span class="sauce-section-open-pill">${openTasks.length} Open</span>` +
+          `<span class="sauce-section-done-pill">${doneTasks.length} Done</span>`;
+      } else if (openTasks.length > 0) {
+        tasksRightHtml = `<span class="sauce-section-open-pill">${openTasks.length} Open</span>`;
       } else {
-        tasksTitle = `Tasks (${openTasks.length})`;
-        tasksTitleHtml = undefined;
+        tasksRightHtml = `<span class="sauce-section-done-pill">${doneTasks.length} Done</span>`;
       }
 
       const tasksBody = this._renderSection(container, {
         accent: "cyan",
         iconHtml: icons.checkSquare,
-        title: tasksTitle,
-        titleHtml: tasksTitleHtml,
+        title: "Tasks",
+        rightHtml: tasksRightHtml,
         defaultOpen: true,
         stateKey: "sauce-daily-dashboard:tasks",
         sectionState,
@@ -271,7 +273,8 @@ class SpaceDailyDashboard {
       const meetingsBody = this._renderSection(container, {
         accent: "blue",
         iconHtml: icons.calendar,
-        title: `Meetings (${meetings.length})`,
+        title: "Meetings",
+        rightHtml: `<span class="sauce-section-count-pill">${meetings.length}</span>`,
         defaultOpen: true,
         stateKey: "sauce-daily-dashboard:meetings",
         sectionState,
@@ -322,7 +325,8 @@ class SpaceDailyDashboard {
       const activityBody = this._renderSection(container, {
         accent: "grey",
         iconHtml: icons.activity,
-        title: `Activity (${activityCount})`,
+        title: "Activity",
+        rightHtml: `<span class="sauce-section-count-pill">${activityCount}</span>`,
         defaultOpen: true,
         stateKey: "sauce-daily-dashboard:activity",
         sectionState,
@@ -896,7 +900,7 @@ class SpaceDailyDashboard {
    * Visual styling lives in .obsidian/snippets/sauce-daily-dashboard.css
    * (installed via daily.manifest.json's snippets[] + appearance.enabledCssSnippets[]).
    */
-  _renderSection(container, { accent, iconHtml, title, titleHtml, defaultOpen, stateKey, sectionState }) {
+  _renderSection(container, { accent, iconHtml, title, titleHtml, rightHtml, defaultOpen, stateKey, sectionState }) {
     const section = container.createEl("div");
     section.className = "sauce-section";
     section.dataset.accent = accent;
@@ -911,13 +915,19 @@ class SpaceDailyDashboard {
     const summary = details.createEl("summary");
     summary.className = "sauce-section-summary";
     // v0.13.1 (sauce v0.84.1): callers can pass titleHtml to inject pre-built
-    // HTML (e.g., the green "N done" pill in the Tasks section header).
-    // Numeric counts interpolated directly into titleHtml are safe; arbitrary
-    // user text MUST still go through _escapeHtml. Today's only titleHtml
-    // caller is the Tasks header, which interpolates integers only.
+    // HTML; numeric counts interpolated directly are safe, arbitrary user
+    // text MUST still go through _escapeHtml.
+    // v0.13.3 (sauce v0.84.3): rightHtml parallels titleHtml — wraps a
+    // right-aligned .sauce-section-counts container between the title and the
+    // chevron, used for the Tasks open/done pills and the Meetings/Activity
+    // neutral count pills. Same XSS trust boundary: integers only.
+    const rightMarkup = (typeof rightHtml === "string" && rightHtml.length > 0)
+      ? `<span class="sauce-section-counts">${rightHtml}</span>`
+      : "";
     summary.innerHTML =
       `<span class="sauce-section-icon">${iconHtml}</span>` +
       `<span>${titleHtml ? titleHtml : this._escapeHtml(title)}</span>` +
+      rightMarkup +
       `<span class="sauce-section-chevron">${this._CHEVRON_SVG}</span>`;
     const body = details.createEl("div");
     body.className = "sauce-section-body";

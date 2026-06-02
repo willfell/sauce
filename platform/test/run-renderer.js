@@ -2076,51 +2076,73 @@ async function testRendV067Todo1() {
     return !!cond;
   }
 
-  // ── HC-V0841-C1: SpaceDailyDashboard Tasks header surfaces done count ─────
-  // v0.84.2 (sauce v0.84.2): SDD_PATH now reads the CANONICAL source under
-  // platform/blueprints/daily/helpers/, not the workshop's dogfood-materialized
-  // copy under ranch/. Reading ranch/ misses bugs where a hand edit landed in
-  // the materialized copy but never reached the canonical that the installer
-  // ships to consumers — exactly the v0.84.1 → v0.84.2 carryforward symptom.
-  console.log("\n--- HC-V0841-C1: Tasks header surfaces done count ---");
+  // ── HC-V0843-A: header pills (Tasks orange+green, Meetings/Activity neutral) ─
+  // Replaces HC-V0841-C1.* which tested the v0.84.1 inline `Tasks (3 open · 1 done)`
+  // form + the now-retired .sauce-tasks-done span. v0.84.3 moves counts out of the
+  // title string and into right-aligned .sauce-section-counts pills.
+  //
+  // SDD_PATH reads the CANONICAL source under platform/blueprints/daily/helpers/,
+  // not the workshop's dogfood-materialized copy under ranch/. HC-V0842-A1 below
+  // re-confirms canonical and dogfood are byte-equal after Task 4 sync.
+  console.log("\n--- HC-V0843-A: header pills ---");
 
   {
     const SDD_PATH = require("path").resolve(__dirname, "../../platform/blueprints/daily/helpers/space-daily-dashboard.js");
     const fs = require("fs");
     const sddSrc = fs.readFileSync(SDD_PATH, "utf8");
 
-    assertTrue("HC-V0841-C1.1 getTasks returns { open, done } object",
+    assertTrue("HC-V0843-A1 getTasks still splits open/done",
       /const\s+open\s*=\s*\[\]/.test(sddSrc) && /const\s+done\s*=\s*\[\]/.test(sddSrc),
-      "space-daily-dashboard.js getTasks() must split tasks into open[] and done[]");
+      "v0.84.1 open/done split must remain; pill rendering depends on the two arrays");
 
-    assertTrue("HC-V0841-C1.2 header references sauce-tasks-done span",
-      /sauce-tasks-done/.test(sddSrc),
-      "Tasks header must wrap done count in <span class=\"sauce-tasks-done\">");
+    assertTrue("HC-V0843-A2 Tasks call site title is bare 'Tasks' (no parenthetical count)",
+      /title:\s*["']Tasks["']/.test(sddSrc),
+      "Tasks _renderSection call must pass title: 'Tasks' as a plain string — counts move to rightHtml");
 
-    assertTrue("HC-V0841-C1.3 'all done' celebration branch present",
-      /all done/.test(sddSrc),
-      "Tasks header must include the all-done celebration form when open===0 and done>0");
+    assertTrue("HC-V0843-A3 Tasks call site references sauce-section-open-pill",
+      /sauce-section-open-pill/.test(sddSrc),
+      "Tasks rightHtml must build a <span class=\"sauce-section-open-pill\">…</span> for the open count");
+
+    assertTrue("HC-V0843-A4 Tasks call site references sauce-section-done-pill",
+      /sauce-section-done-pill/.test(sddSrc),
+      "Tasks rightHtml must build a <span class=\"sauce-section-done-pill\">…</span> for the done count");
+
+    assertTrue("HC-V0843-A5 Meetings call site uses title 'Meetings' + sauce-section-count-pill",
+      /title:\s*["']Meetings["']/.test(sddSrc) && /sauce-section-count-pill[\s\S]{0,300}meetings\.length/.test(sddSrc),
+      "Meetings _renderSection must pass title: 'Meetings' and a rightHtml containing sauce-section-count-pill with the meetings.length value");
+
+    assertTrue("HC-V0843-A6 Activity call site uses title 'Activity' + sauce-section-count-pill",
+      /title:\s*["']Activity["']/.test(sddSrc) && /sauce-section-count-pill[\s\S]{0,300}activityCount/.test(sddSrc),
+      "Activity _renderSection must pass title: 'Activity' and a rightHtml containing sauce-section-count-pill with the activityCount value");
+
+    assertTrue("HC-V0843-A7 _renderSection signature includes rightHtml opt",
+      /_renderSection\(container,\s*\{[^}]*rightHtml[^}]*\}/.test(sddSrc),
+      "_renderSection must destructure rightHtml from its opts object (parallel to titleHtml landed in v0.84.1)");
+
+    assertTrue("HC-V0843-A8 _renderSection wraps rightHtml in sauce-section-counts span",
+      /sauce-section-counts/.test(sddSrc) && /rightHtml[\s\S]{0,200}sauce-section-counts/.test(sddSrc),
+      "_renderSection must inject the rightHtml inside a <span class=\"sauce-section-counts\">…</span> wrapper between the title and the chevron");
 
     const CSS_PATH = require("path").resolve(__dirname,
       "../../platform/blueprints/daily/helpers/sauce-daily-dashboard.css");
-    assertTrue("HC-V0841-C1.4 sauce-daily-dashboard.css defines .sauce-tasks-done",
-      fs.existsSync(CSS_PATH) && /\.sauce-tasks-done\s*\{/.test(fs.readFileSync(CSS_PATH, "utf8")),
-      ".sauce-tasks-done CSS rule must exist in sauce-daily-dashboard.css");
+    const cssSrc = fs.readFileSync(CSS_PATH, "utf8");
 
-    assertTrue("HC-V0841-C1.5 _renderSection signature includes titleHtml opt",
-      /_renderSection\(container,\s*\{[^}]*titleHtml/.test(sddSrc),
-      "_renderSection must accept titleHtml so callers can inject raw HTML (the green pill span) bypassing _escapeHtml");
+    assertTrue("HC-V0843-A9 CSS defines all three pill classes + counts container",
+      /\.sauce-section-counts\s*\{/.test(cssSrc) &&
+      /\.sauce-section-open-pill\s*\{/.test(cssSrc) &&
+      /\.sauce-section-done-pill\s*\{/.test(cssSrc) &&
+      /\.sauce-section-count-pill\s*\{/.test(cssSrc),
+      "sauce-daily-dashboard.css must define .sauce-section-counts, .sauce-section-open-pill, .sauce-section-done-pill, .sauce-section-count-pill");
 
-    assertTrue("HC-V0841-C1.6 _renderSection prefers titleHtml over title when present",
-      /summary\.innerHTML\s*=[\s\S]*?titleHtml\s*\?\s*titleHtml\s*:\s*this\._escapeHtml\(title\)/.test(sddSrc),
-      "_renderSection's summary.innerHTML assignment must select titleHtml when provided, _escapeHtml(title) otherwise");
+    assertTrue("HC-V0843-A10 retired .sauce-tasks-done is gone from CSS",
+      !/\.sauce-tasks-done\s*\{/.test(cssSrc),
+      "The v0.84.1 .sauce-tasks-done rule has no callers in v0.84.3 and must be removed from the CSS");
 
-    // HC-V0842-A1: canonical vs dogfood drift guard. The workshop installs
-    // itself as its own first consumer; if the canonical at
-    // platform/blueprints/daily/helpers/space-daily-dashboard.js diverges
+    // HC-V0842-A1: canonical vs dogfood drift guard (retained from v0.84.2).
+    // The workshop installs itself as its own first consumer; if the canonical
+    // at platform/blueprints/daily/helpers/space-daily-dashboard.js diverges
     // from ranch/scripts/daily/space-daily-dashboard.js, a hand edit landed
-    // in the wrong file and consumer vaults will never see it. Compare
-    // byte-for-byte to catch the v0.84.1 carryforward symptom.
+    // in the wrong file and consumer vaults will never see it.
     const RANCH_SDD_PATH = require("path").resolve(__dirname, "../../ranch/scripts/daily/space-daily-dashboard.js");
     const canonicalBytes = fs.readFileSync(SDD_PATH);
     const ranchBytes = fs.existsSync(RANCH_SDD_PATH) ? fs.readFileSync(RANCH_SDD_PATH) : Buffer.alloc(0);

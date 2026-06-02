@@ -4,6 +4,29 @@ This file archives the per-cycle status snapshots that previously lived in `CLAU
 
 ---
 
+## v0.84.3 header-pills CLOSED 2026-06-02
+
+Workshop 0.84.2 → **0.84.3** (PATCH). Visual refinement of the three top-level daily-dashboard section headers:
+
+- **Tasks header** drops the inline `(N open · K done)` form from v0.84.1. Counts move to right-aligned pills: `.sauce-section-open-pill` (orange tint, soft `box-shadow` glow, dot + "N Open" label) and optional `.sauce-section-done-pill` (green tint, dot + "K Done"). Three render states: open>0 only → orange pill alone; open>0 + done>0 → both pills; open=0 + done>0 → green pill alone. The empty Tasks body now signals all-clear; no celebration text variant (the v0.84.1 `Tasks (all done — N today)` form is gone).
+- **Meetings + Activity headers** drop `(N)` from the title text and gain a single subtle `.sauce-section-count-pill` (neutral outline, muted text) — always visible when the section renders so the count is surfaced even when collapsed.
+- **`_renderSection`** grows a `rightHtml` opt parallel to v0.84.1's `titleHtml`. Raw HTML wrapped in `<span class="sauce-section-counts">…</span>` with `margin-left: auto` to push the container right-of-title and immediately-before-chevron. XSS trust boundary unchanged — integer-only interpolation at all call sites.
+- **CSS retires** the v0.84.1 `.sauce-tasks-done` rule (no remaining caller).
+- **Activity sub-group counts** (Cowork/Project/Kanban/Scratch) unchanged — out of scope per design §9.
+
+Two lockstep version bumps (workshop 0.84.2 → 0.84.3, daily 0.13.2 → 0.13.3). 11 HC-V0843-A* sub-asserts replace the 6 retired HC-V0841-C1 cases in `run-renderer.js`; HC-V0842-A1 byte-equal guard retained (re-validates after Task 4 dogfood sync). 1 in-cycle test-pin update at Task 5 (run-helper-cases.js FA6-MANIFEST daily 0.13.2 → 0.13.3). Single cycle commit (Task 7) following Task 0's pre-cycle docs commit. Preflight `version-sync ok: 0.84.3` ALL GREEN. Design + plan + result: `Docs/plans/2026-06-02-v0.84.3-header-pills-*.md`.
+
+## v0.84.2 carryforward CLOSED 2026-06-02
+
+Workshop 0.84.1 → **0.84.2** (PATCH). Carryforward fix for v0.84.1 S5: the original implementer edited `ranch/scripts/daily/space-daily-dashboard.js` (the workshop's dogfood-materialized copy) instead of the canonical source at `platform/blueprints/daily/helpers/space-daily-dashboard.js`. The HC-V0841-C1.* tests passed because they were reading the workshop's materialized path, not the canonical the installer ships to consumers. Result: the Tasks header `open · done` count + green pill + `titleHtml` opt never reached consumer vaults despite v0.84.1's daily 0.13.0 → 0.13.1 bump.
+
+Three changes in v0.84.2:
+- **Canonical sync** — workshop's `ranch/`-materialized v0.84.1 content copied byte-equal to the canonical source at `platform/blueprints/daily/helpers/space-daily-dashboard.js`. This is what v0.84.1 S5 should have written.
+- **Test path repointed** — HC-V0841-C1.* assertions now read from the CANONICAL path (`platform/blueprints/daily/helpers/...`) rather than the workshop's materialized path (`ranch/scripts/daily/...`). Catches future hand edits landing in only one copy.
+- **NEW HC-V0842-A1 drift guard** — asserts canonical and workshop-dogfood `space-daily-dashboard.js` are byte-identical. Drift now fails preflight automatically; the v0.84.1 carryforward symptom cannot recur silently.
+
+Two lockstep version bumps (workshop 0.84.1 → 0.84.2, daily 0.13.1 → 0.13.2). 1 new HC sub-assert (HC-V0842-A1) added to run-renderer.js. 1 in-cycle test-pin update (run-helper-cases FA6-MANIFEST daily 0.13.1 → 0.13.2). Single cycle commit. Preflight `version-sync ok: 0.84.2` ALL GREEN. **FLN-v841-1 + FLN-v841-2 (cycle-status.md FLNs) carried into the cycle-status FLN queue at design time** (test-pin equality helper extension, defaultClosed group-state pruning). Tag → tap PR → merge → `brew upgrade` → `sauce update --bump-pins` × 4 verified working on all 4 consumer vaults at deploy time.
+
 ## v0.84.1 cleanup-1 CLOSED 2026-06-02
 
 - **Workshop version (previous):** `0.84.1` (closed 2026-06-02) — v0.84.1 cleanup-1 PATCH. 4 user-reported fixes:

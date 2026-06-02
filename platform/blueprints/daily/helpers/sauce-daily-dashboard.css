@@ -268,6 +268,85 @@
 }
 .space-daily-dashboard .sauce-todo-count { font-variant-numeric: tabular-nums; }
 
+/* ── v0.13.3 (sauce v0.84.3) — right-aligned section header pills ─────── *
+ * Container pushed right via margin-left:auto. Tasks gets the colorful
+ * orange+green pair; Meetings + Activity get a single neutral count pill. */
+.space-daily-dashboard .sauce-section-counts {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Open-tasks pill — orange tint + soft glow. Used in the Tasks section header. */
+.space-daily-dashboard .sauce-section-open-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px 1px 6px;
+  border-radius: 999px;
+  font-size: 0.85em;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  background: color-mix(in srgb, var(--color-orange) 12%, transparent);
+  border: 1px solid var(--color-orange);
+  color: var(--color-orange);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--color-orange) 35%, transparent);
+  font-variant-numeric: tabular-nums;
+}
+.space-daily-dashboard .sauce-section-open-pill::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-orange);
+}
+
+/* Done-tasks pill — green tint, no glow (acknowledgment, not call-to-action). */
+.space-daily-dashboard .sauce-section-done-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px 1px 6px;
+  border-radius: 999px;
+  font-size: 0.85em;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  background: color-mix(in srgb, var(--color-green) 12%, transparent);
+  border: 1px solid var(--color-green);
+  color: var(--color-green);
+  font-variant-numeric: tabular-nums;
+}
+.space-daily-dashboard .sauce-section-done-pill::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-green);
+}
+
+/* Neutral count pill — used by Meetings + Activity section headers. */
+.space-daily-dashboard .sauce-section-count-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 9px;
+  border-radius: 999px;
+  font-size: 0.85em;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  background: transparent;
+  border: 1px solid var(--background-modifier-border);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 1.5em;
+  justify-content: center;
+}
+
 /* ── Empty state (v0.10.3 sauce v0.70.3) ────────────────────────────────── *
  * Rendered when the day has no tasks, meetings, or activity. Replaces the
  * prior silent-return behavior so the user always gets a visible signal. */
@@ -300,6 +379,10 @@
   .space-daily-dashboard .sauce-drill-row { font-size: 0.9em; padding: 2px 4px; }
   .space-daily-dashboard .sauce-drill-time { margin-left: 8px; }
   .space-daily-dashboard .sauce-todo-pill { padding: 1px 7px 1px 5px; font-size: 0.88em; }
+  .space-daily-dashboard .sauce-section-open-pill,
+  .space-daily-dashboard .sauce-section-done-pill,
+  .space-daily-dashboard .sauce-section-count-pill { padding: 1px 6px; font-size: 0.82em; }
+  .space-daily-dashboard .sauce-section-counts { gap: 4px; }
   .space-daily-dashboard { --sauce-section-gap: 8px; }
   .space-daily-dashboard .sauce-group-header { padding: 8px 10px; gap: 6px; }
   /* v0.10.1 — on mobile, stack title above meta and let the title use the full
@@ -330,10 +413,4 @@
   .space-daily-dashboard .sauce-group-dot { width: 7px; height: 7px; }
 }
 
-/* v0.13.1 (sauce v0.84.1): green dopamine pill inside the Tasks section
- * title. Surfaces today's done-task count alongside the open count. */
-.sauce-tasks-done {
-  color: var(--color-green);
-  font-weight: 600;
-}
 

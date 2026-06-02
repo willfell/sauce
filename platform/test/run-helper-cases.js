@@ -7645,7 +7645,7 @@ async function caseFA2RuleFragmentsExtends() {
   // (sauce v0.84.1 — Tasks header open · done); cards untouched.
   {
     const pins = [
-      ["daily",         "platform/blueprints/daily/manifest.json",            "0.13.2"],
+      ["daily",         "platform/blueprints/daily/manifest.json",            "0.13.3"],
       ["activity-feed", "platform/mechanisms/activity-feed/manifest.json",    "0.7.1"],
       ["cards",         "platform/mechanisms/cards/manifest.json",            "0.2.6"],
     ];
