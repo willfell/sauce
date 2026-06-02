@@ -70,7 +70,7 @@ If `resume_from_step` is set, skip steps `< resume_from_step` and pick up from t
 
 7. Capture `blueprints_installed = []` from the `blueprints[]` array of platform-installed.json read in step 3.
 
-8. **Load engagement-type registry from materialized path.** List `<vault>/spice/cowork/context/engagement-types/*.json` via `mcp__obsidian__list_files_in_dir` (treat dir-not-found as fatal — the registry is materialized at install time; an absent dir means the vault has not been installed against a v0.83.0+ workshop). For each `.json` file, Read + parse; key by `id`. Capture `engagement_types_registry = { <id>: <manifest>, ... }`. If the dir is empty, emit Notice `cowork:bootstrap-vault aborted -- spice/cowork/context/engagement-types/ is empty; ensure sauce update --bump-pins ran against v0.83.0+ workshop` and exit.
+8. **Load engagement-type registry from materialized path.** List `<vault>/spice/cowork/context/engagement-types/*.json` via `mcp__obsidian__list_files_in_dir`. If the dir is not found (the registry is materialized at install time; an absent dir means the vault has not been installed against a v0.83.0+ workshop), emit Notice `cowork:bootstrap-vault aborted -- spice/cowork/context/engagement-types/ not found; ensure sauce update --bump-pins ran against v0.83.0+ workshop` and exit. If the dir is empty, emit Notice `cowork:bootstrap-vault aborted -- spice/cowork/context/engagement-types/ is empty; ensure sauce update --bump-pins ran against v0.83.0+ workshop` and exit. For each `.json` file, Read + parse; key by `id`. Capture `engagement_types_registry = { <id>: <manifest>, ... }`.
 
 9. **NEW** — Load blueprint bootstrap_contributions:
    - For each blueprint in `blueprints_installed`:
