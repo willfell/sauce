@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-06-02T04:54:52.964Z",
+  "generated_at": "2026-06-02T05:04:06.300Z",
   "workshop_version": "0.83.0",
   "contributions": {
     "audit": [
@@ -470,6 +470,15 @@
           "topic": "Cowork About",
           "path": "spice/cowork/About Cowork.md",
           "command": "/cowork about"
+        }
+      },
+      {
+        "kind": "claude_md_row",
+        "table": "resolvers",
+        "row": {
+          "topic": "Cowork Memory",
+          "path": "spice/cowork/memory/",
+          "command": "/cowork memory"
         }
       },
       {

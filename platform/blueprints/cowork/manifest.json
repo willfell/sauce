@@ -568,6 +568,15 @@
       }
     },
     {
+      "kind": "claude_md_row",
+      "table": "resolvers",
+      "row": {
+        "topic": "Cowork Memory",
+        "path": "{{module_directory}}/memory/",
+        "command": "/cowork memory"
+      }
+    },
+    {
       "kind": "skill",
       "source": "skills/skills/read-user-preferences/SKILL.md",
       "dest": "{{skills_dir}}/skills/read-user-preferences/SKILL.md"

@@ -168,6 +168,34 @@ Print the per-orchestrator preamble:
   month's headline + any rolling commitments.
   ```
 
+- **cowork:capture-tick (hourly memory tick, NEW v0.84.0)**:
+  ```
+  This runs every hour during waking hours (default 7am-10pm) and quietly
+  captures a lean snapshot of what changed across your MCP kinds in the last
+  hour. Writes to a single daily memory file at
+  `spice/cowork/memory/<engagement>/YYYY/MM-MMMM/YYYY-MM-DD/memory.md`
+  — background only; does NOT clutter the daily note. Other scheduled jobs
+  (morning-briefing especially) read this as continuity context so they walk
+  in with what's been happening rather than starting cold.
+  ```
+
+  Ask: `Enable cowork:capture-tick for engagement <engagement.id>? (default: <engagement.type_manifest.default_cadences.tick>)`
+
+  Default cron suggestion: `0 7-22 * * *` (top of every hour 7am-10pm, 16 ticks/day).
+
+- **cowork:synthesize-day (end-of-day memory synthesis, NEW v0.84.0)**:
+  ```
+  This runs 15 minutes after the typical EOD slot and compresses the day's
+  hourly ticks + today's atomic notes (morning-briefing/midday-tripwire/
+  eod-review) into a voice-applied 2-3 paragraph 'Today's pattern' synthesis
+  + a Carry-forward block tomorrow's morning-briefing will read. Replaces
+  the placeholder synthesis section at the top of today's memory.md.
+  ```
+
+  Ask: `Enable cowork:synthesize-day for engagement <engagement.id>? (default: <engagement.type_manifest.default_cadences.synthesize_day>)`
+
+  Default cron suggestion: `15 19 * * *` (15 min after typical EOD slot).
+
 Ask: `Enable cowork:<orch> for engagement <engagement.id>? (default: <default>)` where `<default>` reads `engagement.type_manifest.default_cadences[<cadence>]`.
 
 If enabled AND `<cadence>` is NOT in `supported_cadences`, surface a Notice:
