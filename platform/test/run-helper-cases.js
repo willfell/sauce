@@ -5050,9 +5050,9 @@ async function caseHCV0821A1() {
       { rules_path: "ranch/rules" }, [], { commit: "x", tag: "x", dirty: false });
     const written = JSON.parse(fs.readFileSync(path.join(dir, "ranch/rules/trips.json"), "utf8"));
     assertEqual(written.contributions.trips.length, 0,
-      "HC-V0821-A1.1: source's contributions array reset to []");
+      "HC-V0821-A1.1a: source's contributions array reset to []");
     assertEqual(written.contributions.meetings.length, 5,
-      "HC-V0821-A1.1: other source's contributions untouched");
+      "HC-V0821-A1.1b: other source's contributions untouched");
   });
 
   // A1.2 — Reset on non-existent file is a graceful no-op (no error, no file created).
