@@ -27,6 +27,7 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
 2. **Resolve engagement.** Read `<vault>/spice/cowork/context/vault-config.md` via `mcp__obsidian__get_frontmatter`. Look up `engagements[]` entry where `id == engagement_id`. If not found, emit Notice `cowork:morning-briefing aborted -- engagement '<id>' not found in vault-config.md` and exit. Capture `engagement` (the full record) and read the matching engagement-type manifest via the Read tool at `spice/cowork/context/engagement-types/<engagement.type>.json` (expected values: `personal`, `w2-fte`, `consulting`). Parse as JSON; capture `type_manifest.render_aspects`. If the file is missing or fails to parse, emit Notice `cowork:morning-briefing aborted -- engagement-type manifest unavailable at spice/cowork/context/engagement-types/<engagement.type>.json` and exit. The render-aspects map drives which gather + write steps fire (e.g. `finance_block: include` enables the Finance callout; `inner_circle_imessage: include` enables Messages).
 3. READ `.claude/skills/cowork/skills/date-context/SKILL.md` in full and follow
    its `## Steps` section with `{}`. Capture the returned `context` object. If `context.error` exists, emit Notice and exit.
+3a. **Read recent memory.** Compose `<yesterday-memory-path>` = `spice/cowork/memory/<engagement_id>/<yesterday-YYYY>/<yesterday-MM-Month>/<yesterday-YYYY-MM-DD>/memory.md` (substitute date components from `date-context.yesterday`). Read via the Read tool; treat not-found as absent (set `yesterday_memory = null`). If present, parse frontmatter; extract `summary`, `synthesis_at`, `tick_count`, `synthesized`; extract synthesis section body (text between the H1 line and the `## Ticks` header) as `yesterday_synthesis_md`; extract the `[!tip] Carry-forward to tomorrow's morning-briefing` callout body as `yesterday_carry_forward_md`. ALSO read `<today-memory-path>` = `spice/cowork/memory/<engagement_id>/<today-YYYY>/<today-MM-Month>/<today-YYYY-MM-DD>/memory.md`. If present, parse the `## Ticks` section; extract up to the last 6 tick callouts in chronological-reverse order (most-recent first) as `overnight_ticks_md`. If neither file exists (memory layer hasn't fired yet for this engagement), set both to `null` and continue silently — no degradation of morning-briefing's existing behavior. This step is PURE — no MCP calls, no writes. NEW in v0.84.0; backward-compat: cleanly absent when memory layer hasn't been deployed.
 3b. READ `.claude/skills/cowork/skills/read-user-preferences/SKILL.md` in full and follow
    its `## Steps` section with `{}`. Capture as `prefs_result = { prefs, status, reason }`. Capture `prefs = prefs_result.prefs` (may be null when `status != "ok"`). Do NOT abort on `status != "ok"`; continue with legacy fallback (see step 3c).
 3c. **Plan dispatch.** Determine dispatch mode and build the priority-ordered dispatch plan.
@@ -220,7 +221,23 @@ Each gather call passes `engagement_id`. The sub-skill reads per-engagement MCP-
    `prompt_body = voice_contract + prompt_body`. The combined string is the input to step 14 composition. If `voice_contract == ""`, prompt_body passes through unchanged.
 14. **Compose run-note body** from the gather outputs (steps 5–12b), interpolating per `prompt_body` instructions.
 
-   When `dispatch_mode == "prefs"`, compose the body as: SpaceNavButtons → `[!info]- Today at a glance` synopsis → `ordered_blocks[]` (priority order, in array order) → engagement-type-aspect blocks (semantic_related, finance from render_aspects) → `[!tip] Today's focus` closing. ordered_blocks entries with `kind: "warning"` render as `[!warning]` callouts in-position (priority preserved). When `dispatch_mode == "legacy"`, use the v0.77.0 composition order verbatim (existing step 14 body).
+   When `dispatch_mode == "prefs"`, compose the body as: SpaceNavButtons → `[!info]- Today at a glance` synopsis → NEW memory callouts (gated; see below) → `ordered_blocks[]` (priority order, in array order) → engagement-type-aspect blocks (semantic_related, finance from render_aspects) → `[!tip] Today's focus` closing. ordered_blocks entries with `kind: "warning"` render as `[!warning]` callouts in-position (priority preserved). When `dispatch_mode == "legacy"`, use the v0.77.0 composition order verbatim (existing step 14 body).
+
+   - **NEW (v0.84.0): Yesterday at a glance.** If `yesterday_memory != null` (memory layer has fired previously), append immediately after the synopsis callout:
+     ```
+     > [!example]+ Yesterday at a glance
+     > {{yesterday_carry_forward_md verbatim — bullets}}
+     >
+     > {{yesterday_synthesis_md condensed to ~2-3 sentences if longer than 4 sentences; otherwise inject verbatim}}
+     ```
+     If `yesterday_memory == null` (vault has no prior synthesis — backward-compat: memory layer hasn't run yet), omit this entire callout cleanly.
+   - **NEW (v0.84.0): Overnight.** If `overnight_ticks_md != null` AND has at least one tick entry, append immediately after the Yesterday at a glance callout (or after the synopsis if Yesterday was omitted):
+     ```
+     > [!example]+ Overnight
+     > For each tick callout in overnight_ticks_md (chronological-reverse — newest first):
+     >   - HH:00 — <one-liner derived from the tick body's bold-prefix lines: kindlist + brief delta>
+     ```
+     If `overnight_ticks_md == null` OR has zero tick entries, omit this entire callout cleanly. (Backward-compat: absent when memory layer hasn't run yet.)
 
    When `prompt_body` is empty, do NOT freelance content — compose a skeleton-compliant STUB body:
     - `SpaceNavButtons` dataviewjs block (verbatim).
