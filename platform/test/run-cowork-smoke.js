@@ -836,9 +836,9 @@ function assertCoworkV068Shape() {
   assertTrue(fileSources.includes("helpers/cowork-latest-runs.js"),
     "V068-MANIFEST-FILES: manifest files[] declares helpers/cowork-latest-runs.js");
 
-  // V0750-VERSION: cowork blueprint version bumped to 0.23.0 (was 0.22.0 in v0.83.0; MINOR bump for v0.84.0 — adds capture-tick + synthesize-day to claude_surface[] + cowork-memory rule_fragment).
-  assertTrue(manifest.version === "0.23.0",
-    `V0750-VERSION: cowork manifest.version === "0.23.0" (got ${JSON.stringify(manifest.version)})`);
+  // V0750-VERSION: cowork blueprint version bumped to 0.24.0 (was 0.23.0 in v0.84.0; MINOR bump for v0.85.0 — adds read-memory sub-skill + synthesize-week orchestrator + cowork-weekly-synthesis rule_fragment + compose-memory-callouts helper).
+  assertTrue(manifest.version === "0.24.0",
+    `V0750-VERSION: cowork manifest.version === "0.24.0" (got ${JSON.stringify(manifest.version)})`);
 }
 
 // ---------------------------------------------------------------------------
