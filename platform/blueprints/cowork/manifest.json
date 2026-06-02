@@ -320,6 +320,11 @@
       "source": "helpers/read-memory-helper.js",
       "dest": "{{module_directory}}/helpers/read-memory-helper.js",
       "tag": "platform"
+    },
+    {
+      "source": "helpers/compose-memory-callouts.js",
+      "dest": "{{module_directory}}/helpers/compose-memory-callouts.js",
+      "tag": "platform"
     }
   ],
   "claude_surface": [

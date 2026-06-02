@@ -1,0 +1,13 @@
+{
+    "found": true,
+    "tier": "tick",
+    "window_resolved": { "start": "2026-06-02T00:00:00-06:00", "end": "2026-06-02T07:00:00-06:00" },
+    "files_read": ["spice/cowork/memory/personal/2026/06-June/2026-06-02/memory.md"],
+    "day_synthesis": null,
+    "week_synthesis": null,
+    "ticks": [
+        { "time": "06:00", "kindlist": ["calendar"], "summary_line": "**Calendar:** stand-up at 09:00 confirmed", "raw_callout_md": "> [!example]- 06:00 Tick\n> **Calendar:** stand-up at 09:00 confirmed\n" },
+        { "time": "05:00", "kindlist": ["email"], "summary_line": "**Email:** 1 new (Brex receipt)", "raw_callout_md": "> [!example]- 05:00 Tick\n> **Email:** 1 new (Brex receipt)\n" },
+        { "time": "04:00", "kindlist": ["chat"], "summary_line": "**Chat:** quiet", "raw_callout_md": "> [!example]- 04:00 Tick\n> **Chat:** quiet\n" }
+    ]
+}

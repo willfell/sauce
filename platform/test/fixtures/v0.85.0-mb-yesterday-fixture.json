@@ -1,0 +1,22 @@
+{
+    "found": true,
+    "tier": "day",
+    "window_resolved": { "start": "2026-06-01T00:00:00-06:00", "end": "2026-06-01T23:59:59-06:00" },
+    "files_read": ["spice/cowork/memory/personal/2026/06-June/2026-06-01/memory.md"],
+    "day_synthesis": {
+        "engagement_id": "personal",
+        "day": "2026-06-01",
+        "summary": "Quiet morning; 1 finance event; calendar light",
+        "synthesis_paragraph": "Yesterday was a measured day. Calendar held two short stand-ups and a focus block; email queue stayed at 3 in inbox with one finance receipt to file. No tripwires fired.",
+        "carry_forward_bullets": [
+            "Follow up on the Brex receipt with vendor by EOD today",
+            "Inner-circle: ping Jason re: kanban context"
+        ],
+        "tick_count": 12,
+        "synthesized": true,
+        "synthesis_at": "2026-06-01T19:15:00-06:00",
+        "last_tick_at": "2026-06-01T22:00:00-06:00"
+    },
+    "week_synthesis": null,
+    "ticks": []
+}
