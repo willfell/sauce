@@ -607,6 +607,51 @@
         "naming_pattern": "^\\d{4}-\\d{2}-\\d{2}\\.md$"
       },
       {
+        "scope": "spice/cowork/memory/**/*/memory.md",
+        "extends": "_canonical-vocab",
+        "required_frontmatter": {
+          "type": {
+            "required": true,
+            "type": "string",
+            "equals": "cowork-memory"
+          },
+          "engagement_id": {
+            "required": true,
+            "type": "string"
+          },
+          "day": {
+            "required": true,
+            "type": "string",
+            "matches": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "created_at": {
+            "required": true,
+            "type": "string"
+          },
+          "tick_count": {
+            "required": true,
+            "type": "number"
+          },
+          "summary": {
+            "required": true,
+            "type": "string"
+          },
+          "last_tick_at": {
+            "required": false,
+            "type": "string"
+          },
+          "synthesized": {
+            "required": false,
+            "type": "boolean"
+          },
+          "synthesis_at": {
+            "required": false,
+            "type": "string"
+          }
+        },
+        "naming_pattern": "^memory\\.md$"
+      },
+      {
         "scope": {
           "path_glob": "spice/cowork/prompts/*.md"
         },

@@ -1,6 +1,6 @@
 {
   "name": "cowork",
-  "version": "0.22.0",
+  "version": "0.23.0",
   "kind": "blueprint",
   "module_directory": "cowork",
   "engagement_types_dir": "engagement-types",
@@ -576,6 +576,16 @@
       "kind": "skill",
       "source": "skills/skills/gather-from-served-by/SKILL.md",
       "dest": "{{skills_dir}}/skills/gather-from-served-by/SKILL.md"
+    },
+    {
+      "kind": "skill",
+      "source": "skills/orchestrators/capture-tick/SKILL.md",
+      "dest": "{{skills_dir}}/capture-tick/SKILL.md"
+    },
+    {
+      "kind": "skill",
+      "source": "skills/orchestrators/synthesize-day/SKILL.md",
+      "dest": "{{skills_dir}}/synthesize-day/SKILL.md"
     }
   ],
   "engagement_types": [
@@ -1259,6 +1269,54 @@
           }
         },
         "naming_pattern": "^\\d{4}-\\d{2}-\\d{2}\\.md$"
+      }
+    },
+    {
+      "target": "cowork",
+      "fragment": {
+        "scope": "spice/cowork/memory/**/*/memory.md",
+        "extends": "_canonical-vocab",
+        "required_frontmatter": {
+          "type": {
+            "required": true,
+            "type": "string",
+            "equals": "cowork-memory"
+          },
+          "engagement_id": {
+            "required": true,
+            "type": "string"
+          },
+          "day": {
+            "required": true,
+            "type": "string",
+            "matches": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "created_at": {
+            "required": true,
+            "type": "string"
+          },
+          "tick_count": {
+            "required": true,
+            "type": "number"
+          },
+          "summary": {
+            "required": true,
+            "type": "string"
+          },
+          "last_tick_at": {
+            "required": false,
+            "type": "string"
+          },
+          "synthesized": {
+            "required": false,
+            "type": "boolean"
+          },
+          "synthesis_at": {
+            "required": false,
+            "type": "string"
+          }
+        },
+        "naming_pattern": "^memory\\.md$"
       }
     },
     {
