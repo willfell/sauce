@@ -1045,14 +1045,16 @@ function assertCoworkV068Shape() {
 }
 
 // ---------------------------------------------------------------------------
-// HC-V0750-C1..C3 — onboard-scheduled-jobs Step 2 workshop_manifest_path
+// HC-V0750-C1..C3 — onboard-scheduled-jobs Step 2 engagement-type manifest read
+// (v0.83.0: workshop_manifest_path resolution + consumer-override merge removed;
+//  now reads materialized_manifest_path at spice/cowork/context/engagement-types/)
 // ---------------------------------------------------------------------------
 {
   const onboard = fs.readFileSync(path.join(BP, "skills/orchestrators/onboard-scheduled-jobs/SKILL.md"), "utf8");
-  assertContains(onboard, "workshop_manifest_path",               "HC-V0750-C1 Step 2 uses workshop_manifest_path");
+  assertContains(onboard, "materialized_manifest_path",            "HC-V0750-C1 Step 2 uses materialized_manifest_path (v0.83.0)");
   assertTrue(!onboard.includes("in-vault context can only reach"),
              "HC-V0750-C2 false-premise sentence removed");
-  assertContains(onboard, "consumer wins on conflict",             "HC-V0750-C3 consumer-override merge semantics");
+  assertTrue(!onboard.includes("consumer wins on conflict"),       "HC-V0750-C3 consumer-override merge semantics removed (v0.83.0)");
 }
 
 // ---------------------------------------------------------------------------
