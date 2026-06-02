@@ -559,6 +559,18 @@ async function caseCSMIG1CoworkAggregation() {
   assertTrue("CS-MIG-1: cowork manifest.json exists", fs.existsSync(bpManifestPath));
   const bpMan = JSON.parse(fs.readFileSync(bpManifestPath, "utf8"));
 
+  // FLN-v79-5 (v0.82.1): derive expected counts from manifest.claude_surface[]
+  // groupBy. Replaces the previous hardcoded 47/38/3/6 magic numbers that
+  // required lockstep bumps every cycle. CS-MIG-1 count posture is unchanged
+  // (manifest still has 47 entries); only the assertion mechanic is derived.
+  const _cs = Array.isArray(bpMan.claude_surface) ? bpMan.claude_surface : [];
+  const _expected = {
+    total: _cs.length,
+    skill: _cs.filter(e => e.kind === "skill").length,
+    command: _cs.filter(e => e.kind === "command").length,
+    resolver: _cs.filter(e => e.kind === "claude_md_row" && e.table === "resolvers").length,
+  };
+
   assertTrue("CS-MIG-1: cowork version >= 0.8.0",
     require("./helpers/semver-helper").versionAtLeast(bpMan.version, "0.8.0"),
     `got: ${bpMan.version}`);
@@ -593,6 +605,17 @@ async function caseCSMIG1CoworkAggregation() {
   // claude_md_row resolver entries — v0.6.0 ships 6 (v0.4.0's 5 Cowork + Daily Hub + Weekly Hub + Monthly Hub + Prompts, plus v0.44.0's new Cowork About).
   const coworkRows = out.rows.resolvers.filter((r) => r.owner === "cowork");
   assertEq("CS-MIG-1: exactly 6 resolver rows owned by cowork", coworkRows.length, 6);
+
+  // HC-V0821-C1: derivation-equality check (FLN-v79-5).
+  assertEq("HC-V0821-C1.1: contributions length matches manifest derivation",
+    out.registry.contributions["cowork"].length, _expected.total);
+  assertEq("HC-V0821-C1.2: skill entries match manifest derivation",
+    skillEntries.length, _expected.skill);
+  assertEq("HC-V0821-C1.3: command entries match manifest derivation",
+    cmdEntries.length, _expected.command);
+  assertEq("HC-V0821-C1.4: resolver rows match manifest derivation",
+    coworkRows.length, _expected.resolver);
+
   const coworkHubRow = coworkRows.find((r) => r.topic === "Cowork");
   assertTrue("CS-MIG-1: Cowork resolver row present", !!coworkHubRow);
   assertEq("CS-MIG-1: Cowork resolver command is '/cowork'", coworkHubRow && coworkHubRow.command, "/cowork");
