@@ -202,6 +202,7 @@ function makeMomentShim(input) {
     startOf(_unit) { suffix = "T00:00:00-06:00"; return this; },
     endOf(_unit) { suffix = "T23:59:59-06:00"; return this; },
     format() { return datePart + suffix; },
+    valueOf() { return new Date(datePart + suffix).getTime(); },
   };
 }
 const windowShim = { moment: (input) => makeMomentShim(input) };
@@ -1460,6 +1461,21 @@ try {
 } catch (e) {
   assertTrue("AF-V073-3: native-Date _resolveTimeWindow fallback reachable", false, e && e.message);
 }
+
+// ── HC-V0841-A3: inWindow numeric ISO compare ─────────────────────────────
+console.log("\n--- HC-V0841-A3: inWindow uses numeric epoch compare for ISO timestamps ---");
+
+assertTrue("HC-V0841-A3.1 source references window.moment(...).valueOf() for ISO compare",
+  /window\.moment\([^)]+\)\.valueOf\(\)/.test(src),
+  "activity-feed.js inWindow must parse ISO strings via moment().valueOf() before compare");
+
+assertTrue("HC-V0841-A3.2 source uses Number.isFinite guard on parsed timestamps",
+  /Number\.isFinite\([^)]+\)/.test(src),
+  "activity-feed.js inWindow must guard against malformed ISO inputs with Number.isFinite");
+
+// Note: full execution-based exercise of inWindow is out of scope here —
+// requires Dataview shim. A3 is a source-lint guard against future
+// regressions to lexicographic ISO compare.
 
 // ── Summary ───────────────────────────────────────────────────────────────
 
