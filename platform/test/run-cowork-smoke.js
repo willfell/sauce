@@ -3698,6 +3698,120 @@ function assertCoworkV068Shape() {
     }
 }
 
+// HC-V0830-A1: materialized engagement-type JSONs present in workshop dogfood vault
+{
+    const label = "HC-V0830-A1 dogfood: spice/cowork/context/engagement-types/*.json materialized";
+    try {
+        const dogfoodDir = path.join(ROOT, "spice/cowork/context/engagement-types");
+        for (const type of ["personal", "w2-fte", "consulting"]) {
+            const dest = path.join(dogfoodDir, `${type}.json`);
+            assertTrue(fs.existsSync(dest),
+                `${label}: missing ${type}.json at ${dest}`);
+        }
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0830-A2: materialized JSONs parse + match workshop source content
+{
+    const label = "HC-V0830-A2 dogfood: materialized engagement-type JSONs match workshop source";
+    try {
+        for (const type of ["personal", "w2-fte", "consulting"]) {
+            const source = JSON.parse(fs.readFileSync(path.join(BP, `engagement-types/${type}.json`), "utf8"));
+            const dest = JSON.parse(fs.readFileSync(path.join(ROOT, `spice/cowork/context/engagement-types/${type}.json`), "utf8"));
+            assertTrue(JSON.stringify(source) === JSON.stringify(dest),
+                `${label}: ${type}.json content drift between workshop source and materialized dest`);
+        }
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0830-A3: materialized JSONs carry required schema fields
+{
+    const label = "HC-V0830-A3 dogfood: materialized JSONs carry required schema fields";
+    try {
+        const required = ["id", "tripwire_aspects", "render_aspects", "default_cadences", "supported_cadences", "required_fields"];
+        for (const type of ["personal", "w2-fte", "consulting"]) {
+            const dest = JSON.parse(fs.readFileSync(path.join(ROOT, `spice/cowork/context/engagement-types/${type}.json`), "utf8"));
+            for (const field of required) {
+                assertTrue(Object.prototype.hasOwnProperty.call(dest, field),
+                    `${label}: ${type}.json missing required field '${field}'`);
+            }
+        }
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0830-B1..B5: each atomic-note orchestrator references the materialized engagement-type path
+{
+    const orchestrators = ["midday-tripwire", "morning-briefing", "eod-review", "weekly-review", "monthly-review"];
+    const expectedPath = "spice/cowork/context/engagement-types/";
+    const removedPhrase = "load type manifest";
+    for (let i = 0; i < orchestrators.length; i++) {
+        const orch = orchestrators[i];
+        const label = `HC-V0830-B${i + 1} ${orch}/SKILL.md references materialized engagement-type path + removes vague 'load type manifest' phrasing`;
+        try {
+            const skill = fs.readFileSync(path.join(BP, `skills/orchestrators/${orch}/SKILL.md`), "utf8");
+            assertTrue(skill.includes(expectedPath),
+                `${label}: SKILL.md missing canonical path substring '${expectedPath}'`);
+            assertTrue(!skill.toLowerCase().includes(removedPhrase),
+                `${label}: SKILL.md still contains vague phrasing '${removedPhrase}'`);
+        } catch (e) {
+            failed++; console.error(`FAIL  ${label}: ${e.message}`);
+        }
+    }
+}
+
+// HC-V0830-C1: bootstrap-vault/SKILL.md references materialized engagement-type path + drops workshop_path engagement-type resolution
+{
+    const label = "HC-V0830-C1 bootstrap-vault/SKILL.md references materialized engagement-type path";
+    try {
+        const skill = fs.readFileSync(path.join(BP, "skills/orchestrators/bootstrap-vault/SKILL.md"), "utf8");
+        assertTrue(skill.includes("spice/cowork/context/engagement-types/"),
+            `${label}: missing canonical path 'spice/cowork/context/engagement-types/'`);
+        assertTrue(!/Read\s+`platform\/blueprints\/cowork\/engagement-types/.test(skill),
+            `${label}: still references workshop path 'platform/blueprints/cowork/engagement-types/' for engagement-type read`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0830-C2: onboard-scheduled-jobs/SKILL.md references materialized path + drops workshop_manifest_path composition + override check
+{
+    const label = "HC-V0830-C2 onboard-scheduled-jobs/SKILL.md references materialized path; drops workshop_manifest_path + override logic";
+    try {
+        const skill = fs.readFileSync(path.join(BP, "skills/orchestrators/onboard-scheduled-jobs/SKILL.md"), "utf8");
+        assertTrue(skill.includes("spice/cowork/context/engagement-types/"),
+            `${label}: missing canonical path 'spice/cowork/context/engagement-types/'`);
+        assertTrue(!skill.includes("workshop_manifest_path"),
+            `${label}: still composes 'workshop_manifest_path'`);
+        assertTrue(!skill.includes("type_manifest_consumer"),
+            `${label}: still references 'type_manifest_consumer' override variable`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0830-D1: cowork-customization-contract.md STOCK table includes engagement-types/*.json row
+{
+    const label = "HC-V0830-D1 cowork-customization-contract.md STOCK table mentions engagement-types/*.json";
+    try {
+        const contract = fs.readFileSync(path.join(ROOT, "Docs/agent-guides/cowork-customization-contract.md"), "utf8");
+        const stockSectionStart = contract.indexOf("## STOCK");
+        const nextSectionStart  = contract.indexOf("## USER", stockSectionStart);
+        assertTrue(stockSectionStart !== -1 && nextSectionStart !== -1 && nextSectionStart > stockSectionStart,
+            `${label}: could not locate '## STOCK' or '## USER' sections in customization contract`);
+        const stockBlock = contract.slice(stockSectionStart, nextSectionStart);
+        assertTrue(stockBlock.includes("engagement-types/"),
+            `${label}: STOCK table missing 'engagement-types/' row`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
 (function main() {
   console.log("--- shared contracts ---");
   checkSharedContracts();
