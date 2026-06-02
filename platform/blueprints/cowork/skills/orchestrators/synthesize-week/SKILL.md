@@ -1,14 +1,14 @@
 ---
 name: cowork:synthesize-week
 description: End-of-week synthesis (Tier 2). Reads the past 7 daily memory.md files for the engagement, composes a voice-applied weekly-pattern paragraph + ≤5 carry-forward bullets, and writes them to spice/cowork/memory/<engagement_id>/YYYY/MM-Month/YYYY-Www/synthesis.md. Pure synthesis — does not modify any Tier 0 (tick) or Tier 1 (daily) memory files. Phrasings = "synthesize this week's pattern", "weekly memory synthesis", "tier 2 roll-up".
-schedule: Cron-driven per (engagement, week); typically Friday 17:00 (after weekly-review)
+schedule: Cron-driven per (engagement, week); typically Friday 17:30 (after synthesize-day's 17:20 fire so Friday's data is included in the roll-up)
 scope: shared
 tags: [cowork, orchestrator, synthesis, memory, weekly, background]
 ---
 
 # cowork:synthesize-week
 
-End-of-week memory synthesis (Tier 2). Fires Friday 17:00 after `cowork:weekly-review`. Reads the past 7 daily `memory.md` files via `cowork:read-memory`. Composes a voice-applied 3-paragraph weekly-pattern + ≤5 carry-forward bullets at `spice/cowork/memory/<engagement_id>/<YYYY>/<MM-Month>/<YYYY-Www>/synthesis.md`.
+End-of-week memory synthesis (Tier 2). Fires Friday 17:30 after `cowork:synthesize-day`'s 17:20 fire (so Friday's daily memory is captured in the roll-up). Reads the past 7 daily `memory.md` files via `cowork:read-memory`. Composes a voice-applied 3-paragraph weekly-pattern + ≤5 carry-forward bullets at `spice/cowork/memory/<engagement_id>/<YYYY>/<MM-Month>/<YYYY-Www>/synthesis.md`.
 
 Pure synthesis. Does not modify Tier 0 (tick) or Tier 1 (daily) memory files. Background-only — never touches the weekly-review atomic note. Idempotent re-fires within the same ISO week REPLACE the synthesis body while preserving `created_at` + days-covered list.
 

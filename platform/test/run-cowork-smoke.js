@@ -836,9 +836,9 @@ function assertCoworkV068Shape() {
   assertTrue(fileSources.includes("helpers/cowork-latest-runs.js"),
     "V068-MANIFEST-FILES: manifest files[] declares helpers/cowork-latest-runs.js");
 
-  // V0750-VERSION: cowork blueprint version bumped to 0.24.0 (was 0.23.0 in v0.84.0; MINOR bump for v0.85.0 — adds read-memory sub-skill + synthesize-week orchestrator + cowork-weekly-synthesis rule_fragment + compose-memory-callouts helper).
-  assertTrue(manifest.version === "0.24.0",
-    `V0750-VERSION: cowork manifest.version === "0.24.0" (got ${JSON.stringify(manifest.version)})`);
+  // V0750-VERSION: cowork blueprint version bumped to 0.24.1 (was 0.24.0 in v0.85.0; PATCH bump for v0.85.1 S2 — synthesize-week default cron 0 17 -> 30 17 so Friday's synthesize-day at 17:20 lands before the weekly roll-up).
+  assertTrue(manifest.version === "0.24.1",
+    `V0750-VERSION: cowork manifest.version === "0.24.1" (got ${JSON.stringify(manifest.version)})`);
 }
 
 // ---------------------------------------------------------------------------
@@ -4283,6 +4283,30 @@ function assertCoworkV068Shape() {
             `${label}: missing synthesize-week reference`);
         assertTrue(/Friday|0 17 \* \* 5/.test(skill),
             `${label}: missing Friday cron default suggestion`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0851-B1: synthesize-week + onboard cadence walk default cron 30 17 (after synthesize-day)
+{
+    const label = "HC-V0851-B1 synthesize-week + onboard cadence walk Friday 17:30 default";
+    try {
+        const onboard = fs.readFileSync(path.join(BP, "skills/orchestrators/onboard-scheduled-jobs/SKILL.md"), "utf8");
+        const syn = fs.readFileSync(path.join(BP, "skills/orchestrators/synthesize-week/SKILL.md"), "utf8");
+
+        // Onboard walk: must propose 30 17 NOT 0 17 for synthesize-week
+        const wwIdx = onboard.indexOf("synthesize-week");
+        assertTrue(wwIdx > 0, `${label}: onboard walk missing synthesize-week entry`);
+        const wwBlock = onboard.slice(wwIdx, wwIdx + 1200);
+        assertTrue(/30 17 \* \* 5/.test(wwBlock),
+            `${label}: onboard cadence walk for synthesize-week missing '30 17 * * 5' cron`);
+        assertTrue(!/`0 17 \* \* 5`/.test(wwBlock),
+            `${label}: onboard cadence walk still has legacy '0 17 * * 5' default in synthesize-week block`);
+
+        // synthesize-week SKILL.md schedule line
+        assertTrue(/17:30/.test(syn) || /30 17 \* \* 5/.test(syn),
+            `${label}: synthesize-week SKILL.md schedule line missing 17:30 default`);
     } catch (e) {
         failed++; console.error(`FAIL  ${label}: ${e.message}`);
     }
