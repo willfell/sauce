@@ -5101,6 +5101,25 @@ async function caseHCV0821A1() {
   });
 }
 
+// HC-V0821-B1 — parseYamlIsh accepts hyphenated keys at top level and nested mcps:
+// (FLN-v82-3: regex /^([a-z_]+):/ silently dropped keys with hyphens; widened to
+// /^([a-z_][a-z0-9_-]*):/. Custom MCP kinds like lharries-whatsapp now parse.)
+async function caseHCV0821B1() {
+  console.log("\n--- Case HC-V0821-B1: parseYamlIsh accepts hyphenated keys ---");
+  const bp = path.resolve(__dirname, "../blueprints/cowork");
+  const cbDryRun = require(path.join(bp, "helpers", "context-builder-dry-run.js"));
+  const parseYamlIsh = cbDryRun._parseYamlIsh;
+
+  // B1.1 — Top-level hyphenated key parses, not dropped.
+  const top = parseYamlIsh("custom-kind: chatlike\n");
+  assertTrue("HC-V0821-B1.1: top-level hyphenated key parses", top["custom-kind"] === "chatlike");
+
+  // B1.2 — Nested hyphenated key under mcps: parses, value resolves.
+  const nested = parseYamlIsh("mcps:\n  lharries-whatsapp:\n    served_by: lharries\n");
+  assertTrue("HC-V0821-B1.2: nested hyphenated key under mcps: parses",
+    nested.mcps && nested.mcps["lharries-whatsapp"] && nested.mcps["lharries-whatsapp"].served_by === "lharries");
+}
+
 // v0.30.0 S1.5 — TDD-first cases for materializeSkills (cowork blueprint
 // helper that copies <workshop>/platform/<bp>/skills/<src> → <vault>/<dest>
 // with {{skills_dir}} substitution + Option B overwrite semantics).
@@ -7339,6 +7358,7 @@ async function caseFA2RuleFragmentsExtends() {
 
   // v0.82.1 S1 — resetSourceContributions per-source reset (FLN-v82-2).
   await caseHCV0821A1();
+  await caseHCV0821B1();
 
   // v0.30.0 S1.5 — materializeSkills (cowork blueprint installer helper).
   await caseHCMS1OrchestratorWrite();
