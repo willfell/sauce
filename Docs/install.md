@@ -686,3 +686,47 @@ sauce update --bump-pins   # or: sauce update --force
 ```
 
 **FLN-v83-2 workaround note.** If `sauce update --bump-pins` bumps the workshop pin but leaves the cowork blueprint pin at `0.22.0` (known bug; inconsistent across machines), manually edit `ranch/platform-subscription.json` to set `"cowork": "0.23.0"` and re-run `sauce update` (no `--bump-pins` needed on the second run). Verify cowork materialized by checking that `spice/cowork/context/engagement-types/w2-fte.json` is present on disk and that `spice/cowork/memory/` is accessible (will be created on first `capture-tick` run).
+
+> [!success] FLN-v83-2 closed in v0.85.0
+> v0.85.0 §0.1 ships a defensive hardening to `handleBumpPins`'s workshop-path resolution. v0.85.0+ deploys should no longer require this jq workaround — but real-world deploy validation on accuris/headspace is still owed (FLN-v85-1). If `--bump-pins` still silently skips cowork on v0.85.0+, fall back to the manual `ranch/platform-subscription.json` edit above and file a bug.
+
+---
+
+## Upgrading from v0.84.x to v0.85.0
+
+MINOR release. `sauce update --bump-pins` should work cleanly (v0.85.0 §0.1 closes FLN-v83-2's `--bump-pins` blueprint-pin handling — but see the validation caveat below). One required post-deploy user action (re-run `cowork:onboard-scheduled-jobs`).
+
+What changes:
+
+- **Workshop:** `0.84.4` → `0.85.0`. Tier 2 of the cowork continuous-memory architecture + the load-bearing structured-output read-memory primitive.
+- **cowork:** `0.23.0` → `0.24.0` (MINOR — new install surface: 1 new sub-skill `cowork:read-memory` + 1 new orchestrator `cowork:synthesize-week` + 2 new pure helpers + 1 new canonical type `cowork-weekly-synthesis` + rule_fragment + customization-contract STOCK row).
+- **Engagement-types schema:** `0.4.0` → `0.5.0` (additive `synthesize_week` field on all 3 standard types — personal / w2-fte / consulting).
+
+**NEW sub-skill `cowork:read-memory`.** Single load-bearing structured-output API for memory-aware orchestrators — returns `{ yesterday, today_ticks, week_synthesis, carry_forward }`. Materializes at `.claude/skills/cowork/skills/read-memory/SKILL.md` (FLN-v79-4 nested sub-skill dest). The morning-briefing's prior inline file-read step 3a is now a thin shim that calls this sub-skill twice + composes output via a new pure helper.
+
+**NEW orchestrator `cowork:synthesize-week` (Friday 17:00).** Reads the week-window (Mon..Fri) for each engagement via `cowork:read-memory`; composes a voice-applied weekly-pattern paragraph (≤300 words) + ≤5 carry-forward bullets; writes to a NEW deep path `spice/cowork/memory/<engagement>/YYYY/MM-Month/YYYY-Www/synthesis.md`. Idempotent re-fires within the same ISO week replace the body while preserving `created_at`. Materializes at `.claude/skills/cowork/synthesize-week/SKILL.md` (FLN-v79-4 flat orchestrator dest).
+
+**Morning-briefing byte-identical refactor.** `morning-briefing/SKILL.md` step 3a now calls `cowork:read-memory` twice (yesterday day + today tick) and pipes results through a new `composeMemoryCallouts` pure helper. The composed callout output is **byte-identical** to v0.84.0 — no consumer-visible change in the briefing body or callout text. Golden-fixture HC-V0850-C3..C5 asserts byte equality.
+
+**§0.1 `sauce update --bump-pins` defensive hardening.** `handleBumpPins`'s `_resolveWorkshopPath` now detects when `installed.workshop_path` (recorded at first install) diverges from the actual on-disk path (the `__filename` ancestry walk) and prefers ancestry. This fix targets the stale Cellar keg scenario that surfaced on accuris/headspace at v0.83.0/v0.84.0 deploy (where `sauce update --bump-pins` resolved the workshop path to a stale Homebrew Cellar keg and silently no-op'd cowork's pin bump). **v0.85.0+ deploys should not require the v0.83.0/v0.84.0 jq workaround.** Real-world validation owed at deploy (FLN-v85-1).
+
+**§0.2 Visible `## Memory` section on Cowork.md hub.** Between Engagements + cadences and About. Inline dataviewjs lists 5 most-recent cowork-memory files cross-engagement. Re-rendered automatically by the next `cowork:bootstrap-vault` or `cowork:onboard-scheduled-jobs` run; or hand-author from the visible source if needed (the section uses standard claude_surface marker pairs).
+
+**§0.3 Atomic-note `[!quote]- Memory log` backlink footer.** Morning-briefing / midday-tripwire / eod-review `## Write` step now emit a small `[!quote]-` callout linking back to today's `memory.md` for the active engagement. One-click pivot from any atomic note to the day's tick stream + synthesis.
+
+**New canonical type `cowork-weekly-synthesis`.** Frontmatter shape: `type` + `engagement_id` + `iso_week` + `week_start` + `week_end` + `days_covered` + `created_at` + `synthesis_at` + `summary`. Rule-engine `naming_pattern`: `^synthesis\.md$`. activity-feed `_DEFAULT_BLUEPRINTS` picks up synthesis files automatically for hub-render.
+
+**Required post-deploy user action: re-run `cowork:onboard-scheduled-jobs` after the update.** The new `synthesize_week` cadence will not appear in your vault's Cowork.md nav table until `onboard-scheduled-jobs` walks the updated engagement-type JSONs and registers it. Run `/cowork` → `onboard-scheduled-jobs` once per consumer vault after `sauce update --bump-pins`.
+
+```bash
+# Bump consumer subscription pins (workshop + cowork) — edit each vault's
+# ranch/platform-subscription.json:
+#   "workshop_version": "0.84.x" → "0.85.0"
+#   "cowork": "0.23.0" → "0.24.0"
+# Then:
+sauce update --bump-pins   # or: sauce update --force
+```
+
+After the update, verify by checking that `spice/cowork/context/engagement-types/w2-fte.json` (or whichever type you use) shows `synthesize_week: true` in its `default_cadences` block. On Friday afternoon, the new `cowork:synthesize-week` orchestrator should fire at 17:00 and produce a `spice/cowork/memory/<engagement>/YYYY/MM-Month/YYYY-Www/synthesis.md` file with a voice-applied weekly-pattern paragraph + carry-forward bullets.
+
+**Optional: workshop self-install drift catch-up.** The workshop dogfood subscription's `workshop_version` had drifted to `0.84.0` during the mid-cycle daily-blueprint polish PATCHes (v0.84.2/3/4) shipped from another chat. S11 absorbed the bump to `0.85.0` in lockstep. Consumer vaults whose subscriptions had been tracking v0.84.x will catch up to v0.85.0 in one `sauce update --bump-pins` run (no manual jq required if §0.1 hardening holds).

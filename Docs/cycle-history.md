@@ -4,6 +4,45 @@ This file archives the per-cycle status snapshots that previously lived in `CLAU
 
 ---
 
+## v0.85.0 tier-2-and-read-memory + polish-prelude CLOSED 2026-06-02
+
+Workshop 0.84.4 → **0.85.0** (MINOR). Predecessor is v0.84.4 via the in-cycle polish PATCH chain v0.84.1 → v0.84.2 → v0.84.3 → v0.84.4 (three of those PATCHes shipped from another chat in parallel between this cycle's S1 and S2 — disjoint daily-blueprint scope; cohabitation worked cleanly; S11 absorbed the workshop_version bump 0.84.4 → 0.85.0). **Tier 2 of the cowork continuous-memory architecture + the load-bearing read-memory primitive that makes v0.86.0's cross-orchestrator wire-through mechanical.**
+
+**Memory-leverage core (8 stages S2..S11 + 5 polish-bundle follow-on commits):**
+
+- **NEW sub-skill `cowork:read-memory`** at `skills/skills/read-memory/SKILL.md` (FLN-v79-4 nested dest). Structured-output API returning `{ yesterday, today_ticks, week_synthesis, carry_forward }`. The primitive that decouples downstream orchestrators from raw-md parse logic.
+- **NEW pure helper `read-memory-helper.js`** — `parseMemoryFile` + `parseSynthesisFile`. Never throws; CRLF-tolerant; tick / synthesis / carry-forward parsers harden against 5 real-world edge cases (CRLF line endings; bare frontmatter values; back-to-back ticks; paragraph collapse; non-bullet bleeding into carry-forward bullets). All 5 fixed at S6 polish (`c2ac5c2`) BEFORE the byte-identical contract on `composeMemoryCallouts` was load-bearing.
+- **NEW orchestrator `cowork:synthesize-week`** at `skills/orchestrators/synthesize-week/SKILL.md` (FLN-v79-4 flat orchestrator dest). Friday 17:00 cron `0 17 * * 5`; reads week-window via `cowork:read-memory`; composes voice-applied weekly-pattern paragraph (≤300 words) + ≤5 carry-forward bullets; writes `spice/cowork/memory/<engagement>/YYYY/MM-Month/YYYY-Www/synthesis.md`; idempotent re-fires within the same ISO week replace body while preserving `created_at`.
+- **NEW pure helper `compose-memory-callouts.js`** — `composeMemoryCallouts(outputYesterday, outputOvernight) -> { yesterdayCalloutMd, overnightCalloutMd }`. Byte-identical to v0.84.0 hand-composed prose. Golden-fixture HC-V0850-C3..C5 asserts byte equality.
+- **`morning-briefing/SKILL.md` step 3a refactored** to call `cowork:read-memory` twice + `composeMemoryCallouts` once instead of inline file-read + body-composition prose. Output BYTE-IDENTICAL to v0.84.0.
+- **Engagement-types schema 0.4.0 → 0.5.0** (additive `synthesize_week`). All 3 standard types (personal / w2-fte / consulting) default `synthesize_week: true`; w2-fte preserves its `monthly: false` posture.
+- **NEW canonical type `cowork-weekly-synthesis`** + rule_fragment. Frontmatter: `type` + `engagement_id` + `iso_week` + `week_start` + `week_end` + `days_covered` + `created_at` + `synthesis_at` + `summary`. `naming_pattern: ^synthesis\.md$` (escape hygiene surfaced at S10 polish `bd10160`).
+- **`onboard-scheduled-jobs/SKILL.md` cadence walk** gains synthesize-week entry with Friday cron default.
+- **`cowork-customization-contract.md` STOCK row** for `spice/cowork/memory/**/synthesis.md`.
+- **`activity-feed.js` `_DEFAULT_BLUEPRINTS`** gains `cowork-weekly-synthesis` for hub-render.
+- **V0750-VERSION cowork-pin** bumped 0.23.0 → 0.24.0 in lockstep (FLN-v821-1 pattern; S6 polish `b18d3eb`).
+- **HC-V0740-1 engagement-type schema exact-pin** bumped 0.4.0 → 0.5.0 in lockstep (FLN-v841-1 pattern; surfaced at S5, value-change landed at S9).
+
+**Polish prelude (4 items folded from would-be v0.84.2):**
+- **§0.1 FLN-v83-2 — `handleBumpPins` defensive hardening (CLOSED).** `_resolveWorkshopPath` now detects when `installed.workshop_path` diverges from the `__filename` ancestry walk (stale Cellar keg scenario) and prefers ancestry. Design's "skips when N-2+ behind" hypothesis was disconfirmed during S1 investigation; the real-world bug pattern is stale Cellar keg paths, not version-skip distance. **Real-world deploy-time validation on accuris/headspace still owed** (FLN-v85-1).
+- **§0.2 Visible `## Memory` section on Cowork.md hub** — inline dataviewjs lists 5 most-recent cowork-memory files cross-engagement; rendered between Engagements + cadences and About.
+- **§0.3 Atomic-note `[!quote]- Memory log` backlink footer** on morning-briefing / midday-tripwire / eod-review `## Write` step — one-click pivot from any atomic note to today's `memory.md`. S3 polish (`862c3a2`) added date-token + indent + NEW-prefix parity.
+- **§0.4 Headspace eod-review monochrome-callout post-deploy validation** owed at v0.85.0 deploy; no commit unless regression.
+
+cowork@0.23.0 → **0.24.0** (MINOR — new install surface: 1 new sub-skill + 1 new orchestrator + 2 new pure helpers + new canonical type + rule_fragment + customization contract STOCK row). Workshop dogfood install fired cowork's loop body cleanly under the new MINOR (no version-skip surprise — FLN-v821-2 pattern naturally satisfied).
+
+**Test surface:** ~24 new HC-V0850-* sub-asserts across A1..A4 (parseMemoryFile) / B1..B5 (parseSynthesisFile) / C1..C5 (composeMemoryCallouts contract — C3..C5 are golden fixtures asserting v0.84.0 prose byte equality) / D1×3 (read-memory SKILL.md structured-output) / E1..E2 (synthesize-week orchestrator prose-lint) / F1 (engagement-types 0.5.0 schema) / G1 (cowork-weekly-synthesis canonical type discriminator + rule_fragment) / G2 (onboard cadence walk) / G3×3 (STOCK row + activity-feed `_DEFAULT_BLUEPRINTS` + `run-cli.js` HC-V0850-G1 dispatch wiring). 2 HC-V0840-C1/C2 superseded at S8 (commented stub left as supersedure note — FLN-v85-2 pattern). Pre-existing HC-V0740-1 exact-pin bumped 0.4.0 → 0.5.0 in `run-helper-cases.js`. V0750-VERSION cowork-pin bumped 0.23.0 → 0.24.0 in `run-cowork-smoke.js`. Final smoke **864 passed / 0 failed**. Preflight `version-sync ok: 0.85.0` ALL GREEN.
+
+**Stage chain:** S0 plan-commit (`1e8d7f8`) → S1 (`a7b61c5`) → mid-cycle other-chat polish PATCHes (`aa9e6fd`/`f116c3e`/`4f8082c`) → S2 (`c2649a8`) → S3 main (`48e7203`) → S3 polish (`862c3a2`) → S5 main (`7ade9b4`) → S5 polish (`b6a283f`) → S6 main (`63c2bfa`) → S6 polish V0750 (`b18d3eb`) → S6 polish parser (`c2ac5c2`) → S7 (`77c6d57`) → S8 main (`51995e9`) → S8 polish (`c1daaa4`) → S9 (`729d013`) → S10 main (`bb984f9`) → S10 polish (`bd10160`) → S11 (`27ae6a8`) → S12 cycle-close (this commit). 16 commits across 12 logical stages.
+
+**FLNs:** FLN-v83-2 CLOSED (deploy validation owed via FLN-v85-1). FLN-v841-1 partially closed (HC-V0740-1 engagement-type schema pin closed; V0750-VERSION cowork-pin still exact-pin candidate for `versionEquals()` future refactor). 3 NEW: FLN-v85-1 (deploy-time validation on accuris/headspace owed); FLN-v85-2 (formalize prior-cycle assertion supersedure pattern); FLN-v85-3 (test-pin escape hygiene for JSON-stored naming_patterns).
+
+**Carry-forwards.** v0.86.0 next: cross-orchestrator memory wire-through (FLN-v84-2 — midday-tripwire / eod-review / weekly-review / monthly-review via `cowork:read-memory`) per strict-sequence per `Docs/plans/2026-06-02-memory-leverage-sequencing-decision.md`. The v0.85.0 MB pre-flight 3a + body composition pattern copy-and-adapts directly to each remaining orchestrator. ~5-7 stages.
+
+**Post-deploy actions.** Re-run `cowork:onboard-scheduled-jobs` on each consumer vault to register the new `synthesize_week` cadence in Cowork.md after `sauce update --bump-pins` to v0.85.0. v0.85.0+ deploys should no longer require the v0.83.0/v0.84.0 jq workaround (pending FLN-v85-1 confirmation). Verify on Friday afternoon: does `cowork:synthesize-week` fire correctly + produce the canonical `synthesis.md` at the deep path? Verify morning-briefing output is byte-equal to a v0.84.4 reference fire.
+
+Design + plan + result: `Docs/plans/2026-06-02-v0.85.0-tier-2-and-read-memory-*.md`. Handoff: `Docs/prompts/2026-06-02-post-v0.85.0-next-cycle-handoff.md`.
+
 ## v0.84.4 polish-pills CLOSED 2026-06-02
 
 Workshop 0.84.3 → **0.84.4** (PATCH). Three CSS polish tweaks on top of v0.84.3's right-aligned section-header pills, surfaced by post-deploy review of the workshop dashboard in Obsidian:
