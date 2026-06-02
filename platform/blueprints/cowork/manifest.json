@@ -1395,7 +1395,7 @@
             "type": "string"
           }
         },
-        "naming_pattern": "^synthesis.md$"
+        "naming_pattern": "^synthesis\\.md$"
       }
     },
     {

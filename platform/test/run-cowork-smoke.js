@@ -4255,8 +4255,8 @@ function assertCoworkV068Shape() {
             return eq === "cowork-weekly-synthesis";
         });
         assertTrue(!!wsFrag, `${label}: missing rule_fragment for cowork-weekly-synthesis`);
-        assertTrue(wsFrag && wsFrag.fragment && /synthesis\.md/.test(wsFrag.fragment.naming_pattern || ""),
-            `${label}: rule_fragment naming_pattern must match ^synthesis\\.md$`);
+        assertTrue(wsFrag && wsFrag.fragment && /^\^synthesis\\?\.md\$$/.test(wsFrag.fragment.naming_pattern || ""),
+            `${label}: rule_fragment naming_pattern must be '^synthesis\\.md$' (accepts escaped or unescaped period)`);
     } catch (e) {
         failed++; console.error(`FAIL  ${label}: ${e.message}`);
     }
