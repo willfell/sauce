@@ -4,6 +4,40 @@ This file archives the per-cycle status snapshots that previously lived in `CLAU
 
 ---
 
+## v0.87.0 semantic-memory-retrieval CLOSED 2026-06-02
+
+Workshop 0.86.0 → **0.87.0** (MINOR). FLN-v84-4 closed: semantic retrieval
+over accumulated memory corpus via sc-bridge `semantic-search` wrapper.
+NEW sub-skill `cowork:gather-semantic-memory` at `skills/skills/gather-
+semantic-memory/SKILL.md` (FLN-v79-4 sub-skill dest). Inputs: { engagement_id,
+anchor_text, top_k, exclude_window, min_similarity }. Output: structured
+matches[] array with similarity_score + synthesis_excerpt + day_or_week +
+tier per match. Tier 2 (synthesis.md) prioritized over Tier 1 (memory.md);
+Tier 0 (per-tick) excluded.
+
+NEW pure helper `compose-semantic-echoes-callout.js` exports
+`composeSemanticEchoesCallout(gatherOutput) -> string` rendering
+`[!quote]+ Echoes from your record` callout. Byte-identical to golden
+fixture (HC-V0870-B2). Null-data clean-omit for thin corpus / sc-bridge
+unavailable / SC index missing / empty matches.
+
+MB step 3b (NEW): composes anchor_text from dispatch_plan_summary +
+calendar + email summaries, invokes gather-semantic-memory with top_k=2,
+exclude_window=last-30d, min_similarity=0.45. Body composition appends
+Echoes callout after Overnight, before Memory log backlink. Existing MB
+steps 3b/3c renumbered to 3c/3d with cross-references updated.
+
+cowork 0.25.0 → 0.26.0 (MINOR; new install surface). 4 stage commits S0..S3;
+preflight version-sync ok: 0.87.0 ALL GREEN. ~10 HC-V0870-A1..D1 sub-asserts
+(~28 inner assertions). Smoke 902 → 929.
+
+Carry-forwards: v0.88.0 distill-week + auto-update prefs next per sequencing
+decision. FLN-v87-1 (corpus-density empirical validation owed at deploy),
+FLN-v87-2 (/cowork recall slash command deferred), FLN-v87-3 (Tier 2
+prioritization requires synthesize-week to have fired). FLN-v85-2/3/4,
+FLN-v86-1/2/3, §0.4 headspace validation still queued.
+Result doc: Docs/plans/2026-06-02-v0.87.0-semantic-memory-retrieval-result.md.
+
 ## v0.86.0 cross-orchestrator-wire-through CLOSED 2026-06-02
 
 Workshop 0.85.1 → **0.86.0** (MINOR). FLN-v84-2 closed: cross-orchestrator

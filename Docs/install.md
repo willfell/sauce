@@ -825,3 +825,57 @@ sauce update --bump-pins   # or: sauce update --force
 ```
 
 After the update, verify by checking that `.claude/skills/cowork/midday-tripwire/SKILL.md` references `cowork:read-memory` in its pre-flight section. On the next midday-tripwire / eod-review / weekly-review / monthly-review fire, the relevant `[!example]+` / `[!info]+` callout should appear in the atomic note's body (when the underlying memory file is present). If the underlying memory tier is absent, the callout silently omits — that's expected null-data behavior, not a regression.
+
+## Upgrading from v0.86.0 to v0.87.0
+
+MINOR release. `sauce update --bump-pins` should work cleanly. **No required user action for the cycle's headline behavior to ship cleanly** — the Echoes wire-through is additive + null-data gated. Morning-briefing output is byte-identical to v0.86.0 when sc-bridge or the Smart Connections plugin is absent; the Echoes callout surfaces only when both prerequisites are met AND the corpus has matches above threshold.
+
+What changes:
+
+- **Workshop:** `0.86.0` → `0.87.0`. Semantic-retrieval over memory (FLN-v84-4 CLOSED).
+- **cowork:** `0.25.0` → `0.26.0` (MINOR — new install surface: NEW sub-skill `cowork:gather-semantic-memory` at `skills/skills/gather-semantic-memory/SKILL.md` + NEW pure helper `compose-semantic-echoes-callout.js` in `files[]` + SKILL.md modification on morning-briefing).
+- **Engagement-types schema:** unchanged at `0.5.0`.
+- **smart-connections-bridge:** unchanged at `0.1.1` (existing `semantic-search` op covers v0.87.0 needs).
+
+**NEW sub-skill `cowork:gather-semantic-memory`** wraps `sc-bridge semantic-search` behind a structured-output API. Inputs `{ engagement_id, anchor_text, top_k, exclude_window, min_similarity }`; output `{ found, matches[], anchor_text_used, exclusion_count, error }` with one match per `{ path, similarity_score, day_or_week, tier, synthesis_excerpt }`. Tier 2 (synthesis.md) matches prioritized over Tier 1 (memory.md); Tier 0 (per-tick) excluded from retrieval scope. Graceful failure-mode taxonomy (`empty_anchor` / `sc_bridge_unavailable` / `index_unavailable` / `timeout` / empty `matches[]`) — sub-skill never throws.
+
+**NEW helper `composeSemanticEchoesCallout`** renders a `[!quote]+ Echoes from your record` callout listing up to `top_k` matches:
+
+```markdown
+> [!quote]+ Echoes from your record
+> Patterns from your past that resemble today's signal:
+> - **<day_or_week>** (similarity 0.NN) — _"<excerpt>"_
+```
+
+Byte-identical to a golden test fixture. Returns empty string when the gather output is null, `found: false`, or `matches[]` is empty.
+
+**MB step 3b auto-includes the Echoes callout when sc-bridge + SC index are available.** The new pre-flight step composes anchor_text from today's `dispatch_plan_summary` + `calendar_summary` + `email_summary` (≤500 chars total) and invokes the sub-skill with `top_k: 2`, `exclude_window: "last-30d"`, `min_similarity: 0.45`. Body composition appends the Echoes callout after the Overnight callout (or after the synopsis if Overnight + Yesterday were both empty), BEFORE the v0.85.0 `[!quote]- Memory log` backlink footer.
+
+### Required consumer setup for Echoes to surface
+
+For the Echoes callout to actually appear in MB output, BOTH of the following must be true on the consumer vault:
+
+1. **`smart-connections-bridge` mechanism MUST be subscribed** in `ranch/platform-subscription.json`. Check with:
+   ```bash
+   jq '.mechanisms[] | select(.name == "smart-connections-bridge")' ranch/platform-subscription.json
+   ```
+   If the query returns nothing, add `{ "name": "smart-connections-bridge", "version": "0.1.1" }` to the `mechanisms[]` array and re-run `sauce update`. The bridge ships the `sc-bridge` Node CLI that the new sub-skill wraps.
+
+2. **Smart Connections plugin MUST be installed + indexed in Obsidian.** Open Settings → Smart Connections in the consumer vault; verify the index status reports "ready" + the corpus size is at least ~50 memory files for meaningful retrieval. The plugin maintains the `.smart-env/multi/*.ajson` corpus files that the bridge reads.
+
+Without those two, **MB still fires normally** — the sub-skill returns `error: "sc_bridge_unavailable"` or `error: "index_unavailable"`, the helper returns empty string, and the Echoes callout cleanly omits from the body. No regression, no user-visible error. The rest of MB (yesterday's pattern, overnight ticks, dispatch plan, served-by callouts) is byte-identical to v0.86.0.
+
+```bash
+# Bump consumer subscription pins (workshop + cowork) — edit each vault's
+# ranch/platform-subscription.json:
+#   "workshop_version": "0.86.0" → "0.87.0"
+#   "cowork": "0.25.0" → "0.26.0"
+# Optionally (if not already subscribed) add to mechanisms[]:
+#   { "name": "smart-connections-bridge", "version": "0.1.1" }
+# Then:
+sauce update --bump-pins   # or: sauce update --force
+```
+
+After the update, verify by checking that `.claude/skills/cowork/skills/gather-semantic-memory/SKILL.md` exists in the consumer vault and that `.claude/skills/cowork/morning-briefing/SKILL.md` references `cowork:gather-semantic-memory` in its pre-flight step 3b. On the next morning-briefing fire (with sc-bridge subscribed + SC plugin indexed + ≥1 month of accumulated memory above the `exclude_window: "last-30d"` cutoff), the Echoes callout should appear in the atomic-note body. If any of those prerequisites is missing, the callout silently omits — expected null-data behavior, not a regression.
+
+**Optional post-deploy validation (FLN-v87-1).** The `min_similarity: 0.45` threshold is a design-time guess. Review the first 3-5 morning briefings on each consumer vault: if Echoes callouts surface obviously-unrelated matches, the threshold should be raised; if relevant matches are consistently filtered out (callout omits even on days with clear historical analogues), the threshold should be lowered. A v0.87.1 PATCH can ship the empirically-validated threshold.
