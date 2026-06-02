@@ -730,3 +730,66 @@ sauce update --bump-pins   # or: sauce update --force
 After the update, verify by checking that `spice/cowork/context/engagement-types/w2-fte.json` (or whichever type you use) shows `synthesize_week: true` in its `default_cadences` block. On Friday afternoon, the new `cowork:synthesize-week` orchestrator should fire at 17:00 and produce a `spice/cowork/memory/<engagement>/YYYY/MM-Month/YYYY-Www/synthesis.md` file with a voice-applied weekly-pattern paragraph + carry-forward bullets.
 
 **Optional: workshop self-install drift catch-up.** The workshop dogfood subscription's `workshop_version` had drifted to `0.84.0` during the mid-cycle daily-blueprint polish PATCHes (v0.84.2/3/4) shipped from another chat. S11 absorbed the bump to `0.85.0` in lockstep. Consumer vaults whose subscriptions had been tracking v0.84.x will catch up to v0.85.0 in one `sauce update --bump-pins` run (no manual jq required if §0.1 hardening holds).
+
+## Upgrading from v0.85.0 to v0.85.1
+
+PATCH release. Closes FLN-v85-1 (v0.85.0 §0.1's defensive hardening was insufficient for the active-pantry deploy layout) + fixes a synthesize-week Friday-timing miss. **One required user action when upgrading from v0.85.0:** hand-adjust each existing `cowork-synthesize-week-<engagement>` scheduled job's cron field (see below). All other changes are transparent.
+
+What changes:
+
+- **Workshop:** `0.85.0` → `0.85.1`. Bug-fix to `_resolveWorkshopPath` + cron-default tweak + active-pantry drift warning.
+- **cowork:** `0.24.0` → `0.24.1` (PATCH — SKILL.md prose change in synthesize-week + onboard-scheduled-jobs cadence walk).
+- **Engagement-types schema:** unchanged at `0.5.0`.
+
+**§1 `_resolveWorkshopPath` generalization (FLN-v85-1 CLOSED).** New `_isValidWorkshopRoot()` helper probes any candidate ancestor for a parseable `platform/manifest.json` with a `workshop_version` field. The ancestry walk no longer requires a `libexec/`-named ancestor, so `sauce update --bump-pins` now resolves cleanly across all three deploy layouts:
+
+- **brew Cellar** (`.../Cellar/sauce/0.85.x/libexec/platform/manifest.json`)
+- **active-pantry** (e.g., `.../Documents/obsidian/sync/workshop/sauce/platform/manifest.json`)
+- **in-vault pantry** (`.../vault/pantry/platform/manifest.json`)
+
+No `--workshop-path` flag dance required for any of the three. If you previously hand-passed `--workshop-path` on accuris/headspace to work around v0.85.0's libexec-only heuristic, you can drop it from your `sauce update` invocations going forward.
+
+**§2 `installed.workshop_path` auto-populated on first resolve.** `handleBumpPins` now writes the resolved workshop path back to `ranch/platform-installed.json` after first successful resolve (when the stored value was null or diverged). Future `sauce update --bump-pins` invocations short-circuit without re-walking the filesystem. Inspect via:
+
+```bash
+jq -r '.workshop_path' ranch/platform-installed.json
+```
+
+The value is durable + debuggable; if `sauce update` ever resolves to a surprising path, the divergence is now visible on disk.
+
+**§3 Synthesize-week default cron `0 17 * * 5 → 30 17 * * 5` (Friday 17:00 → 17:30).** Friday's synthesize-day fires at 17:20 (`cron 20 17 17 * * 1-5`). v0.85.0's synthesize-week default of `0 17` fired BEFORE synthesize-day, sees only Mon-Thu synthesized, drops Friday from the week roll-up. v0.85.1 moves the default to `30 17` (Friday 17:30, after synthesize-day's 17:20 fire) — captures Friday data in the week roll-up.
+
+**REQUIRED user action: hand-adjust existing scheduled jobs.** Scheduled jobs registered at v0.85.0 onboard via `cowork:onboard-scheduled-jobs` (e.g., `cowork-synthesize-week-accuris`) carry the old `0 17 * * 5` cron and **will NOT auto-update**. For each consumer vault with an existing `cowork-synthesize-week-<engagement>` task, edit the cron field once via the scheduled-tasks MCP. The one-liner pattern (adjust to your MCP's API):
+
+```text
+For each existing `cowork-synthesize-week-<engagement>` task:
+  Change cron from `0 17 * * 5` to `30 17 * * 5`.
+```
+
+After the edit, `sauce update --bump-pins` to pick up the v0.85.1 SKILL.md text (so the prose displayed by `/cowork` matches your active cron). Newly registered jobs (via a fresh `cowork:onboard-scheduled-jobs` walk) get the v0.85.1 default automatically.
+
+**§4 Active-pantry drift warning.** New `_warnIfActivePantryDrift()` helper in `cmd-update.js` detects when `sauce update` is running against an active-pantry checkout (heuristic: resolved workshop path does NOT contain `/Cellar/`) and runs `git fetch origin --quiet` + `git rev-list --count HEAD..origin/main`. If the checkout is N-behind `origin/main`, you'll see a stderr Notice:
+
+```
+sauce: active-pantry workshop is <N> commits behind origin/main.
+   Pull with: cd <workshop-path> && git pull --ff-only origin main
+```
+
+Best-effort: fetch failures emit a different Notice and don't block the install. This pre-empts the v0.85.0 deploy-time friction pattern (active-pantry was 189 commits behind; the just-shipped deploy fix never actually ran because the checkout was stale).
+
+**Required user action after `sauce update --bump-pins`:** none beyond the cron migration in §3 above. The §1 generalization + §2 auto-populate land transparently. The §4 drift warning is read-only — it surfaces N-behind state but doesn't modify anything.
+
+```bash
+# Bump consumer subscription pins (workshop + cowork) — edit each vault's
+# ranch/platform-subscription.json:
+#   "workshop_version": "0.85.0" → "0.85.1"
+#   "cowork": "0.24.0" → "0.24.1"
+# Then:
+sauce update --bump-pins   # or: sauce update --force
+
+# Hand-adjust each existing cowork-synthesize-week-<engagement> task's cron:
+#   0 17 * * 5  →  30 17 * * 5
+# (via your scheduled-tasks MCP)
+```
+
+After the update, verify the synthesize-week SKILL.md prose by checking `.claude/skills/cowork/synthesize-week/SKILL.md` shows `30 17 * * 5` (or "Friday 17:30") in its schedule line. On the next Friday afternoon, `cowork:synthesize-week` should fire at 17:30 (after the 17:20 synthesize-day fire) and produce a `spice/cowork/memory/<engagement>/YYYY/MM-Month/YYYY-Www/synthesis.md` file that includes Friday's data in the roll-up.

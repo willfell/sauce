@@ -4,6 +4,34 @@ This file archives the per-cycle status snapshots that previously lived in `CLAU
 
 ---
 
+## v0.85.1 deploy-mechanics-and-cron-fix CLOSED 2026-06-02
+
+Workshop 0.85.0 → **0.85.1** (PATCH). FLN-v85-1 closed: `_resolveWorkshopPath`
+generalized to walk for any ancestor with a valid sauce manifest (covers
+brew Cellar + active-pantry + in-vault pantry uniformly via `_isValidWorkshopRoot`
+helper). `installed.workshop_path` auto-populated on first resolve so future
+runs short-circuit without re-walk. Synthesize-week onboard default cron
+`0 17 * * 5` → `30 17 * * 5` (Friday 17:30, after synthesize-day's 17:20 —
+captures Friday data in the week roll-up). NEW `_warnIfActivePantryDrift`
+in cmd-update.js fires loud Notice when active-pantry is N-behind origin/main.
+
+Collateral: 4 pre-existing test fixtures (caseV0760B2/B3/B4 + 6 _bpRun callers
++ HC-V0850-G1) updated for hermeticity now that the helper accepts the real
+sauce-repo ancestry as a valid workshop root.
+
+cowork 0.24.0 → 0.24.1 (PATCH; SKILL.md prose). 6 stage commits S0..S5;
+preflight version-sync ok: 0.85.1 ALL GREEN; smoke 868/0. ~6 HC-V0851
+sub-asserts.
+
+Existing scheduled jobs registered at v0.85.0 onboard with `0 17 * * 5`
+won't auto-update — install.md upgrade section documents the one-line
+manual adjustment via scheduled-tasks MCP. NEW FLN-v85-4 candidate: ship
+cron migration hints in future default-change cycles.
+
+Carry-forwards: v0.86.0 cross-orchestrator wire-through next per sequencing
+decision. FLN-v85-2, FLN-v85-3, §0.4 headspace validation, FLN-v85-4 still
+queued. Result doc: Docs/plans/2026-06-02-v0.85.1-deploy-mechanics-and-cron-fix-result.md.
+
 ## v0.85.0 tier-2-and-read-memory + polish-prelude CLOSED 2026-06-02
 
 Workshop 0.84.4 → **0.85.0** (MINOR). Predecessor is v0.84.4 via the in-cycle polish PATCH chain v0.84.1 → v0.84.2 → v0.84.3 → v0.84.4 (three of those PATCHes shipped from another chat in parallel between this cycle's S1 and S2 — disjoint daily-blueprint scope; cohabitation worked cleanly; S11 absorbed the workshop_version bump 0.84.4 → 0.85.0). **Tier 2 of the cowork continuous-memory architecture + the load-bearing read-memory primitive that makes v0.86.0's cross-orchestrator wire-through mechanical.**
