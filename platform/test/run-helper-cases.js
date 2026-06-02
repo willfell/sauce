@@ -5018,6 +5018,89 @@ async function caseHCRF3() {
   });
 }
 
+// HC-V0821-A1 — resetSourceContributions wipes a source's contributions array
+// before the per-fragment loop runs (FLN-v82-2: ranch/rules/cowork.json grew
+// to ~7900 lines / 13x duplication because every install re-appended without
+// clearing prior runs' entries. New mechanic: caller resets per source per
+// run; applyRuleFragment is unchanged.)
+async function caseHCV0821A1() {
+  console.log("\n--- Case HC-V0821-A1: resetSourceContributions per-source reset (FLN-v82-2) ---");
+
+  // A1.1 — Reset wipes pre-existing entries for the named source only.
+  await withTempVault(async (dir) => {
+    fs.mkdirSync(path.join(dir, "ranch/rules"), { recursive: true });
+    const dupFrag = {
+      scope: { path_glob: "spice/trips/Trips.md" },
+      extends: "_canonical-vocab",
+      required_tags: [{ tag: "trip" }],
+    };
+    const otherFrag = {
+      scope: { path_glob: "spice/meetings/Meetings.md" },
+      extends: "_canonical-vocab",
+      required_tags: [{ tag: "meeting" }],
+    };
+    fs.writeFileSync(path.join(dir, "ranch/rules/trips.json"),
+      JSON.stringify({ contributions: {
+        trips: Array(12).fill(dupFrag),
+        meetings: Array(5).fill(otherFrag),
+      } }, null, 2));
+    const tp = makeTpStub(dir);
+    const { resetSourceContributions } = require("../install");
+    await resetSourceContributions(tp, "trips", "trips",
+      { rules_path: "ranch/rules" }, [], { commit: "x", tag: "x", dirty: false });
+    const written = JSON.parse(fs.readFileSync(path.join(dir, "ranch/rules/trips.json"), "utf8"));
+    assertEqual(written.contributions.trips.length, 0,
+      "HC-V0821-A1.1: source's contributions array reset to []");
+    assertEqual(written.contributions.meetings.length, 5,
+      "HC-V0821-A1.1: other source's contributions untouched");
+  });
+
+  // A1.2 — Reset on non-existent file is a graceful no-op (no error, no file created).
+  await withTempVault(async (dir) => {
+    fs.mkdirSync(path.join(dir, "ranch/rules"), { recursive: true });
+    const tp = makeTpStub(dir);
+    const { resetSourceContributions } = require("../install");
+    const history = [];
+    await resetSourceContributions(tp, "trips", "trips",
+      { rules_path: "ranch/rules" }, history, { commit: "x", tag: "x", dirty: false });
+    assertTrue("HC-V0821-A1.2: reset on missing file does not throw or create the file",
+      !fs.existsSync(path.join(dir, "ranch/rules/trips.json")));
+  });
+
+  // A1.3 — End-to-end: reset + apply two fragments → array length exactly 2 (the bloat is cleaned).
+  await withTempVault(async (dir) => {
+    fs.mkdirSync(path.join(dir, "ranch/rules"), { recursive: true });
+    const oldFrag = {
+      scope: { path_glob: "spice/trips/old.md" },
+      extends: "_canonical-vocab",
+      required_tags: [{ tag: "obsolete" }],
+    };
+    // Pre-seed file with 12 copies of an OBSOLETE fragment (simulates accumulated bloat).
+    fs.writeFileSync(path.join(dir, "ranch/rules/trips.json"),
+      JSON.stringify({ contributions: { trips: Array(12).fill(oldFrag) } }, null, 2));
+    const tp = makeTpStub(dir);
+    const { resetSourceContributions, applyRuleFragment } = require("../install");
+    // Simulate the install-loop pattern: reset once, then apply each current-manifest fragment.
+    await resetSourceContributions(tp, "trips", "trips",
+      { rules_path: "ranch/rules" }, [], { commit: "x", tag: "x", dirty: false });
+    const newFrag1 = { target: "trips", fragment: {
+      scope: { path_glob: "spice/trips/Trips.md" },
+      extends: "_canonical-vocab",
+      required_tags: [{ tag: "trip" }],
+    } };
+    const newFrag2 = { target: "trips", fragment: {
+      scope: { path_glob: "spice/trips/atlas.md" },
+      extends: "_canonical-vocab",
+      required_frontmatter: { type: { required: true, type: "string" } },
+    } };
+    await applyRuleFragment(tp, newFrag1, "trips", { rules_path: "ranch/rules" }, [], { commit: "x", tag: "x", dirty: false });
+    await applyRuleFragment(tp, newFrag2, "trips", { rules_path: "ranch/rules" }, [], { commit: "x", tag: "x", dirty: false });
+    const written = JSON.parse(fs.readFileSync(path.join(dir, "ranch/rules/trips.json"), "utf8"));
+    assertEqual(written.contributions.trips.length, 2,
+      "HC-V0821-A1.3: reset + 2 applies = length 2 (obsolete bloat cleaned, new fragments accumulated)");
+  });
+}
+
 // v0.30.0 S1.5 — TDD-first cases for materializeSkills (cowork blueprint
 // helper that copies <workshop>/platform/<bp>/skills/<src> → <vault>/<dest>
 // with {{skills_dir}} substitution + Option B overwrite semantics).
@@ -7253,6 +7336,9 @@ async function caseFA2RuleFragmentsExtends() {
   await caseHCRF1();
   await caseHCRF2();
   await caseHCRF3();
+
+  // v0.82.1 S1 — resetSourceContributions per-source reset (FLN-v82-2).
+  await caseHCV0821A1();
 
   // v0.30.0 S1.5 — materializeSkills (cowork blueprint installer helper).
   await caseHCMS1OrchestratorWrite();
