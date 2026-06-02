@@ -23,13 +23,16 @@ function parseMemoryFile(rawMarkdown) {
         result.parse_error = "empty_or_non_string";
         return result;
     }
-    const fmMatch = rawMarkdown.match(/^---\n([\s\S]*?)\n---\n/);
+    const normalized = rawMarkdown.replace(/\r\n/g, "\n");
+    const fmMatch = normalized.match(/^---\n([\s\S]*?)\n---\n/);
     if (!fmMatch) { result.parse_error = "no_frontmatter"; return result; }
     const fm = fmMatch[1];
     const grabFm = (key) => {
-        const re = new RegExp("^" + key + ":\\s*(.+)$", "m");
+        const re = new RegExp("^" + key + ":[ \\t]*(.*)$", "m");
         const m = fm.match(re);
-        return m ? m[1].replace(/^["']|["']$/g, "") : null;
+        if (!m) return null;
+        const v = m[1].replace(/^["']|["']$/g, "");
+        return v.length > 0 ? v : null;
     };
     result.engagement_id = grabFm("engagement_id");
     result.day = grabFm("day");
@@ -39,27 +42,28 @@ function parseMemoryFile(rawMarkdown) {
     result.synthesis_at = grabFm("synthesis_at");
     result.last_tick_at = grabFm("last_tick_at");
 
-    const synMatch = rawMarkdown.match(/>\s*\[!info\][+-]?\s*Today's pattern[^\n]*\n((?:>\s*[^\n]*\n?)+)/);
+    const synMatch = normalized.match(/>\s*\[!info\][+-]?\s*Today's pattern[^\n]*\n((?:>\s*[^\n]*\n?)+)/);
     if (synMatch) {
         result.synthesis_paragraph = synMatch[1]
             .split("\n")
             .map(l => l.replace(/^>\s?/, "").trimEnd())
-            .filter(l => l.length > 0)
             .join("\n")
+            .replace(/\n{3,}/g, "\n\n")
             .trim() || null;
     }
 
-    const cfMatch = rawMarkdown.match(/>\s*\[!tip\][+-]?\s*Carry-forward[^\n]*\n((?:>\s*[^\n]*\n?)+)/);
+    const cfMatch = normalized.match(/>\s*\[!tip\][+-]?\s*Carry-forward[^\n]*\n((?:>\s*[^\n]*\n?)+)/);
     if (cfMatch) {
         result.carry_forward_bullets = cfMatch[1]
             .split("\n")
+            .filter(l => /^>\s?-\s/.test(l))
             .map(l => l.replace(/^>\s?-\s?/, "").trim())
             .filter(l => l.length > 0 && !/^_\(.*\)_$/.test(l));
     }
 
-    const tickRe = /^>\s*\[!example\][+-]?\s*(\d{1,2}:\d{2})\s+Tick\s*\n((?:>\s*[^\n]*\n?)+)/gm;
+    const tickRe = /^>\s*\[!example\][+-]?\s*(\d{1,2}:\d{2})\s+Tick\s*\n((?:>\s*(?!\[![a-z]+\])[^\n]*\n?)+)/gm;
     let tm;
-    while ((tm = tickRe.exec(rawMarkdown)) !== null) {
+    while ((tm = tickRe.exec(normalized)) !== null) {
         const time = tm[1];
         const body = tm[2];
         const lines = body
@@ -97,13 +101,16 @@ function parseSynthesisFile(rawMarkdown) {
     if (typeof rawMarkdown !== "string" || rawMarkdown.length === 0) {
         result.parse_error = "empty_or_non_string"; return result;
     }
-    const fmMatch = rawMarkdown.match(/^---\n([\s\S]*?)\n---\n/);
+    const normalized = rawMarkdown.replace(/\r\n/g, "\n");
+    const fmMatch = normalized.match(/^---\n([\s\S]*?)\n---\n/);
     if (!fmMatch) { result.parse_error = "no_frontmatter"; return result; }
     const fm = fmMatch[1];
     const grab = (k) => {
-        const re = new RegExp("^" + k + ":\\s*(.+)$", "m");
+        const re = new RegExp("^" + k + ":[ \\t]*(.*)$", "m");
         const m = fm.match(re);
-        return m ? m[1].replace(/^["']|["']$/g, "") : null;
+        if (!m) return null;
+        const v = m[1].replace(/^["']|["']$/g, "");
+        return v.length > 0 ? v : null;
     };
     result.engagement_id = grab("engagement_id");
     result.iso_week = grab("iso_week");
@@ -111,15 +118,19 @@ function parseSynthesisFile(rawMarkdown) {
     result.days_covered = Number(grab("days_covered")) || 0;
     result.synthesis_at = grab("synthesis_at");
 
-    const wpMatch = rawMarkdown.match(/>\s*\[!info\][+-]?\s*Weekly pattern[^\n]*\n((?:>\s*[^\n]*\n?)+)/);
+    const wpMatch = normalized.match(/>\s*\[!info\][+-]?\s*Weekly pattern[^\n]*\n((?:>\s*[^\n]*\n?)+)/);
     if (wpMatch) {
         result.weekly_pattern = wpMatch[1]
-            .split("\n").map(l => l.replace(/^>\s?/, "").trimEnd())
-            .filter(l => l.length > 0).join("\n").trim() || null;
+            .split("\n")
+            .map(l => l.replace(/^>\s?/, "").trimEnd())
+            .join("\n")
+            .replace(/\n{3,}/g, "\n\n")
+            .trim() || null;
     }
-    const cfMatch = rawMarkdown.match(/>\s*\[!tip\][+-]?\s*Carry-forward[^\n]*\n((?:>\s*[^\n]*\n?)+)/);
+    const cfMatch = normalized.match(/>\s*\[!tip\][+-]?\s*Carry-forward[^\n]*\n((?:>\s*[^\n]*\n?)+)/);
     if (cfMatch) {
         result.carry_forward_bullets = cfMatch[1].split("\n")
+            .filter(l => /^>\s?-\s/.test(l))
             .map(l => l.replace(/^>\s?-\s?/, "").trim())
             .filter(l => l.length > 0 && !/^_\(.*\)_$/.test(l));
     }
