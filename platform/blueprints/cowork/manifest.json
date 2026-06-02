@@ -1,6 +1,6 @@
 {
   "name": "cowork",
-  "version": "0.21.1",
+  "version": "0.22.0",
   "kind": "blueprint",
   "module_directory": "cowork",
   "engagement_types_dir": "engagement-types",
@@ -303,6 +303,18 @@
     {
       "source": "content/scheduled-jobs.md",
       "dest": "{{module_directory}}/scheduled-jobs.md"
+    },
+    {
+      "source": "engagement-types/personal.json",
+      "dest": "{{module_directory}}/context/engagement-types/personal.json"
+    },
+    {
+      "source": "engagement-types/w2-fte.json",
+      "dest": "{{module_directory}}/context/engagement-types/w2-fte.json"
+    },
+    {
+      "source": "engagement-types/consulting.json",
+      "dest": "{{module_directory}}/context/engagement-types/consulting.json"
     }
   ],
   "claude_surface": [
