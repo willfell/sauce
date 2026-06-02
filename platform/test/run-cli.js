@@ -1718,7 +1718,7 @@ async function caseV0850G1HandleBumpPinsBlueprintPin() {
         try {
             await cmdUpdate.run(
                 { vaultPath: consumer, _runInstaller: async () => {} },
-                ["--bump-pins"],
+                ["--bump-pins", "--workshop-path", workshop],
             );
         } finally {
             process.stdout.write = origWrite;
