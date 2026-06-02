@@ -1,6 +1,6 @@
 {
   "id": "w2-fte",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "schema_version": 1,
   "label": "W2 full-time employment",
   "consumes": ["daily", "meetings", "project", "to-do", "people"],
@@ -14,7 +14,7 @@
     { "id": "gmail_label", "type": "string", "prompt": "Gmail label scoping this engagement's email (e.g., \"Work\")" },
     { "id": "calendar_id", "type": "string", "prompt": "Calendar ID scoping this engagement's events (e.g., your work email)" }
   ],
-  "supported_cadences": ["morning", "midday", "eod", "weekly", "tick", "synthesize_day"],
+  "supported_cadences": ["morning", "midday", "eod", "weekly", "tick", "synthesize_day", "synthesize_week"],
   "default_cadences": {
     "morning": true,
     "midday":  false,
@@ -22,7 +22,8 @@
     "weekly":  true,
     "monthly": false,
     "tick": true,
-    "synthesize_day": true
+    "synthesize_day": true,
+    "synthesize_week": true
   },
   "render_aspects": {
     "finance_block":          "skip",

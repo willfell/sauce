@@ -196,6 +196,17 @@ Print the per-orchestrator preamble:
 
   Default cron suggestion: `15 19 * * *` (15 min after typical EOD slot).
 
+**cowork:synthesize-week (end-of-week memory synthesis, NEW v0.85.0)**
+
+Fires Friday after weekly-review. Reads the past 7 daily syntheses, composes
+a voice-applied weekly-pattern paragraph + ≤5 carry-forward bullets. Writes
+to `spice/cowork/memory/<engagement>/YYYY/MM-Month/YYYY-Www/synthesis.md`.
+Background only — does not clutter the weekly-review atomic note.
+
+Ask: Enable cowork:synthesize-week for engagement <engagement.id>? (default: <engagement.default_cadences.synthesize_week>)
+
+Default cron suggestion: `0 17 * * 5` (Friday 17:00 — after the typical weekly-review slot).
+
 Ask: `Enable cowork:<orch> for engagement <engagement.id>? (default: <default>)` where `<default>` reads `engagement.type_manifest.default_cadences[<cadence>]`.
 
 If enabled AND `<cadence>` is NOT in `supported_cadences`, surface a Notice:

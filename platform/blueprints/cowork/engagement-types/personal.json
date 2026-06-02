@@ -1,6 +1,6 @@
 {
   "id": "personal",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "schema_version": 1,
   "label": "Personal life",
   "consumes": ["finance", "to-do", "daily", "people", "journal"],
@@ -19,7 +19,7 @@
     { "id": "includes_wellness_prompts",  "type": "boolean",  "prompt": "Include wellness prompts in EOD review? (true/false)", "default_value": true },
     { "id": "discretionary_categories",   "type": "string[]", "prompt": "Discretionary spending categories (comma-separated)" }
   ],
-  "supported_cadences": ["morning", "midday", "eod", "weekly", "monthly", "tick", "synthesize_day"],
+  "supported_cadences": ["morning", "midday", "eod", "weekly", "monthly", "tick", "synthesize_day", "synthesize_week"],
   "default_cadences": {
     "morning": true,
     "midday":  true,
@@ -27,7 +27,8 @@
     "weekly":  true,
     "monthly": true,
     "tick": true,
-    "synthesize_day": true
+    "synthesize_day": true,
+    "synthesize_week": true
   },
   "render_aspects": {
     "finance_block":          "include",

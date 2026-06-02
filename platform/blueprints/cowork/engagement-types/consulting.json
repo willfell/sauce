@@ -1,6 +1,6 @@
 {
   "id": "consulting",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "schema_version": 1,
   "label": "Consulting / contract work",
   "consumes": ["daily", "meetings", "project", "to-do", "people", "finance"],
@@ -19,7 +19,7 @@
     { "id": "gmail_label",        "type": "string",   "prompt": "Gmail label scoping this engagement's email (e.g., \"Clients/Acme\")" },
     { "id": "calendar_id",        "type": "string",   "prompt": "Calendar ID scoping this engagement's events" }
   ],
-  "supported_cadences": ["morning", "midday", "eod", "weekly", "monthly", "tick", "synthesize_day"],
+  "supported_cadences": ["morning", "midday", "eod", "weekly", "monthly", "tick", "synthesize_day", "synthesize_week"],
   "default_cadences": {
     "morning": true,
     "midday":  false,
@@ -27,7 +27,8 @@
     "weekly":  true,
     "monthly": true,
     "tick": true,
-    "synthesize_day": true
+    "synthesize_day": true,
+    "synthesize_week": true
   },
   "render_aspects": {
     "finance_block":          "include",
