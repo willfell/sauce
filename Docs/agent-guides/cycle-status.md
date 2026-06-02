@@ -9,8 +9,10 @@ load_when: Starting a session, picking the next cycle, or sanity-checking the cu
 
 ## Current
 
-- **Workshop version:** `0.84.0` (closed 2026-06-02)
-- **Most recent cycle:** v0.84.0 cowork-memory-layer MINOR — Tier 0 (capture-tick) + Tier 1 (synthesize-day) of the cowork continuous-memory architecture. Two new orchestrators: `cowork:capture-tick` (appends a time-stamped tick entry to `spice/cowork/memory/<engagement_id>/YYYY-MM-DD.md`) + `cowork:synthesize-day` (synthesizes a daily summary callout from the tick stream at EOD). `cowork:morning-briefing` gains pre-flight step 3a: reads the most recent memory file and folds it into the briefing as a `[!info]+ Memory context` callout (null-data-gated; clean skip when no memory files exist). Engagement-type schema 0.3.1 → 0.4.0 (NEW `supported_cadences` + `default_cadences` fields; `tick` + `synthesize_day` added to all 3 standard types). `cowork:onboard-scheduled-jobs` updated to walk `supported_cadences` + register new cadences in the vault's Cowork.md nav table. STOCK row added to `cowork-customization-contract.md` for `spice/cowork/memory/**`. Workshop 0.83.0 → 0.84.0; cowork 0.22.0 → 0.23.0 (MINOR — new install surface). ~14 cases / ~29 actual HC-V0840-* sub-asserts (A/B/C/D/E/F groups); 4 pre-existing test gaps closed at S7.1. 9 stage commits + S7.1 + S8 cycle-close. Preflight `version-sync ok: 0.84.0` ALL GREEN. 5 new lessons surfaced; FLN-v84-1/2/3/4 surfaced.
+- **Workshop version:** `0.84.1` (closed 2026-06-02)
+- **Most recent cycle:** v0.84.1 cleanup-1 PATCH — 4 user-reported fixes: properties bar hidden default (§1); scratch timezone-attribution leak — `_coerceDay` Date-branch removal + `ScratchDayMigrate` startup-script + activity-feed numeric ISO compare (§2.1/§2.2/§2.4); daily-dashboard Tasks header `open · done` count + green pill + celebration form (§3); scratch sub-group auto-collapse regression — `defaultClosed` wins over persisted state (§4). Six lockstep bumps (workshop / platform-claude 0.1.2 / activity-feed 0.7.1 / styling 0.2.1 / daily 0.13.1 / scratch 0.5.2). ~32 HC-V0841-* sub-asserts + 3 in-cycle test-pin updates. 8 stage commits + S8 cycle-close. Preflight `version-sync ok: 0.84.1` ALL GREEN.
+
+- **Workshop version (previous):** `0.84.0` (closed 2026-06-02) — v0.84.0 cowork-memory-layer MINOR. See `Docs/cycle-history.md` for the v0.84.0 narrative.
 
 - **Workshop version (previous):** `0.83.0` (closed 2026-06-01) — v0.83.0 cowork-engagement-type-materialization MINOR. See `Docs/cycle-history.md` for the v0.83.0 narrative.
 
@@ -46,7 +48,7 @@ load_when: Starting a session, picking the next cycle, or sanity-checking the cu
 
 ## Cycle order (chronological)
 
-v0.1.0 → v0.1.1 → v0.1.x → v0.1.3 → v0.1.2 → v0.2.0 → v0.3.0 → v0.4.0 → v0.3.2 → v0.4.2 → v0.5.0 → v0.11.0 → v0.12.0 → v0.13.0 → v0.14.0 → v0.6.0 → v0.16.0 → v0.17.0 → v0.18.0/.1/.2 → v0.19.0 → v0.20.0 → v0.21.0/.1 → v0.22.0/.1 → v0.23.0 → v0.24.0 → v0.25.0 → v0.26.0/.1 → v0.27.0 → v0.28.0 → v0.29.0 → v0.30.0 ⏭️ → v0.31.0 → v0.32.0 → v0.33.0/.1 → v0.36.0/.1 → v0.37.0 → v0.38.0/.1 → v0.40.0 → v0.41.0/.5 → v0.42.0 → v0.43.0 → v0.44.0 → v0.45.0 → v0.46.0/.1/.2 → v0.47.0 → v0.48.0 → v0.49.0 → v0.49.1 ⏭️ → v0.49.2 → (v0.50.0–v0.62.0 narratives lost; pre-v0.63 narrative below resumes) → v0.63.0 → v0.63.1 → v0.63.2 → v0.63.3 → v0.64.0 → v0.64.1 → v0.64.2 → v0.64.3 → v0.65.0 → v0.66.0 → v0.66.1 → v0.66.2 → v0.67.0 → v0.67.1 → v0.67.2 → v0.67.3 → v0.70.0 → v0.70.1 → v0.70.2 → v0.70.3 → v0.70.4 → v0.70.5 → v0.70.6 → v0.70.7 → v0.71.0 → v0.71.1 → v0.72.0 → v0.72.1 → v0.73.0 → v0.74.0 → v0.75.0 → v0.75.1 → v0.76.0 → v0.77.0 → v0.78.0 → v0.78.1 → v0.79.0 → v0.80.0 → v0.80.1 → v0.81.0 → v0.81.1 → v0.82.0 → v0.82.1 → v0.83.0 → v0.84.0 (current).
+v0.1.0 → v0.1.1 → v0.1.x → v0.1.3 → v0.1.2 → v0.2.0 → v0.3.0 → v0.4.0 → v0.3.2 → v0.4.2 → v0.5.0 → v0.11.0 → v0.12.0 → v0.13.0 → v0.14.0 → v0.6.0 → v0.16.0 → v0.17.0 → v0.18.0/.1/.2 → v0.19.0 → v0.20.0 → v0.21.0/.1 → v0.22.0/.1 → v0.23.0 → v0.24.0 → v0.25.0 → v0.26.0/.1 → v0.27.0 → v0.28.0 → v0.29.0 → v0.30.0 ⏭️ → v0.31.0 → v0.32.0 → v0.33.0/.1 → v0.36.0/.1 → v0.37.0 → v0.38.0/.1 → v0.40.0 → v0.41.0/.5 → v0.42.0 → v0.43.0 → v0.44.0 → v0.45.0 → v0.46.0/.1/.2 → v0.47.0 → v0.48.0 → v0.49.0 → v0.49.1 ⏭️ → v0.49.2 → (v0.50.0–v0.62.0 narratives lost; pre-v0.63 narrative below resumes) → v0.63.0 → v0.63.1 → v0.63.2 → v0.63.3 → v0.64.0 → v0.64.1 → v0.64.2 → v0.64.3 → v0.65.0 → v0.66.0 → v0.66.1 → v0.66.2 → v0.67.0 → v0.67.1 → v0.67.2 → v0.67.3 → v0.70.0 → v0.70.1 → v0.70.2 → v0.70.3 → v0.70.4 → v0.70.5 → v0.70.6 → v0.70.7 → v0.71.0 → v0.71.1 → v0.72.0 → v0.72.1 → v0.73.0 → v0.74.0 → v0.75.0 → v0.75.1 → v0.76.0 → v0.77.0 → v0.78.0 → v0.78.1 → v0.79.0 → v0.80.0 → v0.80.1 → v0.81.0 → v0.81.1 → v0.82.0 → v0.82.1 → v0.83.0 → v0.84.0 → v0.84.1 (current).
 
 > Gap note: per `Docs/cycle-history.md` line count (57 closed-cycle sections ending at v0.47.0, plus a v0.48–v0.67.3 archive), the v0.50.0 → v0.62.0 narratives were not captured in cycle-history.md during their respective closes. The CLAUDE.md claim that they were "archived to Docs/cycle-history.md" was stale. Backfill from `Docs/plans/` is possible but deferred.
 
@@ -94,6 +96,8 @@ Live brainstorm list (also referenced in `Docs/plans/` and brainstorm shelf file
 - **FLN-v84-1 (NEW — v0.85.0 MINOR candidate): Tier 2 (weekly synthesis) + Tier 3 (monthly synthesis) deferred.** Tier 0 (capture-tick) + Tier 1 (synthesize-day) shipped in v0.84.0. Tier 2 synthesizes daily summaries into a weekly roll-up; Tier 3 synthesizes weekly summaries into a monthly roll-up. Both are well-specified in the v0.84.0 design doc. v0.85.0 MINOR candidate; could bundle with FLN-v84-2.
 - **FLN-v84-2 (NEW — v0.85.0+ MINOR candidate): wire-through to midday-tripwire / eod-review / weekly-review / monthly-review deferred.** Each orchestrator could read recent memory (parallel to morning-briefing's step 3a wire-through). Each needs its own pre-flight step + body composition update. Could bundle with FLN-v84-1 in a v0.85.0 MINOR cycle.
 - **FLN-v84-3 (NEW — design candidate): memory retention / compression policy.** Memory files accumulate indefinitely. At 1-2 ticks/day × ~50 lines/tick, a year-long active engagement accumulates ~73k lines. A rolling summarization or date-based archival policy will eventually be needed. Design-only until compression logic is scoped.
+- **FLN-v841-1 (NEW — v0.85.0+ candidate): test-pin equality helper.** More test-pin sites use hardcoded version strings (SHC-S1, FA6-MANIFEST, AF-1d, AF-V065). FLN-v81-1 closed three pin sites by adopting `versionAtLeast()`; the remaining hardcoded-equality sites surfaced again at v0.84.1 S7. Future cycle could extend `semver-helper.js` with a `versionEquals()` helper and refactor the equality sites where exact pinning is intentional (vs. converting to floor checks where appropriate).
+- **FLN-v841-2 (NEW — long-term candidate): prune stale defaultClosed group state.** Activity-feed group state persistence is now asymmetric: `defaultClosed` groups skip reading persistence but still write to it. Toggling a `defaultClosed` group open still persists `open:true` to `dashboard-section-state.json`; that value is just ignored on subsequent renders. Cleanup: prune persisted state entries for groups currently in `defaultClosed` at write time.
 - **FLN-v84-4 (NEW — long-term candidate): Smart Connections semantic retrieval over memory notes.** `spice/cowork/memory/**` is a natural corpus for semantic similarity queries. Future cycle could wire `sc-bridge` (or equivalent) to surface relevant past context beyond the most-recent-file read. Aligns with the Smart Connections candidate in project memory.
 - ~~**FLN-v82-2: ranch/rules/cowork.json dedup.**~~ — CLOSED in v0.82.1. NEW `resetSourceContributions(contributions, sourceName)` helper in `install.js` + wired into per-item install loop. `ranch/rules/cowork.json` shrank 7929→635 lines / 281→22 entries at S8 dogfood. Design pivoted at S0.3 from key-based dedup to per-source reset (two scope shapes in the real file; object-form + string-form; key-based dedup would have dropped string-scope entries). cowork PATCH bump 0.21.0→0.21.1 added mid-cycle to clear landmine-#16 version-skip guard and validate end-to-end.
 - ~~**FLN-v82-3: parseYamlIsh hyphenated-key support.**~~ — CLOSED in v0.82.1. `context-builder-dry-run.js#parseYamlIsh` flat-key regex widened from `/^([a-z_]+):/` to `/^([a-z_][a-z0-9_-]*):/`. Hyphenated MCP kinds (e.g., `lharries-whatsapp`, `sharepoint-online`) can now appear in `user-preferences.md` without being silently dropped. HC-V0821-B1.1/B1.2 added.
@@ -109,15 +113,15 @@ Live brainstorm list (also referenced in `Docs/plans/` and brainstorm shelf file
 | `validator` | 0.3.0 | Per-file rules engine + Layer 2 manifest-convention rules |
 | `audit` | 0.3.0 | `claude-surface` walker + entity-create walker + `/audit` slash command |
 | `nav-buttons` | 2.7.0 | Registry-driven nav-button renderer; consumes icons mechanism |
-| `activity-feed` | 0.7.0 | Bucketed activity-feed renderer; framed groups; persisted `<details>` state across re-renders (v0.7.0) |
+| `activity-feed` | 0.7.1 | Bucketed activity-feed renderer; framed groups; persisted `<details>` state across re-renders (v0.7.0); numeric ISO compare + defaultClosed gate fix (v0.7.1) |
 | `kanban-status-sync` | 0.2.0 | Syncs obsidian-kanban column → frontmatter; NEW `KanbanStatusSyncInit` startup-script class moves sync out of render hot path (v0.2.0) |
 | `cards` | 0.2.6 | BeaconCards row/stacked layouts; function-form `meta` opt |
 | `accent-button` | 0.1.0 | AccentButton render helper |
 | `icons` | 0.1.1 | Lucide kebab → SVG resolver; ~21 vendored Tier 1 SVGs + Obsidian `setIcon` Tier 2 fallback |
 | `people-rendering` | 0.1.0 | People page renderers |
-| `styling` | 0.2.0 | Vendored sauce theme + CSS variables (v0.79.0: per-type callout-color snippet `sauce-callouts.css`) |
+| `styling` | 0.2.1 | Vendored sauce theme + CSS variables (v0.79.0: per-type callout-color snippet `sauce-callouts.css`); `.sauce-tasks-done` CSS rule (v0.2.1) |
 | `convenience` | 0.2.4 | Consumer-default hotkeys/snippets/app-settings |
-| `platform-claude` | 0.1.1 | `/install` `/upgrade` `/bootstrap` lifecycle slash commands + CLAUDE.md marker renderer |
+| `platform-claude` | 0.1.2 | `/install` `/upgrade` `/bootstrap` lifecycle slash commands + CLAUDE.md marker renderer |
 | `entity-create` | 0.4.0 | Declarative `new_entity_buttons[]` spec; inside-block JS-comment sentinel; substitution catalogue with `derive`/`validate`/`inline_body` extensions |
 | `backlink-panel` | 0.1.0 | Backlink panel renderer |
 | `smart-connections-bridge` | 0.1.1 | Node CLI bridge over `.smart-env/multi/*.ajson` for SC semantic retrieval; `--quiet` suppresses non-fatal parse-skip stderr |
@@ -130,13 +134,13 @@ Per-mechanism version history is in `Docs/cycle-history.md`. Current canonical c
 | --- | --- | --- | --- |
 | `boards` | 0.2.1 | — | `spice/boards/` |
 | `cowork` | 0.23.0 | — | `spice/cowork/` |
-| `daily` | 0.13.0 | `/daily` | `spice/daily/` |
+| `daily` | 0.13.1 | `/daily` | `spice/daily/` |
 | `journal` | 0.2.0 | — | `spice/journal/` |
 | `meetings` | 0.6.0 | `/meetings` | `spice/meetings/` |
 | `people` | 0.4.0 | — | `spice/people/` |
 | `products` | 0.3.0 | — | `spice/products/` |
 | `project` | 1.14.0 | `/project` | `spice/projects/` |
-| `scratch` | 0.5.1 | `/scratch` | `spice/scratch/` |
+| `scratch` | 0.5.2 | `/scratch` | `spice/scratch/` |
 | `teams` | 0.3.0 | — | `spice/teams/` |
 | `to-do` | 0.3.3 | — | `spice/to-do/` |
 | `trips` | 0.3.0 | — | `spice/trips/` |
@@ -177,6 +181,8 @@ v0.82.1 added ~10 new sub-asserts: HC-V0821-A1.1a, A1.1b, A1.2, A1.3 (resetSourc
 v0.83.0 added ~10 cases / ~14 new sub-asserts: HC-V0830-A1..A3 (materialization: files[] presence + path resolution + field correctness) + HC-V0830-B1..B5 (atomic-note orchestrators read materialized path) + HC-V0830-C1..C2 (bootstrap-vault + onboard-scheduled-jobs) + HC-V0830-D1 (prose-lint: engagement-not-found guard) distributed across run-install.js and run-cowork-smoke.js. HC-V0750-C1 + C3 updated (S4.1 follow-up — modified, not new sub-asserts). No new run-*.js harness files; file count stays at 23. CS-MIG-1 count posture UNCHANGED at 47/38/3/6 (no new claude_surface[] entries; manifest-derived counts absorb automatically).
 
 v0.84.0 added ~14 cases / ~29 actual sub-asserts: HC-V0840-A1..A3 (capture-tick orchestrator prose-lint + output contract) + HC-V0840-B1..B3 (synthesize-day orchestrator prose-lint + output contract) + HC-V0840-C1..C2 (morning-briefing pre-flight step 3a + null-data gate) + HC-V0840-D1 (engagement-type schema 0.4.0: supported_cadences + default_cadences across all 3 types; 12 sub-asserts) + HC-V0840-E1..E2 (onboard-scheduled-jobs cadence walk + Cowork.md resolver) + HC-V0840-F1 (customization contract STOCK row for memory/**) all in run-cowork-smoke.js. 4 pre-existing gaps closed at S7.1: HC-V0710-1c (cowork-memory discriminator_tags entry) + HC-V0740-1 (engagement-type exact-version pin 0.3.1 → 0.4.0). Started at 754 passed / 0 failed (post-v0.83.0); ended at 803 passed / 0 failed. No new run-*.js harness files; file count stays at 23. CS-MIG-1 count posture UNCHANGED at 47/38/3/6 (no new claude_surface[] entries).
+
+v0.84.1 added ~32 HC-V0841-* sub-asserts: A1 ×7 (`_coerceDay` regression — string, Luxon, Date→null, null/undefined/object→null) + A2 ×15 (`ScratchDayMigrate` behavior — passthrough, Date rewrite, path/filename synthesis, no-op, idempotency, manifest wiring) in NEW `run-scratch.js`; A3 ×2 (`inWindow` numeric epoch compare source-lint) + D1/D2 (`defaultClosed` `!isClosed` gate + toggle WRITE preservation) appended to `run-activity-feed.js`; C1 ×6 (Tasks header forms + `titleHtml` opt + CSS rule) appended to `run-renderer.js`. 3 in-cycle test-pin updates surfaced at S7 (run-helper-cases SHC-S1 + FA6-MANIFEST-daily/activity-feed; run-activity-feed AF-1d + AF-V065; run-install-sh PID-1). NEW `run-scratch.js` harness file added; file count bumps to 24. CS-MIG-1 count posture UNCHANGED at 47/38/3/6 (no new claude_surface[] entries).
 
 Per-cycle sub-assert deltas are in `Docs/cycle-history.md`. Run via `npm run release:preflight` (gated first on `scripts/check-version-sync.js` per v0.38.0).
 
