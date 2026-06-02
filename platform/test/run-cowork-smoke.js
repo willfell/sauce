@@ -4036,6 +4036,281 @@ function assertCoworkV068Shape() {
     }
 }
 
+// ============================================================================
+// HC-V0850 RED baseline — surface progressively turns green S6-S10.
+// At S5 close: A1..A4, B1..B5, C1..C5, D1×3, E1, E2, F1 all expected to FAIL.
+// (G1..G3 already green from S1-S3.)
+// ============================================================================
+
+// HC-V0850-A1: read-memory sub-skill SKILL.md exists at sub-skill-tier dest
+{
+    const label = "HC-V0850-A1 read-memory/SKILL.md exists at skills/skills/read-memory/SKILL.md";
+    try {
+        const dest = path.join(BP, "skills/skills/read-memory/SKILL.md");
+        assertTrue(fs.existsSync(dest), `${label}: missing at ${dest}`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0850-A2: read-memory SKILL.md declares required sections
+{
+    const label = "HC-V0850-A2 read-memory/SKILL.md declares required sections";
+    try {
+        const skill = fs.readFileSync(path.join(BP, "skills/skills/read-memory/SKILL.md"), "utf8");
+        for (const section of ["## Inputs", "## Pre-flight", "## Gather", "## Decide", "## Done", "## Harness testing"]) {
+            assertTrue(skill.includes(section), `${label}: missing section '${section}'`);
+        }
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0850-A3: read-memory SKILL.md declares structured output shape
+{
+    const label = "HC-V0850-A3 read-memory/SKILL.md declares structured-output fields";
+    try {
+        const skill = fs.readFileSync(path.join(BP, "skills/skills/read-memory/SKILL.md"), "utf8");
+        for (const field of ["day_synthesis", "week_synthesis", "ticks", "files_read", "window_resolved"]) {
+            assertTrue(skill.includes(field), `${label}: missing output field '${field}'`);
+        }
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0850-A4: read-memory SKILL.md declares graceful null-data return on file-not-found
+{
+    const label = "HC-V0850-A4 read-memory/SKILL.md declares null-data return on file-not-found";
+    try {
+        const skill = fs.readFileSync(path.join(BP, "skills/skills/read-memory/SKILL.md"), "utf8");
+        assertTrue(/found:\s*false|null-data|graceful/i.test(skill),
+            `${label}: missing null-data / found:false / graceful-failure prose`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0850-B1: synthesize-week orchestrator SKILL.md exists at orchestrator-tier dest
+{
+    const label = "HC-V0850-B1 synthesize-week/SKILL.md exists at skills/orchestrators/synthesize-week/SKILL.md";
+    try {
+        const dest = path.join(BP, "skills/orchestrators/synthesize-week/SKILL.md");
+        assertTrue(fs.existsSync(dest), `${label}: missing at ${dest}`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0850-B2: synthesize-week declares required sections
+{
+    const label = "HC-V0850-B2 synthesize-week/SKILL.md declares required sections";
+    try {
+        const skill = fs.readFileSync(path.join(BP, "skills/orchestrators/synthesize-week/SKILL.md"), "utf8");
+        for (const section of ["## Inputs", "## Pre-flight", "## Gather", "## Decide", "## Write", "## Verify", "## Done", "## Harness testing"]) {
+            assertTrue(skill.includes(section), `${label}: missing section '${section}'`);
+        }
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0850-B3: synthesize-week invokes read-memory + references canonical week-synthesis path
+{
+    const label = "HC-V0850-B3 synthesize-week invokes cowork:read-memory + canonical week-synthesis path";
+    try {
+        const skill = fs.readFileSync(path.join(BP, "skills/orchestrators/synthesize-week/SKILL.md"), "utf8");
+        assertTrue(skill.includes("cowork:read-memory"),
+            `${label}: missing 'cowork:read-memory' sub-skill invocation`);
+        assertTrue(skill.includes("YYYY-Www/synthesis.md") || /<?YYYY-Www>?\/synthesis\.md/.test(skill),
+            `${label}: missing canonical week-synthesis path pattern`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0850-B4: synthesize-week declares cowork-weekly-synthesis type + replace semantics
+{
+    const label = "HC-V0850-B4 synthesize-week declares cowork-weekly-synthesis type + replace-section idempotency";
+    try {
+        const skill = fs.readFileSync(path.join(BP, "skills/orchestrators/synthesize-week/SKILL.md"), "utf8");
+        assertTrue(skill.includes("cowork-weekly-synthesis"),
+            `${label}: missing 'cowork-weekly-synthesis' canonical type`);
+        assertTrue(/REPLACE|replace|idempot/i.test(skill),
+            `${label}: missing replace-section or idempotency prose`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0850-B5: synthesize-week declares ## Days included section
+{
+    const label = "HC-V0850-B5 synthesize-week declares '## Days included' body section";
+    try {
+        const skill = fs.readFileSync(path.join(BP, "skills/orchestrators/synthesize-week/SKILL.md"), "utf8");
+        assertTrue(skill.includes("Days included"),
+            `${label}: missing 'Days included' section reference`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0850-C1: morning-briefing pre-flight step 3a invokes cowork:read-memory
+{
+    const label = "HC-V0850-C1 morning-briefing step 3a invokes cowork:read-memory";
+    try {
+        const skill = fs.readFileSync(path.join(BP, "skills/orchestrators/morning-briefing/SKILL.md"), "utf8");
+        assertTrue(skill.includes("cowork:read-memory"),
+            `${label}: step 3a doesn't reference cowork:read-memory sub-skill`);
+        assertTrue(/output_yesterday|tier:\s*"day"\s*,\s*window:\s*"yesterday"/.test(skill),
+            `${label}: step 3a doesn't invoke read-memory with tier:day window:yesterday`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0850-C2: morning-briefing body composition invokes composeMemoryCallouts helper
+{
+    const label = "HC-V0850-C2 morning-briefing body composition invokes composeMemoryCallouts";
+    try {
+        const skill = fs.readFileSync(path.join(BP, "skills/orchestrators/morning-briefing/SKILL.md"), "utf8");
+        assertTrue(skill.includes("composeMemoryCallouts"),
+            `${label}: body composition doesn't reference composeMemoryCallouts helper`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0850-C3: composeMemoryCallouts byte-identical to v0.84.0 — yesterday only
+{
+    const label = "HC-V0850-C3 composeMemoryCallouts: yesterday fixture matches expected output";
+    try {
+        const helperPath = path.join(BP, "helpers/compose-memory-callouts.js");
+        assertTrue(fs.existsSync(helperPath), `${label}: helper missing at ${helperPath}`);
+        delete require.cache[require.resolve(helperPath)];
+        const { composeMemoryCallouts } = require(helperPath);
+        const fixturePath = path.join(ROOT, "platform/test/fixtures/v0.85.0-mb-yesterday-fixture.json");
+        const expectedPath = path.join(ROOT, "platform/test/fixtures/v0.85.0-mb-expected-yesterday-callout.md");
+        const fixture = JSON.parse(fs.readFileSync(fixturePath, "utf8"));
+        const expected = fs.readFileSync(expectedPath, "utf8");
+        const out = composeMemoryCallouts(fixture, null);
+        assertTrue(out.yesterdayCalloutMd === expected,
+            `${label}: yesterdayCalloutMd diverges from expected (byte-diff)`);
+        assertTrue(out.overnightCalloutMd === "",
+            `${label}: overnightCalloutMd should be empty when overnight input is null`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0850-C4: composeMemoryCallouts byte-identical to v0.84.0 — overnight only
+{
+    const label = "HC-V0850-C4 composeMemoryCallouts: overnight fixture matches expected output";
+    try {
+        const helperPath = path.join(BP, "helpers/compose-memory-callouts.js");
+        delete require.cache[require.resolve(helperPath)];
+        const { composeMemoryCallouts } = require(helperPath);
+        const fixtureJsonPath = path.join(ROOT, "platform/test/fixtures/v0.85.0-mb-overnight-fixture.json");
+        const expectedPath = path.join(ROOT, "platform/test/fixtures/v0.85.0-mb-expected-overnight-callout.md");
+        const fixture = JSON.parse(fs.readFileSync(fixtureJsonPath, "utf8"));
+        const expected = fs.readFileSync(expectedPath, "utf8");
+        const out = composeMemoryCallouts(null, fixture);
+        assertTrue(out.overnightCalloutMd === expected,
+            `${label}: overnightCalloutMd diverges from expected (byte-diff)`);
+        assertTrue(out.yesterdayCalloutMd === "",
+            `${label}: yesterdayCalloutMd should be empty when yesterday input is null`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0850-C5: composeMemoryCallouts null-data clean-omit (backward-compat)
+{
+    const label = "HC-V0850-C5 composeMemoryCallouts(null, null) returns empty strings";
+    try {
+        const helperPath = path.join(BP, "helpers/compose-memory-callouts.js");
+        delete require.cache[require.resolve(helperPath)];
+        const { composeMemoryCallouts } = require(helperPath);
+        const out = composeMemoryCallouts(null, null);
+        assertTrue(out.yesterdayCalloutMd === "", `${label}: yesterdayCalloutMd not empty on null input`);
+        assertTrue(out.overnightCalloutMd === "", `${label}: overnightCalloutMd not empty on null input`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0850-D1: 3 engagement-types JSONs gain synthesize_week + version 0.5.0
+{
+    const label_root = "HC-V0850-D1 engagement-types schema v0.5.0 + synthesize_week";
+    for (const type of ["personal", "w2-fte", "consulting"]) {
+        const label = `${label_root}: ${type}.json`;
+        try {
+            const j = JSON.parse(fs.readFileSync(path.join(BP, `engagement-types/${type}.json`), "utf8"));
+            assertTrue(j.version === "0.5.0", `${label}: version != 0.5.0 (got ${j.version})`);
+            assertTrue(Array.isArray(j.supported_cadences) && j.supported_cadences.includes("synthesize_week"),
+                `${label}: supported_cadences missing 'synthesize_week'`);
+            assertTrue(j.default_cadences && j.default_cadences.synthesize_week === true,
+                `${label}: default_cadences.synthesize_week !== true`);
+            // Regression-protect: tick + synthesize_day still present per v0.84.0
+            assertTrue(Array.isArray(j.supported_cadences) && j.supported_cadences.includes("tick") && j.supported_cadences.includes("synthesize_day"),
+                `${label}: regressed v0.84.0 tick/synthesize_day`);
+        } catch (e) {
+            failed++; console.error(`FAIL  ${label}: ${e.message}`);
+        }
+    }
+}
+
+// HC-V0850-E1: cowork manifest declares synthesize-week + read-memory in claude_surface[] + cowork-weekly-synthesis rule_fragment
+{
+    const label = "HC-V0850-E1 cowork manifest claude_surface[] + cowork-weekly-synthesis rule_fragment";
+    try {
+        const manifest = JSON.parse(fs.readFileSync(path.join(BP, "manifest.json"), "utf8"));
+        const sources = (manifest.claude_surface || [])
+            .filter(e => e.kind === "skill")
+            .map(e => e.source);
+        assertTrue(sources.some(s => s.includes("orchestrators/synthesize-week/SKILL.md")),
+            `${label}: claude_surface[] missing synthesize-week entry`);
+        assertTrue(sources.some(s => s.includes("skills/read-memory/SKILL.md")),
+            `${label}: claude_surface[] missing read-memory entry`);
+        const wsFrag = (manifest.rule_fragments || []).find(rf => {
+            const eq = rf.fragment && rf.fragment.required_frontmatter && rf.fragment.required_frontmatter.type && rf.fragment.required_frontmatter.type.equals;
+            return eq === "cowork-weekly-synthesis";
+        });
+        assertTrue(!!wsFrag, `${label}: missing rule_fragment for cowork-weekly-synthesis`);
+        assertTrue(wsFrag && wsFrag.fragment && /synthesis\.md/.test(wsFrag.fragment.naming_pattern || ""),
+            `${label}: rule_fragment naming_pattern must match ^synthesis\\.md$`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0850-E2: cowork-customization-contract.md STOCK table includes synthesis.md row
+{
+    const label = "HC-V0850-E2 cowork-customization-contract.md STOCK includes spice/cowork/memory/**/synthesis.md";
+    try {
+        const contract = fs.readFileSync(path.join(ROOT, "Docs/agent-guides/cowork-customization-contract.md"), "utf8");
+        assertTrue(contract.includes("spice/cowork/memory/**/synthesis.md")
+                || contract.includes("synthesis.md"),
+            `${label}: customization contract missing synthesis.md row`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0850-F1: onboard-scheduled-jobs cadence walk references synthesize-week
+{
+    const label = "HC-V0850-F1 onboard-scheduled-jobs cadence walk references synthesize-week + Friday cron";
+    try {
+        const skill = fs.readFileSync(path.join(BP, "skills/orchestrators/onboard-scheduled-jobs/SKILL.md"), "utf8");
+        assertTrue(/synthesize.week|synthesize_week/.test(skill),
+            `${label}: missing synthesize-week reference`);
+        assertTrue(/Friday|0 17 \* \* 5/.test(skill),
+            `${label}: missing Friday cron default suggestion`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
 (function main() {
   console.log("--- shared contracts ---");
   checkSharedContracts();

@@ -8142,10 +8142,11 @@ async function caseFA2RuleFragmentsExtends() {
       assertTrue("HC-V0740-1: consulting supported_cadences must include midday",
         Array.isArray(consul.supported_cadences) && consul.supported_cadences.includes("midday"));
 
-      // v0.84.0: engagement-type version bumped 0.3.1 -> 0.4.0 (supported_cadences + default_cadences extended with tick + synthesize_day)
-      assertTrue("HC-V0740-1: personal.version must be 0.4.0", personal.version === "0.4.0");
-      assertTrue("HC-V0740-1: w2-fte.version must be 0.4.0", w2fte.version === "0.4.0");
-      assertTrue("HC-V0740-1: consulting.version must be 0.4.0", consul.version === "0.4.0");
+      // v0.85.0: engagement-type version bumped 0.4.0 -> 0.5.0 (supported_cadences + default_cadences extended with synthesize_week)
+      // FLN-v841-1 pattern: pin site surfaced at S5 BEFORE S9 lands the value change in engagement-type JSONs.
+      assertTrue("HC-V0740-1: personal.version must be 0.5.0", personal.version === "0.5.0");
+      assertTrue("HC-V0740-1: w2-fte.version must be 0.5.0", w2fte.version === "0.5.0");
+      assertTrue("HC-V0740-1: consulting.version must be 0.5.0", consul.version === "0.5.0");
     } catch (e) {
       assertTrue("HC-V0740-1: engagement-type tripwire_aspects contract", false, e && e.message);
     }
