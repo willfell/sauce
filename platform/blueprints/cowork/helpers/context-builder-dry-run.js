@@ -32,7 +32,7 @@ function parseYamlIsh(yaml) {
     while (i < lines.length) {
         const line = lines[i];
         if (!line.trim() || line.trim().startsWith("#")) { i++; continue; }
-        const flat = line.match(/^([a-z_]+):\s*(.*)$/);
+        const flat = line.match(/^([a-z_][a-z0-9_-]*):\s*(.*)$/);
         if (!flat) { i++; continue; }
         const [, key, valRaw] = flat;
         const val = valRaw.trim();
