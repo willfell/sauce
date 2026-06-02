@@ -3900,37 +3900,16 @@ function assertCoworkV068Shape() {
     }
 }
 
-// HC-V0840-C1: morning-briefing pre-flight step 3a reads yesterday's memory
-{
-    const label = "HC-V0840-C1 morning-briefing/SKILL.md pre-flight step 3a reads yesterday's memory";
-    try {
-        const skill = fs.readFileSync(path.join(BP, "skills/orchestrators/morning-briefing/SKILL.md"), "utf8");
-        assertTrue(/3a\.\s+\*\*Read recent memory\.\*\*/.test(skill) || skill.includes("3a. **Read recent memory.**"),
-            `${label}: missing step 3a 'Read recent memory'`);
-        assertTrue(skill.includes("spice/cowork/memory/"),
-            `${label}: missing canonical memory path in pre-flight`);
-        assertTrue(skill.includes("yesterday_synthesis") || skill.includes("yesterday's memory"),
-            `${label}: missing yesterday synthesis variable/reference`);
-    } catch (e) {
-        failed++; console.error(`FAIL  ${label}: ${e.message}`);
-    }
-}
-
-// HC-V0840-C2: morning-briefing body composition includes new callouts gated on null data
-{
-    const label = "HC-V0840-C2 morning-briefing/SKILL.md body composition: Yesterday at a glance + Overnight callouts";
-    try {
-        const skill = fs.readFileSync(path.join(BP, "skills/orchestrators/morning-briefing/SKILL.md"), "utf8");
-        assertTrue(skill.includes("Yesterday at a glance"),
-            `${label}: missing 'Yesterday at a glance' callout title`);
-        assertTrue(skill.includes("Overnight"),
-            `${label}: missing 'Overnight' callout title`);
-        assertTrue(skill.includes("skipped cleanly") || skill.includes("backward-compat") || skill.includes("if non-empty") || skill.includes("absent") || skill.includes("memory layer hasn't"),
-            `${label}: missing null-data backward-compat clause`);
-    } catch (e) {
-        failed++; console.error(`FAIL  ${label}: ${e.message}`);
-    }
-}
+// HC-V0840-C1, HC-V0840-C2: SUPERSEDED at v0.85.0 S8.
+//
+// These cases asserted the v0.84.0 morning-briefing inline file-read prose at
+// step 3a (`yesterday_synthesis` variable references) + the body composition's
+// hand-composed `Yesterday at a glance` + `Overnight` callout literals. The
+// v0.85.0 S8 refactor moved both surfaces to the pure helper compose-memory-
+// callouts.js (asserted byte-identical via HC-V0850-C1..C5 golden-fixture).
+// Removed at v0.85.0 S8 close as the new sub-asserts fully cover the contract
+// + the literal prose is now opaque inside the helper. See v0.85.0 design § 2.2.3
+// / § 2.2.4 + Docs/plans/2026-06-02-v0.85.0-tier-2-and-read-memory-design.md.
 
 // HC-V0840-D1: engagement-types/*.json declare tick + synthesize_day in supported + default cadences
 {
