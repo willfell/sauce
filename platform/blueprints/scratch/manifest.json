@@ -36,8 +36,11 @@
     "ScratchDayList",
     "ScratchDayActions",
     "ScratchLeafActions",
-    "ScratchHubActions"
+    "ScratchHubActions",
+    "ScratchDayMigrate",
+    "ScratchDayMigrateInit"
   ],
+  "customjs_startup_scripts": ["ScratchDayMigrateInit"],
   "files": [
     {
       "source": "templates/Scratch.md",
@@ -70,6 +73,14 @@
     {
       "source": "helpers/scratch-hub-actions.js",
       "dest": "{{scripts_path}}/scratch/scratch-hub-actions.js"
+    },
+    {
+      "source": "helpers/scratch-day-migrate.js",
+      "dest": "{{scripts_path}}/scratch/scratch-day-migrate.js"
+    },
+    {
+      "source": "helpers/scratch-day-migrate-init.js",
+      "dest": "{{scripts_path}}/scratch/scratch-day-migrate-init.js"
     }
   ],
   "claude_surface": [
