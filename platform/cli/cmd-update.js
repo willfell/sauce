@@ -18,59 +18,54 @@ const path = require("path");
 //   3. Ancestry walk from __filename (or test hook _callerFile)
 //   4. Throw with explicit message
 // Exposed via module.exports._resolveWorkshopPath for HC-V0751-B1..B4 +
-// HC-V0850-G1.
+// HC-V0850-G1 + HC-V0851-A1..A4.
+//
+// v0.85.1 generalization (FLN-v85-1): the helper no longer requires a
+// libexec/-named ancestor. It accepts ANY ancestor with a valid sauce
+// manifest (platform/manifest.json parseable + workshop_version field
+// present). Covers three deploy layouts uniformly:
+//   - brew Cellar  (.../sauce/<ver>/libexec/platform/manifest.json)
+//   - active-pantry (.../sauce/platform/manifest.json — dev symlink target)
+//   - in-vault pantry (.../pantry/platform/manifest.json — legacy/embed)
 // ---------------------------------------------------------------------------
+function _isValidWorkshopRoot(dir) {
+    const manifestPath = path.join(dir, "platform", "manifest.json");
+    if (!fs.existsSync(manifestPath)) return false;
+    try {
+        const m = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+        return typeof m.workshop_version === "string" && m.workshop_version.length > 0;
+    } catch (_) {
+        return false;
+    }
+}
+
 function _resolveWorkshopPath(installed, argv, hooks) {
     if (argv && argv.workshopPath) return argv.workshopPath;
 
-    // Workstream A (v0.76.0): walk from __filename, NOT process.execPath.
-    // process.execPath is the Node binary (e.g., /opt/homebrew/Cellar/node/.../bin/node)
-    // whose ancestry contains no libexec/platform — the v0.75.1 helper walked
-    // it pointlessly. cmd-update.js itself lives at <workshop>/platform/cli/cmd-update.js;
-    // walking from __filename reaches the workshop in 3 hops.
-    //
-    // v0.85.0 S1: computed up-front so we can compare against
-    // installed.workshop_path (FLN-v83-2 defensive hardening — see precedence
-    // note above).
-    function _ancestryWalk() {
+    // Walk from __filename (or hook-injected caller) looking for ANY ancestor
+    // with a valid sauce manifest. Covers brew Cellar + active-pantry + in-vault
+    // pantry layouts uniformly. v0.85.1 generalization (FLN-v85-1).
+    const ancestryPath = (() => {
         const startFile = (hooks && hooks._callerFile) || __filename;
         let dir = path.dirname(startFile);
         const root = path.parse(dir).root;
         while (dir !== root) {
-            if (
-                path.basename(dir) === "libexec" &&
-                fs.existsSync(path.join(dir, "platform"))
-            ) {
-                return dir;
-            }
+            if (_isValidWorkshopRoot(dir)) return dir;
             dir = path.dirname(dir);
         }
         return null;
-    }
-    const ancestryPath = _ancestryWalk();
+    })();
 
-    // Workstream B (v0.76.0): validate stored path before returning. When brew
-    // cleans up an old keg, installed.workshop_path becomes a dead path;
-    // returning it causes downstream "workshop manifest not parseable" failures.
-    // Probe for platform/manifest.json — falls through to ancestry walk if dead.
     if (installed && installed.workshop_path) {
         const stored = installed.workshop_path;
-        const manifestProbe = path.join(stored, "platform", "manifest.json");
-        if (fs.existsSync(manifestProbe)) {
-            // v0.85.0 S1 FLN-v83-2 defensive hardening: if the ancestry-walked
-            // path diverges from the stored path, the running sauce binary's
-            // libexec is the source of truth (brew shim resolved through the
-            // currently-active keg). The stored workshop_path may point at a
-            // prior keg that brew hasn't cleaned up yet; reading its older
-            // manifest would silently bypass --bump-pins diff detection
-            // (older manifest's blueprint versions match the consumer's
-            // current pins → "nothing to bump").
+        if (_isValidWorkshopRoot(stored)) {
+            // If stored and ancestry diverge, prefer ancestry (currently-active dispatcher path).
             if (ancestryPath && path.resolve(ancestryPath) !== path.resolve(stored)) {
                 return ancestryPath;
             }
             return stored;
         }
-        // stale: fall through to ancestry walk below
+        // stale: fall through to ancestry
     }
 
     if (ancestryPath) return ancestryPath;
@@ -100,6 +95,17 @@ function handleBumpPins(cwd, opts) {
     }
     const installed = JSON.parse(fs.readFileSync(installedPath, "utf8"));
     const workshopPath = _resolveWorkshopPath(installed, { workshopPath: opts.workshopPath });
+
+    // v0.85.1 auto-populate: persist resolved workshop_path for future runs.
+    if (!installed.workshop_path || installed.workshop_path !== workshopPath) {
+        installed.workshop_path = workshopPath;
+        try {
+            fs.writeFileSync(installedPath, JSON.stringify(installed, null, 2) + "\n");
+        } catch (_e) {
+            // Best-effort; don't block bump-pins on write failure.
+        }
+    }
+
     const workshopManifestPath = path.join(workshopPath, "platform", "manifest.json");
     let workshopManifest;
     try {

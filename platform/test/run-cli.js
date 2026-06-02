@@ -1475,21 +1475,27 @@ function _bpSetupVault(opts) {
 }
 
 // Helper: runs `sauce update --bump-pins [...args]` from inside vault dir.
-function _bpRun(vault, args) {
+// v0.85.1: pin the workshop path explicitly via --workshop-path so the
+// child process's _resolveWorkshopPath does not ancestry-walk into the real
+// sauce repo root (whose platform/manifest.json now satisfies the generalized
+// validity probe). When `workshop` is undefined (BP5 outside-vault case),
+// the flag is omitted.
+function _bpRun(vault, args, workshop) {
     const { spawnSync: sp } = require("child_process");
     const ROOT = path.resolve(__dirname, "..", "..");
-    const result = sp("node", [path.join(ROOT, "platform/cli/sauce-cli.js"), "update", "--bump-pins", ...args],
+    const wpArgs = workshop ? ["--workshop-path", workshop] : [];
+    const result = sp("node", [path.join(ROOT, "platform/cli/sauce-cli.js"), "update", "--bump-pins", ...wpArgs, ...args],
         { cwd: vault, encoding: "utf8" });
     return { code: result.status, stdout: result.stdout || "", stderr: result.stderr || "" };
 }
 
 async function caseBP1HappyPathWorkshopVersionDiff() {
     const label = "HC-V0750-D1 workshop_version diff line";
-    const { vault, tmp } = _bpSetupVault({
+    const { vault, workshop, tmp } = _bpSetupVault({
         workshopManifest: { workshop_version: "0.75.0", blueprints: [{ name: "cowork", version: "0.14.0" }], mechanisms: [] },
         subscription: { workshop_version: "0.74.0", blueprints: [{ name: "cowork", version: "0.13.0" }], mechanisms: [] },
     });
-    const { code, stdout } = _bpRun(vault, ["--dry-run"]);
+    const { code, stdout } = _bpRun(vault, ["--dry-run"], workshop);
     assertTrue(code === 0, label + " (exit 0)");
     assertContains(stdout, "workshop_version: 0.74.0 -> 0.75.0", label);
     fs.rmSync(tmp, { recursive: true, force: true });
@@ -1497,11 +1503,11 @@ async function caseBP1HappyPathWorkshopVersionDiff() {
 
 async function caseBP2BlueprintPinMapBumps() {
     const label = "HC-V0750-D2 blueprint pin map bumps";
-    const { vault, tmp } = _bpSetupVault({
+    const { vault, workshop, tmp } = _bpSetupVault({
         workshopManifest: { workshop_version: "0.75.0", blueprints: [{ name: "cowork", version: "0.14.0" }], mechanisms: [] },
         subscription: { workshop_version: "0.74.0", blueprints: [{ name: "cowork", version: "0.13.0" }], mechanisms: [] },
     });
-    const { code, stdout } = _bpRun(vault, ["--dry-run"]);
+    const { code, stdout } = _bpRun(vault, ["--dry-run"], workshop);
     assertTrue(code === 0, label + " (exit 0)");
     assertContains(stdout, "pinned.blueprints.cowork: 0.13.0 -> 0.14.0", label);
     fs.rmSync(tmp, { recursive: true, force: true });
@@ -1509,11 +1515,11 @@ async function caseBP2BlueprintPinMapBumps() {
 
 async function caseBP3NewMechanismNotAutoSubscribed() {
     const label = "HC-V0750-D3 new mechanism NOT auto-subscribed";
-    const { vault, tmp } = _bpSetupVault({
+    const { vault, workshop, tmp } = _bpSetupVault({
         workshopManifest: { workshop_version: "0.75.0", blueprints: [], mechanisms: [{ name: "smart-connections-bridge", version: "0.1.0" }] },
         subscription: { workshop_version: "0.74.0", blueprints: [], mechanisms: [] },
     });
-    const { code, stdout } = _bpRun(vault, ["--dry-run"]);
+    const { code, stdout } = _bpRun(vault, ["--dry-run"], workshop);
     assertTrue(code === 0, label + " (exit 0)");
     assertContains(stdout, "smart-connections-bridge: (new in workshop — not subscribed", label);
     fs.rmSync(tmp, { recursive: true, force: true });
@@ -1521,11 +1527,11 @@ async function caseBP3NewMechanismNotAutoSubscribed() {
 
 async function caseBP4RemovedMechanismWarning() {
     const label = "HC-V0750-D4 removed-from-workshop mechanism warning";
-    const { vault, tmp } = _bpSetupVault({
+    const { vault, workshop, tmp } = _bpSetupVault({
         workshopManifest: { workshop_version: "0.75.0", blueprints: [], mechanisms: [] },
         subscription: { workshop_version: "0.74.0", blueprints: [], mechanisms: [{ name: "deprecated-mech", version: "0.1.0" }] },
     });
-    const { code, stdout } = _bpRun(vault, ["--dry-run"]);
+    const { code, stdout } = _bpRun(vault, ["--dry-run"], workshop);
     assertTrue(code === 0, label + " (exit 0)");
     assertContains(stdout, "deprecated-mech: WARNING", label);
     fs.rmSync(tmp, { recursive: true, force: true });
@@ -1542,11 +1548,11 @@ async function caseBP5OutsideVaultErrors() {
 
 async function caseBP6KeepComparatorsPreservesPrefix() {
     const label = "HC-V0750-D6 --keep-comparators preserves ^X.Y.Z";
-    const { vault, tmp } = _bpSetupVault({
+    const { vault, workshop, tmp } = _bpSetupVault({
         workshopManifest: { workshop_version: "0.75.0", blueprints: [{ name: "cowork", version: "0.14.0" }], mechanisms: [] },
         subscription: { workshop_version: "0.74.0", blueprints: [{ name: "cowork", version: "^0.13.0" }], mechanisms: [] },
     });
-    const { code, stdout } = _bpRun(vault, ["--dry-run", "--keep-comparators"]);
+    const { code, stdout } = _bpRun(vault, ["--dry-run", "--keep-comparators"], workshop);
     assertTrue(code === 0, label + " (exit 0)");
     assertContains(stdout, "pinned.blueprints.cowork: ^0.13.0 -> ^0.14.0", label);
     fs.rmSync(tmp, { recursive: true, force: true });
@@ -1554,11 +1560,11 @@ async function caseBP6KeepComparatorsPreservesPrefix() {
 
 async function caseBP7EmptyDiffNoOp() {
     const label = "HC-V0750-D7 empty diff — already match, nothing to bump";
-    const { vault, tmp } = _bpSetupVault({
+    const { vault, workshop, tmp } = _bpSetupVault({
         workshopManifest: { workshop_version: "0.74.0", blueprints: [{ name: "cowork", version: "0.13.0" }], mechanisms: [] },
         subscription: { workshop_version: "0.74.0", blueprints: [{ name: "cowork", version: "0.13.0" }], mechanisms: [] },
     });
-    const { code, stdout } = _bpRun(vault, ["--dry-run"]);
+    const { code, stdout } = _bpRun(vault, ["--dry-run"], workshop);
     assertTrue(code === 0, label + " (exit 0)");
     assertContains(stdout, "already match workshop; nothing to bump", label);
     fs.rmSync(tmp, { recursive: true, force: true });
@@ -1587,7 +1593,12 @@ async function caseV0760B2ResolveWorkshopPathInstalledWins() {
         fs.writeFileSync(path.join(tmp, "platform", "manifest.json"), JSON.stringify({ workshop_version: "0.76.0" }));
         const installed = { workshop_path: tmp };
         const argv = {};
-        const result = cmdUpdate._resolveWorkshopPath(installed, argv);
+        // v0.85.1: inject _callerFile under tmp so the generalized ancestry walk
+        // resolves to tmp (and not the actual sauce repo root, which would
+        // diverge and trigger the "prefer-ancestry" branch).
+        const result = cmdUpdate._resolveWorkshopPath(installed, argv, {
+            _callerFile: path.join(tmp, "platform", "cli", "cmd-update.js"),
+        });
         assertEqual(result, tmp, label);
     } finally {
         fs.rmSync(tmp, { recursive: true, force: true });
@@ -1602,6 +1613,10 @@ async function caseV0760B3ResolveWorkshopPathAncestryWalk() {
         // Fabricate a libexec ancestor that contains a platform/ subdir.
         const libexec = path.join(tmp, "Cellar", "sauce", "0.76.0", "libexec");
         fs.mkdirSync(path.join(libexec, "platform", "cli"), { recursive: true });
+        // v0.85.1: generalized helper now requires platform/manifest.json with
+        // a workshop_version field (no longer relies on libexec basename).
+        fs.writeFileSync(path.join(libexec, "platform", "manifest.json"),
+            JSON.stringify({ workshop_version: "0.76.0" }));
         // Inject a fake __filename via the helper's _callerFile hook — simulates
         // cmd-update.js being at <libexec>/platform/cli/cmd-update.js.
         const installed = { workshop_path: null };
@@ -1623,6 +1638,9 @@ async function caseV0760B4ResolveWorkshopPathStalePathFallsThrough() {
         // Synthetic ancestry tree (valid libexec)
         const libexec = path.join(tmp, "Cellar", "sauce", "0.76.0", "libexec");
         fs.mkdirSync(path.join(libexec, "platform", "cli"), { recursive: true });
+        // v0.85.1: generalized helper requires platform/manifest.json present.
+        fs.writeFileSync(path.join(libexec, "platform", "manifest.json"),
+            JSON.stringify({ workshop_version: "0.76.0" }));
         // Stored path that does NOT exist on disk
         const installed = { workshop_path: "/opt/homebrew/Cellar/sauce/0.74.0/libexec" };
         const argv = {};
@@ -1718,6 +1736,122 @@ async function caseV0850G1HandleBumpPinsBlueprintPin() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// HC-V0851-A1..A4 — v0.85.1 S1 _resolveWorkshopPath generalization (FLN-v85-1)
+// + handleBumpPins workshop_path auto-populate. Three deploy-layout cases
+// (brew Cellar, active-pantry, in-vault pantry) prove the helper no longer
+// requires a libexec-named ancestor; the fourth proves successful resolution
+// writes installed.workshop_path back to ranch/platform-installed.json.
+// ---------------------------------------------------------------------------
+async function caseV0851A1ResolveCellar() {
+    const label = "HC-V0851-A1 _resolveWorkshopPath brew Cellar layout";
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "hc-v0851-a1-"));
+    try {
+        const libexec = path.join(tmp, "Cellar", "sauce", "0.85.1", "libexec");
+        fs.mkdirSync(path.join(libexec, "platform", "cli"), { recursive: true });
+        fs.writeFileSync(path.join(libexec, "platform", "manifest.json"),
+            JSON.stringify({ workshop_version: "0.85.1" }));
+        const cmdUpdate = require("../cli/cmd-update.js");
+        const resolved = cmdUpdate._resolveWorkshopPath(
+            { workshop_path: null }, {},
+            { _callerFile: path.join(libexec, "platform", "cli", "cmd-update.js") }
+        );
+        assertTrue(path.resolve(resolved) === path.resolve(libexec),
+            `${label}: expected ${libexec}, got ${resolved}`);
+    } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+    }
+}
+
+async function caseV0851A2ResolveActivePantry() {
+    const label = "HC-V0851-A2 _resolveWorkshopPath active-pantry layout";
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "hc-v0851-a2-"));
+    try {
+        const active = path.join(tmp, "Documents", "obsidian", "sync", "workshop", "sauce");
+        fs.mkdirSync(path.join(active, "platform", "cli"), { recursive: true });
+        fs.writeFileSync(path.join(active, "platform", "manifest.json"),
+            JSON.stringify({ workshop_version: "0.85.1" }));
+        const cmdUpdate = require("../cli/cmd-update.js");
+        const resolved = cmdUpdate._resolveWorkshopPath(
+            { workshop_path: null }, {},
+            { _callerFile: path.join(active, "platform", "cli", "cmd-update.js") }
+        );
+        assertTrue(path.resolve(resolved) === path.resolve(active),
+            `${label}: expected ${active}, got ${resolved}`);
+    } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+    }
+}
+
+async function caseV0851A3ResolveInVaultPantry() {
+    const label = "HC-V0851-A3 _resolveWorkshopPath in-vault pantry layout";
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "hc-v0851-a3-"));
+    try {
+        const pantry = path.join(tmp, "vault", "pantry");
+        fs.mkdirSync(path.join(pantry, "platform", "cli"), { recursive: true });
+        fs.writeFileSync(path.join(pantry, "platform", "manifest.json"),
+            JSON.stringify({ workshop_version: "0.85.1" }));
+        const cmdUpdate = require("../cli/cmd-update.js");
+        const resolved = cmdUpdate._resolveWorkshopPath(
+            { workshop_path: null }, {},
+            { _callerFile: path.join(pantry, "platform", "cli", "cmd-update.js") }
+        );
+        assertTrue(path.resolve(resolved) === path.resolve(pantry),
+            `${label}: expected ${pantry}, got ${resolved}`);
+    } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+    }
+}
+
+async function caseV0851A4AutoPopulate() {
+    const label = "HC-V0851-A4 handleBumpPins auto-populates installed.workshop_path";
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "hc-v0851-a4-"));
+    try {
+        const consumer = path.join(tmp, "consumer");
+        const workshop = path.join(tmp, "workshop");
+        fs.mkdirSync(path.join(consumer, "ranch"), { recursive: true });
+        fs.mkdirSync(path.join(workshop, "platform"), { recursive: true });
+
+        const installed = { workshop_version: "0.85.0", workshop_path: null };
+        const subscription = {
+            workshop_version: "0.85.0",
+            blueprints: [{ name: "cowork", version: "0.24.0" }],
+            mechanisms: []
+        };
+        const workshopManifest = {
+            workshop_version: "0.85.1",
+            blueprints: [{ name: "cowork", version: "0.24.1" }],
+            mechanisms: []
+        };
+        fs.writeFileSync(path.join(consumer, "ranch", "platform-installed.json"),
+            JSON.stringify(installed));
+        fs.writeFileSync(path.join(consumer, "ranch", "platform-subscription.json"),
+            JSON.stringify(subscription));
+        fs.writeFileSync(path.join(workshop, "platform", "manifest.json"),
+            JSON.stringify(workshopManifest));
+
+        const cmdUpdate = require("../cli/cmd-update.js");
+        // Suppress stdout chatter from handleBumpPins.
+        const origWrite = process.stdout.write.bind(process.stdout);
+        process.stdout.write = () => true;
+        try {
+            await cmdUpdate.run(
+                { vaultPath: consumer, _runInstaller: async () => {} },
+                ["--bump-pins", "--workshop-path", workshop]
+            );
+        } finally {
+            process.stdout.write = origWrite;
+        }
+
+        const installedAfter = JSON.parse(fs.readFileSync(
+            path.join(consumer, "ranch", "platform-installed.json"), "utf8"));
+        assertTrue(path.resolve(installedAfter.workshop_path || "") === path.resolve(workshop),
+            `${label}: workshop_path not auto-populated (got ${installedAfter.workshop_path})`);
+    } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+    }
+}
+
 const cases = [
     caseC1AncestorWalk, caseC2SauceVaultEnv, caseC3NotInVault, caseC4UnknownVerb,
     caseC5StatusClean, caseC6StatusDrift, caseC10WizardDelegates,
@@ -1759,6 +1893,8 @@ const cases = [
     caseV0760B1ResolveWorkshopPathArgvWins, caseV0760B2ResolveWorkshopPathInstalledWins,
     caseV0760B3ResolveWorkshopPathAncestryWalk, caseV0760B4ResolveWorkshopPathStalePathFallsThrough,  // v0.76.0 S1 HC-V0760-B1..B4
     caseV0850G1HandleBumpPinsBlueprintPin,  // v0.85.0 S1 HC-V0850-G1 FLN-v83-2
+    caseV0851A1ResolveCellar, caseV0851A2ResolveActivePantry,
+    caseV0851A3ResolveInVaultPantry, caseV0851A4AutoPopulate,  // v0.85.1 S1 HC-V0851-A1..A4 FLN-v85-1
 ];
 
 async function main() {
