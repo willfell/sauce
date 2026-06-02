@@ -656,3 +656,33 @@ sauce update --bump-pins   # or: sauce update --force
 ```
 
 After the update, verify by checking that `spice/cowork/context/engagement-types/w2-fte.json` (or whichever type you use) is present in your vault. If running `cowork:midday-tripwire` previously silent-no-op'd on a w2-fte or consulting engagement, it should now correctly read `tripwire_aspects` from the materialized file.
+
+---
+
+## Upgrading from v0.83.x to v0.84.0
+
+MINOR release. `sauce update --bump-pins` works as normal — no vault-side migration steps required. One required post-deploy user action (see below).
+
+What changes:
+
+- **Workshop:** `0.83.0` → `0.84.0`. Tier 0 + Tier 1 of the cowork continuous-memory architecture: `cowork:capture-tick` + `cowork:synthesize-day` orchestrators; morning-briefing pre-flight step 3a wire-through; engagement-types schema 0.4.0.
+- **cowork:** `0.22.0` → `0.23.0` (MINOR — new install surface; 2 new orchestrators; morning-briefing wire-through; engagement-type schema 0.4.0 + cadence fields).
+
+**Memory files land at `spice/cowork/memory/<engagement_id>/YYYY-MM-DD.md`.** This directory is NOT a `files[]` entry — it is created by `cowork:capture-tick` on first run. No action required at update time. These files are USER-data and are never overwritten by `sauce update`. You may delete or archive them freely.
+
+**`cowork:morning-briefing` is backward-compatible.** The new pre-flight step 3a reads the most recent memory file and injects a memory context callout into the briefing body. When no memory files exist (i.e., you have not yet run `capture-tick`), the step skips cleanly with no visible change to the briefing output.
+
+**Engagement-type schema 0.4.0.** The three standard engagement-type JSONs (`w2-fte.json`, `personal.json`, `consulting.json`) now include `supported_cadences` + `default_cadences` fields listing `tick` + `synthesize_day`. These are STOCK files overwritten by `sauce update`; do not hand-edit them.
+
+**Required post-deploy user action: re-run `cowork:onboard-scheduled-jobs` after the update.** The new `tick` + `synthesize_day` cadences will not appear in your vault's Cowork.md nav table until `onboard-scheduled-jobs` walks the updated engagement-type JSON and registers them. Run `/cowork` → `onboard-scheduled-jobs` once per consumer vault after `sauce update --bump-pins`.
+
+```bash
+# Bump consumer subscription pins (workshop + cowork) — edit each vault's
+# ranch/platform-subscription.json:
+#   "workshop_version": "0.83.0" → "0.84.0"
+#   "cowork": "0.22.0" → "0.23.0"
+# Then:
+sauce update --bump-pins   # or: sauce update --force
+```
+
+**FLN-v83-2 workaround note.** If `sauce update --bump-pins` bumps the workshop pin but leaves the cowork blueprint pin at `0.22.0` (known bug; inconsistent across machines), manually edit `ranch/platform-subscription.json` to set `"cowork": "0.23.0"` and re-run `sauce update` (no `--bump-pins` needed on the second run). Verify cowork materialized by checking that `spice/cowork/context/engagement-types/w2-fte.json` is present on disk and that `spice/cowork/memory/` is accessible (will be created on first `capture-tick` run).
