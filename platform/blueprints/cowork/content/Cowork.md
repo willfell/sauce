@@ -96,6 +96,26 @@ if (vaultConfig) {
 
 ---
 
+## Memory
+
+> [!info]+ Background memory layer (v0.84.0+)
+> Cowork captures hourly snapshots of your day across MCPs and synthesizes them at EOD into a daily-pattern note. Background-only — does not clutter the daily note. Click any file below to inspect.
+
+```dataviewjs
+// 5 most-recent memory.md files cross-engagement, sorted by last_tick_at desc.
+const pages = dv.pages('"spice/cowork/memory"')
+    .where(p => p.type === "cowork-memory")
+    .sort(p => p.last_tick_at || p.created_at, "desc")
+    .limit(5);
+if (pages.length === 0) {
+    dv.paragraph("_(No memory captured yet — the first hourly tick will create today's memory.md.)_");
+} else {
+    dv.list(pages.map(p => `[[${p.file.path}|${p.engagement_id} — ${p.day} (${p.tick_count} ticks)]]`));
+}
+```
+
+---
+
 ## About
 
 ```dataviewjs

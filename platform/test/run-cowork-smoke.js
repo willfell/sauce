@@ -3999,6 +3999,22 @@ function assertCoworkV068Shape() {
     }
 }
 
+// HC-V0850-G2: Cowork.md hub gains visible Memory section + dataview filter
+{
+    const label = "HC-V0850-G2 Cowork.md ## Memory + cowork-memory dataview filter";
+    try {
+        const hub = fs.readFileSync(path.join(BP, "content/Cowork.md"), "utf8");
+        assertTrue(hub.includes("## Memory"),
+            `${label}: missing '## Memory' heading`);
+        assertTrue(hub.includes('"spice/cowork/memory"'),
+            `${label}: missing dv.pages('"spice/cowork/memory"') dataview query`);
+        assertTrue(hub.includes('p.type === "cowork-memory"'),
+            `${label}: missing cowork-memory type filter`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
 (function main() {
   console.log("--- shared contracts ---");
   checkSharedContracts();
