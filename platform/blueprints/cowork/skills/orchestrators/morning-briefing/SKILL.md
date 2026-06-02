@@ -34,9 +34,16 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
    3a.ii Invoke sub-skill `cowork:read-memory` with input `{ engagement_id, tier: "tick", window: "today", limit_ticks: 6 }`. Capture `output_overnight`. Same null-data preservation.
 
    Both invocations are PURE (no MCP calls, no writes). New in v0.85.0 (refactor of v0.84.0's inline file-read).
-3b. READ `.claude/skills/cowork/skills/read-user-preferences/SKILL.md` in full and follow
-   its `## Steps` section with `{}`. Capture as `prefs_result = { prefs, status, reason }`. Capture `prefs = prefs_result.prefs` (may be null when `status != "ok"`). Do NOT abort on `status != "ok"`; continue with legacy fallback (see step 3c).
-3c. **Plan dispatch.** Determine dispatch mode and build the priority-ordered dispatch plan.
+3b. **Gather semantic echoes.** (NEW v0.87.0; PURE — no MCP calls.)
+
+   Compose `anchor_text` from `dispatch_plan_summary` + today's `calendar_summary` + `email_summary` (≤500 chars total; join with " · " separator). When all three are empty, skip this step and set `output_echoes = null`.
+
+   Invoke sub-skill `cowork:gather-semantic-memory` with input `{ engagement_id, anchor_text, top_k: 2, exclude_window: "last-30d", min_similarity: 0.45 }`. Capture `output_echoes`.
+
+   The sub-skill returns null-data when corpus is thin OR sc-bridge unavailable OR SC index missing — preserve as `output_echoes = null` (or the returned null-data object) for the body-composition step.
+3c. READ `.claude/skills/cowork/skills/read-user-preferences/SKILL.md` in full and follow
+   its `## Steps` section with `{}`. Capture as `prefs_result = { prefs, status, reason }`. Capture `prefs = prefs_result.prefs` (may be null when `status != "ok"`). Do NOT abort on `status != "ok"`; continue with legacy fallback (see step 3d).
+3d. **Plan dispatch.** Determine dispatch mode and build the priority-ordered dispatch plan.
 
    Compute `dispatch_mode`:
 
@@ -46,7 +53,7 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
 
    When `dispatch_mode == "legacy"`:
    - Emit Obsidian Notice: `cowork:morning-briefing -- user-preferences <status> (<reason>); using engagement-template defaults` (where `<status>` and `<reason>` come from `prefs_result`).
-   - Skip the remainder of step 3c. The legacy gather sequence (steps 5-12) fires unchanged.
+   - Skip the remainder of step 3d. The legacy gather sequence (steps 5-12) fires unchanged.
 
    When `dispatch_mode == "prefs"`:
 
@@ -231,6 +238,8 @@ Each gather call passes `engagement_id`. The sub-skill reads per-engagement MCP-
 
     - **NEW (v0.85.0): Memory callouts (REFACTORED).** Invoke pure helper `composeMemoryCallouts(output_yesterday, output_overnight)` from `helpers/compose-memory-callouts.js` → `{ yesterdayCalloutMd, overnightCalloutMd }`. When `yesterdayCalloutMd` is non-empty, append immediately after the synopsis callout. When `overnightCalloutMd` is non-empty, append immediately after the Yesterday callout (or after the synopsis if Yesterday was empty). Both empty strings = omit cleanly (matches v0.84.0 null-data backward-compat). Output is byte-identical to v0.84.0's hand-composed prose given the same memory.md input; golden-fixture asserted by HC-V0850-C3..C5.
 
+    - **NEW (v0.87.0): Echoes from your record.** Invoke pure helper `composeSemanticEchoesCallout(output_echoes)` from `helpers/compose-semantic-echoes-callout.js`. When non-empty, append immediately after the Overnight callout (or after the synopsis if Overnight + Yesterday were both empty). Empty string = omit cleanly (null-data backward-compat for vaults with thin corpus or no sc-bridge installed).
+
    When `prompt_body` is empty, do NOT freelance content — compose a skeleton-compliant STUB body:
     - `SpaceNavButtons` dataviewjs block (verbatim).
     - `> [!info]- Today at a glance\n> (Prompt body empty — edit spice/cowork/prompts/morning-briefing.md to customize what this run emits.)`
@@ -296,4 +305,4 @@ Emit Obsidian Notice `cowork:morning-briefing complete -- <engagement.label> <co
 
 ## Harness testing
 
-A helper at `platform/blueprints/cowork/helpers/dispatch-plan-helper.js` exports `planDispatch`, `decideDispatchMode`, `composeVoiceContract`, `composeWarningCallout` for the HC-V0780-C* / D* harness cases. Production agents in consumer vaults execute step 3c's algorithm directly — they do NOT depend on the helper file existing.
+A helper at `platform/blueprints/cowork/helpers/dispatch-plan-helper.js` exports `planDispatch`, `decideDispatchMode`, `composeVoiceContract`, `composeWarningCallout` for the HC-V0780-C* / D* harness cases. Production agents in consumer vaults execute step 3d's algorithm directly — they do NOT depend on the helper file existing.

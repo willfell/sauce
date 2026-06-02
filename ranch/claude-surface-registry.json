@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-06-02T22:37:10.326Z",
-  "workshop_version": "0.85.1",
+  "generated_at": "2026-06-02T23:03:35.599Z",
+  "workshop_version": "0.86.0",
   "contributions": {
     "audit": [
       {
@@ -77,7 +77,7 @@
         "kind": "command",
         "source": "commands/cowork.md",
         "dest": ".claude/commands/cowork.md",
-        "version": "0.25.0"
+        "version": "0.26.0"
       },
       {
         "kind": "claude_md_row",
@@ -92,229 +92,229 @@
         "kind": "skill",
         "source": "skills/orchestrators/bootstrap-vault/SKILL.md",
         "dest": ".claude/skills/cowork/bootstrap-vault/SKILL.md",
-        "version": "0.25.0"
+        "version": "0.26.0"
       },
       {
         "kind": "skill",
         "source": "skills/orchestrators/morning-briefing/SKILL.md",
         "dest": ".claude/skills/cowork/morning-briefing/SKILL.md",
-        "version": "0.25.0"
+        "version": "0.26.0"
       },
       {
         "kind": "skill",
         "source": "skills/orchestrators/midday-tripwire/SKILL.md",
         "dest": ".claude/skills/cowork/midday-tripwire/SKILL.md",
-        "version": "0.25.0"
+        "version": "0.26.0"
       },
       {
         "kind": "skill",
         "source": "skills/orchestrators/eod-review/SKILL.md",
         "dest": ".claude/skills/cowork/eod-review/SKILL.md",
-        "version": "0.25.0"
+        "version": "0.26.0"
       },
       {
         "kind": "skill",
         "source": "skills/orchestrators/weekly-review/SKILL.md",
         "dest": ".claude/skills/cowork/weekly-review/SKILL.md",
-        "version": "0.25.0"
+        "version": "0.26.0"
       },
       {
         "kind": "skill",
         "source": "skills/orchestrators/monthly-review/SKILL.md",
         "dest": ".claude/skills/cowork/monthly-review/SKILL.md",
-        "version": "0.25.0"
+        "version": "0.26.0"
       },
       {
         "kind": "skill",
         "source": "skills/orchestrators/onboard-scheduled-jobs/SKILL.md",
         "dest": ".claude/skills/cowork/onboard-scheduled-jobs/SKILL.md",
-        "version": "0.25.0"
+        "version": "0.26.0"
       },
       {
         "kind": "skill",
         "source": "skills/orchestrators/context-builder/SKILL.md",
         "dest": ".claude/skills/cowork/context-builder/SKILL.md",
-        "version": "0.25.0"
+        "version": "0.26.0"
       },
       {
         "kind": "skill",
         "source": "skills/orchestrators/edit-microscope/SKILL.md",
         "dest": ".claude/skills/cowork/edit-microscope/SKILL.md",
-        "version": "0.25.0"
+        "version": "0.26.0"
       },
       {
         "kind": "skill",
         "source": "skills/orchestrators/audit-siblings/SKILL.md",
         "dest": ".claude/skills/cowork/audit-siblings/SKILL.md",
-        "version": "0.25.0"
+        "version": "0.26.0"
       },
       {
         "kind": "skill",
         "source": "skills/skills/check-vault-routing/SKILL.md",
         "dest": ".claude/skills/cowork/skills/check-vault-routing/SKILL.md",
-        "version": "0.25.0"
+        "version": "0.26.0"
       },
       {
         "kind": "skill",
         "source": "skills/skills/date-context/SKILL.md",
         "dest": ".claude/skills/cowork/skills/date-context/SKILL.md",
-        "version": "0.25.0"
+        "version": "0.26.0"
       },
       {
         "kind": "skill",
         "source": "skills/skills/ensure-daily-note/SKILL.md",
         "dest": ".claude/skills/cowork/skills/ensure-daily-note/SKILL.md",
-        "version": "0.25.0"
+        "version": "0.26.0"
       },
       {
         "kind": "skill",
         "source": "skills/skills/gather-weather/SKILL.md",
         "dest": ".claude/skills/cowork/skills/gather-weather/SKILL.md",
-        "version": "0.25.0"
+        "version": "0.26.0"
       },
       {
         "kind": "skill",
         "source": "skills/skills/gather-calendar/SKILL.md",
         "dest": ".claude/skills/cowork/skills/gather-calendar/SKILL.md",
-        "version": "0.25.0"
+        "version": "0.26.0"
       },
       {
         "kind": "skill",
         "source": "skills/skills/gather-gmail/SKILL.md",
         "dest": ".claude/skills/cowork/skills/gather-gmail/SKILL.md",
-        "version": "0.25.0"
+        "version": "0.26.0"
       },
       {
         "kind": "skill",
         "source": "skills/skills/gather-imessage/SKILL.md",
         "dest": ".claude/skills/cowork/skills/gather-imessage/SKILL.md",
-        "version": "0.25.0"
+        "version": "0.26.0"
       },
       {
         "kind": "skill",
         "source": "skills/skills/gather-finance-yesterday/SKILL.md",
         "dest": ".claude/skills/cowork/skills/gather-finance-yesterday/SKILL.md",
-        "version": "0.25.0"
+        "version": "0.26.0"
       },
       {
         "kind": "skill",
         "source": "skills/skills/gather-finance-cc-today/SKILL.md",
         "dest": ".claude/skills/cowork/skills/gather-finance-cc-today/SKILL.md",
-        "version": "0.25.0"
+        "version": "0.26.0"
       },
       {
         "kind": "skill",
         "source": "skills/skills/gather-cc-debt-snapshot/SKILL.md",
         "dest": ".claude/skills/cowork/skills/gather-cc-debt-snapshot/SKILL.md",
-        "version": "0.25.0"
+        "version": "0.26.0"
       },
       {
         "kind": "skill",
         "source": "skills/skills/gather-projects/SKILL.md",
         "dest": ".claude/skills/cowork/skills/gather-projects/SKILL.md",
-        "version": "0.25.0"
+        "version": "0.26.0"
       },
       {
         "kind": "skill",
         "source": "skills/skills/gather-threads/SKILL.md",
         "dest": ".claude/skills/cowork/skills/gather-threads/SKILL.md",
-        "version": "0.25.0"
+        "version": "0.26.0"
       },
       {
         "kind": "skill",
         "source": "skills/skills/gather-semantic-related/SKILL.md",
         "dest": ".claude/skills/cowork/skills/gather-semantic-related/SKILL.md",
-        "version": "0.25.0"
+        "version": "0.26.0"
       },
       {
         "kind": "skill",
         "source": "skills/skills/write-run-note-morning-briefing/SKILL.md",
         "dest": ".claude/skills/cowork/skills/write-run-note-morning-briefing/SKILL.md",
-        "version": "0.25.0"
+        "version": "0.26.0"
       },
       {
         "kind": "skill",
         "source": "skills/skills/write-run-note-eod-review/SKILL.md",
         "dest": ".claude/skills/cowork/skills/write-run-note-eod-review/SKILL.md",
-        "version": "0.25.0"
+        "version": "0.26.0"
       },
       {
         "kind": "skill",
         "source": "skills/skills/write-run-note-midday-tripwire/SKILL.md",
         "dest": ".claude/skills/cowork/skills/write-run-note-midday-tripwire/SKILL.md",
-        "version": "0.25.0"
+        "version": "0.26.0"
       },
       {
         "kind": "skill",
         "source": "skills/skills/write-run-note-finance/SKILL.md",
         "dest": ".claude/skills/cowork/skills/write-run-note-finance/SKILL.md",
-        "version": "0.25.0"
+        "version": "0.26.0"
       },
       {
         "kind": "skill",
         "source": "skills/skills/write-run-note-weekly-review/SKILL.md",
         "dest": ".claude/skills/cowork/skills/write-run-note-weekly-review/SKILL.md",
-        "version": "0.25.0"
+        "version": "0.26.0"
       },
       {
         "kind": "skill",
         "source": "skills/skills/write-run-note-monthly-review/SKILL.md",
         "dest": ".claude/skills/cowork/skills/write-run-note-monthly-review/SKILL.md",
-        "version": "0.25.0"
+        "version": "0.26.0"
       },
       {
         "kind": "skill",
         "source": "skills/skills/write-summary-invoice-prep/SKILL.md",
         "dest": ".claude/skills/cowork/skills/write-summary-invoice-prep/SKILL.md",
-        "version": "0.25.0"
+        "version": "0.26.0"
       },
       {
         "kind": "skill",
         "source": "skills/skills/write-summary-fte-status/SKILL.md",
         "dest": ".claude/skills/cowork/skills/write-summary-fte-status/SKILL.md",
-        "version": "0.25.0"
+        "version": "0.26.0"
       },
       {
         "kind": "skill",
         "source": "skills/skills/update-active-threads/SKILL.md",
         "dest": ".claude/skills/cowork/skills/update-active-threads/SKILL.md",
-        "version": "0.25.0"
+        "version": "0.26.0"
       },
       {
         "kind": "skill",
         "source": "skills/skills/update-active-projects/SKILL.md",
         "dest": ".claude/skills/cowork/skills/update-active-projects/SKILL.md",
-        "version": "0.25.0"
+        "version": "0.26.0"
       },
       {
         "kind": "skill",
         "source": "skills/skills/update-weekly-snapshot/SKILL.md",
         "dest": ".claude/skills/cowork/skills/update-weekly-snapshot/SKILL.md",
-        "version": "0.25.0"
+        "version": "0.26.0"
       },
       {
         "kind": "skill",
         "source": "skills/skills/run-audit-receipt/SKILL.md",
         "dest": ".claude/skills/cowork/skills/run-audit-receipt/SKILL.md",
-        "version": "0.25.0"
+        "version": "0.26.0"
       },
       {
         "kind": "command",
         "source": "commands/weekly.md",
         "dest": ".claude/commands/weekly.md",
-        "version": "0.25.0"
+        "version": "0.26.0"
       },
       {
         "kind": "command",
         "source": "commands/monthly.md",
         "dest": ".claude/commands/monthly.md",
-        "version": "0.25.0"
+        "version": "0.26.0"
       },
       {
         "kind": "skill",
         "source": "skills/skills/scaffold-timeframes/SKILL.md",
         "dest": ".claude/skills/cowork/skills/scaffold-timeframes/SKILL.md",
-        "version": "0.25.0"
+        "version": "0.26.0"
       },
       {
         "kind": "claude_md_row",
@@ -374,37 +374,43 @@
         "kind": "skill",
         "source": "skills/skills/read-user-preferences/SKILL.md",
         "dest": ".claude/skills/cowork/skills/read-user-preferences/SKILL.md",
-        "version": "0.25.0"
+        "version": "0.26.0"
       },
       {
         "kind": "skill",
         "source": "skills/skills/gather-from-served-by/SKILL.md",
         "dest": ".claude/skills/cowork/skills/gather-from-served-by/SKILL.md",
-        "version": "0.25.0"
+        "version": "0.26.0"
       },
       {
         "kind": "skill",
         "source": "skills/orchestrators/capture-tick/SKILL.md",
         "dest": ".claude/skills/cowork/capture-tick/SKILL.md",
-        "version": "0.25.0"
+        "version": "0.26.0"
       },
       {
         "kind": "skill",
         "source": "skills/orchestrators/synthesize-day/SKILL.md",
         "dest": ".claude/skills/cowork/synthesize-day/SKILL.md",
-        "version": "0.25.0"
+        "version": "0.26.0"
       },
       {
         "kind": "skill",
         "source": "skills/skills/read-memory/SKILL.md",
         "dest": ".claude/skills/cowork/skills/read-memory/SKILL.md",
-        "version": "0.25.0"
+        "version": "0.26.0"
+      },
+      {
+        "kind": "skill",
+        "source": "skills/skills/gather-semantic-memory/SKILL.md",
+        "dest": ".claude/skills/cowork/skills/gather-semantic-memory/SKILL.md",
+        "version": "0.26.0"
       },
       {
         "kind": "skill",
         "source": "skills/orchestrators/synthesize-week/SKILL.md",
         "dest": ".claude/skills/cowork/synthesize-week/SKILL.md",
-        "version": "0.25.0"
+        "version": "0.26.0"
       }
     ]
   }

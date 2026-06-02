@@ -836,9 +836,9 @@ function assertCoworkV068Shape() {
   assertTrue(fileSources.includes("helpers/cowork-latest-runs.js"),
     "V068-MANIFEST-FILES: manifest files[] declares helpers/cowork-latest-runs.js");
 
-  // V0750-VERSION: cowork blueprint version bumped to 0.25.0 (was 0.24.1 in v0.85.1; MINOR bump for v0.86.0 S1 — cross-orchestrator memory wire-through across 4 orchestrators; 4 NEW pure compose helpers added to files[]).
-  assertTrue(manifest.version === "0.25.0",
-    `V0750-VERSION: cowork manifest.version === "0.25.0" (got ${JSON.stringify(manifest.version)})`);
+  // V0750-VERSION: cowork blueprint version bumped to 0.26.0 (was 0.25.0 in v0.86.0; MINOR bump for v0.87.0 — adds gather-semantic-memory sub-skill + compose-semantic-echoes-callout helper).
+  assertTrue(manifest.version === "0.26.0",
+    `V0750-VERSION: cowork manifest.version === "0.26.0" (got ${JSON.stringify(manifest.version)})`);
 }
 
 // ---------------------------------------------------------------------------
@@ -4513,6 +4513,132 @@ function assertCoworkV068Shape() {
     } catch (e) {
         failed++; console.error(`FAIL  ${label}: ${e.message}`);
     }
+}
+
+// HC-V0870-A1: gather-semantic-memory sub-skill SKILL.md exists at sub-skill-tier dest
+{
+    const label = "HC-V0870-A1 gather-semantic-memory/SKILL.md exists";
+    try {
+        const dest = path.join(BP, "skills/skills/gather-semantic-memory/SKILL.md");
+        assertTrue(fs.existsSync(dest), `${label}: missing at ${dest}`);
+    } catch (e) { failed++; console.error(`FAIL  ${label}: ${e.message}`); }
+}
+
+// HC-V0870-A2: gather-semantic-memory SKILL.md declares required sections
+{
+    const label = "HC-V0870-A2 gather-semantic-memory required sections";
+    try {
+        const skill = fs.readFileSync(path.join(BP, "skills/skills/gather-semantic-memory/SKILL.md"), "utf8");
+        for (const section of ["## Inputs", "## Pre-flight", "## Gather", "## Decide", "## Done", "## Harness testing"]) {
+            assertTrue(skill.includes(section), `${label}: missing '${section}'`);
+        }
+    } catch (e) { failed++; console.error(`FAIL  ${label}: ${e.message}`); }
+}
+
+// HC-V0870-A3: gather-semantic-memory declares structured-output fields
+{
+    const label = "HC-V0870-A3 gather-semantic-memory structured-output fields";
+    try {
+        const skill = fs.readFileSync(path.join(BP, "skills/skills/gather-semantic-memory/SKILL.md"), "utf8");
+        for (const field of ["matches", "similarity_score", "synthesis_excerpt", "day_or_week", "tier"]) {
+            assertTrue(skill.includes(field), `${label}: missing output field '${field}'`);
+        }
+    } catch (e) { failed++; console.error(`FAIL  ${label}: ${e.message}`); }
+}
+
+// HC-V0870-A4: gather-semantic-memory declares graceful failure modes
+{
+    const label = "HC-V0870-A4 gather-semantic-memory graceful failure clause";
+    try {
+        const skill = fs.readFileSync(path.join(BP, "skills/skills/gather-semantic-memory/SKILL.md"), "utf8");
+        assertTrue(skill.includes("sc_bridge_unavailable"),
+            `${label}: missing sc_bridge_unavailable error code`);
+        assertTrue(skill.includes("index_unavailable") || skill.includes("SC index"),
+            `${label}: missing SC index unavailable failure mode`);
+        assertTrue(/found:\s*false|null-data|graceful/i.test(skill),
+            `${label}: missing graceful null-data clause`);
+    } catch (e) { failed++; console.error(`FAIL  ${label}: ${e.message}`); }
+}
+
+// HC-V0870-B1: composeSemanticEchoesCallout helper exists + exports correctly
+{
+    const label = "HC-V0870-B1 composeSemanticEchoesCallout helper exists + exports";
+    try {
+        const helperPath = path.join(BP, "helpers/compose-semantic-echoes-callout.js");
+        assertTrue(fs.existsSync(helperPath), `${label}: helper missing`);
+        delete require.cache[require.resolve(helperPath)];
+        const { composeSemanticEchoesCallout } = require(helperPath);
+        assertTrue(typeof composeSemanticEchoesCallout === "function",
+            `${label}: composeSemanticEchoesCallout not exported as function`);
+    } catch (e) { failed++; console.error(`FAIL  ${label}: ${e.message}`); }
+}
+
+// HC-V0870-B2: composeSemanticEchoesCallout byte-identical to golden fixture
+{
+    const label = "HC-V0870-B2 composeSemanticEchoesCallout byte-identical";
+    try {
+        const helperPath = path.join(BP, "helpers/compose-semantic-echoes-callout.js");
+        delete require.cache[require.resolve(helperPath)];
+        const { composeSemanticEchoesCallout } = require(helperPath);
+        const fixture = JSON.parse(fs.readFileSync(path.join(ROOT, "platform/test/fixtures/v0.87.0-echoes-fixture.json"), "utf8"));
+        const expected = fs.readFileSync(path.join(ROOT, "platform/test/fixtures/v0.87.0-echoes-expected-callout.md"), "utf8");
+        const out = composeSemanticEchoesCallout(fixture);
+        assertTrue(out === expected, `${label}: byte-diff vs expected`);
+    } catch (e) { failed++; console.error(`FAIL  ${label}: ${e.message}`); }
+}
+
+// HC-V0870-B3: composeSemanticEchoesCallout null-data clean-omit
+{
+    const label = "HC-V0870-B3 composeSemanticEchoesCallout null-data clean-omit";
+    try {
+        const helperPath = path.join(BP, "helpers/compose-semantic-echoes-callout.js");
+        delete require.cache[require.resolve(helperPath)];
+        const { composeSemanticEchoesCallout } = require(helperPath);
+        assertTrue(composeSemanticEchoesCallout(null) === "",
+            `${label}: null input non-empty`);
+        assertTrue(composeSemanticEchoesCallout({ found: false }) === "",
+            `${label}: found:false non-empty`);
+        assertTrue(composeSemanticEchoesCallout({ found: true, matches: [] }) === "",
+            `${label}: empty matches non-empty`);
+    } catch (e) { failed++; console.error(`FAIL  ${label}: ${e.message}`); }
+}
+
+// HC-V0870-C1: MB SKILL.md step 3b invokes cowork:gather-semantic-memory
+{
+    const label = "HC-V0870-C1 MB step 3b invokes cowork:gather-semantic-memory";
+    try {
+        const skill = fs.readFileSync(path.join(BP, "skills/orchestrators/morning-briefing/SKILL.md"), "utf8");
+        assertTrue(skill.includes("cowork:gather-semantic-memory"),
+            `${label}: missing cowork:gather-semantic-memory invocation`);
+        assertTrue(/3b\.\s+\*\*Gather semantic echoes\.\*\*/.test(skill),
+            `${label}: missing step 3b 'Gather semantic echoes' header`);
+        assertTrue(skill.includes("top_k: 2") || /top_k:\s*2/.test(skill),
+            `${label}: missing top_k: 2 parameter`);
+    } catch (e) { failed++; console.error(`FAIL  ${label}: ${e.message}`); }
+}
+
+// HC-V0870-C2: MB SKILL.md body composition invokes composeSemanticEchoesCallout
+{
+    const label = "HC-V0870-C2 MB body composition invokes composeSemanticEchoesCallout";
+    try {
+        const skill = fs.readFileSync(path.join(BP, "skills/orchestrators/morning-briefing/SKILL.md"), "utf8");
+        assertTrue(skill.includes("composeSemanticEchoesCallout"),
+            `${label}: missing composeSemanticEchoesCallout invocation`);
+    } catch (e) { failed++; console.error(`FAIL  ${label}: ${e.message}`); }
+}
+
+// HC-V0870-D1: cowork manifest declares gather-semantic-memory claude_surface + helper files entry
+{
+    const label = "HC-V0870-D1 cowork manifest registers gather-semantic-memory + echoes helper";
+    try {
+        const manifest = JSON.parse(fs.readFileSync(path.join(BP, "manifest.json"), "utf8"));
+        const skillSources = (manifest.claude_surface || []).filter(e => e.kind === "skill").map(e => e.source);
+        assertTrue(skillSources.some(s => s.includes("skills/gather-semantic-memory/SKILL.md")),
+            `${label}: claude_surface[] missing gather-semantic-memory entry`);
+        const filesSources = (manifest.files || []).map(e => e.source);
+        assertTrue(filesSources.some(s => s.includes("compose-semantic-echoes-callout.js")),
+            `${label}: files[] missing compose-semantic-echoes-callout.js entry`);
+    } catch (e) { failed++; console.error(`FAIL  ${label}: ${e.message}`); }
 }
 
 (function main() {

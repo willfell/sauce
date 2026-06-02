@@ -1,0 +1,22 @@
+{
+    "found": true,
+    "matches": [
+        {
+            "path": "spice/cowork/memory/personal/2026/04-April/2026-W15/synthesis.md",
+            "similarity_score": 0.78,
+            "day_or_week": "2026-W15",
+            "tier": "week",
+            "synthesis_excerpt": "Week of focus blocks; finance receipts cleared Thu; standup energy steady"
+        },
+        {
+            "path": "spice/cowork/memory/personal/2026/04-April/2026-04-15/memory.md",
+            "similarity_score": 0.71,
+            "day_or_week": "2026-04-15",
+            "tier": "day",
+            "synthesis_excerpt": "CR review wrapped; deep-work block produced design draft; email queue manageable"
+        }
+    ],
+    "anchor_text_used": "standup at noon; CR review backlog; finance receipt to file",
+    "exclusion_count": 4,
+    "error": null
+}
