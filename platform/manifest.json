@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop platform manifest. Each mechanism + blueprint has its own version.",
-  "workshop_version": "0.84.0",
+  "workshop_version": "0.84.1",
   "date": "2026-05-23",
   "foundational_plugins": [
     {
@@ -49,7 +49,7 @@
     },
     {
       "name": "activity-feed",
-      "version": "0.7.0",
+      "version": "0.7.1",
       "path": "mechanisms/activity-feed"
     },
     {
@@ -99,7 +99,7 @@
     },
     {
       "name": "styling",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "path": "mechanisms/styling"
     },
     {
@@ -109,7 +109,7 @@
     },
     {
       "name": "platform-claude",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "path": "mechanisms/platform-claude"
     },
     {
@@ -131,7 +131,7 @@
     },
     {
       "name": "daily",
-      "version": "0.13.0",
+      "version": "0.13.1",
       "path": "blueprints/daily"
     },
     {
@@ -176,7 +176,7 @@
     },
     {
       "name": "scratch",
-      "version": "0.5.1",
+      "version": "0.5.2",
       "path": "blueprints/scratch"
     },
     {

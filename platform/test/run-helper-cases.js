@@ -4195,7 +4195,7 @@ async function caseSHCS1ManifestFields() {
   assertTrue("SHC-S1: scratch/manifest.json exists on disk", fs.existsSync(p));
   const m = _readJson(p);
   assertEqual(m.name, "scratch", "SHC-S1: manifest.name === \"scratch\"");
-  assertEqual(m.version, "0.5.1", "SHC-S1: manifest.version === \"0.5.1\"");
+  assertEqual(m.version, "0.5.2", "SHC-S1: manifest.version === \"0.5.2\"");
   assertEqual(m.module_directory, "scratch", "SHC-S1: manifest.module_directory === \"scratch\"");
 }
 
@@ -7640,14 +7640,13 @@ async function caseFA2RuleFragmentsExtends() {
   }
 
   // FA6-MANIFEST version pins — daily / activity-feed / cards
-  // Updated per cycle as manifests bump. activity-feed at 0.7.0
-  // (sauce v0.73.0 — <details> state persistence + audit pass); daily at 0.13.0
-  // (sauce v0.73.0 — Part A removes syncAllBoards from render hot-path,
-  // Part B persists section state); cards untouched.
+  // Updated per cycle as manifests bump. activity-feed at 0.7.1
+  // (sauce v0.84.1 — numeric ISO compare + defaultClosed gate); daily at 0.13.1
+  // (sauce v0.84.1 — Tasks header open · done); cards untouched.
   {
     const pins = [
-      ["daily",         "platform/blueprints/daily/manifest.json",            "0.13.0"],
-      ["activity-feed", "platform/mechanisms/activity-feed/manifest.json",    "0.7.0"],
+      ["daily",         "platform/blueprints/daily/manifest.json",            "0.13.1"],
+      ["activity-feed", "platform/mechanisms/activity-feed/manifest.json",    "0.7.1"],
       ["cards",         "platform/mechanisms/cards/manifest.json",            "0.2.6"],
     ];
     for (const [name, relPath, expected] of pins) {

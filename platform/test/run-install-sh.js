@@ -38,16 +38,16 @@ const installSh = path.join(repoRoot, "install.sh");
     // I5: message mentions migrate-layout for legacy users
     assertTrue(all.includes("sauce migrate-layout"), "I5 message points legacy users at migrate-layout");
 
-    // PID-1 (v0.64.0 S5): post-install .obsidian/app.json contains
-    // "propertiesInDocument": "visible". Reads the workshop's own
+    // PID-1 (v0.84.1 S1): post-install .obsidian/app.json contains
+    // "propertiesInDocument": "hidden". Reads the workshop's own
     // self-installed app.json (workshop dogfoods every release).
-    // EXPECTED TO FAIL until S6 lands app_settings.propertiesInDocument
-    // in platform/manifest.json + reinstall propagates the value.
+    // §1 flipped the default from "visible" → "hidden" to suppress the
+    // YAML-properties bar by default in consumer vaults.
     const appJsonPath = path.join(repoRoot, ".obsidian", "app.json");
     let pidOk = false;
     try {
         const obj = JSON.parse(fs.readFileSync(appJsonPath, "utf8"));
-        pidOk = obj && obj.propertiesInDocument === "visible";
+        pidOk = obj && obj.propertiesInDocument === "hidden";
     } catch (e) {
         pidOk = false;
     }
