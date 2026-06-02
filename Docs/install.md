@@ -628,3 +628,31 @@ sauce update --bump-pins   # or: sauce update --force
 **One-time side effect:** `ranch/rules/cowork.json` on each consumer vault will naturally shrink (from ~7900 lines down to ~600 lines, or proportional based on how many dogfood cycles that vault has had) as the new `resetSourceContributions` mechanism fires during cowork's PATCH re-install. This is not an entry loss — it is de-duplication of accumulated bloat (duplicate copies of the same path_glob fragments, pre-existing since ~v0.78.0). The canonical rule set is preserved.
 
 No user action needed beyond the pin bump. No migration script. No manual `ranch/rules/cowork.json` cleanup required — the installer handles it automatically on the first cowork re-install after the bump.
+
+---
+
+## Upgrading from v0.82.x to v0.83.0
+
+MINOR release. `sauce update --bump-pins` works as normal — no vault-side migration steps required.
+
+What changes:
+
+- **Workshop:** `0.82.1` → `0.83.0`. Engagement-type materialization: cowork now ships `w2-fte.json`, `personal.json`, and `consulting.json` via `files[]`.
+- **cowork:** `0.21.1` → `0.22.0` (MINOR — new install surface; 3 engagement-type JSONs now materialize to `spice/cowork/context/engagement-types/`).
+
+**Engagement-type manifests now materialize to `spice/cowork/context/engagement-types/`.** No action required — `sauce update --bump-pins` populates the dir automatically. These are STOCK files (overwritten on every `sauce update` to stay current with the workshop manifest). Do not hand-edit them; they are not user-customizable.
+
+**Orchestrators that previously relied on workshop-path resolution** (`bootstrap-vault`, `onboard-scheduled-jobs`, and the 5 atomic-note orchestrators) now read the materialized path at `spice/cowork/context/engagement-types/<type>.json`. This makes engagement-type-driven orchestrator behavior (e.g., midday-tripwire `tripwire_aspects` gating) reachable on consumer vaults for the first time.
+
+**Consumer overrides at the legacy `spice/cowork/engagement-types/` (no `context/`) path are no longer scanned.** If a user authored a file at the old pre-v0.83.0 path, the file is preserved on disk but inert. Recovery: copy the diff into the workshop source via PR, or wait for a future `.local/` seam if one is introduced.
+
+```bash
+# Bump consumer subscription pins (workshop + cowork) — edit each vault's
+# ranch/platform-subscription.json:
+#   "workshop_version": "0.82.1" → "0.83.0"
+#   "cowork": "0.21.1" → "0.22.0"
+# Then:
+sauce update --bump-pins   # or: sauce update --force
+```
+
+After the update, verify by checking that `spice/cowork/context/engagement-types/w2-fte.json` (or whichever type you use) is present in your vault. If running `cowork:midday-tripwire` previously silent-no-op'd on a w2-fte or consulting engagement, it should now correctly read `tripwire_aspects` from the materialized file.

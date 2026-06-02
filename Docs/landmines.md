@@ -236,6 +236,8 @@ Codified in v0.20.0.
 
 **v0.80.0 + v0.80.1 observation:** the global `materializeClaudeSurface` step (run on every install regardless of the per-item version short-circuit) keeps `.claude/skills/<blueprint>/<skill>/SKILL.md` dests current per-install for surfaces it processes. The mid-cycle "deferred catch-up" concern that prior cycles documented is largely moot for SKILL.md surfaces — they refresh as a side effect of every install run. The per-item short-circuit is still load-bearing for `files[]` entries (the materialize_once + skip-if-version-matches contract on data files), but the SKILL.md drift fear is overstated. Future plans can skip the "this will catch up at the version-bump stage" warning for SKILL.md edits.
 
+**v0.83.0 observation:** cycle naturally exercised FLN-v821-2 — new install surface (3 engagement-types JSONs in cowork's `files[]`) required cowork to bump from 0.21.1 → 0.22.0 (MINOR; new install surface) for the dogfood install to actually materialize them. v0.82.1's `resetSourceContributions` wiring + per-item-loop reset fired correctly under the new MINOR bump. No bookkeeping issue surfaced.
+
 ### 17. Bootstrap network posture — failure-loud + idempotent + skip-if-present + GitHub-only
 
 The `platform/bootstrap.js` orchestrator (v0.21.0+) is the only platform layer that makes network calls. Its posture:
