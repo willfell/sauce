@@ -605,6 +605,11 @@
       "kind": "skill",
       "source": "skills/skills/read-memory/SKILL.md",
       "dest": "{{skills_dir}}/skills/read-memory/SKILL.md"
+    },
+    {
+      "kind": "skill",
+      "source": "skills/orchestrators/synthesize-week/SKILL.md",
+      "dest": "{{skills_dir}}/synthesize-week/SKILL.md"
     }
   ],
   "engagement_types": [

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-06-02T19:23:09.720Z",
+  "generated_at": "2026-06-02T19:40:06.262Z",
   "workshop_version": "0.84.4",
   "contributions": {
     "audit": [
@@ -398,6 +398,12 @@
         "kind": "skill",
         "source": "skills/skills/read-memory/SKILL.md",
         "dest": ".claude/skills/cowork/skills/read-memory/SKILL.md",
+        "version": "0.24.0"
+      },
+      {
+        "kind": "skill",
+        "source": "skills/orchestrators/synthesize-week/SKILL.md",
+        "dest": ".claude/skills/cowork/synthesize-week/SKILL.md",
         "version": "0.24.0"
       }
     ]
