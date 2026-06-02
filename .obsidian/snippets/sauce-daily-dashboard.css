@@ -59,6 +59,13 @@
 .space-daily-dashboard .sauce-section > details[open] > .sauce-section-summary .sauce-section-chevron {
   transform: rotate(90deg);
 }
+/* v0.13.4 (sauce v0.84.4): when a counts span precedes the chevron, suppress
+ * the chevron's auto-margin so counts hugs the right edge. The original
+ * margin-left:auto rule above is still the correct fallback for any future
+ * caller that omits rightHtml. */
+.space-daily-dashboard .sauce-section-counts + .sauce-section-chevron {
+  margin-left: 0;
+}
 
 /* ── Framed group (v0.10.0 sauce v0.70.0, refined v0.10.2 sauce v0.70.2) ───
  * v0.10.2: accent moved from a 4px left stripe to a thin (1px) border
@@ -275,7 +282,7 @@
   margin-left: auto;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 10px;
 }
 
 /* Open-tasks pill — orange tint + soft glow. Used in the Tasks section header. */
@@ -340,7 +347,7 @@
   letter-spacing: 0.02em;
   white-space: nowrap;
   background: transparent;
-  border: 1px solid var(--background-modifier-border);
+  border: 1px solid var(--background-modifier-border-hover);
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
   min-width: 1.5em;

@@ -2138,6 +2138,19 @@ async function testRendV067Todo1() {
       !/\.sauce-tasks-done\s*\{/.test(cssSrc),
       "The v0.84.1 .sauce-tasks-done rule has no callers in v0.84.3 and must be removed from the CSS");
 
+    // ── HC-V0844-A: pill polish (chevron hug + gap + border visibility) ───
+    assertTrue("HC-V0844-A1 CSS suppresses chevron auto-margin when counts precedes",
+      /\.sauce-section-counts\s*\+\s*\.sauce-section-chevron\s*\{[^}]*margin-left:\s*0/.test(cssSrc),
+      "CSS must include a `.sauce-section-counts + .sauce-section-chevron` adjacent-sibling rule with margin-left:0 so the chevron stops competing with the counts auto-margin");
+
+    assertTrue("HC-V0844-A2 .sauce-section-counts gap is 10px",
+      /\.sauce-section-counts\s*\{[^}]*gap:\s*10px/.test(cssSrc),
+      "v0.84.4 widens the inter-pill gap from 6px to 10px");
+
+    assertTrue("HC-V0844-A3 .sauce-section-count-pill border uses border-hover var",
+      /\.sauce-section-count-pill\s*\{[^}]*border:\s*1px\s+solid\s+var\(--background-modifier-border-hover\)/.test(cssSrc),
+      "v0.84.4 switches the Meetings/Activity pill border from --background-modifier-border (near-transparent) to --background-modifier-border-hover so the pill is findable");
+
     // HC-V0842-A1: canonical vs dogfood drift guard (retained from v0.84.2).
     // The workshop installs itself as its own first consumer; if the canonical
     // at platform/blueprints/daily/helpers/space-daily-dashboard.js diverges

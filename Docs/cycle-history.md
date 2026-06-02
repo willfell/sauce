@@ -4,6 +4,16 @@ This file archives the per-cycle status snapshots that previously lived in `CLAU
 
 ---
 
+## v0.84.4 polish-pills CLOSED 2026-06-02
+
+Workshop 0.84.3 → **0.84.4** (PATCH). Three CSS polish tweaks on top of v0.84.3's right-aligned section-header pills, surfaced by post-deploy review of the workshop dashboard in Obsidian:
+
+- **§1 Pills hug the chevron.** v0.84.3 added `margin-left: auto` to `.sauce-section-counts`, but `.sauce-section-chevron` already had its own `margin-left: auto` (pre-v0.84.3). When two flex siblings both carry auto-margins, they split the available free space equally — counts ended up roughly centered, with broken-looking whitespace between counts and chevron. Fix: new adjacent-sibling rule `.sauce-section-counts + .sauce-section-chevron { margin-left: 0 }` suppresses the chevron's auto-margin when a counts span precedes it. The original chevron auto-margin rule stays as the fallback for any future caller without `rightHtml`. The flex parent's `gap: 8px` provides the "little bit of a gap" between counts and chevron.
+- **§2 More breath between Open and Done.** `.sauce-section-counts { gap: 6px }` → `gap: 10px`. ~60% more breathing room between the orange and green Tasks pills. Mobile-pass `gap: 4px` unchanged.
+- **§3 Findable border on Meetings/Activity count pill.** `.sauce-section-count-pill`'s border switched from `var(--background-modifier-border)` (near-transparent in dark themes) to `var(--background-modifier-border-hover)` — same role-based variable family, one notch more contrast.
+
+Two lockstep version bumps (workshop 0.84.3 → 0.84.4, daily 0.13.3 → 0.13.4). 3 new HC-V0844-A* sub-asserts appended to `run-renderer.js` (CSS source-lint for each of the three rule changes). All v0.84.3 + earlier HC cases retained. 1 in-cycle test-pin update (run-helper-cases FA6-MANIFEST daily 0.13.3 → 0.13.4). Single cycle commit. Preflight `version-sync ok: 0.84.4` ALL GREEN. Design + plan + result: `Docs/plans/2026-06-02-v0.84.4-polish-pills-*.md`.
+
 ## v0.84.3 header-pills CLOSED 2026-06-02
 
 Workshop 0.84.2 → **0.84.3** (PATCH). Visual refinement of the three top-level daily-dashboard section headers:
