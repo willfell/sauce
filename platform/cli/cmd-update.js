@@ -76,6 +76,53 @@ function _resolveWorkshopPath(installed, argv, hooks) {
 }
 
 // ---------------------------------------------------------------------------
+// _warnIfActivePantryDrift — when the resolved workshop_path is an active-
+// pantry checkout (NOT a brew Cellar libexec), check whether it's N commits
+// behind origin/main and emit a loud Notice with the suggested pull command.
+// v0.85.1 FLN-v85-1 follow-up: surface drift before the next deploy bites.
+// Best-effort — git fetch failures don't block install.
+// ---------------------------------------------------------------------------
+function _warnIfActivePantryDrift(workshopPath) {
+    // Skip if path looks like a brew Cellar libexec (different update mechanism).
+    if (workshopPath.includes(path.sep + "Cellar" + path.sep)) return;
+    if (!fs.existsSync(path.join(workshopPath, ".git"))) return;
+
+    const cp = require("child_process");
+    try {
+        cp.execSync("git fetch origin --quiet", {
+            cwd: workshopPath,
+            stdio: "pipe",
+            timeout: 10000,
+        });
+    } catch (_e) {
+        process.stderr.write(
+            "sauce: active-pantry drift check skipped (git fetch failed; check network).\n",
+        );
+        return;
+    }
+
+    let behind = 0;
+    try {
+        const out = cp.execSync("git rev-list --count HEAD..origin/main", {
+            cwd: workshopPath,
+            stdio: "pipe",
+            encoding: "utf8",
+            timeout: 5000,
+        });
+        behind = parseInt(out.trim(), 10) || 0;
+    } catch (_e) {
+        return;
+    }
+
+    if (behind > 0) {
+        process.stderr.write(
+            `sauce: active-pantry workshop is ${behind} commits behind origin/main.\n` +
+            `   Pull with: cd ${workshopPath} && git pull --ff-only origin main\n`,
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
 // --bump-pins: reads the brew-installed workshop's platform/manifest.json and
 // rewrites the consumer vault's ranch/platform-subscription.json to match.
 // Returns true if normal update flow should continue, false if the process
@@ -201,11 +248,31 @@ async function run(ctx, args) {
     const wpIdx = argList.indexOf("--workshop-path");
     if (wpIdx >= 0 && argList[wpIdx + 1]) workshopPathFlag = argList[wpIdx + 1];
 
+    const cwd = (ctx && ctx.vaultPath) ? ctx.vaultPath : process.cwd();
+
+    // v0.85.1 S3: resolve workshop_path once for both bump-pins + drift warning.
+    // Best-effort: failures don't block install (handleBumpPins has its own
+    // resolution path that throws-with-context when needed).
+    let workshopPath = null;
+    try {
+        const installedPath = path.join(cwd, "ranch", "platform-installed.json");
+        if (fs.existsSync(installedPath)) {
+            const installed = JSON.parse(fs.readFileSync(installedPath, "utf8"));
+            workshopPath = _resolveWorkshopPath(installed, { workshopPath: workshopPathFlag });
+        }
+    } catch (_e) {
+        // resolution failed; let handleBumpPins surface the explicit error if needed
+    }
+
     if (bumpPins) {
-        const cwd = (ctx && ctx.vaultPath) ? ctx.vaultPath : process.cwd();
         handleBumpPins(cwd, { keepComparators, dryRun, workshopPath: workshopPathFlag });
         // handleBumpPins exits on --dry-run with a non-empty diff; returns here only to continue
         if (dryRun) return; // --dry-run + no diff (nothing to bump) — don't run normal flow
+    }
+
+    // v0.85.1 S3: surface active-pantry drift before deploy bites.
+    if (workshopPath) {
+        _warnIfActivePantryDrift(workshopPath);
     }
 
     // ----------------------------------------------------------------------
@@ -224,4 +291,4 @@ async function _runInstaller(ctx) {
     await bootstrap.phaseRunInstaller({ vaultPath: ctx.vaultPath });
 }
 
-module.exports = { run, _resolveWorkshopPath };
+module.exports = { run, _resolveWorkshopPath, _warnIfActivePantryDrift, _isValidWorkshopRoot };

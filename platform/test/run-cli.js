@@ -1852,6 +1852,28 @@ async function caseV0851A4AutoPopulate() {
     }
 }
 
+// HC-V0851-C1 — _warnIfActivePantryDrift exported + warning prose present in source.
+// v0.85.1 S3 FLN-v85-1 follow-up: source-lint guard ensuring the drift-warning
+// helper ships with the expected stderr prose + brew Cellar skip-clause.
+async function caseV0851C1ActivePantryDriftWarning() {
+    const label = "HC-V0851-C1 _warnIfActivePantryDrift exported + warning prose";
+    try {
+        const ROOT = path.resolve(__dirname, "..", "..");
+        const cmdUpdate = require("../cli/cmd-update.js");
+        assertTrue(typeof cmdUpdate._warnIfActivePantryDrift === "function",
+            `${label}: _warnIfActivePantryDrift not exported`);
+        const src = fs.readFileSync(path.join(ROOT, "platform/cli/cmd-update.js"), "utf8");
+        assertTrue(src.includes("commits behind origin/main"),
+            `${label}: warning prose 'commits behind origin/main' missing in cmd-update.js`);
+        assertTrue(src.includes("git pull --ff-only origin main"),
+            `${label}: warning suggested-command 'git pull --ff-only origin main' missing`);
+        assertTrue(src.includes("Cellar"),
+            `${label}: brew Cellar skip-clause missing (warning would fire on brew installs)`);
+    } catch (e) {
+        fail++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
 const cases = [
     caseC1AncestorWalk, caseC2SauceVaultEnv, caseC3NotInVault, caseC4UnknownVerb,
     caseC5StatusClean, caseC6StatusDrift, caseC10WizardDelegates,
@@ -1895,6 +1917,7 @@ const cases = [
     caseV0850G1HandleBumpPinsBlueprintPin,  // v0.85.0 S1 HC-V0850-G1 FLN-v83-2
     caseV0851A1ResolveCellar, caseV0851A2ResolveActivePantry,
     caseV0851A3ResolveInVaultPantry, caseV0851A4AutoPopulate,  // v0.85.1 S1 HC-V0851-A1..A4 FLN-v85-1
+    caseV0851C1ActivePantryDriftWarning,  // v0.85.1 S3 HC-V0851-C1 FLN-v85-1 follow-up
 ];
 
 async function main() {
