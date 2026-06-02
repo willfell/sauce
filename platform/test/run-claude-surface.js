@@ -536,25 +536,16 @@ async function caseCSSUB3VerbsExist() {
 }
 
 // ============================================================
-// CS-MIG-1: cowork@0.3.0 manifest with claude_surface[] entries → aggregator
-//           yields contributions including all 32 skill entries + 1 command
-//           + 1 claude_md_row (resolvers). v0.32.0 S8 dogfood migration of
-//           the legacy skills[] + files[] command shape to claude_surface[].
-//           v0.68.0 (cowork@0.11.0): patch-daily-callouts orphan deleted →
-//           32 skill entries (was 33) → 41 contributions (was 42).
-//           v0.75.0 S8: gather-semantic-related added →
-//           33 skill entries (was 32) → 42 contributions (was 41).
-//           v0.76.0 S13: context-builder orchestrator added →
-//           34 skill entries (was 33) → 43 contributions (was 42).
-//           v0.78.0 S2: read-user-preferences sub-skill added →
-//           35 skill entries (was 34) → 44 contributions (was 43).
-//           v0.78.0 S4: gather-from-served-by sub-skill added →
-//           36 skill entries (was 35) → 45 contributions (was 44).
-//           v0.79.0 S11: edit-microscope orchestrator added →
-//           37 skill entries (was 36) → 46 contributions (was 45).
+// CS-MIG-1: cowork manifest with claude_surface[] entries → aggregator yields
+//           contributions matching manifest groupBy (FLN-v79-5, v0.82.1).
+//
+// Counts are derived from manifest.claude_surface[] groupBy rather than
+// hardcoded. Manifest is the source of truth; aggregator output must match.
+// History (lockstep count bumps from prior cycles) preserved in
+// Docs/cycle-history.md.
 // ============================================================
 async function caseCSMIG1CoworkAggregation() {
-  console.log("\n--- Case CS-MIG-1: cowork manifest claude_surface[] yields 47 contributions (v0.81.0) ---");
+  console.log("\n--- Case CS-MIG-1: cowork manifest claude_surface[] aggregator counts match manifest (FLN-v79-5) ---");
   const bpManifestPath = path.join(WORKSHOP, "platform/blueprints/cowork/manifest.json");
   assertTrue("CS-MIG-1: cowork manifest.json exists", fs.existsSync(bpManifestPath));
   const bpMan = JSON.parse(fs.readFileSync(bpManifestPath, "utf8"));
@@ -588,13 +579,9 @@ async function caseCSMIG1CoworkAggregation() {
 
   assertTrue("CS-MIG-1: cowork in registry.contributions",
     Array.isArray(out.registry.contributions["cowork"]));
-  assertEq("CS-MIG-1: cowork has 47 contributions (38 skill + 3 command + 6 claude_md_row)",
-    out.registry.contributions["cowork"].length, 47);
 
   const skillEntries = out.materializeList.filter((e) => e.owner === "cowork" && e.kind === "skill");
   const cmdEntries = out.materializeList.filter((e) => e.owner === "cowork" && e.kind === "command");
-  assertEq("CS-MIG-1: 38 skill entries in materializeList", skillEntries.length, 38);
-  assertEq("CS-MIG-1: 3 command entries in materializeList", cmdEntries.length, 3);
 
   // Skill dests should have {{skills_dir}} substituted to ".claude/skills/cowork".
   for (const e of skillEntries) {
@@ -604,7 +591,6 @@ async function caseCSMIG1CoworkAggregation() {
 
   // claude_md_row resolver entries — v0.6.0 ships 6 (v0.4.0's 5 Cowork + Daily Hub + Weekly Hub + Monthly Hub + Prompts, plus v0.44.0's new Cowork About).
   const coworkRows = out.rows.resolvers.filter((r) => r.owner === "cowork");
-  assertEq("CS-MIG-1: exactly 6 resolver rows owned by cowork", coworkRows.length, 6);
 
   // HC-V0821-C1: derivation-equality check (FLN-v79-5).
   assertEq("HC-V0821-C1.1: contributions length matches manifest derivation",
