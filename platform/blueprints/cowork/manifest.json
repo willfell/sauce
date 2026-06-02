@@ -1,6 +1,6 @@
 {
   "name": "cowork",
-  "version": "0.23.0",
+  "version": "0.24.0",
   "kind": "blueprint",
   "module_directory": "cowork",
   "engagement_types_dir": "engagement-types",
@@ -315,6 +315,11 @@
     {
       "source": "engagement-types/consulting.json",
       "dest": "{{module_directory}}/context/engagement-types/consulting.json"
+    },
+    {
+      "source": "helpers/read-memory-helper.js",
+      "dest": "{{module_directory}}/helpers/read-memory-helper.js",
+      "tag": "platform"
     }
   ],
   "claude_surface": [
@@ -595,6 +600,11 @@
       "kind": "skill",
       "source": "skills/orchestrators/synthesize-day/SKILL.md",
       "dest": "{{skills_dir}}/synthesize-day/SKILL.md"
+    },
+    {
+      "kind": "skill",
+      "source": "skills/skills/read-memory/SKILL.md",
+      "dest": "{{skills_dir}}/skills/read-memory/SKILL.md"
     }
   ],
   "engagement_types": [
