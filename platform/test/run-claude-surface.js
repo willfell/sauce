@@ -559,7 +559,8 @@ async function caseCSMIG1CoworkAggregation() {
   assertTrue("CS-MIG-1: cowork manifest.json exists", fs.existsSync(bpManifestPath));
   const bpMan = JSON.parse(fs.readFileSync(bpManifestPath, "utf8"));
 
-  assertTrue("CS-MIG-1: cowork version >= 0.8.0", /^0\.(8|9|[12]\d)\.\d+$/.test(bpMan.version),
+  assertTrue("CS-MIG-1: cowork version >= 0.8.0",
+    require("./helpers/semver-helper").versionAtLeast(bpMan.version, "0.8.0"),
     `got: ${bpMan.version}`);
   assertTrue("CS-MIG-1: cowork manifest no longer has skills[] field", !("skills" in bpMan));
   assertTrue("CS-MIG-1: cowork manifest has claude_surface[]", Array.isArray(bpMan.claude_surface));

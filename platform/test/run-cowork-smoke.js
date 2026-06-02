@@ -432,7 +432,8 @@ function assertCoworkV045Shape() {
 
   // --- Manifest version + depends_on ---
   const m = loadManifest();
-  assertTrue(/^0\.(8|9|[12]\d)\.\d+$/.test(m.version), `v0.57.0: cowork manifest version >= 0.8.0 (got ${m.version})`);
+  assertTrue(require("./helpers/semver-helper").versionAtLeast(m.version, "0.8.0"),
+    `v0.57.0: cowork manifest version >= 0.8.0 (got ${m.version})`);
   const hasAccentDep = (m.depends_on || []).some(d => d.name === "accent-button");
   assertTrue(hasAccentDep, "v0.45.0: cowork depends_on accent-button");
 }
