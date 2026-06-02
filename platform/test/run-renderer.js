@@ -2065,6 +2065,52 @@ async function testRendV067Todo1() {
     process.exit(2);
   }
 
+  // Source-lint helper for HC blocks — pushes to results[] like other assertions.
+  function assertTrue(label, cond, hint) {
+    results.push([label, !!cond]);
+    if (!cond) {
+      console.log(`  FAIL: ${label}${hint ? ` — ${hint}` : ""}`);
+    } else {
+      console.log(`  PASS: ${label}`);
+    }
+    return !!cond;
+  }
+
+  // ── HC-V0841-C1: SpaceDailyDashboard Tasks header surfaces done count ─────
+  console.log("\n--- HC-V0841-C1: Tasks header surfaces done count ---");
+
+  {
+    const SDD_PATH = require("path").resolve(__dirname, "../../ranch/scripts/daily/space-daily-dashboard.js");
+    const fs = require("fs");
+    const sddSrc = fs.readFileSync(SDD_PATH, "utf8");
+
+    assertTrue("HC-V0841-C1.1 getTasks returns { open, done } object",
+      /const\s+open\s*=\s*\[\]/.test(sddSrc) && /const\s+done\s*=\s*\[\]/.test(sddSrc),
+      "space-daily-dashboard.js getTasks() must split tasks into open[] and done[]");
+
+    assertTrue("HC-V0841-C1.2 header references sauce-tasks-done span",
+      /sauce-tasks-done/.test(sddSrc),
+      "Tasks header must wrap done count in <span class=\"sauce-tasks-done\">");
+
+    assertTrue("HC-V0841-C1.3 'all done' celebration branch present",
+      /all done/.test(sddSrc),
+      "Tasks header must include the all-done celebration form when open===0 and done>0");
+
+    const CSS_PATH = require("path").resolve(__dirname,
+      "../../platform/blueprints/daily/helpers/sauce-daily-dashboard.css");
+    assertTrue("HC-V0841-C1.4 sauce-daily-dashboard.css defines .sauce-tasks-done",
+      fs.existsSync(CSS_PATH) && /\.sauce-tasks-done\s*\{/.test(fs.readFileSync(CSS_PATH, "utf8")),
+      ".sauce-tasks-done CSS rule must exist in sauce-daily-dashboard.css");
+
+    assertTrue("HC-V0841-C1.5 _renderSection signature includes titleHtml opt",
+      /_renderSection\(container,\s*\{[^}]*titleHtml/.test(sddSrc),
+      "_renderSection must accept titleHtml so callers can inject raw HTML (the green pill span) bypassing _escapeHtml");
+
+    assertTrue("HC-V0841-C1.6 _renderSection prefers titleHtml over title when present",
+      /summary\.innerHTML\s*=[\s\S]*?titleHtml\s*\?\s*titleHtml\s*:\s*this\._escapeHtml\(title\)/.test(sddSrc),
+      "_renderSection's summary.innerHTML assignment must select titleHtml when provided, _escapeHtml(title) otherwise");
+  }
+
   console.log('\n=== Summary ===');
   for (const [name, ok] of results) console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${name}`);
   const allPass = results.every(([, ok]) => ok);

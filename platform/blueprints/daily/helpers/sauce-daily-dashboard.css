@@ -329,3 +329,11 @@
   }
   .space-daily-dashboard .sauce-group-dot { width: 7px; height: 7px; }
 }
+
+/* v0.13.1 (sauce v0.84.1): green dopamine pill inside the Tasks section
+ * title. Surfaces today's done-task count alongside the open count. */
+.sauce-tasks-done {
+  color: var(--color-green);
+  font-weight: 600;
+}
+
