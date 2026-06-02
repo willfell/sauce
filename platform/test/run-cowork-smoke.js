@@ -3814,6 +3814,191 @@ function assertCoworkV068Shape() {
     }
 }
 
+// HC-V0840-A1: capture-tick orchestrator SKILL.md exists at canonical dest
+{
+    const label = "HC-V0840-A1 capture-tick/SKILL.md exists";
+    try {
+        const dest = path.join(BP, "skills/orchestrators/capture-tick/SKILL.md");
+        assertTrue(fs.existsSync(dest),
+            `${label}: missing at ${dest}`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0840-A2: capture-tick SKILL.md declares required sections
+{
+    const label = "HC-V0840-A2 capture-tick/SKILL.md declares required sections";
+    try {
+        const skill = fs.readFileSync(path.join(BP, "skills/orchestrators/capture-tick/SKILL.md"), "utf8");
+        for (const section of ["## Inputs", "## Pre-flight", "## Gather", "## Decide", "## Write", "## Verify", "## Done", "## Harness testing"]) {
+            assertTrue(skill.includes(section),
+                `${label}: missing section '${section}'`);
+        }
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0840-A3: capture-tick references canonical memory path + tick range pattern
+{
+    const label = "HC-V0840-A3 capture-tick/SKILL.md references canonical memory path + range pattern";
+    try {
+        const skill = fs.readFileSync(path.join(BP, "skills/orchestrators/capture-tick/SKILL.md"), "utf8");
+        assertTrue(skill.includes("spice/cowork/memory/"),
+            `${label}: missing canonical path 'spice/cowork/memory/'`);
+        assertTrue(/range:\s*\{\s*start:\s*<?last[_-]tick[_-]at>?/i.test(skill) || skill.includes("last_tick_at"),
+            `${label}: missing range/last_tick_at pattern`);
+        assertTrue(skill.includes("memory.md"),
+            `${label}: missing dest filename 'memory.md'`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0840-B1: synthesize-day orchestrator SKILL.md exists at canonical dest
+{
+    const label = "HC-V0840-B1 synthesize-day/SKILL.md exists";
+    try {
+        const dest = path.join(BP, "skills/orchestrators/synthesize-day/SKILL.md");
+        assertTrue(fs.existsSync(dest),
+            `${label}: missing at ${dest}`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0840-B2: synthesize-day SKILL.md declares required sections
+{
+    const label = "HC-V0840-B2 synthesize-day/SKILL.md declares required sections";
+    try {
+        const skill = fs.readFileSync(path.join(BP, "skills/orchestrators/synthesize-day/SKILL.md"), "utf8");
+        for (const section of ["## Inputs", "## Pre-flight", "## Gather", "## Decide", "## Write", "## Verify", "## Done", "## Harness testing"]) {
+            assertTrue(skill.includes(section),
+                `${label}: missing section '${section}'`);
+        }
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0840-B3: synthesize-day references memory path + atomic-note discovery + replace-section pattern
+{
+    const label = "HC-V0840-B3 synthesize-day/SKILL.md references memory path + atomic-note discovery + synthesis section";
+    try {
+        const skill = fs.readFileSync(path.join(BP, "skills/orchestrators/synthesize-day/SKILL.md"), "utf8");
+        assertTrue(skill.includes("spice/cowork/memory/"),
+            `${label}: missing canonical memory path`);
+        assertTrue(skill.includes("Today's pattern (synthesis)") || skill.includes("synthesis section"),
+            `${label}: missing synthesis section reference`);
+        assertTrue(skill.includes("synthesized: true") || /synthesized:\s*true/.test(skill),
+            `${label}: missing 'synthesized: true' frontmatter update mention`);
+        assertTrue(skill.includes("spice/cowork/daily/"),
+            `${label}: missing reference to today's atomic notes path for cross-correlation`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0840-C1: morning-briefing pre-flight step 3a reads yesterday's memory
+{
+    const label = "HC-V0840-C1 morning-briefing/SKILL.md pre-flight step 3a reads yesterday's memory";
+    try {
+        const skill = fs.readFileSync(path.join(BP, "skills/orchestrators/morning-briefing/SKILL.md"), "utf8");
+        assertTrue(/3a\.\s+\*\*Read recent memory\.\*\*/.test(skill) || skill.includes("3a. **Read recent memory.**"),
+            `${label}: missing step 3a 'Read recent memory'`);
+        assertTrue(skill.includes("spice/cowork/memory/"),
+            `${label}: missing canonical memory path in pre-flight`);
+        assertTrue(skill.includes("yesterday_synthesis") || skill.includes("yesterday's memory"),
+            `${label}: missing yesterday synthesis variable/reference`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0840-C2: morning-briefing body composition includes new callouts gated on null data
+{
+    const label = "HC-V0840-C2 morning-briefing/SKILL.md body composition: Yesterday at a glance + Overnight callouts";
+    try {
+        const skill = fs.readFileSync(path.join(BP, "skills/orchestrators/morning-briefing/SKILL.md"), "utf8");
+        assertTrue(skill.includes("Yesterday at a glance"),
+            `${label}: missing 'Yesterday at a glance' callout title`);
+        assertTrue(skill.includes("Overnight"),
+            `${label}: missing 'Overnight' callout title`);
+        assertTrue(skill.includes("skipped cleanly") || skill.includes("backward-compat") || skill.includes("if non-empty") || skill.includes("absent") || skill.includes("memory layer hasn't"),
+            `${label}: missing null-data backward-compat clause`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0840-D1: engagement-types/*.json declare tick + synthesize_day in supported + default cadences
+{
+    const label = "HC-V0840-D1 engagement-types JSONs extend supported_cadences + default_cadences with tick + synthesize_day";
+    try {
+        for (const type of ["personal", "w2-fte", "consulting"]) {
+            const j = JSON.parse(fs.readFileSync(path.join(BP, `engagement-types/${type}.json`), "utf8"));
+            assertTrue(Array.isArray(j.supported_cadences) && j.supported_cadences.includes("tick"),
+                `${label}: ${type}.json supported_cadences missing 'tick'`);
+            assertTrue(Array.isArray(j.supported_cadences) && j.supported_cadences.includes("synthesize_day"),
+                `${label}: ${type}.json supported_cadences missing 'synthesize_day'`);
+            assertTrue(j.default_cadences && j.default_cadences.tick === true,
+                `${label}: ${type}.json default_cadences.tick !== true`);
+            assertTrue(j.default_cadences && j.default_cadences.synthesize_day === true,
+                `${label}: ${type}.json default_cadences.synthesize_day !== true`);
+        }
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0840-E1: cowork manifest declares both new orchestrators in claude_surface[] + has cowork-memory rule_fragment
+{
+    const label = "HC-V0840-E1 cowork manifest claude_surface[] declares capture-tick + synthesize-day + cowork-memory rule_fragment";
+    try {
+        const manifest = JSON.parse(fs.readFileSync(path.join(BP, "manifest.json"), "utf8"));
+        const cs = manifest.claude_surface || [];
+        const sources = cs.filter(e => e.kind === "skill").map(e => e.source);
+        assertTrue(sources.some(s => s.includes("orchestrators/capture-tick/SKILL.md")),
+            `${label}: claude_surface[] missing capture-tick entry`);
+        assertTrue(sources.some(s => s.includes("orchestrators/synthesize-day/SKILL.md")),
+            `${label}: claude_surface[] missing synthesize-day entry`);
+        const memFrag = (manifest.rule_fragments || []).find(rf => {
+            const eq = rf.fragment && rf.fragment.required_frontmatter && rf.fragment.required_frontmatter.type && rf.fragment.required_frontmatter.type.equals;
+            return eq === "cowork-memory";
+        });
+        assertTrue(!!memFrag, `${label}: missing rule_fragment for cowork-memory`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0840-E2: cowork-customization-contract.md STOCK table includes memory path
+{
+    const label = "HC-V0840-E2 cowork-customization-contract.md STOCK or platform-owned section mentions spice/cowork/memory/";
+    try {
+        const contract = fs.readFileSync(path.join(ROOT, "Docs/agent-guides/cowork-customization-contract.md"), "utf8");
+        assertTrue(contract.includes("spice/cowork/memory/"),
+            `${label}: customization contract missing 'spice/cowork/memory/' row`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0840-F1: onboard-scheduled-jobs/SKILL.md cadence walk references tick + synthesize-day
+{
+    const label = "HC-V0840-F1 onboard-scheduled-jobs/SKILL.md cadence walk includes tick + synthesize-day";
+    try {
+        const skill = fs.readFileSync(path.join(BP, "skills/orchestrators/onboard-scheduled-jobs/SKILL.md"), "utf8");
+        assertTrue(/\btick\b/.test(skill),
+            `${label}: missing tick cadence reference`);
+        assertTrue(/synthesize.day|synthesize_day/.test(skill),
+            `${label}: missing synthesize-day cadence reference`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
 (function main() {
   console.log("--- shared contracts ---");
   checkSharedContracts();
