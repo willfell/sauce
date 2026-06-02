@@ -1041,6 +1041,16 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   }
 
   // Materialize rule_fragments contributed by this item.
+  // FLN-v82-2 (v0.82.1): reset each (source, target) pair's contributions
+  // BEFORE the per-fragment loop, so re-installs don't accumulate duplicates.
+  // The reset is a no-op when the target file doesn't exist (fresh vault).
+  const _resetTargets = new Set();
+  for (const frag of mech.rule_fragments || []) {
+    if (frag && frag.target && !_resetTargets.has(frag.target)) {
+      await resetSourceContributions(tp, frag.target, mech.name, variables, history, git);
+      _resetTargets.add(frag.target);
+    }
+  }
   for (const frag of mech.rule_fragments || []) {
     await applyRuleFragment(tp, frag, mech.name, variables, history, git);
   }
@@ -1370,6 +1380,84 @@ async function applyRuleFragment(tp, frag, sourceName, variables, history, git) 
     existing.contributions[sourceName] = [existing.contributions[sourceName]];
   }
   existing.contributions[sourceName].push(frag.fragment);
+  await adapter.write(rulePath, JSON.stringify(existing, null, 2));
+}
+
+// resetSourceContributions — FLN-v82-2 (v0.82.1). Called once per (source, target)
+// pair at the start of the per-item rule_fragments loop in installItem. Reads
+// <rules_path>/<target>.json (or initializes empty), sets contributions[sourceName]
+// to [], writes back. Net effect: each install run rewrites this source's
+// contributions from scratch in the per-fragment loop, so re-installs don't
+// accumulate duplicates and the file always reflects the current manifest.
+//
+// Posture mirrors applyRuleFragment: malformed pre-existing JSON is preserved
+// (C4 hardening); missing file is a no-op (no file created); failures record
+// history but do not throw.
+async function resetSourceContributions(tp, target, sourceName, variables, history, git) {
+  const adapter = tp.app.vault.adapter;
+  const rulesPath = variables.rules_path;
+  if (!rulesPath) {
+    new Notice(`resetSourceContributions: rules_path not configured; skipping reset for ${sourceName}`, 6000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "resetSourceContributions",
+        name: sourceName,
+        message: `rules_path not configured; skipped reset for target "${target}"`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+  const rulePath = `${rulesPath}/${target}.json`;
+  if (!(await adapter.exists(rulePath))) {
+    // Missing file → nothing to reset; per-fragment loop will create it via applyRuleFragment.
+    return;
+  }
+  let raw;
+  try {
+    raw = await adapter.read(rulePath);
+  } catch (e) {
+    new Notice(`resetSourceContributions: cannot read ${rulePath} (${e.message}). Skipping reset for ${sourceName}.`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "resetSourceContributions",
+        name: sourceName,
+        message: `read failed for ${rulePath}: ${e.message}`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+  let existing;
+  try {
+    existing = JSON.parse(raw);
+  } catch (e) {
+    // C4: do NOT silently overwrite a malformed pre-existing rule file.
+    new Notice(`resetSourceContributions: ${rulePath} is malformed JSON (${e.message}). Skipping reset for ${sourceName}.`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "resetSourceContributions",
+        name: sourceName,
+        message: `${rulePath} is malformed JSON: ${e.message}`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+  existing.contributions = existing.contributions || {};
+  existing.contributions[sourceName] = [];
   await adapter.write(rulePath, JSON.stringify(existing, null, 2));
 }
 
@@ -7569,6 +7657,7 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     // by run-helper-cases.js (HC-RF1/HC-RF2/HC-RF3 cover the array-support
     // patch). Pure additive; does not affect the function-as-default export.
     module.exports.applyRuleFragment = applyRuleFragment;
+    module.exports.resetSourceContributions = resetSourceContributions;
     // v0.30.0 S1.5 — expose materializeSkills for HC-MS1..HC-MS5 in
     // run-helper-cases.js. Pure additive; does not affect the function-as-default export.
     module.exports.materializeSkills = materializeSkills;
