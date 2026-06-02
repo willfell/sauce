@@ -148,28 +148,30 @@ class SpaceDailyDashboard {
     };
 
     const getTasks = () => {
-      const tasks = [];
+      // v0.13.1 (sauce v0.84.1): split open vs done so the section header
+      // can surface a green "N done" pill alongside the open count. Body
+      // still iterates open only — completed items stay collapsed under
+      // the source page to keep the dashboard focused on what's left.
+      const open = [];
+      const done = [];
       for (const todoPath of config.todoPaths) {
         const todoPages = dv.pages(`"${todoPath}"`)
           .where(p => p.file.name.includes(today));
         for (const page of todoPages) {
-          const pageTasks = page.file.tasks.where(t => !t.completed);
-          for (const task of pageTasks) {
-            tasks.push({
-              text: task.text,
-              parentPath: page.file.path
-            });
+          for (const task of page.file.tasks) {
+            const item = { text: task.text, parentPath: page.file.path };
+            (task.completed ? done : open).push(item);
           }
         }
       }
-      return tasks;
+      return { open, done };
     };
 
     const meetings = getMeetings();
-    const tasks = getTasks();
+    const { open: openTasks, done: doneTasks } = getTasks();
     const activityResult = await this._getActivityCount(dv, today);
     const activityCount = activityResult.total;
-    const hasContent = meetings.length > 0 || tasks.length > 0 || activityCount > 0;
+    const hasContent = meetings.length > 0 || openTasks.length > 0 || doneTasks.length > 0 || activityCount > 0;
 
     // v0.13.0 (sauce v0.73.0): persisted <details> state map. Read once per
     // render so the 3 _renderSection calls don't each hit the adapter.
@@ -206,40 +208,61 @@ class SpaceDailyDashboard {
       return;
     }
 
-    if (tasks.length > 0) {
+    if (openTasks.length > 0 || doneTasks.length > 0) {
+      // v0.13.1 (sauce v0.84.1): three header forms based on open/done state.
+      // Use title for plain-text forms (gets _escapeHtml'd) and titleHtml for
+      // the mixed form that needs a raw <span> for the green pill. The
+      // mixed form interpolates only integers — safe to skip the escape.
+      let tasksTitle, tasksTitleHtml;
+      if (openTasks.length === 0 && doneTasks.length > 0) {
+        tasksTitle = `Tasks (all done — ${doneTasks.length} today)`;
+        tasksTitleHtml = undefined;
+      } else if (doneTasks.length > 0) {
+        tasksTitle = undefined;
+        tasksTitleHtml = `Tasks (${openTasks.length} open · <span class="sauce-tasks-done">${doneTasks.length} done</span>)`;
+      } else {
+        tasksTitle = `Tasks (${openTasks.length})`;
+        tasksTitleHtml = undefined;
+      }
+
       const tasksBody = this._renderSection(container, {
         accent: "cyan",
         iconHtml: icons.checkSquare,
-        title: `Tasks (${tasks.length})`,
+        title: tasksTitle,
+        titleHtml: tasksTitleHtml,
         defaultOpen: true,
         stateKey: "sauce-daily-dashboard:tasks",
         sectionState,
       });
 
-      const tasksList = tasksBody.createEl("ul");
-      tasksList.style.cssText = "margin: 0; padding-left: 20px; list-style-type: disc;";
+      // v0.13.1: body iterates open tasks only. Done tasks are surfaced
+      // via the header count; their text stays in the source notes.
+      if (openTasks.length > 0) {
+        const tasksList = tasksBody.createEl("ul");
+        tasksList.style.cssText = "margin: 0; padding-left: 20px; list-style-type: disc;";
 
-      for (const task of tasks) {
-        const li = tasksList.createEl("li");
-        // v0.2.6: word-break + overflow-wrap protect against long task strings
-        // (URLs, hashes, no-space text) overflowing the dashboard.
-        li.style.cssText = "margin: 6px 0; font-size: 0.9em; cursor: pointer; word-break: break-word; overflow-wrap: anywhere;";
-        // v0.5.1 (v0.64.1): render markdown links + wikilinks as clickable
-        // anchors. Plain-text clicks (outside any <a>) still open the parent
-        // daily note via the LI's onclick.
-        li.innerHTML = this._renderTaskHTML(task.text);
-        li.onclick = (e) => {
-          if (e.target && (e.target.tagName === "A" || (e.target.closest && e.target.closest("a")))) return;
-          app.workspace.openLinkText(task.parentPath, "");
-        };
-        const wikilinks = li.querySelectorAll("a.internal-link");
-        for (const a of wikilinks) {
-          a.onclick = (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            const target = a.getAttribute("data-href") || a.textContent || "";
-            app.workspace.openLinkText(target, task.parentPath);
+        for (const task of openTasks) {
+          const li = tasksList.createEl("li");
+          // v0.2.6: word-break + overflow-wrap protect against long task strings
+          // (URLs, hashes, no-space text) overflowing the dashboard.
+          li.style.cssText = "margin: 6px 0; font-size: 0.9em; cursor: pointer; word-break: break-word; overflow-wrap: anywhere;";
+          // v0.5.1 (v0.64.1): render markdown links + wikilinks as clickable
+          // anchors. Plain-text clicks (outside any <a>) still open the parent
+          // daily note via the LI's onclick.
+          li.innerHTML = this._renderTaskHTML(task.text);
+          li.onclick = (e) => {
+            if (e.target && (e.target.tagName === "A" || (e.target.closest && e.target.closest("a")))) return;
+            app.workspace.openLinkText(task.parentPath, "");
           };
+          const wikilinks = li.querySelectorAll("a.internal-link");
+          for (const a of wikilinks) {
+            a.onclick = (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              const target = a.getAttribute("data-href") || a.textContent || "";
+              app.workspace.openLinkText(target, task.parentPath);
+            };
+          }
         }
       }
     }
@@ -873,7 +896,7 @@ class SpaceDailyDashboard {
    * Visual styling lives in .obsidian/snippets/sauce-daily-dashboard.css
    * (installed via daily.manifest.json's snippets[] + appearance.enabledCssSnippets[]).
    */
-  _renderSection(container, { accent, iconHtml, title, defaultOpen, stateKey, sectionState }) {
+  _renderSection(container, { accent, iconHtml, title, titleHtml, defaultOpen, stateKey, sectionState }) {
     const section = container.createEl("div");
     section.className = "sauce-section";
     section.dataset.accent = accent;
@@ -887,9 +910,14 @@ class SpaceDailyDashboard {
     if (initialOpen) details.open = true;
     const summary = details.createEl("summary");
     summary.className = "sauce-section-summary";
+    // v0.13.1 (sauce v0.84.1): callers can pass titleHtml to inject pre-built
+    // HTML (e.g., the green "N done" pill in the Tasks section header).
+    // Numeric counts interpolated directly into titleHtml are safe; arbitrary
+    // user text MUST still go through _escapeHtml. Today's only titleHtml
+    // caller is the Tasks header, which interpolates integers only.
     summary.innerHTML =
       `<span class="sauce-section-icon">${iconHtml}</span>` +
-      `<span>${this._escapeHtml(title)}</span>` +
+      `<span>${titleHtml ? titleHtml : this._escapeHtml(title)}</span>` +
       `<span class="sauce-section-chevron">${this._CHEVRON_SVG}</span>`;
     const body = details.createEl("div");
     body.className = "sauce-section-body";

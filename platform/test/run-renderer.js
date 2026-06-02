@@ -2077,10 +2077,15 @@ async function testRendV067Todo1() {
   }
 
   // ── HC-V0841-C1: SpaceDailyDashboard Tasks header surfaces done count ─────
+  // v0.84.2 (sauce v0.84.2): SDD_PATH now reads the CANONICAL source under
+  // platform/blueprints/daily/helpers/, not the workshop's dogfood-materialized
+  // copy under ranch/. Reading ranch/ misses bugs where a hand edit landed in
+  // the materialized copy but never reached the canonical that the installer
+  // ships to consumers — exactly the v0.84.1 → v0.84.2 carryforward symptom.
   console.log("\n--- HC-V0841-C1: Tasks header surfaces done count ---");
 
   {
-    const SDD_PATH = require("path").resolve(__dirname, "../../ranch/scripts/daily/space-daily-dashboard.js");
+    const SDD_PATH = require("path").resolve(__dirname, "../../platform/blueprints/daily/helpers/space-daily-dashboard.js");
     const fs = require("fs");
     const sddSrc = fs.readFileSync(SDD_PATH, "utf8");
 
@@ -2109,6 +2114,19 @@ async function testRendV067Todo1() {
     assertTrue("HC-V0841-C1.6 _renderSection prefers titleHtml over title when present",
       /summary\.innerHTML\s*=[\s\S]*?titleHtml\s*\?\s*titleHtml\s*:\s*this\._escapeHtml\(title\)/.test(sddSrc),
       "_renderSection's summary.innerHTML assignment must select titleHtml when provided, _escapeHtml(title) otherwise");
+
+    // HC-V0842-A1: canonical vs dogfood drift guard. The workshop installs
+    // itself as its own first consumer; if the canonical at
+    // platform/blueprints/daily/helpers/space-daily-dashboard.js diverges
+    // from ranch/scripts/daily/space-daily-dashboard.js, a hand edit landed
+    // in the wrong file and consumer vaults will never see it. Compare
+    // byte-for-byte to catch the v0.84.1 carryforward symptom.
+    const RANCH_SDD_PATH = require("path").resolve(__dirname, "../../ranch/scripts/daily/space-daily-dashboard.js");
+    const canonicalBytes = fs.readFileSync(SDD_PATH);
+    const ranchBytes = fs.existsSync(RANCH_SDD_PATH) ? fs.readFileSync(RANCH_SDD_PATH) : Buffer.alloc(0);
+    assertTrue("HC-V0842-A1 canonical SDD == ranch dogfood SDD (byte-equal)",
+      ranchBytes.length === canonicalBytes.length && ranchBytes.equals(canonicalBytes),
+      "canonical platform/blueprints/daily/helpers/space-daily-dashboard.js and dogfood ranch/scripts/daily/space-daily-dashboard.js must be byte-identical; drift means a hand edit landed in only one copy");
   }
 
   console.log('\n=== Summary ===');
