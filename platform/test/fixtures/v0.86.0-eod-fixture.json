@@ -1,0 +1,13 @@
+{
+    "found": true,
+    "tier": "tick",
+    "window_resolved": { "start": "2026-06-02T07:00:00-06:00", "end": "2026-06-02T22:00:00-06:00" },
+    "files_read": ["spice/cowork/memory/personal/2026/06-June/2026-06-02/memory.md"],
+    "day_synthesis": null,
+    "week_synthesis": null,
+    "ticks": [
+        { "time": "17:00", "kindlist": ["calendar"], "summary_line": "**Calendar:** day winding down; no late events", "raw_callout_md": "" },
+        { "time": "14:00", "kindlist": ["chat"], "summary_line": "**Chat:** 1:1 with mgr completed", "raw_callout_md": "" },
+        { "time": "11:00", "kindlist": ["calendar"], "summary_line": "**Calendar:** standup at noon confirmed", "raw_callout_md": "" }
+    ]
+}

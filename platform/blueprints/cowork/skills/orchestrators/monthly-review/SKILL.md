@@ -27,6 +27,11 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
 2. **Resolve engagement.** Read `<vault>/spice/cowork/context/vault-config.md`; look up engagement by id. If not found, exit silently. Read the engagement-type manifest via the Read tool at `spice/cowork/context/engagement-types/<engagement.type>.json` (expected values: `personal`, `w2-fte`, `consulting`). Parse as JSON; capture `engagement` + `render_aspects`. If the file is missing or fails to parse, emit Notice `cowork:monthly-review aborted -- engagement-type manifest unavailable at spice/cowork/context/engagement-types/<engagement.type>.json` and exit.
 3. READ `.claude/skills/cowork/skills/date-context/SKILL.md` in full and follow
    its `## Steps` section with `{}`. Capture `context` — critically `prev_month_start`, `prev_month_end`, `prev_month_label`, `prev_month_yyyymm`, plus today's `daily_path`. Also capture `month_start` / `month_end` (first / last day of `context.today`'s month, used as the prefs-driven dispatch range below).
+3a. **Read recent memory.** (NEW v0.86.0; mirrors morning-briefing's step 3a refactor.)
+
+   Invoke sub-skill `cowork:read-memory` with input `{ engagement_id, tier: "week", window: { start: context.month_start, end: context.today } }`. Capture `output_month` — aggregated weekly syntheses across the current month. The sub-skill returns null-data when no matching synthesis files exist — preserve as `output_month = null` for the body-composition step.
+
+   This step is PURE (no MCP calls, no writes). NEW in v0.86.0.
 3b. READ `.claude/skills/cowork/skills/read-user-preferences/SKILL.md` in full and follow
    its `## Steps` section with `{}`. Capture as `prefs_result = { prefs, status, reason }`. Capture `prefs = prefs_result.prefs` (may be null when `status != "ok"`). Do NOT abort on `status != "ok"`; continue with legacy fallback (see step 3c).
 3c. **Plan dispatch.** Determine dispatch mode and build the priority-ordered dispatch plan.
@@ -225,6 +230,7 @@ for entry in dispatch_plan:
     - `> [!tip] ✏️ Next action\n> Edit \`spice/cowork/prompts/monthly-review.md\` to define what this scheduled job should emit when it fires.`
     Set `warning = "empty_prompt"` and pass `summary = "Stub run — monthly-review prompt body at spice/cowork/prompts/monthly-review.md is empty."` to write-run-note via its `summary` arg. The write-run-note self-check passes (5 markers + summary + title all present).
     When `prompt_body` is non-empty, set `warning = null` and compose the body per the prompt's instructions, respecting the adaptive body skeleton in write-run-note-monthly-review's `## Adaptive body skeleton` section.
+    - **NEW (v0.86.0): This month's pattern.** Invoke pure helper `composeMonthlyMemoryCallout(output_month)` from `helpers/compose-monthly-memory-callout.js`. Aggregates up to 4 weekly syntheses across the month. When empty, omit cleanly.
 16. READ `.claude/skills/cowork/skills/write-run-note-monthly-review/SKILL.md` in full —
     paying particular attention to its `## Title composition`,
     `## Adaptive body skeleton`, and `## Pre-write self-check` sections — then apply those contracts

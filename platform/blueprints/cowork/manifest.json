@@ -1,6 +1,6 @@
 {
   "name": "cowork",
-  "version": "0.24.1",
+  "version": "0.25.0",
   "kind": "blueprint",
   "module_directory": "cowork",
   "engagement_types_dir": "engagement-types",
@@ -324,6 +324,26 @@
     {
       "source": "helpers/compose-memory-callouts.js",
       "dest": "{{module_directory}}/helpers/compose-memory-callouts.js",
+      "tag": "platform"
+    },
+    {
+      "source": "helpers/compose-midam-memory-callout.js",
+      "dest": "{{module_directory}}/helpers/compose-midam-memory-callout.js",
+      "tag": "platform"
+    },
+    {
+      "source": "helpers/compose-eod-memory-callout.js",
+      "dest": "{{module_directory}}/helpers/compose-eod-memory-callout.js",
+      "tag": "platform"
+    },
+    {
+      "source": "helpers/compose-weekly-memory-callout.js",
+      "dest": "{{module_directory}}/helpers/compose-weekly-memory-callout.js",
+      "tag": "platform"
+    },
+    {
+      "source": "helpers/compose-monthly-memory-callout.js",
+      "dest": "{{module_directory}}/helpers/compose-monthly-memory-callout.js",
       "tag": "platform"
     }
   ],

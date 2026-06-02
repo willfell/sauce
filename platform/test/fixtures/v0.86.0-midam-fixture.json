@@ -1,0 +1,13 @@
+{
+    "found": true,
+    "tier": "tick",
+    "window_resolved": { "start": "2026-06-02T08:00:00-06:00", "end": "2026-06-02T12:00:00-06:00" },
+    "files_read": ["spice/cowork/memory/personal/2026/06-June/2026-06-02/memory.md"],
+    "day_synthesis": null,
+    "week_synthesis": null,
+    "ticks": [
+        { "time": "11:00", "kindlist": ["calendar"], "summary_line": "**Calendar:** standup at noon confirmed", "raw_callout_md": "" },
+        { "time": "10:00", "kindlist": ["email"], "summary_line": "**Email:** 2 new (Brex receipt + CR review)", "raw_callout_md": "" },
+        { "time": "09:00", "kindlist": ["chat"], "summary_line": "**Chat:** team standup notes posted", "raw_callout_md": "" }
+    ]
+}

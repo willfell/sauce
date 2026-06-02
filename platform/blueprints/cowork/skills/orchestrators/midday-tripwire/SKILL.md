@@ -29,6 +29,11 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
 2. **Resolve engagement.** Read `<vault>/spice/cowork/context/vault-config.md`; look up `engagement` by id. If not found, exit silently. Read the engagement-type manifest via the Read tool at `spice/cowork/context/engagement-types/<engagement.type>.json` (substitute `<engagement.type>` from the resolved engagement; expected values: `personal`, `w2-fte`, `consulting`). Parse as JSON; capture `render_aspects` AND `tripwire_aspects` (defaults to `[]` when field absent). If the file is missing or fails to parse, emit Notice `cowork:midday-tripwire aborted -- engagement-type manifest unavailable at spice/cowork/context/engagement-types/<engagement.type>.json` and exit. If `tripwire_aspects.length == 0`, exit silently (engagement has no tripwire signals — tripwire is a no-op).
 3. READ `.claude/skills/cowork/skills/date-context/SKILL.md` in full and follow
    its `## Steps` section with `{}`. If `context.error`, exit silently.
+3a. **Read recent memory.** (NEW v0.86.0; mirrors morning-briefing's step 3a refactor.)
+
+   Invoke sub-skill `cowork:read-memory` with input `{ engagement_id, tier: "tick", window: "today", limit_ticks: 4 }`. Capture `output_today`. The sub-skill returns null-data when no memory file exists — preserve as `output_today = null` for the body-composition step.
+
+   This step is PURE (no MCP calls, no writes). NEW in v0.86.0.
 3b. READ `.claude/skills/cowork/skills/read-user-preferences/SKILL.md` in full and follow
    its `## Steps` section with `{}`. Capture as `prefs_result = { prefs, status, reason }`. Capture `prefs = prefs_result.prefs` (may be null when `status != "ok"`). Do NOT abort on `status != "ok"`; continue with legacy fallback (see step 3c).
 3c. **Plan dispatch.** Determine dispatch mode and build the priority-ordered dispatch plan.
@@ -220,6 +225,7 @@ Each gather call passes `engagement_id`. The orchestrator branches per-aspect fr
     - `> [!tip] ✏️ Next action\n> Edit \`spice/cowork/prompts/midday-tripwire.md\` to define what this tripwire should emit when it fires.`
     Set `warning = "empty_prompt"` and pass `summary = "Stub run — prompt body at spice/cowork/prompts/midday-tripwire.md is empty."` to write-run-note via its `summary` arg. The write-run-note self-check passes (5 markers + summary + title all present).
     When `prompt_body` is non-empty, set `warning = null` and compose the body per the prompt's instructions, respecting the adaptive body skeleton in write-run-note-midday-tripwire's `## Adaptive body skeleton` section.
+   - **NEW (v0.86.0): Earlier today.** Invoke pure helper `composeMidamMemoryCallout(output_today)` from `helpers/compose-midam-memory-callout.js`. When the return value is non-empty, append immediately after the synopsis callout. Empty string = omit cleanly (null-data backward-compat for vaults pre-v0.86.0).
    - **NEW (v0.85.0): Memory log backlink.** Append a final `[!quote]-` callout (collapsed by default) at the very end of the atomic note body:
 
      ```

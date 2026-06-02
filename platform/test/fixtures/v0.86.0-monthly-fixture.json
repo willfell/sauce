@@ -1,0 +1,14 @@
+{
+    "found": true,
+    "tier": "week",
+    "window_resolved": { "start": "2026-06-01T00:00:00-06:00", "end": "2026-06-30T23:59:59-06:00" },
+    "files_read": [],
+    "day_synthesis": null,
+    "ticks": [],
+    "week_syntheses": [
+        { "iso_week": "2026-W23", "summary": "v0.85 cycle landed; mid-week energy steady", "weekly_pattern": "Strong week.", "days_covered": 5 },
+        { "iso_week": "2026-W24", "summary": "v0.86 wire-through + deploy validation", "weekly_pattern": "Solid follow-through week.", "days_covered": 5 },
+        { "iso_week": "2026-W25", "summary": "v0.87 semantic-retrieval design + plan", "weekly_pattern": "Design-heavy week.", "days_covered": 5 },
+        { "iso_week": "2026-W26", "summary": "v0.87 implementation + corpus validation", "weekly_pattern": "Build-heavy week.", "days_covered": 5 }
+    ]
+}

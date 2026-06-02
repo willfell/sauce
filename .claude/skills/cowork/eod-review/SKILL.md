@@ -27,6 +27,13 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
 2. **Resolve engagement.** Read `<vault>/spice/cowork/context/vault-config.md`; look up engagement by id. If not found, exit silently. Read the engagement-type manifest via the Read tool at `spice/cowork/context/engagement-types/<engagement.type>.json` (expected values: `personal`, `w2-fte`, `consulting`). Parse as JSON; capture `engagement` + `render_aspects`. If the file is missing or fails to parse, emit Notice `cowork:eod-review aborted -- engagement-type manifest unavailable at spice/cowork/context/engagement-types/<engagement.type>.json` and exit.
 3. READ `.claude/skills/cowork/skills/date-context/SKILL.md` in full and follow
    its `## Steps` section with `{}`. Capture `context` (today, tomorrow, daily_path, tomorrow_daily_path, tomorrow_weekday).
+3a. **Read recent memory.** (NEW v0.86.0; mirrors morning-briefing's step 3a refactor.)
+
+   3a.i Invoke sub-skill `cowork:read-memory` with input `{ engagement_id, tier: "tick", window: "today" }`. Capture `output_today`. The sub-skill returns null-data when no memory file exists — preserve as `output_today = null` for the body-composition step.
+
+   3a.ii Invoke sub-skill `cowork:read-memory` with input `{ engagement_id, tier: "day", window: "today" }`. Capture `output_day` for the day-synthesis callout. Same null-data preservation as `output_day = null`.
+
+   Both invocations are PURE (no MCP calls, no writes). NEW in v0.86.0.
 3b. READ `.claude/skills/cowork/skills/read-user-preferences/SKILL.md` in full and follow
    its `## Steps` section with `{}`. Capture as `prefs_result = { prefs, status, reason }`. Capture `prefs = prefs_result.prefs` (may be null when `status != "ok"`). Do NOT abort on `status != "ok"`; continue with legacy fallback (see step 3c).
 3c. **Plan dispatch.** Determine dispatch mode and build the priority-ordered dispatch plan.
@@ -227,6 +234,7 @@ for entry in dispatch_plan:
     - If `related_signal.status == "ready"`, append the markdown block returned by gather-semantic-related as a `> [!example]+ 🧩 Notes thematically close to today` callout, placed after the last primary example block and before the closing `> [!tip]`.
     - **ONLY IF step 9b ran** (i.e., `render_aspects.semantic_related == "include"`) AND `related_signal.status` starts with `skipped:no-index` OR `skipped:anchor-not-indexed`, append ONE `> [!warning]- Semantic index not available\n> Smart Connections index absent or anchor not indexed — semantic gather skipped.` callout after the Synopsis admonition. Text matches the canonical contract in `cowork:gather-semantic-related`'s `## Orchestrator integration contract` section — do not paraphrase; copy exactly (note the em-dash, not two hyphens). Idempotent: never emit more than one such warning callout per run.
     - **When step 9b did NOT run** (`render_aspects.semantic_related != "include"`): NO warning callout is emitted. The atomic-note body remains structurally clean.
+    - **NEW (v0.86.0): Today's memory.** Invoke pure helper `composeEodMemoryCallout(output_today, output_day)` from `helpers/compose-eod-memory-callout.js` → `{ tickLogCalloutMd, dayPatternCalloutMd }`. When `tickLogCalloutMd` is non-empty, append after the synopsis. When `dayPatternCalloutMd` is non-empty, append after the tick log (or after the synopsis if tick log was empty). Both empty = omit cleanly.
     - **NEW (v0.85.0): Memory log backlink.** Append a final `[!quote]-` callout (collapsed by default) at the very end of the atomic note body:
 
       ```

@@ -1,0 +1,21 @@
+{
+    "found": true,
+    "tier": "week",
+    "window_resolved": { "start": "2026-06-01T00:00:00-06:00", "end": "2026-06-07T23:59:59-06:00" },
+    "files_read": ["spice/cowork/memory/personal/2026/06-June/2026-W23/synthesis.md"],
+    "day_synthesis": null,
+    "ticks": [],
+    "week_synthesis": {
+        "engagement_id": "personal",
+        "iso_week": "2026-W23",
+        "summary": "Strong week — v0.85 cycle landed clean; mid-week energy steady",
+        "weekly_pattern": "This week was productive. The v0.85.0 cycle landed end-to-end with no real-world regressions. Mid-week 1:1 was particularly useful. Wednesday's deep-work block produced the bulk of the design work.",
+        "carry_forward_bullets": [
+            "Schedule next deep-work block Wed",
+            "Follow up on async with mgr re: v0.86 sequencing",
+            "Review v0.85 deploy validation results"
+        ],
+        "days_covered": 5,
+        "synthesis_at": "2026-06-07T17:30:00-06:00"
+    }
+}

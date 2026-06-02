@@ -27,6 +27,11 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
 2. **Resolve engagement.** Read `<vault>/spice/cowork/context/vault-config.md`; look up engagement by id. If not found, exit silently. Read the engagement-type manifest via the Read tool at `spice/cowork/context/engagement-types/<engagement.type>.json` (expected values: `personal`, `w2-fte`, `consulting`). Parse as JSON; capture `engagement` + `render_aspects`. If the file is missing or fails to parse, emit Notice `cowork:weekly-review aborted -- engagement-type manifest unavailable at spice/cowork/context/engagement-types/<engagement.type>.json` and exit.
 3. READ `.claude/skills/cowork/skills/date-context/SKILL.md` in full and follow
    its `## Steps` section with `{}`. Capture `context` (today, dddd, week_of, week_range, week_start, week_end, daily_path, iso_week_label).
+3a. **Read recent memory.** (NEW v0.86.0; mirrors morning-briefing's step 3a refactor.)
+
+   Invoke sub-skill `cowork:read-memory` with input `{ engagement_id, tier: "week", window: "this-week" }`. Capture `output_week`. The sub-skill returns null-data when no week-synthesis file exists — preserve as `output_week = null` for the body-composition step.
+
+   This step is PURE (no MCP calls, no writes). NEW in v0.86.0.
 3b. READ `.claude/skills/cowork/skills/read-user-preferences/SKILL.md` in full and follow
    its `## Steps` section with `{}`. Capture as `prefs_result = { prefs, status, reason }`. Capture `prefs = prefs_result.prefs` (may be null when `status != "ok"`). Do NOT abort on `status != "ok"`; continue with legacy fallback (see step 3c).
 3c. **Plan dispatch.** Determine dispatch mode and build the priority-ordered dispatch plan.
@@ -243,6 +248,7 @@ for entry in dispatch_plan:
     - If `week_related_status != "skipped:no-hits"`, append the rolled-up `> [!example]+ 🧩 Emergent themes this week` callout composed in step 11d, placed after the last primary example block and before the closing `> [!tip]`.
     - **ONLY IF step 11b ran** (i.e., `render_aspects.semantic_related == "include"`) AND any `week_related_signals[].status` starts with `skipped:no-index` OR `skipped:anchor-not-indexed`, append ONE `> [!warning]- Semantic index not available\n> Smart Connections index absent or anchor not indexed — semantic gather skipped.` callout after the Synopsis admonition. Text matches the canonical contract in `cowork:gather-semantic-related`'s `## Orchestrator integration contract` section — do not paraphrase; copy exactly (note the em-dash, not two hyphens). Idempotent: never emit more than one such warning callout per run regardless of how many per-day calls skipped.
     - **When step 11b did NOT run** (`render_aspects.semantic_related != "include"`): NO warning callout is emitted.
+    - **NEW (v0.86.0): This week so far.** Invoke pure helper `composeWeeklyMemoryCallout(output_week)` from `helpers/compose-weekly-memory-callout.js`. When non-empty, append immediately after the synopsis callout. When `output_week.found === false` OR no week_synthesis present (synthesize-week hasn't fired yet), omit cleanly.
 16. READ `.claude/skills/cowork/skills/write-run-note-weekly-review/SKILL.md` in full —
     paying particular attention to its `## Title composition`,
     `## Adaptive body skeleton`, and `## Pre-write self-check` sections — then apply those contracts

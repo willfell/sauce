@@ -836,9 +836,9 @@ function assertCoworkV068Shape() {
   assertTrue(fileSources.includes("helpers/cowork-latest-runs.js"),
     "V068-MANIFEST-FILES: manifest files[] declares helpers/cowork-latest-runs.js");
 
-  // V0750-VERSION: cowork blueprint version bumped to 0.24.1 (was 0.24.0 in v0.85.0; PATCH bump for v0.85.1 S2 — synthesize-week default cron 0 17 -> 30 17 so Friday's synthesize-day at 17:20 lands before the weekly roll-up).
-  assertTrue(manifest.version === "0.24.1",
-    `V0750-VERSION: cowork manifest.version === "0.24.1" (got ${JSON.stringify(manifest.version)})`);
+  // V0750-VERSION: cowork blueprint version bumped to 0.25.0 (was 0.24.1 in v0.85.1; MINOR bump for v0.86.0 S1 — cross-orchestrator memory wire-through across 4 orchestrators; 4 NEW pure compose helpers added to files[]).
+  assertTrue(manifest.version === "0.25.0",
+    `V0750-VERSION: cowork manifest.version === "0.25.0" (got ${JSON.stringify(manifest.version)})`);
 }
 
 // ---------------------------------------------------------------------------
@@ -4307,6 +4307,209 @@ function assertCoworkV068Shape() {
         // synthesize-week SKILL.md schedule line
         assertTrue(/17:30/.test(syn) || /30 17 \* \* 5/.test(syn),
             `${label}: synthesize-week SKILL.md schedule line missing 17:30 default`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// v0.86.0 — cross-orchestrator memory wire-through (4 orchestrators × 4 groups)
+// Mirrors v0.85.0 HC-V0850-C1/C2/C3 pattern. 4 helpers byte-identical to
+// golden fixtures; 4 orchestrator SKILL.md edits add pre-flight 3a + body
+// composition bullet referencing the per-orchestrator compose helper.
+// ---------------------------------------------------------------------------
+
+// HC-V0860-A1..A4: each orchestrator pre-flight step 3a invokes cowork:read-memory
+{
+    const cases = [
+        { orch: "midday-tripwire", id: "A1", hint: "tier:\\s*\"tick\".*window:\\s*\"today\"" },
+        { orch: "eod-review",      id: "A2", hint: "tier:\\s*\"day\"\\s*,\\s*window:\\s*\"today\"" },
+        { orch: "weekly-review",   id: "A3", hint: "tier:\\s*\"week\"\\s*,\\s*window:\\s*\"this-week\"" },
+        { orch: "monthly-review",  id: "A4", hint: "tier:\\s*\"week\"\\s*,\\s*window:\\s*\\{" }
+    ];
+    for (const c of cases) {
+        const label = `HC-V0860-${c.id} ${c.orch} step 3a invokes cowork:read-memory`;
+        try {
+            const skill = fs.readFileSync(path.join(BP, `skills/orchestrators/${c.orch}/SKILL.md`), "utf8");
+            assertTrue(skill.includes("cowork:read-memory"),
+                `${label}: step 3a doesn't reference cowork:read-memory sub-skill`);
+            assertTrue(/3a\.\s+\*\*Read recent memory\.\*\*/.test(skill),
+                `${label}: missing '3a. **Read recent memory.**' header marker`);
+            const re = new RegExp(c.hint);
+            assertTrue(re.test(skill),
+                `${label}: step 3a doesn't invoke read-memory with the expected tier+window shape`);
+        } catch (e) {
+            failed++; console.error(`FAIL  ${label}: ${e.message}`);
+        }
+    }
+}
+
+// HC-V0860-B1..B4: each orchestrator body composition invokes per-orch compose helper
+{
+    const cases = [
+        { orch: "midday-tripwire", id: "B1", helper: "composeMidamMemoryCallout" },
+        { orch: "eod-review",      id: "B2", helper: "composeEodMemoryCallout" },
+        { orch: "weekly-review",   id: "B3", helper: "composeWeeklyMemoryCallout" },
+        { orch: "monthly-review",  id: "B4", helper: "composeMonthlyMemoryCallout" }
+    ];
+    for (const c of cases) {
+        const label = `HC-V0860-${c.id} ${c.orch} body composition invokes ${c.helper}`;
+        try {
+            const skill = fs.readFileSync(path.join(BP, `skills/orchestrators/${c.orch}/SKILL.md`), "utf8");
+            assertTrue(skill.includes(c.helper),
+                `${label}: body composition doesn't reference ${c.helper} helper`);
+            assertTrue(skill.includes("NEW (v0.86.0)"),
+                `${label}: body composition missing 'NEW (v0.86.0)' marker bullet`);
+        } catch (e) {
+            failed++; console.error(`FAIL  ${label}: ${e.message}`);
+        }
+    }
+}
+
+// HC-V0860-C1: composeMidamMemoryCallout byte-identical to golden fixture
+{
+    const label = "HC-V0860-C1 composeMidamMemoryCallout: fixture matches expected output";
+    try {
+        const helperPath = path.join(BP, "helpers/compose-midam-memory-callout.js");
+        delete require.cache[require.resolve(helperPath)];
+        const { composeMidamMemoryCallout } = require(helperPath);
+        const fixturePath = path.join(ROOT, "platform/test/fixtures/v0.86.0-midam-fixture.json");
+        const expectedPath = path.join(ROOT, "platform/test/fixtures/v0.86.0-midam-expected-callout.md");
+        const fixture = JSON.parse(fs.readFileSync(fixturePath, "utf8"));
+        const expected = fs.readFileSync(expectedPath, "utf8");
+        const out = composeMidamMemoryCallout(fixture);
+        assertTrue(out === expected,
+            `${label}: midam callout diverges from expected (byte-diff)`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0860-C2: composeEodMemoryCallout byte-identical to dual golden fixtures
+{
+    const label = "HC-V0860-C2 composeEodMemoryCallout: dual fixtures match expected outputs";
+    try {
+        const helperPath = path.join(BP, "helpers/compose-eod-memory-callout.js");
+        delete require.cache[require.resolve(helperPath)];
+        const { composeEodMemoryCallout } = require(helperPath);
+        const ticksPath = path.join(ROOT, "platform/test/fixtures/v0.86.0-eod-fixture.json");
+        const dayPath = path.join(ROOT, "platform/test/fixtures/v0.86.0-eod-day-fixture.json");
+        const expTickPath = path.join(ROOT, "platform/test/fixtures/v0.86.0-eod-expected-tick-callout.md");
+        const expDayPath = path.join(ROOT, "platform/test/fixtures/v0.86.0-eod-expected-pattern-callout.md");
+        const ticks = JSON.parse(fs.readFileSync(ticksPath, "utf8"));
+        const day = JSON.parse(fs.readFileSync(dayPath, "utf8"));
+        const expTick = fs.readFileSync(expTickPath, "utf8");
+        const expDay = fs.readFileSync(expDayPath, "utf8");
+        const out = composeEodMemoryCallout(ticks, day);
+        assertTrue(out.tickLogCalloutMd === expTick,
+            `${label}: tickLogCalloutMd diverges from expected (byte-diff)`);
+        assertTrue(out.dayPatternCalloutMd === expDay,
+            `${label}: dayPatternCalloutMd diverges from expected (byte-diff)`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0860-C3: composeWeeklyMemoryCallout byte-identical to golden fixture
+{
+    const label = "HC-V0860-C3 composeWeeklyMemoryCallout: fixture matches expected output";
+    try {
+        const helperPath = path.join(BP, "helpers/compose-weekly-memory-callout.js");
+        delete require.cache[require.resolve(helperPath)];
+        const { composeWeeklyMemoryCallout } = require(helperPath);
+        const fixturePath = path.join(ROOT, "platform/test/fixtures/v0.86.0-weekly-fixture.json");
+        const expectedPath = path.join(ROOT, "platform/test/fixtures/v0.86.0-weekly-expected-callout.md");
+        const fixture = JSON.parse(fs.readFileSync(fixturePath, "utf8"));
+        const expected = fs.readFileSync(expectedPath, "utf8");
+        const out = composeWeeklyMemoryCallout(fixture);
+        assertTrue(out === expected,
+            `${label}: weekly callout diverges from expected (byte-diff)`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0860-C4: composeMonthlyMemoryCallout byte-identical to golden fixture
+{
+    const label = "HC-V0860-C4 composeMonthlyMemoryCallout: fixture matches expected output";
+    try {
+        const helperPath = path.join(BP, "helpers/compose-monthly-memory-callout.js");
+        delete require.cache[require.resolve(helperPath)];
+        const { composeMonthlyMemoryCallout } = require(helperPath);
+        const fixturePath = path.join(ROOT, "platform/test/fixtures/v0.86.0-monthly-fixture.json");
+        const expectedPath = path.join(ROOT, "platform/test/fixtures/v0.86.0-monthly-expected-callout.md");
+        const fixture = JSON.parse(fs.readFileSync(fixturePath, "utf8"));
+        const expected = fs.readFileSync(expectedPath, "utf8");
+        const out = composeMonthlyMemoryCallout(fixture);
+        assertTrue(out === expected,
+            `${label}: monthly callout diverges from expected (byte-diff)`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0860-D1: composeMidamMemoryCallout(null) returns empty string (null-data clean-omit)
+{
+    const label = "HC-V0860-D1 composeMidamMemoryCallout(null) returns empty string";
+    try {
+        const helperPath = path.join(BP, "helpers/compose-midam-memory-callout.js");
+        delete require.cache[require.resolve(helperPath)];
+        const { composeMidamMemoryCallout } = require(helperPath);
+        assertTrue(composeMidamMemoryCallout(null) === "",
+            `${label}: did not return empty string on null input`);
+        assertTrue(composeMidamMemoryCallout({ found: false }) === "",
+            `${label}: did not return empty string on found:false input`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0860-D2: composeEodMemoryCallout(null, null) returns dual empty strings
+{
+    const label = "HC-V0860-D2 composeEodMemoryCallout(null, null) returns dual empty strings";
+    try {
+        const helperPath = path.join(BP, "helpers/compose-eod-memory-callout.js");
+        delete require.cache[require.resolve(helperPath)];
+        const { composeEodMemoryCallout } = require(helperPath);
+        const out = composeEodMemoryCallout(null, null);
+        assertTrue(out.tickLogCalloutMd === "",
+            `${label}: tickLogCalloutMd not empty on null input`);
+        assertTrue(out.dayPatternCalloutMd === "",
+            `${label}: dayPatternCalloutMd not empty on null input`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0860-D3: composeWeeklyMemoryCallout(null) returns empty string
+{
+    const label = "HC-V0860-D3 composeWeeklyMemoryCallout(null) returns empty string";
+    try {
+        const helperPath = path.join(BP, "helpers/compose-weekly-memory-callout.js");
+        delete require.cache[require.resolve(helperPath)];
+        const { composeWeeklyMemoryCallout } = require(helperPath);
+        assertTrue(composeWeeklyMemoryCallout(null) === "",
+            `${label}: did not return empty string on null input`);
+        assertTrue(composeWeeklyMemoryCallout({ found: false }) === "",
+            `${label}: did not return empty string on found:false input`);
+    } catch (e) {
+        failed++; console.error(`FAIL  ${label}: ${e.message}`);
+    }
+}
+
+// HC-V0860-D4: composeMonthlyMemoryCallout(null) returns empty string
+{
+    const label = "HC-V0860-D4 composeMonthlyMemoryCallout(null) returns empty string";
+    try {
+        const helperPath = path.join(BP, "helpers/compose-monthly-memory-callout.js");
+        delete require.cache[require.resolve(helperPath)];
+        const { composeMonthlyMemoryCallout } = require(helperPath);
+        assertTrue(composeMonthlyMemoryCallout(null) === "",
+            `${label}: did not return empty string on null input`);
+        assertTrue(composeMonthlyMemoryCallout({ found: false }) === "",
+            `${label}: did not return empty string on found:false input`);
+        assertTrue(composeMonthlyMemoryCallout({ found: true, week_syntheses: [] }) === "",
+            `${label}: did not return empty string on empty week_syntheses input`);
     } catch (e) {
         failed++; console.error(`FAIL  ${label}: ${e.message}`);
     }
