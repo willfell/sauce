@@ -4,6 +4,34 @@ This file archives the per-cycle status snapshots that previously lived in `CLAU
 
 ---
 
+## v0.86.0 cross-orchestrator-wire-through CLOSED 2026-06-02
+
+Workshop 0.85.1 → **0.86.0** (MINOR). FLN-v84-2 closed: cross-orchestrator
+memory wire-through applied to midday-tripwire / eod-review / weekly-review
+/ monthly-review. Each gains pre-flight step 3a invoking cowork:read-memory
+with the appropriate tier+window (midday tier:tick limit_ticks=4; eod
+tier:tick limit_ticks=16 + tier:day dual; weekly tier:week this-week;
+monthly tier:week {start,end}), plus body composition via a NEW pure
+helper per orchestrator (composeMidamMemoryCallout / composeEodMemoryCallout
+dual-output / composeWeeklyMemoryCallout / composeMonthlyMemoryCallout) —
+each byte-identical to golden fixtures.
+
+cowork 0.24.1 → 0.25.0 (MINOR; new install surface — 4 new helper files
+in files[] + 4 orchestrator SKILL.md modifications). 4 stage commits S0..S3;
+preflight version-sync ok: 0.86.0 ALL GREEN. ~16 HC-V0860-A1..D4 sub-asserts
++ 10 new fixtures + V0750-VERSION pin bumped 0.24.1 → 0.25.0. Smoke 868 → 902.
+
+Memory amplification: read frequency 1× → 5× per engagement per day across
+the 5 atomic-note orchestrators. Helper-extract pattern (4 separate
+composeXMemoryCallout helpers, not consolidated) chosen empirically — each
+orchestrator's body context different enough to justify separation;
+consolidation candidate (FLN-v86-1) deferred until pattern stability is
+observed across future wire-through cycles.
+
+Carry-forwards: v0.87.0 semantic-retrieval over memory next per sequencing
+decision. FLN-v85-2/3/4 queued; v0.85.0 §0.4 still owed; NEW FLN-v86-1/2/3.
+Result doc: Docs/plans/2026-06-02-v0.86.0-cross-orchestrator-wire-through-result.md.
+
 ## v0.85.1 deploy-mechanics-and-cron-fix CLOSED 2026-06-02
 
 Workshop 0.85.0 → **0.85.1** (PATCH). FLN-v85-1 closed: `_resolveWorkshopPath`

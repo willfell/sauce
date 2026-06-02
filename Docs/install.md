@@ -793,3 +793,35 @@ sauce update --bump-pins   # or: sauce update --force
 ```
 
 After the update, verify the synthesize-week SKILL.md prose by checking `.claude/skills/cowork/synthesize-week/SKILL.md` shows `30 17 * * 5` (or "Friday 17:30") in its schedule line. On the next Friday afternoon, `cowork:synthesize-week` should fire at 17:30 (after the 17:20 synthesize-day fire) and produce a `spice/cowork/memory/<engagement>/YYYY/MM-Month/YYYY-Www/synthesis.md` file that includes Friday's data in the roll-up.
+
+## Upgrading from v0.85.1 to v0.86.0
+
+MINOR release. `sauce update --bump-pins` should work cleanly (v0.85.1's `_resolveWorkshopPath` generalization covers all three deploy layouts). **No required user action.** The wire-through is additive + null-data gated — atomic-note output is enriched when memory is present, unchanged when memory is absent (e.g., on the first day after install before any memory has accumulated).
+
+What changes:
+
+- **Workshop:** `0.85.1` → `0.86.0`. Cross-orchestrator memory wire-through (FLN-v84-2 CLOSED) — 4 atomic-note orchestrators newly memory-aware.
+- **cowork:** `0.24.1` → `0.25.0` (MINOR — new install surface: 4 new pure helper files in `files[]` (`compose-midam-memory-callout.js`, `compose-eod-memory-callout.js`, `compose-weekly-memory-callout.js`, `compose-monthly-memory-callout.js`) + SKILL.md surface changes on 4 orchestrators).
+- **Engagement-types schema:** unchanged at `0.5.0`.
+
+**4 orchestrators gain memory wire-through.** Each of `cowork:midday-tripwire`, `cowork:eod-review`, `cowork:weekly-review`, `cowork:monthly-review` now invokes `cowork:read-memory` at pre-flight step 3a with the appropriate tier+window and pipes the structured output through a new per-orchestrator compose helper. The output is a new `[!example]+` / `[!info]+` callout injected after the orchestrator's synopsis. Specifically:
+
+- **midday-tripwire** — reads recent 4 hours of tick activity (`tier: "tick"`, `limit_ticks: 4`); injects `[!example]+ Earlier today` callout listing tick HH:MM lines.
+- **eod-review** — reads the full day's ticks (`tier: "tick"`, `limit_ticks: 16`) AND today's daily synthesis (`tier: "day"`, `window: "today"`); injects `[!example]+ Today's tick log` + (when day-synthesis present) `[!info]+ Today's pattern`.
+- **weekly-review** — reads this week's Tier 2 synthesis (`tier: "week"`, `window: "this-week"`); injects `[!info]+ This week so far` with weekly_pattern + up to 5 carry-forward bullets.
+- **monthly-review** — reads up to 4 weekly syntheses for the current month (`tier: "week"`, `window: { start, end }`); injects `[!info]+ This month's pattern` aggregating each week as a bullet.
+
+**No consumer-visible behavior change without memory.** All 4 new compose helpers are null-data gated — when a memory file is absent (e.g., on the first day after install, or for an engagement that hasn't yet accumulated synthesis output), the relevant callout silently omits and the orchestrator body proceeds unchanged. Tomorrow's morning briefing on accuris and headspace continues to fire byte-identical to v0.84.x — the morning-briefing surface is unchanged in v0.86.0; only the 4 newly-wired orchestrators change.
+
+**No required user action.** Existing cadences are unchanged (midday / eod / weekly / monthly fire at their established times). No scheduled-job edits required. No engagement-type schema bump. No `cowork:onboard-scheduled-jobs` re-run required. After `sauce update --bump-pins`, the new helpers + SKILL.md prose materialize automatically into `.claude/skills/cowork/` on next install.
+
+```bash
+# Bump consumer subscription pins (workshop + cowork) — edit each vault's
+# ranch/platform-subscription.json:
+#   "workshop_version": "0.85.1" → "0.86.0"
+#   "cowork": "0.24.1" → "0.25.0"
+# Then:
+sauce update --bump-pins   # or: sauce update --force
+```
+
+After the update, verify by checking that `.claude/skills/cowork/midday-tripwire/SKILL.md` references `cowork:read-memory` in its pre-flight section. On the next midday-tripwire / eod-review / weekly-review / monthly-review fire, the relevant `[!example]+` / `[!info]+` callout should appear in the atomic note's body (when the underlying memory file is present). If the underlying memory tier is absent, the callout silently omits — that's expected null-data behavior, not a regression.
