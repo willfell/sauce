@@ -4015,6 +4015,27 @@ function assertCoworkV068Shape() {
     }
 }
 
+// HC-V0850-G3: 3 orchestrators ## Write step gains Memory log backlink callout
+{
+    const label_root = "HC-V0850-G3 memory log backlink";
+    for (const orch of ["morning-briefing", "midday-tripwire", "eod-review"]) {
+        const label = `${label_root}: ${orch} ## Write contains Memory log callout`;
+        try {
+            const skill = fs.readFileSync(path.join(BP, `skills/orchestrators/${orch}/SKILL.md`), "utf8");
+            const writeIdx = skill.indexOf("\n## Write");
+            assertTrue(writeIdx > 0, `${label}: missing '## Write' section`);
+            const nextH2 = skill.indexOf("\n## ", writeIdx + 1);
+            const writeBlock = nextH2 > 0 ? skill.slice(writeIdx, nextH2) : skill.slice(writeIdx);
+            assertTrue(writeBlock.includes("[!quote]-") && writeBlock.includes("Memory log"),
+                `${label}: ## Write body missing '[!quote]-' Memory log callout`);
+            assertTrue(writeBlock.includes("[[spice/cowork/memory/"),
+                `${label}: ## Write body missing canonical memory wikilink target`);
+        } catch (e) {
+            failed++; console.error(`FAIL  ${label}: ${e.message}`);
+        }
+    }
+}
+
 (function main() {
   console.log("--- shared contracts ---");
   checkSharedContracts();

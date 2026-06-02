@@ -251,6 +251,14 @@ Each gather call passes `engagement_id`. The sub-skill reads per-engagement MCP-
     - For each `related_signal` in `related_signals[]` where `related_signal.status == "ready"`, append the markdown block returned by gather-semantic-related as a `> [!example]+ 🧩 Related to: <event.title>` callout immediately after the calendar-event line that matches `event.title`.
     - **ONLY IF step 12b ran** (i.e., `calendar_signal.events.length > 0`) AND any `related_signal.status` starts with `skipped:no-index` OR `skipped:anchor-not-indexed`: set `semantic_index_unavailable = true` and append ONE `> [!warning]- Semantic index not available\n> Smart Connections index absent or anchor not indexed — semantic gather skipped.` callout after the Synopsis admonition. Text matches the canonical contract in `cowork:gather-semantic-related`'s `## Orchestrator integration contract` section — do not paraphrase; copy exactly (note the em-dash, not two hyphens). Idempotent: never emit more than one such warning callout per run regardless of how many per-event calls skipped.
     - **When step 12b did NOT run** (calendar empty, or `render_aspects.semantic_related != "include"`): leave `semantic_index_unavailable = false` (default) and **NO warning callout is emitted**. The atomic-note body remains structurally clean — the absence of a semantic gather is not itself a contract violation.
+   - **Memory log backlink (NEW v0.85.0).** Append a final `[!quote]-` callout (collapsed by default) at the very end of the atomic note body:
+
+     ```
+     > [!quote]- Memory log
+     > Today's memory: [[spice/cowork/memory/<engagement_id>/<YYYY>/<MM-MMMM>/<YYYY-MM-DD>/memory.md|Memory log — <YYYY-MM-DD> (<tick_count_if_known> ticks)]]
+     ```
+
+     Substitute `<engagement_id>`, `<YYYY>`, `<MM-MMMM>`, `<YYYY-MM-DD>` from `date-context.today`. When `tick_count` is unknown (today's memory.md not yet read), omit the `(<N> ticks)` parenthetical. The wikilink target may not resolve when no tick has fired yet — Obsidian renders it dimmed (acceptable per v0.85.0 design § 2.1.3). Collapsed callout (`-` suffix) keeps the atomic note visually clean.
 15. **If `render_aspects.finance_block == "include"`:** READ `.claude/skills/cowork/skills/write-run-note-finance/SKILL.md` in full —
     paying particular attention to its `## Title composition`,
     `## Adaptive body skeleton`, and `## Pre-write self-check` sections — then apply those contracts

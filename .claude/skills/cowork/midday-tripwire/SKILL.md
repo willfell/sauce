@@ -220,6 +220,14 @@ Each gather call passes `engagement_id`. The orchestrator branches per-aspect fr
     - `> [!tip] ✏️ Next action\n> Edit \`spice/cowork/prompts/midday-tripwire.md\` to define what this tripwire should emit when it fires.`
     Set `warning = "empty_prompt"` and pass `summary = "Stub run — prompt body at spice/cowork/prompts/midday-tripwire.md is empty."` to write-run-note via its `summary` arg. The write-run-note self-check passes (5 markers + summary + title all present).
     When `prompt_body` is non-empty, set `warning = null` and compose the body per the prompt's instructions, respecting the adaptive body skeleton in write-run-note-midday-tripwire's `## Adaptive body skeleton` section.
+   - **Memory log backlink (NEW v0.85.0).** Append a final `[!quote]-` callout (collapsed by default) at the very end of the atomic note body:
+
+     ```
+     > [!quote]- Memory log
+     > Today's memory: [[spice/cowork/memory/<engagement_id>/<YYYY>/<MM-MMMM>/<YYYY-MM-DD>/memory.md|Memory log — <YYYY-MM-DD> (<tick_count_if_known> ticks)]]
+     ```
+
+     Substitute `<engagement_id>`, `<YYYY>`, `<MM-MMMM>`, `<YYYY-MM-DD>` from `date-context.today`. When `tick_count` is unknown (today's memory.md not yet read), omit the `(<N> ticks)` parenthetical. The wikilink target may not resolve when no tick has fired yet — Obsidian renders it dimmed (acceptable per v0.85.0 design § 2.1.3). Collapsed callout (`-` suffix) keeps the atomic note visually clean.
 11. READ `.claude/skills/cowork/skills/write-run-note-midday-tripwire/SKILL.md` in full —
     paying particular attention to its `## Title composition`,
     `## Adaptive body skeleton`, and `## Pre-write self-check` sections — then apply those contracts
