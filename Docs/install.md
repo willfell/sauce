@@ -604,3 +604,27 @@ Severity vocabulary simplified: `yellow|red` → `warn|alert`.
 **Behavior notes (intentional):**
 - Consumer subscription cowork pin still requires a manual edit until FLN-v67-7 lands. Edit `ranch/platform-subscription.json` → `pinned.cowork: "0.13.0"` in each consumer vault before running `sauce update`.
 - Existing customized prompt files (prompts whose byte count diverges from the workshop default) are skipped by `cowork:onboard-scheduled-jobs` unless you explicitly confirm overwrite. Your customizations are preserved.
+
+---
+
+## Upgrading from v0.82.0 to v0.82.1
+
+PATCH release. `sauce update --bump-pins` works as normal — no vault-side migration steps required.
+
+What changes:
+
+- **Workshop:** `0.82.0` → `0.82.1`. Platform-internal changes only (install.js rules-merge dedup, parseYamlIsh regex, test harness refactors). No new blueprint or mechanism contract surfaces.
+- **cowork:** `0.21.0` → `0.21.1` (PATCH; mechanism-internal; no contract surface change for blueprint consumers). The cowork PATCH bump was added mid-cycle to exercise the new `resetSourceContributions` mechanism through the production install path.
+
+```bash
+# Bump consumer subscription pins (workshop + cowork) — edit each vault's
+# ranch/platform-subscription.json:
+#   "workshop_version": "0.82.0" → "0.82.1"
+#   "cowork": "0.21.0" → "0.21.1"
+# Then:
+sauce update --bump-pins   # or: sauce update --force
+```
+
+**One-time side effect:** `ranch/rules/cowork.json` on each consumer vault will naturally shrink (from ~7900 lines down to ~600 lines, or proportional based on how many dogfood cycles that vault has had) as the new `resetSourceContributions` mechanism fires during cowork's PATCH re-install. This is not an entry loss — it is de-duplication of accumulated bloat (duplicate copies of the same path_glob fragments, pre-existing since ~v0.78.0). The canonical rule set is preserved.
+
+No user action needed beyond the pin bump. No migration script. No manual `ranch/rules/cowork.json` cleanup required — the installer handles it automatically on the first cowork re-install after the bump.
