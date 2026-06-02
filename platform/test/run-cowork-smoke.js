@@ -4136,7 +4136,7 @@ function assertCoworkV068Shape() {
         const skill = fs.readFileSync(path.join(BP, "skills/orchestrators/synthesize-week/SKILL.md"), "utf8");
         assertTrue(skill.includes("cowork-weekly-synthesis"),
             `${label}: missing 'cowork-weekly-synthesis' canonical type`);
-        assertTrue(/REPLACE|replace|idempot/i.test(skill),
+        assertTrue(/replace|idempot/i.test(skill),
             `${label}: missing replace-section or idempotency prose`);
     } catch (e) {
         failed++; console.error(`FAIL  ${label}: ${e.message}`);
@@ -4186,7 +4186,6 @@ function assertCoworkV068Shape() {
     const label = "HC-V0850-C3 composeMemoryCallouts: yesterday fixture matches expected output";
     try {
         const helperPath = path.join(BP, "helpers/compose-memory-callouts.js");
-        assertTrue(fs.existsSync(helperPath), `${label}: helper missing at ${helperPath}`);
         delete require.cache[require.resolve(helperPath)];
         const { composeMemoryCallouts } = require(helperPath);
         const fixturePath = path.join(ROOT, "platform/test/fixtures/v0.85.0-mb-yesterday-fixture.json");
@@ -4289,9 +4288,8 @@ function assertCoworkV068Shape() {
     const label = "HC-V0850-E2 cowork-customization-contract.md STOCK includes spice/cowork/memory/**/synthesis.md";
     try {
         const contract = fs.readFileSync(path.join(ROOT, "Docs/agent-guides/cowork-customization-contract.md"), "utf8");
-        assertTrue(contract.includes("spice/cowork/memory/**/synthesis.md")
-                || contract.includes("synthesis.md"),
-            `${label}: customization contract missing synthesis.md row`);
+        assertTrue(contract.includes("spice/cowork/memory/**/synthesis.md"),
+            `${label}: customization contract missing 'spice/cowork/memory/**/synthesis.md' STOCK row`);
     } catch (e) {
         failed++; console.error(`FAIL  ${label}: ${e.message}`);
     }
@@ -4302,7 +4300,7 @@ function assertCoworkV068Shape() {
     const label = "HC-V0850-F1 onboard-scheduled-jobs cadence walk references synthesize-week + Friday cron";
     try {
         const skill = fs.readFileSync(path.join(BP, "skills/orchestrators/onboard-scheduled-jobs/SKILL.md"), "utf8");
-        assertTrue(/synthesize.week|synthesize_week/.test(skill),
+        assertTrue(/synthesize[-_]week/.test(skill),
             `${label}: missing synthesize-week reference`);
         assertTrue(/Friday|0 17 \* \* 5/.test(skill),
             `${label}: missing Friday cron default suggestion`);
