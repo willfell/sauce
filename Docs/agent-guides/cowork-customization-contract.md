@@ -11,6 +11,7 @@ HC-V0760-A1 preservation harness lockstep.
 | Path | Source | Notes |
 |---|---|---|
 | `spice/cowork/context/engagement-templates/**/*.md` | `platform/blueprints/cowork/content/context/engagement-templates/**` | All 15 prompt files + 7 context defaults per engagement-type. Stripped of emoji in v0.75.1. |
+| `spice/cowork/context/engagement-types/*.json` | `platform/blueprints/cowork/engagement-types/**` | Per-type platform contracts (`id`, `supported_cadences`, `default_cadences`, `render_aspects`, `tripwire_aspects`, `required_fields`, `optional_fields`). Aspect names are hardcoded into orchestrator branch conditions — customizing would silently degrade orchestrators. Override (if/when supported) routes through `.local/` per landmine #22. NEW in v0.83.0. |
 | `spice/cowork/context/engagement-shared-templates/*.md` | `platform/blueprints/cowork/content/context/engagement-shared-templates/**` | active-threads.md, vault-config.md, weekly-snapshot.md SEED templates only — NOT the runtime files at `spice/cowork/context/`. |
 | `spice/cowork/scheduled-jobs.md` | `platform/blueprints/cowork/content/scheduled-jobs.md` | `cowork:onboard-scheduled-jobs` rewrites this as the user adds/removes jobs; `sauce reinstall` reverts to template. |
 | `.claude/skills/cowork/**/SKILL.md` | `platform/blueprints/cowork/skills/**` | All skill bodies are `claude_surface`-managed STOCK. |
