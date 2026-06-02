@@ -1351,6 +1351,56 @@
     {
       "target": "cowork",
       "fragment": {
+        "scope": "spice/cowork/memory/**/*/synthesis.md",
+        "extends": "_canonical-vocab",
+        "required_frontmatter": {
+          "type": {
+            "required": true,
+            "type": "string",
+            "equals": "cowork-weekly-synthesis"
+          },
+          "engagement_id": {
+            "required": true,
+            "type": "string"
+          },
+          "iso_week": {
+            "required": true,
+            "type": "string",
+            "matches": "^\\d{4}-W\\d{2}$"
+          },
+          "week_start": {
+            "required": true,
+            "type": "string",
+            "matches": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "week_end": {
+            "required": true,
+            "type": "string",
+            "matches": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "days_covered": {
+            "required": true,
+            "type": "number"
+          },
+          "created_at": {
+            "required": true,
+            "type": "string"
+          },
+          "synthesis_at": {
+            "required": true,
+            "type": "string"
+          },
+          "summary": {
+            "required": true,
+            "type": "string"
+          }
+        },
+        "naming_pattern": "^synthesis.md$"
+      }
+    },
+    {
+      "target": "cowork",
+      "fragment": {
         "scope": {
           "path_glob": "spice/cowork/prompts/*.md"
         },

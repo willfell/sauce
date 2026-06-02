@@ -856,6 +856,7 @@ class ActivityFeed {
       "scratch-day",
       "cowork-daily",
       "cowork-weekly",
+      "cowork-weekly-synthesis",
       "cowork-monthly",
       "to-do",
       "journal",
