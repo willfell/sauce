@@ -1635,6 +1635,89 @@ async function caseV0760B4ResolveWorkshopPathStalePathFallsThrough() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// HC-V0850-G1 — handleBumpPins blueprint-pin handling (FLN-v83-2 closure).
+//
+// Synthetic-vault driver: constructs a temp consumer vault subscribed to
+// cowork@0.23.0 + scratch@0.5.2, plus a temp workshop tree whose
+// platform/manifest.json declares cowork@0.24.0 + scratch@0.5.2 +
+// workshop_version 0.85.0. Invokes cmd-update.run({...}, ["--bump-pins"])
+// with a no-op installer, then asserts the consumer subscription's cowork
+// pin AND workshop_version both bumped to the workshop's values.
+//
+// Root-cause note for FLN-v83-2 deploy friction: handleBumpPins itself
+// walks blueprints[] unconditionally (cmd-update.js L98-111) and the
+// synthetic reproducer demonstrates it bumps correctly when
+// installed.workshop_path resolves. The deploy-time symptom (workshop
+// pin bumps, blueprint pin doesn't) reproduces on real consumers when
+// _resolveWorkshopPath returns a stale path — but real consumer vaults
+// always have installed.workshop_path === null (the installer never
+// writes it), so the helper falls through to the ancestry walk from
+// __filename, which under brew points at the currently-active libexec.
+// The deploy-time symptom likely arises when an older brew Cellar keg
+// is still on disk AND __filename resolves into the older keg (e.g.,
+// when ~/.sauce/active-pantry is a dev-link to a stale checkout).
+// HC-V0850-G1 locks in the happy path; this guards against future
+// regressions to the unconditional walk and the version-bump rewrite.
+// ---------------------------------------------------------------------------
+async function caseV0850G1HandleBumpPinsBlueprintPin() {
+    const label = "HC-V0850-G1 handleBumpPins bumps cowork pin 0.23.0 -> 0.24.0 and workshop_version -> 0.85.0";
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "hc-v0850-g1-"));
+    try {
+        const consumer = path.join(tmp, "consumer");
+        const workshop = path.join(tmp, "workshop");
+        fs.mkdirSync(path.join(consumer, "ranch"), { recursive: true });
+        fs.mkdirSync(path.join(workshop, "platform"), { recursive: true });
+
+        const installed = { workshop_version: "0.84.1", workshop_path: workshop };
+        const subscription = {
+            workshop_version: "0.84.1",
+            blueprints: [
+                { name: "cowork", version: "0.23.0" },
+                { name: "scratch", version: "0.5.2" },
+            ],
+            mechanisms: [],
+        };
+        const workshopManifest = {
+            workshop_version: "0.85.0",
+            blueprints: [
+                { name: "cowork", version: "0.24.0" },
+                { name: "scratch", version: "0.5.2" },
+            ],
+            mechanisms: [],
+        };
+        fs.writeFileSync(path.join(consumer, "ranch", "platform-installed.json"),
+            JSON.stringify(installed, null, 2));
+        fs.writeFileSync(path.join(consumer, "ranch", "platform-subscription.json"),
+            JSON.stringify(subscription, null, 2));
+        fs.writeFileSync(path.join(workshop, "platform", "manifest.json"),
+            JSON.stringify(workshopManifest, null, 2));
+
+        const cmdUpdate = require("../cli/cmd-update.js");
+        // Suppress stdout chatter (handleBumpPins writes diff lines via process.stdout.write).
+        const origWrite = process.stdout.write.bind(process.stdout);
+        process.stdout.write = () => true;
+        try {
+            await cmdUpdate.run(
+                { vaultPath: consumer, _runInstaller: async () => {} },
+                ["--bump-pins"],
+            );
+        } finally {
+            process.stdout.write = origWrite;
+        }
+
+        const after = JSON.parse(fs.readFileSync(
+            path.join(consumer, "ranch", "platform-subscription.json"), "utf8"));
+        const coworkPin = (after.blueprints || []).find(p => p.name === "cowork");
+        assertEqual(coworkPin && coworkPin.version, "0.24.0",
+            label + " — cowork pin bumped");
+        assertEqual(after.workshop_version, "0.85.0",
+            label + " — workshop_version bumped");
+    } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+    }
+}
+
 const cases = [
     caseC1AncestorWalk, caseC2SauceVaultEnv, caseC3NotInVault, caseC4UnknownVerb,
     caseC5StatusClean, caseC6StatusDrift, caseC10WizardDelegates,
@@ -1675,6 +1758,7 @@ const cases = [
     caseBP7EmptyDiffNoOp,  // v0.75.0 S13 HC-V0750-D1..D7
     caseV0760B1ResolveWorkshopPathArgvWins, caseV0760B2ResolveWorkshopPathInstalledWins,
     caseV0760B3ResolveWorkshopPathAncestryWalk, caseV0760B4ResolveWorkshopPathStalePathFallsThrough,  // v0.76.0 S1 HC-V0760-B1..B4
+    caseV0850G1HandleBumpPinsBlueprintPin,  // v0.85.0 S1 HC-V0850-G1 FLN-v83-2
 ];
 
 async function main() {

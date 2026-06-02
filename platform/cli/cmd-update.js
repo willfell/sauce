@@ -11,13 +11,44 @@ const path = require("path");
 // ranch/platform-installed.json's workshop_path field (which is null on every
 // pre-v0.75.1 consumer vault). Precedence:
 //   1. argv.workshopPath  — explicit --workshop-path CLI override
-//   2. installed.workshop_path — preserved when present
-//   3. Ancestry walk from process.execPath (or test hook _execPath)
+//   2. installed.workshop_path — preserved when present AND not stale
+//      (v0.85.0 S1: if ancestry-walked path diverges from stored, PREFER
+//      ancestry — protects against legacy workshop_path values pointing at
+//      a prior brew keg the user no longer wants resolved against).
+//   3. Ancestry walk from __filename (or test hook _callerFile)
 //   4. Throw with explicit message
-// Exposed via module.exports._resolveWorkshopPath for HC-V0751-B1..B4.
+// Exposed via module.exports._resolveWorkshopPath for HC-V0751-B1..B4 +
+// HC-V0850-G1.
 // ---------------------------------------------------------------------------
 function _resolveWorkshopPath(installed, argv, hooks) {
     if (argv && argv.workshopPath) return argv.workshopPath;
+
+    // Workstream A (v0.76.0): walk from __filename, NOT process.execPath.
+    // process.execPath is the Node binary (e.g., /opt/homebrew/Cellar/node/.../bin/node)
+    // whose ancestry contains no libexec/platform — the v0.75.1 helper walked
+    // it pointlessly. cmd-update.js itself lives at <workshop>/platform/cli/cmd-update.js;
+    // walking from __filename reaches the workshop in 3 hops.
+    //
+    // v0.85.0 S1: computed up-front so we can compare against
+    // installed.workshop_path (FLN-v83-2 defensive hardening — see precedence
+    // note above).
+    function _ancestryWalk() {
+        const startFile = (hooks && hooks._callerFile) || __filename;
+        let dir = path.dirname(startFile);
+        const root = path.parse(dir).root;
+        while (dir !== root) {
+            if (
+                path.basename(dir) === "libexec" &&
+                fs.existsSync(path.join(dir, "platform"))
+            ) {
+                return dir;
+            }
+            dir = path.dirname(dir);
+        }
+        return null;
+    }
+    const ancestryPath = _ancestryWalk();
+
     // Workstream B (v0.76.0): validate stored path before returning. When brew
     // cleans up an old keg, installed.workshop_path becomes a dead path;
     // returning it causes downstream "workshop manifest not parseable" failures.
@@ -25,26 +56,25 @@ function _resolveWorkshopPath(installed, argv, hooks) {
     if (installed && installed.workshop_path) {
         const stored = installed.workshop_path;
         const manifestProbe = path.join(stored, "platform", "manifest.json");
-        if (fs.existsSync(manifestProbe)) return stored;
+        if (fs.existsSync(manifestProbe)) {
+            // v0.85.0 S1 FLN-v83-2 defensive hardening: if the ancestry-walked
+            // path diverges from the stored path, the running sauce binary's
+            // libexec is the source of truth (brew shim resolved through the
+            // currently-active keg). The stored workshop_path may point at a
+            // prior keg that brew hasn't cleaned up yet; reading its older
+            // manifest would silently bypass --bump-pins diff detection
+            // (older manifest's blueprint versions match the consumer's
+            // current pins → "nothing to bump").
+            if (ancestryPath && path.resolve(ancestryPath) !== path.resolve(stored)) {
+                return ancestryPath;
+            }
+            return stored;
+        }
         // stale: fall through to ancestry walk below
     }
-    // Workstream A (v0.76.0): walk from __filename, NOT process.execPath.
-    // process.execPath is the Node binary (e.g., /opt/homebrew/Cellar/node/.../bin/node)
-    // whose ancestry contains no libexec/platform — the v0.75.1 helper walked
-    // it pointlessly. cmd-update.js itself lives at <workshop>/platform/cli/cmd-update.js;
-    // walking from __filename reaches the workshop in 3 hops.
-    const startFile = (hooks && hooks._callerFile) || __filename;
-    let dir = path.dirname(startFile);
-    const root = path.parse(dir).root;
-    while (dir !== root) {
-        if (
-            path.basename(dir) === "libexec" &&
-            fs.existsSync(path.join(dir, "platform"))
-        ) {
-            return dir;
-        }
-        dir = path.dirname(dir);
-    }
+
+    if (ancestryPath) return ancestryPath;
+
     throw new Error(
         "Could not auto-detect workshop_path. Pass --workshop-path <path> explicitly.",
     );
