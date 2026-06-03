@@ -4,6 +4,61 @@ This file archives the per-cycle status snapshots that previously lived in `CLAU
 
 ---
 
+## v0.88.1 accent-button-null-guard CLOSED 2026-06-03
+
+Workshop 0.88.0 → **0.88.1** (PATCH). Hot-fix following v0.88.0 deploy.
+
+Root cause: `platform/mechanisms/accent-button/accent-button.js:42` did
+`btn.innerHTML = opts.icon + \`<span>${opts.label}</span>\``. When
+`opts.icon` was null (which `PersonNavButtons` intentionally passes —
+`person-nav-buttons.js:58`), JavaScript's `null + "<span>..."` evaluated
+to the literal string `"null<span>..."`. Result: every person note
+rendered "null ← Back to People" instead of "← Back to People".
+
+The bug has been latent since `accent-button@0.1.0`. Pre-v0.88.0, person
+notes were broken from the templater double-fire bug — the body
+dataviewjs block never executed, so the render path that triggers
+AccentButton never ran. v0.88.0 fixed the creation path, which
+unblocked the render path, which exposed this ~70-cycle-old latent bug.
+
+Two coordinated fixes shipped together:
+1. accent-button 0.1.0 → 0.1.1 — defensive null-guard:
+   `(opts.icon || "")` in the innerHTML concat. Protects against any
+   future caller passing nullish icon, not just PersonNavButtons.
+2. people 0.5.0 → 0.5.1 — PersonNavButtons now passes a real Lucide
+   `arrow-left` SVG icon (matching the existing user icon in the
+   identity row). Label drops the redundant `←` arrow-char since the
+   SVG conveys direction.
+
+2 new HC-V0881 cases (caseHCV0881AccentButton + caseHCV0881PersonNavButtons)
+covering the null-guard substring, manifest 0.1.x line, no `icon: null`,
+backIcon SVG definition, `icon: backIcon` passing, and the new
+`"Back to People"` label. ~6 assertTrue calls. Existing HC-V0880-PEOPLE-D
+widened from exact `=== "0.5.0"` to floor `^0\.5\.\d+$` to accommodate
+the 0.5.1 bump (mirrors FA2-PEOPLE-1 pattern).
+
+Single bundled commit covering: accent-button.js + person-nav-buttons.js
+source edits, accent-button manifest 0.1.1, people manifest 0.5.1,
+platform/manifest.json (workshop_version 0.88.1 + catalogue pins
+accent-button 0.1.1 / people 0.5.1), package.json 0.88.1,
+ranch/platform-subscription.json (workshop_version 0.88.1 +
+accent-button subscription pin 0.1.1). Preflight `version-sync ok: 0.88.1`
+ALL GREEN. Final helper-cases smoke 1303 → 1309 passed / 0 failed.
+
+Sequencing decision update: v0.89.0 now reserved for **slice B of the
+people-cohesion arc** (entity-create people-multi prompt type +
+meeting-button attendee suggester + identity resolution foundations).
+distill-week shifts to v0.90.0; retro/insights to v0.91.0+; slices
+C/D/E to v0.92.0+. This is the second memory-arc displacement
+(first was v0.88.0 itself). Both displacements documented in
+the result doc + cycle-status next-cycle pointer block.
+
+FLN-v88-6 surfaced: latent null-icon bug went undetected for ~70 cycles
+because no HC tested the null-icon code path. Defensive mechanism
+test coverage candidate for a future cleanup PATCH.
+
+Result doc: `Docs/plans/2026-06-03-v0.88.1-accent-button-null-guard-result.md`.
+
 ## v0.88.0 people-cohesion-1 CLOSED 2026-06-03
 
 Workshop 0.87.0 → **0.88.0** (MINOR). Slice A of a five-slice people-cohesion

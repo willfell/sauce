@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop platform manifest. Each mechanism + blueprint has its own version.",
-  "workshop_version": "0.88.0",
+  "workshop_version": "0.88.1",
   "date": "2026-05-23",
   "foundational_plugins": [
     {
@@ -79,7 +79,7 @@
     },
     {
       "name": "accent-button",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "path": "mechanisms/accent-button"
     },
     {
@@ -141,7 +141,7 @@
     },
     {
       "name": "people",
-      "version": "0.5.0",
+      "version": "0.5.1",
       "path": "blueprints/people"
     },
     {

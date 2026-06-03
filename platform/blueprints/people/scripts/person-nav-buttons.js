@@ -28,6 +28,7 @@ class PersonNavButtons {
         }
 
         const userIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`;
+        const backIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>`;
 
         const root = dv.container.createEl("div", { cls: "pnb-root" });
 
@@ -54,8 +55,8 @@ class PersonNavButtons {
         btnRow.style.cssText = "display: flex; flex-wrap: nowrap; gap: 6px; margin-bottom: 4px;";
 
         customJS.AccentButton.render(btnRow, {
-            label: "← Back to People",
-            icon: null,
+            label: "Back to People",
+            icon: backIcon,
             onClick: () => dv.app.workspace.openLinkText("People", "spice/people/", false)
         });
     }

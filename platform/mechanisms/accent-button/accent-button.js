@@ -39,7 +39,10 @@ class AccentButton {
      */
     render(parent, opts) {
         const btn = parent.createEl("button");
-        btn.innerHTML = opts.icon + `<span>${opts.label}</span>`;
+        // Null-guard the icon concat: null + "<span>..." would render the
+        // literal string "null" in the button DOM (PersonNavButtons passes
+        // icon: null intentionally for icon-less back-link). v0.1.1 fix.
+        btn.innerHTML = (opts.icon || "") + `<span>${opts.label}</span>`;
         const baseCss = "cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 6px 14px; border-radius: 6px; border: 1px solid var(--interactive-accent); background: var(--background-primary); color: var(--interactive-accent); font-size: 0.82em; font-weight: 500; font-family: inherit; letter-spacing: 0.01em; transition: all 0.15s ease;";
         const flexSuffix = opts.flex === true ? " flex: 1; min-width: 0;" : "";
         const restingCss = baseCss + flexSuffix;

@@ -7314,12 +7314,48 @@ async function caseHCV0880PeopleC() {
 }
 
 async function caseHCV0880PeopleD() {
-  console.log("\n--- Case HC-V0880-PEOPLE-D: people version exactly 0.5.0 ---");
+  console.log("\n--- Case HC-V0880-PEOPLE-D: people version >= 0.5.0 (v0.88.x line) ---");
   const m = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/people/manifest.json"), "utf8"));
-  assertTrue("HC-V0880-PEOPLE-D: people manifest.version === '0.5.0'",
-    m.version === "0.5.0",
+  assertTrue("HC-V0880-PEOPLE-D: people manifest.version on the 0.5.x line",
+    /^0\.5\.\d+$/.test(m.version),
     `got: ${m.version}`);
+}
+
+async function caseHCV0881AccentButton() {
+  console.log("\n--- Case HC-V0881-ACCENTBUTTON-A: AccentButton null-icon guard ---");
+  const body = fs.readFileSync(
+    path.join(WORKSHOP, "platform/mechanisms/accent-button/accent-button.js"), "utf8");
+  // The pre-v0.1.1 bug: `opts.icon + \`<span>...\`` produced literal "null<span>..."
+  // when opts.icon was null. v0.1.1 fix: (opts.icon || "").
+  assertTrue("HC-V0881-ACCENTBUTTON-A: opts.icon access is null-guarded",
+    /\(opts\.icon\s*\|\|\s*""\)/.test(body),
+    `expected null-guard substring not found; body excerpt: ${body.slice(0, 1200)}`);
+  const am = JSON.parse(fs.readFileSync(
+    path.join(WORKSHOP, "platform/mechanisms/accent-button/manifest.json"), "utf8"));
+  assertTrue("HC-V0881-ACCENTBUTTON-A: accent-button manifest.version on 0.1.x line",
+    /^0\.1\.\d+$/.test(am.version),
+    `got: ${am.version}`);
+}
+
+async function caseHCV0881PersonNavButtons() {
+  console.log("\n--- Case HC-V0881-PNB: PersonNavButtons passes real icon, not null ---");
+  const body = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/people/scripts/person-nav-buttons.js"), "utf8");
+  // v0.88.1 fix: AccentButton call passes a real back-icon SVG instead of null.
+  assertTrue("HC-V0881-PNB-1: PersonNavButtons no longer passes icon: null",
+    !/icon\s*:\s*null/.test(body),
+    `body excerpt: ${body.slice(0, 1500)}`);
+  assertTrue("HC-V0881-PNB-2: PersonNavButtons defines backIcon SVG",
+    /backIcon\s*=/.test(body),
+    `body excerpt: ${body.slice(0, 1500)}`);
+  assertTrue("HC-V0881-PNB-3: AccentButton.render passes icon: backIcon",
+    /icon\s*:\s*backIcon/.test(body),
+    `body excerpt: ${body.slice(0, 1500)}`);
+  // Label dropped the redundant "←" character since the SVG conveys direction now.
+  assertTrue("HC-V0881-PNB-4: label is 'Back to People' without arrow-char",
+    /label\s*:\s*"Back to People"/.test(body),
+    `body excerpt: ${body.slice(0, 1500)}`);
 }
 
 async function caseHCV0880MeetingsA() {
@@ -7692,6 +7728,8 @@ async function caseHCV0880MeetingsD() {
   await caseHCV0880MeetingsB();
   await caseHCV0880MeetingsC();
   await caseHCV0880MeetingsD();
+  await caseHCV0881AccentButton();
+  await caseHCV0881PersonNavButtons();
   await caseFA2ProductsCanonical();
   await caseFA2TeamsCanonical();
   await caseFA2RuleFragmentsExtends();
