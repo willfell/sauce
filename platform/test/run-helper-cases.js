@@ -6783,10 +6783,10 @@ async function casePDC7NavButtonsRenamedToDocs() {
 // ============================================================
 
 async function caseFA2MeetingsCanonical() {
-  console.log("\n--- Case FA2-MEETINGS: meetings@0.6.0 canonical vocab adoption ---");
+  console.log("\n--- Case FA2-MEETINGS: meetings@0.7.0 canonical vocab adoption ---");
   const manifest = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/meetings/manifest.json"), "utf8"));
-  assertTrue("FA2-MEETINGS-1: meetings version 0.6.0", manifest.version === "0.6.0",
+  assertTrue("FA2-MEETINGS-1: meetings version 0.7.0", manifest.version === "0.7.0",
     `got: ${manifest.version}`);
   const ec = manifest.new_entity_buttons[0].frontmatter_template;
   assertTrue("FA2-MEETINGS-2: entity-create frontmatter_template has created_at",
@@ -6801,7 +6801,7 @@ async function caseFA2PeopleCanonical() {
   console.log("\n--- Case FA2-PEOPLE: people@0.3.0 canonical vocab adoption ---");
   const manifest = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/people/manifest.json"), "utf8"));
-  assertTrue("FA2-PEOPLE-1: people version >= 0.3.0", /^0\.(3|4)\.\d+$/.test(manifest.version),
+  assertTrue("FA2-PEOPLE-1: people version >= 0.3.0", /^0\.(3|4|5)\.\d+$/.test(manifest.version),
     `got: ${manifest.version}`);
   const ec = manifest.new_entity_buttons[0].frontmatter_template;
   assertTrue("FA2-PEOPLE-2: entity-create frontmatter_template has type:person",
@@ -7261,6 +7261,116 @@ async function caseFA2RuleFragmentsExtends() {
   }
 }
 
+// ============================================================
+// v0.88.0 HC-V0880 — people-cohesion-1 plumbing asserts
+// ============================================================
+
+async function caseHCV0880PeopleA() {
+  console.log("\n--- Case HC-V0880-PEOPLE-A: people manifest drops templater_folder_templates binding ---");
+  const m = JSON.parse(fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/people/manifest.json"), "utf8"));
+  const bindings = Array.isArray(m.templater_folder_templates) ? m.templater_folder_templates : [];
+  const offending = bindings.filter(b => b && (b.folder === "{{module_directory}}" || b.folder === "spice/people"));
+  assertTrue("HC-V0880-PEOPLE-A: no spice/people templater_folder_templates binding",
+    offending.length === 0,
+    `got bindings: ${JSON.stringify(bindings)}`);
+}
+
+async function caseHCV0880PeopleB() {
+  console.log("\n--- Case HC-V0880-PEOPLE-B: naming_pattern accepts target name set + rejects garbage ---");
+  const m = JSON.parse(fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/people/manifest.json"), "utf8"));
+  const frag = (m.rule_fragments || []).find(rf => rf.target === "people");
+  assertTrue("HC-V0880-PEOPLE-B: rule_fragment for people exists", frag && frag.fragment,
+    `got: ${JSON.stringify(frag)}`);
+  const pattern = frag && frag.fragment && frag.fragment.naming_pattern;
+  assertTrue("HC-V0880-PEOPLE-B: naming_pattern is a string", typeof pattern === "string",
+    `got: ${pattern}`);
+  const re = new RegExp(pattern);
+  // Note: curly apostrophe variant ("O'Brien.md" with U+2019) was dropped during
+  // S1.1 by intentional post-edit; only straight apostrophe is accepted.
+  const accept = ["Madonna.md", "Élise Martin.md", "John Paul Smith.md", "Dr. Strange.md",
+                  "O'Brien.md", "Will Fellhoelter.md",
+                  "Mary-Anne Smith.md", "Søren Højberg.md"];
+  for (const name of accept) {
+    assertTrue(`HC-V0880-PEOPLE-B accept: ${name}`, re.test(name),
+      `pattern: ${pattern}`);
+  }
+  const reject = ["will fellhoelter.md", "123Person.md", "Steve!.md", ".md", "person.md",
+                  "O’Brien.md"]; // curly variant — rejected after S1.1 intentional post-edit
+  for (const name of reject) {
+    assertTrue(`HC-V0880-PEOPLE-B reject: ${name}`, !re.test(name),
+      `pattern: ${pattern}`);
+  }
+}
+
+async function caseHCV0880PeopleC() {
+  console.log("\n--- Case HC-V0880-PEOPLE-C: Template, People.md drops tp.file.move directive ---");
+  const body = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/people/templates/Template, People.md"), "utf8");
+  assertTrue("HC-V0880-PEOPLE-C: no tp.file.move( in Template, People.md",
+    !/tp\.file\.move\(/.test(body),
+    `body excerpt: ${body.slice(-200)}`);
+}
+
+async function caseHCV0880PeopleD() {
+  console.log("\n--- Case HC-V0880-PEOPLE-D: people version exactly 0.5.0 ---");
+  const m = JSON.parse(fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/people/manifest.json"), "utf8"));
+  assertTrue("HC-V0880-PEOPLE-D: people manifest.version === '0.5.0'",
+    m.version === "0.5.0",
+    `got: ${m.version}`);
+}
+
+async function caseHCV0880MeetingsA() {
+  console.log("\n--- Case HC-V0880-MEETINGS-A: Meeting.md mirrors people: from attendees: ---");
+  const body = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/meetings/templates/Meeting.md"), "utf8");
+  assertTrue("HC-V0880-MEETINGS-A: contains attendees: yaml key with loop",
+    /\battendees:\s*\n<%\*\s*for\s*\(\s*const\s+attendee\s+of\s+attendees\s*\)/.test(body),
+    `excerpt: ${body.slice(0, 600)}`);
+  assertTrue("HC-V0880-MEETINGS-A: contains people: yaml key with loop",
+    /\bpeople:\s*\n<%\*\s*for\s*\(\s*const\s+attendee\s+of\s+attendees\s*\)/.test(body),
+    `excerpt: ${body.slice(0, 600)}`);
+  const attMatches = body.match(/tR\s*\+=\s*`\s*-\s*"\[\[\$\{attendee\}\]\]"/g) || [];
+  assertTrue("HC-V0880-MEETINGS-A: at least 2 [[${attendee}]] emit lines (attendees + people)",
+    attMatches.length >= 2,
+    `count: ${attMatches.length}`);
+}
+
+async function caseHCV0880MeetingsB() {
+  console.log("\n--- Case HC-V0880-MEETINGS-B: suggester-loop sentinel + tp.system.suggester present ---");
+  const body = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/meetings/templates/Meeting.md"), "utf8");
+  assertTrue("HC-V0880-MEETINGS-B: SUGGESTER_LOOP_V0880 sentinel present",
+    /SUGGESTER_LOOP_V0880/.test(body));
+  assertTrue("HC-V0880-MEETINGS-B: tp.system.suggester( call present",
+    /tp\.system\.suggester\(/.test(body));
+}
+
+async function caseHCV0880MeetingsC() {
+  console.log("\n--- Case HC-V0880-MEETINGS-C: suggester-loop exit paths + create branch ---");
+  const body = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/meetings/templates/Meeting.md"), "utf8");
+  assertTrue("HC-V0880-MEETINGS-C: Done sentinel present",
+    /Done — finish meeting/.test(body));
+  assertTrue("HC-V0880-MEETINGS-C: Add-new-person sentinel present",
+    /\+ Add new person…/.test(body));
+  assertTrue("HC-V0880-MEETINGS-C: app.vault.getMarkdownFiles() call present",
+    /app\.vault\.getMarkdownFiles\(\)/.test(body));
+  assertTrue("HC-V0880-MEETINGS-C: app.vault.create( call present (new-person stub branch)",
+    /app\.vault\.create\(/.test(body));
+}
+
+async function caseHCV0880MeetingsD() {
+  console.log("\n--- Case HC-V0880-MEETINGS-D: meetings version exactly 0.7.0 ---");
+  const m = JSON.parse(fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/meetings/manifest.json"), "utf8"));
+  assertTrue("HC-V0880-MEETINGS-D: meetings manifest.version === '0.7.0'",
+    m.version === "0.7.0",
+    `got: ${m.version}`);
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -7574,6 +7684,14 @@ async function caseFA2RuleFragmentsExtends() {
   // v0.54.0 FA-2 — canonical vocab adoption asserts (meetings + people + products + teams)
   await caseFA2MeetingsCanonical();
   await caseFA2PeopleCanonical();
+  await caseHCV0880PeopleA();
+  await caseHCV0880PeopleB();
+  await caseHCV0880PeopleC();
+  await caseHCV0880PeopleD();
+  await caseHCV0880MeetingsA();
+  await caseHCV0880MeetingsB();
+  await caseHCV0880MeetingsC();
+  await caseHCV0880MeetingsD();
   await caseFA2ProductsCanonical();
   await caseFA2TeamsCanonical();
   await caseFA2RuleFragmentsExtends();

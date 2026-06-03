@@ -153,7 +153,7 @@ async function caseAU6() {
   await withTempVault(async (dir) => {
     const rules = [{
       scope: { path_glob: "spice/people/*.md", exclude_basenames: ["People.md"] },
-      naming_pattern: "^[A-Z][a-zA-Z'\\- ]+ [A-Z][a-zA-Z'\\- ]+\\.md$"
+      naming_pattern: "^[A-ZÀ-Ý][A-Za-zÀ-ÿ''\\.\\- ]*\\.md$"
     }];
     makeSauceVault(dir, { rules: { people: rules } });
     writeNote(dir, "spice/people/john-doe.md", { tags: ["person"] });
@@ -168,7 +168,7 @@ async function caseAU7() {
   await withTempVault(async (dir) => {
     const rules = [{
       scope: { path_glob: "spice/people/*.md", exclude_basenames: ["People.md"] },
-      naming_pattern: "^[A-Z][a-zA-Z'\\- ]+ [A-Z][a-zA-Z'\\- ]+\\.md$"
+      naming_pattern: "^[A-ZÀ-Ý][A-Za-zÀ-ÿ''\\.\\- ]*\\.md$"
     }];
     makeSauceVault(dir, { rules: { people: rules } });
     writeNote(dir, "spice/people/People.md", { tags: ["people-hub"] });

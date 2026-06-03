@@ -45,4 +45,3 @@ await dv.view("{{views_path}}/customjs-guard", {
   args: [{ entityType: "person" }]
 });
 ```
-<%* await tp.file.move("spice/people/" + tp.file.title) %>
