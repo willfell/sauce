@@ -7338,6 +7338,39 @@ async function caseHCV0881AccentButton() {
     `got: ${am.version}`);
 }
 
+async function caseHCV0882RemovedTemplaterFolderTemplates() {
+  console.log("\n--- Case HC-V0882-REMOVED-FT: people manifest declares removed_templater_folder_templates ---");
+  const m = JSON.parse(fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/people/manifest.json"), "utf8"));
+  assertTrue("HC-V0882-REMOVED-FT-A: people declares removed_templater_folder_templates as an array",
+    Array.isArray(m.removed_templater_folder_templates),
+    `got: ${JSON.stringify(m.removed_templater_folder_templates)}`);
+  assertTrue("HC-V0882-REMOVED-FT-B: list contains 'spice/people'",
+    Array.isArray(m.removed_templater_folder_templates) && m.removed_templater_folder_templates.indexOf("spice/people") >= 0,
+    `got: ${JSON.stringify(m.removed_templater_folder_templates)}`);
+}
+
+async function caseHCV0882InstallerHelperPresent() {
+  console.log("\n--- Case HC-V0882-INSTALL: install.js carries applyTemplaterFolderTemplateRemovals helper ---");
+  const body = fs.readFileSync(
+    path.join(WORKSHOP, "platform/install.js"), "utf8");
+  assertTrue("HC-V0882-INSTALL-A: applyTemplaterFolderTemplateRemovals function defined",
+    /async\s+function\s+applyTemplaterFolderTemplateRemovals\s*\(/.test(body),
+    "function definition not found");
+  assertTrue("HC-V0882-INSTALL-B: helper is called inside installItem before applyTemplaterFolderTemplates",
+    /await\s+applyTemplaterFolderTemplateRemovals\(tp,\s*mech,\s*variables,\s*history,\s*git\);[\s\S]{0,400}await\s+applyTemplaterFolderTemplates\(tp,\s*mech/.test(body),
+    "removals call must precede applyTemplaterFolderTemplates inside installItem");
+  assertTrue("HC-V0882-INSTALL-C: helper reads .obsidian/plugins/templater-obsidian/data.json",
+    /applyTemplaterFolderTemplateRemovals[\s\S]{0,1200}\.obsidian\/plugins\/templater-obsidian\/data\.json/.test(body),
+    "helper must target the canonical templater data.json path");
+  assertTrue("HC-V0882-INSTALL-D: helper writes a sauce-backup before mutating",
+    /applyTemplaterFolderTemplateRemovals[\s\S]{0,4500}sauce-backup/.test(body),
+    "backup-on-edit safety guard required (landmine #12)");
+  assertTrue("HC-V0882-INSTALL-E: helper logs removed_orphan_binding action in history",
+    /removed_orphan_binding/.test(body),
+    "history.action sentinel must be emitted");
+}
+
 async function caseHCV0881PersonNavButtons() {
   console.log("\n--- Case HC-V0881-PNB: PersonNavButtons passes real icon, not null ---");
   const body = fs.readFileSync(
@@ -7730,6 +7763,8 @@ async function caseHCV0880MeetingsD() {
   await caseHCV0880MeetingsD();
   await caseHCV0881AccentButton();
   await caseHCV0881PersonNavButtons();
+  await caseHCV0882RemovedTemplaterFolderTemplates();
+  await caseHCV0882InstallerHelperPresent();
   await caseFA2ProductsCanonical();
   await caseFA2TeamsCanonical();
   await caseFA2RuleFragmentsExtends();

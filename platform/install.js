@@ -1072,6 +1072,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await scaffoldFoundationalPluginData(tp, mech, workshopPath, variables, history, git);  // NEW v0.26.0
   await applyTemplaterHotkeys(tp, mech, variables, history, git);          // NEW v0.1.3
   await applySlashCommanderBindings(tp, mech, variables, history, git);    // NEW v0.1.3
+  await applyTemplaterFolderTemplateRemovals(tp, mech, variables, history, git); // NEW v0.88.2 — runs BEFORE applyTemplaterFolderTemplates so removals + re-adds compose correctly
   await applyTemplaterFolderTemplates(tp, mech, variables, history, git);  // NEW v0.4.0
   await applyTemplaterStartupTemplates(tp, mech, variables, history, git); // NEW v0.48.0
   await applyCustomJsStartupScripts(tp, mech, variables, history, git);    // NEW v0.49.0
@@ -4584,6 +4585,129 @@ async function applyTemplaterFolderTemplates(tp, manifest, variables, history, g
         step: "templater_folder_templates",
         name: manifest.name,
         message: `write failed: ${e.message}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+  }
+}
+
+// applyTemplaterFolderTemplateRemovals — NEW v0.88.2. Counterpart to
+// applyTemplaterFolderTemplates. For each item that declares
+// removed_templater_folder_templates: [<folder>, ...], read
+// .obsidian/plugins/templater-obsidian/data.json and remove ANY
+// folder_templates[] entry whose .folder field matches (after lenient
+// substitution). Idempotent — re-running on a vault that already had the
+// orphan binding removed is a no-op (removedCount === 0 short-circuits the
+// write). Backup-on-edit to <target>.sauce-backup. Failure-loud (Notice +
+// history). Honors landmine #12 — never overwrites malformed data.json.
+//
+// Use case: when a blueprint retires a previously-shipped folder-template
+// binding (as people@0.5.0 did with spice/people/ → Template, People.md),
+// declaring the folder in this list ensures the stale entry is purged from
+// every consumer vault on the next install — closes the additive-install
+// orphan-binding gap that v0.88.0 surfaced. FLN-v88-7.
+async function applyTemplaterFolderTemplateRemovals(tp, manifest, variables, history, git) {
+  if (!manifest || !Array.isArray(manifest.removed_templater_folder_templates) || manifest.removed_templater_folder_templates.length === 0) return;
+  const adapter = tp.app.vault.adapter;
+  const target = ".obsidian/plugins/templater-obsidian/data.json";
+
+  if (!(await adapter.exists(target))) return; // file absent — nothing to clean
+
+  let raw;
+  try {
+    raw = await adapter.read(target);
+  } catch (e) {
+    if (history) {
+      history.push({
+        event: "error",
+        step: "templater_folder_templates",
+        name: manifest.name,
+        message: `removals read failed for ${target}: ${e.message}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch (e) {
+    if (history) {
+      history.push({
+        event: "error",
+        step: "templater_folder_templates",
+        name: manifest.name,
+        message: `removals: ${target} malformed JSON: ${e.message}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  if (!Array.isArray(data.folder_templates)) return;
+
+  const removedFolderSet = new Set(
+    manifest.removed_templater_folder_templates
+      .map(f => substituteLenient(f, variables))
+      .filter(Boolean)
+  );
+  if (removedFolderSet.size === 0) return;
+
+  let removedCount = 0;
+  data.folder_templates = data.folder_templates.filter(ft => {
+    if (!ft || typeof ft.folder !== "string") return true;
+    if (removedFolderSet.has(ft.folder)) {
+      removedCount++;
+      if (history) {
+        history.push({
+          event: "info",
+          step: "templater_folder_templates",
+          name: manifest.name,
+          folder: ft.folder,
+          template: (typeof ft.template === "string" ? ft.template : null),
+          action: "removed_orphan_binding",
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      return false;
+    }
+    return true;
+  });
+
+  if (removedCount === 0) return; // idempotent
+
+  try {
+    await adapter.write(`${target}.sauce-backup`, raw);
+  } catch (e) {
+    new Notice(`applyTemplaterFolderTemplateRemovals: backup write failed (${e.message}); aborting removal for ${manifest.name}`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "templater_folder_templates",
+        name: manifest.name,
+        message: `removals backup write failed: ${e.message}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  try {
+    await adapter.write(target, JSON.stringify(data, null, 2));
+  } catch (e) {
+    new Notice(`applyTemplaterFolderTemplateRemovals: write failed (${e.message}) for ${manifest.name}`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "templater_folder_templates",
+        name: manifest.name,
+        message: `removals write failed: ${e.message}`,
         git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
         attempted_at: new Date().toISOString(),
       });

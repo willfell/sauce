@@ -4,6 +4,65 @@ This file archives the per-cycle status snapshots that previously lived in `CLAU
 
 ---
 
+## v0.88.2 orphan-folder-template-cleanup CLOSED 2026-06-03
+
+Workshop 0.88.1 → **0.88.2** (PATCH). Second hot-fix following v0.88.0
+deploy — closes the actual user-facing double-fire bug that v0.88.0 was
+originally supposed to fix.
+
+Root cause: v0.88.0 removed the `templater_folder_templates[]` block from
+the people manifest. HC tests asserted the manifest no longer contained
+the binding. But `applyTemplaterFolderTemplates` in install.js is
+**additive-only** — it adds new entries to each consumer vault's
+`.obsidian/plugins/templater-obsidian/data.json` `folder_templates[]`
+array, but never removes entries that previous manifest versions had
+declared and the current manifest no longer does. Every consumer vault
+that had `people@0.4.0` installed previously still had
+`{ folder: "spice/people", template: "ranch/templates/Template, People.md" }`
+in its local Templater config after v0.88.0/v0.88.1 — so creating a new
+person via `+ New Person` still fired Templater on file landing → broken
+notes with double frontmatter + literal `<% tp ... %>` text + the
+`PeopleRendering.renderMentionList: unknown mode undefined` Notice
+toasts. The user-facing symptom v0.88.0 targeted was untouched.
+
+Surfaced post-v0.88.1 deploy when the user created
+`spice/people/test person.md` and saw the same renderMentionList errors
+they were seeing before v0.88.0. Confirmed by inspecting all 4 deployed
+vaults — all still had the stale binding.
+
+Structural fix: NEW `removed_templater_folder_templates: [<folder>, ...]`
+manifest field + NEW `applyTemplaterFolderTemplateRemovals(tp, manifest,
+variables, history, git)` install helper. Helper iterates the field,
+reads `.obsidian/plugins/templater-obsidian/data.json`, removes any
+`folder_templates[]` entry whose `.folder` matches (after lenient
+substitution), backs up + writes. Called inside `installItem` immediately
+BEFORE `applyTemplaterFolderTemplates` so removals + re-adds compose
+correctly (a blueprint can simultaneously retire one binding and add
+another, e.g. during a path rename). Idempotent (no-op after first
+removal). Honors landmine #12 (never overwrites malformed data.json).
+
+people 0.5.1 → 0.5.2 (PATCH) declares
+`removed_templater_folder_templates: ["spice/people"]`.
+
+2 new HC-V0882 cases (caseHCV0882RemovedTemplaterFolderTemplates +
+caseHCV0882InstallerHelperPresent) covering: manifest field shape +
+"spice/people" presence; install.js helper definition; call-site
+ordering inside `installItem`; canonical data.json path target;
+sauce-backup pre-write; `removed_orphan_binding` history sentinel.
+~7 assertTrue calls. Smoke 1309 → 1316.
+
+Single bundled commit: install.js + people manifest + catalogue pin +
+package.json + subscription + tests + cycle-status + cycle-history +
+result doc. Preflight `version-sync ok: 0.88.2` ALL GREEN.
+
+FLN-v88-7 CLOSED. NEW FLN-v88-8: same additive-only pattern likely
+affects templater_startup_templates / templater_hotkeys /
+slash_commander_bindings / nav_buttons / claude_surface — each
+`applyXxx` helper is additive-only. Full audit candidate for a focused
+cleanup PATCH.
+
+Result doc: `Docs/plans/2026-06-03-v0.88.2-orphan-folder-template-cleanup-result.md`.
+
 ## v0.88.1 accent-button-null-guard CLOSED 2026-06-03
 
 Workshop 0.88.0 → **0.88.1** (PATCH). Hot-fix following v0.88.0 deploy.
