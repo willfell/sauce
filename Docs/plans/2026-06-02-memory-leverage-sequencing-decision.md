@@ -12,6 +12,14 @@ companion_docs:
 
 # Memory-leverage multi-cycle sequencing decision (2026-06-02)
 
+> [!warning]+ Superseded by v0.88.0 people-cohesion-1
+> The strict v0.85→v0.89 sequence below is overridden by `Docs/plans/2026-06-03-v0.88.0-people-cohesion-1-design.md` §0.1.
+> - v0.88.0 → people-cohesion-1 (was: distill-week)
+> - v0.89.0 → distill-week (was: retro/insights)
+> - v0.90.0 → retro/insights
+>
+> Lock-decision rationale below preserved for historical audit; the load-bearing argument (memory volume must precede primitives) still holds for the shifted slots.
+
 The roadmap doc at `Docs/prompts/2026-06-02-memory-leverage-multi-cycle-roadmap.md` posed two sequencing questions to the brainstorm. This doc codifies the answers. Companion docs detail the v0.85.0 spec and v0.86–v0.89 scope sketches.
 
 ## Decision summary

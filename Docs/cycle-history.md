@@ -4,6 +4,72 @@ This file archives the per-cycle status snapshots that previously lived in `CLAU
 
 ---
 
+## v0.88.0 people-cohesion-1 CLOSED 2026-06-03
+
+Workshop 0.87.0 → **0.88.0** (MINOR). Slice A of a five-slice people-cohesion
+arc. Closes the half-baked state of the people blueprint as it interacts with
+meetings: template error on `+ New Person` (entity-create vs Templater
+double-fire), dead `people:` frontmatter field, over-strict naming pattern,
+no autocomplete in Meeting attendees prompt.
+
+people 0.4.0 → 0.5.0 (MINOR): removed `templater_folder_templates[]` binding
+for `spice/people/` → `Template, People.md` (kills the double-fire); relaxed
+`naming_pattern` from `^[A-Z][a-zA-Z'\\- ]+ [A-Z][a-zA-Z'\\- ]+\\.md$` to
+`^[A-ZÀ-Ý][A-Za-zÀ-ÿ''\\.\\- ]*\\.md$` (accepts mononyms, diacritics,
+multi-part names, "Dr. Strange", straight apostrophes; curly-apostrophe
+variant intentionally dropped post-S1.1); `Template, People.md` drops the
+`tp.file.move` directive (dead code post folder-binding removal).
+
+meetings 0.6.0 → 0.7.0 (MINOR): `Meeting.md` Templater template's opening
+`<%* ... -%>` block replaced with a suggester loop over existing
+`spice/people/*.md` plus two sentinels (`+ Add new person…` /
+`Done — finish meeting`). Loop accumulates `attendees[]`; `+ Add new person…`
+prompts for a name and scaffolds a minimal `type: person` stub via
+`app.vault.create`. `SUGGESTER_LOOP_V0880` regression sentinel embedded.
+Frontmatter `people:` mirrors `attendees:` at creation; `people:` is the
+superset (attendees + discussed-but-absent), `attendees:` stays the canonical
+at-the-meeting field. Validator rule unchanged.
+
+Sequencing override: this cycle displaces the planned v0.88.0 distill-week
+per `Docs/plans/2026-06-02-memory-leverage-sequencing-decision.md` (now
+bears a Superseded callout). distill-week shifts to v0.89.0;
+retro/insights to v0.90.0. Slices B-E (people-cohesion arc continuation)
+queued for v0.91.0+. The load-bearing memory-volume-before-primitives
+argument still holds at the shifted slots.
+
+Fixtures: 2 new audit-vault fixtures (`Madonna.md` mononym,
+`Élise Martin.md` diacritic). `run-audit.js` AU6/AU7 pattern literals updated
+in lockstep with the manifest. `run-helper-cases.js` FA2-MEETINGS-1 pinned
+to 0.7.0 (label + console.log header); FA2-PEOPLE-1 regex widened to
+`^0\.(3|4|5)\.\d+$`. 8 new HC-V0880 cases / ~29 `assertTrue` calls
+(PEOPLE-A/B/C/D + MEETINGS-A/B/C/D). HC-V0880-DOCS-A from spec §5.1 moved
+to S3.1 manual grep (the supersession doc edit lands in S3, after smoke
+runs in S1; cannot assert in-suite without re-ordering).
+
+Stage commits: `a1a003e` (S1 — main blueprint changes + tests),
+`11a36ca` (S1 polish — platform/manifest.json catalogue pins for
+meetings/people; missed at original S1), `dd65f48` (S1 polish 2 —
+ranch/platform-subscription.json meetings pin; missed at original S1),
+`36bb19b` (S2 — workshop_version 0.87.0 → 0.88.0 in 3 files), S3
+this commit (cycle-close artifacts). Preflight `version-sync ok: 0.88.0`
+ALL GREEN. Final helper-cases smoke 1303 passed / 0 failed
+(delta +29 from the 1274 baseline captured at S0.1; note the v0.87.0
+cycle-status snapshot cited 929, reflecting a different counter — recount
+adopted post-v0.87.0).
+
+Carry-forwards: v0.89.0 distill-week + auto-update prefs next (shifted from
+v0.88.0). v0.90.0 retro views + insights surfacing (shifted from v0.89.0+).
+v0.91.0+ people-cohesion-arc B-E (identity-resolution mechanism, cowork
+auto-stub people, wikilink-in-output convention, brain-map fields + rollups)
+— each gets its own brainstorm post-A. Manual cleanup of pre-existing
+broken person notes deferred to user — see
+`Docs/upgrades/v0.88.0-people-notes-cleanup.md`. FLN-v88-1 surfaced (the
+plan missed catalogue-pin and subscription-pin lockstep bumps at S1;
+required two S1 polish commits to recover — candidate addition to the
+plan template).
+
+Result doc: `Docs/plans/2026-06-03-v0.88.0-people-cohesion-1-result.md`.
+
 ## v0.87.0 semantic-memory-retrieval CLOSED 2026-06-02
 
 Workshop 0.86.0 → **0.87.0** (MINOR). FLN-v84-4 closed: semantic retrieval
