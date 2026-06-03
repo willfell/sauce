@@ -136,12 +136,12 @@
     },
     {
       "name": "meetings",
-      "version": "0.6.0",
+      "version": "0.7.0",
       "path": "blueprints/meetings"
     },
     {
       "name": "people",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "path": "blueprints/people"
     },
     {
