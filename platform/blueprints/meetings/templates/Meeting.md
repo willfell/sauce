@@ -12,7 +12,9 @@ const attendees = [];
 while (true) {
   const options = [SENTINEL_DONE, SENTINEL_ADD, ...peopleFiles.filter(n => attendees.indexOf(n) === -1)];
   const labels  = options.slice();
-  const picked = await tp.system.suggester(labels, options, true,
+  // throwOnCancel: false → Esc returns undefined, breaks the loop with
+  // already-picked attendees preserved (instead of aborting template).
+  const picked = await tp.system.suggester(labels, options, false,
     attendees.length === 0
       ? "Pick first attendee (or Done to skip)"
       : `Pick another attendee (${attendees.length} so far) or Done`);
@@ -30,7 +32,11 @@ while (true) {
         peopleFiles.push(trimmed);
         peopleFiles.sort();
       } catch (e) {
-        // Swallow — duplicate or invalid name; user can retry.
+        // Stub-create failed (path-hostile chars like "/", or some other
+        // create error). Skip the attendee add — pushing a name we couldn't
+        // stub would leave a broken [[wikilink]] in the frontmatter.
+        // User can retry with a sanitized name. See FLN-v88-4.
+        continue;
       }
     }
     if (attendees.indexOf(trimmed) === -1) attendees.push(trimmed);
