@@ -7604,6 +7604,91 @@ async function caseHCV0890VersionD() {
   assertEqual(mechCount, 17, "HC-V0890-VERSION-D: mechanism count = 17 (was 16, +people-identity)");
 }
 
+async function caseHCV0890ResolvePersonA() {
+  console.log("\n--- Case HC-V0890-RESOLVE-PERSON-A: SKILL.md prose contract ---");
+  const skill = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/cowork/skills/skills/resolve-person/SKILL.md"), "utf8");
+  // Inputs documented
+  for (const k of ["input", "prefer_type", "engagement_id"]) {
+    assertTrue(`HC-V0890-RESOLVE-PERSON-A: documents input ${k}`,
+      skill.includes(k + ":"));
+  }
+  // Outputs documented
+  for (const k of ["resolved", "person_link", "person_basename", "matched_via", "collision_warning", "aliases_by_type"]) {
+    assertTrue(`HC-V0890-RESOLVE-PERSON-A: documents output ${k}`,
+      skill.includes(k + ":") || skill.includes("`" + k + "`"));
+  }
+  // NEVER throws documented
+  assertTrue("HC-V0890-RESOLVE-PERSON-A: NEVER throws guarantee in prose",
+    /NEVER throws/.test(skill));
+  // Errors section present
+  assertTrue("HC-V0890-RESOLVE-PERSON-A: ## Errors section present",
+    skill.includes("## Errors"));
+}
+
+async function caseHCV0890ResolvePersonB() {
+  console.log("\n--- Case HC-V0890-RESOLVE-PERSON-B: output-shape parity with fixtures ---");
+  const skill = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/cowork/skills/skills/resolve-person/SKILL.md"), "utf8");
+  const fixtureKeys = ["resolved", "person_link", "person_basename", "matched_via", "collision_warning", "aliases_by_type"];
+  const fixturePath = path.join(WORKSHOP, "platform/test/fixtures/resolver/case-a-basename-hit.json");
+  const fx = JSON.parse(fs.readFileSync(fixturePath, "utf8"));
+  for (const k of fixtureKeys) {
+    assertTrue(`HC-V0890-RESOLVE-PERSON-B: fixture has key ${k}`,
+      Object.prototype.hasOwnProperty.call(fx.expected, k));
+    assertTrue(`HC-V0890-RESOLVE-PERSON-B: SKILL.md mentions key ${k}`,
+      skill.includes(k));
+  }
+  // aliases_by_type subkeys
+  for (const sub of ["phone", "email", "name", "handle"]) {
+    assertTrue(`HC-V0890-RESOLVE-PERSON-B: fixture aliases_by_type.${sub} present`,
+      Object.prototype.hasOwnProperty.call(fx.expected.aliases_by_type, sub));
+  }
+}
+
+async function caseHCV0890ResolvePersonC() {
+  console.log("\n--- Case HC-V0890-RESOLVE-PERSON-C: golden-fixture parse-roundtrip ---");
+  const dir = path.join(WORKSHOP, "platform/test/fixtures/resolver");
+  const names = ["case-a-basename-hit.json", "case-b-alias-collision.json", "case-c-miss.json"];
+  for (const n of names) {
+    const fx = JSON.parse(fs.readFileSync(path.join(dir, n), "utf8"));
+    assertTrue(`HC-V0890-RESOLVE-PERSON-C: ${n} has input.input string`,
+      fx.input && typeof fx.input.input === "string");
+    assertTrue(`HC-V0890-RESOLVE-PERSON-C: ${n} has expected.resolved boolean`,
+      fx.expected && typeof fx.expected.resolved === "boolean");
+    assertTrue(`HC-V0890-RESOLVE-PERSON-C: ${n} has expected.aliases_by_type.phone array`,
+      fx.expected.aliases_by_type && Array.isArray(fx.expected.aliases_by_type.phone));
+  }
+  // Case-b specific: collision_warning populated
+  const caseB = JSON.parse(fs.readFileSync(path.join(dir, "case-b-alias-collision.json"), "utf8"));
+  assertTrue("HC-V0890-RESOLVE-PERSON-C: case-b collision_warning pipe-delimited",
+    typeof caseB.expected.collision_warning === "string" && caseB.expected.collision_warning.includes("|"));
+  // Case-c specific: resolved false
+  const caseC = JSON.parse(fs.readFileSync(path.join(dir, "case-c-miss.json"), "utf8"));
+  assertEqual(caseC.expected.resolved, false,
+    "HC-V0890-RESOLVE-PERSON-C: case-c expected.resolved false");
+  assertEqual(caseC.expected.person_link, null,
+    "HC-V0890-RESOLVE-PERSON-C: case-c expected.person_link null");
+}
+
+async function caseHCV0890ResolvePersonD() {
+  console.log("\n--- Case HC-V0890-RESOLVE-PERSON-D: claude_surface registration ---");
+  const m = JSON.parse(fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/cowork/manifest.json"), "utf8"));
+  // files[] entry
+  const fileEntry = (m.files || []).find(f => f.source && f.source.includes("resolve-person"));
+  assertTrue("HC-V0890-RESOLVE-PERSON-D: cowork files[] has resolve-person entry",
+    !!fileEntry);
+  assertTrue("HC-V0890-RESOLVE-PERSON-D: files[] dest matches nested sub-skill convention",
+    fileEntry && fileEntry.dest === "{{skills_dir}}/skills/resolve-person/SKILL.md");
+  // claude_surface[] entry
+  const csEntry = (m.claude_surface || []).find(c => c.source && c.source.includes("resolve-person"));
+  assertTrue("HC-V0890-RESOLVE-PERSON-D: cowork claude_surface[] has resolve-person entry",
+    !!csEntry);
+  assertTrue("HC-V0890-RESOLVE-PERSON-D: claude_surface[] dest matches nested sub-skill convention",
+    csEntry && csEntry.dest === "{{skills_dir}}/skills/resolve-person/SKILL.md");
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -7934,6 +8019,10 @@ async function caseHCV0890VersionD() {
   await caseHCV0890PeopleIdentityC();
   await caseHCV0890PeopleIdentityD();
   await caseHCV0890VersionD();
+  await caseHCV0890ResolvePersonA();
+  await caseHCV0890ResolvePersonB();
+  await caseHCV0890ResolvePersonC();
+  await caseHCV0890ResolvePersonD();
   await caseFA2ProductsCanonical();
   await caseFA2TeamsCanonical();
   await caseFA2RuleFragmentsExtends();

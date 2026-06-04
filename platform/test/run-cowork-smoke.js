@@ -836,9 +836,9 @@ function assertCoworkV068Shape() {
   assertTrue(fileSources.includes("helpers/cowork-latest-runs.js"),
     "V068-MANIFEST-FILES: manifest files[] declares helpers/cowork-latest-runs.js");
 
-  // V0750-VERSION: cowork blueprint version bumped to 0.26.0 (was 0.25.0 in v0.86.0; MINOR bump for v0.87.0 — adds gather-semantic-memory sub-skill + compose-semantic-echoes-callout helper).
-  assertTrue(manifest.version === "0.26.0",
-    `V0750-VERSION: cowork manifest.version === "0.26.0" (got ${JSON.stringify(manifest.version)})`);
+  // V0750-VERSION: cowork blueprint version bumped to 0.27.0 (was 0.26.0 in v0.87.0; MINOR bump for v0.89.0 — adds cowork:resolve-person sub-skill + depends_on people≥0.6.0).
+  assertTrue(manifest.version === "0.27.0",
+    `V0750-VERSION: cowork manifest.version === "0.27.0" (got ${JSON.stringify(manifest.version)})`);
 }
 
 // ---------------------------------------------------------------------------

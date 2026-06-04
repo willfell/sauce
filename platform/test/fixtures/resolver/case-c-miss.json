@@ -1,0 +1,16 @@
+{
+  "input": { "input": "UnknownPersonNeverExists" },
+  "expected": {
+    "resolved": false,
+    "person_link": null,
+    "person_basename": null,
+    "matched_via": null,
+    "collision_warning": null,
+    "aliases_by_type": {
+      "phone": [],
+      "email": [],
+      "name": [],
+      "handle": []
+    }
+  }
+}

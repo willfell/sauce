@@ -1,0 +1,16 @@
+{
+  "input": { "input": "Steve" },
+  "expected": {
+    "resolved": true,
+    "person_link": "[[Steve A]]",
+    "person_basename": "Steve A",
+    "matched_via": "alias_exact:name",
+    "collision_warning": "Steve A | Steve B",
+    "aliases_by_type": {
+      "phone": [],
+      "email": [],
+      "name": ["Steve"],
+      "handle": []
+    }
+  }
+}

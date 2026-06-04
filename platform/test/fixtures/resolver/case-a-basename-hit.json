@@ -1,0 +1,16 @@
+{
+  "input": { "input": "Stefan de Pagter" },
+  "expected": {
+    "resolved": true,
+    "person_link": "[[Stefan de Pagter]]",
+    "person_basename": "Stefan de Pagter",
+    "matched_via": "basename_exact",
+    "collision_warning": null,
+    "aliases_by_type": {
+      "phone": ["+13035551212"],
+      "email": ["stefan@example.com"],
+      "name": ["Stefan de P."],
+      "handle": []
+    }
+  }
+}
