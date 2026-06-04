@@ -2501,9 +2501,12 @@ function assertCoworkV068Shape() {
     }
 }
 
-// HC-V0790-A2: no hard_rules / no_emojis absent → effective_hard_rules == []
+// HC-V0790-A2: no hard_rules / no_emojis absent → effective_hard_rules == [wikilink_people]
+// v0.89.0 (people-cohesion-2): platform-default wikilink_people rule is now auto-injected
+// into every effective_hard_rules[] unless the user opts out. Previously this case asserted
+// length === 0; now it expects length === 1 (just the canonical wikilink_people string).
 {
-    const label = "HC-V0790-A2 absent hard_rules/no_emojis → empty effective_hard_rules";
+    const label = "HC-V0790-A2 absent hard_rules/no_emojis → wikilink_people-only effective_hard_rules";
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "v0790-a2-"));
     try {
         const ctxDir = path.join(tmpDir, "spice/cowork/context");
@@ -2519,8 +2522,10 @@ function assertCoworkV068Shape() {
         const helper = require(path.join(BP, "helpers", "read-user-preferences-helper.js"));
         const result = helper.readUserPreferences({ vaultRoot: tmpDir });
         assertTrue(result.prefs.personality.no_emojis === false, `${label}: expected no_emojis default false`);
-        assertTrue(Array.isArray(result.prefs.effective_hard_rules) && result.prefs.effective_hard_rules.length === 0,
-            `${label}: expected empty effective_hard_rules, got ${JSON.stringify(result.prefs.effective_hard_rules)}`);
+        assertTrue(Array.isArray(result.prefs.effective_hard_rules) && result.prefs.effective_hard_rules.length === 1,
+            `${label}: expected one entry (wikilink_people), got ${JSON.stringify(result.prefs.effective_hard_rules)}`);
+        assertTrue(result.prefs.effective_hard_rules[0] === helper.CANONICAL_WIKILINK_PEOPLE_RULE,
+            `${label}: expected canonical wikilink_people rule auto-injected, got ${JSON.stringify(result.prefs.effective_hard_rules)}`);
     } catch (e) {
         failed++; console.error(`FAIL  ${label}: ${e.message}`);
     } finally {
@@ -2529,16 +2534,28 @@ function assertCoworkV068Shape() {
 }
 
 // HC-V0790-A3: composeEffectiveHardRules unit
+// v0.89.0: composeEffectiveHardRules now auto-appends the canonical wikilink_people rule
+// unless the user opts out via {id: "wikilink_people", disabled: true}.
 {
     const label = "HC-V0790-A3 composeEffectiveHardRules({no_emojis,hard_rules})";
     try {
         const helper = require(path.join(BP, "helpers", "read-user-preferences-helper.js"));
         assertTrue(typeof helper.composeEffectiveHardRules === "function", `${label}: composeEffectiveHardRules not exported`);
         const r1 = helper.composeEffectiveHardRules({ no_emojis: true, hard_rules: ["a"] });
-        assertTrue(r1.length === 2 && r1[0] === "a" && r1[1] === helper.CANONICAL_NO_EMOJI_RULE,
-            `${label}: expected [a, canonical], got ${JSON.stringify(r1)}`);
+        assertTrue(r1.length === 3
+            && r1[0] === "a"
+            && r1[1] === helper.CANONICAL_NO_EMOJI_RULE
+            && r1[2] === helper.CANONICAL_WIKILINK_PEOPLE_RULE,
+            `${label}: expected [a, canonical-no-emoji, canonical-wikilink-people], got ${JSON.stringify(r1)}`);
         const r2 = helper.composeEffectiveHardRules({ no_emojis: false, hard_rules: [] });
-        assertTrue(r2.length === 0, `${label}: expected empty, got ${JSON.stringify(r2)}`);
+        assertTrue(r2.length === 1 && r2[0] === helper.CANONICAL_WIKILINK_PEOPLE_RULE,
+            `${label}: expected single wikilink_people entry, got ${JSON.stringify(r2)}`);
+        // Forward-looking disable-path: user opts out via object-shape override.
+        const r3 = helper.composeEffectiveHardRules({
+            no_emojis: false,
+            hard_rules: [{ id: "wikilink_people", disabled: true }],
+        });
+        assertTrue(r3.length === 0, `${label}: disabled override should drop wikilink_people, got ${JSON.stringify(r3)}`);
     } catch (e) {
         failed++; console.error(`FAIL  ${label}: ${e.message}`);
     }

@@ -38,6 +38,13 @@ Atomic-note writer for the morning-briefing run. Composes canonical frontmatter,
 
 1. Compose the path: `spice/cowork/daily/<YYYY>/<MM>-<MonthName>/<YYYY-MM-DD>/morning-briefing.md`, where `<YYYY>` and `<MM>` come from `date` and `<MonthName>` from `month_name`. Example for 2026-05-19 (Tuesday): `spice/cowork/daily/2026/05-May/2026-05-19/morning-briefing.md`.
 2. Compose `created_at` as the current ISO-8601 timestamp with offset (e.g. `2026-05-19T07:05:14-06:00`). Use the local TZ resolved by `cowork:date-context`.
+2a. **Resolve inner-circle names → phone aliases.** When `engagement.type` permits iMessage gathering (currently: `engagement.type == "personal"`) AND `engagement.inner_circle_people` is set:
+   - For each name in `inner_circle_people: string[]`:
+     - Call `cowork:resolve-person { input: <name>, prefer_type: "name", engagement_id: <engagement_id> }`.
+     - **On resolve hit:** read `aliases_by_type.phone` from the output; union the phones into `inner_circle_phones[]`.
+     - **On resolve miss:** emit a Notice `cowork: inner-circle name "<name>" unresolved; not included in iMessage filter`. Append `inner_circle_unresolved:<name>` to the atomic note's `warnings:` array (v0.85.0 plumbing).
+   - Pass `inner_circle: inner_circle_phones.join(",")` to `gather-imessage` (existing E.164 contract preserved).
+   - When `engagement.type` does NOT permit iMessage gathering: skip the resolution loop entirely (no Notices, no warnings).
 3. Compose frontmatter as YAML:
    ```yaml
    ---

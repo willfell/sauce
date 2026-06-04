@@ -59,6 +59,22 @@ When absent or invalid, the helper falls back to a default per-kind mapping for 
 
 Unknown kinds default to `example` (preserves pre-v0.82.0 behavior). The resolved `callout_type` is exposed at `prefs.mcps[<kind_name>].callout_type` for orchestrator passthrough into `cowork:gather-from-served-by`.
 
+## Hard rules
+
+The `effective_hard_rules` output is a string array assembled from `personality.hard_rules` plus any platform-default rules the helper appends. Consumers MUST apply these verbatim to narrative composition, gather-from-served-by dispatch, and skeleton binding (voice-contract block, dispatch-contract `## Hard rules` section, write-run-note skeleton binding paragraph).
+
+The canonical no-emoji rule is appended when `personality.no_emojis: true`. Its body is the fixed string: *"Do not use any emoji or pictographic characters anywhere in the output — not in section/callout titles, not in inline prose, not in table cells."*
+
+### Canonical platform-default rule: `wikilink_people` (v0.89.0+)
+
+The helper auto-appends one platform-default rule to every engagement's `effective_hard_rules[]` regardless of user opt-in:
+
+> **`wikilink_people`** — when body composition mentions a person, always emit `[[Person Name]]` if the person resolves (via `cowork:resolve-person` or via prior wikilink in the same atomic note); never use bare `**Name**` for a resolved person. Unresolved people may emit `**Name**` or plain text. Preserve existing `[[Person Name]]` wikilinks verbatim when summarizing or distilling. This rule binds atomic-note bodies, synthesis bodies (synthesize-day / synthesize-week output), callout titles, and dispatch-contract output. Exempt: literal display strings inside calendar event titles, email subjects, message previews.
+
+This rule propagates via the existing `effective_hard_rules[]` plumbing (v0.79.0) — voice-contract block, gather-from-served-by dispatch `## Hard rules` section, and write-run-note skeleton binding paragraph all receive it without per-rule special-casing.
+
+Users CAN override by adding `personality.hard_rules: [{id: "wikilink_people", disabled: true}]` to `spice/cowork/context/user-preferences.md` — the disable-path is a forward-looking breadcrumb and is NOT implemented in v0.89.0 (no-op; future cycle if real opt-out demand surfaces).
+
 ## Steps
 
 1. **Read the user-preferences.md file.** Use the Read tool at `spice/cowork/context/user-preferences.md` (or `mcp__obsidian__get_file_contents` with that vault-relative path). If the file does not exist, return `{ prefs: null, status: "empty", reason: "file_not_found" }`.

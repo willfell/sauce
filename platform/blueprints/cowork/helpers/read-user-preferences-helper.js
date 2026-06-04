@@ -25,9 +25,30 @@ const PREFS_RELPATH = "spice/cowork/context/user-preferences.md";
 const CANONICAL_NO_EMOJI_RULE =
     "Do not use any emoji or pictographic characters anywhere in the output — not in section/callout titles, not in inline prose, not in table cells.";
 
+// v0.89.0 (people-cohesion-2): platform-default `wikilink_people` rule auto-appended
+// to every engagement's effective_hard_rules[] unless the user opts out via
+// personality.hard_rules: [{id: "wikilink_people", disabled: true}] (forward-looking
+// breadcrumb; disable-path no-op this cycle).
+const WIKILINK_PEOPLE_RULE = {
+    id: "wikilink_people",
+    body: "When body composition mentions a person, always emit [[Person Name]] if the person resolves (via cowork:resolve-person or via prior wikilink in the same atomic note); never use bare **Name** for a resolved person. Unresolved people may emit **Name** or plain text. Preserve existing [[Person Name]] wikilinks verbatim when summarizing or distilling. This rule binds atomic-note bodies, synthesis bodies (synthesize-day / synthesize-week output), callout titles, and dispatch-contract output. Exempt: literal display strings inside calendar event titles, email subjects, message previews.",
+    source: "platform-default",
+    introduced_in: "v0.89.0",
+};
+const CANONICAL_WIKILINK_PEOPLE_RULE = WIKILINK_PEOPLE_RULE.body;
+
 function composeEffectiveHardRules({ no_emojis, hard_rules } = {}) {
-    const base = Array.isArray(hard_rules) ? hard_rules.filter(r => typeof r === "string" && r.trim()) : [];
-    return no_emojis === true ? base.concat([CANONICAL_NO_EMOJI_RULE]) : base.slice();
+    // Detect disable-path BEFORE the string-filter (override entries may be objects).
+    const rawList = Array.isArray(hard_rules) ? hard_rules : [];
+    const hasWikilinkDisable = rawList.some(r =>
+        r && typeof r === "object" && r.id === "wikilink_people" && r.disabled === true);
+    const base = rawList.filter(r => typeof r === "string" && r.trim());
+    const out = base.slice();
+    if (no_emojis === true) out.push(CANONICAL_NO_EMOJI_RULE);
+    if (!hasWikilinkDisable && !out.includes(CANONICAL_WIKILINK_PEOPLE_RULE)) {
+        out.push(CANONICAL_WIKILINK_PEOPLE_RULE);
+    }
+    return out;
 }
 
 // v0.82.0: default callout type per kind for visual differentiation across atomic notes.
@@ -130,4 +151,6 @@ module.exports = {
     DEFAULT_CALLOUT_TYPE_BY_KIND,
     VALID_CALLOUT_TYPES,
     CANONICAL_NO_EMOJI_RULE,
+    WIKILINK_PEOPLE_RULE,
+    CANONICAL_WIKILINK_PEOPLE_RULE,
 };

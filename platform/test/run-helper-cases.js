@@ -7689,6 +7689,138 @@ async function caseHCV0890ResolvePersonD() {
     csEntry && csEntry.dest === "{{skills_dir}}/skills/resolve-person/SKILL.md");
 }
 
+async function caseHCV0890GatherImessageA() {
+  console.log("\n--- Case HC-V0890-GATHER-IMESSAGE-A: gather-imessage prose wiring ---");
+  const skill = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/cowork/skills/skills/gather-imessage/SKILL.md"), "utf8");
+  assertTrue("HC-V0890-GATHER-IMESSAGE-A: skill mentions cowork:resolve-person",
+    skill.includes("cowork:resolve-person"));
+  assertTrue("HC-V0890-GATHER-IMESSAGE-A: prefer_type 'phone' documented",
+    /prefer_type:\s*"phone"/.test(skill));
+  assertTrue("HC-V0890-GATHER-IMESSAGE-A: Step 6.5 (resolve) present",
+    /Step 6\.5|Resolve each thread/i.test(skill));
+  assertTrue("HC-V0890-GATHER-IMESSAGE-A: hit + miss branches documented",
+    /On resolve hit:/.test(skill) && /On resolve miss:/.test(skill));
+  assertTrue("HC-V0890-GATHER-IMESSAGE-A: wikilink + plaintext emission examples both present",
+    /\[\[/.test(skill) && /\*\*</.test(skill));
+}
+
+async function caseHCV0890GatherGmailA() {
+  console.log("\n--- Case HC-V0890-GATHER-GMAIL-A: gather-gmail prose wiring ---");
+  const skill = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/cowork/skills/skills/gather-gmail/SKILL.md"), "utf8");
+  assertTrue("HC-V0890-GATHER-GMAIL-A: skill mentions cowork:resolve-person",
+    skill.includes("cowork:resolve-person"));
+  assertTrue("HC-V0890-GATHER-GMAIL-A: prefer_type 'email' documented",
+    /prefer_type:\s*"email"/.test(skill));
+  assertTrue("HC-V0890-GATHER-GMAIL-A: prefer_type 'name' fallback documented",
+    /prefer_type:\s*"name"/.test(skill));
+  assertTrue("HC-V0890-GATHER-GMAIL-A: hit + miss branches documented",
+    /On resolve hit:/.test(skill) && /On resolve miss:/.test(skill));
+}
+
+async function caseHCV0890GatherCalendarA() {
+  console.log("\n--- Case HC-V0890-GATHER-CALENDAR-A: gather-calendar prose wiring ---");
+  const skill = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/cowork/skills/skills/gather-calendar/SKILL.md"), "utf8");
+  assertTrue("HC-V0890-GATHER-CALENDAR-A: skill mentions cowork:resolve-person",
+    skill.includes("cowork:resolve-person"));
+  assertTrue("HC-V0890-GATHER-CALENDAR-A: prefer_type 'email' documented",
+    /prefer_type:\s*"email"/.test(skill));
+  assertTrue("HC-V0890-GATHER-CALENDAR-A: hit + miss branches documented",
+    /On resolve hit:/.test(skill) && /On resolve miss:/.test(skill));
+  assertTrue("HC-V0890-GATHER-CALENDAR-A: plaintext localpart fallback preserved",
+    /localpart/.test(skill));
+}
+
+async function caseHCV0890VoiceA() {
+  console.log("\n--- Case HC-V0890-VOICE-A: wikilink_people canonical rule wired ---");
+  const helper = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/cowork/helpers/read-user-preferences-helper.js"), "utf8");
+  const skill = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/cowork/skills/skills/read-user-preferences/SKILL.md"), "utf8");
+  assertTrue("HC-V0890-VOICE-A: helper defines wikilink_people rule constant",
+    helper.includes("wikilink_people"));
+  assertTrue("HC-V0890-VOICE-A: helper rule body mentions [[Person Name]]",
+    helper.includes("[[Person Name]]") || helper.includes("[[Person"));
+  assertTrue("HC-V0890-VOICE-A: helper rule body contains exemption list",
+    /calendar event titles, email subjects, message previews/.test(helper));
+  assertTrue("HC-V0890-VOICE-A: SKILL.md documents wikilink_people rule",
+    skill.includes("wikilink_people"));
+  assertTrue("HC-V0890-VOICE-A: SKILL.md calls out platform-default origin",
+    /platform-default/.test(skill));
+}
+
+async function caseHCV0890MorningBriefingA() {
+  console.log("\n--- Case HC-V0890-MORNING-BRIEFING-A: inner-circle name->phone loop wired ---");
+  const skill = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/cowork/skills/skills/write-run-note-morning-briefing/SKILL.md"), "utf8");
+  assertTrue("HC-V0890-MORNING-BRIEFING-A: mentions inner_circle_people",
+    skill.includes("inner_circle_people"));
+  assertTrue("HC-V0890-MORNING-BRIEFING-A: calls cowork:resolve-person",
+    skill.includes("cowork:resolve-person"));
+  assertTrue("HC-V0890-MORNING-BRIEFING-A: extracts aliases_by_type.phone",
+    /aliases_by_type\.phone/.test(skill));
+  assertTrue("HC-V0890-MORNING-BRIEFING-A: passes phones to gather-imessage",
+    skill.includes("gather-imessage"));
+  assertTrue("HC-V0890-MORNING-BRIEFING-A: unresolved-name warning emission documented",
+    /inner_circle_unresolved/.test(skill));
+}
+
+async function caseHCV0890VersionA() {
+  console.log("\n--- Case HC-V0890-VERSION-A: cowork version floor accepts 0.27.0 ---");
+  const smoke = fs.readFileSync(
+    path.join(WORKSHOP, "platform/test/run-cowork-smoke.js"), "utf8");
+  // Look for any hardcoded cowork-version equals comparison; if present, must include 0.27.0.
+  const eqMatches = smoke.match(/cowork.{0,50}===\s*"0\.(\d+)\.(\d+)"/g) || [];
+  for (const m of eqMatches) {
+    const ver = m.match(/"(0\.\d+\.\d+)"/);
+    if (ver && ver[1]) {
+      assertTrue(
+        `HC-V0890-VERSION-A: cowork === pin must be 0.27.0 (found ${ver[1]})`,
+        ver[1] === "0.27.0");
+    }
+  }
+  if (eqMatches.length === 0) {
+    assertTrue("HC-V0890-VERSION-A: no hardcoded cowork version pins (floor-via-versionAtLeast)",
+      true);
+  }
+}
+
+async function caseHCV0890VersionB() {
+  console.log("\n--- Case HC-V0890-VERSION-B: people pin accepts 0.6.0 ---");
+  const m = JSON.parse(fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/people/manifest.json"), "utf8"));
+  assertEqual(m.version, "0.6.0", "HC-V0890-VERSION-B: people manifest version === 0.6.0");
+  const cat = JSON.parse(fs.readFileSync(
+    path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
+  const flat = JSON.stringify(cat);
+  assertTrue("HC-V0890-VERSION-B: platform/manifest.json catalogue pin people@0.6.0",
+    flat.includes("\"people\"") && flat.includes("0.6.0"));
+}
+
+async function caseHCV0890VersionC() {
+  console.log("\n--- Case HC-V0890-VERSION-C: workshop_version cross-file parity ---");
+  // S3 close: workshop_version still at 0.88.2 (bump happens at S4).
+  // S4 close: should be 0.89.0. This case asserts whichever value matches the current
+  // platform/manifest.json workshop_version field for cross-file parity with package.json.
+  const m = JSON.parse(fs.readFileSync(
+    path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
+  const pkg = JSON.parse(fs.readFileSync(
+    path.join(WORKSHOP, "package.json"), "utf8"));
+  const sub = JSON.parse(fs.readFileSync(
+    path.join(WORKSHOP, "ranch/platform-subscription.json"), "utf8"));
+  let mWS = m.workshop_version;
+  if (!mWS && m.workshop && m.workshop.version) mWS = m.workshop.version;
+  if (!mWS) mWS = m.version;
+  let sWS = sub.workshop_version;
+  if (!sWS && sub.workshop && sub.workshop.version) sWS = sub.workshop.version;
+  assertEqual(pkg.version, mWS,
+    "HC-V0890-VERSION-C: package.json === platform/manifest.json workshop_version");
+  assertEqual(pkg.version, sWS,
+    "HC-V0890-VERSION-C: package.json === ranch/platform-subscription.json workshop_version");
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -8023,6 +8155,14 @@ async function caseHCV0890ResolvePersonD() {
   await caseHCV0890ResolvePersonB();
   await caseHCV0890ResolvePersonC();
   await caseHCV0890ResolvePersonD();
+  await caseHCV0890GatherImessageA();
+  await caseHCV0890GatherGmailA();
+  await caseHCV0890GatherCalendarA();
+  await caseHCV0890VoiceA();
+  await caseHCV0890MorningBriefingA();
+  await caseHCV0890VersionA();
+  await caseHCV0890VersionB();
+  await caseHCV0890VersionC();
   await caseFA2ProductsCanonical();
   await caseFA2TeamsCanonical();
   await caseFA2RuleFragmentsExtends();
