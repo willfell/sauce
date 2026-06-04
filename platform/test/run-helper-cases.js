@@ -7821,6 +7821,166 @@ async function caseHCV0890VersionC() {
     "HC-V0890-VERSION-C: package.json === ranch/platform-subscription.json workshop_version");
 }
 
+async function caseHCV0891HelperA() {
+  console.log("\n--- Case HC-V0891-HELPER-A: composeInnerCircleAllowlist output shape parity ---");
+  const bp = path.resolve(__dirname, "../blueprints/cowork");
+  const helper = require(path.join(bp, "helpers", "resolve-inner-circle-helper.js"));
+  const fn = helper.composeInnerCircleAllowlist;
+
+  const input = [
+    {
+      _input: "Stefan de P.",
+      resolved: true,
+      person_link: "[[Stefan de Pagter]]",
+      person_basename: "Stefan de Pagter",
+      matched_via: "alias_exact:name",
+      collision_warning: null,
+      aliases_by_type: { phone: ["+13035551212"], email: ["stefan@x.com"], name: ["Stefan de P."], handle: [] },
+    },
+  ];
+  const out = fn(input);
+  assertTrue("HC-V0891-HELPER-A: out.resolved is array", Array.isArray(out.resolved));
+  assertEqual(out.resolved.length, 1, "HC-V0891-HELPER-A: one resolved entry");
+  const r0 = out.resolved[0];
+  assertEqual(r0.name, "Stefan de P.", "HC-V0891-HELPER-A: name = _input");
+  assertEqual(r0.person_link, "[[Stefan de Pagter]]", "HC-V0891-HELPER-A: person_link echoed");
+  assertEqual(r0.person_basename, "Stefan de Pagter", "HC-V0891-HELPER-A: person_basename echoed");
+  assertEqual(r0.matched_via, "alias_exact:name", "HC-V0891-HELPER-A: matched_via echoed");
+  assertEqual(r0.aliases_by_type.phone[0], "+13035551212", "HC-V0891-HELPER-A: aliases_by_type.phone echoed");
+  assertTrue("HC-V0891-HELPER-A: out.unresolved is empty array",
+    Array.isArray(out.unresolved) && out.unresolved.length === 0);
+  assertTrue("HC-V0891-HELPER-A: out.phone_filter_list contains +13035551212",
+    Array.isArray(out.phone_filter_list) && out.phone_filter_list.includes("+13035551212"));
+}
+
+async function caseHCV0891HelperB() {
+  console.log("\n--- Case HC-V0891-HELPER-B: empty / null / null-shape input handling ---");
+  const bp = path.resolve(__dirname, "../blueprints/cowork");
+  const helper = require(path.join(bp, "helpers", "resolve-inner-circle-helper.js"));
+  const fn = helper.composeInnerCircleAllowlist;
+
+  // B1: null → fully empty
+  const o1 = fn(null);
+  assertTrue("HC-V0891-HELPER-B: null input → empty resolved",
+    Array.isArray(o1.resolved) && o1.resolved.length === 0);
+  assertTrue("HC-V0891-HELPER-B: null input → empty unresolved",
+    Array.isArray(o1.unresolved) && o1.unresolved.length === 0);
+  assertTrue("HC-V0891-HELPER-B: null input → empty phone_filter_list",
+    Array.isArray(o1.phone_filter_list) && o1.phone_filter_list.length === 0);
+
+  // B2: empty array → same as null
+  const o2 = fn([]);
+  assertEqual(o2.resolved.length, 0, "HC-V0891-HELPER-B: [] → 0 resolved");
+
+  // B3: null-shape entry (resolver miss) with _input threaded → unresolved contains _input
+  const o3 = fn([{
+    _input: "GhostPerson",
+    resolved: false,
+    person_link: null,
+    person_basename: null,
+    matched_via: null,
+    collision_warning: null,
+    aliases_by_type: { phone: [], email: [], name: [], handle: [] },
+  }]);
+  assertEqual(o3.resolved.length, 0, "HC-V0891-HELPER-B: miss → 0 resolved");
+  assertEqual(o3.unresolved.length, 1, "HC-V0891-HELPER-B: miss → 1 unresolved");
+  assertEqual(o3.unresolved[0], "GhostPerson", "HC-V0891-HELPER-B: unresolved contains _input verbatim");
+
+  // B4: missing _input → silently dropped
+  const o4 = fn([{ resolved: true, person_link: "[[X]]" }]);
+  assertEqual(o4.resolved.length, 0, "HC-V0891-HELPER-B: missing _input → dropped");
+}
+
+async function caseHCV0891HelperC() {
+  console.log("\n--- Case HC-V0891-HELPER-C: phone_filter_list dedup + union ---");
+  const bp = path.resolve(__dirname, "../blueprints/cowork");
+  const helper = require(path.join(bp, "helpers", "resolve-inner-circle-helper.js"));
+  const fn = helper.composeInnerCircleAllowlist;
+
+  const out = fn([
+    {
+      _input: "A",
+      resolved: true,
+      person_link: "[[A]]",
+      person_basename: "A",
+      matched_via: "basename_exact",
+      collision_warning: null,
+      aliases_by_type: { phone: ["+13030001111", "+17200002222"], email: [], name: [], handle: [] },
+    },
+    {
+      _input: "B",
+      resolved: true,
+      person_link: "[[B]]",
+      person_basename: "B",
+      matched_via: "basename_exact",
+      collision_warning: null,
+      aliases_by_type: { phone: ["+13030001111"], email: [], name: [], handle: [] }, // dup of A's first phone
+    },
+  ]);
+
+  assertEqual(out.resolved.length, 2, "HC-V0891-HELPER-C: both A + B resolved");
+  assertEqual(out.phone_filter_list.length, 2, "HC-V0891-HELPER-C: phone dedup → 2 unique");
+  assertEqual(out.phone_filter_list[0], "+13030001111", "HC-V0891-HELPER-C: first-occurrence order preserved");
+  assertEqual(out.phone_filter_list[1], "+17200002222", "HC-V0891-HELPER-C: second phone preserved");
+}
+
+async function caseHCV0891DailyA() {
+  console.log("\n--- Case HC-V0891-DAILY-A: _resolveTitle typed-alias .value extraction ---");
+  // Read source to confirm fix landed (DOM-instantiating the dashboard class out of band
+  // is overkill; source-level guards + a behavior probe via a fixture-shaped object check
+  // give us deterministic coverage matching the v0.89.0 HC pattern).
+  const helperPath = path.resolve(__dirname,
+    "../blueprints/daily/helpers/space-daily-dashboard.js");
+  const src = fs.readFileSync(helperPath, "utf8");
+
+  assertTrue("HC-V0891-DAILY-A: _resolveTitle source detects typed-alias .value path",
+    /a0\s*&&\s*typeof\s+a0\s*===\s*["']object["']/.test(src)
+    && /a0\.value/.test(src));
+  assertTrue("HC-V0891-DAILY-A: defensive [object Object] guard present",
+    src.includes("[object Object]"));
+  assertTrue("HC-V0891-DAILY-A: JSDoc references v0.13.5 typed-alias guard",
+    /v0\.13\.5[^\n]*typed.?alias/i.test(src));
+}
+
+async function caseHCV0891DailyB() {
+  console.log("\n--- Case HC-V0891-DAILY-B: _resolveTitle behavior probe (typed-alias + fallthrough) ---");
+  // Load the source as text; extract the _resolveTitle function via eval-in-sandbox.
+  // The helper class isn't directly require()-able (browser-side customjs), but the
+  // function is pure once we stub `String` / etc. We test the actual fix logic.
+  const helperPath = path.resolve(__dirname,
+    "../blueprints/daily/helpers/space-daily-dashboard.js");
+  const src = fs.readFileSync(helperPath, "utf8");
+  const match = src.match(/_resolveTitle\(p\)\s*\{[\s\S]*?\n  \}/);
+  assertTrue("HC-V0891-DAILY-B: _resolveTitle function body extractable", !!match);
+  const body = match[0];
+
+  // Wrap in a function expression we can invoke. Replace the leading method-syntax with
+  // a plain function declaration so eval treats it as an expression.
+  const wrapped = "(function " + body.replace(/^_resolveTitle/, "") + ")";
+  // eslint-disable-next-line no-eval
+  const resolveTitle = eval(wrapped);
+
+  // B1: typed-alias .value extraction
+  const t1 = resolveTitle({ file: { aliases: [{ type: "name", value: "Foo" }] } });
+  assertEqual(t1, "Foo", "HC-V0891-DAILY-B: typed-alias .value extracted");
+
+  // B2: typed-alias falls through when value is empty → outline wins
+  const t2 = resolveTitle({
+    file: { aliases: [{ type: "weird", value: "" }], outline: [{ text: "Real Title" }] },
+  });
+  assertEqual(t2, "Real Title", "HC-V0891-DAILY-B: empty typed-alias .value falls through to outline");
+
+  // B3: empty object alias → falls through (no [object Object] leak)
+  const t3 = resolveTitle({
+    file: { aliases: [{}], outline: [], name: "fallback.md" },
+  });
+  assertEqual(t3, "fallback.md", "HC-V0891-DAILY-B: {} alias falls through to file.name");
+
+  // B4: bare-string alias still works (back-compat)
+  const t4 = resolveTitle({ file: { aliases: ["LegacyAlias"] } });
+  assertEqual(t4, "LegacyAlias", "HC-V0891-DAILY-B: bare-string alias back-compat");
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -8163,6 +8323,11 @@ async function caseHCV0890VersionC() {
   await caseHCV0890VersionA();
   await caseHCV0890VersionB();
   await caseHCV0890VersionC();
+  await caseHCV0891HelperA();
+  await caseHCV0891HelperB();
+  await caseHCV0891HelperC();
+  await caseHCV0891DailyA();
+  await caseHCV0891DailyB();
   await caseFA2ProductsCanonical();
   await caseFA2TeamsCanonical();
   await caseFA2RuleFragmentsExtends();

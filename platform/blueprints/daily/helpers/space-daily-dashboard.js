@@ -1131,26 +1131,53 @@ class SpaceDailyDashboard {
    * "aliases.values is not a function" and aborted BeaconCards rendering.
    * Now: just length-probe + index-zero access, and ANY throw falls back
    * to filename so a single bad frontmatter never breaks the dashboard.
+   *
+   * v0.13.5 (sauce v0.89.1): typed-alias guard. people@0.6.0 introduced
+   * typed-object aliases ({type, value}); pre-fix the aliases[0] branch
+   * stringified them to "[object Object]" and rendered that literally as
+   * the dashboard row title for newly-created person notes. Now: detect
+   * the typed-alias shape and use a0.value; defensive [object Object]
+   * fallthrough on every branch as a safety net for any other object
+   * leaks (Dataview Link wrappers etc.).
    */
   _resolveTitle(p) {
+    // v0.13.5 (sauce v0.89.1): _safe returns a clean string or "" when the value
+    // would stringify to "[object Object]". Lets each branch short-circuit on
+    // junk and fall through to the next.
+    const _safe = (v) => {
+      if (v == null) return "";
+      if (typeof v === "string") return v.trim();
+      const s = String(v).trim();
+      if (s === "[object Object]") return "";
+      return s;
+    };
     try {
       if (!p) return "";
       // v0.7.1 (v0.66.1): project blueprint stores name: in frontmatter, not
       // title:. Without this branch, project hubs at <slug>/Project.md
       // resolve to the literal filename "Project" via the final fallback.
-      const name = p.name;
-      if (name && String(name).trim()) return String(name).trim();
-      const title = p.title;
-      if (title && String(title).trim()) return String(title).trim();
+      const nameStr = _safe(p.name);
+      if (nameStr) return nameStr;
+      const titleStr = _safe(p.title);
+      if (titleStr) return titleStr;
       const aliases = p.file && p.file.aliases;
       if (aliases && typeof aliases.length === "number" && aliases.length > 0) {
         const a0 = aliases[0];
-        if (a0 && String(a0).trim()) return String(a0).trim();
+        // v0.13.5: typed-alias shape {type, value} from people@0.6.0 — use .value
+        // instead of stringifying the wrapper object.
+        if (a0 && typeof a0 === "object" && typeof a0.value === "string") {
+          const v = _safe(a0.value);
+          if (v) return v;
+        } else {
+          const aliasStr = _safe(a0);
+          if (aliasStr) return aliasStr;
+        }
       }
       const outline = p.file && p.file.outline;
       if (outline && typeof outline.length === "number" && outline.length > 0) {
         const t0 = outline[0] && (outline[0].text || outline[0].name);
-        if (t0 && String(t0).trim()) return String(t0).trim();
+        const outlineStr = _safe(t0);
+        if (outlineStr) return outlineStr;
       }
       return p.file && p.file.name ? String(p.file.name) : "";
     } catch (e) {
