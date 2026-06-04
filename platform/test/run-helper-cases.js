@@ -7768,17 +7768,17 @@ async function caseHCV0890MorningBriefingA() {
 }
 
 async function caseHCV0890VersionA() {
-  console.log("\n--- Case HC-V0890-VERSION-A: cowork version floor accepts 0.27.0 ---");
+  console.log("\n--- Case HC-V0890-VERSION-A: cowork version floor accepts 0.27.1 ---");
   const smoke = fs.readFileSync(
     path.join(WORKSHOP, "platform/test/run-cowork-smoke.js"), "utf8");
-  // Look for any hardcoded cowork-version equals comparison; if present, must include 0.27.0.
+  // Look for any hardcoded cowork-version equals comparison; if present, must include 0.27.1.
   const eqMatches = smoke.match(/cowork.{0,50}===\s*"0\.(\d+)\.(\d+)"/g) || [];
   for (const m of eqMatches) {
     const ver = m.match(/"(0\.\d+\.\d+)"/);
     if (ver && ver[1]) {
       assertTrue(
-        `HC-V0890-VERSION-A: cowork === pin must be 0.27.0 (found ${ver[1]})`,
-        ver[1] === "0.27.0");
+        `HC-V0890-VERSION-A: cowork === pin must be 0.27.1 (found ${ver[1]})`,
+        ver[1] === "0.27.1");
     }
   }
   if (eqMatches.length === 0) {
@@ -8110,6 +8110,37 @@ async function caseHCV0891OrchestratorBCDE() {
         skill.includes(needle));
     }
   }
+}
+
+async function caseHCV0891Versions() {
+  console.log("\n--- Case HC-V0891-VERSION-A..D: version pins ---");
+
+  const WORKSHOP = path.resolve(__dirname, "..");
+  // A: cowork manifest pin
+  const coworkMan = JSON.parse(fs.readFileSync(
+    path.join(WORKSHOP, "blueprints/cowork/manifest.json"), "utf8"));
+  assertEqual(coworkMan.version, "0.27.1", "HC-V0891-VERSION-A: cowork pin = 0.27.1");
+
+  // B: daily manifest pin
+  const dailyMan = JSON.parse(fs.readFileSync(
+    path.join(WORKSHOP, "blueprints/daily/manifest.json"), "utf8"));
+  assertEqual(dailyMan.version, "0.13.5", "HC-V0891-VERSION-B: daily pin = 0.13.5");
+
+  // C: workshop manifest pin + package.json
+  const platformMan = JSON.parse(fs.readFileSync(
+    path.join(WORKSHOP, "manifest.json"), "utf8"));
+  const wsVer = platformMan.workshop_version || platformMan.version
+    || (platformMan.workshop && platformMan.workshop.version);
+  assertEqual(wsVer, "0.89.1", "HC-V0891-VERSION-C: workshop pin = 0.89.1");
+  const pkg = JSON.parse(fs.readFileSync(
+    path.resolve(WORKSHOP, "..", "package.json"), "utf8"));
+  assertEqual(pkg.version, "0.89.1", "HC-V0891-VERSION-C: package.json = 0.89.1");
+
+  // D: mechanism count unchanged
+  const mechs = (platformMan.mechanisms && Array.isArray(platformMan.mechanisms))
+    ? platformMan.mechanisms
+    : (Array.isArray(platformMan.items) ? platformMan.items.filter(x => x.kind === "mechanism") : []);
+  assertEqual(mechs.length, 17, "HC-V0891-VERSION-D: mechanism count unchanged at 17");
 }
 
 (async function main() {
@@ -8464,6 +8495,7 @@ async function caseHCV0891OrchestratorBCDE() {
   await caseHCV0891GatherC();
   await caseHCV0891OrchestratorA();
   await caseHCV0891OrchestratorBCDE();
+  await caseHCV0891Versions();
   await caseFA2ProductsCanonical();
   await caseFA2TeamsCanonical();
   await caseFA2RuleFragmentsExtends();
@@ -8535,7 +8567,7 @@ async function caseHCV0891OrchestratorBCDE() {
   // (sauce v0.84.1 — Tasks header open · done); cards untouched.
   {
     const pins = [
-      ["daily",         "platform/blueprints/daily/manifest.json",            "0.13.4"],
+      ["daily",         "platform/blueprints/daily/manifest.json",            "0.13.5"],
       ["activity-feed", "platform/mechanisms/activity-feed/manifest.json",    "0.7.1"],
       ["cards",         "platform/mechanisms/cards/manifest.json",            "0.2.6"],
     ];
