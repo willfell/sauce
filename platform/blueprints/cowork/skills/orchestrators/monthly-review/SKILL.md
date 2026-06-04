@@ -142,14 +142,14 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
    - Compose the dispatch `range` as the current calendar month:
      - `range.start = context.month_start` (first day of `context.today`'s month, `YYYY-MM-01`; date-context emits this pre-computed field — equivalent to `context.today.replace(/-\d{2}$/, "-01")`).
      - `range.end = context.month_end` (last day of `context.today`'s month; date-context emits this pre-computed field — equivalent to `new Date(year, monthIndex + 1, 0)` JS semantics, where passing day=0 to next month yields the last day of current month, handling 28/29/30/31 calendar days).
-3d. **Pre-resolve inner-circle people.** Read `engagement.inner_circle_people: string[]` (when present; skip step on empty).
+3d. **Pre-resolve inner-circle people.** Read `engagement.inner_circle_people: string[]` (when present; skip step on empty). When `engagement.inner_circle_people` is empty / absent, set `allowlist = { resolved: [], unresolved: [], phone_filter_list: [] }` as the default for downstream pseudocode.
 
    For each name in the array, call `cowork:resolve-person { input: <name>, prefer_type: "name", engagement_id: <engagement_id> }`. Thread the original name as `_input` on each output so the helper can surface unresolved names verbatim.
 
    Accumulate the resolver outputs into an array. Invoke the helper:
 
    ```js
-   const { composeInnerCircleAllowlist } = require("./resolve-inner-circle-helper.js");
+   const { composeInnerCircleAllowlist } = require("<workshop>/platform/blueprints/cowork/helpers/resolve-inner-circle-helper.js");
    const allowlist = composeInnerCircleAllowlist(resolverOutputs);
    // allowlist = { resolved: [{name, person_link, person_basename, aliases_by_type, matched_via, collision_warning}],
    //               unresolved: ["<name>", ...],
@@ -191,9 +191,9 @@ for entry in dispatch_plan:
       question_set_answers: entry.question_set_answers,
       hard_rules:           prefs.effective_hard_rules,
       siblings:             siblings[entry.kind_name] || [],
+      callout_type:         prefs.mcps[entry.kind_name].callout_type,
       inner_circle_resolved: allowlist.resolved,
       engagement_id:        engagement_id,
-      callout_type:         prefs.mcps[entry.kind_name].callout_type,
       today:                context.today,
       range:                { start: context.month_start, end: context.month_end },
       timezone:             engagement.timezone || "America/Denver"

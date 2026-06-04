@@ -148,14 +148,14 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
       ```
 
    This step is PURE — no MCP calls, no file writes. It builds in-memory state used by the gather phase.
-3e. **Pre-resolve inner-circle people.** Read `engagement.inner_circle_people: string[]` (when present; skip step on empty).
+3e. **Pre-resolve inner-circle people.** Read `engagement.inner_circle_people: string[]` (when present; skip step on empty). When `engagement.inner_circle_people` is empty / absent, set `allowlist = { resolved: [], unresolved: [], phone_filter_list: [] }` as the default for downstream pseudocode.
 
    For each name in the array, call `cowork:resolve-person { input: <name>, prefer_type: "name", engagement_id: <engagement_id> }`. Thread the original name as `_input` on each output so the helper can surface unresolved names verbatim.
 
    Accumulate the resolver outputs into an array. Invoke the helper:
 
    ```js
-   const { composeInnerCircleAllowlist } = require("./resolve-inner-circle-helper.js");
+   const { composeInnerCircleAllowlist } = require("<workshop>/platform/blueprints/cowork/helpers/resolve-inner-circle-helper.js");
    const allowlist = composeInnerCircleAllowlist(resolverOutputs);
    // allowlist = { resolved: [{name, person_link, person_basename, aliases_by_type, matched_via, collision_warning}],
    //               unresolved: ["<name>", ...],
