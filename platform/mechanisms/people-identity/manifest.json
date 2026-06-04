@@ -1,0 +1,14 @@
+{
+  "name": "people-identity",
+  "version": "0.1.0",
+  "kind": "mechanism",
+  "module_directory": null,
+  "description": "Identity resolution for spice/people/ — given a name, handle, email, or alias, returns the canonical wikilink for the matching person note. Reads typed-alias frontmatter per the people@0.6.0+ schema convention (aliases: [{type, value}]) with back-compat for bare-string entries (treated as implicit name-type). Public API (LITERAL signatures): resolvePerson(input) → personLink|null; findByAlias(type, value) → personLink|null; getAliases(personLink) → Array<{type, value}>; listAliasesOfType(type) → Array<{personLink, value}>. NEVER throws; collision policy emits console.warn + returns first-in-folder-sort match. Module-directory invariant per landmines #19+#11: spice/people/ hardcoded. No backlink writes (pure read).",
+  "customjs_classes": ["PeopleIdentity"],
+  "depends_on": [
+    { "name": "customjs-guard", "range": ">=1.0.0" }
+  ],
+  "files": [
+    { "source": "people-identity.js", "dest": "{{scripts_path}}/mechanisms/people-identity.js" }
+  ]
+}

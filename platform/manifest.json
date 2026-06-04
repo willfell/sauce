@@ -98,6 +98,11 @@
       "path": "mechanisms/people-rendering"
     },
     {
+      "name": "people-identity",
+      "version": "0.1.0",
+      "path": "mechanisms/people-identity"
+    },
+    {
       "name": "styling",
       "version": "0.2.1",
       "path": "mechanisms/styling"
@@ -141,7 +146,7 @@
     },
     {
       "name": "people",
-      "version": "0.5.2",
+      "version": "0.6.0",
       "path": "blueprints/people"
     },
     {

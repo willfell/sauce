@@ -7,6 +7,7 @@ title:
 email:
 website:
 aliases:
+  # entries: bare string = name-type (back-compat); typed {type: phone|email|name|handle, value: X} canonical.
 phone:
 tags:
 ---

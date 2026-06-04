@@ -6801,7 +6801,7 @@ async function caseFA2PeopleCanonical() {
   console.log("\n--- Case FA2-PEOPLE: people@0.3.0 canonical vocab adoption ---");
   const manifest = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/people/manifest.json"), "utf8"));
-  assertTrue("FA2-PEOPLE-1: people version >= 0.3.0", /^0\.(3|4|5)\.\d+$/.test(manifest.version),
+  assertTrue("FA2-PEOPLE-1: people version >= 0.3.0", /^0\.(3|4|5|6)\.\d+$/.test(manifest.version),
     `got: ${manifest.version}`);
   const ec = manifest.new_entity_buttons[0].frontmatter_template;
   assertTrue("FA2-PEOPLE-2: entity-create frontmatter_template has type:person",
@@ -7317,8 +7317,8 @@ async function caseHCV0880PeopleD() {
   console.log("\n--- Case HC-V0880-PEOPLE-D: people version >= 0.5.0 (v0.88.x line) ---");
   const m = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/people/manifest.json"), "utf8"));
-  assertTrue("HC-V0880-PEOPLE-D: people manifest.version on the 0.5.x line",
-    /^0\.5\.\d+$/.test(m.version),
+  assertTrue("HC-V0880-PEOPLE-D: people manifest.version on the 0.5.x or 0.6.x line",
+    /^0\.(5|6)\.\d+$/.test(m.version),
     `got: ${m.version}`);
 }
 
@@ -7438,6 +7438,170 @@ async function caseHCV0880MeetingsD() {
   assertTrue("HC-V0880-MEETINGS-D: meetings manifest.version === '0.7.0'",
     m.version === "0.7.0",
     `got: ${m.version}`);
+}
+
+async function caseHCV0890PeopleIdentityA() {
+  console.log("\n--- Case HC-V0890-PEOPLE-IDENTITY-A: people-identity manifest shape ---");
+  const manifestPath = path.join(WORKSHOP, "platform/mechanisms/people-identity/manifest.json");
+  const m = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  assertEqual(m.name, "people-identity", "HC-V0890-PEOPLE-IDENTITY-A: manifest name");
+  assertEqual(m.version, "0.1.0", "HC-V0890-PEOPLE-IDENTITY-A: manifest version");
+  assertEqual(m.kind, "mechanism", "HC-V0890-PEOPLE-IDENTITY-A: manifest kind");
+  assertTrue("HC-V0890-PEOPLE-IDENTITY-A: customjs_classes contains PeopleIdentity",
+    Array.isArray(m.customjs_classes) && m.customjs_classes.includes("PeopleIdentity"));
+  assertTrue("HC-V0890-PEOPLE-IDENTITY-A: depends_on customjs-guard >=1.0.0",
+    Array.isArray(m.depends_on) && m.depends_on.some(d => d.name === "customjs-guard" && d.range && d.range.includes("1.0.0")));
+  assertTrue("HC-V0890-PEOPLE-IDENTITY-A: files[] single entry to mechanisms/people-identity.js",
+    Array.isArray(m.files) && m.files.length === 1
+    && m.files[0].source === "people-identity.js"
+    && m.files[0].dest === "{{scripts_path}}/mechanisms/people-identity.js");
+}
+
+async function caseHCV0890PeopleIdentityB() {
+  console.log("\n--- Case HC-V0890-PEOPLE-IDENTITY-B: class public API surface ---");
+  const src = fs.readFileSync(
+    path.join(WORKSHOP, "platform/mechanisms/people-identity/people-identity.js"), "utf8");
+  assertTrue("HC-V0890-PEOPLE-IDENTITY-B: class PeopleIdentity declared",
+    src.includes("class PeopleIdentity"));
+  assertTrue("HC-V0890-PEOPLE-IDENTITY-B: resolvePerson method present",
+    src.includes("resolvePerson("));
+  assertTrue("HC-V0890-PEOPLE-IDENTITY-B: findByAlias method present",
+    src.includes("findByAlias("));
+  assertTrue("HC-V0890-PEOPLE-IDENTITY-B: getAliases method present",
+    src.includes("getAliases("));
+  assertTrue("HC-V0890-PEOPLE-IDENTITY-B: listAliasesOfType method present",
+    src.includes("listAliasesOfType("));
+  // No throw outside try blocks: greedy check — any 'throw ' must be wrapped in a try { ... }.
+  const lines = src.split("\n");
+  let inTry = 0;
+  let badThrow = false;
+  for (const ln of lines) {
+    if (/\btry\s*\{/.test(ln)) inTry++;
+    // Crude close detection: count catch keywords to close try.
+    if (inTry > 0 && /\}\s*catch\b/.test(ln)) inTry--;
+    if (/\bthrow\s+/.test(ln) && inTry === 0) badThrow = true;
+  }
+  assertTrue("HC-V0890-PEOPLE-IDENTITY-B: no throw outside try blocks", !badThrow);
+}
+
+async function caseHCV0890PeopleIdentityC() {
+  console.log("\n--- Case HC-V0890-PEOPLE-IDENTITY-C: resolution priority order ---");
+  const src = fs.readFileSync(
+    path.join(WORKSHOP, "platform/mechanisms/people-identity/people-identity.js"), "utf8");
+  const stubWarn = [];
+  const fixturesRoot = path.join(WORKSHOP, "platform/test/fixtures/audit-vault");
+  const peopleDir = path.join(fixturesRoot, "spice/people");
+  const files = fs.readdirSync(peopleDir)
+    .filter(n => n.endsWith(".md") && n !== "People.md")
+    .map(n => ({
+      path: `spice/people/${n}`,
+      basename: n.slice(0, -3),
+      _raw: fs.readFileSync(path.join(peopleDir, n), "utf8"),
+    }));
+  // Crude YAML-frontmatter extract for the `aliases` field.
+  function fmAliases(raw) {
+    const m = raw.match(/^---\n([\s\S]*?)\n---/);
+    if (!m) return undefined;
+    const block = m[1];
+    const idx = block.indexOf("aliases:");
+    if (idx < 0) return undefined;
+    const tail = block.slice(idx);
+    const lines = tail.split("\n").slice(1); // skip "aliases:" line
+    const out = [];
+    for (const ln of lines) {
+      if (!/^\s+- /.test(ln)) break;
+      const item = ln.replace(/^\s+- /, "").trim();
+      // typed object: {type: <t>, value: "<v>"} (commas/spaces flexible)
+      const t = item.match(/^\{type:\s*(\w+),\s*value:\s*"([^"]*)"\s*\}/);
+      if (t) { out.push({ type: t[1], value: t[2] }); continue; }
+      // bare string
+      const b = item.match(/^"([^"]*)"$/) || item.match(/^([^"\{\}].*)$/);
+      if (b) out.push(b[1]);
+    }
+    return out;
+  }
+  const stubApp = {
+    vault: {
+      getMarkdownFiles() { return files; },
+      getAbstractFileByPath(p) { return files.find(f => f.path === p) || null; },
+    },
+    metadataCache: {
+      getFileCache(f) {
+        const aliases = fmAliases(f._raw);
+        return { frontmatter: { aliases } };
+      },
+      getFirstLinkpathDest(linkpath) {
+        return files.find(f => f.basename === linkpath) || null;
+      },
+    },
+  };
+  const customJS = {};
+  const Notice = function() {};
+  const console2 = Object.assign({}, console, { warn: msg => stubWarn.push(msg) });
+  // Evaluate the class source in a sandbox with our stubs as closure args.
+  const PI = (new Function("app", "customJS", "Notice", "console", `${src}\nreturn PeopleIdentity;`))(stubApp, customJS, Notice, console2);
+  const pi = new PI();
+  assertEqual(pi.resolvePerson("Stefan de Pagter"), "[[Stefan de Pagter]]",
+    "HC-V0890-PEOPLE-IDENTITY-C: basename exact resolves");
+  assertEqual(pi.resolvePerson("+13035551212"), "[[Stefan de Pagter]]",
+    "HC-V0890-PEOPLE-IDENTITY-C: alias phone resolves");
+  assertEqual(pi.resolvePerson("STEFAN DE PAGTER"), "[[Stefan de Pagter]]",
+    "HC-V0890-PEOPLE-IDENTITY-C: basename CI resolves");
+  const steveResult = pi.resolvePerson("Steve");
+  assertTrue("HC-V0890-PEOPLE-IDENTITY-C: Steve collision resolves to one of the two",
+    steveResult === "[[Steve A]]" || steveResult === "[[Steve B]]");
+  assertTrue("HC-V0890-PEOPLE-IDENTITY-C: collision emits console.warn",
+    stubWarn.some(w => /alias collision for 'Steve'/.test(w)));
+  assertEqual(pi.resolvePerson("UnknownPersonNeverExists"), null,
+    "HC-V0890-PEOPLE-IDENTITY-C: miss returns null");
+}
+
+async function caseHCV0890PeopleIdentityD() {
+  console.log("\n--- Case HC-V0890-PEOPLE-IDENTITY-D: bare-string back-compat ---");
+  const src = fs.readFileSync(
+    path.join(WORKSHOP, "platform/mechanisms/people-identity/people-identity.js"), "utf8");
+  const files = [{
+    path: "spice/people/Stevie.md",
+    basename: "Stevie",
+    _aliases: ["Stevie nickname"], // bare string entry
+  }];
+  const stubApp = {
+    vault: {
+      getMarkdownFiles() { return files; },
+      getAbstractFileByPath(p) { return files.find(f => f.path === p) || null; },
+    },
+    metadataCache: {
+      getFileCache(f) { return { frontmatter: { aliases: f._aliases } }; },
+      getFirstLinkpathDest(linkpath) { return files.find(f => f.basename === linkpath) || null; },
+    },
+  };
+  const customJS = {};
+  const Notice = function() {};
+  const console2 = Object.assign({}, console, { warn: () => {} });
+  const PI = (new Function("app", "customJS", "Notice", "console", `${src}\nreturn PeopleIdentity;`))(stubApp, customJS, Notice, console2);
+  const pi = new PI();
+  const aliases = pi.getAliases("[[Stevie]]");
+  assertTrue("HC-V0890-PEOPLE-IDENTITY-D: bare-string normalized to one entry",
+    Array.isArray(aliases) && aliases.length === 1);
+  assertEqual(aliases[0].type, "name",
+    "HC-V0890-PEOPLE-IDENTITY-D: bare-string normalized type === name");
+  assertEqual(aliases[0].value, "Stevie nickname",
+    "HC-V0890-PEOPLE-IDENTITY-D: bare-string normalized value preserved");
+}
+
+async function caseHCV0890VersionD() {
+  console.log("\n--- Case HC-V0890-VERSION-D: platform manifest catalogue pin + mechanism count ---");
+  const m = JSON.parse(fs.readFileSync(
+    path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
+  const flat = JSON.stringify(m);
+  assertTrue("HC-V0890-VERSION-D: platform/manifest.json declares people-identity@0.1.0",
+    flat.includes("people-identity") && flat.includes("0.1.0"));
+  // Mechanism count derivation — platform/manifest.json uses a top-level mechanisms[] array.
+  let mechCount = 0;
+  if (Array.isArray(m.mechanisms)) mechCount = m.mechanisms.length;
+  else if (Array.isArray(m.items)) mechCount = m.items.filter(x => x.kind === "mechanism").length;
+  else if (m.catalogue && Array.isArray(m.catalogue.mechanisms)) mechCount = m.catalogue.mechanisms.length;
+  assertEqual(mechCount, 17, "HC-V0890-VERSION-D: mechanism count = 17 (was 16, +people-identity)");
 }
 
 (async function main() {
@@ -7765,6 +7929,11 @@ async function caseHCV0880MeetingsD() {
   await caseHCV0881PersonNavButtons();
   await caseHCV0882RemovedTemplaterFolderTemplates();
   await caseHCV0882InstallerHelperPresent();
+  await caseHCV0890PeopleIdentityA();
+  await caseHCV0890PeopleIdentityB();
+  await caseHCV0890PeopleIdentityC();
+  await caseHCV0890PeopleIdentityD();
+  await caseHCV0890VersionD();
   await caseFA2ProductsCanonical();
   await caseFA2TeamsCanonical();
   await caseFA2RuleFragmentsExtends();
