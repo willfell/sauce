@@ -20,6 +20,14 @@ companion_docs:
 >
 > Lock-decision rationale below preserved for historical audit; the load-bearing argument (memory volume must precede primitives) still holds for the shifted slots.
 
+> [!warning]+ Superseded a second time — see v0.89.0 people-cohesion-2
+> The v0.88.0 supersession above shifted distill-week to v0.89.0; v0.89.0 itself is now `Docs/plans/2026-06-03-v0.89.0-people-cohesion-2-design.md` (people-cohesion arc slices B+C+D bundled).
+> - v0.89.0 → people-cohesion-2 (was: distill-week)
+> - v0.90.0 → distill-week + auto-update prefs (was: retro/insights)
+> - v0.91.0 → retro/insights + slice E brain-map rollups (was: slice E only at v0.92.0+)
+>
+> Third memory-arc shift. The lock-decision rationale ("memory volume must precede primitives") still holds for the further-shifted slots.
+
 The roadmap doc at `Docs/prompts/2026-06-02-memory-leverage-multi-cycle-roadmap.md` posed two sequencing questions to the brainstorm. This doc codifies the answers. Companion docs detail the v0.85.0 spec and v0.86–v0.89 scope sketches.
 
 ## Decision summary

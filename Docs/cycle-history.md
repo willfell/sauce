@@ -4,6 +4,26 @@ This file archives the per-cycle status snapshots that previously lived in `CLAU
 
 ---
 
+## v0.89.0 (closed 2026-06-03) — people-cohesion-2 MINOR
+
+People-cohesion arc slices B+C+D bundled vertical slice; slice C narrowed at brainstorm to "integration-without-auto-stub" (resolve-person returns null on miss; gather skills emit plaintext fallback). Slice A shipped in v0.88.0; slice E (brain-map rollups) deferred to v0.91.0.
+
+NEW mechanism `people-identity@0.1.0` (PeopleIdentity class: resolvePerson / findByAlias / getAliases / listAliasesOfType; sorted-folder collision policy with console.warn). Mechanism count 16 → 17.
+
+`people 0.5.2 → 0.6.0` MINOR — typed-alias schema convention documented in rule_fragment.aliases_schema; depends_on +people-identity ≥0.1.0; bare-string aliases stay valid (back-compat at read time).
+
+`cowork 0.26.0 → 0.27.0` MINOR — NEW sub-skill `cowork:resolve-person` at `skills/skills/resolve-person/SKILL.md` (nested sub-skill dest per FLN-v79-4) wraps spice/people/ frontmatter scan over MCP; NEVER throws. Wired into 3 gather skills (imessage / gmail / calendar) at their bullet-composition steps for wikilink-on-hit emission. NEW canonical hard rule `wikilink_people` injected by `read-user-preferences-helper.js` into every engagement's `effective_hard_rules[]` — platform-default, always-on; binds atomic-note bodies + synthesis bodies + callout titles + dispatch-contract output. `write-run-note-morning-briefing` Step 2 gains inner-circle name→phone resolution loop (translates `inner_circle_people: string[]` into E.164 phones via `aliases_by_type.phone` before passing to `gather-imessage`).
+
+Two-tier wikilink convention: per-gather-skill resolve+emit + central voice-block hard rule (catches body-composition mentions outside gather output). Forward-only emission; no historical backfill of memory.md / synthesis.md.
+
+Third memory-arc shift: distill-week → v0.90.0; retro/insights + slice E coalesce at v0.91.0.
+
+~14 HC-V0890-* cases / ~40 sub-asserts (PEOPLE-IDENTITY-A..D, RESOLVE-PERSON-A..D, GATHER-IMESSAGE/GMAIL/CALENDAR-A, VOICE-A, MORNING-BRIEFING-A, VERSION-A..D). 3 golden-fixture JSON pairs for resolver case-a (basename hit), case-b (alias collision), case-c (miss). 3 fixture vault person notes (Stefan de Pagter, Steve A, Steve B). 6 stage commits S0..S5.
+
+NEW FLN-v89-1 carry-forwards: auto-stub-on-miss (handle-only contacts), collision-as-audit-error promotion, performance index for >500-person vaults, inner_circle_people migration to wikilinks, personality.hard_rules disable-path for wikilink_people.
+
+---
+
 ## v0.88.2 orphan-folder-template-cleanup CLOSED 2026-06-03
 
 Workshop 0.88.1 → **0.88.2** (PATCH). Second hot-fix following v0.88.0
