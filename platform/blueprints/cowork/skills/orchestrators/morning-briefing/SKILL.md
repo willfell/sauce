@@ -148,6 +148,27 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
       ```
 
    This step is PURE — no MCP calls, no file writes. It builds in-memory state used by the gather phase.
+3e. **Pre-resolve inner-circle people.** Read `engagement.inner_circle_people: string[]` (when present; skip step on empty).
+
+   For each name in the array, call `cowork:resolve-person { input: <name>, prefer_type: "name", engagement_id: <engagement_id> }`. Thread the original name as `_input` on each output so the helper can surface unresolved names verbatim.
+
+   Accumulate the resolver outputs into an array. Invoke the helper:
+
+   ```js
+   const { composeInnerCircleAllowlist } = require("./resolve-inner-circle-helper.js");
+   const allowlist = composeInnerCircleAllowlist(resolverOutputs);
+   // allowlist = { resolved: [{name, person_link, person_basename, aliases_by_type, matched_via, collision_warning}],
+   //               unresolved: ["<name>", ...],
+   //               phone_filter_list: ["+E.164...", ...] }
+   ```
+
+   Pass `allowlist.resolved` as `inner_circle_resolved` AND `engagement_id` to every `gather-from-served-by` invocation in the kind loop.
+
+   Pass `allowlist.phone_filter_list.join(",")` as `gather-imessage`'s existing `inner_circle` input (E.164 phones, comma-separated) — preserves the v0.89.0 contract.
+
+   For each name in `allowlist.unresolved[]`, emit Notice `cowork: inner-circle name "<name>" unresolved` AND append `inner_circle_unresolved:<name>` to the atomic note's `warnings:` array (v0.85.0 plumbing).
+
+   This step is PURE on the helper side; the per-name `cowork:resolve-person` calls are MCP-bound.
 4. READ `.claude/skills/cowork/skills/ensure-daily-note/SKILL.md` in full and follow
    its `## Steps` section with `{ date: context.today, weekday: context.dddd, month_name: context["MM-Month"].split("-")[1], path: context.daily_path }`.
 
@@ -180,6 +201,8 @@ for entry in dispatch_plan:
       hard_rules:           prefs.effective_hard_rules,
       siblings:             siblings[entry.kind_name] || [],
       callout_type:         prefs.mcps[entry.kind_name].callout_type,
+      inner_circle_resolved: allowlist.resolved,
+      engagement_id:        engagement_id,
       today:                context.today,
       range:                { start: context.today, end: context.today + 2 days },
       timezone:             engagement.timezone || "America/Denver"
@@ -208,7 +231,7 @@ Each gather call passes `engagement_id`. The sub-skill reads per-engagement MCP-
 7. READ `.claude/skills/cowork/skills/gather-gmail/SKILL.md` in full and follow
    its `## Steps` section with `{ engagement_id, window: "newer_than:1d" }`.
 8. READ `.claude/skills/cowork/skills/gather-imessage/SKILL.md` in full and follow
-   its `## Steps` section with `{ engagement_id, window_days: 3, scope: "inner-circle-and-groups" }` (gated: early-exit if engagement.type != "personal").
+   its `## Steps` section with `{ engagement_id, window_days: 3, scope: "inner-circle-and-groups", inner_circle: allowlist.phone_filter_list.join(",") }` (gated: early-exit if engagement.type != "personal"). The `phone_filter_list` comes from Step 3e's `composeInnerCircleAllowlist` invocation; empty string when no inner-circle is configured.
 9. If `render_aspects.finance_block == "include"`: READ `.claude/skills/cowork/skills/gather-finance-yesterday/SKILL.md` in full and follow
    its `## Steps` section with `{ engagement_id, date_yesterday: context.yesterday, mode: "daily" }`.
 10. If `render_aspects.finance_block == "include"`: READ `.claude/skills/cowork/skills/gather-cc-debt-snapshot/SKILL.md` in full and follow

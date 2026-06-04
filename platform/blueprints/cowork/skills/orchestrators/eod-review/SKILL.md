@@ -141,6 +141,25 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
       ```
 
    This step is PURE — no MCP calls, no file writes. It builds in-memory state used by the gather phase.
+3d. **Pre-resolve inner-circle people.** Read `engagement.inner_circle_people: string[]` (when present; skip step on empty).
+
+   For each name in the array, call `cowork:resolve-person { input: <name>, prefer_type: "name", engagement_id: <engagement_id> }`. Thread the original name as `_input` on each output so the helper can surface unresolved names verbatim.
+
+   Accumulate the resolver outputs into an array. Invoke the helper:
+
+   ```js
+   const { composeInnerCircleAllowlist } = require("./resolve-inner-circle-helper.js");
+   const allowlist = composeInnerCircleAllowlist(resolverOutputs);
+   // allowlist = { resolved: [{name, person_link, person_basename, aliases_by_type, matched_via, collision_warning}],
+   //               unresolved: ["<name>", ...],
+   //               phone_filter_list: ["+E.164...", ...] }
+   ```
+
+   Pass `allowlist.resolved` as `inner_circle_resolved` AND `engagement_id` to every `gather-from-served-by` invocation in the kind loop.
+
+   For each name in `allowlist.unresolved[]`, emit Notice `cowork: inner-circle name "<name>" unresolved` AND append `inner_circle_unresolved:<name>` to the atomic note's `warnings:` array (v0.85.0 plumbing).
+
+   (This orchestrator does NOT call `gather-imessage`; `phone_filter_list` is unused here.)
 4. READ `.claude/skills/cowork/skills/ensure-daily-note/SKILL.md` in full and follow
    its `## Steps` section with `{ date: context.today, weekday: context.dddd, month_name: context["MM-Month"].split("-")[1], path: context.daily_path }`.
 
@@ -172,6 +191,8 @@ for entry in dispatch_plan:
       hard_rules:           prefs.effective_hard_rules,
       siblings:             siblings[entry.kind_name] || [],
       callout_type:         prefs.mcps[entry.kind_name].callout_type,
+      inner_circle_resolved: allowlist.resolved,
+      engagement_id:        engagement_id,
       today:                context.today,
       range:                { start: context.today, end: context.today },
       timezone:             engagement.timezone || "America/Denver"

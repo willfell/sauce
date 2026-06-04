@@ -142,6 +142,25 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
    - Compose the dispatch `range` as the current calendar month:
      - `range.start = context.month_start` (first day of `context.today`'s month, `YYYY-MM-01`; date-context emits this pre-computed field — equivalent to `context.today.replace(/-\d{2}$/, "-01")`).
      - `range.end = context.month_end` (last day of `context.today`'s month; date-context emits this pre-computed field — equivalent to `new Date(year, monthIndex + 1, 0)` JS semantics, where passing day=0 to next month yields the last day of current month, handling 28/29/30/31 calendar days).
+3d. **Pre-resolve inner-circle people.** Read `engagement.inner_circle_people: string[]` (when present; skip step on empty).
+
+   For each name in the array, call `cowork:resolve-person { input: <name>, prefer_type: "name", engagement_id: <engagement_id> }`. Thread the original name as `_input` on each output so the helper can surface unresolved names verbatim.
+
+   Accumulate the resolver outputs into an array. Invoke the helper:
+
+   ```js
+   const { composeInnerCircleAllowlist } = require("./resolve-inner-circle-helper.js");
+   const allowlist = composeInnerCircleAllowlist(resolverOutputs);
+   // allowlist = { resolved: [{name, person_link, person_basename, aliases_by_type, matched_via, collision_warning}],
+   //               unresolved: ["<name>", ...],
+   //               phone_filter_list: ["+E.164...", ...] }
+   ```
+
+   Pass `allowlist.resolved` as `inner_circle_resolved` AND `engagement_id` to every `gather-from-served-by` invocation in the kind loop.
+
+   Pass `allowlist.phone_filter_list.join(",")` as `gather-imessage`'s existing `inner_circle` input (E.164 phones, comma-separated) — preserves the v0.89.0 contract.
+
+   For each name in `allowlist.unresolved[]`, emit Notice `cowork: inner-circle name "<name>" unresolved` AND append `inner_circle_unresolved:<name>` to the atomic note's `warnings:` array (v0.85.0 plumbing).
 4. READ `.claude/skills/cowork/skills/ensure-daily-note/SKILL.md` in full and follow
    its `## Steps` section with `{ date: context.today, weekday: context.dddd, month_name: context["MM-Month"].split("-")[1], path: context.daily_path }`.
 
@@ -172,6 +191,8 @@ for entry in dispatch_plan:
       question_set_answers: entry.question_set_answers,
       hard_rules:           prefs.effective_hard_rules,
       siblings:             siblings[entry.kind_name] || [],
+      inner_circle_resolved: allowlist.resolved,
+      engagement_id:        engagement_id,
       callout_type:         prefs.mcps[entry.kind_name].callout_type,
       today:                context.today,
       range:                { start: context.month_start, end: context.month_end },
@@ -199,7 +220,7 @@ for entry in dispatch_plan:
 7. READ `.claude/skills/cowork/skills/gather-calendar/SKILL.md` in full and follow
    its `## Steps` section with `{ engagement_id, date_today: context.today, horizon: "next-month", range_start: context.next_month_start, range_end: context.next_month_end, timezone: "America/Denver" }`.
 8. READ `.claude/skills/cowork/skills/gather-imessage/SKILL.md` in full and follow
-   its `## Steps` section with `{ engagement_id, window_days: 31, scope: "inner-circle" }` (gated: personal-only).
+   its `## Steps` section with `{ engagement_id, window_days: 31, scope: "inner-circle", inner_circle: allowlist.phone_filter_list.join(",") }` (gated: personal-only). The `phone_filter_list` comes from Step 3d's `composeInnerCircleAllowlist` invocation; empty string when no inner-circle is configured.
 9. READ `.claude/skills/cowork/skills/gather-projects/SKILL.md` in full and follow
    its `## Steps` section with `{ engagement_id, filter: "monthly", month_range: { start: context.prev_month_start, end: context.prev_month_end } }`.
 10. READ `.claude/skills/cowork/skills/gather-threads/SKILL.md` in full and follow

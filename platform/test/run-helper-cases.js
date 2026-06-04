@@ -7981,6 +7981,137 @@ async function caseHCV0891DailyB() {
   assertEqual(t4, "LegacyAlias", "HC-V0891-DAILY-B: bare-string alias back-compat");
 }
 
+async function caseHCV0891GatherA() {
+  console.log("\n--- Case HC-V0891-GATHER-A: gather-from-served-by SKILL.md inputs + dispatch contract ---");
+  const skillPath = path.resolve(__dirname,
+    "../blueprints/cowork/skills/skills/gather-from-served-by/SKILL.md");
+  const skill = fs.readFileSync(skillPath, "utf8");
+
+  // Inputs prose
+  assertTrue("HC-V0891-GATHER-A: SKILL.md inputs declare inner_circle_resolved",
+    /inner_circle_resolved:\s*list\[/.test(skill));
+  assertTrue("HC-V0891-GATHER-A: SKILL.md inputs declare engagement_id",
+    /engagement_id:\s*string/.test(skill));
+
+  // Outputs prose
+  assertTrue("HC-V0891-GATHER-A: SKILL.md outputs declare inner_circle_resolved_count",
+    /inner_circle_resolved_count:\s*integer/.test(skill));
+
+  // Dispatch contract Step 3 — Known people in scope section
+  assertTrue("HC-V0891-GATHER-A: dispatch contract has Known people in scope",
+    skill.includes("Known people in scope"));
+
+  // Ambient soft-prompt instruction
+  assertTrue("HC-V0891-GATHER-A: dispatch contract instructs ambient resolver call",
+    skill.includes("cowork:resolve-person") && /prefer_type:/.test(skill));
+}
+
+async function caseHCV0891GatherB() {
+  console.log("\n--- Case HC-V0891-GATHER-B: gather-from-served-by-helper validates + echoes ---");
+  const bp = path.resolve(__dirname, "../blueprints/cowork");
+  const helper = require(path.join(bp, "helpers", "gather-from-served-by-helper.js"));
+  const fn = helper.gatherFromServedBy;
+
+  const baseDryRun = {
+    available_tools: ["mcp__test__list_things"],
+    agent_markdown: "> [!example]+ Test Kind\n> - body bullet content here long enough to pass the 80-char floor check.\n",
+    tools_used: ["mcp__test__list_things"],
+  };
+
+  // B1: valid allowlist → echoed count
+  const r1 = fn({
+    kind_name: "test", kind_title: "Test Kind", served_by: "test",
+    what_matters: "stub", today: "2026-06-04",
+    range: { start: "2026-06-04", end: "2026-06-04" }, timezone: "America/Denver",
+    inner_circle_resolved: [
+      { name: "X", person_link: "[[X]]", person_basename: "X",
+        aliases_by_type: { phone: [], email: [], name: [], handle: [] } },
+    ],
+    engagement_id: "test",
+    dry_run_answers: baseDryRun,
+  });
+  assertEqual(r1.status, "ready", "HC-V0891-GATHER-B: valid allowlist → status ready");
+  assertEqual(r1.inner_circle_resolved_count, 1, "HC-V0891-GATHER-B: count = 1 echoed");
+
+  // B2: malformed entry dropped → count = 0
+  const r2 = fn({
+    kind_name: "test", kind_title: "Test Kind", served_by: "test",
+    what_matters: "stub", today: "2026-06-04",
+    range: { start: "2026-06-04", end: "2026-06-04" }, timezone: "America/Denver",
+    inner_circle_resolved: [{ bogus: true }],
+    dry_run_answers: baseDryRun,
+  });
+  assertEqual(r2.inner_circle_resolved_count, 0, "HC-V0891-GATHER-B: malformed entry dropped");
+
+  // B3: absent allowlist → count = 0
+  const r3 = fn({
+    kind_name: "test", kind_title: "Test Kind", served_by: "test",
+    what_matters: "stub", today: "2026-06-04",
+    range: { start: "2026-06-04", end: "2026-06-04" }, timezone: "America/Denver",
+    dry_run_answers: baseDryRun,
+  });
+  assertEqual(r3.inner_circle_resolved_count, 0, "HC-V0891-GATHER-B: absent input → count 0");
+}
+
+async function caseHCV0891GatherC() {
+  console.log("\n--- Case HC-V0891-GATHER-C: SKILL.md documents empty-allowlist ambient-only path ---");
+  const skillPath = path.resolve(__dirname,
+    "../blueprints/cowork/skills/skills/gather-from-served-by/SKILL.md");
+  const skill = fs.readFileSync(skillPath, "utf8");
+
+  // Empty-allowlist behavior documented
+  assertTrue("HC-V0891-GATHER-C: empty/absent path documented",
+    /absent|empty/i.test(skill) && skill.includes("ambient"));
+  // Microscope-precedence-preserved line still present
+  assertTrue("HC-V0891-GATHER-C: microscope precedence preserved line still present",
+    skill.includes("microscope") && skill.includes("ALWAYS WIN"));
+}
+
+async function caseHCV0891OrchestratorA() {
+  console.log("\n--- Case HC-V0891-ORCHESTRATOR-A: morning-briefing inner-circle helper wiring ---");
+  const skillPath = path.resolve(__dirname,
+    "../blueprints/cowork/skills/orchestrators/morning-briefing/SKILL.md");
+  const skill = fs.readFileSync(skillPath, "utf8");
+
+  for (const needle of [
+    "composeInnerCircleAllowlist",
+    "cowork:resolve-person",
+    "inner_circle_resolved",
+    "engagement_id",
+    "inner_circle_unresolved:",
+    "phone_filter_list",
+    "inner_circle:",
+  ]) {
+    assertTrue(`HC-V0891-ORCHESTRATOR-A: morning-briefing mentions ${needle}`,
+      skill.includes(needle));
+  }
+}
+
+async function caseHCV0891OrchestratorBCDE() {
+  console.log("\n--- Case HC-V0891-ORCHESTRATOR-B..E: 4 atomic-note orchestrators inner-circle helper wiring ---");
+  const orchestrators = [
+    { slot: "B", name: "midday-tripwire" },
+    { slot: "C", name: "eod-review" },
+    { slot: "D", name: "weekly-review" },
+    { slot: "E", name: "monthly-review" },
+  ];
+  for (const { slot, name } of orchestrators) {
+    const skillPath = path.resolve(__dirname,
+      `../blueprints/cowork/skills/orchestrators/${name}/SKILL.md`);
+    const skill = fs.readFileSync(skillPath, "utf8");
+    for (const needle of [
+      "composeInnerCircleAllowlist",
+      "cowork:resolve-person",
+      "inner_circle_resolved",
+      "engagement_id",
+      "inner_circle_unresolved:",
+    ]) {
+      assertTrue(`HC-V0891-ORCHESTRATOR-${slot}: ${name} mentions ${needle}`,
+        skill.includes(needle));
+    }
+  }
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -8328,6 +8459,11 @@ async function caseHCV0891DailyB() {
   await caseHCV0891HelperC();
   await caseHCV0891DailyA();
   await caseHCV0891DailyB();
+  await caseHCV0891GatherA();
+  await caseHCV0891GatherB();
+  await caseHCV0891GatherC();
+  await caseHCV0891OrchestratorA();
+  await caseHCV0891OrchestratorBCDE();
   await caseFA2ProductsCanonical();
   await caseFA2TeamsCanonical();
   await caseFA2RuleFragmentsExtends();

@@ -1,6 +1,6 @@
 /* eslint-disable no-console */
 /**
- * gather-from-served-by-helper.js — v0.78.0
+ * gather-from-served-by-helper.js — v0.89.1 (sauce)
  *
  * Dry-run-mode-only helper for gather-from-served-by. The production gather
  * path is agent-driven (orchestrator's executing agent invokes MCP tools
@@ -17,6 +17,12 @@
  *   - if available_tools has zero mcp__<served_by>__* entries → skipped:no-tools
  *   - if agent_markdown is null/empty when tools are present → failed:bad-output
  *   - markdown MUST start with `> [!example]+ <kind_title>\n` → else bad-output
+ *
+ * v0.89.1 (sauce v0.89.1): accept + shape-validate inner_circle_resolved
+ * (resolve-time inner-circle allowlist) and engagement_id; echo
+ * inner_circle_resolved_count on success return. Production-mode injection
+ * of the allowlist into the dispatch contract is described in SKILL.md
+ * "Known people in scope" section.
  */
 "use strict";
 
@@ -25,11 +31,27 @@ function gatherFromServedBy(input) {
         kind_name, kind_title, served_by, what_matters,
         question_set_answers, today, range, timezone, hard_rules, siblings,
         callout_type: callout_type_input,
+        inner_circle_resolved, engagement_id,
         dry_run_answers,
     } = input || {};
     const VALID = new Set(["info","note","tip","success","warning","caution","example","quote","danger"]);
     const coerced = (callout_type_input && String(callout_type_input).toLowerCase().trim()) || "";
     const callout_type = (coerced && VALID.has(coerced)) ? coerced : "example";
+
+    // v0.89.1: validate inner_circle_resolved shape; drop malformed entries silently.
+    const validatedInnerCircle = [];
+    if (Array.isArray(inner_circle_resolved)) {
+        for (const entry of inner_circle_resolved) {
+            if (entry && typeof entry === "object"
+                && typeof entry.name === "string" && entry.name
+                && typeof entry.person_link === "string" && entry.person_link) {
+                validatedInnerCircle.push(entry);
+            }
+        }
+    }
+    // engagement_id: string when present; ignored otherwise (reserved field, no-op).
+    void engagement_id;
+
     if (!kind_name || !kind_title || !served_by) {
         return { status: "failed:bad-input", reason: "kind_name, kind_title, served_by required" };
     }
@@ -88,6 +110,7 @@ function gatherFromServedBy(input) {
         hard_rules_applied: Array.isArray(hard_rules) ? hard_rules : [],
         siblings_used: Array.isArray(siblings) ? siblings.map(s => s && s.name).filter(Boolean) : [],
         callout_type_used: callout_type,
+        inner_circle_resolved_count: validatedInnerCircle.length,
     };
 }
 
