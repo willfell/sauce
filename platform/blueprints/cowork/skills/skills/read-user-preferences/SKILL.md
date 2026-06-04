@@ -73,7 +73,7 @@ The helper auto-appends one platform-default rule to every engagement's `effecti
 
 This rule propagates via the existing `effective_hard_rules[]` plumbing (v0.79.0) — voice-contract block, gather-from-served-by dispatch `## Hard rules` section, and write-run-note skeleton binding paragraph all receive it without per-rule special-casing.
 
-Users CAN override by adding `personality.hard_rules: [{id: "wikilink_people", disabled: true}]` to `spice/cowork/context/user-preferences.md` — the disable-path is a forward-looking breadcrumb and is NOT implemented in v0.89.0 (no-op; future cycle if real opt-out demand surfaces).
+Users CAN override by adding `personality.hard_rules: [{id: "wikilink_people", disabled: true}]` to `spice/cowork/context/user-preferences.md` — `composeEffectiveHardRules` honors this disable flag and skips injection. The disable-path was promoted from "forward-looking breadcrumb" to live during S3 implementation; HC-V0790-A3 in `run-cowork-smoke.js` asserts the disable behavior end-to-end.
 
 ## Steps
 
