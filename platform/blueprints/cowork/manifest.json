@@ -357,7 +357,8 @@
     },
     {
       "source": "helpers/resolve-inner-circle-helper.js",
-      "dest": "{{helpers_dir}}/cowork/resolve-inner-circle-helper.js"
+      "dest": "{{module_directory}}/helpers/resolve-inner-circle-helper.js",
+      "tag": "platform"
     },
     {
       "source": "skills/skills/resolve-person/SKILL.md",
