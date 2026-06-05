@@ -1,0 +1,10 @@
+{
+  "promotion_rows": [
+    {"canonical_name": "Stefan de Pagter", "section": "inner_circle", "status": "confirmed"},
+    {"canonical_name": "Stale Veipe", "section": "inner_circle", "status": "confirmed"},
+    {"canonical_name": "Alfredo Diaz", "section": "frequent_collaborators", "status": "confirm"},
+    {"canonical_name": "Jason Tam", "section": "frequent_collaborators", "status": "promoted"},
+    {"canonical_name": "Veranika Vayavodzina", "section": "frequent_collaborators", "status": "skip"}
+  ],
+  "suppress_list": ["Henry Batson"]
+}

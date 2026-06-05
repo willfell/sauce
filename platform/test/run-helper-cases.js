@@ -9458,6 +9458,242 @@ async function caseHCV0891Versions() {
     }
   });
 
+  // ============================================================================
+  // v0.90.0 HC-V0900-DISCOVER-HELPER-* — WS-C discover-people-helper.js pure helpers
+  // ============================================================================
+
+  const DPH_FIX = path.join(WORKSHOP, "platform/test/fixtures/v0900-discover-people");
+  const DPH = require(path.join(WORKSHOP, "platform/blueprints/cowork/helpers/discover-people-helper.js"));
+
+  // HC-V0900-DISCOVER-HELPER-A1: parseInnerCircleFromMicroscope extracts canonical names
+  {
+    console.log("\n--- Case HC-V0900-DISCOVER-HELPER-A1: parseInnerCircleFromMicroscope ---");
+    try {
+      const body = fs.readFileSync(path.join(DPH_FIX, "case-a-microscope.md"), "utf8");
+      const expected = JSON.parse(fs.readFileSync(path.join(DPH_FIX, "case-a-expected-names.json"), "utf8"));
+      const out = DPH.parseInnerCircleFromMicroscope(body);
+      assertTrue("HC-V0900-DISCOVER-HELPER-A1: returns array", Array.isArray(out));
+      expected.inner_circle_names.forEach(name => {
+        assertTrue(`HC-V0900-DISCOVER-HELPER-A1: out includes "${name}"`, out.includes(name));
+      });
+    } catch (e) {
+      assertTrue("HC-V0900-DISCOVER-HELPER-A1: parser contract", false, e && e.message);
+    }
+  }
+
+  // HC-V0900-DISCOVER-HELPER-A2: missing ## What matters returns []
+  {
+    console.log("\n--- Case HC-V0900-DISCOVER-HELPER-A2: missing section returns [] ---");
+    try {
+      const out = DPH.parseInnerCircleFromMicroscope("# foo\n\nno What matters here\n");
+      assertTrue("HC-V0900-DISCOVER-HELPER-A2: returns empty array", Array.isArray(out) && out.length === 0);
+    } catch (e) {
+      assertTrue("HC-V0900-DISCOVER-HELPER-A2: empty section contract", false, e && e.message);
+    }
+  }
+
+  // HC-V0900-DISCOVER-HELPER-B1: parsePromotionRowsFromSibling extracts rows with status
+  {
+    console.log("\n--- Case HC-V0900-DISCOVER-HELPER-B1: parsePromotionRowsFromSibling ---");
+    try {
+      const body = fs.readFileSync(path.join(DPH_FIX, "case-b-people-aliases.md"), "utf8");
+      const expected = JSON.parse(fs.readFileSync(path.join(DPH_FIX, "case-b-expected-rows.json"), "utf8"));
+      const result = DPH.parsePromotionRowsFromSibling(body);
+      assertTrue("HC-V0900-DISCOVER-HELPER-B1: returns {rows, suppress_list}",
+        result && Array.isArray(result.rows));
+      expected.promotion_rows.forEach(expRow => {
+        const r = result.rows.find(x => x.canonical_name === expRow.canonical_name);
+        assertTrue(`HC-V0900-DISCOVER-HELPER-B1: row "${expRow.canonical_name}" found`, !!r);
+        if (r) assertTrue(`HC-V0900-DISCOVER-HELPER-B1: row "${expRow.canonical_name}" status="${expRow.status}" (got "${r.status}")`,
+          r.status === expRow.status);
+      });
+    } catch (e) {
+      assertTrue("HC-V0900-DISCOVER-HELPER-B1: parser contract", false, e && e.message);
+    }
+  }
+
+  // HC-V0900-DISCOVER-HELPER-B2: suppress_list extracted from Personal/non-work section
+  {
+    console.log("\n--- Case HC-V0900-DISCOVER-HELPER-B2: suppress_list extraction ---");
+    try {
+      const body = fs.readFileSync(path.join(DPH_FIX, "case-b-people-aliases.md"), "utf8");
+      const result = DPH.parsePromotionRowsFromSibling(body);
+      assertTrue("HC-V0900-DISCOVER-HELPER-B2: suppress_list includes Henry Batson",
+        Array.isArray(result.suppress_list) && result.suppress_list.includes("Henry Batson"));
+    } catch (e) {
+      assertTrue("HC-V0900-DISCOVER-HELPER-B2: suppress contract", false, e && e.message);
+    }
+  }
+
+  // HC-V0900-DISCOVER-HELPER-C1: parseStakeholdersFromVaultConfig
+  {
+    console.log("\n--- Case HC-V0900-DISCOVER-HELPER-C1: parseStakeholdersFromVaultConfig ---");
+    try {
+      const body = fs.readFileSync(path.join(DPH_FIX, "case-c-vault-config.md"), "utf8");
+      const expected = JSON.parse(fs.readFileSync(path.join(DPH_FIX, "case-c-expected-stakeholders.json"), "utf8"));
+      const out = DPH.parseStakeholdersFromVaultConfig(body, "accuris");
+      expected.names.forEach(name => {
+        assertTrue(`HC-V0900-DISCOVER-HELPER-C1: extracted "${name}" (got [${out.join(",")}])`, out.includes(name));
+      });
+    } catch (e) {
+      assertTrue("HC-V0900-DISCOVER-HELPER-C1: parser contract", false, e && e.message);
+    }
+  }
+
+  // HC-V0900-DISCOVER-HELPER-C2: parseCurrentInnerCircle
+  {
+    console.log("\n--- Case HC-V0900-DISCOVER-HELPER-C2: parseCurrentInnerCircle ---");
+    try {
+      const body = fs.readFileSync(path.join(DPH_FIX, "case-c-vault-config.md"), "utf8");
+      const cur = DPH.parseCurrentInnerCircle(body, "accuris");
+      assertTrue("HC-V0900-DISCOVER-HELPER-C2: returns Stefan",
+        Array.isArray(cur) && cur.includes("Stefan de Pagter"));
+    } catch (e) {
+      assertTrue("HC-V0900-DISCOVER-HELPER-C2: parser contract", false, e && e.message);
+    }
+  }
+
+  // HC-V0900-DISCOVER-HELPER-D1: aggregateCandidates dedups + preserves sources
+  {
+    console.log("\n--- Case HC-V0900-DISCOVER-HELPER-D1: aggregateCandidates ---");
+    try {
+      const candidates = DPH.aggregateCandidates({
+        microscopeNames: { chat: ["Stefan de Pagter", "Jon Levin"] },
+        siblingRows: { chat: [
+          { canonical_name: "Stefan de Pagter", section: "inner_circle", status: "confirmed" },
+          { canonical_name: "Alfredo Diaz", section: "frequent_collaborators", status: "confirm" },
+        ]},
+        vaultConfigNames: ["Stefan de Pagter", "Hayden Remington"],
+      });
+      assertTrue("HC-V0900-DISCOVER-HELPER-D1: 4 unique candidates after dedup", candidates.length === 4);
+      const stefan = candidates.find(c => c.canonical_name === "Stefan de Pagter");
+      assertTrue("HC-V0900-DISCOVER-HELPER-D1: Stefan dedup preserves 3 source provenances",
+        stefan && stefan.sources.length === 3);
+    } catch (e) {
+      assertTrue("HC-V0900-DISCOVER-HELPER-D1: aggregate contract", false, e && e.message);
+    }
+  }
+
+  // HC-V0900-DISCOVER-HELPER-E1..E4: classifyCandidate decision matrix
+  {
+    console.log("\n--- Case HC-V0900-DISCOVER-HELPER-E1..E4: classifyCandidate ---");
+    try {
+      const s1 = DPH.classifyCandidate({
+        candidate: { canonical_name: "Stefan de Pagter" },
+        resolveResult: { resolved: true, person_basename: "Stefan de Pagter" },
+        current_inner_circle: ["Stefan de Pagter"],
+        suppress_list: [],
+      });
+      assertTrue("HC-V0900-DISCOVER-HELPER-E1: ALREADY_PROMOTED when in inner_circle", s1 === "ALREADY_PROMOTED");
+      const s2 = DPH.classifyCandidate({
+        candidate: { canonical_name: "Jon Levin" },
+        resolveResult: { resolved: true },
+        current_inner_circle: ["Stefan de Pagter"],
+        suppress_list: [],
+      });
+      assertTrue("HC-V0900-DISCOVER-HELPER-E2: PROMOTE_EXISTING when resolves + not in inner_circle", s2 === "PROMOTE_EXISTING");
+      const s3 = DPH.classifyCandidate({
+        candidate: { canonical_name: "Alfredo Diaz" },
+        resolveResult: { resolved: false },
+        current_inner_circle: [],
+        suppress_list: [],
+      });
+      assertTrue("HC-V0900-DISCOVER-HELPER-E3: CREATE_AND_PROMOTE when not resolved + not suppressed", s3 === "CREATE_AND_PROMOTE");
+      const s4 = DPH.classifyCandidate({
+        candidate: { canonical_name: "Henry Batson" },
+        resolveResult: { resolved: false },
+        current_inner_circle: [],
+        suppress_list: ["Henry Batson"],
+      });
+      assertTrue("HC-V0900-DISCOVER-HELPER-E4: SUPPRESS when in suppress_list", s4 === "SUPPRESS");
+    } catch (e) {
+      assertTrue("HC-V0900-DISCOVER-HELPER-E1..E4: classifier contract", false, e && e.message);
+    }
+  }
+
+  // HC-V0900-DISCOVER-HELPER-F1: composePersonNoteStub v0.6.0 typed-alias schema
+  {
+    console.log("\n--- Case HC-V0900-DISCOVER-HELPER-F1: composePersonNoteStub ---");
+    try {
+      const stub = DPH.composePersonNoteStub({
+        canonical_name: "Alfredo Diaz",
+        aliases: [],
+        sources: [{ source_type: "microscope", source_kind: "chat" }],
+      });
+      assertTrue("HC-V0900-DISCOVER-HELPER-F1: stub frontmatter has name", stub.includes("name: Alfredo Diaz"));
+      assertTrue("HC-V0900-DISCOVER-HELPER-F1: stub frontmatter has aliases", stub.includes("aliases:"));
+      assertTrue("HC-V0900-DISCOVER-HELPER-F1: stub credits cowork:discover-people",
+        stub.includes("created_by: cowork:discover-people"));
+    } catch (e) {
+      assertTrue("HC-V0900-DISCOVER-HELPER-F1: stub composer contract", false, e && e.message);
+    }
+  }
+
+  // HC-V0900-DISCOVER-HELPER-G1: composeUpdatedSibling flips confirm → promoted
+  {
+    console.log("\n--- Case HC-V0900-DISCOVER-HELPER-G1: composeUpdatedSibling ---");
+    try {
+      const body = fs.readFileSync(path.join(DPH_FIX, "case-b-people-aliases.md"), "utf8");
+      const updated = DPH.composeUpdatedSibling(body, { "Alfredo Diaz": "promoted" });
+      assertTrue("HC-V0900-DISCOVER-HELPER-G1: Alfredo row flipped confirm → promoted",
+        updated.includes("| Alfredo Diaz | Alfredo Diaz | project-library | promoted |"));
+      assertTrue("HC-V0900-DISCOVER-HELPER-G1: Jason Tam already-promoted row preserved (idempotent)",
+        updated.includes("| Jason Tam | Jason Tam | platform | promoted |"));
+      assertTrue("HC-V0900-DISCOVER-HELPER-G1: Veranika skip row preserved",
+        updated.includes("| Veranika Vayavodzina | Veranika Vayavodzina | ERC migration | skip |"));
+    } catch (e) {
+      assertTrue("HC-V0900-DISCOVER-HELPER-G1: sibling composer contract", false, e && e.message);
+    }
+  }
+
+  // HC-V0900-DISCOVER-HELPER-H1: composeUpdatedVaultConfig appends + preserves
+  {
+    console.log("\n--- Case HC-V0900-DISCOVER-HELPER-H1: composeUpdatedVaultConfig ---");
+    try {
+      const body = fs.readFileSync(path.join(DPH_FIX, "case-c-vault-config.md"), "utf8");
+      const updated = DPH.composeUpdatedVaultConfig(body, "accuris", ["Jon Levin", "Hayden Remington"]);
+      assertTrue("HC-V0900-DISCOVER-HELPER-H1: existing Stefan entry preserved",
+        /-\s+"Stefan de Pagter"/.test(updated));
+      assertTrue("HC-V0900-DISCOVER-HELPER-H1: Jon Levin appended", updated.includes("Jon Levin"));
+      assertTrue("HC-V0900-DISCOVER-HELPER-H1: Hayden Remington appended", updated.includes("Hayden Remington"));
+    } catch (e) {
+      assertTrue("HC-V0900-DISCOVER-HELPER-H1: vault-config composer contract", false, e && e.message);
+    }
+  }
+
+  // HC-V0900-DISCOVER-HELPER-H2: idempotent — re-append of existing name does not duplicate
+  {
+    console.log("\n--- Case HC-V0900-DISCOVER-HELPER-H2: idempotent vault-config append ---");
+    try {
+      const body = fs.readFileSync(path.join(DPH_FIX, "case-c-vault-config.md"), "utf8");
+      const updated = DPH.composeUpdatedVaultConfig(body, "accuris", ["Stefan de Pagter"]);
+      // Count occurrences in the inner_circle_people block specifically
+      const icBlockMatch = updated.match(/inner_circle_people:\s*\n([\s\S]*?)(?=\n[a-z]|\n---|\n  - id:)/);
+      const icBlock = icBlockMatch ? icBlockMatch[1] : "";
+      const stefanCount = (icBlock.match(/Stefan de Pagter/g) || []).length;
+      assertTrue(`HC-V0900-DISCOVER-HELPER-H2: Stefan appears exactly 1× in inner_circle_people (got ${stefanCount})`,
+        stefanCount === 1);
+    } catch (e) {
+      assertTrue("HC-V0900-DISCOVER-HELPER-H2: idempotence contract", false, e && e.message);
+    }
+  }
+
+  // HC-V0900-DISCOVER-HELPER-I1: composeReviewTable groups by status with row numbers
+  {
+    console.log("\n--- Case HC-V0900-DISCOVER-HELPER-I1: composeReviewTable ---");
+    try {
+      const table = DPH.composeReviewTable([
+        { canonical_name: "Jon Levin", status: "PROMOTE_EXISTING", sources: [{ source_type: "microscope", source_kind: "chat" }] },
+        { canonical_name: "Alfredo Diaz", status: "CREATE_AND_PROMOTE", sources: [{ source_type: "sibling", source_kind: "chat" }] },
+      ]);
+      assertTrue("HC-V0900-DISCOVER-HELPER-I1: groups by status", table.includes("PROMOTE_EXISTING") && table.includes("CREATE_AND_PROMOTE"));
+      assertTrue("HC-V0900-DISCOVER-HELPER-I1: includes candidate names", table.includes("Jon Levin") && table.includes("Alfredo Diaz"));
+      assertTrue("HC-V0900-DISCOVER-HELPER-I1: emits row numbers", /\|\s+1\s+\|/.test(table));
+    } catch (e) {
+      assertTrue("HC-V0900-DISCOVER-HELPER-I1: review-table composer contract", false, e && e.message);
+    }
+  }
+
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
   if (fail > 0) {
