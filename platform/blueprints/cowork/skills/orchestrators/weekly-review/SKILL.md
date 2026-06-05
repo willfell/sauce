@@ -43,7 +43,7 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
    ```
 
    When `dispatch_mode == "legacy"`:
-   - Emit Obsidian Notice: `cowork:weekly-review -- user-preferences <status> (<reason>); using engagement-template defaults`.
+   - Emit Obsidian Notice: `cowork:weekly-review -- PREFS UNAVAILABLE (<status>: <reason>); falling back to legacy mode. Chat and any custom kinds will NOT fire in legacy mode; inner-circle wikilink emission will NOT occur. Investigate user-preferences.md if this is unexpected.`.
    - Skip the remainder of step 3c. The legacy gather sequence fires unchanged.
 
    When `dispatch_mode == "prefs"`:
@@ -162,6 +162,8 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
    its `## Steps` section with `{ date: context.today, weekday: context.dddd, month_name: context["MM-Month"].split("-")[1], path: context.daily_path }`.
 
 ## Gather
+
+> **MANDATORY:** When `dispatch_mode == "prefs"`, execute the priority loop for EVERY entry in `dispatch_plan`. Do NOT skip the loop in favor of memory-tick synthesis. Memory ticks are SUPPLEMENTARY context for the `[!info]- Today at a glance` synopsis section; they DO NOT replace live MCP gather output. When a kind's `action == "warn"`, emit the warning callout in-position via `composeWarningCallout`; do NOT silently drop it. Failing to fire the priority loop means the dispatch contract's "Known people in scope" wikilink instruction never reaches the LLM, and inner-circle names render as plaintext instead of `**[[Name]]**` wikilinks.
 
 When `dispatch_mode == "legacy"`, execute the v0.77.0 legacy gather sequence below verbatim. `ordered_blocks[]` stays empty.
 

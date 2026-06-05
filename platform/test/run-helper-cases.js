@@ -9435,6 +9435,29 @@ async function caseHCV0891Versions() {
     }
   }
 
+  // ============================================================================
+  // v0.90.0 HC-V0900-IMPERATIVE-* + HC-V0900-FALLBACK-* — WS-B 5-orchestrator prose
+  // ============================================================================
+
+  ["morning-briefing", "midday-tripwire", "eod-review", "weekly-review", "monthly-review"].forEach((orchName, idx) => {
+    const letter = String.fromCharCode(65 + idx);  // A..E
+    const p = path.join(WORKSHOP, "platform/blueprints/cowork/skills/orchestrators", orchName, "SKILL.md");
+    console.log(`\n--- Case HC-V0900-IMPERATIVE-${letter}1 / FALLBACK-${letter}1: ${orchName} prose ---`);
+    try {
+      const body = fs.readFileSync(p, "utf8");
+      assertTrue(`HC-V0900-IMPERATIVE-${letter}1: ${orchName} ## Gather has MANDATORY prefs-loop paragraph`,
+        body.includes("MANDATORY") && body.includes("Memory ticks are SUPPLEMENTARY"));
+      assertTrue(`HC-V0900-IMPERATIVE-${letter}1: ${orchName} paragraph cites Known people in scope wikilink`,
+        body.includes("Known people in scope") && body.includes("[[Name]]"));
+      assertTrue(`HC-V0900-FALLBACK-${letter}1: ${orchName} Notice uses PREFS UNAVAILABLE prefix`,
+        body.includes("PREFS UNAVAILABLE"));
+      assertTrue(`HC-V0900-FALLBACK-${letter}1: ${orchName} Notice cites legacy-mode wikilink consequence`,
+        body.includes("inner-circle wikilink emission will NOT occur"));
+    } catch (e) {
+      assertTrue(`HC-V0900-IMPERATIVE/FALLBACK-${letter}1: ${orchName} prose contract`, false, e && e.message);
+    }
+  });
+
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
   if (fail > 0) {
