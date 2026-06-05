@@ -1,6 +1,6 @@
 {
   "name": "cowork",
-  "version": "0.27.1",
+  "version": "0.28.0",
   "kind": "blueprint",
   "module_directory": "cowork",
   "engagement_types_dir": "engagement-types",
@@ -363,6 +363,15 @@
     {
       "source": "skills/skills/resolve-person/SKILL.md",
       "dest": "{{skills_dir}}/skills/resolve-person/SKILL.md"
+    },
+    {
+      "source": "helpers/discover-people-helper.js",
+      "dest": "{{module_directory}}/helpers/discover-people-helper.js",
+      "tag": "platform"
+    },
+    {
+      "source": "skills/orchestrators/discover-people/SKILL.md",
+      "dest": "{{skills_dir}}/discover-people/SKILL.md"
     }
   ],
   "claude_surface": [
@@ -663,6 +672,20 @@
       "kind": "skill",
       "source": "skills/orchestrators/synthesize-week/SKILL.md",
       "dest": "{{skills_dir}}/synthesize-week/SKILL.md"
+    },
+    {
+      "kind": "skill",
+      "source": "skills/orchestrators/discover-people/SKILL.md",
+      "dest": "{{skills_dir}}/discover-people/SKILL.md"
+    },
+    {
+      "kind": "claude_md_row",
+      "table": "resolvers",
+      "row": {
+        "topic": "Cowork Discover People",
+        "path": "{{module_directory}}/skills/orchestrators/discover-people/SKILL.md",
+        "command": "/cowork discover-people"
+      }
     }
   ],
   "engagement_types": [

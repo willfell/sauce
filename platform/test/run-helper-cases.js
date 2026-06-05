@@ -7768,17 +7768,17 @@ async function caseHCV0890MorningBriefingA() {
 }
 
 async function caseHCV0890VersionA() {
-  console.log("\n--- Case HC-V0890-VERSION-A: cowork version floor accepts 0.27.1 ---");
+  console.log("\n--- Case HC-V0890-VERSION-A: cowork version pin in smoke === 0.28.0 (v0.90.0 bump) ---");
   const smoke = fs.readFileSync(
     path.join(WORKSHOP, "platform/test/run-cowork-smoke.js"), "utf8");
-  // Look for any hardcoded cowork-version equals comparison; if present, must include 0.27.1.
+  // Look for any hardcoded cowork-version equals comparison; if present, must include 0.28.0.
   const eqMatches = smoke.match(/cowork.{0,50}===\s*"0\.(\d+)\.(\d+)"/g) || [];
   for (const m of eqMatches) {
     const ver = m.match(/"(0\.\d+\.\d+)"/);
     if (ver && ver[1]) {
       assertTrue(
-        `HC-V0890-VERSION-A: cowork === pin must be 0.27.1 (found ${ver[1]})`,
-        ver[1] === "0.27.1");
+        `HC-V0890-VERSION-A: cowork === pin must be 0.28.0 (found ${ver[1]})`,
+        ver[1] === "0.28.0");
     }
   }
   if (eqMatches.length === 0) {
@@ -8119,7 +8119,7 @@ async function caseHCV0891Versions() {
   // A: cowork manifest pin
   const coworkMan = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "blueprints/cowork/manifest.json"), "utf8"));
-  assertEqual(coworkMan.version, "0.27.1", "HC-V0891-VERSION-A: cowork pin = 0.27.1");
+  assertEqual(coworkMan.version, "0.28.0", "HC-V0891-VERSION-A: cowork pin = 0.28.0 (v0.90.0 bump)");
 
   // B: daily manifest pin
   const dailyMan = JSON.parse(fs.readFileSync(
@@ -8131,10 +8131,10 @@ async function caseHCV0891Versions() {
     path.join(WORKSHOP, "manifest.json"), "utf8"));
   const wsVer = platformMan.workshop_version || platformMan.version
     || (platformMan.workshop && platformMan.workshop.version);
-  assertEqual(wsVer, "0.89.1", "HC-V0891-VERSION-C: workshop pin = 0.89.1");
+  assertEqual(wsVer, "0.90.0", "HC-V0891-VERSION-C: workshop pin = 0.90.0 (v0.90.0 bump)");
   const pkg = JSON.parse(fs.readFileSync(
     path.resolve(WORKSHOP, "..", "package.json"), "utf8"));
-  assertEqual(pkg.version, "0.89.1", "HC-V0891-VERSION-C: package.json = 0.89.1");
+  assertEqual(pkg.version, "0.90.0", "HC-V0891-VERSION-C: package.json = 0.90.0 (v0.90.0 bump)");
 
   // D: mechanism count unchanged
   const mechs = (platformMan.mechanisms && Array.isArray(platformMan.mechanisms))
@@ -9714,6 +9714,59 @@ async function caseHCV0891Versions() {
         body.includes(".bak") && body.includes("landmine #12"));
     } catch (e) {
       assertTrue("HC-V0900-DISCOVER-SKILL-A1..A5: SKILL.md prose contract", false, e && e.message);
+    }
+  }
+
+  // ============================================================================
+  // v0.90.0 HC-V0900-VERSION-* + HC-V0900-MANIFEST-A1 — version sync + manifest entries
+  // ============================================================================
+
+  {
+    console.log("\n--- Case HC-V0900-VERSION-A..D: v0.90.0 version pins ---");
+    try {
+      // NOTE: top-level WORKSHOP at line 29 = path.resolve(__dirname, "../..") = workshop ROOT
+      // (distinct from the local WORKSHOP inside caseHCV0891Versions which is platform/).
+      const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
+      assertTrue("HC-V0900-VERSION-A: package.json version === '0.90.0'", pkg.version === "0.90.0");
+      const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
+      assertTrue("HC-V0900-VERSION-B: platform/manifest.json workshop_version === '0.90.0'",
+        platMan.workshop_version === "0.90.0");
+      const coworkMan = JSON.parse(fs.readFileSync(
+        path.join(WORKSHOP, "platform/blueprints/cowork/manifest.json"), "utf8"));
+      assertTrue("HC-V0900-VERSION-C: cowork manifest version === '0.28.0'",
+        coworkMan.version === "0.28.0");
+      const sub = JSON.parse(fs.readFileSync(
+        path.join(WORKSHOP, "ranch/platform-subscription.json"), "utf8"));
+      const blueprints = sub.blueprints || sub.subscriptions || [];
+      const cworkPin = blueprints.find(b => b.name === "cowork");
+      assertTrue("HC-V0900-VERSION-D: ranch platform-subscription cowork pin === '0.28.0'",
+        cworkPin && cworkPin.version === "0.28.0");
+    } catch (e) {
+      assertTrue("HC-V0900-VERSION-A..D: version pin contract", false, e && e.message);
+    }
+  }
+
+  {
+    console.log("\n--- Case HC-V0900-MANIFEST-A1: cowork manifest entries for discover-people ---");
+    try {
+      const coworkMan = JSON.parse(fs.readFileSync(
+        path.join(WORKSHOP, "platform/blueprints/cowork/manifest.json"), "utf8"));
+      const helperEntry = (coworkMan.files || []).find(f => f.source === "helpers/discover-people-helper.js");
+      assertTrue("HC-V0900-MANIFEST-A1: files[] includes discover-people-helper.js", !!helperEntry);
+      assertTrue("HC-V0900-MANIFEST-A1: helper entry tag === 'platform'",
+        helperEntry && helperEntry.tag === "platform");
+      assertTrue("HC-V0900-MANIFEST-A1: helper dest uses {{module_directory}}/helpers/",
+        helperEntry && helperEntry.dest && helperEntry.dest.includes("{{module_directory}}/helpers/"));
+      const skillEntry = (coworkMan.files || []).find(f => f.source === "skills/orchestrators/discover-people/SKILL.md");
+      assertTrue("HC-V0900-MANIFEST-A1: files[] includes discover-people SKILL.md", !!skillEntry);
+      const csSkillEntry = (coworkMan.claude_surface || []).find(c =>
+        c.kind === "skill" && c.source === "skills/orchestrators/discover-people/SKILL.md");
+      assertTrue("HC-V0900-MANIFEST-A1: claude_surface includes discover-people skill entry", !!csSkillEntry);
+      const csRowEntry = (coworkMan.claude_surface || []).find(c =>
+        c.kind === "claude_md_row" && c.row && c.row.command === "/cowork discover-people");
+      assertTrue("HC-V0900-MANIFEST-A1: claude_surface includes /cowork discover-people resolver row", !!csRowEntry);
+    } catch (e) {
+      assertTrue("HC-V0900-MANIFEST-A1: manifest entries contract", false, e && e.message);
     }
   }
 

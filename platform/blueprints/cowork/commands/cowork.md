@@ -98,3 +98,11 @@ Running `/cowork` against a vault that already has `engagements[]` in `vault-con
 ## Handoff doc
 
 If you want broader context on what's happening + cycle metadata + the cross-machine handoff plan, read `pantry/Docs/prompts/2026-05-12-accuris-cowork-bootstrap-handoff.md`. The slash command flow is canonical going forward; the handoff doc is a fallback for when you need the full narrative.
+
+## /cowork discover-people [<engagement>] (v0.28.0)
+
+Microscope-extraction first slice of the people-discovery surface. Scans `spice/cowork/prompts/per-mcp/<*>/microscope.md` `## What matters` sections + `per-mcp/<*>/people-aliases.md` tables + vault-config.md `engagements[<id>].stakeholders/manager/direct_reports` for candidate inner-circle people, classifies via `cowork:resolve-person`, batch-confirms, and writes person-note stubs + appends to `inner_circle_people` + flips sibling `Promote? confirm → promoted`.
+
+Engagement defaults if the vault has exactly one; otherwise prompts to pick. USER-AUTHORED `microscope.md` files are READ-ONLY (never modified). `vault-config.md` + `people-aliases.md` get `.bak` backups before edit per landmine #12.
+
+Run this after authoring or deepening microscopes via `/cowork microscope <kind>` to operationalize the inner-circle prose into the canonical allowlist that v0.89.0+ atomic-note gather skills consume. Re-runs are idempotent: previously-promoted names are skipped, previously-declined names re-appear in the review table for re-decision.

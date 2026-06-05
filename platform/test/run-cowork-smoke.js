@@ -836,9 +836,9 @@ function assertCoworkV068Shape() {
   assertTrue(fileSources.includes("helpers/cowork-latest-runs.js"),
     "V068-MANIFEST-FILES: manifest files[] declares helpers/cowork-latest-runs.js");
 
-  // V0750-VERSION: cowork blueprint version bumped to 0.27.1 (was 0.27.0 in v0.89.0; PATCH bump for v0.89.1 — adds resolve-inner-circle-helper.js + gather-from-served-by envelope wiring + 5 orchestrator pre-resolve steps).
-  assertTrue(manifest.version === "0.27.1",
-    `V0750-VERSION: cowork manifest.version === "0.27.1" (got ${JSON.stringify(manifest.version)})`);
+  // V0750-VERSION: cowork blueprint version bumped to 0.28.0 (was 0.27.1 in v0.89.1; MINOR bump for v0.90.0 — adds discover-people orchestrator + helper + WS-A wikilink hard rule reorder + WS-B 5-orchestrator imperative-gather prose).
+  assertTrue(manifest.version === "0.28.0",
+    `V0750-VERSION: cowork manifest.version === "0.28.0" (got ${JSON.stringify(manifest.version)})`);
 }
 
 // ---------------------------------------------------------------------------
@@ -2534,8 +2534,9 @@ function assertCoworkV068Shape() {
 }
 
 // HC-V0790-A3: composeEffectiveHardRules unit
-// v0.89.0: composeEffectiveHardRules now auto-appends the canonical wikilink_people rule
-// unless the user opts out via {id: "wikilink_people", disabled: true}.
+// v0.89.0: auto-appends the canonical wikilink_people rule.
+// v0.90.0: REORDERED — wikilink_people rule now FIRST (out.unshift) for first-bullet
+// priority in dispatch contract. Order is [wikilink, ...user_rules, no_emoji].
 {
     const label = "HC-V0790-A3 composeEffectiveHardRules({no_emojis,hard_rules})";
     try {
@@ -2543,10 +2544,10 @@ function assertCoworkV068Shape() {
         assertTrue(typeof helper.composeEffectiveHardRules === "function", `${label}: composeEffectiveHardRules not exported`);
         const r1 = helper.composeEffectiveHardRules({ no_emojis: true, hard_rules: ["a"] });
         assertTrue(r1.length === 3
-            && r1[0] === "a"
-            && r1[1] === helper.CANONICAL_NO_EMOJI_RULE
-            && r1[2] === helper.CANONICAL_WIKILINK_PEOPLE_RULE,
-            `${label}: expected [a, canonical-no-emoji, canonical-wikilink-people], got ${JSON.stringify(r1)}`);
+            && r1[0] === helper.CANONICAL_WIKILINK_PEOPLE_RULE
+            && r1[1] === "a"
+            && r1[2] === helper.CANONICAL_NO_EMOJI_RULE,
+            `${label}: expected v0.90.0 order [canonical-wikilink-people, a, canonical-no-emoji], got ${JSON.stringify(r1)}`);
         const r2 = helper.composeEffectiveHardRules({ no_emojis: false, hard_rules: [] });
         assertTrue(r2.length === 1 && r2[0] === helper.CANONICAL_WIKILINK_PEOPLE_RULE,
             `${label}: expected single wikilink_people entry, got ${JSON.stringify(r2)}`);
