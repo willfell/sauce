@@ -4,6 +4,60 @@ This file archives the per-cycle status snapshots that previously lived in `CLAU
 
 ---
 
+## v0.90.2 (closed 2026-06-05) — orchestrator-path-callout + prompt-body-sentinel PATCH
+
+Workshop 0.90.1 → **0.90.2** (PATCH). Three-fix bundle closing two live-runtime failures observed at v0.90.1 deploy:
+
+**Failure 1 (output-path miswrite — accuris, willfell-laptop machine):** Scheduled morning-briefing wrote the atomic note to `spice/daily/2026/06-June/Friday-2026-06-05.md` (daily-blueprint surface) instead of the canonical `spice/cowork/daily/2026/06-June/2026-06-05/morning-briefing.md` (cowork atomic-note surface). The LLM read the consumer vault's CLAUDE.md row `| Daily | spice/daily | /daily |` and applied that path to the cowork briefing. Never reached Step 16 of the orchestrator SKILL.md (where `cowork:write-run-note-morning-briefing` is invoked); LLM's own self-diagnosis admitted it didn't read that far in the 300-line SKILL.md.
+
+**Failure 2 (empty-prompt false-positive — accuris, this machine):** Scheduled morning-briefing wrote a stub note because the LLM treated the v0.4.0 installer-default user-prompt blockquote (*"Vault-editable prompt for cowork:morning-briefing. Edit the body to customize..."*) as "non-empty content" and short-circuited to Step 10's empty-prompt stub branch without trying engagement-template fallback. Headspace's identical prompt content was handled correctly by a different LLM session that morning — LLM-behavior variance on ambiguous prompt-body content.
+
+Both failures share a root cause: **LLM attention truncates or mis-interprets ambiguous content in long SKILL.md files**. The orchestrator SKILL.md had the canonical path in its frontmatter description, intro paragraph, AND Step 16 sub-skill invocation — but the LLM didn't process all three. Structural fix is three layers:
+
+**Fix A — `[!warning]+ CRITICAL: output path (v0.90.2)` callout at TOP of 5 orchestrator SKILL.md files** (morning-briefing, midday-tripwire, eod-review, weekly-review, monthly-review). Callout positioned immediately after the `# cowork:<orchestrator>` H1 heading, before the intro paragraph — first thing the LLM reads after frontmatter parsing. The callout names the canonical path (`spice/cowork/daily/<YYYY>/<MM-Month>/<YYYY-MM-DD>/<orchestrator>.md` for daily cadences; `spice/cowork/weekly/<YYYY>/<YYYY-Www>/weekly-review.md` for weekly; `spice/cowork/monthly/<YYYY>/<YYYY-MM>/monthly-review.md` for monthly), explicitly forbids the `spice/daily/<YYYY>/<MM-Month>/<weekday>-<YYYY-MM-DD>.md` daily-blueprint path, names the write sub-skill (e.g. `cowork:write-run-note-morning-briefing`), and forbids direct writes via Write/Edit/`mcp__obsidian__obsidian_put_content`. Critically, the callout explicitly cites the CLAUDE.md `spice/daily/` Daily-row as a known trap so the LLM disambiguates it. Even if the LLM only processes the top 50 lines of the SKILL.md, this block is unmissable.
+
+**Fix B (FLN-v90-2 closure) — v0.4.0 installer-default sentinel detection in Step 10 of 5 orchestrators.** Detects the v0.4.0 stub pattern by THREE conditions ALL holding: (a) the body is a single blockquote (every non-blank line starts with `> `), (b) the first non-blank line starts with `> Vault-editable prompt for `, (c) the body contains the substring `Empty body is a no-op stub for now`. When the sentinel matches, the orchestrator treats `user_prompt_body = ""` and the engagement-template fallback fires. Plus morning-briefing + midday-tripwire gain the full fallback chain that eod/weekly/monthly already had (user-prompt → sentinel-check → template-prompt → stub), unifying behavior across all 5.
+
+**Fix B.2 — 5 source prompt files emptied** at `platform/blueprints/cowork/content/prompts/<orchestrator>.md`. Body removed; just frontmatter remains. `materialize_once: true` added to the 5 prompt `files[]` entries in cowork manifest. Future fresh installs get truly-empty prompts (Step 10's empty-check fires cleanly without needing the sentinel branch); installer NEVER overwrites user customizations on existing vaults (the materialize_once invariant). Existing vaults with v0.4.0 prompts stay untouched; Fix B.1's runtime sentinel detection handles legacy content cleanly.
+
+**Versioning:** workshop 0.90.1 → 0.90.2 PATCH; cowork 0.28.0 → 0.28.1 PATCH; mechanism count unchanged at 17.
+
+**HC delta:** helper-cases 1587 → 1612 (+25: V0902-PATH-A1..E1 = 10; V0902-SENTINEL-A1..E1 = 5; V0902-MATERIALIZE-A1 = 5; V0902-SOURCE-A1 = 5). Cowork-smoke 931 / claude-surface 206 unchanged. Install 15 unchanged. Bumped stale pin tests: HC-V0900-VERSION-A/B/C/D + HC-V0901-CATALOGUE-A1 + HC-V0891-VERSION-A/C + V0750-VERSION cowork-smoke pin. Preflight `version-sync ok: 0.90.2` ALL GREEN.
+
+**Commits (4 + deploy):** `01841da` (S0 design), `6b3b2b4` (S1+S2+S3 functional unit — callouts + sentinels + source-prompt cleanup + manifest materialize_once + HC tests), S4 (this commit) version bumps + cycle-close.
+
+**Status:**
+- **FLN-v90-2 CLOSED** (v0.4.0 sentinel detection + truly-empty source prompts + materialize_once).
+- Output-path failure mode addressed via [!warning]+ CRITICAL callouts at top of 5 orchestrators (LLM-attention defense).
+- **Verification owed at tomorrow's (2026-06-06) scheduled cron jobs** on both machines: morning briefings should now write to canonical `spice/cowork/daily/<YYYY>/<MM-Month>/<YYYY-MM-DD>/morning-briefing.md` (Fix A) AND use engagement-template fallback when user-prompt is the v0.4.0 sentinel (Fix B).
+- **NEW FLN-v90-3 queued:** write-guard in `cowork:write-run-note-*` sub-skills that ABORTS if invoked from outside the expected orchestrator call path (defense against future prose-imperative fails — if [!warning]+ CRITICAL callout fails to land, the sub-skill itself catches the wrong-path write). Estimated ~3 stages PATCH.
+- FLN-v89-7 (`--subscribe` CLI flag), FLN-v89-8 (E.164 normalization), FLN-v89-10 (toast diagnostic), FLN-v891-1 (manifest substitution-token validator), FLN-v891-2 (write-run-note Step 2a cleanup), FLN-v90-1 (platform manifest catalogue auto-sync) stay queued. WS-C v0.29.0+ MCP-discovery extension is the natural follow-on once tomorrow's verification confirms cycle stability.
+
+See `Docs/plans/2026-06-05-v0.90.2-orchestrator-path-callout-and-prompt-sentinel-design.md`.
+
+---
+
+## v0.90.1 (closed 2026-06-04) — catalogue-pin-sync + read-user-preferences-prose-update PATCH
+
+Workshop 0.90.0 → **0.90.1** (PATCH). Hot-fix following v0.90.0 deploy revealed two structural gaps that broke v0.90.0's runtime intent:
+
+**Gap 1 — Stale platform/manifest.json blueprints[] catalogue.** v0.90.0 bumped cowork's own `manifest.json` version to 0.28.0 but did NOT bump the platform/manifest.json blueprints[] catalogue pin (still 0.27.1). `sauce update --bump-pins` reads the catalogue to decide whether to update files[] in consumer vaults. With the stale pin, consumer subscriptions stayed at cowork 0.27.1, so the new `discover-people-helper.js` never materialized to accuris/headspace. The `.claude/skills/cowork/discover-people/SKILL.md` materialized correctly because the claude_surface[] path is independent of version pinning. v0.90.1 bumps the catalogue to 0.28.0.
+
+**Gap 2 — Stale read-user-preferences SKILL.md prose.** v0.90.0 changed `read-user-preferences-helper.js` (`out.push` → `out.unshift` so the canonical wikilink rule moves to index 0 of `effective_hard_rules[]`) but did NOT update the corresponding SKILL.md prose. At runtime the production LLM follows the SKILL.md (not the JS helper, which is HC-test-only per the SKILL.md's own "## Harness testing" disclaimer). Without the prose update, the LLM kept composing `effective_hard_rules` with the v0.89.0 rule body at the END of the array, defeating the entire WS-A intent. v0.90.1 rewrites the prose with the full v0.90.0 rule body (PRECEDENCE OVERRIDE prefix + microscope-override language) + explicit composition order description (index 0 = wikilink, 1..N = user_rules, N+1 = no_emoji).
+
+**Versioning:** workshop 0.90.0 → 0.90.1 PATCH; cowork NO bump (SKILL.md materialization happens via claude_surface, not version-gated). Catalogue pin 0.27.1 → 0.28.0 (catches up to cowork manifest).
+
+**HC delta:** helper-cases 1581 → 1587 (+6 HC-V0901-CATALOGUE-A1 + HC-V0901-SKILL-A1 × 4 sub-asserts) + bumped HC-V0900-VERSION-A/B/C/D + HC-V0891-VERSION-C pin assertions to v0.90.1. Preflight `version-sync ok: 0.90.1` ALL GREEN.
+
+**Commit:** `68b7310` (S1 — single-stage hot-fix; design captured inline in commit body).
+
+**Status:**
+- **NEW FLN-v90-1 surfaced:** `platform/manifest.json` blueprints[] catalogue auto-sync with each blueprint's own `manifest.json` version. Currently manually kept in sync; v0.90.0 cycle missed it. Queued ~2 stages PATCH.
+
+See commit `68b7310` for details.
+
+---
+
 ## v0.90.0 (closed 2026-06-04) — wikilink-imperative + eod-imperative-gather + discover-people-extraction MINOR
 
 Workshop 0.89.1 → **0.90.0** (MINOR). Three-workstream bundle closing FLN-v89-9 (microscope precedence over wikilink soft prompt) + FLN-v891-3 (EOD/midday/weekly/monthly skipping the prefs-mode priority loop) + WS2 v0.28.0 microscope-extraction first slice. Triggered by live verification on accuris 2026-06-04 (an EOD + a morning briefing both fired on accuris via claude.ai desktop) revealing v0.89.1's structural wiring was present but wikilinks weren't actually landing: morning-briefing's chat callout rendered every named person as plaintext `**Bold**` despite the dispatch contract's "Known people in scope" soft prompt; EOD's body was composed entirely from synthesize-day memory ticks with no chat / calendar / email gather firing.
