@@ -4,6 +4,34 @@ This file archives the per-cycle status snapshots that previously lived in `CLAU
 
 ---
 
+## v0.90.3 (closed 2026-06-05) — discover-people-helper-bug-fixes + prose-extraction-fallback PATCH
+
+Workshop 0.90.2 → **0.90.3** (PATCH). Three coordinated fixes to `cowork:discover-people` surfaced by live `/cowork discover-people headspace` run earlier today (pre-v0.90.2 deploy).
+
+**Fix B1 — composeUpdatedVaultConfig two bugs.** (1) Reconstruction missed the closing `\n---\n` fence: `body.slice(fmMatch[0].length)` extracts everything AFTER the entire frontmatter match (which includes the closing `---`), so `after` is body content with NO leading `\n---\n`; function returned `before + fm + after` instead of `before + fm + closing + after`. Result: closing `---` got consumed into body content, producing malformed YAML. Bug existed since v0.28.0; HC fixture tests didn't catch it because all fixtures had body content AFTER frontmatter that masked the missing `\n---\n`. (2) Inline `inner_circle_people: []` (empty-array shorthand) wasn't detected: regex `/^    inner_circle_people:\s*$/` only matches multi-line block header; inline form fell through to the "insert new block at engEnd" branch without removing the inline line, producing duplicate-key YAML. Fix: preserve `const closing = fmMatch[3]` + add inline-empty branch via `lines.splice(inlineIdx, 1, ...newLines)` for atomic in-place replacement.
+
+**Fix B2 — parseInnerCircleFromMicroscope prose-narrative widening.** Added Pass B: bold-name extraction in inner-circle-adjacent H3/H4 subsections anywhere in body (not just `## What matters`). Adjacent-section keywords: `inner circle`, `going quiet`, `cadence sweep`, `open loops`, `reply owed`, `who you owe`, `aged open loops`, `elevation`. Within those sections, extracts `**Bold Name**` patterns (1-3 capitalized words). Catches headspace's prose-narrative microscope format that embeds names in `### 1. Inner circle first` paragraphs and "Going quiet" sweep tables — names like `**Diana** — 12 days since`, `**Ellen Senders** — Dinner tonight`. Added KNOWN_NON_PERSON_NAMES filter (~40 entries) rejecting common false positives: cards (Cap1 Platinum, SCHEELS, Discover, Apple Card), abbreviations (EMS, AWS, ADO, GitHub, iMCP), time terms (Friday, Tonight, Yesterday), status labels (Reply, Owed, Open). User batch-confirm gate (Step 7) remains the final filter — some review-table noise is acceptable.
+
+**Fix B3 — discover-people orchestrator Step 4b prose-extraction fallback.** When helper returns `candidates.length < 3` AND any microscope body length > 500 chars, perform LLM-side prose extraction as backup. Scans H3/H4 sections matching the same adjacent-keyword regex for proper-noun person names; rejects same KNOWN_NON_PERSON_NAMES categories; appends to candidates with `source_type: "microscope-prose-llm"`. Two-layer defense: deterministic helper (B2) catches structured patterns + LLM judgment (B3) covers remaining prose-narrative coverage that regex would over-extract or miss.
+
+**Versioning:** workshop 0.90.2 → 0.90.3 PATCH; cowork 0.28.1 → 0.28.2 PATCH; mechanism count unchanged at 17.
+
+**HC delta:** helper-cases 1612 → 1647 (+35: V0903-B1-A1 = 5; V0903-B1-A2 = 3; V0903-B2-A1 = 7; V0903-B2-A2 = 5; V0903-B3-A1 = 4; V0903-B2-REGRESSION = 11). The regression block confirms v0.28.0 accuris fixture still extracts all 11 inner-circle names post-widening — no false-negative regressions. Cowork-smoke 931 unchanged; claude-surface 206 unchanged. Preflight `version-sync ok: 0.90.3` ALL GREEN.
+
+**Commits (3 + deploy):** `938ecf1` (S0 design), `de1beda` (S1 — helper B1+B2 + orchestrator B3 + 35 HC tests), S2 (this commit) version bumps + cycle-close.
+
+**Status:**
+- B1 + B2 + B3 closed deterministically (HC fixtures + regression check).
+- After deploy, user re-runs `/cowork discover-people headspace` to catch the 9+ names missed earlier today (Ellen Senders + Mo Holton + Evie + Andres Cornejo + Galen Gossman + David Panlilio + Mrs. Panlilio + Tyler Igoe + Grace Fellhoelter).
+- **NEW FLN-v90-4 surfaced:** `composeUpdatedVaultConfig` closing-fence bug existed since v0.28.0 ship and went undetected by fixture-based HC tests. Pattern: when a helper modifies frontmatter, the HC test fixture must include body content AFTER the frontmatter AND the test must assert `\n---\n` boundary preservation. Queue a Tier 2 helper-hardening sweep across all manifest-touching helpers (resolve-inner-circle-helper, edit-microscope-helper, discover-people-helper, read-user-preferences-helper) — add closing-fence-preserved assertions to each. Estimated ~3 stages PATCH or fold into v0.91.0.
+- **WS-C v0.29.0+ MCP-discovery extension** still queued.
+- **N1 (`cowork:find-missing-people` skill)** is the next cycle per user direction — addresses unresolved-wikilink-in-atomic-note pattern (`[[Ellen Senders]]` greyed-out cases). v0.91.0 MINOR. ~6-8 stages.
+- FLN-v89-7 / FLN-v89-8 / FLN-v89-10 / FLN-v891-1 / FLN-v891-2 / FLN-v90-1 / FLN-v90-3 stay queued.
+
+See `Docs/plans/2026-06-05-v0.90.3-discover-people-helper-fixes-design.md`.
+
+---
+
 ## v0.90.2 (closed 2026-06-05) — orchestrator-path-callout + prompt-body-sentinel PATCH
 
 Workshop 0.90.1 → **0.90.2** (PATCH). Three-fix bundle closing two live-runtime failures observed at v0.90.1 deploy:
