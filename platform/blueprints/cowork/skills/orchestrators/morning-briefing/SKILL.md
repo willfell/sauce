@@ -33,6 +33,14 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
 
 1. READ `.claude/skills/cowork/skills/check-vault-routing/SKILL.md` in full and follow
    its `## Steps` section with `{ required: ["obsidian"] }`. If the return is not `"ready"`, emit Notice `cowork:morning-briefing aborted -- <status>` and exit. Do not write.
+1b. **Verbal commitment (v0.91.1).** Before any other action, emit Obsidian Notice and treat it as a binding commitment for this run:
+
+   ```
+   cowork:morning-briefing committing to canonical write path: spice/cowork/daily/<YYYY>/<MM-Month>/<YYYY-MM-DD>/morning-briefing.md (NOT spice/daily/<weekday>-<YYYY-MM-DD>.md)
+   ```
+
+   This Notice serves two purposes: (1) commit the path to the LLM's working memory at run-start so it stays salient even after long gather + compose steps, (2) create an audit trail in the Obsidian Notice log if a wrong-path write happens despite the commitment. The v0.91.1 write-guard in `cowork:write-run-note-morning-briefing` enforces the canonical path deterministically at write time; this verbal commitment is the prose-side layer.
+
 2. **Resolve engagement.** Read `<vault>/spice/cowork/context/vault-config.md` via `mcp__obsidian__get_frontmatter`. Look up `engagements[]` entry where `id == engagement_id`. If not found, emit Notice `cowork:morning-briefing aborted -- engagement '<id>' not found in vault-config.md` and exit. Capture `engagement` (the full record) and read the matching engagement-type manifest via the Read tool at `spice/cowork/context/engagement-types/<engagement.type>.json` (expected values: `personal`, `w2-fte`, `consulting`). Parse as JSON; capture `type_manifest.render_aspects`. If the file is missing or fails to parse, emit Notice `cowork:morning-briefing aborted -- engagement-type manifest unavailable at spice/cowork/context/engagement-types/<engagement.type>.json` and exit. The render-aspects map drives which gather + write steps fire (e.g. `finance_block: include` enables the Finance callout; `inner_circle_imessage: include` enables Messages).
 3. READ `.claude/skills/cowork/skills/date-context/SKILL.md` in full and follow
    its `## Steps` section with `{}`. Capture the returned `context` object. If `context.error` exists, emit Notice and exit.

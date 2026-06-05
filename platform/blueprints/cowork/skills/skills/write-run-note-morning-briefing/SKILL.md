@@ -120,6 +120,20 @@ When `prompt_body` was empty upstream (`warning == "empty_prompt"`), the orchest
 
 BEFORE calling the Write tool, verify your composed output against this checklist. If any item fails, return `{ path, status: "failed:contract-violation:<field>" }` and do NOT write.
 
+### v0.91.1 write-guard: canonical output path enforcement (FIRST CHECK)
+
+Before any other pre-write check, validate the computed write path against the canonical shape:
+
+`spice/cowork/daily/<YYYY>/<MM-Month>/<YYYY-MM-DD>/morning-briefing.md`
+
+REJECT and return `{ path, status: "failed:contract-violation:wrong-output-path" }` if the computed `path` argument:
+
+1. Starts with `spice/daily/` — that's the daily-blueprint surface (hand-edited daily notes), NOT this sub-skill's output.
+2. Has a basename matching `<weekday>-<YYYY-MM-DD>.md` shape (e.g. `Friday-2026-06-05.md` — daily-blueprint naming convention).
+3. Doesn't contain the canonical prefix `spice/cowork/daily/`.
+
+Even if the orchestrator passes a wrong `path` argument, this guard catches it. This is the v0.91.1 deterministic backstop for v0.90.2's `[!warning]+ CRITICAL` orchestrator callout, which is prose-only and LLM-attention-bounded.
+
 **Frontmatter checks:**
 - [ ] `type:` matches the canonical value for this skill (`cowork-morning-briefing`)
 - [ ] `title:` is present and non-empty (the formula-composed title from above)

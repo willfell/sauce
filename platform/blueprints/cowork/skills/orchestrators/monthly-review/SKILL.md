@@ -33,6 +33,14 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
 
 1. READ `.claude/skills/cowork/skills/check-vault-routing/SKILL.md` in full and follow
    its `## Steps` section with `{ required: ["obsidian"] }`. If not `"ready"`, emit Notice `cowork:monthly-review aborted -- <status>` and exit.
+1b. **Verbal commitment (v0.91.1).** Before any other action, emit Obsidian Notice as a binding commitment:
+
+   ```
+   cowork:monthly-review committing to canonical write path: spice/cowork/monthly/<YYYY>/<YYYY-MM>/monthly-review.md (NOT spice/daily/)
+   ```
+
+   Prose-side layer for path commitment; the v0.91.1 write-guard in `cowork:write-run-note-monthly-review` enforces the canonical path deterministically at write time.
+
 2. **Resolve engagement.** Read `<vault>/spice/cowork/context/vault-config.md`; look up engagement by id. If not found, exit silently. Read the engagement-type manifest via the Read tool at `spice/cowork/context/engagement-types/<engagement.type>.json` (expected values: `personal`, `w2-fte`, `consulting`). Parse as JSON; capture `engagement` + `render_aspects`. If the file is missing or fails to parse, emit Notice `cowork:monthly-review aborted -- engagement-type manifest unavailable at spice/cowork/context/engagement-types/<engagement.type>.json` and exit.
 3. READ `.claude/skills/cowork/skills/date-context/SKILL.md` in full and follow
    its `## Steps` section with `{}`. Capture `context` — critically `prev_month_start`, `prev_month_end`, `prev_month_label`, `prev_month_yyyymm`, plus today's `daily_path`. Also capture `month_start` / `month_end` (first / last day of `context.today`'s month, used as the prefs-driven dispatch range below).

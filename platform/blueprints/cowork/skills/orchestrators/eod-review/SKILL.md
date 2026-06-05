@@ -33,6 +33,14 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
 
 1. READ `.claude/skills/cowork/skills/check-vault-routing/SKILL.md` in full and follow
    its `## Steps` section with `{ required: ["obsidian"] }`. If not `"ready"`, emit Notice `cowork:eod-review aborted -- <status>` and exit.
+1b. **Verbal commitment (v0.91.1).** Before any other action, emit Obsidian Notice as a binding commitment:
+
+   ```
+   cowork:eod-review committing to canonical write path: spice/cowork/daily/<YYYY>/<MM-Month>/<YYYY-MM-DD>/eod-review.md (NOT spice/daily/<weekday>-<YYYY-MM-DD>.md)
+   ```
+
+   Prose-side layer for path commitment; the v0.91.1 write-guard in `cowork:write-run-note-eod-review` enforces the canonical path deterministically at write time.
+
 2. **Resolve engagement.** Read `<vault>/spice/cowork/context/vault-config.md`; look up engagement by id. If not found, exit silently. Read the engagement-type manifest via the Read tool at `spice/cowork/context/engagement-types/<engagement.type>.json` (expected values: `personal`, `w2-fte`, `consulting`). Parse as JSON; capture `engagement` + `render_aspects`. If the file is missing or fails to parse, emit Notice `cowork:eod-review aborted -- engagement-type manifest unavailable at spice/cowork/context/engagement-types/<engagement.type>.json` and exit.
 3. READ `.claude/skills/cowork/skills/date-context/SKILL.md` in full and follow
    its `## Steps` section with `{}`. Capture `context` (today, tomorrow, daily_path, tomorrow_daily_path, tomorrow_weekday).

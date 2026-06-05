@@ -4,6 +4,54 @@ This file archives the per-cycle status snapshots that previously lived in `CLAU
 
 ---
 
+## v0.91.1 (closed 2026-06-05) — orchestrator-write-guard + claude_surface-disambiguation + verbal-commitment PATCH
+
+Workshop 0.91.0 → **0.91.1** (PATCH). Three structural defenses against the recurring wrong-path bug surfacing AGAIN on accuris-laptop post-v0.91.0 deploy. The LLM wrote the morning-briefing atomic note to `spice/daily/Friday-2026-06-05.md` instead of canonical `spice/cowork/daily/2026/06-June/2026-06-05/morning-briefing.md` — same failure mode v0.90.2 was supposed to prevent. Headspace works correctly on the same machine.
+
+**Why accuris fails while headspace works:** the accuris consumer vault's CLAUDE.md carries LEGACY accuris content from before the vault adopted cowork. Specifically:
+- Line 23: `Daily note, ToDo, Meeting, Meetings hub, nav → Docs/Meta/Daily-Notes.md` (resolver row)
+- Line 53 (Non-Negotiables): *"Daily notes are gateways: navigation + free-form only."*
+- Line 57: *"Naming: daily YYYY-MM-DD-DayName.md"* — the EXACT pattern (`Friday-2026-06-05.md`) the LLM used today
+- Line 94: `| Daily | spice/daily | /daily |` (auto-generated resolvers row)
+
+These four signals compete with the orchestrator's `[!warning]+ CRITICAL` callout (v0.90.2). The LLM, attention-bounded by the long SKILL.md + the gather + compose steps, defers to vault-canonical CLAUDE.md rather than skill-body prose. Headspace's CLAUDE.md doesn't have those legacy daily-note rows so v0.90.2's callout suffices there.
+
+**Prose-only fixes have an LLM-attention ceiling.** v0.91.1 adds deterministic backstops.
+
+**Fix A — write-guard `## Pre-write self-check` clause in 5 `cowork:write-run-note-<orchestrator>` sub-skills.** REJECTS any computed write path that (1) starts with `spice/daily/`, (2) has basename matching `<weekday>-<YYYY-MM-DD>.md`, or (3) doesn't contain the canonical prefix (`spice/cowork/daily/` for morning/midday/eod, `spice/cowork/weekly/` for weekly, `spice/cowork/monthly/` for monthly). Returns `{ path, status: "failed:contract-violation:wrong-output-path" }`. Deterministic backstop: even if the orchestrator passes the LLM-computed wrong path to the sub-skill, the sub-skill itself refuses.
+
+**Fix B — claude_md_row disambiguation.** Adds `{kind: "claude_md_row", table: "resolvers", row: {topic: "Cowork Atomic Notes (cron output)", path: "{{module_directory}}/daily/", command: "(cron-only — NOT spice/daily/)"}}` to cowork manifest. After v0.91.1 install + `sauce update --bump-pins`, the consumer CLAUDE.md resolvers table gains a row for `spice/cowork/daily/` SIDE-BY-SIDE with the legacy `Daily | spice/daily | /daily` row + explicit "NOT spice/daily/" in the command column. LLMs reading the table see both surfaces with explicit disambiguation.
+
+**Fix C — verbal-commitment Notice at orchestrator pre-flight Step 1b.** In 5 orchestrators (morning-briefing, midday-tripwire, eod-review, weekly-review, monthly-review), adds Step 1b BEFORE the existing Step 2 (engagement resolution): emits Obsidian Notice `"cowork:<orchestrator> committing to canonical write path: <canonical> (NOT spice/daily/...)"`. Two purposes: (1) commit path to the LLM's working memory at run-start so it stays salient through long gather + compose steps, (2) create audit trail in the Obsidian Notice log if a wrong-path write happens despite the commitment.
+
+**Plus user-side Layer 1** (explicit-path scheduled-job prompt wrappers) provided in `Docs/plans/2026-06-05-v0.91.1-*-design.md` §8 — bakes the canonical path into the cron-job prompt itself so it's loaded with every invocation and stays top-of-context (most salient signal). User applies on the laptop for accuris cron jobs (5 cadence prompts to update).
+
+**Three-layer defense in depth** after v0.91.1:
+1. [!warning]+ CRITICAL callout at TOP of orchestrator SKILL.md (v0.90.2)
+2. Verbal-commitment Notice at orchestrator pre-flight Step 1b (v0.91.1 Fix C)
+3. Deterministic write-guard in write-run-note sub-skill (v0.91.1 Fix A) — refuses bad paths even if layers 1+2 fail
+
+Plus claude_surface disambiguation (Fix B) reduces CLAUDE.md ambiguity that caused the failure. Plus user-side prompt wrapper (Layer 1) puts the constraint in the most-loaded surface.
+
+**Versioning:** workshop 0.91.0 → 0.91.1 PATCH; cowork 0.29.0 → 0.29.1 PATCH; mechanism count unchanged at 17.
+
+**HC delta:** helper-cases 1687 → 1720 (+33: V0911-WRITE-GUARD-A1..E1 = 15; V0911-DISAMBIG-A1 = 3; V0911-COMMIT-A1..E1 = 15). Cowork-smoke 931 unchanged; claude-surface 207 unchanged; install 15 unchanged. Preflight `version-sync ok: 0.91.1` ALL GREEN.
+
+**Commits (2 + deploy):** `e83621e` (S0 design), S1 (this commit) all 3 fixes + 33 HC tests + version bumps + cycle-close.
+
+**Status:**
+- Write-guard in 5 write-run-note sub-skills: deterministic refusal of bad paths at write time.
+- Claude_surface disambiguation row: future CLAUDE.md resolver tables show both surfaces with explicit topic distinction.
+- Verbal-commitment Notice at Step 1b: working-memory aid for the LLM at run-start.
+- User-side Layer 1 prompt wrappers: provided in design doc; user updates accuris cron jobs on the laptop.
+- **Tomorrow's accuris morning briefing should write to canonical path** even if the LLM-attention bug recurs — between the user prompt wrapper + the deterministic write-guard, the wrong path is rejected at write time.
+
+**Cycle stack (2-day stretch):** 8 cycles shipped (v0.89.0 → v0.89.1 → v0.90.0 → v0.90.1 → v0.90.2 → v0.90.3 → v0.91.0 → v0.91.1). +404 HC sub-asserts (1316 → 1720). 36 hours of wall-clock.
+
+See `Docs/plans/2026-06-05-v0.91.1-orchestrator-write-guard-and-disambiguation-design.md`.
+
+---
+
 ## v0.91.0 (closed 2026-06-05) — cowork:find-missing-people MINOR
 
 Workshop 0.90.3 → **0.91.0** (MINOR). NEW orchestrator `cowork:find-missing-people` complementing v0.28.0 `cowork:discover-people` to close the dim-wikilink loop in cowork atomic notes.

@@ -113,6 +113,21 @@ When `prompt_body` was empty upstream (`warning == "empty_prompt"`), the orchest
 
 ## Pre-write self-check
 
+### v0.91.1 write-guard: canonical output path enforcement (FIRST CHECK)
+
+Before any other pre-write check, validate the computed write path against the canonical shape:
+
+`spice/cowork/monthly/<YYYY>/<YYYY-MM>/monthly-review.md`
+
+REJECT and return `{ path, status: "failed:contract-violation:wrong-output-path" }` if the computed `path` argument:
+
+1. Starts with `spice/daily/` — that's the daily-blueprint surface (hand-edited daily notes), NOT this sub-skill's output.
+2. Doesn't contain the canonical prefix `spice/cowork/monthly/`.
+
+Even if the orchestrator passes a wrong `path` argument, this guard catches it. This is the v0.91.1 deterministic backstop for v0.90.2's `[!warning]+ CRITICAL` orchestrator callout, which is prose-only and LLM-attention-bounded.
+
+### Original pre-write checklist
+
 BEFORE calling the Write tool, verify your composed output against this checklist. If any item fails, return `{ path, status: "failed:contract-violation:<field>" }` and do NOT write.
 
 **Frontmatter checks:**
