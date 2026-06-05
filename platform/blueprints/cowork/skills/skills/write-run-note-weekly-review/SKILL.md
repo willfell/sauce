@@ -165,7 +165,7 @@ BEFORE calling the Write tool, verify your composed output against this checklis
 - [ ] `engagement_id:`, `week:`, `generator:`, `prompt_source:` present
 
 **Body checks (regex-scan the composed body string):**
-- [ ] First non-frontmatter line opens a `SpaceNavButtons` dataviewjs fence (i.e. the line starts with ` ```dataviewjs` and is followed within 3 lines by `class: "SpaceNavButtons"`)
+- [ ] First non-frontmatter line opens a dataviewjs fence containing the v0.91.3 CANONICAL SpaceNavButtons invocation EXACTLY: opening ` ```dataviewjs` + body line `await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });` + closing ` ``` `. REJECT any other shape — in particular REJECT `const { SpaceNavButtons } = customJS; SpaceNavButtons(dv, {...})` (produces runtime TypeError; only the customjs-guard view pattern handles the load + fallback correctly).
 - [ ] At least one `> [!info]-` admonition present
 - [ ] At least one `> [!example]+` admonition present
 - [ ] Closing `> [!tip]` admonition present (last admonition in the body)

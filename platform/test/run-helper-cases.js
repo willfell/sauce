@@ -7778,7 +7778,7 @@ async function caseHCV0890VersionA() {
     if (ver && ver[1]) {
       assertTrue(
         `HC-V0890-VERSION-A: cowork === pin must be 0.28.0 (found ${ver[1]})`,
-        ver[1] === "0.29.2");
+        ver[1] === "0.29.3");
     }
   }
   if (eqMatches.length === 0) {
@@ -8119,7 +8119,7 @@ async function caseHCV0891Versions() {
   // A: cowork manifest pin
   const coworkMan = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "blueprints/cowork/manifest.json"), "utf8"));
-  assertEqual(coworkMan.version, "0.29.2", "HC-V0891-VERSION-A: cowork pin = 0.28.0 (v0.90.0 bump)");
+  assertEqual(coworkMan.version, "0.29.3", "HC-V0891-VERSION-A: cowork pin = 0.28.0 (v0.90.0 bump)");
 
   // B: daily manifest pin
   const dailyMan = JSON.parse(fs.readFileSync(
@@ -8131,10 +8131,10 @@ async function caseHCV0891Versions() {
     path.join(WORKSHOP, "manifest.json"), "utf8"));
   const wsVer = platformMan.workshop_version || platformMan.version
     || (platformMan.workshop && platformMan.workshop.version);
-  assertEqual(wsVer, "0.91.2", "HC-V0891-VERSION-C: workshop pin = 0.90.0 (v0.90.0 bump)");
+  assertEqual(wsVer, "0.91.3", "HC-V0891-VERSION-C: workshop pin = 0.90.0 (v0.90.0 bump)");
   const pkg = JSON.parse(fs.readFileSync(
     path.resolve(WORKSHOP, "..", "package.json"), "utf8"));
-  assertEqual(pkg.version, "0.91.2", "HC-V0891-VERSION-C: package.json = 0.90.0 (v0.90.0 bump)");
+  assertEqual(pkg.version, "0.91.3", "HC-V0891-VERSION-C: package.json = 0.90.0 (v0.90.0 bump)");
 
   // D: mechanism count unchanged
   const mechs = (platformMan.mechanisms && Array.isArray(platformMan.mechanisms))
@@ -9727,20 +9727,20 @@ async function caseHCV0891Versions() {
       // NOTE: top-level WORKSHOP at line 29 = path.resolve(__dirname, "../..") = workshop ROOT
       // (distinct from the local WORKSHOP inside caseHCV0891Versions which is platform/).
       const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
-      assertTrue("HC-V0900-VERSION-A: package.json version === '0.91.1'", pkg.version === "0.91.2");
+      assertTrue("HC-V0900-VERSION-A: package.json version === '0.91.1'", pkg.version === "0.91.3");
       const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
       assertTrue("HC-V0900-VERSION-B: platform/manifest.json workshop_version === '0.91.1'",
-        platMan.workshop_version === "0.91.2");
+        platMan.workshop_version === "0.91.3");
       const coworkMan = JSON.parse(fs.readFileSync(
         path.join(WORKSHOP, "platform/blueprints/cowork/manifest.json"), "utf8"));
       assertTrue("HC-V0900-VERSION-C: cowork manifest version === '0.29.1'",
-        coworkMan.version === "0.29.2");
+        coworkMan.version === "0.29.3");
       const sub = JSON.parse(fs.readFileSync(
         path.join(WORKSHOP, "ranch/platform-subscription.json"), "utf8"));
       const blueprints = sub.blueprints || sub.subscriptions || [];
       const cworkPin = blueprints.find(b => b.name === "cowork");
       assertTrue("HC-V0900-VERSION-D: ranch platform-subscription cowork pin === '0.29.1'",
-        cworkPin && cworkPin.version === "0.29.2");
+        cworkPin && cworkPin.version === "0.29.3");
     } catch (e) {
       assertTrue("HC-V0900-VERSION-A..D: version pin contract", false, e && e.message);
     }
@@ -9781,7 +9781,7 @@ async function caseHCV0891Versions() {
       const cw = (platMan.blueprints || []).find(b => b.name === "cowork");
       assertTrue("HC-V0901-CATALOGUE-A1: cowork present in workshop catalogue", !!cw);
       assertTrue("HC-V0901-CATALOGUE-A1: cowork catalogue pin === '0.29.1' (matches cowork's own manifest)",
-        cw && cw.version === "0.29.2");
+        cw && cw.version === "0.29.3");
     } catch (e) {
       assertTrue("HC-V0901-CATALOGUE-A1: catalogue sync contract", false, e && e.message);
     }
@@ -10346,6 +10346,80 @@ type: cowork-microscope
         body.includes("MICROSCOPES:") && body.includes("Output shape"));
     } catch (e) {
       assertTrue(`HC-V0912-COMMIT-${letter}1: extended commitment contract`, false, e && e.message);
+    }
+  });
+
+  // ============================================================================
+  // v0.91.3 HC-V0913-* — trust user-prefs + deferred-tool loading + dataviewjs regex tightening
+  // ============================================================================
+
+  // A: connectivity signal authority clause in 5 orchestrators
+  ["morning-briefing", "midday-tripwire", "eod-review", "weekly-review", "monthly-review"].forEach((orchName, idx) => {
+    const letter = String.fromCharCode(65 + idx);
+    const p = path.join(WORKSHOP, "platform/blueprints/cowork/skills/orchestrators/" + orchName + "/SKILL.md");
+    console.log(`\n--- Case HC-V0913-PREFS-${letter}1: ${orchName} connectivity signal authority ---`);
+    try {
+      const body = fs.readFileSync(p, "utf8");
+      assertTrue(`HC-V0913-PREFS-${letter}1: cites Connectivity signal authority v0.91.3`,
+        body.includes("Connectivity signal authority (v0.91.3)"));
+      assertTrue(`HC-V0913-PREFS-${letter}1: tells LLM to trust prefs.mcps`,
+        body.includes("trust `prefs.mcps"));
+      assertTrue(`HC-V0913-PREFS-${letter}1: tells LLM NOT to trust vault-config.mcp_map`,
+        body.includes("DO NOT trust `vault-config.mcp_map"));
+    } catch (e) {
+      assertTrue(`HC-V0913-PREFS-${letter}1: signal authority contract`, false, e && e.message);
+    }
+  });
+
+  // B: deferred-tool loading MANDATORY clause in 5 orchestrators
+  ["morning-briefing", "midday-tripwire", "eod-review", "weekly-review", "monthly-review"].forEach((orchName, idx) => {
+    const letter = String.fromCharCode(65 + idx);
+    const p = path.join(WORKSHOP, "platform/blueprints/cowork/skills/orchestrators/" + orchName + "/SKILL.md");
+    console.log(`\n--- Case HC-V0913-TOOLS-${letter}1: ${orchName} deferred tool loading ---`);
+    try {
+      const body = fs.readFileSync(p, "utf8");
+      assertTrue(`HC-V0913-TOOLS-${letter}1: MANDATORY v0.91.3 deferred-tool clause present`,
+        body.includes("MANDATORY (v0.91.3): load deferred MCP tools UPFRONT"));
+      assertTrue(`HC-V0913-TOOLS-${letter}1: lists M365 tools`,
+        body.includes("chat_message_search") && body.includes("outlook_calendar_search"));
+      assertTrue(`HC-V0913-TOOLS-${letter}1: lists ADO tools`,
+        body.includes("list_workitems"));
+    } catch (e) {
+      assertTrue(`HC-V0913-TOOLS-${letter}1: tool-loading contract`, false, e && e.message);
+    }
+  });
+
+  // C.1: dataviewjs canonical pattern check in 5 write-run-note sub-skills
+  ["morning-briefing", "midday-tripwire", "eod-review", "weekly-review", "monthly-review"].forEach((orchName, idx) => {
+    const letter = String.fromCharCode(65 + idx);
+    const p = path.join(WORKSHOP, "platform/blueprints/cowork/skills/skills/write-run-note-" + orchName + "/SKILL.md");
+    console.log(`\n--- Case HC-V0913-DVJS-${letter}1: write-run-note-${orchName} canonical dataviewjs check ---`);
+    try {
+      const body = fs.readFileSync(p, "utf8");
+      assertTrue(`HC-V0913-DVJS-${letter}1: cites v0.91.3 CANONICAL SpaceNavButtons invocation`,
+        body.includes("v0.91.3 CANONICAL SpaceNavButtons invocation"));
+      assertTrue(`HC-V0913-DVJS-${letter}1: cites canonical pattern (dv.view + customjs-guard)`,
+        body.includes("ranch/views/customjs-guard") && body.includes("class: \"SpaceNavButtons\""));
+      assertTrue(`HC-V0913-DVJS-${letter}1: REJECTS hallucinated const { SpaceNavButtons } = customJS pattern`,
+        body.includes("REJECT") && body.includes("const { SpaceNavButtons } = customJS"));
+    } catch (e) {
+      assertTrue(`HC-V0913-DVJS-${letter}1: canonical dataviewjs contract`, false, e && e.message);
+    }
+  });
+
+  // C.2: tightened regex in 5 orchestrator Step 17 structural verify
+  ["morning-briefing", "midday-tripwire", "eod-review", "weekly-review", "monthly-review"].forEach((orchName, idx) => {
+    const letter = String.fromCharCode(65 + idx);
+    const p = path.join(WORKSHOP, "platform/blueprints/cowork/skills/orchestrators/" + orchName + "/SKILL.md");
+    console.log(`\n--- Case HC-V0913-VERIFY-${letter}1: ${orchName} Step 17 regex tightening ---`);
+    try {
+      const body = fs.readFileSync(p, "utf8");
+      assertTrue(`HC-V0913-VERIFY-${letter}1: Step 17 cites v0.91.3 canonical pattern in regex annotation`,
+        body.includes("v0.91.3 canonical pattern"));
+      assertTrue(`HC-V0913-VERIFY-${letter}1: regex includes await dv.view + customjs-guard`,
+        body.includes("await") && body.includes("dv\\.view") && body.includes("customjs-guard"));
+    } catch (e) {
+      assertTrue(`HC-V0913-VERIFY-${letter}1: regex tightening contract`, false, e && e.message);
     }
   });
 

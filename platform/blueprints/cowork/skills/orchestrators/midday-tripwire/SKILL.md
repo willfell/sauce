@@ -59,6 +59,8 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
    its `## Steps` section with `{}`. Capture as `prefs_result = { prefs, status, reason }`. Capture `prefs = prefs_result.prefs` (may be null when `status != "ok"`). Do NOT abort on `status != "ok"`; continue with legacy fallback (see step 3c).
 3c. **Plan dispatch.** Determine dispatch mode and build the priority-ordered dispatch plan.
 
+   **Connectivity signal authority (v0.91.3):** trust `prefs.mcps[<kind>].served_by` + `prefs.mcps[<kind>].connected` for namespace + connectivity. DO NOT trust `vault-config.mcp_map` for connectivity — that field is bootstrap-time-only, stale-prone. Cross-reference `prefs.mcps[<kind>].served_by` with `reachable_namespaces` for final dispatch action.
+
    Compute `dispatch_mode`:
 
    ```
@@ -188,6 +190,8 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
 
 > **MANDATORY:** When `dispatch_mode == "prefs"`, execute the priority loop for EVERY entry in `dispatch_plan`. Do NOT skip the loop in favor of memory-tick synthesis. Memory ticks are SUPPLEMENTARY context for the `[!info]- Today at a glance` synopsis section; they DO NOT replace live MCP gather output. When a kind's `action == "warn"`, emit the warning callout in-position via `composeWarningCallout`; do NOT silently drop it. Failing to fire the priority loop means the dispatch contract's "Known people in scope" wikilink instruction never reaches the LLM, and inner-circle names render as plaintext instead of `**[[Name]]**` wikilinks.
 
+> **MANDATORY (v0.91.3): load deferred MCP tools UPFRONT.** Before the priority loop, for each kind in `dispatch_plan` with `action == "gather_from_served_by"` or `action == "gather_canonical"`, load the required deferred tools from the kind's `served_by` namespace via Tool Search / Load. M365 (UUID `45224a84-...`): `chat_message_search`, `outlook_calendar_search`, `outlook_email_search`. ADO (UUID like `1151913a-...`): `list_workitems`, `search_workitems`. github: `search_pull_requests`, `search_issues`. If a tool isn't loaded when its gather sub-skill needs it, the sub-skill cannot execute and you silently fall back to a warning callout — the deterministic fix for the "MCP tools require loading" failure.
+
 When `dispatch_mode == "legacy"`, execute the v0.77.0 legacy gather sequence below verbatim. `ordered_blocks[]` stays empty.
 
 When `dispatch_mode == "prefs"`, skip the legacy steps; execute the priority-loop:
@@ -301,7 +305,7 @@ Each gather call passes `engagement_id`. The orchestrator branches per-aspect fr
       - `severity:` (must match `/^(warn|alert)$/`)
       - `warning:` only when the orchestrator passed a non-null `warning` to write-run-note (otherwise the field is allowed to be absent or `null`).
    d. Regex-scan `body` for required structural markers:
-      - SpaceNavButtons block: `/```dataviewjs\n[\s\S]*?SpaceNavButtons[\s\S]*?```/`
+      - SpaceNavButtons block (v0.91.3 canonical pattern — REJECTS hallucinated `const { SpaceNavButtons } = customJS` shape): `/```dataviewjs\s*\n\s*await\s+dv\.view\(\s*["']ranch\/views\/customjs-guard["']\s*,\s*\{\s*class:\s*["']SpaceNavButtons["']\s*\}\s*\)/`
       - At least one Synopsis callout: `/^> \[!info\]- /m`
       - At least one example callout: `/^> \[!example\]\+ /m`
       - Closing tip callout: `/^> \[!tip\] /m`
