@@ -9694,6 +9694,29 @@ async function caseHCV0891Versions() {
     }
   }
 
+  // ============================================================================
+  // v0.90.0 HC-V0900-DISCOVER-SKILL-* — orchestrator SKILL.md prose contract
+  // ============================================================================
+
+  {
+    console.log("\n--- Case HC-V0900-DISCOVER-SKILL-A1..A5: discover-people SKILL.md ---");
+    try {
+      const p = path.join(WORKSHOP, "platform/blueprints/cowork/skills/orchestrators/discover-people/SKILL.md");
+      const body = fs.readFileSync(p, "utf8");
+      assertTrue("HC-V0900-DISCOVER-SKILL-A1: SKILL.md exists and is non-empty", body.length > 0);
+      assertTrue("HC-V0900-DISCOVER-SKILL-A2: declares cowork:check-vault-routing + cowork:resolve-person dependencies",
+        body.includes("cowork:check-vault-routing") && body.includes("cowork:resolve-person"));
+      assertTrue("HC-V0900-DISCOVER-SKILL-A3: documents default-if-one engagement resolution",
+        body.includes("default-if-one") || body.includes("auto-pick"));
+      assertTrue("HC-V0900-DISCOVER-SKILL-A4: documents batch-confirm UX",
+        body.includes("batch-confirm") || body.includes("single batch-confirm"));
+      assertTrue("HC-V0900-DISCOVER-SKILL-A5: documents landmine #12 .bak backup convention for sibling writes",
+        body.includes(".bak") && body.includes("landmine #12"));
+    } catch (e) {
+      assertTrue("HC-V0900-DISCOVER-SKILL-A1..A5: SKILL.md prose contract", false, e && e.message);
+    }
+  }
+
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
   if (fail > 0) {
