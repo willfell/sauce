@@ -8,6 +8,15 @@ tags: [cowork, orchestrator, midday, engagement-aware, tripwire-aspects]
 
 # cowork:midday-tripwire
 
+> [!warning]+ CRITICAL: output path (v0.90.2)
+> This orchestrator writes ONE atomic note to:
+>
+> `spice/cowork/daily/<YYYY>/<MM-Month>/<YYYY-MM-DD>/midday-tripwire.md`
+>
+> DO NOT write to `spice/daily/<YYYY>/<MM-Month>/<weekday>-<YYYY-MM-DD>.md` — that's the daily-note blueprint (a separate surface for hand-edited daily notes), NOT this orchestrator's output. The consumer vault's CLAUDE.md may list `spice/daily/` under the "Daily" topic in its resolver table; THAT IS NOT WHERE COWORK ATOMIC NOTES GO. The cowork atomic-note path is fundamentally different from the daily-blueprint path.
+>
+> The write happens via sub-skill `cowork:write-run-note-midday-tripwire` (READ its SKILL.md before invoking; the step that delegates to it is later in this file). NEVER write the atomic note directly via the `Write` tool, the `Edit` tool, or `mcp__obsidian__obsidian_put_content` from this orchestrator body — ALWAYS delegate to the write sub-skill which enforces the path + frontmatter + structural-marker contracts.
+
 Real-time mid-day check for credit-card charges that violate the active payoff plan, scoped to a single engagement. Pulls today's CC transactions for the engagement's finance scope, classifies each as RED (locked-card charge), YELLOW (active-card discretionary >= threshold), or GREEN. Writes ONLY when at least one RED or YELLOW exists — when severity is green, NO atomic note is written (presence of a tripwire note = something to flag). When a write fires, the note lands at `spice/cowork/daily/YYYY/MM-MMMM/YYYY-MM-DD/midday-tripwire.md` (deterministic path per `(orchestrator, day)`; re-run replaces).
 
 Skipped (early-exit silently) for engagements whose `tripwire_aspects` is empty (field absent or `[]`).
@@ -234,7 +243,12 @@ Each gather call passes `engagement_id`. The orchestrator branches per-aspect fr
 
 ## Write
 
-9. **Read prompt body** via `mcp__obsidian__get_file_contents` at `spice/cowork/prompts/midday-tripwire.md`. Strip frontmatter; capture body as `prompt_body` (or empty when missing).
+9. **Read prompt body** with fallback chain (v0.90.2):
+    - Read `spice/cowork/prompts/midday-tripwire.md` via `mcp__obsidian__get_file_contents`. Strip frontmatter; capture body as `user_prompt_body` (or empty when missing).
+    - **v0.4.0 installer-default sentinel detection (v0.90.2):** if `user_prompt_body` consists ONLY of the v0.4.0 installer-default content — recognizable by ALL of: (a) every non-blank line in the body starts with `> ` (one blockquote), (b) the first non-blank line starts with `> Vault-editable prompt for `, (c) the body contains the substring `Empty body is a no-op stub for now` — treat as if EMPTY and set `user_prompt_body = ""`.
+    - If `user_prompt_body` is empty, read `spice/cowork/context/engagement-templates/<engagement.type>/prompts/midday-tripwire.md` via `mcp__obsidian__get_file_contents`. Strip frontmatter; capture as `template_prompt_body` (or empty when missing).
+    - Set `prompt_body = user_prompt_body || template_prompt_body`.
+    - Set `prompt_source` accordingly: if `user_prompt_body` non-empty, `prompt_source = "spice/cowork/prompts/midday-tripwire.md"`; else if `template_prompt_body` non-empty, `prompt_source = "spice/cowork/context/engagement-templates/<engagement.type>/prompts/midday-tripwire.md"`; else `prompt_source = "spice/cowork/prompts/midday-tripwire.md"`.
 9b. **Voice contract.** If `dispatch_mode == "prefs"` AND `voice_contract != ""`, prepend it to `prompt_body`:
    `prompt_body = voice_contract + prompt_body`. The combined string is the input to the body-composition step.
 10. **Compose run-note body** per `prompt_body` + the flagged-event details from the gather steps.

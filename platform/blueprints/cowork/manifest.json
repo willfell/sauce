@@ -250,23 +250,28 @@
     },
     {
       "source": "content/prompts/morning-briefing.md",
-      "dest": "{{module_directory}}/prompts/morning-briefing.md"
+      "dest": "{{module_directory}}/prompts/morning-briefing.md",
+      "materialize_once": true
     },
     {
       "source": "content/prompts/eod-review.md",
-      "dest": "{{module_directory}}/prompts/eod-review.md"
+      "dest": "{{module_directory}}/prompts/eod-review.md",
+      "materialize_once": true
     },
     {
       "source": "content/prompts/weekly-review.md",
-      "dest": "{{module_directory}}/prompts/weekly-review.md"
+      "dest": "{{module_directory}}/prompts/weekly-review.md",
+      "materialize_once": true
     },
     {
       "source": "content/prompts/monthly-review.md",
-      "dest": "{{module_directory}}/prompts/monthly-review.md"
+      "dest": "{{module_directory}}/prompts/monthly-review.md",
+      "materialize_once": true
     },
     {
       "source": "content/prompts/midday-tripwire.md",
-      "dest": "{{module_directory}}/prompts/midday-tripwire.md"
+      "dest": "{{module_directory}}/prompts/midday-tripwire.md",
+      "materialize_once": true
     },
     {
       "source": "helpers/cowork-daily-hub-cards.js",

@@ -9805,6 +9805,75 @@ async function caseHCV0891Versions() {
     }
   }
 
+  // ============================================================================
+  // v0.90.2 HC-V0902-PATH-* + HC-V0902-SENTINEL-* + HC-V0902-MATERIALIZE-* + HC-V0902-SOURCE-*
+  // ============================================================================
+
+  // PATH callouts in 5 orchestrators (2 sub-asserts each = 10 total)
+  ["morning-briefing", "midday-tripwire", "eod-review", "weekly-review", "monthly-review"].forEach((orchName, idx) => {
+    const letter = String.fromCharCode(65 + idx);  // A..E
+    const p = path.join(WORKSHOP, "platform/blueprints/cowork/skills/orchestrators", orchName, "SKILL.md");
+    console.log(`\n--- Case HC-V0902-PATH-${letter}1: ${orchName} CRITICAL output-path callout ---`);
+    try {
+      const body = fs.readFileSync(p, "utf8");
+      assertTrue(`HC-V0902-PATH-${letter}1: ${orchName} has CRITICAL output path callout with [!warning]+`,
+        body.includes("[!warning]+ CRITICAL: output path"));
+      assertTrue(`HC-V0902-PATH-${letter}1: ${orchName} callout forbids spice/daily path`,
+        body.includes("DO NOT write to `spice/daily/"));
+    } catch (e) {
+      assertTrue(`HC-V0902-PATH-${letter}1: ${orchName} CRITICAL callout contract`, false, e && e.message);
+    }
+  });
+
+  // SENTINEL detection in 5 orchestrators (1 sub-assert each = 5 total)
+  ["morning-briefing", "midday-tripwire", "eod-review", "weekly-review", "monthly-review"].forEach((orchName, idx) => {
+    const letter = String.fromCharCode(65 + idx);
+    const p = path.join(WORKSHOP, "platform/blueprints/cowork/skills/orchestrators", orchName, "SKILL.md");
+    console.log(`\n--- Case HC-V0902-SENTINEL-${letter}1: ${orchName} v0.4.0 sentinel detection ---`);
+    try {
+      const body = fs.readFileSync(p, "utf8");
+      assertTrue(`HC-V0902-SENTINEL-${letter}1: ${orchName} Step has v0.4.0 sentinel detection`,
+        body.includes("v0.4.0 installer-default sentinel detection") &&
+        body.includes("Empty body is a no-op stub for now"));
+    } catch (e) {
+      assertTrue(`HC-V0902-SENTINEL-${letter}1: ${orchName} sentinel contract`, false, e && e.message);
+    }
+  });
+
+  // MATERIALIZE_ONCE on 5 prompt manifest entries (5 sub-asserts)
+  {
+    console.log("\n--- Case HC-V0902-MATERIALIZE-A1: 5 prompt files[] entries have materialize_once:true ---");
+    try {
+      const m = JSON.parse(fs.readFileSync(
+        path.join(WORKSHOP, "platform/blueprints/cowork/manifest.json"), "utf8"));
+      ["morning-briefing", "midday-tripwire", "eod-review", "weekly-review", "monthly-review"].forEach(orchName => {
+        const entry = (m.files || []).find(f => f.source === `content/prompts/${orchName}.md`);
+        assertTrue(`HC-V0902-MATERIALIZE-A1: ${orchName} entry has materialize_once: true`,
+          entry && entry.materialize_once === true);
+      });
+    } catch (e) {
+      assertTrue("HC-V0902-MATERIALIZE-A1: materialize_once contract", false, e && e.message);
+    }
+  }
+
+  // SOURCE prompt files are emptied (frontmatter only) — 5 sub-asserts
+  {
+    console.log("\n--- Case HC-V0902-SOURCE-A1: 5 source prompt files are truly empty (frontmatter only) ---");
+    try {
+      ["morning-briefing", "midday-tripwire", "eod-review", "weekly-review", "monthly-review"].forEach(orchName => {
+        const body = fs.readFileSync(
+          path.join(WORKSHOP, `platform/blueprints/cowork/content/prompts/${orchName}.md`), "utf8");
+        // Strip frontmatter and check remaining body is whitespace-only
+        const m = body.match(/^---\s*\n[\s\S]*?\n---\s*\n([\s\S]*)$/);
+        const remaining = m ? m[1].trim() : body.trim();
+        assertTrue(`HC-V0902-SOURCE-A1: ${orchName} source has no body content (was v0.4.0 installer-default; now empty)`,
+          remaining === "");
+      });
+    } catch (e) {
+      assertTrue("HC-V0902-SOURCE-A1: empty source contract", false, e && e.message);
+    }
+  }
+
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
   if (fail > 0) {
