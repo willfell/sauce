@@ -10049,6 +10049,174 @@ type: cowork-microscope
     }
   }
 
+  // ============================================================================
+  // v0.91.0 HC-V0910-* — find-missing-people helper
+  // ============================================================================
+
+  const FMP = require(path.join(WORKSHOP, "platform/blueprints/cowork/helpers/find-missing-people-helper.js"));
+
+  // A1: scanAtomicNoteForWikilinks extracts [[Name]] wikilinks
+  {
+    console.log("\n--- Case HC-V0910-A1: scanAtomicNoteForWikilinks ---");
+    try {
+      const body = `# Briefing\n\n[[Ellen Senders]] needs reply. [[Diana]] at 12 days.\n\n![[Memory log]] (embed should be ignored)\n\n[[spice/cowork/daily/path|Daily]] (path-shaped, kept by parser; filter rejects later).\n\n[[Stefan de Pagter]] mentioned twice: [[Stefan de Pagter]].`;
+      const out = FMP.scanAtomicNoteForWikilinks(body);
+      assertTrue("HC-V0910-A1: extracts Ellen Senders", out.includes("Ellen Senders"));
+      assertTrue("HC-V0910-A1: extracts Diana", out.includes("Diana"));
+      assertTrue("HC-V0910-A1: extracts Stefan de Pagter once (dedup)",
+        out.filter(n => n === "Stefan de Pagter").length === 1);
+      assertTrue("HC-V0910-A1: extracts path-shaped target (filter handles later)",
+        out.some(n => n.includes("spice/cowork/daily")));
+      assertTrue("HC-V0910-A1: REJECTS embed (![[Memory log]])",
+        !out.includes("Memory log"));
+    } catch (e) {
+      assertTrue("HC-V0910-A1: scan contract", false, e && e.message);
+    }
+  }
+
+  // B1: filterToPersonShapedWikilinks
+  {
+    console.log("\n--- Case HC-V0910-B1: filterToPersonShapedWikilinks ---");
+    try {
+      const input = [
+        "Ellen Senders",        // person, keep
+        "spice/cowork/daily/2026/06-June/2026-06-05/morning-briefing.md",  // path-shaped, reject
+        "Memory log — 2026-06-05",  // contains digits + em-dash, reject
+        "AWS",                  // abbreviation, reject
+        "Cap1 Platinum",        // card, reject
+        "Diana",                // person, keep
+        "Stefan de Pagter",     // person, keep
+        "page.md",              // .md extension, reject
+        "",                     // empty, reject
+      ];
+      const out = FMP.filterToPersonShapedWikilinks(input);
+      assertTrue("HC-V0910-B1: keeps Ellen Senders", out.includes("Ellen Senders"));
+      assertTrue("HC-V0910-B1: keeps Diana", out.includes("Diana"));
+      assertTrue("HC-V0910-B1: keeps Stefan de Pagter", out.includes("Stefan de Pagter"));
+      assertTrue("HC-V0910-B1: rejects path-shaped",
+        !out.some(n => n.includes("/")));
+      assertTrue("HC-V0910-B1: rejects .md extensions",
+        !out.includes("page.md"));
+      assertTrue("HC-V0910-B1: rejects AWS (abbreviation)",
+        !out.includes("AWS"));
+      assertTrue("HC-V0910-B1: rejects Cap1 Platinum (card)",
+        !out.includes("Cap1 Platinum"));
+    } catch (e) {
+      assertTrue("HC-V0910-B1: filter contract", false, e && e.message);
+    }
+  }
+
+  // C1: aggregateWikilinksAcrossNotes — dedups + tracks surface_count + first/last seen
+  {
+    console.log("\n--- Case HC-V0910-C1: aggregateWikilinksAcrossNotes ---");
+    try {
+      const surfaces = [
+        { path: "spice/cowork/daily/2026/06-June/2026-06-03/morning-briefing.md", date: "2026-06-03", body: "[[Ellen Senders]] dinner" },
+        { path: "spice/cowork/daily/2026/06-June/2026-06-04/morning-briefing.md", date: "2026-06-04", body: "[[Ellen Senders]] follow-up. [[Diana]] quiet." },
+        { path: "spice/cowork/daily/2026/06-June/2026-06-05/morning-briefing.md", date: "2026-06-05", body: "[[Ellen Senders]] tonight. [[Diana]] 12 days." },
+      ];
+      const out = FMP.aggregateWikilinksAcrossNotes(surfaces);
+      const ellen = out.find(c => c.name === "Ellen Senders");
+      assertTrue("HC-V0910-C1: Ellen Senders aggregated", !!ellen);
+      assertTrue("HC-V0910-C1: Ellen count === 3", ellen && ellen.count === 3);
+      assertTrue("HC-V0910-C1: Ellen first_seen === 2026-06-03", ellen && ellen.first_seen === "2026-06-03");
+      assertTrue("HC-V0910-C1: Ellen last_seen === 2026-06-05", ellen && ellen.last_seen === "2026-06-05");
+      const diana = out.find(c => c.name === "Diana");
+      assertTrue("HC-V0910-C1: Diana count === 2", diana && diana.count === 2);
+    } catch (e) {
+      assertTrue("HC-V0910-C1: aggregate contract", false, e && e.message);
+    }
+  }
+
+  // D1: filterToMissingPeople
+  {
+    console.log("\n--- Case HC-V0910-D1: filterToMissingPeople ---");
+    try {
+      const candidates = [
+        { name: "Ellen Senders", count: 3 },
+        { name: "Diana", count: 2 },
+        { name: "Stefan de Pagter", count: 1 },
+      ];
+      const existing = ["Stefan de Pagter", "Jon Levin"];
+      const out = FMP.filterToMissingPeople(candidates, existing);
+      assertTrue("HC-V0910-D1: Ellen Senders missing", out.some(c => c.name === "Ellen Senders"));
+      assertTrue("HC-V0910-D1: Diana missing", out.some(c => c.name === "Diana"));
+      assertTrue("HC-V0910-D1: Stefan de Pagter NOT missing (exists)",
+        !out.some(c => c.name === "Stefan de Pagter"));
+    } catch (e) {
+      assertTrue("HC-V0910-D1: missing contract", false, e && e.message);
+    }
+  }
+
+  // E1: composePersonNoteStubFromSurfaces
+  {
+    console.log("\n--- Case HC-V0910-E1: composePersonNoteStubFromSurfaces ---");
+    try {
+      const stub = FMP.composePersonNoteStubFromSurfaces({
+        canonical_name: "Ellen Senders",
+        surfaced_in: [
+          { path: "spice/cowork/daily/2026/06-June/2026-06-04/morning-briefing.md", date: "2026-06-04" },
+          { path: "spice/cowork/daily/2026/06-June/2026-06-05/morning-briefing.md", date: "2026-06-05" },
+        ],
+        first_seen: "2026-06-04",
+        last_seen: "2026-06-05",
+        count: 2,
+      });
+      assertTrue("HC-V0910-E1: stub has name field", stub.includes("name: Ellen Senders"));
+      assertTrue("HC-V0910-E1: stub credits cowork:find-missing-people",
+        stub.includes("created_by: cowork:find-missing-people"));
+      assertTrue("HC-V0910-E1: stub has discovered_from frontmatter",
+        stub.includes("discovered_from:"));
+      assertTrue("HC-V0910-E1: stub has first_seen / last_seen", stub.includes("first_seen:") && stub.includes("last_seen:"));
+      assertTrue("HC-V0910-E1: stub body has source-listing callout",
+        stub.includes("Discovered by cowork:find-missing-people"));
+    } catch (e) {
+      assertTrue("HC-V0910-E1: stub contract", false, e && e.message);
+    }
+  }
+
+  // F1: composeReviewTable
+  {
+    console.log("\n--- Case HC-V0910-F1: composeReviewTable ---");
+    try {
+      const table = FMP.composeReviewTable([
+        { name: "Ellen Senders", count: 8, first_seen: "2026-05-15", last_seen: "2026-06-05",
+          surfaced_in: [{path: "a.md", date: "2026-05-15"}, {path: "b.md", date: "2026-06-05"}] },
+        { name: "Diana", count: 3, first_seen: "2026-06-03", last_seen: "2026-06-05",
+          surfaced_in: [{path: "c.md", date: "2026-06-03"}] },
+        { name: "Galen Gossman", count: 1, first_seen: "2026-06-05", last_seen: "2026-06-05",
+          surfaced_in: [{path: "d.md", date: "2026-06-05"}] },
+      ]);
+      assertTrue("HC-V0910-F1: HIGH tier present (count>5)", table.includes("HIGH (1)"));
+      assertTrue("HC-V0910-F1: MEDIUM tier present (count 2-5)", table.includes("MEDIUM (1)"));
+      assertTrue("HC-V0910-F1: LOW tier present (count<=1)", table.includes("LOW (1)"));
+      assertTrue("HC-V0910-F1: names appear", table.includes("Ellen Senders") && table.includes("Diana") && table.includes("Galen Gossman"));
+      assertTrue("HC-V0910-F1: row numbers emit", /\|\s+1\s+\|/.test(table));
+    } catch (e) {
+      assertTrue("HC-V0910-F1: review table contract", false, e && e.message);
+    }
+  }
+
+  // G1: composeReport
+  {
+    console.log("\n--- Case HC-V0910-G1: composeReport ---");
+    try {
+      const report = FMP.composeReport({
+        applied: [{canonical_name: "Ellen Senders", count: 3, last_seen: "2026-06-05"}],
+        skipped: [{canonical_name: "Galen Gossman", reason: "user skipped"}],
+        scanned_count: 25,
+        days_back: 30,
+        engagement_id: "headspace",
+      });
+      assertTrue("HC-V0910-G1: report cites engagement", report.includes("headspace"));
+      assertTrue("HC-V0910-G1: report cites scanned_count", report.includes("25"));
+      assertTrue("HC-V0910-G1: report lists Ellen as applied", report.includes("Ellen Senders"));
+      assertTrue("HC-V0910-G1: report lists Galen as skipped", report.includes("Galen Gossman"));
+    } catch (e) {
+      assertTrue("HC-V0910-G1: report contract", false, e && e.message);
+    }
+  }
+
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
   if (fail > 0) {

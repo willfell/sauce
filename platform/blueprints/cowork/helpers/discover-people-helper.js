@@ -523,4 +523,8 @@ module.exports = {
     composeUpdatedVaultConfig,
     composeReviewTable,
     composeReport,
+    // v0.91.0: exposed for find-missing-people-helper.js to reuse the
+    // person-name filter logic (KNOWN_NON_PERSON_NAMES + _isLikelyPersonName).
+    _isLikelyPersonName,
+    KNOWN_NON_PERSON_NAMES,
 };
