@@ -1,6 +1,6 @@
 {
   "name": "cowork",
-  "version": "0.28.2",
+  "version": "0.29.0",
   "kind": "blueprint",
   "module_directory": "cowork",
   "engagement_types_dir": "engagement-types",
@@ -377,6 +377,15 @@
     {
       "source": "skills/orchestrators/discover-people/SKILL.md",
       "dest": "{{skills_dir}}/discover-people/SKILL.md"
+    },
+    {
+      "source": "helpers/find-missing-people-helper.js",
+      "dest": "{{module_directory}}/helpers/find-missing-people-helper.js",
+      "tag": "platform"
+    },
+    {
+      "source": "skills/orchestrators/find-missing-people/SKILL.md",
+      "dest": "{{skills_dir}}/find-missing-people/SKILL.md"
     }
   ],
   "claude_surface": [
@@ -690,6 +699,20 @@
         "topic": "Cowork Discover People",
         "path": "{{module_directory}}/skills/orchestrators/discover-people/SKILL.md",
         "command": "/cowork discover-people"
+      }
+    },
+    {
+      "kind": "skill",
+      "source": "skills/orchestrators/find-missing-people/SKILL.md",
+      "dest": "{{skills_dir}}/find-missing-people/SKILL.md"
+    },
+    {
+      "kind": "claude_md_row",
+      "table": "resolvers",
+      "row": {
+        "topic": "Cowork Find Missing People",
+        "path": "{{module_directory}}/skills/orchestrators/find-missing-people/SKILL.md",
+        "command": "/cowork find-missing-people"
       }
     }
   ],

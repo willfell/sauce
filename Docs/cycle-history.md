@@ -4,6 +4,47 @@ This file archives the per-cycle status snapshots that previously lived in `CLAU
 
 ---
 
+## v0.91.0 (closed 2026-06-05) — cowork:find-missing-people MINOR
+
+Workshop 0.90.3 → **0.91.0** (MINOR). NEW orchestrator `cowork:find-missing-people` complementing v0.28.0 `cowork:discover-people` to close the dim-wikilink loop in cowork atomic notes.
+
+**Problem:** Atomic notes (morning-briefing, midday-tripwire, eod-review, weekly-review, monthly-review) emit `[[Person]]` wikilinks for people surfaced from memory ticks + gather output. When the target `spice/people/<Name>.md` doesn't exist, Obsidian renders the wikilink dim ("greyed out"). The headspace 2026-06-05 morning briefing had `[[Ellen Senders]]` dimmed because Ellen wasn't in the chat microscope's strict "Inner circle (people):" section (she lives in "Open loops" / elevation sections); v0.28.0 discover-people therefore didn't promote her, and no person-note stub was created. Many other surfaced names (Mo Holton, Evie, Andres Cornejo, Galen Gossman, David Panlilio, etc.) have the same shape.
+
+**Solution:** find-missing-people scans the last N days (default 30) of atomic notes for `[[Name]]` wikilinks, filters to person-shape candidates (reusing v0.90.3's KNOWN_NON_PERSON_NAMES), diffs against existing `spice/people/<name>.md` files, and offers to batch-create stubs with `discovered_from` frontmatter listing the source atomic notes. The two skills compose: discover-people fills the inner_circle_people allowlist from microscopes; find-missing-people fills the person-note repository from atomic-note emission.
+
+**Skill placement:**
+- NEW orchestrator at `platform/blueprints/cowork/skills/orchestrators/find-missing-people/SKILL.md`. Reachable via `/cowork find-missing-people [<engagement_id>] [days_back=30]`. User-invoked only.
+- `[!warning]+ CRITICAL: output path (v0.91.0)` callout at top per v0.90.2 convention — names canonical `spice/people/<basename>.md` write path; forbids cowork-cadence-atomic-note writes from this orchestrator.
+
+**NEW pure helper `find-missing-people-helper.js`** exports 7 functions:
+- `scanAtomicNoteForWikilinks(body) → string[]` — extracts every `[[Name]]` (group 1 of `(?<!!)\[\[([^\]|#]+?)(?:\|[^\]]+)?\]\]`); rejects embeds (`![[X]]`) and anchor links (`[[X#section]]`); supports aliased wikilinks (`[[Target|Display]]`).
+- `filterToPersonShapedWikilinks(wikilinks) → string[]` — rejects path-shaped (containing `/`), `.md`/`.canvas`/`.base` extensions, leading non-capital chars, then applies `_isLikelyPersonName` from discover-people-helper (v0.91.0 export) which checks KNOWN_NON_PERSON_NAMES + character set + token count.
+- `aggregateWikilinksAcrossNotes(noteSurfaces) → candidates[]` — given array of `{path, body, date}`, scans each + dedups names + accumulates `surfaced_in: [{path, date}]` + `surface_count` + `first_seen` / `last_seen` (lexicographic date compare).
+- `filterToMissingPeople(candidates, existing_person_basenames) → candidates[]` — case-insensitive diff.
+- `composePersonNoteStubFromSurfaces({canonical_name, surfaced_in, first_seen, last_seen, count}) → string` — v0.6.0 typed-alias frontmatter (`aliases: []`) + `created_by: cowork:find-missing-people` + `discovered_from: [{path, date}, ...]` (up to 10) + `first_seen` / `last_seen` / `surface_count` fields + `[!info]- Discovered by cowork:find-missing-people` body callout listing source atomic-note wikilinks.
+- `composeReviewTable(missingCandidates) → string` — markdown table grouped by surface-count tier: HIGH (>5 mentions), MEDIUM (2-5), LOW (1). Row format: `| # | Name | Mentions | First seen | Last seen | Sources |`. Numbered for batch-confirm UX.
+- `composeReport({applied, skipped, scanned_count, days_back, engagement_id}) → string` — final markdown report.
+
+**Orchestrator 12-step flow:** pre-flight (check-vault-routing + engagement resolve via default-if-one or ask-if-many + vault-config body capture + current_inner_circle parse) → date-context window (today - days_back through today) → enumerate atomic notes via list_files_in_dir per date dir → aggregate wikilinks via FMP helper → enumerate existing person notes via list_files_in_dir(spice/people/) → filter to missing → review (HIGH/MEDIUM/LOW table) → batch confirm (y/n/skip <rows>) → apply (composePersonNoteStubFromSurfaces + obsidian_put_content with pre-existence check) → optional inner-circle promotion (reuses v0.90.3-fixed composeUpdatedVaultConfig from discover-people-helper; `.bak` backup per landmine #12) → report.
+
+**Versioning:** workshop 0.90.3 → 0.91.0 MINOR; cowork 0.28.2 → 0.29.0 MINOR (new orchestrator + helper + 2 `files[]` entries with `tag: platform` on helper + 2 `claude_surface[]` entries: skill body materialization + claude_md_row resolver for `/cowork find-missing-people`); mechanism count unchanged at 17.
+
+**HC delta:** helper-cases 1647 → 1687 (+40: V0910-A1 = 5; V0910-B1 = 7; V0910-C1 = 5; V0910-D1 = 3; V0910-E1 = 5; V0910-F1 = 5; V0910-G1 = 4; V0910-SKILL-A1 = 6). Cowork-smoke 931 unchanged. Claude-surface 206 → 207 (+1 new orchestrator entry). Install 15 unchanged. Bumped stale pin tests: HC-V0900-VERSION + HC-V0901-CATALOGUE + HC-V0891-VERSION-A/C + V0750-VERSION cowork-smoke pin. Preflight `version-sync ok: 0.91.0` ALL GREEN.
+
+**Commits (4 + deploy):** `a96228d` (S0 design), `8ed0013` (S1 — helper + KNOWN_NON_PERSON_NAMES export from discover-people-helper + 34 HC tests), `825accf` (S2 — orchestrator SKILL.md + 6 HC SKILL-prose tests), S3 (this commit) manifest + version bumps + cycle-close + deploy.
+
+**Status:**
+- v0.28.0 discover-people + v0.29.0 find-missing-people compose: microscope→inner_circle + atomic-notes→person-notes-repository. Together they close the LLM-emits-wikilink-but-target-missing loop.
+- **After deploy + user runs `/cowork find-missing-people headspace`:** dim `[[Ellen Senders]]` in today's headspace morning briefing → resolves to real (stub) person note. Same for any other dim wikilinks across the last 30 days of atomic notes.
+- **NEW FLN-v91-1:** cowork.md slash-command body has grown with each new orchestrator. A meta-helper or template that auto-emits sub-command sections from `claude_surface[]` entries would reduce drift risk in future cycles. Queued.
+- FLN-v90-4 (closing-fence helper-hardening sweep) + WS-C v0.29.0+ MCP-discovery + FLN-v89-7 / v89-8 / v89-10 / v891-1 / v891-2 / v90-1 / v90-3 stay queued.
+
+**Cycle stack (2-day stretch):** 7 cycles shipped (v0.89.0 MINOR → v0.89.1 PATCH → v0.90.0 MINOR → v0.90.1 PATCH → v0.90.2 PATCH → v0.90.3 PATCH → v0.91.0 MINOR). +371 HC sub-asserts (1316 → 1687).
+
+See `Docs/plans/2026-06-05-v0.91.0-find-missing-people-design.md` + `-result.md`.
+
+---
+
 ## v0.90.3 (closed 2026-06-05) — discover-people-helper-bug-fixes + prose-extraction-fallback PATCH
 
 Workshop 0.90.2 → **0.90.3** (PATCH). Three coordinated fixes to `cowork:discover-people` surfaced by live `/cowork discover-people headspace` run earlier today (pre-v0.90.2 deploy).

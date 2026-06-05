@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop self-subscription. Pinned to the workshop's own manifest version.",
-  "workshop_version": "0.90.3",
+  "workshop_version": "0.91.0",
   "mechanisms": [
     {
       "name": "customjs-guard",
@@ -90,7 +90,7 @@
     },
     {
       "name": "cowork",
-      "version": "0.28.2"
+      "version": "0.29.0"
     }
   ]
 }
