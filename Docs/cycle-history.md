@@ -4,6 +4,62 @@ This file archives the per-cycle status snapshots that previously lived in `CLAU
 
 ---
 
+## v0.91.3 (closed 2026-06-05) — trust-user-prefs-over-vault-config + deferred-tool-loading + dataviewjs-regex-tightening PATCH
+
+Workshop 0.91.2 → **0.91.3** (PATCH). Three coordinated structural fixes after live accuris morning-briefing on 2026-06-05 produced a useless "MCP unavailable" stub-warning artifact while the SAME MACHINE's weekly-review run produced rich, accurate content WITHOUT consulting the orchestrator. Three distinct root causes attacked.
+
+**Fix A — Connectivity signal authority.** 5 orchestrator SKILL.md files (morning-briefing/midday-tripwire/eod-review/weekly-review/monthly-review) gain a "Connectivity signal authority (v0.91.3)" clause in Step 3c/3d dispatch plan: TRUST `prefs.mcps[<kind>].served_by` + `prefs.mcps[<kind>].connected` (recent, runtime-authoritative); DO NOT TRUST `vault-config.mcp_map` (bootstrap-time-only, stale-prone, audit hint not runtime signal). Cross-reference resolved served_by names against `reachable_namespaces[]` for final dispatch decision. Accuris vault-config.mcp_map had stale `gmail: missing` / `gcal: missing` entries (accuris uses M365, not Google) that the orchestrator was reading as runtime truth — causing it to emit "MCP unavailable" warnings instead of dispatching to the connected M365 served_by `45224a84-ce0e-459b-a016-909ab178ad8c`.
+
+**Fix B — Deferred MCP tool loading.** 5 orchestrators gain MANDATORY (v0.91.3) paragraph at top of `## Gather`, immediately after the existing MANDATORY priority-loop paragraph: "load deferred MCP tools UPFRONT before the priority loop." LLMs running orchestrators frequently encounter deferred-tool stubs (mcp__claude_ai_*, mcp__accuris-obsidian__*, mcp__plugin_*) at gather time, and silently fall back to warning callouts when invocation fails on a not-yet-loaded tool. Eager-load eliminates the silent-fallback path. Per-orchestrator candidate tool lists baked into the MANDATORY paragraph.
+
+**Fix C — Dataviewjs regex tightening.** 5 write-run-note sub-skills' canonical SpaceNavButtons invocation check + 5 orchestrator Step 17 regexes tightened to require canonical pattern:
+```
+/```dataviewjs\s*\n\s*await\s+dv\.view\(\s*["']ranch\/views\/customjs-guard["']\s*,\s*\{\s*class:\s*["']SpaceNavButtons["']\s*\}\s*\)/
+```
+Sub-skill check now EXPLICITLY REJECTS the hallucinated shape:
+```
+const { SpaceNavButtons } = customJS;
+SpaceNavButtons(dv, { type: "morning-briefing", ... });
+```
+This produces a `SpaceNavButtons is not a function` TypeError at render time because customJS exposes a `SpaceNavButtons` *class*, not a callable, and rendering goes through `customjs-guard` `dv.view`. Accuris morning-briefing on 2026-06-05 emitted the hallucinated invocation. The sub-skill regex backstop refuses the bad pattern even if the orchestrator's prose check passes.
+
+cowork@0.29.2 → 0.29.3 PATCH; workshop 0.91.2 → 0.91.3 PATCH; mechanism count unchanged at 17. 55 HC-V0913-* sub-asserts (PREFS-A1..E1 = 15; TOOLS-A1..E1 = 15; DVJS-A1..E1 = 15; VERIFY-A1..E1 = 10). Final smoke **1815 passed / 0 failed** (delta +55 from v0.91.2's 1760); cowork-smoke 931 / claude-surface 207 unchanged. Preflight `version-sync ok: 0.91.3` ALL GREEN.
+
+**Bundled data-layer fixes on accuris vault** (synced to laptop):
+- `vault-config.md` frontmatter closing `---` fence restored — pre-v0.90.3 discover-people-helper `composeUpdatedVaultConfig` corruption legacy where reconstruction missed `fmMatch[3]`.
+- `vault-config.md` mcp_map corrected — M365/github/ADO connected; gmail/gcal not_applicable (accuris is M365, not Google).
+- `user-preferences.md` `mcps.ado.served_by` updated from legacy alias `"accuris-ado"` to actual UUID `1151913a-530a-4a36-a5f6-3bedcab4e4da`.
+
+**Deliberate NON-trim** of orchestrator prose this cycle. v0.92.0 MINOR refactor candidate queued: move imperative prose (CRITICAL callouts, verbal commitments, write-guard reminders) to sub-skills; slim orchestrators to ~50-line dispatcher. Today's weekly-review success WITHOUT reading the orchestrator is the load-bearing evidence — orchestrator prose burden has hit LLM-attention ceiling. Three-layer defense in depth holds at v0.91.3:
+1. CRITICAL callout at top of orchestrator (v0.90.2).
+2. Verbal-commitment Notice at orchestrator pre-flight Step 1b (v0.91.1 Fix C).
+3. Deterministic write-guards: path (v0.91.1 Fix A) + frontmatter type (v0.91.2) + dataviewjs canonical pattern (v0.91.3 Fix C).
+
+**Cycle stack (2-day stretch):** 10 cycles shipped (v0.89.0 → v0.89.1 → v0.90.0 → v0.90.1 → v0.90.2 → v0.90.3 → v0.91.0 → v0.91.1 → v0.91.2 → v0.91.3). +499 HC sub-asserts (1316 → 1815). 38 hours of wall-clock.
+
+See `Docs/plans/2026-06-05-v0.91.3-trust-prefs-and-deferred-tools-design.md`.
+
+---
+
+## v0.91.2 (closed 2026-06-05) — frontmatter-write-guard PATCH
+
+Workshop 0.91.1 → **0.91.2** (PATCH). Defense-in-depth layer 2 atop v0.91.1's path write-guard. Accuris morning-briefing on 2026-06-05 wrote to the canonical path post-v0.91.1 deploy (Layer 1 fired correctly), but emitted wrong frontmatter `type: cowork-run-note` instead of canonical `type: cowork-morning-briefing`. The LLM hallucinated a generic stub type when the orchestrator's frontmatter spec wasn't salient by Step 16.
+
+**Fix** — 5 write-run-note sub-skills (`write-run-note-{morning-briefing,midday-tripwire,eod-review,weekly-review,monthly-review}`) gain a frontmatter `type:` validation clause in their `## Pre-write self-check` section. The clause REJECTS any computed frontmatter whose `type:` field is not the canonical per-orchestrator value:
+- `cowork-morning-briefing`
+- `cowork-midday-tripwire`
+- `cowork-eod-review`
+- `cowork-weekly-review`
+- `cowork-monthly-review`
+
+Returns `failed:contract-violation:wrong-frontmatter-type`. Companion guard to v0.91.1's path-write-guard — same architecture, different field. Three-layer defense in depth becomes four-layer at the sub-skill: orchestrator CRITICAL callout (v0.90.2) → verbal-commitment Notice (v0.91.1 Fix C) → path write-guard (v0.91.1 Fix A) → frontmatter write-guard (v0.91.2). Each layer is salience-independent — even if all prose layers fail to register, the sub-skill refuses the contract violation.
+
+cowork@0.29.1 → 0.29.2 PATCH; workshop 0.91.1 → 0.91.2 PATCH; mechanism count unchanged at 17. ~40 HC-V0912-* sub-asserts (TYPE-CHECK-A1..E1 = 25; COMMIT-A1..E1 OR-substring widening = 15). Final smoke **1760 passed / 0 failed** (delta +40 from v0.91.1's 1720); cowork-smoke 931 / claude-surface 207 unchanged. Preflight `version-sync ok: 0.91.2` ALL GREEN.
+
+Cycle-close artifacts brief during the live-bug recovery window (multiple deploys in rapid succession on 2026-06-05). Full retrospective narrative folded into v0.91.3 cycle-close at 2026-06-05 22:50 UTC.
+
+---
+
 ## v0.91.1 (closed 2026-06-05) — orchestrator-write-guard + claude_surface-disambiguation + verbal-commitment PATCH
 
 Workshop 0.91.0 → **0.91.1** (PATCH). Three structural defenses against the recurring wrong-path bug surfacing AGAIN on accuris-laptop post-v0.91.0 deploy. The LLM wrote the morning-briefing atomic note to `spice/daily/Friday-2026-06-05.md` instead of canonical `spice/cowork/daily/2026/06-June/2026-06-05/morning-briefing.md` — same failure mode v0.90.2 was supposed to prevent. Headspace works correctly on the same machine.
