@@ -11,45 +11,111 @@
 
 // --- parseInnerCircleFromMicroscope ------------------------------------------
 
+// v0.90.3: common false positives when scanning bold-name patterns in prose.
+// User batch-confirm is the final filter; this list reduces review-table noise.
+const KNOWN_NON_PERSON_NAMES = new Set([
+    // Cards / financial
+    "Cap1", "Cap1 Platinum", "Cap1 Quicksilver", "Apple Card", "Discover",
+    "Discover it", "SCHEELS", "SCHEELS Signature Visa", "Toast", "Brex",
+    "Capital One", "Splitwise", "Cabo Splitwise", "Cabo",
+    // Common abbreviations / orgs / products
+    "AWS", "EMS", "ADO", "PR", "CI", "DM", "API", "AI", "MCP", "URL",
+    "BoM", "BLM", "CDC", "DMV", "NBA", "MTD", "OTP", "VIP", "FAQ",
+    "GitHub", "Linear", "Slack", "Teams", "Zoom", "Outlook", "Gmail",
+    "Obsidian", "Smart Connections",
+    // Time / cadence terms
+    "Today", "Yesterday", "Tomorrow", "Tonight", "Weekly", "Monthly",
+    "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday",
+    "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun",
+    // Status / action labels often bolded
+    "Reply", "Owed", "Owed Days", "Inner", "Open", "Closed", "Going",
+    "WhatsApp", "iMessage", "iMCP", "M365",
+]);
+
+function _isLikelyPersonName(name) {
+    if (!name || typeof name !== "string") return false;
+    const trimmed = name.trim();
+    if (!trimmed) return false;
+    if (KNOWN_NON_PERSON_NAMES.has(trimmed)) return false;
+    if (!/^[A-Z]/.test(trimmed)) return false;
+    // Reject all-caps single tokens (likely abbreviations like EMS, AWS)
+    if (/^[A-Z]{2,}$/.test(trimmed)) return false;
+    // Reject anything with digits or non-letter chars besides spaces/apostrophes/hyphens
+    if (/[0-9@#$%^&*()_+={}\[\]:;"<>?/\\|`~]/.test(trimmed)) return false;
+    // Reject phrases longer than 4 tokens (likely sentences not names)
+    if (trimmed.split(/\s+/).length > 4) return false;
+    return true;
+}
+
 function parseInnerCircleFromMicroscope(body) {
     if (!body || typeof body !== "string") return [];
     const lines = body.split("\n");
-    let inSection = false;
-    const sectionLines = [];
+
+    // Pass A: extract from `## What matters` section using structured patterns
+    let inWhatMatters = false;
+    const whatMattersLines = [];
     for (const line of lines) {
-        if (/^##\s+What\s+matters\b/i.test(line)) { inSection = true; continue; }
-        if (inSection && /^##\s+/.test(line)) break;
-        if (inSection) sectionLines.push(line);
+        if (/^##\s+What\s+matters\b/i.test(line)) { inWhatMatters = true; continue; }
+        if (inWhatMatters && /^##\s+/.test(line)) break;
+        if (inWhatMatters) whatMattersLines.push(line);
     }
-    if (sectionLines.length === 0) return [];
-    const text = sectionLines.join("\n");
+    const text = whatMattersLines.join("\n");
     const out = new Set();
 
-    // "Inner circle (people)...: A, B, C, ..."
+    // A.1: "Inner circle (people)...: A, B, C, ..."
     const innerMatch = text.match(/Inner\s+circle\s*\(\s*people\s*\)[^:]*:\s*([^\n.]+)/i);
     if (innerMatch) {
-        const namesPart = innerMatch[1];
-        namesPart.split(/,\s*|\s+and\s+/).forEach(n => {
+        innerMatch[1].split(/,\s*|\s+and\s+/).forEach(n => {
             const cleaned = n.trim().replace(/[.]+$/, "");
-            if (cleaned && /^[A-Z]/.test(cleaned)) out.add(cleaned);
+            if (_isLikelyPersonName(cleaned)) out.add(cleaned);
         });
     }
 
-    // "Priority pair: A and B"
+    // A.2: "Priority pair: A and B"
     const priorityMatch = text.match(/Priority\s+pair\s*:\s*([^.\n]+)/i);
     if (priorityMatch) {
         priorityMatch[1].split(/,\s*|\s+and\s+/).forEach(n => {
             const cleaned = n.trim().replace(/[.]+$/, "");
-            if (cleaned && /^[A-Z]/.test(cleaned)) out.add(cleaned);
+            if (_isLikelyPersonName(cleaned)) out.add(cleaned);
         });
     }
 
-    // Bare bullet lines under elevation signals: "- Single Name." or "- First Last."
-    const bullets = sectionLines.filter(l => /^\s*-\s+[A-Z]/.test(l));
+    // A.3: Bare bullet lines under elevation signals: "- Name." or "- First Last."
+    const bullets = whatMattersLines.filter(l => /^\s*-\s+[A-Z]/.test(l));
     for (const b of bullets) {
-        // Match: "- First Last." (one or more capitalized words, ending with optional period)
         const m = b.match(/^\s*-\s+([A-Z][a-z]+(?:\s+(?:de|van|von|der|du|la|le)\s+)?(?:[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)?)\.?\s*$/);
-        if (m && m[1]) out.add(m[1].trim());
+        if (m && m[1] && _isLikelyPersonName(m[1])) out.add(m[1].trim());
+    }
+
+    // Pass B (v0.90.3): Bold-name extraction in inner-circle-adjacent subsections
+    // anywhere in the full body. Catches prose-narrative microscopes that put
+    // cadence-sweep / going-quiet sections at body level outside `## What matters`.
+    const adjacentKeywords = /(?:inner\s+circle|going\s+quiet|cadence\s+sweep|open\s+loops|reply\s+owed|who\s+you\s+owe|aged\s+open\s+loops|elevation\b)/i;
+    let inAdjacentSection = false;
+    const adjacentLines = [];
+    for (const line of lines) {
+        const heading = line.match(/^#{2,4}\s+(.+)$/);
+        if (heading) {
+            inAdjacentSection = adjacentKeywords.test(heading[1]);
+            continue;
+        }
+        if (inAdjacentSection) adjacentLines.push(line);
+    }
+    const adjacentText = adjacentLines.join("\n");
+
+    // B.1: Extract **Bold Names** from adjacent sections (1-3 capitalized words)
+    const boldNameRe = /\*\*([A-Z][a-zA-Z]+(?:[\s'\-][A-Z][a-zA-Z]+){0,2})\*\*/g;
+    let m;
+    while ((m = boldNameRe.exec(adjacentText)) !== null) {
+        const cleaned = m[1].trim();
+        if (_isLikelyPersonName(cleaned)) out.add(cleaned);
+    }
+
+    // B.2: Also scan What matters section for **Bold Names** (some microscopes
+    // embed inner-circle names as **Name** in prose even within ## What matters).
+    while ((m = boldNameRe.exec(text)) !== null) {
+        const cleaned = m[1].trim();
+        if (_isLikelyPersonName(cleaned)) out.add(cleaned);
     }
 
     return Array.from(out);
@@ -323,6 +389,7 @@ function composeUpdatedVaultConfig(body, engagement_id, names_to_append) {
     if (!fmMatch) return body;
     const before = fmMatch[1];
     let fm = fmMatch[2];
+    const closing = fmMatch[3];  // v0.90.3: preserve closing "\n---\n" — prior version dropped it
     const after = body.slice(fmMatch[0].length);
 
     // Find the engagement block start line index
@@ -342,10 +409,17 @@ function composeUpdatedVaultConfig(body, engagement_id, names_to_append) {
     }
     if (engStart === -1) return body;  // engagement not found
 
-    // Find inner_circle_people within the engagement block
+    // v0.90.3: detect inline empty array FIRST, then multi-line block, then missing
+    let inlineEmptyIdx = -1;
     let icStart = -1;
     let icEnd = engEnd;
     for (let i = engStart; i < engEnd; i++) {
+        // Inline empty array: "    inner_circle_people: []"
+        if (/^    inner_circle_people:\s*\[\s*\]\s*$/.test(lines[i])) {
+            inlineEmptyIdx = i;
+            break;
+        }
+        // Multi-line block header: "    inner_circle_people:"
         if (/^    inner_circle_people:\s*$/.test(lines[i])) {
             icStart = i;
             for (let j = i + 1; j < engEnd; j++) {
@@ -356,7 +430,14 @@ function composeUpdatedVaultConfig(body, engagement_id, names_to_append) {
         }
     }
 
-    if (icStart === -1) {
+    if (inlineEmptyIdx >= 0) {
+        // v0.90.3: replace inline `inner_circle_people: []` with multi-line block in-place
+        const replacement = [
+            "    inner_circle_people:",
+            ...names_to_append.map(n => `      - "${n}"`),
+        ];
+        lines.splice(inlineEmptyIdx, 1, ...replacement);
+    } else if (icStart === -1) {
         // No inner_circle_people block; insert one at the end of the engagement
         const insertion = [
             "    inner_circle_people:",
@@ -364,13 +445,12 @@ function composeUpdatedVaultConfig(body, engagement_id, names_to_append) {
         ];
         lines.splice(engEnd, 0, ...insertion);
     } else {
-        // Collect existing entries
+        // Existing multi-line block; append unique names
         const existingNames = new Set();
         for (let i = icStart + 1; i < icEnd; i++) {
             const nm = lines[i].match(/^\s+-\s+["']?([^"'\n]+?)["']?\s*$/);
             if (nm && nm[1]) existingNames.add(nm[1].trim());
         }
-        // Append unique new names
         const appendLines = names_to_append
             .filter(n => !existingNames.has(n))
             .map(n => `      - "${n}"`);
@@ -378,7 +458,9 @@ function composeUpdatedVaultConfig(body, engagement_id, names_to_append) {
     }
 
     fm = lines.join("\n");
-    return before + fm + after;
+    // v0.90.3: include `closing` (\n---\n) — prior version dropped this and
+    // produced malformed YAML that consumed the closing fence into body content.
+    return before + fm + closing + after;
 }
 
 // --- composeReviewTable -----------------------------------------------------

@@ -9874,6 +9874,181 @@ async function caseHCV0891Versions() {
     }
   }
 
+  // ============================================================================
+  // v0.90.3 HC-V0903-* — discover-people helper bug fixes + prose-extraction fallback
+  // ============================================================================
+
+  const DPH3 = require(path.join(WORKSHOP, "platform/blueprints/cowork/helpers/discover-people-helper.js"));
+
+  // B1.A1: composeUpdatedVaultConfig handles inline `inner_circle_people: []`
+  {
+    console.log("\n--- Case HC-V0903-B1-A1: composeUpdatedVaultConfig inline empty-array handling ---");
+    try {
+      const body = `---
+type: cowork-vault-config
+engagements:
+  - id: headspace
+    type: personal
+    label: Personal
+    inner_circle_people: []
+    cadences:
+      morning: true
+mcp_map:
+  obsidian: connected
+---
+
+# Cowork vault config
+
+Body content here.
+`;
+      const updated = DPH3.composeUpdatedVaultConfig(body, "headspace", ["Diana", "Dad"]);
+      assertTrue("HC-V0903-B1-A1: closing --- preserved",
+        updated.includes("\n---\n") && updated.split("\n---\n").length === 2);
+      assertTrue("HC-V0903-B1-A1: inline empty array replaced with multi-line block",
+        updated.includes("inner_circle_people:\n      - \"Diana\"\n      - \"Dad\""));
+      assertTrue("HC-V0903-B1-A1: no leftover inline empty array",
+        !updated.includes("inner_circle_people: []"));
+      assertTrue("HC-V0903-B1-A1: mcp_map preserved after inner_circle_people block",
+        updated.includes("mcp_map:") && updated.indexOf("mcp_map:") > updated.indexOf("Diana"));
+      assertTrue("HC-V0903-B1-A1: body content preserved after closing ---",
+        updated.includes("# Cowork vault config") && updated.includes("Body content here."));
+    } catch (e) {
+      assertTrue("HC-V0903-B1-A1: inline-empty fix contract", false, e && e.message);
+    }
+  }
+
+  // B1.A2: closing --- regression — populated multi-line block case also preserves fence
+  {
+    console.log("\n--- Case HC-V0903-B1-A2: composeUpdatedVaultConfig populated case preserves closing --- ---");
+    try {
+      const body = `---
+type: cowork-vault-config
+engagements:
+  - id: accuris
+    type: w2-fte
+    inner_circle_people:
+      - "Stefan de Pagter"
+    cadences:
+      morning: true
+mcp_map:
+  obsidian: connected
+---
+
+# Body
+`;
+      const updated = DPH3.composeUpdatedVaultConfig(body, "accuris", ["Jon Levin"]);
+      assertTrue("HC-V0903-B1-A2: closing --- preserved on populated case",
+        updated.includes("\n---\n") && updated.split("\n---\n").length === 2);
+      assertTrue("HC-V0903-B1-A2: Jon Levin appended", updated.includes("Jon Levin"));
+      assertTrue("HC-V0903-B1-A2: Stefan preserved", updated.includes("Stefan de Pagter"));
+    } catch (e) {
+      assertTrue("HC-V0903-B1-A2: closing fence preservation", false, e && e.message);
+    }
+  }
+
+  // B2.A1: parseInnerCircleFromMicroscope extracts bold names from prose-narrative sections
+  {
+    console.log("\n--- Case HC-V0903-B2-A1: prose-narrative bold-name extraction ---");
+    try {
+      const body = `---
+type: cowork-microscope
+---
+
+# chat microscope
+
+## What matters
+
+Teams chat is the top priority.
+
+### 1. Inner circle first
+
+The cadence-sweep view: **Diana** at 12 days quiet, **Jake Holton** 13 days. Active: **Momma** (3d), **Addie** (4d).
+
+### Going quiet
+
+- **Dad** at the 7d line.
+
+## Open loops
+
+| Who | What |
+|---|---|
+| **Ellen Senders** | Dinner tonight |
+| **Galen Gossman** | Callback owed |
+`;
+      const out = DPH3.parseInnerCircleFromMicroscope(body);
+      ["Diana", "Jake Holton", "Momma", "Addie", "Dad", "Ellen Senders", "Galen Gossman"].forEach(name => {
+        assertTrue(`HC-V0903-B2-A1: extracted ${name} from prose-narrative section`, out.includes(name));
+      });
+    } catch (e) {
+      assertTrue("HC-V0903-B2-A1: prose-narrative extraction", false, e && e.message);
+    }
+  }
+
+  // B2.A2: KNOWN_NON_PERSON_NAMES filter rejects abbreviations/cards/products
+  {
+    console.log("\n--- Case HC-V0903-B2-A2: false-positive filter ---");
+    try {
+      const body = `---
+type: cowork-microscope
+---
+
+# microscope
+
+## What matters
+
+### Inner circle
+
+- **Cap1 Platinum** focus card.
+- **AWS** billing alarm.
+- **GitHub** PR review.
+- **Diana** — real person.
+- **EMS** Linkerd removal.
+`;
+      const out = DPH3.parseInnerCircleFromMicroscope(body);
+      assertTrue("HC-V0903-B2-A2: Diana extracted (real person)", out.includes("Diana"));
+      assertTrue("HC-V0903-B2-A2: Cap1 Platinum filtered (card)", !out.includes("Cap1 Platinum"));
+      assertTrue("HC-V0903-B2-A2: AWS filtered (abbreviation)", !out.includes("AWS"));
+      assertTrue("HC-V0903-B2-A2: GitHub filtered (product)", !out.includes("GitHub"));
+      assertTrue("HC-V0903-B2-A2: EMS filtered (abbreviation)", !out.includes("EMS"));
+    } catch (e) {
+      assertTrue("HC-V0903-B2-A2: false-positive filter", false, e && e.message);
+    }
+  }
+
+  // B3.A1: discover-people SKILL.md documents prose-extraction fallback
+  {
+    console.log("\n--- Case HC-V0903-B3-A1: discover-people Step 4b prose-extraction fallback prose ---");
+    try {
+      const p = path.join(WORKSHOP, "platform/blueprints/cowork/skills/orchestrators/discover-people/SKILL.md");
+      const body = fs.readFileSync(p, "utf8");
+      assertTrue("HC-V0903-B3-A1: SKILL.md has Step 4b prose-extraction fallback",
+        body.includes("Prose-extraction fallback") && body.includes("v0.90.3"));
+      assertTrue("HC-V0903-B3-A1: SKILL.md mentions candidates.length < 3 threshold",
+        body.includes("candidates.length < 3"));
+      assertTrue("HC-V0903-B3-A1: SKILL.md names microscope-prose-llm source_type",
+        body.includes("microscope-prose-llm"));
+      assertTrue("HC-V0903-B3-A1: SKILL.md lists rejection categories (abbreviations/cards/products)",
+        body.includes("REJECT") && body.includes("abbreviations") && body.includes("card"));
+    } catch (e) {
+      assertTrue("HC-V0903-B3-A1: SKILL.md fallback contract", false, e && e.message);
+    }
+  }
+
+  // B2-existing-regression: previous v0.28.0 fixture A1 (accuris-shaped microscope) still passes
+  {
+    console.log("\n--- Case HC-V0903-B2-REGRESSION: v0.28.0 fixture A1 (accuris-shaped) still extracts all 11 ---");
+    try {
+      const body = fs.readFileSync(path.join(WORKSHOP, "platform/test/fixtures/v0900-discover-people/case-a-microscope.md"), "utf8");
+      const expected = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/test/fixtures/v0900-discover-people/case-a-expected-names.json"), "utf8"));
+      const out = DPH3.parseInnerCircleFromMicroscope(body);
+      expected.inner_circle_names.forEach(name => {
+        assertTrue(`HC-V0903-B2-REGRESSION: v0.28.0 fixture name "${name}" still extracted post-widening`, out.includes(name));
+      });
+    } catch (e) {
+      assertTrue("HC-V0903-B2-REGRESSION: regression contract", false, e && e.message);
+    }
+  }
+
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
   if (fail > 0) {

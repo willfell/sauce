@@ -60,6 +60,16 @@ This skill does NOT make MCP discovery calls in v0.28.0 — that's WS-C's v0.29.
    Aggregate:
    - `candidates = DPH.aggregateCandidates({ microscopeNames, siblingRows, vaultConfigNames })`
 
+4b. **Prose-extraction fallback (v0.90.3 — LLM-side):** if `candidates.length < 3` AND any microscope body length > 500 chars, perform LLM-side prose extraction as backup. The helper's regex patterns are intentionally conservative (avoid over-extraction false positives); the LLM's contextual judgment catches what the regex misses on prose-narrative microscopes (e.g., headspace's chat microscope embeds names in `### Inner circle first` / `### Going quiet` / `### Cadence sweep` paragraphs rather than the structured `Inner circle (people): A, B, C` format).
+
+    For each microscope body > 500 chars:
+    - Scan H3/H4 sections whose headings contain: `inner circle`, `going quiet`, `cadence sweep`, `open loops`, `reply owed`, `who you owe`, `aged open loops`, `elevation`.
+    - Within those sections, extract proper-noun person names. Bold-wrapped `**Name**` patterns are the cleanest signal; bare-prose names like `Diana — 12 days since contact` also count.
+    - REJECT abbreviations (EMS, AWS, ADO), card names (Cap1 Platinum, SCHEELS, Apple Card), product names (GitHub, iMCP, WhatsApp), and known non-person nouns. The helper exports `KNOWN_NON_PERSON_NAMES` as a reference set.
+    - For each extracted name not already in `candidates`, append a new candidate with `canonical_name: <name>`, `sources: [{source_type: "microscope-prose-llm", source_kind: <kind>, source_path: "spice/cowork/prompts/per-mcp/<kind>/microscope.md"}]`.
+
+    Merged candidates flow to Step 5 classify normally. The user batch-confirm gate (Step 7) is the final filter against false positives — review-table noise is acceptable since user can `skip <rows>`.
+
 ## Classify
 
 5. For each candidate, call sub-skill `cowork:resolve-person` with `{ input: candidate.canonical_name, prefer_type: "name", engagement_id }`. Capture `resolveResult`.
