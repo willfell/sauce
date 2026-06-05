@@ -137,6 +137,32 @@ REJECT and return `{ path, status: "failed:contract-violation:wrong-output-path"
 
 Even if the orchestrator passes a wrong `path` argument, this guard catches it. This is the v0.91.1 deterministic backstop for v0.90.2's `[!warning]+ CRITICAL` orchestrator callout, which is prose-only and LLM-attention-bounded.
 
+### v0.91.2 frontmatter write-guard: canonical frontmatter enforcement (SECOND CHECK)
+
+After the path check passes, validate the composed frontmatter BEFORE the Write tool fires. The canonical frontmatter shape is:
+
+```yaml
+type: cowork-midday-tripwire        # MUST be this EXACT string
+engagement_id: <engagement_id>
+day: "<YYYY-MM-DD>"
+severity: <warn|alert>
+generator: cowork:midday-tripwire@1.0.0
+prompt_source: <path>
+title: <composed title>
+summary: <1-2 sentence headline>
+created_at: <ISO timestamp>
+warnings: [<list>]                   # OPTIONAL
+```
+
+REJECT and return `{ path, status: "failed:contract-violation:wrong-frontmatter:<field>" }` if:
+
+1. `type:` is missing OR != the EXACT string `cowork-midday-tripwire`.
+2. Any of `engagement_id`, `day`, `severity`, `generator`, `prompt_source`, `title`, `summary` is missing/empty.
+3. Frontmatter contains non-canonical fields like `cadence:`, `date:`, `generated_at:`.
+4. `day:` not in ISO `YYYY-MM-DD` format; `severity:` not in `{warn, alert}`.
+
+v0.91.2 deterministic backstop for Step 17 post-write verify.
+
 ### Original pre-write checklist
 
 BEFORE calling the Write tool, verify your composed output against this checklist. If any item fails, return `{ path, status: "failed:contract-violation:<field>" }` and do NOT write.

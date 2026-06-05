@@ -7778,7 +7778,7 @@ async function caseHCV0890VersionA() {
     if (ver && ver[1]) {
       assertTrue(
         `HC-V0890-VERSION-A: cowork === pin must be 0.28.0 (found ${ver[1]})`,
-        ver[1] === "0.29.1");
+        ver[1] === "0.29.2");
     }
   }
   if (eqMatches.length === 0) {
@@ -8119,7 +8119,7 @@ async function caseHCV0891Versions() {
   // A: cowork manifest pin
   const coworkMan = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "blueprints/cowork/manifest.json"), "utf8"));
-  assertEqual(coworkMan.version, "0.29.1", "HC-V0891-VERSION-A: cowork pin = 0.28.0 (v0.90.0 bump)");
+  assertEqual(coworkMan.version, "0.29.2", "HC-V0891-VERSION-A: cowork pin = 0.28.0 (v0.90.0 bump)");
 
   // B: daily manifest pin
   const dailyMan = JSON.parse(fs.readFileSync(
@@ -8131,10 +8131,10 @@ async function caseHCV0891Versions() {
     path.join(WORKSHOP, "manifest.json"), "utf8"));
   const wsVer = platformMan.workshop_version || platformMan.version
     || (platformMan.workshop && platformMan.workshop.version);
-  assertEqual(wsVer, "0.91.1", "HC-V0891-VERSION-C: workshop pin = 0.90.0 (v0.90.0 bump)");
+  assertEqual(wsVer, "0.91.2", "HC-V0891-VERSION-C: workshop pin = 0.90.0 (v0.90.0 bump)");
   const pkg = JSON.parse(fs.readFileSync(
     path.resolve(WORKSHOP, "..", "package.json"), "utf8"));
-  assertEqual(pkg.version, "0.91.1", "HC-V0891-VERSION-C: package.json = 0.90.0 (v0.90.0 bump)");
+  assertEqual(pkg.version, "0.91.2", "HC-V0891-VERSION-C: package.json = 0.90.0 (v0.90.0 bump)");
 
   // D: mechanism count unchanged
   const mechs = (platformMan.mechanisms && Array.isArray(platformMan.mechanisms))
@@ -9727,20 +9727,20 @@ async function caseHCV0891Versions() {
       // NOTE: top-level WORKSHOP at line 29 = path.resolve(__dirname, "../..") = workshop ROOT
       // (distinct from the local WORKSHOP inside caseHCV0891Versions which is platform/).
       const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
-      assertTrue("HC-V0900-VERSION-A: package.json version === '0.91.1'", pkg.version === "0.91.1");
+      assertTrue("HC-V0900-VERSION-A: package.json version === '0.91.1'", pkg.version === "0.91.2");
       const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
       assertTrue("HC-V0900-VERSION-B: platform/manifest.json workshop_version === '0.91.1'",
-        platMan.workshop_version === "0.91.1");
+        platMan.workshop_version === "0.91.2");
       const coworkMan = JSON.parse(fs.readFileSync(
         path.join(WORKSHOP, "platform/blueprints/cowork/manifest.json"), "utf8"));
       assertTrue("HC-V0900-VERSION-C: cowork manifest version === '0.29.1'",
-        coworkMan.version === "0.29.1");
+        coworkMan.version === "0.29.2");
       const sub = JSON.parse(fs.readFileSync(
         path.join(WORKSHOP, "ranch/platform-subscription.json"), "utf8"));
       const blueprints = sub.blueprints || sub.subscriptions || [];
       const cworkPin = blueprints.find(b => b.name === "cowork");
       assertTrue("HC-V0900-VERSION-D: ranch platform-subscription cowork pin === '0.29.1'",
-        cworkPin && cworkPin.version === "0.29.1");
+        cworkPin && cworkPin.version === "0.29.2");
     } catch (e) {
       assertTrue("HC-V0900-VERSION-A..D: version pin contract", false, e && e.message);
     }
@@ -9781,7 +9781,7 @@ async function caseHCV0891Versions() {
       const cw = (platMan.blueprints || []).find(b => b.name === "cowork");
       assertTrue("HC-V0901-CATALOGUE-A1: cowork present in workshop catalogue", !!cw);
       assertTrue("HC-V0901-CATALOGUE-A1: cowork catalogue pin === '0.29.1' (matches cowork's own manifest)",
-        cw && cw.version === "0.29.1");
+        cw && cw.version === "0.29.2");
     } catch (e) {
       assertTrue("HC-V0901-CATALOGUE-A1: catalogue sync contract", false, e && e.message);
     }
@@ -10289,11 +10289,63 @@ type: cowork-microscope
       assertTrue(`HC-V0911-COMMIT-${letter}1: Step 1b Verbal commitment present`,
         body.includes("1b. **Verbal commitment") && body.includes("v0.91.1"));
       assertTrue(`HC-V0911-COMMIT-${letter}1: Notice text names canonical write path`,
-        body.includes("committing to canonical write path"));
+        body.includes("committing to canonical write path") || body.includes("committing to:"));
       assertTrue(`HC-V0911-COMMIT-${letter}1: explicitly cites NOT spice/daily/ for daily cadences`,
         body.includes("NOT spice/daily/"));
     } catch (e) {
       assertTrue(`HC-V0911-COMMIT-${letter}1: verbal-commitment contract`, false, e && e.message);
+    }
+  });
+
+  // ============================================================================
+  // v0.91.2 HC-V0912-* — frontmatter write-guard + voice/microscope verbal commitment extension
+  // ============================================================================
+
+  const ORCH_TO_TYPE = {
+    "morning-briefing": "cowork-morning-briefing",
+    "midday-tripwire": "cowork-midday-tripwire",
+    "eod-review": "cowork-eod-review",
+    "weekly-review": "cowork-weekly-review",
+    "monthly-review": "cowork-monthly-review",
+  };
+
+  // A: frontmatter write-guard in 5 write-run-note sub-skills
+  ["morning-briefing", "midday-tripwire", "eod-review", "weekly-review", "monthly-review"].forEach((orchName, idx) => {
+    const letter = String.fromCharCode(65 + idx);
+    const p = path.join(WORKSHOP, "platform/blueprints/cowork/skills/skills/write-run-note-" + orchName + "/SKILL.md");
+    console.log(`\n--- Case HC-V0912-FM-${letter}1: write-run-note-${orchName} frontmatter write-guard ---`);
+    try {
+      const body = fs.readFileSync(p, "utf8");
+      assertTrue(`HC-V0912-FM-${letter}1: v0.91.2 frontmatter write-guard section present`,
+        body.includes("v0.91.2 frontmatter write-guard"));
+      assertTrue(`HC-V0912-FM-${letter}1: cites canonical type ${ORCH_TO_TYPE[orchName]}`,
+        body.includes(ORCH_TO_TYPE[orchName]));
+      assertTrue(`HC-V0912-FM-${letter}1: rejects non-canonical fields cadence/date/generated_at`,
+        body.includes("cadence:") && body.includes("generated_at:"));
+      assertTrue(`HC-V0912-FM-${letter}1: returns failed:contract-violation:wrong-frontmatter`,
+        body.includes("failed:contract-violation:wrong-frontmatter"));
+    } catch (e) {
+      assertTrue(`HC-V0912-FM-${letter}1: frontmatter write-guard contract`, false, e && e.message);
+    }
+  });
+
+  // C: extended verbal commitment in 5 orchestrators (TYPE + VOICE + MICROSCOPES)
+  ["morning-briefing", "midday-tripwire", "eod-review", "weekly-review", "monthly-review"].forEach((orchName, idx) => {
+    const letter = String.fromCharCode(65 + idx);
+    const p = path.join(WORKSHOP, "platform/blueprints/cowork/skills/orchestrators/" + orchName + "/SKILL.md");
+    console.log(`\n--- Case HC-V0912-COMMIT-${letter}1: ${orchName} Step 1b extended commitment ---`);
+    try {
+      const body = fs.readFileSync(p, "utf8");
+      assertTrue(`HC-V0912-COMMIT-${letter}1: Step 1b cites v0.91.2`,
+        body.includes("v0.91.1 + v0.91.2"));
+      assertTrue(`HC-V0912-COMMIT-${letter}1: commits to TYPE`,
+        body.includes("TYPE:") && body.includes(ORCH_TO_TYPE[orchName]));
+      assertTrue(`HC-V0912-COMMIT-${letter}1: commits to VOICE`,
+        body.includes("VOICE:") && body.includes("personality.notes"));
+      assertTrue(`HC-V0912-COMMIT-${letter}1: commits to MICROSCOPES`,
+        body.includes("MICROSCOPES:") && body.includes("Output shape"));
+    } catch (e) {
+      assertTrue(`HC-V0912-COMMIT-${letter}1: extended commitment contract`, false, e && e.message);
     }
   });
 

@@ -33,13 +33,17 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
 
 1. READ `.claude/skills/cowork/skills/check-vault-routing/SKILL.md` in full and follow
    its `## Steps` section with `{ required: ["obsidian"] }`. If the return is not `"ready"`, emit Notice `cowork:morning-briefing aborted -- <status>` and exit. Do not write.
-1b. **Verbal commitment (v0.91.1).** Before any other action, emit Obsidian Notice and treat it as a binding commitment for this run:
+1b. **Verbal commitment (v0.91.1 + v0.91.2).** Before any other action, emit Obsidian Notice and treat it as a binding commitment for this run:
 
    ```
-   cowork:morning-briefing committing to canonical write path: spice/cowork/daily/<YYYY>/<MM-Month>/<YYYY-MM-DD>/morning-briefing.md (NOT spice/daily/<weekday>-<YYYY-MM-DD>.md)
+   cowork:morning-briefing committing to:
+     PATH: spice/cowork/daily/<YYYY>/<MM-Month>/<YYYY-MM-DD>/morning-briefing.md (NOT spice/daily/<weekday>-<YYYY-MM-DD>.md)
+     TYPE: cowork-morning-briefing (canonical frontmatter type — NOT cowork-run-note)
+     VOICE: apply user-preferences.personality.notes verbatim AND personality.{vibe, formality, length, pep_talk} to every narrative sentence
+     MICROSCOPES: for each kind in prefs.priorities with a microscope at spice/cowork/prompts/per-mcp/<kind>/microscope.md, follow that microscope's ## Output shape directives verbatim for the kind's callout
    ```
 
-   This Notice serves two purposes: (1) commit the path to the LLM's working memory at run-start so it stays salient even after long gather + compose steps, (2) create an audit trail in the Obsidian Notice log if a wrong-path write happens despite the commitment. The v0.91.1 write-guard in `cowork:write-run-note-morning-briefing` enforces the canonical path deterministically at write time; this verbal commitment is the prose-side layer.
+   Four-purpose commitment: (1) commit path so the v0.91.1 path write-guard never fires; (2) commit type so the v0.91.2 frontmatter write-guard never fires; (3) commit voice so personality + voice contract land in body composition; (4) commit microscope adherence so each kind's callout follows its microscope's `## Output shape`. The Notice creates an audit trail if any commitment is violated. Deterministic backstops in write-run-note: path write-guard (v0.91.1) + frontmatter write-guard (v0.91.2). Voice + microscope are prose-imperative; Step 14 re-read reinforces.
 
 2. **Resolve engagement.** Read `<vault>/spice/cowork/context/vault-config.md` via `mcp__obsidian__get_frontmatter`. Look up `engagements[]` entry where `id == engagement_id`. If not found, emit Notice `cowork:morning-briefing aborted -- engagement '<id>' not found in vault-config.md` and exit. Capture `engagement` (the full record) and read the matching engagement-type manifest via the Read tool at `spice/cowork/context/engagement-types/<engagement.type>.json` (expected values: `personal`, `w2-fte`, `consulting`). Parse as JSON; capture `type_manifest.render_aspects`. If the file is missing or fails to parse, emit Notice `cowork:morning-briefing aborted -- engagement-type manifest unavailable at spice/cowork/context/engagement-types/<engagement.type>.json` and exit. The render-aspects map drives which gather + write steps fire (e.g. `finance_block: include` enables the Finance callout; `inner_circle_imessage: include` enables Messages).
 3. READ `.claude/skills/cowork/skills/date-context/SKILL.md` in full and follow

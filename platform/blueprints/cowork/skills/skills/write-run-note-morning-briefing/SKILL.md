@@ -134,6 +134,31 @@ REJECT and return `{ path, status: "failed:contract-violation:wrong-output-path"
 
 Even if the orchestrator passes a wrong `path` argument, this guard catches it. This is the v0.91.1 deterministic backstop for v0.90.2's `[!warning]+ CRITICAL` orchestrator callout, which is prose-only and LLM-attention-bounded.
 
+### v0.91.2 frontmatter write-guard: canonical frontmatter enforcement (SECOND CHECK)
+
+After the path check passes, validate the composed frontmatter BEFORE the Write tool fires. The canonical frontmatter shape is:
+
+```yaml
+type: cowork-morning-briefing       # MUST be this EXACT string
+engagement_id: <engagement_id>
+day: "<YYYY-MM-DD>"                  # ISO date — NOT weekday name
+generator: cowork:morning-briefing@1.0.0
+prompt_source: <path>
+title: <composed title>
+summary: <1-2 sentence headline ~150-250 chars>
+created_at: <ISO timestamp>
+warnings: [<list>]                   # OPTIONAL — only when warnings exist
+```
+
+REJECT and return `{ path, status: "failed:contract-violation:wrong-frontmatter:<field>" }` if:
+
+1. `type:` is missing OR is not the EXACT string `cowork-morning-briefing` (NOT `cowork-run-note`, NOT `cowork-briefing`, NOT any other variant).
+2. Any of `engagement_id`, `day`, `generator`, `prompt_source`, `title`, `summary` is missing or empty.
+3. Frontmatter contains non-canonical fields like `cadence:`, `date:` (use `day:` instead), `generated_at:` (use `created_at:` instead).
+4. `day:` is not in `YYYY-MM-DD` ISO format (`Friday` is invalid; `2026-06-05` is valid).
+
+This is the v0.91.2 deterministic backstop for the orchestrator's Step 17 post-write verify (which depends on the LLM reaching it). The write-guard runs BEFORE the file lands on disk; wrong frontmatter is refused at write time.
+
 **Frontmatter checks:**
 - [ ] `type:` matches the canonical value for this skill (`cowork-morning-briefing`)
 - [ ] `title:` is present and non-empty (the formula-composed title from above)
