@@ -9350,6 +9350,91 @@ async function caseHCV0891Versions() {
     }
   }
 
+  // ============================================================================
+  // v0.90.0 HC-V0900-WIKILINK-* — WS-A canonical wikilink rule reorder + body strengthen + surface
+  // ============================================================================
+
+  // HC-V0900-WIKILINK-A1: wikilink rule at index 0 with PRECEDENCE OVERRIDE prefix
+  {
+    console.log("\n--- Case HC-V0900-WIKILINK-A1: wikilink rule moved to top of effective_hard_rules ---");
+    try {
+      const helper = require(path.join(WORKSHOP, "platform/blueprints/cowork/helpers/read-user-preferences-helper.js"));
+      const out = helper.composeEffectiveHardRules({});
+      assertTrue("HC-V0900-WIKILINK-A1: composeEffectiveHardRules returns array", Array.isArray(out));
+      assertTrue("HC-V0900-WIKILINK-A1: array has at least 1 entry", out.length >= 1);
+      assertTrue("HC-V0900-WIKILINK-A1: out[0] includes 'PRECEDENCE OVERRIDE'",
+        typeof out[0] === "string" && out[0].includes("PRECEDENCE OVERRIDE"));
+      assertTrue("HC-V0900-WIKILINK-A1: out[0] includes '[[Person Basename]]'",
+        out[0].includes("[[Person Basename]]"));
+      assertTrue("HC-V0900-WIKILINK-A1: out[0] cites 'microscope ## Output shape'",
+        out[0].includes("microscope ## Output shape"));
+    } catch (e) {
+      assertTrue("HC-V0900-WIKILINK-A1: wikilink rule reorder contract", false, e && e.message);
+    }
+  }
+
+  // HC-V0900-WIKILINK-A2: user hard_rules preserved AFTER wikilink rule
+  {
+    console.log("\n--- Case HC-V0900-WIKILINK-A2: wikilink rule precedes user-authored hard rules ---");
+    try {
+      const helper = require(path.join(WORKSHOP, "platform/blueprints/cowork/helpers/read-user-preferences-helper.js"));
+      const out = helper.composeEffectiveHardRules({ hard_rules: ["facts only — never speculate"] });
+      assertTrue("HC-V0900-WIKILINK-A2: length === 2", out.length === 2);
+      assertTrue("HC-V0900-WIKILINK-A2: wikilink rule at index 0",
+        out[0].includes("PRECEDENCE OVERRIDE"));
+      assertTrue("HC-V0900-WIKILINK-A2: user rule preserved at index 1",
+        out[1] === "facts only — never speculate");
+    } catch (e) {
+      assertTrue("HC-V0900-WIKILINK-A2: user-rules-after-wikilink contract", false, e && e.message);
+    }
+  }
+
+  // HC-V0900-WIKILINK-A3: wikilink + user + no_emojis composes 4 entries with correct ordering
+  {
+    console.log("\n--- Case HC-V0900-WIKILINK-A3: full composition with wikilink + user + no_emojis ---");
+    try {
+      const helper = require(path.join(WORKSHOP, "platform/blueprints/cowork/helpers/read-user-preferences-helper.js"));
+      const out = helper.composeEffectiveHardRules({ no_emojis: true, hard_rules: ["rule x", "rule y"] });
+      assertTrue("HC-V0900-WIKILINK-A3: length === 4", out.length === 4);
+      assertTrue("HC-V0900-WIKILINK-A3: wikilink rule at index 0",
+        out[0].includes("PRECEDENCE OVERRIDE"));
+      assertTrue("HC-V0900-WIKILINK-A3: user rule 1 at index 1", out[1] === "rule x");
+      assertTrue("HC-V0900-WIKILINK-A3: user rule 2 at index 2", out[2] === "rule y");
+      assertTrue("HC-V0900-WIKILINK-A3: no_emojis rule at index 3 (last)",
+        out[3].includes("emoji"));
+    } catch (e) {
+      assertTrue("HC-V0900-WIKILINK-A3: full composition ordering", false, e && e.message);
+    }
+  }
+
+  // HC-V0900-WIKILINK-A4: disable-path still works post-reorder
+  {
+    console.log("\n--- Case HC-V0900-WIKILINK-A4: wikilink_people disable-path honored ---");
+    try {
+      const helper = require(path.join(WORKSHOP, "platform/blueprints/cowork/helpers/read-user-preferences-helper.js"));
+      const out = helper.composeEffectiveHardRules({ hard_rules: [{ id: "wikilink_people", disabled: true }] });
+      const hasWikilink = out.some(r => typeof r === "string" && r.includes("PRECEDENCE OVERRIDE"));
+      assertTrue("HC-V0900-WIKILINK-A4: disable-path omits the canonical wikilink rule", !hasWikilink);
+    } catch (e) {
+      assertTrue("HC-V0900-WIKILINK-A4: disable-path post-reorder", false, e && e.message);
+    }
+  }
+
+  // HC-V0900-WIKILINK-B1: gather-from-served-by SKILL.md surfaces the precedence note
+  {
+    console.log("\n--- Case HC-V0900-WIKILINK-B1: gather-from-served-by SKILL.md precedence note ---");
+    try {
+      const p = path.join(WORKSHOP, "platform/blueprints/cowork/skills/skills/gather-from-served-by/SKILL.md");
+      const body = fs.readFileSync(p, "utf8");
+      assertTrue("HC-V0900-WIKILINK-B1: SKILL.md mentions PRECEDENCE OVERRIDE or wikilink hard rule precedence",
+        body.includes("Precedence note") || body.includes("wikilink hard rule"));
+      assertTrue("HC-V0900-WIKILINK-B1: SKILL.md distinguishes STRUCTURAL layout from IDENTIFIER format",
+        body.includes("STRUCTURAL") || body.includes("IDENTIFIER format") || body.includes("LAYOUT"));
+    } catch (e) {
+      assertTrue("HC-V0900-WIKILINK-B1: SKILL.md precedence note contract", false, e && e.message);
+    }
+  }
+
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
   if (fail > 0) {

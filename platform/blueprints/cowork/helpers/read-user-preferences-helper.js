@@ -31,9 +31,10 @@ const CANONICAL_NO_EMOJI_RULE =
 // breadcrumb; disable-path no-op this cycle).
 const WIKILINK_PEOPLE_RULE = {
     id: "wikilink_people",
-    body: "When body composition mentions a person, always emit [[Person Name]] if the person resolves (via cowork:resolve-person or via prior wikilink in the same atomic note); never use bare **Name** for a resolved person. Unresolved people may emit **Name** or plain text. Preserve existing [[Person Name]] wikilinks verbatim when summarizing or distilling. This rule binds atomic-note bodies, synthesis bodies (synthesize-day / synthesize-week output), callout titles, and dispatch-contract output. Exempt: literal display strings inside calendar event titles, email subjects, message previews.",
+    body: "PRECEDENCE OVERRIDE: This rule takes precedence over microscope ## Output shape per-item-line format specs. When body composition mentions a person, always emit **[[Person Basename]]** if the person resolves (via cowork:resolve-person or via the dispatch contract's 'Known people in scope' allowlist or via prior wikilink in the same atomic note); never use bare **Name** or plaintext for a resolved person. Even when a microscope's ## Output shape instructs a specific per-item format (e.g., 'sender resolved to canonical display name'), the canonical name MUST be wrapped in [[Basename]] wikilink syntax. Unresolved people may emit **Name** or plain text. Preserve existing [[Person Name]] wikilinks verbatim when summarizing or distilling. This rule binds atomic-note bodies, synthesis bodies (synthesize-day / synthesize-week output), callout titles, table cells, narrative prose, and dispatch-contract output. Exempt: literal display strings inside calendar event titles, email subjects, message previews.",
     source: "platform-default",
     introduced_in: "v0.89.0",
+    promoted_in: "v0.90.0",
 };
 const CANONICAL_WIKILINK_PEOPLE_RULE = WIKILINK_PEOPLE_RULE.body;
 
@@ -46,7 +47,11 @@ function composeEffectiveHardRules({ no_emojis, hard_rules } = {}) {
     const out = base.slice();
     if (no_emojis === true) out.push(CANONICAL_NO_EMOJI_RULE);
     if (!hasWikilinkDisable && !out.includes(CANONICAL_WIKILINK_PEOPLE_RULE)) {
-        out.push(CANONICAL_WIKILINK_PEOPLE_RULE);
+        // v0.90.0: unshift (not push) so the canonical wikilink rule appears
+        // FIRST in effective_hard_rules[]. In the dispatch contract bullet list
+        // it gets first-bullet visibility and structural precedence over user-
+        // authored hard_rules + microscope ## Output shape format specs.
+        out.unshift(CANONICAL_WIKILINK_PEOPLE_RULE);
     }
     return out;
 }
