@@ -8131,10 +8131,10 @@ async function caseHCV0891Versions() {
     path.join(WORKSHOP, "manifest.json"), "utf8"));
   const wsVer = platformMan.workshop_version || platformMan.version
     || (platformMan.workshop && platformMan.workshop.version);
-  assertEqual(wsVer, "0.90.0", "HC-V0891-VERSION-C: workshop pin = 0.90.0 (v0.90.0 bump)");
+  assertEqual(wsVer, "0.90.1", "HC-V0891-VERSION-C: workshop pin = 0.90.0 (v0.90.0 bump)");
   const pkg = JSON.parse(fs.readFileSync(
     path.resolve(WORKSHOP, "..", "package.json"), "utf8"));
-  assertEqual(pkg.version, "0.90.0", "HC-V0891-VERSION-C: package.json = 0.90.0 (v0.90.0 bump)");
+  assertEqual(pkg.version, "0.90.1", "HC-V0891-VERSION-C: package.json = 0.90.0 (v0.90.0 bump)");
 
   // D: mechanism count unchanged
   const mechs = (platformMan.mechanisms && Array.isArray(platformMan.mechanisms))
@@ -9727,10 +9727,10 @@ async function caseHCV0891Versions() {
       // NOTE: top-level WORKSHOP at line 29 = path.resolve(__dirname, "../..") = workshop ROOT
       // (distinct from the local WORKSHOP inside caseHCV0891Versions which is platform/).
       const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
-      assertTrue("HC-V0900-VERSION-A: package.json version === '0.90.0'", pkg.version === "0.90.0");
+      assertTrue("HC-V0900-VERSION-A: package.json version === '0.90.1'", pkg.version === "0.90.1");
       const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
-      assertTrue("HC-V0900-VERSION-B: platform/manifest.json workshop_version === '0.90.0'",
-        platMan.workshop_version === "0.90.0");
+      assertTrue("HC-V0900-VERSION-B: platform/manifest.json workshop_version === '0.90.1'",
+        platMan.workshop_version === "0.90.1");
       const coworkMan = JSON.parse(fs.readFileSync(
         path.join(WORKSHOP, "platform/blueprints/cowork/manifest.json"), "utf8"));
       assertTrue("HC-V0900-VERSION-C: cowork manifest version === '0.28.0'",
@@ -9767,6 +9767,41 @@ async function caseHCV0891Versions() {
       assertTrue("HC-V0900-MANIFEST-A1: claude_surface includes /cowork discover-people resolver row", !!csRowEntry);
     } catch (e) {
       assertTrue("HC-V0900-MANIFEST-A1: manifest entries contract", false, e && e.message);
+    }
+  }
+
+  // ============================================================================
+  // v0.90.1 HC-V0901-* — catalogue pin sync + read-user-preferences SKILL.md prose update
+  // ============================================================================
+
+  {
+    console.log("\n--- Case HC-V0901-CATALOGUE-A1: platform/manifest.json blueprints[] cowork pin sync ---");
+    try {
+      const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
+      const cw = (platMan.blueprints || []).find(b => b.name === "cowork");
+      assertTrue("HC-V0901-CATALOGUE-A1: cowork present in workshop catalogue", !!cw);
+      assertTrue("HC-V0901-CATALOGUE-A1: cowork catalogue pin === '0.28.0' (matches cowork's own manifest)",
+        cw && cw.version === "0.28.0");
+    } catch (e) {
+      assertTrue("HC-V0901-CATALOGUE-A1: catalogue sync contract", false, e && e.message);
+    }
+  }
+
+  {
+    console.log("\n--- Case HC-V0901-SKILL-A1: read-user-preferences SKILL.md prose update for v0.90.0 wikilink rule ---");
+    try {
+      const p = path.join(WORKSHOP, "platform/blueprints/cowork/skills/skills/read-user-preferences/SKILL.md");
+      const body = fs.readFileSync(p, "utf8");
+      assertTrue("HC-V0901-SKILL-A1: SKILL.md mentions PRECEDENCE OVERRIDE",
+        body.includes("PRECEDENCE OVERRIDE"));
+      assertTrue("HC-V0901-SKILL-A1: SKILL.md specifies wikilink rule is at index 0 (first bullet)",
+        body.includes("index 0") || body.includes("first bullet"));
+      assertTrue("HC-V0901-SKILL-A1: SKILL.md describes the v0.90.0 composition order",
+        body.includes("promoted v0.90.0") || body.includes("v0.90.0 composition order"));
+      assertTrue("HC-V0901-SKILL-A1: SKILL.md mentions microscope ## Output shape override",
+        body.includes("microscope") && body.includes("Output shape"));
+    } catch (e) {
+      assertTrue("HC-V0901-SKILL-A1: SKILL.md prose contract", false, e && e.message);
     }
   }
 
