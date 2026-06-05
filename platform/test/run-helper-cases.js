@@ -10217,6 +10217,28 @@ type: cowork-microscope
     }
   }
 
+  // SKILL-A1: orchestrator SKILL.md prose contract
+  {
+    console.log("\n--- Case HC-V0910-SKILL-A1: find-missing-people SKILL.md ---");
+    try {
+      const p = path.join(WORKSHOP, "platform/blueprints/cowork/skills/orchestrators/find-missing-people/SKILL.md");
+      const body = fs.readFileSync(p, "utf8");
+      assertTrue("HC-V0910-SKILL-A1: SKILL.md exists and is non-empty", body.length > 0);
+      assertTrue("HC-V0910-SKILL-A1: declares cowork:check-vault-routing + cowork:date-context dependencies",
+        body.includes("cowork:check-vault-routing") && body.includes("cowork:date-context"));
+      assertTrue("HC-V0910-SKILL-A1: documents canonical output path spice/people/<basename>.md",
+        body.includes("spice/people/<basename>.md"));
+      assertTrue("HC-V0910-SKILL-A1: has CRITICAL output path callout",
+        body.includes("[!warning]+ CRITICAL: output path"));
+      assertTrue("HC-V0910-SKILL-A1: documents days_back default 30",
+        body.includes("days_back") && body.includes("30"));
+      assertTrue("HC-V0910-SKILL-A1: documents landmine #12 backup convention",
+        body.includes("landmine #12"));
+    } catch (e) {
+      assertTrue("HC-V0910-SKILL-A1: SKILL.md prose contract", false, e && e.message);
+    }
+  }
+
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
   if (fail > 0) {
