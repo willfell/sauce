@@ -1,6 +1,6 @@
 {
   "name": "cowork",
-  "version": "0.30.0",
+  "version": "0.31.0",
   "kind": "blueprint",
   "module_directory": "cowork",
   "engagement_types_dir": "engagement-types",
@@ -391,6 +391,16 @@
     {
       "source": "skills/orchestrators/find-missing-people/SKILL.md",
       "dest": "{{skills_dir}}/find-missing-people/SKILL.md"
+    },
+    {
+      "source": "helpers/compose-scheduled-job-wrappers-helper.js",
+      "dest": "{{module_directory}}/helpers/compose-scheduled-job-wrappers-helper.js",
+      "tag": "platform"
+    },
+    {
+      "source": "data/scheduled-job-contract.json",
+      "dest": "{{module_directory}}/data/scheduled-job-contract.json",
+      "tag": "platform"
     }
   ],
   "claude_surface": [

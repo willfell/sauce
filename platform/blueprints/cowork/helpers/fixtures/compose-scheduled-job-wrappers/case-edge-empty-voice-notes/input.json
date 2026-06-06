@@ -1,0 +1,29 @@
+{
+  "_comment": "Edge case: prefs.personality.notes is empty string. Expected: voice_notes_excerpt = '' + warning empty_voice_notes. Contract field omitted intentionally — HC loader injects canonical contract.",
+  "engagement": {
+    "id": "no-voice-eng",
+    "label": "No Voice Engagement",
+    "type": "personal",
+    "timezone": "America/Denver"
+  },
+  "prefs": {
+    "mcps": {
+      "chat":   { "kind": "chat",   "served_by": "apple-mcp-uuid", "connected": true, "callout_type": "info" },
+      "github": { "kind": "github", "served_by": "github",         "connected": true, "callout_type": "note" }
+    },
+    "personality": {
+      "notes": "",
+      "vibe": "neutral",
+      "formality": "casual",
+      "length": "short",
+      "pep_talk": false
+    }
+  },
+  "engagement_type_data": {
+    "scheduled_jobs": { "disabled_cadences": [] }
+  },
+  "sauce_version": "0.93.0",
+  "cowork_version": "0.31.0",
+  "generated_at": "2026-06-05T14:42:22-06:00",
+  "generated_by": "cowork:sync-scheduled-jobs@1.0.0"
+}

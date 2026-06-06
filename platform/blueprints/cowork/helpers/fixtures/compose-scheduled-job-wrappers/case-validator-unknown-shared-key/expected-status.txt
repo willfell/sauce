@@ -1,0 +1,1 @@
+failed:contract:unknown-shared-key:bogus_key:cadence-morning-briefing

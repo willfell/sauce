@@ -7777,8 +7777,8 @@ async function caseHCV0890VersionA() {
     const ver = m.match(/"(0\.\d+\.\d+)"/);
     if (ver && ver[1]) {
       assertTrue(
-        `HC-V0890-VERSION-A: cowork === pin must be 0.28.0 (found ${ver[1]})`,
-        ver[1] === "0.30.0");
+        `HC-V0890-VERSION-A: cowork === pin must be 0.31.0 (found ${ver[1]})`,
+        ver[1] === "0.31.0");
     }
   }
   if (eqMatches.length === 0) {
@@ -8119,7 +8119,7 @@ async function caseHCV0891Versions() {
   // A: cowork manifest pin
   const coworkMan = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "blueprints/cowork/manifest.json"), "utf8"));
-  assertEqual(coworkMan.version, "0.30.0", "HC-V0891-VERSION-A: cowork pin = 0.28.0 (v0.90.0 bump)");
+  assertEqual(coworkMan.version, "0.31.0", "HC-V0891-VERSION-A: cowork pin = 0.31.0 (v0.93.0 bump)");
 
   // B: daily manifest pin
   const dailyMan = JSON.parse(fs.readFileSync(
@@ -8131,10 +8131,10 @@ async function caseHCV0891Versions() {
     path.join(WORKSHOP, "manifest.json"), "utf8"));
   const wsVer = platformMan.workshop_version || platformMan.version
     || (platformMan.workshop && platformMan.workshop.version);
-  assertEqual(wsVer, "0.92.0", "HC-V0891-VERSION-C: workshop pin = 0.90.0 (v0.90.0 bump)");
+  assertEqual(wsVer, "0.93.0", "HC-V0891-VERSION-C: workshop pin = 0.93.0 (v0.93.0 bump)");
   const pkg = JSON.parse(fs.readFileSync(
     path.resolve(WORKSHOP, "..", "package.json"), "utf8"));
-  assertEqual(pkg.version, "0.92.0", "HC-V0891-VERSION-C: package.json = 0.90.0 (v0.90.0 bump)");
+  assertEqual(pkg.version, "0.93.0", "HC-V0891-VERSION-C: package.json = 0.93.0 (v0.93.0 bump)");
 
   // D: mechanism count unchanged
   const mechs = (platformMan.mechanisms && Array.isArray(platformMan.mechanisms))
@@ -9727,20 +9727,20 @@ async function caseHCV0891Versions() {
       // NOTE: top-level WORKSHOP at line 29 = path.resolve(__dirname, "../..") = workshop ROOT
       // (distinct from the local WORKSHOP inside caseHCV0891Versions which is platform/).
       const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
-      assertTrue("HC-V0900-VERSION-A: package.json version === '0.91.1'", pkg.version === "0.92.0");
+      assertTrue("HC-V0900-VERSION-A: package.json version === '0.93.0'", pkg.version === "0.93.0");
       const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
-      assertTrue("HC-V0900-VERSION-B: platform/manifest.json workshop_version === '0.91.1'",
-        platMan.workshop_version === "0.92.0");
+      assertTrue("HC-V0900-VERSION-B: platform/manifest.json workshop_version === '0.93.0'",
+        platMan.workshop_version === "0.93.0");
       const coworkMan = JSON.parse(fs.readFileSync(
         path.join(WORKSHOP, "platform/blueprints/cowork/manifest.json"), "utf8"));
-      assertTrue("HC-V0900-VERSION-C: cowork manifest version === '0.29.1'",
-        coworkMan.version === "0.30.0");
+      assertTrue("HC-V0900-VERSION-C: cowork manifest version === '0.31.0'",
+        coworkMan.version === "0.31.0");
       const sub = JSON.parse(fs.readFileSync(
         path.join(WORKSHOP, "ranch/platform-subscription.json"), "utf8"));
       const blueprints = sub.blueprints || sub.subscriptions || [];
       const cworkPin = blueprints.find(b => b.name === "cowork");
-      assertTrue("HC-V0900-VERSION-D: ranch platform-subscription cowork pin === '0.29.1'",
-        cworkPin && cworkPin.version === "0.30.0");
+      assertTrue("HC-V0900-VERSION-D: ranch platform-subscription cowork pin === '0.31.0'",
+        cworkPin && cworkPin.version === "0.31.0");
     } catch (e) {
       assertTrue("HC-V0900-VERSION-A..D: version pin contract", false, e && e.message);
     }
@@ -9780,8 +9780,8 @@ async function caseHCV0891Versions() {
       const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
       const cw = (platMan.blueprints || []).find(b => b.name === "cowork");
       assertTrue("HC-V0901-CATALOGUE-A1: cowork present in workshop catalogue", !!cw);
-      assertTrue("HC-V0901-CATALOGUE-A1: cowork catalogue pin === '0.29.1' (matches cowork's own manifest)",
-        cw && cw.version === "0.30.0");
+      assertTrue("HC-V0901-CATALOGUE-A1: cowork catalogue pin === '0.31.0' (matches cowork's own manifest)",
+        cw && cw.version === "0.31.0");
     } catch (e) {
       assertTrue("HC-V0901-CATALOGUE-A1: catalogue sync contract", false, e && e.message);
     }
@@ -10613,8 +10613,8 @@ type: cowork-microscope
       coworkMan.claude_surface.some(s =>
         (s.source || "").endsWith("skills/skills/compose-body/SKILL.md")
         && (s.dest || "").includes("{{skills_dir}}/skills/compose-body/SKILL.md")));
-    assertTrue("HC-V0920-MANIFEST-A3: cowork manifest version === 0.30.0",
-      coworkMan.version === "0.30.0");
+    assertTrue("HC-V0920-MANIFEST-A3: cowork manifest version === 0.31.0",
+      coworkMan.version === "0.31.0");
     assertTrue("HC-V0920-MANIFEST-A4: compose-body-helper source uses helpers/ relative path",
       coworkMan.files.find(f => (f.source || "").endsWith("compose-body-helper.js"))
         .source.startsWith("helpers/"));
@@ -10631,16 +10631,16 @@ type: cowork-microscope
   console.log(`\n--- Case HC-V0920-VERSION: pin lockstep ---`);
   try {
     const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
-    assertTrue("HC-V0920-VERSION-A1: workshop_version === 0.92.0",
-      platMan.workshop_version === "0.92.0");
-    assertTrue("HC-V0920-VERSION-A2: blueprints[].cowork.version === 0.30.0",
-      platMan.blueprints.find(b => b.name === "cowork").version === "0.30.0");
+    assertTrue("HC-V0920-VERSION-A1: workshop_version === 0.93.0",
+      platMan.workshop_version === "0.93.0");
+    assertTrue("HC-V0920-VERSION-A2: blueprints[].cowork.version === 0.31.0",
+      platMan.blueprints.find(b => b.name === "cowork").version === "0.31.0");
     const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
-    assertTrue("HC-V0920-VERSION-A3: package.json version === 0.92.0",
-      pkg.version === "0.92.0");
+    assertTrue("HC-V0920-VERSION-A3: package.json version === 0.93.0",
+      pkg.version === "0.93.0");
     const workshopSub = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "ranch/platform-subscription.json"), "utf8"));
-    assertTrue("HC-V0920-VERSION-A4: workshop subscription cowork pin === 0.30.0",
-      workshopSub.blueprints.find(b => b.name === "cowork").version === "0.30.0");
+    assertTrue("HC-V0920-VERSION-A4: workshop subscription cowork pin === 0.31.0",
+      workshopSub.blueprints.find(b => b.name === "cowork").version === "0.31.0");
   } catch (e) {
     assertTrue("HC-V0920-VERSION: pin lockstep contract", false, e && e.message);
   }
@@ -10659,6 +10659,167 @@ type: cowork-microscope
       claudeMd.includes("<!-- @claude-surface:skills-index END -->"));
   } catch (e) {
     assertTrue("HC-V0920-SURFACE: claude_surface contract", false, e && e.message);
+  }
+
+  // ============================================================================
+  // v0.93.0 — COMPOSE-SHAPE / VALIDATOR / SUB-HELPER / CONTRACT
+  // (cowork:sync-scheduled-jobs orchestrator + helper + canonical contract).
+  // 8 byte-identical fixtures + 4 validator-failure fixtures + sub-helper
+  // unit asserts + contract structural invariants. ~46 sub-asserts.
+  // ============================================================================
+  console.log(`\n--- Case HC-V0930-COMPOSE-SHAPE: sync-scheduled-jobs byte-identical fixtures ---`);
+  const _sjHelper = require(path.join(WORKSHOP, "platform/blueprints/cowork/helpers/compose-scheduled-job-wrappers-helper.js"));
+  const _sjContract = JSON.parse(fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/cowork/data/scheduled-job-contract.json"), "utf8"));
+  const _sjFixDir = path.join(WORKSHOP, "platform/blueprints/cowork/helpers/fixtures/compose-scheduled-job-wrappers");
+
+  function _loadSjFixture(name) {
+    const dir = path.join(_sjFixDir, name);
+    const inputRaw = JSON.parse(fs.readFileSync(path.join(dir, "input.json"), "utf8"));
+    // If input.json doesn't include a contract field, inject the canonical contract
+    // so fixtures stay self-contained (validator-failure fixtures provide their own
+    // corrupted contract inline so the loader respects it).
+    const input = Object.assign({}, inputRaw, {
+      contract: (inputRaw.contract !== undefined) ? inputRaw.contract : _sjContract,
+    });
+    const expectedFilePath = path.join(dir, "expected-file.md");
+    const expectedStatusPath = path.join(dir, "expected-status.txt");
+    const expectedFile = fs.existsSync(expectedFilePath) ? fs.readFileSync(expectedFilePath, "utf8") : null;
+    const expectedStatus = fs.existsSync(expectedStatusPath)
+      ? fs.readFileSync(expectedStatusPath, "utf8")  // expected-status.txt has NO trailing newline
+      : null;
+    return { input, expectedFile, expectedStatus };
+  }
+
+  const _SJ_SHAPE_FIXTURES = [
+    "case-accuris-shape",
+    "case-headspace-shape",
+    "case-novel-mcp-shape",
+    "case-edge-no-connected-mcps",
+    "case-edge-engagement-no-label",
+    "case-edge-empty-voice-notes",
+    "case-edge-contract-version-mismatch",
+    "case-edge-disabled-cadence",
+  ];
+
+  for (const name of _SJ_SHAPE_FIXTURES) {
+    const label = name.toUpperCase().replace(/[^A-Z0-9]/g, "_");
+    try {
+      const { input, expectedFile } = _loadSjFixture(name);
+      const r = _sjHelper.composeScheduledJobWrappers(input);
+      assertTrue(`HC-V0930-COMPOSE-SHAPE-${label}-A1: status ok`,
+        r.status === "ok",
+        `got status=${r.status}`);
+      assertTrue(`HC-V0930-COMPOSE-SHAPE-${label}-A2: file_md byte-identical to expected-file.md`,
+        r.file_md === expectedFile,
+        `lengths: actual=${r.file_md.length} expected=${(expectedFile || "").length}`);
+    } catch (e) {
+      assertTrue(`HC-V0930-COMPOSE-SHAPE-${label}: fixture load + compare`, false, e && e.message);
+    }
+  }
+
+  console.log(`\n--- Case HC-V0930-VALIDATOR: substitution-token validator modes 1-4 ---`);
+  const _SJ_VALIDATOR_FIXTURES = [
+    "case-validator-undeclared-token",
+    "case-validator-unknown-shared-key",
+    "case-validator-invalid-format",
+    "case-validator-post-render-leak",
+  ];
+  for (const name of _SJ_VALIDATOR_FIXTURES) {
+    const label = name.toUpperCase().replace(/[^A-Z0-9]/g, "_");
+    try {
+      const { input, expectedStatus } = _loadSjFixture(name);
+      const r = _sjHelper.composeScheduledJobWrappers(input);
+      assertTrue(`HC-V0930-VALIDATOR-${label}-A1: status matches expected`,
+        r.status === expectedStatus,
+        `expected=${expectedStatus} actual=${r.status}`);
+      assertTrue(`HC-V0930-VALIDATOR-${label}-A2: file_md empty on failure`,
+        r.file_md === "");
+      assertTrue(`HC-V0930-VALIDATOR-${label}-A3: warnings empty array on failure`,
+        Array.isArray(r.warnings) && r.warnings.length === 0);
+    } catch (e) {
+      assertTrue(`HC-V0930-VALIDATOR-${label}: validator contract`, false, e && e.message);
+    }
+  }
+
+  console.log(`\n--- Case HC-V0930-SUB-HELPER: composeMcpDispatchLines / validateContract / substituteTemplate ---`);
+  try {
+    // composeMcpDispatchLines — 5 sub-asserts
+    {
+      const r = _sjHelper.composeMcpDispatchLines({
+        chat:   { kind: "chat",   connected: true,  served_by: "A" },
+        email:  { kind: "email",  connected: false, served_by: "B" },
+        github: { kind: "github", connected: true,  served_by: "C" },
+      });
+      assertTrue("HC-V0930-SUB-HELPER-MCP-A1: only connected emitted (sorted by kind)",
+        r.line === "chat served-by A; github served-by C",
+        `got: ${JSON.stringify(r.line)}`);
+      assertTrue("HC-V0930-SUB-HELPER-MCP-A2: no warning when at least one connected",
+        r.warning === null);
+    }
+    {
+      const r = _sjHelper.composeMcpDispatchLines({});
+      assertTrue("HC-V0930-SUB-HELPER-MCP-A3: empty mcps → fallback string",
+        r.line.indexOf("(no connected MCPs detected") === 0);
+      assertTrue("HC-V0930-SUB-HELPER-MCP-A4: empty mcps → no_connected_mcps_in_prefs warning",
+        r.warning === "no_connected_mcps_in_prefs");
+    }
+    {
+      const r = _sjHelper.composeMcpDispatchLines({
+        slack: { kind: "slack", connected: true, served_by: "novel-uuid" },
+      });
+      assertTrue("HC-V0930-SUB-HELPER-MCP-A5: novel kind handled dynamically (no brand-string special-case)",
+        r.line === "slack served-by novel-uuid",
+        `got: ${JSON.stringify(r.line)}`);
+    }
+
+    // validateContract — 3 sub-asserts
+    assertTrue("HC-V0930-SUB-HELPER-VC-A1: canonical contract validates ok",
+      _sjHelper.validateContract(_sjContract).status === "ok");
+    assertTrue("HC-V0930-SUB-HELPER-VC-A2: null contract fails not-object",
+      _sjHelper.validateContract(null).status === "failed:contract:invalid-shape:not-object");
+    {
+      const bad = Object.assign({}, _sjContract, { cadence_order: [..._sjContract.cadence_order, "nonexistent-cadence"] });
+      assertTrue("HC-V0930-SUB-HELPER-VC-A3: cadence_order with missing cadence fails",
+        _sjHelper.validateContract(bad).status === "failed:contract:cadence-order-mismatch");
+    }
+
+    // substituteTemplate — 4 sub-asserts
+    assertTrue("HC-V0930-SUB-HELPER-ST-A1: $-token replaced",
+      _sjHelper.substituteTemplate("hello {{$name}}", { "$name": "world" }) === "hello world");
+    assertTrue("HC-V0930-SUB-HELPER-ST-A2: shared.<key> token replaced",
+      _sjHelper.substituteTemplate("see {{shared.foo}}", { "shared.foo": "bar" }) === "see bar");
+    assertTrue("HC-V0930-SUB-HELPER-ST-A3: idempotent on no tokens",
+      _sjHelper.substituteTemplate("static text", {}) === "static text");
+    {
+      const subs = { "$x": "a" };
+      _sjHelper.substituteTemplate("{{$x}}", subs);
+      assertTrue("HC-V0930-SUB-HELPER-ST-A4: input subs object not mutated",
+        subs["$x"] === "a" && Object.keys(subs).length === 1);
+    }
+  } catch (e) {
+    assertTrue("HC-V0930-SUB-HELPER: sub-helper contract", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0930-CONTRACT: scheduled-job-contract.json structural invariants ---`);
+  try {
+    assertTrue("HC-V0930-CONTRACT-A1: contract parses + is object",
+      _sjContract && typeof _sjContract === "object" && !Array.isArray(_sjContract));
+    assertTrue("HC-V0930-CONTRACT-A2: contract_version === \"0.31.0\"",
+      _sjContract.contract_version === "0.31.0");
+    assertTrue("HC-V0930-CONTRACT-A3: cadence_order is length-5 array",
+      Array.isArray(_sjContract.cadence_order) && _sjContract.cadence_order.length === 5);
+    assertTrue("HC-V0930-CONTRACT-A4: every cadence in cadence_order exists in cadences",
+      _sjContract.cadence_order.every((c) => !!_sjContract.cadences[c]));
+    const _sjReqFields = ["schedule_hint", "frontmatter_type", "output_path_template",
+      "orchestrator_skill_name", "sub_skill_name", "cadence_tone_hint", "wrapper_template"];
+    assertTrue("HC-V0930-CONTRACT-A5: every cadence has 7 required fields",
+      _sjContract.cadence_order.every((c) =>
+        _sjReqFields.every((f) => _sjContract.cadences[c][f] !== undefined)));
+    assertTrue("HC-V0930-CONTRACT-A6: substitution_tokens declares exactly 13 tokens",
+      Object.keys(_sjContract.substitution_tokens).length === 13);
+  } catch (e) {
+    assertTrue("HC-V0930-CONTRACT: contract structural contract", false, e && e.message);
   }
 
   console.log(`\n========`);

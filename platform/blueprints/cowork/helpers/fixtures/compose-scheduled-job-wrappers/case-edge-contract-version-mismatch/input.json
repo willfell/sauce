@@ -1,0 +1,29 @@
+{
+  "_comment": "Edge case: contract.contract_version (0.31.0) != cowork_version (0.30.0). Expected: file renders fully + warning contract_version_mismatch:0.31.0:0.30.0. Contract field omitted intentionally — HC loader injects canonical contract at 0.31.0.",
+  "engagement": {
+    "id": "version-skew",
+    "label": "Version Skew Engagement",
+    "type": "personal",
+    "timezone": "America/Denver"
+  },
+  "prefs": {
+    "mcps": {
+      "chat":   { "kind": "chat",   "served_by": "apple-mcp-uuid", "connected": true, "callout_type": "info" },
+      "github": { "kind": "github", "served_by": "github",         "connected": true, "callout_type": "note" }
+    },
+    "personality": {
+      "notes": "Tests cowork_version skew against contract_version.",
+      "vibe": "neutral",
+      "formality": "casual",
+      "length": "short",
+      "pep_talk": false
+    }
+  },
+  "engagement_type_data": {
+    "scheduled_jobs": { "disabled_cadences": [] }
+  },
+  "sauce_version": "0.93.0",
+  "cowork_version": "0.30.0",
+  "generated_at": "2026-06-05T14:43:33-06:00",
+  "generated_by": "cowork:sync-scheduled-jobs@1.0.0"
+}

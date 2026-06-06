@@ -1,0 +1,30 @@
+{
+  "_comment": "Contrived novel-kind engagement: slack + email + github. Tests dynamic-design (B4) guarantee — helper has never seen 'slack' as a kind, just emits canonical line. Contract field omitted intentionally — HC loader injects canonical contract.",
+  "engagement": {
+    "id": "consulting-client-x",
+    "label": "Consulting Client X",
+    "type": "consulting",
+    "timezone": "America/Denver"
+  },
+  "prefs": {
+    "mcps": {
+      "slack":  { "kind": "slack",  "served_by": "slack-mcp-uuid-novel", "connected": true, "callout_type": "info" },
+      "email":  { "kind": "email",  "served_by": "smtp-mcp-uuid",         "connected": true, "callout_type": "quote" },
+      "github": { "kind": "github", "served_by": "github",                "connected": true, "callout_type": "note" }
+    },
+    "personality": {
+      "notes": "Professional, concise, focused on deliverables; no internal jargon.",
+      "vibe": "professional",
+      "formality": "professional",
+      "length": "short",
+      "pep_talk": false
+    }
+  },
+  "engagement_type_data": {
+    "scheduled_jobs": { "disabled_cadences": [] }
+  },
+  "sauce_version": "0.93.0",
+  "cowork_version": "0.31.0",
+  "generated_at": "2026-06-05T14:38:55-06:00",
+  "generated_by": "cowork:sync-scheduled-jobs@1.0.0"
+}

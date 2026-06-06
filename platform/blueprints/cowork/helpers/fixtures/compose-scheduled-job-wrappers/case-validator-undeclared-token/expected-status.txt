@@ -1,0 +1,1 @@
+failed:contract:substitution-token-undeclared:$bogus_undeclared_token:cadence-morning-briefing

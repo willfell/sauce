@@ -1,0 +1,28 @@
+{
+  "_comment": "Edge case: engagement.label omitted. Expected: fallback to engagement.id + warning engagement_label_fallback_used. Contract field omitted intentionally — HC loader injects canonical contract.",
+  "engagement": {
+    "id": "no-label-eng",
+    "type": "personal",
+    "timezone": "America/Denver"
+  },
+  "prefs": {
+    "mcps": {
+      "chat":   { "kind": "chat",   "served_by": "apple-mcp-uuid", "connected": true, "callout_type": "info" },
+      "github": { "kind": "github", "served_by": "github",         "connected": true, "callout_type": "note" }
+    },
+    "personality": {
+      "notes": "Casual scope; no label to test fallback.",
+      "vibe": "warm",
+      "formality": "casual",
+      "length": "short",
+      "pep_talk": false
+    }
+  },
+  "engagement_type_data": {
+    "scheduled_jobs": { "disabled_cadences": [] }
+  },
+  "sauce_version": "0.93.0",
+  "cowork_version": "0.31.0",
+  "generated_at": "2026-06-05T14:41:11-06:00",
+  "generated_by": "cowork:sync-scheduled-jobs@1.0.0"
+}

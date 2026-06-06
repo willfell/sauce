@@ -1,0 +1,29 @@
+{
+  "_comment": "Edge case: engagement_type_data.scheduled_jobs.disabled_cadences=[\"midday-tripwire\"]. Expected: section 2 = DISABLED stub (slot preserved) + warning cadence_disabled:midday-tripwire:engagement-type. Contract field omitted intentionally — HC loader injects canonical contract.",
+  "engagement": {
+    "id": "no-tripwire",
+    "label": "No Tripwire Engagement",
+    "type": "personal",
+    "timezone": "America/Denver"
+  },
+  "prefs": {
+    "mcps": {
+      "chat":   { "kind": "chat",   "served_by": "apple-mcp-uuid", "connected": true, "callout_type": "info" },
+      "github": { "kind": "github", "served_by": "github",         "connected": true, "callout_type": "note" }
+    },
+    "personality": {
+      "notes": "Personal engagement; midday-tripwire disabled at engagement-type level.",
+      "vibe": "warm",
+      "formality": "casual",
+      "length": "short",
+      "pep_talk": false
+    }
+  },
+  "engagement_type_data": {
+    "scheduled_jobs": { "disabled_cadences": ["midday-tripwire"] }
+  },
+  "sauce_version": "0.93.0",
+  "cowork_version": "0.31.0",
+  "generated_at": "2026-06-05T14:44:44-06:00",
+  "generated_by": "cowork:sync-scheduled-jobs@1.0.0"
+}

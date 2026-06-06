@@ -1,0 +1,30 @@
+{
+  "_comment": "Edge case: all prefs.mcps[*].connected = false. Expected: fallback dispatch line + warning no_connected_mcps_in_prefs. Contract field omitted intentionally — HC loader injects canonical contract.",
+  "engagement": {
+    "id": "stale-prefs",
+    "label": "Stale Prefs Engagement",
+    "type": "personal",
+    "timezone": "America/Denver"
+  },
+  "prefs": {
+    "mcps": {
+      "chat":   { "kind": "chat",   "served_by": "old-uuid", "connected": false, "callout_type": "info" },
+      "email":  { "kind": "email",  "served_by": "old-uuid", "connected": false, "callout_type": "quote" },
+      "github": { "kind": "github", "served_by": "",          "connected": false, "callout_type": "note" }
+    },
+    "personality": {
+      "notes": "Test engagement; prefs disconnected to verify fallback line.",
+      "vibe": "neutral",
+      "formality": "casual",
+      "length": "short",
+      "pep_talk": false
+    }
+  },
+  "engagement_type_data": {
+    "scheduled_jobs": { "disabled_cadences": [] }
+  },
+  "sauce_version": "0.93.0",
+  "cowork_version": "0.31.0",
+  "generated_at": "2026-06-05T14:40:00-06:00",
+  "generated_by": "cowork:sync-scheduled-jobs@1.0.0"
+}

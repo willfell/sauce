@@ -1,0 +1,31 @@
+{
+  "_comment": "Apple-MCP engagement: chat/calendar/messages via apple-mcp-uuid + github; NO ado; engagement.type=personal. Contract field omitted intentionally — HC loader injects canonical contract.",
+  "engagement": {
+    "id": "headspace",
+    "label": "Headspace (personal)",
+    "type": "personal",
+    "timezone": "America/Denver"
+  },
+  "prefs": {
+    "mcps": {
+      "chat":     { "kind": "chat",     "served_by": "apple-mcp-uuid", "connected": true, "callout_type": "info" },
+      "calendar": { "kind": "calendar", "served_by": "apple-mcp-uuid", "connected": true, "callout_type": "tip" },
+      "messages": { "kind": "messages", "served_by": "apple-mcp-uuid", "connected": true, "callout_type": "info" },
+      "github":   { "kind": "github",   "served_by": "github",         "connected": true, "callout_type": "note" }
+    },
+    "personality": {
+      "notes": "Reflective, warm, narrative-leaning; lean into journal-like cadence for personal scope.",
+      "vibe": "reflective",
+      "formality": "casual",
+      "length": "medium",
+      "pep_talk": true
+    }
+  },
+  "engagement_type_data": {
+    "scheduled_jobs": { "disabled_cadences": [] }
+  },
+  "sauce_version": "0.93.0",
+  "cowork_version": "0.31.0",
+  "generated_at": "2026-06-05T14:35:42-06:00",
+  "generated_by": "cowork:sync-scheduled-jobs@1.0.0"
+}

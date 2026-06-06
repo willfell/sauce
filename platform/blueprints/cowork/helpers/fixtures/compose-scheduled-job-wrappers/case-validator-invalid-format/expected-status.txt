@@ -1,0 +1,1 @@
+failed:contract:invalid-substitution-format:{{template_variables}}:cadence-morning-briefing
