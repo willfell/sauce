@@ -113,6 +113,46 @@ When `prompt_body` was empty upstream (`warning == "empty_prompt"`), the orchest
 
 ## Pre-write self-check
 
+### v0.91.1 write-guard: canonical output path enforcement (FIRST CHECK)
+
+Before any other pre-write check, validate the computed write path against the canonical shape:
+
+`spice/cowork/monthly/<YYYY>/<YYYY-MM>/monthly-review.md`
+
+REJECT and return `{ path, status: "failed:contract-violation:wrong-output-path" }` if the computed `path` argument:
+
+1. Starts with `spice/daily/` — that's the daily-blueprint surface (hand-edited daily notes), NOT this sub-skill's output.
+2. Doesn't contain the canonical prefix `spice/cowork/monthly/`.
+
+Even if the orchestrator passes a wrong `path` argument, this guard catches it. This is the v0.91.1 deterministic backstop for v0.90.2's `[!warning]+ CRITICAL` orchestrator callout, which is prose-only and LLM-attention-bounded.
+
+### v0.91.2 frontmatter write-guard: canonical frontmatter enforcement (SECOND CHECK)
+
+After the path check passes, validate the composed frontmatter BEFORE the Write tool fires. The canonical frontmatter shape is:
+
+```yaml
+type: cowork-monthly-review         # MUST be this EXACT string
+engagement_id: <engagement_id>
+month: "<YYYY-MM>"                   # e.g. 2026-06
+generator: cowork:monthly-review@1.0.0
+prompt_source: <path>
+title: <composed title>
+summary: <1-2 sentence headline>
+created_at: <ISO timestamp>
+warnings: [<list>]                   # OPTIONAL
+```
+
+REJECT and return `{ path, status: "failed:contract-violation:wrong-frontmatter:<field>" }` if:
+
+1. `type:` is missing OR != the EXACT string `cowork-monthly-review`.
+2. Any of `engagement_id`, `month`, `generator`, `prompt_source`, `title`, `summary` is missing/empty.
+3. Frontmatter contains non-canonical fields like `cadence:`, `date:`, `generated_at:`.
+4. `month:` not in ISO `YYYY-MM` format.
+
+v0.91.2 deterministic backstop for Step 17 post-write verify.
+
+### Original pre-write checklist
+
 BEFORE calling the Write tool, verify your composed output against this checklist. If any item fails, return `{ path, status: "failed:contract-violation:<field>" }` and do NOT write.
 
 **Frontmatter checks:**
@@ -122,7 +162,7 @@ BEFORE calling the Write tool, verify your composed output against this checklis
 - [ ] `engagement_id:`, `month:`, `generator:`, `prompt_source:` present
 
 **Body checks (regex-scan the composed body string):**
-- [ ] First non-frontmatter line opens a `SpaceNavButtons` dataviewjs fence (i.e. the line starts with ` ```dataviewjs` and is followed within 3 lines by `class: "SpaceNavButtons"`)
+- [ ] First non-frontmatter line opens a dataviewjs fence containing the v0.91.3 CANONICAL SpaceNavButtons invocation EXACTLY: opening ` ```dataviewjs` + body line `await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });` + closing ` ``` `. REJECT any other shape — in particular REJECT `const { SpaceNavButtons } = customJS; SpaceNavButtons(dv, {...})` (produces runtime TypeError; only the customjs-guard view pattern handles the load + fallback correctly).
 - [ ] At least one `> [!info]-` admonition present
 - [ ] At least one `> [!example]+` admonition present
 - [ ] Closing `> [!tip]` admonition present (last admonition in the body)

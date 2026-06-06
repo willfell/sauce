@@ -7778,7 +7778,7 @@ async function caseHCV0890VersionA() {
     if (ver && ver[1]) {
       assertTrue(
         `HC-V0890-VERSION-A: cowork === pin must be 0.28.0 (found ${ver[1]})`,
-        ver[1] === "0.29.3");
+        ver[1] === "0.30.0");
     }
   }
   if (eqMatches.length === 0) {
@@ -8119,7 +8119,7 @@ async function caseHCV0891Versions() {
   // A: cowork manifest pin
   const coworkMan = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "blueprints/cowork/manifest.json"), "utf8"));
-  assertEqual(coworkMan.version, "0.29.3", "HC-V0891-VERSION-A: cowork pin = 0.28.0 (v0.90.0 bump)");
+  assertEqual(coworkMan.version, "0.30.0", "HC-V0891-VERSION-A: cowork pin = 0.28.0 (v0.90.0 bump)");
 
   // B: daily manifest pin
   const dailyMan = JSON.parse(fs.readFileSync(
@@ -8131,10 +8131,10 @@ async function caseHCV0891Versions() {
     path.join(WORKSHOP, "manifest.json"), "utf8"));
   const wsVer = platformMan.workshop_version || platformMan.version
     || (platformMan.workshop && platformMan.workshop.version);
-  assertEqual(wsVer, "0.91.3", "HC-V0891-VERSION-C: workshop pin = 0.90.0 (v0.90.0 bump)");
+  assertEqual(wsVer, "0.92.0", "HC-V0891-VERSION-C: workshop pin = 0.90.0 (v0.90.0 bump)");
   const pkg = JSON.parse(fs.readFileSync(
     path.resolve(WORKSHOP, "..", "package.json"), "utf8"));
-  assertEqual(pkg.version, "0.91.3", "HC-V0891-VERSION-C: package.json = 0.90.0 (v0.90.0 bump)");
+  assertEqual(pkg.version, "0.92.0", "HC-V0891-VERSION-C: package.json = 0.90.0 (v0.90.0 bump)");
 
   // D: mechanism count unchanged
   const mechs = (platformMan.mechanisms && Array.isArray(platformMan.mechanisms))
@@ -9727,20 +9727,20 @@ async function caseHCV0891Versions() {
       // NOTE: top-level WORKSHOP at line 29 = path.resolve(__dirname, "../..") = workshop ROOT
       // (distinct from the local WORKSHOP inside caseHCV0891Versions which is platform/).
       const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
-      assertTrue("HC-V0900-VERSION-A: package.json version === '0.91.1'", pkg.version === "0.91.3");
+      assertTrue("HC-V0900-VERSION-A: package.json version === '0.91.1'", pkg.version === "0.92.0");
       const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
       assertTrue("HC-V0900-VERSION-B: platform/manifest.json workshop_version === '0.91.1'",
-        platMan.workshop_version === "0.91.3");
+        platMan.workshop_version === "0.92.0");
       const coworkMan = JSON.parse(fs.readFileSync(
         path.join(WORKSHOP, "platform/blueprints/cowork/manifest.json"), "utf8"));
       assertTrue("HC-V0900-VERSION-C: cowork manifest version === '0.29.1'",
-        coworkMan.version === "0.29.3");
+        coworkMan.version === "0.30.0");
       const sub = JSON.parse(fs.readFileSync(
         path.join(WORKSHOP, "ranch/platform-subscription.json"), "utf8"));
       const blueprints = sub.blueprints || sub.subscriptions || [];
       const cworkPin = blueprints.find(b => b.name === "cowork");
       assertTrue("HC-V0900-VERSION-D: ranch platform-subscription cowork pin === '0.29.1'",
-        cworkPin && cworkPin.version === "0.29.3");
+        cworkPin && cworkPin.version === "0.30.0");
     } catch (e) {
       assertTrue("HC-V0900-VERSION-A..D: version pin contract", false, e && e.message);
     }
@@ -9781,7 +9781,7 @@ async function caseHCV0891Versions() {
       const cw = (platMan.blueprints || []).find(b => b.name === "cowork");
       assertTrue("HC-V0901-CATALOGUE-A1: cowork present in workshop catalogue", !!cw);
       assertTrue("HC-V0901-CATALOGUE-A1: cowork catalogue pin === '0.29.1' (matches cowork's own manifest)",
-        cw && cw.version === "0.29.3");
+        cw && cw.version === "0.30.0");
     } catch (e) {
       assertTrue("HC-V0901-CATALOGUE-A1: catalogue sync contract", false, e && e.message);
     }
@@ -10422,6 +10422,101 @@ type: cowork-microscope
       assertTrue(`HC-V0913-VERIFY-${letter}1: regex tightening contract`, false, e && e.message);
     }
   });
+
+  // ============================================================================
+  // v0.92.0 — cowork:compose-body helper (HC-V0920-COMPOSE-*)
+  // ============================================================================
+  // 9 byte-identical golden fixtures (5 cadences + 4 edge cases).
+  // Replaces the v0.78.0 HC-V0780-E1 retired from run-cowork-smoke.
+
+  const COMPOSE_BODY_HELPER = require(path.join(WORKSHOP, "platform/blueprints/cowork/helpers/compose-body-helper.js"));
+  const COMPOSE_FIXTURES_DIR = path.join(WORKSHOP, "platform/blueprints/cowork/helpers/fixtures/compose-body");
+
+  function _loadComposeFixture(name) {
+    const dir = path.join(COMPOSE_FIXTURES_DIR, name);
+    const input = JSON.parse(fs.readFileSync(path.join(dir, "input.json"), "utf8"));
+    const out = { input };
+    const ebPath = path.join(dir, "expected-body.md");
+    const eaPath = path.join(dir, "expected-assertions.json");
+    const esPath = path.join(dir, "expected-status.txt");
+    if (fs.existsSync(ebPath)) out.expectedBody = fs.readFileSync(ebPath, "utf8");
+    if (fs.existsSync(eaPath)) out.expectedAssertions = JSON.parse(fs.readFileSync(eaPath, "utf8"));
+    if (fs.existsSync(esPath)) out.expectedStatus = fs.readFileSync(esPath, "utf8").trim();
+    return out;
+  }
+
+  function _runComposeCadenceFixture(labelPrefix, fixtureName) {
+    console.log(`\n--- Case ${labelPrefix}: cowork:compose-body fixture ${fixtureName} ---`);
+    try {
+      const { input, expectedBody, expectedAssertions } = _loadComposeFixture(fixtureName);
+      const r = COMPOSE_BODY_HELPER.composeBody(input);
+      assertTrue(`${labelPrefix}-A1: status ok`, r.status === "ok");
+      assertTrue(`${labelPrefix}-A2: body_md byte-identical`, r.body_md === expectedBody);
+      assertTrue(`${labelPrefix}-A3: body_assertions match expected (as set)`,
+        JSON.stringify([...r.body_assertions].sort()) === JSON.stringify([...expectedAssertions].sort()));
+      assertTrue(`${labelPrefix}-A4: nav-buttons block present in body`,
+        r.body_md.includes("```dataviewjs"));
+      assertTrue(`${labelPrefix}-A5: body ends with single newline`,
+        r.body_md.endsWith("\n") && !r.body_md.endsWith("\n\n"));
+    } catch (e) {
+      assertTrue(`${labelPrefix}: cadence fixture`, false, e && e.message);
+    }
+  }
+
+  _runComposeCadenceFixture("HC-V0920-COMPOSE-MB", "case-morning-briefing");
+  _runComposeCadenceFixture("HC-V0920-COMPOSE-MT", "case-midday-tripwire");
+  _runComposeCadenceFixture("HC-V0920-COMPOSE-EOD", "case-eod-review");
+  _runComposeCadenceFixture("HC-V0920-COMPOSE-WR", "case-weekly-review");
+  _runComposeCadenceFixture("HC-V0920-COMPOSE-MR", "case-monthly-review");
+
+  // Edge: empty memory
+  console.log(`\n--- Case HC-V0920-COMPOSE-EDGE-EM: empty memory_callouts → cluster skipped cleanly ---`);
+  try {
+    const { input, expectedBody } = _loadComposeFixture("case-edge-empty-memory");
+    const r = COMPOSE_BODY_HELPER.composeBody(input);
+    assertTrue("HC-V0920-COMPOSE-EDGE-EM1: status ok", r.status === "ok");
+    assertTrue("HC-V0920-COMPOSE-EDGE-EM2: body byte-identical", r.body_md === expectedBody);
+    assertTrue("HC-V0920-COMPOSE-EDGE-EM3: no orphan triple-newline", !r.body_md.includes("\n\n\n"));
+  } catch (e) {
+    assertTrue("HC-V0920-COMPOSE-EDGE-EM: edge fixture", false, e && e.message);
+  }
+
+  // Edge: empty ordered_blocks
+  console.log(`\n--- Case HC-V0920-COMPOSE-EDGE-EOB: ordered_blocks: [] → graceful skip ---`);
+  try {
+    const { input, expectedBody } = _loadComposeFixture("case-edge-empty-ordered-blocks");
+    const r = COMPOSE_BODY_HELPER.composeBody(input);
+    assertTrue("HC-V0920-COMPOSE-EDGE-EOB1: status ok", r.status === "ok");
+    assertTrue("HC-V0920-COMPOSE-EDGE-EOB2: body byte-identical", r.body_md === expectedBody);
+  } catch (e) {
+    assertTrue("HC-V0920-COMPOSE-EDGE-EOB: edge fixture", false, e && e.message);
+  }
+
+  // Edge: multiline body with blanks
+  console.log(`\n--- Case HC-V0920-COMPOSE-EDGE-ML: multiline body + blanks + leading whitespace + mid-line > ---`);
+  try {
+    const { input, expectedBody } = _loadComposeFixture("case-edge-multiline-body-with-blanks");
+    const r = COMPOSE_BODY_HELPER.composeBody(input);
+    assertTrue("HC-V0920-COMPOSE-EDGE-ML1: status ok", r.status === "ok");
+    assertTrue("HC-V0920-COMPOSE-EDGE-ML2: body byte-identical", r.body_md === expectedBody);
+    assertTrue("HC-V0920-COMPOSE-EDGE-ML3: blank line is bare > (no trailing space)",
+      r.body_md.includes("> Line 1\n>\n>"));
+  } catch (e) {
+    assertTrue("HC-V0920-COMPOSE-EDGE-ML: edge fixture", false, e && e.message);
+  }
+
+  // Edge: unknown callout type
+  console.log(`\n--- Case HC-V0920-COMPOSE-EDGE-UCT: unknown callout_type → defensive reject ---`);
+  try {
+    const { input, expectedStatus } = _loadComposeFixture("case-edge-unknown-callout-type");
+    const r = COMPOSE_BODY_HELPER.composeBody(input);
+    assertTrue("HC-V0920-COMPOSE-EDGE-UCT1: status matches expected", r.status === expectedStatus);
+    assertTrue("HC-V0920-COMPOSE-EDGE-UCT2: body_md empty on failure", r.body_md === "");
+    assertTrue("HC-V0920-COMPOSE-EDGE-UCT3: body_assertions empty on failure",
+      Array.isArray(r.body_assertions) && r.body_assertions.length === 0);
+  } catch (e) {
+    assertTrue("HC-V0920-COMPOSE-EDGE-UCT: edge fixture", false, e && e.message);
+  }
 
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);

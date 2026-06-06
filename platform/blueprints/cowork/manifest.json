@@ -1,6 +1,6 @@
 {
   "name": "cowork",
-  "version": "0.29.3",
+  "version": "0.30.0",
   "kind": "blueprint",
   "module_directory": "cowork",
   "engagement_types_dir": "engagement-types",
@@ -338,6 +338,11 @@
     {
       "source": "helpers/compose-semantic-echoes-callout.js",
       "dest": "{{module_directory}}/helpers/compose-semantic-echoes-callout.js",
+      "tag": "platform"
+    },
+    {
+      "source": "helpers/compose-body-helper.js",
+      "dest": "{{module_directory}}/helpers/compose-body-helper.js",
       "tag": "platform"
     },
     {
@@ -685,6 +690,11 @@
       "kind": "skill",
       "source": "skills/skills/gather-semantic-memory/SKILL.md",
       "dest": "{{skills_dir}}/skills/gather-semantic-memory/SKILL.md"
+    },
+    {
+      "kind": "skill",
+      "source": "skills/skills/compose-body/SKILL.md",
+      "dest": "{{skills_dir}}/skills/compose-body/SKILL.md"
     },
     {
       "kind": "skill",

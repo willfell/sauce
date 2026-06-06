@@ -3,7 +3,8 @@
   "jsFolder": "ranch/Scripts",
   "startupScriptNames": [
     "ProjectTaskCreateListenerInit",
-    "KanbanStatusSyncInit"
+    "KanbanStatusSyncInit",
+    "ScratchDayMigrateInit"
   ],
   "registeredInvocableScriptNames": [],
   "rerunStartupScriptsOnFileChange": false

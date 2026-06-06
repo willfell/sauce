@@ -349,6 +349,12 @@ class ActivityFeed {
     const inWindow = (p) => {
       if (!p) return false;
       let anyFieldPresent = false;
+      // v0.7.1 (sauce v0.84.1): cache numeric epoch bounds once per call.
+      // String-compare of full-ISO timestamps is brittle when offsets mix
+      // (e.g., one source serializes -06:00, another Z). moment().valueOf()
+      // collapses both to absolute epoch ms.
+      const startMs = window.moment(start).valueOf();
+      const endMs   = window.moment(end).valueOf();
       for (const key of tsKeysOpt) {
         const tsRaw = p[key];
         if (!tsRaw) continue;
@@ -356,15 +362,17 @@ class ActivityFeed {
         const ts = String(tsRaw);
         if (/^\d{4}-\d{2}-\d{2}$/.test(ts)) {
           if (ts >= start.slice(0, 10) && ts <= end.slice(0, 10)) return true;
-        } else if (ts >= start && ts <= end) {
-          return true;
+        } else {
+          const tsMs = window.moment(ts).valueOf();
+          if (Number.isFinite(tsMs) && tsMs >= startMs && tsMs <= endMs) return true;
         }
       }
       if (anyFieldPresent) return false; // authoritative: at least one field found, none in-window
       if (!includeMtime) return false;
       if (!p.file || !p.file.mtime) return false;
       const mIso = (typeof p.file.mtime.toISO === "function") ? p.file.mtime.toISO() : String(p.file.mtime);
-      return mIso >= start && mIso <= end;
+      const mMs = window.moment(mIso).valueOf();
+      return Number.isFinite(mMs) && mMs >= startMs && mMs <= endMs;
     };
 
     const windowed = dv.pages().where(inWindow).array();
@@ -632,9 +640,16 @@ class ActivityFeed {
     // v0.7.0 (sauce v0.73.0): override the !isClosed default when persisted
     // state has a value for this group's key. Falls back to manifest-defined
     // defaultClosed semantics on miss.
+    // v0.7.1 (sauce v0.84.1): defaultClosed groups always start closed at
+    // session boot. Without the `!isClosed` gate, a single past user-toggle
+    // persists `open:true` and defeats the curated default on every
+    // subsequent render — observed for the "scratch" group on the daily
+    // dashboard. User toggles still work within a session (the toggle
+    // listener below still writes), so a re-expanded group stays open until
+    // reload.
     const stateKey = "sauce-activity-feed:" + key;
     let initialOpen = !isClosed;
-    if (groupState && Object.prototype.hasOwnProperty.call(groupState, stateKey)) {
+    if (!isClosed && groupState && Object.prototype.hasOwnProperty.call(groupState, stateKey)) {
       initialOpen = !!groupState[stateKey];
     }
     if (initialOpen) details.open = true;
@@ -841,6 +856,7 @@ class ActivityFeed {
       "scratch-day",
       "cowork-daily",
       "cowork-weekly",
+      "cowork-weekly-synthesis",
       "cowork-monthly",
       "to-do",
       "journal",

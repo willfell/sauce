@@ -8,6 +8,15 @@ tags: [cowork, orchestrator, midday, engagement-aware, tripwire-aspects]
 
 # cowork:midday-tripwire
 
+> [!warning]+ CRITICAL: output path (v0.90.2)
+> This orchestrator writes ONE atomic note to:
+>
+> `spice/cowork/daily/<YYYY>/<MM-Month>/<YYYY-MM-DD>/midday-tripwire.md`
+>
+> DO NOT write to `spice/daily/<YYYY>/<MM-Month>/<weekday>-<YYYY-MM-DD>.md` — that's the daily-note blueprint (a separate surface for hand-edited daily notes), NOT this orchestrator's output. The consumer vault's CLAUDE.md may list `spice/daily/` under the "Daily" topic in its resolver table; THAT IS NOT WHERE COWORK ATOMIC NOTES GO. The cowork atomic-note path is fundamentally different from the daily-blueprint path.
+>
+> The write happens via sub-skill `cowork:write-run-note-midday-tripwire` (READ its SKILL.md before invoking; the step that delegates to it is later in this file). NEVER write the atomic note directly via the `Write` tool, the `Edit` tool, or `mcp__obsidian__obsidian_put_content` from this orchestrator body — ALWAYS delegate to the write sub-skill which enforces the path + frontmatter + structural-marker contracts.
+
 Real-time mid-day check for credit-card charges that violate the active payoff plan, scoped to a single engagement. Pulls today's CC transactions for the engagement's finance scope, classifies each as RED (locked-card charge), YELLOW (active-card discretionary >= threshold), or GREEN. Writes ONLY when at least one RED or YELLOW exists — when severity is green, NO atomic note is written (presence of a tripwire note = something to flag). When a write fires, the note lands at `spice/cowork/daily/YYYY/MM-MMMM/YYYY-MM-DD/midday-tripwire.md` (deterministic path per `(orchestrator, day)`; re-run replaces).
 
 Skipped (early-exit silently) for engagements whose `tripwire_aspects` is empty (field absent or `[]`).
@@ -26,6 +35,18 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
 
 1. READ `.claude/skills/cowork/skills/check-vault-routing/SKILL.md` in full and follow
    its `## Steps` section with `{ required: ["obsidian"] }`. If not `"ready"`, exit silently.
+1b. **Verbal commitment (v0.91.1 + v0.91.2).** Before any other action, emit Obsidian Notice as a binding commitment:
+
+   ```
+   cowork:midday-tripwire committing to:
+     PATH: spice/cowork/daily/<YYYY>/<MM-Month>/<YYYY-MM-DD>/midday-tripwire.md (NOT spice/daily/...)
+     TYPE: cowork-midday-tripwire (canonical frontmatter type)
+     VOICE: apply user-preferences.personality.notes verbatim AND personality.{vibe, formality, length, pep_talk}
+     MICROSCOPES: follow ## Output shape from each per-mcp/<kind>/microscope.md verbatim
+   ```
+
+   Deterministic backstops in write-run-note: path write-guard (v0.91.1) + frontmatter write-guard (v0.91.2). Voice + microscope are prose-imperative.
+
 2. **Resolve engagement.** Read `<vault>/spice/cowork/context/vault-config.md`; look up `engagement` by id. If not found, exit silently. Read the engagement-type manifest via the Read tool at `spice/cowork/context/engagement-types/<engagement.type>.json` (substitute `<engagement.type>` from the resolved engagement; expected values: `personal`, `w2-fte`, `consulting`). Parse as JSON; capture `render_aspects` AND `tripwire_aspects` (defaults to `[]` when field absent). If the file is missing or fails to parse, emit Notice `cowork:midday-tripwire aborted -- engagement-type manifest unavailable at spice/cowork/context/engagement-types/<engagement.type>.json` and exit. If `tripwire_aspects.length == 0`, exit silently (engagement has no tripwire signals — tripwire is a no-op).
 3. READ `.claude/skills/cowork/skills/date-context/SKILL.md` in full and follow
    its `## Steps` section with `{}`. If `context.error`, exit silently.
@@ -38,6 +59,8 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
    its `## Steps` section with `{}`. Capture as `prefs_result = { prefs, status, reason }`. Capture `prefs = prefs_result.prefs` (may be null when `status != "ok"`). Do NOT abort on `status != "ok"`; continue with legacy fallback (see step 3c).
 3c. **Plan dispatch.** Determine dispatch mode and build the priority-ordered dispatch plan.
 
+   **Connectivity signal authority (v0.91.3):** trust `prefs.mcps[<kind>].served_by` + `prefs.mcps[<kind>].connected` for namespace + connectivity. DO NOT trust `vault-config.mcp_map` for connectivity — that field is bootstrap-time-only, stale-prone. Cross-reference `prefs.mcps[<kind>].served_by` with `reachable_namespaces` for final dispatch action.
+
    Compute `dispatch_mode`:
 
    ```
@@ -45,7 +68,7 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
    ```
 
    When `dispatch_mode == "legacy"`:
-   - Emit Obsidian Notice: `cowork:midday-tripwire -- user-preferences <status> (<reason>); using engagement-template defaults`.
+   - Emit Obsidian Notice: `cowork:midday-tripwire -- PREFS UNAVAILABLE (<status>: <reason>); falling back to legacy mode. Chat and any custom kinds will NOT fire in legacy mode; inner-circle wikilink emission will NOT occur. Investigate user-preferences.md if this is unexpected.`.
    - Skip the remainder of step 3c. The legacy gather sequence fires unchanged.
 
    When `dispatch_mode == "prefs"`:
@@ -165,6 +188,10 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
 
 ## Gather
 
+> **MANDATORY:** When `dispatch_mode == "prefs"`, execute the priority loop for EVERY entry in `dispatch_plan`. Do NOT skip the loop in favor of memory-tick synthesis. Memory ticks are SUPPLEMENTARY context for the `[!info]- Today at a glance` synopsis section; they DO NOT replace live MCP gather output. When a kind's `action == "warn"`, emit the warning callout in-position via `composeWarningCallout`; do NOT silently drop it. Failing to fire the priority loop means the dispatch contract's "Known people in scope" wikilink instruction never reaches the LLM, and inner-circle names render as plaintext instead of `**[[Name]]**` wikilinks.
+
+> **MANDATORY (v0.91.3): load deferred MCP tools UPFRONT.** Before the priority loop, for each kind in `dispatch_plan` with `action == "gather_from_served_by"` or `action == "gather_canonical"`, load the required deferred tools from the kind's `served_by` namespace via Tool Search / Load. M365 (UUID `45224a84-...`): `chat_message_search`, `outlook_calendar_search`, `outlook_email_search`. ADO (UUID like `1151913a-...`): `list_workitems`, `search_workitems`. github: `search_pull_requests`, `search_issues`. If a tool isn't loaded when its gather sub-skill needs it, the sub-skill cannot execute and you silently fall back to a warning callout — the deterministic fix for the "MCP tools require loading" failure.
+
 When `dispatch_mode == "legacy"`, execute the v0.77.0 legacy gather sequence below verbatim. `ordered_blocks[]` stays empty.
 
 When `dispatch_mode == "prefs"`, skip the legacy steps; execute the priority-loop:
@@ -232,7 +259,12 @@ Each gather call passes `engagement_id`. The orchestrator branches per-aspect fr
 
 ## Write
 
-9. **Read prompt body** via `mcp__obsidian__get_file_contents` at `spice/cowork/prompts/midday-tripwire.md`. Strip frontmatter; capture body as `prompt_body` (or empty when missing).
+9. **Read prompt body** with fallback chain (v0.90.2):
+    - Read `spice/cowork/prompts/midday-tripwire.md` via `mcp__obsidian__get_file_contents`. Strip frontmatter; capture body as `user_prompt_body` (or empty when missing).
+    - **v0.4.0 installer-default sentinel detection (v0.90.2):** if `user_prompt_body` consists ONLY of the v0.4.0 installer-default content — recognizable by ALL of: (a) every non-blank line in the body starts with `> ` (one blockquote), (b) the first non-blank line starts with `> Vault-editable prompt for `, (c) the body contains the substring `Empty body is a no-op stub for now` — treat as if EMPTY and set `user_prompt_body = ""`.
+    - If `user_prompt_body` is empty, read `spice/cowork/context/engagement-templates/<engagement.type>/prompts/midday-tripwire.md` via `mcp__obsidian__get_file_contents`. Strip frontmatter; capture as `template_prompt_body` (or empty when missing).
+    - Set `prompt_body = user_prompt_body || template_prompt_body`.
+    - Set `prompt_source` accordingly: if `user_prompt_body` non-empty, `prompt_source = "spice/cowork/prompts/midday-tripwire.md"`; else if `template_prompt_body` non-empty, `prompt_source = "spice/cowork/context/engagement-templates/<engagement.type>/prompts/midday-tripwire.md"`; else `prompt_source = "spice/cowork/prompts/midday-tripwire.md"`.
 9b. **Voice contract.** If `dispatch_mode == "prefs"` AND `voice_contract != ""`, prepend it to `prompt_body`:
    `prompt_body = voice_contract + prompt_body`. The combined string is the input to the body-composition step.
 10. **Compose run-note body** per `prompt_body` + the flagged-event details from the gather steps.
@@ -273,7 +305,7 @@ Each gather call passes `engagement_id`. The orchestrator branches per-aspect fr
       - `severity:` (must match `/^(warn|alert)$/`)
       - `warning:` only when the orchestrator passed a non-null `warning` to write-run-note (otherwise the field is allowed to be absent or `null`).
    d. Regex-scan `body` for required structural markers:
-      - SpaceNavButtons block: `/```dataviewjs\n[\s\S]*?SpaceNavButtons[\s\S]*?```/`
+      - SpaceNavButtons block (v0.91.3 canonical pattern — REJECTS hallucinated `const { SpaceNavButtons } = customJS` shape): `/```dataviewjs\s*\n\s*await\s+dv\.view\(\s*["']ranch\/views\/customjs-guard["']\s*,\s*\{\s*class:\s*["']SpaceNavButtons["']\s*\}\s*\)/`
       - At least one Synopsis callout: `/^> \[!info\]- /m`
       - At least one example callout: `/^> \[!example\]\+ /m`
       - Closing tip callout: `/^> \[!tip\] /m`

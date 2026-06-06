@@ -120,6 +120,45 @@ When `prompt_body` was empty upstream (`warning == "empty_prompt"`), the orchest
 
 BEFORE calling the Write tool, verify your composed output against this checklist. If any item fails, return `{ path, status: "failed:contract-violation:<field>" }` and do NOT write.
 
+### v0.91.1 write-guard: canonical output path enforcement (FIRST CHECK)
+
+Before any other pre-write check, validate the computed write path against the canonical shape:
+
+`spice/cowork/daily/<YYYY>/<MM-Month>/<YYYY-MM-DD>/morning-briefing.md`
+
+REJECT and return `{ path, status: "failed:contract-violation:wrong-output-path" }` if the computed `path` argument:
+
+1. Starts with `spice/daily/` — that's the daily-blueprint surface (hand-edited daily notes), NOT this sub-skill's output.
+2. Has a basename matching `<weekday>-<YYYY-MM-DD>.md` shape (e.g. `Friday-2026-06-05.md` — daily-blueprint naming convention).
+3. Doesn't contain the canonical prefix `spice/cowork/daily/`.
+
+Even if the orchestrator passes a wrong `path` argument, this guard catches it. This is the v0.91.1 deterministic backstop for v0.90.2's `[!warning]+ CRITICAL` orchestrator callout, which is prose-only and LLM-attention-bounded.
+
+### v0.91.2 frontmatter write-guard: canonical frontmatter enforcement (SECOND CHECK)
+
+After the path check passes, validate the composed frontmatter BEFORE the Write tool fires. The canonical frontmatter shape is:
+
+```yaml
+type: cowork-morning-briefing       # MUST be this EXACT string
+engagement_id: <engagement_id>
+day: "<YYYY-MM-DD>"                  # ISO date — NOT weekday name
+generator: cowork:morning-briefing@1.0.0
+prompt_source: <path>
+title: <composed title>
+summary: <1-2 sentence headline ~150-250 chars>
+created_at: <ISO timestamp>
+warnings: [<list>]                   # OPTIONAL — only when warnings exist
+```
+
+REJECT and return `{ path, status: "failed:contract-violation:wrong-frontmatter:<field>" }` if:
+
+1. `type:` is missing OR is not the EXACT string `cowork-morning-briefing` (NOT `cowork-run-note`, NOT `cowork-briefing`, NOT any other variant).
+2. Any of `engagement_id`, `day`, `generator`, `prompt_source`, `title`, `summary` is missing or empty.
+3. Frontmatter contains non-canonical fields like `cadence:`, `date:` (use `day:` instead), `generated_at:` (use `created_at:` instead).
+4. `day:` is not in `YYYY-MM-DD` ISO format (`Friday` is invalid; `2026-06-05` is valid).
+
+This is the v0.91.2 deterministic backstop for the orchestrator's Step 17 post-write verify (which depends on the LLM reaching it). The write-guard runs BEFORE the file lands on disk; wrong frontmatter is refused at write time.
+
 **Frontmatter checks:**
 - [ ] `type:` matches the canonical value for this skill (`cowork-morning-briefing`)
 - [ ] `title:` is present and non-empty (the formula-composed title from above)
@@ -127,7 +166,7 @@ BEFORE calling the Write tool, verify your composed output against this checklis
 - [ ] `engagement_id:`, `day:`, `generator:`, `prompt_source:` present
 
 **Body checks (regex-scan the composed body string):**
-- [ ] First non-frontmatter line opens a `SpaceNavButtons` dataviewjs fence (i.e. the line starts with ` ```dataviewjs` and is followed within 3 lines by `class: "SpaceNavButtons"`)
+- [ ] First non-frontmatter line opens a dataviewjs fence containing the v0.91.3 CANONICAL SpaceNavButtons invocation EXACTLY: opening ` ```dataviewjs` + body line `await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });` + closing ` ``` `. REJECT any other shape — in particular REJECT `const { SpaceNavButtons } = customJS; SpaceNavButtons(dv, {...})` (produces runtime TypeError "SpaceNavButtons is not a function" because SpaceNavButtons is a class registered on customJS, not a callable export; only the customjs-guard view pattern handles the load + fallback correctly).
 - [ ] At least one `> [!info]-` admonition present
 - [ ] At least one `> [!example]+` admonition present
 - [ ] Closing `> [!tip]` admonition present (last admonition in the body)

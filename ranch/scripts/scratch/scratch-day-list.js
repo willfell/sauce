@@ -18,12 +18,14 @@ class ScratchDayList {
     _coerceDay(raw) {
         if (typeof raw === "string") return raw.slice(0, 10);
         if (raw && typeof raw.toISODate === "function") return raw.toISODate();
-        if (raw instanceof Date && !isNaN(raw)) {
-            const y = raw.getFullYear();
-            const m = String(raw.getMonth() + 1).padStart(2, "0");
-            const d = String(raw.getDate()).padStart(2, "0");
-            return `${y}-${m}-${d}`;
-        }
+        // v0.5.2 (sauce v0.84.1): no Date branch. A bare JS Date carries no
+        // timezone affinity — getFullYear/Month/Date pull LOCAL-time components
+        // off a UTC-anchored instant, which silently shifts a YAML-parsed
+        // unquoted "day: 2026-06-01" (= 2026-06-01T00:00:00Z) to 2026-05-31
+        // for any user west of UTC. Returning null drops the scratch from the
+        // day-list rather than mis-attributing it; the migration helper
+        // (ScratchDayMigrate, Stage 3) rewrites unquoted YAML dates as quoted
+        // strings so the dropped branch becomes unreachable in practice.
         return null;
     }
 

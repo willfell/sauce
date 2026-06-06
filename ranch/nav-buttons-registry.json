@@ -70,6 +70,18 @@
           "target": "spice/cowork/Cowork.md"
         }
       }
+    ],
+    "people": [
+      {
+        "id": "people-hub",
+        "label": "People",
+        "icon": "people",
+        "order": 60,
+        "action": {
+          "type": "openLink",
+          "target": "spice/people/People.md"
+        }
+      }
     ]
   }
 }
