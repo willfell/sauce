@@ -10518,6 +10518,37 @@ type: cowork-microscope
     assertTrue("HC-V0920-COMPOSE-EDGE-UCT: edge fixture", false, e && e.message);
   }
 
+  // ============================================================================
+  // v0.92.0 — body-shape write-guard prose in 5 write-run-note sub-skills
+  // ============================================================================
+  const _V0920_CADENCES = ["morning-briefing", "midday-tripwire", "eod-review", "weekly-review", "monthly-review"];
+  const _V0920_LABELS = { "morning-briefing": "MB", "midday-tripwire": "MT", "eod-review": "EOD", "weekly-review": "WR", "monthly-review": "MR" };
+
+  for (const cad of _V0920_CADENCES) {
+    const L = _V0920_LABELS[cad];
+    const skillPath = path.join(WORKSHOP, "platform/blueprints/cowork/skills/skills/write-run-note-" + cad + "/SKILL.md");
+    console.log(`\n--- Case HC-V0920-GUARD-${L}: write-run-note-${cad} body-shape write-guard prose ---`);
+    try {
+      const skillBody = fs.readFileSync(skillPath, "utf8");
+      assertTrue(`HC-V0920-GUARD-${L}-A1: v0.92.0 sub-section header present`,
+        skillBody.includes("### v0.92.0 body-shape write-guard: canonical callout markers (FOURTH CHECK)"));
+      assertTrue(`HC-V0920-GUARD-${L}-A2: body-shape:no-assertions-input failure token`,
+        skillBody.includes("body-shape:no-assertions-input"));
+      assertTrue(`HC-V0920-GUARD-${L}-A3: body-shape:empty-assertions failure token`,
+        skillBody.includes("body-shape:empty-assertions"));
+      assertTrue(`HC-V0920-GUARD-${L}-A4: body-shape:missing-assertion failure token`,
+        skillBody.includes("body-shape:missing-assertion:<index>"));
+      assertTrue(`HC-V0920-GUARD-${L}-A5: body_assertions input declared in YAML frontmatter`,
+        /^\s*body_assertions:\s*array\b/m.test(skillBody));
+      assertTrue(`HC-V0920-GUARD-${L}-A6: v0.91.1 path guard preserved`,
+        skillBody.includes("wrong-output-path"));
+      assertTrue(`HC-V0920-GUARD-${L}-A7: v0.91.2 frontmatter guard preserved`,
+        skillBody.includes("wrong-frontmatter"));
+    } catch (e) {
+      assertTrue(`HC-V0920-GUARD-${L}: write-guard contract`, false, e && e.message);
+    }
+  }
+
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
   if (fail > 0) {

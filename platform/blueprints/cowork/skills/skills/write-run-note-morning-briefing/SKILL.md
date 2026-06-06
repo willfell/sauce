@@ -7,6 +7,7 @@ inputs:
   weekday: string
   month_name: string
   body: string
+  body_assertions: array
   prompt_source: string
   warning: string | null
 outputs:
@@ -26,6 +27,7 @@ Atomic-note writer for the morning-briefing run. Composes canonical frontmatter,
 - `weekday` (string, required): full English weekday (e.g. `Tuesday`). Used only for path composition.
 - `month_name` (string, required): full English month name (e.g. `May`). Used only for path composition.
 - `body` (string, required): pre-rendered Markdown body. May be empty when `warning == "empty_prompt"`.
+- `body_assertions` (string[], required): List of canonical substrings the composed body MUST contain; computed by `cowork:compose-body` and passed through by the orchestrator. The body-shape write-guard verifies each one is present in body.
 - `prompt_source` (string, required): vault-relative path to the prompt body that was read upstream (typically `spice/cowork/prompts/morning-briefing.md`).
 - `warning` (string, optional): set to `"empty_prompt"` when the orchestrator detected an empty prompt body upstream. Surfaces in frontmatter so the readiness panel can flag stub runs.
 
@@ -165,6 +167,18 @@ This is the v0.91.2 deterministic backstop for the orchestrator's Step 17 post-w
 - [ ] `summary:` is present and non-empty (1-2 sentences, ~150-250 chars)
 - [ ] `engagement_id:`, `day:`, `generator:`, `prompt_source:` present
 
+### v0.92.0 body-shape write-guard: canonical callout markers (FOURTH CHECK)
+
+After the path / frontmatter / dvjs checks pass, validate the composed `body` against the canonical assertion list passed in via `body_assertions`.
+
+REJECT and return `{ path, status: "failed:contract-violation:body-shape:<reason>" }` if:
+
+1. `body_assertions` input is missing, null, or not an array → `body-shape:no-assertions-input` (indicates the orchestrator skipped `cowork:compose-body`).
+2. `body_assertions` is an empty array → `body-shape:empty-assertions` (composeBody emitted no markers — defensive reject).
+3. For each `assertion` in `body_assertions`: if `body.includes(assertion)` is false → `body-shape:missing-assertion:<index>:<first-40-chars-of-assertion>`.
+
+The orchestrator surfaces this as a Notice + exit non-zero per the existing v0.91.x pattern.
+
 **Body checks (regex-scan the composed body string):**
 - [ ] First non-frontmatter line opens a dataviewjs fence containing the v0.91.3 CANONICAL SpaceNavButtons invocation EXACTLY: opening ` ```dataviewjs` + body line `await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });` + closing ` ``` `. REJECT any other shape — in particular REJECT `const { SpaceNavButtons } = customJS; SpaceNavButtons(dv, {...})` (produces runtime TypeError "SpaceNavButtons is not a function" because SpaceNavButtons is a class registered on customJS, not a callable export; only the customjs-guard view pattern handles the load + fallback correctly).
 - [ ] At least one `> [!info]-` admonition present
@@ -180,5 +194,8 @@ On any failure, the returned `status` field names which check failed using a sta
 - `failed:contract-violation:body-missing-example-admonition`
 - `failed:contract-violation:body-missing-tip-admonition`
 - `failed:contract-violation:body-missing-warning-admonition-for-<key>`
+- `failed:contract-violation:body-shape:no-assertions-input`
+- `failed:contract-violation:body-shape:empty-assertions`
+- `failed:contract-violation:body-shape:missing-assertion:<index>:<truncated-substring>`
 
 The orchestrator surfaces this in a Notice and skips downstream state-update steps.
