@@ -10571,6 +10571,96 @@ type: cowork-microscope
     }
   }
 
+  // ============================================================================
+  // v0.92.0 — INTEGRATION (compose-body → write-guard simulation roundtrip)
+  // ============================================================================
+  for (const cad of _V0920_CADENCES) {
+    const L = _V0920_LABELS[cad];
+    console.log(`\n--- Case HC-V0920-INTEGRATION-${L}: compose-body → write-guard simulation ---`);
+    try {
+      const { input } = _loadComposeFixture(`case-${cad}`);
+      const r = COMPOSE_BODY_HELPER.composeBody(input);
+      assertTrue(`HC-V0920-INTEGRATION-${L}-A1: status ok`, r.status === "ok");
+      const guardOk = Array.isArray(r.body_assertions) && r.body_assertions.length > 0
+        && r.body_assertions.every(a => r.body_md.includes(a));
+      assertTrue(`HC-V0920-INTEGRATION-${L}-A2: simulated write-guard passes on canonical output`, guardOk);
+    } catch (e) {
+      assertTrue(`HC-V0920-INTEGRATION-${L}: end-to-end contract`, false, e && e.message);
+    }
+  }
+
+  // Negative mutation: deleting one assertion substring from body should fail the guard
+  console.log(`\n--- Case HC-V0920-INTEGRATION-NEG: mutated body rejected by write-guard ---`);
+  try {
+    const { input } = _loadComposeFixture("case-morning-briefing");
+    const r = COMPOSE_BODY_HELPER.composeBody(input);
+    const mutated = r.body_md.replace(r.body_assertions[1], "<mutated>");
+    const stillOk = r.body_assertions.every(a => mutated.includes(a));
+    assertTrue("HC-V0920-INTEGRATION-NEG-A1: write-guard rejects mutated body", stillOk === false);
+  } catch (e) {
+    assertTrue("HC-V0920-INTEGRATION-NEG: negative mutation contract", false, e && e.message);
+  }
+
+  // ============================================================================
+  // v0.92.0 — MANIFEST (cowork manifest registers helper + sub-skill)
+  // ============================================================================
+  console.log(`\n--- Case HC-V0920-MANIFEST: cowork manifest registration ---`);
+  try {
+    const coworkMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/cowork/manifest.json"), "utf8"));
+    assertTrue("HC-V0920-MANIFEST-A1: files[] includes compose-body-helper.js",
+      coworkMan.files.some(f => (f.source || "").endsWith("compose-body-helper.js")));
+    assertTrue("HC-V0920-MANIFEST-A2: claude_surface[] includes compose-body sub-skill (nested dest)",
+      coworkMan.claude_surface.some(s =>
+        (s.source || "").endsWith("skills/skills/compose-body/SKILL.md")
+        && (s.dest || "").includes("{{skills_dir}}/skills/compose-body/SKILL.md")));
+    assertTrue("HC-V0920-MANIFEST-A3: cowork manifest version === 0.30.0",
+      coworkMan.version === "0.30.0");
+    assertTrue("HC-V0920-MANIFEST-A4: compose-body-helper source uses helpers/ relative path",
+      coworkMan.files.find(f => (f.source || "").endsWith("compose-body-helper.js"))
+        .source.startsWith("helpers/"));
+    assertTrue("HC-V0920-MANIFEST-A5: 9 fixture directories present on disk",
+      ["case-morning-briefing","case-midday-tripwire","case-eod-review","case-weekly-review","case-monthly-review","case-edge-empty-memory","case-edge-empty-ordered-blocks","case-edge-multiline-body-with-blanks","case-edge-unknown-callout-type"]
+        .every(c => fs.existsSync(path.join(COMPOSE_FIXTURES_DIR, c, "input.json"))));
+  } catch (e) {
+    assertTrue("HC-V0920-MANIFEST: registration contract", false, e && e.message);
+  }
+
+  // ============================================================================
+  // v0.92.0 — VERSION (workshop + cowork + package + subscription pin lockstep)
+  // ============================================================================
+  console.log(`\n--- Case HC-V0920-VERSION: pin lockstep ---`);
+  try {
+    const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
+    assertTrue("HC-V0920-VERSION-A1: workshop_version === 0.92.0",
+      platMan.workshop_version === "0.92.0");
+    assertTrue("HC-V0920-VERSION-A2: blueprints[].cowork.version === 0.30.0",
+      platMan.blueprints.find(b => b.name === "cowork").version === "0.30.0");
+    const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
+    assertTrue("HC-V0920-VERSION-A3: package.json version === 0.92.0",
+      pkg.version === "0.92.0");
+    const workshopSub = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "ranch/platform-subscription.json"), "utf8"));
+    assertTrue("HC-V0920-VERSION-A4: workshop subscription cowork pin === 0.30.0",
+      workshopSub.blueprints.find(b => b.name === "cowork").version === "0.30.0");
+  } catch (e) {
+    assertTrue("HC-V0920-VERSION: pin lockstep contract", false, e && e.message);
+  }
+
+  // ============================================================================
+  // v0.92.0 — SURFACE (claude_surface registry + workshop CLAUDE.md skills index)
+  // ============================================================================
+  console.log(`\n--- Case HC-V0920-SURFACE: claude_surface materialization ---`);
+  try {
+    const surfaceRegistry = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "ranch/claude-surface-registry.json"), "utf8"));
+    assertTrue("HC-V0920-SURFACE-A1: claude-surface-registry lists compose-body",
+      JSON.stringify(surfaceRegistry).includes("compose-body"));
+    const claudeMd = fs.readFileSync(path.join(WORKSHOP, "CLAUDE.md"), "utf8");
+    assertTrue("HC-V0920-SURFACE-A2: workshop CLAUDE.md skills-index marker region present",
+      claudeMd.includes("<!-- @claude-surface:skills-index BEGIN -->") &&
+      claudeMd.includes("<!-- @claude-surface:skills-index END -->"));
+  } catch (e) {
+    assertTrue("HC-V0920-SURFACE: claude_surface contract", false, e && e.message);
+  }
+
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
   if (fail > 0) {
