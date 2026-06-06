@@ -60,7 +60,7 @@ MICROSCOPES (NON-NEGOTIABLE): for each kind in priorities, READ spice/cowork/pro
 SUB-SKILL (NON-NEGOTIABLE): invoke cowork:write-run-note-morning-briefing. v0.91.1 + v0.91.2 + v0.91.3 + v0.92.0 write-guards enforce path + frontmatter + dvjs + body-shape at write time:
   failed:contract-violation:wrong-output-path
   failed:contract-violation:wrong-frontmatter:<field>
-  failed:contract-violation:wrong-dvjs-pattern
+  failed:contract-violation:body-missing-navbuttons
   failed:contract-violation:body-shape:<reason>
 on any miss.
 
@@ -117,7 +117,7 @@ MICROSCOPES (NON-NEGOTIABLE): for each kind in priorities, READ spice/cowork/pro
 SUB-SKILL (NON-NEGOTIABLE): invoke cowork:write-run-note-eod-review. v0.91.1 + v0.91.2 + v0.91.3 + v0.92.0 write-guards enforce path + frontmatter + dvjs + body-shape at write time:
   failed:contract-violation:wrong-output-path
   failed:contract-violation:wrong-frontmatter:<field>
-  failed:contract-violation:wrong-dvjs-pattern
+  failed:contract-violation:body-missing-navbuttons
   failed:contract-violation:body-shape:<reason>
 on any miss.
 
@@ -164,7 +164,7 @@ MICROSCOPES (NON-NEGOTIABLE): for each kind in priorities, READ spice/cowork/pro
 SUB-SKILL (NON-NEGOTIABLE): invoke cowork:write-run-note-weekly-review. v0.91.1 + v0.91.2 + v0.91.3 + v0.92.0 write-guards enforce path + frontmatter + dvjs + body-shape at write time:
   failed:contract-violation:wrong-output-path
   failed:contract-violation:wrong-frontmatter:<field>
-  failed:contract-violation:wrong-dvjs-pattern
+  failed:contract-violation:body-missing-navbuttons
   failed:contract-violation:body-shape:<reason>
 on any miss.
 
@@ -211,7 +211,7 @@ MICROSCOPES (NON-NEGOTIABLE): for each kind in priorities, READ spice/cowork/pro
 SUB-SKILL (NON-NEGOTIABLE): invoke cowork:write-run-note-monthly-review. v0.91.1 + v0.91.2 + v0.91.3 + v0.92.0 write-guards enforce path + frontmatter + dvjs + body-shape at write time:
   failed:contract-violation:wrong-output-path
   failed:contract-violation:wrong-frontmatter:<field>
-  failed:contract-violation:wrong-dvjs-pattern
+  failed:contract-violation:body-missing-navbuttons
   failed:contract-violation:body-shape:<reason>
 on any miss.
 
