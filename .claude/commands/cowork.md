@@ -114,3 +114,13 @@ Complementary write-side discovery: scans the last N days of atomic notes (morni
 Closes the dim-wikilink loop: atomic notes emit `[[Ellen Senders]]` from memory ticks, but if the person note doesn't exist, Obsidian renders it dim. After running this skill, every previously-dim wikilink resolves to a real (stub) person note. Optional Step 11 also offers to promote discovered names to `engagement.inner_circle_people`.
 
 Re-runs are idempotent: previously-created person notes pre-check existence (never overwrite), so subsequent days only surface NEW dim wikilinks.
+
+## /cowork sync-scheduled-jobs [<engagement_id>] (v0.31.0)
+
+Emits paste-ready Cowork scheduled-job wrapper bodies for an engagement, fully aligned with the current sauce + cowork versions + the engagement's actual `prefs.mcps` state. Reads `spice/cowork/context/vault-config.md` + `spice/cowork/context/user-preferences.md` + `spice/cowork/context/engagement-types/<type>.json` + `spice/cowork/data/scheduled-job-contract.json` + `ranch/platform-installed.json`, then writes a single file at `spice/cowork/scheduled-job-wrappers/<engagement_id>.md` containing 5 fenced wrapper bodies (one per cowork cadence — morning-briefing, midday-tripwire, eod-review, weekly-review, monthly-review).
+
+Re-run after every cowork blueprint MINOR bump — the cron contract may have shifted (v0.91.1 path-guard / v0.91.2 frontmatter-guard / v0.91.3 connectivity + dvjs / v0.92.0 body-shape). The user copies each fenced block into the matching task in claude.ai's Cowork UI; schedule is not changed.
+
+Engagement defaults if the vault has exactly one; otherwise prompts to pick (matches `/cowork discover-people` resolution). Backup-on-edit: any prior `<engagement_id>.md` is copied to `<engagement_id>.md.sauce-backup` per landmine #12 mechanic #2 before overwrite. Dispatch lines are computed kind-by-kind from `prefs.mcps` (FULLY DYNAMIC — no brand-string special-casing; novel MCP kinds work without contract changes).
+
+Invokes `cowork:sync-scheduled-jobs`.

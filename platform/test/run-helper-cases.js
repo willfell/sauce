@@ -10822,6 +10822,37 @@ type: cowork-microscope
     assertTrue("HC-V0930-CONTRACT: contract structural contract", false, e && e.message);
   }
 
+  // ============================================================================
+  // v0.93.0 — cowork:sync-scheduled-jobs orchestrator SKILL.md prose (HC-V0930-SKILL-*)
+  // ============================================================================
+  console.log(`\n--- Case HC-V0930-SKILL: sync-scheduled-jobs orchestrator SKILL.md ---`);
+  try {
+    const orchPath = path.join(WORKSHOP, "platform/blueprints/cowork/skills/orchestrators/sync-scheduled-jobs/SKILL.md");
+    const orchBody = fs.readFileSync(orchPath, "utf8");
+    assertTrue("HC-V0930-SKILL-A1: frontmatter name === cowork:sync-scheduled-jobs",
+      orchBody.includes("name: cowork:sync-scheduled-jobs"));
+    assertTrue("HC-V0930-SKILL-A2: ## What it does heading present",
+      orchBody.includes("## What it does"));
+    assertTrue("HC-V0930-SKILL-A3: ## When to invoke heading present",
+      orchBody.includes("## When to invoke"));
+    assertTrue("HC-V0930-SKILL-A4: ## Pre-flight heading present",
+      orchBody.includes("## Pre-flight"));
+    assertTrue("HC-V0930-SKILL-A5: at least 17 numbered steps",
+      (orchBody.match(/^\d+\./gm) || []).length >= 17);
+    assertTrue("HC-V0930-SKILL-A6: invokes composeScheduledJobWrappers",
+      orchBody.includes("composeScheduledJobWrappers"));
+    assertTrue("HC-V0930-SKILL-A7: backup-on-edit prose mentions .sauce-backup",
+      orchBody.includes(".sauce-backup"));
+    assertTrue("HC-V0930-SKILL-A8: canonical output path documented",
+      orchBody.includes("spice/cowork/scheduled-job-wrappers/"));
+    assertTrue("HC-V0930-SKILL-A9: failure-token enumeration includes engagement + verify tokens",
+      orchBody.includes("failed:engagement:not-found") && orchBody.includes("failed:verify:undersized"));
+    assertTrue("HC-V0930-SKILL-A10: ## Harness testing references fixtures",
+      orchBody.includes("compose-scheduled-job-wrappers"));
+  } catch (e) {
+    assertTrue("HC-V0930-SKILL: orchestrator SKILL.md contract", false, e && e.message);
+  }
+
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
   if (fail > 0) {

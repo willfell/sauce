@@ -743,6 +743,20 @@
         "path": "{{module_directory}}/skills/orchestrators/find-missing-people/SKILL.md",
         "command": "/cowork find-missing-people"
       }
+    },
+    {
+      "kind": "skill",
+      "source": "skills/orchestrators/sync-scheduled-jobs/SKILL.md",
+      "dest": "{{skills_dir}}/sync-scheduled-jobs/SKILL.md"
+    },
+    {
+      "kind": "claude_md_row",
+      "table": "resolvers",
+      "row": {
+        "topic": "Cowork Sync Scheduled Jobs",
+        "path": "{{module_directory}}/skills/orchestrators/sync-scheduled-jobs/SKILL.md",
+        "command": "/cowork sync-scheduled-jobs"
+      }
     }
   ],
   "engagement_types": [

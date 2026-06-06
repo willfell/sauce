@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-06-06T21:32:33.341Z",
+  "generated_at": "2026-06-06T21:37:55.846Z",
   "workshop_version": "0.93.0",
   "contributions": {
     "audit": [
@@ -572,6 +572,21 @@
           "topic": "Cowork Find Missing People",
           "path": "spice/cowork/skills/orchestrators/find-missing-people/SKILL.md",
           "command": "/cowork find-missing-people"
+        }
+      },
+      {
+        "kind": "skill",
+        "source": "skills/orchestrators/sync-scheduled-jobs/SKILL.md",
+        "dest": ".claude/skills/cowork/sync-scheduled-jobs/SKILL.md",
+        "version": "0.31.0"
+      },
+      {
+        "kind": "claude_md_row",
+        "table": "resolvers",
+        "row": {
+          "topic": "Cowork Sync Scheduled Jobs",
+          "path": "spice/cowork/skills/orchestrators/sync-scheduled-jobs/SKILL.md",
+          "command": "/cowork sync-scheduled-jobs"
         }
       }
     ]

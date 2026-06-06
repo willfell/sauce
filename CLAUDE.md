@@ -37,6 +37,7 @@ Before any write, run `ls /Users/willfellhoelter/projects/repos/sauce`. Expected
 | Cowork Memory | spice/cowork/memory/ | /cowork memory |
 | Cowork Monthly Hub | spice/cowork/Monthly Hub.md | /monthly hub |
 | Cowork Prompts | spice/cowork/prompts/ | /cowork prompts |
+| Cowork Sync Scheduled Jobs | spice/cowork/skills/orchestrators/sync-scheduled-jobs/SKILL.md | /cowork sync-scheduled-jobs |
 | Cowork Weekly Hub | spice/cowork/Weekly Hub.md | /weekly hub |
 | Daily | spice/daily | /daily |
 | Install | .claude/commands/install.md | /install |
