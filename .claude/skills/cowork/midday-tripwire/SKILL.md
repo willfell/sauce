@@ -267,30 +267,31 @@ Each gather call passes `engagement_id`. The orchestrator branches per-aspect fr
     - Set `prompt_source` accordingly: if `user_prompt_body` non-empty, `prompt_source = "spice/cowork/prompts/midday-tripwire.md"`; else if `template_prompt_body` non-empty, `prompt_source = "spice/cowork/context/engagement-templates/<engagement.type>/prompts/midday-tripwire.md"`; else `prompt_source = "spice/cowork/prompts/midday-tripwire.md"`.
 9b. **Voice contract.** If `dispatch_mode == "prefs"` AND `voice_contract != ""`, prepend it to `prompt_body`:
    `prompt_body = voice_contract + prompt_body`. The combined string is the input to the body-composition step.
-10. **Compose run-note body** per `prompt_body` + the flagged-event details from the gather steps.
+10. **Compose run-note body via cowork:compose-body.**
 
-   When `dispatch_mode == "prefs"`, compose the body as: SpaceNavButtons → `[!info]- Synopsis` paragraph → `ordered_blocks[]` (priority order, in array order) → engagement-type-aspect blocks (semantic_related, finance from render_aspects) → `[!tip]` closing. `ordered_blocks` entries with `kind: "warning"` render as `[!warning]` callouts in-position. When `dispatch_mode == "legacy"`, use the v0.77.0 composition order verbatim (existing body).
+  14a. **Prep synopsis_md.** Compose the `> [!info]- Midday status` callout per `prompt_body` instructions (voice-shaped one-paragraph synopsis distilled from gather outputs — tripwire signal + recalibration framing). When `semantic_index_age` is non-null, append `> Semantic index age: <semantic_index_age>m` as the last `> ` line inside the synopsis callout BEFORE passing to composeBody.
+       - Empty-prompt stub case (when `warning == "empty_prompt"`): synopsis_md = `"> [!info]- Midday status\n> (Prompt body empty — edit spice/cowork/prompts/midday-tripwire.md to customize what this run emits.)"`.
 
-   When `prompt_body` is empty, do NOT freelance content — compose a skeleton-compliant STUB body:
-    - `SpaceNavButtons` dataviewjs block (verbatim).
-    - `> [!info]- Today at a glance\n> Tripwire fired (severity: <severity>). Prompt body empty — edit spice/cowork/prompts/midday-tripwire.md to customize what this run emits.`
-    - `> [!example]+ 🚨 Tripwire fired\n> Severity: <severity>. <one-line aspect summary>. Prompt body empty — see spice/cowork/prompts/midday-tripwire.md to customize what this run emits.`
-    - `> [!tip] ✏️ Next action\n> Edit \`spice/cowork/prompts/midday-tripwire.md\` to define what this tripwire should emit when it fires.`
-    Set `warning = "empty_prompt"` and pass `summary = "Stub run — prompt body at spice/cowork/prompts/midday-tripwire.md is empty."` to write-run-note via its `summary` arg. The write-run-note self-check passes (5 markers + summary + title all present).
-    When `prompt_body` is non-empty, set `warning = null` and compose the body per the prompt's instructions, respecting the adaptive body skeleton in write-run-note-midday-tripwire's `## Adaptive body skeleton` section.
-   - **NEW (v0.86.0): Earlier today.** Invoke pure helper `composeMidamMemoryCallout(output_today)` from `helpers/compose-midam-memory-callout.js`. When the return value is non-empty, append immediately after the synopsis callout. Empty string = omit cleanly (null-data backward-compat for vaults pre-v0.86.0).
-   - **NEW (v0.85.0): Memory log backlink.** Append a final `[!quote]-` callout (collapsed by default) at the very end of the atomic note body:
+  14b. **Prep closing_md.** Compose the `> [!tip] Recalibration` callout per `prompt_body` instructions (2-3 sentence recalibration paragraph + concrete first action).
+       - Empty-prompt stub case: closing_md = `"> [!tip] Recalibration\n> Edit \`spice/cowork/prompts/midday-tripwire.md\` to define what this scheduled job should emit when it fires."`.
 
-     ```
-     > [!quote]- Memory log
-     > Today's memory: [[spice/cowork/memory/<engagement_id>/<YYYY>/<MM-Month>/<YYYY-MM-DD>/memory.md|Memory log — <YYYY-MM-DD> (<tick_count_if_known> ticks)]]
-     ```
+  14c. **Prep memory_callouts struct.** Use existing helpers:
+       - `yesterday_md` ← `""` (midday cadence does not surface yesterday)
+       - `overnight_md` ← `composeMidamMemoryCallout(output_today)` (the "Earlier today" callout)
+       - `echoes_md` ← `composeSemanticEchoesCallout(output_echoes)` when applicable, else `""`
+       - `backlink_md` ← inline-composed per v0.85.0 § 2.1.3 spec: `"> [!quote]- Memory log\n> Today's memory: [[spice/cowork/memory/<engagement_id>/<YYYY>/<MM-Month>/<YYYY-MM-DD>/memory.md|Memory log — <YYYY-MM-DD>]]"` (tick-count parenthetical omitted when unknown).
 
-     Substitute `<engagement_id>`, `<YYYY>`, `<MM-Month>`, `<YYYY-MM-DD>` from `date-context.today`. When `tick_count` is unknown (today's memory.md not yet read), omit the `(<N> ticks)` parenthetical. The wikilink target may not resolve when no tick has fired yet — Obsidian renders it dimmed (acceptable per v0.85.0 design § 2.1.3). Collapsed callout (`-` suffix) keeps the atomic note visually clean.
+  14d. **Prep ordered_blocks[].** Iterate gather-pipeline `ordered_blocks[]` (from priority loop). Each entry already carries `{ kind, callout_type, markdown }`. Add `title` from the kind-to-title map: chat → "Chat (Teams)", calendar → "Today's calendar", email → "Email triage", github → "GitHub", ado → "ADO" — or microscope-`## Output shape`-specified override. Translate to composeBody shape: `{ kind, callout_type, title, body_md: markdown }`.
+
+  14e. **Prep engagement_type_blocks[].** For each `related_signal` in `related_signals[]` with `status == "ready"`: push `{ kind: "semantic", callout_type: "example", title: "Related to: <event.title>", body_md: <related_signal.markdown> }`. When `semantic_index_unavailable == true`: push ONCE `{ kind: "semantic-unavailable", callout_type: "warning", title: "Semantic index not available", body_md: "Smart Connections index absent or anchor not indexed — semantic gather skipped." }`. Finance does NOT flow through here — it's written by a separate sub-skill when applicable.
+
+  14f. **Invoke composeBody.** READ `.claude/skills/cowork/skills/compose-body/SKILL.md` in full and follow its `## Compose` section with `{ cadence: "midday-tripwire", nav_buttons_block: "<canonical block>", synopsis_md, memory_callouts: { yesterday_md, overnight_md, echoes_md, backlink_md }, ordered_blocks, engagement_type_blocks, closing_md }`. Capture `{ body_md, body_assertions, status }`.
+
+  14g. **Compose failure handling.** If `status` starts with `"failed:"`, emit Notice `cowork:midday-tripwire aborted -- compose-body failure: <status>` and exit non-zero. Do NOT call write-run-note. Do NOT run state-update steps.
 11. READ `.claude/skills/cowork/skills/write-run-note-midday-tripwire/SKILL.md` in full —
     paying particular attention to its `## Title composition`,
     `## Adaptive body skeleton`, and `## Pre-write self-check` sections — then apply those contracts
-    before performing the write described in its `## Steps` section with `{ engagement, date: context.today, weekday: context.dddd, month_name: context["MM-Month"].split("-")[1], severity, signals: { cc: cc_signal, calendar: calendar_signal, queue: queue_signal }, body: run_body, prompt_source: "spice/cowork/prompts/midday-tripwire.md", warning, warnings: warnings_array }`. The `signals` arg is an opaque structured handoff write-run-note uses to compose the summary line; `warnings_array` is the optional list of `<aspect>_unavailable` strings from gather-skipped returns. Capture `status`. If `status` starts with `"failed:contract-violation:"`, emit Notice `cowork:midday-tripwire aborted -- contract violation: <field>` and exit non-zero. Else if `status` starts with `"failed:"`, emit Notice `cowork:midday-tripwire aborted -- write failed: <status>` and exit. Do not run state-update steps after a failed write.
+    before performing the write described in its `## Steps` section with `{ engagement, date: context.today, weekday: context.dddd, month_name: context["MM-Month"].split("-")[1], severity, signals: { cc: cc_signal, calendar: calendar_signal, queue: queue_signal }, body: body_md, body_assertions, prompt_source: "spice/cowork/prompts/midday-tripwire.md", warning, warnings: warnings_array }`. The `signals` arg is an opaque structured handoff write-run-note uses to compose the summary line; `warnings_array` is the optional list of `<aspect>_unavailable` strings from gather-skipped returns. Capture `status`. If `status` starts with `"failed:contract-violation:"`, emit Notice `cowork:midday-tripwire aborted -- contract violation: <field>` and exit non-zero. Else if `status` starts with `"failed:"`, emit Notice `cowork:midday-tripwire aborted -- write failed: <status>` and exit. Do not run state-update steps after a failed write.
 
 ## Verify
 

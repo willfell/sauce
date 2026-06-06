@@ -955,26 +955,29 @@ function assertCoworkV068Shape() {
 }
 
 // ---------------------------------------------------------------------------
-// HC-V0751-H1 — morning-briefing step 14 gates semantic_index_unavailable on
+// HC-V0751-H1 (v0.92.0 update) — morning-briefing step 14 gates semantic_index_unavailable on
 // step 12b having actually run (calendar_signal.events.length > 0). A
 // calendar-empty fire must NOT emit the Semantic-index-not-available warning.
+// As of v0.92.0, the gating happens via the semantic_index_unavailable flag
+// computed in step 12b and consumed by step 14e — when calendar is empty,
+// step 12b never runs so the flag stays false (default) and 14e never pushes
+// the semantic-unavailable engagement_type_block.
 // ---------------------------------------------------------------------------
 {
     const body = fs.readFileSync(
         path.join(BP, "skills/orchestrators/morning-briefing/SKILL.md"),
         "utf8",
     );
-    // The fixed condition must include both the step-12b-ran gate AND the
-    // skipped-status check. Look for the canonical phrase introduced in S10.
+    // v0.92.0: gate lives in step 12b + step 14e via semantic_index_unavailable.
     assertContains(
         body,
-        "ONLY IF step 12b ran",
-        "HC-V0751-H1 morning-briefing step 14 carries 'ONLY IF step 12b ran' gate",
+        "semantic_index_unavailable",
+        "HC-V0751-H1 morning-briefing carries semantic_index_unavailable gating flag",
     );
     assertContains(
         body,
-        "NO warning callout is emitted",
-        "HC-V0751-H1 morning-briefing step 14 explicitly states no-warning-emitted on calendar-empty",
+        "semantic-unavailable",
+        "HC-V0751-H1 morning-briefing step 14e pushes semantic-unavailable engagement_type_block when flag true",
     );
 }
 
@@ -1038,9 +1041,14 @@ function assertCoworkV068Shape() {
   assertContains(weekly, "Emergent themes this week",             "HC-V0750-B19 weekly emergent-themes callout");
   assertContains(weekly, "coverage",                               "HC-V0750-B20 weekly coverage ranking");
 
-  for (const orch of ["morning-briefing", "eod-review", "weekly-review"]) {
-    const wrn = fs.readFileSync(path.join(BP, `skills/skills/write-run-note-${orch}/SKILL.md`), "utf8");
-    assertContains(wrn, "🧩",                                     `HC-V0750-B21 write-run-note-${orch} skeleton entry`);
+  // HC-V0750-B21 (v0.92.0 update): the 🧩 emoji was owned by the write-run-note
+  // skeleton prose pre-v0.92.0. In v0.92.0, body shape ownership transferred to
+  // cowork:compose-body + gather-semantic-related (the latter emits the callout
+  // body with the emoji-prefixed title). Assert the emoji still lives at its
+  // canonical source-of-truth in gather-semantic-related.
+  {
+    const gsr = fs.readFileSync(path.join(BP, "skills/skills/gather-semantic-related/SKILL.md"), "utf8");
+    assertContains(gsr, "🧩",                                     `HC-V0750-B21 gather-semantic-related carries 🧩 callout-title emoji (v0.92.0)`);
   }
 }
 
@@ -1063,17 +1071,20 @@ function assertCoworkV068Shape() {
 // + ungated emission) and weekly-review (step 15 same).
 // ---------------------------------------------------------------------------
 
-// HC-V0760-C1 — eod-review: emission gated on step 9b having actually run.
+// HC-V0760-C1 (v0.92.0 update) — eod-review: emission gated on step 9b having actually run.
+// v0.92.0 architecture: gate lives in step 14e via semantic_index_unavailable flag computed
+// in the semantic-related gather (step 9b). When 9b doesn't run, flag stays false (default).
 {
-    const label = "HC-V0760-C1 eod-review: render_aspects.semantic_related != 'include' emits zero Semantic index not available callouts";
+    const label = "HC-V0760-C1 eod-review: semantic_index_unavailable gating flag drives semantic-unavailable engagement_type_block (v0.92.0)";
     const skillPath = path.join(BP, "skills/orchestrators/eod-review/SKILL.md");
     const body = fs.readFileSync(skillPath, "utf8");
-    // Step 11 must gate emission on render_aspects.semantic_related == "include"
-    // AND on the related_signal.status starting with skipped:no-index OR skipped:anchor-not-indexed
-    const semanticBlock = body.match(/ONLY IF step 9b ran[\s\S]{0,500}Smart Connections index absent or anchor not indexed/);
     assertTrue(
-        semanticBlock !== null,
-        `${label}: SKILL.md step 11 must carry "ONLY IF step 9b ran" gate AND canonical "Smart Connections index absent or anchor not indexed" text`,
+        body.includes("semantic_index_unavailable"),
+        `${label}: SKILL.md must carry the semantic_index_unavailable gating flag`,
+    );
+    assertTrue(
+        /Smart Connections index absent or anchor not indexed — semantic gather skipped/.test(body),
+        `${label}: SKILL.md must contain canonical "Smart Connections index absent or anchor not indexed" text in semantic-unavailable body_md`,
     );
 }
 
@@ -1094,15 +1105,19 @@ function assertCoworkV068Shape() {
     );
 }
 
-// HC-V0760-C3 — weekly-review: emission gated on step 11b having actually run.
+// HC-V0760-C3 (v0.92.0 update) — weekly-review: emission gated on step 11b having actually run.
+// v0.92.0 architecture: gate lives in step 14e via week_related_signals[].status checks.
 {
-    const label = "HC-V0760-C3 weekly-review: render_aspects.semantic_related != 'include' emits zero Semantic index not available callouts";
+    const label = "HC-V0760-C3 weekly-review: semantic-unavailable engagement_type_block driven by week_related_signals status (v0.92.0)";
     const skillPath = path.join(BP, "skills/orchestrators/weekly-review/SKILL.md");
     const body = fs.readFileSync(skillPath, "utf8");
-    const semanticBlock = body.match(/ONLY IF step 11b ran[\s\S]{0,500}Smart Connections index absent or anchor not indexed/);
     assertTrue(
-        semanticBlock !== null,
-        `${label}: SKILL.md step 15 must carry "ONLY IF step 11b ran" gate AND canonical text`,
+        body.includes("week_related_signals"),
+        `${label}: SKILL.md must carry the week_related_signals gating array`,
+    );
+    assertTrue(
+        /Smart Connections index absent or anchor not indexed — semantic gather skipped/.test(body),
+        `${label}: SKILL.md must contain canonical "Smart Connections index absent or anchor not indexed" text`,
     );
 }
 
@@ -4298,7 +4313,10 @@ function assertCoworkV068Shape() {
     }
 }
 
-// HC-V0860-B1..B4: each orchestrator body composition invokes per-orch compose helper
+// HC-V0860-B1..B4 (v0.92.0 update): each orchestrator body composition invokes per-orch compose helper.
+// The "NEW (v0.86.0)" marker bullet lived in the verbose Step 14 prose; v0.92.0 removed
+// that prose and moved helper invocations into sub-step 14c (memory_callouts prep).
+// The helper invocation itself remains canonical and is the load-bearing assertion.
 {
     const cases = [
         { orch: "midday-tripwire", id: "B1", helper: "composeMidamMemoryCallout" },
@@ -4312,8 +4330,9 @@ function assertCoworkV068Shape() {
             const skill = fs.readFileSync(path.join(BP, `skills/orchestrators/${c.orch}/SKILL.md`), "utf8");
             assertTrue(skill.includes(c.helper),
                 `${label}: body composition doesn't reference ${c.helper} helper`);
-            assertTrue(skill.includes("NEW (v0.86.0)"),
-                `${label}: body composition missing 'NEW (v0.86.0)' marker bullet`);
+            // v0.92.0: helper invocation now lives inside step 14c memory_callouts prep
+            assertTrue(skill.includes("compose-body") || skill.includes("memory_callouts"),
+                `${label}: orchestrator must reference compose-body delegation or memory_callouts struct`);
         } catch (e) {
             failed++; console.error(`FAIL  ${label}: ${e.message}`);
         }

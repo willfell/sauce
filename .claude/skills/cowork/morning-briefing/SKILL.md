@@ -43,7 +43,7 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
      MICROSCOPES: for each kind in prefs.priorities with a microscope at spice/cowork/prompts/per-mcp/<kind>/microscope.md, follow that microscope's ## Output shape directives verbatim for the kind's callout
    ```
 
-   Four-purpose commitment: (1) commit path so the v0.91.1 path write-guard never fires; (2) commit type so the v0.91.2 frontmatter write-guard never fires; (3) commit voice so personality + voice contract land in body composition; (4) commit microscope adherence so each kind's callout follows its microscope's `## Output shape`. The Notice creates an audit trail if any commitment is violated. Deterministic backstops in write-run-note: path write-guard (v0.91.1) + frontmatter write-guard (v0.91.2). Voice + microscope are prose-imperative; Step 14 re-read reinforces.
+   Four-purpose commitment: (1) commit path so the v0.91.1 path write-guard never fires; (2) commit type so the v0.91.2 frontmatter write-guard never fires; (3) commit voice so personality + voice contract land in body composition; (4) commit microscope adherence so each kind's callout follows its microscope's `## Output shape`. The Notice creates an audit trail if any commitment is violated. Deterministic backstops in write-run-note: path write-guard (v0.91.1) + frontmatter write-guard (v0.91.2) + body-shape write-guard (v0.92.0). Voice + microscope are prose-imperative; cowork:compose-body's canonical shape re-read reinforces.
 
 2. **Resolve engagement.** Read `<vault>/spice/cowork/context/vault-config.md` via `mcp__obsidian__get_frontmatter`. Look up `engagements[]` entry where `id == engagement_id`. If not found, emit Notice `cowork:morning-briefing aborted -- engagement '<id>' not found in vault-config.md` and exit. Capture `engagement` (the full record) and read the matching engagement-type manifest via the Read tool at `spice/cowork/context/engagement-types/<engagement.type>.json` (expected values: `personal`, `w2-fte`, `consulting`). Parse as JSON; capture `type_manifest.render_aspects`. If the file is missing or fails to parse, emit Notice `cowork:morning-briefing aborted -- engagement-type manifest unavailable at spice/cowork/context/engagement-types/<engagement.type>.json` and exit. The render-aspects map drives which gather + write steps fire (e.g. `finance_block: include` enables the Finance callout; `inner_circle_imessage: include` enables Messages).
 3. READ `.claude/skills/cowork/skills/date-context/SKILL.md` in full and follow
@@ -201,7 +201,7 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
 
 > **MANDATORY (v0.91.3): load deferred MCP tools UPFRONT.** Before the priority loop, for each kind in `dispatch_plan` with `action == "gather_from_served_by"` or `action == "gather_canonical"`, load the required deferred tools from the kind's `served_by` namespace via Tool Search / Load. M365 (UUID `45224a84-...`): `chat_message_search`, `outlook_calendar_search`, `outlook_email_search`. ADO (UUID like `1151913a-...`): `list_workitems`, `search_workitems`. github: `search_pull_requests`, `search_issues`. If a tool isn't loaded when its gather sub-skill needs it, the sub-skill cannot execute and you silently fall back to a warning callout — the deterministic fix for today's "MCP tools require loading" failure.
 
-When `dispatch_mode == "legacy"`, execute the v0.77.0 legacy gather sequence in steps 5-12 below verbatim. `ordered_blocks[]` stays empty; gather outputs flow through their existing composition slots in step 14.
+When `dispatch_mode == "legacy"`, execute the v0.77.0 legacy gather sequence in steps 5-12 below verbatim. `ordered_blocks[]` stays empty; gather outputs flow through their existing composition slots per cowork:compose-body's canonical shape.
 
 When `dispatch_mode == "prefs"`, skip steps 5-12 below; instead execute the priority-loop:
 
@@ -286,35 +286,28 @@ Each gather call passes `engagement_id`. The sub-skill reads per-engagement MCP-
     - Set `prompt_body = user_prompt_body || template_prompt_body` (use user prompt when populated; else fall back to engagement-template prompt; else empty).
     - Set `prompt_source` accordingly: if `user_prompt_body` non-empty, `prompt_source = "spice/cowork/prompts/morning-briefing.md"`; else if `template_prompt_body` non-empty, `prompt_source = "spice/cowork/context/engagement-templates/<engagement.type>/prompts/morning-briefing.md"`; else `prompt_source = "spice/cowork/prompts/morning-briefing.md"` (the user-prompt path is still the canonical pointer when both empty — the stub references it).
 13b. **Voice contract.** If `dispatch_mode == "prefs"` AND `voice_contract != ""`, prepend it to `prompt_body`:
-   `prompt_body = voice_contract + prompt_body`. The combined string is the input to step 14 composition. If `voice_contract == ""`, prompt_body passes through unchanged.
-14. **Compose run-note body** from the gather outputs (steps 5–12b), interpolating per `prompt_body` instructions.
+   `prompt_body = voice_contract + prompt_body`. The combined string is the input to the body-composition step. If `voice_contract == ""`, prompt_body passes through unchanged.
+14. **Compose run-note body via cowork:compose-body.**
 
-   When `dispatch_mode == "prefs"`, compose the body as: SpaceNavButtons → `[!info]- Today at a glance` synopsis → NEW memory callouts (gated; see below) → `ordered_blocks[]` (priority order, in array order) → engagement-type-aspect blocks (semantic_related, finance from render_aspects) → `[!tip] Today's focus` closing. ordered_blocks entries with `kind: "warning"` render as `[!warning]` callouts in-position (priority preserved). When `dispatch_mode == "legacy"`, use the v0.77.0 composition order verbatim (existing step 14 body).
+  14a. **Prep synopsis_md.** Compose the `> [!info]- Today at a glance` callout per `prompt_body` instructions (voice-shaped one-paragraph synopsis distilled from gather outputs). When `semantic_index_age` is non-null, append `> Semantic index age: <semantic_index_age>m` as the last `> ` line inside the synopsis callout BEFORE passing to composeBody.
+       - Empty-prompt stub case (when `warning == "empty_prompt"`): synopsis_md = `"> [!info]- Today at a glance\n> (Prompt body empty — edit spice/cowork/prompts/morning-briefing.md to customize what this run emits.)"`.
 
-    - **NEW (v0.85.0): Memory callouts (REFACTORED).** Invoke pure helper `composeMemoryCallouts(output_yesterday, output_overnight)` from `helpers/compose-memory-callouts.js` → `{ yesterdayCalloutMd, overnightCalloutMd }`. When `yesterdayCalloutMd` is non-empty, append immediately after the synopsis callout. When `overnightCalloutMd` is non-empty, append immediately after the Yesterday callout (or after the synopsis if Yesterday was empty). Both empty strings = omit cleanly (matches v0.84.0 null-data backward-compat). Output is byte-identical to v0.84.0's hand-composed prose given the same memory.md input; golden-fixture asserted by HC-V0850-C3..C5.
+  14b. **Prep closing_md.** Compose the `> [!tip] Today's focus` callout per `prompt_body` instructions (2-3 sentence focus paragraph + concrete first action).
+       - Empty-prompt stub case: closing_md = `"> [!tip] Today's focus\n> Edit \`spice/cowork/prompts/morning-briefing.md\` to define what this scheduled job should emit when it fires."`.
 
-    - **NEW (v0.87.0): Echoes from your record.** Invoke pure helper `composeSemanticEchoesCallout(output_echoes)` from `helpers/compose-semantic-echoes-callout.js`. When non-empty, append immediately after the Overnight callout (or after the synopsis if Overnight + Yesterday were both empty). Empty string = omit cleanly (null-data backward-compat for vaults with thin corpus or no sc-bridge installed).
+  14c. **Prep memory_callouts struct.** Use existing helpers:
+       - `yesterday_md` ← `composeMemoryCallouts(output_yesterday, output_overnight).yesterdayCalloutMd`
+       - `overnight_md` ← `composeMemoryCallouts(...).overnightCalloutMd`
+       - `echoes_md` ← `composeSemanticEchoesCallout(output_echoes)`
+       - `backlink_md` ← inline-composed per v0.85.0 § 2.1.3 spec: `"> [!quote]- Memory log\n> Today's memory: [[spice/cowork/memory/<engagement_id>/<YYYY>/<MM-Month>/<YYYY-MM-DD>/memory.md|Memory log — <YYYY-MM-DD>]]"` (tick-count parenthetical omitted when unknown).
 
-   When `prompt_body` is empty, do NOT freelance content — compose a skeleton-compliant STUB body:
-    - `SpaceNavButtons` dataviewjs block (verbatim).
-    - `> [!info]- Today at a glance\n> (Prompt body empty — edit spice/cowork/prompts/morning-briefing.md to customize what this run emits.)`
-    - `> [!example]+ 📋 Status\n> No prompt body to drive content; this run is a placeholder.`
-    - `> [!tip] ✏️ Next action\n> Edit \`spice/cowork/prompts/morning-briefing.md\` to define what this scheduled job should emit when it fires.`
-    Set `warning = "empty_prompt"` and pass `summary = "Stub run — prompt body at spice/cowork/prompts/morning-briefing.md is empty."` to write-run-note via its `summary` arg. The write-run-note self-check passes (5 markers + summary + title all present).
-    When `prompt_body` is non-empty, set `warning = null` and compose the body per the prompt's instructions, respecting the adaptive body skeleton in write-run-note-morning-briefing's `## Adaptive body skeleton` section.
-    **Semantic interpolation** (applies when `prompt_body` is non-empty and step 12b ran):
-    - If `semantic_index_age` is non-null, append `> Semantic index age: <semantic_index_age>m` as the last line inside the `> [!info]- Synopsis` callout (before its closing blank line).
-    - For each `related_signal` in `related_signals[]` where `related_signal.status == "ready"`, append the markdown block returned by gather-semantic-related as a `> [!example]+ 🧩 Related to: <event.title>` callout immediately after the calendar-event line that matches `event.title`.
-    - **ONLY IF step 12b ran** (i.e., `calendar_signal.events.length > 0`) AND any `related_signal.status` starts with `skipped:no-index` OR `skipped:anchor-not-indexed`: set `semantic_index_unavailable = true` and append ONE `> [!warning]- Semantic index not available\n> Smart Connections index absent or anchor not indexed — semantic gather skipped.` callout after the Synopsis admonition. Text matches the canonical contract in `cowork:gather-semantic-related`'s `## Orchestrator integration contract` section — do not paraphrase; copy exactly (note the em-dash, not two hyphens). Idempotent: never emit more than one such warning callout per run regardless of how many per-event calls skipped.
-    - **When step 12b did NOT run** (calendar empty, or `render_aspects.semantic_related != "include"`): leave `semantic_index_unavailable = false` (default) and **NO warning callout is emitted**. The atomic-note body remains structurally clean — the absence of a semantic gather is not itself a contract violation.
-    - **NEW (v0.85.0): Memory log backlink.** Append a final `[!quote]-` callout (collapsed by default) at the very end of the atomic note body:
+  14d. **Prep ordered_blocks[].** Iterate gather-pipeline `ordered_blocks[]` (from steps 5-12b priority loop). Each entry already carries `{ kind, callout_type, markdown }`. Add `title` from the kind-to-title map: chat → "Chat (Teams)", calendar → "Today's calendar", email → "Email triage", github → "GitHub", ado → "ADO" — or microscope-`## Output shape`-specified override. Translate to composeBody shape: `{ kind, callout_type, title, body_md: markdown }`.
 
-      ```
-      > [!quote]- Memory log
-      > Today's memory: [[spice/cowork/memory/<engagement_id>/<YYYY>/<MM-Month>/<YYYY-MM-DD>/memory.md|Memory log — <YYYY-MM-DD> (<tick_count_if_known> ticks)]]
-      ```
+  14e. **Prep engagement_type_blocks[].** For each `related_signal` in `related_signals[]` with `status == "ready"`: push `{ kind: "semantic", callout_type: "example", title: "Related to: <event.title>", body_md: <related_signal.markdown> }`. When `semantic_index_unavailable == true`: push ONCE `{ kind: "semantic-unavailable", callout_type: "warning", title: "Semantic index not available", body_md: "Smart Connections index absent or anchor not indexed — semantic gather skipped." }`. Finance does NOT flow through here — it's written by Step 15's separate sub-skill.
 
-      Substitute `<engagement_id>`, `<YYYY>`, `<MM-Month>`, `<YYYY-MM-DD>` from `date-context.today`. When `tick_count` is unknown (today's memory.md not yet read), omit the `(<N> ticks)` parenthetical. The wikilink target may not resolve when no tick has fired yet — Obsidian renders it dimmed (acceptable per v0.85.0 design § 2.1.3). Collapsed callout (`-` suffix) keeps the atomic note visually clean.
+  14f. **Invoke composeBody.** READ `.claude/skills/cowork/skills/compose-body/SKILL.md` in full and follow its `## Compose` section with `{ cadence: "morning-briefing", nav_buttons_block: "<canonical block>", synopsis_md, memory_callouts: { yesterday_md, overnight_md, echoes_md, backlink_md }, ordered_blocks, engagement_type_blocks, closing_md }`. Capture `{ body_md, body_assertions, status }`.
+
+  14g. **Compose failure handling.** If `status` starts with `"failed:"`, emit Notice `cowork:morning-briefing aborted -- compose-body failure: <status>` and exit non-zero. Do NOT call write-run-note. Do NOT run state-update steps.
 15. **If `render_aspects.finance_block == "include"`:** READ `.claude/skills/cowork/skills/write-run-note-finance/SKILL.md` in full —
     paying particular attention to its `## Title composition`,
     `## Adaptive body skeleton`, and `## Pre-write self-check` sections — then apply those contracts
@@ -322,7 +315,7 @@ Each gather call passes `engagement_id`. The sub-skill reads per-engagement MCP-
 16. READ `.claude/skills/cowork/skills/write-run-note-morning-briefing/SKILL.md` in full —
     paying particular attention to its `## Title composition`,
     `## Adaptive body skeleton`, and `## Pre-write self-check` sections — then apply those contracts
-    before performing the write described in its `## Steps` section with `{ engagement, date: context.today, weekday: context.dddd, month_name: context["MM-Month"].split("-")[1], body: run_body, prompt_source: "spice/cowork/prompts/morning-briefing.md", warning }`. Capture `status`. If `status` starts with `"failed:contract-violation:"`, emit Notice `cowork:morning-briefing aborted -- contract violation: <field>` (where `<field>` is the part after `failed:contract-violation:`). Do not run state-update steps. Exit non-zero.
+    before performing the write described in its `## Steps` section with `{ engagement, date: context.today, weekday: context.dddd, month_name: context["MM-Month"].split("-")[1], body: body_md, body_assertions, prompt_source: "spice/cowork/prompts/morning-briefing.md", warning }`. Capture `status`. If `status` starts with `"failed:contract-violation:"`, emit Notice `cowork:morning-briefing aborted -- contract violation: <field>` (where `<field>` is the part after `failed:contract-violation:`). Do not run state-update steps. Exit non-zero.
     Else if `status` starts with `"failed:"` (e.g. `failed:filesystem:permission`, `failed:write-undersized:285`), emit Notice `cowork:morning-briefing aborted -- write failed: <status>` and exit. Do not run state-update steps after a failed write.
 
 ## Verify

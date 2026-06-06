@@ -10549,6 +10549,28 @@ type: cowork-microscope
     }
   }
 
+  // ============================================================================
+  // v0.92.0 — orchestrator Step 14 refactor across 5 orchestrators (HC-V0920-ORCH-*)
+  // ============================================================================
+  for (const cad of _V0920_CADENCES) {
+    const L = _V0920_LABELS[cad];
+    const orchPath = path.join(WORKSHOP, "platform/blueprints/cowork/skills/orchestrators/" + cad + "/SKILL.md");
+    console.log(`\n--- Case HC-V0920-ORCH-${L}: ${cad} orchestrator Step 14 refactor ---`);
+    try {
+      const orchBody = fs.readFileSync(orchPath, "utf8");
+      assertTrue(`HC-V0920-ORCH-${L}-A1: Step 14 compose-body header present`,
+        orchBody.includes("Compose run-note body via cowork:compose-body"));
+      assertTrue(`HC-V0920-ORCH-${L}-A2: sub-step 14f references compose-body SKILL.md`,
+        orchBody.includes(".claude/skills/cowork/skills/compose-body/SKILL.md"));
+      assertTrue(`HC-V0920-ORCH-${L}-A3: body_assertions captured from composeBody return`,
+        /body_md\s*,\s*body_assertions\s*,\s*status/.test(orchBody));
+      assertTrue(`HC-V0920-ORCH-${L}-A4: body_assertions passed to write-run-note call site`,
+        /body:\s*body_md\s*,\s*body_assertions/.test(orchBody));
+    } catch (e) {
+      assertTrue(`HC-V0920-ORCH-${L}: Step 14 refactor contract`, false, e && e.message);
+    }
+  }
+
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
   if (fail > 0) {

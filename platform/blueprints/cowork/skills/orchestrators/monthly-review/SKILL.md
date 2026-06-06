@@ -268,22 +268,31 @@ for entry in dispatch_plan:
     - Set `prompt_source = (user_prompt_body ? "spice/cowork/prompts/monthly-review.md" : (template_prompt_body ? "spice/cowork/context/engagement-templates/<engagement.type>/prompts/monthly-review.md" : "spice/cowork/prompts/monthly-review.md"))`.
 14b. **Voice contract.** If `dispatch_mode == "prefs"` AND `voice_contract != ""`, prepend it to `prompt_body`:
    `prompt_body = voice_contract + prompt_body`. The combined string is the input to the body-composition step.
-15. **Compose run-note body** per `prompt_body` instructions interpolating month-summary gather outputs.
+15. **Compose run-note body via cowork:compose-body.**
 
-    When `dispatch_mode == "prefs"`, compose the body as: SpaceNavButtons → `[!info]- This month at a glance` paragraph → `ordered_blocks[]` (priority order, in array order) → engagement-type-aspect blocks (semantic_related, finance from render_aspects) → `[!tip]` closing. `ordered_blocks` entries with `kind: "warning"` render as `[!warning]` callouts in-position. When `dispatch_mode == "legacy"`, use the v0.77.0 composition order verbatim (existing body).
+  14a. **Prep synopsis_md.** Compose the `> [!info]- Month in review` callout per `prompt_body` instructions (voice-shaped one-paragraph synopsis distilled from month-summary gather outputs). When `semantic_index_age` is non-null, append `> Semantic index age: <semantic_index_age>m` as the last `> ` line inside the synopsis callout BEFORE passing to composeBody.
+       - Empty-prompt stub case (when `warning == "empty_prompt"`): synopsis_md = `"> [!info]- Month in review\n> (Prompt body empty — edit spice/cowork/prompts/monthly-review.md to customize what this run emits.)"`.
 
-    When `prompt_body` is empty, do NOT freelance content — compose a skeleton-compliant STUB body:
-    - `SpaceNavButtons` dataviewjs block (verbatim).
-    - `> [!info]- This month at a glance\n> (Prompt body empty — edit spice/cowork/prompts/monthly-review.md to customize what this run emits.)`
-    - `> [!example]+ 📋 Status\n> No prompt body to drive content; this run is a placeholder.`
-    - `> [!tip] ✏️ Next action\n> Edit \`spice/cowork/prompts/monthly-review.md\` to define what this scheduled job should emit when it fires.`
-    Set `warning = "empty_prompt"` and pass `summary = "Stub run — monthly-review prompt body at spice/cowork/prompts/monthly-review.md is empty."` to write-run-note via its `summary` arg. The write-run-note self-check passes (5 markers + summary + title all present).
-    When `prompt_body` is non-empty, set `warning = null` and compose the body per the prompt's instructions, respecting the adaptive body skeleton in write-run-note-monthly-review's `## Adaptive body skeleton` section.
-    - **NEW (v0.86.0): This month's pattern.** Invoke pure helper `composeMonthlyMemoryCallout(output_month)` from `helpers/compose-monthly-memory-callout.js`. Aggregates up to 4 weekly syntheses across the month. When empty, omit cleanly.
+  14b. **Prep closing_md.** Compose the `> [!tip] Next month's board` callout per `prompt_body` instructions (2-3 sentence next-month board paragraph + concrete first action).
+       - Empty-prompt stub case: closing_md = `"> [!tip] Next month's board\n> Edit \`spice/cowork/prompts/monthly-review.md\` to define what this scheduled job should emit when it fires."`.
+
+  14c. **Prep memory_callouts struct.** Use existing helpers:
+       - `yesterday_md` ← `composeMonthlyMemoryCallout(output_month)` (the "This month's pattern" callout — aggregates up to 4 weekly syntheses); `""` when empty
+       - `overnight_md` ← `""` (monthly cadence does not surface overnight)
+       - `echoes_md` ← `composeSemanticEchoesCallout(output_echoes)` when applicable, else `""`
+       - `backlink_md` ← inline-composed per v0.85.0 § 2.1.3 spec, monthly memory path: `"> [!quote]- Memory log\n> This month's memory: [[spice/cowork/memory/<engagement_id>/monthly/<YYYY>/<YYYY-MM>/memory.md|Memory log — <YYYY-MM>]]"`.
+
+  14d. **Prep ordered_blocks[].** Iterate gather-pipeline `ordered_blocks[]` (from priority loop). Each entry already carries `{ kind, callout_type, markdown }`. Add `title` from the kind-to-title map: chat → "Chat (Teams)", calendar → "Today's calendar", email → "Email triage", github → "GitHub", ado → "ADO" — or microscope-`## Output shape`-specified override. Translate to composeBody shape: `{ kind, callout_type, title, body_md: markdown }`.
+
+  14e. **Prep engagement_type_blocks[].** For each `related_signal` in `related_signals[]` with `status == "ready"`: push `{ kind: "semantic", callout_type: "example", title: "Related to: <event.title>", body_md: <related_signal.markdown> }`. When `semantic_index_unavailable == true`: push ONCE `{ kind: "semantic-unavailable", callout_type: "warning", title: "Semantic index not available", body_md: "Smart Connections index absent or anchor not indexed — semantic gather skipped." }`. Finance does NOT flow through here — it's written by a separate sub-skill when applicable.
+
+  14f. **Invoke composeBody.** READ `.claude/skills/cowork/skills/compose-body/SKILL.md` in full and follow its `## Compose` section with `{ cadence: "monthly-review", nav_buttons_block: "<canonical block>", synopsis_md, memory_callouts: { yesterday_md, overnight_md, echoes_md, backlink_md }, ordered_blocks, engagement_type_blocks, closing_md }`. Capture `{ body_md, body_assertions, status }`.
+
+  14g. **Compose failure handling.** If `status` starts with `"failed:"`, emit Notice `cowork:monthly-review aborted -- compose-body failure: <status>` and exit non-zero. Do NOT call write-run-note. Do NOT run state-update steps.
 16. READ `.claude/skills/cowork/skills/write-run-note-monthly-review/SKILL.md` in full —
     paying particular attention to its `## Title composition`,
     `## Adaptive body skeleton`, and `## Pre-write self-check` sections — then apply those contracts
-    before performing the write described in its `## Steps` section with `{ engagement, month: context.iso_month, year: context.year, body: run_body, prompt_source: prompt_source, warning }`. Capture `status`. If `status` starts with `"failed:contract-violation:"`, emit Notice `cowork:monthly-review aborted -- contract violation: <field>` (where `<field>` is the part after `failed:contract-violation:`). Do not run state-update steps. Exit non-zero.
+    before performing the write described in its `## Steps` section with `{ engagement, month: context.iso_month, year: context.year, body: body_md, body_assertions, prompt_source: prompt_source, warning }`. Capture `status`. If `status` starts with `"failed:contract-violation:"`, emit Notice `cowork:monthly-review aborted -- contract violation: <field>` (where `<field>` is the part after `failed:contract-violation:`). Do not run state-update steps. Exit non-zero.
     Else if `status` starts with `"failed:"` (e.g. `failed:filesystem:permission`, `failed:write-undersized:285`), emit Notice `cowork:monthly-review aborted -- write failed: <status>` and exit. Do not run state-update steps after a failed write.
 
 ## Verify

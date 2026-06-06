@@ -281,27 +281,31 @@ for entry in dispatch_plan:
     - Set `prompt_source = (user_prompt_body ? "spice/cowork/prompts/weekly-review.md" : (template_prompt_body ? "spice/cowork/context/engagement-templates/<engagement.type>/prompts/weekly-review.md" : "spice/cowork/prompts/weekly-review.md"))`.
 14b. **Voice contract.** If `dispatch_mode == "prefs"` AND `voice_contract != ""`, prepend it to `prompt_body`:
    `prompt_body = voice_contract + prompt_body`. The combined string is the input to the body-composition step.
-15. **Compose run-note body** per `prompt_body` instructions interpolating week-summary gather outputs.
+15. **Compose run-note body via cowork:compose-body.**
 
-    When `dispatch_mode == "prefs"`, compose the body as: SpaceNavButtons → `[!info]- This week at a glance` paragraph → `ordered_blocks[]` (priority order, in array order) → engagement-type-aspect blocks (semantic_related, finance from render_aspects) → `[!tip]` closing. `ordered_blocks` entries with `kind: "warning"` render as `[!warning]` callouts in-position. When `dispatch_mode == "legacy"`, use the v0.77.0 composition order verbatim (existing body).
+  14a. **Prep synopsis_md.** Compose the `> [!info]- Week in review` callout per `prompt_body` instructions (voice-shaped one-paragraph synopsis distilled from week-summary gather outputs). When `semantic_index_age` is non-null, append `> Semantic index age: <semantic_index_age>m` as the last `> ` line inside the synopsis callout BEFORE passing to composeBody.
+       - Empty-prompt stub case (when `warning == "empty_prompt"`): synopsis_md = `"> [!info]- Week in review\n> (Prompt body empty — edit spice/cowork/prompts/weekly-review.md to customize what this run emits.)"`.
 
-    When `prompt_body` is empty, do NOT freelance content — compose a skeleton-compliant STUB body:
-    - `SpaceNavButtons` dataviewjs block (verbatim).
-    - `> [!info]- This week at a glance\n> (Prompt body empty — edit spice/cowork/prompts/weekly-review.md to customize what this run emits.)`
-    - `> [!example]+ 📋 Status\n> No prompt body to drive content; this run is a placeholder.`
-    - `> [!tip] ✏️ Next action\n> Edit \`spice/cowork/prompts/weekly-review.md\` to define what this scheduled job should emit when it fires.`
-    Set `warning = "empty_prompt"` and pass `summary = "Stub run — weekly-review prompt body at spice/cowork/prompts/weekly-review.md is empty."` to write-run-note via its `summary` arg. The write-run-note self-check passes (5 markers + summary + title all present).
-    When `prompt_body` is non-empty, set `warning = null` and compose the body per the prompt's instructions, respecting the adaptive body skeleton in write-run-note-weekly-review's `## Adaptive body skeleton` section.
-    **Semantic interpolation** (applies when `prompt_body` is non-empty and steps 11b–11d ran):
-    - If `semantic_index_age` is non-null, append `> Semantic index age: <semantic_index_age>m` as the last line inside the `> [!info]- Synopsis` callout (before its closing blank line).
-    - If `week_related_status != "skipped:no-hits"`, append the rolled-up `> [!example]+ 🧩 Emergent themes this week` callout composed in step 11d, placed after the last primary example block and before the closing `> [!tip]`.
-    - **ONLY IF step 11b ran** (i.e., `render_aspects.semantic_related == "include"`) AND any `week_related_signals[].status` starts with `skipped:no-index` OR `skipped:anchor-not-indexed`, append ONE `> [!warning]- Semantic index not available\n> Smart Connections index absent or anchor not indexed — semantic gather skipped.` callout after the Synopsis admonition. Text matches the canonical contract in `cowork:gather-semantic-related`'s `## Orchestrator integration contract` section — do not paraphrase; copy exactly (note the em-dash, not two hyphens). Idempotent: never emit more than one such warning callout per run regardless of how many per-day calls skipped.
-    - **When step 11b did NOT run** (`render_aspects.semantic_related != "include"`): NO warning callout is emitted.
-    - **NEW (v0.86.0): This week so far.** Invoke pure helper `composeWeeklyMemoryCallout(output_week)` from `helpers/compose-weekly-memory-callout.js`. When non-empty, append immediately after the synopsis callout. When `output_week.found === false` OR no week_synthesis present (synthesize-week hasn't fired yet), omit cleanly.
+  14b. **Prep closing_md.** Compose the `> [!tip] Next week's setup` callout per `prompt_body` instructions (2-3 sentence next-week setup paragraph + concrete first action).
+       - Empty-prompt stub case: closing_md = `"> [!tip] Next week's setup\n> Edit \`spice/cowork/prompts/weekly-review.md\` to define what this scheduled job should emit when it fires."`.
+
+  14c. **Prep memory_callouts struct.** Use existing helpers:
+       - `yesterday_md` ← `composeWeeklyMemoryCallout(output_week)` (the "This week so far" callout); `""` when `output_week.found === false` OR no week_synthesis present
+       - `overnight_md` ← `""` (weekly cadence does not surface overnight)
+       - `echoes_md` ← `composeSemanticEchoesCallout(output_echoes)` when applicable, else `""`
+       - `backlink_md` ← inline-composed per v0.85.0 § 2.1.3 spec, weekly memory path: `"> [!quote]- Memory log\n> This week's memory: [[spice/cowork/memory/<engagement_id>/weekly/<YYYY>/<YYYY-Www>/memory.md|Memory log — <YYYY-Www>]]"`.
+
+  14d. **Prep ordered_blocks[].** Iterate gather-pipeline `ordered_blocks[]` (from priority loop). Each entry already carries `{ kind, callout_type, markdown }`. Add `title` from the kind-to-title map: chat → "Chat (Teams)", calendar → "Today's calendar", email → "Email triage", github → "GitHub", ado → "ADO" — or microscope-`## Output shape`-specified override. Translate to composeBody shape: `{ kind, callout_type, title, body_md: markdown }`.
+
+  14e. **Prep engagement_type_blocks[].** When `week_related_status != "skipped:no-hits"`, push the rolled-up `{ kind: "semantic", callout_type: "example", title: "Emergent themes this week", body_md: <week_related_callout_md> }`. When semantic index unavailable (any `week_related_signals[].status` starts with `skipped:no-index` OR `skipped:anchor-not-indexed`): push ONCE `{ kind: "semantic-unavailable", callout_type: "warning", title: "Semantic index not available", body_md: "Smart Connections index absent or anchor not indexed — semantic gather skipped." }`. Finance does NOT flow through here — it's written by a separate sub-skill when applicable.
+
+  14f. **Invoke composeBody.** READ `.claude/skills/cowork/skills/compose-body/SKILL.md` in full and follow its `## Compose` section with `{ cadence: "weekly-review", nav_buttons_block: "<canonical block>", synopsis_md, memory_callouts: { yesterday_md, overnight_md, echoes_md, backlink_md }, ordered_blocks, engagement_type_blocks, closing_md }`. Capture `{ body_md, body_assertions, status }`.
+
+  14g. **Compose failure handling.** If `status` starts with `"failed:"`, emit Notice `cowork:weekly-review aborted -- compose-body failure: <status>` and exit non-zero. Do NOT call write-run-note. Do NOT run state-update steps.
 16. READ `.claude/skills/cowork/skills/write-run-note-weekly-review/SKILL.md` in full —
     paying particular attention to its `## Title composition`,
     `## Adaptive body skeleton`, and `## Pre-write self-check` sections — then apply those contracts
-    before performing the write described in its `## Steps` section with `{ engagement, week: context.iso_week, year: context.year, body: run_body, prompt_source: prompt_source, warning }`. Capture `status`. If `status` starts with `"failed:contract-violation:"`, emit Notice `cowork:weekly-review aborted -- contract violation: <field>` (where `<field>` is the part after `failed:contract-violation:`). Do not run state-update steps. Exit non-zero.
+    before performing the write described in its `## Steps` section with `{ engagement, week: context.iso_week, year: context.year, body: body_md, body_assertions, prompt_source: prompt_source, warning }`. Capture `status`. If `status` starts with `"failed:contract-violation:"`, emit Notice `cowork:weekly-review aborted -- contract violation: <field>` (where `<field>` is the part after `failed:contract-violation:`). Do not run state-update steps. Exit non-zero.
     Else if `status` starts with `"failed:"` (e.g. `failed:filesystem:permission`, `failed:write-undersized:285`), emit Notice `cowork:weekly-review aborted -- write failed: <status>` and exit. Do not run state-update steps after a failed write.
 
 ## Verify
