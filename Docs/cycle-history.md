@@ -4,6 +4,43 @@ This file archives the per-cycle status snapshots that previously lived in `CLAU
 
 ---
 
+## v0.93.0 (closed 2026-06-06) — cowork:sync-scheduled-jobs orchestrator + compose-scheduled-job-wrappers helper + scheduled-job-contract.json MINOR
+
+Workshop 0.92.0 → **0.93.0** (MINOR). Closes the Cowork scheduled-job wrapper drift problem: claude.ai's scheduled-task UI is the cron runtime for the 5 cowork cadences, with prompt body living in claude.ai's UI outside the sauce vault entirely. After each v-bump that touches the cron contract (v0.91.1 path / v0.91.2 frontmatter / v0.91.3 connectivity / v0.92.0 body-shape), the user had to remember to re-paste 5 wrapper bodies into claude.ai per engagement. v0.93.0 ships a user-invocable orchestrator that emits paste-ready wrapper bodies for an engagement at `spice/cowork/scheduled-job-wrappers/<engagement_id>.md`, fully aligned with current sauce + cowork versions + engagement's actual `prefs.mcps` state.
+
+**Architecture (decisions from brainstorm session 2026-06-05):**
+- **B1 — one file per engagement** with 5 numbered fenced-block sections + per-section HTML-comment version tags (matches user's existing manual artifact shape; zero retraining).
+- **B2 — lean frontmatter** (8 fields: type, engagement_id, sauce_version, cowork_version, contract_version, generated_at, generated_by, warnings).
+- **B3 — versioned canonical contract** at `platform/blueprints/cowork/data/scheduled-job-contract.json`. JSON not JS (matches platform non-negotiable #4). Substitution tokens use `{{$varname}}` + `{{shared.<key>}}` (distinct from installer's `{{template_variables}}` convention).
+- **B4 — fully dynamic** — contract.json contains ZERO MCP brand strings ("M365" / "Apple-MCP" / "ADO" / etc.). All dispatch lines computed kind-by-kind from `prefs.mcps` at compose time. Novel MCP shapes work without contract changes (case-novel-mcp-shape fixture with contrived `slack` kind proves this).
+- **B5 — cowork: blueprint namespace** (not platform: mechanism). Contract is intrinsically cowork-version-pinned; engagement vocabulary lives in cowork; zero CLI surface churn.
+
+**S1 deliverables (composer arc).** NEW `scheduled-job-contract.json` (14.3KB; contract_version 0.31.0; cadence_order [5]; 13 substitution_tokens; 3 shared_clauses; 5 cadences each with 8 fields). NEW pure helper `compose-scheduled-job-wrappers-helper.js` (15.9KB) exports `composeScheduledJobWrappers({ engagement, prefs, engagement_type_data, contract, sauce_version, cowork_version, generated_at, generated_by }) → { file_md, warnings, status }` + 3 sub-helpers (composeMcpDispatchLines / validateContract / substituteTemplate). 4-mode landmine #20 substitution-token validator. Pure function (caller supplies all timestamps + version strings → fully deterministic). 12 golden-fixture directories: 8 byte-identical (case-accuris-shape derived from accuris production wrappers + case-headspace-shape + case-novel-mcp-shape + 5 edge cases) + 4 validator-failure fixtures (one per Mode 1-4).
+
+**S2 deliverables (orchestrator).** NEW `cowork:sync-scheduled-jobs` user-invocable orchestrator SKILL.md (108 lines, FLN-v79-4 FLAT dest) with frontmatter + ## What it does + ## When to invoke + ## Inputs + ## Pre-flight (6 steps: resolve engagement via v0.90.0 default-if-one/ask-if-many pattern; read user-preferences; read engagement-type-data; read platform-installed; read contract; compute generated_at + generated_by) + ## Compose (3 steps) + ## Write (5 steps including .sauce-backup backup-on-edit per landmine #12 mechanic #2) + ## Done (3 steps) + ## Failure modes + ## Harness testing. Output path: `spice/cowork/scheduled-job-wrappers/<engagement_id>.md`. Slash command `/cowork sync-scheduled-jobs [<engagement_id>]` registered via cowork commands/cowork.md (mirrors discover-people + find-missing-people pattern).
+
+**HC sub-asserts added (~70 total):** HC-V0930-COMPOSE-SHAPE (16), HC-V0930-VALIDATOR (12), HC-V0930-SUB-HELPER (12), HC-V0930-CONTRACT (6), HC-V0930-SKILL (10), HC-V0930-INTEGRATION (5), HC-V0930-MANIFEST (5), HC-V0930-VERSION (4).
+
+cowork@0.30.0 → 0.31.0 MINOR (new install surface: 1 new orchestrator SKILL.md + 1 new helper + 1 new data JSON + 2 new claude_surface entries — skill + claude_md_row); workshop 0.92.0 → 0.93.0 MINOR; mechanism count unchanged at 17.
+
+**Smoke results (v0.93.0 close):**
+- helper-cases: **1998 passed / 0 failed** (delta +70 from v0.92.0 close 1928)
+- cowork-smoke: **923 passed / 0 failed** (unchanged)
+- claude-surface: **209 passed / 0 failed** (delta +1 from 208 — new sync-scheduled-jobs claude_surface entry registered)
+- Workshop dogfood install: clean exit 0; orchestrator materializes to consumer `.claude/skills/cowork/sync-scheduled-jobs/SKILL.md` (FLAT dest, NOT nested)
+- Consumer install (accuris / headspace): pin bumps applied (cowork 0.30.0 → 0.31.0 in both); full materialization deferred to post-Homebrew-release per existing convention.
+
+**FLN candidates queued by v0.93.0:**
+- **FLN-v93-1** — Extract per-cadence `wrapper_template` strings from contract.json into per-cadence .txt files at `data/wrapper-templates/<cadence>.txt`. Defer until embedded JSON strings prove unwieldy editing-wise.
+- **FLN-v93-2** — Factor engagement-resolution into shared `cowork:resolve-engagement` sub-skill (eliminates duplication across discover-people / find-missing-people / morning-briefing / midday-tripwire / eod-review / weekly-review / monthly-review / sync-scheduled-jobs — 8 carriers).
+- **FLN-v93-3** — `## Delta from prior contract versions` section + `contract_history.json` companion file (the future-affordance dropped from v0.93.0 design).
+- **FLN-v93-4** — `--dry-run` flag for `/cowork sync-scheduled-jobs` (prints file_md to Notice without writing).
+- **FLN-v93-5** — Drift-detection skill `cowork:audit-scheduled-jobs` that asks user to paste current claude.ai task bodies → diffs against current sync output → reports per-cadence drift.
+
+**Live verification owed (post-deploy via Homebrew):** Once v0.93.0 ships via the brew tap, the user runs `/cowork sync-scheduled-jobs accuris` + `/cowork sync-scheduled-jobs headspace` on each engagement, then opens the resulting paste-ready files at `spice/cowork/scheduled-job-wrappers/<engagement>.md` and copy-pastes each fenced block into the matching Cowork scheduled-task UI in claude.ai. Replaces the manual `Planning/cowork-scheduled-job-wrappers-v0.91.3.md` artifact for the v0.93.0+ contract.
+
+---
+
 ## v0.92.0 (closed 2026-06-06) — cowork:compose-body sub-skill + body-shape write-guard + Step 14 refactor MINOR
 
 Workshop 0.91.3 → **0.92.0** (MINOR). Closes the orchestrator body-composition prose-attention ceiling surfaced by 2026-06-05's accuris morning-briefing live run on the laptop, where the SOFT body-composition rule at orchestrator Step 14 (line 292 of morning-briefing/SKILL.md, ~25 lines deep into the orchestrator's ## Write section) was DROPPED in favor of plain `##` markdown headers — even as all HARD v0.91.x rules (canonical path / frontmatter / dvjs / M365 connectivity / microscope-driven content / wikilinks) fired correctly. The fix is the 4th layer in the v0.91.x defense stack (after path / frontmatter / dvjs): a body-shape write-guard backed by a deterministic helper that produces canonical output + an assertion list the guard verifies.

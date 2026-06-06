@@ -10853,6 +10853,75 @@ type: cowork-microscope
     assertTrue("HC-V0930-SKILL: orchestrator SKILL.md contract", false, e && e.message);
   }
 
+  // ============================================================================
+  // v0.93.0 — INTEGRATION (end-to-end roundtrip: helper output → parse frontmatter → section count)
+  // ============================================================================
+  console.log(`\n--- Case HC-V0930-INTEGRATION: accuris-shape roundtrip ---`);
+  try {
+    const SJ_HELPER = require(path.join(WORKSHOP, "platform/blueprints/cowork/helpers/compose-scheduled-job-wrappers-helper.js"));
+    const SJ_CONTRACT = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/cowork/data/scheduled-job-contract.json"), "utf8"));
+    const SJ_FIXTURES = path.join(WORKSHOP, "platform/blueprints/cowork/helpers/fixtures/compose-scheduled-job-wrappers");
+    const inputRaw = JSON.parse(fs.readFileSync(path.join(SJ_FIXTURES, "case-accuris-shape/input.json"), "utf8"));
+    const input = Object.assign({}, inputRaw, { contract: inputRaw.contract || SJ_CONTRACT });
+    const r = SJ_HELPER.composeScheduledJobWrappers(input);
+    assertTrue("HC-V0930-INTEGRATION-A1: status ok", r.status === "ok");
+    const fmMatch = r.file_md.match(/^---\n([\s\S]+?)\n---/);
+    assertTrue("HC-V0930-INTEGRATION-A2: frontmatter parses", !!fmMatch);
+    const fmText = fmMatch ? fmMatch[1] : "";
+    assertTrue("HC-V0930-INTEGRATION-A3: engagement_id matches input",
+      fmText.includes(`engagement_id: ${input.engagement.id}`));
+    assertTrue("HC-V0930-INTEGRATION-A4: sauce_version matches input",
+      fmText.includes(`sauce_version: ${input.sauce_version}`));
+    assertTrue("HC-V0930-INTEGRATION-A5: section count === 5",
+      (r.file_md.match(/^## \d+ —/gm) || []).length === 5);
+  } catch (e) {
+    assertTrue("HC-V0930-INTEGRATION: roundtrip contract", false, e && e.message);
+  }
+
+  // ============================================================================
+  // v0.93.0 — MANIFEST (cowork manifest registers helper + contract + orchestrator)
+  // ============================================================================
+  console.log(`\n--- Case HC-V0930-MANIFEST: cowork manifest registration ---`);
+  try {
+    const coworkMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/cowork/manifest.json"), "utf8"));
+    assertTrue("HC-V0930-MANIFEST-A1: files[] includes compose-scheduled-job-wrappers-helper.js",
+      coworkMan.files.some(f => (f.source || "").endsWith("compose-scheduled-job-wrappers-helper.js")));
+    assertTrue("HC-V0930-MANIFEST-A2: files[] includes scheduled-job-contract.json",
+      coworkMan.files.some(f => (f.source || "").endsWith("scheduled-job-contract.json")));
+    assertTrue("HC-V0930-MANIFEST-A3: claude_surface[] includes sync-scheduled-jobs orchestrator with FLAT dest",
+      coworkMan.claude_surface.some(s =>
+        (s.source || "").endsWith("orchestrators/sync-scheduled-jobs/SKILL.md")
+        && (s.dest || "").includes("sync-scheduled-jobs/SKILL.md")
+        && !(s.dest || "").includes("skills/skills/sync-scheduled-jobs")));
+    assertTrue("HC-V0930-MANIFEST-A4: cowork manifest version === 0.31.0",
+      coworkMan.version === "0.31.0");
+    const coworkCommandsMd = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/cowork/commands/cowork.md"), "utf8");
+    assertTrue("HC-V0930-MANIFEST-A5: commands/cowork.md references sync-scheduled-jobs",
+      coworkCommandsMd.includes("sync-scheduled-jobs"));
+  } catch (e) {
+    assertTrue("HC-V0930-MANIFEST: registration contract", false, e && e.message);
+  }
+
+  // ============================================================================
+  // v0.93.0 — VERSION (pin lockstep)
+  // ============================================================================
+  console.log(`\n--- Case HC-V0930-VERSION: pin lockstep ---`);
+  try {
+    const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
+    assertTrue("HC-V0930-VERSION-A1: workshop_version === 0.93.0",
+      platMan.workshop_version === "0.93.0");
+    assertTrue("HC-V0930-VERSION-A2: blueprints[].cowork.version === 0.31.0",
+      platMan.blueprints.find(b => b.name === "cowork").version === "0.31.0");
+    const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
+    assertTrue("HC-V0930-VERSION-A3: package.json version === 0.93.0",
+      pkg.version === "0.93.0");
+    const workshopSub = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "ranch/platform-subscription.json"), "utf8"));
+    assertTrue("HC-V0930-VERSION-A4: workshop subscription cowork pin === 0.31.0",
+      workshopSub.blueprints.find(b => b.name === "cowork").version === "0.31.0");
+  } catch (e) {
+    assertTrue("HC-V0930-VERSION: pin lockstep contract", false, e && e.message);
+  }
+
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
   if (fail > 0) {
