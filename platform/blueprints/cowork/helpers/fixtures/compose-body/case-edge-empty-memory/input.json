@@ -1,0 +1,28 @@
+{
+  "cadence": "morning-briefing",
+  "nav_buttons_block": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```",
+  "synopsis_md": "> [!info]- Today at a glance\n> Quiet day; one block on the calendar; no chat backlog.",
+  "memory_callouts": {
+    "yesterday_md": "",
+    "overnight_md": "",
+    "echoes_md": "",
+    "backlink_md": ""
+  },
+  "ordered_blocks": [
+    {
+      "kind": "calendar",
+      "callout_type": "tip",
+      "title": "Today's calendar",
+      "body_md": "- 2:00 PM – 2:30 PM: Focus block (no meetings)"
+    }
+  ],
+  "engagement_type_blocks": [
+    {
+      "kind": "semantic",
+      "callout_type": "example",
+      "title": "Related to: focus-block discipline",
+      "body_md": "Pattern of single-meeting days correlates with high-output focus blocks in the last two weeks."
+    }
+  ],
+  "closing_md": "> [!tip] Today's focus\n> Use the open afternoon to push the deferred review queue. First action: clear three PRs older than two days."
+}

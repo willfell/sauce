@@ -1,0 +1,21 @@
+{
+  "cadence": "morning-briefing",
+  "nav_buttons_block": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```",
+  "synopsis_md": "> [!info]- Today at a glance\n> Edge fixture for unknown callout_type rejection.",
+  "memory_callouts": {
+    "yesterday_md": "",
+    "overnight_md": "",
+    "echoes_md": "",
+    "backlink_md": ""
+  },
+  "ordered_blocks": [
+    {
+      "kind": "chat",
+      "callout_type": "bogus",
+      "title": "Chat",
+      "body_md": "Body content does not matter; validation rejects on callout_type."
+    }
+  ],
+  "engagement_type_blocks": [],
+  "closing_md": "> [!tip] Today's focus\n> Should never render."
+}

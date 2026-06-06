@@ -1,0 +1,39 @@
+{
+  "cadence": "eod-review",
+  "nav_buttons_block": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```",
+  "synopsis_md": "> [!info]- Today's recap\n> Document-registry namespace migration moved forward — AccurAPI PR merged, Argo project created. Two GitHub deployment reviews approved (mcp-mesh, ontology-api-gateway). CDC scope handoff confirmed with **[[Ted Grzesik]]** for next week. Hawaii CDN cutover fully closed.",
+  "memory_callouts": {
+    "yesterday_md": "> [!quote]- Yesterday's last memory\n> Closed yesterday on the Hawaii CDN PR approval and the document-registry namespace migration kickoff with **[[Ben Tanner]]**. Last memory tick: \"AccurAPI PR ready for Ben review.\"",
+    "overnight_md": "> [!example]- Overnight tick\n> Overnight Teams thread confirmed Redis cluster nodes discovered (Ben: \"there's the 3rd node\"). **[[Stale Veipe]]** validated Redis fails-open behavior. Matt confirmed Redis data loss acceptable on migration.",
+    "echoes_md": "> [!quote]+ Echoes from your record\n> Echo cluster: document-registry namespace migration appears across 5 of last 7 daily notes. CDC pipeline production work (708152) recurs in 3 of last 5 notes.",
+    "backlink_md": "> [!quote]- Memory log\n> Today's memory: [[spice/cowork/memory/accuris/2026/06-June/2026-06-05/memory.md|Memory log — 2026-06-05]]"
+  },
+  "ordered_blocks": [
+    {
+      "kind": "chat",
+      "callout_type": "info",
+      "title": "Chat (Teams)",
+      "body_md": "Teams volume moderate today — 42 messages. Most activity in **[[Ben Tanner]]** DM (AccurAPI PR review, Redis cluster validation) and project-library channel."
+    },
+    {
+      "kind": "email",
+      "callout_type": "quote",
+      "title": "Email triage",
+      "body_md": "- **GitHub deployment review — mcp-mesh production** · APPROVED at 1:42 PM\n- **GitHub deployment review — ontology-api-gateway dev-pr** · APPROVED at 1:43 PM\n- **New Relic user approval — Sandesh Shenoy Beloor** · APPROVED at 1:45 PM"
+    },
+    {
+      "kind": "github",
+      "callout_type": "note",
+      "title": "GitHub",
+      "body_md": "**Merged today:**\n- **accurapi.ingress-api.routes** — Merged by **[[Ben Tanner]]** at 3:11 PM\n- **content-registry.argocd #47** — Merged by Will at 4:05 PM\n- **hawaii.hawaii-system.delivery-platform-cdn #322** — Already merged yesterday"
+    },
+    {
+      "kind": "ado",
+      "callout_type": "example",
+      "title": "ADO (board status)",
+      "body_md": "Completed today:\n- **[707565](https://dev.azure.com/pdd-ihsmarkit/_apis/wit/workItems/707565)** Centralized Pipeline Rules IaC — moved to Done\n- **[708212](https://dev.azure.com/pdd-ihsmarkit/_apis/wit/workItems/708212)** Remove Linkerd from prod — still Active, blocked on review"
+    }
+  ],
+  "engagement_type_blocks": [],
+  "closing_md": "> [!tip] Carries forward\n> Monday: pick up **[708152](https://dev.azure.com/pdd-ihsmarkit/_apis/wit/workItems/708152)** CDC pipeline work with **[[Ted Grzesik]]** per today's handoff agreement. Confirm Redis prod cutover plan with **[[Ben Tanner]]** and **[[Matt Hemingway]]** before mid-week."
+}
