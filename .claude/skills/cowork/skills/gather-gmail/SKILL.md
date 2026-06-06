@@ -42,7 +42,13 @@ Searches Gmail for human-relevant threads from the last `lookback` window, categ
    - **Action needed**: latest message is FROM someone else AND snippet contains imperative phrasing (`please`, `can you`, `need`, `?`, `due`, `deadline`, `confirm`, `reply`).
    - **Awaiting reply**: latest message is FROM the user (the user already replied; waiting on the other party).
    - **FYI**: everything else.
-5. For each thread, build a one-line bullet: `**[Sender]** - [Subject] - [first 80 chars of snippet, ellipsis-truncated]`.
+5. **Resolve sender + build per-thread bullet.** For each thread:
+   - Extract `<sender_name>` and `<sender_email>` from the latest message's `from` field.
+   - Call `cowork:resolve-person` with `input: <sender_email>`, `prefer_type: "email"`, `engagement_id: <engagement_id>`. On miss, retry with `input: <sender_name>`, `prefer_type: "name"`, `engagement_id: <engagement_id>`.
+   - **On resolve hit:** emit `**[[<person_basename>]]** - <Subject> - [first 80 chars of snippet, ellipsis-truncated]`.
+   - **On resolve miss:** emit `**<sender_name>** - <Subject> - [first 80 chars of snippet, ellipsis-truncated]` (current plaintext behavior preserved).
+
+   The bold-wrap (`**...**`) is preserved in BOTH branches for callout-table parsability.
 6. Compose the callout per Returns. Omit empty categories. If all three categories are empty, emit the empty-case callout.
 7. Return the assembled markdown.
 

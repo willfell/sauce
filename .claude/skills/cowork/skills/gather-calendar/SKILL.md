@@ -60,7 +60,13 @@ Pulls every event scheduled for `date` from whichever calendar MCP is available 
    If no calendar MCP is available, follow the skip path in `## MCP routing` (emit `gather-skipped: no calendar MCP available in this Claude Code runtime` and pass `warning: calendar_unavailable` up to the orchestrator) and exit.
 3. For each returned event extract: `start.dateTime` (or `start.date` for all-day), `summary`, `location`, `attendees[].email`.
 4. Convert each `start.dateTime` to `HH:MM` in `timezone` (24h). All-day events render as `all-day`.
-5. For attendees, drop the user's own email; render the remaining as a comma-separated list (max 3, then `+N more`). If no attendees, render `solo`.
+5. **Resolve attendees + render list.** For each event:
+   - Drop the user's own email from the attendees list.
+   - For each remaining attendee email, call `cowork:resolve-person` with `input: <attendee_email>`, `prefer_type: "email"`, `engagement_id: <engagement_id>`.
+   - **On resolve hit:** render `[[<person_basename>]]`.
+   - **On resolve miss:** render `<localpart>@…` truncated (current plaintext behavior preserved).
+
+   Compose the comma-separated list (max 3, then `+N more` for overflow). If no attendees, render `solo`.
 6. If the result list is empty, return the empty-day callout from Returns.
 7. Otherwise compose the bullet-list callout per Returns and return it.
 

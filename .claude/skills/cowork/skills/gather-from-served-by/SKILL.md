@@ -10,6 +10,8 @@ inputs:
   hard_rules: list[string]
   siblings: list[{name,body}]
   callout_type: string
+  inner_circle_resolved: list[{name, person_link, person_basename, aliases_by_type, matched_via, collision_warning}]
+  engagement_id: string
   today: string
   range: object
   timezone: string
@@ -19,6 +21,7 @@ outputs:
   served_by_used: string
   tools_used: list[string]
   callout_type_used: string
+  inner_circle_resolved_count: integer
   reason: string | null
 tags: [cowork, gather, sub-skill, vendor-agnostic]
 ---
@@ -34,6 +37,8 @@ Generic gather for MCPs whose tool surface doesn't match a canonical vendor (Out
 - `served_by` (string, required): MCP namespace string (e.g., `45224a84-ce0e-459b-a016-909ab178ad8c` for M365, `github` for GitHub).
 - `what_matters` (string, required): free-text gather contract pulled from `user-preferences.md` `mcps.<kind>.what_matters`.
 - `question_set_answers` (object, optional): when kind is known (calendar/email/chat/finance), the captured answers for the kind's question set (e.g., `vip_senders`, `surface_event_kinds`). `null` for custom kinds.
+- `inner_circle_resolved` (list, optional): pre-resolved inner-circle allowlist from `composeInnerCircleAllowlist` (see `cowork/helpers/resolve-inner-circle-helper.js`). Each entry: `{ name, person_link, person_basename, aliases_by_type: {phone, email, name, handle}, matched_via, collision_warning }`. Empty list / absent → no allowlist injected; ambient soft-prompt still applies.
+- `engagement_id` (string, optional): forwarded into the dispatch contract so the per-emission resolver call inherits the orchestrator's engagement scope. Reserved field per v0.89.0 `cowork:resolve-person` contract; safe to omit.
 - `today` (string, required): `YYYY-MM-DD` from `cowork:date-context`.
 - `range` (object, required): `{ start: <YYYY-MM-DD>, end: <YYYY-MM-DD> }` window for the gather.
 - `timezone` (string, optional, default `"America/Denver"`): IANA timezone.
@@ -44,6 +49,7 @@ Generic gather for MCPs whose tool surface doesn't match a canonical vendor (Out
 - `status` (string): one of `"ready"` | `"skipped:no-tools"` | `"failed:served-by-unreachable"` | `"failed:bad-output"` | `"failed:<reason>"`.
 - `served_by_used` (string): echoes `served_by`.
 - `tools_used` (list[string]): tool names the agent invoked, for audit.
+- `inner_circle_resolved_count` (integer): echoes the count of validated `inner_circle_resolved` entries (0 when absent / empty). Audit aid.
 - `reason` (string | null): present when status != "ready".
 
 ## Steps
@@ -73,6 +79,21 @@ Generic gather for MCPs whose tool surface doesn't match a canonical vendor (Out
    - Honor what_matters as the gather contract — microscope `## Output shape` directives ALWAYS WIN over this default rendering guidance.
    - Window: <range.start> to <range.end> (timezone: <timezone>).
    ```
+
+**Known people in scope.** When the orchestrator passes a non-empty `inner_circle_resolved[]` input, inject it into the dispatch contract (Step 3) directly AFTER the `**Hard rules ...**` block and BEFORE the closing window line, formatted as:
+
+````
+**Known people in scope (resolve-time allowlist):**
+
+- **<name>** → `<person_link>` (aliases by type: phone=<JSON>, email=<JSON>, handle=<JSON>; <name_aliases JSON if any>; collision: <basename | basename> when present)
+- …
+
+When you emit a bullet or table cell that mentions one of these names — directly, OR via any of the typed aliases listed (phone / email / handle / name variants observed in tool results) — render the bold-wrapped wikilink: `**[[<person_basename>]]**`. Preserve bold for callout-table parsability.
+
+When you emit a bullet that mentions a person NOT in this allowlist, call `cowork:resolve-person { input: <observed_name_or_handle>, prefer_type: <"email" | "phone" | "name" | "handle" inferred from data shape>, engagement_id: <engagement_id> }`. On `resolved: true`, emit `**[[<person_basename>]]**`; on `resolved: false`, emit plaintext `**<observed>**`. This rule binds the callout BODY only; literal display strings inside event titles, email subjects, message previews remain verbatim per the canonical `wikilink_people` rule.
+````
+
+When `inner_circle_resolved` is absent / empty, omit the preamble + bullet-list entirely. The ambient soft-prompt paragraph (per-emission resolver call) still applies so any kind can still emit wikilinks for ambient mentions.
 
 4. **Execute the gather.** Invoke whatever tools from `available_tools[]` best satisfy what_matters within the range/timezone. Compose the markdown callout per the output contract.
 

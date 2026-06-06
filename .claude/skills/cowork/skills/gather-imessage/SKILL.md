@@ -38,7 +38,17 @@ Surfaces inbound iMessage threads from the last `lookback_hours` where the user 
 3. **(Variant C path — preferred):** call `mcp__apple-mcp__messages` with `operation: "unread"` and `limit: 25`. The tool returns inbound unread items with `displayName` already resolved from Contacts. Filter to the lookback window (`window_days * 24h`); when `scope = "inner-circle"`, additionally intersect against `inner_circle` handles. For deeper per-contact context, optionally follow up with `operation: "read"`, `phoneNumber: <e164>`, `limit: 5` per inner-circle number and keep only items where the latest message has `is_from_me: false`.
 4. **(Variant A path — legacy):** call `mcp__Read_and_Send_iMessages__read_imessages` once per inner-circle number with `since_hours: <window_days * 24>`. Aggregate inbound messages where the user has NOT sent a reply after the latest inbound.
 5. **(Variant B path — legacy):** call `mcp__messages__tool_fuzzy_search_messages` with a single query bounded to `since_hours: <window_days * 24>`; filter results to inbound-only and de-duplicate by chat handle. When `scope = "inner-circle"`, additionally filter to inner-circle handles only.
-6. For each unanswered thread build: `**[Contact display]** - [HH:MM] - [first 80 chars of message, ellipsis-truncated]`. Prefer `displayName` from apple-mcp when present; fall back to the E.164 handle.
+6. **Resolve each thread → person link.** For each unanswered thread surfaced in Steps 3-5, call `cowork:resolve-person` with:
+   - `input: <displayName || handle>` (prefer apple-mcp's resolved `displayName`; fall back to the E.164 handle).
+   - `prefer_type: "phone"` when the handle is E.164 (leading `+`); else `prefer_type: "name"`.
+   - `engagement_id: <engagement_id>` (reserved; pass-through for slice E).
+
+   Capture the output's `person_link` (wikilink string on hit, `null` on miss) and `resolved` boolean fields. Empty/whitespace input returns the null shape; treat as miss.
+6.5. **Build per-thread bullet (uses resolution from Step 6).** For each unanswered thread:
+   - **On resolve hit:** emit `**[[<person_basename>]]** - [HH:MM] - [first 80 chars, ellipsis-truncated]`.
+   - **On resolve miss:** emit `**<displayName || handle>** - [HH:MM] - [first 80 chars, ellipsis-truncated]` (current plaintext behavior preserved).
+
+   The bold-wrap (`**...**`) is preserved in BOTH branches so the resulting callout-table parses uniformly upstream. Prefer `displayName` from apple-mcp when present; fall back to the E.164 handle.
 7. Compose the callout per Returns. Empty list -> empty-case callout.
 8. Return the assembled string.
 

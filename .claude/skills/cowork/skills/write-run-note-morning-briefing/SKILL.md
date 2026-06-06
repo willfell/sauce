@@ -38,6 +38,7 @@ Atomic-note writer for the morning-briefing run. Composes canonical frontmatter,
 
 1. Compose the path: `spice/cowork/daily/<YYYY>/<MM>-<MonthName>/<YYYY-MM-DD>/morning-briefing.md`, where `<YYYY>` and `<MM>` come from `date` and `<MonthName>` from `month_name`. Example for 2026-05-19 (Tuesday): `spice/cowork/daily/2026/05-May/2026-05-19/morning-briefing.md`.
 2. Compose `created_at` as the current ISO-8601 timestamp with offset (e.g. `2026-05-19T07:05:14-06:00`). Use the local TZ resolved by `cowork:date-context`.
+2a. **Inner-circle filter (computed upstream).** The morning-briefing orchestrator's Step 3e pre-resolves `engagement.inner_circle_people` via `cowork:resolve-person` + `composeInnerCircleAllowlist` (which unions each resolved entry's `aliases_by_type.phone` into the deterministic phone-filter list) and passes the resulting E.164 phone-list to `gather-imessage` via its `inner_circle` parameter (v0.89.1). NO resolution loop happens here. NO second `gather-imessage` call is made here. The `inner_circle_phones[]` list referenced by other steps is the same one passed into `gather-imessage` upstream. Unresolved-name handling (Notice emission + `inner_circle_unresolved:<name>` appended to the atomic note's `warnings:` array, v0.85.0 plumbing) is performed by the orchestrator's Step 3e, not here. If this skill is invoked outside the morning-briefing orchestrator (e.g., direct invocation), upstream pre-resolution must be performed by the caller before this skill runs.
 3. Compose frontmatter as YAML:
    ```yaml
    ---
