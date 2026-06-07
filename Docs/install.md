@@ -879,3 +879,46 @@ sauce update --bump-pins   # or: sauce update --force
 After the update, verify by checking that `.claude/skills/cowork/skills/gather-semantic-memory/SKILL.md` exists in the consumer vault and that `.claude/skills/cowork/morning-briefing/SKILL.md` references `cowork:gather-semantic-memory` in its pre-flight step 3b. On the next morning-briefing fire (with sc-bridge subscribed + SC plugin indexed + ≥1 month of accumulated memory above the `exclude_window: "last-30d"` cutoff), the Echoes callout should appear in the atomic-note body. If any of those prerequisites is missing, the callout silently omits — expected null-data behavior, not a regression.
 
 **Optional post-deploy validation (FLN-v87-1).** The `min_similarity: 0.45` threshold is a design-time guess. Review the first 3-5 morning briefings on each consumer vault: if Echoes callouts surface obviously-unrelated matches, the threshold should be raised; if relevant matches are consistently filtered out (callout omits even on days with clear historical analogues), the threshold should be lowered. A v0.87.1 PATCH can ship the empirically-validated threshold.
+
+## Upgrading from v0.93.2 to v0.93.3
+
+PATCH release. `brew upgrade sauce` distributes the new release. Existing consumers should then run `sauce update --bump-pins` from inside each vault to update `ranch/platform-subscription.json` (bumps `workshop_version` to `0.93.3`, `convenience` pin to `0.3.0`, `smart-connections-bridge` pin to `0.2.0`).
+
+**What v0.93.3 declares:**
+- **new-tab-default-page** (chrisgrieser/obsidian-new-tab-default-page) — declared by convenience 0.3.0 in `external_plugins[]` + pre-configured via `community_plugin_settings[]` (whatToOpen=daily-notes, mode=reading-mode, filePath="", compatibilityMode=false). Opens the daily note in reading mode on every new tab.
+- **smart-connections** (brianpetro/obsidian-smart-connections) — declared by smart-connections-bridge 0.2.0 in `external_plugins[]` with `required: true`. SC's own defaults are preserved; SC's first-run wizard handles model selection.
+
+### IMPORTANT: existing consumers must manually install both plugins
+
+`platform/install.js`'s `applyExternalPlugins` step is *warning-only* — it reads `.obsidian/community-plugins.json` and emits a Notice for any required dep that is not currently enabled, but it does NOT install or download the plugin. Actual plugin install lives in `platform/bootstrap.js`'s `phaseFetchPlugins`, which runs only during fresh-vault bootstrap (first install).
+
+**After `sauce update --bump-pins` on an existing consumer vault, expect these Notices:**
+
+```
+applyCommunityPluginData: convenience prereq plugins missing (new-tab-default-page); skipped
+smart-connections-bridge requires plugin smart-connections: (no reason). Install + enable in Settings → Community plugins.
+```
+
+These are the expected v0.93.3 contract. **To complete the upgrade:**
+
+1. Open Obsidian → Settings → Community plugins → Browse.
+2. Search for **"Default New Tab Page"**, click Install, then Enable.
+3. Search for **"Smart Connections"**, click Install, then Enable.
+4. Re-run `sauce update --bump-pins` (or `sauce update`). On this second pass, `applyCommunityPluginData` will scaffold `new-tab-default-page`'s `data.json` with the four-key payload (whatToOpen=daily-notes, mode=reading-mode, filePath="", compatibilityMode=false).
+5. Optional: in Settings → Smart Connections, accept the default model (bge-micro-v2) and wait 10-30 minutes for the first-run vector indexing to complete. Once indexed, the morning-briefing's Echoes callout will start surfacing pattern matches.
+
+### Why install isn't automated
+
+The bootstrap path (`phaseFetchPlugins`) already iterates every mechanism's `external_plugins[]` and calls `fetchPlugin(id, repo, vaultPath)` per id. The update path (`platform/install.js`) does not. Extending the update path to auto-install absent external plugins is queued as **v0.94.0** (recommended next cycle). Once shipped, this manual step will become a one-time historical artifact: existing consumers will run `sauce update` once after upgrading to v0.94.0 and both plugins will be installed automatically.
+
+### If a vault already has either plugin installed manually
+
+The install is idempotent. User-customized settings outside the four-key shape for new-tab-default-page (`whatToOpen`, `filePath`, `mode`, `compatibilityMode`) are preserved via `applyCommunityPluginData`'s shallow-merge. A `data.json.sauce-backup` is written the first time settings diverge. Smart Connections settings are never touched by sauce.
+
+### Echoes callout warming-up window
+
+The `cowork:gather-semantic-related` skill (used by morning-briefing) needs SC's `.smart-env/multi/*.ajson` vector index to surface "Echoes from your record." On a fresh SC install, the plugin builds this index in the background (typically 10-30 min after first run). Until the index is warm, the morning-briefing will emit `[!warning]+ Semantic index not available` instead of an Echoes block. This is expected behavior; subsequent runs will surface Echoes once SC has indexed.
+
+### Fresh consumer vaults (sauce bootstrap)
+
+If you're setting up a new vault via `sauce bootstrap` (not upgrading an existing one), both plugins are installed and configured automatically — `phaseFetchPlugins` reads every subscribed mechanism's `external_plugins[]` and fetches each from GitHub release assets. No manual step required.

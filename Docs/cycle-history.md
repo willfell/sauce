@@ -4,6 +4,42 @@ This file archives the per-cycle status snapshots that previously lived in `CLAU
 
 ---
 
+## v0.93.3 (closed 2026-06-07) — required-plugins PATCH (contract-redefined mid-execution)
+
+Workshop 0.93.2 → **0.93.3** (PATCH). Two mechanism-manifest deltas closing a documentation gap where two de-facto required Obsidian community plugins were not declared by the platform manifest. **Critical mid-execution finding**: the original design assumed `applyExternalPlugins` installs plugins, but it's warning-only — so for existing consumer vaults the v0.93.3 contract is *documentation-of-intent + warning Notice* rather than auto-install. Fresh-bootstrap consumers DO get auto-install via `phaseFetchPlugins`. Existing-consumer auto-install deferred to v0.94.0.
+
+**Gap 1 — Default New Tab Page.** `convenience` mechanism owned adjacent "what happens when you open a new tab" behavior (`alwaysOpenInNewTab`, `Cmd+T → daily-notes:goto-today`, `defaultViewMode: preview`) but did not declare `new-tab-default-page` (chrisgrieser/obsidian-new-tab-default-page). Verified in accuris-sauce as user's preferred new-tab behavior: open the active daily note in Reading Mode.
+
+**Gap 2 — Smart Connections.** `smart-connections-bridge` mechanism ships the Node CLI bridge (`sc-bridge.js`) that reads SC's `.smart-env/multi/*.ajson` vector index. Scheduled jobs and cowork skills (`gather-semantic-related`, `gather-semantic-memory`) depend on that index — but the bridge mechanism did not declare `smart-connections` (brianpetro/obsidian-smart-connections) as a prerequisite. **Observed in production:** headspace-sauce 2026-06-07 morning-briefing emitted `[!warning]+ Semantic index not available` — the orchestrator tried Echoes, but SC wasn't installed.
+
+**Fix.** convenience 0.2.4 → 0.3.0 adds `new-tab-default-page` to `external_plugins[]` + `community_plugin_settings[]` (whatToOpen=daily-notes, mode=reading-mode, filePath="", compatibilityMode=false). smart-connections-bridge 0.1.1 → 0.2.0 adds `{id: "smart-connections", required: true}` to `external_plugins[]`. No `community_plugin_settings[]` entry for SC — install-only; SC's own defaults are preserved.
+
+**Contract redefinition.** Mid-S2 dogfood revealed that `applyExternalPlugins` in `platform/install.js:2693` is explicitly *"a detection-and-surface-up helper, not a remediation step"* — it reads `.obsidian/community-plugins.json` and warns, but never calls `fetchPlugin`. Actual plugin install lives in `phaseFetchPlugins` (`platform/bootstrap.js:120`), invoked only during fresh-vault bootstrap. Consequence:
+- **Fresh bootstrap** (new consumer running `sauce bootstrap`) → both plugins auto-installed + configured.
+- **Existing consumers** (running `sauce update --bump-pins` after `brew upgrade sauce`) → both plugins NOT auto-installed; the install emits warnings + the user must manually install via Settings → Community plugins. After the manual install, `applyCommunityPluginData` (on the next install pass) scaffolds new-tab-default-page's `data.json`.
+
+The user accepted this scope reframe rather than pause-and-expand: v0.93.3 ships the manifest declarations + bootstrap-path install + the user-facing warning Notice path; v0.94.0 will extend `platform/install.js` to call `fetchPlugin` for any mechanism's `external_plugins[]` whose plugin dir is absent.
+
+**Why `required: true` for SC.** Forward-looking documentation. Today the flag is consumed only by `_externalPluginsSatisfied` (used by `applyVendoredThemes` / `applyAppearance` / `applyStyleSettings`) and by `applyExternalPlugins` to emit a more prominent Notice; the bridge currently invokes none of the gated helpers. If a future cycle adds vendored CSS or appearance settings to the bridge, the prereq gate is already in place. Audit clarity also benefits.
+
+**Versioning:** workshop 0.93.2 → 0.93.3 PATCH; convenience 0.2.4 → 0.3.0 MINOR; smart-connections-bridge 0.1.1 → 0.2.0 MINOR.
+
+**HC delta:** +3 cases in two existing harnesses (BS18 + BS19 in run-bootstrap.js; CP6 in run-helper-cases.js). BS18/BS19 use synthetic fixture mechanisms (BS14-style) and invoke `runBootstrap` directly, so they exercise the fresh-bootstrap install path (which DOES install plugins). CP6 exercises `applyCommunityPluginData`. **Gap caveat:** none of the three exercise the existing-vault `platform/install.js` path; that's a v0.94.0 TDD ask.
+
+Per-cycle VERSION-pin maintenance: HC-V0891/V0900/V0920/V0930/V0931-VERSION-* assertion values bumped "0.93.2" → "0.93.3" (landmine #16 in-cycle bump rule — not explicitly in S1.4 plan; surfaced post-S1.4 preflight; bundled into S1.4b commit).
+
+**Commits:** S0 baseline (f45c544); S1.1 tests (960e1ff); S1.2 convenience manifest (f2b4c1a); S1.3 sc-bridge manifest (34d26fc); S1.4 workshop + package bump (57be757); S1.4b per-cycle pin bumps (da305b7); S2 dogfood + ranch bumps (5dfd6a1); S3 cycle-close.
+
+**Status:**
+- Every consumer vault on first `sauce bootstrap` gets both plugins installed and configured (via `phaseFetchPlugins` reading `external_plugins[]`).
+- Existing consumer vaults on `sauce update --bump-pins` after `brew upgrade sauce` will see warning Notices for both missing plugins; user must install manually until v0.94.0 closes the gap.
+- Workshop self-install dogfood verified the warning-only path: exit 0 with two intentional warning Notices.
+- Echoes callout will surface in headspace + accuris morning-briefings once SC's first-run vector indexing completes (typically 10-30 min after install).
+
+See `Docs/plans/2026-06-07-v0.93.3-required-plugins-design.md`, `*-plan.md`, `*-result.md` (the result doc captures the contract redefinition + lessons).
+
+---
+
 ## v0.93.2 (closed 2026-06-07) — contract_version lockstep + fixture regeneration PATCH
 
 Workshop 0.93.1 → **0.93.2** (PATCH). Closes the `contract_version_mismatch:0.31.0:0.31.1` warning that fired on every `/cowork sync-scheduled-jobs` run after v0.93.1 shipped. Root cause: v0.93.1 was a PATCH that bumped cowork blueprint (helper code + SKILL.md prose changed) but DIDN'T bump `scheduled-job-contract.json`'s `contract_version` because the data file itself didn't change. The helper's strict-equality mismatch check at compose time (`contract.contract_version !== input.cowork_version`) doesn't distinguish "real data drift" (concern: hand-edited stale contract on a consumer) from "metadata-bump-without-data-change" (benign: PATCH bumped helper not data). Warning was correctly informational but noisy on every sync run.
