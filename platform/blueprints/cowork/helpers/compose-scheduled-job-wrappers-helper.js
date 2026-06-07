@@ -128,6 +128,20 @@ function _validateSubstitutionTokens(contract) {
 // composeMcpDispatchLines — kind-by-kind dispatch line from prefs.mcps
 // ---------------------------------------------------------------------------
 
+// FLN-v93-8 (v0.93.1): resolveServedBy accepts richer prefs shapes already canonical
+// in real consumer vaults. Headspace's chat.served_by is a list ["iMCP"] that carries
+// served_by_deferred + served_by_retired alongside; flattening to a string would lose
+// curated migration history. Adapter picks first non-`<text> — `-marker string, strips
+// surrounding quote chars, returns "" when nothing usable.
+function _resolveServedBy(rawServedBy) {
+    let s = rawServedBy;
+    if (Array.isArray(s)) {
+        s = s.find(x => typeof x === "string" && !/^.+\s+—\s+/.test(x)) || s[0] || "";
+    }
+    if (typeof s !== "string") s = String(s == null ? "" : s);
+    return s.replace(/^["']/, "").replace(/["']$/, "").trim();
+}
+
 function composeMcpDispatchLines(mcps) {
     if (!mcps || typeof mcps !== "object" || Array.isArray(mcps)) {
         return { line: NO_CONNECTED_MCPS_FALLBACK, warning: "no_connected_mcps_in_prefs" };
@@ -136,14 +150,10 @@ function composeMcpDispatchLines(mcps) {
     // Sort keys for deterministic ordering.
     for (const kind of Object.keys(mcps).sort()) {
         const m = mcps[kind];
-        if (
-            m &&
-            m.connected === true &&
-            typeof m.served_by === "string" &&
-            m.served_by !== ""
-        ) {
-            entries.push(`${kind} served-by ${m.served_by}`);
-        }
+        if (!m || m.connected !== true) continue;
+        const servedBy = _resolveServedBy(m.served_by);
+        if (servedBy === "") continue;
+        entries.push(`${kind} served-by ${servedBy}`);
     }
     if (entries.length === 0) {
         return { line: NO_CONNECTED_MCPS_FALLBACK, warning: "no_connected_mcps_in_prefs" };
@@ -231,11 +241,17 @@ function composeScheduledJobWrappers(input) {
     if (mcpDispatch.warning) warnings.add(mcpDispatch.warning);
 
     // 4c. Voice-notes excerpt (≤200 chars; newlines stripped).
+    // FLN-v93-8 (v0.93.1): fallback chain `notes → vibe_notes → voice_notes → pep_talk_style`
+    // — headspace user-preferences uses `vibe_notes` per v0.82.0 voice convention, not the
+    // helper's original `notes`-only assumption. Pick first non-empty string in priority order.
     let voice_notes_excerpt = "";
-    const rawNotes =
-        input.prefs.personality && typeof input.prefs.personality.notes === "string"
-            ? input.prefs.personality.notes
-            : "";
+    const personality = (input.prefs && input.prefs.personality) || {};
+    const NOTES_FIELDS = ["notes", "vibe_notes", "voice_notes", "pep_talk_style"];
+    let rawNotes = "";
+    for (const field of NOTES_FIELDS) {
+        const v = personality[field];
+        if (typeof v === "string" && v.trim() !== "") { rawNotes = v; break; }
+    }
     if (rawNotes === "") {
         warnings.add("empty_voice_notes");
     } else {

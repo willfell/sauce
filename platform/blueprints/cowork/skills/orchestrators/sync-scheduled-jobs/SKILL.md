@@ -79,7 +79,29 @@ The wrapper contract evolves with each cowork v-bump that touches the cron runti
 
 16. **Surface warnings.** If `warnings.length > 0`: emit a second Notice listing each warning token on its own line so the user sees the full taxonomy (e.g. `no_connected_mcps_in_prefs`, `engagement_label_fallback_used`, `contract_version_mismatch:<a>:<b>`).
 
-17. **Print next-step guidance.** `Open <output_path>, then paste each fenced block into the matching Cowork task in claude.ai. Do not change the schedule. Re-run /cowork sync-scheduled-jobs <engagement.id> after the next cowork MINOR bump.`
+17. **Print next-step guidance.** `Open <output_path>, then paste each fenced block into the matching Cowork task in claude.ai. Do not change the schedule. Re-run /cowork sync-scheduled-jobs <engagement.id> after the next cowork MINOR bump.` (If the Apply step below pushed updates via the scheduled-tasks MCP, the next-step note also reports the task-update summary instead.)
+
+## Apply
+
+(NEW in v0.93.1 — FLN-v93-9.) The Write step (10-14) emits a paste-ready markdown file as an audit artifact + fallback. The Apply step below auto-pushes the same wrapper bodies into claude.ai's scheduled tasks via the Cowork scheduled-tasks MCP when reachable in this session — eliminating the manual paste workflow on every re-run.
+
+18. **Detect the scheduled-tasks MCP.** Check the available tools for an `update_scheduled_task({ taskId, prompt })` callable (typical namespaces: `mcp__claude_ai_Cowork__update_scheduled_task` or whatever surface claude.ai exposes in this session — discover via tool-search). Also look for `list_scheduled_tasks` / equivalent read-side. If neither is reachable, append warning `mcp-unreachable` to `warnings`, skip steps 19-22, and surface paste-fallback guidance per step 17 unchanged.
+
+19. **Parse the wrapper file into per-cadence fenced blocks.** Re-read `output_path` (or use the in-memory `file_md` from the Compose step). For each cadence in `contract.cadence_order`, extract the substituted text inside the 4-backtick fenced code block under its `## N — cowork-<cadence>-<engagement_id> (...)` heading. This is the canonical `computed_prompt` for that cadence.
+
+20. **List + diff current tasks.** Call `list_scheduled_tasks` (or equivalent). For each cadence in `contract.cadence_order`:
+   - Derive `taskId = "cowork-<cadence>-<engagement_id>"` (e.g. `cowork-morning-briefing-headspace`).
+   - Find the matching task in the list. If absent: append warning `mcp-task-absent:<taskId>` and skip — the user must create the task manually in claude.ai's Cowork UI first (cycle close note: v0.93.1 does NOT auto-create; v0.93.2+ may).
+   - Fetch current task's `prompt` field. Compare to `computed_prompt` exactly. If equal: this task is current; report `unchanged`. If different: proceed to step 21.
+
+21. **Idempotent update.** For each cadence whose current prompt differs from `computed_prompt`: call `update_scheduled_task({ taskId, prompt: computed_prompt })`. On failure: append warning `mcp-update-failed:<taskId>:<reason>` and continue with the remaining cadences (don't abort the whole sync on a single task's failure). On success: report `updated`.
+
+22. **Strict rules.** Hard non-negotiables for the MCP push:
+   - **NEVER touch `cron`/`schedule`/`description` fields.** Only `prompt`. The contract's `schedule_hint` is documentation of the canonical pattern, NOT ground truth. The user's live schedule on the task IS the ground truth — they may have deliberately tuned crons (e.g. morning 06:30 instead of contract hint 08:00, weekly Friday 04:00 instead of 17:30). Preserve verbatim.
+   - **NEVER touch tasks outside the 5 canonical cadences.** If `list_scheduled_tasks` returns tasks like `cowork-debt-scoreboard-<engagement>`, `cowork-capture-tick-<engagement>`, `cowork-synthesize-day-<engagement>`, `cowork-synthesize-week-<engagement>`, etc. — those are out-of-scope for this contract. Skip silently. Append informational warning `mcp-listed-out-of-scope-task:<taskId>` per task seen (helps user spot orphaned tasks).
+   - **Idempotent on re-run.** A second invocation finds all 5 tasks already matching `computed_prompt` and reports `5 unchanged / 0 updated / 0 absent` — zero side effects.
+
+23. **Final Notice (replaces step 17 when Apply ran).** Emit `cowork:sync-scheduled-jobs complete -- <engagement.label> @ sauce <sauce_version>. MCP push: <N> updated / <M> unchanged / <Z> absent. Audit file: <output_path>. <X> out-of-scope tasks left untouched.` If any `mcp-update-failed:*` warning surfaced, append `Re-run when you've checked the failing tasks in claude.ai's Cowork UI` as a follow-up line.
 
 ## Failure modes
 
@@ -102,6 +124,13 @@ Orchestrator-side:
 - `failed:filesystem:write-permission` — output write or backup write failed.
 - `failed:verify:undersized:<bytes>` — written file is < 500 bytes (compose miscarriage).
 - `failed:verify:frontmatter-parse` — written file's frontmatter block doesn't parse.
+
+Apply-step warnings (NEW v0.93.1 — FLN-v93-9 MCP push; all non-fatal — file write succeeded so paste workflow remains as fallback):
+
+- `mcp-unreachable` — scheduled-tasks MCP not present in this session's tool surface; Apply step skipped entirely.
+- `mcp-task-absent:<taskId>` — a canonical-cadence task ID (e.g. `cowork-morning-briefing-headspace`) isn't in `list_scheduled_tasks` output; user must create the task in claude.ai's Cowork UI first (v0.93.1 does NOT auto-create).
+- `mcp-update-failed:<taskId>:<reason>` — `update_scheduled_task` call failed for a specific cadence; remaining cadences still attempted.
+- `mcp-listed-out-of-scope-task:<taskId>` — informational; the user has scheduled tasks outside the 5-cadence contract (e.g. `cowork-debt-scoreboard-headspace`); skipped silently but surfaced so user can spot orphans.
 
 ## Harness testing
 

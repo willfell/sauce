@@ -4,6 +4,30 @@ This file archives the per-cycle status snapshots that previously lived in `CLAU
 
 ---
 
+## v0.93.1 (closed 2026-06-06) — FLN-v93-8 helper schema adapters + FLN-v93-9 scheduled-tasks MCP push PATCH
+
+Workshop 0.93.0 → **0.93.1** (PATCH). Two coordinated fixes bundled into a single PATCH cycle (same day as v0.93.0):
+
+**FLN-v93-8 — helper schema adapters.** `composeMcpDispatchLines` + `composeScheduledJobWrappers` now accept richer prefs shapes already canonical in real consumer vaults. (a) `prefs.mcps[kind].served_by` can be a YAML list (e.g. headspace's `chat.served_by: ["iMCP"]` carries `served_by_deferred: ["whatsapp — ..."]` + `served_by_retired: ["apple-mcp — ..."]` alongside) — NEW `_resolveServedBy()` adapter picks first non-`<text> — `-marker string and strips surrounding quote chars. (b) `prefs.personality.notes` fallback chain extends to `vibe_notes → voice_notes → pep_talk_style` when `notes` absent (headspace uses `vibe_notes` per v0.82.0 voice convention). Closes the AskUserQuestion drift prompt the orchestrator surfaced on the first live `/cowork sync-scheduled-jobs headspace` run.
+
+**FLN-v93-9 — bake claude.ai scheduled-tasks MCP push into orchestrator.** `cowork:sync-scheduled-jobs/SKILL.md` gains a NEW `## Apply` section (between `## Done` and `## Failure modes`) with 6 numbered steps (18-23) that auto-push wrapper bodies into claude.ai's scheduled tasks via the Cowork scheduled-tasks MCP when reachable: (18) detect `update_scheduled_task({taskId, prompt})` callable; (19) parse the wrapper file into per-cadence fenced blocks; (20) list current tasks + diff against computed; (21) idempotently update only the cadences whose prompts differ; (22) hard rules — NEVER touch `cron`/`schedule` (user's live schedules diverge from contract `schedule_hint` documentation; ground truth lives on the task — preserve verbatim); NEVER touch tasks outside the 5-cadence pattern (out-of-scope tasks like `cowork-debt-scoreboard-*`, `cowork-capture-tick-*`, `cowork-synthesize-day/week-*` skipped silently with informational warning); (23) final Notice reports `X updated / Y unchanged / Z absent`. File write preserved as audit artifact + paste fallback. 4 new failure tokens in `## Failure modes`: `mcp-unreachable` (non-fatal — fall back to paste workflow); `mcp-task-absent:<taskId>` (user must create the task in claude.ai first; v0.93.1 does NOT auto-create); `mcp-update-failed:<taskId>:<reason>` (per-task; remaining cadences continue); `mcp-listed-out-of-scope-task:<taskId>` (informational, helps user spot orphans). Eliminates the manual paste workflow on every re-run. Surfaced 2026-06-06 when the user prompted the in-vault orchestrator with "can you utilize the claude cowork mcp to update these scheduled jobs idempotently?" — LLM autonomously discovered the MCP tool and executed the pattern correctly on first try; v0.93.1 codifies the workflow into orchestrator prose so every future run does it without prompting.
+
+**HC sub-asserts added (~18):** HC-V0931-ADAPTER (4 — array-form served_by + quote-strip + deferred-fallback + empty-array omit), HC-V0931-NOTES (4 — notes → vibe_notes → voice_notes → pep_talk_style fallback chain + empty_voice_notes warning when all absent), HC-V0931-APPLY (6 — `## Apply` header + update_scheduled_task tool reference + schedule-preservation rule + out-of-scope-skip rule + idempotence rule + 4 new failure tokens enumerated), HC-V0931-VERSION (4 — pin lockstep for 0.31.1 / 0.93.1). Existing 12 byte-identical fixtures all pass unchanged — helper changes are additive defensive parsing, output shape preserved.
+
+cowork@0.31.0 → 0.31.1 PATCH (SKILL.md prose addition + helper schema adapters; no new files); workshop 0.93.0 → 0.93.1 PATCH; mechanism count unchanged at 17; contract_version unchanged at 0.31.0 (no schema or wrapper_template change — substitution INPUT became more flexible but OUTPUT is the same).
+
+**Smoke results (v0.93.1 close):**
+- helper-cases: **2016 passed / 0 failed** (delta +18 from v0.93.0's 1998)
+- cowork-smoke: **923 passed / 0 failed** (unchanged)
+- claude-surface: **209 passed / 0 failed** (unchanged)
+- Workshop dogfood install: clean exit 0
+
+**Live verification owed at next /cowork sync-scheduled-jobs run:**
+1. Headspace re-run: orchestrator finds all 5 tasks already match (you just pasted v0.93.0 wrappers via the MCP); reports `5 unchanged / 0 updated / 0 absent`; idempotent no-op. Adapter eliminates the AskUserQuestion drift prompt.
+2. Accuris first run via the new Apply path: tasks update via MCP (no manual paste needed); schedule fields preserved.
+
+---
+
 ## v0.93.0 (closed 2026-06-06) — cowork:sync-scheduled-jobs orchestrator + compose-scheduled-job-wrappers helper + scheduled-job-contract.json MINOR
 
 Workshop 0.92.0 → **0.93.0** (MINOR). Closes the Cowork scheduled-job wrapper drift problem: claude.ai's scheduled-task UI is the cron runtime for the 5 cowork cadences, with prompt body living in claude.ai's UI outside the sauce vault entirely. After each v-bump that touches the cron contract (v0.91.1 path / v0.91.2 frontmatter / v0.91.3 connectivity / v0.92.0 body-shape), the user had to remember to re-paste 5 wrapper bodies into claude.ai per engagement. v0.93.0 ships a user-invocable orchestrator that emits paste-ready wrapper bodies for an engagement at `spice/cowork/scheduled-job-wrappers/<engagement_id>.md`, fully aligned with current sauce + cowork versions + engagement's actual `prefs.mcps` state.
