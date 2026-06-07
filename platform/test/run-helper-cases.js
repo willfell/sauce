@@ -3594,6 +3594,48 @@ async function caseCP5PathTraversalRejected() {
   }
 }
 
+async function caseCP6NewTabDefaultPageFreshWrite() {
+  console.log("\n--- Case CP6: applyCommunityPluginData writes new-tab-default-page data.json ---");
+  const scratch = await fsp.mkdtemp(path.join(os.tmpdir(), "beacon-caseCP6-"));
+  try {
+    const manifest = fixtureHotkeysManifest({
+      external_plugins: [{ id: "new-tab-default-page" }],
+      community_plugin_settings: [
+        {
+          id: "new-tab-default-page",
+          settings: {
+            whatToOpen: "daily-notes",
+            filePath: "",
+            mode: "reading-mode",
+            compatibilityMode: false,
+          },
+        },
+      ],
+    });
+    await scaffoldVault(scratch, {
+      templaterData: TEMPLATER_DEFAULT,
+      slashCommanderData: SC_DEFAULT,
+      manifest,
+    });
+    // Seed plugin dir + community-plugins.json so the prereq gate passes.
+    const ntdpDir = path.join(scratch, ".obsidian/plugins/new-tab-default-page");
+    await fsp.mkdir(ntdpDir, { recursive: true });
+    const cpPath = path.join(scratch, ".obsidian/community-plugins.json");
+    await fsp.writeFile(cpPath, JSON.stringify(["new-tab-default-page"]), "utf8");
+    const result = await runHarness(scratch);
+    assertTrue("CP6: install ran", result !== null);
+    const dataPath = path.join(scratch, ".obsidian/plugins/new-tab-default-page/data.json");
+    assertTrue("CP6: data.json written", fs.existsSync(dataPath));
+    const data = await readJson(dataPath);
+    assertEq("CP6: whatToOpen=daily-notes", data.whatToOpen, "daily-notes");
+    assertEq("CP6: mode=reading-mode", data.mode, "reading-mode");
+    assertEq("CP6: filePath empty", data.filePath, "");
+    assertEq("CP6: compatibilityMode false", data.compatibilityMode, false);
+  } finally {
+    await fsp.rm(scratch, { recursive: true, force: true });
+  }
+}
+
 // -----------------------------------------------------------------------------
 // SF1-SF5 — scaffoldFoundationalPluginData (v0.26.0 P0-2)
 // Materializes Templater data.json defaults at install time when the plugin
@@ -8219,6 +8261,7 @@ async function caseHCV0891Versions() {
   await caseCP3ManifestWinsShallowMerge();
   await caseCP4MalformedJsonGuard();
   await caseCP5PathTraversalRejected();
+  await caseCP6NewTabDefaultPageFreshWrite();
 
   // v0.26.0 first-run robustness — TDD-first cases for scaffoldFoundationalPluginData.
   await caseSF1AbsentDataJsonScaffolds();

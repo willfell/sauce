@@ -648,6 +648,116 @@ async function caseBS17NoDuplicateWhenAlreadyPresent() {
     assertTrue(occurrences === 1, label + ": convenience appears exactly once (" + occurrences + ")");
 }
 
+async function caseBS18NewTabDefaultPageFromMechanism() {
+    const label = "BS18 mechanism with external_plugins[new-tab-default-page] installs the plugin";
+    const indexMod = require("../bootstrap-lib/community-plugins-index.js");
+    if (typeof indexMod._clearCache === "function") indexMod._clearCache();
+    await withTempVault({}, async (vaultPath) => {
+        const sibling = fs.mkdtempSync(path.join(os.tmpdir(), "beacon-bs18-fixture-"));
+        try {
+            fs.mkdirSync(path.join(sibling, "platform/mechanisms/test-ntdp"), { recursive: true });
+            fs.writeFileSync(path.join(sibling, "platform/manifest.json"),
+                JSON.stringify({
+                    workshop_version: "0.93.3",
+                    foundational_plugins: [],
+                    mechanisms: [
+                        { name: "test-ntdp", version: "0.1.0", path: "mechanisms/test-ntdp" }
+                    ],
+                    blueprints: []
+                }, null, 2));
+            fs.writeFileSync(path.join(sibling, "platform/mechanisms/test-ntdp/manifest.json"),
+                JSON.stringify({
+                    name: "test-ntdp",
+                    version: "0.1.0",
+                    kind: "mechanism",
+                    external_plugins: [{ id: "new-tab-default-page" }],
+                    files: []
+                }, null, 2));
+            seedConfig(vaultPath, {
+                config: { workshop_relative_path: path.relative(vaultPath, sibling) },
+                subscription: {
+                    workshop_version: "0.93.3",
+                    mechanisms: [{ name: "test-ntdp", version: "0.1.0" }],
+                    blueprints: []
+                }
+            });
+            const indexBody = JSON.stringify([
+                { id: "new-tab-default-page", name: "Default New Tab Page", repo: "chrisgrieser/obsidian-new-tab-default-page" }
+            ]);
+            const routes = Object.assign({},
+                { [MOCK_INDEX_URL]: { body: indexBody } },
+                pluginRoutes("new-tab-default-page", "chrisgrieser/obsidian-new-tab-default-page", { skipStyles: true })
+            );
+            const bootstrap = require("../bootstrap.js");
+            await withMockedHttps(routes, async () => {
+                await bootstrap.runBootstrap({ vaultPath, nonInteractive: true, skipInstaller: true });
+            });
+            const dir = path.join(vaultPath, ".obsidian/plugins/new-tab-default-page");
+            assertTrue(fs.existsSync(path.join(dir, "manifest.json")), label + ": manifest.json present");
+            assertTrue(fs.existsSync(path.join(dir, "main.js")), label + ": main.js present");
+            const cp = readJson(path.join(vaultPath, ".obsidian/community-plugins.json"));
+            assertTrue(cp.includes("new-tab-default-page"), label + ": community-plugins.json contains id");
+        } finally {
+            fs.rmSync(sibling, { recursive: true, force: true });
+        }
+    });
+}
+
+async function caseBS19SmartConnectionsFromMechanism() {
+    const label = "BS19 mechanism with external_plugins[smart-connections required] installs the plugin";
+    const indexMod = require("../bootstrap-lib/community-plugins-index.js");
+    if (typeof indexMod._clearCache === "function") indexMod._clearCache();
+    await withTempVault({}, async (vaultPath) => {
+        const sibling = fs.mkdtempSync(path.join(os.tmpdir(), "beacon-bs19-fixture-"));
+        try {
+            fs.mkdirSync(path.join(sibling, "platform/mechanisms/test-sc"), { recursive: true });
+            fs.writeFileSync(path.join(sibling, "platform/manifest.json"),
+                JSON.stringify({
+                    workshop_version: "0.93.3",
+                    foundational_plugins: [],
+                    mechanisms: [
+                        { name: "test-sc", version: "0.1.0", path: "mechanisms/test-sc" }
+                    ],
+                    blueprints: []
+                }, null, 2));
+            fs.writeFileSync(path.join(sibling, "platform/mechanisms/test-sc/manifest.json"),
+                JSON.stringify({
+                    name: "test-sc",
+                    version: "0.1.0",
+                    kind: "mechanism",
+                    external_plugins: [{ id: "smart-connections", required: true }],
+                    files: []
+                }, null, 2));
+            seedConfig(vaultPath, {
+                config: { workshop_relative_path: path.relative(vaultPath, sibling) },
+                subscription: {
+                    workshop_version: "0.93.3",
+                    mechanisms: [{ name: "test-sc", version: "0.1.0" }],
+                    blueprints: []
+                }
+            });
+            const indexBody = JSON.stringify([
+                { id: "smart-connections", name: "Smart Connections", repo: "brianpetro/obsidian-smart-connections" }
+            ]);
+            const routes = Object.assign({},
+                { [MOCK_INDEX_URL]: { body: indexBody } },
+                pluginRoutes("smart-connections", "brianpetro/obsidian-smart-connections", { skipStyles: true })
+            );
+            const bootstrap = require("../bootstrap.js");
+            await withMockedHttps(routes, async () => {
+                await bootstrap.runBootstrap({ vaultPath, nonInteractive: true, skipInstaller: true });
+            });
+            const dir = path.join(vaultPath, ".obsidian/plugins/smart-connections");
+            assertTrue(fs.existsSync(path.join(dir, "manifest.json")), label + ": manifest.json present");
+            assertTrue(fs.existsSync(path.join(dir, "main.js")), label + ": main.js present");
+            const cp = readJson(path.join(vaultPath, ".obsidian/community-plugins.json"));
+            assertTrue(cp.includes("smart-connections"), label + ": community-plugins.json contains id");
+        } finally {
+            fs.rmSync(sibling, { recursive: true, force: true });
+        }
+    });
+}
+
 // BS13: phaseWriteActivation atomic write + backup-on-overwrite
 async function caseBS13ActivationAtomicAndBackup() {
     const label = "BS13 phaseWriteActivation atomic write + backup-on-overwrite";
@@ -691,7 +801,10 @@ const cases = {
         // v0.26.1 P1-3c: wizard auto-add convenience helper
         caseBS15AutoAddsConvenienceForDvBlueprint,
         caseBS16NoAddForNonDvBlueprint,
-        caseBS17NoDuplicateWhenAlreadyPresent
+        caseBS17NoDuplicateWhenAlreadyPresent,
+        // v0.93.3 — convenience installs new-tab-default-page; sc-bridge installs smart-connections
+        caseBS18NewTabDefaultPageFromMechanism,
+        caseBS19SmartConnectionsFromMechanism
     ]
 };
 
