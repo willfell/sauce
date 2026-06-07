@@ -8,8 +8,18 @@
   },
   "prefs": {
     "mcps": {
-      "chat":   { "kind": "chat",   "served_by": "apple-mcp-uuid", "connected": true, "callout_type": "info" },
-      "github": { "kind": "github", "served_by": "github",         "connected": true, "callout_type": "note" }
+      "chat": {
+        "kind": "chat",
+        "served_by": "apple-mcp-uuid",
+        "connected": true,
+        "callout_type": "info"
+      },
+      "github": {
+        "kind": "github",
+        "served_by": "github",
+        "connected": true,
+        "callout_type": "note"
+      }
     },
     "personality": {
       "notes": "Tests cowork_version skew against contract_version.",
@@ -20,9 +30,11 @@
     }
   },
   "engagement_type_data": {
-    "scheduled_jobs": { "disabled_cadences": [] }
+    "scheduled_jobs": {
+      "disabled_cadences": []
+    }
   },
-  "sauce_version": "0.93.0",
+  "sauce_version": "0.93.2",
   "cowork_version": "0.30.0",
   "generated_at": "2026-06-05T14:43:33-06:00",
   "generated_by": "cowork:sync-scheduled-jobs@1.0.0"

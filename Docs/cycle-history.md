@@ -4,6 +4,36 @@ This file archives the per-cycle status snapshots that previously lived in `CLAU
 
 ---
 
+## v0.93.2 (closed 2026-06-07) — contract_version lockstep + fixture regeneration PATCH
+
+Workshop 0.93.1 → **0.93.2** (PATCH). Closes the `contract_version_mismatch:0.31.0:0.31.1` warning that fired on every `/cowork sync-scheduled-jobs` run after v0.93.1 shipped. Root cause: v0.93.1 was a PATCH that bumped cowork blueprint (helper code + SKILL.md prose changed) but DIDN'T bump `scheduled-job-contract.json`'s `contract_version` because the data file itself didn't change. The helper's strict-equality mismatch check at compose time (`contract.contract_version !== input.cowork_version`) doesn't distinguish "real data drift" (concern: hand-edited stale contract on a consumer) from "metadata-bump-without-data-change" (benign: PATCH bumped helper not data). Warning was correctly informational but noisy on every sync run.
+
+**Fix.** Establish the convention: `contract_version` ALWAYS mirrors cowork blueprint version exactly, even when the contract data is unchanged. Retroactively bump:
+- `scheduled-job-contract.json` contract_version: 0.31.0 → 0.31.2
+- cowork manifest: 0.31.1 → 0.31.2
+- platform manifest workshop_version: 0.93.1 → 0.93.2
+- platform manifest blueprints[].cowork.version: 0.31.1 → 0.31.2
+- package.json: 0.93.1 → 0.93.2
+- workshop self-subscription pins: workshop 0.93.1 → 0.93.2, cowork 0.31.1 → 0.31.2
+- 18+ HC pin assertions in run-helper-cases.js + V0750-VERSION in run-cowork-smoke.js
+- HC-V0930-CONTRACT-A2 contract_version assertion: 0.31.0 → 0.31.2
+
+**Fixture regeneration.** 7 of 8 byte-identical fixtures had their input.json's `cowork_version: "0.31.0"` and `sauce_version: "0.93.0"` bumped to the new versions; all 8 expected-file.md files regenerated via the helper to capture the bumped contract_version + sauce_version strings in frontmatter + preamble. case-edge-contract-version-mismatch fixture retains its deliberate mismatch (inline contract@0.30.0 vs cowork_version 0.31.2 → expected warning `contract_version_mismatch:0.31.2:0.30.0`). All 12 fixtures pass byte-identically post-regen.
+
+**Convention codified.** Future cycles MUST bump contract_version in lockstep with cowork blueprint version, regardless of whether contract data changed. Documented in design §4.6 + cycle-history (this entry) + the strict-equality check at line 230 of compose-scheduled-job-wrappers-helper.js is intentional. Catches REAL drift (e.g., consumer's hand-edited contract; pantry/ stale clone) by ensuring perfect version mirror.
+
+No helper code change. No new HC sub-asserts. cowork@0.31.1 → 0.31.2 PATCH; workshop 0.93.1 → 0.93.2 PATCH; contract_version 0.31.0 → 0.31.2.
+
+**Smoke results (v0.93.2 close):**
+- helper-cases: **2016 passed / 0 failed** (unchanged from v0.93.1)
+- cowork-smoke: **923 passed / 0 failed** (unchanged)
+- claude-surface: **209 passed / 0 failed** (unchanged)
+- Workshop dogfood install: clean exit 0
+
+**FLN-v93-12 (queued)** — Future-cycle candidate: loosen the helper's mismatch check to MAJOR.MINOR equality (e.g., `contract_version` 0.31.x matches cowork 0.31.y regardless of PATCH) so the warning only fires on legitimate cross-MINOR drift. Trade-off: catches REAL drift at coarser grain. v0.93.2 retains strict equality + lockstep convention as the simpler solution; revisit if the lockstep convention becomes burdensome (e.g., many same-day PATCHes that don't touch data).
+
+---
+
 ## v0.93.1 (closed 2026-06-06) — FLN-v93-8 helper schema adapters + FLN-v93-9 scheduled-tasks MCP push PATCH
 
 Workshop 0.93.0 → **0.93.1** (PATCH). Two coordinated fixes bundled into a single PATCH cycle (same day as v0.93.0):
