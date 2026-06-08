@@ -14,6 +14,7 @@ outputs:
   allowlist: object
   render_aspects: object
   cadence_order: object
+  tripwire_aspects: array
   kind_titles: object
   effective_hard_rules: array
   dispatch_mode: string
@@ -25,7 +26,7 @@ tags: [cowork, sub-skill, pre-flight, dispatch, knob-composition]
 
 Single pre-flight entry point for every atomic-note orchestrator (morning-briefing / midday-tripwire / eod-review / weekly-review / monthly-review). Replaces the ~100 lines of inline `3a memory → 3b read-prefs → 3c dispatch-plan → 3d microscopes → 3e inner-circle` pseudocode that v0.94.x carried byte-identical across all 5 orchestrators.
 
-The 11-key result tree returned by this sub-skill is the orchestrator's sole source of truth for Gather + Write. Knob composition (engagement-type defaults ⨁ engagement.overrides ⨁ ad-hoc runtime overrides) happens HERE, once, not scattered through gather/write skills.
+The 12-key result tree returned by this sub-skill is the orchestrator's sole source of truth for Gather + Write. Knob composition (engagement-type defaults ⨁ engagement.overrides ⨁ ad-hoc runtime overrides) happens HERE, once, not scattered through gather/write skills.
 
 ## Inputs
 
@@ -48,7 +49,7 @@ The 11-key result tree returned by this sub-skill is the orchestrator's sole sou
 
 4. **Read engagement + bundle.** Invoke `dispatchPlanHelper.readEngagement({ engagement_id, vault_root })` → `{ engagement, bundle, overrides, status, reason }`. If `status !== "ok"`, set `dispatch_mode = "legacy"` and capture `reason` for the fallback Notice; downstream steps still execute against the available data.
 
-5. **Compose final preferences.** Invoke `dispatchPlanHelper.composeFinalPreferences({ bundle, overrides, ad_hoc_prefs: null })` → `{ render_aspects, cadence_order, voice, microscopes_registry, tripwire_aspects }`. This is the FINAL knob layer — Gather + Write read from here, not from the engagement-type JSON directly. Composition order: `bundle` (defaults) ⨁ `overrides` (per-key wins on objects, REPLACES on arrays) ⨁ `ad_hoc_prefs` (reserved; null today).
+5. **Compose final preferences.** Invoke `dispatchPlanHelper.composeFinalPreferences({ bundle, overrides, ad_hoc_prefs: null })` → `{ render_aspects, cadence_order, voice, microscopes_registry, tripwire_aspects }`. This is the FINAL knob layer — Gather + Write read from here, not from the engagement-type JSON directly. Composition order: `bundle` (defaults) ⨁ `overrides` (per-key wins on objects, REPLACES on arrays) ⨁ `ad_hoc_prefs` (reserved; null today). `final.tripwire_aspects` propagates to the 12-key return for midday-tripwire's early-exit + per-aspect dispatch.
 
 6. **Load kind titles.** Invoke `dispatchPlanHelper.loadKindTitles({ vault_root })` → `kind_titles` map (kind → display title). The data file at `spice/cowork/data/kind-titles.json` v1.0.0 is canonical; per-kind microscope `## Output shape` directives (`<! title: My Custom Title !>`) override the data-file value for THAT engagement's gather.
 
@@ -64,7 +65,7 @@ The 11-key result tree returned by this sub-skill is the orchestrator's sole sou
 
 12. **Resolve inner-circle allowlist.** When `engagement.inner_circle_people` is a non-empty array AND `final.render_aspects.inner_circle_imessage !== "skip"`, READ `.claude/skills/cowork/skills/resolve-person/SKILL.md` in full and follow its `## Steps` section per name. Then invoke `composeInnerCircleAllowlist(resolverOutputs)` from `helpers/resolve-inner-circle-helper.js` → `allowlist = { resolved, unresolved, phone_filter_list }`. When the gate is closed (no inner_circle_people or `inner_circle_imessage: skip`), return `allowlist = { resolved: [], unresolved: [], phone_filter_list: [] }`.
 
-13. **Return the 11-key contract.** Per the `## Returns` section below. Every key MUST be present even when null/empty — defensive contract. Atomic-note orchestrators consume the result tree as their single source of truth for Gather + Write.
+13. **Return the 12-key contract.** Per the `## Returns` section below. Every key MUST be present even when null/empty — defensive contract. Atomic-note orchestrators consume the result tree as their single source of truth for Gather + Write.
 
 ## Returns
 
@@ -77,6 +78,7 @@ The 11-key result tree returned by this sub-skill is the orchestrator's sole sou
   allowlist:       {...},          // inner-circle resolver { resolved, unresolved, phone_filter_list }
   render_aspects:  {...},          // FINAL composed (bundle ⨁ overrides ⨁ ad_hoc)
   cadence_order:   {...},          // FINAL composed per-cadence (the orchestrator only needs cadence_order[cadence])
+  tripwire_aspects: [...],         // FINAL composed (overrides REPLACES bundle's array); midday-tripwire's early-exit gate + per-aspect dispatcher
   kind_titles:     {...},          // kind_name → title (data file v1.0.0, falls back to CANONICAL_TITLES const)
   effective_hard_rules: [...],     // string[] — pass-through from read-user-preferences; consumed by gather-from-served-by `## Hard rules` block
   dispatch_mode:   "prefs" | "legacy",  // legacy when prefs unreadable OR engagement_not_found OR bundle_missing

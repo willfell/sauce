@@ -55,150 +55,31 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
    Invoke sub-skill `cowork:read-memory` with input `{ engagement_id, tier: "tick", window: "today", limit_ticks: 4 }`. Capture `output_today`. The sub-skill returns null-data when no memory file exists — preserve as `output_today = null` for the body-composition step.
 
    This step is PURE (no MCP calls, no writes). NEW in v0.86.0.
-3b. READ `.claude/skills/cowork/skills/read-user-preferences/SKILL.md` in full and follow
-   its `## Steps` section with `{}`. Capture as `prefs_result = { prefs, status, reason }`. Capture `prefs = prefs_result.prefs` (may be null when `status != "ok"`). Do NOT abort on `status != "ok"`; continue with legacy fallback (see step 3c).
-3c. **Plan dispatch.** Determine dispatch mode and build the priority-ordered dispatch plan.
+3b. **Plan dispatch.** (Replaces v0.94.x's separate `3b read-prefs + 3c dispatch + 3d inner-circle` steps with a single sub-skill READ.)
 
-   **Connectivity signal authority (v0.91.3):** trust `prefs.mcps[<kind>].served_by` + `prefs.mcps[<kind>].connected` for namespace + connectivity. DO NOT trust `vault-config.mcp_map` for connectivity — that field is bootstrap-time-only, stale-prone. Cross-reference `prefs.mcps[<kind>].served_by` with `reachable_namespaces` for final dispatch action.
+   Capture `reachable_namespaces` from the agent's tool list (walk every `mcp__<ns>__<tool>` name; add `<ns>` to the set).
 
-   Compute `dispatch_mode`:
+   READ `.claude/skills/cowork/skills/plan-dispatch/SKILL.md` in full and follow its `## Steps` section with `{ engagement_id, cadence: "midday", reachable_namespaces, vault_root: <vault-root-from-routing> }`. Capture the 12-key result as `plan`.
 
-   ```
-   dispatch_mode = (prefs_result.status === "ok") ? "prefs" : "legacy"
-   ```
+   If `plan.dispatch_mode == "legacy"`, emit Obsidian Notice: `cowork:midday-tripwire -- PREFS UNAVAILABLE (<plan.prefs_status>); falling back to legacy mode. Chat and any custom kinds will NOT fire in legacy mode; inner-circle wikilink emission will NOT occur. Investigate user-preferences.md if this is unexpected.` The legacy per-aspect gather sequence (steps 5-7 below) fires unchanged.
 
-   When `dispatch_mode == "legacy"`:
-   - Emit Obsidian Notice: `cowork:midday-tripwire -- PREFS UNAVAILABLE (<status>: <reason>); falling back to legacy mode. Chat and any custom kinds will NOT fire in legacy mode; inner-circle wikilink emission will NOT occur. Investigate user-preferences.md if this is unexpected.`.
-   - Skip the remainder of step 3c. The legacy gather sequence fires unchanged.
-
-   When `dispatch_mode == "prefs"`:
-
-   1. From `check-vault-routing`'s prior result (pre-flight step 1), capture `reachable_namespaces` as the set of MCP namespace segments the agent has tools for in this session. Extract by walking your tool list: for every `mcp__<ns>__<tool>` name, add `<ns>` to the set.
-
-   2. Read `mcp-skill-map.json` from `spice/cowork/context/mcp-skill-map.json` via the Read tool. Capture as `mcp_skill_map`. (The map is materialized into every consumer vault as a `files[]` entry.)
-
-   2b. **Read per-kind microscope contracts.** For each `kind_name` in `prefs.priorities`, check whether `spice/cowork/prompts/per-mcp/<kind_name>/microscope.md` exists (via `mcp__obsidian__get_file_contents`; treat a not-found error as absent). When present, strip any leading frontmatter and capture the body as `microscopes[kind_name]`. Build the `microscopes` map (kind_name → body string). Kinds without a file are simply absent from the map.
-
-   2c. **Read per-kind sibling files.** For each `kind_name` in `prefs.priorities`, list the contents of `spice/cowork/prompts/per-mcp/<kind_name>/` via `mcp__obsidian__list_files_in_dir` (treat dir-not-found as empty). Filter the result to files matching the `per-mcp/<kind_name>/*.md` glob, then exclude `microscope.md` and any filename matching `^_.*\.md$` (underscore-prefix files are user drafts — never injected). For each remaining file, read its body via `mcp__obsidian__get_file_contents`, strip any leading frontmatter, and append `{ name: <filename>, body: <stripped body> }` to `siblings[kind_name]`. Kinds without a per-mcp dir, or with only `microscope.md` + `_*.md` files, get `siblings[kind_name] = []`. This step is PURE — no MCP gather calls, no writes.
-
-   3. Build `dispatch_plan[]` as an ordered array. For each `kind_name` in `prefs.priorities` (in order):
-
-      ```
-      mcps_entry = prefs.mcps[kind_name]    # may be undefined
-
-      # Compute kind_title
-      if kind_name in {calendar, email, chat, finance}:
-          kind_title = canonical lookup ("Calendar", "Email", "Chat", "Finance")
-      else:
-          kind_title = title-case of kind_name (whitespace/underscore-split; "ado" -> "Ado", "github" -> "Github", "monitoring" -> "Monitoring")
-
-      # Determine action
-      if mcps_entry is undefined:
-          push { kind_name, action: "warn", reason: "not_classified", kind_title, mcps_entry: null }
-          continue
-      if mcps_entry.connected == false:
-          push { kind_name, action: "warn", reason: "not_connected", kind_title, mcps_entry }
-          continue
-      if mcps_entry.served_by is set and not in reachable_namespaces:
-          push { kind_name, action: "warn", reason: "served_by_unreachable", kind_title, mcps_entry }
-          continue
-      # v0.79.0: a per-kind microscope contract forces served-by routing with the
-      # microscope body as the deep what_matters (notes preserved as baseline_notes)
-      if microscopes[kind_name] is present and non-empty:
-          push {
-            kind_name,
-            action: "gather_from_served_by",
-            served_by: mcps_entry.served_by,
-            what_matters: microscopes[kind_name],
-            baseline_notes: mcps_entry.what_matters or "",
-            question_set_answers: null,
-            kind_title,
-            microscope: true,
-            mcps_entry,
-          }
-          continue
-      if mcps_entry.custom_kind == true OR mcps_entry.override_classified == true:
-          bookkeeping = {served_by, what_matters, connected, captured_at, custom_kind, override_classified}
-          question_set_answers = {k: v for k, v in mcps_entry if k not in bookkeeping}
-          push {
-            kind_name,
-            action: "gather_from_served_by",
-            served_by: mcps_entry.served_by,
-            what_matters: mcps_entry.what_matters or "",
-            question_set_answers: mcps_entry.custom_kind ? null : (question_set_answers if non-empty else null),
-            kind_title,
-            mcps_entry,
-          }
-          continue
-      # Default: known canonical-vendor kind (kind_name in mcp_skill_map.kinds[].kind)
-      if any entry in mcp_skill_map.kinds has .kind == kind_name:
-          push {
-            kind_name,
-            action: "gather_canonical",
-            gather_skill: <that entry>.gather_skill,
-            kind_title,
-            mcps_entry,
-          }
-      else:
-          # Rare: kind name not recognized and not flagged custom — treat as gather_from_served_by
-          push { kind_name, action: "gather_from_served_by", served_by, what_matters, question_set_answers: null, kind_title, mcps_entry }
-      ```
-
-   4. Capture `voice_contract` from `prefs.personality` and `prefs.effective_hard_rules`: if every personality field (`vibe`, `formality`, `pep_talk`, `length`, `notes`) is null/undefined AND `prefs.effective_hard_rules` is empty, `voice_contract = ""`. Otherwise compose:
-
-      ```
-      Voice contract (from spice/cowork/context/user-preferences.md):
-      - Vibe: <prefs.personality.vibe or "default">
-      - Formality: <prefs.personality.formality or "default">
-      - Pep talk: <"yes" if prefs.personality.pep_talk else "no">
-      - Length: <prefs.personality.length or "default">
-      - Notes: <prefs.personality.notes verbatim, collapsed to single line>
-
-      Apply this voice ONLY to narrative sections (frontmatter summary, [!info]- synopsis, [!tip] closing). Do NOT apply to tabular [!example]+ blocks (their content comes from gather sub-skills and is contractually shaped).
-
-      Hard rules (non-negotiable, apply verbatim to ALL output — narrative AND callout titles/bodies):
-      - <each entry of prefs.effective_hard_rules on its own line; omit this whole block when the list is empty>
-
-      ---
-
-      ```
-
-   This step is PURE — no MCP calls, no file writes. It builds in-memory state used by the gather phase.
-3d. **Pre-resolve inner-circle people.** Read `engagement.inner_circle_people: string[]` (when present; skip step on empty). When `engagement.inner_circle_people` is empty / absent, set `allowlist = { resolved: [], unresolved: [], phone_filter_list: [] }` as the default for downstream pseudocode.
-
-   For each name in the array, call `cowork:resolve-person { input: <name>, prefer_type: "name", engagement_id: <engagement_id> }`. Thread the original name as `_input` on each output so the helper can surface unresolved names verbatim.
-
-   Accumulate the resolver outputs into an array. Invoke the helper:
-
-   ```js
-   const { composeInnerCircleAllowlist } = require("<workshop>/platform/blueprints/cowork/helpers/resolve-inner-circle-helper.js");
-   const allowlist = composeInnerCircleAllowlist(resolverOutputs);
-   // allowlist = { resolved: [{name, person_link, person_basename, aliases_by_type, matched_via, collision_warning}],
-   //               unresolved: ["<name>", ...],
-   //               phone_filter_list: ["+E.164...", ...] }
-   ```
-
-   Pass `allowlist.resolved` as `inner_circle_resolved` AND `engagement_id` to every `gather-from-served-by` invocation in the kind loop.
-
-   For each name in `allowlist.unresolved[]`, emit Notice `cowork: inner-circle name "<name>" unresolved` AND append `inner_circle_unresolved:<name>` to the atomic note's `warnings:` array (v0.85.0 plumbing).
-
-   (This orchestrator does NOT call `gather-imessage`; `phone_filter_list` is unused here.)
+   When `plan.dispatch_mode == "prefs"`, Gather + Decide + Write consume `plan.dispatch_plan`, `plan.voice_contract`, `plan.microscopes`, `plan.siblings`, `plan.allowlist`, `plan.render_aspects`, `plan.cadence_order`, `plan.tripwire_aspects`, `plan.kind_titles`, and `plan.effective_hard_rules` directly — no inline dispatch-plan composition lives in this orchestrator.
 4. READ `.claude/skills/cowork/skills/ensure-daily-note/SKILL.md` in full and follow
    its `## Steps` section with `{ date: context.today, weekday: context.dddd, month_name: context["MM-Month"].split("-")[1], path: context.daily_path }`.
 
 ## Gather
 
-> **MANDATORY:** When `dispatch_mode == "prefs"`, execute the priority loop for EVERY entry in `dispatch_plan`. Do NOT skip the loop in favor of memory-tick synthesis. Memory ticks are SUPPLEMENTARY context for the `[!info]- Today at a glance` synopsis section; they DO NOT replace live MCP gather output. When a kind's `action == "warn"`, emit the warning callout in-position via `composeWarningCallout`; do NOT silently drop it. Failing to fire the priority loop means the dispatch contract's "Known people in scope" wikilink instruction never reaches the LLM, and inner-circle names render as plaintext instead of `**[[Name]]**` wikilinks.
+> **MANDATORY:** When `plan.dispatch_mode == "prefs"`, execute the priority loop for EVERY entry in `plan.dispatch_plan`. Memory ticks are SUPPLEMENTARY context for the `[!info]- Today at a glance` synopsis section; they DO NOT replace live MCP gather output. When a kind's `action == "warn"`, emit the warning callout in-position via `composeWarningCallout`. Failing to fire the priority loop means the dispatch contract's "Known people in scope" wikilink instruction never reaches the LLM.
 
-> **MANDATORY (v0.91.3): load deferred MCP tools UPFRONT.** Before the priority loop, for each kind in `dispatch_plan` with `action == "gather_from_served_by"` or `action == "gather_canonical"`, load the required deferred tools from the kind's `served_by` namespace via Tool Search / Load. M365 (UUID `45224a84-...`): `chat_message_search`, `outlook_calendar_search`, `outlook_email_search`. ADO (UUID like `1151913a-...`): `list_workitems`, `search_workitems`. github: `search_pull_requests`, `search_issues`. If a tool isn't loaded when its gather sub-skill needs it, the sub-skill cannot execute and you silently fall back to a warning callout — the deterministic fix for the "MCP tools require loading" failure.
+> **MANDATORY (v0.91.3): load deferred MCP tools UPFRONT.** Before the priority loop, for each kind in `plan.dispatch_plan` with `action == "gather_from_served_by"` or `action == "gather_canonical"`, load the required deferred tools from the kind's `served_by` namespace via Tool Search / Load.
 
-When `dispatch_mode == "legacy"`, execute the v0.77.0 legacy gather sequence below verbatim. `ordered_blocks[]` stays empty.
+When `plan.dispatch_mode == "legacy"`, execute the v0.77.0 legacy per-aspect gather sequence below verbatim. `ordered_blocks[]` stays empty.
 
-When `dispatch_mode == "prefs"`, skip the legacy steps; execute the priority-loop:
+When `plan.dispatch_mode == "prefs"`, skip the legacy steps; execute the priority-loop:
 
 ```
 ordered_blocks = []
-for entry in dispatch_plan:
+for entry in plan.dispatch_plan:
   if entry.action == "warn":
     md = composeWarningCallout({ kind_name, kind_title, reason, mcps_entry })
     ordered_blocks.push({ kind_name, markdown: md, kind: "warning" })
@@ -213,39 +94,34 @@ for entry in dispatch_plan:
       kind_name:            entry.kind_name,
       kind_title:           entry.kind_title,
       served_by:            entry.served_by,
-      what_matters:         entry.what_matters,     # microscope body when entry.microscope == true
+      what_matters:         entry.what_matters,
       question_set_answers: entry.question_set_answers,
-      hard_rules:           prefs.effective_hard_rules,
-      siblings:             siblings[entry.kind_name] || [],
-      callout_type:         prefs.mcps[entry.kind_name].callout_type,
-      inner_circle_resolved: allowlist.resolved,
+      hard_rules:           plan.effective_hard_rules,
+      siblings:             plan.siblings[entry.kind_name] || [],
+      callout_type:         entry.mcps_entry.callout_type,
+      inner_circle_resolved: plan.allowlist.resolved,
       engagement_id:        engagement_id,
       today:                context.today,
       range:                { start: context.today, end: context.today },
       timezone:             engagement.timezone || "America/Denver"
     }
-    # When entry.baseline_notes is set (microscope-routed kind), treat it as secondary
-    # "baseline preferences" context behind the microscope contract.
     if result.status == "ready":
       ordered_blocks.push({ kind_name, markdown: result.markdown, kind: "example" })
     else:
       md = composeWarningCallout({ kind_name, kind_title, reason: result.status, mcps_entry })
       ordered_blocks.push({ kind_name, markdown: md, kind: "warning" })
 
-# After the priority loop, run engagement-type-aspect gathers per existing
-# render_aspects gates. These remain APPENDED AFTER ordered_blocks in the
-# composed body.
+# After the priority loop, run per-aspect tripwire gathers (steps 5/6/7 below)
+# per plan.tripwire_aspects. These remain APPENDED AFTER ordered_blocks in the composed body.
 ```
 
-*(existing legacy-mode gather steps preserved verbatim below — these fire ONLY when `dispatch_mode == "legacy"`)*
+Each gather call passes `engagement_id`. The orchestrator branches per-aspect from `plan.tripwire_aspects` (FINAL composed: bundle ⨁ overrides REPLACES on the array).
 
-Each gather call passes `engagement_id`. The orchestrator branches per-aspect from `engagement.tripwire_aspects`.
-
-5. If `"cc_drift"` in `tripwire_aspects`: READ `.claude/skills/cowork/skills/gather-finance-cc-today/SKILL.md` in full and follow
-   its `## Steps` section with `{ engagement_id, date_today: context.today, lookback_start: "06:00", timezone: "America/Denver", classify: true, cards: { active: engagement.cc_active_cards, locked: engagement.cc_locked_cards, ignore: engagement.cc_ignored_cards } }`. Capture `{ markdown, charges, top_merchant_today_total, mtd_discretionary, days_since_splurge_pre }` as `cc_signal`. When CC cards are not configured, treat as `cc_signal = null` (engagement opted into cc_drift but isn't wired yet; surface a one-line Notice and continue).
-6. If `"calendar_drift"` in `tripwire_aspects`: READ `.claude/skills/cowork/skills/gather-calendar/SKILL.md` in full and follow
+5. If `"cc_drift"` in `plan.tripwire_aspects`: READ `.claude/skills/cowork/skills/gather-finance-cc-today/SKILL.md` in full and follow
+   its `## Steps` section with `{ engagement_id, date_today: context.today, lookback_start: "06:00", timezone: "America/Denver", classify: true, cards: { active: engagement.cc_active_cards, locked: engagement.cc_locked_cards, ignore: engagement.cc_ignored_cards } }`. Capture `{ markdown, charges, top_merchant_today_total, mtd_discretionary, days_since_splurge_pre }` as `cc_signal`. When CC cards are not configured, treat as `cc_signal = null`.
+6. If `"calendar_drift"` in `plan.tripwire_aspects`: READ `.claude/skills/cowork/skills/gather-calendar/SKILL.md` in full and follow
    its `## Steps` section with `{ engagement_id, mode: "drift-check", horizon: "today+4h", timezone: "America/Denver" }`. Capture `{ markdown, drift_minutes, drifted_events }` as `calendar_signal`. On `gather-skipped`, `calendar_signal = null` and append `calendar_unavailable` to the warnings array passed to write.
-7. If `"queue_growth"` in `tripwire_aspects`: READ `.claude/skills/cowork/skills/gather-projects/SKILL.md` in full and follow
+7. If `"queue_growth"` in `plan.tripwire_aspects`: READ `.claude/skills/cowork/skills/gather-projects/SKILL.md` in full and follow
    its `## Steps` section with `{ engagement_id, mode: "tripwire-delta", since: <yesterday EOD ISO> }`. Capture `{ markdown, new_count, items }` as `queue_signal`.
 
 ## Decide
@@ -265,8 +141,8 @@ Each gather call passes `engagement_id`. The orchestrator branches per-aspect fr
     - If `user_prompt_body` is empty, read `spice/cowork/context/engagement-templates/<engagement.type>/prompts/midday-tripwire.md` via `mcp__obsidian__get_file_contents`. Strip frontmatter; capture as `template_prompt_body` (or empty when missing).
     - Set `prompt_body = user_prompt_body || template_prompt_body`.
     - Set `prompt_source` accordingly: if `user_prompt_body` non-empty, `prompt_source = "spice/cowork/prompts/midday-tripwire.md"`; else if `template_prompt_body` non-empty, `prompt_source = "spice/cowork/context/engagement-templates/<engagement.type>/prompts/midday-tripwire.md"`; else `prompt_source = "spice/cowork/prompts/midday-tripwire.md"`.
-9b. **Voice contract.** If `dispatch_mode == "prefs"` AND `voice_contract != ""`, prepend it to `prompt_body`:
-   `prompt_body = voice_contract + prompt_body`. The combined string is the input to the body-composition step.
+9b. **Voice contract.** If `plan.dispatch_mode == "prefs"` AND `plan.voice_contract != ""`, prepend it to `prompt_body`:
+   `prompt_body = plan.voice_contract + prompt_body`. The combined string is the input to the body-composition step.
 10. **Compose run-note body via cowork:compose-body.**
 
   14a. **Prep synopsis_md.** Compose the `> [!info]- Midday status` callout per `prompt_body` instructions (voice-shaped one-paragraph synopsis distilled from gather outputs — tripwire signal + recalibration framing). When `semantic_index_age` is non-null, append `> Semantic index age: <semantic_index_age>m` as the last `> ` line inside the synopsis callout BEFORE passing to composeBody.
@@ -281,7 +157,7 @@ Each gather call passes `engagement_id`. The orchestrator branches per-aspect fr
        - `echoes_md` ← `composeSemanticEchoesCallout(output_echoes)` when applicable, else `""`
        - `backlink_md` ← inline-composed per v0.85.0 § 2.1.3 spec: `"> [!quote]- Memory log\n> Today's memory: [[spice/cowork/memory/<engagement_id>/<YYYY>/<MM-Month>/<YYYY-MM-DD>/memory.md|Memory log — <YYYY-MM-DD>]]"` (tick-count parenthetical omitted when unknown).
 
-  14d. **Prep ordered_blocks[].** Iterate gather-pipeline `ordered_blocks[]` (from priority loop). Each entry already carries `{ kind, callout_type, markdown }`. Add `title` from the kind-to-title map: chat → "Chat (Teams)", calendar → "Today's calendar", email → "Email triage", github → "GitHub", ado → "ADO" — or microscope-`## Output shape`-specified override. Translate to composeBody shape: `{ kind, callout_type, title, body_md: markdown }`.
+  14d. **Prep ordered_blocks[].** Iterate gather-pipeline `ordered_blocks[]` (from priority loop). Each entry already carries `{ kind, callout_type, markdown }`. Add `title` from `plan.kind_titles[entry.kind_name]` (v0.95.0: data file `spice/cowork/data/kind-titles.json` is canonical; per-kind microscope `## Output shape` directives may override per-engagement). Translate to composeBody shape: `{ kind, callout_type, title, body_md: markdown }`.
 
   14e. **Prep engagement_type_blocks[].** For each `related_signal` in `related_signals[]` with `status == "ready"`: push `{ kind: "semantic", callout_type: "example", title: "Related to: <event.title>", body_md: <related_signal.markdown> }`. When `semantic_index_unavailable == true`: push ONCE `{ kind: "semantic-unavailable", callout_type: "warning", title: "Semantic index not available", body_md: "Smart Connections index absent or anchor not indexed — semantic gather skipped." }`. Finance does NOT flow through here — it's written by a separate sub-skill when applicable.
 
@@ -321,4 +197,6 @@ Each gather call passes `engagement_id`. The orchestrator branches per-aspect fr
 
 ## Harness testing
 
-A helper at `platform/blueprints/cowork/helpers/dispatch-plan-helper.js` exports `planDispatch`, `decideDispatchMode`, `composeVoiceContract`, `composeWarningCallout` for the HC-V0780-C* / D* harness cases. Production agents in consumer vaults execute step 3c's algorithm directly — they do NOT depend on the helper file existing.
+This orchestrator conforms to `Docs/agent-guides/cowork-orchestrator-template.md` (v1.0.0). Cohesion regression is caught by HC-V0950-COHESION-A1..A5.
+
+A helper at `platform/blueprints/cowork/helpers/dispatch-plan-helper.js` exports `planDispatch`, `decideDispatchMode`, `composeVoiceContract`, `composeWarningCallout`, and the v0.95.0 additive trio `composeFinalPreferences`, `readEngagement`, `loadKindTitles`. The cowork:plan-dispatch sub-skill body composes these helpers into the 12-key result tree this orchestrator consumes — no inline dispatch-plan pseudocode remains.
