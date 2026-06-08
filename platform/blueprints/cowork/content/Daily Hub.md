@@ -26,6 +26,16 @@ await dv.view("ranch/views/customjs-guard", { class: "CoworkDailyActions" });
 await dv.view("ranch/views/customjs-guard", { class: "CoworkDailyHubCards" });
 ```
 
+## Lens-shift companions
+
+```dataviewjs
+await dv.view("ranch/views/customjs-guard", {
+  class: "CoworkLensShiftCards",
+  method: "render",
+  args: [{ scope: "this_week" }]
+});
+```
+
 ## Today's Activity
 
 ```dataviewjs
