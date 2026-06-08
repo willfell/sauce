@@ -49,18 +49,93 @@ function planDispatch({
     bundle,
     overrides,
     yesterdayMemory,
+    // v0.96.0 additive inputs — Rail D (kind classifier) integration.
+    //   tools_by_namespace + vault_root: when both are provided AND
+    //     classifier_result is NOT, Step 0 below invokes
+    //     classifyConnectedKinds() to populate classifier_result.
+    //   classifier_result: pre-computed Rail-D result (passed by tests/callers
+    //     that have already invoked the classifier). When present, Step 0 is
+    //     a no-op and pending_confirmations[] is derived directly from
+    //     classifier_result.new_since_last_fire.
+    //   When neither is provided, classifier_result defaults to the empty
+    //     4-key shell and pending_confirmations[] is [].
+    tools_by_namespace,
+    vault_root,
+    classifier_result,
+    engagement_id,
 }) {
     const isV0951Call = (bundle !== undefined && bundle !== null)
         || engagement !== undefined
         || overrides !== undefined
-        || yesterdayMemory !== undefined;
+        || yesterdayMemory !== undefined
+        || classifier_result !== undefined
+        || tools_by_namespace !== undefined;
+
+    // Step 0 (v0.96.0): Classify connected kinds via Rail D.
+    //   Resolves classifier_result from one of three sources, in order:
+    //     1. classifier_result kwarg (pre-computed; tests/callers supply this).
+    //     2. classifyConnectedKinds(reachable_namespaces, tools_by_namespace,
+    //        vault_root) when both inputs are present.
+    //     3. Empty shell { classified, unclassified, new_since_last_fire,
+    //        cache_hits } when neither is available.
+    //   Failures during (2) are caught and fall through to the empty shell
+    //   so planDispatch NEVER throws — graceful degradation.
+    let _classifierResult;
+    if (classifier_result && typeof classifier_result === "object") {
+        _classifierResult = classifier_result;
+    } else if (Array.isArray(reachableNamespaces) && tools_by_namespace && typeof tools_by_namespace === "object") {
+        try {
+            const { classifyConnectedKinds } = require("./kind-classifier-helper");
+            _classifierResult = classifyConnectedKinds({
+                reachable_namespaces: reachableNamespaces,
+                tools_by_namespace,
+                vault_root,
+            });
+        } catch (_err) {
+            _classifierResult = { classified: {}, unclassified: [], new_since_last_fire: [], cache_hits: [] };
+        }
+    } else {
+        _classifierResult = { classified: {}, unclassified: [], new_since_last_fire: [], cache_hits: [] };
+    }
+
+    // pending_confirmations[]: the 14th contract key (v0.96.0).
+    //   Surfaces the raw namespace names that the classifier flagged as
+    //   "new since last fire" (cache miss this cycle). compose-body decides
+    //   downstream whether to render the detection callout based on
+    //   render_aspects.new_mcp_notice.
+    const pending_confirmations = Array.isArray(_classifierResult.new_since_last_fire)
+        ? _classifierResult.new_since_last_fire.slice()
+        : [];
+
+    // Best-effort state-file write: append-and-dedupe pending namespaces into
+    //   spice/cowork/context/<engagement>/pending-mcps.md so the user can later
+    //   confirm them via /cowork context-builder. Write failure is non-fatal.
+    if (pending_confirmations.length > 0 && vault_root) {
+        const effective_engagement_id = engagement_id
+            || (engagement && typeof engagement === "object" ? engagement.id : null);
+        if (effective_engagement_id) {
+            try {
+                _upsertPendingMcps(vault_root, effective_engagement_id, pending_confirmations, _classifierResult);
+            } catch (_err) { /* non-fatal */ }
+        }
+    }
+
+    const classifier_cache_hit = Array.isArray(_classifierResult.cache_hits)
+        && _classifierResult.cache_hits.length > 0;
 
     if (!prefs || !Array.isArray(prefs.priorities)) {
         if (isV0951Call) {
-            // Defensive: still emit the 13th key so the orchestrator never
-            // dereferences `plan.excluded_themes` against `undefined`.
+            // Defensive: still emit the 14-key contract so the orchestrator never
+            // dereferences `plan.excluded_themes`/`plan.pending_confirmations`
+            // against `undefined`.
             const excluded_themes_empty = _computeExcludedThemes({ bundle, overrides, engagement, yesterdayMemory });
-            return { dispatch_plan: [], excluded_themes: excluded_themes_empty };
+            return {
+                dispatch_plan: [],
+                excluded_themes: excluded_themes_empty,
+                pending_confirmations,
+                classifier_cache_hit,
+                classifier_result: _classifierResult,
+            };
         }
         return [];
     }
@@ -149,14 +224,23 @@ function planDispatch({
         }
     }
     if (isV0951Call) {
-        // v0.95.1 contract object: dispatch_plan (the array the legacy form
-        // returned) PLUS excluded_themes (the 13th key). The plan-dispatch
-        // SKILL.md composes the remaining ~11 keys (voice_contract,
-        // microscopes, siblings, allowlist, render_aspects, cadence_order,
-        // tripwire_aspects, kind_titles, effective_hard_rules,
-        // dispatch_mode, prefs_status) around this helper's two-key surface.
+        // v0.96.0 contract object: dispatch_plan (legacy array form) PLUS
+        // excluded_themes (13th key, v0.95.1) PLUS pending_confirmations
+        // (14th key, v0.96.0). The plan-dispatch SKILL.md composes the
+        // remaining keys (voice_contract, microscopes, siblings, allowlist,
+        // render_aspects, cadence_order, tripwire_aspects, kind_titles,
+        // effective_hard_rules, dispatch_mode, prefs_status) around this
+        // helper's surface. classifier_cache_hit + classifier_result are
+        // exposed as additional pass-through fields for the orchestrator's
+        // Step 14f telemetry block.
         const excluded_themes = _computeExcludedThemes({ bundle, overrides, engagement, yesterdayMemory });
-        return { dispatch_plan: plan, excluded_themes };
+        return {
+            dispatch_plan: plan,
+            excluded_themes,
+            pending_confirmations,
+            classifier_cache_hit,
+            classifier_result: _classifierResult,
+        };
     }
     return plan;
 }
@@ -494,6 +578,64 @@ function deriveExcludedThemes(yesterdayMemory) {
     return bullets.filter((b) => typeof b === "string" && b.trim().length > 0);
 }
 
+// ===========================================================================
+// v0.96.0 additive — Rail D pending-MCP state-file management
+// ===========================================================================
+
+/**
+ * _upsertPendingMcps(vault_root, engagement_id, pending_namespaces, classifierResult)
+ *
+ * Append-and-dedupe write to spice/cowork/context/<engagement_id>/pending-mcps.md.
+ * Accumulates MCPs auto-detected by Rail D but not yet confirmed in
+ * `user-preferences.mcps`. The user later confirms them via
+ * `/cowork context-builder`.
+ *
+ * Idempotent: existing entries (matched by namespace via backtick capture) are
+ * not duplicated. Each new entry is appended with the classified kind +
+ * first-seen ISO timestamp.
+ *
+ * Best-effort: callers wrap in try/catch — state-file write failures must
+ * never abort an orchestrator's atomic-note emission.
+ */
+function _upsertPendingMcps(vault_root, engagement_id, pending_namespaces, classifierResult) {
+    const fs = require("node:fs");
+    const path = require("node:path");
+    const dir = path.join(vault_root, "spice/cowork/context", engagement_id);
+    fs.mkdirSync(dir, { recursive: true });
+    const filePath = path.join(dir, "pending-mcps.md");
+
+    let existing = "";
+    try { existing = fs.readFileSync(filePath, "utf8"); } catch (_) { /* new file */ }
+
+    const existingNamespaces = new Set(
+        existing.split("\n")
+            .filter((l) => l.startsWith("- "))
+            .map((l) => {
+                const m = l.match(/`([^`]+)`/);
+                return m ? m[1] : null;
+            })
+            .filter(Boolean)
+    );
+
+    const classified = (classifierResult && classifierResult.classified) || {};
+    const now = new Date().toISOString();
+    const newEntries = pending_namespaces
+        .filter((ns) => !existingNamespaces.has(ns))
+        .map((ns) => {
+            const kind = (classified[ns] && classified[ns].kind) || "unclassified";
+            return `- \`${ns}\` → ${kind} (first seen ${now})`;
+        });
+
+    if (newEntries.length === 0) return;
+
+    const isNew = !existing || existing.length === 0;
+    const header = isNew
+        ? `---\ntype: cowork-pending-mcps\nengagement_id: ${engagement_id}\n---\n\n# Pending MCP confirmations\n\nThis file accumulates MCPs auto-detected by Rail D but not yet confirmed in \`user-preferences.mcps\`. Run \`/cowork context-builder\` to confirm.\n\n`
+        : "";
+    const body = isNew ? "" : (existing.endsWith("\n") ? existing : existing + "\n");
+    fs.writeFileSync(filePath, header + body + newEntries.join("\n") + "\n", "utf8");
+}
+
 module.exports = {
     planDispatch,
     decideDispatchMode,
@@ -504,6 +646,7 @@ module.exports = {
     loadKindTitles,
     deriveExcludedThemes,
     _computeExcludedThemes,
+    _upsertPendingMcps,
     _titleCase: titleCase,
     _CANONICAL_TITLES: CANONICAL_TITLES,
     _parseEngagementByIdFromYaml,

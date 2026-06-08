@@ -1,10 +1,11 @@
 ---
 name: cowork:plan-dispatch
-description: Single pre-flight entry point for the 5 atomic-note orchestrators. Loads engagement record + engagement-type bundle + engagement.overrides, composes the layered preferences tree, reads microscopes/siblings, plans dispatch via dispatch-plan-helper, composes voice contract, resolves the inner-circle allowlist, and returns the 13-key contract that drives Gather + Write phases. Never throws — degrades to `dispatch_mode: "legacy"` on prefs failure so the orchestrator can fall back cleanly.
+description: Single pre-flight entry point for the 5 atomic-note orchestrators. Loads engagement record + engagement-type bundle + engagement.overrides, composes the layered preferences tree, reads microscopes/siblings, plans dispatch via dispatch-plan-helper, composes voice contract, resolves the inner-circle allowlist, and returns the 14-key contract that drives Gather + Write phases. v0.96.0 adds Rail-D kind-classifier integration (Step 0) plus the `pending_confirmations[]` 14th key. Never throws — degrades to `dispatch_mode: "legacy"` on prefs failure so the orchestrator can fall back cleanly.
 inputs:
   engagement_id: string
   cadence: string
   reachable_namespaces: string[]
+  tools_by_namespace: object
   vault_root: string
   yesterday_memory: object
 outputs:
@@ -21,14 +22,17 @@ outputs:
   dispatch_mode: string
   prefs_status: string
   excluded_themes: array
-tags: [cowork, sub-skill, pre-flight, dispatch, knob-composition]
+  pending_confirmations: array
+tags: [cowork, sub-skill, pre-flight, dispatch, knob-composition, rail-d]
 ---
 
 # cowork:plan-dispatch
 
 Single pre-flight entry point for every atomic-note orchestrator (morning-briefing / midday-tripwire / eod-review / weekly-review / monthly-review). Replaces the ~100 lines of inline `3a memory → 3b read-prefs → 3c dispatch-plan → 3d microscopes → 3e inner-circle` pseudocode that v0.94.x carried byte-identical across all 5 orchestrators.
 
-The 13-key result tree returned by this sub-skill (v0.95.0's 12-key contract + v0.95.1's `excluded_themes[]`) is the orchestrator's sole source of truth for Gather + Write. Knob composition (engagement-type defaults ⨁ engagement.overrides ⨁ ad-hoc runtime overrides) happens HERE, once, not scattered through gather/write skills.
+The 14-key result tree returned by this sub-skill (v0.95.0's 12-key contract + v0.95.1's `excluded_themes[]` + v0.96.0's `pending_confirmations[]`) is the orchestrator's sole source of truth for Gather + Write. Knob composition (engagement-type defaults ⨁ engagement.overrides ⨁ ad-hoc runtime overrides) happens HERE, once, not scattered through gather/write skills.
+
+v0.96.0 adds Rail D (kind classifier) integration: Step 0 invokes `classifyConnectedKinds` to identify which connected MCP namespaces have not yet been confirmed in `user-preferences.mcps`, surfacing them as `pending_confirmations[]` so compose-body can render an in-note detection callout (gated by `render_aspects.new_mcp_notice`).
 
 ## Inputs
 
@@ -37,6 +41,11 @@ The 13-key result tree returned by this sub-skill (v0.95.0's 12-key contract + v
   engagement_id:        string,    // REQUIRED — matches an entry in vault-config.md engagements[]
   cadence:              string,    // REQUIRED — one of "morning" | "midday" | "eod" | "weekly" | "monthly"
   reachable_namespaces: string[],  // REQUIRED — runtime MCP namespace set (e.g. ["iMCP", "brex", "github"])
+  tools_by_namespace:   object,    // OPTIONAL (v0.96.0) — { <namespace>: [<tool short name>, ...] }
+                                   //   derived from the orchestrator's agent tool list by stripping
+                                   //   the `mcp__<ns>__` prefix. Required for Step 0's classifier
+                                   //   invocation. When absent, classifier is skipped and
+                                   //   `pending_confirmations[]` defaults to [].
   vault_root:           string,    // OPTIONAL — vault filesystem root; defaults to cwd-based resolution
   yesterday_memory:     object,    // OPTIONAL (v0.95.1) — return value of cowork:read-memory for the
                                    //   prior day; supplies the carry-forward bullets that become
@@ -49,11 +58,15 @@ The 13-key result tree returned by this sub-skill (v0.95.0's 12-key contract + v
 
 ## Steps
 
+0. **Classify connected kinds (Rail D, v0.96.0).** When BOTH `reachable_namespaces` AND `tools_by_namespace` are present, invoke `classifyConnectedKinds({ reachable_namespaces, tools_by_namespace, vault_root })` from `helpers/kind-classifier-helper.js`. The classifier consults `spice/cowork/data/kind-patterns.json` (consumer-vault path, falling back to the workshop module path) for deterministic namespace+tool-name globs, an optional LLM fallback (currently unwired), and persists per-namespace results in `spice/cowork/data/kind-classifier-cache.json` keyed by `classifier_version`. Result shape: `{ classified, unclassified, new_since_last_fire, cache_hits }`. Step 14 below converts `new_since_last_fire` into the 14th contract key. Failures inside the classifier are swallowed and replaced by an empty 4-key shell — `plan-dispatch` never throws on Rail-D problems.
+
+   This step is implemented inside `dispatchPlanHelper.planDispatch` so the helper owns the contract; the orchestrator does not invoke the classifier directly. Callers that have already classified (e.g. unit-harness tests, integration tools) may pass `classifier_result` directly to `planDispatch` to bypass the classifier invocation while still surfacing `pending_confirmations[]`.
+
 1. **Vault routing.** READ `.claude/skills/cowork/skills/check-vault-routing/SKILL.md` in full and follow its `## Steps` section with `{ required: ["obsidian"] }`. If the vault-routing check fails, propagate that failure verbatim — `plan-dispatch` cannot proceed without routing.
 
 2. **Read user-preferences.** READ `.claude/skills/cowork/skills/read-user-preferences/SKILL.md` in full and follow its `## Steps` section with `{}`. Capture the result as `prefs_result = { prefs, status, reason }`.
 
-3. **Decide dispatch mode.** Invoke `dispatchPlanHelper.decideDispatchMode({ prefsStatus: prefs_result.status })` → `dispatch_mode` (`"prefs"` when status === "ok", else `"legacy"`). If `dispatch_mode === "legacy"`, the orchestrator MUST fall through to its legacy gather sequence; this sub-skill still returns the full 13-key contract so the orchestrator can compose its fallback Notice from `prefs_status`.
+3. **Decide dispatch mode.** Invoke `dispatchPlanHelper.decideDispatchMode({ prefsStatus: prefs_result.status })` → `dispatch_mode` (`"prefs"` when status === "ok", else `"legacy"`). If `dispatch_mode === "legacy"`, the orchestrator MUST fall through to its legacy gather sequence; this sub-skill still returns the full 14-key contract so the orchestrator can compose its fallback Notice from `prefs_status`.
 
 4. **Read engagement + bundle.** Invoke `dispatchPlanHelper.readEngagement({ engagement_id, vault_root })` → `{ engagement, bundle, overrides, status, reason }`. If `status !== "ok"`, set `dispatch_mode = "legacy"` and capture `reason` for the fallback Notice; downstream steps still execute against the available data.
 
@@ -65,9 +78,11 @@ The 13-key result tree returned by this sub-skill (v0.95.0's 12-key contract + v
 
 8. **Read per-kind siblings.** For each kind in `prefs.priorities`, attempt to READ `spice/cowork/prompts/per-mcp/<kind>/siblings/` (a directory of supporting markdown files). Collect into `siblings = { kind_name: [{ name, body }, ...] }`. Missing directories yield empty arrays — not an error.
 
-9. **Plan dispatch.** Invoke `dispatchPlanHelper.planDispatch({ prefs: prefs_result.prefs, reachableNamespaces: reachable_namespaces, mcpSkillMap, microscopes, engagement, bundle, overrides: engagement.overrides, yesterdayMemory: yesterday_memory })` → `{ dispatch_plan, excluded_themes }` (the v0.95.1 contract object). `mcpSkillMap` is read from `spice/cowork/data/mcp-skill-map.json` v2.0.0. `dispatch_plan[]` is the ordered kind entries with per-entry action + served_by + warning reasons (unchanged from v0.94.x shape). `excluded_themes` is the raw carry-forward bullet strings from `yesterday_memory.carry_forward_bullets` when `render_aspects.anti_echo == "include"`, else `[]`. Both keys are ALWAYS present, even when null/empty inputs would leave them vacuous — defensive contract.
+9. **Plan dispatch.** Invoke `dispatchPlanHelper.planDispatch({ prefs: prefs_result.prefs, reachableNamespaces: reachable_namespaces, tools_by_namespace, vault_root, engagement_id, mcpSkillMap, microscopes, engagement, bundle, overrides: engagement.overrides, yesterdayMemory: yesterday_memory })` → `{ dispatch_plan, excluded_themes, pending_confirmations, classifier_cache_hit, classifier_result }` (the v0.96.0 contract object). `mcpSkillMap` is read from `spice/cowork/data/mcp-skill-map.json` v2.0.0. `dispatch_plan[]` is the ordered kind entries with per-entry action + served_by + warning reasons (unchanged from v0.94.x shape). `excluded_themes` is the raw carry-forward bullet strings from `yesterday_memory.carry_forward_bullets` when `render_aspects.anti_echo == "include"`, else `[]`. `pending_confirmations[]` is the raw new-since-last-fire namespaces from Step 0's classifier_result. All keys are ALWAYS present, even when null/empty inputs would leave them vacuous — defensive contract.
 
-   When the helper is called without v0.95.1 inputs (`engagement`/`bundle`/`overrides`/`yesterdayMemory` all absent), it returns the legacy raw array form for backward compatibility with pre-v0.95.1 unit harnesses. Within this sub-skill we ALWAYS pass `engagement` + `bundle`, so we ALWAYS receive the v0.95.1 contract object.
+   When the helper is called without v0.95.1+ inputs (`engagement`/`bundle`/`overrides`/`yesterdayMemory`/`classifier_result`/`tools_by_namespace` all absent), it returns the legacy raw array form for backward compatibility with pre-v0.95.1 unit harnesses. Within this sub-skill we ALWAYS pass `engagement` + `bundle`, so we ALWAYS receive the v0.96.0 contract object.
+
+14. **Compose pending_confirmations.** The planDispatch helper (called in Step 9) already surfaces `pending_confirmations` derived from `classifier_result.new_since_last_fire`, and best-effort-writes the `spice/cowork/context/<engagement_id>/pending-mcps.md` state file via `_upsertPendingMcps`. This sub-skill emits the value verbatim — orchestrators consume it via `plan.pending_confirmations` and pass it through Step 14f's compose-body invocation alongside `render_aspects.new_mcp_notice` so compose-body can gate the detection callout. State-file write failures are non-fatal.
 
 10. **Reorder for cadence.** If `final.cadence_order[cadence]` is a non-empty array, reorder `dispatch_plan[]` to match that priority. Entries listed in `cadence_order[cadence]` come first in declared order; entries NOT listed retain their original relative order at the tail. This is how per-cadence knob composition surfaces — orchestrators DO NOT consult `cadence_order` directly.
 
@@ -77,7 +92,7 @@ The 13-key result tree returned by this sub-skill (v0.95.0's 12-key contract + v
 
    Orchestrators pass `allowlist.resolved` as `inner_circle_resolved` to every `gather-from-served-by` invocation (along with `engagement_id`). morning-briefing also passes `allowlist.phone_filter_list.join(",")` as `gather-imessage`'s existing `inner_circle:` input. For each name in `allowlist.unresolved[]`, the orchestrator emits Notice `cowork: inner-circle name "<name>" unresolved` AND appends `inner_circle_unresolved:<name>` to the atomic note's `warnings:` array (v0.85.0 plumbing).
 
-13. **Return the 13-key contract.** Per the `## Returns` section below. Every key MUST be present even when null/empty — defensive contract. Atomic-note orchestrators consume the result tree as their single source of truth for Gather + Write.
+13. **Return the 14-key contract.** Per the `## Returns` section below. Every key MUST be present even when null/empty — defensive contract. Atomic-note orchestrators consume the result tree as their single source of truth for Gather + Write.
 
 ## Returns
 
@@ -100,10 +115,18 @@ The 13-key result tree returned by this sub-skill (v0.95.0's 12-key contract + v
                                    //   [] otherwise. ALWAYS present, never undefined/null. Consumed by
                                    //   compose-body's anti-echo callout injection in the
                                    //   morning-briefing / midday-tripwire / eod-review orchestrators.
+  pending_confirmations: [...],    // v0.96.0 (14th key) — raw namespace strings flagged by Rail D's
+                                   //   classifier as "new since last fire" (cache miss this cycle).
+                                   //   [] when no new MCPs detected OR Rail-D inputs absent.
+                                   //   compose-body gates the in-note detection callout on
+                                   //   pending_confirmations.length > 0 AND
+                                   //   render_aspects.new_mcp_notice == "include".
 }
 ```
 
-The orchestrator captures this as `plan`. Gather phase iterates `plan.dispatch_plan` and consults `plan.kind_titles[kind_name]` per emit; Write phase prepends `plan.voice_contract` to the compose-body invocation and passes `plan.microscopes` + `plan.allowlist` + `plan.excluded_themes` into the body composition.
+The orchestrator captures this as `plan`. Gather phase iterates `plan.dispatch_plan` and consults `plan.kind_titles[kind_name]` per emit; Write phase prepends `plan.voice_contract` to the compose-body invocation and passes `plan.microscopes` + `plan.allowlist` + `plan.excluded_themes` + `plan.pending_confirmations` into the body composition. The helper also exposes additional pass-through fields (`classifier_cache_hit`, `classifier_result`) for orchestrator telemetry in Step 14f.
+
+Reference: design §5 (Rail D classifier integration) and §6.3 (14-key contract surface) in `Docs/plans/2026-06-07-v0.96.0-cowork-rethought-1-design.md`.
 
 ## Backward-compatibility
 
@@ -129,7 +152,7 @@ In `dispatch_mode == "legacy"` (prefs unreadable / engagement-not-found / bundle
 
 ## Failure-mode contract
 
-This sub-skill NEVER throws. Failure modes map to the 13-key contract:
+This sub-skill NEVER throws. Failure modes map to the 14-key contract:
 
 | Condition | dispatch_mode | prefs_status | Orchestrator behavior |
 |---|---|---|---|

@@ -57,7 +57,19 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
 
    Capture `reachable_namespaces` from the agent's tool list (walk every `mcp__<ns>__<tool>` name; add `<ns>` to the set).
 
-   READ `.claude/skills/cowork/skills/plan-dispatch/SKILL.md` in full and follow its `## Steps` section with `{ engagement_id, cadence: "weekly", reachable_namespaces, vault_root: <vault-root-from-routing> }`. Capture the 12-key result as `plan`.
+   Capture `tools_by_namespace` from the same tool list — group tool short-names by namespace:
+
+   ```
+   tools_by_namespace = {}
+   for tool_name in agent_tool_list:
+     if tool_name.startsWith("mcp__"):
+       parts = tool_name.split("__")
+       ns = parts[1]
+       short = parts.slice(2).join("__")
+       (tools_by_namespace[ns] ||= []).push(short)
+   ```
+
+   READ `.claude/skills/cowork/skills/plan-dispatch/SKILL.md` in full and follow its `## Steps` section with `{ engagement_id, cadence: "weekly", reachable_namespaces, tools_by_namespace, vault_root: <vault-root-from-routing> }`. Capture the 14-key result as `plan` (v0.96.0 adds `pending_confirmations[]` as the 14th key, surfaced from Rail D's kind classifier; `plan.classifier_cache_hit` and `plan.classifier_result` are exposed as additional pass-through fields).
 
    If `plan.dispatch_mode == "legacy"`, emit Obsidian Notice: `cowork:weekly-review -- PREFS UNAVAILABLE (<plan.prefs_status>); falling back to legacy mode.` The legacy gather sequence fires unchanged.
 
@@ -182,7 +194,7 @@ for entry in plan.dispatch_plan:
 
   14e. **Prep engagement_type_blocks[].** When `week_related_status != "skipped:no-hits"`, push the rolled-up `{ kind: "semantic", callout_type: "example", title: "Emergent themes this week", body_md: <week_related_callout_md> }`. When semantic index unavailable (any `week_related_signals[].status` starts with `skipped:no-index` OR `skipped:anchor-not-indexed`): push ONCE `{ kind: "semantic-unavailable", callout_type: "warning", title: "Semantic index not available", body_md: "Smart Connections index absent or anchor not indexed — semantic gather skipped." }`. Finance does NOT flow through here — it's written by a separate sub-skill when applicable.
 
-  14f. **Invoke composeBody.** READ `.claude/skills/cowork/skills/compose-body/SKILL.md` in full and follow its `## Compose` section with `{ cadence: "weekly-review", nav_buttons_block: "<canonical block>", synopsis_md, memory_callouts: { yesterday_md, overnight_md, echoes_md, backlink_md }, ordered_blocks, engagement_type_blocks, closing_md, engagement_id: engagement.id, generated_by: "cowork:weekly-review@2.0.0", frontmatter: { type: "cowork-weekly-review", engagement_id: engagement.id, week: context.iso_week, title: <composed title>, summary: <composed summary>, created_at: <ISO+TZ now> }, render_aspects_applied: <Array of "<key>:<value>" strings derived from plan.render_aspects>, memory_used: { yesterday_present: output_week != null, drift_warning_present: false, echoes_count: (output_echoes && output_echoes.results) ? output_echoes.results.length : 0 }, plan_dispatch: { mode: plan.dispatch_mode, kinds_dispatched: plan.dispatch_plan.length, warnings_emitted: plan.dispatch_plan.filter(e => e.action === "warn").length, classifier_cache_hit: false, pending_confirmations_count: 0 } }`. Capture `{ body_md, sidecar_json, status }`. (`classifier_cache_hit` and `pending_confirmations_count` are S2.3 placeholders — Rail D is not yet wired.)
+  14f. **Invoke composeBody.** READ `.claude/skills/cowork/skills/compose-body/SKILL.md` in full and follow its `## Compose` section with `{ cadence: "weekly-review", nav_buttons_block: "<canonical block>", synopsis_md, memory_callouts: { yesterday_md, overnight_md, echoes_md, backlink_md }, ordered_blocks, engagement_type_blocks, closing_md, pending_confirmations: plan.pending_confirmations, render_aspects: plan.render_aspects, engagement_id: engagement.id, generated_by: "cowork:weekly-review@2.0.0", frontmatter: { type: "cowork-weekly-review", engagement_id: engagement.id, week: context.iso_week, title: <composed title>, summary: <composed summary>, created_at: <ISO+TZ now> }, render_aspects_applied: <Array of "<key>:<value>" strings derived from plan.render_aspects>, memory_used: { yesterday_present: output_week != null, drift_warning_present: false, echoes_count: (output_echoes && output_echoes.results) ? output_echoes.results.length : 0 }, plan_dispatch: { mode: plan.dispatch_mode, kinds_dispatched: plan.dispatch_plan.length, warnings_emitted: plan.dispatch_plan.filter(e => e.action === "warn").length, classifier_cache_hit: plan.classifier_cache_hit || false, pending_confirmations_count: (plan.pending_confirmations && plan.pending_confirmations.length) || 0 } }`. The `pending_confirmations` + `render_aspects` fields are the v0.96.0 Rail-D inputs to composeBody's new-MCP detection callout — composeBody emits `> [!info]+ Cowork detected a new MCP` when `pending_confirmations.length > 0` AND `render_aspects.new_mcp_notice == "include"` (S2.4 lands this emission). Capture `{ body_md, sidecar_json, status }`.
 
   14g. **Compose failure handling.** If `status` starts with `"failed:"`, emit Notice `cowork:weekly-review aborted -- compose-body failure: <status>` and exit non-zero. Do NOT call write-run-note. Do NOT run state-update steps.
 16. READ `.claude/skills/cowork/skills/write-run-note-weekly-review/SKILL.md` in full —
