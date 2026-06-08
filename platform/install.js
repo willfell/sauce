@@ -1068,6 +1068,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyNewEntityButtons(tp, mech, variables, history, git);
   await applyWikiToDocsMigration(tp, mech, variables, history, git);   // NEW v0.52.0 — must run BEFORE applyDocsBackfill
   await applyDocsBackfill(tp, mech, variables, history, git);          // NEW v0.50.0; renamed from applyWikiBackfill v0.52.0
+  await applyExternalPluginInstall(tp, mech, adapter.basePath || (typeof adapter.getBasePath === "function" ? adapter.getBasePath() : null), workshopPath, history, git);  // NEW v0.94.0 — install missing
   await applyExternalPlugins(tp, mech, history, git);
   await scaffoldFoundationalPluginData(tp, mech, workshopPath, variables, history, git);  // NEW v0.26.0
   await applyTemplaterHotkeys(tp, mech, variables, history, git);          // NEW v0.1.3
@@ -2788,6 +2789,110 @@ async function applyExternalPlugins(tp, manifest, history, git) {
         });
       }
     }
+  }
+}
+
+// applyExternalPluginInstall — v0.94.0. For each item that declares
+// external_plugins[], fetch any plugin whose .obsidian/plugins/<id>/manifest.json
+// is absent, then append id to community-plugins.json. Companion to the existing
+// applyExternalPlugins warning helper (which still runs after to nag the user
+// about required:true deps that remain disabled). Mirrors phaseFetchPlugins's
+// posture: per-plugin failures are caught into a failed[] list; the wider
+// install continues.
+async function applyExternalPluginInstall(tp, manifest, vaultPath, workshopPath, history, git) {
+  if (!manifest || !Array.isArray(manifest.external_plugins) || manifest.external_plugins.length === 0) return;
+
+  const path = require("path");
+  // Resolve bootstrap-lib: primary path is __dirname-relative (correct when
+  // install.js is loaded from platform/ directly). Fallback is workshop-relative
+  // (for alternate load paths). If neither resolves, skip gracefully so that
+  // downstream helpers (applyCommunityPluginData, etc.) still run.
+  let fetchPluginMod, indexMod, mergeMod;
+  const candidates = [
+    path.join(__dirname, "bootstrap-lib"),
+    path.join(workshopPath, "platform", "bootstrap-lib"),
+  ];
+  for (const dir of candidates) {
+    try {
+      fetchPluginMod = require(path.join(dir, "fetch-plugin.js"));
+      indexMod       = require(path.join(dir, "community-plugins-index.js"));
+      mergeMod       = require(path.join(dir, "community-plugins-merge.js"));
+      break;
+    } catch (_e) { fetchPluginMod = indexMod = mergeMod = null; }
+  }
+  if (!fetchPluginMod || !indexMod || !mergeMod) {
+    if (history) history.push({
+      event: "error", step: "external_plugin_install", name: manifest.name,
+      message: "bootstrap-lib unavailable; skipping external_plugins install",
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+      attempted_at: new Date().toISOString(),
+    });
+    return;
+  }
+
+  let index;
+  try {
+    index = await indexMod.fetchIndex();
+  } catch (e) {
+    new Notice(`applyExternalPluginInstall: cannot fetch community-plugins index (${e.message}); skipping for ${manifest.name}`, 8000);
+    if (history) history.push({
+      event: "error", step: "external_plugin_install", name: manifest.name,
+      message: `index fetch failed: ${e.message}`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+      attempted_at: new Date().toISOString(),
+    });
+    return;
+  }
+
+  const fetched = [], skipped = [], failed = [];
+
+  for (const dep of manifest.external_plugins) {
+    if (!dep || typeof dep.id !== "string") continue;
+    const id = dep.id;
+    const entry = index[id];
+    if (!entry) {
+      failed.push({ id, reason: `plugin id '${id}' not found in obsidian-releases index` });
+      if (history) history.push({
+        event: "error", step: "external_plugin_install", name: manifest.name,
+        plugin_id: id, message: `not found in obsidian-releases index`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+      continue;
+    }
+    try {
+      const r = await fetchPluginMod.fetchPlugin({ id, repo: entry.repo, vaultPath });
+      if (r.status === "skipped") {
+        skipped.push({ id });
+      } else if (r.status === "fetched") {
+        fetched.push({ id });
+        new Notice(`applyExternalPluginInstall: fetched ${id} from ${entry.repo}`, 6000);
+        if (history) history.push({
+          event: "fetched", step: "external_plugin_install", name: manifest.name,
+          plugin_id: id, repo: entry.repo,
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    } catch (e) {
+      failed.push({ id, reason: e.message });
+      new Notice(`applyExternalPluginInstall: failed to fetch ${id} (${e.message}); ${manifest.name} will still warn via applyExternalPlugins`, 10000);
+      if (history) history.push({
+        event: "error", step: "external_plugin_install", name: manifest.name,
+        plugin_id: id, message: e.message,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+  }
+
+  // Mirror phaseFetchPlugins:161 — append id to community-plugins.json for
+  // BOTH fetched AND skipped (skipped means dir already present; ensure the
+  // id is enabled). Failed installs are NOT added — the warning helper still
+  // surfaces them.
+  const installedIds = [...fetched.map(x => x.id), ...skipped.map(x => x.id)];
+  if (installedIds.length > 0) {
+    await mergeMod.mergeCommunityPlugins({ vaultPath, addIds: installedIds });
   }
 }
 
