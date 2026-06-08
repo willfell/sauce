@@ -758,6 +758,441 @@ async function caseBS19SmartConnectionsFromMechanism() {
     });
 }
 
+// ============================================================
+// v0.94.0 — HC-EPI-1..6: applyExternalPluginInstall (install-time)
+// These cases bypass bootstrap and call install.js in-process
+// (mirroring run-install.js's fake-tp pattern) so the install pass
+// exercises applyExternalPluginInstall end-to-end with https mocked.
+// ============================================================
+
+// Scope-adaptation (Lesson 5.6): install.js's exported runInstall()
+// spawns run-install.js in a subprocess, so the in-process https mock
+// would NOT intercept its https calls. Instead, we call install.js
+// directly with a fake tp/adapter shim (same pattern as run-install.js)
+// so withMockedHttps intercepts all fetches in-process.
+async function runInstallInProcess(vaultPath) {
+    const fsp = require("fs").promises;
+    const installerPath = path.resolve(__dirname, "../install.js");
+    // Bust require cache so each test gets a fresh installer state.
+    delete require.cache[require.resolve(installerPath)];
+    const installer = require(installerPath);
+    if (typeof installer !== "function") {
+        throw new Error(`install.js did not export a function (got ${typeof installer})`);
+    }
+
+    function abs(rel) { return path.join(vaultPath, rel); }
+    function existsSync(rel) {
+        try { fs.accessSync(abs(rel)); return true; } catch { return false; }
+    }
+
+    const adapter = {
+        basePath: vaultPath,
+        getBasePath() { return vaultPath; },
+        async read(p) { return fsp.readFile(abs(p), "utf8"); },
+        async write(p, content) {
+            await fsp.mkdir(path.dirname(abs(p)), { recursive: true });
+            await fsp.writeFile(abs(p), content, "utf8");
+        },
+        async exists(p) { return fsp.access(abs(p)).then(() => true, () => false); },
+        async mkdir(p) { await fsp.mkdir(abs(p), { recursive: true }); },
+        async list(p) {
+            const entries = await fsp.readdir(abs(p), { withFileTypes: true });
+            return {
+                files: entries.filter(e => e.isFile()).map(e => `${p}/${e.name}`),
+                folders: entries.filter(e => e.isDirectory()).map(e => `${p}/${e.name}`),
+            };
+        },
+        async remove(p) { await fsp.unlink(abs(p)); },
+        async stat(p) {
+            try {
+                const s = await fsp.stat(abs(p));
+                return { type: s.isDirectory() ? "folder" : "file", size: s.size, mtime: s.mtimeMs, ctime: s.ctimeMs };
+            } catch { return null; }
+        },
+    };
+
+    const vault = {
+        adapter,
+        getAbstractFileByPath(p) { return existsSync(p) ? { path: p } : null; },
+        async read(file) { return fsp.readFile(abs(file.path), "utf8"); },
+        async modify(file, text) {
+            await fsp.mkdir(path.dirname(abs(file.path)), { recursive: true });
+            await fsp.writeFile(abs(file.path), text, "utf8");
+        },
+        async create(p, text) {
+            await fsp.mkdir(path.dirname(abs(p)), { recursive: true });
+            await fsp.writeFile(abs(p), text, "utf8");
+        },
+        async createFolder(p) { await fsp.mkdir(abs(p), { recursive: true }); },
+    };
+
+    const tp = {
+        app: { vault },
+        system: {
+            async suggester(textItems, items) { return items[0]; }
+        },
+        user: {},
+    };
+
+    // Notice shim — install.js calls `new Notice(...)` as a global.
+    const prevNotice = global.Notice;
+    global.Notice = class Notice { constructor(msg) {} };
+    try {
+        await installer(tp);
+    } finally {
+        global.Notice = prevNotice;
+    }
+}
+
+async function caseHC_EPI_1_DirAbsentFetched() {
+    const label = "HC-EPI-1 plugin dir absent -> applyExternalPluginInstall fetches + updates community-plugins.json";
+    const indexMod = require("../bootstrap-lib/community-plugins-index.js");
+    if (typeof indexMod._clearCache === "function") indexMod._clearCache();
+    await withTempVault({}, async (vaultPath) => {
+        const sibling = fs.mkdtempSync(path.join(os.tmpdir(), "beacon-epi1-fixture-"));
+        try {
+            fs.mkdirSync(path.join(sibling, "platform/mechanisms/test-epi"), { recursive: true });
+            fs.writeFileSync(path.join(sibling, "platform/manifest.json"),
+                JSON.stringify({
+                    workshop_version: "0.94.0",
+                    foundational_plugins: [],
+                    mechanisms: [{ name: "test-epi", version: "0.1.0", path: "mechanisms/test-epi" }],
+                    blueprints: []
+                }, null, 2));
+            fs.writeFileSync(path.join(sibling, "platform/mechanisms/test-epi/manifest.json"),
+                JSON.stringify({
+                    name: "test-epi", version: "0.1.0", kind: "mechanism",
+                    external_plugins: [{ id: "realclaudian" }],
+                    files: []
+                }, null, 2));
+            seedConfig(vaultPath, {
+                config: { workshop_relative_path: path.relative(vaultPath, sibling) },
+                subscription: {
+                    workshop_version: "0.94.0",
+                    mechanisms: [{ name: "test-epi", version: "0.1.0" }],
+                    blueprints: []
+                }
+            });
+            // community-plugins.json must EXIST (else applyExternalPlugins short-circuits and aborts).
+            fs.writeFileSync(path.join(vaultPath, ".obsidian/community-plugins.json"), JSON.stringify([]), "utf8");
+
+            const indexBody = JSON.stringify([
+                { id: "realclaudian", name: "Claudian", repo: "YishenTu/claudian" }
+            ]);
+            const routes = Object.assign({},
+                { [MOCK_INDEX_URL]: { body: indexBody } },
+                pluginRoutes("realclaudian", "YishenTu/claudian")
+            );
+
+            // Bypass bootstrap; call install.js in-process so withMockedHttps
+            // intercepts all https calls made by applyExternalPluginInstall.
+            await withMockedHttps(routes, async () => {
+                await runInstallInProcess(vaultPath);
+            });
+
+            const dir = path.join(vaultPath, ".obsidian/plugins/realclaudian");
+            assertTrue(fs.existsSync(path.join(dir, "manifest.json")), label + ": manifest.json present");
+            assertTrue(fs.existsSync(path.join(dir, "main.js")), label + ": main.js present");
+            const cp = readJson(path.join(vaultPath, ".obsidian/community-plugins.json"));
+            assertTrue(cp.includes("realclaudian"), label + ": community-plugins.json contains realclaudian");
+        } finally {
+            fs.rmSync(sibling, { recursive: true, force: true });
+        }
+    });
+}
+
+async function caseHC_EPI_2_DirPresentSkipped() {
+    const label = "HC-EPI-2 plugin dir present -> fetch skipped, id still ensured in community-plugins.json";
+    const indexMod = require("../bootstrap-lib/community-plugins-index.js");
+    if (typeof indexMod._clearCache === "function") indexMod._clearCache();
+    await withTempVault({}, async (vaultPath) => {
+        const sibling = fs.mkdtempSync(path.join(os.tmpdir(), "beacon-epi2-fixture-"));
+        try {
+            fs.mkdirSync(path.join(sibling, "platform/mechanisms/test-epi"), { recursive: true });
+            fs.writeFileSync(path.join(sibling, "platform/manifest.json"),
+                JSON.stringify({
+                    workshop_version: "0.94.0", foundational_plugins: [],
+                    mechanisms: [{ name: "test-epi", version: "0.1.0", path: "mechanisms/test-epi" }],
+                    blueprints: []
+                }, null, 2));
+            fs.writeFileSync(path.join(sibling, "platform/mechanisms/test-epi/manifest.json"),
+                JSON.stringify({
+                    name: "test-epi", version: "0.1.0", kind: "mechanism",
+                    external_plugins: [{ id: "realclaudian" }],
+                    files: []
+                }, null, 2));
+            seedConfig(vaultPath, {
+                config: { workshop_relative_path: path.relative(vaultPath, sibling) },
+                subscription: {
+                    workshop_version: "0.94.0",
+                    mechanisms: [{ name: "test-epi", version: "0.1.0" }], blueprints: []
+                }
+            });
+            // Pre-seed the plugin dir with a valid manifest.json so fetchPlugin's
+            // skip-if-present check fires. Also pre-seed community-plugins.json
+            // as EMPTY so we can assert the id was added (not pre-existing).
+            const pluginDir = path.join(vaultPath, ".obsidian/plugins/realclaudian");
+            fs.mkdirSync(pluginDir, { recursive: true });
+            fs.writeFileSync(path.join(pluginDir, "manifest.json"),
+                JSON.stringify({ id: "realclaudian", version: "2.0.21", name: "Claudian" }), "utf8");
+            fs.writeFileSync(path.join(pluginDir, "main.js"), "// pre-existing\n", "utf8");
+            fs.writeFileSync(path.join(vaultPath, ".obsidian/community-plugins.json"), JSON.stringify([]), "utf8");
+
+            const indexBody = JSON.stringify([
+                { id: "realclaudian", name: "Claudian", repo: "YishenTu/claudian" }
+            ]);
+            // No pluginRoutes — if fetchPlugin tries to fetch (it shouldn't), test
+            // will fail with 404.
+            const routes = { [MOCK_INDEX_URL]: { body: indexBody } };
+
+            await withMockedHttps(routes, async () => {
+                await runInstallInProcess(vaultPath);
+            });
+
+            const cp = readJson(path.join(vaultPath, ".obsidian/community-plugins.json"));
+            assertTrue(cp.includes("realclaudian"), label + ": community-plugins.json contains realclaudian");
+            // Pre-existing main.js should still be the pre-seeded content (no overwrite).
+            const main = fs.readFileSync(path.join(pluginDir, "main.js"), "utf8");
+            assertTrue(main.includes("pre-existing"), label + ": pre-existing main.js NOT overwritten");
+        } finally {
+            fs.rmSync(sibling, { recursive: true, force: true });
+        }
+    });
+}
+
+async function caseHC_EPI_3_FetchFails() {
+    const label = "HC-EPI-3 fetch throws -> failed[]; dir absent; id not appended; downstream warning still fires";
+    const indexMod = require("../bootstrap-lib/community-plugins-index.js");
+    if (typeof indexMod._clearCache === "function") indexMod._clearCache();
+    await withTempVault({}, async (vaultPath) => {
+        const sibling = fs.mkdtempSync(path.join(os.tmpdir(), "beacon-epi3-fixture-"));
+        try {
+            fs.mkdirSync(path.join(sibling, "platform/mechanisms/test-epi"), { recursive: true });
+            fs.writeFileSync(path.join(sibling, "platform/manifest.json"),
+                JSON.stringify({
+                    workshop_version: "0.94.0", foundational_plugins: [],
+                    mechanisms: [{ name: "test-epi", version: "0.1.0", path: "mechanisms/test-epi" }],
+                    blueprints: []
+                }, null, 2));
+            fs.writeFileSync(path.join(sibling, "platform/mechanisms/test-epi/manifest.json"),
+                JSON.stringify({
+                    name: "test-epi", version: "0.1.0", kind: "mechanism",
+                    external_plugins: [{ id: "realclaudian", required: true }],
+                    files: []
+                }, null, 2));
+            seedConfig(vaultPath, {
+                config: { workshop_relative_path: path.relative(vaultPath, sibling) },
+                subscription: {
+                    workshop_version: "0.94.0",
+                    mechanisms: [{ name: "test-epi", version: "0.1.0" }], blueprints: []
+                }
+            });
+            fs.writeFileSync(path.join(vaultPath, ".obsidian/community-plugins.json"), JSON.stringify([]), "utf8");
+
+            const indexBody = JSON.stringify([
+                { id: "realclaudian", name: "Claudian", repo: "YishenTu/claudian" }
+            ]);
+            // skipManifest: true -> manifest.json returns 404 -> fetchPlugin throws
+            const routes = Object.assign({},
+                { [MOCK_INDEX_URL]: { body: indexBody } },
+                pluginRoutes("realclaudian", "YishenTu/claudian", { skipManifest: true })
+            );
+
+            await withMockedHttps(routes, async () => {
+                await runInstallInProcess(vaultPath);
+            });
+
+            const dir = path.join(vaultPath, ".obsidian/plugins/realclaudian");
+            assertTrue(!fs.existsSync(dir), label + ": plugin dir NOT created");
+            const cp = readJson(path.join(vaultPath, ".obsidian/community-plugins.json"));
+            assertTrue(!cp.includes("realclaudian"), label + ": id NOT appended on fetch failure");
+            // Inspect install history: expect an event:'error' for external_plugin_install
+            const installedPath = path.join(vaultPath, "ranch/platform-installed.json");
+            if (fs.existsSync(installedPath)) {
+                const installed = JSON.parse(fs.readFileSync(installedPath, "utf8"));
+                const errs = (installed.history || []).filter(h => h.step === "external_plugin_install" && h.event === "error");
+                assertTrue(errs.length >= 1, label + ": history has external_plugin_install error event");
+                // Downstream warning helper still fires for required:true
+                const warns = (installed.history || []).filter(h => h.step === "external_plugins" && h.event === "warning" && h.plugin_id === "realclaudian");
+                assertTrue(warns.length >= 1, label + ": downstream applyExternalPlugins warning still fires for required:true");
+            }
+        } finally {
+            fs.rmSync(sibling, { recursive: true, force: true });
+        }
+    });
+}
+
+async function caseHC_EPI_4_IndexFetchFails() {
+    const label = "HC-EPI-4 indexMod.fetchIndex throws -> early return; install continues";
+    const indexMod = require("../bootstrap-lib/community-plugins-index.js");
+    if (typeof indexMod._clearCache === "function") indexMod._clearCache();
+    await withTempVault({}, async (vaultPath) => {
+        const sibling = fs.mkdtempSync(path.join(os.tmpdir(), "beacon-epi4-fixture-"));
+        try {
+            fs.mkdirSync(path.join(sibling, "platform/mechanisms/test-epi"), { recursive: true });
+            fs.writeFileSync(path.join(sibling, "platform/manifest.json"),
+                JSON.stringify({
+                    workshop_version: "0.94.0", foundational_plugins: [],
+                    mechanisms: [{ name: "test-epi", version: "0.1.0", path: "mechanisms/test-epi" }],
+                    blueprints: []
+                }, null, 2));
+            fs.writeFileSync(path.join(sibling, "platform/mechanisms/test-epi/manifest.json"),
+                JSON.stringify({
+                    name: "test-epi", version: "0.1.0", kind: "mechanism",
+                    external_plugins: [{ id: "realclaudian" }],
+                    files: []
+                }, null, 2));
+            seedConfig(vaultPath, {
+                config: { workshop_relative_path: path.relative(vaultPath, sibling) },
+                subscription: {
+                    workshop_version: "0.94.0",
+                    mechanisms: [{ name: "test-epi", version: "0.1.0" }], blueprints: []
+                }
+            });
+            fs.writeFileSync(path.join(vaultPath, ".obsidian/community-plugins.json"), JSON.stringify([]), "utf8");
+
+            // No route for MOCK_INDEX_URL -> withMockedHttps responds 404 -> fetchIndex throws
+            const routes = pluginRoutes("realclaudian", "YishenTu/claudian");
+
+            await withMockedHttps(routes, async () => {
+                await runInstallInProcess(vaultPath);  // must NOT throw
+            });
+
+            const dir = path.join(vaultPath, ".obsidian/plugins/realclaudian");
+            assertTrue(!fs.existsSync(dir), label + ": plugin dir NOT created");
+            const installedPath = path.join(vaultPath, "ranch/platform-installed.json");
+            assertTrue(fs.existsSync(installedPath), label + ": install completed (platform-installed.json written)");
+            const installed = JSON.parse(fs.readFileSync(installedPath, "utf8"));
+            const idxErrs = (installed.history || []).filter(h =>
+                h.step === "external_plugin_install" && h.event === "error" && /index fetch failed/.test(h.message || "")
+            );
+            assertTrue(idxErrs.length >= 1, label + ": history has index-fetch-failed error event");
+        } finally {
+            fs.rmSync(sibling, { recursive: true, force: true });
+        }
+    });
+}
+
+async function caseHC_EPI_5_IdNotInIndex() {
+    const label = "HC-EPI-5 plugin id missing from index -> failed[]; no fetch attempted";
+    const indexMod = require("../bootstrap-lib/community-plugins-index.js");
+    if (typeof indexMod._clearCache === "function") indexMod._clearCache();
+    await withTempVault({}, async (vaultPath) => {
+        const sibling = fs.mkdtempSync(path.join(os.tmpdir(), "beacon-epi5-fixture-"));
+        try {
+            fs.mkdirSync(path.join(sibling, "platform/mechanisms/test-epi"), { recursive: true });
+            fs.writeFileSync(path.join(sibling, "platform/manifest.json"),
+                JSON.stringify({
+                    workshop_version: "0.94.0", foundational_plugins: [],
+                    mechanisms: [{ name: "test-epi", version: "0.1.0", path: "mechanisms/test-epi" }],
+                    blueprints: []
+                }, null, 2));
+            fs.writeFileSync(path.join(sibling, "platform/mechanisms/test-epi/manifest.json"),
+                JSON.stringify({
+                    name: "test-epi", version: "0.1.0", kind: "mechanism",
+                    external_plugins: [{ id: "plugin-that-does-not-exist-anywhere" }],
+                    files: []
+                }, null, 2));
+            seedConfig(vaultPath, {
+                config: { workshop_relative_path: path.relative(vaultPath, sibling) },
+                subscription: {
+                    workshop_version: "0.94.0",
+                    mechanisms: [{ name: "test-epi", version: "0.1.0" }], blueprints: []
+                }
+            });
+            fs.writeFileSync(path.join(vaultPath, ".obsidian/community-plugins.json"), JSON.stringify([]), "utf8");
+
+            // Index returns an empty array (the plugin id is not present).
+            const indexBody = JSON.stringify([]);
+            const routes = { [MOCK_INDEX_URL]: { body: indexBody } };
+
+            await withMockedHttps(routes, async (ctx) => {
+                await runInstallInProcess(vaultPath);
+                // No plugin fetch attempts beyond the index fetch itself.
+                const log = ctx.getCallLog();
+                const pluginFetchCalls = log.filter(u => /\/releases\/latest\/download\//.test(u));
+                assertTrue(pluginFetchCalls.length === 0, label + ": no fetch attempted for missing id");
+            });
+
+            const installedPath = path.join(vaultPath, "ranch/platform-installed.json");
+            assertTrue(fs.existsSync(installedPath), label + ": install completed");
+            const installed = JSON.parse(fs.readFileSync(installedPath, "utf8"));
+            const errs = (installed.history || []).filter(h =>
+                h.step === "external_plugin_install" && h.event === "error"
+                && h.plugin_id === "plugin-that-does-not-exist-anywhere"
+                && /not found in obsidian-releases index/.test(h.message || "")
+            );
+            assertTrue(errs.length >= 1, label + ": history has not-in-index error event");
+        } finally {
+            fs.rmSync(sibling, { recursive: true, force: true });
+        }
+    });
+}
+
+async function caseHC_EPI_6_EndToEndChain() {
+    const label = "HC-EPI-6 end-to-end: fetch new-tab-default-page + applyCommunityPluginData writes data.json";
+    const indexMod = require("../bootstrap-lib/community-plugins-index.js");
+    if (typeof indexMod._clearCache === "function") indexMod._clearCache();
+    await withTempVault({}, async (vaultPath) => {
+        const sibling = fs.mkdtempSync(path.join(os.tmpdir(), "beacon-epi6-fixture-"));
+        try {
+            fs.mkdirSync(path.join(sibling, "platform/mechanisms/test-epi-chain"), { recursive: true });
+            fs.writeFileSync(path.join(sibling, "platform/manifest.json"),
+                JSON.stringify({
+                    workshop_version: "0.94.0", foundational_plugins: [],
+                    mechanisms: [{ name: "test-epi-chain", version: "0.1.0", path: "mechanisms/test-epi-chain" }],
+                    blueprints: []
+                }, null, 2));
+            fs.writeFileSync(path.join(sibling, "platform/mechanisms/test-epi-chain/manifest.json"),
+                JSON.stringify({
+                    name: "test-epi-chain", version: "0.1.0", kind: "mechanism",
+                    external_plugins: [{ id: "new-tab-default-page" }],
+                    community_plugin_settings: [{
+                        id: "new-tab-default-page",
+                        settings: { whatToOpen: "daily-notes", filePath: "", mode: "reading-mode", compatibilityMode: false }
+                    }],
+                    files: []
+                }, null, 2));
+            seedConfig(vaultPath, {
+                config: { workshop_relative_path: path.relative(vaultPath, sibling) },
+                subscription: {
+                    workshop_version: "0.94.0",
+                    mechanisms: [{ name: "test-epi-chain", version: "0.1.0" }], blueprints: []
+                }
+            });
+            fs.writeFileSync(path.join(vaultPath, ".obsidian/community-plugins.json"), JSON.stringify([]), "utf8");
+
+            const indexBody = JSON.stringify([
+                { id: "new-tab-default-page", name: "Default New Tab Page", repo: "chrisgrieser/obsidian-new-tab-default-page" }
+            ]);
+            const routes = Object.assign({},
+                { [MOCK_INDEX_URL]: { body: indexBody } },
+                pluginRoutes("new-tab-default-page", "chrisgrieser/obsidian-new-tab-default-page")
+            );
+
+            await withMockedHttps(routes, async () => {
+                await runInstallInProcess(vaultPath);
+            });
+
+            const dir = path.join(vaultPath, ".obsidian/plugins/new-tab-default-page");
+            assertTrue(fs.existsSync(path.join(dir, "manifest.json")), label + ": plugin dir + manifest present");
+            const cp = readJson(path.join(vaultPath, ".obsidian/community-plugins.json"));
+            assertTrue(cp.includes("new-tab-default-page"), label + ": community-plugins.json contains id");
+            // The chain: applyCommunityPluginData found the dir present and wrote data.json
+            const dataPath = path.join(dir, "data.json");
+            const dataExists = fs.existsSync(dataPath);
+            assertTrue(dataExists, label + ": data.json scaffolded by applyCommunityPluginData");
+            if (dataExists) {
+                const data = JSON.parse(fs.readFileSync(dataPath, "utf8"));
+                assertTrue(data.whatToOpen === "daily-notes", label + ": data.json whatToOpen correct");
+                assertTrue(data.mode === "reading-mode", label + ": data.json mode correct");
+            }
+        } finally {
+            fs.rmSync(sibling, { recursive: true, force: true });
+        }
+    });
+}
+
 // BS13: phaseWriteActivation atomic write + backup-on-overwrite
 async function caseBS13ActivationAtomicAndBackup() {
     const label = "BS13 phaseWriteActivation atomic write + backup-on-overwrite";
@@ -804,7 +1239,14 @@ const cases = {
         caseBS17NoDuplicateWhenAlreadyPresent,
         // v0.93.3 — convenience installs new-tab-default-page; sc-bridge installs smart-connections
         caseBS18NewTabDefaultPageFromMechanism,
-        caseBS19SmartConnectionsFromMechanism
+        caseBS19SmartConnectionsFromMechanism,
+        // v0.94.0 — applyExternalPluginInstall (install-time companion to phaseFetchPlugins)
+        caseHC_EPI_1_DirAbsentFetched,
+        caseHC_EPI_2_DirPresentSkipped,
+        caseHC_EPI_3_FetchFails,
+        caseHC_EPI_4_IndexFetchFails,
+        caseHC_EPI_5_IdNotInIndex,
+        caseHC_EPI_6_EndToEndChain
     ]
 };
 
