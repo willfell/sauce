@@ -11283,6 +11283,248 @@ type: cowork-microscope
     assertTrue("HC-V0950-PLAN-DISPATCH-C: defensive contract", false, e && e.message);
   }
 
+  // ============================================================================
+  // v0.95.1 — K1 (anti_echo render aspect): TDD-RED at S1.1
+  //
+  // Knob 1 ships a new render aspect (`render_aspects.anti_echo`) plus a 13th
+  // plan-dispatch contract key (`excluded_themes[]`) plus a compose-body
+  // injection guarded by cadence eligibility. The five labelled groups below
+  // (K1-A…K1-E) are RED at S1.1 commit time — they exercise helpers/exports
+  // that don't yet exist:
+  //   * dispatch-plan-helper.js: deriveExcludedThemes(yesterdayMemory)
+  //   * dispatch-plan-helper.js: planDispatch({…, yesterdayMemory}) returning
+  //     a 13th key `excluded_themes`
+  //   * compose-body-helper.js: ANTI_ECHO_ELIGIBLE_CADENCES,
+  //     injectAntiEchoCallout(body, excluded_themes, voice_contract), plus
+  //     composeBody wiring an `excluded_themes`-driven branch.
+  // S1.2 + S1.3 + S1.4 turn these GREEN. Pre-v0.95.1 cases unchanged.
+  // ============================================================================
+
+  console.log(`\n--- Case HC-V0951-K1-A: deriveExcludedThemes helper unit ---`);
+  try {
+    const DPH = require(path.join(WORKSHOP, "platform/blueprints/cowork/helpers/dispatch-plan-helper.js"));
+    // A1: happy path — carry_forward_bullets array yields verbatim strings.
+    const yesterdayA1 = {
+      carry_forward_bullets: [
+        "Q3 planning: any reply from Diana yet?",
+        "Tickets 705679 + 706012 still In Review",
+        "Saturday cabin trip — confirm route w/ Sarah",
+      ],
+    };
+    const a1 = typeof DPH.deriveExcludedThemes === "function"
+      ? DPH.deriveExcludedThemes(yesterdayA1)
+      : null;
+    assertTrue("HC-V0951-K1-A1: deriveExcludedThemes returns carry-forward bullets verbatim",
+      Array.isArray(a1) && a1.length === 3
+      && a1[0] === yesterdayA1.carry_forward_bullets[0]
+      && a1[1] === yesterdayA1.carry_forward_bullets[1]
+      && a1[2] === yesterdayA1.carry_forward_bullets[2]);
+
+    // A2: null/undefined yesterdayMemory yields [].
+    const a2null  = typeof DPH.deriveExcludedThemes === "function" ? DPH.deriveExcludedThemes(null)      : null;
+    const a2undef = typeof DPH.deriveExcludedThemes === "function" ? DPH.deriveExcludedThemes(undefined) : null;
+    assertTrue("HC-V0951-K1-A2: deriveExcludedThemes returns [] for null/undefined memory",
+      Array.isArray(a2null) && a2null.length === 0
+      && Array.isArray(a2undef) && a2undef.length === 0);
+
+    // A3: missing or empty carry_forward_bullets yields [].
+    const a3missing = typeof DPH.deriveExcludedThemes === "function" ? DPH.deriveExcludedThemes({ synthesis_paragraph: "x" }) : null;
+    const a3empty   = typeof DPH.deriveExcludedThemes === "function" ? DPH.deriveExcludedThemes({ carry_forward_bullets: [] }) : null;
+    const a3whitey  = typeof DPH.deriveExcludedThemes === "function" ? DPH.deriveExcludedThemes({ carry_forward_bullets: ["   ", ""] }) : null;
+    assertTrue("HC-V0951-K1-A3: deriveExcludedThemes returns [] for missing/empty/whitespace bullets",
+      Array.isArray(a3missing) && a3missing.length === 0
+      && Array.isArray(a3empty)   && a3empty.length   === 0
+      && Array.isArray(a3whitey)  && a3whitey.length  === 0);
+  } catch (e) {
+    assertTrue("HC-V0951-K1-A: deriveExcludedThemes helper unit", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0951-K1-B: plan-dispatch contract emits excluded_themes[] ---`);
+  try {
+    const DPH = require(path.join(WORKSHOP, "platform/blueprints/cowork/helpers/dispatch-plan-helper.js"));
+    const PERSONAL = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/cowork/engagement-types/personal.json"), "utf8"));
+    const yesterdayMemory = {
+      carry_forward_bullets: [
+        "Q3 planning: any reply from Diana yet?",
+        "Tickets 705679 + 706012 still In Review",
+      ],
+    };
+    const baseEngagement = { id: "personal-fixture", type: "personal", label: "Personal" };
+    const baseMcps = {
+      calendar: { kind: "calendar", served_by: "iMCP", connected: true },
+      email:    { kind: "email",    served_by: "iMCP", connected: true },
+      chat:     { kind: "chat",     served_by: "iMCP", connected: true },
+    };
+    const reachable = new Set(["iMCP"]);
+    const mcpSkillMap = { kinds: [
+      { kind: "calendar", gather_skill: "cowork:gather-calendar" },
+      { kind: "email",    gather_skill: "cowork:gather-email" },
+      { kind: "chat",     gather_skill: "cowork:gather-chat" },
+    ]};
+    const prefsBase = { priorities: ["calendar", "email", "chat"], mcps: baseMcps };
+
+    // B1: render_aspects.anti_echo == "include" + yesterdayMemory present → contract.excluded_themes
+    // contains the bullet strings verbatim.
+    const overridesOn = { render_aspects: { anti_echo: "include" } };
+    const contractB1 = DPH.planDispatch({
+      prefs: prefsBase,
+      reachableNamespaces: reachable,
+      mcpSkillMap,
+      microscopes: null,
+      engagement: baseEngagement,
+      bundle: PERSONAL,
+      overrides: overridesOn,
+      yesterdayMemory,
+    });
+    const b1Themes = contractB1 && !Array.isArray(contractB1) ? contractB1.excluded_themes : undefined;
+    assertTrue("HC-V0951-K1-B1: contract.excluded_themes === yesterday bullets when anti_echo == include",
+      Array.isArray(b1Themes)
+      && b1Themes.length === 2
+      && b1Themes[0] === yesterdayMemory.carry_forward_bullets[0]
+      && b1Themes[1] === yesterdayMemory.carry_forward_bullets[1]);
+
+    // B2: render_aspects.anti_echo == "skip" → contract.excluded_themes is [] (always-present key).
+    const overridesOff = { render_aspects: { anti_echo: "skip" } };
+    const contractB2 = DPH.planDispatch({
+      prefs: prefsBase,
+      reachableNamespaces: reachable,
+      mcpSkillMap,
+      microscopes: null,
+      engagement: baseEngagement,
+      bundle: PERSONAL,
+      overrides: overridesOff,
+      yesterdayMemory,
+    });
+    const b2Themes = contractB2 && !Array.isArray(contractB2) ? contractB2.excluded_themes : undefined;
+    assertTrue("HC-V0951-K1-B2: contract.excluded_themes === [] when anti_echo == skip (always-present key)",
+      Array.isArray(b2Themes) && b2Themes.length === 0);
+  } catch (e) {
+    assertTrue("HC-V0951-K1-B: plan-dispatch contract excluded_themes key", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0951-K1-C: compose-body anti-echo callout injection on/off ---`);
+  try {
+    const CBH = require(path.join(WORKSHOP, "platform/blueprints/cowork/helpers/compose-body-helper.js"));
+    const baseInput = {
+      cadence: "morning-briefing",
+      nav_buttons_block: '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });\n```',
+      synopsis_md: "> [!info]+ Today\n> A quick synopsis.",
+      memory_callouts: {},
+      ordered_blocks: [
+        { kind: "calendar", callout_type: "example", title: "Today's calendar", body_md: "9am standup" },
+      ],
+      engagement_type_blocks: [],
+      closing_md: "> [!tip] Pep talk\n> Go get it.",
+      voice_contract: "Voice contract …",
+    };
+
+    // C1: excluded_themes non-empty → body contains anti-echo callout (requires S1.2 wiring).
+    const c1 = CBH.composeBody(Object.assign({}, baseInput, { excluded_themes: ["Q3 planning", "Ticket 705679"] }));
+    assertTrue("HC-V0951-K1-C1: body contains [!question] Outside yesterday's frame when excluded_themes non-empty",
+      c1 && c1.status === "ok" && typeof c1.body_md === "string"
+      && c1.body_md.includes("[!question]")
+      && c1.body_md.includes("Outside yesterday's frame"));
+
+    // C2: injectAntiEchoCallout helper exported + behaviour-correct AND excluded_themes empty/absent
+    // → body does NOT contain anti-echo callout. The helper-export check makes C2 RED at S1.1 commit
+    // time even though the "no callout" side passes vacuously today.
+    const injectFn = CBH.injectAntiEchoCallout;
+    const helperExists = typeof injectFn === "function";
+    let injectsWhenCalled = false;
+    if (helperExists) {
+      try {
+        const tmp = injectFn("body before\n", ["theme one", "theme two"], "Voice contract: casual.");
+        injectsWhenCalled = typeof tmp === "string"
+          && tmp.includes("[!question]")
+          && tmp.includes("Outside yesterday's frame");
+      } catch (_e) { /* leaves injectsWhenCalled = false */ }
+    }
+    const c2empty = CBH.composeBody(Object.assign({}, baseInput, { excluded_themes: [] }));
+    const c2undef = CBH.composeBody(baseInput); // excluded_themes omitted entirely
+    const hasCalloutEmpty = c2empty && typeof c2empty.body_md === "string"
+      && (c2empty.body_md.includes("[!question]") || c2empty.body_md.includes("Outside yesterday's frame"));
+    const hasCalloutUndef = c2undef && typeof c2undef.body_md === "string"
+      && (c2undef.body_md.includes("[!question]") || c2undef.body_md.includes("Outside yesterday's frame"));
+    assertTrue("HC-V0951-K1-C2: injectAntiEchoCallout exported + injects callout when called, AND empty/absent excluded_themes yields no callout",
+      helperExists
+      && injectsWhenCalled
+      && c2empty && c2empty.status === "ok" && c2undef && c2undef.status === "ok"
+      && !hasCalloutEmpty && !hasCalloutUndef);
+  } catch (e) {
+    assertTrue("HC-V0951-K1-C: compose-body anti-echo callout injection", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0951-K1-D: anti-echo callout cadence-eligibility guard ---`);
+  try {
+    const CBH = require(path.join(WORKSHOP, "platform/blueprints/cowork/helpers/compose-body-helper.js"));
+    // D0: Eligibility const exists + lists the three eligible cadences (and excludes weekly/monthly).
+    const elig = CBH.ANTI_ECHO_ELIGIBLE_CADENCES;
+    const eligOk = Array.isArray(elig)
+      && elig.includes("morning-briefing")
+      && elig.includes("midday-tripwire")
+      && elig.includes("eod-review")
+      && !elig.includes("weekly-review")
+      && !elig.includes("monthly-review");
+
+    // D1: under an eligible cadence WITH excluded_themes, callout MUST be present
+    // (proves the guard is "open" for the right cadences). Under weekly/monthly with
+    // excluded_themes, callout MUST be absent (proves the guard is "closed" elsewhere).
+    const mkInput = (cadence) => ({
+      cadence,
+      nav_buttons_block: '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });\n```',
+      synopsis_md: "> [!info]+ Synopsis\n> body",
+      memory_callouts: {},
+      ordered_blocks: [{ kind: "calendar", callout_type: "example", title: "Today's calendar", body_md: "x" }],
+      engagement_type_blocks: [],
+      closing_md: "> [!tip] Pep talk\n> Go.",
+      excluded_themes: ["something carried over"],
+    });
+    const morning = CBH.composeBody(mkInput("morning-briefing"));
+    const midday  = CBH.composeBody(mkInput("midday-tripwire"));
+    const eod     = CBH.composeBody(mkInput("eod-review"));
+    const weekly  = CBH.composeBody(mkInput("weekly-review"));
+    const monthly = CBH.composeBody(mkInput("monthly-review"));
+    const hasCallout = (r) => r && typeof r.body_md === "string"
+      && (r.body_md.includes("[!question]") || r.body_md.includes("Outside yesterday's frame"));
+    const eligibleAllInject = hasCallout(morning) && hasCallout(midday) && hasCallout(eod);
+    const ineligibleAllSkip = !hasCallout(weekly) && !hasCallout(monthly);
+
+    assertTrue("HC-V0951-K1-D: ANTI_ECHO_ELIGIBLE_CADENCES exported, eligible cadences inject + weekly/monthly skip",
+      eligOk
+      && eligibleAllInject
+      && ineligibleAllSkip
+      && morning && morning.status === "ok"
+      && midday  && midday.status  === "ok"
+      && eod     && eod.status     === "ok"
+      && weekly  && weekly.status  === "ok"
+      && monthly && monthly.status === "ok");
+  } catch (e) {
+    assertTrue("HC-V0951-K1-D: cadence-eligibility guard", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0951-K1-E: anti-echo callout canonical regex shape ---`);
+  try {
+    const CBH = require(path.join(WORKSHOP, "platform/blueprints/cowork/helpers/compose-body-helper.js"));
+    const input = {
+      cadence: "morning-briefing",
+      nav_buttons_block: '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });\n```',
+      synopsis_md: "> [!info]+ Synopsis\n> body",
+      memory_callouts: {},
+      ordered_blocks: [{ kind: "calendar", callout_type: "example", title: "Today's calendar", body_md: "x" }],
+      engagement_type_blocks: [],
+      closing_md: "> [!tip] Pep talk\n> Go.",
+      excluded_themes: ["Q3 planning"],
+      voice_contract: "Voice contract: casual.",
+    };
+    const r = CBH.composeBody(input);
+    // Canonical pre-LLM-fill shape: callout header line followed by a "> "-prefixed body line.
+    const canonical = /> \[!question\]([+\-]?)\s+Outside yesterday's frame\n> /;
+    assertTrue("HC-V0951-K1-E: anti-echo callout matches canonical pre-LLM-fill regex `> [!question] Outside yesterday's frame\\n> `",
+      r && r.status === "ok" && typeof r.body_md === "string" && canonical.test(r.body_md));
+  } catch (e) {
+    assertTrue("HC-V0951-K1-E: anti-echo callout canonical regex shape", false, e && e.message);
+  }
+
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
   if (fail > 0) {
