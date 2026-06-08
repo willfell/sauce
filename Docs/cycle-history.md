@@ -24,7 +24,7 @@ Workshop 0.93.3 → **0.94.0** (MINOR). Closes the v0.93.3 existing-consumer ins
 - accuris-sauce: `sauce update --bump-pins` ran clean. Pins bumped. realclaudian auto-installed (or skipped-if-present per current state).
 - headspace-sauce: `sauce update --bump-pins` ran clean. **The load-bearing demo**: `.obsidian/plugins/new-tab-default-page/` and `.obsidian/plugins/realclaudian/` both now present; `community-plugins.json` includes both; new-tab-default-page's `data.json` scaffolded by the chain. The v0.93.3 manual-install workflow becomes a historical artifact.
 
-**Commits:** S0 baseline (36bc60b); S1.1 tests RED (b8daa11); S1.2 helper GREEN (7df7073); S1.3 convenience manifest (451d778); S1.4 workshop + package bump + VERSION pin sweep (0a31930); S1.5 landmine #17 (7780133); S2 dogfood + ranch (34d4f59); S2 addendum community-plugins.json dogfood (e40bcb1); S3 cycle-close.
+**Commits:** S0 baseline (36bc60b); S1.1 tests RED (b8daa11); S1.2 helper GREEN (7df7073); S1.3 convenience manifest (451d778); S1.4 workshop + package bump + VERSION pin sweep (0a31930); S1.5 landmine #17 (7780133); S2 dogfood + ranch (34d4f59); S2 addendum community-plugins.json dogfood (e40bcb1); S3 cycle-close (b6d1c10).
 
 See `Docs/plans/2026-06-07-v0.94.0-applyExternalPluginInstall-{design,plan,result}.md`.
 
