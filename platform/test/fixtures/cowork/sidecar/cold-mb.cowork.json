@@ -1,0 +1,28 @@
+{
+  "schema_version": "1.0.0",
+  "generated_by": "cowork:morning-briefing@2.0.0",
+  "generated_at": "2026-06-08T08:00:14-06:00",
+  "cadence": "morning-briefing",
+  "engagement_id": "personal",
+  "frontmatter": {
+    "type": "cowork-morning-briefing-cold",
+    "engagement_id": "personal",
+    "day": "2026-06-08",
+    "title": "Morning Briefing (cold) - Monday, June 8, 2026",
+    "summary": "Cold MB variant — no yesterday memory; lens_shift cadence fired this morning.",
+    "created_at": "2026-06-08T08:00:14-06:00"
+  },
+  "surfaced_kinds": [],
+  "surfaced_items": [],
+  "render_aspects_applied": ["finance_block:skip", "lens_shift:include"],
+  "memory_used": {
+    "yesterday_present": false,
+    "drift_warning_present": false,
+    "echoes_count": 0
+  },
+  "plan_dispatch": {
+    "mode": "prefs",
+    "kinds_dispatched": 0,
+    "warnings_emitted": 0
+  }
+}

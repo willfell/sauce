@@ -1,0 +1,49 @@
+{
+  "schema_version": "1.0.0",
+  "generated_by": "cowork:morning-briefing@2.0.0",
+  "generated_at": "2026-06-08T08:00:14-06:00",
+  "cadence": "morning-briefing",
+  "engagement_id": "personal",
+  "frontmatter": {
+    "type": "cowork-morning-briefing",
+    "engagement_id": "personal",
+    "day": "2026-06-08",
+    "title": "Morning Briefing - Monday, June 8, 2026",
+    "summary": "Two surfaced_items entries share the same item_id — duplicate collision case.",
+    "created_at": "2026-06-08T08:00:14-06:00"
+  },
+  "surfaced_kinds": ["calendar"],
+  "surfaced_items": [
+    {
+      "item_id": "cal-personal-2026-06-08-0900-standup",
+      "kind": "calendar",
+      "callout_type": "example",
+      "title": "9:00 AM Standup",
+      "features": {
+        "time_of_day_bucket": "morning",
+        "is_warning": false
+      }
+    },
+    {
+      "item_id": "cal-personal-2026-06-08-0900-standup",
+      "kind": "calendar",
+      "callout_type": "example",
+      "title": "9:00 AM Standup (duplicate)",
+      "features": {
+        "time_of_day_bucket": "morning",
+        "is_warning": false
+      }
+    }
+  ],
+  "render_aspects_applied": ["finance_block:skip"],
+  "memory_used": {
+    "yesterday_present": true,
+    "drift_warning_present": false,
+    "echoes_count": 0
+  },
+  "plan_dispatch": {
+    "mode": "prefs",
+    "kinds_dispatched": 1,
+    "warnings_emitted": 0
+  }
+}

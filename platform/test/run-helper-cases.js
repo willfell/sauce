@@ -12486,6 +12486,422 @@ type: cowork-microscope
     assertTrue("HC-V0951-X-G: activity-feed surfaces cold MB type", false, e && e.message);
   }
 
+  // ============================================================================
+  // v0.96.0 — Rail W (sidecar determinism): TDD-RED at S1.1
+  //
+  // Rail W ships a structured per-atomic-note sidecar (`<basename>.cowork.json`),
+  // a 6-cadence JSON Schema set (draft-07), and 2 new helpers:
+  //   * helpers/validate-sidecar-helper.js  — validateSidecar(payload, schemaPath)
+  //                                          + validatePreCycleNote(mdPath)
+  //   * helpers/write-atomic-note-helper.js — writeAtomicNote({ mdPath,
+  //                                          sidecarPath, body_md, sidecar_json,
+  //                                          schemaPath }) with validate-before-
+  //                                          write semantics and atomic rollback
+  //   * data/schemas/{morning-briefing,midday-tripwire,eod-review,
+  //                   weekly-review,monthly-review,morning-briefing-cold}@1.0.0.json
+  //
+  // composeBody (extended) returns `{ body_md, sidecar_json, status }`,
+  // retiring the v0.91.x–v0.92.0 body_assertions[] field.
+  //
+  // The 18 cases below (HC-V0960-W-1..18) are RED at S1.1 commit time —
+  // every helper/schema/contract they exercise is not-yet-implemented. S1.2
+  // turns W-1, -2, -12..-15, -17 GREEN. S1.3 turns W-3..-11 GREEN. S1.6 turns
+  // W-18 GREEN. W-16 follows composeBody's compose-body-helper extension
+  // (S1.4–S1.5). Fixtures live at platform/test/fixtures/cowork/sidecar/.
+  // ============================================================================
+
+  const SIDECAR_FIXTURES_DIR = path.join(WORKSHOP, "platform/test/fixtures/cowork/sidecar");
+  const COWORK_HELPERS_DIR   = path.join(WORKSHOP, "platform/blueprints/cowork/helpers");
+  const COWORK_SCHEMAS_DIR   = path.join(WORKSHOP, "platform/blueprints/cowork/data/schemas");
+  const MB_SCHEMA_PATH       = path.join(COWORK_SCHEMAS_DIR, "morning-briefing@1.0.0.json");
+
+  console.log(`\n--- Case HC-V0960-W-1: validate-sidecar-helper.js exports validateSidecar ---`);
+  try {
+    const helperPath = path.join(COWORK_HELPERS_DIR, "validate-sidecar-helper.js");
+    delete require.cache[require.resolve(helperPath)];
+    const VSH = require(helperPath);
+    assertTrue("HC-V0960-W-1: validate-sidecar-helper.js exports validateSidecar(payload, schemaPath)",
+      VSH && typeof VSH.validateSidecar === "function" && VSH.validateSidecar.length >= 2);
+  } catch (e) {
+    assertTrue("HC-V0960-W-1: validate-sidecar-helper.js exports validateSidecar(payload, schemaPath)", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0960-W-2: validateSidecar returns { ok: true } for minimal MB sidecar ---`);
+  try {
+    const helperPath = path.join(COWORK_HELPERS_DIR, "validate-sidecar-helper.js");
+    delete require.cache[require.resolve(helperPath)];
+    const { validateSidecar } = require(helperPath);
+    const payload = JSON.parse(fs.readFileSync(path.join(SIDECAR_FIXTURES_DIR, "minimal-morning-briefing.cowork.json"), "utf8"));
+    const result = validateSidecar(payload, MB_SCHEMA_PATH);
+    assertTrue("HC-V0960-W-2: validateSidecar returns { ok: true } for the minimal valid MB sidecar fixture",
+      result && result.ok === true);
+  } catch (e) {
+    assertTrue("HC-V0960-W-2: validateSidecar returns { ok: true } for the minimal valid MB sidecar fixture", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0960-W-3: validateSidecar rejects payload missing schema_version ---`);
+  try {
+    const helperPath = path.join(COWORK_HELPERS_DIR, "validate-sidecar-helper.js");
+    delete require.cache[require.resolve(helperPath)];
+    const { validateSidecar } = require(helperPath);
+    const payload = JSON.parse(fs.readFileSync(path.join(SIDECAR_FIXTURES_DIR, "missing-version.cowork.json"), "utf8"));
+    const result = validateSidecar(payload, MB_SCHEMA_PATH);
+    assertTrue("HC-V0960-W-3: validateSidecar returns { ok: false, errors: [...] } when schema_version missing",
+      result && result.ok === false && Array.isArray(result.errors) && result.errors.length > 0);
+  } catch (e) {
+    assertTrue("HC-V0960-W-3: validateSidecar returns { ok: false, errors: [...] } when schema_version missing", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0960-W-4: validateSidecar rejects surfaced_kinds not-an-array ---`);
+  try {
+    const helperPath = path.join(COWORK_HELPERS_DIR, "validate-sidecar-helper.js");
+    delete require.cache[require.resolve(helperPath)];
+    const { validateSidecar } = require(helperPath);
+    const payload = JSON.parse(fs.readFileSync(path.join(SIDECAR_FIXTURES_DIR, "bad-kinds.cowork.json"), "utf8"));
+    const result = validateSidecar(payload, MB_SCHEMA_PATH);
+    assertTrue("HC-V0960-W-4: validateSidecar returns { ok: false } when surfaced_kinds is not an array",
+      result && result.ok === false);
+  } catch (e) {
+    assertTrue("HC-V0960-W-4: validateSidecar returns { ok: false } when surfaced_kinds is not an array", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0960-W-5: validateSidecar rejects duplicate item_id within one sidecar ---`);
+  try {
+    const helperPath = path.join(COWORK_HELPERS_DIR, "validate-sidecar-helper.js");
+    delete require.cache[require.resolve(helperPath)];
+    const { validateSidecar } = require(helperPath);
+    const payload = JSON.parse(fs.readFileSync(path.join(SIDECAR_FIXTURES_DIR, "duplicate-item-id.cowork.json"), "utf8"));
+    const result = validateSidecar(payload, MB_SCHEMA_PATH);
+    assertTrue("HC-V0960-W-5: validateSidecar returns { ok: false } when surfaced_items[].item_id collides within one sidecar",
+      result && result.ok === false);
+  } catch (e) {
+    assertTrue("HC-V0960-W-5: validateSidecar returns { ok: false } when surfaced_items[].item_id collides within one sidecar", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0960-W-6: morning-briefing@1.0.0.json schema exists + draft-07 valid ---`);
+  try {
+    const schemaPath = path.join(COWORK_SCHEMAS_DIR, "morning-briefing@1.0.0.json");
+    if (!fs.existsSync(schemaPath)) {
+      throw new Error(`schema file missing: ${schemaPath}`);
+    }
+    const schema = JSON.parse(fs.readFileSync(schemaPath, "utf8"));
+    const isDraft07 = typeof schema.$schema === "string"
+      && schema.$schema.indexOf("draft-07") !== -1;
+    const looksLikeSchema = schema && typeof schema.type === "string" && schema.properties && typeof schema.properties === "object";
+    assertTrue("HC-V0960-W-6: data/schemas/morning-briefing@1.0.0.json exists and parses as valid JSON Schema draft-07",
+      isDraft07 && looksLikeSchema);
+  } catch (e) {
+    assertTrue("HC-V0960-W-6: data/schemas/morning-briefing@1.0.0.json exists and parses as valid JSON Schema draft-07", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0960-W-7: midday-tripwire@1.0.0.json schema exists + draft-07 valid ---`);
+  try {
+    const schemaPath = path.join(COWORK_SCHEMAS_DIR, "midday-tripwire@1.0.0.json");
+    if (!fs.existsSync(schemaPath)) {
+      throw new Error(`schema file missing: ${schemaPath}`);
+    }
+    const schema = JSON.parse(fs.readFileSync(schemaPath, "utf8"));
+    const isDraft07 = typeof schema.$schema === "string" && schema.$schema.indexOf("draft-07") !== -1;
+    const looksLikeSchema = schema && typeof schema.type === "string" && schema.properties && typeof schema.properties === "object";
+    assertTrue("HC-V0960-W-7: data/schemas/midday-tripwire@1.0.0.json exists and is a valid JSON Schema draft-07",
+      isDraft07 && looksLikeSchema);
+  } catch (e) {
+    assertTrue("HC-V0960-W-7: data/schemas/midday-tripwire@1.0.0.json exists and is a valid JSON Schema draft-07", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0960-W-8: eod-review@1.0.0.json schema exists + draft-07 valid ---`);
+  try {
+    const schemaPath = path.join(COWORK_SCHEMAS_DIR, "eod-review@1.0.0.json");
+    if (!fs.existsSync(schemaPath)) {
+      throw new Error(`schema file missing: ${schemaPath}`);
+    }
+    const schema = JSON.parse(fs.readFileSync(schemaPath, "utf8"));
+    const isDraft07 = typeof schema.$schema === "string" && schema.$schema.indexOf("draft-07") !== -1;
+    const looksLikeSchema = schema && typeof schema.type === "string" && schema.properties && typeof schema.properties === "object";
+    assertTrue("HC-V0960-W-8: data/schemas/eod-review@1.0.0.json exists and is a valid JSON Schema draft-07",
+      isDraft07 && looksLikeSchema);
+  } catch (e) {
+    assertTrue("HC-V0960-W-8: data/schemas/eod-review@1.0.0.json exists and is a valid JSON Schema draft-07", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0960-W-9: weekly-review@1.0.0.json schema exists + draft-07 valid ---`);
+  try {
+    const schemaPath = path.join(COWORK_SCHEMAS_DIR, "weekly-review@1.0.0.json");
+    if (!fs.existsSync(schemaPath)) {
+      throw new Error(`schema file missing: ${schemaPath}`);
+    }
+    const schema = JSON.parse(fs.readFileSync(schemaPath, "utf8"));
+    const isDraft07 = typeof schema.$schema === "string" && schema.$schema.indexOf("draft-07") !== -1;
+    const looksLikeSchema = schema && typeof schema.type === "string" && schema.properties && typeof schema.properties === "object";
+    assertTrue("HC-V0960-W-9: data/schemas/weekly-review@1.0.0.json exists and is a valid JSON Schema draft-07",
+      isDraft07 && looksLikeSchema);
+  } catch (e) {
+    assertTrue("HC-V0960-W-9: data/schemas/weekly-review@1.0.0.json exists and is a valid JSON Schema draft-07", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0960-W-10: monthly-review@1.0.0.json schema exists + draft-07 valid ---`);
+  try {
+    const schemaPath = path.join(COWORK_SCHEMAS_DIR, "monthly-review@1.0.0.json");
+    if (!fs.existsSync(schemaPath)) {
+      throw new Error(`schema file missing: ${schemaPath}`);
+    }
+    const schema = JSON.parse(fs.readFileSync(schemaPath, "utf8"));
+    const isDraft07 = typeof schema.$schema === "string" && schema.$schema.indexOf("draft-07") !== -1;
+    const looksLikeSchema = schema && typeof schema.type === "string" && schema.properties && typeof schema.properties === "object";
+    assertTrue("HC-V0960-W-10: data/schemas/monthly-review@1.0.0.json exists and is a valid JSON Schema draft-07",
+      isDraft07 && looksLikeSchema);
+  } catch (e) {
+    assertTrue("HC-V0960-W-10: data/schemas/monthly-review@1.0.0.json exists and is a valid JSON Schema draft-07", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0960-W-11: morning-briefing-cold@1.0.0.json schema exists + does NOT require yesterday_present ---`);
+  try {
+    const schemaPath = path.join(COWORK_SCHEMAS_DIR, "morning-briefing-cold@1.0.0.json");
+    if (!fs.existsSync(schemaPath)) {
+      throw new Error(`schema file missing: ${schemaPath}`);
+    }
+    const schema = JSON.parse(fs.readFileSync(schemaPath, "utf8"));
+    const isDraft07 = typeof schema.$schema === "string" && schema.$schema.indexOf("draft-07") !== -1;
+    const looksLikeSchema = schema && typeof schema.type === "string" && schema.properties && typeof schema.properties === "object";
+    // The cold-MB schema MUST allow memory_used.yesterday_present == false
+    // (per design § 3.5: cold variant runs when yesterday's MB note is absent).
+    // Two ways this can be expressed: (a) no `required` list on memory_used at
+    // all, OR (b) memory_used.required excludes yesterday_present, OR (c)
+    // there is no const/enum forcing yesterday_present to true. We validate
+    // the negative — schema does NOT pin yesterday_present to true.
+    const muProp = schema && schema.properties && schema.properties.memory_used;
+    const yp     = muProp && muProp.properties && muProp.properties.yesterday_present;
+    const requiresTrue =
+      (muProp && Array.isArray(muProp.required) && muProp.required.indexOf("yesterday_present") !== -1
+        && yp && (yp.const === true || (Array.isArray(yp.enum) && yp.enum.length === 1 && yp.enum[0] === true)));
+    // Also try validating the cold-MB fixture against the cold schema if the
+    // validateSidecar helper is loadable; if validateSidecar returns ok:true
+    // for the cold fixture, that's authoritative proof yesterday_present:false
+    // is permitted.
+    let coldFixtureValidates = null;
+    try {
+      const helperPath = path.join(COWORK_HELPERS_DIR, "validate-sidecar-helper.js");
+      delete require.cache[require.resolve(helperPath)];
+      const { validateSidecar } = require(helperPath);
+      const coldPayload = JSON.parse(fs.readFileSync(path.join(SIDECAR_FIXTURES_DIR, "cold-mb.cowork.json"), "utf8"));
+      const r = validateSidecar(coldPayload, schemaPath);
+      coldFixtureValidates = r && r.ok === true;
+    } catch (_subErr) { coldFixtureValidates = null; }
+    assertTrue("HC-V0960-W-11: morning-briefing-cold@1.0.0.json exists, is valid draft-07, and does NOT require memory_used.yesterday_present == true (cold-MB variant permits yesterday_present: false)",
+      isDraft07 && looksLikeSchema && !requiresTrue && coldFixtureValidates === true);
+  } catch (e) {
+    assertTrue("HC-V0960-W-11: morning-briefing-cold@1.0.0.json exists, is valid draft-07, and does NOT require memory_used.yesterday_present == true (cold-MB variant permits yesterday_present: false)", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0960-W-12: write-atomic-note-helper.js exports writeAtomicNote ---`);
+  try {
+    const helperPath = path.join(COWORK_HELPERS_DIR, "write-atomic-note-helper.js");
+    delete require.cache[require.resolve(helperPath)];
+    const WAN = require(helperPath);
+    // writeAtomicNote takes a single options object with 5 keys; .length === 1.
+    assertTrue("HC-V0960-W-12: write-atomic-note-helper.js exports writeAtomicNote({ mdPath, sidecarPath, body_md, sidecar_json, schemaPath })",
+      WAN && typeof WAN.writeAtomicNote === "function");
+  } catch (e) {
+    assertTrue("HC-V0960-W-12: write-atomic-note-helper.js exports writeAtomicNote({ mdPath, sidecarPath, body_md, sidecar_json, schemaPath })", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0960-W-13: writeAtomicNote writes both files (happy path) ---`);
+  try {
+    const helperPath = path.join(COWORK_HELPERS_DIR, "write-atomic-note-helper.js");
+    delete require.cache[require.resolve(helperPath)];
+    const { writeAtomicNote } = require(helperPath);
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "hc-v0960-w-13-"));
+    try {
+      const mdPath      = path.join(tmpDir, "2026-06-08-0800-briefing.md");
+      const sidecarPath = path.join(tmpDir, "2026-06-08-0800-briefing.cowork.json");
+      const bodyMd = "---\ntype: cowork-morning-briefing\n---\n\n> [!info]+ Today\n> body\n";
+      const sidecarJson = JSON.parse(fs.readFileSync(path.join(SIDECAR_FIXTURES_DIR, "minimal-morning-briefing.cowork.json"), "utf8"));
+      const result = writeAtomicNote({
+        mdPath, sidecarPath,
+        body_md: bodyMd,
+        sidecar_json: sidecarJson,
+        schemaPath: MB_SCHEMA_PATH,
+      });
+      const mdExists      = fs.existsSync(mdPath);
+      const sidecarExists = fs.existsSync(sidecarPath);
+      const mdContent     = mdExists      ? fs.readFileSync(mdPath, "utf8")      : null;
+      const sidecarRead   = sidecarExists ? JSON.parse(fs.readFileSync(sidecarPath, "utf8")) : null;
+      assertTrue("HC-V0960-W-13: writeAtomicNote happy-path writes BOTH .md and .cowork.json with correct contents AND returns status ok",
+        result && result.status === "ok"
+        && mdExists && sidecarExists
+        && mdContent === bodyMd
+        && sidecarRead && sidecarRead.schema_version === "1.0.0"
+        && sidecarRead.cadence === "morning-briefing");
+    } finally {
+      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
+    }
+  } catch (e) {
+    assertTrue("HC-V0960-W-13: writeAtomicNote happy-path writes BOTH .md and .cowork.json with correct contents AND returns status ok", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0960-W-14: writeAtomicNote rolls back on schema failure (BOTH files absent) ---`);
+  try {
+    const helperPath = path.join(COWORK_HELPERS_DIR, "write-atomic-note-helper.js");
+    delete require.cache[require.resolve(helperPath)];
+    const { writeAtomicNote } = require(helperPath);
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "hc-v0960-w-14-"));
+    try {
+      const mdPath      = path.join(tmpDir, "bad.md");
+      const sidecarPath = path.join(tmpDir, "bad.cowork.json");
+      const badSidecar = JSON.parse(fs.readFileSync(path.join(SIDECAR_FIXTURES_DIR, "bad-kinds.cowork.json"), "utf8"));
+      const result = writeAtomicNote({
+        mdPath, sidecarPath,
+        body_md: "would-be body",
+        sidecar_json: badSidecar,
+        schemaPath: MB_SCHEMA_PATH,
+      });
+      const statusOk = result && typeof result.status === "string"
+        && result.status === "failed:contract-violation:sidecar-schema";
+      const mdAbsent      = !fs.existsSync(mdPath);
+      const sidecarAbsent = !fs.existsSync(sidecarPath);
+      assertTrue("HC-V0960-W-14: writeAtomicNote returns failed:contract-violation:sidecar-schema and leaves BOTH files absent",
+        statusOk && mdAbsent && sidecarAbsent);
+    } finally {
+      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
+    }
+  } catch (e) {
+    assertTrue("HC-V0960-W-14: writeAtomicNote returns failed:contract-violation:sidecar-schema and leaves BOTH files absent", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0960-W-15: writeAtomicNote filesystem failure leaves no partial files ---`);
+  try {
+    const helperPath = path.join(COWORK_HELPERS_DIR, "write-atomic-note-helper.js");
+    delete require.cache[require.resolve(helperPath)];
+    const { writeAtomicNote } = require(helperPath);
+    const tmpDir   = fs.mkdtempSync(path.join(os.tmpdir(), "hc-v0960-w-15-"));
+    const roDir    = path.join(tmpDir, "ro");
+    fs.mkdirSync(roDir, { recursive: true });
+    try {
+      // chmod 0o555 → read+exec only; mkdir/write under roDir/sub fails with EACCES.
+      fs.chmodSync(roDir, 0o555);
+      const mdPath      = path.join(roDir, "sub", "out.md");
+      const sidecarPath = path.join(roDir, "sub", "out.cowork.json");
+      const sidecarJson = JSON.parse(fs.readFileSync(path.join(SIDECAR_FIXTURES_DIR, "minimal-morning-briefing.cowork.json"), "utf8"));
+      const result = writeAtomicNote({
+        mdPath, sidecarPath,
+        body_md: "body",
+        sidecar_json: sidecarJson,
+        schemaPath: MB_SCHEMA_PATH,
+      });
+      const statusOk = result && typeof result.status === "string"
+        && /^failed:filesystem(:|$)/.test(result.status);
+      const mdAbsent      = !fs.existsSync(mdPath);
+      const sidecarAbsent = !fs.existsSync(sidecarPath);
+      assertTrue("HC-V0960-W-15: writeAtomicNote returns failed:filesystem:* when md path unwritable AND leaves no partial files",
+        statusOk && mdAbsent && sidecarAbsent);
+    } finally {
+      try { fs.chmodSync(roDir, 0o755); } catch (_) {}
+      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
+    }
+  } catch (e) {
+    assertTrue("HC-V0960-W-15: writeAtomicNote returns failed:filesystem:* when md path unwritable AND leaves no partial files", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0960-W-16: composeBody returns { body_md, sidecar_json, status } (no body_assertions) ---`);
+  try {
+    const CBH = require(path.join(COWORK_HELPERS_DIR, "compose-body-helper.js"));
+    const baseInput = {
+      cadence: "morning-briefing",
+      nav_buttons_block: '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });\n```',
+      synopsis_md: "> [!info]+ Today\n> body",
+      memory_callouts: {},
+      ordered_blocks: [
+        { kind: "calendar", callout_type: "example", title: "Today's calendar", body_md: "9am standup",
+          items: [{ item_id: "cal-personal-2026-06-08-0900-standup", kind: "calendar", callout_type: "example", title: "9:00 AM Standup", features: { time_of_day_bucket: "morning", is_warning: false } }] },
+      ],
+      engagement_type_blocks: [],
+      closing_md: "> [!tip] Pep talk\n> Go.",
+      voice_contract: "Voice contract …",
+      engagement_id: "personal",
+      day: "2026-06-08",
+    };
+    const result = CBH.composeBody(baseInput);
+    const hasBodyMd      = result && typeof result.body_md === "string";
+    const hasSidecarJson = result && result.sidecar_json && typeof result.sidecar_json === "object" && !Array.isArray(result.sidecar_json);
+    const hasStatus      = result && typeof result.status === "string";
+    const noLegacyKey    = result && !Object.prototype.hasOwnProperty.call(result, "body_assertions");
+    assertTrue("HC-V0960-W-16: composeBody returns { body_md, sidecar_json, status } shape — no body_assertions field",
+      hasBodyMd && hasSidecarJson && hasStatus && noLegacyKey);
+  } catch (e) {
+    assertTrue("HC-V0960-W-16: composeBody returns { body_md, sidecar_json, status } shape — no body_assertions field", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0960-W-17: item_id stability — gather-calendar returns byte-identical item_id for same input ---`);
+  try {
+    // Per design § 3.3: item_id shape is `<kind-prefix>-<deterministic-hash>`
+    // where the hash is derived from gather-specific stable fields (event UID
+    // for calendar). Same-day re-fires of gather-calendar against the SAME
+    // event UID MUST yield byte-identical item_id values.
+    //
+    // The gather sub-skills are SKILL.md bodies, not direct Node modules, so
+    // we exercise the canonical item-id derivation TWICE via the gather
+    // helper-tier export when present, otherwise we exercise the design
+    // contract in two layers: (a) gather-calendar SKILL.md MUST document the
+    // deterministic shape; (b) a helper-tier item-id derivation function
+    // (if exposed by Rail W's gather-from-served-by-helper or a new
+    // item-id-helper) MUST return the SAME string twice for the same input.
+    //
+    // S1.1 RED: neither the SKILL.md doc rewrite nor the helper-tier export
+    // exists, so this case fails. S1.2+ + S2.x will land the contract.
+    const helperPath = path.join(COWORK_HELPERS_DIR, "gather-from-served-by-helper.js");
+    delete require.cache[require.resolve(helperPath)];
+    const GFSB = require(helperPath);
+    // Per design § 3.3 the canonical item-id derivation MUST be exported
+    // so write-atomic-note + tests can call it deterministically. We
+    // require `deriveItemId({ kind, engagement_id, day, stable_key })`
+    // returning `<kind-prefix>-<hash>`.
+    const callA = typeof GFSB.deriveItemId === "function"
+      ? GFSB.deriveItemId({
+          kind: "calendar",
+          engagement_id: "personal",
+          day: "2026-06-08",
+          stable_key: "uid:abc123-google-com",
+        })
+      : null;
+    const callB = typeof GFSB.deriveItemId === "function"
+      ? GFSB.deriveItemId({
+          kind: "calendar",
+          engagement_id: "personal",
+          day: "2026-06-08",
+          stable_key: "uid:abc123-google-com",
+        })
+      : null;
+    assertTrue("HC-V0960-W-17: deriveItemId returns byte-identical item_id for identical inputs across two calls (same-day re-fire stability)",
+      typeof callA === "string" && typeof callB === "string"
+      && callA.length > 0 && callA === callB
+      && /^cal-/.test(callA));
+  } catch (e) {
+    assertTrue("HC-V0960-W-17: deriveItemId returns byte-identical item_id for identical inputs across two calls (same-day re-fire stability)", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0960-W-18: validatePreCycleNote returns { ok: true, warn: "missing-sidecar" } for legacy notes ---`);
+  try {
+    const helperPath = path.join(COWORK_HELPERS_DIR, "validate-sidecar-helper.js");
+    delete require.cache[require.resolve(helperPath)];
+    const VSH = require(helperPath);
+    if (typeof VSH.validatePreCycleNote !== "function") {
+      throw new Error("validate-sidecar-helper.js does not export validatePreCycleNote(mdPath)");
+    }
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "hc-v0960-w-18-"));
+    try {
+      const mdPath = path.join(tmpDir, "legacy.md");
+      fs.writeFileSync(mdPath, "---\ntype: cowork-morning-briefing\n---\nlegacy body without sidecar\n", "utf8");
+      // Sidecar intentionally NOT written — simulates a pre-cycle atomic note.
+      const result = VSH.validatePreCycleNote(mdPath);
+      assertTrue("HC-V0960-W-18: validatePreCycleNote(mdPath) returns { ok: true, warn: 'missing-sidecar' } for a legacy .md without its sidecar",
+        result && result.ok === true && result.warn === "missing-sidecar");
+    } finally {
+      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
+    }
+  } catch (e) {
+    assertTrue("HC-V0960-W-18: validatePreCycleNote(mdPath) returns { ok: true, warn: 'missing-sidecar' } for a legacy .md without its sidecar", false, e && e.message);
+  }
+
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
   if (fail > 0) {

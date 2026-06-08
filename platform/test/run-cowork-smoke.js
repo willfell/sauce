@@ -4638,6 +4638,116 @@ function assertCoworkV068Shape() {
     } catch (e) { failed++; console.error(`FAIL  ${label}: ${e.message}`); }
 }
 
+// =============================================================================
+// v0.96.0 — Rail W smoke scenarios (smoke-W-1..3)
+//
+// End-to-end happy + failure paths for the new sidecar-determinism rail:
+//   * smoke-W-1: write-then-validate-then-roundtrip morning-briefing fixture
+//   * smoke-W-2: schema-fail rollback cleans both files
+//   * smoke-W-3: pre-cycle .md missing sidecar handled gracefully
+//
+// RED at S1.1 commit time — write-atomic-note-helper.js, validate-sidecar-
+// helper.js, and data/schemas/morning-briefing@1.0.0.json do not yet exist.
+// S1.2 brings smoke-W-1, smoke-W-2 GREEN; S1.6 brings smoke-W-3 GREEN.
+// =============================================================================
+
+const COWORK_HELPERS_DIR = path.join(BP, "helpers");
+const COWORK_SCHEMAS_DIR = path.join(BP, "data/schemas");
+const SIDECAR_FIXTURES_DIR = path.join(ROOT, "platform/test/fixtures/cowork/sidecar");
+const MB_SCHEMA_PATH = path.join(COWORK_SCHEMAS_DIR, "morning-briefing@1.0.0.json");
+
+// smoke-W-1: write-then-validate-then-roundtrip morning-briefing fixture
+{
+    const label = "smoke-W-1 write-then-validate-then-roundtrip morning-briefing fixture";
+    try {
+        const helperPath = path.join(COWORK_HELPERS_DIR, "write-atomic-note-helper.js");
+        delete require.cache[require.resolve(helperPath)];
+        const { writeAtomicNote } = require(helperPath);
+        const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "smoke-W-1-"));
+        try {
+            const mdPath      = path.join(tmpDir, "2026-06-08-0800-briefing.md");
+            const sidecarPath = path.join(tmpDir, "2026-06-08-0800-briefing.cowork.json");
+            const bodyMd = "---\ntype: cowork-morning-briefing\nday: 2026-06-08\n---\n\n> [!info]+ Today\n> Smoke body.\n";
+            const sidecarJson = JSON.parse(fs.readFileSync(path.join(SIDECAR_FIXTURES_DIR, "minimal-morning-briefing.cowork.json"), "utf8"));
+            const result = writeAtomicNote({
+                mdPath, sidecarPath,
+                body_md: bodyMd,
+                sidecar_json: sidecarJson,
+                schemaPath: MB_SCHEMA_PATH,
+            });
+            assertTrue(result && result.status === "ok",
+                `${label}: writeAtomicNote did not return status=ok (got ${result && result.status})`);
+            assertTrue(fs.existsSync(mdPath),
+                `${label}: .md file missing after write`);
+            assertTrue(fs.existsSync(sidecarPath),
+                `${label}: .cowork.json sidecar missing after write`);
+            const mdContent = fs.existsSync(mdPath) ? fs.readFileSync(mdPath, "utf8") : null;
+            assertTrue(mdContent === bodyMd,
+                `${label}: .md content does not roundtrip (body_md byte-mismatch)`);
+            const sidecarRead = fs.existsSync(sidecarPath) ? JSON.parse(fs.readFileSync(sidecarPath, "utf8")) : null;
+            assertTrue(sidecarRead && sidecarRead.schema_version === "1.0.0" && sidecarRead.cadence === "morning-briefing",
+                `${label}: sidecar JSON did not roundtrip (schema_version/cadence missing or wrong)`);
+        } finally {
+            try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
+        }
+    } catch (e) { failed++; console.error(`FAIL  ${label}: ${e.message}`); }
+}
+
+// smoke-W-2: schema-fail rollback cleans both files
+{
+    const label = "smoke-W-2 schema-fail rollback cleans both files";
+    try {
+        const helperPath = path.join(COWORK_HELPERS_DIR, "write-atomic-note-helper.js");
+        delete require.cache[require.resolve(helperPath)];
+        const { writeAtomicNote } = require(helperPath);
+        const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "smoke-W-2-"));
+        try {
+            const mdPath      = path.join(tmpDir, "bad.md");
+            const sidecarPath = path.join(tmpDir, "bad.cowork.json");
+            const badSidecar = JSON.parse(fs.readFileSync(path.join(SIDECAR_FIXTURES_DIR, "bad-kinds.cowork.json"), "utf8"));
+            const result = writeAtomicNote({
+                mdPath, sidecarPath,
+                body_md: "would-be body",
+                sidecar_json: badSidecar,
+                schemaPath: MB_SCHEMA_PATH,
+            });
+            assertTrue(result && result.status === "failed:contract-violation:sidecar-schema",
+                `${label}: status was '${result && result.status}', expected failed:contract-violation:sidecar-schema`);
+            assertTrue(!fs.existsSync(mdPath),
+                `${label}: .md left on disk after schema-fail rollback`);
+            assertTrue(!fs.existsSync(sidecarPath),
+                `${label}: .cowork.json left on disk after schema-fail rollback`);
+        } finally {
+            try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
+        }
+    } catch (e) { failed++; console.error(`FAIL  ${label}: ${e.message}`); }
+}
+
+// smoke-W-3: pre-cycle .md missing sidecar handled gracefully
+{
+    const label = "smoke-W-3 pre-cycle .md missing sidecar handled gracefully";
+    try {
+        const helperPath = path.join(COWORK_HELPERS_DIR, "validate-sidecar-helper.js");
+        delete require.cache[require.resolve(helperPath)];
+        const VSH = require(helperPath);
+        assertTrue(typeof VSH.validatePreCycleNote === "function",
+            `${label}: validate-sidecar-helper.js does not export validatePreCycleNote(mdPath)`);
+        const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "smoke-W-3-"));
+        try {
+            const mdPath = path.join(tmpDir, "legacy-note.md");
+            fs.writeFileSync(mdPath, "---\ntype: cowork-morning-briefing\n---\nlegacy pre-cycle body\n", "utf8");
+            // Sidecar intentionally NOT written.
+            if (typeof VSH.validatePreCycleNote === "function") {
+                const result = VSH.validatePreCycleNote(mdPath);
+                assertTrue(result && result.ok === true && result.warn === "missing-sidecar",
+                    `${label}: validatePreCycleNote did not return { ok:true, warn:'missing-sidecar' } (got ${JSON.stringify(result)})`);
+            }
+        } finally {
+            try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
+        }
+    } catch (e) { failed++; console.error(`FAIL  ${label}: ${e.message}`); }
+}
+
 (function main() {
   console.log("--- shared contracts ---");
   checkSharedContracts();
