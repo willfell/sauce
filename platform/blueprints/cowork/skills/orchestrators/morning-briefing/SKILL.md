@@ -180,6 +180,14 @@ Each gather call passes `engagement_id`. The sub-skill reads per-engagement MCP-
        - `echoes_md` ← `composeSemanticEchoesCallout(output_echoes)`
        - `backlink_md` ← inline-composed per v0.85.0 § 2.1.3 spec: `"> [!quote]- Memory log\n> Today's memory: [[spice/cowork/memory/<engagement_id>/<YYYY>/<MM-Month>/<YYYY-MM-DD>/memory.md|Memory log — <YYYY-MM-DD>]]"` (tick-count parenthetical omitted when unknown).
 
+  14c.i **v0.95.1 Knob-2 — inject `drift_warning` into the "Yesterday at a glance" callout.** After composing `yesterday_md` (which already carries yesterday's synthesis + carry-forward bullets inside the `> [!example]+ Yesterday at a glance` callout), check `output_yesterday.day_synthesis.drift_warning` (the `[!warning]- Frame may be stuck` callout body surfaced by `cowork:read-memory`'s v0.95.1 extension — design § 4.6). When non-null AND `yesterday_md != ""`:
+
+       Append to `yesterday_md` a single line (just before the trailing blank line):
+
+       `> **Drift flag from yesterday:** <drift_warning text>`
+
+       Apply the voice contract from `plan.voice_contract` to the prose (casual personalities may rephrase the prefix; professional personalities keep the canonical "Drift flag from yesterday:" prefix verbatim). The drift flag surfaces the frame-may-be-stuck warning so the LLM composing today's MB is aware that recent days have been thematically locked — it can lean into the named theme deliberately or explicitly broaden. When `drift_warning` is null or `yesterday_md == ""` (no memory available), this step is a no-op; the yesterday callout passes through unchanged.
+
   14d. **Prep ordered_blocks[].** Iterate gather-pipeline `ordered_blocks[]` (from steps 5-12b priority loop). Each entry already carries `{ kind, callout_type, markdown }`. Add `title` from `plan.kind_titles[entry.kind_name]` (v0.95.0: data file `spice/cowork/data/kind-titles.json` is canonical; per-kind microscope `## Output shape` directives may override per-engagement). Translate to composeBody shape: `{ kind, callout_type, title, body_md: markdown }`.
 
   14e. **Prep engagement_type_blocks[].** For each `related_signal` in `related_signals[]` with `status == "ready"`: push `{ kind: "semantic", callout_type: "example", title: "Related to: <event.title>", body_md: <related_signal.markdown> }`. When `semantic_index_unavailable == true`: push ONCE `{ kind: "semantic-unavailable", callout_type: "warning", title: "Semantic index not available", body_md: "Smart Connections index absent or anchor not indexed — semantic gather skipped." }`. Finance does NOT flow through here — it's written by Step 15's separate sub-skill.
