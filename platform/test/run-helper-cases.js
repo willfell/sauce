@@ -7794,19 +7794,22 @@ async function caseHCV0890VoiceA() {
 }
 
 async function caseHCV0890MorningBriefingA() {
-  console.log("\n--- Case HC-V0890-MORNING-BRIEFING-A: inner-circle name->phone loop wired ---");
-  const skill = fs.readFileSync(
-    path.join(WORKSHOP, "platform/blueprints/cowork/skills/skills/write-run-note-morning-briefing/SKILL.md"), "utf8");
-  assertTrue("HC-V0890-MORNING-BRIEFING-A: mentions inner_circle_people",
-    skill.includes("inner_circle_people"));
-  assertTrue("HC-V0890-MORNING-BRIEFING-A: calls cowork:resolve-person",
-    skill.includes("cowork:resolve-person"));
-  assertTrue("HC-V0890-MORNING-BRIEFING-A: extracts aliases_by_type.phone",
-    /aliases_by_type\.phone/.test(skill));
-  assertTrue("HC-V0890-MORNING-BRIEFING-A: passes phones to gather-imessage",
-    skill.includes("gather-imessage"));
-  assertTrue("HC-V0890-MORNING-BRIEFING-A: unresolved-name warning emission documented",
-    /inner_circle_unresolved/.test(skill));
+  // v0.96.0 S1.7: inner-circle name->phone resolution prose moved to the
+  // morning-briefing ORCHESTRATOR (Step 3e + plan.allowlist composition in
+  // cowork:plan-dispatch). The write-run-note-morning-briefing sub-skill is
+  // now a thin shim around write-atomic-note-helper.js and no longer carries
+  // the resolution prose — assert against the orchestrator instead.
+  console.log("\n--- Case HC-V0890-MORNING-BRIEFING-A: inner-circle name->phone loop wired (orchestrator) ---");
+  const orch = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/cowork/skills/orchestrators/morning-briefing/SKILL.md"), "utf8");
+  assertTrue("HC-V0890-MORNING-BRIEFING-A: orchestrator mentions inner_circle_people OR plan.allowlist",
+    orch.includes("inner_circle_people") || orch.includes("plan.allowlist"));
+  assertTrue("HC-V0890-MORNING-BRIEFING-A: orchestrator/plan-dispatch flow references resolve-person",
+    orch.includes("cowork:resolve-person") || orch.includes("plan.allowlist.resolved"));
+  assertTrue("HC-V0890-MORNING-BRIEFING-A: orchestrator routes phones via plan.allowlist.phone_filter_list",
+    /phone_filter_list|aliases_by_type\.phone/.test(orch));
+  assertTrue("HC-V0890-MORNING-BRIEFING-A: orchestrator passes phones to gather-imessage",
+    orch.includes("gather-imessage"));
 }
 
 async function caseHCV0890VersionA() {
@@ -9247,26 +9250,49 @@ async function caseHCV0891Versions() {
     }
   }
 
-  // v0.74.0 HC-V0740-7: write-run-note uses Write tool in steps; no obsidian MCP in write step
+  // v0.74.0 HC-V0740-7: write-run-note uses filesystem write; no obsidian MCP in write step
+  // v0.96.0 S1.7: the 5 cowork-cadence write-run-note SKILL.mds were slimmed to
+  // thin shims that invoke `writeAtomicNote` from `write-atomic-note-helper.js`.
+  // The legacy Write-tool-mentioning sub-skill (write-run-note-finance) still
+  // uses the prior shape and is asserted with the prior contract.
   {
-    console.log("\n--- Case HC-V0740-7: write-run-note uses Write tool; no obsidian MCP in Steps section ---");
+    console.log("\n--- Case HC-V0740-7: write-run-note Steps section uses filesystem write contract; no obsidian MCP ---");
     try {
-      const skills = [
+      const railWShims = [
         "write-run-note-morning-briefing", "write-run-note-midday-tripwire",
-        "write-run-note-eod-review",       "write-run-note-finance",
-        "write-run-note-weekly-review",    "write-run-note-monthly-review"
+        "write-run-note-eod-review",       "write-run-note-weekly-review",
+        "write-run-note-monthly-review"
       ];
-      for (const skill of skills) {
+      const legacyShims = ["write-run-note-finance"];
+
+      for (const skill of railWShims) {
         const p = path.join(WORKSHOP, `platform/blueprints/cowork/skills/skills/${skill}/SKILL.md`);
         const body = fs.readFileSync(p, "utf8");
-        // Slice from '## Steps' to next '## ' heading (no /m flag — $ means true end-of-string)
         const stepsIdx = body.indexOf("## Steps");
         assertTrue(`HC-V0740-7: ${skill} missing '## Steps' section`, stepsIdx >= 0);
         if (stepsIdx < 0) continue;
         const afterSteps = body.slice(stepsIdx + "## Steps".length);
         const nextH2 = afterSteps.search(/\n## /);
         const stepsBody = nextH2 >= 0 ? afterSteps.slice(0, nextH2) : afterSteps;
-        assertTrue(`HC-V0740-7: ${skill} '## Steps' must reference 'Write tool'`,
+        // v0.96.0 Rail W: shims call writeAtomicNote from write-atomic-note-helper.js.
+        assertTrue(`HC-V0740-7: ${skill} '## Steps' must reference 'writeAtomicNote' (Rail W helper)`,
+          /writeAtomicNote/.test(stepsBody));
+        assertTrue(`HC-V0740-7: ${skill} '## Steps' must reference write-atomic-note-helper`,
+          /write-atomic-note-helper/.test(stepsBody));
+        assertTrue(`HC-V0740-7: ${skill} '## Steps' must NOT reference mcp__obsidian__create_note or obsidian_put_content`,
+          !/mcp__obsidian__create_note|obsidian_put_content/.test(stepsBody));
+      }
+
+      for (const skill of legacyShims) {
+        const p = path.join(WORKSHOP, `platform/blueprints/cowork/skills/skills/${skill}/SKILL.md`);
+        const body = fs.readFileSync(p, "utf8");
+        const stepsIdx = body.indexOf("## Steps");
+        assertTrue(`HC-V0740-7: ${skill} missing '## Steps' section`, stepsIdx >= 0);
+        if (stepsIdx < 0) continue;
+        const afterSteps = body.slice(stepsIdx + "## Steps".length);
+        const nextH2 = afterSteps.search(/\n## /);
+        const stepsBody = nextH2 >= 0 ? afterSteps.slice(0, nextH2) : afterSteps;
+        assertTrue(`HC-V0740-7: ${skill} '## Steps' must reference 'Write tool' (legacy shape)`,
           /Write tool/.test(stepsBody));
         assertTrue(`HC-V0740-7: ${skill} '## Steps' must NOT reference mcp__obsidian__create_note or obsidian_put_content`,
           !/mcp__obsidian__create_note|obsidian_put_content/.test(stepsBody));
@@ -9863,16 +9889,21 @@ async function caseHCV0891Versions() {
   // ============================================================================
 
   // PATH callouts in 5 orchestrators (2 sub-asserts each = 10 total)
+  // v0.96.0 S1.7: the legacy `CRITICAL: output path (v0.90.2)` callout was
+  // retired in favor of `CRITICAL: voice + microscope discipline (v0.96.0)`.
+  // Path/type/body-shape are now deterministically enforced by the Rail W
+  // writer + JSON-schema sidecar validation; the prose callout no longer
+  // owns those invariants, only voice + microscope discipline.
   ["morning-briefing", "midday-tripwire", "eod-review", "weekly-review", "monthly-review"].forEach((orchName, idx) => {
     const letter = String.fromCharCode(65 + idx);  // A..E
     const p = path.join(WORKSHOP, "platform/blueprints/cowork/skills/orchestrators", orchName, "SKILL.md");
-    console.log(`\n--- Case HC-V0902-PATH-${letter}1: ${orchName} CRITICAL output-path callout ---`);
+    console.log(`\n--- Case HC-V0902-PATH-${letter}1: ${orchName} CRITICAL voice+microscope callout ---`);
     try {
       const body = fs.readFileSync(p, "utf8");
-      assertTrue(`HC-V0902-PATH-${letter}1: ${orchName} has CRITICAL output path callout with [!warning]+`,
-        body.includes("[!warning]+ CRITICAL: output path"));
-      assertTrue(`HC-V0902-PATH-${letter}1: ${orchName} callout forbids spice/daily path`,
-        body.includes("DO NOT write to `spice/daily/"));
+      assertTrue(`HC-V0902-PATH-${letter}1: ${orchName} has CRITICAL callout with [!warning]+ (v0.96.0 voice+microscope)`,
+        body.includes("[!warning]+ CRITICAL: voice + microscope discipline (v0.96.0)"));
+      assertTrue(`HC-V0902-PATH-${letter}1: ${orchName} callout references schema-based path/type/body-shape enforcement`,
+        /write-atomic-note-helper\.js/.test(body) && /JSON-schema/.test(body));
     } catch (e) {
       assertTrue(`HC-V0902-PATH-${letter}1: ${orchName} CRITICAL callout contract`, false, e && e.message);
     }
@@ -10333,6 +10364,10 @@ type: cowork-microscope
   }
 
   // C: verbal commitment Step 1b in 5 orchestrators
+  // v0.96.0 S1.7: PATH + TYPE bullets retired from verbal commitment. The
+  // commitment block now covers only VOICE + MICROSCOPES (prose invariants
+  // the writer cannot enforce). Path/type/body-shape live in the Rail W
+  // writer + JSON-schema sidecar validation.
   ["morning-briefing", "midday-tripwire", "eod-review", "weekly-review", "monthly-review"].forEach((orchName, idx) => {
     const letter = String.fromCharCode(65 + idx);
     const p = path.join(WORKSHOP, "platform/blueprints/cowork/skills/orchestrators/" + orchName + "/SKILL.md");
@@ -10341,10 +10376,10 @@ type: cowork-microscope
       const body = fs.readFileSync(p, "utf8");
       assertTrue(`HC-V0911-COMMIT-${letter}1: Step 1b Verbal commitment present`,
         body.includes("1b. **Verbal commitment") && body.includes("v0.91.1"));
-      assertTrue(`HC-V0911-COMMIT-${letter}1: Notice text names canonical write path`,
-        body.includes("committing to canonical write path") || body.includes("committing to:"));
-      assertTrue(`HC-V0911-COMMIT-${letter}1: explicitly cites NOT spice/daily/ for daily cadences`,
-        body.includes("NOT spice/daily/"));
+      assertTrue(`HC-V0911-COMMIT-${letter}1: Notice block uses committing-to convention`,
+        body.includes("committing to:"));
+      assertTrue(`HC-V0911-COMMIT-${letter}1: backstops cite v0.96.0 Rail W writer + JSON-schema sidecar validation`,
+        body.includes("v0.96.0 Rail W writer") && body.includes("JSON-schema sidecar validation"));
     } catch (e) {
       assertTrue(`HC-V0911-COMMIT-${letter}1: verbal-commitment contract`, false, e && e.message);
     }
@@ -10382,7 +10417,12 @@ type: cowork-microscope
     }
   });
 
-  // C: extended verbal commitment in 5 orchestrators (TYPE + VOICE + MICROSCOPES)
+  // C: extended verbal commitment in 5 orchestrators (VOICE + MICROSCOPES)
+  // v0.96.0 S1.7: TYPE bullet retired alongside PATH. The cadence's canonical
+  // frontmatter type is now enforced by JSON-schema validation in Rail W
+  // (data/schemas/<cadence>@1.0.0.json `frontmatter.type` const). The
+  // commitment block now covers only the prose invariants the writer cannot
+  // enforce: VOICE + MICROSCOPES.
   ["morning-briefing", "midday-tripwire", "eod-review", "weekly-review", "monthly-review"].forEach((orchName, idx) => {
     const letter = String.fromCharCode(65 + idx);
     const p = path.join(WORKSHOP, "platform/blueprints/cowork/skills/orchestrators/" + orchName + "/SKILL.md");
@@ -10391,8 +10431,8 @@ type: cowork-microscope
       const body = fs.readFileSync(p, "utf8");
       assertTrue(`HC-V0912-COMMIT-${letter}1: Step 1b cites v0.91.2`,
         body.includes("v0.91.1 + v0.91.2"));
-      assertTrue(`HC-V0912-COMMIT-${letter}1: commits to TYPE`,
-        body.includes("TYPE:") && body.includes(ORCH_TO_TYPE[orchName]));
+      assertTrue(`HC-V0912-COMMIT-${letter}1: canonical frontmatter type enforced by JSON-schema (data/schemas/<cadence>@1.0.0.json)`,
+        body.includes("data/schemas/" + orchName + "@1.0.0.json"));
       assertTrue(`HC-V0912-COMMIT-${letter}1: commits to VOICE`,
         body.includes("VOICE:") && body.includes("personality.notes"));
       assertTrue(`HC-V0912-COMMIT-${letter}1: commits to MICROSCOPES`,
@@ -10467,18 +10507,27 @@ type: cowork-microscope
   });
 
   // C.2: tightened regex in 5 orchestrator Step 17 structural verify
+  // v0.96.0 S1.7: the regex re-read pass (v0.91.3 + v0.92.0) in the
+  // orchestrator's `## Verify` section is RETIRED. JSON-schema sidecar
+  // validation in Rail W's `writeAtomicNote` subsumes it (returns
+  // `failed:contract-violation:sidecar-schema` BEFORE any file is committed).
+  // The v0.91.3 canonical dataviewjs pattern still lives in the write-run-note
+  // sub-skills' body-shape write-guard (belt-and-suspenders), but no longer
+  // in the orchestrator's Verify section.
   ["morning-briefing", "midday-tripwire", "eod-review", "weekly-review", "monthly-review"].forEach((orchName, idx) => {
     const letter = String.fromCharCode(65 + idx);
     const p = path.join(WORKSHOP, "platform/blueprints/cowork/skills/orchestrators/" + orchName + "/SKILL.md");
-    console.log(`\n--- Case HC-V0913-VERIFY-${letter}1: ${orchName} Step 17 regex tightening ---`);
+    console.log(`\n--- Case HC-V0913-VERIFY-${letter}1: ${orchName} Verify section sidecar-schema validation ---`);
     try {
       const body = fs.readFileSync(p, "utf8");
-      assertTrue(`HC-V0913-VERIFY-${letter}1: Step 17 cites v0.91.3 canonical pattern in regex annotation`,
-        body.includes("v0.91.3 canonical pattern"));
-      assertTrue(`HC-V0913-VERIFY-${letter}1: regex includes await dv.view + customjs-guard`,
-        body.includes("await") && body.includes("dv\\.view") && body.includes("customjs-guard"));
+      assertTrue(`HC-V0913-VERIFY-${letter}1: Verify section calls out sidecar schema validation`,
+        body.includes("Sidecar schema validation") && body.includes("validateSidecar"));
+      assertTrue(`HC-V0913-VERIFY-${letter}1: Verify section surfaces failed:contract-violation:sidecar-schema`,
+        body.includes("failed:contract-violation:sidecar-schema"));
+      assertTrue(`HC-V0913-VERIFY-${letter}1: regex re-read pass retired (v0.96.0)`,
+        body.includes("regex re-read pass from v0.91.3+v0.92.0 is RETIRED"));
     } catch (e) {
-      assertTrue(`HC-V0913-VERIFY-${letter}1: regex tightening contract`, false, e && e.message);
+      assertTrue(`HC-V0913-VERIFY-${letter}1: sidecar-schema verify contract`, false, e && e.message);
     }
   });
 
@@ -10618,6 +10667,13 @@ type: cowork-microscope
   // ============================================================================
   // v0.92.0 — orchestrator Step 14 refactor across 5 orchestrators (HC-V0920-ORCH-*)
   // ============================================================================
+  // v0.96.0 S1.7: composeBody return shape changed from
+  //   { body_md, body_assertions, status }
+  // to
+  //   { body_md, sidecar_json, status }
+  // and orchestrators now pass `sidecar_json` (not `body_assertions`) into the
+  // write-run-note shim. The sub-shim invokes writeAtomicNote, which validates
+  // the sidecar against the cadence JSON schema BEFORE committing either file.
   for (const cad of _V0920_CADENCES) {
     const L = _V0920_LABELS[cad];
     const orchPath = path.join(WORKSHOP, "platform/blueprints/cowork/skills/orchestrators/" + cad + "/SKILL.md");
@@ -10628,10 +10684,10 @@ type: cowork-microscope
         orchBody.includes("Compose run-note body via cowork:compose-body"));
       assertTrue(`HC-V0920-ORCH-${L}-A2: sub-step 14f references compose-body SKILL.md`,
         orchBody.includes(".claude/skills/cowork/skills/compose-body/SKILL.md"));
-      assertTrue(`HC-V0920-ORCH-${L}-A3: body_assertions captured from composeBody return`,
-        /body_md\s*,\s*body_assertions\s*,\s*status/.test(orchBody));
-      assertTrue(`HC-V0920-ORCH-${L}-A4: body_assertions passed to write-run-note call site`,
-        /body:\s*body_md\s*,\s*body_assertions/.test(orchBody));
+      assertTrue(`HC-V0920-ORCH-${L}-A3: sidecar_json captured from composeBody return (v0.96.0)`,
+        /body_md\s*,\s*sidecar_json\s*,\s*status/.test(orchBody));
+      assertTrue(`HC-V0920-ORCH-${L}-A4: sidecar_json passed to write-run-note call site (v0.96.0)`,
+        /body:\s*body_md\s*,\s*sidecar_json:\s*sidecar_json/.test(orchBody));
     } catch (e) {
       assertTrue(`HC-V0920-ORCH-${L}: Step 14 refactor contract`, false, e && e.message);
     }

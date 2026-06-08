@@ -728,6 +728,14 @@ function assertCoworkV068Shape() {
   // V068-DESC-1..5: each per-job orchestrator SKILL.md description + opening
   // prose mentions "atomic note" / "atomic-note write contract" and does NOT
   // describe legacy callout-patching surface.
+  // v0.96.0 S1.7: the "atomic-note write contract is the only output surface"
+  // sentence lived inside the v0.90.2 `CRITICAL: output path` callout body,
+  // which was retired in favor of `CRITICAL: voice + microscope discipline
+  // (v0.96.0)`. The atomic-note contract is now enforced deterministically by
+  // Rail W's write-atomic-note-helper + JSON-schema sidecar validation; the
+  // sentence-level disclaimer is no longer required and would conflict with
+  // the new compact callout body. Assertion migrated to check for the new
+  // schema reference instead.
   const orchs = ["morning-briefing", "midday-tripwire", "eod-review", "weekly-review", "monthly-review"];
   for (const o of orchs) {
     const body = readSkill(`skills/orchestrators/${o}/SKILL.md`);
@@ -742,8 +750,8 @@ function assertCoworkV068Shape() {
     );
     assertContains(
       top,
-      "atomic-note write contract is the only output surface",
-      `V068-DESC-${o}: opening prose explicitly disclaims legacy callout-patching`
+      "data/schemas/" + o + "@1.0.0.json",
+      `V068-DESC-${o}: opening prose references Rail W JSON-schema sidecar validation (v0.96.0)`
     );
   }
 
@@ -875,6 +883,11 @@ function assertCoworkV068Shape() {
 // ---------------------------------------------------------------------------
 // HC-V0750-A2 — Layer 2 post-write verification step present in all 5
 // atomic-note-writing orchestrators.
+// v0.96.0 S1.7: "Re-read + structural verify" + `rm -f` delete-on-miss was
+// retired. JSON-schema sidecar validation inside Rail W's `writeAtomicNote`
+// rolls back BOTH the .md and .cowork.json atomically when the sidecar fails
+// validation, so the orchestrator no longer needs to delete a partial file.
+// Layer 2 now checks for sidecar-schema validation in the Verify section.
 // ---------------------------------------------------------------------------
 {
   const fives = [
@@ -886,9 +899,9 @@ function assertCoworkV068Shape() {
   ];
   for (const rel of fives) {
     const body = fs.readFileSync(path.join(BP, rel), "utf8");
-    assertContains(body, "Re-read + structural verify", `HC-V0750-A2 ${rel} contains verify step`);
-    assertContains(body, "rm -f ",                       `HC-V0750-A2 ${rel} contains rm -f delete-on-miss`);
-    assertContains(body, "failed:contract-violation:",   `HC-V0750-A2 ${rel} returns contract-violation status`);
+    assertContains(body, "Sidecar schema validation",            `HC-V0750-A2 ${rel} contains sidecar-schema verify step`);
+    assertContains(body, "failed:contract-violation:sidecar-schema", `HC-V0750-A2 ${rel} surfaces sidecar-schema status`);
+    assertContains(body, "failed:contract-violation:",           `HC-V0750-A2 ${rel} returns contract-violation status`);
   }
 }
 

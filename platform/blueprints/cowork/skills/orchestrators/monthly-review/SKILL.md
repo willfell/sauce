@@ -8,14 +8,16 @@ tags: [cowork, orchestrator, monthly, engagement-aware]
 
 # cowork:monthly-review
 
-> [!warning]+ CRITICAL: output path (v0.90.2)
-> This orchestrator writes ONE atomic note to:
+> [!warning]+ CRITICAL: voice + microscope discipline (v0.96.0)
+> Path, frontmatter type, and atomic-note body shape are enforced
+> deterministically by `write-atomic-note-helper.js` + JSON-schema
+> validation against `data/schemas/monthly-review@1.0.0.json`. They cannot drift.
 >
-> `spice/cowork/monthly/<YYYY>/<YYYY-MM>/monthly-review.md`
->
-> DO NOT write to `spice/daily/<YYYY>/<MM-Month>/<weekday>-<YYYY-MM-DD>.md` or any other path outside `spice/cowork/monthly/` — that's a separate blueprint surface, NOT this orchestrator's output. The consumer vault's CLAUDE.md may list `spice/daily/` under the "Daily" topic and `spice/cowork/monthly/` may also appear in other resolvers; THE COWORK MONTHLY ATOMIC NOTE LIVES UNDER `spice/cowork/monthly/`, NEVER under `spice/daily/`.
->
-> The write happens via sub-skill `cowork:write-run-note-monthly-review` (READ its SKILL.md before invoking; the step that delegates to it is later in this file). NEVER write the atomic note directly via the `Write` tool, the `Edit` tool, or `mcp__obsidian__obsidian_put_content` from this orchestrator body — ALWAYS delegate to the write sub-skill which enforces the path + frontmatter + structural-marker contracts.
+> Voice + microscope adherence ARE prose-level invariants the writer
+> can't enforce. Apply `user-preferences.personality.notes` verbatim to
+> every narrative sentence. For each kind in `priorities` with a
+> microscope at `spice/cowork/prompts/per-mcp/<kind>/microscope.md`,
+> follow that microscope's `## Output shape` directives verbatim.
 
 First-of-month deep pass for one engagement. Reviews the PREVIOUS month. Writes ONE atomic note at `spice/cowork/monthly/YYYY/YYYY-MM/monthly-review.md` (deterministic path per `(orchestrator, month)`; overwrite-last-write-wins idempotency). Body shape follows the user's prompt body at `spice/cowork/prompts/monthly-review.md`; when the prompt body is empty, emits a no-op note with `warning: empty_prompt`. For finance-tracking engagements, this is the authoritative Credit Debt Payoff reconciliation moment. Refreshes `active-threads.md` + `weekly-snapshot.md` for this engagement's slice as a side effect.
 
@@ -37,13 +39,11 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
 
    ```
    cowork:monthly-review committing to:
-     PATH: spice/cowork/monthly/<YYYY>/<YYYY-MM>/monthly-review.md (NOT spice/daily/)
-     TYPE: cowork-monthly-review (canonical frontmatter type)
-     VOICE: apply user-preferences.personality.notes verbatim AND personality.{vibe, formality, length, pep_talk}
-     MICROSCOPES: follow ## Output shape from each per-mcp/<kind>/microscope.md verbatim
+     VOICE: apply user-preferences.personality.notes verbatim AND personality.{vibe, formality, length, pep_talk} to every narrative sentence
+     MICROSCOPES: for each kind in prefs.priorities with a microscope at spice/cowork/prompts/per-mcp/<kind>/microscope.md, follow that microscope's ## Output shape directives verbatim
    ```
 
-   Deterministic backstops in write-run-note: path write-guard (v0.91.1) + frontmatter write-guard (v0.91.2). Voice + microscope are prose-imperative.
+   Two-purpose commitment: (1) commit voice so personality + voice contract land in body composition; (2) commit microscope adherence so each kind's callout follows its microscope's `## Output shape`. Deterministic backstops via the v0.96.0 Rail W writer + JSON-schema sidecar validation (path/frontmatter/dvjs/body-shape are enforced by `write-atomic-note-helper.js` against `data/schemas/monthly-review@1.0.0.json`, so PATH + TYPE bullets retired). The v0.91.x–v0.92.0 write-guards remain as belt-and-suspenders.
 
 2. **Resolve engagement.** Read `<vault>/spice/cowork/context/vault-config.md`; look up engagement by id. If not found, exit silently. Read the engagement-type manifest via the Read tool at `spice/cowork/context/engagement-types/<engagement.type>.json` (expected values: `personal`, `w2-fte`, `consulting`). Parse as JSON; capture `engagement` + `render_aspects`. If the file is missing or fails to parse, emit Notice `cowork:monthly-review aborted -- engagement-type manifest unavailable at spice/cowork/context/engagement-types/<engagement.type>.json` and exit.
 3. READ `.claude/skills/cowork/skills/date-context/SKILL.md` in full and follow
@@ -166,36 +166,20 @@ for entry in plan.dispatch_plan:
 
   14e. **Prep engagement_type_blocks[].** For each `related_signal` in `related_signals[]` with `status == "ready"`: push `{ kind: "semantic", callout_type: "example", title: "Related to: <event.title>", body_md: <related_signal.markdown> }`. When `semantic_index_unavailable == true`: push ONCE `{ kind: "semantic-unavailable", callout_type: "warning", title: "Semantic index not available", body_md: "Smart Connections index absent or anchor not indexed — semantic gather skipped." }`. Finance does NOT flow through here — it's written by a separate sub-skill when applicable.
 
-  14f. **Invoke composeBody.** READ `.claude/skills/cowork/skills/compose-body/SKILL.md` in full and follow its `## Compose` section with `{ cadence: "monthly-review", nav_buttons_block: "<canonical block>", synopsis_md, memory_callouts: { yesterday_md, overnight_md, echoes_md, backlink_md }, ordered_blocks, engagement_type_blocks, closing_md }`. Capture `{ body_md, body_assertions, status }`.
+  14f. **Invoke composeBody.** READ `.claude/skills/cowork/skills/compose-body/SKILL.md` in full and follow its `## Compose` section with `{ cadence: "monthly-review", nav_buttons_block: "<canonical block>", synopsis_md, memory_callouts: { yesterday_md, overnight_md, echoes_md, backlink_md }, ordered_blocks, engagement_type_blocks, closing_md, engagement_id: engagement.id, generated_by: "cowork:monthly-review@2.0.0", frontmatter: { type: "cowork-monthly-review", engagement_id: engagement.id, month: context.iso_month, title: <composed title>, summary: <composed summary>, created_at: <ISO+TZ now> }, render_aspects_applied: <Array of "<key>:<value>" strings derived from plan.render_aspects>, memory_used: { yesterday_present: output_month != null, drift_warning_present: false, echoes_count: (output_echoes && output_echoes.results) ? output_echoes.results.length : 0 }, plan_dispatch: { mode: plan.dispatch_mode, kinds_dispatched: plan.dispatch_plan.length, warnings_emitted: plan.dispatch_plan.filter(e => e.action === "warn").length, classifier_cache_hit: false, pending_confirmations_count: 0 } }`. Capture `{ body_md, sidecar_json, status }`. (`classifier_cache_hit` and `pending_confirmations_count` are S2.3 placeholders — Rail D is not yet wired.)
 
   14g. **Compose failure handling.** If `status` starts with `"failed:"`, emit Notice `cowork:monthly-review aborted -- compose-body failure: <status>` and exit non-zero. Do NOT call write-run-note. Do NOT run state-update steps.
 16. READ `.claude/skills/cowork/skills/write-run-note-monthly-review/SKILL.md` in full —
     paying particular attention to its `## Title composition`,
     `## Adaptive body skeleton`, and `## Pre-write self-check` sections — then apply those contracts
-    before performing the write described in its `## Steps` section with `{ engagement, month: context.iso_month, year: context.year, body: body_md, body_assertions, prompt_source: prompt_source, warning }`. Capture `status`. If `status` starts with `"failed:contract-violation:"`, emit Notice `cowork:monthly-review aborted -- contract violation: <field>` (where `<field>` is the part after `failed:contract-violation:`). Do not run state-update steps. Exit non-zero.
+    before performing the write described in its `## Steps` section with `{ engagement, month: context.iso_month, year: context.year, body: body_md, sidecar_json: sidecar_json, prompt_source: prompt_source, warning }`. Capture `status`. If `status` starts with `"failed:contract-violation:"`, emit Notice `cowork:monthly-review aborted -- contract violation: <field>` (where `<field>` is the part after `failed:contract-violation:`). Do not run state-update steps. Exit non-zero.
     Else if `status` starts with `"failed:"` (e.g. `failed:filesystem:permission`, `failed:write-undersized:285`), emit Notice `cowork:monthly-review aborted -- write failed: <status>` and exit. Do not run state-update steps after a failed write.
 
 ## Verify
 
-17. **Re-read + structural verify.** After `write-run-note-monthly-review` returns a non-`"failed:"` status:
+17. **Sidecar schema validation.** The write step's `writeAtomicNote` helper invokes `validateSidecar` against the cadence schema BEFORE committing either file. If the helper returned `failed:contract-violation:sidecar-schema`, no files were written — emit Notice `cowork:monthly-review aborted -- contract-violation: <field>` (where `<field>` is the JSON-Schema validator's first reported error) and exit non-zero. Do not run subsequent state-update steps.
 
-   a. Read the just-written file via the Read tool at `spice/cowork/monthly/<YYYY>/<YYYY-MM>/monthly-review.md` (substituting the values from `context`).
-   b. Parse leading frontmatter (YAML between `---` markers) as `parsed_frontmatter`; capture the remainder as `body`.
-   c. Assert required frontmatter fields exist and are non-empty strings:
-      - `title:`
-      - `summary:`
-      - `type:` (must equal `cowork-monthly-review`)
-      - `warning:` only when the orchestrator passed a non-null `warning` to write-run-note (otherwise the field is allowed to be absent or `null`).
-   d. Regex-scan `body` for required structural markers:
-      - SpaceNavButtons block (v0.91.3 canonical pattern — REJECTS hallucinated `const { SpaceNavButtons } = customJS` shape): `/```dataviewjs\s*\n\s*await\s+dv\.view\(\s*["']ranch\/views\/customjs-guard["']\s*,\s*\{\s*class:\s*["']SpaceNavButtons["']\s*\}\s*\)/`
-      - At least one Synopsis callout: `/^> \[!info\]- /m`
-      - At least one example callout: `/^> \[!example\]\+ /m`
-      - Closing tip callout: `/^> \[!tip\] /m`
-   e. On ANY frontmatter-field miss or marker miss:
-      - Use Bash to delete the file: `rm -f spice/cowork/monthly/<YYYY>/<YYYY-MM>/monthly-review.md`
-      - Emit Obsidian Notice: `cowork:monthly-review aborted -- contract-violation: <missing-field-or-marker-name>`
-      - Exit non-zero. Do NOT run subsequent state-update steps.
-   f. On all-pass: continue to the State section per the existing flow.
+    The regex re-read pass from v0.91.3+v0.92.0 is RETIRED. Sidecar JSON-schema validation subsumes it. v0.91.x–v0.92.0 path/frontmatter/dvjs write-guards INSIDE write-run-note still fire as belt-and-suspenders before the writeAtomicNote call.
 
 ## State
 

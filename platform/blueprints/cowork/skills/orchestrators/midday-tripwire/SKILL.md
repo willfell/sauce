@@ -8,14 +8,20 @@ tags: [cowork, orchestrator, midday, engagement-aware, tripwire-aspects]
 
 # cowork:midday-tripwire
 
-> [!warning]+ CRITICAL: output path (v0.90.2)
-> This orchestrator writes ONE atomic note to:
+> [!warning]+ CRITICAL: voice + microscope discipline (v0.96.0)
+> Path, frontmatter type, and atomic-note body shape are enforced
+> deterministically by `write-atomic-note-helper.js` + JSON-schema
+> validation against `data/schemas/midday-tripwire@1.0.0.json`. They cannot drift.
 >
-> `spice/cowork/daily/<YYYY>/<MM-Month>/<YYYY-MM-DD>/midday-tripwire.md`
+> Voice + microscope adherence ARE prose-level invariants the writer
+> can't enforce. Apply `user-preferences.personality.notes` verbatim to
+> every narrative sentence. For each kind in `priorities` with a
+> microscope at `spice/cowork/prompts/per-mcp/<kind>/microscope.md`,
+> follow that microscope's `## Output shape` directives verbatim.
 >
-> DO NOT write to `spice/daily/<YYYY>/<MM-Month>/<weekday>-<YYYY-MM-DD>.md` — that's the daily-note blueprint (a separate surface for hand-edited daily notes), NOT this orchestrator's output. The consumer vault's CLAUDE.md may list `spice/daily/` under the "Daily" topic in its resolver table; THAT IS NOT WHERE COWORK ATOMIC NOTES GO. The cowork atomic-note path is fundamentally different from the daily-blueprint path.
->
-> The write happens via sub-skill `cowork:write-run-note-midday-tripwire` (READ its SKILL.md before invoking; the step that delegates to it is later in this file). NEVER write the atomic note directly via the `Write` tool, the `Edit` tool, or `mcp__obsidian__obsidian_put_content` from this orchestrator body — ALWAYS delegate to the write sub-skill which enforces the path + frontmatter + structural-marker contracts.
+> Tripwire severity is unchanged: silent on green (no note written), writes
+> only when at least one signal lands at warn or alert. Severity-marker
+> regex check moved into sidecar `surfaced_kinds` validation.
 
 Real-time mid-day check for credit-card charges that violate the active payoff plan, scoped to a single engagement. Pulls today's CC transactions for the engagement's finance scope, classifies each as RED (locked-card charge), YELLOW (active-card discretionary >= threshold), or GREEN. Writes ONLY when at least one RED or YELLOW exists — when severity is green, NO atomic note is written (presence of a tripwire note = something to flag). When a write fires, the note lands at `spice/cowork/daily/YYYY/MM-MMMM/YYYY-MM-DD/midday-tripwire.md` (deterministic path per `(orchestrator, day)`; re-run replaces).
 
@@ -39,13 +45,11 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
 
    ```
    cowork:midday-tripwire committing to:
-     PATH: spice/cowork/daily/<YYYY>/<MM-Month>/<YYYY-MM-DD>/midday-tripwire.md (NOT spice/daily/...)
-     TYPE: cowork-midday-tripwire (canonical frontmatter type)
-     VOICE: apply user-preferences.personality.notes verbatim AND personality.{vibe, formality, length, pep_talk}
-     MICROSCOPES: follow ## Output shape from each per-mcp/<kind>/microscope.md verbatim
+     VOICE: apply user-preferences.personality.notes verbatim AND personality.{vibe, formality, length, pep_talk} to every narrative sentence
+     MICROSCOPES: for each kind in prefs.priorities with a microscope at spice/cowork/prompts/per-mcp/<kind>/microscope.md, follow that microscope's ## Output shape directives verbatim
    ```
 
-   Deterministic backstops in write-run-note: path write-guard (v0.91.1) + frontmatter write-guard (v0.91.2). Voice + microscope are prose-imperative.
+   Two-purpose commitment: (1) commit voice so personality + voice contract land in body composition; (2) commit microscope adherence so each kind's callout follows its microscope's `## Output shape`. Deterministic backstops via the v0.96.0 Rail W writer + JSON-schema sidecar validation (path/frontmatter/dvjs/body-shape are enforced by `write-atomic-note-helper.js` against `data/schemas/midday-tripwire@1.0.0.json`, so PATH + TYPE bullets retired). The v0.91.x–v0.92.0 write-guards remain as belt-and-suspenders.
 
 2. **Resolve engagement.** Read `<vault>/spice/cowork/context/vault-config.md`; look up `engagement` by id. If not found, exit silently. Read the engagement-type manifest via the Read tool at `spice/cowork/context/engagement-types/<engagement.type>.json` (substitute `<engagement.type>` from the resolved engagement; expected values: `personal`, `w2-fte`, `consulting`). Parse as JSON; capture `render_aspects` AND `tripwire_aspects` (defaults to `[]` when field absent). If the file is missing or fails to parse, emit Notice `cowork:midday-tripwire aborted -- engagement-type manifest unavailable at spice/cowork/context/engagement-types/<engagement.type>.json` and exit. If `tripwire_aspects.length == 0`, exit silently (engagement has no tripwire signals — tripwire is a no-op).
 3. READ `.claude/skills/cowork/skills/date-context/SKILL.md` in full and follow
@@ -161,37 +165,19 @@ Each gather call passes `engagement_id`. The orchestrator branches per-aspect fr
 
   14e. **Prep engagement_type_blocks[].** For each `related_signal` in `related_signals[]` with `status == "ready"`: push `{ kind: "semantic", callout_type: "example", title: "Related to: <event.title>", body_md: <related_signal.markdown> }`. When `semantic_index_unavailable == true`: push ONCE `{ kind: "semantic-unavailable", callout_type: "warning", title: "Semantic index not available", body_md: "Smart Connections index absent or anchor not indexed — semantic gather skipped." }`. Finance does NOT flow through here — it's written by a separate sub-skill when applicable.
 
-  14f. **Invoke composeBody.** READ `.claude/skills/cowork/skills/compose-body/SKILL.md` in full and follow its `## Compose` section with `{ cadence: "midday-tripwire", nav_buttons_block: "<canonical block>", synopsis_md, memory_callouts: { yesterday_md, overnight_md, echoes_md, backlink_md }, ordered_blocks, engagement_type_blocks, closing_md, excluded_themes: plan.excluded_themes, voice_contract: plan.voice_contract }`. The `excluded_themes` field is the v0.95.1 Knob-1 13th plan-dispatch contract key — when `render_aspects.anti_echo == "include"` it carries yesterday's carry-forward bullets verbatim; otherwise `[]`. composeBody gates the anti-echo callout injection internally on cadence eligibility + non-empty excluded_themes. Capture `{ body_md, body_assertions, status }`.
+  14f. **Invoke composeBody.** READ `.claude/skills/cowork/skills/compose-body/SKILL.md` in full and follow its `## Compose` section with `{ cadence: "midday-tripwire", nav_buttons_block: "<canonical block>", synopsis_md, memory_callouts: { yesterday_md, overnight_md, echoes_md, backlink_md }, ordered_blocks, engagement_type_blocks, closing_md, excluded_themes: plan.excluded_themes, voice_contract: plan.voice_contract, engagement_id: engagement.id, generated_by: "cowork:midday-tripwire@2.0.0", frontmatter: { type: "cowork-midday-tripwire", engagement_id: engagement.id, day: context.today, severity, title: <composed title>, summary: <composed summary>, created_at: <ISO+TZ now> }, render_aspects_applied: <Array of "<key>:<value>" strings derived from plan.render_aspects>, memory_used: { yesterday_present: false, drift_warning_present: false, echoes_count: (output_echoes && output_echoes.results) ? output_echoes.results.length : 0 }, plan_dispatch: { mode: plan.dispatch_mode, kinds_dispatched: plan.dispatch_plan.length, warnings_emitted: plan.dispatch_plan.filter(e => e.action === "warn").length, classifier_cache_hit: false, pending_confirmations_count: 0 } }`. The `excluded_themes` field is the v0.95.1 Knob-1 13th plan-dispatch contract key — when `render_aspects.anti_echo == "include"` it carries yesterday's carry-forward bullets verbatim; otherwise `[]`. composeBody gates the anti-echo callout injection internally on cadence eligibility + non-empty excluded_themes. Capture `{ body_md, sidecar_json, status }`. (`classifier_cache_hit` and `pending_confirmations_count` are S2.3 placeholders — Rail D is not yet wired.)
 
   14g. **Compose failure handling.** If `status` starts with `"failed:"`, emit Notice `cowork:midday-tripwire aborted -- compose-body failure: <status>` and exit non-zero. Do NOT call write-run-note. Do NOT run state-update steps.
 11. READ `.claude/skills/cowork/skills/write-run-note-midday-tripwire/SKILL.md` in full —
     paying particular attention to its `## Title composition`,
     `## Adaptive body skeleton`, and `## Pre-write self-check` sections — then apply those contracts
-    before performing the write described in its `## Steps` section with `{ engagement, date: context.today, weekday: context.dddd, month_name: context["MM-Month"].split("-")[1], severity, signals: { cc: cc_signal, calendar: calendar_signal, queue: queue_signal }, body: body_md, body_assertions, prompt_source: "spice/cowork/prompts/midday-tripwire.md", warning, warnings: warnings_array }`. The `signals` arg is an opaque structured handoff write-run-note uses to compose the summary line; `warnings_array` is the optional list of `<aspect>_unavailable` strings from gather-skipped returns. Capture `status`. If `status` starts with `"failed:contract-violation:"`, emit Notice `cowork:midday-tripwire aborted -- contract violation: <field>` and exit non-zero. Else if `status` starts with `"failed:"`, emit Notice `cowork:midday-tripwire aborted -- write failed: <status>` and exit. Do not run state-update steps after a failed write.
+    before performing the write described in its `## Steps` section with `{ engagement, date: context.today, weekday: context.dddd, month_name: context["MM-Month"].split("-")[1], severity, signals: { cc: cc_signal, calendar: calendar_signal, queue: queue_signal }, body: body_md, sidecar_json: sidecar_json, prompt_source: "spice/cowork/prompts/midday-tripwire.md", warning, warnings: warnings_array }`. The `signals` arg is an opaque structured handoff write-run-note uses to compose the summary line; `warnings_array` is the optional list of `<aspect>_unavailable` strings from gather-skipped returns. Capture `status`. If `status` starts with `"failed:contract-violation:"`, emit Notice `cowork:midday-tripwire aborted -- contract violation: <field>` and exit non-zero. Else if `status` starts with `"failed:"`, emit Notice `cowork:midday-tripwire aborted -- write failed: <status>` and exit. Do not run state-update steps after a failed write.
 
 ## Verify
 
-12. **Re-read + structural verify.** After `write-run-note-midday-tripwire` returns a non-`"failed:"` status:
+12. **Sidecar schema validation.** The write step's `writeAtomicNote` helper invokes `validateSidecar` against the cadence schema BEFORE committing either file. If the helper returned `failed:contract-violation:sidecar-schema`, no files were written — emit Notice `cowork:midday-tripwire aborted -- contract-violation: <field>` (where `<field>` is the JSON-Schema validator's first reported error) and exit non-zero. Do not run subsequent state-update steps.
 
-   a. Read the just-written file via the Read tool at `spice/cowork/daily/<YYYY>/<MM-Month>/<YYYY-MM-DD>/midday-tripwire.md` (substituting the values from `context`).
-   b. Parse leading frontmatter (YAML between `---` markers) as `parsed_frontmatter`; capture the remainder as `body`.
-   c. Assert required frontmatter fields exist and are non-empty strings:
-      - `title:`
-      - `summary:`
-      - `type:` (must equal `cowork-midday-tripwire`)
-      - `severity:` (must match `/^(warn|alert)$/`)
-      - `warning:` only when the orchestrator passed a non-null `warning` to write-run-note (otherwise the field is allowed to be absent or `null`).
-   d. Regex-scan `body` for required structural markers:
-      - SpaceNavButtons block (v0.91.3 canonical pattern — REJECTS hallucinated `const { SpaceNavButtons } = customJS` shape): `/```dataviewjs\s*\n\s*await\s+dv\.view\(\s*["']ranch\/views\/customjs-guard["']\s*,\s*\{\s*class:\s*["']SpaceNavButtons["']\s*\}\s*\)/`
-      - At least one Synopsis callout: `/^> \[!info\]- /m`
-      - At least one example callout: `/^> \[!example\]\+ /m`
-      - Closing tip callout: `/^> \[!tip\] /m`
-      - Severity-specific marker: at least one `> [!warning] ` callout OR `> [!example]+ 🚨` callout (regex: `/^> \[!warning\] |^> \[!example\]\+ 🚨/m`).
-   e. On ANY frontmatter-field miss or marker miss:
-      - Use Bash to delete the file: `rm -f spice/cowork/daily/<YYYY>/<MM-Month>/<YYYY-MM-DD>/midday-tripwire.md`
-      - Emit Obsidian Notice: `cowork:midday-tripwire aborted -- contract-violation: <missing-field-or-marker-name>` (when the miss is the severity-specific marker, reference it explicitly as `severity-marker`)
-      - Exit non-zero. Do NOT run subsequent steps.
-   f. On all-pass: continue to Done per the existing flow.
+    The regex re-read pass from v0.91.3+v0.92.0 is RETIRED. Sidecar JSON-schema validation subsumes it (severity-marker presence is now expressed via sidecar `surfaced_kinds` / `frontmatter.severity` schema constraints rather than a body regex). v0.91.x–v0.92.0 path/frontmatter/dvjs write-guards INSIDE write-run-note still fire as belt-and-suspenders before the writeAtomicNote call.
 
 ## Done
 
