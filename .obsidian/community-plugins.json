@@ -1,9 +1,11 @@
 [
-  "templater-obsidian",
-  "dataview",
   "customjs",
-  "quickadd",
+  "dataview",
   "js-engine",
-  "url-into-selection",
-  "obsidian-style-settings"
+  "new-tab-default-page",
+  "obsidian-style-settings",
+  "quickadd",
+  "realclaudian",
+  "templater-obsidian",
+  "url-into-selection"
 ]
