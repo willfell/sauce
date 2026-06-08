@@ -35,7 +35,7 @@ node platform/install.js .   # self-install at workshop root
 sauce install                 # equivalent via CLI (after brew install)
 ```
 
-The platform non-negotiable: workshop dogfoods every release.
+The platform non-negotiable: workshop dogfoods every release **and every push** (~4 seconds, ~82 history entries; catches manifest entry order, materialization paths, and path-resolution drift that preflight misses).
 
 ## CLI
 
@@ -55,7 +55,7 @@ Single-branch direct-push to `origin/main`. No feature branches, no PR review (f
 
 1. Cycle stage commits: bundle per-stage work into one commit each, conventional-commits format (`feat(installer,validator): v0.X.Y patch S1 — ...`). Use HEREDOC for multiline messages.
 2. Push to `origin/main` after each commit. No staging.
-3. At cycle close: bump `workshop_version` in `platform/manifest.json` AND `package.json`. After `brew upgrade sauce` distributes the new release, run `sauce update --bump-pins` from inside each consumer vault to auto-update `ranch/platform-subscription.json` (replaces the previous manual `vim ranch/platform-subscription.json` step — lockstep enforced by `check-version-sync.js`). See `/install` for full `--bump-pins` flag reference.
+3. At cycle close: bump `workshop_version` in `platform/manifest.json` AND `package.json`. After `brew upgrade sauce` distributes the new release, run `sauce update --bump-pins` from inside each consumer vault to auto-update `ranch/platform-subscription.json` (replaces the previous manual `vim ranch/platform-subscription.json` step — lockstep enforced by `check-version-sync.js`). See `/install` for full `--bump-pins` flag reference. Two related pin-sweep requirements: (a) per landmine #16, every `workshop_version` bump implies a sweep across `HC-V0*-VERSION-*` assertions in `run-helper-cases.js` + `run-bootstrap.js` plus fixture `cowork_version` / `sauce_version` strings; (b) per landmine #20, `scheduled-job-contract.json#contract_version` mirrors the cowork blueprint version exactly. The workshop's own `ranch/platform-subscription.json` requires manual edit at the same stage (no `sauce update --bump-pins` runs on the workshop itself).
 4. Annotated git tag `v<X.Y.Z>` at HEAD — **REQUIRES user approval** per the ask-before-acting list.
 5. `release.yml` GitHub Action fires on tag: runs preflight + `bump-tap` chain that auto-bumps `Formula/sauce.rb` in `willfell/homebrew-sauce` via PR.
 6. Tap PR merge → `brew upgrade sauce` picks up the new release.
@@ -103,6 +103,42 @@ This caveat surfaced as FLN-v79-3 during the v0.79.0 cycle (HC-V0790-B3 / D1 fix
 - Don't paraphrase API contracts in subagent prompts — quote literally.
 - Don't author new manifests without diffing against canonical precedent.
 - Don't trust "mirror v0.X.0 precedent" without reading the cited file.
+
+## Cycle lessons (load-bearing)
+
+Durable principles distilled from recent cycles' result docs. Each entry cites its origin cycle for traceability. Read at the start of any cycle that involves a refactor, a new helper, or a contract change. Bug-specific lessons (one-off frontmatter parser bugs, particular sub-skill prose fixes) belong in `Docs/cycle-history.md` — this section is for the cross-cycle principles.
+
+### Design + planning
+
+- **Verify helper behavior before the design asserts it.** Grep + read the helper, including its LOADING context (subprocess-spawning vs in-process; workshop-path resolution; vault-path source). v0.93.3 designed against `applyExternalPlugins` install behavior that didn't exist (helper was warning-only); v0.94.0 reinforced twice — `installer.runInstall` is subprocess-spawning (not in-process; needs an in-process shim for mocking), and `bootstrap-lib` resolution breaks under templater copy because `__dirname` becomes the ranch path, not platform/. One grep + one read of the helper file pre-design closes this trap.
+
+- **TDD against the real path, not just adjacent paths.** Distinguish what a test EXERCISES from what it COULD exercise. v0.93.3 lesson: `runBootstrap` end-to-end with `skipInstaller: true` exercises `phaseFetchPlugins` but NOT `applyExternalPlugins`; a true regression net for the install-time path requires invoking `platform/install.js` end-to-end on a synthetic existing vault.
+
+- **Phantom plan steps signal stale assumptions.** Verify scripts and files exist before authoring plan steps that invoke them. v0.95.0 plan referenced `Scripts/regenerate-claude-surface-registry.js` — a script that doesn't exist (registry regen happens inside `platform/install.js`'s Templater context, not as a standalone). One `ls` of the cited path would have caught it.
+
+### Refactor cycle patterns
+
+- **Sub-skill contracts evolve under refactor pressure.** Reserve a slot or two for "I forgot one" extensions during design. v0.95.0 designed a 10-key `plan-dispatch` contract; mid-execution it grew to 12 keys (`effective_hard_rules` added during S1.5.1 for `gather-from-served-by`; `tripwire_aspects` added during S1.5.2 for `midday-tripwire`). Both were organic discoveries as orchestrators consumed the result tree. Design with extension room.
+
+- **Defense-in-depth surfaces resist slimming.** Line targets in design docs must account for the defense floor. v0.95.0 designed 5 orchestrators slimming from ~330 to ~150 lines each; actual outcome was 192-237 lines because verify / write-guard / verbal-commitment surfaces are load-bearing (HC-V0911-WRITE-GUARD-* / HC-V0912-FM-* / HC-V0911-COMMIT-*). The cohesion goal is achieved at the higher floor; just don't over-promise the line delta in design docs.
+
+- **Test-quality drift can mask cohesion regressions.** When refactoring shared prose into a new structural owner, audit prose-lint assertions in the SAME stage — not at preflight discovery time. v0.95.0 S1.5 surfaced 41 pre-existing test failures asserting against prose that the refactor legitimately MOVED. Right fix: re-route the assertions to read the orchestrator + new sub-skill as a combined corpus, OR accept dual patterns (`plan.X` vs `prefs.X`). Preserving the stale prose is the wrong fix.
+
+- **Mid-execution scope expansion needs explicit surfacing.** Three cycles reinforced (v0.93.3 lesson 5.6; v0.94.0 lesson 5; v0.95.0 lesson 5). Document any contract addition / scope adjustment in the commit message AND the touched-skill body. Subagents may quietly merge clearly-needed work that the plan attributes to a later stage — v0.94.0 S1.4 silently included `ranch/platform-subscription.json` lockstep when preflight caught the drift. Plans should make these dependencies explicit (e.g., "S1.4 MUST also bump ranch lockstep or preflight fails").
+
+### Release hygiene
+
+- **Per-cycle VERSION pin sweep is mandatory at S1.4b.** Every `workshop_version` / blueprint bump implies a sweep across `HC-V0*-VERSION-*` assertions in `run-helper-cases.js` + `run-bootstrap.js`, fixture `cowork_version` / `sauce_version` strings, and `scheduled-job-contract.json#contract_version` per landmine #20. Standard hygiene — add to every plan as an explicit S1.4b-equivalent step (v0.93.3 lesson: this was implicit and got missed; v0.95.0 codified the stage label).
+
+- **`ranch/platform-subscription.json` lockstep is required for workshop dogfood.** Manual edit (no `sauce update --bump-pins` runs on the workshop itself); install correctly refuses to "downgrade" a mechanism whose subscription pins to an older version. Land at the same stage as the `workshop_version` bump.
+
+- **Workshop dogfood is a useful contract verifier.** Run before EVERY push (not just cycle close). ~4 seconds, ~82 history entries; catches manifest entry order, materialization paths, and path-resolution drift that preflight misses. v0.95.0 S2 caught a `claude_surface[]` entry-order issue that preflight passed.
+
+### Test hygiene
+
+- **Be defensive about path resolution + explicit about test cleanup.** Tests that resolve paths via fallback can leak artifacts when the fallback lands on the workshop root. v0.94.0 RED-state runs left stale `mechanisms/test-epi*` directories (path leak before S1.2's `bootstrap-lib` fallback fixed the resolution). Pattern: prefer explicit path arguments over `__dirname`-derived guessing; use `os.tmpdir()` + `fs.mkdtempSync()` for transient fixtures; clean up at the end of every test scope.
+
+- **`gatherFromServedBy` HC cases need ≥ 80-char `agent_markdown`.** See § Writing HC cases above for the canonical fix pattern. Surfaced as FLN-v79-3.
 
 ## Installer helper history (reference)
 
