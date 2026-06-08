@@ -10511,8 +10511,13 @@ type: cowork-microscope
       const r = COMPOSE_BODY_HELPER.composeBody(input);
       assertTrue(`${labelPrefix}-A1: status ok`, r.status === "ok");
       assertTrue(`${labelPrefix}-A2: body_md byte-identical`, r.body_md === expectedBody);
-      assertTrue(`${labelPrefix}-A3: body_assertions match expected (as set)`,
-        JSON.stringify([...r.body_assertions].sort()) === JSON.stringify([...expectedAssertions].sort()));
+      // v0.96.0 S1.6: body_assertions field retired from composeBody return shape.
+      // _computeAssertions remains exported for migration-window callers; we
+      // exercise it directly against the fixture to keep golden-assertion
+      // coverage during the cut-over.
+      const computedAssertions = COMPOSE_BODY_HELPER._computeAssertions(input);
+      assertTrue(`${labelPrefix}-A3: _computeAssertions(input) matches expected (as set)`,
+        JSON.stringify([...computedAssertions].sort()) === JSON.stringify([...expectedAssertions].sort()));
       assertTrue(`${labelPrefix}-A4: nav-buttons block present in body`,
         r.body_md.includes("```dataviewjs"));
       assertTrue(`${labelPrefix}-A5: body ends with single newline`,
@@ -10571,8 +10576,10 @@ type: cowork-microscope
     const r = COMPOSE_BODY_HELPER.composeBody(input);
     assertTrue("HC-V0920-COMPOSE-EDGE-UCT1: status matches expected", r.status === expectedStatus);
     assertTrue("HC-V0920-COMPOSE-EDGE-UCT2: body_md empty on failure", r.body_md === "");
-    assertTrue("HC-V0920-COMPOSE-EDGE-UCT3: body_assertions empty on failure",
-      Array.isArray(r.body_assertions) && r.body_assertions.length === 0);
+    // v0.96.0 S1.6: composeBody now returns sidecar_json (not body_assertions);
+    // on failure sidecar_json is null.
+    assertTrue("HC-V0920-COMPOSE-EDGE-UCT3: sidecar_json null on failure",
+      r.sidecar_json === null);
   } catch (e) {
     assertTrue("HC-V0920-COMPOSE-EDGE-UCT: edge fixture", false, e && e.message);
   }
@@ -10640,8 +10647,11 @@ type: cowork-microscope
       const { input } = _loadComposeFixture(`case-${cad}`);
       const r = COMPOSE_BODY_HELPER.composeBody(input);
       assertTrue(`HC-V0920-INTEGRATION-${L}-A1: status ok`, r.status === "ok");
-      const guardOk = Array.isArray(r.body_assertions) && r.body_assertions.length > 0
-        && r.body_assertions.every(a => r.body_md.includes(a));
+      // v0.96.0 S1.6: body_assertions field retired; simulate the write-guard
+      // by deriving assertions from the input via the exported helper.
+      const assertions = COMPOSE_BODY_HELPER._computeAssertions(input);
+      const guardOk = Array.isArray(assertions) && assertions.length > 0
+        && assertions.every(a => r.body_md.includes(a));
       assertTrue(`HC-V0920-INTEGRATION-${L}-A2: simulated write-guard passes on canonical output`, guardOk);
     } catch (e) {
       assertTrue(`HC-V0920-INTEGRATION-${L}: end-to-end contract`, false, e && e.message);
@@ -10653,8 +10663,11 @@ type: cowork-microscope
   try {
     const { input } = _loadComposeFixture("case-morning-briefing");
     const r = COMPOSE_BODY_HELPER.composeBody(input);
-    const mutated = r.body_md.replace(r.body_assertions[1], "<mutated>");
-    const stillOk = r.body_assertions.every(a => mutated.includes(a));
+    // v0.96.0 S1.6: derive assertions via _computeAssertions(input) since
+    // composeBody no longer returns body_assertions.
+    const assertions = COMPOSE_BODY_HELPER._computeAssertions(input);
+    const mutated = r.body_md.replace(assertions[1], "<mutated>");
+    const stillOk = assertions.every(a => mutated.includes(a));
     assertTrue("HC-V0920-INTEGRATION-NEG-A1: write-guard rejects mutated body", stillOk === false);
   } catch (e) {
     assertTrue("HC-V0920-INTEGRATION-NEG: negative mutation contract", false, e && e.message);

@@ -2336,8 +2336,12 @@ function assertCoworkV068Shape() {
 // cleaner contract: composeBody({ cadence, nav_buttons_block, synopsis_md,
 // memory_callouts, ordered_blocks{kind,callout_type,title,body_md},
 // engagement_type_blocks, closing_md }) → { body_md, body_assertions, status }.
-// Coverage moves to HC-V0920-COMPOSE-* (cowork/run-helper-cases.js) with
-// 9 byte-identical golden fixtures (5 cadences + 4 edge cases).
+// v0.96.0 S1.6 further refines the return shape to
+// { body_md, sidecar_json, status } — body_assertions is subsumed by JSON-
+// schema validation against data/schemas/<cadence>@1.0.0.json.
+// Coverage moves to HC-V0920-COMPOSE-* + HC-V0960-W-* (cowork/run-helper-cases.js)
+// with 9 byte-identical golden fixtures (5 cadences + 4 edge cases) plus
+// Rail W sidecar/schema/helper coverage.
 // =====================================================================
 
 // =====================================================================

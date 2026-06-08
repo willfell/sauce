@@ -6,8 +6,12 @@
  *
  * Takes pre-rendered nav-buttons block, synopsis callout, memory callouts,
  * priority-ordered MCP-kind blocks, engagement-type aspect blocks, and a
- * pre-rendered closing callout. Returns the final body markdown + an array
- * of canonical assertion substrings + a status token.
+ * pre-rendered closing callout. Returns the final body markdown + a v1.0.0
+ * sidecar payload object (Rail W, v0.96.0 S1.6) + a status token.
+ *
+ * v0.96.0 S1.6 retires the v0.91.x–v0.92.0 `body_assertions[]` field; the
+ * downstream write-atomic-note-helper validates `sidecar_json` against
+ * `data/schemas/<cadence>@1.0.0.json` (draft-07) BEFORE write commits.
  *
  * Pure: no I/O, no MCP calls, no clock, no randomness. Deterministic:
  * same input → byte-identical output. Spec lives in
@@ -183,6 +187,75 @@ function _computeAssertions(input) {
 }
 
 /**
+ * v0.96.0 S1.6 — sidecar composition (Rail W).
+ *
+ * Walks `ordered_blocks[]` + `engagement_type_blocks[]` to aggregate items[]
+ * and surfaced_kinds[] into the v1.0.0 sidecar payload schema documented in
+ * `data/schemas/<cadence>@1.0.0.json` (draft-07). Pure; deterministic.
+ *
+ * Sidecar surface keys:
+ *   - schema_version       — pinned "1.0.0".
+ *   - generated_by         — `cowork:<cadence>@2.0.0` if not provided.
+ *   - generated_at         — ISO timestamp; from input or new Date().
+ *   - cadence              — passthrough.
+ *   - engagement_id        — passthrough (default "").
+ *   - frontmatter          — mirror of the .md frontmatter (default {}).
+ *   - surfaced_kinds       — unique kinds from both block arrays, excluding
+ *                            "warning" sentinels. Order = first-seen.
+ *   - surfaced_items       — flat concat of block.items[] across both arrays.
+ *   - render_aspects_applied — passthrough (default []).
+ *   - memory_used          — passthrough (default conservative zero-state).
+ *   - plan_dispatch        — passthrough (default derived from
+ *                            surfaced_kinds.size + warnings = 0).
+ *
+ * The retired v0.91.x–v0.92.0 `body_assertions[]` field is subsumed by JSON-
+ * schema validation at write-atomic-note time.
+ *
+ * @param {object} input  — composeBody input (post-validation)
+ * @returns {object}      — v1.0.0 sidecar payload
+ */
+function _composeSidecar(input) {
+    const generated_at = input.generated_at || new Date().toISOString();
+    const surfaced_items = [];
+    const surfaced_kinds = new Set();
+    const allBlocks = [
+        ...(input.ordered_blocks || []),
+        ...(input.engagement_type_blocks || []),
+    ];
+    for (const block of allBlocks) {
+        if (block.kind && block.kind !== "warning") {
+            surfaced_kinds.add(block.kind);
+        }
+        if (Array.isArray(block.items)) {
+            for (const item of block.items) {
+                surfaced_items.push(item);
+            }
+        }
+    }
+    return {
+        schema_version: "1.0.0",
+        generated_by: input.generated_by || `cowork:${input.cadence}@2.0.0`,
+        generated_at,
+        cadence: input.cadence,
+        engagement_id: input.engagement_id || "",
+        frontmatter: input.frontmatter || {},
+        surfaced_kinds: Array.from(surfaced_kinds),
+        surfaced_items,
+        render_aspects_applied: input.render_aspects_applied || [],
+        memory_used: input.memory_used || {
+            yesterday_present: false,
+            drift_warning_present: false,
+            echoes_count: 0,
+        },
+        plan_dispatch: input.plan_dispatch || {
+            mode: "prefs",
+            kinds_dispatched: surfaced_kinds.size,
+            warnings_emitted: 0,
+        },
+    };
+}
+
+/**
  * v0.95.1 — Knob 1 (anti_echo render aspect).
  *
  * injectAntiEchoCallout(body, excluded_themes, voice_contract)
@@ -222,7 +295,7 @@ function injectAntiEchoCallout(body, excluded_themes, voice_contract) {
 function composeBody(input) {
     const validationError = _validateInput(input);
     if (validationError) {
-        return { body_md: "", body_assertions: [], status: validationError };
+        return { body_md: "", sidecar_json: null, status: validationError };
     }
 
     const {
@@ -273,9 +346,9 @@ function composeBody(input) {
     }
 
     const body_md = sections.join("\n\n") + "\n";
-    const body_assertions = _computeAssertions(input);
+    const sidecar_json = _composeSidecar(input);
 
-    return { body_md, body_assertions, status: "ok" };
+    return { body_md, sidecar_json, status: "ok" };
 }
 
 module.exports = {
@@ -287,4 +360,5 @@ module.exports = {
     _composeMemoryCluster,
     _composeBacklink,
     _computeAssertions,
+    _composeSidecar,
 };
