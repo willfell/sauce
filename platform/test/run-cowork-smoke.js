@@ -4985,6 +4985,154 @@ const LEARN_FIXTURES_DIR = path.join(ROOT, "platform/test/fixtures/cowork/learn"
     } catch (e) { failed++; console.error(`FAIL  ${label}: ${e.message}`); }
 }
 
+// ============================================================================
+// v0.96.1 — Rail M (multi-engagement learned_weights) smoke scenario
+// ============================================================================
+//   * smoke-M-1: _normalizeLearnedWeights migrates legacy YAML fixture → nested shape
+//
+// RED until S1.2 lands _normalizeLearnedWeights. Fixture lives at
+// platform/test/fixtures/cowork/learned-weights-migration/legacy-single-engagement.yaml.
+
+const LWM_FIXTURES_DIR = path.join(ROOT, "platform/test/fixtures/cowork/learned-weights-migration");
+
+// Minimal targeted parser for the v0.96.1 migration fixtures (no js-yaml dep).
+function _smokeParseFixtureYaml(text) {
+    function parseScalar(raw) {
+        const s = String(raw).trim();
+        if (s === "") return "";
+        if (s === "null" || s === "~") return null;
+        if (s === "true") return true;
+        if (s === "false") return false;
+        if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
+            return s.slice(1, -1);
+        }
+        if (/^-?\d+$/.test(s)) return parseInt(s, 10);
+        if (/^-?\d*\.\d+$/.test(s)) return parseFloat(s);
+        if (s.startsWith("[") && s.endsWith("]")) {
+            const inner = s.slice(1, -1).trim();
+            if (inner === "") return [];
+            const parts = []; let depth = 0; let cur = "";
+            for (const ch of inner) {
+                if (ch === "[" || ch === "{") depth++;
+                else if (ch === "]" || ch === "}") depth--;
+                if (ch === "," && depth === 0) { parts.push(cur); cur = ""; continue; }
+                cur += ch;
+            }
+            if (cur.trim() !== "") parts.push(cur);
+            return parts.map((p) => parseScalar(p));
+        }
+        if (s.startsWith("{") && s.endsWith("}")) {
+            const inner = s.slice(1, -1).trim();
+            if (inner === "") return {};
+            const parts = []; let depth = 0; let cur = "";
+            for (const ch of inner) {
+                if (ch === "[" || ch === "{") depth++;
+                else if (ch === "]" || ch === "}") depth--;
+                if (ch === "," && depth === 0) { parts.push(cur); cur = ""; continue; }
+                cur += ch;
+            }
+            if (cur.trim() !== "") parts.push(cur);
+            const obj = {};
+            for (const p of parts) {
+                const idx = p.indexOf(":");
+                if (idx < 0) continue;
+                const k = p.slice(0, idx).trim().replace(/^["']|["']$/g, "");
+                const v = p.slice(idx + 1).trim();
+                obj[k] = parseScalar(v);
+            }
+            return obj;
+        }
+        return s;
+    }
+    const lines = String(text).split(/\r?\n/);
+    const root = {};
+    const stack = [{ indent: -1, container: root, key: null }];
+    for (let raw of lines) {
+        if (raw.trim() === "" || /^\s*#/.test(raw)) continue;
+        const indent = raw.match(/^ */)[0].length;
+        const body = raw.slice(indent);
+        while (stack.length > 1 && stack[stack.length - 1].indent >= indent) stack.pop();
+        const top = stack[stack.length - 1];
+        const m = body.match(/^([A-Za-z_][A-Za-z0-9_-]*)\s*:\s*(.*)$/);
+        if (!m) continue;
+        const key = m[1];
+        const rest = m[2];
+        if (rest === "") {
+            const child = {};
+            top.container[key] = child;
+            stack.push({ indent, container: child, key });
+        } else {
+            top.container[key] = parseScalar(rest);
+        }
+    }
+    return root;
+}
+
+// smoke-M-1: _normalizeLearnedWeights migrates legacy YAML fixture to nested shape
+{
+    const label = "smoke-M-1 _normalizeLearnedWeights migrates legacy YAML fixture to nested shape";
+    try {
+        const helperPath = path.join(COWORK_HELPERS_DIR, "learn-from-checks-helper.js");
+        delete require.cache[require.resolve(helperPath)];
+        const lfc = require(helperPath);
+        const raw = _smokeParseFixtureYaml(fs.readFileSync(path.join(LWM_FIXTURES_DIR, "legacy-single-engagement.yaml"), "utf8"));
+        const out = lfc._normalizeLearnedWeights(raw.learned_weights);
+        const ok = out && out.schema_version === "1.1.0"
+            && out.engagements && out.engagements.personal
+            && out.engagements.personal.per_kind
+            && out.engagements.personal.per_kind.projects
+            && out.engagements.personal.per_kind.projects.weight === 1.45;
+        assertTrue(ok, `${label}: legacy fixture did not migrate to nested shape (got ${JSON.stringify(out).slice(0, 300)})`);
+    } catch (e) { failed++; console.error(`FAIL  ${label}: ${e.message}`); }
+}
+
+// ============================================================================
+// v0.96.1 — Rail H (cron heartbeat) smoke scenarios
+// ============================================================================
+//   * smoke-H-1: walkCadenceSidecars finds 5 cadences in all-fresh fixture
+//   * smoke-H-2: evaluateFreshness flags morning-briefing missed in missing-morning fixture
+//
+// RED until S2.1 lands check-heartbeat-helper.js. Fixtures at
+// platform/test/fixtures/cowork/heartbeat/{all-fresh,missing-morning,first-fire}/.
+
+const HEARTBEAT_FIXTURES_DIR = path.join(ROOT, "platform/test/fixtures/cowork/heartbeat");
+
+// smoke-H-1: walkCadenceSidecars finds 5 cadences in all-fresh fixture
+{
+    const label = "smoke-H-1 walkCadenceSidecars finds 5 cadences in all-fresh fixture";
+    try {
+        const helperPath = path.join(COWORK_HELPERS_DIR, "check-heartbeat-helper.js");
+        delete require.cache[require.resolve(helperPath)];
+        const cbh = require(helperPath);
+        const vault_root = path.join(HEARTBEAT_FIXTURES_DIR, "all-fresh");
+        const out = cbh.walkCadenceSidecars({ vault_root, engagement_id: "test-personal", days: 7 });
+        const expected = ["morning-briefing", "midday-tripwire", "eod-review", "lens-shift", "finance"];
+        const allPresent = expected.every((k) => out && out[k] && out[k].last_fire_at);
+        assertTrue(allPresent, `${label}: walkCadenceSidecars did not surface all 5 cadences (got keys ${out ? Object.keys(out).join(",") : "none"})`);
+    } catch (e) { failed++; console.error(`FAIL  ${label}: ${e.message}`); }
+}
+
+// smoke-H-2: evaluateFreshness flags morning-briefing missed in missing-morning fixture
+{
+    const label = "smoke-H-2 evaluateFreshness flags morning-briefing missed in missing-morning fixture";
+    try {
+        const helperPath = path.join(COWORK_HELPERS_DIR, "check-heartbeat-helper.js");
+        delete require.cache[require.resolve(helperPath)];
+        const cbh = require(helperPath);
+        const vault_root = path.join(HEARTBEAT_FIXTURES_DIR, "missing-morning");
+        const last_fires = cbh.walkCadenceSidecars({ vault_root, engagement_id: "test-personal", days: 7 });
+        const out = cbh.evaluateFreshness({
+            windows_hours: { "morning-briefing": 36, "midday-tripwire": 36, "eod-review": 36 },
+            expected_cadences: ["morning-briefing", "midday-tripwire", "eod-review"],
+            last_fires,
+            now: "2026-06-09T20:00:00Z",
+        });
+        const mbMissed = out && Array.isArray(out.missed)
+            && out.missed.some((m) => m.cadence === "morning-briefing");
+        assertTrue(mbMissed, `${label}: morning-briefing was not flagged as missed (missed=${JSON.stringify(out && out.missed)})`);
+    } catch (e) { failed++; console.error(`FAIL  ${label}: ${e.message}`); }
+}
+
 (function main() {
   console.log("--- shared contracts ---");
   checkSharedContracts();

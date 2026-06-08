@@ -1,0 +1,20 @@
+{
+  "schema_version": "1.0.0",
+  "generated_by": "cowork:morning-briefing@2.0.0",
+  "generated_at": "2026-06-08T07:30:00Z",
+  "cadence": "lens-shift",
+  "engagement_id": "test-personal",
+  "frontmatter": {
+    "type": "cowork-morning-briefing-cold",
+    "engagement_id": "test-personal",
+    "day": "2026-06-08",
+    "title": "Lens Shift Test",
+    "summary": "test",
+    "created_at": "2026-06-08T07:30:00Z"
+  },
+  "surfaced_kinds": [],
+  "surfaced_items": [],
+  "render_aspects_applied": [],
+  "memory_used": { "yesterday_present": false, "drift_warning_present": false, "echoes_count": 0 },
+  "plan_dispatch": { "mode": "prefs", "kinds_dispatched": 0, "warnings_emitted": 0 }
+}

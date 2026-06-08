@@ -13782,6 +13782,420 @@ type: cowork-microscope
     assertTrue("HC-V0960-L-18: cowork:skills/learn-from-checks/SKILL.md exists at platform/blueprints/cowork/skills/skills/learn-from-checks/SKILL.md AND documents `totals.scanned_days[]` idempotency mechanism", false, e && e.message);
   }
 
+  // =========================================================================
+  // v0.96.1 Rail M — multi-engagement learned_weights nesting (HC-V0961-M-1..9)
+  // =========================================================================
+  // _normalizeLearnedWeights migrates legacy single-engagement shape → nested
+  // `engagements[id]` shape. composeFinalPreferences reads nested shape via
+  // engagement_id. learn-from-checks SKILL.md retires Step 4 engagement-mismatch
+  // guard and adopts engagements keying in Step 3 LAZY-INIT.
+  //
+  // All RED until S1.2 lands _normalizeLearnedWeights + composeFinalPreferences
+  // engagement_id support + SKILL.md edits.
+  // -------------------------------------------------------------------------
+
+  const LWM_FIXTURES_DIR = path.join(WORKSHOP, "platform/test/fixtures/cowork/learned-weights-migration");
+
+  // Minimal hand-parser for the fixture YAMLs (no js-yaml dependency in this
+  // workshop). Only handles the exact shapes shipped in
+  // platform/test/fixtures/cowork/learned-weights-migration/*.yaml. Returns the
+  // top-level keyed object.
+  function _parseFixtureYaml(text) {
+    // Strategy: deterministic-shape parser — walk lines, track indent stack,
+    // detect inline `{ ... }` flow-objects, string/number/bool/array literals.
+    function parseScalar(raw) {
+      const s = String(raw).trim();
+      if (s === "") return "";
+      if (s === "null" || s === "~") return null;
+      if (s === "true") return true;
+      if (s === "false") return false;
+      // quoted string
+      if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
+        return s.slice(1, -1);
+      }
+      // number
+      if (/^-?\d+$/.test(s)) return parseInt(s, 10);
+      if (/^-?\d*\.\d+$/.test(s)) return parseFloat(s);
+      // flow array [a, b, c]
+      if (s.startsWith("[") && s.endsWith("]")) {
+        const inner = s.slice(1, -1).trim();
+        if (inner === "") return [];
+        // split on commas not inside braces
+        const parts = [];
+        let depth = 0; let cur = "";
+        for (const ch of inner) {
+          if (ch === "[" || ch === "{") depth++;
+          else if (ch === "]" || ch === "}") depth--;
+          if (ch === "," && depth === 0) { parts.push(cur); cur = ""; continue; }
+          cur += ch;
+        }
+        if (cur.trim() !== "") parts.push(cur);
+        return parts.map((p) => parseScalar(p));
+      }
+      // flow object { key: value, ... }
+      if (s.startsWith("{") && s.endsWith("}")) {
+        const inner = s.slice(1, -1).trim();
+        if (inner === "") return {};
+        const parts = [];
+        let depth = 0; let cur = "";
+        for (const ch of inner) {
+          if (ch === "[" || ch === "{") depth++;
+          else if (ch === "]" || ch === "}") depth--;
+          if (ch === "," && depth === 0) { parts.push(cur); cur = ""; continue; }
+          cur += ch;
+        }
+        if (cur.trim() !== "") parts.push(cur);
+        const obj = {};
+        for (const p of parts) {
+          const idx = p.indexOf(":");
+          if (idx < 0) continue;
+          const k = p.slice(0, idx).trim().replace(/^["']|["']$/g, "");
+          const v = p.slice(idx + 1).trim();
+          obj[k] = parseScalar(v);
+        }
+        return obj;
+      }
+      return s;
+    }
+    const lines = String(text).split(/\r?\n/);
+    // Build a stack of (indent, container). Root indent = -1.
+    const root = {};
+    const stack = [{ indent: -1, container: root, key: null }];
+    for (let raw of lines) {
+      if (raw.trim() === "" || /^\s*#/.test(raw)) continue;
+      const indent = raw.match(/^ */)[0].length;
+      const body = raw.slice(indent);
+      // pop stack until top.indent < indent
+      while (stack.length > 1 && stack[stack.length - 1].indent >= indent) stack.pop();
+      const top = stack[stack.length - 1];
+      // key: rest
+      const m = body.match(/^([A-Za-z_][A-Za-z0-9_-]*)\s*:\s*(.*)$/);
+      if (!m) continue;
+      const key = m[1];
+      const rest = m[2];
+      if (rest === "") {
+        // nested object
+        const child = {};
+        top.container[key] = child;
+        stack.push({ indent, container: child, key });
+      } else {
+        top.container[key] = parseScalar(rest);
+      }
+    }
+    return root;
+  }
+
+  console.log(`\n--- Case HC-V0961-M-1: _normalizeLearnedWeights exported ---`);
+  try {
+    delete require.cache[require.resolve("../blueprints/cowork/helpers/learn-from-checks-helper")];
+    const lfc = require("../blueprints/cowork/helpers/learn-from-checks-helper");
+    assertTrue("HC-V0961-M-1: learn-from-checks-helper.js exports _normalizeLearnedWeights(raw) function",
+      typeof lfc._normalizeLearnedWeights === "function",
+      `expected function, got ${typeof (lfc && lfc._normalizeLearnedWeights)}`);
+  } catch (e) {
+    assertTrue("HC-V0961-M-1: learn-from-checks-helper.js exports _normalizeLearnedWeights(raw) function", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0961-M-2: _normalizeLearnedWeights(null) → empty nested skeleton ---`);
+  try {
+    delete require.cache[require.resolve("../blueprints/cowork/helpers/learn-from-checks-helper")];
+    const lfc = require("../blueprints/cowork/helpers/learn-from-checks-helper");
+    const out = lfc._normalizeLearnedWeights(null);
+    const ok = out && typeof out === "object"
+      && out.schema_version === "1.1.0"
+      && out.engagements && typeof out.engagements === "object"
+      && Object.keys(out.engagements).length === 0;
+    assertTrue("HC-V0961-M-2: _normalizeLearnedWeights(null) returns { schema_version: '1.1.0', engagements: {} }",
+      ok, `got ${JSON.stringify(out)}`);
+  } catch (e) {
+    assertTrue("HC-V0961-M-2: _normalizeLearnedWeights(null) returns { schema_version: '1.1.0', engagements: {} }", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0961-M-3: _normalizeLearnedWeights migrates legacy → nested ---`);
+  try {
+    delete require.cache[require.resolve("../blueprints/cowork/helpers/learn-from-checks-helper")];
+    const lfc = require("../blueprints/cowork/helpers/learn-from-checks-helper");
+    const raw = _parseFixtureYaml(fs.readFileSync(path.join(LWM_FIXTURES_DIR, "legacy-single-engagement.yaml"), "utf8"));
+    const out = lfc._normalizeLearnedWeights(raw.learned_weights);
+    const personal = out && out.engagements && out.engagements.personal;
+    const ok = out && out.engagements && !out.engagement_id
+      && out.schema_version === "1.1.0"
+      && personal && personal.per_kind && personal.per_kind.calendar
+      && personal.totals && personal.totals.notes_scanned === 24;
+    assertTrue("HC-V0961-M-3: legacy single-engagement (schema_version 1.0.0, top-level engagement_id + per_kind) → nested under engagements[engagement_id]",
+      ok, `got ${JSON.stringify(out).slice(0, 400)}`);
+  } catch (e) {
+    assertTrue("HC-V0961-M-3: legacy single-engagement (schema_version 1.0.0, top-level engagement_id + per_kind) → nested under engagements[engagement_id]", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0961-M-4: _normalizeLearnedWeights idempotent on already-nested input ---`);
+  try {
+    delete require.cache[require.resolve("../blueprints/cowork/helpers/learn-from-checks-helper")];
+    const lfc = require("../blueprints/cowork/helpers/learn-from-checks-helper");
+    const raw = _parseFixtureYaml(fs.readFileSync(path.join(LWM_FIXTURES_DIR, "nested-multi-engagement.yaml"), "utf8"));
+    const out = lfc._normalizeLearnedWeights(raw.learned_weights);
+    // Idempotent: passing nested in returns same nested shape (no engagements.engagements double-wrap)
+    const noDoubleWrap = out && out.engagements
+      && !out.engagements.engagements
+      && out.engagements.personal && out.engagements.consulting;
+    assertTrue("HC-V0961-M-4: already-nested input (schema_version 1.1.0 + engagements key) returns idempotent (no double-wrap)",
+      noDoubleWrap, `got ${JSON.stringify(out).slice(0, 400)}`);
+  } catch (e) {
+    assertTrue("HC-V0961-M-4: already-nested input (schema_version 1.1.0 + engagements key) returns idempotent (no double-wrap)", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0961-M-5: legacy → nested preserves weight precision ---`);
+  try {
+    delete require.cache[require.resolve("../blueprints/cowork/helpers/learn-from-checks-helper")];
+    const lfc = require("../blueprints/cowork/helpers/learn-from-checks-helper");
+    const raw = _parseFixtureYaml(fs.readFileSync(path.join(LWM_FIXTURES_DIR, "legacy-single-engagement.yaml"), "utf8"));
+    const out = lfc._normalizeLearnedWeights(raw.learned_weights);
+    const pk = out && out.engagements && out.engagements.personal && out.engagements.personal.per_kind;
+    const ok = pk && pk.calendar && pk.calendar.weight === 1.20
+      && pk.email && pk.email.weight === 0.85
+      && pk.projects && pk.projects.weight === 1.45;
+    assertTrue("HC-V0961-M-5: legacy → nested migration preserves per_kind weight values byte-identically (calendar=1.20, email=0.85, projects=1.45)",
+      ok, `got ${JSON.stringify(pk)}`);
+  } catch (e) {
+    assertTrue("HC-V0961-M-5: legacy → nested migration preserves per_kind weight values byte-identically (calendar=1.20, email=0.85, projects=1.45)", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0961-M-6: composeFinalPreferences reads learned_weights.engagements[engagement_id] ---`);
+  try {
+    delete require.cache[require.resolve("../blueprints/cowork/helpers/dispatch-plan-helper")];
+    const { composeFinalPreferences } = require("../blueprints/cowork/helpers/dispatch-plan-helper");
+    const bundle = {
+      render_aspects: {},
+      cadence_order: { morning: ["calendar", "email", "projects"] },
+      voice: {},
+      microscopes_registry: null,
+    };
+    const learned_weights = {
+      schema_version: "1.1.0",
+      engagements: {
+        personal: {
+          per_kind: {
+            projects: { weight: 1.45, ticks: 22, skips: 2, warmup: false, last_updated: "2026-06-08" },
+            calendar: { weight: 1.00, ticks: 5, skips: 5, warmup: false, last_updated: "2026-06-08" },
+            email:    { weight: 1.00, ticks: 5, skips: 5, warmup: false, last_updated: "2026-06-08" },
+          },
+        },
+      },
+    };
+    const result = composeFinalPreferences({ bundle, learned_weights, engagement_id: "personal", today: "2026-06-08" });
+    // When engagement_id slot exists AND projects has |1.45-1.00|=0.45 > 0.20 → reorder; learned_weights_applied: true
+    const ok = result && result.learned_weights_applied === true
+      && result.cadence_order && Array.isArray(result.cadence_order.morning)
+      && result.cadence_order.morning.indexOf("projects") < result.cadence_order.morning.indexOf("calendar");
+    assertTrue("HC-V0961-M-6: composeFinalPreferences({ learned_weights, engagement_id }) reads learned_weights.engagements[engagement_id].per_kind for weight lookup (nested shape)",
+      ok, `got ${JSON.stringify(result)}`);
+  } catch (e) {
+    assertTrue("HC-V0961-M-6: composeFinalPreferences({ learned_weights, engagement_id }) reads learned_weights.engagements[engagement_id].per_kind for weight lookup (nested shape)", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0961-M-7: composeFinalPreferences returns learned_weights_applied: false when engagement slot absent ---`);
+  try {
+    delete require.cache[require.resolve("../blueprints/cowork/helpers/dispatch-plan-helper")];
+    const { composeFinalPreferences } = require("../blueprints/cowork/helpers/dispatch-plan-helper");
+    const bundle = {
+      render_aspects: {},
+      cadence_order: { morning: ["calendar", "email", "projects"] },
+      voice: {},
+      microscopes_registry: null,
+    };
+    // Critical control: paired calls verify engagement_id is honored.
+    // Call A (slot present, engagement_id matches "personal"): expects true.
+    // Call B (slot absent, engagement_id "personal" but only "consulting" populated): expects false.
+    // The DIFFERENCE between A and B requires engagement_id to be consulted — a helper that
+    // ignores engagement_id would return the same answer for both.
+    const lwSlotPresent = {
+      schema_version: "1.1.0",
+      engagements: {
+        personal: { per_kind: { projects: { weight: 1.45, ticks: 22, skips: 2, warmup: false, last_updated: "2026-06-08" } } },
+      },
+    };
+    const lwSlotAbsent = {
+      schema_version: "1.1.0",
+      engagements: {
+        consulting: { per_kind: { projects: { weight: 1.45, ticks: 22, skips: 2, warmup: false, last_updated: "2026-06-08" } } },
+      },
+    };
+    const rA = composeFinalPreferences({ bundle, learned_weights: lwSlotPresent, engagement_id: "personal", today: "2026-06-08" });
+    const rB = composeFinalPreferences({ bundle, learned_weights: lwSlotAbsent, engagement_id: "personal", today: "2026-06-08" });
+    const ok = rB && rB.learned_weights_applied === false
+      && rA && rA.learned_weights_applied === true
+      && rA.learned_weights_applied !== rB.learned_weights_applied;
+    assertTrue("HC-V0961-M-7: composeFinalPreferences returns learned_weights_applied: false when engagement_id slot absent in nested shape (paired with slot-present call which must return true — proves engagement_id is consulted)",
+      ok,
+      `got slot-present=${rA && rA.learned_weights_applied} slot-absent=${rB && rB.learned_weights_applied}`);
+  } catch (e) {
+    assertTrue("HC-V0961-M-7: composeFinalPreferences returns learned_weights_applied: false when engagement_id slot absent in nested shape (paired with slot-present call which must return true — proves engagement_id is consulted)", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0961-M-8: composeFinalPreferences returns learned_weights_applied: true on high-deviation nested weight ---`);
+  try {
+    delete require.cache[require.resolve("../blueprints/cowork/helpers/dispatch-plan-helper")];
+    const { composeFinalPreferences } = require("../blueprints/cowork/helpers/dispatch-plan-helper");
+    const bundle = {
+      render_aspects: {},
+      cadence_order: { morning: ["calendar", "email", "projects"] },
+      voice: {},
+      microscopes_registry: null,
+    };
+    const learned_weights = {
+      schema_version: "1.1.0",
+      engagements: {
+        personal: {
+          per_kind: {
+            projects: { weight: 1.45, ticks: 22, skips: 2, warmup: false, last_updated: "2026-06-08" },
+            calendar: { weight: 1.00, ticks: 5, skips: 5, warmup: false, last_updated: "2026-06-08" },
+            email:    { weight: 1.00, ticks: 5, skips: 5, warmup: false, last_updated: "2026-06-08" },
+          },
+        },
+      },
+    };
+    const result = composeFinalPreferences({ bundle, learned_weights, engagement_id: "personal", today: "2026-06-08" });
+    assertTrue("HC-V0961-M-8: composeFinalPreferences returns learned_weights_applied: true when engagement slot exists AND a kind weight deviates > 0.20 from baseline (projects.weight = 1.45)",
+      result && result.learned_weights_applied === true,
+      `got learned_weights_applied=${result && result.learned_weights_applied}`);
+  } catch (e) {
+    assertTrue("HC-V0961-M-8: composeFinalPreferences returns learned_weights_applied: true when engagement slot exists AND a kind weight deviates > 0.20 from baseline (projects.weight = 1.45)", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0961-M-9: learn-from-checks SKILL.md retires engagement-mismatch guard + adds engagements keying ---`);
+  try {
+    const skillPath = path.join(WORKSHOP, "platform/blueprints/cowork/skills/skills/learn-from-checks/SKILL.md");
+    const exists = fs.existsSync(skillPath);
+    let guardRetired = false;
+    let mentionsEngagements = false;
+    if (exists) {
+      const content = fs.readFileSync(skillPath, "utf8");
+      // Step 4 engagement-mismatch guard is retired (no occurrences of the marker text)
+      guardRetired = !content.includes("engagement-mismatch");
+      // Step 3 LAZY-INIT mentions engagements (the nested shape)
+      mentionsEngagements = content.includes("engagements");
+    }
+    assertTrue("HC-V0961-M-9: learn-from-checks SKILL.md does NOT contain 'engagement-mismatch' guard text (Step 4 retired) AND mentions `engagements` keying in Step 3 LAZY-INIT",
+      exists && guardRetired && mentionsEngagements,
+      `exists=${exists} guardRetired=${guardRetired} mentionsEngagements=${mentionsEngagements}`);
+  } catch (e) {
+    assertTrue("HC-V0961-M-9: learn-from-checks SKILL.md does NOT contain 'engagement-mismatch' guard text (Step 4 retired) AND mentions `engagements` keying in Step 3 LAZY-INIT", false, e && e.message);
+  }
+
+  // =========================================================================
+  // v0.96.1 Rail H — cron heartbeat helpers + skill (HC-V0961-H-1..6)
+  // =========================================================================
+  // walkCadenceSidecars walks daily sidecar dir → last_fire_at per cadence.
+  // evaluateFreshness flags overdue cadences against window thresholds.
+  // composeHeartbeatCallout emits the warning callout markdown.
+  // check-heartbeat SKILL.md ships at platform/blueprints/cowork/skills/skills/check-heartbeat/SKILL.md.
+  //
+  // All RED until S2.1/S2.2 land check-heartbeat-helper.js + SKILL.md.
+  // -------------------------------------------------------------------------
+
+  const HB_FIXTURES_DIR = path.join(WORKSHOP, "platform/test/fixtures/cowork/heartbeat");
+
+  console.log(`\n--- Case HC-V0961-H-1: walkCadenceSidecars exported ---`);
+  try {
+    delete require.cache[require.resolve("../blueprints/cowork/helpers/check-heartbeat-helper")];
+    const cbh = require("../blueprints/cowork/helpers/check-heartbeat-helper");
+    assertTrue("HC-V0961-H-1: check-heartbeat-helper.js exports walkCadenceSidecars({ vault_root, engagement_id, days }) function (arity >= 1)",
+      typeof cbh.walkCadenceSidecars === "function" && cbh.walkCadenceSidecars.length >= 1,
+      `expected function arity>=1, got ${typeof (cbh && cbh.walkCadenceSidecars)} arity=${cbh && cbh.walkCadenceSidecars && cbh.walkCadenceSidecars.length}`);
+  } catch (e) {
+    assertTrue("HC-V0961-H-1: check-heartbeat-helper.js exports walkCadenceSidecars({ vault_root, engagement_id, days }) function (arity >= 1)", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0961-H-2: walkCadenceSidecars finds cadences in all-fresh fixture ---`);
+  try {
+    delete require.cache[require.resolve("../blueprints/cowork/helpers/check-heartbeat-helper")];
+    const cbh = require("../blueprints/cowork/helpers/check-heartbeat-helper");
+    const vault_root = path.join(HB_FIXTURES_DIR, "all-fresh");
+    const out = cbh.walkCadenceSidecars({ vault_root, engagement_id: "test-personal", days: 7 });
+    // Expected: object with at least these keys, each with last_fire_at present (non-null)
+    const expected = ["morning-briefing", "midday-tripwire", "eod-review"];
+    const present = expected.every((k) => out && out[k] && out[k].last_fire_at);
+    assertTrue("HC-V0961-H-2: walkCadenceSidecars against all-fresh fixture returns object with morning-briefing/midday-tripwire/eod-review keys, each with non-null last_fire_at",
+      present, `got ${JSON.stringify(out)}`);
+  } catch (e) {
+    assertTrue("HC-V0961-H-2: walkCadenceSidecars against all-fresh fixture returns object with morning-briefing/midday-tripwire/eod-review keys, each with non-null last_fire_at", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0961-H-3: walkCadenceSidecars distinguishes warm vs cold MB ---`);
+  try {
+    delete require.cache[require.resolve("../blueprints/cowork/helpers/check-heartbeat-helper")];
+    const cbh = require("../blueprints/cowork/helpers/check-heartbeat-helper");
+    const vault_root = path.join(HB_FIXTURES_DIR, "all-fresh");
+    const out = cbh.walkCadenceSidecars({ vault_root, engagement_id: "test-personal", days: 7 });
+    // Warm MB (frontmatter.type = "cowork-morning-briefing") → key "morning-briefing"
+    // Cold MB (frontmatter.type = "cowork-morning-briefing-cold") → key "lens-shift"
+    const warmOk = out && out["morning-briefing"] && out["morning-briefing"].last_fire_at;
+    const coldOk = out && out["lens-shift"] && out["lens-shift"].last_fire_at;
+    assertTrue("HC-V0961-H-3: walkCadenceSidecars distinguishes warm MB (frontmatter.type=cowork-morning-briefing → morning-briefing) from cold MB (frontmatter.type=cowork-morning-briefing-cold → lens-shift)",
+      warmOk && coldOk, `morning-briefing=${JSON.stringify(out && out["morning-briefing"])} lens-shift=${JSON.stringify(out && out["lens-shift"])}`);
+  } catch (e) {
+    assertTrue("HC-V0961-H-3: walkCadenceSidecars distinguishes warm MB (frontmatter.type=cowork-morning-briefing → morning-briefing) from cold MB (frontmatter.type=cowork-morning-briefing-cold → lens-shift)", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0961-H-4: evaluateFreshness flags missed cadence on empty last_fires ---`);
+  try {
+    delete require.cache[require.resolve("../blueprints/cowork/helpers/check-heartbeat-helper")];
+    const cbh = require("../blueprints/cowork/helpers/check-heartbeat-helper");
+    const out = cbh.evaluateFreshness({
+      windows_hours: { "morning-briefing": 36 },
+      expected_cadences: ["morning-briefing"],
+      last_fires: {},
+      now: "2026-06-09T08:00:00Z",
+    });
+    const ok = out
+      && Array.isArray(out.missed) && out.missed.length === 1
+      && out.missed[0].cadence === "morning-briefing"
+      && out.missed[0].last_fire_at === null
+      && out.missed[0].expected_window_hours === 36
+      && Array.isArray(out.green) && out.green.length === 0
+      && out.first_fire === true;
+    assertTrue("HC-V0961-H-4: evaluateFreshness({ windows_hours, expected_cadences, last_fires: {}, now }) returns { missed: [{ cadence, last_fire_at: null, expected_window_hours: 36 }], green: [], first_fire: true }",
+      ok, `got ${JSON.stringify(out)}`);
+  } catch (e) {
+    assertTrue("HC-V0961-H-4: evaluateFreshness({ windows_hours, expected_cadences, last_fires: {}, now }) returns { missed: [{ cadence, last_fire_at: null, expected_window_hours: 36 }], green: [], first_fire: true }", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0961-H-5: composeHeartbeatCallout returns warning callout markdown ---`);
+  try {
+    delete require.cache[require.resolve("../blueprints/cowork/helpers/check-heartbeat-helper")];
+    const cbh = require("../blueprints/cowork/helpers/check-heartbeat-helper");
+    const md = cbh.composeHeartbeatCallout(
+      [{ cadence: "morning-briefing", last_fire_at: null, expected_window_hours: 36 }],
+      true,
+      "2026-06-09"
+    );
+    const ok = typeof md === "string"
+      && md.startsWith("> [!warning]+ Cron heartbeat anomaly — 2026-06-09")
+      && md.includes("first post-upgrade fire");
+    assertTrue("HC-V0961-H-5: composeHeartbeatCallout([missed], first_fire=true, day) returns markdown starting with `> [!warning]+ Cron heartbeat anomaly — 2026-06-09` AND includes `first post-upgrade fire` mitigation text",
+      ok, `got: ${typeof md === "string" ? md.slice(0, 200) : typeof md}`);
+  } catch (e) {
+    assertTrue("HC-V0961-H-5: composeHeartbeatCallout([missed], first_fire=true, day) returns markdown starting with `> [!warning]+ Cron heartbeat anomaly — 2026-06-09` AND includes `first post-upgrade fire` mitigation text", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0961-H-6: check-heartbeat SKILL.md exists with documented Steps + helper reference ---`);
+  try {
+    const skillPath = path.join(WORKSHOP, "platform/blueprints/cowork/skills/skills/check-heartbeat/SKILL.md");
+    const exists = fs.existsSync(skillPath);
+    let hasSteps = false;
+    let mentionsHelper = false;
+    if (exists) {
+      const content = fs.readFileSync(skillPath, "utf8");
+      hasSteps = content.includes("## Steps");
+      mentionsHelper = content.includes("walkCadenceSidecars");
+    }
+    assertTrue("HC-V0961-H-6: check-heartbeat/SKILL.md exists at platform/blueprints/cowork/skills/skills/check-heartbeat/SKILL.md AND contains `## Steps` section AND references `walkCadenceSidecars`",
+      exists && hasSteps && mentionsHelper,
+      `exists=${exists} hasSteps=${hasSteps} mentionsHelper=${mentionsHelper}`);
+  } catch (e) {
+    assertTrue("HC-V0961-H-6: check-heartbeat/SKILL.md exists at platform/blueprints/cowork/skills/skills/check-heartbeat/SKILL.md AND contains `## Steps` section AND references `walkCadenceSidecars`", false, e && e.message);
+  }
+
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
   if (fail > 0) {

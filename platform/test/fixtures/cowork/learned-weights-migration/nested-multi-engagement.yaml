@@ -1,0 +1,21 @@
+learned_weights:
+  schema_version: "1.1.0"
+  engagements:
+    personal:
+      per_kind:
+        calendar: { weight: 1.20, ticks: 18, skips: 4, warmup: false, last_updated: "2026-06-08" }
+      totals:
+        notes_scanned: 12
+        notes_with_any_tick: 10
+        warmup_until: "2026-06-15"
+        upgrade_notice_emitted: false
+        scanned_days: ["2026-06-07"]
+    consulting:
+      per_kind:
+        finance: { weight: 0.30, ticks: 1, skips: 18, warmup: false, last_updated: "2026-06-08" }
+      totals:
+        notes_scanned: 12
+        notes_with_any_tick: 9
+        warmup_until: "2026-06-15"
+        upgrade_notice_emitted: false
+        scanned_days: ["2026-06-07"]

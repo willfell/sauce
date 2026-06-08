@@ -1,0 +1,3 @@
+priorities: ["calendar", "email"]
+personality: { vibe: "calm" }
+# Note: NO learned_weights key at all
