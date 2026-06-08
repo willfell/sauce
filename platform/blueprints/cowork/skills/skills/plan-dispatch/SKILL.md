@@ -1,6 +1,6 @@
 ---
 name: cowork:plan-dispatch
-description: Single pre-flight entry point for the 5 atomic-note orchestrators. Loads engagement record + engagement-type bundle + engagement.overrides, composes the layered preferences tree, reads microscopes/siblings, plans dispatch via dispatch-plan-helper, composes voice contract, resolves the inner-circle allowlist, and returns the 14-key contract that drives Gather + Write phases. v0.96.0 adds Rail-D kind-classifier integration (Step 0) plus the `pending_confirmations[]` 14th key. Never throws — degrades to `dispatch_mode: "legacy"` on prefs failure so the orchestrator can fall back cleanly.
+description: Single pre-flight entry point for the 5 atomic-note orchestrators. Loads engagement record + engagement-type bundle + engagement.overrides, composes the layered preferences tree, reads microscopes/siblings, plans dispatch via dispatch-plan-helper, composes voice contract, resolves the inner-circle allowlist, and returns the 14-key contract that drives Gather + Write phases. v0.96.0 adds Rail-D kind-classifier integration (Step 0), the `pending_confirmations[]` 14th key, and Rail-L weight-aware cadence reordering (composeFinalPreferences reads `prefs.learned_weights` and reorders `cadence_order[*]` arrays via `effective_priority`; exposes `learned_weights_applied` telemetry). Never throws — degrades to `dispatch_mode: "legacy"` on prefs failure so the orchestrator can fall back cleanly.
 inputs:
   engagement_id: string
   cadence: string
@@ -8,6 +8,7 @@ inputs:
   tools_by_namespace: object
   vault_root: string
   yesterday_memory: object
+  user_prefs.learned_weights: object
 outputs:
   dispatch_plan: array
   voice_contract: string
@@ -23,7 +24,8 @@ outputs:
   prefs_status: string
   excluded_themes: array
   pending_confirmations: array
-tags: [cowork, sub-skill, pre-flight, dispatch, knob-composition, rail-d]
+  learned_weights_applied: boolean
+tags: [cowork, sub-skill, pre-flight, dispatch, knob-composition, rail-d, rail-l]
 ---
 
 # cowork:plan-dispatch
@@ -53,6 +55,17 @@ v0.96.0 adds Rail D (kind classifier) integration: Step 0 invokes `classifyConne
                                    //   When omitted (or null), `excluded_themes` defaults to [].
                                    //   Orchestrators that already invoke read-memory at pre-flight 3a
                                    //   pass their captured `yesterdayMemory` straight through.
+  user_prefs.learned_weights: object, // OPTIONAL (v0.96.0 Rail L) — per-engagement learned weight
+                                   //   state captured by read-user-preferences from user-preferences.md
+                                   //   frontmatter. Shape:
+                                   //     { schema_version, totals, per_kind: { <kind>: {
+                                   //         weight: number, ticks: int, skips: int, warmup: bool,
+                                   //         last_surfaced?: "YYYY-MM-DD",
+                                   //         last_updated?: "YYYY-MM-DD"
+                                   //       } } }
+                                   //   When present, composeFinalPreferences reorders each cadence
+                                   //   array via `effective_priority`. When absent / null, cadence
+                                   //   ordering is unchanged (bundle ⨁ overrides only).
 }
 ```
 
@@ -70,7 +83,14 @@ v0.96.0 adds Rail D (kind classifier) integration: Step 0 invokes `classifyConne
 
 4. **Read engagement + bundle.** Invoke `dispatchPlanHelper.readEngagement({ engagement_id, vault_root })` → `{ engagement, bundle, overrides, status, reason }`. If `status !== "ok"`, set `dispatch_mode = "legacy"` and capture `reason` for the fallback Notice; downstream steps still execute against the available data.
 
-5. **Compose final preferences.** Invoke `dispatchPlanHelper.composeFinalPreferences({ bundle, overrides, ad_hoc_prefs: null })` → `{ render_aspects, cadence_order, voice, microscopes_registry, tripwire_aspects }`. This is the FINAL knob layer — Gather + Write read from here, not from the engagement-type JSON directly. Composition order: `bundle` (defaults) ⨁ `overrides` (per-key wins on objects, REPLACES on arrays) ⨁ `ad_hoc_prefs` (reserved; null today). `final.tripwire_aspects` propagates to the 13-key return for midday-tripwire's early-exit + per-aspect dispatch. `final.render_aspects.anti_echo` propagates downstream to step 9's `planDispatch` call where it gates `excluded_themes` derivation.
+5. **Compose final preferences.** Invoke `dispatchPlanHelper.composeFinalPreferences({ bundle, overrides, ad_hoc_prefs: null, learned_weights: prefs.learned_weights })` → `{ render_aspects, cadence_order, voice, microscopes_registry, tripwire_aspects, learned_weights_applied }`. This is the FINAL knob layer — Gather + Write read from here, not from the engagement-type JSON directly. Composition order: `bundle` (defaults) ⨁ `overrides` (per-key wins on objects, REPLACES on arrays) ⨁ `ad_hoc_prefs` (reserved; null today). `final.tripwire_aspects` propagates to the 13-key return for midday-tripwire's early-exit + per-aspect dispatch. `final.render_aspects.anti_echo` propagates downstream to step 9's `planDispatch` call where it gates `excluded_themes` derivation.
+
+   **v0.96.0 Rail L — weight-aware cadence reorder.** When `learned_weights` is provided, the helper rewrites each `cadence_order[<cadence>]` array using per-kind `effective_priority`:
+   - `base_priority = i` (declared index inside the bundle ⨁ overrides cadence array)
+   - **Out-of-warmup, high-deviation gate (`warmup === false` AND `abs(weight - 1.00) > 0.20`)**: `effective_priority = base_priority - (weight * 5)`. A kind whose weight has drifted significantly above 1.00 leaps forward in cadence (and below 1.00 drops back).
+   - **Warmup or low-deviation**: `effective_priority = base_priority` (unchanged). Cadence preserves the bundle ⨁ overrides order.
+   - **Day-14 must-surface backstop**: the lowest-weight non-warmup kind, when `days_since_last_surfaced` (or `last_updated`) is a positive multiple of 14, gets `effective_priority = base_priority - 25` (`PRIORITY_BUMP * BACKSTOP_MULTIPLIER` = `5 * 5`). Guarantees a long-buried low-weight kind cannot permanently fall off cadence.
+   - Each cadence is re-sorted by `effective_priority` ascending; ties preserve declared order. The composed result exposes `learned_weights_applied: boolean` so callers can verify the helper actually consulted `learned_weights` versus ignored it.
 
 6. **Load kind titles.** Invoke `dispatchPlanHelper.loadKindTitles({ vault_root })` → `kind_titles` map (kind → display title). The data file at `spice/cowork/data/kind-titles.json` v1.0.0 is canonical; per-kind microscope `## Output shape` directives (`<! title: My Custom Title !>`) override the data-file value for THAT engagement's gather.
 
@@ -78,7 +98,7 @@ v0.96.0 adds Rail D (kind classifier) integration: Step 0 invokes `classifyConne
 
 8. **Read per-kind siblings.** For each kind in `prefs.priorities`, attempt to READ `spice/cowork/prompts/per-mcp/<kind>/siblings/` (a directory of supporting markdown files). Collect into `siblings = { kind_name: [{ name, body }, ...] }`. Missing directories yield empty arrays — not an error.
 
-9. **Plan dispatch.** Invoke `dispatchPlanHelper.planDispatch({ prefs: prefs_result.prefs, reachableNamespaces: reachable_namespaces, tools_by_namespace, vault_root, engagement_id, mcpSkillMap, microscopes, engagement, bundle, overrides: engagement.overrides, yesterdayMemory: yesterday_memory })` → `{ dispatch_plan, excluded_themes, pending_confirmations, classifier_cache_hit, classifier_result }` (the v0.96.0 contract object). `mcpSkillMap` is read from `spice/cowork/data/mcp-skill-map.json` v2.0.0. `dispatch_plan[]` is the ordered kind entries with per-entry action + served_by + warning reasons (unchanged from v0.94.x shape). `excluded_themes` is the raw carry-forward bullet strings from `yesterday_memory.carry_forward_bullets` when `render_aspects.anti_echo == "include"`, else `[]`. `pending_confirmations[]` is the raw new-since-last-fire namespaces from Step 0's classifier_result. All keys are ALWAYS present, even when null/empty inputs would leave them vacuous — defensive contract.
+9. **Plan dispatch.** Invoke `dispatchPlanHelper.planDispatch({ prefs: prefs_result.prefs, reachableNamespaces: reachable_namespaces, tools_by_namespace, vault_root, engagement_id, mcpSkillMap, microscopes, engagement, bundle, overrides: engagement.overrides, yesterdayMemory: yesterday_memory, learned_weights: prefs_result.prefs.learned_weights })` → `{ dispatch_plan, excluded_themes, pending_confirmations, classifier_cache_hit, classifier_result, learned_weights_applied }` (the v0.96.0 contract object). `mcpSkillMap` is read from `spice/cowork/data/mcp-skill-map.json` v2.0.0. `dispatch_plan[]` is the ordered kind entries with per-entry action + served_by + warning reasons (unchanged from v0.94.x shape). `excluded_themes` is the raw carry-forward bullet strings from `yesterday_memory.carry_forward_bullets` when `render_aspects.anti_echo == "include"`, else `[]`. `pending_confirmations[]` is the raw new-since-last-fire namespaces from Step 0's classifier_result. `learned_weights_applied` is true when Rail-L weight-aware cadence reordering or the day-14 backstop fired during composeFinalPreferences (else false). All keys are ALWAYS present, even when null/empty inputs would leave them vacuous — defensive contract. The helper falls back to `prefs.learned_weights` when the explicit `learned_weights` kwarg is undefined/null, so orchestrators that forget to thread it still observe Rail-L behavior from read-user-preferences's parsed frontmatter.
 
    When the helper is called without v0.95.1+ inputs (`engagement`/`bundle`/`overrides`/`yesterdayMemory`/`classifier_result`/`tools_by_namespace` all absent), it returns the legacy raw array form for backward compatibility with pre-v0.95.1 unit harnesses. Within this sub-skill we ALWAYS pass `engagement` + `bundle`, so we ALWAYS receive the v0.96.0 contract object.
 
@@ -121,6 +141,14 @@ v0.96.0 adds Rail D (kind classifier) integration: Step 0 invokes `classifyConne
                                    //   compose-body gates the in-note detection callout on
                                    //   pending_confirmations.length > 0 AND
                                    //   render_aspects.new_mcp_notice == "include".
+  learned_weights_applied: bool,   // v0.96.0 Rail L (telemetry, 15th surface field) — true when
+                                   //   composeFinalPreferences re-ordered at least one cadence array
+                                   //   via the weight-aware effective_priority gate (high-deviation
+                                   //   bump OR day-14 backstop). false when learned_weights was
+                                   //   absent, all kinds were in warmup, or every kind had deviation
+                                   //   ≤ 0.20. Consumed by HC-V0960-L-15/-16 to prove the helper
+                                   //   actually consulted learned_weights; orchestrators may also
+                                   //   surface this in Step 14f telemetry blocks.
 }
 ```
 
@@ -169,6 +197,7 @@ This sub-skill exercises three pre-existing helper exports + three NEW helper ex
 - `HC-V0950-PLAN-DISPATCH-A1..A6` — helper chain end-to-end (5-key shell; render_aspects/cadence_order/voice/tripwire_aspects override behavior; w2-fte bundle defaults; tripwire_aspects REPLACES not merges).
 - `HC-V0950-PLAN-DISPATCH-B1..B3` — `loadKindTitles` data-file vs fallback behavior.
 - `HC-V0950-PLAN-DISPATCH-C1..C2` — defensive contract (`decideDispatchMode` legacy fallback; `composeFinalPreferences` null inputs yield 5-key shell, no throw).
+- `HC-V0960-L-14..L-17` — v0.96.0 Rail-L weight-aware `composeFinalPreferences` (high-deviation reorder; warmup keeps base order; deviation ≤ 0.20 keeps base order with `learned_weights_applied` field reported; day-14 must-surface backstop bumps lowest-weight kind forward).
 
 Cohesion regression across the 5 orchestrators is caught by `HC-V0950-COHESION-A1..A5` in the same harness (each orchestrator invokes `plan-dispatch` at pre-flight step 3b; canonical section order; no inline dispatch-plan pseudocode; orchestrator template doc exists).
 

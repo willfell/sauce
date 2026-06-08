@@ -63,13 +63,31 @@ function planDispatch({
     vault_root,
     classifier_result,
     engagement_id,
+    // v0.96.0 additive inputs — Rail L (weight-aware ordering).
+    //   learned_weights: per-kind learned weight state. When explicitly
+    //     passed, takes precedence over prefs.learned_weights. Falls back
+    //     to prefs.learned_weights (read from user-preferences.md frontmatter
+    //     by read-user-preferences) when absent.
+    //   today: ISO date string for day-14 backstop evaluation; helps tests
+    //     pin a deterministic "today".
+    learned_weights,
+    today,
 }) {
     const isV0951Call = (bundle !== undefined && bundle !== null)
         || engagement !== undefined
         || overrides !== undefined
         || yesterdayMemory !== undefined
         || classifier_result !== undefined
-        || tools_by_namespace !== undefined;
+        || tools_by_namespace !== undefined
+        || learned_weights !== undefined;
+
+    // v0.96.0 Rail L: extract learned_weights from user-preferences frontmatter
+    // when caller didn't pass it explicitly. Allows orchestrators to skip the
+    // explicit thread and rely on prefs.learned_weights surfacing naturally
+    // from read-user-preferences.
+    const effective_learned_weights = (learned_weights !== undefined && learned_weights !== null)
+        ? learned_weights
+        : (prefs && prefs.learned_weights) || null;
 
     // Step 0 (v0.96.0): Classify connected kinds via Rail D.
     //   Resolves classifier_result from one of three sources, in order:
@@ -135,6 +153,7 @@ function planDispatch({
                 pending_confirmations,
                 classifier_cache_hit,
                 classifier_result: _classifierResult,
+                learned_weights_applied: false,
             };
         }
         return [];
@@ -234,12 +253,35 @@ function planDispatch({
         // exposed as additional pass-through fields for the orchestrator's
         // Step 14f telemetry block.
         const excluded_themes = _computeExcludedThemes({ bundle, overrides, engagement, yesterdayMemory });
+
+        // v0.96.0 Rail L: compute learned_weights_applied telemetry by invoking
+        // composeFinalPreferences with the effective learned_weights and
+        // surfacing the contract flag. This lets HC-V0960-L-15/-16 verify the
+        // helper actually consulted learned_weights vs. ignored it.
+        let learned_weights_applied = false;
+        if (bundle && typeof bundle === "object") {
+            const effectiveOverrides = (overrides && typeof overrides === "object" && !Array.isArray(overrides))
+                ? overrides
+                : (engagement && typeof engagement === "object" && engagement.overrides
+                    && typeof engagement.overrides === "object" && !Array.isArray(engagement.overrides))
+                    ? engagement.overrides
+                    : null;
+            const probe = composeFinalPreferences({
+                bundle,
+                overrides: effectiveOverrides,
+                ad_hoc_prefs: null,
+                learned_weights: effective_learned_weights,
+                today,
+            });
+            learned_weights_applied = probe && probe.learned_weights_applied === true;
+        }
         return {
             dispatch_plan: plan,
             excluded_themes,
             pending_confirmations,
             classifier_cache_hit,
             classifier_result: _classifierResult,
+            learned_weights_applied,
         };
     }
     return plan;
@@ -361,13 +403,19 @@ function composeWarningCallout({ kind_name, kind_title, reason, mcps_entry }) {
 // ===========================================================================
 
 /**
- * composeFinalPreferences({ bundle, overrides, ad_hoc_prefs })
+ * composeFinalPreferences({ bundle, overrides, ad_hoc_prefs, learned_weights, today })
  *
  * Composes the FINAL preferences tree from layered inputs.
- *   bundle       — engagement-type JSON parsed (e.g. personal.json) — required
- *   overrides    — engagement.overrides block from vault-config.md (optional;
- *                  may be absent, empty, or — defensively — malformed)
- *   ad_hoc_prefs — optional runtime overrides (reserved; currently unused)
+ *   bundle          — engagement-type JSON parsed (e.g. personal.json) — required
+ *   overrides       — engagement.overrides block from vault-config.md (optional;
+ *                     may be absent, empty, or — defensively — malformed)
+ *   ad_hoc_prefs    — optional runtime overrides (reserved; currently unused)
+ *   learned_weights — v0.96.0 Rail L: per-kind learned weight state from
+ *                     user-preferences.md frontmatter (optional). When present
+ *                     AND any kind is out-of-warmup AND |weight - 1.00| > 0.20,
+ *                     re-orders cadence_order arrays via effective_priority.
+ *   today           — optional ISO date (YYYY-MM-DD) for day-14 backstop
+ *                     evaluation. Defaults to current date.
  *
  * Composition rules:
  *   - Objects (render_aspects, cadence_order, voice): bundle ⨁ overrides
@@ -376,31 +424,123 @@ function composeWarningCallout({ kind_name, kind_title, reason, mcps_entry }) {
  *   - microscopes_registry: overrides.value || bundle.value || null
  *     (null triggers filesystem scan downstream)
  *
- * Defensive: when bundle is null/non-object, returns an empty 5-key shell.
- * When overrides is non-object (e.g. string/array), it is treated as absent
- * (Postel — caller can surface a warning Notice independently).
+ * v0.96.0 weight-aware ordering (Rail L):
+ *   For each kind in each cadence_order[cadence] array, compute:
+ *     base_priority      = i (declared index)
+ *     effective_priority = base - (weight * 5)  IF warmup === false AND
+ *                                                  abs(weight - 1.00) > 0.20
+ *                        = base                  otherwise
+ *   Day-14 must-surface backstop:
+ *     For the lowest-weight non-warmup kind, when days_since_last_surfaced
+ *     (or last_updated) is a positive multiple of 14:
+ *       effective_priority = base - (5 * 5) = base - 25
+ *     This guarantees a low-weight kind cannot permanently fall off cadence.
+ *   Each cadence is re-sorted by effective_priority ascending. When no
+ *   weight-aware adjustment fires, cadence_order is unchanged.
+ *   The result exposes `learned_weights_applied: boolean` so callers can
+ *   verify the helper actually consulted learned_weights vs. ignored it.
+ *
+ * Defensive: when bundle is null/non-object, returns an empty 5-key shell
+ * (plus learned_weights_applied=false). When overrides is non-object, treated
+ * as absent (Postel — caller can surface a warning Notice independently).
  */
-function composeFinalPreferences({ bundle, overrides, ad_hoc_prefs } = {}) {
+function composeFinalPreferences({ bundle, overrides, ad_hoc_prefs, learned_weights, today } = {}) {
     const emptyShell = {
         render_aspects: {},
         cadence_order: {},
         voice: {},
         microscopes_registry: null,
         tripwire_aspects: [],
+        learned_weights_applied: false,
     };
     if (!bundle || typeof bundle !== "object") return emptyShell;
     const ov = (overrides && typeof overrides === "object" && !Array.isArray(overrides)) ? overrides : {};
     const adHoc = (ad_hoc_prefs && typeof ad_hoc_prefs === "object" && !Array.isArray(ad_hoc_prefs)) ? ad_hoc_prefs : {};
 
+    const composed_cadence_order = Object.assign({}, bundle.cadence_order || {}, ov.cadence_order || {}, adHoc.cadence_order || {});
+
+    // v0.96.0 Rail L: weight-aware cadence_order reorder
+    const DEVIATION = 0.20;
+    const PRIORITY_BUMP = 5;
+    const BACKSTOP_DAYS = 14;
+    const BACKSTOP_MULTIPLIER = 5;
+    const lwPerKind = (learned_weights && typeof learned_weights === "object" && learned_weights.per_kind && typeof learned_weights.per_kind === "object")
+        ? learned_weights.per_kind : null;
+    const todayStr = (typeof today === "string" && /^\d{4}-\d{2}-\d{2}$/.test(today))
+        ? today : new Date().toISOString().slice(0, 10);
+
+    function _daysSince(dateStr) {
+        if (!dateStr || typeof dateStr !== "string") return Infinity;
+        const a = new Date(todayStr);
+        const b = new Date(dateStr);
+        if (isNaN(a.getTime()) || isNaN(b.getTime())) return Infinity;
+        return Math.floor((a - b) / (1000 * 60 * 60 * 24));
+    }
+
+    let learned_weights_applied = false;
+    let final_cadence_order = composed_cadence_order;
+
+    if (lwPerKind) {
+        final_cadence_order = {};
+        // Find lowest-weight kind globally (excluding warmup) for backstop computation.
+        // We do this once across all kinds in learned_weights, not per-cadence, so
+        // the same low-weight kind is consistently flagged regardless of which
+        // cadence array we are sorting.
+        let lowestWeight = null;
+        for (const kind of Object.keys(lwPerKind)) {
+            const s = lwPerKind[kind] || {};
+            if (s.warmup === false && typeof s.weight === "number") {
+                if (lowestWeight === null || s.weight < lowestWeight) lowestWeight = s.weight;
+            }
+        }
+        for (const cadenceName of Object.keys(composed_cadence_order)) {
+            const arr = composed_cadence_order[cadenceName];
+            if (!Array.isArray(arr)) {
+                final_cadence_order[cadenceName] = arr;
+                continue;
+            }
+            const decorated = arr.map((kind, i) => {
+                const base_priority = i;
+                const lwState = lwPerKind[kind] || { weight: 1.00, warmup: true };
+                const weight = (typeof lwState.weight === "number") ? lwState.weight : 1.00;
+                const warmup = lwState.warmup !== false;
+                const deviation = Math.abs(weight - 1.00);
+
+                let effective_priority;
+                if (warmup || deviation <= DEVIATION) {
+                    effective_priority = base_priority;
+                } else {
+                    effective_priority = base_priority - (weight * PRIORITY_BUMP);
+                    learned_weights_applied = true;
+                }
+
+                // Day-14 must-surface backstop: lowest-weight kind gets a bigger bump
+                // every 14 days since last_surfaced (or last_updated).
+                const lastSurfaced = lwState.last_surfaced || lwState.last_updated || null;
+                const days_since = _daysSince(lastSurfaced);
+                const isLowest = !warmup && lowestWeight !== null && weight === lowestWeight;
+                if (isLowest && Number.isFinite(days_since) && days_since > 0 && days_since % BACKSTOP_DAYS === 0) {
+                    effective_priority = base_priority - (PRIORITY_BUMP * BACKSTOP_MULTIPLIER);
+                    learned_weights_applied = true;
+                }
+                return { kind, i, effective_priority };
+            });
+            // Stable sort by effective_priority ascending; preserve declared order for ties.
+            decorated.sort((a, b) => (a.effective_priority - b.effective_priority) || (a.i - b.i));
+            final_cadence_order[cadenceName] = decorated.map((d) => d.kind);
+        }
+    }
+
     return {
         render_aspects:       Object.assign({}, bundle.render_aspects || {}, ov.render_aspects || {}, adHoc.render_aspects || {}),
-        cadence_order:        Object.assign({}, bundle.cadence_order   || {}, ov.cadence_order   || {}, adHoc.cadence_order   || {}),
+        cadence_order:        final_cadence_order,
         voice:                Object.assign({}, bundle.voice           || {}, ov.voice           || {}, adHoc.voice           || {}),
         microscopes_registry: adHoc.microscopes_registry || ov.microscopes_registry || bundle.microscopes_registry || null,
         tripwire_aspects:     Array.isArray(adHoc.tripwire_aspects) ? adHoc.tripwire_aspects.slice()
                             : Array.isArray(ov.tripwire_aspects)    ? ov.tripwire_aspects.slice()
                             : Array.isArray(bundle.tripwire_aspects) ? bundle.tripwire_aspects.slice()
                             : [],
+        learned_weights_applied,
     };
 }
 
