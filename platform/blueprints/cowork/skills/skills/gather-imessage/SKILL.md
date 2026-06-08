@@ -69,6 +69,32 @@ Empty case:
 > No unanswered iMessages in the last [window_days]d.
 ```
 
+### Structured items (NEW v0.96.0)
+
+In addition to `markdown`, return `items[]` — one entry per surfaced conversation:
+
+```json
+{
+  "items": [
+    {
+      "item_id": "<deriveItemId({ kind: 'messages', engagement_id, day, stable_key: chat.id })>",
+      "kind": "messages",
+      "callout_type": "example",
+      "title": "<counterpart display name OR chat title>",
+      "features": {
+        "sender_or_organizer_inner_circle": <bool — true when counterpart is inner-circle>,
+        "is_group_chat": <bool>,
+        "recency_bucket": "today|yesterday|within-week",
+        "message_count_bucket": "1-2|3-10|11-plus",
+        "is_warning": false
+      }
+    }
+  ]
+}
+```
+
+`item_id` derives from the chat/conversation ID — stable across re-fires; immune to message-volume churn.
+
 ## Errors
 
 - **No iMessage MCP connected** (e.g. remote / sandboxed runtime where `apple-mcp` is not wired): return:

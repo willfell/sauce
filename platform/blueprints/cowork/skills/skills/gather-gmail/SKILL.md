@@ -77,6 +77,32 @@ Empty case:
 > No notable email in the last [lookback].
 ```
 
+### Structured items (NEW v0.96.0)
+
+In addition to `markdown`, return `items[]` — one entry per surfaced thread:
+
+```json
+{
+  "items": [
+    {
+      "item_id": "<deriveItemId({ kind: 'email', engagement_id, day, stable_key: thread.id })>",
+      "kind": "email",
+      "callout_type": "example",
+      "title": "<thread.subject truncated to 80 chars>",
+      "features": {
+        "sender_or_organizer_inner_circle": <bool>,
+        "recency_bucket": "today|yesterday|within-week",
+        "thread_length_bucket": "single|2-5|6-plus",
+        "has_unread": <bool>,
+        "is_warning": false
+      }
+    }
+  ]
+}
+```
+
+`item_id` derives from the immutable Gmail thread ID, ensuring stability across same-day re-fires.
+
 ## Errors
 
 - **Gmail MCP unavailable / not authenticated / search error:** return:
