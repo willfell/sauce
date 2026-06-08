@@ -6,8 +6,12 @@
  *
  * Takes pre-rendered nav-buttons block, synopsis callout, memory callouts,
  * priority-ordered MCP-kind blocks, engagement-type aspect blocks, and a
- * pre-rendered closing callout. Returns the final body markdown + an array
- * of canonical assertion substrings + a status token.
+ * pre-rendered closing callout. Returns the final body markdown + a v1.0.0
+ * sidecar payload object (Rail W, v0.96.0 S1.6) + a status token.
+ *
+ * v0.96.0 S1.6 retires the v0.91.x–v0.92.0 `body_assertions[]` field; the
+ * downstream write-atomic-note-helper validates `sidecar_json` against
+ * `data/schemas/<cadence>@1.0.0.json` (draft-07) BEFORE write commits.
  *
  * Pure: no I/O, no MCP calls, no clock, no randomness. Deterministic:
  * same input → byte-identical output. Spec lives in
@@ -183,6 +187,75 @@ function _computeAssertions(input) {
 }
 
 /**
+ * v0.96.0 S1.6 — sidecar composition (Rail W).
+ *
+ * Walks `ordered_blocks[]` + `engagement_type_blocks[]` to aggregate items[]
+ * and surfaced_kinds[] into the v1.0.0 sidecar payload schema documented in
+ * `data/schemas/<cadence>@1.0.0.json` (draft-07). Pure; deterministic.
+ *
+ * Sidecar surface keys:
+ *   - schema_version       — pinned "1.0.0".
+ *   - generated_by         — `cowork:<cadence>@2.0.0` if not provided.
+ *   - generated_at         — ISO timestamp; from input or new Date().
+ *   - cadence              — passthrough.
+ *   - engagement_id        — passthrough (default "").
+ *   - frontmatter          — mirror of the .md frontmatter (default {}).
+ *   - surfaced_kinds       — unique kinds from both block arrays, excluding
+ *                            "warning" sentinels. Order = first-seen.
+ *   - surfaced_items       — flat concat of block.items[] across both arrays.
+ *   - render_aspects_applied — passthrough (default []).
+ *   - memory_used          — passthrough (default conservative zero-state).
+ *   - plan_dispatch        — passthrough (default derived from
+ *                            surfaced_kinds.size + warnings = 0).
+ *
+ * The retired v0.91.x–v0.92.0 `body_assertions[]` field is subsumed by JSON-
+ * schema validation at write-atomic-note time.
+ *
+ * @param {object} input  — composeBody input (post-validation)
+ * @returns {object}      — v1.0.0 sidecar payload
+ */
+function _composeSidecar(input) {
+    const generated_at = input.generated_at || new Date().toISOString();
+    const surfaced_items = [];
+    const surfaced_kinds = new Set();
+    const allBlocks = [
+        ...(input.ordered_blocks || []),
+        ...(input.engagement_type_blocks || []),
+    ];
+    for (const block of allBlocks) {
+        if (block.kind && block.kind !== "warning") {
+            surfaced_kinds.add(block.kind);
+        }
+        if (Array.isArray(block.items)) {
+            for (const item of block.items) {
+                surfaced_items.push(item);
+            }
+        }
+    }
+    return {
+        schema_version: "1.0.0",
+        generated_by: input.generated_by || `cowork:${input.cadence}@2.0.0`,
+        generated_at,
+        cadence: input.cadence,
+        engagement_id: input.engagement_id || "",
+        frontmatter: input.frontmatter || {},
+        surfaced_kinds: Array.from(surfaced_kinds),
+        surfaced_items,
+        render_aspects_applied: input.render_aspects_applied || [],
+        memory_used: input.memory_used || {
+            yesterday_present: false,
+            drift_warning_present: false,
+            echoes_count: 0,
+        },
+        plan_dispatch: input.plan_dispatch || {
+            mode: "prefs",
+            kinds_dispatched: surfaced_kinds.size,
+            warnings_emitted: 0,
+        },
+    };
+}
+
+/**
  * v0.95.1 — Knob 1 (anti_echo render aspect).
  *
  * injectAntiEchoCallout(body, excluded_themes, voice_contract)
@@ -219,10 +292,118 @@ function injectAntiEchoCallout(body, excluded_themes, voice_contract) {
     return safeBody + sep + callout;
 }
 
+/**
+ * v0.96.0 Rail D — Detection callout (new_mcp_notice render aspect).
+ *
+ * injectDetectionCallout(body, pending_confirmations)
+ *
+ * Prepends a "> [!info]+ Cowork detected a new MCP" callout to the body, listing
+ * each newly-detected MCP namespace that is not yet in user-preferences.mcps.
+ * Accepts both the S2.3 string[] contract (raw namespace names) and the richer
+ * design contract (objects with namespace/classified_as/suggested_priority).
+ *
+ * Caller is responsible for gating on render_aspects.new_mcp_notice == "include"
+ * AND a non-empty pending_confirmations array (typically routed through
+ * composeBody).
+ *
+ * @param {string} body                            - current body string
+ * @param {(string|object)[]} pending_confirmations - non-empty array of raw namespace
+ *                                                    names OR objects with
+ *                                                    {namespace, classified_as,
+ *                                                    suggested_priority}
+ * @returns {string} body with the callout prepended
+ */
+function injectDetectionCallout(body, pending_confirmations) {
+    if (!Array.isArray(pending_confirmations) || pending_confirmations.length === 0) {
+        return body;
+    }
+    const lines = pending_confirmations.map((entry) => {
+        // Accept both string (S2.3 contract) and object (design contract) shapes
+        if (typeof entry === "string") {
+            return `> - \`${entry}\``;
+        }
+        return `> - \`${entry.namespace}\` classified as \`${entry.classified_as}\` (suggested priority: ${entry.suggested_priority})`;
+    });
+    const callout = [
+        `> [!info]+ Cowork detected a new MCP`,
+        `> The following connected MCPs are not yet in your \`user-preferences.mcps\`. Edit \`spice/cowork/context/user-preferences.md\` to confirm and customize, or run \`/cowork context-builder\` to re-interview.`,
+        ...lines,
+    ].join("\n");
+    return callout + "\n\n" + body;
+}
+
+/**
+ * v0.96.0 Rail L — Rating callout (learn-from-checks render aspect).
+ *
+ * composeRatingCallout(opts)
+ *
+ * Composes a "> [!todo]+ Was today useful?" callout listing one checkbox per
+ * kind in surfaced_kinds. The callout body includes an HTML sentinel
+ * `<!-- cowork:rating-block schema=1.0.0 cadence=<c> day=<d> -->` for
+ * idempotent learn-from-checks parsing.
+ *
+ * Idempotent re-fire: when prior_state is supplied (parsed from an existing
+ * atomic-note via parseRatingCallout), kinds that were previously ticked
+ * preserve their [x] state across re-fires.
+ *
+ * Caller is responsible for the learning-enabled gate (or, more typically,
+ * routes through composeBody which gates via input.learning_enabled !== false
+ * AND a non-empty input.surfaced_kinds_for_rating array).
+ *
+ * @param {object} opts
+ * @param {string} opts.cadence        - cadence name (morning-briefing, midday-tripwire, ...)
+ * @param {string} opts.day            - ISO day (YYYY-MM-DD)
+ * @param {string[]} opts.surfaced_kinds - non-empty array of kinds surfaced today
+ * @param {object|null} opts.prior_state - { kind → wasTicked } map from prior rating callout
+ * @returns {string} rendered callout (or "" when surfaced_kinds empty)
+ */
+function composeRatingCallout(opts) {
+    const { cadence, day, surfaced_kinds, prior_state } = opts || {};
+    if (!Array.isArray(surfaced_kinds) || surfaced_kinds.length === 0) return "";
+    const kindLabel = (k) => k.charAt(0).toUpperCase() + k.slice(1);
+    const lines = surfaced_kinds.map((kind) => {
+        const wasTicked = prior_state && prior_state[kind] === true;
+        const checkbox = wasTicked ? "[x]" : "[ ]";
+        return `> - ${checkbox} ${kindLabel(kind)}`;
+    });
+    return [
+        `> [!todo]+ Was today useful?`,
+        `> Tick the kinds that surfaced something you cared about. (One tick per kind per day; learned weights live in \`spice/cowork/context/user-preferences.md\`.)`,
+        ...lines,
+        `> <!-- cowork:rating-block schema=1.0.0 cadence=${cadence} day=${day} -->`,
+    ].join("\n");
+}
+
+/**
+ * v0.96.0 Rail L — Upgrade-notice callout (one-shot per engagement).
+ *
+ * injectUpgradeNoticeCallout(body)
+ *
+ * Prepends a "> [!info]+ Cowork v0.96.0 upgrade notice" callout explaining the
+ * rating callout, sidecar file conventions, and the learning_enabled override
+ * knob. Designed to fire ONCE per engagement — the first atomic note emitted
+ * post-upgrade — gated by `learned_weights.totals.upgrade_notice_emitted` which
+ * `cowork:learn-from-checks` flips to `true` after the first run.
+ *
+ * Caller is responsible for the one-shot gate (or, more typically, routes
+ * through composeBody which checks input.learned_weights_state.totals).
+ *
+ * @param {string} body - current body string
+ * @returns {string} body with the upgrade-notice callout prepended
+ */
+function injectUpgradeNoticeCallout(body) {
+    const callout = [
+        `> [!info]+ Cowork v0.96.0 upgrade notice`,
+        `> This is the first atomic note since upgrading to v0.96.0 — cowork now learns which kinds of items you care about. Each atomic note ends with a "Was today useful?" rating callout — tick the kinds that surfaced something you cared about. Your daily preferences update nightly; effects begin after 7 days of ticks.`,
+        `> To disable for an engagement, set \`engagement.learning_enabled: false\` in \`vault-config.md\`. To exclude \`.cowork.json\` sidecars from Obsidian search, add \`*.cowork.json\` to Settings → Files & Links → Excluded files.`,
+    ].join("\n");
+    return callout + "\n\n" + body;
+}
+
 function composeBody(input) {
     const validationError = _validateInput(input);
     if (validationError) {
-        return { body_md: "", body_assertions: [], status: validationError };
+        return { body_md: "", sidecar_json: null, status: validationError };
     }
 
     const {
@@ -272,19 +453,54 @@ function composeBody(input) {
         sections.push(backlink);
     }
 
-    const body_md = sections.join("\n\n") + "\n";
-    const body_assertions = _computeAssertions(input);
+    let body_md = sections.join("\n\n") + "\n";
+    // v0.96.0 Rail D: emit detection callout when MCPs detected AND render_aspects allows
+    if (
+        input.pending_confirmations
+        && input.pending_confirmations.length > 0
+        && input.render_aspects
+        && input.render_aspects.new_mcp_notice === "include"
+    ) {
+        body_md = injectDetectionCallout(body_md, input.pending_confirmations);
+    }
+    // v0.96.0 Rail L: emit rating callout when learning enabled + kinds surfaced
+    if (input.learning_enabled !== false && Array.isArray(input.surfaced_kinds_for_rating)) {
+        const ratingCallout = composeRatingCallout({
+            cadence: input.cadence,
+            day: input.day || (input.frontmatter && input.frontmatter.day) || new Date().toISOString().slice(0, 10),
+            surfaced_kinds: input.surfaced_kinds_for_rating,
+            prior_state: input.prior_rating_state || null,
+        });
+        if (ratingCallout) {
+            body_md = body_md.trimEnd() + "\n\n" + ratingCallout + "\n";
+        }
+    }
+    // v0.96.0 upgrade notice — one-shot per engagement
+    if (
+        input.learned_weights_state &&
+        input.learned_weights_state.totals &&
+        !input.learned_weights_state.totals.upgrade_notice_emitted
+    ) {
+        body_md = injectUpgradeNoticeCallout(body_md);
+        // Note: orchestrator/learn-from-checks marks totals.upgrade_notice_emitted = true
+        // on next learn-from-checks fire (idempotent — won't re-emit on subsequent days).
+    }
+    const sidecar_json = _composeSidecar(input);
 
-    return { body_md, body_assertions, status: "ok" };
+    return { body_md, sidecar_json, status: "ok" };
 }
 
 module.exports = {
     composeBody,
     injectAntiEchoCallout,
+    injectDetectionCallout,
+    composeRatingCallout,
+    injectUpgradeNoticeCallout,
     ANTI_ECHO_ELIGIBLE_CADENCES,
     _validateInput,
     _wrapCallout,
     _composeMemoryCluster,
     _composeBacklink,
     _computeAssertions,
+    _composeSidecar,
 };

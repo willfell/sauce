@@ -1,6 +1,6 @@
 {
   "_comment": "Canonical Cowork scheduled-job wrapper contract. Substitution tokens use {{$varname}} (engagement/cadence level) + {{shared.<key>}} (shared boilerplate). See Docs/plans/2026-06-05-v0.92.x-scheduled-jobs-sync-design.md §4 for schema; compose-scheduled-job-wrappers-helper.js for substitution semantics + validator modes.",
-  "contract_version": "0.33.0",
+  "contract_version": "0.34.0",
   "cadence_order": [
     "morning-briefing",
     "midday-tripwire",

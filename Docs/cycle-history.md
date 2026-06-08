@@ -4,6 +4,29 @@ This file archives the per-cycle status snapshots that previously lived in `CLAU
 
 ---
 
+## v0.96.0 — cowork-rethought-1 (2026-06-08 close)
+
+**Codename:** `cowork-rethought-1`. Workshop 0.95.1 → 0.96.0; cowork 0.33.0 → 0.34.0; contract 0.33.0 → 0.34.0.
+
+**Rails shipped:**
+- Rail W — `.cowork.json` sidecar per atomic note; JSON-schema Verify replaces regex; `body_assertions[]` retired; per-cadence write-run-note slimmed to shims around `write-atomic-note-helper.js`.
+- Rail D — `classifyConnectedKinds` with deterministic patterns (8 canonical kinds) + LLM fallback (cached); 14th contract key `pending_confirmations[]`; detection callout default-include; bootstrap auto-fill from kind baselines.
+- Rail L — per-kind preference learning; `> [!todo]+ Was today useful?` rating callout default-on; `learned_weights:` in user-preferences.md (lazy-init on first fire per S0.5 mitigation); `cowork:learn-from-checks` sub-skill in synthesize-day post-step; weight-aware `composeFinalPreferences` ordering; day-14 must-surface backstop.
+
+**Subsumed:** auto-update-prefs (was queued v0.96.0+) → Rail L at MVP granularity.
+
+**New artifacts:** 4 helpers (write-atomic-note, validate-sidecar, kind-classifier, learn-from-checks), 1 new sub-skill (learn-from-checks), 6 new JSON Schema files (sidecar shapes for 5 cadences + cold MB variant), 2 new data files (kind-patterns, kind-classifier-cache), 2 new baselines (docs, weather).
+
+**Surface changes:** 14-key plan-dispatch contract (added `pending_confirmations[]`); new frontmatter `learned_weights:` in user-preferences.md; new sidecar artifact `.cowork.json` per atomic note; 3 new UI surfaces (detection callout, rating callout, upgrade notice).
+
+**Parked for cowork-rethought-2 or later:** W2 (full structured-output API rewrite), memory salience/decay, per-item L2R + Thompson sampling, cron heartbeat, per-skill SemVer + versioning CI, the v0.95.1-migrator.
+
+**Final test posture:** helper-cases 2135/0 (+38 from baseline), cowork-smoke 949/0 (+12), claude-surface 212/0, integration-smoke 36/0. Preflight ALL GREEN.
+
+See `Docs/plans/2026-06-08-v0.96.0-cowork-rethought-1-{design,plan,result}.md`.
+
+---
+
 ## v0.95.1 (closed 2026-06-08) — cowork-anti-echo MINOR
 
 Workshop 0.95.0 → **0.95.1** (MINOR). cowork blueprint 0.32.0 → **0.33.0** (MINOR). scheduled-job-contract `contract_version` 0.32.0 → **0.33.0** (lockstep mirror, per v0.93.2 landmine #20 convention). Mechanism count unchanged at 17.
