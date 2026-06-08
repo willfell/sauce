@@ -191,11 +191,211 @@ function composeWarningCallout({ kind_name, kind_title, reason, mcps_entry }) {
     ].join("\n");
 }
 
+// ===========================================================================
+// v0.95.0 additive exports
+// ===========================================================================
+
+/**
+ * composeFinalPreferences({ bundle, overrides, ad_hoc_prefs })
+ *
+ * Composes the FINAL preferences tree from layered inputs.
+ *   bundle       — engagement-type JSON parsed (e.g. personal.json) — required
+ *   overrides    — engagement.overrides block from vault-config.md (optional;
+ *                  may be absent, empty, or — defensively — malformed)
+ *   ad_hoc_prefs — optional runtime overrides (reserved; currently unused)
+ *
+ * Composition rules:
+ *   - Objects (render_aspects, cadence_order, voice): bundle ⨁ overrides
+ *     (override wins per-key)
+ *   - Arrays (tripwire_aspects): overrides REPLACES bundle when present
+ *   - microscopes_registry: overrides.value || bundle.value || null
+ *     (null triggers filesystem scan downstream)
+ *
+ * Defensive: when bundle is null/non-object, returns an empty 5-key shell.
+ * When overrides is non-object (e.g. string/array), it is treated as absent
+ * (Postel — caller can surface a warning Notice independently).
+ */
+function composeFinalPreferences({ bundle, overrides, ad_hoc_prefs } = {}) {
+    const emptyShell = {
+        render_aspects: {},
+        cadence_order: {},
+        voice: {},
+        microscopes_registry: null,
+        tripwire_aspects: [],
+    };
+    if (!bundle || typeof bundle !== "object") return emptyShell;
+    const ov = (overrides && typeof overrides === "object" && !Array.isArray(overrides)) ? overrides : {};
+    const adHoc = (ad_hoc_prefs && typeof ad_hoc_prefs === "object" && !Array.isArray(ad_hoc_prefs)) ? ad_hoc_prefs : {};
+
+    return {
+        render_aspects:       Object.assign({}, bundle.render_aspects || {}, ov.render_aspects || {}, adHoc.render_aspects || {}),
+        cadence_order:        Object.assign({}, bundle.cadence_order   || {}, ov.cadence_order   || {}, adHoc.cadence_order   || {}),
+        voice:                Object.assign({}, bundle.voice           || {}, ov.voice           || {}, adHoc.voice           || {}),
+        microscopes_registry: adHoc.microscopes_registry || ov.microscopes_registry || bundle.microscopes_registry || null,
+        tripwire_aspects:     Array.isArray(adHoc.tripwire_aspects) ? adHoc.tripwire_aspects.slice()
+                            : Array.isArray(ov.tripwire_aspects)    ? ov.tripwire_aspects.slice()
+                            : Array.isArray(bundle.tripwire_aspects) ? bundle.tripwire_aspects.slice()
+                            : [],
+    };
+}
+
+/**
+ * loadKindTitles({ vault_root })
+ *
+ * Loads the canonical kind→title map from spice/cowork/data/kind-titles.json
+ * (v1.0.0 contract). Falls back to module-private CANONICAL_TITLES when the
+ * file is missing, unparseable, or carries an incompatible version.
+ *
+ * Returns: { kind_name: title, ... }
+ */
+function loadKindTitles({ vault_root } = {}) {
+    const fallback = Object.assign({}, CANONICAL_TITLES);
+    if (!vault_root) return fallback;
+    const fs = require("fs");
+    const path = require("path");
+    const dataPath = path.join(vault_root, "spice/cowork/data/kind-titles.json");
+    try {
+        if (!fs.existsSync(dataPath)) return fallback;
+        const data = JSON.parse(fs.readFileSync(dataPath, "utf8"));
+        if (data.version !== "1.0.0" || !data.canonical_titles || typeof data.canonical_titles !== "object") return fallback;
+        return Object.assign({}, data.canonical_titles);
+    } catch (_e) {
+        return fallback;
+    }
+}
+
+/**
+ * readEngagement({ engagement_id, vault_root })
+ *
+ * Reads the named engagement record from spice/cowork/context/vault-config.md
+ * by id, plus the bundle (engagement-type JSON at
+ * spice/cowork/context/engagement-types/<type>.json), plus the engagement.overrides
+ * block when present.
+ *
+ * Returns 5-key contract:
+ *   { engagement, bundle, overrides, status, reason }
+ *   status ∈ { "ok", "engagement_not_found", "bundle_missing", "bundle_parse_failed" }
+ */
+function readEngagement({ engagement_id, vault_root } = {}) {
+    const fs = require("fs");
+    const path = require("path");
+    const empty = { engagement: null, bundle: null, overrides: null };
+    if (!engagement_id || !vault_root) {
+        return Object.assign({}, empty, { status: "engagement_not_found", reason: "missing inputs" });
+    }
+    const vaultConfigPath = path.join(vault_root, "spice/cowork/context/vault-config.md");
+    if (!fs.existsSync(vaultConfigPath)) {
+        return Object.assign({}, empty, { status: "engagement_not_found", reason: "vault-config.md missing" });
+    }
+    let body;
+    try { body = fs.readFileSync(vaultConfigPath, "utf8"); }
+    catch (e) { return Object.assign({}, empty, { status: "engagement_not_found", reason: `read failed: ${e.message}` }); }
+    const fmMatch = body.match(/^---\n([\s\S]*?)\n---/);
+    if (!fmMatch) return Object.assign({}, empty, { status: "engagement_not_found", reason: "no frontmatter" });
+    const engagement = _parseEngagementByIdFromYaml(fmMatch[1], engagement_id);
+    if (!engagement) return Object.assign({}, empty, { status: "engagement_not_found", reason: `id "${engagement_id}" absent` });
+    const type = engagement.type;
+    if (!type) return Object.assign({}, empty, { engagement, status: "bundle_missing", reason: "engagement.type absent" });
+    const bundlePath = path.join(vault_root, "spice/cowork/context/engagement-types", `${type}.json`);
+    if (!fs.existsSync(bundlePath)) {
+        return { engagement, bundle: null, overrides: engagement.overrides || null, status: "bundle_missing", reason: `${type}.json absent` };
+    }
+    let bundle;
+    try { bundle = JSON.parse(fs.readFileSync(bundlePath, "utf8")); }
+    catch (e) { return { engagement, bundle: null, overrides: engagement.overrides || null, status: "bundle_parse_failed", reason: e.message }; }
+    return { engagement, bundle, overrides: engagement.overrides || null, status: "ok", reason: null };
+}
+
+/**
+ * _parseEngagementByIdFromYaml — minimal YAML-ish extractor scoped to vault-config.md's
+ * engagements[] array shape. Finds the `- id: <engagement_id>` entry, captures the
+ * indented block (until the next `-` at the same indent or end), and parses it
+ * recursively (flat key:value, nested maps, list-of-strings, nested
+ * `overrides:` map). Not a full YAML parser; sufficient for the vault-config
+ * engagement-record shape.
+ */
+function _parseEngagementByIdFromYaml(yaml, engagement_id) {
+    const lines = yaml.split("\n");
+    // Locate the `engagements:` key (top-level)
+    let i = 0;
+    while (i < lines.length && !/^engagements:\s*$/.test(lines[i])) i++;
+    if (i >= lines.length) return null;
+    i++;
+    // Walk entries (each starts at indent==2 with "- ")
+    while (i < lines.length) {
+        const line = lines[i];
+        const m = line.match(/^  -\s+id:\s*(.*)$/);
+        if (m) {
+            const thisId = m[1].trim().replace(/^["']|["']$/g, "");
+            // Collect this entry's body until the next "  - " or non-indented line
+            const bodyLines = [`id: ${thisId}`]; // promote the id field to flat
+            let j = i + 1;
+            while (j < lines.length) {
+                const ln = lines[j];
+                if (/^  -\s/.test(ln)) break;            // next engagement
+                if (/^\S/.test(ln) && ln.trim() !== "") break;  // top-level key
+                if (ln.startsWith("    ")) bodyLines.push(ln.slice(4)); // strip 4-space indent
+                else if (ln.trim() === "") bodyLines.push("");
+                j++;
+            }
+            if (thisId === engagement_id) {
+                return _parseEngagementBlock(bodyLines.join("\n"));
+            }
+            i = j;
+            continue;
+        }
+        i++;
+    }
+    return null;
+}
+
+function _parseEngagementBlock(block) {
+    const out = {};
+    const lines = block.split("\n");
+    let i = 0;
+    while (i < lines.length) {
+        const line = lines[i];
+        if (!line.trim() || line.trim().startsWith("#")) { i++; continue; }
+        const flat = line.match(/^([A-Za-z_][A-Za-z0-9_-]*):\s*(.*)$/);
+        if (!flat) { i++; continue; }
+        const [, key, valRaw] = flat;
+        const val = valRaw.trim();
+        if (val === "") {
+            const nested = [];
+            i++;
+            while (i < lines.length && (lines[i].startsWith("  ") || lines[i].trim() === "")) {
+                nested.push(lines[i]);
+                i++;
+            }
+            if (nested.length && nested.filter(l => l.trim()).every(l => /^\s+-\s/.test(l))) {
+                out[key] = nested.filter(l => l.trim()).map(l => l.replace(/^\s+-\s*/, "").trim().replace(/^["']|["']$/g, ""));
+            } else {
+                out[key] = _parseEngagementBlock(nested.map(l => l.replace(/^  /, "")).join("\n"));
+            }
+            continue;
+        }
+        if (val.startsWith("[") && val.endsWith("]")) {
+            out[key] = val.slice(1, -1).split(",").map(s => s.trim().replace(/^["']|["']$/g, "")).filter(Boolean);
+        } else if (val === "true") out[key] = true;
+        else if (val === "false") out[key] = false;
+        else if (val === "null") out[key] = null;
+        else if (/^-?\d+(\.\d+)?$/.test(val)) out[key] = Number(val);
+        else out[key] = val.replace(/^["']|["']$/g, "");
+        i++;
+    }
+    return out;
+}
+
 module.exports = {
     planDispatch,
     decideDispatchMode,
     composeVoiceContract,
     composeWarningCallout,
+    composeFinalPreferences,
+    readEngagement,
+    loadKindTitles,
     _titleCase: titleCase,
     _CANONICAL_TITLES: CANONICAL_TITLES,
+    _parseEngagementByIdFromYaml,
+    _parseEngagementBlock,
 };
