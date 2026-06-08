@@ -25,11 +25,37 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
 
 ```
 {
-  engagement_id: string   // required — id of the engagement to brief; must match an entry in vault-config.md engagements[]
+  engagement_id: string,  // required — id of the engagement to brief; must match an entry in vault-config.md engagements[]
+  cadence: string         // optional — when "lens_shift", triggers the v0.95.1 cold-mode branch (Knob 3): skips pre-flight 3a (read-memory) AND 3a.5 (gather-semantic-related), writes type cowork-morning-briefing-cold + slug morning-briefing-cold-<engagement>.md. Default (absent or any other value) runs the standard warm MB.
 }
 ```
 
+CLI surface: invoke as `cowork:morning-briefing --engagement_id <id>` for the warm path, OR `cowork:morning-briefing --engagement_id <id> --cadence lens_shift` for the weekly cold companion (default Saturday 07:00 from `cadences.lens_shift` opt-in).
+
 ## Pre-flight
+
+> [!info]+ Cold-mode branch (v0.95.1 Knob 3 — `--cadence lens_shift`)
+>
+> When the orchestrator is invoked with `cadence == "lens_shift"` (the `--cadence lens_shift` runtime flag emitted by the lens_shift scheduled-job wrapper), take the **cold-mode** branch:
+>
+> - **SKIP step 3a (read-memory).** Both 3a.i and 3a.ii sub-skill invocations are skipped in cold-mode. Set `output_yesterday = null` and `output_overnight = null` directly so downstream composition treats this as "no memory available".
+> - **SKIP step 3a.5 (gather-semantic-related).** Do NOT invoke `cowork:gather-semantic-memory`. Set `output_echoes = null`.
+> - **Step 3b (plan-dispatch) STILL RUNS** with the null memory inputs. The plan-dispatch SKILL.md derives `excluded_themes = []` when `yesterdayMemory == null`, so the v0.95.1 Knob-1 anti-echo callout naturally injects nothing. Drift-warning extraction (v0.95.1 Knob 2) also yields `drift_warning = null` because there is no yesterday-memory to extract from.
+> - **Write contract (cold variant):**
+>   - Atomic-note frontmatter `type:` is **`cowork-morning-briefing-cold`** (NOT the warm `cowork-morning-briefing`).
+>   - Atomic-note slug is **`morning-briefing-cold-<engagement_id>.md`** (NOT the warm `morning-briefing.md`). Output path: `spice/cowork/daily/<YYYY>/<MM-Month>/<YYYY-MM-DD>/morning-briefing-cold-<engagement_id>.md`.
+>   - All other frontmatter (`engagement_id`, `day`, `generator`, `prompt_source`, `title`, `summary`, `created_at`, optional `warnings`) follows the warm contract. Title prefix should read `Morning Briefing (cold) - <Weekday>, <Month> <D>, <YYYY>`.
+> - **Body exclusions emerge naturally — NO dedicated suppression code.** Because step 3a is skipped (no memory → `excluded_themes = []` → Knob 1 anti-echo callout skips its own injection), and step 3a.5 is skipped (no semantic gather → semantic-echoes callout skips its own injection), the cold-mode body contains:
+>   - NO `Yesterday at a glance` callout (no memory available)
+>   - NO anti-echo `excluded_themes` callout (excluded_themes empty)
+>   - NO semantic-echoes callout (3a.5 skipped)
+>   - NO `Frame may be stuck` drift_warning callout (no yesterday-memory to extract from)
+>
+>   Future readers/implementers MUST NOT add dedicated cold-mode suppression branches — the existing render-aspect gates already produce the correct empty-body outcome via the skipped pre-flight steps.
+> - **Pairing is visual-only.** No `companion_to:` frontmatter. The Daily Hub `CoworkLensShiftCards` CustomJS class (added S3.3 / S3.4) renders warm + cold notes side-by-side by slug-matching within the same day folder. When only one of the pair exists, it renders single-column.
+>
+> All warm-mode pre-flight steps NOT explicitly skipped above (1 check-vault-routing, 1b verbal-commitment, 2 resolve-engagement, 3 date-context, 3b plan-dispatch, 4 ensure-daily-note) continue to fire identically in cold-mode.
+
 
 1. READ `.claude/skills/cowork/skills/check-vault-routing/SKILL.md` in full and follow
    its `## Steps` section with `{ required: ["obsidian"] }`. If the return is not `"ready"`, emit Notice `cowork:morning-briefing aborted -- <status>` and exit. Do not write.

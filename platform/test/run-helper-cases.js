@@ -10864,10 +10864,10 @@ type: cowork-microscope
   try {
     assertTrue("HC-V0930-CONTRACT-A1: contract parses + is object",
       _sjContract && typeof _sjContract === "object" && !Array.isArray(_sjContract));
-    assertTrue("HC-V0930-CONTRACT-A2: contract_version === \"0.31.0\"",
-      _sjContract.contract_version === "0.32.0");
-    assertTrue("HC-V0930-CONTRACT-A3: cadence_order is length-5 array",
-      Array.isArray(_sjContract.cadence_order) && _sjContract.cadence_order.length === 5);
+    assertTrue("HC-V0930-CONTRACT-A2: contract_version === \"0.33.0\"",
+      _sjContract.contract_version === "0.33.0");
+    assertTrue("HC-V0930-CONTRACT-A3: cadence_order is length-6 array (v0.95.1: lens_shift added)",
+      Array.isArray(_sjContract.cadence_order) && _sjContract.cadence_order.length === 6);
     assertTrue("HC-V0930-CONTRACT-A4: every cadence in cadence_order exists in cadences",
       _sjContract.cadence_order.every((c) => !!_sjContract.cadences[c]));
     const _sjReqFields = ["schedule_hint", "frontmatter_type", "output_path_template",

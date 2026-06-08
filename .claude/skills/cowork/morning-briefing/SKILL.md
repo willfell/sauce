@@ -25,11 +25,37 @@ This orchestrator NEVER patches the daily note's callouts, edits the daily-note 
 
 ```
 {
-  engagement_id: string   // required — id of the engagement to brief; must match an entry in vault-config.md engagements[]
+  engagement_id: string,  // required — id of the engagement to brief; must match an entry in vault-config.md engagements[]
+  cadence: string         // optional — when "lens_shift", triggers the v0.95.1 cold-mode branch (Knob 3): skips pre-flight 3a (read-memory) AND 3a.5 (gather-semantic-related), writes type cowork-morning-briefing-cold + slug morning-briefing-cold-<engagement>.md. Default (absent or any other value) runs the standard warm MB.
 }
 ```
 
+CLI surface: invoke as `cowork:morning-briefing --engagement_id <id>` for the warm path, OR `cowork:morning-briefing --engagement_id <id> --cadence lens_shift` for the weekly cold companion (default Saturday 07:00 from `cadences.lens_shift` opt-in).
+
 ## Pre-flight
+
+> [!info]+ Cold-mode branch (v0.95.1 Knob 3 — `--cadence lens_shift`)
+>
+> When the orchestrator is invoked with `cadence == "lens_shift"` (the `--cadence lens_shift` runtime flag emitted by the lens_shift scheduled-job wrapper), take the **cold-mode** branch:
+>
+> - **SKIP step 3a (read-memory).** Both 3a.i and 3a.ii sub-skill invocations are skipped in cold-mode. Set `output_yesterday = null` and `output_overnight = null` directly so downstream composition treats this as "no memory available".
+> - **SKIP step 3a.5 (gather-semantic-related).** Do NOT invoke `cowork:gather-semantic-memory`. Set `output_echoes = null`.
+> - **Step 3b (plan-dispatch) STILL RUNS** with the null memory inputs. The plan-dispatch SKILL.md derives `excluded_themes = []` when `yesterdayMemory == null`, so the v0.95.1 Knob-1 anti-echo callout naturally injects nothing. Drift-warning extraction (v0.95.1 Knob 2) also yields `drift_warning = null` because there is no yesterday-memory to extract from.
+> - **Write contract (cold variant):**
+>   - Atomic-note frontmatter `type:` is **`cowork-morning-briefing-cold`** (NOT the warm `cowork-morning-briefing`).
+>   - Atomic-note slug is **`morning-briefing-cold-<engagement_id>.md`** (NOT the warm `morning-briefing.md`). Output path: `spice/cowork/daily/<YYYY>/<MM-Month>/<YYYY-MM-DD>/morning-briefing-cold-<engagement_id>.md`.
+>   - All other frontmatter (`engagement_id`, `day`, `generator`, `prompt_source`, `title`, `summary`, `created_at`, optional `warnings`) follows the warm contract. Title prefix should read `Morning Briefing (cold) - <Weekday>, <Month> <D>, <YYYY>`.
+> - **Body exclusions emerge naturally — NO dedicated suppression code.** Because step 3a is skipped (no memory → `excluded_themes = []` → Knob 1 anti-echo callout skips its own injection), and step 3a.5 is skipped (no semantic gather → semantic-echoes callout skips its own injection), the cold-mode body contains:
+>   - NO `Yesterday at a glance` callout (no memory available)
+>   - NO anti-echo `excluded_themes` callout (excluded_themes empty)
+>   - NO semantic-echoes callout (3a.5 skipped)
+>   - NO `Frame may be stuck` drift_warning callout (no yesterday-memory to extract from)
+>
+>   Future readers/implementers MUST NOT add dedicated cold-mode suppression branches — the existing render-aspect gates already produce the correct empty-body outcome via the skipped pre-flight steps.
+> - **Pairing is visual-only.** No `companion_to:` frontmatter. The Daily Hub `CoworkLensShiftCards` CustomJS class (added S3.3 / S3.4) renders warm + cold notes side-by-side by slug-matching within the same day folder. When only one of the pair exists, it renders single-column.
+>
+> All warm-mode pre-flight steps NOT explicitly skipped above (1 check-vault-routing, 1b verbal-commitment, 2 resolve-engagement, 3 date-context, 3b plan-dispatch, 4 ensure-daily-note) continue to fire identically in cold-mode.
+
 
 1. READ `.claude/skills/cowork/skills/check-vault-routing/SKILL.md` in full and follow
    its `## Steps` section with `{ required: ["obsidian"] }`. If the return is not `"ready"`, emit Notice `cowork:morning-briefing aborted -- <status>` and exit. Do not write.
@@ -180,11 +206,19 @@ Each gather call passes `engagement_id`. The sub-skill reads per-engagement MCP-
        - `echoes_md` ← `composeSemanticEchoesCallout(output_echoes)`
        - `backlink_md` ← inline-composed per v0.85.0 § 2.1.3 spec: `"> [!quote]- Memory log\n> Today's memory: [[spice/cowork/memory/<engagement_id>/<YYYY>/<MM-Month>/<YYYY-MM-DD>/memory.md|Memory log — <YYYY-MM-DD>]]"` (tick-count parenthetical omitted when unknown).
 
+  14c.i **v0.95.1 Knob-2 — inject `drift_warning` into the "Yesterday at a glance" callout.** After composing `yesterday_md` (which already carries yesterday's synthesis + carry-forward bullets inside the `> [!example]+ Yesterday at a glance` callout), check `output_yesterday.day_synthesis.drift_warning` (the `[!warning]- Frame may be stuck` callout body surfaced by `cowork:read-memory`'s v0.95.1 extension — design § 4.6). When non-null AND `yesterday_md != ""`:
+
+       Append to `yesterday_md` a single line (just before the trailing blank line):
+
+       `> **Drift flag from yesterday:** <drift_warning text>`
+
+       Apply the voice contract from `plan.voice_contract` to the prose (casual personalities may rephrase the prefix; professional personalities keep the canonical "Drift flag from yesterday:" prefix verbatim). The drift flag surfaces the frame-may-be-stuck warning so the LLM composing today's MB is aware that recent days have been thematically locked — it can lean into the named theme deliberately or explicitly broaden. When `drift_warning` is null or `yesterday_md == ""` (no memory available), this step is a no-op; the yesterday callout passes through unchanged.
+
   14d. **Prep ordered_blocks[].** Iterate gather-pipeline `ordered_blocks[]` (from steps 5-12b priority loop). Each entry already carries `{ kind, callout_type, markdown }`. Add `title` from `plan.kind_titles[entry.kind_name]` (v0.95.0: data file `spice/cowork/data/kind-titles.json` is canonical; per-kind microscope `## Output shape` directives may override per-engagement). Translate to composeBody shape: `{ kind, callout_type, title, body_md: markdown }`.
 
   14e. **Prep engagement_type_blocks[].** For each `related_signal` in `related_signals[]` with `status == "ready"`: push `{ kind: "semantic", callout_type: "example", title: "Related to: <event.title>", body_md: <related_signal.markdown> }`. When `semantic_index_unavailable == true`: push ONCE `{ kind: "semantic-unavailable", callout_type: "warning", title: "Semantic index not available", body_md: "Smart Connections index absent or anchor not indexed — semantic gather skipped." }`. Finance does NOT flow through here — it's written by Step 15's separate sub-skill.
 
-  14f. **Invoke composeBody.** READ `.claude/skills/cowork/skills/compose-body/SKILL.md` in full and follow its `## Compose` section with `{ cadence: "morning-briefing", nav_buttons_block: "<canonical block>", synopsis_md, memory_callouts: { yesterday_md, overnight_md, echoes_md, backlink_md }, ordered_blocks, engagement_type_blocks, closing_md }`. Capture `{ body_md, body_assertions, status }`.
+  14f. **Invoke composeBody.** READ `.claude/skills/cowork/skills/compose-body/SKILL.md` in full and follow its `## Compose` section with `{ cadence: "morning-briefing", nav_buttons_block: "<canonical block>", synopsis_md, memory_callouts: { yesterday_md, overnight_md, echoes_md, backlink_md }, ordered_blocks, engagement_type_blocks, closing_md, excluded_themes: plan.excluded_themes, voice_contract: plan.voice_contract }`. The `excluded_themes` field is the v0.95.1 Knob-1 13th plan-dispatch contract key — when `render_aspects.anti_echo == "include"` it carries yesterday's carry-forward bullets verbatim; otherwise `[]`. composeBody gates the anti-echo callout injection internally on cadence eligibility + non-empty excluded_themes. Capture `{ body_md, body_assertions, status }`.
 
   14g. **Compose failure handling.** If `status` starts with `"failed:"`, emit Notice `cowork:morning-briefing aborted -- compose-body failure: <status>` and exit non-zero. Do NOT call write-run-note. Do NOT run state-update steps.
 15. **If `plan.render_aspects.finance_block == "include"`:** READ `.claude/skills/cowork/skills/write-run-note-finance/SKILL.md` in full —

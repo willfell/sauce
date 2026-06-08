@@ -3,28 +3,29 @@ type: cowork-scheduled-job-wrappers
 engagement_id: no-tripwire
 sauce_version: 0.93.2
 cowork_version: 0.32.0
-contract_version: 0.32.0
+contract_version: 0.33.0
 generated_at: 2026-06-05T14:44:44-06:00
 generated_by: cowork:sync-scheduled-jobs@1.0.0
-warnings: [cadence_disabled:midday-tripwire:engagement-type]
+warnings: [cadence_disabled:midday-tripwire:engagement-type, contract_version_mismatch:0.33.0:0.32.0]
 ---
 
 # Cowork scheduled-job wrappers — No Tripwire Engagement
 
 > [!warning]+ Warnings from generation
 > cadence_disabled:midday-tripwire:engagement-type
+> contract_version_mismatch:0.33.0:0.32.0
 
 > [!info]- How to use
 > For each of the scheduled tasks below (one per cowork cadence), open the matching task in claude.ai's Cowork UI, replace the prompt body with the fenced block from the matching section, and save. Do not change the schedule.
 >
 > After all sections are pasted, run `/cowork morning-briefing no-tripwire` in Claude Code as a smoke test.
 >
-> This file was generated against sauce 0.93.2 + cowork 0.32.0 + contract 0.32.0. When the sauce version moves past 0.93.2, re-run `/cowork sync-scheduled-jobs no-tripwire` to refresh.
+> This file was generated against sauce 0.93.2 + cowork 0.32.0 + contract 0.33.0. When the sauce version moves past 0.93.2, re-run `/cowork sync-scheduled-jobs no-tripwire` to refresh.
 
 ---
 
 ## 1 — cowork-morning-briefing-no-tripwire (08:00 daily)
-<!-- section_contract_version: 0.32.0 -->
+<!-- section_contract_version: 0.33.0 -->
 
 ````
 Use skill cowork:morning-briefing with { engagement_id: "no-tripwire" }.
@@ -72,7 +73,7 @@ When the orchestrator instructs you to use ANY sub-skill (cowork:write-run-note-
 ---
 
 ## 2 — DISABLED — cowork-midday-tripwire-no-tripwire
-<!-- section_contract_version: 0.32.0 -->
+<!-- section_contract_version: 0.33.0 -->
 <!-- disabled_by: engagement-type -->
 
 > [!example] This cadence is disabled for No Tripwire Engagement
@@ -81,7 +82,7 @@ When the orchestrator instructs you to use ANY sub-skill (cowork:write-run-note-
 ---
 
 ## 3 — cowork-eod-review-no-tripwire (17:00 daily)
-<!-- section_contract_version: 0.32.0 -->
+<!-- section_contract_version: 0.33.0 -->
 
 ````
 Use skill cowork:eod-review with { engagement_id: "no-tripwire" }.
@@ -129,7 +130,7 @@ When the orchestrator instructs you to use ANY sub-skill (cowork:write-run-note-
 ---
 
 ## 4 — cowork-weekly-review-no-tripwire (17:30 Friday)
-<!-- section_contract_version: 0.32.0 -->
+<!-- section_contract_version: 0.33.0 -->
 
 ````
 Use skill cowork:weekly-review with { engagement_id: "no-tripwire" }.
@@ -176,7 +177,7 @@ When the orchestrator instructs you to use ANY sub-skill (cowork:write-run-note-
 ---
 
 ## 5 — cowork-monthly-review-no-tripwire (last weekday 17:30)
-<!-- section_contract_version: 0.32.0 -->
+<!-- section_contract_version: 0.33.0 -->
 
 ````
 Use skill cowork:monthly-review with { engagement_id: "no-tripwire" }.

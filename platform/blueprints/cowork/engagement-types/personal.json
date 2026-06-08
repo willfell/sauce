@@ -19,7 +19,7 @@
     { "id": "includes_wellness_prompts",  "type": "boolean",  "prompt": "Include wellness prompts in EOD review? (true/false)", "default_value": true },
     { "id": "discretionary_categories",   "type": "string[]", "prompt": "Discretionary spending categories (comma-separated)" }
   ],
-  "supported_cadences": ["morning", "midday", "eod", "weekly", "monthly", "tick", "synthesize_day", "synthesize_week"],
+  "supported_cadences": ["morning", "midday", "eod", "weekly", "monthly", "tick", "synthesize_day", "synthesize_week", "lens_shift"],
   "default_cadences": {
     "morning": true,
     "midday":  true,

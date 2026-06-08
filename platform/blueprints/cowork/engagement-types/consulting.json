@@ -19,7 +19,7 @@
     { "id": "gmail_label",        "type": "string",   "prompt": "Gmail label scoping this engagement's email (e.g., \"Clients/Acme\")" },
     { "id": "calendar_id",        "type": "string",   "prompt": "Calendar ID scoping this engagement's events" }
   ],
-  "supported_cadences": ["morning", "midday", "eod", "weekly", "monthly", "tick", "synthesize_day", "synthesize_week"],
+  "supported_cadences": ["morning", "midday", "eod", "weekly", "monthly", "tick", "synthesize_day", "synthesize_week", "lens_shift"],
   "default_cadences": {
     "morning": true,
     "midday":  false,

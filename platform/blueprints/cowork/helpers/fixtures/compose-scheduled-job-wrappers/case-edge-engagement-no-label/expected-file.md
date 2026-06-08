@@ -3,15 +3,16 @@ type: cowork-scheduled-job-wrappers
 engagement_id: no-label-eng
 sauce_version: 0.93.2
 cowork_version: 0.32.0
-contract_version: 0.32.0
+contract_version: 0.33.0
 generated_at: 2026-06-05T14:41:11-06:00
 generated_by: cowork:sync-scheduled-jobs@1.0.0
-warnings: [engagement_label_fallback_used]
+warnings: [contract_version_mismatch:0.33.0:0.32.0, engagement_label_fallback_used]
 ---
 
 # Cowork scheduled-job wrappers — no-label-eng
 
 > [!warning]+ Warnings from generation
+> contract_version_mismatch:0.33.0:0.32.0
 > engagement_label_fallback_used
 
 > [!info]- How to use
@@ -19,12 +20,12 @@ warnings: [engagement_label_fallback_used]
 >
 > After all sections are pasted, run `/cowork morning-briefing no-label-eng` in Claude Code as a smoke test.
 >
-> This file was generated against sauce 0.93.2 + cowork 0.32.0 + contract 0.32.0. When the sauce version moves past 0.93.2, re-run `/cowork sync-scheduled-jobs no-label-eng` to refresh.
+> This file was generated against sauce 0.93.2 + cowork 0.32.0 + contract 0.33.0. When the sauce version moves past 0.93.2, re-run `/cowork sync-scheduled-jobs no-label-eng` to refresh.
 
 ---
 
 ## 1 — cowork-morning-briefing-no-label-eng (08:00 daily)
-<!-- section_contract_version: 0.32.0 -->
+<!-- section_contract_version: 0.33.0 -->
 
 ````
 Use skill cowork:morning-briefing with { engagement_id: "no-label-eng" }.
@@ -72,7 +73,7 @@ When the orchestrator instructs you to use ANY sub-skill (cowork:write-run-note-
 ---
 
 ## 2 — cowork-midday-tripwire-no-label-eng (12:30 daily)
-<!-- section_contract_version: 0.32.0 -->
+<!-- section_contract_version: 0.33.0 -->
 
 ````
 Use skill cowork:midday-tripwire with { engagement_id: "no-label-eng" }.
@@ -118,7 +119,7 @@ When the orchestrator instructs you to use ANY sub-skill (cowork:write-run-note-
 ---
 
 ## 3 — cowork-eod-review-no-label-eng (17:00 daily)
-<!-- section_contract_version: 0.32.0 -->
+<!-- section_contract_version: 0.33.0 -->
 
 ````
 Use skill cowork:eod-review with { engagement_id: "no-label-eng" }.
@@ -166,7 +167,7 @@ When the orchestrator instructs you to use ANY sub-skill (cowork:write-run-note-
 ---
 
 ## 4 — cowork-weekly-review-no-label-eng (17:30 Friday)
-<!-- section_contract_version: 0.32.0 -->
+<!-- section_contract_version: 0.33.0 -->
 
 ````
 Use skill cowork:weekly-review with { engagement_id: "no-label-eng" }.
@@ -213,7 +214,7 @@ When the orchestrator instructs you to use ANY sub-skill (cowork:write-run-note-
 ---
 
 ## 5 — cowork-monthly-review-no-label-eng (last weekday 17:30)
-<!-- section_contract_version: 0.32.0 -->
+<!-- section_contract_version: 0.33.0 -->
 
 ````
 Use skill cowork:monthly-review with { engagement_id: "no-label-eng" }.
