@@ -86,15 +86,15 @@ Q&A list, mirrored on `Docs/plans/2026-06-07-post-v0.93.2-brainstorm-state.md` �
 
 Live arc as of this doc. See `Docs/plans/2026-06-07-post-v0.93.3-brainstorm-state.md` § 4 for the canonical version; this section is a cross-reference.
 
-| Cycle | Scope | Vision dimension(s) advanced |
-|---|---|---|
-| **v0.94.0** (in flight, parallel session) | `applyExternalPluginInstall` — closes v0.93.3 existing-consumer install gap | Recoverability |
-| **v0.94.1** | Echoes-warning reword | Recoverability |
-| **v0.94.2** | Platform de-personalization | Generalizability |
-| **v0.95.0** ⭐ | **cowork-spine MINOR** — canonical orchestrator template + `cowork:plan-dispatch` sub-skill + `kind-titles.json` + layered preferences (overrides[]) | Cohesion (A) + Composability (B+) + Generalizability |
-| **v0.95.0.x PATCH** | Voice/bootstrap polish — `cowork:doctor` not yet; bootstrap-vault stage-gated context fill | Voice fidelity + Bootstrap quality |
-| **v0.95.1** | `sauce update --migrate-config` — drops v0.95.0 backward-compat reads | Composability tail |
-| **v0.96.0+** | Memory write-side (pattern accrual) + cross-machine wrappers + `cowork:doctor` | Adaptive memory loop + Cross-machine consistency + Quality observability |
+| Cycle | Scope | Status | Vision dimension(s) advanced |
+|---|---|---|---|
+| **v0.94.0** | `applyExternalPluginInstall` — closes v0.93.3 existing-consumer install gap | shipped 2026-06-07 (tag `v0.94.0`) | Recoverability |
+| **v0.95.0** ⭐ | **cowork-spine MINOR** — `cowork:plan-dispatch` sub-skill (12-key contract) + 3 NEW helper exports + `kind-titles.json` v1.0.0 + layered preferences (`engagement.overrides`) + canonical orchestrator template + 5 orchestrators slim −587 lines | **SHIPPED 2026-06-07** (SHA TBD-at-S4-push) | Cohesion (A) + Composability (B+) + Generalizability |
+| **v0.94.1** | Echoes-warning reword | queued | Recoverability |
+| **v0.94.2** | Platform de-personalization | queued | Generalizability |
+| **v0.95.0.x PATCH** | Voice/bootstrap polish — `cowork:doctor` not yet; bootstrap-vault stage-gated context fill | queued (depends on v0.95.0 lessons + 7-day observability window) | Voice fidelity + Bootstrap quality |
+| **v0.95.1** | `sauce update --migrate-config` — adds empty `overrides: {}` to every engagement + drops v0.95.0 backward-compat reads | queued (depends on v0.95.0 vault-config schema) | Composability tail |
+| **v0.96.0+** | Memory write-side (pattern accrual) + cross-machine wrappers + `cowork:doctor` + `cowork:audit-cohesion` | queued | Adaptive memory loop + Cross-machine consistency + Quality observability |
 
 ## 6 — Decision audit (how to use this doc)
 

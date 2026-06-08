@@ -880,6 +880,47 @@ After the update, verify by checking that `.claude/skills/cowork/skills/gather-s
 
 **Optional post-deploy validation (FLN-v87-1).** The `min_similarity: 0.45` threshold is a design-time guess. Review the first 3-5 morning briefings on each consumer vault: if Echoes callouts surface obviously-unrelated matches, the threshold should be raised; if relevant matches are consistently filtered out (callout omits even on days with clear historical analogues), the threshold should be lowered. A v0.87.1 PATCH can ship the empirically-validated threshold.
 
+## Upgrading from v0.94.0 to v0.95.0
+
+`brew upgrade sauce` distributes the new release. Existing consumers run `sauce update --bump-pins` from inside each vault. v0.95.0 bundles the **cowork-spine MINOR**: a NEW `cowork:plan-dispatch` sub-skill that 5 atomic-note orchestrators (morning-briefing / midday-tripwire / eod-review / weekly-review / monthly-review) invoke as their single source of truth for Gather + Write, plus a NEW `engagement.overrides` schema on vault-config.md engagements[], plus a NEW `data/kind-titles.json` v1.0.0 canonical kind→title map.
+
+**What auto-installs on the first `sauce update --bump-pins` after upgrade:**
+
+- `.claude/skills/cowork/skills/plan-dispatch/SKILL.md` — NEW sub-skill body. Orchestrators READ this at pre-flight step 3b and consume its 12-key result tree (dispatch_plan / voice_contract / microscopes / siblings / allowlist / render_aspects / cadence_order / tripwire_aspects / kind_titles / effective_hard_rules / dispatch_mode / prefs_status).
+- `spice/cowork/data/kind-titles.json` v1.0.0 — canonical kind→title map (7 entries: calendar=Today's calendar, email=Email triage, chat=Chat, finance=Finance, github=GitHub, ado=ADO, monitoring=Monitoring). Replaces the inlined kind→title labels in 5 orchestrator bodies + the module-private CANONICAL_TITLES const fallback in `dispatch-plan-helper.js`.
+- 5 slimmed orchestrator SKILL.md bodies — pre-flight steps 3b read-prefs + 3c dispatch + 3d microscopes + 3e inner-circle collapse to a single READ of cowork:plan-dispatch. Net **−587 lines** across the 5 orchestrators.
+- NEW `Docs/agent-guides/cowork-orchestrator-template.md` v1.0.0 — canonical structural contract every cowork atomic-note orchestrator must conform to.
+
+**What does NOT change (backward-compat for one cycle):**
+
+- vault-config.md engagement records WITHOUT an `overrides:` block continue to work — `composeFinalPreferences` falls through to bundle defaults verbatim. Observable behavior unchanged from v0.94.x.
+- Existing engagement-type JSON files (personal.json / w2-fte.json / consulting.json) stay at v0.5.0; no schema change this cycle.
+- Atomic-note output shape unchanged. Next scheduled cron fire (morning-briefing on day after deploy) should produce a note in the same shape as v0.94.x. The orchestrator's pre-flight log will show the new plan-dispatch invocation; that's the only observable difference.
+
+**Optional: try engagement.overrides.** After upgrade, you can add an `overrides:` block to any engagement in `spice/cowork/context/vault-config.md` to reorder/tune knobs per-engagement without forking the engagement-type JSON. Examples:
+
+```yaml
+engagements:
+  - id: accuris
+    type: w2-fte
+    # ... existing fields ...
+    overrides:
+      render_aspects:
+        finance_block: skip     # disable finance for this engagement
+        semantic_related: include   # add semantic echoes (was morning-only)
+      cadence_order:
+        morning: [calendar, chat, github, ado]   # reorder for morning
+      voice:
+        vibe: concise           # override the bundle's voice contract
+      tripwire_aspects: [cc_drift]   # REPLACES bundle's array (not merge)
+```
+
+Composition order: `bundle ⨁ overrides ⨁ ad_hoc_prefs (reserved) → final`. Objects merge per-key with override-wins. Arrays REPLACE bundle values when present.
+
+**Coming in v0.95.1.** `sauce update --migrate-config` will add an empty `overrides: {}` block to every engagement in vault-config.md (so the field is canonical) and drop the backward-compat reads. v0.95.0's one-cycle backward-compat window keeps the helper readable; v0.95.1 locks the schema.
+
+**Restart Obsidian.** Not strictly required for v0.95.0 (no new plugins), but a restart picks up the new claude-surface-registry.json + materialized SKILL.md bodies for any claude-skills-aware tooling running inside the vault.
+
 ## Upgrading from v0.93.3 to v0.94.0
 
 `brew upgrade sauce` distributes the new release. Existing consumers should run `sauce update --bump-pins` from inside each vault. v0.94.0 introduces an install-time companion to bootstrap's `phaseFetchPlugins` — `applyExternalPluginInstall` — which auto-fetches every `external_plugins[]` declaration whose plugin directory is absent.
