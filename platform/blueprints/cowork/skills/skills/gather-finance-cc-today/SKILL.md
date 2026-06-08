@@ -86,6 +86,30 @@ Empty case:
 > No credit card activity since [HH:MM].
 ```
 
+### Structured items (NEW v0.96.0)
+
+In addition to `markdown`, return `items[]` — one entry per surfaced charge:
+
+```json
+{
+  "items": [
+    {
+      "item_id": "<deriveItemId({ kind: 'finance', engagement_id, day, stable_key: 'cc-' + charge.id })>",
+      "kind": "finance",
+      "callout_type": "example|warning (locked-card alerts)",
+      "title": "<merchant or alert>",
+      "features": {
+        "amount_bucket": "lt-25|25-100|100-500|500-plus",
+        "is_locked_card_alert": <bool>,
+        "is_warning": <bool — derived from callout_type>
+      }
+    }
+  ]
+}
+```
+
+`callout_type` is `"warning"` for locked-card alerts; `"example"` otherwise.
+
 ## Errors
 
 - **Brex MCP unavailable / not authenticated / API error:** return:

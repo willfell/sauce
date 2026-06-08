@@ -64,6 +64,28 @@ Compose output:
 }
 ```
 
+### Structured items (NEW v0.96.0)
+
+In addition to `markdown`, return `items[]` — one entry per surfaced echo:
+
+```json
+{
+  "items": [
+    {
+      "item_id": "<deriveItemId({ kind: 'semantic', engagement_id, day, stable_key: echo.source_path })>",
+      "kind": "semantic",
+      "callout_type": "example",
+      "title": "<echo.title or source basename>",
+      "features": {
+        "similarity_bucket": "0.45-0.6|0.6-0.75|0.75-plus",
+        "source_age_bucket": "within-week|within-month|older",
+        "is_warning": false
+      }
+    }
+  ]
+}
+```
+
 ## Failure modes (graceful — never throws)
 
 - **Empty anchor_text** → `{ found: false, matches: [], anchor_text_used: "", error: "empty_anchor" }`.
