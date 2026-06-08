@@ -875,6 +875,8 @@ class ActivityFeed {
       "cowork-finance-snapshot",
       "cowork-weekly-review",
       "cowork-monthly-review",
+      // v0.95.1 cowork-anti-echo Knob 3 (lens_shift cadence): cold-MB variant
+      "cowork-morning-briefing-cold",
     ];
   }
 }
