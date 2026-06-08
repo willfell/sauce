@@ -386,6 +386,33 @@ function _parseEngagementBlock(block) {
     return out;
 }
 
+// ===========================================================================
+// v0.95.1 additive export — Knob 1 (anti_echo render aspect)
+// ===========================================================================
+
+/**
+ * deriveExcludedThemes(yesterdayMemory)
+ *
+ * Pure helper. Returns the raw carry-forward bullet strings from yesterday's
+ * memory.md (as captured by the read-memory sub-skill). compose-body's
+ * LLM-fill step does the semantic compare — this helper does NO theme
+ * extraction.
+ *
+ * Defensive:
+ *   - null/undefined yesterdayMemory → []
+ *   - missing/null/non-array carry_forward_bullets → []
+ *   - non-string or whitespace-only bullets are filtered out
+ *
+ * @param {Object|null|undefined} yesterdayMemory - return value of read-memory sub-skill
+ * @returns {string[]} - bullet strings verbatim; [] when no usable bullets
+ */
+function deriveExcludedThemes(yesterdayMemory) {
+    if (!yesterdayMemory || typeof yesterdayMemory !== "object") return [];
+    const bullets = yesterdayMemory.carry_forward_bullets;
+    if (!Array.isArray(bullets) || bullets.length === 0) return [];
+    return bullets.filter((b) => typeof b === "string" && b.trim().length > 0);
+}
+
 module.exports = {
     planDispatch,
     decideDispatchMode,
@@ -394,6 +421,7 @@ module.exports = {
     composeFinalPreferences,
     readEngagement,
     loadKindTitles,
+    deriveExcludedThemes,
     _titleCase: titleCase,
     _CANONICAL_TITLES: CANONICAL_TITLES,
     _parseEngagementByIdFromYaml,

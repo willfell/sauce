@@ -23,6 +23,16 @@ const KNOWN_CADENCES = [
     "monthly-review",
 ];
 
+// v0.95.1 — Knob 1 (anti_echo render aspect): the cadences eligible to receive
+// the [!question] Outside yesterday's frame callout. weekly-review and
+// monthly-review skip — different granularity, "yesterday's frame" doesn't
+// translate to weekly/monthly horizons.
+const ANTI_ECHO_ELIGIBLE_CADENCES = [
+    "morning-briefing",
+    "midday-tripwire",
+    "eod-review",
+];
+
 const KNOWN_CALLOUT_TYPES = [
     "info",
     "tip",
@@ -172,6 +182,43 @@ function _computeAssertions(input) {
     return assertions;
 }
 
+/**
+ * v0.95.1 — Knob 1 (anti_echo render aspect).
+ *
+ * injectAntiEchoCallout(body, excluded_themes, voice_contract)
+ *
+ * Appends a "> [!question] Outside yesterday's frame" callout to the body. The
+ * callout body is an LLM-fill placeholder that names ONE item from today's
+ * dispatch which does NOT relate to any of yesterday's carry-forward bullets,
+ * or explicitly says "today's gather largely continued yesterday's threads"
+ * when nothing qualifies. voice_contract is passed into the prompt so the
+ * explicit-null phrasing inherits the engagement's personality at LLM-fill
+ * time.
+ *
+ * Caller is responsible for the cadence-eligibility gate (or, more typically,
+ * routes through composeBody which gates via ANTI_ECHO_ELIGIBLE_CADENCES).
+ *
+ * @param {string} body              - current body string
+ * @param {string[]} excluded_themes - non-empty array of carry-forward bullet strings
+ * @param {string} voice_contract    - engagement voice contract (may be empty string)
+ * @returns {string} body with the callout appended
+ */
+function injectAntiEchoCallout(body, excluded_themes, voice_contract) {
+    const safeBody = typeof body === "string" ? body : "";
+    const themes = Array.isArray(excluded_themes) ? excluded_themes.filter((t) => typeof t === "string" && t.trim()) : [];
+    if (themes.length === 0) return safeBody;
+    const joined = themes.join(" | ");
+    const vc = typeof voice_contract === "string" && voice_contract.trim() ? " Apply voice contract." : "";
+    const callout = [
+        "> [!question] Outside yesterday's frame",
+        `> {{LLM-fill: ONE item from today's dispatch that doesn't relate to any of: ${joined}. If nothing qualifies, write 'today's gather largely continued yesterday's threads.'${vc}}}`,
+    ].join("\n");
+    // Append as its own block, separated by a blank line. Caller controls trailing newline.
+    if (safeBody === "") return callout;
+    const sep = safeBody.endsWith("\n\n") ? "" : (safeBody.endsWith("\n") ? "\n" : "\n\n");
+    return safeBody + sep + callout;
+}
+
 function composeBody(input) {
     const validationError = _validateInput(input);
     if (validationError) {
@@ -179,12 +226,15 @@ function composeBody(input) {
     }
 
     const {
+        cadence,
         nav_buttons_block,
         synopsis_md,
         memory_callouts,
         ordered_blocks,
         engagement_type_blocks,
         closing_md,
+        excluded_themes,
+        voice_contract,
     } = input;
 
     const sections = [];
@@ -205,6 +255,15 @@ function composeBody(input) {
     for (const block of engagement_type_blocks) {
         sections.push(_wrapCallout(block));
     }
+    // 5.5. v0.95.1 Knob 1 — anti-echo callout, gated by cadence eligibility AND
+    // a non-empty excluded_themes array (always-present 13th plan-dispatch key).
+    if (
+        ANTI_ECHO_ELIGIBLE_CADENCES.includes(cadence)
+        && Array.isArray(excluded_themes)
+        && excluded_themes.filter((t) => typeof t === "string" && t.trim()).length > 0
+    ) {
+        sections.push(injectAntiEchoCallout("", excluded_themes, voice_contract));
+    }
     // 6. closing.
     sections.push(_trimEnd(closing_md));
     // 7. backlink (last, if present).
@@ -221,6 +280,8 @@ function composeBody(input) {
 
 module.exports = {
     composeBody,
+    injectAntiEchoCallout,
+    ANTI_ECHO_ELIGIBLE_CADENCES,
     _validateInput,
     _wrapCallout,
     _composeMemoryCluster,
