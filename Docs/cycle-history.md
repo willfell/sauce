@@ -4,6 +4,32 @@ This file archives the per-cycle status snapshots that previously lived in `CLAU
 
 ---
 
+## v0.94.0 (closed 2026-06-07) — applyExternalPluginInstall MINOR
+
+Workshop 0.93.3 → **0.94.0** (MINOR). Closes the v0.93.3 existing-consumer install gap by adding an install-time companion to `phaseFetchPlugins`. Also adds claudian as a default external plugin under convenience.
+
+**Gap closed.** v0.93.3 shipped `applyExternalPlugins` (warning-only) and `phaseFetchPlugins` (bootstrap-only). Existing consumers running `sauce update` after a v0.93.3 manifest delta saw a Notice + had to install the plugin manually. Headspace-sauce demonstrated this: `new-tab-default-page` declared by convenience 0.3.0 was not auto-installed; user had to use Settings → Community plugins → Browse manually. v0.94.0's new `applyExternalPluginInstall` mirrors `phaseFetchPlugins`'s behavior at install time, with a warn-and-continue posture per plugin so a single fetch failure doesn't brick the wider install.
+
+**Helper shape.** Inline in `platform/install.js`, alongside `applyExternalPlugins`. Imports the three already-standalone `bootstrap-lib/` modules (`fetch-plugin`, `community-plugins-index`, `community-plugins-merge`). Wires at install.js:1071, BEFORE the existing warning helper. Per-plugin failures are caught into a `failed[]` list; failed ids are NOT appended to community-plugins.json (so the downstream `applyExternalPlugins` warning helper retains `required:true` teeth on failed installs); successful and skipped ids ARE appended (mirroring phaseFetchPlugins:161).
+
+**Claudian addition.** convenience 0.3.0 → 0.4.0 adds `{id: "realclaudian"}` to `external_plugins[]`. Plugin id is `realclaudian` (not `claudian`); repo is `YishenTu/claudian`; standard 3-asset release. No `community_plugin_settings[]` entry — claudian's settings (Claude provider, auth, MCP servers) are user-owned.
+
+**Landmine #17 amendment.** Two network gateways now: `bootstrap.js:phaseFetchPlugins` (fail-loud, fresh-vault) and `install.js:applyExternalPluginInstall` (warn-and-continue, existing-vault). Same defense-in-depth via shared `bootstrap-lib/fetch-plugin.js`.
+
+**Versioning.** workshop 0.93.3 → 0.94.0 MINOR; convenience 0.3.0 → 0.4.0 MINOR. New install-time behavior is semver-respectful MINOR.
+
+**HC delta:** +6 cases in run-bootstrap.js (HC-EPI-1..6). HC-EPI-6 exercises the chain end-to-end (lesson 5.2). Per-cycle VERSION pin sweep landed in S1.4 (lesson 5.3).
+
+**Status (post-deploy verification):**
+- accuris-sauce: `sauce update --bump-pins` ran clean. Pins bumped. realclaudian auto-installed (or skipped-if-present per current state).
+- headspace-sauce: `sauce update --bump-pins` ran clean. **The load-bearing demo**: `.obsidian/plugins/new-tab-default-page/` and `.obsidian/plugins/realclaudian/` both now present; `community-plugins.json` includes both; new-tab-default-page's `data.json` scaffolded by the chain. The v0.93.3 manual-install workflow becomes a historical artifact.
+
+**Commits:** S0 baseline (36bc60b); S1.1 tests RED (b8daa11); S1.2 helper GREEN (7df7073); S1.3 convenience manifest (451d778); S1.4 workshop + package bump + VERSION pin sweep (0a31930); S1.5 landmine #17 (7780133); S2 dogfood + ranch (34d4f59); S2 addendum community-plugins.json dogfood (e40bcb1); S3 cycle-close.
+
+See `Docs/plans/2026-06-07-v0.94.0-applyExternalPluginInstall-{design,plan,result}.md`.
+
+---
+
 ## v0.93.3 (closed 2026-06-07) — required-plugins PATCH (contract-redefined mid-execution)
 
 Workshop 0.93.2 → **0.93.3** (PATCH). Two mechanism-manifest deltas closing a documentation gap where two de-facto required Obsidian community plugins were not declared by the platform manifest. **Critical mid-execution finding**: the original design assumed `applyExternalPlugins` installs plugins, but it's warning-only — so for existing consumer vaults the v0.93.3 contract is *documentation-of-intent + warning Notice* rather than auto-install. Fresh-bootstrap consumers DO get auto-install via `phaseFetchPlugins`. Existing-consumer auto-install deferred to v0.94.0.

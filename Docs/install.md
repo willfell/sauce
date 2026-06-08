@@ -880,6 +880,25 @@ After the update, verify by checking that `.claude/skills/cowork/skills/gather-s
 
 **Optional post-deploy validation (FLN-v87-1).** The `min_similarity: 0.45` threshold is a design-time guess. Review the first 3-5 morning briefings on each consumer vault: if Echoes callouts surface obviously-unrelated matches, the threshold should be raised; if relevant matches are consistently filtered out (callout omits even on days with clear historical analogues), the threshold should be lowered. A v0.87.1 PATCH can ship the empirically-validated threshold.
 
+## Upgrading from v0.93.3 to v0.94.0
+
+`brew upgrade sauce` distributes the new release. Existing consumers should run `sauce update --bump-pins` from inside each vault. v0.94.0 introduces an install-time companion to bootstrap's `phaseFetchPlugins` — `applyExternalPluginInstall` — which auto-fetches every `external_plugins[]` declaration whose plugin directory is absent.
+
+**What auto-installs on the first `sauce update --bump-pins` after upgrade:**
+
+- **realclaudian** (YishenTu/claudian) — new default under convenience 0.4.0. Embeds Claude Code / Codex / Opencode / Pi as AI coding-agent collaborators. Plugin id is `realclaudian` (not `claudian`); the renamed id is purely a community-plugin-store quirk.
+- Anything declared in any subscribed mechanism's `external_plugins[]` whose plugin directory is absent in your vault. For consumers who skipped the v0.93.2 → v0.93.3 manual install workflow, this means **new-tab-default-page** (chrisgrieser/obsidian-new-tab-default-page) and **smart-connections** (brianpetro/obsidian-smart-connections) now auto-install too. The v0.93.3 manual-install workflow becomes a historical artifact.
+
+**What does NOT change:**
+
+- User-installed plugins (anything not declared by a sauce mechanism's `external_plugins[]`) are untouched. `community-plugins.json` is additive — sauce ids are appended-if-missing; nothing is removed.
+- `applyExternalPlugins` (the warning helper) still runs after the install helper. Plugins marked `required:true` that remain disabled (e.g., because the auto-install failed, or you manually disabled them) still emit the loud Notice.
+- The fetch fails warn-and-continue per plugin. If GitHub is unreachable for one plugin, the rest of the install proceeds; the failure is logged to `ranch/platform-installed.json`'s history and a Notice fires.
+
+**Restart Obsidian.** Newly-installed plugins won't load until Obsidian rescans the plugins directory on restart. Close + reopen Obsidian after the update completes; the new plugins (claudian especially) need a restart to activate their commands + ribbon icons.
+
+**Settings.** Claudian's settings (Claude provider, authentication, MCP servers) are user-owned. Open Settings → Claudian after first activation; choose your provider (Claude Code CLI is the recommended path). Sauce does not pre-configure anything for claudian.
+
 ## Upgrading from v0.93.2 to v0.93.3
 
 PATCH release. `brew upgrade sauce` distributes the new release. Existing consumers should then run `sauce update --bump-pins` from inside each vault to update `ranch/platform-subscription.json` (bumps `workshop_version` to `0.93.3`, `convenience` pin to `0.3.0`, `smart-connections-bridge` pin to `0.2.0`).
