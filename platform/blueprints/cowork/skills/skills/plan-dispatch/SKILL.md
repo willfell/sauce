@@ -15,6 +15,7 @@ outputs:
   render_aspects: object
   cadence_order: object
   kind_titles: object
+  effective_hard_rules: array
   dispatch_mode: string
   prefs_status: string
 tags: [cowork, sub-skill, pre-flight, dispatch, knob-composition]
@@ -24,7 +25,7 @@ tags: [cowork, sub-skill, pre-flight, dispatch, knob-composition]
 
 Single pre-flight entry point for every atomic-note orchestrator (morning-briefing / midday-tripwire / eod-review / weekly-review / monthly-review). Replaces the ~100 lines of inline `3a memory → 3b read-prefs → 3c dispatch-plan → 3d microscopes → 3e inner-circle` pseudocode that v0.94.x carried byte-identical across all 5 orchestrators.
 
-The 10-key result tree returned by this sub-skill is the orchestrator's sole source of truth for Gather + Write. Knob composition (engagement-type defaults ⨁ engagement.overrides ⨁ ad-hoc runtime overrides) happens HERE, once, not scattered through gather/write skills.
+The 11-key result tree returned by this sub-skill is the orchestrator's sole source of truth for Gather + Write. Knob composition (engagement-type defaults ⨁ engagement.overrides ⨁ ad-hoc runtime overrides) happens HERE, once, not scattered through gather/write skills.
 
 ## Inputs
 
@@ -59,11 +60,11 @@ The 10-key result tree returned by this sub-skill is the orchestrator's sole sou
 
 10. **Reorder for cadence.** If `final.cadence_order[cadence]` is a non-empty array, reorder `dispatch_plan[]` to match that priority. Entries listed in `cadence_order[cadence]` come first in declared order; entries NOT listed retain their original relative order at the tail. This is how per-cadence knob composition surfaces — orchestrators DO NOT consult `cadence_order` directly.
 
-11. **Compose voice contract.** Invoke `dispatchPlanHelper.composeVoiceContract(final.voice, prefs_result.prefs.effective_hard_rules)` → `voice_contract` (string). The Write phase prepends this verbatim to its compose-body invocation.
+11. **Compose voice contract.** Invoke `dispatchPlanHelper.composeVoiceContract(final.voice, prefs_result.prefs.effective_hard_rules)` → `voice_contract` (string). The Write phase prepends this verbatim to its compose-body invocation. Also capture `prefs_result.prefs.effective_hard_rules` as the 11th key on the return — `gather-from-served-by` consumes the rules array independently of the voice_contract formatted string.
 
 12. **Resolve inner-circle allowlist.** When `engagement.inner_circle_people` is a non-empty array AND `final.render_aspects.inner_circle_imessage !== "skip"`, READ `.claude/skills/cowork/skills/resolve-person/SKILL.md` in full and follow its `## Steps` section per name. Then invoke `composeInnerCircleAllowlist(resolverOutputs)` from `helpers/resolve-inner-circle-helper.js` → `allowlist = { resolved, unresolved, phone_filter_list }`. When the gate is closed (no inner_circle_people or `inner_circle_imessage: skip`), return `allowlist = { resolved: [], unresolved: [], phone_filter_list: [] }`.
 
-13. **Return the 10-key contract.** Per the `## Returns` section below. Every key MUST be present even when null/empty — defensive contract. Atomic-note orchestrators consume the result tree as their single source of truth for Gather + Write.
+13. **Return the 11-key contract.** Per the `## Returns` section below. Every key MUST be present even when null/empty — defensive contract. Atomic-note orchestrators consume the result tree as their single source of truth for Gather + Write.
 
 ## Returns
 
@@ -77,6 +78,7 @@ The 10-key result tree returned by this sub-skill is the orchestrator's sole sou
   render_aspects:  {...},          // FINAL composed (bundle ⨁ overrides ⨁ ad_hoc)
   cadence_order:   {...},          // FINAL composed per-cadence (the orchestrator only needs cadence_order[cadence])
   kind_titles:     {...},          // kind_name → title (data file v1.0.0, falls back to CANONICAL_TITLES const)
+  effective_hard_rules: [...],     // string[] — pass-through from read-user-preferences; consumed by gather-from-served-by `## Hard rules` block
   dispatch_mode:   "prefs" | "legacy",  // legacy when prefs unreadable OR engagement_not_found OR bundle_missing
   prefs_status:    "...",          // pass-through from read-user-preferences for the orchestrator's Notice composition
 }
