@@ -34,8 +34,36 @@ function titleCase(s) {
         .join(" ");
 }
 
-function planDispatch({ prefs, reachableNamespaces, mcpSkillMap, microscopes }) {
-    if (!prefs || !Array.isArray(prefs.priorities)) return [];
+function planDispatch({
+    prefs,
+    reachableNamespaces,
+    mcpSkillMap,
+    microscopes,
+    // v0.95.1 additive inputs — opt-in calling convention. When ANY of these
+    // is provided, planDispatch returns the v0.95.1 contract object
+    // ({ dispatch_plan, excluded_themes }) instead of the legacy raw array.
+    // This preserves backward-compat for every pre-v0.95.1 call site
+    // (run-cowork-smoke HC-V0780-C*, etc.) while letting the new
+    // plan-dispatch SKILL.md compose the 13th contract key here.
+    engagement,
+    bundle,
+    overrides,
+    yesterdayMemory,
+}) {
+    const isV0951Call = (bundle !== undefined && bundle !== null)
+        || engagement !== undefined
+        || overrides !== undefined
+        || yesterdayMemory !== undefined;
+
+    if (!prefs || !Array.isArray(prefs.priorities)) {
+        if (isV0951Call) {
+            // Defensive: still emit the 13th key so the orchestrator never
+            // dereferences `plan.excluded_themes` against `undefined`.
+            const excluded_themes_empty = _computeExcludedThemes({ bundle, overrides, engagement, yesterdayMemory });
+            return { dispatch_plan: [], excluded_themes: excluded_themes_empty };
+        }
+        return [];
+    }
     const reachable = reachableNamespaces instanceof Set
         ? reachableNamespaces
         : new Set(reachableNamespaces || []);
@@ -120,7 +148,60 @@ function planDispatch({ prefs, reachableNamespaces, mcpSkillMap, microscopes }) 
             });
         }
     }
+    if (isV0951Call) {
+        // v0.95.1 contract object: dispatch_plan (the array the legacy form
+        // returned) PLUS excluded_themes (the 13th key). The plan-dispatch
+        // SKILL.md composes the remaining ~11 keys (voice_contract,
+        // microscopes, siblings, allowlist, render_aspects, cadence_order,
+        // tripwire_aspects, kind_titles, effective_hard_rules,
+        // dispatch_mode, prefs_status) around this helper's two-key surface.
+        const excluded_themes = _computeExcludedThemes({ bundle, overrides, engagement, yesterdayMemory });
+        return { dispatch_plan: plan, excluded_themes };
+    }
     return plan;
+}
+
+/**
+ * _computeExcludedThemes({ bundle, overrides, engagement, yesterdayMemory })
+ *
+ * Internal helper: derives the v0.95.1 13th contract key (excluded_themes)
+ * given the composed final preferences for an engagement plus the
+ * yesterdayMemory shape returned by the read-memory sub-skill.
+ *
+ * Returns the carry-forward bullets verbatim WHEN render_aspects.anti_echo
+ * resolves to "include" after layering bundle ⨁ overrides ⨁ engagement.overrides.
+ * Returns [] in every other case (anti-echo not opted in, no bundle, no
+ * memory, malformed inputs).
+ *
+ * Overrides resolution order (later wins):
+ *   1. bundle.render_aspects.anti_echo               (default — "skip" once
+ *                                                     engagement-types ship
+ *                                                     the v0.95.1 default in
+ *                                                     S1.4)
+ *   2. engagement.overrides.render_aspects.anti_echo (per-engagement opt-in
+ *                                                     declared in
+ *                                                     vault-config.md)
+ *   3. overrides.render_aspects.anti_echo            (explicit top-level
+ *                                                     overrides arg — used by
+ *                                                     the K1B harness cases)
+ */
+function _computeExcludedThemes({ bundle, overrides, engagement, yesterdayMemory } = {}) {
+    const effectiveOverrides = (overrides && typeof overrides === "object" && !Array.isArray(overrides))
+        ? overrides
+        : (engagement && typeof engagement === "object" && engagement.overrides
+            && typeof engagement.overrides === "object" && !Array.isArray(engagement.overrides))
+            ? engagement.overrides
+            : null;
+    const final_prefs = composeFinalPreferences({
+        bundle,
+        overrides: effectiveOverrides,
+        ad_hoc_prefs: null,
+    });
+    const anti_echo_enabled = final_prefs
+        && final_prefs.render_aspects
+        && final_prefs.render_aspects.anti_echo === "include";
+    if (!anti_echo_enabled) return [];
+    return deriveExcludedThemes(yesterdayMemory);
 }
 
 function decideDispatchMode({ prefsStatus }) {
@@ -422,6 +503,7 @@ module.exports = {
     readEngagement,
     loadKindTitles,
     deriveExcludedThemes,
+    _computeExcludedThemes,
     _titleCase: titleCase,
     _CANONICAL_TITLES: CANONICAL_TITLES,
     _parseEngagementByIdFromYaml,
