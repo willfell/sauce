@@ -36,7 +36,8 @@
     "ai_committee":           "skip",
     "kanban_projects":        "include",
     "inner_circle_imessage":  "include",
-    "semantic_related":       "include"
+    "semantic_related":       "include",
+    "anti_echo":              "skip"
   },
   "tripwire_aspects": ["cc_drift"]
 }
