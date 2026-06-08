@@ -332,6 +332,48 @@ function injectDetectionCallout(body, pending_confirmations) {
     return callout + "\n\n" + body;
 }
 
+/**
+ * v0.96.0 Rail L — Rating callout (learn-from-checks render aspect).
+ *
+ * composeRatingCallout(opts)
+ *
+ * Composes a "> [!todo]+ Was today useful?" callout listing one checkbox per
+ * kind in surfaced_kinds. The callout body includes an HTML sentinel
+ * `<!-- cowork:rating-block schema=1.0.0 cadence=<c> day=<d> -->` for
+ * idempotent learn-from-checks parsing.
+ *
+ * Idempotent re-fire: when prior_state is supplied (parsed from an existing
+ * atomic-note via parseRatingCallout), kinds that were previously ticked
+ * preserve their [x] state across re-fires.
+ *
+ * Caller is responsible for the learning-enabled gate (or, more typically,
+ * routes through composeBody which gates via input.learning_enabled !== false
+ * AND a non-empty input.surfaced_kinds_for_rating array).
+ *
+ * @param {object} opts
+ * @param {string} opts.cadence        - cadence name (morning-briefing, midday-tripwire, ...)
+ * @param {string} opts.day            - ISO day (YYYY-MM-DD)
+ * @param {string[]} opts.surfaced_kinds - non-empty array of kinds surfaced today
+ * @param {object|null} opts.prior_state - { kind → wasTicked } map from prior rating callout
+ * @returns {string} rendered callout (or "" when surfaced_kinds empty)
+ */
+function composeRatingCallout(opts) {
+    const { cadence, day, surfaced_kinds, prior_state } = opts || {};
+    if (!Array.isArray(surfaced_kinds) || surfaced_kinds.length === 0) return "";
+    const kindLabel = (k) => k.charAt(0).toUpperCase() + k.slice(1);
+    const lines = surfaced_kinds.map((kind) => {
+        const wasTicked = prior_state && prior_state[kind] === true;
+        const checkbox = wasTicked ? "[x]" : "[ ]";
+        return `> - ${checkbox} ${kindLabel(kind)}`;
+    });
+    return [
+        `> [!todo]+ Was today useful?`,
+        `> Tick the kinds that surfaced something you cared about. (One tick per kind per day; learned weights live in \`spice/cowork/context/user-preferences.md\`.)`,
+        ...lines,
+        `> <!-- cowork:rating-block schema=1.0.0 cadence=${cadence} day=${day} -->`,
+    ].join("\n");
+}
+
 function composeBody(input) {
     const validationError = _validateInput(input);
     if (validationError) {
@@ -395,6 +437,18 @@ function composeBody(input) {
     ) {
         body_md = injectDetectionCallout(body_md, input.pending_confirmations);
     }
+    // v0.96.0 Rail L: emit rating callout when learning enabled + kinds surfaced
+    if (input.learning_enabled !== false && Array.isArray(input.surfaced_kinds_for_rating)) {
+        const ratingCallout = composeRatingCallout({
+            cadence: input.cadence,
+            day: input.day || (input.frontmatter && input.frontmatter.day) || new Date().toISOString().slice(0, 10),
+            surfaced_kinds: input.surfaced_kinds_for_rating,
+            prior_state: input.prior_rating_state || null,
+        });
+        if (ratingCallout) {
+            body_md = body_md.trimEnd() + "\n\n" + ratingCallout + "\n";
+        }
+    }
     const sidecar_json = _composeSidecar(input);
 
     return { body_md, sidecar_json, status: "ok" };
@@ -404,6 +458,7 @@ module.exports = {
     composeBody,
     injectAntiEchoCallout,
     injectDetectionCallout,
+    composeRatingCallout,
     ANTI_ECHO_ELIGIBLE_CADENCES,
     _validateInput,
     _wrapCallout,
