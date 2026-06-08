@@ -271,6 +271,7 @@ function planDispatch({
                 overrides: effectiveOverrides,
                 ad_hoc_prefs: null,
                 learned_weights: effective_learned_weights,
+                engagement_id,
                 today,
             });
             learned_weights_applied = probe && probe.learned_weights_applied === true;
@@ -403,17 +404,25 @@ function composeWarningCallout({ kind_name, kind_title, reason, mcps_entry }) {
 // ===========================================================================
 
 /**
- * composeFinalPreferences({ bundle, overrides, ad_hoc_prefs, learned_weights, today })
+ * composeFinalPreferences({ bundle, overrides, ad_hoc_prefs, learned_weights, engagement_id, today })
  *
  * Composes the FINAL preferences tree from layered inputs.
  *   bundle          — engagement-type JSON parsed (e.g. personal.json) — required
  *   overrides       — engagement.overrides block from vault-config.md (optional;
  *                     may be absent, empty, or — defensively — malformed)
  *   ad_hoc_prefs    — optional runtime overrides (reserved; currently unused)
- *   learned_weights — v0.96.0 Rail L: per-kind learned weight state from
- *                     user-preferences.md frontmatter (optional). When present
- *                     AND any kind is out-of-warmup AND |weight - 1.00| > 0.20,
- *                     re-orders cadence_order arrays via effective_priority.
+ *   learned_weights — v0.96.1 Rail M: nested per-engagement learned weight state
+ *                     from user-preferences.md frontmatter (optional). Accepts
+ *                     both v1.1.0 nested shape (`engagements.<id>.per_kind`) and
+ *                     legacy v0.96.0 single-engagement shape (top-level
+ *                     `engagement_id`+`per_kind`+`totals`) — _normalizeLearnedWeights
+ *                     migrates legacy → nested transparently on read. When the
+ *                     engagement_id slot exists AND any kind is out-of-warmup AND
+ *                     |weight - 1.00| > 0.20, re-orders cadence_order arrays via
+ *                     effective_priority.
+ *   engagement_id   — v0.96.1: required for learned_weights lookup. When absent
+ *                     OR the engagement slot is missing in the nested shape,
+ *                     no weight-aware reorder fires (learned_weights_applied=false).
  *   today           — optional ISO date (YYYY-MM-DD) for day-14 backstop
  *                     evaluation. Defaults to current date.
  *
@@ -444,7 +453,7 @@ function composeWarningCallout({ kind_name, kind_title, reason, mcps_entry }) {
  * (plus learned_weights_applied=false). When overrides is non-object, treated
  * as absent (Postel — caller can surface a warning Notice independently).
  */
-function composeFinalPreferences({ bundle, overrides, ad_hoc_prefs, learned_weights, today } = {}) {
+function composeFinalPreferences({ bundle, overrides, ad_hoc_prefs, learned_weights, engagement_id, today } = {}) {
     const emptyShell = {
         render_aspects: {},
         cadence_order: {},
@@ -464,8 +473,27 @@ function composeFinalPreferences({ bundle, overrides, ad_hoc_prefs, learned_weig
     const PRIORITY_BUMP = 5;
     const BACKSTOP_DAYS = 14;
     const BACKSTOP_MULTIPLIER = 5;
-    const lwPerKind = (learned_weights && typeof learned_weights === "object" && learned_weights.per_kind && typeof learned_weights.per_kind === "object")
-        ? learned_weights.per_kind : null;
+    // v0.96.1 Rail M: support nested learned_weights shape; backwards-compatible
+    // with v0.96.0 single-engagement shape via _normalizeLearnedWeights. Per-kind
+    // state lives at normalized.engagements[engagement_id].per_kind.
+    //
+    // Backwards-compat fallback: if engagement_id is NOT provided AND learned_weights
+    // carries top-level per_kind (the pre-Rail-M v0.96.0 raw shape consumed by
+    // HC-V0960-L-14/L-15/L-16/L-17), read per_kind directly. This preserves the
+    // v0.96.0 single-engagement contract for callers that have not yet migrated to
+    // pass engagement_id.
+    const { _normalizeLearnedWeights } = require("./learn-from-checks-helper");
+    let lwPerKind = null;
+    if (engagement_id) {
+        const normalizedLW = _normalizeLearnedWeights(learned_weights);
+        const engagementLW = (normalizedLW.engagements && normalizedLW.engagements[engagement_id]) || null;
+        lwPerKind = (engagementLW && engagementLW.per_kind && typeof engagementLW.per_kind === "object")
+            ? engagementLW.per_kind : null;
+    } else if (learned_weights && typeof learned_weights === "object"
+            && learned_weights.per_kind && typeof learned_weights.per_kind === "object") {
+        // Legacy v0.96.0 fallback: top-level per_kind without engagement_id arg.
+        lwPerKind = learned_weights.per_kind;
+    }
     const todayStr = (typeof today === "string" && /^\d{4}-\d{2}-\d{2}$/.test(today))
         ? today : new Date().toISOString().slice(0, 10);
 

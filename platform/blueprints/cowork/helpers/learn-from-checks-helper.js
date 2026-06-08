@@ -29,6 +29,54 @@ const DEFAULTS = Object.freeze({
   must_surface_backstop_days: 14,
 });
 
+// v0.96.1 Rail M — multi-engagement learned_weights nesting.
+// Normalizes raw `learned_weights` frontmatter into the nested v1.1.0 shape:
+//   { schema_version: "1.1.0", engagements: { <engagement_id>: { per_kind, totals } } }
+//
+// Behaviors:
+//   - null / non-object → fresh empty nested skeleton.
+//   - Already-nested (schema_version === "1.1.0" OR has `engagements` key) →
+//     returned idempotent (no double-wrap).
+//   - Legacy v0.96.0 single-engagement (top-level `engagement_id` + `per_kind`
+//     and/or `totals`) → migrated to nested under engagements[engagement_id].
+//   - Anything else (object without recognizable shape) → empty skeleton.
+function _normalizeLearnedWeights(raw) {
+  if (!raw || typeof raw !== "object") {
+    return {
+      schema_version: "1.1.0",
+      engagements: {},
+    };
+  }
+  if (raw.schema_version === "1.1.0" || raw.engagements) {
+    return {
+      schema_version: raw.schema_version || "1.1.0",
+      engagements: raw.engagements || {},
+    };
+  }
+  if (raw.engagement_id && (raw.per_kind || raw.totals)) {
+    const engagement_id = raw.engagement_id;
+    return {
+      schema_version: "1.1.0",
+      engagements: {
+        [engagement_id]: {
+          per_kind: raw.per_kind || {},
+          totals: raw.totals || {
+            notes_scanned: 0,
+            notes_with_any_tick: 0,
+            warmup_until: null,
+            upgrade_notice_emitted: false,
+            scanned_days: [],
+          },
+        },
+      },
+    };
+  }
+  return {
+    schema_version: "1.1.0",
+    engagements: {},
+  };
+}
+
 const _clamp = (n, min, max) => Math.max(min, Math.min(max, n));
 // Banker's rounding (round-half-to-even) at the given decimal place. The
 // design hand-math (Docs/plans/2026-06-08-v0.96.0-cowork-rethought-1-design.md
@@ -212,6 +260,7 @@ module.exports = {
   evaluateWarmup,
   parseRatingCallout,
   scanAtomicNotes,
+  _normalizeLearnedWeights,
   _clamp,
   _round,
 };
