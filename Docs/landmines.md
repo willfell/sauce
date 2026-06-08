@@ -269,6 +269,16 @@ The `platform/bootstrap.js` orchestrator (v0.21.0+) is the only platform layer t
 
 Codified in v0.21.0 after Phase A surfaced 302-redirect failures (CF-1) at first real GitHub fetch.
 
+#### v0.94.0 amendment — install.js becomes second network gateway
+
+**Two network gateways, two postures, one shared fetch layer.**
+
+- `bootstrap.js:phaseFetchPlugins` is **fail-loud** (BS5 posture; per-plugin failures get caught into a `failed[]` but the bootstrap caller surfaces them).
+- `install.js:applyExternalPluginInstall` (NEW v0.94.0) is **warn-and-continue** (per-plugin failures are caught + Noticed + history-logged; the install proceeds; downstream `applyExternalPlugins` retains `required:true` warning teeth for any failed install).
+- Both share `bootstrap-lib/fetch-plugin.js`'s defense-in-depth: plugin-id allowlist regex, path-traversal guard, atomic writes with backup-on-edit, BS5 per-plugin failure handling, optional `process.env.GITHUB_TOKEN` honored.
+
+Why the asymmetry: bootstrap runs on a fresh, empty vault — a fetch failure means the consumer never got a working install, so failing loud is the only honest signal. Update runs on an existing, working vault — a fetch failure means one new plugin couldn't be auto-installed, which is annoying but not catastrophic; we surface the failure (Notice + history + downstream required:true warning) and let the rest of the install proceed.
+
 ### 18. Inside-vault `pantry/` is git-managed — never hand-edit
 
 Consumer vaults bootstrapped via `curl ... | bash` get the workshop cloned into `<vault>/pantry/` (lowercase, post-v0.23.0; renamed from the v0.22.x `Beacon/` to resolve the macOS APFS case-collision with the lowercase `spice/<module>/` namespace — see install.md "Upgrading from v0.22.x"). That directory is git-managed — `sauce update` fetches origin/main and `git reset --hard origin/main`-s. Hand-edits are wiped on the next update. If you need to customize:
