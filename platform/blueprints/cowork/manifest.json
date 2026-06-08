@@ -473,6 +473,11 @@
       "tag": "platform"
     },
     {
+      "source": "helpers/learn-from-checks-helper.js",
+      "dest": "{{module_directory}}/helpers/learn-from-checks-helper.js",
+      "tag": "platform"
+    },
+    {
       "source": "helpers/validate-sidecar-helper.js",
       "dest": "{{module_directory}}/helpers/validate-sidecar-helper.js",
       "tag": "platform"
