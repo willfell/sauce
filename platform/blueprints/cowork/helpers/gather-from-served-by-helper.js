@@ -23,8 +23,54 @@
  * inner_circle_resolved_count on success return. Production-mode injection
  * of the allowlist into the dispatch contract is described in SKILL.md
  * "Known people in scope" section.
+ *
+ * v0.96.0 (sauce v0.96.0 cowork-rethought-1): NEW export deriveItemId
+ * provides the canonical Rail W item_id derivation:
+ *   `<kind-prefix>-<sha256(engagement_id|day|stable_key).slice(0,16)>`
+ * Deterministic across same-day re-fires so the gather sub-skills'
+ * structured returns + write-atomic-note + sidecar validation all agree
+ * on stable identifiers without needing a runtime lookup.
  */
 "use strict";
+
+// Canonical kind → item_id prefix map. Matches design § 3.3 sample
+// payloads (cal-, mail-, msg-, etc.) and the sidecar fixtures under
+// platform/test/fixtures/cowork/sidecar/. New kinds appended here as
+// gather sub-skills extend in v0.96.0.x patches.
+const KIND_PREFIX = {
+    calendar: "cal",
+    email: "mail",
+    gmail: "mail",
+    imessage: "msg",
+    chat: "msg",
+    projects: "proj",
+    threads: "thr",
+    finance: "fin",
+    "finance-cc": "fin",
+    "finance-checking": "fin",
+    weather: "wx",
+    "semantic-related": "sem",
+    "semantic-echoes": "sem",
+};
+
+function _prefixForKind(kind) {
+    if (typeof kind !== "string" || !kind) return "item";
+    if (KIND_PREFIX[kind]) return KIND_PREFIX[kind];
+    // Lowercase + collapse non-alphanum → "-"; trim leading/trailing "-".
+    return kind.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "item";
+}
+
+function deriveItemId({ kind, engagement_id, day, stable_key } = {}) {
+    if (!kind || !engagement_id || !stable_key) {
+        throw new Error("deriveItemId requires kind, engagement_id, and stable_key");
+    }
+    const crypto = require("node:crypto");
+    const dayPart = day || "no-day";
+    const input = `${engagement_id}|${dayPart}|${stable_key}`;
+    const hash = crypto.createHash("sha256").update(input).digest("hex").slice(0, 16);
+    const prefix = _prefixForKind(kind);
+    return `${prefix}-${hash}`;
+}
 
 function gatherFromServedBy(input) {
     const {
@@ -116,4 +162,5 @@ function gatherFromServedBy(input) {
 
 module.exports = {
     gatherFromServedBy,
+    deriveItemId,
 };
