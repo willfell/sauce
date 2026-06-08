@@ -1,0 +1,52 @@
+{
+  "description": "5-day ThemeBundle[] fixture where themes + subjects rotate cleanly across days. No drift flag should fire. Baseline negative fixture.",
+  "themes": [
+    {
+      "day": "2026-06-04",
+      "themes": ["Q3 planning"],
+      "top_subject": "Diana"
+    },
+    {
+      "day": "2026-06-05",
+      "themes": ["Cabin trip planning"],
+      "top_subject": "Sarah"
+    },
+    {
+      "day": "2026-06-06",
+      "themes": ["Ticket review"],
+      "top_subject": "ADO queue"
+    },
+    {
+      "day": "2026-06-07",
+      "themes": ["Reading rotation"],
+      "top_subject": "Books"
+    },
+    {
+      "day": "2026-06-08",
+      "themes": ["Weekend prep"],
+      "top_subject": "Saturday cabin"
+    }
+  ],
+  "atomicNotes": [
+    {
+      "day": "2026-06-06",
+      "cadence": "morning-briefing",
+      "body_md": "> [!info]+ Today\n> Plenty of variety."
+    },
+    {
+      "day": "2026-06-07",
+      "cadence": "morning-briefing",
+      "body_md": "> [!info]+ Today\n> Different angle today."
+    },
+    {
+      "day": "2026-06-08",
+      "cadence": "morning-briefing",
+      "body_md": "> [!info]+ Today\n> Fresh frame."
+    }
+  ],
+  "expected_drift_report": {
+    "frame_repeat": false,
+    "subject_dominance": false,
+    "explicit_null": false
+  }
+}

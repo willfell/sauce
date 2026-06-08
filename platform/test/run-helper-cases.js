@@ -11525,6 +11525,302 @@ type: cowork-microscope
     assertTrue("HC-V0951-K1-E: anti-echo callout canonical regex shape", false, e && e.message);
   }
 
+  // ============================================================================
+  // v0.95.1 — K2 (capture-frame-drift): TDD-RED at S2.1
+  //
+  // Knob 2 ships a NEW sub-skill `cowork:capture-frame-drift` + helper
+  // `capture-frame-drift-helper.js` exposing three exports:
+  //   * extractThemes(syntheses, { mockResponse } = {}) → async (LLM-backed at
+  //     runtime; mocked here via the optional second arg so the harness exercises
+  //     real JSON-parse + validation logic without burning tokens)
+  //   * evaluateDrift({ themes, atomicNotes }) → DriftReport { frame_repeat,
+  //     subject_dominance, explicit_null, details }
+  //   * composeDriftCallout(report, voice_contract) → markdown callout string
+  //
+  // Cascading wire-throughs (also RED until S2.3 / S2.4):
+  //   * cowork blueprint manifest.json registers the new SKILL.md + helper.
+  //   * cowork:synthesize-day SKILL.md adds a post-write step invoking
+  //     capture-frame-drift gated by plan.tripwire_aspects.includes("frame_drift").
+  //   * cowork:read-memory SKILL.md grows a drift_warning extraction step.
+  //   * cowork:morning-briefing SKILL.md injects drift_warning into the
+  //     "Yesterday at a glance" callout prompt.
+  //
+  // The 11 K2 sub-asserts (K2-A through K2-K) collectively exercise the
+  // sub-skill registration, gating semantics, LLM JSON-validity surface,
+  // three drift-flag evaluators, callout canonical shape, the synthesize-day
+  // post-step contract, read-memory extension, and MB injection. S2.2 turns
+  // K2-A through K2-H GREEN; S2.3 turns K2-I + K2-J GREEN; S2.4 turns K2-K
+  // GREEN. Pre-v0.95.1 + K1 cases continue passing throughout.
+  //
+  // No real API calls — extractThemes mock is fed via fixture in
+  // platform/blueprints/cowork/helpers/fixtures/v0951-k2-mock-llm/.
+  // ============================================================================
+
+  const COWORK_BP_DIR = path.join(WORKSHOP, "platform/blueprints/cowork");
+  const K2_FIXTURES   = path.join(COWORK_BP_DIR, "helpers/fixtures");
+
+  console.log(`\n--- Case HC-V0951-K2-A: capture-frame-drift sub-skill + helper registered at claude_surface ---`);
+  try {
+    const skillPath  = path.join(COWORK_BP_DIR, "skills/skills/capture-frame-drift/SKILL.md");
+    const helperPath = path.join(COWORK_BP_DIR, "helpers/capture-frame-drift-helper.js");
+    const manifest   = JSON.parse(fs.readFileSync(path.join(COWORK_BP_DIR, "manifest.json"), "utf8"));
+    const surface    = Array.isArray(manifest.claude_surface) ? manifest.claude_surface : [];
+    const filesArr   = Array.isArray(manifest.files) ? manifest.files : [];
+    const skillRegistered = surface.some((e) => e && e.kind === "skill"
+      && typeof e.source === "string"
+      && e.source.includes("skills/skills/capture-frame-drift/SKILL.md"));
+    const helperRegistered = filesArr.some((e) => e && typeof e.source === "string"
+      && e.source.includes("helpers/capture-frame-drift-helper.js"));
+    assertTrue("HC-V0951-K2-A: capture-frame-drift SKILL.md + helper exist on disk AND are registered in manifest claude_surface/files",
+      fs.existsSync(skillPath)
+      && fs.existsSync(helperPath)
+      && skillRegistered
+      && helperRegistered);
+  } catch (e) {
+    assertTrue("HC-V0951-K2-A: capture-frame-drift registration", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0951-K2-B: tripwire_aspects gating skips when frame_drift absent ---`);
+  try {
+    const FDH = require(path.join(COWORK_BP_DIR, "helpers/capture-frame-drift-helper.js"));
+    // Build a 5-day ThemeBundle[] that WOULD trigger frame_repeat — but the
+    // gating is the caller's responsibility (sub-skill + orchestrator check
+    // plan.tripwire_aspects). The helper itself just evaluates rules. K2-B
+    // asserts that evaluateDrift returns NO-flag result when called with an
+    // explicit `tripwire_aspects` argument that excludes "frame_drift" — the
+    // helper MUST surface this gate so the sub-skill can short-circuit before
+    // its LLM call. Design § 4.4 + § 4.7.
+    const themes = JSON.parse(fs.readFileSync(path.join(K2_FIXTURES, "v0951-k2-frame-repeat/syntheses.json"), "utf8")).themes;
+    const gatedReport = typeof FDH.evaluateDrift === "function"
+      ? FDH.evaluateDrift({ themes, atomicNotes: [], tripwire_aspects: ["cc_drift"] })
+      : null;
+    assertTrue("HC-V0951-K2-B: evaluateDrift returns a no-flag report when tripwire_aspects excludes 'frame_drift'",
+      gatedReport
+      && gatedReport.frame_repeat === false
+      && gatedReport.subject_dominance === false
+      && gatedReport.explicit_null === false);
+  } catch (e) {
+    assertTrue("HC-V0951-K2-B: tripwire_aspects gating", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0951-K2-C: <5-syntheses skip (insufficient history) ---`);
+  try {
+    const FDH = require(path.join(COWORK_BP_DIR, "helpers/capture-frame-drift-helper.js"));
+    // Helper exposes a precondition gate: <5 ThemeBundle entries → skip entirely
+    // (no flags fire). Design § 4.7: "Fewer than 5 days of syntheses … skip
+    // evaluation entirely. No callout, no warning, no LLM call." The helper
+    // MUST return a no-flag report (sub-skill / orchestrator can branch on that).
+    const threeDays = [
+      { day: "2026-06-06", themes: ["Q3 planning"], top_subject: "Diana" },
+      { day: "2026-06-07", themes: ["Q3 planning"], top_subject: "Diana" },
+      { day: "2026-06-08", themes: ["Q3 planning"], top_subject: "Diana" },
+    ];
+    const shortReport = typeof FDH.evaluateDrift === "function"
+      ? FDH.evaluateDrift({ themes: threeDays, atomicNotes: [], tripwire_aspects: ["frame_drift"] })
+      : null;
+    assertTrue("HC-V0951-K2-C: evaluateDrift returns no-flag report when <5 ThemeBundle entries (insufficient history)",
+      shortReport
+      && shortReport.frame_repeat === false
+      && shortReport.subject_dominance === false
+      && shortReport.explicit_null === false);
+  } catch (e) {
+    assertTrue("HC-V0951-K2-C: <5-syntheses skip", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0951-K2-D: extractThemes JSON validity (mocked LLM response) ---`);
+  try {
+    const FDH = require(path.join(COWORK_BP_DIR, "helpers/capture-frame-drift-helper.js"));
+    const fixture = JSON.parse(fs.readFileSync(path.join(K2_FIXTURES, "v0951-k2-mock-llm/mock-response.json"), "utf8"));
+    // extractThemes is async at runtime (LLM-backed). The helper MUST accept a
+    // second arg `{ mockResponse }` to short-circuit the LLM call for tests;
+    // this lets the harness exercise the JSON-parse + schema-validate path
+    // without burning tokens. The parsed result must be a ThemeBundle[] with
+    // the canonical shape: { day, themes, top_subject } per § 4.3.
+    let parsed = null;
+    if (typeof FDH.extractThemes === "function") {
+      parsed = await FDH.extractThemes(fixture.syntheses, { mockResponse: fixture.mockResponse });
+    }
+    const shapeOk = Array.isArray(parsed)
+      && parsed.length === fixture.expected_parsed_length
+      && parsed.every((b) => b
+        && typeof b.day === "string"
+        && Array.isArray(b.themes)
+        && b.themes.every((t) => typeof t === "string")
+        && typeof b.top_subject === "string");
+    assertTrue("HC-V0951-K2-D: extractThemes(mockResponse) returns 5 ThemeBundle{day,themes[],top_subject} entries",
+      shapeOk
+      && parsed[0].day === fixture.expected_first_day
+      && parsed[0].top_subject === fixture.expected_first_top_subject);
+  } catch (e) {
+    assertTrue("HC-V0951-K2-D: extractThemes JSON validity", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0951-K2-E: evaluateDrift frame_repeat flag (≥4/5 days same theme) ---`);
+  try {
+    const FDH = require(path.join(COWORK_BP_DIR, "helpers/capture-frame-drift-helper.js"));
+    const fixture = JSON.parse(fs.readFileSync(path.join(K2_FIXTURES, "v0951-k2-frame-repeat/syntheses.json"), "utf8"));
+    // "Q3 planning" appears in 4 of 5 days (case-insensitive + whitespace-trim
+    // per design § 4.4 "same theme STRING (case-insensitive equality after
+    // trim)"). Subject dominance MUST NOT fire (top_subject rotates).
+    const report = typeof FDH.evaluateDrift === "function"
+      ? FDH.evaluateDrift({ themes: fixture.themes, atomicNotes: [], tripwire_aspects: ["frame_drift"] })
+      : null;
+    assertTrue("HC-V0951-K2-E: evaluateDrift fires frame_repeat (and ONLY frame_repeat) when same theme appears 4/5 days",
+      report
+      && report.frame_repeat === true
+      && report.subject_dominance === false
+      && report.explicit_null === false);
+  } catch (e) {
+    assertTrue("HC-V0951-K2-E: frame_repeat flag", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0951-K2-F: evaluateDrift subject_dominance flag (≥3/5 days same top_subject) ---`);
+  try {
+    const FDH = require(path.join(COWORK_BP_DIR, "helpers/capture-frame-drift-helper.js"));
+    const fixture = JSON.parse(fs.readFileSync(path.join(K2_FIXTURES, "v0951-k2-subject-dominance/syntheses.json"), "utf8"));
+    // top_subject "Diana" appears in 3 of 5 days (case-insensitive + trim).
+    // No theme repeats ≥4/5 — only subject_dominance fires.
+    const report = typeof FDH.evaluateDrift === "function"
+      ? FDH.evaluateDrift({ themes: fixture.themes, atomicNotes: [], tripwire_aspects: ["frame_drift"] })
+      : null;
+    assertTrue("HC-V0951-K2-F: evaluateDrift fires subject_dominance (and ONLY subject_dominance) when same top_subject appears 3/5 days",
+      report
+      && report.frame_repeat === false
+      && report.subject_dominance === true
+      && report.explicit_null === false);
+  } catch (e) {
+    assertTrue("HC-V0951-K2-F: subject_dominance flag", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0951-K2-G: evaluateDrift explicit_null flag (3 consecutive days with canonical phrase) ---`);
+  try {
+    const FDH = require(path.join(COWORK_BP_DIR, "helpers/capture-frame-drift-helper.js"));
+    const fixture = JSON.parse(fs.readFileSync(path.join(K2_FIXTURES, "v0951-k2-explicit-null/atomic-notes.json"), "utf8"));
+    // 3 consecutive days of atomic notes contain the canonical explicit-null
+    // phrase emitted by Knob 1's anti-echo callout. Per § 4.4: "Exact phrase
+    // 'today's gather largely continued yesterday's threads' found via file
+    // grep (not LLM) in last 3 days' MB / midday-tripwire / EOD atomic notes
+    // (all three Knob-1-eligible cadences)". themes[] is empty so frame_repeat
+    // + subject_dominance MUST NOT fire (we want ONLY explicit_null).
+    const report = typeof FDH.evaluateDrift === "function"
+      ? FDH.evaluateDrift({ themes: [], atomicNotes: fixture.atomicNotes, tripwire_aspects: ["frame_drift"] })
+      : null;
+    assertTrue("HC-V0951-K2-G: evaluateDrift fires explicit_null when canonical phrase appears in 3 consecutive days of atomic notes",
+      report
+      && report.frame_repeat === false
+      && report.subject_dominance === false
+      && report.explicit_null === true);
+  } catch (e) {
+    assertTrue("HC-V0951-K2-G: explicit_null flag", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0951-K2-H: composeDriftCallout canonical regex shape ---`);
+  try {
+    const FDH = require(path.join(COWORK_BP_DIR, "helpers/capture-frame-drift-helper.js"));
+    // Compose a callout for a single-flag report. The body MUST start with the
+    // canonical "> [!warning]- Frame may be stuck\n> " header per design § 4.5.
+    // The voice_contract argument is the engagement's voice-applied prelude
+    // (passed verbatim through to phrasing). For shape testing we use a stub.
+    const report = {
+      frame_repeat: true,
+      subject_dominance: false,
+      explicit_null: false,
+      details: { repeating_theme: "Q3 planning", repeat_count: 4 },
+    };
+    const out = typeof FDH.composeDriftCallout === "function"
+      ? FDH.composeDriftCallout(report, "Voice contract: casual.")
+      : null;
+    const canonical = /^> \[!warning\]-\s+Frame may be stuck\n> /m;
+    assertTrue("HC-V0951-K2-H: composeDriftCallout returns markdown starting with `> [!warning]- Frame may be stuck\\n> ` (canonical shape)",
+      typeof out === "string"
+      && canonical.test(out));
+  } catch (e) {
+    assertTrue("HC-V0951-K2-H: composeDriftCallout canonical shape", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0951-K2-I: synthesize-day post-step invokes capture-frame-drift (SKILL.md contract) ---`);
+  try {
+    const synthSkill = fs.readFileSync(
+      path.join(COWORK_BP_DIR, "skills/orchestrators/synthesize-day/SKILL.md"),
+      "utf8"
+    );
+    // Per plan S2.3: synthesize-day SKILL.md gains a post-write step invoking
+    // cowork:capture-frame-drift gated by plan.tripwire_aspects.includes("frame_drift").
+    // The SKILL.md body MUST reference the sub-skill by canonical id AND mention
+    // the gating literal AND the non-fatal warnings contract AND the today's
+    // memory.md write target (§ 4.5).
+    const mentionsSubSkill   = synthSkill.includes("cowork:capture-frame-drift");
+    const mentionsGate       = synthSkill.includes("frame_drift");
+    const mentionsTripwire   = synthSkill.includes("tripwire_aspects");
+    const mentionsWarningsFallback = synthSkill.includes("warnings:")
+      || synthSkill.includes("warnings`")
+      || synthSkill.toLowerCase().includes("non-fatal");
+    const mentionsMemoryTarget = synthSkill.includes("memory.md");
+    assertTrue("HC-V0951-K2-I: synthesize-day SKILL.md invokes capture-frame-drift post-write, gated by tripwire_aspects, non-fatal on failure, writes to today's memory.md",
+      mentionsSubSkill
+      && mentionsGate
+      && mentionsTripwire
+      && mentionsWarningsFallback
+      && mentionsMemoryTarget);
+  } catch (e) {
+    assertTrue("HC-V0951-K2-I: synthesize-day post-step", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0951-K2-J: read-memory SKILL.md surfaces drift_warning ---`);
+  try {
+    const rmSkill = fs.readFileSync(
+      path.join(COWORK_BP_DIR, "skills/skills/read-memory/SKILL.md"),
+      "utf8"
+    );
+    // Per plan S2.3 step 2: read-memory SKILL.md grows a new extraction step
+    // scanning memory.md for the `> [!warning]- Frame may be stuck` callout
+    // and returning its body as `drift_warning: string | null` in the output
+    // shape. The SKILL.md body MUST reference both the callout title AND the
+    // output key name so downstream consumers (MB) can rely on them.
+    const mentionsCalloutTitle = rmSkill.includes("Frame may be stuck");
+    const mentionsOutputKey    = rmSkill.includes("drift_warning");
+    // Spot-check the fixture parses against a fresh extractor pattern (sanity
+    // for the read-memory implementer in S2.3 — the fixture supplies the
+    // canonical memory.md shape they need to extract from).
+    const fixtureMd = fs.readFileSync(
+      path.join(K2_FIXTURES, "v0951-k2-memory-with-drift/memory.md"),
+      "utf8"
+    );
+    const fixtureHasCallout = /> \[!warning\]-\s+Frame may be stuck/.test(fixtureMd);
+    assertTrue("HC-V0951-K2-J: read-memory SKILL.md documents extracting [!warning]- Frame may be stuck → drift_warning",
+      mentionsCalloutTitle
+      && mentionsOutputKey
+      && fixtureHasCallout);
+  } catch (e) {
+    assertTrue("HC-V0951-K2-J: read-memory drift_warning extraction", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0951-K2-K: morning-briefing injects drift_warning into Yesterday-at-a-glance (SKILL.md contract) ---`);
+  try {
+    const mbSkill = fs.readFileSync(
+      path.join(COWORK_BP_DIR, "skills/orchestrators/morning-briefing/SKILL.md"),
+      "utf8"
+    );
+    // Per plan S2.4: MB SKILL.md Yesterday-at-a-glance step checks
+    // yesterdayMemory.drift_warning. When non-null, appends to the callout body
+    // so the LLM composing today's MB is aware that recent days have been
+    // thematically locked. The SKILL.md body MUST reference the output key
+    // from read-memory (drift_warning) AND mark it as injected into the
+    // yesterday-at-a-glance composition step.
+    const mentionsDriftWarningKey = mbSkill.includes("drift_warning");
+    const mentionsAnchorPhrase    = mbSkill.includes("Yesterday at a glance")
+      || mbSkill.includes("yesterday-at-a-glance")
+      || mbSkill.includes("yesterday_at_a_glance");
+    const mentionsDriftFlag       = mbSkill.toLowerCase().includes("drift flag")
+      || mbSkill.includes("Frame may be stuck");
+    assertTrue("HC-V0951-K2-K: morning-briefing SKILL.md injects yesterdayMemory.drift_warning into the Yesterday-at-a-glance callout body when non-null",
+      mentionsDriftWarningKey
+      && mentionsAnchorPhrase
+      && mentionsDriftFlag);
+  } catch (e) {
+    assertTrue("HC-V0951-K2-K: morning-briefing drift_warning injection", false, e && e.message);
+  }
+
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
   if (fail > 0) {

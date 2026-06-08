@@ -1,0 +1,39 @@
+{
+  "description": "5-day ThemeBundle[] fixture where the theme 'Q3 planning' appears in 4 of 5 days. Drives the frame_repeat flag (≥4/5 threshold per design § 4.4).",
+  "themes": [
+    {
+      "day": "2026-06-04",
+      "themes": ["Q3 planning", "Ticket review"],
+      "top_subject": "Q3 strategy"
+    },
+    {
+      "day": "2026-06-05",
+      "themes": ["Q3 planning", "Diana follow-up"],
+      "top_subject": "Diana"
+    },
+    {
+      "day": "2026-06-06",
+      "themes": ["Cabin trip planning", "Family logistics"],
+      "top_subject": "Sarah"
+    },
+    {
+      "day": "2026-06-07",
+      "themes": ["Q3 planning", "ADO queue"],
+      "top_subject": "Q3 strategy"
+    },
+    {
+      "day": "2026-06-08",
+      "themes": ["q3 PLANNING ", "Ticket triage"],
+      "top_subject": "Diana"
+    }
+  ],
+  "expected_drift_report": {
+    "frame_repeat": true,
+    "subject_dominance": false,
+    "explicit_null": false,
+    "details": {
+      "repeating_theme": "q3 planning",
+      "repeat_count": 4
+    }
+  }
+}

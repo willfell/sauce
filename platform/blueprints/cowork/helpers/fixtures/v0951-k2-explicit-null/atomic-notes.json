@@ -1,0 +1,28 @@
+{
+  "description": "3 consecutive days of MB/midday/EOD atomic-note bodies that contain the explicit-null phrase introduced by Knob 1 ('today's gather largely continued yesterday's threads'). Drives the explicit_null flag (3-consecutive threshold per design § 4.4).",
+  "atomicNotes": [
+    {
+      "day": "2026-06-06",
+      "cadence": "morning-briefing",
+      "body_md": "> [!info]+ Today\n> Same patterns continuing.\n\n> [!question]+ Outside yesterday's frame\n> today's gather largely continued yesterday's threads."
+    },
+    {
+      "day": "2026-06-07",
+      "cadence": "morning-briefing",
+      "body_md": "> [!info]+ Today\n> Sunday wind-down.\n\n> [!question]+ Outside yesterday's frame\n> today's gather largely continued yesterday's threads."
+    },
+    {
+      "day": "2026-06-08",
+      "cadence": "morning-briefing",
+      "body_md": "> [!info]+ Today\n> Monday energy.\n\n> [!question]+ Outside yesterday's frame\n> today's gather largely continued yesterday's threads."
+    }
+  ],
+  "expected_drift_report": {
+    "frame_repeat": false,
+    "subject_dominance": false,
+    "explicit_null": true,
+    "details": {
+      "explicit_null_consecutive_days": 3
+    }
+  }
+}

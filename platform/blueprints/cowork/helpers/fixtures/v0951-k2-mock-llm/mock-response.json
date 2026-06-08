@@ -1,0 +1,50 @@
+{
+  "description": "Mock LLM response for extractThemes(syntheses). Exercises the JSON-validation pathway in capture-frame-drift-helper.js without burning real API tokens. The helper MUST be invokable in a 'mock' mode (e.g., `extractThemes(syntheses, { mockResponse })`) so the harness exercises real parsing logic. See plan S2.1 step 4 (K2D — extractThemes JSON validity).",
+  "syntheses": [
+    {
+      "day": "2026-06-04",
+      "synthesis_paragraph": "Today felt like Q3 planning swallowed most cycles — Diana's email is still the open thread.",
+      "carry_forward_bullets": [
+        "Q3 planning: chase Diana reply",
+        "Ticket 705679 still In Review"
+      ]
+    },
+    {
+      "day": "2026-06-05",
+      "synthesis_paragraph": "Quiet morning, ADO queue caught up. Diana finally replied.",
+      "carry_forward_bullets": [
+        "Confirm Q3 planning meeting on Diana reply",
+        "Saturday cabin route w/ Sarah"
+      ]
+    },
+    {
+      "day": "2026-06-06",
+      "synthesis_paragraph": "Cabin-trip logistics dominated — emails moved aside.",
+      "carry_forward_bullets": [
+        "Cabin trip: groceries list",
+        "Sarah follow-up"
+      ]
+    },
+    {
+      "day": "2026-06-07",
+      "synthesis_paragraph": "Calendar-light Sunday. Reading time.",
+      "carry_forward_bullets": [
+        "Pick next book",
+        "Plan Monday standup agenda"
+      ]
+    },
+    {
+      "day": "2026-06-08",
+      "synthesis_paragraph": "Monday energy returned. Three follow-ups landed.",
+      "carry_forward_bullets": [
+        "Reply to Anna on RFC",
+        "Q3 planning slot reschedule",
+        "Ticket 706012 push"
+      ]
+    }
+  ],
+  "mockResponse": "[\n  {\"day\":\"2026-06-04\",\"themes\":[\"Q3 planning\",\"Ticket review\"],\"top_subject\":\"Diana\"},\n  {\"day\":\"2026-06-05\",\"themes\":[\"ADO queue\",\"Diana reply\"],\"top_subject\":\"Diana\"},\n  {\"day\":\"2026-06-06\",\"themes\":[\"Cabin trip planning\"],\"top_subject\":\"Sarah\"},\n  {\"day\":\"2026-06-07\",\"themes\":[\"Reading rotation\"],\"top_subject\":\"Books\"},\n  {\"day\":\"2026-06-08\",\"themes\":[\"Q3 planning\",\"RFC reply\"],\"top_subject\":\"Anna\"}\n]",
+  "expected_parsed_length": 5,
+  "expected_first_day": "2026-06-04",
+  "expected_first_top_subject": "Diana"
+}

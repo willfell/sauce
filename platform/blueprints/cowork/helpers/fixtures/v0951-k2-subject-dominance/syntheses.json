@@ -1,0 +1,39 @@
+{
+  "description": "5-day ThemeBundle[] fixture where the same top_subject 'Diana' appears in 3 of 5 days. Drives the subject_dominance flag (≥3/5 threshold per design § 4.4). No single theme repeats ≥4/5 — only subject dominance fires.",
+  "themes": [
+    {
+      "day": "2026-06-04",
+      "themes": ["Q3 planning"],
+      "top_subject": "Diana"
+    },
+    {
+      "day": "2026-06-05",
+      "themes": ["Diana follow-up", "ADO queue"],
+      "top_subject": "Diana"
+    },
+    {
+      "day": "2026-06-06",
+      "themes": ["Cabin trip planning"],
+      "top_subject": "Sarah"
+    },
+    {
+      "day": "2026-06-07",
+      "themes": ["Ticket triage"],
+      "top_subject": "Q3 strategy"
+    },
+    {
+      "day": "2026-06-08",
+      "themes": ["Ticket review"],
+      "top_subject": " diana  "
+    }
+  ],
+  "expected_drift_report": {
+    "frame_repeat": false,
+    "subject_dominance": true,
+    "explicit_null": false,
+    "details": {
+      "dominant_subject": "diana",
+      "dominance_count": 3
+    }
+  }
+}
