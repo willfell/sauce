@@ -11821,6 +11821,388 @@ type: cowork-microscope
     assertTrue("HC-V0951-K2-K: morning-briefing drift_warning injection", false, e && e.message);
   }
 
+  // ============================================================================
+  // v0.95.1 — K3 (lens_shift cadence + cold-MB variant): TDD-RED at S3.1
+  //
+  // Knob 3 ships a new background cadence (`lens_shift`, default Saturday 07:00)
+  // that fires `cowork:morning-briefing` with memory READ DISABLED — producing a
+  // "cold" companion atomic note that Daily Hub renders side-by-side with the
+  // warm MB. The 12 sub-asserts below (K3-A through K3-L) collectively exercise:
+  //
+  //   * morning-briefing SKILL.md pre-flight short-circuit on `--cadence lens_shift`
+  //     (skip step 3a read-memory AND step 3a.5 gather-semantic-related)
+  //   * cold-mode write contract (type / slug / body exclusions)
+  //   * scheduled-job-contract.json lens_shift entry + contract_version bump
+  //   * scheduled-job-wrappers-helper emits 6th block per engagement opt-in
+  //   * CoworkLensShiftCards CustomJS class renders pair vs single columns
+  //
+  // S3.2 turns K3-A..K3-G GREEN (cadence + MB cold-mode branch + scheduled-job
+  // contract entry). S3.3 turns K3-H + K3-I GREEN (wrapper-helper emit/skip).
+  // S3.4 turns K3-J..K3-L GREEN (CustomJS class + Daily Hub embed). Pre-v0.95.1
+  // + K1 + K2 cases continue passing throughout.
+  //
+  // CustomJS class tested via Node by requiring the source file directly + invoking
+  // its `render(dv, opts)` method with a synthetic dataview-like `dv` shim and
+  // page-fixture inputs. No Obsidian runtime needed.
+  // ============================================================================
+
+  const K3_FIXTURES = path.join(COWORK_BP_DIR, "helpers/fixtures");
+
+  console.log(`\n--- Case HC-V0951-K3-A: --cadence lens_shift skips pre-flight 3a (read-memory) ---`);
+  try {
+    const mbSkill = fs.readFileSync(
+      path.join(COWORK_BP_DIR, "skills/orchestrators/morning-briefing/SKILL.md"),
+      "utf8"
+    );
+    // Per plan S3.2 + design § 5.3: when the orchestrator is invoked with
+    // `--cadence lens_shift`, step 3a (read-memory) MUST be skipped. The SKILL.md
+    // body must explicitly document this branch — the gate-prose MUST mention
+    // BOTH the cadence flag name AND that step 3a (or the read-memory sub-skill
+    // invocations within it) is skipped in cold-mode.
+    const mentionsLensShiftFlag = mbSkill.includes("lens_shift")
+      || mbSkill.includes("--cadence lens_shift");
+    // Find a prose region tying lens_shift to a skip of read-memory.
+    const skipsReadMemoryProse =
+      /lens_shift[\s\S]{0,400}(skip|SKIPPED|skipped|cold-mode|cold mode)[\s\S]{0,200}(read-memory|step 3a\b|3a read|3a\.i|memory)/i.test(mbSkill)
+      || /(skip|SKIPPED|skipped|cold-mode|cold mode)[\s\S]{0,200}(read-memory|step 3a\b|3a read|3a\.i)[\s\S]{0,200}lens_shift/i.test(mbSkill);
+    assertTrue("HC-V0951-K3-A: morning-briefing SKILL.md documents --cadence lens_shift skipping pre-flight 3a (read-memory)",
+      mentionsLensShiftFlag
+      && skipsReadMemoryProse);
+  } catch (e) {
+    assertTrue("HC-V0951-K3-A: --cadence lens_shift skips pre-flight 3a", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0951-K3-B: --cadence lens_shift skips pre-flight 3a.5 (gather-semantic-related) ---`);
+  try {
+    const mbSkill = fs.readFileSync(
+      path.join(COWORK_BP_DIR, "skills/orchestrators/morning-briefing/SKILL.md"),
+      "utf8"
+    );
+    // Per plan S3.2 + design § 5.3: cold-mode MB MUST also skip step 3a.5
+    // (gather-semantic-related). Same pattern as K3-A — SKILL.md must tie the
+    // lens_shift flag to the skip of the semantic gather step.
+    const skipsSemanticProse =
+      /lens_shift[\s\S]{0,600}(skip|SKIPPED|skipped|cold-mode|cold mode)[\s\S]{0,300}(gather-semantic|semantic[- ]related|step 3a\.5|3a\.5)/i.test(mbSkill)
+      || /(skip|SKIPPED|skipped|cold-mode|cold mode)[\s\S]{0,300}(gather-semantic|semantic[- ]related|step 3a\.5|3a\.5)[\s\S]{0,400}lens_shift/i.test(mbSkill);
+    assertTrue("HC-V0951-K3-B: morning-briefing SKILL.md documents --cadence lens_shift skipping pre-flight 3a.5 (gather-semantic-related)",
+      skipsSemanticProse);
+  } catch (e) {
+    assertTrue("HC-V0951-K3-B: --cadence lens_shift skips pre-flight 3a.5", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0951-K3-C: cold MB writes type cowork-morning-briefing-cold ---`);
+  try {
+    const mbSkill = fs.readFileSync(
+      path.join(COWORK_BP_DIR, "skills/orchestrators/morning-briefing/SKILL.md"),
+      "utf8"
+    );
+    // Per plan S3.2 + design § 5.4: cold MB frontmatter `type:` is the new
+    // canonical `cowork-morning-briefing-cold` (NOT `cowork-morning-briefing`).
+    // The orchestrator SKILL.md MUST instruct this distinct type for cold-mode
+    // writes. Also assert the type is registered in a cowork rule_fragment OR
+    // declared somewhere in the blueprint (rule_fragment auto-discovery for
+    // activity-feed surfacing — but minimum bar is the SKILL.md reference).
+    const mentionsColdType = mbSkill.includes("cowork-morning-briefing-cold");
+    assertTrue("HC-V0951-K3-C: morning-briefing SKILL.md instructs cold-mode writes use type cowork-morning-briefing-cold",
+      mentionsColdType);
+  } catch (e) {
+    assertTrue("HC-V0951-K3-C: cold MB type frontmatter", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0951-K3-D: cold MB slug is morning-briefing-cold-<engagement>.md ---`);
+  try {
+    const mbSkill = fs.readFileSync(
+      path.join(COWORK_BP_DIR, "skills/orchestrators/morning-briefing/SKILL.md"),
+      "utf8"
+    );
+    // Per plan S3.2 + design § 5.4: warm slug is morning-briefing-<engagement>.md
+    // (or morning-briefing.md historically); cold slug is
+    // morning-briefing-cold-<engagement>.md. Orchestrator SKILL.md MUST document
+    // the cold slug pattern so write-run-note's path write-guard is satisfied.
+    const mentionsColdSlug = /morning-briefing-cold[-_.\/<]/.test(mbSkill)
+      || mbSkill.includes("morning-briefing-cold.md");
+    assertTrue("HC-V0951-K3-D: morning-briefing SKILL.md documents cold slug morning-briefing-cold-<engagement>.md",
+      mentionsColdSlug);
+  } catch (e) {
+    assertTrue("HC-V0951-K3-D: cold MB slug pattern", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0951-K3-E: cold MB body excludes Yesterday-at-a-glance + anti-echo + semantic-echoes ---`);
+  try {
+    const mbSkill = fs.readFileSync(
+      path.join(COWORK_BP_DIR, "skills/orchestrators/morning-briefing/SKILL.md"),
+      "utf8"
+    );
+    // Per design § 5.4: "No separate cold-mode suppression code-paths needed.
+    // The body exclusions emerge naturally from skipping pre-flight 3a (no
+    // memory → excluded_themes=[] → Knob 1 skips) and 3a.5 (no semantic gather
+    // → semantic-echoes callout skips)." The orchestrator SKILL.md MUST document
+    // this body-exclusion outcome explicitly so future readers/implementers do
+    // not add redundant suppression paths.
+    const mentionsBodyExclusions = /lens_shift[\s\S]{0,1500}(excluded_themes\s*=\s*\[\]|excluded_themes\s*=\s*empty|no memory|memory[\s\S]{0,30}skip|emerge naturally|no anti-echo|skip(s|ped|ping) the anti-echo|no semantic|skip(s|ped|ping) the semantic)/i.test(mbSkill)
+      || /(cold-mode|cold mode|cold MB)[\s\S]{0,1500}(excluded_themes\s*=\s*\[\]|emerge naturally|no anti-echo|no semantic|no Yesterday at a glance|skip(s|ped|ping) Yesterday at a glance)/i.test(mbSkill);
+    assertTrue("HC-V0951-K3-E: morning-briefing SKILL.md documents that cold MB body excludes Yesterday-at-a-glance / anti-echo / semantic-echoes (via 3a + 3a.5 skips, no dedicated suppression code)",
+      mentionsBodyExclusions);
+  } catch (e) {
+    assertTrue("HC-V0951-K3-E: cold MB body exclusions", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0951-K3-F: scheduled-job-contract.json contains lens_shift cadence entry ---`);
+  try {
+    const contract = JSON.parse(fs.readFileSync(
+      path.join(COWORK_BP_DIR, "data/scheduled-job-contract.json"),
+      "utf8"
+    ));
+    // Per plan S3.2 step 2 + design § 5.6: scheduled-job-contract.json gains a
+    // lens_shift cadence entry under `cadences.lens_shift` AND lens_shift is
+    // appended to `cadence_order`. The entry's wrapper template MUST embed the
+    // `--cadence lens_shift` runtime flag in the prompt so the orchestrator
+    // knows to take the cold-mode branch.
+    const cadences = contract.cadences || {};
+    const cadenceOrder = Array.isArray(contract.cadence_order) ? contract.cadence_order : [];
+    const lensEntry = cadences.lens_shift || null;
+    const lensWrapperHasFlag = lensEntry && typeof lensEntry.wrapper_template === "string"
+      && /--cadence\s+lens_shift/.test(lensEntry.wrapper_template);
+    assertTrue("HC-V0951-K3-F: scheduled-job-contract.json declares lens_shift cadence (in cadences + cadence_order) with wrapper template embedding --cadence lens_shift",
+      !!lensEntry
+      && cadenceOrder.includes("lens_shift")
+      && lensWrapperHasFlag);
+  } catch (e) {
+    assertTrue("HC-V0951-K3-F: lens_shift cadence entry", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0951-K3-G: scheduled-job-contract.json contract_version bumped 0.32.0 -> 0.33.0 ---`);
+  try {
+    const contract = JSON.parse(fs.readFileSync(
+      path.join(COWORK_BP_DIR, "data/scheduled-job-contract.json"),
+      "utf8"
+    ));
+    // Per plan S3.2 step 2 + landmine #10/#16 lockstep: adding a new cadence
+    // is a MINOR shape change to the contract. contract_version MUST bump
+    // 0.32.0 -> 0.33.0 (matches cowork blueprint version bump in S5).
+    assertTrue("HC-V0951-K3-G: scheduled-job-contract.json contract_version bumped to 0.33.0 (was 0.32.0 pre-S3.2)",
+      contract.contract_version === "0.33.0");
+  } catch (e) {
+    assertTrue("HC-V0951-K3-G: contract_version bump", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0951-K3-H: composeScheduledJobWrappers emits 6th block when engagement.cadences.lens_shift set ---`);
+  try {
+    const wrapperHelperPath = path.join(COWORK_BP_DIR, "helpers/compose-scheduled-job-wrappers-helper.js");
+    delete require.cache[require.resolve(wrapperHelperPath)];
+    const WH = require(wrapperHelperPath);
+    const contract = JSON.parse(fs.readFileSync(
+      path.join(COWORK_BP_DIR, "data/scheduled-job-contract.json"),
+      "utf8"
+    ));
+    const input = JSON.parse(fs.readFileSync(
+      path.join(K3_FIXTURES, "v0951-k3-wrapper-input/input-with-lens-shift.json"),
+      "utf8"
+    ));
+    input.contract = contract;
+    // Per plan S3.3 + design § 5.7: when engagement.cadences.lens_shift is set,
+    // the helper emits 6 fenced wrapper sections instead of the existing 5.
+    // The new section's heading includes "lens_shift" AND its fenced body
+    // includes `--cadence lens_shift`. The pre-S3.2 contract version (0.32.0)
+    // would already fail K3-G, so input.cowork_version matches the new 0.33.0
+    // to surface ONLY the wrapper-emit gap.
+    let output = { file_md: "", status: "failed:helper-missing" };
+    if (typeof WH.composeScheduledJobWrappers === "function") {
+      output = WH.composeScheduledJobWrappers(input);
+    }
+    const sectionHeadings = (output.file_md || "").match(/^## \d+ — /gm) || [];
+    const mentionsLensShiftSection = (output.file_md || "").includes("lens_shift")
+      && (output.file_md || "").includes("--cadence lens_shift");
+    assertTrue("HC-V0951-K3-H: composeScheduledJobWrappers emits 6 wrapper sections (incl. lens_shift cold-MB) when engagement.cadences.lens_shift opt-in is set",
+      sectionHeadings.length === 6
+      && mentionsLensShiftSection
+      && (output.status === "ok" || output.status === "ready" || /:ok\b/.test(String(output.status || ""))));
+  } catch (e) {
+    assertTrue("HC-V0951-K3-H: wrapper-helper emits 6 blocks with lens_shift opt-in", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0951-K3-I: composeScheduledJobWrappers omits 6th block when lens_shift NOT in engagement.cadences ---`);
+  try {
+    const wrapperHelperPath = path.join(COWORK_BP_DIR, "helpers/compose-scheduled-job-wrappers-helper.js");
+    delete require.cache[require.resolve(wrapperHelperPath)];
+    const WH = require(wrapperHelperPath);
+    const contract = JSON.parse(fs.readFileSync(
+      path.join(COWORK_BP_DIR, "data/scheduled-job-contract.json"),
+      "utf8"
+    ));
+    const input = JSON.parse(fs.readFileSync(
+      path.join(K3_FIXTURES, "v0951-k3-wrapper-input/input-without-lens-shift.json"),
+      "utf8"
+    ));
+    input.contract = contract;
+    // Pre-v0.95.1 behavior preservation: engagement without lens_shift opt-in
+    // must emit exactly the 5 default cadences (morning/midday/eod/weekly/monthly)
+    // — even though contract.cadences.lens_shift exists post-K3-F. The helper
+    // MUST gate the 6th-section emit on `engagement.cadences.lens_shift`.
+    let output = { file_md: "", status: "failed:helper-missing" };
+    if (typeof WH.composeScheduledJobWrappers === "function") {
+      output = WH.composeScheduledJobWrappers(input);
+    }
+    const sectionHeadings = (output.file_md || "").match(/^## \d+ — /gm) || [];
+    const omitsLensShiftSection = !(output.file_md || "").includes("lens_shift");
+    const fiveSections = sectionHeadings.length === 5;
+    const okStatus = (output.status === "ok" || output.status === "ready" || /:ok\b/.test(String(output.status || "")));
+    // S3.3 wires the engagement-level cadence-gate semantics into the helper.
+    // The source MUST explicitly read engagement.cadences (or an equivalent
+    // opt-in shape) AND key on lens_shift to skip the 6th block — a static
+    // grep guarantees the helper's intent is encoded, not accidental. Without
+    // this static check, K3-I would pass spuriously pre-S3.2 (contract has no
+    // lens_shift entry yet) instead of remaining TDD-red.
+    const helperSrc = fs.readFileSync(wrapperHelperPath, "utf8");
+    const mentionsEngagementCadenceOptIn =
+      /engagement\.cadences/.test(helperSrc)
+      && /lens_shift/.test(helperSrc);
+    assertTrue("HC-V0951-K3-I: composeScheduledJobWrappers emits exactly 5 wrapper sections (no lens_shift) when engagement has no lens_shift opt-in (AND helper source documents engagement.cadences.lens_shift gate)",
+      fiveSections
+      && omitsLensShiftSection
+      && okStatus
+      && mentionsEngagementCadenceOptIn);
+  } catch (e) {
+    assertTrue("HC-V0951-K3-I: wrapper-helper omits 6th block without opt-in", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0951-K3-J: CoworkLensShiftCards renders 2-column pair when warm AND cold exist ---`);
+  try {
+    const cardsPath = path.join(COWORK_BP_DIR, "helpers/cowork-lens-shift-cards.js");
+    delete require.cache[require.resolve(cardsPath)];
+    // CustomJS class is invoked via Node with a synthetic dataview-like
+    // context. We require the file directly + look up the constructor by name.
+    // Per design § 5.5: when both warm + cold MB exist for the same day +
+    // engagement, render a 2-column pair (one .lens-shift-card per note).
+    const CardsModule = require(cardsPath);
+    const Cls = CardsModule && (CardsModule.CoworkLensShiftCards || CardsModule.default || CardsModule);
+    const fixture = JSON.parse(fs.readFileSync(
+      path.join(K3_FIXTURES, "v0951-k3-customjs-cards/pages-pair.json"),
+      "utf8"
+    ));
+    const container = { children: [], appendChild(n) { this.children.push(n); }, removeChild(n) { this.children = this.children.filter(c => c !== n); }, get firstChild() { return this.children[0] || null; }, closest() { return null; } };
+    const dv = {
+      container,
+      pages(_query) { return { where(fn) { return fixture.pages.filter(fn); } }; },
+      el(tag, text, opts) { const node = { tag, text, opts, children: [], appendChild(n) { this.children.push(n); } }; container.appendChild(node); return node; },
+      header(level, text) { const node = { tag: `h${level}`, text, children: [], appendChild(n) { this.children.push(n); } }; container.appendChild(node); return node; },
+      paragraph(text) { const node = { tag: "p", text, children: [], appendChild(n) { this.children.push(n); } }; container.appendChild(node); return node; },
+      span(text) { return { tag: "span", text }; },
+      fileLink(path, embed, alias) { return { tag: "a", path, alias: alias || path }; },
+    };
+    const inst = (typeof Cls === "function") ? new Cls() : null;
+    if (inst && typeof inst.render === "function") {
+      await inst.render(dv, {});
+    }
+    // Flatten the rendered tree into a string for assertion-friendly matching.
+    const flatten = (n) => {
+      if (!n) return "";
+      const parts = [];
+      if (typeof n.text === "string") parts.push(n.text);
+      if (typeof n.path === "string") parts.push(n.path);
+      if (Array.isArray(n.children)) for (const c of n.children) parts.push(flatten(c));
+      return parts.join(" ");
+    };
+    const dom = flatten(container);
+    const hasWarmRef = dom.includes("morning-briefing-personal") && !dom.includes("morning-briefing-cold-personal-warm-only");
+    const hasColdRef = dom.includes("morning-briefing-cold-personal");
+    assertTrue("HC-V0951-K3-J: CoworkLensShiftCards renders both warm AND cold notes (2-column pair) when both exist for same day",
+      hasWarmRef
+      && hasColdRef
+      && container.children.length >= 1);
+  } catch (e) {
+    assertTrue("HC-V0951-K3-J: CustomJS pair rendering", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0951-K3-K: CoworkLensShiftCards renders single-column when only warm exists ---`);
+  try {
+    const cardsPath = path.join(COWORK_BP_DIR, "helpers/cowork-lens-shift-cards.js");
+    delete require.cache[require.resolve(cardsPath)];
+    const CardsModule = require(cardsPath);
+    const Cls = CardsModule && (CardsModule.CoworkLensShiftCards || CardsModule.default || CardsModule);
+    const fixture = JSON.parse(fs.readFileSync(
+      path.join(K3_FIXTURES, "v0951-k3-customjs-cards/pages-warm-only.json"),
+      "utf8"
+    ));
+    const container = { children: [], appendChild(n) { this.children.push(n); }, removeChild(n) { this.children = this.children.filter(c => c !== n); }, get firstChild() { return this.children[0] || null; }, closest() { return null; } };
+    const dv = {
+      container,
+      pages() { return { where(fn) { return fixture.pages.filter(fn); } }; },
+      el(tag, text, opts) { const node = { tag, text, opts, children: [], appendChild(n) { this.children.push(n); } }; container.appendChild(node); return node; },
+      header(level, text) { const node = { tag: `h${level}`, text, children: [], appendChild(n) { this.children.push(n); } }; container.appendChild(node); return node; },
+      paragraph(text) { const node = { tag: "p", text, children: [], appendChild(n) { this.children.push(n); } }; container.appendChild(node); return node; },
+      span(text) { return { tag: "span", text }; },
+      fileLink(path, embed, alias) { return { tag: "a", path, alias: alias || path }; },
+    };
+    const inst = (typeof Cls === "function") ? new Cls() : null;
+    if (inst && typeof inst.render === "function") {
+      await inst.render(dv, {});
+    }
+    const flatten = (n) => {
+      if (!n) return "";
+      const parts = [];
+      if (typeof n.text === "string") parts.push(n.text);
+      if (typeof n.path === "string") parts.push(n.path);
+      if (Array.isArray(n.children)) for (const c of n.children) parts.push(flatten(c));
+      return parts.join(" ");
+    };
+    const dom = flatten(container);
+    // Warm exists → rendered. Cold absent → MUST NOT be rendered.
+    const hasWarmRef = dom.includes("morning-briefing-personal");
+    const hasColdRef = dom.includes("morning-briefing-cold-personal");
+    assertTrue("HC-V0951-K3-K: CoworkLensShiftCards renders ONLY warm (single-column) when cold MB absent for the day",
+      hasWarmRef
+      && !hasColdRef);
+  } catch (e) {
+    assertTrue("HC-V0951-K3-K: CustomJS warm-only single-column", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0951-K3-L: CoworkLensShiftCards renders single-column when only cold exists ---`);
+  try {
+    const cardsPath = path.join(COWORK_BP_DIR, "helpers/cowork-lens-shift-cards.js");
+    delete require.cache[require.resolve(cardsPath)];
+    const CardsModule = require(cardsPath);
+    const Cls = CardsModule && (CardsModule.CoworkLensShiftCards || CardsModule.default || CardsModule);
+    const fixture = JSON.parse(fs.readFileSync(
+      path.join(K3_FIXTURES, "v0951-k3-customjs-cards/pages-cold-only.json"),
+      "utf8"
+    ));
+    const container = { children: [], appendChild(n) { this.children.push(n); }, removeChild(n) { this.children = this.children.filter(c => c !== n); }, get firstChild() { return this.children[0] || null; }, closest() { return null; } };
+    const dv = {
+      container,
+      pages() { return { where(fn) { return fixture.pages.filter(fn); } }; },
+      el(tag, text, opts) { const node = { tag, text, opts, children: [], appendChild(n) { this.children.push(n); } }; container.appendChild(node); return node; },
+      header(level, text) { const node = { tag: `h${level}`, text, children: [], appendChild(n) { this.children.push(n); } }; container.appendChild(node); return node; },
+      paragraph(text) { const node = { tag: "p", text, children: [], appendChild(n) { this.children.push(n); } }; container.appendChild(node); return node; },
+      span(text) { return { tag: "span", text }; },
+      fileLink(path, embed, alias) { return { tag: "a", path, alias: alias || path }; },
+    };
+    const inst = (typeof Cls === "function") ? new Cls() : null;
+    if (inst && typeof inst.render === "function") {
+      await inst.render(dv, {});
+    }
+    const flatten = (n) => {
+      if (!n) return "";
+      const parts = [];
+      if (typeof n.text === "string") parts.push(n.text);
+      if (typeof n.path === "string") parts.push(n.path);
+      if (Array.isArray(n.children)) for (const c of n.children) parts.push(flatten(c));
+      return parts.join(" ");
+    };
+    const dom = flatten(container);
+    // Cold exists → rendered. Warm-only path absent → MUST NOT mistakenly fire.
+    const hasColdRef = dom.includes("morning-briefing-cold-personal");
+    // Distinguish "morning-briefing-personal" warm slug from the cold slug
+    // (which is "morning-briefing-cold-personal"). The cold slug contains the
+    // warm slug as substring, so we must exclude cold-pages when looking for warm.
+    const warmOnly = /(?:^|[^t])morning-briefing-personal/.test(dom) || dom.includes("morning-briefing-personal.md");
+    assertTrue("HC-V0951-K3-L: CoworkLensShiftCards renders ONLY cold (single-column) when warm MB absent for the day",
+      hasColdRef
+      && !warmOnly);
+  } catch (e) {
+    assertTrue("HC-V0951-K3-L: CustomJS cold-only single-column", false, e && e.message);
+  }
+
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
   if (fail > 0) {

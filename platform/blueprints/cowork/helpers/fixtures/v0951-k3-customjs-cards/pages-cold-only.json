@@ -1,0 +1,20 @@
+{
+  "_comment": "K3-L fixture — only COLD MB exists for 2026-06-08; warm MB disabled Saturday. CoworkLensShiftCards must render single-column (cold only).",
+  "pages": [
+    {
+      "file": {
+        "name": "morning-briefing-cold-personal",
+        "path": "spice/cowork/daily/2026/06-June/2026-06-08/morning-briefing-cold-personal.md",
+        "folder": "spice/cowork/daily/2026/06-June/2026-06-08",
+        "link": {
+          "path": "spice/cowork/daily/2026/06-June/2026-06-08/morning-briefing-cold-personal.md"
+        }
+      },
+      "type": "cowork-morning-briefing-cold",
+      "engagement_id": "personal",
+      "day": "2026-06-08",
+      "title": "Morning Briefing (Cold) - Saturday, June 8, 2026",
+      "summary": "Today's calendar: dentist at 2pm. Email triage: 3 reply-owed threads."
+    }
+  ]
+}

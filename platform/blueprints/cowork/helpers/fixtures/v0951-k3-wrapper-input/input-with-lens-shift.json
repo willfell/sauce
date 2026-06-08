@@ -1,0 +1,46 @@
+{
+  "_comment": "K3-H fixture — engagement opts into lens_shift cadence. Mirrors compose-scheduled-job-wrappers accuris-shape input but adds engagement.cadences.lens_shift. composeScheduledJobWrappers must emit a 6th fenced section (after monthly-review) when this opt-in is set, AND the per-cadence wrapper must be loaded from scheduled-job-contract.json's lens_shift entry. Generated_at frozen.",
+  "engagement": {
+    "id": "personal",
+    "label": "Personal",
+    "type": "personal",
+    "timezone": "America/Denver",
+    "cadences": {
+      "lens_shift": {
+        "cron": "0 7 * * 6"
+      }
+    }
+  },
+  "prefs": {
+    "mcps": {
+      "calendar": {
+        "kind": "calendar",
+        "served_by": "Google Calendar",
+        "connected": true,
+        "callout_type": "tip"
+      },
+      "email": {
+        "kind": "email",
+        "served_by": "Gmail",
+        "connected": true,
+        "callout_type": "quote"
+      }
+    },
+    "personality": {
+      "notes": "Casual, conversational, warm.",
+      "vibe": "warm",
+      "formality": "casual",
+      "length": "medium",
+      "pep_talk": false
+    }
+  },
+  "engagement_type_data": {
+    "scheduled_jobs": {
+      "disabled_cadences": []
+    }
+  },
+  "sauce_version": "0.95.1",
+  "cowork_version": "0.33.0",
+  "generated_at": "2026-06-08T07:00:00-06:00",
+  "generated_by": "cowork:sync-scheduled-jobs@1.0.0"
+}
