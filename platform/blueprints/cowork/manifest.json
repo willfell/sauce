@@ -401,6 +401,11 @@
       "source": "data/scheduled-job-contract.json",
       "dest": "{{module_directory}}/data/scheduled-job-contract.json",
       "tag": "platform"
+    },
+    {
+      "source": "data/kind-titles.json",
+      "dest": "{{module_directory}}/data/kind-titles.json",
+      "tag": "platform"
     }
   ],
   "claude_surface": [
