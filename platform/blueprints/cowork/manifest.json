@@ -406,6 +406,11 @@
       "source": "data/kind-titles.json",
       "dest": "{{module_directory}}/data/kind-titles.json",
       "tag": "platform"
+    },
+    {
+      "source": "helpers/capture-frame-drift-helper.js",
+      "dest": "{{module_directory}}/helpers/capture-frame-drift-helper.js",
+      "tag": "platform"
     }
   ],
   "claude_surface": [
@@ -705,6 +710,11 @@
       "kind": "skill",
       "source": "skills/skills/read-memory/SKILL.md",
       "dest": "{{skills_dir}}/skills/read-memory/SKILL.md"
+    },
+    {
+      "kind": "skill",
+      "source": "skills/skills/capture-frame-drift/SKILL.md",
+      "dest": "{{skills_dir}}/skills/capture-frame-drift/SKILL.md"
     },
     {
       "kind": "skill",
