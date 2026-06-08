@@ -186,6 +186,28 @@ On any miss: return `failed:contract-violation:<field>` + emit Notice `cowork:sy
 
    d. Capture the sub-skill's return value as `drift_result` for the Done section diagnostics.
 
+7. **v0.96.0 Rail L — post-write learn-from-checks (gated).** AFTER Step 6 AND BEFORE `## Verify`, conditionally invoke `cowork:learn-from-checks`. This step is the final atomic-state mutation of the orchestrator — it updates per-engagement `learned_weights:` in `user-preferences.md` from yesterday's ticked rating callouts so tomorrow's morning-briefing dispatch reflects observed preference signal.
+
+   a. **Gate.** When `engagement.learning_enabled === false`, skip this step silently. Continue to `## Verify`. (Default behavior — `learning_enabled` unset / `true` — runs the sub-skill.)
+
+   b. READ `.claude/skills/cowork/skills/learn-from-checks/SKILL.md` in full and follow its `## Steps` section with:
+
+      ```json
+      {
+        "engagement_id": "<from vault-config.md>",
+        "yesterday":     "<context.yesterday from date-context>",
+        "vault_root":    "<absolute vault root from check-vault-routing>"
+      }
+      ```
+
+      The sub-skill is pure data — no MCP calls, no LLM call. It scans `<vault_root>/spice/cowork/daily/<YYYY>/<MM-Month>/<yesterday>/` for rating-tick atomic notes, aggregates per-kind ticks/skips, applies `updateWeights` + `evaluateWarmup` from `helpers/learn-from-checks-helper.js`, and writes `learned_weights:` back to `spice/cowork/context/user-preferences.md` frontmatter. Idempotent on same-day re-fire via `totals.scanned_days[]` (per HC-V0960-L-18).
+
+   c. **Lazy-init mitigation (S0.5 plan revision).** On the first post-v0.96.0-upgrade fire against an existing vault, `user-preferences.md` has NO `learned_weights:` section (the installer's `materialize_once` policy skipped the file). The sub-skill detects this in its Step 3 and constructs the skeleton in-memory before scanning. First-fire result includes `lazy_initialized: true`. No caller action required.
+
+   d. **Non-fatal contract.** ANY `status` starting with `"failed:"` from the sub-skill MUST be treated as non-fatal: emit Notice `cowork:synthesize-day learn-from-checks step skipped -- <result.status>` and continue to `## Verify`. `learned_weights:` stays at its prior on-disk state; synthesize-day's own contract guards in `## Verify` (synthesized: true, body H1, callouts, ## Ticks, tick count) are independent of this step.
+
+   e. Capture the sub-skill's return value as `learn_result` for the Done section diagnostics.
+
 ## Verify
 
 After a successful Write:

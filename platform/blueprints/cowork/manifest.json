@@ -793,6 +793,11 @@
     },
     {
       "kind": "skill",
+      "source": "skills/skills/learn-from-checks/SKILL.md",
+      "dest": "{{skills_dir}}/skills/learn-from-checks/SKILL.md"
+    },
+    {
+      "kind": "skill",
       "source": "skills/skills/gather-semantic-memory/SKILL.md",
       "dest": "{{skills_dir}}/skills/gather-semantic-memory/SKILL.md"
     },
