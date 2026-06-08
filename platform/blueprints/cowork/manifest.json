@@ -14,7 +14,8 @@
     "CoworkHubNav",
     "CoworkDailyActions",
     "CoworkReadiness",
-    "CoworkLatestRuns"
+    "CoworkLatestRuns",
+    "CoworkLensShiftCards"
   ],
   "nav_buttons": [
     {
@@ -308,6 +309,10 @@
     {
       "source": "helpers/cowork-latest-runs.js",
       "dest": "{{scripts_path}}/cowork/cowork-latest-runs.js"
+    },
+    {
+      "source": "helpers/cowork-lens-shift-cards.js",
+      "dest": "{{scripts_path}}/cowork/cowork-lens-shift-cards.js"
     },
     {
       "source": "content/scheduled-jobs.md",
