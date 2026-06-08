@@ -13389,6 +13389,399 @@ type: cowork-microscope
     assertTrue("HC-V0960-D-14: composeBody SKIPS the detection callout when render_aspects.new_mcp_notice == 'skip' even if pending_confirmations is non-empty", false, e && e.message);
   }
 
+  // ============================================================================
+  // v0.96.0 cowork-rethought-1 — Rail L (preference learning)
+  // 18 RED sub-asserts (HC-V0960-L-1..18). All FAIL until S3.2 through S3.5.
+  //   S3.2 (learn-from-checks-helper + parseRatingCallout + updateWeights +
+  //         evaluateWarmup) turns L-1..L-11 GREEN.
+  //   S3.3 (composeBody rating callout) turns L-12..L-13 GREEN.
+  //   S3.4 (composeFinalPreferences weight-aware ordering + day-14 backstop)
+  //         turns L-14..L-17 GREEN.
+  //   S3.5 (learn-from-checks SKILL.md) turns L-18 GREEN.
+  // Fixtures live at platform/test/fixtures/cowork/learn/.
+  // ============================================================================
+
+  const LEARN_FIXTURES_DIR = path.join(WORKSHOP, "platform/test/fixtures/cowork/learn");
+
+  console.log(`\n--- Case HC-V0960-L-1: learn-from-checks-helper.js exports updateWeights ---`);
+  try {
+    const helperPath = path.join(COWORK_HELPERS_DIR, "learn-from-checks-helper.js");
+    delete require.cache[require.resolve(helperPath)];
+    const LFCH = require(helperPath);
+    assertTrue("HC-V0960-L-1: learn-from-checks-helper.js exports updateWeights(prev_per_kind, observations, opts?)",
+      LFCH && typeof LFCH.updateWeights === "function" && LFCH.updateWeights.length >= 2);
+  } catch (e) {
+    assertTrue("HC-V0960-L-1: learn-from-checks-helper.js exports updateWeights(prev_per_kind, observations, opts?)", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0960-L-2: updateWeights worked example (calendar ticked → 1.201) ---`);
+  try {
+    const helperPath = path.join(COWORK_HELPERS_DIR, "learn-from-checks-helper.js");
+    delete require.cache[require.resolve(helperPath)];
+    const { updateWeights } = require(helperPath);
+    const prev = { calendar: { weight: 1.20, ticks: 0, skips: 0, warmup: false } };
+    const observations = [{ kind: "calendar", ticked: true }];
+    const result = updateWeights(prev, observations);
+    // Formula: 1.20 * 0.98 + 0.15 * (1 - 0) / (1 + 0 + 5) = 1.176 + 0.025 = 1.201
+    const w = result && result.calendar && Number(result.calendar.weight);
+    assertTrue("HC-V0960-L-2: updateWeights calendar (1.20 ticked) -> 1.201 (rounded to 3dp)",
+      typeof w === "number" && Math.round(w * 1000) / 1000 === 1.201);
+  } catch (e) {
+    assertTrue("HC-V0960-L-2: updateWeights calendar (1.20 ticked) -> 1.201 (rounded to 3dp)", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0960-L-3: updateWeights worked example (email un-ticked → 0.820) ---`);
+  try {
+    const helperPath = path.join(COWORK_HELPERS_DIR, "learn-from-checks-helper.js");
+    delete require.cache[require.resolve(helperPath)];
+    const { updateWeights } = require(helperPath);
+    const prev = { email: { weight: 0.85, ticks: 0, skips: 0, warmup: false } };
+    const observations = [{ kind: "email", ticked: false }];
+    const result = updateWeights(prev, observations);
+    // Formula: 0.85 * 0.98 + 0.15 * (0 - 0.5) / (0 + 1 + 5) = 0.833 - 0.0125 = 0.820
+    const w = result && result.email && Number(result.email.weight);
+    assertTrue("HC-V0960-L-3: updateWeights email (0.85 un-ticked) -> 0.820 (rounded to 3dp)",
+      typeof w === "number" && Math.round(w * 1000) / 1000 === 0.820);
+  } catch (e) {
+    assertTrue("HC-V0960-L-3: updateWeights email (0.85 un-ticked) -> 0.820 (rounded to 3dp)", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0960-L-4: updateWeights clamps lower (0.05 → 0.10) ---`);
+  try {
+    const helperPath = path.join(COWORK_HELPERS_DIR, "learn-from-checks-helper.js");
+    delete require.cache[require.resolve(helperPath)];
+    const { updateWeights } = require(helperPath);
+    const prev = { finance: { weight: 0.05, ticks: 0, skips: 50, warmup: false } };
+    // Try several observations — clamp_min should hold regardless
+    const obsA = [{ kind: "finance", ticked: false }];
+    const obsB = [{ kind: "finance", ticked: true }];
+    const resA = updateWeights(prev, obsA);
+    const resB = updateWeights(prev, obsB);
+    const wA = resA && resA.finance && Number(resA.finance.weight);
+    const wB = resB && resB.finance && Number(resB.finance.weight);
+    assertTrue("HC-V0960-L-4: updateWeights clamps lower — input weight 0.05 stays at 0.10 (clamp_min) regardless of observation",
+      typeof wA === "number" && wA >= 0.10 && wA <= 0.10 + 1e-9
+      && typeof wB === "number" && wB >= 0.10);
+  } catch (e) {
+    assertTrue("HC-V0960-L-4: updateWeights clamps lower — input weight 0.05 stays at 0.10 (clamp_min) regardless of observation", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0960-L-5: updateWeights clamps upper (5.00 → 3.00) ---`);
+  try {
+    const helperPath = path.join(COWORK_HELPERS_DIR, "learn-from-checks-helper.js");
+    delete require.cache[require.resolve(helperPath)];
+    const { updateWeights } = require(helperPath);
+    const prev = { projects: { weight: 5.00, ticks: 100, skips: 0, warmup: false } };
+    const observations = [{ kind: "projects", ticked: true }];
+    const result = updateWeights(prev, observations);
+    const w = result && result.projects && Number(result.projects.weight);
+    assertTrue("HC-V0960-L-5: updateWeights clamps upper — input weight 5.00 ends at 3.00 (clamp_max)",
+      typeof w === "number" && Math.abs(w - 3.00) < 1e-9);
+  } catch (e) {
+    assertTrue("HC-V0960-L-5: updateWeights clamps upper — input weight 5.00 ends at 3.00 (clamp_max)", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0960-L-6: learn-from-checks-helper.js exports evaluateWarmup ---`);
+  try {
+    const helperPath = path.join(COWORK_HELPERS_DIR, "learn-from-checks-helper.js");
+    delete require.cache[require.resolve(helperPath)];
+    const LFCH = require(helperPath);
+    assertTrue("HC-V0960-L-6: learn-from-checks-helper.js exports evaluateWarmup(per_kind_state, days_since_first, opts?)",
+      LFCH && typeof LFCH.evaluateWarmup === "function" && LFCH.evaluateWarmup.length >= 2);
+  } catch (e) {
+    assertTrue("HC-V0960-L-6: learn-from-checks-helper.js exports evaluateWarmup(per_kind_state, days_since_first, opts?)", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0960-L-7: evaluateWarmup graduates when days>=7 AND obs>=7 ---`);
+  try {
+    const helperPath = path.join(COWORK_HELPERS_DIR, "learn-from-checks-helper.js");
+    delete require.cache[require.resolve(helperPath)];
+    const { evaluateWarmup } = require(helperPath);
+    // calendar: 4 ticks + 3 skips = 7 obs; days_since_first 7 — should graduate (warmup → false)
+    const state = { calendar: { weight: 1.00, ticks: 4, skips: 3, warmup: true } };
+    const result = evaluateWarmup(state, 7);
+    const graduated = result && result.calendar && result.calendar.warmup === false;
+    assertTrue("HC-V0960-L-7: evaluateWarmup graduates kind out of warmup when days_since_first >= 7 AND (ticks + skips) >= 7",
+      !!graduated);
+  } catch (e) {
+    assertTrue("HC-V0960-L-7: evaluateWarmup graduates kind out of warmup when days_since_first >= 7 AND (ticks + skips) >= 7", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0960-L-8: evaluateWarmup KEEPS warmup when threshold not met ---`);
+  try {
+    const helperPath = path.join(COWORK_HELPERS_DIR, "learn-from-checks-helper.js");
+    delete require.cache[require.resolve(helperPath)];
+    const { evaluateWarmup } = require(helperPath);
+    // days=6 (one shy) + ticks+skips=6 (one shy)
+    const stateA = { calendar: { weight: 1.00, ticks: 3, skips: 3, warmup: true } };
+    const stateB = { calendar: { weight: 1.00, ticks: 4, skips: 2, warmup: true } };
+    const resA = evaluateWarmup(stateA, 6); // days short (6)
+    const resB = evaluateWarmup(stateB, 7); // obs short (6 total)
+    const stillWarmA = resA && resA.calendar && resA.calendar.warmup === true;
+    const stillWarmB = resB && resB.calendar && resB.calendar.warmup === true;
+    assertTrue("HC-V0960-L-8: evaluateWarmup keeps warmup true with days_since_first === 6 OR (ticks + skips) === 6",
+      !!stillWarmA && !!stillWarmB);
+  } catch (e) {
+    assertTrue("HC-V0960-L-8: evaluateWarmup keeps warmup true with days_since_first === 6 OR (ticks + skips) === 6", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0960-L-9: learn-from-checks-helper.js exports parseRatingCallout ---`);
+  try {
+    const helperPath = path.join(COWORK_HELPERS_DIR, "learn-from-checks-helper.js");
+    delete require.cache[require.resolve(helperPath)];
+    const LFCH = require(helperPath);
+    assertTrue("HC-V0960-L-9: learn-from-checks-helper.js exports parseRatingCallout(markdown)",
+      LFCH && typeof LFCH.parseRatingCallout === "function" && LFCH.parseRatingCallout.length >= 1);
+  } catch (e) {
+    assertTrue("HC-V0960-L-9: learn-from-checks-helper.js exports parseRatingCallout(markdown)", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0960-L-10: parseRatingCallout extracts ticks (3 ticked, 2 un-ticked) ---`);
+  try {
+    const helperPath = path.join(COWORK_HELPERS_DIR, "learn-from-checks-helper.js");
+    delete require.cache[require.resolve(helperPath)];
+    const { parseRatingCallout } = require(helperPath);
+    const md = fs.readFileSync(path.join(LEARN_FIXTURES_DIR, "atomic-note-with-3-ticks.md"), "utf8");
+    const parsed = parseRatingCallout(md);
+    const list = parsed && Array.isArray(parsed.observations) ? parsed.observations : (Array.isArray(parsed) ? parsed : null);
+    const byKind = {};
+    if (Array.isArray(list)) for (const e of list) byKind[String(e.kind || "").toLowerCase()] = !!e.ticked;
+    assertTrue("HC-V0960-L-10: parseRatingCallout extracts 5 entries with correct ticked flags (3 ticked: calendar/projects/finance)",
+      Array.isArray(list) && list.length === 5
+      && byKind.calendar === true && byKind.email === false && byKind.projects === true
+      && byKind.threads === false && byKind.finance === true);
+  } catch (e) {
+    assertTrue("HC-V0960-L-10: parseRatingCallout extracts 5 entries with correct ticked flags (3 ticked: calendar/projects/finance)", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0960-L-11: parseRatingCallout returns null when sentinel missing ---`);
+  try {
+    const helperPath = path.join(COWORK_HELPERS_DIR, "learn-from-checks-helper.js");
+    delete require.cache[require.resolve(helperPath)];
+    const { parseRatingCallout } = require(helperPath);
+    const md = fs.readFileSync(path.join(LEARN_FIXTURES_DIR, "atomic-note-no-rating.md"), "utf8");
+    const parsed = parseRatingCallout(md);
+    assertTrue("HC-V0960-L-11: parseRatingCallout returns null when sentinel `<!-- cowork:rating-block ... -->` missing",
+      parsed === null);
+  } catch (e) {
+    assertTrue("HC-V0960-L-11: parseRatingCallout returns null when sentinel `<!-- cowork:rating-block ... -->` missing", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0960-L-12: composeBody emits rating callout with HTML sentinel ---`);
+  try {
+    const CBH = require(path.join(COWORK_HELPERS_DIR, "compose-body-helper.js"));
+    const input = {
+      cadence: "morning-briefing",
+      nav_buttons_block: '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });\n```',
+      synopsis_md: "> [!info]+ Today\n> body",
+      memory_callouts: {},
+      ordered_blocks: [
+        { kind: "calendar", callout_type: "example", title: "Today's calendar", body_md: "9am standup" },
+      ],
+      engagement_type_blocks: [],
+      closing_md: "> [!tip] Pep talk\n> Go.",
+      learning_enabled: true,
+      surfaced_kinds_for_rating: ["calendar", "email", "projects", "threads", "finance"],
+      day: "2026-06-08",
+    };
+    const result = CBH.composeBody(input);
+    const body = result && result.body_md;
+    assertTrue("HC-V0960-L-12: composeBody emits rating callout with sentinel `<!-- cowork:rating-block schema=1.0.0 cadence=morning-briefing day=2026-06-08 -->` when learning_enabled !== false AND surfaced_kinds_for_rating non-empty",
+      typeof body === "string"
+        && body.includes("<!-- cowork:rating-block schema=1.0.0 cadence=morning-briefing day=2026-06-08 -->"));
+  } catch (e) {
+    assertTrue("HC-V0960-L-12: composeBody emits rating callout with sentinel `<!-- cowork:rating-block schema=1.0.0 cadence=morning-briefing day=2026-06-08 -->` when learning_enabled !== false AND surfaced_kinds_for_rating non-empty", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0960-L-13: rating callout includes only surfaced_kinds_for_rating kinds ---`);
+  try {
+    const CBH = require(path.join(COWORK_HELPERS_DIR, "compose-body-helper.js"));
+    const input = {
+      cadence: "morning-briefing",
+      nav_buttons_block: '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });\n```',
+      synopsis_md: "> [!info]+ Today\n> body",
+      memory_callouts: {},
+      ordered_blocks: [],
+      engagement_type_blocks: [],
+      closing_md: "> [!tip] Pep talk\n> Go.",
+      learning_enabled: true,
+      surfaced_kinds_for_rating: ["calendar", "email"],
+      day: "2026-06-08",
+    };
+    const result = CBH.composeBody(input);
+    const body = result && result.body_md;
+    assertTrue("HC-V0960-L-13: rating callout includes only kinds present in surfaced_kinds_for_rating (calendar + email only; no projects)",
+      typeof body === "string"
+        && body.includes("> - [ ] Calendar")
+        && body.includes("> - [ ] Email")
+        && !body.includes("> - [ ] Projects"));
+  } catch (e) {
+    assertTrue("HC-V0960-L-13: rating callout includes only kinds present in surfaced_kinds_for_rating (calendar + email only; no projects)", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0960-L-14: composeFinalPreferences applies effective_priority for high-deviation weights ---`);
+  try {
+    const DPH = require(path.join(WORKSHOP, "platform/blueprints/cowork/helpers/dispatch-plan-helper.js"));
+    // projects weight = 1.45 (|1.45 - 1.00| = 0.45 > 0.20) AND warmup === false
+    // base_priority example: 5 → effective_priority = 5 - (1.45 * 5) = 5 - 7.25 = -2.25
+    const bundle = {
+      render_aspects: {},
+      cadence_order: { morning: ["calendar", "email", "projects", "threads", "finance"] },
+      voice: {},
+      microscopes_registry: null,
+      tripwire_aspects: [],
+    };
+    const learned_weights = {
+      schema_version: "1.0.0",
+      per_kind: {
+        calendar: { weight: 1.00, ticks: 10, skips: 10, warmup: false },
+        email:    { weight: 1.00, ticks: 10, skips: 10, warmup: false },
+        projects: { weight: 1.45, ticks: 22, skips: 2,  warmup: false },
+        threads:  { weight: 1.00, ticks: 0,  skips: 0,  warmup: true },
+        finance:  { weight: 0.30, ticks: 1,  skips: 18, warmup: false },
+      },
+    };
+    const result = DPH.composeFinalPreferences({ bundle, overrides: null, ad_hoc_prefs: null, learned_weights });
+    const co = result && result.cadence_order && result.cadence_order.morning;
+    // After weight-aware reordering, projects (highest weight, deviation > 0.20, warmup=false) should
+    // move ahead of calendar/email (which stay at base_priority because deviation === 0). Finance
+    // (lowest weight, deviation > 0.20, warmup=false) should move to the tail.
+    assertTrue("HC-V0960-L-14: composeFinalPreferences applies effective_priority = base - (weight * 5) when warmup === false AND abs(weight - 1.00) > 0.20 — projects (w=1.45) moves ahead of calendar (w=1.00)",
+      Array.isArray(co)
+        && co.indexOf("projects") >= 0
+        && co.indexOf("calendar") >= 0
+        && co.indexOf("projects") < co.indexOf("calendar"));
+  } catch (e) {
+    assertTrue("HC-V0960-L-14: composeFinalPreferences applies effective_priority = base - (weight * 5) when warmup === false AND abs(weight - 1.00) > 0.20 — projects (w=1.45) moves ahead of calendar (w=1.00)", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0960-L-15: composeFinalPreferences keeps base_priority when in warmup ---`);
+  try {
+    const DPH = require(path.join(WORKSHOP, "platform/blueprints/cowork/helpers/dispatch-plan-helper.js"));
+    // All kinds in warmup → cadence_order should be identical to bundle's base order
+    const bundle = {
+      render_aspects: {},
+      cadence_order: { morning: ["calendar", "email", "projects", "threads", "finance"] },
+      voice: {},
+      microscopes_registry: null,
+      tripwire_aspects: [],
+    };
+    const learned_weights = {
+      schema_version: "1.0.0",
+      per_kind: {
+        calendar: { weight: 1.80, ticks: 2, skips: 1, warmup: true },
+        email:    { weight: 0.20, ticks: 0, skips: 3, warmup: true },
+        projects: { weight: 1.45, ticks: 1, skips: 1, warmup: true },
+        threads:  { weight: 1.00, ticks: 0, skips: 0, warmup: true },
+        finance:  { weight: 0.30, ticks: 0, skips: 2, warmup: true },
+      },
+    };
+    const result = DPH.composeFinalPreferences({ bundle, overrides: null, ad_hoc_prefs: null, learned_weights });
+    const co = result && result.cadence_order && result.cadence_order.morning;
+    // Cadence_order should be unchanged AND result must expose a learned_weights-aware
+    // contract field (learned_weights_applied) proving the helper actually consulted
+    // learned_weights rather than ignoring it. Pre-S3.4 the field doesn't exist.
+    const applied = result && Object.prototype.hasOwnProperty.call(result, "learned_weights_applied")
+      ? result.learned_weights_applied : undefined;
+    assertTrue("HC-V0960-L-15: composeFinalPreferences keeps base_priority when warmup === true (cadence_order unchanged AND learned_weights_applied is reported)",
+      Array.isArray(co)
+        && co[0] === "calendar" && co[1] === "email" && co[2] === "projects"
+        && co[3] === "threads"  && co[4] === "finance"
+        && applied !== undefined);
+  } catch (e) {
+    assertTrue("HC-V0960-L-15: composeFinalPreferences keeps base_priority when warmup === true (cadence_order unchanged AND learned_weights_applied is reported)", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0960-L-16: composeFinalPreferences keeps base_priority when deviation <= 0.20 ---`);
+  try {
+    const DPH = require(path.join(WORKSHOP, "platform/blueprints/cowork/helpers/dispatch-plan-helper.js"));
+    // All deviations <= 0.20 → no reordering even though warmup is over
+    const bundle = {
+      render_aspects: {},
+      cadence_order: { morning: ["calendar", "email", "projects", "threads", "finance"] },
+      voice: {},
+      microscopes_registry: null,
+      tripwire_aspects: [],
+    };
+    const learned_weights = {
+      schema_version: "1.0.0",
+      per_kind: {
+        calendar: { weight: 1.15, ticks: 10, skips: 10, warmup: false },
+        email:    { weight: 0.85, ticks: 10, skips: 10, warmup: false },
+        projects: { weight: 1.10, ticks: 10, skips: 10, warmup: false },
+        threads:  { weight: 1.00, ticks: 10, skips: 10, warmup: false },
+        finance:  { weight: 0.90, ticks: 10, skips: 10, warmup: false },
+      },
+    };
+    const result = DPH.composeFinalPreferences({ bundle, overrides: null, ad_hoc_prefs: null, learned_weights });
+    const co = result && result.cadence_order && result.cadence_order.morning;
+    // Same trick as L-15: the helper must report learned_weights_applied so we can
+    // prove the deviation-gate logic ran rather than the helper having ignored
+    // learned_weights altogether.
+    const applied = result && Object.prototype.hasOwnProperty.call(result, "learned_weights_applied")
+      ? result.learned_weights_applied : undefined;
+    assertTrue("HC-V0960-L-16: composeFinalPreferences keeps base_priority when deviation <= 0.20 (weight: 1.15 or 0.85 → no reorder, learned_weights_applied is reported)",
+      Array.isArray(co)
+        && co[0] === "calendar" && co[1] === "email" && co[2] === "projects"
+        && co[3] === "threads"  && co[4] === "finance"
+        && applied !== undefined);
+  } catch (e) {
+    assertTrue("HC-V0960-L-16: composeFinalPreferences keeps base_priority when deviation <= 0.20 (weight: 1.15 or 0.85 → no reorder, learned_weights_applied is reported)", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0960-L-17: day-14 must-surface backstop bumps long-buried kind forward ---`);
+  try {
+    const DPH = require(path.join(WORKSHOP, "platform/blueprints/cowork/helpers/dispatch-plan-helper.js"));
+    // finance has lowest weight (0.30) AND warmup=false AND last_surfaced exactly 14 days ago
+    // → day-14 backstop should bump effective_priority enough to surface it ahead of e.g. threads
+    const bundle = {
+      render_aspects: {},
+      cadence_order: { morning: ["calendar", "email", "projects", "threads", "finance"] },
+      voice: {},
+      microscopes_registry: null,
+      tripwire_aspects: [],
+    };
+    const learned_weights = {
+      schema_version: "1.0.0",
+      per_kind: {
+        calendar: { weight: 1.00, ticks: 10, skips: 10, warmup: false, last_surfaced: "2026-06-07" },
+        email:    { weight: 1.00, ticks: 10, skips: 10, warmup: false, last_surfaced: "2026-06-07" },
+        projects: { weight: 1.00, ticks: 10, skips: 10, warmup: false, last_surfaced: "2026-06-07" },
+        threads:  { weight: 1.00, ticks: 0,  skips: 0,  warmup: false, last_surfaced: "2026-06-07" },
+        finance:  { weight: 0.30, ticks: 1,  skips: 18, warmup: false, last_surfaced: "2026-05-25" },
+      },
+    };
+    const result = DPH.composeFinalPreferences({
+      bundle,
+      overrides: null,
+      ad_hoc_prefs: null,
+      learned_weights,
+      today: "2026-06-08",
+    });
+    const co = result && result.cadence_order && result.cadence_order.morning;
+    // finance should not be at tail any more — day-14 backstop fired
+    assertTrue("HC-V0960-L-17: day-14 must-surface backstop — finance (lowest weight, last_surfaced 14 days ago, warmup === false) gets a bigger bump so it surfaces ahead of at least one other kind",
+      Array.isArray(co) && co.indexOf("finance") < co.length - 1);
+  } catch (e) {
+    assertTrue("HC-V0960-L-17: day-14 must-surface backstop — finance (lowest weight, last_surfaced 14 days ago, warmup === false) gets a bigger bump so it surfaces ahead of at least one other kind", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0960-L-18: cowork:skills/learn-from-checks SKILL.md exists + idempotent ---`);
+  try {
+    const skillPath = path.join(WORKSHOP, "platform/blueprints/cowork/skills/skills/learn-from-checks/SKILL.md");
+    const exists = fs.existsSync(skillPath);
+    let mentionsIdempotency = false;
+    if (exists) {
+      const content = fs.readFileSync(skillPath, "utf8");
+      // Idempotency mechanism is documented via totals.scanned_days[] — same-day re-fire is a no-op
+      mentionsIdempotency = content.includes("totals.scanned_days") || content.includes("scanned_days[]");
+    }
+    assertTrue("HC-V0960-L-18: cowork:skills/learn-from-checks/SKILL.md exists at platform/blueprints/cowork/skills/skills/learn-from-checks/SKILL.md AND documents `totals.scanned_days[]` idempotency mechanism",
+      exists && mentionsIdempotency);
+  } catch (e) {
+    assertTrue("HC-V0960-L-18: cowork:skills/learn-from-checks/SKILL.md exists at platform/blueprints/cowork/skills/skills/learn-from-checks/SKILL.md AND documents `totals.scanned_days[]` idempotency mechanism", false, e && e.message);
+  }
+
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
   if (fail > 0) {

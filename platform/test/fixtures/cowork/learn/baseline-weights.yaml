@@ -1,0 +1,14 @@
+learned_weights:
+  schema_version: "1.0.0"
+  engagement_id: test-personal
+  per_kind:
+    calendar:   { weight: 1.20, ticks: 18, skips: 4, warmup: false, last_updated: "2026-06-07" }
+    email:      { weight: 0.85, ticks: 7,  skips: 15, warmup: false, last_updated: "2026-06-07" }
+    projects:   { weight: 1.45, ticks: 22, skips: 2, warmup: false, last_updated: "2026-06-07" }
+    threads:    { weight: 1.00, ticks: 0,  skips: 0, warmup: true,  last_updated: "2026-06-07" }
+    finance:    { weight: 0.30, ticks: 1,  skips: 18, warmup: false, last_updated: "2026-06-07" }
+  totals:
+    notes_scanned: 24
+    notes_with_any_tick: 19
+    warmup_until: "2026-06-15"
+    scanned_days: ["2026-06-07"]

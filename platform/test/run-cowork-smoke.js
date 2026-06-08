@@ -4889,6 +4889,102 @@ const CLASSIFIER_FIXTURES_DIR = path.join(ROOT, "platform/test/fixtures/cowork/c
     } catch (e) { failed++; console.error(`FAIL  ${label}: ${e.message}`); }
 }
 
+// ============================================================================
+// v0.96.0 — Rail L smoke scenarios (smoke-L-1..3)
+// ============================================================================
+//   * smoke-L-1: scanAtomicNotes returns observations from fixture atomic note
+//   * smoke-L-2: updateWeights produces correct next state for fixture observations
+//   * smoke-L-3: parseRatingCallout extracts sentinel + ticks correctly
+//
+// All RED until S3.2 lands learn-from-checks-helper.js. Fixtures live at
+// platform/test/fixtures/cowork/learn/.
+
+const LEARN_FIXTURES_DIR = path.join(ROOT, "platform/test/fixtures/cowork/learn");
+
+// smoke-L-1: scanAtomicNotes returns observations from fixture atomic note
+{
+    const label = "smoke-L-1 scanAtomicNotes returns observations from fixture atomic-note-with-3-ticks.md";
+    try {
+        const helperPath = path.join(COWORK_HELPERS_DIR, "learn-from-checks-helper.js");
+        delete require.cache[require.resolve(helperPath)];
+        const LFCH = require(helperPath);
+        const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "smoke-L-1-"));
+        try {
+            // Copy the fixture into a temp scan dir
+            const fixSrc = path.join(LEARN_FIXTURES_DIR, "atomic-note-with-3-ticks.md");
+            const fixDst = path.join(tmpDir, "2026-06-08-0800-briefing.md");
+            fs.copyFileSync(fixSrc, fixDst);
+            // scanAtomicNotes signature (per design): ({ dir, since_day? }) → { observations, scanned_files }
+            // or ({ files: [path] }) — tolerate either by trying the dir-form first.
+            const result = LFCH.scanAtomicNotes({ dir: tmpDir });
+            const obs = result && Array.isArray(result.observations) ? result.observations : null;
+            assertTrue(Array.isArray(obs) && obs.length === 5,
+                `${label}: scanAtomicNotes did not return 5 observations from the fixture (got ${obs && obs.length})`);
+            const byKind = {};
+            if (Array.isArray(obs)) for (const e of obs) byKind[String(e.kind || "").toLowerCase()] = !!e.ticked;
+            assertTrue(byKind.calendar === true && byKind.email === false && byKind.projects === true
+                && byKind.threads === false && byKind.finance === true,
+                `${label}: scanAtomicNotes observations did not match the fixture ticked pattern (3 ticked, 2 un-ticked)`);
+        } finally {
+            try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
+        }
+    } catch (e) { failed++; console.error(`FAIL  ${label}: ${e.message}`); }
+}
+
+// smoke-L-2: updateWeights produces correct next state for fixture observations
+{
+    const label = "smoke-L-2 updateWeights produces correct next state for fixture observations";
+    try {
+        const helperPath = path.join(COWORK_HELPERS_DIR, "learn-from-checks-helper.js");
+        delete require.cache[require.resolve(helperPath)];
+        const { updateWeights } = require(helperPath);
+        const prev = {
+            calendar: { weight: 1.20, ticks: 0, skips: 0, warmup: false },
+            email:    { weight: 0.85, ticks: 0, skips: 0, warmup: false },
+        };
+        const observations = [
+            { kind: "calendar", ticked: true },
+            { kind: "email",    ticked: false },
+        ];
+        const next = updateWeights(prev, observations);
+        const calW = next && next.calendar && Math.round(Number(next.calendar.weight) * 1000) / 1000;
+        const emailW = next && next.email && Math.round(Number(next.email.weight) * 1000) / 1000;
+        assertTrue(calW === 1.201,
+            `${label}: calendar updated weight expected 1.201, got ${calW}`);
+        assertTrue(emailW === 0.820,
+            `${label}: email updated weight expected 0.820, got ${emailW}`);
+        // ticks/skips counters also bump
+        const calTicks = next && next.calendar && Number(next.calendar.ticks);
+        const emailSkips = next && next.email && Number(next.email.skips);
+        assertTrue(calTicks === 1, `${label}: calendar ticks counter expected 1, got ${calTicks}`);
+        assertTrue(emailSkips === 1, `${label}: email skips counter expected 1, got ${emailSkips}`);
+    } catch (e) { failed++; console.error(`FAIL  ${label}: ${e.message}`); }
+}
+
+// smoke-L-3: parseRatingCallout extracts sentinel + ticks correctly
+{
+    const label = "smoke-L-3 parseRatingCallout extracts sentinel + ticks correctly";
+    try {
+        const helperPath = path.join(COWORK_HELPERS_DIR, "learn-from-checks-helper.js");
+        delete require.cache[require.resolve(helperPath)];
+        const { parseRatingCallout } = require(helperPath);
+        const md = fs.readFileSync(path.join(LEARN_FIXTURES_DIR, "atomic-note-with-3-ticks.md"), "utf8");
+        const parsed = parseRatingCallout(md);
+        const list = parsed && Array.isArray(parsed.observations) ? parsed.observations : (Array.isArray(parsed) ? parsed : null);
+        const day = parsed && parsed.day ? parsed.day : null;
+        const cadence = parsed && parsed.cadence ? parsed.cadence : null;
+        assertTrue(Array.isArray(list) && list.length === 5,
+            `${label}: parseRatingCallout did not return 5 observations (got ${list && list.length})`);
+        assertTrue(day === "2026-06-08" && cadence === "morning-briefing",
+            `${label}: parseRatingCallout did not extract day/cadence from sentinel (day=${day}, cadence=${cadence})`);
+        // also test the missing-sentinel branch
+        const mdMissing = fs.readFileSync(path.join(LEARN_FIXTURES_DIR, "atomic-note-no-rating.md"), "utf8");
+        const missing = parseRatingCallout(mdMissing);
+        assertTrue(missing === null,
+            `${label}: parseRatingCallout did not return null on missing sentinel (got ${JSON.stringify(missing)})`);
+    } catch (e) { failed++; console.error(`FAIL  ${label}: ${e.message}`); }
+}
+
 (function main() {
   console.log("--- shared contracts ---");
   checkSharedContracts();
