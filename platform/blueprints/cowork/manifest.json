@@ -683,6 +683,11 @@
     },
     {
       "kind": "skill",
+      "source": "skills/skills/plan-dispatch/SKILL.md",
+      "dest": "{{skills_dir}}/skills/plan-dispatch/SKILL.md"
+    },
+    {
+      "kind": "skill",
       "source": "skills/skills/gather-from-served-by/SKILL.md",
       "dest": "{{skills_dir}}/skills/gather-from-served-by/SKILL.md"
     },
