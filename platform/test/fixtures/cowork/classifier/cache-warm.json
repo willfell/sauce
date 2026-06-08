@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0.0",
+  "classifier_version": "0.96.0",
+  "entries": {
+    "Gmail": {
+      "kind": "email",
+      "classified_at": "2026-06-08T07:00:00Z",
+      "classifier_version": "0.96.0",
+      "best_score": 4
+    }
+  }
+}

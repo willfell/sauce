@@ -1,0 +1,10 @@
+{
+  "reachable_namespaces": ["Gmail", "Google_Calendar", "Brex", "apple-mcp", "Google_Drive"],
+  "tools_by_namespace": {
+    "Gmail": ["search_threads", "create_draft"],
+    "Google_Calendar": ["list_events", "create_event", "suggest_time"],
+    "Brex": ["list_expenses", "list_cards"],
+    "apple-mcp": ["messages_fetch", "messages_search"],
+    "Google_Drive": ["list_recent_files", "search_files"]
+  }
+}

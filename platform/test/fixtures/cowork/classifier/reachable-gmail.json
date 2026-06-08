@@ -1,0 +1,6 @@
+{
+  "reachable_namespaces": ["Gmail"],
+  "tools_by_namespace": {
+    "Gmail": ["search_threads", "create_draft", "list_labels", "label_message"]
+  }
+}

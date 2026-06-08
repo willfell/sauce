@@ -4765,6 +4765,130 @@ const MB_SCHEMA_PATH = path.join(COWORK_SCHEMAS_DIR, "morning-briefing@1.0.0.jso
     } catch (e) { failed++; console.error(`FAIL  ${label}: ${e.message}`); }
 }
 
+// =============================================================================
+// v0.96.0 — Rail D smoke scenarios (smoke-D-1..3)
+//
+// End-to-end coverage for MCP auto-discovery + 14th contract key + detection
+// callout:
+//   * smoke-D-1: classifier returns expected kind for reachable_mixed fixture
+//   * smoke-D-2: cache hit short-circuits — second call reads from cache
+//                without re-classifying
+//   * smoke-D-3: composeBody emits detection callout when new MCP detected
+//                AND render_aspects.new_mcp_notice == "include"
+//
+// RED at S2.1 commit time — kind-classifier-helper.js, the 14th contract key,
+// and the composeBody detection-callout branch do not yet exist. S2.2 lands
+// smoke-D-1, smoke-D-2; S2.4 lands smoke-D-3. Fixtures live at
+// platform/test/fixtures/cowork/classifier/.
+// =============================================================================
+
+const CLASSIFIER_FIXTURES_DIR = path.join(ROOT, "platform/test/fixtures/cowork/classifier");
+
+// smoke-D-1: classifier returns expected kind for reachable_mixed fixture
+{
+    const label = "smoke-D-1 classifier returns expected kind for reachable_mixed fixture";
+    try {
+        const helperPath = path.join(COWORK_HELPERS_DIR, "kind-classifier-helper.js");
+        delete require.cache[require.resolve(helperPath)];
+        const { classifyConnectedKinds } = require(helperPath);
+        const fixture = JSON.parse(fs.readFileSync(path.join(CLASSIFIER_FIXTURES_DIR, "reachable-mixed.json"), "utf8"));
+        const tmpVault = fs.mkdtempSync(path.join(os.tmpdir(), "smoke-D-1-"));
+        try {
+            const result = classifyConnectedKinds({
+                reachable_namespaces: fixture.reachable_namespaces,
+                tools_by_namespace: fixture.tools_by_namespace,
+                vault_root: tmpVault,
+            });
+            // The classifier must map each of the 5 canonical namespaces to its
+            // canonical kind. Accept either object-keyed { Gmail: { kind } } or
+            // string-valued { Gmail: "email" } shape.
+            function getKind(ns) {
+                const c = result && result.classified;
+                if (!c) return null;
+                const e = c[ns];
+                if (!e) return null;
+                return typeof e === "string" ? e : e.kind;
+            }
+            assertTrue(
+                getKind("Gmail") === "email"
+                && getKind("Google_Calendar") === "calendar"
+                && getKind("apple-mcp") === "messages"
+                && getKind("Brex") === "finance"
+                && getKind("Google_Drive") === "docs",
+                `${label}: classifier did not produce the canonical kind mapping for one or more namespaces (got ${JSON.stringify(result && result.classified)})`,
+            );
+        } finally {
+            try { fs.rmSync(tmpVault, { recursive: true, force: true }); } catch (_) {}
+        }
+    } catch (e) { failed++; console.error(`FAIL  ${label}: ${e.message}`); }
+}
+
+// smoke-D-2: cache hit short-circuits — second call reads from cache
+{
+    const label = "smoke-D-2 cache hit short-circuits — second call reads from cache without re-classifying";
+    try {
+        const helperPath = path.join(COWORK_HELPERS_DIR, "kind-classifier-helper.js");
+        delete require.cache[require.resolve(helperPath)];
+        const { classifyConnectedKinds } = require(helperPath);
+        const fixture = JSON.parse(fs.readFileSync(path.join(CLASSIFIER_FIXTURES_DIR, "reachable-gmail.json"), "utf8"));
+        const tmpVault = fs.mkdtempSync(path.join(os.tmpdir(), "smoke-D-2-"));
+        try {
+            const firstCall = classifyConnectedKinds({
+                reachable_namespaces: fixture.reachable_namespaces,
+                tools_by_namespace: fixture.tools_by_namespace,
+                vault_root: tmpVault,
+            });
+            const secondCall = classifyConnectedKinds({
+                reachable_namespaces: fixture.reachable_namespaces,
+                tools_by_namespace: fixture.tools_by_namespace,
+                vault_root: tmpVault,
+            });
+            const firstHadHit = firstCall && (
+                (Array.isArray(firstCall.cache_hits) && firstCall.cache_hits.includes("Gmail"))
+                || (firstCall.classified && firstCall.classified.Gmail && firstCall.classified.Gmail.cache_hit === true)
+            );
+            const secondHasHit = secondCall && (
+                (Array.isArray(secondCall.cache_hits) && secondCall.cache_hits.includes("Gmail"))
+                || (secondCall.classified && secondCall.classified.Gmail && secondCall.classified.Gmail.cache_hit === true)
+            );
+            assertTrue(!firstHadHit && secondHasHit === true,
+                `${label}: first call should miss cache, second call should hit (firstHit=${firstHadHit}, secondHit=${secondHasHit})`);
+        } finally {
+            try { fs.rmSync(tmpVault, { recursive: true, force: true }); } catch (_) {}
+        }
+    } catch (e) { failed++; console.error(`FAIL  ${label}: ${e.message}`); }
+}
+
+// smoke-D-3: composeBody emits detection callout when new MCP detected
+{
+    const label = "smoke-D-3 composeBody emits detection callout when new MCP detected AND render_aspects.new_mcp_notice == include";
+    try {
+        const CBH = require(path.join(COWORK_HELPERS_DIR, "compose-body-helper.js"));
+        const input = {
+            cadence: "morning-briefing",
+            nav_buttons_block: '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });\n```',
+            synopsis_md: "> [!info]+ Today\n> body",
+            memory_callouts: {},
+            ordered_blocks: [
+                { kind: "calendar", callout_type: "example", title: "Today's calendar", body_md: "9am standup" },
+            ],
+            engagement_type_blocks: [],
+            closing_md: "> [!tip] Pep talk\n> Go.",
+            pending_confirmations: ["Google_Calendar", "Brex"],
+            render_aspects: { new_mcp_notice: "include" },
+        };
+        const result = CBH.composeBody(input);
+        const body = result && result.body_md;
+        assertTrue(
+            typeof body === "string"
+                && body.includes("> [!info]+ Cowork detected a new MCP")
+                && body.includes("Google_Calendar")
+                && body.includes("Brex"),
+            `${label}: composeBody body_md does not include the detection callout for the new namespaces`,
+        );
+    } catch (e) { failed++; console.error(`FAIL  ${label}: ${e.message}`); }
+}
+
 (function main() {
   console.log("--- shared contracts ---");
   checkSharedContracts();

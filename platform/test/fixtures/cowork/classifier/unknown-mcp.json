@@ -1,0 +1,6 @@
+{
+  "reachable_namespaces": ["MysteryNamespace"],
+  "tools_by_namespace": {
+    "MysteryNamespace": ["do_thing", "other_thing"]
+  }
+}

@@ -12971,6 +12971,424 @@ type: cowork-microscope
     assertTrue("HC-V0960-W-18: validatePreCycleNote(mdPath) returns { ok: true, warn: 'missing-sidecar' } for a legacy .md without its sidecar", false, e && e.message);
   }
 
+  // ============================================================================
+  // v0.96.0 — Rail D RED — MCP auto-discovery + 14th contract key + detection callout
+  // ============================================================================
+  //
+  // Rail D introduces a pure pattern-based MCP namespace classifier
+  // (`kind-classifier-helper.js`) that maps reachable MCP namespaces +
+  // their tools to one of five canonical kinds (email, calendar, messages,
+  // finance, docs) WITHOUT calling an LLM in the common case. When a
+  // namespace pattern doesn't match any rule, the helper reports it via
+  // `unclassified[]` so the orchestrator can decide whether to fall back
+  // to an LLM nudge.
+  //
+  // The classifier is paired with a write-through cache so repeated cycles
+  // don't re-classify already-known namespaces (cache hit short-circuits
+  // even the pattern walk).
+  //
+  // The plan-dispatch contract grows a 14th key (`pending_confirmations[]`)
+  // carrying any NEW (never-before-cached) namespaces detected this cycle.
+  // When non-empty AND `render_aspects.new_mcp_notice == "include"`,
+  // composeBody emits a `> [!info]+ Cowork detected a new MCP` callout
+  // surfacing the new namespaces for user confirmation.
+  //
+  // The 14 cases below (HC-V0960-D-1..14) are RED at S2.1 commit time —
+  // `kind-classifier-helper.js`, the 14th contract key, and the
+  // composeBody detection-callout branch do not yet exist. S2.2 lands
+  // D-1..D-10; S2.3 lands D-11, D-12; S2.4 lands D-13, D-14. Fixtures
+  // live at platform/test/fixtures/cowork/classifier/.
+  // ============================================================================
+
+  const CLASSIFIER_FIXTURES_DIR = path.join(WORKSHOP, "platform/test/fixtures/cowork/classifier");
+
+  console.log(`\n--- Case HC-V0960-D-1: kind-classifier-helper.js exports classifyConnectedKinds ---`);
+  try {
+    const helperPath = path.join(COWORK_HELPERS_DIR, "kind-classifier-helper.js");
+    delete require.cache[require.resolve(helperPath)];
+    const KCH = require(helperPath);
+    assertTrue("HC-V0960-D-1: kind-classifier-helper.js exports classifyConnectedKinds({ reachable_namespaces, tools_by_namespace, vault_root })",
+      KCH && typeof KCH.classifyConnectedKinds === "function" && KCH.classifyConnectedKinds.length >= 1);
+  } catch (e) {
+    assertTrue("HC-V0960-D-1: kind-classifier-helper.js exports classifyConnectedKinds({ reachable_namespaces, tools_by_namespace, vault_root })", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0960-D-2: classifyConnectedKinds matches Gmail → kind 'email' (pattern-only) ---`);
+  try {
+    const helperPath = path.join(COWORK_HELPERS_DIR, "kind-classifier-helper.js");
+    delete require.cache[require.resolve(helperPath)];
+    const { classifyConnectedKinds } = require(helperPath);
+    const fixture = JSON.parse(fs.readFileSync(path.join(CLASSIFIER_FIXTURES_DIR, "reachable-gmail.json"), "utf8"));
+    const tmpVault = fs.mkdtempSync(path.join(os.tmpdir(), "hc-v0960-d-2-"));
+    try {
+      const result = classifyConnectedKinds({
+        reachable_namespaces: fixture.reachable_namespaces,
+        tools_by_namespace: fixture.tools_by_namespace,
+        vault_root: tmpVault,
+      });
+      const classified = result && result.classified;
+      const gmailKind = classified && (classified.Gmail || (typeof classified.find === "function" && classified.find((e) => e.namespace === "Gmail")));
+      const kindValue = gmailKind && (typeof gmailKind === "string" ? gmailKind : gmailKind.kind);
+      assertTrue("HC-V0960-D-2: classifyConnectedKinds maps Gmail namespace + email-related tools to kind 'email' (pattern-only, no LLM)",
+        kindValue === "email");
+    } finally {
+      try { fs.rmSync(tmpVault, { recursive: true, force: true }); } catch (_) {}
+    }
+  } catch (e) {
+    assertTrue("HC-V0960-D-2: classifyConnectedKinds maps Gmail namespace + email-related tools to kind 'email' (pattern-only, no LLM)", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0960-D-3: classifyConnectedKinds matches Google_Calendar → kind 'calendar' ---`);
+  try {
+    const helperPath = path.join(COWORK_HELPERS_DIR, "kind-classifier-helper.js");
+    delete require.cache[require.resolve(helperPath)];
+    const { classifyConnectedKinds } = require(helperPath);
+    const fixture = JSON.parse(fs.readFileSync(path.join(CLASSIFIER_FIXTURES_DIR, "reachable-mixed.json"), "utf8"));
+    const tmpVault = fs.mkdtempSync(path.join(os.tmpdir(), "hc-v0960-d-3-"));
+    try {
+      const result = classifyConnectedKinds({
+        reachable_namespaces: fixture.reachable_namespaces,
+        tools_by_namespace: fixture.tools_by_namespace,
+        vault_root: tmpVault,
+      });
+      const classified = result && result.classified;
+      const calEntry = classified && (classified.Google_Calendar || (typeof classified.find === "function" && classified.find((e) => e.namespace === "Google_Calendar")));
+      const kindValue = calEntry && (typeof calEntry === "string" ? calEntry : calEntry.kind);
+      assertTrue("HC-V0960-D-3: classifyConnectedKinds maps Google_Calendar + calendar tools to kind 'calendar'",
+        kindValue === "calendar");
+    } finally {
+      try { fs.rmSync(tmpVault, { recursive: true, force: true }); } catch (_) {}
+    }
+  } catch (e) {
+    assertTrue("HC-V0960-D-3: classifyConnectedKinds maps Google_Calendar + calendar tools to kind 'calendar'", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0960-D-4: classifyConnectedKinds matches apple-mcp + messages_* → kind 'messages' ---`);
+  try {
+    const helperPath = path.join(COWORK_HELPERS_DIR, "kind-classifier-helper.js");
+    delete require.cache[require.resolve(helperPath)];
+    const { classifyConnectedKinds } = require(helperPath);
+    const fixture = JSON.parse(fs.readFileSync(path.join(CLASSIFIER_FIXTURES_DIR, "reachable-mixed.json"), "utf8"));
+    const tmpVault = fs.mkdtempSync(path.join(os.tmpdir(), "hc-v0960-d-4-"));
+    try {
+      const result = classifyConnectedKinds({
+        reachable_namespaces: fixture.reachable_namespaces,
+        tools_by_namespace: fixture.tools_by_namespace,
+        vault_root: tmpVault,
+      });
+      const classified = result && result.classified;
+      const appleEntry = classified && (classified["apple-mcp"] || (typeof classified.find === "function" && classified.find((e) => e.namespace === "apple-mcp")));
+      const kindValue = appleEntry && (typeof appleEntry === "string" ? appleEntry : appleEntry.kind);
+      assertTrue("HC-V0960-D-4: classifyConnectedKinds maps apple-mcp + messages_* tools to kind 'messages'",
+        kindValue === "messages");
+    } finally {
+      try { fs.rmSync(tmpVault, { recursive: true, force: true }); } catch (_) {}
+    }
+  } catch (e) {
+    assertTrue("HC-V0960-D-4: classifyConnectedKinds maps apple-mcp + messages_* tools to kind 'messages'", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0960-D-5: classifyConnectedKinds matches Brex + expense tools → kind 'finance' ---`);
+  try {
+    const helperPath = path.join(COWORK_HELPERS_DIR, "kind-classifier-helper.js");
+    delete require.cache[require.resolve(helperPath)];
+    const { classifyConnectedKinds } = require(helperPath);
+    const fixture = JSON.parse(fs.readFileSync(path.join(CLASSIFIER_FIXTURES_DIR, "reachable-mixed.json"), "utf8"));
+    const tmpVault = fs.mkdtempSync(path.join(os.tmpdir(), "hc-v0960-d-5-"));
+    try {
+      const result = classifyConnectedKinds({
+        reachable_namespaces: fixture.reachable_namespaces,
+        tools_by_namespace: fixture.tools_by_namespace,
+        vault_root: tmpVault,
+      });
+      const classified = result && result.classified;
+      const brexEntry = classified && (classified.Brex || (typeof classified.find === "function" && classified.find((e) => e.namespace === "Brex")));
+      const kindValue = brexEntry && (typeof brexEntry === "string" ? brexEntry : brexEntry.kind);
+      assertTrue("HC-V0960-D-5: classifyConnectedKinds maps Brex + expense tools to kind 'finance'",
+        kindValue === "finance");
+    } finally {
+      try { fs.rmSync(tmpVault, { recursive: true, force: true }); } catch (_) {}
+    }
+  } catch (e) {
+    assertTrue("HC-V0960-D-5: classifyConnectedKinds maps Brex + expense tools to kind 'finance'", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0960-D-6: classifyConnectedKinds matches Google_Drive + file tools → kind 'docs' ---`);
+  try {
+    const helperPath = path.join(COWORK_HELPERS_DIR, "kind-classifier-helper.js");
+    delete require.cache[require.resolve(helperPath)];
+    const { classifyConnectedKinds } = require(helperPath);
+    const fixture = JSON.parse(fs.readFileSync(path.join(CLASSIFIER_FIXTURES_DIR, "reachable-mixed.json"), "utf8"));
+    const tmpVault = fs.mkdtempSync(path.join(os.tmpdir(), "hc-v0960-d-6-"));
+    try {
+      const result = classifyConnectedKinds({
+        reachable_namespaces: fixture.reachable_namespaces,
+        tools_by_namespace: fixture.tools_by_namespace,
+        vault_root: tmpVault,
+      });
+      const classified = result && result.classified;
+      const driveEntry = classified && (classified.Google_Drive || (typeof classified.find === "function" && classified.find((e) => e.namespace === "Google_Drive")));
+      const kindValue = driveEntry && (typeof driveEntry === "string" ? driveEntry : driveEntry.kind);
+      assertTrue("HC-V0960-D-6: classifyConnectedKinds maps Google_Drive + file tools to kind 'docs'",
+        kindValue === "docs");
+    } finally {
+      try { fs.rmSync(tmpVault, { recursive: true, force: true }); } catch (_) {}
+    }
+  } catch (e) {
+    assertTrue("HC-V0960-D-6: classifyConnectedKinds maps Google_Drive + file tools to kind 'docs'", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0960-D-7: classifyConnectedKinds returns unclassified[] for unrecognized namespace ---`);
+  try {
+    const helperPath = path.join(COWORK_HELPERS_DIR, "kind-classifier-helper.js");
+    delete require.cache[require.resolve(helperPath)];
+    const { classifyConnectedKinds } = require(helperPath);
+    const fixture = JSON.parse(fs.readFileSync(path.join(CLASSIFIER_FIXTURES_DIR, "unknown-mcp.json"), "utf8"));
+    const tmpVault = fs.mkdtempSync(path.join(os.tmpdir(), "hc-v0960-d-7-"));
+    try {
+      const result = classifyConnectedKinds({
+        reachable_namespaces: fixture.reachable_namespaces,
+        tools_by_namespace: fixture.tools_by_namespace,
+        vault_root: tmpVault,
+      });
+      assertTrue("HC-V0960-D-7: classifyConnectedKinds returns unclassified: ['MysteryNamespace'] for unrecognized namespace (no LLM fallback provided)",
+        result && Array.isArray(result.unclassified) && result.unclassified.includes("MysteryNamespace"));
+    } finally {
+      try { fs.rmSync(tmpVault, { recursive: true, force: true }); } catch (_) {}
+    }
+  } catch (e) {
+    assertTrue("HC-V0960-D-7: classifyConnectedKinds returns unclassified: ['MysteryNamespace'] for unrecognized namespace (no LLM fallback provided)", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0960-D-8: Cache hit short-circuits — second call has cache_hit set ---`);
+  try {
+    const helperPath = path.join(COWORK_HELPERS_DIR, "kind-classifier-helper.js");
+    delete require.cache[require.resolve(helperPath)];
+    const { classifyConnectedKinds } = require(helperPath);
+    const fixture = JSON.parse(fs.readFileSync(path.join(CLASSIFIER_FIXTURES_DIR, "reachable-gmail.json"), "utf8"));
+    const tmpVault = fs.mkdtempSync(path.join(os.tmpdir(), "hc-v0960-d-8-"));
+    try {
+      const firstCall = classifyConnectedKinds({
+        reachable_namespaces: fixture.reachable_namespaces,
+        tools_by_namespace: fixture.tools_by_namespace,
+        vault_root: tmpVault,
+      });
+      const secondCall = classifyConnectedKinds({
+        reachable_namespaces: fixture.reachable_namespaces,
+        tools_by_namespace: fixture.tools_by_namespace,
+        vault_root: tmpVault,
+      });
+      // Cache-hit signal can surface either as result.cache_hits[] OR per-entry
+      // cache_hit flag — either is acceptable. The semantic invariant is:
+      // first call has no cache hit for Gmail; second call DOES.
+      const firstHadHit = firstCall && (
+        (Array.isArray(firstCall.cache_hits) && firstCall.cache_hits.includes("Gmail"))
+        || (firstCall.classified && firstCall.classified.Gmail && firstCall.classified.Gmail.cache_hit === true)
+      );
+      const secondHasHit = secondCall && (
+        (Array.isArray(secondCall.cache_hits) && secondCall.cache_hits.includes("Gmail"))
+        || (secondCall.classified && secondCall.classified.Gmail && secondCall.classified.Gmail.cache_hit === true)
+      );
+      assertTrue("HC-V0960-D-8: cache hit short-circuits LLM fallback — second call to classifyConnectedKinds reports Gmail as cache_hit",
+        !firstHadHit && secondHasHit === true);
+    } finally {
+      try { fs.rmSync(tmpVault, { recursive: true, force: true }); } catch (_) {}
+    }
+  } catch (e) {
+    assertTrue("HC-V0960-D-8: cache hit short-circuits LLM fallback — second call to classifyConnectedKinds reports Gmail as cache_hit", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0960-D-9: Cache file structure { schema_version, entries: { <ns>: { kind, classified_at, classifier_version, best_score } } } ---`);
+  try {
+    const helperPath = path.join(COWORK_HELPERS_DIR, "kind-classifier-helper.js");
+    delete require.cache[require.resolve(helperPath)];
+    const { classifyConnectedKinds } = require(helperPath);
+    const fixture = JSON.parse(fs.readFileSync(path.join(CLASSIFIER_FIXTURES_DIR, "reachable-gmail.json"), "utf8"));
+    const tmpVault = fs.mkdtempSync(path.join(os.tmpdir(), "hc-v0960-d-9-"));
+    try {
+      classifyConnectedKinds({
+        reachable_namespaces: fixture.reachable_namespaces,
+        tools_by_namespace: fixture.tools_by_namespace,
+        vault_root: tmpVault,
+      });
+      // The helper writes its cache under spice/cowork/cache/ (canonical) or
+      // ranch/cache/ (alternate) — accept either. The shape MUST be:
+      //   { schema_version, entries: { Gmail: { kind, classified_at, classifier_version, best_score } } }
+      const candidates = [
+        path.join(tmpVault, "spice/cowork/cache/kind-classifier-cache.json"),
+        path.join(tmpVault, "ranch/cache/kind-classifier-cache.json"),
+        path.join(tmpVault, "spice/cowork/data/kind-classifier-cache.json"),
+      ];
+      const cachePath = candidates.find((p) => fs.existsSync(p));
+      if (!cachePath) {
+        throw new Error("classifier cache file not written under any expected path (spice/cowork/cache/, ranch/cache/, spice/cowork/data/)");
+      }
+      const cache = JSON.parse(fs.readFileSync(cachePath, "utf8"));
+      const hasSchema  = cache && typeof cache.schema_version === "string";
+      const hasEntries = cache && cache.entries && typeof cache.entries === "object" && !Array.isArray(cache.entries);
+      const gmailEntry = cache && cache.entries && cache.entries.Gmail;
+      const entryOk = gmailEntry
+        && typeof gmailEntry.kind === "string"
+        && typeof gmailEntry.classified_at === "string"
+        && typeof gmailEntry.classifier_version === "string"
+        && typeof gmailEntry.best_score === "number";
+      assertTrue("HC-V0960-D-9: classifier cache file has shape { schema_version, entries: { <ns>: { kind, classified_at, classifier_version, best_score } } }",
+        hasSchema && hasEntries && entryOk);
+    } finally {
+      try { fs.rmSync(tmpVault, { recursive: true, force: true }); } catch (_) {}
+    }
+  } catch (e) {
+    assertTrue("HC-V0960-D-9: classifier cache file has shape { schema_version, entries: { <ns>: { kind, classified_at, classifier_version, best_score } } }", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0960-D-10: new_since_last_fire[] lists never-before-cached namespaces ---`);
+  try {
+    const helperPath = path.join(COWORK_HELPERS_DIR, "kind-classifier-helper.js");
+    delete require.cache[require.resolve(helperPath)];
+    const { classifyConnectedKinds } = require(helperPath);
+    const gmailFix  = JSON.parse(fs.readFileSync(path.join(CLASSIFIER_FIXTURES_DIR, "reachable-gmail.json"), "utf8"));
+    const mixedFix  = JSON.parse(fs.readFileSync(path.join(CLASSIFIER_FIXTURES_DIR, "reachable-mixed.json"), "utf8"));
+    const tmpVault = fs.mkdtempSync(path.join(os.tmpdir(), "hc-v0960-d-10-"));
+    try {
+      // Warm the cache with Gmail.
+      classifyConnectedKinds({
+        reachable_namespaces: gmailFix.reachable_namespaces,
+        tools_by_namespace: gmailFix.tools_by_namespace,
+        vault_root: tmpVault,
+      });
+      // Now fire with the mixed fixture (Gmail + 4 new namespaces).
+      const result = classifyConnectedKinds({
+        reachable_namespaces: mixedFix.reachable_namespaces,
+        tools_by_namespace: mixedFix.tools_by_namespace,
+        vault_root: tmpVault,
+      });
+      const nsf = result && result.new_since_last_fire;
+      const okShape = Array.isArray(nsf);
+      const containsNew = okShape
+        && nsf.includes("Google_Calendar")
+        && nsf.includes("Brex")
+        && nsf.includes("apple-mcp")
+        && nsf.includes("Google_Drive");
+      const excludesCached = okShape && !nsf.includes("Gmail");
+      assertTrue("HC-V0960-D-10: new_since_last_fire[] lists namespaces not previously cached (Google_Calendar/Brex/apple-mcp/Google_Drive) and excludes the already-cached Gmail",
+        okShape && containsNew && excludesCached);
+    } finally {
+      try { fs.rmSync(tmpVault, { recursive: true, force: true }); } catch (_) {}
+    }
+  } catch (e) {
+    assertTrue("HC-V0960-D-10: new_since_last_fire[] lists namespaces not previously cached (Google_Calendar/Brex/apple-mcp/Google_Drive) and excludes the already-cached Gmail", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0960-D-11: planDispatch result carries pending_confirmations[] (14th key) when new MCPs detected ---`);
+  try {
+    const helperPath = path.join(COWORK_HELPERS_DIR, "dispatch-plan-helper.js");
+    delete require.cache[require.resolve(helperPath)];
+    const { planDispatch } = require(helperPath);
+    // S2.3 lands: planDispatch reads new_since_last_fire[] from the classifier
+    // result (passed via `classifier_result`) and surfaces those namespaces
+    // through pending_confirmations[] as the 14th contract key.
+    const result = planDispatch({
+      prefs: { priorities: ["email"], mcps: { email: { served_by: "Gmail", connected: true, what_matters: "x" } } },
+      reachableNamespaces: ["Gmail"],
+      mcpSkillMap: { kinds: [{ kind: "email", gather_skill: "cowork:gather-email" }] },
+      microscopes: {},
+      engagement: { id: "personal", type: "personal" },
+      bundle: { render_aspects: { new_mcp_notice: "include" } },
+      overrides: null,
+      yesterdayMemory: null,
+      classifier_result: {
+        classified: { Gmail: { kind: "email" } },
+        unclassified: [],
+        new_since_last_fire: ["Google_Calendar", "Brex"],
+        cache_hits: ["Gmail"],
+      },
+    });
+    const pc = result && result.pending_confirmations;
+    assertTrue("HC-V0960-D-11: planDispatch result.pending_confirmations[] is the 14th contract key and lists new namespaces detected this cycle",
+      Array.isArray(pc) && pc.includes("Google_Calendar") && pc.includes("Brex"));
+  } catch (e) {
+    assertTrue("HC-V0960-D-11: planDispatch result.pending_confirmations[] is the 14th contract key and lists new namespaces detected this cycle", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0960-D-12: planDispatch result carries pending_confirmations: [] when no new MCPs ---`);
+  try {
+    const helperPath = path.join(COWORK_HELPERS_DIR, "dispatch-plan-helper.js");
+    delete require.cache[require.resolve(helperPath)];
+    const { planDispatch } = require(helperPath);
+    const result = planDispatch({
+      prefs: { priorities: ["email"], mcps: { email: { served_by: "Gmail", connected: true, what_matters: "x" } } },
+      reachableNamespaces: ["Gmail"],
+      mcpSkillMap: { kinds: [{ kind: "email", gather_skill: "cowork:gather-email" }] },
+      microscopes: {},
+      engagement: { id: "personal", type: "personal" },
+      bundle: { render_aspects: { new_mcp_notice: "include" } },
+      overrides: null,
+      yesterdayMemory: null,
+      classifier_result: {
+        classified: { Gmail: { kind: "email" } },
+        unclassified: [],
+        new_since_last_fire: [],
+        cache_hits: ["Gmail"],
+      },
+    });
+    const pc = result && result.pending_confirmations;
+    assertTrue("HC-V0960-D-12: planDispatch result.pending_confirmations is [] when classifier_result.new_since_last_fire is empty",
+      Array.isArray(pc) && pc.length === 0);
+  } catch (e) {
+    assertTrue("HC-V0960-D-12: planDispatch result.pending_confirmations is [] when classifier_result.new_since_last_fire is empty", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0960-D-13: composeBody emits "> [!info]+ Cowork detected a new MCP" when pending_confirmations + new_mcp_notice='include' ---`);
+  try {
+    const CBH = require(path.join(COWORK_HELPERS_DIR, "compose-body-helper.js"));
+    const input = {
+      cadence: "morning-briefing",
+      nav_buttons_block: '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });\n```',
+      synopsis_md: "> [!info]+ Today\n> body",
+      memory_callouts: {},
+      ordered_blocks: [
+        { kind: "calendar", callout_type: "example", title: "Today's calendar", body_md: "9am standup" },
+      ],
+      engagement_type_blocks: [],
+      closing_md: "> [!tip] Pep talk\n> Go.",
+      pending_confirmations: ["Google_Calendar", "Brex"],
+      render_aspects: { new_mcp_notice: "include" },
+    };
+    const result = CBH.composeBody(input);
+    const body = result && result.body_md;
+    assertTrue("HC-V0960-D-13: composeBody emits `> [!info]+ Cowork detected a new MCP` callout when pending_confirmations.length > 0 AND render_aspects.new_mcp_notice == 'include'",
+      typeof body === "string"
+        && body.includes("> [!info]+ Cowork detected a new MCP")
+        && body.includes("Google_Calendar")
+        && body.includes("Brex"));
+  } catch (e) {
+    assertTrue("HC-V0960-D-13: composeBody emits `> [!info]+ Cowork detected a new MCP` callout when pending_confirmations.length > 0 AND render_aspects.new_mcp_notice == 'include'", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0960-D-14: composeBody SKIPS detection callout when new_mcp_notice='skip' ---`);
+  try {
+    const CBH = require(path.join(COWORK_HELPERS_DIR, "compose-body-helper.js"));
+    const input = {
+      cadence: "morning-briefing",
+      nav_buttons_block: '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });\n```',
+      synopsis_md: "> [!info]+ Today\n> body",
+      memory_callouts: {},
+      ordered_blocks: [
+        { kind: "calendar", callout_type: "example", title: "Today's calendar", body_md: "9am standup" },
+      ],
+      engagement_type_blocks: [],
+      closing_md: "> [!tip] Pep talk\n> Go.",
+      pending_confirmations: ["Google_Calendar", "Brex"],
+      render_aspects: { new_mcp_notice: "skip" },
+    };
+    const result = CBH.composeBody(input);
+    const body = result && result.body_md;
+    assertTrue("HC-V0960-D-14: composeBody SKIPS the detection callout when render_aspects.new_mcp_notice == 'skip' even if pending_confirmations is non-empty",
+      typeof body === "string" && !body.includes("Cowork detected a new MCP"));
+  } catch (e) {
+    assertTrue("HC-V0960-D-14: composeBody SKIPS the detection callout when render_aspects.new_mcp_notice == 'skip' even if pending_confirmations is non-empty", false, e && e.message);
+  }
+
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
   if (fail > 0) {
