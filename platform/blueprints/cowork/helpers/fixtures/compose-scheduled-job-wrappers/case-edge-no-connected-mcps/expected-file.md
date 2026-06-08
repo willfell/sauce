@@ -2,8 +2,8 @@
 type: cowork-scheduled-job-wrappers
 engagement_id: stale-prefs
 sauce_version: 0.93.2
-cowork_version: 0.31.2
-contract_version: 0.31.2
+cowork_version: 0.32.0
+contract_version: 0.32.0
 generated_at: 2026-06-05T14:40:00-06:00
 generated_by: cowork:sync-scheduled-jobs@1.0.0
 warnings: [no_connected_mcps_in_prefs]
@@ -19,12 +19,12 @@ warnings: [no_connected_mcps_in_prefs]
 >
 > After all sections are pasted, run `/cowork morning-briefing stale-prefs` in Claude Code as a smoke test.
 >
-> This file was generated against sauce 0.93.2 + cowork 0.31.2 + contract 0.31.2. When the sauce version moves past 0.93.2, re-run `/cowork sync-scheduled-jobs stale-prefs` to refresh.
+> This file was generated against sauce 0.93.2 + cowork 0.32.0 + contract 0.32.0. When the sauce version moves past 0.93.2, re-run `/cowork sync-scheduled-jobs stale-prefs` to refresh.
 
 ---
 
 ## 1 — cowork-morning-briefing-stale-prefs (08:00 daily)
-<!-- section_contract_version: 0.31.2 -->
+<!-- section_contract_version: 0.32.0 -->
 
 ````
 Use skill cowork:morning-briefing with { engagement_id: "stale-prefs" }.
@@ -72,7 +72,7 @@ When the orchestrator instructs you to use ANY sub-skill (cowork:write-run-note-
 ---
 
 ## 2 — cowork-midday-tripwire-stale-prefs (12:30 daily)
-<!-- section_contract_version: 0.31.2 -->
+<!-- section_contract_version: 0.32.0 -->
 
 ````
 Use skill cowork:midday-tripwire with { engagement_id: "stale-prefs" }.
@@ -118,7 +118,7 @@ When the orchestrator instructs you to use ANY sub-skill (cowork:write-run-note-
 ---
 
 ## 3 — cowork-eod-review-stale-prefs (17:00 daily)
-<!-- section_contract_version: 0.31.2 -->
+<!-- section_contract_version: 0.32.0 -->
 
 ````
 Use skill cowork:eod-review with { engagement_id: "stale-prefs" }.
@@ -166,7 +166,7 @@ When the orchestrator instructs you to use ANY sub-skill (cowork:write-run-note-
 ---
 
 ## 4 — cowork-weekly-review-stale-prefs (17:30 Friday)
-<!-- section_contract_version: 0.31.2 -->
+<!-- section_contract_version: 0.32.0 -->
 
 ````
 Use skill cowork:weekly-review with { engagement_id: "stale-prefs" }.
@@ -213,7 +213,7 @@ When the orchestrator instructs you to use ANY sub-skill (cowork:write-run-note-
 ---
 
 ## 5 — cowork-monthly-review-stale-prefs (last weekday 17:30)
-<!-- section_contract_version: 0.31.2 -->
+<!-- section_contract_version: 0.32.0 -->
 
 ````
 Use skill cowork:monthly-review with { engagement_id: "stale-prefs" }.

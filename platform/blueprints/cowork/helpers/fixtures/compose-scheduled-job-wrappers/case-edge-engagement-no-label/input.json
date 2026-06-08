@@ -34,7 +34,7 @@
     }
   },
   "sauce_version": "0.93.2",
-  "cowork_version": "0.31.2",
+  "cowork_version": "0.32.0",
   "generated_at": "2026-06-05T14:41:11-06:00",
   "generated_by": "cowork:sync-scheduled-jobs@1.0.0"
 }
