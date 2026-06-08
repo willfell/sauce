@@ -183,6 +183,30 @@ Branching is driven by the `filter` input. Steps 1-7 below describe the `"active
 }
 ```
 
+### Structured items (NEW v0.96.0)
+
+In addition to `markdown`, return `items[]` — one entry per surfaced kanban card:
+
+```json
+{
+  "items": [
+    {
+      "item_id": "<deriveItemId({ kind: 'projects', engagement_id, day, stable_key: card.path_relative_to_vault_root })>",
+      "kind": "projects",
+      "callout_type": "example",
+      "title": "<card.title>",
+      "features": {
+        "recency_bucket": "today|within-week|stale-gt-week",
+        "kanban_status": "<status from card frontmatter>",
+        "is_warning": false
+      }
+    }
+  ]
+}
+```
+
+`item_id` is keyed by the card's vault-relative path — stable as long as the file isn't moved.
+
 ## Errors
 - Missing `spice/projects/` directory: return `{ projects: [], thread_triggers: [] }` and emit one Notice (`cowork:gather-projects - spice/projects/ not found`).
 - Per-project read errors: skip that project, append `{ slug, error: "<short>" }` to a sibling `errors` field if any callers care; otherwise silently skip and continue. Never abort the whole scan because of one bad project.

@@ -137,7 +137,18 @@ If `resume_from_step` is set, skip steps `< resume_from_step` and pick up from t
       - **On Y:** stage ONE write to `E.cadences`:
         - `E.cadences.lens_shift: { cron: "0 7 * * 6" }` (canonical default — Saturday 07:00)
       - **On N:** write NOTHING — no `lens_shift` entry appears in `E.cadences`. The default warm-MB cadence on Saturday (governed by `default_cadences.morning`) is unaffected by this answer; only the cold-MB companion is gated by `lens_shift` opt-in.
-    - **13h.** Capture engagement E as a full record (id, type, type_schema_version, label, captured field map, cadences, overrides).
+    - **13h.** **Preference-learning opt-in (v0.96.0 Y/N3 — Rail L).** Ask user:
+
+      > `Enable preference learning for this engagement? Adds a 'Was today useful?' rating callout to every atomic note; per-kind weights update nightly from your ticks. Atomic-note quality should improve over 1-2 weeks. (default: yes)`
+
+      **Idempotent re-bootstrap default:** if `existing_engagements[E.id].learning_enabled === false`, the question defaults to `N`; otherwise (unset OR `true`) defaults to `Y`. Blank input accepts the default.
+
+      - **On Y:** stage ONE write to `E` (top-level engagement record key, not inside `overrides`):
+        - `E.learning_enabled: true`
+        - No installer change for `learned_weights` — lazy-initialized by `cowork:learn-from-checks` on first post-upgrade fire (per S0.5 mitigation).
+      - **On N:** stage ONE write to `E`:
+        - `E.learning_enabled: false` — composeBody never emits the rating callout; `cowork:learn-from-checks` skips this engagement.
+    - **13i.** Capture engagement E as a full record (id, type, type_schema_version, label, captured field map, cadences, overrides, learning_enabled).
 
 14. Vault-scoped questions (from `contributions_registry` where `vault_question` kind exists): ask once per vault, not per engagement. Capture into the vault-wide substitution map.
 

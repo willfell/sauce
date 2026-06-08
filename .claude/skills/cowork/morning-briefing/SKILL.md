@@ -8,14 +8,16 @@ tags: [cowork, orchestrator, morning, engagement-aware]
 
 # cowork:morning-briefing
 
-> [!warning]+ CRITICAL: output path (v0.90.2)
-> This orchestrator writes ONE atomic note to:
+> [!warning]+ CRITICAL: voice + microscope discipline (v0.96.0)
+> Path, frontmatter type, and atomic-note body shape are enforced
+> deterministically by `write-atomic-note-helper.js` + JSON-schema
+> validation against `data/schemas/morning-briefing@1.0.0.json`. They cannot drift.
 >
-> `spice/cowork/daily/<YYYY>/<MM-Month>/<YYYY-MM-DD>/morning-briefing.md`
->
-> DO NOT write to `spice/daily/<YYYY>/<MM-Month>/<weekday>-<YYYY-MM-DD>.md` — that's the daily-note blueprint (a separate surface for hand-edited daily notes), NOT this orchestrator's output. The consumer vault's CLAUDE.md may list `spice/daily/` under the "Daily" topic in its resolver table; THAT IS NOT WHERE COWORK ATOMIC NOTES GO. The cowork atomic-note path is fundamentally different from the daily-blueprint path.
->
-> The write happens via sub-skill `cowork:write-run-note-morning-briefing` (READ its SKILL.md before invoking; the step that delegates to it is later in this file). NEVER write the atomic note directly via the `Write` tool, the `Edit` tool, or `mcp__obsidian__obsidian_put_content` from this orchestrator body — ALWAYS delegate to the write sub-skill which enforces the path + frontmatter + structural-marker contracts.
+> Voice + microscope adherence ARE prose-level invariants the writer
+> can't enforce. Apply `user-preferences.personality.notes` verbatim to
+> every narrative sentence. For each kind in `priorities` with a
+> microscope at `spice/cowork/prompts/per-mcp/<kind>/microscope.md`,
+> follow that microscope's `## Output shape` directives verbatim.
 
 Composes a morning briefing for one engagement (calendar + email + optional Finance + optional Messages + Open Threads) and writes ONE atomic note at `spice/cowork/daily/YYYY/MM-MMMM/YYYY-MM-DD/morning-briefing.md` (deterministic path per `(orchestrator, day)`; overwrite-last-write-wins idempotency). Body shape follows the user's prompt body at `spice/cowork/prompts/morning-briefing.md`; when the prompt body is empty, emits a no-op note with `warning: empty_prompt` frontmatter.
 
@@ -63,13 +65,11 @@ CLI surface: invoke as `cowork:morning-briefing --engagement_id <id>` for the wa
 
    ```
    cowork:morning-briefing committing to:
-     PATH: spice/cowork/daily/<YYYY>/<MM-Month>/<YYYY-MM-DD>/morning-briefing.md (NOT spice/daily/<weekday>-<YYYY-MM-DD>.md)
-     TYPE: cowork-morning-briefing (canonical frontmatter type — NOT cowork-run-note)
      VOICE: apply user-preferences.personality.notes verbatim AND personality.{vibe, formality, length, pep_talk} to every narrative sentence
-     MICROSCOPES: for each kind in prefs.priorities with a microscope at spice/cowork/prompts/per-mcp/<kind>/microscope.md, follow that microscope's ## Output shape directives verbatim for the kind's callout
+     MICROSCOPES: for each kind in prefs.priorities with a microscope at spice/cowork/prompts/per-mcp/<kind>/microscope.md, follow that microscope's ## Output shape directives verbatim
    ```
 
-   Four-purpose commitment: (1) commit path so the v0.91.1 path write-guard never fires; (2) commit type so the v0.91.2 frontmatter write-guard never fires; (3) commit voice so personality + voice contract land in body composition; (4) commit microscope adherence so each kind's callout follows its microscope's `## Output shape`. The Notice creates an audit trail if any commitment is violated. Deterministic backstops in write-run-note: path write-guard (v0.91.1) + frontmatter write-guard (v0.91.2) + body-shape write-guard (v0.92.0). Voice + microscope are prose-imperative; cowork:compose-body's canonical shape re-read reinforces.
+   Two-purpose commitment: (1) commit voice so personality + voice contract land in body composition; (2) commit microscope adherence so each kind's callout follows its microscope's `## Output shape`. Deterministic backstops via the v0.96.0 Rail W writer + JSON-schema sidecar validation (path/frontmatter/dvjs/body-shape are enforced by `write-atomic-note-helper.js` against `data/schemas/morning-briefing@1.0.0.json`, so PATH + TYPE bullets retired). The v0.91.x–v0.92.0 write-guards remain as belt-and-suspenders.
 
 2. **Resolve engagement.** Read `<vault>/spice/cowork/context/vault-config.md` via `mcp__obsidian__get_frontmatter`. Look up `engagements[]` entry where `id == engagement_id`. If not found, emit Notice `cowork:morning-briefing aborted -- engagement '<id>' not found in vault-config.md` and exit. Capture `engagement` (the full record) and read the matching engagement-type manifest via the Read tool at `spice/cowork/context/engagement-types/<engagement.type>.json` (expected values: `personal`, `w2-fte`, `consulting`). Parse as JSON; capture `type_manifest.render_aspects`. If the file is missing or fails to parse, emit Notice `cowork:morning-briefing aborted -- engagement-type manifest unavailable at spice/cowork/context/engagement-types/<engagement.type>.json` and exit. The render-aspects map drives which gather + write steps fire (e.g. `finance_block: include` enables the Finance callout; `inner_circle_imessage: include` enables Messages).
 3. READ `.claude/skills/cowork/skills/date-context/SKILL.md` in full and follow
@@ -92,7 +92,19 @@ CLI surface: invoke as `cowork:morning-briefing --engagement_id <id>` for the wa
 
    Capture `reachable_namespaces` from the agent's tool list (walk every `mcp__<ns>__<tool>` name; add `<ns>` to the set).
 
-   READ `.claude/skills/cowork/skills/plan-dispatch/SKILL.md` in full and follow its `## Steps` section with `{ engagement_id, cadence: "morning", reachable_namespaces, vault_root: <vault-root-from-routing> }`. Capture the 11-key result as `plan`.
+   Capture `tools_by_namespace` from the same tool list — group tool short-names by namespace:
+
+   ```
+   tools_by_namespace = {}
+   for tool_name in agent_tool_list:
+     if tool_name.startsWith("mcp__"):
+       parts = tool_name.split("__")
+       ns = parts[1]
+       short = parts.slice(2).join("__")
+       (tools_by_namespace[ns] ||= []).push(short)
+   ```
+
+   READ `.claude/skills/cowork/skills/plan-dispatch/SKILL.md` in full and follow its `## Steps` section with `{ engagement_id, cadence: "morning", reachable_namespaces, tools_by_namespace, vault_root: <vault-root-from-routing> }`. Capture the 14-key result as `plan` (v0.96.0 adds `pending_confirmations[]` as the 14th key, surfaced from Rail D's kind classifier; `plan.classifier_cache_hit` and `plan.classifier_result` are exposed as additional pass-through fields).
 
    If `plan.dispatch_mode == "legacy"`, emit Obsidian Notice: `cowork:morning-briefing -- PREFS UNAVAILABLE (<plan.prefs_status>); falling back to legacy mode. Chat and any custom kinds will NOT fire in legacy mode; inner-circle wikilink emission will NOT occur. Investigate user-preferences.md if this is unexpected.` The legacy gather sequence (steps 5-12 below) fires unchanged.
 
@@ -192,6 +204,11 @@ Each gather call passes `engagement_id`. The sub-skill reads per-engagement MCP-
     - Set `prompt_source` accordingly: if `user_prompt_body` non-empty, `prompt_source = "spice/cowork/prompts/morning-briefing.md"`; else if `template_prompt_body` non-empty, `prompt_source = "spice/cowork/context/engagement-templates/<engagement.type>/prompts/morning-briefing.md"`; else `prompt_source = "spice/cowork/prompts/morning-briefing.md"` (the user-prompt path is still the canonical pointer when both empty — the stub references it).
 13b. **Voice contract.** If `plan.dispatch_mode == "prefs"` AND `plan.voice_contract != ""`, prepend it to `prompt_body`:
    `prompt_body = plan.voice_contract + prompt_body`. The combined string is the input to the body-composition step. If `plan.voice_contract == ""`, prompt_body passes through unchanged.
+
+13.5. **Read prior rating state (v0.96.0 Rail L — idempotent re-fire).** Compute `output_path = "spice/cowork/daily/<YYYY>/<MM-MMMM>/<YYYY-MM-DD>/morning-briefing.md"` (same path the write-run-note sub-skill will write). If the file already exists on disk (same-day re-fire scenario), READ it via the Read tool and invoke `parseRatingCallout(prior_md)` from `platform/blueprints/cowork/helpers/learn-from-checks-helper.js`. The helper returns `{ schema_version, cadence, day, observations: [{ kind, ticked }] }` or `null`. Build `prior_rating_state = {}` by iterating `observations` and setting `prior_rating_state[obs.kind] = obs.ticked` for each entry. If the file does not exist OR `parseRatingCallout` returns null, set `prior_rating_state = null`. Capture for Step 14f.
+
+   Also compute `surfaced_kinds_for_rating` from the gather-pipeline outputs (Steps 5-12b): an array of kind names (lowercase) for entries in `ordered_blocks[]` whose `markdown` is non-empty AND whose `kind` is not `semantic` or `semantic-unavailable` (those are engagement-type blocks, not first-class kinds the user rates). Preserve the order from `ordered_blocks[]` so the rendered checklist matches the body's surfaced order. Capture for Step 14f.
+
 14. **Compose run-note body via cowork:compose-body.**
 
   14a. **Prep synopsis_md.** Compose the `> [!info]- Today at a glance` callout per `prompt_body` instructions (voice-shaped one-paragraph synopsis distilled from gather outputs). When `semantic_index_age` is non-null, append `> Semantic index age: <semantic_index_age>m` as the last `> ` line inside the synopsis callout BEFORE passing to composeBody.
@@ -218,7 +235,7 @@ Each gather call passes `engagement_id`. The sub-skill reads per-engagement MCP-
 
   14e. **Prep engagement_type_blocks[].** For each `related_signal` in `related_signals[]` with `status == "ready"`: push `{ kind: "semantic", callout_type: "example", title: "Related to: <event.title>", body_md: <related_signal.markdown> }`. When `semantic_index_unavailable == true`: push ONCE `{ kind: "semantic-unavailable", callout_type: "warning", title: "Semantic index not available", body_md: "Smart Connections index absent or anchor not indexed — semantic gather skipped." }`. Finance does NOT flow through here — it's written by Step 15's separate sub-skill.
 
-  14f. **Invoke composeBody.** READ `.claude/skills/cowork/skills/compose-body/SKILL.md` in full and follow its `## Compose` section with `{ cadence: "morning-briefing", nav_buttons_block: "<canonical block>", synopsis_md, memory_callouts: { yesterday_md, overnight_md, echoes_md, backlink_md }, ordered_blocks, engagement_type_blocks, closing_md, excluded_themes: plan.excluded_themes, voice_contract: plan.voice_contract }`. The `excluded_themes` field is the v0.95.1 Knob-1 13th plan-dispatch contract key — when `render_aspects.anti_echo == "include"` it carries yesterday's carry-forward bullets verbatim; otherwise `[]`. composeBody gates the anti-echo callout injection internally on cadence eligibility + non-empty excluded_themes. Capture `{ body_md, body_assertions, status }`.
+  14f. **Invoke composeBody.** READ `.claude/skills/cowork/skills/compose-body/SKILL.md` in full and follow its `## Compose` section with `{ cadence: "morning-briefing", nav_buttons_block: "<canonical block>", synopsis_md, memory_callouts: { yesterday_md, overnight_md, echoes_md, backlink_md }, ordered_blocks, engagement_type_blocks, closing_md, excluded_themes: plan.excluded_themes, pending_confirmations: plan.pending_confirmations, render_aspects: plan.render_aspects, voice_contract: plan.voice_contract, engagement_id: engagement.id, generated_by: "cowork:morning-briefing@2.0.0", frontmatter: { type: "cowork-morning-briefing", engagement_id: engagement.id, day: context.today, title: <composed title>, summary: <composed summary>, created_at: <ISO+TZ now> }, render_aspects_applied: <Array of "<key>:<value>" strings derived from plan.render_aspects>, memory_used: { yesterday_present: output_yesterday != null, drift_warning_present: (output_yesterday && output_yesterday.day_synthesis && output_yesterday.day_synthesis.drift_warning) != null, echoes_count: (output_echoes && output_echoes.results) ? output_echoes.results.length : 0 }, plan_dispatch: { mode: plan.dispatch_mode, kinds_dispatched: plan.dispatch_plan.length, warnings_emitted: plan.dispatch_plan.filter(e => e.action === "warn").length, classifier_cache_hit: plan.classifier_cache_hit || false, pending_confirmations_count: (plan.pending_confirmations && plan.pending_confirmations.length) || 0 }, learning_enabled: engagement.learning_enabled !== false, surfaced_kinds_for_rating: <from Step 13.5>, prior_rating_state: <from Step 13.5; may be null>, day: context.today }`. The `excluded_themes` field is the v0.95.1 Knob-1 13th plan-dispatch contract key — when `render_aspects.anti_echo == "include"` it carries yesterday's carry-forward bullets verbatim; otherwise `[]`. composeBody gates the anti-echo callout injection internally on cadence eligibility + non-empty excluded_themes. The `pending_confirmations` + `render_aspects` fields are the v0.96.0 Rail-D inputs to composeBody's new-MCP detection callout — composeBody emits `> [!info]+ Cowork detected a new MCP` when `pending_confirmations.length > 0` AND `render_aspects.new_mcp_notice == "include"` (S2.4 lands this emission). The `learning_enabled` + `surfaced_kinds_for_rating` + `prior_rating_state` + `day` fields are the v0.96.0 Rail-L inputs to composeBody's rating callout — composeBody emits `> [!todo]+ Was today useful?` with one checkbox per surfaced kind, gated on `learning_enabled !== false` AND non-empty `surfaced_kinds_for_rating` (S3.4 lands this emission). Capture `{ body_md, sidecar_json, status }`.
 
   14g. **Compose failure handling.** If `status` starts with `"failed:"`, emit Notice `cowork:morning-briefing aborted -- compose-body failure: <status>` and exit non-zero. Do NOT call write-run-note. Do NOT run state-update steps.
 15. **If `plan.render_aspects.finance_block == "include"`:** READ `.claude/skills/cowork/skills/write-run-note-finance/SKILL.md` in full —
@@ -228,30 +245,14 @@ Each gather call passes `engagement_id`. The sub-skill reads per-engagement MCP-
 16. READ `.claude/skills/cowork/skills/write-run-note-morning-briefing/SKILL.md` in full —
     paying particular attention to its `## Title composition`,
     `## Adaptive body skeleton`, and `## Pre-write self-check` sections — then apply those contracts
-    before performing the write described in its `## Steps` section with `{ engagement, date: context.today, weekday: context.dddd, month_name: context["MM-Month"].split("-")[1], body: body_md, body_assertions, prompt_source: "spice/cowork/prompts/morning-briefing.md", warning }`. Capture `status`. If `status` starts with `"failed:contract-violation:"`, emit Notice `cowork:morning-briefing aborted -- contract violation: <field>` (where `<field>` is the part after `failed:contract-violation:`). Do not run state-update steps. Exit non-zero.
+    before performing the write described in its `## Steps` section with `{ engagement, date: context.today, weekday: context.dddd, month_name: context["MM-Month"].split("-")[1], body: body_md, sidecar_json: sidecar_json, prompt_source: "spice/cowork/prompts/morning-briefing.md", warning }`. Capture `status`. If `status` starts with `"failed:contract-violation:"`, emit Notice `cowork:morning-briefing aborted -- contract violation: <field>` (where `<field>` is the part after `failed:contract-violation:`). Do not run state-update steps. Exit non-zero.
     Else if `status` starts with `"failed:"` (e.g. `failed:filesystem:permission`, `failed:write-undersized:285`), emit Notice `cowork:morning-briefing aborted -- write failed: <status>` and exit. Do not run state-update steps after a failed write.
 
 ## Verify
 
-17. **Re-read + structural verify.** After `write-run-note-morning-briefing` returns a non-`"failed:"` status:
+17. **Sidecar schema validation.** The write step's `writeAtomicNote` helper invokes `validateSidecar` against the cadence schema BEFORE committing either file. If the helper returned `failed:contract-violation:sidecar-schema`, no files were written — emit Notice `cowork:morning-briefing aborted -- contract-violation: <field>` (where `<field>` is the JSON-Schema validator's first reported error) and exit non-zero. Do not run subsequent state-update steps.
 
-   a. Read the just-written file via the Read tool at `spice/cowork/daily/<YYYY>/<MM-Month>/<YYYY-MM-DD>/morning-briefing.md` (substituting the values from `context`).
-   b. Parse leading frontmatter (YAML between `---` markers) as `parsed_frontmatter`; capture the remainder as `body`.
-   c. Assert required frontmatter fields exist and are non-empty strings:
-      - `title:`
-      - `summary:`
-      - `type:` (must equal `cowork-morning-briefing`)
-      - `warning:` only when the orchestrator passed a non-null `warning` to write-run-note (otherwise the field is allowed to be absent or `null`).
-   d. Regex-scan `body` for required structural markers:
-      - SpaceNavButtons block (v0.91.3 canonical pattern — REJECTS hallucinated `const { SpaceNavButtons } = customJS` shape): `/```dataviewjs\s*\n\s*await\s+dv\.view\(\s*["']ranch\/views\/customjs-guard["']\s*,\s*\{\s*class:\s*["']SpaceNavButtons["']\s*\}\s*\)/`
-      - At least one Synopsis callout: `/^> \[!info\]- /m`
-      - At least one example callout: `/^> \[!example\]\+ /m`
-      - Closing tip callout: `/^> \[!tip\] /m`
-   e. On ANY frontmatter-field miss or marker miss:
-      - Use Bash to delete the file: `rm -f spice/cowork/daily/<YYYY>/<MM-Month>/<YYYY-MM-DD>/morning-briefing.md`
-      - Emit Obsidian Notice: `cowork:morning-briefing aborted -- contract-violation: <missing-field-or-marker-name>`
-      - Exit non-zero. Do NOT run subsequent state-update steps.
-   f. On all-pass: continue to the State section per the existing flow.
+    The regex re-read pass from v0.91.3+v0.92.0 is RETIRED. Sidecar JSON-schema validation subsumes it. v0.91.x–v0.92.0 path/frontmatter/dvjs write-guards INSIDE write-run-note still fire as belt-and-suspenders before the writeAtomicNote call.
 
 ## State
 

@@ -100,6 +100,28 @@ Read-only digest of the active-threads ledger. Returns a `[!example]+` callout g
 }
 ```
 
+### Structured items (NEW v0.96.0)
+
+In addition to `markdown`, return `items[]` — one entry per surfaced open thread:
+
+```json
+{
+  "items": [
+    {
+      "item_id": "<deriveItemId({ kind: 'threads', engagement_id, day, stable_key: thread.id })>",
+      "kind": "threads",
+      "callout_type": "example",
+      "title": "<thread.title>",
+      "features": {
+        "recency_bucket": "today|within-week|stale-gt-week",
+        "person_inner_circle": <bool>,
+        "is_warning": false
+      }
+    }
+  ]
+}
+```
+
 ## Errors
 
 - If file missing, return a digest with `File missing.` body - let the orchestrator decide whether that is fatal.

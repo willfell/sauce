@@ -69,6 +69,28 @@ Pulls every Brex-visible card limit + outstanding balance, computes per-card uti
 > | [name] x[last4] | $[balance] | $[limit] | [pct]% | ±$[delta] |
 ```
 
+### Structured items (NEW v0.96.0)
+
+In addition to `markdown`, return `items[]` — one entry per surfaced account:
+
+```json
+{
+  "items": [
+    {
+      "item_id": "<deriveItemId({ kind: 'finance', engagement_id, day, stable_key: 'cc-debt-' + account.id })>",
+      "kind": "finance",
+      "callout_type": "example",
+      "title": "<account name>",
+      "features": {
+        "utilization_bucket": "lt-30|30-50|50-75|75-plus",
+        "apr_bucket": "lt-15|15-25|25-plus",
+        "is_warning": false
+      }
+    }
+  ]
+}
+```
+
 ## Errors
 
 - **Brex MCP unavailable / either list call fails:** return:

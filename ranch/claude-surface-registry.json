@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-06-08T18:28:23.701Z",
+  "generated_at": "2026-06-08T22:25:07.213Z",
   "workshop_version": "0.95.1",
   "contributions": {
     "audit": [
@@ -530,6 +530,12 @@
         "kind": "skill",
         "source": "skills/skills/capture-frame-drift/SKILL.md",
         "dest": ".claude/skills/cowork/skills/capture-frame-drift/SKILL.md",
+        "version": "0.33.0"
+      },
+      {
+        "kind": "skill",
+        "source": "skills/skills/learn-from-checks/SKILL.md",
+        "dest": ".claude/skills/cowork/skills/learn-from-checks/SKILL.md",
         "version": "0.33.0"
       },
       {

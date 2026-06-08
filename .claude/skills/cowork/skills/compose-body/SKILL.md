@@ -11,16 +11,16 @@ inputs:
   closing_md: string
 outputs:
   body_md: string
-  body_assertions: array
+  sidecar_json: object
   status: string
 tags: [cowork, compose, atomic-note, pure-helper, body-shape]
 ---
 
 # cowork:compose-body
 
-Shape composer for cowork atomic-note bodies. Pure delegation to `compose-body-helper.js` — no I/O, no MCP, no LLM judgment. Returns canonical body markdown + a body_assertions list the downstream write-guard verifies.
+Shape composer for cowork atomic-note bodies. Pure delegation to `compose-body-helper.js` — no I/O, no MCP, no LLM judgment. Returns canonical body markdown + a v1.0.0 sidecar payload object the downstream write-atomic-note-helper validates against the cadence's JSON schema (draft-07).
 
-Use this sub-skill to convert structured gather/memory/closing inputs into the canonical body markdown that gets written by `cowork:write-run-note-<cadence>`. The orchestrator owns content (voice-shaped synopsis + closing prose, gather-pipeline output assembly); this skill owns SHAPE (callout wrapping, inter-section ordering, null-omit semantics, body_assertions emission).
+Use this sub-skill to convert structured gather/memory/closing inputs into the canonical body markdown that gets written by `cowork:write-run-note-<cadence>`. The orchestrator owns content (voice-shaped synopsis + closing prose, gather-pipeline output assembly); this skill owns SHAPE (callout wrapping, inter-section ordering, null-omit semantics, sidecar payload emission).
 
 ## Inputs
 
@@ -47,7 +47,7 @@ Resolve helper path: `spice/cowork/helpers/compose-body-helper.js`. Consumer-sid
 
 ## Compose
 
-1. **Validate input shape.** The helper's `_validateInput` enforces required-field presence + cadence whitelist + callout_type whitelist. Returns `failed:input:<reason>` on miss; body_md = "" and body_assertions = [] in that case.
+1. **Validate input shape.** The helper's `_validateInput` enforces required-field presence + cadence whitelist + callout_type whitelist. Returns `failed:input:<reason>` on miss; `body_md = ""` and `sidecar_json = null` in that case.
 2. **Invoke `composeBody(input)`** from the helper.
 3. **Return the helper's output unchanged** to the caller.
 
@@ -55,10 +55,32 @@ Resolve helper path: `spice/cowork/helpers/compose-body-helper.js`. Consumer-sid
 
 ## Returns
 
-`{ body_md: string, body_assertions: string[], status: "ok" | "failed:<reason>" }`.
+```json
+{
+  "body_md": "<assembled markdown body, ends with newline>",
+  "sidecar_json": {
+    "schema_version": "1.0.0",
+    "generated_by": "cowork:<cadence>@<version>",
+    "generated_at": "<ISO timestamp>",
+    "cadence": "<morning-briefing | midday-tripwire | eod-review | weekly-review | monthly-review>",
+    "engagement_id": "<engagement_id>",
+    "frontmatter": { /* mirror of .md frontmatter */ },
+    "surfaced_kinds": ["<kind1>", "<kind2>"],
+    "surfaced_items": [ /* aggregated from ordered_blocks[].items + engagement_type_blocks[].items */ ],
+    "render_aspects_applied": [ /* "<key>:<value>" pairs */ ],
+    "memory_used": { "yesterday_present": false, "drift_warning_present": false, "echoes_count": 0 },
+    "plan_dispatch": { "mode": "prefs", "kinds_dispatched": 0, "warnings_emitted": 0 }
+  },
+  "status": "ok"
+}
+```
+
+Status alphabet: `"ok"` or any `failed:<reason>` from `## Failure modes`.
 
 - `body_md` is the empty string `""` when status is any `failed:*` value.
-- `body_assertions` is `[]` when status is any `failed:*` value.
+- `sidecar_json` is `null` when status is any `failed:*` value.
+
+Validated against `<vault>/.claude/skills/cowork/data/schemas/<cadence>@1.0.0.json` by `write-atomic-note-helper` BEFORE write commits. See design §3.3 for full schema reference. The retired `body_assertions[]` field is subsumed by JSON-schema validation.
 
 ## Failure modes
 

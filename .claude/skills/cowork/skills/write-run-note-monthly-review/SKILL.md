@@ -36,29 +36,13 @@ Atomic-note writer for the monthly-review run. Composes canonical frontmatter, s
 
 ## Steps
 
-1. Compose the path: `spice/cowork/monthly/<year>/<month>/monthly-review.md`. Example for `2026-05`: `spice/cowork/monthly/2026/2026-05/monthly-review.md`.
-2. Compose `created_at` as the current ISO-8601 timestamp with offset (e.g. `2026-05-19T07:05:14-06:00`). Use the local TZ resolved by `cowork:date-context`.
-3. Compose frontmatter as YAML:
-   ```yaml
-   ---
-   type: cowork-monthly-review
-   created_at: "<ISO+TZ>"
-   engagement_id: "<engagement.id>"
-   month: "<month>"
-   generator: "cowork:monthly-review@1.0.0"
-   prompt_source: "<prompt_source>"
-   ```
-   If `warning` is set, append `warning: "<warning>"` as the last frontmatter key. Close with `---`.
-4. Compose the file contents: frontmatter block + one blank line + `body`. When `body` is empty AND `warning == "empty_prompt"`, use the literal body:
-   ```
-   (Prompt body empty — edit `<prompt_source>` to customize what this run emits.)
-   ```
-5. **Write the file** (3 sub-steps):
-   a. **Ensure parent directory exists.** Use the Bash tool: `mkdir -p "<dirname(path)>"` where `<path>` is the composed vault-relative path resolved against cwd (the bash sandbox boundary IS the vault root for scheduled-jobs invocations).
-   b. **Write the file.** Use the Write tool with `file_path: <path>` and the composed contents (frontmatter + body). The Write tool overwrites existing files (matches v0.65.0 atomic-note contract: overwrite-last-write-wins).
-   c. **Verify.** Use the Bash tool: `wc -c "<path>"` and confirm the byte count is ≥ 500 (frontmatter alone is ~300; a real note clears). On undersized return `{ path, status: "failed:write-undersized:<bytes>" }`. On any Write tool failure return `{ path, status: "failed:filesystem:<reason>" }` where `<reason>` is normalized (`permission`, `enospc`, `path-collision`, `unknown`). On success return `{ path, status: "written" }`.
-
-Pre-write self-check (see `## Pre-write self-check` below) MUST pass before sub-step (a). On self-check failure return `{ path, status: "failed:contract-violation:<field>" }` and do NOT call Bash or Write.
+1. Construct `mdPath` from `{ engagement, month, year }` per the v0.65.0 atomic-note write contract:
+   `spice/cowork/monthly/<YYYY>/<YYYY-MM>/monthly-review.md`
+2. Construct `sidecarPath` = `mdPath` with `.md` replaced by `.cowork.json`.
+3. Construct full markdown via existing frontmatter + body assembly (frontmatter from input.frontmatter merged with cadence-canonical fields; body from `input.body`).
+4. v0.91.x–v0.92.0 path + frontmatter + dvjs body-shape write-guards stay as belt-and-suspenders — apply them BEFORE the writeAtomicNote call. Abort with `failed:contract-violation:wrong-frontmatter:<field>` etc. on any miss.
+5. Invoke `writeAtomicNote({ mdPath, sidecarPath, body_md, sidecar_json: input.sidecar_json, schemaPath: <vault>/.claude/skills/cowork/data/schemas/monthly-review@1.0.0.json })` from `write-atomic-note-helper.js`.
+6. Return the helper's status verbatim. The helper's JSON-schema validation against the sidecar IS the authoritative new contract check (v0.96.0); the v0.91.x–v0.92.0 prose write-guards remain as belt-and-suspenders for path/frontmatter/dvjs body-shape.
 
 ## Returns
 

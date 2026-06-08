@@ -374,6 +374,32 @@ function composeRatingCallout(opts) {
     ].join("\n");
 }
 
+/**
+ * v0.96.0 Rail L — Upgrade-notice callout (one-shot per engagement).
+ *
+ * injectUpgradeNoticeCallout(body)
+ *
+ * Prepends a "> [!info]+ Cowork v0.96.0 upgrade notice" callout explaining the
+ * rating callout, sidecar file conventions, and the learning_enabled override
+ * knob. Designed to fire ONCE per engagement — the first atomic note emitted
+ * post-upgrade — gated by `learned_weights.totals.upgrade_notice_emitted` which
+ * `cowork:learn-from-checks` flips to `true` after the first run.
+ *
+ * Caller is responsible for the one-shot gate (or, more typically, routes
+ * through composeBody which checks input.learned_weights_state.totals).
+ *
+ * @param {string} body - current body string
+ * @returns {string} body with the upgrade-notice callout prepended
+ */
+function injectUpgradeNoticeCallout(body) {
+    const callout = [
+        `> [!info]+ Cowork v0.96.0 upgrade notice`,
+        `> This is the first atomic note since upgrading to v0.96.0 — cowork now learns which kinds of items you care about. Each atomic note ends with a "Was today useful?" rating callout — tick the kinds that surfaced something you cared about. Your daily preferences update nightly; effects begin after 7 days of ticks.`,
+        `> To disable for an engagement, set \`engagement.learning_enabled: false\` in \`vault-config.md\`. To exclude \`.cowork.json\` sidecars from Obsidian search, add \`*.cowork.json\` to Settings → Files & Links → Excluded files.`,
+    ].join("\n");
+    return callout + "\n\n" + body;
+}
+
 function composeBody(input) {
     const validationError = _validateInput(input);
     if (validationError) {
@@ -449,6 +475,16 @@ function composeBody(input) {
             body_md = body_md.trimEnd() + "\n\n" + ratingCallout + "\n";
         }
     }
+    // v0.96.0 upgrade notice — one-shot per engagement
+    if (
+        input.learned_weights_state &&
+        input.learned_weights_state.totals &&
+        !input.learned_weights_state.totals.upgrade_notice_emitted
+    ) {
+        body_md = injectUpgradeNoticeCallout(body_md);
+        // Note: orchestrator/learn-from-checks marks totals.upgrade_notice_emitted = true
+        // on next learn-from-checks fire (idempotent — won't re-emit on subsequent days).
+    }
     const sidecar_json = _composeSidecar(input);
 
     return { body_md, sidecar_json, status: "ok" };
@@ -459,6 +495,7 @@ module.exports = {
     injectAntiEchoCallout,
     injectDetectionCallout,
     composeRatingCallout,
+    injectUpgradeNoticeCallout,
     ANTI_ECHO_ELIGIBLE_CADENCES,
     _validateInput,
     _wrapCallout,

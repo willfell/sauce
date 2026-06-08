@@ -91,6 +91,31 @@ Empty case:
 > No transactions recorded.
 ```
 
+### Structured items (NEW v0.96.0)
+
+In addition to `markdown`, return `items[]` — one entry per surfaced transaction:
+
+```json
+{
+  "items": [
+    {
+      "item_id": "<deriveItemId({ kind: 'finance', engagement_id, day, stable_key: 'yest-' + (txn.id || sha256(txn.merchant + txn.amount + txn.date)) })>",
+      "kind": "finance",
+      "callout_type": "example",
+      "title": "<merchant name> — $<amount>",
+      "features": {
+        "amount_bucket": "lt-25|25-100|100-500|500-plus",
+        "recurring_merchant": <bool>,
+        "category": "<txn.category>",
+        "is_warning": false
+      }
+    }
+  ]
+}
+```
+
+`item_id` prefers `txn.id`; falls back to hashed `merchant+amount+date`. Stable across same-day re-fires.
+
 ## Errors
 
 - **Brex MCP unavailable / not authenticated / API error on either endpoint:** return:

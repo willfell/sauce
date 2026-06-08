@@ -88,6 +88,32 @@ Empty case:
 > No events scheduled.
 ```
 
+### Structured items (NEW v0.96.0)
+
+In addition to `markdown`, return `items[]` with one entry per surfaced calendar event. Use the `deriveItemId` helper exported from `gather-from-served-by-helper.js` to construct stable IDs (same-day re-fires return byte-identical ids):
+
+```json
+{
+  "items": [
+    {
+      "item_id": "<deriveItemId({ kind: 'calendar', engagement_id, day, stable_key: event.uid || sha256(event.start + event.summary) })>",
+      "kind": "calendar",
+      "callout_type": "example",
+      "title": "<event.summary>",
+      "features": {
+        "time_of_day_bucket": "morning|midday|afternoon|evening",
+        "sender_or_organizer_inner_circle": <bool — true if event.organizer.email matches inner_circle resolver>,
+        "recency_bucket": "today|tomorrow|day-after",
+        "subject_recurring": <bool — true if event.recurrenceId present>,
+        "is_warning": false
+      }
+    }
+  ]
+}
+```
+
+`item_id` MUST be stable across same-day re-fires. Prefer the calendar API's UID; fall back to `sha256(start + summary).slice(0,16)` via `deriveItemId` when UID absent.
+
 ## Errors
 
 - **Calendar MCP unavailable / not authenticated / API error:** return:

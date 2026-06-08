@@ -68,6 +68,8 @@ If `resume_from_step` is set, skip steps `< resume_from_step` and pick up from t
    cowork:bootstrap-vault -- <backend> MCP missing; will mark engagement-scoped questions for that backend as skip
    ```
 
+6.bis. **Auto-detect connected MCPs (NEW v0.96.0).** Before any engagement interview runs (and before context-builder is later invoked per-engagement), enumerate the agent's tool list and call `classifyConnectedKinds({ reachable_namespaces, tools_by_namespace, vault_root })` from `helpers/kind-classifier-helper.js`. Walk every `mcp__<ns>__<tool>` tool name in your current tool inventory; build `reachable_namespaces[]` (deduped) and `tools_by_namespace = { <ns>: [<tool_short_name>, ...] }`. The helper consults `spice/cowork/data/kind-patterns.json` for deterministic namespace + tool-name glob matching and persists per-namespace results in `spice/cowork/data/kind-classifier-cache.json` keyed by `classifier_version`. Capture result shape `{ classified, unclassified, new_since_last_fire, cache_hits }` as `classifier_result`. Pass `classifier_result` INTO context-builder as input so its Section 0 (auto-fill) can pre-populate the per-MCP interview from the classification. Classifier failures are non-fatal — on any throw, set `classifier_result = { classified: [], unclassified: [], new_since_last_fire: [], cache_hits: 0 }` and continue. The final bootstrap report (step 24) shows the auto-detection result (in §1) + the user's overrides (in §2) for transparency.
+
 7. Capture `blueprints_installed = []` from the `blueprints[]` array of platform-installed.json read in step 3.
 
 8. **Load engagement-type registry from materialized path.** List `<vault>/spice/cowork/context/engagement-types/*.json` via `mcp__obsidian__list_files_in_dir`. If the dir is not found (the registry is materialized at install time; an absent dir means the vault has not been installed against a v0.83.0+ workshop), emit Notice `cowork:bootstrap-vault aborted -- spice/cowork/context/engagement-types/ not found; ensure sauce update --bump-pins ran against v0.83.0+ workshop` and exit. If the dir is empty, emit Notice `cowork:bootstrap-vault aborted -- spice/cowork/context/engagement-types/ is empty; ensure sauce update --bump-pins ran against v0.83.0+ workshop` and exit. For each `.json` file, Read + parse; key by `id`. Capture `engagement_types_registry = { <id>: <manifest>, ... }`.
@@ -135,7 +137,18 @@ If `resume_from_step` is set, skip steps `< resume_from_step` and pick up from t
       - **On Y:** stage ONE write to `E.cadences`:
         - `E.cadences.lens_shift: { cron: "0 7 * * 6" }` (canonical default — Saturday 07:00)
       - **On N:** write NOTHING — no `lens_shift` entry appears in `E.cadences`. The default warm-MB cadence on Saturday (governed by `default_cadences.morning`) is unaffected by this answer; only the cold-MB companion is gated by `lens_shift` opt-in.
-    - **13h.** Capture engagement E as a full record (id, type, type_schema_version, label, captured field map, cadences, overrides).
+    - **13h.** **Preference-learning opt-in (v0.96.0 Y/N3 — Rail L).** Ask user:
+
+      > `Enable preference learning for this engagement? Adds a 'Was today useful?' rating callout to every atomic note; per-kind weights update nightly from your ticks. Atomic-note quality should improve over 1-2 weeks. (default: yes)`
+
+      **Idempotent re-bootstrap default:** if `existing_engagements[E.id].learning_enabled === false`, the question defaults to `N`; otherwise (unset OR `true`) defaults to `Y`. Blank input accepts the default.
+
+      - **On Y:** stage ONE write to `E` (top-level engagement record key, not inside `overrides`):
+        - `E.learning_enabled: true`
+        - No installer change for `learned_weights` — lazy-initialized by `cowork:learn-from-checks` on first post-upgrade fire (per S0.5 mitigation).
+      - **On N:** stage ONE write to `E`:
+        - `E.learning_enabled: false` — composeBody never emits the rating callout; `cowork:learn-from-checks` skips this engagement.
+    - **13i.** Capture engagement E as a full record (id, type, type_schema_version, label, captured field map, cadences, overrides, learning_enabled).
 
 14. Vault-scoped questions (from `contributions_registry` where `vault_question` kind exists): ask once per vault, not per engagement. Capture into the vault-wide substitution map.
 
@@ -239,7 +252,7 @@ If `resume_from_step` is set, skip steps `< resume_from_step` and pick up from t
 
     Sections:
 
-    - **§1 What I discovered** — `mcp_map` as a table, `vault_surface` stats as a list, blueprints installed, daily-template marker presence (always confirmed by step 10 or we would have exited).
+    - **§1 What I discovered** — `mcp_map` as a table, `vault_surface` stats as a list, blueprints installed, daily-template marker presence (always confirmed by step 10 or we would have exited). v0.96.0 NEW: append a `Kind classifier results` subsection listing `classifier_result.classified` (one row per detected namespace → kind), `classifier_result.unclassified` (namespaces the deterministic classifier could not place; user resolved during per-engagement context-builder runs or skipped), and `classifier_result.new_since_last_fire` (namespaces detected for the first time this run — surfaced as `pending_confirmations[]` to downstream cadences via plan-dispatch).
     - **§2 Engagements** — per-engagement subsection (id, type, label, captured fields, cadences).
     - **§3 Cron jobs** — per-engagement table with columns `cadence | schedule | job-name | SKILL.md body` populated from step 22.
     - **§4 Skipped** — per-(engagement, cadence) one-liner with reason: missing MCP / engagement-type opt-out / user override.

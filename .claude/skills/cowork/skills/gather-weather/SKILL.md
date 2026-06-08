@@ -54,6 +54,28 @@ Literal output shape (substitute bracketed placeholders):
 > | [day-after YYYY-MM-DD] | [conditions] | [max]° | [min]° |
 ```
 
+### Structured items (NEW v0.96.0)
+
+In addition to `markdown`, return `items[]` — exactly ONE entry per fire (single weather block):
+
+```json
+{
+  "items": [
+    {
+      "item_id": "<deriveItemId({ kind: 'weather', engagement_id, day, stable_key: date_today })>",
+      "kind": "weather",
+      "callout_type": "example",
+      "title": "Weather — <home_city>",
+      "features": {
+        "is_warning": false
+      }
+    }
+  ]
+}
+```
+
+`item_id` is stable across same-day re-fires because `stable_key` is the date.
+
 ## Errors
 
 - **WebFetch failure / non-200 / malformed JSON:** return the following callout verbatim and exit successfully (orchestrator pastes as-is):

@@ -186,6 +186,28 @@ The helper performs steps 5-7 (validate + return) but skips steps 1-4 (the live 
 
 `{ markdown, status, served_by_used, tools_used, reason }` per Outputs.
 
+### Structured items (NEW v0.96.0)
+
+In addition to `markdown`, return `items[]` — one entry per surfaced row. Items[].kind === input.kind_name (passed by the caller). The default_features per kind come from `data/kind-patterns.json` (S2.2 — `default_features: [...]` per kind). At v0.96.0 ship-time, treat all features beyond `is_warning` as best-effort; the kind classifier's default_features list is the authoritative source post-S2.
+
+```json
+{
+  "items": [
+    {
+      "item_id": "<deriveItemId({ kind: input.kind_name, engagement_id, day, stable_key: <kind-appropriate stable id from result row> })>",
+      "kind": "<input.kind_name>",
+      "callout_type": "<input.callout_type — already provided>",
+      "title": "<row.title or composed>",
+      "features": {
+        "is_warning": <bool>
+      }
+    }
+  ]
+}
+```
+
+For S1.5, the structural contract is the deliverable. Per-kind features[] population deferred to S2.2 when kind-patterns.json's `default_features:` mapping lands.
+
 ## Test fixtures
 
 HC-V0780-B1 (chat override), HC-V0780-B2 (ado custom), HC-V0780-B3 (no tools) in `platform/test/run-cowork-smoke.js`.
