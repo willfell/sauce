@@ -226,6 +226,16 @@
       "dest": "{{module_directory}}/context/engagement-shared-templates/weekly-snapshot.md"
     },
     {
+      "source": "content/context/engagement-shared-templates/docs/baseline.json",
+      "dest": "{{module_directory}}/context/engagement-shared-templates/docs/baseline.json",
+      "tag": "platform"
+    },
+    {
+      "source": "content/context/engagement-shared-templates/weather/baseline.json",
+      "dest": "{{module_directory}}/context/engagement-shared-templates/weather/baseline.json",
+      "tag": "platform"
+    },
+    {
       "source": "content/Daily Hub.md",
       "dest": "{{module_directory}}/Daily Hub.md"
     },

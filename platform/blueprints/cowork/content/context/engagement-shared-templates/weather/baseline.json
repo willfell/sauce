@@ -1,0 +1,8 @@
+{
+  "kind": "weather",
+  "what_matters": "Today's high/low + tomorrow's forecast; emphasize any severe weather alerts.",
+  "microscope_suggested": false,
+  "siblings": [],
+  "hard_rules": [],
+  "default_priority": 70
+}

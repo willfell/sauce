@@ -1,0 +1,8 @@
+{
+  "kind": "docs",
+  "what_matters": "Recent file edits + files shared with me by others within the last 7 days.",
+  "microscope_suggested": false,
+  "siblings": [],
+  "hard_rules": [],
+  "default_priority": 60
+}

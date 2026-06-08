@@ -38,6 +38,41 @@ Writes `spice/cowork/context/user-preferences.md` — a user-owned file that NEV
 
 3. **Read MCP-skill map.** Use Read on `spice/cowork/context/mcp-skill-map.json`. Parse as `mcp_skill_map` (array of entries each with `mcp_kind`, `mcp_namespace_match`, `gather_skill`).
 
+## 0. Auto-detection pre-fill (NEW v0.96.0)
+
+Before the per-MCP interview begins, invoke the kind classifier to pre-fill answers from `spice/cowork/data/kind-patterns.json` + the per-kind baseline files. The interview then walks only the questions the user hasn't implicitly answered via accept-defaults. Time-to-bootstrap drops from "10-15 minutes per MCP" to "~30 seconds confirming the auto-detected list + tweaking outliers" (design § 4.4).
+
+1. **Enumerate reachable namespaces from the agent's tool list.** Walk every `mcp__<ns>__<tool>` tool name in your current tool inventory. For each, parse `<ns>` (the segment between `mcp__` and the right-most `__`) and the short tool name (the segment after the right-most `__`). Build `reachable_namespaces[]` (deduped string array) and `tools_by_namespace = { <ns>: [<tool_short_name>, ...] }`.
+
+2. **Call `classifyConnectedKinds`.** Invoke `classifyConnectedKinds({ reachable_namespaces, tools_by_namespace, vault_root })` from `helpers/kind-classifier-helper.js` (workshop path: `platform/blueprints/cowork/helpers/kind-classifier-helper.js`; consumer-vault path: `.claude/skills/cowork/helpers/kind-classifier-helper.js`). The helper consults `spice/cowork/data/kind-patterns.json` for deterministic namespace + tool-name glob matching and persists per-namespace results in `spice/cowork/data/kind-classifier-cache.json` keyed by `classifier_version`. Capture result shape `{ classified, unclassified, new_since_last_fire, cache_hits }` as `classifier_result`. Bootstrap-vault MAY supply `classifier_result` as input — if so, skip this call and reuse the supplied value (see bootstrap-vault step 13b.bis).
+
+3. **Look up per-kind baselines.** For each entry in `classifier_result.classified` (shape `{ namespace, kind, score, priority }`), read `<vault>/spice/cowork/context/engagement-shared-templates/<kind>/baseline.json`. Each baseline carries `{ kind, what_matters, microscope_suggested, siblings, hard_rules, default_priority }`. If the baseline file is absent for a given kind, fall back to a generic stub (`what_matters: "Recent activity from <namespace>."`, `siblings: []`, `hard_rules: []`).
+
+4. **Present the auto-detected list to the user via `AskUserQuestion`.** Compose a single prompt of the form:
+
+   ```
+   I detected these connected MCPs and classified them:
+     Gmail            → email     (priority 20)
+     Google Calendar  → calendar  (priority 10)
+     Brex             → finance   (priority 50)
+     apple-mcp        → messages  (priority 40)
+
+   Press Enter to accept each as-is, or type the kind name to override
+   (calendar / email / chat / messages / finance / docs / weather / vault).
+   ```
+
+   Capture per-namespace acceptance/override as `auto_fill_decisions = { <namespace>: { kind: <accepted-or-overridden>, accepted_baseline: true|false } }`. A blank/Enter accept keeps the classifier's kind; typed input overrides it (validate against the 8 canonical kinds in `kind-patterns.json`).
+
+5. **For unclassified namespaces, surface them separately.** For each `ns` in `classifier_result.unclassified`, fall through to the existing Unknown-MCP loop (§7 below) — that loop already handles known-override / custom / skip per-namespace and remains the canonical path for namespaces the deterministic classifier could not place.
+
+6. **Pre-fill interview answers from each accepted baseline.** For each accepted `<namespace, kind>` pair, seed the per-MCP block under `mcps.<kind>` with the baseline's `what_matters`, the suggested microscope flag, baseline siblings, and baseline hard_rules. The kind's `default_priority` from kind-patterns.json contributes to the priorities ordering in step 13 below.
+
+7. **Existing user-preferences entries PRESERVE.** Engagements with an existing `user-preferences.mcps.<kind>` block keep that block verbatim — auto-fill only adds entries for kinds NOT already in `existing_prefs`. New detections surface as additive opt-in; the user is never silently re-onboarded for a kind they previously configured.
+
+8. **Proceed to the per-MCP interview (steps 4 onward below), but skip questions whose answers are already implicitly captured by the accepted baseline.** Specifically: when `auto_fill_decisions[<ns>].accepted_baseline == true`, the per-MCP walk in step 10 below SKIPS questions whose output fields were already populated by the baseline (i.e., `what_matters`-equivalent fields like `surface_kinds` defaults), and asks ONLY for the remaining engagement-specific answers (e.g., `vip_senders`, `inner_circle`, `cards_mine` — fields the baseline cannot supply).
+
+Run-time invariants per Rail D design (§4 of `Docs/plans/2026-06-08-v0.96.0-cowork-rethought-1-design.md`): the classifier is deterministic-first + LLM-fallback (currently unwired); cache makes the cost essentially zero after first sighting; the 8 canonical kinds (calendar, email, chat, messages, finance, docs, weather, vault) cover everything we ship microscopes for.
+
 ## Detect
 
 4. **Enumerate available MCP tools.** Inspect your current tool list. For each tool whose name starts with `mcp__`, capture the FULL name string (e.g., `mcp__Google_Calendar__list_events`). Build `available_tools[]`. Do NOT pre-strip namespaces — the helper handles namespace splitting.
