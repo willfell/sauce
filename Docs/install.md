@@ -880,6 +880,56 @@ After the update, verify by checking that `.claude/skills/cowork/skills/gather-s
 
 **Optional post-deploy validation (FLN-v87-1).** The `min_similarity: 0.45` threshold is a design-time guess. Review the first 3-5 morning briefings on each consumer vault: if Echoes callouts surface obviously-unrelated matches, the threshold should be raised; if relevant matches are consistently filtered out (callout omits even on days with clear historical analogues), the threshold should be lowered. A v0.87.1 PATCH can ship the empirically-validated threshold.
 
+## Upgrading from v0.95.0 to v0.95.1
+
+`brew upgrade sauce` distributes the new release. Existing consumers run `sauce update --bump-pins` from inside each vault. v0.95.1 bundles the **cowork-anti-echo MINOR**: three composable knobs intervening at the three closure points of the cowork memory echo loop — Knob 1 `render_aspects.anti_echo` per-fire callout, Knob 2 `cowork:capture-frame-drift` background tripwire, Knob 3 `lens_shift` weekly cold-MB cadence. All three default OFF in every engagement-type (Approach B opt-in everywhere); bootstrap-vault interview grows 3 NEW Y/N opt-in questions.
+
+**What auto-installs on the first `sauce update --bump-pins` after upgrade:**
+
+- `.claude/skills/cowork/skills/capture-frame-drift/SKILL.md` — NEW sub-skill body for Knob 2. Invoked post-synthesize-day when `plan.tripwire_aspects.includes("frame_drift")`. Requires ≥5 days of memory.md syntheses (fast-path skip if fewer).
+- `spice/cowork/helpers/capture-frame-drift-helper.js` — NEW 3-export helper (`extractThemes` async LLM call to `claude-haiku-4-5`; `evaluateDrift` deterministic 3-flag DriftReport; `composeDriftCallout` voice-applied markdown).
+- `ranch/scripts/cowork/CoworkLensShiftCards.js` — NEW CustomJS class for Knob 3's Daily Hub warm/cold MB side-by-side rendering (slug-match pairing, no `companion_to:` frontmatter).
+- 3 engagement-type JSONs (personal / w2-fte / consulting) bump with `render_aspects.anti_echo: "skip"` default (opt-in `"include"`) + `supported_cadences += ["lens_shift"]` (NOT in `default_cadences`).
+- `spice/cowork/data/scheduled-job-contract.json` — `contract_version` 0.32.0 → 0.33.0 (lockstep mirror per landmine #20); NEW `lens_shift` cadence entry with `default_cron: "0 7 * * 6"` + prompt template.
+- 4 modified cowork orchestrator SKILL.md bodies: morning-briefing (cold-mode `--cadence lens_shift` branch + drift_warning injection), midday-tripwire + eod-review (`plan.excluded_themes` pass-through), synthesize-day (post-write capture-frame-drift invocation), read-memory (4-key return shape adds `drift_warning: string \| null`), bootstrap-vault (3 NEW Y/N opt-in questions per engagement).
+- activity-feed type allowlist registers `cowork-morning-briefing-cold` so Knob 3's cold companion atomic notes surface on Daily Hub.
+
+**What does NOT change (backward-compat):**
+
+- vault-config.md engagement records WITHOUT new opt-ins continue to work — all three knobs default to OFF. Observable behavior unchanged from v0.95.0.
+- plan-dispatch contract grows 12 keys → 13 keys (NEW `excluded_themes: string[]` always-present, empty when not opted in). Existing consumers of the contract see one new always-present empty array; nothing breaks.
+- Existing v0.95.0 engagement-types JSONs gain the new fields ADDITIVELY; no removed fields.
+- Atomic-note output shape unchanged for non-opted-in engagements. Next scheduled cron fire (morning-briefing on day after deploy) should produce a note in the same shape as v0.95.0.
+
+**Optional: try the anti-echo knobs.** After upgrade, edit `spice/cowork/context/vault-config.md` for one engagement:
+
+```yaml
+engagements:
+  - id: accuris
+    type: w2-fte
+    # ... existing fields ...
+    overrides:
+      render_aspects:
+        anti_echo: include      # Knob 1: per-fire "Outside yesterday's frame" callout
+      tripwire_aspects: [calendar_drift, queue_growth, frame_drift]   # Knob 2: REPLACES bundle (per v0.95.0 semantics)
+    cadences:
+      # ... existing entries ...
+      lens_shift:               # Knob 3: weekly cold-MB
+        cron: "0 7 * * 6"       # Saturday 07:00 (default)
+```
+
+OR re-run `cowork:bootstrap-vault` to be offered the 3 NEW Y/N opt-in questions interactively (one per knob; can be enabled independently).
+
+**Knob behavior summary:**
+
+- **Knob 1 (anti_echo).** MB / midday / EOD atomic notes grow a `> [!question] Outside yesterday's frame` callout naming ONE item from today's gather that doesn't relate to yesterday's carry-forward bullets. If nothing qualifies, the LLM writes explicit-null prose ("today's gather largely continued yesterday's threads") — load-bearing signal for Knob 2.
+- **Knob 2 (capture-frame-drift).** Once-per-day post-synthesize-day, ONE LLM call (`claude-haiku-4-5`, ~$0.50/year/engagement at daily firing) extracts themes from the last 5 day-syntheses + deterministic helper evaluates 3 flags (`frame_repeat ≥4/5 days`, `subject_dominance ≥3/5 days`, `explicit_null 3 consecutive`). On any flag firing, appends a `[!warning]- Frame may be stuck` callout to today's memory.md + frontmatter additions. Tomorrow's MB picks it up via read-memory's NEW `drift_warning` field and injects into "Yesterday at a glance" so the LLM is aware recent days have been thematically locked.
+- **Knob 3 (lens_shift).** Weekly Saturday 07:00 (default cron) fires `cowork:morning-briefing --cadence lens_shift` with pre-flight `read-memory` + `gather-semantic-related` SKIPPED. Writes a "cold" companion atomic note with NEW `type: cowork-morning-briefing-cold` + slug `morning-briefing-cold-<engagement>.md`. Daily Hub's `## Lens-shift companions` section renders warm + cold pair side-by-side via `CoworkLensShiftCards` (slug-match, no frontmatter coordination).
+
+**Migrator parking note.** The v0.95.1 slot was originally allocated to a `sauce update --migrate-config` migrator (closes v0.95.0's one-cycle backward-compat window for vault-config.md `overrides:` block). Re-prioritized to anti-echo at brainstorm time. Migrator design + plan PARKED to v0.96.0+ (execution-ready when resurrected); v0.95.0's helper still falls through to bundle defaults when `overrides:` is absent, so existing engagements without overrides keep working through v0.95.1.
+
+**Restart Obsidian.** Not strictly required for v0.95.1 (no new plugins), but a restart picks up the new claude-surface-registry.json + materialized SKILL.md bodies for any claude-skills-aware tooling running inside the vault, AND the new `CoworkLensShiftCards` CustomJS class registration.
+
 ## Upgrading from v0.94.0 to v0.95.0
 
 `brew upgrade sauce` distributes the new release. Existing consumers run `sauce update --bump-pins` from inside each vault. v0.95.0 bundles the **cowork-spine MINOR**: a NEW `cowork:plan-dispatch` sub-skill that 5 atomic-note orchestrators (morning-briefing / midday-tripwire / eod-review / weekly-review / monthly-review) invoke as their single source of truth for Gather + Write, plus a NEW `engagement.overrides` schema on vault-config.md engagements[], plus a NEW `data/kind-titles.json` v1.0.0 canonical kind→title map.
