@@ -75,7 +75,8 @@ Compose the structured output:
     "tick_count": <number>,
     "synthesized": <boolean>,
     "synthesis_at": "<ISO or null>",
-    "last_tick_at": "<ISO or null>"
+    "last_tick_at": "<ISO or null>",
+    "drift_warning": "<string body of `[!warning]- Frame may be stuck` callout if present, else null>"
   } | null,
   "week_synthesis": {
     "engagement_id": "<string>",
@@ -97,6 +98,20 @@ Compose the structured output:
   ]
 }
 ```
+
+### v0.95.1 Knob 2 — drift_warning extraction (day-tier reads)
+
+For any `(tier, window)` combination that populates `day_synthesis` (all `day`/`tick` rows in the table above), after extracting `synthesis_paragraph` + `carry_forward_bullets` + `last_tick_at`, scan the memory.md body for a collapsed callout with the canonical title `> [!warning]- Frame may be stuck` (the marker written by `cowork:capture-frame-drift` per design § 4.5).
+
+Extraction rules:
+
+1. Match the callout header via regex `/^> \[!warning\]-\s+Frame may be stuck\s*$/m`. The `-` between `!warning` and the title denotes a collapsed callout (Obsidian convention).
+2. Capture the callout body: the contiguous block of lines immediately following the header that start with `> ` (or are blank-`>` lines). Stop at the first line that does NOT start with `>` (typically a blank line or a `##` header such as `## Ticks`).
+3. Strip the leading `> ` prefix from each captured body line; join with `\n`; trim trailing whitespace. The resulting string is `drift_warning`.
+4. If the canonical callout is not present, set `drift_warning: null`.
+5. If parsing fails (malformed callout, encoding issue), set `drift_warning: null` and emit a debug-level Notice — never throw. Downstream MB consumers gate on null silently.
+
+Surface the captured string (or null) on `day_synthesis.drift_warning`. This is the channel tomorrow's morning-briefing reads to inject the frame-may-be-stuck warning into its "Yesterday at a glance" callout (design § 4.6).
 
 ## Failure modes (graceful — never throws)
 

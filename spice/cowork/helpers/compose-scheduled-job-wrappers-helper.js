@@ -343,9 +343,30 @@ function composeScheduledJobWrappers(input) {
     const howToUseCallout = "> [!info]- How to use\n" + preambleLines.join("\n");
 
     // 14. Compose per-cadence sections.
+    //
+    // v0.95.1 Knob-3 opt-in gate: `lens_shift` is the first cadence that ships
+    // in contract.cadence_order but is OPT-IN at the engagement level (NOT in
+    // any engagement-type's default_cadences). The helper SKIPS lens_shift
+    // emission entirely (not even a DISABLED marker section) unless the
+    // engagement explicitly opts in via `engagement.cadences.lens_shift` (an
+    // object — typically `{ cron: "0 7 * * 6" }`). Rationale: keeping the
+    // pre-v0.95.1 5-section default output for non-opted-in engagements
+    // preserves the byte-identical compose-shape fixture contracts AND honors
+    // the design intent (Knob 3 doubles MB cost weekly — explicit consent).
+    // Future opt-in-only cadences can extend the OPT_IN_CADENCES set below.
+    const OPT_IN_CADENCES = new Set(["lens_shift"]);
+    const engagementCadences = (engagement && typeof engagement.cadences === "object" && engagement.cadences) || {};
+    const optInCadenceEnabled = (cad) => {
+        if (cad === "lens_shift") return !!engagementCadences.lens_shift;
+        return true;
+    };
+
     const sectionParts = [];
     let sectionIndex = 0;
     for (const cad of contract.cadence_order) {
+        if (OPT_IN_CADENCES.has(cad) && !optInCadenceEnabled(cad)) {
+            continue;
+        }
         sectionIndex++;
         const cadDef = contract.cadences[cad];
 

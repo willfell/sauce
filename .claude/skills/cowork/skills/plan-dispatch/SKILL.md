@@ -1,11 +1,12 @@
 ---
 name: cowork:plan-dispatch
-description: Single pre-flight entry point for the 5 atomic-note orchestrators. Loads engagement record + engagement-type bundle + engagement.overrides, composes the layered preferences tree, reads microscopes/siblings, plans dispatch via dispatch-plan-helper, composes voice contract, resolves the inner-circle allowlist, and returns the 10-key contract that drives Gather + Write phases. Never throws — degrades to `dispatch_mode: "legacy"` on prefs failure so the orchestrator can fall back cleanly.
+description: Single pre-flight entry point for the 5 atomic-note orchestrators. Loads engagement record + engagement-type bundle + engagement.overrides, composes the layered preferences tree, reads microscopes/siblings, plans dispatch via dispatch-plan-helper, composes voice contract, resolves the inner-circle allowlist, and returns the 13-key contract that drives Gather + Write phases. Never throws — degrades to `dispatch_mode: "legacy"` on prefs failure so the orchestrator can fall back cleanly.
 inputs:
   engagement_id: string
   cadence: string
   reachable_namespaces: string[]
   vault_root: string
+  yesterday_memory: object
 outputs:
   dispatch_plan: array
   voice_contract: string
@@ -19,6 +20,7 @@ outputs:
   effective_hard_rules: array
   dispatch_mode: string
   prefs_status: string
+  excluded_themes: array
 tags: [cowork, sub-skill, pre-flight, dispatch, knob-composition]
 ---
 
@@ -26,7 +28,7 @@ tags: [cowork, sub-skill, pre-flight, dispatch, knob-composition]
 
 Single pre-flight entry point for every atomic-note orchestrator (morning-briefing / midday-tripwire / eod-review / weekly-review / monthly-review). Replaces the ~100 lines of inline `3a memory → 3b read-prefs → 3c dispatch-plan → 3d microscopes → 3e inner-circle` pseudocode that v0.94.x carried byte-identical across all 5 orchestrators.
 
-The 12-key result tree returned by this sub-skill is the orchestrator's sole source of truth for Gather + Write. Knob composition (engagement-type defaults ⨁ engagement.overrides ⨁ ad-hoc runtime overrides) happens HERE, once, not scattered through gather/write skills.
+The 13-key result tree returned by this sub-skill (v0.95.0's 12-key contract + v0.95.1's `excluded_themes[]`) is the orchestrator's sole source of truth for Gather + Write. Knob composition (engagement-type defaults ⨁ engagement.overrides ⨁ ad-hoc runtime overrides) happens HERE, once, not scattered through gather/write skills.
 
 ## Inputs
 
@@ -36,6 +38,12 @@ The 12-key result tree returned by this sub-skill is the orchestrator's sole sou
   cadence:              string,    // REQUIRED — one of "morning" | "midday" | "eod" | "weekly" | "monthly"
   reachable_namespaces: string[],  // REQUIRED — runtime MCP namespace set (e.g. ["iMCP", "brex", "github"])
   vault_root:           string,    // OPTIONAL — vault filesystem root; defaults to cwd-based resolution
+  yesterday_memory:     object,    // OPTIONAL (v0.95.1) — return value of cowork:read-memory for the
+                                   //   prior day; supplies the carry-forward bullets that become
+                                   //   `excluded_themes[]` when `render_aspects.anti_echo == "include"`.
+                                   //   When omitted (or null), `excluded_themes` defaults to [].
+                                   //   Orchestrators that already invoke read-memory at pre-flight 3a
+                                   //   pass their captured `yesterdayMemory` straight through.
 }
 ```
 
@@ -45,11 +53,11 @@ The 12-key result tree returned by this sub-skill is the orchestrator's sole sou
 
 2. **Read user-preferences.** READ `.claude/skills/cowork/skills/read-user-preferences/SKILL.md` in full and follow its `## Steps` section with `{}`. Capture the result as `prefs_result = { prefs, status, reason }`.
 
-3. **Decide dispatch mode.** Invoke `dispatchPlanHelper.decideDispatchMode({ prefsStatus: prefs_result.status })` → `dispatch_mode` (`"prefs"` when status === "ok", else `"legacy"`). If `dispatch_mode === "legacy"`, the orchestrator MUST fall through to its legacy gather sequence; this sub-skill still returns the full 10-key contract so the orchestrator can compose its fallback Notice from `prefs_status`.
+3. **Decide dispatch mode.** Invoke `dispatchPlanHelper.decideDispatchMode({ prefsStatus: prefs_result.status })` → `dispatch_mode` (`"prefs"` when status === "ok", else `"legacy"`). If `dispatch_mode === "legacy"`, the orchestrator MUST fall through to its legacy gather sequence; this sub-skill still returns the full 13-key contract so the orchestrator can compose its fallback Notice from `prefs_status`.
 
 4. **Read engagement + bundle.** Invoke `dispatchPlanHelper.readEngagement({ engagement_id, vault_root })` → `{ engagement, bundle, overrides, status, reason }`. If `status !== "ok"`, set `dispatch_mode = "legacy"` and capture `reason` for the fallback Notice; downstream steps still execute against the available data.
 
-5. **Compose final preferences.** Invoke `dispatchPlanHelper.composeFinalPreferences({ bundle, overrides, ad_hoc_prefs: null })` → `{ render_aspects, cadence_order, voice, microscopes_registry, tripwire_aspects }`. This is the FINAL knob layer — Gather + Write read from here, not from the engagement-type JSON directly. Composition order: `bundle` (defaults) ⨁ `overrides` (per-key wins on objects, REPLACES on arrays) ⨁ `ad_hoc_prefs` (reserved; null today). `final.tripwire_aspects` propagates to the 12-key return for midday-tripwire's early-exit + per-aspect dispatch.
+5. **Compose final preferences.** Invoke `dispatchPlanHelper.composeFinalPreferences({ bundle, overrides, ad_hoc_prefs: null })` → `{ render_aspects, cadence_order, voice, microscopes_registry, tripwire_aspects }`. This is the FINAL knob layer — Gather + Write read from here, not from the engagement-type JSON directly. Composition order: `bundle` (defaults) ⨁ `overrides` (per-key wins on objects, REPLACES on arrays) ⨁ `ad_hoc_prefs` (reserved; null today). `final.tripwire_aspects` propagates to the 13-key return for midday-tripwire's early-exit + per-aspect dispatch. `final.render_aspects.anti_echo` propagates downstream to step 9's `planDispatch` call where it gates `excluded_themes` derivation.
 
 6. **Load kind titles.** Invoke `dispatchPlanHelper.loadKindTitles({ vault_root })` → `kind_titles` map (kind → display title). The data file at `spice/cowork/data/kind-titles.json` v1.0.0 is canonical; per-kind microscope `## Output shape` directives (`<! title: My Custom Title !>`) override the data-file value for THAT engagement's gather.
 
@@ -57,7 +65,9 @@ The 12-key result tree returned by this sub-skill is the orchestrator's sole sou
 
 8. **Read per-kind siblings.** For each kind in `prefs.priorities`, attempt to READ `spice/cowork/prompts/per-mcp/<kind>/siblings/` (a directory of supporting markdown files). Collect into `siblings = { kind_name: [{ name, body }, ...] }`. Missing directories yield empty arrays — not an error.
 
-9. **Plan dispatch.** Invoke `dispatchPlanHelper.planDispatch({ prefs: prefs_result.prefs, reachableNamespaces: reachable_namespaces, mcpSkillMap, microscopes })` → `dispatch_plan[]` (ordered kind entries with per-entry action + served_by + warning reasons). `mcpSkillMap` is read from `spice/cowork/data/mcp-skill-map.json` v2.0.0.
+9. **Plan dispatch.** Invoke `dispatchPlanHelper.planDispatch({ prefs: prefs_result.prefs, reachableNamespaces: reachable_namespaces, mcpSkillMap, microscopes, engagement, bundle, overrides: engagement.overrides, yesterdayMemory: yesterday_memory })` → `{ dispatch_plan, excluded_themes }` (the v0.95.1 contract object). `mcpSkillMap` is read from `spice/cowork/data/mcp-skill-map.json` v2.0.0. `dispatch_plan[]` is the ordered kind entries with per-entry action + served_by + warning reasons (unchanged from v0.94.x shape). `excluded_themes` is the raw carry-forward bullet strings from `yesterday_memory.carry_forward_bullets` when `render_aspects.anti_echo == "include"`, else `[]`. Both keys are ALWAYS present, even when null/empty inputs would leave them vacuous — defensive contract.
+
+   When the helper is called without v0.95.1 inputs (`engagement`/`bundle`/`overrides`/`yesterdayMemory` all absent), it returns the legacy raw array form for backward compatibility with pre-v0.95.1 unit harnesses. Within this sub-skill we ALWAYS pass `engagement` + `bundle`, so we ALWAYS receive the v0.95.1 contract object.
 
 10. **Reorder for cadence.** If `final.cadence_order[cadence]` is a non-empty array, reorder `dispatch_plan[]` to match that priority. Entries listed in `cadence_order[cadence]` come first in declared order; entries NOT listed retain their original relative order at the tail. This is how per-cadence knob composition surfaces — orchestrators DO NOT consult `cadence_order` directly.
 
@@ -67,7 +77,7 @@ The 12-key result tree returned by this sub-skill is the orchestrator's sole sou
 
    Orchestrators pass `allowlist.resolved` as `inner_circle_resolved` to every `gather-from-served-by` invocation (along with `engagement_id`). morning-briefing also passes `allowlist.phone_filter_list.join(",")` as `gather-imessage`'s existing `inner_circle:` input. For each name in `allowlist.unresolved[]`, the orchestrator emits Notice `cowork: inner-circle name "<name>" unresolved` AND appends `inner_circle_unresolved:<name>` to the atomic note's `warnings:` array (v0.85.0 plumbing).
 
-13. **Return the 12-key contract.** Per the `## Returns` section below. Every key MUST be present even when null/empty — defensive contract. Atomic-note orchestrators consume the result tree as their single source of truth for Gather + Write.
+13. **Return the 13-key contract.** Per the `## Returns` section below. Every key MUST be present even when null/empty — defensive contract. Atomic-note orchestrators consume the result tree as their single source of truth for Gather + Write.
 
 ## Returns
 
@@ -85,10 +95,15 @@ The 12-key result tree returned by this sub-skill is the orchestrator's sole sou
   effective_hard_rules: [...],     // string[] — pass-through from read-user-preferences; consumed by gather-from-served-by `## Hard rules` block
   dispatch_mode:   "prefs" | "legacy",  // legacy when prefs unreadable OR engagement_not_found OR bundle_missing
   prefs_status:    "...",          // pass-through from read-user-preferences for the orchestrator's Notice composition
+  excluded_themes: [...],          // v0.95.1 — raw carry-forward bullet strings from yesterday's memory.md
+                                   //   when render_aspects.anti_echo == "include" for this engagement;
+                                   //   [] otherwise. ALWAYS present, never undefined/null. Consumed by
+                                   //   compose-body's anti-echo callout injection in the
+                                   //   morning-briefing / midday-tripwire / eod-review orchestrators.
 }
 ```
 
-The orchestrator captures this as `plan`. Gather phase iterates `plan.dispatch_plan` and consults `plan.kind_titles[kind_name]` per emit; Write phase prepends `plan.voice_contract` to the compose-body invocation and passes `plan.microscopes` + `plan.allowlist` into the body composition.
+The orchestrator captures this as `plan`. Gather phase iterates `plan.dispatch_plan` and consults `plan.kind_titles[kind_name]` per emit; Write phase prepends `plan.voice_contract` to the compose-body invocation and passes `plan.microscopes` + `plan.allowlist` + `plan.excluded_themes` into the body composition.
 
 ## Backward-compatibility
 
@@ -114,7 +129,7 @@ In `dispatch_mode == "legacy"` (prefs unreadable / engagement-not-found / bundle
 
 ## Failure-mode contract
 
-This sub-skill NEVER throws. Failure modes map to the 10-key contract:
+This sub-skill NEVER throws. Failure modes map to the 13-key contract:
 
 | Condition | dispatch_mode | prefs_status | Orchestrator behavior |
 |---|---|---|---|

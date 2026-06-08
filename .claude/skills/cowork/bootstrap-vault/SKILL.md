@@ -114,7 +114,28 @@ If `resume_from_step` is set, skip steps `< resume_from_step` and pick up from t
       Required fields ask without blank-allowed (re-ask on blank). Optional fields ask with blank-allowed (default applies per the offer's `default_value` if any; flag as `USING DEFAULT` for report §5).
     - **13d.** For each MCP backend marked `connected` in `mcp_map`, ask the engagement-scoped MCP question — but ONLY if the engagement type's `render_aspects` references that backend (or a blueprint's `engagement_field_offer` does). E.g., gmail: `Which gmail label/account does engagement '<id>' use?`. Skip backends whose `render_aspects` are all `"skip"` for this type.
     - **13e.** Cadence overrides: present `engagement_types_registry[E.type].default_cadences`. Ask user `Override any cadences for engagement '<id>'? (yes/no)`. If yes, walk cadences one at a time and capture overrides.
-    - **13f.** Capture engagement E as a full record (id, type, type_schema_version, label, captured field map, cadences).
+    - **13f.** **Anti-echo opt-in (v0.95.1 Y/N1 — Knobs 1 + 2 BUNDLED).** Ask user:
+
+      > `Enable anti-echo memory-drift detection for engagement '<id>'? Adds a 'outside yesterday's frame' callout per daily atomic note AND flags stuck frames across days. (default: no)`
+
+      **Idempotent re-bootstrap default:** if `existing_engagements[E.id].overrides.render_aspects.anti_echo == "include"` AND `existing_engagements[E.id].overrides.tripwire_aspects` already includes `"frame_drift"`, the question defaults to `Y` (current-state Y); otherwise defaults to `N`. Blank input accepts the default.
+
+      - **On Y:** stage TWO writes to `E.overrides` (do NOT touch bundle defaults — overrides are a sparse layer):
+        - `E.overrides.render_aspects.anti_echo: "include"`
+        - `E.overrides.tripwire_aspects: [...engagement_types_registry[E.type].tripwire_aspects, "frame_drift"]` (REPLACE-semantics array; copy the engagement-type's bundle defaults then append `"frame_drift"`; do not duplicate if already present)
+      - **On N:** write NOTHING — leave `E.overrides` untouched so the engagement inherits the engagement-type's bundle defaults verbatim at runtime (render_aspects.anti_echo: "skip"; tripwire_aspects: bundle's default array). The opt-in-everywhere posture (design § 2.5) means default-N preserves pre-v0.95.1 behavior for every engagement.
+
+      Power-user case (Knob 1 only, no Knob 2): documented in the bootstrap-report §5 and About-Cowork prose — user manually edits `vault-config.md` `engagements[].overrides` post-bootstrap to set `render_aspects.anti_echo: "include"` without also adding `"frame_drift"` to `tripwire_aspects`.
+    - **13g.** **Lens-shift opt-in (v0.95.1 Y/N2 — Knob 3 SEPARATE).** Ask user:
+
+      > `Enable weekly cold-perspective morning briefing for engagement '<id>'? Fires a memory-skip MB on Saturday mornings (default 07:00), paired with that day's warm MB on the Daily Hub for empirical anti-echo. (default: no)`
+
+      **Idempotent re-bootstrap default:** if `existing_engagements[E.id].cadences.lens_shift` is currently set (any cron value), the question defaults to `Y`; otherwise defaults to `N`. Blank input accepts the default. (Rationale for the split from Y/N1: Knob 3 doubles MB cost weekly + produces a visible second atomic note — operationally distinct from Knobs 1+2's per-note callout additions, worth its own explicit consent per design § 6.5.)
+
+      - **On Y:** stage ONE write to `E.cadences`:
+        - `E.cadences.lens_shift: { cron: "0 7 * * 6" }` (canonical default — Saturday 07:00)
+      - **On N:** write NOTHING — no `lens_shift` entry appears in `E.cadences`. The default warm-MB cadence on Saturday (governed by `default_cadences.morning`) is unaffected by this answer; only the cold-MB companion is gated by `lens_shift` opt-in.
+    - **13h.** Capture engagement E as a full record (id, type, type_schema_version, label, captured field map, cadences, overrides).
 
 14. Vault-scoped questions (from `contributions_registry` where `vault_question` kind exists): ask once per vault, not per engagement. Capture into the vault-wide substitution map.
 
@@ -148,13 +169,27 @@ If `resume_from_step` is set, skip steps `< resume_from_step` and pick up from t
           eod:     <bool>
           weekly:  <bool>
           monthly: <bool>
+          # v0.95.1 Knob 3 — present ONLY when user opted in to Y/N2 at step 13g:
+          lens_shift:
+            cron: "0 7 * * 6"   # canonical default — Saturday 07:00
+        # v0.95.0 cowork-spine layered-preferences schema. Present ONLY when
+        # user staged at least one override (e.g., Y/N1 anti-echo opt-in at
+        # step 13f). Sparse — only keys the user overrode appear; everything
+        # else inherits the engagement-type's bundle defaults at runtime.
+        # v0.95.1 Y/N1-driven shape (when user answered Y):
+        overrides:
+          render_aspects:
+            anti_echo: "include"   # Knob 1
+          tripwire_aspects:        # Knob 2 — REPLACES bundle array (per overrides schema)
+            - <each entry from engagement_types_registry[E.type].tripwire_aspects>
+            - "frame_drift"
       - ...
     mcp_map:
       gmail: connected | missing
       ...
     ```
 
-    Body: human-readable per-engagement summary block + MCP map block. Re-bootstrap modes: preserve any non-managed body content via patch-merge (use `mcp__obsidian__patch_note` if a fresh write would clobber; use `mcp__obsidian__write_note` for fresh state).
+    Body: human-readable per-engagement summary block + MCP map block. Re-bootstrap modes: preserve any non-managed body content via patch-merge (use `mcp__obsidian__patch_note` if a fresh write would clobber; use `mcp__obsidian__write_note` for fresh state). The `overrides` and `cadences.lens_shift` keys are managed-region content: bootstrap-vault re-writes them on every run, but never clobbers other body content. User edits to `overrides` (e.g., Knob 1 power-user case adding `render_aspects.anti_echo: "include"` WITHOUT `frame_drift` in `tripwire_aspects`) survive `sauce update` because the installer never touches this canonical path (`<vault>/spice/cowork/context/vault-config.md` is bootstrap-vault-owned, NOT in `files[]`).
 
 18. For each engagement E, ensure the directory `<vault>/spice/cowork/context/<E.id>/` exists. Then for each template file in `engagement-templates/<E.type>/`:
     - Read the template body from the workshop tree.

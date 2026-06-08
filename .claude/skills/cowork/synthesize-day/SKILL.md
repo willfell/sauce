@@ -164,6 +164,28 @@ On any miss: return `failed:contract-violation:<field>` + emit Notice `cowork:sy
 
 5. Write the full file content to `today_memory_path` via the Write tool.
 
+6. **v0.95.1 Knob 2 — post-write frame-drift capture (gated).** AFTER the successful Write in Step 5 AND BEFORE `## Verify`, conditionally invoke `cowork:capture-frame-drift`:
+
+   a. Check `plan.tripwire_aspects`. When the array does NOT include `"frame_drift"`, skip this step silently. Continue to `## Verify`.
+
+   b. When `plan.tripwire_aspects.includes("frame_drift")`, READ the `cowork:capture-frame-drift` sub-skill and follow its `## Steps` with:
+
+      ```json
+      {
+        "engagement_id":      "<from vault-config.md>",
+        "tripwire_aspects":   <plan.tripwire_aspects>,
+        "voice_contract":     "<plan.voice_contract>",
+        "today_memory_path":  "<today_memory_path resolved in pre-flight>",
+        "today_date":         "<context.today>"
+      }
+      ```
+
+      The sub-skill self-gates on <5-syntheses availability (returns `skipped:insufficient-history`) and is responsible for its own LLM call to `claude-haiku-4-5-20251001` (design § 4.3). It writes the `[!warning]- Frame may be stuck` callout directly into today's `memory.md` between the `[!tip] Carry-forward` callout and the `## Ticks` section, and additively sets frontmatter `frame_drift_flagged: true` + `frame_drift_at: <ISO>`.
+
+   c. **Non-fatal contract.** ANY non-zero / error return from the sub-skill MUST be treated as non-fatal: synthesize-day continues to `## Verify` regardless. The sub-skill itself appends a `warnings:` frontmatter entry on today's memory.md per design § 4.7 — synthesize-day's own contract guards (frontmatter `synthesized: true`, body H1, callout presence, `## Ticks`, tick count) all still apply unchanged in `## Verify` since the sub-skill only ADDS to body + frontmatter, never replaces.
+
+   d. Capture the sub-skill's return value as `drift_result` for the Done section diagnostics.
+
 ## Verify
 
 After a successful Write:
