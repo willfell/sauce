@@ -292,6 +292,46 @@ function injectAntiEchoCallout(body, excluded_themes, voice_contract) {
     return safeBody + sep + callout;
 }
 
+/**
+ * v0.96.0 Rail D — Detection callout (new_mcp_notice render aspect).
+ *
+ * injectDetectionCallout(body, pending_confirmations)
+ *
+ * Prepends a "> [!info]+ Cowork detected a new MCP" callout to the body, listing
+ * each newly-detected MCP namespace that is not yet in user-preferences.mcps.
+ * Accepts both the S2.3 string[] contract (raw namespace names) and the richer
+ * design contract (objects with namespace/classified_as/suggested_priority).
+ *
+ * Caller is responsible for gating on render_aspects.new_mcp_notice == "include"
+ * AND a non-empty pending_confirmations array (typically routed through
+ * composeBody).
+ *
+ * @param {string} body                            - current body string
+ * @param {(string|object)[]} pending_confirmations - non-empty array of raw namespace
+ *                                                    names OR objects with
+ *                                                    {namespace, classified_as,
+ *                                                    suggested_priority}
+ * @returns {string} body with the callout prepended
+ */
+function injectDetectionCallout(body, pending_confirmations) {
+    if (!Array.isArray(pending_confirmations) || pending_confirmations.length === 0) {
+        return body;
+    }
+    const lines = pending_confirmations.map((entry) => {
+        // Accept both string (S2.3 contract) and object (design contract) shapes
+        if (typeof entry === "string") {
+            return `> - \`${entry}\``;
+        }
+        return `> - \`${entry.namespace}\` classified as \`${entry.classified_as}\` (suggested priority: ${entry.suggested_priority})`;
+    });
+    const callout = [
+        `> [!info]+ Cowork detected a new MCP`,
+        `> The following connected MCPs are not yet in your \`user-preferences.mcps\`. Edit \`spice/cowork/context/user-preferences.md\` to confirm and customize, or run \`/cowork context-builder\` to re-interview.`,
+        ...lines,
+    ].join("\n");
+    return callout + "\n\n" + body;
+}
+
 function composeBody(input) {
     const validationError = _validateInput(input);
     if (validationError) {
@@ -345,7 +385,16 @@ function composeBody(input) {
         sections.push(backlink);
     }
 
-    const body_md = sections.join("\n\n") + "\n";
+    let body_md = sections.join("\n\n") + "\n";
+    // v0.96.0 Rail D: emit detection callout when MCPs detected AND render_aspects allows
+    if (
+        input.pending_confirmations
+        && input.pending_confirmations.length > 0
+        && input.render_aspects
+        && input.render_aspects.new_mcp_notice === "include"
+    ) {
+        body_md = injectDetectionCallout(body_md, input.pending_confirmations);
+    }
     const sidecar_json = _composeSidecar(input);
 
     return { body_md, sidecar_json, status: "ok" };
@@ -354,6 +403,7 @@ function composeBody(input) {
 module.exports = {
     composeBody,
     injectAntiEchoCallout,
+    injectDetectionCallout,
     ANTI_ECHO_ELIGIBLE_CADENCES,
     _validateInput,
     _wrapCallout,

@@ -36,6 +36,7 @@
     "ai_committee":           "skip",
     "kanban_projects":        "include",
     "inner_circle_imessage":  "include",
+    "new_mcp_notice":         "include",
     "semantic_related":       "include",
     "anti_echo":              "skip"
   },
