@@ -11076,6 +11076,197 @@ type: cowork-microscope
     assertTrue("HC-V0931-VERSION: pin lockstep contract", false, e && e.message);
   }
 
+  // ============================================================================
+  // v0.95.0 — OVERRIDES (composeFinalPreferences: bundle ⨁ overrides composition)
+  // ============================================================================
+  console.log(`\n--- Case HC-V0950-OVERRIDES: composeFinalPreferences ---`);
+  try {
+    const DPH = require(path.join(WORKSHOP, "platform/blueprints/cowork/helpers/dispatch-plan-helper.js"));
+    const W2_FTE = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/cowork/engagement-types/w2-fte.json"), "utf8"));
+    const PERSONAL = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/cowork/engagement-types/personal.json"), "utf8"));
+
+    // A1: no overrides key at all -> bundle defaults verbatim
+    const r1 = DPH.composeFinalPreferences({ bundle: PERSONAL, overrides: undefined, ad_hoc_prefs: null });
+    assertTrue("HC-V0950-OVERRIDES-A1: render_aspects mirrors bundle when overrides absent",
+      r1 && r1.render_aspects && r1.render_aspects.finance_block === "include");
+    // A2: empty overrides object -> identical to A1
+    const r2 = DPH.composeFinalPreferences({ bundle: PERSONAL, overrides: {}, ad_hoc_prefs: null });
+    assertTrue("HC-V0950-OVERRIDES-A2: empty overrides equals bundle defaults",
+      r2 && r2.render_aspects && r2.render_aspects.finance_block === "include"
+      && JSON.stringify(r2.tripwire_aspects) === JSON.stringify(PERSONAL.tripwire_aspects));
+    // A3: override.render_aspects.finance_block: skip -> override wins
+    const r3 = DPH.composeFinalPreferences({
+      bundle: PERSONAL,
+      overrides: { render_aspects: { finance_block: "skip" } },
+      ad_hoc_prefs: null,
+    });
+    assertTrue("HC-V0950-OVERRIDES-A3: override wins per-key on render_aspects",
+      r3 && r3.render_aspects && r3.render_aspects.finance_block === "skip"
+      && r3.render_aspects.kanban_projects === "include");
+    // A4: malformed overrides (string) -> bundle defaults verbatim (Postel)
+    const r4 = DPH.composeFinalPreferences({ bundle: PERSONAL, overrides: "not-an-object", ad_hoc_prefs: null });
+    assertTrue("HC-V0950-OVERRIDES-A4: malformed overrides falls back to bundle defaults",
+      r4 && r4.render_aspects && r4.render_aspects.finance_block === "include");
+  } catch (e) {
+    assertTrue("HC-V0950-OVERRIDES: composeFinalPreferences contract", false, e && e.message);
+  }
+
+  // ============================================================================
+  // v0.95.0 — PLAN-DISPATCH (helper chain: composeFinalPreferences + planDispatch + composeVoiceContract + loadKindTitles)
+  // ============================================================================
+  console.log(`\n--- Case HC-V0950-PLAN-DISPATCH-A: composition chain on synthetic personal bundle ---`);
+  try {
+    const DPH = require(path.join(WORKSHOP, "platform/blueprints/cowork/helpers/dispatch-plan-helper.js"));
+    const PERSONAL = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/cowork/engagement-types/personal.json"), "utf8"));
+    const W2_FTE = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/cowork/engagement-types/w2-fte.json"), "utf8"));
+    const baseMcps = {
+      calendar: { kind: "calendar", served_by: "iMCP",       connected: true },
+      email:    { kind: "email",    served_by: "iMCP",       connected: true },
+      chat:     { kind: "chat",     served_by: "iMCP",       connected: true },
+      finance:  { kind: "finance",  served_by: "brex",       connected: true },
+    };
+    const reachable = new Set(["iMCP", "brex"]);
+    const mcpSkillMap = { kinds: [
+      { kind: "calendar", gather_skill: "cowork:gather-calendar" },
+      { kind: "email",    gather_skill: "cowork:gather-email" },
+      { kind: "chat",     gather_skill: "cowork:gather-chat" },
+      { kind: "finance",  gather_skill: "cowork:gather-finance" },
+    ]};
+
+    // A1: ALL 5 final-prefs keys present for a no-overrides personal bundle
+    const finalA1 = DPH.composeFinalPreferences({ bundle: PERSONAL, overrides: null, ad_hoc_prefs: null });
+    const keysA1 = ["render_aspects", "cadence_order", "voice", "microscopes_registry", "tripwire_aspects"];
+    assertTrue("HC-V0950-PLAN-DISPATCH-A1: composeFinalPreferences returns all 5 keys for no-overrides bundle",
+      finalA1 && keysA1.every(k => Object.prototype.hasOwnProperty.call(finalA1, k)));
+
+    // A2: override.render_aspects.finance_block: skip → final.render_aspects.finance_block === skip
+    const finalA2 = DPH.composeFinalPreferences({
+      bundle: PERSONAL,
+      overrides: { render_aspects: { finance_block: "skip" } },
+      ad_hoc_prefs: null,
+    });
+    assertTrue("HC-V0950-PLAN-DISPATCH-A2: render_aspects override wins per-key",
+      finalA2.render_aspects.finance_block === "skip");
+
+    // A3: override.cadence_order.morning reorders priorities
+    const finalA3 = DPH.composeFinalPreferences({
+      bundle: PERSONAL,
+      overrides: { cadence_order: { morning: ["chat", "finance", "calendar", "email"] } },
+      ad_hoc_prefs: null,
+    });
+    assertTrue("HC-V0950-PLAN-DISPATCH-A3: cadence_order.morning override observed",
+      JSON.stringify(finalA3.cadence_order.morning) === JSON.stringify(["chat", "finance", "calendar", "email"]));
+
+    // A4: voice override wins per-key; composeVoiceContract reflects new vibe
+    const finalA4 = DPH.composeFinalPreferences({
+      bundle: PERSONAL,
+      overrides: { voice: { vibe: "concise" } },
+      ad_hoc_prefs: null,
+    });
+    const voiceA4 = DPH.composeVoiceContract(finalA4.voice, []);
+    assertTrue("HC-V0950-PLAN-DISPATCH-A4: voice override flows into voice_contract",
+      finalA4.voice.vibe === "concise" && voiceA4.includes("Vibe: concise"));
+
+    // A5: w2-fte bundle defaults → tripwire_aspects = ["calendar_drift", "queue_growth"]
+    const finalA5 = DPH.composeFinalPreferences({ bundle: W2_FTE, overrides: null, ad_hoc_prefs: null });
+    assertTrue("HC-V0950-PLAN-DISPATCH-A5: w2-fte bundle tripwire_aspects defaults preserved",
+      JSON.stringify(finalA5.tripwire_aspects) === JSON.stringify(["calendar_drift", "queue_growth"]));
+
+    // A6: tripwire_aspects override REPLACES (not merges) bundle's array
+    const finalA6 = DPH.composeFinalPreferences({
+      bundle: W2_FTE,
+      overrides: { tripwire_aspects: ["cc_drift"] },
+      ad_hoc_prefs: null,
+    });
+    assertTrue("HC-V0950-PLAN-DISPATCH-A6: tripwire_aspects override REPLACES bundle array",
+      JSON.stringify(finalA6.tripwire_aspects) === JSON.stringify(["cc_drift"]));
+  } catch (e) {
+    assertTrue("HC-V0950-PLAN-DISPATCH-A: helper chain contract", false, e && e.message);
+  }
+
+  // ============================================================================
+  // v0.95.0 — PLAN-DISPATCH-B (loadKindTitles + data/kind-titles.json fallback)
+  // ============================================================================
+  console.log(`\n--- Case HC-V0950-PLAN-DISPATCH-B: loadKindTitles ---`);
+  try {
+    const DPH = require(path.join(WORKSHOP, "platform/blueprints/cowork/helpers/dispatch-plan-helper.js"));
+
+    // B1: vault_root missing kind-titles.json → fall back to module-private CANONICAL_TITLES
+    const scratchB1 = fs.mkdtempSync(path.join(os.tmpdir(), "hc-v0950-b1-"));
+    try {
+      const titlesB1 = DPH.loadKindTitles({ vault_root: scratchB1 });
+      assertTrue("HC-V0950-PLAN-DISPATCH-B1: absent data file falls back to CANONICAL_TITLES const",
+        titlesB1 && titlesB1.calendar === DPH._CANONICAL_TITLES.calendar);
+    } finally {
+      fs.rmSync(scratchB1, { recursive: true, force: true });
+    }
+
+    // B2: vault_root has kind-titles.json v1.0.0 → titles read from data file
+    const scratchB2 = fs.mkdtempSync(path.join(os.tmpdir(), "hc-v0950-b2-"));
+    try {
+      fs.mkdirSync(path.join(scratchB2, "spice/cowork/data"), { recursive: true });
+      fs.writeFileSync(
+        path.join(scratchB2, "spice/cowork/data/kind-titles.json"),
+        JSON.stringify({
+          version: "1.0.0",
+          canonical_titles: {
+            calendar: "Today's calendar",
+            email:    "Email triage",
+            chat:     "Chat",
+            finance:  "Finance",
+            github:   "GitHub",
+            ado:      "ADO",
+            monitoring: "Monitoring",
+          },
+          fallback_strategy: "title-case kind_name with underscore/whitespace split",
+        }),
+        "utf8"
+      );
+      const titlesB2 = DPH.loadKindTitles({ vault_root: scratchB2 });
+      assertTrue("HC-V0950-PLAN-DISPATCH-B2: data file v1.0.0 titles override fallback",
+        titlesB2 && titlesB2.calendar === "Today's calendar" && titlesB2.github === "GitHub");
+    } finally {
+      fs.rmSync(scratchB2, { recursive: true, force: true });
+    }
+
+    // B3: data file with wrong version (or missing canonical_titles) → fallback
+    const scratchB3 = fs.mkdtempSync(path.join(os.tmpdir(), "hc-v0950-b3-"));
+    try {
+      fs.mkdirSync(path.join(scratchB3, "spice/cowork/data"), { recursive: true });
+      fs.writeFileSync(
+        path.join(scratchB3, "spice/cowork/data/kind-titles.json"),
+        JSON.stringify({ version: "0.9.0", canonical_titles: { calendar: "Should-Not-Win" } }),
+        "utf8"
+      );
+      const titlesB3 = DPH.loadKindTitles({ vault_root: scratchB3 });
+      assertTrue("HC-V0950-PLAN-DISPATCH-B3: stale/incompatible data file falls back to CANONICAL_TITLES",
+        titlesB3 && titlesB3.calendar === DPH._CANONICAL_TITLES.calendar);
+    } finally {
+      fs.rmSync(scratchB3, { recursive: true, force: true });
+    }
+  } catch (e) {
+    assertTrue("HC-V0950-PLAN-DISPATCH-B: loadKindTitles contract", false, e && e.message);
+  }
+
+  // ============================================================================
+  // v0.95.0 — PLAN-DISPATCH-C (defensive: decideDispatchMode + composeFinalPreferences null/empty)
+  // ============================================================================
+  console.log(`\n--- Case HC-V0950-PLAN-DISPATCH-C: defensive contract ---`);
+  try {
+    const DPH = require(path.join(WORKSHOP, "platform/blueprints/cowork/helpers/dispatch-plan-helper.js"));
+    // C1: decideDispatchMode("error") => "legacy" — orchestrator falls back when prefs unreadable
+    const modeC1 = DPH.decideDispatchMode({ prefsStatus: "error_unreadable" });
+    assertTrue("HC-V0950-PLAN-DISPATCH-C1: prefsStatus != 'ok' yields dispatch_mode 'legacy'",
+      modeC1 === "legacy");
+    // C2: composeFinalPreferences with null/empty inputs returns a sane 5-key shell (no throw)
+    const finalC2 = DPH.composeFinalPreferences({ bundle: null, overrides: null, ad_hoc_prefs: null });
+    const keysC2 = ["render_aspects", "cadence_order", "voice", "microscopes_registry", "tripwire_aspects"];
+    assertTrue("HC-V0950-PLAN-DISPATCH-C2: defensive null inputs still yield all 5 keys (no throw)",
+      finalC2 && keysC2.every(k => Object.prototype.hasOwnProperty.call(finalC2, k)));
+  } catch (e) {
+    assertTrue("HC-V0950-PLAN-DISPATCH-C: defensive contract", false, e && e.message);
+  }
+
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
   if (fail > 0) {
