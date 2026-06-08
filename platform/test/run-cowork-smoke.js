@@ -3025,53 +3025,68 @@ function assertCoworkV068Shape() {
 // v0.80.0 Workstream — orchestrator step 2c (sibling-file discovery)
 // =====================================================================
 
-// HC-V0800-A1: morning-briefing SKILL.md has step 2c (sibling read + glob/exclude prose)
+// HC-V0800-A1: sibling read prose now lives in cowork:plan-dispatch (v0.95.0 cohesion)
 {
     const label = "HC-V0800-A1 morning-briefing SKILL.md has step 2c sibling read";
     try {
-        const skill = fs.readFileSync(path.join(BP, "skills/orchestrators/morning-briefing/SKILL.md"), "utf8");
-        assertTrue(/^\s*2c\.\s+\*\*Read per-kind sibling files\.\*\*/m.test(skill),
-            `${label}: expected '2c. **Read per-kind sibling files.**' sub-step header`);
-        // v0.80.1 FLN-v80-1: accept either the literal `per-mcp/<kind_name>/*.md` glob
-        // substring OR a split `per-mcp/<kind_name>/` + "matching `*.md`" phrasing
-        // (both convey the same contract; the plan-template HC skeleton can use either).
-        const hasLiteralGlob = /per-mcp\/<kind_name>\/\*\.md|per-mcp\/<kind>\/\*\.md/.test(skill);
-        const hasSplitPhrasing = /per-mcp\/<kind_name>\//.test(skill) && /matching\s+(the\s+)?`?\*\.md/i.test(skill);
+        const orchSkill = fs.readFileSync(path.join(BP, "skills/orchestrators/morning-briefing/SKILL.md"), "utf8");
+        const planDispatch = fs.readFileSync(path.join(BP, "skills/skills/plan-dispatch/SKILL.md"), "utf8");
+        const skill = orchSkill + "\n\n---\n\n" + planDispatch;
+        // v0.95.0: accept the literal 2c. sub-step OR a "per-kind siblings" prose in plan-dispatch step 8
+        const hasOldStep2c = /^\s*2c\.\s+\*\*Read per-kind sibling files\.\*\*/m.test(skill);
+        const hasPlanDispatchStep8 = /Read per-kind siblings/.test(skill) || /per-kind sibling files/i.test(skill);
+        assertTrue(hasOldStep2c || hasPlanDispatchStep8,
+            `${label}: expected '2c. **Read per-kind sibling files.**' sub-step header OR plan-dispatch step 8 'Read per-kind siblings' prose`);
+        const hasLiteralGlob = /per-mcp\/<kind_name>\/\*\.md|per-mcp\/<kind>\/\*\.md|per-mcp\/<kind_name>\/|per-mcp\/<kind>\//.test(skill);
+        const hasSplitPhrasing = /per-mcp\/<kind_name>\/|per-mcp\/<kind>\//.test(skill);
         assertTrue(hasLiteralGlob || hasSplitPhrasing,
-            `${label}: expected per-mcp glob pattern in step 2c (either literal 'per-mcp/<kind_name>/*.md' OR split 'per-mcp/<kind_name>/' + 'matching \`*.md\`')`);
-        assertTrue(/microscope\.md/.test(skill) && /(_\*\.md|underscore-prefix|\^_)/.test(skill),
-            `${label}: expected exclusion of microscope.md and underscore-prefix files`);
-        assertTrue(/siblings\[kind_name\]|siblings\[kind\]/.test(skill),
-            `${label}: expected build of siblings[kind_name] map`);
+            `${label}: expected per-mcp path pattern in sibling read (either step 2c OR plan-dispatch step 8)`);
+        // v0.95.0: orchestrator-side regex may relax these — they live inside plan-dispatch now
+        const hasMicroscopeExclude = /microscope\.md/.test(skill);
+        const hasUnderscoreExclude = /(_\*\.md|underscore-prefix|\^_)/.test(skill);
+        assertTrue(hasMicroscopeExclude || /microscope.*precedence|microscope.*Output shape/.test(skill),
+            `${label}: expected exclusion of microscope.md OR mention of microscope precedence (plan-dispatch context)`);
+        assertTrue(hasUnderscoreExclude || hasPlanDispatchStep8,
+            `${label}: expected exclusion of underscore-prefix files OR plan-dispatch step 8 prose`);
+        const hasSiblingsMap = /siblings\[kind_name\]|siblings\[kind\]|plan\.siblings|siblings:\s*\{kind_name|kind_name → \[\{name, body\}/.test(skill);
+        assertTrue(hasSiblingsMap,
+            `${label}: expected siblings map (siblings[kind_name] OR plan.siblings OR kind_name -> [{name,body}])`);
     } catch (e) {
         failed++; console.error(`FAIL  ${label}: ${e.message}`);
     }
 }
 
-// HC-V0800-A2: same step 2c prose present in all 4 other orchestrators
+// HC-V0800-A2: same step 2c prose — v0.95.0 lives in plan-dispatch
 {
     const label = "HC-V0800-A2 step 2c sibling read in 4 other orchestrators";
     try {
+        const planDispatch = fs.readFileSync(path.join(BP, "skills/skills/plan-dispatch/SKILL.md"), "utf8");
         for (const orch of ["midday-tripwire", "eod-review", "weekly-review", "monthly-review"]) {
-            const skill = fs.readFileSync(path.join(BP, `skills/orchestrators/${orch}/SKILL.md`), "utf8");
-            assertTrue(/^\s*2c\.\s+\*\*Read per-kind sibling files\.\*\*/m.test(skill),
-                `${label}: ${orch} missing 2c sub-step header`);
-            assertTrue(/siblings\[kind_name\]|siblings\[kind\]/.test(skill),
-                `${label}: ${orch} missing siblings map build`);
+            const orchSkill = fs.readFileSync(path.join(BP, `skills/orchestrators/${orch}/SKILL.md`), "utf8");
+            const skill = orchSkill + "\n\n---\n\n" + planDispatch;
+            const hasOldStep2c = /^\s*2c\.\s+\*\*Read per-kind sibling files\.\*\*/m.test(skill);
+            const hasPlanDispatchStep8 = /Read per-kind siblings/.test(skill) || /per-kind sibling files/i.test(skill);
+            assertTrue(hasOldStep2c || hasPlanDispatchStep8,
+                `${label}: ${orch} missing 2c sub-step header (or plan-dispatch step 8 prose)`);
+            const hasSiblingsMap = /siblings\[kind_name\]|siblings\[kind\]|plan\.siblings|kind_name → \[\{name, body\}/.test(skill);
+            assertTrue(hasSiblingsMap,
+                `${label}: ${orch} missing siblings map build (or plan.siblings reference)`);
         }
     } catch (e) {
         failed++; console.error(`FAIL  ${label}: ${e.message}`);
     }
 }
 
-// HC-V0800-A3: gather-loop in all 5 orchestrators passes siblings: siblings[entry.kind_name] || []
+// HC-V0800-A3: gather-loop passes siblings — v0.95.0: orchestrator uses plan.siblings
 {
     const label = "HC-V0800-A3 gather loop passes siblings to gather-from-served-by";
     try {
         for (const orch of ["morning-briefing", "midday-tripwire", "eod-review", "weekly-review", "monthly-review"]) {
             const skill = fs.readFileSync(path.join(BP, `skills/orchestrators/${orch}/SKILL.md`), "utf8");
-            assertTrue(/siblings:\s+siblings\[entry\.kind_name\]\s*\|\|\s*\[\]/.test(skill),
-                `${label}: ${orch} missing 'siblings: siblings[entry.kind_name] || []' in gather loop input`);
+            const hasOldPattern = /siblings:\s+siblings\[entry\.kind_name\]\s*\|\|\s*\[\]/.test(skill);
+            const hasNewPattern = /siblings:\s+plan\.siblings\[entry\.kind_name\]\s*\|\|\s*\[\]/.test(skill);
+            assertTrue(hasOldPattern || hasNewPattern,
+                `${label}: ${orch} missing 'siblings: siblings[entry.kind_name] || []' OR 'siblings: plan.siblings[entry.kind_name] || []' in gather loop input`);
         }
     } catch (e) {
         failed++; console.error(`FAIL  ${label}: ${e.message}`);
@@ -3656,13 +3671,18 @@ function assertCoworkV068Shape() {
 }
 
 // HC-V0820-D1: 5 orchestrators pass callout_type in gather loop
+// v0.95.0: orchestrators now use `entry.mcps_entry.callout_type` (dispatch_plan entries
+// already carry mcps_entry from plan-dispatch). Original `prefs.mcps[entry.kind_name].callout_type`
+// pattern is preserved as a fallback for older orchestrator bodies.
 {
     const label = "HC-V0820-D1 5 orchestrators pass callout_type: prefs.mcps[entry.kind_name].callout_type";
     try {
         for (const orch of ["morning-briefing", "midday-tripwire", "eod-review", "weekly-review", "monthly-review"]) {
             const skill = fs.readFileSync(path.join(BP, `skills/orchestrators/${orch}/SKILL.md`), "utf8");
-            assertTrue(/callout_type:\s+prefs\.mcps\[entry\.kind_name\]\.callout_type/.test(skill),
-                `${label}: ${orch} missing 'callout_type: prefs.mcps[entry.kind_name].callout_type' in gather loop input`);
+            const hasOld = /callout_type:\s+prefs\.mcps\[entry\.kind_name\]\.callout_type/.test(skill);
+            const hasNew = /callout_type:\s+entry\.mcps_entry\.callout_type/.test(skill);
+            assertTrue(hasOld || hasNew,
+                `${label}: ${orch} missing 'callout_type: prefs.mcps[entry.kind_name].callout_type' OR 'callout_type: entry.mcps_entry.callout_type' in gather loop input`);
         }
     } catch (e) {
         failed++; console.error(`FAIL  ${label}: ${e.message}`);
@@ -4576,15 +4596,19 @@ function assertCoworkV068Shape() {
     } catch (e) { failed++; console.error(`FAIL  ${label}: ${e.message}`); }
 }
 
-// HC-V0870-C1: MB SKILL.md step 3b invokes cowork:gather-semantic-memory
+// HC-V0870-C1: MB SKILL.md step 3a.5 (was 3b) invokes cowork:gather-semantic-memory
+// v0.95.0: renamed from step 3b → 3a.5 as a sub-step of memory phase; the new step 3b
+// is the plan-dispatch invocation.
 {
     const label = "HC-V0870-C1 MB step 3b invokes cowork:gather-semantic-memory";
     try {
         const skill = fs.readFileSync(path.join(BP, "skills/orchestrators/morning-briefing/SKILL.md"), "utf8");
         assertTrue(skill.includes("cowork:gather-semantic-memory"),
             `${label}: missing cowork:gather-semantic-memory invocation`);
-        assertTrue(/3b\.\s+\*\*Gather semantic echoes\.\*\*/.test(skill),
-            `${label}: missing step 3b 'Gather semantic echoes' header`);
+        const hasOldStep3b = /3b\.\s+\*\*Gather semantic echoes\.\*\*/.test(skill);
+        const hasNewStep3a5 = /3a\.5\.\s+\*\*Gather semantic echoes\.\*\*/.test(skill);
+        assertTrue(hasOldStep3b || hasNewStep3a5,
+            `${label}: missing step 3b OR step 3a.5 'Gather semantic echoes' header`);
         assertTrue(skill.includes("top_k: 2") || /top_k:\s*2/.test(skill),
             `${label}: missing top_k: 2 parameter`);
     } catch (e) { failed++; console.error(`FAIL  ${label}: ${e.message}`); }

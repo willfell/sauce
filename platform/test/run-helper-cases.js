@@ -8110,10 +8110,12 @@ async function caseHCV0891GatherC() {
 }
 
 async function caseHCV0891OrchestratorA() {
-  console.log("\n--- Case HC-V0891-ORCHESTRATOR-A: morning-briefing inner-circle helper wiring ---");
+  console.log("\n--- Case HC-V0891-ORCHESTRATOR-A: morning-briefing inner-circle helper wiring (v0.95.0: wiring now lives inside cowork:plan-dispatch) ---");
   const skillPath = path.resolve(__dirname,
     "../blueprints/cowork/skills/orchestrators/morning-briefing/SKILL.md");
-  const skill = fs.readFileSync(skillPath, "utf8");
+  const planDispatchPath = path.resolve(__dirname,
+    "../blueprints/cowork/skills/skills/plan-dispatch/SKILL.md");
+  const skill = fs.readFileSync(skillPath, "utf8") + "\n\n---\n\n" + fs.readFileSync(planDispatchPath, "utf8");
 
   for (const needle of [
     "composeInnerCircleAllowlist",
@@ -8130,17 +8132,20 @@ async function caseHCV0891OrchestratorA() {
 }
 
 async function caseHCV0891OrchestratorBCDE() {
-  console.log("\n--- Case HC-V0891-ORCHESTRATOR-B..E: 4 atomic-note orchestrators inner-circle helper wiring ---");
+  console.log("\n--- Case HC-V0891-ORCHESTRATOR-B..E: 4 atomic-note orchestrators inner-circle helper wiring (v0.95.0: wiring now lives inside cowork:plan-dispatch) ---");
   const orchestrators = [
     { slot: "B", name: "midday-tripwire" },
     { slot: "C", name: "eod-review" },
     { slot: "D", name: "weekly-review" },
     { slot: "E", name: "monthly-review" },
   ];
+  const planDispatchPath = path.resolve(__dirname,
+    "../blueprints/cowork/skills/skills/plan-dispatch/SKILL.md");
+  const planDispatch = fs.readFileSync(planDispatchPath, "utf8");
   for (const { slot, name } of orchestrators) {
     const skillPath = path.resolve(__dirname,
       `../blueprints/cowork/skills/orchestrators/${name}/SKILL.md`);
-    const skill = fs.readFileSync(skillPath, "utf8");
+    const skill = fs.readFileSync(skillPath, "utf8") + "\n\n---\n\n" + planDispatch;
     for (const needle of [
       "composeInnerCircleAllowlist",
       "cowork:resolve-person",
@@ -9482,12 +9487,17 @@ async function caseHCV0891Versions() {
   // v0.90.0 HC-V0900-IMPERATIVE-* + HC-V0900-FALLBACK-* — WS-B 5-orchestrator prose
   // ============================================================================
 
+  // v0.95.0: HC-V0900 prose contract now reads orchestrator body + plan-dispatch body
+  // as a combined corpus, since the inner-circle + wikilink + legacy-fallback prose
+  // moved into the plan-dispatch sub-skill where it's structurally owned.
+  const _planDispatchV0900 = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/cowork/skills/skills/plan-dispatch/SKILL.md"), "utf8");
   ["morning-briefing", "midday-tripwire", "eod-review", "weekly-review", "monthly-review"].forEach((orchName, idx) => {
     const letter = String.fromCharCode(65 + idx);  // A..E
     const p = path.join(WORKSHOP, "platform/blueprints/cowork/skills/orchestrators", orchName, "SKILL.md");
     console.log(`\n--- Case HC-V0900-IMPERATIVE-${letter}1 / FALLBACK-${letter}1: ${orchName} prose ---`);
     try {
-      const body = fs.readFileSync(p, "utf8");
+      const body = fs.readFileSync(p, "utf8") + "\n\n---\n\n" + _planDispatchV0900;
       assertTrue(`HC-V0900-IMPERATIVE-${letter}1: ${orchName} ## Gather has MANDATORY prefs-loop paragraph`,
         body.includes("MANDATORY") && body.includes("Memory ticks are SUPPLEMENTARY"));
       assertTrue(`HC-V0900-IMPERATIVE-${letter}1: ${orchName} paragraph cites Known people in scope wikilink`,
@@ -10396,13 +10406,16 @@ type: cowork-microscope
   // v0.91.3 HC-V0913-* — trust user-prefs + deferred-tool loading + dataviewjs regex tightening
   // ============================================================================
 
-  // A: connectivity signal authority clause in 5 orchestrators
+  // A: connectivity signal authority clause — v0.95.0: prose lives in cowork:plan-dispatch
+  // (the cohesion sweep moved the contract from each orchestrator to its single owner).
+  const _planDispatchV0913 = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/cowork/skills/skills/plan-dispatch/SKILL.md"), "utf8");
   ["morning-briefing", "midday-tripwire", "eod-review", "weekly-review", "monthly-review"].forEach((orchName, idx) => {
     const letter = String.fromCharCode(65 + idx);
     const p = path.join(WORKSHOP, "platform/blueprints/cowork/skills/orchestrators/" + orchName + "/SKILL.md");
     console.log(`\n--- Case HC-V0913-PREFS-${letter}1: ${orchName} connectivity signal authority ---`);
     try {
-      const body = fs.readFileSync(p, "utf8");
+      const body = fs.readFileSync(p, "utf8") + "\n\n---\n\n" + _planDispatchV0913;
       assertTrue(`HC-V0913-PREFS-${letter}1: cites Connectivity signal authority v0.91.3`,
         body.includes("Connectivity signal authority (v0.91.3)"));
       assertTrue(`HC-V0913-PREFS-${letter}1: tells LLM to trust prefs.mcps`,
@@ -10414,13 +10427,16 @@ type: cowork-microscope
     }
   });
 
-  // B: deferred-tool loading MANDATORY clause in 5 orchestrators
+  // B: deferred-tool loading MANDATORY clause — v0.95.0: prose lives in cowork:plan-dispatch
+  // (the cohesion sweep moved the tool-list catalogue from each orchestrator to its single owner).
+  const _planDispatchV0913Tools = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/cowork/skills/skills/plan-dispatch/SKILL.md"), "utf8");
   ["morning-briefing", "midday-tripwire", "eod-review", "weekly-review", "monthly-review"].forEach((orchName, idx) => {
     const letter = String.fromCharCode(65 + idx);
     const p = path.join(WORKSHOP, "platform/blueprints/cowork/skills/orchestrators/" + orchName + "/SKILL.md");
     console.log(`\n--- Case HC-V0913-TOOLS-${letter}1: ${orchName} deferred tool loading ---`);
     try {
-      const body = fs.readFileSync(p, "utf8");
+      const body = fs.readFileSync(p, "utf8") + "\n\n---\n\n" + _planDispatchV0913Tools;
       assertTrue(`HC-V0913-TOOLS-${letter}1: MANDATORY v0.91.3 deferred-tool clause present`,
         body.includes("MANDATORY (v0.91.3): load deferred MCP tools UPFRONT"));
       assertTrue(`HC-V0913-TOOLS-${letter}1: lists M365 tools`,

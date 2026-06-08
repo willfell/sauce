@@ -63,7 +63,9 @@ The 12-key result tree returned by this sub-skill is the orchestrator's sole sou
 
 11. **Compose voice contract.** Invoke `dispatchPlanHelper.composeVoiceContract(final.voice, prefs_result.prefs.effective_hard_rules)` → `voice_contract` (string). The Write phase prepends this verbatim to its compose-body invocation. Also capture `prefs_result.prefs.effective_hard_rules` as the 11th key on the return — `gather-from-served-by` consumes the rules array independently of the voice_contract formatted string.
 
-12. **Resolve inner-circle allowlist.** When `engagement.inner_circle_people` is a non-empty array AND `final.render_aspects.inner_circle_imessage !== "skip"`, READ `.claude/skills/cowork/skills/resolve-person/SKILL.md` in full and follow its `## Steps` section per name. Then invoke `composeInnerCircleAllowlist(resolverOutputs)` from `helpers/resolve-inner-circle-helper.js` → `allowlist = { resolved, unresolved, phone_filter_list }`. When the gate is closed (no inner_circle_people or `inner_circle_imessage: skip`), return `allowlist = { resolved: [], unresolved: [], phone_filter_list: [] }`.
+12. **Resolve inner-circle allowlist.** When `engagement.inner_circle_people` is a non-empty array AND `final.render_aspects.inner_circle_imessage !== "skip"`, for each name call `cowork:resolve-person { input: <name>, prefer_type: "name", engagement_id }`. Thread the original name as `_input` so the helper can surface unresolved names verbatim. Accumulate outputs and invoke `composeInnerCircleAllowlist(resolverOutputs)` from `helpers/resolve-inner-circle-helper.js` → `allowlist = { resolved, unresolved, phone_filter_list }`. When the gate is closed (no inner_circle_people or `inner_circle_imessage: skip`), return `allowlist = { resolved: [], unresolved: [], phone_filter_list: [] }`.
+
+   Orchestrators pass `allowlist.resolved` as `inner_circle_resolved` to every `gather-from-served-by` invocation (along with `engagement_id`). morning-briefing also passes `allowlist.phone_filter_list.join(",")` as `gather-imessage`'s existing `inner_circle:` input. For each name in `allowlist.unresolved[]`, the orchestrator emits Notice `cowork: inner-circle name "<name>" unresolved` AND appends `inner_circle_unresolved:<name>` to the atomic note's `warnings:` array (v0.85.0 plumbing).
 
 13. **Return the 12-key contract.** Per the `## Returns` section below. Every key MUST be present even when null/empty — defensive contract. Atomic-note orchestrators consume the result tree as their single source of truth for Gather + Write.
 
@@ -93,6 +95,22 @@ The orchestrator captures this as `plan`. Gather phase iterates `plan.dispatch_p
 - vault-config.md without `engagements[i].overrides` → `composeFinalPreferences` returns bundle defaults verbatim; observable behavior unchanged from v0.94.x. v0.95.1's `sauce update --migrate-config` adds an empty `overrides: {}` block to every engagement and drops backward-compat reads.
 - `data/kind-titles.json` absent → `loadKindTitles` falls back to module-private `CANONICAL_TITLES` const (4 entries: calendar/email/chat/finance). Fresh consumer installs pick up the 7-entry data file at v0.95.0 deploy time.
 - `engagement.inner_circle_people` absent → `allowlist` returns empty arrays (no resolver invocations).
+
+## Connectivity signal authority (v0.91.3)
+
+This sub-skill must trust `prefs.mcps[<kind>].served_by` + `prefs.mcps[<kind>].connected` (from `read-user-preferences`) for namespace + connectivity. DO NOT trust `vault-config.mcp_map` for connectivity — that field is bootstrap-time-only, stale-prone, an audit hint not a runtime signal. Cross-reference `prefs.mcps[<kind>].served_by` with `reachable_namespaces` (passed in by the orchestrator) for the final dispatch action.
+
+This authority chain replaces v0.94.x's per-orchestrator inline assertion of the same contract — orchestrators now delegate ALL connectivity reasoning to plan-dispatch.
+
+### Deferred MCP tool loading
+
+MANDATORY (v0.91.3): load deferred MCP tools UPFRONT. Before the orchestrator's priority loop fires, for each kind in `dispatch_plan` with `action == "gather_from_served_by"` or `action == "gather_canonical"`, load the required deferred tools from the kind's `served_by` namespace via Tool Search / Load. M365 (UUID like `45224a84-...`): `chat_message_search`, `outlook_calendar_search`, `outlook_email_search`. ADO (UUID like `1151913a-...`): `list_workitems`, `search_workitems`. github: `search_pull_requests`, `search_issues`. If a tool isn't loaded when its gather sub-skill needs it, the sub-skill cannot execute and you silently fall back to a warning callout — the deterministic fix for the "MCP tools require loading" failure.
+
+## Inner-circle wiring contract (Known people in scope)
+
+`allowlist.resolved[]` (a list of `{ name, person_link, person_basename, aliases_by_type, matched_via, collision_warning }`) is the "Known people in scope" list that orchestrators thread into every `gather-from-served-by` invocation. Downstream `cowork:gather-from-served-by` injects the allowlist into its dispatch contract so the LLM emits `**[[Name]]**` wikilinks for resolved people (per the `wikilink_people` canonical hard rule from v0.89.0+/v0.90.0).
+
+In `dispatch_mode == "legacy"` (prefs unreadable / engagement-not-found / bundle-missing), the inner-circle pipeline does NOT fire — orchestrators emit a Notice citing "inner-circle wikilink emission will NOT occur" so the user knows resolved-person wikilinking is degraded for that run.
 
 ## Failure-mode contract
 
