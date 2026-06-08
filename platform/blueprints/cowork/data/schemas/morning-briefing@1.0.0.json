@@ -1,0 +1,88 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "cowork morning-briefing atomic-note sidecar",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "generated_by",
+    "generated_at",
+    "cadence",
+    "engagement_id",
+    "frontmatter",
+    "surfaced_kinds",
+    "surfaced_items",
+    "render_aspects_applied",
+    "memory_used",
+    "plan_dispatch"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "generated_by": { "type": "string", "pattern": "^cowork:[a-z-]+@\\d+\\.\\d+\\.\\d+$" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "cadence": { "const": "morning-briefing" },
+    "engagement_id": { "type": "string", "minLength": 1 },
+    "frontmatter": {
+      "type": "object",
+      "required": ["type", "engagement_id", "day", "title", "summary", "created_at"],
+      "properties": {
+        "type": { "const": "cowork-morning-briefing" },
+        "engagement_id": { "type": "string" },
+        "day": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+        "generator": { "type": "string" },
+        "prompt_source": { "type": "string" },
+        "title": { "type": "string", "minLength": 1 },
+        "summary": { "type": "string", "minLength": 1 },
+        "created_at": { "type": "string" },
+        "warning": { "type": ["string", "null"] }
+      },
+      "additionalProperties": true
+    },
+    "surfaced_kinds": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    },
+    "surfaced_items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["item_id", "kind", "callout_type", "title", "features"],
+        "properties": {
+          "item_id": { "type": "string", "minLength": 1 },
+          "kind": { "type": "string" },
+          "callout_type": { "type": "string", "enum": ["example", "warning", "info", "tip", "todo", "question", "quote"] },
+          "title": { "type": "string" },
+          "features": { "type": "object" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "render_aspects_applied": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "memory_used": {
+      "type": "object",
+      "required": ["yesterday_present", "drift_warning_present", "echoes_count"],
+      "properties": {
+        "yesterday_present": { "type": "boolean" },
+        "drift_warning_present": { "type": "boolean" },
+        "echoes_count": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "plan_dispatch": {
+      "type": "object",
+      "required": ["mode", "kinds_dispatched", "warnings_emitted"],
+      "properties": {
+        "mode": { "type": "string", "enum": ["prefs", "legacy", "legacy-classifier-fallback"] },
+        "kinds_dispatched": { "type": "integer", "minimum": 0 },
+        "warnings_emitted": { "type": "integer", "minimum": 0 },
+        "classifier_cache_hit": { "type": "boolean" },
+        "pending_confirmations_count": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    }
+  }
+}
