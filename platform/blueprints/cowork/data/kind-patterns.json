@@ -1,0 +1,61 @@
+{
+  "schema_version": "1.0.0",
+  "kinds": {
+    "calendar": {
+      "tool_name_patterns": ["*calendar*", "list_events", "create_event", "suggest_time", "respond_to_event"],
+      "namespace_patterns": ["*calendar*", "*Calendar*", "*calendars*"],
+      "callout_type": "example",
+      "default_priority": 10,
+      "default_features": ["time_of_day_bucket", "sender_or_organizer_inner_circle", "recency_bucket", "subject_recurring"]
+    },
+    "email": {
+      "tool_name_patterns": ["*email*", "*gmail*", "*mail*", "search_threads", "list_drafts", "create_draft", "label_message"],
+      "namespace_patterns": ["*Gmail*", "*gmail*", "*Outlook*", "*M365*", "*outlook*"],
+      "callout_type": "example",
+      "default_priority": 20,
+      "default_features": ["sender_or_organizer_inner_circle", "recency_bucket", "thread_length_bucket", "has_unread"]
+    },
+    "chat": {
+      "tool_name_patterns": ["*chat*", "chat_message_search", "*conversation*"],
+      "namespace_patterns": ["*Slack*", "*Teams*", "*Discord*"],
+      "callout_type": "example",
+      "default_priority": 30,
+      "default_features": ["sender_or_organizer_inner_circle", "recency_bucket", "channel_active"]
+    },
+    "messages": {
+      "tool_name_patterns": ["messages_*", "imessage*", "*sms*"],
+      "namespace_patterns": ["*apple-mcp*", "*iMessage*", "*iMCP*"],
+      "callout_type": "example",
+      "default_priority": 40,
+      "default_features": ["sender_or_organizer_inner_circle", "is_group_chat", "recency_bucket", "message_count_bucket"]
+    },
+    "finance": {
+      "tool_name_patterns": ["*expense*", "*transaction*", "*account*", "*card*", "*budget*", "list_bills", "list_vendors"],
+      "namespace_patterns": ["*Brex*", "*Copilot*", "*Quickbooks*", "*Plaid*"],
+      "callout_type": "example",
+      "default_priority": 50,
+      "default_features": ["amount_bucket", "recurring_merchant", "category"]
+    },
+    "docs": {
+      "tool_name_patterns": ["*drive*", "*doc*", "*sheet*", "*file*", "list_recent_files", "search_files"],
+      "namespace_patterns": ["*Drive*", "*Docs*", "*Notion*", "*Confluence*"],
+      "callout_type": "example",
+      "default_priority": 60,
+      "default_features": ["recency_bucket", "shared_with_user", "type"]
+    },
+    "weather": {
+      "tool_name_patterns": ["weather_*"],
+      "namespace_patterns": ["*iMCP*", "*weather*"],
+      "callout_type": "example",
+      "default_priority": 70,
+      "default_features": ["is_warning"]
+    },
+    "vault": {
+      "tool_name_patterns": ["obsidian_*"],
+      "namespace_patterns": ["*obsidian*"],
+      "callout_type": "example",
+      "default_priority": 80,
+      "default_features": []
+    }
+  }
+}

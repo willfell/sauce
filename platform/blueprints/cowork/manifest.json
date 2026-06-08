@@ -413,6 +413,21 @@
       "tag": "platform"
     },
     {
+      "source": "helpers/kind-classifier-helper.js",
+      "dest": "{{module_directory}}/helpers/kind-classifier-helper.js",
+      "tag": "platform"
+    },
+    {
+      "source": "data/kind-patterns.json",
+      "dest": "{{module_directory}}/data/kind-patterns.json",
+      "tag": "platform"
+    },
+    {
+      "source": "data/kind-classifier-cache.json",
+      "dest": "{{module_directory}}/data/kind-classifier-cache.json",
+      "tag": "platform"
+    },
+    {
       "source": "data/schemas/morning-briefing@1.0.0.json",
       "dest": "{{module_directory}}/data/schemas/morning-briefing@1.0.0.json",
       "tag": "platform"
