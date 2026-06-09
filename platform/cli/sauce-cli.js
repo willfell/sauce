@@ -22,6 +22,7 @@ const VERBS = {
     seed:      "./cmd-seed.js",
     "migrate-frontmatter": "./cmd-migrate-frontmatter.js",
     "cleanup-project-type": "./cmd-cleanup-project-type.js",
+    "reconcile-cowork": "./cmd-reconcile-cowork.js",
     help:      "./cmd-help.js"
 };
 
@@ -186,8 +187,17 @@ async function dispatch(argv, opts) {
         await cmd.run(testCtx, rest);
         return;
     }
+    if (verb === "reconcile-cowork") {
+        const cmd = require(VERBS["reconcile-cowork"]);
+        // v0.97.0: context-free. Operates against --vault <path> or the
+        // ~/.sauce/vault-paths.json registry. Forward test hooks via opts.
+        const testCtx = opts || {};
+        const code = await cmd.run(testCtx, rest);
+        if (typeof code === "number") process.exitCode = code;
+        return;
+    }
     if (!VERBS[verb]) {
-        throw new Error(`unknown verb: ${verb}\nUsage: sauce <bootstrap|update|status|wizard|migrate|migrate-layout|migrate-frontmatter|cleanup-project-type|audit|vault|reinstall|doctor|link|unlink|seed|help>`);
+        throw new Error(`unknown verb: ${verb}\nUsage: sauce <bootstrap|update|status|wizard|migrate|migrate-layout|migrate-frontmatter|cleanup-project-type|reconcile-cowork|audit|vault|reinstall|doctor|link|unlink|seed|help>`);
     }
     let ctx;
     if (verb === "bootstrap") {
