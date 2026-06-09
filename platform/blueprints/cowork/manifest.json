@@ -418,6 +418,11 @@
       "tag": "platform"
     },
     {
+      "source": "helpers/cowork-sync-mcp-helper.js",
+      "dest": "{{module_directory}}/helpers/cowork-sync-mcp-helper.js",
+      "tag": "platform"
+    },
+    {
       "source": "data/scheduled-job-contract.json",
       "dest": "{{module_directory}}/data/scheduled-job-contract.json",
       "tag": "platform"

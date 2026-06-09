@@ -11010,6 +11010,14 @@ type: cowork-microscope
 
   // ============================================================================
   // v0.93.0 — cowork:sync-scheduled-jobs orchestrator SKILL.md prose (HC-V0930-SKILL-*)
+  // v0.97.0 S3.2: SKILL.md rewritten for claude.ai-Cowork-UI-native auto-sync
+  // via update_scheduled_task. The legacy paste-flow prose (## What it does /
+  // ## When to invoke / ## Pre-flight / 17-step numbered list / .sauce-backup /
+  // composeScheduledJobWrappers invocation / canonical paste-file output path /
+  // engagement+verify failure tokens / compose-scheduled-job-wrappers fixtures)
+  // is SUPERSEDED by the v0.97.0 ## Steps + ## Substitution Protocol contract.
+  // A1 (frontmatter name) survives; A2..A10 retired with explanatory note. The
+  // replacement contract is enforced by HC-V0970-A-1..12.
   // ============================================================================
   console.log(`\n--- Case HC-V0930-SKILL: sync-scheduled-jobs orchestrator SKILL.md ---`);
   try {
@@ -11017,24 +11025,7 @@ type: cowork-microscope
     const orchBody = fs.readFileSync(orchPath, "utf8");
     assertTrue("HC-V0930-SKILL-A1: frontmatter name === cowork:sync-scheduled-jobs",
       orchBody.includes("name: cowork:sync-scheduled-jobs"));
-    assertTrue("HC-V0930-SKILL-A2: ## What it does heading present",
-      orchBody.includes("## What it does"));
-    assertTrue("HC-V0930-SKILL-A3: ## When to invoke heading present",
-      orchBody.includes("## When to invoke"));
-    assertTrue("HC-V0930-SKILL-A4: ## Pre-flight heading present",
-      orchBody.includes("## Pre-flight"));
-    assertTrue("HC-V0930-SKILL-A5: at least 17 numbered steps",
-      (orchBody.match(/^\d+\./gm) || []).length >= 17);
-    assertTrue("HC-V0930-SKILL-A6: invokes composeScheduledJobWrappers",
-      orchBody.includes("composeScheduledJobWrappers"));
-    assertTrue("HC-V0930-SKILL-A7: backup-on-edit prose mentions .sauce-backup",
-      orchBody.includes(".sauce-backup"));
-    assertTrue("HC-V0930-SKILL-A8: canonical output path documented",
-      orchBody.includes("spice/cowork/scheduled-job-wrappers/"));
-    assertTrue("HC-V0930-SKILL-A9: failure-token enumeration includes engagement + verify tokens",
-      orchBody.includes("failed:engagement:not-found") && orchBody.includes("failed:verify:undersized"));
-    assertTrue("HC-V0930-SKILL-A10: ## Harness testing references fixtures",
-      orchBody.includes("compose-scheduled-job-wrappers"));
+    // HC-V0930-SKILL-A2..A10 SUPERSEDED by HC-V0970-A-1..12 (v0.97.0 S3.2).
   } catch (e) {
     assertTrue("HC-V0930-SKILL: orchestrator SKILL.md contract", false, e && e.message);
   }
@@ -11178,27 +11169,22 @@ type: cowork-microscope
     assertTrue("HC-V0931-NOTES: voice-notes fallback contract", false, e && e.message);
   }
 
-  console.log(`\n--- Case HC-V0931-APPLY: sync-scheduled-jobs ## Apply section prose ---`);
+  // v0.97.0 S3.2: ## Apply section (v0.93.1 paste+optional-MCP-push hybrid) is
+  // SUPERSEDED by the v0.97.0 ## Steps section (claude.ai-Cowork-UI-native
+  // auto-sync via update_scheduled_task — no paste fallback, no .sauce-backup).
+  // The replacement contract (cron field NEVER set / orphan warn-not-delete /
+  // idempotent re-run / abort-cleanly-when-MCP-missing) is enforced by
+  // HC-V0970-A-1..12. C2 (update_scheduled_task mention) still passes via
+  // the new ## Steps section, so kept as a continuity probe.
+  console.log(`\n--- Case HC-V0931-APPLY: sync-scheduled-jobs MCP-push prose (continuity probe) ---`);
   try {
     const orchPath = path.join(WORKSHOP, "platform/blueprints/cowork/skills/orchestrators/sync-scheduled-jobs/SKILL.md");
     const orchBody = fs.readFileSync(orchPath, "utf8");
-    assertTrue("HC-V0931-APPLY-C1: ## Apply section header present",
-      /^## Apply$/m.test(orchBody));
-    assertTrue("HC-V0931-APPLY-C2: prose cites update_scheduled_task tool",
+    assertTrue("HC-V0931-APPLY-C2: prose cites update_scheduled_task tool (continuity probe)",
       orchBody.includes("update_scheduled_task"));
-    assertTrue("HC-V0931-APPLY-C3: prose enforces NEVER touch cron/schedule",
-      orchBody.includes("NEVER touch `cron`/`schedule`"));
-    assertTrue("HC-V0931-APPLY-C4: prose enforces out-of-scope task isolation",
-      orchBody.includes("NEVER touch tasks outside the 5 canonical cadences"));
-    assertTrue("HC-V0931-APPLY-C5: prose claims idempotence",
-      orchBody.includes("Idempotent on re-run"));
-    assertTrue("HC-V0931-APPLY-C6: 4 new mcp-* failure tokens listed",
-      orchBody.includes("mcp-unreachable")
-      && orchBody.includes("mcp-task-absent:<taskId>")
-      && orchBody.includes("mcp-update-failed:<taskId>")
-      && orchBody.includes("mcp-listed-out-of-scope-task:<taskId>"));
+    // HC-V0931-APPLY-C1, C3, C4, C5, C6 SUPERSEDED by HC-V0970-A-1..12 (v0.97.0 S3.2).
   } catch (e) {
-    assertTrue("HC-V0931-APPLY: orchestrator Apply-section contract", false, e && e.message);
+    assertTrue("HC-V0931-APPLY: orchestrator MCP-push contract", false, e && e.message);
   }
 
   // ============================================================================
