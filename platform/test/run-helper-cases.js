@@ -15222,6 +15222,388 @@ type: cowork-microscope
     assertTrue("HC-V0970-A-12: helper registered + audit-file frontmatter shape documented", false, e && e.message);
   }
 
+  // ==========================================================================
+  // v0.97.0 S4.1: RED tests for Rail R (local reconciler).
+  // 16 sub-asserts: CLI verb (cmd-reconcile-cowork.js exports + dispatch),
+  // ~/.sauce/ vault-paths registry (load + idempotent add), reconcileVault
+  // per-vault flow, sidecar backfill from .md prose (callout-title kind
+  // inference), learn-from-checks (updateForEngagement + .bak), check-heartbeat
+  // (runForEngagement), reconciler-log (appendEntry capped), --install-launchd
+  // module + plist template at Docs/install/.
+  //
+  // All RED until S4.2-S4.5 land.
+  // ==========================================================================
+
+  const _V0970_R_CMD_PATH = path.join(WORKSHOP, "platform/cli/cmd-reconcile-cowork.js");
+  const _V0970_R_REG_HELPER_PATH = path.join(WORKSHOP, "platform/helpers/vault-paths-registry-helper.js");
+  const _V0970_R_RECON_INDEX_PATH = path.join(WORKSHOP, "platform/mechanisms/cowork-reconciler/index.js");
+  const _V0970_R_SIDECAR_PATH = path.join(WORKSHOP, "platform/mechanisms/cowork-reconciler/sidecar-backfill.js");
+  const _V0970_R_LWU_PATH = path.join(WORKSHOP, "platform/mechanisms/cowork-reconciler/learned-weights-update.js");
+  const _V0970_R_HEARTBEAT_PATH = path.join(WORKSHOP, "platform/mechanisms/cowork-reconciler/heartbeat-check.js");
+  const _V0970_R_LOG_PATH = path.join(WORKSHOP, "platform/mechanisms/cowork-reconciler/reconciler-log.js");
+  const _V0970_R_LAUNCHD_PATH = path.join(WORKSHOP, "platform/mechanisms/cowork-reconciler/launchd-installer.js");
+  const _V0970_R_LAUNCHD_TEMPLATE_PATH = path.join(WORKSHOP, "Docs/install/cowork-reconciler-launchd.plist.template");
+
+  console.log(`\n--- Case HC-V0970-R-1: sauce reconcile-cowork --help works (cmd module exports run/dispatch) ---`);
+  try {
+    delete require.cache[require.resolve(_V0970_R_CMD_PATH)];
+    const cmd = require(_V0970_R_CMD_PATH);
+    assertTrue(
+      "HC-V0970-R-1: cmd-reconcile-cowork.js exports a run() or dispatch() function",
+      typeof cmd.run === "function" || typeof cmd.dispatch === "function",
+      `expected run/dispatch function`
+    );
+  } catch (e) {
+    assertTrue("HC-V0970-R-1: sauce reconcile-cowork --help works", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0970-R-2: sauce reconcile-cowork --dry-run --vault <tmpfixture> ---`);
+  try {
+    // Scaffold a minimal tmp fixture vault and invoke cmd.run() / dispatch()
+    // with --dry-run --vault <fixture>. The dry-run path must return exit 0
+    // (or a zero-exit-equivalent) without writing into the fixture vault.
+    const fixVault = fs.mkdtempSync(path.join(os.tmpdir(), "v097-r2-vault-"));
+    // Minimal vault layout so the reconciler has SOMETHING to read.
+    fs.mkdirSync(path.join(fixVault, "ranch"), { recursive: true });
+    fs.mkdirSync(path.join(fixVault, "spice/cowork"), { recursive: true });
+    fs.writeFileSync(
+      path.join(fixVault, "spice/cowork/vault-config.md"),
+      "---\nschema_version: 1\nengagements:\n  - id: test-eng\n    type: work\n---\n\n# Vault Config\n"
+    );
+    const before = fs.readdirSync(fixVault).sort().join(",");
+
+    delete require.cache[require.resolve(_V0970_R_CMD_PATH)];
+    const cmd = require(_V0970_R_CMD_PATH);
+    const runFn = cmd.run || cmd.dispatch;
+    let exitCode = -1;
+    let threw = false;
+    try {
+      // Most cmd modules accept an argv array; we pass --dry-run + --vault.
+      const result = runFn(["--dry-run", "--vault", fixVault]);
+      // run() may be sync (returns number) or async (Promise<number>).
+      if (result && typeof result.then === "function") {
+        // Treat async-returning as RED-acceptable (helper not built yet).
+        exitCode = 0;
+      } else if (typeof result === "number") {
+        exitCode = result;
+      } else {
+        exitCode = 0; // assume successful no-op
+      }
+    } catch (e) {
+      threw = true;
+      exitCode = 99;
+    }
+    const after = fs.readdirSync(fixVault).sort().join(",");
+    assertTrue(
+      "HC-V0970-R-2: --dry-run exits 0 without writing to fixture vault root",
+      !threw && exitCode === 0 && before === after,
+      `threw=${threw} exitCode=${exitCode} before=${before} after=${after}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0970-R-2: sauce reconcile-cowork --dry-run --vault <tmpfixture>", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0970-R-3: ~/.sauce/ exists/createable + registry file loadable ---`);
+  try {
+    const sauceDir = path.join(os.homedir(), ".sauce");
+    const sauceDirOk = fs.existsSync(sauceDir) || (() => {
+      try { fs.mkdirSync(sauceDir, { recursive: true }); return true; } catch (_) { return false; }
+    })();
+    // Registry: either vault-paths.json (canonical v0.97.0) or vaults.json (legacy).
+    const canonical = path.join(sauceDir, "vault-paths.json");
+    const legacy = path.join(sauceDir, "vaults.json");
+    // Loadable = file does not exist (empty registry) OR file is valid JSON.
+    let loadable = false;
+    if (!fs.existsSync(canonical) && !fs.existsSync(legacy)) {
+      loadable = true; // absent-file === empty registry (acceptable shape)
+    } else {
+      try {
+        const src = fs.existsSync(canonical) ? canonical : legacy;
+        JSON.parse(fs.readFileSync(src, "utf8"));
+        loadable = true;
+      } catch (_) {
+        loadable = false;
+      }
+    }
+    // RED until S4.2 also requires the helper to actually parse both shapes.
+    // For this RED we additionally require the helper module to be present so
+    // the assertion only flips GREEN once S4.2 ships it.
+    const helperPresent = fs.existsSync(_V0970_R_REG_HELPER_PATH);
+    assertTrue(
+      "HC-V0970-R-3: ~/.sauce/ directory exists or is createable AND vault-paths-registry-helper.js present",
+      sauceDirOk && loadable && helperPresent,
+      `sauceDirOk=${sauceDirOk} loadable=${loadable} helperPresent=${helperPresent}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0970-R-3: ~/.sauce/ + vault-paths.json loadable", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0970-R-4: vault-paths-registry-helper.js exports loadVaultPaths + addVaultPath ---`);
+  try {
+    delete require.cache[require.resolve(_V0970_R_REG_HELPER_PATH)];
+    const r = require(_V0970_R_REG_HELPER_PATH);
+    assertTrue(
+      "HC-V0970-R-4: loadVaultPaths + addVaultPath exported from vault-paths-registry-helper.js",
+      typeof r.loadVaultPaths === "function" && typeof r.addVaultPath === "function",
+      `expected both functions exported`
+    );
+  } catch (e) {
+    assertTrue("HC-V0970-R-4: vault-paths-registry-helper exports", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0970-R-5: loadVaultPaths returns { schema_version, vaults: [...] }; absent → empty ---`);
+  try {
+    delete require.cache[require.resolve(_V0970_R_REG_HELPER_PATH)];
+    const r = require(_V0970_R_REG_HELPER_PATH);
+    // Test against an empty tmp registry dir so we don't disturb ~/.sauce/.
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "v097-r5-home-"));
+    const reg = (typeof r.loadVaultPaths === "function") ? r.loadVaultPaths({ sauce_dir: tmpHome }) : null;
+    const shapeOk = reg
+      && typeof reg.schema_version !== "undefined"
+      && Array.isArray(reg.vaults)
+      && reg.vaults.length === 0;
+    assertTrue(
+      "HC-V0970-R-5: loadVaultPaths absent-file → { schema_version, vaults: [] }",
+      shapeOk,
+      `got ${JSON.stringify(reg)}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0970-R-5: loadVaultPaths shape", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0970-R-6: addVaultPath idempotent (same path twice no-op; label updates) ---`);
+  try {
+    delete require.cache[require.resolve(_V0970_R_REG_HELPER_PATH)];
+    const r = require(_V0970_R_REG_HELPER_PATH);
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "v097-r6-home-"));
+    const p1 = "/tmp/v097-r6-fake-vault-a";
+    const p2 = "/tmp/v097-r6-fake-vault-b";
+    r.addVaultPath({ path: p1, label: "alpha" }, { sauce_dir: tmpHome });
+    r.addVaultPath({ path: p1, label: "alpha" }, { sauce_dir: tmpHome }); // no-op (same)
+    r.addVaultPath({ path: p2, label: "beta" }, { sauce_dir: tmpHome });
+    r.addVaultPath({ path: p1, label: "alpha-renamed" }, { sauce_dir: tmpHome }); // label update
+    const reg = r.loadVaultPaths({ sauce_dir: tmpHome });
+    const vaults = (reg && Array.isArray(reg.vaults)) ? reg.vaults : [];
+    const aEntry = vaults.find((v) => v && v.path === p1);
+    const bEntry = vaults.find((v) => v && v.path === p2);
+    const idempotent = vaults.length === 2; // not duplicated
+    const labelUpdated = aEntry && aEntry.label === "alpha-renamed";
+    assertTrue(
+      "HC-V0970-R-6: addVaultPath idempotent + label updates on existing entry",
+      idempotent && labelUpdated && bEntry && bEntry.label === "beta",
+      `vaults=${JSON.stringify(vaults)}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0970-R-6: addVaultPath idempotent", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0970-R-7: reconcileVault exported from cowork-reconciler/index.js ---`);
+  try {
+    delete require.cache[require.resolve(_V0970_R_RECON_INDEX_PATH)];
+    const recon = require(_V0970_R_RECON_INDEX_PATH);
+    assertTrue(
+      "HC-V0970-R-7: reconcileVault({ vault_path, dry_run, engagement_filter }) exported",
+      typeof recon.reconcileVault === "function",
+      `expected reconcileVault function`
+    );
+  } catch (e) {
+    assertTrue("HC-V0970-R-7: reconcileVault export", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0970-R-8: reconcileVault reads vault-config.md engagements[] ---`);
+  try {
+    delete require.cache[require.resolve(_V0970_R_RECON_INDEX_PATH)];
+    const recon = require(_V0970_R_RECON_INDEX_PATH);
+    // Scaffold a fixture vault with a vault-config.md declaring two engagements.
+    const fixVault = fs.mkdtempSync(path.join(os.tmpdir(), "v097-r8-vault-"));
+    fs.mkdirSync(path.join(fixVault, "spice/cowork"), { recursive: true });
+    fs.writeFileSync(
+      path.join(fixVault, "spice/cowork/vault-config.md"),
+      "---\nschema_version: 1\nengagements:\n  - id: eng-one\n    type: work\n  - id: eng-two\n    type: personal\n---\n\n# Vault Config\n"
+    );
+    let res = null;
+    try {
+      res = recon.reconcileVault({ vault_path: fixVault, dry_run: true });
+      if (res && typeof res.then === "function") res = null; // async not supported in this sync RED check
+    } catch (_e) {
+      res = null;
+    }
+    const sawBoth = res
+      && Array.isArray(res.engagements)
+      && res.engagements.some((e) => e && e.id === "eng-one")
+      && res.engagements.some((e) => e && e.id === "eng-two");
+    assertTrue(
+      "HC-V0970-R-8: reconcileVault parses engagements[] from vault-config.md",
+      sawBoth,
+      `got ${JSON.stringify(res && res.engagements)}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0970-R-8: reconcileVault reads engagements[]", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0970-R-9: backfillSidecar surfaces calendar+email from > [!example]+ callouts ---`);
+  try {
+    delete require.cache[require.resolve(_V0970_R_SIDECAR_PATH)];
+    const sb = require(_V0970_R_SIDECAR_PATH);
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "v097-r9-"));
+    const mdPath = path.join(tmpDir, "morning-briefing.md");
+    fs.writeFileSync(
+      mdPath,
+      `---\ntype: cowork-morning-briefing\nengagement_id: test\nday: "2026-06-09"\ngenerator: cowork:morning-briefing@1.0.0\n---\n\n# MB\n\n> [!example]+ Calendar - Today\n> something\n\n> [!example]+ Email\n> something\n`
+    );
+    const result = sb.backfillSidecar({ mdPath, engagementPriorities: ["calendar", "email", "projects"] });
+    const ok = result
+      && Array.isArray(result.surfaced_kinds)
+      && result.surfaced_kinds.indexOf("calendar") >= 0
+      && result.surfaced_kinds.indexOf("email") >= 0;
+    assertTrue(
+      "HC-V0970-R-9: backfillSidecar returns sidecar with surfaced_kinds incl. calendar+email",
+      ok,
+      `expected calendar+email; got ${JSON.stringify(result && result.surfaced_kinds)}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0970-R-9: backfillSidecar surfaces calendar+email", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0970-R-10: backfilled sidecar generated_by contains "reconciler-backfill" ---`);
+  try {
+    delete require.cache[require.resolve(_V0970_R_SIDECAR_PATH)];
+    const sb = require(_V0970_R_SIDECAR_PATH);
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "v097-r10-"));
+    const mdPath = path.join(tmpDir, "morning-briefing.md");
+    fs.writeFileSync(
+      mdPath,
+      `---\ntype: cowork-morning-briefing\nengagement_id: test\nday: "2026-06-09"\n---\n\n# MB\n\n> [!example]+ Calendar - Today\n> a\n`
+    );
+    const result = sb.backfillSidecar({ mdPath, engagementPriorities: ["calendar"] });
+    const tag = result && typeof result.generated_by === "string" ? result.generated_by : "";
+    assertTrue(
+      "HC-V0970-R-10: sidecar.generated_by contains 'reconciler-backfill'",
+      tag.indexOf("reconciler-backfill") >= 0,
+      `generated_by=${JSON.stringify(tag)}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0970-R-10: sidecar generated_by reconciler-backfill", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0970-R-11: _inferKindFromCalloutTitle maps known titles ---`);
+  try {
+    delete require.cache[require.resolve(_V0970_R_SIDECAR_PATH)];
+    const sb = require(_V0970_R_SIDECAR_PATH);
+    const cal = typeof sb._inferKindFromCalloutTitle === "function"
+      ? sb._inferKindFromCalloutTitle("Calendar - Today", ["calendar", "email", "projects"])
+      : null;
+    const email = typeof sb._inferKindFromCalloutTitle === "function"
+      ? sb._inferKindFromCalloutTitle("Email", ["calendar", "email", "projects"])
+      : null;
+    const projects = typeof sb._inferKindFromCalloutTitle === "function"
+      ? sb._inferKindFromCalloutTitle("Projects", ["calendar", "email", "projects"])
+      : null;
+    assertTrue(
+      "HC-V0970-R-11: _inferKindFromCalloutTitle maps Calendar/Email/Projects → calendar/email/projects",
+      cal === "calendar" && email === "email" && projects === "projects",
+      `cal=${cal} email=${email} projects=${projects}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0970-R-11: _inferKindFromCalloutTitle mapping", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0970-R-12: learned-weights-update.js exports updateForEngagement ---`);
+  try {
+    delete require.cache[require.resolve(_V0970_R_LWU_PATH)];
+    const lwu = require(_V0970_R_LWU_PATH);
+    assertTrue(
+      "HC-V0970-R-12: learned-weights-update.js exports updateForEngagement({ vault_path, engagement_id, dry_run })",
+      typeof lwu.updateForEngagement === "function",
+      `expected updateForEngagement function`
+    );
+  } catch (e) {
+    assertTrue("HC-V0970-R-12: learned-weights-update updateForEngagement", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0970-R-13: learned_weights rewrite writes .bak before frontmatter rewrite ---`);
+  try {
+    delete require.cache[require.resolve(_V0970_R_LWU_PATH)];
+    const lwu = require(_V0970_R_LWU_PATH);
+    // Scaffold a fixture vault w/ a user-preferences.md containing learned_weights.
+    const fixVault = fs.mkdtempSync(path.join(os.tmpdir(), "v097-r13-vault-"));
+    const engId = "eng-r13";
+    const prefsDir = path.join(fixVault, "spice/cowork/engagements", engId);
+    fs.mkdirSync(prefsDir, { recursive: true });
+    const prefsPath = path.join(prefsDir, "user-preferences.md");
+    fs.writeFileSync(
+      prefsPath,
+      "---\nschema_version: 1\nengagement_id: " + engId + "\nlearned_weights:\n  calendar: 0.5\n  email: 0.4\n---\n\n# Prefs\n"
+    );
+    let didRun = false;
+    try {
+      lwu.updateForEngagement({ vault_path: fixVault, engagement_id: engId, dry_run: false });
+      didRun = true;
+    } catch (_e) {
+      didRun = false;
+    }
+    const bakPath = prefsPath + ".bak";
+    const bakExists = fs.existsSync(bakPath);
+    assertTrue(
+      "HC-V0970-R-13: .bak written before learned_weights frontmatter rewrite",
+      didRun && bakExists,
+      `didRun=${didRun} bakExists=${bakExists} bakPath=${bakPath}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0970-R-13: .bak before learned_weights rewrite", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0970-R-14: heartbeat-check.js exports runForEngagement ---`);
+  try {
+    delete require.cache[require.resolve(_V0970_R_HEARTBEAT_PATH)];
+    const hb = require(_V0970_R_HEARTBEAT_PATH);
+    assertTrue(
+      "HC-V0970-R-14: heartbeat-check.js exports runForEngagement({ vault_path, engagement_id, engagement, dry_run })",
+      typeof hb.runForEngagement === "function",
+      `expected runForEngagement function`
+    );
+  } catch (e) {
+    assertTrue("HC-V0970-R-14: heartbeat-check runForEngagement export", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0970-R-15: reconciler-log.js appendEntry capped at MAX_ENTRIES (30 default) ---`);
+  try {
+    delete require.cache[require.resolve(_V0970_R_LOG_PATH)];
+    const rlog = require(_V0970_R_LOG_PATH);
+    const hasAppend = typeof rlog.appendEntry === "function";
+    // Either expose MAX_ENTRIES or test idempotent capping behaviour. Either is OK
+    // for RED — we just need both an appendEntry export AND a documented cap.
+    const capDeclared = (typeof rlog.MAX_ENTRIES === "number" && rlog.MAX_ENTRIES === 30)
+      || (typeof rlog._MAX_ENTRIES === "number" && rlog._MAX_ENTRIES === 30);
+    assertTrue(
+      "HC-V0970-R-15: appendEntry({ vault_path, summary }) exported + MAX_ENTRIES===30",
+      hasAppend && capDeclared,
+      `hasAppend=${hasAppend} capDeclared=${capDeclared}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0970-R-15: reconciler-log appendEntry + cap", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0970-R-16: launchd-installer.js + Docs/install/cowork-reconciler-launchd.plist.template ---`);
+  try {
+    const templateExists = fs.existsSync(_V0970_R_LAUNCHD_TEMPLATE_PATH);
+    delete require.cache[require.resolve(_V0970_R_LAUNCHD_PATH)];
+    let installLaunchdOk = false;
+    try {
+      const li = require(_V0970_R_LAUNCHD_PATH);
+      installLaunchdOk = typeof li.installLaunchd === "function";
+    } catch (_e) {
+      installLaunchdOk = false;
+    }
+    assertTrue(
+      "HC-V0970-R-16: cowork-reconciler-launchd.plist.template exists AND launchd-installer.js exports installLaunchd",
+      templateExists && installLaunchdOk,
+      `templateExists=${templateExists} installLaunchdOk=${installLaunchdOk}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0970-R-16: launchd installer module + plist template", false, e && e.message);
+  }
+
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
   if (fail > 0) {
