@@ -432,11 +432,202 @@ function composeScheduledJobWrappers(input) {
     return { file_md, warnings: warningsArr, status: "ok" };
 }
 
+// ---------------------------------------------------------------------------
+// composeFromOrchestratorInstructions — Rail T compose path (v0.97.0)
+//
+// Reads orchestrator-instructions/<cadence>.md + _shared-clauses.md, resolves
+// {{#if cadence_mode == "lens_shift"}}…{{else}}…{{/if}} conditional branches,
+// substitutes {{shared.<key>}} from the shared-clauses parse, substitutes
+// static {{$tokens}} from engagement+prefs+contract, leaves {{$today_*}} +
+// computed-at-emit tokens literal, wraps with PRELUDE + DONE blocks.
+//
+// Pure JS, no MCP, no LLM. Deterministic: same input tuple → byte-identical
+// output. Replaces the inline contract.cadences[cadence].wrapper_template
+// path with a single-source-of-truth data file pointed to by
+// contract.cadences[cadence].wrapper_template_source.
+// ---------------------------------------------------------------------------
+
+const _fs = require("node:fs");
+const _path = require("node:path");
+
+function _loadOrchestratorInstructions(cadence, sourceRoot) {
+    const candidates = [
+        sourceRoot && _path.join(sourceRoot, "content", "data", "orchestrator-instructions", `${cadence}.md`),
+        sourceRoot && _path.join(sourceRoot, `${cadence}.md`),
+        _path.join(__dirname, "..", "content", "data", "orchestrator-instructions", `${cadence}.md`),
+    ].filter(Boolean);
+    for (const p of candidates) {
+        if (_fs.existsSync(p)) return _fs.readFileSync(p, "utf8");
+    }
+    throw new Error(`orchestrator-instructions file not found for cadence "${cadence}" (looked in: ${candidates.join(" | ")})`);
+}
+
+function _loadSharedClauses(sourceRoot) {
+    const candidates = [
+        sourceRoot && _path.join(sourceRoot, "content", "data", "orchestrator-instructions", "_shared-clauses.md"),
+        sourceRoot && _path.join(sourceRoot, "_shared-clauses.md"),
+        _path.join(__dirname, "..", "content", "data", "orchestrator-instructions", "_shared-clauses.md"),
+    ].filter(Boolean);
+    for (const p of candidates) {
+        if (_fs.existsSync(p)) {
+            const raw = _fs.readFileSync(p, "utf8");
+            const blocks = {};
+            const sectionRx = /^## (\w+)\s*$/gm;
+            const sections = [...raw.matchAll(sectionRx)];
+            for (let i = 0; i < sections.length; i++) {
+                const key = sections[i][1];
+                const start = sections[i].index + sections[i][0].length;
+                const end = i + 1 < sections.length ? sections[i + 1].index : raw.length;
+                blocks[key] = raw.slice(start, end).trim();
+            }
+            return blocks;
+        }
+    }
+    throw new Error(`_shared-clauses.md not found (looked in: ${candidates.join(" | ")})`);
+}
+
+function _resolveConditional(template, cadence_mode) {
+    // {{#if cadence_mode == "lens_shift"}}...{{else}}...{{/if}}
+    // Handle both with and without {{else}}.
+    const rxWithElse = /\{\{#if cadence_mode == "([^"]+)"\}\}([\s\S]*?)\{\{else\}\}([\s\S]*?)\{\{\/if\}\}/g;
+    template = template.replace(rxWithElse, (_m, condValue, branchTrue, branchFalse) => {
+        return cadence_mode === condValue ? branchTrue : branchFalse;
+    });
+    // {{#if cadence_mode == "lens_shift"}}...{{/if}} (no else)
+    const rxNoElse = /\{\{#if cadence_mode == "([^"]+)"\}\}([\s\S]*?)\{\{\/if\}\}/g;
+    template = template.replace(rxNoElse, (_m, condValue, branchTrue) => {
+        return cadence_mode === condValue ? branchTrue : "";
+    });
+    return template;
+}
+
+function _substituteShared(template, sharedBlocks) {
+    return template.replace(/\{\{shared\.(\w+)\}\}/g, (_m, key) => {
+        if (sharedBlocks[key] == null) {
+            throw new Error(`unknown shared key {{shared.${key}}}`);
+        }
+        return sharedBlocks[key];
+    });
+}
+
+const _FIRE_TIME_TOKEN_PREFIXES = ["today_"];
+const _COMPUTED_AT_EMIT_TOKENS = new Set(["rating_kind_lines", "pending_confirmation_lines"]);
+
+function _isFireTimeOrComputedToken(key) {
+    if (_COMPUTED_AT_EMIT_TOKENS.has(key)) return true;
+    for (const prefix of _FIRE_TIME_TOKEN_PREFIXES) {
+        if (key.startsWith(prefix)) return true;
+    }
+    return false;
+}
+
+function _substituteStaticTokens(template, tokens) {
+    return template.replace(/\{\{\$(\w+)\}\}/g, (m, key) => {
+        if (_isFireTimeOrComputedToken(key)) return m; // leave literal
+        if (tokens[key] == null) return m; // unknown — leave literal (harness will detect)
+        return tokens[key];
+    });
+}
+
+function composeFromOrchestratorInstructions(opts) {
+    const { cadence, engagement, prefs, contract, cadence_mode, sourceRoot } = opts || {};
+    if (!cadence) throw new Error("composeFromOrchestratorInstructions: cadence required");
+    if (!engagement) throw new Error("composeFromOrchestratorInstructions: engagement required");
+    if (!prefs) throw new Error("composeFromOrchestratorInstructions: prefs required");
+    if (!contract) throw new Error("composeFromOrchestratorInstructions: contract required");
+
+    const mode = cadence_mode || "warm";
+
+    let template = _loadOrchestratorInstructions(cadence, sourceRoot);
+    const shared = _loadSharedClauses(sourceRoot);
+
+    // 1. Conditional resolution
+    template = _resolveConditional(template, mode);
+
+    // 2. Shared substitution
+    template = _substituteShared(template, shared);
+
+    // 3. Compute static tokens
+    const cadenceInContract = (contract.cadences && contract.cadences[cadence]) || {};
+    const personality = prefs.personality || {};
+    const mcpLinesResult = composeMcpDispatchLines(prefs.mcps || {});
+    const mcpLines = (mcpLinesResult && typeof mcpLinesResult === "object")
+        ? (mcpLinesResult.line || "")
+        : (mcpLinesResult || "");
+    const tokens = {
+        engagement_id: engagement.id || "",
+        engagement_label: engagement.label || engagement.id || "",
+        timezone: engagement.timezone || "America/Denver",
+        voice_notes: personality.notes || personality.vibe_notes || "",
+        voice_summary: `vibe: ${personality.vibe || "casual"}, formality: ${personality.formality || "casual"}, length: ${personality.length || "balanced"}, pep_talk: ${personality.pep_talk === undefined ? false : personality.pep_talk}`,
+        priorities: Array.isArray(prefs.priorities) ? prefs.priorities.join(", ") : "",
+        mcp_dispatch_lines: mcpLines,
+        inner_circle: Array.isArray(engagement.inner_circle_people) ? engagement.inner_circle_people.join(", ") : "",
+        workshop_version: contract.workshop_version || "",
+        cowork_version: contract.cowork_version || "",
+        contract_version: contract.contract_version || "",
+        cadence,
+        cadence_mode: mode,
+        frontmatter_type: (mode === "lens_shift" && cadence === "morning-briefing")
+            ? "cowork-morning-briefing-cold"
+            : (cadenceInContract.frontmatter_type || `cowork-${cadence}`),
+        title_template: cadenceInContract.title_template || `${cadence} - {{$today_weekday}}, {{$today_month_name}} {{$today_day}}, {{$today_year}}`,
+    };
+
+    // 4. Static substitution
+    template = _substituteStaticTokens(template, tokens);
+
+    // 5. Wrap with PRELUDE + DONE
+    const prelude = `PRELUDE — fire-time setup (CRITICAL: do these first)
+
+1. Resolve today's date in ${tokens.timezone}. Capture:
+     today_date     = YYYY-MM-DD (ISO)
+     today_weekday  = e.g. "Tuesday"
+     today_month_name = e.g. "June"
+     today_day      = e.g. "9" (no leading zero)
+     today_year     = e.g. "2026"
+     today_dirpath  = <YYYY>/<MM-Month>/<YYYY-MM-DD>
+     today_ymd_compact = YYYY-MM-DD
+   Use these values everywhere {{$today_*}} appears below.
+
+2. Read frontmatter from spice/cowork/context/vault-config.md via Obsidian MCP. Locate engagement record where id == "${tokens.engagement_id}". Capture engagement.
+
+3. Read spice/cowork/context/user-preferences.md frontmatter. Capture personality + priorities + mcps + learned_weights.
+
+4. Read spice/cowork/context/${tokens.engagement_id}/people-aliases.md (if exists) for inner-circle display-name resolution.`;
+
+    const done = `DONE
+
+N. Emit Obsidian Notice \`cowork:${cadence} complete -- ${tokens.engagement_label} {{$today_date}}\`.
+
+---
+
+Generated against sauce ${tokens.workshop_version} + cowork ${tokens.cowork_version} + contract ${tokens.contract_version}.`;
+
+    const wrapper = `You are running cowork:${cadence} for engagement ${tokens.engagement_id} (${tokens.engagement_label}).
+
+${prelude}
+
+# Orchestrator step-list
+
+${template}
+
+${done}`;
+
+    return wrapper;
+}
+
 module.exports = {
     composeScheduledJobWrappers,
     composeMcpDispatchLines,
     validateContract,
     substituteTemplate,
+    composeFromOrchestratorInstructions,
     // Internal export for test inspection.
     _validateSubstitutionTokens,
+    _loadOrchestratorInstructions,
+    _loadSharedClauses,
+    _resolveConditional,
+    _substituteShared,
+    _substituteStaticTokens,
 };
