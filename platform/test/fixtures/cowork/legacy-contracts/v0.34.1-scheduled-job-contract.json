@@ -1,0 +1,98 @@
+{
+  "_comment": "Canonical Cowork scheduled-job wrapper contract. Substitution tokens use {{$varname}} (engagement/cadence level) + {{shared.<key>}} (shared boilerplate). See Docs/plans/2026-06-05-v0.92.x-scheduled-jobs-sync-design.md §4 for schema; compose-scheduled-job-wrappers-helper.js for substitution semantics + validator modes.",
+  "contract_version": "0.34.1",
+  "cadence_order": [
+    "morning-briefing",
+    "midday-tripwire",
+    "eod-review",
+    "weekly-review",
+    "monthly-review",
+    "lens_shift"
+  ],
+  "substitution_tokens": {
+    "$engagement_id": "Engagement.id from vault-config",
+    "$engagement_label": "Engagement.label from vault-config (falls back to $engagement_id)",
+    "$schedule_hint": "Per-cadence (from cadences[<cadence>].schedule_hint)",
+    "$frontmatter_type": "Per-cadence (from cadences[<cadence>].frontmatter_type)",
+    "$output_path_template": "Per-cadence path with literal <YYYY>/<MM-Month>/<YYYY-MM-DD> placeholders",
+    "$orchestrator_skill_name": "Per-cadence orchestrator skill ID (e.g. cowork:morning-briefing)",
+    "$sub_skill_name": "Per-cadence write sub-skill ID (e.g. cowork:write-run-note-morning-briefing)",
+    "$mcp_dispatch_lines": "Computed kind-by-kind from prefs.mcps; FULLY DYNAMIC — no brand strings",
+    "$cadence_tone_hint": "Per-cadence short tone description",
+    "$voice_notes_excerpt": "Optional engagement-specific voice notes excerpt (<=200 chars) from prefs.personality.notes",
+    "$sauce_version": "Caller-supplied sauce_version arg",
+    "$cowork_version": "Caller-supplied cowork_version arg",
+    "$contract_version": "contract.contract_version"
+  },
+  "shared_clauses": {
+    "dataviewjs_block_pattern": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```",
+    "subskill_read_boilerplate": "When the orchestrator instructs you to use ANY sub-skill (cowork:write-run-note-*, cowork:gather-*, etc.), READ that sub-skill's SKILL.md from .claude/skills/cowork/skills/<name>/ IN FULL and strictly follow ALL sections including any ## Pre-write self-check checklist. Return failed:contract-violation:<field> on any miss.",
+    "connectivity_authority_clause": "trust user-preferences.mcps served_by + connected as runtime authority; vault-config.mcp_map is bootstrap-time audit hint only. Load deferred MCP tools via ToolSearch BEFORE dispatch. Cross-reference resolved served_by names against reachable_namespaces[] before dispatching. NEVER emit \"MCP unavailable\" callouts when prefs + reachable show the served_by is connected."
+  },
+  "preamble_template": "For each of the scheduled tasks below (one per cowork cadence), open the matching task in claude.ai's Cowork UI, replace the prompt body with the fenced block from the matching section, and save. Do not change the schedule.\n\nAfter all sections are pasted, run `/cowork morning-briefing {{$engagement_id}}` in Claude Code as a smoke test.\n\nThis file was generated against sauce {{$sauce_version}} + cowork {{$cowork_version}} + contract {{$contract_version}}. When the sauce version moves past {{$sauce_version}}, re-run `/cowork sync-scheduled-jobs {{$engagement_id}}` to refresh.",
+  "cadences": {
+    "morning-briefing": {
+      "schedule_hint": "08:00 daily",
+      "frontmatter_type": "cowork-morning-briefing",
+      "output_path_template": "spice/cowork/daily/<YYYY>/<MM-Month>/<YYYY-MM-DD>/morning-briefing.md",
+      "orchestrator_skill_name": "cowork:morning-briefing",
+      "sub_skill_name": "cowork:write-run-note-morning-briefing",
+      "cadence_tone_hint": "Forward-looking; tee up the day's focus with calendar + email + chat + project surfaces.",
+      "includes_microscopes": true,
+      "wrapper_template": "Use skill {{$orchestrator_skill_name}} with { engagement_id: \"{{$engagement_id}}\" }.\n\nOUTPUT PATH (NON-NEGOTIABLE): write the atomic note to EXACTLY:\n  {{$output_path_template}}\nDO NOT write to spice/daily/<weekday>-<YYYY-MM-DD>.md.\n\nFRONTMATTER (NON-NEGOTIABLE):\n  type: {{$frontmatter_type}}      (EXACT)\n  engagement_id: {{$engagement_id}}\n  day: \"<YYYY-MM-DD>\"                (ISO — NOT \"Friday\")\n  generator: {{$orchestrator_skill_name}}@1.0.0\n  prompt_source: spice/cowork/prompts/morning-briefing.md\n  title: Morning Briefing - <Weekday>, <Month> <D>, <YYYY>\n  summary: <1-2 sentence headline>\n  created_at: <ISO timestamp with timezone>\nDo NOT include: cadence, date, generated_at.\n\nDATAVIEWJS BLOCK (NON-NEGOTIABLE):\n{{shared.dataviewjs_block_pattern}}\n\nCONNECTIVITY (NON-NEGOTIABLE): {{shared.connectivity_authority_clause}}\n\n{{$mcp_dispatch_lines}}\n\nVOICE (NON-NEGOTIABLE): apply spice/cowork/context/user-preferences.md personality.notes verbatim AND personality.{vibe, formality, length, pep_talk}. {{$voice_notes_excerpt}}\n\nMICROSCOPES (NON-NEGOTIABLE): for each kind in priorities, READ spice/cowork/prompts/per-mcp/<kind>/microscope.md and follow its ## Output shape directives verbatim. Resolve display names via people-aliases.md. Emit **[[Person Basename]]** for every inner-circle hit.\n\nSUB-SKILL (NON-NEGOTIABLE): invoke {{$sub_skill_name}}. v0.91.1 + v0.91.2 + v0.91.3 + v0.92.0 write-guards enforce path + frontmatter + dvjs + body-shape at write time:\n  failed:contract-violation:wrong-output-path\n  failed:contract-violation:wrong-frontmatter:<field>\n  failed:contract-violation:body-missing-navbuttons\n  failed:contract-violation:body-shape:<reason>\non any miss.\n\nTONE: {{$cadence_tone_hint}}\n\n{{shared.subskill_read_boilerplate}}"
+    },
+    "midday-tripwire": {
+      "schedule_hint": "12:30 daily",
+      "frontmatter_type": "cowork-midday-tripwire",
+      "output_path_template": "spice/cowork/daily/<YYYY>/<MM-Month>/<YYYY-MM-DD>/midday-tripwire.md",
+      "orchestrator_skill_name": "cowork:midday-tripwire",
+      "sub_skill_name": "cowork:write-run-note-midday-tripwire",
+      "cadence_tone_hint": "Short + punchy by design; only fires when tripwire_aspects trip — otherwise produces a brief 'all clear' note.",
+      "includes_microscopes": false,
+      "wrapper_template": "Use skill {{$orchestrator_skill_name}} with { engagement_id: \"{{$engagement_id}}\" }.\n\nOUTPUT PATH (NON-NEGOTIABLE): write the atomic note to EXACTLY:\n  {{$output_path_template}}\nDO NOT write to spice/daily/.\n\nFRONTMATTER (NON-NEGOTIABLE):\n  type: {{$frontmatter_type}}       (EXACT)\n  engagement_id: {{$engagement_id}}\n  day: \"<YYYY-MM-DD>\"                (ISO)\n  severity: warn | alert\n  generator: {{$orchestrator_skill_name}}@1.0.0\n  prompt_source: spice/cowork/prompts/midday-tripwire.md\n  title: <composed>\n  summary: <1-2 sentence>\n  created_at: <ISO timestamp with timezone>\n\nDATAVIEWJS BLOCK (NON-NEGOTIABLE):\n{{shared.dataviewjs_block_pattern}}\n\nCONNECTIVITY (NON-NEGOTIABLE): {{shared.connectivity_authority_clause}}\n\n{{$mcp_dispatch_lines}}\n\nVOICE (NON-NEGOTIABLE): apply spice/cowork/context/user-preferences.md personality.notes verbatim AND personality.{vibe, formality, length, pep_talk}. {{$voice_notes_excerpt}}\n\nSUB-SKILL (NON-NEGOTIABLE): invoke {{$sub_skill_name}}. v0.91.1 + v0.91.2 + v0.91.3 + v0.92.0 write-guards enforce path + frontmatter + dvjs + body-shape at write time:\n  failed:contract-violation:wrong-output-path\n  failed:contract-violation:wrong-frontmatter:<field>\n  failed:contract-violation:body-missing-navbuttons\n  failed:contract-violation:body-shape:<reason>\non any miss.\n\nTONE: {{$cadence_tone_hint}}\n\n{{shared.subskill_read_boilerplate}}"
+    },
+    "eod-review": {
+      "schedule_hint": "17:00 daily",
+      "frontmatter_type": "cowork-eod-review",
+      "output_path_template": "spice/cowork/daily/<YYYY>/<MM-Month>/<YYYY-MM-DD>/eod-review.md",
+      "orchestrator_skill_name": "cowork:eod-review",
+      "sub_skill_name": "cowork:write-run-note-eod-review",
+      "cadence_tone_hint": "Retrospective; what shipped, what's carrying forward, what tomorrow looks like. Memory tick at the bottom is mandatory.",
+      "includes_microscopes": true,
+      "wrapper_template": "Use skill {{$orchestrator_skill_name}} with { engagement_id: \"{{$engagement_id}}\" }.\n\nOUTPUT PATH (NON-NEGOTIABLE): write the atomic note to EXACTLY:\n  {{$output_path_template}}\nDO NOT write to spice/daily/<weekday>-<YYYY-MM-DD>.md.\n\nFRONTMATTER (NON-NEGOTIABLE):\n  type: {{$frontmatter_type}}            (EXACT)\n  engagement_id: {{$engagement_id}}\n  day: \"<YYYY-MM-DD>\"                (ISO — NOT \"Friday\")\n  generator: {{$orchestrator_skill_name}}@1.0.0\n  prompt_source: spice/cowork/prompts/eod-review.md\n  title: EOD Review - <Weekday>, <Month> <D>, <YYYY>\n  summary: <1-2 sentence headline>\n  created_at: <ISO timestamp with timezone>\nDo NOT include: cadence, date, generated_at.\n\nDATAVIEWJS BLOCK (NON-NEGOTIABLE):\n{{shared.dataviewjs_block_pattern}}\n\nCONNECTIVITY (NON-NEGOTIABLE): {{shared.connectivity_authority_clause}}\n\n{{$mcp_dispatch_lines}}\n\nVOICE (NON-NEGOTIABLE): apply spice/cowork/context/user-preferences.md personality.notes verbatim AND personality.{vibe, formality, length, pep_talk}. {{$voice_notes_excerpt}}\n\nMICROSCOPES (NON-NEGOTIABLE): for each kind in priorities, READ spice/cowork/prompts/per-mcp/<kind>/microscope.md and follow its ## Output shape directives verbatim. Resolve display names via people-aliases.md. Emit **[[Person Basename]]** for every inner-circle hit.\n\nSUB-SKILL (NON-NEGOTIABLE): invoke {{$sub_skill_name}}. v0.91.1 + v0.91.2 + v0.91.3 + v0.92.0 write-guards enforce path + frontmatter + dvjs + body-shape at write time:\n  failed:contract-violation:wrong-output-path\n  failed:contract-violation:wrong-frontmatter:<field>\n  failed:contract-violation:body-missing-navbuttons\n  failed:contract-violation:body-shape:<reason>\non any miss.\n\nTONE: {{$cadence_tone_hint}}\n\n{{shared.subskill_read_boilerplate}}"
+    },
+    "weekly-review": {
+      "schedule_hint": "17:30 Friday",
+      "frontmatter_type": "cowork-weekly-review",
+      "output_path_template": "spice/cowork/weekly/<YYYY>/<YYYY-Www>/weekly-review.md",
+      "orchestrator_skill_name": "cowork:weekly-review",
+      "sub_skill_name": "cowork:write-run-note-weekly-review",
+      "cadence_tone_hint": "Reflective; patterns across the week, what got dropped, what's queued for next week. Memory tick at the bottom is mandatory.",
+      "includes_microscopes": true,
+      "wrapper_template": "Use skill {{$orchestrator_skill_name}} with { engagement_id: \"{{$engagement_id}}\" }.\n\nOUTPUT PATH (NON-NEGOTIABLE): write the atomic note to EXACTLY:\n  {{$output_path_template}}\nDO NOT write to spice/daily/ or spice/cowork/daily/.\n\nFRONTMATTER (NON-NEGOTIABLE):\n  type: {{$frontmatter_type}}         (EXACT)\n  engagement_id: {{$engagement_id}}\n  week: \"<YYYY-Www>\"                 (e.g. 2026-W23)\n  generator: {{$orchestrator_skill_name}}@1.0.0\n  prompt_source: spice/cowork/prompts/weekly-review.md\n  title: <composed>\n  summary: <1-2 sentence>\n  created_at: <ISO timestamp with timezone>\n\nDATAVIEWJS BLOCK (NON-NEGOTIABLE):\n{{shared.dataviewjs_block_pattern}}\n\nCONNECTIVITY (NON-NEGOTIABLE): {{shared.connectivity_authority_clause}}\n\n{{$mcp_dispatch_lines}}\n\nVOICE (NON-NEGOTIABLE): apply spice/cowork/context/user-preferences.md personality.notes verbatim AND personality.{vibe, formality, length, pep_talk}. {{$voice_notes_excerpt}}\n\nMICROSCOPES (NON-NEGOTIABLE): for each kind in priorities, READ spice/cowork/prompts/per-mcp/<kind>/microscope.md and follow its ## Output shape directives verbatim. Resolve display names via people-aliases.md. Emit **[[Person Basename]]** for every inner-circle hit.\n\nSUB-SKILL (NON-NEGOTIABLE): invoke {{$sub_skill_name}}. v0.91.1 + v0.91.2 + v0.91.3 + v0.92.0 write-guards enforce path + frontmatter + dvjs + body-shape at write time:\n  failed:contract-violation:wrong-output-path\n  failed:contract-violation:wrong-frontmatter:<field>\n  failed:contract-violation:body-missing-navbuttons\n  failed:contract-violation:body-shape:<reason>\non any miss.\n\nTONE: {{$cadence_tone_hint}}\n\n{{shared.subskill_read_boilerplate}}"
+    },
+    "monthly-review": {
+      "schedule_hint": "last weekday 17:30",
+      "frontmatter_type": "cowork-monthly-review",
+      "output_path_template": "spice/cowork/monthly/<YYYY>/<YYYY-MM>/monthly-review.md",
+      "orchestrator_skill_name": "cowork:monthly-review",
+      "sub_skill_name": "cowork:write-run-note-monthly-review",
+      "cadence_tone_hint": "Longest-arc view; month's wins/misses, projects landed, what's on the next-month board.",
+      "includes_microscopes": true,
+      "wrapper_template": "Use skill {{$orchestrator_skill_name}} with { engagement_id: \"{{$engagement_id}}\" }.\n\nOUTPUT PATH (NON-NEGOTIABLE): write the atomic note to EXACTLY:\n  {{$output_path_template}}\nDO NOT write to spice/daily/ or spice/cowork/daily/.\n\nFRONTMATTER (NON-NEGOTIABLE):\n  type: {{$frontmatter_type}}        (EXACT)\n  engagement_id: {{$engagement_id}}\n  month: \"<YYYY-MM>\"                 (e.g. 2026-06)\n  generator: {{$orchestrator_skill_name}}@1.0.0\n  prompt_source: spice/cowork/prompts/monthly-review.md\n  title: <composed>\n  summary: <1-2 sentence>\n  created_at: <ISO timestamp with timezone>\n\nDATAVIEWJS BLOCK (NON-NEGOTIABLE):\n{{shared.dataviewjs_block_pattern}}\n\nCONNECTIVITY (NON-NEGOTIABLE): {{shared.connectivity_authority_clause}}\n\n{{$mcp_dispatch_lines}}\n\nVOICE (NON-NEGOTIABLE): apply spice/cowork/context/user-preferences.md personality.notes verbatim AND personality.{vibe, formality, length, pep_talk}. {{$voice_notes_excerpt}}\n\nMICROSCOPES (NON-NEGOTIABLE): for each kind in priorities, READ spice/cowork/prompts/per-mcp/<kind>/microscope.md and follow its ## Output shape directives verbatim. Resolve display names via people-aliases.md. Emit **[[Person Basename]]** for every inner-circle hit.\n\nSUB-SKILL (NON-NEGOTIABLE): invoke {{$sub_skill_name}}. v0.91.1 + v0.91.2 + v0.91.3 + v0.92.0 write-guards enforce path + frontmatter + dvjs + body-shape at write time:\n  failed:contract-violation:wrong-output-path\n  failed:contract-violation:wrong-frontmatter:<field>\n  failed:contract-violation:body-missing-navbuttons\n  failed:contract-violation:body-shape:<reason>\non any miss.\n\nTONE: {{$cadence_tone_hint}}\n\n{{shared.subskill_read_boilerplate}}"
+    },
+    "lens_shift": {
+      "schedule_hint": "07:00 Saturday",
+      "default_cron": "0 7 * * 6",
+      "frontmatter_type": "cowork-morning-briefing-cold",
+      "output_path_template": "spice/cowork/daily/<YYYY>/<MM-Month>/<YYYY-MM-DD>/morning-briefing-cold-<engagement_id>.md",
+      "orchestrator_skill_name": "cowork:morning-briefing",
+      "sub_skill_name": "cowork:write-run-note-morning-briefing",
+      "cadence_tone_hint": "Cold-perspective companion to warm MB; memory-skip + semantic-skip surfaces what yesterday's frame was hiding.",
+      "includes_microscopes": true,
+      "description": "Weekly cold-perspective morning briefing — memory-skip for empirical anti-echo",
+      "required_mcps_inherit_from": "morning-briefing",
+      "wrapper_template": "Use skill {{$orchestrator_skill_name}} with { engagement_id: \"{{$engagement_id}}\" } INVOKED AS `cowork:morning-briefing --engagement_id {{$engagement_id}} --cadence lens_shift` (the --cadence lens_shift flag triggers the cold-mode pre-flight branch: skip step 3a read-memory AND step 3a.5 gather-semantic-related).\n\nOUTPUT PATH (NON-NEGOTIABLE): write the atomic note to EXACTLY:\n  {{$output_path_template}}\nDO NOT write to spice/daily/<weekday>-<YYYY-MM-DD>.md and DO NOT write to the warm morning-briefing.md slug.\n\nFRONTMATTER (NON-NEGOTIABLE):\n  type: {{$frontmatter_type}}      (EXACT — cowork-morning-briefing-cold, NOT cowork-morning-briefing)\n  engagement_id: {{$engagement_id}}\n  day: \"<YYYY-MM-DD>\"                (ISO — NOT \"Friday\")\n  generator: {{$orchestrator_skill_name}}@1.0.0\n  prompt_source: spice/cowork/prompts/morning-briefing.md\n  title: Morning Briefing (cold) - <Weekday>, <Month> <D>, <YYYY>\n  summary: <1-2 sentence headline>\n  created_at: <ISO timestamp with timezone>\nDo NOT include: cadence, date, generated_at.\n\nDATAVIEWJS BLOCK (NON-NEGOTIABLE):\n{{shared.dataviewjs_block_pattern}}\n\nCONNECTIVITY (NON-NEGOTIABLE): {{shared.connectivity_authority_clause}}\n\n{{$mcp_dispatch_lines}}\n\nVOICE (NON-NEGOTIABLE): apply spice/cowork/context/user-preferences.md personality.notes verbatim AND personality.{vibe, formality, length, pep_talk}. {{$voice_notes_excerpt}}\n\nMICROSCOPES (NON-NEGOTIABLE): for each kind in priorities, READ spice/cowork/prompts/per-mcp/<kind>/microscope.md and follow its ## Output shape directives verbatim. Resolve display names via people-aliases.md. Emit **[[Person Basename]]** for every inner-circle hit.\n\nCOLD-MODE EXCLUSIONS (NON-NEGOTIABLE): the cold-mode branch skips pre-flight step 3a (read-memory) and step 3a.5 (gather-semantic-related). As a downstream natural consequence, the composed body MUST NOT contain a `Yesterday at a glance` callout, MUST NOT contain an anti-echo `excluded_themes` callout (excluded_themes = [] when no memory), and MUST NOT contain a semantic-echoes callout. No separate suppression code-paths are required — these exclusions emerge naturally from the skipped pre-flight steps via existing render-aspect gates.\n\nSUB-SKILL (NON-NEGOTIABLE): invoke {{$sub_skill_name}}. v0.91.1 + v0.91.2 + v0.91.3 + v0.92.0 write-guards enforce path + frontmatter + dvjs + body-shape at write time:\n  failed:contract-violation:wrong-output-path\n  failed:contract-violation:wrong-frontmatter:<field>\n  failed:contract-violation:body-missing-navbuttons\n  failed:contract-violation:body-shape:<reason>\non any miss.\n\nTONE: {{$cadence_tone_hint}}\n\n{{shared.subskill_read_boilerplate}}"
+    }
+  }
+}

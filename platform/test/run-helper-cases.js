@@ -10847,8 +10847,16 @@ type: cowork-microscope
   // ============================================================================
   console.log(`\n--- Case HC-V0930-COMPOSE-SHAPE: sync-scheduled-jobs byte-identical fixtures ---`);
   const _sjHelper = require(path.join(WORKSHOP, "platform/blueprints/cowork/helpers/compose-scheduled-job-wrappers-helper.js"));
+  // v0.97.0 S2.4.1: legacy composeScheduledJobWrappers tests (HC-V0930-*, HC-V0931-*,
+  // HC-V0951-K3-*) operate on the pre-S2.3 contract shape (inline wrapper_template
+  // strings, contract_version "0.34.1"). The live contract at
+  // platform/blueprints/cowork/data/scheduled-job-contract.json has migrated to
+  // wrapper_template_source pointers + 0.35.0 under Rail T. To keep the legacy
+  // compose-path contract assertable without restoring the inline strings, load
+  // the frozen pre-migration snapshot. Rail T tests still exercise the live
+  // contract directly via composeFromOrchestratorInstructions.
   const _sjContract = JSON.parse(fs.readFileSync(
-    path.join(WORKSHOP, "platform/blueprints/cowork/data/scheduled-job-contract.json"), "utf8"));
+    path.join(WORKSHOP, "platform/test/fixtures/cowork/legacy-contracts/v0.34.1-scheduled-job-contract.json"), "utf8"));
   const _sjFixDir = path.join(WORKSHOP, "platform/blueprints/cowork/helpers/fixtures/compose-scheduled-job-wrappers");
 
   function _loadSjFixture(name) {
@@ -11037,7 +11045,8 @@ type: cowork-microscope
   console.log(`\n--- Case HC-V0930-INTEGRATION: accuris-shape roundtrip ---`);
   try {
     const SJ_HELPER = require(path.join(WORKSHOP, "platform/blueprints/cowork/helpers/compose-scheduled-job-wrappers-helper.js"));
-    const SJ_CONTRACT = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/cowork/data/scheduled-job-contract.json"), "utf8"));
+    // v0.97.0 S2.4.1: legacy compose-path tests use the frozen pre-S2.3 contract.
+    const SJ_CONTRACT = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/test/fixtures/cowork/legacy-contracts/v0.34.1-scheduled-job-contract.json"), "utf8"));
     const SJ_FIXTURES = path.join(WORKSHOP, "platform/blueprints/cowork/helpers/fixtures/compose-scheduled-job-wrappers");
     const inputRaw = JSON.parse(fs.readFileSync(path.join(SJ_FIXTURES, "case-accuris-shape/input.json"), "utf8"));
     const input = Object.assign({}, inputRaw, { contract: inputRaw.contract || SJ_CONTRACT });
@@ -11137,7 +11146,8 @@ type: cowork-microscope
   console.log(`\n--- Case HC-V0931-NOTES: voice-notes fallback chain notes → vibe_notes → voice_notes → pep_talk_style ---`);
   try {
     const SJ = require(path.join(WORKSHOP, "platform/blueprints/cowork/helpers/compose-scheduled-job-wrappers-helper.js"));
-    const _contract = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/cowork/data/scheduled-job-contract.json"), "utf8"));
+    // v0.97.0 S2.4.1: legacy compose-path tests use the frozen pre-S2.3 contract.
+    const _contract = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/test/fixtures/cowork/legacy-contracts/v0.34.1-scheduled-job-contract.json"), "utf8"));
     const baseInput = {
       engagement: { id: "test", label: "Test", type: "personal", timezone: "America/Denver" },
       prefs: { mcps: { chat: { kind: "chat", served_by: "X", connected: true } }, personality: {} },
@@ -12068,8 +12078,12 @@ type: cowork-microscope
 
   console.log(`\n--- Case HC-V0951-K3-F: scheduled-job-contract.json contains lens_shift cadence entry ---`);
   try {
+    // v0.97.0 S2.4.1: read from the frozen legacy contract fixture. The live
+    // contract has migrated to wrapper_template_source pointers under Rail T;
+    // the legacy compose path's lens_shift cadence with inline wrapper_template
+    // is preserved in the v0.34.1 snapshot fixture.
     const contract = JSON.parse(fs.readFileSync(
-      path.join(COWORK_BP_DIR, "data/scheduled-job-contract.json"),
+      path.join(WORKSHOP, "platform/test/fixtures/cowork/legacy-contracts/v0.34.1-scheduled-job-contract.json"),
       "utf8"
     ));
     // Per plan S3.2 step 2 + design § 5.6: scheduled-job-contract.json gains a
@@ -12092,8 +12106,9 @@ type: cowork-microscope
 
   console.log(`\n--- Case HC-V0951-K3-G: scheduled-job-contract.json contract_version bumped 0.32.0 -> 0.33.0 ---`);
   try {
+    // v0.97.0 S2.4.1: pinned to the frozen pre-S2.3 contract snapshot.
     const contract = JSON.parse(fs.readFileSync(
-      path.join(COWORK_BP_DIR, "data/scheduled-job-contract.json"),
+      path.join(WORKSHOP, "platform/test/fixtures/cowork/legacy-contracts/v0.34.1-scheduled-job-contract.json"),
       "utf8"
     ));
     // Per plan S3.2 step 2 + landmine #10/#16 lockstep: adding a new cadence
@@ -12110,8 +12125,9 @@ type: cowork-microscope
     const wrapperHelperPath = path.join(COWORK_BP_DIR, "helpers/compose-scheduled-job-wrappers-helper.js");
     delete require.cache[require.resolve(wrapperHelperPath)];
     const WH = require(wrapperHelperPath);
+    // v0.97.0 S2.4.1: legacy compose-path tests use the frozen pre-S2.3 contract.
     const contract = JSON.parse(fs.readFileSync(
-      path.join(COWORK_BP_DIR, "data/scheduled-job-contract.json"),
+      path.join(WORKSHOP, "platform/test/fixtures/cowork/legacy-contracts/v0.34.1-scheduled-job-contract.json"),
       "utf8"
     ));
     const input = JSON.parse(fs.readFileSync(
@@ -12145,8 +12161,9 @@ type: cowork-microscope
     const wrapperHelperPath = path.join(COWORK_BP_DIR, "helpers/compose-scheduled-job-wrappers-helper.js");
     delete require.cache[require.resolve(wrapperHelperPath)];
     const WH = require(wrapperHelperPath);
+    // v0.97.0 S2.4.1: legacy compose-path tests use the frozen pre-S2.3 contract.
     const contract = JSON.parse(fs.readFileSync(
-      path.join(COWORK_BP_DIR, "data/scheduled-job-contract.json"),
+      path.join(WORKSHOP, "platform/test/fixtures/cowork/legacy-contracts/v0.34.1-scheduled-job-contract.json"),
       "utf8"
     ));
     const input = JSON.parse(fs.readFileSync(

@@ -40,8 +40,13 @@ const REQUIRED_CADENCE_FIELDS = [
     "orchestrator_skill_name",
     "sub_skill_name",
     "cadence_tone_hint",
-    "wrapper_template",
 ];
+// v0.97.0 S2.4.1: wrapper field is shape-tolerant. Cadence is valid if it has
+// EITHER `wrapper_template` (legacy v0.34.1 and earlier — inline ~50-line UI
+// wrapper string) OR `wrapper_template_source` (v0.97.0+ — relative path to a
+// data/orchestrator-instructions/<cadence>.md file). The error string keeps
+// "wrapper_template" so legacy asserts that grep on the error token still match.
+const WRAPPER_FIELD_ALTERNATIVES = ["wrapper_template", "wrapper_template_source"];
 
 const TOKEN_RE = /\{\{[^}]*\}\}/g;
 const VALID_TOKEN_RE = /^\{\{(\$[a-z_]+|shared\.[a-z_]+)\}\}$/;
@@ -79,6 +84,14 @@ function validateContract(contract) {
             if (contract.cadences[cad][f] === undefined) {
                 return { status: `failed:contract:invalid-shape:cadence-${cad}-missing-${f}` };
             }
+        }
+        // Shape-tolerant wrapper field check: accept either legacy
+        // `wrapper_template` OR v0.97.0+ `wrapper_template_source`.
+        const hasWrapper = WRAPPER_FIELD_ALTERNATIVES.some(
+            (alt) => contract.cadences[cad][alt] !== undefined,
+        );
+        if (!hasWrapper) {
+            return { status: `failed:contract:invalid-shape:cadence-${cad}-missing-wrapper_template` };
         }
     }
     return { status: "ok" };
