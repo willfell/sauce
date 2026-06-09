@@ -15009,6 +15009,233 @@ type: cowork-microscope
     assertTrue("HC-V0970-T-14: composed output contains rating callout template inline", false, e && e.message);
   }
 
+  // ==========================================================================
+  // HC-V0970-A-1..12 — Rail A (auto-sync via update_scheduled_task)
+  // v0.97.0 S3.1: RED tests for sync-scheduled-jobs SKILL.md rewrite + the new
+  // cowork-sync-mcp-helper.js authoring. Until S3.2 lands these MUST fail.
+  // ==========================================================================
+
+  const _V0970_A_SKILL_PATH = path.join(
+    WORKSHOP,
+    "platform/blueprints/cowork/skills/orchestrators/sync-scheduled-jobs/SKILL.md"
+  );
+  const _V0970_A_HELPER_PATH = path.join(
+    WORKSHOP,
+    "platform/blueprints/cowork/helpers/cowork-sync-mcp-helper.js"
+  );
+  const _V0970_A_MANIFEST_PATH = path.join(
+    WORKSHOP,
+    "platform/blueprints/cowork/manifest.json"
+  );
+  function _v0970AReadSkill() {
+    return fs.readFileSync(_V0970_A_SKILL_PATH, "utf8");
+  }
+  function _v0970ALoadHelper() {
+    delete require.cache[require.resolve(_V0970_A_HELPER_PATH)];
+    return require(_V0970_A_HELPER_PATH);
+  }
+
+  console.log(`\n--- Case HC-V0970-A-1: sync-scheduled-jobs SKILL.md frontmatter declares required_tools ---`);
+  try {
+    const body = _v0970AReadSkill();
+    const fmMatch = body.match(/^---\n([\s\S]*?)\n---/);
+    const fm = fmMatch ? fmMatch[1] : "";
+    const hasList = /required_tools\s*:/.test(fm);
+    const hasListSched = /list_scheduled_tasks/.test(fm);
+    const hasUpdateSched = /update_scheduled_task/.test(fm);
+    const hasCreateSched = /create_scheduled_task/.test(fm);
+    assertTrue(
+      "HC-V0970-A-1: SKILL.md frontmatter declares required_tools: [list_scheduled_tasks, update_scheduled_task, create_scheduled_task]",
+      hasList && hasListSched && hasUpdateSched && hasCreateSched,
+      `hasList=${hasList} hasListSched=${hasListSched} hasUpdateSched=${hasUpdateSched} hasCreateSched=${hasCreateSched}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0970-A-1: SKILL.md frontmatter declares required_tools", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0970-A-2: SKILL.md has ## Steps section with >= 8 numbered steps ---`);
+  try {
+    const body = _v0970AReadSkill();
+    const stepsIdx = body.indexOf("## Steps");
+    let stepCount = 0;
+    if (stepsIdx >= 0) {
+      const tail = body.slice(stepsIdx);
+      // Count numbered step headings like "### 1. ", "### 2. ", etc.
+      const stepRx = /\n###\s+\d+\.\s+/g;
+      const matches = tail.match(stepRx);
+      stepCount = matches ? matches.length : 0;
+    }
+    assertTrue(
+      "HC-V0970-A-2: ## Steps section has at least 8 numbered steps (### 1. ... ### N.)",
+      stepsIdx >= 0 && stepCount >= 8,
+      `stepsIdx=${stepsIdx} stepCount=${stepCount}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0970-A-2: ## Steps section has at least 8 numbered steps", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0970-A-3: SKILL.md has Substitution Protocol section enumerating tokens ---`);
+  try {
+    const body = _v0970AReadSkill();
+    const hasSection = /Substitution Protocol/.test(body);
+    const hasEngagementToken = /\{\{\$engagement_id\}\}/.test(body);
+    const hasSharedToken = /\{\{shared\./.test(body);
+    const hasFireTimeToken = /\{\{\$today_date\}\}/.test(body);
+    assertTrue(
+      "HC-V0970-A-3: Substitution Protocol section enumerates tokens (engagement_id, shared.<key>, today_date)",
+      hasSection && hasEngagementToken && hasSharedToken && hasFireTimeToken,
+      `hasSection=${hasSection} engagement=${hasEngagementToken} shared=${hasSharedToken} fireTime=${hasFireTimeToken}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0970-A-3: Substitution Protocol section enumerates tokens", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0970-A-4: SKILL.md documents schedule preservation invariant ---`);
+  try {
+    const body = _v0970AReadSkill();
+    const hasInvariantPhrase = /cron field NEVER set/i.test(body) || /schedule preservation invariant/i.test(body);
+    assertTrue(
+      "HC-V0970-A-4: SKILL.md documents `cron field NEVER set` or schedule preservation invariant",
+      hasInvariantPhrase,
+      `hasInvariantPhrase=${hasInvariantPhrase}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0970-A-4: SKILL.md documents schedule preservation invariant", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0970-A-5: SKILL.md documents --dry-run flag ---`);
+  try {
+    const body = _v0970AReadSkill();
+    const hasDryRun = /--dry-run/.test(body) && /dry_run/.test(body);
+    assertTrue(
+      "HC-V0970-A-5: SKILL.md documents --dry-run flag (both `--dry-run` and `dry_run` input)",
+      hasDryRun,
+      `hasDryRun=${hasDryRun}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0970-A-5: SKILL.md documents --dry-run flag", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0970-A-6: SKILL.md documents --engagement <id> filter ---`);
+  try {
+    const body = _v0970AReadSkill();
+    const hasEngagementFlag = /--engagement/.test(body) && /engagement_id/.test(body);
+    assertTrue(
+      "HC-V0970-A-6: SKILL.md documents --engagement <id> filter (both `--engagement` and `engagement_id` input)",
+      hasEngagementFlag,
+      `hasEngagementFlag=${hasEngagementFlag}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0970-A-6: SKILL.md documents --engagement <id> filter", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0970-A-7: SKILL.md aborts cleanly when scheduled-task MCP tools missing ---`);
+  try {
+    const body = _v0970AReadSkill();
+    const hasAbortMessage = /claude\.ai Cowork UI/i.test(body);
+    assertTrue(
+      "HC-V0970-A-7: SKILL.md documents abort-cleanly-when-MCP-missing message containing `claude.ai Cowork UI`",
+      hasAbortMessage,
+      `hasAbortMessage=${hasAbortMessage}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0970-A-7: SKILL.md documents abort-cleanly-when-MCP-missing", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0970-A-8: cowork-sync-mcp-helper.js exports diffWrappersAgainstLive ---`);
+  try {
+    const helper = _v0970ALoadHelper();
+    assertTrue(
+      "HC-V0970-A-8: helpers/cowork-sync-mcp-helper.js exports diffWrappersAgainstLive function",
+      helper && typeof helper.diffWrappersAgainstLive === "function",
+      `typeof=${helper ? typeof helper.diffWrappersAgainstLive : "no helper"}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0970-A-8: helpers/cowork-sync-mcp-helper.js exports diffWrappersAgainstLive", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0970-A-9: diffWrappersAgainstLive returns { changed, new, orphan, noop } ---`);
+  try {
+    const helper = _v0970ALoadHelper();
+    const composed = [{ task_name: "cowork-morning-briefing-test", prompt: "X" }];
+    const live = [{ task_id: "a1", name: "cowork-morning-briefing-test", prompt: "X", cron: "30 6 * * *", enabled: true }];
+    const result = helper.diffWrappersAgainstLive(composed, live);
+    const hasShape =
+      result &&
+      Array.isArray(result.changed) &&
+      Array.isArray(result.new) &&
+      Array.isArray(result.orphan) &&
+      Array.isArray(result.noop);
+    assertTrue(
+      "HC-V0970-A-9: diffWrappersAgainstLive returns object with arrays changed/new/orphan/noop",
+      hasShape,
+      `result=${JSON.stringify(result)}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0970-A-9: diffWrappersAgainstLive returns { changed, new, orphan, noop }", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0970-A-10: diffWrappersAgainstLive classifies byte-different prompt as changed ---`);
+  try {
+    const helper = _v0970ALoadHelper();
+    const composed = [{ task_name: "cowork-morning-briefing-test", prompt: "new prompt body" }];
+    const live = [{ task_id: "abc", name: "cowork-morning-briefing-test", prompt: "old prompt body", cron: "30 6 * * *", enabled: true }];
+    const result = helper.diffWrappersAgainstLive(composed, live);
+    assertTrue(
+      "HC-V0970-A-10: byte-different prompt -> changed (and not noop)",
+      result.changed.length === 1 && result.noop.length === 0,
+      `expected changed:1 noop:0 got changed:${result.changed.length} noop:${result.noop.length}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0970-A-10: byte-different prompt classified as changed", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0970-A-11: diffWrappersAgainstLive classifies cowork-*-* live without composed as orphan ---`);
+  try {
+    const helper = _v0970ALoadHelper();
+    const composed = [{ task_name: "cowork-morning-briefing-test", prompt: "X" }];
+    const live = [
+      { task_id: "a", name: "cowork-morning-briefing-test", prompt: "X", cron: "30 6 * * *", enabled: true },
+      { task_id: "b", name: "cowork-old-cadence-test", prompt: "Y", cron: "0 0 * * *", enabled: true },
+    ];
+    const result = helper.diffWrappersAgainstLive(composed, live);
+    assertTrue(
+      "HC-V0970-A-11: live cowork-*-* task without composed counterpart -> orphan (warn-not-delete posture)",
+      result.orphan.length === 1 && result.orphan[0].task_name === "cowork-old-cadence-test",
+      `expected orphan:[cowork-old-cadence-test]; got ${JSON.stringify(result.orphan)}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0970-A-11: cowork-*-* live without composed -> orphan", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0970-A-12: cowork-sync-mcp-helper registered in cowork manifest.json ---`);
+  try {
+    // RED: helper must exist AND be wired into manifest.json files[] so install
+    // ships it. The audit file shape (frontmatter w/ schema_version, sauce_version,
+    // cowork_version, contract_version, last_synced_at) is documented in SKILL.md
+    // Step 7 and verified via the helper-registration check here.
+    const helperExists = fs.existsSync(_V0970_A_HELPER_PATH);
+    const manifest = _readJson(_V0970_A_MANIFEST_PATH);
+    const filesArr = Array.isArray(manifest.files) ? manifest.files : [];
+    const wired = filesArr.some(
+      (f) => f && typeof f.source === "string" && f.source.indexOf("helpers/cowork-sync-mcp-helper.js") >= 0
+    );
+    // Also validate SKILL.md audit-file frontmatter shape is documented.
+    const skillBody = _v0970AReadSkill();
+    const hasSchemaVersion = /schema_version/.test(skillBody);
+    const hasSauceVersion = /sauce_version/.test(skillBody);
+    const hasCoworkVersion = /cowork_version/.test(skillBody);
+    const hasContractVersion = /contract_version/.test(skillBody);
+    const hasLastSyncedAt = /last_synced_at/.test(skillBody);
+    assertTrue(
+      "HC-V0970-A-12: cowork-sync-mcp-helper.js exists + registered in manifest.json AND SKILL.md documents audit-file frontmatter (schema_version, sauce_version, cowork_version, contract_version, last_synced_at)",
+      helperExists && wired && hasSchemaVersion && hasSauceVersion && hasCoworkVersion && hasContractVersion && hasLastSyncedAt,
+      `helperExists=${helperExists} wired=${wired} schema=${hasSchemaVersion} sauce=${hasSauceVersion} cowork=${hasCoworkVersion} contract=${hasContractVersion} lastSynced=${hasLastSyncedAt}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0970-A-12: helper registered + audit-file frontmatter shape documented", false, e && e.message);
+  }
+
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
   if (fail > 0) {
