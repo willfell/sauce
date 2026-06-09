@@ -370,7 +370,15 @@ class SpaceDailyDashboard {
           // v0.12.0 (sauce v0.72.0): kanban group surfaces cards moved today via
           // status_changed_at OR created today via created_at. Activity-feed
           // v0.6.0 tsKeys opt applies the OR semantics.
-          tsKeys: ["created_at", "status_changed_at"],
+          // v0.13.6 (sauce v0.96.2): prepend `day` so cowork atomic notes are
+          // bucketed by their semantic `day:` frontmatter field (canonical
+          // day-of-action) before falling back to wall-clock created_at /
+          // status_changed_at. Closes the timestamp-drift class where EOD cron
+          // firing past midnight (4am next morning) stamped created_at on the
+          // wrong calendar day. Activity-feed iterates tsKeys in order and
+          // OR-passes on the first in-window match, so `day` first gives the
+          // semantic value precedence without breaking kanban OR semantics.
+          tsKeys: ["day", "created_at", "status_changed_at"],
           // v0.11.0 (sauce v0.71.0) — surface cowork-* atomic note summary
           // as the row subtitle for cowork-* pages. NOTE: activity-feed v0.5.0
           // semantics give metaBuilder precedence over getSubtitle (only one
@@ -423,16 +431,41 @@ class SpaceDailyDashboard {
     // and we do NOT fall through to mtime (which is unreliable on Obsidian
     // Mobile after sync). mtime is consulted only for legacy pages without
     // a created_at field.
+    // v0.13.6 (sauce v0.96.2): consult `day` (semantic YYYY-MM-DD frontmatter,
+    // canonical day-of-action) FIRST. When `day` is present it is fully
+    // authoritative — we do NOT also OR-check created_at / status_changed_at,
+    // because doing so would double-surface a page on both its canonical day
+    // (per `day:`) AND on the wall-clock day that created_at happens to land on
+    // (e.g. EOD cron firing 4am next morning). Only when `day` is absent do we
+    // fall back to created_at → status_changed_at OR-semantics (matching the
+    // pre-v0.13.6 behavior + activity-feed kanban OR semantics). mtime is the
+    // final fallback for legacy pages with NONE of these fields.
     const inWindow = (p) => {
       if (!p) return false;
-      const tsRaw = p.created_at;
-      if (tsRaw) {
-        const ts = String(tsRaw);
+      // Authoritative path: `day:` frontmatter (semantic day-of-action).
+      if (p.day) {
+        const ts = String(p.day);
         if (/^\d{4}-\d{2}-\d{2}$/.test(ts)) {
           return ts >= startIso.slice(0, 10) && ts <= endIso.slice(0, 10);
         }
         return ts >= startIso && ts <= endIso;
       }
+      // Legacy path: OR-check created_at + status_changed_at (matches activity-feed
+      // tsKeys semantics + pre-v0.13.6 dashboard behavior).
+      const FALLBACK_KEYS = ["created_at", "status_changed_at"];
+      let anyFieldPresent = false;
+      for (const key of FALLBACK_KEYS) {
+        const tsRaw = p[key];
+        if (!tsRaw) continue;
+        anyFieldPresent = true;
+        const ts = String(tsRaw);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(ts)) {
+          if (ts >= startIso.slice(0, 10) && ts <= endIso.slice(0, 10)) return true;
+        } else {
+          if (ts >= startIso && ts <= endIso) return true;
+        }
+      }
+      if (anyFieldPresent) return false; // authoritative — at least one field present
       if (p.file && p.file.mtime) {
         const mIso = (typeof p.file.mtime.toISO === "function") ? p.file.mtime.toISO() : String(p.file.mtime);
         if (mIso >= startIso && mIso <= endIso) return true;

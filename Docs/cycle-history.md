@@ -4,6 +4,26 @@ This file archives the per-cycle status snapshots that previously lived in `CLAU
 
 ---
 
+## v0.96.2 — daily-dashboard-tskeys-hotfix (2026-06-09 close)
+
+**Codename:** `daily-dashboard-tskeys-hotfix`. Workshop 0.96.1 → 0.96.2; daily 0.13.5 → 0.13.6. Cowork blueprint + contract UNCHANGED at 0.34.1 (landmine #20 only pins scheduled-job-contract to cowork, not daily).
+
+**Fix shipped:**
+- `SpaceDailyDashboard`'s `tsKeys` arg passed to `ActivityFeed.render` now includes `"day"` as the FIRST element, so cowork atomic notes are bucketed by their semantic `day:` frontmatter field (canonical day-of-action) before falling back to wall-clock `created_at` / `status_changed_at` timestamps.
+- Local `inWindow` predicate inside `_getActivityCount` rewritten to consult `day` → `created_at` → `status_changed_at` in order. Key semantic decision: when `day` is PRESENT, it is fully authoritative — no OR-fallback to `created_at` / `status_changed_at`. Without this, a page would double-surface on both its canonical day (per `day:`) AND on the wall-clock day that `created_at` landed on. The OR-fallback path remains for pages with no `day:` set (legacy + non-cowork blueprints).
+
+**Closes:** timestamp-drift class affecting any cowork cron whose `created_at` rolls past midnight. Diagnosed via Workflow run wzr3g3uad — Monday 2026-06-08 EOD note stamped `created_at: 2026-06-09T04:10:...` (cron fired 4am Tuesday) dropped from Monday daily-note Activity panel.
+
+**HC added:** 3 sub-asserts (HC-V0962-DASH-1..3) — tsKeys ordering (DASH-1), `day:` YYYY-MM-DD parse on Monday window (DASH-2), no-double-surface invariant when `day` takes precedence over a later `created_at` (DASH-3).
+
+**Open carry-forward to v0.97:** the activity-feed mechanism's own `inWindow` predicate (`platform/mechanisms/activity-feed/activity-feed.js` line ~349) still uses pure OR-semantics across all tsKeys — at render time it may still double-surface a page on both Monday and Tuesday in the cron-overrun scenario, because the dashboard pre-count fix only gates the `hasContent` boolean. Authoritative-day semantics in activity-feed itself is a follow-up. Two other findings from the same Workflow run (sidecars-not-written + skill-not-loaded) also remain open for v0.97.
+
+**Verification:** Tomorrow (2026-06-09), the Monday EOD note (after the inline created_at hotfix on the consumer vault) appears on Monday's daily; will NOT double-surface on Tuesday's daily because `day:` takes precedence in the dashboard pre-count.
+
+**Harness:** helper-cases 2150 → 2153 (3 new sub-asserts, GREEN). cowork-smoke 952/0; claude-surface 213/0; integration-smoke 36/0; activity-feed 120/0; bootstrap 85/0.
+
+---
+
 ## v0.96.1 — cowork-rethought-1-patch (2026-06-08 close)
 
 **Codename:** `cowork-rethought-1-patch`. Workshop 0.96.0 → 0.96.1; cowork 0.34.0 → 0.34.1; contract 0.34.0 → 0.34.1.
