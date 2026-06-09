@@ -208,6 +208,22 @@ On any miss: return `failed:contract-violation:<field>` + emit Notice `cowork:sy
 
    e. Capture the sub-skill's return value as `learn_result` for the Done section diagnostics.
 
+8. **v0.96.1 Rail H — post-write check-heartbeat (NEW).** AFTER Step 7 AND BEFORE `## Verify`, invoke sub-skill `cowork:check-heartbeat`:
+
+   ```json
+   {
+     "engagement_id": "<from vault-config.md>",
+     "today":         "<context.today from date-context>",
+     "vault_root":    "<absolute vault root from check-vault-routing>"
+   }
+   ```
+
+   READ `.claude/skills/cowork/skills/check-heartbeat/SKILL.md` in full and follow its `## Steps` section. Capture the sub-skill's return value as `heartbeat_result`. The sub-skill is pure data — no MCP / LLM calls — and walks the last 30 days of `.cowork.json` sidecars under `<vault_root>/spice/cowork/daily/` to compute per-cadence last-fire timestamps; flags cadences that missed their freshness window against `data/cadence-freshness-windows.json`.
+
+   **Non-fatal contract.** ANY `status` starting with `"failed:"` from `cowork:check-heartbeat` MUST be treated as non-fatal: emit Notice `cowork:synthesize-day check-heartbeat step skipped -- <heartbeat_result.status>` and continue to `## Verify`. The heartbeat check is purely observational — missing it for one day is harmless and does NOT abort synthesize-day.
+
+   When `heartbeat_result.missed_count > 0`, the sub-skill has already appended a `> [!warning]+ Cron heartbeat anomaly` callout to today's `memory.md` directly. No further action by this orchestrator — the warning surfaces tomorrow when MB reads memory.md for the "Yesterday at a glance" callout.
+
 ## Verify
 
 After a successful Write:

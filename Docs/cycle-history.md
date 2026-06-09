@@ -4,6 +4,24 @@ This file archives the per-cycle status snapshots that previously lived in `CLAU
 
 ---
 
+## v0.96.1 — cowork-rethought-1-patch (2026-06-08 close)
+
+**Codename:** `cowork-rethought-1-patch`. Workshop 0.96.0 → 0.96.1; cowork 0.34.0 → 0.34.1; contract 0.34.0 → 0.34.1.
+
+**Rails shipped:**
+- Rail M — `learned_weights:` nested by engagement_id; auto-migrates legacy v0.96.0 single-engagement shape on first post-patch synthesize-day fire. Schema_version 1.0.0 → 1.1.0. composeFinalPreferences reads nested shape via `_normalizeLearnedWeights`; learn-from-checks engagement-mismatch guard retired (no longer applicable to nested shape).
+- Rail H — NEW sub-skill `cowork:check-heartbeat` walks `.cowork.json` sidecars in synthesize-day post-step; emits a `> [!warning]+ Cron heartbeat anomaly` callout to memory.md when any enabled cadence misses its freshness window. Silent on green. First-fire mitigation message for fresh-vault scenarios.
+
+**Cron prompts:** unchanged. No `/cowork sync-scheduled-jobs` re-run needed by consumers.
+
+**New artifacts:** 1 helper (check-heartbeat-helper.js), 1 sub-skill (check-heartbeat/SKILL.md), 2 data files (cadence-freshness-windows.json, learned_weights-skeleton.json).
+
+**HC sub-asserts added:** 15 (9 Rail M + 6 Rail H). Total cycle test gain: helper-cases 2135 → ~2150, smoke 949 → ~952, surface 212 → ~213.
+
+**Parked for cowork-rethought-2 or later:** same as v0.96.0 — W2 (full structured-output API rewrite), memory salience/decay, per-item L2R + Thompson sampling, cron heartbeat WRITE surface (this patch is read-only via sidecars), per-skill SemVer + versioning CI, the v0.95.1-migrator.
+
+---
+
 ## v0.96.0 — cowork-rethought-1 (2026-06-08 close)
 
 **Codename:** `cowork-rethought-1`. Workshop 0.95.1 → 0.96.0; cowork 0.33.0 → 0.34.0; contract 0.33.0 → 0.34.0.

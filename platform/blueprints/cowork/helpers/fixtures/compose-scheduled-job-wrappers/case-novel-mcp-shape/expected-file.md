@@ -3,28 +3,28 @@ type: cowork-scheduled-job-wrappers
 engagement_id: consulting-client-x
 sauce_version: 0.93.2
 cowork_version: 0.32.0
-contract_version: 0.34.0
+contract_version: 0.34.1
 generated_at: 2026-06-05T14:38:55-06:00
 generated_by: cowork:sync-scheduled-jobs@1.0.0
-warnings: [contract_version_mismatch:0.34.0:0.32.0]
+warnings: [contract_version_mismatch:0.34.1:0.32.0]
 ---
 
 # Cowork scheduled-job wrappers — Consulting Client X
 
 > [!warning]+ Warnings from generation
-> contract_version_mismatch:0.34.0:0.32.0
+> contract_version_mismatch:0.34.1:0.32.0
 
 > [!info]- How to use
 > For each of the scheduled tasks below (one per cowork cadence), open the matching task in claude.ai's Cowork UI, replace the prompt body with the fenced block from the matching section, and save. Do not change the schedule.
 >
 > After all sections are pasted, run `/cowork morning-briefing consulting-client-x` in Claude Code as a smoke test.
 >
-> This file was generated against sauce 0.93.2 + cowork 0.32.0 + contract 0.34.0. When the sauce version moves past 0.93.2, re-run `/cowork sync-scheduled-jobs consulting-client-x` to refresh.
+> This file was generated against sauce 0.93.2 + cowork 0.32.0 + contract 0.34.1. When the sauce version moves past 0.93.2, re-run `/cowork sync-scheduled-jobs consulting-client-x` to refresh.
 
 ---
 
 ## 1 — cowork-morning-briefing-consulting-client-x (08:00 daily)
-<!-- section_contract_version: 0.34.0 -->
+<!-- section_contract_version: 0.34.1 -->
 
 ````
 Use skill cowork:morning-briefing with { engagement_id: "consulting-client-x" }.
@@ -72,7 +72,7 @@ When the orchestrator instructs you to use ANY sub-skill (cowork:write-run-note-
 ---
 
 ## 2 — cowork-midday-tripwire-consulting-client-x (12:30 daily)
-<!-- section_contract_version: 0.34.0 -->
+<!-- section_contract_version: 0.34.1 -->
 
 ````
 Use skill cowork:midday-tripwire with { engagement_id: "consulting-client-x" }.
@@ -118,7 +118,7 @@ When the orchestrator instructs you to use ANY sub-skill (cowork:write-run-note-
 ---
 
 ## 3 — cowork-eod-review-consulting-client-x (17:00 daily)
-<!-- section_contract_version: 0.34.0 -->
+<!-- section_contract_version: 0.34.1 -->
 
 ````
 Use skill cowork:eod-review with { engagement_id: "consulting-client-x" }.
@@ -166,7 +166,7 @@ When the orchestrator instructs you to use ANY sub-skill (cowork:write-run-note-
 ---
 
 ## 4 — cowork-weekly-review-consulting-client-x (17:30 Friday)
-<!-- section_contract_version: 0.34.0 -->
+<!-- section_contract_version: 0.34.1 -->
 
 ````
 Use skill cowork:weekly-review with { engagement_id: "consulting-client-x" }.
@@ -213,7 +213,7 @@ When the orchestrator instructs you to use ANY sub-skill (cowork:write-run-note-
 ---
 
 ## 5 — cowork-monthly-review-consulting-client-x (last weekday 17:30)
-<!-- section_contract_version: 0.34.0 -->
+<!-- section_contract_version: 0.34.1 -->
 
 ````
 Use skill cowork:monthly-review with { engagement_id: "consulting-client-x" }.

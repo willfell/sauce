@@ -845,8 +845,8 @@ function assertCoworkV068Shape() {
     "V068-MANIFEST-FILES: manifest files[] declares helpers/cowork-latest-runs.js");
 
   // V0750-VERSION: cowork blueprint version bumped to 0.31.0 (was 0.30.0 in v0.92.0; MINOR bump for v0.93.0 — adds cowork:sync-scheduled-jobs orchestrator + compose-scheduled-job-wrappers-helper.js pure helper + scheduled-job-contract.json canonical data file + 12 byte-identical/validator-failure fixtures + COMPOSE-SHAPE / VALIDATOR / SUB-HELPER / CONTRACT HC groups).
-  assertTrue(manifest.version === "0.34.0",
-    `V0750-VERSION: cowork manifest.version === "0.34.0" (got ${JSON.stringify(manifest.version)})`);
+  assertTrue(manifest.version === "0.34.1",
+    `V0750-VERSION: cowork manifest.version === "0.34.1" (got ${JSON.stringify(manifest.version)})`);
 }
 
 // ---------------------------------------------------------------------------

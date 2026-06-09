@@ -1,0 +1,14 @@
+{
+  "schema_version": "1.0.0",
+  "windows_hours": {
+    "morning-briefing": 36,
+    "midday-tripwire": 36,
+    "eod-review": 36,
+    "capture-tick": 36,
+    "finance": 192,
+    "weekly-review": 192,
+    "synthesize-week": 192,
+    "monthly-review": 840,
+    "lens-shift": 192
+  }
+}
