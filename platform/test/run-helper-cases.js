@@ -30,6 +30,33 @@ const WORKSHOP = path.resolve(__dirname, "../..");
 const RUN_INSTALL = path.join(WORKSHOP, "platform/test/run-install.js");
 const CANONICAL_INSTALLER = path.join(WORKSHOP, "platform/install.js");
 
+// v0.97.0 C3: legacy SKILL.md content was migrated to
+// content/data/orchestrator-instructions/<cadence>.md. Tests that historically
+// read the cadence SKILL.md to assert content presence now read this joined
+// corpus (SKILL.md shim banner + orchestrator-instructions canonical body).
+// Either source satisfies legacy assertions. Adds plan-dispatch SKILL.md
+// content for the cadence orchestrators (some legacy v0.95.0 cohesion-sweep
+// asserts already join plan-dispatch into the corpus — the helper makes this
+// uniform across cases).
+const _V0970_CADENCES = new Set(["morning-briefing", "midday-tripwire", "eod-review", "weekly-review", "monthly-review"]);
+function readCadenceOrchestrator(skillPath) {
+  // Accept either an absolute path or a relative-to-WORKSHOP path.
+  const abs = path.isAbsolute(skillPath) ? skillPath : path.resolve(skillPath);
+  let body = "";
+  try { body = fs.readFileSync(abs, "utf8"); } catch (_e) { body = ""; }
+  // Detect the cadence from the path. Only the 5 cadence-orchestrator SKILL.mds
+  // get the joined-corpus treatment; other orchestrators (synthesize-day,
+  // bootstrap-vault, etc.) read SKILL.md directly.
+  const m = abs.match(/\/skills\/orchestrators\/([^/]+)\/SKILL\.md$/);
+  if (m && _V0970_CADENCES.has(m[1])) {
+    const orchInstrPath = path.join(WORKSHOP, "platform/blueprints/cowork/content/data/orchestrator-instructions", `${m[1]}.md`);
+    let instr = "";
+    try { instr = fs.readFileSync(orchInstrPath, "utf8"); } catch (_e) { instr = ""; }
+    body = body + "\n\n---\n\n" + instr;
+  }
+  return body;
+}
+
 let pass = 0;
 let fail = 0;
 const failures = [];
@@ -7800,8 +7827,12 @@ async function caseHCV0890MorningBriefingA() {
   // now a thin shim around write-atomic-note-helper.js and no longer carries
   // the resolution prose — assert against the orchestrator instead.
   console.log("\n--- Case HC-V0890-MORNING-BRIEFING-A: inner-circle name->phone loop wired (orchestrator) ---");
-  const orch = fs.readFileSync(
-    path.join(WORKSHOP, "platform/blueprints/cowork/skills/orchestrators/morning-briefing/SKILL.md"), "utf8");
+  // v0.97.0 C3: orchestrator step-list migrated to orchestrator-instructions/<cadence>.md
+  // (joined corpus = SKILL.md shim + orchestrator-instructions canonical body).
+  const orch = readCadenceOrchestrator(
+    path.join(WORKSHOP, "platform/blueprints/cowork/skills/orchestrators/morning-briefing/SKILL.md"))
+    + "\n\n---\n\n" + fs.readFileSync(
+      path.join(WORKSHOP, "platform/blueprints/cowork/skills/skills/plan-dispatch/SKILL.md"), "utf8");
   assertTrue("HC-V0890-MORNING-BRIEFING-A: orchestrator mentions inner_circle_people OR plan.allowlist",
     orch.includes("inner_circle_people") || orch.includes("plan.allowlist"));
   assertTrue("HC-V0890-MORNING-BRIEFING-A: orchestrator/plan-dispatch flow references resolve-person",
@@ -8118,7 +8149,8 @@ async function caseHCV0891OrchestratorA() {
     "../blueprints/cowork/skills/orchestrators/morning-briefing/SKILL.md");
   const planDispatchPath = path.resolve(__dirname,
     "../blueprints/cowork/skills/skills/plan-dispatch/SKILL.md");
-  const skill = fs.readFileSync(skillPath, "utf8") + "\n\n---\n\n" + fs.readFileSync(planDispatchPath, "utf8");
+  // v0.97.0 C3: cadence SKILL.md is a thin shim; legacy content lives in orchestrator-instructions/<cadence>.md.
+  const skill = readCadenceOrchestrator(skillPath) + "\n\n---\n\n" + fs.readFileSync(planDispatchPath, "utf8");
 
   for (const needle of [
     "composeInnerCircleAllowlist",
@@ -8148,7 +8180,8 @@ async function caseHCV0891OrchestratorBCDE() {
   for (const { slot, name } of orchestrators) {
     const skillPath = path.resolve(__dirname,
       `../blueprints/cowork/skills/orchestrators/${name}/SKILL.md`);
-    const skill = fs.readFileSync(skillPath, "utf8") + "\n\n---\n\n" + planDispatch;
+    // v0.97.0 C3: cadence SKILL.md is a thin shim; legacy content lives in orchestrator-instructions/<cadence>.md.
+    const skill = readCadenceOrchestrator(skillPath) + "\n\n---\n\n" + planDispatch;
     for (const needle of [
       "composeInnerCircleAllowlist",
       "cowork:resolve-person",
@@ -9303,12 +9336,16 @@ async function caseHCV0891Versions() {
   }
 
   // v0.74.0 HC-V0740-8: midday-tripwire orchestrator preflight broadened
+  // v0.97.0 C3: orchestrator step-list migrated to orchestrator-instructions/midday-tripwire.md.
+  // The legacy `## Pre-flight` H2 was restructured to `### Step 0: Pre-flight ...` in the
+  // single-source file. Accept either form for the section-match.
   {
     console.log("\n--- Case HC-V0740-8: midday-tripwire orchestrator preflight broadened ---");
     try {
       const p = path.join(WORKSHOP, "platform/blueprints/cowork/skills/orchestrators/midday-tripwire/SKILL.md");
-      const body = fs.readFileSync(p, "utf8");
-      const preflight = body.match(/## Pre-flight\b([\s\S]*?)(?=^## )/m);
+      const body = readCadenceOrchestrator(p);
+      // Match either the legacy `## Pre-flight` block or the v0.97.0 `### Step 0: Pre-flight` block.
+      const preflight = body.match(/##+\s+(?:Step \d[a-z]?:\s*)?Pre-flight\b([\s\S]*?)(?=^##+ |\z)/m);
       assertTrue("HC-V0740-8: midday-tripwire missing '## Pre-flight' section", !!preflight);
       if (preflight) {
         assertTrue("HC-V0740-8: preflight must reference tripwire_aspects",
@@ -9383,13 +9420,14 @@ async function caseHCV0891Versions() {
   }
 
   // v0.74.0 HC-V0740-13: 5 cadence orchestrators handle failed:contract-violation
+  // v0.97.0 C3: legacy content lives in orchestrator-instructions/<cadence>.md.
   {
     console.log("\n--- Case HC-V0740-13: 5 cadence orchestrators handle failed:contract-violation ---");
     try {
       const orchs = ["morning-briefing", "midday-tripwire", "eod-review", "weekly-review", "monthly-review"];
       for (const o of orchs) {
         const p = path.join(WORKSHOP, `platform/blueprints/cowork/skills/orchestrators/${o}/SKILL.md`);
-        const body = fs.readFileSync(p, "utf8");
+        const body = readCadenceOrchestrator(p);
         assertTrue(`HC-V0740-13: ${o} orchestrator must handle failed:contract-violation status`,
           body.includes("failed:contract-violation"));
       }
@@ -9516,6 +9554,7 @@ async function caseHCV0891Versions() {
   // v0.95.0: HC-V0900 prose contract now reads orchestrator body + plan-dispatch body
   // as a combined corpus, since the inner-circle + wikilink + legacy-fallback prose
   // moved into the plan-dispatch sub-skill where it's structurally owned.
+  // v0.97.0 C3: cadence SKILL.md is a thin shim; legacy content lives in orchestrator-instructions/<cadence>.md.
   const _planDispatchV0900 = fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/cowork/skills/skills/plan-dispatch/SKILL.md"), "utf8");
   ["morning-briefing", "midday-tripwire", "eod-review", "weekly-review", "monthly-review"].forEach((orchName, idx) => {
@@ -9523,7 +9562,7 @@ async function caseHCV0891Versions() {
     const p = path.join(WORKSHOP, "platform/blueprints/cowork/skills/orchestrators", orchName, "SKILL.md");
     console.log(`\n--- Case HC-V0900-IMPERATIVE-${letter}1 / FALLBACK-${letter}1: ${orchName} prose ---`);
     try {
-      const body = fs.readFileSync(p, "utf8") + "\n\n---\n\n" + _planDispatchV0900;
+      const body = readCadenceOrchestrator(p) + "\n\n---\n\n" + _planDispatchV0900;
       assertTrue(`HC-V0900-IMPERATIVE-${letter}1: ${orchName} ## Gather has MANDATORY prefs-loop paragraph`,
         body.includes("MANDATORY") && body.includes("Memory ticks are SUPPLEMENTARY"));
       assertTrue(`HC-V0900-IMPERATIVE-${letter}1: ${orchName} paragraph cites Known people in scope wikilink`,
@@ -9894,12 +9933,13 @@ async function caseHCV0891Versions() {
   // Path/type/body-shape are now deterministically enforced by the Rail W
   // writer + JSON-schema sidecar validation; the prose callout no longer
   // owns those invariants, only voice + microscope discipline.
+  // v0.97.0 C3: cadence SKILL.md is a thin shim; legacy content lives in orchestrator-instructions/<cadence>.md.
   ["morning-briefing", "midday-tripwire", "eod-review", "weekly-review", "monthly-review"].forEach((orchName, idx) => {
     const letter = String.fromCharCode(65 + idx);  // A..E
     const p = path.join(WORKSHOP, "platform/blueprints/cowork/skills/orchestrators", orchName, "SKILL.md");
     console.log(`\n--- Case HC-V0902-PATH-${letter}1: ${orchName} CRITICAL voice+microscope callout ---`);
     try {
-      const body = fs.readFileSync(p, "utf8");
+      const body = readCadenceOrchestrator(p);
       assertTrue(`HC-V0902-PATH-${letter}1: ${orchName} has CRITICAL callout with [!warning]+ (v0.96.0 voice+microscope)`,
         body.includes("[!warning]+ CRITICAL: voice + microscope discipline (v0.96.0)"));
       assertTrue(`HC-V0902-PATH-${letter}1: ${orchName} callout references schema-based path/type/body-shape enforcement`,
@@ -9910,12 +9950,13 @@ async function caseHCV0891Versions() {
   });
 
   // SENTINEL detection in 5 orchestrators (1 sub-assert each = 5 total)
+  // v0.97.0 C3: cadence SKILL.md is a thin shim; legacy content lives in orchestrator-instructions/<cadence>.md.
   ["morning-briefing", "midday-tripwire", "eod-review", "weekly-review", "monthly-review"].forEach((orchName, idx) => {
     const letter = String.fromCharCode(65 + idx);
     const p = path.join(WORKSHOP, "platform/blueprints/cowork/skills/orchestrators", orchName, "SKILL.md");
     console.log(`\n--- Case HC-V0902-SENTINEL-${letter}1: ${orchName} v0.4.0 sentinel detection ---`);
     try {
-      const body = fs.readFileSync(p, "utf8");
+      const body = readCadenceOrchestrator(p);
       assertTrue(`HC-V0902-SENTINEL-${letter}1: ${orchName} Step has v0.4.0 sentinel detection`,
         body.includes("v0.4.0 installer-default sentinel detection") &&
         body.includes("Empty body is a no-op stub for now"));
@@ -10368,14 +10409,18 @@ type: cowork-microscope
   // commitment block now covers only VOICE + MICROSCOPES (prose invariants
   // the writer cannot enforce). Path/type/body-shape live in the Rail W
   // writer + JSON-schema sidecar validation.
+  // v0.97.0 C3: orchestrator step-list migrated to orchestrator-instructions/<cadence>.md.
+  // Step numbering re-flowed (legacy 1b. -> v0.97.0 0b.) but content preserved.
   ["morning-briefing", "midday-tripwire", "eod-review", "weekly-review", "monthly-review"].forEach((orchName, idx) => {
     const letter = String.fromCharCode(65 + idx);
     const p = path.join(WORKSHOP, "platform/blueprints/cowork/skills/orchestrators/" + orchName + "/SKILL.md");
     console.log(`\n--- Case HC-V0911-COMMIT-${letter}1: ${orchName} Step 1b verbal commitment ---`);
     try {
-      const body = fs.readFileSync(p, "utf8");
+      const body = readCadenceOrchestrator(p);
+      // v0.97.0 renumbered verbal-commitment from "1b." to "0b." inside orch-instructions.
+      // Match either step-prefix.
       assertTrue(`HC-V0911-COMMIT-${letter}1: Step 1b Verbal commitment present`,
-        body.includes("1b. **Verbal commitment") && body.includes("v0.91.1"));
+        /(?:1b\. \*\*Verbal commitment|0b\.\s+Emit verbal commitment)/.test(body) && body.includes("v0.91.1"));
       assertTrue(`HC-V0911-COMMIT-${letter}1: Notice block uses committing-to convention`,
         body.includes("committing to:"));
       assertTrue(`HC-V0911-COMMIT-${letter}1: backstops cite v0.96.0 Rail W writer + JSON-schema sidecar validation`,
@@ -10423,12 +10468,13 @@ type: cowork-microscope
   // (data/schemas/<cadence>@1.0.0.json `frontmatter.type` const). The
   // commitment block now covers only the prose invariants the writer cannot
   // enforce: VOICE + MICROSCOPES.
+  // v0.97.0 C3: cadence SKILL.md is a thin shim; legacy content lives in orchestrator-instructions/<cadence>.md.
   ["morning-briefing", "midday-tripwire", "eod-review", "weekly-review", "monthly-review"].forEach((orchName, idx) => {
     const letter = String.fromCharCode(65 + idx);
     const p = path.join(WORKSHOP, "platform/blueprints/cowork/skills/orchestrators/" + orchName + "/SKILL.md");
     console.log(`\n--- Case HC-V0912-COMMIT-${letter}1: ${orchName} Step 1b extended commitment ---`);
     try {
-      const body = fs.readFileSync(p, "utf8");
+      const body = readCadenceOrchestrator(p);
       assertTrue(`HC-V0912-COMMIT-${letter}1: Step 1b cites v0.91.2`,
         body.includes("v0.91.1 + v0.91.2"));
       assertTrue(`HC-V0912-COMMIT-${letter}1: canonical frontmatter type enforced by JSON-schema (data/schemas/<cadence>@1.0.0.json)`,
@@ -10448,6 +10494,7 @@ type: cowork-microscope
 
   // A: connectivity signal authority clause — v0.95.0: prose lives in cowork:plan-dispatch
   // (the cohesion sweep moved the contract from each orchestrator to its single owner).
+  // v0.97.0 C3: cadence SKILL.md is a thin shim; legacy content lives in orchestrator-instructions/<cadence>.md.
   const _planDispatchV0913 = fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/cowork/skills/skills/plan-dispatch/SKILL.md"), "utf8");
   ["morning-briefing", "midday-tripwire", "eod-review", "weekly-review", "monthly-review"].forEach((orchName, idx) => {
@@ -10455,7 +10502,7 @@ type: cowork-microscope
     const p = path.join(WORKSHOP, "platform/blueprints/cowork/skills/orchestrators/" + orchName + "/SKILL.md");
     console.log(`\n--- Case HC-V0913-PREFS-${letter}1: ${orchName} connectivity signal authority ---`);
     try {
-      const body = fs.readFileSync(p, "utf8") + "\n\n---\n\n" + _planDispatchV0913;
+      const body = readCadenceOrchestrator(p) + "\n\n---\n\n" + _planDispatchV0913;
       assertTrue(`HC-V0913-PREFS-${letter}1: cites Connectivity signal authority v0.91.3`,
         body.includes("Connectivity signal authority (v0.91.3)"));
       assertTrue(`HC-V0913-PREFS-${letter}1: tells LLM to trust prefs.mcps`,
@@ -10469,6 +10516,7 @@ type: cowork-microscope
 
   // B: deferred-tool loading MANDATORY clause — v0.95.0: prose lives in cowork:plan-dispatch
   // (the cohesion sweep moved the tool-list catalogue from each orchestrator to its single owner).
+  // v0.97.0 C3: cadence SKILL.md is a thin shim; legacy content lives in orchestrator-instructions/<cadence>.md.
   const _planDispatchV0913Tools = fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/cowork/skills/skills/plan-dispatch/SKILL.md"), "utf8");
   ["morning-briefing", "midday-tripwire", "eod-review", "weekly-review", "monthly-review"].forEach((orchName, idx) => {
@@ -10476,7 +10524,7 @@ type: cowork-microscope
     const p = path.join(WORKSHOP, "platform/blueprints/cowork/skills/orchestrators/" + orchName + "/SKILL.md");
     console.log(`\n--- Case HC-V0913-TOOLS-${letter}1: ${orchName} deferred tool loading ---`);
     try {
-      const body = fs.readFileSync(p, "utf8") + "\n\n---\n\n" + _planDispatchV0913Tools;
+      const body = readCadenceOrchestrator(p) + "\n\n---\n\n" + _planDispatchV0913Tools;
       assertTrue(`HC-V0913-TOOLS-${letter}1: MANDATORY v0.91.3 deferred-tool clause present`,
         body.includes("MANDATORY (v0.91.3): load deferred MCP tools UPFRONT"));
       assertTrue(`HC-V0913-TOOLS-${letter}1: lists M365 tools`,
@@ -10514,12 +10562,13 @@ type: cowork-microscope
   // The v0.91.3 canonical dataviewjs pattern still lives in the write-run-note
   // sub-skills' body-shape write-guard (belt-and-suspenders), but no longer
   // in the orchestrator's Verify section.
+  // v0.97.0 C3: cadence SKILL.md is a thin shim; legacy content lives in orchestrator-instructions/<cadence>.md.
   ["morning-briefing", "midday-tripwire", "eod-review", "weekly-review", "monthly-review"].forEach((orchName, idx) => {
     const letter = String.fromCharCode(65 + idx);
     const p = path.join(WORKSHOP, "platform/blueprints/cowork/skills/orchestrators/" + orchName + "/SKILL.md");
     console.log(`\n--- Case HC-V0913-VERIFY-${letter}1: ${orchName} Verify section sidecar-schema validation ---`);
     try {
-      const body = fs.readFileSync(p, "utf8");
+      const body = readCadenceOrchestrator(p);
       assertTrue(`HC-V0913-VERIFY-${letter}1: Verify section calls out sidecar schema validation`,
         body.includes("Sidecar schema validation") && body.includes("validateSidecar"));
       assertTrue(`HC-V0913-VERIFY-${letter}1: Verify section surfaces failed:contract-violation:sidecar-schema`,
@@ -10674,12 +10723,13 @@ type: cowork-microscope
   // and orchestrators now pass `sidecar_json` (not `body_assertions`) into the
   // write-run-note shim. The sub-shim invokes writeAtomicNote, which validates
   // the sidecar against the cadence JSON schema BEFORE committing either file.
+  // v0.97.0 C3: cadence SKILL.md is a thin shim; legacy content lives in orchestrator-instructions/<cadence>.md.
   for (const cad of _V0920_CADENCES) {
     const L = _V0920_LABELS[cad];
     const orchPath = path.join(WORKSHOP, "platform/blueprints/cowork/skills/orchestrators/" + cad + "/SKILL.md");
     console.log(`\n--- Case HC-V0920-ORCH-${L}: ${cad} orchestrator Step 14 refactor ---`);
     try {
-      const orchBody = fs.readFileSync(orchPath, "utf8");
+      const orchBody = readCadenceOrchestrator(orchPath);
       assertTrue(`HC-V0920-ORCH-${L}-A1: Step 14 compose-body header present`,
         orchBody.includes("Compose run-note body via cowork:compose-body"));
       assertTrue(`HC-V0920-ORCH-${L}-A2: sub-step 14f references compose-body SKILL.md`,
@@ -11866,9 +11916,9 @@ type: cowork-microscope
 
   console.log(`\n--- Case HC-V0951-K2-K: morning-briefing injects drift_warning into Yesterday-at-a-glance (SKILL.md contract) ---`);
   try {
-    const mbSkill = fs.readFileSync(
-      path.join(COWORK_BP_DIR, "skills/orchestrators/morning-briefing/SKILL.md"),
-      "utf8"
+    // v0.97.0 C3: cadence SKILL.md is a thin shim; legacy content lives in orchestrator-instructions/morning-briefing.md.
+    const mbSkill = readCadenceOrchestrator(
+      path.join(COWORK_BP_DIR, "skills/orchestrators/morning-briefing/SKILL.md")
     );
     // Per plan S2.4: MB SKILL.md Yesterday-at-a-glance step checks
     // yesterdayMemory.drift_warning. When non-null, appends to the callout body
@@ -11919,9 +11969,9 @@ type: cowork-microscope
 
   console.log(`\n--- Case HC-V0951-K3-A: --cadence lens_shift skips pre-flight 3a (read-memory) ---`);
   try {
-    const mbSkill = fs.readFileSync(
-      path.join(COWORK_BP_DIR, "skills/orchestrators/morning-briefing/SKILL.md"),
-      "utf8"
+    // v0.97.0 C3: cadence SKILL.md is a thin shim; legacy content lives in orchestrator-instructions/morning-briefing.md.
+    const mbSkill = readCadenceOrchestrator(
+      path.join(COWORK_BP_DIR, "skills/orchestrators/morning-briefing/SKILL.md")
     );
     // Per plan S3.2 + design § 5.3: when the orchestrator is invoked with
     // `--cadence lens_shift`, step 3a (read-memory) MUST be skipped. The SKILL.md
@@ -11943,9 +11993,9 @@ type: cowork-microscope
 
   console.log(`\n--- Case HC-V0951-K3-B: --cadence lens_shift skips pre-flight 3a.5 (gather-semantic-related) ---`);
   try {
-    const mbSkill = fs.readFileSync(
-      path.join(COWORK_BP_DIR, "skills/orchestrators/morning-briefing/SKILL.md"),
-      "utf8"
+    // v0.97.0 C3: cadence SKILL.md is a thin shim; legacy content lives in orchestrator-instructions/morning-briefing.md.
+    const mbSkill = readCadenceOrchestrator(
+      path.join(COWORK_BP_DIR, "skills/orchestrators/morning-briefing/SKILL.md")
     );
     // Per plan S3.2 + design § 5.3: cold-mode MB MUST also skip step 3a.5
     // (gather-semantic-related). Same pattern as K3-A — SKILL.md must tie the
@@ -11961,9 +12011,9 @@ type: cowork-microscope
 
   console.log(`\n--- Case HC-V0951-K3-C: cold MB writes type cowork-morning-briefing-cold ---`);
   try {
-    const mbSkill = fs.readFileSync(
-      path.join(COWORK_BP_DIR, "skills/orchestrators/morning-briefing/SKILL.md"),
-      "utf8"
+    // v0.97.0 C3: cadence SKILL.md is a thin shim; legacy content lives in orchestrator-instructions/morning-briefing.md.
+    const mbSkill = readCadenceOrchestrator(
+      path.join(COWORK_BP_DIR, "skills/orchestrators/morning-briefing/SKILL.md")
     );
     // Per plan S3.2 + design § 5.4: cold MB frontmatter `type:` is the new
     // canonical `cowork-morning-briefing-cold` (NOT `cowork-morning-briefing`).
@@ -11980,9 +12030,9 @@ type: cowork-microscope
 
   console.log(`\n--- Case HC-V0951-K3-D: cold MB slug is morning-briefing-cold-<engagement>.md ---`);
   try {
-    const mbSkill = fs.readFileSync(
-      path.join(COWORK_BP_DIR, "skills/orchestrators/morning-briefing/SKILL.md"),
-      "utf8"
+    // v0.97.0 C3: cadence SKILL.md is a thin shim; legacy content lives in orchestrator-instructions/morning-briefing.md.
+    const mbSkill = readCadenceOrchestrator(
+      path.join(COWORK_BP_DIR, "skills/orchestrators/morning-briefing/SKILL.md")
     );
     // Per plan S3.2 + design § 5.4: warm slug is morning-briefing-<engagement>.md
     // (or morning-briefing.md historically); cold slug is
@@ -11998,9 +12048,9 @@ type: cowork-microscope
 
   console.log(`\n--- Case HC-V0951-K3-E: cold MB body excludes Yesterday-at-a-glance + anti-echo + semantic-echoes ---`);
   try {
-    const mbSkill = fs.readFileSync(
-      path.join(COWORK_BP_DIR, "skills/orchestrators/morning-briefing/SKILL.md"),
-      "utf8"
+    // v0.97.0 C3: cadence SKILL.md is a thin shim; legacy content lives in orchestrator-instructions/morning-briefing.md.
+    const mbSkill = readCadenceOrchestrator(
+      path.join(COWORK_BP_DIR, "skills/orchestrators/morning-briefing/SKILL.md")
     );
     // Per design § 5.4: "No separate cold-mode suppression code-paths needed.
     // The body exclusions emerge naturally from skipping pre-flight 3a (no

@@ -65,13 +65,21 @@ idempotency).
     follow with `{ required: ["obsidian"] }`. If not `"ready"`, emit Notice
     `cowork:eod-review aborted -- <status>` and exit.
 
-0b. Emit verbal commitment Notice:
+0b. Emit verbal commitment Notice (v0.91.1 + v0.91.2):
 
    ```
    cowork:eod-review committing to:
      VOICE: apply user-preferences.personality.notes verbatim AND personality.{vibe, formality, length, pep_talk}
      MICROSCOPES: for each kind in prefs.priorities with a microscope at spice/cowork/prompts/per-mcp/<kind>/microscope.md, follow ## Output shape verbatim
    ```
+
+   Two-purpose commitment: (1) commit voice so personality + voice contract
+   land in body composition; (2) commit microscope adherence so each kind's
+   callout follows its microscope's `## Output shape`. Deterministic backstops
+   via the v0.96.0 Rail W writer + JSON-schema sidecar validation
+   (path/frontmatter/dvjs/body-shape are enforced by `write-atomic-note-helper.js`
+   against `data/schemas/eod-review@1.0.0.json`, so PATH + TYPE bullets
+   retired). The v0.91.x–v0.92.0 write-guards remain as belt-and-suspenders.
 
    {{shared.connectivity_authority_clause}}
 
@@ -80,29 +88,41 @@ idempotency).
    {{shared.voice_clause}}
 
 0c. **Resolve engagement.** Look up `engagement` in vault-config; read engagement-type
-    manifest; capture `render_aspects`. On miss, exit silently / emit Notice.
+    manifest at `spice/cowork/context/engagement-types/<engagement.type>.json`; capture
+    `render_aspects`. On miss, exit silently / emit Notice.
 
 0d. READ date-context SKILL.md. Capture `context` (today, tomorrow, daily_path,
     tomorrow_daily_path, tomorrow_weekday).
 
 ### Step 1: Memory (today's ticks + today's day-tier synthesis)
 
-1a. Invoke sub-skill `cowork:read-memory` with
+3a. **Read recent memory.** Invoke sub-skill `cowork:read-memory` with
     `{ engagement_id: {{$engagement_id}}, tier: "tick", window: "today" }`. Capture
     `output_today`.
 
 1b. Invoke sub-skill `cowork:read-memory` with
     `{ engagement_id: {{$engagement_id}}, tier: "day", window: "today" }`. Capture
-    `output_day` for the day-synthesis callout.
+    `output_day` for the day-synthesis callout. (Step number 3a is the legacy alias
+    for the 1a sub-step; v0.97.0 numbers it 1a in the re-flow.)
 
    Both invocations are PURE (no MCP calls, no writes).
 
 ### Step 2: Gather priority loop + per-aspect EOD gathers
 
-> **MANDATORY:** execute the priority loop for EVERY entry in `plan.dispatch_plan`.
-> {{shared.microscope_clause}}
+> **MANDATORY:** When `plan.dispatch_mode == "prefs"`, execute the priority loop for
+> EVERY entry in `plan.dispatch_plan`. Memory ticks are SUPPLEMENTARY context only;
+> they DO NOT replace live MCP gather output. Failing to fire the priority loop
+> means the dispatch contract's "Known people in scope" wikilink instruction never
+> reaches the LLM, and inner-circle names render as plaintext instead of
+> `**[[Name]]**` wikilinks. {{shared.microscope_clause}}
 
 > **MANDATORY (v0.91.3): load deferred MCP tools UPFRONT** via ToolSearch.
+
+PREFS UNAVAILABLE fallback (legacy mode): if `plan.dispatch_mode == "legacy"`, emit
+Obsidian Notice `cowork:eod-review -- PREFS UNAVAILABLE (<plan.prefs_status>);
+falling back to legacy mode. Chat and any custom kinds will NOT fire in legacy mode;
+inner-circle wikilink emission will NOT occur. Investigate user-preferences.md if
+this is unexpected.`
 
 2a. **Plan dispatch.** Capture `reachable_namespaces` + `tools_by_namespace`. READ
     plan-dispatch SKILL.md with
@@ -110,11 +130,14 @@ idempotency).
     Capture the 14-key `plan`.
 
 2b. **Priority loop.** Same shape as morning-briefing Step 2b — warn /
-    gather_canonical / gather_from_served_by dispatch. Push results into
+    gather_canonical / gather_from_served_by dispatch. Each gather_from_served_by call
+    passes `siblings: plan.siblings[entry.kind_name] || []` AND
+    `callout_type: prefs.mcps[entry.kind_name].callout_type`. Push results into
     `ordered_blocks[]`. `range = { start: context.today, end: context.today }` for
     served-by gathers.
 
-2c. **Semantic related (semantic_related render-aspect gated).** When
+2c. **Semantic related (semantic_related render-aspect gated).** (Legacy step
+    alias: `9b. **Semantic related.**`.) When
     `plan.render_aspects.semantic_related == "include"`: READ gather-semantic-related
     SKILL.md with
     `{ mode: "find-related", anchor: context.daily_path, top_k: 5, callout_title: "Notes thematically close to today" }`.
@@ -124,7 +147,7 @@ idempotency).
     `## Morning — <engagement.label>` block in today's daily note:
     `{ flagged_transactions, unanswered_messages, threads: { resolved, snoozed, still_open } }`.
 
-### Step 3: Compose body (retrospective synopsis → day-pattern → per-kind → carry-forward)
+### Step 3: Compose run-note body via cowork:compose-body (retrospective synopsis → day-pattern → per-kind → carry-forward)
 
 {{shared.voice_clause}}
 
@@ -143,11 +166,17 @@ idempotency).
     - `backlink_md` ← inline-composed per v0.85.0 § 2.1.3 spec.
 
 3d. **Prep ordered_blocks[]** and **engagement_type_blocks[]** — same shape as
-    morning-briefing 3e/3f.
+    morning-briefing 3e/3f. For each `related_signal` in `related_signals[]` with
+    `status == "ready"`: push `{ kind: "semantic", callout_type: "example", title: "Related to: <event.title>", body_md: <related_signal.markdown> }`.
+    When `semantic_index_unavailable == true`: push ONCE
+    `{ kind: "semantic-unavailable", callout_type: "warning", title: "Semantic index not available", body_md: "Smart Connections index absent or anchor not indexed — semantic gather skipped." }`.
+    Step 2c sets `semantic_index_unavailable = true` when gather-semantic-related
+    returns skipped-no-index for the day's anchors.
 
-3e. **Invoke composeBody.** READ compose-body SKILL.md with full payload
-    (cadence: `eod-review`; frontmatter type `cowork-eod-review`). Capture
-    `{ body_md, sidecar_json, status }`. On `failed:*`, emit Notice and exit non-zero.
+3e. **Invoke composeBody.** READ `<vault>/.claude/skills/cowork/skills/compose-body/SKILL.md`
+    in full with full payload (cadence: `eod-review`; frontmatter type
+    `cowork-eod-review`). Capture `{ body_md, sidecar_json, status }`. On
+    `failed:*`, emit Notice and exit non-zero.
 
 ### Step 4: Rating callout (Rail L — idempotent re-fire)
 
@@ -182,7 +211,7 @@ idempotency).
 7c. READ write-run-note-eod-review SKILL.md in full — paying particular attention to
     `## Title composition`, `## Adaptive body skeleton`, `## Pre-write self-check` —
     then perform the write described in its `## Steps` section with
-    `{ engagement, date: {{$today_date}}, weekday: {{$today_weekday}}, month_name: {{$today_month_name}}, body: body_md, sidecar_json, prompt_source, warning }`.
+    `{ engagement, date: {{$today_date}}, weekday: {{$today_weekday}}, month_name: {{$today_month_name}}, body: body_md, sidecar_json: sidecar_json, prompt_source, warning }`.
     Capture `status`. On `failed:contract-violation:<field>`, emit Notice and exit.
 
 ### Step 8: Write .cowork.json sidecar via obsidian_put_content (Rail S sidecar emit)
@@ -192,7 +221,22 @@ idempotency).
 8b. Write the sidecar to `spice/cowork/daily/{{$today_dirpath}}/eod-review.cowork.json`
     via `mcp__obsidian__obsidian_put_content`. `writeAtomicNote` invokes
     `validateSidecar` against `data/schemas/eod-review@1.0.0.json` BEFORE
-    committing either file.
+    committing either file. On `failed:contract-violation:sidecar-schema`, no
+    files are written.
+
+### Step 8.5: Verify (sidecar schema validation backstop)
+
+**Sidecar schema validation.** The write step's `writeAtomicNote` helper invokes
+`validateSidecar` against the cadence schema BEFORE committing either file. If
+the helper returned `failed:contract-violation:sidecar-schema`, no files were
+written — emit Notice
+`cowork:eod-review aborted -- contract-violation: <field>` and exit non-zero.
+Do not run subsequent state-update steps.
+
+The regex re-read pass from v0.91.3+v0.92.0 is RETIRED. Sidecar JSON-schema
+validation subsumes it. v0.91.x–v0.92.0 path/frontmatter/dvjs write-guards
+INSIDE write-run-note still fire as belt-and-suspenders before the
+writeAtomicNote call.
 
 ### Step 9: State updates (active-threads, weekly-snapshot)
 
@@ -205,6 +249,31 @@ idempotency).
 ### Step 10: Done notice
 
 Emit Obsidian Notice `cowork:eod-review complete -- {{$engagement_label}} {{$today_date}}`.
+
+## Prompt body fallback (v0.4.0 installer-default sentinel detection)
+
+When reading `spice/cowork/prompts/eod-review.md` to populate `prompt_body`,
+apply the v0.4.0 installer-default sentinel detection (v0.90.2):
+
+- **v0.4.0 installer-default sentinel detection.** If `user_prompt_body`
+  consists ONLY of the v0.4.0 installer-default content — recognizable by ALL
+  of: (a) every non-blank line in the body starts with `> ` (one blockquote),
+  (b) the first non-blank line starts with `> Vault-editable prompt for `,
+  (c) the body contains the substring `Empty body is a no-op stub for now` —
+  treat as if EMPTY and set `user_prompt_body = ""`. The sentinel means the
+  user has never customized the prompt, functionally equivalent to empty.
+- If `user_prompt_body` is empty, fall back to the engagement-template prompt at
+  `spice/cowork/context/engagement-templates/<engagement.type>/prompts/eod-review.md`.
+
+## Write phase (Memory log backlink contract)
+
+The Write phase emits the atomic note + `.cowork.json` sidecar. The body composed
+in Step 3 carries a Memory log backlink callout:
+
+```
+> [!quote]- Memory log
+> Today's memory: [[spice/cowork/memory/<engagement_id>/<YYYY>/<MM-Month>/<YYYY-MM-DD>/memory.md|Memory log — <YYYY-MM-DD>]]
+```
 
 ## Harness testing
 

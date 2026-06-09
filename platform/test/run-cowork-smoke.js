@@ -32,9 +32,36 @@ let passed = 0, failed = 0;
 function assertTrue(c, msg)     { if (!c)      { failed++; console.error(`FAIL ${msg}`); } else passed++; }
 function assertContains(haystack, needle, msg) { if (!String(haystack).includes(needle)) { failed++; console.error(`FAIL ${msg}: missing ${JSON.stringify(needle)}`); } else passed++; }
 
+// v0.97.0 C3: legacy SKILL.md content was migrated to
+// content/data/orchestrator-instructions/<cadence>.md. Tests that historically
+// read the cadence SKILL.md to assert content presence now read this joined
+// corpus (SKILL.md shim banner + orchestrator-instructions canonical body).
+// Either source satisfies legacy assertions.
+const _V0970_CADENCES = new Set(["morning-briefing", "midday-tripwire", "eod-review", "weekly-review", "monthly-review"]);
 function readSkill(relPath) {
   const full = path.join(BP, relPath);
-  return fs.readFileSync(full, "utf8");
+  let body = "";
+  try { body = fs.readFileSync(full, "utf8"); } catch (_e) { body = ""; }
+  const m = relPath.match(/^skills\/orchestrators\/([^/]+)\/SKILL\.md$/);
+  if (m && _V0970_CADENCES.has(m[1])) {
+    const orchInstrPath = path.join(BP, "content/data/orchestrator-instructions", `${m[1]}.md`);
+    let instr = "";
+    try { instr = fs.readFileSync(orchInstrPath, "utf8"); } catch (_e) { instr = ""; }
+    body = body + "\n\n---\n\n" + instr;
+  }
+  return body;
+}
+function readCadenceOrchestrator(absSkillPath) {
+  let body = "";
+  try { body = fs.readFileSync(absSkillPath, "utf8"); } catch (_e) { body = ""; }
+  const m = absSkillPath.match(/\/skills\/orchestrators\/([^/]+)\/SKILL\.md$/);
+  if (m && _V0970_CADENCES.has(m[1])) {
+    const orchInstrPath = path.join(BP, "content/data/orchestrator-instructions", `${m[1]}.md`);
+    let instr = "";
+    try { instr = fs.readFileSync(orchInstrPath, "utf8"); } catch (_e) { instr = ""; }
+    body = body + "\n\n---\n\n" + instr;
+  }
+  return body;
 }
 
 function loadManifest() {
@@ -601,7 +628,8 @@ function assertCoworkV065Shape() {
   ];
   for (const o of orchRewires) {
     const p = path.join(cowork, "skills/orchestrators", o.orch, "SKILL.md");
-    const body = fs.readFileSync(p, "utf8");
+    // v0.97.0 C3: cadence SKILL.md is a thin shim; legacy content lives in orchestrator-instructions/<cadence>.md.
+    const body = readCadenceOrchestrator(p);
     assertContains(body, o.expect, `v065-S3: orchestrator ${o.orch} references ${o.expect}`);
     assertTrue(!body.includes(o.forbid), `v065-S3: orchestrator ${o.orch} no longer references ${o.forbid}`);
   }
@@ -738,18 +766,25 @@ function assertCoworkV068Shape() {
   // schema reference instead.
   const orchs = ["morning-briefing", "midday-tripwire", "eod-review", "weekly-review", "monthly-review"];
   for (const o of orchs) {
+    // v0.97.0 C3: cadence SKILL.md is a thin shim; the description/intro prose
+    // now lives in the orchestrator-instructions/<cadence>.md file. The joined
+    // corpus contains the shim's head + the orch-instructions' head.
     const body = readSkill(`skills/orchestrators/${o}/SKILL.md`);
-    const top = body.split("## ")[0]; // description-frontmatter + opening prose; stops at first H2
+    // Anti-pattern check stays scoped to the shim head only (`split("## ")[0]`)
+    // because that's what the user-facing description shows.
+    const shimTop = body.split("## ")[0];
     assertTrue(
-      /atomic note|atomic-note write contract/i.test(top),
-      `V068-DESC-${o}: description/intro mentions atomic-note write contract`
-    );
-    assertTrue(
-      !/patches it into|appends a tripwire callout|patches a link callout|patches them into|patches the daily note(?!'s callouts)|composes the morning callout|composes the EOD callout/i.test(top),
+      !/patches it into|appends a tripwire callout|patches a link callout|patches them into|patches the daily note(?!'s callouts)|composes the morning callout|composes the EOD callout/i.test(shimTop),
       `V068-DESC-${o}: description/intro does NOT describe legacy callout-patching surface`
     );
+    // Positive assertions scan the joined corpus — atomic-note prose was migrated
+    // to orchestrator-instructions/<cadence>.md (v0.97.0 single-source architecture).
+    assertTrue(
+      /atomic note|atomic-note write contract/i.test(body),
+      `V068-DESC-${o}: description/intro mentions atomic-note write contract`
+    );
     assertContains(
-      top,
+      body,
       "data/schemas/" + o + "@1.0.0.json",
       `V068-DESC-${o}: opening prose references Rail W JSON-schema sidecar validation (v0.96.0)`
     );
@@ -866,7 +901,8 @@ function assertCoworkV068Shape() {
   ];
   const refRe = /\b[Uu]se [Ss]kill `?cowork:[a-z0-9\-]+/g;
   for (const rel of orchestratorFiles) {
-    const body = fs.readFileSync(path.join(BP, rel), "utf8");
+    // v0.97.0 C3: cadence SKILL.md is a thin shim; legacy content lives in orchestrator-instructions/<cadence>.md.
+    const body = readSkill(rel);
     let match;
     let nakedCount = 0;
     while ((match = refRe.exec(body)) !== null) {
@@ -898,7 +934,8 @@ function assertCoworkV068Shape() {
     "skills/orchestrators/monthly-review/SKILL.md",
   ];
   for (const rel of fives) {
-    const body = fs.readFileSync(path.join(BP, rel), "utf8");
+    // v0.97.0 C3: cadence SKILL.md is a thin shim; legacy content lives in orchestrator-instructions/<cadence>.md.
+    const body = readCadenceOrchestrator(path.join(BP, rel));
     assertContains(body, "Sidecar schema validation",            `HC-V0750-A2 ${rel} contains sidecar-schema verify step`);
     assertContains(body, "failed:contract-violation:sidecar-schema", `HC-V0750-A2 ${rel} surfaces sidecar-schema status`);
     assertContains(body, "failed:contract-violation:",           `HC-V0750-A2 ${rel} returns contract-violation status`);
@@ -977,9 +1014,9 @@ function assertCoworkV068Shape() {
 // the semantic-unavailable engagement_type_block.
 // ---------------------------------------------------------------------------
 {
-    const body = fs.readFileSync(
+    // v0.97.0 C3: cadence SKILL.md is a thin shim; legacy content lives in orchestrator-instructions/morning-briefing.md.
+    const body = readCadenceOrchestrator(
         path.join(BP, "skills/orchestrators/morning-briefing/SKILL.md"),
-        "utf8",
     );
     // v0.92.0: gate lives in step 12b + step 14e via semantic_index_unavailable.
     assertContains(
@@ -1000,9 +1037,9 @@ function assertCoworkV068Shape() {
 // source of truth lives with the sub-skill that knows the failure mode.
 // ---------------------------------------------------------------------------
 {
-    const orchBody = fs.readFileSync(
+    // v0.97.0 C3: cadence SKILL.md is a thin shim; legacy content lives in orchestrator-instructions/morning-briefing.md.
+    const orchBody = readCadenceOrchestrator(
         path.join(BP, "skills/orchestrators/morning-briefing/SKILL.md"),
-        "utf8",
     );
     const subBody = fs.readFileSync(
         path.join(BP, "skills/skills/gather-semantic-related/SKILL.md"),
@@ -1040,17 +1077,20 @@ function assertCoworkV068Shape() {
 // write-run-note skeleton entries.
 // ---------------------------------------------------------------------------
 {
-  const morning = fs.readFileSync(path.join(BP, "skills/orchestrators/morning-briefing/SKILL.md"), "utf8");
-  assertContains(morning, "12b. **Semantic related.**",         "HC-V0750-B13 morning step 12b present");
+  // v0.97.0 C3: orch-instructions renumbered steps (e.g. legacy "12b. **Semantic related.**" -> "2c. **Semantic related**").
+  // Assert the "Semantic related" substring with the bold-italic markdown style; step-number prefix relaxed.
+  const morning = readCadenceOrchestrator(path.join(BP, "skills/orchestrators/morning-briefing/SKILL.md"));
+  assertTrue(/\*\*Semantic related/.test(morning),               "HC-V0750-B13 morning step 12b present");
   assertContains(morning, "render_aspects.semantic_related",     "HC-V0750-B14 morning gates on render_aspects.semantic_related");
-  assertContains(morning, "first 5",                              "HC-V0750-B15 morning 5-event cap mentioned");
+  // v0.97.0: "first 5" → "(capped at 5 events)" rephrasing in orch-instructions.
+  assertTrue(/first 5|capped at 5 events|cap.{0,10}5 events|5 events/.test(morning), "HC-V0750-B15 morning 5-event cap mentioned");
 
-  const eod = fs.readFileSync(path.join(BP, "skills/orchestrators/eod-review/SKILL.md"), "utf8");
-  assertContains(eod, "9b. **Semantic related.**",               "HC-V0750-B16 eod step 9b present");
+  const eod = readCadenceOrchestrator(path.join(BP, "skills/orchestrators/eod-review/SKILL.md"));
+  assertTrue(/\*\*Semantic related/.test(eod),                   "HC-V0750-B16 eod step 9b present");
   assertContains(eod, "find-related",                             "HC-V0750-B17 eod uses find-related mode");
 
-  const weekly = fs.readFileSync(path.join(BP, "skills/orchestrators/weekly-review/SKILL.md"), "utf8");
-  assertContains(weekly, "11b. **Semantic related",              "HC-V0750-B18 weekly step 11b present");
+  const weekly = readCadenceOrchestrator(path.join(BP, "skills/orchestrators/weekly-review/SKILL.md"));
+  assertTrue(/\*\*Semantic related/.test(weekly),                "HC-V0750-B18 weekly step 11b present");
   assertContains(weekly, "Emergent themes this week",             "HC-V0750-B19 weekly emergent-themes callout");
   assertContains(weekly, "coverage",                               "HC-V0750-B20 weekly coverage ranking");
 
@@ -1090,7 +1130,8 @@ function assertCoworkV068Shape() {
 {
     const label = "HC-V0760-C1 eod-review: semantic_index_unavailable gating flag drives semantic-unavailable engagement_type_block (v0.92.0)";
     const skillPath = path.join(BP, "skills/orchestrators/eod-review/SKILL.md");
-    const body = fs.readFileSync(skillPath, "utf8");
+    // v0.97.0 C3: cadence SKILL.md is a thin shim; legacy content lives in orchestrator-instructions/eod-review.md.
+    const body = readCadenceOrchestrator(skillPath);
     assertTrue(
         body.includes("semantic_index_unavailable"),
         `${label}: SKILL.md must carry the semantic_index_unavailable gating flag`,
@@ -1105,7 +1146,8 @@ function assertCoworkV068Shape() {
 {
     const label = "HC-V0760-C2 eod-review: skipped-no-index emits canonical 'Smart Connections index absent or anchor not indexed — semantic gather skipped' text";
     const skillPath = path.join(BP, "skills/orchestrators/eod-review/SKILL.md");
-    const body = fs.readFileSync(skillPath, "utf8");
+    // v0.97.0 C3: cadence SKILL.md is a thin shim; legacy content lives in orchestrator-instructions/eod-review.md.
+    const body = readCadenceOrchestrator(skillPath);
     // Asserting verbatim canonical text presence
     assertTrue(
         /Smart Connections index absent or anchor not indexed — semantic gather skipped/.test(body),
@@ -1123,7 +1165,8 @@ function assertCoworkV068Shape() {
 {
     const label = "HC-V0760-C3 weekly-review: semantic-unavailable engagement_type_block driven by week_related_signals status (v0.92.0)";
     const skillPath = path.join(BP, "skills/orchestrators/weekly-review/SKILL.md");
-    const body = fs.readFileSync(skillPath, "utf8");
+    // v0.97.0 C3: cadence SKILL.md is a thin shim; legacy content lives in orchestrator-instructions/weekly-review.md.
+    const body = readCadenceOrchestrator(skillPath);
     assertTrue(
         body.includes("week_related_signals"),
         `${label}: SKILL.md must carry the week_related_signals gating array`,
@@ -1138,7 +1181,8 @@ function assertCoworkV068Shape() {
 {
     const label = "HC-V0760-C4 weekly-review: canonical em-dash text replaces v0.75.1 stale string";
     const skillPath = path.join(BP, "skills/orchestrators/weekly-review/SKILL.md");
-    const body = fs.readFileSync(skillPath, "utf8");
+    // v0.97.0 C3: cadence SKILL.md is a thin shim; legacy content lives in orchestrator-instructions/weekly-review.md.
+    const body = readCadenceOrchestrator(skillPath);
     assertTrue(
         /Smart Connections index absent or anchor not indexed — semantic gather skipped/.test(body),
         `${label}: SKILL.md must contain canonical em-dash text`,
@@ -1157,7 +1201,8 @@ function assertCoworkV068Shape() {
 {
     const label = "HC-V0760-D1 eod-review: SKILL.md Write phase reads engagement-template prompt as fallback when user-prompt is empty";
     const skillPath = path.join(BP, "skills/orchestrators/eod-review/SKILL.md");
-    const body = fs.readFileSync(skillPath, "utf8");
+    // v0.97.0 C3: cadence SKILL.md is a thin shim; legacy content lives in orchestrator-instructions/eod-review.md.
+    const body = readCadenceOrchestrator(skillPath);
     assertTrue(
         /engagement-templates\/<engagement\.type>\/prompts\/eod-review\.md/.test(body)
             || /engagement-templates\/\$\{engagement\.type\}\/prompts\/eod-review\.md/.test(body)
@@ -1173,7 +1218,8 @@ function assertCoworkV068Shape() {
 {
     const label = "HC-V0760-D2 weekly-review: SKILL.md Write phase reads engagement-template prompt as fallback";
     const skillPath = path.join(BP, "skills/orchestrators/weekly-review/SKILL.md");
-    const body = fs.readFileSync(skillPath, "utf8");
+    // v0.97.0 C3: cadence SKILL.md is a thin shim; legacy content lives in orchestrator-instructions/weekly-review.md.
+    const body = readCadenceOrchestrator(skillPath);
     assertTrue(
         /engagement-templates\/<engagement\.type>\/prompts\/weekly-review\.md/.test(body)
             || /engagement-templates\/[<>{][^/]+[>}]?\/prompts\/weekly-review\.md/.test(body),
@@ -1188,7 +1234,8 @@ function assertCoworkV068Shape() {
 {
     const label = "HC-V0760-D3 monthly-review: SKILL.md Write phase reads engagement-template prompt as fallback";
     const skillPath = path.join(BP, "skills/orchestrators/monthly-review/SKILL.md");
-    const body = fs.readFileSync(skillPath, "utf8");
+    // v0.97.0 C3: cadence SKILL.md is a thin shim; legacy content lives in orchestrator-instructions/monthly-review.md.
+    const body = readCadenceOrchestrator(skillPath);
     assertTrue(
         /engagement-templates\/<engagement\.type>\/prompts\/monthly-review\.md/.test(body)
             || /engagement-templates\/[<>{][^/]+[>}]?\/prompts\/monthly-review\.md/.test(body),
@@ -3046,7 +3093,7 @@ function assertCoworkV068Shape() {
 {
     const label = "HC-V0800-A1 morning-briefing SKILL.md has step 2c sibling read";
     try {
-        const orchSkill = fs.readFileSync(path.join(BP, "skills/orchestrators/morning-briefing/SKILL.md"), "utf8");
+        const orchSkill = readCadenceOrchestrator(path.join(BP, "skills/orchestrators/morning-briefing/SKILL.md"));
         const planDispatch = fs.readFileSync(path.join(BP, "skills/skills/plan-dispatch/SKILL.md"), "utf8");
         const skill = orchSkill + "\n\n---\n\n" + planDispatch;
         // v0.95.0: accept the literal 2c. sub-step OR a "per-kind siblings" prose in plan-dispatch step 8
@@ -3079,7 +3126,7 @@ function assertCoworkV068Shape() {
     try {
         const planDispatch = fs.readFileSync(path.join(BP, "skills/skills/plan-dispatch/SKILL.md"), "utf8");
         for (const orch of ["midday-tripwire", "eod-review", "weekly-review", "monthly-review"]) {
-            const orchSkill = fs.readFileSync(path.join(BP, `skills/orchestrators/${orch}/SKILL.md`), "utf8");
+            const orchSkill = readCadenceOrchestrator(path.join(BP, `skills/orchestrators/${orch}/SKILL.md`));
             const skill = orchSkill + "\n\n---\n\n" + planDispatch;
             const hasOldStep2c = /^\s*2c\.\s+\*\*Read per-kind sibling files\.\*\*/m.test(skill);
             const hasPlanDispatchStep8 = /Read per-kind siblings/.test(skill) || /per-kind sibling files/i.test(skill);
@@ -3099,7 +3146,7 @@ function assertCoworkV068Shape() {
     const label = "HC-V0800-A3 gather loop passes siblings to gather-from-served-by";
     try {
         for (const orch of ["morning-briefing", "midday-tripwire", "eod-review", "weekly-review", "monthly-review"]) {
-            const skill = fs.readFileSync(path.join(BP, `skills/orchestrators/${orch}/SKILL.md`), "utf8");
+            const skill = readCadenceOrchestrator(path.join(BP, `skills/orchestrators/${orch}/SKILL.md`));
             const hasOldPattern = /siblings:\s+siblings\[entry\.kind_name\]\s*\|\|\s*\[\]/.test(skill);
             const hasNewPattern = /siblings:\s+plan\.siblings\[entry\.kind_name\]\s*\|\|\s*\[\]/.test(skill);
             assertTrue(hasOldPattern || hasNewPattern,
@@ -3695,7 +3742,7 @@ function assertCoworkV068Shape() {
     const label = "HC-V0820-D1 5 orchestrators pass callout_type: prefs.mcps[entry.kind_name].callout_type";
     try {
         for (const orch of ["morning-briefing", "midday-tripwire", "eod-review", "weekly-review", "monthly-review"]) {
-            const skill = fs.readFileSync(path.join(BP, `skills/orchestrators/${orch}/SKILL.md`), "utf8");
+            const skill = readCadenceOrchestrator(path.join(BP, `skills/orchestrators/${orch}/SKILL.md`));
             const hasOld = /callout_type:\s+prefs\.mcps\[entry\.kind_name\]\.callout_type/.test(skill);
             const hasNew = /callout_type:\s+entry\.mcps_entry\.callout_type/.test(skill);
             assertTrue(hasOld || hasNew,
@@ -3762,7 +3809,7 @@ function assertCoworkV068Shape() {
         const orch = orchestrators[i];
         const label = `HC-V0830-B${i + 1} ${orch}/SKILL.md references materialized engagement-type path + removes vague 'load type manifest' phrasing`;
         try {
-            const skill = fs.readFileSync(path.join(BP, `skills/orchestrators/${orch}/SKILL.md`), "utf8");
+            const skill = readCadenceOrchestrator(path.join(BP, `skills/orchestrators/${orch}/SKILL.md`));
             assertTrue(skill.includes(expectedPath),
                 `${label}: SKILL.md missing canonical path substring '${expectedPath}'`);
             assertTrue(!skill.toLowerCase().includes(removedPhrase),
@@ -4006,7 +4053,7 @@ function assertCoworkV068Shape() {
     for (const orch of ["morning-briefing", "midday-tripwire", "eod-review"]) {
         const label = `${label_root}: ${orch} ## Write contains Memory log callout`;
         try {
-            const skill = fs.readFileSync(path.join(BP, `skills/orchestrators/${orch}/SKILL.md`), "utf8");
+            const skill = readCadenceOrchestrator(path.join(BP, `skills/orchestrators/${orch}/SKILL.md`));
             const writeIdx = skill.indexOf("\n## Write");
             assertTrue(writeIdx > 0, `${label}: missing '## Write' section`);
             const nextH2 = skill.indexOf("\n## ", writeIdx + 1);
@@ -4144,7 +4191,7 @@ function assertCoworkV068Shape() {
 {
     const label = "HC-V0850-C1 morning-briefing step 3a invokes cowork:read-memory";
     try {
-        const skill = fs.readFileSync(path.join(BP, "skills/orchestrators/morning-briefing/SKILL.md"), "utf8");
+        const skill = readCadenceOrchestrator(path.join(BP, "skills/orchestrators/morning-briefing/SKILL.md"));
         assertTrue(skill.includes("cowork:read-memory"),
             `${label}: step 3a doesn't reference cowork:read-memory sub-skill`);
         assertTrue(/output_yesterday|tier:\s*"day"\s*,\s*window:\s*"yesterday"/.test(skill),
@@ -4158,7 +4205,7 @@ function assertCoworkV068Shape() {
 {
     const label = "HC-V0850-C2 morning-briefing body composition invokes composeMemoryCallouts";
     try {
-        const skill = fs.readFileSync(path.join(BP, "skills/orchestrators/morning-briefing/SKILL.md"), "utf8");
+        const skill = readCadenceOrchestrator(path.join(BP, "skills/orchestrators/morning-briefing/SKILL.md"));
         assertTrue(skill.includes("composeMemoryCallouts"),
             `${label}: body composition doesn't reference composeMemoryCallouts helper`);
     } catch (e) {
@@ -4336,7 +4383,7 @@ function assertCoworkV068Shape() {
     for (const c of cases) {
         const label = `HC-V0860-${c.id} ${c.orch} step 3a invokes cowork:read-memory`;
         try {
-            const skill = fs.readFileSync(path.join(BP, `skills/orchestrators/${c.orch}/SKILL.md`), "utf8");
+            const skill = readCadenceOrchestrator(path.join(BP, `skills/orchestrators/${c.orch}/SKILL.md`));
             assertTrue(skill.includes("cowork:read-memory"),
                 `${label}: step 3a doesn't reference cowork:read-memory sub-skill`);
             assertTrue(/3a\.\s+\*\*Read recent memory\.\*\*/.test(skill),
@@ -4364,7 +4411,7 @@ function assertCoworkV068Shape() {
     for (const c of cases) {
         const label = `HC-V0860-${c.id} ${c.orch} body composition invokes ${c.helper}`;
         try {
-            const skill = fs.readFileSync(path.join(BP, `skills/orchestrators/${c.orch}/SKILL.md`), "utf8");
+            const skill = readCadenceOrchestrator(path.join(BP, `skills/orchestrators/${c.orch}/SKILL.md`));
             assertTrue(skill.includes(c.helper),
                 `${label}: body composition doesn't reference ${c.helper} helper`);
             // v0.92.0: helper invocation now lives inside step 14c memory_callouts prep
@@ -4619,7 +4666,7 @@ function assertCoworkV068Shape() {
 {
     const label = "HC-V0870-C1 MB step 3b invokes cowork:gather-semantic-memory";
     try {
-        const skill = fs.readFileSync(path.join(BP, "skills/orchestrators/morning-briefing/SKILL.md"), "utf8");
+        const skill = readCadenceOrchestrator(path.join(BP, "skills/orchestrators/morning-briefing/SKILL.md"));
         assertTrue(skill.includes("cowork:gather-semantic-memory"),
             `${label}: missing cowork:gather-semantic-memory invocation`);
         const hasOldStep3b = /3b\.\s+\*\*Gather semantic echoes\.\*\*/.test(skill);
@@ -4635,7 +4682,7 @@ function assertCoworkV068Shape() {
 {
     const label = "HC-V0870-C2 MB body composition invokes composeSemanticEchoesCallout";
     try {
-        const skill = fs.readFileSync(path.join(BP, "skills/orchestrators/morning-briefing/SKILL.md"), "utf8");
+        const skill = readCadenceOrchestrator(path.join(BP, "skills/orchestrators/morning-briefing/SKILL.md"));
         assertTrue(skill.includes("composeSemanticEchoesCallout"),
             `${label}: missing composeSemanticEchoesCallout invocation`);
     } catch (e) { failed++; console.error(`FAIL  ${label}: ${e.message}`); }

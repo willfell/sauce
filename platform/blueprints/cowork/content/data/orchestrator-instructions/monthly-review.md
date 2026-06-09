@@ -21,11 +21,11 @@ cold_path_skips: []
 > verbatim.
 
 First-of-month deep pass for one engagement. Reviews the PREVIOUS month. Tone:
-longest-arc view — month's wins/misses, projects landed, next-month board.
-Output path: `spice/cowork/monthly/<YYYY>/<YYYY-MM>/monthly-review.md`.
-Frontmatter uses `month: "<YYYY-MM>"` instead of `day:`. Anti-echo NOT eligible
-per v0.95.1 §3.4. For finance-tracking engagements, this is the authoritative
-Credit Debt Payoff reconciliation moment.
+longest-arc view — month's wins/misses, projects landed, next-month board. Writes
+ONE atomic note at `spice/cowork/monthly/<YYYY>/<YYYY-MM>/monthly-review.md` per
+scheduled invocation. Frontmatter uses `month: "<YYYY-MM>"` instead of `day:`.
+Anti-echo NOT eligible per v0.95.1 §3.4. For finance-tracking engagements, this
+is the authoritative Credit Debt Payoff reconciliation moment.
 
 ## Substitution tokens
 
@@ -63,13 +63,21 @@ Credit Debt Payoff reconciliation moment.
 0a. READ check-vault-routing SKILL.md with `{ required: ["obsidian"] }`. On not-ready,
     emit Notice `cowork:monthly-review aborted -- <status>` and exit.
 
-0b. Emit verbal commitment Notice:
+0b. Emit verbal commitment Notice (v0.91.1 + v0.91.2):
 
    ```
    cowork:monthly-review committing to:
      VOICE: apply user-preferences.personality.notes verbatim AND personality.{vibe, formality, length, pep_talk}
      MICROSCOPES: for each kind in prefs.priorities with a microscope at spice/cowork/prompts/per-mcp/<kind>/microscope.md, follow ## Output shape verbatim
    ```
+
+   Two-purpose commitment: (1) commit voice so personality + voice contract
+   land in body composition; (2) commit microscope adherence so each kind's
+   callout follows its microscope's `## Output shape`. Deterministic backstops
+   via the v0.96.0 Rail W writer + JSON-schema sidecar validation
+   (path/frontmatter/dvjs/body-shape are enforced by `write-atomic-note-helper.js`
+   against `data/schemas/monthly-review@1.0.0.json`, so PATH + TYPE bullets
+   retired). The v0.91.x–v0.92.0 write-guards remain as belt-and-suspenders.
 
    {{shared.connectivity_authority_clause}}
 
@@ -78,7 +86,8 @@ Credit Debt Payoff reconciliation moment.
    {{shared.voice_clause}}
 
 0c. **Resolve engagement.** Look up `engagement` in vault-config; read engagement-type
-    manifest; capture `render_aspects`.
+    manifest at `spice/cowork/context/engagement-types/<engagement.type>.json`; capture
+    `render_aspects`.
 
 0d. READ date-context SKILL.md. Capture `context` — critically `prev_month_start`,
     `prev_month_end`, `prev_month_label`, `prev_month_yyyymm`, `month_start`,
@@ -86,19 +95,30 @@ Credit Debt Payoff reconciliation moment.
 
 ### Step 1: Memory (month-tier — aggregated weekly syntheses)
 
-1a. Invoke sub-skill `cowork:read-memory` with
+3a. **Read recent memory.** Invoke sub-skill `cowork:read-memory` with
     `{ engagement_id: {{$engagement_id}}, tier: "week", window: { start: context.month_start, end: context.today } }`.
     Capture `output_month` — aggregated weekly syntheses across the current month.
-    Null-data preservation: `output_month = null`.
+    Null-data preservation: `output_month = null`. (Step number 3a is the legacy
+    alias; v0.97.0 numbers it 1a in the re-flow.)
 
    This step is PURE (no MCP calls, no writes).
 
 ### Step 2: Gather priority loop + month-summary gathers
 
-> **MANDATORY:** execute the priority loop for EVERY entry in `plan.dispatch_plan`.
-> {{shared.microscope_clause}}
+> **MANDATORY:** When `plan.dispatch_mode == "prefs"`, execute the priority loop for
+> EVERY entry in `plan.dispatch_plan`. Memory ticks are SUPPLEMENTARY context only;
+> they DO NOT replace live MCP gather output. Failing to fire the priority loop
+> means the dispatch contract's "Known people in scope" wikilink instruction never
+> reaches the LLM, and inner-circle names render as plaintext instead of
+> `**[[Name]]**` wikilinks. {{shared.microscope_clause}}
 
 > **MANDATORY (v0.91.3): load deferred MCP tools UPFRONT** via ToolSearch.
+
+PREFS UNAVAILABLE fallback (legacy mode): if `plan.dispatch_mode == "legacy"`, emit
+Obsidian Notice `cowork:monthly-review -- PREFS UNAVAILABLE (<plan.prefs_status>);
+falling back to legacy mode. Chat and any custom kinds will NOT fire in legacy mode;
+inner-circle wikilink emission will NOT occur. Investigate user-preferences.md if
+this is unexpected.`
 
 2a. **Plan dispatch.** Capture `reachable_namespaces` + `tools_by_namespace`. READ
     plan-dispatch SKILL.md with
@@ -107,7 +127,9 @@ Credit Debt Payoff reconciliation moment.
     `range: { start: context.month_start, end: context.month_end }`.
 
 2b. **Priority loop.** Same shape as morning-briefing Step 2b — warn /
-    gather_canonical / gather_from_served_by dispatch. Push results into
+    gather_canonical / gather_from_served_by dispatch. Each gather_from_served_by call
+    passes `siblings: plan.siblings[entry.kind_name] || []` AND
+    `callout_type: prefs.mcps[entry.kind_name].callout_type`. Push results into
     `ordered_blocks[]`.
 
 2c. **Forward-look stressors (inline scan).** Scan `spice/trips/` (next 30-45 days),
@@ -124,7 +146,7 @@ Credit Debt Payoff reconciliation moment.
     READ write-summary-fte-status SKILL.md with mode `"monthly"`; capture
     `fte_status_block`.
 
-### Step 3: Compose body (month-tier synopsis → month-pattern → per-kind → next-month board)
+### Step 3: Compose run-note body via cowork:compose-body (month-tier synopsis → month-pattern → per-kind → next-month board)
 
 {{shared.voice_clause}}
 
@@ -147,10 +169,11 @@ Credit Debt Payoff reconciliation moment.
 3d. **Prep ordered_blocks[]** and **engagement_type_blocks[]** — same shape as
     morning-briefing 3e/3f.
 
-3e. **Invoke composeBody.** READ compose-body SKILL.md with the full payload (cadence:
-    `monthly-review`; frontmatter `type: cowork-monthly-review` AND
-    `month: context.iso_month`). Capture `{ body_md, sidecar_json, status }`. On
-    `failed:*`, emit Notice and exit non-zero.
+3e. **Invoke composeBody.** READ `<vault>/.claude/skills/cowork/skills/compose-body/SKILL.md`
+    in full with the full payload (cadence: `monthly-review`; frontmatter
+    `type: cowork-monthly-review` AND `month: context.iso_month`). Capture
+    `{ body_md, sidecar_json, status }`. On `failed:*`, emit Notice and exit
+    non-zero.
 
 ### Step 4: Rating callout (Rail L — idempotent re-fire)
 
@@ -186,7 +209,7 @@ no-op for monthly and exists in the step-list for parity with other cadence file
 7c. READ write-run-note-monthly-review SKILL.md in full — paying particular attention
     to `## Title composition`, `## Adaptive body skeleton`, `## Pre-write self-check` —
     then perform the write described in its `## Steps` section with
-    `{ engagement, month: context.iso_month, year: context.year, body: body_md, sidecar_json, prompt_source, warning }`.
+    `{ engagement, month: context.iso_month, year: context.year, body: body_md, sidecar_json: sidecar_json, prompt_source, warning }`.
     Capture `status`. On `failed:contract-violation:<field>`, emit Notice and exit.
 
 ### Step 8: Write .cowork.json sidecar via obsidian_put_content (Rail S sidecar emit)
@@ -197,7 +220,22 @@ no-op for monthly and exists in the step-list for parity with other cadence file
 8b. Write the sidecar to
     `spice/cowork/monthly/{{$today_dirpath}}/monthly-review.cowork.json` via
     `mcp__obsidian__obsidian_put_content`. `writeAtomicNote` invokes `validateSidecar`
-    against `data/schemas/monthly-review@1.0.0.json` BEFORE committing either file.
+    against `data/schemas/monthly-review@1.0.0.json` BEFORE committing either file. On
+    `failed:contract-violation:sidecar-schema`, no files are written.
+
+### Step 8.5: Verify (sidecar schema validation backstop)
+
+**Sidecar schema validation.** The write step's `writeAtomicNote` helper invokes
+`validateSidecar` against the cadence schema BEFORE committing either file. If
+the helper returned `failed:contract-violation:sidecar-schema`, no files were
+written — emit Notice
+`cowork:monthly-review aborted -- contract-violation: <field>` and exit
+non-zero. Do not run subsequent state-update steps.
+
+The regex re-read pass from v0.91.3+v0.92.0 is RETIRED. Sidecar JSON-schema
+validation subsumes it. v0.91.x–v0.92.0 path/frontmatter/dvjs write-guards
+INSIDE write-run-note still fire as belt-and-suspenders before the
+writeAtomicNote call.
 
 ### Step 9: State updates (active-threads, weekly-snapshot)
 
@@ -210,6 +248,21 @@ no-op for monthly and exists in the step-list for parity with other cadence file
 ### Step 10: Done notice
 
 Emit Obsidian Notice `cowork:monthly-review complete -- {{$engagement_label}} <prev_month_label>`.
+
+## Prompt body fallback (v0.4.0 installer-default sentinel detection)
+
+When reading `spice/cowork/prompts/monthly-review.md` to populate `prompt_body`,
+apply the v0.4.0 installer-default sentinel detection (v0.90.2):
+
+- **v0.4.0 installer-default sentinel detection.** If `user_prompt_body`
+  consists ONLY of the v0.4.0 installer-default content — recognizable by ALL
+  of: (a) every non-blank line in the body starts with `> ` (one blockquote),
+  (b) the first non-blank line starts with `> Vault-editable prompt for `,
+  (c) the body contains the substring `Empty body is a no-op stub for now` —
+  treat as if EMPTY and set `user_prompt_body = ""`. The sentinel means the
+  user has never customized the prompt, functionally equivalent to empty.
+- If `user_prompt_body` is empty, fall back to the engagement-template prompt at
+  `spice/cowork/context/engagement-templates/<engagement.type>/prompts/monthly-review.md`.
 
 ## Harness testing
 
