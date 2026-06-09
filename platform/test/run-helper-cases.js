@@ -14196,6 +14196,125 @@ type: cowork-microscope
     assertTrue("HC-V0961-H-6: check-heartbeat/SKILL.md exists at platform/blueprints/cowork/skills/skills/check-heartbeat/SKILL.md AND contains `## Steps` section AND references `walkCadenceSidecars`", false, e && e.message);
   }
 
+  // v0.96.2 — daily-dashboard tsKeys hotfix (HC-V0962-DASH-1..3)
+  // ─────────────────────────────────────────────────────────────
+  // SpaceDailyDashboard must honor the semantic `day:` frontmatter field when
+  // bucketing cowork atomic notes into the Activity panel. Closes the
+  // timestamp-drift class where an EOD cron firing past midnight stamped
+  // created_at on the wrong calendar day (diagnosed by Workflow wzr3g3uad).
+  //
+  // DASH-1 — tsKeys arg includes `"day"` as the FIRST element (source-level)
+  // DASH-2 — inWindow surfaces a page on day 2026-06-08 when day matches but
+  //          created_at is the next morning (4am Tuesday)
+  // DASH-3 — inWindow does NOT double-surface that same page on day 2026-06-09
+  //          (day takes precedence over created_at)
+
+  const DASHBOARD_SRC = path.join(WORKSHOP, "platform/blueprints/daily/helpers/space-daily-dashboard.js");
+
+  console.log(`\n--- Case HC-V0962-DASH-1: tsKeys arg includes "day" as FIRST element ---`);
+  try {
+    const src = fs.readFileSync(DASHBOARD_SRC, "utf8");
+    // Match the tsKeys assignment line; first element of the array must be "day"
+    const m = src.match(/tsKeys:\s*\[\s*"([^"]+)"\s*,\s*"([^"]+)"\s*,\s*"([^"]+)"\s*\]/);
+    const first = m && m[1];
+    const second = m && m[2];
+    const third = m && m[3];
+    assertTrue("HC-V0962-DASH-1: space-daily-dashboard.js tsKeys arg passed to ActivityFeed is exactly [\"day\", \"created_at\", \"status_changed_at\"] (day FIRST so activity-feed prefers semantic frontmatter day-of-action over wall-clock timestamps)",
+      first === "day" && second === "created_at" && third === "status_changed_at",
+      `matched=${!!m} first=${first} second=${second} third=${third}`);
+  } catch (e) {
+    assertTrue("HC-V0962-DASH-1: space-daily-dashboard.js tsKeys arg passed to ActivityFeed is exactly [\"day\", \"created_at\", \"status_changed_at\"]", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0962-DASH-2: inWindow surfaces page on Monday when day:"2026-06-08" + created_at:"2026-06-09T04:10:00-06:00" ---`);
+  try {
+    // Extract the inWindow predicate body from the source and reconstruct it for
+    // direct invocation. The predicate is purely-functional given startIso/endIso
+    // closure; we evaluate the inWindow IIFE in a controlled scope.
+    const src = fs.readFileSync(DASHBOARD_SRC, "utf8");
+    // Find the inWindow function in _getActivityCount — it's the one we patched.
+    // Snip from `const inWindow = (p) =>` to the matching closing `};`.
+    const startMarker = "const inWindow = (p) => {";
+    const sIdx = src.indexOf(startMarker);
+    if (sIdx < 0) throw new Error("could not locate const inWindow = (p) => { in source");
+    // Naive brace-matching from sIdx
+    let depth = 0;
+    let i = sIdx + startMarker.length - 1; // start at the `{`
+    let endIdx = -1;
+    for (; i < src.length; i++) {
+      const ch = src[i];
+      if (ch === "{") depth++;
+      else if (ch === "}") {
+        depth--;
+        if (depth === 0) { endIdx = i + 1; break; }
+      }
+    }
+    if (endIdx < 0) throw new Error("could not locate end of inWindow function");
+    // Skip the trailing `;`
+    if (src[endIdx] === ";") endIdx++;
+    const inWindowSrc = src.slice(sIdx, endIdx);
+    // Build a Function that returns the predicate, closing over startIso/endIso
+    const makeInWindow = new Function("startIso", "endIso", inWindowSrc + "\nreturn inWindow;");
+    // Window: Monday 2026-06-08 local-ish ISO (we keep offset-free for simplicity;
+    // the YYYY-MM-DD branch only uses .slice(0, 10))
+    const startIso = "2026-06-08T00:00:00-06:00";
+    const endIso   = "2026-06-08T23:59:59-06:00";
+    const inWindow = makeInWindow(startIso, endIso);
+    // Note: day "2026-06-08" + created_at next morning 4am. The semantic `day`
+    // field must win — page belongs to Monday's window.
+    const page = {
+      day: "2026-06-08",
+      created_at: "2026-06-09T04:10:00-06:00",
+      type: "cowork-eod-review",
+    };
+    const got = inWindow(page);
+    assertTrue("HC-V0962-DASH-2: inWindow predicate (Monday window 2026-06-08) returns TRUE for { day: \"2026-06-08\", created_at: \"2026-06-09T04:10:00-06:00\" } — `day` semantic frontmatter wins over wall-clock created_at that rolled past midnight",
+      got === true,
+      `got=${got}`);
+  } catch (e) {
+    assertTrue("HC-V0962-DASH-2: inWindow predicate (Monday window) returns TRUE when day matches but created_at is next morning", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0962-DASH-3: inWindow does NOT double-surface page on Tuesday window when day:"2026-06-08" ---`);
+  try {
+    const src = fs.readFileSync(DASHBOARD_SRC, "utf8");
+    const startMarker = "const inWindow = (p) => {";
+    const sIdx = src.indexOf(startMarker);
+    if (sIdx < 0) throw new Error("could not locate const inWindow = (p) => { in source");
+    let depth = 0;
+    let i = sIdx + startMarker.length - 1;
+    let endIdx = -1;
+    for (; i < src.length; i++) {
+      const ch = src[i];
+      if (ch === "{") depth++;
+      else if (ch === "}") { depth--; if (depth === 0) { endIdx = i + 1; break; } }
+    }
+    if (endIdx < 0) throw new Error("could not locate end of inWindow function");
+    if (src[endIdx] === ";") endIdx++;
+    const inWindowSrc = src.slice(sIdx, endIdx);
+    const makeInWindow = new Function("startIso", "endIso", inWindowSrc + "\nreturn inWindow;");
+    // Tuesday window 2026-06-09
+    const startIso = "2026-06-09T00:00:00-06:00";
+    const endIso   = "2026-06-09T23:59:59-06:00";
+    const inWindow = makeInWindow(startIso, endIso);
+    // Same page as DASH-2 — created_at is in Tuesday's window but `day` is Monday.
+    // The semantic `day` field is consulted FIRST and is in-window-FALSE for Tuesday.
+    // Because `day` is present, it's authoritative — created_at is NOT consulted
+    // for this page (matches activity-feed v0.6.0 "any field present is authoritative"
+    // semantics). So the page must NOT double-surface on Tuesday.
+    const page = {
+      day: "2026-06-08",
+      created_at: "2026-06-09T04:10:00-06:00",
+      type: "cowork-eod-review",
+    };
+    const got = inWindow(page);
+    assertTrue("HC-V0962-DASH-3: inWindow predicate (Tuesday window 2026-06-09) returns FALSE for { day: \"2026-06-08\", created_at: \"2026-06-09T04:10:00-06:00\" } — `day` is authoritative; the page surfaces only on its semantic day (Monday), NOT double-surfacing on the calendar day that created_at happens to land on",
+      got === false,
+      `got=${got}`);
+  } catch (e) {
+    assertTrue("HC-V0962-DASH-3: inWindow predicate (Tuesday window) returns FALSE — day takes precedence over later created_at", false, e && e.message);
+  }
+
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
   if (fail > 0) {
