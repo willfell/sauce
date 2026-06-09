@@ -14560,6 +14560,438 @@ type: cowork-microscope
     assertTrue("HC-V0970-O-12: 5 cadence orchestrator SKILL.mds are ≤ 30 lines (shim shape)", false, e && e.message);
   }
 
+  // ==========================================================================
+  // v0.97.0 Rail T — WRAPPER TEMPLATES INLINE ORCHESTRATOR-INSTRUCTIONS
+  //
+  // S2.1: 14 RED sub-asserts pinning the new
+  //        composeFromOrchestratorInstructions({ cadence, engagement, prefs,
+  //          contract, cadence_mode, sourceRoot }) export on
+  //        compose-scheduled-job-wrappers-helper.js, plus the
+  //        scheduled-job-contract.json v0.35.0 pointer-field migration
+  //        (`wrapper_template_source` replaces inline `wrapper_template`).
+  //
+  // Coverage map:
+  //   T-1   — helper exports composeFromOrchestratorInstructions
+  //   T-2   — helper reads orchestrator-instructions/<cadence>.md from
+  //           sourceRoot
+  //   T-3   — after substitution, no `{{$<token>}}` orphans remain
+  //           (excluding `{{$today_*}}`, `{{$rating_kind_lines}}`,
+  //           `{{$pending_confirmation_lines}}` which are fire-time / runtime)
+  //   T-4   — after substitution, no `{{shared.<key>}}` markers remain
+  //   T-5   — `{{$today_date}}`/`{{$today_weekday}}`/etc. LEFT LITERAL
+  //   T-6   — `{{#if cadence_mode == "lens_shift"}}…{{else}}…{{/if}}` branch
+  //           resolves per input
+  //   T-7   — output structure: PRELUDE section before orchestrator body,
+  //           DONE block after
+  //   T-8   — PRELUDE instructs LLM to resolve `today_date`/`today_weekday`
+  //           at fire time
+  //   T-9   — scheduled-job-contract.json v0.35.0: each cadence has
+  //           `wrapper_template_source` pointer, no inline `wrapper_template`
+  //   T-10  — idempotency: same input → byte-identical output across calls
+  //   T-11  — per-engagement variation: different voice_notes → different
+  //           composed output
+  //   T-12  — lens_shift cold variant: cadence_mode "lens_shift" yields
+  //           `cowork-morning-briefing-cold` frontmatter type
+  //   T-13  — sidecar schema template inlined (`"schema_version": "1.0.0"` +
+  //           `"surfaced_kinds"`)
+  //   T-14  — rating callout template inlined (`> [!todo]+ Was today useful?`
+  //           + `cowork:rating-block schema=1.0.0`)
+  //
+  // ALL RED until S2.2-S2.3 land helper + contract changes. v0.96.x +
+  // v0.97.0 Rail O groups stay GREEN.
+
+  const SJ_HELPER_PATH_T = path.join(WORKSHOP, "platform/blueprints/cowork/helpers/compose-scheduled-job-wrappers-helper.js");
+  const SJ_CONTRACT_PATH_T = path.join(WORKSHOP, "platform/blueprints/cowork/data/scheduled-job-contract.json");
+  const ORCH_INSTR_DIR_T = path.join(WORKSHOP, "platform/blueprints/cowork/content/data/orchestrator-instructions");
+  const SOURCE_ROOT_T = path.join(WORKSHOP, "platform/blueprints/cowork");
+
+  function _loadSjContractT() {
+    return JSON.parse(fs.readFileSync(SJ_CONTRACT_PATH_T, "utf8"));
+  }
+
+  function _loadSjHelperT() {
+    delete require.cache[require.resolve(SJ_HELPER_PATH_T)];
+    return require(SJ_HELPER_PATH_T);
+  }
+
+  // Minimal engagement / prefs fixtures for T-3..T-8, T-10..T-14.
+  // Shape mirrors the existing case-accuris-shape fixture but pared down to
+  // the fields the new composeFromOrchestratorInstructions path is expected
+  // to touch. Designed to be self-contained: no I/O beyond the helper itself.
+  function _baseEngagementT() {
+    return {
+      id: "test-engagement",
+      label: "Test Engagement",
+      type: "w2-fte",
+      timezone: "America/Denver",
+    };
+  }
+  function _basePrefsT(voiceNotes) {
+    return {
+      mcps: {
+        chat: { kind: "chat", served_by: "X", connected: true, callout_type: "info" },
+        calendar: { kind: "calendar", served_by: "X", connected: true, callout_type: "tip" },
+        email: { kind: "email", served_by: "X", connected: true, callout_type: "quote" },
+      },
+      personality: {
+        notes: voiceNotes || "Casual, conversational, warm.",
+        vibe: "warm",
+        formality: "casual",
+        length: "medium",
+        pep_talk: false,
+      },
+    };
+  }
+
+  console.log(`\n--- Case HC-V0970-T-1: composeFromOrchestratorInstructions exported ---`);
+  try {
+    const helper = _loadSjHelperT();
+    assertTrue("HC-V0970-T-1: compose-scheduled-job-wrappers-helper.js exports `composeFromOrchestratorInstructions({ cadence, engagement, prefs, contract, cadence_mode, sourceRoot })` (Rail T export — composes wrapper body by reading orchestrator-instructions/<cadence>.md, substituting shared+engagement tokens, leaving fire-time tokens literal)",
+      typeof helper.composeFromOrchestratorInstructions === "function",
+      `expected function, got typeof=${typeof helper.composeFromOrchestratorInstructions}`);
+  } catch (e) {
+    assertTrue("HC-V0970-T-1: composeFromOrchestratorInstructions exported", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0970-T-2: composeFromOrchestratorInstructions reads orchestrator-instructions/<cadence>.md ---`);
+  try {
+    const helper = _loadSjHelperT();
+    const contract = _loadSjContractT();
+    const mbPath = path.join(ORCH_INSTR_DIR_T, "morning-briefing.md");
+    const mbContent = fs.existsSync(mbPath) ? fs.readFileSync(mbPath, "utf8") : "";
+    // Use a unique, otherwise-not-occurring substring from morning-briefing.md
+    // as the "fingerprint". The Step 8 sidecar emit marker is a load-bearing
+    // line that exists ONLY in the orchestrator-instructions file.
+    const fingerprint = "Step 8";
+    const hasFingerprint = mbContent.includes(fingerprint);
+    const out = helper.composeFromOrchestratorInstructions({
+      cadence: "morning-briefing",
+      engagement: _baseEngagementT(),
+      prefs: _basePrefsT(),
+      contract,
+      cadence_mode: "warm",
+      sourceRoot: SOURCE_ROOT_T,
+    });
+    const outStr = (out && typeof out === "object") ? (out.file_md || out.output || "") : (out || "");
+    assertTrue("HC-V0970-T-2: composeFromOrchestratorInstructions output contains content sourced from orchestrator-instructions/morning-briefing.md (fingerprint `Step 8` propagates from data file → composed wrapper, proving the helper reads the file and does NOT use the inline contract.cadences[cadence].wrapper_template field)",
+      hasFingerprint && typeof outStr === "string" && outStr.includes(fingerprint),
+      `mbContent has fingerprint=${hasFingerprint}; output has fingerprint=${typeof outStr === "string" && outStr.includes(fingerprint)} (output type=${typeof outStr}, length=${typeof outStr === "string" ? outStr.length : "n/a"})`);
+  } catch (e) {
+    assertTrue("HC-V0970-T-2: composeFromOrchestratorInstructions reads orchestrator-instructions/<cadence>.md", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0970-T-3: no orphan {{$<token>}} after substitution (excluding fire-time tokens) ---`);
+  try {
+    const helper = _loadSjHelperT();
+    const contract = _loadSjContractT();
+    const out = helper.composeFromOrchestratorInstructions({
+      cadence: "morning-briefing",
+      engagement: _baseEngagementT(),
+      prefs: _basePrefsT(),
+      contract,
+      cadence_mode: "warm",
+      sourceRoot: SOURCE_ROOT_T,
+    });
+    const outStr = (out && typeof out === "object") ? (out.file_md || out.output || "") : (out || "");
+    // Allowlist: tokens that MUST stay literal because they're resolved at
+    // fire time (today_*) or runtime by composer sub-helpers
+    // (rating_kind_lines, pending_confirmation_lines).
+    const ALLOWLIST = new Set([
+      "{{$today_date}}",
+      "{{$today_weekday}}",
+      "{{$today_iso}}",
+      "{{$today_year}}",
+      "{{$today_month}}",
+      "{{$today_day}}",
+      "{{$today_yyyy_mm}}",
+      "{{$today_yyyy}}",
+      "{{$today_yyyymmdd}}",
+      "{{$today_iso_date}}",
+      "{{$rating_kind_lines}}",
+      "{{$pending_confirmation_lines}}",
+    ]);
+    const orphans = (typeof outStr === "string"
+      ? (outStr.match(/\{\{\$[a-z_]+\}\}/gi) || [])
+      : []
+    ).filter(tok => !ALLOWLIST.has(tok) && !/^\{\{\$today_/.test(tok));
+    assertTrue("HC-V0970-T-3: composed output has NO orphan `{{$<varname>}}` engagement-level tokens (allowlist: {{$today_*}}, {{$rating_kind_lines}}, {{$pending_confirmation_lines}} — those resolve at fire time or by downstream sub-helpers)",
+      orphans.length === 0,
+      `unexpected orphan tokens: ${orphans.slice(0, 5).join(", ")}${orphans.length > 5 ? ` (+${orphans.length - 5} more)` : ""}`);
+  } catch (e) {
+    assertTrue("HC-V0970-T-3: no orphan {{$<token>}} after substitution", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0970-T-4: no {{shared.<key>}} orphans after substitution ---`);
+  try {
+    const helper = _loadSjHelperT();
+    const contract = _loadSjContractT();
+    const out = helper.composeFromOrchestratorInstructions({
+      cadence: "morning-briefing",
+      engagement: _baseEngagementT(),
+      prefs: _basePrefsT(),
+      contract,
+      cadence_mode: "warm",
+      sourceRoot: SOURCE_ROOT_T,
+    });
+    const outStr = (out && typeof out === "object") ? (out.file_md || out.output || "") : (out || "");
+    const sharedOrphans = typeof outStr === "string"
+      ? (outStr.match(/\{\{shared\.[a-z_]+\}\}/gi) || [])
+      : [];
+    assertTrue("HC-V0970-T-4: composed output has NO `{{shared.<key>}}` markers (all shared-clauses inlined from _shared-clauses.md — landmine #20 mode 2 enforcement applied to the new compose path)",
+      sharedOrphans.length === 0,
+      `unexpected shared-key orphans: ${sharedOrphans.slice(0, 5).join(", ")}`);
+  } catch (e) {
+    assertTrue("HC-V0970-T-4: no {{shared.<key>}} orphans after substitution", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0970-T-5: {{$today_*}} tokens left literal in output ---`);
+  try {
+    const helper = _loadSjHelperT();
+    const contract = _loadSjContractT();
+    const out = helper.composeFromOrchestratorInstructions({
+      cadence: "morning-briefing",
+      engagement: _baseEngagementT(),
+      prefs: _basePrefsT(),
+      contract,
+      cadence_mode: "warm",
+      sourceRoot: SOURCE_ROOT_T,
+    });
+    const outStr = (out && typeof out === "object") ? (out.file_md || out.output || "") : (out || "");
+    // At minimum the canonical {{$today_date}} + {{$today_weekday}} pair must
+    // survive substitution as literal substrings (the PRELUDE instructs the
+    // LLM to resolve them at fire time).
+    const hasTodayDate = typeof outStr === "string" && outStr.includes("{{$today_date}}");
+    const hasTodayWeekday = typeof outStr === "string" && outStr.includes("{{$today_weekday}}");
+    assertTrue("HC-V0970-T-5: composed output contains literal `{{$today_date}}` AND `{{$today_weekday}}` substrings (fire-time tokens left unsubstituted — PRELUDE block tells the LLM to resolve them when the scheduled-job actually fires, NOT at compose time)",
+      hasTodayDate && hasTodayWeekday,
+      `hasTodayDate=${hasTodayDate} hasTodayWeekday=${hasTodayWeekday}`);
+  } catch (e) {
+    assertTrue("HC-V0970-T-5: {{$today_*}} tokens left literal in output", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0970-T-6: lens_shift conditional resolves per cadence_mode ---`);
+  try {
+    const helper = _loadSjHelperT();
+    const contract = _loadSjContractT();
+    const baseArgs = {
+      cadence: "morning-briefing",
+      engagement: _baseEngagementT(),
+      prefs: _basePrefsT(),
+      contract,
+      sourceRoot: SOURCE_ROOT_T,
+    };
+    const outWarm = helper.composeFromOrchestratorInstructions(Object.assign({}, baseArgs, { cadence_mode: "warm" }));
+    const outCold = helper.composeFromOrchestratorInstructions(Object.assign({}, baseArgs, { cadence_mode: "lens_shift" }));
+    const warmStr = (outWarm && typeof outWarm === "object") ? (outWarm.file_md || outWarm.output || "") : (outWarm || "");
+    const coldStr = (outCold && typeof outCold === "object") ? (outCold.file_md || outCold.output || "") : (outCold || "");
+    // Conditional resolution: ALL `{{#if ...}}…{{else}}…{{/if}}` markers MUST
+    // be gone from both branches' output (substituted away by the helper).
+    const warmHasIfMarker = typeof warmStr === "string" && /\{\{\s*#if\s+cadence_mode/.test(warmStr);
+    const coldHasIfMarker = typeof coldStr === "string" && /\{\{\s*#if\s+cadence_mode/.test(coldStr);
+    // And the two branch outputs MUST differ (different cadence_mode picks
+    // different branch content).
+    const branchesDiffer = typeof warmStr === "string" && typeof coldStr === "string" && warmStr !== coldStr;
+    assertTrue("HC-V0970-T-6: `{{#if cadence_mode == \"lens_shift\"}}…{{else}}…{{/if}}` conditional resolves per `cadence_mode` input (warm output picks the {{else}} branch, lens_shift output picks the #if branch; ALL `{{#if}}` markers are gone from both outputs; outputs differ byte-wise)",
+      !warmHasIfMarker && !coldHasIfMarker && branchesDiffer,
+      `warmHasIfMarker=${warmHasIfMarker} coldHasIfMarker=${coldHasIfMarker} branchesDiffer=${branchesDiffer}`);
+  } catch (e) {
+    assertTrue("HC-V0970-T-6: lens_shift conditional resolves per cadence_mode", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0970-T-7: wrapper output has PRELUDE + DONE structure ---`);
+  try {
+    const helper = _loadSjHelperT();
+    const contract = _loadSjContractT();
+    const out = helper.composeFromOrchestratorInstructions({
+      cadence: "morning-briefing",
+      engagement: _baseEngagementT(),
+      prefs: _basePrefsT(),
+      contract,
+      cadence_mode: "warm",
+      sourceRoot: SOURCE_ROOT_T,
+    });
+    const outStr = (out && typeof out === "object") ? (out.file_md || out.output || "") : (out || "");
+    // Accept "Step PRELUDE" / "PRELUDE" and "Step DONE" / "DONE" as section
+    // markers (allow either prefix form). PRELUDE must appear BEFORE the
+    // orchestrator body; DONE must appear AFTER.
+    const preludeRe = /(Step\s+PRELUDE|^|\n)PRELUDE\b/m;
+    const doneRe = /(Step\s+DONE|^|\n)DONE\b/m;
+    const preludeMatch = typeof outStr === "string" ? outStr.match(preludeRe) : null;
+    const doneMatch = typeof outStr === "string" ? outStr.match(doneRe) : null;
+    const hasPrelude = !!preludeMatch;
+    const hasDone = !!doneMatch;
+    const ordered = hasPrelude && hasDone && preludeMatch.index < doneMatch.index;
+    assertTrue("HC-V0970-T-7: composed wrapper output has `PRELUDE` section (or `Step PRELUDE`) BEFORE the orchestrator body AND `DONE` block (or `Step DONE`) AFTER (envelope structure that brackets the LLM-resolved orchestrator-instructions body — gives the executor a stable beginning/end marker pair)",
+      hasPrelude && hasDone && ordered,
+      `hasPrelude=${hasPrelude} hasDone=${hasDone} ordered=${ordered}`);
+  } catch (e) {
+    assertTrue("HC-V0970-T-7: wrapper output has PRELUDE + DONE structure", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0970-T-8: PRELUDE instructs LLM to resolve today_* at fire time ---`);
+  try {
+    const helper = _loadSjHelperT();
+    const contract = _loadSjContractT();
+    const out = helper.composeFromOrchestratorInstructions({
+      cadence: "morning-briefing",
+      engagement: _baseEngagementT(),
+      prefs: _basePrefsT(),
+      contract,
+      cadence_mode: "warm",
+      sourceRoot: SOURCE_ROOT_T,
+    });
+    const outStr = (out && typeof out === "object") ? (out.file_md || out.output || "") : (out || "");
+    const hasResolve = typeof outStr === "string" && /Resolve today's date in/i.test(outStr);
+    const hasTodayDateMention = typeof outStr === "string" && outStr.includes("today_date");
+    const hasTodayWeekdayMention = typeof outStr === "string" && outStr.includes("today_weekday");
+    assertTrue("HC-V0970-T-8: PRELUDE block contains the `Resolve today's date in` instruction PLUS `today_date` AND `today_weekday` mentions (tells the executing LLM to substitute these tokens at fire time using the engagement's timezone — landmine #15 explicit-clock contract enforced in the new compose path)",
+      hasResolve && hasTodayDateMention && hasTodayWeekdayMention,
+      `hasResolve=${hasResolve} hasTodayDateMention=${hasTodayDateMention} hasTodayWeekdayMention=${hasTodayWeekdayMention}`);
+  } catch (e) {
+    assertTrue("HC-V0970-T-8: PRELUDE instructs LLM to resolve today_* at fire time", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0970-T-9: scheduled-job-contract.json has wrapper_template_source pointer (replaces inline wrapper_template) ---`);
+  try {
+    const contract = _loadSjContractT();
+    for (const cadence of ["morning-briefing", "midday-tripwire", "eod-review", "weekly-review", "monthly-review"]) {
+      const cadenceEntry = contract.cadences && contract.cadences[cadence];
+      const expectedPointer = `orchestrator-instructions/${cadence}.md`;
+      const hasPointer = !!(cadenceEntry && typeof cadenceEntry.wrapper_template_source === "string" && cadenceEntry.wrapper_template_source.includes(expectedPointer));
+      assertTrue(`HC-V0970-T-9-${cadence}: scheduled-job-contract.json cadences[${cadence}].wrapper_template_source is a string pointing to \`orchestrator-instructions/${cadence}.md\` (pointer-field migration — Rail T removes inline wrapper_template in favor of single-source data files)`,
+        hasPointer,
+        `expected wrapper_template_source containing "${expectedPointer}"; got ${JSON.stringify(cadenceEntry && cadenceEntry.wrapper_template_source)}`);
+      const hasInline = !!(cadenceEntry && cadenceEntry.wrapper_template !== undefined);
+      assertTrue(`HC-V0970-T-9-${cadence}-no-inline: scheduled-job-contract.json cadences[${cadence}] has NO inline \`wrapper_template\` field (Rail T migration — inline template REMOVED so the single source of truth is the data file pointed to by wrapper_template_source)`,
+        !hasInline,
+        `inline wrapper_template still present for ${cadence}`);
+    }
+    // Also bump-aware: contract_version should advance to 0.35.0 for the
+    // Rail T migration.
+    assertTrue("HC-V0970-T-9-contract-version: scheduled-job-contract.json contract_version bumped to 0.35.0 for Rail T migration (pointer-field replaces inline wrapper_template — schema change → MINOR bump)",
+      contract.contract_version === "0.35.0",
+      `expected contract_version "0.35.0", got ${JSON.stringify(contract.contract_version)}`);
+  } catch (e) {
+    assertTrue("HC-V0970-T-9: scheduled-job-contract.json has wrapper_template_source pointer", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0970-T-10: composeFromOrchestratorInstructions is idempotent (byte-identical) ---`);
+  try {
+    const helper = _loadSjHelperT();
+    const contract = _loadSjContractT();
+    const args = {
+      cadence: "morning-briefing",
+      engagement: _baseEngagementT(),
+      prefs: _basePrefsT(),
+      contract,
+      cadence_mode: "warm",
+      sourceRoot: SOURCE_ROOT_T,
+    };
+    const out1 = helper.composeFromOrchestratorInstructions(args);
+    const out2 = helper.composeFromOrchestratorInstructions(args);
+    const s1 = (out1 && typeof out1 === "object") ? (out1.file_md || out1.output || "") : (out1 || "");
+    const s2 = (out2 && typeof out2 === "object") ? (out2.file_md || out2.output || "") : (out2 || "");
+    assertTrue("HC-V0970-T-10: same input → byte-identical output across two composeFromOrchestratorInstructions calls (idempotent / pure helper — no clock, no randomness; deterministic-fire-rules contract from compose-body / compose-scheduled-job-wrappers extended to the new compose path)",
+      typeof s1 === "string" && typeof s2 === "string" && s1 === s2 && s1.length > 0,
+      `s1.length=${typeof s1 === "string" ? s1.length : "n/a"} s2.length=${typeof s2 === "string" ? s2.length : "n/a"} equal=${s1 === s2}`);
+  } catch (e) {
+    assertTrue("HC-V0970-T-10: composeFromOrchestratorInstructions is idempotent (byte-identical)", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0970-T-11: different voice_notes per engagement → different composed output ---`);
+  try {
+    const helper = _loadSjHelperT();
+    const contract = _loadSjContractT();
+    const baseArgs = {
+      cadence: "morning-briefing",
+      engagement: _baseEngagementT(),
+      contract,
+      cadence_mode: "warm",
+      sourceRoot: SOURCE_ROOT_T,
+    };
+    const outA = helper.composeFromOrchestratorInstructions(Object.assign({}, baseArgs, {
+      prefs: _basePrefsT("Engagement A voice: dry, terse, blunt."),
+    }));
+    const outB = helper.composeFromOrchestratorInstructions(Object.assign({}, baseArgs, {
+      prefs: _basePrefsT("Engagement B voice: bubbly, encouraging, warm."),
+    }));
+    const sA = (outA && typeof outA === "object") ? (outA.file_md || outA.output || "") : (outA || "");
+    const sB = (outB && typeof outB === "object") ? (outB.file_md || outB.output || "") : (outB || "");
+    assertTrue("HC-V0970-T-11: different engagement.prefs.personality.notes (voice_notes) → different composed wrapper output (proves substitution layer is engagement-aware — the same orchestrator-instructions/<cadence>.md source produces engagement-distinct outputs after Rail T compose)",
+      typeof sA === "string" && typeof sB === "string" && sA !== sB && sA.length > 0 && sB.length > 0,
+      `sA.length=${typeof sA === "string" ? sA.length : "n/a"} sB.length=${typeof sB === "string" ? sB.length : "n/a"} differ=${sA !== sB}`);
+  } catch (e) {
+    assertTrue("HC-V0970-T-11: different voice_notes per engagement → different composed output", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0970-T-12: lens_shift cold variant → cowork-morning-briefing-cold frontmatter type ---`);
+  try {
+    const helper = _loadSjHelperT();
+    const contract = _loadSjContractT();
+    const outCold = helper.composeFromOrchestratorInstructions({
+      cadence: "morning-briefing",
+      engagement: _baseEngagementT(),
+      prefs: _basePrefsT(),
+      contract,
+      cadence_mode: "lens_shift",
+      sourceRoot: SOURCE_ROOT_T,
+    });
+    const coldStr = (outCold && typeof outCold === "object") ? (outCold.file_md || outCold.output || "") : (outCold || "");
+    const hasColdType = typeof coldStr === "string" && coldStr.includes("cowork-morning-briefing-cold");
+    // And the warm-only frontmatter type MUST NOT appear as a standalone
+    // identifier in the cold output's frontmatter (it may appear in commentary
+    // about the type; the load-bearing check is the cold marker is present).
+    assertTrue("HC-V0970-T-12: cadence_mode=`lens_shift` produces composed output containing `cowork-morning-briefing-cold` (the cold frontmatter type — landmine #19 alias-free type contract — substituted into the cold branch's frontmatter, distinguishing it from the warm `cowork-morning-briefing` variant)",
+      hasColdType,
+      `cold output missing "cowork-morning-briefing-cold" substring (output length=${typeof coldStr === "string" ? coldStr.length : "n/a"})`);
+  } catch (e) {
+    assertTrue("HC-V0970-T-12: lens_shift cold variant → cowork-morning-briefing-cold frontmatter type", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0970-T-13: composed output contains sidecar schema template inline ---`);
+  try {
+    const helper = _loadSjHelperT();
+    const contract = _loadSjContractT();
+    const out = helper.composeFromOrchestratorInstructions({
+      cadence: "morning-briefing",
+      engagement: _baseEngagementT(),
+      prefs: _basePrefsT(),
+      contract,
+      cadence_mode: "warm",
+      sourceRoot: SOURCE_ROOT_T,
+    });
+    const outStr = (out && typeof out === "object") ? (out.file_md || out.output || "") : (out || "");
+    const hasSchemaVersion = typeof outStr === "string" && outStr.includes(`"schema_version": "1.0.0"`);
+    const hasSurfacedKinds = typeof outStr === "string" && outStr.includes(`"surfaced_kinds"`);
+    assertTrue("HC-V0970-T-13: composed wrapper output contains the sidecar schema template inline (`\"schema_version\": \"1.0.0\"` AND `\"surfaced_kinds\"` substrings — Step 8 cadence-sidecar emit block from _shared-clauses.md `sidecar_schema_template` clause inlined into the wrapper so the executing LLM has the exact JSON shape to emit)",
+      hasSchemaVersion && hasSurfacedKinds,
+      `hasSchemaVersion=${hasSchemaVersion} hasSurfacedKinds=${hasSurfacedKinds}`);
+  } catch (e) {
+    assertTrue("HC-V0970-T-13: composed output contains sidecar schema template inline", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0970-T-14: composed output contains rating callout template inline ---`);
+  try {
+    const helper = _loadSjHelperT();
+    const contract = _loadSjContractT();
+    const out = helper.composeFromOrchestratorInstructions({
+      cadence: "morning-briefing",
+      engagement: _baseEngagementT(),
+      prefs: _basePrefsT(),
+      contract,
+      cadence_mode: "warm",
+      sourceRoot: SOURCE_ROOT_T,
+    });
+    const outStr = (out && typeof out === "object") ? (out.file_md || out.output || "") : (out || "");
+    const hasRatingHeader = typeof outStr === "string" && outStr.includes("> [!todo]+ Was today useful?");
+    const hasRatingMarker = typeof outStr === "string" && outStr.includes("cowork:rating-block schema=1.0.0");
+    assertTrue("HC-V0970-T-14: composed wrapper output contains the rating callout template inline (`> [!todo]+ Was today useful?` callout header AND `cowork:rating-block schema=1.0.0` marker — Step 4 rating block from _shared-clauses.md `rating_callout_template` clause inlined so the executor pastes the exact callout shape that compose-body downstream rating-aware composition can detect)",
+      hasRatingHeader && hasRatingMarker,
+      `hasRatingHeader=${hasRatingHeader} hasRatingMarker=${hasRatingMarker}`);
+  } catch (e) {
+    assertTrue("HC-V0970-T-14: composed output contains rating callout template inline", false, e && e.message);
+  }
+
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
   if (fail > 0) {
