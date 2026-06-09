@@ -4,6 +4,26 @@ This file archives the per-cycle status snapshots that previously lived in `CLAU
 
 ---
 
+### v0.97.1 — reconciler-as-cadence (2026-06-09 close)
+
+**Codename:** `reconciler-as-cadence`. Workshop 0.97.0 → 0.97.1; cowork 0.35.0 → 0.35.1; contract 0.35.0 → 0.35.1.
+
+**Migration:** Reconciler moves from local launchd (v0.97.0 Rail R) to claude.ai scheduled job. NEW `reconcile-cowork` cadence in scheduled-job-contract.json fires nightly 03:00 local via the same Rail A mechanism as other cadences. `sauce reconcile-cowork --install-launchd` deprecated (one-cycle grace).
+
+**Why:** v0.97.0 split automation into TWO surfaces (cron LLM + local launchd). User feedback: consolidate to ONE surface (claude.ai scheduled jobs). The reconciler work IS doable by an LLM via Obsidian MCP only.
+
+**New artifacts:** 1 orchestrator-instructions file (`content/data/orchestrator-instructions/reconcile-cowork.md` — 9-step LLM-driven reconciler) + 1 SKILL.md shim (`skills/orchestrators/reconcile-cowork/SKILL.md` — 21 lines, single-source pattern) + 1 cadence entry (`reconcile-cowork` in `scheduled-job-contract.json`, default_cron `0 3 * * *`, sub_skill_name null, includes_microscopes false).
+
+**Modified:** `cmd-reconcile-cowork.js` (deprecation notice + printHelp flag); `manifest.json` (registers both new files); `cadence_order` extended to include reconcile-cowork; cycle artifacts.
+
+**Action required post-deploy:** run `/cowork sync-scheduled-jobs` once from claude.ai's Cowork UI. Rail A picks up the new cadence + creates `cowork-reconcile-cowork-<engagement_id>` tasks per enabled engagement. Existing 10 tasks: prompt bodies refresh (contract version bumped → byte-diff).
+
+**HC sub-asserts added:** 15 (12 RC + 3 DEPR). Final helper-cases 2230/0. Cowork-smoke 954/0.
+
+**Parked for v0.98.0+:** removal of `--install-launchd` flag entirely; possibly removal of `cowork-reconciler` pure-Node mechanism (kept for manual `sauce reconcile-cowork --dry-run`).
+
+---
+
 ### v0.97.0 — cowork-rethought-2 (2026-06-09 close)
 
 **Codename:** `cowork-rethought-2`. Workshop 0.96.2 → 0.97.0; cowork 0.34.1 → 0.35.0; contract 0.34.1 → 0.35.0.
