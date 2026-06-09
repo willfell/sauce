@@ -15604,6 +15604,214 @@ type: cowork-microscope
     assertTrue("HC-V0970-R-16: launchd installer module + plist template", false, e && e.message);
   }
 
+  // =========================================================================
+  // v0.97.1 reconciler-as-cadence — 15 sub-asserts (12 RC + 3 DEPR)
+  // =========================================================================
+  const _V0971_RC_INSTRUCTIONS_PATH = "platform/blueprints/cowork/content/data/orchestrator-instructions/reconcile-cowork.md";
+  const _V0971_RC_SHIM_PATH = "platform/blueprints/cowork/skills/orchestrators/reconcile-cowork/SKILL.md";
+  const _V0971_RC_CONTRACT_PATH = "platform/blueprints/cowork/data/scheduled-job-contract.json";
+  const _V0971_RC_CMD_PATH = "platform/cli/cmd-reconcile-cowork.js";
+
+  console.log(`\n--- Case HC-V0971-RC-1: reconcile-cowork.md orchestrator-instructions file exists ---`);
+  try {
+    assertTrue(
+      "HC-V0971-RC-1: orchestrator-instructions/reconcile-cowork.md exists",
+      fs.existsSync(_V0971_RC_INSTRUCTIONS_PATH),
+      `expected ${_V0971_RC_INSTRUCTIONS_PATH} to exist`
+    );
+  } catch (e) {
+    assertTrue("HC-V0971-RC-1: orchestrator-instructions/reconcile-cowork.md exists", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0971-RC-2: contract has reconcile-cowork cadence ---`);
+  try {
+    const contract = JSON.parse(fs.readFileSync(_V0971_RC_CONTRACT_PATH, "utf8"));
+    const rc = contract.cadences && contract.cadences["reconcile-cowork"];
+    assertTrue(
+      "HC-V0971-RC-2: cadences.reconcile-cowork exists",
+      !!rc,
+      `got: ${JSON.stringify(rc)}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0971-RC-2: cadences.reconcile-cowork exists", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0971-RC-3: reconcile-cowork cadence has correct wrapper_template_source ---`);
+  try {
+    const contract = JSON.parse(fs.readFileSync(_V0971_RC_CONTRACT_PATH, "utf8"));
+    const rc = contract.cadences && contract.cadences["reconcile-cowork"];
+    assertTrue(
+      "HC-V0971-RC-3: cadence has wrapper_template_source pointing at reconcile-cowork.md",
+      rc && rc.wrapper_template_source === "orchestrator-instructions/reconcile-cowork.md",
+      `got: ${rc && rc.wrapper_template_source}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0971-RC-3: cadence has wrapper_template_source pointing at reconcile-cowork.md", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0971-RC-4: reconcile-cowork cadence has default_cron 0 3 * * * ---`);
+  try {
+    const contract = JSON.parse(fs.readFileSync(_V0971_RC_CONTRACT_PATH, "utf8"));
+    const rc = contract.cadences && contract.cadences["reconcile-cowork"];
+    assertTrue(
+      "HC-V0971-RC-4: cadence has default_cron === '0 3 * * *'",
+      rc && rc.default_cron === "0 3 * * *",
+      `got: ${rc && rc.default_cron}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0971-RC-4: cadence has default_cron === '0 3 * * *'", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0971-RC-5: reconcile-cowork cadence has includes_microscopes === false ---`);
+  try {
+    const contract = JSON.parse(fs.readFileSync(_V0971_RC_CONTRACT_PATH, "utf8"));
+    const rc = contract.cadences && contract.cadences["reconcile-cowork"];
+    assertTrue(
+      "HC-V0971-RC-5: cadence has includes_microscopes === false",
+      rc && rc.includes_microscopes === false,
+      `got: ${rc && rc.includes_microscopes}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0971-RC-5: cadence has includes_microscopes === false", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0971-RC-6: reconcile-cowork cadence has orchestrator_skill_name cowork:reconcile-cowork ---`);
+  try {
+    const contract = JSON.parse(fs.readFileSync(_V0971_RC_CONTRACT_PATH, "utf8"));
+    const rc = contract.cadences && contract.cadences["reconcile-cowork"];
+    assertTrue(
+      "HC-V0971-RC-6: cadence has orchestrator_skill_name === 'cowork:reconcile-cowork'",
+      rc && rc.orchestrator_skill_name === "cowork:reconcile-cowork",
+      `got: ${rc && rc.orchestrator_skill_name}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0971-RC-6: cadence has orchestrator_skill_name === 'cowork:reconcile-cowork'", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0971-RC-7: reconcile-cowork cadence has sub_skill_name null ---`);
+  try {
+    const contract = JSON.parse(fs.readFileSync(_V0971_RC_CONTRACT_PATH, "utf8"));
+    const rc = contract.cadences && contract.cadences["reconcile-cowork"];
+    assertTrue(
+      "HC-V0971-RC-7: cadence has sub_skill_name === null (no atomic note write)",
+      rc && rc.sub_skill_name === null,
+      `got: ${rc && rc.sub_skill_name}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0971-RC-7: cadence has sub_skill_name === null", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0971-RC-8: contract_version === '0.35.1' ---`);
+  try {
+    const contract = JSON.parse(fs.readFileSync(_V0971_RC_CONTRACT_PATH, "utf8"));
+    assertTrue(
+      "HC-V0971-RC-8: contract_version === '0.35.1'",
+      contract.contract_version === "0.35.1",
+      `got: ${contract.contract_version}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0971-RC-8: contract_version === '0.35.1'", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0971-RC-9: reconcile-cowork.md mentions rating callout parsing ---`);
+  try {
+    const body = fs.readFileSync(_V0971_RC_INSTRUCTIONS_PATH, "utf8");
+    const hasRatingCallout = /rating callout/i.test(body) || (/Step 3/i.test(body) && /rating/i.test(body));
+    assertTrue(
+      "HC-V0971-RC-9: orchestrator-instructions mentions rating callout parsing",
+      hasRatingCallout,
+      `body length=${body.length}; no 'rating callout' or 'Step 3' + 'rating' match`
+    );
+  } catch (e) {
+    assertTrue("HC-V0971-RC-9: orchestrator-instructions mentions rating callout parsing", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0971-RC-10: reconcile-cowork.md mentions learned_weights + user-preferences.md ---`);
+  try {
+    const body = fs.readFileSync(_V0971_RC_INSTRUCTIONS_PATH, "utf8");
+    const hasLW = /learned_weights/.test(body);
+    const hasPrefs = /user-preferences\.md/.test(body);
+    assertTrue(
+      "HC-V0971-RC-10: orchestrator-instructions mentions learned_weights + user-preferences.md",
+      hasLW && hasPrefs,
+      `hasLW=${hasLW} hasPrefs=${hasPrefs}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0971-RC-10: orchestrator-instructions mentions learned_weights + user-preferences.md", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0971-RC-11: reconcile-cowork.md mentions heartbeat + memory.md ---`);
+  try {
+    const body = fs.readFileSync(_V0971_RC_INSTRUCTIONS_PATH, "utf8");
+    const hasHeartbeat = /heartbeat/i.test(body);
+    const hasMemory = /memory\.md/.test(body);
+    assertTrue(
+      "HC-V0971-RC-11: orchestrator-instructions mentions heartbeat + memory.md",
+      hasHeartbeat && hasMemory,
+      `hasHeartbeat=${hasHeartbeat} hasMemory=${hasMemory}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0971-RC-11: orchestrator-instructions mentions heartbeat + memory.md", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0971-RC-12: reconcile-cowork SKILL.md shim exists AND ≤ 30 lines ---`);
+  try {
+    const shimExists = fs.existsSync(_V0971_RC_SHIM_PATH);
+    let lineCount = -1;
+    if (shimExists) {
+      const body = fs.readFileSync(_V0971_RC_SHIM_PATH, "utf8");
+      lineCount = body.split("\n").length;
+    }
+    assertTrue(
+      "HC-V0971-RC-12: SKILL.md shim exists AND ≤ 30 lines",
+      shimExists && lineCount > 0 && lineCount <= 30,
+      `shimExists=${shimExists} lineCount=${lineCount}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0971-RC-12: SKILL.md shim exists AND ≤ 30 lines", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0971-DEPR-1: cmd-reconcile-cowork.js content includes DEPRECATED + v0.97.1 ---`);
+  try {
+    const body = fs.readFileSync(_V0971_RC_CMD_PATH, "utf8");
+    const hasDeprecated = /DEPRECATED/.test(body);
+    const hasV0971 = /v0\.97\.1/.test(body);
+    assertTrue(
+      "HC-V0971-DEPR-1: cmd-reconcile-cowork.js mentions DEPRECATED + v0.97.1",
+      hasDeprecated && hasV0971,
+      `hasDeprecated=${hasDeprecated} hasV0971=${hasV0971}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0971-DEPR-1: cmd-reconcile-cowork.js mentions DEPRECATED + v0.97.1", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0971-DEPR-2: cmd-reconcile-cowork.js references sync-scheduled-jobs ---`);
+  try {
+    const body = fs.readFileSync(_V0971_RC_CMD_PATH, "utf8");
+    const hasSlash = /\/cowork sync-scheduled-jobs/.test(body);
+    const hasColon = /cowork:sync-scheduled-jobs/.test(body);
+    assertTrue(
+      "HC-V0971-DEPR-2: cmd-reconcile-cowork.js references /cowork sync-scheduled-jobs or cowork:sync-scheduled-jobs",
+      hasSlash || hasColon,
+      `hasSlash=${hasSlash} hasColon=${hasColon}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0971-DEPR-2: cmd-reconcile-cowork.js references sync-scheduled-jobs", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0971-DEPR-3: cmd-reconcile-cowork.js retains installer.installLaunchd() call ---`);
+  try {
+    const body = fs.readFileSync(_V0971_RC_CMD_PATH, "utf8");
+    const hasInstall = /installer\.installLaunchd\(\)/.test(body);
+    assertTrue(
+      "HC-V0971-DEPR-3: cmd-reconcile-cowork.js still calls installer.installLaunchd() (functional grace)",
+      hasInstall,
+      `hasInstall=${hasInstall}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0971-DEPR-3: cmd-reconcile-cowork.js still calls installer.installLaunchd()", false, e && e.message);
+  }
+
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
   if (fail > 0) {
