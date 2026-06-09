@@ -854,7 +854,7 @@ async function caseHC_EPI_1_DirAbsentFetched() {
             fs.mkdirSync(path.join(sibling, "platform/mechanisms/test-epi"), { recursive: true });
             fs.writeFileSync(path.join(sibling, "platform/manifest.json"),
                 JSON.stringify({
-                    workshop_version: "0.96.2",
+                    workshop_version: "0.97.0",
                     foundational_plugins: [],
                     mechanisms: [{ name: "test-epi", version: "0.1.0", path: "mechanisms/test-epi" }],
                     blueprints: []
@@ -868,7 +868,7 @@ async function caseHC_EPI_1_DirAbsentFetched() {
             seedConfig(vaultPath, {
                 config: { workshop_relative_path: path.relative(vaultPath, sibling) },
                 subscription: {
-                    workshop_version: "0.96.2",
+                    workshop_version: "0.97.0",
                     mechanisms: [{ name: "test-epi", version: "0.1.0" }],
                     blueprints: []
                 }
@@ -911,7 +911,7 @@ async function caseHC_EPI_2_DirPresentSkipped() {
             fs.mkdirSync(path.join(sibling, "platform/mechanisms/test-epi"), { recursive: true });
             fs.writeFileSync(path.join(sibling, "platform/manifest.json"),
                 JSON.stringify({
-                    workshop_version: "0.96.2", foundational_plugins: [],
+                    workshop_version: "0.97.0", foundational_plugins: [],
                     mechanisms: [{ name: "test-epi", version: "0.1.0", path: "mechanisms/test-epi" }],
                     blueprints: []
                 }, null, 2));
@@ -924,7 +924,7 @@ async function caseHC_EPI_2_DirPresentSkipped() {
             seedConfig(vaultPath, {
                 config: { workshop_relative_path: path.relative(vaultPath, sibling) },
                 subscription: {
-                    workshop_version: "0.96.2",
+                    workshop_version: "0.97.0",
                     mechanisms: [{ name: "test-epi", version: "0.1.0" }], blueprints: []
                 }
             });
@@ -970,7 +970,7 @@ async function caseHC_EPI_3_FetchFails() {
             fs.mkdirSync(path.join(sibling, "platform/mechanisms/test-epi"), { recursive: true });
             fs.writeFileSync(path.join(sibling, "platform/manifest.json"),
                 JSON.stringify({
-                    workshop_version: "0.96.2", foundational_plugins: [],
+                    workshop_version: "0.97.0", foundational_plugins: [],
                     mechanisms: [{ name: "test-epi", version: "0.1.0", path: "mechanisms/test-epi" }],
                     blueprints: []
                 }, null, 2));
@@ -983,7 +983,7 @@ async function caseHC_EPI_3_FetchFails() {
             seedConfig(vaultPath, {
                 config: { workshop_relative_path: path.relative(vaultPath, sibling) },
                 subscription: {
-                    workshop_version: "0.96.2",
+                    workshop_version: "0.97.0",
                     mechanisms: [{ name: "test-epi", version: "0.1.0" }], blueprints: []
                 }
             });
@@ -1032,7 +1032,7 @@ async function caseHC_EPI_4_IndexFetchFails() {
             fs.mkdirSync(path.join(sibling, "platform/mechanisms/test-epi"), { recursive: true });
             fs.writeFileSync(path.join(sibling, "platform/manifest.json"),
                 JSON.stringify({
-                    workshop_version: "0.96.2", foundational_plugins: [],
+                    workshop_version: "0.97.0", foundational_plugins: [],
                     mechanisms: [{ name: "test-epi", version: "0.1.0", path: "mechanisms/test-epi" }],
                     blueprints: []
                 }, null, 2));
@@ -1045,7 +1045,7 @@ async function caseHC_EPI_4_IndexFetchFails() {
             seedConfig(vaultPath, {
                 config: { workshop_relative_path: path.relative(vaultPath, sibling) },
                 subscription: {
-                    workshop_version: "0.96.2",
+                    workshop_version: "0.97.0",
                     mechanisms: [{ name: "test-epi", version: "0.1.0" }], blueprints: []
                 }
             });
@@ -1083,7 +1083,7 @@ async function caseHC_EPI_5_IdNotInIndex() {
             fs.mkdirSync(path.join(sibling, "platform/mechanisms/test-epi"), { recursive: true });
             fs.writeFileSync(path.join(sibling, "platform/manifest.json"),
                 JSON.stringify({
-                    workshop_version: "0.96.2", foundational_plugins: [],
+                    workshop_version: "0.97.0", foundational_plugins: [],
                     mechanisms: [{ name: "test-epi", version: "0.1.0", path: "mechanisms/test-epi" }],
                     blueprints: []
                 }, null, 2));
@@ -1096,7 +1096,7 @@ async function caseHC_EPI_5_IdNotInIndex() {
             seedConfig(vaultPath, {
                 config: { workshop_relative_path: path.relative(vaultPath, sibling) },
                 subscription: {
-                    workshop_version: "0.96.2",
+                    workshop_version: "0.97.0",
                     mechanisms: [{ name: "test-epi", version: "0.1.0" }], blueprints: []
                 }
             });
@@ -1139,7 +1139,7 @@ async function caseHC_EPI_6_EndToEndChain() {
             fs.mkdirSync(path.join(sibling, "platform/mechanisms/test-epi-chain"), { recursive: true });
             fs.writeFileSync(path.join(sibling, "platform/manifest.json"),
                 JSON.stringify({
-                    workshop_version: "0.96.2", foundational_plugins: [],
+                    workshop_version: "0.97.0", foundational_plugins: [],
                     mechanisms: [{ name: "test-epi-chain", version: "0.1.0", path: "mechanisms/test-epi-chain" }],
                     blueprints: []
                 }, null, 2));
@@ -1156,7 +1156,7 @@ async function caseHC_EPI_6_EndToEndChain() {
             seedConfig(vaultPath, {
                 config: { workshop_relative_path: path.relative(vaultPath, sibling) },
                 subscription: {
-                    workshop_version: "0.96.2",
+                    workshop_version: "0.97.0",
                     mechanisms: [{ name: "test-epi-chain", version: "0.1.0" }], blueprints: []
                 }
             });

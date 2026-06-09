@@ -4,6 +4,29 @@ This file archives the per-cycle status snapshots that previously lived in `CLAU
 
 ---
 
+### v0.97.0 — cowork-rethought-2 (2026-06-09 close)
+
+**Codename:** `cowork-rethought-2`. Workshop 0.96.2 → 0.97.0; cowork 0.34.1 → 0.35.0; contract 0.34.1 → 0.35.0.
+
+**Rails shipped:**
+- Rail O — Single-source `data/orchestrator-instructions/<cadence>.md` per cadence + `_shared-clauses.md`. SKILL.md becomes a 5-line shim. Resolves the v0.96.x dead-code issue (cron LLM didn't load orchestrator SKILL.md bodies).
+- Rail T — Wrapper template inlines the full orchestrator. compose-scheduled-job-wrappers-helper rewritten with `composeFromOrchestratorInstructions`. scheduled-job-contract.json `wrapper_template` field replaced by `wrapper_template_source` pointer. Fire-time tokens (`{{$today_*}}`) stay literal — LLM resolves at fire time, killing the timestamp-drift class entirely.
+- Rail S — Cron LLM writes `.cowork.json` sidecar via `obsidian_put_content` immediately after `.md`. Eventually-consistent: reconciler backfills missing sidecars from `.md` prose overnight.
+- Rail A — `cowork:sync-scheduled-jobs` rewritten as claude.ai-Cowork-UI-native. Uses `list_scheduled_tasks` + `update_scheduled_task` + `create_scheduled_task` MCP tools. Schedule preservation invariant: cron field NEVER set on update. No manual paste.
+- Rail R — NEW `sauce reconcile-cowork` CLI verb + `cowork-reconciler` mechanism + launchd plist + `--install-launchd` one-shot. Nightly 03:00 MT processes both vaults via shared filesystem.
+
+**Resolves:** Findings 2 + 3 from Workflow run wzr3g3uad (sidecars not written + orchestrator skill not loaded in cron).
+
+**New artifacts:** 6 orchestrator-instructions files; 1 new sub-skill (cowork-sync-mcp-helper); 1 new CLI verb (sauce reconcile-cowork); 5 reconciler module files; 1 vault-paths registry helper; 1 launchd plist template; 1 frozen legacy contract fixture.
+
+**HC sub-asserts added:** 76 (24 Rail O + 24 Rail T + 12 Rail A + 16 Rail R). Final helper-cases ~2215/0; cowork-smoke 954/0; claude-surface 213/0; integration-smoke 36/0.
+
+**Parked for cowork-rethought-3 or later:** per-item L2R + Thompson sampling, memory salience/decay, per-skill SemVer + versioning CI, the v0.95.1-migrator.
+
+**Migration:** existing engagements seamlessly transition. Cron prompts auto-update on user-invoked `/cowork sync-scheduled-jobs` (Rail A); learned_weights nested shape from v0.96.1 still handled lazily.
+
+---
+
 ## v0.96.2 — daily-dashboard-tskeys-hotfix (2026-06-09 close)
 
 **Codename:** `daily-dashboard-tskeys-hotfix`. Workshop 0.96.1 → 0.96.2; daily 0.13.5 → 0.13.6. Cowork blueprint + contract UNCHANGED at 0.34.1 (landmine #20 only pins scheduled-job-contract to cowork, not daily).
