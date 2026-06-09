@@ -5133,6 +5133,61 @@ const HEARTBEAT_FIXTURES_DIR = path.join(ROOT, "platform/test/fixtures/cowork/he
     } catch (e) { failed++; console.error(`FAIL  ${label}: ${e.message}`); }
 }
 
+// ============================================================================
+// v0.97.0 — Rail O (orchestrator-instructions single source) smoke scenarios
+// ============================================================================
+//   * smoke-O-1: all 6 orchestrator-instructions files exist + have non-empty content
+//   * smoke-O-2: morning-briefing.md contains Step 8 sidecar emit text
+//
+// RED until S1.2-S1.6 land content. v0.96.x smoke groups stay GREEN.
+
+const ORCH_INSTR_DIR = path.join(ROOT, "platform/blueprints/cowork/content/data/orchestrator-instructions");
+
+// smoke-O-1: all 6 orchestrator-instructions files exist + have non-empty content
+{
+    const label = "smoke-O-1 all 6 orchestrator-instructions files exist and have non-empty content";
+    try {
+        const files = [
+            "morning-briefing.md",
+            "midday-tripwire.md",
+            "eod-review.md",
+            "weekly-review.md",
+            "monthly-review.md",
+            "_shared-clauses.md",
+        ];
+        const missing = [];
+        const empty = [];
+        for (const f of files) {
+            const fp = path.join(ORCH_INSTR_DIR, f);
+            if (!fs.existsSync(fp)) {
+                missing.push(f);
+                continue;
+            }
+            const stat = fs.statSync(fp);
+            if (stat.size === 0) empty.push(f);
+        }
+        const ok = missing.length === 0 && empty.length === 0;
+        assertTrue(ok, `${label}: missing=[${missing.join(",")}] empty=[${empty.join(",")}]`);
+    } catch (e) { failed++; console.error(`FAIL  ${label}: ${e.message}`); }
+}
+
+// smoke-O-2: morning-briefing.md contains Step 8 sidecar emit text
+{
+    const label = "smoke-O-2 morning-briefing.md contains Step 8 sidecar emit instruction";
+    try {
+        const mbPath = path.join(ORCH_INSTR_DIR, "morning-briefing.md");
+        if (!fs.existsSync(mbPath)) {
+            failed++;
+            console.error(`FAIL  ${label}: morning-briefing.md not found at ${mbPath}`);
+        } else {
+            const content = fs.readFileSync(mbPath, "utf8");
+            const hasStep8 = /Step\s*8/i.test(content);
+            const hasSidecar = /sidecar/i.test(content);
+            assertTrue(hasStep8 && hasSidecar, `${label}: hasStep8=${hasStep8} hasSidecar=${hasSidecar}`);
+        }
+    } catch (e) { failed++; console.error(`FAIL  ${label}: ${e.message}`); }
+}
+
 (function main() {
   console.log("--- shared contracts ---");
   checkSharedContracts();

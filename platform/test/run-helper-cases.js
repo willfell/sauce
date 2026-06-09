@@ -14315,6 +14315,201 @@ type: cowork-microscope
     assertTrue("HC-V0962-DASH-3: inWindow predicate (Tuesday window) returns FALSE — day takes precedence over later created_at", false, e && e.message);
   }
 
+  // ───────────────────────────────────────────────────────────────────────
+  // v0.97.0 — Rail O (orchestrator-instructions single source) RED tests
+  // ───────────────────────────────────────────────────────────────────────
+  // S1.1 introduces the Rail O contract: each cadence orchestrator's prompt
+  // body lives in platform/blueprints/cowork/content/data/orchestrator-instructions/
+  // as a single-source markdown file. The cadence SKILL.md is reduced to a
+  // ≤30-line shim that Read()s the data file. Shared clauses (dataviewjs
+  // block, microscope clause, sidecar schema template, etc.) are factored
+  // into _shared-clauses.md so the 5 cadence files can {{include}} them
+  // rather than duplicate.
+  //
+  // O-1..O-6  — six file-existence asserts (5 cadences + _shared-clauses)
+  // O-7       — _shared-clauses.md exposes 9 named clause blocks
+  // O-8..O-10 — morning-briefing.md canonical structure (token table, Step 8
+  //             sidecar emit, lens_shift conditional branch)
+  // O-11      — morning-briefing SKILL.md shim Reads the data file
+  // O-12      — 5 cadence SKILL.mds ≤30 lines each (shim shape; lens_shift
+  //             is handled INSIDE morning-briefing.md, not its own SKILL.md)
+  //
+  // ALL RED until S1.2-S1.6 land content. v0.96.x groups stay GREEN.
+
+  const ORCH_INSTR_DIR = path.join(WORKSHOP, "platform/blueprints/cowork/content/data/orchestrator-instructions");
+  const ORCH_SKILLS_DIR = path.join(WORKSHOP, "platform/blueprints/cowork/skills/orchestrators");
+
+  console.log(`\n--- Case HC-V0970-O-1: morning-briefing.md exists ---`);
+  try {
+    const filePath = path.join(ORCH_INSTR_DIR, "morning-briefing.md");
+    assertTrue("HC-V0970-O-1: orchestrator-instructions/morning-briefing.md exists at platform/blueprints/cowork/content/data/orchestrator-instructions/morning-briefing.md (single-source prompt body for the morning-briefing cadence orchestrator)",
+      fs.existsSync(filePath),
+      `file missing at ${filePath}`);
+  } catch (e) {
+    assertTrue("HC-V0970-O-1: orchestrator-instructions/morning-briefing.md exists", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0970-O-2: midday-tripwire.md exists ---`);
+  try {
+    const filePath = path.join(ORCH_INSTR_DIR, "midday-tripwire.md");
+    assertTrue("HC-V0970-O-2: orchestrator-instructions/midday-tripwire.md exists at platform/blueprints/cowork/content/data/orchestrator-instructions/midday-tripwire.md (single-source prompt body for the midday-tripwire cadence orchestrator)",
+      fs.existsSync(filePath),
+      `file missing at ${filePath}`);
+  } catch (e) {
+    assertTrue("HC-V0970-O-2: orchestrator-instructions/midday-tripwire.md exists", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0970-O-3: eod-review.md exists ---`);
+  try {
+    const filePath = path.join(ORCH_INSTR_DIR, "eod-review.md");
+    assertTrue("HC-V0970-O-3: orchestrator-instructions/eod-review.md exists at platform/blueprints/cowork/content/data/orchestrator-instructions/eod-review.md (single-source prompt body for the eod-review cadence orchestrator)",
+      fs.existsSync(filePath),
+      `file missing at ${filePath}`);
+  } catch (e) {
+    assertTrue("HC-V0970-O-3: orchestrator-instructions/eod-review.md exists", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0970-O-4: weekly-review.md exists ---`);
+  try {
+    const filePath = path.join(ORCH_INSTR_DIR, "weekly-review.md");
+    assertTrue("HC-V0970-O-4: orchestrator-instructions/weekly-review.md exists at platform/blueprints/cowork/content/data/orchestrator-instructions/weekly-review.md (single-source prompt body for the weekly-review cadence orchestrator)",
+      fs.existsSync(filePath),
+      `file missing at ${filePath}`);
+  } catch (e) {
+    assertTrue("HC-V0970-O-4: orchestrator-instructions/weekly-review.md exists", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0970-O-5: monthly-review.md exists ---`);
+  try {
+    const filePath = path.join(ORCH_INSTR_DIR, "monthly-review.md");
+    assertTrue("HC-V0970-O-5: orchestrator-instructions/monthly-review.md exists at platform/blueprints/cowork/content/data/orchestrator-instructions/monthly-review.md (single-source prompt body for the monthly-review cadence orchestrator)",
+      fs.existsSync(filePath),
+      `file missing at ${filePath}`);
+  } catch (e) {
+    assertTrue("HC-V0970-O-5: orchestrator-instructions/monthly-review.md exists", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0970-O-6: _shared-clauses.md exists ---`);
+  try {
+    const filePath = path.join(ORCH_INSTR_DIR, "_shared-clauses.md");
+    assertTrue("HC-V0970-O-6: orchestrator-instructions/_shared-clauses.md exists at platform/blueprints/cowork/content/data/orchestrator-instructions/_shared-clauses.md (shared dataviewjs/microscope/voice/sidecar-template clause library, included by each cadence file)",
+      fs.existsSync(filePath),
+      `file missing at ${filePath}`);
+  } catch (e) {
+    assertTrue("HC-V0970-O-6: orchestrator-instructions/_shared-clauses.md exists", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0970-O-7: _shared-clauses.md contains 9 expected clause blocks ---`);
+  try {
+    const sharedPath = path.join(ORCH_INSTR_DIR, "_shared-clauses.md");
+    const sharedContent = fs.existsSync(sharedPath) ? fs.readFileSync(sharedPath, "utf8") : "";
+    const expectedKeys = [
+      "dataviewjs_block",
+      "connectivity_authority_clause",
+      "microscope_clause",
+      "voice_clause",
+      "sidecar_schema_template",
+      "rating_callout_template",
+      "detection_callout_template",
+      "anti_echo_callout_template",
+      "frontmatter_base",
+    ];
+    for (const key of expectedKeys) {
+      assertTrue(`HC-V0970-O-7-${key}: _shared-clauses.md has \`## ${key}\` block heading (named clause exposed for {{include}} from cadence files)`,
+        sharedContent.includes(`## ${key}`),
+        `missing \`## ${key}\` heading in _shared-clauses.md`);
+    }
+  } catch (e) {
+    assertTrue("HC-V0970-O-7: _shared-clauses.md contains 9 expected clause blocks", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0970-O-8: morning-briefing.md declares substitution tokens table at top ---`);
+  try {
+    const mbPath = path.join(ORCH_INSTR_DIR, "morning-briefing.md");
+    const content = fs.existsSync(mbPath) ? fs.readFileSync(mbPath, "utf8") : "";
+    // Token table convention: a markdown table appears in the first ~80 lines
+    // with a "Token" / "Value" header pair. This is the substitution-binding
+    // contract — the SKILL.md shim Read()s this file and the table tells the
+    // executor which {{tokens}} get bound from engagement context.
+    const head = content.split("\n").slice(0, 80).join("\n");
+    const hasTokenTable = /\|\s*Token\s*\|/i.test(head) && /\|\s*Value\s*\|/i.test(head);
+    assertTrue("HC-V0970-O-8: morning-briefing.md declares a substitution-tokens markdown table within the first 80 lines (header columns include `Token` and `Value` — binds {{engagement_id}}, {{cadence_mode}}, etc.)",
+      hasTokenTable,
+      `no \`| Token | ... | Value |\` table found in first 80 lines of morning-briefing.md`);
+  } catch (e) {
+    assertTrue("HC-V0970-O-8: morning-briefing.md declares substitution tokens table at top", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0970-O-9: morning-briefing.md contains Step 8 sidecar emit instruction ---`);
+  try {
+    const mbPath = path.join(ORCH_INSTR_DIR, "morning-briefing.md");
+    const content = fs.existsSync(mbPath) ? fs.readFileSync(mbPath, "utf8") : "";
+    // Step 8 is the canonical position for the cadence-sidecar emit in
+    // morning-briefing (after compose, before final write). Asserting both
+    // "Step 8" marker AND "sidecar" mention to avoid false-positive on stray
+    // "step 8" text elsewhere.
+    const hasStep8Sidecar = /Step\s*8/i.test(content) && /sidecar/i.test(content);
+    assertTrue("HC-V0970-O-9: morning-briefing.md contains `Step 8` marker AND a `sidecar` reference (Step 8 = canonical cadence-sidecar emit position so check-heartbeat can detect this fire)",
+      hasStep8Sidecar,
+      `Step 8 sidecar emit not found in morning-briefing.md`);
+  } catch (e) {
+    assertTrue("HC-V0970-O-9: morning-briefing.md contains Step 8 sidecar emit instruction", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0970-O-10: morning-briefing.md contains lens_shift conditional branch ---`);
+  try {
+    const mbPath = path.join(ORCH_INSTR_DIR, "morning-briefing.md");
+    const content = fs.existsSync(mbPath) ? fs.readFileSync(mbPath, "utf8") : "";
+    // lens_shift is handled INSIDE morning-briefing.md (not its own SKILL.md);
+    // therefore morning-briefing.md must carry a {{#if cadence_mode == "lens_shift"}}
+    // branch. Allow flexible whitespace and quote style.
+    const hasLensShiftIf = /\{\{\s*#if\s+cadence_mode\s*==\s*["']lens_shift["']\s*\}\}/.test(content);
+    assertTrue("HC-V0970-O-10: morning-briefing.md contains a `{{#if cadence_mode == \"lens_shift\"}}` conditional branch (lens_shift mode is a morning-briefing variant, NOT its own cadence orchestrator)",
+      hasLensShiftIf,
+      `lens_shift conditional branch not found in morning-briefing.md`);
+  } catch (e) {
+    assertTrue("HC-V0970-O-10: morning-briefing.md contains lens_shift conditional branch", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0970-O-11: morning-briefing SKILL.md shim references orchestrator-instructions/morning-briefing.md via Read tool ---`);
+  try {
+    const skillPath = path.join(ORCH_SKILLS_DIR, "morning-briefing/SKILL.md");
+    const content = fs.existsSync(skillPath) ? fs.readFileSync(skillPath, "utf8") : "";
+    // Shim must reference the data file by relative path (so the Read tool
+    // call points the executor at the single-source prompt body). Allow either
+    // the bare filename or the full content/data/... path.
+    const referencesDataFile = content.includes("orchestrator-instructions/morning-briefing.md");
+    // Must also literally call the Read tool (case-insensitive — accept Read
+    // tool / Read() / `Read` etc.)
+    const referencesReadTool = /\bRead\b/.test(content);
+    assertTrue("HC-V0970-O-11: skills/orchestrators/morning-briefing/SKILL.md references `orchestrator-instructions/morning-briefing.md` AND invokes the `Read` tool (shim shape — SKILL.md no longer carries the prompt body itself, just Read()s the data file)",
+      referencesDataFile && referencesReadTool,
+      `referencesDataFile=${referencesDataFile} referencesReadTool=${referencesReadTool}`);
+  } catch (e) {
+    assertTrue("HC-V0970-O-11: morning-briefing SKILL.md shim references orchestrator-instructions/morning-briefing.md via Read tool", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0970-O-12: 5 cadence orchestrator SKILL.mds are ≤ 30 lines (shim shape) ---`);
+  try {
+    const cadences = ["morning-briefing", "midday-tripwire", "eod-review", "weekly-review", "monthly-review"];
+    for (const cadence of cadences) {
+      const skillPath = path.join(ORCH_SKILLS_DIR, `${cadence}/SKILL.md`);
+      if (!fs.existsSync(skillPath)) {
+        assertTrue(`HC-V0970-O-12-${cadence}: skills/orchestrators/${cadence}/SKILL.md ≤ 30 lines (shim shape)`,
+          false,
+          `SKILL.md missing at ${skillPath}`);
+        continue;
+      }
+      const content = fs.readFileSync(skillPath, "utf8");
+      const lineCount = content.split("\n").length;
+      assertTrue(`HC-V0970-O-12-${cadence}: skills/orchestrators/${cadence}/SKILL.md ≤ 30 lines (shim shape; lens_shift handled INSIDE morning-briefing.md, not its own SKILL.md)`,
+        lineCount <= 30,
+        `SKILL.md is ${lineCount} lines; should be ≤ 30 (shim should just Read() the data file)`);
+    }
+  } catch (e) {
+    assertTrue("HC-V0970-O-12: 5 cadence orchestrator SKILL.mds are ≤ 30 lines (shim shape)", false, e && e.message);
+  }
+
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
   if (fail > 0) {
