@@ -1,13 +1,14 @@
 {
   "_comment": "Canonical Cowork scheduled-job wrapper contract. Substitution tokens use {{$varname}} (engagement/cadence level) + {{shared.<key>}} (shared boilerplate). See Docs/plans/2026-06-05-v0.92.x-scheduled-jobs-sync-design.md §4 for schema; compose-scheduled-job-wrappers-helper.js for substitution semantics + validator modes.",
-  "contract_version": "0.35.0",
+  "contract_version": "0.35.1",
   "cadence_order": [
     "morning-briefing",
     "midday-tripwire",
     "eod-review",
     "weekly-review",
     "monthly-review",
-    "lens_shift"
+    "lens_shift",
+    "reconcile-cowork"
   ],
   "substitution_tokens": {
     "$engagement_id": "Engagement.id from vault-config",
@@ -93,6 +94,17 @@
       "description": "Weekly cold-perspective morning briefing — memory-skip for empirical anti-echo",
       "required_mcps_inherit_from": "morning-briefing",
       "wrapper_template_source": "orchestrator-instructions/morning-briefing.md"
+    },
+    "reconcile-cowork": {
+      "schedule_hint": "03:00 daily",
+      "default_cron": "0 3 * * *",
+      "frontmatter_type": null,
+      "output_path_template": null,
+      "orchestrator_skill_name": "cowork:reconcile-cowork",
+      "sub_skill_name": null,
+      "cadence_tone_hint": "Silent on green; emits warning callouts only when anomalies detected.",
+      "includes_microscopes": false,
+      "wrapper_template_source": "orchestrator-instructions/reconcile-cowork.md"
     }
   }
 }

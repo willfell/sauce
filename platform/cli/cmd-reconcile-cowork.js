@@ -30,7 +30,7 @@ Usage:
   sauce reconcile-cowork [--all-vaults]         Process all vaults in ~/.sauce/vault-paths.json (default)
   sauce reconcile-cowork [--engagement <id>]    Limit to one engagement within the vault
   sauce reconcile-cowork [--dry-run]            Compute reconciliation but don't write
-  sauce reconcile-cowork [--install-launchd]    Write + load the launchd plist (one-time setup)
+  sauce reconcile-cowork [--install-launchd]    Write + load the launchd plist (DEPRECATED v0.97.1 — use /cowork sync-scheduled-jobs)
   sauce reconcile-cowork --help                 Show this help
 
 The reconciler:
@@ -102,6 +102,22 @@ async function run(arg1, arg2) {
   }
 
   if (args.install_launchd) {
+    console.log(`
+[DEPRECATED v0.97.1] Local launchd reconciler is deprecated. The
+reconciler now runs as a claude.ai scheduled job (cadence:
+reconcile-cowork). Run \`/cowork sync-scheduled-jobs\` from your claude.ai
+Cowork UI chat to create the cowork-reconcile-cowork-<engagement_id>
+scheduled task; it will fire nightly at 03:00 local (default).
+
+To uninstall any existing launchd job:
+  launchctl unload -w ~/Library/LaunchAgents/com.<user>.cowork-reconciler.plist
+  rm ~/Library/LaunchAgents/com.<user>.cowork-reconciler.plist
+
+The --install-launchd flag will continue to work for one cycle (v0.97.x)
+as a fallback. It will be removed in v0.98.0+.
+
+Proceeding with launchd install anyway (one-cycle grace)...
+`);
     const installer = require("../mechanisms/cowork-reconciler/launchd-installer");
     return await installer.installLaunchd();
   }

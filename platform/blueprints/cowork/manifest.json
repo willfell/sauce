@@ -513,6 +513,11 @@
       "tag": "platform"
     },
     {
+      "source": "content/data/orchestrator-instructions/reconcile-cowork.md",
+      "dest": "{{module_directory}}/data/orchestrator-instructions/reconcile-cowork.md",
+      "tag": "platform"
+    },
+    {
       "source": "helpers/capture-frame-drift-helper.js",
       "dest": "{{module_directory}}/helpers/capture-frame-drift-helper.js",
       "tag": "platform"
@@ -582,6 +587,11 @@
       "kind": "skill",
       "source": "skills/orchestrators/monthly-review/SKILL.md",
       "dest": "{{skills_dir}}/monthly-review/SKILL.md"
+    },
+    {
+      "kind": "skill",
+      "source": "skills/orchestrators/reconcile-cowork/SKILL.md",
+      "dest": "{{skills_dir}}/reconcile-cowork/SKILL.md"
     },
     {
       "kind": "skill",
