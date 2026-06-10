@@ -590,18 +590,22 @@ function composeFromOrchestratorInstructions(opts) {
     // 4. Static substitution
     template = _substituteStaticTokens(template, tokens);
 
-    // 5. Wrap with PRELUDE + DONE
+    // 5. Wrap with anti-delegation directive + PRELUDE + DONE
+    const antiDelegation = `ANTI-DELEGATION (NON-NEGOTIABLE): You are running this entire orchestrator INLINE in the current context. DO NOT spawn subagents. DO NOT use Task(), Agent(), or any agent-launching tool. DO NOT summarize the work and hand it off. Every step below — including the per-kind gather loops — executes in THIS turn. If the wrapper feels long, that is intentional; follow it step-by-step rather than delegating. A delegated run produces structurally-wrong output (wrong path, wrong frontmatter type, missing callout structure, missing sidecar, missing rating block) and is treated as a failed fire.`;
+
     const prelude = `PRELUDE — fire-time setup (CRITICAL: do these first)
 
-1. Resolve today's date in ${tokens.timezone}. Capture:
-     today_date     = YYYY-MM-DD (ISO)
-     today_weekday  = e.g. "Tuesday"
-     today_month_name = e.g. "June"
-     today_day      = e.g. "9" (no leading zero)
-     today_year     = e.g. "2026"
-     today_dirpath  = <YYYY>/<MM-Month>/<YYYY-MM-DD>
-     today_ymd_compact = YYYY-MM-DD
-   Use these values everywhere {{$today_*}} appears below.
+1. Resolve today's date in ${tokens.timezone}. Use the Bash tool (or equivalent in your environment) to get the actual current date — do NOT use any example value. Compute and capture:
+
+     today_date           = YYYY-MM-DD  (run: date '+%Y-%m-%d')
+     today_weekday        = long weekday name in ${tokens.timezone}  (run: TZ='${tokens.timezone}' date '+%A')
+     today_month_name     = long month name in ${tokens.timezone}  (run: TZ='${tokens.timezone}' date '+%B')
+     today_day            = day-of-month integer, no leading zero  (run: TZ='${tokens.timezone}' date '+%-d')
+     today_year           = 4-digit year  (run: TZ='${tokens.timezone}' date '+%Y')
+     today_dirpath        = "<today_year>/<MM>-<today_month_name>/<today_date>" where MM is zero-padded month  (e.g. "2026/06-June/2026-06-10")
+     today_ymd_compact    = YYYYMMDD with no separators
+
+   These are the values to substitute everywhere {{$today_*}} appears in the steps below. If you cannot run Bash in your environment, use any other tool that returns the actual current wall-clock date in ${tokens.timezone} — but DO NOT fabricate or guess. A wrong weekday/date means the atomic note goes to the wrong path and the daily dashboard cannot see it.
 
 2. Read frontmatter from spice/cowork/context/vault-config.md via Obsidian MCP. Locate engagement record where id == "${tokens.engagement_id}". Capture engagement.
 
@@ -617,7 +621,9 @@ N. Emit Obsidian Notice \`cowork:${cadence} complete -- ${tokens.engagement_labe
 
 Generated against sauce ${tokens.workshop_version} + cowork ${tokens.cowork_version} + contract ${tokens.contract_version}.`;
 
-    const wrapper = `You are running cowork:${cadence} for engagement ${tokens.engagement_id} (${tokens.engagement_label}).
+    const wrapper = `${antiDelegation}
+
+You are running cowork:${cadence} for engagement ${tokens.engagement_id} (${tokens.engagement_label}).
 
 ${prelude}
 

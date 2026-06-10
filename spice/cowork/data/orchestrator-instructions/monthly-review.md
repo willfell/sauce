@@ -199,18 +199,47 @@ this is unexpected.`
 v0.95.1 §3.4. composeBody internally gates on cadence eligibility; this step is a
 no-op for monthly and exists in the step-list for parity with other cadence files.)
 
-### Step 7: Write .md via obsidian_put_content
+### Step 7: Write .md via obsidian_put_content (INLINE CONTRACT — do not delegate)
 
-7a. Apply `{{shared.frontmatter_base}}` substitution. Monthly cadence frontmatter
-    REPLACES `day:` with `month: "<YYYY-MM>"`.
+7a. **Compute the EXACT output path** (no improvisation, no daily-note pattern):
+    `spice/cowork/daily/{{$today_dirpath}}/{{$cadence}}.md`
+    Example for 2026-06-10 monthly-review: `spice/cowork/daily/2026/06-June/2026-06-10/monthly-review.md`.
+    DO NOT write to `spice/cowork/daily/2026/06-June/Tuesday-2026-06-10.md` or any other shape.
 
-7b. {{shared.dataviewjs_block}} renders SpaceNavButtons block.
+7b. **Emit the frontmatter as a literal YAML block** (this exact shape, no extra keys, no missing keys; for monthly, `day:` is the month-anchor day and there is NO `month:` key in this writer contract):
 
-7c. READ write-run-note-monthly-review SKILL.md in full — paying particular attention
-    to `## Title composition`, `## Adaptive body skeleton`, `## Pre-write self-check` —
-    then perform the write described in its `## Steps` section with
-    `{ engagement, month: context.iso_month, year: context.year, body: body_md, sidecar_json: sidecar_json, prompt_source, warning }`.
-    Capture `status`. On `failed:contract-violation:<field>`, emit Notice and exit.
+    ```yaml
+    ---
+    type: {{$frontmatter_type}}
+    engagement_id: {{$engagement_id}}
+    day: "{{$today_date}}"
+    generator: cowork:{{$cadence}}@2.0.0
+    prompt_source: spice/cowork/prompts/{{$cadence}}.md
+    title: {{$title_template_resolved}}
+    summary: <1-2 sentence headline distilled from the body>
+    created_at: <NOW in {{$timezone}} as ISO 8601 timestamp with offset>
+    ---
+    ```
+
+    FORBIDDEN frontmatter keys: `cadence`, `date`, `engagement` (NOT engagement_id), `generated_at`, `week`, `month`, `year`, `schema_version`.
+
+7c. **Emit the DataviewJS block** as the literal first body content under the frontmatter:
+
+    ```dataviewjs
+    await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+    ```
+
+7d. **Body skeleton** — the body that follows the DataviewJS block MUST be the composed
+    `body_md` from Step 3 (composeBody output). Every per-kind block MUST render as a
+    Callout (`> [!example]+`, `> [!warning]+`, `> [!info]+`, `> [!quote]+`, `> [!tip]`,
+    `> [!todo]+`, `> [!question]+`) — NEVER as plain `## Heading` sections. Plain
+    headings indicate delegation occurred; abort the write and emit a Notice.
+
+7e. **Write via Obsidian MCP** — call `mcp__<vault>-obsidian__obsidian_put_content` with
+    `{ filepath: <step 7a path>, content: <frontmatter + dataviewjs + body_md> }`. On any
+    error from the MCP call, emit Notice
+    `cowork:{{$cadence}} aborted -- write failed: <error>` and exit non-zero. Do NOT
+    fall back to writing at a different path.
 
 ### Step 8: Write .cowork.json sidecar via obsidian_put_content (Rail S sidecar emit)
 

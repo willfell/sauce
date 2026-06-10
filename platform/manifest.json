@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop platform manifest. Each mechanism + blueprint has its own version.",
-  "workshop_version": "0.97.1",
+  "workshop_version": "0.97.2",
   "date": "2026-05-23",
   "foundational_plugins": [
     {
@@ -131,7 +131,7 @@
     },
     {
       "name": "cowork",
-      "version": "0.35.1",
+      "version": "0.35.2",
       "path": "blueprints/cowork"
     },
     {

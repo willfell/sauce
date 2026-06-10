@@ -264,24 +264,52 @@ empty.
     yesterday's carry-forward did NOT name; falls back to the explicit-null sentence
     when nothing qualifies.
 
-### Step 7: Write .md via obsidian_put_content
+### Step 7: Write .md via obsidian_put_content (INLINE CONTRACT — do not delegate)
 
-7a. Apply `{{shared.frontmatter_base}}` substitution (token: `{{$frontmatter_type}}` =
-    `cowork-morning-briefing` warm OR `cowork-morning-briefing-cold` lens_shift; slug
-    `morning-briefing.md` warm OR `morning-briefing-cold-{{$engagement_id}}.md` lens_shift).
+7a. **Compute the EXACT output path** (no improvisation, no daily-note pattern):
+    `spice/cowork/daily/{{$today_dirpath}}/{{$cadence}}.md`
+    Example for 2026-06-10 morning-briefing: `spice/cowork/daily/2026/06-June/2026-06-10/morning-briefing.md`.
+    DO NOT write to `spice/cowork/daily/2026/06-June/Tuesday-2026-06-10.md` or any other shape.
 
-7b. {{shared.dataviewjs_block}} renders the SpaceNavButtons block at the top of the body
-    via the customjs-guard view (write-atomic-note-helper.js prepends this block before
-    persisting).
+    Lens-shift variant: when `cadence_mode == "lens_shift"`, the slug becomes
+    `morning-briefing-cold-{{$engagement_id}}.md` and the full path becomes
+    `spice/cowork/daily/{{$today_dirpath}}/morning-briefing-cold-{{$engagement_id}}.md`
+    (cold MB writes alongside the warm MB so daily hubs can render side-by-side).
 
-7c. READ `<vault>/.claude/skills/cowork/skills/write-run-note-morning-briefing/SKILL.md`
-    in full — paying particular attention to its `## Title composition`,
-    `## Adaptive body skeleton`, and `## Pre-write self-check` sections — then apply
-    those contracts before performing the write described in its `## Steps` section with
-    `{ engagement, date: {{$today_date}}, weekday: {{$today_weekday}}, month_name: {{$today_month_name}}, body: body_md, sidecar_json: sidecar_json, prompt_source: "spice/cowork/prompts/morning-briefing.md", warning }`.
-    Capture `status`. On `failed:contract-violation:<field>`, emit Notice and exit
-    non-zero. On other `failed:*`, emit Notice and exit. Do not run state-update steps
-    after a failed write.
+7b. **Emit the frontmatter as a literal YAML block** (this exact shape, no extra keys, no missing keys):
+
+    ```yaml
+    ---
+    type: {{$frontmatter_type}}
+    engagement_id: {{$engagement_id}}
+    day: "{{$today_date}}"
+    generator: cowork:{{$cadence}}@2.0.0
+    prompt_source: spice/cowork/prompts/{{$cadence}}.md
+    title: {{$title_template_resolved}}
+    summary: <1-2 sentence headline distilled from the body>
+    created_at: <NOW in {{$timezone}} as ISO 8601 timestamp with offset>
+    ---
+    ```
+
+    FORBIDDEN frontmatter keys: `cadence`, `date`, `engagement` (NOT engagement_id), `generated_at`, `week`, `month`, `year`, `schema_version`.
+
+7c. **Emit the DataviewJS block** as the literal first body content under the frontmatter:
+
+    ```dataviewjs
+    await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+    ```
+
+7d. **Body skeleton** — the body that follows the DataviewJS block MUST be the composed
+    `body_md` from Step 3 (composeBody output). Every per-kind block MUST render as a
+    Callout (`> [!example]+`, `> [!warning]+`, `> [!info]+`, `> [!quote]+`, `> [!tip]`,
+    `> [!todo]+`, `> [!question]+`) — NEVER as plain `## Heading` sections. Plain
+    headings indicate delegation occurred; abort the write and emit a Notice.
+
+7e. **Write via Obsidian MCP** — call `mcp__<vault>-obsidian__obsidian_put_content` with
+    `{ filepath: <step 7a path>, content: <frontmatter + dataviewjs + body_md> }`. On any
+    error from the MCP call, emit Notice
+    `cowork:{{$cadence}} aborted -- write failed: <error>` and exit non-zero. Do NOT
+    fall back to writing at a different path.
 
 ### Step 8: Write .cowork.json sidecar via obsidian_put_content (Rail S sidecar emit)
 
