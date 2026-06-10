@@ -16013,6 +16013,85 @@ type: cowork-microscope
     assertTrue("HC-V0972-DP-4: PRELUDE has do-NOT-use-example instruction", false, e && e.message);
   }
 
+  // =========================================================================
+  // v0.97.3 cloud-sync-parity — 11 sub-asserts (6 CSP-CADENCE + 3 CSP-CLAUSE + 2 CSP-HELPER)
+  //
+  // Migrate ANTI-DELEGATION / PRELUDE / DONE blocks OUT of compose-scheduled-job-
+  // wrappers-helper.js literals INTO _shared-clauses.md so the claude.ai Cowork UI
+  // (cloud sync) sees them in the vault sources and the JS composer becomes a pure
+  // token substituter. Re-uses ORCH_INSTR_DIR_T / SJ_HELPER_PATH_T from the v0.97.0
+  // Rail T setup above. fs + path already imported at top of file.
+  // =========================================================================
+  const _V0973_ALL_CADENCES = ["morning-briefing", "midday-tripwire", "eod-review", "weekly-review", "monthly-review", "reconcile-cowork"];
+  const _V0973_SHARED_CLAUSES_PATH = path.join(ORCH_INSTR_DIR_T, "_shared-clauses.md");
+
+  // ---- HC-V0973-CSP-1..6: each cadence file references {{shared.anti_delegation_clause}} + {{shared.prelude_block}} + {{shared.done_block}} ----
+  _V0973_ALL_CADENCES.forEach((cadence, idx) => {
+    const n = idx + 1;
+    console.log(`\n--- Case HC-V0973-CSP-${n}: ${cadence}.md sources ANTI-DELEGATION + PRELUDE + DONE from _shared-clauses ---`);
+    try {
+      const filePath = path.join(ORCH_INSTR_DIR_T, `${cadence}.md`);
+      const body = fs.readFileSync(filePath, "utf8");
+      const hasAntiDelegation = body.includes("{{shared.anti_delegation_clause}}");
+      const hasPrelude = body.includes("{{shared.prelude_block}}");
+      const hasDone = body.includes("{{shared.done_block}}");
+      assertTrue(
+        `HC-V0973-CSP-${n}: ${cadence}.md contains {{shared.anti_delegation_clause}} AND {{shared.prelude_block}} AND {{shared.done_block}} — cloud LLM finds the guardrails via {{shared.*}} substitution at sync time (was previously prepended by JS helper, invisible to cloud sync)`,
+        hasAntiDelegation && hasPrelude && hasDone,
+        `hasAntiDelegation=${hasAntiDelegation} hasPrelude=${hasPrelude} hasDone=${hasDone}`
+      );
+    } catch (e) {
+      assertTrue(`HC-V0973-CSP-${n}: ${cadence}.md references shared clauses`, false, e && e.message);
+    }
+  });
+
+  // ---- HC-V0973-CSP-7..9: _shared-clauses.md defines anti_delegation_clause / prelude_block / done_block heading blocks ----
+  const _V0973_CLAUSE_HEADINGS = ["anti_delegation_clause", "prelude_block", "done_block"];
+  _V0973_CLAUSE_HEADINGS.forEach((heading, idx) => {
+    const n = idx + 7;
+    console.log(`\n--- Case HC-V0973-CSP-${n}: _shared-clauses.md defines ## ${heading} block ---`);
+    try {
+      const body = fs.readFileSync(_V0973_SHARED_CLAUSES_PATH, "utf8");
+      const headingRx = new RegExp(`^## ${heading}\\s*$`, "m");
+      const hasHeading = headingRx.test(body);
+      assertTrue(
+        `HC-V0973-CSP-${n}: _shared-clauses.md contains "## ${heading}" heading — defines the clause body that {{shared.${heading}}} references substitute in`,
+        hasHeading,
+        `hasHeading=${hasHeading}`
+      );
+    } catch (e) {
+      assertTrue(`HC-V0973-CSP-${n}: _shared-clauses.md ## ${heading} heading`, false, e && e.message);
+    }
+  });
+
+  // ---- HC-V0973-CSP-10: compose-scheduled-job-wrappers-helper.js NO LONGER contains literal ANTI-DELEGATION (NON-NEGOTIABLE) ----
+  console.log(`\n--- Case HC-V0973-CSP-10: compose-scheduled-job-wrappers-helper.js source no longer contains literal ANTI-DELEGATION text ---`);
+  try {
+    const helperSrc = fs.readFileSync(SJ_HELPER_PATH_T, "utf8");
+    const hasLiteral = helperSrc.includes("ANTI-DELEGATION (NON-NEGOTIABLE)");
+    assertTrue(
+      "HC-V0973-CSP-10: compose-scheduled-job-wrappers-helper.js source does NOT contain 'ANTI-DELEGATION (NON-NEGOTIABLE)' as a literal — proves the clause has been migrated out of the JS into _shared-clauses.md so cloud sync sees it",
+      !hasLiteral,
+      `hasLiteral=${hasLiteral} (expected false — clause should live only in _shared-clauses.md)`
+    );
+  } catch (e) {
+    assertTrue("HC-V0973-CSP-10: helper no longer contains literal ANTI-DELEGATION", false, e && e.message);
+  }
+
+  // ---- HC-V0973-CSP-11: compose-scheduled-job-wrappers-helper.js NO LONGER contains literal PRELUDE — fire-time setup ----
+  console.log(`\n--- Case HC-V0973-CSP-11: compose-scheduled-job-wrappers-helper.js source no longer contains literal "PRELUDE — fire-time setup" ---`);
+  try {
+    const helperSrc = fs.readFileSync(SJ_HELPER_PATH_T, "utf8");
+    const hasLiteral = helperSrc.includes("PRELUDE — fire-time setup");
+    assertTrue(
+      "HC-V0973-CSP-11: compose-scheduled-job-wrappers-helper.js source does NOT contain 'PRELUDE — fire-time setup' as a literal — proves the PRELUDE has been migrated out of the JS into _shared-clauses.md",
+      !hasLiteral,
+      `hasLiteral=${hasLiteral} (expected false — PRELUDE should live only in _shared-clauses.md)`
+    );
+  } catch (e) {
+    assertTrue("HC-V0973-CSP-11: helper no longer contains literal PRELUDE block", false, e && e.message);
+  }
+
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
   if (fail > 0) {
