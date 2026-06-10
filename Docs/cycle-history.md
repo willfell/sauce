@@ -4,6 +4,33 @@ This file archives the per-cycle status snapshots that previously lived in `CLAU
 
 ---
 
+### v0.97.2 — wrapper-delegation-proof (2026-06-10 close)
+
+**Codename:** `wrapper-delegation-proof`. Workshop 0.97.1 → 0.97.2; cowork 0.35.1 → 0.35.2; contract 0.35.1 (UNCHANGED).
+
+**Origin:** Accuris's 2026-06-10 morning fire produced structurally-wrong output (wrong path `Tuesday-2026-06-10.md` instead of `2026-06-10/morning-briefing.md`; copied verbatim "Tuesday" from PRELUDE example value on a Wednesday; wrong frontmatter type; missing callout structure; fabricated sidecar with `cadence: "morning"` instead of `type: cowork-morning-briefing`). Headspace's morning fire at the same fire-time with the same wrapper was structurally perfect. Root cause: accuris's cron LLM delegated to a Task() subagent which then improvised everything. Same input → wrong output because nothing in the wrapper PROHIBITED delegation.
+
+**Three knobs:**
+- **Anti-delegation directive** prepended as the first non-blank paragraph of every composed wrapper, ahead of the PRELUDE. Bans Task()/Agent()/subagent invocations + summarize-and-hand-off pattern. Coverage: all 6 cadences. Lives in `compose-scheduled-job-wrappers-helper.js` (~line 593).
+- **Inline write contract** — replaces Step 7's `READ <vault>/.claude/skills/cowork/skills/write-run-note-<cadence>/SKILL.md ... follow its Steps section` (delegation pattern) in ALL 5 atomic-note orchestrator-instructions files (morning-briefing, midday-tripwire, eod-review, weekly-review, monthly-review) with a literal 5-substep inline contract: 7a path / 7b frontmatter YAML / 7c DataviewJS / 7d callout body skeleton / 7e obsidian_put_content invocation. Path now a literal `spice/cowork/daily/{{$today_dirpath}}/{{$cadence}}.md`. Frontmatter shape carries explicit FORBIDDEN-keys list (`cadence`, `date`, `engagement`, `generated_at`, `week`, `month`, `year`, `schema_version`).
+- **PRELUDE date fix** — replaces example-based PRELUDE (`e.g. "Tuesday"`, `e.g. "June"` — which accuris's LLM literally copied into the title on a Wednesday) with a Bash-command-driven PRELUDE: `TZ='{{$timezone}}' date '+%A'` etc. + verbatim `do NOT use any example value` instruction. Lives in helper (~line 594-601).
+
+**Why contract_version stays at 0.35.1:** Per cycle prompt instruction. The contract shape itself (`cadence_order`, `substitution_tokens`, `shared_clauses`, per-cadence schema) didn't change — only the per-cadence orchestrator-instructions bodies + helper PRELUDE. Landmine #20 lockstep applies when contract DATA changes; byte-identical contract data doesn't require a bump.
+
+**Files touched:** 6 implementation files (helper + 5 orchestrator-instructions) + 3 test files (run-helper-cases + run-cowork-smoke + run-bootstrap pin sweeps and reroutes) + 4 version/manifest files (package.json, platform/manifest.json, cowork/manifest.json, ranch/platform-subscription.json).
+
+**HC sub-asserts added:** 26 (HC-V0972-AD-1..7 + HC-V0972-IW-1..15 + HC-V0972-DP-1..4). 5+1 pre-existing legacy delegation-pattern asserts rerouted (HC-V0920-ORCH-{MB,MT,EOD,WR,MR}-A4 + S6 + v065-S3 in run-cowork-smoke).
+
+**Action required post-deploy:** run `/cowork sync-scheduled-jobs` once from claude.ai's Cowork UI **PER VAULT** (headspace + accuris). Rail A pushes new wrapper bodies (anti-delegation + inline contract + new PRELUDE) into the live 11 cadence tasks per vault. Schedule preservation invariant holds. Headspace's accidentally-correct fire today doesn't mean it's delegation-proof — directive needs to land in both vaults because the bug is non-deterministic.
+
+**Final harness:** helper-cases **2256 / 0** (+26); cowork-smoke **954 / 0**; claude-surface **214 / 0**; integration-smoke **36 / 0**; cli **132 / 0**; bootstrap **85 / 0**. Preflight `version-sync ok: 0.97.2` ALL GREEN.
+
+**Parked for v0.98.0+:** v0.97.1 launchd grace removal; full retirement of `write-run-note-<cadence>` SKILL.md files (orchestrator-instructions stopped delegating to them — could retire fully or keep as legacy manual paths); per-item L2R + Thompson sampling, memory salience/decay, per-skill SemVer, v0.95.1-migrator.
+
+See `Docs/plans/2026-06-10-v0.97.2-wrapper-delegation-proof-{design,plan,result}.md`.
+
+---
+
 ### v0.97.1 — reconciler-as-cadence (2026-06-09 close)
 
 **Codename:** `reconciler-as-cadence`. Workshop 0.97.0 → 0.97.1; cowork 0.35.0 → 0.35.1; contract 0.35.0 → 0.35.1.
