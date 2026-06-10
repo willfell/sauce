@@ -15812,6 +15812,193 @@ type: cowork-microscope
     assertTrue("HC-V0971-DEPR-3: cmd-reconcile-cowork.js still calls installer.installLaunchd()", false, e && e.message);
   }
 
+  // =========================================================================
+  // v0.97.2 wrapper-delegation-proof — 25 sub-asserts (7 AD + 15 IW + 4 DP)
+  //
+  // Anti-delegation directive + inline write contract + PRELUDE date fix.
+  // Targets: composed wrappers (via composeFromOrchestratorInstructions) for
+  // all 6 cadences + Step 7 contract in the 5 atomic-note cadence
+  // orchestrator-instructions files + PRELUDE no-hardcoded-date-examples.
+  //
+  // Re-uses SOURCE_ROOT_T / ORCH_INSTR_DIR_T / SJ_HELPER_PATH_T /
+  // SJ_CONTRACT_PATH_T / _loadSjHelperT / _loadSjContractT / _baseEngagementT /
+  // _basePrefsT from the v0.97.0 Rail T setup above.
+  // =========================================================================
+  const _V0972_ALL_CADENCES = ["morning-briefing", "midday-tripwire", "eod-review", "weekly-review", "monthly-review", "reconcile-cowork"];
+  const _V0972_ATOMIC_NOTE_CADENCES = ["morning-briefing", "midday-tripwire", "eod-review", "weekly-review", "monthly-review"];
+
+  function _composeV0972(cadence) {
+    const helper = _loadSjHelperT();
+    const contract = _loadSjContractT();
+    const out = helper.composeFromOrchestratorInstructions({
+      cadence,
+      engagement: _baseEngagementT(),
+      prefs: _basePrefsT(),
+      contract,
+      cadence_mode: "warm",
+      sourceRoot: SOURCE_ROOT_T,
+    });
+    return (out && typeof out === "object") ? (out.file_md || out.output || "") : (out || "");
+  }
+
+  // ---- HC-V0972-AD-1..6: anti-delegation directive present in each cadence ----
+  _V0972_ALL_CADENCES.forEach((cadence, idx) => {
+    const n = idx + 1;
+    console.log(`\n--- Case HC-V0972-AD-${n}: anti-delegation directive present in composed ${cadence} wrapper ---`);
+    try {
+      const outStr = _composeV0972(cadence);
+      const hasLiteral = outStr.includes("ANTI-DELEGATION (NON-NEGOTIABLE)");
+      const hasSubagentBan = outStr.includes("DO NOT spawn subagents");
+      assertTrue(
+        `HC-V0972-AD-${n}: composed ${cadence} wrapper contains "ANTI-DELEGATION (NON-NEGOTIABLE)" AND "DO NOT spawn subagents" — kills the Task()/Agent() delegation class that broke accuris's 2026-06-10 morning fire`,
+        hasLiteral && hasSubagentBan,
+        `hasLiteral=${hasLiteral} hasSubagentBan=${hasSubagentBan} (outLen=${outStr.length})`
+      );
+    } catch (e) {
+      assertTrue(`HC-V0972-AD-${n}: anti-delegation directive in ${cadence}`, false, e && e.message);
+    }
+  });
+
+  // ---- HC-V0972-AD-7: directive appears BEFORE the PRELUDE ----
+  console.log(`\n--- Case HC-V0972-AD-7: anti-delegation directive appears BEFORE PRELUDE block ---`);
+  try {
+    const outStr = _composeV0972("morning-briefing");
+    const idxDirective = outStr.indexOf("ANTI-DELEGATION (NON-NEGOTIABLE)");
+    const idxPrelude = outStr.indexOf("PRELUDE");
+    assertTrue(
+      "HC-V0972-AD-7: ANTI-DELEGATION directive string-index < PRELUDE string-index (directive lives at the top of the wrapper body, ahead of fire-time setup, so the LLM reads it first)",
+      idxDirective >= 0 && idxPrelude >= 0 && idxDirective < idxPrelude,
+      `idxDirective=${idxDirective} idxPrelude=${idxPrelude}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0972-AD-7: directive before PRELUDE", false, e && e.message);
+  }
+
+  // ---- HC-V0972-IW-1..5: inline write contract present + old delegation hook gone ----
+  _V0972_ATOMIC_NOTE_CADENCES.forEach((cadence, idx) => {
+    const n = idx + 1;
+    console.log(`\n--- Case HC-V0972-IW-${n}: ${cadence} wrapper carries INLINE CONTRACT (Step 7) + drops old READ-skill delegation ---`);
+    try {
+      const outStr = _composeV0972(cadence);
+      const hasInlineContract = outStr.includes("INLINE CONTRACT — do not delegate");
+      const oldDelegationHook = `READ <vault>/.claude/skills/cowork/skills/write-run-note-${cadence}/SKILL.md`;
+      const hasOldHook = outStr.includes(oldDelegationHook);
+      assertTrue(
+        `HC-V0972-IW-${n}: composed ${cadence} wrapper contains "INLINE CONTRACT — do not delegate" AND does NOT contain "${oldDelegationHook}" (Step 7c replaces SKILL.md-delegation with inline write contract)`,
+        hasInlineContract && !hasOldHook,
+        `hasInlineContract=${hasInlineContract} hasOldHook=${hasOldHook}`
+      );
+    } catch (e) {
+      assertTrue(`HC-V0972-IW-${n}: ${cadence} inline write contract`, false, e && e.message);
+    }
+  });
+
+  // ---- HC-V0972-IW-6..10: exact path template literal present ----
+  _V0972_ATOMIC_NOTE_CADENCES.forEach((cadence, idx) => {
+    const n = idx + 6;
+    console.log(`\n--- Case HC-V0972-IW-${n}: ${cadence} wrapper carries exact path template ---`);
+    try {
+      const outStr = _composeV0972(cadence);
+      const pathTemplate = `spice/cowork/daily/{{$today_dirpath}}/${cadence}.md`;
+      const hasPath = outStr.includes(pathTemplate);
+      assertTrue(
+        `HC-V0972-IW-${n}: composed ${cadence} wrapper contains exact path template "${pathTemplate}" (forbids daily-blueprint-style "<Weekday>-<YYYY-MM-DD>" paths that delegated runs improvise)`,
+        hasPath,
+        `hasPath=${hasPath}`
+      );
+    } catch (e) {
+      assertTrue(`HC-V0972-IW-${n}: ${cadence} exact path template`, false, e && e.message);
+    }
+  });
+
+  // ---- HC-V0972-IW-11..15: forbidden frontmatter keys list present ----
+  const _V0972_FORBIDDEN_KEYS = ["cadence", "date", "engagement", "generated_at", "week"];
+  _V0972_FORBIDDEN_KEYS.forEach((key, idx) => {
+    const n = idx + 11;
+    console.log(`\n--- Case HC-V0972-IW-${n}: morning-briefing wrapper FORBIDDEN list contains "${key}" ---`);
+    try {
+      const outStr = _composeV0972("morning-briefing");
+      const hasForbiddenSection = outStr.includes("FORBIDDEN frontmatter keys");
+      // Bound the search to the FORBIDDEN region to avoid coincidental matches
+      // elsewhere in the wrapper body. Find the FORBIDDEN line then check
+      // within the same paragraph (up to next blank-line boundary).
+      const startIdx = outStr.indexOf("FORBIDDEN frontmatter keys");
+      let regionContainsKey = false;
+      if (startIdx >= 0) {
+        const tail = outStr.slice(startIdx, startIdx + 500);
+        // Match the key as a backticked literal so e.g. "cadence" doesn't match "cadence_mode".
+        const tickedKey = "`" + key + "`";
+        regionContainsKey = tail.includes(tickedKey);
+      }
+      assertTrue(
+        `HC-V0972-IW-${n}: composed morning-briefing wrapper FORBIDDEN frontmatter list contains backticked "${key}" — guards against the v0.97.1 accuris fire's sidecar bug ("cadence: morning" instead of "type: cowork-morning-briefing")`,
+        hasForbiddenSection && regionContainsKey,
+        `hasForbiddenSection=${hasForbiddenSection} regionContainsKey=${regionContainsKey}`
+      );
+    } catch (e) {
+      assertTrue(`HC-V0972-IW-${n}: forbidden key "${key}"`, false, e && e.message);
+    }
+  });
+
+  // ---- HC-V0972-DP-1: no hardcoded weekday examples in PRELUDE ----
+  console.log(`\n--- Case HC-V0972-DP-1: composed PRELUDE does NOT hardcode weekday example ---`);
+  try {
+    const outStr = _composeV0972("morning-briefing");
+    const hasTuesdayExample = outStr.includes('e.g. "Tuesday"');
+    const hasFridayExample = outStr.includes('e.g. "Friday"');
+    const hasMondayExample = outStr.includes('e.g. "Monday"');
+    assertTrue(
+      "HC-V0972-DP-1: composed PRELUDE does NOT contain 'e.g. \"Tuesday\"', 'e.g. \"Friday\"', or 'e.g. \"Monday\"' (hardcoded weekday examples cause the LLM to literally copy the example into the title — root cause of accuris 2026-06-10 morning fire saying 'Tuesday' on a Wednesday)",
+      !hasTuesdayExample && !hasFridayExample && !hasMondayExample,
+      `hasTuesdayExample=${hasTuesdayExample} hasFridayExample=${hasFridayExample} hasMondayExample=${hasMondayExample}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0972-DP-1: no hardcoded weekday example", false, e && e.message);
+  }
+
+  // ---- HC-V0972-DP-2: no hardcoded month example in PRELUDE ----
+  console.log(`\n--- Case HC-V0972-DP-2: composed PRELUDE does NOT hardcode month example ---`);
+  try {
+    const outStr = _composeV0972("morning-briefing");
+    const hasJuneExample = outStr.includes('e.g. "June"');
+    const hasJanuaryExample = outStr.includes('e.g. "January"');
+    assertTrue(
+      "HC-V0972-DP-2: composed PRELUDE does NOT contain 'e.g. \"June\"' or 'e.g. \"January\"' (month-name examples follow the same copy-the-example failure mode as weekday)",
+      !hasJuneExample && !hasJanuaryExample,
+      `hasJuneExample=${hasJuneExample} hasJanuaryExample=${hasJanuaryExample}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0972-DP-2: no hardcoded month example", false, e && e.message);
+  }
+
+  // ---- HC-V0972-DP-3: PRELUDE references date Bash command pattern ----
+  console.log(`\n--- Case HC-V0972-DP-3: composed PRELUDE references date Bash command pattern ---`);
+  try {
+    const outStr = _composeV0972("morning-briefing");
+    const hasDateCmd = outStr.includes("date '+%Y-%m-%d'");
+    assertTrue(
+      "HC-V0972-DP-3: composed PRELUDE contains the substring `date '+%Y-%m-%d'` — directs the LLM at the actual Bash command for resolving today's date instead of accepting an example value",
+      hasDateCmd,
+      `hasDateCmd=${hasDateCmd}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0972-DP-3: PRELUDE references date command", false, e && e.message);
+  }
+
+  // ---- HC-V0972-DP-4: PRELUDE explicitly says not to use example values ----
+  console.log(`\n--- Case HC-V0972-DP-4: composed PRELUDE explicitly says "do NOT use any example value" ---`);
+  try {
+    const outStr = _composeV0972("morning-briefing");
+    const hasInstruction = outStr.includes("do NOT use any example value");
+    assertTrue(
+      "HC-V0972-DP-4: composed PRELUDE contains verbatim 'do NOT use any example value' — verbatim string the LLM must read before resolving fire-time date tokens",
+      hasInstruction,
+      `hasInstruction=${hasInstruction}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0972-DP-4: PRELUDE has do-NOT-use-example instruction", false, e && e.message);
+  }
+
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
   if (fail > 0) {
