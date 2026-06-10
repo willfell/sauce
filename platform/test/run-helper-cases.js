@@ -16092,6 +16092,682 @@ type: cowork-microscope
     assertTrue("HC-V0973-CSP-11: helper no longer contains literal PRELUDE block", false, e && e.message);
   }
 
+  // =========================================================================
+  // v0.97.4 prose-invariant write-guards — 31 sub-asserts
+  //
+  // Three prose-level invariants the LLM owns can today silently fail the
+  // structural contract while the deterministic backstops (path/frontmatter/
+  // sidecar schema) stay clean — confirmed via accuris 2026-06-10 morning
+  // briefing: surfaced_kinds_for_rating=[calendar,email,chat] yet no rating
+  // callout; render_aspects_applied=[anti_echo:include] yet no `[!question]
+  // Outside yesterday's frame`; 3 of 5 priorities (chat/calendar/email)
+  // surfaced while ado+github silently dropped.
+  //
+  // Strategy: turn ALL THREE into deterministic write-guards / write-injects
+  // inside `write-atomic-note-helper.js`. The rating + anti-echo guards
+  // hard-fail (no file gets written). The coverage-gap guard injects a
+  // `> [!warning]+ Coverage gap` callout AND mirrors the gap into
+  // `sidecar.coverage_gap` (write proceeds — some kinds legitimately have
+  // no data — but the gap is now VISIBLE to the user AND machine-readable
+  // for reconcile-cowork cross-day monitoring).
+  //
+  // Plus a plan-dispatch completeness fix: 5-priority engagements with
+  // `custom_kind: true` entries and UUID-shaped served_by values must still
+  // produce 5 dispatch_plan entries (root cause of the morning fire's
+  // "chat/calendar/email only" surface).
+  //
+  // Plus the gather-from-served-by `## Output shape` inline contract: per
+  // microscope discipline, the chat callout MUST emit Utilization snapshot +
+  // urgency tiers (not a flat reverse-chron list); the calendar callout MUST
+  // emit a markdown table (not bullets). Under wrapper-load, the LLM was
+  // skipping the read-microscope step entirely. Fix the same way v0.97.2
+  // fixed Step 7 — inline the contract into gather-from-served-by SKILL.md
+  // so the LLM cannot delegate to a separate file read.
+  // =========================================================================
+  const _WRITE_HELPER_PATH_T = path.join(WORKSHOP, "platform/blueprints/cowork/helpers/write-atomic-note-helper.js");
+  const _DISPATCH_HELPER_PATH_T = path.join(WORKSHOP, "platform/blueprints/cowork/helpers/dispatch-plan-helper.js");
+  const _GFS_SKILL_PATH_T = path.join(WORKSHOP, "platform/blueprints/cowork/skills/skills/gather-from-served-by/SKILL.md");
+
+  function _loadWriteHelperT() {
+    delete require.cache[require.resolve(_WRITE_HELPER_PATH_T)];
+    return require(_WRITE_HELPER_PATH_T);
+  }
+  function _loadDispatchHelperT() {
+    delete require.cache[require.resolve(_DISPATCH_HELPER_PATH_T)];
+    return require(_DISPATCH_HELPER_PATH_T);
+  }
+  function _baseSidecarT(overrides) {
+    return Object.assign(
+      JSON.parse(fs.readFileSync(path.join(SIDECAR_FIXTURES_DIR, "minimal-morning-briefing.cowork.json"), "utf8")),
+      overrides || {}
+    );
+  }
+  function _baseBodyMdT() {
+    return [
+      "---",
+      "type: cowork-morning-briefing",
+      "engagement_id: personal",
+      "day: \"2026-06-10\"",
+      "title: Morning Briefing - Wednesday, June 10, 2026",
+      "summary: Test body.",
+      "created_at: 2026-06-10T08:00:00-06:00",
+      "---",
+      "",
+      "```dataviewjs",
+      "await dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });",
+      "```",
+      "",
+      "> [!info]+ Today",
+      "> body",
+      "",
+      "> [!example]+ Calendar",
+      "> 9am standup",
+      "",
+      "> [!tip] Today's focus",
+      "> Go.",
+      "",
+    ].join("\n");
+  }
+
+  // ---- HC-V0974-WG-1..4: rating-callout write-guard ----
+
+  console.log(`\n--- Case HC-V0974-WG-1: writeAtomicNote rejects when surfaced_kinds_for_rating non-empty AND body lacks rating sentinel ---`);
+  try {
+    const { writeAtomicNote } = _loadWriteHelperT();
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "hc-v0974-wg-1-"));
+    try {
+      const mdPath = path.join(tmpDir, "out.md");
+      const sidecarPath = path.join(tmpDir, "out.cowork.json");
+      const result = writeAtomicNote({
+        mdPath, sidecarPath,
+        body_md: _baseBodyMdT(),  // does NOT contain `<!-- cowork:rating-block schema=`
+        sidecar_json: _baseSidecarT(),
+        schemaPath: MB_SCHEMA_PATH,
+        surfaced_kinds_for_rating: ["calendar", "email"],
+        learning_enabled: true,
+      });
+      const statusOk = result && result.status === "failed:contract-violation:missing-rating-callout";
+      const mdAbsent = !fs.existsSync(mdPath);
+      const sidecarAbsent = !fs.existsSync(sidecarPath);
+      assertTrue(
+        "HC-V0974-WG-1: writeAtomicNote returns failed:contract-violation:missing-rating-callout and writes NO files when surfaced_kinds_for_rating=[calendar,email] + learning_enabled=true + body_md lacks `<!-- cowork:rating-block schema=`",
+        statusOk && mdAbsent && sidecarAbsent,
+        `status=${result && result.status} mdAbsent=${mdAbsent} sidecarAbsent=${sidecarAbsent}`
+      );
+    } finally {
+      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
+    }
+  } catch (e) {
+    assertTrue("HC-V0974-WG-1: rating-callout write-guard rejects when sentinel absent", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0974-WG-2: writeAtomicNote accepts when body contains rating sentinel ---`);
+  try {
+    const { writeAtomicNote } = _loadWriteHelperT();
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "hc-v0974-wg-2-"));
+    try {
+      const mdPath = path.join(tmpDir, "out.md");
+      const sidecarPath = path.join(tmpDir, "out.cowork.json");
+      const bodyWithRating = _baseBodyMdT() +
+        "\n> [!todo]+ Was today useful?\n> - [ ] Calendar\n> - [ ] Email\n> <!-- cowork:rating-block schema=1.0.0 cadence=morning-briefing day=2026-06-10 -->\n";
+      const result = writeAtomicNote({
+        mdPath, sidecarPath,
+        body_md: bodyWithRating,
+        sidecar_json: _baseSidecarT(),
+        schemaPath: MB_SCHEMA_PATH,
+        surfaced_kinds_for_rating: ["calendar", "email"],
+        learning_enabled: true,
+      });
+      assertTrue(
+        "HC-V0974-WG-2: writeAtomicNote returns ok when surfaced_kinds_for_rating=[calendar,email] + learning_enabled=true + body_md contains the rating-block sentinel substring",
+        result && result.status === "ok" && fs.existsSync(mdPath) && fs.existsSync(sidecarPath),
+        `status=${result && result.status}`
+      );
+    } finally {
+      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
+    }
+  } catch (e) {
+    assertTrue("HC-V0974-WG-2: rating-callout write-guard accepts when sentinel present", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0974-WG-3: writeAtomicNote accepts when learning_enabled=false (rating-callout optional) ---`);
+  try {
+    const { writeAtomicNote } = _loadWriteHelperT();
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "hc-v0974-wg-3-"));
+    try {
+      const mdPath = path.join(tmpDir, "out.md");
+      const sidecarPath = path.join(tmpDir, "out.cowork.json");
+      const result = writeAtomicNote({
+        mdPath, sidecarPath,
+        body_md: _baseBodyMdT(),  // no rating sentinel
+        sidecar_json: _baseSidecarT(),
+        schemaPath: MB_SCHEMA_PATH,
+        surfaced_kinds_for_rating: ["calendar", "email"],
+        learning_enabled: false,
+      });
+      assertTrue(
+        "HC-V0974-WG-3: writeAtomicNote returns ok when learning_enabled=false even though body lacks rating sentinel (gate opens — rating-callout is opt-in)",
+        result && result.status === "ok",
+        `status=${result && result.status}`
+      );
+    } finally {
+      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
+    }
+  } catch (e) {
+    assertTrue("HC-V0974-WG-3: rating-callout guard opens when learning_enabled=false", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0974-WG-4: writeAtomicNote accepts when surfaced_kinds_for_rating empty ---`);
+  try {
+    const { writeAtomicNote } = _loadWriteHelperT();
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "hc-v0974-wg-4-"));
+    try {
+      const mdPath = path.join(tmpDir, "out.md");
+      const sidecarPath = path.join(tmpDir, "out.cowork.json");
+      const result = writeAtomicNote({
+        mdPath, sidecarPath,
+        body_md: _baseBodyMdT(),  // no rating sentinel
+        sidecar_json: _baseSidecarT(),
+        schemaPath: MB_SCHEMA_PATH,
+        surfaced_kinds_for_rating: [],
+        learning_enabled: true,
+      });
+      assertTrue(
+        "HC-V0974-WG-4: writeAtomicNote returns ok when surfaced_kinds_for_rating=[] — no kinds surfaced means no rating callout expected",
+        result && result.status === "ok",
+        `status=${result && result.status}`
+      );
+    } finally {
+      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
+    }
+  } catch (e) {
+    assertTrue("HC-V0974-WG-4: rating-callout guard opens when no kinds surfaced", false, e && e.message);
+  }
+
+  // ---- HC-V0974-WG-5..8: anti-echo write-guard ----
+
+  console.log(`\n--- Case HC-V0974-WG-5: writeAtomicNote rejects when render_aspects_applied=[anti_echo:include] AND body lacks "Outside yesterday's frame" ---`);
+  try {
+    const { writeAtomicNote } = _loadWriteHelperT();
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "hc-v0974-wg-5-"));
+    try {
+      const mdPath = path.join(tmpDir, "out.md");
+      const sidecarPath = path.join(tmpDir, "out.cowork.json");
+      const sidecar = _baseSidecarT({ render_aspects_applied: ["anti_echo:include"] });
+      const result = writeAtomicNote({
+        mdPath, sidecarPath,
+        body_md: _baseBodyMdT(),  // no "Outside yesterday's frame"
+        sidecar_json: sidecar,
+        schemaPath: MB_SCHEMA_PATH,
+      });
+      const statusOk = result && result.status === "failed:contract-violation:missing-anti-echo-callout";
+      const mdAbsent = !fs.existsSync(mdPath);
+      const sidecarAbsent = !fs.existsSync(sidecarPath);
+      assertTrue(
+        "HC-V0974-WG-5: writeAtomicNote returns failed:contract-violation:missing-anti-echo-callout and writes NO files when sidecar.render_aspects_applied includes 'anti_echo:include' AND body_md lacks `Outside yesterday's frame`",
+        statusOk && mdAbsent && sidecarAbsent,
+        `status=${result && result.status} mdAbsent=${mdAbsent} sidecarAbsent=${sidecarAbsent}`
+      );
+    } finally {
+      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
+    }
+  } catch (e) {
+    assertTrue("HC-V0974-WG-5: anti-echo guard rejects when callout absent", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0974-WG-6: writeAtomicNote accepts when body contains "Outside yesterday's frame" ---`);
+  try {
+    const { writeAtomicNote } = _loadWriteHelperT();
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "hc-v0974-wg-6-"));
+    try {
+      const mdPath = path.join(tmpDir, "out.md");
+      const sidecarPath = path.join(tmpDir, "out.cowork.json");
+      const body = _baseBodyMdT() +
+        "\n> [!question] Outside yesterday's frame\n> One new thing from today's gather.\n";
+      const sidecar = _baseSidecarT({ render_aspects_applied: ["anti_echo:include"] });
+      const result = writeAtomicNote({
+        mdPath, sidecarPath,
+        body_md: body,
+        sidecar_json: sidecar,
+        schemaPath: MB_SCHEMA_PATH,
+      });
+      assertTrue(
+        "HC-V0974-WG-6: writeAtomicNote returns ok when anti_echo:include AND body_md contains `Outside yesterday's frame`",
+        result && result.status === "ok",
+        `status=${result && result.status}`
+      );
+    } finally {
+      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
+    }
+  } catch (e) {
+    assertTrue("HC-V0974-WG-6: anti-echo guard accepts when callout present", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0974-WG-7: writeAtomicNote accepts when render_aspects_applied does NOT include anti_echo:include ---`);
+  try {
+    const { writeAtomicNote } = _loadWriteHelperT();
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "hc-v0974-wg-7-"));
+    try {
+      const mdPath = path.join(tmpDir, "out.md");
+      const sidecarPath = path.join(tmpDir, "out.cowork.json");
+      const sidecar = _baseSidecarT({ render_aspects_applied: ["finance_block:skip"] });
+      const result = writeAtomicNote({
+        mdPath, sidecarPath,
+        body_md: _baseBodyMdT(),  // no anti-echo callout
+        sidecar_json: sidecar,
+        schemaPath: MB_SCHEMA_PATH,
+      });
+      assertTrue(
+        "HC-V0974-WG-7: writeAtomicNote returns ok when anti_echo NOT applied (render_aspects_applied=[finance_block:skip]) — gate closes, anti-echo callout not expected",
+        result && result.status === "ok",
+        `status=${result && result.status}`
+      );
+    } finally {
+      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
+    }
+  } catch (e) {
+    assertTrue("HC-V0974-WG-7: anti-echo guard closes when aspect not applied", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0974-WG-8: anti-echo guard fires AFTER missing-input but BEFORE schema validation (deterministic order) ---`);
+  try {
+    const { writeAtomicNote } = _loadWriteHelperT();
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "hc-v0974-wg-8-"));
+    try {
+      const mdPath = path.join(tmpDir, "out.md");
+      const sidecarPath = path.join(tmpDir, "out.cowork.json");
+      // Missing-input check should fire first regardless of other guards
+      const result = writeAtomicNote({
+        // missing mdPath
+        sidecarPath,
+        body_md: _baseBodyMdT(),
+        sidecar_json: _baseSidecarT({ render_aspects_applied: ["anti_echo:include"] }),
+        schemaPath: MB_SCHEMA_PATH,
+      });
+      assertTrue(
+        "HC-V0974-WG-8: writeAtomicNote returns failed:contract-violation:missing-input when mdPath absent — missing-input check precedes the new prose-invariant guards (order: missing-input → rating → anti-echo → coverage-gap → schema → write)",
+        result && result.status === "failed:contract-violation:missing-input",
+        `status=${result && result.status}`
+      );
+    } finally {
+      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
+    }
+  } catch (e) {
+    assertTrue("HC-V0974-WG-8: guard ordering preserves missing-input precedence", false, e && e.message);
+  }
+
+  // ---- HC-V0974-WG-9..12: coverage-gap callout injection ----
+
+  console.log(`\n--- Case HC-V0974-WG-9: writeAtomicNote injects coverage-gap callout into body_md when expected_kinds > surfaced_kinds ---`);
+  try {
+    const { writeAtomicNote } = _loadWriteHelperT();
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "hc-v0974-wg-9-"));
+    try {
+      const mdPath = path.join(tmpDir, "out.md");
+      const sidecarPath = path.join(tmpDir, "out.cowork.json");
+      const sidecar = _baseSidecarT({ surfaced_kinds: ["chat", "calendar", "email"] });
+      const result = writeAtomicNote({
+        mdPath, sidecarPath,
+        body_md: _baseBodyMdT(),
+        sidecar_json: sidecar,
+        schemaPath: MB_SCHEMA_PATH,
+        expected_kinds: ["chat", "ado", "github", "calendar", "email"],
+      });
+      const writtenBody = fs.existsSync(mdPath) ? fs.readFileSync(mdPath, "utf8") : "";
+      const hasCalloutHeader = writtenBody.includes("> [!warning]+ Coverage gap");
+      const mentionsAdo = writtenBody.includes("ado");
+      const mentionsGithub = writtenBody.includes("github");
+      assertTrue(
+        "HC-V0974-WG-9: writeAtomicNote injects `> [!warning]+ Coverage gap` callout into written body_md naming `ado` AND `github` when expected_kinds=[chat,ado,github,calendar,email] but surfaced_kinds=[chat,calendar,email] — gap is VISIBLE in the rendered brief",
+        result && result.status === "ok" && hasCalloutHeader && mentionsAdo && mentionsGithub,
+        `status=${result && result.status} hasCalloutHeader=${hasCalloutHeader} mentionsAdo=${mentionsAdo} mentionsGithub=${mentionsGithub}`
+      );
+    } finally {
+      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
+    }
+  } catch (e) {
+    assertTrue("HC-V0974-WG-9: coverage-gap callout injected into body", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0974-WG-10: coverage-gap mirrors into sidecar.coverage_gap with expected/surfaced/skipped ---`);
+  try {
+    const { writeAtomicNote } = _loadWriteHelperT();
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "hc-v0974-wg-10-"));
+    try {
+      const mdPath = path.join(tmpDir, "out.md");
+      const sidecarPath = path.join(tmpDir, "out.cowork.json");
+      const sidecar = _baseSidecarT({ surfaced_kinds: ["chat", "calendar", "email"] });
+      const result = writeAtomicNote({
+        mdPath, sidecarPath,
+        body_md: _baseBodyMdT(),
+        sidecar_json: sidecar,
+        schemaPath: MB_SCHEMA_PATH,
+        expected_kinds: ["chat", "ado", "github", "calendar", "email"],
+      });
+      const written = fs.existsSync(sidecarPath) ? JSON.parse(fs.readFileSync(sidecarPath, "utf8")) : null;
+      const cg = written && written.coverage_gap;
+      const expectedOk = cg && Array.isArray(cg.expected) && JSON.stringify(cg.expected) === JSON.stringify(["chat","ado","github","calendar","email"]);
+      const surfacedOk = cg && Array.isArray(cg.surfaced) && JSON.stringify(cg.surfaced) === JSON.stringify(["chat","calendar","email"]);
+      const skippedOk = cg && Array.isArray(cg.skipped) && JSON.stringify(cg.skipped) === JSON.stringify(["ado","github"]);
+      assertTrue(
+        "HC-V0974-WG-10: written sidecar.coverage_gap = { expected:[chat,ado,github,calendar,email], surfaced:[chat,calendar,email], skipped:[ado,github] } — reconciler reads this for cross-day coverage monitoring",
+        result && result.status === "ok" && expectedOk && surfacedOk && skippedOk,
+        `status=${result && result.status} expectedOk=${expectedOk} surfacedOk=${surfacedOk} skippedOk=${skippedOk}`
+      );
+    } finally {
+      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
+    }
+  } catch (e) {
+    assertTrue("HC-V0974-WG-10: coverage_gap mirrored into sidecar", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0974-WG-11: no coverage-gap injection when all kinds covered ---`);
+  try {
+    const { writeAtomicNote } = _loadWriteHelperT();
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "hc-v0974-wg-11-"));
+    try {
+      const mdPath = path.join(tmpDir, "out.md");
+      const sidecarPath = path.join(tmpDir, "out.cowork.json");
+      const sidecar = _baseSidecarT({ surfaced_kinds: ["calendar", "email"] });
+      const result = writeAtomicNote({
+        mdPath, sidecarPath,
+        body_md: _baseBodyMdT(),
+        sidecar_json: sidecar,
+        schemaPath: MB_SCHEMA_PATH,
+        expected_kinds: ["calendar", "email"],
+      });
+      const writtenBody = fs.existsSync(mdPath) ? fs.readFileSync(mdPath, "utf8") : "";
+      const written = fs.existsSync(sidecarPath) ? JSON.parse(fs.readFileSync(sidecarPath, "utf8")) : null;
+      const noCallout = !writtenBody.includes("Coverage gap");
+      const noCoverageGap = !written || written.coverage_gap === undefined || (Array.isArray(written.coverage_gap.skipped) && written.coverage_gap.skipped.length === 0);
+      assertTrue(
+        "HC-V0974-WG-11: no `Coverage gap` callout and sidecar.coverage_gap.skipped is [] (or coverage_gap absent) when expected_kinds == surfaced_kinds — only fires when something is missing",
+        result && result.status === "ok" && noCallout && noCoverageGap,
+        `status=${result && result.status} noCallout=${noCallout} noCoverageGap=${noCoverageGap}`
+      );
+    } finally {
+      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
+    }
+  } catch (e) {
+    assertTrue("HC-V0974-WG-11: no injection when coverage complete", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0974-WG-12: coverage-gap callout appears BEFORE first per-kind block in body ---`);
+  try {
+    const { writeAtomicNote } = _loadWriteHelperT();
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "hc-v0974-wg-12-"));
+    try {
+      const mdPath = path.join(tmpDir, "out.md");
+      const sidecarPath = path.join(tmpDir, "out.cowork.json");
+      const sidecar = _baseSidecarT({ surfaced_kinds: ["calendar"] });
+      const result = writeAtomicNote({
+        mdPath, sidecarPath,
+        body_md: _baseBodyMdT(),
+        sidecar_json: sidecar,
+        schemaPath: MB_SCHEMA_PATH,
+        expected_kinds: ["calendar", "email"],
+      });
+      const writtenBody = fs.existsSync(mdPath) ? fs.readFileSync(mdPath, "utf8") : "";
+      const gapIdx = writtenBody.indexOf("Coverage gap");
+      const firstExampleIdx = writtenBody.indexOf("> [!example]+");
+      assertTrue(
+        "HC-V0974-WG-12: `Coverage gap` callout appears BEFORE the first `> [!example]+` per-kind block — gap is the first thing the user sees in the brief, NOT buried at the bottom",
+        result && result.status === "ok" && gapIdx > 0 && firstExampleIdx > 0 && gapIdx < firstExampleIdx,
+        `status=${result && result.status} gapIdx=${gapIdx} firstExampleIdx=${firstExampleIdx}`
+      );
+    } finally {
+      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
+    }
+  } catch (e) {
+    assertTrue("HC-V0974-WG-12: coverage-gap callout positioned before per-kind blocks", false, e && e.message);
+  }
+
+  // ---- HC-V0974-PD-1..5: plan-dispatch 5-priority completeness ----
+
+  console.log(`\n--- Case HC-V0974-PD-1: planDispatch returns 5 entries for a 5-priority engagement with all 5 connected ---`);
+  try {
+    const { planDispatch } = _loadDispatchHelperT();
+    const prefs = {
+      priorities: ["chat", "ado", "github", "calendar", "email"],
+      mcps: {
+        chat:     { kind: "chat",     served_by: "45224a84-ce0e-459b-a016-909ab178ad8c", connected: true, what_matters: "msgs", override_classified: true, callout_type: "info" },
+        ado:      { kind: "ado",      served_by: "1151913a-530a-4a36-a5f6-3bedcab4e4da", connected: true, what_matters: "tickets", custom_kind: true, callout_type: "example" },
+        github:   { kind: "github",   served_by: "github", connected: true, what_matters: "prs", custom_kind: true, callout_type: "example" },
+        calendar: { kind: "calendar", served_by: "45224a84-ce0e-459b-a016-909ab178ad8c", connected: true, what_matters: "events", override_classified: true, callout_type: "tip" },
+        email:    { kind: "email",    served_by: "45224a84-ce0e-459b-a016-909ab178ad8c", connected: true, what_matters: "threads", override_classified: true, callout_type: "quote" },
+      },
+    };
+    const reachable = ["45224a84-ce0e-459b-a016-909ab178ad8c", "1151913a-530a-4a36-a5f6-3bedcab4e4da", "github"];
+    const out = planDispatch({
+      prefs,
+      reachableNamespaces: reachable,
+      mcpSkillMap: { kinds: [] },
+      microscopes: {},
+    });
+    const plan = Array.isArray(out) ? out : (out && out.dispatch_plan);
+    const allDispatched = Array.isArray(plan) && plan.length === 5
+      && plan.every((e) => e && e.action !== "warn");
+    const orderOk = Array.isArray(plan) && plan.map((e) => e.kind_name).join(",") === "chat,ado,github,calendar,email";
+    assertTrue(
+      "HC-V0974-PD-1: planDispatch returns 5 dispatch_plan entries (none `action=warn`) for 5-priority engagement with all 5 served_by namespaces in reachable — root cause for accuris's 2026-06-10 morning fire surfacing only 3 of 5 priorities",
+      allDispatched && orderOk,
+      `plan.length=${plan && plan.length} actions=${JSON.stringify(plan && plan.map((e) => e.action))} order=${plan && plan.map((e) => e.kind_name).join(",")}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0974-PD-1: 5-priority dispatch returns 5 entries", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0974-PD-2: planDispatch does NOT filter custom_kind=true entries ---`);
+  try {
+    const { planDispatch } = _loadDispatchHelperT();
+    const prefs = {
+      priorities: ["ado", "github"],
+      mcps: {
+        ado:    { kind: "ado",    served_by: "azure-ns", connected: true, what_matters: "tickets", custom_kind: true, callout_type: "example" },
+        github: { kind: "github", served_by: "gh-ns",    connected: true, what_matters: "prs",     custom_kind: true, callout_type: "example" },
+      },
+    };
+    const out = planDispatch({
+      prefs,
+      reachableNamespaces: ["azure-ns", "gh-ns"],
+      mcpSkillMap: { kinds: [] },
+      microscopes: {},
+    });
+    const plan = Array.isArray(out) ? out : (out && out.dispatch_plan);
+    const bothDispatched = Array.isArray(plan) && plan.length === 2
+      && plan.every((e) => e && e.action === "gather_from_served_by");
+    assertTrue(
+      "HC-V0974-PD-2: planDispatch returns gather_from_served_by for BOTH custom_kind:true entries (ado + github) — custom_kind must NOT be silently filtered out of dispatch_plan",
+      bothDispatched,
+      `plan.length=${plan && plan.length} actions=${JSON.stringify(plan && plan.map((e) => e.action))}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0974-PD-2: custom_kind entries not filtered", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0974-PD-3: planDispatch resolves UUID-shaped served_by values against reachable_namespaces ---`);
+  try {
+    const { planDispatch } = _loadDispatchHelperT();
+    const uuid = "1151913a-530a-4a36-a5f6-3bedcab4e4da";
+    const prefs = {
+      priorities: ["ado"],
+      mcps: {
+        ado: { kind: "ado", served_by: uuid, connected: true, what_matters: "tickets", custom_kind: true, callout_type: "example" },
+      },
+    };
+    const out = planDispatch({
+      prefs,
+      reachableNamespaces: [uuid],
+      mcpSkillMap: { kinds: [] },
+      microscopes: {},
+    });
+    const plan = Array.isArray(out) ? out : (out && out.dispatch_plan);
+    const dispatched = Array.isArray(plan) && plan.length === 1
+      && plan[0].action === "gather_from_served_by" && plan[0].served_by === uuid;
+    assertTrue(
+      "HC-V0974-PD-3: planDispatch returns gather_from_served_by when served_by is a UUID like `1151913a-530a-4a36-a5f6-3bedcab4e4da` and that UUID is present in reachable_namespaces — UUID-shaped namespaces resolve same as named ones",
+      dispatched,
+      `plan=${JSON.stringify(plan)}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0974-PD-3: UUID-shaped served_by resolves", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0974-PD-4: planDispatch emits warn for entries whose served_by is NOT in reachable (not silent drop) ---`);
+  try {
+    const { planDispatch } = _loadDispatchHelperT();
+    const prefs = {
+      priorities: ["chat", "ado", "github"],
+      mcps: {
+        chat:   { kind: "chat",   served_by: "ns-a", connected: true, what_matters: "x", override_classified: true, callout_type: "info" },
+        ado:    { kind: "ado",    served_by: "ns-b", connected: true, what_matters: "x", custom_kind: true, callout_type: "example" },
+        github: { kind: "github", served_by: "ns-c", connected: true, what_matters: "x", custom_kind: true, callout_type: "example" },
+      },
+    };
+    const out = planDispatch({
+      prefs,
+      reachableNamespaces: ["ns-a"],  // ns-b + ns-c NOT reachable
+      mcpSkillMap: { kinds: [] },
+      microscopes: {},
+    });
+    const plan = Array.isArray(out) ? out : (out && out.dispatch_plan);
+    const allThree = Array.isArray(plan) && plan.length === 3;
+    const warnsCorrect = allThree
+      && plan[0].action === "gather_from_served_by"
+      && plan[1].action === "warn" && plan[1].reason === "served_by_unreachable"
+      && plan[2].action === "warn" && plan[2].reason === "served_by_unreachable";
+    assertTrue(
+      "HC-V0974-PD-4: planDispatch emits a `warn` entry (reason=served_by_unreachable) for each kind whose served_by isn't in reachable — kinds NEVER silently drop out of dispatch_plan; the priority loop ALWAYS sees 5 entries for a 5-priority engagement",
+      warnsCorrect,
+      `plan=${JSON.stringify(plan && plan.map((e) => ({k:e.kind_name, a:e.action, r:e.reason})))}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0974-PD-4: unreachable served_by emits warn entry", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0974-PD-5: planDispatch preserves priorities[] declared order in dispatch_plan ---`);
+  try {
+    const { planDispatch } = _loadDispatchHelperT();
+    const prefs = {
+      priorities: ["chat", "ado", "github", "calendar", "email"],
+      mcps: {
+        chat:     { kind: "chat",     served_by: "ns",  connected: true, what_matters: "x", override_classified: true, callout_type: "info" },
+        ado:      { kind: "ado",      served_by: "ns",  connected: true, what_matters: "x", custom_kind: true, callout_type: "example" },
+        github:   { kind: "github",   served_by: "ns",  connected: true, what_matters: "x", custom_kind: true, callout_type: "example" },
+        calendar: { kind: "calendar", served_by: "ns",  connected: true, what_matters: "x", override_classified: true, callout_type: "tip" },
+        email:    { kind: "email",    served_by: "ns",  connected: true, what_matters: "x", override_classified: true, callout_type: "quote" },
+      },
+    };
+    const out = planDispatch({
+      prefs,
+      reachableNamespaces: ["ns"],
+      mcpSkillMap: { kinds: [] },
+      microscopes: {},
+    });
+    const plan = Array.isArray(out) ? out : (out && out.dispatch_plan);
+    const orderOk = Array.isArray(plan) && plan.map((e) => e.kind_name).join(",") === "chat,ado,github,calendar,email";
+    assertTrue(
+      "HC-V0974-PD-5: planDispatch preserves priorities[] declared order (chat → ado → github → calendar → email) in dispatch_plan — the priority loop iterates in user-defined order",
+      orderOk,
+      `order=${plan && plan.map((e) => e.kind_name).join(",")}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0974-PD-5: priorities order preserved", false, e && e.message);
+  }
+
+  // ---- HC-V0974-GS-1..6: gather-from-served-by SKILL.md inline output-shape contract ----
+
+  console.log(`\n--- Case HC-V0974-GS-1: gather-from-served-by SKILL.md contains "Microscope output-shape contract (INLINE" ---`);
+  try {
+    const body = fs.readFileSync(_GFS_SKILL_PATH_T, "utf8");
+    const hasInline = body.includes("Microscope output-shape contract (INLINE");
+    assertTrue(
+      "HC-V0974-GS-1: gather-from-served-by/SKILL.md contains the literal substring `Microscope output-shape contract (INLINE` — section header inlines the per-kind structural contract directly into the SKILL body so the LLM under wrapper-load can't silently skip reading the microscope file",
+      hasInline,
+      `hasInline=${hasInline}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0974-GS-1: SKILL.md inline contract section exists", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0974-GS-2: SKILL.md inline contract lists the FOUR mandatory structural elements ---`);
+  try {
+    const body = fs.readFileSync(_GFS_SKILL_PATH_T, "utf8");
+    const hasSnapshot = /Utilization snapshot/i.test(body);
+    const hasUrgencyTiers = /[Uu]rgency.tier/i.test(body) || /REPLY OWED/i.test(body);
+    const hasWikilinkRule = /\*\*\[\[Person Basename\]\]\*\*/.test(body) || /\*\*\[\[.+Basename.+\]\]\*\*/.test(body);
+    const hasCalendarTable = /MARKDOWN TABLE|markdown table.*Time.*Event.*Organizer|Time \/ Event \/ Organizer/.test(body);
+    assertTrue(
+      "HC-V0974-GS-2: inline contract lists ALL FOUR mandatory structural elements verbatim: (1) `Utilization snapshot` 1-line lead-in, (2) urgency tiers / REPLY OWED subheads, (3) inner-circle wikilink `**[[Person Basename]]**`, (4) calendar MARKDOWN TABLE (Time / Event / Organizer / Status)",
+      hasSnapshot && hasUrgencyTiers && hasWikilinkRule && hasCalendarTable,
+      `hasSnapshot=${hasSnapshot} hasUrgencyTiers=${hasUrgencyTiers} hasWikilinkRule=${hasWikilinkRule} hasCalendarTable=${hasCalendarTable}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0974-GS-2: four mandatory elements present", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0974-GS-3: SKILL.md verbal-commitment line says READ microscope file in full + echo headers ---`);
+  try {
+    const body = fs.readFileSync(_GFS_SKILL_PATH_T, "utf8");
+    const hasReadInstruction = /READ the microscope file in full/.test(body);
+    const hasEchoInstruction = /echo back/i.test(body) && /Notice/.test(body);
+    assertTrue(
+      "HC-V0974-GS-3: SKILL.md contains a verbal-commitment line directing the LLM to READ the microscope file in full BEFORE composing AND echo back the section headers as a Notice — verbal commitment forces the read step under wrapper-load",
+      hasReadInstruction && hasEchoInstruction,
+      `hasReadInstruction=${hasReadInstruction} hasEchoInstruction=${hasEchoInstruction}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0974-GS-3: verbal-commitment line present", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0974-GS-4: SKILL.md contains pre-render self-check checklist ---`);
+  try {
+    const body = fs.readFileSync(_GFS_SKILL_PATH_T, "utf8");
+    const hasSelfCheck = /Pre-render self-check/i.test(body) || /pre-render self-check/i.test(body);
+    const hasFourPoints = (
+      /Snapshot line present/i.test(body) &&
+      /[Uu]rgency tiers/i.test(body) &&
+      /[Ii]nner.circle wikilinks/i.test(body) &&
+      /table format used/i.test(body)
+    );
+    assertTrue(
+      "HC-V0974-GS-4: SKILL.md ends with a Pre-render self-check checklist enumerating four points: (1) Snapshot line present? (2) Urgency tiers present? (3) Inner-circle wikilinks intact? (4) For calendar: table format used? — last-mile prose-invariant audit before write",
+      hasSelfCheck && hasFourPoints,
+      `hasSelfCheck=${hasSelfCheck} hasFourPoints=${hasFourPoints}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0974-GS-4: pre-render self-check checklist present", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0974-GS-5: SKILL.md inline contract forbids improvising flat list when microscope absent ---`);
+  try {
+    const body = fs.readFileSync(_GFS_SKILL_PATH_T, "utf8");
+    const hasFallback = /structured fallback/i.test(body) && /do NOT improvise a flat list/i.test(body);
+    assertTrue(
+      "HC-V0974-GS-5: SKILL.md instructs `do NOT improvise a flat list` when the microscope file is missing — falls back to a structured shape, never to flat reverse-chron output (root cause of accuris's 2026-06-10 chat callout)",
+      hasFallback,
+      `hasFallback=${hasFallback}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0974-GS-5: forbids flat-list fallback", false, e && e.message);
+  }
+
+  console.log(`\n--- Case HC-V0974-GS-6: SKILL.md mentions the specific urgency tier labels (REPLY OWED - DIRECT / GROUP / TIME-SENSITIVE / FYI) ---`);
+  try {
+    const body = fs.readFileSync(_GFS_SKILL_PATH_T, "utf8");
+    const hasReplyOwedDirect = /REPLY OWED - DIRECT/.test(body);
+    const hasReplyOwedGroup = /REPLY OWED - GROUP/.test(body);
+    const hasTimeSensitive = /TIME-SENSITIVE/.test(body);
+    const hasFyi = /FYI/.test(body);
+    assertTrue(
+      "HC-V0974-GS-6: SKILL.md lists the specific urgency-tier labels REPLY OWED - DIRECT, REPLY OWED - GROUP, TIME-SENSITIVE, FYI — verbatim labels the chat microscope mandates as subhead text",
+      hasReplyOwedDirect && hasReplyOwedGroup && hasTimeSensitive && hasFyi,
+      `hasReplyOwedDirect=${hasReplyOwedDirect} hasReplyOwedGroup=${hasReplyOwedGroup} hasTimeSensitive=${hasTimeSensitive} hasFyi=${hasFyi}`
+    );
+  } catch (e) {
+    assertTrue("HC-V0974-GS-6: urgency tier labels enumerated", false, e && e.message);
+  }
+
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
   if (fail > 0) {
