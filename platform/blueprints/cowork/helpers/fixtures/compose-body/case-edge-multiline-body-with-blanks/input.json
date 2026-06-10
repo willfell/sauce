@@ -1,7 +1,7 @@
 {
   "cadence": "morning-briefing",
   "nav_buttons_block": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```",
-  "synopsis_md": "> [!info]- Today at a glance\n> Edge fixture for multi-line body composition.",
+  "synopsis_md": "> [!info]+ What matters today\n> Edge fixture for multi-line body composition.",
   "memory_callouts": {
     "yesterday_md": "",
     "overnight_md": "",
@@ -16,6 +16,5 @@
       "body_md": "Line 1\n\nLine 3 with > inline prefix\n  Trailing spaces  "
     }
   ],
-  "engagement_type_blocks": [],
-  "closing_md": "> [!tip] Today's focus\n> Exercise the line-prefix mechanic."
+  "engagement_type_blocks": []
 }

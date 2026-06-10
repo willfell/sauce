@@ -2,7 +2,7 @@
 await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 ```
 
-> [!info]- Today's recap
+> [!info]+ What landed today
 > Document-registry namespace migration moved forward — AccurAPI PR merged, Argo project created. Two GitHub deployment reviews approved (mcp-mesh, ontology-api-gateway). CDC scope handoff confirmed with **[[Ted Grzesik]]** for next week. Hawaii CDN cutover fully closed.
 
 > [!quote]- Yesterday's last memory
@@ -11,30 +11,27 @@ await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 > [!example]- Overnight tick
 > Overnight Teams thread confirmed Redis cluster nodes discovered (Ben: "there's the 3rd node"). **[[Stale Veipe]]** validated Redis fails-open behavior. Matt confirmed Redis data loss acceptable on migration.
 
-> [!quote]+ Echoes from your record
+> [!quote]- Echoes from your record
 > Echo cluster: document-registry namespace migration appears across 5 of last 7 daily notes. CDC pipeline production work (708152) recurs in 3 of last 5 notes.
 
-> [!info]+ Chat (Teams)
+> [!info]- Chat (Teams)
 > Teams volume moderate today — 42 messages. Most activity in **[[Ben Tanner]]** DM (AccurAPI PR review, Redis cluster validation) and project-library channel.
 
-> [!quote]+ Email triage
+> [!quote]- Email triage
 > - **GitHub deployment review — mcp-mesh production** · APPROVED at 1:42 PM
 > - **GitHub deployment review — ontology-api-gateway dev-pr** · APPROVED at 1:43 PM
 > - **New Relic user approval — Sandesh Shenoy Beloor** · APPROVED at 1:45 PM
 
-> [!note]+ GitHub
+> [!note]- GitHub
 > **Merged today:**
 > - **accurapi.ingress-api.routes** — Merged by **[[Ben Tanner]]** at 3:11 PM
 > - **content-registry.argocd #47** — Merged by Will at 4:05 PM
 > - **hawaii.hawaii-system.delivery-platform-cdn #322** — Already merged yesterday
 
-> [!example]+ ADO (board status)
+> [!example]- ADO (board status)
 > Completed today:
 > - **[707565](https://dev.azure.com/pdd-ihsmarkit/_apis/wit/workItems/707565)** Centralized Pipeline Rules IaC — moved to Done
 > - **[708212](https://dev.azure.com/pdd-ihsmarkit/_apis/wit/workItems/708212)** Remove Linkerd from prod — still Active, blocked on review
-
-> [!tip] Carries forward
-> Monday: pick up **[708152](https://dev.azure.com/pdd-ihsmarkit/_apis/wit/workItems/708152)** CDC pipeline work with **[[Ted Grzesik]]** per today's handoff agreement. Confirm Redis prod cutover plan with **[[Ben Tanner]]** and **[[Matt Hemingway]]** before mid-week.
 
 > [!quote]- Memory log
 > Today's memory: [[spice/cowork/memory/accuris/2026/06-June/2026-06-05/memory.md|Memory log — 2026-06-05]]

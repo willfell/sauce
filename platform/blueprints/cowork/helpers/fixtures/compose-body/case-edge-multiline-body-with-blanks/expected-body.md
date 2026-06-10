@@ -2,14 +2,11 @@
 await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 ```
 
-> [!info]- Today at a glance
+> [!info]+ What matters today
 > Edge fixture for multi-line body composition.
 
-> [!info]+ Chat
+> [!info]- Chat
 > Line 1
 >
 > Line 3 with > inline prefix
 >   Trailing spaces
-
-> [!tip] Today's focus
-> Exercise the line-prefix mechanic.

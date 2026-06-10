@@ -100,10 +100,10 @@ function _validateInput(input) {
     if (!_isNonEmptyString(input.synopsis_md)) {
         return "failed:input:missing-synopsis";
     }
-    // 4. closing_md
-    if (!_isNonEmptyString(input.closing_md)) {
-        return "failed:input:missing-closing";
-    }
+    // 4. closing_md — REMOVED in v0.98.0 (synopsis carries the action signal).
+    // The orchestrator no longer composes a `[!tip] <closing>` callout; the
+    // helper accepts inputs without a `closing_md` key and emits no closing
+    // section. Inputs with a legacy `closing_md` key are tolerated but ignored.
     // 5. ordered_blocks must be an array, each entry validated in order.
     if (!Array.isArray(input.ordered_blocks)) {
         return "failed:input:malformed-ordered-block:0:kind";
@@ -130,7 +130,11 @@ function _wrapCallout({ callout_type, title, body_md }) {
         .map((l) => l.replace(/[ \t]+$/, ""));
     // Blank line → bare ">"; non-blank → "> <content>".
     const prefixed = bodyLines.map((l) => (l === "" ? ">" : `> ${l}`));
-    const header = `> [!${callout_type}]+ ${title}`;
+    // v0.98.0 synopsis-density contract: per-kind callouts default-collapsed
+    // (`-` sigil) regardless of callout_type. Lead synopsis stays `+` (open)
+    // but is composed upstream in synopsis_md; this wrapper only renders
+    // per-kind ordered_blocks + engagement_type_blocks.
+    const header = `> [!${callout_type}]- ${title}`;
     return [header, ...prefixed].join("\n");
 }
 
@@ -169,16 +173,15 @@ function _computeAssertions(input) {
             assertions.push(mc[f].split("\n")[0].replace(/[ \t]+$/, ""));
         }
     }
-    // 4. per ordered_blocks[i] callout header.
+    // 4. per ordered_blocks[i] callout header. v0.98.0: collapsed by default.
     for (const b of input.ordered_blocks) {
-        assertions.push(`> [!${b.callout_type}]+ ${b.title}`);
+        assertions.push(`> [!${b.callout_type}]- ${b.title}`);
     }
-    // 5. per engagement_type_blocks[i] callout header.
+    // 5. per engagement_type_blocks[i] callout header. v0.98.0: collapsed.
     for (const b of input.engagement_type_blocks) {
-        assertions.push(`> [!${b.callout_type}]+ ${b.title}`);
+        assertions.push(`> [!${b.callout_type}]- ${b.title}`);
     }
-    // 6. closing first line.
-    assertions.push(input.closing_md.split("\n")[0].replace(/[ \t]+$/, ""));
+    // 6. closing first line — REMOVED in v0.98.0 (no closing callout).
     // 7. backlink first line if present (last).
     if (typeof mc.backlink_md === "string" && mc.backlink_md.trim()) {
         assertions.push(mc.backlink_md.split("\n")[0].replace(/[ \t]+$/, ""));
@@ -413,7 +416,6 @@ function composeBody(input) {
         memory_callouts,
         ordered_blocks,
         engagement_type_blocks,
-        closing_md,
         excluded_themes,
         voice_contract,
     } = input;
@@ -445,8 +447,7 @@ function composeBody(input) {
     ) {
         sections.push(injectAntiEchoCallout("", excluded_themes, voice_contract));
     }
-    // 6. closing.
-    sections.push(_trimEnd(closing_md));
+    // 6. closing — REMOVED in v0.98.0 (synopsis carries the action signal).
     // 7. backlink (last, if present).
     const backlink = _composeBacklink(memory_callouts);
     if (backlink !== "") {

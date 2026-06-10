@@ -1,13 +1,12 @@
 [
   "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });",
-  "> [!info]- Today's recap",
+  "> [!info]+ What landed today",
   "> [!quote]- Yesterday's last memory",
   "> [!example]- Overnight tick",
-  "> [!quote]+ Echoes from your record",
-  "> [!info]+ Chat (Teams)",
-  "> [!quote]+ Email triage",
-  "> [!note]+ GitHub",
-  "> [!example]+ ADO (board status)",
-  "> [!tip] Carries forward",
+  "> [!quote]- Echoes from your record",
+  "> [!info]- Chat (Teams)",
+  "> [!quote]- Email triage",
+  "> [!note]- GitHub",
+  "> [!example]- ADO (board status)",
   "> [!quote]- Memory log"
 ]

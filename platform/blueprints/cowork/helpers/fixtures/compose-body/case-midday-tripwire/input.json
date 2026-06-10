@@ -1,11 +1,11 @@
 {
   "cadence": "midday-tripwire",
   "nav_buttons_block": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```",
-  "synopsis_md": "> [!info]- Midday status\n> Morning meetings landed cleanly — Nevado Scrum brief, CDC discussion with **[[Ted Grzesik]]** confirmed scope handoff for next week. AccurAPI PR still awaiting **[[Ben Tanner]]**'s approval. No fires; afternoon is open for the document-registry namespace work.",
+  "synopsis_md": "> [!info]+ What changed since morning\n> Morning meetings landed cleanly — Nevado Scrum brief, CDC discussion with **[[Ted Grzesik]]** confirmed scope handoff for next week. AccurAPI PR still awaiting **[[Ben Tanner]]**'s approval. No fires; afternoon is open for the document-registry namespace work.",
   "memory_callouts": {
     "yesterday_md": "",
     "overnight_md": "",
-    "echoes_md": "> [!quote]+ Echoes from your record\n> Recent runs have surfaced repeated focus on the document-registry namespace migration — Redis cluster moves, Argo project creation, New Relic operator secret access. The CDC pipeline work (item 708152) also recurs across the last three daily notes.",
+    "echoes_md": "> [!quote]- Echoes from your record\n> Recent runs have surfaced repeated focus on the document-registry namespace migration — Redis cluster moves, Argo project creation, New Relic operator secret access. The CDC pipeline work (item 708152) also recurs across the last three daily notes.",
     "backlink_md": "> [!quote]- Memory log\n> Today's memory: [[spice/cowork/memory/accuris/2026/06-June/2026-06-05/memory.md|Memory log — 2026-06-05]]"
   },
   "ordered_blocks": [
@@ -22,6 +22,5 @@
       "body_md": "- 12:30 PM – 1:00 PM: CDC discussion (completed)\n- 3:00 PM – 3:30 PM: AccurAPI PR review session (informal, with **[[Ben Tanner]]**)"
     }
   ],
-  "engagement_type_blocks": [],
-  "closing_md": "> [!tip] Recalibration\n> Push the AccurAPI PR review through this afternoon so **[[Ben Tanner]]** can proceed with the Argo sync before end of day. Nothing else needs rescheduling."
+  "engagement_type_blocks": []
 }

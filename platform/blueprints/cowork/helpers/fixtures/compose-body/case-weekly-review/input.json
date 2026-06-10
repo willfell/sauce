@@ -1,11 +1,11 @@
 {
   "cadence": "weekly-review",
   "nav_buttons_block": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```",
-  "synopsis_md": "> [!info]- Week in review\n> Week 23 closed with document-registry namespace migration delivered end-to-end (Redis cluster moved, AccurAPI PR merged, Argo project sync stable). Hawaii CDN cutover completed. CDC pipeline production work scoped and handed off to **[[Ted Grzesik]]** for next week. Two-day momentum on Dev Enablement IaC platform build-out.",
+  "synopsis_md": "> [!info]+ Where the week landed\n> Week 23 closed with document-registry namespace migration delivered end-to-end (Redis cluster moved, AccurAPI PR merged, Argo project sync stable). Hawaii CDN cutover completed. CDC pipeline production work scoped and handed off to **[[Ted Grzesik]]** for next week. Two-day momentum on Dev Enablement IaC platform build-out.",
   "memory_callouts": {
     "yesterday_md": "",
     "overnight_md": "",
-    "echoes_md": "> [!quote]+ Echoes from your record\n> Weekly echo cluster: namespace migration patterns (document-registry, hawaii) align with the Q2 platform-modernization arc. CDC pipeline work threads from week 21 onward — convergence point now within reach.",
+    "echoes_md": "> [!quote]- Echoes from your record\n> Weekly echo cluster: namespace migration patterns (document-registry, hawaii) align with the Q2 platform-modernization arc. CDC pipeline work threads from week 21 onward — convergence point now within reach.",
     "backlink_md": "> [!quote]- Memory log\n> This week's memory: [[spice/cowork/memory/accuris/2026/W23/memory.md|Memory log — 2026-W23]]"
   },
   "ordered_blocks": [
@@ -41,6 +41,5 @@
       "title": "Related to: CDC pipeline production handoff",
       "body_md": "Related to: CDC pipeline production handoff — convergence with **[[Ted Grzesik]]**'s BoM team work surfaces as the long-arc thread for week 24."
     }
-  ],
-  "closing_md": "> [!tip] Next week's setup\n> Open Monday with the CDC scope handoff session (Ted committed). Schedule Redis prod cutover with **[[Ben Tanner]]** and **[[Matt Hemingway]]** for mid-week. Capacity for Linkerd removal review depends on whether CDC work blocks."
+  ]
 }

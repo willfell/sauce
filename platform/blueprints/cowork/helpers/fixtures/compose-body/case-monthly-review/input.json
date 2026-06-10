@@ -1,11 +1,11 @@
 {
   "cadence": "monthly-review",
   "nav_buttons_block": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```",
-  "synopsis_md": "> [!info]- Month in review\n> June closed with the document-registry namespace migration arc completed, Hawaii CDN cutover, and the CDC pipeline production scope locked in for July with **[[Ted Grzesik]]**. Two major Q2 platform-modernization milestones landed. Linkerd prod removal slipped into July.",
+  "synopsis_md": "> [!info]+ Where the month landed\n> June closed with the document-registry namespace migration arc completed, Hawaii CDN cutover, and the CDC pipeline production scope locked in for July with **[[Ted Grzesik]]**. Two major Q2 platform-modernization milestones landed. Linkerd prod removal slipped into July.",
   "memory_callouts": {
     "yesterday_md": "> [!quote]- Yesterday's last memory\n> Closed June with the weekly-review handoff for CDC and the Redis prod cutover plan locked. Last memory tick: \"Linkerd removal still blocked; revisit early July.\"",
     "overnight_md": "> [!example]- Overnight tick\n> Overnight cycle showed completion of the final argocd genesis Redis support roll-up. Nothing else flagged.",
-    "echoes_md": "> [!quote]+ Echoes from your record\n> Monthly echo cluster: namespace migration arc (May → June) marks a multi-month platform-modernization theme. CDC pipeline work threads from mid-May through June handoff. Linkerd removal recurs as a persistent slip indicator.",
+    "echoes_md": "> [!quote]- Echoes from your record\n> Monthly echo cluster: namespace migration arc (May → June) marks a multi-month platform-modernization theme. CDC pipeline work threads from mid-May through June handoff. Linkerd removal recurs as a persistent slip indicator.",
     "backlink_md": "> [!quote]- Memory log\n> This month's memory: [[spice/cowork/memory/accuris/2026/06-June/memory.md|Memory log — 2026-06]]"
   },
   "ordered_blocks": [
@@ -29,6 +29,5 @@
       "title": "Related to: Q2 → Q3 architectural transition",
       "body_md": "Related to: Q2 → Q3 architectural transition — June's deliverables close out Q2's platform-consolidation thesis. The CDC pipeline production work bridges into Q3's data-platform modernization arc."
     }
-  ],
-  "closing_md": "> [!tip] Next month's board\n> July priorities: CDC pipeline production (with **[[Ted Grzesik]]**), Linkerd prod removal (carry-over), Nevado business-event prod cutover, Databricks platform modernization kickoff. Schedule a July-1 alignment with **[[Ben Tanner]]** and **[[Matt Hemingway]]** to confirm Redis prod cutover timing."
+  ]
 }

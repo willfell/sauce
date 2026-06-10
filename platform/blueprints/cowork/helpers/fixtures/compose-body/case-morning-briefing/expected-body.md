@@ -2,10 +2,10 @@
 await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 ```
 
-> [!info]- Today at a glance
+> [!info]+ What matters today
 > Light calendar — Nevado Scrum at 11:00 AM (tentative) and CDC discussion with **[[Ted Grzesik]]** and **[[Graham Lammers]]** at 12:30 PM. Heavy Teams activity overnight with **[[Ben Tanner]]**, **[[Stale Veipe]]**, and **[[Matt Hemingway]]** on the document-registry namespace migration and Redis/New Relic setup. **[[Jason Batai]]** wrapped up the Hawaii CDN cutover work late yesterday. Two GitHub deployment reviews waiting for approval in mcp-mesh and ontology-api-gateway.
 
-> [!info]+ Chat (Teams)
+> [!info]- Chat (Teams)
 > Utilization snapshot: 75 messages since yesterday 5 PM, split roughly 30 sent / 45 received. Busiest threads: **[[Ben Tanner]]** DM (48 msgs), infra/preprod debugging with **[[Jason Batai]]** and **[[Kevin Morales]]** (15 msgs), project-library channel (6 msgs). No outstanding reply debt — latest messages in active threads are from Will. Inner circle reach: 8 of 11 (Ben, Stale, Matt, Jason B, Kevin M, Justin, Ted, Alfredo). No unmapped senders.
 >
 > ### Inner circle
@@ -34,20 +34,20 @@ await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 >
 > Shreya Wani (support, unmapped DM `19:a33dcaab53e9483295c614a4d5296e38`) — Closed ServiceNow request RITM0020140 (Power Automate Premium access) after Will confirmed access via provided link. Final comment 4:49 PM.
 
-> [!tip]+ Today's calendar
+> [!tip]- Today's calendar
 > - 11:00 AM – 11:15 AM: Nevado Scrum (tentative) · Ying Zhu organizer · [Teams Meeting](https://outlook.office365.com/owa/?itemid=AAMkAGU5ZTAzMDRlLTJmNTMtNGI3MC1hYmVjLWZjZGQ5ODVhYmUwYwFRAAgI3sKVYv9AAEYAAAAAz5Y0b67glUKLqVM0T2MzPAcANoJJasuQLUGJ6e6u9d4U2gAAAAABDQAANoJJasuQLUGJ6e6u9d4U2gAA%2BwwXLwAAEA%3D%3D&exvsurl=1&path=/calendar/item)
 > - 12:30 PM – 1:00 PM: CDC discussion · **[[Ted Grzesik]]** organizer, **[[Graham Lammers]]** attending · [Teams Meeting](https://outlook.office365.com/owa/?itemid=AAMkAGU5ZTAzMDRlLTJmNTMtNGI3MC1hYmVjLWZjZGQ5ODVhYmUwYwBGAAAAAADPljRvruCVQoupUzRPYzM8BwA2gklqy5AtQYnp7q713hTaAAAAAAENAAA2gklqy5AtQYnp7q713hTaAALLbYq2AAA%3D&exvsurl=1&path=/calendar/item)
 >
 > Tomorrow: No events scheduled (Saturday).
 
-> [!quote]+ Email triage (work scope)
+> [!quote]- Email triage (work scope)
 > - **GitHub deployment review — mcp-mesh production** · notifications@github.com · Deployment workflow waiting for approval in ai.agentic-workflows.mcp-mesh (AgentGateway + OBO Sidecar) · [Email](https://outlook.office365.com/owa/?ItemID=AAMkAGU5ZTAzMDRlLTJmNTMtNGI3MC1hYmVjLWZjZGQ5ODVhYmUwYwBGAAAAAADPljRvruCVQoupUzRPYzM8BwA2gklqy5AtQYnp7q713hTaAAAAAAEMAAA2gklqy5AtQYnp7q713hTaAALK1O9EAAA%3D&exvsurl=1&viewmodel=ReadMessageItem)
 > - **GitHub deployment review — ontology-api-gateway dev-pr** · notifications@github.com · Deployment workflow waiting for approval in oneapi.sci-connect.ontology-api-gateway · [Email](https://outlook.office365.com/owa/?ItemID=AAMkAGU5ZTAzMDRlLTJmNTMtNGI3MC1hYmVjLWZjZGQ5ODVhYmUwYwBGAAAAAADPljRvruCVQoupUzRPYzM8BwA2gklqy5AtQYnp7q713hTaAAAAAAEMAAA2gklqy5AtQYnp7q713hTaAALK1O9DAAA%3D&exvsurl=1&viewmodel=ReadMessageItem)
 > - **New Relic user approval — Sandesh Shenoy Beloor** · noreply@newrelic.com (2 emails) · Approval needed for full platform user access, Supply Chain Full Stack Engineering Team · [Email](https://outlook.office365.com/owa/?ItemID=AAMkAGU5ZTAzMDRlLTJmNTMtNGI3MC1hYmVjLWZjZGQ5ODVhYmUwYwBGAAAAAADPljRvruCVQoupUzRPYzM8BwA2gklqy5AtQYnp7q713hTaAAAAAAEMAAA2gklqy5AtQYnp7q713hTaAALK1O9CAAA%3D&exvsurl=1&viewmodel=ReadMessageItem)
 >
 > Filtered: TechMentor conference promo, Miro Canvas sessions, iRU endpoint security newsletter, O'Reilly trial upsell, Tufts building update (denver-office list).
 
-> [!note]+ GitHub
+> [!note]- GitHub
 > *(Chat-sourced PR activity — direct GitHub search encountered rate/permission constraints)*
 >
 > **PRs involving Will or awaiting review:**
@@ -59,7 +59,7 @@ await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 > - **product-technology.argocd.genesis #313** (Kevin Williams) — istiod fix. [PR link](https://github.com/accuristech/product-technology.argocd.genesis/pull/313)
 > - **thread.interactions.sink #32** (**[[Justin Pflueger]]**) — Report authoring guide + agent instructions update. Merged. [PR link](https://github.com/accuristech/thread.interactions.sink/pull/32)
 
-> [!example]+ ADO (board status)
+> [!example]- ADO (board status)
 > Dev Enablement team scope (EPD\Product Technology\Developer Enablement):
 >
 > **Active work:**
@@ -70,9 +70,6 @@ await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 > **New work:**
 > - **[707659](https://dev.azure.com/pdd-ihsmarkit/_apis/wit/workItems/707659)** [NEVADO] – Business Event K8s Migration: Prod Cutover (User Story, New, assigned to Will)
 > - **[708152](https://dev.azure.com/pdd-ihsmarkit/_apis/wit/workItems/708152)** [SCI] – Add Database to CDC Pipeline Production (User Story, New, no assignee yet) — ties to today's CDC discussion with **[[Ted Grzesik]]** and **[[Graham Lammers]]**
-
-> [!tip] Today's focus
-> Wrap up the document-registry namespace migration PRs (AccurAPI + content-registry argocd) and confirm the e3 environment update is stable. The CDC discussion at 12:30 PM with **[[Ted Grzesik]]** and **[[Graham Lammers]]** ties directly to work item 708152 (CDC pipeline production database add) — Ted committed to diving into this next week, so use today's call to align on scope and handoff. Approve the two GitHub deployment reviews (mcp-mesh production, ontology-api-gateway dev-pr) and the New Relic user access for Sandesh Shenoy Beloor. First action: review and merge the AccurAPI PR so **[[Ben Tanner]]** can proceed with the Argo sync.
 
 > [!quote]- Memory log
 > Today's memory: [[spice/cowork/memory/accuris/2026/06-June/2026-06-05/memory.md|Memory log — 2026-06-05]]

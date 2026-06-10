@@ -1,11 +1,11 @@
 {
   "cadence": "midday-tripwire",
   "nav_buttons_block": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```",
-  "synopsis_md": "> [!info]- Midday status\n> Morning calendar cleared; no chat activity since briefing; running ahead.",
+  "synopsis_md": "> [!info]+ What changed since morning\n> Morning calendar cleared; no chat activity since briefing; running ahead.",
   "memory_callouts": {
     "yesterday_md": "> [!quote]- Yesterday's last memory\n> Closed yesterday on the deferred-review queue cleanup.",
     "overnight_md": "> [!example]- Overnight tick\n> Quiet overnight cycle.",
-    "echoes_md": "> [!quote]+ Echoes from your record\n> Theme: deferred-review queue surfaces across last 4 daily notes.",
+    "echoes_md": "> [!quote]- Echoes from your record\n> Theme: deferred-review queue surfaces across last 4 daily notes.",
     "backlink_md": "> [!quote]- Memory log\n> Today's memory: [[spice/cowork/memory/accuris/2026/06-June/2026-06-05/memory.md|Memory log — 2026-06-05]]"
   },
   "ordered_blocks": [],
@@ -16,6 +16,5 @@
       "title": "Related to: deferred-review queue",
       "body_md": "Convergence with last week's queue-hygiene push — afternoon is the natural slot to close out remaining reviews."
     }
-  ],
-  "closing_md": "> [!tip] Recalibration\n> Keep the afternoon for review work; no recalibration needed."
+  ]
 }

@@ -1,12 +1,11 @@
 [
   "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });",
-  "> [!info]- Week in review",
-  "> [!quote]+ Echoes from your record",
-  "> [!info]+ Chat (Teams) — weekly",
-  "> [!note]+ GitHub — weekly",
-  "> [!example]+ ADO — weekly",
-  "> [!example]+ Related to: Q2 platform-modernization arc",
-  "> [!example]+ Related to: CDC pipeline production handoff",
-  "> [!tip] Next week's setup",
+  "> [!info]+ Where the week landed",
+  "> [!quote]- Echoes from your record",
+  "> [!info]- Chat (Teams) — weekly",
+  "> [!note]- GitHub — weekly",
+  "> [!example]- ADO — weekly",
+  "> [!example]- Related to: Q2 platform-modernization arc",
+  "> [!example]- Related to: CDC pipeline production handoff",
   "> [!quote]- Memory log"
 ]

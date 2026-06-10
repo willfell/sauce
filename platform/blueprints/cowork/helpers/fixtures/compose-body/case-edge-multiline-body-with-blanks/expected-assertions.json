@@ -1,6 +1,5 @@
 [
   "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });",
-  "> [!info]- Today at a glance",
-  "> [!info]+ Chat",
-  "> [!tip] Today's focus"
+  "> [!info]+ What matters today",
+  "> [!info]- Chat"
 ]

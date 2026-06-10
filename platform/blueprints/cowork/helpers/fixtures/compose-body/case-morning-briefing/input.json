@@ -1,7 +1,7 @@
 {
   "cadence": "morning-briefing",
   "nav_buttons_block": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```",
-  "synopsis_md": "> [!info]- Today at a glance\n> Light calendar — Nevado Scrum at 11:00 AM (tentative) and CDC discussion with **[[Ted Grzesik]]** and **[[Graham Lammers]]** at 12:30 PM. Heavy Teams activity overnight with **[[Ben Tanner]]**, **[[Stale Veipe]]**, and **[[Matt Hemingway]]** on the document-registry namespace migration and Redis/New Relic setup. **[[Jason Batai]]** wrapped up the Hawaii CDN cutover work late yesterday. Two GitHub deployment reviews waiting for approval in mcp-mesh and ontology-api-gateway.",
+  "synopsis_md": "> [!info]+ What matters today\n> Light calendar — Nevado Scrum at 11:00 AM (tentative) and CDC discussion with **[[Ted Grzesik]]** and **[[Graham Lammers]]** at 12:30 PM. Heavy Teams activity overnight with **[[Ben Tanner]]**, **[[Stale Veipe]]**, and **[[Matt Hemingway]]** on the document-registry namespace migration and Redis/New Relic setup. **[[Jason Batai]]** wrapped up the Hawaii CDN cutover work late yesterday. Two GitHub deployment reviews waiting for approval in mcp-mesh and ontology-api-gateway.",
   "memory_callouts": {
     "yesterday_md": "",
     "overnight_md": "",
@@ -40,6 +40,5 @@
       "body_md": "Dev Enablement team scope (EPD\\Product Technology\\Developer Enablement):\n\n**Active work:**\n- **[708212](https://dev.azure.com/pdd-ihsmarkit/_apis/wit/workItems/708212)** [DE] – [EMS] – Remove Linkerd from prod (User Story, Active, assigned to Will)\n- **[706967](https://dev.azure.com/pdd-ihsmarkit/_apis/wit/workItems/706967)** [SCI] – Databricks Platform Modernization: Serverless Workspaces and Private-Egress Storage (Feature, Active, assigned to Will)\n- **[707565](https://dev.azure.com/pdd-ihsmarkit/_apis/wit/workItems/707565)** [DE] Centralized Pipeline Rules IaC Platform Build-out (Feature, Active, assigned to Will)\n\n**New work:**\n- **[707659](https://dev.azure.com/pdd-ihsmarkit/_apis/wit/workItems/707659)** [NEVADO] – Business Event K8s Migration: Prod Cutover (User Story, New, assigned to Will)\n- **[708152](https://dev.azure.com/pdd-ihsmarkit/_apis/wit/workItems/708152)** [SCI] – Add Database to CDC Pipeline Production (User Story, New, no assignee yet) — ties to today's CDC discussion with **[[Ted Grzesik]]** and **[[Graham Lammers]]**"
     }
   ],
-  "engagement_type_blocks": [],
-  "closing_md": "> [!tip] Today's focus\n> Wrap up the document-registry namespace migration PRs (AccurAPI + content-registry argocd) and confirm the e3 environment update is stable. The CDC discussion at 12:30 PM with **[[Ted Grzesik]]** and **[[Graham Lammers]]** ties directly to work item 708152 (CDC pipeline production database add) — Ted committed to diving into this next week, so use today's call to align on scope and handoff. Approve the two GitHub deployment reviews (mcp-mesh production, ontology-api-gateway dev-pr) and the New Relic user access for Sandesh Shenoy Beloor. First action: review and merge the AccurAPI PR so **[[Ben Tanner]]** can proceed with the Argo sync."
+  "engagement_type_blocks": []
 }

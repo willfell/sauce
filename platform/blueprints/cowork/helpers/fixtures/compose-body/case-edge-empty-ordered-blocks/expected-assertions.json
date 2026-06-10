@@ -1,10 +1,9 @@
 [
   "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });",
-  "> [!info]- Midday status",
+  "> [!info]+ What changed since morning",
   "> [!quote]- Yesterday's last memory",
   "> [!example]- Overnight tick",
-  "> [!quote]+ Echoes from your record",
-  "> [!example]+ Related to: deferred-review queue",
-  "> [!tip] Recalibration",
+  "> [!quote]- Echoes from your record",
+  "> [!example]- Related to: deferred-review queue",
   "> [!quote]- Memory log"
 ]
