@@ -4,6 +4,53 @@ This file archives the per-cycle status snapshots that previously lived in `CLAU
 
 ---
 
+### v0.97.4 — prose-invariant write-guards (2026-06-10 close)
+
+**Codename:** `prose-invariant-write-guards`. Workshop 0.97.3 → 0.97.4; cowork 0.35.3 → 0.35.4; contract 0.35.1 (UNCHANGED).
+
+**Origin.** v0.97.3 cloud-sync-parity shipped and today's accuris morning briefing was the first clean fire in 4 cycles — structural contract held (correct path, correct frontmatter, all callouts, correct sidecar schema). But multi-lens review identified three blockers + two high-severity gaps the deterministic write-helper currently CANNOT catch because they're prose-level invariants the LLM owns:
+
+1. **Rating callout missing.** Sidecar said `surfaced_kinds_for_rating.length=3` + `learned_weights` initialized — Rail L should have emitted `> [!todo]+ Was today useful?` with the `cowork:rating-block` sentinel. Body had no rating block. Without the sentinel, next-day reconciler can't parse prior_rating_state — Rail L is dead for that engagement.
+2. **Anti-echo callout missing despite sidecar saying it applied.** Sidecar `render_aspects_applied: [anti_echo:include]` but body had no `> [!question] Outside yesterday's frame`. Sidecar and body contradicted each other.
+3. **Priority loop dispatched only 3 of 5 kinds.** Accuris's priorities `[chat, ado, github, calendar, email]`; body had callouts for chat/calendar/email only. ado + github silently skipped. GitHub deployment-approval notifications leaked into the Email callout.
+4. **Chat microscope `## Output shape` ignored** — chat rendered as flat reverse-chronological list instead of Utilization snapshot + urgency tiers (REPLY OWED - DIRECT / GROUP / TIME-SENSITIVE / FYI).
+5. **Calendar used bullets instead of mandated chronological table.**
+
+**Migration.** Architectural shift: where v0.97.3 made the SHAPE of the brief contractually correct, v0.97.4 makes the BEHAVIOR contractually correct.
+
+**Three new write-guards in `write-atomic-note-helper.js`** (guard order: missing-input → rating → anti-echo → coverage-gap → schema → write):
+
+1. **Rating-callout sentinel.** Gate: `surfaced_kinds_for_rating.length>0 && learning_enabled !== false`. Body MUST contain `<!-- cowork:rating-block schema=`. On miss → `failed:contract-violation:missing-rating-callout`; no file written.
+2. **Anti-echo callout.** Gate: `sidecar.render_aspects_applied.includes("anti_echo:include")`. Body MUST contain `Outside yesterday's frame`. On miss → `failed:contract-violation:missing-anti-echo-callout`; no file written. Sidecar-driven — no new param needed.
+3. **Coverage-gap inject + sidecar mirror.** Gate: `expected_kinds.length > surfaced_kinds.length`. Injects `> [!warning]+ Coverage gap` callout BEFORE the first per-kind block AND mirrors `coverage_gap: { expected, surfaced, skipped }` into the sidecar. NON-failing — some kinds legitimately have no data — but the gap is now VISIBLE in the rendered brief AND machine-readable for `reconcile-cowork`'s cross-day monitoring.
+
+**6 sidecar schemas** (morning-briefing / midday-tripwire / eod-review / weekly-review / monthly-review / morning-briefing-cold) grow an optional `coverage_gap` property: `{ expected: string[], surfaced: string[], skipped: string[] }`.
+
+**`gather-from-served-by/SKILL.md` inline output-shape contract.** New section `## Microscope output-shape contract (INLINE — do not delegate to a separate read)` lists the FOUR mandatory structural elements verbatim:
+
+- Utilization snapshot 1-line lead-in (NOT a generic "Recent activity:" placeholder)
+- Urgency-tiered subsections with bold subheads (REPLY OWED - DIRECT / GROUP / TIME-SENSITIVE / FYI for chat; REPLY OWED / TIME-SENSITIVE / FYI for email; MINE - OPEN / BLOCKED / REVIEW REQUESTED / FYI for ado/github)
+- Inner-circle hits wrapped as `**[[Person Basename]]**`
+- Calendar: MARKDOWN TABLE (Time / Event / Organizer / Status), NOT bullets
+
+Plus a verbal-commitment line directing the LLM to READ the microscope file in full BEFORE composing AND echo back the section headers as a Notice. Plus a pre-render self-check checklist (4 points). Plus a `do NOT improvise a flat list` fallback prohibition for the missing-microscope case.
+
+**5 orchestrator-instructions** (morning-briefing / midday-tripwire / eod-review / weekly-review / monthly-review) update Step 8.5 with v0.97.4 guidance documenting the three new `writeAtomicNote` params (`surfaced_kinds_for_rating`, `learning_enabled`, `expected_kinds`).
+
+**plan-dispatch investigation.** HC-V0974-PD-1..5 prove the helper contract is already correct: 5-priority engagements with `custom_kind: true` + UUID-shaped `served_by` + warn-on-unreachable all produce 5-entry `dispatch_plan`. The accuris fire's "only 3 of 5 priorities surfaced" was an LLM-side priority-loop skip, NOT a planDispatch filtering bug. The coverage-gap write-guard now makes that exact class of failure VISIBLE in the brief.
+
+**23 new HC sub-asserts** (HC-V0974-WG-1..12 write-guards + HC-V0974-PD-1..5 plan-dispatch contract + HC-V0974-GS-1..6 gather-from-served-by inline contract).
+
+**Final harness:** helper-cases **2290 / 0** (+23); cowork-smoke **954 / 0**; claude-surface **214 / 0**; integration-smoke **36 / 0**; cli **132 / 0**; bootstrap **85 / 0**. Preflight `version-sync ok: 0.97.4` ALL GREEN.
+
+**Action required post-deploy.** `sauce update --bump-pins` per consumer vault. Cloud-sync prompt UNCHANGED from v0.97.3 — source files now produce a stricter wrapper (rating/anti-echo/coverage-gap guidance flows through Steps 4/6/8.5; gather-from-served-by inline contract loaded on every priority-loop iteration); sync mechanics unchanged.
+
+**Lessons.** (1) Deterministic backstops must cover both shape AND behavior — v0.97.3's regex/sidecar-schema backstops caught structural drift but couldn't see prose-level invariants. v0.97.4 closes that gap by letting writeAtomicNote ITSELF refuse the write when an invariant is violated. (2) Visibility beats silent dropping — the coverage-gap guard does NOT fail the write (some kinds legitimately have no data) but makes the gap LOUD in the rendered brief AND machine-readable in the sidecar. (3) Inline the contract when the LLM is under wrapper-load — same fix pattern as v0.97.2's inline write contract. (4) HC tests as forensic instruments — HC-V0974-PD-1..5 were written to prove or disprove the planDispatch filtering bug; they proved the helper is correct and redirected the cycle to the right fix.
+
+See `Docs/plans/2026-06-10-v0.97.4-prose-invariant-write-guards-{design,plan,result}.md`.
+
+---
+
 ### v0.97.3 — cloud-sync-parity (2026-06-10 close)
 
 **Codename:** `cloud-sync-parity`. Workshop 0.97.2 → 0.97.3; cowork 0.35.2 → 0.35.3; contract 0.35.1 (UNCHANGED).
