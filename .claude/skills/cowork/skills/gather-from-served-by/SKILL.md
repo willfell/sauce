@@ -106,6 +106,40 @@ When `inner_circle_resolved` is absent / empty, omit the preamble + bullet-list 
 
 7. **On success**, return `{ status: "ready", markdown: <composed>, served_by_used, tools_used: [<tools you invoked>] }`.
 
+## Microscope output-shape contract (INLINE — do not delegate to a separate read)
+
+v0.97.4: under wrapper-load the LLM was skipping the read-microscope step entirely and improvising flat reverse-chronological output. The four mandatory structural elements below are now INLINED into this SKILL body so they reach the agent regardless of whether the microscope file is opened.
+
+BEFORE composing the per-kind callout, READ the microscope file in full at `spice/cowork/prompts/per-mcp/<kind_name>/microscope.md` AND echo back the four section headers verbatim as a Notice (e.g. `cowork:gather-from-served-by: microscope sections for chat = "Utilization snapshot" / "REPLY OWED - DIRECT" / "REPLY OWED - GROUP" / "TIME-SENSITIVE"`). If you cannot find the microscope file, emit Notice `cowork:gather-from-served-by: microscope file not found for <kind_name> — applying structured fallback` and continue with a structured fallback per the FOUR mandatory elements below — do NOT improvise a flat list.
+
+**The FOUR mandatory structural elements** every per-kind `> [!<callout_type>]+ <kind_title>` callout MUST carry:
+
+1. **Utilization snapshot lead-in.** A 1-line situation lead-in distilled from the gather window (e.g. for chat: `> 47 messages across 8 threads; 3 direct mentions, 1 reply owed since yesterday afternoon.`). This is the FIRST line under the callout header — NOT a generic "Recent activity:" placeholder. The microscope file's narrative dictates the exact phrasing; the fallback when no microscope is found is `> <window summary>: <N items> across <M sources>; <X> needing response.`.
+
+2. **Urgency-tiered subsections with bold subheads when the microscope specifies tiers.** For chat specifically, the microscope mandates these verbatim tier labels as bold subheads, in declared order:
+   - `**REPLY OWED - DIRECT**` — direct messages or @mentions awaiting your reply
+   - `**REPLY OWED - GROUP**` — group threads awaiting your reply
+   - `**TIME-SENSITIVE**` — items with embedded deadlines or time anchors
+   - `**FYI - actionable**` — items you should know about that may need action later
+   - `**FYI - ambient**` — context-only items, no action implied
+
+   For email: `**REPLY OWED**` / `**TIME-SENSITIVE**` / `**FYI**`. For ado/github: `**MINE - OPEN**` / `**MINE - BLOCKED**` / `**REVIEW REQUESTED**` / `**FYI**`. When the microscope file declares different labels, the microscope wins; when it declares NONE, use the kind's default labels above. NEVER emit a single flat reverse-chronological list under any tier-bearing kind.
+
+3. **Inner-circle hits wrapped as `**[[Person Basename]]**`.** When the dispatch contract's "Known people in scope" allowlist is non-empty, every mention of a listed person (directly OR via any of their typed aliases — phone / email / handle / name variants) MUST render as the bold-wrapped Obsidian wikilink `**[[Person Basename]]**`. Preserve bold for callout-table parsability. Plaintext-only people-names indicate the wikilink_people hard rule was violated.
+
+4. **For calendar specifically: a MARKDOWN TABLE — NOT a bulleted list.** Columns: `| Time | Event | Organizer | Status |`. One row per surfaced event, ordered chronologically. The leading "Utilization snapshot" line above the table still applies (e.g. `> 4 events today; 2 with you as organizer, 1 conflict at 14:00.`). Calendar in bullet form indicates the microscope's `## Output shape` directive was ignored — re-render as table before validation.
+
+### Pre-render self-check (last-mile prose-invariant audit)
+
+After composing the callout and BEFORE returning it to the orchestrator, run this four-point checklist mentally:
+
+1. **Snapshot line present?** First content line under the callout header is a Utilization snapshot, not a generic placeholder.
+2. **Urgency tiers / subheads present per microscope?** When the kind's microscope (or the fallback default) specifies tiered subheads, they appear in declared order as bold subheads — NOT a flat list.
+3. **Inner-circle wikilinks intact?** Every name from the `Known people in scope` allowlist that appears in the body is wrapped as `**[[Basename]]**`.
+4. **For calendar: table format used?** When kind_name == "calendar", the body contains a markdown table with the columns above — NOT a bulleted list of events.
+
+If any point fails, RE-RENDER the callout before returning. The structural backstops at Step 5 (output validation) cannot detect prose-invariant drift; the write-helper guards added in v0.97.4 catch rating + anti-echo prose invariants but the per-kind output shape is yours.
+
 ## Source URL requirements
 
 The output `markdown` MUST include source URLs when the `served_by` MCP exposes them. The user reads briefings in Obsidian where inline markdown links open in the browser; URL-less prose is much less useful than a one-click jump to the source.

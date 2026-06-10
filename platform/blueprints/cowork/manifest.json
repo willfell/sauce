@@ -1,6 +1,6 @@
 {
   "name": "cowork",
-  "version": "0.35.3",
+  "version": "0.35.4",
   "kind": "blueprint",
   "module_directory": "cowork",
   "engagement_types_dir": "engagement-types",

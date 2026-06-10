@@ -290,6 +290,18 @@ validation subsumes it. v0.91.x–v0.92.0 path/frontmatter/dvjs write-guards
 INSIDE write-run-note still fire as belt-and-suspenders before the
 writeAtomicNote call.
 
+**v0.97.4 prose-invariant write-guards.** Pass `surfaced_kinds_for_rating`
+(from Step 4 rating-callout compute) + `learning_enabled` (engagement field) +
+`expected_kinds` (= `plan.dispatch_plan.map(e => e.kind_name)`) into
+`writeAtomicNote`. Guards fire deterministically:
+`failed:contract-violation:missing-rating-callout` when body lacks the
+`<!-- cowork:rating-block schema=` sentinel and rating gate is open;
+`failed:contract-violation:missing-anti-echo-callout` when sidecar's
+`render_aspects_applied` includes `anti_echo:include` but body lacks
+`Outside yesterday's frame`. The coverage-gap injection (expected vs surfaced
+kinds) is non-failing — visible warning callout + sidecar `coverage_gap`
+field so reconcile-cowork can monitor cross-day.
+
 ### Step 9: State updates
 
 (midday-tripwire does NOT update active-threads or weekly-snapshot — those are
