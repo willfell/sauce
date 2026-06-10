@@ -179,7 +179,10 @@ function checkSharedContracts() {
   // S6 — orchestrator declares engagement_id intake
   const morning = readSkill("skills/orchestrators/morning-briefing/SKILL.md");
   assertContains(morning, "engagement_id: string", "S6: morning-briefing orchestrator declares engagement_id input");
-  assertContains(morning, ".claude/skills/cowork/skills/write-run-note-morning-briefing/SKILL.md", "S6: morning-briefing dispatches write-run-note-morning-briefing");
+  // v0.97.2 wrapper-delegation-proof: morning-briefing orchestrator-instructions
+  // no longer DELEGATES to write-run-note-morning-briefing/SKILL.md; the write
+  // contract is inlined in Step 7. Assert the new inline marker instead.
+  assertContains(morning, "INLINE CONTRACT — do not delegate", "S6: morning-briefing carries v0.97.2 inline write contract (replaces v0.65.0 write-run-note delegation)");
   assertContains(morning, "Resolve engagement", "S6: morning-briefing has Resolve engagement pre-flight step");
 
   // S7 — every gather sub-skill referenced by orchestrators declares engagement_id
@@ -618,19 +621,25 @@ function assertCoworkV065Shape() {
     assertTrue(!fs.existsSync(p), `v065-S3.8: legacy sub-skill ${slug} removed`);
   }
 
-  // S3.1..S3.6: orchestrator step lists reference new sub-skills, not legacy
+  // S3.1..S3.6: orchestrator step lists reference inline write contract, not legacy
+  // v0.97.2 wrapper-delegation-proof: orchestrator-instructions no longer carry
+  // a `write-run-note-<cadence>` reference; the write contract is inlined into
+  // Step 7 per wrapper-delegation-proof. Asserts shift from delegation marker
+  // (`write-run-note-<cadence>`) to the inline-contract marker
+  // (`INLINE CONTRACT — do not delegate`). The `forbid` legacy `write-callout`/
+  // `write-summary` slugs remain forbidden (pre-v0.65 retired pattern).
   const orchRewires = [
-    { orch: "morning-briefing", expect: "write-run-note-morning-briefing", forbid: "write-callout-morning-briefing" },
-    { orch: "eod-review",       expect: "write-run-note-eod-review",       forbid: "write-callout-eod-review" },
-    { orch: "midday-tripwire",  expect: "write-run-note-midday-tripwire",  forbid: "write-callout-tripwire" },
-    { orch: "weekly-review",    expect: "write-run-note-weekly-review",    forbid: "write-summary-weekly" },
-    { orch: "monthly-review",   expect: "write-run-note-monthly-review",   forbid: "write-summary-monthly" },
+    { orch: "morning-briefing", forbid: "write-callout-morning-briefing" },
+    { orch: "eod-review",       forbid: "write-callout-eod-review" },
+    { orch: "midday-tripwire",  forbid: "write-callout-tripwire" },
+    { orch: "weekly-review",    forbid: "write-summary-weekly" },
+    { orch: "monthly-review",   forbid: "write-summary-monthly" },
   ];
   for (const o of orchRewires) {
     const p = path.join(cowork, "skills/orchestrators", o.orch, "SKILL.md");
     // v0.97.0 C3: cadence SKILL.md is a thin shim; legacy content lives in orchestrator-instructions/<cadence>.md.
     const body = readCadenceOrchestrator(p);
-    assertContains(body, o.expect, `v065-S3: orchestrator ${o.orch} references ${o.expect}`);
+    assertContains(body, "INLINE CONTRACT — do not delegate", `v065-S3: orchestrator ${o.orch} carries v0.97.2 inline write contract`);
     assertTrue(!body.includes(o.forbid), `v065-S3: orchestrator ${o.orch} no longer references ${o.forbid}`);
   }
 

@@ -10724,6 +10724,12 @@ type: cowork-microscope
   // write-run-note shim. The sub-shim invokes writeAtomicNote, which validates
   // the sidecar against the cadence JSON schema BEFORE committing either file.
   // v0.97.0 C3: cadence SKILL.md is a thin shim; legacy content lives in orchestrator-instructions/<cadence>.md.
+  // v0.97.2 wrapper-delegation-proof: orchestrator-instructions Step 7 no longer
+  // delegates to write-run-note SKILL.md; the write contract is inlined per
+  // accuris's 2026-06-10 morning-fire delegation regression. sidecar_json is
+  // still captured from composeBody (Step 3g) but the call-site regex shifts
+  // from `body: body_md, sidecar_json: sidecar_json` (legacy delegation) to
+  // the inline obsidian_put_content call described in Step 7e.
   for (const cad of _V0920_CADENCES) {
     const L = _V0920_LABELS[cad];
     const orchPath = path.join(WORKSHOP, "platform/blueprints/cowork/skills/orchestrators/" + cad + "/SKILL.md");
@@ -10736,8 +10742,12 @@ type: cowork-microscope
         orchBody.includes(".claude/skills/cowork/skills/compose-body/SKILL.md"));
       assertTrue(`HC-V0920-ORCH-${L}-A3: sidecar_json captured from composeBody return (v0.96.0)`,
         /body_md\s*,\s*sidecar_json\s*,\s*status/.test(orchBody));
-      assertTrue(`HC-V0920-ORCH-${L}-A4: sidecar_json passed to write-run-note call site (v0.96.0)`,
-        /body:\s*body_md\s*,\s*sidecar_json:\s*sidecar_json/.test(orchBody));
+      // v0.97.2: legacy delegation call-site retired; assert the new inline
+      // write contract instead. INLINE CONTRACT marker + the literal
+      // obsidian_put_content invocation pattern are the new ground truth.
+      assertTrue(`HC-V0920-ORCH-${L}-A4: inline write contract in Step 7 (v0.97.2 wrapper-delegation-proof — replaces v0.96.0 sidecar_json call-site delegation)`,
+        orchBody.includes("INLINE CONTRACT — do not delegate")
+        && orchBody.includes("obsidian_put_content"));
     } catch (e) {
       assertTrue(`HC-V0920-ORCH-${L}: Step 14 refactor contract`, false, e && e.message);
     }
@@ -14712,6 +14722,10 @@ type: cowork-microscope
       "{{$today_iso_date}}",
       "{{$rating_kind_lines}}",
       "{{$pending_confirmation_lines}}",
+      // v0.97.2: title_template_resolved is the LLM's fire-time-resolved title
+      // string, computed by substituting fire-time {{$today_*}} tokens into the
+      // cadence's title_template. Stays literal in compose-time output.
+      "{{$title_template_resolved}}",
     ]);
     const orphans = (typeof outStr === "string"
       ? (outStr.match(/\{\{\$[a-z_]+\}\}/gi) || [])
