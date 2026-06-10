@@ -587,53 +587,15 @@ function composeFromOrchestratorInstructions(opts) {
         title_template: cadenceInContract.title_template || `${cadence} - {{$today_weekday}}, {{$today_month_name}} {{$today_day}}, {{$today_year}}`,
     };
 
-    // 4. Static substitution
-    template = _substituteStaticTokens(template, tokens);
-
-    // 5. Wrap with anti-delegation directive + PRELUDE + DONE
-    const antiDelegation = `ANTI-DELEGATION (NON-NEGOTIABLE): You are running this entire orchestrator INLINE in the current context. DO NOT spawn subagents. DO NOT use Task(), Agent(), or any agent-launching tool. DO NOT summarize the work and hand it off. Every step below — including the per-kind gather loops — executes in THIS turn. If the wrapper feels long, that is intentional; follow it step-by-step rather than delegating. A delegated run produces structurally-wrong output (wrong path, wrong frontmatter type, missing callout structure, missing sidecar, missing rating block) and is treated as a failed fire.`;
-
-    const prelude = `PRELUDE — fire-time setup (CRITICAL: do these first)
-
-1. Resolve today's date in ${tokens.timezone}. Use the Bash tool (or equivalent in your environment) to get the actual current date — do NOT use any example value. Compute and capture:
-
-     today_date           = YYYY-MM-DD  (run: date '+%Y-%m-%d')
-     today_weekday        = long weekday name in ${tokens.timezone}  (run: TZ='${tokens.timezone}' date '+%A')
-     today_month_name     = long month name in ${tokens.timezone}  (run: TZ='${tokens.timezone}' date '+%B')
-     today_day            = day-of-month integer, no leading zero  (run: TZ='${tokens.timezone}' date '+%-d')
-     today_year           = 4-digit year  (run: TZ='${tokens.timezone}' date '+%Y')
-     today_dirpath        = "<today_year>/<MM>-<today_month_name>/<today_date>" where MM is zero-padded month  (e.g. "2026/06-June/2026-06-10")
-     today_ymd_compact    = YYYYMMDD with no separators
-
-   These are the values to substitute everywhere {{$today_*}} appears in the steps below. If you cannot run Bash in your environment, use any other tool that returns the actual current wall-clock date in ${tokens.timezone} — but DO NOT fabricate or guess. A wrong weekday/date means the atomic note goes to the wrong path and the daily dashboard cannot see it.
-
-2. Read frontmatter from spice/cowork/context/vault-config.md via Obsidian MCP. Locate engagement record where id == "${tokens.engagement_id}". Capture engagement.
-
-3. Read spice/cowork/context/user-preferences.md frontmatter. Capture personality + priorities + mcps + learned_weights.
-
-4. Read spice/cowork/context/${tokens.engagement_id}/people-aliases.md (if exists) for inner-circle display-name resolution.`;
-
-    const done = `DONE
-
-N. Emit Obsidian Notice \`cowork:${cadence} complete -- ${tokens.engagement_label} {{$today_date}}\`.
-
----
-
-Generated against sauce ${tokens.workshop_version} + cowork ${tokens.cowork_version} + contract ${tokens.contract_version}.`;
-
-    const wrapper = `${antiDelegation}
-
-You are running cowork:${cadence} for engagement ${tokens.engagement_id} (${tokens.engagement_label}).
-
-${prelude}
-
-# Orchestrator step-list
-
-${template}
-
-${done}`;
-
-    return wrapper;
+    // 4. Static substitution. v0.97.3 cloud-sync-parity: ANTI-DELEGATION,
+    // PRELUDE, and DONE blocks now live IN _shared-clauses.md (referenced
+    // from each orchestrator-instructions/<cadence>.md as
+    // {{shared.anti_delegation_clause}} / {{shared.prelude_block}} /
+    // {{shared.done_block}}). They were substituted in by step 2 above. The
+    // composer no longer prepends or appends literals — both local-CLI and
+    // claude.ai Cloud-UI sync produce byte-identical output because both
+    // resolve from the same vault sources.
+    return _substituteStaticTokens(template, tokens);
 }
 
 module.exports = {

@@ -9,6 +9,10 @@ schema_version: "1.0.0"
 cadence: reconcile-cowork
 ---
 
+{{shared.anti_delegation_clause}}
+
+{{shared.prelude_block}}
+
 # Cowork orchestrator — reconcile-cowork
 
 ## Substitution tokens
@@ -121,3 +125,5 @@ cadence: reconcile-cowork
 ## Performance
 
 ~50-160 MCP calls per fire per engagement. Bounded by 30-day sidecar walk. Acceptable for nightly automation.
+
+{{shared.done_block}}
