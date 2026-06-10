@@ -10,6 +10,10 @@ warm_path_steps: 10
 cold_path_skips: [step_1_memory, step_2c_semantic_gather]
 ---
 
+{{shared.anti_delegation_clause}}
+
+{{shared.prelude_block}}
+
 # cowork:morning-briefing — orchestrator-instructions
 
 > [!warning]+ CRITICAL: voice + microscope discipline (v0.96.0)
@@ -392,3 +396,5 @@ synthesis (cowork:synthesize-day) can roll up tick-state into a per-day memory.
 This orchestrator conforms to `Docs/agent-guides/cowork-orchestrator-template.md` (v1.0.0).
 Cohesion regression is caught by HC-V0950-COHESION-A1..A5. Single-source-of-truth
 regression is caught by HC-V0970-O-1..12.
+
+{{shared.done_block}}

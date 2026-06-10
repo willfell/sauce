@@ -8,6 +8,10 @@ warm_path_steps: 10
 cold_path_skips: []
 ---
 
+{{shared.anti_delegation_clause}}
+
+{{shared.prelude_block}}
+
 # cowork:eod-review — orchestrator-instructions
 
 > [!warning]+ CRITICAL: voice + microscope discipline (v0.96.0)
@@ -309,3 +313,5 @@ in Step 3 carries a Memory log backlink callout:
 This orchestrator conforms to `Docs/agent-guides/cowork-orchestrator-template.md` (v1.0.0).
 Cohesion regression caught by HC-V0950-COHESION-A1..A5. Single-source-of-truth regression
 caught by HC-V0970-O-1..12.
+
+{{shared.done_block}}
