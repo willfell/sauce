@@ -8226,6 +8226,212 @@ async function caseHCV0891Versions() {
   assertEqual(mechs.length, 17, "HC-V0891-VERSION-D: mechanism count unchanged at 17");
 }
 
+// ========================================================================
+// v0.98.0 HC-V0980-SYNOPSIS-* + HC-V0980-CADENCES-* — synopsis-density rewrite
+// 11 TDD-red sub-asserts (S1.1). GREEN sweep lands in S1.2 by rewriting the
+// 5 cadence orchestrator-instructions files to use the new contract.
+// ========================================================================
+
+async function caseV0980SynopsisA1() {
+  console.log(`\n--- Case HC-V0980-SYNOPSIS-A1: morning-briefing orchestrator-instructions composes lead callout as [!info]+ What matters today ---`);
+  try {
+    const path = require("path");
+    const fs   = require("fs");
+    const oiPath = path.join(__dirname, "../blueprints/cowork/content/data/orchestrator-instructions/morning-briefing.md");
+    const text  = fs.readFileSync(oiPath, "utf8");
+    const hasLead = /`> \[!info\]\+ What matters today`/.test(text);
+    assertTrue(
+      "HC-V0980-SYNOPSIS-A1: morning-briefing orchestrator-instructions references `> [!info]+ What matters today` in the synopsis_md composition step — confirms the lead callout uses the OPEN-by-default sigil AND the new per-cadence title string",
+      hasLead
+    );
+  } catch (e) {
+    assertTrue("HC-V0980-SYNOPSIS-A1: morning-briefing lead callout shape", false, e && e.message);
+  }
+}
+
+async function caseV0980SynopsisA2() {
+  console.log(`\n--- Case HC-V0980-SYNOPSIS-A2: morning-briefing orchestrator-instructions does NOT compose [!tip] Today's focus ---`);
+  try {
+    const path = require("path");
+    const fs   = require("fs");
+    const oiPath = path.join(__dirname, "../blueprints/cowork/content/data/orchestrator-instructions/morning-briefing.md");
+    const text  = fs.readFileSync(oiPath, "utf8");
+    const hasOldFocus = /`> \[!tip\] Today's focus`/.test(text);
+    assertTrue(
+      "HC-V0980-SYNOPSIS-A2: morning-briefing orchestrator-instructions does NOT reference `> [!tip] Today's focus` anywhere — confirms the closing callout has been removed",
+      !hasOldFocus
+    );
+  } catch (e) {
+    assertTrue("HC-V0980-SYNOPSIS-A2: closing callout removed", false, e && e.message);
+  }
+}
+
+async function caseV0980SynopsisA3() {
+  console.log(`\n--- Case HC-V0980-SYNOPSIS-A3: morning-briefing instructions document per-kind default-expand sigil as \`-\` ---`);
+  try {
+    const path = require("path");
+    const fs   = require("fs");
+    const oiPath = path.join(__dirname, "../blueprints/cowork/content/data/orchestrator-instructions/morning-briefing.md");
+    const text  = fs.readFileSync(oiPath, "utf8");
+    const hasRule = /Per-kind callout default-expand[\s\S]{0,500}`-` collapse sigil/.test(text);
+    assertTrue(
+      "HC-V0980-SYNOPSIS-A3: orchestrator-instructions carries a `Per-kind callout default-expand` directive declaring that every per-kind callout (whatever its callout_type — info / tip / quote / note / example / warning) uses the `-` collapse sigil, NOT `+` — overrides the LLM's prior default",
+      hasRule
+    );
+  } catch (e) {
+    assertTrue("HC-V0980-SYNOPSIS-A3: per-kind collapse sigil directive present", false, e && e.message);
+  }
+}
+
+async function caseV0980SynopsisA4() {
+  console.log(`\n--- Case HC-V0980-SYNOPSIS-A4: morning-briefing instructions pin synopsis ≤80 words ---`);
+  try {
+    const path = require("path");
+    const fs   = require("fs");
+    const oiPath = path.join(__dirname, "../blueprints/cowork/content/data/orchestrator-instructions/morning-briefing.md");
+    const text  = fs.readFileSync(oiPath, "utf8");
+    const has80 = /Length: ≤ 80 words/.test(text) || /Length: <= 80 words/.test(text);
+    assertTrue(
+      "HC-V0980-SYNOPSIS-A4: orchestrator-instructions declares synopsis hard cap `Length: ≤ 80 words` (or ASCII variant) — confirms the structural rule survived round-trip",
+      has80
+    );
+  } catch (e) {
+    assertTrue("HC-V0980-SYNOPSIS-A4: 80-word cap directive present", false, e && e.message);
+  }
+}
+
+async function caseV0980SynopsisA5() {
+  console.log(`\n--- Case HC-V0980-SYNOPSIS-A5: morning-briefing instructions pin first-sentence-concrete rule ---`);
+  try {
+    const path = require("path");
+    const fs   = require("fs");
+    const oiPath = path.join(__dirname, "../blueprints/cowork/content/data/orchestrator-instructions/morning-briefing.md");
+    const text  = fs.readFileSync(oiPath, "utf8");
+    const hasFirst = /First sentence names the highest-blocking action concretely/.test(text);
+    const hasForbidden = /Never opens with "Today is/.test(text);
+    assertTrue(
+      "HC-V0980-SYNOPSIS-A5: orchestrator-instructions declares first-sentence rule: `First sentence names the highest-blocking action concretely` AND forbidden openers `Never opens with \"Today is...\", \"You have...\", \"There are N...\"` — confirms predictive-not-descriptive contract",
+      hasFirst && hasForbidden
+    );
+  } catch (e) {
+    assertTrue("HC-V0980-SYNOPSIS-A5: first-sentence rules present", false, e && e.message);
+  }
+}
+
+async function caseV0980SynopsisA6() {
+  console.log(`\n--- Case HC-V0980-SYNOPSIS-A6: morning-briefing instructions pin empty-day "Quiet day" fallback ---`);
+  try {
+    const path = require("path");
+    const fs   = require("fs");
+    const oiPath = path.join(__dirname, "../blueprints/cowork/content/data/orchestrator-instructions/morning-briefing.md");
+    const text  = fs.readFileSync(oiPath, "utf8");
+    const hasQuiet = /Quiet day/.test(text);
+    const hasFallback = /If the day is genuinely quiet/.test(text);
+    assertTrue(
+      "HC-V0980-SYNOPSIS-A6: orchestrator-instructions carries the empty-day fallback directive (`If the day is genuinely quiet, say so PLAINLY: \"Quiet day — ...\"`) — confirms the no-padding rule is documented",
+      hasQuiet && hasFallback
+    );
+  } catch (e) {
+    assertTrue("HC-V0980-SYNOPSIS-A6: empty-day fallback directive present", false, e && e.message);
+  }
+}
+
+async function caseV0980CadencesA1() {
+  console.log(`\n--- Case HC-V0980-CADENCES-A1: midday-tripwire composes [!info]+ What changed since morning ---`);
+  try {
+    const path = require("path");
+    const fs   = require("fs");
+    const oiPath = path.join(__dirname, "../blueprints/cowork/content/data/orchestrator-instructions/midday-tripwire.md");
+    const text  = fs.readFileSync(oiPath, "utf8");
+    const hasLead = /`> \[!info\]\+ What changed since morning`/.test(text);
+    const hasOldFocus = /`> \[!tip\] Recalibration`/.test(text);
+    assertTrue(
+      "HC-V0980-CADENCES-A1: midday-tripwire orchestrator-instructions references `> [!info]+ What changed since morning` for synopsis_md AND no longer references `> [!tip] Recalibration` closing callout",
+      hasLead && !hasOldFocus
+    );
+  } catch (e) {
+    assertTrue("HC-V0980-CADENCES-A1: midday-tripwire cadence titles", false, e && e.message);
+  }
+}
+
+async function caseV0980CadencesA2() {
+  console.log(`\n--- Case HC-V0980-CADENCES-A2: eod-review composes [!info]+ What landed today ---`);
+  try {
+    const path = require("path");
+    const fs   = require("fs");
+    const oiPath = path.join(__dirname, "../blueprints/cowork/content/data/orchestrator-instructions/eod-review.md");
+    const text  = fs.readFileSync(oiPath, "utf8");
+    const hasLead = /`> \[!info\]\+ What landed today`/.test(text);
+    const hasOldFocus = /`> \[!tip\] Carries forward`/.test(text);
+    assertTrue(
+      "HC-V0980-CADENCES-A2: eod-review orchestrator-instructions references `> [!info]+ What landed today` for synopsis_md AND no longer references `> [!tip] Carries forward` closing callout",
+      hasLead && !hasOldFocus
+    );
+  } catch (e) {
+    assertTrue("HC-V0980-CADENCES-A2: eod-review cadence titles", false, e && e.message);
+  }
+}
+
+async function caseV0980CadencesA3() {
+  console.log(`\n--- Case HC-V0980-CADENCES-A3: weekly-review composes [!info]+ Where the week landed ---`);
+  try {
+    const path = require("path");
+    const fs   = require("fs");
+    const oiPath = path.join(__dirname, "../blueprints/cowork/content/data/orchestrator-instructions/weekly-review.md");
+    const text  = fs.readFileSync(oiPath, "utf8");
+    const hasLead = /`> \[!info\]\+ Where the week landed`/.test(text);
+    const hasOldFocus = /`> \[!tip\] Next week's setup`/.test(text);
+    assertTrue(
+      "HC-V0980-CADENCES-A3: weekly-review orchestrator-instructions references `> [!info]+ Where the week landed` for synopsis_md AND no longer references `> [!tip] Next week's setup` closing callout",
+      hasLead && !hasOldFocus
+    );
+  } catch (e) {
+    assertTrue("HC-V0980-CADENCES-A3: weekly-review cadence titles", false, e && e.message);
+  }
+}
+
+async function caseV0980CadencesA4() {
+  console.log(`\n--- Case HC-V0980-CADENCES-A4: monthly-review composes [!info]+ Where the month landed ---`);
+  try {
+    const path = require("path");
+    const fs   = require("fs");
+    const oiPath = path.join(__dirname, "../blueprints/cowork/content/data/orchestrator-instructions/monthly-review.md");
+    const text  = fs.readFileSync(oiPath, "utf8");
+    const hasLead = /`> \[!info\]\+ Where the month landed`/.test(text);
+    const hasOldFocus = /`> \[!tip\] Next month's board`/.test(text);
+    assertTrue(
+      "HC-V0980-CADENCES-A4: monthly-review orchestrator-instructions references `> [!info]+ Where the month landed` for synopsis_md AND no longer references `> [!tip] Next month's board` closing callout",
+      hasLead && !hasOldFocus
+    );
+  } catch (e) {
+    assertTrue("HC-V0980-CADENCES-A4: monthly-review cadence titles", false, e && e.message);
+  }
+}
+
+async function caseV0980CadencesA5() {
+  console.log(`\n--- Case HC-V0980-CADENCES-A5: all 5 cadences carry synopsis composition rules section ---`);
+  const path = require("path");
+  const fs   = require("fs");
+  const cadences = ["morning-briefing", "midday-tripwire", "eod-review", "weekly-review", "monthly-review"];
+  let allHave = true;
+  let missing = [];
+  for (const cad of cadences) {
+    try {
+      const oiPath = path.join(__dirname, `../blueprints/cowork/content/data/orchestrator-instructions/${cad}.md`);
+      const text  = fs.readFileSync(oiPath, "utf8");
+      const ok    = /Synopsis composition rules/.test(text) && (/Length: ≤ 80 words/.test(text) || /Length: <= 80 words/.test(text));
+      if (!ok) { allHave = false; missing.push(cad); }
+    } catch (e) {
+      allHave = false;
+      missing.push(`${cad} (read error: ${e.message})`);
+    }
+  }
+  assertTrue(
+    `HC-V0980-CADENCES-A5: all 5 cadence orchestrator-instructions files carry a 'Synopsis composition rules' section with the 80-word cap directive. Missing/non-conforming: [${missing.join(", ")}]`,
+    allHave
+  );
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -8616,6 +8822,19 @@ async function caseHCV0891Versions() {
 
   // v0.60.0 SQ — shellSingleQuote helper round-trips through bash
   await caseV60ShellSingleQuote();
+
+  // v0.98.0 HC-V0980-SYNOPSIS-* + HC-V0980-CADENCES-* — synopsis-density rewrite
+  await caseV0980SynopsisA1();
+  await caseV0980SynopsisA2();
+  await caseV0980SynopsisA3();
+  await caseV0980SynopsisA4();
+  await caseV0980SynopsisA5();
+  await caseV0980SynopsisA6();
+  await caseV0980CadencesA1();
+  await caseV0980CadencesA2();
+  await caseV0980CadencesA3();
+  await caseV0980CadencesA4();
+  await caseV0980CadencesA5();
 
   // v0.65.0 HC-V065-RUN-NOTE: write-run-note-* sub-skill lint
   {
