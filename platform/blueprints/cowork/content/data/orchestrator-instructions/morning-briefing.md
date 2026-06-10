@@ -330,7 +330,7 @@ empty.
     `failed:contract-violation:sidecar-schema`, no files are written — emit Notice
     `cowork:morning-briefing aborted -- contract-violation: <field>` and exit non-zero.
 
-### Step 8.5: Verify (sidecar schema validation backstop)
+### Step 8.5: Verify (sidecar schema validation backstop + v0.97.4 prose-invariant write-guards)
 
 **Sidecar schema validation.** The write step's `writeAtomicNote` helper invokes
 `validateSidecar` against the cadence schema BEFORE committing either file. If
@@ -344,6 +344,32 @@ The regex re-read pass from v0.91.3+v0.92.0 is RETIRED. Sidecar JSON-schema
 validation subsumes it. v0.91.x–v0.92.0 path/frontmatter/dvjs write-guards
 INSIDE write-run-note still fire as belt-and-suspenders before the
 writeAtomicNote call.
+
+**v0.97.4 prose-invariant write-guards.** `writeAtomicNote` now accepts three
+additional params that turn LLM-owned prose invariants into deterministic
+backstops:
+
+- `surfaced_kinds_for_rating` (string[]) — pass the same array used to build
+  the rating callout in Step 4b. When non-empty AND `learning_enabled !==
+  false`, the helper rejects with `failed:contract-violation:missing-rating-callout`
+  if body_md lacks the `<!-- cowork:rating-block schema=` sentinel. Closes the
+  v0.97.3 accuris fire where the rating callout silently dropped.
+- `learning_enabled` (bool) — from `engagement.learning_enabled` (default
+  `true`). Gates the rating-callout guard.
+- `expected_kinds` (string[]) — pass `plan.dispatch_plan.map(e => e.kind_name)`
+  (the FULL ordered priority list, including warn entries). When `expected_kinds.length
+  > sidecar.surfaced_kinds.length`, the helper injects a `> [!warning]+
+  Coverage gap` callout into body_md BEFORE the first per-kind block AND mirrors
+  `coverage_gap: { expected, surfaced, skipped }` into the sidecar. Write
+  proceeds (some kinds legitimately have no data) — the gap is now VISIBLE in
+  the rendered brief AND machine-readable for reconcile-cowork's cross-day
+  monitoring.
+
+The anti-echo write-guard is sidecar-driven: when sidecar's `render_aspects_applied`
+includes `anti_echo:include`, the helper rejects with
+`failed:contract-violation:missing-anti-echo-callout` if body_md lacks the literal
+phrase `Outside yesterday's frame`. No extra param needed — composeBody's
+sidecar already carries `render_aspects_applied`.
 
 ### Step 9: State updates (active-threads, weekly-snapshot)
 

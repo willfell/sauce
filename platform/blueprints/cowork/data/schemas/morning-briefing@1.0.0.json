@@ -83,6 +83,17 @@
         "pending_confirmations_count": { "type": "integer", "minimum": 0 }
       },
       "additionalProperties": false
+    },
+    "coverage_gap": {
+      "type": "object",
+      "description": "v0.97.4 — coverage-gap write-guard output. expected = engagement priority list passed by orchestrator; surfaced = kinds that actually produced data; skipped = expected \\ surfaced (preserving expected order). reconcile-cowork reads this for cross-day coverage monitoring.",
+      "required": ["expected", "surfaced", "skipped"],
+      "properties": {
+        "expected": { "type": "array", "items": { "type": "string" } },
+        "surfaced": { "type": "array", "items": { "type": "string" } },
+        "skipped":  { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
     }
   }
 }
