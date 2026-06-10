@@ -4,6 +4,38 @@ This file archives the per-cycle status snapshots that previously lived in `CLAU
 
 ---
 
+### v0.97.3 — cloud-sync-parity (2026-06-10 close)
+
+**Codename:** `cloud-sync-parity`. Workshop 0.97.2 → 0.97.3; cowork 0.35.2 → 0.35.3; contract 0.35.1 (UNCHANGED).
+
+**Origin.** v0.97.2 added an `ANTI-DELEGATION (NON-NEGOTIABLE)` directive and a fire-time `PRELUDE` block via `compose-scheduled-job-wrappers-helper.js` literal strings — prepended at compose time inside the JS function. This worked when the sync ran locally via the sauce CLI: Node executes the helper, the directive lands in every composed wrapper. But when the sync ran inside claude.ai's Cowork UI (cloud-side), there was no JS runtime — the cloud LLM read `orchestrator-instructions/*.md` + `_shared-clauses.md` from the vault directly. Today the cloud guardrail-verify step searched for `ANTI-DELEGATION (NON-NEGOTIABLE)` in the vault sources, found it nowhere, and correctly aborted the push (since from its perspective the wrappers were missing v0.97.2's guardrail).
+
+**Fix.** Move the three load-bearing blocks OUT of JS literals and INTO `_shared-clauses.md` as three new clause heading blocks: `## anti_delegation_clause`, `## prelude_block`, `## done_block`. The PRELUDE was reparameterized from hardcoded `America/Denver` to the `{{$timezone}}` token so each engagement's timezone resolves correctly. The DONE block was parameterized via `{{$cadence}}` + `{{$engagement_label}}` + `{{$workshop_version}}` + `{{$cowork_version}}` + `{{$contract_version}}`. All six orchestrator-instructions cadence files (morning-briefing/midday-tripwire/eod-review/weekly-review/monthly-review/reconcile-cowork) now reference all three clauses at top + bottom via `{{shared.*}}`.
+
+**JS composer simplified.** `composeFromOrchestratorInstructions(...)` no longer prepends ANTI-DELEGATION text or appends DONE text. The wrap-with-PRELUDE-and-DONE block at the bottom of the function is stripped; the function returns `_substituteStaticTokens(template, tokens)` directly. The composer is now a pure substituter — same as the cloud LLM's substituter, modulo runtime.
+
+**Parity invariant.** Both rails (local Node, cloud LLM) now resolve the same vault sources and produce byte-identical composed wrappers. Same `{{shared.*}}` substitutions, same `{{$<token>}}` substitutions, same per-cadence body. The cloud LLM no longer needs special "prepend the directive" knowledge — it just reads the vault sources and substitutes.
+
+**Tests.** 11 new HC-V0973-CSP sub-asserts:
+
+- **CSP-1..6** (6) — each cadence file contains `{{shared.anti_delegation_clause}}` + `{{shared.prelude_block}}` + `{{shared.done_block}}` references.
+- **CSP-7..9** (3) — `_shared-clauses.md` defines `## anti_delegation_clause` / `## prelude_block` / `## done_block` heading blocks.
+- **CSP-10..11** (2) — `compose-scheduled-job-wrappers-helper.js` source no longer contains `ANTI-DELEGATION (NON-NEGOTIABLE)` or `PRELUDE — fire-time setup` as literals.
+
+Pre-existing HC-V0972-AD-1..7 + HC-V0972-DP-1..4 stayed GREEN — the strings are still in the composed output, just sourced from `_shared-clauses.md` now.
+
+**Final harness.** helper-cases **2267 / 0** (+11); cowork-smoke **954 / 0**; claude-surface **214 / 0**; integration-smoke **36 / 0**; cli **132 / 0**; bootstrap **85 / 0**. Preflight `version-sync ok: 0.97.3` ALL GREEN.
+
+**Files touched.** `platform/blueprints/cowork/content/data/orchestrator-instructions/_shared-clauses.md` (3 new clauses); 6 cadence files (top + bottom refs); `platform/blueprints/cowork/helpers/compose-scheduled-job-wrappers-helper.js` (strip prepending/appending logic); `platform/test/run-helper-cases.js` (+11 new HC); plus standard cycle-bump version pins.
+
+**Action required post-deploy.** Run `sauce update --bump-pins` per consumer vault (materializes v0.97.3 `_shared-clauses.md` + cadence files into `spice/cowork/data/orchestrator-instructions/`); THEN run `/cowork sync-scheduled-jobs` from claude.ai's Cowork UI — cloud LLM now finds all three guardrail substrings in vault sources, passes verify, pushes new wrappers to live scheduled tasks via `update_scheduled_task` MCP. Schedule preservation invariant holds.
+
+**Lessons.** (1) Source of truth must be readable by every rail; JS-only guardrails fail silently in non-Node execution paths. (2) Cloud sync's guardrail-verify is the right safety net — it correctly aborted today rather than pushing a wrapper without the v0.97.2 directive. (3) The cloud LLM is a capable token-substituter; once text lives in markdown, `{{shared.*}}` and `{{$<token>}}` substitute reliably with no special handling.
+
+See `Docs/plans/2026-06-10-v0.97.3-cloud-sync-parity-{design,plan,result}.md`.
+
+---
+
 ### v0.97.2 — wrapper-delegation-proof (2026-06-10 close)
 
 **Codename:** `wrapper-delegation-proof`. Workshop 0.97.1 → 0.97.2; cowork 0.35.1 → 0.35.2; contract 0.35.1 (UNCHANGED).
