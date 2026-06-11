@@ -12,17 +12,17 @@ load_when: |
   about which layer to modify for a behavior change. You're designing a
   cycle that touches the gather → compose → write → feedback → reconcile
   loop.
-status: authoritative as of v0.98.1 (2026-06-11)
+status: authoritative as of v0.98.2 (2026-06-11)
 companion_docs:
   - Docs/cowork-vision.md (North Star + locked decisions)
   - Docs/agent-guides/architecture.md (mechanisms vs blueprints; installer)
   - Docs/cycle-history.md (chronological per-cycle change log)
   - Docs/landmines.md (22 non-negotiable traps)
 versions_described:
-  workshop: "0.98.1"
-  cowork_blueprint: "0.37.0"
-  eod_review_sidecar_schema: "1.0.0 + 1.1.0 (additive enum)"
-  learned_weights_schema: "1.1.0 (nested per-engagement; Rail M)"
+  workshop: "0.98.2"
+  cowork_blueprint: "0.38.0"
+  eod_review_sidecar_schema: "1.0.0 + 1.1.0 + 1.2.0 (additive enum; v=2 sentinel + items[] registry)"
+  learned_weights_schema: "3 (nested per-kind entity maps; lives in user-preferences.md frontmatter)"
   scheduled_job_contract: "0.35.1"
 ---
 
@@ -268,22 +268,31 @@ Morning-briefing, midday-tripwire, weekly-review, monthly-review all emit:
 - **Idempotent re-fire:** if the same cadence re-fires on the same day (e.g. the user manually re-triggers), the helper parses the prior file's sentinel + tick state via `parseRatingCallout`, then preserves `[x]` per kind across the rewrite. The user never loses ticks they already entered.
 - **Coarse signal:** kind-level boolean only. "Did chat surface something useful today?" is the question. No per-item granularity. No frequency tilt. No prose.
 
-### 5.2 On EOD (v0.98.1 rich shape)
+### 5.2 On EOD (v0.98.2 rich shape — v=2 sentinel)
 
-EOD-review emits a richer Rail L:
+EOD-review emits a richer Rail L with BOTH a Mattered list AND a Didn't-like list per kind:
 
 ```markdown
 > [!todo]+ Was today useful?
-> Tick items that mattered. Set per-kind frequency. Type prose for nuance. Tomorrow's brief adjusts overnight.
-> <!-- cowork:feedback-capture v=1 -->
+> Tick items that mattered. Tick what didn't. Set per-kind frequency. Type prose. Tomorrow's brief adjusts overnight.
+> <!-- cowork:feedback-capture v=2 -->
 >
 > > [!summary]- Chat — items
+> > Mattered:
+> > - [ ] [[#^item-chat-a7b3c9d|Zhenzhen PR #353 thread]]
+> > - [ ] [[#^item-chat-b8c4d0e|Ben/Stale Doc DB infra]]
+> >
+> > Didn't like:
 > > - [ ] [[#^item-chat-a7b3c9d|Zhenzhen PR #353 thread]]
 > > - [ ] [[#^item-chat-b8c4d0e|Ben/Stale Doc DB infra]]
 > >
 > > **Fire chat:** `[ ] less` `[ ] same` `[ ] more`
 >
 > > [!summary]- GitHub — items
+> > Mattered:
+> > - [ ] [[#^item-github-d0e6f20|PR #353 awaiting review]]
+> >
+> > Didn't like:
 > > - [ ] [[#^item-github-d0e6f20|PR #353 awaiting review]]
 > >
 > > **Fire GitHub:** `[ ] less` `[ ] same` `[ ] more`
@@ -295,29 +304,35 @@ EOD-review emits a richer Rail L:
 > ```
 ```
 
-Three new capture surfaces:
+Four capture surfaces (v0.98.2 adds the second):
 
-1. **Per-item ticks** — one checkbox per surfaced person-block / PR-row / ADO-story-row / etc. The wikilink target (`[[#^item-chat-a7b3c9d|<label>]]`) resolves to the block-ID emitted by compose-body at Step 3c. The block-ID itself renders invisibly; the user sees just `<label>` as a clickable link.
-2. **Per-kind frequency knob** — `[ ] less` / `[ ] same` / `[ ] more` per kind. Single signed signal per kind. (See § 7.2.4 for how this becomes a weight delta.)
-3. **Free-text feedback** — a tagged fenced ` ```feedback…``` ` block. The user types prose: "stop surfacing Diana's emails", "I never read calendar after 3pm", "Brex bills are too noisy". Captured this cycle; v0.98.2 reads it.
+1. **Per-item Mattered ticks** — one checkbox per surfaced person-block / PR-row / ADO-story-row / etc. The wikilink target (`[[#^item-chat-a7b3c9d|<label>]]`) resolves to the block-ID emitted by compose-body at Step 3c. The block-ID itself renders invisibly; the user sees just `<label>` as a clickable link.
+2. **Per-item Didn't-like ticks (v0.98.2)** — second checkbox row per kind sharing the SAME `^item-<kind>-<sha>` IDs as the Mattered list. Block-ID anchors are defined ONCE in the body; the rail only links. Section-context state machine in the parser: tick lines after `Mattered:` → `ticks{}`; after `Didn't like:` → `downvotes{}`.
+3. **Per-kind frequency knob** — `[ ] less` / `[ ] same` / `[ ] more` per kind. Single signed signal per kind. (See § 7.2.4 for how this becomes a weight delta.)
+4. **Free-text feedback** — a tagged fenced ` ```feedback…``` ` block. The user types prose: "stop surfacing Diana's emails", "I never read calendar after 3pm", "Brex bills are too noisy". v0.98.2's reconciler reads it via inline LLM intent extraction.
 
-The sentinel `<!-- cowork:feedback-capture v=1 -->` at the top of the callout is the parse target for `parseFeedbackCapture` in `learn-from-checks-helper.js` (v0.98.1+). The `v=1` is intentional: v0.98.2's reconciler greps for it; future shape changes can bump to v=2 with a tolerant parser.
+The sentinel `<!-- cowork:feedback-capture v=2 -->` at the top of the callout is the parse target for `parseFeedbackCapture` in `learn-from-checks-helper.js` (v0.98.2+). The parser is **tolerant by construction**: v=2 → full parse including downvotes; v=1 → parse with empty `downvotes{}` map (v=1-era corpus stays readable forever); legacy `rating-block` → existing `parseRatingCallout` path (4 non-EOD cadences).
 
-**Idempotent re-fire — richer than v0.96.0.** When EOD re-fires on the same day, `compose-feedback-capture-helper.js`'s `_parsePrior` reads the prior file's `cowork:feedback-capture v=1` block and preserves:
-- `[x]` state per item-ID (the user's per-item ticks)
+**Tasks-plugin trailing-annotation tolerance (v0.98.2).** Obsidian's Tasks plugin appends `✅ YYYY-MM-DD` to ticked lines (live in headspace 2026-06-10 EOD: `- [x] Chat ✅ 2026-06-10`). All v0.98.2 tick regexes anchor on the prefix-through-wikilink and ignore trailing annotations — applies to BOTH `parseFeedbackCapture` tick lines AND `parseRatingCallout` kind-checkbox lines (the 4 non-EOD cadences also get the suffix tolerance as a parse-side fix).
+
+**Idempotent re-fire — richer than v0.96.0.** When EOD re-fires on the same day, `compose-feedback-capture-helper.js`'s `_parsePrior` reads the prior file's `cowork:feedback-capture` block (v=1 OR v=2) and preserves:
+- `[x]` state per item-ID in BOTH the Mattered AND Didn't-like lists (v0.98.2)
 - Knob position per kind (which `[x]` is set on the `less / same / more` row)
 - Free-text content (the prose stays verbatim)
-- **Ambiguous-knob guard:** if the user has `[x] less [x] more` for a kind (transitioning their opinion mid-day), the rendered output preserves both `[x]` AND the sidecar's `feedback_capture.ambiguous_knobs[]` array gains the kind name — so the v0.98.2 reconciler treats it as no-signal rather than computing `(-1) + (+1) = 0`.
+- **Ambiguous-knob guard:** if the user has `[x] less [x] more` for a kind (transitioning their opinion mid-day), the rendered output preserves both `[x]` AND the sidecar's `feedback_capture.ambiguous_knobs[]` array gains the kind name — so the reconciler treats it as no-signal rather than computing `(-1) + (+1) = 0`.
+- **Ambiguous-items guard (v0.98.2):** if the user ticks an item in BOTH the Mattered AND Didn't-like lists, the UI state is preserved AND the sidecar's `feedback_capture.ambiguous_items[]` array gains the item-ID — ingest treats as no-signal (mirrors ambiguous-knob).
 
 ### 5.3 The sentinel system — why two sentinels coexist
 
-v0.98.1 chose NOT to migrate the v0.96.0 rating-block sentinel to the v=1 feedback-capture sentinel on the four non-EOD cadences. Reasons:
+v0.98.1 + v0.98.2 chose NOT to migrate the v0.96.0 rating-block sentinel to the feedback-capture sentinel on the four non-EOD cadences. Reasons:
 
-1. **MVP discipline.** Capture is the v0.98.1 goal; ingest is v0.98.2. Adding per-item ticks to MB/midday/weekly/monthly expands scope to 5 OIs + 5 fixtures.
-2. **Reversibility.** EOD-only is the smallest reversible diff. Expanding later is additive; narrowing back is a contract break.
-3. **Semantic fit.** Per-item ticks make most sense retrospectively (EOD looks back at the day's items). Morning/midday are forward-looking; per-item ticks on them have ambiguous semantics ("which surfaced items look relevant?" is a different question than "which surfaced items were useful?").
+1. **Reversibility.** EOD-only is the smallest reversible diff. Expanding later is additive; narrowing back is a contract break.
+2. **Semantic fit.** Per-item ticks make most sense retrospectively (EOD looks back at the day's items). Morning/midday are forward-looking; per-item ticks on them have ambiguous semantics ("which surfaced items look relevant?" is a different question than "which surfaced items were useful?").
+3. **Per-item ticks on weekly / monthly** are queued as a v0.99.0+ candidate — additive extension if post-deploy data shows demand.
 
-Result: `parseRatingCallout` + `RATING_SENTINEL_RX` continue to drive the reconciler for 4 cadences; `parseFeedbackCapture` + `FEEDBACK_SENTINEL_RX` drive EOD. Both functions are exported from `learn-from-checks-helper.js` (v0.98.1+) and live alongside each other forever.
+Result: `parseRatingCallout` + `RATING_SENTINEL_RX` continue to drive the reconciler for 4 cadences (with v0.98.2 Tasks-suffix tolerance added on kind-checkbox lines); `parseFeedbackCapture` + `FEEDBACK_SENTINEL_RX` drive EOD (v=1 AND v=2 tolerant). Both functions are exported from `learn-from-checks-helper.js` (v0.98.1+) and live alongside each other forever.
+
+**v0.98.2 regression restored — reconciler now parses BOTH sentinels.** v0.98.1's EOD sentinel switch (rating-block → feedback-capture v=1) had silently broken reconciler EOD signal — `reconcile-cowork.md` Step 3 grepped only `cowork:rating-block`, so post-v0.98.1 EOD notes contributed ZERO signal to per-kind learning. v0.98.2's Step 3 extension parses BOTH `rating-block` (4 non-EOD cadences) AND `feedback-capture` (v=1 + v=2 EOD) sentinels — restoring EOD signal to per-kind learning AND extending into per-entity learning under each kind.
 
 ## § 6 — The sidecar (`.cowork.json`)
 
@@ -433,9 +448,9 @@ The decay term (`* 0.98`) is the **drift-toward-1.00 pressure** — without tick
 - During warmup, downstream consumers (the orchestrators' Step 2 priority loop) treat the weight as advisory only — they fire the kind regardless of weight, to accumulate signal.
 - After graduation, the weight becomes authoritative: weight ≥ 1.20 promotes the kind earlier in the priority loop; weight ≤ 0.50 demotes (still fires, but ordered last; very low weights may be skipped entirely on quiet days).
 
-#### 7.2.4 Apply v0.98.1 frequency-knob signal
+#### 7.2.4 Apply v0.98.1 frequency-knob signal (SHIPPED v0.98.2)
 
-When v0.98.2 ships (currently sketched, not yet implemented), the per-kind frequency knobs from the EOD Rail L become direct weight deltas added to the formula's output:
+The per-kind frequency knobs from the EOD Rail L become direct weight deltas added to the formula's output (SHIPPED v0.98.2 — the v0.98.1 capture surface now feeds the reconciler):
 
 ```
 knob = "less"  → w_new := w_new - 0.05
@@ -444,37 +459,54 @@ knob = "more"  → w_new := w_new + 0.05
 knob = "ambiguous" → no signal (skipped)
 ```
 
-These deltas are applied AFTER the formula + clamp pass, then re-clamped to [0.10, 3.00]. They're "direct user intent" — a stronger signal than the formula's gradual ticks-driven movement.
+These deltas are applied AFTER the v0.96.0 formula + clamp pass, then re-clamped to [0.10, 3.00]. They're "direct user intent" — a stronger signal than the formula's gradual ticks-driven movement. Implementation in `ingest-feedback-helper.js` (NEW v0.98.2), wired into `reconcile-cowork.md` Step 3.5 (deterministic rollup).
 
-#### 7.2.5 Write the result
+#### 7.2.5 Write the result (v0.98.2 — schema 3, user-preferences.md frontmatter)
 
-The new `per_kind` state is written to `spice/cowork/memory/<engagement>/learned_weights.json`:
+The new state is written **in-place** to the `learned_weights:` block of `spice/cowork/context/user-preferences.md` FRONTMATTER. **The location is NOT `spice/cowork/memory/<engagement>/learned_weights.json`** — that was an aspirational sketch in earlier drafts of this doc. Absorption against live consumer vaults (headspace + accuris) at the v0.98.2 brainstorm confirmed the file lives in user-preferences frontmatter and the reconciler already owns this write path (block-scoped `.bak`-first rewrite).
 
-```json
-{
-  "schema_version": "1.1.0",
-  "engagements": {
-    "headspace": {
-      "per_kind": {
-        "chat": { "weight": 1.150, "ticks": 12, "skips": 4, "warmup": false, "last_updated": "2026-06-11" },
-        "github": { "weight": 0.820, "ticks": 5, "skips": 8, "warmup": false, "last_updated": "2026-06-11" },
-        ...
-      },
-      "totals": {
-        "notes_scanned": 89,
-        "notes_with_any_tick": 67,
-        "warmup_until": "2026-06-18",
-        "upgrade_notice_emitted": true,
-        "scanned_days": ["2026-06-10", "2026-06-11"]
-      }
-    },
-    "life": { ... },
-    "accuris": { ... }
-  }
-}
+Schema 3 shape (SHIPPED v0.98.2 — nested per-kind entity maps; in-place additive migration from schema 2; legacy `"1.1.0"` and missing-version shapes still normalize cleanly):
+
+```yaml
+learned_weights:
+  schema_version: 3
+  updated_by: cowork:reconcile-cowork
+  engagements:
+    headspace:
+      per_kind:
+        chat:
+          weight: 1.150          # existing v0.96.0 per-kind formula, unchanged
+          ticks: 12
+          skips: 4
+          warmup: false
+          last_updated: 2026-06-12
+          per_person:
+            "Zhenzhen Su": { weight: 1.050, ticks: 1, downvotes: 0, last_updated: 2026-06-12 }
+          per_channel:
+            "Dev Enablement Channels": { weight: 0.900, ticks: 0, downvotes: 1, last_updated: 2026-06-12 }
+          per_topic: {}
+        github:
+          weight: 0.820
+          ticks: 5
+          skips: 8
+          warmup: false
+          last_updated: 2026-06-12
+          per_person: {}
+          per_channel: {}
+          per_topic: {}
+      totals:
+        notes_scanned: 89
+        notes_with_any_tick: 67
+        scanned_days: ["2026-06-10", "2026-06-11", "2026-06-12"]
+        feedback_ingested_days: ["2026-06-12"]
+        warmup_until: 2026-06-18
+    life: { ... }
+    accuris: { ... }
 ```
 
-The schema is **nested per-engagement** (v1.1.0; introduced at v0.96.1 / Rail M). Each engagement has its own weight space — your accuris weights don't influence your life weights. Migration from v0.96.0's flat shape is automatic via `_normalizeLearnedWeights`.
+The schema is **nested per-engagement** (introduced at v0.96.1 / Rail M; promoted to schema 3 at v0.98.2 with per-kind entity nesting). Each engagement has its own weight space — your accuris weights don't influence your life weights. Each kind has its own entity space — your chat-person weights don't influence your email-person weights. Migration is in-place + additive: `per_person/per_channel/per_topic` maps initialize empty; nothing existing is dropped. `_normalizeLearnedWeights` (v0.98.2) tolerates on-disk `schema_version: 2` (headspace), missing version (accuris), legacy `"1.1.0"` (helper-era), AND `3`.
+
+**Entity weight math (v0.98.2):** start 1.00; clamp [0.10, 3.00]; banker's rounding (3 places); +0.05 per Mattered tick; −0.10 per Didn't-like tick (rarer + stronger signal); light daily decay TOWARD 1.00 — explicitly `w' = 1.00 + (w − 1.00) × 0.995` (NOT `w × 0.995`, which would decay toward zero) — applied once per ingest run to every entity under the engagement, idempotent via `totals.feedback_ingested_days[]`. Free-text floor-set ("stop surfacing X's emails") bypasses deltas (direct `weight = 0.10` with audit). Entity warmup analog: advisory until the entity has ≥3 observations.
 
 ### 7.3 How the new weights affect tomorrow's brief
 
@@ -503,31 +535,131 @@ Concretely, three compounding loops are in motion:
 - Coverage-gap detection (gaps in tick-coverage trigger Rail L's `## Coverage gap` sub-callout from v0.97.4)
 - The v0.98.2 reconciler (rolls up per-item ticks longitudinally — "user ticked Zhenzhen's chat thread 12 times in 30 days → upweight that person")
 
-**Loop 3 — Microscopes evolve.** Microscopes (`spice/cowork/context/<engagement>/microscopes/<kind>.md`) carry the per-kind output-shape contract. Today they're hand-authored. v0.98.2's reconciler will APPEND to microscope `## What matters` sections based on free-text feedback — never rewrite, just append. The user prunes later. Over months, the microscopes become a hand-curated representation of the user's preferences distilled through the LLM's understanding of their prose feedback.
+**Loop 3 — Microscopes evolve.** Microscopes (`spice/cowork/prompts/per-mcp/<kind>/microscope.md` — engagement-agnostic per vault) carry the per-kind output-shape contract. Today they're hand-authored. v0.98.2's reconciler APPENDS to microscope `## What matters` sections based on free-text feedback — never rewrites, just appends. The user prunes later. Over months, the microscopes become a hand-curated representation of the user's preferences distilled through the LLM's understanding of their prose feedback.
 
 **The key invariant: nothing in the system overwrites the user's authored content silently.** Numeric weights update directly (the user can read them in `learned_weights.json` and edit them if they want). Microscope `what_matters` strings append (the user prunes). Voice/personality changes are PROPOSED, not auto-applied (v0.98.2 surfaces them in the next morning brief as a callout: "Voice tweak proposed: [...]. Apply via /cowork apply-voice-deltas?"). Coverage gaps land in a separate file (`spice/cowork/memory/<engagement>/coverage-queue.md`) that the user reviews on their schedule.
 
-## § 9 — The feedback loop — coming in v0.98.2
+## § 9 — The feedback loop — SHIPPED v0.98.2
 
-v0.98.1 (shipped) is **capture only**: structured signal lands in the EOD atomic note's Rail L + sidecar's `feedback_capture` field. No writes back to learned_weights / microscopes / voice. The corpus accumulates.
-
-v0.98.2 (next cycle) will be **the reconciler ingest** — closing the loop the user's 2026-06-10 vision described:
+The compounding-assistant loop is **LIVE as of v0.98.2 (2026-06-11)**. v0.98.1 shipped the capture surface; v0.98.2 shipped the reconciler ingest, the v=2 downvote list, the voice-proposal tick-to-approve mechanism, and `learned_weights` schema 3 (nested per-kind entity maps). The user's 2026-06-10 vision is now fully satisfied across the v0.98.x arc:
 
 > "another job took what i liked, what i didn't like, my feedback, then updated the relevant files so that all scheduled jobs would then adjust the next day"
 
-Sketched pipeline (full design at the v0.98.2 cycle's brainstorm):
+### 9.1 Architecture overview
 
-1. **Trigger.** Existing reconciler cron, fired daily (warmup) or weekly (post-warmup). Reads N days of EOD reviews where `sidecar.feedback_capture.item_count > 0`.
-2. **Parse structured signal (deterministic — no LLM).** Per-item ticks → looked up against the item-ID hash registry → rolled up per-kind, per-person, per-channel weight nudges. Frequency knobs → direct ±0.05 delta. Ambiguous-knobs skipped.
-3. **Parse free-text (LLM pass).** NEW sub-skill `cowork:ingest-feedback` runs Sonnet 4.6 (cost-fast, open question) with a structured-output prompt: "Read this user's feedback prose. Extract structured intents: (a) per-person/channel/topic uprank/downrank, (b) voice corrections, (c) coverage gaps, (d) other. Return as deltas with proposed write-targets."
-4. **Apply with audit trail.**
-   - All deltas logged to `spice/cowork/memory/<engagement>/feedback-deltas.md` (append-only changelog: date + delta + source quote from prose)
-   - `learned_weights` numeric updates: applied directly with clamp + log. Schema bumps 1.1.0 → 1.2.0 (adds `per_person.<name>.weight`, `per_channel.<id>.weight`, `per_topic.<topic>.weight` maps under each engagement)
-   - Microscope `what_matters` strings: append-only — never rewrite the contract
-   - Personality/voice changes: PROPOSED only — next-day morning brief shows a callout
-   - Coverage gaps: written to `spice/cowork/memory/<engagement>/coverage-queue.md`
+The ingest pipeline lives inside the existing nightly `reconcile-cowork` cadence (03:00 local, per-engagement, daily forever). No new scheduled job; no contract bump (0.35.1 holds). Architectural posture preserved: **deterministic helpers carry shape; OI prose carries voice; structural rules WIN on conflict.** The reconciler stays pure-MCP at fire time (per its v0.97.1 posture) — `ingest-feedback-helper.js` is the testable reference implementation whose contract the OI re-states inline. The LLM proposes (free-text intents); the deterministic layer disposes (validation rules + clamps + allowlisted write-targets).
 
-The user explicitly raised the per-item DOWNVOTE row as part of the same vision — that's queued as a v0.98.1.x PATCH candidate or v0.98.2 brainstorm seed: should Rail L gain a parallel "what I didn't like" row per kind, or should downvote signal flow purely through the free-text + LLM ingest?
+```
+              EOD orchestrator (cowork:eod-review)                  3:00am reconciler (cowork:reconcile-cowork)
+                          │                                                        │
+            Step 4: composeFeedbackCapture                     Step 3 (EXTENDED): parse BOTH sentinels
+              (v=2: + Didn't like list)                          rating-block (4 cadences) +
+                          │                                      feedback-capture v=1/v=2 (EOD)
+            Step 8: sidecar 1.2.0                                              │
+              (+ feedback_capture.items[] registry)            NEW Step 3.5: deterministic rollup
+                          │                                      cowork:ingest-feedback →
+                          ▼                                      ingest-feedback-helper.js contract
+              user ticks + knobs + prose                          (kind obs + entity deltas + knob deltas)
+                                                                               │
+                                                               NEW Step 3.6: free-text intent extraction
+                                                                 (INLINE LLM; schema-validated by helper rules)
+                                                                               │
+                                                               Step 4-5 (EXTENDED): apply learned_weights
+                                                                 schema 2 → 3 in-place; clamp; .bak
+                                                                               │
+                                                               NEW Step 5.5: apply non-weight deltas
+                                                                 microscope appends · voice proposals ·
+                                                                 coverage queue · feedback-deltas audit log
+                                                                               │
+                                                               NEW Step 5.6: voice-proposal approvals
+                                                                 (parse yesterday's MB callout ticks → apply)
+
+              6:30am morning-briefing: Step 2 consults per-kind + per-entity weights;
+              renders pending voice-proposals callout (tick-to-approve)
+```
+
+### 9.2 The pipeline in detail
+
+1. **Trigger.** Existing reconciler cron (03:00 local, per-engagement, daily — the v0.97.1 cadence). Reads yesterday's `.md` notes for the engagement.
+
+2. **Step 3 (extended) — parse BOTH sentinels.** For each note: if `rating-block` sentinel → existing kind-checkbox parse (with v0.98.2 Tasks-suffix tolerance added on kind lines). If `feedback-capture` sentinel (v=1 OR v=2) → rich parse via `parseFeedbackCapture`. EOD now contributes kind-level observations to the v0.96.0 formula: **kind tick = ≥1 mattered-tick in that kind; else kind skip.** This RESTORES EOD signal to per-kind learning, which v0.98.1's sentinel switch had silently broken.
+
+3. **NEW Step 3.5 — deterministic rollup (v=2 ingest, per `ingest-feedback-helper.js` contract).**
+   - **Per-item Mattered tick** → entity delta **+0.05** on the item's person/channel/topic under its kind (identity via the sidecar's 1.2.0 `items[]` registry; wikilink-label fallback for v=1-era sidecars; kind-only rollup fallback when identity resolution fails).
+   - **Per-item Didn't-like tick** → entity delta **−0.10** (dislikes are rarer + stronger signal) AND counts toward the kind-skip side of the kind-level formula.
+   - **Frequency knobs** → direct **±0.05** per-kind delta applied AFTER the v0.96.0 formula + re-clamped. `ambiguous` → no signal.
+   - **Ambiguous items** (sidecar `ambiguous_items[]` flag — user dual-ticked Mattered AND Didn't-like) → no entity signal.
+   - **Idempotency** via `totals.feedback_ingested_days[]` alongside existing `scanned_days[]`.
+
+4. **NEW Step 3.6 — free-text intent extraction (INLINE LLM pass).** No separate API call, no model pin — the reconciler IS an LLM session (its pure-MCP posture). The OI carries a strict structured-intent schema:
+
+   ```json
+   [{ "intent": "uprank | downrank | voice_correction | coverage_gap | frequency | other",
+      "kind": "<kind, when scoped>", "entity": "<person/channel/topic, when named>",
+      "source_quote": "<verbatim substring of the user's prose>",
+      "proposed_target": "learned_weights | microscope:<kind> | voice-proposals | coverage-queue",
+      "confidence": "high | medium | low" }]
+   ```
+
+   The deterministic helper's validation rules (re-stated in OI) REJECT: unknown intent / missing or non-verbatim `source_quote` / target outside the four-value allowlist / `learned_weights` intent naming no kind / `low` confidence (logged pending, not applied). Hard suppression intents ("stop surfacing X's emails") → direct floor-set `weight = 0.10` on the named entity under the named kind.
+
+5. **Steps 4-5 (extended) — apply learned_weights schema 2 → 3 in-place.** Same `user-preferences.md`, same `.bak`-first rewrite of ONLY the `learned_weights:` block. Normalizer tolerates all on-disk shapes (2, missing, "1.1.0", 3). Per-entity weight math (see § 7.2.5) applies in-line.
+
+6. **NEW Step 5.5 — apply non-weight deltas.**
+
+   | Target | Posture | Path |
+   | --- | --- | --- |
+   | Microscope `## What matters` | **APPEND-only** — one dated line per delta with source quote; never rewrites; user prunes later. If the kind has no microscope file → delta parks as `pending` (this cycle never CREATES microscope files) | `spice/cowork/prompts/per-mcp/<kind>/microscope.md` |
+   | Voice/personality corrections | **PROPOSED only** — durable entry in `voice-proposals.md` (id, exact append text, target file, source quote, status, expiry = +7 days) | `spice/cowork/memory/<eng>/voice-proposals.md` |
+   | Coverage gaps | Queued for user-schedule triage | `spice/cowork/memory/<eng>/coverage-queue.md` |
+   | Everything (applied / proposed / rejected / pending) | **Append-only audit log** — date · delta · old → new · source quote · target | `spice/cowork/memory/<eng>/feedback-deltas.md` |
+
+   All four files are **runtime-created by the reconciler session via Obsidian MCP** when absent (frontmatter `type: cowork-feedback-deltas` etc.) — they are NOT installer-materialized and gain NO `files[]` entries (Safeguard 3 stays green by construction).
+
+   Audit entry format (one section per run):
+
+   ```markdown
+   ## 2026-06-12 (run-id: fd-20260612-0300)
+   - [weights] chat.per_person."Zhenzhen Su" 1.000 → 1.050 (+0.05 mattered ^item-chat-a7b3c9d "Zhenzhen PR #353 thread")
+   - [weights] email.per_person."Diana" 1.000 → 0.100 (floor-set; source: "stop surfacing Diana's emails")
+   - [knob] chat +0.05 (Fire chat: more)
+   - [microscope] chat APPEND: "<line>" (source: "<quote>")
+   - [voice] PROPOSED vp-20260612-1 → voice-proposals.md (source: "<quote>")
+   - [coverage] QUEUED: "<gap>" → coverage-queue.md
+   - [rejected] intent other/"<...>" — target outside allowlist
+   ```
+
+7. **NEW Step 5.6 — voice-proposal approval sweep.** Parse yesterday's morning-briefing `.md` for the voice-proposals callout. Per proposal line: `[x]` → apply the exact append text to the proposal's target file (append-only), mark `applied` in `voice-proposals.md`, audit-log. Untouched + past expiry → mark `expired` (inert, visible in the file). Proposals named in free-text as rejected ("no, don't change that") → `dismissed`.
+
+### 9.3 Morning-briefing voice-proposals callout
+
+Rendered ONLY when `voice-proposals.md` has `pending` entries (collapsed; compact):
+
+```markdown
+> [!note]- Voice proposals pending (1)
+> Tick to approve — applies overnight. Untouched proposals expire 7 days after proposal.
+> - [ ] Stop numbered marching orders in chat sections — append to headspace/brand-voice.md <!-- cowork:voice-proposal id=vp-20260612-1 -->
+```
+
+The per-line HTML-comment id is the deterministic parse key (same pattern as every other cowork sentinel). Suffix-tolerant tick parsing applies here too.
+
+### 9.4 Consumption — how tomorrow's brief actually changes
+
+One new rule in the shared microscope/voice clause + Step 2 of morning-briefing and eod-review OIs: when composing per-kind blocks, consult `per_kind.<kind>.per_person/per_channel/per_topic`:
+
+- **≥ 1.20** → lead the section (surface first, fuller rendering)
+- **≤ 0.50** → cap to one line
+- **≤ 0.25** → omit, UNLESS the item carries a hard signal (direct @-mention, money movement, inner-circle going-dark per existing microscope contracts)
+- Entities in warmup (<3 observations) → advisory only
+
+Structural rules still WIN over voice on conflict; the thresholds are OI prose consumed at gather/compose time, deliberately NOT helper-enforced (rendering judgment is the LLM's lane; the WEIGHTS are deterministic).
+
+### 9.5 Carry-forward (v0.98.2.x + v0.99.0+)
+
+- **`cowork:doctor` (sidecar conformance + observability).** Surfaced concretely by a v0.98.2 absorption finding: the live headspace 2026-06-10 EOD sidecar carries `coverage_gap: []` (array) where the schema's shape is an object — write-guard bypassed at fire time. Doctor would scan sidecar conformance across the corpus and emit anomaly callouts. v0.98.2.x PATCH if anomalies recur; v0.99.0+ if full scope (also grade learned_weights movement).
+- **Per-item ticks on weekly / monthly cadences.** v0.98.2's Rail L v=2 is EOD-only by design. Additive extension if post-deploy data shows demand.
+- **Cross-machine wrappers + lockfile semantics.** Vision § 2 dimension 8 (Cross-machine consistency); v0.99.0+ next.
+- **Entity-weight live-grading after 7 days.** First time the platform can grade itself empirically — entity maps populate over the first 7-30 days post-deploy.
 
 ## § 10 — Cross-machine + cross-engagement
 
@@ -607,12 +739,13 @@ The combination guarantees: even if a future cycle accidentally introduces a `fi
 
 | Cycle | Scope | Status |
 | --- | --- | --- |
-| **v0.98.1** ⭐ | Questionnaire expansion + free-text capture (THIS CYCLE) | **SHIPPED 2026-06-11** |
-| **v0.98.2** | Reconciler free-text + per-item-tick ingest — closes the loop the user's vision described | NEXT (brainstorm seeded at `Docs/prompts/2026-06-11-post-v0.98.1-next-cycle-handoff.md`) |
-| **v0.98.1.x candidates** | Per-item DOWNVOTE row; bare-fence vs `>`-prefix visual UX; end-to-end integration fixture for cadence dispatch | Queued (PATCH-sized) |
-| **v0.99.0+** | Cross-machine wrappers; `cowork:doctor` observability skill; `cowork:audit-cohesion` enforcement; per-skill SemVer | Queued; depends on memory write-side maturation |
+| **v0.98.0** | Synopsis-density rewrite — predictive lead, collapsed per-kind, closing removed | SHIPPED 2026-06-10 |
+| **v0.98.1** | Questionnaire expansion + free-text capture — per-item ticks + knobs + fenced free-text + sentinel v=1 | SHIPPED 2026-06-11 |
+| **v0.98.2** ⭐ | **Feedback-loop closure (THIS CYCLE)** — Rail L v=2 (+ Didn't-like list); reconciler ingest steps 3/3.5/3.6/5.5/5.6; learned_weights schema 2 → 3 nested per-kind entity maps; voice changes PROPOSED + tick-to-approve in next morning brief; sidecar 1.2.0 with items[] registry | **SHIPPED 2026-06-11** |
+| **v0.98.2.x candidates** | `cowork:doctor` minimum scope (sidecar conformance scan); per-item ticks on weekly/monthly cadences; strict-mode adoption for helpers (workshop-wide hygiene) | Queued (PATCH-sized) |
+| **v0.99.0+** | Cross-machine wrappers + lockfile semantics; `cowork:doctor` full scope (also grade learned_weights movement; embed cadence vs separate fire); entity-weight live-grading after 7 days of dogfood; v0.95.1-migrator carry-forward | NEXT (queued); 4 open brainstorm questions at `Docs/prompts/2026-06-11-post-v0.98.2-next-cycle-handoff.md` |
 
-The substance arc (v0.98.x) is the most directly user-visible direction since the platform's launch. Density first (v0.98.0), capture surface second (v0.98.1), ingest + write-side third (v0.98.2). Then the platform shifts focus to observability + cross-machine durability (v0.99.0+).
+The substance arc (v0.98.x) is the most directly user-visible direction since the platform's launch. Density first (v0.98.0), capture surface second (v0.98.1), ingest + write-side third (v0.98.2). **The v0.98.x arc is now CLOSED — the compounding-assistant loop is LIVE.** The platform now shifts focus to observability + cross-machine durability (v0.99.0+).
 
 ## § 13 — Where to look next
 
@@ -637,7 +770,7 @@ If you want to trace a specific path through the system:
 - **Bootstrap flow (first-time install).** See `Docs/cowork-onboarding.md` + `commands/install.md`.
 - **Mechanism architecture (17 mechanisms across the platform).** See `Docs/agent-guides/architecture.md` § Two building blocks.
 - **Slash commands + their handlers.** See `commands/<name>.md` + `Docs/cowork-vision.md` § 3 (anti-goal).
-- **Specific microscope contracts per kind.** See per-engagement `microscopes/<kind>.md`.
+- **Specific microscope contracts per kind.** See `spice/cowork/prompts/per-mcp/<kind>/microscope.md` (engagement-agnostic per vault — NOT a per-engagement `context/<eng>/microscopes/` path; that was an aspirational sketch in earlier drafts).
 - **The MCP integration layer (apple-mcp, Brex, Gmail, Calendar, Slack, Teams, Drive, Context7, Playwright).** See per-MCP integration docs + `user-preferences.mcps`.
 - **Smart Connections / semantic retrieval mechanics.** See its own dedicated cycle docs (v0.93.x family).
 - **Workshop self-install (dogfood loop).** See `Docs/agent-guides/build-test-verify.md`.

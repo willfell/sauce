@@ -174,7 +174,7 @@ function writeAtomicNote(opts) {
     }
   }
 
-  // v0.98.1: pass-through feedback_capture observability when caller supplied it.
+  // v0.98.1+v0.98.2: pass-through feedback_capture observability (counts + items[] identity registry) when caller supplied it. Schema validation enforces shape.
   // When present, bump schema_version from default "1.0.0" to "1.1.0" (additive).
   const { feedback_capture } = (opts || {});
   if (feedback_capture && typeof feedback_capture === "object") {

@@ -52,6 +52,24 @@ The cowork installer is an explicit allowlist. `platform/blueprints/cowork/manif
 
 These guarantees are codified in four safeguards (introduced v0.98.1). See `Docs/plans/2026-06-11-v0.98.1-questionnaire-capture-design.md` § User-content preservation safeguards for rationale and design detail.
 
+### v0.98.2 deploy note (feedback-loop closure)
+
+The v0.98.2 update materializes:
+
+- NEW `spice/cowork/helpers/ingest-feedback-helper.js` (deterministic core for reconciler ingest)
+- NEW `.claude/skills/cowork/skills/ingest-feedback/SKILL.md` shim
+- Updated `compose-feedback-capture-helper.js` (v=2 Rail L shape — adds Didn't-like list)
+- Updated `learn-from-checks-helper.js` (v=2 parse + Tasks-plugin trailing-annotation tolerance)
+- Updated `write-atomic-note-helper.js` (sidecar `items[]` registry passthrough)
+- Updated `reconcile-cowork.md` / `eod-review.md` / `morning-briefing.md` / `_shared-clauses.md` orchestrator-instructions
+- Updated `data/schemas/eod-review@1.0.0.json` — `schema_version` enum gains `"1.2.0"` (additive; pre-1.2.0 sidecars still validate)
+
+**User-content safeguards UNCHANGED from v0.98.1.** All four safeguards hold. `learned_weights` migrates schema 2 → 3 IN PLACE on `user-preferences.md` frontmatter (block-scoped `.bak`-first rewrite of ONLY the `learned_weights:` block; the existing reconciler contract, unchanged in kind). New per-engagement files (`feedback-deltas.md`, `voice-proposals.md`, `coverage-queue.md`) are runtime-created by the reconciler session via Obsidian MCP — NOT installer-materialized, NO `files[]` entries, Safeguard 3 stays green by construction.
+
+**Accuris two-version catch-up is SAFE.** If a consumer vault sat at workshop 0.98.0 / cowork 0.36.0 (skipping v0.98.1), ONE `sauce update --bump-pins` invocation cleanly catches BOTH v0.98.1 AND v0.98.2 deltas in a single materialize pass. Verify post-install with `jq -r '.workshop_version' ranch/platform-subscription.json` (expect `0.98.2`) and confirm both `compose-feedback-capture-helper.js` (v0.98.1) AND `ingest-feedback-helper.js` (v0.98.2) materialize at `spice/cowork/helpers/`. Pre-deploy snapshot per Safeguard 1 strongly recommended for two-version jumps.
+
+After `sauce update --bump-pins`, run `/cowork sync-scheduled-jobs` once per vault from claude.ai's Cowork UI — Rail A pushes new wrapper bodies (contract_version stays at 0.35.1; the new substitution tokens `{{$voice_proposals_count}}` + `{{$voice_proposal_lines}}` flow through wrapper template substitution; schedule preservation invariant holds — cron field NEVER touched).
+
 ---
 
 ### Safeguard 1 — Pre-deploy snapshot recipe

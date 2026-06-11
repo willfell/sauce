@@ -251,6 +251,21 @@ empty.
     sentinel `cowork:rating-block` line encodes `schema_version=1.0.0`, `cadence`, `day`
     for round-trip parsing on the next fire.
 
+### Step 4.5: Voice-proposals callout (v0.98.2 — tick-to-approve)
+
+4.5a. Read `spice/cowork/memory/{{$engagement_id}}/voice-proposals.md` (absent
+      → skip this step). Collect entries with `status: pending` whose expiry
+      date has not passed.
+
+4.5b. When ≥1 pending: render per `{{shared.voice_proposals_callout_template}}`
+      — a COLLAPSED `[!note]-` callout listing each pending proposal as ONE
+      checkbox line ending with its sentinel
+      `<!-- cowork:voice-proposal id=vp-... -->`. Place it AFTER Rail L's
+      rating callout, before the backlink. When zero pending: emit nothing.
+
+4.5c. Do NOT apply anything here. The nightly reconciler (Step 5.6) reads the
+      ticks and applies approved appends.
+
 ### Step 5: Detection callout (Rail D — new-MCP surface)
 
 5a. composeBody (Step 3g) emits the detection callout per `{{shared.detection_callout_template}}`

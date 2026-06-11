@@ -197,7 +197,7 @@ this is unexpected.`
 ### Step 4: Feedback-capture callout (Rail L — v0.98.1 expanded shape)
 
 4a. Compute `output_path = "spice/cowork/daily/{{$today_dirpath}}/eod-review.md"`.
-    Parse prior `cowork:feedback-capture v=1` sentinel via `parseFeedbackCapture(prior_md)`
+    Parse prior `cowork:feedback-capture v=2` sentinel via `parseFeedbackCapture(prior_md)`
     when file exists; build `prior_feedback_state` map (per-item ticks, knob positions,
     free-text). If only the legacy `cowork:rating-block` sentinel exists (pre-v0.98.1
     EOD), start fresh — no migration of kind-level ticks to per-item ticks.
@@ -211,6 +211,14 @@ this is unexpected.`
     when cadence is `eod-review` AND `surfaced_items_by_kind` is non-empty. Behind the
     scenes: composeBody dispatches to `composeFeedbackCapture` (new helper) for EOD;
     the other 4 cadences continue using `composeRatingCallout` unchanged.
+
+4d. v0.98.2 — the rail's per-kind sub-callouts carry TWO checklists sharing
+    the same `^item-<kind>-<7hex>` IDs: `Mattered:` (this helped) and
+    `Didn't like:` (surface less of this). composeFeedbackCapture emits the
+    `<!-- cowork:feedback-capture v=2 -->` sentinel; prior v=1 files parse
+    with ticks preserved into Mattered and a fresh Didn't-like row. An item
+    ticked in BOTH lists is contradictory: preserved in the UI, flagged in
+    sidecar `feedback_capture.ambiguous_items[]`, ignored by the reconciler.
 
 ### Step 5: Detection callout (Rail D — new-MCP surface)
 
@@ -275,6 +283,12 @@ this is unexpected.`
     `validateSidecar` against `data/schemas/eod-review@1.0.0.json` BEFORE
     committing either file. On `failed:contract-violation:sidecar-schema`, no
     files are written.
+
+8c. v0.98.2 — the sidecar `feedback_capture` field (schema 1.2.0) carries the
+    identity registry `items[]: [{item_id, kind, identifier, label}]` from
+    composeFeedbackCapture's `sidecar_observability`, plus
+    `ambiguous_items[]`. This is the reconciler's per-item identity source —
+    do NOT omit it.
 
 ### Step 8.5: Verify (sidecar schema validation backstop)
 

@@ -1,6 +1,6 @@
 // platform/blueprints/cowork/helpers/compose-feedback-capture-helper.js
 //
-// v0.98.1 — Feedback-capture callout (Rail L expanded shape; EOD-only).
+// v0.98.2 — Feedback-capture callout (Rail L expanded shape; EOD-only).
 //
 // composeFeedbackCapture(opts)
 //
@@ -10,8 +10,11 @@
 
 const crypto = require("crypto");
 
-const SENTINEL = "<!-- cowork:feedback-capture v=1 -->";
-const SENTINEL_VERSION = "v=1";
+const SENTINEL = "<!-- cowork:feedback-capture v=2 -->";
+const SENTINEL_VERSION = "v=2";
+// v0.98.1-era sentinel — _parsePrior accepts it so the one night of v=1
+// capture corpus (headspace 2026-06-11) stays readable forever.
+const SENTINEL_V1 = "<!-- cowork:feedback-capture v=1 -->";
 
 const KIND_LABELS = {
   chat: "Chat",
@@ -42,25 +45,51 @@ function _itemId(kind, identifier) {
   return `item-${kind}-${hash}`;
 }
 
+// Mirrored in learn-from-checks-helper.js::parseFeedbackCapture — keep the section state machines in sync.
 function _parsePrior(priorMd) {
   const result = {
     ticks: {},
+    downvotes: {},
     knobs: {},
     free_text: "",
     sentinel_version: null,
     ambiguous_knobs: [],
+    ambiguous_items: [],
   };
   if (!priorMd || typeof priorMd !== "string") return result;
-  if (!priorMd.includes(SENTINEL)) return result;
-  result.sentinel_version = SENTINEL_VERSION;
+  const isV2 = priorMd.includes(SENTINEL);
+  const isV1 = !isV2 && priorMd.includes(SENTINEL_V1);
+  if (!isV2 && !isV1) return result;
+  result.sentinel_version = isV2 ? "v=2" : "v=1";
 
-  const tickRx = /^>\s*>\s*-\s*\[([ xX])\]\s*\[\[#\^(item-[a-z]+-[0-9a-f]{7})\|/gm;
-  let m;
-  while ((m = tickRx.exec(priorMd)) !== null) {
-    result.ticks[m[2]] = m[1].toLowerCase() === "x";
+  // Section-aware tick scan. `Mattered:` / `Didn't like:` flip the section;
+  // a new kind sub-callout header resets it. v=1 priors carry no section
+  // headers, so their ticks land in `ticks` (mattered) by default — exactly
+  // the v=1 semantic. Tick regex is prefix-anchored through the wikilink, so
+  // trailing Tasks-plugin annotations (`✅ 2026-06-12`) are ignored.
+  const headerRx = /^>\s*>\s*\[!summary\]-/;
+  const sectionRx = /^>\s*>\s*(Mattered|Didn't like):\s*$/;
+  const tickRx = /^>\s*>\s*-\s*\[([ xX])\]\s*\[\[#\^(item-[a-z]+-[0-9a-f]{7})\|/;
+  let section = null;
+  for (const line of priorMd.split("\n")) {
+    if (headerRx.test(line)) { section = null; continue; }
+    const s = line.match(sectionRx);
+    if (s) { section = s[1]; continue; }
+    const m = line.match(tickRx);
+    if (m) {
+      const ticked = m[1].toLowerCase() === "x";
+      if (section === "Didn't like") result.downvotes[m[2]] = ticked;
+      else result.ticks[m[2]] = ticked;
+    }
+  }
+  for (const id of Object.keys(result.ticks)) {
+    if (result.ticks[id] === true && result.downvotes[id] === true) {
+      result.ambiguous_items.push(id);
+    }
   }
 
   const knobLineRx = /^>\s*>\s*\*\*Fire (\w+):\*\*\s*`\[([ xX])\]\s*less`\s*`\[([ xX])\]\s*same`\s*`\[([ xX])\]\s*more`/gm;
+  let m;
   while ((m = knobLineRx.exec(priorMd)) !== null) {
     const kind = m[1].toLowerCase();
     const less = m[2].toLowerCase() === "x";
@@ -96,10 +125,17 @@ function _parsePrior(priorMd) {
 
 function _renderKindBlock(kind, items, priorState) {
   const lines = [`> > [!summary]- ${_kindLabel(kind)} — items`];
+  lines.push("> > Mattered:");
   for (const item of items) {
     const itemId = _itemId(kind, item.id);
-    const wasTicked = priorState && priorState.ticks && priorState.ticks[itemId] === true;
-    const box = wasTicked ? "[x]" : "[ ]";
+    const box = priorState && priorState.ticks && priorState.ticks[itemId] === true ? "[x]" : "[ ]";
+    lines.push(`> > - ${box} [[#^${itemId}|${item.label}]]`);
+  }
+  lines.push("> >");
+  lines.push("> > Didn't like:");
+  for (const item of items) {
+    const itemId = _itemId(kind, item.id);
+    const box = priorState && priorState.downvotes && priorState.downvotes[itemId] === true ? "[x]" : "[ ]";
     lines.push(`> > - ${box} [[#^${itemId}|${item.label}]]`);
   }
   lines.push("> >");
@@ -147,6 +183,7 @@ function composeFeedbackCapture(opts) {
   const kindBlocks = [];
   const itemIdRegistry = {};
   const kindsWithKnobs = [];
+  const items = [];
 
   for (const kind of kinds) {
     kindBlocks.push(_renderKindBlock(kind, surfaced[kind], priorState));
@@ -155,6 +192,7 @@ function composeFeedbackCapture(opts) {
     for (const item of surfaced[kind]) {
       const itemId = _itemId(kind, item.id);
       itemIdRegistry[itemId] = { kind, identifier: item.id, label: item.label };
+      items.push({ item_id: itemId, kind, identifier: item.id, label: item.label });
     }
   }
 
@@ -172,6 +210,8 @@ function composeFeedbackCapture(opts) {
     item_count: itemCount,
     kinds_with_knobs: kindsWithKnobs,
     ambiguous_knobs: (priorState && priorState.ambiguous_knobs) || [],
+    ambiguous_items: (priorState && priorState.ambiguous_items) || [],
+    items,
   };
 
   return {
@@ -188,5 +228,6 @@ module.exports = {
   _parsePrior,
   SENTINEL,
   SENTINEL_VERSION,
+  SENTINEL_V1,
   KIND_LABELS,
 };
