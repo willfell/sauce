@@ -1,6 +1,6 @@
 /* eslint-disable no-console */
 /**
- * write-atomic-note-helper.js — v0.97.4 (sauce v0.97.4 prose-invariant write-guards)
+ * write-atomic-note-helper.js — v0.98.1 (sauce v0.98.1 eod-review sidecar schema 1.0.0 → 1.1.0)
  *
  * Atomic dual-write for cowork atomic notes: writes the .md and its
  * .cowork.json sidecar together; on any failure (validation or filesystem),
@@ -15,7 +15,9 @@
  *   writeAtomicNote({
  *     mdPath, sidecarPath, body_md, sidecar_json, schemaPath,
  *     // v0.97.4 — prose-invariant write-guards (all optional; absent = guard skipped)
- *     surfaced_kinds_for_rating, learning_enabled, expected_kinds
+ *     surfaced_kinds_for_rating, learning_enabled, expected_kinds,
+ *     // v0.98.1 — questionnaire-capture observability (optional; absent = schema_version stays "1.0.0")
+ *     feedback_capture
  *   }) → { status, mdPath?, sidecarPath?, errors? }
  *
  * Status strings:
@@ -170,6 +172,16 @@ function writeAtomicNote(opts) {
       // "field absent because helper didn't run").
       mutated_sidecar = Object.assign({}, sidecar_json, { coverage_gap: gap });
     }
+  }
+
+  // v0.98.1: pass-through feedback_capture observability when caller supplied it.
+  // When present, bump schema_version from default "1.0.0" to "1.1.0" (additive).
+  const { feedback_capture } = (opts || {});
+  if (feedback_capture && typeof feedback_capture === "object") {
+    mutated_sidecar = Object.assign({}, mutated_sidecar, {
+      schema_version: "1.1.0",
+      feedback_capture,
+    });
   }
 
   // Guard 5 — sidecar schema validation (existing contract). Runs against the
