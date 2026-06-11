@@ -8432,6 +8432,343 @@ async function caseV0980CadencesA5() {
   );
 }
 
+async function caseV0981FeedbackA1() {
+  console.log(`\n--- Case HC-V0981-FEEDBACK-A1: composeFeedbackCapture emits <!-- cowork:feedback-capture v=1 --> sentinel ---`);
+  try {
+    const path = require("path");
+    const { composeFeedbackCapture } = require("../blueprints/cowork/helpers/compose-feedback-capture-helper.js");
+    const rail = composeFeedbackCapture({
+      cadence: "eod-review",
+      day: "2026-06-11",
+      surfaced_items_by_kind: {
+        chat: [{ id: "chat:c1:t1", label: "Zhenzhen PR #353 thread" }],
+      },
+      prior_md: null,
+      knob_positions: ["less", "same", "more"],
+    });
+    const hasHeader = /> \[!todo\]\+ Was today useful\?/.test(rail.rail_md);
+    const hasSentinel = /<!-- cowork:feedback-capture v=1 -->/.test(rail.rail_md);
+    assertTrue(
+      "HC-V0981-FEEDBACK-A1: composeFeedbackCapture emits `> [!todo]+ Was today useful?` lead AND `<!-- cowork:feedback-capture v=1 -->` sentinel within the callout body",
+      hasHeader && hasSentinel
+    );
+  } catch (e) {
+    assertTrue("HC-V0981-FEEDBACK-A1: composeFeedbackCapture sentinel emission", false, e && e.message);
+  }
+}
+
+async function caseV0981FeedbackA2() {
+  console.log(`\n--- Case HC-V0981-FEEDBACK-A2: composeFeedbackCapture emits per-kind [!summary]- callout with item-ticks ---`);
+  try {
+    const { composeFeedbackCapture } = require("../blueprints/cowork/helpers/compose-feedback-capture-helper.js");
+    const rail = composeFeedbackCapture({
+      cadence: "eod-review",
+      day: "2026-06-11",
+      surfaced_items_by_kind: {
+        chat: [
+          { id: "chat:c1:t1", label: "Zhenzhen PR #353 thread" },
+          { id: "chat:person:Ben", label: "Ben/Stale Doc DB infra" },
+        ],
+        github: [{ id: "github:org/repo#353", label: "PR #353 awaiting review" }],
+      },
+      prior_md: null,
+      knob_positions: ["less", "same", "more"],
+    });
+    const hasChatSummary = /> > \[!summary\]- Chat — items/.test(rail.rail_md);
+    const hasGithubSummary = /> > \[!summary\]- GitHub — items/.test(rail.rail_md);
+    const hasChatItemTick = /> > - \[ \] \[\[#\^item-chat-[0-9a-f]{7}\|Zhenzhen PR #353 thread\]\]/.test(rail.rail_md);
+    const hasGithubItemTick = /> > - \[ \] \[\[#\^item-github-[0-9a-f]{7}\|PR #353 awaiting review\]\]/.test(rail.rail_md);
+    assertTrue(
+      "HC-V0981-FEEDBACK-A2: per-kind `> > [!summary]- <Kind> — items` sub-callouts emitted with one wikilinked item-tick per surfaced item",
+      hasChatSummary && hasGithubSummary && hasChatItemTick && hasGithubItemTick
+    );
+  } catch (e) {
+    assertTrue("HC-V0981-FEEDBACK-A2: per-kind item-tick emission", false, e && e.message);
+  }
+}
+
+async function caseV0981FeedbackA3() {
+  console.log(`\n--- Case HC-V0981-FEEDBACK-A3: composeFeedbackCapture emits **Fire <kind>:** [ ] less [ ] same [ ] more knob row ---`);
+  try {
+    const { composeFeedbackCapture } = require("../blueprints/cowork/helpers/compose-feedback-capture-helper.js");
+    const rail = composeFeedbackCapture({
+      cadence: "eod-review",
+      day: "2026-06-11",
+      surfaced_items_by_kind: {
+        chat: [{ id: "chat:c1:t1", label: "X" }],
+        github: [{ id: "github:org/repo#1", label: "Y" }],
+      },
+      prior_md: null,
+      knob_positions: ["less", "same", "more"],
+    });
+    const hasChatKnob = /\*\*Fire chat:\*\* `\[ \] less` `\[ \] same` `\[ \] more`/.test(rail.rail_md);
+    const hasGithubKnob = /\*\*Fire GitHub:\*\* `\[ \] less` `\[ \] same` `\[ \] more`/.test(rail.rail_md);
+    assertTrue(
+      "HC-V0981-FEEDBACK-A3: per-kind `**Fire <kind>:** [ ] less [ ] same [ ] more` knob row emitted (one per surfaced kind, kind label cased per existing per-kind conventions: lowercase for chat/calendar/email/finance/ado; GitHub display-cased)",
+      hasChatKnob && hasGithubKnob
+    );
+  } catch (e) {
+    assertTrue("HC-V0981-FEEDBACK-A3: per-kind knob row emission", false, e && e.message);
+  }
+}
+
+async function caseV0981FeedbackA4() {
+  console.log(`\n--- Case HC-V0981-FEEDBACK-A4: composeFeedbackCapture emits tagged fenced feedback block ---`);
+  try {
+    const { composeFeedbackCapture } = require("../blueprints/cowork/helpers/compose-feedback-capture-helper.js");
+    const rail = composeFeedbackCapture({
+      cadence: "eod-review",
+      day: "2026-06-11",
+      surfaced_items_by_kind: { chat: [{ id: "chat:c1:t1", label: "X" }] },
+      prior_md: null,
+      knob_positions: ["less", "same", "more"],
+    });
+    const hasHeading = /### Free-text feedback/.test(rail.rail_md);
+    const hasFenceOpen = /```feedback\b/.test(rail.rail_md);
+    const hasFenceClose = /\n```(\s|$)/.test(rail.rail_md);
+    assertTrue(
+      "HC-V0981-FEEDBACK-A4: emits `### Free-text feedback` heading + tagged fenced ```feedback opening fence + closing ``` fence — v0.98.2 parse target",
+      hasHeading && hasFenceOpen && hasFenceClose
+    );
+  } catch (e) {
+    assertTrue("HC-V0981-FEEDBACK-A4: fenced feedback block emission", false, e && e.message);
+  }
+}
+
+async function caseV0981FeedbackA5() {
+  console.log(`\n--- Case HC-V0981-FEEDBACK-A5: re-fire with v=1 sentinel prior_md preserves [x] state + knob position ---`);
+  try {
+    const { composeFeedbackCapture } = require("../blueprints/cowork/helpers/compose-feedback-capture-helper.js");
+    // First fire — capture rail with deterministic item-IDs
+    const firstFire = composeFeedbackCapture({
+      cadence: "eod-review",
+      day: "2026-06-11",
+      surfaced_items_by_kind: { chat: [{ id: "chat:c1:t1", label: "Zhenzhen PR #353" }] },
+      prior_md: null,
+      knob_positions: ["less", "same", "more"],
+    });
+    // Simulate user ticking the chat item + selecting `[x] more` for chat + typing free-text
+    const userTicked = firstFire.rail_md
+      .replace(/> > - \[ \] (\[\[#\^item-chat-[0-9a-f]{7}\|Zhenzhen PR #353\]\])/, "> > - [x] $1")
+      .replace(/\*\*Fire chat:\*\* `\[ \] less` `\[ \] same` `\[ \] more`/, "**Fire chat:** `[ ] less` `[ ] same` `[x] more`")
+      .replace(/```feedback\n\(Type prose here[^)]*\)\n```/, "```feedback\nDiana's emails are noise.\n```");
+    // Re-fire with the ticked prior_md
+    const reFire = composeFeedbackCapture({
+      cadence: "eod-review",
+      day: "2026-06-11",
+      surfaced_items_by_kind: { chat: [{ id: "chat:c1:t1", label: "Zhenzhen PR #353" }] },
+      prior_md: userTicked,
+      knob_positions: ["less", "same", "more"],
+    });
+    const preservedTick = /> > - \[x\] \[\[#\^item-chat-[0-9a-f]{7}\|Zhenzhen PR #353\]\]/.test(reFire.rail_md);
+    const preservedKnob = /\*\*Fire chat:\*\* `\[ \] less` `\[ \] same` `\[x\] more`/.test(reFire.rail_md);
+    const preservedFreeText = /Diana's emails are noise\./.test(reFire.rail_md);
+    assertTrue(
+      "HC-V0981-FEEDBACK-A5: re-fire with v=1 sentinel prior_md preserves [x] per-item ticks AND [x] knob position AND free-text content verbatim",
+      preservedTick && preservedKnob && preservedFreeText
+    );
+  } catch (e) {
+    assertTrue("HC-V0981-FEEDBACK-A5: idempotent re-fire preservation", false, e && e.message);
+  }
+}
+
+async function caseV0981FeedbackA6() {
+  console.log(`\n--- Case HC-V0981-FEEDBACK-A6: empty-day Rail L = sentinel + free-text fence; no per-kind sub-callouts ---`);
+  try {
+    const { composeFeedbackCapture } = require("../blueprints/cowork/helpers/compose-feedback-capture-helper.js");
+    const rail = composeFeedbackCapture({
+      cadence: "eod-review",
+      day: "2026-06-11",
+      surfaced_items_by_kind: {},  // empty
+      prior_md: null,
+      knob_positions: ["less", "same", "more"],
+    });
+    const hasSentinel = /<!-- cowork:feedback-capture v=1 -->/.test(rail.rail_md);
+    const hasFreeText = /```feedback\b/.test(rail.rail_md);
+    const hasNoPerKind = !/\[!summary\]-/.test(rail.rail_md);
+    const hasNoKnob = !/\*\*Fire /.test(rail.rail_md);
+    assertTrue(
+      "HC-V0981-FEEDBACK-A6: empty-day path (surfaced_items_by_kind empty) emits sentinel + free-text fence only; no per-kind `[!summary]-` sub-callouts; no `**Fire <kind>:**` knob rows",
+      hasSentinel && hasFreeText && hasNoPerKind && hasNoKnob
+    );
+  } catch (e) {
+    assertTrue("HC-V0981-FEEDBACK-A6: empty-day minimal Rail L", false, e && e.message);
+  }
+}
+
+async function caseV0981FeedbackA7() {
+  console.log(`\n--- Case HC-V0981-FEEDBACK-A7: compose-body output per-kind items carry ^item-<kind>-<7hex> block-IDs ---`);
+  try {
+    const path = require("path");
+    const fs = require("fs");
+    const fixturePath = path.join(__dirname, "../blueprints/cowork/helpers/fixtures/compose-body/case-eod-review/expected-body.md");
+    const text = fs.readFileSync(fixturePath, "utf8");
+    // The expected-body.md fixture, post-v0.98.1, should carry at least one
+    // `^item-<kind>-<7hex>` block-ID anchor on a surfaced item line.
+    const itemIdRx = /\^item-[a-z]+-[0-9a-f]{7}/;
+    const hasItemId = itemIdRx.test(text);
+    assertTrue(
+      "HC-V0981-FEEDBACK-A7: case-eod-review fixture's expected-body.md carries at least one `^item-<kind>-<7hex>` block-ID anchor (e.g. ^item-chat-a7b3c9d) emitted by compose-body's per-kind callout assembly — proves the deterministic item-ID hook fires",
+      hasItemId
+    );
+  } catch (e) {
+    assertTrue("HC-V0981-FEEDBACK-A7: compose-body item-ID emit", false, e && e.message);
+  }
+}
+
+async function caseV0981FeedbackA8() {
+  console.log(`\n--- Case HC-V0981-FEEDBACK-A8: ambiguous-knob (multi-[x]) preserves UI state + flags sidecar ---`);
+  try {
+    const { composeFeedbackCapture } = require("../blueprints/cowork/helpers/compose-feedback-capture-helper.js");
+    // Build a synthetic prior_md with multiple [x] on chat's knob row
+    const priorMd = [
+      "> [!todo]+ Was today useful?",
+      "> Tick items that mattered. Set per-kind frequency. Type prose for nuance. Tomorrow's brief adjusts overnight.",
+      "> <!-- cowork:feedback-capture v=1 -->",
+      ">",
+      "> > [!summary]- Chat — items",
+      "> > - [ ] [[#^item-chat-a7b3c9d|X]]",
+      "> >",
+      "> > **Fire chat:** `[x] less` `[ ] same` `[x] more`",
+      ">",
+      "> ### Free-text feedback",
+      ">",
+      "> ```feedback",
+      "> ",
+      "> ```",
+      "",
+    ].join("\n");
+    const reFire = composeFeedbackCapture({
+      cadence: "eod-review",
+      day: "2026-06-11",
+      surfaced_items_by_kind: { chat: [{ id: "chat:c1:t1", label: "X" }] },
+      prior_md: priorMd,
+      knob_positions: ["less", "same", "more"],
+    });
+    const preservedBothX = /\*\*Fire chat:\*\* `\[x\] less` `\[ \] same` `\[x\] more`/.test(reFire.rail_md);
+    const flagsAmbiguous = Array.isArray(reFire.sidecar_observability && reFire.sidecar_observability.ambiguous_knobs)
+      && reFire.sidecar_observability.ambiguous_knobs.includes("chat");
+    assertTrue(
+      "HC-V0981-FEEDBACK-A8: when prior has multiple [x] on a kind's knob row, the re-fire preserves both [x] in rendered output AND sidecar_observability.ambiguous_knobs[] contains the kind name (v0.98.2 ingest will treat as no-signal)",
+      preservedBothX && flagsAmbiguous
+    );
+  } catch (e) {
+    assertTrue("HC-V0981-FEEDBACK-A8: ambiguous-knob guard", false, e && e.message);
+  }
+}
+
+async function caseV0981ParseFeedbackA1() {
+  console.log(`\n--- Case HC-V0981-PARSEFEEDBACK-A1: parseFeedbackCapture extracts item-ID tick map ---`);
+  try {
+    const { parseFeedbackCapture } = require("../blueprints/cowork/helpers/learn-from-checks-helper.js");
+    const md = [
+      "> [!todo]+ Was today useful?",
+      "> <!-- cowork:feedback-capture v=1 -->",
+      ">",
+      "> > [!summary]- Chat — items",
+      "> > - [x] [[#^item-chat-a7b3c9d|Zhenzhen PR #353]]",
+      "> > - [ ] [[#^item-chat-b8c4d0e|Ben/Stale Doc DB]]",
+      ">",
+      "> ### Free-text feedback",
+      "> ```feedback",
+      "> ",
+      "> ```",
+      "",
+    ].join("\n");
+    const parsed = parseFeedbackCapture(md);
+    const ticked = parsed && parsed.ticks && parsed.ticks["item-chat-a7b3c9d"] === true;
+    const notTicked = parsed && parsed.ticks && parsed.ticks["item-chat-b8c4d0e"] === false;
+    const sentinelOk = parsed && parsed.sentinel_version === "v=1";
+    assertTrue(
+      "HC-V0981-PARSEFEEDBACK-A1: parseFeedbackCapture returns { ticks: {item-chat-a7b3c9d: true, item-chat-b8c4d0e: false}, sentinel_version: 'v=1' } from a Rail L with one [x] and one [ ]",
+      ticked && notTicked && sentinelOk
+    );
+  } catch (e) {
+    assertTrue("HC-V0981-PARSEFEEDBACK-A1: item-ID tick map extraction", false, e && e.message);
+  }
+}
+
+async function caseV0981ParseFeedbackA2() {
+  console.log(`\n--- Case HC-V0981-PARSEFEEDBACK-A2: parseFeedbackCapture extracts per-kind knob position ---`);
+  try {
+    const { parseFeedbackCapture } = require("../blueprints/cowork/helpers/learn-from-checks-helper.js");
+    const md = [
+      "> [!todo]+ Was today useful?",
+      "> <!-- cowork:feedback-capture v=1 -->",
+      ">",
+      "> > [!summary]- Chat — items",
+      "> > - [ ] [[#^item-chat-a7b3c9d|X]]",
+      "> >",
+      "> > **Fire chat:** `[ ] less` `[ ] same` `[x] more`",
+      ">",
+      "> > [!summary]- GitHub — items",
+      "> > - [ ] [[#^item-github-d0e6f20|Y]]",
+      "> >",
+      "> > **Fire GitHub:** `[x] less` `[ ] same` `[ ] more`",
+      "",
+    ].join("\n");
+    const parsed = parseFeedbackCapture(md);
+    const chatKnob = parsed && parsed.knobs && parsed.knobs.chat === "more";
+    const githubKnob = parsed && parsed.knobs && parsed.knobs.github === "less";
+    assertTrue(
+      "HC-V0981-PARSEFEEDBACK-A2: parseFeedbackCapture.knobs = { chat: 'more', github: 'less' } from Rail L with single [x] per knob row (kind name normalized to lowercase per parseRatingCallout convention)",
+      chatKnob && githubKnob
+    );
+  } catch (e) {
+    assertTrue("HC-V0981-PARSEFEEDBACK-A2: per-kind knob position extraction", false, e && e.message);
+  }
+}
+
+async function caseV0981ParseFeedbackA3() {
+  console.log(`\n--- Case HC-V0981-PARSEFEEDBACK-A3: parseFeedbackCapture extracts raw multiline free-text ---`);
+  try {
+    const { parseFeedbackCapture } = require("../blueprints/cowork/helpers/learn-from-checks-helper.js");
+    const md = [
+      "> [!todo]+ Was today useful?",
+      "> <!-- cowork:feedback-capture v=1 -->",
+      ">",
+      "> ### Free-text feedback",
+      "> ```feedback",
+      "> Stop surfacing Diana's emails.",
+      "> I never read calendar after 3pm.",
+      "> ```",
+      "",
+    ].join("\n");
+    const parsed = parseFeedbackCapture(md);
+    const text = parsed && parsed.free_text;
+    const hasFirst = text && /Stop surfacing Diana's emails\./.test(text);
+    const hasSecond = text && /I never read calendar after 3pm\./.test(text);
+    const noFenceMarkers = text && !/```/.test(text);
+    assertTrue(
+      "HC-V0981-PARSEFEEDBACK-A3: parseFeedbackCapture.free_text returns raw multiline prose between fences (callout's `> ` prefix stripped; triple-backtick fence markers NOT included)",
+      hasFirst && hasSecond && noFenceMarkers
+    );
+  } catch (e) {
+    assertTrue("HC-V0981-PARSEFEEDBACK-A3: free-text extraction", false, e && e.message);
+  }
+}
+
+async function caseV0981ParseFeedbackA4() {
+  console.log(`\n--- Case HC-V0981-PARSEFEEDBACK-A4: missing sentinel returns graceful empty result ---`);
+  try {
+    const { parseFeedbackCapture } = require("../blueprints/cowork/helpers/learn-from-checks-helper.js");
+    // Markdown with no feedback-capture sentinel — should return empty
+    const md = "> [!info]+ Some other callout\n> body";
+    const parsed = parseFeedbackCapture(md);
+    const ok = parsed
+      && parsed.sentinel_version === null
+      && Object.keys(parsed.ticks).length === 0
+      && Object.keys(parsed.knobs).length === 0
+      && parsed.free_text === "";
+    assertTrue(
+      "HC-V0981-PARSEFEEDBACK-A4: parseFeedbackCapture on markdown with NO `cowork:feedback-capture v=1` sentinel returns { ticks: {}, knobs: {}, free_text: '', sentinel_version: null } — graceful degradation, never throws",
+      ok
+    );
+  } catch (e) {
+    assertTrue("HC-V0981-PARSEFEEDBACK-A4: missing-sentinel graceful empty", false, e && e.message);
+  }
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -8835,6 +9172,18 @@ async function caseV0980CadencesA5() {
   await caseV0980CadencesA3();
   await caseV0980CadencesA4();
   await caseV0980CadencesA5();
+  await caseV0981FeedbackA1();
+  await caseV0981FeedbackA2();
+  await caseV0981FeedbackA3();
+  await caseV0981FeedbackA4();
+  await caseV0981FeedbackA5();
+  await caseV0981FeedbackA6();
+  await caseV0981FeedbackA7();
+  await caseV0981FeedbackA8();
+  await caseV0981ParseFeedbackA1();
+  await caseV0981ParseFeedbackA2();
+  await caseV0981ParseFeedbackA3();
+  await caseV0981ParseFeedbackA4();
 
   // v0.65.0 HC-V065-RUN-NOTE: write-run-note-* sub-skill lint
   {
