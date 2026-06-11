@@ -17,7 +17,7 @@
     "plan_dispatch"
   ],
   "properties": {
-    "schema_version": { "enum": ["1.0.0", "1.1.0"] },
+    "schema_version": { "enum": ["1.0.0", "1.1.0", "1.2.0"] },
     "generated_by": { "type": "string", "pattern": "^cowork:[a-z-]+@\\d+\\.\\d+\\.\\d+$" },
     "generated_at": { "type": "string", "format": "date-time" },
     "cadence": { "const": "eod-review" },
@@ -97,18 +97,27 @@
     },
     "feedback_capture": {
       "type": "object",
-      "description": "v0.98.1 — questionnaire-capture observability. Present only when schema_version is 1.1.0 (eod-review orchestrator supplied feedback_capture to write-atomic-note-helper). Gives reconciler a fast-path check without re-reading markdown body.",
+      "description": "v0.98.1 capture observability + v0.98.2 identity registry. 1.1.0 sidecars carry counts only; 1.2.0 adds items[] + ambiguous_items[] and sentinel v=2.",
       "additionalProperties": false,
       "properties": {
-        "sentinel_version": { "type": "string", "enum": ["v=1"] },
+        "sentinel_version": { "type": "string", "enum": ["v=1", "v=2"] },
         "item_count": { "type": "integer", "minimum": 0 },
-        "kinds_with_knobs": {
+        "kinds_with_knobs": { "type": "array", "items": { "type": "string" } },
+        "ambiguous_knobs": { "type": "array", "items": { "type": "string" } },
+        "ambiguous_items": { "type": "array", "items": { "type": "string" } },
+        "items": {
           "type": "array",
-          "items": { "type": "string" }
-        },
-        "ambiguous_knobs": {
-          "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["item_id", "kind", "identifier", "label"],
+            "properties": {
+              "item_id": { "type": "string", "pattern": "^item-[a-z]+-[0-9a-f]{7}$" },
+              "kind": { "type": "string", "minLength": 1 },
+              "identifier": { "type": "string", "minLength": 1 },
+              "label": { "type": "string", "minLength": 1 }
+            }
+          }
         }
       },
       "required": ["sentinel_version", "item_count"]
