@@ -7854,7 +7854,7 @@ async function caseHCV0890VersionA() {
     if (ver && ver[1]) {
       assertTrue(
         `HC-V0890-VERSION-A: cowork === pin must be 0.31.0 (found ${ver[1]})`,
-        ver[1] === "0.37.0");
+        ver[1] === "0.38.0");
     }
   }
   if (eqMatches.length === 0) {
@@ -8202,7 +8202,7 @@ async function caseHCV0891Versions() {
   // A: cowork manifest pin
   const coworkMan = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "blueprints/cowork/manifest.json"), "utf8"));
-  assertEqual(coworkMan.version, "0.37.0", "HC-V0891-VERSION-A: cowork pin = 0.31.0 (v0.93.0 bump)");
+  assertEqual(coworkMan.version, "0.38.0", "HC-V0891-VERSION-A: cowork pin = 0.31.0 (v0.93.0 bump)");
 
   // B: daily manifest pin
   const dailyMan = JSON.parse(fs.readFileSync(
@@ -8214,10 +8214,10 @@ async function caseHCV0891Versions() {
     path.join(WORKSHOP, "manifest.json"), "utf8"));
   const wsVer = platformMan.workshop_version || platformMan.version
     || (platformMan.workshop && platformMan.workshop.version);
-  assertEqual(wsVer, "0.98.1", "HC-V0891-VERSION-C: workshop pin = 0.93.3 (v0.93.3 bump)");
+  assertEqual(wsVer, "0.98.2", "HC-V0891-VERSION-C: workshop pin = 0.93.3 (v0.93.3 bump)");
   const pkg = JSON.parse(fs.readFileSync(
     path.resolve(WORKSHOP, "..", "package.json"), "utf8"));
-  assertEqual(pkg.version, "0.98.1", "HC-V0891-VERSION-C: package.json = 0.93.3 (v0.93.3 bump)");
+  assertEqual(pkg.version, "0.98.2", "HC-V0891-VERSION-C: package.json = 0.93.3 (v0.93.3 bump)");
 
   // D: mechanism count unchanged
   const mechs = (platformMan.mechanisms && Array.isArray(platformMan.mechanisms))
@@ -10937,20 +10937,20 @@ async function caseV0982IngestA8() {
       // NOTE: top-level WORKSHOP at line 29 = path.resolve(__dirname, "../..") = workshop ROOT
       // (distinct from the local WORKSHOP inside caseHCV0891Versions which is platform/).
       const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
-      assertTrue("HC-V0900-VERSION-A: package.json version === '0.93.3'", pkg.version === "0.98.1");
+      assertTrue("HC-V0900-VERSION-A: package.json version === '0.93.3'", pkg.version === "0.98.2");
       const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
       assertTrue("HC-V0900-VERSION-B: platform/manifest.json workshop_version === '0.93.3'",
-        platMan.workshop_version === "0.98.1");
+        platMan.workshop_version === "0.98.2");
       const coworkMan = JSON.parse(fs.readFileSync(
         path.join(WORKSHOP, "platform/blueprints/cowork/manifest.json"), "utf8"));
       assertTrue("HC-V0900-VERSION-C: cowork manifest version === '0.31.0'",
-        coworkMan.version === "0.37.0");
+        coworkMan.version === "0.38.0");
       const sub = JSON.parse(fs.readFileSync(
         path.join(WORKSHOP, "ranch/platform-subscription.json"), "utf8"));
       const blueprints = sub.blueprints || sub.subscriptions || [];
       const cworkPin = blueprints.find(b => b.name === "cowork");
       assertTrue("HC-V0900-VERSION-D: ranch platform-subscription cowork pin === '0.31.0'",
-        cworkPin && cworkPin.version === "0.37.0");
+        cworkPin && cworkPin.version === "0.38.0");
     } catch (e) {
       assertTrue("HC-V0900-VERSION-A..D: version pin contract", false, e && e.message);
     }
@@ -10991,7 +10991,7 @@ async function caseV0982IngestA8() {
       const cw = (platMan.blueprints || []).find(b => b.name === "cowork");
       assertTrue("HC-V0901-CATALOGUE-A1: cowork present in workshop catalogue", !!cw);
       assertTrue("HC-V0901-CATALOGUE-A1: cowork catalogue pin === '0.31.0' (matches cowork's own manifest)",
-        cw && cw.version === "0.37.0");
+        cw && cw.version === "0.38.0");
     } catch (e) {
       assertTrue("HC-V0901-CATALOGUE-A1: catalogue sync contract", false, e && e.message);
     }
@@ -11898,7 +11898,7 @@ type: cowork-microscope
         (s.source || "").endsWith("skills/skills/compose-body/SKILL.md")
         && (s.dest || "").includes("{{skills_dir}}/skills/compose-body/SKILL.md")));
     assertTrue("HC-V0920-MANIFEST-A3: cowork manifest version === 0.31.0",
-      coworkMan.version === "0.37.0");
+      coworkMan.version === "0.38.0");
     assertTrue("HC-V0920-MANIFEST-A4: compose-body-helper source uses helpers/ relative path",
       coworkMan.files.find(f => (f.source || "").endsWith("compose-body-helper.js"))
         .source.startsWith("helpers/"));
@@ -11916,15 +11916,15 @@ type: cowork-microscope
   try {
     const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
     assertTrue("HC-V0920-VERSION-A1: workshop_version === 0.93.3",
-      platMan.workshop_version === "0.98.1");
+      platMan.workshop_version === "0.98.2");
     assertTrue("HC-V0920-VERSION-A2: blueprints[].cowork.version === 0.31.2",
-      platMan.blueprints.find(b => b.name === "cowork").version === "0.37.0");
+      platMan.blueprints.find(b => b.name === "cowork").version === "0.38.0");
     const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
     assertTrue("HC-V0920-VERSION-A3: package.json version === 0.93.3",
-      pkg.version === "0.98.1");
+      pkg.version === "0.98.2");
     const workshopSub = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "ranch/platform-subscription.json"), "utf8"));
     assertTrue("HC-V0920-VERSION-A4: workshop subscription cowork pin === 0.31.0",
-      workshopSub.blueprints.find(b => b.name === "cowork").version === "0.37.0");
+      workshopSub.blueprints.find(b => b.name === "cowork").version === "0.38.0");
   } catch (e) {
     assertTrue("HC-V0920-VERSION: pin lockstep contract", false, e && e.message);
   }
@@ -12178,7 +12178,7 @@ type: cowork-microscope
         && (s.dest || "").includes("sync-scheduled-jobs/SKILL.md")
         && !(s.dest || "").includes("skills/skills/sync-scheduled-jobs")));
     assertTrue("HC-V0930-MANIFEST-A4: cowork manifest version === 0.31.0",
-      coworkMan.version === "0.37.0");
+      coworkMan.version === "0.38.0");
     const coworkCommandsMd = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/cowork/commands/cowork.md"), "utf8");
     assertTrue("HC-V0930-MANIFEST-A5: commands/cowork.md references sync-scheduled-jobs",
       coworkCommandsMd.includes("sync-scheduled-jobs"));
@@ -12193,15 +12193,15 @@ type: cowork-microscope
   try {
     const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
     assertTrue("HC-V0930-VERSION-A1: workshop_version === 0.93.3",
-      platMan.workshop_version === "0.98.1");
+      platMan.workshop_version === "0.98.2");
     assertTrue("HC-V0930-VERSION-A2: blueprints[].cowork.version === 0.31.2",
-      platMan.blueprints.find(b => b.name === "cowork").version === "0.37.0");
+      platMan.blueprints.find(b => b.name === "cowork").version === "0.38.0");
     const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
     assertTrue("HC-V0930-VERSION-A3: package.json version === 0.93.3",
-      pkg.version === "0.98.1");
+      pkg.version === "0.98.2");
     const workshopSub = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "ranch/platform-subscription.json"), "utf8"));
     assertTrue("HC-V0930-VERSION-A4: workshop subscription cowork pin === 0.31.1",
-      workshopSub.blueprints.find(b => b.name === "cowork").version === "0.37.0");
+      workshopSub.blueprints.find(b => b.name === "cowork").version === "0.38.0");
   } catch (e) {
     assertTrue("HC-V0930-VERSION: pin lockstep contract", false, e && e.message);
   }
@@ -12300,15 +12300,15 @@ type: cowork-microscope
   try {
     const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
     assertTrue("HC-V0931-VERSION-D1: workshop_version === 0.93.3",
-      platMan.workshop_version === "0.98.1");
+      platMan.workshop_version === "0.98.2");
     assertTrue("HC-V0931-VERSION-D2: blueprints[].cowork.version === 0.31.2",
-      platMan.blueprints.find(b => b.name === "cowork").version === "0.37.0");
+      platMan.blueprints.find(b => b.name === "cowork").version === "0.38.0");
     const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
     assertTrue("HC-V0931-VERSION-D3: package.json version === 0.93.3",
-      pkg.version === "0.98.1");
+      pkg.version === "0.98.2");
     const coworkMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/cowork/manifest.json"), "utf8"));
     assertTrue("HC-V0931-VERSION-D4: cowork manifest.version === 0.31.1",
-      coworkMan.version === "0.37.0");
+      coworkMan.version === "0.38.0");
   } catch (e) {
     assertTrue("HC-V0931-VERSION: pin lockstep contract", false, e && e.message);
   }
