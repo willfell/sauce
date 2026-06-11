@@ -19,6 +19,8 @@
  */
 "use strict";
 
+const { _itemId } = require("./compose-feedback-capture-helper.js");
+
 const KNOWN_CADENCES = [
     "morning-briefing",
     "midday-tripwire",
@@ -47,6 +49,17 @@ const KNOWN_CALLOUT_TYPES = [
 ];
 
 const BLOCK_REQUIRED_FIELDS = ["kind", "callout_type", "title", "body_md"];
+
+// v0.98.1: kinds that should NOT receive ^item-<kind>-<7hex> block-ID anchors.
+// Memory log, semantic echoes, and untyped blocks are excluded — their body_md
+// is either prose (no discrete items) or a quote/echo cluster (not surfaced items).
+const SKIP_ITEM_ID_KINDS = new Set(["memory_log", "semantic_echoes", "semantic", ""]);
+function _shouldEmitItemId(block) {
+    if (!block || !block.kind) return false;
+    if (SKIP_ITEM_ID_KINDS.has(block.kind)) return false;
+    if (block.callout_type === "[!quote]") return false;
+    return true;
+}
 
 function _isNonEmptyString(value) {
     return typeof value === "string" && value.trim() !== "";
@@ -123,13 +136,40 @@ function _validateInput(input) {
     return null;
 }
 
-function _wrapCallout({ callout_type, title, body_md }) {
+function _wrapCallout({ callout_type, title, body_md, kind, items }) {
     // Strip trailing [ \t]+ on each line; preserve leading whitespace.
-    const bodyLines = String(body_md == null ? "" : body_md)
+    const rawLines = String(body_md == null ? "" : body_md)
         .split("\n")
         .map((l) => l.replace(/[ \t]+$/, ""));
+
+    // v0.98.1: when the block carries items[] and the kind is eligible for item-ID
+    // emission, annotate each item line in body_md with a deterministic
+    // `^item-<kind>-<7hex>` block-ID anchor (invisible in Obsidian reading mode;
+    // wikilink-targetable as [[note#^item-<kind>-<7hex>]] by Rail L ticks).
+    // Matching is done by substring: the first body_md line that contains
+    // item.text (or item.label) verbatim receives the anchor appended.
+    const annotatedLines = rawLines.slice();
+    const blockForGuard = { kind, callout_type };
+    if (Array.isArray(items) && items.length > 0 && _shouldEmitItemId(blockForGuard)) {
+        const claimed = new Set(); // prevent double-annotation
+        for (const item of items) {
+            const matchText = item.text || item.label || "";
+            if (!matchText) continue;
+            const canonicalId = item.id || matchText;
+            const anchor = `^${_itemId(kind, canonicalId)}`;
+            for (let i = 0; i < annotatedLines.length; i++) {
+                if (claimed.has(i)) continue;
+                if (annotatedLines[i].includes(matchText)) {
+                    annotatedLines[i] = `${annotatedLines[i]} ${anchor}`;
+                    claimed.add(i);
+                    break;
+                }
+            }
+        }
+    }
+
     // Blank line → bare ">"; non-blank → "> <content>".
-    const prefixed = bodyLines.map((l) => (l === "" ? ">" : `> ${l}`));
+    const prefixed = annotatedLines.map((l) => (l === "" ? ">" : `> ${l}`));
     // v0.98.0 synopsis-density contract: per-kind callouts default-collapsed
     // (`-` sigil) regardless of callout_type. Lead synopsis stays `+` (open)
     // but is composed upstream in synopsis_md; this wrapper only renders
@@ -464,16 +504,36 @@ function composeBody(input) {
     ) {
         body_md = injectDetectionCallout(body_md, input.pending_confirmations);
     }
-    // v0.96.0 Rail L: emit rating callout when learning enabled + kinds surfaced
-    if (input.learning_enabled !== false && Array.isArray(input.surfaced_kinds_for_rating)) {
-        const ratingCallout = composeRatingCallout({
-            cadence: input.cadence,
-            day: input.day || (input.frontmatter && input.frontmatter.day) || new Date().toISOString().slice(0, 10),
-            surfaced_kinds: input.surfaced_kinds_for_rating,
-            prior_state: input.prior_rating_state || null,
-        });
-        if (ratingCallout) {
-            body_md = body_md.trimEnd() + "\n\n" + ratingCallout + "\n";
+    // v0.98.1: Rail L cadence-based dispatch.
+    // EOD-only → composeFeedbackCapture (rich shape with per-item ticks + knob + free-text)
+    // Other 4 cadences → composeRatingCallout (v0.96.0 kind-checkbox shape)
+    if (input.learning_enabled !== false) {
+        if (
+            input.cadence === "eod-review"
+            && input.surfaced_items_by_kind
+            && typeof input.surfaced_items_by_kind === "object"
+        ) {
+            const { composeFeedbackCapture } = require("./compose-feedback-capture-helper.js");
+            const feedbackResult = composeFeedbackCapture({
+                cadence: input.cadence,
+                day: input.day || (input.frontmatter && input.frontmatter.day) || new Date().toISOString().slice(0, 10),
+                surfaced_items_by_kind: input.surfaced_items_by_kind,
+                prior_md: input.prior_md || null,
+                knob_positions: ["less", "same", "more"],
+            });
+            if (feedbackResult && feedbackResult.rail_md) {
+                body_md = body_md.trimEnd() + "\n\n" + feedbackResult.rail_md + "\n";
+            }
+        } else if (Array.isArray(input.surfaced_kinds_for_rating)) {
+            const ratingCallout = composeRatingCallout({
+                cadence: input.cadence,
+                day: input.day || (input.frontmatter && input.frontmatter.day) || new Date().toISOString().slice(0, 10),
+                surfaced_kinds: input.surfaced_kinds_for_rating,
+                prior_state: input.prior_rating_state || null,
+            });
+            if (ratingCallout) {
+                body_md = body_md.trimEnd() + "\n\n" + ratingCallout + "\n";
+            }
         }
     }
     // v0.96.0 upgrade notice — one-shot per engagement

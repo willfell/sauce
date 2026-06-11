@@ -158,6 +158,10 @@ function evaluateWarmup(per_kind_state, days_since_first, opts) {
 // Sentinel comment may live inside a callout (prefixed `> `) or as a bare HTML
 // comment line. Match it anywhere in the markdown.
 const RATING_SENTINEL_RX = /<!--\s*cowork:rating-block\s+schema=([\d.]+)\s+cadence=([\w-]+)\s+day=(\d{4}-\d{2}-\d{2})\s*-->/;
+// v0.98.1: feedback-capture sentinel for the EOD-only rich Rail L shape.
+// Lives alongside (not replacing) RATING_SENTINEL_RX — other 4 cadences
+// continue to use the rating-block sentinel.
+const FEEDBACK_SENTINEL_RX = /<!--\s*cowork:feedback-capture\s+v=(\d+)\s*-->/;
 // Callout checkbox line — tolerates leading `> ` from blockquote nesting.
 const CHECKBOX_LINE_RX = /^>\s*-\s*\[([ xX])\]\s+(.+?)\s*$/;
 // Heading line of the rating callout.
@@ -195,6 +199,76 @@ function parseRatingCallout(markdown) {
     day: sentinelMatch[3],
     observations,
   };
+}
+
+// v0.98.1: Parse the EOD-only feedback-capture Rail L.
+//
+// Returns:
+//   {
+//     sentinel_version: "v=1" | null,
+//     ticks:    { [itemId: string]: boolean },
+//     knobs:    { [kind: string]: "less" | "same" | "more" | "ambiguous" },
+//     free_text: string,        // raw multiline prose; `> ` callout prefix stripped
+//   }
+//
+// Returns the all-empty result when the markdown doesn't carry the
+// `cowork:feedback-capture v=1` sentinel — graceful degradation, never throws.
+//
+// Caller (v0.98.2 reconciler) is responsible for treating "ambiguous" knob
+// positions as no-signal.
+function parseFeedbackCapture(markdown) {
+  const empty = { sentinel_version: null, ticks: {}, knobs: {}, free_text: "" };
+  if (!markdown || typeof markdown !== "string") return empty;
+  const sentinelMatch = markdown.match(FEEDBACK_SENTINEL_RX);
+  if (!sentinelMatch) return empty;
+
+  const result = {
+    sentinel_version: `v=${sentinelMatch[1]}`,
+    ticks: {},
+    knobs: {},
+    free_text: "",
+  };
+
+  // Tick lines: `> > - [x] [[#^item-<kind>-<hash>|<label>]]`
+  const tickRx = /^>\s*>\s*-\s*\[([ xX])\]\s*\[\[#\^(item-[a-z]+-[0-9a-f]{7})\|/gm;
+  let m;
+  while ((m = tickRx.exec(markdown)) !== null) {
+    result.ticks[m[2]] = m[1].toLowerCase() === "x";
+  }
+
+  // Knob lines: `> > **Fire <kindLabel>:** `[ ] less` `[ ] same` `[ ] more``
+  const knobLineRx = /^>\s*>\s*\*\*Fire (\w+):\*\*\s*`\[([ xX])\]\s*less`\s*`\[([ xX])\]\s*same`\s*`\[([ xX])\]\s*more`/gm;
+  while ((m = knobLineRx.exec(markdown)) !== null) {
+    const kind = m[1].toLowerCase();
+    const less = m[2].toLowerCase() === "x";
+    const same = m[3].toLowerCase() === "x";
+    const more = m[4].toLowerCase() === "x";
+    const xCount = (less ? 1 : 0) + (same ? 1 : 0) + (more ? 1 : 0);
+    if (xCount > 1) {
+      result.knobs[kind] = "ambiguous";
+    } else if (xCount === 1) {
+      result.knobs[kind] = less ? "less" : (same ? "same" : "more");
+    } else {
+      // No selection — kind present but no signal. Omit from knobs map.
+    }
+  }
+
+  // Free-text: content between ```feedback ... ``` fences. Tolerant of
+  // both bare fences and `> `-prefixed fences (S1.2 adjustment).
+  const fenceRx = /^>?\s*```feedback\s*$([\s\S]*?)^>?\s*```\s*$/m;
+  const fenceMatch = markdown.match(fenceRx);
+  if (fenceMatch) {
+    const raw = fenceMatch[1];
+    const stripped = raw
+      .split("\n")
+      .map((line) => line.replace(/^>\s?/, ""))
+      .join("\n")
+      .replace(/^\s*\n+/, "")
+      .replace(/\n+\s*$/, "");
+    result.free_text = stripped;
+  }
+
+  return result;
 }
 
 function scanAtomicNotes(opts) {
@@ -263,4 +337,6 @@ module.exports = {
   _normalizeLearnedWeights,
   _clamp,
   _round,
+  parseFeedbackCapture,         // v0.98.1
+  FEEDBACK_SENTINEL_RX,         // v0.98.1
 };

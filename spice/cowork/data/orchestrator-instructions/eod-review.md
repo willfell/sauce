@@ -181,16 +181,36 @@ this is unexpected.`
     `cowork-eod-review`). Capture `{ body_md, sidecar_json, status }`. On
     `failed:*`, emit Notice and exit non-zero.
 
-### Step 4: Rating callout (Rail L — idempotent re-fire)
+    **items[] contract (EOD only).** For each surfaced per-kind block in
+    `ordered_blocks`, include an `items[]` array of `{id, label, text}` objects where:
+    - `id` is the canonical identifier (channel:thread for chat, repo#PR for github, etc.)
+    - `label` is the user-visible string for the Rail L wikilink target
+    - `text` is the rendered line text (typically same as label)
+
+    compose-body's per-kind callout assembly will append `^item-<kind>-<7hex>` block-ID
+    anchors to each item line when `items[]` is present (deterministic SHA-1 hash of
+    `<kind>:<id>` — see `compose-feedback-capture-helper.js`). Also compute
+    `surfaced_items_by_kind` (a map of kind → items[]) and pass it alongside
+    `ordered_blocks` in the composeBody payload — this is what drives the EOD Rail L
+    feedback-capture dispatch in Step 4.
+
+### Step 4: Feedback-capture callout (Rail L — v0.98.1 expanded shape)
 
 4a. Compute `output_path = "spice/cowork/daily/{{$today_dirpath}}/eod-review.md"`.
-    Parse prior `cowork:rating-block` sentinel via `parseRatingCallout(prior_md)` when
-    file exists; build `prior_rating_state` map.
+    Parse prior `cowork:feedback-capture v=1` sentinel via `parseFeedbackCapture(prior_md)`
+    when file exists; build `prior_feedback_state` map (per-item ticks, knob positions,
+    free-text). If only the legacy `cowork:rating-block` sentinel exists (pre-v0.98.1
+    EOD), start fresh — no migration of kind-level ticks to per-item ticks.
 
-4b. Compute `surfaced_kinds_for_rating` per the same rule as other cadences.
+4b. Compute `surfaced_items_by_kind` (richer than `surfaced_kinds_for_rating` — per-kind
+    list of items with their canonical identifiers for `^item-<kind>-<sha>` block-ID
+    hashing). Passed as `input.surfaced_items_by_kind` to composeBody alongside the
+    existing fields.
 
-4c. composeBody emits the rating callout per `{{shared.rating_callout_template}}` when
-    eligible.
+4c. composeBody emits the feedback-capture callout per `{{shared.feedback_capture_template}}`
+    when cadence is `eod-review` AND `surfaced_items_by_kind` is non-empty. Behind the
+    scenes: composeBody dispatches to `composeFeedbackCapture` (new helper) for EOD;
+    the other 4 cadences continue using `composeRatingCallout` unchanged.
 
 ### Step 5: Detection callout (Rail D — new-MCP surface)
 

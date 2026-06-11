@@ -4,6 +4,43 @@ This file archives the per-cycle status snapshots that previously lived in `CLAU
 
 ---
 
+### v0.98.1 — questionnaire expansion + free-text capture (2026-06-11 close)
+
+**SHIPPED 2026-06-11.** See `Docs/plans/2026-06-11-v0.98.1-questionnaire-capture-result.md` for the full narrative. Commits S0..S3: `3c8bafe` (S0 baseline) → `caadddf` (S1.0 pre-design audit) → `ecb0cbe` (S1.1 RED) → `40fe750` (S1.2 NEW helper + SKILL.md + fixtures) → `bf7326c` (S1.3 block-IDs) → `4008922` (S1.4 parseFeedbackCapture) → `bf67bd4` (S1.5 cadence dispatch + OI swap) → `0ece9ef` (S1.6 sidecar schema 1.1.0) → `ff8fe6c` (S1.7 version bumps + files[] + Safeguard 3) → `f573c6f` (S1.7.1 SKILL.md reconciliation) → S3 cycle-close this commit.
+
+**Codename:** `questionnaire-capture`. Workshop 0.98.0 → 0.98.1; cowork 0.36.0 → 0.37.0; eod-review sidecar schema 1.0.0 → 1.1.0 (additive); scheduled-job-contract UNCHANGED at 0.35.1.
+
+**Origin.** User direction captured 2026-06-10 post-v0.98.0 close: "just saying thumbs up isn't enough. what if we added a section for didn't like? what if there was a section where i could provide feedback, and another job took what i liked, what i didn't like, my feedback, then updated the relevant files so that all scheduled jobs would then adjust the next day?" v0.98.1 ships the capture surface; v0.98.2 closes the loop with ingest.
+
+**Architectural posture: deterministic-helpers-for-shape, OI-prose-for-voice.** Item-IDs are computed in `compose-body-helper.js` (hash-stable across re-fires); the Rail L body is built in the NEW `compose-feedback-capture-helper.js`; the sentinel parse lives in `learn-from-checks-helper.js`. The eod-review OI Step 4 swaps one template invocation for one helper call. No LLM-driven structural computation (lesson v0.98.0 §2 — LLM-rendered shape contracts drift; deterministic helpers don't). The first cycle that EXPLICITLY guards user-authored cowork content via Safeguard 3 automation (`scripts/check-files-forbidden-paths.js` wired into `release:preflight` — fails CI if any `files[]` dest path matches user-owned path patterns).
+
+**New EOD Rail L shape.** Replaces the coarse kind-checkbox rating block with: stable per-item `^item-<kind>-<7-char-sha>` block-IDs emitted by compose-body; per-item ticks pointing at those block-IDs via wikilinks (`[[#^item-<kind>-<sha>|<label>]]`); per-kind 3-position frequency knobs (`less / same / more`); tagged fenced `` ```feedback…``` `` free-text block; `<!-- cowork:feedback-capture v=1 -->` sentinel. EOD is the ONLY cadence with the new shape. Morning-briefing / midday-tripwire / weekly-review / monthly-review keep `{{shared.rating_callout_template}}` unchanged.
+
+**Sidecar schema additive (1.0.0 → 1.1.0).** `eod-review@1.0.0.json` (filename unchanged per workshop convention) gains optional `feedback_capture` field: `{ sentinel_version, item_count, kinds_with_knobs[], ambiguous_knobs[] }`. Pre-v0.98.1 EOD sidecars (without the field) still validate. Purpose: v0.98.2 ingest fast-path "is there feedback to parse?" check without re-reading the markdown body.
+
+**12 new HC sub-asserts** (HC-V0981-FEEDBACK-A1..A8 + HC-V0981-PARSEFEEDBACK-A1..A4): sentinel emission + per-kind sub-callouts + knob rows + free-text fence + re-fire tick/knob/free-text preservation + empty-day minimal Rail L + block-ID format regex + ambiguous-knob sidecar flag + parseFeedbackCapture tick map + knob map + free-text extraction + graceful null sentinel.
+
+**Per-cycle VERSION-pin sweep** (v0.93.3 lesson 5.3): ~25 hardcoded `"0.98.0"` / `"0.36.0"` assertion values bumped to `"0.98.1"` / `"0.37.0"` across HC-V0891 / V0900 / V0901 / V0920 / V0930 / V0931 VERSION-* + MANIFEST blocks (~22 in `run-helper-cases.js`; ~3 in `run-cowork-smoke.js`). `ranch/platform-subscription.json` workshop + cowork lockstep.
+
+**Final harness:** helper-cases **2313 / 0** (+12); cowork-smoke 954 / 0; claude-surface 215 / 0 (+1 — new compose-feedback-capture shim); integration-smoke 36 / 0; cli 132 / 0; bootstrap 85 / 0. Preflight `version-sync ok: 0.98.1` ALL GREEN. Safeguard 3 forbidden-paths check GREEN.
+
+**Action required post-deploy.** `sauce update --bump-pins` per consumer vault (materializes: NEW `compose-feedback-capture-helper.js` + NEW `SKILL.md` shim + updated `compose-body-helper.js` / `learn-from-checks-helper.js` / `write-atomic-note-helper.js` + updated `eod-review.md` OI + `_shared-clauses.md` `feedback_capture_template` block + `eod-review@1.0.0.json` schema 1.1.0). THEN `/cowork sync-scheduled-jobs` once per vault from claude.ai's Cowork UI — Rail A pushes new wrapper bodies (contract version STAYS at 0.35.1; wrapper template substitution refreshes against updated orchestrator-instructions sources). Pre-deploy snapshot recommended per `commands/install.md` § Upgrading Safeguard 1.
+
+**6 lessons.**
+
+1. **Bare fence shape for feedback block.** Design sketched `> `-prefixed fences; implementer landed bare fences + made `_parsePrior` tolerant of both. Functional/parse equivalent; visual UX deferred to v0.98.1.x IF deployed briefs show poor callout containment.
+2. **Item-ID emission opt-in via `block.items[]`.** Existing compose-body block shape had no structured items. Implementer made item-ID emission opt-in when `block.items[]` is present; other 8 fixtures stayed byte-identical. Cleaner than the plan's "extend all per-kind callouts" approach.
+3. **S1.5 scope expansion — compose-body cadence dispatch.** Plan's S1.5 covered OI prose only. Production routing required cadence dispatch in `compose-body-helper.js` (`cadence === "eod-review"` + `surfaced_items_by_kind` → `composeFeedbackCapture`; else `composeRatingCallout`). The OI change and the helper routing change are a single atomic unit — plan must treat them as such.
+4. **SKILL.md two-location reconciliation.** Plan's S1.2 wrote runtime path directly (wrong source-of-truth). Blueprint source was empty until S1.7; S1.7.1 reconciled. New SKILL.md content ALWAYS belongs in the blueprint source first; runtime is derived.
+5. **ranch/platform-subscription.json blueprints[].cowork.version pin missed.** S1.7 jq command missed this pin; 3 tests failed. Future cycles must include this in the VERSION-pin sweep jq automation checklist.
+6. **Scripts/ vs scripts/ gitignore conflict.** macOS case-insensitive filesystem matched `/scripts/` gitignore entry against `/Scripts/`, hiding the new guard. Verify `git status -s` immediately after creating files under any path that shares a name-pattern with a gitignore entry.
+
+**Carry-forward.** v0.98.1.x PATCH candidates: bare-fence visual UX (if observed on deploy); per-item DOWNVOTE row (per user vision); integration fixture for composeBody cadence dispatch (untested end-to-end). v0.98.2 closes the feedback loop: `cowork:ingest-feedback` sub-skill (Sonnet 4.6 pass) + structured deltas to `learned_weights` (schema 2 → 3) + microscopes / what_matters with audit trail; voice changes PROPOSED, never auto-applied. 5 open questions for v0.98.2 brainstorm (see result doc § Carry-forward).
+
+See `Docs/plans/2026-06-11-v0.98.1-questionnaire-capture-{design,plan,result}.md`.
+
+---
+
 ### v0.98.0 — synopsis-density rewrite (2026-06-10 close)
 
 **Codename:** `synopsis-density`. Workshop 0.97.4 → 0.98.0; cowork 0.35.4 → 0.36.0; contract 0.35.1 (UNCHANGED).
