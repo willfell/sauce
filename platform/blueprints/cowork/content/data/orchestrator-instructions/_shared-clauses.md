@@ -52,6 +52,24 @@ created_at: <NOW in {{$timezone}} as ISO timestamp>
 
 (Where `{{$rating_kind_lines}}` is computed at compose time per surfaced kind: e.g. `> - [ ] Calendar\n> - [ ] Email\n...`. If a prior file exists for this day, parse its existing cowork:rating-block sentinel and preserve `[x]` state per kind.)
 
+## feedback_capture_template
+
+```
+> [!todo]+ Was today useful?
+> Tick items that mattered. Set per-kind frequency. Type prose for nuance. Tomorrow's brief adjusts overnight.
+> <!-- cowork:feedback-capture v=1 -->
+>
+{{$feedback_capture_per_kind_blocks}}
+>
+> ### Free-text feedback
+>
+> ```feedback
+> {{$feedback_capture_free_text_or_placeholder}}
+> ```
+```
+
+(Used by `cowork:eod-review` only — v0.98.1+. The other 4 cadences continue using `rating_callout_template`. `{{$feedback_capture_per_kind_blocks}}` is computed by `composeFeedbackCapture(opts)` per surfaced kind: one `> > [!summary]- <Kind> — items` sub-callout with per-item ticks, knob row, and a blank `>` separator between kinds. `{{$feedback_capture_free_text_or_placeholder}}` is either the prior fenced content carried forward across re-fires or a placeholder. On v=1 sentinel detected in prior file, preserve `[x]` state per item-ID, per knob position, and free-text verbatim.)
+
 ## detection_callout_template
 
 ```

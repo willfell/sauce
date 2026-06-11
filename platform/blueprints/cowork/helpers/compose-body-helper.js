@@ -504,16 +504,36 @@ function composeBody(input) {
     ) {
         body_md = injectDetectionCallout(body_md, input.pending_confirmations);
     }
-    // v0.96.0 Rail L: emit rating callout when learning enabled + kinds surfaced
-    if (input.learning_enabled !== false && Array.isArray(input.surfaced_kinds_for_rating)) {
-        const ratingCallout = composeRatingCallout({
-            cadence: input.cadence,
-            day: input.day || (input.frontmatter && input.frontmatter.day) || new Date().toISOString().slice(0, 10),
-            surfaced_kinds: input.surfaced_kinds_for_rating,
-            prior_state: input.prior_rating_state || null,
-        });
-        if (ratingCallout) {
-            body_md = body_md.trimEnd() + "\n\n" + ratingCallout + "\n";
+    // v0.98.1: Rail L cadence-based dispatch.
+    // EOD-only → composeFeedbackCapture (rich shape with per-item ticks + knob + free-text)
+    // Other 4 cadences → composeRatingCallout (v0.96.0 kind-checkbox shape)
+    if (input.learning_enabled !== false) {
+        if (
+            input.cadence === "eod-review"
+            && input.surfaced_items_by_kind
+            && typeof input.surfaced_items_by_kind === "object"
+        ) {
+            const { composeFeedbackCapture } = require("./compose-feedback-capture-helper.js");
+            const feedbackResult = composeFeedbackCapture({
+                cadence: input.cadence,
+                day: input.day || (input.frontmatter && input.frontmatter.day) || new Date().toISOString().slice(0, 10),
+                surfaced_items_by_kind: input.surfaced_items_by_kind,
+                prior_md: input.prior_md || null,
+                knob_positions: ["less", "same", "more"],
+            });
+            if (feedbackResult && feedbackResult.rail_md) {
+                body_md = body_md.trimEnd() + "\n\n" + feedbackResult.rail_md + "\n";
+            }
+        } else if (Array.isArray(input.surfaced_kinds_for_rating)) {
+            const ratingCallout = composeRatingCallout({
+                cadence: input.cadence,
+                day: input.day || (input.frontmatter && input.frontmatter.day) || new Date().toISOString().slice(0, 10),
+                surfaced_kinds: input.surfaced_kinds_for_rating,
+                prior_state: input.prior_rating_state || null,
+            });
+            if (ratingCallout) {
+                body_md = body_md.trimEnd() + "\n\n" + ratingCallout + "\n";
+            }
         }
     }
     // v0.96.0 upgrade notice — one-shot per engagement
