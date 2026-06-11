@@ -1,0 +1,54 @@
+{
+  "cadence": "eod-review",
+  "nav_buttons_block": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```",
+  "synopsis_md": "> [!info]+ What landed today\n> Document-registry namespace migration moved forward — AccurAPI PR merged, Argo project created. Two GitHub deployment reviews approved (mcp-mesh, ontology-api-gateway). CDC scope handoff confirmed with **[[Ted Grzesik]]** for next week. Hawaii CDN cutover fully closed.",
+  "memory_callouts": {
+    "yesterday_md": "> [!quote]- Yesterday's last memory\n> Closed yesterday on the Hawaii CDN PR approval and the document-registry namespace migration kickoff with **[[Ben Tanner]]**. Last memory tick: \"AccurAPI PR ready for Ben review.\"",
+    "overnight_md": "> [!example]- Overnight tick\n> Overnight Teams thread confirmed Redis cluster nodes discovered (Ben: \"there's the 3rd node\"). **[[Stale Veipe]]** validated Redis fails-open behavior. Matt confirmed Redis data loss acceptable on migration.",
+    "echoes_md": "> [!quote]- Echoes from your record\n> Echo cluster: document-registry namespace migration appears across 5 of last 7 daily notes. CDC pipeline production work (708152) recurs in 3 of last 5 notes.",
+    "backlink_md": "> [!quote]- Memory log\n> Today's memory: [[spice/cowork/memory/accuris/2026/06-June/2026-06-05/memory.md|Memory log — 2026-06-05]]"
+  },
+  "ordered_blocks": [
+    {
+      "kind": "chat",
+      "callout_type": "info",
+      "title": "Chat (Teams)",
+      "body_md": "Teams volume moderate today — 42 messages. Most activity in **[[Ben Tanner]]** DM (AccurAPI PR review, Redis cluster validation) and project-library channel.",
+      "items": [{ "id": "chat:c1:t1", "label": "Zhenzhen PR #353 thread", "text": "Zhenzhen PR #353 thread" }]
+    },
+    {
+      "kind": "email",
+      "callout_type": "quote",
+      "title": "Email triage",
+      "body_md": "- **GitHub deployment review — mcp-mesh production** · APPROVED at 1:42 PM\n- **GitHub deployment review — ontology-api-gateway dev-pr** · APPROVED at 1:43 PM\n- **New Relic user approval — Sandesh Shenoy Beloor** · APPROVED at 1:45 PM",
+      "items": [
+        { "id": "email:mcp-mesh-deploy-approve", "text": "**GitHub deployment review — mcp-mesh production** · APPROVED at 1:42 PM", "label": "mcp-mesh deploy approved" },
+        { "id": "email:ontology-api-deploy-approve", "text": "**GitHub deployment review — ontology-api-gateway dev-pr** · APPROVED at 1:43 PM", "label": "ontology-api-gateway deploy approved" },
+        { "id": "email:new-relic-shenoy-approve", "text": "**New Relic user approval — Sandesh Shenoy Beloor** · APPROVED at 1:45 PM", "label": "New Relic user Sandesh Shenoy Beloor approved" }
+      ]
+    },
+    {
+      "kind": "github",
+      "callout_type": "note",
+      "title": "GitHub",
+      "body_md": "**Merged today:**\n- **accurapi.ingress-api.routes** — Merged by **[[Ben Tanner]]** at 3:11 PM\n- **content-registry.argocd #47** — Merged by Will at 4:05 PM\n- **hawaii.hawaii-system.delivery-platform-cdn #322** — Already merged yesterday",
+      "items": [
+        { "id": "github:accurapi-ingress-api-routes-merge", "text": "**accurapi.ingress-api.routes** — Merged by **[[Ben Tanner]]** at 3:11 PM", "label": "accurapi.ingress-api.routes merged" },
+        { "id": "github:content-registry-argocd-47-merge", "text": "**content-registry.argocd #47** — Merged by Will at 4:05 PM", "label": "content-registry.argocd #47 merged" },
+        { "id": "github:hawaii-cdn-322-merge", "text": "**hawaii.hawaii-system.delivery-platform-cdn #322** — Already merged yesterday", "label": "hawaii CDN #322 merged" }
+      ]
+    },
+    {
+      "kind": "ado",
+      "callout_type": "example",
+      "title": "ADO (board status)",
+      "body_md": "Completed today:\n- **[707565](https://dev.azure.com/pdd-ihsmarkit/_apis/wit/workItems/707565)** Centralized Pipeline Rules IaC — moved to Done\n- **[708212](https://dev.azure.com/pdd-ihsmarkit/_apis/wit/workItems/708212)** Remove Linkerd from prod — still Active, blocked on review",
+      "items": [
+        { "id": "ado:707565-centralized-pipeline-rules", "text": "**[707565](https://dev.azure.com/pdd-ihsmarkit/_apis/wit/workItems/707565)** Centralized Pipeline Rules IaC — moved to Done", "label": "707565 Centralized Pipeline Rules IaC" },
+        { "id": "ado:708212-remove-linkerd-prod", "text": "**[708212](https://dev.azure.com/pdd-ihsmarkit/_apis/wit/workItems/708212)** Remove Linkerd from prod — still Active, blocked on review", "label": "708212 Remove Linkerd from prod" }
+      ]
+    }
+  ],
+  "surfaced_items_by_kind": { "chat": [{ "id": "chat:c1:t1", "label": "Zhenzhen PR #353 thread" }] },
+  "engagement_type_blocks": []
+}

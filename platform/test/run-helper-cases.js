@@ -8447,7 +8447,7 @@ async function caseV0981FeedbackA1() {
       knob_positions: ["less", "same", "more"],
     });
     const hasHeader = /> \[!todo\]\+ Was today useful\?/.test(rail.rail_md);
-    const hasSentinel = /<!-- cowork:feedback-capture v=1 -->/.test(rail.rail_md);
+    const hasSentinel = /<!-- cowork:feedback-capture v=2 -->/.test(rail.rail_md);
     assertTrue(
       "HC-V0981-FEEDBACK-A1: composeFeedbackCapture emits `> [!todo]+ Was today useful?` lead AND `<!-- cowork:feedback-capture v=1 -->` sentinel within the callout body",
       hasHeader && hasSentinel
@@ -8583,7 +8583,7 @@ async function caseV0981FeedbackA6() {
       prior_md: null,
       knob_positions: ["less", "same", "more"],
     });
-    const hasSentinel = /<!-- cowork:feedback-capture v=1 -->/.test(rail.rail_md);
+    const hasSentinel = /<!-- cowork:feedback-capture v=2 -->/.test(rail.rail_md);
     const hasFreeText = /```feedback\b/.test(rail.rail_md);
     const hasNoPerKind = !/\[!summary\]-/.test(rail.rail_md);
     const hasNoKnob = !/\*\*Fire /.test(rail.rail_md);
@@ -11722,6 +11722,10 @@ type: cowork-microscope
   _runComposeCadenceFixture("HC-V0920-COMPOSE-EOD", "case-eod-review");
   _runComposeCadenceFixture("HC-V0920-COMPOSE-WR", "case-weekly-review");
   _runComposeCadenceFixture("HC-V0920-COMPOSE-MR", "case-monthly-review");
+
+  // v0.98.2 — end-to-end cadence-dispatch fixture (v0.98.1 carry-forward):
+  // compose-body → eod dispatch → composeFeedbackCapture v=2 rail in body_md.
+  _runComposeCadenceFixture("HC-V0982-COMPOSE-EODITEMS", "case-eod-review-with-items");
 
   // Edge: empty memory
   console.log(`\n--- Case HC-V0920-COMPOSE-EDGE-EM: empty memory_callouts → cluster skipped cleanly ---`);

@@ -9,10 +9,10 @@
 > > Didn't like:
 > > - [ ] [[#^item-chat-10f069a|Zhenzhen PR #353 thread]]
 > >
-> > **Fire chat:** `[ ] less` `[ ] same` `[x] more`
+> > **Fire chat:** `[x] less` `[ ] same` `[ ] more`
 >
 > ### Free-text feedback
 >
 ```feedback
-Diana's emails are noise.
+carried prose
 ```
