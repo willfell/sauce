@@ -1,0 +1,10 @@
+{
+  "case_name": "case-eod-rerun-with-prior",
+  "description": "Re-fire with v=1 sentinel prior_md; preserves [x] tick + knob position + free-text content",
+  "asserts": [
+    { "type": "rail_md_regex", "pattern": "> > - \\[x\\] \\[\\[#\\^item-chat-[0-9a-f]{7}\\|Zhenzhen PR #353 thread\\]\\]" },
+    { "type": "rail_md_regex", "pattern": "\\*\\*Fire chat:\\*\\* `\\[ \\] less` `\\[ \\] same` `\\[x\\] more`" },
+    { "type": "rail_md_regex", "pattern": "Diana's emails are noise\\." },
+    { "type": "sidecar_field", "path": "sentinel_version", "value": "v=1" }
+  ]
+}

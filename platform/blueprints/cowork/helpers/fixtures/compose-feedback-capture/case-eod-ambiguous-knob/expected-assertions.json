@@ -1,0 +1,8 @@
+{
+  "case_name": "case-eod-ambiguous-knob",
+  "description": "Prior has multiple [x] on chat knob row (user transitioning); preserve UI state + flag sidecar",
+  "asserts": [
+    { "type": "rail_md_regex", "pattern": "\\*\\*Fire chat:\\*\\* `\\[x\\] less` `\\[ \\] same` `\\[x\\] more`" },
+    { "type": "sidecar_field_array_contains", "path": "ambiguous_knobs", "value": "chat" }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "case_name": "case-eod-empty-day",
+  "description": "Empty-day path: no surfaced items; Rail L emits lead + sentinel + free-text fence only",
+  "asserts": [
+    { "type": "rail_md_regex", "pattern": "<!-- cowork:feedback-capture v=1 -->" },
+    { "type": "rail_md_regex", "pattern": "```feedback" },
+    { "type": "rail_md_not_regex", "pattern": "\\[!summary\\]-" },
+    { "type": "rail_md_not_regex", "pattern": "\\*\\*Fire " },
+    { "type": "sidecar_field", "path": "item_count", "value": 0 },
+    { "type": "sidecar_field_array_length", "path": "kinds_with_knobs", "value": 0 }
+  ]
+}

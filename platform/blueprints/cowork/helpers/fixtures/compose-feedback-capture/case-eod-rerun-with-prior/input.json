@@ -1,0 +1,11 @@
+{
+  "cadence": "eod-review",
+  "day": "2026-06-11",
+  "surfaced_items_by_kind": {
+    "chat": [
+      { "id": "chat:c1:t1", "label": "Zhenzhen PR #353 thread" }
+    ]
+  },
+  "prior_md": "> [!todo]+ Was today useful?\n> Tick items that mattered. Set per-kind frequency. Type prose for nuance. Tomorrow's brief adjusts overnight.\n> <!-- cowork:feedback-capture v=1 -->\n>\n> > [!summary]- Chat — items\n> > - [x] [[#^item-chat-10f069a|Zhenzhen PR #353 thread]]\n> >\n> > **Fire chat:** `[ ] less` `[ ] same` `[x] more`\n>\n> ### Free-text feedback\n>\n```feedback\nDiana's emails are noise.\n```\n",
+  "knob_positions": ["less", "same", "more"]
+}
