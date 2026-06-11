@@ -1,0 +1,29 @@
+{
+  "entity_deltas": [
+    {
+      "kind": "chat",
+      "entity_type": "per_person",
+      "entity": "Zhenzhen Su",
+      "delta": 0.05,
+      "source": "mattered ^item-chat-a7b3c9d \"Zhenzhen PR #353 thread\""
+    },
+    {
+      "kind": "github",
+      "entity_type": "per_topic",
+      "entity": "org/repo",
+      "delta": -0.1,
+      "source": "didn't-like ^item-github-d0e6f20 \"PR #353 awaiting review\""
+    }
+  ],
+  "kind_observations": [
+    {
+      "kind": "chat",
+      "ticked": true
+    },
+    {
+      "kind": "github",
+      "ticked": false
+    }
+  ],
+  "knob_deltas": []
+}

@@ -1,0 +1,15 @@
+{
+  "parsed": {
+    "sentinel_version": "v=2",
+    "ticks": { "item-chat-a7b3c9d": true },
+    "downvotes": { "item-github-d0e6f20": true },
+    "knobs": {},
+    "free_text": ""
+  },
+  "registry": [
+    { "item_id": "item-chat-a7b3c9d", "kind": "chat", "identifier": "person:Zhenzhen Su", "label": "Zhenzhen PR #353 thread" },
+    { "item_id": "item-chat-b8c4d0e", "kind": "chat", "identifier": "c1:t9", "label": "Dev Enablement Channels thread" },
+    { "item_id": "item-github-d0e6f20", "kind": "github", "identifier": "org/repo#353", "label": "PR #353 awaiting review" }
+  ],
+  "ambiguous_items": []
+}

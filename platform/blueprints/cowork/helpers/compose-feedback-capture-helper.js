@@ -45,6 +45,7 @@ function _itemId(kind, identifier) {
   return `item-${kind}-${hash}`;
 }
 
+// Mirrored in learn-from-checks-helper.js::parseFeedbackCapture — keep the section state machines in sync.
 function _parsePrior(priorMd) {
   const result = {
     ticks: {},

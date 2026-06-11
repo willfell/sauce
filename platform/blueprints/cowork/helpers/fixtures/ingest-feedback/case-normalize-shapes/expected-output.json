@@ -1,0 +1,87 @@
+[
+  {
+    "schema_version": 3,
+    "engagements": {
+      "headspace": {
+        "per_kind": {
+          "chat": {
+            "weight": 0.991,
+            "ticks": 2,
+            "skips": 1,
+            "warmup": true,
+            "per_person": {},
+            "per_channel": {},
+            "per_topic": {}
+          }
+        },
+        "totals": {
+          "notes_scanned": 4,
+          "notes_with_any_tick": 0,
+          "scanned_days": [
+            "2026-06-10"
+          ],
+          "feedback_ingested_days": [],
+          "warmup_until": null
+        }
+      }
+    }
+  },
+  {
+    "schema_version": 3,
+    "engagements": {
+      "accuris": {
+        "per_kind": {},
+        "totals": {
+          "notes_scanned": 3,
+          "notes_with_any_tick": 0,
+          "scanned_days": [],
+          "feedback_ingested_days": [],
+          "warmup_until": null
+        }
+      }
+    }
+  },
+  {
+    "schema_version": 3,
+    "engagements": {
+      "headspace": {
+        "per_kind": {},
+        "totals": {
+          "notes_scanned": 0,
+          "notes_with_any_tick": 0,
+          "scanned_days": [],
+          "feedback_ingested_days": [],
+          "warmup_until": null
+        }
+      }
+    }
+  },
+  {
+    "schema_version": 3,
+    "engagements": {
+      "headspace": {
+        "per_kind": {
+          "chat": {
+            "weight": 1,
+            "per_person": {
+              "X": {
+                "weight": 1.05
+              }
+            },
+            "per_channel": {},
+            "per_topic": {}
+          }
+        },
+        "totals": {
+          "notes_scanned": 0,
+          "notes_with_any_tick": 0,
+          "scanned_days": [],
+          "feedback_ingested_days": [
+            "2026-06-12"
+          ],
+          "warmup_until": null
+        }
+      }
+    }
+  }
+]

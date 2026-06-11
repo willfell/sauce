@@ -225,6 +225,7 @@ function parseRatingCallout(markdown) {
 //
 // Caller (v0.98.2 reconciler) is responsible for treating "ambiguous" knob
 // positions as no-signal.
+// Mirrored in compose-feedback-capture-helper.js::_parsePrior — keep the section state machines in sync.
 function parseFeedbackCapture(markdown) {
   const empty = { sentinel_version: null, ticks: {}, downvotes: {}, knobs: {}, free_text: "" };
   if (!markdown || typeof markdown !== "string") return empty;

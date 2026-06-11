@@ -1,0 +1,44 @@
+[
+  {
+    "schema_version": 2,
+    "engagements": {
+      "headspace": {
+        "per_kind": {
+          "chat": { "weight": 0.991, "ticks": 2, "skips": 1, "warmup": true }
+        },
+        "totals": { "notes_scanned": 4, "scanned_days": ["2026-06-10"] }
+      }
+    }
+  },
+  {
+    "engagements": {
+      "accuris": {
+        "per_kind": {},
+        "totals": { "notes_scanned": 3 }
+      }
+    }
+  },
+  {
+    "schema_version": "1.1.0",
+    "engagements": {
+      "headspace": {
+        "per_kind": {},
+        "totals": {}
+      }
+    }
+  },
+  {
+    "schema_version": 3,
+    "engagements": {
+      "headspace": {
+        "per_kind": {
+          "chat": {
+            "weight": 1.0,
+            "per_person": { "X": { "weight": 1.05 } }
+          }
+        },
+        "totals": { "feedback_ingested_days": ["2026-06-12"] }
+      }
+    }
+  }
+]
