@@ -262,6 +262,7 @@ function parseFeedbackCapture(markdown) {
 
   // Knob lines: `> > **Fire <kindLabel>:** `[ ] less` `[ ] same` `[ ] more``
   const knobLineRx = /^>\s*>\s*\*\*Fire (\w+):\*\*\s*`\[([ xX])\]\s*less`\s*`\[([ xX])\]\s*same`\s*`\[([ xX])\]\s*more`/gm;
+  let m;
   while ((m = knobLineRx.exec(markdown)) !== null) {
     const kind = m[1].toLowerCase();
     const less = m[2].toLowerCase() === "x";
