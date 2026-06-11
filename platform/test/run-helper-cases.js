@@ -15822,6 +15822,11 @@ type: cowork-microscope
       // string, computed by substituting fire-time {{$today_*}} tokens into the
       // cadence's title_template. Stays literal in compose-time output.
       "{{$title_template_resolved}}",
+      // v0.98.2 S1.5: voice_proposals_callout_template tokens — resolved at
+      // fire time inside cowork:morning-briefing Step 4.5 from
+      // spice/cowork/memory/<engagement_id>/voice-proposals.md entries.
+      "{{$voice_proposals_count}}",
+      "{{$voice_proposal_lines}}",
     ]);
     const orphans = (typeof outStr === "string"
       ? (outStr.match(/\{\{\$[a-z_]+\}\}/gi) || [])

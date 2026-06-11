@@ -22,6 +22,8 @@ CONNECTIVITY (NON-NEGOTIABLE): trust user-preferences.mcps served_by + connected
 
 MICROSCOPES (NON-NEGOTIABLE): for each kind in priorities, READ spice/cowork/prompts/per-mcp/<kind>/microscope.md and follow its ## Output shape directives verbatim. Resolve display names via people-aliases.md. Emit **[[Person Basename]]** for every inner-circle hit.
 
+ENTITY WEIGHTS (v0.98.2): when `learned_weights.engagements.<id>.per_kind.<kind>` carries per_person / per_channel / per_topic maps, consult them while composing the kind's items: weight ≥ 1.20 → lead the section; ≤ 0.50 → cap to one line; ≤ 0.25 → omit UNLESS the item carries a hard signal (direct @-mention, money movement, inner-circle going-dark). Entities with fewer than 3 observations are advisory-only. Structural rules WIN over these thresholds on conflict.
+
 ## voice_clause
 
 VOICE (NON-NEGOTIABLE): apply spice/cowork/context/user-preferences.md personality.notes (or personality.vibe_notes) verbatim AND personality.{vibe, formality, length, pep_talk}. {{$voice_summary}}
@@ -57,7 +59,7 @@ created_at: <NOW in {{$timezone}} as ISO timestamp>
 ```
 > [!todo]+ Was today useful?
 > Tick items that mattered. Set per-kind frequency. Type prose for nuance. Tomorrow's brief adjusts overnight.
-> <!-- cowork:feedback-capture v=1 -->
+> <!-- cowork:feedback-capture v=2 -->
 >
 {{$feedback_capture_per_kind_blocks}}
 >
@@ -68,7 +70,17 @@ created_at: <NOW in {{$timezone}} as ISO timestamp>
 > ```
 ```
 
-(Used by `cowork:eod-review` only — v0.98.1+. The other 4 cadences continue using `rating_callout_template`. `{{$feedback_capture_per_kind_blocks}}` is computed by `composeFeedbackCapture(opts)` per surfaced kind: one `> > [!summary]- <Kind> — items` sub-callout with per-item ticks, knob row, and a blank `>` separator between kinds. `{{$feedback_capture_free_text_or_placeholder}}` is either the prior fenced content carried forward across re-fires or a placeholder. On v=1 sentinel detected in prior file, preserve `[x]` state per item-ID, per knob position, and free-text verbatim.)
+(Used by `cowork:eod-review` only — v0.98.1+. The other 4 cadences continue using `rating_callout_template`. `{{$feedback_capture_per_kind_blocks}}` is computed by `composeFeedbackCapture(opts)` per surfaced kind: one `> > [!summary]- <Kind> — items` sub-callout with per-item ticks, knob row, and a blank `>` separator between kinds. `{{$feedback_capture_free_text_or_placeholder}}` is either the prior fenced content carried forward across re-fires or a placeholder. On v=2 sentinel detected in prior file, preserve `[x]` state per item-ID per SECTION (Mattered vs Didn't like), per knob position, and free-text verbatim; v=1 priors preserve into Mattered with a fresh Didn't-like row. Each per-kind sub-callout carries `Mattered:` + `Didn't like:` checklists sharing the same item-IDs.)
+
+## voice_proposals_callout_template
+
+```
+> [!note]- Voice proposals pending ({{$voice_proposals_count}})
+> Tick to approve — applies overnight. Untouched proposals expire 7 days after proposal.
+{{$voice_proposal_lines}}
+```
+
+(Used by `cowork:morning-briefing` Step 4.5 only — v0.98.2+. `{{$voice_proposal_lines}}` is one line per pending proposal: `> - [ ] <one-line summary> — appends to <target basename> <!-- cowork:voice-proposal id=<vp-id> -->`. Rendered ONLY when ≥1 pending; ticks are parsed by reconcile-cowork Step 5.6 the following night.)
 
 ## detection_callout_template
 
