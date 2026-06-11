@@ -187,7 +187,11 @@ function parseRatingCallout(markdown) {
     const m = line.match(CHECKBOX_LINE_RX);
     if (m) {
       observations.push({
-        kind: m[2].trim().toLowerCase(),
+        // First whitespace-token only: the Obsidian Tasks plugin appends
+        // `✅ YYYY-MM-DD` to ticked lines (live in headspace 2026-06-10 EOD),
+        // turning `Chat` into `Chat ✅ 2026-06-10`. Kind labels are single
+        // words by contract (KIND_LABELS), so the first token IS the kind.
+        kind: m[2].trim().split(/\s+/)[0].toLowerCase(),
         ticked: m[1].toLowerCase() === "x",
       });
     }
@@ -201,23 +205,28 @@ function parseRatingCallout(markdown) {
   };
 }
 
-// v0.98.1: Parse the EOD-only feedback-capture Rail L.
+// v0.98.1+: Parse the EOD-only feedback-capture Rail L.
 //
 // Returns:
 //   {
-//     sentinel_version: "v=1" | null,
-//     ticks:    { [itemId: string]: boolean },
+//     sentinel_version: "v=1" | "v=2" | null,
+//     ticks:    { [itemId: string]: boolean },   // Mattered section (or v=1 flat)
+//     downvotes: { [itemId: string]: boolean },  // Didn't like section (v=2 only; {} for v=1)
 //     knobs:    { [kind: string]: "less" | "same" | "more" | "ambiguous" },
 //     free_text: string,        // raw multiline prose; `> ` callout prefix stripped
 //   }
 //
 // Returns the all-empty result when the markdown doesn't carry the
-// `cowork:feedback-capture v=1` sentinel — graceful degradation, never throws.
+// `cowork:feedback-capture v=N` sentinel — graceful degradation, never throws.
+//
+// v=1 bodies have no section headers — ticks land in `ticks`, downvotes stays {}.
+// v=2 bodies use `Mattered:` / `Didn't like:` section headers; a `[!summary]-`
+// kind sub-callout header resets the section state machine between kinds.
 //
 // Caller (v0.98.2 reconciler) is responsible for treating "ambiguous" knob
 // positions as no-signal.
 function parseFeedbackCapture(markdown) {
-  const empty = { sentinel_version: null, ticks: {}, knobs: {}, free_text: "" };
+  const empty = { sentinel_version: null, ticks: {}, downvotes: {}, knobs: {}, free_text: "" };
   if (!markdown || typeof markdown !== "string") return empty;
   const sentinelMatch = markdown.match(FEEDBACK_SENTINEL_RX);
   if (!sentinelMatch) return empty;
@@ -225,15 +234,30 @@ function parseFeedbackCapture(markdown) {
   const result = {
     sentinel_version: `v=${sentinelMatch[1]}`,
     ticks: {},
+    downvotes: {},
     knobs: {},
     free_text: "",
   };
 
-  // Tick lines: `> > - [x] [[#^item-<kind>-<hash>|<label>]]`
-  const tickRx = /^>\s*>\s*-\s*\[([ xX])\]\s*\[\[#\^(item-[a-z]+-[0-9a-f]{7})\|/gm;
-  let m;
-  while ((m = tickRx.exec(markdown)) !== null) {
-    result.ticks[m[2]] = m[1].toLowerCase() === "x";
+  // Section-aware tick scan (v=2). `Mattered:` / `Didn't like:` flip the
+  // section; a kind sub-callout header resets it. v=1 bodies carry no section
+  // headers — ticks land in `ticks`, downvotes stays {} (v=1 semantic).
+  // Prefix-anchored through the wikilink → trailing Tasks-plugin annotations
+  // (`✅ 2026-06-12` etc.) are ignored.
+  const headerRx = /^>\s*>\s*\[!summary\]-/;
+  const sectionRx = /^>\s*>\s*(Mattered|Didn't like):\s*$/;
+  const tickLineRx = /^>\s*>\s*-\s*\[([ xX])\]\s*\[\[#\^(item-[a-z]+-[0-9a-f]{7})\|/;
+  let section = null;
+  for (const line of markdown.split("\n")) {
+    if (headerRx.test(line)) { section = null; continue; }
+    const s = line.match(sectionRx);
+    if (s) { section = s[1]; continue; }
+    const m = line.match(tickLineRx);
+    if (m) {
+      const ticked = m[1].toLowerCase() === "x";
+      if (section === "Didn't like") result.downvotes[m[2]] = ticked;
+      else result.ticks[m[2]] = ticked;
+    }
   }
 
   // Knob lines: `> > **Fire <kindLabel>:** `[ ] less` `[ ] same` `[ ] more``
