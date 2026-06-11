@@ -4,6 +4,48 @@ This file archives the per-cycle status snapshots that previously lived in `CLAU
 
 ---
 
+### v0.98.0 — synopsis-density rewrite (2026-06-10 close)
+
+**Codename:** `synopsis-density`. Workshop 0.97.4 → 0.98.0; cowork 0.35.4 → 0.36.0; contract 0.35.1 (UNCHANGED).
+
+**Origin.** User direction captured in memory `project_v098_brainstorm_direction.md` (2026-06-10): "Reports too long, too much reading, not enough summarization. ... long term it will give me the info that I need before I need it." The brief shape today emphasizes COVERAGE (every kind enumerated, every per-kind callout open by default, `[!tip] <closing>` at the bottom). User wants emphasis on PREDICTION (highest-blocking action first; cross-kind dependencies as connective tissue; per-kind detail behind a click).
+
+**Shape contract change (atomic notes across 5 cadences).** Lead callout flips from `> [!info]- <old title>` (collapsed by default, behind a click) to `> [!info]+ <per-cadence title>` (OPEN by default, ≤80 words, predictive). All per-kind callouts flip from `[!<type>]+` (open) to `[!<type>]-` (collapsed). The bottom `> [!tip] <closing title>` callout is REMOVED entirely. Each cadence carries the per-cadence lead title:
+
+- morning-briefing → `What matters today`
+- midday-tripwire → `What changed since morning`
+- eod-review → `What landed today`
+- weekly-review → `Where the week landed`
+- monthly-review → `Where the month landed`
+
+**Composition rules section.** Each `content/data/orchestrator-instructions/<cadence>.md` gains a `## Synopsis composition rules (v0.98.0 contract)` EOF section with 5 rules: (1) ≤80 words hard cap, prefer 50-60; (2) first sentence concrete blocking-action token; (3) cross-kind dependencies as connective tissue, not per-kind enumeration; (4) ≤3 distinct must-knows beyond the lead; (5) empty-day plain-acknowledgment ("Quiet day —"). Voice contract applies on top; structural rules WIN on conflict.
+
+**compose-body-helper.js scope expansion** (S1.4 discovery). The plan assumed orchestrator-instructions OI changes drove rendered output; the helper code was supposed to be neutral. Reality: the helper encoded the OLD shape — `closing_md` validation, hardcoded `+` per-kind sigil in `_wrapCallout` + `_computeAssertions`, closing-line body-assembly emit, `closing_md` destructure. Scope expanded to flip per-kind sigil to `-`, drop `closing_md` validation (legacy keys tolerated as no-op), drop closing-line body emit, drop `closing_md` destructure. 8 `expected-body.md` files regenerated alongside the 9 fixture sweep.
+
+**Engagement-template scope narrowing** (S1.3 discovery). The plan assumed all 15 prompt files (3 templates × 5 cadences) shared cadence vocabulary (`## Today at a glance`, `## Week in review`, etc.). On-disk reality: 13 of 15 use per-bundle author-content H2s (e.g. `## Flagged charges`, `## Today's wins`, `## ⏭ Next week setup`, `## ⏱ Billable hours snapshot`). Only the 3 morning-briefing files happen to carry the OLD `## Today at a glance` + `## Today's focus` verbatim. Scope NARROWED to those 3 files; the other 12 are author-content and were left untouched.
+
+**11 new HC sub-asserts** (HC-V0980-SYNOPSIS-A1..A6 + HC-V0980-CADENCES-A1..A5): lead callout sentinel + closing-callout absence + per-kind `-` sigil + word count ≤80 + first-sentence-concrete + empty-day "Quiet day" fallback + 4 per-cadence variant titles + cross-cadence parity.
+
+**Per-cycle VERSION-pin sweep** (v0.93.3 lesson 5.3): 26 hardcoded `"0.97.x"` / `"0.35.x"` HC assertion values bumped to `"0.98.0"` / `"0.36.0"` across HC-V0891 / V0900 / V0901 / V0920 / V0930 / V0931 VERSION-* + MANIFEST blocks (23 in `run-helper-cases.js`; 3 in `run-cowork-smoke.js`). `ranch/platform-subscription.json` workshop + cowork lockstep.
+
+**Final harness:** helper-cases **2301 / 0** (+11); cowork-smoke 954 / 0; claude-surface 214 / 0; integration-smoke 36 / 0; cli 132 / 0; bootstrap 85 / 0. Preflight `version-sync ok: 0.98.0` ALL GREEN.
+
+**Commits (S0..S3):** `86ed5c1` (S0 baseline) + `506a95f` (S1.1 RED) + `2f49e5a` (S1.2.1 morning-briefing OI) + `7ec48a9` (S1.2.2 midday-tripwire OI) + `68dff20` (S1.2.3 eod-review OI) + `d26079e` (S1.2.4 weekly-review OI) + `ea38502` (S1.2.5 monthly-review OI) + `115fa13` (S1.3 SCOPED engagement-template rename) + `48207e2` (S1.4 compose-body fixture + helper sweep) + `3c5f325` (S1.5 version bumps + VERSION-pin sweep) + S3 cycle-close this commit.
+
+**Action required post-deploy.** `sauce update --bump-pins` per consumer vault (materializes 5 new orchestrator-instructions + 3 morning-briefing engagement-template prompts + updated compose-body-helper.js). THEN `/cowork sync-scheduled-jobs` once per vault from claude.ai's Cowork UI — Rail A pushes new wrapper bodies (contract version stays at 0.35.1; wrapper template substitution refreshes against new orchestrator-instructions sources). Next scheduled cron fire after deploy emits the new shape.
+
+**Lessons.**
+
+1. **Verify on-disk vocabulary before designing per-file rename sweeps.** The plan's 15-file rename table assumed cadence-vocabulary H2s across all engagement-template prompts; reality is 13/15 are per-bundle author content. A `grep -n '^## '` at design time would have surfaced the scope reality before the table was committed.
+2. **Helper code can encode shape contracts that should live at the OI layer.** When designing a "string-level contract change at the OI layer only" cycle, grep the helper for the shape literals (`[!example]+`, `closing_md`, etc.) at design time to confirm they don't live both places. v0.97.x wrapper architecture should have surfaced this earlier.
+3. **Structural rules WIN on conflict with voice contract.** Composition-rules section explicitly states voice still applies on top, but structural rules (word cap, first-sentence-concrete, empty-day plain-acknowledgment) win when they conflict with voice (e.g. a verbose voice that wants to lecture).
+
+**Carry-forward.** Shim path mismatch in `.claude/skills/cowork/<cadence>/SKILL.md` referencing absent `.claude/skills/cowork/data/orchestrator-instructions/` path (actual runtime path is `spice/cowork/data/orchestrator-instructions/`) — pre-existing, NOT v0.98.0-introduced. v0.98.0.x PATCH candidate. v0.98.1 ships questionnaire expansion + free-text capture; v0.98.2 closes the loop with reconciler ingest. v0.95.0 cowork-spine formally PARKED (cohesion-sweep premise obsoleted by v0.97.x wrapper architecture).
+
+See `Docs/plans/2026-06-10-v0.98.0-synopsis-density-{design,plan,result}.md`.
+
+---
+
 ### v0.97.4 — prose-invariant write-guards (2026-06-10 close)
 
 **Codename:** `prose-invariant-write-guards`. Workshop 0.97.3 → 0.97.4; cowork 0.35.3 → 0.35.4; contract 0.35.1 (UNCHANGED).

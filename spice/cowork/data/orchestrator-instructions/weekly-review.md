@@ -155,12 +155,11 @@ this is unexpected.`
 
 {{shared.voice_clause}}
 
-3a. **Prep synopsis_md.** Compose `> [!info]- Week in review` callout per `prompt_body`
-    (voice-shaped one-paragraph synopsis distilled from week-summary gather outputs).
+3a. **Prep synopsis_md.** Compose `> [!info]+ Where the week landed` callout per `prompt_body`
+    AND the § Synopsis composition rules below (voice-shaped one-paragraph synopsis
+    distilled from gather outputs; ≤80 words; first-sentence-concrete; empty-day
+    "Quiet day" fallback).
     When `semantic_index_age` is non-null, append `> Semantic index age: <age>m`.
-
-3b. **Prep closing_md.** Compose `> [!tip] Next week's setup` callout (2-3 sentence
-    next-week setup paragraph + concrete first action).
 
 3c. **Prep memory_callouts struct.**
     - `yesterday_md` ← `composeWeeklyMemoryCallout(output_week)` ("This week so far"); `""`
@@ -322,5 +321,22 @@ apply the v0.4.0 installer-default sentinel detection (v0.90.2):
 This orchestrator conforms to `Docs/agent-guides/cowork-orchestrator-template.md` (v1.0.0).
 Cohesion regression caught by HC-V0950-COHESION-A1..A5. Single-source-of-truth regression
 caught by HC-V0970-O-1..12.
+
+## Synopsis composition rules (v0.98.0 contract)
+
+The synopsis is a single paragraph rendered inside a `> [!info]+ <cadence-title>` callout. The callout is OPEN by default; it is the reader's first stop and is expected to carry the load of the brief on its own.
+
+Compose the paragraph per the following rules. Voice contract (vibe, personality, hard_rules) still applies on top of these rules; structural rules WIN on conflict.
+
+  1. Length: ≤ 80 words. Hard cap. Prefer 50-60.
+  2. First sentence names the highest-blocking action concretely — a PR number, a person + decision, an inbound + ask. Never opens with "Today is...", "You have...", "There are N...".
+  3. Thread cross-kind dependencies as connective tissue when present (e.g. "...which gates today's 10am with Stefan..."). Don't enumerate per-kind ("first chat, then calendar, then..."); the reader can drill into each `[!info]-` / `[!tip]-` / `[!example]-` per-kind callout.
+  4. Beyond the lead action, name at most 3 distinct must-knows. Order by blocking-effect, not by kind.
+  5. If the day is genuinely quiet (no actionable items, no inbox debt, no blocking calendar conflicts), say so PLAINLY: "Quiet day — standup + Stefan 1:1, nothing else needs attention." Do not pad.
+  6. Predict the next user action; do not describe the last LLM gather.
+
+### Per-kind callout default-expand
+
+Every per-kind callout (chat, calendar, email, github, ado, finance, any custom kind) renders with the `-` collapse sigil, NOT `+`. The `callout_type` field from user-preferences.md (one of `[!info]`, `[!tip]`, `[!quote]`, `[!note]`, `[!example]`, `[!warning]`) is followed by `-` (e.g. `> [!info]- Chat (Teams)`). The lead synopsis callout uses `+` (open by default — see § Synopsis composition rules above). The Memory log callout stays `-` (already collapsed). The `[!quote]` callout (Memory log) stays `-`. All per-kind callouts use `-`. No `+` per-kind callouts.
 
 {{shared.done_block}}

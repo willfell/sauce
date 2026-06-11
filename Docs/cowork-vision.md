@@ -89,12 +89,20 @@ Live arc as of this doc. See `Docs/plans/2026-06-07-post-v0.93.3-brainstorm-stat
 | Cycle | Scope | Status | Vision dimension(s) advanced |
 |---|---|---|---|
 | **v0.94.0** | `applyExternalPluginInstall` — closes v0.93.3 existing-consumer install gap | shipped 2026-06-07 (tag `v0.94.0`) | Recoverability |
-| **v0.95.0** ⭐ | **cowork-spine MINOR** — `cowork:plan-dispatch` sub-skill (12-key contract) + 3 NEW helper exports + `kind-titles.json` v1.0.0 + layered preferences (`engagement.overrides`) + canonical orchestrator template + 5 orchestrators slim −587 lines | **SHIPPED 2026-06-07** (SHA TBD-at-S4-push) | Cohesion (A) + Composability (B+) + Generalizability |
-| **v0.94.1** | Echoes-warning reword | queued | Recoverability |
-| **v0.94.2** | Platform de-personalization | queued | Generalizability |
-| **v0.95.0.x PATCH** | Voice/bootstrap polish — `cowork:doctor` not yet; bootstrap-vault stage-gated context fill | queued (depends on v0.95.0 lessons + 7-day observability window) | Voice fidelity + Bootstrap quality |
-| **v0.95.1** | `sauce update --migrate-config` — adds empty `overrides: {}` to every engagement + drops v0.95.0 backward-compat reads | queued (depends on v0.95.0 vault-config schema) | Composability tail |
-| **v0.96.0+** | Memory write-side (pattern accrual) + cross-machine wrappers + `cowork:doctor` + `cowork:audit-cohesion` | queued | Adaptive memory loop + Cross-machine consistency + Quality observability |
+| **v0.95.0** | cowork-spine MINOR — `cowork:plan-dispatch` sub-skill | **PARKED 2026-06-10** (cohesion-sweep premise obsoleted by v0.97.x wrapper architecture; see PARKED banner on design doc) | superseded |
+| **v0.95.1** | cowork-anti-echo MINOR — three knobs breaking the memory echo loop | shipped 2026-06-08 | Recoverability + (proactive memory-arc safety net) |
+| **v0.96.0** | cowork-rethought-1 MINOR — Rail W sidecars + Rail D MCP discovery + Rail L per-kind preference learning | shipped 2026-06-08 | Composability + Adaptive memory loop (read+write) |
+| **v0.96.1** | cowork-rethought-1-patch PATCH — multi-engagement learned_weights nesting + cron heartbeat read | shipped 2026-06-08 | Adaptive memory loop tail + Recoverability |
+| **v0.96.2** | daily-dashboard-tskeys-hotfix PATCH — semantic `day:` bucketing | shipped 2026-06-09 | Cross-machine consistency tail |
+| **v0.97.0** | cowork-rethought-2 MINOR — Rail O orchestrator-instructions single-source + Rail T wrapper template + Rail A claude.ai sync + Rail R local reconciler | shipped 2026-06-09 | Cohesion (A) + Cross-machine consistency |
+| **v0.97.1** | reconciler-as-cadence PATCH — reconciler moves from launchd to claude.ai scheduled job | shipped 2026-06-09 | Cross-machine consistency tail |
+| **v0.97.2** | wrapper-delegation-proof PATCH — anti-delegation directive + inline write contract + PRELUDE date fix | shipped 2026-06-10 | Recoverability (LLM-behavior bounding) |
+| **v0.97.3** | cloud-sync-parity PATCH — guardrails move from JS literals to `_shared-clauses.md` | shipped 2026-06-10 | Cross-machine consistency tail |
+| **v0.97.4** | prose-invariant write-guards PATCH — rating + anti-echo + coverage-gap deterministic backstops + inline microscope output-shape contract | shipped 2026-06-10 | Recoverability + Quality observability (machine-readable coverage-gap mirror) |
+| **v0.98.0** ⭐ | **synopsis-density rewrite MINOR** — brief-shape contract change at OI layer (5 cadences): `[!info]+ <per-cadence title>` lead callout OPEN by default carrying ≤80-word predictive synopsis; per-kind callouts collapsed by default; bottom `[!tip] <closing>` REMOVED; NEW `## Synopsis composition rules (v0.98.0 contract)` EOF section per cadence | **SHIPPED 2026-06-10** (SHA TBD-at-S4-push) | Substance/Voice + Predictiveness (FIRST brief-shape change targeting the user's stated reading-load complaint directly) |
+| **v0.98.1** | questionnaire expansion + free-text capture — stable item-IDs (`^item-<key>` block-IDs) + per-item ticks + per-kind frequency knobs + fenced code block free-text + sentinel HTML comment for v0.98.2 parse | queued (sketched in v0.98.0 design § Forward arc; 3 open questions on knob granularity / Rail L on non-EOD / free-text encoding) | Substance/Voice + Predictiveness tail |
+| **v0.98.2** | reconciler free-text + per-item-tick ingest — `cowork:ingest-feedback` sub-skill (Sonnet 4.6 pass) + structured deltas to `learned_weights` (schema 2 → 3) + microscopes / what_matters with audit trail; voice changes PROPOSED, never auto-applied | queued (sketched in v0.98.0 design § Forward arc) | Adaptive memory loop (write-side compounding) |
+| **v0.99.0+** | Cross-machine wrappers + `cowork:doctor` observability skill + `cowork:audit-cohesion` + per-skill SemVer + the v0.95.1-migrator carry-forward | queued | Cross-machine consistency + Quality observability + Cohesion enforcement |
 
 ## 6 — Decision audit (how to use this doc)
 

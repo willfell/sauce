@@ -2,7 +2,6 @@ run-install: vault = /Users/willfellhoelter/projects/repos/sauce
 run-install: installer = /Users/willfellhoelter/projects/repos/sauce/ranch/templater/platformInstall.js
 run-install: flags = {"autoApprove":true,"declineAll":false,"dryRun":false,"verbose":false}
 
-[Notice] cowork@0.8.0 installed (FA-5 canonical-vocab adoption). 3 note templates now emit canonical created_at: (ISO+TZ) replacing legacy created:. Monthly Note adds canonical month: "YYYY-MM" alongside friendly month_label:. Discriminator tags (cowork-daily/cowork-weekly/cowork-monthly) stripped from templates. 12 of 13 rule_fragments now extend _canonical-vocab. Existing cowork notes in your vault should be migrated via: sauce migrate-frontmatter --vault <vault> --blueprint cowork --apply. Helper code unchanged.
 [Notice] platformInstall: complete.
 
 ========================================================================
@@ -275,8 +274,8 @@ RESULTS
     },
     {
       "name": "cowork",
-      "version": "0.35.3",
-      "installed_at": "2026-06-10T16:52:56.072Z"
+      "version": "0.35.4",
+      "installed_at": "2026-06-10T18:33:54.312Z"
     },
     {
       "name": "people",
@@ -142925,124 +142924,4015 @@ RESULTS
       "git_tag": null,
       "git_dirty": true,
       "attempted_at": "2026-06-10T16:52:56.091Z"
+    },
+    {
+      "event": "info",
+      "step": "customjs_settings",
+      "action": "skipped_user_customized",
+      "jsFolder": "ranch/Scripts",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.247Z"
+    },
+    {
+      "event": "info",
+      "step": "app_settings",
+      "action": "applied",
+      "keys_written": [
+        "alwaysOpenInNewTab",
+        "defaultViewMode",
+        "livePreview",
+        "propertiesInDocument"
+      ],
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.249Z"
+    },
+    {
+      "event": "info",
+      "step": "module_directory",
+      "name": "cowork",
+      "path": "spice/cowork",
+      "action": "already_exists",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.254Z"
+    },
+    {
+      "event": "info",
+      "step": "file_overwrite",
+      "name": "cowork",
+      "dest": "spice/cowork/context/user-preferences.md",
+      "action": "skipped_materialize_once",
+      "message": "file declares materialize_once=true and dest exists; preserving user content",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.256Z"
+    },
+    {
+      "event": "info",
+      "step": "file_overwrite",
+      "name": "cowork",
+      "dest": "spice/cowork/prompts/morning-briefing.md",
+      "action": "skipped_materialize_once",
+      "message": "file declares materialize_once=true and dest exists; preserving user content",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.271Z"
+    },
+    {
+      "event": "info",
+      "step": "file_overwrite",
+      "name": "cowork",
+      "dest": "spice/cowork/prompts/eod-review.md",
+      "action": "skipped_materialize_once",
+      "message": "file declares materialize_once=true and dest exists; preserving user content",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.271Z"
+    },
+    {
+      "event": "info",
+      "step": "file_overwrite",
+      "name": "cowork",
+      "dest": "spice/cowork/prompts/weekly-review.md",
+      "action": "skipped_materialize_once",
+      "message": "file declares materialize_once=true and dest exists; preserving user content",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.271Z"
+    },
+    {
+      "event": "info",
+      "step": "file_overwrite",
+      "name": "cowork",
+      "dest": "spice/cowork/prompts/monthly-review.md",
+      "action": "skipped_materialize_once",
+      "message": "file declares materialize_once=true and dest exists; preserving user content",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.272Z"
+    },
+    {
+      "event": "info",
+      "step": "file_overwrite",
+      "name": "cowork",
+      "dest": "spice/cowork/prompts/midday-tripwire.md",
+      "action": "skipped_materialize_once",
+      "message": "file declares materialize_once=true and dest exists; preserving user content",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.272Z"
+    },
+    {
+      "event": "replace",
+      "step": "file_overwrite",
+      "name": "cowork",
+      "dest": "spice/cowork/data/schemas/morning-briefing@1.0.0.json",
+      "prior_sha": "2950e973750b22f3ba0063c6eb06c9c76145ab8a292108a35fe82d8507ee5c6b",
+      "new_sha": "23644d5d66f73f980f2953261fa25a4e8e4379dd3dc1331bf720f41a69ee72c2",
+      "bak_path": "spice/cowork/data/schemas/morning-briefing@1.0.0.json.bak",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.291Z"
+    },
+    {
+      "event": "replace",
+      "step": "file_overwrite",
+      "name": "cowork",
+      "dest": "spice/cowork/data/schemas/midday-tripwire@1.0.0.json",
+      "prior_sha": "99bc7e011734e92fc40286feaa34224454882ccf1b5a646c0ba66e1e7bc7d1ef",
+      "new_sha": "942d55e604eddee633b449a6d01a76a2d84bb76a530961269a15488143ace0f3",
+      "bak_path": "spice/cowork/data/schemas/midday-tripwire@1.0.0.json.bak",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.292Z"
+    },
+    {
+      "event": "replace",
+      "step": "file_overwrite",
+      "name": "cowork",
+      "dest": "spice/cowork/data/schemas/eod-review@1.0.0.json",
+      "prior_sha": "23ab1cb3f13a87b9dcb83ff17c371333a0a13de385b4a8934fe7a8741afc0c56",
+      "new_sha": "040f5b29ae602c2cd3b8c95ef98e20205c962b382a943f4cb9e0e42c4a5bb2f2",
+      "bak_path": "spice/cowork/data/schemas/eod-review@1.0.0.json.bak",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.293Z"
+    },
+    {
+      "event": "replace",
+      "step": "file_overwrite",
+      "name": "cowork",
+      "dest": "spice/cowork/data/schemas/weekly-review@1.0.0.json",
+      "prior_sha": "5e8570579c83663a87922bd4d8bcbad64383afd422d27b291bffe72be06c6c9c",
+      "new_sha": "db814932b08aeb2f9020b834e64c8bfa32a70fa027075f0d68a8782f3ee105be",
+      "bak_path": "spice/cowork/data/schemas/weekly-review@1.0.0.json.bak",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.293Z"
+    },
+    {
+      "event": "replace",
+      "step": "file_overwrite",
+      "name": "cowork",
+      "dest": "spice/cowork/data/schemas/monthly-review@1.0.0.json",
+      "prior_sha": "321b59e26e2bf212903d88c617bbb6329981885d6f7678783f95b4e2d983ce5f",
+      "new_sha": "23c26a218d70d217213b31dc6f60f6314ed064186df8abc4da5d13a9efb47005",
+      "bak_path": "spice/cowork/data/schemas/monthly-review@1.0.0.json.bak",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.294Z"
+    },
+    {
+      "event": "replace",
+      "step": "file_overwrite",
+      "name": "cowork",
+      "dest": "spice/cowork/data/schemas/morning-briefing-cold@1.0.0.json",
+      "prior_sha": "5fdaf4e639dfc4b350c760cda3b2366fd0ca4189b9fd1c9ec550abdd8bf4e25a",
+      "new_sha": "2cec3f68e86edc2230dc993ddaf6b381d22cf7ae146691f8418f3e24867b9c32",
+      "bak_path": "spice/cowork/data/schemas/morning-briefing-cold@1.0.0.json.bak",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.295Z"
+    },
+    {
+      "event": "replace",
+      "step": "file_overwrite",
+      "name": "cowork",
+      "dest": "spice/cowork/data/orchestrator-instructions/morning-briefing.md",
+      "prior_sha": "867ca82676794b56c00ee0af62834a2f7b80920d4135a0db052c91d5b44cfb54",
+      "new_sha": "eff4db6f7c88d7819f3d587240b7d745f726c3244adf67f0f0a1ca185fb4320d",
+      "bak_path": "spice/cowork/data/orchestrator-instructions/morning-briefing.md.bak",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.296Z"
+    },
+    {
+      "event": "replace",
+      "step": "file_overwrite",
+      "name": "cowork",
+      "dest": "spice/cowork/data/orchestrator-instructions/midday-tripwire.md",
+      "prior_sha": "89e2c24aa52ec09ad2d8e97a34470a19a96a2d29fca04dea5af7552817027a60",
+      "new_sha": "fb8c422a3b2208c517af0c705b429bb622a7b819f896bca8124e701db1655af7",
+      "bak_path": "spice/cowork/data/orchestrator-instructions/midday-tripwire.md.bak",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.297Z"
+    },
+    {
+      "event": "replace",
+      "step": "file_overwrite",
+      "name": "cowork",
+      "dest": "spice/cowork/data/orchestrator-instructions/eod-review.md",
+      "prior_sha": "c5a2072600214fe7deafcd552d0c4dff460f9cc5e4517645db92a39fa0d736e0",
+      "new_sha": "1be5c7ece84491d8ccc59dc83629fca30724f17fb227cf1f04af1bed7f0ab572",
+      "bak_path": "spice/cowork/data/orchestrator-instructions/eod-review.md.bak",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.298Z"
+    },
+    {
+      "event": "replace",
+      "step": "file_overwrite",
+      "name": "cowork",
+      "dest": "spice/cowork/data/orchestrator-instructions/weekly-review.md",
+      "prior_sha": "eca0fd2fd6bdb596983d21f89e67c8465f15cf4836956138b80d2fbbe62791b5",
+      "new_sha": "cb589104b877be454775ada97b017caf7cd63862d2662028105b1212bb40c4ce",
+      "bak_path": "spice/cowork/data/orchestrator-instructions/weekly-review.md.bak",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.298Z"
+    },
+    {
+      "event": "replace",
+      "step": "file_overwrite",
+      "name": "cowork",
+      "dest": "spice/cowork/data/orchestrator-instructions/monthly-review.md",
+      "prior_sha": "936ba770d2c3b11ea91b3b0c80917894e6f4c60bdba73c825f8bfc04c56baad5",
+      "new_sha": "3f90dee83b0271fb4696a96f78aeeef0e9a17c216bb7db95d98656ad7fec84fa",
+      "bak_path": "spice/cowork/data/orchestrator-instructions/monthly-review.md.bak",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.299Z"
+    },
+    {
+      "event": "replace",
+      "step": "file_overwrite",
+      "name": "cowork",
+      "dest": "spice/cowork/helpers/write-atomic-note-helper.js",
+      "prior_sha": "cc4d3dd2b39a2160bc36a9a269f391e113dc8409f9896f74ffbc8dee730edf9b",
+      "new_sha": "29b905c2f39bf0686ed25509135e54c13d063d833c297708d2ea007721416251",
+      "bak_path": "spice/cowork/helpers/write-atomic-note-helper.js.bak",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.302Z"
+    },
+    {
+      "event": "info",
+      "step": "scaffold_foundational",
+      "name": "cowork",
+      "item": "cowork",
+      "id": "templater-obsidian",
+      "action": "skipped_already_present",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.310Z"
+    },
+    {
+      "event": "install",
+      "kind": "blueprint",
+      "name": "cowork",
+      "version": "0.35.4",
+      "installed_at": "2026-06-10T18:33:54.312Z",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true
+    },
+    {
+      "event": "aggregate",
+      "step": "claude_surface_aggregate",
+      "contributions": 7,
+      "entries": 91,
+      "rejected": 0,
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.312Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/audit.md",
+      "owner": "audit",
+      "version": "0.3.0",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.313Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/audit/drift/SKILL.md",
+      "owner": "audit",
+      "version": "0.3.0",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.313Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/install.md",
+      "owner": "platform-claude",
+      "version": "0.1.2",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.313Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/upgrade.md",
+      "owner": "platform-claude",
+      "version": "0.1.2",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.314Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/bootstrap.md",
+      "owner": "platform-claude",
+      "version": "0.1.2",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.314Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/platform/install/SKILL.md",
+      "owner": "platform-claude",
+      "version": "0.1.2",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.316Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/platform/upgrade/SKILL.md",
+      "owner": "platform-claude",
+      "version": "0.1.2",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.316Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/platform/bootstrap/SKILL.md",
+      "owner": "platform-claude",
+      "version": "0.1.2",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.316Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/project.md",
+      "owner": "project",
+      "version": "1.14.0",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.317Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/project/new-project/SKILL.md",
+      "owner": "project",
+      "version": "1.14.0",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.317Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/daily.md",
+      "owner": "daily",
+      "version": "0.13.6",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.317Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/daily/open-today/SKILL.md",
+      "owner": "daily",
+      "version": "0.13.6",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.318Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/meetings.md",
+      "owner": "meetings",
+      "version": "0.7.0",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.318Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/meetings/new-meeting/SKILL.md",
+      "owner": "meetings",
+      "version": "0.7.0",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.318Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/scratch.md",
+      "owner": "scratch",
+      "version": "0.5.2",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.319Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/scratch/new-scratch/SKILL.md",
+      "owner": "scratch",
+      "version": "0.5.2",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.319Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/cowork.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.319Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/bootstrap-vault/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.320Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/morning-briefing/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.320Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/midday-tripwire/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.320Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/eod-review/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.321Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/weekly-review/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.321Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/monthly-review/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.321Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/reconcile-cowork/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.322Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/onboard-scheduled-jobs/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.322Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/context-builder/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.322Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/edit-microscope/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.323Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/audit-siblings/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.323Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/check-vault-routing/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.324Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/date-context/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.324Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/ensure-daily-note/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.325Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-weather/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.326Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-calendar/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.326Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-gmail/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.326Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-imessage/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.327Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-finance-yesterday/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.327Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-finance-cc-today/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.327Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-cc-debt-snapshot/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.328Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-projects/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.328Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-threads/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.328Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-semantic-related/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.329Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/write-run-note-morning-briefing/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.329Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/write-run-note-eod-review/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.329Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/write-run-note-midday-tripwire/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.330Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/write-run-note-finance/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.330Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/write-run-note-weekly-review/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.330Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/write-run-note-monthly-review/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.330Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/write-summary-invoice-prep/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.331Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/write-summary-fte-status/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.331Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/update-active-threads/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.331Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/update-active-projects/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.332Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/update-weekly-snapshot/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.332Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/run-audit-receipt/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.332Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/weekly.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.333Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/monthly.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.333Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/scaffold-timeframes/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.333Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/read-user-preferences/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.334Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/plan-dispatch/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.334Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-from-served-by/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.334Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/capture-tick/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.335Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/synthesize-day/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.335Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/read-memory/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.335Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/capture-frame-drift/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.336Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/learn-from-checks/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.336Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/check-heartbeat/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.337Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-semantic-memory/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.337Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/compose-body/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.337Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/resolve-person/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.337Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/synthesize-week/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.338Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/discover-people/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.338Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/find-missing-people/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.338Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/sync-scheduled-jobs/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.339Z"
+    },
+    {
+      "event": "claude_md_regen",
+      "step": "claude_md_regen",
+      "tables_updated": [
+        "directory-map",
+        "resolvers",
+        "skills-index"
+      ],
+      "rows_total": 23,
+      "git_commit": "4f9b7df59d25614d2c578e9fd086f5a9dcfea110",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:33:54.340Z"
+    },
+    {
+      "event": "info",
+      "step": "customjs_settings",
+      "action": "skipped_user_customized",
+      "jsFolder": "ranch/Scripts",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.365Z"
+    },
+    {
+      "event": "info",
+      "step": "app_settings",
+      "action": "applied",
+      "keys_written": [
+        "alwaysOpenInNewTab",
+        "defaultViewMode",
+        "livePreview",
+        "propertiesInDocument"
+      ],
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.367Z"
+    },
+    {
+      "event": "aggregate",
+      "step": "claude_surface_aggregate",
+      "contributions": 7,
+      "entries": 91,
+      "rejected": 0,
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.373Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/audit.md",
+      "owner": "audit",
+      "version": "0.3.0",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.374Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/audit/drift/SKILL.md",
+      "owner": "audit",
+      "version": "0.3.0",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.374Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/install.md",
+      "owner": "platform-claude",
+      "version": "0.1.2",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.375Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/upgrade.md",
+      "owner": "platform-claude",
+      "version": "0.1.2",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.375Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/bootstrap.md",
+      "owner": "platform-claude",
+      "version": "0.1.2",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.376Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/platform/install/SKILL.md",
+      "owner": "platform-claude",
+      "version": "0.1.2",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.376Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/platform/upgrade/SKILL.md",
+      "owner": "platform-claude",
+      "version": "0.1.2",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.376Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/platform/bootstrap/SKILL.md",
+      "owner": "platform-claude",
+      "version": "0.1.2",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.376Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/project.md",
+      "owner": "project",
+      "version": "1.14.0",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.377Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/project/new-project/SKILL.md",
+      "owner": "project",
+      "version": "1.14.0",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.377Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/daily.md",
+      "owner": "daily",
+      "version": "0.13.6",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.377Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/daily/open-today/SKILL.md",
+      "owner": "daily",
+      "version": "0.13.6",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.378Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/meetings.md",
+      "owner": "meetings",
+      "version": "0.7.0",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.378Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/meetings/new-meeting/SKILL.md",
+      "owner": "meetings",
+      "version": "0.7.0",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.378Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/scratch.md",
+      "owner": "scratch",
+      "version": "0.5.2",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.379Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/scratch/new-scratch/SKILL.md",
+      "owner": "scratch",
+      "version": "0.5.2",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.379Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/cowork.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.379Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/bootstrap-vault/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.380Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/morning-briefing/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.380Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/midday-tripwire/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.381Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/eod-review/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.381Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/weekly-review/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.382Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/monthly-review/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.382Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/reconcile-cowork/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.382Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/onboard-scheduled-jobs/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.383Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/context-builder/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.383Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/edit-microscope/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.384Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/audit-siblings/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.384Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/check-vault-routing/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.384Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/date-context/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.385Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/ensure-daily-note/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.385Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-weather/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.385Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-calendar/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.386Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-gmail/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.386Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-imessage/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.386Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-finance-yesterday/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.387Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-finance-cc-today/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.387Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-cc-debt-snapshot/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.388Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-projects/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.388Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-threads/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.388Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-semantic-related/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.389Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/write-run-note-morning-briefing/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.389Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/write-run-note-eod-review/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.390Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/write-run-note-midday-tripwire/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.390Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/write-run-note-finance/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.390Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/write-run-note-weekly-review/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.391Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/write-run-note-monthly-review/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.391Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/write-summary-invoice-prep/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.392Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/write-summary-fte-status/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.392Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/update-active-threads/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.393Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/update-active-projects/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.394Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/update-weekly-snapshot/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.394Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/run-audit-receipt/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.394Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/weekly.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.395Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/monthly.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.395Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/scaffold-timeframes/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.395Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/read-user-preferences/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.396Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/plan-dispatch/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.396Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-from-served-by/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.396Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/capture-tick/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.397Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/synthesize-day/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.397Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/read-memory/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.398Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/capture-frame-drift/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.398Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/learn-from-checks/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.398Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/check-heartbeat/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.399Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-semantic-memory/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.399Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/compose-body/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.399Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/resolve-person/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.400Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/synthesize-week/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.400Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/discover-people/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.401Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/find-missing-people/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.401Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/sync-scheduled-jobs/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.401Z"
+    },
+    {
+      "event": "claude_md_regen",
+      "step": "claude_md_regen",
+      "tables_updated": [
+        "directory-map",
+        "resolvers",
+        "skills-index"
+      ],
+      "rows_total": 23,
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:19.402Z"
+    },
+    {
+      "event": "info",
+      "step": "customjs_settings",
+      "action": "skipped_user_customized",
+      "jsFolder": "ranch/Scripts",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.610Z"
+    },
+    {
+      "event": "info",
+      "step": "app_settings",
+      "action": "applied",
+      "keys_written": [
+        "alwaysOpenInNewTab",
+        "defaultViewMode",
+        "livePreview",
+        "propertiesInDocument"
+      ],
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.611Z"
+    },
+    {
+      "event": "aggregate",
+      "step": "claude_surface_aggregate",
+      "contributions": 7,
+      "entries": 91,
+      "rejected": 0,
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.614Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/audit.md",
+      "owner": "audit",
+      "version": "0.3.0",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.615Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/audit/drift/SKILL.md",
+      "owner": "audit",
+      "version": "0.3.0",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.615Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/install.md",
+      "owner": "platform-claude",
+      "version": "0.1.2",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.616Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/upgrade.md",
+      "owner": "platform-claude",
+      "version": "0.1.2",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.616Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/bootstrap.md",
+      "owner": "platform-claude",
+      "version": "0.1.2",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.616Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/platform/install/SKILL.md",
+      "owner": "platform-claude",
+      "version": "0.1.2",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.616Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/platform/upgrade/SKILL.md",
+      "owner": "platform-claude",
+      "version": "0.1.2",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.616Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/platform/bootstrap/SKILL.md",
+      "owner": "platform-claude",
+      "version": "0.1.2",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.617Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/project.md",
+      "owner": "project",
+      "version": "1.14.0",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.617Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/project/new-project/SKILL.md",
+      "owner": "project",
+      "version": "1.14.0",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.617Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/daily.md",
+      "owner": "daily",
+      "version": "0.13.6",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.617Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/daily/open-today/SKILL.md",
+      "owner": "daily",
+      "version": "0.13.6",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.617Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/meetings.md",
+      "owner": "meetings",
+      "version": "0.7.0",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.618Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/meetings/new-meeting/SKILL.md",
+      "owner": "meetings",
+      "version": "0.7.0",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.618Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/scratch.md",
+      "owner": "scratch",
+      "version": "0.5.2",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.618Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/scratch/new-scratch/SKILL.md",
+      "owner": "scratch",
+      "version": "0.5.2",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.618Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/cowork.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.618Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/bootstrap-vault/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.619Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/morning-briefing/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.619Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/midday-tripwire/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.619Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/eod-review/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.619Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/weekly-review/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.619Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/monthly-review/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.619Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/reconcile-cowork/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.620Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/onboard-scheduled-jobs/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.620Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/context-builder/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.620Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/edit-microscope/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.620Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/audit-siblings/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.620Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/check-vault-routing/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.621Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/date-context/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.621Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/ensure-daily-note/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.621Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-weather/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.621Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-calendar/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.621Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-gmail/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.621Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-imessage/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.622Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-finance-yesterday/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.622Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-finance-cc-today/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.622Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-cc-debt-snapshot/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.622Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-projects/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.623Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-threads/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.623Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-semantic-related/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.623Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/write-run-note-morning-briefing/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.623Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/write-run-note-eod-review/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.623Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/write-run-note-midday-tripwire/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.624Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/write-run-note-finance/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.624Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/write-run-note-weekly-review/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.624Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/write-run-note-monthly-review/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.624Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/write-summary-invoice-prep/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.624Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/write-summary-fte-status/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.625Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/update-active-threads/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.625Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/update-active-projects/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.625Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/update-weekly-snapshot/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.625Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/run-audit-receipt/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.625Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/weekly.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.625Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/monthly.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.625Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/scaffold-timeframes/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.626Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/read-user-preferences/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.626Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/plan-dispatch/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.626Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-from-served-by/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.626Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/capture-tick/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.627Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/synthesize-day/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.627Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/read-memory/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.627Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/capture-frame-drift/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.627Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/learn-from-checks/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.627Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/check-heartbeat/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.628Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-semantic-memory/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.628Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/compose-body/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.628Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/resolve-person/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.628Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/synthesize-week/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.628Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/discover-people/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.628Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/find-missing-people/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.629Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/sync-scheduled-jobs/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.629Z"
+    },
+    {
+      "event": "claude_md_regen",
+      "step": "claude_md_regen",
+      "tables_updated": [
+        "directory-map",
+        "resolvers",
+        "skills-index"
+      ],
+      "rows_total": 23,
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:24.630Z"
+    },
+    {
+      "event": "info",
+      "step": "customjs_settings",
+      "action": "skipped_user_customized",
+      "jsFolder": "ranch/Scripts",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.505Z"
+    },
+    {
+      "event": "info",
+      "step": "app_settings",
+      "action": "applied",
+      "keys_written": [
+        "alwaysOpenInNewTab",
+        "defaultViewMode",
+        "livePreview",
+        "propertiesInDocument"
+      ],
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.507Z"
+    },
+    {
+      "event": "aggregate",
+      "step": "claude_surface_aggregate",
+      "contributions": 7,
+      "entries": 91,
+      "rejected": 0,
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.510Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/audit.md",
+      "owner": "audit",
+      "version": "0.3.0",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.511Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/audit/drift/SKILL.md",
+      "owner": "audit",
+      "version": "0.3.0",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.511Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/install.md",
+      "owner": "platform-claude",
+      "version": "0.1.2",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.511Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/upgrade.md",
+      "owner": "platform-claude",
+      "version": "0.1.2",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.512Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/bootstrap.md",
+      "owner": "platform-claude",
+      "version": "0.1.2",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.512Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/platform/install/SKILL.md",
+      "owner": "platform-claude",
+      "version": "0.1.2",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.512Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/platform/upgrade/SKILL.md",
+      "owner": "platform-claude",
+      "version": "0.1.2",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.512Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/platform/bootstrap/SKILL.md",
+      "owner": "platform-claude",
+      "version": "0.1.2",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.512Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/project.md",
+      "owner": "project",
+      "version": "1.14.0",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.513Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/project/new-project/SKILL.md",
+      "owner": "project",
+      "version": "1.14.0",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.513Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/daily.md",
+      "owner": "daily",
+      "version": "0.13.6",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.513Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/daily/open-today/SKILL.md",
+      "owner": "daily",
+      "version": "0.13.6",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.513Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/meetings.md",
+      "owner": "meetings",
+      "version": "0.7.0",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.513Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/meetings/new-meeting/SKILL.md",
+      "owner": "meetings",
+      "version": "0.7.0",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.514Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/scratch.md",
+      "owner": "scratch",
+      "version": "0.5.2",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.514Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/scratch/new-scratch/SKILL.md",
+      "owner": "scratch",
+      "version": "0.5.2",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.514Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/cowork.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.514Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/bootstrap-vault/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.514Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/morning-briefing/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.515Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/midday-tripwire/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.515Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/eod-review/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.515Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/weekly-review/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.515Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/monthly-review/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.515Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/reconcile-cowork/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.516Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/onboard-scheduled-jobs/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.516Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/context-builder/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.516Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/edit-microscope/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.516Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/audit-siblings/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.516Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/check-vault-routing/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.517Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/date-context/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.517Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/ensure-daily-note/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.517Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-weather/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.517Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-calendar/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.517Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-gmail/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.517Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-imessage/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.518Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-finance-yesterday/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.518Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-finance-cc-today/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.518Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-cc-debt-snapshot/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.518Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-projects/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.518Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-threads/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.519Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-semantic-related/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.519Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/write-run-note-morning-briefing/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.519Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/write-run-note-eod-review/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.519Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/write-run-note-midday-tripwire/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.519Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/write-run-note-finance/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.520Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/write-run-note-weekly-review/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.520Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/write-run-note-monthly-review/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.520Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/write-summary-invoice-prep/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.520Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/write-summary-fte-status/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.520Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/update-active-threads/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.520Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/update-active-projects/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.521Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/update-weekly-snapshot/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.521Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/run-audit-receipt/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.521Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/weekly.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.521Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/monthly.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.521Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/scaffold-timeframes/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.521Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/read-user-preferences/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.522Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/plan-dispatch/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.522Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-from-served-by/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.522Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/capture-tick/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.522Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/synthesize-day/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.522Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/read-memory/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.523Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/capture-frame-drift/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.523Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/learn-from-checks/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.523Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/check-heartbeat/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.523Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-semantic-memory/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.523Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/compose-body/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.524Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/resolve-person/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.524Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/synthesize-week/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.524Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/discover-people/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.524Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/find-missing-people/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.524Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/sync-scheduled-jobs/SKILL.md",
+      "owner": "cowork",
+      "version": "0.35.4",
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.525Z"
+    },
+    {
+      "event": "claude_md_regen",
+      "step": "claude_md_regen",
+      "tables_updated": [
+        "directory-map",
+        "resolvers",
+        "skills-index"
+      ],
+      "rows_total": 23,
+      "git_commit": "2f5ad461b094d64a6e1964701c5335b3e9c5335b",
+      "git_tag": "v0.97.4",
+      "git_dirty": true,
+      "attempted_at": "2026-06-10T18:41:56.525Z"
     }
   ],
-  "workshop_version": "0.97.3",
-  "workshop_path": "/opt/homebrew/Cellar/sauce/0.93.0/libexec"
+  "workshop_version": "0.97.4",
+  "workshop_path": "/opt/homebrew/Cellar/sauce/0.97.4/libexec"
 }
 
---- Notices (2) ---
-  cowork@0.8.0 installed (FA-5 canonical-vocab adoption). 3 note templates now emit canonical created_at: (ISO+TZ) replacing legacy created:. Monthly Note adds canonical month: "YYYY-MM" alongside friendly month_label:. Discriminator tags (cowork-daily/cowork-weekly/cowork-monthly) stripped from templates. 12 of 13 rule_fragments now extend _canonical-vocab. Existing cowork notes in your vault should be migrated via: sauce migrate-frontmatter --vault <vault> --blueprint cowork --apply. Helper code unchanged.
+--- Notices (1) ---
   platformInstall: complete.
 
 --- Suggester calls (0) ---
 
 --- Plugin-data writes (0) ---
 
---- New history entries this run (93) ---
-  {"event":"info","step":"customjs_settings","action":"skipped_user_customized","jsFolder":"ranch/Scripts","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.023Z"}
-  {"event":"info","step":"app_settings","action":"applied","keys_written":["alwaysOpenInNewTab","defaultViewMode","livePreview","propertiesInDocument"],"git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.025Z"}
-  {"event":"info","step":"module_directory","name":"cowork","path":"spice/cowork","action":"already_exists","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.028Z"}
-  {"event":"info","step":"file_overwrite","name":"cowork","dest":"spice/cowork/context/user-preferences.md","action":"skipped_materialize_once","message":"file declares materialize_once=true and dest exists; preserving user content","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.029Z"}
-  {"event":"info","step":"file_overwrite","name":"cowork","dest":"spice/cowork/prompts/morning-briefing.md","action":"skipped_materialize_once","message":"file declares materialize_once=true and dest exists; preserving user content","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.040Z"}
-  {"event":"info","step":"file_overwrite","name":"cowork","dest":"spice/cowork/prompts/eod-review.md","action":"skipped_materialize_once","message":"file declares materialize_once=true and dest exists; preserving user content","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.040Z"}
-  {"event":"info","step":"file_overwrite","name":"cowork","dest":"spice/cowork/prompts/weekly-review.md","action":"skipped_materialize_once","message":"file declares materialize_once=true and dest exists; preserving user content","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.040Z"}
-  {"event":"info","step":"file_overwrite","name":"cowork","dest":"spice/cowork/prompts/monthly-review.md","action":"skipped_materialize_once","message":"file declares materialize_once=true and dest exists; preserving user content","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.040Z"}
-  {"event":"info","step":"file_overwrite","name":"cowork","dest":"spice/cowork/prompts/midday-tripwire.md","action":"skipped_materialize_once","message":"file declares materialize_once=true and dest exists; preserving user content","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.040Z"}
-  {"event":"replace","step":"file_overwrite","name":"cowork","dest":"spice/cowork/helpers/compose-scheduled-job-wrappers-helper.js","prior_sha":"aacea5afffc26b0684a5cc05f7b4d795d4bff50e3286ad8d361d7c4109ad490d","new_sha":"aa1a635301283d464dc4a1858c42f77e1a66d7bc74c8bea3dd19cdfe61c7d329","bak_path":"spice/cowork/helpers/compose-scheduled-job-wrappers-helper.js.bak","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.053Z"}
-  {"event":"replace","step":"file_overwrite","name":"cowork","dest":"spice/cowork/data/orchestrator-instructions/_shared-clauses.md","prior_sha":"57053f15026ee53219131e09a053edeef9c6ec4bf94c203da2ffa66b7a9e95d4","new_sha":"67262fd026ad0c8fd09dde91bb920e613e2652387b46f6b242cd55aed2d19786","bak_path":"spice/cowork/data/orchestrator-instructions/_shared-clauses.md.bak","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.057Z"}
-  {"event":"replace","step":"file_overwrite","name":"cowork","dest":"spice/cowork/data/orchestrator-instructions/morning-briefing.md","prior_sha":"b8b1386f99d7fccd029e5007c82394d650f1f26cc88b53347f953fccef4be2e2","new_sha":"867ca82676794b56c00ee0af62834a2f7b80920d4135a0db052c91d5b44cfb54","bak_path":"spice/cowork/data/orchestrator-instructions/morning-briefing.md.bak","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.058Z"}
-  {"event":"replace","step":"file_overwrite","name":"cowork","dest":"spice/cowork/data/orchestrator-instructions/midday-tripwire.md","prior_sha":"48cf6720e8975d51d3d597dd532e2f9abe4d0d25c84acf20991f7c83cb75b684","new_sha":"89e2c24aa52ec09ad2d8e97a34470a19a96a2d29fca04dea5af7552817027a60","bak_path":"spice/cowork/data/orchestrator-instructions/midday-tripwire.md.bak","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.058Z"}
-  {"event":"replace","step":"file_overwrite","name":"cowork","dest":"spice/cowork/data/orchestrator-instructions/eod-review.md","prior_sha":"c8576b95aec6cb9ac9c02542e9c620f0ad77be20208254e1d96aab31b6cee04a","new_sha":"c5a2072600214fe7deafcd552d0c4dff460f9cc5e4517645db92a39fa0d736e0","bak_path":"spice/cowork/data/orchestrator-instructions/eod-review.md.bak","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.059Z"}
-  {"event":"replace","step":"file_overwrite","name":"cowork","dest":"spice/cowork/data/orchestrator-instructions/weekly-review.md","prior_sha":"2370c13cf607b34514894c6438fd864756541238aa5d48900bf76ca0ece1802d","new_sha":"eca0fd2fd6bdb596983d21f89e67c8465f15cf4836956138b80d2fbbe62791b5","bak_path":"spice/cowork/data/orchestrator-instructions/weekly-review.md.bak","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.060Z"}
-  {"event":"replace","step":"file_overwrite","name":"cowork","dest":"spice/cowork/data/orchestrator-instructions/monthly-review.md","prior_sha":"766a58448b8e12f77e66da452d5b359af04db90f9f2d9dc13543d2ad28f98158","new_sha":"936ba770d2c3b11ea91b3b0c80917894e6f4c60bdba73c825f8bfc04c56baad5","bak_path":"spice/cowork/data/orchestrator-instructions/monthly-review.md.bak","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.061Z"}
-  {"event":"replace","step":"file_overwrite","name":"cowork","dest":"spice/cowork/data/orchestrator-instructions/reconcile-cowork.md","prior_sha":"d8afc63059bba4765ed3d809cdd2bcf2d901bb4b0c311f52697008cd536d4474","new_sha":"27037754ffd1632f23e45f4d56289670ffeadf93fcd6df58de814753217f74d2","bak_path":"spice/cowork/data/orchestrator-instructions/reconcile-cowork.md.bak","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.062Z"}
-  {"event":"info","step":"scaffold_foundational","name":"cowork","item":"cowork","id":"templater-obsidian","action":"skipped_already_present","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.071Z"}
-  {"event":"install","kind":"blueprint","name":"cowork","version":"0.35.3","installed_at":"2026-06-10T16:52:56.072Z","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true}
-  {"event":"aggregate","step":"claude_surface_aggregate","contributions":7,"entries":91,"rejected":0,"git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.073Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"command","dest":".claude/commands/audit.md","owner":"audit","version":"0.3.0","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.073Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/audit/drift/SKILL.md","owner":"audit","version":"0.3.0","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.074Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"command","dest":".claude/commands/install.md","owner":"platform-claude","version":"0.1.2","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.074Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"command","dest":".claude/commands/upgrade.md","owner":"platform-claude","version":"0.1.2","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.074Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"command","dest":".claude/commands/bootstrap.md","owner":"platform-claude","version":"0.1.2","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.074Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/platform/install/SKILL.md","owner":"platform-claude","version":"0.1.2","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.074Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/platform/upgrade/SKILL.md","owner":"platform-claude","version":"0.1.2","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.075Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/platform/bootstrap/SKILL.md","owner":"platform-claude","version":"0.1.2","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.075Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"command","dest":".claude/commands/project.md","owner":"project","version":"1.14.0","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.075Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/project/new-project/SKILL.md","owner":"project","version":"1.14.0","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.077Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"command","dest":".claude/commands/daily.md","owner":"daily","version":"0.13.6","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.077Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/daily/open-today/SKILL.md","owner":"daily","version":"0.13.6","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.078Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"command","dest":".claude/commands/meetings.md","owner":"meetings","version":"0.7.0","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.078Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/meetings/new-meeting/SKILL.md","owner":"meetings","version":"0.7.0","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.078Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"command","dest":".claude/commands/scratch.md","owner":"scratch","version":"0.5.2","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.078Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/scratch/new-scratch/SKILL.md","owner":"scratch","version":"0.5.2","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.078Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"command","dest":".claude/commands/cowork.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.079Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/bootstrap-vault/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.079Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/morning-briefing/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.079Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/midday-tripwire/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.079Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/eod-review/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.079Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/weekly-review/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.080Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/monthly-review/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.080Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/reconcile-cowork/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.080Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/onboard-scheduled-jobs/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.080Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/context-builder/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.081Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/edit-microscope/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.081Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/audit-siblings/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.081Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/check-vault-routing/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.081Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/date-context/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.081Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/ensure-daily-note/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.082Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/gather-weather/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.082Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/gather-calendar/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.082Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/gather-gmail/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.082Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/gather-imessage/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.082Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/gather-finance-yesterday/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.083Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/gather-finance-cc-today/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.083Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/gather-cc-debt-snapshot/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.083Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/gather-projects/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.083Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/gather-threads/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.084Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/gather-semantic-related/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.084Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/write-run-note-morning-briefing/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.084Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/write-run-note-eod-review/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.084Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/write-run-note-midday-tripwire/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.084Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/write-run-note-finance/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.085Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/write-run-note-weekly-review/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.085Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/write-run-note-monthly-review/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.085Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/write-summary-invoice-prep/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.085Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/write-summary-fte-status/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.085Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/update-active-threads/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.086Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/update-active-projects/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.086Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/update-weekly-snapshot/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.086Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/run-audit-receipt/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.086Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"command","dest":".claude/commands/weekly.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.086Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"command","dest":".claude/commands/monthly.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.087Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/scaffold-timeframes/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.087Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/read-user-preferences/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.087Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/plan-dispatch/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.087Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/gather-from-served-by/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.087Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/capture-tick/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.088Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/synthesize-day/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.088Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/read-memory/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.088Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/capture-frame-drift/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.088Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/learn-from-checks/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.089Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/check-heartbeat/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.089Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/gather-semantic-memory/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.089Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/compose-body/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.089Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/resolve-person/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.089Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/synthesize-week/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.090Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/discover-people/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.090Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/find-missing-people/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.090Z"}
-  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/sync-scheduled-jobs/SKILL.md","owner":"cowork","version":"0.35.3","git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.090Z"}
-  {"event":"claude_md_regen","step":"claude_md_regen","tables_updated":["directory-map","resolvers","skills-index"],"rows_total":23,"git_commit":"26347a5f7735cb5d2bb610b5822184d1a6d7ac4b","git_tag":null,"git_dirty":true,"attempted_at":"2026-06-10T16:52:56.091Z"}
+--- New history entries this run (76) ---
+  {"event":"info","step":"customjs_settings","action":"skipped_user_customized","jsFolder":"ranch/Scripts","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.505Z"}
+  {"event":"info","step":"app_settings","action":"applied","keys_written":["alwaysOpenInNewTab","defaultViewMode","livePreview","propertiesInDocument"],"git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.507Z"}
+  {"event":"aggregate","step":"claude_surface_aggregate","contributions":7,"entries":91,"rejected":0,"git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.510Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"command","dest":".claude/commands/audit.md","owner":"audit","version":"0.3.0","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.511Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/audit/drift/SKILL.md","owner":"audit","version":"0.3.0","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.511Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"command","dest":".claude/commands/install.md","owner":"platform-claude","version":"0.1.2","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.511Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"command","dest":".claude/commands/upgrade.md","owner":"platform-claude","version":"0.1.2","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.512Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"command","dest":".claude/commands/bootstrap.md","owner":"platform-claude","version":"0.1.2","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.512Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/platform/install/SKILL.md","owner":"platform-claude","version":"0.1.2","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.512Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/platform/upgrade/SKILL.md","owner":"platform-claude","version":"0.1.2","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.512Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/platform/bootstrap/SKILL.md","owner":"platform-claude","version":"0.1.2","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.512Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"command","dest":".claude/commands/project.md","owner":"project","version":"1.14.0","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.513Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/project/new-project/SKILL.md","owner":"project","version":"1.14.0","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.513Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"command","dest":".claude/commands/daily.md","owner":"daily","version":"0.13.6","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.513Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/daily/open-today/SKILL.md","owner":"daily","version":"0.13.6","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.513Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"command","dest":".claude/commands/meetings.md","owner":"meetings","version":"0.7.0","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.513Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/meetings/new-meeting/SKILL.md","owner":"meetings","version":"0.7.0","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.514Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"command","dest":".claude/commands/scratch.md","owner":"scratch","version":"0.5.2","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.514Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/scratch/new-scratch/SKILL.md","owner":"scratch","version":"0.5.2","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.514Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"command","dest":".claude/commands/cowork.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.514Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/bootstrap-vault/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.514Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/morning-briefing/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.515Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/midday-tripwire/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.515Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/eod-review/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.515Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/weekly-review/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.515Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/monthly-review/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.515Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/reconcile-cowork/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.516Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/onboard-scheduled-jobs/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.516Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/context-builder/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.516Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/edit-microscope/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.516Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/audit-siblings/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.516Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/check-vault-routing/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.517Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/date-context/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.517Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/ensure-daily-note/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.517Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/gather-weather/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.517Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/gather-calendar/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.517Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/gather-gmail/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.517Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/gather-imessage/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.518Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/gather-finance-yesterday/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.518Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/gather-finance-cc-today/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.518Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/gather-cc-debt-snapshot/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.518Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/gather-projects/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.518Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/gather-threads/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.519Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/gather-semantic-related/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.519Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/write-run-note-morning-briefing/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.519Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/write-run-note-eod-review/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.519Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/write-run-note-midday-tripwire/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.519Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/write-run-note-finance/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.520Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/write-run-note-weekly-review/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.520Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/write-run-note-monthly-review/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.520Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/write-summary-invoice-prep/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.520Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/write-summary-fte-status/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.520Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/update-active-threads/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.520Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/update-active-projects/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.521Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/update-weekly-snapshot/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.521Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/run-audit-receipt/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.521Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"command","dest":".claude/commands/weekly.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.521Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"command","dest":".claude/commands/monthly.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.521Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/scaffold-timeframes/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.521Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/read-user-preferences/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.522Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/plan-dispatch/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.522Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/gather-from-served-by/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.522Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/capture-tick/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.522Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/synthesize-day/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.522Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/read-memory/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.523Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/capture-frame-drift/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.523Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/learn-from-checks/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.523Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/check-heartbeat/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.523Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/gather-semantic-memory/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.523Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/compose-body/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.524Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/skills/resolve-person/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.524Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/synthesize-week/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.524Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/discover-people/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.524Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/find-missing-people/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.524Z"}
+  {"event":"claude_surface_install","step":"claude_surface_install","kind":"skill","dest":".claude/skills/cowork/sync-scheduled-jobs/SKILL.md","owner":"cowork","version":"0.35.4","git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.525Z"}
+  {"event":"claude_md_regen","step":"claude_md_regen","tables_updated":["directory-map","resolvers","skills-index"],"rows_total":23,"git_commit":"2f5ad461b094d64a6e1964701c5335b3e9c5335b","git_tag":"v0.97.4","git_dirty":true,"attempted_at":"2026-06-10T18:41:56.525Z"}
 
---- Content overwrites (8) ---
-  spice/cowork/helpers/compose-scheduled-job-wrappers-helper.js  aacea5af..aa1a6353  (bak: spice/cowork/helpers/compose-scheduled-job-wrappers-helper.js.bak)
-  spice/cowork/data/orchestrator-instructions/_shared-clauses.md  57053f15..67262fd0  (bak: spice/cowork/data/orchestrator-instructions/_shared-clauses.md.bak)
-  spice/cowork/data/orchestrator-instructions/morning-briefing.md  b8b1386f..867ca826  (bak: spice/cowork/data/orchestrator-instructions/morning-briefing.md.bak)
-  spice/cowork/data/orchestrator-instructions/midday-tripwire.md  48cf6720..89e2c24a  (bak: spice/cowork/data/orchestrator-instructions/midday-tripwire.md.bak)
-  spice/cowork/data/orchestrator-instructions/eod-review.md  c8576b95..c5a20726  (bak: spice/cowork/data/orchestrator-instructions/eod-review.md.bak)
-  spice/cowork/data/orchestrator-instructions/weekly-review.md  2370c13c..eca0fd2f  (bak: spice/cowork/data/orchestrator-instructions/weekly-review.md.bak)
-  spice/cowork/data/orchestrator-instructions/monthly-review.md  766a5844..936ba770  (bak: spice/cowork/data/orchestrator-instructions/monthly-review.md.bak)
-  spice/cowork/data/orchestrator-instructions/reconcile-cowork.md  d8afc630..27037754  (bak: spice/cowork/data/orchestrator-instructions/reconcile-cowork.md.bak)
+--- Content overwrites (0) ---
 
 --- Pre-install deletes (0) ---
 
@@ -143051,7 +146941,7 @@ RESULTS
 --- Templater folder-templates writes (0) ---
 
 --- Git-fields assertion ---
-  OK: 93 new history entries; git fields present on all; at least one has a real 40-char sha.
+  OK: 76 new history entries; git fields present on all; at least one has a real 40-char sha.
 
 --- Verdict ---
   clean run — exit 0

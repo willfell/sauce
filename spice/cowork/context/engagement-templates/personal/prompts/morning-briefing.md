@@ -10,7 +10,7 @@ updated_by: cowork@0.11.0 installer
 
 Compose today's morning briefing using the gather outputs already collected (weather, calendar, gmail, imessage, finance-yesterday, cc-debt-snapshot, projects, threads).
 
-## Today at a glance
+## What matters today
 
 One paragraph from the weather + calendar outputs — temperature/conditions, then 2–3 line items naming today's biggest commitments.
 

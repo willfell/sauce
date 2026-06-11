@@ -880,6 +880,59 @@ After the update, verify by checking that `.claude/skills/cowork/skills/gather-s
 
 **Optional post-deploy validation (FLN-v87-1).** The `min_similarity: 0.45` threshold is a design-time guess. Review the first 3-5 morning briefings on each consumer vault: if Echoes callouts surface obviously-unrelated matches, the threshold should be raised; if relevant matches are consistently filtered out (callout omits even on days with clear historical analogues), the threshold should be lowered. A v0.87.1 PATCH can ship the empirically-validated threshold.
 
+## Upgrading from v0.97.4 to v0.98.0
+
+`brew upgrade sauce` distributes the new release. Existing consumers run `sauce update --bump-pins` from inside each vault. v0.98.0 bundles the **synopsis-density rewrite MINOR**: a brief-shape contract change at the orchestrator-instructions layer that shifts all five cadence atomic notes (morning-briefing, midday-tripwire, eod-review, weekly-review, monthly-review) from a coverage-emphasis shape (every per-kind callout open by default; `[!tip] <closing>` at the bottom) to a prediction-emphasis shape (one OPEN `[!info]+ <per-cadence title>` lead callout carrying ≤80-word predictive synopsis; all per-kind callouts collapsed by default behind a click; bottom closing callout REMOVED).
+
+**Per-cadence lead callout titles (NEW):**
+
+- morning-briefing → `> [!info]+ What matters today`
+- midday-tripwire → `> [!info]+ What changed since morning`
+- eod-review → `> [!info]+ What landed today`
+- weekly-review → `> [!info]+ Where the week landed`
+- monthly-review → `> [!info]+ Where the month landed`
+
+**What auto-installs on the first `sauce update --bump-pins` after upgrade:**
+
+- 5× `spice/cowork/data/orchestrator-instructions/<cadence>.md` with the new lead-callout strings (`[!info]+ <per-cadence title>`) + closing_md composition REMOVED + per-kind contract emit flipped from `[!example]+` (open) to `[!example]-` (collapsed) + NEW `## Synopsis composition rules (v0.98.0 contract)` section at EOF.
+- 3× `spice/cowork/context/engagement-templates/{personal,w2-fte,consulting}/prompts/morning-briefing.md` with `## Today at a glance` H2 renamed to `## What matters today` + `## Today's focus` H2 retired (per-bundle prose merged in). The other 12 engagement-template prompts (3 templates × 4 cadences) are author-content and were left untouched per scope-narrowing discovery — see result doc.
+- `spice/cowork/helpers/compose-body-helper.js` with the dropped `closing_md` contract:
+  - `_validateInput` no longer requires `closing_md` (legacy inputs containing the key tolerated as no-op)
+  - `_wrapCallout` emits `[!<callout_type>]- <title>` (was `+` — per-kind callouts now collapsed by default)
+  - `_computeAssertions` drops the closing-first-line assertion
+  - `composeBody` no longer destructures `closing_md` or emits the closing section
+- 9 compose-body golden fixtures under `helpers/fixtures/compose-body/case-*/` regenerated (input.json + expected-body.md + expected-assertions.json) — informational for consumers, not user-edited.
+- `ranch/platform-subscription.json` workshop_version `0.97.4` → `0.98.0` + cowork pin `0.35.4` → `0.36.0` (lockstep per v0.93.3 lesson 5.4).
+
+**What does NOT change (backward-compat):**
+
+- `scheduled-job-contract.json` `contract_version` UNCHANGED at `0.35.1` — the wrapper contract shape (substitution_tokens, shared_clauses, per-cadence schema) didn't change; only the orchestrator-instructions bodies' inline-composition rules changed. Landmine #20 lockstep applies on contract DATA shape; byte-identical contract data doesn't require a bump.
+- vault-config.md + engagement records continue to work unchanged. No schema delta.
+- `learned_weights:` shape stays at schema_version 2 (capture only continues to flow through Rail L's `[!todo]+ Was today useful?` ticks; v0.98.1 expands this surface with per-item ticks + free-text capture; v0.98.2 closes the loop with ingest).
+
+**Cloud-sync (Rail A).** Run `/cowork sync-scheduled-jobs` once per vault from claude.ai's Cowork UI after `sauce update --bump-pins` completes. Rail A pushes new wrapper bodies (substitution-token refresh against new orchestrator-instructions sources) via the scheduled-tasks MCP. Schedule preservation invariant holds (cron field NEVER touched). Skipping this step means cron-fired briefs continue using the OLD wrapper bodies (with the old `[!info]- Today at a glance` synopsis title + the old `[!tip] Today's focus` closing callout); structurally still valid but doesn't carry the v0.98.0 contract.
+
+**First-fire grading window.** Next scheduled cron fire AFTER deploy:
+
+- Morning-briefing on day after deploy emits `> [!info]+ What matters today` as the lead callout, OPEN by default, ≤80 words, first sentence carrying a concrete blocking action token (PR number / person + decision / inbound + ask) — NEVER opens with "Today is..." / "You have..." / "There are N...".
+- Per-kind callouts (chat / calendar / github / ado / email / finance per the engagement's priorities) all render `[!<type>]-` (collapsed by default behind a click).
+- No `> [!tip] Today's focus` callout at the bottom.
+- On empty-day (no actionable items, no inbox debt, no blocking calendar conflicts), synopsis says "Quiet day —" or equivalent plain-acknowledgment (NO padding).
+
+**Quality observability window (7 days post-deploy).** Grade synopsis quality of every fired brief in both consumer vaults daily:
+
+- Synopsis word count distribution (target: 50-60; hard cap 80; grade overshoots as v0.98.0.x PATCH candidate).
+- First-sentence concrete-token presence (PR#, person + decision, inbound + ask).
+- Cross-kind connective tissue when present.
+- Empty-day fallback prose quality (no padding).
+- Per-kind callout default-collapsed semantics held across cadences.
+
+**Roll-forward on regression.** If structural regression (lead callout missing / closing callout re-emerges / per-kind callouts back to `+`), v0.98.0.x PATCH revises composition rules. If prose-quality regression (synopsis lecture-mode instead of prediction-mode), v0.98.0.x PATCH tightens the OI rule prose. The 9 compose-body golden fixtures + the 11 new HC-V0980 assert layer guard against structural regressions detectable from the rendered body.
+
+**Coming in v0.98.1.** Questionnaire expansion: stable item-IDs (`^item-<key>` block-IDs on each surfaced person-block / PR-row / ADO-story-row); per-item ticks in Rail L; per-kind frequency knobs (`less / same / more`); free-text feedback capture (fenced code block + sentinel HTML comment). Capture only; no parse-back or ingest yet — v0.98.2 closes the loop via reconciler ingest into `learned_weights`.
+
+**Restart Obsidian.** Not strictly required for v0.98.0 (no new plugins, no startup-script class additions), but a restart picks up the new materialized orchestrator-instructions + helper.js bodies for any claude-skills-aware tooling running inside the vault.
+
 ## Upgrading from v0.95.0 to v0.95.1
 
 `brew upgrade sauce` distributes the new release. Existing consumers run `sauce update --bump-pins` from inside each vault. v0.95.1 bundles the **cowork-anti-echo MINOR**: three composable knobs intervening at the three closure points of the cowork memory echo loop — Knob 1 `render_aspects.anti_echo` per-fire callout, Knob 2 `cowork:capture-frame-drift` background tripwire, Knob 3 `lens_shift` weekly cold-MB cadence. All three default OFF in every engagement-type (Approach B opt-in everywhere); bootstrap-vault interview grows 3 NEW Y/N opt-in questions.

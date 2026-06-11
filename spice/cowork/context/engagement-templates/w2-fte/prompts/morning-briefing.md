@@ -10,7 +10,7 @@ updated_by: cowork@0.11.0 installer
 
 Compose today's morning briefing for the w2 engagement using the gather outputs (calendar scoped to `calendar_id`, gmail scoped to `gmail_label`, projects with kanban_projects: include, threads).
 
-## Today at a glance
+## What matters today
 
 One paragraph — today's headline meeting + tone of the day (light vs back-to-back) drawn from calendar + projects gather outputs.
 

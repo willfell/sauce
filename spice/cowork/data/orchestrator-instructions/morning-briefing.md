@@ -131,7 +131,7 @@ callout and NO drift_warning injection.
 
 > **MANDATORY:** When `plan.dispatch_mode == "prefs"`, execute the priority loop for
 > EVERY entry in `plan.dispatch_plan`. Do NOT skip the loop in favor of memory-tick
-> synthesis. Memory ticks are SUPPLEMENTARY context for the `[!info]- Today at a glance`
+> synthesis. Memory ticks are SUPPLEMENTARY context for the `[!info]+ What matters today`
 > synopsis section; they DO NOT replace live MCP gather output. When a kind's
 > `action == "warn"`, emit the warning callout in-position via `composeWarningCallout`.
 > Failing to fire the priority loop means the dispatch contract's "Known people in
@@ -188,15 +188,13 @@ empty.
 
 {{shared.voice_clause}}
 
-3a. **Prep synopsis_md.** Compose the `> [!info]- Today at a glance` callout per
-    `prompt_body` instructions (voice-shaped one-paragraph synopsis distilled from gather
-    outputs). When `semantic_index_age` is non-null, append `> Semantic index age: <age>m`
+3a. **Prep synopsis_md.** Compose the `> [!info]+ What matters today` callout per
+    `prompt_body` instructions AND the § Synopsis composition rules below
+    (voice-shaped one-paragraph synopsis distilled from gather outputs; ≤80
+    words; first-sentence-concrete; empty-day "Quiet day" fallback). When
+    `semantic_index_age` is non-null, append `> Semantic index age: <age>m`
     as the last `> ` line inside the synopsis callout. Empty-prompt stub case:
-    `synopsis_md = "> [!info]- Today at a glance\n> (Prompt body empty — edit spice/cowork/prompts/morning-briefing.md to customize what this run emits.)"`.
-
-3b. **Prep closing_md.** Compose the `> [!tip] Today's focus` callout per `prompt_body`
-    instructions (2-3 sentence focus paragraph + concrete first action). Empty-prompt
-    stub: `closing_md = "> [!tip] Today's focus\n> Edit \`spice/cowork/prompts/morning-briefing.md\` to define what this scheduled job should emit when it fires."`.
+    `synopsis_md = "> [!info]+ What matters today\n> (Prompt body empty — edit spice/cowork/prompts/morning-briefing.md to customize what this run emits.)"`.
 
 3c. **Prep memory_callouts struct.** Use existing helpers:
     - `yesterday_md` ← `composeMemoryCallouts(output_yesterday, output_overnight).yesterdayCalloutMd`
@@ -226,7 +224,7 @@ empty.
 3g. **Invoke composeBody.** READ `<vault>/.claude/skills/cowork/skills/compose-body/SKILL.md`
     in full and follow its `## Compose` section with the full payload (frontmatter +
     nav_buttons_block + synopsis_md + memory_callouts + ordered_blocks +
-    engagement_type_blocks + closing_md + excluded_themes + pending_confirmations +
+    engagement_type_blocks + excluded_themes + pending_confirmations +
     render_aspects + voice_contract + render_aspects_applied + memory_used + plan_dispatch +
     learning_enabled + surfaced_kinds_for_rating + prior_rating_state + day). Capture
     `{ body_md, sidecar_json, status }`.
@@ -424,3 +422,20 @@ Cohesion regression is caught by HC-V0950-COHESION-A1..A5. Single-source-of-trut
 regression is caught by HC-V0970-O-1..12.
 
 {{shared.done_block}}
+
+## Synopsis composition rules (v0.98.0 contract)
+
+The synopsis is a single paragraph rendered inside a `> [!info]+ <cadence-title>` callout. The callout is OPEN by default; it is the reader's first stop and is expected to carry the load of the brief on its own.
+
+Compose the paragraph per the following rules. Voice contract (vibe, personality, hard_rules) still applies on top of these rules; structural rules WIN on conflict.
+
+  1. Length: ≤ 80 words. Hard cap. Prefer 50-60.
+  2. First sentence names the highest-blocking action concretely — a PR number, a person + decision, an inbound + ask. Never opens with "Today is...", "You have...", "There are N...".
+  3. Thread cross-kind dependencies as connective tissue when present (e.g. "...which gates today's 10am with Stefan..."). Don't enumerate per-kind ("first chat, then calendar, then..."); the reader can drill into each `[!info]-` / `[!tip]-` / `[!example]-` per-kind callout.
+  4. Beyond the lead action, name at most 3 distinct must-knows. Order by blocking-effect, not by kind.
+  5. If the day is genuinely quiet (no actionable items, no inbox debt, no blocking calendar conflicts), say so PLAINLY: "Quiet day — standup + Stefan 1:1, nothing else needs attention." Do not pad.
+  6. Predict the next user action; do not describe the last LLM gather.
+
+### Per-kind callout default-expand
+
+Every per-kind callout (chat, calendar, email, github, ado, finance, any custom kind) renders with the `-` collapse sigil, NOT `+`. The `callout_type` field from user-preferences.md (one of `[!info]`, `[!tip]`, `[!quote]`, `[!note]`, `[!example]`, `[!warning]`) is followed by `-` (e.g. `> [!info]- Chat (Teams)`). The lead synopsis callout uses `+` (open by default — see § Synopsis composition rules above). The Memory log callout stays `-` (already collapsed). The `[!quote]` callout (Memory log) stays `-`. All per-kind callouts use `-`. No `+` per-kind callouts.
