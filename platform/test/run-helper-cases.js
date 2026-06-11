@@ -8769,6 +8769,512 @@ async function caseV0981ParseFeedbackA4() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// v0.98.2 — HC-V0982-CAPTURE-* : composeFeedbackCapture v=2 (downvote list)
+// ---------------------------------------------------------------------------
+
+function _v0982CaptureInput(overrides) {
+  return Object.assign({
+    cadence: "eod-review",
+    day: "2026-06-12",
+    surfaced_items_by_kind: {
+      chat: [
+        { id: "chat:c1:t1", label: "Zhenzhen PR #353 thread" },
+        { id: "person:Ben Tanner", label: "Ben/Stale Doc DB infra" },
+      ],
+      github: [{ id: "github:org/repo#353", label: "PR #353 awaiting review" }],
+    },
+    prior_md: null,
+    knob_positions: ["less", "same", "more"],
+  }, overrides || {});
+}
+
+async function caseV0982CaptureA1() {
+  console.log(`\n--- Case HC-V0982-CAPTURE-A1: v=2 sentinel + sidecar items[] registry ---`);
+  try {
+    const { composeFeedbackCapture } = require("../blueprints/cowork/helpers/compose-feedback-capture-helper.js");
+    const r = composeFeedbackCapture(_v0982CaptureInput());
+    const hasSentinel = /<!-- cowork:feedback-capture v=2 -->/.test(r.rail_md);
+    const items = (r.sidecar_observability || {}).items || [];
+    const itemOk = items.length === 3 && items.every((it) =>
+      /^item-[a-z]+-[0-9a-f]{7}$/.test(it.item_id) && it.kind && it.identifier && it.label);
+    assertTrue(
+      "HC-V0982-CAPTURE-A1: composeFeedbackCapture emits v=2 sentinel AND sidecar_observability.items[] registry of {item_id, kind, identifier, label}",
+      hasSentinel && itemOk
+    );
+  } catch (e) {
+    assertTrue("HC-V0982-CAPTURE-A1: v=2 sentinel + items registry", false, e && e.message);
+  }
+}
+
+async function caseV0982CaptureA2() {
+  console.log(`\n--- Case HC-V0982-CAPTURE-A2: Mattered + Didn't like sections share item-IDs ---`);
+  try {
+    const { composeFeedbackCapture } = require("../blueprints/cowork/helpers/compose-feedback-capture-helper.js");
+    const r = composeFeedbackCapture(_v0982CaptureInput());
+    const mattered = [...r.rail_md.matchAll(/^> > Mattered:$/gm)].length;
+    const didnt = [...r.rail_md.matchAll(/^> > Didn't like:$/gm)].length;
+    // every item-ID appears exactly twice (once per section)
+    const ids = Object.keys(r.item_id_registry);
+    const twiceEach = ids.every((id) =>
+      [...r.rail_md.matchAll(new RegExp(`\\[\\[#\\^${id}\\|`, "g"))].length === 2);
+    assertTrue(
+      "HC-V0982-CAPTURE-A2: each surfaced kind renders `Mattered:` + `Didn't like:` sections, every item-ID wikilinked exactly twice (same IDs both lists)",
+      mattered === 2 && didnt === 2 && twiceEach
+    );
+  } catch (e) {
+    assertTrue("HC-V0982-CAPTURE-A2: two-list shape, shared IDs", false, e && e.message);
+  }
+}
+
+async function caseV0982CaptureA3() {
+  console.log(`\n--- Case HC-V0982-CAPTURE-A3: v=2 re-fire preserves ticks in BOTH lists + knob + free-text ---`);
+  try {
+    const { composeFeedbackCapture, _itemId } = require("../blueprints/cowork/helpers/compose-feedback-capture-helper.js");
+    const chatId = _itemId("chat", "chat:c1:t1");
+    const ghId = _itemId("github", "github:org/repo#353");
+    const prior = [
+      "> [!todo]+ Was today useful?",
+      "> Tick items that mattered. Set per-kind frequency. Type prose for nuance. Tomorrow's brief adjusts overnight.",
+      "> <!-- cowork:feedback-capture v=2 -->",
+      ">",
+      "> > [!summary]- Chat — items",
+      "> > Mattered:",
+      `> > - [x] [[#^${chatId}|Zhenzhen PR #353 thread]]`,
+      "> >",
+      "> > Didn't like:",
+      `> > - [ ] [[#^${chatId}|Zhenzhen PR #353 thread]]`,
+      "> >",
+      "> > **Fire chat:** `[ ] less` `[ ] same` `[x] more`",
+      ">",
+      "> > [!summary]- GitHub — items",
+      "> > Mattered:",
+      `> > - [ ] [[#^${ghId}|PR #353 awaiting review]]`,
+      "> >",
+      "> > Didn't like:",
+      `> > - [x] [[#^${ghId}|PR #353 awaiting review]]`,
+      "> >",
+      "> > **Fire GitHub:** `[ ] less` `[ ] same` `[ ] more`",
+      ">",
+      "> ### Free-text feedback",
+      ">",
+      "```feedback",
+      "less github noise please",
+      "```",
+    ].join("\n");
+    const r = composeFeedbackCapture(_v0982CaptureInput({
+      surfaced_items_by_kind: {
+        chat: [{ id: "chat:c1:t1", label: "Zhenzhen PR #353 thread" }],
+        github: [{ id: "github:org/repo#353", label: "PR #353 awaiting review" }],
+      },
+      prior_md: prior,
+    }));
+    const matteredTickKept = new RegExp(`> > - \\[x\\] \\[\\[#\\^${chatId}\\|`).test(
+      r.rail_md.split("Didn't like:")[0]);
+    const downvoteKept = new RegExp(`> > - \\[x\\] \\[\\[#\\^${ghId}\\|`).test(
+      r.rail_md.split("> > [!summary]- GitHub — items")[1] || "");
+    const knobKept = /\*\*Fire chat:\*\* `\[ \] less` `\[ \] same` `\[x\] more`/.test(r.rail_md);
+    const textKept = r.rail_md.includes("less github noise please");
+    assertTrue(
+      "HC-V0982-CAPTURE-A3: v=2 prior re-fire preserves [x] per item-ID per SECTION (mattered vs didn't-like), knob position, and free-text verbatim",
+      matteredTickKept && downvoteKept && knobKept && textKept
+    );
+  } catch (e) {
+    assertTrue("HC-V0982-CAPTURE-A3: v=2 re-fire preservation", false, e && e.message);
+  }
+}
+
+async function caseV0982CaptureA4() {
+  console.log(`\n--- Case HC-V0982-CAPTURE-A4: v=1 prior tolerated — ticks preserved, downvotes start fresh ---`);
+  try {
+    const { composeFeedbackCapture, _itemId } = require("../blueprints/cowork/helpers/compose-feedback-capture-helper.js");
+    const chatId = _itemId("chat", "chat:c1:t1");
+    const priorV1 = [
+      "> [!todo]+ Was today useful?",
+      "> Tick items that mattered. Set per-kind frequency. Type prose for nuance. Tomorrow's brief adjusts overnight.",
+      "> <!-- cowork:feedback-capture v=1 -->",
+      ">",
+      "> > [!summary]- Chat — items",
+      `> > - [x] [[#^${chatId}|Zhenzhen PR #353 thread]]`,
+      "> >",
+      "> > **Fire chat:** `[x] less` `[ ] same` `[ ] more`",
+      ">",
+      "> ### Free-text feedback",
+      ">",
+      "```feedback",
+      "carried prose",
+      "```",
+    ].join("\n");
+    const r = composeFeedbackCapture(_v0982CaptureInput({
+      surfaced_items_by_kind: { chat: [{ id: "chat:c1:t1", label: "Zhenzhen PR #353 thread" }] },
+      prior_md: priorV1,
+    }));
+    const matteredKept = new RegExp(`> > - \\[x\\] \\[\\[#\\^${chatId}\\|`).test(r.rail_md.split("Didn't like:")[0]);
+    const downvoteFresh = new RegExp(`> > - \\[ \\] \\[\\[#\\^${chatId}\\|`).test(r.rail_md.split("Didn't like:")[1] || "");
+    const v2Out = /<!-- cowork:feedback-capture v=2 -->/.test(r.rail_md);
+    assertTrue(
+      "HC-V0982-CAPTURE-A4: v=1 prior parses (ticks → Mattered preserved; Didn't like starts all-unticked); output upgrades to v=2 sentinel",
+      matteredKept && downvoteFresh && v2Out && r.rail_md.includes("carried prose")
+    );
+  } catch (e) {
+    assertTrue("HC-V0982-CAPTURE-A4: v=1 prior tolerance", false, e && e.message);
+  }
+}
+
+async function caseV0982CaptureA5() {
+  console.log(`\n--- Case HC-V0982-CAPTURE-A5: item ticked in BOTH lists → preserved + ambiguous_items flag ---`);
+  try {
+    const { composeFeedbackCapture, _itemId } = require("../blueprints/cowork/helpers/compose-feedback-capture-helper.js");
+    const chatId = _itemId("chat", "chat:c1:t1");
+    const prior = [
+      "> <!-- cowork:feedback-capture v=2 -->",
+      "> > [!summary]- Chat — items",
+      "> > Mattered:",
+      `> > - [x] [[#^${chatId}|Zhenzhen PR #353 thread]]`,
+      "> > Didn't like:",
+      `> > - [x] [[#^${chatId}|Zhenzhen PR #353 thread]]`,
+      "> > **Fire chat:** `[ ] less` `[ ] same` `[ ] more`",
+    ].join("\n");
+    const r = composeFeedbackCapture(_v0982CaptureInput({
+      surfaced_items_by_kind: { chat: [{ id: "chat:c1:t1", label: "Zhenzhen PR #353 thread" }] },
+      prior_md: prior,
+    }));
+    const bothKept = [...r.rail_md.matchAll(new RegExp(`> > - \\[x\\] \\[\\[#\\^${chatId}\\|`, "g"))].length === 2;
+    const flagged = (r.sidecar_observability.ambiguous_items || []).includes(chatId);
+    assertTrue(
+      "HC-V0982-CAPTURE-A5: both-lists-ticked item preserves both [x] in render AND lands in sidecar ambiguous_items[]",
+      bothKept && flagged
+    );
+  } catch (e) {
+    assertTrue("HC-V0982-CAPTURE-A5: ambiguous-item guard", false, e && e.message);
+  }
+}
+
+async function caseV0982CaptureA6() {
+  console.log(`\n--- Case HC-V0982-CAPTURE-A6: empty-day minimal rail (v=2) ---`);
+  try {
+    const { composeFeedbackCapture } = require("../blueprints/cowork/helpers/compose-feedback-capture-helper.js");
+    const r = composeFeedbackCapture(_v0982CaptureInput({ surfaced_items_by_kind: {} }));
+    const noKinds = !/\[!summary\]-/.test(r.rail_md) && !/Mattered:/.test(r.rail_md);
+    const minimal = /<!-- cowork:feedback-capture v=2 -->/.test(r.rail_md) && /```feedback/.test(r.rail_md);
+    const emptySidecar = r.sidecar_observability.item_count === 0
+      && Array.isArray(r.sidecar_observability.items) && r.sidecar_observability.items.length === 0;
+    assertTrue(
+      "HC-V0982-CAPTURE-A6: empty day emits lead + v=2 sentinel + free-text fence only; items[] empty",
+      noKinds && minimal && emptySidecar
+    );
+  } catch (e) {
+    assertTrue("HC-V0982-CAPTURE-A6: empty-day minimal rail", false, e && e.message);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// v0.98.2 — HC-V0982-PARSE-* : parseFeedbackCapture v=2 + suffix tolerance
+// ---------------------------------------------------------------------------
+
+async function caseV0982ParseA1() {
+  console.log(`\n--- Case HC-V0982-PARSE-A1: downvotes map extraction from v=2 markdown ---`);
+  try {
+    const { parseFeedbackCapture } = require("../blueprints/cowork/helpers/learn-from-checks-helper.js");
+    const md = [
+      "> <!-- cowork:feedback-capture v=2 -->",
+      "> > [!summary]- Chat — items",
+      "> > Mattered:",
+      "> > - [x] [[#^item-chat-a7b3c9d|Zhenzhen PR #353 thread]]",
+      "> > Didn't like:",
+      "> > - [x] [[#^item-chat-b8c4d0e|Ben/Stale Doc DB infra]]",
+      "> > **Fire chat:** `[ ] less` `[ ] same` `[x] more`",
+    ].join("\n");
+    const p = parseFeedbackCapture(md);
+    assertTrue(
+      "HC-V0982-PARSE-A1: v=2 parse yields ticks{item-chat-a7b3c9d:true}, downvotes{item-chat-b8c4d0e:true}, sentinel_version v=2, knobs{chat:more}",
+      p.sentinel_version === "v=2"
+        && p.ticks["item-chat-a7b3c9d"] === true
+        && p.downvotes["item-chat-b8c4d0e"] === true
+        && p.downvotes["item-chat-a7b3c9d"] !== true
+        && p.knobs.chat === "more"
+    );
+  } catch (e) {
+    assertTrue("HC-V0982-PARSE-A1: downvote extraction", false, e && e.message);
+  }
+}
+
+async function caseV0982ParseA2() {
+  console.log(`\n--- Case HC-V0982-PARSE-A2: v=1 markdown tolerated — downvotes empty ---`);
+  try {
+    const { parseFeedbackCapture } = require("../blueprints/cowork/helpers/learn-from-checks-helper.js");
+    const md = [
+      "> <!-- cowork:feedback-capture v=1 -->",
+      "> > [!summary]- Chat — items",
+      "> > - [x] [[#^item-chat-a7b3c9d|Zhenzhen PR #353 thread]]",
+      "> > **Fire chat:** `[ ] less` `[x] same` `[ ] more`",
+    ].join("\n");
+    const p = parseFeedbackCapture(md);
+    assertTrue(
+      "HC-V0982-PARSE-A2: v=1 markdown parses with sentinel_version v=1, ticks populated, downvotes === {} (empty object)",
+      p.sentinel_version === "v=1"
+        && p.ticks["item-chat-a7b3c9d"] === true
+        && p.downvotes && Object.keys(p.downvotes).length === 0
+    );
+  } catch (e) {
+    assertTrue("HC-V0982-PARSE-A2: v=1 tolerance", false, e && e.message);
+  }
+}
+
+async function caseV0982ParseA3() {
+  console.log(`\n--- Case HC-V0982-PARSE-A3: Tasks-plugin suffix tolerance (✅ date on tick + kind lines) ---`);
+  try {
+    const { parseFeedbackCapture, parseRatingCallout } = require("../blueprints/cowork/helpers/learn-from-checks-helper.js");
+    const mdItems = [
+      "> <!-- cowork:feedback-capture v=2 -->",
+      "> > [!summary]- Chat — items",
+      "> > Mattered:",
+      "> > - [x] [[#^item-chat-a7b3c9d|Zhenzhen PR #353 thread]] ✅ 2026-06-12",
+      "> > Didn't like:",
+      "> > - [x] [[#^item-chat-b8c4d0e|Ben/Stale Doc DB infra]] ✅ 2026-06-12",
+    ].join("\n");
+    const p = parseFeedbackCapture(mdItems);
+    const mdRating = [
+      "> [!todo]+ Was today useful?",
+      "> Tick the kinds that surfaced something you cared about.",
+      "> - [x] Chat ✅ 2026-06-10",
+      "> - [ ] Finance",
+      "> <!-- cowork:rating-block schema=1.0.0 cadence=eod-review day=2026-06-10 -->",
+    ].join("\n");
+    const r = parseRatingCallout(mdRating);
+    const chatObs = (r.observations || []).find((o) => o.kind === "chat");
+    assertTrue(
+      "HC-V0982-PARSE-A3: trailing `✅ YYYY-MM-DD` tolerated — item ticks still keyed by item-ID; parseRatingCallout extracts kind `chat` (first token) from `Chat ✅ 2026-06-10`",
+      p.ticks["item-chat-a7b3c9d"] === true
+        && p.downvotes["item-chat-b8c4d0e"] === true
+        && chatObs && chatObs.ticked === true
+    );
+  } catch (e) {
+    assertTrue("HC-V0982-PARSE-A3: Tasks-suffix tolerance", false, e && e.message);
+  }
+}
+
+async function caseV0982ParseA4() {
+  console.log(`\n--- Case HC-V0982-PARSE-A4: section state machine resets per kind sub-callout ---`);
+  try {
+    const { parseFeedbackCapture } = require("../blueprints/cowork/helpers/learn-from-checks-helper.js");
+    const md = [
+      "> <!-- cowork:feedback-capture v=2 -->",
+      "> > [!summary]- Chat — items",
+      "> > Mattered:",
+      "> > - [ ] [[#^item-chat-a7b3c9d|Zhenzhen PR #353 thread]]",
+      "> > Didn't like:",
+      "> > - [x] [[#^item-chat-a7b3c9d|Zhenzhen PR #353 thread]]",
+      "> > **Fire chat:** `[ ] less` `[ ] same` `[ ] more`",
+      ">",
+      "> > [!summary]- GitHub — items",
+      "> > Mattered:",
+      "> > - [x] [[#^item-github-d0e6f20|PR #353 awaiting review]]",
+      "> > Didn't like:",
+      "> > - [ ] [[#^item-github-d0e6f20|PR #353 awaiting review]]",
+    ].join("\n");
+    const p = parseFeedbackCapture(md);
+    assertTrue(
+      "HC-V0982-PARSE-A4: a `Didn't like:` section in chat does NOT leak — github's Mattered tick lands in ticks{}, not downvotes{}",
+      p.downvotes["item-chat-a7b3c9d"] === true
+        && p.ticks["item-github-d0e6f20"] === true
+        && p.downvotes["item-github-d0e6f20"] !== true
+    );
+  } catch (e) {
+    assertTrue("HC-V0982-PARSE-A4: section state machine isolation", false, e && e.message);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// v0.98.2 — HC-V0982-INGEST-* : ingest-feedback-helper.js deterministic core
+// ---------------------------------------------------------------------------
+
+function _v0982Registry() {
+  return [
+    { item_id: "item-chat-a7b3c9d", kind: "chat", identifier: "person:Zhenzhen Su", label: "Zhenzhen PR #353 thread" },
+    { item_id: "item-chat-b8c4d0e", kind: "chat", identifier: "c1:t9", label: "Dev Enablement Channels thread" },
+    { item_id: "item-github-d0e6f20", kind: "github", identifier: "org/repo#353", label: "PR #353 awaiting review" },
+  ];
+}
+
+async function caseV0982IngestA1() {
+  console.log(`\n--- Case HC-V0982-INGEST-A1: mattered tick → +0.05 per_person delta (identity via registry) ---`);
+  try {
+    const { rollupFeedback } = require("../blueprints/cowork/helpers/ingest-feedback-helper.js");
+    const r = rollupFeedback({
+      parsed: { sentinel_version: "v=2", ticks: { "item-chat-a7b3c9d": true }, downvotes: {}, knobs: {}, free_text: "" },
+      registry: _v0982Registry(),
+      ambiguous_items: [],
+    });
+    const d = r.entity_deltas.find((x) => x.entity === "Zhenzhen Su");
+    assertTrue(
+      "HC-V0982-INGEST-A1: mattered tick on person:-identified item yields {kind: chat, entity_type: per_person, entity: 'Zhenzhen Su', delta: +0.05}",
+      d && d.kind === "chat" && d.entity_type === "per_person" && d.delta === 0.05
+    );
+  } catch (e) {
+    assertTrue("HC-V0982-INGEST-A1: mattered → +0.05 per_person", false, e && e.message);
+  }
+}
+
+async function caseV0982IngestA2() {
+  console.log(`\n--- Case HC-V0982-INGEST-A2: didn't-like → −0.10 delta + kind-skip mapping ---`);
+  try {
+    const { rollupFeedback } = require("../blueprints/cowork/helpers/ingest-feedback-helper.js");
+    const r = rollupFeedback({
+      parsed: {
+        sentinel_version: "v=2",
+        ticks: { "item-chat-a7b3c9d": true },                 // chat has ≥1 mattered → kind tick
+        downvotes: { "item-github-d0e6f20": true },           // github downvote-only → kind skip
+        knobs: {}, free_text: "",
+      },
+      registry: _v0982Registry(),
+      ambiguous_items: [],
+    });
+    const gh = r.entity_deltas.find((x) => x.kind === "github");
+    const chatObs = r.kind_observations.find((o) => o.kind === "chat");
+    const ghObs = r.kind_observations.find((o) => o.kind === "github");
+    assertTrue(
+      "HC-V0982-INGEST-A2: downvote yields delta −0.10 (per_topic 'org/repo' for github); kind_observations: chat ticked:true (≥1 mattered), github ticked:false (downvote-only)",
+      gh && gh.delta === -0.10 && gh.entity_type === "per_topic" && gh.entity === "org/repo"
+        && chatObs && chatObs.ticked === true && ghObs && ghObs.ticked === false
+    );
+  } catch (e) {
+    assertTrue("HC-V0982-INGEST-A2: downvote → −0.10 + kind skip", false, e && e.message);
+  }
+}
+
+async function caseV0982IngestA3() {
+  console.log(`\n--- Case HC-V0982-INGEST-A3: knob delta ±0.05 post-formula, re-clamped at ceiling ---`);
+  try {
+    const { applyKnobDeltas } = require("../blueprints/cowork/helpers/ingest-feedback-helper.js");
+    const per_kind = {
+      chat: { weight: 3.00, ticks: 5, skips: 0, warmup: false },
+      email: { weight: 1.00, ticks: 1, skips: 1, warmup: true },
+    };
+    const out = applyKnobDeltas(per_kind, [
+      { kind: "chat", position: "more", delta: 0.05 },
+      { kind: "email", position: "less", delta: -0.05 },
+    ]);
+    assertTrue(
+      "HC-V0982-INGEST-A3: knob 'more' at ceiling re-clamps to 3.000; knob 'less' at 1.00 → 0.950",
+      out.chat.weight === 3.000 && out.email.weight === 0.950
+    );
+  } catch (e) {
+    assertTrue("HC-V0982-INGEST-A3: knob delta re-clamp", false, e && e.message);
+  }
+}
+
+async function caseV0982IngestA4() {
+  console.log(`\n--- Case HC-V0982-INGEST-A4: free-text floor-set → entity weight 0.10 ---`);
+  try {
+    const { applyFloorSet } = require("../blueprints/cowork/helpers/ingest-feedback-helper.js");
+    const per_kind = {
+      email: { weight: 1.00, ticks: 0, skips: 0, warmup: true,
+               per_person: { "Diana": { weight: 1.250, ticks: 3, downvotes: 0 } } },
+    };
+    const out = applyFloorSet(per_kind, { kind: "email", entity_type: "per_person", entity: "Diana" });
+    assertTrue(
+      "HC-V0982-INGEST-A4: floor-set forces email.per_person.Diana.weight to exactly 0.100 regardless of prior value",
+      out.email.per_person["Diana"].weight === 0.100
+    );
+  } catch (e) {
+    assertTrue("HC-V0982-INGEST-A4: floor-set 0.10", false, e && e.message);
+  }
+}
+
+async function caseV0982IngestA5() {
+  console.log(`\n--- Case HC-V0982-INGEST-A5: decay toward 1.00 — w' = 1 + (w−1)×0.995 ---`);
+  try {
+    const { applyDecay } = require("../blueprints/cowork/helpers/ingest-feedback-helper.js");
+    const per_kind = {
+      chat: { weight: 1.10, per_person: {
+        "Hot": { weight: 2.000, ticks: 9, downvotes: 0 },
+        "Cold": { weight: 0.500, ticks: 0, downvotes: 4 },
+      } },
+    };
+    const out = applyDecay(per_kind);
+    // 1 + (2.000−1)×0.995 = 1.995 ; 1 + (0.500−1)×0.995 = 0.5025 → banker's → 0.502
+    // kind-level weight untouched (decay applies to ENTITIES only; kinds keep the v0.96.0 formula's own decay)
+    assertTrue(
+      "HC-V0982-INGEST-A5: entity decay → Hot 2.000→1.995, Cold 0.500→0.502 (banker's at 3 places); kind weight untouched (1.10)",
+      out.chat.per_person["Hot"].weight === 1.995
+        && out.chat.per_person["Cold"].weight === 0.502
+        && out.chat.weight === 1.10
+    );
+  } catch (e) {
+    assertTrue("HC-V0982-INGEST-A5: decay toward 1.00", false, e && e.message);
+  }
+}
+
+async function caseV0982IngestA6() {
+  console.log(`\n--- Case HC-V0982-INGEST-A6: schema 2 / missing / "1.1.0" / 3 normalizer tolerance ---`);
+  try {
+    const { normalizeLearnedWeightsV3 } = require("../blueprints/cowork/helpers/ingest-feedback-helper.js");
+    const v2 = normalizeLearnedWeightsV3({ schema_version: 2, engagements: { headspace: { per_kind: { chat: { weight: 0.991, ticks: 2, skips: 1, warmup: true } }, totals: { notes_scanned: 4, scanned_days: ["2026-06-10"] } } } });
+    const missing = normalizeLearnedWeightsV3({ engagements: { accuris: { per_kind: {}, totals: { notes_scanned: 3 } } } });
+    const legacy = normalizeLearnedWeightsV3({ schema_version: "1.1.0", engagements: { headspace: { per_kind: {}, totals: {} } } });
+    const v3 = normalizeLearnedWeightsV3({ schema_version: 3, engagements: { headspace: { per_kind: { chat: { weight: 1.0, per_person: { "X": { weight: 1.05 } } } }, totals: { feedback_ingested_days: ["2026-06-12"] } } } });
+    const ok = [v2, missing, legacy, v3].every((w) => w.schema_version === 3 && w.engagements);
+    const additive = v2.engagements.headspace.per_kind.chat.weight === 0.991
+      && typeof v2.engagements.headspace.per_kind.chat.per_person === "object"
+      && Array.isArray(v2.engagements.headspace.totals.feedback_ingested_days)
+      && v3.engagements.headspace.per_kind.chat.per_person["X"].weight === 1.05;
+    assertTrue(
+      "HC-V0982-INGEST-A6: all four on-disk shapes normalize to schema_version 3; existing weights preserved; per_person/per_channel/per_topic + totals.feedback_ingested_days initialized",
+      ok && additive
+    );
+  } catch (e) {
+    assertTrue("HC-V0982-INGEST-A6: normalizer tolerance", false, e && e.message);
+  }
+}
+
+async function caseV0982IngestA7() {
+  console.log(`\n--- Case HC-V0982-INGEST-A7: intent validation — allowlist + verbatim quote + kind requirement ---`);
+  try {
+    const { validateIntents } = require("../blueprints/cowork/helpers/ingest-feedback-helper.js");
+    const free_text = "stop surfacing Diana's emails. more finance detail please. something vague.";
+    const r = validateIntents([
+      { intent: "downrank", kind: "email", entity: "Diana", source_quote: "stop surfacing Diana's emails", proposed_target: "learned_weights", confidence: "high" },
+      { intent: "uprank", entity: "finance", source_quote: "more finance detail please", proposed_target: "learned_weights", confidence: "high" },            // REJECTED: no kind
+      { intent: "voice_correction", source_quote: "NOT IN THE PROSE", proposed_target: "voice-proposals", confidence: "high" },                               // REJECTED: non-verbatim quote
+      { intent: "coverage_gap", source_quote: "something vague", proposed_target: "/etc/passwd", confidence: "high" },                                        // REJECTED: target outside allowlist
+      { intent: "other", source_quote: "something vague", proposed_target: "coverage-queue", confidence: "high" },                                            // PENDING: 'other' never applies
+      { intent: "downrank", kind: "chat", entity: "promos", source_quote: "something vague", proposed_target: "learned_weights", confidence: "low" },         // PENDING: low confidence
+    ], free_text);
+    assertTrue(
+      "HC-V0982-INGEST-A7: 1 accepted; 3 rejected (kindless weights intent / non-verbatim quote / bad target); 2 pending ('other' + low confidence)",
+      r.accepted.length === 1 && r.accepted[0].entity === "Diana"
+        && r.rejected.length === 3 && r.pending.length === 2
+    );
+  } catch (e) {
+    assertTrue("HC-V0982-INGEST-A7: intent validation", false, e && e.message);
+  }
+}
+
+async function caseV0982IngestA8() {
+  console.log(`\n--- Case HC-V0982-INGEST-A8: composeAuditEntry golden format ---`);
+  try {
+    const { composeAuditEntry } = require("../blueprints/cowork/helpers/ingest-feedback-helper.js");
+    const md = composeAuditEntry({
+      day: "2026-06-12",
+      run_id: "fd-20260612-0300",
+      lines: [
+        `[weights] chat.per_person."Zhenzhen Su" 1.000 → 1.050 (+0.05 mattered ^item-chat-a7b3c9d "Zhenzhen PR #353 thread")`,
+        `[voice] PROPOSED vp-20260612-1 → voice-proposals.md (source: "softer mornings")`,
+      ],
+    });
+    const ok = md.startsWith("## 2026-06-12 (run-id: fd-20260612-0300)")
+      && md.includes(`- [weights] chat.per_person."Zhenzhen Su" 1.000 → 1.050`)
+      && md.includes("- [voice] PROPOSED vp-20260612-1");
+    assertTrue(
+      "HC-V0982-INGEST-A8: audit section = `## <day> (run-id: <id>)` header + one `- [tag] ...` bullet per line",
+      ok
+    );
+  } catch (e) {
+    assertTrue("HC-V0982-INGEST-A8: audit entry format", false, e && e.message);
+  }
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -9184,6 +9690,24 @@ async function caseV0981ParseFeedbackA4() {
   await caseV0981ParseFeedbackA2();
   await caseV0981ParseFeedbackA3();
   await caseV0981ParseFeedbackA4();
+  await caseV0982CaptureA1();
+  await caseV0982CaptureA2();
+  await caseV0982CaptureA3();
+  await caseV0982CaptureA4();
+  await caseV0982CaptureA5();
+  await caseV0982CaptureA6();
+  await caseV0982ParseA1();
+  await caseV0982ParseA2();
+  await caseV0982ParseA3();
+  await caseV0982ParseA4();
+  await caseV0982IngestA1();
+  await caseV0982IngestA2();
+  await caseV0982IngestA3();
+  await caseV0982IngestA4();
+  await caseV0982IngestA5();
+  await caseV0982IngestA6();
+  await caseV0982IngestA7();
+  await caseV0982IngestA8();
 
   // v0.65.0 HC-V065-RUN-NOTE: write-run-note-* sub-skill lint
   {
