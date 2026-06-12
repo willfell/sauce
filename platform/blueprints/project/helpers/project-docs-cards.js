@@ -27,7 +27,9 @@ class ProjectDocsCards {
         const edited = moment(p.file.mtime.ts).fromNow();
         return created ? `created ${created} · edited ${edited}` : `edited ${edited}`;
       },
-      target: (p) => p.file.link,
+      // No target override: BeaconCards' default (p.file.path, a string) is
+      // what openLinkText expects. v0.100.1 — the old target callback returned
+      // a Dataview Link OBJECT and threw "e.indexOf is not a function" on click.
     });
   }
 

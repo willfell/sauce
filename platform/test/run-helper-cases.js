@@ -6899,6 +6899,23 @@ async function casePDC9RowIcon() {
     /icon:\s*\(\)\s*=>\s*fileIcon/.test(src));
 }
 
+// v0.100.1 — PDC-10 (hotfix regression net): rows must NOT pass a Dataview
+// Link object as the click target. `target: (p) => p.file.link` forwarded a
+// Link object into app.workspace.openLinkText(), whose getLinkpath calls
+// .indexOf on a string → "TypeError: e.indexOf is not a function" on every
+// row click (latent since v0.50.0; surfaced when v0.100.0 made rows the
+// primary navigation). BeaconCards' default targetFn (p.file.path, a string)
+// is the correct path — the helper must not override it with file.link.
+async function casePDC10NoLinkObjectTarget() {
+  console.log("\n--- Case PDC-10: ProjectDocsCards passes no Link-object click target ---");
+  const src = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/project/helpers/project-docs-cards.js"),
+    "utf8"
+  );
+  assertTrue("PDC-10: no file.link reference (Link object) in the helper",
+    !/file\.link/.test(src));
+}
+
 // ============================================================
 // v0.54.0 FA-2 — canonical vocab adoption asserts (meetings + people + products + teams)
 // ============================================================
@@ -10121,6 +10138,8 @@ async function caseV0990PrefixA3() {
   // v0.100.0 — PDC-8/9: docs-hub list rows (meta + icon).
   await casePDC8MetaCreatedEdited();
   await casePDC9RowIcon();
+  // v0.100.1 — PDC-10: no Link-object click target (openLinkText wants a string).
+  await casePDC10NoLinkObjectTarget();
 
   // v0.54.0 FA-2 — canonical vocab adoption asserts (meetings + people + products + teams)
   await caseFA2MeetingsCanonical();
