@@ -58,19 +58,20 @@ created_at: <NOW in {{$timezone}} as ISO timestamp>
 
 ```
 > [!todo]+ Was today useful?
-> Tick items that mattered. Set per-kind frequency. Type prose for nuance. Tomorrow's brief adjusts overnight.
-> <!-- cowork:feedback-capture v=2 -->
->
-{{$feedback_capture_per_kind_blocks}}
+> One tap, a line of prose, or ticks — anything counts. Tomorrow's brief adjusts overnight.
+> <!-- cowork:feedback-capture v=3 -->
+> Useful: `[ ] yes` `[ ] no`
 >
 > ### Free-text feedback
 >
 > ```feedback
 > {{$feedback_capture_free_text_or_placeholder}}
 > ```
+>
+{{$feedback_capture_per_kind_blocks}}
 ```
 
-(Used by `cowork:eod-review` only — v0.98.1+. The other 4 cadences continue using `rating_callout_template`. `{{$feedback_capture_per_kind_blocks}}` is computed by `composeFeedbackCapture(opts)` per surfaced kind: one `> > [!summary]- <Kind> — items` sub-callout with per-item ticks, knob row, and a blank `>` separator between kinds. `{{$feedback_capture_free_text_or_placeholder}}` is either the prior fenced content carried forward across re-fires or a placeholder. On v=2 sentinel detected in prior file, preserve `[x]` state per item-ID per SECTION (Mattered vs Didn't like), per knob position, and free-text verbatim; v=1 priors preserve into Mattered with a fresh Didn't-like row. Each per-kind sub-callout carries `Mattered:` + `Didn't like:` checklists sharing the same item-IDs.)
+(Used by `cowork:eod-review` only — v=3 as of v0.99.0. Order is contract: the one-tap `Useful` line, then the free-text fence (the PRIMARY channel — a line starting with `<kind>:` is deterministically scoped to that section by the nightly reconciler), then the collapsed per-kind sub-callouts with `Mattered:` + `Didn't like:` checklists sharing the same item-IDs plus the knob row, exactly as in v=2. `{{$feedback_capture_per_kind_blocks}}` is computed by `composeFeedbackCapture(opts)` per surfaced kind. `{{$feedback_capture_free_text_or_placeholder}}` is the prior fenced content carried forward across re-fires, or the placeholder `(Type prose here — name a section to scope it, e.g. `finance: too long`.)` when none. On a v=3 prior, preserve tap state + free-text + per-section `[x]` per item-ID + knob positions; v=2/v=1 priors preserve everything they carry and the tap renders fresh-unticked. A dual-ticked tap (both yes and no) is preserved visually and treated as ambiguous (no satisfaction signal).)
 
 ## voice_proposals_callout_template
 
