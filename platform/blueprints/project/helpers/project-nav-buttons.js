@@ -426,7 +426,7 @@ class ProjectNavButtons {
         const root = dv.container.createEl("div", { cls: "pnb-root" });
 
         const topDivider = root.createEl("hr");
-        topDivider.style.cssText = "border: none; border-top: 1px solid var(--background-modifier-border); margin: 8px 0 6px 0;";
+        topDivider.style.cssText = "border: none; border-top: 1px solid var(--background-modifier-border); margin: 8px 0 14px 0;";
 
         const sectionLabel = root.createEl("div");
         sectionLabel.textContent = "Project";
@@ -440,40 +440,16 @@ class ProjectNavButtons {
             margin-bottom: 4px;
         `;
 
-        const btnStyle = `
-            cursor: pointer;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            gap: 6px;
-            padding: 6px 14px;
-            border-radius: 6px;
-            border: 1px solid var(--background-modifier-border);
-            background: var(--background-primary);
-            color: var(--text-muted);
-            font-size: 0.82em;
-            font-weight: 500;
-            font-family: inherit;
-            letter-spacing: 0.01em;
-            transition: all 0.15s ease;
-            flex: 0 1 auto;
-        `;
-
+        // v0.100.0 — nav buttons delegate to the shared AccentButton mechanism:
+        // identical styling to the New Doc / New Note buttons by construction,
+        // flex: true stretches the row across the full note width.
         for (const btn of buttons) {
-            const el = container.createEl("button");
-            el.innerHTML = btn.icon + `<span style="white-space: nowrap;">${btn.label}</span>`;
-            el.style.cssText = btnStyle;
-            el.onmouseenter = () => {
-                el.style.background = "var(--interactive-accent)";
-                el.style.color = "var(--text-on-accent)";
-                el.style.borderColor = "var(--interactive-accent)";
-            };
-            el.onmouseleave = () => {
-                el.style.background = "var(--background-primary)";
-                el.style.color = "var(--text-muted)";
-                el.style.borderColor = "var(--background-modifier-border)";
-            };
-            el.onclick = () => app.workspace.openLinkText(btn.path, "");
+            customJS.AccentButton.render(container, {
+                label: btn.label,
+                icon: btn.icon,
+                onClick: () => app.workspace.openLinkText(btn.path, ""),
+                flex: true
+            });
         }
 
         // --- Workstream widget (card notes only) ---

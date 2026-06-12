@@ -6595,10 +6595,8 @@ async function caseKMC1CreateBoardGateWidened() {
 }
 
 // -------------------------------------------------------------------------
-// v0.50.5 — PNB-WRAP-1..3: ProjectNavButtons main button row wraps on narrow
-// widths. CSS-only fix: flex-wrap: wrap on the container; flex: 0 1 auto on
-// each button; white-space: nowrap on the label span (so a long-label button
-// wraps to a new flex row instead of the label wrapping inside the button).
+// v0.50.5 — PNB-WRAP-1: ProjectNavButtons main button row container wraps on
+// narrow widths (flex-wrap: wrap on the container).
 // -------------------------------------------------------------------------
 
 async function casePNBWrap1FlexWrap() {
@@ -6612,26 +6610,45 @@ async function casePNBWrap1FlexWrap() {
         "expected `flex-wrap: wrap` not found");
 }
 
-async function casePNBWrap2ButtonFlexAuto() {
-    console.log("\n--- Case PNB-WRAP-2: project-nav-buttons.js button uses flex: 0 1 auto ---");
+// -------------------------------------------------------------------------
+// v0.100.0 — PNB-ACC-1..3 (replace v0.50.5 PNB-WRAP-2/3): main nav buttons
+// delegate to the shared AccentButton mechanism (accent outline = identical
+// styling to the New Doc / New Note buttons by construction) stretched
+// full-width via flex: true; the hand-rolled muted btnStyle is deleted; the
+// top divider gains breathing room above the "PROJECT" label.
+// -------------------------------------------------------------------------
+
+async function casePNBAcc1AccentDelegation() {
+    console.log("\n--- Case PNB-ACC-1: nav buttons delegate to AccentButton with flex: true ---");
     const src = fs.readFileSync(
         path.join(WORKSHOP, "platform/blueprints/project/helpers/project-nav-buttons.js"),
         "utf8"
     );
-    assertTrue("PNB-WRAP-2: project-nav-buttons.js sets flex: 0 1 auto on the button style",
-        /flex:\s*0\s+1\s+auto/.test(src),
-        "expected `flex: 0 1 auto` not found");
+    assertTrue("PNB-ACC-1: customJS.AccentButton.render(container, {... flex: true}) present",
+        /customJS\.AccentButton\.render\(container,[\s\S]{0,300}?flex:\s*true/.test(src),
+        "expected AccentButton delegation (into `container`) with flex: true not found");
 }
 
-async function casePNBWrap3LabelNowrap() {
-    console.log("\n--- Case PNB-WRAP-3: project-nav-buttons.js label span has white-space: nowrap ---");
+async function casePNBAcc2NoHandRolledStyle() {
+    console.log("\n--- Case PNB-ACC-2: hand-rolled muted nav button style deleted ---");
     const src = fs.readFileSync(
         path.join(WORKSHOP, "platform/blueprints/project/helpers/project-nav-buttons.js"),
         "utf8"
     );
-    assertTrue("PNB-WRAP-3: project-nav-buttons.js sets white-space: nowrap on the label span",
-        /white-space:\s*nowrap/.test(src),
-        "expected `white-space: nowrap` (on label span) not found");
+    assertTrue("PNB-ACC-2: no `flex: 0 1 auto` (old hand-rolled style) remains",
+        !/flex:\s*0\s+1\s+auto/.test(src));
+    assertTrue("PNB-ACC-2: btnStyle const deleted",
+        !/const\s+btnStyle/.test(src));
+}
+
+async function casePNBAcc3DividerBreathingRoom() {
+    console.log("\n--- Case PNB-ACC-3: top divider margin-bottom 14px ---");
+    const src = fs.readFileSync(
+        path.join(WORKSHOP, "platform/blueprints/project/helpers/project-nav-buttons.js"),
+        "utf8"
+    );
+    assertTrue("PNB-ACC-3: divider margin 8px 0 14px 0",
+        /margin:\s*8px 0 14px 0/.test(src));
 }
 
 // -------------------------------------------------------------------------
@@ -10075,10 +10092,12 @@ async function caseV0990PrefixA3() {
   await caseCSS2AdditiveMerge();
   await caseCSS3AbsentArrayDefaultEmpty();
 
-  // v0.50.5 — PNB-WRAP-1..3: ProjectNavButtons main button row wraps.
+  // v0.50.5 PNB-WRAP-1 (container wraps) + v0.100.0 PNB-ACC-1..3 (AccentButton
+  // delegation, full-width, divider spacing).
   await casePNBWrap1FlexWrap();
-  await casePNBWrap2ButtonFlexAuto();
-  await casePNBWrap3LabelNowrap();
+  await casePNBAcc1AccentDelegation();
+  await casePNBAcc2NoHandRolledStyle();
+  await casePNBAcc3DividerBreathingRoom();
 
   // v0.51.0 — PSW-1..6: ProjectStatusWidget surface coverage.
   await casePSW1ClassDefined();
