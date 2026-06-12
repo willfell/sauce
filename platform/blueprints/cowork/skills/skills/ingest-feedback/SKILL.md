@@ -23,6 +23,7 @@ Deterministic core of the v0.98.2 feedback loop. Pure delegation to
 `ingest-feedback-helper.js` — no I/O, no MCP, no LLM judgment. The
 reconcile-cowork orchestrator re-states this contract inline (pure-MCP at
 fire time); any Node-capable session invokes the helper directly.
+v0.99.0: all weight math is gated on `classifyEngagementDay` — engaged days run the full pipeline; tap-only days log satisfaction only; silent days write the audit line only.
 
 ## When invoked
 
