@@ -1,6 +1,13 @@
 > [!todo]+ Was today useful?
-> Tick items that mattered. Set per-kind frequency. Type prose for nuance. Tomorrow's brief adjusts overnight.
-> <!-- cowork:feedback-capture v=2 -->
+> One tap, a line of prose, or ticks — anything counts. Tomorrow's brief adjusts overnight.
+> <!-- cowork:feedback-capture v=3 -->
+> Useful: `[ ] yes` `[ ] no`
+>
+> ### Free-text feedback
+>
+```feedback
+(Type prose here — name a section to scope it, e.g. `finance: too long`.)
+```
 >
 > > [!summary]- Chat — items
 > > Mattered:
@@ -22,8 +29,3 @@
 > >
 > > **Fire GitHub:** `[ ] less` `[ ] same` `[ ] more`
 >
-> ### Free-text feedback
->
-```feedback
-(Type prose here — anything you want cowork to know.)
-```
