@@ -228,7 +228,7 @@ function normalizeLearnedWeightsV3(raw) {
 }
 
 // v0.99.0 — schema 4: engagement-gated semantics. Wraps the V3 shape
-// normalizer, then (one-time, gated on input schema_version !== 4) applies
+// normalizer, then (one-time, gated on Number(schema_version) !== 4) applies
 // the silence-reset migration: keep weight + ticks (real signal), ZERO skips
 // (silence-contaminated), force warmup true (re-graduate on engaged days
 // only). totals gain engaged_days[] + satisfaction[]; warmup_until retired
@@ -236,7 +236,7 @@ function normalizeLearnedWeightsV3(raw) {
 function normalizeLearnedWeightsV4(raw) {
   const priorVersion = raw && typeof raw === "object" ? raw.schema_version : undefined;
   const v3 = normalizeLearnedWeightsV3(raw);
-  const isMigration = priorVersion !== 4;
+  const isMigration = Number(priorVersion) !== 4;
   const out = { schema_version: 4, engagements: {} };
   for (const [eid, eng] of Object.entries(v3.engagements)) {
     const per_kind = JSON.parse(JSON.stringify(eng.per_kind || {}));
@@ -246,7 +246,7 @@ function normalizeLearnedWeightsV4(raw) {
         per_kind[kind].warmup = true;
       }
     }
-    const totals = Object.assign({}, eng.totals);
+    const totals = JSON.parse(JSON.stringify(eng.totals || {}));
     if (!Array.isArray(totals.engaged_days)) totals.engaged_days = [];
     if (!Array.isArray(totals.satisfaction)) totals.satisfaction = [];
     totals.warmup_until = null;

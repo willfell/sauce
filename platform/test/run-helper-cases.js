@@ -9681,9 +9681,18 @@ async function caseV0990SchemaA5() {
     } } };
     const out = normalizeLearnedWeightsV4(raw);
     const c = out.engagements.headspace.per_kind.chat;
+    const rawStr = JSON.parse(JSON.stringify(raw));
+    rawStr.schema_version = "4";
+    const outStr = normalizeLearnedWeightsV4(rawStr);
+    const strKept = outStr.engagements.headspace.per_kind.chat.skips === 4
+      && outStr.engagements.headspace.per_kind.chat.warmup === false;
+    const aliasInput = JSON.parse(JSON.stringify(raw));
+    const aliasOut = normalizeLearnedWeightsV4(aliasInput);
+    aliasOut.engagements.headspace.totals.scanned_days.push("MUTATED");
+    const noAlias = !aliasInput.engagements.headspace.totals.scanned_days.includes("MUTATED");
     assertTrue(
-      "HC-V0990-SCHEMA-A5: already-4 input passes through — skips 4 kept, warmup false kept, satisfaction kept",
-      c.skips === 4 && c.warmup === false && out.engagements.headspace.totals.satisfaction.length === 1
+      "HC-V0990-SCHEMA-A5: already-4 input (int OR string) passes through — skips/warmup/satisfaction kept; output totals do not alias input",
+      c.skips === 4 && c.warmup === false && out.engagements.headspace.totals.satisfaction.length === 1 && strKept && noAlias
     );
   } catch (e) { assertTrue("HC-V0990-SCHEMA-A5: 4 idempotent", false, e && e.message); }
 }
