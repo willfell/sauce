@@ -6787,14 +6787,20 @@ async function casePDC2FiltersByType() {
     /p\.type\s*===\s*["']doc-note["']/.test(src));
 }
 
-async function casePDC3SortsByCreatedDesc() {
-  console.log("\n--- Case PDC-3: ProjectDocsCards sorts by created desc ---");
+// v0.100.0 — PDC-3 REWRITTEN (was "sorts by created desc"): docs hub renders
+// list rows via BeaconCards layout: "row"; ordering is BeaconCards' default
+// mtime-desc. The old Dataview-side .sort((p) => p.created, "desc") was a dead
+// key (doc-notes carry created_at, not created) and is asserted ABSENT.
+async function casePDC3RowLayout() {
+  console.log("\n--- Case PDC-3: ProjectDocsCards renders row layout (dead created-sort removed) ---");
   const src = fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/project/helpers/project-docs-cards.js"),
     "utf8"
   );
-  assertTrue("PDC-3: .sort((p) => p.created, \"desc\") present",
-    /\.sort\(\s*\(p\)\s*=>\s*p\.created\s*,\s*["']desc["']/.test(src));
+  assertTrue("PDC-3: layout: \"row\" passed to BeaconCards",
+    /layout:\s*["']row["']/.test(src));
+  assertTrue("PDC-3: dead .sort((p) => p.created, \"desc\") removed",
+    !/\.sort\(\s*\(p\)\s*=>\s*p\.created\s*,/.test(src));
 }
 
 async function casePDC4EmptyStateCallout() {
@@ -6845,6 +6851,35 @@ async function casePDC7NavButtonsRenamedToDocs() {
   assertTrue("PDC-7: Docs label + icons.docs + docs path + docs-hub guard, no Wiki strings",
     hasDocsLabel && hasDocsIcon && hasDocsPath && hasDocsContextGuard && noWikiRemaining,
     `label=${hasDocsLabel} icon=${hasDocsIcon} path=${hasDocsPath} guard=${hasDocsContextGuard} clean=${noWikiRemaining}`);
+}
+
+// v0.100.0 — PDC-8: right-side meta = `created <MMM D> · edited <relative>`;
+// created reads canonical created_at with a file.ctime fallback for
+// pre-canonical notes; edited is relative mtime.
+async function casePDC8MetaCreatedEdited() {
+  console.log("\n--- Case PDC-8: ProjectDocsCards meta shows created + edited ---");
+  const src = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/project/helpers/project-docs-cards.js"),
+    "utf8"
+  );
+  assertTrue("PDC-8: meta emits `created ${created} · edited ${edited}`",
+    /created \$\{created\} · edited \$\{edited\}/.test(src));
+  assertTrue("PDC-8: created_at read with file.ctime fallback",
+    /created_at/.test(src) && /file\.ctime/.test(src));
+  assertTrue("PDC-8: edited uses relative mtime (fromNow)",
+    /mtime\.ts\)\.fromNow\(\)/.test(src));
+}
+
+// v0.100.0 — PDC-9: rows carry the accent file glyph (matches the task-note
+// tiles in project-nav-buttons.js renderTaskNoteTiles).
+async function casePDC9RowIcon() {
+  console.log("\n--- Case PDC-9: ProjectDocsCards rows have the file icon ---");
+  const src = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/project/helpers/project-docs-cards.js"),
+    "utf8"
+  );
+  assertTrue("PDC-9: icon callback returns fileIcon",
+    /icon:\s*\(\)\s*=>\s*fileIcon/.test(src));
 }
 
 // ============================================================
@@ -10056,7 +10091,7 @@ async function caseV0990PrefixA3() {
   // v0.50.0 S5 — PDC-1..4 (renamed from PWC in v0.52.0): ProjectDocsCards class surface asserts.
   await casePDC1ClassDefined();
   await casePDC2FiltersByType();
-  await casePDC3SortsByCreatedDesc();
+  await casePDC3RowLayout();
   await casePDC4EmptyStateCallout();
   // v0.50.1 BUG-A: PDC-5 guards against view-method regression.
   await casePDC5RenderMethodNotView();
@@ -10064,6 +10099,9 @@ async function caseV0990PrefixA3() {
   // v0.52.0 — PDC-6 + PDC-7 new asserts.
   await casePDC6PathConventionDocs();
   await casePDC7NavButtonsRenamedToDocs();
+  // v0.100.0 — PDC-8/9: docs-hub list rows (meta + icon).
+  await casePDC8MetaCreatedEdited();
+  await casePDC9RowIcon();
 
   // v0.54.0 FA-2 — canonical vocab adoption asserts (meetings + people + products + teams)
   await caseFA2MeetingsCanonical();
