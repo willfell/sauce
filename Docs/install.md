@@ -880,6 +880,28 @@ After the update, verify by checking that `.claude/skills/cowork/skills/gather-s
 
 **Optional post-deploy validation (FLN-v87-1).** The `min_similarity: 0.45` threshold is a design-time guess. Review the first 3-5 morning briefings on each consumer vault: if Echoes callouts surface obviously-unrelated matches, the threshold should be raised; if relevant matches are consistently filtered out (callout omits even on days with clear historical analogues), the threshold should be lowered. A v0.87.1 PATCH can ship the empirically-validated threshold.
 
+## Upgrading from v0.99.0 to v0.100.0
+
+`brew upgrade sauce` distributes the new release. Existing consumers run `sauce update --bump-pins` from inside each vault.
+
+v0.100.0 is a **visual-only project-blueprint change** (1.14.0 → 1.15.0). No schema delta, no contract bump, no scheduled-job sync needed (cowork is untouched at 0.39.0).
+
+**What `sauce update --bump-pins` materializes:**
+
+- `spice/projects/<project-hub>/scripts/project-docs-cards.js` — Docs hub now renders a single-column list instead of a stacked grid; right-side meta shows `created <MMM D> · edited <relative>` per row.
+- `spice/projects/<project-hub>/scripts/project-nav-buttons.js` — Project nav row uses the accent button style (matching New Doc / New Note) and stretches full-width.
+- `ranch/platform-subscription.json` workshop_version `0.99.0` → `0.100.0` + project pin `1.14.0` → `1.15.0` (lockstep).
+
+**What does NOT change:**
+
+- `scheduled-job-contract.json` `contract_version` UNCHANGED at `0.35.1`.
+- No `cowork` blueprint change (stays at 0.39.0). No `align-scheduled-jobs` run required.
+- No schema migration, no `user-preferences.md` write, no new OI files.
+
+**Post-deploy check.** Open a project hub in Obsidian and confirm the Docs section renders a vertical list (not a grid). The project nav row buttons should match the accent style of the New Doc / New Note buttons with full-width stretch.
+
+---
+
 ## Upgrading from v0.97.4 to v0.98.0
 
 `brew upgrade sauce` distributes the new release. Existing consumers run `sauce update --bump-pins` from inside each vault. v0.98.0 bundles the **synopsis-density rewrite MINOR**: a brief-shape contract change at the orchestrator-instructions layer that shifts all five cadence atomic notes (morning-briefing, midday-tripwire, eod-review, weekly-review, monthly-review) from a coverage-emphasis shape (every per-kind callout open by default; `[!tip] <closing>` at the bottom) to a prediction-emphasis shape (one OPEN `[!info]+ <per-cadence title>` lead callout carrying ≤80-word predictive synopsis; all per-kind callouts collapsed by default behind a click; bottom closing callout REMOVED).

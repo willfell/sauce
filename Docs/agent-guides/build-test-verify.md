@@ -31,7 +31,7 @@ node platform/test/run-renderer.js
 The workshop is its own first consumer. Self-install runs against the workshop directory, using its own `Docs/Meta/platform-config.json` / `platform-subscription.json`. **Before promoting any mechanism / blueprint version to consumers, the workshop's own self-install must succeed.** If workshop self-test fails, do NOT push the update.
 
 ```bash
-node platform/install.js .   # self-install at workshop root
+node platform/install.js --vault . --auto-approve   # self-install at workshop root
 sauce install                 # equivalent via CLI (after brew install)
 ```
 

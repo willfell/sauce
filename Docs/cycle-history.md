@@ -4,6 +4,24 @@ This file archives the per-cycle status snapshots that previously lived in `CLAU
 
 ---
 
+### v0.100.0 — project visual polish (2026-06-12 close)
+
+**SHIPPED 2026-06-12.** See `Docs/plans/2026-06-12-v0.100.0-project-visual-polish-result.md` for the full narrative. Commits: `898f1c0` (S0 design) → `346bb31` (S1 plan) → `2d66ccc` (feat S1 docs-hub list rows) → `fca9ce4` (feat S2 accent nav buttons) → `b24042a` (chore S3 version bumps + pin sweep) → `63d7917` (chore S4 dogfood self-install) → S5 cycle-close this commit.
+
+**Codename:** `project-visual-polish`. Workshop 0.99.0 → 0.100.0; project blueprint 1.14.0 → 1.15.0; all other blueprints / mechanisms / contracts UNCHANGED. No cowork surface touched; no schema delta; no scheduled-job-contract bump (0.35.1 holds).
+
+**Two helpers, project blueprint only.** `project-docs-cards.js`: Docs hub converts from a BeaconCards stacked auto-fit grid to `layout: "row"` single-column list rows (mtime-desc ordering). New `_formatCreated` reads canonical `created_at`, handles Luxon DateTime + string shapes, falls back to `file.ctime`; right-side meta `created <MMM D> · edited <relative>` per row; accent file glyph. Fixed latent bug: old code sorted/subtitled on dead key `p.created` (doc-notes carry `created_at`), so subtitle was empty and sort silently fell through. `project-nav-buttons.js`: project nav row delegates to `customJS.AccentButton.render(container, {label, icon, onClick, flex: true})` — identical accent styling to New Doc / New Note by construction; full-width row stretch; divider margin 6px → 14px. Hand-rolled `btnStyle` + hover handlers deleted. Workstream widget / action row / task tiles UNTOUCHED.
+
+**Harness:** helper-cases 2362 → **2369 / 0** (+7: PDC-3 rewritten 1→2 asserts; +PDC-8 ×3; +PDC-9 ×1; PNB-WRAP-2/3 deleted −2; +PNB-ACC-1..3 ×4). All other harnesses GREEN + unchanged. Full `release:preflight` exit 0 twice; `version-sync ok: 0.100.0`. Visual verification deferred to post-deploy human check (no Obsidian UI driving exists).
+
+**3 discoveries.** (1) Stale guide command fixed: `build-test-verify.md` § Self-install used `node platform/install.js .` — actual signature is `--vault . --auto-approve`. Fixed in S5. (2) Rules-regen is blueprint-version-gated — first project regen since v0.61.0 produced a large-looking diff (benign dedup); future cycles should not panic. (3) FA3-PROJ-1 version-floor is an enumerated alternation `^1\.(13|14|15)\.\d+$` — carry-forward: convert to numeric minor-compare.
+
+**Action required post-deploy.** `brew upgrade sauce` → `sauce update --bump-pins` per consumer vault. Visual-only changes; NO schema / contract / migration steps; no scheduled-job sync needed (cowork untouched).
+
+**Carry-forward.** v0.99.1 NEXT: `cowork:doctor` — scope unchanged (embedded, 4 checks). Additional: doc-to-doc linking affordance; accent restyle for SpaceNavButtons/finance/trips; FA3-PROJ-1 numeric compare; HC message-string drift; `fileIcon` SVG cross-file dedup; PNB-WRAP-1 vestigial assert.
+
+---
+
 ### v0.99.0 — sparse-signal feedback (2026-06-12 close)
 
 **SHIPPED 2026-06-12.** See `Docs/plans/2026-06-12-v0.99.0-sparse-signal-feedback-result.md` for the full narrative. Commits S0..S3: `a635227` (S0 baseline) → `a485a87` (S1.0 pre-design grep audit) → `1da3238` (S1.1 26 RED HC-V0990 asserts) → `15f1344` (S1.2 compose v=3) → `3c21105` (S1.2.1 fixture regen to v=3 — review follow-up) → `818fee5` (S1.3 parseFeedbackCapture satisfaction) → `49c115d` (S1.4 gate + schema 4 + prefix + satisfaction primitives) → `f805324` (S1.4.1 V4 normalizer deep-copy + coercion — review follow-up) → `5908b18` (S1.5 OI layer: Step 3.4 gate + v=3 template) → `00f92cf` (S1.5.1 OI gate/bookkeeping ambiguity fixes — review follow-up) → `f4b0152` (S1.6 sidecar schema 1.3.0) → `ec4cb8b` (S1.7 version bumps + pin sweep) → `c249a1a` (S1.7.1 drop delisted realclaudian; convenience 0.4.1) → S3 cycle-close this commit.
