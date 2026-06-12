@@ -50,7 +50,7 @@ cadence: reconcile-cowork
    b. Detect the sentinel:
       - `<!-- cowork:rating-block schema=1.0.0 cadence=<X> day=<Y> -->` → kind-checkbox
         parse (sub-step c). The 4 non-EOD cadences emit this shape.
-      - `<!-- cowork:feedback-capture v=1 -->` or `v=2` → rich parse (sub-step d).
+      - `<!-- cowork:feedback-capture v=1 -->`, `v=2`, or `v=3` → rich parse (sub-step d).
         EOD emits this shape (v0.98.1+).
       - Neither → 0 observations for this note.
    c. Kind-checkbox parse: scan the `> [!todo]+ Was today useful?` callout for
@@ -72,16 +72,47 @@ cadence: reconcile-cowork
       KIND-LEVEL MAPPING for sub-step 8's aggregation: a kind with ≥1
       mattered tick → `{ kind, ticked: true }`; a surfaced kind with 0
       mattered ticks → `{ kind, ticked: false }`.
+      Collect the one-tap satisfaction line (`> Useful: \`[x?] yes\` \`[x?] no\``) → true / false / ambiguous (both ticked) / null (neither); trailing Tasks annotations ignored.
 
 8. Aggregate kind observations across all of yesterday's notes per kind.
    Compute `tick_count` + `skip_count` per kind.
+
+### Step 3.4 — Classify the day (engagement gate, v0.99.0)
+
+8-gate. Classify yesterday per the `classifyEngagementDay` contract
+    (`spice/cowork/helpers/ingest-feedback-helper.js` — re-stated for
+    pure-MCP execution). Walk every parsed note from Step 3:
+    - **ENGAGED** when ANY note shows: ≥1 ticked kind checkbox (rating-block
+      notes), ≥1 ticked Mattered/Didn't-like item, ≥1 knob off `same`
+      (ambiguous counts — the user touched it), OR non-empty free-text that
+      is not the placeholder line.
+    - **TAP-ONLY** when the only signal is the `Useful:` yes/no tap.
+    - **SILENT** otherwise.
+    Gate consequences (HARD — call-site gating, because the weight formula
+    decays unconditionally once invoked):
+    - ENGAGED → run Steps 3.5, 3.6, and ALL of Step 4 (sub-steps 9-13f) in
+      full; append `{{$yesterday_date}}` to `totals.engaged_days[]`
+      (dedup-aware).
+    - TAP-ONLY → SKIP Steps 3.5/3.6 and Step 4's SIGNAL sub-steps (11, 12,
+      13b-13e). Apply ONLY: schema-4 normalize (13a), totals bookkeeping
+      (sub-step 13: notes_scanned, scanned_days), satisfaction append (13f),
+      audit line. The `per_kind` subtree must be byte-identical before/after.
+    - SILENT → SKIP everything except schema-4 normalize (13a, first run
+      only), totals bookkeeping (sub-step 13), and the Step 5.5 audit line
+      `- no feedback signal for {{$yesterday_date}}`.
+    Free-text section scoping fast path: BEFORE Step 3.6, split free_text per
+    the `parseKindPrefixLines` contract — a line `<kind>: <text>` whose
+    prefix case-insensitively matches a kind in this engagement's dispatch
+    set is PRE-BOUND to that kind; the Step 3.6 LLM pass classifies its
+    intent but MUST NOT change its kind. Remaining lines flow to Step 3.6
+    unmodified.
 
 ### Step 3.5 — Deterministic feedback rollup (EOD notes with feedback-capture sentinel only)
 
 8a. Read the EOD sidecar's `feedback_capture` field. Fast-path: skip this step
     entirely when the field is absent OR `item_count == 0` (and free_text is
     empty). Identity registry = `feedback_capture.items[]`
-    (`{item_id, kind, identifier, label}`; sidecar schema 1.2.0+). For
+    (`{item_id, kind, identifier, label}`; sidecar schema 1.2.0+ (incl. 1.3.0)). For
     pre-1.2.0 sidecars (the v=1-era corpus), recover identity from the
     wikilink labels in the .md: `[[#^<item_id>|<label>]]` → use the label as
     a per_topic entity. If identity is unrecoverable, keep the kind-level
@@ -137,25 +168,25 @@ cadence: reconcile-cowork
 ### Step 4 — Update learned_weights in user-preferences.md
 
 9. Read `spice/cowork/context/user-preferences.md` frontmatter via Obsidian MCP. Parse `learned_weights:` block (may be absent → initialize skeleton; may be legacy single-engagement shape → normalize to nested per v0.96.1).
-10. Locate `learned_weights.engagements["{{$engagement_id}}"]`. If absent, initialize skeleton with empty `per_kind: {}` + `totals` block (warmup_until = yesterday + 7 days, etc.).
-11. Apply update formula per kind that surfaced an observation:
+10. Locate `learned_weights.engagements["{{$engagement_id}}"]`. If absent, initialize skeleton with empty `per_kind: {}` + `totals` block (warmup_until = null (retired in schema 4; graduation is engaged-day-driven), etc.).
+11. Apply update formula per kind that surfaced an observation (ENGAGED days only — Step 3.4):
     ```
     w_old = prev.weight || 1.00
     w_raw = w_old * 0.98 + 0.15 * (tick_count - 0.5 * skip_count) / (tick_count + skip_count + 5)
     w_new = clamp(w_raw, 0.10, 3.00) rounded to 3 decimals (banker's rounding)
     ```
     Update `per_kind[<kind>]`: weight, ticks += tick_count, skips += skip_count, warmup preserved, last_updated = `{{$yesterday_date}}`.
-12. Evaluate warmup graduation: if `days_since_first >= 7` AND `ticks + skips >= 7`, set `warmup: false`.
+12. Evaluate warmup graduation (ENGAGED days only — Step 3.4): if `totals.engaged_days.length >= 7` AND `ticks + skips >= 7`, set `warmup: false`. (Calendar days NO LONGER graduate — silence cannot build authority.)
 13. Update `totals`: `notes_scanned += <yesterday's note count>`, `notes_with_any_tick += <count of notes with any [x]>`, `scanned_days.push("{{$yesterday_date}}")` (dedup-aware).
 
-13a. SCHEMA 3 NORMALIZE (v0.98.2): before applying updates, normalize the
-     parsed `learned_weights:` block per `normalizeLearnedWeightsV3` —
+13a. SCHEMA 4 NORMALIZE (v0.99.0): before applying updates, normalize the
+     parsed `learned_weights:` block per `normalizeLearnedWeightsV4` —
      tolerate on-disk `schema_version: 2` (headspace), a MISSING version
-     field (accuris), legacy `"1.1.0"`, or `3`. Result shape: top-level
-     `schema_version: 3`; every `per_kind.<kind>` gains empty
+     field (accuris), legacy `"1.1.0"`, `3`, or `4`. Result shape: top-level
+     `schema_version: 4`; every `per_kind.<kind>` gains empty
      `per_person: {}` / `per_channel: {}` / `per_topic: {}` maps when absent;
      `totals` gains `feedback_ingested_days: []` when absent. NOTHING
-     existing is dropped.
+     existing is dropped. `totals` gain `engaged_days: []` + `satisfaction: []`; `warmup_until` set null (retired). ONE-TIME MIGRATION when the on-disk `schema_version` is not 4: keep every kind's weight + ticks, ZERO skips, force `warmup: true`. Idempotent — already-4 input (numeric or string `"4"`) is never re-reset.
 
 13b. Apply Step 3.5's entity deltas: per entity,
      `weight = clamp(round3(weight + delta), 0.10, 3.00)`; increment `ticks`
@@ -165,13 +196,15 @@ cadence: reconcile-cowork
 13c. Apply entity decay TOWARD 1.00 to EVERY entity under this engagement:
      `weight = round3(1.00 + (weight − 1.00) × 0.995)`. (NOT weight × 0.995 —
      that would decay toward zero.) Once per ingested day (idempotent via
-     `feedback_ingested_days`).
+     `feedback_ingested_days`). ENGAGED days only (Step 3.4 gate).
 
 13d. Apply Step 3.5's knob deltas AFTER the per-kind formula (sub-step 11):
      `weight = clamp(round3(weight + delta), 0.10, 3.00)`.
 
 13e. Append `{{$yesterday_date}}` to `totals.feedback_ingested_days[]`
      (dedup-aware).
+
+13f. Satisfaction append (ALL day classes with a boolean tap): per the `appendSatisfaction` contract — `totals.satisfaction` gets `{ day: "{{$yesterday_date}}", useful: <tap> }`; same-day re-log overwrites; window capped at 30 entries (oldest dropped); ambiguous dual-tap or no tap → no entry.
 
 ### Step 5 — Write .bak + updated user-preferences.md
 
@@ -189,7 +222,7 @@ cadence: reconcile-cowork
      `## {{$today_date}} (run-id: fd-{{$today_ymd_compact}}-0300)` + one
      `- [tag] ...` bullet per delta — tags: `[weights]` (old → new + source),
      `[knob]`, `[microscope]`, `[voice]`, `[coverage]`, `[rejected]`,
-     `[pending]`. A zero-signal day logs the single line
+     `[pending]`, `[satisfaction]` (e.g. `- [satisfaction] 2026-06-13 useful=yes`). A zero-signal day logs the single line
      `- no feedback signal for {{$yesterday_date}}`. Write via
      `obsidian_put_content`.
 
@@ -277,6 +310,7 @@ cadence: reconcile-cowork
 - check-heartbeat: regex-replaces prior callout in memory.md same-day.
 - reconciler-log: dedup by run-id (skip if today's run already logged).
 - feedback ingest: skip when `{{$yesterday_date}}` already in `totals.feedback_ingested_days[]`.
+- engagement gate: engaged_days append is dedup-aware; satisfaction append overwrites same-day; tap-only/silent days never invoke the weight formula (decay cannot double-fire). `scanned_days` records every PROCESSED day (all three classes); `engaged_days` records ENGAGED days only — the re-run guard keys off `scanned_days`, so a re-fired tap-only/silent day is a clean no-op.
 - feedback-deltas log: dedup by run-id (skip if today's `fd-` run already logged).
 - voice apply: a proposal applies at most once (`status: applied` gates re-apply).
 
@@ -289,7 +323,8 @@ cadence: reconcile-cowork
 - EOD sidecar lacks `feedback_capture` / pre-1.2.0 → kind-level signal from the markdown only; entity rollup degrades to labels; never aborts.
 - Free-text extraction yields invalid JSON → log `[rejected] extraction-unparseable` + skip Step 3.6 entirely; deterministic rollup (3.5) still applies.
 - microscope.md absent for an accepted append → `[pending]` log line; never create the file.
-- ZERO signal (no ticks, no downvotes, no knobs, empty free_text — the accuris reality) → no deltas, no writes except the single audit line.
+- ZERO signal (no ticks, no downvotes, no knobs, empty free_text — a SILENT day per Step 3.4) → no deltas; writes limited to the single audit line, totals bookkeeping (sub-step 13), and the first-run 13a normalize/migration.
+- Day classifies SILENT but learned_weights is pre-v4 → still run the 13a normalize+migration (the reset must not wait for an engaged day).
 
 ## Performance
 

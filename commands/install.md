@@ -52,6 +52,12 @@ The cowork installer is an explicit allowlist. `platform/blueprints/cowork/manif
 
 These guarantees are codified in four safeguards (introduced v0.98.1). See `Docs/plans/2026-06-11-v0.98.1-questionnaire-capture-design.md` § User-content preservation safeguards for rationale and design detail.
 
+### v0.99.0 deploy note (sparse-signal feedback)
+
+- **`learned_weights` schema 3 → 4 in-place migration.** The first post-update 03:00 reconciler run migrates the `learned_weights:` block in `user-preferences.md` frontmatter to schema 4 (block-scoped `.bak`-first rewrite — same contract as every prior migration). The migration keeps each kind's weight + ticks, **ZEROES silence-built skip counters, and re-enters every kind into warmup. This is BY DESIGN, not data loss** — under the pre-v0.99.0 semantics, every surfaced-but-unticked kind counted as a skip, so those counters were silence-contaminated, never user signal. Graduation now requires 7 ENGAGED days (days with real feedback gestures) plus 7 observations.
+- **EOD Rail L renders v=3** after the post-update `align-scheduled-jobs` run: one-tap `Useful: [ ] yes [ ] no` + free-text box on top, per-kind lists collapsed below. Old v=1/v=2 notes stay readable forever (tolerant parsers).
+- **`realclaudian` no longer auto-installs.** The plugin was delisted from the upstream obsidian-releases index, so it was removed from the convenience mechanism's `external_plugins[]` (convenience 0.4.1). **Already-installed copies are untouched** — the installer never uninstalls plugins; the entry's removal only stops fresh installs from erroring against the dead index entry.
+
 ### v0.98.2 deploy note (feedback-loop closure)
 
 The v0.98.2 update materializes:

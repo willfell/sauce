@@ -194,10 +194,10 @@ this is unexpected.`
     `ordered_blocks` in the composeBody payload — this is what drives the EOD Rail L
     feedback-capture dispatch in Step 4.
 
-### Step 4: Feedback-capture callout (Rail L — v0.98.1 expanded shape)
+### Step 4: Feedback-capture callout (Rail L — v0.99.0 prose-first shape)
 
 4a. Compute `output_path = "spice/cowork/daily/{{$today_dirpath}}/eod-review.md"`.
-    Parse prior `cowork:feedback-capture v=2` sentinel via `parseFeedbackCapture(prior_md)`
+    Parse prior cowork:feedback-capture sentinel (v=1, v=2, or v=3) via `parseFeedbackCapture(prior_md)`
     when file exists; build `prior_feedback_state` map (per-item ticks, knob positions,
     free-text). If only the legacy `cowork:rating-block` sentinel exists (pre-v0.98.1
     EOD), start fresh — no migration of kind-level ticks to per-item ticks.
@@ -215,10 +215,11 @@ this is unexpected.`
 4d. v0.98.2 — the rail's per-kind sub-callouts carry TWO checklists sharing
     the same `^item-<kind>-<7hex>` IDs: `Mattered:` (this helped) and
     `Didn't like:` (surface less of this). composeFeedbackCapture emits the
-    `<!-- cowork:feedback-capture v=2 -->` sentinel; prior v=1 files parse
+    composeFeedbackCapture emits the `<!-- cowork:feedback-capture v=3 -->` sentinel; prior v=1 files parse
     with ticks preserved into Mattered and a fresh Didn't-like row. An item
     ticked in BOTH lists is contradictory: preserved in the UI, flagged in
     sidecar `feedback_capture.ambiguous_items[]`, ignored by the reconciler.
+    v=3 renders the one-tap Useful line + the free-text fence ABOVE the per-kind blocks — prose is the primary channel; ticks are optional garnish.
 
 ### Step 5: Detection callout (Rail D — new-MCP surface)
 
@@ -284,7 +285,7 @@ this is unexpected.`
     committing either file. On `failed:contract-violation:sidecar-schema`, no
     files are written.
 
-8c. v0.98.2 — the sidecar `feedback_capture` field (schema 1.2.0) carries the
+8c. v0.98.2 — the sidecar `feedback_capture` field (schema 1.3.0) carries the
     identity registry `items[]: [{item_id, kind, identifier, label}]` from
     composeFeedbackCapture's `sidecar_observability`, plus
     `ambiguous_items[]`. This is the reconciler's per-item identity source —

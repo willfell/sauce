@@ -1,6 +1,7 @@
+"use strict";
 // platform/blueprints/cowork/helpers/ingest-feedback-helper.js
 //
-// v0.98.2 — Feedback-loop closure: the deterministic ingest core.
+// v0.99.0 — Engagement gate + schema 4 + kind-prefix + satisfaction primitives.
 // Pure data — no MCP calls, no LLM, no I/O. The reconcile-cowork OI re-states
 // this contract inline (the reconciler is pure-MCP at fire time per its
 // v0.97.1 posture); this module is the testable reference implementation and
@@ -17,11 +18,19 @@
 //   applyFloorSet(per_kind, { kind, entity_type, entity }, opts?) — hard 0.10.
 //   normalizeLearnedWeightsV3(raw) — accepts schema 2 (int) / missing /
 //     "1.1.0" (helper-era) / 3; returns nested schema-3 shape, additive.
+//   normalizeLearnedWeightsV4(raw) — wraps V3; migration: zero skips, force
+//     warmup, init engaged_days[] + satisfaction[], retire warmup_until.
 //   validateIntents(intents, free_text) — allowlist + verbatim-quote gate;
 //     returns { accepted, rejected, pending }.
 //   composeAuditEntry({ day, run_id, lines }) — feedback-deltas.md section.
+//   classifyEngagementDay({ notes }) — "engaged" | "tap_only" | "silent".
+//   parseKindPrefixLines(free_text, kinds) — deterministic section scoping.
+//   appendSatisfaction(totals, day, useful, opts?) — rolling-30 sat series.
+//   applyIntentKindTicks(kind_observations, accepted_intents) — uprank prose
+//     counts as that kind's tick for the day.
 
 const { _clamp, _round } = require("./learn-from-checks-helper.js");
+const { FREE_TEXT_PLACEHOLDERS } = require("./compose-feedback-capture-helper.js");
 
 const INGEST_DEFAULTS = Object.freeze({
   mattered_delta: 0.05,
@@ -218,6 +227,110 @@ function normalizeLearnedWeightsV3(raw) {
   return out;
 }
 
+// v0.99.0 — schema 4: engagement-gated semantics. Wraps the V3 shape
+// normalizer, then (one-time, gated on Number(schema_version) !== 4) applies
+// the silence-reset migration: keep weight + ticks (real signal), ZERO skips
+// (silence-contaminated), force warmup true (re-graduate on engaged days
+// only). totals gain engaged_days[] + satisfaction[]; warmup_until retired
+// (null) — graduation is engaged-day-count driven (evaluateWarmup arg 2).
+function normalizeLearnedWeightsV4(raw) {
+  const priorVersion = raw && typeof raw === "object" ? raw.schema_version : undefined;
+  const v3 = normalizeLearnedWeightsV3(raw);
+  const isMigration = Number(priorVersion) !== 4;
+  const out = { schema_version: 4, engagements: {} };
+  for (const [eid, eng] of Object.entries(v3.engagements)) {
+    const per_kind = JSON.parse(JSON.stringify(eng.per_kind || {}));
+    if (isMigration) {
+      for (const kind of Object.keys(per_kind)) {
+        per_kind[kind].skips = 0;
+        per_kind[kind].warmup = true;
+      }
+    }
+    const totals = JSON.parse(JSON.stringify(eng.totals || {}));
+    if (!Array.isArray(totals.engaged_days)) totals.engaged_days = [];
+    if (!Array.isArray(totals.satisfaction)) totals.satisfaction = [];
+    totals.warmup_until = null;
+    out.engagements[eid] = Object.assign({}, eng, { per_kind, totals });
+  }
+  return out;
+}
+
+// v0.99.0 — engagement gate. A day contributes observations ONLY when the
+// user demonstrably engaged. Input: notes[] of { rating, feedback } where
+// rating = parseRatingCallout(md) | null and feedback = parseFeedbackCapture(md)
+// (sentinel_version null when the note carries no capture sentinel).
+// Returns "engaged" | "tap_only" | "silent".
+function classifyEngagementDay(opts) {
+  const o = opts || {};
+  let engaged = false;
+  let tapped = false;
+  for (const note of (Array.isArray(o.notes) ? o.notes : [])) {
+    const r = note && note.rating;
+    const f = note && note.feedback;
+    if (r && Array.isArray(r.observations) && r.observations.some((x) => x && x.ticked)) {
+      engaged = true;
+    }
+    if (f && f.sentinel_version) {
+      const anyTick = Object.values(f.ticks || {}).some(Boolean)
+        || Object.values(f.downvotes || {}).some(Boolean);
+      // "ambiguous" = user physically ticked 2+ boxes — that IS engagement.
+      const anyKnob = Object.values(f.knobs || {}).some(
+        (p) => p === "less" || p === "more" || p === "ambiguous");
+      const text = typeof f.free_text === "string" ? f.free_text.trim() : "";
+      const prose = text.length > 0 && !FREE_TEXT_PLACEHOLDERS.includes(text);
+      if (anyTick || anyKnob || prose) engaged = true;
+      if (f.satisfaction === true || f.satisfaction === false) tapped = true;
+    }
+  }
+  return engaged ? "engaged" : (tapped ? "tap_only" : "silent");
+}
+
+// v0.99.0 — deterministic section scoping for prose. A line whose prefix
+// case-insensitively matches a known kind is pre-bound to that kind BEFORE
+// LLM intent extraction (the LLM classifies intent but cannot re-scope the
+// kind). Everything else returns in `remainder` for the unmodified Step 3.6.
+function parseKindPrefixLines(free_text, kinds) {
+  const known = new Set((Array.isArray(kinds) ? kinds : []).map((k) => String(k).toLowerCase()));
+  const scoped = [];
+  const remainder = [];
+  for (const line of String(free_text || "").split("\n")) {
+    const m = line.match(/^([A-Za-z][A-Za-z0-9_-]*):\s+(.+)$/);
+    if (m && known.has(m[1].toLowerCase())) {
+      scoped.push({ kind: m[1].toLowerCase(), text: m[2].trim(), line: line.trim() });
+    } else if (line.trim()) {
+      remainder.push(line);
+    }
+  }
+  return { scoped, remainder: remainder.join("\n") };
+}
+
+// v0.99.0 — rolling satisfaction series (the doctor's first KPI). Boolean-only
+// (ambiguous dual-taps and null no-taps are no-ops); same-day re-log
+// overwrites; window capped at 30 entries (oldest dropped).
+function appendSatisfaction(totals, day, useful, opts) {
+  const cap = (opts && opts.cap) || 30;
+  const next = JSON.parse(JSON.stringify(totals || {}));
+  if (!Array.isArray(next.satisfaction)) next.satisfaction = [];
+  if (typeof useful !== "boolean") return next;
+  next.satisfaction = next.satisfaction.filter((e) => e && e.day !== day);
+  next.satisfaction.push({ day, useful });
+  if (next.satisfaction.length > cap) next.satisfaction = next.satisfaction.slice(-cap);
+  return next;
+}
+
+// v0.99.0 — uprank-intent prose counts as that kind's tick for the day
+// (engaged-day kind formula input). Accepted intents only (validateIntents
+// has already run).
+function applyIntentKindTicks(kind_observations, accepted_intents) {
+  const upranked = new Set((Array.isArray(accepted_intents) ? accepted_intents : [])
+    .filter((i) => i && i.intent === "uprank" && i.kind)
+    .map((i) => String(i.kind).toLowerCase()));
+  return (Array.isArray(kind_observations) ? kind_observations : []).map((o) =>
+    o && upranked.has(String(o.kind).toLowerCase())
+      ? Object.assign({}, o, { ticked: true })
+      : o);
+}
+
 function validateIntents(intents, free_text) {
   const text = typeof free_text === "string" ? free_text : "";
   const result = { accepted: [], rejected: [], pending: [] };
@@ -270,7 +383,12 @@ module.exports = {
   applyDecay,
   applyFloorSet,
   normalizeLearnedWeightsV3,
+  normalizeLearnedWeightsV4,
   validateIntents,
   composeAuditEntry,
+  classifyEngagementDay,
+  parseKindPrefixLines,
+  appendSatisfaction,
+  applyIntentKindTicks,
   _classifyEntity,
 };
