@@ -9275,6 +9275,476 @@ async function caseV0982IngestA8() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// v0.99.0 — HC-V0990-* : sparse-signal feedback (gate + v=3 capture + schema 4)
+// ---------------------------------------------------------------------------
+
+function _v0990CaptureInput(overrides) {
+  return Object.assign({
+    cadence: "eod-review",
+    day: "2026-06-13",
+    surfaced_items_by_kind: {
+      chat: [
+        { id: "chat:c1:t1", label: "Zhenzhen PR #353 thread" },
+        { id: "person:Ben Tanner", label: "Ben/Stale Doc DB infra" },
+      ],
+      finance: [{ id: "finance:cc-drift", label: "CC drift snapshot" }],
+    },
+    prior_md: null,
+    knob_positions: ["less", "same", "more"],
+  }, overrides || {});
+}
+
+function _v0990V3Body(opts) {
+  // Minimal hand-built v=3 EOD rail for parse-side cases. Item IDs computed
+  // via _itemId at runtime — never invent hashes (v0.98.2 lesson 1).
+  const { _itemId } = require("../blueprints/cowork/helpers/compose-feedback-capture-helper.js");
+  const o = opts || {};
+  const chatId = _itemId("chat", "chat:c1:t1");
+  const finId = _itemId("finance", "finance:cc-drift");
+  return [
+    "> [!todo]+ Was today useful?",
+    "> One tap, a line of prose, or ticks — anything counts. Tomorrow's brief adjusts overnight.",
+    "> <!-- cowork:feedback-capture v=3 -->",
+    `> Useful: \`[${o.yes ? "x" : " "}] yes\` \`[${o.no ? "x" : " "}] no\`${o.tapSuffix || ""}`,
+    ">",
+    "> ### Free-text feedback",
+    ">",
+    "```feedback",
+    o.free_text !== undefined ? o.free_text : "",
+    "```",
+    ">",
+    "> > [!summary]- Chat — items",
+    "> > Mattered:",
+    `> > - [${o.tickChat ? "x" : " "}] [[#^${chatId}|Zhenzhen PR #353 thread]]`,
+    "> >",
+    "> > Didn't like:",
+    `> > - [ ] [[#^${chatId}|Zhenzhen PR #353 thread]]`,
+    "> >",
+    `> > **Fire chat:** \`[ ] less\` \`[${o.knobChatSame ? "x" : " "}] same\` \`[${o.knobChatMore ? "x" : " "}] more\``,
+    ">",
+    "> > [!summary]- Finance — items",
+    "> > Mattered:",
+    `> > - [ ] [[#^${finId}|CC drift snapshot]]`,
+    "> >",
+    "> > Didn't like:",
+    `> > - [ ] [[#^${finId}|CC drift snapshot]]`,
+    "> >",
+    "> > **Fire finance:** `[ ] less` `[ ] same` `[ ] more`",
+  ].join("\n");
+}
+
+function _v0990Note(ratingObs, feedbackOpts) {
+  const { parseFeedbackCapture } = require("../blueprints/cowork/helpers/learn-from-checks-helper.js");
+  return {
+    rating: ratingObs ? { observations: ratingObs } : null,
+    feedback: feedbackOpts ? parseFeedbackCapture(_v0990V3Body(feedbackOpts)) : null,
+  };
+}
+
+async function caseV0990CaptureA1() {
+  console.log(`\n--- Case HC-V0990-CAPTURE-A1: v=3 sentinel + section ORDER tap < fence < kind blocks ---`);
+  try {
+    const { composeFeedbackCapture } = require("../blueprints/cowork/helpers/compose-feedback-capture-helper.js");
+    const r = composeFeedbackCapture(_v0990CaptureInput());
+    const iSent = r.rail_md.indexOf("cowork:feedback-capture v=3");
+    const iTap = r.rail_md.indexOf("Useful:");
+    const iFence = r.rail_md.indexOf("```feedback");
+    const iKind = r.rail_md.indexOf("[!summary]-");
+    assertTrue(
+      "HC-V0990-CAPTURE-A1: emits v=3 sentinel; order is tap line < free-text fence < first kind sub-callout",
+      iSent > -1 && iTap > -1 && iFence > -1 && iKind > -1 && iTap < iFence && iFence < iKind
+    );
+  } catch (e) { assertTrue("HC-V0990-CAPTURE-A1: v=3 order", false, e && e.message); }
+}
+
+async function caseV0990CaptureA2() {
+  console.log(`\n--- Case HC-V0990-CAPTURE-A2: default tap line renders both boxes unticked ---`);
+  try {
+    const { composeFeedbackCapture } = require("../blueprints/cowork/helpers/compose-feedback-capture-helper.js");
+    const r = composeFeedbackCapture(_v0990CaptureInput());
+    assertTrue(
+      "HC-V0990-CAPTURE-A2: fresh compose renders `> Useful: `[ ] yes` `[ ] no``",
+      /^> Useful: `\[ \] yes` `\[ \] no`$/m.test(r.rail_md)
+    );
+  } catch (e) { assertTrue("HC-V0990-CAPTURE-A2: default tap line", false, e && e.message); }
+}
+
+async function caseV0990CaptureA3() {
+  console.log(`\n--- Case HC-V0990-CAPTURE-A3: v=3 prior re-fire preserves tap + prose + ticks + knob ---`);
+  try {
+    const { composeFeedbackCapture, _itemId } = require("../blueprints/cowork/helpers/compose-feedback-capture-helper.js");
+    const prior = _v0990V3Body({ yes: true, tickChat: true, knobChatMore: true, free_text: "finance: too long" });
+    const r = composeFeedbackCapture(_v0990CaptureInput({ prior_md: prior }));
+    const tapKept = /^> Useful: `\[x\] yes` `\[ \] no`$/m.test(r.rail_md);
+    const proseKept = r.rail_md.includes("finance: too long");
+    const chatId = _itemId("chat", "chat:c1:t1");
+    const tickKept = new RegExp(`^> > - \\[x\\] \\[\\[#\\^${chatId}\\|`, "m").test(r.rail_md);
+    const knobKept = /\*\*Fire chat:\*\* `\[ \] less` `\[ \] same` `\[x\] more`/.test(r.rail_md);
+    assertTrue(
+      "HC-V0990-CAPTURE-A3: v=3 prior re-fire preserves tap state, free-text verbatim, Mattered tick, knob position",
+      tapKept && proseKept && tickKept && knobKept
+    );
+  } catch (e) { assertTrue("HC-V0990-CAPTURE-A3: v=3 re-fire preservation", false, e && e.message); }
+}
+
+async function caseV0990CaptureA4() {
+  console.log(`\n--- Case HC-V0990-CAPTURE-A4: v=2 prior tolerated — ticks/knobs/prose preserved, tap starts fresh, output upgrades to v=3 ---`);
+  try {
+    const { composeFeedbackCapture, _itemId } = require("../blueprints/cowork/helpers/compose-feedback-capture-helper.js");
+    const chatId = _itemId("chat", "chat:c1:t1");
+    const prior = [
+      "> [!todo]+ Was today useful?",
+      "> Tick items that mattered. Set per-kind frequency. Type prose for nuance. Tomorrow's brief adjusts overnight.",
+      "> <!-- cowork:feedback-capture v=2 -->",
+      ">",
+      "> > [!summary]- Chat — items",
+      "> > Mattered:",
+      `> > - [x] [[#^${chatId}|Zhenzhen PR #353 thread]]`,
+      "> >",
+      "> > Didn't like:",
+      `> > - [ ] [[#^${chatId}|Zhenzhen PR #353 thread]]`,
+      "> >",
+      "> > **Fire chat:** `[ ] less` `[x] same` `[ ] more`",
+      "> ### Free-text feedback",
+      ">",
+      "```feedback",
+      "keep the chat threads coming",
+      "```",
+    ].join("\n");
+    const r = composeFeedbackCapture(_v0990CaptureInput({ prior_md: prior }));
+    const upgraded = r.rail_md.includes("cowork:feedback-capture v=3") && !r.rail_md.includes("v=2 -->");
+    const tapFresh = /^> Useful: `\[ \] yes` `\[ \] no`$/m.test(r.rail_md);
+    const tickKept = new RegExp(`^> > - \\[x\\] \\[\\[#\\^${chatId}\\|`, "m").test(r.rail_md);
+    const proseKept = r.rail_md.includes("keep the chat threads coming");
+    assertTrue(
+      "HC-V0990-CAPTURE-A4: v=2 prior parses (ticks + knobs + prose preserved); tap renders fresh-unticked; sentinel upgrades to v=3",
+      upgraded && tapFresh && tickKept && proseKept
+    );
+  } catch (e) { assertTrue("HC-V0990-CAPTURE-A4: v=2 prior tolerance", false, e && e.message); }
+}
+
+async function caseV0990CaptureA5() {
+  console.log(`\n--- Case HC-V0990-CAPTURE-A5: v=1 prior still tolerated under v=3 compose ---`);
+  try {
+    const { composeFeedbackCapture, _itemId } = require("../blueprints/cowork/helpers/compose-feedback-capture-helper.js");
+    const chatId = _itemId("chat", "chat:c1:t1");
+    const prior = [
+      "> [!todo]+ Was today useful?",
+      "> <!-- cowork:feedback-capture v=1 -->",
+      "> > [!summary]- Chat — items",
+      `> > - [x] [[#^${chatId}|Zhenzhen PR #353 thread]]`,
+      "```feedback",
+      "```",
+    ].join("\n");
+    const r = composeFeedbackCapture(_v0990CaptureInput({ prior_md: prior }));
+    const tickKept = new RegExp(`^> > - \\[x\\] \\[\\[#\\^${chatId}\\|`, "m").test(r.rail_md);
+    assertTrue(
+      "HC-V0990-CAPTURE-A5: v=1 prior ticks land in Mattered; output is v=3; no throw",
+      tickKept && r.rail_md.includes("v=3 -->")
+    );
+  } catch (e) { assertTrue("HC-V0990-CAPTURE-A5: v=1 prior tolerance", false, e && e.message); }
+}
+
+async function caseV0990CaptureA6() {
+  console.log(`\n--- Case HC-V0990-CAPTURE-A6: both tap boxes ticked → preserved visually, satisfaction ambiguous ---`);
+  try {
+    const { composeFeedbackCapture, _parsePrior } = require("../blueprints/cowork/helpers/compose-feedback-capture-helper.js");
+    const prior = _v0990V3Body({ yes: true, no: true });
+    const p = _parsePrior(prior);
+    const r = composeFeedbackCapture(_v0990CaptureInput({ prior_md: prior }));
+    assertTrue(
+      "HC-V0990-CAPTURE-A6: _parsePrior returns satisfaction \"ambiguous\" for dual-tap; re-render preserves both [x]",
+      p.satisfaction === "ambiguous" && /^> Useful: `\[x\] yes` `\[x\] no`$/m.test(r.rail_md)
+    );
+  } catch (e) { assertTrue("HC-V0990-CAPTURE-A6: dual-tap ambiguity", false, e && e.message); }
+}
+
+async function caseV0990CaptureA7() {
+  console.log(`\n--- Case HC-V0990-CAPTURE-A7: empty-day minimal rail — tap + fence + sentinel, zero kind blocks ---`);
+  try {
+    const { composeFeedbackCapture } = require("../blueprints/cowork/helpers/compose-feedback-capture-helper.js");
+    const r = composeFeedbackCapture(_v0990CaptureInput({ surfaced_items_by_kind: {} }));
+    assertTrue(
+      "HC-V0990-CAPTURE-A7: empty day emits lead + v=3 sentinel + tap line + fence; no [!summary]- blocks; items[] empty",
+      r.rail_md.includes("v=3 -->") && /^> Useful:/m.test(r.rail_md)
+        && r.rail_md.includes("```feedback") && !r.rail_md.includes("[!summary]-")
+        && (r.sidecar_observability.items || []).length === 0
+    );
+  } catch (e) { assertTrue("HC-V0990-CAPTURE-A7: empty-day minimal", false, e && e.message); }
+}
+
+async function caseV0990ParseA1() {
+  console.log(`\n--- Case HC-V0990-PARSE-A1: satisfaction extraction — yes / no / both / neither ---`);
+  try {
+    const { parseFeedbackCapture } = require("../blueprints/cowork/helpers/learn-from-checks-helper.js");
+    const yes = parseFeedbackCapture(_v0990V3Body({ yes: true })).satisfaction;
+    const no = parseFeedbackCapture(_v0990V3Body({ no: true })).satisfaction;
+    const both = parseFeedbackCapture(_v0990V3Body({ yes: true, no: true })).satisfaction;
+    const neither = parseFeedbackCapture(_v0990V3Body({})).satisfaction;
+    assertTrue(
+      "HC-V0990-PARSE-A1: satisfaction true / false / \"ambiguous\" / null for yes / no / both / neither",
+      yes === true && no === false && both === "ambiguous" && neither === null
+    );
+  } catch (e) { assertTrue("HC-V0990-PARSE-A1: satisfaction extraction", false, e && e.message); }
+}
+
+async function caseV0990ParseA2() {
+  console.log(`\n--- Case HC-V0990-PARSE-A2: v=3 full parse — ticks + knobs + free_text + sentinel ---`);
+  try {
+    const { parseFeedbackCapture } = require("../blueprints/cowork/helpers/learn-from-checks-helper.js");
+    const { _itemId } = require("../blueprints/cowork/helpers/compose-feedback-capture-helper.js");
+    const r = parseFeedbackCapture(_v0990V3Body({ yes: true, tickChat: true, knobChatMore: true, free_text: "finance: too long" }));
+    const chatId = _itemId("chat", "chat:c1:t1");
+    assertTrue(
+      "HC-V0990-PARSE-A2: sentinel_version v=3; Mattered tick keyed by item-ID; knobs.chat === \"more\"; free_text verbatim",
+      r.sentinel_version === "v=3" && r.ticks[chatId] === true
+        && r.knobs.chat === "more" && r.free_text === "finance: too long"
+    );
+  } catch (e) { assertTrue("HC-V0990-PARSE-A2: v=3 full parse", false, e && e.message); }
+}
+
+async function caseV0990ParseA3() {
+  console.log(`\n--- Case HC-V0990-PARSE-A3: v=2 / v=1 markdown → satisfaction null (field absent pre-v=3) ---`);
+  try {
+    const { parseFeedbackCapture } = require("../blueprints/cowork/helpers/learn-from-checks-helper.js");
+    const v2 = parseFeedbackCapture("> [!todo]+ Was today useful?\n> <!-- cowork:feedback-capture v=2 -->\n");
+    const v1 = parseFeedbackCapture("> [!todo]+ Was today useful?\n> <!-- cowork:feedback-capture v=1 -->\n");
+    assertTrue(
+      "HC-V0990-PARSE-A3: v=2 and v=1 bodies parse with satisfaction === null (never undefined)",
+      v2.satisfaction === null && v1.satisfaction === null
+    );
+  } catch (e) { assertTrue("HC-V0990-PARSE-A3: pre-v=3 satisfaction null", false, e && e.message); }
+}
+
+async function caseV0990ParseA4() {
+  console.log(`\n--- Case HC-V0990-PARSE-A4: Tasks-plugin suffix tolerated on the tap line ---`);
+  try {
+    const { parseFeedbackCapture } = require("../blueprints/cowork/helpers/learn-from-checks-helper.js");
+    const r = parseFeedbackCapture(_v0990V3Body({ yes: true, tapSuffix: " ✅ 2026-06-13" }));
+    assertTrue(
+      "HC-V0990-PARSE-A4: trailing `✅ YYYY-MM-DD` on the Useful line still yields satisfaction === true",
+      r.satisfaction === true
+    );
+  } catch (e) { assertTrue("HC-V0990-PARSE-A4: tap-line suffix tolerance", false, e && e.message); }
+}
+
+async function caseV0990GateA1() {
+  console.log(`\n--- Case HC-V0990-GATE-A1: item tick → engaged ---`);
+  try {
+    const { classifyEngagementDay } = require("../blueprints/cowork/helpers/ingest-feedback-helper.js");
+    assertTrue(
+      "HC-V0990-GATE-A1: a day with ≥1 Mattered tick classifies \"engaged\"",
+      classifyEngagementDay({ notes: [_v0990Note(null, { tickChat: true })] }) === "engaged"
+    );
+  } catch (e) { assertTrue("HC-V0990-GATE-A1: tick → engaged", false, e && e.message); }
+}
+
+async function caseV0990GateA2() {
+  console.log(`\n--- Case HC-V0990-GATE-A2: knob / prose / rating-tick each → engaged ---`);
+  try {
+    const { classifyEngagementDay } = require("../blueprints/cowork/helpers/ingest-feedback-helper.js");
+    const knob = classifyEngagementDay({ notes: [_v0990Note(null, { knobChatMore: true })] });
+    const prose = classifyEngagementDay({ notes: [_v0990Note(null, { free_text: "chat: loved the Zhenzhen thread" })] });
+    const rating = classifyEngagementDay({ notes: [_v0990Note([{ kind: "chat", ticked: true }], null)] });
+    assertTrue(
+      "HC-V0990-GATE-A2: knob≠same, non-placeholder prose, and a rating-block kind tick each classify \"engaged\"",
+      knob === "engaged" && prose === "engaged" && rating === "engaged"
+    );
+  } catch (e) { assertTrue("HC-V0990-GATE-A2: gesture classes → engaged", false, e && e.message); }
+}
+
+async function caseV0990GateA3() {
+  console.log(`\n--- Case HC-V0990-GATE-A3: bare one-tap → tap_only ---`);
+  try {
+    const { classifyEngagementDay } = require("../blueprints/cowork/helpers/ingest-feedback-helper.js");
+    assertTrue(
+      "HC-V0990-GATE-A3: only the Useful tap set (no ticks/knobs/prose) classifies \"tap_only\"",
+      classifyEngagementDay({ notes: [_v0990Note(null, { yes: true })] }) === "tap_only"
+    );
+  } catch (e) { assertTrue("HC-V0990-GATE-A3: tap_only", false, e && e.message); }
+}
+
+async function caseV0990GateA4() {
+  console.log(`\n--- Case HC-V0990-GATE-A4: nothing → silent; placeholder prose does NOT count; unticked rating boxes do NOT count ---`);
+  try {
+    const { classifyEngagementDay } = require("../blueprints/cowork/helpers/ingest-feedback-helper.js");
+    const { FREE_TEXT_PLACEHOLDERS } = require("../blueprints/cowork/helpers/compose-feedback-capture-helper.js");
+    const silent = classifyEngagementDay({ notes: [_v0990Note([{ kind: "chat", ticked: false }], { free_text: FREE_TEXT_PLACEHOLDERS[FREE_TEXT_PLACEHOLDERS.length - 1] })] });
+    assertTrue(
+      "HC-V0990-GATE-A4: unticked rating boxes + placeholder-only fence classify \"silent\"",
+      silent === "silent"
+    );
+  } catch (e) { assertTrue("HC-V0990-GATE-A4: silent", false, e && e.message); }
+}
+
+async function caseV0990GateA5() {
+  console.log(`\n--- Case HC-V0990-GATE-A5: evaluateWarmup driven by engaged-day count — silence cannot graduate ---`);
+  try {
+    const { evaluateWarmup } = require("../blueprints/cowork/helpers/learn-from-checks-helper.js");
+    const state = { chat: { weight: 0.95, ticks: 4, skips: 3, warmup: true } };
+    const fewEngaged = evaluateWarmup(state, 2);   // 2 engaged days < 7 → stays warmup
+    const enough = evaluateWarmup(state, 7);       // 7 engaged days + 7 obs → graduates
+    assertTrue(
+      "HC-V0990-GATE-A5: arg 2 is ENGAGED-day count — 2 engaged days keeps warmup despite 7 observations; 7 engaged days graduates",
+      fewEngaged.chat.warmup === true && enough.chat.warmup === false
+    );
+  } catch (e) { assertTrue("HC-V0990-GATE-A5: engaged-day graduation", false, e && e.message); }
+}
+
+async function caseV0990GateA6() {
+  console.log(`\n--- Case HC-V0990-GATE-A6: applyIntentKindTicks — uprank prose flips kind observation to ticked ---`);
+  try {
+    const { applyIntentKindTicks } = require("../blueprints/cowork/helpers/ingest-feedback-helper.js");
+    const obs = [{ kind: "chat", ticked: false }, { kind: "finance", ticked: false }];
+    const intents = [{ intent: "uprank", kind: "chat", source_quote: "x", proposed_target: "learned_weights", confidence: "high" }];
+    const out = applyIntentKindTicks(obs, intents);
+    assertTrue(
+      "HC-V0990-GATE-A6: uprank intent on chat flips its observation to ticked:true; finance stays skip",
+      out[0].ticked === true && out[1].ticked === false
+    );
+  } catch (e) { assertTrue("HC-V0990-GATE-A6: intent kind ticks", false, e && e.message); }
+}
+
+async function caseV0990SchemaA1() {
+  console.log(`\n--- Case HC-V0990-SCHEMA-A1: 3 → 4 migration — keep weight+ticks, zero skips, force warmup ---`);
+  try {
+    const { normalizeLearnedWeightsV4 } = require("../blueprints/cowork/helpers/ingest-feedback-helper.js");
+    const raw = { schema_version: 3, engagements: { headspace: {
+      per_kind: { finance: { weight: 0.927, ticks: 0, skips: 3, warmup: true, per_person: {}, per_channel: {}, per_topic: {} },
+                  chat: { weight: 0.991, ticks: 2, skips: 1, warmup: false, per_person: {}, per_channel: {}, per_topic: {} } },
+      totals: { notes_scanned: 4, notes_with_any_tick: 2, scanned_days: ["2026-06-09"], feedback_ingested_days: [], warmup_until: "2026-06-16" },
+    } } };
+    const out = normalizeLearnedWeightsV4(raw);
+    const f = out.engagements.headspace.per_kind.finance;
+    const c = out.engagements.headspace.per_kind.chat;
+    const t = out.engagements.headspace.totals;
+    assertTrue(
+      "HC-V0990-SCHEMA-A1: schema 4; finance/chat weights + ticks preserved; skips zeroed; warmup forced true (even graduated chat); engaged_days + satisfaction init []; warmup_until null",
+      out.schema_version === 4 && f.weight === 0.927 && f.ticks === 0 && f.skips === 0 && f.warmup === true
+        && c.ticks === 2 && c.skips === 0 && c.warmup === true
+        && Array.isArray(t.engaged_days) && t.engaged_days.length === 0
+        && Array.isArray(t.satisfaction) && t.warmup_until === null
+    );
+  } catch (e) { assertTrue("HC-V0990-SCHEMA-A1: 3→4 migration", false, e && e.message); }
+}
+
+async function caseV0990SchemaA2() {
+  console.log(`\n--- Case HC-V0990-SCHEMA-A2: schema 2 (headspace int shape) → 4 ---`);
+  try {
+    const { normalizeLearnedWeightsV4 } = require("../blueprints/cowork/helpers/ingest-feedback-helper.js");
+    const raw = { schema_version: 2, engagements: { headspace: { per_kind: { email: { weight: 0.959, ticks: 1, skips: 2, warmup: true } }, totals: { scanned_days: ["2026-06-09"] } } } };
+    const out = normalizeLearnedWeightsV4(raw);
+    const e2 = out.engagements.headspace.per_kind.email;
+    assertTrue(
+      "HC-V0990-SCHEMA-A2: int-2 input migrates — skips 0, warmup true, entity maps initialized, schema 4",
+      out.schema_version === 4 && e2.skips === 0 && e2.warmup === true && typeof e2.per_person === "object"
+    );
+  } catch (e) { assertTrue("HC-V0990-SCHEMA-A2: 2→4", false, e && e.message); }
+}
+
+async function caseV0990SchemaA3() {
+  console.log(`\n--- Case HC-V0990-SCHEMA-A3: missing version (accuris shape) → 4 ---`);
+  try {
+    const { normalizeLearnedWeightsV4 } = require("../blueprints/cowork/helpers/ingest-feedback-helper.js");
+    const raw = { engagements: { accuris: { per_kind: {}, totals: { notes_scanned: 3, notes_with_any_tick: 0, scanned_days: ["2026-06-09", "2026-06-10"] } } } };
+    const out = normalizeLearnedWeightsV4(raw);
+    assertTrue(
+      "HC-V0990-SCHEMA-A3: versionless input lands at schema 4 with engaged_days/satisfaction initialized; existing totals preserved",
+      out.schema_version === 4 && out.engagements.accuris.totals.notes_scanned === 3
+        && Array.isArray(out.engagements.accuris.totals.engaged_days)
+    );
+  } catch (e) { assertTrue("HC-V0990-SCHEMA-A3: missing→4", false, e && e.message); }
+}
+
+async function caseV0990SchemaA4() {
+  console.log(`\n--- Case HC-V0990-SCHEMA-A4: legacy "1.1.0" string → 4 ---`);
+  try {
+    const { normalizeLearnedWeightsV4 } = require("../blueprints/cowork/helpers/ingest-feedback-helper.js");
+    const raw = { schema_version: "1.1.0", engagements: { headspace: { per_kind: { chat: { weight: 1.1, ticks: 5, skips: 2 } }, totals: {} } } };
+    const out = normalizeLearnedWeightsV4(raw);
+    const c = out.engagements.headspace.per_kind.chat;
+    assertTrue(
+      "HC-V0990-SCHEMA-A4: \"1.1.0\" input migrates to 4 (skips zeroed, warmup true)",
+      out.schema_version === 4 && c.skips === 0 && c.warmup === true && c.ticks === 5
+    );
+  } catch (e) { assertTrue("HC-V0990-SCHEMA-A4: 1.1.0→4", false, e && e.message); }
+}
+
+async function caseV0990SchemaA5() {
+  console.log(`\n--- Case HC-V0990-SCHEMA-A5: schema 4 input is idempotent — NO re-reset ---`);
+  try {
+    const { normalizeLearnedWeightsV4 } = require("../blueprints/cowork/helpers/ingest-feedback-helper.js");
+    const raw = { schema_version: 4, engagements: { headspace: {
+      per_kind: { chat: { weight: 1.05, ticks: 9, skips: 4, warmup: false, per_person: {}, per_channel: {}, per_topic: {} } },
+      totals: { engaged_days: ["2026-06-13"], satisfaction: [{ day: "2026-06-13", useful: true }], scanned_days: [], feedback_ingested_days: [], warmup_until: null },
+    } } };
+    const out = normalizeLearnedWeightsV4(raw);
+    const c = out.engagements.headspace.per_kind.chat;
+    assertTrue(
+      "HC-V0990-SCHEMA-A5: already-4 input passes through — skips 4 kept, warmup false kept, satisfaction kept",
+      c.skips === 4 && c.warmup === false && out.engagements.headspace.totals.satisfaction.length === 1
+    );
+  } catch (e) { assertTrue("HC-V0990-SCHEMA-A5: 4 idempotent", false, e && e.message); }
+}
+
+async function caseV0990SchemaA6() {
+  console.log(`\n--- Case HC-V0990-SCHEMA-A6: appendSatisfaction — boolean-only, same-day overwrite, rolling-30 trim ---`);
+  try {
+    const { appendSatisfaction } = require("../blueprints/cowork/helpers/ingest-feedback-helper.js");
+    let totals = { satisfaction: [] };
+    for (let i = 1; i <= 32; i++) {
+      totals = appendSatisfaction(totals, `2026-05-${String(i).padStart(2, "0")}`, i % 2 === 0);
+    }
+    const trimmed = totals.satisfaction.length === 30 && totals.satisfaction[0].day === "2026-05-03";
+    const overwritten = appendSatisfaction({ satisfaction: [{ day: "2026-06-13", useful: false }] }, "2026-06-13", true);
+    const ambiguousNoop = appendSatisfaction({ satisfaction: [] }, "2026-06-13", "ambiguous");
+    assertTrue(
+      "HC-V0990-SCHEMA-A6: rolling window trims to 30 (oldest dropped); same-day re-log overwrites; non-boolean is a no-op",
+      trimmed && overwritten.satisfaction.length === 1 && overwritten.satisfaction[0].useful === true
+        && ambiguousNoop.satisfaction.length === 0
+    );
+  } catch (e) { assertTrue("HC-V0990-SCHEMA-A6: appendSatisfaction", false, e && e.message); }
+}
+
+async function caseV0990PrefixA1() {
+  console.log(`\n--- Case HC-V0990-PREFIX-A1: known kind prefix binds deterministically (case-insensitive) ---`);
+  try {
+    const { parseKindPrefixLines } = require("../blueprints/cowork/helpers/ingest-feedback-helper.js");
+    const r = parseKindPrefixLines("Finance: way too long", ["chat", "finance"]);
+    assertTrue(
+      "HC-V0990-PREFIX-A1: \"Finance: way too long\" → scoped [{kind:\"finance\", text:\"way too long\"}], empty remainder",
+      r.scoped.length === 1 && r.scoped[0].kind === "finance" && r.scoped[0].text === "way too long" && r.remainder === ""
+    );
+  } catch (e) { assertTrue("HC-V0990-PREFIX-A1: prefix binds", false, e && e.message); }
+}
+
+async function caseV0990PrefixA2() {
+  console.log(`\n--- Case HC-V0990-PREFIX-A2: unknown prefix falls through to remainder ---`);
+  try {
+    const { parseKindPrefixLines } = require("../blueprints/cowork/helpers/ingest-feedback-helper.js");
+    const r = parseKindPrefixLines("Diana: stop emailing me", ["chat", "finance"]);
+    assertTrue(
+      "HC-V0990-PREFIX-A2: a person-name prefix (not a kind) lands in remainder for LLM extraction; scoped empty",
+      r.scoped.length === 0 && r.remainder === "Diana: stop emailing me"
+    );
+  } catch (e) { assertTrue("HC-V0990-PREFIX-A2: unknown prefix falls through", false, e && e.message); }
+}
+
+async function caseV0990PrefixA3() {
+  console.log(`\n--- Case HC-V0990-PREFIX-A3: mixed multi-line prose splits cleanly ---`);
+  try {
+    const { parseKindPrefixLines } = require("../blueprints/cowork/helpers/ingest-feedback-helper.js");
+    const text = "chat: more like the Zhenzhen thread\ngreat brief overall\nfinance: too long";
+    const r = parseKindPrefixLines(text, ["chat", "finance"]);
+    assertTrue(
+      "HC-V0990-PREFIX-A3: two scoped lines + one remainder line, order preserved",
+      r.scoped.length === 2 && r.scoped[0].kind === "chat" && r.scoped[1].kind === "finance"
+        && r.remainder === "great brief overall"
+    );
+  } catch (e) { assertTrue("HC-V0990-PREFIX-A3: mixed prose", false, e && e.message); }
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -9708,6 +10178,34 @@ async function caseV0982IngestA8() {
   await caseV0982IngestA6();
   await caseV0982IngestA7();
   await caseV0982IngestA8();
+
+  // v0.99.0 HC-V0990-*: sparse-signal feedback (gate + v=3 capture + schema 4)
+  await caseV0990CaptureA1();
+  await caseV0990CaptureA2();
+  await caseV0990CaptureA3();
+  await caseV0990CaptureA4();
+  await caseV0990CaptureA5();
+  await caseV0990CaptureA6();
+  await caseV0990CaptureA7();
+  await caseV0990ParseA1();
+  await caseV0990ParseA2();
+  await caseV0990ParseA3();
+  await caseV0990ParseA4();
+  await caseV0990GateA1();
+  await caseV0990GateA2();
+  await caseV0990GateA3();
+  await caseV0990GateA4();
+  await caseV0990GateA5();
+  await caseV0990GateA6();
+  await caseV0990SchemaA1();
+  await caseV0990SchemaA2();
+  await caseV0990SchemaA3();
+  await caseV0990SchemaA4();
+  await caseV0990SchemaA5();
+  await caseV0990SchemaA6();
+  await caseV0990PrefixA1();
+  await caseV0990PrefixA2();
+  await caseV0990PrefixA3();
 
   // v0.65.0 HC-V065-RUN-NOTE: write-run-note-* sub-skill lint
   {
