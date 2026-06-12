@@ -1,6 +1,6 @@
 // platform/blueprints/cowork/helpers/compose-feedback-capture-helper.js
 //
-// v0.98.2 — Feedback-capture callout (Rail L expanded shape; EOD-only).
+// v0.99.0 — Feedback-capture callout (Rail L expanded shape; EOD-only).
 //
 // composeFeedbackCapture(opts)
 //
@@ -8,13 +8,24 @@
 // kind-checkbox composeRatingCallout for EOD only. The other 4 cadences
 // continue to use composeRatingCallout (see compose-body-helper.js).
 
+"use strict";
+
 const crypto = require("crypto");
 
-const SENTINEL = "<!-- cowork:feedback-capture v=2 -->";
-const SENTINEL_VERSION = "v=2";
-// v0.98.1-era sentinel — _parsePrior accepts it so the one night of v=1
-// capture corpus (headspace 2026-06-11) stays readable forever.
+const SENTINEL = "<!-- cowork:feedback-capture v=3 -->";
+const SENTINEL_VERSION = "v=3";
+// Prior-era sentinels — _parsePrior accepts both so the v=1 night
+// (headspace 2026-06-11) and the v=2 window (2026-06-12) stay readable forever.
+const SENTINEL_V2 = "<!-- cowork:feedback-capture v=2 -->";
 const SENTINEL_V1 = "<!-- cowork:feedback-capture v=1 -->";
+
+// Placeholder texts ever rendered into the free-text fence. Order: oldest first.
+// classifyEngagementDay (ingest-feedback-helper) treats fence content equal to
+// any of these as NOT prose — keep in sync when rewording the placeholder.
+const FREE_TEXT_PLACEHOLDERS = Object.freeze([
+  "(Type prose here — anything you want cowork to know.)",
+  "(Type prose here — name a section to scope it, e.g. `finance: too long`.)",
+]);
 
 const KIND_LABELS = {
   chat: "Chat",
@@ -55,12 +66,15 @@ function _parsePrior(priorMd) {
     sentinel_version: null,
     ambiguous_knobs: [],
     ambiguous_items: [],
+    satisfaction: null,
+    tap: { yes: false, no: false },
   };
   if (!priorMd || typeof priorMd !== "string") return result;
-  const isV2 = priorMd.includes(SENTINEL);
-  const isV1 = !isV2 && priorMd.includes(SENTINEL_V1);
-  if (!isV2 && !isV1) return result;
-  result.sentinel_version = isV2 ? "v=2" : "v=1";
+  const isV3 = priorMd.includes(SENTINEL);
+  const isV2 = !isV3 && priorMd.includes(SENTINEL_V2);
+  const isV1 = !isV3 && !isV2 && priorMd.includes(SENTINEL_V1);
+  if (!isV3 && !isV2 && !isV1) return result;
+  result.sentinel_version = isV3 ? "v=3" : (isV2 ? "v=2" : "v=1");
 
   // Section-aware tick scan. `Mattered:` / `Didn't like:` flip the section;
   // a new kind sub-callout header resets it. v=1 priors carry no section
@@ -107,6 +121,17 @@ function _parsePrior(priorMd) {
     }
   }
 
+  // One-tap satisfaction line (v=3). Prefix-anchored through the `no` box so
+  // trailing Tasks-plugin annotations (`✅ 2026-06-13`) are ignored.
+  const tapRx = /^>\s*Useful:\s*`\[([ xX])\]\s*yes`\s*`\[([ xX])\]\s*no`/m;
+  const tap = priorMd.match(tapRx);
+  if (tap) {
+    const yes = tap[1].toLowerCase() === "x";
+    const no = tap[2].toLowerCase() === "x";
+    result.tap = { yes, no };
+    result.satisfaction = yes && no ? "ambiguous" : (yes ? true : (no ? false : null));
+  }
+
   // Fences may be bare (no > prefix) or prefixed — accept both.
   const fenceRx = /(?:^>?\s*)```feedback\s*$([\s\S]*?)^>?\s*```\s*$/m;
   const fenceMatch = priorMd.match(fenceRx);
@@ -148,6 +173,11 @@ function _renderKindBlock(kind, items, priorState) {
   return lines.join("\n");
 }
 
+function _renderTapLine(priorState) {
+  const tap = (priorState && priorState.tap) || { yes: false, no: false };
+  return `> Useful: \`${tap.yes ? "[x]" : "[ ]"} yes\` \`${tap.no ? "[x]" : "[ ]"} no\``;
+}
+
 function _renderFreeTextBlock(priorState) {
   // Fences are bare (no "> " prefix) so the test replace-and-refire pattern
   // can locate them without callout-prefix awareness.
@@ -158,7 +188,7 @@ function _renderFreeTextBlock(priorState) {
       lines.push(line);
     }
   } else {
-    lines.push("(Type prose here — anything you want cowork to know.)");
+    lines.push(FREE_TEXT_PLACEHOLDERS[1]);
   }
   lines.push("```");
   return lines.join("\n");
@@ -171,8 +201,9 @@ function composeFeedbackCapture(opts) {
 
   const head = [
     "> [!todo]+ Was today useful?",
-    "> Tick items that mattered. Set per-kind frequency. Type prose for nuance. Tomorrow's brief adjusts overnight.",
+    "> One tap, a line of prose, or ticks — anything counts. Tomorrow's brief adjusts overnight.",
     `> ${SENTINEL}`,
+    _renderTapLine(priorState),
     ">",
   ];
 
@@ -200,8 +231,9 @@ function composeFeedbackCapture(opts) {
 
   const rail_md = [
     ...head,
-    ...kindBlocks,
     freeText,
+    ...(kindBlocks.length ? [">"] : []),
+    ...kindBlocks,
   ].join("\n");
 
   const itemCount = Object.keys(itemIdRegistry).length;
@@ -226,8 +258,11 @@ module.exports = {
   composeFeedbackCapture,
   _itemId,
   _parsePrior,
+  _renderTapLine,
   SENTINEL,
   SENTINEL_VERSION,
   SENTINEL_V1,
+  SENTINEL_V2,
+  FREE_TEXT_PLACEHOLDERS,
   KIND_LABELS,
 };

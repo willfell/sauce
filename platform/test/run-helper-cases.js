@@ -8447,9 +8447,9 @@ async function caseV0981FeedbackA1() {
       knob_positions: ["less", "same", "more"],
     });
     const hasHeader = /> \[!todo\]\+ Was today useful\?/.test(rail.rail_md);
-    const hasSentinel = /<!-- cowork:feedback-capture v=2 -->/.test(rail.rail_md);
+    const hasSentinel = /<!-- cowork:feedback-capture v=3 -->/.test(rail.rail_md);
     assertTrue(
-      "HC-V0981-FEEDBACK-A1: composeFeedbackCapture emits `> [!todo]+ Was today useful?` lead AND `<!-- cowork:feedback-capture v=1 -->` sentinel within the callout body",
+      "HC-V0981-FEEDBACK-A1: composeFeedbackCapture emits `> [!todo]+ Was today useful?` lead AND `<!-- cowork:feedback-capture v=3 -->` sentinel within the callout body",
       hasHeader && hasSentinel
     );
   } catch (e) {
@@ -8583,7 +8583,7 @@ async function caseV0981FeedbackA6() {
       prior_md: null,
       knob_positions: ["less", "same", "more"],
     });
-    const hasSentinel = /<!-- cowork:feedback-capture v=2 -->/.test(rail.rail_md);
+    const hasSentinel = /<!-- cowork:feedback-capture v=3 -->/.test(rail.rail_md);
     const hasFreeText = /```feedback\b/.test(rail.rail_md);
     const hasNoPerKind = !/\[!summary\]-/.test(rail.rail_md);
     const hasNoKnob = !/\*\*Fire /.test(rail.rail_md);
@@ -8790,20 +8790,20 @@ function _v0982CaptureInput(overrides) {
 }
 
 async function caseV0982CaptureA1() {
-  console.log(`\n--- Case HC-V0982-CAPTURE-A1: v=2 sentinel + sidecar items[] registry ---`);
+  console.log(`\n--- Case HC-V0982-CAPTURE-A1: v=3 sentinel + sidecar items[] registry ---`);
   try {
     const { composeFeedbackCapture } = require("../blueprints/cowork/helpers/compose-feedback-capture-helper.js");
     const r = composeFeedbackCapture(_v0982CaptureInput());
-    const hasSentinel = /<!-- cowork:feedback-capture v=2 -->/.test(r.rail_md);
+    const hasSentinel = /<!-- cowork:feedback-capture v=3 -->/.test(r.rail_md);
     const items = (r.sidecar_observability || {}).items || [];
     const itemOk = items.length === 3 && items.every((it) =>
       /^item-[a-z]+-[0-9a-f]{7}$/.test(it.item_id) && it.kind && it.identifier && it.label);
     assertTrue(
-      "HC-V0982-CAPTURE-A1: composeFeedbackCapture emits v=2 sentinel AND sidecar_observability.items[] registry of {item_id, kind, identifier, label}",
+      "HC-V0982-CAPTURE-A1: composeFeedbackCapture emits v=3 sentinel AND sidecar_observability.items[] registry of {item_id, kind, identifier, label}",
       hasSentinel && itemOk
     );
   } catch (e) {
-    assertTrue("HC-V0982-CAPTURE-A1: v=2 sentinel + items registry", false, e && e.message);
+    assertTrue("HC-V0982-CAPTURE-A1: v=3 sentinel + items registry", false, e && e.message);
   }
 }
 
@@ -8911,10 +8911,10 @@ async function caseV0982CaptureA4() {
     }));
     const matteredKept = new RegExp(`> > - \\[x\\] \\[\\[#\\^${chatId}\\|`).test(r.rail_md.split("Didn't like:")[0]);
     const downvoteFresh = new RegExp(`> > - \\[ \\] \\[\\[#\\^${chatId}\\|`).test(r.rail_md.split("Didn't like:")[1] || "");
-    const v2Out = /<!-- cowork:feedback-capture v=2 -->/.test(r.rail_md);
+    const v3Out = /<!-- cowork:feedback-capture v=3 -->/.test(r.rail_md);
     assertTrue(
-      "HC-V0982-CAPTURE-A4: v=1 prior parses (ticks → Mattered preserved; Didn't like starts all-unticked); output upgrades to v=2 sentinel",
-      matteredKept && downvoteFresh && v2Out && r.rail_md.includes("carried prose")
+      "HC-V0982-CAPTURE-A4: v=1 prior parses (ticks → Mattered preserved; Didn't like starts all-unticked); output upgrades to v=3 sentinel",
+      matteredKept && downvoteFresh && v3Out && r.rail_md.includes("carried prose")
     );
   } catch (e) {
     assertTrue("HC-V0982-CAPTURE-A4: v=1 prior tolerance", false, e && e.message);
@@ -8951,16 +8951,16 @@ async function caseV0982CaptureA5() {
 }
 
 async function caseV0982CaptureA6() {
-  console.log(`\n--- Case HC-V0982-CAPTURE-A6: empty-day minimal rail (v=2) ---`);
+  console.log(`\n--- Case HC-V0982-CAPTURE-A6: empty-day minimal rail (v=3) ---`);
   try {
     const { composeFeedbackCapture } = require("../blueprints/cowork/helpers/compose-feedback-capture-helper.js");
     const r = composeFeedbackCapture(_v0982CaptureInput({ surfaced_items_by_kind: {} }));
     const noKinds = !/\[!summary\]-/.test(r.rail_md) && !/Mattered:/.test(r.rail_md);
-    const minimal = /<!-- cowork:feedback-capture v=2 -->/.test(r.rail_md) && /```feedback/.test(r.rail_md);
+    const minimal = /<!-- cowork:feedback-capture v=3 -->/.test(r.rail_md) && /```feedback/.test(r.rail_md);
     const emptySidecar = r.sidecar_observability.item_count === 0
       && Array.isArray(r.sidecar_observability.items) && r.sidecar_observability.items.length === 0;
     assertTrue(
-      "HC-V0982-CAPTURE-A6: empty day emits lead + v=2 sentinel + free-text fence only; items[] empty",
+      "HC-V0982-CAPTURE-A6: empty day emits lead + v=3 sentinel + free-text fence only; items[] empty",
       noKinds && minimal && emptySidecar
     );
   } catch (e) {

@@ -37,8 +37,15 @@ await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 > Today's memory: [[spice/cowork/memory/accuris/2026/06-June/2026-06-05/memory.md|Memory log — 2026-06-05]]
 
 > [!todo]+ Was today useful?
-> Tick items that mattered. Set per-kind frequency. Type prose for nuance. Tomorrow's brief adjusts overnight.
-> <!-- cowork:feedback-capture v=2 -->
+> One tap, a line of prose, or ticks — anything counts. Tomorrow's brief adjusts overnight.
+> <!-- cowork:feedback-capture v=3 -->
+> Useful: `[ ] yes` `[ ] no`
+>
+> ### Free-text feedback
+>
+```feedback
+(Type prose here — name a section to scope it, e.g. `finance: too long`.)
+```
 >
 > > [!summary]- Chat — items
 > > Mattered:
@@ -49,8 +56,3 @@ await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 > >
 > > **Fire chat:** `[ ] less` `[ ] same` `[ ] more`
 >
-> ### Free-text feedback
->
-```feedback
-(Type prose here — anything you want cowork to know.)
-```
