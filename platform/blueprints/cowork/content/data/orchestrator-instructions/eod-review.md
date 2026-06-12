@@ -215,7 +215,7 @@ this is unexpected.`
 4d. v0.98.2 — the rail's per-kind sub-callouts carry TWO checklists sharing
     the same `^item-<kind>-<7hex>` IDs: `Mattered:` (this helped) and
     `Didn't like:` (surface less of this). composeFeedbackCapture emits the
-    composeFeedbackCapture emits the `<!-- cowork:feedback-capture v=3 -->` sentinel; prior v=1 files parse
+    `<!-- cowork:feedback-capture v=3 -->` sentinel; prior v=1 files parse
     with ticks preserved into Mattered and a fresh Didn't-like row. An item
     ticked in BOTH lists is contradictory: preserved in the UI, flagged in
     sidecar `feedback_capture.ambiguous_items[]`, ignored by the reconciler.
