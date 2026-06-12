@@ -14,6 +14,8 @@
 //     dir, cross-references .cowork.json sidecars (engagement_id filter when
 //     provided), returns { observations, notes_scanned, notes_with_any_tick }.
 
+"use strict";
+
 const fs = require("node:fs");
 const path = require("node:path");
 
@@ -209,11 +211,12 @@ function parseRatingCallout(markdown) {
 //
 // Returns:
 //   {
-//     sentinel_version: "v=1" | "v=2" | null,
+//     sentinel_version: "v=1" | "v=2" | "v=3" | null,
 //     ticks:    { [itemId: string]: boolean },   // Mattered section (or v=1 flat)
 //     downvotes: { [itemId: string]: boolean },  // Didn't like section (v=2 only; {} for v=1)
 //     knobs:    { [kind: string]: "less" | "same" | "more" | "ambiguous" },
 //     free_text: string,        // raw multiline prose; `> ` callout prefix stripped
+//     satisfaction: true | false | "ambiguous" | null,  // v=3 one-tap; null pre-v=3
 //   }
 //
 // Returns the all-empty result when the markdown doesn't carry the
@@ -227,7 +230,7 @@ function parseRatingCallout(markdown) {
 // positions as no-signal.
 // Mirrored in compose-feedback-capture-helper.js::_parsePrior — keep the section state machines in sync.
 function parseFeedbackCapture(markdown) {
-  const empty = { sentinel_version: null, ticks: {}, downvotes: {}, knobs: {}, free_text: "" };
+  const empty = { sentinel_version: null, ticks: {}, downvotes: {}, knobs: {}, free_text: "", satisfaction: null };
   if (!markdown || typeof markdown !== "string") return empty;
   const sentinelMatch = markdown.match(FEEDBACK_SENTINEL_RX);
   if (!sentinelMatch) return empty;
@@ -238,6 +241,7 @@ function parseFeedbackCapture(markdown) {
     downvotes: {},
     knobs: {},
     free_text: "",
+    satisfaction: null,
   };
 
   // Section-aware tick scan (v=2). `Mattered:` / `Didn't like:` flip the
@@ -277,6 +281,18 @@ function parseFeedbackCapture(markdown) {
     } else {
       // No selection — kind present but no signal. Omit from knobs map.
     }
+  }
+
+  // One-tap satisfaction line (v=3). MIRRORS compose-feedback-capture-helper.js
+  // _parsePrior tap parse; keep in sync. Prefix-anchored — trailing
+  // Tasks-plugin annotations ignored. Pre-v=3 bodies have no Useful line →
+  // satisfaction stays null.
+  const tapRx = /^>\s*Useful:\s*`\[([ xX])\]\s*yes`\s*`\[([ xX])\]\s*no`/m;
+  const tap = markdown.match(tapRx);
+  if (tap) {
+    const yes = tap[1].toLowerCase() === "x";
+    const no = tap[2].toLowerCase() === "x";
+    result.satisfaction = yes && no ? "ambiguous" : (yes ? true : (no ? false : null));
   }
 
   // Free-text: content between ```feedback ... ``` fences. Tolerant of
