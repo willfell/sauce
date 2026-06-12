@@ -880,7 +880,9 @@ After the update, verify by checking that `.claude/skills/cowork/skills/gather-s
 
 **Optional post-deploy validation (FLN-v87-1).** The `min_similarity: 0.45` threshold is a design-time guess. Review the first 3-5 morning briefings on each consumer vault: if Echoes callouts surface obviously-unrelated matches, the threshold should be raised; if relevant matches are consistently filtered out (callout omits even on days with clear historical analogues), the threshold should be lowered. A v0.87.1 PATCH can ship the empirically-validated threshold.
 
-## Upgrading from v0.99.0 to v0.100.0
+## Upgrading from v0.99.0 to v0.100.0 / v0.100.1
+
+> **Skip straight to v0.100.1** — v0.100.0's docs-hub rows threw `e.indexOf is not a function` on click (Dataview Link object passed to `openLinkText`); v0.100.1 PATCH (project 1.15.1) fixes it. Same upgrade steps; one `sauce update --bump-pins` catches both.
 
 `brew upgrade sauce` distributes the new release. Existing consumers run `sauce update --bump-pins` from inside each vault.
 

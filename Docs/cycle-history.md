@@ -4,6 +4,12 @@ This file archives the per-cycle status snapshots that previously lived in `CLAU
 
 ---
 
+### v0.100.1 — docs-hub click hotfix (2026-06-12 close)
+
+**SHIPPED 2026-06-12** (same day as v0.100.0). User-reported on accuris within minutes of deploy: clicking any docs-hub row threw `TypeError: e.indexOf is not a function` at `openLinkText`. Root cause: `project-docs-cards.js` passed `target: (p) => p.file.link` — a Dataview Link OBJECT — into `app.workspace.openLinkText()`, whose `getLinkpath` requires a string. The line was *deliberately preserved* from the pre-v0.100.0 helper as "in-production behavior" — but it had been silently broken on click since v0.50.0 (console-only error; the stacked grid's cards never navigated), masked because users routed around it. Fix: drop the target override; BeaconCards' default (`p.file.path`, a string) applies. NEW PDC-10 regression net asserts no Link-object reference in the helper. Project blueprint 1.15.0 → 1.15.1 PATCH; workshop 0.100.0 → 0.100.1 PATCH; helper-cases 2369 → **2370 / 0** (+1). **Lesson (extends "verify helper behavior before design asserts it"):** "intentionally UNCHANGED — in-production behavior" is only a safe preserve when the preserved line's runtime contract has been verified; in-production ≠ working. Carry-forward: BeaconCards defense-in-depth (coerce Link objects in targetFn results) as a cards-mechanism candidate.
+
+---
+
 ### v0.100.0 — project visual polish (2026-06-12 close)
 
 **SHIPPED 2026-06-12.** See `Docs/plans/2026-06-12-v0.100.0-project-visual-polish-result.md` for the full narrative. Commits: `898f1c0` (S0 design) → `346bb31` (S1 plan) → `2d66ccc` (feat S1 docs-hub list rows) → `fca9ce4` (feat S2 accent nav buttons) → `b24042a` (chore S3 version bumps + pin sweep) → `63d7917` (chore S4 dogfood self-install) → S5 cycle-close this commit.
