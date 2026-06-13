@@ -47,7 +47,7 @@ class ProjectMeetingsPanel {
     const metaFn = (p) => {
       const date = p.date ? String(p.date).slice(0, 10) : "(no date)";
       const attendees = Array.isArray(p.attendees) ? p.attendees.length : 0;
-      return `📅 ${date} · ${attendees} attendee${attendees === 1 ? "" : "s"}`;
+      return `${date} · ${attendees} attendee${attendees === 1 ? "" : "s"}`;
     };
 
     await customJS.BeaconCards.render(dv, {
@@ -62,7 +62,11 @@ class ProjectMeetingsPanel {
       const expandEl = dv.el("p", `View all ${total} meetings →`, { cls: "project-meetings-expand" });
       expandEl.style.cursor = "pointer";
       expandEl.style.color = "var(--interactive-accent)";
+      let expanded = false;
       expandEl.addEventListener("click", async () => {
+        if (expanded) return;
+        expanded = true;
+        expandEl.remove();
         await customJS.BeaconCards.render(dv, {
           pages: sorted,
           layout: "row",
@@ -70,7 +74,6 @@ class ProjectMeetingsPanel {
           icon: () => calendarIcon,
           meta: metaFn,
         });
-        expandEl.remove();
       });
     }
   }
@@ -81,7 +84,9 @@ class ProjectMeetingsPanel {
   _projectMatches(field, currentPath, projectName) {
     if (!field) return false;
     if (typeof field === "string") {
-      return field.includes(`[[${projectName}]]`) || field === projectName;
+      return field.includes(`[[${projectName}]]`)
+          || field.includes(`[[${projectName}|`)
+          || field === projectName;
     }
     if (field.path) return field.path === currentPath;
     if (field.display) return field.display === projectName;

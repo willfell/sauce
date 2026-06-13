@@ -10530,6 +10530,20 @@ async function caseV01020PMP5EmptyStateLanguage() {
     /No meetings linked/.test(src));
 }
 
+async function caseV01020PMP6AliasLinkMatch() {
+  console.log(`\n--- Case HC-V01020-PMP-6: _projectMatches string branch handles wikilink alias form [[Name|Alias]] ---`);
+  const src = _readPmpSrc();
+  assertTrue("HC-V01020-PMP-6: alias-separator include check present (\\[\\[${projectName}|)",
+    /\.includes\s*\(\s*`\[\[\$\{projectName\}\|/.test(src));
+}
+
+async function caseV01020PMP7ExpandToggleReentryGuard() {
+  console.log(`\n--- Case HC-V01020-PMP-7: View-all expand toggle guards against double-click re-entry ---`);
+  const src = _readPmpSrc();
+  assertTrue("HC-V01020-PMP-7: re-entry guard via `let expanded = false` + `expanded = true` flag",
+    /let\s+expanded\s*=\s*false/.test(src) && /expanded\s*=\s*true/.test(src));
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -11046,6 +11060,8 @@ async function caseV01020PMP5EmptyStateLanguage() {
   await caseV01020PMP3SortByDateDescTake5();
   await caseV01020PMP4NewMeetingButtonPresetPrompts();
   await caseV01020PMP5EmptyStateLanguage();
+  await caseV01020PMP6AliasLinkMatch();
+  await caseV01020PMP7ExpandToggleReentryGuard();
 
   // v0.65.0 HC-V065-RUN-NOTE: write-run-note-* sub-skill lint
   {
