@@ -3,7 +3,7 @@
     "project": [
       {
         "scope": {
-          "path_glob": "spice/projects/*/docs/*.md",
+          "path_glob": "spice/projects/*/docs/**/*.md",
           "exclude_basenames": [
             "Docs.md"
           ]

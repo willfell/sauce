@@ -24,6 +24,14 @@ await dv.view("ranch/views/customjs-guard", { class: "ProjectWorkstreamManager" 
 
 ---
 
+## Meetings
+
+```dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "ProjectMeetingsPanel" });
+```
+
+---
+
 ## Mentions
 
 ```dataviewjs

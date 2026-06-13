@@ -13,6 +13,14 @@
             "label": "Meeting title",
             "type": "string",
             "required": true
+          },
+          {
+            "key": "project",
+            "label": "Project (optional)",
+            "type": "select",
+            "required": false,
+            "options_source": "all_projects",
+            "default": "(none)"
           }
         ],
         "destination": {
@@ -28,6 +36,7 @@
           "type": "meeting",
           "summary": "",
           "attendees": [],
+          "project": "{{prompts.project}}",
           "people": [],
           "tags": [],
           "cssclasses": [
@@ -102,6 +111,7 @@
           "workstreams": [],
           "teams": [],
           "products": [],
+          "sections": [],
           "tags": []
         },
         "body_template": "ranch/templates/Template, Project.md",
@@ -137,10 +147,24 @@
             "type": "string",
             "required": true,
             "validate": "safe-filename"
+          },
+          {
+            "key": "section",
+            "label": "Section",
+            "type": "string",
+            "required": true,
+            "default": "Knowledge",
+            "validate": "safe-filename"
+          },
+          {
+            "key": "section_slug",
+            "label": "(derived from section)",
+            "type": "string",
+            "derive": "slugify(prompts.section)"
           }
         ],
         "destination": {
-          "folder_prefix": "spice/projects/{{current_file.frontmatter.project_slug}}/docs",
+          "folder_prefix": "spice/projects/{{current_file.frontmatter.project_slug}}/docs/{{prompts.section_slug}}",
           "filename_prefix": "{{prompts.title|sanitize-filename}}"
         },
         "frontmatter_template": {
@@ -148,6 +172,7 @@
           "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
           "project": "[[{{current_file.frontmatter.project_name}}]]",
           "project_slug": "{{current_file.frontmatter.project_slug}}",
+          "section": "{{prompts.section}}",
           "tags": [
             "doc-note"
           ]
@@ -210,6 +235,14 @@
           "label": "Meeting title",
           "type": "string",
           "required": true
+        },
+        {
+          "key": "project",
+          "label": "Project (optional)",
+          "type": "select",
+          "required": false,
+          "options_source": "all_projects",
+          "default": "(none)"
         }
       ],
       "destination": {
@@ -225,6 +258,7 @@
         "type": "meeting",
         "summary": "",
         "attendees": [],
+        "project": "{{prompts.project}}",
         "people": [],
         "tags": [],
         "cssclasses": [
@@ -295,6 +329,7 @@
         "workstreams": [],
         "teams": [],
         "products": [],
+        "sections": [],
         "tags": []
       },
       "body_template": "ranch/templates/Template, Project.md",
@@ -330,10 +365,24 @@
           "type": "string",
           "required": true,
           "validate": "safe-filename"
+        },
+        {
+          "key": "section",
+          "label": "Section",
+          "type": "string",
+          "required": true,
+          "default": "Knowledge",
+          "validate": "safe-filename"
+        },
+        {
+          "key": "section_slug",
+          "label": "(derived from section)",
+          "type": "string",
+          "derive": "slugify(prompts.section)"
         }
       ],
       "destination": {
-        "folder_prefix": "spice/projects/{{current_file.frontmatter.project_slug}}/docs",
+        "folder_prefix": "spice/projects/{{current_file.frontmatter.project_slug}}/docs/{{prompts.section_slug}}",
         "filename_prefix": "{{prompts.title|sanitize-filename}}"
       },
       "frontmatter_template": {
@@ -341,6 +390,7 @@
         "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
         "project": "[[{{current_file.frontmatter.project_name}}]]",
         "project_slug": "{{current_file.frontmatter.project_slug}}",
+        "section": "{{prompts.section}}",
         "tags": [
           "doc-note"
         ]

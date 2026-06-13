@@ -53,6 +53,7 @@ Before any write, run `ls /Users/willfellhoelter/projects/repos/sauce`. Expected
 | Path | Blueprint | Purpose |
 | --- | --- | --- |
 | spice/ | (platform) | Module-directory namespace for blueprints |
+| spice/resources/ | (platform) | Vault default attachment + new-note targets |
 | ranch/ | (platform) | Runtime plumbing (config, scripts, templates, views) |
 | .claude/commands/ | (platform) | Slash commands managed via claude_surface[] |
 | .claude/skills/ | (platform) | Native Claude Code skill bodies |

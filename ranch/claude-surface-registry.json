@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-06-13T13:35:03.183Z",
-  "workshop_version": "0.101.1",
+  "generated_at": "2026-06-13T17:14:39.838Z",
+  "workshop_version": "0.102.0",
   "contributions": {
     "audit": [
       {
@@ -31,37 +31,37 @@
         "kind": "command",
         "source": "commands/install.md",
         "dest": ".claude/commands/install.md",
-        "version": "0.1.2"
+        "version": "0.1.3"
       },
       {
         "kind": "command",
         "source": "commands/upgrade.md",
         "dest": ".claude/commands/upgrade.md",
-        "version": "0.1.2"
+        "version": "0.1.3"
       },
       {
         "kind": "command",
         "source": "commands/bootstrap.md",
         "dest": ".claude/commands/bootstrap.md",
-        "version": "0.1.2"
+        "version": "0.1.3"
       },
       {
         "kind": "skill",
         "source": "skills/install/SKILL.md",
         "dest": ".claude/skills/platform/install/SKILL.md",
-        "version": "0.1.2"
+        "version": "0.1.3"
       },
       {
         "kind": "skill",
         "source": "skills/upgrade/SKILL.md",
         "dest": ".claude/skills/platform/upgrade/SKILL.md",
-        "version": "0.1.2"
+        "version": "0.1.3"
       },
       {
         "kind": "skill",
         "source": "skills/bootstrap/SKILL.md",
         "dest": ".claude/skills/platform/bootstrap/SKILL.md",
-        "version": "0.1.2"
+        "version": "0.1.3"
       },
       {
         "kind": "claude_md_row",
@@ -96,13 +96,13 @@
         "kind": "command",
         "source": "commands/project.md",
         "dest": ".claude/commands/project.md",
-        "version": "1.15.2"
+        "version": "1.16.0"
       },
       {
         "kind": "skill",
         "source": "skills/new-project/SKILL.md",
         "dest": ".claude/skills/project/new-project/SKILL.md",
-        "version": "1.15.2"
+        "version": "1.16.0"
       },
       {
         "kind": "claude_md_row",
@@ -142,13 +142,13 @@
         "kind": "command",
         "source": "commands/meetings.md",
         "dest": ".claude/commands/meetings.md",
-        "version": "0.7.0"
+        "version": "0.8.0"
       },
       {
         "kind": "skill",
         "source": "skills/new-meeting/SKILL.md",
         "dest": ".claude/skills/meetings/new-meeting/SKILL.md",
-        "version": "0.7.0"
+        "version": "0.8.0"
       },
       {
         "kind": "claude_md_row",

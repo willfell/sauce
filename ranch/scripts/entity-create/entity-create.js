@@ -31,6 +31,19 @@
  *   lowercase(prompts.<key>)          — String.toLowerCase
  *   sanitize-filename(prompts.<key>)  — strip /\\:*?"<>|
  *
+ * Options source (prompts[].options_source):
+ *   "all_projects"  — resolved at prompt-render-time to ["(none)", ...all
+ *                     type:project notes by name]; selecting a project
+ *                     post-processes to "[[name]]", selecting "(none)"
+ *                     post-processes to "". (entity-create@0.5.0)
+ *
+ * render() / create() options:
+ *   presetPrompts: { <key>: <value> }  — short-circuit the prompt loop for
+ *                     matching keys (bypasses derive + UI + validation).
+ *                     Presets are trusted — calling helper code is
+ *                     responsible for pre-formatting (e.g. wikilink wrap
+ *                     for project picks). (entity-create@0.5.0)
+ *
  * Helpers are deterministic + side-effect-free except:
  *   _ensureFolder (vault.createFolder)
  *   create()      (vault.create, workspace.openLinkText)
@@ -38,7 +51,7 @@
 class EntityCreate {
     async render(dv, opts) {
         if (dv.container.closest(".markdown-embed")) return;
-        const { instance } = opts || {};
+        const { instance, presetPrompts = {} } = opts || {};
         const spec = await this._loadSpec(instance);
         if (!spec) { dv.paragraph(`EntityCreate: no spec for "${instance}"`); return; }
 
@@ -47,11 +60,11 @@ class EntityCreate {
         customJS.AccentButton.render(dv.container, {
             label: spec.label,
             icon: resolved || plusIcon,
-            onClick: () => this.create({ instance, dv })
+            onClick: () => this.create({ instance, dv, presetPrompts })
         });
     }
 
-    async create({ instance, dv }) {
+    async create({ instance, dv, presetPrompts = {} }) {
         const spec = await this._loadSpec(instance);
         if (!spec) return;
         const ctx = {
@@ -61,12 +74,37 @@ class EntityCreate {
             spec
         };
         for (const p of spec.prompts || []) {
+            // v0.5.0: presetPrompts short-circuit. Trusted values from the
+            // calling helper (e.g. + New Knowledge button passing section="knowledge")
+            // bypass derive + UI + validation entirely. _loadSpec() re-reads the
+            // registry JSON on every invocation, so per-call options_source
+            // mutation below is safe.
+            if (Object.prototype.hasOwnProperty.call(presetPrompts, p.key)) {
+                ctx.prompts[p.key] = presetPrompts[p.key];
+                continue;
+            }
             if (p.derive) {
                 ctx.prompts[p.key] = this._evalDerive(p.derive, ctx);
                 continue;
             }
+            // v0.5.0: options_source resolution (currently "all_projects").
+            // Mutates p.options in place; safe because _loadSpec re-reads JSON
+            // per invocation.
+            if (p.options_source) {
+                p.options = this._resolveOptionsSource(p.options_source, dv);
+            }
             const v = await this._prompt(p, ctx);
             if (v === null) return; // user cancelled
+            // v0.5.0: post-process options_source picks. "(none)"/empty → "";
+            // anything else → wikilink form "[[name]]". Preset values bypass
+            // this branch entirely (handled by short-circuit above).
+            // all_projects-specific post-process: (none) → ""; otherwise wrap as
+            // "[[name]]" wikilink. Future options_source values must either extend
+            // this branch or refactor into a sibling _postProcessOptionsSource(source, v).
+            if (p.options_source === "all_projects") {
+                ctx.prompts[p.key] = (v === "(none)" || v === "") ? "" : `[[${v}]]`;
+                continue;
+            }
             ctx.prompts[p.key] = v;
         }
         const targetPath = this._substitute(this._joinDestination(spec.destination), ctx);
@@ -103,6 +141,30 @@ class EntityCreate {
             new Notice("entity-create: registry JSON parse error — check console", 8000);
             return null;
         }
+    }
+
+    // ---------- options_source resolution (v0.5.0) ----------
+    // Resolves a prompt-level options_source string to a concrete options[]
+    // array at prompt-render time. Currently supports "all_projects":
+    // returns ["(none)", ...all type:project notes by file.name]. Unknown
+    // sources log a warning and yield [].
+
+    _resolveOptionsSource(source, dv) {
+        if (source === "all_projects") {
+            if (!dv || typeof dv.pages !== "function") return ["(none)"];
+            try {
+                const projects = dv.pages()
+                    .where(p => p && p.type === "project")
+                    .map(p => p.file.name);
+                // dv.pages().map() returns a Dataview DataArray; spread into a
+                // plain JS array for the <select> options loop.
+                return ["(none)", ...Array.from(projects)];
+            } catch (_e) {
+                return ["(none)"];
+            }
+        }
+        console.warn(`EntityCreate: unknown options_source "${source}"`);
+        return [];
     }
 
     // ---------- prompt dispatch ----------

@@ -81,18 +81,29 @@ class MeetingsHubCards {
         doneTasks,
         hasNotes,
         summary,
-        timeStr
+        timeStr,
+        project: p.project
       };
     }));
+
+    // Local helper bound to the class instance — used by the meta callback below.
+    // Using a local arrow keeps `this` access reliable inside BeaconCards opts.
+    const renderProjectLabel = (field) => this._renderProjectLabel(field);
 
     await customJS.BeaconCards.render(dv, {
       pages: enriched,
       layout: "row",
       columns: 1,
       title: p => p.file.name.replace(/-\d{4}-\d{2}-\d{2}$/, "") || p.file.name,
-      meta: p => p.timeStr
-        ? `<span style="display: inline-flex; align-items: center; gap: 4px;">${icons.clock}<span>${p.timeStr}</span></span>`
-        : "",
+      meta: p => {
+        const projectPill = p.project
+          ? `<span class="meeting-project-pill" style="color: var(--text-accent); background: var(--background-modifier-active-hover); padding: 1px 6px; border-radius: 4px; font-size: 0.8em; margin-right: 6px;">${renderProjectLabel(p.project)}</span>`
+          : "";
+        const timeBlock = p.timeStr
+          ? `<span style="display: inline-flex; align-items: center; gap: 4px;">${icons.clock}<span>${p.timeStr}</span></span>`
+          : "";
+        return projectPill + timeBlock;
+      },
       subtitle: p => {
         // v0.3.0 pilot: when at least one attendee is a registered Person, render chips via PeopleRendering callback.
         // Falls back to existing comma-string behavior when no registered People (or PeopleRendering unavailable).
@@ -139,5 +150,23 @@ class MeetingsHubCards {
       empty: "No meetings scheduled for today",
       sort: () => 0  // pre-sorted by Dataview .sort() above
     });
+  }
+
+  /**
+   * Normalise the `project` frontmatter field for display in the meta-slot pill.
+   * Handles three Dataview field shapes:
+   *   - Link object: { path: "spice/projects/Foo.md", display: "Foo" }
+   *   - String: "[[Foo]]" or "[[Foo|Bar]]"
+   *   - null / undefined
+   * Strips wikilink wrapper and any `|alias` separator; returns "" for empty input.
+   */
+  _renderProjectLabel(field) {
+    if (!field) return "";
+    if (typeof field === "string") {
+      return field.replace(/^\[\[|\]\]$/g, "").split("|")[0];
+    }
+    if (field.display) return field.display;
+    if (field.path) return field.path.split("/").pop().replace(/\.md$/, "");
+    return "";
   }
 }
