@@ -802,9 +802,13 @@ function seedVault(setup) {
         !!docEntry, `entries=${(projectManifest.new_entity_buttons || []).map(e => e.id).join(",")}`);
 
     if (docEntry) {
-        ok("DOC-2 doc-note destination.folder_prefix uses {{current_file.frontmatter.project_slug}}",
+        // v0.102.0 S4: doc-note button gained a section subfolder. The folder
+        // prefix is now `.../docs/{{prompts.section_slug}}` so new docs land
+        // under their chosen section bucket. The project-slug substitution is
+        // still the load-bearing identifier; we assert both pieces are present.
+        ok("DOC-2 doc-note destination.folder_prefix uses {{current_file.frontmatter.project_slug}} + section_slug subfolder",
             docEntry.destination &&
-            docEntry.destination.folder_prefix === "spice/projects/{{current_file.frontmatter.project_slug}}/docs",
+            docEntry.destination.folder_prefix === "spice/projects/{{current_file.frontmatter.project_slug}}/docs/{{prompts.section_slug}}",
             `got ${JSON.stringify(docEntry.destination && docEntry.destination.folder_prefix)}`);
 
         ok("DOC-3 doc-note frontmatter_template.project uses {{current_file.frontmatter.project_name}}",
@@ -817,7 +821,7 @@ function seedVault(setup) {
             docEntry.render_in.target_path === "{{templates_path}}/Template, Docs Hub.md",
             `got ${JSON.stringify(docEntry.render_in && docEntry.render_in.target_path)}`);
     } else {
-        ok("DOC-2 doc-note destination.folder_prefix uses {{current_file.frontmatter.project_slug}}", false, "no doc-note entry");
+        ok("DOC-2 doc-note destination.folder_prefix uses {{current_file.frontmatter.project_slug}} + section_slug subfolder", false, "no doc-note entry");
         ok("DOC-3 doc-note frontmatter_template.project uses {{current_file.frontmatter.project_name}}", false, "no doc-note entry");
         ok("DOC-4 doc-note render_in.target_path points at Template, Docs Hub.md", false, "no doc-note entry");
     }

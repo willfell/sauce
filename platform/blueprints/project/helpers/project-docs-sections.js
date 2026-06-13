@@ -1,4 +1,4 @@
-// project-docs-sections.js — v1.16.0 helper (sauce v0.102.0 S2).
+// project-docs-sections.js — v1.16.0 helper (sauce v0.102.0 S2 + S4 carry-forwards).
 //
 // Renders the project Docs Hub as Confluence-style buckets — one labeled card
 // group per section declared on the parent project's `sections[]` frontmatter,
@@ -16,11 +16,12 @@
 //   • Card row via BeaconCards (layout: "row", default-sort by file.mtime desc).
 //   • Empty-state stub when no docs match this bucket.
 //
-// Folder-OR-frontmatter match: a doc belongs to a section if EITHER
-//   (a) `section: <label>` is set in its frontmatter, OR
-//   (b) its containing folder slug matches the slugified section label.
-// This covers the case where someone moves a file without updating frontmatter
-// (and vice versa).
+// Folder-wins-on-conflict (v0.102.0 S4 I-1 fix): when a doc's folder slug matches
+// a DECLARED section, that membership wins — its `section:` frontmatter is
+// ignored for bucket-assignment purposes (so a moved file doesn't show up in
+// two buckets at once). When the folder slug is NOT a declared section, we fall
+// back to the frontmatter `section:` value. Orphans (neither match) flow into
+// the trailing "Unfiled" bucket.
 class ProjectDocsSections {
   async render(dv, opts = {}) {
     const currentFile = dv.current()?.file;
@@ -31,7 +32,17 @@ class ProjectDocsSections {
     // Resolve sections[] from the parent project note. Docs Hub frontmatter
     // (project_slug, project_name) carries the slug for fallback queries, but
     // the actual sections array lives on the project note itself.
-    const projectPath = docsFolder.replace(/\/docs$/, ""); // "spice/projects/global-k8s"
+    //
+    // M-4 fix (v0.102.0 S4): tighten the parent-project resolution. The prior
+    // form did a naive suffix-strip on the docs-folder path, which would
+    // silently follow a misplaced Docs Hub anywhere ending in the docs
+    // basename. Anchor strictly on the canonical layout
+    // `spice/projects/<slug>/docs` via a regex match — if the hub isn't
+    // there, bail and let the canonical-vocab rule_fragment flag the
+    // misplacement.
+    const folderMatch = (docsFolder || "").match(/^spice\/projects\/([^/]+)\/docs$/);
+    if (!folderMatch) return;
+    const projectPath = `spice/projects/${folderMatch[1]}`; // "spice/projects/global-k8s"
     const projectPages = dv.pages(`"${projectPath}"`).where((p) => p.type === "project");
     const project = projectPages.length ? projectPages[0] : null;
     const declared = (project && Array.isArray(project.sections) && project.sections.length > 0)
@@ -42,16 +53,25 @@ class ProjectDocsSections {
     // BeaconCards consumes a dataview proxy; we re-where it per bucket.
     const allDocs = dv.pages(`"${docsFolder}"`).where((p) => p.type === "doc-note");
 
-    const renderedSlugs = new Set();
+    // I-1 fix (v0.102.0 S4): pre-build the set of ALL declared section slugs
+    // up front so each per-section query can ask "is the doc's folder slug a
+    // declared section?" before deciding which rule wins. Folder-wins-on-conflict
+    // means a doc in docs/notes/ shows up under Notes even if its `section:`
+    // frontmatter says "Knowledge" — eliminating the double-count from the prior
+    // OR-match form. Aliased as renderedSlugs for the orphan-detection downstream
+    // (folder slugs and explicitly-declared section slugs are identical).
+    const allSectionSlugs = new Set(declared.map((s) => this._slugify(s)));
+    const renderedSlugs = allSectionSlugs;
 
     for (const section of declared) {
       const slug = this._slugify(section);
-      renderedSlugs.add(slug);
-      // Folder-OR-frontmatter match.
-      const inSection = allDocs.where((p) =>
-        p.section === section ||
-        ((p.file.folder || "").endsWith(`/${slug}`))
-      );
+      const inSection = allDocs.where((p) => {
+        const docFolderSlug = String((p.file.folder || "").split("/").pop() || "");
+        const folderIsDeclared = allSectionSlugs.has(docFolderSlug);
+        return folderIsDeclared
+          ? docFolderSlug === slug          // folder wins when folder is a declared section
+          : p.section === section;          // else fall back to frontmatter
+      });
       await this._renderBucket(dv, section, slug, inSection);
     }
 

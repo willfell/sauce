@@ -6916,21 +6916,26 @@ async function casePDC10NoLinkObjectTarget() {
     !/file\.link/.test(src));
 }
 
-// v0.100.2 — DHB-1 (Docs Hub template button fix): the entity-create:doc-note
-// block must use the canonical `customJS.EntityCreate.render(dv, {instance})`
-// dispatch (which wires onClick + renders into dv.container) — NOT the broken
-// `AccentButton` guard form. The guard calls `AccentButton.render(dv, opts)`
-// passing `dv` (not dv.container) as the parent, so `dv.createEl` throws and
-// the "+ New Doc" button vanishes (no onClick either). All 6 other blueprints'
-// entity-create blocks already use the canonical form.
+// v0.100.2 — DHB-1 (Docs Hub template button fix): originally the standalone
+// entity-create:doc-note block on Docs Hub.md had to use the canonical
+// `customJS.EntityCreate.render(dv, {instance})` dispatch (NOT the broken
+// AccentButton guard form which passed `dv` instead of `dv.container`).
+//
+// v0.102.0 S4 update: the standalone block was REMOVED — ProjectDocsSections
+// now renders per-section + New buttons internally via the same canonical
+// EntityCreate.render dispatch (verified in HC-V01020-PDS-4). DHB-1 now
+// guards that (a) ProjectDocsSections is wired on the Docs Hub template,
+// AND (b) the broken AccentButton-with-doc-note-args form is absent (in case
+// a future edit reintroduces a standalone block, it must NOT use the broken
+// form).
 async function caseDHB1DocsHubTemplateCanonical() {
-  console.log("\n--- Case DHB-1: Docs Hub template uses canonical EntityCreate.render ---");
+  console.log("\n--- Case DHB-1: Docs Hub template wires ProjectDocsSections + no broken AccentButton form ---");
   const src = fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/project/templates/Docs Hub.md"),
     "utf8"
   );
-  assertTrue("DHB-1: canonical customJS.EntityCreate.render(dv, { instance: \"doc-note\" }) present",
-    /customJS\.EntityCreate\.render\(dv,\s*\{\s*instance:\s*"doc-note"\s*\}\)/.test(src));
+  assertTrue("DHB-1: ProjectDocsSections invoked via customjs-guard view (v0.102.0 S4 contract)",
+    /customjs-guard["'\s,\n]+[^}]*class\s*:\s*["']ProjectDocsSections["']/.test(src));
   assertTrue("DHB-1: broken AccentButton-with-doc-note-args form absent",
     !/class:\s*"AccentButton",\s*args:\s*\[\{\s*id:\s*"doc-note"/.test(src));
 }
@@ -7015,7 +7020,7 @@ async function caseFA3ProjectManifest() {
   console.log("\n--- Case FA3-PROJECT-MANIFEST: project@1.13.0 canonical vocab ---");
   const m = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/project/manifest.json"), "utf8"));
-  assertTrue("FA3-PROJ-1: project version >= 1.13.0", /^1\.(13|14|15)\.\d+$/.test(m.version),
+  assertTrue("FA3-PROJ-1: project version >= 1.13.0", /^1\.(13|14|15|16)\.\d+$/.test(m.version),
     `got: ${m.version}`);
   const ec0 = m.new_entity_buttons[0].frontmatter_template;
   assertTrue("FA3-PROJ-2: project entity-create has created_at canonical",
@@ -10416,9 +10421,11 @@ async function caseV01020PDS3QueriesDocNoteFolderOrSection() {
   // Section frontmatter match
   assertTrue("HC-V01020-PDS-3b: matches p.section against the section label",
     /p\.section\s*===\s*section/.test(src));
-  // Folder slug fallback — must use endsWith on p.file.folder
-  assertTrue("HC-V01020-PDS-3c: folder-slug fallback via p.file.folder endsWith",
-    /p\.file\.folder[^\n]*endsWith/.test(src));
+  // Folder match — v0.102.0 S4 I-1 fix replaced the prior endsWith form
+  // with split("/").pop() to extract the doc's folder slug for set-membership
+  // comparison (folder-wins-on-conflict).
+  assertTrue("HC-V01020-PDS-3c: folder-slug derived via p.file.folder split('/').pop()",
+    /p\.file\.folder[^\n]*split\s*\(\s*["']\/["']\s*\)[^\n]*\.pop\s*\(\s*\)/.test(src));
 }
 
 async function caseV01020PDS4PerSectionButtonUsesPresetPrompts() {
@@ -10542,6 +10549,138 @@ async function caseV01020PMP7ExpandToggleReentryGuard() {
   const src = _readPmpSrc();
   assertTrue("HC-V01020-PMP-7: re-entry guard via `let expanded = false` + `expanded = true` flag",
     /let\s+expanded\s*=\s*false/.test(src) && /expanded\s*=\s*true/.test(src));
+}
+
+// v0.102.0 S4 — project blueprint MINOR 1.16.0 (sections schema, modified doc-note button,
+// templates rewired, helper carry-forwards). Tests below cover the manifest + template
+// surface AND the carry-forward fixes to ProjectDocsSections (I-1 + M-4 from Task 2 review).
+const _PROJ_MAN_PATH = path.join(WORKSHOP, "platform", "blueprints", "project", "manifest.json");
+const _PROJ_DOCS_HUB_TPL = path.join(WORKSHOP, "platform", "blueprints", "project", "templates", "Docs Hub.md");
+const _PROJ_TPL = path.join(WORKSHOP, "platform", "blueprints", "project", "templates", "Project.md");
+
+function _readProjManifest() {
+  if (!fs.existsSync(_PROJ_MAN_PATH)) return null;
+  return JSON.parse(fs.readFileSync(_PROJ_MAN_PATH, "utf8"));
+}
+function _readProjManRaw() {
+  if (!fs.existsSync(_PROJ_MAN_PATH)) return "";
+  return fs.readFileSync(_PROJ_MAN_PATH, "utf8");
+}
+
+async function caseV01020ProjMan1VersionAndCustomjs() {
+  console.log(`\n--- Case HC-V01020-PROJ-MAN-1: project manifest version 1.16.0 + customjs_classes adds ProjectDocsSections + ProjectMeetingsPanel ---`);
+  const m = _readProjManifest();
+  assertTrue("HC-V01020-PROJ-MAN-1a: project manifest version is exactly 1.16.0",
+    m && m.version === "1.16.0", `got: ${m && m.version}`);
+  const cls = (m && Array.isArray(m.customjs_classes)) ? m.customjs_classes : [];
+  assertTrue("HC-V01020-PROJ-MAN-1b: customjs_classes includes ProjectDocsSections",
+    cls.indexOf("ProjectDocsSections") !== -1);
+  assertTrue("HC-V01020-PROJ-MAN-1c: customjs_classes includes ProjectMeetingsPanel",
+    cls.indexOf("ProjectMeetingsPanel") !== -1);
+}
+
+async function caseV01020ProjMan2SectionsAndDocNotePrompts() {
+  console.log(`\n--- Case HC-V01020-PROJ-MAN-2: sections:[] on project frontmatter_template + doc-note button extended with section + section_slug + section subfolder ---`);
+  const m = _readProjManifest();
+  const buttons = (m && Array.isArray(m.new_entity_buttons)) ? m.new_entity_buttons : [];
+  const projBtn = buttons.find(b => b && b.id === "project");
+  const docBtn = buttons.find(b => b && b.id === "doc-note");
+  assertTrue("HC-V01020-PROJ-MAN-2a: project entity-create entry exists", !!projBtn);
+  assertTrue("HC-V01020-PROJ-MAN-2b: project frontmatter_template.sections === []",
+    projBtn && projBtn.frontmatter_template && Array.isArray(projBtn.frontmatter_template.sections)
+      && projBtn.frontmatter_template.sections.length === 0);
+
+  assertTrue("HC-V01020-PROJ-MAN-2c: doc-note entity-create entry exists", !!docBtn);
+  const docPrompts = (docBtn && Array.isArray(docBtn.prompts)) ? docBtn.prompts : [];
+  const sectionPrompt = docPrompts.find(p => p && p.key === "section");
+  const slugPrompt = docPrompts.find(p => p && p.key === "section_slug");
+  assertTrue("HC-V01020-PROJ-MAN-2d: doc-note has prompts.section (string, required, default Knowledge)",
+    sectionPrompt && sectionPrompt.type === "string" && sectionPrompt.required === true && sectionPrompt.default === "Knowledge");
+  assertTrue("HC-V01020-PROJ-MAN-2e: doc-note has prompts.section_slug with derive slugify(prompts.section)",
+    slugPrompt && slugPrompt.derive === "slugify(prompts.section)");
+  assertTrue("HC-V01020-PROJ-MAN-2f: doc-note destination.folder_prefix includes {{prompts.section_slug}}",
+    docBtn && docBtn.destination && typeof docBtn.destination.folder_prefix === "string"
+      && docBtn.destination.folder_prefix.indexOf("{{prompts.section_slug}}") !== -1);
+  assertTrue("HC-V01020-PROJ-MAN-2g: doc-note frontmatter_template.section === '{{prompts.section}}'",
+    docBtn && docBtn.frontmatter_template && docBtn.frontmatter_template.section === "{{prompts.section}}");
+  // Preserve carryover fields
+  assertTrue("HC-V01020-PROJ-MAN-2h: doc-note label is '+ New Doc'", docBtn && docBtn.label === "+ New Doc");
+  assertTrue("HC-V01020-PROJ-MAN-2i: doc-note body_template is 'Template, Doc Note.md'",
+    docBtn && docBtn.body_template === "Template, Doc Note.md");
+}
+
+async function caseV01020ProjMan3HelperFilesRegistered() {
+  console.log(`\n--- Case HC-V01020-PROJ-MAN-3: manifest files[] registers both new helper sources ---`);
+  const m = _readProjManifest();
+  const files = (m && Array.isArray(m.files)) ? m.files : [];
+  const pds = files.find(f => f && f.source === "helpers/project-docs-sections.js");
+  const pmp = files.find(f => f && f.source === "helpers/project-meetings-panel.js");
+  assertTrue("HC-V01020-PROJ-MAN-3a: files[] includes helpers/project-docs-sections.js", !!pds);
+  assertTrue("HC-V01020-PROJ-MAN-3b: pds dest is {{scripts_path}}/project/project-docs-sections.js",
+    pds && pds.dest === "{{scripts_path}}/project/project-docs-sections.js");
+  assertTrue("HC-V01020-PROJ-MAN-3c: files[] includes helpers/project-meetings-panel.js", !!pmp);
+  assertTrue("HC-V01020-PROJ-MAN-3d: pmp dest is {{scripts_path}}/project/project-meetings-panel.js",
+    pmp && pmp.dest === "{{scripts_path}}/project/project-meetings-panel.js");
+}
+
+async function caseV01020ProjTpl1DocsHubInvokesSections() {
+  console.log(`\n--- Case HC-V01020-PROJ-TPL-1: Docs Hub template invokes ProjectDocsSections + drops ProjectDocsCards + drops marker ---`);
+  assertTrue("HC-V01020-PROJ-TPL-1: Docs Hub.md exists", fs.existsSync(_PROJ_DOCS_HUB_TPL));
+  const body = fs.readFileSync(_PROJ_DOCS_HUB_TPL, "utf8");
+  assertTrue("HC-V01020-PROJ-TPL-1a: Docs Hub invokes ProjectDocsSections via customjs-guard view",
+    /customjs-guard["'\s,\n]+[^}]*class\s*:\s*["']ProjectDocsSections["']/.test(body));
+  assertTrue("HC-V01020-PROJ-TPL-1b: Docs Hub no longer invokes ProjectDocsCards",
+    !/ProjectDocsCards/.test(body));
+  assertTrue("HC-V01020-PROJ-TPL-1c: Docs Hub no longer contains entity-create:doc-note marker",
+    !/entity-create:doc-note/.test(body));
+}
+
+async function caseV01020ProjTpl2MeetingsPanelInProjectTemplate() {
+  console.log(`\n--- Case HC-V01020-PROJ-TPL-2: Project template has ## Meetings between ## Workstreams and ## Mentions + invokes ProjectMeetingsPanel ---`);
+  assertTrue("HC-V01020-PROJ-TPL-2: Project.md exists", fs.existsSync(_PROJ_TPL));
+  const body = fs.readFileSync(_PROJ_TPL, "utf8");
+  const ws = body.indexOf("## Workstreams");
+  const mt = body.indexOf("## Meetings");
+  const mn = body.indexOf("## Mentions");
+  assertTrue("HC-V01020-PROJ-TPL-2a: ## Workstreams present", ws !== -1);
+  assertTrue("HC-V01020-PROJ-TPL-2b: ## Meetings present", mt !== -1);
+  assertTrue("HC-V01020-PROJ-TPL-2c: ## Mentions present", mn !== -1);
+  assertTrue("HC-V01020-PROJ-TPL-2d: ordering Workstreams < Meetings < Mentions",
+    ws < mt && mt < mn);
+  assertTrue("HC-V01020-PROJ-TPL-2e: invokes ProjectMeetingsPanel via customjs-guard view",
+    /customjs-guard["'\s,\n]+[^}]*class\s*:\s*["']ProjectMeetingsPanel["']/.test(body));
+}
+
+async function caseV01020ProjTpl3DocNoteRuleGlobNested() {
+  console.log(`\n--- Case HC-V01020-PROJ-TPL-3: doc-note rule_fragment path_glob updated to spice/projects/*/docs/**/*.md ---`);
+  const m = _readProjManifest();
+  const rules = (m && Array.isArray(m.rule_fragments)) ? m.rule_fragments : [];
+  const docRule = rules.find(r => r && r.target === "doc-note");
+  assertTrue("HC-V01020-PROJ-TPL-3a: doc-note rule_fragment exists", !!docRule);
+  assertTrue("HC-V01020-PROJ-TPL-3b: doc-note path_glob is spice/projects/*/docs/**/*.md",
+    docRule && docRule.fragment && docRule.fragment.scope
+      && docRule.fragment.scope.path_glob === "spice/projects/*/docs/**/*.md");
+  // exclude_basenames preserved
+  const excludes = docRule && docRule.fragment && docRule.fragment.scope && docRule.fragment.scope.exclude_basenames;
+  assertTrue("HC-V01020-PROJ-TPL-3c: exclude_basenames preserves Docs.md",
+    Array.isArray(excludes) && excludes.indexOf("Docs.md") !== -1);
+}
+
+async function caseV01020PDS9CarryForwardFixes() {
+  console.log(`\n--- Case HC-V01020-PDS-9: ProjectDocsSections carry-forward fixes (I-1 folder-wins + M-4 strict path regex) ---`);
+  const src = _readPdsSrc();
+  // I-1: a pre-built set of all declared section slugs (called allSectionSlugs)
+  assertTrue("HC-V01020-PDS-9a: contains allSectionSlugs set",
+    /allSectionSlugs/.test(src));
+  // I-1: the buggy OR-match form must be GONE — no more `p.section === section ||` chained with folder.endsWith
+  assertTrue("HC-V01020-PDS-9b: buggy OR-match form (`p.section === section ||` followed by `endsWith`) is gone",
+    !/p\.section\s*===\s*section\s*\|\|\s*\(?\s*\(?\s*p\.file\.folder[^\n]*\)?\s*\.endsWith/.test(src));
+  // M-4: strict path-parse regex anchored on ^spice/projects/<slug>/docs$
+  assertTrue("HC-V01020-PDS-9c: strict path-parse regex /^spice\\/projects\\/([^/]+)\\/docs$/ present",
+    /\/\^spice\\\/projects\\\/\(\[\^\/\]\+\)\\\/docs\$\//.test(src));
+  // M-4: the old replace(/\/docs$/, "") form must be GONE
+  assertTrue("HC-V01020-PDS-9d: old `.replace(/\\/docs$/, \"\")` form is gone",
+    !/\.replace\s*\(\s*\/\\\/docs\$\//.test(src));
 }
 
 (async function main() {
@@ -11062,6 +11201,15 @@ async function caseV01020PMP7ExpandToggleReentryGuard() {
   await caseV01020PMP5EmptyStateLanguage();
   await caseV01020PMP6AliasLinkMatch();
   await caseV01020PMP7ExpandToggleReentryGuard();
+
+  // v0.102.0 S4 — project blueprint MINOR 1.16.0 (sections schema + meetings panel + helper carry-forwards).
+  await caseV01020ProjMan1VersionAndCustomjs();
+  await caseV01020ProjMan2SectionsAndDocNotePrompts();
+  await caseV01020ProjMan3HelperFilesRegistered();
+  await caseV01020ProjTpl1DocsHubInvokesSections();
+  await caseV01020ProjTpl2MeetingsPanelInProjectTemplate();
+  await caseV01020ProjTpl3DocNoteRuleGlobNested();
+  await caseV01020PDS9CarryForwardFixes();
 
   // v0.65.0 HC-V065-RUN-NOTE: write-run-note-* sub-skill lint
   {

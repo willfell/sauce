@@ -392,25 +392,33 @@ withTempHomeAndVault(({ home, vault }) => {
         backfillsMaterialized,
         `slugs=${JSON.stringify(seededProjectSlugs.map(s => ({ s, exists: fs.existsSync(path.join(vault, "spice", "projects", s, "docs", "Docs.md")) })))}`);
 
-    // DOCS-INT-2: the materialized Docs.md body contains the entity-create
-    // doc-note sentinel + ProjectDocsCards dispatch + correct project_slug
-    // in frontmatter.
+    // DOCS-INT-2: the materialized Docs.md body contains the ProjectDocsSections
+    // dispatch + correct project_slug in frontmatter.
+    //
+    // v0.102.0 S4 update: the standalone entity-create:doc-note sentinel and
+    // ProjectDocsCards dispatch were retired — ProjectDocsSections (Confluence-
+    // style buckets) now renders per-section + New buttons internally via
+    // EntityCreate.render(presetPrompts: { section }). The assertion now checks
+    // (a) ProjectDocsSections is invoked, (b) ProjectDocsCards is GONE,
+    // (c) the standalone entity-create:doc-note sentinel is GONE, and
+    // (d) project_slug is present in frontmatter.
     let docsContentOk = true;
     let docsContentDetail = "";
     for (const slug of seededProjectSlugs) {
         const docsPath = path.join(vault, "spice", "projects", slug, "docs", "Docs.md");
         if (!fs.existsSync(docsPath)) { docsContentOk = false; docsContentDetail = `missing ${docsPath}`; break; }
         const body = fs.readFileSync(docsPath, "utf8");
-        const hasSentinel = /\/\/\s*entity-create:doc-note/.test(body);
-        const hasCards = /class:\s*["']ProjectDocsCards["']/.test(body);
+        const hasSections = /class:\s*["']ProjectDocsSections["']/.test(body);
+        const noLegacyCards = !/class:\s*["']ProjectDocsCards["']/.test(body);
+        const noLegacySentinel = !/\/\/\s*entity-create:doc-note/.test(body);
         const hasSlug = new RegExp(`project_slug:\\s*${slug}`).test(body);
-        if (!hasSentinel || !hasCards || !hasSlug) {
+        if (!hasSections || !noLegacyCards || !noLegacySentinel || !hasSlug) {
             docsContentOk = false;
-            docsContentDetail = `${slug}: sentinel=${hasSentinel} cards=${hasCards} slug=${hasSlug}`;
+            docsContentDetail = `${slug}: sections=${hasSections} noLegacyCards=${noLegacyCards} noLegacySentinel=${noLegacySentinel} slug=${hasSlug}`;
             break;
         }
     }
-    ok("DOCS-INT-2 materialized Docs.md contains sentinel + ProjectDocsCards + project_slug",
+    ok("DOCS-INT-2 materialized Docs.md contains ProjectDocsSections + project_slug (no legacy ProjectDocsCards/sentinel)",
         docsContentOk, docsContentDetail);
 
     // DOCS-INT-3: re-running install does NOT modify existing Docs.md (idempotent).

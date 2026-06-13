@@ -19,12 +19,5 @@ await dv.view("ranch/views/customjs-guard", { class: "ProjectNavButtons" });
 ---
 
 ```dataviewjs
-// entity-create:doc-note — installer-managed; do not delete this comment
-await customJS.EntityCreate.render(dv, { instance: "doc-note" });
-```
-
----
-
-```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "ProjectDocsCards" });
+await dv.view("ranch/views/customjs-guard", { class: "ProjectDocsSections" });
 ```
