@@ -80,6 +80,33 @@ class ProjectNavButtons {
             return { context: "doc-note", pathParts, planningIdx, projectSlug, projectDir };
         }
 
+        // v0.103.0 S3.2 — section-hub branches (depth 1 + 2). Frontmatter is
+        // authoritative: type === "section-hub" + depth ∈ {1, 2} fully describes
+        // the node. We still read the path to fish out parent_slug for depth-2
+        // back-navigation (frontmatter `parent_section` is the human label;
+        // the folder slug carries the URL).
+        //   depth 1: spice/projects/<slug>/docs/<section_slug>/<Section Name>.md
+        //   depth 2: spice/projects/<slug>/docs/<parent_slug>/<sub_slug>/<Sub Name>.md
+        if (pathParts[tasksIdx] === "docs" && pathParts.length >= planningIdx + 5) {
+            const fcache = app.metadataCache.getFileCache(dv.current().file);
+            const ffm = fcache?.frontmatter || {};
+            if (ffm.type === "section-hub") {
+                const depth = Number(ffm.depth) || 1;
+                if (depth === 1 && pathParts.length === planningIdx + 5) {
+                    const sectionSlug = pathParts[planningIdx + 3];
+                    return { context: "section-hub", depth: 1, pathParts, planningIdx, projectSlug, projectDir, sectionSlug };
+                }
+                if (depth === 2 && pathParts.length === planningIdx + 6) {
+                    const parentSlug = pathParts[planningIdx + 3];
+                    const sectionSlug = pathParts[planningIdx + 4];
+                    // parent_section frontmatter label drives the button text;
+                    // the path-derived parentSlug drives the URL.
+                    const parentSectionLabel = this._stripLinkBrackets(ffm.parent_section) || parentSlug;
+                    return { context: "section-hub", depth: 2, pathParts, planningIdx, projectSlug, projectDir, sectionSlug, parentSlug, parentSectionLabel };
+                }
+            }
+        }
+
         // Project hub: lives directly under project dir, has canonical type:project
         // OR (legacy compat) #project tag. v0.56.1 PATCH (FA-3 fallout): the
         // post-canonical-vocab atlas notes have type:project but no longer carry
@@ -414,6 +441,43 @@ class ProjectNavButtons {
             buttons.push(...filteredButtons);
         }
 
+        // v0.103.0 S3.2 — section-hub (depth 1): nav row =
+        //   Project · Docs · Sibling Sections
+        // "Sibling Sections" routes back to Docs.md (same target as Docs) —
+        // Docs.md IS the sibling-sections index (ProjectDocsIndex renders the
+        // section cards there).
+        if (ctx.context === "section-hub" && ctx.depth === 1) {
+            const docsHubPath = `${projectDir}/docs/Docs.md`;
+            const sectionButtons = [];
+            if (mainNote) {
+                sectionButtons.push({ label: mainNote.basename, icon: icons.project, path: mainNote.path });
+            }
+            sectionButtons.push({ label: "Docs", icon: icons.docs, path: docsHubPath });
+            sectionButtons.push({ label: "Sibling Sections", icon: icons.docs, path: docsHubPath });
+            buttons.length = 0;
+            buttons.push(...sectionButtons);
+        }
+
+        // v0.103.0 S3.2 — section-hub (depth 2): nav row =
+        //   Project · Docs · Section · Sibling Sub-Sections
+        // Section = parent Section Hub (path derived from ctx.parentSlug + the
+        // parent_section frontmatter label). Sibling Sub-Sections also routes
+        // to the parent Section Hub — that hub IS the sub-section index.
+        if (ctx.context === "section-hub" && ctx.depth === 2) {
+            const docsHubPath = `${projectDir}/docs/Docs.md`;
+            const parentLabel = ctx.parentSectionLabel || ctx.parentSlug;
+            const parentHubPath = `${projectDir}/docs/${ctx.parentSlug}/${parentLabel}.md`;
+            const sectionButtons = [];
+            if (mainNote) {
+                sectionButtons.push({ label: mainNote.basename, icon: icons.project, path: mainNote.path });
+            }
+            sectionButtons.push({ label: "Docs", icon: icons.docs, path: docsHubPath });
+            sectionButtons.push({ label: "Section", icon: icons.docs, path: parentHubPath });
+            sectionButtons.push({ label: "Sibling Sub-Sections", icon: icons.docs, path: parentHubPath });
+            buttons.length = 0;
+            buttons.push(...sectionButtons);
+        }
+
         if (buttons.length === 0) return;
 
         // Dedupe: Dataview can re-fire a block without clearing dv.container
@@ -642,6 +706,20 @@ class ProjectNavButtons {
             const notesFolder = `${projectDir}/tasks/${ctx.taskFolder}/notes`;
             await this.renderTaskNoteTiles(root, notesFolder, filePath);
         }
+    }
+
+    // v0.103.0 S3.2: strip Obsidian link brackets off a frontmatter value,
+    // returning the displayable label. Used by detectContext to resolve
+    // section-hub parent_section into a clean basename for the parent-hub URL.
+    //   "[[Knowledge]]"        → "Knowledge"
+    //   "[[Path/To/Hub|Label]]" → "Path/To/Hub" (target wins for path use)
+    //   Dataview Link object   → .path basename or .display
+    _stripLinkBrackets(v) {
+        if (!v) return "";
+        if (typeof v === "string") return v.replace(/^\[\[|\]\]$/g, "").split("|")[0];
+        if (v.display) return v.display;
+        if (v.path) return v.path.split("/").pop().replace(/\.md$/, "");
+        return "";
     }
 
     // v0.59.3: canonical created_at — ISO-8601 with TZ offset.

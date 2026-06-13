@@ -1,11 +1,14 @@
 ---
-type: docs-hub
-project: "[[{{prompts.name}}]]"
-project_slug: {{prompts.slug}}
-project_name: {{prompts.name}}
+type: section-hub
+project: "[[{{current_file.frontmatter.project_name}}]]"
+project_slug: {{current_file.frontmatter.project_slug}}
+section: {{prompts.name}}
+section_slug: {{prompts.slug}}
+parent_section: "{{prompts.parent_section}}"
+depth: {{prompts.depth|number}}
 created_at: "{{now.YYYY-MM-DDTHH:mm:ssZ}}"
 tags:
-  - docs-hub
+  - section-hub
 ---
 
 ```dataviewjs
@@ -23,5 +26,5 @@ await dv.view("ranch/views/customjs-guard", { class: "ProjectNavButtons" });
 ---
 
 ```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "ProjectDocsIndex" });
+await dv.view("ranch/views/customjs-guard", { class: "SectionHub" });
 ```
