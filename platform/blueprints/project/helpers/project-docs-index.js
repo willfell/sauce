@@ -1,19 +1,27 @@
-// project-docs-index.js — v1.17.0 helper (sauce v0.103.0 S2.1).
+// project-docs-index.js — v1.18.0 helper (sauce v0.104.0 S2.1).
 //
 // Renders the project Docs.md landing as a sections-index card row + dashboard
-// chip strip + quick "+ New Doc" shortcut + "+ New Section" button.
+// chip strip + DocSearch filter strip + quick "+ New Doc" shortcut +
+// "+ New Section" button.
 //
 // Replaces v0.102.0's ProjectDocsSections (Confluence-style buckets with docs
 // embedded). In v0.103.0 each section is a first-class section-hub note — so
 // Docs.md now shows ONE card per section (with doc count), and the user
 // navigates INTO a section to see its docs.
 //
+// v0.104.0 S2.1: consumes the v0.104.0 DocSearch helper. The filter UI lives
+// above the section card row; it filters across ALL sections recursively, and
+// per-section doc counts reflect the active filter. onChange triggers a full
+// re-render via dv.container.empty() + this.render(dv); the in-flight ctx is
+// stashed on `this._currentCtx` so the re-render carries the active filter.
+//
 // Order on Docs.md:
 //   1. Dashboard chip strip (doc total · open meetings · project status).
-//   2. Quick + New Doc shortcut (no presetPrompts — user picks the section).
-//   3. + New Section button (no presetPrompts — user types the name).
-//   4. Section card row via BeaconCards (one card per declared section).
-//   5. Empty-state stub when no sections declared (defaults to Knowledge+Notes
+//   2. DocSearch filter strip (text + tag chips + scoped-search button).
+//   3. Quick + New Doc shortcut (no presetPrompts — user picks the section).
+//   4. + New Section button (no presetPrompts — user types the name).
+//   5. Section card row via BeaconCards (one card per declared section).
+//   6. Empty-state stub when no sections declared (defaults to Knowledge+Notes
 //      apply automatically — see below).
 //
 // sections[] schema (v0.103.0): list of WIKILINK strings like
@@ -41,6 +49,27 @@ class ProjectDocsIndex {
     if (!folderMatch) return;
     const projectSlug = folderMatch[1];
     const projectPath = `spice/projects/${projectSlug}`;
+    const scopePath = `spice/projects/${projectSlug}/docs`;
+
+    // v0.104.0 S2.1: render the DocSearch filter strip. onChange triggers a
+    // full re-render — we wipe dv.container and call this.render(dv) so the
+    // section cards / dashboard chips / + New buttons all rebuild against the
+    // freshly active filter. _currentCtx survives across the re-render so the
+    // filter UI doesn't blink between keystrokes.
+    const filterCtx = customJS.DocSearch.render(dv, {
+      projectSlug,
+      scopePath,
+      recursive: true,
+      onChange: (ctx) => {
+        this._currentCtx = ctx;
+        dv.container.empty();
+        this.render(dv);
+      },
+    });
+    if (this._currentCtx) {
+      // Carry over from a previous re-render so the active filter persists.
+      Object.assign(filterCtx, this._currentCtx);
+    }
 
     const projectPages = dv.pages(`"${projectPath}"`).where((p) => p.type === "project");
     const project = projectPages.length ? projectPages[0] : null;
@@ -56,8 +85,11 @@ class ProjectDocsIndex {
     const sections = rawSections.map((v) => this._stripLink(v)).filter(Boolean);
 
     // 1. Dashboard chip strip — total docs across all sections, open meetings
-    //    linked to this project, project status.
-    const allDocs = dv.pages(`"${docsFolder}"`).where((p) => p.type === "doc-note");
+    //    linked to this project, project status. allDocs gates on DocSearch
+    //    filter so the dashboard doc-count chip + per-section meta counts both
+    //    reflect the active filter.
+    const allDocs = dv.pages(`"${docsFolder}"`)
+      .where((p) => p.type === "doc-note" && customJS.DocSearch.matches(p, filterCtx));
     const docCount = allDocs.length;
     const meetingsRoot = "spice/meetings/notes";
     const projectNotePath = project ? project.file.path : null;

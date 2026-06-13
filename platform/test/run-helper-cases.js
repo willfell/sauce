@@ -11379,6 +11379,31 @@ async function caseV01040Ds6AndLogicMatches() {
     /for\s*\(\s*const\s+\w+\s+of\s+ctx\.tags\s*\)/.test(src));
 }
 
+// v0.104.0 S2.1 (Task 2): ProjectDocsIndex consumes DocSearch (cross-section
+// filter). HC-V01040-PDI-EXT-1 confirms the helper invokes
+// customJS.DocSearch.render; HC-V01040-PDI-EXT-2 confirms it references the
+// static customJS.DocSearch.matches (used by section card count filter); and
+// HC-V01040-PDI-EXT-3 confirms the onChange callback follows the
+// dv.container.empty() + this.render(dv) full re-render pattern.
+async function caseV01040PdiExt1InvokesDocSearch() {
+  console.log("\n--- Case HC-V01040-PDI-EXT-1: ProjectDocsIndex invokes customJS.DocSearch.render ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/project-docs-index.js"), "utf8");
+  assertTrue("HC-V01040-PDI-EXT-1: invokes customJS.DocSearch.render",
+    /customJS\.DocSearch\.render\(/.test(src));
+}
+async function caseV01040PdiExt2MatchesUsed() {
+  console.log("\n--- Case HC-V01040-PDI-EXT-2: ProjectDocsIndex references customJS.DocSearch.matches ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/project-docs-index.js"), "utf8");
+  assertTrue("HC-V01040-PDI-EXT-2: references customJS.DocSearch.matches",
+    /customJS\.DocSearch\.matches\(/.test(src));
+}
+async function caseV01040PdiExt3RerenderOnChange() {
+  console.log("\n--- Case HC-V01040-PDI-EXT-3: ProjectDocsIndex onChange uses full re-render pattern ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/project-docs-index.js"), "utf8");
+  assertTrue("HC-V01040-PDI-EXT-3: full re-render pattern (dv.container.empty + this.render)",
+    /dv\.container\.empty\(\)/.test(src) && /this\.render\(dv\)/.test(src));
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -11972,6 +11997,11 @@ async function caseV01040Ds6AndLogicMatches() {
   await caseV01040Ds4Top8Chips();
   await caseV01040Ds5ScopedSearchButton();
   await caseV01040Ds6AndLogicMatches();
+
+  // v0.104.0 S2.1 (Task 2): ProjectDocsIndex consumes DocSearch.
+  await caseV01040PdiExt1InvokesDocSearch();
+  await caseV01040PdiExt2MatchesUsed();
+  await caseV01040PdiExt3RerenderOnChange();
 
   // v0.65.0 HC-V065-RUN-NOTE: write-run-note-* sub-skill lint
   {
