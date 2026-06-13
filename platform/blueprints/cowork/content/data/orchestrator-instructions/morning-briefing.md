@@ -60,7 +60,7 @@ when the prompt body is empty, emits a no-op note with `warning: empty_prompt`.
 | `{{$today_year}}` | fire-time — 4-digit year (2026) |
 | `{{$today_dirpath}}` | fire-time — `<YYYY>/<MM-MMMM>/<YYYY-MM-DD>` directory path |
 | `{{$today_ymd_compact}}` | fire-time — `YYYYMMDD` compact form |
-| `{{$rating_kind_lines}}` | computed-at-emit — `> - [ ] <Kind Title>` lines per surfaced kind |
+| `{{$rating_kind_lines}}` | computed-at-emit — legacy name; feeds the v=4 kind-checklist lines per surfaced kind |
 | `{{$pending_confirmation_lines}}` | computed-at-emit — pending-MCP detection bullet lines |
 
 ## Steps
@@ -226,30 +226,36 @@ empty.
     nav_buttons_block + synopsis_md + memory_callouts + ordered_blocks +
     engagement_type_blocks + excluded_themes + pending_confirmations +
     render_aspects + voice_contract + render_aspects_applied + memory_used + plan_dispatch +
-    learning_enabled + surfaced_kinds_for_rating + prior_rating_state + day). Capture
+    learning_enabled + surfaced_kinds_for_rating + prior_md + day). Capture
     `{ body_md, sidecar_json, status }`.
 
 3h. **Compose failure handling.** If `status` starts with `"failed:"`, emit Notice
     `cowork:morning-briefing aborted -- compose-body failure: <status>` and exit non-zero.
 
-### Step 4: Rating callout (Rail L — idempotent re-fire)
+### Step 4: Feedback-capture callout (Rail L — v0.101.0 prose-first shape)
 
 4a. Compute `output_path = "spice/cowork/daily/{{$today_dirpath}}/morning-briefing.md"`.
-    If the file already exists on disk (same-day re-fire), READ it via the Read tool and
-    invoke `parseRatingCallout(prior_md)` from
-    `platform/blueprints/cowork/helpers/learn-from-checks-helper.js`. Build
-    `prior_rating_state = { <kind>: <ticked-bool>, ... }` from `observations`. Else
-    `prior_rating_state = null`.
+    If the file already exists on disk (same-day re-fire), READ it and pass the
+    raw content as `prior_md` to composeBody. `composeFeedbackCapture` preserves
+    prior state for ANY vintage: a v=4 prior (tap + prose + kind ticks), and an
+    UPGRADE-DAY legacy `cowork:rating-block` prior (kind ticks carried into the
+    new checklist via `parseRatingCallout` — nothing is lost on upgrade day).
+    Else `prior_md = null`.
 
 4b. Compute `surfaced_kinds_for_rating` from `ordered_blocks[]` — array of kind names
     (lowercase) for entries with non-empty `markdown` AND `kind not in ("semantic", "semantic-unavailable")`.
     Preserve `ordered_blocks[]` order so the rendered checklist matches the body's
     surfaced order.
 
-4c. composeBody (Step 3g) emits the rating callout per `{{shared.rating_callout_template}}`
-    when `learning_enabled !== false` AND `surfaced_kinds_for_rating.length > 0`. The
-    sentinel `cowork:rating-block` line encodes `schema_version=1.0.0`, `cadence`, `day`
-    for round-trip parsing on the next fire.
+4c. composeBody emits the feedback callout per `{{shared.feedback_capture_template}}`
+    when `learning_enabled !== false` AND `surfaced_kinds_for_rating.length > 0`.
+    Behind the scenes composeBody dispatches `composeFeedbackCapture` in
+    kind-checklist mode for this cadence: one-tap `Useful` line + free-text
+    typing box on top, ONE collapsed `[!summary]- Kinds — quick ticks`
+    sub-callout below (a checkbox per surfaced kind). The sentinel
+    `<!-- cowork:feedback-capture v=4 -->` is the reconciler's parse target.
+    The legacy `cowork:rating-block` shape is NO LONGER emitted (v0.101.0);
+    its parser remains in the reconciler for the historical corpus.
 
 ### Step 4.5: Voice-proposals callout (v0.98.2 — tick-to-approve)
 
@@ -261,7 +267,7 @@ empty.
       — a COLLAPSED `[!note]-` callout listing each pending proposal as ONE
       checkbox line ending with its sentinel
       `<!-- cowork:voice-proposal id=vp-... -->`. Place it AFTER Rail L's
-      rating callout, before the backlink. When zero pending: emit nothing.
+      feedback callout, before the backlink. When zero pending: emit nothing.
 
 4.5c. Do NOT apply anything here. The nightly reconciler (Step 5.6) reads the
       ticks and applies approved appends.
@@ -343,6 +349,10 @@ empty.
     `failed:contract-violation:sidecar-schema`, no files are written — emit Notice
     `cowork:morning-briefing aborted -- contract-violation: <field>` and exit non-zero.
 
+8c. v0.101.0 — composeBody supplies the slim sidecar field
+    feedback_capture: { sentinel_version: "v=4", kinds_listed: [<surfaced kinds>] }.
+    Do NOT omit it when the feedback callout rendered.
+
 ### Step 8.5: Verify (sidecar schema validation backstop + v0.97.4 prose-invariant write-guards)
 
 **Sidecar schema validation.** The write step's `writeAtomicNote` helper invokes
@@ -363,10 +373,12 @@ additional params that turn LLM-owned prose invariants into deterministic
 backstops:
 
 - `surfaced_kinds_for_rating` (string[]) — pass the same array used to build
-  the rating callout in Step 4b. When non-empty AND `learning_enabled !==
-  false`, the helper rejects with `failed:contract-violation:missing-rating-callout`
-  if body_md lacks the `<!-- cowork:rating-block schema=` sentinel. Closes the
-  v0.97.3 accuris fire where the rating callout silently dropped.
+  the feedback callout in Step 4b. The helper rejects with
+  `failed:contract-violation:missing-rating-callout` when the body lacks BOTH
+  the `<!-- cowork:feedback-capture v= -->` marker AND the legacy
+  `<!-- cowork:rating-block schema= -->` marker while the rating gate is open;
+  the gate is open when the array is non-empty AND `learning_enabled !== false`.
+  Closes the v0.97.3 accuris fire where the rating callout silently dropped.
 - `learning_enabled` (bool) — from `engagement.learning_enabled` (default
   `true`). Gates the rating-callout guard.
 - `expected_kinds` (string[]) — pass `plan.dispatch_plan.map(e => e.kind_name)`

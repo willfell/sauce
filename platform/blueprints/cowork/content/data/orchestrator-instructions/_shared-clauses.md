@@ -43,23 +43,12 @@ created_at: <NOW in {{$timezone}} as ISO timestamp>
 ---
 ```
 
-## rating_callout_template
-
-```
-> [!todo]+ Was today useful?
-> Tick the kinds that surfaced something you cared about. (One tick per kind per day; learned weights live in `spice/cowork/context/user-preferences.md`.)
-{{$rating_kind_lines}}
-> <!-- cowork:rating-block schema=1.0.0 cadence={{$cadence}} day={{$today_date}} -->
-```
-
-(Where `{{$rating_kind_lines}}` is computed at compose time per surfaced kind: e.g. `> - [ ] Calendar\n> - [ ] Email\n...`. If a prior file exists for this day, parse its existing cowork:rating-block sentinel and preserve `[x]` state per kind.)
-
 ## feedback_capture_template
 
 ```
-> [!todo]+ Was today useful?
+> [!todo]+ Was this useful?
 > One tap, a line of prose, or ticks — anything counts. Tomorrow's brief adjusts overnight.
-> <!-- cowork:feedback-capture v=3 -->
+> <!-- cowork:feedback-capture v=4 -->
 > Useful: `[ ] yes` `[ ] no`
 >
 > ### Free-text feedback
@@ -71,7 +60,7 @@ created_at: <NOW in {{$timezone}} as ISO timestamp>
 {{$feedback_capture_per_kind_blocks}}
 ```
 
-(Used by `cowork:eod-review` only — v=3 as of v0.99.0. Order is contract: the one-tap `Useful` line, then the free-text fence (the PRIMARY channel — a line starting with `<kind>:` is deterministically scoped to that section by the nightly reconciler), then the collapsed per-kind sub-callouts with `Mattered:` + `Didn't like:` checklists sharing the same item-IDs plus the knob row, exactly as in v=2. `{{$feedback_capture_per_kind_blocks}}` is computed by `composeFeedbackCapture(opts)` per surfaced kind. `{{$feedback_capture_free_text_or_placeholder}}` is the prior fenced content carried forward across re-fires, or the placeholder `(Type prose here — name a section to scope it, e.g. `finance: too long`.)` when none. On a v=3 prior, preserve tap state + free-text + per-section `[x]` per item-ID + knob positions; v=2/v=1 priors preserve everything they carry and the tap renders fresh-unticked. A dual-ticked tap (both yes and no) is preserved visually and treated as ambiguous (no satisfaction signal).)
+(Used by ALL FIVE cadences — v=4 as of v0.101.0. Order is contract: the one-tap `Useful` line, then the free-text fence (the PRIMARY channel — a line starting with `<kind>:` is deterministically scoped to that section by the nightly reconciler; a line naming no kind moves satisfaction + engagement only, never kind weights), then the per-cadence blocks computed by `composeFeedbackCapture(opts)`: on `eod-review`, the collapsed per-kind sub-callouts with `Mattered:` + `Didn't like:` checklists sharing item-IDs plus the knob row (exact v=3 mechanics); on the other four cadences, ONE collapsed `[!summary]- Kinds — quick ticks` sub-callout with a checkbox per surfaced kind. `{{$feedback_capture_free_text_or_placeholder}}` is the prior fenced content carried forward across re-fires, or the placeholder `(Type prose here — name a section to scope it, e.g. `finance: too long`.)` when none. Priors of ANY vintage are preserved: v=4 (tap + prose + item ticks/knobs or kind ticks), v=3/v=2/v=1 (everything they carry; tap fresh-unticked pre-v=3), and UPGRADE-DAY legacy `rating-block` priors (kind ticks carried into the checklist). A dual-ticked tap is preserved visually and treated as ambiguous (no satisfaction signal). NO new substitution tokens vs v=3.)
 
 ## voice_proposals_callout_template
 

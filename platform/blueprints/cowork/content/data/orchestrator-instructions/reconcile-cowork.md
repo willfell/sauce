@@ -49,9 +49,13 @@ cadence: reconcile-cowork
    a. Read content (or reuse from Step 6).
    b. Detect the sentinel:
       - `<!-- cowork:rating-block schema=1.0.0 cadence=<X> day=<Y> -->` → kind-checkbox
-        parse (sub-step c). The 4 non-EOD cadences emit this shape.
-      - `<!-- cowork:feedback-capture v=1 -->`, `v=2`, or `v=3` → rich parse (sub-step d).
-        EOD emits this shape (v0.98.1+).
+        parse (sub-step c). LEGACY — pre-v0.101.0 notes only; no cadence emits this
+        shape anymore. Parser retained forever for the historical corpus.
+      - `<!-- cowork:feedback-capture v=1 -->` … `v=4` → rich parse (sub-step d).
+        ALL FIVE cadences emit this shape as of v0.101.0 (v=4): EOD carries per-item
+        sections + knobs; the other four carry the `Kinds — quick ticks` checklist,
+        parsed into `kind_ticks` (kind = first whitespace token, Tasks-suffix
+        tolerant — same rule as the legacy kind-checkbox parse).
       - Neither → 0 observations for this note.
    c. Kind-checkbox parse: scan the `> [!todo]+ Was today useful?` callout for
       `> - [x] Kind` / `> - [ ] Kind` lines. The kind is the FIRST whitespace
@@ -73,6 +77,10 @@ cadence: reconcile-cowork
       mattered tick → `{ kind, ticked: true }`; a surfaced kind with 0
       mattered ticks → `{ kind, ticked: false }`.
       Collect the one-tap satisfaction line (`> Useful: \`[x?] yes\` \`[x?] no\``) → true / false / ambiguous (both ticked) / null (neither); trailing Tasks annotations ignored.
+      Collect `kind_ticks` from the "Kinds — quick ticks" checklist section
+      when present; KIND-LEVEL MAPPING for sub-step 8: each listed kind →
+      `{ kind, ticked: <box state> }` (exactly the legacy rating-block
+      semantics).
 
 8. Aggregate kind observations across all of yesterday's notes per kind.
    Compute `tick_count` + `skip_count` per kind.
@@ -82,8 +90,8 @@ cadence: reconcile-cowork
 8-gate. Classify yesterday per the `classifyEngagementDay` contract
     (`spice/cowork/helpers/ingest-feedback-helper.js` — re-stated for
     pure-MCP execution). Walk every parsed note from Step 3:
-    - **ENGAGED** when ANY note shows: ≥1 ticked kind checkbox (rating-block
-      notes), ≥1 ticked Mattered/Didn't-like item, ≥1 knob off `same`
+    - **ENGAGED** when ANY note shows: ≥1 ticked kind checkbox (legacy
+      rating-block notes OR v=4 `kind_ticks`), ≥1 ticked Mattered/Didn't-like item, ≥1 knob off `same`
       (ambiguous counts — the user touched it), OR non-empty free-text that
       is not the placeholder line.
     - **TAP-ONLY** when the only signal is the `Useful:` yes/no tap.
@@ -138,23 +146,34 @@ cadence: reconcile-cowork
 
 ### Step 3.6 — Free-text intent extraction (LLM pass, inline in this session)
 
-8d. When `free_text` is non-empty: read it and extract a JSON intent list —
-    each entry `{ intent, kind?, entity?, source_quote, proposed_target,
-    confidence }` where `intent` ∈ uprank | downrank | voice_correction |
-    coverage_gap | frequency | other; `source_quote` is a VERBATIM substring
-    of the user's prose; `proposed_target` ∈ `learned_weights` |
-    `microscope:<kind>` | `voice-proposals` | `coverage-queue`; `confidence`
+8d. For EACH of yesterday's notes with non-empty `free_text`: extract a JSON
+    intent list from THAT note's prose — each entry `{ intent, kind?, entity?,
+    useful?, source_quote, proposed_target, confidence, source_cadence }`
+    where `source_cadence` is the note's cadence (the LLM does not choose it —
+    it is assigned from the note being read); `intent` ∈ uprank | downrank |
+    voice_correction | coverage_gap | frequency | satisfaction | other;
+    `proposed_target` ∈ `learned_weights` | `microscope:<kind>` |
+    `voice-proposals` | `coverage-queue` | `satisfaction-series`.
+    `source_quote` is a VERBATIM substring of the user's prose; `confidence`
     ∈ high | medium | low.
 
 8e. VALIDATE every intent (deterministic rules — the `validateIntents`
     contract; the LLM proposes, this layer disposes):
     - unknown intent → REJECT
     - `source_quote` missing or not found verbatim in free_text → REJECT
-    - `proposed_target` outside the four-value allowlist → REJECT
+    - `proposed_target` outside the five-value allowlist → REJECT
     - uprank / downrank / frequency without a `kind` → REJECT
+    - intent `satisfaction` without a boolean `useful` → REJECT
+    - `proposed_target` `satisfaction-series` with intent ≠ `satisfaction` → REJECT
     - intent `other` OR confidence `low` → PENDING (logged, never applied)
     Rejected + pending intents are recorded in the Step 5.5 audit log with
     their reason. ONLY accepted intents proceed.
+
+8e2. DEDUP (deterministic — the dedupIntents contract): across ALL notes'
+     accepted intents, a weight-channel intent (uprank / downrank /
+     frequency) applies at most once per (intent, kind, entity) per run;
+     duplicates are logged `[pending] dedup <intent> <kind>` in 16a and
+     NOT applied. Non-weight intents pass through untouched.
 
 8f. Accepted intent dispositions:
     - uprank / downrank naming an entity → entity delta (+0.05 / −0.10); a
@@ -164,6 +183,14 @@ cadence: reconcile-cowork
     - voice_correction → compose a proposal entry (Step 5.5c). NEVER applied
       directly.
     - coverage_gap → queue entry (Step 5.5d).
+    - satisfaction → append to the satisfaction series for the intent's
+      `source_cadence` (sub-step 13f channel). PROSE WINS: apply tap-derived
+      appends FIRST, then satisfaction-intent appends — the same-(day, cadence)
+      overwrite makes the typed word beat the tap on disagreement.
+    - downrank naming a kind WITHOUT an entity → that kind's observation
+      flips to skip (the `applyIntentKindObservations` contract — mirror of
+      uprank-counts-as-tick; contradictory uprank+downrank on one kind →
+      no-op; entity-scoped downrank never flips the kind).
 
 ### Step 4 — Update learned_weights in user-preferences.md
 
@@ -179,14 +206,14 @@ cadence: reconcile-cowork
 12. Evaluate warmup graduation (ENGAGED days only — Step 3.4): if `totals.engaged_days.length >= 7` AND `ticks + skips >= 7`, set `warmup: false`. (Calendar days NO LONGER graduate — silence cannot build authority.)
 13. Update `totals`: `notes_scanned += <yesterday's note count>`, `notes_with_any_tick += <count of notes with any [x]>`, `scanned_days.push("{{$yesterday_date}}")` (dedup-aware).
 
-13a. SCHEMA 4 NORMALIZE (v0.99.0): before applying updates, normalize the
-     parsed `learned_weights:` block per `normalizeLearnedWeightsV4` —
+13a. SCHEMA 5 NORMALIZE (v0.101.0): before applying updates, normalize the
+     parsed `learned_weights:` block per `normalizeLearnedWeightsV5` —
      tolerate on-disk `schema_version: 2` (headspace), a MISSING version
      field (accuris), legacy `"1.1.0"`, `3`, or `4`. Result shape: top-level
-     `schema_version: 4`; every `per_kind.<kind>` gains empty
+     `schema_version: 5`; every `per_kind.<kind>` gains empty
      `per_person: {}` / `per_channel: {}` / `per_topic: {}` maps when absent;
      `totals` gains `feedback_ingested_days: []` when absent. NOTHING
-     existing is dropped. `totals` gain `engaged_days: []` + `satisfaction: []`; `warmup_until` set null (retired). ONE-TIME MIGRATION when the on-disk `schema_version` is not 4: keep every kind's weight + ticks, ZERO skips, force `warmup: true`. Idempotent — already-4 input (numeric or string `"4"`) is never re-reset.
+     existing is dropped. `totals` gain `engaged_days: []` + `satisfaction: []`; `warmup_until` set null (retired). Satisfaction entries are `{ day, cadence, useful }` (pre-5 entries gain `cadence: "eod-review"`). The ONE-TIME silence-reset migration fires ONLY for pre-4 inputs exactly as before; 4 → 5 is purely additive (NO skip-zeroing, NO warmup reset). Idempotent — already-5 input (numeric or string `"5"`) is never re-reset.
 
 13b. Apply Step 3.5's entity deltas: per entity,
      `weight = clamp(round3(weight + delta), 0.10, 3.00)`; increment `ticks`
@@ -204,7 +231,7 @@ cadence: reconcile-cowork
 13e. Append `{{$yesterday_date}}` to `totals.feedback_ingested_days[]`
      (dedup-aware).
 
-13f. Satisfaction append (ALL day classes with a boolean tap): per the `appendSatisfaction` contract — `totals.satisfaction` gets `{ day: "{{$yesterday_date}}", useful: <tap> }`; same-day re-log overwrites; window capped at 30 entries (oldest dropped); ambiguous dual-tap or no tap → no entry.
+13f. Satisfaction append (ALL day classes; PER NOTE with a boolean tap): per the `appendSatisfaction` contract — `totals.satisfaction` gets `{ day: "{{$yesterday_date}}", cadence: <note's cadence>, useful: <tap> }` per tapped note; same-(day, cadence) re-log overwrites; window trims entries older than 30 days (200-entry cap); ambiguous dual-tap or no tap → no entry for that note. Satisfaction-intent appends (8f) run AFTER tap appends — prose wins per cadence.
 
 ### Step 5 — Write .bak + updated user-preferences.md
 
@@ -310,7 +337,8 @@ cadence: reconcile-cowork
 - check-heartbeat: regex-replaces prior callout in memory.md same-day.
 - reconciler-log: dedup by run-id (skip if today's run already logged).
 - feedback ingest: skip when `{{$yesterday_date}}` already in `totals.feedback_ingested_days[]`.
-- engagement gate: engaged_days append is dedup-aware; satisfaction append overwrites same-day; tap-only/silent days never invoke the weight formula (decay cannot double-fire). `scanned_days` records every PROCESSED day (all three classes); `engaged_days` records ENGAGED days only — the re-run guard keys off `scanned_days`, so a re-fired tap-only/silent day is a clean no-op.
+- engagement gate: engaged_days append is dedup-aware; satisfaction append overwrites same-(day, cadence); tap-only/silent days never invoke the weight formula (decay cannot double-fire). `scanned_days` records every PROCESSED day (all three classes); `engaged_days` records ENGAGED days only — the re-run guard keys off `scanned_days`, so a re-fired tap-only/silent day is a clean no-op.
+- intent dedup is per-run deterministic (re-running the same notes yields the same applied set).
 - feedback-deltas log: dedup by run-id (skip if today's `fd-` run already logged).
 - voice apply: a proposal applies at most once (`status: applied` gates re-apply).
 
@@ -323,8 +351,9 @@ cadence: reconcile-cowork
 - EOD sidecar lacks `feedback_capture` / pre-1.2.0 → kind-level signal from the markdown only; entity rollup degrades to labels; never aborts.
 - Free-text extraction yields invalid JSON → log `[rejected] extraction-unparseable` + skip Step 3.6 entirely; deterministic rollup (3.5) still applies.
 - microscope.md absent for an accepted append → `[pending]` log line; never create the file.
-- ZERO signal (no ticks, no downvotes, no knobs, empty free_text — a SILENT day per Step 3.4) → no deltas; writes limited to the single audit line, totals bookkeeping (sub-step 13), and the first-run 13a normalize/migration.
+- ZERO signal (no kind ticks in ANY shape, no item ticks, no downvotes, no knobs, empty free_text across all notes — a SILENT day per Step 3.4) → no deltas; writes limited to the single audit line, totals bookkeeping (sub-step 13), and the first-run 13a normalize/migration.
 - Day classifies SILENT but learned_weights is pre-v4 → still run the 13a normalize+migration (the reset must not wait for an engaged day).
+- A note whose free_text yields intents for a cadence that emitted no tap → satisfaction-intent append still applies (prose alone can set the cadence's satisfaction).
 
 ## Performance
 

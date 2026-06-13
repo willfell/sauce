@@ -16653,7 +16653,9 @@ type: cowork-microscope
       "microscope_clause",
       "voice_clause",
       "sidecar_schema_template",
-      "rating_callout_template",
+      // v0.101.0 S1.7: rating_callout_template retired; feedback_capture_template
+      // is the single Rail L callout clause for all five cadences.
+      "feedback_capture_template",
       "detection_callout_template",
       "anti_echo_callout_template",
       "frontmatter_base",
@@ -16912,6 +16914,12 @@ type: cowork-microscope
       // spice/cowork/memory/<engagement_id>/voice-proposals.md entries.
       "{{$voice_proposals_count}}",
       "{{$voice_proposal_lines}}",
+      // v0.101.0 S1.7: feedback_capture_template tokens — computed at emit by
+      // composeFeedbackCapture (Step 4c dispatch); all five cadences now
+      // inline this template, so its placeholders stay literal at compose time
+      // (exactly like {{$rating_kind_lines}}).
+      "{{$feedback_capture_free_text_or_placeholder}}",
+      "{{$feedback_capture_per_kind_blocks}}",
     ]);
     const orphans = (typeof outStr === "string"
       ? (outStr.match(/\{\{\$[a-z_]+\}\}/gi) || [])
@@ -17173,7 +17181,7 @@ type: cowork-microscope
     assertTrue("HC-V0970-T-13: composed output contains sidecar schema template inline", false, e && e.message);
   }
 
-  console.log(`\n--- Case HC-V0970-T-14: composed output contains rating callout template inline ---`);
+  console.log(`\n--- Case HC-V0970-T-14: composed output contains feedback-capture callout template inline ---`);
   try {
     const helper = _loadSjHelperT();
     const contract = _loadSjContractT();
@@ -17186,13 +17194,15 @@ type: cowork-microscope
       sourceRoot: SOURCE_ROOT_T,
     });
     const outStr = (out && typeof out === "object") ? (out.file_md || out.output || "") : (out || "");
-    const hasRatingHeader = typeof outStr === "string" && outStr.includes("> [!todo]+ Was today useful?");
-    const hasRatingMarker = typeof outStr === "string" && outStr.includes("cowork:rating-block schema=1.0.0");
-    assertTrue("HC-V0970-T-14: composed wrapper output contains the rating callout template inline (`> [!todo]+ Was today useful?` callout header AND `cowork:rating-block schema=1.0.0` marker — Step 4 rating block from _shared-clauses.md `rating_callout_template` clause inlined so the executor pastes the exact callout shape that compose-body downstream rating-aware composition can detect)",
-      hasRatingHeader && hasRatingMarker,
-      `hasRatingHeader=${hasRatingHeader} hasRatingMarker=${hasRatingMarker}`);
+    // v0.101.0 S1.7: rating_callout_template retired — Step 4 now inlines
+    // feedback_capture_template (v=4) on all five cadences.
+    const hasFeedbackHeader = typeof outStr === "string" && outStr.includes("> [!todo]+ Was this useful?");
+    const hasFeedbackSentinel = typeof outStr === "string" && outStr.includes("cowork:feedback-capture v=4");
+    assertTrue("HC-V0970-T-14: composed wrapper output contains the feedback-capture callout template inline (`> [!todo]+ Was this useful?` callout header AND `cowork:feedback-capture v=4` sentinel — Step 4 feedback block from _shared-clauses.md `feedback_capture_template` clause inlined so the executor pastes the exact callout shape that compose-body downstream feedback-aware composition can detect)",
+      hasFeedbackHeader && hasFeedbackSentinel,
+      `hasFeedbackHeader=${hasFeedbackHeader} hasFeedbackSentinel=${hasFeedbackSentinel}`);
   } catch (e) {
-    assertTrue("HC-V0970-T-14: composed output contains rating callout template inline", false, e && e.message);
+    assertTrue("HC-V0970-T-14: composed output contains feedback-capture callout template inline", false, e && e.message);
   }
 
   // ==========================================================================
