@@ -10697,6 +10697,61 @@ async function caseV01020PDS9CarryForwardFixes() {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// v0.102.0 S4 (Task 6): applyProjectSectionsMigration — Strategy A auto-migration.
+// Static-string regex asserts against platform/install.js source (same pattern as
+// DHB-1). The migration: walks spice/projects/, for each project moves flat
+// docs/*.md → docs/knowledge/ (with section: "Knowledge"), preserves existing
+// subfolders containing doc-notes as custom sections, and populates the parent
+// project's sections[] frontmatter. Idempotent per-project (skip if knowledge/
+// exists), failure-loud per-project (catches + logs, never throws).
+// ──────────────────────────────────────────────────────────────────────────────
+
+async function caseV01020Psm1FunctionDeclaredAndIdempotent() {
+  console.log("\n--- Case HC-V01020-PSM-1: applyProjectSectionsMigration declared + idempotency guard ---");
+  const src = fs.readFileSync(
+    path.join(WORKSHOP, "platform/install.js"), "utf8");
+  assertTrue("HC-V01020-PSM-1: async function applyProjectSectionsMigration declared",
+    /async\s+function\s+applyProjectSectionsMigration\s*\(/.test(src));
+  assertTrue("HC-V01020-PSM-1: gated on manifest.name === 'project'",
+    /manifest\.name\s*===\s*["']project["']/.test(src));
+  assertTrue("HC-V01020-PSM-1: idempotency guard on knowledge/ existence",
+    /knowledgeDir|docs\/knowledge|"knowledge"/.test(src) && /adapter\.exists/.test(src));
+}
+
+async function caseV01020Psm2MovesFlatDocsToKnowledge() {
+  console.log("\n--- Case HC-V01020-PSM-2: moves flat docs/*.md into docs/knowledge/ ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
+  assertTrue("HC-V01020-PSM-2: writes into knowledge/ via adapter.write",
+    /adapter\.write\([^)]*knowledge/.test(src));
+  assertTrue("HC-V01020-PSM-2: removes original via adapter.remove",
+    /adapter\.remove\(/.test(src));
+  assertTrue("HC-V01020-PSM-2: skips Docs.md",
+    /Docs\.md/.test(src));
+}
+
+async function caseV01020Psm3PreservesCustomSubfolders() {
+  console.log("\n--- Case HC-V01020-PSM-3: custom subfolders become sections[] entries ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
+  assertTrue("HC-V01020-PSM-3: walks docs/ subfolders + detects doc-notes",
+    /type:\s*\["'\\]\?doc-note|type[^"'\n]*doc-note/.test(src));
+  assertTrue("HC-V01020-PSM-3: titlecase helper present",
+    /_titlecaseFromSlug\s*\(/.test(src));
+  assertTrue("HC-V01020-PSM-3: ensure sections frontmatter helper present",
+    /_ensureSectionsFrontmatter\s*\(/.test(src) || /sections:\\n/.test(src));
+}
+
+async function caseV01020Psm4SectionFrontmatterAndFailureLoud() {
+  console.log("\n--- Case HC-V01020-PSM-4: section frontmatter added + per-project try/catch ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
+  assertTrue("HC-V01020-PSM-4: ensure section frontmatter helper present",
+    /_ensureSectionFrontmatter\s*\(/.test(src));
+  assertTrue("HC-V01020-PSM-4: writes section: \"Knowledge\" literal",
+    /["']Knowledge["']/.test(src));
+  assertTrue("HC-V01020-PSM-4: per-project try/catch with warning event",
+    /event:\s*["']warning["']/.test(src) && /step:\s*["']project_sections_migration["']/.test(src));
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // v0.102.0 S3.2 (Task 5): meetings blueprint 0.8.0 — project link field + pill
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -11257,6 +11312,12 @@ async function caseV01020Meet2ProjectPill() {
   await caseV01020ProjTpl2MeetingsPanelInProjectTemplate();
   await caseV01020ProjTpl3DocNoteRuleGlobNested();
   await caseV01020PDS9CarryForwardFixes();
+
+  // v0.102.0 S4 (Task 6): applyProjectSectionsMigration — Strategy A auto-migration.
+  await caseV01020Psm1FunctionDeclaredAndIdempotent();
+  await caseV01020Psm2MovesFlatDocsToKnowledge();
+  await caseV01020Psm3PreservesCustomSubfolders();
+  await caseV01020Psm4SectionFrontmatterAndFailureLoud();
 
   // v0.102.0 S3.2 (Task 5): meetings blueprint 0.8.0 — project link field + pill
   await caseV01020Meet1ManifestProjectField();

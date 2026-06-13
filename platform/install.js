@@ -1069,6 +1069,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyWikiToDocsMigration(tp, mech, variables, history, git);   // NEW v0.52.0 — must run BEFORE applyDocsBackfill
   await applyDocsBackfill(tp, mech, variables, history, git);          // NEW v0.50.0; renamed from applyWikiBackfill v0.52.0
   await applyDocsHubButtonRepair(tp, mech, variables, history, git);   // NEW v0.100.2 — heals existing broken "+ New Doc" blocks (backfill is create-if-absent)
+  await applyProjectSectionsMigration(tp, mech, variables, history, git);   // NEW v0.102.0 S4 — Strategy A auto-migration (flat docs/*.md → docs/knowledge/ + sections[])
   await applyExternalPluginInstall(tp, mech, adapter.basePath || (typeof adapter.getBasePath === "function" ? adapter.getBasePath() : null), workshopPath, history, git);  // NEW v0.94.0 — install missing
   await applyExternalPlugins(tp, mech, history, git);
   await scaffoldFoundationalPluginData(tp, mech, workshopPath, variables, history, git);  // NEW v0.26.0
@@ -2125,6 +2126,237 @@ async function applyDocsHubButtonRepair(tp, manifest, variables, history, git) {
       attempted_at: new Date().toISOString(),
     });
   }
+}
+
+// applyProjectSectionsMigration — v0.102.0 S4 (Task 6). Strategy A auto-migration
+// of existing flat docs/*.md files into docs/knowledge/ with section: "Knowledge"
+// frontmatter, preserving any existing custom subfolders that contain doc-notes
+// as additional sections[] entries on the parent project. Project-gated.
+// Idempotent per-project: skips when docs/knowledge/ already exists (already
+// migrated) OR docs/ doesn't exist (nothing to do). Failure-loud per-project:
+// wraps each project body in try/catch, emits a warning event, continues to
+// next project — NEVER throws.
+//
+// Steps per project (with docs/ present and docs/knowledge/ absent):
+//   1. Create docs/knowledge/ and docs/notes/.
+//   2. For each .md file directly under docs/ (excluding Docs.md):
+//      - write to docs/knowledge/<basename> with section: "Knowledge" injected
+//        into frontmatter (when absent).
+//      - remove the original.
+//   3. For each existing subfolder of docs/ (excluding knowledge, notes):
+//      - if at least one .md inside has type: doc-note in frontmatter, treat
+//        as a custom section. Titlecase the folder slug into the section label.
+//      - inject section: "<label>" into each doc-note's frontmatter (when absent).
+//   4. Update parent project note's frontmatter: when sections: is absent,
+//      set sections: ["Knowledge", "Notes", ...customSections]. The project
+//      note is identified as the .md file in the project dir with
+//      type: project in frontmatter.
+async function applyProjectSectionsMigration(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "project") return;
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+
+  const projectsRoot = "spice/projects";
+  if (!(await adapter.exists(projectsRoot))) return;
+
+  let projectsList;
+  try {
+    projectsList = await adapter.list(projectsRoot);
+  } catch (e) {
+    if (history) {
+      history.push({
+        event: "warning",
+        step: "project_sections_migration",
+        name: "project",
+        reason: `list failed for ${projectsRoot}: ${e.message}`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  const projectDirs = (projectsList.folders || []).filter((d) => d.split("/").pop() !== "All Projects");
+
+  let migratedCount = 0;
+  let skippedCount = 0;
+  let warnCount = 0;
+
+  for (const projectDir of projectDirs) {
+    const docsDir = `${projectDir}/docs`;
+    const knowledgeDir = `${docsDir}/knowledge`;
+    const notesDir = `${docsDir}/notes`;
+    try {
+      // Idempotency: skip when docs/ missing or knowledge/ already exists.
+      if (!(await adapter.exists(docsDir))) {
+        skippedCount += 1;
+        continue;
+      }
+      if (await adapter.exists(knowledgeDir)) {
+        skippedCount += 1;
+        continue;
+      }
+
+      // 1. Create knowledge/ + notes/ subfolders.
+      await adapter.mkdir(knowledgeDir);
+      if (!(await adapter.exists(notesDir))) {
+        await adapter.mkdir(notesDir);
+      }
+
+      // 2. Move flat docs/*.md → docs/knowledge/ (excluding Docs.md).
+      const docsList = await adapter.list(docsDir);
+      const movedFiles = [];
+      for (const fp of (docsList.files || [])) {
+        if (!fp.endsWith(".md")) continue;
+        const base = fp.split("/").pop();
+        if (base === "Docs.md") continue;
+        const body = await adapter.read(fp);
+        const newBody = _ensureSectionFrontmatter(body, "Knowledge");
+        // Inline the docs/knowledge/<base> destination so static-source asserts
+        // (HC-V01020-PSM-2) can see `adapter.write(...knowledge...)` in one span.
+        await adapter.write(`${docsDir}/knowledge/${base}`, newBody);
+        await adapter.remove(fp);
+        movedFiles.push(base);
+      }
+
+      // 3. Detect custom subfolders that contain doc-notes.
+      const customSections = [];
+      for (const sub of (docsList.folders || [])) {
+        const subBase = sub.split("/").pop();
+        if (subBase === "knowledge" || subBase === "notes") continue;
+        let hasDocNote = false;
+        let subList;
+        try {
+          subList = await adapter.list(sub);
+        } catch (_e) {
+          subList = { files: [], folders: [] };
+        }
+        const docNotePaths = [];
+        for (const fp of (subList.files || [])) {
+          if (!fp.endsWith(".md")) continue;
+          const fb = await adapter.read(fp);
+          if (/^type:\s*["']?doc-note["']?\s*$/m.test(fb)) {
+            hasDocNote = true;
+            docNotePaths.push(fp);
+          }
+        }
+        if (!hasDocNote) continue;
+        const sectionLabel = _titlecaseFromSlug(subBase);
+        customSections.push(sectionLabel);
+        // Inject section: "<label>" into each doc-note's frontmatter (when absent).
+        for (const fp of docNotePaths) {
+          const fb = await adapter.read(fp);
+          const newBody = _ensureSectionFrontmatter(fb, sectionLabel);
+          if (newBody !== fb) {
+            await adapter.write(fp, newBody);
+          }
+        }
+      }
+
+      // 4. Update parent project note's frontmatter with sections[].
+      const dirList = await adapter.list(projectDir);
+      let projectNotePath = null;
+      for (const fp of (dirList.files || [])) {
+        if (!fp.endsWith(".md")) continue;
+        const fb = await adapter.read(fp);
+        if (/^type:\s*["']?project["']?\s*$/m.test(fb)) {
+          projectNotePath = fp;
+          break;
+        }
+      }
+      if (projectNotePath) {
+        const pBody = await adapter.read(projectNotePath);
+        if (!/^sections:/m.test(pBody)) {
+          const sections = ["Knowledge", "Notes", ...customSections];
+          const newPBody = _ensureSectionsFrontmatter(pBody, sections);
+          if (newPBody !== pBody) {
+            await adapter.write(projectNotePath, newPBody);
+          }
+        }
+      }
+
+      migratedCount += 1;
+      if (history) {
+        history.push({
+          event: "info",
+          step: "project_sections_migration",
+          name: "project",
+          target: docsDir,
+          action: "migrated_to_sections",
+          reason: `moved ${movedFiles.length} file(s) into knowledge/; ${customSections.length} custom section(s): ${customSections.join(", ") || "(none)"}`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    } catch (e) {
+      warnCount += 1;
+      if (history) {
+        history.push({
+          event: "warning",
+          step: "project_sections_migration",
+          name: "project",
+          target: docsDir,
+          reason: `migration failed for ${docsDir}: ${e && e.message ? e.message : String(e)}`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    }
+  }
+
+  if (history) {
+    history.push({
+      event: "info",
+      step: "project_sections_migration",
+      name: "project",
+      reason: `migrated ${migratedCount} project(s); skipped ${skippedCount}; ${warnCount} warning(s)`,
+      git_commit: git.commit,
+      git_tag: git.tag,
+      git_dirty: git.dirty,
+      attempted_at: new Date().toISOString(),
+    });
+  }
+}
+
+// _ensureSectionFrontmatter — inject `section: "<label>"` into the leading
+// YAML frontmatter block when absent. Returns body unchanged if no FM block
+// is present or `section:` already exists. Pure string transform.
+function _ensureSectionFrontmatter(body, sectionLabel) {
+  if (/^section:/m.test(body)) return body;
+  const fmMatch = body.match(/^---\n([\s\S]*?)\n---/);
+  if (!fmMatch) return body;
+  const fm = fmMatch[1];
+  const newFm = `${fm}\nsection: "${sectionLabel}"`;
+  return body.replace(/^---\n[\s\S]*?\n---/, `---\n${newFm}\n---`);
+}
+
+// _ensureSectionsFrontmatter — inject `sections:` YAML list into the leading
+// frontmatter block when absent. Returns body unchanged if no FM block is
+// present or `sections:` already exists. Always emits an explicit list (even
+// when callers pass just ["Knowledge", "Notes"]).
+function _ensureSectionsFrontmatter(body, sections) {
+  if (/^sections:/m.test(body)) return body;
+  const fmMatch = body.match(/^---\n([\s\S]*?)\n---/);
+  if (!fmMatch) return body;
+  const fm = fmMatch[1];
+  const yamlList = sections.map((s) => `  - ${s}`).join("\n");
+  const newFm = `${fm}\nsections:\n${yamlList}`;
+  return body.replace(/^---\n[\s\S]*?\n---/, `---\n${newFm}\n---`);
+}
+
+// _titlecaseFromSlug — convert a kebab-case folder slug into a Title Case
+// section label. e.g. "release-notes" → "Release Notes".
+function _titlecaseFromSlug(slug) {
+  return String(slug)
+    .split("-")
+    .map((w) => (w.length ? w.charAt(0).toUpperCase() + w.slice(1) : w))
+    .join(" ");
 }
 
 // applyNewEntityButtons — v0.46.0 S2. Aggregates this item's
