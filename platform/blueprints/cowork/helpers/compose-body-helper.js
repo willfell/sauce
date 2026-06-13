@@ -504,35 +504,33 @@ function composeBody(input) {
     ) {
         body_md = injectDetectionCallout(body_md, input.pending_confirmations);
     }
-    // v0.98.1: Rail L cadence-based dispatch.
-    // EOD-only → composeFeedbackCapture (rich shape with per-item ticks + knob + free-text)
-    // Other 4 cadences → composeRatingCallout (v0.96.0 kind-checkbox shape)
+    // v0.101.0: Rail L — feedback-capture v=4 on ALL cadences.
+    // EOD → item mode (per-item Mattered/Didn't-like lists + knobs);
+    // other 4 → kind-checklist mode (collapsed). composeRatingCallout below
+    // is LEGACY emission — no cadence dispatches it since v0.101.0; retained
+    // for back-compat tests + historical-corpus tooling only.
+    let railObservability = null;
     if (input.learning_enabled !== false) {
-        if (
-            input.cadence === "eod-review"
+        const isEod = input.cadence === "eod-review";
+        const haveItems = isEod
             && input.surfaced_items_by_kind
-            && typeof input.surfaced_items_by_kind === "object"
-        ) {
+            && typeof input.surfaced_items_by_kind === "object";
+        const haveKinds = !isEod
+            && Array.isArray(input.surfaced_kinds_for_rating)
+            && input.surfaced_kinds_for_rating.length > 0;
+        if (haveItems || haveKinds) {
             const { composeFeedbackCapture } = require("./compose-feedback-capture-helper.js");
             const feedbackResult = composeFeedbackCapture({
                 cadence: input.cadence,
                 day: input.day || (input.frontmatter && input.frontmatter.day) || new Date().toISOString().slice(0, 10),
-                surfaced_items_by_kind: input.surfaced_items_by_kind,
+                surfaced_items_by_kind: haveItems ? input.surfaced_items_by_kind : undefined,
+                surfaced_kinds: haveKinds ? input.surfaced_kinds_for_rating : undefined,
                 prior_md: input.prior_md || null,
                 knob_positions: ["less", "same", "more"],
             });
             if (feedbackResult && feedbackResult.rail_md) {
                 body_md = body_md.trimEnd() + "\n\n" + feedbackResult.rail_md + "\n";
-            }
-        } else if (Array.isArray(input.surfaced_kinds_for_rating)) {
-            const ratingCallout = composeRatingCallout({
-                cadence: input.cadence,
-                day: input.day || (input.frontmatter && input.frontmatter.day) || new Date().toISOString().slice(0, 10),
-                surfaced_kinds: input.surfaced_kinds_for_rating,
-                prior_state: input.prior_rating_state || null,
-            });
-            if (ratingCallout) {
-                body_md = body_md.trimEnd() + "\n\n" + ratingCallout + "\n";
+                railObservability = feedbackResult.sidecar_observability || null;
             }
         }
     }
@@ -547,6 +545,7 @@ function composeBody(input) {
         // on next learn-from-checks fire (idempotent — won't re-emit on subsequent days).
     }
     const sidecar_json = _composeSidecar(input);
+    if (railObservability) sidecar_json.feedback_capture = railObservability;
 
     return { body_md, sidecar_json, status: "ok" };
 }

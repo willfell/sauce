@@ -15806,7 +15806,11 @@ type: cowork-microscope
     assertTrue("HC-V0960-L-11: parseRatingCallout returns null when sentinel `<!-- cowork:rating-block ... -->` missing", false, e && e.message);
   }
 
-  console.log(`\n--- Case HC-V0960-L-12: composeBody emits rating callout with HTML sentinel ---`);
+  console.log(`\n--- Case HC-V0960-L-12: composeBody emits feedback-capture callout with HTML sentinel ---`);
+  // HC-V0960-L-12 pin UPDATED at v0.101.0 S1.6 (FLN-v85-2): composeBody no longer
+  // dispatches composeRatingCallout on any cadence — all five cadences emit the
+  // feedback-capture v=4 shape (kind-checklist mode for non-EOD). The legacy
+  // rating-block emitter remains covered by HC-V1010-DISPATCH-A2 (direct call).
   try {
     const CBH = require(path.join(COWORK_HELPERS_DIR, "compose-body-helper.js"));
     const input = {
@@ -15825,11 +15829,12 @@ type: cowork-microscope
     };
     const result = CBH.composeBody(input);
     const body = result && result.body_md;
-    assertTrue("HC-V0960-L-12: composeBody emits rating callout with sentinel `<!-- cowork:rating-block schema=1.0.0 cadence=morning-briefing day=2026-06-08 -->` when learning_enabled !== false AND surfaced_kinds_for_rating non-empty",
+    assertTrue("HC-V0960-L-12 (updated v0.101.0): composeBody emits feedback-capture callout with sentinel `<!-- cowork:feedback-capture v=4 -->` (and NOT the legacy rating-block sentinel) when learning_enabled !== false AND surfaced_kinds_for_rating non-empty",
       typeof body === "string"
-        && body.includes("<!-- cowork:rating-block schema=1.0.0 cadence=morning-briefing day=2026-06-08 -->"));
+        && body.includes("<!-- cowork:feedback-capture v=4 -->")
+        && !body.includes("cowork:rating-block"));
   } catch (e) {
-    assertTrue("HC-V0960-L-12: composeBody emits rating callout with sentinel `<!-- cowork:rating-block schema=1.0.0 cadence=morning-briefing day=2026-06-08 -->` when learning_enabled !== false AND surfaced_kinds_for_rating non-empty", false, e && e.message);
+    assertTrue("HC-V0960-L-12 (updated v0.101.0): composeBody emits feedback-capture callout with sentinel `<!-- cowork:feedback-capture v=4 -->` (and NOT the legacy rating-block sentinel) when learning_enabled !== false AND surfaced_kinds_for_rating non-empty", false, e && e.message);
   }
 
   console.log(`\n--- Case HC-V0960-L-13: rating callout includes only surfaced_kinds_for_rating kinds ---`);
