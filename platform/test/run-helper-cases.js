@@ -10849,6 +10849,44 @@ async function caseV01020Meet2ProjectPill() {
     /project:\s*p\.project/.test(src));
 }
 
+// v0.103.0 S1 — Breadcrumb helper (clickable navigation trail at the top of
+// project-related notes). Static-string asserts against the helper source.
+const _BC_PATH = path.join(WORKSHOP, "platform", "blueprints", "project", "helpers", "breadcrumb.js");
+
+function _readBcSrc() {
+  if (!fs.existsSync(_BC_PATH)) return "";
+  return fs.readFileSync(_BC_PATH, "utf8");
+}
+
+async function caseV01030Bc1ClassDefined() {
+  console.log("\n--- Case HC-V01030-BC-1: Breadcrumb class declared + async render ---");
+  assertTrue("HC-V01030-BC-1: breadcrumb.js exists", fs.existsSync(_BC_PATH));
+  const src = _readBcSrc();
+  assertTrue("HC-V01030-BC-1: class Breadcrumb declared", /class\s+Breadcrumb\s*\{/.test(src));
+  assertTrue("HC-V01030-BC-1: async render method", /async\s+render\s*\(/.test(src));
+}
+
+async function caseV01030Bc2ReadsCurrentFrontmatter() {
+  console.log("\n--- Case HC-V01030-BC-2: Breadcrumb reads project/section/sub_section ---");
+  const src = _readBcSrc();
+  assertTrue("HC-V01030-BC-2: reads dv.current()", /dv\.current\(\)/.test(src));
+  assertTrue("HC-V01030-BC-2: walks project + section + sub_section", /project[^}]*section/.test(src) || /\.section/.test(src));
+}
+
+async function caseV01030Bc3EmitsWikilinks() {
+  console.log("\n--- Case HC-V01030-BC-3: Breadcrumb emits wikilink trail ---");
+  const src = _readBcSrc();
+  assertTrue("HC-V01030-BC-3: emits [[...]] form via openLinkText or wikilink markdown",
+    /openLinkText|\[\[\$\{|app\.workspace\.openLinkText/.test(src));
+}
+
+async function caseV01030Bc4HandlesAllTypes() {
+  console.log("\n--- Case HC-V01030-BC-4: Breadcrumb handles project + docs-hub + section-hub + doc-note ---");
+  const src = _readBcSrc();
+  assertTrue("HC-V01030-BC-4: branches on type", /p\.type|type:\s*["']/.test(src));
+  assertTrue("HC-V01030-BC-4: docs-hub or section-hub branches", /docs-hub|section-hub/.test(src));
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -11393,6 +11431,12 @@ async function caseV01020Meet2ProjectPill() {
   // v0.102.0 S3.2 (Task 5): meetings blueprint 0.8.0 — project link field + pill
   await caseV01020Meet1ManifestProjectField();
   await caseV01020Meet2ProjectPill();
+
+  // v0.103.0 S1 — Breadcrumb helper (clickable navigation trail).
+  await caseV01030Bc1ClassDefined();
+  await caseV01030Bc2ReadsCurrentFrontmatter();
+  await caseV01030Bc3EmitsWikilinks();
+  await caseV01030Bc4HandlesAllTypes();
 
   // v0.65.0 HC-V065-RUN-NOTE: write-run-note-* sub-skill lint
   {
