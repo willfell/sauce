@@ -10100,6 +10100,13 @@ async function caseV1010SatA2() {
       t.satisfaction.length === 2
       && !t.satisfaction.some((e) => e.day === "2026-05-01")
       && t.satisfaction.some((e) => e.day === "2026-06-01"));
+    let c = { satisfaction: [
+      { day: "2026-06-10", cadence: "eod-review", useful: true },
+      { day: "2026-06-11", cadence: "eod-review", useful: true },
+    ] };
+    c = appendSatisfaction(c, "2026-06-12", true, { cadence: "eod-review", cap: 2, window_days: 365 });
+    assertTrue("HC-V1010-SAT-A2: belt-and-suspenders entry cap enforced (oldest dropped)",
+      c.satisfaction.length === 2 && c.satisfaction[0].day === "2026-06-11" && c.satisfaction[1].day === "2026-06-12");
   } catch (e) { assertTrue("HC-V1010-SAT-A2", false, e && e.message); }
 }
 

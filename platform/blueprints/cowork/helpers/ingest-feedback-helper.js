@@ -1,7 +1,7 @@
 "use strict";
 // platform/blueprints/cowork/helpers/ingest-feedback-helper.js
 //
-// v0.99.0 — Engagement gate + schema 4 + kind-prefix + satisfaction primitives.
+// v0.99.0/v0.101.0 — Engagement gate + schema 4/5 + kind-prefix + per-cadence satisfaction primitives.
 // Pure data — no MCP calls, no LLM, no I/O. The reconcile-cowork OI re-states
 // this contract inline (the reconciler is pure-MCP at fire time per its
 // v0.97.1 posture); this module is the testable reference implementation and
