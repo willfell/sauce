@@ -8515,10 +8515,10 @@ async function caseV0981FeedbackA1() {
       prior_md: null,
       knob_positions: ["less", "same", "more"],
     });
-    const hasHeader = /> \[!todo\]\+ Was today useful\?/.test(rail.rail_md);
-    const hasSentinel = /<!-- cowork:feedback-capture v=3 -->/.test(rail.rail_md);
+    const hasHeader = /> \[!todo\]\+ Was this useful\?/.test(rail.rail_md);
+    const hasSentinel = /<!-- cowork:feedback-capture v=4 -->/.test(rail.rail_md);
     assertTrue(
-      "HC-V0981-FEEDBACK-A1: composeFeedbackCapture emits `> [!todo]+ Was today useful?` lead AND `<!-- cowork:feedback-capture v=3 -->` sentinel within the callout body",
+      "HC-V0981-FEEDBACK-A1: composeFeedbackCapture emits `> [!todo]+ Was this useful?` lead AND `<!-- cowork:feedback-capture v=4 -->` sentinel within the callout body",
       hasHeader && hasSentinel
     );
   } catch (e) {
@@ -8652,7 +8652,7 @@ async function caseV0981FeedbackA6() {
       prior_md: null,
       knob_positions: ["less", "same", "more"],
     });
-    const hasSentinel = /<!-- cowork:feedback-capture v=3 -->/.test(rail.rail_md);
+    const hasSentinel = /<!-- cowork:feedback-capture v=4 -->/.test(rail.rail_md);
     const hasFreeText = /```feedback\b/.test(rail.rail_md);
     const hasNoPerKind = !/\[!summary\]-/.test(rail.rail_md);
     const hasNoKnob = !/\*\*Fire /.test(rail.rail_md);
@@ -8863,16 +8863,16 @@ async function caseV0982CaptureA1() {
   try {
     const { composeFeedbackCapture } = require("../blueprints/cowork/helpers/compose-feedback-capture-helper.js");
     const r = composeFeedbackCapture(_v0982CaptureInput());
-    const hasSentinel = /<!-- cowork:feedback-capture v=3 -->/.test(r.rail_md);
+    const hasSentinel = /<!-- cowork:feedback-capture v=4 -->/.test(r.rail_md);
     const items = (r.sidecar_observability || {}).items || [];
     const itemOk = items.length === 3 && items.every((it) =>
       /^item-[a-z]+-[0-9a-f]{7}$/.test(it.item_id) && it.kind && it.identifier && it.label);
     assertTrue(
-      "HC-V0982-CAPTURE-A1: composeFeedbackCapture emits v=3 sentinel AND sidecar_observability.items[] registry of {item_id, kind, identifier, label}",
+      "HC-V0982-CAPTURE-A1: composeFeedbackCapture emits v=4 sentinel AND sidecar_observability.items[] registry of {item_id, kind, identifier, label}",
       hasSentinel && itemOk
     );
   } catch (e) {
-    assertTrue("HC-V0982-CAPTURE-A1: v=3 sentinel + items registry", false, e && e.message);
+    assertTrue("HC-V0982-CAPTURE-A1: v=4 sentinel + items registry", false, e && e.message);
   }
 }
 
@@ -8980,10 +8980,10 @@ async function caseV0982CaptureA4() {
     }));
     const matteredKept = new RegExp(`> > - \\[x\\] \\[\\[#\\^${chatId}\\|`).test(r.rail_md.split("Didn't like:")[0]);
     const downvoteFresh = new RegExp(`> > - \\[ \\] \\[\\[#\\^${chatId}\\|`).test(r.rail_md.split("Didn't like:")[1] || "");
-    const v3Out = /<!-- cowork:feedback-capture v=3 -->/.test(r.rail_md);
+    const v4Out = /<!-- cowork:feedback-capture v=4 -->/.test(r.rail_md);
     assertTrue(
-      "HC-V0982-CAPTURE-A4: v=1 prior parses (ticks → Mattered preserved; Didn't like starts all-unticked); output upgrades to v=3 sentinel",
-      matteredKept && downvoteFresh && v3Out && r.rail_md.includes("carried prose")
+      "HC-V0982-CAPTURE-A4: v=1 prior parses (ticks → Mattered preserved; Didn't like starts all-unticked); output upgrades to v=4 sentinel",
+      matteredKept && downvoteFresh && v4Out && r.rail_md.includes("carried prose")
     );
   } catch (e) {
     assertTrue("HC-V0982-CAPTURE-A4: v=1 prior tolerance", false, e && e.message);
@@ -9025,11 +9025,11 @@ async function caseV0982CaptureA6() {
     const { composeFeedbackCapture } = require("../blueprints/cowork/helpers/compose-feedback-capture-helper.js");
     const r = composeFeedbackCapture(_v0982CaptureInput({ surfaced_items_by_kind: {} }));
     const noKinds = !/\[!summary\]-/.test(r.rail_md) && !/Mattered:/.test(r.rail_md);
-    const minimal = /<!-- cowork:feedback-capture v=3 -->/.test(r.rail_md) && /```feedback/.test(r.rail_md);
+    const minimal = /<!-- cowork:feedback-capture v=4 -->/.test(r.rail_md) && /```feedback/.test(r.rail_md);
     const emptySidecar = r.sidecar_observability.item_count === 0
       && Array.isArray(r.sidecar_observability.items) && r.sidecar_observability.items.length === 0;
     assertTrue(
-      "HC-V0982-CAPTURE-A6: empty day emits lead + v=3 sentinel + free-text fence only; items[] empty",
+      "HC-V0982-CAPTURE-A6: empty day emits lead + v=4 sentinel + free-text fence only; items[] empty",
       noKinds && minimal && emptySidecar
     );
   } catch (e) {
@@ -9416,12 +9416,12 @@ async function caseV0990CaptureA1() {
   try {
     const { composeFeedbackCapture } = require("../blueprints/cowork/helpers/compose-feedback-capture-helper.js");
     const r = composeFeedbackCapture(_v0990CaptureInput());
-    const iSent = r.rail_md.indexOf("cowork:feedback-capture v=3");
+    const iSent = r.rail_md.indexOf("cowork:feedback-capture v=4");
     const iTap = r.rail_md.indexOf("Useful:");
     const iFence = r.rail_md.indexOf("```feedback");
     const iKind = r.rail_md.indexOf("[!summary]-");
     assertTrue(
-      "HC-V0990-CAPTURE-A1: emits v=3 sentinel; order is tap line < free-text fence < first kind sub-callout",
+      "HC-V0990-CAPTURE-A1: emits v=4 sentinel; order is tap line < free-text fence < first kind sub-callout",
       iSent > -1 && iTap > -1 && iFence > -1 && iKind > -1 && iTap < iFence && iFence < iKind
     );
   } catch (e) { assertTrue("HC-V0990-CAPTURE-A1: v=3 order", false, e && e.message); }
@@ -9482,12 +9482,12 @@ async function caseV0990CaptureA4() {
       "```",
     ].join("\n");
     const r = composeFeedbackCapture(_v0990CaptureInput({ prior_md: prior }));
-    const upgraded = r.rail_md.includes("cowork:feedback-capture v=3") && !r.rail_md.includes("v=2 -->");
+    const upgraded = r.rail_md.includes("cowork:feedback-capture v=4") && !r.rail_md.includes("v=2 -->");
     const tapFresh = /^> Useful: `\[ \] yes` `\[ \] no`$/m.test(r.rail_md);
     const tickKept = new RegExp(`^> > - \\[x\\] \\[\\[#\\^${chatId}\\|`, "m").test(r.rail_md);
     const proseKept = r.rail_md.includes("keep the chat threads coming");
     assertTrue(
-      "HC-V0990-CAPTURE-A4: v=2 prior parses (ticks + knobs + prose preserved); tap renders fresh-unticked; sentinel upgrades to v=3",
+      "HC-V0990-CAPTURE-A4: v=2 prior parses (ticks + knobs + prose preserved); tap renders fresh-unticked; sentinel upgrades to v=4",
       upgraded && tapFresh && tickKept && proseKept
     );
   } catch (e) { assertTrue("HC-V0990-CAPTURE-A4: v=2 prior tolerance", false, e && e.message); }
@@ -9509,8 +9509,8 @@ async function caseV0990CaptureA5() {
     const r = composeFeedbackCapture(_v0990CaptureInput({ prior_md: prior }));
     const tickKept = new RegExp(`^> > - \\[x\\] \\[\\[#\\^${chatId}\\|`, "m").test(r.rail_md);
     assertTrue(
-      "HC-V0990-CAPTURE-A5: v=1 prior ticks land in Mattered; output is v=3; no throw",
-      tickKept && r.rail_md.includes("v=3 -->")
+      "HC-V0990-CAPTURE-A5: v=1 prior ticks land in Mattered; output is v=4; no throw",
+      tickKept && r.rail_md.includes("v=4 -->")
     );
   } catch (e) { assertTrue("HC-V0990-CAPTURE-A5: v=1 prior tolerance", false, e && e.message); }
 }
@@ -9535,8 +9535,8 @@ async function caseV0990CaptureA7() {
     const { composeFeedbackCapture } = require("../blueprints/cowork/helpers/compose-feedback-capture-helper.js");
     const r = composeFeedbackCapture(_v0990CaptureInput({ surfaced_items_by_kind: {} }));
     assertTrue(
-      "HC-V0990-CAPTURE-A7: empty day emits lead + v=3 sentinel + tap line + fence; no [!summary]- blocks; items[] empty",
-      r.rail_md.includes("v=3 -->") && /^> Useful:/m.test(r.rail_md)
+      "HC-V0990-CAPTURE-A7: empty day emits lead + v=4 sentinel + tap line + fence; no [!summary]- blocks; items[] empty",
+      r.rail_md.includes("v=4 -->") && /^> Useful:/m.test(r.rail_md)
         && r.rail_md.includes("```feedback") && !r.rail_md.includes("[!summary]-")
         && (r.sidecar_observability.items || []).length === 0
     );

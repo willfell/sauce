@@ -1,21 +1,22 @@
-// platform/blueprints/cowork/helpers/compose-feedback-capture-helper.js
-//
-// v0.99.0 — Feedback-capture callout (Rail L expanded shape; EOD-only).
+// v0.101.0 — Feedback-capture callout (Rail L; ALL FIVE cadences).
 //
 // composeFeedbackCapture(opts)
 //
-// Builds the Rail L body for the EOD review cadence. Replaces the v0.96.0
-// kind-checkbox composeRatingCallout for EOD only. The other 4 cadences
-// continue to use composeRatingCallout (see compose-body-helper.js).
+// One v=4 shape: tap + free-text fence on top everywhere; below them,
+// EOD renders per-item Mattered/Didn't-like lists + knobs (exact v=3
+// mechanics), the other 4 cadences render ONE collapsed kind checklist.
+// Replaces composeRatingCallout emission on the non-EOD cadences as of
+// v0.101.0 (that function is legacy — see compose-body-helper.js).
 
 "use strict";
 
 const crypto = require("crypto");
 
-const SENTINEL = "<!-- cowork:feedback-capture v=3 -->";
-const SENTINEL_VERSION = "v=3";
-// Prior-era sentinels — _parsePrior accepts both so the v=1 night
-// (headspace 2026-06-11) and the v=2 window (2026-06-12) stay readable forever.
+const SENTINEL = "<!-- cowork:feedback-capture v=4 -->";
+const SENTINEL_VERSION = "v=4";
+// Prior-era sentinels — _parsePrior accepts all so every historical night
+// stays readable forever (v=1: 2026-06-11; v=2: 2026-06-12; v=3: v0.99.0 era).
+const SENTINEL_V3 = "<!-- cowork:feedback-capture v=3 -->";
 const SENTINEL_V2 = "<!-- cowork:feedback-capture v=2 -->";
 const SENTINEL_V1 = "<!-- cowork:feedback-capture v=1 -->";
 
@@ -61,6 +62,7 @@ function _parsePrior(priorMd) {
   const result = {
     ticks: {},
     downvotes: {},
+    kind_ticks: {},
     knobs: {},
     free_text: "",
     sentinel_version: null,
@@ -70,25 +72,31 @@ function _parsePrior(priorMd) {
     tap: { yes: false, no: false },
   };
   if (!priorMd || typeof priorMd !== "string") return result;
-  const isV3 = priorMd.includes(SENTINEL);
-  const isV2 = !isV3 && priorMd.includes(SENTINEL_V2);
-  const isV1 = !isV3 && !isV2 && priorMd.includes(SENTINEL_V1);
-  if (!isV3 && !isV2 && !isV1) return result;
-  result.sentinel_version = isV3 ? "v=3" : (isV2 ? "v=2" : "v=1");
+  const isV4 = priorMd.includes(SENTINEL);
+  const isV3 = !isV4 && priorMd.includes(SENTINEL_V3);
+  const isV2 = !isV4 && !isV3 && priorMd.includes(SENTINEL_V2);
+  const isV1 = !isV4 && !isV3 && !isV2 && priorMd.includes(SENTINEL_V1);
+  if (!isV4 && !isV3 && !isV2 && !isV1) return result;
+  result.sentinel_version = isV4 ? "v=4" : (isV3 ? "v=3" : (isV2 ? "v=2" : "v=1"));
 
-  // Section-aware tick scan. `Mattered:` / `Didn't like:` flip the section;
-  // a new kind sub-callout header resets it. v=1 priors carry no section
-  // headers, so their ticks land in `ticks` (mattered) by default — exactly
-  // the v=1 semantic. Tick regex is prefix-anchored through the wikilink, so
-  // trailing Tasks-plugin annotations (`✅ 2026-06-12`) are ignored.
+  // Mirrored in learn-from-checks-helper.js::parseFeedbackCapture — keep the
+  // section state machines (incl. kind_ticks checklist section) in sync.
   const headerRx = /^>\s*>\s*\[!summary\]-/;
+  const kindsHeaderRx = /^>\s*>\s*\[!summary\]-\s*Kinds — quick ticks/;
   const sectionRx = /^>\s*>\s*(Mattered|Didn't like):\s*$/;
   const tickRx = /^>\s*>\s*-\s*\[([ xX])\]\s*\[\[#\^(item-[a-z]+-[0-9a-f]{7})\|/;
-  let section = null;
+  const kindTickRx = /^>\s*>\s*-\s*\[([ xX])\]\s+(\S+)/;
+  let section = null;   // "Mattered" | "Didn't like" | "kinds" | null
   for (const line of priorMd.split("\n")) {
+    if (kindsHeaderRx.test(line)) { section = "kinds"; continue; }
     if (headerRx.test(line)) { section = null; continue; }
     const s = line.match(sectionRx);
     if (s) { section = s[1]; continue; }
+    if (section === "kinds") {
+      const km = line.match(kindTickRx);
+      if (km) result.kind_ticks[km[2].toLowerCase()] = km[1].toLowerCase() === "x";
+      continue;
+    }
     const m = line.match(tickRx);
     if (m) {
       const ticked = m[1].toLowerCase() === "x";
@@ -173,6 +181,16 @@ function _renderKindBlock(kind, items, priorState) {
   return lines.join("\n");
 }
 
+function _renderKindChecklist(kinds, priorState) {
+  const lines = ["> > [!summary]- Kinds — quick ticks"];
+  for (const kind of kinds) {
+    const k = String(kind).toLowerCase();
+    const box = priorState && priorState.kind_ticks && priorState.kind_ticks[k] === true ? "[x]" : "[ ]";
+    lines.push(`> > - ${box} ${_kindLabel(k)}`);
+  }
+  return lines.join("\n");
+}
+
 function _renderTapLine(priorState) {
   const tap = (priorState && priorState.tap) || { yes: false, no: false };
   return `> Useful: \`${tap.yes ? "[x]" : "[ ]"} yes\` \`${tap.no ? "[x]" : "[ ]"} no\``;
@@ -196,55 +214,78 @@ function _renderFreeTextBlock(priorState) {
 
 function composeFeedbackCapture(opts) {
   const o = opts || {};
-  const surfaced = o.surfaced_items_by_kind || {};
+  const itemMode = o.cadence === "eod-review";
   const priorState = _parsePrior(o.prior_md);
 
+  // UPGRADE-DAY transition: a same-day prior carrying only the legacy
+  // rating-block marker (pre-v0.101.0 non-EOD note) still surrenders its
+  // kind ticks into the new checklist. Inline require — no top-level cycle.
+  if (!priorState.sentinel_version && o.prior_md) {
+    const { parseRatingCallout } = require("./learn-from-checks-helper.js");
+    const legacy = parseRatingCallout(o.prior_md);
+    if (legacy && Array.isArray(legacy.observations)) {
+      for (const obs of legacy.observations) {
+        if (obs && obs.ticked) priorState.kind_ticks[String(obs.kind).toLowerCase()] = true;
+      }
+    }
+  }
+
   const head = [
-    "> [!todo]+ Was today useful?",
+    "> [!todo]+ Was this useful?",
     "> One tap, a line of prose, or ticks — anything counts. Tomorrow's brief adjusts overnight.",
     `> ${SENTINEL}`,
     _renderTapLine(priorState),
     ">",
   ];
 
-  const kinds = Object.keys(surfaced).filter(
-    (k) => Array.isArray(surfaced[k]) && surfaced[k].length > 0
-  );
-
   const kindBlocks = [];
   const itemIdRegistry = {};
   const kindsWithKnobs = [];
   const items = [];
+  let sidecar_observability;
 
-  for (const kind of kinds) {
-    kindBlocks.push(_renderKindBlock(kind, surfaced[kind], priorState));
-    kindBlocks.push(">");
-    kindsWithKnobs.push(kind);
-    for (const item of surfaced[kind]) {
-      const itemId = _itemId(kind, item.id);
-      itemIdRegistry[itemId] = { kind, identifier: item.id, label: item.label };
-      items.push({ item_id: itemId, kind, identifier: item.id, label: item.label });
+  if (itemMode) {
+    const surfaced = o.surfaced_items_by_kind || {};
+    const kinds = Object.keys(surfaced).filter(
+      (k) => Array.isArray(surfaced[k]) && surfaced[k].length > 0
+    );
+    for (const kind of kinds) {
+      kindBlocks.push(_renderKindBlock(kind, surfaced[kind], priorState));
+      kindBlocks.push(">");
+      kindsWithKnobs.push(kind);
+      for (const item of surfaced[kind]) {
+        const itemId = _itemId(kind, item.id);
+        itemIdRegistry[itemId] = { kind, identifier: item.id, label: item.label };
+        items.push({ item_id: itemId, kind, identifier: item.id, label: item.label });
+      }
     }
+    sidecar_observability = {
+      sentinel_version: SENTINEL_VERSION,
+      item_count: Object.keys(itemIdRegistry).length,
+      kinds_with_knobs: kindsWithKnobs,
+      ambiguous_knobs: (priorState && priorState.ambiguous_knobs) || [],
+      ambiguous_items: (priorState && priorState.ambiguous_items) || [],
+      items,
+    };
+  } else {
+    const kindList = (Array.isArray(o.surfaced_kinds) ? o.surfaced_kinds : [])
+      .map((k) => String(k).toLowerCase());
+    if (kindList.length > 0) {
+      kindBlocks.push(_renderKindChecklist(kindList, priorState));
+    }
+    sidecar_observability = {
+      sentinel_version: SENTINEL_VERSION,
+      kinds_listed: kindList,
+    };
   }
 
   const freeText = _renderFreeTextBlock(priorState);
-
   const rail_md = [
     ...head,
     freeText,
     ...(kindBlocks.length ? [">"] : []),
     ...kindBlocks,
   ].join("\n");
-
-  const itemCount = Object.keys(itemIdRegistry).length;
-  const sidecar_observability = {
-    sentinel_version: SENTINEL_VERSION,
-    item_count: itemCount,
-    kinds_with_knobs: kindsWithKnobs,
-    ambiguous_knobs: (priorState && priorState.ambiguous_knobs) || [],
-    ambiguous_items: (priorState && priorState.ambiguous_items) || [],
-    items,
-  };
 
   return {
     rail_md,
@@ -263,6 +304,7 @@ module.exports = {
   SENTINEL_VERSION,
   SENTINEL_V1,
   SENTINEL_V2,
+  SENTINEL_V3,
   FREE_TEXT_PLACEHOLDERS,
   KIND_LABELS,
 };

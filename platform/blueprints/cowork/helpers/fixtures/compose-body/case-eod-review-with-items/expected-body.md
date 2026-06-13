@@ -36,9 +36,9 @@ await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 > [!quote]- Memory log
 > Today's memory: [[spice/cowork/memory/accuris/2026/06-June/2026-06-05/memory.md|Memory log — 2026-06-05]]
 
-> [!todo]+ Was today useful?
+> [!todo]+ Was this useful?
 > One tap, a line of prose, or ticks — anything counts. Tomorrow's brief adjusts overnight.
-> <!-- cowork:feedback-capture v=3 -->
+> <!-- cowork:feedback-capture v=4 -->
 > Useful: `[ ] yes` `[ ] no`
 >
 > ### Free-text feedback
