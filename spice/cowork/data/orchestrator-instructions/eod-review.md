@@ -197,7 +197,7 @@ this is unexpected.`
 ### Step 4: Feedback-capture callout (Rail L — v0.99.0 prose-first shape)
 
 4a. Compute `output_path = "spice/cowork/daily/{{$today_dirpath}}/eod-review.md"`.
-    Parse prior cowork:feedback-capture sentinel (v=1, v=2, or v=3) via `parseFeedbackCapture(prior_md)`
+    Parse prior cowork:feedback-capture sentinel (v=1, v=2, v=3, or v=4) via `parseFeedbackCapture(prior_md)`
     when file exists; build `prior_feedback_state` map (per-item ticks, knob positions,
     free-text). If only the legacy `cowork:rating-block` sentinel exists (pre-v0.98.1
     EOD), start fresh — no migration of kind-level ticks to per-item ticks.
@@ -209,17 +209,17 @@ this is unexpected.`
 
 4c. composeBody emits the feedback-capture callout per `{{shared.feedback_capture_template}}`
     when cadence is `eod-review` AND `surfaced_items_by_kind` is non-empty. Behind the
-    scenes: composeBody dispatches to `composeFeedbackCapture` (new helper) for EOD;
-    the other 4 cadences continue using `composeRatingCallout` unchanged.
+    scenes: all five cadences dispatch `composeFeedbackCapture`; EOD uses item mode.
 
 4d. v0.98.2 — the rail's per-kind sub-callouts carry TWO checklists sharing
     the same `^item-<kind>-<7hex>` IDs: `Mattered:` (this helped) and
     `Didn't like:` (surface less of this). composeFeedbackCapture emits the
-    `<!-- cowork:feedback-capture v=3 -->` sentinel; prior v=1 files parse
+    `<!-- cowork:feedback-capture v=4 -->` sentinel; prior v=1 files parse
     with ticks preserved into Mattered and a fresh Didn't-like row. An item
     ticked in BOTH lists is contradictory: preserved in the UI, flagged in
     sidecar `feedback_capture.ambiguous_items[]`, ignored by the reconciler.
-    v=3 renders the one-tap Useful line + the free-text fence ABOVE the per-kind blocks — prose is the primary channel; ticks are optional garnish.
+    v=4 renders the one-tap Useful line + the free-text fence ABOVE the per-kind blocks — prose is the primary channel; ticks are optional garnish.
+    Title is cadence-neutral `Was this useful?` as of v0.101.0.
 
 ### Step 5: Detection callout (Rail D — new-MCP surface)
 
@@ -289,7 +289,8 @@ this is unexpected.`
     identity registry `items[]: [{item_id, kind, identifier, label}]` from
     composeFeedbackCapture's `sidecar_observability`, plus
     `ambiguous_items[]`. This is the reconciler's per-item identity source —
-    do NOT omit it.
+    do NOT omit it. v0.101.0 — composeBody now supplies `feedback_capture`
+    directly (registry + ambiguous arrays unchanged).
 
 ### Step 8.5: Verify (sidecar schema validation backstop)
 
@@ -309,8 +310,9 @@ writeAtomicNote call.
 (from Step 4 rating-callout compute) + `learning_enabled` (engagement field) +
 `expected_kinds` (= `plan.dispatch_plan.map(e => e.kind_name)`) into
 `writeAtomicNote`. Guards fire deterministically:
-`failed:contract-violation:missing-rating-callout` when body lacks the
-`<!-- cowork:rating-block schema=` sentinel and rating gate is open;
+`failed:contract-violation:missing-rating-callout` when the body lacks BOTH
+the `<!-- cowork:feedback-capture v= -->` marker AND the legacy
+`<!-- cowork:rating-block schema= -->` marker while the rating gate is open;
 `failed:contract-violation:missing-anti-echo-callout` when sidecar's
 `render_aspects_applied` includes `anti_echo:include` but body lacks
 `Outside yesterday's frame`. The coverage-gap injection (expected vs surfaced

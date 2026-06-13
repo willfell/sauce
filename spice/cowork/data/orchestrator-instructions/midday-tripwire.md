@@ -60,7 +60,7 @@ engagement. Tone is short + punchy — only fires when tripwire_aspects trip
 | `{{$today_year}}` | fire-time — 4-digit year |
 | `{{$today_dirpath}}` | fire-time — `<YYYY>/<MM-MMMM>/<YYYY-MM-DD>` |
 | `{{$today_ymd_compact}}` | fire-time — `YYYYMMDD` |
-| `{{$rating_kind_lines}}` | computed-at-emit — `> - [ ] <Kind Title>` per surfaced kind |
+| `{{$rating_kind_lines}}` | computed-at-emit — legacy name; feeds the v=4 kind-checklist lines per surfaced kind |
 | `{{$pending_confirmation_lines}}` | computed-at-emit — pending-MCP bullet lines |
 
 ## Steps
@@ -196,18 +196,28 @@ this is unexpected.`
     `midday-tripwire`; frontmatter includes `severity: warn | alert`). Capture
     `{ body_md, sidecar_json, status }`. On `failed:*`, emit Notice and exit non-zero.
 
-### Step 4: Rating callout (Rail L — idempotent re-fire)
+### Step 4: Feedback-capture callout (Rail L — v0.101.0 prose-first shape)
 
 4a. Compute `output_path = "spice/cowork/daily/{{$today_dirpath}}/midday-tripwire.md"`.
-    If exists, parse prior `cowork:rating-block` sentinel via
-    `parseRatingCallout(prior_md)`; preserve per-kind `[x]` state in
-    `prior_rating_state`.
+    If the file already exists on disk (same-day re-fire), READ it and pass the
+    raw content as `prior_md` to composeBody. `composeFeedbackCapture` preserves
+    prior state for ANY vintage: a v=4 prior (tap + prose + kind ticks), and an
+    UPGRADE-DAY legacy `cowork:rating-block` prior (kind ticks carried into the
+    new checklist via `parseRatingCallout` — nothing is lost on upgrade day).
+    Else `prior_md = null`.
 
 4b. Compute `surfaced_kinds_for_rating` from `ordered_blocks[]` per the same rule as
     morning-briefing Step 4b.
 
-4c. composeBody emits the rating callout per `{{shared.rating_callout_template}}` when
-    `learning_enabled !== false` AND `surfaced_kinds_for_rating.length > 0`.
+4c. composeBody emits the feedback callout per `{{shared.feedback_capture_template}}`
+    when `learning_enabled !== false` AND `surfaced_kinds_for_rating.length > 0`.
+    Behind the scenes composeBody dispatches `composeFeedbackCapture` in
+    kind-checklist mode for this cadence: one-tap `Useful` line + free-text
+    typing box on top, ONE collapsed `[!summary]- Kinds — quick ticks`
+    sub-callout below (a checkbox per surfaced kind). The sentinel
+    `<!-- cowork:feedback-capture v=4 -->` is the reconciler's parse target.
+    The legacy `cowork:rating-block` shape is NO LONGER emitted (v0.101.0);
+    its parser remains in the reconciler for the historical corpus.
 
 ### Step 5: Detection callout (Rail D — new-MCP surface)
 
@@ -276,6 +286,10 @@ parity with other cadence files.)
     committing either file. On `failed:contract-violation:sidecar-schema`, no files are
     written.
 
+8c. v0.101.0 — composeBody supplies the slim sidecar field
+    feedback_capture: { sentinel_version: "v=4", kinds_listed: [<surfaced kinds>] }.
+    Do NOT omit it when the feedback callout rendered.
+
 ### Step 8.5: Verify (sidecar schema validation backstop)
 
 **Sidecar schema validation.** The write step's `writeAtomicNote` helper invokes
@@ -294,8 +308,9 @@ writeAtomicNote call.
 (from Step 4 rating-callout compute) + `learning_enabled` (engagement field) +
 `expected_kinds` (= `plan.dispatch_plan.map(e => e.kind_name)`) into
 `writeAtomicNote`. Guards fire deterministically:
-`failed:contract-violation:missing-rating-callout` when body lacks the
-`<!-- cowork:rating-block schema=` sentinel and rating gate is open;
+`failed:contract-violation:missing-rating-callout` when the body lacks BOTH
+the `<!-- cowork:feedback-capture v= -->` marker AND the legacy
+`<!-- cowork:rating-block schema= -->` marker while the rating gate is open;
 `failed:contract-violation:missing-anti-echo-callout` when sidecar's
 `render_aspects_applied` includes `anti_echo:include` but body lacks
 `Outside yesterday's frame`. The coverage-gap injection (expected vs surfaced

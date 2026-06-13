@@ -248,34 +248,44 @@ Key structural invariants (enforced by helpers, not by LLM prose):
 
 Rail L lives at the bottom of every atomic note. It is **the user-touched surface** — everything else in the note is read-only output. Rail L is where the user gives signal back to the system.
 
-### 5.1 On non-EOD cadences (v0.96.0 kind-checkbox shape)
+### 5.1 On the four non-EOD cadences (v0.101.0 — v=4 shape)
 
-Morning-briefing, midday-tripwire, weekly-review, monthly-review all emit:
+Morning-briefing, midday-tripwire, weekly-review, monthly-review all emit the same v=4 feedback section (one shape on all five briefs as of v0.101.0):
 
 ```markdown
-> [!todo]+ Was today useful?
-> Tick the kinds that surfaced something you cared about. (One tick per kind per day; learned weights live in `spice/cowork/context/user-preferences.md`.)
-> - [ ] Chat
-> - [ ] Calendar
-> - [ ] GitHub
-> - [ ] Email
-> <!-- cowork:rating-block schema=1.0.0 cadence=morning-briefing day=2026-06-11 -->
+> [!todo]+ Was this useful?
+> One tap, a line of prose, or ticks — anything counts. Tomorrow's brief adjusts overnight.
+> <!-- cowork:feedback-capture v=4 -->
+> Useful: `[ ] yes` `[ ] no`
+>
+> ### Free-text feedback
+>
+> ```feedback
+> (Type prose here — name a section to scope it, e.g. `finance: too long`.)
+> ```
+>
+> > [!summary]- Kinds — quick ticks
+> > - [ ] Chat
+> > - [ ] Calendar
+> > - [ ] GitHub
+> > - [ ] Email
 ```
 
-- The lead callout is `> [!todo]+ Was today useful?` (OPEN by default — the rail is visible without expanding).
-- One checkbox per surfaced kind (chat / calendar / github / email / ado / finance / reminders / etc.).
-- The HTML-comment sentinel `<!-- cowork:rating-block schema=1.0.0 cadence=<c> day=<d> -->` is the parse target for `parseRatingCallout` in `learn-from-checks-helper.js`.
-- **Idempotent re-fire:** if the same cadence re-fires on the same day (e.g. the user manually re-triggers), the helper parses the prior file's sentinel + tick state via `parseRatingCallout`, then preserves `[x]` per kind across the rewrite. The user never loses ticks they already entered.
-- **Coarse signal:** kind-level boolean only. "Did chat surface something useful today?" is the question. No per-item granularity. No frequency tilt. No prose.
+- **Section order is contract:** (1) the one-tap `Useful:` line, (2) the typing box (the PRIMARY channel — same `<kind>:` prefix-scoping convention as EOD), (3) ONE collapsed `Kinds — quick ticks` sub-callout carrying the old kind checkboxes demoted to garnish (one checkbox per surfaced kind, same source as the legacy shape's `{{$rating_kind_lines}}` token — ZERO new substitution tokens), (4) the marker (sentinel) `<!-- cowork:feedback-capture v=4 -->` near the top.
+- **Kind semantics unchanged:** ticked kind → `{kind, ticked: true}`; surfaced-but-unticked → `{kind, ticked: false}` — identical to the legacy rating parse, now extracted via the `kind_ticks` checklist section of `parseFeedbackCapture`.
+- **Idempotent re-fire** preserves tap state, typed prose, and kind-checklist ticks. **Upgrade-day transition:** the first v=4 fire over a same-day prior carrying only the LEGACY rating-block marker preserves the prior's kind ticks into the new checklist via `parseRatingCallout` — nothing is lost on upgrade day.
+- **No per-item granularity, no knobs** — those remain EOD-only by design (you haven't lived the day yet on morning/midday; weekly/monthly per-item ticks stay demand-gated).
 
-### 5.2 On EOD (v0.99.0 prose-first shape — v=3 sentinel)
+**Historical (pre-v0.101.0).** From v0.96.0 through v0.100.1 these four cadences emitted a kind-checkbox-only rating callout (`> [!todo]+ Was today useful?` + one checkbox per kind + the `<!-- cowork:rating-block schema=1.0.0 cadence=<c> day=<d> -->` marker). That shape's EMISSION is retired at v0.101.0; `parseRatingCallout` lives forever for the historical corpus (§ 5.3).
 
-EOD-review emits a prose-first Rail L (v=3 as of v0.99.0): a one-tap satisfaction line and the free-text typing box render ON TOP; the per-kind Mattered/Didn't-like lists + knobs keep their exact v=2 mechanics but render below, collapsed:
+### 5.2 On EOD (v=4 — prose-first shape since v0.99.0)
+
+EOD-review emits a prose-first feedback section (v=4 marker as of v0.101.0; the prose-first order shipped at v0.99.0): a one-tap satisfaction line and the free-text typing box render ON TOP; the per-kind Mattered/Didn't-like lists + knobs keep their exact v=2 mechanics but render below, collapsed. The v=4 EOD body is byte-comparable to v=3 modulo the marker + the cadence-neutral title (`Was this useful?`):
 
 ```markdown
-> [!todo]+ Was today useful?
+> [!todo]+ Was this useful?
 > One tap, a line of prose, or ticks — anything counts. Tomorrow's brief adjusts overnight.
-> <!-- cowork:feedback-capture v=3 -->
+> <!-- cowork:feedback-capture v=4 -->
 > Useful: `[ ] yes` `[ ] no`
 >
 > ### Free-text feedback
@@ -307,17 +317,17 @@ EOD-review emits a prose-first Rail L (v=3 as of v0.99.0): a one-tap satisfactio
 
 Five capture surfaces (v0.99.0 adds the first; the order is contract):
 
-1. **One-tap satisfaction (v0.99.0)** — `Useful: [ ] yes [ ] no` at the very top. SATISFACTION LOG ONLY: it feeds the rolling-30 `totals.satisfaction[]` series (§ 7.2.6) but does NOT count as a full engagement day — a bare tap can never demote anything (see § 9's Step 3.4 gate). `yes` → true; `no` → false; BOTH ticked → ambiguous (preserved visually, no signal); NEITHER → null.
-2. **Free-text feedback (PRIMARY channel, v0.99.0 moves it to the top)** — a tagged fenced ` ```feedback…``` ` block directly under the tap. The user types prose: "stop surfacing Diana's emails", "finance: too long", "Brex bills are too noisy". A line starting with `<kind>:` (where the prefix case-insensitively matches a kind in the engagement's dispatch set) is **deterministically scoped to that section** by the nightly reconciler (`parseKindPrefixLines` — the LLM interprets intent but cannot mis-route the kind; non-matching prefixes like a person's name fall through to unmodified LLM extraction). An uprank-intent prose line scoped to a kind counts as that kind's tick (`applyIntentKindTicks`).
+1. **One-tap satisfaction (v0.99.0; per-cadence since v0.101.0)** — `Useful: [ ] yes [ ] no` at the very top. SATISFACTION LOG ONLY: it feeds the `totals.satisfaction[]` series (§ 7.2.7 — entries are `{day, cadence, useful}`, so up to five taps a day coexist) but does NOT count as a full engagement day — a bare tap can never demote anything (see § 9's Step 3.4 gate). `yes` → true; `no` → false; BOTH ticked → ambiguous (preserved visually, no signal); NEITHER → null.
+2. **Free-text feedback (PRIMARY channel, v0.99.0 moves it to the top)** — a tagged fenced ` ```feedback…``` ` block directly under the tap. The user types prose: "stop surfacing Diana's emails", "finance: too long", "Brex bills are too noisy". A line starting with `<kind>:` (where the prefix case-insensitively matches a kind in the engagement's dispatch set) is **deterministically scoped to that section** by the nightly reconciler (`parseKindPrefixLines` — the LLM interprets intent but cannot mis-route the kind; non-matching prefixes like a person's name fall through to unmodified LLM extraction). An uprank-intent prose line scoped to a kind counts as that kind's tick; as of v0.101.0, a DOWNRANK-intent prose line scoped to a kind WITHOUT a named entity counts as that kind's skip (`applyIntentKindObservations` — renamed from `applyIntentKindTicks` because it now emits skips, not just ticks).
 3. **Per-item Mattered ticks** — one checkbox per surfaced person-block / PR-row / ADO-story-row / etc. The wikilink target (`[[#^item-chat-a7b3c9d|<label>]]`) resolves to the block-ID emitted by compose-body at Step 3c. The block-ID itself renders invisibly; the user sees just `<label>` as a clickable link.
 4. **Per-item Didn't-like ticks (v0.98.2)** — second checkbox row per kind sharing the SAME `^item-<kind>-<sha>` IDs as the Mattered list. Block-ID anchors are defined ONCE in the body; the rail only links. Section-context state machine in the parser: tick lines after `Mattered:` → `ticks{}`; after `Didn't like:` → `downvotes{}`.
 5. **Per-kind frequency knob** — `[ ] less` / `[ ] same` / `[ ] more` per kind. Single signed signal per kind. (See § 7.2.4 for how this becomes a weight delta.)
 
-The sentinel `<!-- cowork:feedback-capture v=3 -->` near the top of the callout is the parse target for `parseFeedbackCapture` in `learn-from-checks-helper.js`. The parser is **tolerant by construction**: v=3 → full parse including the satisfaction tap; v=2 → full parse with downvotes, satisfaction null; v=1 → parse with empty `downvotes{}` map (the v=1- and v=2-era corpus stays readable forever); legacy `rating-block` → existing `parseRatingCallout` path (4 non-EOD cadences).
+The marker `<!-- cowork:feedback-capture v=4 -->` near the top of the callout is the parse target for `parseFeedbackCapture` in `learn-from-checks-helper.js`. The parser is **tolerant by construction**: v=4 → full parse including the non-EOD `kind_ticks` checklist section (empty `{}` on item-mode EOD bodies); v=3 → full parse including the satisfaction tap; v=2 → full parse with downvotes, satisfaction null; v=1 → parse with empty `downvotes{}` map (the entire pre-v=4 corpus stays readable forever); legacy `rating-block` → existing `parseRatingCallout` path (pre-v0.101.0 non-EOD notes).
 
 **Tasks-plugin trailing-annotation tolerance (v0.98.2; extended to the tap line at v0.99.0).** Obsidian's Tasks plugin appends `✅ YYYY-MM-DD` to ticked lines (live in headspace 2026-06-10 EOD: `- [x] Chat ✅ 2026-06-10`). All tick regexes anchor on the prefix-through-wikilink and ignore trailing annotations — applies to `parseFeedbackCapture` tick lines, `parseRatingCallout` kind-checkbox lines (the 4 non-EOD cadences also get the suffix tolerance as a parse-side fix), AND the v=3 `Useful:` tap line.
 
-**Idempotent re-fire — richer than v0.96.0.** When EOD re-fires on the same day, `compose-feedback-capture-helper.js`'s `_parsePrior` reads the prior file's `cowork:feedback-capture` block (v=1, v=2, OR v=3) and preserves:
+**Idempotent re-fire — richer than v0.96.0.** When EOD re-fires on the same day, `compose-feedback-capture-helper.js`'s `_parsePrior` reads the prior file's `cowork:feedback-capture` block (v=1 through v=4) and preserves:
 - Tap state on the `Useful:` line (v0.99.0; a v=2/v=1 prior renders the tap fresh-unticked)
 - `[x]` state per item-ID in BOTH the Mattered AND Didn't-like lists (v0.98.2)
 - Knob position per kind (which `[x]` is set on the `less / same / more` row)
@@ -325,15 +335,15 @@ The sentinel `<!-- cowork:feedback-capture v=3 -->` near the top of the callout 
 - **Ambiguous-knob guard:** if the user has `[x] less [x] more` for a kind (transitioning their opinion mid-day), the rendered output preserves both `[x]` AND the sidecar's `feedback_capture.ambiguous_knobs[]` array gains the kind name — so the reconciler treats it as no-signal rather than computing `(-1) + (+1) = 0`.
 - **Ambiguous-items guard (v0.98.2):** if the user ticks an item in BOTH the Mattered AND Didn't-like lists, the UI state is preserved AND the sidecar's `feedback_capture.ambiguous_items[]` array gains the item-ID — ingest treats as no-signal (mirrors ambiguous-knob).
 
-### 5.3 The sentinel system — why two sentinels coexist
+### 5.3 The marker (sentinel) system — one emitted marker, two parsed forever
 
-v0.98.1 + v0.98.2 chose NOT to migrate the v0.96.0 rating-block sentinel to the feedback-capture sentinel on the four non-EOD cadences. Reasons:
+v0.101.0 ended the two-marker emission era: ALL FIVE cadences now emit the `feedback-capture` marker (v=4). The legacy `rating-block` marker is **historical corpus only** — nothing emits it anymore, but it stays parseable forever:
 
-1. **Reversibility.** EOD-only is the smallest reversible diff. Expanding later is additive; narrowing back is a contract break.
-2. **Semantic fit.** Per-item ticks make most sense retrospectively (EOD looks back at the day's items). Morning/midday are forward-looking; per-item ticks on them have ambiguous semantics ("which surfaced items look relevant?" is a different question than "which surfaced items were useful?").
-3. **Per-item ticks on weekly / monthly** remain queued (demand-gated) — additive extension if post-deploy data shows demand.
+- **Emission:** `<!-- cowork:feedback-capture v=4 -->` on every brief (one shape, § 5.1/§ 5.2).
+- **Parse:** `parseFeedbackCapture` handles v=1 through v=4 (`FEEDBACK_SENTINEL_RX` matches `v=(\d+)` generically, and the parser degrades gracefully per version: v=4 adds the non-EOD kind-checklist section, v=3 added the satisfaction tap, v=2 added downvotes, v=1 is ticks/knobs/prose only). `parseRatingCallout` + `RATING_SENTINEL_RX` keep parsing the pre-v0.101.0 rating-block corpus (with v0.98.2 Tasks-suffix tolerance on kind-checkbox lines). Both functions are exported from `learn-from-checks-helper.js` and live alongside each other forever — the reconciler's Step 3 parses BOTH marker families across yesterday's notes.
+- **Write-guard (either-marker, v0.101.0):** `write-atomic-note-helper.js` carries a NEW `FEEDBACK_SENTINEL` const alongside `RATING_SENTINEL`; Guard 2 passes when the body carries EITHER marker. Gate condition unchanged (`surfaced_kinds_for_rating.length > 0 && learning_enabled !== false`); the failure token stays `missing-rating-callout` (downstream OI prose references it). Rating-marker acceptance is **permanent legacy tolerance, not a deprecation window**. The either-marker guard also resolved STRUCTURALLY a v0.99.0-era discrepancy: eod-review.md Step 8.5 said to pass `surfaced_kinds_for_rating`, yet EOD bodies carried no rating-block marker — all five orchestrators now pass the array uniformly and the guard accepts the marker every cadence actually emits.
 
-Result: `parseRatingCallout` + `RATING_SENTINEL_RX` continue to drive the reconciler for 4 cadences (with v0.98.2 Tasks-suffix tolerance added on kind-checkbox lines); `parseFeedbackCapture` + `FEEDBACK_SENTINEL_RX` drive EOD — **three sentinel versions tolerated** (v=1 + v=2 + v=3 as of v0.99.0; `FEEDBACK_SENTINEL_RX` matches `v=(\d+)` generically, and the parser degrades gracefully per version: v=3 adds the satisfaction tap, v=2 adds downvotes, v=1 is ticks/knobs/prose only). Both functions are exported from `learn-from-checks-helper.js` (v0.98.1+) and live alongside each other forever.
+Historical context: v0.98.1 + v0.98.2 deliberately kept the rating-block marker on the four non-EOD cadences (smallest reversible diff; per-item ticks fit EOD's retrospective frame). v0.101.0 expanded the feedback-capture shape ADDITIVELY instead of narrowing anything — the kind checkboxes survive as the collapsed checklist, so no capture power was retired. Per-item ticks on weekly/monthly remain queued (demand-gated).
 
 **v0.98.2 regression restored — reconciler now parses BOTH sentinels.** v0.98.1's EOD sentinel switch (rating-block → feedback-capture v=1) had silently broken reconciler EOD signal — `reconcile-cowork.md` Step 3 grepped only `cowork:rating-block`, so post-v0.98.1 EOD notes contributed ZERO signal to per-kind learning. v0.98.2's Step 3 extension parses BOTH `rating-block` (4 non-EOD cadences) AND `feedback-capture` (v=1 + v=2 EOD) sentinels — restoring EOD signal to per-kind learning AND extending into per-entity learning under each kind.
 
@@ -387,9 +397,10 @@ The user opens the atomic note in Obsidian (typically the EOD review around 6pm,
 
 1. **Read the lead callout.** The `> [!info]+ <per-cadence title>` synopsis paragraph is open by default (v0.98.0 contract) and carries the brief's predictive load on its own.
 2. **Optionally expand per-kind callouts.** All `> [!<type>]- <Kind>` are collapsed by default; the user clicks to expand only the kinds they want to drill into.
-3. **Tick Rail L at the bottom.** This is the explicit feedback gesture:
-   - On non-EOD cadences: tick the kind-level boxes that surfaced something useful
-   - On EOD (v0.98.1+): tick the per-item boxes that mattered, set the per-kind frequency knob if they want to nudge, optionally type prose into the free-text block
+3. **Touch the feedback section (Rail L) at the bottom.** This is the explicit feedback gesture — as of v0.101.0 the same v=4 shape on every brief:
+   - On EVERY cadence: tap `Useful: yes/no` and/or type prose into the typing box (the PRIMARY channel)
+   - On EOD additionally: tick the per-item boxes that mattered / didn't, set the per-kind frequency knob to nudge
+   - On the four non-EOD cadences additionally: tick the collapsed kind checklist (the old kind-level boxes, demoted to garnish)
 4. **Save the file.** Obsidian persists. The next cron fire (the reconciler) sees the updated atomic note.
 
 That's it. No slash commands. No buttons to click. No external UI. The Markdown is the interface; the check-marks are the signal.
@@ -402,7 +413,7 @@ When it fires:
 
 #### 7.2.1 Scan atomic notes
 
-`learn-from-checks-helper.js` `scanAtomicNotes({ dir, engagement_id, since_day })` walks the atomic-note directory tree, opens each `.md`, calls `parseRatingCallout(md)` (or `parseFeedbackCapture(md)` for EOD with v=1 sentinel), and returns an observation set:
+`learn-from-checks-helper.js` `scanAtomicNotes({ dir, engagement_id, since_day })` walks the atomic-note directory tree, opens each `.md`, calls `parseFeedbackCapture(md)` (feedback-capture notes — all five cadences as of v0.101.0) or `parseRatingCallout(md)` (legacy rating-block notes), and returns an observation set:
 
 ```js
 {
@@ -539,6 +550,22 @@ learned_weights:
 - **`satisfaction[]`** is the rolling-30 yes/no series fed by the v=3 one-tap via `appendSatisfaction` (same-day overwrite; ambiguous dual-tap or no tap → no entry). It is the platform's first cheap KPI and the primary input for the v0.99.1 doctor's self-grading digest.
 - **ONE-TIME silence-reset migration (3 → 4, applied at the first post-deploy ingest).** Per engagement, per kind: **keep** `weight` and `ticks` (real signal), **zero** `skips` (silence-contaminated under the pre-gate semantics, where every surfaced-but-unticked kind counted as a skip), **force** `warmup: true`. `engaged_days[]` + `satisfaction[]` initialize empty. Effect: a vault with sparse real signal keeps its ticks but sheds all silence-built demotion pressure and re-enters warmup with a 7-engaged-day runway. The migration is idempotent — the `schema_version` stamp gates it, with `Number()` coercion so a string `"4"` (plausible after LLM/YAML round-trips) never re-triggers the reset. This is BY DESIGN, not data loss: the zeroed skips were never user signal.
 
+#### 7.2.7 Schema 5 (v0.101.0 — per-cadence satisfaction)
+
+`learned_weights` bumps schema 4 → 5 via `normalizeLearnedWeightsV5` (ingest-feedback-helper.js; extends the tolerance chain to on-disk 2 / missing / `"1.1.0"` / 3 / 4 / 5, string-or-number versions with `Number()`-coerced gates; deep-copies everything returned; same block-scoped `.bak`-first write contract). The 4 → 5 step is **PURELY ADDITIVE — no skip-zeroing, no warmup reset, no counter changes** (unlike the 3 → 4 silence-reset): satisfaction entries gain a `cadence` field, and schema-4-era `{day, useful}` entries normalize to `cadence: "eod-review"` (the only cadence that had a tap):
+
+```yaml
+satisfaction:                     # window trims by DAY (30); belt-and-suspenders cap: 200 entries
+  - { day: "2026-06-13", cadence: "morning-briefing", useful: true }
+  - { day: "2026-06-13", cadence: "eod-review", useful: false }
+```
+
+- **Per-cadence entries.** Up to five taps a day coexist — one per cadence; same-(day, cadence) re-log overwrites (`appendSatisfaction(totals, day, useful, {cadence})`, `opts.cadence` required for new writes). The doctor (next cycle) can grade each cadence separately ("morning trends yes, midday trends no").
+- **Prose wins over tap.** A global-sentiment prose line in the typing box ("great brief today" — the NEW `satisfaction` intent, no kind required; `proposed_target: satisfaction-series`) writes to the same channel for the note's cadence; on disagreement with that note's tap, the typed word wins — it is higher-intent than a tap. Global sentiment moves satisfaction + engagement ONLY; kind weights move only on kind/entity-scoped prose.
+- **Per-note ingest + dedup (v0.101.0).** The reconciler extracts intents from up to five typing boxes per day, each tagged `source_cadence` (recorded in `feedback-deltas.md` audit lines + voice-proposal `source:` fields — data accrual for the doctor; no per-cadence rendering machinery yet). An accepted intent applies at most once per (day, intent, kind, entity) across ALL of yesterday's notes — "github: too much" typed at midday AND EOD is one delta; both occurrences appear in the audit log (second tagged `[pending] dedup`).
+- **Downrank-skip symmetry (v0.101.0).** Downrank prose scoped to a kind WITHOUT a named entity counts as that kind's SKIP — the mirror of v0.99.0's uprank-counts-as-tick. Downrank naming an entity keeps the entity-delta-only path (a complaint about one person must not skip the whole kind). Implemented by `applyIntentKindObservations` (renamed from `applyIntentKindTicks` — it now emits skips, not just ticks).
+- Graduation rules untouched (`engaged_days.length >= 7` AND `ticks + skips >= 7`); `classifyEngagementDay` semantics unchanged — five taps without other signal across several notes is still TAP-ONLY.
+
 ### 7.3 How the new weights affect tomorrow's brief
 
 Tomorrow morning, when the cron fires `cowork:morning-briefing` for `headspace`:
@@ -572,7 +599,7 @@ Concretely, three compounding loops are in motion:
 
 ## § 9 — The feedback loop — SHIPPED v0.98.2
 
-The compounding-assistant loop is **LIVE as of v0.98.2 (2026-06-11)**. v0.98.1 shipped the capture surface; v0.98.2 shipped the reconciler ingest, the v=2 downvote list, the voice-proposal tick-to-approve mechanism, and `learned_weights` schema 3 (nested per-kind entity maps). **v0.99.0 (2026-06-12) made the loop CORRECT on sparse signal** — the Step 3.4 engagement gate (below) ensures only ENGAGED days move weights, so silence never demotes and lazy taps never count as judgment. The user's 2026-06-10 vision is now fully satisfied across the v0.98.x arc:
+The compounding-assistant loop is **LIVE as of v0.98.2 (2026-06-11)**. v0.98.1 shipped the capture surface; v0.98.2 shipped the reconciler ingest, the v=2 downvote list, the voice-proposal tick-to-approve mechanism, and `learned_weights` schema 3 (nested per-kind entity maps). **v0.99.0 (2026-06-12) made the loop CORRECT on sparse signal** — the Step 3.4 engagement gate (below) ensures only ENGAGED days move weights, so silence never demotes and lazy taps never count as judgment. **v0.101.0 (2026-06-13) put the channel EVERYWHERE** — v=4 capture on all five cadences, per-cadence satisfaction (schema 5), and per-note prose ingest with dedup. The user's 2026-06-10 vision is now fully satisfied across the v0.98.x arc:
 
 > "another job took what i liked, what i didn't like, my feedback, then updated the relevant files so that all scheduled jobs would then adjust the next day"
 
@@ -581,31 +608,36 @@ The compounding-assistant loop is **LIVE as of v0.98.2 (2026-06-11)**. v0.98.1 s
 The ingest pipeline lives inside the existing nightly `reconcile-cowork` cadence (03:00 local, per-engagement, daily forever). No new scheduled job; no contract bump (0.35.1 holds). Architectural posture preserved: **deterministic helpers carry shape; OI prose carries voice; structural rules WIN on conflict.** The reconciler stays pure-MCP at fire time (per its v0.97.1 posture) — `ingest-feedback-helper.js` is the testable reference implementation whose contract the OI re-states inline. The LLM proposes (free-text intents); the deterministic layer disposes (validation rules + clamps + allowlisted write-targets).
 
 ```
-              EOD orchestrator (cowork:eod-review)                  3:00am reconciler (cowork:reconcile-cowork)
+              5 orchestrators (each fire)                           3:00am reconciler (cowork:reconcile-cowork)
                           │                                                        │
-            Step 4: composeFeedbackCapture                     Step 3: parse BOTH sentinels
-              (v=3: tap + prose-first; v=2 lists                 rating-block (4 cadences) +
-               collapsed below)                                  feedback-capture v=1/v=2/v=3 (EOD)
-                          │                                                    │
-            Step 8: sidecar 1.3.0                              Step 3.4 (v0.99.0): classify the day per engagement
-              (sentinel_version "v=3";                           ENGAGED   — ≥1 item/kind tick, knob ≠ same,
-               items[] registry)                                             or non-empty typing box
-                          │                                      TAP-ONLY  — one-tap only → satisfaction append
-                          ▼                                                  (13f), NOTHING else
-              user taps + types + (optionally) ticks             SILENT    — audit line + totals bookkeeping only
-                                                                               │ (ENGAGED days only below)
-                                                               Step 3.5: deterministic rollup
-                                                                 cowork:ingest-feedback →
-                                                                 ingest-feedback-helper.js contract
-                                                                 (kind obs + entity deltas + knob deltas;
-                                                                  <kind>: prefix lines arrive kind-bound)
+            Step 4: composeFeedbackCapture v=4                 Step 3: parse EVERY note
+              (one shape: tap + typing box on top;               feedback-capture v=1..v=4 (all 5 cadences) +
+               EOD per-item lists; non-EOD ONE                   legacy rating-block (pre-v0.101.0 corpus)
+               collapsed kind checklist)                                       │
+                          │                                    Step 3.4 (v0.99.0): classify the day per engagement
+            Step 8: sidecar — EOD 1.4.0                          ENGAGED   — ≥1 item/kind tick, knob ≠ same,
+              (sentinel_version "v=4"; items[]                               or non-empty typing box (ANY note)
+               registry); other 4 gain slim                      TAP-ONLY  — taps only (even ×5) → satisfaction
+               feedback_capture {sentinel_version,                           appends (13f, per-cadence), NOTHING else
+               kinds_listed}                                     SILENT    — audit line + totals bookkeeping only
+                          │                                                    │ (ENGAGED days only below)
+                          ▼                                    Step 3.5: deterministic rollup
+              user taps + types + (optionally) ticks             cowork:ingest-feedback →
+              on ANY of the day's five briefs                    ingest-feedback-helper.js contract
+                                                                 (kind obs — v=4 checklist ticks join the same
+                                                                  channel as EOD mattered-ticks; entity + knob
+                                                                  deltas EOD-only; <kind>: prefix lines kind-bound)
                                                                                │
-                                                               Step 3.6: free-text intent extraction
+                                                               Step 3.6: free-text intent extraction PER NOTE
                                                                  (INLINE LLM; schema-validated by helper rules;
-                                                                  uprank-prose counts as kind tick)
+                                                                  intents tagged source_cadence; dedup ONE
+                                                                  application per (day, intent, kind, entity);
+                                                                  uprank-prose = kind tick; downrank-kind-no-
+                                                                  entity = kind skip; NEW satisfaction intent →
+                                                                  satisfaction-series, prose WINS over tap)
                                                                                │
                                                                Step 4-5: apply learned_weights
-                                                                 schema 4 in-place; clamp; .bak
+                                                                 schema 5 in-place; clamp; .bak
                                                                  (decay + warmup run ONLY here — gated)
                                                                                │
                                                                Step 5.5: apply non-weight deltas
@@ -624,11 +656,11 @@ The ingest pipeline lives inside the existing nightly `reconcile-cowork` cadence
 
 1. **Trigger.** Existing reconciler cron (03:00 local, per-engagement, daily — the v0.97.1 cadence). Reads yesterday's `.md` notes for the engagement.
 
-2. **Step 3 (extended) — parse BOTH sentinels.** For each note: if `rating-block` sentinel → existing kind-checkbox parse (with v0.98.2 Tasks-suffix tolerance added on kind lines). If `feedback-capture` sentinel (v=1, v=2, OR v=3) → rich parse via `parseFeedbackCapture` (v=3 adds the one-tap satisfaction collection: yes / no / ambiguous / null). EOD contributes kind-level observations to the v0.96.0 formula: **kind tick = ≥1 mattered-tick in that kind OR ≥1 uprank-intent prose line scoped to it (v0.99.0, `applyIntentKindTicks`); else kind skip.** This restored EOD signal to per-kind learning at v0.98.2, which v0.98.1's sentinel switch had silently broken.
+2. **Step 3 — parse EVERY note (per-cadence sweep, v0.101.0).** All five cadences emit the `feedback-capture` marker as of v0.101.0; the reconciler parses each of yesterday's notes via `parseFeedbackCapture` (v=1 through v=4 — v=4 adds the non-EOD `kind_ticks` checklist section; v=3 added the one-tap satisfaction collection: yes / no / ambiguous / null) and falls back to `parseRatingCallout` for legacy `rating-block` notes (pre-v0.101.0 corpus; Tasks-suffix tolerance on kind lines). Kind-level observations join one channel regardless of source: **kind tick = ≥1 mattered-tick in that kind (EOD), ≥1 ticked checklist box (non-EOD v=4), OR ≥1 uprank-intent prose line scoped to it; kind skip = surfaced-but-unticked, OR a downrank-intent prose line scoped to the kind with no named entity (v0.101.0 symmetry, `applyIntentKindObservations`).** Per-item/knob mechanics remain EOD-only.
 
 2.5. **Step 3.4 (v0.99.0) — classify the day per engagement (THE GATE).** Deterministic contract (`classifyEngagementDay`, restated inline in the OI per the reconciler's pure-MCP posture):
-   - **ENGAGED** — any note for that engagement/day shows ≥1 item tick (Mattered or Didn't-like), ≥1 kind-checkbox tick (rating-block cadences), ≥1 knob ≠ `same`, or a non-empty typing box. The FULL pipeline below runs: observations (ticks AND skips), entity deltas, knob deltas, decay, warmup progress, `engaged_days[]` append.
-   - **TAP-ONLY** — the only signal is the `Useful:` yes/no tap. Satisfaction append (`totals.satisfaction[]`) + `[satisfaction]` audit line ONLY — no `updateWeights` call, no decay, no warmup, no `engaged_days[]` entry. The `per_kind` subtree is untouched.
+   - **ENGAGED** — any note for that engagement/day shows ≥1 item tick (Mattered or Didn't-like), ≥1 kind-checkbox tick (v=4 checklist or legacy rating-block), ≥1 knob ≠ `same`, or a non-empty typing box. The FULL pipeline below runs: observations (ticks AND skips), entity deltas, knob deltas, decay, warmup progress, `engaged_days[]` append.
+   - **TAP-ONLY** — the only signal is `Useful:` yes/no taps (even all five notes tapped — multi-note taps without other signal are still TAP-ONLY; semantics UNCHANGED at v0.101.0). Satisfaction appends (`totals.satisfaction[]`, per-cadence) + `[satisfaction]` audit lines ONLY — no `updateWeights` call, no decay, no warmup, no `engaged_days[]` entry. The `per_kind` subtree is untouched.
    - **SILENT** — nothing. Audit section still written with the `no feedback signal` line + totals bookkeeping; no weight pipeline. (A pre-schema-4 weights file still gets the one-time normalize/migration on first touch — the silence-reset must not wait for an engaged day.)
    The gate lives at the CALL SITE because `updateWeights` decays unconditionally inside (2%/day toward 1.00) — passing empty observations would still decay every kind. **Silence = no signal, ever:** a never-ticking user stays advisory-forever; the day the user DOES engage, that day's skips become meaningful ("I looked, finance didn't matter today").
 
@@ -639,19 +671,19 @@ The ingest pipeline lives inside the existing nightly `reconcile-cowork` cadence
    - **Ambiguous items** (sidecar `ambiguous_items[]` flag — user dual-ticked Mattered AND Didn't-like) → no entity signal.
    - **Idempotency** via `totals.feedback_ingested_days[]` alongside existing `scanned_days[]`.
 
-4. **Step 3.6 — free-text intent extraction (INLINE LLM pass; ENGAGED days only).** No separate API call, no model pin — the reconciler IS an LLM session (its pure-MCP posture). Prefix-scoped lines arrive kind-bound (Step 3.5) — the LLM classifies intent (uprank / downrank / frequency / voice / coverage) but cannot re-scope the kind. The OI carries a strict structured-intent schema:
+4. **Step 3.6 — free-text intent extraction (INLINE LLM pass, PER NOTE; ENGAGED days only).** No separate API call, no model pin — the reconciler IS an LLM session (its pure-MCP posture). As of v0.101.0 the pass runs over up to five typing boxes per day; every extracted intent is tagged with the `source_cadence` of the note whose box produced it (recorded in `feedback-deltas.md` audit lines + voice-proposal `source:` fields). Prefix-scoped lines arrive kind-bound (Step 3.5) — the LLM classifies intent but cannot re-scope the kind. The OI carries a strict structured-intent schema:
 
    ```json
-   [{ "intent": "uprank | downrank | voice_correction | coverage_gap | frequency | other",
+   [{ "intent": "uprank | downrank | voice_correction | coverage_gap | frequency | satisfaction | other",
       "kind": "<kind, when scoped>", "entity": "<person/channel/topic, when named>",
       "source_quote": "<verbatim substring of the user's prose>",
-      "proposed_target": "learned_weights | microscope:<kind> | voice-proposals | coverage-queue",
+      "proposed_target": "learned_weights | microscope:<kind> | voice-proposals | coverage-queue | satisfaction-series",
       "confidence": "high | medium | low" }]
    ```
 
-   The deterministic helper's validation rules (re-stated in OI) REJECT: unknown intent / missing or non-verbatim `source_quote` / target outside the four-value allowlist / `learned_weights` intent naming no kind / `low` confidence (logged pending, not applied). Hard suppression intents ("stop surfacing X's emails") → direct floor-set `weight = 0.10` on the named entity under the named kind.
+   The deterministic helper's validation rules (re-stated in OI) REJECT: unknown intent / missing or non-verbatim `source_quote` / target outside the five-value allowlist / `learned_weights` intent naming no kind / `low` confidence (logged pending, not applied). The NEW `satisfaction` intent (v0.101.0) requires NO kind — global sentiment routes to the `satisfaction-series` target for the note's cadence and WINS over that note's tap on disagreement; it moves satisfaction + engagement ONLY, never kind weights. **Dedup (v0.101.0):** an accepted intent applies at most once per (day, intent, kind, entity) across ALL of yesterday's notes — dedup at the disposition layer; both occurrences audit-logged (second tagged `[pending] dedup`). Hard suppression intents ("stop surfacing X's emails") → direct floor-set `weight = 0.10` on the named entity under the named kind.
 
-5. **Steps 4-5 — apply learned_weights schema 4 in-place (signal sub-steps ENGAGED days only).** Same `user-preferences.md`, same `.bak`-first rewrite of ONLY the `learned_weights:` block. `normalizeLearnedWeightsV4` tolerates all on-disk shapes (2, missing, "1.1.0", 3, 4) and runs the one-time silence-reset migration on first touch regardless of day class (see § 7.2.6). Per-entity weight math (see § 7.2.5) + the v0.96.0 kind formula + decay + warmup graduation (engaged-day-driven, § 7.2.3) run ONLY on ENGAGED days; totals bookkeeping (notes_scanned, scanned_days) runs on all day classes; the satisfaction append (sub-step 13f) runs on ANY day class with a boolean tap.
+5. **Steps 4-5 — apply learned_weights schema 5 in-place (signal sub-steps ENGAGED days only).** Same `user-preferences.md`, same `.bak`-first rewrite of ONLY the `learned_weights:` block. `normalizeLearnedWeightsV5` tolerates all on-disk shapes (2, missing, "1.1.0", 3, 4, 5); the 4 → 5 step is purely additive (see § 7.2.7); the one-time 3 → 4 silence-reset still runs on first touch of pre-schema-4 files regardless of day class (see § 7.2.6). Per-entity weight math (see § 7.2.5) + the v0.96.0 kind formula + decay + warmup graduation (engaged-day-driven, § 7.2.3) run ONLY on ENGAGED days; totals bookkeeping (notes_scanned, scanned_days) runs on all day classes; the satisfaction append (sub-step 13f) runs PER NOTE with a boolean tap, on ANY day class, tagged with the note's cadence (per-cadence entries, same-(day, cadence) overwrite, day-window trim).
 
 6. **NEW Step 5.5 — apply non-weight deltas.**
 
@@ -702,12 +734,13 @@ One new rule in the shared microscope/voice clause + Step 2 of morning-briefing 
 
 Structural rules still WIN over voice on conflict; the thresholds are OI prose consumed at gather/compose time, deliberately NOT helper-enforced (rendering judgment is the LLM's lane; the WEIGHTS are deterministic).
 
-### 9.5 Carry-forward (post-v0.99.0)
+### 9.5 Carry-forward (post-v0.101.0)
 
-- **`cowork:doctor` (v0.99.1, NEXT).** Embedded in the nightly reconciler; 4 checks locked at the 2026-06-11 brainstorm: wrapper/sidecar version-drift vs installed; sidecar schema conformance over a rolling window (the v0.98.2 `coverage_gap: []` write-guard-bypass finding); align-audit staleness; self-grading digest (satisfaction-series trend — accumulating since v0.99.0 — + top entity-weight movers). Anomalies → one collapsed morning-brief callout; details → reconciler log.
-- **Per-item ticks on weekly / monthly cadences.** EOD-only by design. Additive extension, demand-gated.
-- **Cross-machine lockfiles + path-relative wrappers.** Vision § 2 dimension 8 (Cross-machine consistency); v0.99.2+, bundled.
-- **Entity-weight + satisfaction live-grading.** The platform can now grade itself empirically — entity maps and the satisfaction series populate over the first 7-30 days post-deploy; formula-constant tuning stays data-gated until the doctor reads them.
+- **`cowork:doctor` (NEXT — displaced ONE cycle by v0.101.0; shape stays locked).** Embedded in the nightly reconciler; 4 checks locked at the 2026-06-11 brainstorm: wrapper/sidecar version-drift vs installed; sidecar schema conformance over a rolling window (the v0.98.2 `coverage_gap: []` write-guard-bypass finding); align-audit staleness; self-grading digest — **satisfaction-series trend, NOW PER-CADENCE** (the v0.101.0 KPI upgrade: grade morning vs midday vs EOD separately) + top entity-weight movers. Anomalies → one collapsed morning-brief callout; details → reconciler log.
+- **Per-item ticks on weekly / monthly cadences.** Still demand-gated — the v=4 checklist gives those cadences tap + prose + kind ticks; per-item identity is the remaining gap.
+- **Per-cadence rendering knobs.** `source_cadence` is data accrual only this cycle; gated on doctor evidence that a cadence-level rendering fix is needed.
+- **Cross-machine lockfiles + path-relative wrappers.** Vision § 2 dimension 8 (Cross-machine consistency); bundled, queued behind doctor.
+- **Entity-weight + satisfaction live-grading.** The platform can now grade itself empirically per cadence — entity maps and the per-cadence satisfaction series populate post-deploy; formula-constant tuning stays data-gated until the doctor reads them.
 
 ## § 10 — Cross-machine + cross-engagement
 

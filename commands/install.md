@@ -52,6 +52,12 @@ The cowork installer is an explicit allowlist. `platform/blueprints/cowork/manif
 
 These guarantees are codified in four safeguards (introduced v0.98.1). See `Docs/plans/2026-06-11-v0.98.1-questionnaire-capture-design.md` § User-content preservation safeguards for rationale and design detail.
 
+### v0.101.0 deploy note (verbal feedback everywhere)
+
+- **`learned_weights` schema 4 → 5 in-place migration is ADDITIVE — NO reset.** The first post-update 03:00 reconciler run adds a `cadence` field to satisfaction entries (existing entries are labeled `eod-review`, the only cadence that had a tap before this release). Weights, ticks, skips, warmup state, and engaged-day counters are all left **INTACT** — unlike the v0.99.0 silence-reset, nothing re-enters warmup. Same block-scoped `.bak`-first rewrite of ONLY the `learned_weights:` block.
+- **The feedback section renders v=4 on ALL FIVE briefs** after the post-update `align-scheduled-jobs` run: the one-tap `Useful: [ ] yes [ ] no` line + the free-text typing box on top of every brief. EOD keeps its per-item Mattered/Didn't-like lists + frequency knobs; the four other cadences render one collapsed `Kinds — quick ticks` checklist (the old kind checkboxes, demoted). Old notes — any marker version, including the retired `rating-block` shape — stay readable forever (tolerant parsers; the write-guard accepts either marker).
+- **Run `align-scheduled-jobs` ONCE per vault post-update** from Cloud Cowork (the real surface — `/cowork sync-scheduled-jobs` does NOT exist as a slash command). Contract stays at 0.35.1; ZERO new substitution tokens; schedule preservation invariant holds (cron field never touched).
+
 ### v0.99.0 deploy note (sparse-signal feedback)
 
 - **`learned_weights` schema 3 → 4 in-place migration.** The first post-update 03:00 reconciler run migrates the `learned_weights:` block in `user-preferences.md` frontmatter to schema 4 (block-scoped `.bak`-first rewrite — same contract as every prior migration). The migration keeps each kind's weight + ticks, **ZEROES silence-built skip counters, and re-enters every kind into warmup. This is BY DESIGN, not data loss** — under the pre-v0.99.0 semantics, every surfaced-but-unticked kind counted as a skip, so those counters were silence-contaminated, never user signal. Graduation now requires 7 ENGAGED days (days with real feedback gestures) plus 7 observations.
