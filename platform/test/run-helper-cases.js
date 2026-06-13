@@ -10134,7 +10134,7 @@ async function caseV1010IntentA2() {
     ];
     const out = dedupIntents(twice);
     assertTrue("HC-V1010-INTENT-A2: github downrank applies once", out.applied.filter((i) => i.kind === "github").length === 1);
-    assertTrue("HC-V1010-INTENT-A2: duplicate reported in deduped[]", out.deduped.length === 1 && out.deduped[0].source_cadence === "eod-review");
+    assertTrue("HC-V1010-INTENT-A2: duplicate reported in deduped[]", out.deduped.length === 1 && out.deduped[0].source_cadence === "eod-review" && out.deduped[0].source_quote === "github: too much today");
     assertTrue("HC-V1010-INTENT-A2: distinct kinds unaffected", out.applied.length === 2);
     const entityDistinct = dedupIntents([
       { intent: "downrank", kind: "chat", entity: "Diana", source_quote: "a" },
@@ -10218,13 +10218,15 @@ async function caseV1010SchemaA3() {
     const { normalizeLearnedWeightsV5 } = require("../blueprints/cowork/helpers/ingest-feedback-helper.js");
     const legacy = {
       schema_version: 3,
-      engagements: { hs: { per_kind: { finance: { weight: 0.927, ticks: 0, skips: 3, warmup: true } }, totals: { notes_scanned: 4, notes_with_any_tick: 0, scanned_days: [] } } },
+      engagements: { hs: { per_kind: { finance: { weight: 0.927, ticks: 0, skips: 3, warmup: true }, github: { weight: 1.2, ticks: 1, skips: 4, warmup: false } }, totals: { notes_scanned: 4, notes_with_any_tick: 0, scanned_days: [] } } },
     };
     const out = normalizeLearnedWeightsV5(legacy);
     const pk = out.engagements.hs.per_kind.finance;
     assertTrue("HC-V1010-SCHEMA-A3: schema 5 + V4 silence-reset applied (skips zeroed, warmup forced)", out.schema_version === 5 && pk.skips === 0 && pk.warmup === true && pk.weight === 0.927);
     assertTrue("HC-V1010-SCHEMA-A3: satisfaction[] + engaged_days[] initialized", Array.isArray(out.engagements.hs.totals.satisfaction) && Array.isArray(out.engagements.hs.totals.engaged_days));
     assertTrue("HC-V1010-SCHEMA-A3: idempotent — re-run of own output is byte-identical", JSON.stringify(normalizeLearnedWeightsV5(out)) === JSON.stringify(out));
+    assertTrue("HC-V1010-SCHEMA-A3: warmup:false input forced back to true by the one-time reset", out.engagements.hs.per_kind.github.warmup === true);
+    assertTrue("HC-V1010-SCHEMA-A3: silence-contaminated skips zeroed on the warmup:false kind too", out.engagements.hs.per_kind.github.skips === 0 && out.engagements.hs.per_kind.github.ticks === 1);
   } catch (e) { assertTrue("HC-V1010-SCHEMA-A3", false, e && e.message); }
 }
 
@@ -10245,7 +10247,7 @@ async function caseV1010DispatchA1() {
   console.log(`\n--- Case HC-V1010-DISPATCH-A1: morning-briefing composeBody emits v=4 capture (not rating-block) ---`);
   try {
     const { composeBody } = require("../blueprints/cowork/helpers/compose-body-helper.js");
-    const out = composeBody({
+    const input = {
       cadence: "morning-briefing", engagement_id: "test-eng", day: "2026-06-13",
       frontmatter: { type: "cowork-morning-briefing", engagement_id: "test-eng", day: "2026-06-13", generator: "cowork:morning-briefing@2.0.0", prompt_source: "spice/cowork/prompts/morning-briefing.md", title: "T", summary: "S", created_at: "2026-06-13T07:00:00-06:00" },
       nav_buttons_block: "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```",
@@ -10257,12 +10259,16 @@ async function caseV1010DispatchA1() {
       memory_used: { yesterday_present: false, drift_warning_present: false, echoes_count: 0 },
       plan_dispatch: { mode: "prefs", kinds_dispatched: 1, warnings_emitted: 0, classifier_cache_hit: false, pending_confirmations_count: 0 },
       learning_enabled: true, surfaced_kinds_for_rating: ["chat"], prior_md: null,
-    });
+    };
+    const out = composeBody(input);
     assertTrue("HC-V1010-DISPATCH-A1: status ok", out.status === "ok");
     assertTrue("HC-V1010-DISPATCH-A1: v=4 marker in body", out.body_md.includes("cowork:feedback-capture v=4"));
     assertTrue("HC-V1010-DISPATCH-A1: NO rating-block marker emitted", !out.body_md.includes("cowork:rating-block"));
     assertTrue("HC-V1010-DISPATCH-A1: checklist carries surfaced kind", out.body_md.includes("> > - [ ] Chat"));
     assertTrue("HC-V1010-DISPATCH-A1: slim feedback_capture in sidecar", out.sidecar_json.feedback_capture && out.sidecar_json.feedback_capture.sentinel_version === "v=4" && out.sidecar_json.feedback_capture.kinds_listed.includes("chat"));
+    const off = composeBody(Object.assign({}, input, { learning_enabled: false }));
+    assertTrue("HC-V1010-DISPATCH-A1: learning_enabled false → no capture callout", !off.body_md.includes("cowork:feedback-capture"));
+    assertTrue("HC-V1010-DISPATCH-A1: learning_enabled false → no sidecar feedback_capture", off.sidecar_json.feedback_capture === undefined);
   } catch (e) { assertTrue("HC-V1010-DISPATCH-A1", false, e && e.message); }
 }
 
