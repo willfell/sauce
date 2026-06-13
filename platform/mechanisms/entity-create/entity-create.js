@@ -31,6 +31,19 @@
  *   lowercase(prompts.<key>)          — String.toLowerCase
  *   sanitize-filename(prompts.<key>)  — strip /\\:*?"<>|
  *
+ * Options source (prompts[].options_source):
+ *   "all_projects"  — resolved at prompt-render-time to ["(none)", ...all
+ *                     type:project notes by name]; selecting a project
+ *                     post-processes to "[[name]]", selecting "(none)"
+ *                     post-processes to "". (entity-create@0.5.0)
+ *
+ * render() / create() options:
+ *   presetPrompts: { <key>: <value> }  — short-circuit the prompt loop for
+ *                     matching keys (bypasses derive + UI + validation).
+ *                     Presets are trusted — calling helper code is
+ *                     responsible for pre-formatting (e.g. wikilink wrap
+ *                     for project picks). (entity-create@0.5.0)
+ *
  * Helpers are deterministic + side-effect-free except:
  *   _ensureFolder (vault.createFolder)
  *   create()      (vault.create, workspace.openLinkText)
@@ -85,6 +98,9 @@ class EntityCreate {
             // v0.5.0: post-process options_source picks. "(none)"/empty → "";
             // anything else → wikilink form "[[name]]". Preset values bypass
             // this branch entirely (handled by short-circuit above).
+            // all_projects-specific post-process: (none) → ""; otherwise wrap as
+            // "[[name]]" wikilink. Future options_source values must either extend
+            // this branch or refactor into a sibling _postProcessOptionsSource(source, v).
             if (p.options_source === "all_projects") {
                 ctx.prompts[p.key] = (v === "(none)" || v === "") ? "" : `[[${v}]]`;
                 continue;
