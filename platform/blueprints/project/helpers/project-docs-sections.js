@@ -1,11 +1,10 @@
-// project-docs-sections.js — v1.16.0 helper (sauce v0.102.0 S2 + S4 carry-forwards).
+// project-docs-sections.js — v1.16.0 helper (sauce v0.102.0 S3).
 //
 // Renders the project Docs Hub as Confluence-style buckets — one labeled card
 // group per section declared on the parent project's `sections[]` frontmatter,
 // followed by an optional "Unfiled" bucket for orphans.
 //
-// Replaces the v0.100.0 ProjectDocsCards single-list rendering on the Docs Hub
-// (manifest + template rewrite to consume this helper lands in v0.102.0 S4).
+// Replaces the v0.100.0 ProjectDocsCards single-list rendering on the Docs Hub.
 //
 // Per-bucket rendering:
 //   • <h3>{{section}}</h3> header.
@@ -16,7 +15,7 @@
 //   • Card row via BeaconCards (layout: "row", default-sort by file.mtime desc).
 //   • Empty-state stub when no docs match this bucket.
 //
-// Folder-wins-on-conflict (v0.102.0 S4 I-1 fix): when a doc's folder slug matches
+// Folder-wins-on-conflict (v0.102.0 S3 I-1 fix): when a doc's folder slug matches
 // a DECLARED section, that membership wins — its `section:` frontmatter is
 // ignored for bucket-assignment purposes (so a moved file doesn't show up in
 // two buckets at once). When the folder slug is NOT a declared section, we fall
@@ -33,7 +32,7 @@ class ProjectDocsSections {
     // (project_slug, project_name) carries the slug for fallback queries, but
     // the actual sections array lives on the project note itself.
     //
-    // M-4 fix (v0.102.0 S4): tighten the parent-project resolution. The prior
+    // M-4 fix (v0.102.0 S3): tighten the parent-project resolution. The prior
     // form did a naive suffix-strip on the docs-folder path, which would
     // silently follow a misplaced Docs Hub anywhere ending in the docs
     // basename. Anchor strictly on the canonical layout
@@ -53,15 +52,14 @@ class ProjectDocsSections {
     // BeaconCards consumes a dataview proxy; we re-where it per bucket.
     const allDocs = dv.pages(`"${docsFolder}"`).where((p) => p.type === "doc-note");
 
-    // I-1 fix (v0.102.0 S4): pre-build the set of ALL declared section slugs
+    // I-1 fix (v0.102.0 S3): pre-build the set of ALL declared section slugs
     // up front so each per-section query can ask "is the doc's folder slug a
     // declared section?" before deciding which rule wins. Folder-wins-on-conflict
     // means a doc in docs/notes/ shows up under Notes even if its `section:`
     // frontmatter says "Knowledge" — eliminating the double-count from the prior
-    // OR-match form. Aliased as renderedSlugs for the orphan-detection downstream
-    // (folder slugs and explicitly-declared section slugs are identical).
+    // OR-match form. The same set drives orphan detection downstream (folder
+    // slugs and explicitly-declared section slugs are identical).
     const allSectionSlugs = new Set(declared.map((s) => this._slugify(s)));
-    const renderedSlugs = allSectionSlugs;
 
     for (const section of declared) {
       const slug = this._slugify(section);
@@ -81,10 +79,10 @@ class ProjectDocsSections {
     const orphans = allDocs.where((p) => {
       const folderSlug = String((p.file.folder || "").split("/").pop() || "");
       const sectionSlug = this._slugify(p.section || "");
-      const folderMatches = renderedSlugs.has(folderSlug);
+      const folderMatches = allSectionSlugs.has(folderSlug);
       const sectionMatches = p.section && declared.indexOf(p.section) !== -1;
       // Also accept slugified section match (defensive against case/whitespace drift).
-      const sectionSlugMatches = sectionSlug && renderedSlugs.has(sectionSlug);
+      const sectionSlugMatches = sectionSlug && allSectionSlugs.has(sectionSlug);
       return !folderMatches && !sectionMatches && !sectionSlugMatches;
     });
     if (orphans.length > 0) {

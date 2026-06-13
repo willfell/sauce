@@ -10623,6 +10623,19 @@ async function caseV01020ProjMan3HelperFilesRegistered() {
     pmp && pmp.dest === "{{scripts_path}}/project/project-meetings-panel.js");
 }
 
+async function caseV01020ProjMan4SectionPromptHasSafeFilenameValidate() {
+  console.log(`\n--- Case HC-V01020-PROJ-MAN-4: doc-note section prompt has validate: "safe-filename" (defense-in-depth) ---`);
+  const m = _readProjManifest();
+  const buttons = (m && Array.isArray(m.new_entity_buttons)) ? m.new_entity_buttons : [];
+  const docBtn = buttons.find(b => b && b.id === "doc-note");
+  const docPrompts = (docBtn && Array.isArray(docBtn.prompts)) ? docBtn.prompts : [];
+  const sectionPrompt = docPrompts.find(p => p && p.key === "section");
+  assertTrue("HC-V01020-PROJ-MAN-4a: doc-note section prompt exists", !!sectionPrompt);
+  assertTrue("HC-V01020-PROJ-MAN-4b: doc-note section prompt has validate: 'safe-filename'",
+    sectionPrompt && sectionPrompt.validate === "safe-filename",
+    `got: ${sectionPrompt && sectionPrompt.validate}`);
+}
+
 async function caseV01020ProjTpl1DocsHubInvokesSections() {
   console.log(`\n--- Case HC-V01020-PROJ-TPL-1: Docs Hub template invokes ProjectDocsSections + drops ProjectDocsCards + drops marker ---`);
   assertTrue("HC-V01020-PROJ-TPL-1: Docs Hub.md exists", fs.existsSync(_PROJ_DOCS_HUB_TPL));
@@ -11206,6 +11219,7 @@ async function caseV01020PDS9CarryForwardFixes() {
   await caseV01020ProjMan1VersionAndCustomjs();
   await caseV01020ProjMan2SectionsAndDocNotePrompts();
   await caseV01020ProjMan3HelperFilesRegistered();
+  await caseV01020ProjMan4SectionPromptHasSafeFilenameValidate();
   await caseV01020ProjTpl1DocsHubInvokesSections();
   await caseV01020ProjTpl2MeetingsPanelInProjectTemplate();
   await caseV01020ProjTpl3DocNoteRuleGlobNested();
