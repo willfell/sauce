@@ -20,14 +20,21 @@
 //     "1.1.0" (helper-era) / 3; returns nested schema-3 shape, additive.
 //   normalizeLearnedWeightsV4(raw) — wraps V3; migration: zero skips, force
 //     warmup, init engaged_days[] + satisfaction[], retire warmup_until.
+//   normalizeLearnedWeightsV5(raw) — wraps V4; purely additive: satisfaction
+//     entries gain cadence (pre-5 default "eod-review"); already-5 input is
+//     guarded from re-entering V4's silence-reset migration.
 //   validateIntents(intents, free_text) — allowlist + verbatim-quote gate;
 //     returns { accepted, rejected, pending }.
 //   composeAuditEntry({ day, run_id, lines }) — feedback-deltas.md section.
 //   classifyEngagementDay({ notes }) — "engaged" | "tap_only" | "silent".
 //   parseKindPrefixLines(free_text, kinds) — deterministic section scoping.
-//   appendSatisfaction(totals, day, useful, opts?) — rolling-30 sat series.
-//   applyIntentKindTicks(kind_observations, accepted_intents) — uprank prose
-//     counts as that kind's tick for the day.
+//   appendSatisfaction(totals, day, useful, opts?) — per-cadence sat series
+//     (30-day window, 200-entry cap; same-(day, cadence) overwrites).
+//   applyIntentKindObservations(kind_observations, accepted_intents) — uprank
+//     prose = kind tick; kind-scoped downrank (no entity) = kind skip;
+//     contradictions no-op; modify-only.
+//   dedupIntents(intents) — weight intents (uprank/downrank/frequency) apply
+//     once per (intent, kind, entity); duplicates reported in deduped[].
 
 const { _clamp, _round } = require("./learn-from-checks-helper.js");
 const { FREE_TEXT_PLACEHOLDERS } = require("./compose-feedback-capture-helper.js");
@@ -45,9 +52,11 @@ const INGEST_DEFAULTS = Object.freeze({
 
 const ENTITY_TYPES = Object.freeze(["per_person", "per_channel", "per_topic"]);
 const VALID_INTENTS = Object.freeze([
-  "uprank", "downrank", "voice_correction", "coverage_gap", "frequency", "other",
+  "uprank", "downrank", "voice_correction", "coverage_gap", "frequency",
+  "satisfaction",   // v0.101.0 — global sentiment; no kind; feeds satisfaction-series
+  "other",
 ]);
-const TARGET_RX = /^(learned_weights|microscope:[a-z][a-z_-]*|voice-proposals|coverage-queue)$/;
+const TARGET_RX = /^(learned_weights|microscope:[a-z][a-z_-]*|voice-proposals|coverage-queue|satisfaction-series)$/;
 
 // Deterministic identity classification from the sidecar registry entry.
 // Rules (first match wins):
@@ -255,6 +264,31 @@ function normalizeLearnedWeightsV4(raw) {
   return out;
 }
 
+// v0.101.0 — schema 5: per-cadence satisfaction. PURELY ADDITIVE on top of
+// schema 4 — entries gain `cadence` (pre-5 entries default "eod-review", the
+// only cadence that had a tap); NOTHING else changes (no skip-zeroing, no
+// warmup reset, graduation untouched).
+function normalizeLearnedWeightsV5(raw) {
+  const priorVersion = raw && typeof raw === "object" ? raw.schema_version : undefined;
+  // Already-5 input must NOT re-enter V4's silence-reset: V4's migration gate
+  // is `Number(prior) !== 4`, so a literal 5 would re-zero skips (destructive
+  // — v0.99.0 lesson 2 class). Stamp a deep COPY to 4 so V4 runs its
+  // shape-normalize path only.
+  const v4input = Number(priorVersion) === 5
+    ? Object.assign(JSON.parse(JSON.stringify(raw)), { schema_version: 4 })
+    : raw;
+  const v4 = normalizeLearnedWeightsV4(v4input);
+  const out = { schema_version: 5, engagements: {} };
+  for (const [eid, eng] of Object.entries(v4.engagements)) {
+    const totals = JSON.parse(JSON.stringify(eng.totals || {}));
+    totals.satisfaction = (Array.isArray(totals.satisfaction) ? totals.satisfaction : [])
+      .filter((e) => e && typeof e === "object" && e.day)
+      .map((e) => (e.cadence ? e : Object.assign({}, e, { cadence: "eod-review" })));
+    out.engagements[eid] = Object.assign({}, eng, { totals });
+  }
+  return out;
+}
+
 // v0.99.0 — engagement gate. A day contributes observations ONLY when the
 // user demonstrably engaged. Input: notes[] of { rating, feedback } where
 // rating = parseRatingCallout(md) | null and feedback = parseFeedbackCapture(md)
@@ -304,31 +338,77 @@ function parseKindPrefixLines(free_text, kinds) {
   return { scoped, remainder: remainder.join("\n") };
 }
 
-// v0.99.0 — rolling satisfaction series (the doctor's first KPI). Boolean-only
-// (ambiguous dual-taps and null no-taps are no-ops); same-day re-log
-// overwrites; window capped at 30 entries (oldest dropped).
+// v0.101.0 — per-cadence satisfaction series (schema 5). Entries are
+// { day, cadence, useful }; same-(day, cadence) re-log overwrites; window
+// trims by DAY (default 30 days relative to the appended day; lexicographic
+// YYYY-MM-DD compare), with a 200-entry belt-and-suspenders cap. Boolean-only
+// (ambiguous dual-taps / no-taps are no-ops). cadence defaults to
+// "eod-review" (the only cadence that tapped before v0.101.0).
 function appendSatisfaction(totals, day, useful, opts) {
-  const cap = (opts && opts.cap) || 30;
+  const cap = (opts && opts.cap) || 200;
+  const windowDays = (opts && opts.window_days) || 30;
+  const cadence = (opts && opts.cadence) || "eod-review";
   const next = JSON.parse(JSON.stringify(totals || {}));
   if (!Array.isArray(next.satisfaction)) next.satisfaction = [];
   if (typeof useful !== "boolean") return next;
-  next.satisfaction = next.satisfaction.filter((e) => e && e.day !== day);
-  next.satisfaction.push({ day, useful });
+  const cutoff = new Date(new Date(`${day}T00:00:00Z`).getTime() - windowDays * 86400000)
+    .toISOString().slice(0, 10);
+  next.satisfaction = next.satisfaction.filter((e) =>
+    e && e.day
+    && !(e.day === day && (e.cadence || "eod-review") === cadence)
+    && e.day >= cutoff);
+  next.satisfaction.push({ day, cadence, useful });
   if (next.satisfaction.length > cap) next.satisfaction = next.satisfaction.slice(-cap);
   return next;
 }
 
-// v0.99.0 — uprank-intent prose counts as that kind's tick for the day
-// (engaged-day kind formula input). Accepted intents only (validateIntents
-// has already run).
-function applyIntentKindTicks(kind_observations, accepted_intents) {
-  const upranked = new Set((Array.isArray(accepted_intents) ? accepted_intents : [])
+// v0.101.0 — kind-scoped prose drives kind observations symmetrically:
+// uprank → that kind's tick; downrank WITHOUT a named entity → that kind's
+// skip (an entity complaint must not skip the whole kind). Contradictory
+// uprank+downrank on the same kind → no-op. Modify-only — never appends
+// observations for unsurfaced kinds (their signal flows via the 8f
+// kind-delta channel instead). Accepted + deduped intents only.
+function applyIntentKindObservations(kind_observations, accepted_intents) {
+  const intents = Array.isArray(accepted_intents) ? accepted_intents : [];
+  const upranked = new Set(intents
     .filter((i) => i && i.intent === "uprank" && i.kind)
     .map((i) => String(i.kind).toLowerCase()));
-  return (Array.isArray(kind_observations) ? kind_observations : []).map((o) =>
-    o && upranked.has(String(o.kind).toLowerCase())
-      ? Object.assign({}, o, { ticked: true })
-      : o);
+  const downranked = new Set(intents
+    .filter((i) => i && i.intent === "downrank" && i.kind && !i.entity)
+    .map((i) => String(i.kind).toLowerCase()));
+  return (Array.isArray(kind_observations) ? kind_observations : []).map((o) => {
+    if (!o) return o;
+    const k = String(o.kind).toLowerCase();
+    const up = upranked.has(k);
+    const down = downranked.has(k);
+    if (up && down) return o;
+    if (up) return Object.assign({}, o, { ticked: true });
+    if (down) return Object.assign({}, o, { ticked: false });
+    return o;
+  });
+}
+
+// v0.101.0 — with five typing boxes per day, the same weight-moving complaint
+// can arrive from multiple notes. Weight-channel intents (uprank / downrank /
+// frequency) apply at most once per (intent, kind, entity) per reconciler run
+// (= per day); duplicates are returned in `deduped` for [pending] audit
+// logging. Non-weight intents (voice_correction, coverage_gap, satisfaction,
+// other) pass through untouched — two distinct voice corrections are two
+// proposals, and satisfaction same-cadence collisions are handled by
+// appendSatisfaction's same-(day, cadence) overwrite.
+const WEIGHT_INTENTS = Object.freeze(new Set(["uprank", "downrank", "frequency"]));
+function dedupIntents(intents) {
+  const applied = [];
+  const deduped = [];
+  const seen = new Set();
+  for (const intent of (Array.isArray(intents) ? intents : [])) {
+    if (!intent || typeof intent !== "object") continue;
+    if (!WEIGHT_INTENTS.has(intent.intent)) { applied.push(intent); continue; }
+    const key = [intent.intent, String(intent.kind || "").toLowerCase(), String(intent.entity || "").toLowerCase()].join("|");
+    if (seen.has(key)) deduped.push(intent);
+    else { seen.add(key); applied.push(intent); }
+  }
+  return { applied, deduped };
 }
 
 function validateIntents(intents, free_text) {
@@ -353,6 +433,14 @@ function validateIntents(intents, free_text) {
     }
     if (["uprank", "downrank", "frequency"].includes(intent.intent) && !intent.kind) {
       result.rejected.push({ intent, reason: "weights-intent-requires-kind" });
+      continue;
+    }
+    if (intent.intent === "satisfaction" && typeof intent.useful !== "boolean") {
+      result.rejected.push({ intent, reason: "satisfaction-requires-useful-boolean" });
+      continue;
+    }
+    if (String(intent.proposed_target) === "satisfaction-series" && intent.intent !== "satisfaction") {
+      result.rejected.push({ intent, reason: "satisfaction-series-target-requires-satisfaction-intent" });
       continue;
     }
     if (intent.intent === "other" || intent.confidence === "low") {
@@ -384,11 +472,13 @@ module.exports = {
   applyFloorSet,
   normalizeLearnedWeightsV3,
   normalizeLearnedWeightsV4,
+  normalizeLearnedWeightsV5,
   validateIntents,
   composeAuditEntry,
   classifyEngagementDay,
   parseKindPrefixLines,
   appendSatisfaction,
-  applyIntentKindTicks,
+  applyIntentKindObservations,
+  dedupIntents,
   _classifyEntity,
 };

@@ -9662,12 +9662,12 @@ async function caseV0990GateA5() {
 }
 
 async function caseV0990GateA6() {
-  console.log(`\n--- Case HC-V0990-GATE-A6: applyIntentKindTicks — uprank prose flips kind observation to ticked ---`);
+  console.log(`\n--- Case HC-V0990-GATE-A6: applyIntentKindObservations — uprank prose flips kind observation to ticked ---`);
   try {
-    const { applyIntentKindTicks } = require("../blueprints/cowork/helpers/ingest-feedback-helper.js");
+    const { applyIntentKindObservations } = require("../blueprints/cowork/helpers/ingest-feedback-helper.js");
     const obs = [{ kind: "chat", ticked: false }, { kind: "finance", ticked: false }];
     const intents = [{ intent: "uprank", kind: "chat", source_quote: "x", proposed_target: "learned_weights", confidence: "high" }];
-    const out = applyIntentKindTicks(obs, intents);
+    const out = applyIntentKindObservations(obs, intents);
     assertTrue(
       "HC-V0990-GATE-A6: uprank intent on chat flips its observation to ticked:true; finance stays skip",
       out[0].ticked === true && out[1].ticked === false
@@ -9767,18 +9767,21 @@ async function caseV0990SchemaA5() {
 }
 
 async function caseV0990SchemaA6() {
-  console.log(`\n--- Case HC-V0990-SCHEMA-A6: appendSatisfaction — boolean-only, same-day overwrite, rolling-30 trim ---`);
+  console.log(`\n--- Case HC-V0990-SCHEMA-A6: appendSatisfaction — boolean-only, same-day overwrite, 30-day window trim (v0.101.0 per-cadence semantics) ---`);
   try {
     const { appendSatisfaction } = require("../blueprints/cowork/helpers/ingest-feedback-helper.js");
     let totals = { satisfaction: [] };
-    for (let i = 1; i <= 32; i++) {
-      totals = appendSatisfaction(totals, `2026-05-${String(i).padStart(2, "0")}`, i % 2 === 0);
+    for (let i = 0; i < 32; i++) {
+      // 2026-05-01 .. 2026-06-01 — 32 consecutive days; final append's 30-day
+      // window (cutoff 2026-05-02, inclusive) drops only the first day.
+      const day = new Date(Date.UTC(2026, 4, 1 + i)).toISOString().slice(0, 10);
+      totals = appendSatisfaction(totals, day, i % 2 === 0);
     }
-    const trimmed = totals.satisfaction.length === 30 && totals.satisfaction[0].day === "2026-05-03";
+    const trimmed = totals.satisfaction.length === 31 && totals.satisfaction[0].day === "2026-05-02";
     const overwritten = appendSatisfaction({ satisfaction: [{ day: "2026-06-13", useful: false }] }, "2026-06-13", true);
     const ambiguousNoop = appendSatisfaction({ satisfaction: [] }, "2026-06-13", "ambiguous");
     assertTrue(
-      "HC-V0990-SCHEMA-A6: rolling window trims to 30 (oldest dropped); same-day re-log overwrites; non-boolean is a no-op",
+      "HC-V0990-SCHEMA-A6: 30-day window trims by day (oldest dropped); same-(day, cadence) re-log overwrites (legacy entry defaults eod-review); non-boolean is a no-op",
       trimmed && overwritten.satisfaction.length === 1 && overwritten.satisfaction[0].useful === true
         && ambiguousNoop.satisfaction.length === 0
     );
