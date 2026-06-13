@@ -11320,6 +11320,65 @@ async function caseV01030Pshm5InjectsBreadcrumb() {
     /class:\s*["']Breadcrumb["']/.test(src));
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// v0.104.0 S1 (Task 1): DocSearch helper — text filter + dynamic tag chips +
+// scoped Obsidian-search button. Static-string regex asserts against the new
+// helper at platform/blueprints/project/helpers/doc-search.js. HC-V01040-DS-1
+// covers class + instance render method; HC-V01040-DS-2 the static matches()
+// purity; HC-V01040-DS-3 the doc-note exclusion in _countTags; HC-V01040-DS-4
+// the top-8 chip cap; HC-V01040-DS-5 the scoped Obsidian global-search:open
+// integration; HC-V01040-DS-6 the AND-logic across text + tag chips.
+// ──────────────────────────────────────────────────────────────────────────────
+
+async function caseV01040Ds1ClassDefined() {
+  console.log("\n--- Case HC-V01040-DS-1: DocSearch class declared + instance render method ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/doc-search.js"), "utf8");
+  assertTrue("HC-V01040-DS-1: class DocSearch declared", /class\s+DocSearch\s*\{/.test(src));
+  assertTrue("HC-V01040-DS-1: instance render method", /\brender\s*\(\s*dv\s*,\s*opts\s*\)/.test(src));
+}
+
+async function caseV01040Ds2StaticMatches() {
+  console.log("\n--- Case HC-V01040-DS-2: static matches(page, ctx) pure-function shape ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/doc-search.js"), "utf8");
+  assertTrue("HC-V01040-DS-2: static matches method present",
+    /static\s+matches\s*\(\s*page\s*,\s*ctx\s*\)/.test(src));
+  assertTrue("HC-V01040-DS-2: matches returns true when ctx absent/inactive",
+    /!ctx\.hasActiveFilter/.test(src) || /!ctx\s*\|\|\s*!ctx\.hasActiveFilter/.test(src));
+}
+
+async function caseV01040Ds3CountTagsExcludesDocNote() {
+  console.log("\n--- Case HC-V01040-DS-3: _countTags excludes the universal doc-note tag from the chip pool ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/doc-search.js"), "utf8");
+  assertTrue("HC-V01040-DS-3: _countTags method present", /_countTags\s*\(/.test(src));
+  assertTrue("HC-V01040-DS-3: excludes 'doc-note' tag from chip pool",
+    /doc-note/.test(src) && /continue|skip/.test(src));
+}
+
+async function caseV01040Ds4Top8Chips() {
+  console.log("\n--- Case HC-V01040-DS-4: top-8 cap on dynamic tag chips ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/doc-search.js"), "utf8");
+  assertTrue("HC-V01040-DS-4: top-8 cap on chips",
+    /\.slice\(\s*0\s*,\s*8\s*\)/.test(src) || /slice\(0,\s*8\)/.test(src));
+}
+
+async function caseV01040Ds5ScopedSearchButton() {
+  console.log("\n--- Case HC-V01040-DS-5: scoped Obsidian-search button invokes global-search:open with path: pre-fill ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/doc-search.js"), "utf8");
+  assertTrue("HC-V01040-DS-5: invokes global-search:open command",
+    /global-search:open/.test(src));
+  assertTrue("HC-V01040-DS-5: pre-fills `path:` query",
+    /path:\s*"\$\{|`path:"\$\{/.test(src) || /path:[^"]*scopePath/.test(src));
+}
+
+async function caseV01040Ds6AndLogicMatches() {
+  console.log("\n--- Case HC-V01040-DS-6: matches uses AND logic across text + selected tags ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/doc-search.js"), "utf8");
+  assertTrue("HC-V01040-DS-6: matches uses AND logic across text + tags",
+    /return\s+false/.test(src));
+  assertTrue("HC-V01040-DS-6: tag match requires ALL selected tags",
+    /for\s*\(\s*const\s+\w+\s+of\s+ctx\.tags\s*\)/.test(src));
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -11905,6 +11964,14 @@ async function caseV01030Pshm5InjectsBreadcrumb() {
   await caseV01030Pshm3MaterializesSectionHubs();
   await caseV01030Pshm4MigratesDocNoteFrontmatter();
   await caseV01030Pshm5InjectsBreadcrumb();
+
+  // v0.104.0 S1 (Task 1): DocSearch helper — text filter + tag chips + scoped-search button.
+  await caseV01040Ds1ClassDefined();
+  await caseV01040Ds2StaticMatches();
+  await caseV01040Ds3CountTagsExcludesDocNote();
+  await caseV01040Ds4Top8Chips();
+  await caseV01040Ds5ScopedSearchButton();
+  await caseV01040Ds6AndLogicMatches();
 
   // v0.65.0 HC-V065-RUN-NOTE: write-run-note-* sub-skill lint
   {
