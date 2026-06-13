@@ -1,4 +1,12 @@
-// section-hub.js — v1.17.0 helper (sauce v0.103.0 S2.2).
+// section-hub.js — v1.18.0 helper (sauce v0.104.0 S2.2).
+//
+// v0.104.0 S2.2: consumes the v0.104.0 DocSearch helper. The filter UI mounts
+// above the + New Doc / + New Sub-Section buttons. Scope is THIS section's
+// folder; recursive: true at depth 1 (covers sub-section docs in the count),
+// recursive: false at depth 2 (leaf). The docs query + (depth-1) sub-section
+// card count both gate on customJS.DocSearch.matches. onChange triggers a full
+// re-render via dv.container.empty() + this.render(dv); _currentCtx stash is
+// the same pattern ProjectDocsIndex uses.
 //
 // Renders any section-hub note — depth 1 (section) OR depth 2 (sub-section).
 // Reads its own frontmatter (type, project, project_slug, section,
@@ -45,6 +53,29 @@ class SectionHub {
     const sectionSlug = cur.section_slug;
     const sectionName = cur.section || cur.file.name;
     if (!projectSlug || !sectionSlug) return;
+
+    // v0.104.0 S2.2: DocSearch filter strip — scoped to THIS section's folder.
+    // depth 1: recursive (covers sub-section docs in count). depth 2: leaf.
+    // Compute scopePath up-front so DocSearch + the docsPath below stay in sync.
+    const parentSlugForScope = depth === 2
+      ? this._slugify(this._stripLink(cur.parent_section))
+      : null;
+    const scopePath = depth === 1
+      ? `spice/projects/${projectSlug}/docs/${sectionSlug}`
+      : `spice/projects/${projectSlug}/docs/${parentSlugForScope}/${sectionSlug}`;
+    const filterCtx = customJS.DocSearch.render(dv, {
+      projectSlug,
+      scopePath,
+      recursive: depth === 1,
+      onChange: (ctx) => {
+        this._currentCtx = ctx;
+        dv.container.empty();
+        this.render(dv);
+      },
+    });
+    if (this._currentCtx) {
+      Object.assign(filterCtx, this._currentCtx);
+    }
 
     // 1. + New Doc — presetPrompts depend on depth.
     //    At depth 1, the new doc lives directly in this section's folder
@@ -101,8 +132,11 @@ class SectionHub {
           meta: (p) => {
             const subSlug = p.section_slug || this._slugify(p.section || p.file.name);
             const subFolder = `${sectionPath}/${subSlug}`;
+            // v0.104.0 S2.2: sub-section card count also gates on the active
+            // filter so the meta line matches what the user sees inside.
             const count = dv.pages(`"${subFolder}"`)
-              .where((q) => q.type === "doc-note" && q.file.folder === subFolder)
+              .where((q) => q.type === "doc-note" && q.file.folder === subFolder
+                && customJS.DocSearch.matches(q, filterCtx))
               .length;
             return `${count} doc${count === 1 ? "" : "s"}`;
           },
@@ -118,7 +152,8 @@ class SectionHub {
       : `spice/projects/${projectSlug}/docs/${this._slugify(this._stripLink(cur.parent_section))}/${sectionSlug}`;
 
     const docs = dv.pages(`"${docsPath}"`)
-      .where((p) => p.type === "doc-note" && p.file.folder === docsPath);
+      .where((p) => p.type === "doc-note" && p.file.folder === docsPath
+        && customJS.DocSearch.matches(p, filterCtx));
 
     dv.header(3, "Docs");
     if (docs.length === 0) {

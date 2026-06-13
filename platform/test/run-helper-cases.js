@@ -11404,6 +11404,24 @@ async function caseV01040PdiExt3RerenderOnChange() {
     /dv\.container\.empty\(\)/.test(src) && /this\.render\(dv\)/.test(src));
 }
 
+// v0.104.0 S2.2 (Task 3): SectionHub consumes DocSearch (within-section
+// filter). HC-V01040-SH-EXT-1 confirms the helper invokes
+// customJS.DocSearch.render (scoped to this section's folder); HC-V01040-SH-EXT-2
+// confirms it references the static customJS.DocSearch.matches in the docs
+// query + (depth-1) sub-section card count.
+async function caseV01040ShExt1InvokesDocSearch() {
+  console.log("\n--- Case HC-V01040-SH-EXT-1: SectionHub invokes customJS.DocSearch.render ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/section-hub.js"), "utf8");
+  assertTrue("HC-V01040-SH-EXT-1: invokes customJS.DocSearch.render",
+    /customJS\.DocSearch\.render\(/.test(src));
+}
+async function caseV01040ShExt2MatchesUsed() {
+  console.log("\n--- Case HC-V01040-SH-EXT-2: SectionHub references customJS.DocSearch.matches ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/section-hub.js"), "utf8");
+  assertTrue("HC-V01040-SH-EXT-2: references customJS.DocSearch.matches",
+    /customJS\.DocSearch\.matches\(/.test(src));
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -12002,6 +12020,10 @@ async function caseV01040PdiExt3RerenderOnChange() {
   await caseV01040PdiExt1InvokesDocSearch();
   await caseV01040PdiExt2MatchesUsed();
   await caseV01040PdiExt3RerenderOnChange();
+
+  // v0.104.0 S2.2 (Task 3): SectionHub consumes DocSearch.
+  await caseV01040ShExt1InvokesDocSearch();
+  await caseV01040ShExt2MatchesUsed();
 
   // v0.65.0 HC-V065-RUN-NOTE: write-run-note-* sub-skill lint
   {
