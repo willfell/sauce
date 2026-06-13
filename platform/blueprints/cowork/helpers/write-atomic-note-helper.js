@@ -23,7 +23,7 @@
  * Status strings:
  *   ok
  *   failed:contract-violation:missing-input
- *   failed:contract-violation:missing-rating-callout       (v0.97.4)
+ *   failed:contract-violation:missing-rating-callout       (v0.97.4; accepts rating OR feedback-capture sentinel)
  *   failed:contract-violation:missing-anti-echo-callout    (v0.97.4)
  *   failed:contract-violation:sidecar-schema
  *   failed:filesystem:md-write:<errno-or-message>
@@ -31,7 +31,7 @@
  *
  * Guard ordering (deterministic):
  *   1. missing-input
- *   2. missing-rating-callout    (gate: surfaced_kinds_for_rating.length>0 AND learning_enabled !== false)
+ *   2. missing-rating-callout    (gate: surfaced_kinds_for_rating.length>0 AND learning_enabled !== false; accepts rating OR feedback-capture sentinel)
  *   3. missing-anti-echo-callout (gate: sidecar.render_aspects_applied includes "anti_echo:include")
  *   4. coverage-gap injection    (gate: expected_kinds.length > sidecar.surfaced_kinds.length — non-failing; body+sidecar mutated)
  *   5. sidecar-schema (validateSidecar)
@@ -45,6 +45,10 @@ const path = require("node:path");
 const { validateSidecar } = require("./validate-sidecar-helper");
 
 const RATING_SENTINEL = "<!-- cowork:rating-block schema=";
+// v0.101.0 — all five cadences emit feedback-capture; rating-block acceptance
+// below is PERMANENT legacy tolerance (historical corpus + back-compat tests),
+// not a deprecation window.
+const FEEDBACK_SENTINEL = "<!-- cowork:feedback-capture v=";
 const ANTI_ECHO_PHRASE = "Outside yesterday's frame";
 const ANTI_ECHO_ASPECT = "anti_echo:include";
 
@@ -138,7 +142,11 @@ function writeAtomicNote(opts) {
     Array.isArray(surfaced_kinds_for_rating)
     && surfaced_kinds_for_rating.length > 0
     && learning_enabled !== false;
-  if (ratingGateOpen && !String(body_md).includes(RATING_SENTINEL)) {
+  if (
+    ratingGateOpen
+    && !String(body_md).includes(RATING_SENTINEL)
+    && !String(body_md).includes(FEEDBACK_SENTINEL)
+  ) {
     return { status: "failed:contract-violation:missing-rating-callout" };
   }
 
@@ -216,6 +224,7 @@ module.exports = {
   _composeCoverageGapCallout,
   _injectCoverageGapIntoBody,
   RATING_SENTINEL,
+  FEEDBACK_SENTINEL,
   ANTI_ECHO_PHRASE,
   ANTI_ECHO_ASPECT,
 };
