@@ -17,7 +17,7 @@
     "plan_dispatch"
   ],
   "properties": {
-    "schema_version": { "const": "1.0.0" },
+    "schema_version": { "enum": ["1.0.0", "1.1.0"] },
     "generated_by": { "type": "string", "pattern": "^cowork:[a-z-]+@\\d+\\.\\d+\\.\\d+$" },
     "generated_at": { "type": "string", "format": "date-time" },
     "cadence": { "const": "weekly-review" },
@@ -94,6 +94,16 @@
         "skipped":  { "type": "array", "items": { "type": "string" } }
       },
       "additionalProperties": false
+    },
+    "feedback_capture": {
+      "type": "object",
+      "description": "v0.101.0 slim capture observability — this cadence renders the v=4 tap + typing box + kind checklist; satisfaction lives in the .md only (sidecars are written before the user engages).",
+      "additionalProperties": false,
+      "required": ["sentinel_version", "kinds_listed"],
+      "properties": {
+        "sentinel_version": { "type": "string", "enum": ["v=4"] },
+        "kinds_listed": { "type": "array", "items": { "type": "string" } }
+      }
     }
   }
 }
