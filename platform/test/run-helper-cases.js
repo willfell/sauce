@@ -11220,6 +11220,22 @@ async function caseV01030ProjTpl2DocNoteBreadcrumb() {
     /class:\s*["']Breadcrumb["']/.test(body));
 }
 
+// v0.103.0 S3.2 — ProjectNavButtons grows section-hub branches (depth 1 + 2).
+// Depth-1 section-hubs render: Project | Docs | Sibling Sections.
+// Depth-2 section-hubs render: Project | Docs | Section | Sibling Sub-Sections.
+async function caseV01030PnbCtx1SectionHubBranches() {
+  console.log("\n--- Case HC-V01030-PNB-CTX-1: ProjectNavButtons handles section-hub depth 1 + 2 ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/project-nav-buttons.js"), "utf8");
+  assertTrue("HC-V01030-PNB-CTX-1: depth 1 branch present",
+    /(?:type\s*===\s*["']section-hub["']).*depth\s*===\s*1/s.test(src) || /section-hub.*depth.*1/s.test(src));
+  assertTrue("HC-V01030-PNB-CTX-1: depth 2 branch present",
+    /(?:type\s*===\s*["']section-hub["']).*depth\s*===\s*2/s.test(src) || /section-hub.*depth.*2/s.test(src));
+  assertTrue("HC-V01030-PNB-CTX-1: Sibling Sections label",
+    /Sibling\s*Sections/i.test(src));
+  assertTrue("HC-V01030-PNB-CTX-1: parent_section reference for depth 2",
+    /parent_section|parent_slug/.test(src));
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -11795,6 +11811,9 @@ async function caseV01030ProjTpl2DocNoteBreadcrumb() {
   await caseV01030ProjMan4FilesAndExtraFiles();
   await caseV01030ProjTpl1DocsHubInvokesIndex();
   await caseV01030ProjTpl2DocNoteBreadcrumb();
+
+  // v0.103.0 S3.2 — ProjectNavButtons context branches for section-hub depth 1 + 2.
+  await caseV01030PnbCtx1SectionHubBranches();
 
   // v0.65.0 HC-V065-RUN-NOTE: write-run-note-* sub-skill lint
   {
