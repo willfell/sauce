@@ -1071,6 +1071,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyDocsBackfill(tp, mech, variables, history, git);          // NEW v0.50.0; renamed from applyWikiBackfill v0.52.0
   await applyDocsHubButtonRepair(tp, mech, variables, history, git);   // NEW v0.100.2 — heals existing broken "+ New Doc" blocks (backfill is create-if-absent)
   await applyProjectSectionsMigration(tp, mech, variables, history, git);   // NEW v0.102.0 S4 — Strategy A auto-migration (flat docs/*.md → docs/knowledge/ + sections[])
+  await applyProjectSectionsHubMigration(tp, mech, variables, history, git);   // NEW v0.103.0 S4 — heals v0.102.0 vaults: Docs.md → ProjectDocsIndex + materialize Section Hubs + wikilink frontmatter + breadcrumb injection
   await applyExternalPluginInstall(tp, mech, adapter.basePath || (typeof adapter.getBasePath === "function" ? adapter.getBasePath() : null), workshopPath, history, git);  // NEW v0.94.0 — install missing
   await applyExternalPlugins(tp, mech, history, git);
   await scaffoldFoundationalPluginData(tp, mech, workshopPath, variables, history, git);  // NEW v0.26.0
@@ -2358,6 +2359,385 @@ function _titlecaseFromSlug(slug) {
     .split("-")
     .map((w) => (w.length ? w.charAt(0).toUpperCase() + w.slice(1) : w))
     .join(" ");
+}
+
+// applyProjectSectionsHubMigration — v0.103.0 S4 (Task 6). Heals existing
+// v0.102.0 vaults by upgrading them to the section-hubs layout. For each
+// project under spice/projects/:
+//   1. Rewrites docs/Docs.md body to invoke ProjectDocsIndex (instead of
+//      ProjectDocsCards|ProjectDocsSections) and strips the standalone
+//      entity-create:doc-note block (now offered by the index helper).
+//   2. Materializes Section Hub notes (Knowledge.md, Notes.md, etc.) in each
+//      existing docs/<slug>/ subfolder. Recurses ONE level deep — any sub-folder
+//      containing ≥1 doc-note gets a sub-section hub (depth: 2).
+//   3. Migrates doc-note frontmatter: section: "Knowledge" (string) →
+//      section: "[[Knowledge]]" (wikilink). Adds sub_section: "[[X]]" when the
+//      doc-note lives in a sub-folder.
+//   4. Injects a breadcrumb dataviewjs block at the top of every doc-note body
+//      (with <!-- breadcrumb-v1.17.0 --> marker for idempotency).
+//   5. Migrates the project's sections[] frontmatter from strings to wikilink form
+//      (or inserts sections[] with the full discovered labels when absent).
+//   6. Default-section guarantee: every project gets Knowledge + Notes hubs even
+//      when currently empty (create folder + materialize hub).
+//
+// Project-gated (manifest.name === "project"). Idempotent per-project: skips
+// any project whose Docs.md body already invokes ProjectDocsIndex. Failure-loud
+// per-project: wraps each project body in try/catch, emits a warning event,
+// continues to the next project — NEVER throws.
+async function applyProjectSectionsHubMigration(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "project") return;
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+
+  const projectsRoot = "spice/projects";
+  if (!(await adapter.exists(projectsRoot))) return;
+
+  let projectsList;
+  try {
+    projectsList = await adapter.list(projectsRoot);
+  } catch (e) {
+    if (history) {
+      history.push({
+        event: "warning",
+        step: "project_sections_hub_migration",
+        name: "project",
+        reason: `list failed for ${projectsRoot}: ${e.message}`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  const projectDirs = (projectsList.folders || []).filter((d) => d.split("/").pop() !== "All Projects");
+
+  let migrated = 0;
+  let skipped = 0;
+  let warned = 0;
+
+  for (const projectDir of projectDirs) {
+    const docsDir = `${projectDir}/docs`;
+    const docsHubPath = `${docsDir}/Docs.md`;
+    try {
+      if (!(await adapter.exists(docsHubPath))) {
+        skipped += 1;
+        continue;
+      }
+
+      // Idempotency guard: skip if Docs.md already invokes ProjectDocsIndex.
+      const docsHubBody = await adapter.read(docsHubPath);
+      const alreadyMigrated = /customJS\.ProjectDocsIndex\.render/.test(docsHubBody) ||
+                              /class:\s*["']ProjectDocsIndex["']/.test(docsHubBody);
+      if (alreadyMigrated) {
+        skipped += 1;
+        continue;
+      }
+
+      // 1. Heal Docs.md body.
+      const healed = _healDocsHubBody(docsHubBody);
+      if (healed !== docsHubBody) await adapter.write(docsHubPath, healed);
+
+      // 2. Discover sections (existing subfolders of docs/).
+      const docsList = await adapter.list(docsDir);
+      const sectionFolders = (docsList.folders || []).filter((d) => {
+        const slug = d.split("/").pop();
+        return slug !== "All Projects";
+      });
+
+      // Identify the project note (for sections[] migration + display name).
+      const projectSlug = projectDir.split("/").pop();
+      const dirList = await adapter.list(projectDir);
+      let projectNotePath = null;
+      for (const fp of (dirList.files || [])) {
+        if (!fp.endsWith(".md")) continue;
+        const fb = await adapter.read(fp);
+        if (/^type:\s*["']?project["']?\s*$/m.test(fb)) {
+          projectNotePath = fp;
+          break;
+        }
+      }
+      const projectDisplayName = projectNotePath
+        ? projectNotePath.split("/").pop().replace(/\.md$/, "")
+        : _titlecaseFromSlug(projectSlug);
+
+      // 3. Default-section guarantee: ensure Knowledge + Notes folders exist.
+      const haveSlugs = new Set(sectionFolders.map((d) => d.split("/").pop()));
+      const defaultSections = [];
+      if (!haveSlugs.has("knowledge")) defaultSections.push({ slug: "knowledge", label: "Knowledge" });
+      if (!haveSlugs.has("notes")) defaultSections.push({ slug: "notes", label: "Notes" });
+      for (const def of defaultSections) {
+        const folder = `${docsDir}/${def.slug}`;
+        if (!(await adapter.exists(folder))) await adapter.mkdir(folder);
+        sectionFolders.push(folder);
+      }
+
+      // 4. Materialize Section Hubs (depth 1) + recurse one level (depth 2).
+      const customSectionLabels = [];
+      for (const folder of sectionFolders) {
+        const slug = folder.split("/").pop();
+        const label = _titlecaseFromSlug(slug);
+        customSectionLabels.push(label);
+        const hubPath = `${folder}/${label}.md`;
+        if (!(await adapter.exists(hubPath))) {
+          const hubBody = _sectionHubBody({
+            projectName: projectDisplayName,
+            projectSlug: projectSlug,
+            section: label,
+            sectionSlug: slug,
+            parentSection: "",
+            depth: 1,
+          });
+          await adapter.write(hubPath, hubBody);
+        }
+
+        // 5. Recurse one level for sub-sections — only when the sub-folder
+        //    contains ≥1 doc-note. Each such sub-folder gets a depth-2 hub.
+        let subList;
+        try {
+          subList = await adapter.list(folder);
+        } catch (_e) {
+          subList = { folders: [], files: [] };
+        }
+        for (const subFolder of (subList.folders || [])) {
+          const subSlug = subFolder.split("/").pop();
+          let subItems;
+          try {
+            subItems = await adapter.list(subFolder);
+          } catch (_e) {
+            subItems = { folders: [], files: [] };
+          }
+          let hasDocNote = false;
+          for (const fp of (subItems.files || [])) {
+            if (!fp.endsWith(".md")) continue;
+            const fb = await adapter.read(fp);
+            if (/^type:\s*["']?doc-note["']?\s*$/m.test(fb)) {
+              hasDocNote = true;
+              break;
+            }
+          }
+          if (!hasDocNote) continue;
+          const subLabel = _titlecaseFromSlug(subSlug);
+          const subHubPath = `${subFolder}/${subLabel}.md`;
+          if (!(await adapter.exists(subHubPath))) {
+            const subHubBody = _sectionHubBody({
+              projectName: projectDisplayName,
+              projectSlug: projectSlug,
+              section: subLabel,
+              sectionSlug: subSlug,
+              parentSection: `[[${label}]]`,
+              depth: 2,
+            });
+            await adapter.write(subHubPath, subHubBody);
+          }
+
+          // 6a. Migrate doc-notes in sub-folder: add sub_section frontmatter.
+          //     Skip the sub-section hub itself (its filename matches subLabel.md).
+          for (const fp of (subItems.files || [])) {
+            if (!fp.endsWith(".md")) continue;
+            const baseName = fp.split("/").pop();
+            if (baseName === `${subLabel}.md`) continue;
+            await _migrateDocNote(adapter, fp, label, subLabel);
+          }
+        }
+
+        // 6b. Migrate doc-notes in the section folder (not in sub-folders).
+        //     Skip the section hub itself (its filename matches label.md).
+        for (const fp of (subList.files || [])) {
+          if (!fp.endsWith(".md")) continue;
+          const baseName = fp.split("/").pop();
+          if (baseName === `${label}.md`) continue;
+          await _migrateDocNote(adapter, fp, label, "");
+        }
+      }
+
+      // 7. Migrate project's sections[] frontmatter to wikilink form.
+      if (projectNotePath) {
+        const pBody = await adapter.read(projectNotePath);
+        const newPBody = _migrateProjectSectionsToWikilinks(pBody, customSectionLabels);
+        if (newPBody !== pBody) await adapter.write(projectNotePath, newPBody);
+      }
+
+      migrated += 1;
+      if (history) {
+        history.push({
+          event: "info",
+          step: "project_sections_hub_migration",
+          name: "project",
+          target: projectDir,
+          action: "migrated",
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    } catch (e) {
+      warned += 1;
+      if (history) {
+        history.push({
+          event: "warning",
+          step: "project_sections_hub_migration",
+          name: "project",
+          target: projectDir,
+          reason: `migration failed for ${projectDir}: ${e && e.message ? e.message : String(e)}`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    }
+  }
+
+  if (history) {
+    history.push({
+      event: "info",
+      step: "project_sections_hub_migration",
+      name: "project",
+      reason: `migrated ${migrated} project(s); skipped ${skipped}; ${warned} warning(s)`,
+      git_commit: git.commit,
+      git_tag: git.tag,
+      git_dirty: git.dirty,
+      attempted_at: new Date().toISOString(),
+    });
+  }
+}
+
+// _healDocsHubBody — pure string transform. Removes the standalone
+// entity-create:doc-note dataviewjs block + the horizontal rule that follows
+// it (the doc-note shortcut now lives inside ProjectDocsIndex), and rewrites
+// the ProjectDocsCards|ProjectDocsSections invocation to ProjectDocsIndex.
+// Returns body unchanged when neither pattern matches.
+function _healDocsHubBody(body) {
+  let out = body;
+  // Remove standalone entity-create:doc-note 3-line dataviewjs block + optional --- separator.
+  out = out.replace(
+    /```dataviewjs\n\s*\/\/\s*entity-create:doc-note[^\n]*\n\s*await\s+customJS\.EntityCreate\.render\(dv,\s*\{\s*instance:\s*["']doc-note["']\s*\}\);\n```\n?(?:---\n\n?)?/g,
+    ""
+  );
+  // Replace ProjectDocsCards|ProjectDocsSections invocation with ProjectDocsIndex.
+  out = out.replace(
+    /await\s+dv\.view\("ranch\/views\/customjs-guard",\s*\{\s*class:\s*["'](?:ProjectDocsCards|ProjectDocsSections)["']\s*\}\);/g,
+    'await customJS.ProjectDocsIndex.render(dv);'
+  );
+  return out;
+}
+
+// _sectionHubBody — canonical Section Hub note body. Frontmatter declares
+// type: section-hub + project + section + depth + parent_section (depth 2);
+// body invokes Breadcrumb, SpaceNavButtons, ProjectNavButtons, then SectionHub.
+function _sectionHubBody({ projectName, projectSlug, section, sectionSlug, parentSection, depth }) {
+  return `---
+type: section-hub
+project: "[[${projectName}]]"
+project_slug: ${projectSlug}
+section: ${section}
+section_slug: ${sectionSlug}
+parent_section: "${parentSection}"
+depth: ${depth}
+created_at: "${new Date().toISOString().replace(/\.\d{3}Z$/, "Z")}"
+tags:
+  - section-hub
+---
+
+\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "Breadcrumb" });
+\`\`\`
+
+\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+\`\`\`
+
+\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "ProjectNavButtons" });
+\`\`\`
+
+---
+
+\`\`\`dataviewjs
+await customJS.SectionHub.render(dv);
+\`\`\`
+`;
+}
+
+// _migrateDocNote — three sub-operations on each doc-note file:
+//   1. Wrap section: "<label>" string to section: "[[<label>]]" wikilink form
+//      (skip if already a wikilink).
+//   2. Add sub_section: "[[<label>]]" frontmatter field when subSectionLabel is
+//      provided AND sub_section: is absent.
+//   3. Inject a breadcrumb dataviewjs block at the top of the body (immediately
+//      after the frontmatter close ---), guarded by a
+//      <!-- breadcrumb-v1.17.0 --> marker for idempotency. Skip if the marker
+//      is already present.
+// Writes only when the body changed.
+async function _migrateDocNote(adapter, fp, sectionLabel, subSectionLabel) {
+  const body = await adapter.read(fp);
+  let out = body;
+
+  // 1. section: "Knowledge" -> section: "[[Knowledge]]"
+  out = out.replace(/^section:\s*["']?([^"'\n[\]]+)["']?$/m, (full, val) => {
+    const stripped = val.trim();
+    if (stripped.startsWith("[[")) return full; // already wikilink
+    return `section: "[[${stripped}]]"`;
+  });
+
+  // 2. Add sub_section: "[[<label>]]" if applicable and absent.
+  if (subSectionLabel && !/^sub_section:/m.test(out)) {
+    const fmMatch = out.match(/^---\n([\s\S]*?)\n---/);
+    if (fmMatch) {
+      const fm = fmMatch[1];
+      const newFm = `${fm}\nsub_section: "[[${subSectionLabel}]]"`;
+      out = out.replace(/^---\n[\s\S]*?\n---/, `---\n${newFm}\n---`);
+    }
+  }
+
+  // 3. Inject breadcrumb block at top of body (after frontmatter close) if marker absent.
+  if (!out.includes("<!-- breadcrumb-v1.17.0 -->")) {
+    // Find the closing --- of the leading frontmatter block.
+    const fmEnd = out.indexOf("---\n", 4);
+    if (fmEnd !== -1) {
+      const fmCloseIdx = fmEnd + 4;
+      const before = out.slice(0, fmCloseIdx);
+      const after = out.slice(fmCloseIdx);
+      const breadcrumbBlock = `\n<!-- breadcrumb-v1.17.0 -->\n\`\`\`dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "Breadcrumb" });\n\`\`\`\n\n---\n`;
+      out = before + breadcrumbBlock + after;
+    }
+  }
+
+  if (out !== body) await adapter.write(fp, out);
+}
+
+// _migrateProjectSectionsToWikilinks — pure string transform on project body.
+// When sections: YAML block exists with string entries, rewrites each to
+// wikilink form. When sections: is absent, INSERTS it with the full discovered
+// labels (each as "[[Label]]"). Returns body unchanged when no FM block or
+// nothing to migrate.
+function _migrateProjectSectionsToWikilinks(body, fullLabels) {
+  const m = body.match(/^sections:\s*\n((?:\s*-\s*.+\n)+)/m);
+  if (!m) {
+    // No sections: yet; insert.
+    const fmMatch = body.match(/^---\n([\s\S]*?)\n---/);
+    if (!fmMatch) return body;
+    const fm = fmMatch[1];
+    if (/^sections:/m.test(fm)) return body;
+    if (!fullLabels || fullLabels.length === 0) return body;
+    const yamlList = fullLabels.map((s) => `  - "[[${s}]]"`).join("\n");
+    const newFm = `${fm}\nsections:\n${yamlList}`;
+    return body.replace(/^---\n[\s\S]*?\n---/, `---\n${newFm}\n---`);
+  }
+  const listText = m[1];
+  // For each list line, wrap to wikilink form when not already wikilink.
+  const newLines = listText.split("\n").map((line) => {
+    const t = line.match(/^(\s*-\s*)["']?([^"'\n[\]]+?)["']?\s*$/);
+    if (!t) return line;
+    const prefix = t[1];
+    const val = t[2].trim();
+    if (val.startsWith("[[")) return line;
+    return `${prefix}"[[${val}]]"`;
+  });
+  return body.replace(m[0], `sections:\n${newLines.join("\n")}\n`);
 }
 
 // applyNewEntityButtons — v0.46.0 S2. Aggregates this item's

@@ -11236,6 +11236,90 @@ async function caseV01030PnbCtx1SectionHubBranches() {
     /parent_section|parent_slug/.test(src));
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// v0.103.0 S4 (Task 6): applyProjectSectionsHubMigration — heals v0.102.0 vaults.
+// Static-string regex asserts against platform/install.js source (same pattern as
+// HC-V01020-PSM-1..4). The migration: walks spice/projects/, for each project:
+//   1. Heals Docs.md body — replaces ProjectDocsCards|ProjectDocsSections invocation
+//      with ProjectDocsIndex; strips standalone entity-create:doc-note block.
+//   2. Materializes Section Hubs in each docs/<slug>/ subfolder (Knowledge.md,
+//      Notes.md, etc.) — depth 1 + recurse one level for sub-section hubs (depth 2).
+//   3. Migrates doc-note frontmatter: section: "Knowledge" → section: "[[Knowledge]]";
+//      adds sub_section: "[[X]]" when applicable.
+//   4. Injects a breadcrumb dataviewjs block at the top of every doc-note body
+//      with <!-- breadcrumb-v1.17.0 --> marker for idempotency.
+//   5. Migrates project's sections[] frontmatter from strings to wikilink form.
+//   6. Default-section guarantee: ensures Knowledge + Notes hubs exist even on
+//      currently-empty projects.
+// Idempotent per-project (skip if Docs.md already invokes ProjectDocsIndex),
+// failure-loud per-project (catches + logs warning event, never throws).
+// ──────────────────────────────────────────────────────────────────────────────
+
+async function caseV01030Pshm1FunctionDeclaredAndIdempotent() {
+  console.log("\n--- Case HC-V01030-PSHM-1: applyProjectSectionsHubMigration declared + gated + idempotency guard ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
+  assertTrue("HC-V01030-PSHM-1a: async function applyProjectSectionsHubMigration declared",
+    /async\s+function\s+applyProjectSectionsHubMigration\s*\(/.test(src));
+  assertTrue("HC-V01030-PSHM-1b: gated on manifest.name === 'project'",
+    /async\s+function\s+applyProjectSectionsHubMigration\s*\([^)]*\)\s*\{[\s\S]{0,300}manifest\.name\s*(?:===|!==)\s*["']project["']/.test(src));
+  assertTrue("HC-V01030-PSHM-1c: idempotency guard looks for ProjectDocsIndex in Docs.md body",
+    /ProjectDocsIndex\.render/.test(src) || /class:\s*["']ProjectDocsIndex["']/.test(src));
+  assertTrue("HC-V01030-PSHM-1d: wired into install pipeline after applyProjectSectionsMigration",
+    /await\s+applyProjectSectionsMigration\([^)]*\);\s*[^\n]*\n\s*await\s+applyProjectSectionsHubMigration\(/.test(src));
+}
+
+async function caseV01030Pshm2HealsDocsHubBody() {
+  console.log("\n--- Case HC-V01030-PSHM-2: heals Docs.md (ProjectDocsCards|ProjectDocsSections → ProjectDocsIndex) ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
+  assertTrue("HC-V01030-PSHM-2a: _healDocsHubBody helper declared",
+    /function\s+_healDocsHubBody\s*\(/.test(src));
+  assertTrue("HC-V01030-PSHM-2b: replaces ProjectDocsCards|ProjectDocsSections invocation with ProjectDocsIndex",
+    /ProjectDocsCards\|ProjectDocsSections/.test(src) && /customJS\.ProjectDocsIndex\.render/.test(src));
+  assertTrue("HC-V01030-PSHM-2c: removes standalone entity-create:doc-note block",
+    /entity-create:doc-note/.test(src));
+}
+
+async function caseV01030Pshm3MaterializesSectionHubs() {
+  console.log("\n--- Case HC-V01030-PSHM-3: materializes Section Hub notes (depth 1 + 2) ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
+  assertTrue("HC-V01030-PSHM-3a: _sectionHubBody helper declared",
+    /function\s+_sectionHubBody\s*\(/.test(src));
+  assertTrue("HC-V01030-PSHM-3b: emits type: section-hub frontmatter",
+    /type:\s*section-hub/.test(src));
+  assertTrue("HC-V01030-PSHM-3c: invokes SectionHub.render in body",
+    /customJS\.SectionHub\.render/.test(src));
+  assertTrue("HC-V01030-PSHM-3d: default-section guarantee for knowledge + notes",
+    /"knowledge"/.test(src) && /"notes"/.test(src));
+  assertTrue("HC-V01030-PSHM-3e: recurses one level for sub-section hubs at depth: 2",
+    /depth:\s*2/.test(src));
+}
+
+async function caseV01030Pshm4MigratesDocNoteFrontmatter() {
+  console.log("\n--- Case HC-V01030-PSHM-4: migrates doc-note section: \"X\" → \"[[X]]\" + adds sub_section ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
+  assertTrue("HC-V01030-PSHM-4a: _migrateDocNote helper declared",
+    /async\s+function\s+_migrateDocNote\s*\(/.test(src));
+  assertTrue("HC-V01030-PSHM-4b: wraps section: string value to wikilink form",
+    /section:\s*"\[\[/.test(src));
+  assertTrue("HC-V01030-PSHM-4c: adds sub_section frontmatter field",
+    /sub_section:\s*"\[\[/.test(src));
+  assertTrue("HC-V01030-PSHM-4d: _migrateProjectSectionsToWikilinks helper declared",
+    /function\s+_migrateProjectSectionsToWikilinks\s*\(/.test(src));
+  assertTrue("HC-V01030-PSHM-4e: per-project try/catch with warning event",
+    /event:\s*["']warning["']/.test(src) && /step:\s*["']project_sections_hub_migration["']/.test(src));
+}
+
+async function caseV01030Pshm5InjectsBreadcrumb() {
+  console.log("\n--- Case HC-V01030-PSHM-5: injects breadcrumb block with v1.17.0 marker for idempotency ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
+  assertTrue("HC-V01030-PSHM-5a: emits <!-- breadcrumb-v1.17.0 --> marker literal",
+    /<!--\s*breadcrumb-v1\.17\.0\s*-->/.test(src));
+  assertTrue("HC-V01030-PSHM-5b: idempotency check for breadcrumb marker",
+    /includes\(["']<!--\s*breadcrumb-v1\.17\.0\s*-->/.test(src));
+  assertTrue("HC-V01030-PSHM-5c: emits Breadcrumb dataviewjs invocation",
+    /class:\s*["']Breadcrumb["']/.test(src));
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -11814,6 +11898,13 @@ async function caseV01030PnbCtx1SectionHubBranches() {
 
   // v0.103.0 S3.2 — ProjectNavButtons context branches for section-hub depth 1 + 2.
   await caseV01030PnbCtx1SectionHubBranches();
+
+  // v0.103.0 S4 (Task 6): applyProjectSectionsHubMigration — heals v0.102.0 vaults.
+  await caseV01030Pshm1FunctionDeclaredAndIdempotent();
+  await caseV01030Pshm2HealsDocsHubBody();
+  await caseV01030Pshm3MaterializesSectionHubs();
+  await caseV01030Pshm4MigratesDocNoteFrontmatter();
+  await caseV01030Pshm5InjectsBreadcrumb();
 
   // v0.65.0 HC-V065-RUN-NOTE: write-run-note-* sub-skill lint
   {
