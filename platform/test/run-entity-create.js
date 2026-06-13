@@ -806,10 +806,18 @@ function seedVault(setup) {
         // prefix is now `.../docs/{{prompts.section_slug}}` so new docs land
         // under their chosen section bucket. The project-slug substitution is
         // still the load-bearing identifier; we assert both pieces are present.
-        ok("DOC-2 doc-note destination.folder_prefix uses {{current_file.frontmatter.project_slug}} + section_slug subfolder",
-            docEntry.destination &&
-            docEntry.destination.folder_prefix === "spice/projects/{{current_file.frontmatter.project_slug}}/docs/{{prompts.section_slug}}",
-            `got ${JSON.stringify(docEntry.destination && docEntry.destination.folder_prefix)}`);
+        //
+        // v0.103.0 S3: doc-note button gained an optional sub_section subfolder.
+        // The folder prefix is now `.../docs/<section_slug>/<sub_section_slug>`
+        // (sub_section_slug is empty when no sub-section is chosen; entity-
+        // create's _ensureFolder collapses double slashes via split('/').filter(Boolean)).
+        // The DOC-2 contract accepts either form so v0.102.0 + v0.103.0 both pass.
+        const docPrefix = docEntry.destination && docEntry.destination.folder_prefix;
+        const v0102Form = "spice/projects/{{current_file.frontmatter.project_slug}}/docs/{{prompts.section_slug}}";
+        const v0103Form = "spice/projects/{{current_file.frontmatter.project_slug}}/docs/{{prompts.section_slug}}/{{prompts.sub_section_slug}}";
+        ok("DOC-2 doc-note destination.folder_prefix uses {{current_file.frontmatter.project_slug}} + section_slug subfolder (+ optional sub_section_slug)",
+            docEntry.destination && (docPrefix === v0102Form || docPrefix === v0103Form),
+            `got ${JSON.stringify(docPrefix)}`);
 
         ok("DOC-3 doc-note frontmatter_template.project uses {{current_file.frontmatter.project_name}}",
             docEntry.frontmatter_template &&

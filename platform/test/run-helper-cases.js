@@ -6928,14 +6928,20 @@ async function casePDC10NoLinkObjectTarget() {
 // AND (b) the broken AccentButton-with-doc-note-args form is absent (in case
 // a future edit reintroduces a standalone block, it must NOT use the broken
 // form).
+//
+// v0.103.0 S3 update: ProjectDocsSections is RETIRED from the Docs Hub
+// template — ProjectDocsIndex (the new sections-index landing helper) takes
+// over. DHB-1 now guards (a) ProjectDocsIndex is wired on the Docs Hub
+// template, AND (b) the broken AccentButton form is still absent.
 async function caseDHB1DocsHubTemplateCanonical() {
-  console.log("\n--- Case DHB-1: Docs Hub template wires ProjectDocsSections + no broken AccentButton form ---");
+  console.log("\n--- Case DHB-1: Docs Hub template wires ProjectDocsIndex + no broken AccentButton form ---");
   const src = fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/project/templates/Docs Hub.md"),
     "utf8"
   );
-  assertTrue("DHB-1: ProjectDocsSections invoked via customjs-guard view (v0.102.0 S4 contract)",
-    /customjs-guard["'\s,\n]+[^}]*class\s*:\s*["']ProjectDocsSections["']/.test(src));
+  assertTrue("DHB-1: ProjectDocsIndex invoked via customjs-guard view (v0.103.0 S3 contract)",
+    /customjs-guard["'\s,\n]+[^}]*class\s*:\s*["']ProjectDocsIndex["']/.test(src)
+      || /customJS\.ProjectDocsIndex\.render/.test(src));
   assertTrue("DHB-1: broken AccentButton-with-doc-note-args form absent",
     !/class:\s*"AccentButton",\s*args:\s*\[\{\s*id:\s*"doc-note"/.test(src));
 }
@@ -7020,7 +7026,7 @@ async function caseFA3ProjectManifest() {
   console.log("\n--- Case FA3-PROJECT-MANIFEST: project@1.13.0 canonical vocab ---");
   const m = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/project/manifest.json"), "utf8"));
-  assertTrue("FA3-PROJ-1: project version >= 1.13.0", /^1\.(13|14|15|16)\.\d+$/.test(m.version),
+  assertTrue("FA3-PROJ-1: project version >= 1.13.0", /^1\.(13|14|15|16|17)\.\d+$/.test(m.version),
     `got: ${m.version}`);
   const ec0 = m.new_entity_buttons[0].frontmatter_template;
   assertTrue("FA3-PROJ-2: project entity-create has created_at canonical",
@@ -10568,10 +10574,14 @@ function _readProjManRaw() {
 }
 
 async function caseV01020ProjMan1VersionAndCustomjs() {
-  console.log(`\n--- Case HC-V01020-PROJ-MAN-1: project manifest version 1.16.0 + customjs_classes adds ProjectDocsSections + ProjectMeetingsPanel ---`);
+  console.log(`\n--- Case HC-V01020-PROJ-MAN-1: project manifest version pins (>= 1.16.0) + customjs_classes carries v0.102.0 ProjectDocsSections + ProjectMeetingsPanel surfaces ---`);
   const m = _readProjManifest();
-  assertTrue("HC-V01020-PROJ-MAN-1a: project manifest version is exactly 1.16.0",
-    m && m.version === "1.16.0", `got: ${m && m.version}`);
+  // v0.103.0 supersedes the v0.102.0 hard-pin (1.16.0). The v0.102.0 contract
+  // shifts from "exact version" to "version >= 1.16.0 AND v0.102.0 customjs
+  // classes still registered". The pin-tightening v0.103.0 contract lives in
+  // HC-V01030-PROJ-MAN-1.
+  assertTrue("HC-V01020-PROJ-MAN-1a: project manifest version >= 1.16.0",
+    m && /^1\.(1[6-9]|[2-9]\d)\.\d+$/.test(m.version), `got: ${m && m.version}`);
   const cls = (m && Array.isArray(m.customjs_classes)) ? m.customjs_classes : [];
   assertTrue("HC-V01020-PROJ-MAN-1b: customjs_classes includes ProjectDocsSections",
     cls.indexOf("ProjectDocsSections") !== -1);
@@ -10637,11 +10647,15 @@ async function caseV01020ProjMan4SectionPromptHasSafeFilenameValidate() {
 }
 
 async function caseV01020ProjTpl1DocsHubInvokesSections() {
-  console.log(`\n--- Case HC-V01020-PROJ-TPL-1: Docs Hub template invokes ProjectDocsSections + drops ProjectDocsCards + drops marker ---`);
+  console.log(`\n--- Case HC-V01020-PROJ-TPL-1: Docs Hub template invokes a v0.102.0+ sections helper (ProjectDocsSections or successor ProjectDocsIndex) + drops ProjectDocsCards + drops marker ---`);
   assertTrue("HC-V01020-PROJ-TPL-1: Docs Hub.md exists", fs.existsSync(_PROJ_DOCS_HUB_TPL));
   const body = fs.readFileSync(_PROJ_DOCS_HUB_TPL, "utf8");
-  assertTrue("HC-V01020-PROJ-TPL-1a: Docs Hub invokes ProjectDocsSections via customjs-guard view",
-    /customjs-guard["'\s,\n]+[^}]*class\s*:\s*["']ProjectDocsSections["']/.test(body));
+  // v0.103.0 supersedes: ProjectDocsIndex replaces ProjectDocsSections on Docs.md.
+  // The v0.102.0 contract becomes "EITHER helper wired" — the strict pinned-to-Index
+  // assertion lives in HC-V01030-PROJ-TPL-1.
+  assertTrue("HC-V01020-PROJ-TPL-1a: Docs Hub invokes ProjectDocsSections OR ProjectDocsIndex via customjs-guard view",
+    /customjs-guard["'\s,\n]+[^}]*class\s*:\s*["'](?:ProjectDocsSections|ProjectDocsIndex)["']/.test(body)
+      || /customJS\.ProjectDocsIndex\.render/.test(body));
   assertTrue("HC-V01020-PROJ-TPL-1b: Docs Hub no longer invokes ProjectDocsCards",
     !/ProjectDocsCards/.test(body));
   assertTrue("HC-V01020-PROJ-TPL-1c: Docs Hub no longer contains entity-create:doc-note marker",
@@ -11050,6 +11064,160 @@ async function caseV01030Sh7EmptyStateCallout() {
     /No docs in\s+\*\*/.test(src));
   assertTrue("HC-V01030-SH-7c: '+ New Doc' hint in empty-state",
     /\+\s*New Doc/.test(src));
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// v0.103.0 S3 (Task 4): project blueprint 1.17.0 manifest + templates.
+// Static-string regex asserts against the manifest JSON + Docs Hub / Section Hub
+// / Doc Note templates. PROJ-MAN-1..4 cover version bump, new entity-create
+// entries, extended doc-note prompts + sub_section field, files[] additions,
+// and project extra_files Knowledge.md + Notes.md materializations. PROJ-TPL-1..2
+// cover the Docs Hub rewrite (ProjectDocsIndex replaces ProjectDocsSections),
+// Section Hub template existence + dispatch, and Doc Note template breadcrumb
+// injection with the <!-- breadcrumb-v1.17.0 --> idempotency marker.
+// ──────────────────────────────────────────────────────────────────────────────
+
+const _PROJ_SECTION_HUB_TPL = path.join(WORKSHOP, "platform", "blueprints", "project", "templates", "Section Hub.md");
+const _PROJ_DOC_NOTE_TPL = path.join(WORKSHOP, "platform", "blueprints", "project", "templates", "Doc Note.md");
+
+async function caseV01030ProjMan1VersionAndCustomjs() {
+  console.log("\n--- Case HC-V01030-PROJ-MAN-1: project manifest version 1.17.0 + customjs_classes adds Breadcrumb + ProjectDocsIndex + SectionHub ---");
+  const m = _readProjManifest();
+  assertTrue("HC-V01030-PROJ-MAN-1a: project manifest version is exactly 1.17.0",
+    m && m.version === "1.17.0", `got: ${m && m.version}`);
+  const cls = (m && Array.isArray(m.customjs_classes)) ? m.customjs_classes : [];
+  assertTrue("HC-V01030-PROJ-MAN-1b: customjs_classes includes Breadcrumb",
+    cls.indexOf("Breadcrumb") !== -1);
+  assertTrue("HC-V01030-PROJ-MAN-1c: customjs_classes includes ProjectDocsIndex",
+    cls.indexOf("ProjectDocsIndex") !== -1);
+  assertTrue("HC-V01030-PROJ-MAN-1d: customjs_classes includes SectionHub",
+    cls.indexOf("SectionHub") !== -1);
+}
+
+async function caseV01030ProjMan2SectionHubButtons() {
+  console.log("\n--- Case HC-V01030-PROJ-MAN-2: new_entity_buttons[] includes section-hub + sub-section-hub with correct depth + parent_section ---");
+  const m = _readProjManifest();
+  const buttons = (m && Array.isArray(m.new_entity_buttons)) ? m.new_entity_buttons : [];
+  const secBtn = buttons.find(b => b && b.id === "section-hub");
+  const subBtn = buttons.find(b => b && b.id === "sub-section-hub");
+
+  assertTrue("HC-V01030-PROJ-MAN-2a: section-hub entity-create entry exists", !!secBtn);
+  assertTrue("HC-V01030-PROJ-MAN-2b: section-hub label is '+ New Section'",
+    secBtn && secBtn.label === "+ New Section");
+  assertTrue("HC-V01030-PROJ-MAN-2c: section-hub frontmatter_template.type === 'section-hub'",
+    secBtn && secBtn.frontmatter_template && secBtn.frontmatter_template.type === "section-hub");
+  assertTrue("HC-V01030-PROJ-MAN-2d: section-hub frontmatter_template.depth === 1",
+    secBtn && secBtn.frontmatter_template && secBtn.frontmatter_template.depth === 1);
+  assertTrue("HC-V01030-PROJ-MAN-2e: section-hub frontmatter_template.parent_section is empty string",
+    secBtn && secBtn.frontmatter_template && secBtn.frontmatter_template.parent_section === "");
+  assertTrue("HC-V01030-PROJ-MAN-2f: section-hub body_template is 'Template, Section Hub.md'",
+    secBtn && secBtn.body_template === "Template, Section Hub.md");
+
+  assertTrue("HC-V01030-PROJ-MAN-2g: sub-section-hub entity-create entry exists", !!subBtn);
+  assertTrue("HC-V01030-PROJ-MAN-2h: sub-section-hub label is '+ New Sub-Section'",
+    subBtn && subBtn.label === "+ New Sub-Section");
+  assertTrue("HC-V01030-PROJ-MAN-2i: sub-section-hub frontmatter_template.depth === 2",
+    subBtn && subBtn.frontmatter_template && subBtn.frontmatter_template.depth === 2);
+  assertTrue("HC-V01030-PROJ-MAN-2j: sub-section-hub frontmatter_template.parent_section references current_file.frontmatter.section as wikilink",
+    subBtn && subBtn.frontmatter_template
+      && typeof subBtn.frontmatter_template.parent_section === "string"
+      && /\[\[\{\{current_file\.frontmatter\.section\}\}\]\]/.test(subBtn.frontmatter_template.parent_section));
+  assertTrue("HC-V01030-PROJ-MAN-2k: sub-section-hub destination.folder_prefix nests under parent_slug",
+    subBtn && subBtn.destination && typeof subBtn.destination.folder_prefix === "string"
+      && /\{\{prompts\.parent_slug\}\}\/\{\{prompts\.slug\}\}/.test(subBtn.destination.folder_prefix));
+}
+
+async function caseV01030ProjMan3DocNoteSubSection() {
+  console.log("\n--- Case HC-V01030-PROJ-MAN-3: doc-note entity-create entry extended with sub_section + sub_section_slug ---");
+  const m = _readProjManifest();
+  const buttons = (m && Array.isArray(m.new_entity_buttons)) ? m.new_entity_buttons : [];
+  const docBtn = buttons.find(b => b && b.id === "doc-note");
+  assertTrue("HC-V01030-PROJ-MAN-3a: doc-note entity-create entry exists", !!docBtn);
+
+  const docPrompts = (docBtn && Array.isArray(docBtn.prompts)) ? docBtn.prompts : [];
+  const subPrompt = docPrompts.find(p => p && p.key === "sub_section");
+  const subSlugPrompt = docPrompts.find(p => p && p.key === "sub_section_slug");
+  assertTrue("HC-V01030-PROJ-MAN-3b: doc-note has prompts.sub_section (optional, default empty)",
+    subPrompt && subPrompt.type === "string" && (subPrompt.default === "" || subPrompt.default === undefined)
+      && subPrompt.required !== true);
+  assertTrue("HC-V01030-PROJ-MAN-3c: doc-note has prompts.sub_section_slug with derive slugify(prompts.sub_section)",
+    subSlugPrompt && subSlugPrompt.derive === "slugify(prompts.sub_section)");
+  assertTrue("HC-V01030-PROJ-MAN-3d: doc-note destination.folder_prefix appends {{prompts.sub_section_slug}}",
+    docBtn && docBtn.destination && typeof docBtn.destination.folder_prefix === "string"
+      && docBtn.destination.folder_prefix.indexOf("{{prompts.sub_section_slug}}") !== -1);
+  assertTrue("HC-V01030-PROJ-MAN-3e: doc-note frontmatter_template.sub_section === '{{prompts.sub_section}}'",
+    docBtn && docBtn.frontmatter_template && docBtn.frontmatter_template.sub_section === "{{prompts.sub_section}}");
+}
+
+async function caseV01030ProjMan4FilesAndExtraFiles() {
+  console.log("\n--- Case HC-V01030-PROJ-MAN-4: files[] adds 3 new helpers + Section Hub.md; project extra_files[] materializes Knowledge.md + Notes.md ---");
+  const m = _readProjManifest();
+  const files = (m && Array.isArray(m.files)) ? m.files : [];
+  const bc = files.find(f => f && f.source === "helpers/breadcrumb.js");
+  const pdi = files.find(f => f && f.source === "helpers/project-docs-index.js");
+  const sh = files.find(f => f && f.source === "helpers/section-hub.js");
+  const shTpl = files.find(f => f && f.source === "templates/Section Hub.md");
+  assertTrue("HC-V01030-PROJ-MAN-4a: files[] includes helpers/breadcrumb.js", !!bc);
+  assertTrue("HC-V01030-PROJ-MAN-4b: files[] includes helpers/project-docs-index.js", !!pdi);
+  assertTrue("HC-V01030-PROJ-MAN-4c: files[] includes helpers/section-hub.js", !!sh);
+  assertTrue("HC-V01030-PROJ-MAN-4d: files[] includes templates/Section Hub.md", !!shTpl);
+  assertTrue("HC-V01030-PROJ-MAN-4e: Section Hub template dest is Template, Section Hub.md",
+    shTpl && shTpl.dest === "{{templates_path}}/Template, Section Hub.md");
+
+  const buttons = (m && Array.isArray(m.new_entity_buttons)) ? m.new_entity_buttons : [];
+  const projBtn = buttons.find(b => b && b.id === "project");
+  assertTrue("HC-V01030-PROJ-MAN-4f: project entity-create entry exists", !!projBtn);
+  const extras = (projBtn && Array.isArray(projBtn.extra_files)) ? projBtn.extra_files : [];
+  const knowledge = extras.find(x => x && x.filename_pattern === "Knowledge.md");
+  const notes = extras.find(x => x && x.filename_pattern === "Notes.md");
+  assertTrue("HC-V01030-PROJ-MAN-4g: project extra_files materializes Knowledge.md", !!knowledge);
+  assertTrue("HC-V01030-PROJ-MAN-4h: Knowledge.md subfolder is docs/knowledge", knowledge && knowledge.subfolder === "docs/knowledge");
+  assertTrue("HC-V01030-PROJ-MAN-4i: Knowledge.md frontmatter_template.type === 'section-hub'",
+    knowledge && knowledge.frontmatter_template && knowledge.frontmatter_template.type === "section-hub");
+  assertTrue("HC-V01030-PROJ-MAN-4j: Knowledge.md frontmatter_template.section === 'Knowledge'",
+    knowledge && knowledge.frontmatter_template && knowledge.frontmatter_template.section === "Knowledge");
+  assertTrue("HC-V01030-PROJ-MAN-4k: Knowledge.md frontmatter_template.depth === 1",
+    knowledge && knowledge.frontmatter_template && knowledge.frontmatter_template.depth === 1);
+
+  assertTrue("HC-V01030-PROJ-MAN-4l: project extra_files materializes Notes.md", !!notes);
+  assertTrue("HC-V01030-PROJ-MAN-4m: Notes.md subfolder is docs/notes", notes && notes.subfolder === "docs/notes");
+  assertTrue("HC-V01030-PROJ-MAN-4n: Notes.md frontmatter_template.section === 'Notes'",
+    notes && notes.frontmatter_template && notes.frontmatter_template.section === "Notes");
+}
+
+async function caseV01030ProjTpl1DocsHubInvokesIndex() {
+  console.log("\n--- Case HC-V01030-PROJ-TPL-1: Docs Hub template invokes ProjectDocsIndex (NOT ProjectDocsSections); Section Hub template exists + invokes SectionHub ---");
+  assertTrue("HC-V01030-PROJ-TPL-1: Docs Hub.md exists", fs.existsSync(_PROJ_DOCS_HUB_TPL));
+  const docsHub = fs.readFileSync(_PROJ_DOCS_HUB_TPL, "utf8");
+  assertTrue("HC-V01030-PROJ-TPL-1a: Docs Hub invokes ProjectDocsIndex",
+    /customJS\.ProjectDocsIndex\.render/.test(docsHub) || /class:\s*["']ProjectDocsIndex["']/.test(docsHub));
+  assertTrue("HC-V01030-PROJ-TPL-1b: Docs Hub no longer invokes ProjectDocsSections",
+    !/ProjectDocsSections/.test(docsHub));
+  assertTrue("HC-V01030-PROJ-TPL-1c: Docs Hub invokes Breadcrumb",
+    /class:\s*["']Breadcrumb["']/.test(docsHub));
+
+  assertTrue("HC-V01030-PROJ-TPL-1d: Section Hub.md template exists", fs.existsSync(_PROJ_SECTION_HUB_TPL));
+  const secHub = fs.readFileSync(_PROJ_SECTION_HUB_TPL, "utf8");
+  assertTrue("HC-V01030-PROJ-TPL-1e: Section Hub invokes SectionHub via customjs-guard",
+    /class:\s*["']SectionHub["']/.test(secHub));
+  assertTrue("HC-V01030-PROJ-TPL-1f: Section Hub invokes Breadcrumb",
+    /class:\s*["']Breadcrumb["']/.test(secHub));
+  assertTrue("HC-V01030-PROJ-TPL-1g: Section Hub frontmatter has type: section-hub",
+    /^type:\s*section-hub\s*$/m.test(secHub));
+  assertTrue("HC-V01030-PROJ-TPL-1h: Section Hub frontmatter has depth field",
+    /^depth:\s*\{\{prompts\.depth/m.test(secHub));
+}
+
+async function caseV01030ProjTpl2DocNoteBreadcrumb() {
+  console.log("\n--- Case HC-V01030-PROJ-TPL-2: Doc Note template has <!-- breadcrumb-v1.17.0 --> marker at top + Breadcrumb invocation ---");
+  assertTrue("HC-V01030-PROJ-TPL-2: Doc Note.md exists", fs.existsSync(_PROJ_DOC_NOTE_TPL));
+  const body = fs.readFileSync(_PROJ_DOC_NOTE_TPL, "utf8");
+  assertTrue("HC-V01030-PROJ-TPL-2a: Doc Note contains <!-- breadcrumb-v1.17.0 --> marker",
+    /<!--\s*breadcrumb-v1\.17\.0\s*-->/.test(body));
+  assertTrue("HC-V01030-PROJ-TPL-2b: marker appears at the very top (within first 20 chars)",
+    body.indexOf("<!-- breadcrumb-v1.17.0 -->") >= 0 && body.indexOf("<!-- breadcrumb-v1.17.0 -->") < 20);
+  assertTrue("HC-V01030-PROJ-TPL-2c: Doc Note invokes Breadcrumb via customjs-guard",
+    /class:\s*["']Breadcrumb["']/.test(body));
 }
 
 (async function main() {
@@ -11619,6 +11787,14 @@ async function caseV01030Sh7EmptyStateCallout() {
   await caseV01030Sh5DocsStrictFolderMatch();
   await caseV01030Sh6BeaconCardsRowMeta();
   await caseV01030Sh7EmptyStateCallout();
+
+  // v0.103.0 S3 — project blueprint 1.17.0 manifest + templates (section-hub schema + Docs Hub rewrite + Doc Note breadcrumb).
+  await caseV01030ProjMan1VersionAndCustomjs();
+  await caseV01030ProjMan2SectionHubButtons();
+  await caseV01030ProjMan3DocNoteSubSection();
+  await caseV01030ProjMan4FilesAndExtraFiles();
+  await caseV01030ProjTpl1DocsHubInvokesIndex();
+  await caseV01030ProjTpl2DocNoteBreadcrumb();
 
   // v0.65.0 HC-V065-RUN-NOTE: write-run-note-* sub-skill lint
   {

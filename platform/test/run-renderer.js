@@ -1807,15 +1807,23 @@ const ENTITY_CREATE_SITES = [
 // per bucket. So this assert now requires (a) ProjectDocsSections dispatch,
 // (b) ProjectDocsCards is GONE, and (c) the broken AccentButton-with-doc-note
 // form is absent (defends against accidental re-introduction).
+//
+// v0.103.0 S3 update: ProjectDocsSections is RETIRED from the Docs Hub
+// template — ProjectDocsIndex (the new sections-index landing helper) takes
+// over. The assert now requires (a) EITHER ProjectDocsSections OR
+// ProjectDocsIndex dispatch, (b) ProjectDocsCards is GONE, (c) the standalone
+// entity-create:doc-note sentinel is GONE, and (d) the broken AccentButton
+// form is absent.
 async function testRWikiHubTemplateBody() {
-  console.log('\n=== R-WIKI-1 — Template, Docs Hub.md body: ProjectDocsSections + no legacy ProjectDocsCards ===');
+  console.log('\n=== R-WIKI-1 — Template, Docs Hub.md body: ProjectDocsIndex/ProjectDocsSections + no legacy ProjectDocsCards ===');
   const templatePath = path.resolve(WORKSHOP, 'platform/blueprints/project/templates/Docs Hub.md');
   if (!fs.existsSync(templatePath)) {
     console.log(`  FAIL — template missing: ${templatePath}`);
     return false;
   }
   const body = fs.readFileSync(templatePath, 'utf8');
-  const hasSectionsDispatch = /class:\s*["']ProjectDocsSections["']/.test(body);
+  const hasSectionsDispatch = /class:\s*["'](?:ProjectDocsSections|ProjectDocsIndex)["']/.test(body)
+    || /customJS\.ProjectDocsIndex\.render/.test(body);
   const noLegacyCardsDispatch = !/class:\s*["']ProjectDocsCards["']/.test(body);
   const noLegacySentinel = !/\/\/\s*entity-create:doc-note/.test(body);
   const noBrokenAccentForm = !/class:\s*["']AccentButton["'],\s*args:\s*\[\{\s*id:\s*["']doc-note["']/.test(body);
