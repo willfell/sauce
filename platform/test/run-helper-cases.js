@@ -10377,6 +10377,101 @@ async function caseV01020EC3SchemaExposesNewFields() {
     `got: ${man.version}`);
 }
 
+// v0.102.0 S2 — ProjectDocsSections helper (Confluence-style buckets on Docs Hub).
+// Static-string asserts against the helper source — the helper runs inside Obsidian's
+// dataviewjs sandbox so we can't unit-test the render output, but the source-text
+// regex assertions lock in the canonical shape that BeaconCards + EntityCreate consume.
+const _PDS_PATH = path.join(WORKSHOP, "platform", "blueprints", "project", "helpers", "project-docs-sections.js");
+
+function _readPdsSrc() {
+  if (!fs.existsSync(_PDS_PATH)) return "";
+  return fs.readFileSync(_PDS_PATH, "utf8");
+}
+
+async function caseV01020PDS1ClassDefinedAsyncRender() {
+  console.log(`\n--- Case HC-V01020-PDS-1: ProjectDocsSections class defined + uses async render ---`);
+  assertTrue("HC-V01020-PDS-1: project-docs-sections.js exists", fs.existsSync(_PDS_PATH));
+  const src = _readPdsSrc();
+  assertTrue("HC-V01020-PDS-1a: class ProjectDocsSections declared",
+    /class\s+ProjectDocsSections\s*\{/.test(src));
+  assertTrue("HC-V01020-PDS-1b: async render(dv, opts ...) method present (NOT view)",
+    /async\s+render\s*\(\s*dv\s*,\s*opts/.test(src));
+  assertTrue("HC-V01020-PDS-1c: does NOT define an async view method",
+    !/async\s+view\s*\(/.test(src));
+}
+
+async function caseV01020PDS2DefaultsKnowledgeNotes() {
+  console.log(`\n--- Case HC-V01020-PDS-2: defaults to ["Knowledge", "Notes"] when sections[] absent/empty ---`);
+  const src = _readPdsSrc();
+  // Literal default array — order matters.
+  assertTrue("HC-V01020-PDS-2: literal default [\"Knowledge\", \"Notes\"] present",
+    /\[\s*["']Knowledge["']\s*,\s*["']Notes["']\s*\]/.test(src));
+}
+
+async function caseV01020PDS3QueriesDocNoteFolderOrSection() {
+  console.log(`\n--- Case HC-V01020-PDS-3: queries p.type === "doc-note" AND filters by p.section OR folder slug ---`);
+  const src = _readPdsSrc();
+  assertTrue("HC-V01020-PDS-3a: filters by p.type === \"doc-note\"",
+    /p\.type\s*===\s*["']doc-note["']/.test(src));
+  // Section frontmatter match
+  assertTrue("HC-V01020-PDS-3b: matches p.section against the section label",
+    /p\.section\s*===\s*section/.test(src));
+  // Folder slug fallback — must use endsWith on p.file.folder
+  assertTrue("HC-V01020-PDS-3c: folder-slug fallback via p.file.folder endsWith",
+    /p\.file\.folder[^\n]*endsWith/.test(src));
+}
+
+async function caseV01020PDS4PerSectionButtonUsesPresetPrompts() {
+  console.log(`\n--- Case HC-V01020-PDS-4: per-section + New button calls EntityCreate.render with presetPrompts.section ---`);
+  const src = _readPdsSrc();
+  assertTrue("HC-V01020-PDS-4a: EntityCreate.render called with instance doc-note",
+    /customJS\.EntityCreate\.render\s*\(\s*dv\s*,\s*\{[^}]*instance\s*:\s*["']doc-note["']/.test(src));
+  assertTrue("HC-V01020-PDS-4b: presetPrompts.section forwarded (literal section variable)",
+    /presetPrompts\s*:\s*\{\s*section\s*:/.test(src));
+}
+
+async function caseV01020PDS5BeaconCardsRowLayout() {
+  console.log(`\n--- Case HC-V01020-PDS-5: BeaconCards rendered with layout: "row" ---`);
+  const src = _readPdsSrc();
+  assertTrue("HC-V01020-PDS-5a: BeaconCards.render called",
+    /customJS\.BeaconCards\.render\s*\(\s*dv\s*,/.test(src));
+  assertTrue("HC-V01020-PDS-5b: layout: \"row\" present",
+    /layout\s*:\s*["']row["']/.test(src));
+}
+
+async function caseV01020PDS6MetaCallbackCreatedAtFallback() {
+  console.log(`\n--- Case HC-V01020-PDS-6: meta callback reads created_at with file.ctime fallback + relative .fromNow() ---`);
+  const src = _readPdsSrc();
+  assertTrue("HC-V01020-PDS-6a: reads p.created_at",
+    /p\.created_at/.test(src) || /raw\s*=\s*p\.created_at/.test(src));
+  assertTrue("HC-V01020-PDS-6b: file.ctime fallback",
+    /p\.file\.ctime/.test(src) || /file\.ctime\.ts/.test(src));
+  assertTrue("HC-V01020-PDS-6c: relative edited via moment(...).fromNow()",
+    /moment\([^)]*p\.file\.mtime\.ts[^)]*\)\.fromNow\s*\(/.test(src) ||
+    /\.fromNow\s*\(\s*\)/.test(src));
+}
+
+async function caseV01020PDS7PerBucketEmptyState() {
+  console.log(`\n--- Case HC-V01020-PDS-7: per-bucket empty state branch + "No docs in" language ---`);
+  const src = _readPdsSrc();
+  assertTrue("HC-V01020-PDS-7a: pages.length === 0 empty branch",
+    /pages\.length\s*===\s*0/.test(src) || /\.length\s*===\s*0/.test(src));
+  assertTrue("HC-V01020-PDS-7b: \"No docs in\" empty-state language",
+    /No docs in/.test(src));
+  // Confirm it's a callout-style stub (example callout per design)
+  assertTrue("HC-V01020-PDS-7c: callout-style stub uses [!example]+",
+    /\[!example\]\+/.test(src));
+}
+
+async function caseV01020PDS8UnfiledBucketMethod() {
+  console.log(`\n--- Case HC-V01020-PDS-8: _renderUnfiledBucket method defined + emits an "Unfiled" header ---`);
+  const src = _readPdsSrc();
+  assertTrue("HC-V01020-PDS-8a: _renderUnfiledBucket method defined",
+    /_renderUnfiledBucket\s*\(/.test(src));
+  assertTrue("HC-V01020-PDS-8b: literal \"Unfiled\" header text present",
+    /["']Unfiled["']/.test(src));
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -10876,6 +10971,16 @@ async function caseV01020EC3SchemaExposesNewFields() {
   await caseV01020EC1PresetPromptsPlumbed();
   await caseV01020EC2OptionsSourceAllProjects();
   await caseV01020EC3SchemaExposesNewFields();
+
+  // v0.102.0 S2 — ProjectDocsSections helper (Confluence-style buckets on Docs Hub).
+  await caseV01020PDS1ClassDefinedAsyncRender();
+  await caseV01020PDS2DefaultsKnowledgeNotes();
+  await caseV01020PDS3QueriesDocNoteFolderOrSection();
+  await caseV01020PDS4PerSectionButtonUsesPresetPrompts();
+  await caseV01020PDS5BeaconCardsRowLayout();
+  await caseV01020PDS6MetaCallbackCreatedAtFallback();
+  await caseV01020PDS7PerBucketEmptyState();
+  await caseV01020PDS8UnfiledBucketMethod();
 
   // v0.65.0 HC-V065-RUN-NOTE: write-run-note-* sub-skill lint
   {
