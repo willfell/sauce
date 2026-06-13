@@ -162,6 +162,10 @@ Helper count UNCHANGED at 13 in v0.32.0 — the new writes are handled by extens
 
 **v0.93.3 observation (applyExternalPlugins is inspection-only).** The function comment at `platform/install.js:2693` is explicit: *"the installer cannot install Obsidian community plugins itself, so this is a detection-and-surface-up helper, not a remediation step."* Adding entries to a mechanism's `external_plugins[]` does NOT cause the install pass to fetch + install the plugin; it only causes a warning Notice + history entry when the declared id is absent from `.obsidian/community-plugins.json`. Actual plugin install lives only in `platform/bootstrap.js`'s `phaseFetchPlugins` (network-gateway per landmine #17), invoked on fresh-vault bootstrap. v0.93.3 baked `new-tab-default-page` + `smart-connections` into convenience + smart-connections-bridge `external_plugins[]` — fresh bootstraps get auto-install, existing consumers get the warning + manual-install workflow. v0.94.0 candidate: extend `platform/install.js` with a new `applyExternalPluginInstall` helper running BEFORE `applyExternalPlugins` to close the existing-consumer gap. No allowlist or helper-count change for v0.93.3.
 
+**v0.102.0 — NEW installer step `applyVaultDefaultPaths` writes to existing `.obsidian/app.json`.** Allowlist UNCHANGED at 18 paths + CLAUDE.md marker regions; helper count UNCHANGED at 14. The v0.102.0 cycle (project workspace — sections + meetings link + vault-defaults install fix) adds a NEW installer step at the vault-init prelude that reads `.obsidian/app.json`, writes `newFileFolderPath: "spice/resources/notes"` + `attachmentFolderPath: "spice/resources/attachments"` when EACH key is currently unset, and creates `spice/resources/{notes,attachments}/` folders if absent. `.obsidian/app.json` is already in the allowlist (v0.26.1 added it for `applyAppSettings`); the v0.102.0 step adds a SECOND helper that writes to the same target file with a divergent posture from `applyAppSettings`: **per-key user-customization-preserved** (writes ONLY when the key is unset; preserves any user value verbatim) — closer to the v0.21.1 `applyHotkeys` per-binding first-wins posture than to v0.26.1 `applyAppSettings`'s platform-as-overrider posture. Backup-on-edit `.sauce-backup` per mechanic #2. Justified because `newFileFolderPath` + `attachmentFolderPath` are user-overridable defaults (legitimate consumer customization), unlike `alwaysOpenInNewTab` which the platform declares as a vault baseline. Two helpers writing the same JSON file is a NEW pattern in the allowlist; both go through Read-Modify-Write so they compose cleanly. Allowlist UNCHANGED at 18 paths; helper count `14 → 15` (new `applyVaultDefaultPaths`). Cycle close history block updated.
+
+- v0.102.0 (2026-06-13): project workspace cycle — sections + meetings link + vault-defaults; lessons captured in result doc.
+
 ### 13. Bootstrap stub is content-static; never re-edit (per-consumer drift forbidden)
 
 Each consumer's `ranch/templater/platformInstall.js` is a ~12-line dispatcher first set during v0.1.2 S2. It MUST be byte-identical across all consumers at any given platform version (`diff` between any two stubs returns empty). The stub never re-syncs with `platform/install.js` — that file is now canonical-only and reached at runtime via `require()`.
@@ -406,6 +410,20 @@ The shape is: if `tsRaw` is set, return its in-window check directly. Never OR w
 - Tests: `AF-V071-1/2/3` in `run-activity-feed.js` lock the strict semantics + legacy fallback contract. Any future in-window predicate should add a parallel test set.
 
 When you write a third time-window predicate (weekly/monthly hub renderer, future ranking surfaces, etc.), copy the shape above. Mobile smoke is mandatory before close on any cycle that touches this path — Node-side preflight cannot reproduce the failure mode.
+
+### 24. Workshop manifest catalogue drifts from per-mechanism manifests
+
+`platform/manifest.json` carries a `mechanisms[]` + `blueprints[]` catalogue with names + versions. This catalogue is INDEPENDENT of the per-mechanism + per-blueprint `manifest.json` files. Bumping a mechanism's own `manifest.json` (and the corresponding pin in `ranch/platform-subscription.json`) does NOT automatically update the catalogue entry in the workshop manifest. Workshop self-install catches this (it cross-references the consumer subscription against the workshop catalogue and rejects the install with skip notices when any pin disagrees); `npm run release:preflight` + `check-version-sync.js` do NOT catch this — they verify `workshop_version` lockstep only, not the catalogue rows.
+
+**Watch when:** bumping ANY mechanism or blueprint version. The S5 version-bump checklist MUST update BOTH (a) the per-mechanism/per-blueprint `manifest.json`'s own `version`, (b) the matching `ranch/platform-subscription.json` pin, AND (c) the corresponding row in `platform/manifest.json`'s `mechanisms[]` / `blueprints[]` catalogue. All three are independent edit sites.
+
+**Symptom.** Workshop self-install bombs out with skip notices: `"subscription pins X@A.B.C but workshop has D.E.F"` for every drifted entry; entire install rejected.
+
+**Fix when surfaced.** Sweep the catalogue rows in `platform/manifest.json` to match the freshly-bumped per-mechanism/per-blueprint versions; re-run workshop self-install; verify all skip notices clear.
+
+**Surfaced:** v0.102.0 S6 (commit `ed48e93`). S5 bumped entity-create 0.5.0 / project 1.16.0 / meetings 0.8.0 / platform-claude 0.1.3 in per-mechanism manifests + `ranch/platform-subscription.json` pins, but the workshop catalogue in `platform/manifest.json` still listed the pre-bump versions. S6 self-install rejected the whole install with skip notices ("subscription pins entity-create@0.5.0 but workshop has 0.4.0", etc.).
+
+**Future hardening candidate:** extend `check-version-sync.js` to assert that for every `subscription.mechanisms[]` / `subscription.blueprints[]` entry, the matching `workshop_manifest.mechanisms[]` / `workshop_manifest.blueprints[]` row exists at the same pin AND equals the per-item `manifest.json` `version`. PATCH-sized hygiene; would shift this failure mode from S6 dogfood to preflight.
 
 ## Operational gotchas
 

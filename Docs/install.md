@@ -886,6 +886,92 @@ After the update, verify by checking that `.claude/skills/cowork/skills/gather-s
 
 Fixes the project Docs hub "+ New Doc" button, which was missing on every project created from the pre-0.101.1 template (the entity-create block used a broken `AccentButton` guard form that threw on render). The fix canonicalizes the template AND adds an installer repair step (`applyDocsHubButtonRepair`) that heals already-broken `docs/Docs.md` files in place on update — so existing projects get their button back automatically. Idempotent; canonical hubs are untouched.
 
+### Upgrading from v0.101.1
+
+After `brew upgrade sauce`, run from each consumer vault:
+
+```bash
+sauce update --bump-pins
+sauce install
+```
+
+The v0.102.0 install runs two new steps:
+
+1. **`applyProjectSectionsMigration`** — auto-moves every flat `docs/<doc>.md`
+   (except `Docs.md`) into `docs/knowledge/<doc>.md`, adds
+   `section: "Knowledge"` frontmatter, and registers any pre-existing
+   doc-note-containing subfolders as custom sections in the parent
+   project's `sections[]` frontmatter. Idempotent — second run is a
+   no-op once `docs/knowledge/` exists.
+
+2. **`applyVaultDefaultPaths`** — creates
+   `spice/resources/{notes,attachments}/` and configures Obsidian's
+   "Files & Links" defaults if currently unset. Existing user
+   customizations are left untouched.
+
+v0.102.0 also ships three platform-level moves on top of the migration:
+
+- **Sections** in the project blueprint — doc-notes get foldered under
+  `docs/<section-slug>/`; `Knowledge` and `Notes` ship as platform
+  defaults; per-project overrides via `sections: []` in project
+  frontmatter; `section:` doc-note frontmatter mirrors the folder
+  (folder wins on conflict).
+- **Confluence-style Docs Hub** — one labeled bucket per section, each
+  as a single-column row list (v0.100.0 row aesthetic preserved); per-bucket
+  `+ New <Section>` button via the NEW EntityCreate `presetPrompts`
+  capability — no section picker on click; trailing `Unfiled` bucket
+  catches orphans.
+- **Project ↔ Meetings link** — singular `project:
+  "[[ProjectName]]"` field on meeting frontmatter (optional); project
+  note grows a `## Meetings` panel above the BacklinkPanel (top-5
+  recent + view-all expander + `+ New meeting for this project`
+  button); meeting hub rows gain a project pill when set.
+
+Cowork is untouched (0.40.0); contract 0.35.1 holds; no scheduled-job
+sync needed.
+
+**What `sauce update --bump-pins` materializes:**
+
+- `ranch/scripts/project/project-docs-sections.js` — NEW Confluence-style
+  hub renderer.
+- `ranch/scripts/project/project-meetings-panel.js` — NEW project↔meetings
+  panel.
+- `ranch/scripts/meetings/meetings-hub-cards.js` — project-pill subtitle
+  callback.
+- `ranch/scripts/entity-create/entity-create.js` — `presetPrompts` +
+  `_resolveOptionsSource("all_projects")`.
+- `ranch/templates/Template, Docs Hub.md` — invokes `ProjectDocsSections`.
+- `ranch/templates/Template, Project.md` — adds `## Meetings` H2
+  invoking `ProjectMeetingsPanel`.
+- `ranch/platform-subscription.json` — workshop `0.101.1` →
+  `0.102.0` + project pin `1.15.2` → `1.16.0` + meetings pin `0.7.0` →
+  `0.8.0` + entity-create pin `0.4.0` → `0.5.0` + platform-claude pin
+  `0.1.2` → `0.1.3` (lockstep).
+
+**What does NOT change:**
+
+- `scheduled-job-contract.json` `contract_version` UNCHANGED at `0.35.1`.
+- No `cowork` blueprint change (stays at 0.40.0). No `align-scheduled-jobs`
+  run required.
+- No `learned_weights` schema migration, no cowork user-content writes.
+
+**Post-deploy check.** Open a project Docs hub — should render labeled
+buckets per section (Knowledge by default; any pre-existing doc-note
+subfolders preserved as custom sections); each bucket has a `+ New
+<Section>` button (no section picker on click). Open a Project note —
+should show `## Meetings` H2 above Mentions, with top-5 recent linked
+meetings + `+ New meeting for this project` button. Open the Meetings
+Hub — rows linked to a project should show a project pill before the
+attendees chip row.
+
+**Expected accuris migration delta:** `spice/projects/global-k8s/` has
+~31 flat `docs/<doc>.md`; the install moves them all to
+`docs/knowledge/<doc>.md` + adds `section: "Knowledge"` frontmatter.
+Any pre-existing doc-note-containing subfolder (e.g., `docs/specs/`)
+registers as a custom section in the project's `sections[]`.
+Transactional per project — partial failure aborts that project's
+migration with full backup hand-undo logged.
+
 ## Upgrading from v0.99.0 to v0.100.0 / v0.100.1
 
 > **Skip straight to v0.100.1** — v0.100.0's docs-hub rows threw `e.indexOf is not a function` on click (Dataview Link object passed to `openLinkText`); v0.100.1 PATCH (project 1.15.1) fixes it. Same upgrade steps; one `sauce update --bump-pins` catches both.
