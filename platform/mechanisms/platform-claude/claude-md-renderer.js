@@ -56,6 +56,7 @@
 // table, ahead of any blueprint-contributed rows.
 const DIRECTORY_MAP_SEEDS = [
   { path: "spice/",            owner: "(platform)", purpose: "Module-directory namespace for blueprints" },
+  { path: "spice/resources/",  owner: "(platform)", purpose: "Vault default attachment + new-note targets" },   // NEW v0.1.3
   { path: "ranch/",            owner: "(platform)", purpose: "Runtime plumbing (config, scripts, templates, views)" },
   { path: ".claude/commands/", owner: "(platform)", purpose: "Slash commands managed via claude_surface[]" },
   { path: ".claude/skills/",   owner: "(platform)", purpose: "Native Claude Code skill bodies" },

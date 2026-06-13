@@ -126,6 +126,7 @@ module.exports = async function (tp) {
     // into <vault>/.obsidian/app.json (additive shallow merge, platform-as-
     // overrider, backup-on-edit, atomic write). Workshop-level helper.
     await applyAppSettings(tp, manifest, installedNow.history, git);
+    await applyVaultDefaultPaths(tp, installedNow.history, git);   // NEW v0.102.0 — codify default attachment + new-note paths
 
     // 1. resolve which items to install + their order
     const { nodes, skipped: missingItems } = resolveDependencies(subscription, manifest);
@@ -4598,6 +4599,126 @@ async function applyAppSettings(tp, workshopManifest, history, git) {
       step: "app_settings",
       action: "applied",
       keys_written: Object.keys(workshopManifest.app_settings),
+      git_commit: git.commit,
+      git_tag: git.tag,
+      git_dirty: git.dirty,
+      attempted_at: new Date().toISOString(),
+    });
+  }
+}
+
+// applyVaultDefaultPaths — v0.102.0. Ensures spice/resources/{notes,attachments}/
+// exist; configures Obsidian's newFileLocation / newFileFolderPath /
+// attachmentFolderPath in .obsidian/app.json IFF currently absent or set to
+// vault-root defaults. Never clobbers user customizations. Vault-scoped,
+// runs once per install (not per mechanism).
+async function applyVaultDefaultPaths(tp, history, git) {
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+
+  // 1. Ensure folders exist
+  const folders = ["spice/resources", "spice/resources/notes", "spice/resources/attachments"];
+  for (const folder of folders) {
+    try {
+      if (!(await adapter.exists(folder))) {
+        await adapter.mkdir(folder);
+      }
+      // .gitkeep for the leaf folders so they survive empty-folder git pruning
+      if (folder.endsWith("/notes") || folder.endsWith("/attachments")) {
+        const gitkeep = `${folder}/.gitkeep`;
+        if (!(await adapter.exists(gitkeep))) {
+          await adapter.write(gitkeep, "");
+        }
+      }
+    } catch (e) {
+      history?.push({
+        event: "warning",
+        step: "vault_default_paths",
+        name: "platform",
+        reason: `mkdir failed for ${folder}: ${e.message}`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+  }
+
+  // 2. Read-modify-write .obsidian/app.json
+  const appJsonPath = ".obsidian/app.json";
+  let app;
+  try {
+    if (!(await adapter.exists(appJsonPath))) {
+      app = {};
+    } else {
+      const raw = await adapter.read(appJsonPath);
+      app = raw ? JSON.parse(raw) : {};
+    }
+  } catch (e) {
+    history?.push({
+      event: "warning",
+      step: "vault_default_paths",
+      name: "platform",
+      reason: `failed to read ${appJsonPath}: ${e.message}`,
+      git_commit: git.commit,
+      git_tag: git.tag,
+      git_dirty: git.dirty,
+      attempted_at: new Date().toISOString(),
+    });
+    return;
+  }
+
+  let changed = false;
+
+  // newFileLocation: only write if absent or set to "root" (vault-root default)
+  if (!Object.prototype.hasOwnProperty.call(app, "newFileLocation") || app.newFileLocation === "root") {
+    app.newFileLocation = "folder";
+    changed = true;
+  }
+
+  // newFileFolderPath: only write if absent or empty
+  if (!app.newFileFolderPath) {
+    app.newFileFolderPath = "spice/resources/notes";
+    changed = true;
+  }
+
+  // attachmentFolderPath: only write if absent or empty
+  if (!app.attachmentFolderPath) {
+    app.attachmentFolderPath = "spice/resources/attachments";
+    changed = true;
+  }
+
+  if (changed) {
+    try {
+      await adapter.write(appJsonPath, JSON.stringify(app, null, 2));
+      history?.push({
+        event: "info",
+        step: "vault_default_paths",
+        name: "platform",
+        action: "applied_canonical_defaults",
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    } catch (e) {
+      history?.push({
+        event: "warning",
+        step: "vault_default_paths",
+        name: "platform",
+        reason: `write failed for ${appJsonPath}: ${e.message}`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+  } else {
+    history?.push({
+      event: "info",
+      step: "vault_default_paths",
+      name: "platform",
+      reason: "all keys already customized; no changes",
       git_commit: git.commit,
       git_tag: git.tag,
       git_dirty: git.dirty,

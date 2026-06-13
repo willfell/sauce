@@ -10752,6 +10752,71 @@ async function caseV01020Psm4SectionFrontmatterAndFailureLoud() {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// v0.102.0 S4.2 (Task 7): applyVaultDefaultPaths — vault-scoped installer step
+// that ensures spice/resources/{notes,attachments}/ exist and sets canonical
+// Obsidian defaults (newFileLocation/newFileFolderPath/attachmentFolderPath)
+// in .obsidian/app.json, without clobbering user customizations. Static-string
+// regex asserts against platform/install.js source (same pattern as PSM-1..4).
+// CLAUDE-MD-RES-1 covers the parallel platform-claude renderer seed addition.
+// ──────────────────────────────────────────────────────────────────────────────
+
+async function caseV01020Vdp1FunctionAndFolders() {
+  console.log("\n--- Case HC-V01020-VDP-1: applyVaultDefaultPaths declared + creates spice/resources/ folders ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
+  assertTrue("HC-V01020-VDP-1: async function applyVaultDefaultPaths declared",
+    /async\s+function\s+applyVaultDefaultPaths\s*\(/.test(src));
+  assertTrue("HC-V01020-VDP-1: creates spice/resources/notes",
+    /spice\/resources\/notes/.test(src));
+  assertTrue("HC-V01020-VDP-1: creates spice/resources/attachments",
+    /spice\/resources\/attachments/.test(src));
+  assertTrue("HC-V01020-VDP-1: writes .gitkeep for empty folders",
+    /\.gitkeep/.test(src));
+}
+
+async function caseV01020Vdp2AppJsonDefaults() {
+  console.log("\n--- Case HC-V01020-VDP-2: applyVaultDefaultPaths sets canonical defaults in app.json ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
+  assertTrue("HC-V01020-VDP-2: reads .obsidian/app.json",
+    /\.obsidian\/app\.json/.test(src));
+  assertTrue("HC-V01020-VDP-2: writes newFileLocation: \"folder\"",
+    /newFileLocation\s*=\s*["']folder["']/.test(src));
+  assertTrue("HC-V01020-VDP-2: writes newFileFolderPath = spice/resources/notes",
+    /newFileFolderPath\s*=\s*["']spice\/resources\/notes["']/.test(src));
+  assertTrue("HC-V01020-VDP-2: writes attachmentFolderPath = spice/resources/attachments",
+    /attachmentFolderPath\s*=\s*["']spice\/resources\/attachments["']/.test(src));
+}
+
+async function caseV01020Vdp3RespectsCustomization() {
+  console.log("\n--- Case HC-V01020-VDP-3: applyVaultDefaultPaths respects user customization ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
+  // Guards: only write when key absent (hasOwnProperty check) OR set to default-equivalent value
+  assertTrue("HC-V01020-VDP-3: hasOwnProperty guard on newFileLocation",
+    /hasOwnProperty\.call\(app,\s*["']newFileLocation["']\)|app\.newFileLocation\s*===\s*["']root["']/.test(src));
+  assertTrue("HC-V01020-VDP-3: falsy guard on newFileFolderPath",
+    /!app\.newFileFolderPath/.test(src));
+  assertTrue("HC-V01020-VDP-3: falsy guard on attachmentFolderPath",
+    /!app\.attachmentFolderPath/.test(src));
+  assertTrue("HC-V01020-VDP-3: per-key changed flag (no all-or-nothing)",
+    /let\s+changed\s*=\s*false|changed\s*=\s*true/.test(src));
+}
+
+async function caseV01020ClaudeMdRes1SeedAdded() {
+  console.log("\n--- Case HC-V01020-CLAUDE-MD-RES-1: DIRECTORY_MAP_SEEDS includes spice/resources/ ---");
+  const src = fs.readFileSync(
+    path.join(WORKSHOP, "platform/mechanisms/platform-claude/claude-md-renderer.js"), "utf8");
+  assertTrue("HC-V01020-CLAUDE-MD-RES-1: spice/resources/ seed row present",
+    /path:\s*["']spice\/resources\/["']/.test(src));
+  assertTrue("HC-V01020-CLAUDE-MD-RES-1: seed row has owner: (platform)",
+    /path:\s*["']spice\/resources\/["'][^}]*owner:\s*["']\(platform\)["']/.test(src));
+
+  const mSrc = fs.readFileSync(
+    path.join(WORKSHOP, "platform/mechanisms/platform-claude/manifest.json"), "utf8");
+  const m = JSON.parse(mSrc);
+  assertTrue("HC-V01020-CLAUDE-MD-RES-1: platform-claude version bumped to 0.1.3",
+    m.version === "0.1.3");
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // v0.102.0 S3.2 (Task 5): meetings blueprint 0.8.0 — project link field + pill
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -11318,6 +11383,12 @@ async function caseV01020Meet2ProjectPill() {
   await caseV01020Psm2MovesFlatDocsToKnowledge();
   await caseV01020Psm3PreservesCustomSubfolders();
   await caseV01020Psm4SectionFrontmatterAndFailureLoud();
+
+  // v0.102.0 S4.2 (Task 7): applyVaultDefaultPaths + spice/resources/ directory-map seed.
+  await caseV01020Vdp1FunctionAndFolders();
+  await caseV01020Vdp2AppJsonDefaults();
+  await caseV01020Vdp3RespectsCustomization();
+  await caseV01020ClaudeMdRes1SeedAdded();
 
   // v0.102.0 S3.2 (Task 5): meetings blueprint 0.8.0 — project link field + pill
   await caseV01020Meet1ManifestProjectField();

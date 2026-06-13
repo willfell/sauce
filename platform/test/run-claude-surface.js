@@ -1134,6 +1134,7 @@ async function caseCSMD5SeedRows() {
     const out = fs.readFileSync(path.join(dir, "CLAUDE.md"), "utf8");
 
     assertTrue("CS-MD-5: spice/ seed row present", out.includes("| spice/ | (platform) |"));
+    assertTrue("CS-MD-5: spice/resources/ seed row present", out.includes("| spice/resources/ | (platform) |"));
     assertTrue("CS-MD-5: ranch/ seed row present", out.includes("| ranch/ | (platform) |"));
     assertTrue("CS-MD-5: .claude/commands/ seed row present", out.includes("| .claude/commands/ | (platform) |"));
     assertTrue("CS-MD-5: .claude/skills/ seed row present",  out.includes("| .claude/skills/ | (platform) |"));
