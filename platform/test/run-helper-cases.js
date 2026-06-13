@@ -10887,6 +10887,84 @@ async function caseV01030Bc4HandlesAllTypes() {
   assertTrue("HC-V01030-BC-4: docs-hub or section-hub branches", /docs-hub|section-hub/.test(src));
 }
 
+// v0.103.0 S2.1 — ProjectDocsIndex helper (Docs.md sections-index landing).
+// Replaces ProjectDocsSections from v0.102.0. Renders section CARDS (one per
+// declared section, with doc counts) + quick + New Doc shortcut + dashboard
+// chip strip (doc total / open meetings / project status) + + New Section
+// button. Static-string asserts against the helper source.
+const _PDI_PATH = path.join(WORKSHOP, "platform", "blueprints", "project", "helpers", "project-docs-index.js");
+
+function _readPdiSrc() {
+  if (!fs.existsSync(_PDI_PATH)) return "";
+  return fs.readFileSync(_PDI_PATH, "utf8");
+}
+
+async function caseV01030Pdi1ClassDefined() {
+  console.log("\n--- Case HC-V01030-PDI-1: ProjectDocsIndex class declared + async render ---");
+  assertTrue("HC-V01030-PDI-1: project-docs-index.js exists", fs.existsSync(_PDI_PATH));
+  const src = _readPdiSrc();
+  assertTrue("HC-V01030-PDI-1: class ProjectDocsIndex declared", /class\s+ProjectDocsIndex\s*\{/.test(src));
+  assertTrue("HC-V01030-PDI-1: async render method", /async\s+render\s*\(/.test(src));
+}
+
+async function caseV01030Pdi2ReadsParentProjectSections() {
+  console.log("\n--- Case HC-V01030-PDI-2: ProjectDocsIndex reads dv.current() + parent project's sections[] ---");
+  const src = _readPdiSrc();
+  assertTrue("HC-V01030-PDI-2a: reads dv.current()", /dv\.current\(\)/.test(src));
+  assertTrue("HC-V01030-PDI-2b: queries parent project under spice/projects",
+    /spice\/projects/.test(src));
+  assertTrue("HC-V01030-PDI-2c: filters parent project by type === \"project\"",
+    /p\.type\s*===\s*["']project["']/.test(src));
+  assertTrue("HC-V01030-PDI-2d: reads project.sections array",
+    /\.sections\b/.test(src));
+}
+
+async function caseV01030Pdi3DefaultsKnowledgeNotesWikilinks() {
+  console.log("\n--- Case HC-V01030-PDI-3: defaults to [[Knowledge]] / [[Notes]] when sections[] absent/empty ---");
+  const src = _readPdiSrc();
+  assertTrue("HC-V01030-PDI-3a: literal [[Knowledge]] default present",
+    /\[\[Knowledge\]\]/.test(src));
+  assertTrue("HC-V01030-PDI-3b: literal [[Notes]] default present",
+    /\[\[Notes\]\]/.test(src));
+}
+
+async function caseV01030Pdi4SectionCardsBeaconCardsRow() {
+  console.log("\n--- Case HC-V01030-PDI-4: renders section cards via BeaconCards with layout: \"row\" ---");
+  const src = _readPdiSrc();
+  assertTrue("HC-V01030-PDI-4a: BeaconCards.render called",
+    /customJS\.BeaconCards\.render\s*\(/.test(src));
+  assertTrue("HC-V01030-PDI-4b: layout: \"row\" present",
+    /layout:\s*["']row["']/.test(src));
+  assertTrue("HC-V01030-PDI-4c: meta callback emits doc count",
+    /doc\s*\$\{|docs?["'`]|`\$\{count\}\s*doc/.test(src));
+}
+
+async function caseV01030Pdi5NewSectionButton() {
+  console.log("\n--- Case HC-V01030-PDI-5: emits + New Section via EntityCreate.render with instance: \"section-hub\" ---");
+  const src = _readPdiSrc();
+  assertTrue("HC-V01030-PDI-5a: EntityCreate.render called",
+    /customJS\.EntityCreate\.render\s*\(/.test(src));
+  assertTrue("HC-V01030-PDI-5b: instance: \"section-hub\" present",
+    /instance:\s*["']section-hub["']/.test(src));
+  assertTrue("HC-V01030-PDI-5c: instance: \"doc-note\" quick shortcut also present",
+    /instance:\s*["']doc-note["']/.test(src));
+}
+
+async function caseV01030Pdi6DashboardChips() {
+  console.log("\n--- Case HC-V01030-PDI-6: emits dashboard chip strip (doc count + open meetings + project status) ---");
+  const src = _readPdiSrc();
+  assertTrue("HC-V01030-PDI-6a: queries spice/meetings/notes",
+    /spice\/meetings\/notes/.test(src));
+  assertTrue("HC-V01030-PDI-6b: filters by p.type === \"meeting\"",
+    /p\.type\s*===\s*["']meeting["']/.test(src));
+  assertTrue("HC-V01030-PDI-6c: _projectMatches helper defined (shared with ProjectMeetingsPanel pattern)",
+    /_projectMatches\s*\(/.test(src));
+  assertTrue("HC-V01030-PDI-6d: reads project.status frontmatter",
+    /\.status\b/.test(src));
+  assertTrue("HC-V01030-PDI-6e: dv.el(\"div\" ...) chip strip container",
+    /dv\.el\s*\(\s*["']div["']/.test(src));
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -11437,6 +11515,14 @@ async function caseV01030Bc4HandlesAllTypes() {
   await caseV01030Bc2ReadsCurrentFrontmatter();
   await caseV01030Bc3EmitsWikilinks();
   await caseV01030Bc4HandlesAllTypes();
+
+  // v0.103.0 S2.1 — ProjectDocsIndex helper (Docs.md sections-index landing).
+  await caseV01030Pdi1ClassDefined();
+  await caseV01030Pdi2ReadsParentProjectSections();
+  await caseV01030Pdi3DefaultsKnowledgeNotesWikilinks();
+  await caseV01030Pdi4SectionCardsBeaconCardsRow();
+  await caseV01030Pdi5NewSectionButton();
+  await caseV01030Pdi6DashboardChips();
 
   // v0.65.0 HC-V065-RUN-NOTE: write-run-note-* sub-skill lint
   {
