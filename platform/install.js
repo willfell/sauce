@@ -1072,6 +1072,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyDocsHubButtonRepair(tp, mech, variables, history, git);   // NEW v0.100.2 — heals existing broken "+ New Doc" blocks (backfill is create-if-absent)
   await applyProjectSectionsMigration(tp, mech, variables, history, git);   // NEW v0.102.0 S4 — Strategy A auto-migration (flat docs/*.md → docs/knowledge/ + sections[])
   await applyProjectSectionsHubMigration(tp, mech, variables, history, git);   // NEW v0.103.0 S4 — heals v0.102.0 vaults: Docs.md → ProjectDocsIndex + materialize Section Hubs + wikilink frontmatter + breadcrumb injection
+  await applyProjectSectionsCloseRepair(tp, mech, variables, history, git);    // NEW v0.103.0.1 — fixes the regex-induced -"[[--]]" damage from v0.103.0 deploy
   await applyExternalPluginInstall(tp, mech, adapter.basePath || (typeof adapter.getBasePath === "function" ? adapter.getBasePath() : null), workshopPath, history, git);  // NEW v0.94.0 — install missing
   await applyExternalPlugins(tp, mech, history, git);
   await scaffoldFoundationalPluginData(tp, mech, workshopPath, variables, history, git);  // NEW v0.26.0
@@ -2715,7 +2716,12 @@ async function _migrateDocNote(adapter, fp, sectionLabel, subSectionLabel) {
 // labels (each as "[[Label]]"). Returns body unchanged when no FM block or
 // nothing to migrate.
 function _migrateProjectSectionsToWikilinks(body, fullLabels) {
-  const m = body.match(/^sections:\s*\n((?:\s*-\s*.+\n)+)/m);
+  // v0.103.0.1 PATCH: regex now requires a SPACE after the `-` (YAML list
+  // spec: `- value`), so the frontmatter closing `---` (no space) is no
+  // longer captured as a list item. Pre-patch, `---` was rewritten to
+  // `-"[[--]]"` and damaged 19 project notes in accuris during the
+  // v0.103.0 migration.
+  const m = body.match(/^sections:\s*\n((?:\s*-\s+\S.*\n)+)/m);
   if (!m) {
     // No sections: yet; insert.
     const fmMatch = body.match(/^---\n([\s\S]*?)\n---/);
@@ -2730,7 +2736,7 @@ function _migrateProjectSectionsToWikilinks(body, fullLabels) {
   const listText = m[1];
   // For each list line, wrap to wikilink form when not already wikilink.
   const newLines = listText.split("\n").map((line) => {
-    const t = line.match(/^(\s*-\s*)["']?([^"'\n[\]]+?)["']?\s*$/);
+    const t = line.match(/^(\s*-\s+)["']?([^"'\n[\]]+?)["']?\s*$/);
     if (!t) return line;
     const prefix = t[1];
     const val = t[2].trim();
@@ -2738,6 +2744,55 @@ function _migrateProjectSectionsToWikilinks(body, fullLabels) {
     return `${prefix}"[[${val}]]"`;
   });
   return body.replace(m[0], `sections:\n${newLines.join("\n")}\n`);
+}
+
+// _repairBrokenSectionsClose — v0.103.0.1 PATCH heal step. The v0.103.0
+// _migrateProjectSectionsToWikilinks regex captured the frontmatter closing
+// `---` and rewrote it to `-"[[--]]"`. Damaged 19 project notes in accuris
+// during deploy. This walks every project note and converts the stray
+// `-"[[--]]"` line back to `---`. Idempotent (no-op if not present).
+async function applyProjectSectionsCloseRepair(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "project") return;
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const projectsRoot = "spice/projects";
+  if (!(await adapter.exists(projectsRoot))) return;
+
+  let projectsList;
+  try { projectsList = await adapter.list(projectsRoot); }
+  catch (e) {
+    history?.push({ event: "warning", step: "project_sections_close_repair", name: "project", reason: e.message,
+                    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    return;
+  }
+
+  const projectDirs = (projectsList.folders || []).filter(d => d.split("/").pop() !== "All Projects");
+  let repaired = 0;
+
+  for (const projectDir of projectDirs) {
+    try {
+      const dirList = await adapter.list(projectDir).catch(() => ({ files: [], folders: [] }));
+      for (const fp of (dirList.files || [])) {
+        if (!fp.endsWith(".md")) continue;
+        const body = await adapter.read(fp);
+        if (!body.includes('-"[[--]]"')) continue;
+        const fixed = body.replace(/^\s*-"\[\[--\]\]"\s*$/gm, "---");
+        if (fixed !== body) {
+          await adapter.write(fp, fixed);
+          repaired++;
+          history?.push({ event: "info", step: "project_sections_close_repair", name: "project", target: fp, action: "repaired_broken_frontmatter_close",
+                          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+        }
+      }
+    } catch (e) {
+      history?.push({ event: "warning", step: "project_sections_close_repair", name: "project", target: projectDir, reason: e?.message || String(e),
+                      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    }
+  }
+
+  history?.push({ event: "info", step: "project_sections_close_repair", name: "project",
+                  reason: `repaired ${repaired} project note(s)`,
+                  git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
 }
 
 // applyNewEntityButtons — v0.46.0 S2. Aggregates this item's
