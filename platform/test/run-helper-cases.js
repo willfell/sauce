@@ -10965,6 +10965,93 @@ async function caseV01030Pdi6DashboardChips() {
     /dv\.el\s*\(\s*["']div["']/.test(src));
 }
 
+// v0.103.0 S2.2 — SectionHub helper (depth-aware section + sub-section render).
+// Renders any section-hub note (depth 1 OR depth 2); reads its own frontmatter
+// and emits + New Doc (presetPrompts conditioned on depth), + New Sub-Section
+// (depth === 1 only), sub-section cards (depth === 1 only), docs in this
+// section/sub-section, empty-state callout. Static-string asserts against the
+// helper source.
+const _SH_PATH = path.join(WORKSHOP, "platform", "blueprints", "project", "helpers", "section-hub.js");
+
+function _readShSrc() {
+  if (!fs.existsSync(_SH_PATH)) return "";
+  return fs.readFileSync(_SH_PATH, "utf8");
+}
+
+async function caseV01030Sh1ClassDefined() {
+  console.log("\n--- Case HC-V01030-SH-1: SectionHub class declared + async render + reads dv.current().depth ---");
+  assertTrue("HC-V01030-SH-1: section-hub.js exists", fs.existsSync(_SH_PATH));
+  const src = _readShSrc();
+  assertTrue("HC-V01030-SH-1: class SectionHub declared", /class\s+SectionHub\s*\{/.test(src));
+  assertTrue("HC-V01030-SH-1: async render method", /async\s+render\s*\(/.test(src));
+  assertTrue("HC-V01030-SH-1: reads dv.current()", /dv\.current\(\)/.test(src));
+  assertTrue("HC-V01030-SH-1: reads depth from frontmatter", /\.depth\b/.test(src));
+}
+
+async function caseV01030Sh2NewDocPresetPrompts() {
+  console.log("\n--- Case HC-V01030-SH-2: emits + New Doc with instance: \"doc-note\" + presetPrompts.section ---");
+  const src = _readShSrc();
+  assertTrue("HC-V01030-SH-2a: EntityCreate.render called",
+    /customJS\.EntityCreate\.render\s*\(/.test(src));
+  assertTrue("HC-V01030-SH-2b: instance: \"doc-note\" present",
+    /instance:\s*["']doc-note["']/.test(src));
+  assertTrue("HC-V01030-SH-2c: presetPrompts with section key present",
+    /presetPrompts[\s\S]{0,200}?section:/.test(src));
+}
+
+async function caseV01030Sh3NewSubSectionOnlyDepth1() {
+  console.log("\n--- Case HC-V01030-SH-3: emits + New Sub-Section ONLY when depth === 1 ---");
+  const src = _readShSrc();
+  assertTrue("HC-V01030-SH-3a: instance: \"sub-section-hub\" present",
+    /instance:\s*["']sub-section-hub["']/.test(src));
+  // Gate must be `depth === 1` near the sub-section-hub EntityCreate call.
+  // Match `depth === 1` appearing before the sub-section-hub instance string.
+  assertTrue("HC-V01030-SH-3b: depth === 1 gate near sub-section-hub EntityCreate",
+    /depth\s*===\s*1[\s\S]{0,400}?instance:\s*["']sub-section-hub["']/.test(src));
+}
+
+async function caseV01030Sh4SubSectionQuery() {
+  console.log("\n--- Case HC-V01030-SH-4: sub-section query filters p.type === \"section-hub\" && p.depth === 2 ---");
+  const src = _readShSrc();
+  assertTrue("HC-V01030-SH-4a: filters p.type === \"section-hub\"",
+    /p\.type\s*===\s*["']section-hub["']/.test(src));
+  assertTrue("HC-V01030-SH-4b: filters p.depth === 2",
+    /p\.depth\s*===\s*2/.test(src));
+}
+
+async function caseV01030Sh5DocsStrictFolderMatch() {
+  console.log("\n--- Case HC-V01030-SH-5: docs query filters p.type === \"doc-note\" AND strict folder match (p.file.folder ===) ---");
+  const src = _readShSrc();
+  assertTrue("HC-V01030-SH-5a: filters p.type === \"doc-note\"",
+    /p\.type\s*===\s*["']doc-note["']/.test(src));
+  assertTrue("HC-V01030-SH-5b: strict folder match (p.file.folder ===)",
+    /p\.file\.folder\s*===/.test(src));
+}
+
+async function caseV01030Sh6BeaconCardsRowMeta() {
+  console.log("\n--- Case HC-V01030-SH-6: BeaconCards layout: \"row\" + meta callback shows created + edited ---");
+  const src = _readShSrc();
+  assertTrue("HC-V01030-SH-6a: BeaconCards.render called",
+    /customJS\.BeaconCards\.render\s*\(/.test(src));
+  assertTrue("HC-V01030-SH-6b: layout: \"row\" present",
+    /layout:\s*["']row["']/.test(src));
+  assertTrue("HC-V01030-SH-6c: meta callback emits created token",
+    /created\s*\$\{|`created\s/.test(src));
+  assertTrue("HC-V01030-SH-6d: meta callback emits edited token",
+    /edited\s*\$\{|`edited\s|·\s*edited/.test(src));
+}
+
+async function caseV01030Sh7EmptyStateCallout() {
+  console.log("\n--- Case HC-V01030-SH-7: empty-state callout language for no docs ---");
+  const src = _readShSrc();
+  assertTrue("HC-V01030-SH-7a: [!example]+ callout present",
+    /\[!example\]\+/.test(src));
+  assertTrue("HC-V01030-SH-7b: 'No docs in' empty-state phrase present",
+    /No docs in\s+\*\*/.test(src));
+  assertTrue("HC-V01030-SH-7c: '+ New Doc' hint in empty-state",
+    /\+\s*New Doc/.test(src));
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -11523,6 +11610,15 @@ async function caseV01030Pdi6DashboardChips() {
   await caseV01030Pdi4SectionCardsBeaconCardsRow();
   await caseV01030Pdi5NewSectionButton();
   await caseV01030Pdi6DashboardChips();
+
+  // v0.103.0 S2.2 — SectionHub helper (depth-aware section + sub-section render).
+  await caseV01030Sh1ClassDefined();
+  await caseV01030Sh2NewDocPresetPrompts();
+  await caseV01030Sh3NewSubSectionOnlyDepth1();
+  await caseV01030Sh4SubSectionQuery();
+  await caseV01030Sh5DocsStrictFolderMatch();
+  await caseV01030Sh6BeaconCardsRowMeta();
+  await caseV01030Sh7EmptyStateCallout();
 
   // v0.65.0 HC-V065-RUN-NOTE: write-run-note-* sub-skill lint
   {
