@@ -11,6 +11,11 @@
       "id":    { "type": "string", "pattern": "^[a-z][a-z0-9_-]*$" },
       "label": { "type": "string", "minLength": 1 },
       "icon":  { "type": "string" },
+      "presetPrompts": {
+        "type": "object",
+        "description": "v0.5.0 — optional map of prompt-key → preset answer. When set, EntityCreate.render() forwards it to create(); the prompt loop short-circuits on each matching key (bypasses derive + UI + validation). Values are trusted (the calling helper is responsible for pre-formatting, e.g. wikilink form for project picks). Backward-compatible: omitting this field behaves exactly as v0.4.0.",
+        "additionalProperties": true
+      },
       "prompts": {
         "type": "array",
         "items": {
@@ -23,6 +28,10 @@
             "required": { "type": "boolean", "default": true },
             "default":  { "type": "string" },
             "options":  { "type": "array", "items": { "type": "string" } },
+            "options_source": {
+              "enum": ["all_projects"],
+              "description": "v0.5.0 — when present (only on type:\"select\" prompts), resolves at prompt-render time to a concrete options[] list. Currently supports \"all_projects\" which yields [\"(none)\", ...all type:project notes by file.name]. Post-process: \"(none)\"/empty → \"\"; project pick → wikilink \"[[name]]\". Preset values bypass this post-process."
+            },
             "min":      { "type": "number" },
             "max":      { "type": "number" },
             "validate": { "type": "string" },

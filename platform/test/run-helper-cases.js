@@ -10315,6 +10315,68 @@ async function caseV1010DispatchA2() {
   } catch (e) { assertTrue("HC-V1010-DISPATCH-A2", false, e && e.message); }
 }
 
+// ============================================================
+// v0.102.0 S1 — entity-create@0.5.0 MINOR:
+//   1) presetPrompts capability (render forwards → create skips matching
+//      prompts and uses preset values; bypasses derive + UI + validation).
+//   2) options_source: "all_projects" capability (prompt-level field;
+//      resolves at prompt-render time to ["(none)", ...all type:project notes];
+//      post-process formats picks as "[[<name>]]" or "" for "(none)").
+// HC cases are static-string regex asserts against the mechanism source
+// + JSON-parse + key-presence asserts against the schema.
+// ============================================================
+
+async function caseV01020EC1PresetPromptsPlumbed() {
+  console.log(`\n--- Case HC-V01020-EC-1: entity-create.js plumbs presetPrompts through render() → create() and short-circuits the prompt loop ---`);
+  const p = path.join(WORKSHOP, "platform", "mechanisms", "entity-create", "entity-create.js");
+  assertTrue("HC-V01020-EC-1: entity-create.js exists", fs.existsSync(p));
+  const src = fs.readFileSync(p, "utf8");
+  // create() destructures presetPrompts with a default-empty object
+  assertTrue("HC-V01020-EC-1a: create() destructures presetPrompts = {} default",
+    /presetPrompts\s*=\s*\{\}/.test(src));
+  // render() forwards presetPrompts to create() on click
+  assertTrue("HC-V01020-EC-1b: render() forwards presetPrompts to create()",
+    /this\.create\(\s*\{\s*instance\s*,\s*dv\s*,\s*presetPrompts\s*\}\s*\)/.test(src));
+  // Prompt-loop has a presetPrompts hasOwnProperty short-circuit using p.key
+  assertTrue("HC-V01020-EC-1c: prompt loop short-circuits on presetPrompts via hasOwnProperty(p.key)",
+    /Object\.prototype\.hasOwnProperty\.call\(\s*presetPrompts\s*,\s*p\.key\s*\)/.test(src));
+}
+
+async function caseV01020EC2OptionsSourceAllProjects() {
+  console.log(`\n--- Case HC-V01020-EC-2: entity-create.js resolves options_source: "all_projects" → ["(none)", ...projects] and post-processes pick into "[[name]]" or "" ---`);
+  const p = path.join(WORKSHOP, "platform", "mechanisms", "entity-create", "entity-create.js");
+  const src = fs.readFileSync(p, "utf8");
+  // Resolver method exists + is called
+  assertTrue("HC-V01020-EC-2a: _resolveOptionsSource method defined",
+    /_resolveOptionsSource\s*\(/.test(src));
+  // "all_projects" literal handled
+  assertTrue("HC-V01020-EC-2b: 'all_projects' source string is referenced",
+    /["']all_projects["']/.test(src));
+  // (none) sentinel present
+  assertTrue("HC-V01020-EC-2c: '(none)' sentinel option is emitted",
+    /\(none\)/.test(src));
+  // type === "project" filter on dv.pages()
+  assertTrue("HC-V01020-EC-2d: filters dv.pages() by type === 'project'",
+    /p\.type\s*===\s*["']project["']/.test(src));
+}
+
+async function caseV01020EC3SchemaExposesNewFields() {
+  console.log(`\n--- Case HC-V01020-EC-3: new-entity-buttons.json schema exposes presetPrompts (button-level) and options_source (prompt-level) ---`);
+  const p = path.join(WORKSHOP, "platform", "mechanisms", "entity-create", "schema", "new-entity-buttons.json");
+  assertTrue("HC-V01020-EC-3: schema file exists", fs.existsSync(p));
+  let parsed = null, threw = false;
+  try { parsed = JSON.parse(fs.readFileSync(p, "utf8")); } catch (_e) { threw = true; }
+  assertTrue("HC-V01020-EC-3a: schema JSON.parse succeeds", !threw && parsed);
+  const asText = JSON.stringify(parsed);
+  assertTrue("HC-V01020-EC-3b: schema mentions presetPrompts", asText.includes("presetPrompts"));
+  assertTrue("HC-V01020-EC-3c: schema mentions options_source", asText.includes("options_source"));
+  // Manifest version bumped to 0.5.0
+  const mp = path.join(WORKSHOP, "platform", "mechanisms", "entity-create", "manifest.json");
+  const man = JSON.parse(fs.readFileSync(mp, "utf8"));
+  assertTrue("HC-V01020-EC-3d: entity-create manifest version is 0.5.0", man.version === "0.5.0",
+    `got: ${man.version}`);
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -10809,6 +10871,11 @@ async function caseV1010DispatchA2() {
   await caseV1010SchemaA4();
   await caseV1010DispatchA1();
   await caseV1010DispatchA2();
+
+  // v0.102.0 S1 — entity-create@0.5.0 (presetPrompts + options_source: all_projects).
+  await caseV01020EC1PresetPromptsPlumbed();
+  await caseV01020EC2OptionsSourceAllProjects();
+  await caseV01020EC3SchemaExposesNewFields();
 
   // v0.65.0 HC-V065-RUN-NOTE: write-run-note-* sub-skill lint
   {
