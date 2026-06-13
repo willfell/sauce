@@ -7026,7 +7026,7 @@ async function caseFA3ProjectManifest() {
   console.log("\n--- Case FA3-PROJECT-MANIFEST: project@1.13.0 canonical vocab ---");
   const m = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/project/manifest.json"), "utf8"));
-  assertTrue("FA3-PROJ-1: project version >= 1.13.0", /^1\.(13|14|15|16|17)\.\d+$/.test(m.version),
+  assertTrue("FA3-PROJ-1: project version >= 1.13.0", /^1\.(1[3-9]|[2-9]\d)\.\d+$/.test(m.version),
     `got: ${m.version}`);
   const ec0 = m.new_entity_buttons[0].frontmatter_template;
   assertTrue("FA3-PROJ-2: project entity-create has created_at canonical",
@@ -11081,10 +11081,13 @@ const _PROJ_SECTION_HUB_TPL = path.join(WORKSHOP, "platform", "blueprints", "pro
 const _PROJ_DOC_NOTE_TPL = path.join(WORKSHOP, "platform", "blueprints", "project", "templates", "Doc Note.md");
 
 async function caseV01030ProjMan1VersionAndCustomjs() {
-  console.log("\n--- Case HC-V01030-PROJ-MAN-1: project manifest version 1.17.0 + customjs_classes adds Breadcrumb + ProjectDocsIndex + SectionHub ---");
+  console.log("\n--- Case HC-V01030-PROJ-MAN-1: project manifest version 1.18.0 + customjs_classes adds Breadcrumb + ProjectDocsIndex + SectionHub ---");
   const m = _readProjManifest();
-  assertTrue("HC-V01030-PROJ-MAN-1a: project manifest version is exactly 1.17.0",
-    m && m.version === "1.17.0", `got: ${m && m.version}`);
+  // v0.104.0 supersedes the v0.103.0 hard-pin (1.17.0). v0.104.0 S3 bumps the
+  // project blueprint to 1.18.0 (registers the new DocSearch helper).
+  // Breadcrumb + ProjectDocsIndex + SectionHub carryover assertions still apply.
+  assertTrue("HC-V01030-PROJ-MAN-1a: project manifest version is exactly 1.18.0",
+    m && m.version === "1.18.0", `got: ${m && m.version}`);
   const cls = (m && Array.isArray(m.customjs_classes)) ? m.customjs_classes : [];
   assertTrue("HC-V01030-PROJ-MAN-1b: customjs_classes includes Breadcrumb",
     cls.indexOf("Breadcrumb") !== -1);
@@ -11420,6 +11423,20 @@ async function caseV01040ShExt2MatchesUsed() {
   const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/section-hub.js"), "utf8");
   assertTrue("HC-V01040-SH-EXT-2: references customJS.DocSearch.matches",
     /customJS\.DocSearch\.matches\(/.test(src));
+}
+
+// v0.104.0 S3 (Task 4): project blueprint manifest bumps to 1.18.0,
+// customjs_classes appends DocSearch, files[] appends the helpers/doc-search.js
+// → {{scripts_path}}/project/doc-search.js materialization.
+async function caseV01040Man1Manifest118() {
+  console.log("\n--- Case HC-V01040-MAN-1: project blueprint version 1.18.0 + DocSearch registered + doc-search.js shipped ---");
+  const m = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/manifest.json"), "utf8"));
+  assertTrue("HC-V01040-MAN-1: project blueprint version 1.18.0", m.version === "1.18.0");
+  assertTrue("HC-V01040-MAN-1: customjs_classes includes DocSearch",
+    Array.isArray(m.customjs_classes) && m.customjs_classes.includes("DocSearch"));
+  const sources = (m.files || []).map(f => f.source);
+  assertTrue("HC-V01040-MAN-1: files includes helpers/doc-search.js",
+    sources.includes("helpers/doc-search.js"));
 }
 
 (async function main() {
@@ -12024,6 +12041,9 @@ async function caseV01040ShExt2MatchesUsed() {
   // v0.104.0 S2.2 (Task 3): SectionHub consumes DocSearch.
   await caseV01040ShExt1InvokesDocSearch();
   await caseV01040ShExt2MatchesUsed();
+
+  // v0.104.0 S3 (Task 4): project blueprint manifest 1.18.0 (DocSearch registered).
+  await caseV01040Man1Manifest118();
 
   // v0.65.0 HC-V065-RUN-NOTE: write-run-note-* sub-skill lint
   {
