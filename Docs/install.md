@@ -880,6 +880,52 @@ After the update, verify by checking that `.claude/skills/cowork/skills/gather-s
 
 **Optional post-deploy validation (FLN-v87-1).** The `min_similarity: 0.45` threshold is a design-time guess. Review the first 3-5 morning briefings on each consumer vault: if Echoes callouts surface obviously-unrelated matches, the threshold should be raised; if relevant matches are consistently filtered out (callout omits even on days with clear historical analogues), the threshold should be lowered. A v0.87.1 PATCH can ship the empirically-validated threshold.
 
+## Upgrading from v0.102.0
+
+After `brew upgrade sauce`, run from each consumer vault:
+
+```bash
+sauce update --bump-pins
+sauce install
+```
+
+v0.103.0 ships a single, additive structural change to the project blueprint: a **hierarchical section-hub navigation tree** replaces v0.102.0's single-page Confluence-style Docs Hub. The previous bucket-on-one-page model scaled but did not communicate hierarchy — with 30+ docs across 5+ sections, the section identity got lost in the bucket density. The new model makes each section a first-class entity with its own hub note. Workshop 0.102.0 → 0.103.0; project blueprint 1.16.0 → 1.17.0; all other mechanism/blueprint versions UNCHANGED (cowork 0.40.0; contract 0.35.1; meetings 0.8.0; entity-create 0.5.0; platform-claude 0.1.3).
+
+The v0.103.0 install runs ONE new structural step on top of the existing v0.102.0 pipeline:
+
+1. **`applyProjectSectionsHubMigration`** — runs after `applyProjectSectionsMigration`. Heals each project under `spice/projects/` end-to-end:
+   - **Rewires `docs/Docs.md` body** from `ProjectDocsCards` / `ProjectDocsSections` → `ProjectDocsIndex` (the new sections-INDEX renderer). Strips the standalone `entity-create:doc-note` block — `+ New Doc` is now offered by the index helper itself with section preset.
+   - **Materializes Section Hub notes** (`Knowledge.md`, `Notes.md`, etc.) in every existing `docs/<slug>/` subfolder. Each hub renders breadcrumb + doc cards + `+ New Doc` button (presetPrompts: section) + sub-section cards + `+ New Sub-Section` button.
+   - **Materializes Sub-Section Hubs** for nested subfolders containing ≥1 doc-note. Recurses ONE level (the 2-level cap: project → section → sub-section → docs). Depth-2 hubs suppress sub-section UI.
+   - **Migrates doc-note frontmatter** from `section: "Knowledge"` (string) → `section: "[[Knowledge]]"` (wikilink). Adds `sub_section: "[[X]]"` field when the doc-note lives in a sub-folder.
+   - **Injects a breadcrumb dataviewjs block** at the top of every doc-note body, guarded by `<!-- breadcrumb-v1.17.0 -->` marker for idempotency. The breadcrumb renders a clickable wikilink trail (project → docs → section → sub-section).
+   - **Migrates project `sections[]` frontmatter** from string entries to wikilink form (`"Knowledge"` → `"[[Knowledge]]"`) — or inserts `sections[]` with the discovered labels when the field is absent.
+   - **Default-section guarantee** — every project always has Knowledge + Notes hubs after migration, even when currently empty.
+
+Idempotent per-project: re-running install is a no-op once `docs/Docs.md` already invokes `ProjectDocsIndex`. Failure-loud per-project: a per-project try/catch emits a warning event with `step: "project_sections_hub_migration"` but never throws — so one project's failed migration cannot block the rest of the install.
+
+**What `sauce update --bump-pins` materializes:**
+
+- `ranch/scripts/project/breadcrumb.js` — NEW Breadcrumb renderer (clickable wikilink trail on every node).
+- `ranch/scripts/project/project-docs-index.js` — NEW sections-INDEX renderer (replaces ProjectDocsSections on `Docs.md`).
+- `ranch/scripts/project/section-hub.js` — NEW depth-aware section + sub-section renderer.
+- `ranch/scripts/project/project-nav-buttons.js` — section-hub depth 1 + depth 2 context branches.
+- `ranch/templates/Template, Section Hub.md` — NEW canonical template for both depth-1 + depth-2 section hubs.
+- `ranch/templates/Template, Docs Hub.md` — REWRITTEN to invoke Breadcrumb + ProjectDocsIndex.
+- `ranch/templates/Template, Doc Note.md` — extended with `<!-- breadcrumb-v1.17.0 -->` marker + Breadcrumb dataviewjs block prepended.
+- `ranch/rules/section-hub.json` — NEW rule registered.
+- `ranch/platform-subscription.json` — workshop `0.102.0` → `0.103.0` + project pin `1.16.0` → `1.17.0` (lockstep).
+
+**What does NOT change:**
+
+- `scheduled-job-contract.json` `contract_version` UNCHANGED at `0.35.1`.
+- No `cowork` blueprint change (stays at 0.40.0). No `align-scheduled-jobs` run required.
+- meetings / entity-create / platform-claude UNCHANGED (0.8.0 / 0.5.0 / 0.1.3).
+
+**Post-deploy visual check.** Open a project Docs hub in Obsidian — should render the breadcrumb at the top, section cards (Knowledge + Notes always present), dashboard chips (doc count + open meetings + project status), and `+ New Section` / `+ New Doc` shortcut buttons. Click a section card — should open the section's `<Section Name>.md` hub with its own breadcrumb, doc cards, `+ New Doc` button, and (depth-1 only) sub-section cards + `+ New Sub-Section` button. Open an existing doc-note — should render the breadcrumb at the top above the SpaceNavButtons row + the doc's original body.
+
+**Expected accuris migration delta on `spice/projects/global-k8s/`:** ~5 existing section folders (created at v0.102.0 deploy) each gain a `<Section Name>.md` Section Hub note; every doc-note gains the breadcrumb marker + block at the top of its body + has its `section:` frontmatter rewritten from string to wikilink form; `Docs.md` body rewritten to invoke `ProjectDocsIndex`; project `sections[]` frontmatter rewritten from strings to wikilinks. Any pre-existing nested doc-note subfolder (depth ≥ 2 below `docs/`) gains a Sub-Section Hub at depth 2 (the cap). Idempotent — second run is a no-op once Docs.md already invokes `ProjectDocsIndex`.
+
 ## Upgrading from v0.101.0 to v0.101.1
 
 `brew upgrade sauce` → `sauce update --bump-pins` per consumer vault. Project-blueprint PATCH (1.15.1 → 1.15.2); cowork untouched (0.40.0), no schema/contract change, no scheduled-job sync needed.

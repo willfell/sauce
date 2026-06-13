@@ -165,6 +165,7 @@ Helper count UNCHANGED at 13 in v0.32.0 — the new writes are handled by extens
 **v0.102.0 — NEW installer step `applyVaultDefaultPaths` writes to existing `.obsidian/app.json`.** Allowlist UNCHANGED at 18 paths + CLAUDE.md marker regions; helper count UNCHANGED at 14. The v0.102.0 cycle (project workspace — sections + meetings link + vault-defaults install fix) adds a NEW installer step at the vault-init prelude that reads `.obsidian/app.json`, writes `newFileFolderPath: "spice/resources/notes"` + `attachmentFolderPath: "spice/resources/attachments"` when EACH key is currently unset, and creates `spice/resources/{notes,attachments}/` folders if absent. `.obsidian/app.json` is already in the allowlist (v0.26.1 added it for `applyAppSettings`); the v0.102.0 step adds a SECOND helper that writes to the same target file with a divergent posture from `applyAppSettings`: **per-key user-customization-preserved** (writes ONLY when the key is unset; preserves any user value verbatim) — closer to the v0.21.1 `applyHotkeys` per-binding first-wins posture than to v0.26.1 `applyAppSettings`'s platform-as-overrider posture. Backup-on-edit `.sauce-backup` per mechanic #2. Justified because `newFileFolderPath` + `attachmentFolderPath` are user-overridable defaults (legitimate consumer customization), unlike `alwaysOpenInNewTab` which the platform declares as a vault baseline. Two helpers writing the same JSON file is a NEW pattern in the allowlist; both go through Read-Modify-Write so they compose cleanly. Allowlist UNCHANGED at 18 paths; helper count `14 → 15` (new `applyVaultDefaultPaths`). Cycle close history block updated.
 
 - v0.102.0 (2026-06-13): project workspace cycle — sections + meetings link + vault-defaults; lessons captured in result doc.
+- v0.103.0 (2026-06-13): section hubs cycle — hierarchical navigation tree replaces v0.102.0's single-page Confluence; user-observed post-dogfood that single-page sections didn't communicate hierarchy.
 
 ### 13. Bootstrap stub is content-static; never re-edit (per-consumer drift forbidden)
 
@@ -424,6 +425,22 @@ When you write a third time-window predicate (weekly/monthly hub renderer, futur
 **Surfaced:** v0.102.0 S6 (commit `ed48e93`). S5 bumped entity-create 0.5.0 / project 1.16.0 / meetings 0.8.0 / platform-claude 0.1.3 in per-mechanism manifests + `ranch/platform-subscription.json` pins, but the workshop catalogue in `platform/manifest.json` still listed the pre-bump versions. S6 self-install rejected the whole install with skip notices ("subscription pins entity-create@0.5.0 but workshop has 0.4.0", etc.).
 
 **Future hardening candidate:** extend `check-version-sync.js` to assert that for every `subscription.mechanisms[]` / `subscription.blueprints[]` entry, the matching `workshop_manifest.mechanisms[]` / `workshop_manifest.blueprints[]` row exists at the same pin AND equals the per-item `manifest.json` `version`. PATCH-sized hygiene; would shift this failure mode from S6 dogfood to preflight.
+
+### 25. Multi-shape doc-note `section:` frontmatter during the v0.102.0 → v0.103.0 consumer-vault migration window
+
+v0.102.0 shipped doc-note `section:` frontmatter as a STRING (`section: "Knowledge"`). v0.103.0's `applyProjectSectionsHubMigration` rewrites that to a WIKILINK (`section: "[[Knowledge]]"`) — but the migration only fires on `sauce install` against an updated workshop. Until BOTH consumer vaults (accuris + headspace) are migrated, the platform is in a mixed state: some doc-notes have string `section:`, others have wikilink `section:`. Any code that reads `frontmatter.section` MUST tolerate BOTH shapes. The `Breadcrumb` / `ProjectDocsIndex` / `SectionHub` helpers all handle this via a `_stripLinkBrackets`-style normalization at read time (strip leading `[[` / trailing `]]` before comparison). The `rule_fragment` for doc-note `section:` similarly accepts both shapes during the migration window.
+
+**Watch when:** writing new code that reads `frontmatter.section` (or `frontmatter.sub_section` introduced in v0.103.0) — assume the value can be EITHER `"Knowledge"` OR `"[[Knowledge]]"` until the migration window closes.
+
+**Symptom.** A helper compares `frontmatter.section === "Knowledge"` and silently drops doc-notes whose section was already migrated to `"[[Knowledge]]"` — half the project's docs disappear from a hub, with no error.
+
+**Fix when surfaced.** Normalize at read time: `const sectionLabel = String(p.section || "").replace(/^\[\[|\]\]$/g, "")`. Compare on `sectionLabel`, never on the raw value.
+
+**Window closes when:** both consumer vaults (accuris + headspace) have completed `sauce install` against v0.103.0 AND no new vault is bootstrapped at v0.102.0 (fresh installs at v0.103.0 emit wikilink form from the entity-create entry directly). Once the window closes, the `rule_fragment` can tighten to wikilink-only (v0.103.x carry-forward).
+
+**Surfaced:** v0.103.0 design (proactive — never observed in production because the migration is mandatory and the readers were authored to tolerate both shapes from day one).
+
+**Future hardening candidate:** an `applyProjectSectionsHubMigration` post-pass that asserts every doc-note's `section:` is in wikilink form before declaring the project migrated; OR a `/audit` rule that flags any string-form `section:` after the migration window closes.
 
 ## Operational gotchas
 
