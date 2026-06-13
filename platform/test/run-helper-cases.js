@@ -10472,6 +10472,64 @@ async function caseV01020PDS8UnfiledBucketMethod() {
     /["']Unfiled["']/.test(src));
 }
 
+// v0.102.0 S2.2 — ProjectMeetingsPanel helper (## Meetings section on Project notes).
+// Static-string asserts against the helper source — the helper runs inside Obsidian's
+// dataviewjs sandbox so we can't unit-test the render output, but the source-text
+// regex assertions lock in the canonical shape that BeaconCards + EntityCreate consume.
+const _PMP_PATH = path.join(WORKSHOP, "platform", "blueprints", "project", "helpers", "project-meetings-panel.js");
+
+function _readPmpSrc() {
+  if (!fs.existsSync(_PMP_PATH)) return "";
+  return fs.readFileSync(_PMP_PATH, "utf8");
+}
+
+async function caseV01020PMP1ClassDefinedAsyncRender() {
+  console.log(`\n--- Case HC-V01020-PMP-1: ProjectMeetingsPanel class defined + uses async render ---`);
+  assertTrue("HC-V01020-PMP-1: project-meetings-panel.js exists", fs.existsSync(_PMP_PATH));
+  const src = _readPmpSrc();
+  assertTrue("HC-V01020-PMP-1a: class ProjectMeetingsPanel declared",
+    /class\s+ProjectMeetingsPanel\s*\{/.test(src));
+  assertTrue("HC-V01020-PMP-1b: async render(dv, opts ...) method present (NOT view)",
+    /async\s+render\s*\(\s*dv\s*,\s*opts/.test(src) && !/async\s+view\s*\(/.test(src));
+}
+
+async function caseV01020PMP2QueriesMeetingsAndMatchesProject() {
+  console.log(`\n--- Case HC-V01020-PMP-2: queries meetings + matches project via path or string include + reads spice/meetings/notes ---`);
+  const src = _readPmpSrc();
+  assertTrue("HC-V01020-PMP-2a: filters by p.type === \"meeting\"",
+    /p\.type\s*===\s*["']meeting["']/.test(src));
+  // Project matching — either field.path === currentPath OR string includes [[<projectName>]]
+  assertTrue("HC-V01020-PMP-2b: project match via .path or string include of [[projectName]]",
+    /\.path\s*===\s*currentPath/.test(src) && /includes\s*\(\s*`\[\[\$\{projectName\}\]\]`\s*\)/.test(src));
+  assertTrue("HC-V01020-PMP-2c: queries dv.pages from spice/meetings/notes",
+    /dv\.pages\(\s*['"]"spice\/meetings\/notes"['"]\s*\)/.test(src));
+}
+
+async function caseV01020PMP3SortByDateDescTake5() {
+  console.log(`\n--- Case HC-V01020-PMP-3: sorts by date desc + limits/takes to 5 ---`);
+  const src = _readPmpSrc();
+  assertTrue("HC-V01020-PMP-3a: sort by p.date desc",
+    /\.sort\s*\(\s*p\s*=>\s*p\.date\s*,\s*["']desc["']\s*\)/.test(src));
+  assertTrue("HC-V01020-PMP-3b: limits to 5 via .limit(5), .slice(0, 5), or .take(5)",
+    /\.limit\s*\(\s*5\s*\)/.test(src) || /\.slice\s*\(\s*0\s*,\s*5\s*\)/.test(src) || /\.take\s*\(\s*5\s*\)/.test(src));
+}
+
+async function caseV01020PMP4NewMeetingButtonPresetPrompts() {
+  console.log(`\n--- Case HC-V01020-PMP-4: + New meeting button uses EntityCreate.render with presetPrompts.project + instance "meeting" ---`);
+  const src = _readPmpSrc();
+  assertTrue("HC-V01020-PMP-4a: EntityCreate.render called with instance: \"meeting\"",
+    /customJS\.EntityCreate\.render\s*\(\s*dv\s*,\s*\{[\s\S]*?instance\s*:\s*["']meeting["']/.test(src));
+  assertTrue("HC-V01020-PMP-4b: presetPrompts.project forwarded",
+    /presetPrompts\s*:\s*\{\s*project\s*:/.test(src));
+}
+
+async function caseV01020PMP5EmptyStateLanguage() {
+  console.log(`\n--- Case HC-V01020-PMP-5: empty-state "No meetings linked" language present ---`);
+  const src = _readPmpSrc();
+  assertTrue("HC-V01020-PMP-5: empty-state \"No meetings linked\" copy present",
+    /No meetings linked/.test(src));
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -10981,6 +11039,13 @@ async function caseV01020PDS8UnfiledBucketMethod() {
   await caseV01020PDS6MetaCallbackCreatedAtFallback();
   await caseV01020PDS7PerBucketEmptyState();
   await caseV01020PDS8UnfiledBucketMethod();
+
+  // v0.102.0 S2.2 — ProjectMeetingsPanel helper (## Meetings section on Project notes).
+  await caseV01020PMP1ClassDefinedAsyncRender();
+  await caseV01020PMP2QueriesMeetingsAndMatchesProject();
+  await caseV01020PMP3SortByDateDescTake5();
+  await caseV01020PMP4NewMeetingButtonPresetPrompts();
+  await caseV01020PMP5EmptyStateLanguage();
 
   // v0.65.0 HC-V065-RUN-NOTE: write-run-note-* sub-skill lint
   {
