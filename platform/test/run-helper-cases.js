@@ -9823,6 +9823,459 @@ async function caseV0990PrefixA3() {
   } catch (e) { assertTrue("HC-V0990-PREFIX-A3: mixed prose", false, e && e.message); }
 }
 
+// ---------------------------------------------------------------------------
+// v0.101.0 — HC-V1010-* : verbal feedback everywhere (v=4 + per-cadence
+// satisfaction + schema 5 + intent generalization)
+// ---------------------------------------------------------------------------
+
+function _v1010V4NonEodBody(o) {
+  // Hand-built v=4 NON-EOD rail (checklist mode) for parse-side cases.
+  o = o || {};
+  return [
+    "> [!todo]+ Was this useful?",
+    "> One tap, a line of prose, or ticks — anything counts. Tomorrow's brief adjusts overnight.",
+    "> <!-- cowork:feedback-capture v=4 -->",
+    `> Useful: \`[${o.yes ? "x" : " "}] yes\` \`[${o.no ? "x" : " "}] no\`${o.tapSuffix || ""}`,
+    ">",
+    "> ### Free-text feedback",
+    ">",
+    "```feedback",
+    o.free_text !== undefined ? o.free_text : "(Type prose here — name a section to scope it, e.g. `finance: too long`.)",
+    "```",
+    ">",
+    "> > [!summary]- Kinds — quick ticks",
+    `> > - [${o.tickChat ? "x" : " "}] Chat${o.chatSuffix || ""}`,
+    `> > - [${o.tickCal ? "x" : " "}] Calendar`,
+    `> > - [${o.tickGh ? "x" : " "}] GitHub`,
+  ].join("\n");
+}
+
+function _v1010LegacyRatingBody(o) {
+  // Old rating-block note (pre-v0.101.0 corpus / upgrade-day prior).
+  o = o || {};
+  return [
+    "> [!todo]+ Was today useful?",
+    "> Tick the kinds that surfaced something you cared about.",
+    `> - [${o.tickChat ? "x" : " "}] Chat`,
+    `> - [${o.tickCal ? "x" : " "}] Calendar`,
+    `> <!-- cowork:rating-block schema=1.0.0 cadence=${o.cadence || "morning-briefing"} day=${o.day || "2026-06-13"} -->`,
+  ].join("\n");
+}
+
+async function caseV1010CaptureA1() {
+  console.log(`\n--- Case HC-V1010-CAPTURE-A1: non-EOD checklist mode — v=4 sentinel + neutral title + order tap < fence < kind checklist ---`);
+  try {
+    const { composeFeedbackCapture } = require("../blueprints/cowork/helpers/compose-feedback-capture-helper.js");
+    const out = composeFeedbackCapture({
+      cadence: "morning-briefing", day: "2026-06-13",
+      surfaced_kinds: ["chat", "calendar", "github"], prior_md: null,
+    });
+    const md = out.rail_md;
+    assertTrue("HC-V1010-CAPTURE-A1: v=4 sentinel emitted", md.includes("<!-- cowork:feedback-capture v=4 -->"));
+    assertTrue("HC-V1010-CAPTURE-A1: neutral title", md.includes("> [!todo]+ Was this useful?"));
+    const iTap = md.indexOf("Useful:"), iFence = md.indexOf("```feedback"), iKinds = md.indexOf("[!summary]- Kinds — quick ticks");
+    assertTrue("HC-V1010-CAPTURE-A1: order tap < fence < checklist", iTap > -1 && iFence > iTap && iKinds > iFence);
+    assertTrue("HC-V1010-CAPTURE-A1: checklist lines per surfaced kind in order",
+      /> > - \[ \] Chat\n> > - \[ \] Calendar\n> > - \[ \] GitHub/.test(md));
+    assertTrue("HC-V1010-CAPTURE-A1: NO per-item wikilinks and NO knob rows in checklist mode",
+      !md.includes("[[#^item-") && !md.includes("**Fire "));
+    assertTrue("HC-V1010-CAPTURE-A1: NO legacy rating-block sentinel emitted", !md.includes("cowork:rating-block"));
+    assertTrue("HC-V1010-CAPTURE-A1: slim sidecar observability",
+      out.sidecar_observability && out.sidecar_observability.sentinel_version === "v=4"
+      && Array.isArray(out.sidecar_observability.kinds_listed)
+      && out.sidecar_observability.kinds_listed.join(",") === "chat,calendar,github");
+  } catch (e) { assertTrue("HC-V1010-CAPTURE-A1", false, e && e.message); }
+}
+
+async function caseV1010CaptureA2() {
+  console.log(`\n--- Case HC-V1010-CAPTURE-A2: EOD item mode — exact v=3 mechanics under v=4 sentinel ---`);
+  try {
+    const { composeFeedbackCapture, _itemId } = require("../blueprints/cowork/helpers/compose-feedback-capture-helper.js");
+    const out = composeFeedbackCapture({
+      cadence: "eod-review", day: "2026-06-13",
+      surfaced_items_by_kind: { chat: [{ id: "chat:c1:t1", label: "Zhenzhen PR #353 thread" }] },
+      prior_md: null,
+    });
+    const md = out.rail_md;
+    const chatId = _itemId("chat", "chat:c1:t1");
+    assertTrue("HC-V1010-CAPTURE-A2: v=4 sentinel", md.includes("<!-- cowork:feedback-capture v=4 -->"));
+    assertTrue("HC-V1010-CAPTURE-A2: Mattered + Didn't-like lists share item-ID", md.includes(`[[#^${chatId}|Zhenzhen PR #353 thread]]`) && md.includes("> > Mattered:") && md.includes("> > Didn't like:"));
+    assertTrue("HC-V1010-CAPTURE-A2: knob row present", md.includes("**Fire chat:**"));
+    assertTrue("HC-V1010-CAPTURE-A2: item-mode sidecar carries items[] registry + v=4",
+      out.sidecar_observability.sentinel_version === "v=4" && out.sidecar_observability.item_count === 1
+      && out.sidecar_observability.items[0].item_id === chatId);
+    assertTrue("HC-V1010-CAPTURE-A2: no kinds_listed in item mode", out.sidecar_observability.kinds_listed === undefined);
+  } catch (e) { assertTrue("HC-V1010-CAPTURE-A2", false, e && e.message); }
+}
+
+async function caseV1010CaptureA3() {
+  console.log(`\n--- Case HC-V1010-CAPTURE-A3: re-fire preserves tap + prose + checklist ticks from v=4 prior ---`);
+  try {
+    const { composeFeedbackCapture } = require("../blueprints/cowork/helpers/compose-feedback-capture-helper.js");
+    const prior = _v1010V4NonEodBody({ yes: true, tickChat: true, free_text: "calendar: this saved me" });
+    const out = composeFeedbackCapture({
+      cadence: "morning-briefing", day: "2026-06-13",
+      surfaced_kinds: ["chat", "calendar", "github"], prior_md: prior,
+    });
+    assertTrue("HC-V1010-CAPTURE-A3: tap preserved", out.rail_md.includes("Useful: `[x] yes` `[ ] no`"));
+    assertTrue("HC-V1010-CAPTURE-A3: prose preserved verbatim", out.rail_md.includes("calendar: this saved me"));
+    assertTrue("HC-V1010-CAPTURE-A3: chat tick preserved, calendar fresh", out.rail_md.includes("> > - [x] Chat") && out.rail_md.includes("> > - [ ] Calendar"));
+  } catch (e) { assertTrue("HC-V1010-CAPTURE-A3", false, e && e.message); }
+}
+
+async function caseV1010CaptureA4() {
+  console.log(`\n--- Case HC-V1010-CAPTURE-A4: UPGRADE DAY — legacy rating-block prior ticks preserved into v=4 checklist ---`);
+  try {
+    const { composeFeedbackCapture } = require("../blueprints/cowork/helpers/compose-feedback-capture-helper.js");
+    const prior = _v1010LegacyRatingBody({ tickChat: true });
+    const out = composeFeedbackCapture({
+      cadence: "morning-briefing", day: "2026-06-13",
+      surfaced_kinds: ["chat", "calendar"], prior_md: prior,
+    });
+    assertTrue("HC-V1010-CAPTURE-A4: legacy chat tick carried into checklist", out.rail_md.includes("> > - [x] Chat"));
+    assertTrue("HC-V1010-CAPTURE-A4: unticked calendar stays fresh", out.rail_md.includes("> > - [ ] Calendar"));
+    assertTrue("HC-V1010-CAPTURE-A4: tap renders fresh-unticked from legacy prior", out.rail_md.includes("Useful: `[ ] yes` `[ ] no`"));
+  } catch (e) { assertTrue("HC-V1010-CAPTURE-A4", false, e && e.message); }
+}
+
+async function caseV1010CaptureA5() {
+  console.log(`\n--- Case HC-V1010-CAPTURE-A5: EOD v=3 prior tolerance under v=4 emit (tap + items + knobs + prose preserved) ---`);
+  try {
+    const { composeFeedbackCapture, _itemId } = require("../blueprints/cowork/helpers/compose-feedback-capture-helper.js");
+    const chatId = _itemId("chat", "chat:c1:t1");
+    const prior = [
+      "> [!todo]+ Was today useful?",
+      "> <!-- cowork:feedback-capture v=3 -->",
+      "> Useful: `[ ] yes` `[x] no`",
+      "> ### Free-text feedback", ">",
+      "```feedback", "github: too much", "```", ">",
+      "> > [!summary]- Chat — items",
+      "> > Mattered:",
+      `> > - [x] [[#^${chatId}|Zhenzhen PR #353 thread]]`,
+      "> >",
+      "> > Didn't like:",
+      `> > - [ ] [[#^${chatId}|Zhenzhen PR #353 thread]]`,
+      "> >",
+      "> > **Fire chat:** `[ ] less` `[ ] same` `[x] more`",
+    ].join("\n");
+    const out = composeFeedbackCapture({
+      cadence: "eod-review", day: "2026-06-13",
+      surfaced_items_by_kind: { chat: [{ id: "chat:c1:t1", label: "Zhenzhen PR #353 thread" }] },
+      prior_md: prior,
+    });
+    assertTrue("HC-V1010-CAPTURE-A5: tap no preserved", out.rail_md.includes("Useful: `[ ] yes` `[x] no`"));
+    assertTrue("HC-V1010-CAPTURE-A5: mattered tick preserved", out.rail_md.includes(`- [x] [[#^${chatId}|`));
+    assertTrue("HC-V1010-CAPTURE-A5: knob more preserved", out.rail_md.includes("`[x] more`"));
+    assertTrue("HC-V1010-CAPTURE-A5: prose preserved", out.rail_md.includes("github: too much"));
+    assertTrue("HC-V1010-CAPTURE-A5: emits v=4 sentinel (not v=3)", out.rail_md.includes("v=4 -->") && !out.rail_md.includes("v=3 -->"));
+  } catch (e) { assertTrue("HC-V1010-CAPTURE-A5", false, e && e.message); }
+}
+
+async function caseV1010CaptureA6() {
+  console.log(`\n--- Case HC-V1010-CAPTURE-A6: checklist Tasks-suffix tolerance + empty-kinds minimal shape ---`);
+  try {
+    const { composeFeedbackCapture, _parsePrior } = require("../blueprints/cowork/helpers/compose-feedback-capture-helper.js");
+    const prior = _v1010V4NonEodBody({ tickChat: true, chatSuffix: " ✅ 2026-06-13" });
+    const parsed = _parsePrior(prior);
+    assertTrue("HC-V1010-CAPTURE-A6: _parsePrior kind_ticks ignores Tasks suffix", parsed.kind_ticks && parsed.kind_ticks.chat === true);
+    const out = composeFeedbackCapture({ cadence: "midday-tripwire", day: "2026-06-13", surfaced_kinds: [], prior_md: null });
+    assertTrue("HC-V1010-CAPTURE-A6: zero kinds → tap + fence still render, no checklist callout",
+      out.rail_md.includes("Useful:") && out.rail_md.includes("```feedback") && !out.rail_md.includes("Kinds — quick ticks"));
+  } catch (e) { assertTrue("HC-V1010-CAPTURE-A6", false, e && e.message); }
+}
+
+async function caseV1010GuardA1() {
+  console.log(`\n--- Case HC-V1010-GUARD-A1: write-guard accepts feedback-capture marker when rating gate open ---`);
+  try {
+    const os = require("node:os"), fsx = require("node:fs"), pathx = require("node:path");
+    const { writeAtomicNote } = require("../blueprints/cowork/helpers/write-atomic-note-helper.js");
+    const tmp = fsx.mkdtempSync(pathx.join(os.tmpdir(), "v1010-guard-"));
+    const schemaPath = pathx.join(__dirname, "../blueprints/cowork/data/schemas/morning-briefing@1.0.0.json");
+    const base = {
+      mdPath: pathx.join(tmp, "morning-briefing.md"),
+      sidecarPath: pathx.join(tmp, "morning-briefing.cowork.json"),
+      schemaPath,
+      sidecar_json: {
+        schema_version: "1.0.0", generated_by: "cowork:morning-briefing@2.0.0",
+        generated_at: "2026-06-13T07:00:00-06:00", cadence: "morning-briefing",
+        engagement_id: "test-eng", frontmatter: { type: "cowork-morning-briefing" },
+        surfaced_kinds: ["chat"], surfaced_items: [], render_aspects_applied: [],
+        memory_used: { yesterday_present: false, drift_warning_present: false, echoes_count: 0 },
+        plan_dispatch: { mode: "prefs", kinds_dispatched: 1, warnings_emitted: 0, classifier_cache_hit: false, pending_confirmations_count: 0 },
+      },
+      surfaced_kinds_for_rating: ["chat"], learning_enabled: true, expected_kinds: ["chat"],
+    };
+    const withFeedback = Object.assign({}, base, { body_md: "body\n\n> [!todo]+ Was this useful?\n> <!-- cowork:feedback-capture v=4 -->\n> Useful: `[ ] yes` `[ ] no`\n" });
+    const r1 = writeAtomicNote(withFeedback);
+    assertTrue("HC-V1010-GUARD-A1: feedback-capture marker passes guard", r1 && r1.status !== "failed:contract-violation:missing-rating-callout");
+    const withNeither = Object.assign({}, base, { mdPath: pathx.join(tmp, "x.md"), sidecarPath: pathx.join(tmp, "x.cowork.json"), body_md: "body with no marker\n" });
+    const r2 = writeAtomicNote(withNeither);
+    assertTrue("HC-V1010-GUARD-A1: neither marker still fails", r2 && r2.status === "failed:contract-violation:missing-rating-callout");
+  } catch (e) { assertTrue("HC-V1010-GUARD-A1", false, e && e.message); }
+}
+
+async function caseV1010GuardA2() {
+  console.log(`\n--- Case HC-V1010-GUARD-A2: legacy rating-block marker still passes (permanent tolerance) + FEEDBACK_SENTINEL exported ---`);
+  try {
+    const helper = require("../blueprints/cowork/helpers/write-atomic-note-helper.js");
+    assertTrue("HC-V1010-GUARD-A2: FEEDBACK_SENTINEL exported", typeof helper.FEEDBACK_SENTINEL === "string" && helper.FEEDBACK_SENTINEL.includes("cowork:feedback-capture"));
+    assertTrue("HC-V1010-GUARD-A2: RATING_SENTINEL still exported", typeof helper.RATING_SENTINEL === "string");
+  } catch (e) { assertTrue("HC-V1010-GUARD-A2", false, e && e.message); }
+}
+
+async function caseV1010ParseA1() {
+  console.log(`\n--- Case HC-V1010-PARSE-A1: v=4 non-EOD body → kind_ticks extraction (NEW field — not a version-string assert) ---`);
+  try {
+    const { parseFeedbackCapture } = require("../blueprints/cowork/helpers/learn-from-checks-helper.js");
+    const parsed = parseFeedbackCapture(_v1010V4NonEodBody({ tickChat: true, tickGh: false, yes: true }));
+    assertTrue("HC-V1010-PARSE-A1: kind_ticks field exists", parsed.kind_ticks && typeof parsed.kind_ticks === "object");
+    assertTrue("HC-V1010-PARSE-A1: chat ticked / calendar+github unticked", parsed.kind_ticks.chat === true && parsed.kind_ticks.calendar === false && parsed.kind_ticks.github === false);
+    assertTrue("HC-V1010-PARSE-A1: satisfaction tap extracted alongside", parsed.satisfaction === true);
+    assertTrue("HC-V1010-PARSE-A1: no item ticks leak from checklist", Object.keys(parsed.ticks).length === 0);
+  } catch (e) { assertTrue("HC-V1010-PARSE-A1", false, e && e.message); }
+}
+
+async function caseV1010ParseA2() {
+  console.log(`\n--- Case HC-V1010-PARSE-A2: v=3 EOD body → kind_ticks stays empty (no false positives from item sections) ---`);
+  try {
+    const { parseFeedbackCapture } = require("../blueprints/cowork/helpers/learn-from-checks-helper.js");
+    const { _itemId } = require("../blueprints/cowork/helpers/compose-feedback-capture-helper.js");
+    const chatId = _itemId("chat", "chat:c1:t1");
+    const v3 = [
+      "> <!-- cowork:feedback-capture v=3 -->",
+      "> Useful: `[ ] yes` `[ ] no`",
+      "> > [!summary]- Chat — items",
+      "> > Mattered:",
+      `> > - [x] [[#^${chatId}|Zhenzhen PR #353 thread]]`,
+    ].join("\n");
+    const parsed = parseFeedbackCapture(v3);
+    assertTrue("HC-V1010-PARSE-A2: kind_ticks empty on item-mode body", parsed.kind_ticks && Object.keys(parsed.kind_ticks).length === 0);
+    assertTrue("HC-V1010-PARSE-A2: item tick still lands in ticks{}", parsed.ticks[chatId] === true);
+  } catch (e) { assertTrue("HC-V1010-PARSE-A2", false, e && e.message); }
+}
+
+async function caseV1010ParseA3() {
+  console.log(`\n--- Case HC-V1010-PARSE-A3: mirrored-parser lockstep — both files carry the kind_ticks cross-reference comment ---`);
+  try {
+    const fsx = require("node:fs"), pathx = require("node:path");
+    const a = fsx.readFileSync(pathx.join(__dirname, "../blueprints/cowork/helpers/compose-feedback-capture-helper.js"), "utf8");
+    const b = fsx.readFileSync(pathx.join(__dirname, "../blueprints/cowork/helpers/learn-from-checks-helper.js"), "utf8");
+    assertTrue("HC-V1010-PARSE-A3: compose side names the mirror", /Mirrored in learn-from-checks-helper\.js/.test(a) && a.includes("kind_ticks"));
+    assertTrue("HC-V1010-PARSE-A3: parse side names the mirror", /Mirrored in compose-feedback-capture-helper\.js/.test(b) && b.includes("kind_ticks"));
+  } catch (e) { assertTrue("HC-V1010-PARSE-A3", false, e && e.message); }
+}
+
+async function caseV1010SatA1() {
+  console.log(`\n--- Case HC-V1010-SAT-A1: per-cadence entries coexist; same-(day,cadence) overwrites ---`);
+  try {
+    const { appendSatisfaction } = require("../blueprints/cowork/helpers/ingest-feedback-helper.js");
+    let t = { satisfaction: [] };
+    t = appendSatisfaction(t, "2026-06-13", true, { cadence: "morning-briefing" });
+    t = appendSatisfaction(t, "2026-06-13", false, { cadence: "eod-review" });
+    assertTrue("HC-V1010-SAT-A1: two same-day entries coexist", t.satisfaction.length === 2);
+    assertTrue("HC-V1010-SAT-A1: entries carry cadence", t.satisfaction[0].cadence === "morning-briefing" && t.satisfaction[1].cadence === "eod-review");
+    t = appendSatisfaction(t, "2026-06-13", true, { cadence: "eod-review" });
+    assertTrue("HC-V1010-SAT-A1: same-(day,cadence) overwrite — still 2 entries, eod now true",
+      t.satisfaction.length === 2 && t.satisfaction.find((e) => e.cadence === "eod-review").useful === true);
+  } catch (e) { assertTrue("HC-V1010-SAT-A1", false, e && e.message); }
+}
+
+async function caseV1010SatA2() {
+  console.log(`\n--- Case HC-V1010-SAT-A2: day-window trim (30 days), not entry-count trim ---`);
+  try {
+    const { appendSatisfaction } = require("../blueprints/cowork/helpers/ingest-feedback-helper.js");
+    let t = { satisfaction: [
+      { day: "2026-05-01", cadence: "eod-review", useful: true },     // 43 days before append → trimmed
+      { day: "2026-06-01", cadence: "eod-review", useful: true },     // 12 days before → kept
+    ] };
+    t = appendSatisfaction(t, "2026-06-13", false, { cadence: "morning-briefing" });
+    assertTrue("HC-V1010-SAT-A2: stale entry trimmed, recent kept, new appended",
+      t.satisfaction.length === 2
+      && !t.satisfaction.some((e) => e.day === "2026-05-01")
+      && t.satisfaction.some((e) => e.day === "2026-06-01"));
+  } catch (e) { assertTrue("HC-V1010-SAT-A2", false, e && e.message); }
+}
+
+async function caseV1010SatA3() {
+  console.log(`\n--- Case HC-V1010-SAT-A3: non-boolean no-op + missing-cadence default eod-review (legacy call shape) ---`);
+  try {
+    const { appendSatisfaction } = require("../blueprints/cowork/helpers/ingest-feedback-helper.js");
+    const t0 = { satisfaction: [] };
+    const t1 = appendSatisfaction(t0, "2026-06-13", null, { cadence: "eod-review" });
+    assertTrue("HC-V1010-SAT-A3: null tap is a no-op", t1.satisfaction.length === 0);
+    const t2 = appendSatisfaction(t0, "2026-06-13", true);
+    assertTrue("HC-V1010-SAT-A3: cadence defaults to eod-review", t2.satisfaction.length === 1 && t2.satisfaction[0].cadence === "eod-review");
+    assertTrue("HC-V1010-SAT-A3: input not aliased", t0.satisfaction.length === 0);
+  } catch (e) { assertTrue("HC-V1010-SAT-A3", false, e && e.message); }
+}
+
+async function caseV1010IntentA1() {
+  console.log(`\n--- Case HC-V1010-INTENT-A1: satisfaction intent accepted without kind; requires boolean useful; satisfaction-series target allowlisted ---`);
+  try {
+    const { validateIntents } = require("../blueprints/cowork/helpers/ingest-feedback-helper.js");
+    const text = "morning was great";
+    const ok = validateIntents([{ intent: "satisfaction", useful: true, source_quote: "morning was great", proposed_target: "satisfaction-series", confidence: "high" }], text);
+    assertTrue("HC-V1010-INTENT-A1: accepted without kind", ok.accepted.length === 1 && ok.rejected.length === 0);
+    const bad = validateIntents([{ intent: "satisfaction", source_quote: "morning was great", proposed_target: "satisfaction-series", confidence: "high" }], text);
+    assertTrue("HC-V1010-INTENT-A1: missing useful boolean → rejected", bad.rejected.length === 1);
+    const badTarget = validateIntents([{ intent: "uprank", kind: "chat", source_quote: "morning was great", proposed_target: "satisfaction-series", confidence: "high" }], text);
+    assertTrue("HC-V1010-INTENT-A1: satisfaction-series target invalid for non-satisfaction intent", badTarget.rejected.length === 1);
+  } catch (e) { assertTrue("HC-V1010-INTENT-A1", false, e && e.message); }
+}
+
+async function caseV1010IntentA2() {
+  console.log(`\n--- Case HC-V1010-INTENT-A2: dedupIntents — one application per (intent, kind, entity); duplicates reported ---`);
+  try {
+    const { dedupIntents } = require("../blueprints/cowork/helpers/ingest-feedback-helper.js");
+    const twice = [
+      { intent: "downrank", kind: "github", source_quote: "github: too much", source_cadence: "midday-tripwire" },
+      { intent: "downrank", kind: "github", source_quote: "github: too much today", source_cadence: "eod-review" },
+      { intent: "uprank", kind: "calendar", source_quote: "calendar: saved me", source_cadence: "eod-review" },
+    ];
+    const out = dedupIntents(twice);
+    assertTrue("HC-V1010-INTENT-A2: github downrank applies once", out.applied.filter((i) => i.kind === "github").length === 1);
+    assertTrue("HC-V1010-INTENT-A2: duplicate reported in deduped[]", out.deduped.length === 1 && out.deduped[0].source_cadence === "eod-review");
+    assertTrue("HC-V1010-INTENT-A2: distinct kinds unaffected", out.applied.length === 2);
+    const entityDistinct = dedupIntents([
+      { intent: "downrank", kind: "chat", entity: "Diana", source_quote: "a" },
+      { intent: "downrank", kind: "chat", entity: "Ben", source_quote: "b" },
+    ]);
+    assertTrue("HC-V1010-INTENT-A2: same kind different entity NOT deduped", entityDistinct.applied.length === 2);
+  } catch (e) { assertTrue("HC-V1010-INTENT-A2", false, e && e.message); }
+}
+
+async function caseV1010IntentA3() {
+  console.log(`\n--- Case HC-V1010-INTENT-A3: applyIntentKindObservations — downrank(kind, no entity) = skip; entity-downrank does NOT skip kind; contradictions no-op ---`);
+  try {
+    const { applyIntentKindObservations } = require("../blueprints/cowork/helpers/ingest-feedback-helper.js");
+    const obs = [{ kind: "github", ticked: true }, { kind: "chat", ticked: true }, { kind: "calendar", ticked: false }];
+    const out1 = applyIntentKindObservations(obs, [{ intent: "downrank", kind: "github" }]);
+    assertTrue("HC-V1010-INTENT-A3: kind-scoped downrank flips ticked→false", out1.find((o) => o.kind === "github").ticked === false);
+    const out2 = applyIntentKindObservations(obs, [{ intent: "downrank", kind: "chat", entity: "Diana" }]);
+    assertTrue("HC-V1010-INTENT-A3: entity-scoped downrank leaves kind tick alone", out2.find((o) => o.kind === "chat").ticked === true);
+    const out3 = applyIntentKindObservations(obs, [{ intent: "uprank", kind: "calendar" }]);
+    assertTrue("HC-V1010-INTENT-A3: uprank flips ticked→true (v0.99.0 behavior preserved under new name)", out3.find((o) => o.kind === "calendar").ticked === true);
+    const out4 = applyIntentKindObservations(obs, [{ intent: "uprank", kind: "github" }, { intent: "downrank", kind: "github" }]);
+    assertTrue("HC-V1010-INTENT-A3: uprank+downrank same kind → unchanged", out4.find((o) => o.kind === "github").ticked === true);
+    assertTrue("HC-V1010-INTENT-A3: modify-only — no append for unsurfaced kinds",
+      applyIntentKindObservations(obs, [{ intent: "downrank", kind: "finance" }]).length === 3);
+  } catch (e) { assertTrue("HC-V1010-INTENT-A3", false, e && e.message); }
+}
+
+async function caseV1010IntentA4() {
+  console.log(`\n--- Case HC-V1010-INTENT-A4: applyIntentKindTicks name retired (export gone; observations export present) ---`);
+  try {
+    const helper = require("../blueprints/cowork/helpers/ingest-feedback-helper.js");
+    assertTrue("HC-V1010-INTENT-A4: applyIntentKindObservations exported", typeof helper.applyIntentKindObservations === "function");
+    assertTrue("HC-V1010-INTENT-A4: applyIntentKindTicks no longer exported", helper.applyIntentKindTicks === undefined);
+  } catch (e) { assertTrue("HC-V1010-INTENT-A4", false, e && e.message); }
+}
+
+async function caseV1010SchemaA1() {
+  console.log(`\n--- Case HC-V1010-SCHEMA-A1: 4→5 is additive — entries gain cadence eod-review; counters byte-identical ---`);
+  try {
+    const { normalizeLearnedWeightsV5 } = require("../blueprints/cowork/helpers/ingest-feedback-helper.js");
+    const v4 = {
+      schema_version: 4,
+      engagements: { hs: {
+        per_kind: { chat: { weight: 1.15, ticks: 5, skips: 2, warmup: false, per_person: {}, per_channel: {}, per_topic: {} } },
+        totals: { notes_scanned: 12, notes_with_any_tick: 8, scanned_days: ["2026-06-12"], engaged_days: ["2026-06-12"], feedback_ingested_days: ["2026-06-12"], warmup_until: null,
+          satisfaction: [{ day: "2026-06-12", useful: true }] },
+      } },
+    };
+    const out = normalizeLearnedWeightsV5(v4);
+    assertTrue("HC-V1010-SCHEMA-A1: schema_version 5", out.schema_version === 5);
+    assertTrue("HC-V1010-SCHEMA-A1: old entry gains cadence eod-review", out.engagements.hs.totals.satisfaction[0].cadence === "eod-review" && out.engagements.hs.totals.satisfaction[0].useful === true);
+    const pk = out.engagements.hs.per_kind.chat;
+    assertTrue("HC-V1010-SCHEMA-A1: NO destructive reset — skips/ticks/warmup intact", pk.skips === 2 && pk.ticks === 5 && pk.warmup === false);
+  } catch (e) { assertTrue("HC-V1010-SCHEMA-A1", false, e && e.message); }
+}
+
+async function caseV1010SchemaA2() {
+  console.log(`\n--- Case HC-V1010-SCHEMA-A2: already-5 input (numeric AND string) must NOT re-enter the V4 silence-reset ---`);
+  try {
+    const { normalizeLearnedWeightsV5 } = require("../blueprints/cowork/helpers/ingest-feedback-helper.js");
+    for (const v of [5, "5"]) {
+      const five = {
+        schema_version: v,
+        engagements: { hs: {
+          per_kind: { chat: { weight: 1.15, ticks: 5, skips: 2, warmup: false, per_person: {}, per_channel: {}, per_topic: {} } },
+          totals: { scanned_days: [], engaged_days: [], feedback_ingested_days: [], warmup_until: null, notes_scanned: 0, notes_with_any_tick: 0,
+            satisfaction: [{ day: "2026-06-13", cadence: "morning-briefing", useful: true }] },
+        } },
+      };
+      const out = normalizeLearnedWeightsV5(five);
+      assertTrue(`HC-V1010-SCHEMA-A2: skips survive already-5 (${typeof v})`, out.engagements.hs.per_kind.chat.skips === 2);
+      assertTrue(`HC-V1010-SCHEMA-A2: warmup false survives (${typeof v})`, out.engagements.hs.per_kind.chat.warmup === false);
+      assertTrue(`HC-V1010-SCHEMA-A2: cadence preserved (${typeof v})`, out.engagements.hs.totals.satisfaction[0].cadence === "morning-briefing");
+    }
+  } catch (e) { assertTrue("HC-V1010-SCHEMA-A2", false, e && e.message); }
+}
+
+async function caseV1010SchemaA3() {
+  console.log(`\n--- Case HC-V1010-SCHEMA-A3: pre-4 inputs still route through the V4 chain (2 / missing / "1.1.0" / 3 → reset fires ONCE, then 5) ---`);
+  try {
+    const { normalizeLearnedWeightsV5 } = require("../blueprints/cowork/helpers/ingest-feedback-helper.js");
+    const legacy = {
+      schema_version: 3,
+      engagements: { hs: { per_kind: { finance: { weight: 0.927, ticks: 0, skips: 3, warmup: true } }, totals: { notes_scanned: 4, notes_with_any_tick: 0, scanned_days: [] } } },
+    };
+    const out = normalizeLearnedWeightsV5(legacy);
+    const pk = out.engagements.hs.per_kind.finance;
+    assertTrue("HC-V1010-SCHEMA-A3: schema 5 + V4 silence-reset applied (skips zeroed, warmup forced)", out.schema_version === 5 && pk.skips === 0 && pk.warmup === true && pk.weight === 0.927);
+    assertTrue("HC-V1010-SCHEMA-A3: satisfaction[] + engaged_days[] initialized", Array.isArray(out.engagements.hs.totals.satisfaction) && Array.isArray(out.engagements.hs.totals.engaged_days));
+    assertTrue("HC-V1010-SCHEMA-A3: idempotent — re-run of own output is byte-identical", JSON.stringify(normalizeLearnedWeightsV5(out)) === JSON.stringify(out));
+  } catch (e) { assertTrue("HC-V1010-SCHEMA-A3", false, e && e.message); }
+}
+
+async function caseV1010SchemaA4() {
+  console.log(`\n--- Case HC-V1010-SCHEMA-A4: deep-copy — mutating output never mutates caller input ---`);
+  try {
+    const { normalizeLearnedWeightsV5 } = require("../blueprints/cowork/helpers/ingest-feedback-helper.js");
+    const input = { schema_version: 5, engagements: { hs: { per_kind: {}, totals: { scanned_days: [], engaged_days: [], feedback_ingested_days: [], notes_scanned: 0, notes_with_any_tick: 0, warmup_until: null, satisfaction: [{ day: "2026-06-13", cadence: "eod-review", useful: true }] } } } };
+    const out = normalizeLearnedWeightsV5(input);
+    out.engagements.hs.totals.satisfaction.push({ day: "2026-06-14", cadence: "eod-review", useful: false });
+    out.engagements.hs.totals.engaged_days.push("2026-06-14");
+    assertTrue("HC-V1010-SCHEMA-A4: input satisfaction untouched", input.engagements.hs.totals.satisfaction.length === 1);
+    assertTrue("HC-V1010-SCHEMA-A4: input engaged_days untouched", input.engagements.hs.totals.engaged_days.length === 0);
+  } catch (e) { assertTrue("HC-V1010-SCHEMA-A4", false, e && e.message); }
+}
+
+async function caseV1010DispatchA1() {
+  console.log(`\n--- Case HC-V1010-DISPATCH-A1: morning-briefing composeBody emits v=4 capture (not rating-block) ---`);
+  try {
+    const { composeBody } = require("../blueprints/cowork/helpers/compose-body-helper.js");
+    const out = composeBody({
+      cadence: "morning-briefing", engagement_id: "test-eng", day: "2026-06-13",
+      frontmatter: { type: "cowork-morning-briefing", engagement_id: "test-eng", day: "2026-06-13", generator: "cowork:morning-briefing@2.0.0", prompt_source: "spice/cowork/prompts/morning-briefing.md", title: "T", summary: "S", created_at: "2026-06-13T07:00:00-06:00" },
+      nav_buttons_block: "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```",
+      synopsis_md: "> [!info]+ What matters today\n> Quiet day.",
+      memory_callouts: { yesterday_md: "", overnight_md: "", echoes_md: "", backlink_md: "" },
+      ordered_blocks: [{ kind: "chat", callout_type: "info", title: "Chat", body_md: "> [!info]- Chat\n> x" }],
+      engagement_type_blocks: [], excluded_themes: [], pending_confirmations: [],
+      render_aspects: {}, voice_contract: {}, render_aspects_applied: [],
+      memory_used: { yesterday_present: false, drift_warning_present: false, echoes_count: 0 },
+      plan_dispatch: { mode: "prefs", kinds_dispatched: 1, warnings_emitted: 0, classifier_cache_hit: false, pending_confirmations_count: 0 },
+      learning_enabled: true, surfaced_kinds_for_rating: ["chat"], prior_md: null,
+    });
+    assertTrue("HC-V1010-DISPATCH-A1: status ok", out.status === "ok");
+    assertTrue("HC-V1010-DISPATCH-A1: v=4 marker in body", out.body_md.includes("cowork:feedback-capture v=4"));
+    assertTrue("HC-V1010-DISPATCH-A1: NO rating-block marker emitted", !out.body_md.includes("cowork:rating-block"));
+    assertTrue("HC-V1010-DISPATCH-A1: checklist carries surfaced kind", out.body_md.includes("> > - [ ] Chat"));
+    assertTrue("HC-V1010-DISPATCH-A1: slim feedback_capture in sidecar", out.sidecar_json.feedback_capture && out.sidecar_json.feedback_capture.sentinel_version === "v=4" && out.sidecar_json.feedback_capture.kinds_listed.includes("chat"));
+  } catch (e) { assertTrue("HC-V1010-DISPATCH-A1", false, e && e.message); }
+}
+
+async function caseV1010DispatchA2() {
+  console.log(`\n--- Case HC-V1010-DISPATCH-A2: learning_enabled false → no capture; composeRatingCallout still exported (legacy, undisputed by dispatch) ---`);
+  try {
+    const cb = require("../blueprints/cowork/helpers/compose-body-helper.js");
+    assertTrue("HC-V1010-DISPATCH-A2: composeRatingCallout export retained", typeof cb.composeRatingCallout === "function");
+    const md = cb.composeRatingCallout({ cadence: "morning-briefing", day: "2026-06-13", surfaced_kinds: ["chat"], prior_state: null });
+    assertTrue("HC-V1010-DISPATCH-A2: legacy emitter still functional for back-compat tests", typeof md === "string" && md.includes("cowork:rating-block"));
+  } catch (e) { assertTrue("HC-V1010-DISPATCH-A2", false, e && e.message); }
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -10291,6 +10744,30 @@ async function caseV0990PrefixA3() {
   await caseV0990PrefixA1();
   await caseV0990PrefixA2();
   await caseV0990PrefixA3();
+  await caseV1010CaptureA1();
+  await caseV1010CaptureA2();
+  await caseV1010CaptureA3();
+  await caseV1010CaptureA4();
+  await caseV1010CaptureA5();
+  await caseV1010CaptureA6();
+  await caseV1010GuardA1();
+  await caseV1010GuardA2();
+  await caseV1010ParseA1();
+  await caseV1010ParseA2();
+  await caseV1010ParseA3();
+  await caseV1010SatA1();
+  await caseV1010SatA2();
+  await caseV1010SatA3();
+  await caseV1010IntentA1();
+  await caseV1010IntentA2();
+  await caseV1010IntentA3();
+  await caseV1010IntentA4();
+  await caseV1010SchemaA1();
+  await caseV1010SchemaA2();
+  await caseV1010SchemaA3();
+  await caseV1010SchemaA4();
+  await caseV1010DispatchA1();
+  await caseV1010DispatchA2();
 
   // v0.65.0 HC-V065-RUN-NOTE: write-run-note-* sub-skill lint
   {
