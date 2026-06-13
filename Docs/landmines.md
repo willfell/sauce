@@ -166,6 +166,7 @@ Helper count UNCHANGED at 13 in v0.32.0 — the new writes are handled by extens
 
 - v0.102.0 (2026-06-13): project workspace cycle — sections + meetings link + vault-defaults; lessons captured in result doc.
 - v0.103.0 (2026-06-13): section hubs cycle — hierarchical navigation tree replaces v0.102.0's single-page Confluence; user-observed post-dogfood that single-page sections didn't communicate hierarchy.
+- v0.104.0 (2026-06-13): search & filter cycle — pure additive, no migration required; closes the original v0.102.0 ask.
 
 ### 13. Bootstrap stub is content-static; never re-edit (per-consumer drift forbidden)
 

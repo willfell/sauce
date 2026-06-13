@@ -880,6 +880,39 @@ After the update, verify by checking that `.claude/skills/cowork/skills/gather-s
 
 **Optional post-deploy validation (FLN-v87-1).** The `min_similarity: 0.45` threshold is a design-time guess. Review the first 3-5 morning briefings on each consumer vault: if Echoes callouts surface obviously-unrelated matches, the threshold should be raised; if relevant matches are consistently filtered out (callout omits even on days with clear historical analogues), the threshold should be lowered. A v0.87.1 PATCH can ship the empirically-validated threshold.
 
+## Upgrading from v0.103.0.1
+
+After `brew upgrade sauce`, run from each consumer vault:
+
+```bash
+sauce update --bump-pins
+sauce install
+```
+
+v0.104.0 is the cleanest cycle close in the recent arc: **pure additive — no migration step, no schema change, no template rewrite, no installer step, no contract bump**. The entire surface delta is helper materialization. Workshop 0.103.0.1 → 0.104.0; project blueprint 1.17.0 → 1.18.0; all other mechanism/blueprint versions UNCHANGED (cowork 0.40.0; contract 0.35.1; meetings 0.8.0; entity-create 0.5.0; platform-claude 0.1.3).
+
+v0.104.0 closes the original v0.102.0 three-item ask. Sections + meetings link shipped at v0.102.0; search was deferred to v0.102.1 then re-evaluated against v0.103.0's section-hub reframe. The deferred search design adapted cleanly here because the underlying user-need (in-page filter + tag chips + scoped-search escape hatch) was unchanged and the section-hub model gave us natural query scope per hub for free.
+
+**What `sauce install` materializes:**
+
+- `ranch/scripts/project/doc-search.js` — NEW. `DocSearch` CustomJS class. `render(dv, opts)` builds the filter UI strip (text input + dynamic top-8 tag chips + scoped-Obsidian-search button + status pill) and returns the initial `filterContext` `{text, tags, hasActiveFilter}`. Static `DocSearch.matches(page, ctx)` is the pure predicate consumed by `ProjectDocsIndex` + `SectionHub` at query time — AND-logic across text substring (`file.name` + `tags` + first 200 chars of `file.content`) + every selected tag chip. The scoped-search button invokes Obsidian's `global-search:open` command pre-filled with `path:"<scopePath>"` — the escape hatch for full-body fuzzy search.
+- `ranch/scripts/project/project-docs-index.js` — REFRESHED. Mounts `customJS.DocSearch.render` above the section card row at `recursive: true` cross-section scope. The `allDocs` query gates on `customJS.DocSearch.matches` so the dashboard doc-count chip + per-section meta counts both reflect the live filter. `onChange` triggers full re-render via `dv.container.empty() + this.render(dv)` with `_currentCtx` carry-over.
+- `ranch/scripts/project/section-hub.js` — REFRESHED. Mounts `customJS.DocSearch.render` at depth-appropriate scope (depth 1 `recursive: true` so the count covers sub-section docs; depth 2 `recursive: false` leaf). Docs query + depth-1 sub-section card meta count gate on `customJS.DocSearch.matches`. Same `onChange` full-re-render pattern.
+- `ranch/platform-subscription.json` — workshop `0.103.0.1` → `0.104.0` + project pin `1.17.0` → `1.18.0` (lockstep).
+
+**What does NOT change:**
+
+- No schema changes; no frontmatter rewrites; no doc-note touches; no project-note touches.
+- No `applyProjectSectionsHubMigration` re-run (that step is idempotent and was already complete at v0.103.0).
+- `scheduled-job-contract.json` `contract_version` UNCHANGED at `0.35.1`.
+- No `cowork` blueprint change (stays at 0.40.0). No `align-scheduled-jobs` run required.
+- meetings / entity-create / platform-claude UNCHANGED (0.8.0 / 0.5.0 / 0.1.3).
+- Empty filter on every Docs.md + Section Hub = zero behavior change from v0.103.0.1.
+
+**Restart Obsidian (or `customJS:reload`).** CustomJS only picks up the new `DocSearch` class on first vault load or via Cmd+P → `CustomJS: Reload`. After reload, every Docs.md + Section Hub re-renders with the filter strip mounted above the section card row.
+
+**Post-deploy visual check.** Open a project's Docs.md in Obsidian. Above the section card row should now sit a filter strip: text input ("Filter docs by title, tags, or content…") + 8-or-fewer tag chips drawn from the docs in scope + a scoped-search button. Type a few characters — section card doc-counts narrow in real time; the status pill ("Filtering: 'X' — N of M docs") appears. Click a tag chip — chip activates; filter ANDs with the chip selection. Click the scoped-search button — Obsidian's global search opens pre-filled with `path:"spice/projects/<slug>/docs"`. Open a Section Hub — the same filter strip appears scoped to that section (recursive at depth 1, leaf at depth 2). Clear the input + deselect chips — UI returns to v0.103.0.1 baseline.
+
 ## Upgrading from v0.102.0
 
 After `brew upgrade sauce`, run from each consumer vault:
