@@ -89,7 +89,7 @@
     },
     {
       "name": "entity-create",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "path": "mechanisms/entity-create"
     },
     {
@@ -114,7 +114,7 @@
     },
     {
       "name": "platform-claude",
-      "version": "0.1.2",
+      "version": "0.1.3",
       "path": "mechanisms/platform-claude"
     },
     {
@@ -141,7 +141,7 @@
     },
     {
       "name": "meetings",
-      "version": "0.7.0",
+      "version": "0.8.0",
       "path": "blueprints/meetings"
     },
     {
@@ -156,7 +156,7 @@
     },
     {
       "name": "project",
-      "version": "1.15.2",
+      "version": "1.16.0",
       "path": "blueprints/project"
     },
     {
