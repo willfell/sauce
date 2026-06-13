@@ -268,8 +268,8 @@ function composeFeedbackCapture(opts) {
       items,
     };
   } else {
-    const kindList = (Array.isArray(o.surfaced_kinds) ? o.surfaced_kinds : [])
-      .map((k) => String(k).toLowerCase());
+    const kindList = [...new Set((Array.isArray(o.surfaced_kinds) ? o.surfaced_kinds : [])
+      .map((k) => String(k).toLowerCase()))];
     if (kindList.length > 0) {
       kindBlocks.push(_renderKindChecklist(kindList, priorState));
     }

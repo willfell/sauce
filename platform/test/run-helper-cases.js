@@ -9981,6 +9981,10 @@ async function caseV1010CaptureA6() {
     const out = composeFeedbackCapture({ cadence: "midday-tripwire", day: "2026-06-13", surfaced_kinds: [], prior_md: null });
     assertTrue("HC-V1010-CAPTURE-A6: zero kinds → tap + fence still render, no checklist callout",
       out.rail_md.includes("Useful:") && out.rail_md.includes("```feedback") && !out.rail_md.includes("Kinds — quick ticks"));
+    const dup = composeFeedbackCapture({ cadence: "midday-tripwire", day: "2026-06-13", surfaced_kinds: ["chat", "Chat", "github"], prior_md: null });
+    assertTrue("HC-V1010-CAPTURE-A6: duplicate/mixed-case kinds dedupe in checklist + sidecar",
+      dup.sidecar_observability.kinds_listed.join(",") === "chat,github"
+      && (dup.rail_md.match(/> > - \[ \] Chat/g) || []).length === 1);
   } catch (e) { assertTrue("HC-V1010-CAPTURE-A6", false, e && e.message); }
 }
 
