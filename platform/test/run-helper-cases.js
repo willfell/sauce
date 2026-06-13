@@ -6945,10 +6945,10 @@ async function caseDHB1DocsHubTemplateCanonical() {
 // ============================================================
 
 async function caseFA2MeetingsCanonical() {
-  console.log("\n--- Case FA2-MEETINGS: meetings@0.7.0 canonical vocab adoption ---");
+  console.log("\n--- Case FA2-MEETINGS: meetings@0.8.0 canonical vocab adoption ---");
   const manifest = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/meetings/manifest.json"), "utf8"));
-  assertTrue("FA2-MEETINGS-1: meetings version 0.7.0", manifest.version === "0.7.0",
+  assertTrue("FA2-MEETINGS-1: meetings version 0.8.0", manifest.version === "0.8.0",
     `got: ${manifest.version}`);
   const ec = manifest.new_entity_buttons[0].frontmatter_template;
   assertTrue("FA2-MEETINGS-2: entity-create frontmatter_template has created_at",
@@ -7594,11 +7594,11 @@ async function caseHCV0880MeetingsC() {
 }
 
 async function caseHCV0880MeetingsD() {
-  console.log("\n--- Case HC-V0880-MEETINGS-D: meetings version exactly 0.7.0 ---");
+  console.log("\n--- Case HC-V0880-MEETINGS-D: meetings version exactly 0.8.0 ---");
   const m = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/meetings/manifest.json"), "utf8"));
-  assertTrue("HC-V0880-MEETINGS-D: meetings manifest.version === '0.7.0'",
-    m.version === "0.7.0",
+  assertTrue("HC-V0880-MEETINGS-D: meetings manifest.version === '0.8.0'",
+    m.version === "0.8.0",
     `got: ${m.version}`);
 }
 
@@ -10696,6 +10696,39 @@ async function caseV01020PDS9CarryForwardFixes() {
     !/\.replace\s*\(\s*\/\\\/docs\$\//.test(src));
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// v0.102.0 S3.2 (Task 5): meetings blueprint 0.8.0 — project link field + pill
+// ──────────────────────────────────────────────────────────────────────────────
+
+async function caseV01020Meet1ManifestProjectField() {
+  console.log("\n--- Case HC-V01020-MEET-1: meetings manifest 0.8.0 + project field + picker ---");
+  const m = JSON.parse(fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/meetings/manifest.json"), "utf8"));
+  assertTrue("HC-V01020-MEET-1: version is 0.8.0", m.version === "0.8.0");
+  const meetBtn = (m.new_entity_buttons || []).find(b => b.id === "meeting");
+  assertTrue("HC-V01020-MEET-1: meeting button frontmatter_template includes project",
+    meetBtn && meetBtn.frontmatter_template &&
+    Object.prototype.hasOwnProperty.call(meetBtn.frontmatter_template, "project"));
+  assertTrue("HC-V01020-MEET-1: meeting button prompts include project select with options_source: all_projects",
+    meetBtn && (meetBtn.prompts || []).some(p => p.key === "project" && p.options_source === "all_projects"));
+  assertTrue("HC-V01020-MEET-1: project prompt is optional (required: false)",
+    meetBtn && (meetBtn.prompts || []).find(p => p.key === "project")?.required === false);
+}
+
+async function caseV01020Meet2ProjectPill() {
+  console.log("\n--- Case HC-V01020-MEET-2: MeetingsHubCards renders project pill ---");
+  const src = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/meetings/helpers/meetings-hub-cards.js"), "utf8");
+  assertTrue("HC-V01020-MEET-2: meeting-project-pill CSS class present",
+    /meeting-project-pill/.test(src));
+  assertTrue("HC-V01020-MEET-2: pill emitted conditionally on p.project",
+    /p\.project\s*&&|if\s*\(\s*p\.project\s*\)|p\.project\s*\?/.test(src));
+  assertTrue("HC-V01020-MEET-2: _renderProjectLabel helper defined",
+    /_renderProjectLabel\s*\(/.test(src));
+  assertTrue("HC-V01020-MEET-2: enrichment adds project to synthetic page",
+    /project:\s*p\.project/.test(src));
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -11224,6 +11257,10 @@ async function caseV01020PDS9CarryForwardFixes() {
   await caseV01020ProjTpl2MeetingsPanelInProjectTemplate();
   await caseV01020ProjTpl3DocNoteRuleGlobNested();
   await caseV01020PDS9CarryForwardFixes();
+
+  // v0.102.0 S3.2 (Task 5): meetings blueprint 0.8.0 — project link field + pill
+  await caseV01020Meet1ManifestProjectField();
+  await caseV01020Meet2ProjectPill();
 
   // v0.65.0 HC-V065-RUN-NOTE: write-run-note-* sub-skill lint
   {
