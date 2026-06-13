@@ -1798,8 +1798,12 @@ const ENTITY_CREATE_SITES = [
 
 // v0.50.0 — R-WIKI-1 (renamed R-DOCS-1 in v0.52.0): Template, Docs Hub.md body includes
 // ProjectDocsCards dispatch + inside-block entity-create:doc-note sentinel.
+// v0.101.1: the entity-create block must use the canonical EntityCreate.render
+// dispatch — the prior AccentButton-guard form fed `dv` (not dv.container) to
+// AccentButton.render so the "+ New Doc" button threw on render and vanished.
+// This assert previously REQUIRED that broken form; it now requires the fix.
 async function testRWikiHubTemplateBody() {
-  console.log('\n=== R-WIKI-1 — Template, Docs Hub.md body includes ProjectDocsCards + doc-note sentinel ===');
+  console.log('\n=== R-WIKI-1 — Template, Docs Hub.md body: ProjectDocsCards + canonical doc-note entity-create ===');
   const templatePath = path.resolve(WORKSHOP, 'platform/blueprints/project/templates/Docs Hub.md');
   if (!fs.existsSync(templatePath)) {
     console.log(`  FAIL — template missing: ${templatePath}`);
@@ -1808,10 +1812,10 @@ async function testRWikiHubTemplateBody() {
   const body = fs.readFileSync(templatePath, 'utf8');
   const hasCardsDispatch = /class:\s*["']ProjectDocsCards["']/.test(body);
   const hasSentinel = /\/\/\s*entity-create:doc-note/.test(body);
-  const hasAccentButton = /class:\s*["']AccentButton["']/.test(body);
-  const hasIdDocNote = /id:\s*["']doc-note["']/.test(body);
-  const allPass = hasCardsDispatch && hasSentinel && hasAccentButton && hasIdDocNote;
-  console.log(`  hasCardsDispatch=${hasCardsDispatch} hasSentinel=${hasSentinel} hasAccentButton=${hasAccentButton} hasIdDocNote=${hasIdDocNote}`);
+  const hasCanonicalDispatch = /customJS\.EntityCreate\.render\(dv,\s*\{\s*instance:\s*["']doc-note["']\s*\}\)/.test(body);
+  const noBrokenAccentForm = !/class:\s*["']AccentButton["'],\s*args:\s*\[\{\s*id:\s*["']doc-note["']/.test(body);
+  const allPass = hasCardsDispatch && hasSentinel && hasCanonicalDispatch && noBrokenAccentForm;
+  console.log(`  hasCardsDispatch=${hasCardsDispatch} hasSentinel=${hasSentinel} hasCanonicalDispatch=${hasCanonicalDispatch} noBrokenAccentForm=${noBrokenAccentForm}`);
   console.log(`  ${allPass ? 'PASS' : 'FAIL'}`);
   return allPass;
 }

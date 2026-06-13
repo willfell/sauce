@@ -15,6 +15,14 @@ const path = require("path");
 const installModule = require("../install.js");
 const applyWikiToDocsMigration = installModule.applyWikiToDocsMigration;
 const _rewriteWikiToDocsBody = installModule._rewriteWikiToDocsBody;
+// v0.100.2 — docs-hub "+ New Doc" button repair (broken AccentButton guard
+// form → canonical EntityCreate.render). Shares this harness's adapter stub.
+const applyDocsHubButtonRepair = installModule.applyDocsHubButtonRepair;
+const _repairDocsHubButtonBody = installModule._repairDocsHubButtonBody;
+
+const BROKEN_DOCS_HUB = '---\ntype: docs-hub\nproject_slug: demo\n---\n\n```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });\n```\n\n```dataviewjs\n// entity-create:doc-note — installer-managed; do not delete this comment\nawait dv.view("ranch/views/customjs-guard", { class: "AccentButton", args: [{ id: "doc-note", label: "+ New Doc", icon: "file-plus" }] });\n```\n\n```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "ProjectDocsCards" });\n```\n';
+const CANONICAL_DISPATCH = 'await customJS.EntityCreate.render(dv, { instance: "doc-note" });';
+const BROKEN_DISPATCH = 'class: "AccentButton", args: [{ id: "doc-note"';
 
 let passed = 0;
 let failed = 0;
@@ -173,11 +181,71 @@ async function caseWTDMIG4RmdirFallback() {
   fs.rmSync(tmpRoot, { recursive: true, force: true });
 }
 
+// ---------------------------------------------------------------------------
+// v0.100.2 — DHBR (docs-hub button repair) cases. applyDocsHubButtonRepair
+// rewrites any existing docs/Docs.md whose entity-create:doc-note block uses
+// the broken AccentButton guard form into the canonical EntityCreate.render
+// form. applyDocsBackfill is create-if-absent, so it never heals an existing
+// broken Docs.md — this repair closes that gap.
+// ---------------------------------------------------------------------------
+
+async function caseDHBR1RepairsBrokenBlock() {
+  console.log("\n--- Case DHBR-1: repairs a broken docs-hub button block ---");
+  const adapter = makeAdapter({
+    "spice/projects/demo/demo.md": '---\ntype: project\nname: "Demo"\n---\nbody',
+    "spice/projects/demo/docs/Docs.md": BROKEN_DOCS_HUB,
+  });
+  const tp = { app: { vault: { adapter } } };
+  const history = [];
+  await applyDocsHubButtonRepair(tp, mockManifest, mockVariables, history, mockGit);
+
+  const body = await adapter.read("spice/projects/demo/docs/Docs.md");
+  ok("DHBR-1.1 canonical EntityCreate.render dispatch present", body.includes(CANONICAL_DISPATCH));
+  ok("DHBR-1.2 broken AccentButton doc-note dispatch removed", !body.includes(BROKEN_DISPATCH));
+  ok("DHBR-1.3 installer-managed comment preserved", body.includes("// entity-create:doc-note"));
+  ok("DHBR-1.4 sibling SpaceNavButtons block untouched", body.includes('class: "SpaceNavButtons"'));
+  ok("DHBR-1.5 sibling ProjectDocsCards block untouched", body.includes('class: "ProjectDocsCards"'));
+  const repNote = history.find((e) => e.step === "docs_hub_button_repair" && /repaired 1/.test(e.reason || ""));
+  ok("DHBR-1.6 history summary reports 1 repaired", !!repNote);
+}
+
+async function caseDHBR2IdempotentCanonical() {
+  console.log("\n--- Case DHBR-2: idempotent — canonical Docs.md untouched ---");
+  const canonical = BROKEN_DOCS_HUB.replace(
+    'await dv.view("ranch/views/customjs-guard", { class: "AccentButton", args: [{ id: "doc-note", label: "+ New Doc", icon: "file-plus" }] });',
+    CANONICAL_DISPATCH
+  );
+  const adapter = makeAdapter({
+    "spice/projects/demo/demo.md": '---\ntype: project\nname: "Demo"\n---\nbody',
+    "spice/projects/demo/docs/Docs.md": canonical,
+  });
+  const tp = { app: { vault: { adapter } } };
+  const history = [];
+  await applyDocsHubButtonRepair(tp, mockManifest, mockVariables, history, mockGit);
+
+  const body = await adapter.read("spice/projects/demo/docs/Docs.md");
+  ok("DHBR-2.1 canonical body unchanged (still has dispatch)", body.includes(CANONICAL_DISPATCH));
+  ok("DHBR-2.2 no broken form reintroduced", !body.includes(BROKEN_DISPATCH));
+  const repNote = history.find((e) => e.step === "docs_hub_button_repair" && /repaired 0/.test(e.reason || ""));
+  ok("DHBR-2.3 history summary reports 0 repaired", !!repNote);
+}
+
+async function caseDHBR3PureHelper() {
+  console.log("\n--- Case DHBR-3: _repairDocsHubButtonBody rewrites the dispatch line ---");
+  const out = _repairDocsHubButtonBody(BROKEN_DOCS_HUB);
+  ok("DHBR-3.1 helper output has canonical dispatch", out.includes(CANONICAL_DISPATCH));
+  ok("DHBR-3.2 helper output drops broken dispatch", !out.includes(BROKEN_DISPATCH));
+  ok("DHBR-3.3 helper is a no-op on already-canonical input", _repairDocsHubButtonBody(out) === out);
+}
+
 (async () => {
   await caseWTDMIG1HappyPath();
   await caseWTDMIG2Idempotent();
   await caseWTDMIG3CoExistence();
   await caseWTDMIG4RmdirFallback();
+  await caseDHBR1RepairsBrokenBlock();
+  await caseDHBR2IdempotentCanonical();
+  await caseDHBR3PureHelper();
   console.log(`\nrun-wiki-to-docs-migration.js: ${passed} pass · ${failed} fail`);
   process.exit(failed === 0 ? 0 : 1);
 })();

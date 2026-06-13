@@ -1068,6 +1068,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyNewEntityButtons(tp, mech, variables, history, git);
   await applyWikiToDocsMigration(tp, mech, variables, history, git);   // NEW v0.52.0 — must run BEFORE applyDocsBackfill
   await applyDocsBackfill(tp, mech, variables, history, git);          // NEW v0.50.0; renamed from applyWikiBackfill v0.52.0
+  await applyDocsHubButtonRepair(tp, mech, variables, history, git);   // NEW v0.100.2 — heals existing broken "+ New Doc" blocks (backfill is create-if-absent)
   await applyExternalPluginInstall(tp, mech, adapter.basePath || (typeof adapter.getBasePath === "function" ? adapter.getBasePath() : null), workshopPath, history, git);  // NEW v0.94.0 — install missing
   await applyExternalPlugins(tp, mech, history, git);
   await scaffoldFoundationalPluginData(tp, mech, workshopPath, variables, history, git);  // NEW v0.26.0
@@ -2012,6 +2013,112 @@ async function applyDocsBackfill(tp, manifest, variables, history, git) {
       step: "docs_backfill",
       name: "project",
       reason: `backfilled ${backfilledCount} project(s); skipped ${skippedCount} (already had Docs.md); ${warnCount} warning(s)`,
+      git_commit: git.commit,
+      git_tag: git.tag,
+      git_dirty: git.dirty,
+      attempted_at: new Date().toISOString(),
+    });
+  }
+}
+
+// _repairDocsHubButtonBody — v0.100.2. Pure string transform: rewrites the
+// broken `+ New Doc` dispatch (AccentButton via customjs-guard with id/label/
+// icon args) into the canonical `customJS.EntityCreate.render(dv, {instance})`
+// form. The broken form fed `dv` (not dv.container) to AccentButton.render, so
+// `dv.createEl` threw and the button vanished; the guard form also never wired
+// an onClick. Anchored on `class: "AccentButton"` + `id: "doc-note"` so it only
+// touches the doc-note entity-create block and is a no-op on canonical bodies.
+function _repairDocsHubButtonBody(body) {
+  if (typeof body !== "string") return body;
+  const brokenDispatch = /await dv\.view\("ranch\/views\/customjs-guard",\s*\{\s*class:\s*"AccentButton",\s*args:\s*\[\{\s*id:\s*"doc-note"[\s\S]*?\}\s*\]\s*\}\);/;
+  if (!brokenDispatch.test(body)) return body;
+  return body.replace(brokenDispatch, 'await customJS.EntityCreate.render(dv, { instance: "doc-note" });');
+}
+
+// applyDocsHubButtonRepair — v0.100.2. Walks spice/projects/*/docs/Docs.md and
+// rewrites any whose doc-note entity-create block uses the broken AccentButton
+// guard form (see _repairDocsHubButtonBody). applyDocsBackfill is
+// create-if-absent, so it never heals an existing Docs.md — this step closes
+// that gap for the projects materialized from the pre-v0.100.2 template.
+// Project-gated, idempotent (no write when nothing changed), failure-loud
+// per-project (catches + logs, never throws).
+async function applyDocsHubButtonRepair(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "project") return;
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+
+  const projectsRoot = "spice/projects";
+  if (!(await adapter.exists(projectsRoot))) return;
+
+  let projectsList;
+  try {
+    projectsList = await adapter.list(projectsRoot);
+  } catch (e) {
+    if (history) {
+      history.push({
+        event: "warning",
+        step: "docs_hub_button_repair",
+        name: "project",
+        reason: `list failed for ${projectsRoot}: ${e.message}`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  const projectDirs = (projectsList.folders || []).filter((d) => d.split("/").pop() !== "All Projects");
+
+  let repairedCount = 0;
+  let warnCount = 0;
+
+  for (const projectDir of projectDirs) {
+    const docsPath = `${projectDir}/docs/Docs.md`;
+    try {
+      if (!(await adapter.exists(docsPath))) continue;
+      const before = await adapter.read(docsPath);
+      const after = _repairDocsHubButtonBody(before);
+      if (after === before) continue;
+      await adapter.write(docsPath, after);
+      repairedCount += 1;
+      if (history) {
+        history.push({
+          event: "info",
+          step: "docs_hub_button_repair",
+          name: "project",
+          target: docsPath,
+          action: "repaired_broken_button",
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    } catch (e) {
+      warnCount += 1;
+      if (history) {
+        history.push({
+          event: "warning",
+          step: "docs_hub_button_repair",
+          name: "project",
+          reason: `repair failed for ${docsPath}: ${e && e.message ? e.message : String(e)}`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    }
+  }
+
+  if (history) {
+    history.push({
+      event: "info",
+      step: "docs_hub_button_repair",
+      name: "project",
+      reason: `repaired ${repairedCount} project(s); ${warnCount} warning(s)`,
       git_commit: git.commit,
       git_tag: git.tag,
       git_dirty: git.dirty,
@@ -7905,6 +8012,9 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports.applyWikiToDocsMigration = applyWikiToDocsMigration;
     module.exports.applyDocsBackfill = applyDocsBackfill;
     module.exports._rewriteWikiToDocsBody = _rewriteWikiToDocsBody;
+    // v0.100.2 — docs-hub "+ New Doc" button repair (run-wiki-to-docs-migration.js DHBR-1..3).
+    module.exports.applyDocsHubButtonRepair = applyDocsHubButtonRepair;
+    module.exports._repairDocsHubButtonBody = _repairDocsHubButtonBody;
     //
     // CF-2: by default, capture run-install.js's stdio (Phase B/C surfaced
     // 2200-line JSON dumps mixed into the user's terminal). We tee the

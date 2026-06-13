@@ -6916,6 +6916,25 @@ async function casePDC10NoLinkObjectTarget() {
     !/file\.link/.test(src));
 }
 
+// v0.100.2 — DHB-1 (Docs Hub template button fix): the entity-create:doc-note
+// block must use the canonical `customJS.EntityCreate.render(dv, {instance})`
+// dispatch (which wires onClick + renders into dv.container) — NOT the broken
+// `AccentButton` guard form. The guard calls `AccentButton.render(dv, opts)`
+// passing `dv` (not dv.container) as the parent, so `dv.createEl` throws and
+// the "+ New Doc" button vanishes (no onClick either). All 6 other blueprints'
+// entity-create blocks already use the canonical form.
+async function caseDHB1DocsHubTemplateCanonical() {
+  console.log("\n--- Case DHB-1: Docs Hub template uses canonical EntityCreate.render ---");
+  const src = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/project/templates/Docs Hub.md"),
+    "utf8"
+  );
+  assertTrue("DHB-1: canonical customJS.EntityCreate.render(dv, { instance: \"doc-note\" }) present",
+    /customJS\.EntityCreate\.render\(dv,\s*\{\s*instance:\s*"doc-note"\s*\}\)/.test(src));
+  assertTrue("DHB-1: broken AccentButton-with-doc-note-args form absent",
+    !/class:\s*"AccentButton",\s*args:\s*\[\{\s*id:\s*"doc-note"/.test(src));
+}
+
 // ============================================================
 // v0.54.0 FA-2 — canonical vocab adoption asserts (meetings + people + products + teams)
 // ============================================================
@@ -10613,6 +10632,8 @@ async function caseV1010DispatchA2() {
   await casePDC9RowIcon();
   // v0.100.1 — PDC-10: no Link-object click target (openLinkText wants a string).
   await casePDC10NoLinkObjectTarget();
+  // v0.100.2 — DHB-1: Docs Hub template uses canonical EntityCreate.render form.
+  await caseDHB1DocsHubTemplateCanonical();
 
   // v0.54.0 FA-2 — canonical vocab adoption asserts (meetings + people + products + teams)
   await caseFA2MeetingsCanonical();

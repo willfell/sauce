@@ -20,7 +20,7 @@ await dv.view("ranch/views/customjs-guard", { class: "ProjectNavButtons" });
 
 ```dataviewjs
 // entity-create:doc-note — installer-managed; do not delete this comment
-await dv.view("ranch/views/customjs-guard", { class: "AccentButton", args: [{ id: "doc-note", label: "+ New Doc", icon: "file-plus" }] });
+await customJS.EntityCreate.render(dv, { instance: "doc-note" });
 ```
 
 ---
