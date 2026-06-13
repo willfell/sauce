@@ -73,9 +73,12 @@ cadence: reconcile-cowork
       Collect per-kind knob rows (`**Fire <kind>:** \`[x?] less\` ...`) →
       less / same / more / ambiguous (>1 ticked). Collect the
       ` ```feedback ``` ` fence content as free_text.
-      KIND-LEVEL MAPPING for sub-step 8's aggregation: a kind with ≥1
-      mattered tick → `{ kind, ticked: true }`; a surfaced kind with 0
-      mattered ticks → `{ kind, ticked: false }`.
+      KIND-LEVEL MAPPING for sub-step 8's aggregation (ITEM-MODE bodies only
+      — notes whose rail carries per-item Mattered/Didn't-like sections, i.e.
+      EOD): a kind with ≥1 mattered tick → `{ kind, ticked: true }`; a
+      surfaced kind with 0 mattered ticks → `{ kind, ticked: false }`.
+      Checklist-mode notes (the other 4 cadences) use ONLY the `kind_ticks`
+      mapping below — the two mappings never both apply to one note.
       Collect the one-tap satisfaction line (`> Useful: \`[x?] yes\` \`[x?] no\``) → true / false / ambiguous (both ticked) / null (neither); trailing Tasks annotations ignored.
       Collect `kind_ticks` from the "Kinds — quick ticks" checklist section
       when present; KIND-LEVEL MAPPING for sub-step 8: each listed kind →
@@ -102,10 +105,10 @@ cadence: reconcile-cowork
       full; append `{{$yesterday_date}}` to `totals.engaged_days[]`
       (dedup-aware).
     - TAP-ONLY → SKIP Steps 3.5/3.6 and Step 4's SIGNAL sub-steps (11, 12,
-      13b-13e). Apply ONLY: schema-4 normalize (13a), totals bookkeeping
+      13b-13e). Apply ONLY: schema-5 normalize (13a), totals bookkeeping
       (sub-step 13: notes_scanned, scanned_days), satisfaction append (13f),
       audit line. The `per_kind` subtree must be byte-identical before/after.
-    - SILENT → SKIP everything except schema-4 normalize (13a, first run
+    - SILENT → SKIP everything except schema-5 normalize (13a, first run
       only), totals bookkeeping (sub-step 13), and the Step 5.5 audit line
       `- no feedback signal for {{$yesterday_date}}`.
     Free-text section scoping fast path: BEFORE Step 3.6, split free_text per
