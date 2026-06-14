@@ -92,6 +92,16 @@ class EntityCreate {
             // per invocation.
             if (p.options_source) {
                 p.options = this._resolveOptionsSource(p.options_source, dv);
+                // v0.6.0 (Issue 4): skip-prompt-when-empty. When the resolved
+                // options list is empty AND the prompt is optional, skip the
+                // UI entirely and set the value to "". Without this, the user
+                // would see an empty <select> dropdown — bad UX. Required
+                // prompts still show (with empty list) so the user is forced
+                // to either cancel or see why no options exist.
+                if (Array.isArray(p.options) && p.options.length === 0 && p.required === false) {
+                    ctx.prompts[p.key] = "";
+                    continue;
+                }
             }
             const v = await this._prompt(p, ctx);
             if (v === null) return; // user cancelled
@@ -105,23 +115,41 @@ class EntityCreate {
                 ctx.prompts[p.key] = (v === "(none)" || v === "") ? "" : `[[${v}]]`;
                 continue;
             }
+            // v0.6.0 (Issue 4): current_project_sections + current_section_sub_sections
+            // return plain string labels, not wikilink form. The destination
+            // folder template + frontmatter_template consume {{prompts.section}}
+            // / {{prompts.sub_section}} as bare strings (filepath segments +
+            // YAML scalars), so no wrap is desired.
+            if (p.options_source === "current_project_sections"
+                || p.options_source === "current_section_sub_sections") {
+                ctx.prompts[p.key] = v;
+                continue;
+            }
             ctx.prompts[p.key] = v;
         }
         const targetPath = this._substitute(this._joinDestination(spec.destination), ctx);
         const folder = this._substitute(this._destFolder(spec.destination), ctx);
         await this._ensureFolder(folder);
-        if (app.vault.getAbstractFileByPath(targetPath)) {
+        // v0.6.0 (Issue 1): open the just-created TFile directly via
+        // workspace.getLeaf().openFile() rather than openLinkText(path, "").
+        // openLinkText routes through the link resolver, which can race against
+        // metadata-cache lag immediately after vault.create() and end up
+        // creating a NEW empty `<name> 1.md` (auto-numbered) instead of
+        // opening the file we just wrote. Using the TFile object bypasses the
+        // resolver entirely.
+        const existing = app.vault.getAbstractFileByPath(targetPath);
+        if (existing) {
             new Notice(`${targetPath} already exists; opening.`);
-            app.workspace.openLinkText(targetPath, "");
+            await app.workspace.getLeaf(false).openFile(existing);
             return;
         }
         const fm = this._renderFrontmatter(spec.frontmatter_template, ctx);
         const body = spec.body_template
             ? await this._readBody(spec.body_template, ctx)
             : (spec.inline_body ? this._substitute(spec.inline_body, ctx) : "");
-        await app.vault.create(targetPath, `---\n${fm}---\n\n${body}`);
+        const newFile = await app.vault.create(targetPath, `---\n${fm}---\n\n${body}`);
         for (const xf of (spec.extra_files || [])) await this._createExtra(xf, ctx, folder);
-        app.workspace.openLinkText(targetPath, "");
+        await app.workspace.getLeaf(false).openFile(newFile);
     }
 
     // ---------- spec lookup ----------
@@ -163,8 +191,77 @@ class EntityCreate {
                 return ["(none)"];
             }
         }
+        // v0.6.0 (Issue 4): current_project_sections — read sections[] from the
+        // PROJECT note that owns the current file. Two entry shapes are
+        // possible:
+        //   • current_file.type === "docs-hub" / "section-hub" / "doc-note":
+        //       resolve project via dv.current().project_slug and read
+        //       sections[] from that project note.
+        //   • current_file.type === "project":
+        //       read sections[] directly from the current file.
+        // Returns plain string labels (wikilink wrap stripped). Empty / missing
+        // → []. The skip-empty branch in create() handles the empty case.
+        if (source === "current_project_sections") {
+            if (!dv || typeof dv.current !== "function" || typeof dv.pages !== "function") return [];
+            try {
+                const cur = dv.current();
+                if (!cur) return [];
+                let project = null;
+                if (cur.type === "project") {
+                    project = cur;
+                } else if (cur.project_slug) {
+                    const pages = dv.pages(`"spice/projects/${cur.project_slug}"`)
+                        .where(p => p && p.type === "project");
+                    project = pages.length ? pages[0] : null;
+                }
+                if (!project || !Array.isArray(project.sections)) return [];
+                return Array.from(project.sections)
+                    .map(v => this._stripWikilink(v))
+                    .filter(Boolean);
+            } catch (_e) {
+                return [];
+            }
+        }
+        // v0.6.0 (Issue 4): current_section_sub_sections — only meaningful when
+        // the current file is a depth-1 section-hub. Returns the section labels
+        // of the depth-2 sub-section-hub notes living in this section's folder.
+        // Depth 2 or non-section-hub current files yield []. Returns plain
+        // labels (wikilink wrap stripped).
+        if (source === "current_section_sub_sections") {
+            if (!dv || typeof dv.current !== "function" || typeof dv.pages !== "function") return [];
+            try {
+                const cur = dv.current();
+                if (!cur || cur.type !== "section-hub") return [];
+                const depth = Number(cur.depth) || 1;
+                if (depth !== 1) return [];
+                const scopePath = cur.file && cur.file.folder ? cur.file.folder : null;
+                if (!scopePath) return [];
+                const subs = dv.pages(`"${scopePath}"`)
+                    .where(p => p && p.type === "section-hub" && Number(p.depth) === 2);
+                return Array.from(subs)
+                    .map(p => this._stripWikilink(p.section || (p.file && p.file.name) || ""))
+                    .filter(Boolean);
+            } catch (_e) {
+                return [];
+            }
+        }
         console.warn(`EntityCreate: unknown options_source "${source}"`);
         return [];
+    }
+
+    // v0.6.0 helper for options_source resolvers — strip wikilink markup or
+    // Dataview Link object into a plain label string. Mirrors the _stripLink
+    // helper in project blueprint helpers (project-docs-index.js / section-hub.js).
+    _stripWikilink(v) {
+        if (v === null || v === undefined) return "";
+        if (typeof v === "string") {
+            const s = v.trim();
+            const m = s.match(/^\[\[([^\]|]+)(?:\|[^\]]*)?\]\]$/);
+            return m ? m[1].trim() : s;
+        }
+        if (v.display) return String(v.display);
+        if (v.path) return String(v.path).split("/").pop().replace(/\.md$/, "");
+        return "";
     }
 
     // ---------- prompt dispatch ----------

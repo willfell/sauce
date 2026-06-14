@@ -10381,10 +10381,10 @@ async function caseV01020EC3SchemaExposesNewFields() {
   const asText = JSON.stringify(parsed);
   assertTrue("HC-V01020-EC-3b: schema mentions presetPrompts", asText.includes("presetPrompts"));
   assertTrue("HC-V01020-EC-3c: schema mentions options_source", asText.includes("options_source"));
-  // Manifest version bumped to 0.5.0
+  // Manifest version bumped to 0.6.0 in v0.105.0 (was 0.5.0 in v0.102.0).
   const mp = path.join(WORKSHOP, "platform", "mechanisms", "entity-create", "manifest.json");
   const man = JSON.parse(fs.readFileSync(mp, "utf8"));
-  assertTrue("HC-V01020-EC-3d: entity-create manifest version is 0.5.0", man.version === "0.5.0",
+  assertTrue("HC-V01020-EC-3d: entity-create manifest version is 0.6.0", man.version === "0.6.0",
     `got: ${man.version}`);
 }
 
@@ -10604,8 +10604,13 @@ async function caseV01020ProjMan2SectionsAndDocNotePrompts() {
   const docPrompts = (docBtn && Array.isArray(docBtn.prompts)) ? docBtn.prompts : [];
   const sectionPrompt = docPrompts.find(p => p && p.key === "section");
   const slugPrompt = docPrompts.find(p => p && p.key === "section_slug");
-  assertTrue("HC-V01020-PROJ-MAN-2d: doc-note has prompts.section (string, required, default Knowledge)",
-    sectionPrompt && sectionPrompt.type === "string" && sectionPrompt.required === true && sectionPrompt.default === "Knowledge");
+  // v0.105.0 (Issue 4): section prompt switched from free-text string +
+  // default "Knowledge" + validate "safe-filename" to a type: select picker
+  // sourced from the project's sections[] via options_source. The required:
+  // true invariant + the prompt being present is what v0.102.0 originally
+  // pinned; the type + default are now picker semantics.
+  assertTrue("HC-V01020-PROJ-MAN-2d: doc-note has prompts.section (required; type select after v0.105.0)",
+    sectionPrompt && sectionPrompt.required === true && sectionPrompt.type === "select");
   assertTrue("HC-V01020-PROJ-MAN-2e: doc-note has prompts.section_slug with derive slugify(prompts.section)",
     slugPrompt && slugPrompt.derive === "slugify(prompts.section)");
   assertTrue("HC-V01020-PROJ-MAN-2f: doc-note destination.folder_prefix includes {{prompts.section_slug}}",
@@ -10634,16 +10639,22 @@ async function caseV01020ProjMan3HelperFilesRegistered() {
 }
 
 async function caseV01020ProjMan4SectionPromptHasSafeFilenameValidate() {
-  console.log(`\n--- Case HC-V01020-PROJ-MAN-4: doc-note section prompt has validate: "safe-filename" (defense-in-depth) ---`);
+  // v0.105.0 (Issue 4): section prompt switched from type: string +
+  // validate: "safe-filename" to type: select fed by options_source:
+  // "current_project_sections". The free-text safety check is no longer
+  // applicable because the user picks from a known good list — the picker
+  // bypasses arbitrary input. We retain the case as an existence + picker-
+  // shape assertion.
+  console.log(`\n--- Case HC-V01020-PROJ-MAN-4: doc-note section prompt is a picker after v0.105.0 (was string + safe-filename) ---`);
   const m = _readProjManifest();
   const buttons = (m && Array.isArray(m.new_entity_buttons)) ? m.new_entity_buttons : [];
   const docBtn = buttons.find(b => b && b.id === "doc-note");
   const docPrompts = (docBtn && Array.isArray(docBtn.prompts)) ? docBtn.prompts : [];
   const sectionPrompt = docPrompts.find(p => p && p.key === "section");
   assertTrue("HC-V01020-PROJ-MAN-4a: doc-note section prompt exists", !!sectionPrompt);
-  assertTrue("HC-V01020-PROJ-MAN-4b: doc-note section prompt has validate: 'safe-filename'",
-    sectionPrompt && sectionPrompt.validate === "safe-filename",
-    `got: ${sectionPrompt && sectionPrompt.validate}`);
+  assertTrue("HC-V01020-PROJ-MAN-4b: doc-note section prompt is a select with options_source",
+    sectionPrompt && sectionPrompt.type === "select" && typeof sectionPrompt.options_source === "string",
+    `got: type=${sectionPrompt && sectionPrompt.type} options_source=${sectionPrompt && sectionPrompt.options_source}`);
 }
 
 async function caseV01020ProjTpl1DocsHubInvokesSections() {
@@ -11081,13 +11092,15 @@ const _PROJ_SECTION_HUB_TPL = path.join(WORKSHOP, "platform", "blueprints", "pro
 const _PROJ_DOC_NOTE_TPL = path.join(WORKSHOP, "platform", "blueprints", "project", "templates", "Doc Note.md");
 
 async function caseV01030ProjMan1VersionAndCustomjs() {
-  console.log("\n--- Case HC-V01030-PROJ-MAN-1: project manifest version 1.18.0 + customjs_classes adds Breadcrumb + ProjectDocsIndex + SectionHub ---");
+  console.log("\n--- Case HC-V01030-PROJ-MAN-1: project manifest version 1.19.0 + customjs_classes adds Breadcrumb + ProjectDocsIndex + SectionHub ---");
   const m = _readProjManifest();
-  // v0.104.0 supersedes the v0.103.0 hard-pin (1.17.0). v0.104.0 S3 bumps the
-  // project blueprint to 1.18.0 (registers the new DocSearch helper).
-  // Breadcrumb + ProjectDocsIndex + SectionHub carryover assertions still apply.
-  assertTrue("HC-V01030-PROJ-MAN-1a: project manifest version is exactly 1.18.0",
-    m && m.version === "1.18.0", `got: ${m && m.version}`);
+  // v0.104.0 superseded the v0.103.0 hard-pin (1.17.0) → 1.18.0.
+  // v0.105.0 supersedes the v0.104.0 hard-pin → 1.19.0 (docs-system-fixes
+  // brief reshapes the doc-note prompt schema + ships DocSearch + section-hub
+  // refactor). Breadcrumb + ProjectDocsIndex + SectionHub carryover assertions
+  // still apply.
+  assertTrue("HC-V01030-PROJ-MAN-1a: project manifest version is exactly 1.19.0",
+    m && m.version === "1.19.0", `got: ${m && m.version}`);
   const cls = (m && Array.isArray(m.customjs_classes)) ? m.customjs_classes : [];
   assertTrue("HC-V01030-PROJ-MAN-1b: customjs_classes includes Breadcrumb",
     cls.indexOf("Breadcrumb") !== -1);
@@ -11140,8 +11153,13 @@ async function caseV01030ProjMan3DocNoteSubSection() {
   const docPrompts = (docBtn && Array.isArray(docBtn.prompts)) ? docBtn.prompts : [];
   const subPrompt = docPrompts.find(p => p && p.key === "sub_section");
   const subSlugPrompt = docPrompts.find(p => p && p.key === "sub_section_slug");
+  // v0.105.0 (Issue 4): sub_section prompt switched from type: string to
+  // type: select fed by options_source: "current_section_sub_sections".
+  // The optionality + empty-default invariants still hold; only the input
+  // type changes.
   assertTrue("HC-V01030-PROJ-MAN-3b: doc-note has prompts.sub_section (optional, default empty)",
-    subPrompt && subPrompt.type === "string" && (subPrompt.default === "" || subPrompt.default === undefined)
+    subPrompt && (subPrompt.type === "string" || subPrompt.type === "select")
+      && (subPrompt.default === "" || subPrompt.default === undefined)
       && subPrompt.required !== true);
   assertTrue("HC-V01030-PROJ-MAN-3c: doc-note has prompts.sub_section_slug with derive slugify(prompts.sub_section)",
     subSlugPrompt && subSlugPrompt.derive === "slugify(prompts.sub_section)");
@@ -11205,20 +11223,32 @@ async function caseV01030ProjTpl1DocsHubInvokesIndex() {
     /class:\s*["']SectionHub["']/.test(secHub));
   assertTrue("HC-V01030-PROJ-TPL-1f: Section Hub invokes Breadcrumb",
     /class:\s*["']Breadcrumb["']/.test(secHub));
-  assertTrue("HC-V01030-PROJ-TPL-1g: Section Hub frontmatter has type: section-hub",
-    /^type:\s*section-hub\s*$/m.test(secHub));
-  assertTrue("HC-V01030-PROJ-TPL-1h: Section Hub frontmatter has depth field",
-    /^depth:\s*\{\{prompts\.depth/m.test(secHub));
+  // v0.105.0 (Issue 5): Section Hub template no longer ships its own leading
+  // frontmatter block — entity-create's frontmatter_template provides type +
+  // depth + project + section etc. The template body now starts with the
+  // first dataviewjs block. The frontmatter assertions are inverted: confirm
+  // the template does NOT lead with its own type/depth scalars.
+  assertTrue("HC-V01030-PROJ-TPL-1g: Section Hub template does NOT ship leading 'type: section-hub' (v0.105.0 Issue 5)",
+    !/^type:\s*section-hub\s*$/m.test(secHub));
+  assertTrue("HC-V01030-PROJ-TPL-1h: Section Hub template does NOT ship leading 'depth: ...' scalar (v0.105.0 Issue 5)",
+    !/^depth:\s*\{\{prompts\.depth/m.test(secHub));
 }
 
 async function caseV01030ProjTpl2DocNoteBreadcrumb() {
-  console.log("\n--- Case HC-V01030-PROJ-TPL-2: Doc Note template has <!-- breadcrumb-v1.17.0 --> marker at top + Breadcrumb invocation ---");
+  // v0.105.0 (Issue 2): Doc Note template no longer ships the breadcrumb-v1.17.0
+  // marker line. New docs come without it — install.js _migrateDocNote still
+  // probes for the marker and adds it to EXISTING pre-v0.103 docs (idempotency
+  // guard for the migration path; see HC-V01050-DOC-TPL-1).
+  console.log("\n--- Case HC-V01030-PROJ-TPL-2: Doc Note template invokes Breadcrumb (marker removed in v0.105.0 Issue 2) ---");
   assertTrue("HC-V01030-PROJ-TPL-2: Doc Note.md exists", fs.existsSync(_PROJ_DOC_NOTE_TPL));
   const body = fs.readFileSync(_PROJ_DOC_NOTE_TPL, "utf8");
-  assertTrue("HC-V01030-PROJ-TPL-2a: Doc Note contains <!-- breadcrumb-v1.17.0 --> marker",
-    /<!--\s*breadcrumb-v1\.17\.0\s*-->/.test(body));
-  assertTrue("HC-V01030-PROJ-TPL-2b: marker appears at the very top (within first 20 chars)",
-    body.indexOf("<!-- breadcrumb-v1.17.0 -->") >= 0 && body.indexOf("<!-- breadcrumb-v1.17.0 -->") < 20);
+  // The marker is now absent from new docs (still present in legacy migration).
+  assertTrue("HC-V01030-PROJ-TPL-2a: Doc Note template does NOT ship the breadcrumb-v1.17.0 marker (v0.105.0 Issue 2)",
+    !/<!--\s*breadcrumb-v1\.17\.0\s*-->/.test(body));
+  // Sanity: install.js still references the marker for migration idempotency.
+  const installSrc = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
+  assertTrue("HC-V01030-PROJ-TPL-2b: install.js _migrateDocNote still references the marker (migration path intact)",
+    installSrc.includes("<!-- breadcrumb-v1.17.0 -->"));
   assertTrue("HC-V01030-PROJ-TPL-2c: Doc Note invokes Breadcrumb via customjs-guard",
     /class:\s*["']Breadcrumb["']/.test(body));
 }
@@ -11401,10 +11431,16 @@ async function caseV01040PdiExt2MatchesUsed() {
     /customJS\.DocSearch\.matches\(/.test(src));
 }
 async function caseV01040PdiExt3RerenderOnChange() {
-  console.log("\n--- Case HC-V01040-PDI-EXT-3: ProjectDocsIndex onChange uses full re-render pattern ---");
+  // v0.105.0 (Issue 6): the prior "full re-render via dv.container.empty() +
+  // this.render(dv)" pattern was the root cause of the input-resets-on-keystroke
+  // bug. ProjectDocsIndex now uses a SCOPED re-render: clear ONLY
+  // ctx.resultsContainer + re-render results into it. The strip is permanent.
+  console.log("\n--- Case HC-V01040-PDI-EXT-3: ProjectDocsIndex onChange uses scoped re-render pattern (resultsContainer.empty) ---");
   const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/project-docs-index.js"), "utf8");
-  assertTrue("HC-V01040-PDI-EXT-3: full re-render pattern (dv.container.empty + this.render)",
-    /dv\.container\.empty\(\)/.test(src) && /this\.render\(dv\)/.test(src));
+  assertTrue("HC-V01040-PDI-EXT-3: scoped re-render pattern (ctx.resultsContainer.empty + helper method)",
+    /resultsContainer\.empty\s*\(/.test(src));
+  assertTrue("HC-V01040-PDI-EXT-3: dv.container.empty NOT called in ProjectDocsIndex",
+    !/dv\.container\.empty\s*\(/.test(src));
 }
 
 // v0.104.0 S2.2 (Task 3): SectionHub consumes DocSearch (within-section
@@ -11429,14 +11465,236 @@ async function caseV01040ShExt2MatchesUsed() {
 // customjs_classes appends DocSearch, files[] appends the helpers/doc-search.js
 // → {{scripts_path}}/project/doc-search.js materialization.
 async function caseV01040Man1Manifest118() {
-  console.log("\n--- Case HC-V01040-MAN-1: project blueprint version 1.18.0 + DocSearch registered + doc-search.js shipped ---");
+  // Asserts the canonical surface area introduced in v0.104.0 (DocSearch
+  // registered) + the live project blueprint version (bumped to 1.19.0 in
+  // v0.105.0 per docs-system-fixes brief).
+  console.log("\n--- Case HC-V01040-MAN-1: project blueprint version 1.19.0 + DocSearch registered + doc-search.js shipped ---");
   const m = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/manifest.json"), "utf8"));
-  assertTrue("HC-V01040-MAN-1: project blueprint version 1.18.0", m.version === "1.18.0");
+  assertTrue("HC-V01040-MAN-1: project blueprint version 1.19.0", m.version === "1.19.0");
   assertTrue("HC-V01040-MAN-1: customjs_classes includes DocSearch",
     Array.isArray(m.customjs_classes) && m.customjs_classes.includes("DocSearch"));
   const sources = (m.files || []).map(f => f.source);
   assertTrue("HC-V01040-MAN-1: files includes helpers/doc-search.js",
     sources.includes("helpers/doc-search.js"));
+}
+
+// =====================================================================
+// v0.105.0 docs-system-fixes brief (10 issues) — source-text asserts.
+// =====================================================================
+
+// Issue 1: entity-create.js opens just-created TFile via getLeaf().openFile()
+// instead of workspace.openLinkText(targetPath, "") which races metadata-cache.
+async function caseV01050EcOpenFile1() {
+  console.log("\n--- Case HC-V01050-EC-OPENFILE-1: entity-create.js create() opens via getLeaf().openFile(), not openLinkText ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/mechanisms/entity-create/entity-create.js"), "utf8");
+  assertTrue("HC-V01050-EC-OPENFILE-1: openFile( present",
+    /\.openFile\s*\(/.test(src));
+  assertTrue("HC-V01050-EC-OPENFILE-1: create() captures the returned TFile",
+    /const\s+newFile\s*=\s*await\s+app\.vault\.create\(/.test(src));
+  assertTrue("HC-V01050-EC-OPENFILE-1: create() opens via getLeaf(false).openFile(newFile)",
+    /workspace\.getLeaf\(\s*false\s*\)\.openFile\(\s*newFile\s*\)/.test(src));
+  // The existing branch (existing path) also uses openFile rather than
+  // openLinkText — sanity check.
+  assertTrue("HC-V01050-EC-OPENFILE-1: existing-file branch also uses openFile",
+    /openFile\(\s*existing\s*\)/.test(src));
+  // openLinkText is gone from the create() path. Other class methods don't
+  // currently use it either; absence anywhere in the source is the strictest
+  // assertion we can lock in.
+  assertTrue("HC-V01050-EC-OPENFILE-1: openLinkText NOT called from create()",
+    !/openLinkText\s*\(\s*targetPath\b/.test(src));
+}
+
+// Issue 4: EntityCreate gains options_source: current_project_sections +
+// current_section_sub_sections + skip-prompt-when-empty.
+async function caseV01050EcCps1CurrentProjectSections() {
+  console.log("\n--- Case HC-V01050-EC-CPS-1: entity-create.js resolves options_source: 'current_project_sections' ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/mechanisms/entity-create/entity-create.js"), "utf8");
+  assertTrue("HC-V01050-EC-CPS-1: 'current_project_sections' literal referenced",
+    /["']current_project_sections["']/.test(src));
+  assertTrue("HC-V01050-EC-CPS-1: case branch in _resolveOptionsSource present",
+    /source\s*===\s*["']current_project_sections["']/.test(src));
+  // Reads sections[] off either cur (when type === project) or the project
+  // note resolved via project_slug.
+  assertTrue("HC-V01050-EC-CPS-1: reads sections[] field",
+    /\bsections\b/.test(src) && /\.sections\b/.test(src));
+}
+
+async function caseV01050EcCss1CurrentSectionSubSections() {
+  console.log("\n--- Case HC-V01050-EC-CSS-1: entity-create.js resolves options_source: 'current_section_sub_sections' ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/mechanisms/entity-create/entity-create.js"), "utf8");
+  assertTrue("HC-V01050-EC-CSS-1: 'current_section_sub_sections' literal referenced",
+    /["']current_section_sub_sections["']/.test(src));
+  assertTrue("HC-V01050-EC-CSS-1: case branch in _resolveOptionsSource present",
+    /source\s*===\s*["']current_section_sub_sections["']/.test(src));
+  // Only emits non-empty on depth-1 section-hub.
+  assertTrue("HC-V01050-EC-CSS-1: gates on type === 'section-hub'",
+    /["']section-hub["']/.test(src));
+  assertTrue("HC-V01050-EC-CSS-1: gates on depth === 2 query for sub-sections",
+    /depth\)\s*===\s*2/.test(src) || /depth\s*===\s*2/.test(src));
+}
+
+// Skip-prompt-when-empty — when options_source resolves to [] AND the prompt
+// is required: false, the prompt UI is skipped and ctx.prompts[p.key] = "".
+async function caseV01050EcSkip1SkipEmptyOptions() {
+  console.log("\n--- Case HC-V01050-EC-SKIP-1: entity-create.js skips prompt when options_source returns [] AND required: false ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/mechanisms/entity-create/entity-create.js"), "utf8");
+  // Look for the explicit length-zero + required-false guard that sits between
+  // options_source resolution and the _prompt() call.
+  assertTrue("HC-V01050-EC-SKIP-1: length === 0 + required === false guard present",
+    /p\.options\.length\s*===\s*0\s*&&\s*p\.required\s*===\s*false/.test(src));
+  assertTrue("HC-V01050-EC-SKIP-1: sets ctx.prompts[p.key] = '' on skip",
+    /ctx\.prompts\[\s*p\.key\s*\]\s*=\s*["']{2}/.test(src));
+}
+
+// Manifest — entity-create at 0.6.0; doc-note section + sub_section prompts
+// use the new options_source values; project blueprint at 1.19.0.
+async function caseV01050EcMan1Manifest060() {
+  console.log("\n--- Case HC-V01050-EC-MAN-1: entity-create mechanism manifest 0.6.0 ---");
+  const m = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/mechanisms/entity-create/manifest.json"), "utf8"));
+  assertTrue("HC-V01050-EC-MAN-1: entity-create mechanism version is 0.6.0", m.version === "0.6.0",
+    `got: ${m.version}`);
+  // Description references the v0.6.0 paragraph.
+  assertTrue("HC-V01050-EC-MAN-1: description mentions v0.6.0",
+    typeof m.description === "string" && /v0\.6\.0/.test(m.description));
+  assertTrue("HC-V01050-EC-MAN-1: description mentions current_project_sections",
+    /current_project_sections/.test(m.description));
+  assertTrue("HC-V01050-EC-MAN-1: description mentions current_section_sub_sections",
+    /current_section_sub_sections/.test(m.description));
+}
+
+async function caseV01050Man1ProjectManifest119() {
+  console.log("\n--- Case HC-V01050-MAN-1: project blueprint manifest 1.19.0 + doc-note prompts use new options_source ---");
+  const m = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/manifest.json"), "utf8"));
+  assertTrue("HC-V01050-MAN-1: project blueprint version 1.19.0", m.version === "1.19.0",
+    `got: ${m.version}`);
+  // Locate doc-note entity-create entry.
+  const docNote = (m.new_entity_buttons || []).find(b => b.id === "doc-note");
+  assertTrue("HC-V01050-MAN-1: doc-note new_entity_buttons entry present", !!docNote);
+  const section = (docNote.prompts || []).find(p => p.key === "section");
+  const subSection = (docNote.prompts || []).find(p => p.key === "sub_section");
+  assertTrue("HC-V01050-MAN-1: section prompt options_source === 'current_project_sections'",
+    section && section.options_source === "current_project_sections",
+    `got: ${section && section.options_source}`);
+  assertTrue("HC-V01050-MAN-1: section prompt type === 'select'",
+    section && section.type === "select");
+  assertTrue("HC-V01050-MAN-1: sub_section prompt options_source === 'current_section_sub_sections'",
+    subSection && subSection.options_source === "current_section_sub_sections",
+    `got: ${subSection && subSection.options_source}`);
+  assertTrue("HC-V01050-MAN-1: sub_section prompt type === 'select'",
+    subSection && subSection.type === "select");
+  assertTrue("HC-V01050-MAN-1: sub_section prompt required === false",
+    subSection && subSection.required === false);
+}
+
+// Issue 2: Doc Note template no longer ships the breadcrumb-v1.17.0 marker.
+// The install.js migration (_migrateDocNote) still uses the marker as an
+// idempotency guard for EXISTING pre-v0.103 docs; that logic stays intact.
+async function caseV01050DocTpl1NoMarker() {
+  console.log("\n--- Case HC-V01050-DOC-TPL-1: Doc Note template does NOT ship the breadcrumb-v1.17.0 marker ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/templates/Doc Note.md"), "utf8");
+  assertTrue("HC-V01050-DOC-TPL-1: '<!-- breadcrumb-v1.17.0 -->' absent from Doc Note template",
+    !src.includes("<!-- breadcrumb-v1.17.0 -->"));
+  // The first line is now the dataviewjs Breadcrumb invocation.
+  const firstLine = src.split(/\r?\n/)[0];
+  assertTrue("HC-V01050-DOC-TPL-1: first line is the dataviewjs fence",
+    /^```dataviewjs\s*$/.test(firstLine));
+  // And install.js _migrateDocNote still references the marker (idempotency).
+  const installSrc = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
+  assertTrue("HC-V01050-DOC-TPL-1: install.js _migrateDocNote still references the marker",
+    installSrc.includes("<!-- breadcrumb-v1.17.0 -->"));
+}
+
+// Issue 5: Section Hub template no longer ships its own frontmatter block.
+async function caseV01050SectionTpl1NoLeadingFrontmatter() {
+  console.log("\n--- Case HC-V01050-SECTION-TPL-1: Section Hub template does NOT start with leading frontmatter ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/templates/Section Hub.md"), "utf8");
+  assertTrue("HC-V01050-SECTION-TPL-1: template does NOT start with '---'",
+    !src.startsWith("---"));
+  const firstLine = src.split(/\r?\n/)[0];
+  assertTrue("HC-V01050-SECTION-TPL-1: first line is the dataviewjs fence",
+    /^```dataviewjs\s*$/.test(firstLine));
+  // The install.js _sectionHubBody still emits its own frontmatter — leave
+  // intact (migration path for legacy hubs).
+  const installSrc = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
+  assertTrue("HC-V01050-SECTION-TPL-1: install.js _sectionHubBody still emits frontmatter",
+    /_sectionHubBody/.test(installSrc) && /type:\s*section-hub/.test(installSrc));
+}
+
+// Issue 6: DocSearch refactored — strip + separate resultsContainer.
+async function caseV01050DsStrip1TwoContainers() {
+  console.log("\n--- Case HC-V01050-DS-STRIP-1: DocSearch creates permanent strip + separate resultsContainer ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/doc-search.js"), "utf8");
+  assertTrue("HC-V01050-DS-STRIP-1: stripContainer var declared",
+    /\bstripContainer\b/.test(src));
+  assertTrue("HC-V01050-DS-STRIP-1: resultsContainer var declared",
+    /\bresultsContainer\b/.test(src));
+  assertTrue("HC-V01050-DS-STRIP-1: strip cls === 'doc-search-strip'",
+    /cls:\s*["']doc-search-strip["']/.test(src));
+  assertTrue("HC-V01050-DS-STRIP-1: results cls === 'doc-search-results'",
+    /cls:\s*["']doc-search-results["']/.test(src));
+  // ctx exposes resultsContainer for consumers.
+  assertTrue("HC-V01050-DS-STRIP-1: returned ctx exposes resultsContainer",
+    /resultsContainer\b/.test(src) && /\{\s*text:\s*["']{2}\s*,\s*tags:\s*new\s+Set/.test(src));
+}
+
+async function caseV01050DsStrip2InputClearsOnlyResults() {
+  console.log("\n--- Case HC-V01050-DS-STRIP-2: DocSearch input listener clears ONLY resultsContainer (not dv.container) ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/doc-search.js"), "utf8");
+  // No call to dv.container.empty() from the input listener.
+  assertTrue("HC-V01050-DS-STRIP-2: dv.container.empty() NOT invoked in doc-search.js",
+    !/dv\.container\.empty\s*\(/.test(src));
+  // resultsContainer.empty() IS invoked.
+  assertTrue("HC-V01050-DS-STRIP-2: resultsContainer.empty() IS invoked",
+    /resultsContainer\.empty\s*\(/.test(src));
+}
+
+// Issue 7: section-hub no longer renders dv.header(3, "Docs").
+async function caseV01050ShNoDocsHeader() {
+  console.log("\n--- Case HC-V01050-SH-NODOCSHEADER: section-hub.js does NOT render dv.header(3, 'Docs') ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/section-hub.js"), "utf8");
+  assertTrue("HC-V01050-SH-NODOCSHEADER: no header(3, 'Docs') call",
+    !/header\s*\(\s*3\s*,\s*["']Docs["']\s*\)/.test(src));
+}
+
+// Issue 8: full-width buttons — flex containers wrap EntityCreate calls in
+// section-hub.js + project-docs-index.js with `flex: 1` per child.
+async function caseV01050Fullwidth1FlexStretch() {
+  console.log("\n--- Case HC-V01050-FULLWIDTH-1: button rows use display: flex + flex: 1 children ---");
+  const shSrc = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/section-hub.js"), "utf8");
+  const pdiSrc = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/project-docs-index.js"), "utf8");
+  // Both helpers ship a flex container around EntityCreate buttons.
+  assertTrue("HC-V01050-FULLWIDTH-1: section-hub.js has display: flex button row",
+    /display:\s*flex/.test(shSrc) && /flex:\s*1/.test(shSrc));
+  assertTrue("HC-V01050-FULLWIDTH-1: project-docs-index.js has display: flex button row",
+    /display:\s*flex/.test(pdiSrc) && /flex:\s*1/.test(pdiSrc));
+  // Both helpers stretch the inner button via querySelectorAll("button").
+  assertTrue("HC-V01050-FULLWIDTH-1: section-hub.js querySelectorAll('button') + flex: 1 styling",
+    /querySelectorAll\(\s*["']button["']\s*\)/.test(shSrc));
+  assertTrue("HC-V01050-FULLWIDTH-1: project-docs-index.js querySelectorAll('button') + flex: 1 styling",
+    /querySelectorAll\(\s*["']button["']\s*\)/.test(pdiSrc));
+}
+
+// Issue 9: DocSearch no longer contains the 🔎 emoji.
+async function caseV01050DsNoEmoji() {
+  console.log("\n--- Case HC-V01050-DS-NOEMOJI: doc-search.js does NOT contain the 🔎 emoji ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/doc-search.js"), "utf8");
+  assertTrue("HC-V01050-DS-NOEMOJI: U+1F50E (🔎) absent",
+    !/\u{1F50E}/u.test(src));
+  // The replacement is an inline SVG <circle ... r="8"> (the lucide search head).
+  assertTrue("HC-V01050-DS-NOEMOJI: inline SVG search icon present",
+    /<svg[^>]*>\s*<circle[^>]*cx=["']11["']/.test(src));
+}
+
+// Issue 10: docs queries sort by file.mtime desc — both consumers.
+async function caseV01050Sort1MtimeDesc() {
+  console.log("\n--- Case HC-V01050-SORT-1: section-hub.js + project-docs-index.js sort docs by file.mtime desc ---");
+  const shSrc = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/section-hub.js"), "utf8");
+  const pdiSrc = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/project-docs-index.js"), "utf8");
+  // sort((p) => p.file.mtime?.ts || 0, "desc") or equivalent.
+  assertTrue("HC-V01050-SORT-1: section-hub.js sorts by file.mtime desc",
+    /\.sort\s*\(\s*\([^)]*\)\s*=>\s*[^,)]*file\.mtime[^,)]*,\s*["']desc["']\s*\)/.test(shSrc));
+  assertTrue("HC-V01050-SORT-1: project-docs-index.js sorts by file.mtime desc",
+    /\.sort\s*\(\s*\([^)]*\)\s*=>\s*[^,)]*file\.mtime[^,)]*,\s*["']desc["']\s*\)/.test(pdiSrc));
 }
 
 (async function main() {
@@ -12043,7 +12301,25 @@ async function caseV01040Man1Manifest118() {
   await caseV01040ShExt2MatchesUsed();
 
   // v0.104.0 S3 (Task 4): project blueprint manifest 1.18.0 (DocSearch registered).
+  // Note: project blueprint version is now 1.19.0 in v0.105.0 — assertion
+  // updated in place to track the live version.
   await caseV01040Man1Manifest118();
+
+  // v0.105.0 — docs-system-fixes brief (10 issues).
+  await caseV01050EcOpenFile1();        // Issue 1
+  await caseV01050EcCps1CurrentProjectSections();   // Issue 4 (resolver)
+  await caseV01050EcCss1CurrentSectionSubSections();// Issue 4 (resolver)
+  await caseV01050EcSkip1SkipEmptyOptions();        // Issue 4 (skip-empty)
+  await caseV01050EcMan1Manifest060();              // Issue 4 (mechanism manifest)
+  await caseV01050Man1ProjectManifest119();         // Issue 4 (project manifest)
+  await caseV01050DocTpl1NoMarker();                // Issue 2
+  await caseV01050SectionTpl1NoLeadingFrontmatter();// Issue 5
+  await caseV01050DsStrip1TwoContainers();          // Issue 6
+  await caseV01050DsStrip2InputClearsOnlyResults(); // Issue 6
+  await caseV01050ShNoDocsHeader();                 // Issue 7
+  await caseV01050Fullwidth1FlexStretch();          // Issue 8
+  await caseV01050DsNoEmoji();                      // Issue 9
+  await caseV01050Sort1MtimeDesc();                 // Issue 10
 
   // v0.65.0 HC-V065-RUN-NOTE: write-run-note-* sub-skill lint
   {

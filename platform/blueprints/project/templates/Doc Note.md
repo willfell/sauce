@@ -1,4 +1,3 @@
-<!-- breadcrumb-v1.17.0 -->
 ```dataviewjs
 await dv.view("ranch/views/customjs-guard", { class: "Breadcrumb" });
 ```

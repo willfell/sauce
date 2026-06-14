@@ -121,10 +121,24 @@ function loadEntityCreate(opts = {}) {
                 },
             },
             async createFolder(p) { vaultFiles[p] = { __folder: true }; },
-            async create(p, content) { vaultFiles[p] = content; created.push({ path: p, content }); },
+            // v0.6.0 (Issue 1): create() now does `const newFile = await
+            // app.vault.create(...)` and opens that TFile. Return a TFile-shaped
+            // stub (just needs .path for the workspace.getLeaf().openFile() call).
+            async create(p, content) { vaultFiles[p] = content; created.push({ path: p, content }); return { path: p }; },
         },
         workspace: {
             openLinkText(p) { opens.push(p); },
+            // v0.6.0 (Issue 1): entity-create.create() now opens via
+            // workspace.getLeaf(false).openFile(file) rather than openLinkText.
+            // Stub a minimal leaf with openFile that records what was opened.
+            getLeaf() {
+                return {
+                    async openFile(file) {
+                        // Record by path (file may be a TFile-shaped stub or null/undefined).
+                        opens.push(file && file.path ? file.path : "<no-path>");
+                    },
+                };
+            },
         },
     };
     const win = { moment };
@@ -149,10 +163,11 @@ for (const [label, p] of mechFiles) {
 }
 ok("EC-1 entity-create mechanism dir + 4 files present", fs.existsSync(MECH_DIR) && allPresent);
 
-// 2. manifest parses, version is "0.5.0" (MINOR v0.102.0 S1 — presetPrompts + options_source: all_projects)
+// 2. manifest parses, version is "0.6.0" (MINOR v0.105.0 S1 — Issue 1 openFile +
+//    Issue 4 current_project_sections / current_section_sub_sections / skip-empty)
 const manifest = JSON.parse(fs.readFileSync(path.join(MECH_DIR, "manifest.json"), "utf8"));
-ok("EC-2 entity-create manifest parses + version === 0.5.0",
-    manifest && manifest.name === "entity-create" && manifest.version === "0.5.0",
+ok("EC-2 entity-create manifest parses + version === 0.6.0",
+    manifest && manifest.name === "entity-create" && manifest.version === "0.6.0",
     `got name=${manifest && manifest.name} version=${manifest && manifest.version}`);
 
 // 3. json-schema parses + has 7 extension shapes

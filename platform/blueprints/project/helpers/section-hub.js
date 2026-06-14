@@ -1,47 +1,25 @@
-// section-hub.js — v1.18.0 helper (sauce v0.104.0 S2.2).
+// section-hub.js — v1.19.0 helper (sauce v0.105.0 S2).
 //
-// v0.104.0 S2.2: consumes the v0.104.0 DocSearch helper. The filter UI mounts
-// above the + New Doc / + New Sub-Section buttons. Scope is THIS section's
-// folder; recursive: true at depth 1 (covers sub-section docs in the count),
-// recursive: false at depth 2 (leaf). The docs query + (depth-1) sub-section
-// card count both gate on customJS.DocSearch.matches. onChange triggers a full
-// re-render via dv.container.empty() + this.render(dv); _currentCtx stash is
-// the same pattern ProjectDocsIndex uses.
+// v0.105.0 S2 — docs-system-fixes brief:
+//   • Issue 6 (P0): DocSearch refactored to a permanent strip + transient
+//     resultsContainer; SectionHub now writes ALL post-strip rendering into
+//     the resultsContainer via a synthetic dv-proxy. The strip's input element
+//     survives keystrokes (no full re-render).
+//   • Issue 7: dropped the docs H3 heading (was a redundant label above the
+//     card row — the file H1 + the strip of cards are self-evident).
+//   • Issue 8: EntityCreate buttons rendered into a `display: flex` row with
+//     `flex: 1` per child for full-width layout.
+//   • Issue 10: docs query sorted by `file.mtime?.ts` desc for newest-first.
+//
+// v0.104.0 S2.2 (carry-over): consumes the v0.104.0 DocSearch helper. The
+// filter UI mounts above the + New Doc / + New Sub-Section buttons. Scope is
+// THIS section's folder; recursive: true at depth 1 (covers sub-section docs in
+// the count), recursive: false at depth 2 (leaf). The docs query + (depth-1)
+// sub-section card count both gate on customJS.DocSearch.matches.
 //
 // Renders any section-hub note — depth 1 (section) OR depth 2 (sub-section).
 // Reads its own frontmatter (type, project, project_slug, section,
-// section_slug, parent_section, depth) and dispatches the correct render shape:
-//
-//   • depth 1 (section)
-//       + New Doc          → presetPrompts: { section, section_slug,
-//                                              sub_section: "", sub_section_slug: "" }
-//       + New Sub-Section  → instance: "sub-section-hub",
-//                              presetPrompts: { parent_slug: <slug> }
-//       ## Sub-sections    → BeaconCards row of child section-hubs (depth 2).
-//       ## Docs            → BeaconCards row of docs in THIS folder ONLY
-//                            (strict folder match — does NOT recurse into
-//                            sub-section folders, since those docs live under
-//                            the depth-2 hub).
-//
-//   • depth 2 (sub-section)
-//       + New Doc          → presetPrompts: { section: <parent_section>,
-//                                              section_slug: <parent_slug>,
-//                                              sub_section: <this section>,
-//                                              sub_section_slug: <this slug> }
-//       (no + New Sub-Section button — 2-level nesting cap.)
-//       (no sub-section list — nothing nests below depth 2.)
-//       ## Docs            → BeaconCards row of docs in THIS folder.
-//
-// Strict folder match (p.file.folder === docsPath): the depth-1 hub MUST NOT
-// list docs that actually live under one of its sub-section folders — those
-// belong to the depth-2 hub. Without strict match, depth-1 docs would
-// double-count in both Docs sections (depth-1 hub via recursive query, depth-2
-// hub via the sub-folder query). Mirror the v0.102.0 ProjectDocsSections
-// folder-wins-on-conflict guard.
-//
-// Empty-state language: `> [!example]+ No docs in **<section>** yet — use
-// **+ New Doc** above.` — matches the in-section "create something" hint
-// pattern used by ProjectDocsSections._renderBucket.
+// section_slug, parent_section, depth) and dispatches the correct render shape.
 class SectionHub {
   async render(dv, opts = {}) {
     const cur = dv.current();
@@ -63,26 +41,45 @@ class SectionHub {
     const scopePath = depth === 1
       ? `spice/projects/${projectSlug}/docs/${sectionSlug}`
       : `spice/projects/${projectSlug}/docs/${parentSlugForScope}/${sectionSlug}`;
+
+    // v0.105.0 Issue 6: re-render callback now wipes ONLY the resultsContainer
+    // (not dv.container). Without this, the strip's input element would be
+    // destroyed mid-keystroke and lose focus + value.
     const filterCtx = customJS.DocSearch.render(dv, {
       projectSlug,
       scopePath,
       recursive: depth === 1,
       onChange: (ctx) => {
         this._currentCtx = ctx;
-        dv.container.empty();
-        this.render(dv);
+        ctx.resultsContainer.empty();
+        this._renderResults(dv, cur, depth, projectSlug, sectionSlug, sectionName, ctx);
       },
     });
     if (this._currentCtx) {
       Object.assign(filterCtx, this._currentCtx);
     }
 
-    // 1. + New Doc — presetPrompts depend on depth.
-    //    At depth 1, the new doc lives directly in this section's folder
-    //    (sub_section empty). At depth 2, it lives one level deeper — section
-    //    is the PARENT, sub_section is this hub.
+    // First-render results into the freshly-created resultsContainer.
+    this._renderResults(dv, cur, depth, projectSlug, sectionSlug, sectionName, filterCtx);
+  }
+
+  // _renderResults writes ALL of the post-strip rendering (buttons + sub-sections
+  // + docs cards) into filterCtx.resultsContainer via a synthetic dv-proxy so
+  // BeaconCards + EntityCreate + dv.header/paragraph all flow into the right
+  // target. The strip itself is rendered by DocSearch.render() and lives outside
+  // this container — the strip is never re-rendered.
+  async _renderResults(dv, cur, depth, projectSlug, sectionSlug, sectionName, filterCtx) {
+    const container = filterCtx.resultsContainer;
+    const proxyDv = this._makeProxyDv(dv, container);
+
+    // 1. + New Doc + (depth 1) + New Sub-Section — wrapped in a flex row so the
+    //    buttons span full width. Issue 8.
+    const btnRow = container.createEl("div");
+    btnRow.style.cssText = "display: flex; gap: 8px; margin: 6px 0;";
+    const btnRowProxy = this._makeProxyDv(dv, btnRow);
+
     if (depth === 1) {
-      await customJS.EntityCreate.render(dv, {
+      await customJS.EntityCreate.render(btnRowProxy, {
         instance: "doc-note",
         presetPrompts: {
           section: sectionName,
@@ -94,7 +91,7 @@ class SectionHub {
     } else {
       const parentName = this._stripLink(cur.parent_section);
       const parentSlug = this._slugify(parentName);
-      await customJS.EntityCreate.render(dv, {
+      await customJS.EntityCreate.render(btnRowProxy, {
         instance: "doc-note",
         presetPrompts: {
           section: parentName,
@@ -105,26 +102,27 @@ class SectionHub {
       });
     }
 
-    // 2. + New Sub-Section — depth === 1 only (2-level nesting cap).
-    //    presetPrompts.parent_slug carries this section's slug so the new
-    //    sub-section-hub frontmatter wires correctly back to us.
     if (depth === 1) {
-      await customJS.EntityCreate.render(dv, {
+      await customJS.EntityCreate.render(btnRowProxy, {
         instance: "sub-section-hub",
         presetPrompts: { parent_slug: sectionSlug },
       });
     }
 
-    // 3. Sub-sections list — depth === 1 only. Query child section-hubs
-    //    (depth === 2) living under this section's folder.
+    // Stretch each EntityCreate-rendered button to fill its share of the row.
+    for (const btn of btnRow.querySelectorAll("button")) {
+      btn.style.flex = "1";
+    }
+
+    // 2. Sub-sections list — depth === 1 only.
     if (depth === 1) {
       const sectionPath = `spice/projects/${projectSlug}/docs/${sectionSlug}`;
       const subHubs = dv.pages(`"${sectionPath}"`)
         .where((p) => p.type === "section-hub" && p.depth === 2);
       if (subHubs.length > 0) {
-        dv.header(3, "Sub-sections");
+        proxyDv.header(3, "Sub-sections");
         const folderIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--interactive-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`;
-        await customJS.BeaconCards.render(dv, {
+        await customJS.BeaconCards.render(proxyDv, {
           pages: subHubs,
           layout: "row",
           title: (p) => p.section || p.file.name,
@@ -132,8 +130,6 @@ class SectionHub {
           meta: (p) => {
             const subSlug = p.section_slug || this._slugify(p.section || p.file.name);
             const subFolder = `${sectionPath}/${subSlug}`;
-            // v0.104.0 S2.2: sub-section card count also gates on the active
-            // filter so the meta line matches what the user sees inside.
             const count = dv.pages(`"${subFolder}"`)
               .where((q) => q.type === "doc-note" && q.file.folder === subFolder
                 && customJS.DocSearch.matches(q, filterCtx))
@@ -144,26 +140,29 @@ class SectionHub {
       }
     }
 
-    // 4. Docs in THIS folder — strict folder match (does NOT recurse).
+    // 3. Docs in THIS folder — strict folder match (does NOT recurse).
     //    depth 1: spice/projects/<slug>/docs/<sectionSlug>
     //    depth 2: spice/projects/<slug>/docs/<parentSlug>/<sectionSlug>
     const docsPath = depth === 1
       ? `spice/projects/${projectSlug}/docs/${sectionSlug}`
       : `spice/projects/${projectSlug}/docs/${this._slugify(this._stripLink(cur.parent_section))}/${sectionSlug}`;
 
+    // v0.105.0 Issue 10: sort docs by file.mtime desc — newest-first card row.
     const docs = dv.pages(`"${docsPath}"`)
       .where((p) => p.type === "doc-note" && p.file.folder === docsPath
-        && customJS.DocSearch.matches(p, filterCtx));
+        && customJS.DocSearch.matches(p, filterCtx))
+      .sort((p) => p.file.mtime?.ts || 0, "desc");
 
-    dv.header(3, "Docs");
+    // v0.105.0 Issue 7: dropped the docs H3 heading — the H1 file-name + the
+    // strip of docs cards are already self-evident.
     if (docs.length === 0) {
-      dv.paragraph(`> [!example]+ No docs in **${sectionName}** yet — use **+ New Doc** above.`);
+      proxyDv.paragraph(`> [!example]+ No docs in **${sectionName}** yet — use **+ New Doc** above.`);
       return;
     }
 
     const fileIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--interactive-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
 
-    await customJS.BeaconCards.render(dv, {
+    await customJS.BeaconCards.render(proxyDv, {
       pages: docs,
       layout: "row",
       title: (p) => p.file.name,
@@ -174,6 +173,29 @@ class SectionHub {
         return created ? `created ${created} · edited ${edited}` : `edited ${edited}`;
       },
     });
+  }
+
+  // v0.105.0 Issue 6 helper — synthetic dv-proxy that routes dv.container +
+  // dv.el + dv.header + dv.paragraph into a target container. Forwards
+  // dv.current + dv.pages to the real dv (no rebind beyond what BeaconCards /
+  // EntityCreate touch on the proxy).
+  _makeProxyDv(dv, container) {
+    return {
+      container,
+      current: dv.current.bind(dv),
+      pages: dv.pages.bind(dv),
+      el: (tag, txt, opts) => {
+        const el = container.createEl(tag, { ...(opts || {}) });
+        if (txt !== undefined && txt !== null && txt !== "") el.textContent = String(txt);
+        return el;
+      },
+      header: (lvl, txt) => container.createEl(`h${lvl}`, { text: String(txt) }),
+      paragraph: (txt) => {
+        const p = container.createEl("p");
+        p.innerHTML = String(txt);
+        return p;
+      },
+    };
   }
 
   // Strip wikilink markup or Dataview Link object into a plain label string.
