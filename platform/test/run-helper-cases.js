@@ -11751,6 +11751,49 @@ async function caseV01060DsDebounce1Input150ms() {
     /setTimeout\s*\([^,]+,\s*150\s*\)/.test(src));
 }
 
+// =====================================================================
+// v0.106.0 S3 — ProjectDocsIndex dashboard widgets expansion. Adds three
+// new chips beside the existing docs/meetings/status row:
+//   (a) task-note count under spice/projects/<slug>/tasks/
+//   (b) recent activity — docs touched in last 7 days
+//   (c) top-3 tags as inline #tag chips
+// All share the existing chipStyle pattern for visual consistency.
+// =====================================================================
+async function caseV01060PdiWidgets1TaskCount() {
+  console.log("\n--- Case HC-V01060-PDI-WIDGETS-1: ProjectDocsIndex queries task-notes under projects/<slug>/tasks ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/project-docs-index.js"), "utf8");
+  assertTrue("HC-V01060-PDI-WIDGETS-1: queries dv.pages tasks subfolder",
+    /dv\.pages\(\s*`"\$\{projectPath\}\/tasks"`/.test(src));
+  assertTrue("HC-V01060-PDI-WIDGETS-1: filters by type === 'task-note'",
+    /p\.type\s*===\s*["']task-note["']/.test(src));
+  assertTrue("HC-V01060-PDI-WIDGETS-1: declares taskCount variable",
+    /\btaskCount\b/.test(src));
+}
+
+async function caseV01060PdiWidgets2RecentActivity() {
+  console.log("\n--- Case HC-V01060-PDI-WIDGETS-2: ProjectDocsIndex computes recent activity (last 7 days) ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/project-docs-index.js"), "utf8");
+  assertTrue("HC-V01060-PDI-WIDGETS-2: computes 7-day window via Date.now() - 7 * 24 * 60 * 60 * 1000",
+    /7\s*\*\s*24\s*\*\s*60\s*\*\s*60\s*\*\s*1000/.test(src));
+  assertTrue("HC-V01060-PDI-WIDGETS-2: filters allDocs by file.mtime?.ts >= sevenDaysAgo",
+    /file\.mtime\?\.ts[\s\S]{0,40}sevenDaysAgo/.test(src));
+  assertTrue("HC-V01060-PDI-WIDGETS-2: chip label 'updated this week'",
+    /updated this week/.test(src));
+}
+
+async function caseV01060PdiWidgets3TopTags() {
+  console.log("\n--- Case HC-V01060-PDI-WIDGETS-3: ProjectDocsIndex renders top-3 tag chips via _topTags helper ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/project-docs-index.js"), "utf8");
+  assertTrue("HC-V01060-PDI-WIDGETS-3: _topTags helper declared",
+    /_topTags\s*\(/.test(src));
+  assertTrue("HC-V01060-PDI-WIDGETS-3: slices top 3",
+    /\.slice\s*\(\s*0\s*,\s*n\s*\)|\.slice\s*\(\s*0\s*,\s*3\s*\)/.test(src));
+  assertTrue("HC-V01060-PDI-WIDGETS-3: top-tag call site requests 3",
+    /_topTags\s*\(\s*allDocs\s*,\s*3\s*\)/.test(src));
+  assertTrue("HC-V01060-PDI-WIDGETS-3: excludes doc-note from tag pool",
+    /clean\s*===\s*["']doc-note["']/.test(src));
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -12383,6 +12426,11 @@ async function caseV01060DsDebounce1Input150ms() {
   // input debounce.
   await caseV01060DsPersist1LocalStorageKeyedByScope();
   await caseV01060DsDebounce1Input150ms();
+
+  // v0.106.0 S3 — ProjectDocsIndex dashboard widgets expansion.
+  await caseV01060PdiWidgets1TaskCount();
+  await caseV01060PdiWidgets2RecentActivity();
+  await caseV01060PdiWidgets3TopTags();
 
   // v0.65.0 HC-V065-RUN-NOTE: write-run-note-* sub-skill lint
   {

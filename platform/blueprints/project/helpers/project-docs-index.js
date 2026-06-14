@@ -99,7 +99,8 @@ class ProjectDocsIndex {
     }
     const sections = Array.from(discoveredSet).sort();
 
-    // 1. Dashboard chip strip — total docs (filtered) + open meetings + status.
+    // 1. Dashboard chip strip — total docs (filtered) + open meetings + status
+    //    + v0.106.0 S4 widgets: task count, recent activity (7d), top tags.
     // v0.105.0 Issue 10: sort docs by mtime desc to match the section cards
     // ordering. The dashboard chip count is order-insensitive but we keep it
     // consistent.
@@ -112,7 +113,27 @@ class ProjectDocsIndex {
     const meetings = dv.pages(`"${meetingsRoot}"`)
       .where((p) => p.type === "meeting" && this._projectMatches(p.project, projectNotePath, projectName));
     const openMeetings = meetings.length;
-    this._renderChips(proxyDv, { docCount, openMeetings, projectStatus });
+
+    // v0.106.0 S4 (a) — task count. Reads spice/projects/<slug>/tasks/ for
+    // task-note frontmatter. If no task-notes exist, skip the chip silently.
+    let taskCount = 0;
+    try {
+      const tasks = dv.pages(`"${projectPath}/tasks"`).where((p) => p && p.type === "task-note");
+      taskCount = tasks.length;
+    } catch (_e) {}
+
+    // v0.106.0 S4 (b) — recent activity. Count docs whose file.mtime is within
+    // the last 7 days. mtime is unfiltered (raw allDocs ignoring filterCtx is
+    // already filtered — `allDocs` IS the filtered set; that's the intended
+    // semantic: "recent within current filter").
+    const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const recentCount = allDocs.where((p) => (p.file.mtime?.ts || 0) >= sevenDaysAgo).length;
+
+    // v0.106.0 S4 (c) — top tags across all docs (filtered). Reuses DocSearch's
+    // _countTags semantic locally: doc-note tag excluded. Top 3 by frequency.
+    const topTags = this._topTags(allDocs, 3);
+
+    this._renderChips(proxyDv, { docCount, openMeetings, projectStatus, taskCount, recentCount, topTags });
 
     // 2. + New Doc / + New Section buttons — wrapped in flex row, each child
     //    stretched to fill its column (Issue 8).
@@ -191,18 +212,57 @@ class ProjectDocsIndex {
     };
   }
 
-  // Dashboard chip strip — three inline-styled spans inside one dv.el("div").
-  _renderChips(dv, { docCount, openMeetings, projectStatus }) {
+  // Dashboard chip strip — original three chips (docs / meetings / status) plus
+  // v0.106.0 S4 expansion: task count, recent activity (7d), top-3 tag chips.
+  // All chips share the same chipStyle for visual consistency. flex-wrap lets
+  // the strip flow to a second row on narrow viewports.
+  _renderChips(dv, { docCount, openMeetings, projectStatus, taskCount, recentCount, topTags }) {
     const wrap = dv.el("div", "", { cls: "project-docs-index-chips" });
     wrap.style.cssText = "display: flex; gap: 8px; margin: 8px 0; flex-wrap: wrap;";
     const chipStyle = "display: inline-block; padding: 2px 10px; border-radius: 12px; "
                     + "background: var(--background-secondary); color: var(--text-muted); "
                     + "font-size: 0.85em; border: 1px solid var(--background-modifier-border);";
     const status = projectStatus || "(no status)";
-    wrap.innerHTML = ""
-      + `<span style="${chipStyle}">${this._escape(String(docCount))} doc${docCount === 1 ? "" : "s"}</span>`
-      + `<span style="${chipStyle}">${this._escape(String(openMeetings))} open meeting${openMeetings === 1 ? "" : "s"}</span>`
-      + `<span style="${chipStyle}">status: ${this._escape(status)}</span>`;
+    const parts = [
+      `<span style="${chipStyle}">${this._escape(String(docCount))} doc${docCount === 1 ? "" : "s"}</span>`,
+      `<span style="${chipStyle}">${this._escape(String(openMeetings))} open meeting${openMeetings === 1 ? "" : "s"}</span>`,
+      `<span style="${chipStyle}">status: ${this._escape(status)}</span>`,
+    ];
+    // v0.106.0 S4 (a) — task count chip. Skip silently when no task-notes exist.
+    if (typeof taskCount === "number" && taskCount > 0) {
+      parts.push(`<span style="${chipStyle}">${this._escape(String(taskCount))} task${taskCount === 1 ? "" : "s"}</span>`);
+    }
+    // v0.106.0 S4 (b) — recent activity chip (last 7 days).
+    if (typeof recentCount === "number" && recentCount > 0) {
+      parts.push(`<span style="${chipStyle}">${this._escape(String(recentCount))} updated this week</span>`);
+    }
+    // v0.106.0 S4 (c) — top-tag chips (top 3 by frequency). Inline after the
+    // status chip so they share a row when space allows; flex-wrap handles the
+    // overflow case.
+    if (Array.isArray(topTags)) {
+      for (const tag of topTags) {
+        parts.push(`<span style="${chipStyle}">#${this._escape(String(tag))}</span>`);
+      }
+    }
+    wrap.innerHTML = parts.join("");
+  }
+
+  // v0.106.0 S4 (c) helper — top N tags by frequency across the supplied pages.
+  // Mirrors DocSearch._countTags semantics: doc-note (universal tag) excluded.
+  _topTags(pages, n) {
+    const counts = {};
+    for (const p of pages) {
+      const tags = Array.isArray(p.tags) ? p.tags : (p.file?.tags || []);
+      for (const t of tags) {
+        const clean = String(t).replace(/^#/, "");
+        if (!clean || clean === "doc-note") continue;
+        counts[clean] = (counts[clean] || 0) + 1;
+      }
+    }
+    return Object.entries(counts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, n)
+      .map((e) => e[0]);
   }
 
   // Same project-match shapes as ProjectMeetingsPanel — Dataview Link object,
