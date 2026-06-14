@@ -105,6 +105,16 @@ class ProjectNavButtons {
                     return { context: "section-hub", depth: 2, pathParts, planningIdx, projectSlug, projectDir, sectionSlug, parentSlug, parentSectionLabel };
                 }
             }
+            // v0.104.0.2 PATCH — doc-notes that live INSIDE section folders
+            // (docs/<section_slug>/<title>.md) or sub-section folders
+            // (docs/<section_slug>/<sub_section_slug>/<title>.md) have the
+            // same path shape as section-hub notes but a different frontmatter
+            // type. Pre-patch this branch only caught type:section-hub and
+            // doc-notes fell through to context:"unknown" → zero nav buttons.
+            // 28 doc-notes in accuris global-k8s knowledge/ surfaced the bug.
+            if (ffm.type === "doc-note") {
+                return { context: "doc-note", pathParts, planningIdx, projectSlug, projectDir };
+            }
         }
 
         // Project hub: lives directly under project dir, has canonical type:project
