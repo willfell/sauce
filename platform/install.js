@@ -1073,6 +1073,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyProjectSectionsMigration(tp, mech, variables, history, git);   // NEW v0.102.0 S4 — Strategy A auto-migration (flat docs/*.md → docs/knowledge/ + sections[])
   await applyProjectSectionsHubMigration(tp, mech, variables, history, git);   // NEW v0.103.0 S4 — heals v0.102.0 vaults: Docs.md → ProjectDocsIndex + materialize Section Hubs + wikilink frontmatter + breadcrumb injection
   await applyProjectSectionsCloseRepair(tp, mech, variables, history, git);    // NEW v0.103.0.1 — fixes the regex-induced -"[[--]]" damage from v0.103.0 deploy
+  await applyEmptyProjectWikilinkRepair(tp, mech, variables, history, git);    // NEW v0.105.0.1 — heals section-hubs with project: "[[]]" from v0.105.0 sub-section-hub bug
   await applyExternalPluginInstall(tp, mech, adapter.basePath || (typeof adapter.getBasePath === "function" ? adapter.getBasePath() : null), workshopPath, history, git);  // NEW v0.94.0 — install missing
   await applyExternalPlugins(tp, mech, history, git);
   await scaffoldFoundationalPluginData(tp, mech, workshopPath, variables, history, git);  // NEW v0.26.0
@@ -2792,6 +2793,83 @@ async function applyProjectSectionsCloseRepair(tp, manifest, variables, history,
 
   history?.push({ event: "info", step: "project_sections_close_repair", name: "project",
                   reason: `repaired ${repaired} project note(s)`,
+                  git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+}
+
+// applyEmptyProjectWikilinkRepair — v0.105.0.1 PATCH. Heals section-hub
+// notes whose `project:` frontmatter is `"[[]]"` (empty wikilink). The bug
+// was in the v0.105.0 sub-section-hub entity-create entry: it substituted
+// `{{current_file.frontmatter.project_name}}` into the wikilink wrap, but
+// section-hub notes don't carry a `project_name` field (only `project` as
+// an already-wrapped wikilink). Substitution resolved to empty, producing
+// `project: "[[]]"`. v0.105.0.1 manifest fix uses the parent's `project`
+// value directly. This repair step heals any consumer-vault notes already
+// damaged by the v0.105.0 release. Walks section-hub notes under
+// spice/projects/*/docs/**/, reads parent section-hub or project's
+// `project` value, rewrites the broken field. Idempotent.
+async function applyEmptyProjectWikilinkRepair(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "project") return;
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const projectsRoot = "spice/projects";
+  if (!(await adapter.exists(projectsRoot))) return;
+
+  let projectsList;
+  try { projectsList = await adapter.list(projectsRoot); }
+  catch (e) {
+    history?.push({ event: "warning", step: "empty_project_wikilink_repair", name: "project", reason: e.message,
+                    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    return;
+  }
+
+  const projectDirs = (projectsList.folders || []).filter(d => d.split("/").pop() !== "All Projects");
+  let repaired = 0;
+
+  for (const projectDir of projectDirs) {
+    try {
+      const dirList = await adapter.list(projectDir).catch(() => ({ files: [], folders: [] }));
+      let projectNoteName = null;
+      for (const fp of (dirList.files || [])) {
+        if (!fp.endsWith(".md")) continue;
+        const fb = await adapter.read(fp);
+        if (/^type:\s*["']?project["']?\s*$/m.test(fb)) {
+          projectNoteName = fp.split("/").pop().replace(/\.md$/, "");
+          break;
+        }
+      }
+      if (!projectNoteName) continue;
+      const projectWikilink = `[[${projectNoteName}]]`;
+
+      // Walk docs/ recursively for section-hub notes with broken project field
+      async function walkAndRepair(folder) {
+        const items = await adapter.list(folder).catch(() => ({ files: [], folders: [] }));
+        for (const fp of (items.files || [])) {
+          if (!fp.endsWith(".md")) continue;
+          const body = await adapter.read(fp);
+          if (!/^type:\s*["']?section-hub["']?\s*$/m.test(body)) continue;
+          if (!/^project:\s*["']?\[\[\]\]["']?\s*$/m.test(body)) continue;
+          const fixed = body.replace(/^project:\s*["']?\[\[\]\]["']?\s*$/m, `project: "${projectWikilink}"`);
+          if (fixed !== body) {
+            await adapter.write(fp, fixed);
+            repaired++;
+            history?.push({ event: "info", step: "empty_project_wikilink_repair", name: "project", target: fp,
+                            action: "repaired_empty_project_wikilink",
+                            git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+          }
+        }
+        for (const sub of (items.folders || [])) await walkAndRepair(sub);
+      }
+
+      const docsDir = `${projectDir}/docs`;
+      if (await adapter.exists(docsDir)) await walkAndRepair(docsDir);
+    } catch (e) {
+      history?.push({ event: "warning", step: "empty_project_wikilink_repair", name: "project", target: projectDir, reason: e?.message || String(e),
+                      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    }
+  }
+
+  history?.push({ event: "info", step: "empty_project_wikilink_repair", name: "project",
+                  reason: `repaired ${repaired} section-hub note(s)`,
                   git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
 }
 
