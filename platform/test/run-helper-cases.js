@@ -8313,10 +8313,10 @@ async function caseHCV0891Versions() {
     path.join(WORKSHOP, "manifest.json"), "utf8"));
   const wsVer = platformMan.workshop_version || platformMan.version
     || (platformMan.workshop && platformMan.workshop.version);
-  assertEqual(wsVer, "0.105.0.3", "HC-V0891-VERSION-C: workshop pin = 0.93.3 (v0.93.3 bump)");
+  assertEqual(wsVer, "0.106.0", "HC-V0891-VERSION-C: workshop pin = 0.93.3 (v0.93.3 bump)");
   const pkg = JSON.parse(fs.readFileSync(
     path.resolve(WORKSHOP, "..", "package.json"), "utf8"));
-  assertEqual(pkg.version, "0.105.0.3", "HC-V0891-VERSION-C: package.json = 0.93.3 (v0.93.3 bump)");
+  assertEqual(pkg.version, "0.106.0", "HC-V0891-VERSION-C: package.json = 0.93.3 (v0.93.3 bump)");
 
   // D: mechanism count unchanged
   const mechs = (platformMan.mechanisms && Array.isArray(platformMan.mechanisms))
@@ -11092,15 +11092,16 @@ const _PROJ_SECTION_HUB_TPL = path.join(WORKSHOP, "platform", "blueprints", "pro
 const _PROJ_DOC_NOTE_TPL = path.join(WORKSHOP, "platform", "blueprints", "project", "templates", "Doc Note.md");
 
 async function caseV01030ProjMan1VersionAndCustomjs() {
-  console.log("\n--- Case HC-V01030-PROJ-MAN-1: project manifest version 1.19.0 + customjs_classes adds Breadcrumb + ProjectDocsIndex + SectionHub ---");
+  console.log("\n--- Case HC-V01030-PROJ-MAN-1: project manifest version 1.20.0 + customjs_classes adds Breadcrumb + ProjectDocsIndex + SectionHub ---");
   const m = _readProjManifest();
   // v0.104.0 superseded the v0.103.0 hard-pin (1.17.0) → 1.18.0.
-  // v0.105.0 supersedes the v0.104.0 hard-pin → 1.19.0 (docs-system-fixes
+  // v0.105.0 superseded the v0.104.0 hard-pin → 1.19.0 (docs-system-fixes
   // brief reshapes the doc-note prompt schema + ships DocSearch + section-hub
-  // refactor). Breadcrumb + ProjectDocsIndex + SectionHub carryover assertions
-  // still apply.
-  assertTrue("HC-V01030-PROJ-MAN-1a: project manifest version is exactly 1.19.0",
-    m && m.version === "1.19.0", `got: ${m && m.version}`);
+  // refactor). v0.106.0 supersedes → 1.20.0 (DocSearch persistent filter state
+  // + 150ms debounce + ProjectDocsIndex dashboard widgets expansion).
+  // Breadcrumb + ProjectDocsIndex + SectionHub carryover assertions still apply.
+  assertTrue("HC-V01030-PROJ-MAN-1a: project manifest version is exactly 1.20.0",
+    m && m.version === "1.20.0", `got: ${m && m.version}`);
   const cls = (m && Array.isArray(m.customjs_classes)) ? m.customjs_classes : [];
   assertTrue("HC-V01030-PROJ-MAN-1b: customjs_classes includes Breadcrumb",
     cls.indexOf("Breadcrumb") !== -1);
@@ -11467,10 +11468,11 @@ async function caseV01040ShExt2MatchesUsed() {
 async function caseV01040Man1Manifest118() {
   // Asserts the canonical surface area introduced in v0.104.0 (DocSearch
   // registered) + the live project blueprint version (bumped to 1.19.0 in
-  // v0.105.0 per docs-system-fixes brief).
-  console.log("\n--- Case HC-V01040-MAN-1: project blueprint version 1.19.0 + DocSearch registered + doc-search.js shipped ---");
+  // v0.105.0 per docs-system-fixes brief; then 1.20.0 in v0.106.0 per the
+  // DocSearch persistence + dashboard widgets brief).
+  console.log("\n--- Case HC-V01040-MAN-1: project blueprint version 1.20.0 + DocSearch registered + doc-search.js shipped ---");
   const m = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/manifest.json"), "utf8"));
-  assertTrue("HC-V01040-MAN-1: project blueprint version 1.19.0", m.version === "1.19.0");
+  assertTrue("HC-V01040-MAN-1: project blueprint version 1.20.0", m.version === "1.20.0");
   assertTrue("HC-V01040-MAN-1: customjs_classes includes DocSearch",
     Array.isArray(m.customjs_classes) && m.customjs_classes.includes("DocSearch"));
   const sources = (m.files || []).map(f => f.source);
@@ -11547,7 +11549,7 @@ async function caseV01050EcSkip1SkipEmptyOptions() {
 }
 
 // Manifest — entity-create at 0.6.0; doc-note section + sub_section prompts
-// use the new options_source values; project blueprint at 1.19.0.
+// use the new options_source values; project blueprint at 1.20.0 (post-v0.106.0).
 async function caseV01050EcMan1Manifest060() {
   console.log("\n--- Case HC-V01050-EC-MAN-1: entity-create mechanism manifest 0.6.0 ---");
   const m = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/mechanisms/entity-create/manifest.json"), "utf8"));
@@ -11563,9 +11565,9 @@ async function caseV01050EcMan1Manifest060() {
 }
 
 async function caseV01050Man1ProjectManifest119() {
-  console.log("\n--- Case HC-V01050-MAN-1: project blueprint manifest 1.19.0 + doc-note prompts use new options_source ---");
+  console.log("\n--- Case HC-V01050-MAN-1: project blueprint manifest 1.20.0 + doc-note prompts use new options_source ---");
   const m = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/manifest.json"), "utf8"));
-  assertTrue("HC-V01050-MAN-1: project blueprint version 1.19.0", m.version === "1.19.0",
+  assertTrue("HC-V01050-MAN-1: project blueprint version 1.20.0", m.version === "1.20.0",
     `got: ${m.version}`);
   // Locate doc-note entity-create entry.
   const docNote = (m.new_entity_buttons || []).find(b => b.id === "doc-note");
@@ -12398,7 +12400,7 @@ async function caseV01060PdiWidgets3TopTags() {
   await caseV01040ShExt2MatchesUsed();
 
   // v0.104.0 S3 (Task 4): project blueprint manifest 1.18.0 (DocSearch registered).
-  // Note: project blueprint version is now 1.19.0 in v0.105.0 — assertion
+  // Note: project blueprint version is now 1.20.0 in v0.106.0 — assertion
   // updated in place to track the live version.
   await caseV01040Man1Manifest118();
 
@@ -13660,10 +13662,10 @@ async function caseV01060PdiWidgets3TopTags() {
       // NOTE: top-level WORKSHOP at line 29 = path.resolve(__dirname, "../..") = workshop ROOT
       // (distinct from the local WORKSHOP inside caseHCV0891Versions which is platform/).
       const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
-      assertTrue("HC-V0900-VERSION-A: package.json version === '0.93.3'", pkg.version === "0.105.0.3");
+      assertTrue("HC-V0900-VERSION-A: package.json version === '0.93.3'", pkg.version === "0.106.0");
       const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
       assertTrue("HC-V0900-VERSION-B: platform/manifest.json workshop_version === '0.93.3'",
-        platMan.workshop_version === "0.105.0.3");
+        platMan.workshop_version === "0.106.0");
       const coworkMan = JSON.parse(fs.readFileSync(
         path.join(WORKSHOP, "platform/blueprints/cowork/manifest.json"), "utf8"));
       assertTrue("HC-V0900-VERSION-C: cowork manifest version === '0.31.0'",
@@ -14639,12 +14641,12 @@ type: cowork-microscope
   try {
     const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
     assertTrue("HC-V0920-VERSION-A1: workshop_version === 0.93.3",
-      platMan.workshop_version === "0.105.0.3");
+      platMan.workshop_version === "0.106.0");
     assertTrue("HC-V0920-VERSION-A2: blueprints[].cowork.version === 0.31.2",
       platMan.blueprints.find(b => b.name === "cowork").version === "0.40.0");
     const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
     assertTrue("HC-V0920-VERSION-A3: package.json version === 0.93.3",
-      pkg.version === "0.105.0.3");
+      pkg.version === "0.106.0");
     const workshopSub = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "ranch/platform-subscription.json"), "utf8"));
     assertTrue("HC-V0920-VERSION-A4: workshop subscription cowork pin === 0.31.0",
       workshopSub.blueprints.find(b => b.name === "cowork").version === "0.40.0");
@@ -14916,12 +14918,12 @@ type: cowork-microscope
   try {
     const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
     assertTrue("HC-V0930-VERSION-A1: workshop_version === 0.93.3",
-      platMan.workshop_version === "0.105.0.3");
+      platMan.workshop_version === "0.106.0");
     assertTrue("HC-V0930-VERSION-A2: blueprints[].cowork.version === 0.31.2",
       platMan.blueprints.find(b => b.name === "cowork").version === "0.40.0");
     const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
     assertTrue("HC-V0930-VERSION-A3: package.json version === 0.93.3",
-      pkg.version === "0.105.0.3");
+      pkg.version === "0.106.0");
     const workshopSub = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "ranch/platform-subscription.json"), "utf8"));
     assertTrue("HC-V0930-VERSION-A4: workshop subscription cowork pin === 0.31.1",
       workshopSub.blueprints.find(b => b.name === "cowork").version === "0.40.0");
@@ -15023,12 +15025,12 @@ type: cowork-microscope
   try {
     const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
     assertTrue("HC-V0931-VERSION-D1: workshop_version === 0.93.3",
-      platMan.workshop_version === "0.105.0.3");
+      platMan.workshop_version === "0.106.0");
     assertTrue("HC-V0931-VERSION-D2: blueprints[].cowork.version === 0.31.2",
       platMan.blueprints.find(b => b.name === "cowork").version === "0.40.0");
     const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
     assertTrue("HC-V0931-VERSION-D3: package.json version === 0.93.3",
-      pkg.version === "0.105.0.3");
+      pkg.version === "0.106.0");
     const coworkMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/cowork/manifest.json"), "utf8"));
     assertTrue("HC-V0931-VERSION-D4: cowork manifest.version === 0.31.1",
       coworkMan.version === "0.40.0");
