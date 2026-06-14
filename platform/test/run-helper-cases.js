@@ -8313,10 +8313,10 @@ async function caseHCV0891Versions() {
     path.join(WORKSHOP, "manifest.json"), "utf8"));
   const wsVer = platformMan.workshop_version || platformMan.version
     || (platformMan.workshop && platformMan.workshop.version);
-  assertEqual(wsVer, "0.106.0", "HC-V0891-VERSION-C: workshop pin = 0.93.3 (v0.93.3 bump)");
+  assertEqual(wsVer, "0.106.0.1", "HC-V0891-VERSION-C: workshop pin = 0.93.3 (v0.93.3 bump)");
   const pkg = JSON.parse(fs.readFileSync(
     path.resolve(WORKSHOP, "..", "package.json"), "utf8"));
-  assertEqual(pkg.version, "0.106.0", "HC-V0891-VERSION-C: package.json = 0.93.3 (v0.93.3 bump)");
+  assertEqual(pkg.version, "0.106.0.1", "HC-V0891-VERSION-C: package.json = 0.93.3 (v0.93.3 bump)");
 
   // D: mechanism count unchanged
   const mechs = (platformMan.mechanisms && Array.isArray(platformMan.mechanisms))
@@ -11067,14 +11067,16 @@ async function caseV01030Sh6BeaconCardsRowMeta() {
 }
 
 async function caseV01030Sh7EmptyStateCallout() {
-  console.log("\n--- Case HC-V01030-SH-7: empty-state callout language for no docs ---");
+  console.log("\n--- Case HC-V01030-SH-7: empty-state callout REMOVED v0.106.0.1 (was visual noise on fresh-section render) ---");
   const src = _readShSrc();
-  assertTrue("HC-V01030-SH-7a: [!example]+ callout present",
-    /\[!example\]\+/.test(src));
-  assertTrue("HC-V01030-SH-7b: 'No docs in' empty-state phrase present",
-    /No docs in\s+\*\*/.test(src));
-  assertTrue("HC-V01030-SH-7c: '+ New Doc' hint in empty-state",
-    /\+\s*New Doc/.test(src));
+  // v0.106.0.1 — flipped from "callout present" to "callout absent".
+  // User reported "No docs in **<section>** yet" appearing as user-visible
+  // noise on every freshly-created section; preferred behavior is to render
+  // nothing when the section has zero docs.
+  assertTrue("HC-V01030-SH-7a: [!example]+ callout REMOVED",
+    !/\[!example\]\+/.test(src));
+  assertTrue("HC-V01030-SH-7b: 'No docs in' empty-state phrase REMOVED",
+    !/No docs in\s+\*\*/.test(src));
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -11650,12 +11652,23 @@ async function caseV01050DsStrip2InputClearsOnlyResults() {
     /resultsContainer\.empty\s*\(/.test(src));
 }
 
-// Issue 7: section-hub no longer renders dv.header(3, "Docs").
+// Issue 7 (v0.105.0): section-hub no longer renders dv.header(3, "Docs").
+// v0.106.0.1: a conditional header(3, "Docs") IS now rendered, BUT only when
+// sub-sections exist AND there are docs — separator for visual clarity. The
+// assertion is updated to require the header() call to be gated by a
+// hasSubSections check, NOT an unconditional emission.
 async function caseV01050ShNoDocsHeader() {
-  console.log("\n--- Case HC-V01050-SH-NODOCSHEADER: section-hub.js does NOT render dv.header(3, 'Docs') ---");
+  console.log("\n--- Case HC-V01050-SH-NODOCSHEADER: section-hub.js docs header is gated by sub-sections presence ---");
   const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/section-hub.js"), "utf8");
-  assertTrue("HC-V01050-SH-NODOCSHEADER: no header(3, 'Docs') call",
-    !/header\s*\(\s*3\s*,\s*["']Docs["']\s*\)/.test(src));
+  // The header(3, "Docs") call IS present in v0.106.0.1 (separator role) but
+  // must live inside a hasSubSections-gated branch. Either: (a) no call at
+  // all (pre-v0.106.0.1 behavior), OR (b) the call is preceded by a
+  // hasSubSections/subHubs check.
+  const hasUnconditionalCall = /header\s*\(\s*3\s*,\s*["']Docs["']\s*\)/.test(src);
+  const hasGatedCall = /hasSubSections|subHubs.*length\s*>\s*0|sub-sections.*hasSub/i.test(src) &&
+                       /header\s*\(\s*3\s*,\s*["']Docs["']\s*\)/.test(src);
+  assertTrue("HC-V01050-SH-NODOCSHEADER: header(3, 'Docs') is either absent or hasSubSections-gated",
+    !hasUnconditionalCall || hasGatedCall);
 }
 
 // Issue 8: full-width buttons — flex containers wrap EntityCreate calls in
@@ -13662,10 +13675,10 @@ async function caseV01060PdiWidgets3TopTags() {
       // NOTE: top-level WORKSHOP at line 29 = path.resolve(__dirname, "../..") = workshop ROOT
       // (distinct from the local WORKSHOP inside caseHCV0891Versions which is platform/).
       const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
-      assertTrue("HC-V0900-VERSION-A: package.json version === '0.93.3'", pkg.version === "0.106.0");
+      assertTrue("HC-V0900-VERSION-A: package.json version === '0.93.3'", pkg.version === "0.106.0.1");
       const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
       assertTrue("HC-V0900-VERSION-B: platform/manifest.json workshop_version === '0.93.3'",
-        platMan.workshop_version === "0.106.0");
+        platMan.workshop_version === "0.106.0.1");
       const coworkMan = JSON.parse(fs.readFileSync(
         path.join(WORKSHOP, "platform/blueprints/cowork/manifest.json"), "utf8"));
       assertTrue("HC-V0900-VERSION-C: cowork manifest version === '0.31.0'",
@@ -14641,12 +14654,12 @@ type: cowork-microscope
   try {
     const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
     assertTrue("HC-V0920-VERSION-A1: workshop_version === 0.93.3",
-      platMan.workshop_version === "0.106.0");
+      platMan.workshop_version === "0.106.0.1");
     assertTrue("HC-V0920-VERSION-A2: blueprints[].cowork.version === 0.31.2",
       platMan.blueprints.find(b => b.name === "cowork").version === "0.40.0");
     const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
     assertTrue("HC-V0920-VERSION-A3: package.json version === 0.93.3",
-      pkg.version === "0.106.0");
+      pkg.version === "0.106.0.1");
     const workshopSub = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "ranch/platform-subscription.json"), "utf8"));
     assertTrue("HC-V0920-VERSION-A4: workshop subscription cowork pin === 0.31.0",
       workshopSub.blueprints.find(b => b.name === "cowork").version === "0.40.0");
@@ -14918,12 +14931,12 @@ type: cowork-microscope
   try {
     const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
     assertTrue("HC-V0930-VERSION-A1: workshop_version === 0.93.3",
-      platMan.workshop_version === "0.106.0");
+      platMan.workshop_version === "0.106.0.1");
     assertTrue("HC-V0930-VERSION-A2: blueprints[].cowork.version === 0.31.2",
       platMan.blueprints.find(b => b.name === "cowork").version === "0.40.0");
     const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
     assertTrue("HC-V0930-VERSION-A3: package.json version === 0.93.3",
-      pkg.version === "0.106.0");
+      pkg.version === "0.106.0.1");
     const workshopSub = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "ranch/platform-subscription.json"), "utf8"));
     assertTrue("HC-V0930-VERSION-A4: workshop subscription cowork pin === 0.31.1",
       workshopSub.blueprints.find(b => b.name === "cowork").version === "0.40.0");
@@ -15025,12 +15038,12 @@ type: cowork-microscope
   try {
     const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
     assertTrue("HC-V0931-VERSION-D1: workshop_version === 0.93.3",
-      platMan.workshop_version === "0.106.0");
+      platMan.workshop_version === "0.106.0.1");
     assertTrue("HC-V0931-VERSION-D2: blueprints[].cowork.version === 0.31.2",
       platMan.blueprints.find(b => b.name === "cowork").version === "0.40.0");
     const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
     assertTrue("HC-V0931-VERSION-D3: package.json version === 0.93.3",
-      pkg.version === "0.106.0");
+      pkg.version === "0.106.0.1");
     const coworkMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/cowork/manifest.json"), "utf8"));
     assertTrue("HC-V0931-VERSION-D4: cowork manifest.version === 0.31.1",
       coworkMan.version === "0.40.0");

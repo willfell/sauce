@@ -463,7 +463,7 @@ class ProjectNavButtons {
                 sectionButtons.push({ label: mainNote.basename, icon: icons.project, path: mainNote.path });
             }
             sectionButtons.push({ label: "Docs", icon: icons.docs, path: docsHubPath });
-            sectionButtons.push({ label: "Sibling Sections", icon: icons.docs, path: docsHubPath });
+            sectionButtons.push({ label: "Sections", icon: icons.docs, path: docsHubPath });
             buttons.length = 0;
             buttons.push(...sectionButtons);
         }
@@ -483,7 +483,7 @@ class ProjectNavButtons {
             }
             sectionButtons.push({ label: "Docs", icon: icons.docs, path: docsHubPath });
             sectionButtons.push({ label: "Section", icon: icons.docs, path: parentHubPath });
-            sectionButtons.push({ label: "Sibling Sub-Sections", icon: icons.docs, path: parentHubPath });
+            sectionButtons.push({ label: "Sub-Sections", icon: icons.docs, path: parentHubPath });
             buttons.length = 0;
             buttons.push(...sectionButtons);
         }

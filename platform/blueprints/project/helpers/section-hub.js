@@ -153,11 +153,24 @@ class SectionHub {
         && customJS.DocSearch.matches(p, filterCtx))
       .sort((p) => p.file.mtime?.ts || 0, "desc");
 
-    // v0.105.0 Issue 7: dropped the docs H3 heading — the H1 file-name + the
-    // strip of docs cards are already self-evident.
+    // v0.106.0.1 — empty-state callout removed entirely (was visual noise on
+    // every fresh-section render). When no docs, render nothing.
     if (docs.length === 0) {
-      proxyDv.paragraph(`> [!example]+ No docs in **${sectionName}** yet — use **+ New Doc** above.`);
       return;
+    }
+
+    // v0.106.0.1 — when this section ALSO has sub-sections (depth-1 only),
+    // emit a small "Docs" header so the docs row is visually separated from
+    // the sub-sections row above. When no sub-sections, the docs cards stand
+    // alone and need no header.
+    if (depth === 1) {
+      try {
+        const sectionPath = `spice/projects/${projectSlug}/docs/${sectionSlug}`;
+        const hasSubSections = dv.pages(`"${sectionPath}"`)
+          .where((p) => p.type === "section-hub" && p.depth === 2)
+          .length > 0;
+        if (hasSubSections) proxyDv.header(3, "Docs");
+      } catch (_e) {}
     }
 
     const fileIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--interactive-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
