@@ -143,6 +143,13 @@ class EntityCreate {
             await app.workspace.getLeaf(false).openFile(existing);
             return;
         }
+        // v0.107.0: seed_from_defaults — read a per-vault defaults file at
+        // scaffold time and copy arrays into the new entity's frontmatter
+        // template. Template wins on conflict (only injects when template's
+        // value is empty/missing). Used by finance Budget + Paycheck to
+        // auto-populate categories/expenses from per-vault Budget Defaults.md
+        // and Paycheck Defaults.md.
+        await this._resolveSeedFromDefaults(spec, ctx);
         const fm = this._renderFrontmatter(spec.frontmatter_template, ctx);
         const body = spec.body_template
             ? await this._readBody(spec.body_template, ctx)
@@ -150,6 +157,98 @@ class EntityCreate {
         const newFile = await app.vault.create(targetPath, `---\n${fm}---\n\n${body}`);
         for (const xf of (spec.extra_files || [])) await this._createExtra(xf, ctx, folder);
         await app.workspace.getLeaf(false).openFile(newFile);
+    }
+
+    // ---------- v0.107.0: seed_from_defaults resolution ----------
+    //
+    // When a new_entity_buttons[] entry declares a seed_from_defaults block,
+    // read the named defaults file and copy its arrays into the new entity's
+    // frontmatter_template BEFORE _renderFrontmatter runs. Mutates spec in
+    // place (spec is per-invocation — re-loaded fresh from the registry on
+    // every create() call by _loadSpec).
+    //
+    // Schema (all string fields are token-substituted via this._substitute):
+    //   {
+    //     source_path:   "{{module_directory}}/Budget Defaults.md",
+    //     source_array:  "categories",
+    //     dest_array:    "categories",           // optional; defaults to source_array
+    //     carry_arrays:  ["groups"],             // optional; verbatim copy of other top-level arrays
+    //     per_item_set:  { actual: 0 }           // optional; merged into every copied item
+    //   }
+    //
+    // Template wins on conflict: defaults are only injected when the
+    // frontmatter_template's value for that key is empty/missing. This
+    // protects authored frontmatter_template overrides.
+    //
+    // Defensive error handling — all failure modes surface as a non-blocking
+    // Notice + return spec unchanged. Never throws; never blocks entity
+    // creation. (A failed seed = empty array in the new entity, which the
+    // user can still populate via the editor.)
+
+    async _resolveSeedFromDefaults(spec, ctx) {
+        const sfd = spec && spec.seed_from_defaults;
+        if (!sfd || typeof sfd !== "object") return spec;
+        if (!sfd.source_path || !sfd.source_array) return spec;
+
+        const resolvedPath = this._substitute(sfd.source_path, ctx);
+        const destKey = sfd.dest_array || sfd.source_array;
+        const carry_arrays = Array.isArray(sfd.carry_arrays) ? sfd.carry_arrays : [];
+        const per_item_set = (sfd.per_item_set && typeof sfd.per_item_set === "object") ? sfd.per_item_set : {};
+
+        const file = app.vault.getAbstractFileByPath(resolvedPath);
+        if (!file || (file.children !== undefined)) {
+            new Notice(`${resolvedPath} not found; creating with empty ${destKey}.`, 6000);
+            return spec;
+        }
+
+        const fmCache = app.metadataCache.getFileCache(file);
+        const sourceFm = fmCache && fmCache.frontmatter;
+        if (!sourceFm) {
+            new Notice(`${resolvedPath} has no frontmatter; creating with empty ${destKey}.`, 6000);
+            return spec;
+        }
+
+        const srcArr = sourceFm[sfd.source_array];
+        if (!Array.isArray(srcArr)) {
+            new Notice(`${resolvedPath}: '${sfd.source_array}' is not an array; creating with empty ${destKey}.`, 6000);
+            return spec;
+        }
+
+        // Deep-shallow copy of items + merge per_item_set onto each.
+        // Object items get a {...item, ...per_item_set} merge (per_item_set wins
+        // by design — used to force actual:0 on copied budget categories etc.).
+        // Scalar items pass through unchanged.
+        const copied = srcArr.map((item) => {
+            if (item && typeof item === "object" && !Array.isArray(item)) {
+                return { ...item, ...per_item_set };
+            }
+            return item;
+        });
+
+        // Template-wins guard: only inject when the frontmatter_template's
+        // value for the dest key is empty/missing.
+        const isEmpty = (v) => v === undefined || v === null
+            || (Array.isArray(v) && v.length === 0);
+
+        if (!spec.frontmatter_template || typeof spec.frontmatter_template !== "object") {
+            spec.frontmatter_template = {};
+        }
+
+        if (isEmpty(spec.frontmatter_template[destKey])) {
+            spec.frontmatter_template[destKey] = copied;
+        }
+
+        // Carry arrays — same template-wins guard. Top-level arrays only;
+        // shallow-copied to decouple from the defaults file.
+        for (const key of carry_arrays) {
+            const carrySrc = sourceFm[key];
+            if (!Array.isArray(carrySrc)) continue;
+            if (isEmpty(spec.frontmatter_template[key])) {
+                spec.frontmatter_template[key] = carrySrc.slice();
+            }
+        }
+
+        return spec;
     }
 
     // ---------- spec lookup ----------

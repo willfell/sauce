@@ -11809,6 +11809,56 @@ async function caseV01060PdiWidgets3TopTags() {
     /clean\s*===\s*["']doc-note["']/.test(src));
 }
 
+// v0.107.0 — entity-create seed_from_defaults schema field (additive).
+// Per design Section 3: optional block on new_entity_buttons[*] that reads
+// a defaults file at scaffold time and copies arrays into the new entity
+// (carry_arrays for top-level snapshots; per_item_set to merge fields like
+// actual:0 / paid:false; template wins on conflict).
+
+async function caseV01070EcSfd1MethodPresent() {
+  console.log("\n--- Case HC-V01070-EC-SFD-1: _resolveSeedFromDefaults method declared on EntityCreate ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/mechanisms/entity-create/entity-create.js"), "utf8");
+  assertTrue("HC-V01070-EC-SFD-1: _resolveSeedFromDefaults method present",
+    /_resolveSeedFromDefaults\s*\(/.test(src));
+}
+
+async function caseV01070EcSfd2MissingDefaultsNotice() {
+  console.log("\n--- Case HC-V01070-EC-SFD-2: missing-defaults Notice path (non-blocking) ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/mechanisms/entity-create/entity-create.js"), "utf8");
+  assertTrue("HC-V01070-EC-SFD-2: Notice on missing defaults file",
+    /new Notice\([^)]*not found[^)]*\)/.test(src) || /new Notice\([^)]*defaults[^)]*\)/i.test(src));
+}
+
+async function caseV01070EcSfd3PerItemSetMerge() {
+  console.log("\n--- Case HC-V01070-EC-SFD-3: per_item_set merge step present ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/mechanisms/entity-create/entity-create.js"), "utf8");
+  assertTrue("HC-V01070-EC-SFD-3: per_item_set referenced",
+    /per_item_set/.test(src));
+  assertTrue("HC-V01070-EC-SFD-3: spread or assign merges per_item_set onto items",
+    /\.\.\.\s*per_item_set|Object\.assign\([^)]*per_item_set/.test(src));
+}
+
+async function caseV01070EcSfd4CarryArraysCopy() {
+  console.log("\n--- Case HC-V01070-EC-SFD-4: carry_arrays iteration ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/mechanisms/entity-create/entity-create.js"), "utf8");
+  assertTrue("HC-V01070-EC-SFD-4: carry_arrays present",
+    /carry_arrays/.test(src));
+}
+
+async function caseV01070EcSfd5TemplateWinsOnConflict() {
+  console.log("\n--- Case HC-V01070-EC-SFD-5: template-wins guard on dest_array ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/mechanisms/entity-create/entity-create.js"), "utf8");
+  assertTrue("HC-V01070-EC-SFD-5: source_array referenced",
+    /source_array/.test(src));
+  assertTrue("HC-V01070-EC-SFD-5: dest_array or default-to-source resolution",
+    /dest_array/.test(src));
+  // Template-wins: the implementation must guard injection on the template
+  // value being empty/missing for that key. Accept either Array.isArray + length
+  // check, or !frontmatter[key] guard form.
+  assertTrue("HC-V01070-EC-SFD-5: empty-or-missing guard before inject",
+    /(\.length\s*===?\s*0|!\s*\w+\[)/.test(src));
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -12446,6 +12496,13 @@ async function caseV01060PdiWidgets3TopTags() {
   await caseV01060PdiWidgets1TaskCount();
   await caseV01060PdiWidgets2RecentActivity();
   await caseV01060PdiWidgets3TopTags();
+
+  // v0.107.0 — entity-create seed_from_defaults
+  await caseV01070EcSfd1MethodPresent();
+  await caseV01070EcSfd2MissingDefaultsNotice();
+  await caseV01070EcSfd3PerItemSetMerge();
+  await caseV01070EcSfd4CarryArraysCopy();
+  await caseV01070EcSfd5TemplateWinsOnConflict();
 
   // v0.65.0 HC-V065-RUN-NOTE: write-run-note-* sub-skill lint
   {
