@@ -834,9 +834,14 @@ function seedVault(setup) {
             docEntry.destination && (docPrefix === v0102Form || docPrefix === v0103Form),
             `got ${JSON.stringify(docPrefix)}`);
 
-        ok("DOC-3 doc-note frontmatter_template.project uses {{current_file.frontmatter.project_name}}",
+        // v0.105.0.2 — switched to pass-through `{{current_file.frontmatter.project}}`
+        // because section-hub parents don't carry project_name; resolving wikilink
+        // wrap from there produced project: "[[]]". Acceptable shapes: pre-v0.105.0.2
+        // wrapped form OR post-v0.105.0.2 pass-through form.
+        ok("DOC-3 doc-note frontmatter_template.project uses project pass-through or wrapped project_name",
             docEntry.frontmatter_template &&
-            docEntry.frontmatter_template.project === "[[{{current_file.frontmatter.project_name}}]]",
+            (docEntry.frontmatter_template.project === "[[{{current_file.frontmatter.project_name}}]]" ||
+             docEntry.frontmatter_template.project === "{{current_file.frontmatter.project}}"),
             `got ${JSON.stringify(docEntry.frontmatter_template && docEntry.frontmatter_template.project)}`);
 
         ok("DOC-4 doc-note render_in.target_path points at Template, Docs Hub.md",

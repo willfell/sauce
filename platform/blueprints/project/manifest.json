@@ -154,7 +154,7 @@
       "frontmatter_template": {
         "type": "doc-note",
         "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
-        "project": "[[{{current_file.frontmatter.project_name}}]]",
+        "project": "{{current_file.frontmatter.project}}",
         "project_slug": "{{current_file.frontmatter.project_slug}}",
         "section": "{{prompts.section}}",
         "sub_section": "{{prompts.sub_section}}",
@@ -177,7 +177,7 @@
       },
       "frontmatter_template": {
         "type": "section-hub",
-        "project": "[[{{current_file.frontmatter.project_name}}]]",
+        "project": "{{current_file.frontmatter.project}}",
         "project_slug": "{{current_file.frontmatter.project_slug}}",
         "section": "{{prompts.name}}",
         "section_slug": "{{prompts.slug}}",
