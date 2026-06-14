@@ -73,10 +73,31 @@ class ProjectDocsIndex {
     const projectName = project ? project.file.name : projectSlug;
     const projectStatus = project && project.status ? String(project.status) : "";
 
-    const rawSections = (project && Array.isArray(project.sections) && project.sections.length > 0)
-      ? project.sections
-      : ["[[Knowledge]]", "[[Notes]]"];
-    const sections = rawSections.map((v) => this._stripLink(v)).filter(Boolean);
+    // v0.105.0.3 — sections discovery: query filesystem for section-hub notes
+    // at depth 1 inside docs/ (union with declared sections[] for resilience).
+    // Pre-patch, only project.sections[] was consulted; newly-created sections
+    // (via + New Section button) didn't surface on Docs.md until the project
+    // note was manually updated. Filesystem is source of truth.
+    const discoveredSet = new Set();
+    try {
+      const hubs = dv.pages(`"${docsFolder}"`)
+        .where((p) => p && p.type === "section-hub" && Number(p.depth) === 1);
+      for (const h of hubs) {
+        const label = this._stripLink(h.section || (h.file && h.file.name) || "");
+        if (label) discoveredSet.add(label);
+      }
+    } catch (_e) {}
+    if (project && Array.isArray(project.sections)) {
+      for (const v of project.sections) {
+        const label = this._stripLink(v);
+        if (label) discoveredSet.add(label);
+      }
+    }
+    if (discoveredSet.size === 0) {
+      discoveredSet.add("Knowledge");
+      discoveredSet.add("Notes");
+    }
+    const sections = Array.from(discoveredSet).sort();
 
     // 1. Dashboard chip strip — total docs (filtered) + open meetings + status.
     // v0.105.0 Issue 10: sort docs by mtime desc to match the section cards

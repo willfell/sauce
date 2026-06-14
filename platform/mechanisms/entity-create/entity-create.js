@@ -206,18 +206,39 @@ class EntityCreate {
             try {
                 const cur = dv.current();
                 if (!cur) return [];
+                // v0.105.0.3 — discover via FILESYSTEM (section-hub notes at depth 1
+                // inside docs/), unioned with declared project.sections[]. Pre-patch
+                // resolver only read sections[] frontmatter, so newly-created
+                // sections didn't appear in the + New Doc picker until the project
+                // note was manually updated. Filesystem is source of truth.
+                const projectSlug = cur.project_slug || (cur.type === "project" ? (cur.file && cur.file.name) : null);
+                if (!projectSlug) return [];
+                const docsRoot = `spice/projects/${projectSlug}/docs`;
+                const discovered = new Set();
+                try {
+                    const hubs = dv.pages(`"${docsRoot}"`)
+                        .where(p => p && p.type === "section-hub" && Number(p.depth) === 1);
+                    for (const h of hubs) {
+                        const label = this._stripWikilink(h.section || (h.file && h.file.name) || "");
+                        if (label) discovered.add(label);
+                    }
+                } catch (_e) {}
+                // Union with declared sections[] (so user-renamed hubs still surface
+                // if their folder was renamed but the frontmatter wasn't yet).
                 let project = null;
-                if (cur.type === "project") {
-                    project = cur;
-                } else if (cur.project_slug) {
+                if (cur.type === "project") project = cur;
+                else if (cur.project_slug) {
                     const pages = dv.pages(`"spice/projects/${cur.project_slug}"`)
                         .where(p => p && p.type === "project");
                     project = pages.length ? pages[0] : null;
                 }
-                if (!project || !Array.isArray(project.sections)) return [];
-                return Array.from(project.sections)
-                    .map(v => this._stripWikilink(v))
-                    .filter(Boolean);
+                if (project && Array.isArray(project.sections)) {
+                    for (const v of project.sections) {
+                        const label = this._stripWikilink(v);
+                        if (label) discovered.add(label);
+                    }
+                }
+                return Array.from(discovered).sort();
             } catch (_e) {
                 return [];
             }
