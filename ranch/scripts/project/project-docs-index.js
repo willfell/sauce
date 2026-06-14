@@ -1,4 +1,13 @@
-// project-docs-index.js — v1.18.0 helper (sauce v0.104.0 S2.1).
+// project-docs-index.js — v1.19.0 helper (sauce v0.105.0 S2).
+//
+// v0.105.0 S2 — docs-system-fixes brief:
+//   • Issue 6 (P0): DocSearch refactored to permanent strip + transient
+//     resultsContainer; ProjectDocsIndex now writes ALL post-strip rendering
+//     (dashboard chips, + New buttons, section cards) into the resultsContainer
+//     via a synthetic dv-proxy. The strip's input survives keystrokes.
+//   • Issue 8: + New Doc / + New Section buttons wrapped in a `display: flex`
+//     row with `flex: 1` per child for full-width layout.
+//   • Issue 10: docs query sorted by `file.mtime?.ts` desc for newest-first.
 //
 // Renders the project Docs.md landing as a sections-index card row + dashboard
 // chip strip + DocSearch filter strip + quick "+ New Doc" shortcut +
@@ -9,111 +18,101 @@
 // Docs.md now shows ONE card per section (with doc count), and the user
 // navigates INTO a section to see its docs.
 //
-// v0.104.0 S2.1: consumes the v0.104.0 DocSearch helper. The filter UI lives
-// above the section card row; it filters across ALL sections recursively, and
-// per-section doc counts reflect the active filter. onChange triggers a full
-// re-render via dv.container.empty() + this.render(dv); the in-flight ctx is
-// stashed on `this._currentCtx` so the re-render carries the active filter.
-//
 // Order on Docs.md:
-//   1. Dashboard chip strip (doc total · open meetings · project status).
-//   2. DocSearch filter strip (text + tag chips + scoped-search button).
-//   3. Quick + New Doc shortcut (no presetPrompts — user picks the section).
-//   4. + New Section button (no presetPrompts — user types the name).
-//   5. Section card row via BeaconCards (one card per declared section).
-//   6. Empty-state stub when no sections declared (defaults to Knowledge+Notes
-//      apply automatically — see below).
+//   1. DocSearch filter strip — PERMANENT (text + tag chips + scoped-search button).
+//   2. [resultsContainer] Dashboard chip strip.
+//   3. [resultsContainer] + New Doc / + New Section buttons (flex row).
+//   4. [resultsContainer] Section card row via BeaconCards.
 //
 // sections[] schema (v0.103.0): list of WIKILINK strings like
 //   sections:
 //     - "[[Knowledge]]"
 //     - "[[Notes]]"
-// (was bare strings "Knowledge" / "Notes" in v0.102.0 — installer migration
-// applyProjectSectionsHubMigration rewrites in-place; this helper accepts
-// either shape via _stripLink.)
-//
 // Defaults: if the parent project's sections[] is absent OR empty, we fall
 // back to ["[[Knowledge]]", "[[Notes]]"] so a fresh project still renders
-// two cards. The installer also materializes Knowledge.md / Notes.md hubs
-// out-of-box (per Task 4 in the v0.103.0 plan).
+// two cards.
 class ProjectDocsIndex {
   async render(dv, opts = {}) {
     const currentFile = dv.current()?.file;
     if (!currentFile) return;
-    const docsFolder = currentFile.folder;                  // e.g. "spice/projects/global-k8s/docs"
+    const docsFolder = currentFile.folder;
     if (!docsFolder) return;
 
-    // Anchor strictly on the canonical layout `spice/projects/<slug>/docs` —
-    // same M-4 guard from ProjectDocsSections. If the hub isn't there, bail.
     const folderMatch = docsFolder.match(/^spice\/projects\/([^/]+)\/docs$/);
     if (!folderMatch) return;
     const projectSlug = folderMatch[1];
     const projectPath = `spice/projects/${projectSlug}`;
     const scopePath = `spice/projects/${projectSlug}/docs`;
 
-    // v0.104.0 S2.1: render the DocSearch filter strip. onChange triggers a
-    // full re-render — we wipe dv.container and call this.render(dv) so the
-    // section cards / dashboard chips / + New buttons all rebuild against the
-    // freshly active filter. _currentCtx survives across the re-render so the
-    // filter UI doesn't blink between keystrokes.
+    // v0.105.0 Issue 6: DocSearch strip is permanent; onChange clears ONLY
+    // resultsContainer + re-renders into it.
     const filterCtx = customJS.DocSearch.render(dv, {
       projectSlug,
       scopePath,
       recursive: true,
       onChange: (ctx) => {
         this._currentCtx = ctx;
-        dv.container.empty();
-        this.render(dv);
+        ctx.resultsContainer.empty();
+        this._renderResults(dv, projectSlug, projectPath, docsFolder, ctx);
       },
     });
     if (this._currentCtx) {
-      // Carry over from a previous re-render so the active filter persists.
       Object.assign(filterCtx, this._currentCtx);
     }
+
+    // First-render results into resultsContainer.
+    await this._renderResults(dv, projectSlug, projectPath, docsFolder, filterCtx);
+  }
+
+  async _renderResults(dv, projectSlug, projectPath, docsFolder, filterCtx) {
+    const container = filterCtx.resultsContainer;
+    const proxyDv = this._makeProxyDv(dv, container);
 
     const projectPages = dv.pages(`"${projectPath}"`).where((p) => p.type === "project");
     const project = projectPages.length ? projectPages[0] : null;
     const projectName = project ? project.file.name : projectSlug;
     const projectStatus = project && project.status ? String(project.status) : "";
 
-    // sections[] may be wikilink (v0.103.0+) or bare string (pre-migration);
-    // _stripLink normalizes to plain label. Default to Knowledge + Notes when
-    // absent/empty.
     const rawSections = (project && Array.isArray(project.sections) && project.sections.length > 0)
       ? project.sections
       : ["[[Knowledge]]", "[[Notes]]"];
     const sections = rawSections.map((v) => this._stripLink(v)).filter(Boolean);
 
-    // 1. Dashboard chip strip — total docs across all sections, open meetings
-    //    linked to this project, project status. allDocs gates on DocSearch
-    //    filter so the dashboard doc-count chip + per-section meta counts both
-    //    reflect the active filter.
+    // 1. Dashboard chip strip — total docs (filtered) + open meetings + status.
+    // v0.105.0 Issue 10: sort docs by mtime desc to match the section cards
+    // ordering. The dashboard chip count is order-insensitive but we keep it
+    // consistent.
     const allDocs = dv.pages(`"${docsFolder}"`)
-      .where((p) => p.type === "doc-note" && customJS.DocSearch.matches(p, filterCtx));
+      .where((p) => p.type === "doc-note" && customJS.DocSearch.matches(p, filterCtx))
+      .sort((p) => p.file.mtime?.ts || 0, "desc");
     const docCount = allDocs.length;
     const meetingsRoot = "spice/meetings/notes";
     const projectNotePath = project ? project.file.path : null;
     const meetings = dv.pages(`"${meetingsRoot}"`)
       .where((p) => p.type === "meeting" && this._projectMatches(p.project, projectNotePath, projectName));
     const openMeetings = meetings.length;
-    this._renderChips(dv, { docCount, openMeetings, projectStatus });
+    this._renderChips(proxyDv, { docCount, openMeetings, projectStatus });
 
-    // 2. Quick + New Doc shortcut — user picks the section at create time.
-    await customJS.EntityCreate.render(dv, {
+    // 2. + New Doc / + New Section buttons — wrapped in flex row, each child
+    //    stretched to fill its column (Issue 8).
+    const btnRow = container.createEl("div");
+    btnRow.style.cssText = "display: flex; gap: 8px; margin: 6px 0;";
+    const btnRowProxy = this._makeProxyDv(dv, btnRow);
+
+    await customJS.EntityCreate.render(btnRowProxy, {
       instance: "doc-note",
     });
 
-    // 3. + New Section button — user types the section name at create time.
-    await customJS.EntityCreate.render(dv, {
+    await customJS.EntityCreate.render(btnRowProxy, {
       instance: "section-hub",
     });
 
-    // 4. Section card row. Build a synthetic page list for BeaconCards: one
-    //    pseudo-page per declared section. We can't pass raw dataview pages
-    //    here because the section hub may not yet exist (defaults case), so
-    //    we use BeaconCards' plain-object support — title/icon/meta callbacks
-    //    receive the synthetic object verbatim.
-    dv.header(3, "Sections");
+    for (const btn of btnRow.querySelectorAll("button")) {
+      btn.style.flex = "1";
+    }
+
+    // 3. Section card row.
+    proxyDv.header(3, "Sections");
     const folderIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--interactive-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`;
 
     const sectionPages = sections.map((label) => {
@@ -123,7 +122,6 @@ class ProjectDocsIndex {
         const folder = String(p.file.folder || "");
         return folder === sectionFolder || folder.startsWith(`${sectionFolder}/`);
       }).length;
-      // Synthetic page-like shape — BeaconCards.render walks .file.name + .file.path.
       const hubPath = `${sectionFolder}/${label}.md`;
       return {
         file: {
@@ -137,7 +135,7 @@ class ProjectDocsIndex {
       };
     });
 
-    await customJS.BeaconCards.render(dv, {
+    await customJS.BeaconCards.render(proxyDv, {
       pages: sectionPages,
       layout: "row",
       title: (p) => p.section_label || p.file.name,
@@ -150,9 +148,29 @@ class ProjectDocsIndex {
     });
   }
 
+  // v0.105.0 Issue 6 helper — synthetic dv-proxy routing dv.container + dv.el +
+  // dv.header + dv.paragraph into a target container. Forwards dv.current +
+  // dv.pages to the real dv.
+  _makeProxyDv(dv, container) {
+    return {
+      container,
+      current: dv.current.bind(dv),
+      pages: dv.pages.bind(dv),
+      el: (tag, txt, opts) => {
+        const el = container.createEl(tag, { ...(opts || {}) });
+        if (txt !== undefined && txt !== null && txt !== "") el.textContent = String(txt);
+        return el;
+      },
+      header: (lvl, txt) => container.createEl(`h${lvl}`, { text: String(txt) }),
+      paragraph: (txt) => {
+        const p = container.createEl("p");
+        p.innerHTML = String(txt);
+        return p;
+      },
+    };
+  }
+
   // Dashboard chip strip — three inline-styled spans inside one dv.el("div").
-  // Mirrors the lightweight "small row of pill chips" pattern used elsewhere
-  // (e.g. weekly hub status row).
   _renderChips(dv, { docCount, openMeetings, projectStatus }) {
     const wrap = dv.el("div", "", { cls: "project-docs-index-chips" });
     wrap.style.cssText = "display: flex; gap: 8px; margin: 8px 0; flex-wrap: wrap;";
@@ -181,12 +199,9 @@ class ProjectDocsIndex {
   }
 
   // Strip wikilink markup or Dataview Link object into a plain label string.
-  // sections[] entries arrive here as parsed Dataview Link objects (after the
-  // v0.103.0 frontmatter migration) — .display is the inner label.
   _stripLink(v) {
     if (v === null || v === undefined) return "";
     if (typeof v === "string") {
-      // Bare string OR unparsed "[[Label]]" / "[[Label|Alias]]"
       const s = v.trim();
       const m = s.match(/^\[\[([^\]|]+)(?:\|[^\]]*)?\]\]$/);
       return m ? m[1].trim() : s;

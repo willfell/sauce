@@ -187,10 +187,9 @@
           {
             "key": "section",
             "label": "Section",
-            "type": "string",
-            "required": true,
-            "default": "Knowledge",
-            "validate": "safe-filename"
+            "type": "select",
+            "options_source": "current_project_sections",
+            "required": true
           },
           {
             "key": "section_slug",
@@ -200,8 +199,9 @@
           },
           {
             "key": "sub_section",
-            "label": "Sub-section (optional)",
-            "type": "string",
+            "label": "Sub-section",
+            "type": "select",
+            "options_source": "current_section_sub_sections",
             "required": false,
             "default": ""
           },
@@ -547,10 +547,9 @@
         {
           "key": "section",
           "label": "Section",
-          "type": "string",
-          "required": true,
-          "default": "Knowledge",
-          "validate": "safe-filename"
+          "type": "select",
+          "options_source": "current_project_sections",
+          "required": true
         },
         {
           "key": "section_slug",
@@ -560,8 +559,9 @@
         },
         {
           "key": "sub_section",
-          "label": "Sub-section (optional)",
-          "type": "string",
+          "label": "Sub-section",
+          "type": "select",
+          "options_source": "current_section_sub_sections",
           "required": false,
           "default": ""
         },
