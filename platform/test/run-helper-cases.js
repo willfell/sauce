@@ -11716,6 +11716,41 @@ async function caseV01060InstallPosture1HelperScriptOverwrite() {
     /priorContent\s*!==\s*substituted/.test(src) || /priorContent\s*===\s*substituted/.test(src));
 }
 
+// =====================================================================
+// v0.106.0 S2 — DocSearch persistent filter state via localStorage.
+// State is keyed by scopePath so Docs.md (cross-section) + each Section Hub
+// (within-section) keep independent filters. Restored AFTER listeners are
+// wired so chip restore + initial filter render flow through the same paths.
+// =====================================================================
+async function caseV01060DsPersist1LocalStorageKeyedByScope() {
+  console.log("\n--- Case HC-V01060-DS-PERSIST-1: DocSearch persists filter state to localStorage keyed by scopePath ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/doc-search.js"), "utf8");
+  assertTrue("HC-V01060-DS-PERSIST-1: storageKey embeds opts.scopePath",
+    /sauce\.doc-search\.\$\{opts\.scopePath\}/.test(src));
+  assertTrue("HC-V01060-DS-PERSIST-1: writes JSON to localStorage.setItem",
+    /localStorage\.setItem\s*\(\s*storageKey/.test(src));
+  assertTrue("HC-V01060-DS-PERSIST-1: reads JSON from localStorage.getItem",
+    /localStorage\.getItem\s*\(\s*storageKey/.test(src));
+  assertTrue("HC-V01060-DS-PERSIST-1: persists both text + tags (Array.from(ctx.tags))",
+    /Array\.from\s*\(\s*ctx\.tags\s*\)/.test(src));
+}
+
+// =====================================================================
+// v0.106.0 S2 — DocSearch input listener debounced to 150ms. Prevents
+// per-keystroke resultsContainer.empty() + opts.onChange churn while typing.
+// Tag-chip clicks are NOT debounced (single events).
+// =====================================================================
+async function caseV01060DsDebounce1Input150ms() {
+  console.log("\n--- Case HC-V01060-DS-DEBOUNCE-1: DocSearch input listener debounced via setTimeout(..., 150) + clearTimeout ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/doc-search.js"), "utf8");
+  assertTrue("HC-V01060-DS-DEBOUNCE-1: inputTimer variable declared",
+    /\blet\s+inputTimer\b/.test(src));
+  assertTrue("HC-V01060-DS-DEBOUNCE-1: clears prior pending timer before re-scheduling",
+    /clearTimeout\s*\(\s*inputTimer\s*\)/.test(src));
+  assertTrue("HC-V01060-DS-DEBOUNCE-1: setTimeout with 150ms delay",
+    /setTimeout\s*\([^,]+,\s*150\s*\)/.test(src));
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -12343,6 +12378,11 @@ async function caseV01060InstallPosture1HelperScriptOverwrite() {
   // v0.106.0 S1 — install.js helper-script content-overwrite posture
   // (closes the 3-cycle cp workaround).
   await caseV01060InstallPosture1HelperScriptOverwrite();
+
+  // v0.106.0 S2 — DocSearch persistent filter state (localStorage) + 150ms
+  // input debounce.
+  await caseV01060DsPersist1LocalStorageKeyedByScope();
+  await caseV01060DsDebounce1Input150ms();
 
   // v0.65.0 HC-V065-RUN-NOTE: write-run-note-* sub-skill lint
   {
