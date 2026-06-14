@@ -986,6 +986,39 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
       continue;
     }
 
+    // v0.106.0 S1 — helper-script content-overwrite posture. Closes the
+    // 3-cycle cp workaround: dot-js files materialized under ranch/scripts/
+    // are platform-shipped CustomJS class bodies — never user-edited content.
+    // The default Option B path (line below) creates a .bak sidecar for every
+    // overwrite, which left cruft and gated the install on .bak write success.
+    // For helper scripts specifically, write the substituted content cleanly
+    // (no .bak), and emit a content_overwrite history event so the change is
+    // still observable. Blast radius is limited to ranch/scripts/.+\.js$ paths;
+    // every other path (frontmatter merges, template backups, etc.) keeps the
+    // existing posture.
+    if (priorContent !== null && /ranch\/scripts\/.+\.js$/.test(destPath)) {
+      if (priorContent !== substituted) {
+        await adapter.write(destPath, substituted);
+        if (history) {
+          const crypto = require("crypto");
+          history.push({
+            event: "info",
+            step: "content_overwrite",
+            name: mech.name,
+            dest: destPath,
+            action: "content_overwrite_helper_script",
+            prior_sha: crypto.createHash("sha256").update(priorContent).digest("hex"),
+            new_sha: crypto.createHash("sha256").update(substituted).digest("hex"),
+            git_commit: git.commit,
+            git_tag: git.tag,
+            git_dirty: git.dirty,
+            attempted_at: new Date().toISOString(),
+          });
+        }
+      }
+      continue;
+    }
+
     if (priorContent !== null && priorContent.length > 0) {
       // Differs and non-empty: backup prior to <dest>.bak, then overwrite.
       const crypto = require("crypto");

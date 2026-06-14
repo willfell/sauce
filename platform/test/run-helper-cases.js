@@ -11697,6 +11697,25 @@ async function caseV01050Sort1MtimeDesc() {
     /\.sort\s*\(\s*\([^)]*\)\s*=>\s*[^,)]*file\.mtime[^,)]*,\s*["']desc["']\s*\)/.test(pdiSrc));
 }
 
+// =====================================================================
+// v0.106.0 S1 — helper-script content-overwrite posture (closes the 3-cycle
+// cp workaround). install.js intercepts files[] destinations matching
+// ranch/scripts/.+\.js$ and overwrites cleanly (no .bak) when the substituted
+// source differs from current dest content. Identical content skips silently.
+// =====================================================================
+async function caseV01060InstallPosture1HelperScriptOverwrite() {
+  console.log("\n--- Case HC-V01060-INSTALL-POSTURE-1: install.js helper-script content-overwrite posture ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
+  assertTrue("HC-V01060-INSTALL-POSTURE-1: install.js matches ranch/scripts/.+\\.js paths",
+    /ranch\\?\/scripts\\?\/.+\\\.js/.test(src));
+  assertTrue("HC-V01060-INSTALL-POSTURE-1: install.js records content_overwrite_helper_script action",
+    /content_overwrite_helper_script/.test(src));
+  assertTrue("HC-V01060-INSTALL-POSTURE-1: install.js declares content_overwrite step label",
+    /["']content_overwrite["']/.test(src));
+  assertTrue("HC-V01060-INSTALL-POSTURE-1: install.js compares prior vs substituted content (differs / ===)",
+    /priorContent\s*!==\s*substituted/.test(src) || /priorContent\s*===\s*substituted/.test(src));
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -12320,6 +12339,10 @@ async function caseV01050Sort1MtimeDesc() {
   await caseV01050Fullwidth1FlexStretch();          // Issue 8
   await caseV01050DsNoEmoji();                      // Issue 9
   await caseV01050Sort1MtimeDesc();                 // Issue 10
+
+  // v0.106.0 S1 — install.js helper-script content-overwrite posture
+  // (closes the 3-cycle cp workaround).
+  await caseV01060InstallPosture1HelperScriptOverwrite();
 
   // v0.65.0 HC-V065-RUN-NOTE: write-run-note-* sub-skill lint
   {
