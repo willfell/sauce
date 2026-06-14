@@ -101,8 +101,15 @@ class DocSearch {
 
   /**
    * Pure-function matcher used by consumers. Given a doc page + filterContext, returns true if doc matches.
+   *
+   * v0.104.0.1 PATCH — was declared with the class-level keyword in
+   * v0.104.0, but customJS stores INSTANCES of helper classes, not the
+   * classes themselves. The class-level access path therefore resolved to
+   * `undefined.call` and threw "Evaluation Error" inside every `.where(...)`
+   * predicate on Docs.md and Section Hub. The keyword is removed so matches
+   * is reachable via `customJS.DocSearch.matches(p, ctx)`.
    */
-  static matches(page, ctx) {
+  matches(page, ctx) {
     if (!ctx || !ctx.hasActiveFilter) return true;
     if (ctx.text) {
       const needle = ctx.text.toLowerCase();
