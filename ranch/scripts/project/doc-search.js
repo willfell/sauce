@@ -72,6 +72,19 @@ class DocSearch {
 
     const ctx = { text: "", tags: new Set(), hasActiveFilter: false, resultsContainer };
 
+    // v0.106.0 S2 — persistent filter state via localStorage keyed by scopePath.
+    // Per-scope key so Docs.md (cross-section) + each Section Hub (within-section)
+    // each keep their own filter independently.
+    const storageKey = `sauce.doc-search.${opts.scopePath}`;
+    const persistState = () => {
+      try {
+        localStorage.setItem(storageKey, JSON.stringify({
+          text: ctx.text,
+          tags: Array.from(ctx.tags),
+        }));
+      } catch (_e) {}
+    };
+
     // Now wire tag-chip listeners (need ctx before binding).
     if (chipsRow) {
       for (const tag of topTags) {
@@ -93,6 +106,8 @@ class DocSearch {
           } else {
             statusRow.textContent = "";
           }
+          // v0.106.0 S2 — persist after each tag toggle.
+          persistState();
           // Clear ONLY the results container; the strip stays intact.
           resultsContainer.empty();
           opts.onChange?.(ctx);
@@ -100,18 +115,58 @@ class DocSearch {
       }
     }
 
+    // v0.106.0 S3 — debounce input listener (150ms). Coalesces rapid keystrokes
+    // so the filter recomputes once after typing stops, keeping the resultsContainer
+    // re-render off the critical path of every keystroke.
+    let inputTimer = null;
     input.addEventListener("input", () => {
-      ctx.text = input.value.trim();
+      if (inputTimer) clearTimeout(inputTimer);
+      inputTimer = setTimeout(() => {
+        ctx.text = input.value.trim();
+        this._updateActive(ctx);
+        if (ctx.hasActiveFilter) {
+          statusRow.textContent = `Filtering: "${ctx.text}"${ctx.tags.size > 0 ? " + " + Array.from(ctx.tags).map(t => `#${t}`).join(" ") : ""}`;
+        } else {
+          statusRow.textContent = "";
+        }
+        // v0.106.0 S2 — persist after each debounced text change.
+        persistState();
+        // Clear ONLY the results container; the strip (and the input element) stays.
+        resultsContainer.empty();
+        opts.onChange?.(ctx);
+      }, 150);
+    });
+
+    // v0.106.0 S2 — restore saved state for this scope. Runs AFTER all listeners
+    // are wired so the chip-restore styling + initial filter render flow through
+    // the same code paths user interactions do.
+    try {
+      const saved = JSON.parse(localStorage.getItem(storageKey) || "{}");
+      if (saved.text) {
+        ctx.text = saved.text;
+        input.value = saved.text;
+      }
+      if (Array.isArray(saved.tags)) {
+        for (const t of saved.tags) ctx.tags.add(t);
+        if (chipsRow) {
+          for (const chip of chipsRow.children) {
+            const tagText = chip.textContent.replace(/^#/, "");
+            if (ctx.tags.has(tagText)) {
+              chip.style.background = "var(--interactive-accent)";
+              chip.style.color = "var(--text-on-accent)";
+            }
+          }
+        }
+      }
       this._updateActive(ctx);
       if (ctx.hasActiveFilter) {
         statusRow.textContent = `Filtering: "${ctx.text}"${ctx.tags.size > 0 ? " + " + Array.from(ctx.tags).map(t => `#${t}`).join(" ") : ""}`;
-      } else {
-        statusRow.textContent = "";
+        // Match the input event flow so the consumer renders filtered results
+        // on first paint when restored state is non-empty.
+        resultsContainer.empty();
+        opts.onChange?.(ctx);
       }
-      // Clear ONLY the results container; the strip (and the input element) stays.
-      resultsContainer.empty();
-      opts.onChange?.(ctx);
-    });
+    } catch (_e) {}
 
     return ctx;
   }
