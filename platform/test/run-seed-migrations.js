@@ -58,6 +58,16 @@ console.log("");
 
 withTempVault((vault) => {
     helpers.copyDir(SEED_DIR, vault);
+    // Patch platform-config.json's sentinel workshop_relative_path -> current
+    // REPO_ROOT. The seed holds a sentinel ("__SEED_REPO_ROOT__") so the
+    // committed seed is portable across developer machines + CI. Tests +
+    // rebaseline patch in the real path before install; rebaseline restores
+    // the sentinel before writing the result back to the seed.
+    const cfgPath = path.join(vault, "ranch/platform-config.json");
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
+    cfg.workshop_relative_path = REPO_ROOT;
+    fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + "\n");
+
     const result = helpers.runInstall(vault, REPO_ROOT);
 
     // ===== HC-V01100-SEED-INSTALL-* — install ran =====

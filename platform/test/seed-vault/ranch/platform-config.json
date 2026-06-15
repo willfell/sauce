@@ -1,5 +1,5 @@
 {
-  "workshop_relative_path": "/Users/willfellhoelter/projects/repos/sauce/.worktrees/migration-regression-net",
+  "workshop_relative_path": "__SEED_REPO_ROOT__",
   "variables": {
     "views_path": "ranch/views",
     "templater_scripts_path": "ranch/templater",
@@ -7,7 +7,7 @@
     "rules_path": "ranch/rules",
     "templates_path": "ranch/templates",
     "commands_path": "commands",
-    "workshop": "sauce-seed-gen2.kvYKHe",
-    "vault_identity_tag": "sauce-seed-gen2.kvykhe"
+    "workshop": "seed-test-vault",
+    "vault_identity_tag": "seed-test-vault"
   }
 }

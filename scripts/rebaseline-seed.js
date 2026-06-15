@@ -79,11 +79,24 @@ function main() {
         console.log(`rebaseline-seed: copying seed -> ${tmp}`);
         copyDir(SEED_DIR, tmp);
 
+        // Patch sentinel workshop_relative_path -> current REPO_ROOT so
+        // install can find the workshop. The sentinel is restored before
+        // writing the result back to the seed (see step at bottom).
+        const cfgPath = path.join(tmp, "ranch/platform-config.json");
+        const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
+        cfg.workshop_relative_path = REPO_ROOT;
+        fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + "\n");
+
         console.log(`rebaseline-seed: running install...`);
         execFileSync("node", [INSTALL_JS, "--vault", tmp, "--auto-approve"], {
             cwd: REPO_ROOT,
             stdio: "inherit",
         });
+
+        // Restore sentinel before writing back to seed (portability).
+        const cfgAfter = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
+        cfgAfter.workshop_relative_path = "__SEED_REPO_ROOT__";
+        fs.writeFileSync(cfgPath, JSON.stringify(cfgAfter, null, 2) + "\n");
 
         const diff = diffTree(SEED_DIR, tmp);
         console.log(`rebaseline-seed: diff vs current seed:`);
