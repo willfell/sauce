@@ -11940,8 +11940,12 @@ async function caseV01070Fcgb3AppendOnlyGuard() {
   const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
   assertTrue("HC-V01070-FCGB-3: \"Unassigned\" fallback group present",
     /["']Unassigned["']/.test(src));
-  assertTrue("HC-V01070-FCGB-3: append-only check (no overwrite when group already set)",
-    /!\s*cat\.group|cat\.group\s*===?\s*undefined|typeof\s+cat\.group\s*===?\s*["']undefined["']/.test(src));
+  // v0.5.1 patch: backfill is regex-based (headless installer; no
+  // processFrontMatter). Append-only is enforced by per-item `hasGroup` check
+  // — only inserts `    group: Unassigned` when no `group:` key appears within
+  // the item's continuation lines.
+  assertTrue("HC-V01070-FCGB-3: append-only check (hasGroup guard before insert)",
+    /hasGroup\s*=\s*false|let\s+hasGroup|if\s*\(\s*!\s*hasGroup\s*\)/.test(src));
 }
 
 async function caseV01070Fcgb4PerFileFailureLoud() {
@@ -12121,7 +12125,7 @@ async function caseV01070FinMan1Versions() {
   const fin = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
   const ec  = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/mechanisms/entity-create/manifest.json"), "utf8"));
   const ws  = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
-  assertEqual(fin.version, "0.5.0", "HC-V01070-FIN-MAN-1: finance version");
+  assertEqual(fin.version, "0.5.1", "HC-V01070-FIN-MAN-1: finance version");
   assertEqual(ec.version, "0.7.0", "HC-V01070-FIN-MAN-1: entity-create version");
   assertEqual(ws.workshop_version, "0.107.0", "HC-V01070-FIN-MAN-1: workshop_version");
   assertTrue("HC-V01070-FIN-MAN-1: finance depends_on entity-create >=0.7.0",

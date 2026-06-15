@@ -3742,6 +3742,92 @@ async function applyFinanceMigrations(tp, manifest, variables, history, git) {
   await applyFinanceCategoriesGroupBackfill(tp, manifest, variables, history, git);
 }
 
+// _backfillBudgetGroupsFromText — pure string transform on Budget-*.md body.
+// Append-only:
+//   • Inserts `groups: []` into top-level frontmatter if absent (placed before
+//     `created_at:` if present, else appended to the frontmatter block).
+//   • Walks the `categories:` YAML block-list and inserts
+//     `    group: Unassigned` into each item that lacks a `group:` key.
+//     Items without `group:` are detected by checking ALL their continuation
+//     lines (lines indented with 4 spaces immediately following the `  - `
+//     start line).
+// Returns { body, touched, added }. Never alters existing values; never
+// throws on malformed YAML. Mirrors _migrateDocNote / _migrateProjectSectionsToWikilinks
+// regex-based mutation posture so the migration survives headless install
+// (no Obsidian runtime; no processFrontMatter).
+function _backfillBudgetGroupsFromText(body) {
+  const fmMatch = body.match(/^---\n([\s\S]*?)\n---/);
+  if (!fmMatch) return { body, touched: false, added: 0 };
+
+  let fm = fmMatch[1];
+  let touched = false;
+  let added = 0;
+
+  // 1. Insert `groups: []` top-level if absent. Match both `^groups:$` (block
+  // form coming) and `^groups: [` (flow form already present).
+  if (!/^groups:\s*$/m.test(fm) && !/^groups:\s*\[/m.test(fm)) {
+    if (/^created_at:/m.test(fm)) {
+      fm = fm.replace(/^created_at:/m, "groups: []\ncreated_at:");
+    } else {
+      fm = fm + "\ngroups: []";
+    }
+    touched = true;
+  }
+
+  // 2. Walk `categories:` block-list items. For each item missing a
+  // `    group:` sub-key, insert `    group: Unassigned` right after the
+  // item's `  - ...` start line.
+  const fmLines = fm.split("\n");
+  const isItemStart = (line) => /^  - /.test(line);
+  const isItemContinuation = (line) => /^    \S/.test(line);
+
+  let i = 0;
+  while (i < fmLines.length) {
+    if (/^categories:\s*$/.test(fmLines[i])) {
+      // Begin categories block. Walk forward.
+      i++;
+      while (i < fmLines.length) {
+        if (isItemStart(fmLines[i])) {
+          // Collect item's continuation lines.
+          const itemStartIdx = i;
+          let j = i + 1;
+          while (j < fmLines.length && isItemContinuation(fmLines[j])) j++;
+          // Check if this item has `group:` already.
+          let hasGroup = false;
+          for (let k = itemStartIdx; k < j; k++) {
+            if (/^    group:\s/.test(fmLines[k]) || /^  - group:\s/.test(fmLines[k])) {
+              hasGroup = true;
+              break;
+            }
+          }
+          if (!hasGroup) {
+            // Insert immediately after the item's first line.
+            fmLines.splice(itemStartIdx + 1, 0, "    group: Unassigned");
+            added += 1;
+            touched = true;
+            j += 1; // account for inserted line
+          }
+          i = j;
+        } else if (fmLines[i] === "" || /^  /.test(fmLines[i])) {
+          // Blank line or other indented content inside categories block — skip.
+          i++;
+        } else {
+          // Dedented line — categories block ended.
+          break;
+        }
+      }
+    } else {
+      i++;
+    }
+  }
+
+  if (!touched) return { body, touched: false, added: 0 };
+
+  const newFm = fmLines.join("\n");
+  const newBody = body.replace(/^---\n[\s\S]*?\n---/, `---\n${newFm}\n---`);
+  return { body: newBody, touched: true, added };
+}
+
 async function applyFinanceDefaultsScaffolding(tp, manifest, variables, history, git) {
   if (!manifest || manifest.name !== "finance") return;
   if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
@@ -3860,33 +3946,21 @@ async function applyFinanceCategoriesGroupBackfill(tp, manifest, variables, hist
     }
   }
 
-  // Backfill via processFrontMatter (atomic; preserves body bytes; survives
-  // YAML edge cases per v0.16.0 lessons).
+  // Backfill via regex-based YAML mutation. The install runs headless (no
+  // Obsidian runtime), so tp.app.fileManager.processFrontMatter is unavailable —
+  // mirror the _migrateDocNote pattern (v0.103.0): adapter.read + body-text
+  // mutation + adapter.write. Append-only — groups/category.group are added
+  // only if missing; existing values are NEVER altered. Same data-preservation
+  // semantics as processFrontMatter would have provided.
   let touched = 0, backfilled = 0;
   for (const fp of budgetFiles) {
     try {
-      const file = tp.app.vault.getAbstractFileByPath(fp);
-      if (!file) continue;
-      let changed = false;
-      let perCategoryAdded = 0;
-      await tp.app.fileManager.processFrontMatter(file, (fm) => {
-        if (!Array.isArray(fm.groups)) {
-          fm.groups = [];
-          changed = true;
-        }
-        if (Array.isArray(fm.categories)) {
-          for (const cat of fm.categories) {
-            if (cat && typeof cat === "object" && (cat.group === undefined || cat.group === null || cat.group === "")) {
-              cat.group = "Unassigned";
-              changed = true;
-              perCategoryAdded += 1;
-            }
-          }
-        }
-      });
-      if (changed) {
+      const body = await adapter.read(fp);
+      const result = _backfillBudgetGroupsFromText(body);
+      if (result.touched) {
+        await adapter.write(fp, result.body);
         touched += 1;
-        backfilled += perCategoryAdded;
+        backfilled += result.added;
       }
     } catch (e) {
       history?.push({ event: "warning", step: "finance_categories_group_backfill", name: "finance",
