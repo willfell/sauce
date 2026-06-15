@@ -78,35 +78,41 @@ class SectionHub {
     btnRow.style.cssText = "display: flex; gap: 8px; margin: 6px 0;";
     const btnRowProxy = this._makeProxyDv(dv, btnRow);
 
-    if (depth === 1) {
-      await customJS.EntityCreate.render(btnRowProxy, {
-        instance: "doc-note",
-        presetPrompts: {
-          section: sectionName,
-          section_slug: sectionSlug,
-          sub_section: "",
-          sub_section_slug: "",
-        },
-      });
-    } else {
-      const parentName = this._stripLink(cur.parent_section);
-      const parentSlug = this._slugify(parentName);
-      await customJS.EntityCreate.render(btnRowProxy, {
-        instance: "doc-note",
-        presetPrompts: {
-          section: parentName,
-          section_slug: parentSlug,
-          sub_section: sectionName,
-          sub_section_slug: sectionSlug,
-        },
-      });
+    // v0.110.1: poll for EntityCreate (cold-load race)
+    for (let i = 0; i < 40 && !window.customJS?.EntityCreate; i++) {
+      await new Promise((r) => setTimeout(r, 50));
     }
+    if (window.customJS?.EntityCreate) {
+      if (depth === 1) {
+        await customJS.EntityCreate.render(btnRowProxy, {
+          instance: "doc-note",
+          presetPrompts: {
+            section: sectionName,
+            section_slug: sectionSlug,
+            sub_section: "",
+            sub_section_slug: "",
+          },
+        });
+      } else {
+        const parentName = this._stripLink(cur.parent_section);
+        const parentSlug = this._slugify(parentName);
+        await customJS.EntityCreate.render(btnRowProxy, {
+          instance: "doc-note",
+          presetPrompts: {
+            section: parentName,
+            section_slug: parentSlug,
+            sub_section: sectionName,
+            sub_section_slug: sectionSlug,
+          },
+        });
+      }
 
-    if (depth === 1) {
-      await customJS.EntityCreate.render(btnRowProxy, {
-        instance: "sub-section-hub",
-        presetPrompts: { parent_slug: sectionSlug },
-      });
+      if (depth === 1) {
+        await customJS.EntityCreate.render(btnRowProxy, {
+          instance: "sub-section-hub",
+          presetPrompts: { parent_slug: sectionSlug },
+        });
+      }
     }
 
     // Stretch each EntityCreate-rendered button to fill its share of the row.

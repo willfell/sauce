@@ -12,7 +12,7 @@ await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 ```
 
 ```dataviewjs
-await customJS.FinanceHubActions.render(dv, { here: "finance" });
+await dv.view("ranch/views/customjs-guard", { class: "FinanceHubActions", args: [{ here: "finance" }] });
 ```
 
 ```dataviewjs
