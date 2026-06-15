@@ -7317,8 +7317,8 @@ async function caseFA7FinanceManifest() {
   // v0.107.0 widened from === "0.4.0" → /^0\.(4|5)\.\d+$/. v0.108.0 widens
   // again to include 0.6.x (debt sub-area MINOR). Same posture as FA3-PROJ-1
   // widening at v0.104.0.
-  assertTrue("FA7-MANIFEST-1: finance@0.4.x or 0.5.x or 0.6.x or 0.7.x or 0.8.x",
-    /^0\.(4|5|6|7|8)\.\d+$/.test(m.version), `got: ${m.version}`);
+  assertTrue("FA7-MANIFEST-1: finance@0.4.x or 0.5.x or 0.6.x or 0.7.x or 0.8.x or 0.9.x",
+    /^0\.(4|5|6|7|8|9)\.\d+$/.test(m.version), `got: ${m.version}`);
 }
 
 async function caseFA7FinanceTemplates() {
@@ -8320,10 +8320,10 @@ async function caseHCV0891Versions() {
     path.join(WORKSHOP, "manifest.json"), "utf8"));
   const wsVer = platformMan.workshop_version || platformMan.version
     || (platformMan.workshop && platformMan.workshop.version);
-  assertEqual(wsVer, "0.114.0", "HC-V0891-VERSION-C: workshop pin = 0.93.3 (v0.93.3 bump)");
+  assertEqual(wsVer, "0.115.0", "HC-V0891-VERSION-C: workshop pin = 0.93.3 (v0.93.3 bump)");
   const pkg = JSON.parse(fs.readFileSync(
     path.resolve(WORKSHOP, "..", "package.json"), "utf8"));
-  assertEqual(pkg.version, "0.114.0", "HC-V0891-VERSION-C: package.json = 0.93.3 (v0.93.3 bump)");
+  assertEqual(pkg.version, "0.115.0", "HC-V0891-VERSION-C: package.json = 0.93.3 (v0.93.3 bump)");
 
   // D: mechanism count unchanged
   const mechs = (platformMan.mechanisms && Array.isArray(platformMan.mechanisms))
@@ -12153,9 +12153,9 @@ async function caseV01070FinMan1Versions() {
   //   finance 0.5.2 → 0.6.0 (CF-3 + v0.108.0 ship)
   //   entity-create 0.7.0 → 0.7.1 (v0.108.0 S1 resolve_wikilinks PATCH)
   // v0.109.0 bumps workshop_version on top of v0.108.0's finance/EC ship.
-  assertTrue("HC-V01070-FIN-MAN-1: finance version 0.6.x or 0.7.x or 0.8.x", /^0\.(6|7|8)\.\d+$/.test(fin.version), `got: ${fin.version}`);
+  assertTrue("HC-V01070-FIN-MAN-1: finance version 0.6.x or 0.7.x or 0.8.x", /^0\.(6|7|8|9)\.\d+$/.test(fin.version), `got: ${fin.version}`);
   assertEqual(ec.version, "0.7.2", "HC-V01070-FIN-MAN-1: entity-create version");
-  assertEqual(ws.workshop_version, "0.114.0", "HC-V01070-FIN-MAN-1: workshop_version");
+  assertEqual(ws.workshop_version, "0.115.0", "HC-V01070-FIN-MAN-1: workshop_version");
   assertTrue("HC-V01070-FIN-MAN-1: finance depends_on entity-create >=0.7.0",
     fin.depends_on.some(d => d.name === "entity-create" && /0\.7/.test(d.range)));
 }
@@ -12459,7 +12459,7 @@ async function caseV01080FinanceVersionBump() {
   const finance = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
   assertTrue("V01080-FV-1: finance.version 0.6.x or 0.7.x or 0.8.x",
-    /^0\.(6|7|8)\.\d+$/.test(finance.version), `got: ${finance.version}`);
+    /^0\.(6|7|8|9)\.\d+$/.test(finance.version), `got: ${finance.version}`);
   assertTrue("V01080-FV-2: description references v0.6.0",
     /v0\.6\.0/.test(finance.description));
 
@@ -12467,13 +12467,13 @@ async function caseV01080FinanceVersionBump() {
     path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
   const fbp = (workshop.blueprints || []).find(b => b.name === "finance");
   assertTrue("V01080-FV-3: workshop manifest pin finance 0.6.x or 0.7.x or 0.8.x",
-    fbp && /^0\.(6|7|8)\.\d+$/.test(fbp.version), `got: ${fbp?.version}`);
+    fbp && /^0\.(6|7|8|9)\.\d+$/.test(fbp.version), `got: ${fbp?.version}`);
   const ec = (workshop.mechanisms || []).find(m => m.name === "entity-create");
   assertTrue("V01080-FV-4: workshop manifest pin entity-create 0.7.x",
     ec && /^0\.7\.\d+$/.test(ec.version), `got: ${ec?.version}`);
   // v0.109.0 supersedes 0.108.0: workshop bumped again for projects-visual-overhaul.
   assertTrue("V01080-FV-5: workshop_version === 0.109.0 (v0.109.0 supersedes the v0.108.0 baseline this case originally pinned)",
-    workshop.workshop_version === "0.114.0", `got: ${workshop.workshop_version}`);
+    workshop.workshop_version === "0.115.0", `got: ${workshop.workshop_version}`);
 }
 
 async function caseV01080FinanceNewEntityButtonDebt() {
@@ -12481,8 +12481,8 @@ async function caseV01080FinanceNewEntityButtonDebt() {
   const m = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
   const entries = m.new_entity_buttons || [];
-  assertTrue("V01080-NEB-count: 4 entity-create entries",
-    entries.length === 4, `got: ${entries.length}`);
+  assertTrue("V01080-NEB-count: 5 entity-create entries",
+    entries.length === 5, `got: ${entries.length}`);
   const debt = entries.find(e => e.id === "debt");
   assertTrue("V01080-NEB-DEBT-id: debt entry present", !!debt);
   assertTrue("V01080-NEB-DEBT-type: frontmatter_template type === debt",
@@ -12805,7 +12805,7 @@ async function caseV01103FinanceManifestBumped() {
   console.log("\n--- Case V01103-MO-FBP: finance manifest version + classes + files ---");
   const m = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
   assertTrue("V01103-MO-FBP-1: finance version 0.6.x or 0.7.x or 0.8.x",
-    /^0\.(6|7|8)\.\d+$/.test(m.version), `got: ${m.version}`);
+    /^0\.(6|7|8|9)\.\d+$/.test(m.version), `got: ${m.version}`);
   const cls = m.customjs_classes || [];
   assertTrue("V01103-MO-FBP-2: MonthlyOverview in customjs_classes",
     cls.includes("MonthlyOverview"), `got: ${cls.join(",")}`);
@@ -12819,7 +12819,7 @@ async function caseV01103FinanceManifestBumped() {
 async function caseV01103WorkshopManifestBumped() {
   console.log("\n--- Case V01103-MO-WS: workshop manifest at 0.110.3 ---");
   const ws = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
-  assertEqual(ws.workshop_version, "0.114.0", "V01103-MO-WS-1: workshop_version");
+  assertEqual(ws.workshop_version, "0.115.0", "V01103-MO-WS-1: workshop_version");
 }
 
 async function caseV01103BudgetTemplateUpdated() {
@@ -12931,11 +12931,11 @@ async function caseV0112NpmScriptsWired() {
 async function caseV0112VersionBumped() {
   console.log("\n--- Case V0112-T-VER: workshop 0.112.0+ + package.json 0.112.0+ ---");
   const ws = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
-  assertTrue("V0112-T-VER-1: workshop_version 0.112.x or 0.113.x or 0.114.x",
-    /^0\.(112|113|114)\.\d+$/.test(ws.workshop_version), `got: ${ws.workshop_version}`);
+  assertTrue("V0112-T-VER-1: workshop_version 0.112.x or 0.113.x or 0.114.x or 0.115.x",
+    /^0\.(112|113|114|115)\.\d+$/.test(ws.workshop_version), `got: ${ws.workshop_version}`);
   const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
-  assertTrue("V0112-T-VER-2: package.json version 0.112.x or 0.113.x or 0.114.x",
-    /^0\.(112|113|114)\.\d+$/.test(pkg.version), `got: ${pkg.version}`);
+  assertTrue("V0112-T-VER-2: package.json version 0.112.x or 0.113.x or 0.114.x or 0.115.x",
+    /^0\.(112|113|114|115)\.\d+$/.test(pkg.version), `got: ${pkg.version}`);
 }
 
 // v0.113.0 — schema registry MINOR (Stage A). See
@@ -13041,11 +13041,11 @@ async function caseV0113WorkshopBumped() {
   // lockstep with whatever the parallel-cycle finance work lands on — could
   // be 0.112.x PATCH coexistence or 0.113.x MINOR. Accept either.
   const ws = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
-  assertTrue("V0113-VER-1: workshop_version 0.112.x or 0.113.x or 0.114.x",
-    /^0\.(112|113|114)\.\d+$/.test(ws.workshop_version), `got: ${ws.workshop_version}`);
+  assertTrue("V0113-VER-1: workshop_version 0.112.x or 0.113.x or 0.114.x or 0.115.x",
+    /^0\.(112|113|114|115)\.\d+$/.test(ws.workshop_version), `got: ${ws.workshop_version}`);
   const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
-  assertTrue("V0113-VER-2: package.json version 0.112.x or 0.113.x or 0.114.x",
-    /^0\.(112|113|114)\.\d+$/.test(pkg.version), `got: ${pkg.version}`);
+  assertTrue("V0113-VER-2: package.json version 0.112.x or 0.113.x or 0.114.x or 0.115.x",
+    /^0\.(112|113|114|115)\.\d+$/.test(pkg.version), `got: ${pkg.version}`);
 }
 
 // v0.112.0 finance (MINOR) — FinanceMath shared aggregation helper + tests (S1)
@@ -13466,6 +13466,51 @@ async function caseV01150PaycheckTemplateAlignsManifest() {
     !/FinanceNavRow/.test(body));
 }
 
+// v0.115.0 Stage C — manifest additions (month entity-create + months rule_fragment + version bumps)
+
+async function caseV01150ManifestsBumped() {
+  console.log("\n--- Case V01150-C-MANIFESTS: v0.115.0 + finance 0.9.0 version pins ---");
+  const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
+  assertEqual(platMan.workshop_version, "0.115.0", "V01150-C-MANIFESTS-1: platform/manifest.json workshop_version");
+  const finPin = (platMan.blueprints || []).find(b => b.name === "finance");
+  assertTrue("V01150-C-MANIFESTS-2: platform/manifest.json finance blueprint pin === 0.9.0",
+    finPin && finPin.version === "0.9.0", `got: ${finPin?.version}`);
+  const finMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
+  assertEqual(finMan.version, "0.9.0", "V01150-C-MANIFESTS-3: finance manifest version");
+  const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
+  assertEqual(pkg.version, "0.115.0", "V01150-C-MANIFESTS-4: package.json version");
+}
+
+async function caseV01150MonthEntityCreateEntry() {
+  console.log("\n--- Case V01150-C-NEB-MONTH: finance new_entity_buttons[] month entry ---");
+  const finMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
+  const entries = finMan.new_entity_buttons || [];
+  const month = entries.find(e => e.id === "month");
+  assertTrue("V01150-C-NEB-MONTH-1: month entry present in new_entity_buttons[]", !!month);
+  assertTrue("V01150-C-NEB-MONTH-2: destination.folder_prefix === spice/finance/months",
+    month?.destination?.folder_prefix === "spice/finance/months");
+  assertTrue("V01150-C-NEB-MONTH-3: frontmatter_template.type === month",
+    month?.frontmatter_template?.type === "month");
+  assertTrue("V01150-C-NEB-MONTH-4: inline_body contains MonthDashboard and ## Notes",
+    typeof month?.inline_body === "string" &&
+    /MonthDashboard/.test(month.inline_body) &&
+    /##\s*Notes/.test(month.inline_body));
+}
+
+async function caseV01150MonthsRuleFragment() {
+  console.log("\n--- Case V01150-C-RF-MONTHS: finance rule_fragments[] months entry ---");
+  const finMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
+  const frags = finMan.rule_fragments || [];
+  const monthsFrag = frags.find(f => f.fragment && f.fragment.scope &&
+    typeof f.fragment.scope.path_glob === "string" &&
+    f.fragment.scope.path_glob.includes("months"));
+  assertTrue("V01150-C-RF-MONTHS-1: months rule_fragment present (scope.path_glob contains months)",
+    !!monthsFrag, `got: ${JSON.stringify(frags.map(f => f.fragment?.scope?.path_glob))}`);
+  assertTrue("V01150-C-RF-MONTHS-2: naming_pattern matches Month-YYYY-MM.md",
+    monthsFrag && /Month-\\d\{4\}-\\d\{2\}/.test(monthsFrag.fragment.naming_pattern),
+    `got: ${monthsFrag?.fragment?.naming_pattern}`);
+}
+
 async function caseV01103InjectMonthlyBandIdempotent() {
   console.log("\n--- Case V01103-MO-IDEM: _injectMonthlyBand transform is idempotent ---");
   const installer = require(path.join(WORKSHOP, "platform/install.js"));
@@ -13570,17 +13615,17 @@ async function caseV0111FinanceManifestRegistersFinanceNav() {
 async function caseV0110VersionBump() {
   console.log("\n--- Case V0110-VER: workshop 0.110.x or 0.111.x or 0.112.x + finance 0.6.x or 0.7.x + project 1.21.x ---");
   const ws = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
-  assertTrue("V0110-VER-1: workshop_version 0.110.x / 0.111.x / 0.112.x / 0.113.x / 0.114.x",
-    /^0\.(110|111|112|113|114)\.\d+$/.test(ws.workshop_version), `got: ${ws.workshop_version}`);
+  assertTrue("V0110-VER-1: workshop_version 0.110.x / 0.111.x / 0.112.x / 0.113.x / 0.114.x / 0.115.x",
+    /^0\.(110|111|112|113|114|115)\.\d+$/.test(ws.workshop_version), `got: ${ws.workshop_version}`);
   const fbp = (ws.blueprints || []).find(b => b.name === "finance");
   assertTrue("V0110-VER-2: finance pin 0.6.x or 0.7.x or 0.8.x",
-    fbp && /^0\.(6|7|8)\.\d+$/.test(fbp.version), `got: ${fbp?.version}`);
+    fbp && /^0\.(6|7|8|9)\.\d+$/.test(fbp.version), `got: ${fbp?.version}`);
   const pbp = (ws.blueprints || []).find(b => b.name === "project");
   assertTrue("V0110-VER-3: project pin 1.21.x",
     pbp && /^1\.21\.\d+$/.test(pbp.version), `got: ${pbp?.version}`);
   const fin = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
   assertTrue("V0110-VER-4: finance manifest version 0.6.x or 0.7.x or 0.8.x",
-    /^0\.(6|7|8)\.\d+$/.test(fin.version), `got: ${fin.version}`);
+    /^0\.(6|7|8|9)\.\d+$/.test(fin.version), `got: ${fin.version}`);
   const proj = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/manifest.json"), "utf8"));
   assertTrue("V0110-VER-5: project manifest version 1.21.x",
     /^1\.21\.\d+$/.test(proj.version), `got: ${proj.version}`);
@@ -15859,10 +15904,10 @@ async function caseV01090Ds1EntityTypeOpt() {
       // NOTE: top-level WORKSHOP at line 29 = path.resolve(__dirname, "../..") = workshop ROOT
       // (distinct from the local WORKSHOP inside caseHCV0891Versions which is platform/).
       const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
-      assertTrue("HC-V0900-VERSION-A: package.json version === '0.93.3'", pkg.version === "0.114.0");
+      assertTrue("HC-V0900-VERSION-A: package.json version === '0.93.3'", pkg.version === "0.115.0");
       const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
       assertTrue("HC-V0900-VERSION-B: platform/manifest.json workshop_version === '0.93.3'",
-        platMan.workshop_version === "0.114.0");
+        platMan.workshop_version === "0.115.0");
       const coworkMan = JSON.parse(fs.readFileSync(
         path.join(WORKSHOP, "platform/blueprints/cowork/manifest.json"), "utf8"));
       assertTrue("HC-V0900-VERSION-C: cowork manifest version === '0.31.0'",
@@ -16838,12 +16883,12 @@ type: cowork-microscope
   try {
     const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
     assertTrue("HC-V0920-VERSION-A1: workshop_version === 0.93.3",
-      platMan.workshop_version === "0.114.0");
+      platMan.workshop_version === "0.115.0");
     assertTrue("HC-V0920-VERSION-A2: blueprints[].cowork.version === 0.31.2",
       platMan.blueprints.find(b => b.name === "cowork").version === "0.40.2");
     const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
     assertTrue("HC-V0920-VERSION-A3: package.json version === 0.93.3",
-      pkg.version === "0.114.0");
+      pkg.version === "0.115.0");
     const workshopSub = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "ranch/platform-subscription.json"), "utf8"));
     assertTrue("HC-V0920-VERSION-A4: workshop subscription cowork pin === 0.31.0",
       workshopSub.blueprints.find(b => b.name === "cowork").version === "0.40.2");
@@ -17115,12 +17160,12 @@ type: cowork-microscope
   try {
     const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
     assertTrue("HC-V0930-VERSION-A1: workshop_version === 0.93.3",
-      platMan.workshop_version === "0.114.0");
+      platMan.workshop_version === "0.115.0");
     assertTrue("HC-V0930-VERSION-A2: blueprints[].cowork.version === 0.31.2",
       platMan.blueprints.find(b => b.name === "cowork").version === "0.40.2");
     const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
     assertTrue("HC-V0930-VERSION-A3: package.json version === 0.93.3",
-      pkg.version === "0.114.0");
+      pkg.version === "0.115.0");
     const workshopSub = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "ranch/platform-subscription.json"), "utf8"));
     assertTrue("HC-V0930-VERSION-A4: workshop subscription cowork pin === 0.31.1",
       workshopSub.blueprints.find(b => b.name === "cowork").version === "0.40.2");
@@ -17222,12 +17267,12 @@ type: cowork-microscope
   try {
     const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
     assertTrue("HC-V0931-VERSION-D1: workshop_version === 0.93.3",
-      platMan.workshop_version === "0.114.0");
+      platMan.workshop_version === "0.115.0");
     assertTrue("HC-V0931-VERSION-D2: blueprints[].cowork.version === 0.31.2",
       platMan.blueprints.find(b => b.name === "cowork").version === "0.40.2");
     const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
     assertTrue("HC-V0931-VERSION-D3: package.json version === 0.93.3",
-      pkg.version === "0.114.0");
+      pkg.version === "0.115.0");
     const coworkMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/cowork/manifest.json"), "utf8"));
     assertTrue("HC-V0931-VERSION-D4: cowork manifest.version === 0.31.1",
       coworkMan.version === "0.40.2");
@@ -22843,6 +22888,11 @@ type: cowork-microscope
   await caseV01150ContentMonthsExists();
   await caseV01150ContentFinanceLanding();
   await caseV01150PaycheckTemplateAlignsManifest();
+
+  // v0.115.0 finance Stage C — manifest additions (version bumps + month entity-create + months rule_fragment)
+  await caseV01150ManifestsBumped();
+  await caseV01150MonthEntityCreateEntry();
+  await caseV01150MonthsRuleFragment();
 
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
