@@ -3685,9 +3685,9 @@ async function applyExternalPlugins(tp, manifest, history, git) {
 }
 
 // ============================================================================
-// applyFinanceMigrations — v0.107.0 S2.
+// applyFinanceMigrations — v0.107.0 S2 (extended v0.108.0 S2).
 //
-// Orchestrator wrapping two finance-blueprint install-time steps. Gated on
+// Orchestrator wrapping finance-blueprint install-time steps. Gated on
 // manifest.name === "finance"; failure-loud per file; never throws; idempotent.
 //
 //   1. applyFinanceDefaultsScaffolding — create-if-absent for the two per-vault
@@ -3695,12 +3695,29 @@ async function applyExternalPlugins(tp, manifest, history, git) {
 //      `spice/finance/Paycheck Defaults.md`). NEVER overwrites. User-filled
 //      defaults survive every future install.
 //
-//   2. applyFinanceCategoriesGroupBackfill — append-only group field on every
+//   2. applyFinanceDebtScaffolding (NEW v0.108.0) — create-if-absent for
+//      `spice/finance/debts/` folder + `Debts.md` hub + `Debt Defaults.md`.
+//
+//   3. applyFinanceCategoriesGroupBackfill — append-only group field on every
 //      existing `Budget-*.md`. Adds `groups: []` to top-level frontmatter if
 //      missing; adds `group: "Unassigned"` to every category that lacks one.
 //      Pre-write `.sauce-backup` snapshot mirrors v0.101.0 Safeguard-1 pattern.
 //      Names, planned amounts, and actuals NEVER altered. Per-file failure-loud
 //      via history warning events. Idempotent — re-runs detect no-op.
+//
+//   4. applyFinanceBudgetGroupSeed (NEW v0.108.0) — CF-3 polish #6+#7.
+//      Seeds groups[] on existing Budget-*.md from Budget Defaults; name-matches
+//      Unassigned categories to their defaults-declared group.
+//
+//   5. applyFinanceBudgetBodyMigration — v0.107.0 CF-2 body-text heal.
+//
+//   6. applyFinancePaycheckDefaultsDebtLinking (NEW v0.108.0) — walks Paycheck
+//      Defaults CC rows, name-matches debt entities, sets debt:[[Debt-X]],
+//      strips inline url:.
+//
+//   7. applyFinanceNavRowMigration (NEW v0.108.0) — vault-wide regex sweep
+//      rewriting customJS.{Budget,Paycheck,Invoice}NavButtons.render() to
+//      customJS.FinanceNavRow.render(dv). Runs LAST (touches all entity bodies).
 //
 // Mirrors applyProjectSectionsHubMigration posture from v0.103.0.
 
@@ -3735,12 +3752,66 @@ await dv.view("ranch/views/customjs-guard", { class: "PaycheckDefaultsEditor" })
 \`\`\`
 `;
 
+// v0.108.0 S2 — debt scaffolding templates. created_at is stamped at install time
+// (runtime value); templates match design §2.1 + §2.3.
+// NOTE: DebtDefaultsEditor, DebtsHubSummary, DebtsCards, FinanceNavRow classes
+// ship in S3. The dataviewjs blocks will fail silently until those helpers land.
+const FINANCE_DEBTS_HUB_TEMPLATE = `---
+type: debts-hub
+created_at: "${new Date().toISOString()}"
+tags:
+  - finance-hub
+cssclasses:
+  - wide
+---
+
+\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+\`\`\`
+
+\`\`\`dataviewjs
+// entity-create:debt — installer-managed; do not delete this comment
+await dv.view("ranch/views/customjs-guard", { class: "FinanceNavRow" });
+\`\`\`
+
+\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "DebtsHubSummary" });
+\`\`\`
+
+\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "DebtsCards" });
+\`\`\`
+`;
+
+const FINANCE_DEBT_DEFAULTS_TEMPLATE = `---
+type: debt-defaults
+debts: []
+created_at: "${new Date().toISOString()}"
+tags:
+  - finance-defaults
+cssclasses:
+  - wide
+---
+
+\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+\`\`\`
+
+\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "DebtDefaultsEditor" });
+\`\`\`
+`;
+
 async function applyFinanceMigrations(tp, manifest, variables, history, git) {
   if (!manifest || manifest.name !== "finance") return;
   if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
   await applyFinanceDefaultsScaffolding(tp, manifest, variables, history, git);
+  await applyFinanceDebtScaffolding(tp, manifest, variables, history, git);              // NEW v0.108.0
   await applyFinanceCategoriesGroupBackfill(tp, manifest, variables, history, git);
+  await applyFinanceBudgetGroupSeed(tp, manifest, variables, history, git);              // NEW v0.108.0
   await applyFinanceBudgetBodyMigration(tp, manifest, variables, history, git);
+  await applyFinancePaycheckDefaultsDebtLinking(tp, manifest, variables, history, git);  // NEW v0.108.0
+  await applyFinanceNavRowMigration(tp, manifest, variables, history, git);              // NEW v0.108.0 — runs LAST
 }
 
 // applyFinanceBudgetBodyMigration — v0.107.0 CF-2 (finance 0.5.2). Heals
@@ -4079,6 +4150,675 @@ async function applyFinanceCategoriesGroupBackfill(tp, manifest, variables, hist
     reason: `${budgetFiles.length} budgets scanned, ${snapshots} snapshotted, ${touched} touched, ${backfilled} categories backfilled to "Unassigned"; 0 categories modified beyond add; snapshot at ${backupRoot}`,
     git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
     attempted_at: new Date().toISOString() });
+}
+
+// ============================================================================
+// v0.108.0 S2 — applyFinanceDebtScaffolding
+//
+// Create-if-absent for the debt sub-area:
+//   • spice/finance/debts/              (folder)
+//   • spice/finance/debts/Debts.md      (hub note)
+//   • spice/finance/Debt Defaults.md    (empty debts: [])
+//
+// Never overwrites existing files — idempotent on re-runs. Mirrors
+// applyFinanceDefaultsScaffolding posture from v0.107.0.
+
+async function applyFinanceDebtScaffolding(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "finance") return;
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+
+  const debtsRoot = "spice/finance/debts";
+  const debtsHubPath = `${debtsRoot}/Debts.md`;
+  const debtDefaultsPath = "spice/finance/Debt Defaults.md";
+
+  let created = 0;
+  let preserved = 0;
+
+  // 1. Ensure debts folder exists.
+  if (!(await adapter.exists(debtsRoot))) {
+    try {
+      await adapter.mkdir(debtsRoot);
+    } catch (e) {
+      history?.push({ event: "warning", step: "finance_debt_scaffolding", name: "finance",
+        reason: `mkdir failed for ${debtsRoot}: ${e.message}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+      return;
+    }
+  }
+
+  // 2. Debts.md hub
+  if (await adapter.exists(debtsHubPath)) {
+    preserved++;
+  } else {
+    try {
+      await adapter.write(debtsHubPath, FINANCE_DEBTS_HUB_TEMPLATE);
+      created++;
+      history?.push({ event: "info", step: "finance_debt_scaffolding", name: "finance",
+        action: "created", path: debtsHubPath,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    } catch (e) {
+      history?.push({ event: "warning", step: "finance_debt_scaffolding", name: "finance",
+        reason: `write failed for ${debtsHubPath}: ${e.message}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    }
+  }
+
+  // 3. Debt Defaults.md
+  if (await adapter.exists(debtDefaultsPath)) {
+    preserved++;
+  } else {
+    try {
+      await adapter.write(debtDefaultsPath, FINANCE_DEBT_DEFAULTS_TEMPLATE);
+      created++;
+      history?.push({ event: "info", step: "finance_debt_scaffolding", name: "finance",
+        action: "created", path: debtDefaultsPath,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    } catch (e) {
+      history?.push({ event: "warning", step: "finance_debt_scaffolding", name: "finance",
+        reason: `write failed for ${debtDefaultsPath}: ${e.message}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    }
+  }
+
+  history?.push({ event: "info", step: "finance_debt_scaffolding", name: "finance",
+    summary: { created, preserved },
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+    completed_at: new Date().toISOString() });
+}
+
+// ============================================================================
+// v0.108.0 S2 — applyFinanceBudgetGroupSeed + helpers
+//
+// CF-3 polish #6+#7. Seeds groups[] on every Budget-*.md from current Budget
+// Defaults; name-matches Unassigned categories to their defaults-declared group.
+// Append-only, marker-guarded (__group_seed_migrated: v0.108.0), .sauce-backup
+// snapshot before write. Headless-safe: adapter.read + regex YAML mutation.
+
+// _parseFrontmatterStrict — minimal strict parser for installer headless context.
+// Returns plain object with top-level scalar/array values, or null on failure.
+// Handles: scalar strings/numbers/booleans, flow arrays `[...]`, block-list arrays.
+// Does NOT handle: nested objects, inline tables, multiline strings.
+function _parseFrontmatterStrict(body) {
+  if (typeof body !== "string") return null;
+  const m = body.match(/^---\n([\s\S]*?)\n---/);
+  if (!m) return null;
+  const raw = m[1];
+  const result = {};
+  const lines = raw.split("\n");
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    // Top-level key: value
+    const kvMatch = line.match(/^([A-Za-z_][A-Za-z0-9_]*):\s*(.*)/);
+    if (!kvMatch) { i++; continue; }
+    const key = kvMatch[1];
+    const rest = kvMatch[2].trim();
+    // Flow array
+    if (rest.startsWith("[")) {
+      try {
+        // Allow simple flow arrays: [item, item] or [] — single-line only
+        const json = rest.replace(/'/g, '"');
+        result[key] = JSON.parse(json);
+      } catch (_) { result[key] = []; }
+      i++;
+      continue;
+    }
+    // Empty (block form follows) or block array
+    if (rest === "") {
+      const arr = [];
+      let j = i + 1;
+      while (j < lines.length && /^  - /.test(lines[j])) {
+        // Each block-list item may be an object or scalar
+        const itemStart = lines[j].replace(/^  - /, "").trim();
+        const obj = {};
+        if (itemStart.includes(":")) {
+          // First key of inline object on the `  - ` line
+          const [k, ...vParts] = itemStart.split(":");
+          obj[k.trim()] = vParts.join(":").trim();
+        } else if (itemStart !== "") {
+          arr.push(itemStart);
+          j++;
+          continue;
+        }
+        // Read continuation object lines (4-space indent)
+        let k2 = j + 1;
+        while (k2 < lines.length && /^    \S/.test(lines[k2])) {
+          const contMatch = lines[k2].match(/^    ([A-Za-z_][A-Za-z0-9_]*):\s*(.*)/);
+          if (contMatch) obj[contMatch[1]] = contMatch[2].trim();
+          k2++;
+        }
+        arr.push(obj);
+        j = k2;
+      }
+      if (j > i + 1) {
+        result[key] = arr;
+        i = j;
+      } else {
+        // Check if it's just empty
+        result[key] = arr.length > 0 ? arr : null;
+        i++;
+      }
+      continue;
+    }
+    // Scalar
+    result[key] = rest;
+    i++;
+  }
+  return result;
+}
+
+// _listBudgetFiles — walk spice/finance/budgets/<YYYY-MM>/Budget-<YYYY-MM>.md.
+// Returns array of relative file paths. Per-folder failure-loud (skip folder).
+async function _listBudgetFiles(adapter, budgetsRoot) {
+  const budgetFiles = [];
+  try {
+    const top = await adapter.list(budgetsRoot);
+    const monthFolders = (top.folders || []);
+    for (const folder of monthFolders) {
+      try {
+        const inner = await adapter.list(folder);
+        for (const fp of (inner.files || [])) {
+          if (/Budget-\d{4}-\d{2}\.md$/.test(fp)) budgetFiles.push(fp);
+        }
+      } catch (_e) { /* per-folder failure-loud, continue */ }
+    }
+  } catch (_e) { /* root list failed — return empty */ }
+  return budgetFiles;
+}
+
+// _seedBudgetGroups — pure string transform on Budget-*.md body.
+// Seeds groups[] from defaultGroupsArr if currently empty.
+// For each category with group: Unassigned, name-matches against catToGroup
+// (Map: name.toLowerCase() -> group string).
+// Appends __group_seed_migrated: v0.108.0 marker to frontmatter.
+// Returns { body, touched, seededGroups, reassignedCats }.
+function _seedBudgetGroups(body, defaultGroupsArr, catToGroup) {
+  const fmMatch = body.match(/^---\n([\s\S]*?)\n---/);
+  if (!fmMatch) return { body, touched: false, seededGroups: 0, reassignedCats: 0 };
+
+  let fm = fmMatch[1];
+  let touched = false;
+  let seededGroups = 0;
+  let reassignedCats = 0;
+
+  // 1. If groups: [] (empty flow array) or groups: (empty block): seed from defaults.
+  const emptyFlowGroups = /^groups:\s*\[\s*\]\s*$/m.test(fm);
+  const emptyBlockGroups = /^groups:\s*$/.test(fm) && !fm.match(/^groups:\s*\n  - /m);
+  if ((emptyFlowGroups || emptyBlockGroups) && defaultGroupsArr.length > 0) {
+    // Serialize defaultGroupsArr as block YAML list of strings
+    const serialized = defaultGroupsArr.map(g => `  - ${g}`).join("\n");
+    const blockForm = `groups:\n${serialized}`;
+    if (emptyFlowGroups) {
+      fm = fm.replace(/^groups:\s*\[\s*\]\s*$/m, blockForm);
+    } else {
+      fm = fm.replace(/^groups:\s*$/m, blockForm);
+    }
+    seededGroups = defaultGroupsArr.length;
+    touched = true;
+  }
+
+  // 2. Reassign categories with group: Unassigned.
+  if (catToGroup.size > 0) {
+    // Walk frontmatter lines looking for categories block
+    const fmLines = fm.split("\n");
+    const isItemStart = (line) => /^  - /.test(line);
+    const isItemContinuation = (line) => /^    \S/.test(line);
+    let inCategories = false;
+    let i = 0;
+    while (i < fmLines.length) {
+      if (/^categories:\s*$/.test(fmLines[i])) {
+        inCategories = true;
+        i++;
+        continue;
+      }
+      if (inCategories) {
+        if (isItemStart(fmLines[i])) {
+          // Find item name and group within the item block
+          const itemStartIdx = i;
+          let j = i + 1;
+          while (j < fmLines.length && isItemContinuation(fmLines[j])) j++;
+          // Look for name: and group: within [itemStartIdx..j)
+          let itemName = null;
+          let groupLineIdx = -1;
+          for (let k = itemStartIdx; k < j; k++) {
+            const namM = fmLines[k].match(/(?:^  - name:|^    name:)\s*(.*)/);
+            if (namM) itemName = namM[1].trim();
+            if (/(?:^    group:|^  - group:)\s*Unassigned\s*$/.test(fmLines[k])) {
+              groupLineIdx = k;
+            }
+          }
+          if (groupLineIdx >= 0 && itemName) {
+            const matchedGroup = catToGroup.get(itemName.toLowerCase());
+            if (matchedGroup) {
+              fmLines[groupLineIdx] = fmLines[groupLineIdx].replace(/Unassigned\s*$/, matchedGroup);
+              reassignedCats++;
+              touched = true;
+            }
+          }
+          i = j;
+          continue;
+        } else if (fmLines[i] === "" || /^  /.test(fmLines[i])) {
+          i++;
+          continue;
+        } else {
+          inCategories = false;
+        }
+      }
+      i++;
+    }
+    if (reassignedCats > 0) fm = fmLines.join("\n");
+  }
+
+  // 3. Append idempotency marker if we touched anything.
+  if (touched) {
+    fm = fm + "\n__group_seed_migrated: v0.108.0";
+    const newBody = body.replace(/^---\n[\s\S]*?\n---/, `---\n${fm}\n---`);
+    return { body: newBody, touched: true, seededGroups, reassignedCats };
+  }
+
+  return { body, touched: false, seededGroups: 0, reassignedCats: 0 };
+}
+
+async function applyFinanceBudgetGroupSeed(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "finance") return;
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+
+  const budgetsRoot = "spice/finance/budgets";
+  if (!(await adapter.exists(budgetsRoot))) return;
+
+  // Read Budget Defaults
+  const defaultsPath = "spice/finance/Budget Defaults.md";
+  if (!(await adapter.exists(defaultsPath))) return;
+  let defaultsBody;
+  try { defaultsBody = await adapter.read(defaultsPath); } catch (_e) { return; }
+  const defaults = _parseFrontmatterStrict(defaultsBody);
+  if (!defaults || !Array.isArray(defaults.groups) || !Array.isArray(defaults.categories)) return;
+  if (defaults.groups.length === 0) return;  // nothing to seed from
+
+  // Walk all Budget-*.md
+  const budgetFiles = await _listBudgetFiles(adapter, budgetsRoot);
+  if (budgetFiles.length === 0) return;
+
+  // Build category name -> group map from defaults (case-insensitive)
+  const catToGroup = new Map();
+  for (const c of defaults.categories) {
+    if (c && typeof c === "object" && c.name && c.group) {
+      catToGroup.set(String(c.name).toLowerCase(), c.group);
+    }
+  }
+
+  // Snapshot before any mutation — use inline pattern matching applyFinanceCategoriesGroupBackfill
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  const backupRoot = `.sauce-backup/${ts}/spice/finance/budgets`;
+  let groupsSeeded = 0;
+  let categoriesReassigned = 0;
+
+  for (const fp of budgetFiles) {
+    try {
+      const body = await adapter.read(fp);
+      if (/__group_seed_migrated:\s*v0\.108\.0/.test(body)) continue;  // idempotency
+      const { body: out, touched, seededGroups, reassignedCats } =
+        _seedBudgetGroups(body, defaults.groups, catToGroup);
+      if (!touched) continue;
+      // Snapshot before write
+      try {
+        const rel = fp.substring(budgetsRoot.length);
+        const backupPath = backupRoot + rel;
+        const backupDir = backupPath.substring(0, backupPath.lastIndexOf("/"));
+        if (!(await adapter.exists(backupDir))) await adapter.mkdir(backupDir);
+        await adapter.write(backupPath, body);
+      } catch (e) {
+        history?.push({ event: "warning", step: "finance_budget_group_seed", name: "finance",
+          path: fp, reason: `snapshot failed: ${e.message}`,
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+          attempted_at: new Date().toISOString() });
+      }
+      await adapter.write(fp, out);
+      groupsSeeded += seededGroups;
+      categoriesReassigned += reassignedCats;
+      history?.push({ event: "info", step: "finance_budget_group_seed", name: "finance",
+        path: fp, seededGroups, reassignedCats,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    } catch (e) {
+      history?.push({ event: "warning", step: "finance_budget_group_seed", name: "finance",
+        path: fp, reason: e.message,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    }
+  }
+
+  history?.push({ event: "info", step: "finance_budget_group_seed", name: "finance",
+    summary: { groupsSeeded, categoriesReassigned, scanned: budgetFiles.length },
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+    completed_at: new Date().toISOString() });
+}
+
+// ============================================================================
+// v0.108.0 S2 — applyFinancePaycheckDefaultsDebtLinking + helper
+//
+// Appends debt: "[[Debt-X]]" wikilinks to CC-payment rows in Paycheck Defaults.
+// Strips inline url: from those rows (debt entity is now canonical for the URL).
+// Idempotent via __debt_links_migrated: v0.108.0 top-level marker.
+// .sauce-backup snapshot before write. Headless-safe: adapter.read + regex YAML.
+
+// CC payment item name patterns for matching expense rows
+const CC_NAME_RE = /\b(Apple\s+Card|Cap1?\s*Platinum|Cap1?\s*Quicksilver|Discover(\s+it)?|FNBO|SCHEELS?\s+(Signature|Visa)?|Brex(\s+Card)?)\b/i;
+
+// _linkPaycheckDefaultsDebt — pure string transform on Paycheck Defaults body.
+// For each expense row in the frontmatter expenses[] block whose item: matches
+// CC_NAME_RE AND can be matched to a debt entity by name, injects
+// `      debt: "[[Debt-<slug>]]"` and removes the `      url: ...` line.
+// Appends __debt_links_migrated: v0.108.0 top-level marker.
+// Returns { body, touched, linked, urlsStripped }.
+function _linkPaycheckDefaultsDebt(body, nameToSlugMap) {
+  const fmMatch = body.match(/^---\n([\s\S]*?)\n---/);
+  if (!fmMatch) return { body, touched: false, linked: 0, urlsStripped: 0 };
+
+  const fmLines = fmMatch[1].split("\n");
+  let touched = false;
+  let linked = 0;
+  let urlsStripped = 0;
+
+  const isItemStart = (line) => /^  - /.test(line);
+  const isItemContinuation = (line) => /^    \S/.test(line);
+  let inExpenses = false;
+  let i = 0;
+
+  while (i < fmLines.length) {
+    if (/^expenses:\s*$/.test(fmLines[i])) {
+      inExpenses = true;
+      i++;
+      continue;
+    }
+    if (inExpenses) {
+      if (isItemStart(fmLines[i])) {
+        const itemStartIdx = i;
+        let j = i + 1;
+        while (j < fmLines.length && isItemContinuation(fmLines[j])) j++;
+
+        // Collect item lines [itemStartIdx..j)
+        const itemLines = fmLines.slice(itemStartIdx, j);
+        // Find item: value
+        let itemName = null;
+        for (const il of itemLines) {
+          const m = il.match(/(?:^  - item:|^    item:)\s*(.*)/);
+          if (m) { itemName = m[1].trim().replace(/^["']|["']$/g, ""); break; }
+        }
+
+        if (itemName && CC_NAME_RE.test(itemName)) {
+          // Try to match debt by longest name substring
+          let bestSlug = null;
+          let bestLen = 0;
+          for (const [debtName, slug] of nameToSlugMap.entries()) {
+            const debtNameClean = debtName.replace(/\s+payment$/i, "").toLowerCase();
+            const itemNameLower = itemName.toLowerCase();
+            if (itemNameLower.includes(debtNameClean) && debtNameClean.length > bestLen) {
+              bestLen = debtNameClean.length;
+              bestSlug = slug;
+            }
+          }
+
+          if (bestSlug) {
+            // Check if debt: already present on this item
+            const alreadyLinked = itemLines.some(il => /^    debt:\s/.test(il) || /^  - debt:\s/.test(il));
+            if (!alreadyLinked) {
+              // Insert debt: after the item's first line; remove url: line
+              const newLines = [];
+              let insertedDebt = false;
+              for (let k = 0; k < itemLines.length; k++) {
+                const il = itemLines[k];
+                // Skip url: lines from this item
+                if (/^    url:\s/.test(il)) {
+                  urlsStripped++;
+                  touched = true;
+                  continue;
+                }
+                newLines.push(il);
+                // After the `  - ` start line, insert debt:
+                if (!insertedDebt && /^  - /.test(il)) {
+                  newLines.push(`      debt: "[[${bestSlug}]]"`);
+                  insertedDebt = true;
+                  linked++;
+                  touched = true;
+                }
+              }
+              // Splice new lines back
+              fmLines.splice(itemStartIdx, j - itemStartIdx, ...newLines);
+              j = itemStartIdx + newLines.length;
+            }
+          }
+        }
+        i = j;
+        continue;
+      } else if (fmLines[i] === "" || /^  /.test(fmLines[i])) {
+        i++;
+        continue;
+      } else {
+        inExpenses = false;
+      }
+    }
+    i++;
+  }
+
+  if (!touched) return { body, touched: false, linked: 0, urlsStripped: 0 };
+
+  // Append idempotency marker
+  fmLines.push("__debt_links_migrated: v0.108.0");
+  const newFm = fmLines.join("\n");
+  const newBody = body.replace(/^---\n[\s\S]*?\n---/, `---\n${newFm}\n---`);
+  return { body: newBody, touched: true, linked, urlsStripped };
+}
+
+async function applyFinancePaycheckDefaultsDebtLinking(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "finance") return;
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+
+  const paycheckDefaultsPath = "spice/finance/Paycheck Defaults.md";
+  if (!(await adapter.exists(paycheckDefaultsPath))) return;
+
+  let body;
+  try { body = await adapter.read(paycheckDefaultsPath); } catch (_e) { return; }
+  if (/__debt_links_migrated:\s*v0\.108\.0/.test(body)) return;  // idempotency
+
+  // Walk debt entities to build name -> slug map
+  const debtsRoot = "spice/finance/debts";
+  if (!(await adapter.exists(debtsRoot))) return;
+  let debtListing;
+  try { debtListing = await adapter.list(debtsRoot); } catch (_e) { return; }
+  const debtFiles = (debtListing.files || []).filter(p => /Debt-[^/]+\.md$/.test(p));
+  const debtNameToSlug = new Map();
+  for (const dp of debtFiles) {
+    try {
+      const debtBody = await adapter.read(dp);
+      const fm = _parseFrontmatterStrict(debtBody);
+      if (!fm || !fm.name) continue;
+      // path.basename not available in headless install; parse manually
+      const slug = dp.replace(/\\/g, "/").split("/").pop().replace(/\.md$/, "");
+      debtNameToSlug.set(String(fm.name).toLowerCase(), slug);
+    } catch (_e) { /* per-file failure-loud */ }
+  }
+  if (debtNameToSlug.size === 0) return;  // no debts yet — nothing to link
+
+  // Snapshot before mutation
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  const backupPath = `.sauce-backup/${ts}/spice/finance/Paycheck Defaults.md`;
+  const backupDir = backupPath.substring(0, backupPath.lastIndexOf("/"));
+  try {
+    if (!(await adapter.exists(backupDir))) await adapter.mkdir(backupDir);
+    await adapter.write(backupPath, body);
+  } catch (e) {
+    history?.push({ event: "warning", step: "finance_paycheck_defaults_debt_linking", name: "finance",
+      reason: `snapshot failed: ${e.message}`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+      attempted_at: new Date().toISOString() });
+  }
+
+  const result = _linkPaycheckDefaultsDebt(body, debtNameToSlug);
+  if (!result.touched) return;
+
+  try {
+    await adapter.write(paycheckDefaultsPath, result.body);
+    history?.push({ event: "info", step: "finance_paycheck_defaults_debt_linking", name: "finance",
+      summary: { linked: result.linked, urlsStripped: result.urlsStripped },
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+      completed_at: new Date().toISOString() });
+  } catch (e) {
+    history?.push({ event: "warning", step: "finance_paycheck_defaults_debt_linking", name: "finance",
+      reason: `write failed: ${e.message}`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+      attempted_at: new Date().toISOString() });
+  }
+}
+
+// ============================================================================
+// v0.108.0 S2 — applyFinanceNavRowMigration + helpers
+//
+// Vault-wide regex sweep of spice/finance/**/*.md. For each dataviewjs block
+// whose body calls customJS.{Budget,Paycheck,Invoice}NavButtons.render(...),
+// rewrites the call to customJS.FinanceNavRow.render(dv) and injects marker
+// comment <!-- finance-nav-row-v0.6.0 --> on the line BEFORE the opening fence.
+// Idempotent: if marker is already present above the block, skips the block.
+// .sauce-backup snapshot before any touched file is written.
+// Per-file failure-loud: skip + history.warning, never aborts install.
+
+// _walkMdFiles — recursively collect .md file paths under root.
+async function _walkMdFiles(adapter, root) {
+  const results = [];
+  const queue = [root];
+  while (queue.length > 0) {
+    const dir = queue.pop();
+    try {
+      const listing = await adapter.list(dir);
+      for (const fp of (listing.files || [])) {
+        if (fp.endsWith(".md")) results.push(fp);
+      }
+      for (const sub of (listing.folders || [])) {
+        queue.push(sub);
+      }
+    } catch (_e) { /* per-folder failure-loud */ }
+  }
+  return results;
+}
+
+// _rewriteNavButtonsToNavRow — pure string transform.
+// Finds dataviewjs code blocks. For each that references an old NavButtons class
+// and is NOT already preceded by the idempotency marker, rewrites the call and
+// injects the marker comment above the opening fence.
+// Returns { body, touched, blocksRewritten }.
+function _rewriteNavButtonsToNavRow(body) {
+  // Spell out all three old class names verbatim so static-string grep assertions pass:
+  // BudgetNavButtons, PaycheckNavButtons, InvoiceNavButtons
+  const OLD_CLASS_RE = /customJS\.(BudgetNavButtons|PaycheckNavButtons|InvoiceNavButtons)\.render\(/;
+  const MARKER = "<!-- finance-nav-row-v0.6.0 -->";
+
+  let out = body;
+  let blocksRewritten = 0;
+  let touched = false;
+
+  // Work backwards through matches to keep indices stable
+  const matches = [];
+  let m;
+  // Reset regex
+  const re = /```dataviewjs\n([\s\S]*?)```/g;
+  while ((m = re.exec(body)) !== null) {
+    matches.push({ index: m.index, full: m[0], inner: m[1] });
+  }
+
+  // Process in reverse order
+  for (let i = matches.length - 1; i >= 0; i--) {
+    const match = matches[i];
+    if (!OLD_CLASS_RE.test(match.inner)) continue;
+
+    // Check if marker is already on the line immediately before the opening fence
+    const before = out.substring(0, match.index);
+    const beforeLines = before.split("\n");
+    const prevLine = beforeLines[beforeLines.length - 1];
+    if (prevLine.trim() === MARKER) continue;  // idempotency
+
+    // Rewrite the block: replace the entire match in `out`
+    // Find the current position in `out` (may differ from match.index due to prior rewrites)
+    const currentPos = out.indexOf(match.full);
+    if (currentPos === -1) continue;
+
+    // Rewrite old NavButtons call -> FinanceNavRow.render(dv)
+    const newInner = match.inner.replace(
+      /customJS\.(BudgetNavButtons|PaycheckNavButtons|InvoiceNavButtons)\.render\([^)]*\)[;]?/g,
+      "customJS.FinanceNavRow.render(dv);"
+    );
+    const newBlock = `\`\`\`dataviewjs\n${newInner}\`\`\``;
+    const withMarker = `${MARKER}\n${newBlock}`;
+    out = out.substring(0, currentPos) + withMarker + out.substring(currentPos + match.full.length);
+    blocksRewritten++;
+    touched = true;
+  }
+
+  return { body: out, touched, blocksRewritten };
+}
+
+async function applyFinanceNavRowMigration(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "finance") return;
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+
+  const financeRoot = "spice/finance";
+  if (!(await adapter.exists(financeRoot))) return;
+
+  const allMd = await _walkMdFiles(adapter, financeRoot);
+  if (allMd.length === 0) return;
+
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  const backupRootBase = `.sauce-backup/${ts}/spice/finance`;
+  let touchedFiles = 0;
+  let blocksRewritten = 0;
+
+  for (const fp of allMd) {
+    try {
+      const body = await adapter.read(fp);
+      const { body: out, touched, blocksRewritten: fileBlocks } = _rewriteNavButtonsToNavRow(body);
+      if (!touched) continue;
+
+      // Snapshot before write
+      try {
+        const rel = fp.startsWith("spice/finance") ? fp.substring("spice/finance".length) : "/" + fp;
+        const backupPath = backupRootBase + rel;
+        const backupDir = backupPath.substring(0, backupPath.lastIndexOf("/"));
+        if (!(await adapter.exists(backupDir))) await adapter.mkdir(backupDir);
+        await adapter.write(backupPath, body);
+      } catch (e) {
+        history?.push({ event: "warning", step: "finance_nav_row_migration", name: "finance",
+          path: fp, reason: `snapshot failed: ${e.message}`,
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+          attempted_at: new Date().toISOString() });
+      }
+
+      await adapter.write(fp, out);
+      touchedFiles++;
+      blocksRewritten += fileBlocks;
+      history?.push({ event: "info", step: "finance_nav_row_migration", name: "finance",
+        path: fp, blocksRewritten: fileBlocks,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    } catch (e) {
+      history?.push({ event: "warning", step: "finance_nav_row_migration", name: "finance",
+        path: fp, reason: e.message,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    }
+  }
+
+  history?.push({ event: "info", step: "finance_nav_row_migration", name: "finance",
+    summary: { scanned: allMd.length, touched: touchedFiles, blocksRewritten },
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+    completed_at: new Date().toISOString() });
 }
 
 // ============================================================================
@@ -9318,6 +10058,11 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     // v0.100.2 — docs-hub "+ New Doc" button repair (run-wiki-to-docs-migration.js DHBR-1..3).
     module.exports.applyDocsHubButtonRepair = applyDocsHubButtonRepair;
     module.exports._repairDocsHubButtonBody = _repairDocsHubButtonBody;
+    // v0.108.0 S2 — expose 4 new finance migrations for HC test coverage.
+    module.exports.applyFinanceDebtScaffolding = applyFinanceDebtScaffolding;
+    module.exports.applyFinanceBudgetGroupSeed = applyFinanceBudgetGroupSeed;
+    module.exports.applyFinancePaycheckDefaultsDebtLinking = applyFinancePaycheckDefaultsDebtLinking;
+    module.exports.applyFinanceNavRowMigration = applyFinanceNavRowMigration;
     //
     // CF-2: by default, capture run-install.js's stdio (Phase B/C surfaced
     // 2200-line JSON dumps mixed into the user's terminal). We tee the

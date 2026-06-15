@@ -12228,6 +12228,40 @@ async function caseV01080EntityCreateResolveWikilinks() {
     foundResolver, "no source file matches the expected resolver shape");
 }
 
+// v0.108.0 S2 — finance migration orchestrator wiring
+async function caseV01080FinanceMigrationOrchestrator() {
+  console.log("\n--- Case V01080-FM-ORCH: applyFinanceMigrations wires 4 new steps ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
+  const newCalls = [
+    "applyFinanceDebtScaffolding",
+    "applyFinanceBudgetGroupSeed",
+    "applyFinancePaycheckDefaultsDebtLinking",
+    "applyFinanceNavRowMigration",
+  ];
+  for (const fn of newCalls) {
+    assertTrue(`V01080-FM-ORCH-${fn}-defined: function defined`,
+      new RegExp(`async function ${fn}\\(`).test(src));
+    assertTrue(`V01080-FM-ORCH-${fn}-called: orchestrator calls it`,
+      new RegExp(`await ${fn}\\(tp,\\s*manifest`).test(src));
+    assertTrue(`V01080-FM-ORCH-${fn}-exported: module.exports declares it`,
+      new RegExp(`module\\.exports\\.${fn}\\s*=\\s*${fn}`).test(src));
+  }
+}
+
+// v0.108.0 S2 — nav-row migration regex patterns in install.js
+async function caseV01080FinanceNavRowMigrationRegex() {
+  console.log("\n--- Case V01080-FNR-MIG: nav-row migration regex matches old + new ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
+  assertTrue("V01080-FNR-MIG-budgetref: references BudgetNavButtons",
+    /BudgetNavButtons/.test(src));
+  assertTrue("V01080-FNR-MIG-paycheckref: references PaycheckNavButtons",
+    /PaycheckNavButtons/.test(src));
+  assertTrue("V01080-FNR-MIG-invoiceref: references InvoiceNavButtons",
+    /InvoiceNavButtons/.test(src));
+  assertTrue("V01080-FNR-MIG-marker: emits v0.6.0 marker",
+    /finance-nav-row-v0\.6\.0/.test(src));
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -12914,6 +12948,10 @@ async function caseV01080EntityCreateResolveWikilinks() {
   // v0.108.0 S1 — entity-create 0.7.1 PATCH (resolve_wikilinks)
   await caseV01080EntityCreatePatchBump();
   await caseV01080EntityCreateResolveWikilinks();
+
+  // v0.108.0 S2 — 4 finance migrations (debt scaffolding, group seed, paycheck-defaults debt linking, nav-row sweep)
+  await caseV01080FinanceMigrationOrchestrator();
+  await caseV01080FinanceNavRowMigrationRegex();
 
   // v0.65.0 HC-V065-RUN-NOTE: write-run-note-* sub-skill lint
   {
