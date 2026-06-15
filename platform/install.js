@@ -4406,10 +4406,28 @@ async function applyFinanceUnifiedNavMigration(tp, mech, variables, history, git
 
   const REPLACEMENT = `await dv.view("ranch/views/customjs-guard", { class: "FinanceNav" });`;
 
+  // Match a dataviewjs FENCE containing a FinanceNav call. Used after
+  // rewriting to collapse consecutive FinanceNav fences.
+  const FINANCE_NAV_FENCE_RE = /```dataviewjs\s*\n(?:[^`]*?)await\s+dv\.view\("[^"]*customjs-guard"\s*,\s*\{\s*class:\s*"FinanceNav"\s*\}\s*\)\s*;?\s*\n```/g;
+
   function _rewriteUnifiedNav(body) {
     let touched = 0;
     let out = body.replace(GUARD_FORM_RE, () => { touched++; return REPLACEMENT; });
     out = out.replace(DIRECT_FORM_RE, () => { touched++; return REPLACEMENT; });
+    // v0.111.3 dedup: when a file had BOTH a FinanceHubActions block AND a
+    // FinanceNavRow block, the rewrite above produced two FinanceNav fences
+    // back-to-back. Collapse to one (keeps the first, which usually carries
+    // the installer-managed entity-create:<id> comment).
+    const dupRe = new RegExp(FINANCE_NAV_FENCE_RE.source + "\\s*" + FINANCE_NAV_FENCE_RE.source, "g");
+    let prevLen;
+    do {
+      prevLen = out.length;
+      out = out.replace(dupRe, (m) => {
+        touched++;
+        const first = m.match(FINANCE_NAV_FENCE_RE);
+        return first ? first[0] : m;
+      });
+    } while (out.length !== prevLen);
     return { body: out, touched };
   }
 
@@ -11207,6 +11225,8 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     // v0.110.3 — MonthlyOverview band injection on Budget-YYYY-MM.md
     module.exports.applyFinanceBudgetMonthlyBandInjection = applyFinanceBudgetMonthlyBandInjection;
     module.exports._injectMonthlyBand = _injectMonthlyBand;
+    // Behavioral harness reads _migrateBudgetBody to chain-test migration ordering.
+    module.exports._migrateBudgetBody = _migrateBudgetBody;
     // v0.110.1 — vault-wide EntityCreate direct-call → guard rewrite.
     module.exports.applyEntityCreateGuardMigration = applyEntityCreateGuardMigration;
     // v0.110.2 — generalized: ANY direct customJS.<Class>.render(dv,...) → guard.

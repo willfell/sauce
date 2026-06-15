@@ -88,7 +88,29 @@ class FinanceNav {
         } else if (mode.startsWith("entity-")) {
             this._renderEntityContext(root, mode, page);
             this._hr(root);
+        } else if (mode.startsWith("defaults-")) {
+            this._renderDefaultsContext(root, mode);
+            this._hr(root);
         }
+    }
+
+    _renderDefaultsContext(root, mode) {
+        const row = root.createEl("div", { cls: "fnav-row fnav-context" });
+        row.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; margin: 4px 0;";
+
+        const config = {
+            "defaults-budget":   { hubLabel: "Budgets Hub",   hubIcon: this._icon("calculator"),  hubPath: "spice/finance/budgets/Budgets.md" },
+            "defaults-paycheck": { hubLabel: "Paychecks Hub", hubIcon: this._icon("coins"),       hubPath: "spice/finance/paychecks/Paychecks.md" },
+            "defaults-debt":     { hubLabel: "Debts Hub",     hubIcon: this._icon("credit-card"), hubPath: "spice/finance/debts/Debts.md" },
+        };
+        const cfg = config[mode];
+        if (!cfg) return;
+
+        customJS.AccentButton.render(row, {
+            label: cfg.hubLabel,
+            icon: cfg.hubIcon,
+            onClick: () => app.workspace.openLinkText(cfg.hubPath, "")
+        });
     }
 
     _hr(root) {
@@ -102,6 +124,11 @@ class FinanceNav {
         if (filePath === "spice/finance/paychecks/Paychecks.md") return "hub-paychecks";
         if (filePath === "spice/finance/invoices/Invoices.md") return "hub-invoices";
         if (filePath === "spice/finance/debts/Debts.md") return "hub-debts";
+        // v0.111.3: defaults files. Same nav as their parent hub but no "+ New X"
+        // (defaults don't scaffold entities; they're config).
+        if (filePath === "spice/finance/Budget Defaults.md") return "defaults-budget";
+        if (filePath === "spice/finance/Paycheck Defaults.md") return "defaults-paycheck";
+        if (filePath === "spice/finance/Debt Defaults.md") return "defaults-debt";
         if (type === "budget") return "entity-budget";
         if (type === "paycheck") return "entity-paycheck";
         if (type === "invoice") return "entity-invoice";
@@ -111,10 +138,10 @@ class FinanceNav {
 
     _hereKey(mode) {
         if (mode === "hub-finance") return "finance";
-        if (mode === "hub-budgets" || mode === "entity-budget") return "budgets";
-        if (mode === "hub-paychecks" || mode === "entity-paycheck") return "paychecks";
+        if (mode === "hub-budgets" || mode === "entity-budget" || mode === "defaults-budget") return "budgets";
+        if (mode === "hub-paychecks" || mode === "entity-paycheck" || mode === "defaults-paycheck") return "paychecks";
         if (mode === "hub-invoices" || mode === "entity-invoice") return "invoices";
-        if (mode === "hub-debts" || mode === "entity-debt") return "debts";
+        if (mode === "hub-debts" || mode === "entity-debt" || mode === "defaults-debt") return "debts";
         return null;
     }
 
