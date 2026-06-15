@@ -12269,6 +12269,25 @@ async function caseV01070FpbmPaycheckBodyMigration() {
 
 // v0.109.0 — projects visual overhaul. See Docs/plans/2026-06-15-v0.109.0-projects-visual-overhaul-design.md.
 
+// S3 — ProjectsHubCards adopts DocSearch.
+async function caseV01090Phc1DocSearchInvoked() {
+  console.log("\n--- Case HC-V01090-PHC-1: ProjectsHubCards invokes DocSearch ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/projects-hub-cards.js"), "utf8");
+  assertTrue("HC-V01090-PHC-1: DocSearch.render invoked",
+    /customJS\.DocSearch\.render\(/.test(src));
+  assertTrue("HC-V01090-PHC-1: entityType set to project",
+    /entityType:\s*["']project["']/.test(src));
+  assertTrue("HC-V01090-PHC-1: scopePath set to spice/projects",
+    /scopePath:\s*["']spice\/projects["']/.test(src));
+}
+
+async function caseV01090Phc2MatchesAppliedToFilter() {
+  console.log("\n--- Case HC-V01090-PHC-2: ProjectsHubCards applies DocSearch.matches in filter chain ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/projects-hub-cards.js"), "utf8");
+  assertTrue("HC-V01090-PHC-2: DocSearch.matches called in filter chain",
+    /customJS\.DocSearch\.matches\(/.test(src));
+}
+
 // S2 — SectionLabel primitive.
 async function caseV01090Sl1ClassDefined() {
   console.log("\n--- Case HC-V01090-SL-1: SectionLabel class defined ---");
@@ -12999,6 +13018,8 @@ async function caseV01090Ds1EntityTypeOpt() {
   await caseV01090Sl1ClassDefined();         // S2
   await caseV01090Sl2RendersHrAndLabel();    // S2
   await caseV01090Sl3ManifestRegistered();   // S2
+  await caseV01090Phc1DocSearchInvoked();    // S3
+  await caseV01090Phc2MatchesAppliedToFilter(); // S3
   await caseV01070FbbmBudgetBodyMigration();
 
   // v0.5.3 CF-3 — PaycheckSummary + FinanceHubActions + paycheck body migration
