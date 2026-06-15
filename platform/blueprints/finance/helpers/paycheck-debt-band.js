@@ -35,7 +35,11 @@ class PaycheckDebtBand {
         if (page.type !== "paycheck") return;
 
         const expenses = Array.isArray(page.expenses) ? page.expenses : [];
-        const debtExpenses = expenses.filter((e) => e && typeof e.debt === "string" && e.debt.trim().length > 0);
+        // v0.115.3: Dataview auto-converts wikilink-shaped strings (e.g. "[[Debt-X]]")
+        // in frontmatter to Link objects. Strict `typeof === "string"` rejects those
+        // and the band would silently render nothing. Accept any truthy value here;
+        // _parseDebtSlug below normalizes string AND Link object to a slug.
+        const debtExpenses = expenses.filter((e) => e && this._hasDebtLink(e));
         if (debtExpenses.length === 0) return; // nothing to render — quiet
 
         const root = dv.container.createEl("div", { cls: "pdb-root" });
@@ -140,10 +144,33 @@ class PaycheckDebtBand {
         }
     }
 
-    _parseDebtSlug(linkStr) {
-        if (typeof linkStr !== "string") return null;
-        const m = linkStr.match(/^\[\[([^\]]+)\]\]$/);
-        return m ? m[1] : null;
+    // v0.115.3: handle Dataview Link objects (wikilink-shaped strings get
+    // auto-converted in frontmatter parsing) AS WELL AS literal string forms.
+    _hasDebtLink(exp) {
+        const v = exp && exp.debt;
+        if (v == null) return false;
+        if (typeof v === "string") return v.trim().length > 0;
+        // Link object: { path: "Debt-X", display: ..., subpath: ..., type: "file" }
+        if (typeof v === "object" && (typeof v.path === "string" && v.path.length > 0)) return true;
+        return false;
+    }
+    _parseDebtSlug(linkVal) {
+        if (linkVal == null) return null;
+        if (typeof linkVal === "string") {
+            const m = linkVal.match(/^\[\[([^\]]+)\]\]$/);
+            return m ? m[1] : (linkVal.length > 0 ? linkVal : null);
+        }
+        // Dataview Link object: { path: "Debt-X", ... }. Prefer .path, fall back
+        // to .display / .toString().
+        if (typeof linkVal === "object") {
+            if (typeof linkVal.path === "string" && linkVal.path.length > 0) {
+                // Strip optional .md extension that some Dataview versions include
+                return linkVal.path.replace(/\.md$/, "");
+            }
+            if (typeof linkVal.display === "string" && linkVal.display.length > 0) return linkVal.display;
+            try { const s = String(linkVal); return s.length > 0 ? s : null; } catch (_e) { return null; }
+        }
+        return null;
     }
 
     async _resolveDebt(slug) {

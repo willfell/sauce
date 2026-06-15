@@ -95,13 +95,30 @@ class FinanceMath {
         }
         return total;
     }
+    // v0.115.3: Dataview auto-converts wikilink-shaped frontmatter strings
+    // (e.g. "[[Debt-X]]") into Link objects with { path, display, type }.
+    // _debtKey normalizes string OR Link object to a stable string key so
+    // monthDebtPaid + debtPaidByDebt match either form (and the same expense
+    // groups regardless of how Dataview chose to parse it).
+    _debtKey(v) {
+        if (v == null) return null;
+        if (typeof v === "string") return v.trim().length > 0 ? v.trim() : null;
+        if (typeof v === "object") {
+            if (typeof v.path === "string" && v.path.length > 0) {
+                // Canonicalize: strip optional .md
+                return `[[${v.path.replace(/\.md$/, "")}]]`;
+            }
+            if (typeof v.display === "string" && v.display.length > 0) return `[[${v.display}]]`;
+        }
+        return null;
+    }
     monthDebtPaid(paychecks) {
         let total = 0;
         for (const p of paychecks) {
             const ex = Array.isArray(p.expenses) ? p.expenses : [];
             for (const e of ex) {
                 if (!e || e.paid !== true) continue;
-                if (typeof e.debt !== "string" || e.debt.length === 0) continue;
+                if (!this._debtKey(e.debt)) continue;
                 if (typeof e.amount === "number") total += e.amount;
             }
         }
@@ -113,12 +130,13 @@ class FinanceMath {
         for (const p of paychecks) {
             const ex = Array.isArray(p.expenses) ? p.expenses : [];
             for (const e of ex) {
-                if (!e || typeof e.debt !== "string" || e.debt.length === 0) continue;
+                const key = this._debtKey(e && e.debt);
+                if (!key) continue;
                 if (paidOnly && e.paid !== true) continue;
-                const cur = map.get(e.debt) || { amount: 0, count: 0 };
+                const cur = map.get(key) || { amount: 0, count: 0 };
                 cur.amount += (typeof e.amount === "number" ? e.amount : 0);
                 cur.count += 1;
-                map.set(e.debt, cur);
+                map.set(key, cur);
             }
         }
         return map;

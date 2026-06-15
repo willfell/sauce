@@ -13646,6 +13646,91 @@ async function caseV01151ManifestsBumped() {
     /^0\.115\.\d+$/.test(pkg.version), `got: ${pkg.version}`);
 }
 
+// =========================================================================
+// v0.115.3 PATCH — Dataview Link-object debt coercion
+// =========================================================================
+//
+// Dataview auto-converts wikilink-shaped frontmatter strings ("[[Debt-X]]")
+// into Link objects { path, display, type }. v0.115.0..v0.115.2 widgets
+// filtered debt fields with `typeof === "string"` and silently rendered
+// nothing on Link-object debts. v0.115.3 normalizes via:
+//   PaycheckDebtBand._hasDebtLink + ._parseDebtSlug
+//   FinanceMath._debtKey (consumed by monthDebtPaid + debtPaidByDebt)
+
+function _v01153LoadInstance(workshop, relativeHelperPath, className) {
+  const fs = require("fs");
+  const p = require("path");
+  const src = fs.readFileSync(p.join(workshop, "platform/blueprints/finance/helpers", relativeHelperPath), "utf8");
+  const Cls = (new Function(src + "\n; return " + className + ";"))();
+  return new Cls();
+}
+
+async function caseV01153FinanceMathDebtKey() {
+  console.log("\n--- Case V01153-FM-DEBT-KEY: FinanceMath._debtKey normalizes string + Link object ---");
+  const FM = _v01153LoadInstance(WORKSHOP, "finance-math.js", "FinanceMath");
+  assertTrue("V01153-FM-DEBT-KEY-1: _debtKey is a function",
+    typeof FM._debtKey === "function");
+  assertEqual(FM._debtKey("[[Debt-Apple-Card]]"), "[[Debt-Apple-Card]]", "V01153-FM-DEBT-KEY-2: string passes through");
+  assertEqual(FM._debtKey({ path: "Debt-Brex-Card", type: "file" }), "[[Debt-Brex-Card]]", "V01153-FM-DEBT-KEY-3: Link object becomes [[path]]");
+  assertEqual(FM._debtKey({ path: "Debt-Discover-It.md", type: "file" }), "[[Debt-Discover-It]]", "V01153-FM-DEBT-KEY-4: Link object strips .md");
+  assertEqual(FM._debtKey({ display: "Debt-Foo" }), "[[Debt-Foo]]", "V01153-FM-DEBT-KEY-5: Link object falls back to .display");
+  assertTrue("V01153-FM-DEBT-KEY-6: null returns null", FM._debtKey(null) === null);
+  assertTrue("V01153-FM-DEBT-KEY-7: empty string returns null", FM._debtKey("") === null);
+  assertTrue("V01153-FM-DEBT-KEY-8: object without path/display returns null",
+    FM._debtKey({ type: "file" }) === null);
+}
+
+async function caseV01153FinanceMathLinkObjectDebtPaid() {
+  console.log("\n--- Case V01153-FM-LINK-PAID: monthDebtPaid + debtPaidByDebt accept Link objects ---");
+  const FM = _v01153LoadInstance(WORKSHOP, "finance-math.js", "FinanceMath");
+  const paychecks = [{ expenses: [
+    { item: "Apple", amount: 380, debt: "[[Debt-Apple-Card]]", paid: true },
+    { item: "Brex",  amount: 200, debt: { path: "Debt-Brex-Card", type: "file" }, paid: true },
+    { item: "Disco", amount: 100, debt: { path: "Debt-Discover-It.md", type: "file" }, paid: true },
+    { item: "Rent",  amount: 2200, paid: false },
+  ]}];
+  assertEqual(FM.monthDebtPaid(paychecks), 680,
+    "V01153-FM-LINK-PAID-1: monthDebtPaid sums paid debt-linked (string + 2 Link objects) = 680");
+  const map = FM.debtPaidByDebt(paychecks);
+  assertEqual(map.size, 3, "V01153-FM-LINK-PAID-2: debtPaidByDebt has 3 entries");
+  assertTrue("V01153-FM-LINK-PAID-3: Apple key present",
+    map.has("[[Debt-Apple-Card]]"));
+  assertTrue("V01153-FM-LINK-PAID-4: Brex key present (Link-object normalized)",
+    map.has("[[Debt-Brex-Card]]"));
+  assertTrue("V01153-FM-LINK-PAID-5: Discover key present (.md stripped)",
+    map.has("[[Debt-Discover-It]]"));
+}
+
+async function caseV01153PaycheckDebtBandLinkObjectFilter() {
+  console.log("\n--- Case V01153-PDB-LINK-FILTER: PaycheckDebtBand._hasDebtLink accepts string + Link ---");
+  const PDB = _v01153LoadInstance(WORKSHOP, "paycheck-debt-band.js", "PaycheckDebtBand");
+  assertTrue("V01153-PDB-LINK-FILTER-1: _hasDebtLink is a function",
+    typeof PDB._hasDebtLink === "function");
+  assertTrue("V01153-PDB-LINK-FILTER-2: string '[[Debt-X]]' detected",
+    PDB._hasDebtLink({ debt: "[[Debt-X]]" }) === true);
+  assertTrue("V01153-PDB-LINK-FILTER-3: Link object detected",
+    PDB._hasDebtLink({ debt: { path: "Debt-Y", type: "file" } }) === true);
+  assertTrue("V01153-PDB-LINK-FILTER-4: empty string rejected",
+    PDB._hasDebtLink({ debt: "" }) === false);
+  assertTrue("V01153-PDB-LINK-FILTER-5: null rejected",
+    PDB._hasDebtLink({ debt: null }) === false);
+  assertTrue("V01153-PDB-LINK-FILTER-6: undefined debt rejected",
+    PDB._hasDebtLink({}) === false);
+  assertTrue("V01153-PDB-LINK-FILTER-7: Link without path rejected",
+    PDB._hasDebtLink({ debt: { type: "file" } }) === false);
+}
+
+async function caseV01153PaycheckDebtBandLinkSlug() {
+  console.log("\n--- Case V01153-PDB-LINK-SLUG: PaycheckDebtBand._parseDebtSlug normalizes Link/string ---");
+  const PDB = _v01153LoadInstance(WORKSHOP, "paycheck-debt-band.js", "PaycheckDebtBand");
+  assertEqual(PDB._parseDebtSlug("[[Debt-Apple-Card]]"), "Debt-Apple-Card", "V01153-PDB-LINK-SLUG-1: string wikilink -> slug");
+  assertEqual(PDB._parseDebtSlug({ path: "Debt-Brex-Card", type: "file" }), "Debt-Brex-Card", "V01153-PDB-LINK-SLUG-2: Link object -> slug");
+  assertEqual(PDB._parseDebtSlug({ path: "Debt-Discover-It.md", type: "file" }), "Debt-Discover-It", "V01153-PDB-LINK-SLUG-3: Link with .md stripped");
+  assertEqual(PDB._parseDebtSlug({ display: "Debt-Foo" }), "Debt-Foo", "V01153-PDB-LINK-SLUG-4: Link with only display");
+  assertTrue("V01153-PDB-LINK-SLUG-5: null returns null",
+    PDB._parseDebtSlug(null) === null);
+}
+
 async function caseV01103InjectMonthlyBandIdempotent() {
   console.log("\n--- Case V01103-MO-IDEM: _injectMonthlyBand transform is idempotent ---");
   const installer = require(path.join(WORKSHOP, "platform/install.js"));
@@ -23038,6 +23123,12 @@ type: cowork-microscope
   await caseV01151HubFrontmatterHealDetector();
   await caseV01151HubFrontmatterHealCanonicalBuilder();
   await caseV01151ManifestsBumped();
+
+  // v0.115.3 PATCH — Dataview Link-object debt coercion (PaycheckDebtBand + FinanceMath)
+  await caseV01153FinanceMathDebtKey();
+  await caseV01153FinanceMathLinkObjectDebtPaid();
+  await caseV01153PaycheckDebtBandLinkObjectFilter();
+  await caseV01153PaycheckDebtBandLinkSlug();
 
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
