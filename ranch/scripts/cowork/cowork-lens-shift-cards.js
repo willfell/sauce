@@ -19,8 +19,13 @@
  *
  * Spec: Docs/plans/2026-06-08-v0.95.1-anti-echo-design.md § 5.5 (visual pairing).
  * Tests: HC-V0951-K3-J / K3-K / K3-L (platform/test/run-helper-cases.js).
+ *
+ * v0.110.4: removed top-level `"use strict";` directive. CustomJS plugin
+ * only accepts ONE top-level construct (the class declaration); the
+ * directive prologue triggered ParseError on every load. Class bodies
+ * are implicitly strict mode in JavaScript, so the directive was
+ * redundant anyway.
  */
-"use strict";
 
 class CoworkLensShiftCards {
     /**

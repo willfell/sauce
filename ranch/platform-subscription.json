@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop self-subscription. Pinned to the workshop's own manifest version.",
-  "workshop_version": "0.110.3",
+  "workshop_version": "0.110.4",
   "mechanisms": [
     {
       "name": "customjs-guard",
@@ -52,7 +52,7 @@
     },
     {
       "name": "entity-create",
-      "version": "0.7.1"
+      "version": "0.7.2"
     },
     {
       "name": "backlink-panel",
@@ -94,7 +94,7 @@
     },
     {
       "name": "cowork",
-      "version": "0.40.0"
+      "version": "0.40.1"
     }
   ]
 }
