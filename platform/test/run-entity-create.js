@@ -163,11 +163,11 @@ for (const [label, p] of mechFiles) {
 }
 ok("EC-1 entity-create mechanism dir + 4 files present", fs.existsSync(MECH_DIR) && allPresent);
 
-// 2. manifest parses, version is "0.6.0" (MINOR v0.105.0 S1 — Issue 1 openFile +
-//    Issue 4 current_project_sections / current_section_sub_sections / skip-empty)
+// 2. manifest parses, version range 0.6.x or higher MINOR
+//    (0.6.0 — v0.105.0 S1; 0.7.0 — v0.107.0 S1 seed_from_defaults).
 const manifest = JSON.parse(fs.readFileSync(path.join(MECH_DIR, "manifest.json"), "utf8"));
-ok("EC-2 entity-create manifest parses + version === 0.6.0",
-    manifest && manifest.name === "entity-create" && manifest.version === "0.6.0",
+ok("EC-2 entity-create manifest parses + version 0.6.x or higher MINOR",
+    manifest && manifest.name === "entity-create" && /^0\.[6-9]\.\d+$/.test(manifest.version),
     `got name=${manifest && manifest.name} version=${manifest && manifest.version}`);
 
 // 3. json-schema parses + has 7 extension shapes
