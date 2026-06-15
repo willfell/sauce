@@ -180,6 +180,25 @@
           }
         },
         "naming_pattern": "^Debt Defaults\\.md$"
+      },
+      {
+        "scope": {
+          "path_glob": "spice/finance/months/Month-*.md"
+        },
+        "extends": "_canonical-vocab",
+        "required_frontmatter": {
+          "type": {
+            "required": true,
+            "type": "string",
+            "equals": "month"
+          },
+          "month": {
+            "required": true,
+            "type": "string",
+            "matches": "^\\d{4}-\\d{2}$"
+          }
+        },
+        "naming_pattern": "^Month-\\d{4}-\\d{2}\\.md$"
       }
     ]
   }

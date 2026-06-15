@@ -263,10 +263,10 @@ class EntityCreate {
                     const m = linkValue.match(/^\[\[(.+?)\]\]$/);
                     if (!m) continue;
                     const targetName = m[1];
-                    const targetFile = _resolveWikilinkToFile(app, targetName);
+                    const targetFile = this._resolveWikilinkToFile(app, targetName);
                     if (!targetFile) continue;
                     try {
-                        const fm = _readFrontmatterFromCache(app, targetFile);
+                        const fm = this._readFrontmatterFromCache(app, targetFile);
                         if (!fm) continue;
                         for (const [fromKey, toKey] of Object.entries(merge)) {
                             if (fm[fromKey] !== undefined) {
@@ -918,33 +918,32 @@ class EntityCreate {
             : body;
         await app.vault.create(xPath, content);
     }
-}
 
-// ---------- v0.7.1 module-level helpers for resolve_wikilinks ----------
-//
-// These are module-level (outside the class) so they can be tested and called
-// without a class instance. Both receive `app` (the Obsidian App global) as
-// their first argument; at Obsidian runtime `app` is a global, so callers
-// inside _resolveSeedFromDefaults pass the same reference directly.
+    // ---------- v0.7.1 helpers for resolve_wikilinks ----------
+    // v0.110.4: moved INSIDE the class. CustomJS plugin only accepts ONE
+    // top-level construct per file; module-level `function` declarations
+    // outside the class triggered ParseError on every load, which left
+    // window.customJS.EntityCreate undefined across every consumer vault.
 
-// Resolve a wikilink name to its TFile using the metadata cache's link
-// resolver. Returns null when the name cannot be resolved.
-function _resolveWikilinkToFile(app, name) {
-    try {
-        return app.metadataCache.getFirstLinkpathDest(name, "") || null;
-    } catch (_e) {
-        return null;
+    // Resolve a wikilink name to its TFile using the metadata cache's link
+    // resolver. Returns null when the name cannot be resolved.
+    _resolveWikilinkToFile(app, name) {
+        try {
+            return app.metadataCache.getFirstLinkpathDest(name, "") || null;
+        } catch (_e) {
+            return null;
+        }
     }
-}
 
-// Read the frontmatter of a TFile from the metadata cache. Prefers the
-// cached frontmatter (fast, correct at Obsidian runtime; equivalent to
-// reading the YAML block). Returns null when no frontmatter is available.
-function _readFrontmatterFromCache(app, file) {
-    try {
-        const cache = app.metadataCache.getFileCache(file);
-        return (cache && cache.frontmatter) ? cache.frontmatter : null;
-    } catch (_e) {
-        return null;
+    // Read the frontmatter of a TFile from the metadata cache. Prefers the
+    // cached frontmatter (fast, correct at Obsidian runtime; equivalent to
+    // reading the YAML block). Returns null when no frontmatter is available.
+    _readFrontmatterFromCache(app, file) {
+        try {
+            const cache = app.metadataCache.getFileCache(file);
+            return (cache && cache.frontmatter) ? cache.frontmatter : null;
+        } catch (_e) {
+            return null;
+        }
     }
 }

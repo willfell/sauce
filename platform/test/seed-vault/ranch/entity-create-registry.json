@@ -374,7 +374,7 @@
             "actual": 0
           }
         },
-        "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNavRow\" });\n```\n\n```dataviewjs\nawait customJS.FinanceStatus.renderBadge(dv, \"budget\");\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"BudgetSummary\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"BudgetCategoriesEditor\" });\n```\n",
+        "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n```dataviewjs\nawait customJS.FinanceStatus.renderBadge(dv, \"budget\");\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"BudgetSummary\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"BudgetCategoriesEditor\" });\n```\n",
         "render_in": {
           "kind": "hub",
           "target_path": "spice/finance/budgets/Budgets.md"
@@ -436,7 +436,7 @@
             }
           }
         },
-        "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNavRow\" });\n```\n\n```dataviewjs\nawait customJS.FinanceStatus.renderBadge(dv, \"paycheck\");\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PaycheckSummary\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PaycheckExpensesEditor\" });\n```\n",
+        "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n```dataviewjs\nawait customJS.FinanceStatus.renderBadge(dv, \"paycheck\");\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PaycheckSummary\" });\n```\n\n<!-- paycheck-debt-band-v0.8.0 -->\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PaycheckDebtBand\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PaycheckExpensesEditor\" });\n```\n",
         "render_in": {
           "kind": "hub",
           "target_path": "spice/finance/paychecks/Paychecks.md"
@@ -473,7 +473,7 @@
             "wide"
           ]
         },
-        "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNavRow\" });\n```\n\n```dataviewjs\nawait customJS.FinanceStatus.renderBadge(dv, \"invoice\");\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"InvoiceControls\" });\n```\n",
+        "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"InvoiceWorkspaceNav\" });\n```\n\n```dataviewjs\nawait customJS.FinanceStatus.renderBadge(dv, \"invoice\");\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"InvoiceControls\" });\n```\n",
         "extra_files": [
           {
             "filename_pattern": "Time-Log-{{prompts.month}}.md",
@@ -488,7 +488,7 @@
                 "wide"
               ]
             },
-            "inline_body": "%% nav buttons rendered conditionally — suppressed when this note is embedded elsewhere %%\n```dataviewjs\nconst isEmbedded = dv.container.closest(\".markdown-embed\") != null;\nif (!isEmbedded) {\n    await dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n    await dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNavRow\" });\n}\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"InvoiceTimeLogEditor\" });\n```\n"
+            "inline_body": "%% nav buttons rendered conditionally — suppressed when this note is embedded elsewhere %%\n```dataviewjs\nconst isEmbedded = dv.container.closest(\".markdown-embed\") != null;\nif (!isEmbedded) {\n    await dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n    await dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n}\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"InvoiceTimeLogEditor\" });\n```\n"
           },
           {
             "filename_pattern": "Board-{{prompts.month}}.md",
@@ -508,6 +508,87 @@
         "render_in": {
           "kind": "hub",
           "target_path": "spice/finance/invoices/Invoices.md"
+        }
+      },
+      {
+        "blueprint": "finance",
+        "id": "debt",
+        "label": "New Debt",
+        "icon": "credit-card",
+        "prompts": [
+          {
+            "key": "name",
+            "label": "Name",
+            "type": "string",
+            "required": true
+          },
+          {
+            "key": "kind",
+            "label": "Kind",
+            "type": "select",
+            "options": [
+              "credit-card",
+              "student-loan",
+              "other"
+            ],
+            "required": true,
+            "default": "credit-card"
+          }
+        ],
+        "destination": {
+          "folder_prefix": "spice/finance/debts",
+          "filename_prefix": "Debt-{{prompts.name|slugify}}"
+        },
+        "frontmatter_template": {
+          "type": "debt",
+          "kind": "{{prompts.kind}}",
+          "name": "{{prompts.name}}",
+          "current_balance": 0,
+          "apr": 0,
+          "min_payment": 0,
+          "planned_monthly_payment": 0,
+          "balance_history": [],
+          "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+          "cssclasses": [
+            "wide"
+          ]
+        },
+        "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"DebtSummary\" });\n```\n",
+        "render_in": {
+          "kind": "hub",
+          "target_path": "spice/finance/debts/Debts.md"
+        }
+      },
+      {
+        "blueprint": "finance",
+        "id": "month",
+        "label": "New Month",
+        "icon": "calendar-plus",
+        "prompts": [
+          {
+            "key": "month",
+            "label": "Month",
+            "type": "month",
+            "required": true,
+            "default": "{{now.YYYY-MM}}"
+          }
+        ],
+        "destination": {
+          "folder_prefix": "spice/finance/months",
+          "filename_prefix": "Month-{{prompts.month}}"
+        },
+        "frontmatter_template": {
+          "type": "month",
+          "month": "{{prompts.month}}",
+          "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+          "cssclasses": [
+            "wide"
+          ]
+        },
+        "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"MonthDashboard\" });\n```\n\n## Notes\n\n",
+        "render_in": {
+          "kind": "hub",
+          "target_path": "spice/finance/months/Months.md"
         }
       }
     ],
@@ -908,7 +989,7 @@
           "actual": 0
         }
       },
-      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNavRow\" });\n```\n\n```dataviewjs\nawait customJS.FinanceStatus.renderBadge(dv, \"budget\");\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"BudgetSummary\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"BudgetCategoriesEditor\" });\n```\n",
+      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n```dataviewjs\nawait customJS.FinanceStatus.renderBadge(dv, \"budget\");\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"BudgetSummary\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"BudgetCategoriesEditor\" });\n```\n",
       "render_in": {
         "kind": "hub",
         "target_path": "spice/finance/budgets/Budgets.md"
@@ -970,7 +1051,7 @@
           }
         }
       },
-      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNavRow\" });\n```\n\n```dataviewjs\nawait customJS.FinanceStatus.renderBadge(dv, \"paycheck\");\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PaycheckSummary\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PaycheckExpensesEditor\" });\n```\n",
+      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n```dataviewjs\nawait customJS.FinanceStatus.renderBadge(dv, \"paycheck\");\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PaycheckSummary\" });\n```\n\n<!-- paycheck-debt-band-v0.8.0 -->\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PaycheckDebtBand\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PaycheckExpensesEditor\" });\n```\n",
       "render_in": {
         "kind": "hub",
         "target_path": "spice/finance/paychecks/Paychecks.md"
@@ -1007,7 +1088,7 @@
           "wide"
         ]
       },
-      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNavRow\" });\n```\n\n```dataviewjs\nawait customJS.FinanceStatus.renderBadge(dv, \"invoice\");\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"InvoiceControls\" });\n```\n",
+      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"InvoiceWorkspaceNav\" });\n```\n\n```dataviewjs\nawait customJS.FinanceStatus.renderBadge(dv, \"invoice\");\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"InvoiceControls\" });\n```\n",
       "extra_files": [
         {
           "filename_pattern": "Time-Log-{{prompts.month}}.md",
@@ -1022,7 +1103,7 @@
               "wide"
             ]
           },
-          "inline_body": "%% nav buttons rendered conditionally — suppressed when this note is embedded elsewhere %%\n```dataviewjs\nconst isEmbedded = dv.container.closest(\".markdown-embed\") != null;\nif (!isEmbedded) {\n    await dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n    await dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNavRow\" });\n}\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"InvoiceTimeLogEditor\" });\n```\n"
+          "inline_body": "%% nav buttons rendered conditionally — suppressed when this note is embedded elsewhere %%\n```dataviewjs\nconst isEmbedded = dv.container.closest(\".markdown-embed\") != null;\nif (!isEmbedded) {\n    await dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n    await dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n}\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"InvoiceTimeLogEditor\" });\n```\n"
         },
         {
           "filename_pattern": "Board-{{prompts.month}}.md",
@@ -1042,6 +1123,87 @@
       "render_in": {
         "kind": "hub",
         "target_path": "spice/finance/invoices/Invoices.md"
+      }
+    },
+    {
+      "blueprint": "finance",
+      "id": "debt",
+      "label": "New Debt",
+      "icon": "credit-card",
+      "prompts": [
+        {
+          "key": "name",
+          "label": "Name",
+          "type": "string",
+          "required": true
+        },
+        {
+          "key": "kind",
+          "label": "Kind",
+          "type": "select",
+          "options": [
+            "credit-card",
+            "student-loan",
+            "other"
+          ],
+          "required": true,
+          "default": "credit-card"
+        }
+      ],
+      "destination": {
+        "folder_prefix": "spice/finance/debts",
+        "filename_prefix": "Debt-{{prompts.name|slugify}}"
+      },
+      "frontmatter_template": {
+        "type": "debt",
+        "kind": "{{prompts.kind}}",
+        "name": "{{prompts.name}}",
+        "current_balance": 0,
+        "apr": 0,
+        "min_payment": 0,
+        "planned_monthly_payment": 0,
+        "balance_history": [],
+        "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+        "cssclasses": [
+          "wide"
+        ]
+      },
+      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"DebtSummary\" });\n```\n",
+      "render_in": {
+        "kind": "hub",
+        "target_path": "spice/finance/debts/Debts.md"
+      }
+    },
+    {
+      "blueprint": "finance",
+      "id": "month",
+      "label": "New Month",
+      "icon": "calendar-plus",
+      "prompts": [
+        {
+          "key": "month",
+          "label": "Month",
+          "type": "month",
+          "required": true,
+          "default": "{{now.YYYY-MM}}"
+        }
+      ],
+      "destination": {
+        "folder_prefix": "spice/finance/months",
+        "filename_prefix": "Month-{{prompts.month}}"
+      },
+      "frontmatter_template": {
+        "type": "month",
+        "month": "{{prompts.month}}",
+        "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+        "cssclasses": [
+          "wide"
+        ]
+      },
+      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"MonthDashboard\" });\n```\n\n## Notes\n\n",
+      "render_in": {
+        "kind": "hub",
+        "target_path": "spice/finance/months/Months.md"
       }
     },
     {

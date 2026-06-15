@@ -19,8 +19,13 @@
  *
  * Spec: Docs/plans/2026-06-08-v0.95.1-anti-echo-design.md § 5.5 (visual pairing).
  * Tests: HC-V0951-K3-J / K3-K / K3-L (platform/test/run-helper-cases.js).
+ *
+ * v0.110.4: removed top-level `"use strict";` directive. CustomJS plugin
+ * only accepts ONE top-level construct (the class declaration); the
+ * directive prologue triggered ParseError on every load. Class bodies
+ * are implicitly strict mode in JavaScript, so the directive was
+ * redundant anyway.
  */
-"use strict";
 
 class CoworkLensShiftCards {
     /**
@@ -150,12 +155,9 @@ class CoworkLensShiftCards {
     }
 }
 
-// Node interop: CustomJS in Obsidian picks up bare class declarations
-// via global scope, but test harnesses (run-helper-cases.js K3-J/K/L)
-// require() this file and look up the class on `module.exports`.
-// Match the same dual-export pattern other Cowork helpers use.
-if (typeof module !== "undefined" && module.exports) {
-    module.exports = CoworkLensShiftCards;
-    module.exports.CoworkLensShiftCards = CoworkLensShiftCards;
-    module.exports.default = CoworkLensShiftCards;
-}
+// v0.110.5: removed the trailing `if (typeof module !== "undefined")` Node
+// interop block. CustomJS plugin only accepts files where the class is the
+// LAST construct (any code after the closing `}` triggers ParseError, leaving
+// CoworkLensShiftCards undefined). Test harnesses (run-helper-cases.js
+// HC-V0951-K3-J/K/L) now load the class via IIFE-eval — see those cases
+// in platform/test/run-helper-cases.js for the loader pattern.

@@ -13,11 +13,7 @@ await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 
 ```dataviewjs
 // entity-create:budget — installer-managed; do not delete this comment
-await dv.view("ranch/views/customjs-guard", { class: "FinanceHubActions", args: [{
-  here: "budgets",
-  instance: "budget",
-  defaultsPath: "spice/finance/Budget Defaults.md"
-}] });
+await dv.view("ranch/views/customjs-guard", { class: "FinanceNav" });
 ```
 
 ```dataviewjs

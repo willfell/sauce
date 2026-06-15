@@ -1,5 +1,5 @@
 {
-  "workshop_version": "0.110.2",
+  "workshop_version": "0.115.4",
   "mechanisms": [
     {
       "name": "customjs-guard",
@@ -43,7 +43,7 @@
     },
     {
       "name": "entity-create",
-      "version": "0.7.1"
+      "version": "0.7.2"
     },
     {
       "name": "people-rendering",
@@ -77,7 +77,7 @@
     },
     {
       "name": "cowork",
-      "version": "0.40.0"
+      "version": "0.40.2"
     },
     {
       "name": "daily",
@@ -113,7 +113,7 @@
     },
     {
       "name": "finance",
-      "version": "0.6.2"
+      "version": "0.9.2"
     },
     {
       "name": "scratch",

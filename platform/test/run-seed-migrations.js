@@ -237,7 +237,7 @@ withTempVault((vault) => {
     // a real workshop rename), update the table here in lockstep with the
     // rebaseline commit so the harness fails-fast on a stale assertion target.
     const bodyChecks = [
-        ["spice/finance/Finance.md", "FinanceHubCards", "BODY-1"],
+        ["spice/finance/Finance.md", "FinanceHubSummary", "BODY-1"],
         ["spice/finance/Budget Defaults.md", "BudgetDefaultsEditor", "BODY-2"],
         ["spice/finance/Debt Defaults.md", "DebtDefaultsEditor", "BODY-3"],
         ["spice/finance/Paycheck Defaults.md", "PaycheckDefaultsEditor", "BODY-4"],

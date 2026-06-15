@@ -13,10 +13,7 @@ await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 
 ```dataviewjs
 // entity-create:invoice — installer-managed; do not delete this comment
-await dv.view("ranch/views/customjs-guard", { class: "FinanceHubActions", args: [{
-  here: "invoices",
-  instance: "invoice"
-}] });
+await dv.view("ranch/views/customjs-guard", { class: "FinanceNav" });
 ```
 
 ```dataviewjs

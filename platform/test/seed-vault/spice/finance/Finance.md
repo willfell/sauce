@@ -12,9 +12,9 @@ await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 ```
 
 ```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "FinanceHubActions", args: [{ here: "finance" }] });
+await dv.view("ranch/views/customjs-guard", { class: "FinanceNav" });
 ```
 
 ```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "FinanceHubCards" });
+await dv.view("ranch/views/customjs-guard", { class: "FinanceHubSummary" });
 ```
