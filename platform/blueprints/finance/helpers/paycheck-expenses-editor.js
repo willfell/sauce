@@ -84,6 +84,36 @@ class PaycheckExpensesEditor {
             categoryCell.textContent = exp?.category || "";
             categoryCell.style.cssText = "flex: 1; font-size: 0.9em; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;";
 
+            if (exp?.debt) {
+                this._resolveDebt(exp.debt).then((debt) => {
+                    if (!debt) return;
+                    const progressPct = (debt.kind === "credit-card" && Number(debt.credit_limit) > 0)
+                        ? Math.round((1 - Number(debt.current_balance) / Number(debt.credit_limit)) * 100)
+                        : null;
+                    const pctText = progressPct !== null ? `${progressPct}% paid` : "debt";
+                    const color = progressPct === null ? "#6b7280"
+                        : progressPct < 33 ? "#dc2626"
+                        : progressPct < 66 ? "#b45309"
+                        : "#16a34a";
+                    const chip = categoryCell.createEl("span", {
+                        cls: "pee-debt-chip",
+                        attr: { "data-debt": debt.name },
+                        text: `${debt.name} · ${pctText}`
+                    });
+                    chip.style.background = color;
+                    chip.style.color = "#fff";
+                    chip.style.padding = "2px 6px";
+                    chip.style.borderRadius = "4px";
+                    chip.style.marginLeft = "8px";
+                    chip.style.fontSize = "0.75em";
+                    chip.style.cursor = "pointer";
+                    chip.addEventListener("click", (e) => {
+                        e.stopPropagation();
+                        app.workspace.openLinkText(`Debt-${debt.name.replace(/\s+/g, "-")}`, "", false);
+                    });
+                });
+            }
+
             const paidCell = row.createEl("span");
             const paid = isPaid(exp);
             paidCell.textContent = paid ? "✓" : "○";
@@ -119,6 +149,16 @@ class PaycheckExpensesEditor {
 
             row.onclick = () => this._editFlow(file, dv, index, exp);
         });
+    }
+
+    async _resolveDebt(linkStr) {
+        const m = typeof linkStr === "string" ? linkStr.match(/^\[\[(.+?)\]\]$/) : null;
+        if (!m) return null;
+        const name = m[1];
+        const dest = app.metadataCache.getFirstLinkpathDest(name, "");
+        if (!dest) return null;
+        const cache = app.metadataCache.getFileCache(dest);
+        return cache?.frontmatter || null;
     }
 
     _promptForExpense(initial) {
@@ -204,6 +244,14 @@ class PaycheckExpensesEditor {
                 categoryInput.value = initial.category || "";
                 paidInput.checked = (initial.paid === true || (typeof initial.paid === "string" && initial.paid.toLowerCase() === "true"));
                 urlInput.value = initial.url || "";
+                if (initial.debt) {
+                    amountInput.setAttribute("readonly", "readonly");
+                    amountInput.title = "From debt entity — edit there via DebtConfigEditor";
+                    amountInput.style.opacity = "0.6";
+                    urlInput.setAttribute("readonly", "readonly");
+                    urlInput.title = "From debt entity — edit there via DebtConfigEditor";
+                    urlInput.style.opacity = "0.6";
+                }
             } else {
                 amountInput.value = "0";
                 paidInput.checked = false;

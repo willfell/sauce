@@ -12365,6 +12365,18 @@ async function caseV01080DebtsContentTemplate() {
     /class:\s*["']DebtsHubSummary["']/.test(src));
 }
 
+async function caseV01080PaycheckExpensesEditorDebtChip() {
+  console.log("\n--- Case V01080-PEE-DEBT: PaycheckExpensesEditor debt chip + locked cells ---");
+  const src = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/finance/helpers/paycheck-expenses-editor.js"), "utf8");
+  assertTrue("V01080-PEE-DEBT-chip: pee-debt-chip class rendered",
+    /pee-debt-chip/.test(src));
+  assertTrue("V01080-PEE-DEBT-resolver: _resolveDebt helper present",
+    /_resolveDebt|getFirstLinkpathDest/.test(src));
+  assertTrue("V01080-PEE-DEBT-readonly: locks amount/url cells when row.debt set",
+    /readonly|read-only|disabled/.test(src) && /row\.debt|debtLink|\.debt\b/.test(src));
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -13065,6 +13077,9 @@ async function caseV01080DebtsContentTemplate() {
   await caseV01080DebtDefaultsEditor();
   await caseV01080DebtConfigEditor();
   await caseV01080DebtsContentTemplate();
+
+  // v0.108.0 S4 — PaycheckExpensesEditor debt-link chip + locked cells
+  await caseV01080PaycheckExpensesEditorDebtChip();
 
   // v0.65.0 HC-V065-RUN-NOTE: write-run-note-* sub-skill lint
   {
