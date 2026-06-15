@@ -169,7 +169,31 @@ class PaycheckExpensesEditor {
 
             const itemInput = mkField("Item", "text");
             const amountInput = mkField("Amount", "number");
+            // v0.107.0: Category field grows a <datalist> autocomplete from
+            // spice/finance/Budget Defaults.md's categories[].name list. Free
+            // text still accepted (suggestions only). Falls back gracefully if
+            // Budget Defaults is missing or has no categories.
             const categoryInput = mkField("Category", "text");
+            const _budgetDefaults = app.vault.getAbstractFileByPath("spice/finance/Budget Defaults.md");
+            if (_budgetDefaults) {
+                const _bdFm = app.metadataCache.getFileCache(_budgetDefaults)?.frontmatter;
+                if (_bdFm && Array.isArray(_bdFm.categories) && _bdFm.categories.length > 0) {
+                    const _dlId = `pee-categories-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+                    categoryInput.setAttribute("list", _dlId);
+                    const _datalist = document.createElement("datalist");
+                    _datalist.id = _dlId;
+                    const _seen = new Set();
+                    for (const _c of _bdFm.categories) {
+                        if (_c && typeof _c === "object" && _c.name && !_seen.has(_c.name)) {
+                            _seen.add(_c.name);
+                            const _opt = document.createElement("option");
+                            _opt.value = String(_c.name);
+                            _datalist.appendChild(_opt);
+                        }
+                    }
+                    dialog.appendChild(_datalist);
+                }
+            }
             const paidField = mkCheckboxField("Paid");
             const paidInput = paidField.input;
             const urlInput = mkField("URL", "text");

@@ -12023,6 +12023,86 @@ async function caseV01070Pde3UsesFinanceFrontmatter() {
     /customJS\.FinanceFrontmatter\.update/.test(src));
 }
 
+// v0.107.0 — S4: entity editors v2 + BudgetSummary
+
+async function caseV01070BceExt1GroupedSections() {
+  console.log("\n--- Case HC-V01070-BCE-EXT-1: BudgetCategoriesEditor iterates page.groups + uses <details> ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/helpers/budget-categories-editor.js"), "utf8");
+  assertTrue("HC-V01070-BCE-EXT-1: reads page.groups",
+    /page\.groups|fm\.groups/.test(src));
+  assertTrue("HC-V01070-BCE-EXT-1: uses <details> element for grouped sections",
+    /createEl\(\s*["']details["']/.test(src));
+}
+
+async function caseV01070BceExt2SubTotals() {
+  console.log("\n--- Case HC-V01070-BCE-EXT-2: per-group sub-totals computed in-place ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/helpers/budget-categories-editor.js"), "utf8");
+  assertTrue("HC-V01070-BCE-EXT-2: sub-total accumulator references planned + actual",
+    /planned/.test(src) && /actual/.test(src));
+  assertTrue("HC-V01070-BCE-EXT-2: variance computation present",
+    /(variance|subtotal|sub_total|sub-total|SUBTOTAL)/i.test(src));
+}
+
+async function caseV01070BceExt3GroupDropdownInModal() {
+  console.log("\n--- Case HC-V01070-BCE-EXT-3: Add/Edit modal has Group dropdown ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/helpers/budget-categories-editor.js"), "utf8");
+  assertTrue("HC-V01070-BCE-EXT-3: <select> element used (group picker)",
+    /createEl\(\s*["']select["']|createElement\(\s*["']select["']/i.test(src));
+}
+
+async function caseV01070PeeExt1Datalist() {
+  console.log("\n--- Case HC-V01070-PEE-EXT-1: PaycheckExpensesEditor uses datalist for Category ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/helpers/paycheck-expenses-editor.js"), "utf8");
+  assertTrue("HC-V01070-PEE-EXT-1: datalist element used in modal",
+    /createEl\(\s*["']datalist["']|createElement\(\s*["']datalist["']|setAttribute\(\s*["']list["']/.test(src));
+}
+
+async function caseV01070PeeExt2ReadsBudgetDefaults() {
+  console.log("\n--- Case HC-V01070-PEE-EXT-2: PaycheckExpensesEditor reads Budget Defaults for category suggestions ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/helpers/paycheck-expenses-editor.js"), "utf8");
+  assertTrue("HC-V01070-PEE-EXT-2: references Budget Defaults.md",
+    /Budget Defaults\.md/.test(src));
+}
+
+async function caseV01070Bs1ClassDeclared() {
+  console.log("\n--- Case HC-V01070-BS-1: BudgetSummary class declared + read-only ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/helpers/budget-summary.js"), "utf8");
+  assertTrue("HC-V01070-BS-1: class BudgetSummary declared",
+    /class\s+BudgetSummary\s*\{/.test(src));
+  assertTrue("HC-V01070-BS-1: async render(dv) method present",
+    /async\s+render\s*\(\s*dv\s*\)/.test(src));
+  assertTrue("HC-V01070-BS-1: embed-dedup guard",
+    /markdown-embed/.test(src));
+}
+
+async function caseV01070Bs2ThreeBands() {
+  console.log("\n--- Case HC-V01070-BS-2: three bands — totals + month progress + per-group ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/helpers/budget-summary.js"), "utf8");
+  assertTrue("HC-V01070-BS-2: Band 1 — planned + actual + variance",
+    /planned/i.test(src) && /actual/i.test(src) && /variance/i.test(src));
+  assertTrue("HC-V01070-BS-2: Band 2 — month progress (daysInMonth or getDate)",
+    /(daysInMonth|getDate\s*\(\s*\)|elapsed)/i.test(src));
+  assertTrue("HC-V01070-BS-2: Band 3 — per-group iteration",
+    /(per[_-]?group|page\.groups|fm\.groups)/.test(src));
+}
+
+async function caseV01070Bs3PaceIndicator() {
+  console.log("\n--- Case HC-V01070-BS-3: pace indicator threshold ±10 ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/helpers/budget-summary.js"), "utf8");
+  assertTrue("HC-V01070-BS-3: pace symbol or threshold reference",
+    /(pace|>=?\s*10\b|<=?\s*-?10\b|AHEAD|BEHIND)/.test(src));
+}
+
+async function caseV01070Bs4ReadOnly() {
+  console.log("\n--- Case HC-V01070-BS-4: never writes frontmatter (read-only widget) ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/helpers/budget-summary.js"), "utf8");
+  // BudgetSummary must NOT call FinanceFrontmatter.update or processFrontMatter.
+  assertTrue("HC-V01070-BS-4: does NOT call FinanceFrontmatter.update",
+    !/FinanceFrontmatter\.update/.test(src));
+  assertTrue("HC-V01070-BS-4: does NOT call processFrontMatter",
+    !/processFrontMatter/.test(src));
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -12686,6 +12766,17 @@ async function caseV01070Pde3UsesFinanceFrontmatter() {
   await caseV01070Pde1ClassDeclared();
   await caseV01070Pde2DatalistAutocomplete();
   await caseV01070Pde3UsesFinanceFrontmatter();
+
+  // v0.107.0 — entity editors v2 + BudgetSummary (S4)
+  await caseV01070BceExt1GroupedSections();
+  await caseV01070BceExt2SubTotals();
+  await caseV01070BceExt3GroupDropdownInModal();
+  await caseV01070PeeExt1Datalist();
+  await caseV01070PeeExt2ReadsBudgetDefaults();
+  await caseV01070Bs1ClassDeclared();
+  await caseV01070Bs2ThreeBands();
+  await caseV01070Bs3PaceIndicator();
+  await caseV01070Bs4ReadOnly();
 
   // v0.65.0 HC-V065-RUN-NOTE: write-run-note-* sub-skill lint
   {
