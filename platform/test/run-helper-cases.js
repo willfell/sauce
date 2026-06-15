@@ -12146,8 +12146,12 @@ async function caseV01070FinMan1Versions() {
   const fin = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
   const ec  = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/mechanisms/entity-create/manifest.json"), "utf8"));
   const ws  = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
-  assertEqual(fin.version, "0.5.3", "HC-V01070-FIN-MAN-1: finance version");
-  assertEqual(ec.version, "0.7.0", "HC-V01070-FIN-MAN-1: entity-create version");
+  // v0.108.0 superseded the v0.107.0 finance + entity-create pins:
+  //   finance 0.5.2 → 0.6.0 (CF-3 + v0.108.0 ship)
+  //   entity-create 0.7.0 → 0.7.1 (v0.108.0 S1 resolve_wikilinks PATCH)
+  // v0.109.0 bumps workshop_version on top of v0.108.0's finance/EC ship.
+  assertEqual(fin.version, "0.6.0", "HC-V01070-FIN-MAN-1: finance version");
+  assertEqual(ec.version, "0.7.1", "HC-V01070-FIN-MAN-1: entity-create version");
   assertEqual(ws.workshop_version, "0.109.0", "HC-V01070-FIN-MAN-1: workshop_version");
   assertTrue("HC-V01070-FIN-MAN-1: finance depends_on entity-create >=0.7.0",
     fin.depends_on.some(d => d.name === "entity-create" && /0\.7/.test(d.range)));
