@@ -495,13 +495,47 @@ Total new test cases v0.116.0: ~117 net add. Total preflight cases at v0.116.0 c
 
 `npm run lint-schemas` runs as part of preflight (added v0.113.0). Both new schema entries lint clean.
 
+### Seed-migrations integration (gated on PR #2 merged)
+
+PR #2 (`cycle/migration-regression-net`) ships `platform/test/run-seed-migrations.js` + `platform/test/seed-vault/` + the per-cycle authoring loop documented in `Docs/agent-guides/migration-regression-net.md`. The intended sequencing for v0.116.0 implementation is: ship the in-flight finance work → merge PR #2 → start v0.116.0. Under that sequencing, v0.116.0 ships **two migrations** (`applyToDoBlueprintMigration` + `applyProjectTodoBackfill`), so the cycle **MUST extend the seed-vault and add an `HC-V0116-SEED-MIGRATE-*` assert family** per the testing mechanism's per-cycle authoring loop (canonical reference: `Sauce Testing.md` §10.4 / landmine #26).
+
+**Seed-vault hand-edits (per landmine #26 — pre-migration shape; targets `platform/test/seed-vault/spice/...`):**
+
+- 2-3 `spice/to-do/<YYYY>/<MM-MMMM>/ToDo-YYYY-MM-DD.md` files at v0.3.3 body shape:
+  - 1 with the canonical 2-block + free-form `- [ ]` layout
+  - 1 with a manually-added `## Tasks` heading (edge case — verifies absorption)
+  - 1 with a manually-added `## Notes` section in addition to `- [ ]` lines (preservation edge case)
+- 1 `spice/to-do/All-ToDos.md` already at the unchanged v0.3.x shape (verifies no false migration triggers; the v0.4.0 cycle does NOT touch the hub)
+- 2 existing project folders without `<Name> To-Do.md` (e.g. "Sauce", "Headspace") — exercises backfill create-path
+- 1 existing project WITH a pre-existing `<Name> To-Do.md` — exercises skip-if-exists
+- 1 existing project's hub note carrying a manually-typed `- [ ]` line in the body — verifies the "manual hub task NOT pulled into daily / NOT relocated" invariant (project-todo is the canonical task source per Section 5)
+
+**`HC-V0116-SEED-MIGRATE-*` assert family (~14 sub-asserts):**
+
+| Sub-family | Count | Covers |
+|---|---|---|
+| `SEED-MIGRATE-TODO-RESHAPE-*` | 4 | All v0.3.3 daily notes detected + reshaped to 5-block v0.4.0 body; user-typed `- [ ]` lines preserved as Capture content; `## Tasks` heading absorbed; `## Notes` preserved verbatim |
+| `SEED-MIGRATE-TODO-BACKUP-*` | 2 | `.sauce-backup/<ts>/` snapshots exist for each migrated daily note (backup-before-write invariant) |
+| `SEED-MIGRATE-PROJ-TODO-CREATE-*` | 2 | `applyProjectTodoBackfill` created `<Name> To-Do.md` for each project lacking one; frontmatter matches `project-todo` schema |
+| `SEED-MIGRATE-PROJ-TODO-SKIP-*` | 1 | Project that already had a `<Name> To-Do.md` was NOT overwritten (byte-equal pre/post) |
+| `SEED-MIGRATE-ORPHAN-*` | 2 | `applyOrphanedHelperCleanup` removed `ranch/scripts/to-do/todo-migrate-modal.js` + `todo-migrate-init.js`; absent from post-install file tree |
+| `SEED-MIGRATE-PRESERVE-*` | 1 | The project-hub manually-typed `- [ ]` line byte-equal pre/post (not pulled into daily; not relocated) |
+| `SEED-MIGRATE-IDEMP-*` | 2 | Second `node platform/install.js` exit 0; history grew; no unexpected adds/changes/removes; sentinels respected |
+
+Family wires into `run-seed-migrations.js` per PR #2's authoring pattern (assertion-helper choice + `withTempVault` scaffold), `HC-V0116-*` namespace.
+
+**Total preflight cases at v0.116.0 close (with PR #2 merged):** ~3064 (current main, pre-PR-#2) + PR #2's seed-foundation 48 + PR #2's BODY-* / CLAUDE-EXT-* 27 + this cycle's ~117 v0.116.0 contracts + ~14 seed-migrate = **~3270 named asserts.** Numbers track when the chain actually runs.
+
+**If PR #2 is NOT merged before v0.116.0** — drop this sub-section from the implementation plan; the ~117 cases above stand alone and ship the cycle. Carry seed-migrate integration to v0.116.x once PR #2 lands. The implementation plan's preconditions check MUST verify `platform/test/run-seed-migrations.js` exists in `main` HEAD before claiming this sub-section is in scope.
+
 ## Rollout posture
 
 1. Workshop ship: tag `v0.116.0` on `main` → `release.yml` runs preflight → bumps `Formula/sauce.rb` in brew tap PR.
 2. Brew tap merge → `brew upgrade sauce` on consumer machines.
 3. Per-vault: `sauce update --bump-pins` + `sauce install`. Installer fires `applyToDoBlueprintMigration` (existing daily notes get the 5-block body) + `applyProjectTodoBackfill` (each existing project gets a `<Name> To-Do.md` scaffold) + `applyOrphanedHelperCleanup` (removes the two retired JS files).
 4. Post-install smoke (every consumer vault): open today's to-do; verify all 5 sections render (empty sections render nothing); click `+ New Task`; create one task into Today; create one into a project; create one Recurring; verify recurring fires into the next daily-note open.
-5. Dogfood result doc: `Docs/plans/2026-06-{NN}-v0.116.0-todo-blueprint-expansion-result.md` — captures what shipped, what stuck, what carried forward.
+5. **Post-cycle seed rebaseline (only if PR #2 was merged before this cycle):** `npm run seed:prev && npm run seed:rebaseline` forward-ratchets `platform/test/seed-vault/` from v0.115.x state to v0.116.0 state. Bookkeeping commit `chore(seed): rebaseline to v0.116.0`. Per `Sauce Testing.md` §10.4 step 5. Skip cleanly if PR #2 hasn't landed yet.
+6. Dogfood result doc: `Docs/plans/2026-06-{NN}-v0.116.0-todo-blueprint-expansion-result.md` — captures what shipped, what stuck, what carried forward.
 
 ## Out-of-scope for v0.116.0 (carry-forwards)
 
