@@ -21,9 +21,10 @@ await dv.view("ranch/views/customjs-guard", { class: "PaycheckNavButtons" });
 await customJS.FinanceStatus.renderBadge(dv, "paycheck");
 ```
 
-## Expenses
+```dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "PaycheckSummary" });
+```
 
 ```dataviewjs
 await dv.view("ranch/views/customjs-guard", { class: "PaycheckExpensesEditor" });
 ```
-

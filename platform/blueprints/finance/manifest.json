@@ -30,8 +30,10 @@
     "DebtDefaultsEditor",
     "DebtConfigEditor",
     "BudgetSummary",
+    "PaycheckSummary",
     "DebtSummary",
-    "DebtsHubSummary"
+    "DebtsHubSummary",
+    "FinanceHubActions"
   ],
   "files": [
     { "source": "helpers/finance-status.js",       "dest": "{{scripts_path}}/finance/finance-status.js" },
@@ -51,8 +53,10 @@
     { "source": "helpers/debt-defaults-editor.js",      "dest": "{{scripts_path}}/finance/debt-defaults-editor.js" },
     { "source": "helpers/debt-config-editor.js",        "dest": "{{scripts_path}}/finance/debt-config-editor.js" },
     { "source": "helpers/budget-summary.js",            "dest": "{{scripts_path}}/finance/budget-summary.js" },
+    { "source": "helpers/paycheck-summary.js",          "dest": "{{scripts_path}}/finance/paycheck-summary.js" },
     { "source": "helpers/debt-summary.js",              "dest": "{{scripts_path}}/finance/debt-summary.js" },
     { "source": "helpers/debts-hub-summary.js",         "dest": "{{scripts_path}}/finance/debts-hub-summary.js" },
+    { "source": "helpers/finance-hub-actions.js",       "dest": "{{scripts_path}}/finance/finance-hub-actions.js" },
 
     { "source": "content/Finance.md",              "dest": "{{module_directory}}/Finance.md" },
     { "source": "content/Budgets.md",              "dest": "{{module_directory}}/budgets/Budgets.md" },
@@ -164,7 +168,7 @@
           "merge": { "planned_monthly_payment": "amount", "url": "url" }
         }
       },
-      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNavRow\" });\n```\n\n```dataviewjs\nawait customJS.FinanceStatus.renderBadge(dv, \"paycheck\");\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PaycheckExpensesEditor\" });\n```\n",
+      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNavRow\" });\n```\n\n```dataviewjs\nawait customJS.FinanceStatus.renderBadge(dv, \"paycheck\");\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PaycheckSummary\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PaycheckExpensesEditor\" });\n```\n",
       "render_in": { "kind": "hub", "target_path": "{{module_directory}}/paychecks/Paychecks.md" }
     },
     {

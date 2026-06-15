@@ -12136,13 +12136,21 @@ async function caseV01070FinMan1Versions() {
 }
 
 async function caseV01070FinMan2NewClassesAndFiles() {
-  console.log("\n--- Case HC-V01070-FIN-MAN-2: finance customjs_classes + files include 3 new entries ---");
+  console.log("\n--- Case HC-V01070-FIN-MAN-2: finance customjs_classes + files include new entries ---");
   const fin = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
-  for (const cls of ["BudgetDefaultsEditor", "PaycheckDefaultsEditor", "BudgetSummary"]) {
+  // v0.5.3 CF-3 added PaycheckSummary + FinanceHubActions (alongside the
+  // three v0.5.0 classes).
+  for (const cls of ["BudgetDefaultsEditor", "PaycheckDefaultsEditor", "BudgetSummary", "PaycheckSummary", "FinanceHubActions"]) {
     assertTrue(`HC-V01070-FIN-MAN-2: customjs_classes includes ${cls}`,
       fin.customjs_classes.includes(cls));
   }
-  for (const src of ["helpers/budget-defaults-editor.js", "helpers/paycheck-defaults-editor.js", "helpers/budget-summary.js"]) {
+  for (const src of [
+    "helpers/budget-defaults-editor.js",
+    "helpers/paycheck-defaults-editor.js",
+    "helpers/budget-summary.js",
+    "helpers/paycheck-summary.js",
+    "helpers/finance-hub-actions.js"
+  ]) {
     assertTrue(`HC-V01070-FIN-MAN-2: files[] includes ${src}`,
       fin.files.some(f => f.source === src));
   }
@@ -12181,6 +12189,49 @@ async function caseV01070FinMan3SeedFromDefaults() {
   // heading line — the heading was redundant. Editor stands on its own.
   assertTrue("HC-V01070-FIN-MAN-3: budget.inline_body drops `## Categories` heading",
     !/##\s+Categories/.test(budget.inline_body));
+}
+
+// v0.5.3 CF-3 — PaycheckSummary widget shipped.
+
+async function caseV01070PsClassDeclared() {
+  console.log("\n--- Case HC-V01070-PS-1: PaycheckSummary class declared + read-only ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/helpers/paycheck-summary.js"), "utf8");
+  assertTrue("HC-V01070-PS-1: class PaycheckSummary declared",
+    /class\s+PaycheckSummary\s*\{/.test(src));
+  assertTrue("HC-V01070-PS-1: async render(dv) method present",
+    /async\s+render\s*\(\s*dv\s*\)/.test(src));
+  assertTrue("HC-V01070-PS-1: embed-dedup guard",
+    /markdown-embed/.test(src));
+  assertTrue("HC-V01070-PS-1: does NOT write frontmatter",
+    !/FinanceFrontmatter\.update/.test(src) && !/processFrontMatter/.test(src));
+}
+
+async function caseV01070PsThreeBands() {
+  console.log("\n--- Case HC-V01070-PS-2: PaycheckSummary three bands (pay/paid/remaining + progress + per-category) ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/helpers/paycheck-summary.js"), "utf8");
+  assertTrue("HC-V01070-PS-2: Band 1 — pay amount + paid + remaining",
+    /paycheck_amount/.test(src) && /paidExpenses/.test(src) && /remaining/i.test(src));
+  assertTrue("HC-V01070-PS-2: Band 2 — paid X of N progress",
+    /paidCount/.test(src) && /totalCount/.test(src));
+  assertTrue("HC-V01070-PS-2: Band 3 — per-category aggregation",
+    /buckets|category|e\.category/.test(src));
+}
+
+// v0.5.3 CF-3 — FinanceHubActions widget shipped.
+
+async function caseV01070FhaClassDeclared() {
+  console.log("\n--- Case HC-V01070-FHA-1: FinanceHubActions class + cross-hub nav ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/helpers/finance-hub-actions.js"), "utf8");
+  assertTrue("HC-V01070-FHA-1: class FinanceHubActions declared",
+    /class\s+FinanceHubActions\s*\{/.test(src));
+  assertTrue("HC-V01070-FHA-1: render(dv, opts) accepts here/instance/defaultsPath",
+    /here\s*=\s*null/.test(src) && /instance\s*=\s*null/.test(src) && /defaultsPath\s*=\s*null/.test(src));
+  assertTrue("HC-V01070-FHA-1: lists all four finance hubs",
+    /finance/.test(src) && /budgets/.test(src) && /paychecks/.test(src) && /invoices/.test(src));
+  assertTrue("HC-V01070-FHA-1: hides current hub via `here` key",
+    /hub\.key\s*===\s*here|here\s*===\s*hub\.key/.test(src));
+  assertTrue("HC-V01070-FHA-1: delegates + New X to customJS.EntityCreate.render",
+    /customJS\.EntityCreate\.render/.test(src));
 }
 
 // v0.5.2 CF-2 — applyFinanceBudgetBodyMigration (BudgetSummary block injection
@@ -12444,6 +12495,113 @@ async function caseV01080FinanceCustomJsClasses() {
     assertTrue(`V01080-CJS-added-${added}: ${added} present in customjs_classes`,
       cls.includes(added));
   }
+}
+
+// v0.5.3 CF-3 — applyFinancePaycheckBodyMigration (PaycheckSummary block
+// injection + `## Expenses` heading removal on existing Paycheck-*.md files).
+
+async function caseV01070FpbmPaycheckBodyMigration() {
+  console.log("\n--- Case HC-V01070-FPBM: applyFinancePaycheckBodyMigration shipped ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
+  assertTrue("HC-V01070-FPBM-1: applyFinancePaycheckBodyMigration function present",
+    /async\s+function\s+applyFinancePaycheckBodyMigration\s*\(/.test(src));
+  assertTrue("HC-V01070-FPBM-1: wired into applyFinanceMigrations orchestrator",
+    /await\s+applyFinancePaycheckBodyMigration\s*\(/.test(src));
+  assertTrue("HC-V01070-FPBM-2: _migratePaycheckBody helper present",
+    /function\s+_migratePaycheckBody\s*\(/.test(src));
+  assertTrue("HC-V01070-FPBM-2: marker-guarded PaycheckSummary injection",
+    /<!--\s*paycheck-summary-v0\.5\.3\s*-->/.test(src));
+  assertTrue("HC-V01070-FPBM-3: removes `## Expenses` heading line",
+    /## Expenses/.test(src));
+}
+
+// v0.109.0 — projects visual overhaul. See Docs/plans/2026-06-15-v0.109.0-projects-visual-overhaul-design.md.
+
+// S4 — Docs.md section card metadata.
+async function caseV01090Pdi1MaxMtimeComputed() {
+  console.log("\n--- Case HC-V01090-PDI-1: ProjectDocsIndex section cards compute maxMtime + mostRecentDoc ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/project-docs-index.js"), "utf8");
+  assertTrue("HC-V01090-PDI-1: maxMtime computed per section",
+    /maxMtime/.test(src));
+  assertTrue("HC-V01090-PDI-1: most recent doc captured",
+    /mostRecentDoc/.test(src));
+}
+
+async function caseV01090Pdi2SectionsSortedDesc() {
+  console.log("\n--- Case HC-V01090-PDI-2: section cards sorted by maxMtime desc ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/project-docs-index.js"), "utf8");
+  assertTrue("HC-V01090-PDI-2: sectionPages sorted",
+    /sectionPages\.sort/.test(src));
+}
+
+async function caseV01090Pdi3MetaIncludesUpdated() {
+  console.log("\n--- Case HC-V01090-PDI-3: section card meta carries 'updated' suffix when populated ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/project-docs-index.js"), "utf8");
+  assertTrue("HC-V01090-PDI-3: meta includes 'updated' for populated sections",
+    /["'`]updated /.test(src));
+}
+
+// S3 — ProjectsHubCards adopts DocSearch.
+async function caseV01090Phc1DocSearchInvoked() {
+  console.log("\n--- Case HC-V01090-PHC-1: ProjectsHubCards invokes DocSearch ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/projects-hub-cards.js"), "utf8");
+  assertTrue("HC-V01090-PHC-1: DocSearch.render invoked",
+    /customJS\.DocSearch\.render\(/.test(src));
+  assertTrue("HC-V01090-PHC-1: entityType set to project",
+    /entityType:\s*["']project["']/.test(src));
+  assertTrue("HC-V01090-PHC-1: scopePath set to spice/projects",
+    /scopePath:\s*["']spice\/projects["']/.test(src));
+}
+
+async function caseV01090Phc2MatchesAppliedToFilter() {
+  console.log("\n--- Case HC-V01090-PHC-2: ProjectsHubCards applies DocSearch.matches in filter chain ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/projects-hub-cards.js"), "utf8");
+  assertTrue("HC-V01090-PHC-2: DocSearch.matches called in filter chain",
+    /customJS\.DocSearch\.matches\(/.test(src));
+}
+
+// S2 — SectionLabel primitive.
+async function caseV01090Sl1ClassDefined() {
+  console.log("\n--- Case HC-V01090-SL-1: SectionLabel class defined ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/section-label.js"), "utf8");
+  assertTrue("HC-V01090-SL-1: class SectionLabel declared", /class\s+SectionLabel\s*\{/.test(src));
+  assertTrue("HC-V01090-SL-1: instance render method", /\brender\s*\(\s*dv\s*,\s*opts\s*\)/.test(src));
+}
+
+async function caseV01090Sl2RendersHrAndLabel() {
+  console.log("\n--- Case HC-V01090-SL-2: SectionLabel emits hr + uppercase muted label ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/section-label.js"), "utf8");
+  assertTrue("HC-V01090-SL-2: hr emitted unless opts.top",
+    /createEl\(\s*["']hr["']/.test(src));
+  assertTrue("HC-V01090-SL-2: opts.top branch present",
+    /opts\.top/.test(src));
+  assertTrue("HC-V01090-SL-2: uppercase styling",
+    /text-transform:\s*uppercase/.test(src));
+  assertTrue("HC-V01090-SL-2: muted color",
+    /var\(--text-muted\)/.test(src));
+}
+
+async function caseV01090Sl3ManifestRegistered() {
+  console.log("\n--- Case HC-V01090-SL-3: section-label.js registered in project manifest ---");
+  const mf = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/manifest.json"), "utf8"));
+  const files = mf.files || [];
+  const found = files.find((f) => f.source === "helpers/section-label.js"
+                              && f.dest === "{{scripts_path}}/project/section-label.js");
+  assertTrue("HC-V01090-SL-3: section-label.js registered in manifest files[]", !!found);
+}
+
+// S1 — DocSearch parameterization.
+async function caseV01090Ds1EntityTypeOpt() {
+  console.log("\n--- Case HC-V01090-DS-1: DocSearch accepts entityType/placeholder/tagExclude opts ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/doc-search.js"), "utf8");
+  assertTrue("HC-V01090-DS-1: entityType opt referenced",
+    /opts\.entityType/.test(src));
+  assertTrue("HC-V01090-DS-1: default falls back to doc-note",
+    /opts\.entityType\s*\|\|\s*["']doc-note["']/.test(src));
+  assertTrue("HC-V01090-DS-1: placeholder opt referenced",
+    /opts\.placeholder/.test(src));
+  assertTrue("HC-V01090-DS-1: tagExclude opt referenced",
+    /opts\.tagExclude/.test(src));
 }
 
 (async function main() {
@@ -13127,7 +13285,31 @@ async function caseV01080FinanceCustomJsClasses() {
   await caseV01070FinMan3SeedFromDefaults();
 
   // v0.107.0 CF-2 — body migration on existing budgets
+  // v0.109.0 — projects visual overhaul.
+  await caseV01090Ds1EntityTypeOpt();        // S1
+  await caseV01090Sl1ClassDefined();         // S2
+  await caseV01090Sl2RendersHrAndLabel();    // S2
+  await caseV01090Sl3ManifestRegistered();   // S2
+  await caseV01090Phc1DocSearchInvoked();    // S3
+  await caseV01090Phc2MatchesAppliedToFilter(); // S3
+  await caseV01090Pdi1MaxMtimeComputed();    // S4
+  await caseV01090Pdi2SectionsSortedDesc();  // S4
+  await caseV01090Pdi3MetaIncludesUpdated(); // S4
   await caseV01070FbbmBudgetBodyMigration();
+
+  // v0.5.3 CF-3 — PaycheckSummary + FinanceHubActions + paycheck body migration
+  await caseV01070PsClassDeclared();
+  await caseV01070PsThreeBands();
+  await caseV01070FhaClassDeclared();
+  await caseV01070FpbmPaycheckBodyMigration();
+
+  // v0.109.0 projects visual overhaul
+  await caseV01090Phc1DocSearchInvoked();
+  await caseV01090Phc2MatchesAppliedToFilter();
+  await caseV01090Sl1ClassDefined();
+  await caseV01090Sl2RendersHrAndLabel();
+  await caseV01090Sl3ManifestRegistered();
+  await caseV01090Ds1EntityTypeOpt();
 
   // v0.108.0 S1 — entity-create 0.7.1 PATCH (resolve_wikilinks)
   await caseV01080EntityCreatePatchBump();

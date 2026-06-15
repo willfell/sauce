@@ -157,13 +157,26 @@ class ProjectDocsIndex {
     proxyDv.header(3, "Sections");
     const folderIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--interactive-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`;
 
+    // v0.109.0 S4 — each section card carries last-updated meta + most-recent-doc
+    // subtitle. Sections are sorted by maxMtime DESC so active sections surface
+    // first; ties break alphabetically for stability across re-renders. Empty
+    // sections fall to the bottom (maxMtime = 0).
     const sectionPages = sections.map((label) => {
       const slug = this._slugify(label);
       const sectionFolder = `${docsFolder}/${slug}`;
-      const count = allDocs.where((p) => {
+      const docsInSection = allDocs.where((p) => {
         const folder = String(p.file.folder || "");
         return folder === sectionFolder || folder.startsWith(`${sectionFolder}/`);
-      }).length;
+      });
+      let maxMtime = 0;
+      let mostRecentDoc = null;
+      for (const d of docsInSection) {
+        const ts = d.file.mtime?.ts || 0;
+        if (ts > maxMtime) {
+          maxMtime = ts;
+          mostRecentDoc = String(d.file.name || "");
+        }
+      }
       const hubPath = `${sectionFolder}/${label}.md`;
       return {
         file: {
@@ -173,8 +186,15 @@ class ProjectDocsIndex {
         },
         section_label: label,
         section_slug: slug,
-        doc_count: count,
+        doc_count: docsInSection.length,
+        maxMtime,
+        mostRecentDoc,
       };
+    });
+
+    sectionPages.sort((a, b) => {
+      if ((b.maxMtime || 0) !== (a.maxMtime || 0)) return (b.maxMtime || 0) - (a.maxMtime || 0);
+      return String(a.section_label).localeCompare(String(b.section_label));
     });
 
     await customJS.BeaconCards.render(proxyDv, {
@@ -182,9 +202,16 @@ class ProjectDocsIndex {
       layout: "row",
       title: (p) => p.section_label || p.file.name,
       icon: () => folderIcon,
+      subtitle: (p) => {
+        if (!p.mostRecentDoc) return null;
+        const s = String(p.mostRecentDoc);
+        return s.length > 60 ? s.slice(0, 57) + "…" : s;
+      },
       meta: (p) => {
         const count = p.doc_count || 0;
-        return `${count} doc${count === 1 ? "" : "s"}`;
+        const parts = [`${count} doc${count === 1 ? "" : "s"}`];
+        if (p.maxMtime) parts.push(`updated ${moment(p.maxMtime).fromNow()}`);
+        return parts.join(" · ");
       },
       target: (p) => p.file.path,
     });

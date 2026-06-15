@@ -44,8 +44,11 @@ class ProjectsHubCards {
             chip.addEventListener("click", async () => {
                 if (this._activeStatuses.has(s)) this._activeStatuses.delete(s);
                 else this._activeStatuses.add(s);
+                // v0.109.0 S3: clear ONLY the resultsContainer (the proxy's container)
+                // and re-render via _renderInner. The DocSearch strip lives outside
+                // the proxy and stays intact across status-chip clicks.
                 dv.container.empty();
-                await this.render(dv, {});
+                await this._renderInner(dv);
             });
         });
 
@@ -75,8 +78,9 @@ class ProjectsHubCards {
                 chip.addEventListener("click", async () => {
                     if (activeSet.has(path)) activeSet.delete(path);
                     else activeSet.add(path);
+                    // v0.109.0 S3 — see status-chip handler above.
                     dv.container.empty();
-                    await this.render(dv, {});
+                    await this._renderInner(dv);
                 });
             });
         };
@@ -96,8 +100,9 @@ class ProjectsHubCards {
         });
         select.addEventListener("change", async (e) => {
             this._groupBy = e.target.value;
+            // v0.109.0 S3 — see status-chip handler above.
             dv.container.empty();
-            await this.render(dv, {});
+            await this._renderInner(dv);
         });
     }
 
@@ -112,6 +117,44 @@ class ProjectsHubCards {
             this._activeStatuses = new Set(["idea", "planning", "in-progress", "blocked"]);
         }
 
+        // v0.109.0 S3 — DocSearch filter strip wraps the existing status/team/product
+        // chips + grid. entityType: project + scopePath: spice/projects let DocSearch
+        // build its tag-chip universe from project tags. Chip-strip listeners + the
+        // grid are written into the resultsContainer via a proxyDv shim, mirroring
+        // how ProjectDocsIndex and SectionHub consume DocSearch.
+        const filterCtx = customJS.DocSearch.render(dv, {
+            entityType: "project",
+            scopePath:  "spice/projects",
+            recursive:  true,
+            placeholder: "Filter projects by name or tag…",
+            onChange: async (ctx) => {
+                this._filterCtx = ctx;
+                ctx.resultsContainer.empty();
+                await this._renderInner(this._makeProxyDv(dv, ctx.resultsContainer));
+            },
+        });
+        this._filterCtx = filterCtx;
+
+        // First-render INTO resultsContainer.
+        await this._renderInner(this._makeProxyDv(dv, filterCtx.resultsContainer));
+    }
+
+    _makeProxyDv(dv, container) {
+        return {
+            container,
+            current: dv.current.bind(dv),
+            pages:   dv.pages.bind(dv),
+            el: (tag, txt, opts) => {
+                const el = container.createEl(tag, { ...(opts || {}) });
+                if (txt !== undefined && txt !== null && txt !== "") el.textContent = String(txt);
+                return el;
+            },
+            header: (lvl, txt) => container.createEl(`h${lvl}`, { text: String(txt) }),
+            paragraph: (txt) => { const p = container.createEl("p"); p.innerHTML = String(txt); return p; },
+        };
+    }
+
+    async _renderInner(dv) {
         // v1.4.1 (S6.5 CF-1): match the hub note via EITHER the new canonical
         // `type: project` discriminator (v1.4.0+) OR the legacy `#project` tag
         // (pre-v1.4.0). Older projects in long-running consumer vaults don't
@@ -122,6 +165,9 @@ class ProjectsHubCards {
         // which means Project Map.md (type: map) and Project Board.md (type: kanban)
         // would be falsely included by the etag check alone. Filter them out by
         // explicit type, plus the legacy `-board` filename guard for safety.
+        //
+        // v0.109.0 S3: final .where applies DocSearch.matches against the filter ctx
+        // so the text input + tag chips compose with status/team/product.
         const statusFiltered = dv.pages('"spice/projects"')
             .where(p => (p.type === "project"
                       || (p.file.etags.includes("#project")
@@ -130,7 +176,8 @@ class ProjectsHubCards {
                      && p.file.name !== "Projects"
                      && !p.file.path.includes("/steps/")
                      && !p.file.name.toLowerCase().endsWith("-board"))
-            .where(p => !p.status || this._activeStatuses.has(p.status));
+            .where(p => !p.status || this._activeStatuses.has(p.status))
+            .where(p => customJS.DocSearch.matches(p, this._filterCtx));
 
         // v0.39.0 S6.4/S6.5: render status + team + product chip bars at top
         // of hub. Team/product chip set is derived from the status-filtered
