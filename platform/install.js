@@ -3836,7 +3836,7 @@ async function applyExternalPlugins(tp, manifest, history, git) {
 }
 
 // ============================================================================
-// applyFinanceMigrations — v0.107.0 S2 (extended v0.108.0 S2).
+// applyFinanceMigrations — v0.107.0 S2 (extended v0.108.0 S2, v0.112.0 S2).
 //
 // Orchestrator wrapping finance-blueprint install-time steps. Gated on
 // manifest.name === "finance"; failure-loud per file; never throws; idempotent.
@@ -3849,24 +3849,36 @@ async function applyExternalPlugins(tp, manifest, history, git) {
 //   2. applyFinanceDebtScaffolding (NEW v0.108.0) — create-if-absent for
 //      `spice/finance/debts/` folder + `Debts.md` hub + `Debt Defaults.md`.
 //
-//   3. applyFinanceCategoriesGroupBackfill — append-only group field on every
+//   3. applyFinanceMonthsScaffolding (NEW v0.112.0) — create-if-absent for
+//      `spice/finance/months/` folder + `Months.md` hub.
+//
+//   4. applyFinanceCategoriesGroupBackfill — append-only group field on every
 //      existing `Budget-*.md`. Adds `groups: []` to top-level frontmatter if
 //      missing; adds `group: "Unassigned"` to every category that lacks one.
 //      Pre-write `.sauce-backup` snapshot mirrors v0.101.0 Safeguard-1 pattern.
 //      Names, planned amounts, and actuals NEVER altered. Per-file failure-loud
 //      via history warning events. Idempotent — re-runs detect no-op.
 //
-//   4. applyFinanceBudgetGroupSeed (NEW v0.108.0) — CF-3 polish #6+#7.
+//   5. applyFinanceBudgetGroupSeed (NEW v0.108.0) — CF-3 polish #6+#7.
 //      Seeds groups[] on existing Budget-*.md from Budget Defaults; name-matches
 //      Unassigned categories to their defaults-declared group.
 //
-//   5. applyFinanceBudgetBodyMigration — v0.107.0 CF-2 body-text heal.
+//   6. applyFinanceBudgetBodyMigration — v0.107.0 CF-2 body-text heal.
 //
-//   6. applyFinancePaycheckDefaultsDebtLinking (NEW v0.108.0) — walks Paycheck
+//   7. applyFinanceBudgetMonthlyBandInjection (NEW v0.110.3) — injects
+//      MonthlyOverview block above BudgetSummary on every Budget-YYYY-MM.md.
+//
+//   8. applyFinancePaycheckBodyMigration — v0.107.0 CF-3 body-text heal.
+//
+//   9. applyFinancePaycheckDebtBandInjection (NEW v0.112.0) — injects
+//      PaycheckDebtBand block between PaycheckSummary and PaycheckExpensesEditor
+//      on every Paycheck-*.md.
+//
+//  10. applyFinancePaycheckDefaultsDebtLinking (NEW v0.108.0) — walks Paycheck
 //      Defaults CC rows, name-matches debt entities, sets debt:[[Debt-X]],
 //      strips inline url:.
 //
-//   7. applyFinanceNavRowMigration (NEW v0.108.0) — vault-wide regex sweep
+//  11. applyFinanceNavRowMigration (NEW v0.108.0) — vault-wide regex sweep
 //      rewriting customJS.{Budget,Paycheck,Invoice}NavButtons.render() to
 //      customJS.FinanceNavRow.render(dv). Runs LAST (touches all entity bodies).
 //
@@ -3965,16 +3977,197 @@ await dv.view("ranch/views/customjs-guard", { class: "DebtDefaultsEditor" });
 \`\`\`
 `;
 
+// v0.112.0 S2a — months hub body (byte-identical to content/Months.md body and
+// FINANCE_HUB_BODY_TEMPLATES entry — all three must stay in sync).
+const FINANCE_MONTHS_HUB_BODY = `\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+\`\`\`
+
+\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "FinanceNav" });
+\`\`\`
+
+\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "MonthsCards" });
+\`\`\`
+`;
+
+// applyFinanceMonthsScaffolding — v0.112.0 S2a. Create-if-absent for the
+// months sub-area:
+//   • spice/finance/months/        (folder)
+//   • spice/finance/months/Months.md  (hub note)
+//
+// Never overwrites existing files — idempotent on re-runs. Mirrors
+// applyFinanceDebtScaffolding posture from v0.108.0.
+
+async function applyFinanceMonthsScaffolding(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "finance") return;
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+
+  const monthsRoot = "spice/finance/months";
+  const monthsHubPath = `${monthsRoot}/Months.md`;
+
+  let created = 0;
+  let preserved = 0;
+
+  // 1. Ensure months folder exists.
+  if (!(await adapter.exists(monthsRoot))) {
+    try {
+      await adapter.mkdir(monthsRoot);
+    } catch (e) {
+      history?.push({ event: "warning", step: "months_scaffolding", name: "finance",
+        reason: `mkdir failed for ${monthsRoot}: ${e.message}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+      return;
+    }
+  }
+
+  // 2. Months.md hub — create-if-absent only; never overwrite.
+  if (await adapter.exists(monthsHubPath)) {
+    preserved++;
+  } else {
+    try {
+      await adapter.write(monthsHubPath, FINANCE_MONTHS_HUB_BODY);
+      created++;
+      history?.push({ event: "info", step: "months_scaffolding", name: "finance",
+        action: "created", path: monthsHubPath,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    } catch (e) {
+      history?.push({ event: "warning", step: "months_scaffolding", name: "finance",
+        reason: `write failed for ${monthsHubPath}: ${e.message}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    }
+  }
+
+  history?.push({ event: "info", step: "months_scaffolding", name: "finance",
+    summary: { created, preserved },
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+    completed_at: new Date().toISOString() });
+}
+
+// ============================================================================
+// applyFinancePaycheckDebtBandInjection — v0.112.0 S2b (finance 0.8.0). Injects
+// the PaycheckDebtBand dataviewjs block (marker-guarded by
+// `<!-- paycheck-debt-band-v0.8.0 -->`) between PaycheckSummary and
+// PaycheckExpensesEditor on every Paycheck-*.md. Body-text mutation only.
+// Idempotent — marker presence short-circuits. Per-file failure-loud via
+// history warning events. Mirrors applyFinanceBudgetMonthlyBandInjection posture.
+// ============================================================================
+async function applyFinancePaycheckDebtBandInjection(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "finance") return;
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+
+  const paychecksRoot = "spice/finance/paychecks";
+  if (!(await adapter.exists(paychecksRoot))) return;
+
+  const paycheckFiles = [];
+  try {
+    const top = await adapter.list(paychecksRoot);
+    for (const folder of (top.folders || [])) {
+      try {
+        const inner = await adapter.list(folder);
+        for (const fp of (inner.files || [])) {
+          if (/Paycheck-\d{4}-\d{2}-\d{2}\.md$/.test(fp)) paycheckFiles.push(fp);
+        }
+      } catch (_e) { /* per-folder failure-loud */ }
+    }
+  } catch (e) {
+    history?.push({ event: "warning", step: "finance_paycheck_debt_band_injection", name: "finance",
+      reason: `list failed for ${paychecksRoot}: ${e.message}`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+      attempted_at: new Date().toISOString() });
+    return;
+  }
+
+  if (paycheckFiles.length === 0) return;
+
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  let touched = 0;
+  for (const fp of paycheckFiles) {
+    try {
+      const body = await adapter.read(fp);
+      const result = _injectPaycheckDebtBand(body);
+      if (result.touched) {
+        // Snapshot before write
+        const backupPath = `.sauce-backup/${ts}/${fp}`;
+        const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+        try { await adapter.mkdir(backupParent); } catch (_e) { /* already exists */ }
+        try { await adapter.write(backupPath, body); } catch (_e) { /* best-effort */ }
+        await adapter.write(fp, result.body);
+        touched += 1;
+      }
+    } catch (e) {
+      history?.push({ event: "warning", step: "finance_paycheck_debt_band_injection", name: "finance",
+        reason: `body injection failed for ${fp}: ${e.message}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    }
+  }
+
+  history?.push({ event: "info", step: "finance_paycheck_debt_band_injection", name: "finance",
+    reason: `${paycheckFiles.length} paychecks scanned, ${touched} bodies injected (PaycheckDebtBand block between PaycheckSummary and PaycheckExpensesEditor)`,
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+    attempted_at: new Date().toISOString() });
+}
+
+// _injectPaycheckDebtBand — pure body transform. Idempotent. Marker-guarded.
+//   Anchor priority (lands between PaycheckSummary and PaycheckExpensesEditor):
+//     1. marker present → no-op.
+//     2. PaycheckExpensesEditor dataviewjs block exists → inject immediately BEFORE it.
+//     3. PaycheckSummary dataviewjs block exists → inject immediately AFTER it.
+//     4. Frontmatter close (second `---\n`) → inject AFTER it.
+function _injectPaycheckDebtBand(body) {
+  let out = body;
+
+  const MARKER = "<!-- paycheck-debt-band-v0.8.0 -->";
+  if (out.includes(MARKER)) return { body: out, touched: false };
+
+  const debtBandBlock = `${MARKER}\n\`\`\`dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "PaycheckDebtBand" });\n\`\`\`\n\n`;
+
+  // Priority 2: inject immediately before the PaycheckExpensesEditor block.
+  const editorBlockRe = /(```dataviewjs\s*\n[^`]*class:\s*["']PaycheckExpensesEditor["'][^`]*```\s*\n)/;
+  const eb = out.match(editorBlockRe);
+  if (eb) {
+    out = out.replace(editorBlockRe, `${debtBandBlock}$1`);
+    return { body: out, touched: true };
+  }
+
+  // Priority 3: inject immediately after the PaycheckSummary block.
+  const summaryBlockRe = /(```dataviewjs\s*\n[^`]*class:\s*["']PaycheckSummary["'][^`]*```\s*\n)/;
+  const sb = out.match(summaryBlockRe);
+  if (sb) {
+    out = out.replace(summaryBlockRe, `$1\n${debtBandBlock}`);
+    return { body: out, touched: true };
+  }
+
+  // Priority 4: inject after the frontmatter close (second `---\n`).
+  const fmEnd = out.indexOf("---\n", 4);
+  if (fmEnd !== -1) {
+    const cutIdx = fmEnd + 4;
+    out = out.slice(0, cutIdx) + `\n${debtBandBlock}` + out.slice(cutIdx);
+    return { body: out, touched: true };
+  }
+
+  return { body: out, touched: false };
+}
+
 async function applyFinanceMigrations(tp, manifest, variables, history, git) {
   if (!manifest || manifest.name !== "finance") return;
   if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
   await applyFinanceDefaultsScaffolding(tp, manifest, variables, history, git);
   await applyFinanceDebtScaffolding(tp, manifest, variables, history, git);              // NEW v0.108.0
+  await applyFinanceMonthsScaffolding(tp, manifest, variables, history, git);            // NEW v0.112.0 — create-if-absent months/ + Months.md
   await applyFinanceCategoriesGroupBackfill(tp, manifest, variables, history, git);
   await applyFinanceBudgetGroupSeed(tp, manifest, variables, history, git);              // NEW v0.108.0
   await applyFinanceBudgetBodyMigration(tp, manifest, variables, history, git);
   await applyFinanceBudgetMonthlyBandInjection(tp, manifest, variables, history, git);   // NEW v0.110.3 — MonthlyOverview band above BudgetSummary
   await applyFinancePaycheckBodyMigration(tp, manifest, variables, history, git);        // CF-3 v0.107.0
+  await applyFinancePaycheckDebtBandInjection(tp, manifest, variables, history, git);    // NEW v0.112.0 — PaycheckDebtBand between PaycheckSummary and PaycheckExpensesEditor
   await applyFinancePaycheckDefaultsDebtLinking(tp, manifest, variables, history, git);  // NEW v0.108.0
   await applyFinanceNavRowMigration(tp, manifest, variables, history, git);              // NEW v0.108.0
   await applyFinanceNavRowGuardFormMigration(tp, manifest, variables, history, git);     // NEW v0.110.3 — guard-form regression: rewrites class:"BudgetNavButtons"|"PaycheckNavButtons"|"InvoiceNavButtons" guard-form refs missed by v0.108.0's direct-call regex
@@ -3995,11 +4188,12 @@ async function applyFinanceMigrations(tp, manifest, variables, history, git) {
 // args). Finance.md now ALSO has a FinanceNav block (was missing entirely
 // in earlier templates — the user reported no Debts button on Finance.md).
 const FINANCE_HUB_BODY_TEMPLATES = {
-  "spice/finance/Finance.md": "\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceHubCards\" });\n```\n",
+  "spice/finance/Finance.md": "\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceHubSummary\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceHubCards\" });\n```\n",
   "spice/finance/budgets/Budgets.md": "\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\n// entity-create:budget — installer-managed; do not delete this comment\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"BudgetsCards\" });\n```\n",
   "spice/finance/paychecks/Paychecks.md": "\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\n// entity-create:paycheck — installer-managed; do not delete this comment\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PaychecksCards\" });\n```\n",
   "spice/finance/invoices/Invoices.md": "\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\n// entity-create:invoice — installer-managed; do not delete this comment\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"InvoicesCards\" });\n```\n",
   "spice/finance/debts/Debts.md": "\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\n// entity-create:debt — installer-managed; do not delete this comment\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"DebtsHubSummary\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"DebtsCards\" });\n```\n",
+  "spice/finance/months/Months.md": "\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"MonthsCards\" });\n```\n",
 };
 
 async function applyFinanceHubsRepair(tp, manifest, variables, history, git) {
@@ -11233,6 +11427,10 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports.applyCustomJsGuardMigration = applyCustomJsGuardMigration;
     // v0.111.0 — collapse FinanceHubActions + FinanceNavRow → single-line FinanceNav.
     module.exports.applyFinanceUnifiedNavMigration = applyFinanceUnifiedNavMigration;
+    // v0.112.0 S2 — months scaffolding + paycheck-debt-band injection.
+    module.exports.applyFinanceMonthsScaffolding = applyFinanceMonthsScaffolding;
+    module.exports.applyFinancePaycheckDebtBandInjection = applyFinancePaycheckDebtBandInjection;
+    module.exports._injectPaycheckDebtBand = _injectPaycheckDebtBand;
     //
     // CF-2: by default, capture run-install.js's stdio (Phase B/C surfaced
     // 2200-line JSON dumps mixed into the user's terminal). We tee the
