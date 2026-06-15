@@ -1,7 +1,7 @@
 {
   "_comment": "Workshop platform manifest. Each mechanism + blueprint has its own version.",
-  "workshop_version": "0.107.0",
-  "date": "2026-05-23",
+  "workshop_version": "0.108.0",
+  "date": "2026-06-15",
   "foundational_plugins": [
     {
       "id": "templater-obsidian"
@@ -89,7 +89,7 @@
     },
     {
       "name": "entity-create",
-      "version": "0.7.0",
+      "version": "0.7.1",
       "path": "mechanisms/entity-create"
     },
     {
@@ -176,7 +176,7 @@
     },
     {
       "name": "finance",
-      "version": "0.5.2",
+      "version": "0.6.0",
       "path": "blueprints/finance"
     },
     {
