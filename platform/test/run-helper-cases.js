@@ -11956,6 +11956,73 @@ async function caseV01070Fcgb5IdempotentSkip() {
     /(let\s+changed\s*=\s*false|needsWrite|let\s+modified\s*=)/.test(src));
 }
 
+// v0.107.0 — defaults editor classes shipped in finance blueprint.
+
+async function caseV01070Bde1ClassDeclared() {
+  console.log("\n--- Case HC-V01070-BDE-1: BudgetDefaultsEditor class declared ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/helpers/budget-defaults-editor.js"), "utf8");
+  assertTrue("HC-V01070-BDE-1: class BudgetDefaultsEditor declared",
+    /class\s+BudgetDefaultsEditor\s*\{/.test(src));
+  assertTrue("HC-V01070-BDE-1: async render(dv) method present",
+    /async\s+render\s*\(\s*dv\s*\)/.test(src));
+  assertTrue("HC-V01070-BDE-1: embed-dedup guard",
+    /markdown-embed/.test(src));
+}
+
+async function caseV01070Bde2GroupsPane() {
+  console.log("\n--- Case HC-V01070-BDE-2: Groups pane + Add Group dialog ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/helpers/budget-defaults-editor.js"), "utf8");
+  assertTrue("HC-V01070-BDE-2: 'Add Group' action label",
+    /Add Group/.test(src));
+  assertTrue("HC-V01070-BDE-2: groups pane mutates fm.groups",
+    /fm\.groups\s*=|\.groups\s*=\s*\[?/.test(src));
+  assertTrue("HC-V01070-BDE-2: reorder helper (move up/down)",
+    /(_moveGroup|moveUp|moveDown|↑|↓)/.test(src));
+}
+
+async function caseV01070Bde3CategoriesPaneGrouped() {
+  console.log("\n--- Case HC-V01070-BDE-3: Categories pane uses grouped <details> sections ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/helpers/budget-defaults-editor.js"), "utf8");
+  assertTrue("HC-V01070-BDE-3: <details> element used for collapsible groups",
+    /createEl\(\s*["']details["']/.test(src));
+  assertTrue("HC-V01070-BDE-3: Add Category action label",
+    /Add Category/.test(src));
+}
+
+async function caseV01070Bde4UsesFinanceFrontmatter() {
+  console.log("\n--- Case HC-V01070-BDE-4: writes go through FinanceFrontmatter.update ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/helpers/budget-defaults-editor.js"), "utf8");
+  assertTrue("HC-V01070-BDE-4: customJS.FinanceFrontmatter.update referenced",
+    /customJS\.FinanceFrontmatter\.update/.test(src));
+}
+
+async function caseV01070Pde1ClassDeclared() {
+  console.log("\n--- Case HC-V01070-PDE-1: PaycheckDefaultsEditor class declared ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/helpers/paycheck-defaults-editor.js"), "utf8");
+  assertTrue("HC-V01070-PDE-1: class PaycheckDefaultsEditor declared",
+    /class\s+PaycheckDefaultsEditor\s*\{/.test(src));
+  assertTrue("HC-V01070-PDE-1: async render(dv) method present",
+    /async\s+render\s*\(\s*dv\s*\)/.test(src));
+  assertTrue("HC-V01070-PDE-1: embed-dedup guard",
+    /markdown-embed/.test(src));
+}
+
+async function caseV01070Pde2DatalistAutocomplete() {
+  console.log("\n--- Case HC-V01070-PDE-2: datalist autocomplete for Category from Budget Defaults ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/helpers/paycheck-defaults-editor.js"), "utf8");
+  assertTrue("HC-V01070-PDE-2: datalist element used",
+    /createEl\(\s*["']datalist["']|<datalist|setAttribute\(\s*["']list["']/.test(src));
+  assertTrue("HC-V01070-PDE-2: reads from Budget Defaults.md for suggestions",
+    /Budget Defaults\.md/.test(src));
+}
+
+async function caseV01070Pde3UsesFinanceFrontmatter() {
+  console.log("\n--- Case HC-V01070-PDE-3: writes go through FinanceFrontmatter.update ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/helpers/paycheck-defaults-editor.js"), "utf8");
+  assertTrue("HC-V01070-PDE-3: customJS.FinanceFrontmatter.update referenced",
+    /customJS\.FinanceFrontmatter\.update/.test(src));
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -12610,6 +12677,15 @@ async function caseV01070Fcgb5IdempotentSkip() {
   await caseV01070Fcgb3AppendOnlyGuard();
   await caseV01070Fcgb4PerFileFailureLoud();
   await caseV01070Fcgb5IdempotentSkip();
+
+  // v0.107.0 — defaults editor widgets (S3)
+  await caseV01070Bde1ClassDeclared();
+  await caseV01070Bde2GroupsPane();
+  await caseV01070Bde3CategoriesPaneGrouped();
+  await caseV01070Bde4UsesFinanceFrontmatter();
+  await caseV01070Pde1ClassDeclared();
+  await caseV01070Pde2DatalistAutocomplete();
+  await caseV01070Pde3UsesFinanceFrontmatter();
 
   // v0.65.0 HC-V065-RUN-NOTE: write-run-note-* sub-skill lint
   {
