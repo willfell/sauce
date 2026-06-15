@@ -12531,6 +12531,47 @@ async function caseV01070FpbmPaycheckBodyMigration() {
 
 // v0.109.0 — projects visual overhaul. See Docs/plans/2026-06-15-v0.109.0-projects-visual-overhaul-design.md.
 
+// S7 — Breadcrumb extension + template additions.
+async function caseV01090Bc1TypeBranches() {
+  console.log("\n--- Case HC-V01090-BC-1: Breadcrumb handles map/kanban/task-note types ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/breadcrumb.js"), "utf8");
+  assertTrue("HC-V01090-BC-1: handles type map",       /cur\.type\s*===\s*["']map["']/.test(src));
+  assertTrue("HC-V01090-BC-1: handles type kanban",    /cur\.type\s*===\s*["']kanban["']/.test(src));
+  assertTrue("HC-V01090-BC-1: handles type task-note", /cur\.type\s*===\s*["']task-note["']/.test(src));
+}
+
+async function caseV01090Bc2PathFallback() {
+  console.log("\n--- Case HC-V01090-BC-2: Breadcrumb has path-based projectSlug fallback ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/breadcrumb.js"), "utf8");
+  assertTrue("HC-V01090-BC-2: _resolveProjectFromPath helper present",
+    /_resolveProjectFromPath\s*\(/.test(src));
+  assertTrue("HC-V01090-BC-2: path regex anchors on spice/projects/<slug>/",
+    /\^spice\\\/projects\\\/\(\[\^\\\/\]\+\)\\\//.test(src));
+}
+
+async function caseV01090TplMapHasBreadcrumb() {
+  console.log("\n--- Case HC-V01090-TPL-MAP-BC: Project Map.md ships Breadcrumb block ---");
+  const t = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/templates/Project Map.md"), "utf8");
+  assertTrue("HC-V01090-TPL-MAP-BC: Project Map invokes Breadcrumb before SpaceNavButtons",
+    /class: "Breadcrumb"[\s\S]*?class: "SpaceNavButtons"/.test(t));
+}
+
+async function caseV01090TplTaskHasBreadcrumb() {
+  console.log("\n--- Case HC-V01090-TPL-TASK-BC: Task Note.md ships Breadcrumb block ---");
+  const t = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/templates/Task Note.md"), "utf8");
+  assertTrue("HC-V01090-TPL-TASK-BC: Task Note invokes Breadcrumb before SpaceNavButtons",
+    /class: "Breadcrumb"[\s\S]*?class: "SpaceNavButtons"/.test(t));
+}
+
+async function caseV01090TplBoardHasBreadcrumb() {
+  console.log("\n--- Case HC-V01090-TPL-BOARD-BC: Project Board.md ships Breadcrumb block above columns ---");
+  const t = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/templates/Project Board.md"), "utf8");
+  assertTrue("HC-V01090-TPL-BOARD-BC: Project Board invokes Breadcrumb",
+    /class: "Breadcrumb"/.test(t));
+  assertTrue("HC-V01090-TPL-BOARD-BC: Breadcrumb sits above ## In Planning column",
+    t.indexOf('class: "Breadcrumb"') < t.indexOf("## In Planning"));
+}
+
 // S6 — Template, Project.md rewrite.
 async function caseV01090TplBreadcrumbFirst() {
   console.log("\n--- Case HC-V01090-TPL-BC: Template, Project.md has Breadcrumb as first block ---");
@@ -13415,6 +13456,11 @@ async function caseV01090Ds1EntityTypeOpt() {
   await caseV01090TplNoStatusH2();           // S6
   await caseV01090TplNoLegacyPanels();       // S6
   await caseV01090TplSectionOrder();         // S6
+  await caseV01090Bc1TypeBranches();         // S7
+  await caseV01090Bc2PathFallback();         // S7
+  await caseV01090TplMapHasBreadcrumb();     // S7
+  await caseV01090TplTaskHasBreadcrumb();    // S7
+  await caseV01090TplBoardHasBreadcrumb();   // S7
   await caseV01070FbbmBudgetBodyMigration();
 
   // v0.5.3 CF-3 — PaycheckSummary + FinanceHubActions + paycheck body migration
