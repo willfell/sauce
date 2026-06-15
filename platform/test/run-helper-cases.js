@@ -7960,7 +7960,7 @@ async function caseHCV0890VersionA() {
     if (ver && ver[1]) {
       assertTrue(
         `HC-V0890-VERSION-A: cowork === pin must be 0.31.0 (found ${ver[1]})`,
-        ver[1] === "0.40.1");
+        ver[1] === "0.40.2");
     }
   }
   if (eqMatches.length === 0) {
@@ -8308,7 +8308,7 @@ async function caseHCV0891Versions() {
   // A: cowork manifest pin
   const coworkMan = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "blueprints/cowork/manifest.json"), "utf8"));
-  assertEqual(coworkMan.version, "0.40.1", "HC-V0891-VERSION-A: cowork pin = 0.31.0 (v0.93.0 bump)");
+  assertEqual(coworkMan.version, "0.40.2", "HC-V0891-VERSION-A: cowork pin = 0.31.0 (v0.93.0 bump)");
 
   // B: daily manifest pin
   const dailyMan = JSON.parse(fs.readFileSync(
@@ -8320,10 +8320,10 @@ async function caseHCV0891Versions() {
     path.join(WORKSHOP, "manifest.json"), "utf8"));
   const wsVer = platformMan.workshop_version || platformMan.version
     || (platformMan.workshop && platformMan.workshop.version);
-  assertEqual(wsVer, "0.110.4", "HC-V0891-VERSION-C: workshop pin = 0.93.3 (v0.93.3 bump)");
+  assertEqual(wsVer, "0.110.5", "HC-V0891-VERSION-C: workshop pin = 0.93.3 (v0.93.3 bump)");
   const pkg = JSON.parse(fs.readFileSync(
     path.resolve(WORKSHOP, "..", "package.json"), "utf8"));
-  assertEqual(pkg.version, "0.110.4", "HC-V0891-VERSION-C: package.json = 0.93.3 (v0.93.3 bump)");
+  assertEqual(pkg.version, "0.110.5", "HC-V0891-VERSION-C: package.json = 0.93.3 (v0.93.3 bump)");
 
   // D: mechanism count unchanged
   const mechs = (platformMan.mechanisms && Array.isArray(platformMan.mechanisms))
@@ -12155,7 +12155,7 @@ async function caseV01070FinMan1Versions() {
   // v0.109.0 bumps workshop_version on top of v0.108.0's finance/EC ship.
   assertTrue("HC-V01070-FIN-MAN-1: finance version 0.6.x", /^0\.6\.\d+$/.test(fin.version), `got: ${fin.version}`);
   assertEqual(ec.version, "0.7.2", "HC-V01070-FIN-MAN-1: entity-create version");
-  assertEqual(ws.workshop_version, "0.110.4", "HC-V01070-FIN-MAN-1: workshop_version");
+  assertEqual(ws.workshop_version, "0.110.5", "HC-V01070-FIN-MAN-1: workshop_version");
   assertTrue("HC-V01070-FIN-MAN-1: finance depends_on entity-create >=0.7.0",
     fin.depends_on.some(d => d.name === "entity-create" && /0\.7/.test(d.range)));
 }
@@ -12472,7 +12472,7 @@ async function caseV01080FinanceVersionBump() {
     ec && /^0\.7\.\d+$/.test(ec.version), `got: ${ec?.version}`);
   // v0.109.0 supersedes 0.108.0: workshop bumped again for projects-visual-overhaul.
   assertTrue("V01080-FV-5: workshop_version === 0.109.0 (v0.109.0 supersedes the v0.108.0 baseline this case originally pinned)",
-    workshop.workshop_version === "0.110.4", `got: ${workshop.workshop_version}`);
+    workshop.workshop_version === "0.110.5", `got: ${workshop.workshop_version}`);
 }
 
 async function caseV01080FinanceNewEntityButtonDebt() {
@@ -12668,6 +12668,35 @@ async function caseV01104CustomJsClassFilesAreClean() {
       assertTrue(`V01104-CJS-CLEAN-${rel}: no module-level function declaration`,
         !/^function\s+\w+\s*\(/m.test(src),
         `${rel} has a module-level function declaration — move it inside the class as a method`);
+      // CustomJS plugin requires the class to be the LAST construct in the
+      // file (any non-comment / non-whitespace code after the closing brace
+      // triggers ParseError). v0.110.5 caught this on cowork-lens-shift-
+      // cards.js's trailing `if (typeof module !== "undefined")` block.
+      // Strategy: find the class's closing brace at column 1, check tail is
+      // only comments + whitespace.
+      const lines = src.split(/\r?\n/);
+      let classCloseLine = -1;
+      for (let i = lines.length - 1; i >= 0; i--) {
+        if (/^}\s*$/.test(lines[i])) { classCloseLine = i; break; }
+      }
+      if (classCloseLine !== -1) {
+        const tail = lines.slice(classCloseLine + 1);
+        let inBlock = false;
+        const offending = tail.filter((l) => {
+          const t = l.trim();
+          if (t === "") return false;
+          if (inBlock) {
+            if (/\*\//.test(t)) inBlock = false;
+            return false;
+          }
+          if (/^\/\*/.test(t)) { if (!/\*\/$/.test(t)) inBlock = true; return false; }
+          if (/^\/\//.test(t)) return false;
+          return true;
+        });
+        assertTrue(`V01104-CJS-CLEAN-${rel}: no code after class closing brace`,
+          offending.length === 0,
+          `${rel} has ${offending.length} non-comment line(s) after the class — CustomJS will ParseError. First: ${JSON.stringify(offending[0])}`);
+      }
     }
   }
   assertTrue("V01104-CJS-CLEAN-coverage: at least 20 CustomJS class files scanned",
@@ -12786,7 +12815,7 @@ async function caseV01103FinanceManifestBumped() {
 async function caseV01103WorkshopManifestBumped() {
   console.log("\n--- Case V01103-MO-WS: workshop manifest at 0.110.3 ---");
   const ws = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
-  assertEqual(ws.workshop_version, "0.110.4", "V01103-MO-WS-1: workshop_version");
+  assertEqual(ws.workshop_version, "0.110.5", "V01103-MO-WS-1: workshop_version");
 }
 
 async function caseV01103BudgetTemplateUpdated() {
@@ -15096,20 +15125,20 @@ async function caseV01090Ds1EntityTypeOpt() {
       // NOTE: top-level WORKSHOP at line 29 = path.resolve(__dirname, "../..") = workshop ROOT
       // (distinct from the local WORKSHOP inside caseHCV0891Versions which is platform/).
       const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
-      assertTrue("HC-V0900-VERSION-A: package.json version === '0.93.3'", pkg.version === "0.110.4");
+      assertTrue("HC-V0900-VERSION-A: package.json version === '0.93.3'", pkg.version === "0.110.5");
       const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
       assertTrue("HC-V0900-VERSION-B: platform/manifest.json workshop_version === '0.93.3'",
-        platMan.workshop_version === "0.110.4");
+        platMan.workshop_version === "0.110.5");
       const coworkMan = JSON.parse(fs.readFileSync(
         path.join(WORKSHOP, "platform/blueprints/cowork/manifest.json"), "utf8"));
       assertTrue("HC-V0900-VERSION-C: cowork manifest version === '0.31.0'",
-        coworkMan.version === "0.40.1");
+        coworkMan.version === "0.40.2");
       const sub = JSON.parse(fs.readFileSync(
         path.join(WORKSHOP, "ranch/platform-subscription.json"), "utf8"));
       const blueprints = sub.blueprints || sub.subscriptions || [];
       const cworkPin = blueprints.find(b => b.name === "cowork");
       assertTrue("HC-V0900-VERSION-D: ranch platform-subscription cowork pin === '0.31.0'",
-        cworkPin && cworkPin.version === "0.40.1");
+        cworkPin && cworkPin.version === "0.40.2");
     } catch (e) {
       assertTrue("HC-V0900-VERSION-A..D: version pin contract", false, e && e.message);
     }
@@ -15150,7 +15179,7 @@ async function caseV01090Ds1EntityTypeOpt() {
       const cw = (platMan.blueprints || []).find(b => b.name === "cowork");
       assertTrue("HC-V0901-CATALOGUE-A1: cowork present in workshop catalogue", !!cw);
       assertTrue("HC-V0901-CATALOGUE-A1: cowork catalogue pin === '0.31.0' (matches cowork's own manifest)",
-        cw && cw.version === "0.40.1");
+        cw && cw.version === "0.40.2");
     } catch (e) {
       assertTrue("HC-V0901-CATALOGUE-A1: catalogue sync contract", false, e && e.message);
     }
@@ -16057,7 +16086,7 @@ type: cowork-microscope
         (s.source || "").endsWith("skills/skills/compose-body/SKILL.md")
         && (s.dest || "").includes("{{skills_dir}}/skills/compose-body/SKILL.md")));
     assertTrue("HC-V0920-MANIFEST-A3: cowork manifest version === 0.31.0",
-      coworkMan.version === "0.40.1");
+      coworkMan.version === "0.40.2");
     assertTrue("HC-V0920-MANIFEST-A4: compose-body-helper source uses helpers/ relative path",
       coworkMan.files.find(f => (f.source || "").endsWith("compose-body-helper.js"))
         .source.startsWith("helpers/"));
@@ -16075,15 +16104,15 @@ type: cowork-microscope
   try {
     const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
     assertTrue("HC-V0920-VERSION-A1: workshop_version === 0.93.3",
-      platMan.workshop_version === "0.110.4");
+      platMan.workshop_version === "0.110.5");
     assertTrue("HC-V0920-VERSION-A2: blueprints[].cowork.version === 0.31.2",
-      platMan.blueprints.find(b => b.name === "cowork").version === "0.40.1");
+      platMan.blueprints.find(b => b.name === "cowork").version === "0.40.2");
     const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
     assertTrue("HC-V0920-VERSION-A3: package.json version === 0.93.3",
-      pkg.version === "0.110.4");
+      pkg.version === "0.110.5");
     const workshopSub = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "ranch/platform-subscription.json"), "utf8"));
     assertTrue("HC-V0920-VERSION-A4: workshop subscription cowork pin === 0.31.0",
-      workshopSub.blueprints.find(b => b.name === "cowork").version === "0.40.1");
+      workshopSub.blueprints.find(b => b.name === "cowork").version === "0.40.2");
   } catch (e) {
     assertTrue("HC-V0920-VERSION: pin lockstep contract", false, e && e.message);
   }
@@ -16337,7 +16366,7 @@ type: cowork-microscope
         && (s.dest || "").includes("sync-scheduled-jobs/SKILL.md")
         && !(s.dest || "").includes("skills/skills/sync-scheduled-jobs")));
     assertTrue("HC-V0930-MANIFEST-A4: cowork manifest version === 0.31.0",
-      coworkMan.version === "0.40.1");
+      coworkMan.version === "0.40.2");
     const coworkCommandsMd = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/cowork/commands/cowork.md"), "utf8");
     assertTrue("HC-V0930-MANIFEST-A5: commands/cowork.md references sync-scheduled-jobs",
       coworkCommandsMd.includes("sync-scheduled-jobs"));
@@ -16352,15 +16381,15 @@ type: cowork-microscope
   try {
     const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
     assertTrue("HC-V0930-VERSION-A1: workshop_version === 0.93.3",
-      platMan.workshop_version === "0.110.4");
+      platMan.workshop_version === "0.110.5");
     assertTrue("HC-V0930-VERSION-A2: blueprints[].cowork.version === 0.31.2",
-      platMan.blueprints.find(b => b.name === "cowork").version === "0.40.1");
+      platMan.blueprints.find(b => b.name === "cowork").version === "0.40.2");
     const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
     assertTrue("HC-V0930-VERSION-A3: package.json version === 0.93.3",
-      pkg.version === "0.110.4");
+      pkg.version === "0.110.5");
     const workshopSub = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "ranch/platform-subscription.json"), "utf8"));
     assertTrue("HC-V0930-VERSION-A4: workshop subscription cowork pin === 0.31.1",
-      workshopSub.blueprints.find(b => b.name === "cowork").version === "0.40.1");
+      workshopSub.blueprints.find(b => b.name === "cowork").version === "0.40.2");
   } catch (e) {
     assertTrue("HC-V0930-VERSION: pin lockstep contract", false, e && e.message);
   }
@@ -16459,15 +16488,15 @@ type: cowork-microscope
   try {
     const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
     assertTrue("HC-V0931-VERSION-D1: workshop_version === 0.93.3",
-      platMan.workshop_version === "0.110.4");
+      platMan.workshop_version === "0.110.5");
     assertTrue("HC-V0931-VERSION-D2: blueprints[].cowork.version === 0.31.2",
-      platMan.blueprints.find(b => b.name === "cowork").version === "0.40.1");
+      platMan.blueprints.find(b => b.name === "cowork").version === "0.40.2");
     const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
     assertTrue("HC-V0931-VERSION-D3: package.json version === 0.93.3",
-      pkg.version === "0.110.4");
+      pkg.version === "0.110.5");
     const coworkMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/cowork/manifest.json"), "utf8"));
     assertTrue("HC-V0931-VERSION-D4: cowork manifest.version === 0.31.1",
-      coworkMan.version === "0.40.1");
+      coworkMan.version === "0.40.2");
   } catch (e) {
     assertTrue("HC-V0931-VERSION: pin lockstep contract", false, e && e.message);
   }
@@ -17461,8 +17490,12 @@ type: cowork-microscope
     // context. We require the file directly + look up the constructor by name.
     // Per design § 5.5: when both warm + cold MB exist for the same day +
     // engagement, render a 2-column pair (one .lens-shift-card per note).
-    const CardsModule = require(cardsPath);
-    const Cls = CardsModule && (CardsModule.CoworkLensShiftCards || CardsModule.default || CardsModule);
+    // v0.110.5: load class via IIFE-eval since the source has no module.exports
+    // (CustomJS plugin requires class-only files; trailing module.exports block
+    // triggered ParseError in Obsidian). Reload from disk on each call.
+    delete require.cache[require.resolve(cardsPath)];
+    const cardsSrc = fs.readFileSync(cardsPath, "utf8");
+    const Cls = eval(`(function() { ${cardsSrc}; return CoworkLensShiftCards; })()`);
     const fixture = JSON.parse(fs.readFileSync(
       path.join(K3_FIXTURES, "v0951-k3-customjs-cards/pages-pair.json"),
       "utf8"
@@ -17505,8 +17538,12 @@ type: cowork-microscope
   try {
     const cardsPath = path.join(COWORK_BP_DIR, "helpers/cowork-lens-shift-cards.js");
     delete require.cache[require.resolve(cardsPath)];
-    const CardsModule = require(cardsPath);
-    const Cls = CardsModule && (CardsModule.CoworkLensShiftCards || CardsModule.default || CardsModule);
+    // v0.110.5: load class via IIFE-eval since the source has no module.exports
+    // (CustomJS plugin requires class-only files; trailing module.exports block
+    // triggered ParseError in Obsidian). Reload from disk on each call.
+    delete require.cache[require.resolve(cardsPath)];
+    const cardsSrc = fs.readFileSync(cardsPath, "utf8");
+    const Cls = eval(`(function() { ${cardsSrc}; return CoworkLensShiftCards; })()`);
     const fixture = JSON.parse(fs.readFileSync(
       path.join(K3_FIXTURES, "v0951-k3-customjs-cards/pages-warm-only.json"),
       "utf8"
@@ -17548,8 +17585,12 @@ type: cowork-microscope
   try {
     const cardsPath = path.join(COWORK_BP_DIR, "helpers/cowork-lens-shift-cards.js");
     delete require.cache[require.resolve(cardsPath)];
-    const CardsModule = require(cardsPath);
-    const Cls = CardsModule && (CardsModule.CoworkLensShiftCards || CardsModule.default || CardsModule);
+    // v0.110.5: load class via IIFE-eval since the source has no module.exports
+    // (CustomJS plugin requires class-only files; trailing module.exports block
+    // triggered ParseError in Obsidian). Reload from disk on each call.
+    delete require.cache[require.resolve(cardsPath)];
+    const cardsSrc = fs.readFileSync(cardsPath, "utf8");
+    const Cls = eval(`(function() { ${cardsSrc}; return CoworkLensShiftCards; })()`);
     const fixture = JSON.parse(fs.readFileSync(
       path.join(K3_FIXTURES, "v0951-k3-customjs-cards/pages-cold-only.json"),
       "utf8"

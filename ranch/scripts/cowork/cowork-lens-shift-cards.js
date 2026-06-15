@@ -155,12 +155,9 @@ class CoworkLensShiftCards {
     }
 }
 
-// Node interop: CustomJS in Obsidian picks up bare class declarations
-// via global scope, but test harnesses (run-helper-cases.js K3-J/K/L)
-// require() this file and look up the class on `module.exports`.
-// Match the same dual-export pattern other Cowork helpers use.
-if (typeof module !== "undefined" && module.exports) {
-    module.exports = CoworkLensShiftCards;
-    module.exports.CoworkLensShiftCards = CoworkLensShiftCards;
-    module.exports.default = CoworkLensShiftCards;
-}
+// v0.110.5: removed the trailing `if (typeof module !== "undefined")` Node
+// interop block. CustomJS plugin only accepts files where the class is the
+// LAST construct (any code after the closing `}` triggers ParseError, leaving
+// CoworkLensShiftCards undefined). Test harnesses (run-helper-cases.js
+// HC-V0951-K3-J/K/L) now load the class via IIFE-eval — see those cases
+// in platform/test/run-helper-cases.js for the loader pattern.
