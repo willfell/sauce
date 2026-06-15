@@ -28,6 +28,71 @@ Post-v0.28.0 migrated Sauce-shape vaults:
 | `ero-sauce` | `/Users/willfellhoelter/notes/sauce/ero-sauce` | Day-to-day consumer |
 | `headspace-sauce` | `/Users/willfellhoelter/notes/sauce/headspace-sauce` | Day-to-day consumer + smoke-path target |
 
+## Consumer workshop resolution: local-clone (canonical on this machine)
+
+Each consumer vault's `ranch/platform-config.json` declares `workshop_relative_path`. On THIS dev machine, consumers point at the **local clone** of the workshop, NOT the brew bottle:
+
+```json
+{ "workshop_relative_path": "/Users/willfellhoelter/projects/repos/sauce" }
+```
+
+**Why local clone (not brew bottle):**
+
+- We ship multiple cycles per day during active development; every commit on workshop `main` is instantly available to consumers without a brew round-trip (bottle bump → PR → merge → `brew upgrade`).
+- Live debugging works: edit a helper in `platform/blueprints/<x>/helpers/` → re-run `sauce install` → the new code materializes immediately.
+- Branch-switching the workshop instantly switches what consumers see — useful for testing branches before merging.
+
+**Tradeoff:** consumers see whatever HEAD of the local workshop is at install time. Uncommitted edits propagate. Other-branch work propagates. Discipline required.
+
+### Long-term maintenance protocol
+
+Run this sequence whenever you've just landed a workshop cycle and want consumers fully aligned. Order matters.
+
+```bash
+# 1. Workshop side — confirm clean + on origin/main
+cd /Users/willfellhoelter/projects/repos/sauce
+git status                              # expect: clean working tree
+git log --oneline origin/main..HEAD     # expect: empty (no unpushed commits)
+git log --oneline HEAD..origin/main     # expect: empty (no unpulled commits)
+node platform/test/run-helper-cases.js  # expect: PASS
+
+# 2. Per consumer vault — bump subscription pins to match workshop
+cd /Users/willfellhoelter/notes/sauce/headspace-sauce
+sauce update --bump-pins
+sauce status                            # expect: drift: none + git head matches workshop HEAD
+
+cd /Users/willfellhoelter/notes/sauce/accuris-sauce
+sauce update --bump-pins
+sauce status
+
+# 3. Cmd+R in Obsidian on each vault — loads new CustomJS classes
+```
+
+**Expected state after a successful cycle:**
+
+- `sauce status` on each consumer reports the same `git head <sha>` as the workshop HEAD.
+- `Drift: none` on each consumer.
+- Workshop `git status` is clean (no uncommitted runtime artifacts).
+
+**When to flip to brew bottle instead:**
+
+Switch consumer `workshop_relative_path` to `/opt/homebrew/opt/sauce/libexec` when:
+
+- You're leaving the machine for an extended period (no active development).
+- You want fully reproducible state across machines (CI/cross-machine sync).
+- The brew bottle is on a tagged release you trust, and you want frozen behavior.
+
+To switch: edit each consumer's `ranch/platform-config.json` `workshop_relative_path` → `/opt/homebrew/opt/sauce/libexec`. The next `sauce update --bump-pins` will install from the bottle instead.
+
+### Don't ship runtime artifacts
+
+When the workshop is dirty with runtime artifacts (`ranch/claude-surface-registry.json`, `ranch/platform-installed.json`, `ranch/bootstrap-last-install.log`) after a dogfood install, decide explicitly:
+
+- If they reflect a NEW cycle's state → commit them as a "post-cycle dogfood" follow-up (precedent: commits 36097d4 and similar).
+- If they're from an accidental `sauce update --help`-triggered self-install → `git checkout --` them.
+
+Never push origin/main with stale runtime artifacts mixed into a feature commit. Always isolate the dogfood refresh into its own commit.
+
 ## Legacy source vaults (READ-ONLY)
 
 Per landmine #20, these are READ-ONLY: they are **only ever inputs** to `sauce migrate --from <path>`. Never written to.
