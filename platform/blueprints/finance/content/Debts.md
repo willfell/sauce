@@ -8,18 +8,18 @@ cssclasses:
 ---
 
 ```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+await dv.view("{{views_path}}/customjs-guard", { class: "SpaceNavButtons" });
 ```
 
 ```dataviewjs
 // entity-create:debt — installer-managed; do not delete this comment
-await dv.view("ranch/views/customjs-guard", { class: "FinanceNavRow" });
+await dv.view("{{views_path}}/customjs-guard", { class: "FinanceNav" });
 ```
 
 ```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "DebtsHubSummary" });
+await dv.view("{{views_path}}/customjs-guard", { class: "DebtsHubSummary" });
 ```
 
 ```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "DebtsCards" });
+await dv.view("{{views_path}}/customjs-guard", { class: "DebtsCards" });
 ```

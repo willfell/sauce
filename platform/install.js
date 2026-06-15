@@ -1112,6 +1112,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyOrphanedHelperCleanup(tp, mech, variables, history, git);         // NEW v0.110.0 — deletes obsolete *.js and *.js.bak helper files left on disk after manifest removals
   await applyEntityCreateGuardMigration(tp, mech, variables, history, git);    // NEW v0.110.1 — rewrites direct customJS.EntityCreate.render(dv,...) calls in vault notes to the customjs-guard form (cold-load race fix)
   await applyCustomJsGuardMigration(tp, mech, variables, history, git);        // NEW v0.110.2 — generalized: rewrites ANY direct customJS.<Class>.render(dv[,opts]) call in vault notes to guard form (mobile cold-load race fix)
+  await applyFinanceUnifiedNavMigration(tp, mech, variables, history, git);    // NEW v0.111.0 — collapses FinanceHubActions + FinanceNavRow invocations to single-line FinanceNav
   await applyExternalPluginInstall(tp, mech, adapter.basePath || (typeof adapter.getBasePath === "function" ? adapter.getBasePath() : null), workshopPath, history, git);  // NEW v0.94.0 — install missing
   await applyExternalPlugins(tp, mech, history, git);
   await scaffoldFoundationalPluginData(tp, mech, workshopPath, variables, history, git);  // NEW v0.26.0
@@ -4350,6 +4351,111 @@ async function applyCustomJsGuardMigration(tp, mech, variables, history, git) {
 
   history?.push({ event: "info", step: "customjs_guard_migration", name: "platform",
     summary: { scanned, rewritten, callsReplaced, classCounts },
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+    completed_at: new Date().toISOString() });
+}
+
+// applyFinanceUnifiedNavMigration — v0.111.0. Collapses every existing
+// FinanceHubActions and FinanceNavRow invocation in vault notes to the
+// single-line context-aware FinanceNav form. FinanceNav reads dv.current()
+// to decide what to render (top-hub / sub-hub / entity) — no args needed
+// from the note.
+//
+// Patterns matched (recursive .md walk under spice/finance/):
+//
+//   await dv.view("ranch/views/customjs-guard", { class: "FinanceHubActions"<balanced>});
+//   await dv.view("ranch/views/customjs-guard", { class: "FinanceNavRow" });
+//   await customJS.FinanceHubActions.render(dv,<balanced>);
+//   await customJS.FinanceNavRow.render(dv);
+//
+// All four rewritten to:
+//
+//   await dv.view("ranch/views/customjs-guard", { class: "FinanceNav" });
+//
+// Idempotent — guard-form FinanceNav calls are not matched. Per-file
+// failure-loud + .sauce-backup snapshot before write.
+async function applyFinanceUnifiedNavMigration(tp, mech, variables, history, git) {
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+
+  const financeRoot = "spice/finance";
+  if (!(await adapter.exists(financeRoot))) {
+    history?.push({ event: "info", step: "finance_unified_nav_migration", name: "finance",
+      summary: { scanned: 0, rewritten: 0, callsReplaced: 0 },
+      reason: "spice/finance/ absent; nothing to migrate",
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+      completed_at: new Date().toISOString() });
+    return;
+  }
+
+  // Match guard-form invocations: dv.view("...customjs-guard", { class: "X", ... });
+  // where X is FinanceHubActions or FinanceNavRow, including multi-line args.
+  // Uses balanced-bracket counting via a non-greedy match up to `});`.
+  const GUARD_FORM_RE = /await\s+dv\.view\("[^"]*customjs-guard"\s*,\s*\{\s*class:\s*"(FinanceHubActions|FinanceNavRow)"[\s\S]*?\}\s*\)\s*;?/g;
+  // Match direct-form invocations: customJS.FinanceHubActions.render(dv, {...});
+  // or customJS.FinanceNavRow.render(dv);
+  const DIRECT_FORM_RE = /await\s+customJS\.(FinanceHubActions|FinanceNavRow)\.render\(\s*dv\s*(?:,\s*\{[\s\S]*?\})?\s*\)\s*;?/g;
+
+  const REPLACEMENT = `await dv.view("ranch/views/customjs-guard", { class: "FinanceNav" });`;
+
+  function _rewriteUnifiedNav(body) {
+    let touched = 0;
+    let out = body.replace(GUARD_FORM_RE, () => { touched++; return REPLACEMENT; });
+    out = out.replace(DIRECT_FORM_RE, () => { touched++; return REPLACEMENT; });
+    return { body: out, touched };
+  }
+
+  async function _walkMd(dir, files = []) {
+    try {
+      const listing = await adapter.list(dir);
+      for (const fp of (listing.files || [])) {
+        if (fp.endsWith(".md")) files.push(fp);
+      }
+      for (const sub of (listing.folders || [])) {
+        await _walkMd(sub, files);
+      }
+    } catch (_e) { /* skip */ }
+    return files;
+  }
+
+  const files = await _walkMd(financeRoot);
+  if (files.length === 0) return;
+
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  let scanned = 0;
+  let rewritten = 0;
+  let callsReplaced = 0;
+
+  for (const fp of files) {
+    scanned++;
+    try {
+      const body = await adapter.read(fp);
+      // Cheap precheck: skip files that don't even mention the legacy classes.
+      if (!/FinanceHubActions|FinanceNavRow/.test(body)) continue;
+      const { body: out, touched } = _rewriteUnifiedNav(body);
+      if (touched === 0 || out === body) continue;
+      // Snapshot
+      const backupPath = `.sauce-backup/${ts}/${fp}`;
+      const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+      try { await adapter.mkdir(backupParent); } catch (_e) { /* ok */ }
+      try { await adapter.write(backupPath, body); } catch (_e) { /* best-effort */ }
+      await adapter.write(fp, out);
+      rewritten++;
+      callsReplaced += touched;
+      history?.push({ event: "info", step: "finance_unified_nav_migration", name: "finance",
+        action: "rewrote", path: fp, callsReplaced: touched, snapshot: backupPath,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    } catch (e) {
+      history?.push({ event: "warning", step: "finance_unified_nav_migration", name: "finance",
+        path: fp, reason: e.message,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    }
+  }
+
+  history?.push({ event: "info", step: "finance_unified_nav_migration", name: "finance",
+    summary: { scanned, rewritten, callsReplaced },
     git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
     completed_at: new Date().toISOString() });
 }
@@ -11097,6 +11203,8 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports.applyEntityCreateGuardMigration = applyEntityCreateGuardMigration;
     // v0.110.2 — generalized: ANY direct customJS.<Class>.render(dv,...) → guard.
     module.exports.applyCustomJsGuardMigration = applyCustomJsGuardMigration;
+    // v0.111.0 — collapse FinanceHubActions + FinanceNavRow → single-line FinanceNav.
+    module.exports.applyFinanceUnifiedNavMigration = applyFinanceUnifiedNavMigration;
     //
     // CF-2: by default, capture run-install.js's stdio (Phase B/C surfaced
     // 2200-line JSON dumps mixed into the user's terminal). We tee the

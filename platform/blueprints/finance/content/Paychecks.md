@@ -13,11 +13,7 @@ await dv.view("{{views_path}}/customjs-guard", { class: "SpaceNavButtons" });
 
 ```dataviewjs
 // entity-create:paycheck — installer-managed; do not delete this comment
-await customJS.FinanceHubActions.render(dv, {
-  here: "paychecks",
-  instance: "paycheck",
-  defaultsPath: "spice/finance/Paycheck Defaults.md"
-});
+await dv.view("{{views_path}}/customjs-guard", { class: "FinanceNav" });
 ```
 
 ```dataviewjs
