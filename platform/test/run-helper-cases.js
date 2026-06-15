@@ -12869,6 +12869,73 @@ async function caseV01103BehavioralHarnessShipped() {
     /makeStrictDA[\s\S]{0,2000}_kind:\s*["']DataArray["']/.test(src));
 }
 
+// v0.112.0 — workshop tooling MINOR. 4 additive artifacts + npm-script wiring.
+// See Docs/plans/2026-06-15-v0.112.0-workshop-tooling-{brief,design,plan}.md.
+
+async function caseV0112WorkshopStatusShipped() {
+  console.log("\n--- Case V0112-T-WS: scripts/workshop-status.js shipped ---");
+  const abs = path.join(WORKSHOP, "scripts/workshop-status.js");
+  assertTrue("V0112-T-WS-1: file exists",
+    fs.existsSync(abs), `missing: ${abs}`);
+  const src = fs.readFileSync(abs, "utf8");
+  assertTrue("V0112-T-WS-2: reads workshop_version from platform/manifest.json",
+    /workshop_version/.test(src) && /platform\/manifest\.json/.test(src));
+  assertTrue("V0112-T-WS-3: supports --fresh and --json flags",
+    /--fresh/.test(src) && /--json/.test(src));
+}
+
+async function caseV0112RegenCycleStatusShipped() {
+  console.log("\n--- Case V0112-T-RCS: scripts/regen-cycle-status.js shipped ---");
+  const abs = path.join(WORKSHOP, "scripts/regen-cycle-status.js");
+  assertTrue("V0112-T-RCS-1: file exists",
+    fs.existsSync(abs), `missing: ${abs}`);
+  const src = fs.readFileSync(abs, "utf8");
+  assertTrue("V0112-T-RCS-2: supports --check dry-run mode",
+    /--check/.test(src));
+  assertTrue("V0112-T-RCS-3: parses `## Current` section anchor",
+    /##\\?\s*Current/.test(src) || /Current\b/.test(src));
+}
+
+async function caseV0112ScaffoldBehavioralHarnessShipped() {
+  console.log("\n--- Case V0112-T-SCAF: scripts/scaffold-behavioral-harness.js shipped ---");
+  const abs = path.join(WORKSHOP, "scripts/scaffold-behavioral-harness.js");
+  assertTrue("V0112-T-SCAF-1: file exists",
+    fs.existsSync(abs), `missing: ${abs}`);
+  const src = fs.readFileSync(abs, "utf8");
+  assertTrue("V0112-T-SCAF-2: emits canonical makeStrictDA boilerplate",
+    /makeStrictDA/.test(src) && /_kind:\s*["']DataArray["']/.test(src));
+}
+
+async function caseV0112DevWorkflowGuideShipped() {
+  console.log("\n--- Case V0112-T-DW: Docs/agent-guides/dev-workflow.md shipped ---");
+  const abs = path.join(WORKSHOP, "Docs/agent-guides/dev-workflow.md");
+  assertTrue("V0112-T-DW-1: file exists",
+    fs.existsSync(abs), `missing: ${abs}`);
+  const claude = fs.readFileSync(path.join(WORKSHOP, "CLAUDE.md"), "utf8");
+  assertTrue("V0112-T-DW-2: CLAUDE.md Further-reading router links to dev-workflow.md",
+    /Docs\/agent-guides\/dev-workflow\.md/.test(claude));
+}
+
+async function caseV0112NpmScriptsWired() {
+  console.log("\n--- Case V0112-T-NPM: npm scripts (status / regen-cycle-status / scaffold-harness) wired ---");
+  const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
+  const scripts = pkg.scripts || {};
+  assertTrue("V0112-T-NPM-1: status script points at workshop-status.js",
+    scripts.status && scripts.status.includes("workshop-status.js"));
+  assertTrue("V0112-T-NPM-2: regen-cycle-status script points at regen-cycle-status.js",
+    scripts["regen-cycle-status"] && scripts["regen-cycle-status"].includes("regen-cycle-status.js"));
+  assertTrue("V0112-T-NPM-3: scaffold-harness script points at scaffold-behavioral-harness.js",
+    scripts["scaffold-harness"] && scripts["scaffold-harness"].includes("scaffold-behavioral-harness.js"));
+}
+
+async function caseV0112VersionBumped() {
+  console.log("\n--- Case V0112-T-VER: workshop 0.112.0 + package.json 0.112.0 ---");
+  const ws = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
+  assertEqual(ws.workshop_version, "0.112.0", "V0112-T-VER-1: workshop_version");
+  const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
+  assertEqual(pkg.version, "0.112.0", "V0112-T-VER-2: package.json version");
+}
+
 async function caseV01103InjectMonthlyBandIdempotent() {
   console.log("\n--- Case V01103-MO-IDEM: _injectMonthlyBand transform is idempotent ---");
   const installer = require(path.join(WORKSHOP, "platform/install.js"));
@@ -14014,6 +14081,14 @@ async function caseV01090Ds1EntityTypeOpt() {
   await caseV01103BudgetTemplateUpdated();
   await caseV01103InjectMonthlyBandIdempotent();
   await caseV01103BehavioralHarnessShipped();
+
+  // v0.112.0 — workshop tooling MINOR
+  await caseV0112WorkshopStatusShipped();
+  await caseV0112RegenCycleStatusShipped();
+  await caseV0112ScaffoldBehavioralHarnessShipped();
+  await caseV0112DevWorkflowGuideShipped();
+  await caseV0112NpmScriptsWired();
+  await caseV0112VersionBumped();
 
   // v0.65.0 HC-V065-RUN-NOTE: write-run-note-* sub-skill lint
   {
