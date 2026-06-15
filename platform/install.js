@@ -1110,6 +1110,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyProjectSectionsCloseRepair(tp, mech, variables, history, git);    // NEW v0.103.0.1 — fixes the regex-induced -"[[--]]" damage from v0.103.0 deploy
   await applyFinanceMigrations(tp, mech, variables, history, git);             // NEW v0.107.0 S2 — finance defaults scaffolding (create-if-absent) + categories group backfill (append-only + .sauce-backup snapshot)
   await applyOrphanedHelperCleanup(tp, mech, variables, history, git);         // NEW v0.110.0 — deletes obsolete *.js and *.js.bak helper files left on disk after manifest removals
+  await applyEntityCreateGuardMigration(tp, mech, variables, history, git);    // NEW v0.110.1 — rewrites direct customJS.EntityCreate.render(dv,...) calls in vault notes to the customjs-guard form (cold-load race fix)
   await applyExternalPluginInstall(tp, mech, adapter.basePath || (typeof adapter.getBasePath === "function" ? adapter.getBasePath() : null), workshopPath, history, git);  // NEW v0.94.0 — install missing
   await applyExternalPlugins(tp, mech, history, git);
   await scaffoldFoundationalPluginData(tp, mech, workshopPath, variables, history, git);  // NEW v0.26.0
@@ -4108,6 +4109,112 @@ async function applyOrphanedHelperCleanup(tp, mech, variables, history, git) {
 
   history?.push({ event: "info", step: "orphaned_helper_cleanup", name: "platform",
     summary: { orphanRemoved: removed, orphanAbsent: absent, bakRemoved },
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+    completed_at: new Date().toISOString() });
+}
+
+// applyEntityCreateGuardMigration — v0.110.1. Heals the cold-vault load race
+// where dataviewjs blocks call `customJS.EntityCreate.render(dv, {...})`
+// before the CustomJS plugin has registered EntityCreate. Direct calls throw
+// TypeError; the customjs-guard view polls window.customJS for 2s and falls
+// back gracefully. This migration rewrites every direct call in vault notes
+// to go through the guard.
+//
+// Pattern matched (vault-wide, recursive .md walk under spice/):
+//   ```dataviewjs
+//   // entity-create:<id> — installer-managed; do not delete this comment
+//   await customJS.EntityCreate.render(dv, { instance: "<id>" });
+//   ```
+// Rewritten to:
+//   ```dataviewjs
+//   // entity-create:<id> — installer-managed; do not delete this comment
+//   await dv.view("ranch/views/customjs-guard", { class: "EntityCreate", args: [{ instance: "<id>" }] });
+//   ```
+//
+// Idempotent — files already using the guard form are skipped (the regex
+// requires the direct-call shape). Per-file failure-loud + .sauce-backup
+// snapshot before write.
+async function applyEntityCreateGuardMigration(tp, mech, variables, history, git) {
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+
+  // Direct-call pattern: matches `await customJS.EntityCreate.render(dv,
+  // { instance: "<id>" })` with optional whitespace + optional trailing
+  // semicolon. The instance value is captured. Guard form has class:
+  // "EntityCreate" which the matcher does NOT match (idempotency).
+  const DIRECT_CALL_RE = /await\s+customJS\.EntityCreate\.render\(\s*dv\s*,\s*\{\s*instance\s*:\s*["']([^"']+)["']\s*\}\s*\)\s*;?/g;
+
+  function _rewriteEntityCreateDirectCalls(body) {
+    let touched = 0;
+    const out = body.replace(DIRECT_CALL_RE, (_m, instanceId) =>
+      `await dv.view("ranch/views/customjs-guard", { class: "EntityCreate", args: [{ instance: "${instanceId}" }] });`
+    );
+    if (out !== body) {
+      touched = (body.match(DIRECT_CALL_RE) || []).length;
+    }
+    return { body: out, touched };
+  }
+
+  async function _walkMd(dir, files = []) {
+    try {
+      const listing = await adapter.list(dir);
+      for (const fp of (listing.files || [])) {
+        if (fp.endsWith(".md")) files.push(fp);
+      }
+      for (const sub of (listing.folders || [])) {
+        await _walkMd(sub, files);
+      }
+    } catch (_e) { /* dir missing or unreadable — skip */ }
+    return files;
+  }
+
+  if (!(await adapter.exists("spice"))) {
+    history?.push({ event: "info", step: "entity_create_guard_migration", name: "platform",
+      summary: { scanned: 0, rewritten: 0, callsReplaced: 0 },
+      reason: "spice/ root absent; nothing to migrate",
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+      completed_at: new Date().toISOString() });
+    return;
+  }
+
+  const files = await _walkMd("spice");
+  if (files.length === 0) return;
+
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  let scanned = 0;
+  let rewritten = 0;
+  let callsReplaced = 0;
+
+  for (const fp of files) {
+    scanned++;
+    try {
+      const body = await adapter.read(fp);
+      if (!DIRECT_CALL_RE.test(body)) continue;
+      DIRECT_CALL_RE.lastIndex = 0; // reset after test()
+      const { body: out, touched } = _rewriteEntityCreateDirectCalls(body);
+      if (touched === 0 || out === body) continue;
+      // Snapshot before write
+      const backupPath = `.sauce-backup/${ts}/${fp}`;
+      const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+      try { await adapter.mkdir(backupParent); } catch (_e) { /* ok */ }
+      try { await adapter.write(backupPath, body); } catch (_e) { /* best-effort */ }
+      await adapter.write(fp, out);
+      rewritten++;
+      callsReplaced += touched;
+      history?.push({ event: "info", step: "entity_create_guard_migration", name: "platform",
+        action: "rewrote", path: fp, callsReplaced: touched, snapshot: backupPath,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    } catch (e) {
+      history?.push({ event: "warning", step: "entity_create_guard_migration", name: "platform",
+        path: fp, reason: e.message,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    }
+  }
+
+  history?.push({ event: "info", step: "entity_create_guard_migration", name: "platform",
+    summary: { scanned, rewritten, callsReplaced },
     git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
     completed_at: new Date().toISOString() });
 }
@@ -10536,6 +10643,8 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     // v0.110.0 — finance hubs repair + orphaned helper cleanup.
     module.exports.applyFinanceHubsRepair = applyFinanceHubsRepair;
     module.exports.applyOrphanedHelperCleanup = applyOrphanedHelperCleanup;
+    // v0.110.1 — vault-wide EntityCreate direct-call → guard rewrite.
+    module.exports.applyEntityCreateGuardMigration = applyEntityCreateGuardMigration;
     //
     // CF-2: by default, capture run-install.js's stdio (Phase B/C surfaced
     // 2200-line JSON dumps mixed into the user's terminal). We tee the

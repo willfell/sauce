@@ -141,13 +141,14 @@ class ProjectDocsIndex {
     btnRow.style.cssText = "display: flex; gap: 8px; margin: 6px 0;";
     const btnRowProxy = this._makeProxyDv(dv, btnRow);
 
-    await customJS.EntityCreate.render(btnRowProxy, {
-      instance: "doc-note",
-    });
-
-    await customJS.EntityCreate.render(btnRowProxy, {
-      instance: "section-hub",
-    });
+    // v0.110.1: poll for EntityCreate (cold-load race)
+    for (let i = 0; i < 40 && !window.customJS?.EntityCreate; i++) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    if (window.customJS?.EntityCreate) {
+      await customJS.EntityCreate.render(btnRowProxy, { instance: "doc-note" });
+      await customJS.EntityCreate.render(btnRowProxy, { instance: "section-hub" });
+    }
 
     for (const btn of btnRow.querySelectorAll("button")) {
       btn.style.flex = "1";

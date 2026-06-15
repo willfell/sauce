@@ -18,10 +18,16 @@ class ProjectMeetingsPanel {
     // + New meeting for this project — always available. presetPrompts skips
     // the project picker so the new meeting's frontmatter carries
     // `project: "[[<projectName>]]"`.
-    await customJS.EntityCreate.render(dv, {
-      instance: "meeting",
-      presetPrompts: { project: `[[${projectName}]]` },
-    });
+    // v0.110.1: poll for EntityCreate (cold-load race)
+    for (let i = 0; i < 40 && !window.customJS?.EntityCreate; i++) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    if (window.customJS?.EntityCreate) {
+      await customJS.EntityCreate.render(dv, {
+        instance: "meeting",
+        presetPrompts: { project: `[[${projectName}]]` },
+      });
+    }
 
     const meetings = dv.pages('"spice/meetings/notes"')
       .where((p) => p.type === "meeting" && this._projectMatches(p.project, currentPath, projectName));

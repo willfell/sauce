@@ -18,7 +18,7 @@ await dv.view("{{views_path}}/customjs-guard", { class: "SpaceNavButtons" });
 
 ```dataviewjs
 // entity-create:meeting — installer-managed; do not delete this comment
-await customJS.EntityCreate.render(dv, { instance: "meeting" });
+await dv.view("{{views_path}}/customjs-guard", { class: "EntityCreate", args: [{ instance: "meeting" }] });
 ```
 
 

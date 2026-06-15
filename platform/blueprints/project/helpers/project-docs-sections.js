@@ -94,10 +94,16 @@ class ProjectDocsSections {
     dv.header(3, label);
     // Per-section + New button — presetPrompts skips the section picker so the
     // new doc lands directly in this bucket.
-    await customJS.EntityCreate.render(dv, {
-      instance: "doc-note",
-      presetPrompts: { section: label },
-    });
+    // v0.110.1: poll for EntityCreate (cold-load race)
+    for (let i = 0; i < 40 && !window.customJS?.EntityCreate; i++) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    if (window.customJS?.EntityCreate) {
+      await customJS.EntityCreate.render(dv, {
+        instance: "doc-note",
+        presetPrompts: { section: label },
+      });
+    }
 
     if (pages.length === 0) {
       dv.paragraph(`> [!example]+ No docs in **${label}** yet — use **+ New ${label}** above to create one.`);

@@ -71,7 +71,19 @@ class FinanceHubActions {
             // shim that points at our sub-container instead.
             const shim = Object.create(dv);
             shim.container = subContainer;
-            await customJS.EntityCreate.render(shim, { instance });
+            // v0.110.1: poll for customJS.EntityCreate (cold-vault load race —
+            // CustomJS plugin registers asynchronously; mirrors the polling in
+            // ranch/views/customjs-guard/view.js). Up to 2s, then fall back to
+            // a muted placeholder rather than throwing.
+            for (let i = 0; i < 40 && !window.customJS?.EntityCreate; i++) {
+                await new Promise((r) => setTimeout(r, 50));
+            }
+            if (window.customJS?.EntityCreate) {
+                await customJS.EntityCreate.render(shim, { instance });
+            } else {
+                const ph = subContainer.createEl("em", { text: "EntityCreate unavailable" });
+                ph.style.cssText = "color: var(--text-muted); font-size: 0.85em;";
+            }
         }
 
         // ---- ⚙ Defaults link ----
