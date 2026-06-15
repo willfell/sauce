@@ -12936,6 +12936,67 @@ async function caseV0112VersionBumped() {
   assertEqual(pkg.version, "0.112.0", "V0112-T-VER-2: package.json version");
 }
 
+// v0.112.0 finance (MINOR) — FinanceMath shared aggregation helper + tests (S1)
+// See Docs/plans/2026-06-15-v0.112.0-monthly-cohesion-plan.md S1.
+
+async function caseV01120FinanceMathPresent() {
+  console.log("\n--- Case V01120-FM-PRESENT: finance-math.js helper shipped ---");
+  const helperPath = path.join(WORKSHOP, "platform/blueprints/finance/helpers/finance-math.js");
+  if (!assertTrue("V01120-FM-PRESENT-1: file exists",
+    fs.existsSync(helperPath), `missing: ${helperPath}`)) return;
+  const src = fs.readFileSync(helperPath, "utf8");
+  assertTrue("V01120-FM-PRESENT-2: class FinanceMath declared",
+    /class\s+FinanceMath\b/.test(src));
+  assertTrue("V01120-FM-PRESENT-3: no \"use strict\" directive",
+    !/^"use strict";?\s*$/m.test(src) ||
+      /class\s+FinanceMath[\s\S]*\n"use strict"/.test(src),
+    "finance-math.js has \"use strict\" before its class declaration");
+  // Nothing meaningful after the class closing brace (mirrors caseV01104CustomJsClassFilesAreClean)
+  const lines = src.split(/\r?\n/);
+  let classCloseLine = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (/^}\s*$/.test(lines[i])) { classCloseLine = i; break; }
+  }
+  assertTrue("V01120-FM-PRESENT-4: class closing brace found",
+    classCloseLine !== -1, "no top-level closing brace found");
+  if (classCloseLine !== -1) {
+    const tail = lines.slice(classCloseLine + 1);
+    let inBlock = false;
+    const offending = tail.filter((l) => {
+      const t = l.trim();
+      if (t === "") return false;
+      if (inBlock) { if (/\*\//.test(t)) inBlock = false; return false; }
+      if (/^\/\*/.test(t)) { if (!/\*\/$/.test(t)) inBlock = true; return false; }
+      if (/^\/\//.test(t)) return false;
+      return true;
+    });
+    assertTrue("V01120-FM-PRESENT-5: no code after class closing brace",
+      offending.length === 0,
+      `${offending.length} non-comment line(s) after class. First: ${JSON.stringify(offending[0])}`);
+  }
+}
+
+async function caseV01120FinanceMathStaticApi() {
+  console.log("\n--- Case V01120-FM-API: FinanceMath declares all static methods ---");
+  const helperPath = path.join(WORKSHOP, "platform/blueprints/finance/helpers/finance-math.js");
+  if (!fs.existsSync(helperPath)) {
+    assertTrue("V01120-FM-API-file-exists: helper file must exist first", false, `missing: ${helperPath}`);
+    return;
+  }
+  const src = fs.readFileSync(helperPath, "utf8");
+  const methods = [
+    "readDebts", "readPaychecksForMonth", "readBudgetForMonth",
+    "monthBounds", "debtTotals", "monthIncome", "monthSpending",
+    "monthExpensesTotal", "monthDebtPaid", "debtPaidByDebt",
+    "measuredMovement", "reconcile", "fmtMoney",
+  ];
+  for (const m of methods) {
+    assertTrue(`V01120-FM-API-${m}: static ${m} declared`,
+      new RegExp(`static\\s+${m}\\s*\\(`).test(src),
+      `missing static method ${m}`);
+  }
+}
+
 async function caseV01103InjectMonthlyBandIdempotent() {
   console.log("\n--- Case V01103-MO-IDEM: _injectMonthlyBand transform is idempotent ---");
   const installer = require(path.join(WORKSHOP, "platform/install.js"));
@@ -22276,6 +22337,10 @@ type: cowork-microscope
   } catch (e) {
     assertTrue("HC-V0974-GS-6: urgency tier labels enumerated", false, e && e.message);
   }
+
+  // v0.112.0 finance — FinanceMath shared aggregation helper (S1)
+  await caseV01120FinanceMathPresent();
+  await caseV01120FinanceMathStaticApi();
 
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
