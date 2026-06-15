@@ -7309,10 +7309,13 @@ async function caseFA6DomainRuleFragments() {
 // ============================================================
 
 async function caseFA7FinanceManifest() {
-  console.log("\n--- Case FA7-MANIFEST: finance bumped to 0.4.0 ---");
+  console.log("\n--- Case FA7-MANIFEST: finance version range 0.4.x|0.5.x ---");
   const m = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
-  assertTrue("FA7-MANIFEST-1: finance@0.4.0", m.version === "0.4.0",
+  // v0.107.0 widened from === "0.4.0" → matches /^0\.(4|5)\.\d+$/ so future
+  // MINOR bumps of finance don't whack-a-mole the same assertion (same posture
+  // as FA3-PROJ-1 widening at v0.104.0).
+  assertTrue("FA7-MANIFEST-1: finance@0.4.x or 0.5.x", /^0\.(4|5)\.\d+$/.test(m.version),
     `got: ${m.version}`);
 }
 
@@ -7365,15 +7368,17 @@ async function caseFA7FinanceEntityCreate() {
 }
 
 async function caseFA7FinanceRuleFragments() {
-  console.log("\n--- Case FA7-EXTENDS: NEW finance rule_fragments extend canonical-vocab ---");
+  console.log("\n--- Case FA7-EXTENDS: finance rule_fragments extend canonical-vocab ---");
   const m = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
   const frags = m.rule_fragments || [];
-  assertTrue("FA7-EXTENDS-count: 4 rule_fragments",
-    frags.length === 4, `got: ${frags.length}`);
+  // v0.107.0: rule_fragment count widened from === 4 → >= 4. v0.107.0 added
+  // two new fragments for Budget Defaults.md + Paycheck Defaults.md.
+  assertTrue("FA7-EXTENDS-count: >=4 rule_fragments",
+    frags.length >= 4, `got: ${frags.length}`);
   assertTrue("FA7-EXTENDS-all: all rule_fragments declare extends",
     frags.every(rf => rf.fragment.extends === "_canonical-vocab"));
-  // Verify per-sub-flow scopes
+  // Verify the four original per-sub-flow scopes still present.
   const scopes = frags.map(rf => rf.fragment.scope.path_glob);
   for (const s of ["spice/finance/budgets/**/*.md", "spice/finance/paychecks/**/*.md", "spice/finance/invoices/*/Invoice-*.md", "spice/finance/invoices/*/Time-Log-*.md"]) {
     assertTrue(`FA7-EXTENDS-scope-${s.split('/').pop()}: ${s} fragment present`,
@@ -8313,10 +8318,10 @@ async function caseHCV0891Versions() {
     path.join(WORKSHOP, "manifest.json"), "utf8"));
   const wsVer = platformMan.workshop_version || platformMan.version
     || (platformMan.workshop && platformMan.workshop.version);
-  assertEqual(wsVer, "0.106.0.1", "HC-V0891-VERSION-C: workshop pin = 0.93.3 (v0.93.3 bump)");
+  assertEqual(wsVer, "0.107.0", "HC-V0891-VERSION-C: workshop pin = 0.93.3 (v0.93.3 bump)");
   const pkg = JSON.parse(fs.readFileSync(
     path.resolve(WORKSHOP, "..", "package.json"), "utf8"));
-  assertEqual(pkg.version, "0.106.0.1", "HC-V0891-VERSION-C: package.json = 0.93.3 (v0.93.3 bump)");
+  assertEqual(pkg.version, "0.107.0", "HC-V0891-VERSION-C: package.json = 0.93.3 (v0.93.3 bump)");
 
   // D: mechanism count unchanged
   const mechs = (platformMan.mechanisms && Array.isArray(platformMan.mechanisms))
@@ -10381,10 +10386,13 @@ async function caseV01020EC3SchemaExposesNewFields() {
   const asText = JSON.stringify(parsed);
   assertTrue("HC-V01020-EC-3b: schema mentions presetPrompts", asText.includes("presetPrompts"));
   assertTrue("HC-V01020-EC-3c: schema mentions options_source", asText.includes("options_source"));
-  // Manifest version bumped to 0.6.0 in v0.105.0 (was 0.5.0 in v0.102.0).
+  // Manifest version bumped to 0.6.0 in v0.105.0, 0.7.0 in v0.107.0
+  // (seed_from_defaults). Range-widen to /^0\.[6-9]\.\d+$/ so future MINOR
+  // bumps don't whack-a-mole the same assertion.
   const mp = path.join(WORKSHOP, "platform", "mechanisms", "entity-create", "manifest.json");
   const man = JSON.parse(fs.readFileSync(mp, "utf8"));
-  assertTrue("HC-V01020-EC-3d: entity-create manifest version is 0.6.0", man.version === "0.6.0",
+  assertTrue("HC-V01020-EC-3d: entity-create manifest version 0.6.x or higher MINOR",
+    /^0\.[6-9]\.\d+$/.test(man.version),
     `got: ${man.version}`);
 }
 
@@ -11067,9 +11075,9 @@ async function caseV01030Sh6BeaconCardsRowMeta() {
 }
 
 async function caseV01030Sh7EmptyStateCallout() {
-  console.log("\n--- Case HC-V01030-SH-7: empty-state callout REMOVED v0.106.0.1 (was visual noise on fresh-section render) ---");
+  console.log("\n--- Case HC-V01030-SH-7: empty-state callout REMOVED v0.107.0 (was visual noise on fresh-section render) ---");
   const src = _readShSrc();
-  // v0.106.0.1 — flipped from "callout present" to "callout absent".
+  // v0.107.0 — flipped from "callout present" to "callout absent".
   // User reported "No docs in **<section>** yet" appearing as user-visible
   // noise on every freshly-created section; preferred behavior is to render
   // nothing when the section has zero docs.
@@ -11550,14 +11558,17 @@ async function caseV01050EcSkip1SkipEmptyOptions() {
     /ctx\.prompts\[\s*p\.key\s*\]\s*=\s*["']{2}/.test(src));
 }
 
-// Manifest — entity-create at 0.6.0; doc-note section + sub_section prompts
-// use the new options_source values; project blueprint at 1.20.0 (post-v0.106.0).
+// Manifest — entity-create at 0.6.x or higher; doc-note section + sub_section
+// prompts use the new options_source values; project blueprint at 1.20.0
+// (post-v0.106.0). v0.107.0 widened version assert to /^0\.[6-9]\.\d+$/ so
+// future MINOR bumps (e.g. 0.7.0 seed_from_defaults) don't fail this.
 async function caseV01050EcMan1Manifest060() {
-  console.log("\n--- Case HC-V01050-EC-MAN-1: entity-create mechanism manifest 0.6.0 ---");
+  console.log("\n--- Case HC-V01050-EC-MAN-1: entity-create mechanism manifest 0.6.x or higher ---");
   const m = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/mechanisms/entity-create/manifest.json"), "utf8"));
-  assertTrue("HC-V01050-EC-MAN-1: entity-create mechanism version is 0.6.0", m.version === "0.6.0",
+  assertTrue("HC-V01050-EC-MAN-1: entity-create mechanism version 0.6.x or higher MINOR",
+    /^0\.[6-9]\.\d+$/.test(m.version),
     `got: ${m.version}`);
-  // Description references the v0.6.0 paragraph.
+  // Description references the v0.6.0 paragraph (still present in v0.7.0 desc).
   assertTrue("HC-V01050-EC-MAN-1: description mentions v0.6.0",
     typeof m.description === "string" && /v0\.6\.0/.test(m.description));
   assertTrue("HC-V01050-EC-MAN-1: description mentions current_project_sections",
@@ -11653,16 +11664,16 @@ async function caseV01050DsStrip2InputClearsOnlyResults() {
 }
 
 // Issue 7 (v0.105.0): section-hub no longer renders dv.header(3, "Docs").
-// v0.106.0.1: a conditional header(3, "Docs") IS now rendered, BUT only when
+// v0.107.0: a conditional header(3, "Docs") IS now rendered, BUT only when
 // sub-sections exist AND there are docs — separator for visual clarity. The
 // assertion is updated to require the header() call to be gated by a
 // hasSubSections check, NOT an unconditional emission.
 async function caseV01050ShNoDocsHeader() {
   console.log("\n--- Case HC-V01050-SH-NODOCSHEADER: section-hub.js docs header is gated by sub-sections presence ---");
   const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/section-hub.js"), "utf8");
-  // The header(3, "Docs") call IS present in v0.106.0.1 (separator role) but
+  // The header(3, "Docs") call IS present in v0.107.0 (separator role) but
   // must live inside a hasSubSections-gated branch. Either: (a) no call at
-  // all (pre-v0.106.0.1 behavior), OR (b) the call is preceded by a
+  // all (pre-v0.107.0 behavior), OR (b) the call is preceded by a
   // hasSubSections/subHubs check.
   const hasUnconditionalCall = /header\s*\(\s*3\s*,\s*["']Docs["']\s*\)/.test(src);
   const hasGatedCall = /hasSubSections|subHubs.*length\s*>\s*0|sub-sections.*hasSub/i.test(src) &&
@@ -12101,6 +12112,60 @@ async function caseV01070Bs4ReadOnly() {
     !/FinanceFrontmatter\.update/.test(src));
   assertTrue("HC-V01070-BS-4: does NOT call processFrontMatter",
     !/processFrontMatter/.test(src));
+}
+
+// v0.107.0 — S5: finance + entity-create + workshop manifest deltas.
+
+async function caseV01070FinMan1Versions() {
+  console.log("\n--- Case HC-V01070-FIN-MAN-1: finance + entity-create + workshop versions ---");
+  const fin = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
+  const ec  = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/mechanisms/entity-create/manifest.json"), "utf8"));
+  const ws  = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
+  assertEqual(fin.version, "0.5.0", "HC-V01070-FIN-MAN-1: finance version");
+  assertEqual(ec.version, "0.7.0", "HC-V01070-FIN-MAN-1: entity-create version");
+  assertEqual(ws.workshop_version, "0.107.0", "HC-V01070-FIN-MAN-1: workshop_version");
+  assertTrue("HC-V01070-FIN-MAN-1: finance depends_on entity-create >=0.7.0",
+    fin.depends_on.some(d => d.name === "entity-create" && /0\.7/.test(d.range)));
+}
+
+async function caseV01070FinMan2NewClassesAndFiles() {
+  console.log("\n--- Case HC-V01070-FIN-MAN-2: finance customjs_classes + files include 3 new entries ---");
+  const fin = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
+  for (const cls of ["BudgetDefaultsEditor", "PaycheckDefaultsEditor", "BudgetSummary"]) {
+    assertTrue(`HC-V01070-FIN-MAN-2: customjs_classes includes ${cls}`,
+      fin.customjs_classes.includes(cls));
+  }
+  for (const src of ["helpers/budget-defaults-editor.js", "helpers/paycheck-defaults-editor.js", "helpers/budget-summary.js"]) {
+    assertTrue(`HC-V01070-FIN-MAN-2: files[] includes ${src}`,
+      fin.files.some(f => f.source === src));
+  }
+}
+
+async function caseV01070FinMan3SeedFromDefaults() {
+  console.log("\n--- Case HC-V01070-FIN-MAN-3: budget + paycheck new_entity_buttons carry seed_from_defaults ---");
+  const fin = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
+  const budget = fin.new_entity_buttons.find(b => b.id === "budget");
+  const paycheck = fin.new_entity_buttons.find(b => b.id === "paycheck");
+
+  assertTrue("HC-V01070-FIN-MAN-3: budget.seed_from_defaults present",
+    budget && budget.seed_from_defaults && budget.seed_from_defaults.source_path === "{{module_directory}}/Budget Defaults.md");
+  assertTrue("HC-V01070-FIN-MAN-3: budget.seed_from_defaults source_array=categories",
+    budget.seed_from_defaults.source_array === "categories");
+  assertTrue("HC-V01070-FIN-MAN-3: budget.seed_from_defaults carries groups",
+    Array.isArray(budget.seed_from_defaults.carry_arrays) && budget.seed_from_defaults.carry_arrays.includes("groups"));
+  assertTrue("HC-V01070-FIN-MAN-3: budget.seed_from_defaults sets actual: 0",
+    budget.seed_from_defaults.per_item_set && budget.seed_from_defaults.per_item_set.actual === 0);
+  assertTrue("HC-V01070-FIN-MAN-3: budget.frontmatter_template grows groups: []",
+    Array.isArray(budget.frontmatter_template.groups));
+  assertTrue("HC-V01070-FIN-MAN-3: budget.inline_body adds BudgetSummary block",
+    /BudgetSummary/.test(budget.inline_body));
+
+  assertTrue("HC-V01070-FIN-MAN-3: paycheck.seed_from_defaults present",
+    paycheck && paycheck.seed_from_defaults && paycheck.seed_from_defaults.source_path === "{{module_directory}}/Paycheck Defaults.md");
+  assertTrue("HC-V01070-FIN-MAN-3: paycheck.seed_from_defaults source_array=expenses",
+    paycheck.seed_from_defaults.source_array === "expenses");
+  assertTrue("HC-V01070-FIN-MAN-3: paycheck.seed_from_defaults sets paid: false",
+    paycheck.seed_from_defaults.per_item_set && paycheck.seed_from_defaults.per_item_set.paid === false);
 }
 
 (async function main() {
@@ -12777,6 +12842,11 @@ async function caseV01070Bs4ReadOnly() {
   await caseV01070Bs2ThreeBands();
   await caseV01070Bs3PaceIndicator();
   await caseV01070Bs4ReadOnly();
+
+  // v0.107.0 — manifest deltas (S5)
+  await caseV01070FinMan1Versions();
+  await caseV01070FinMan2NewClassesAndFiles();
+  await caseV01070FinMan3SeedFromDefaults();
 
   // v0.65.0 HC-V065-RUN-NOTE: write-run-note-* sub-skill lint
   {
@@ -14006,10 +14076,10 @@ async function caseV01070Bs4ReadOnly() {
       // NOTE: top-level WORKSHOP at line 29 = path.resolve(__dirname, "../..") = workshop ROOT
       // (distinct from the local WORKSHOP inside caseHCV0891Versions which is platform/).
       const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
-      assertTrue("HC-V0900-VERSION-A: package.json version === '0.93.3'", pkg.version === "0.106.0.1");
+      assertTrue("HC-V0900-VERSION-A: package.json version === '0.93.3'", pkg.version === "0.107.0");
       const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
       assertTrue("HC-V0900-VERSION-B: platform/manifest.json workshop_version === '0.93.3'",
-        platMan.workshop_version === "0.106.0.1");
+        platMan.workshop_version === "0.107.0");
       const coworkMan = JSON.parse(fs.readFileSync(
         path.join(WORKSHOP, "platform/blueprints/cowork/manifest.json"), "utf8"));
       assertTrue("HC-V0900-VERSION-C: cowork manifest version === '0.31.0'",
@@ -14985,12 +15055,12 @@ type: cowork-microscope
   try {
     const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
     assertTrue("HC-V0920-VERSION-A1: workshop_version === 0.93.3",
-      platMan.workshop_version === "0.106.0.1");
+      platMan.workshop_version === "0.107.0");
     assertTrue("HC-V0920-VERSION-A2: blueprints[].cowork.version === 0.31.2",
       platMan.blueprints.find(b => b.name === "cowork").version === "0.40.0");
     const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
     assertTrue("HC-V0920-VERSION-A3: package.json version === 0.93.3",
-      pkg.version === "0.106.0.1");
+      pkg.version === "0.107.0");
     const workshopSub = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "ranch/platform-subscription.json"), "utf8"));
     assertTrue("HC-V0920-VERSION-A4: workshop subscription cowork pin === 0.31.0",
       workshopSub.blueprints.find(b => b.name === "cowork").version === "0.40.0");
@@ -15262,12 +15332,12 @@ type: cowork-microscope
   try {
     const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
     assertTrue("HC-V0930-VERSION-A1: workshop_version === 0.93.3",
-      platMan.workshop_version === "0.106.0.1");
+      platMan.workshop_version === "0.107.0");
     assertTrue("HC-V0930-VERSION-A2: blueprints[].cowork.version === 0.31.2",
       platMan.blueprints.find(b => b.name === "cowork").version === "0.40.0");
     const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
     assertTrue("HC-V0930-VERSION-A3: package.json version === 0.93.3",
-      pkg.version === "0.106.0.1");
+      pkg.version === "0.107.0");
     const workshopSub = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "ranch/platform-subscription.json"), "utf8"));
     assertTrue("HC-V0930-VERSION-A4: workshop subscription cowork pin === 0.31.1",
       workshopSub.blueprints.find(b => b.name === "cowork").version === "0.40.0");
@@ -15369,12 +15439,12 @@ type: cowork-microscope
   try {
     const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
     assertTrue("HC-V0931-VERSION-D1: workshop_version === 0.93.3",
-      platMan.workshop_version === "0.106.0.1");
+      platMan.workshop_version === "0.107.0");
     assertTrue("HC-V0931-VERSION-D2: blueprints[].cowork.version === 0.31.2",
       platMan.blueprints.find(b => b.name === "cowork").version === "0.40.0");
     const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
     assertTrue("HC-V0931-VERSION-D3: package.json version === 0.93.3",
-      pkg.version === "0.106.0.1");
+      pkg.version === "0.107.0");
     const coworkMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/cowork/manifest.json"), "utf8"));
     assertTrue("HC-V0931-VERSION-D4: cowork manifest.version === 0.31.1",
       coworkMan.version === "0.40.0");
