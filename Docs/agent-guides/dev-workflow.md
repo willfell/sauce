@@ -92,6 +92,18 @@ Modes:
 
 **Demote logic preserves the prior cycle's "Most recent cycle:" prose** by appending it with the canonical ` — ` separator that historical (previous) rows already use. No information is lost across regen.
 
+## Schema registry & linter
+
+`platform/schemas-index.json` indexes every schema-shaped surface in the workshop (sidecar JSON Schemas, blueprint `rule_fragments[]`, `scheduled-job-contract`, learned-state schemas, data files, workshop manifests, entity-create prompts, helper read-contracts). Twenty-plus entries seeded at v0.113.0.
+
+```bash
+npm run lint-schemas              # validate the registry (preflight runs this)
+npm run lint-schemas -- --list    # one-line per schema
+npm run lint-schemas -- --json    # machine-readable
+```
+
+Run this BEFORE designing any feature that touches a contract. See [`schemas.md`](schemas.md) for the registry shape, when to add an entry, and the version-bump conventions.
+
 ## Starting a per-cycle behavioral harness
 
 For cycles that ship a new helper / shared primitive / non-trivial render dispatch, behavioral harnesses are the right regression net. See [`build-test-verify.md`](build-test-verify.md) § Per-cycle behavioral harness pattern.
