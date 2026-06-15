@@ -1,6 +1,6 @@
 ---
-type: finance-hub
-created_at: "2026-05-17T16:45:00-06:00"
+type: months-hub
+created_at: "2026-06-15T18:00:00-06:00"
 tags:
   - finance-hub
 cssclasses:
@@ -16,5 +16,5 @@ await dv.view("{{views_path}}/customjs-guard", { class: "FinanceNav" });
 ```
 
 ```dataviewjs
-await dv.view("{{views_path}}/customjs-guard", { class: "FinanceHubSummary" });
+await dv.view("{{views_path}}/customjs-guard", { class: "MonthsCards" });
 ```

@@ -129,10 +129,12 @@ class FinanceNav {
         if (filePath === "spice/finance/Budget Defaults.md") return "defaults-budget";
         if (filePath === "spice/finance/Paycheck Defaults.md") return "defaults-paycheck";
         if (filePath === "spice/finance/Debt Defaults.md") return "defaults-debt";
+        if (filePath === "spice/finance/months/Months.md") return "hub-months";
         if (type === "budget") return "entity-budget";
         if (type === "paycheck") return "entity-paycheck";
         if (type === "invoice") return "entity-invoice";
         if (type === "debt") return "entity-debt";
+        if (type === "month") return "entity-month";
         return "hub-finance";
     }
 
@@ -142,6 +144,7 @@ class FinanceNav {
         if (mode === "hub-paychecks" || mode === "entity-paycheck" || mode === "defaults-paycheck") return "paychecks";
         if (mode === "hub-invoices" || mode === "entity-invoice") return "invoices";
         if (mode === "hub-debts" || mode === "entity-debt" || mode === "defaults-debt") return "debts";
+        if (mode === "hub-months" || mode === "entity-month") return "months";
         return null;
     }
 
@@ -156,6 +159,7 @@ class FinanceNav {
             { key: "paychecks", label: "Paychecks", path: "spice/finance/paychecks/Paychecks.md", icon: this._icon("coins") },
             { key: "invoices",  label: "Invoices",  path: "spice/finance/invoices/Invoices.md",   icon: this._icon("file-text") },
             { key: "debts",     label: "Debts",     path: "spice/finance/debts/Debts.md",         icon: this._icon("credit-card") },
+            { key: "months",    label: "Months",    path: "spice/finance/months/Months.md",       icon: this._icon("calendar") },
         ];
 
         const here = this._hereKey(mode);
@@ -179,6 +183,7 @@ class FinanceNav {
             "hub-paychecks": { instance: "paycheck", defaultsLabel: "Paycheck Defaults", defaultsPath: "spice/finance/Paycheck Defaults.md", defaultsIcon: this._icon("settings") },
             "hub-invoices":  { instance: "invoice",  defaultsLabel: null,                defaultsPath: null,                                 defaultsIcon: null },
             "hub-debts":     { instance: "debt",     defaultsLabel: "Debt Defaults",     defaultsPath: "spice/finance/Debt Defaults.md",     defaultsIcon: this._icon("settings") },
+            "hub-months":    { instance: "month",    defaultsLabel: null,                defaultsPath: null,                                 defaultsIcon: null },
         };
         const cfg = config[mode];
         if (!cfg) return;
@@ -217,6 +222,7 @@ class FinanceNav {
             "entity-paycheck": { hubLabel: "Paychecks Hub", hubIcon: this._icon("coins"),       hubPath: "spice/finance/paychecks/Paychecks.md", sub: "paychecks", sortKey: "pay_period_start", dir: "ASC"  },
             "entity-invoice":  { hubLabel: "Invoices Hub",  hubIcon: this._icon("file-text"),   hubPath: "spice/finance/invoices/Invoices.md",   sub: "invoices",  sortKey: "month",            dir: "ASC"  },
             "entity-debt":     { hubLabel: "Debts Hub",     hubIcon: this._icon("credit-card"), hubPath: "spice/finance/debts/Debts.md",         sub: "debts",     sortKey: "current_balance",  dir: "DESC" },
+            "entity-month":    { hubLabel: "Months Hub",    hubIcon: this._icon("calendar"),    hubPath: "spice/finance/months/Months.md",       sub: "months",    sortKey: "month",            dir: "DESC" },
         };
         const cfg = subAreaConfig[mode];
         if (!cfg) return;
@@ -294,6 +300,8 @@ class FinanceNav {
                 return '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>';
             case "chevron-right":
                 return '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>';
+            case "calendar":
+                return '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>';
             default:
                 return null;
         }

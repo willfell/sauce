@@ -13416,6 +13416,56 @@ async function caseV01150ThreeNewClassesRegistered() {
     files.some(f => f && typeof f.source === "string" && f.source.endsWith("finance-hub-summary.js")));
 }
 
+async function caseV01150FinanceNavMonths() {
+  console.log("\n--- Case V01150-FNM: FinanceNav extended with Months modes + calendar icon ---");
+  const src = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/finance/helpers/finance-nav.js"), "utf8");
+  assertTrue("V01150-FNM-1: hub-months mode literal present",
+    /hub-months/.test(src));
+  assertTrue("V01150-FNM-2: entity-month mode literal present",
+    /entity-month/.test(src));
+  assertTrue("V01150-FNM-3: months HUBS entry present",
+    /key:\s*["']months["']/.test(src));
+  assertTrue("V01150-FNM-4: calendar icon case present",
+    /case\s+"calendar":/.test(src));
+}
+
+async function caseV01150ContentMonthsExists() {
+  console.log("\n--- Case V01150-CME: content/Months.md exists with correct blocks ---");
+  const contentPath = path.join(WORKSHOP, "platform/blueprints/finance/content/Months.md");
+  if (!assertTrue("V01150-CME-1: content/Months.md file exists",
+    fs.existsSync(contentPath), `missing: ${contentPath}`)) return;
+  const body = fs.readFileSync(contentPath, "utf8");
+  assertTrue("V01150-CME-2: body contains MonthsCards block",
+    /MonthsCards/.test(body));
+  assertTrue("V01150-CME-3: body contains FinanceNav block",
+    /FinanceNav/.test(body));
+}
+
+async function caseV01150ContentFinanceLanding() {
+  console.log("\n--- Case V01150-CFL: content/Finance.md contains FinanceHubSummary ---");
+  const contentPath = path.join(WORKSHOP, "platform/blueprints/finance/content/Finance.md");
+  if (!assertTrue("V01150-CFL-1: content/Finance.md exists",
+    fs.existsSync(contentPath), `missing: ${contentPath}`)) return;
+  const body = fs.readFileSync(contentPath, "utf8");
+  assertTrue("V01150-CFL-2: body contains FinanceHubSummary block",
+    /FinanceHubSummary/.test(body));
+}
+
+async function caseV01150PaycheckTemplateAlignsManifest() {
+  console.log("\n--- Case V01150-PTAM: Paycheck Template aligned to manifest inline_body ---");
+  const templatePath = path.join(WORKSHOP, "platform/blueprints/finance/templates/Paycheck Template.md");
+  if (!assertTrue("V01150-PTAM-1: Paycheck Template.md exists",
+    fs.existsSync(templatePath), `missing: ${templatePath}`)) return;
+  const body = fs.readFileSync(templatePath, "utf8");
+  assertTrue("V01150-PTAM-2: template body contains PaycheckDebtBand",
+    /PaycheckDebtBand/.test(body));
+  assertTrue("V01150-PTAM-3: template body contains FinanceNav (unified nav)",
+    /FinanceNav/.test(body));
+  assertTrue("V01150-PTAM-4: template body does NOT contain FinanceNavRow (legacy removed)",
+    !/FinanceNavRow/.test(body));
+}
+
 async function caseV01103InjectMonthlyBandIdempotent() {
   console.log("\n--- Case V01103-MO-IDEM: _injectMonthlyBand transform is idempotent ---");
   const installer = require(path.join(WORKSHOP, "platform/install.js"));
@@ -22787,6 +22837,12 @@ type: cowork-microscope
   await caseV01150FinanceHubSummaryPresent();
   await caseV01150FinanceMathRegistered();
   await caseV01150ThreeNewClassesRegistered();
+
+  // v0.115.0 finance Stage B — FinanceNav months modes + content files + Paycheck Template fix
+  await caseV01150FinanceNavMonths();
+  await caseV01150ContentMonthsExists();
+  await caseV01150ContentFinanceLanding();
+  await caseV01150PaycheckTemplateAlignsManifest();
 
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
