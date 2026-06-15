@@ -207,6 +207,66 @@ withTempVault((vault) => {
             "HC-V01100-SEED-CLAUDE-6 outside-marker prose preserved",
             cm.includes("Test consumer vault") && cm.includes("This vault has no real personal content")
         );
+
+        // Row-content checks on the populated markered surfaces. Each ok()
+        // call asserts that a specific row substring survives the install-time
+        // claude-surface regen. Catches the silent failure where a registry
+        // change drops a slash command or directory-map row without any
+        // visible error — only an AI session would notice.
+        ok("HC-V01100-SEED-CLAUDE-7 resolvers row /install present", cm.includes("/install"));
+        ok("HC-V01100-SEED-CLAUDE-8 resolvers row /cowork about present", cm.includes("/cowork about"));
+        ok("HC-V01100-SEED-CLAUDE-9 resolvers row /cowork discover-people present", cm.includes("/cowork discover-people"));
+        ok("HC-V01100-SEED-CLAUDE-10 resolvers row /daily present", cm.includes("/daily"));
+        ok("HC-V01100-SEED-CLAUDE-11 resolvers row /project present", cm.includes("/project"));
+        ok("HC-V01100-SEED-CLAUDE-12 resolvers row /upgrade present", cm.includes("/upgrade"));
+        ok("HC-V01100-SEED-CLAUDE-13 directory-map row spice/resources/ present", cm.includes("spice/resources/"));
+        ok("HC-V01100-SEED-CLAUDE-14 directory-map row ranch Runtime plumbing present", cm.includes("Runtime plumbing"));
+        ok("HC-V01100-SEED-CLAUDE-15 directory-map row .claude/commands/ present", cm.includes(".claude/commands/"));
+        ok("HC-V01100-SEED-CLAUDE-16 directory-map row .claude/skills/ present", cm.includes(".claude/skills/"));
+    }
+
+    // ===== HC-V01100-SEED-BODY-* — hub bodies reference canonical primary widget class =====
+    //
+    // One assert per hub note: the unique class-name substring of its primary
+    // widget appears in the body. Plain String.includes — robust to both the
+    // customjs-guard shim form (`class: "X"`) and the direct-call form
+    // (`customJS.X.render(...)`). Catches silent-fail class: a widget renamed
+    // on the workshop side renders an empty hub on consumer vaults.
+    //
+    // When the seed is rebaselined and a class name changes (legitimately —
+    // a real workshop rename), update the table here in lockstep with the
+    // rebaseline commit so the harness fails-fast on a stale assertion target.
+    const bodyChecks = [
+        ["spice/finance/Finance.md", "FinanceHubCards", "BODY-1"],
+        ["spice/finance/Budget Defaults.md", "BudgetDefaultsEditor", "BODY-2"],
+        ["spice/finance/Debt Defaults.md", "DebtDefaultsEditor", "BODY-3"],
+        ["spice/finance/Paycheck Defaults.md", "PaycheckDefaultsEditor", "BODY-4"],
+        ["spice/finance/budgets/Budgets.md", "BudgetsCards", "BODY-5"],
+        ["spice/finance/debts/Debts.md", "DebtsHubSummary", "BODY-6"],
+        ["spice/finance/paychecks/Paychecks.md", "PaychecksCards", "BODY-7"],
+        ["spice/finance/invoices/Invoices.md", "InvoicesCards", "BODY-8"],
+        ["spice/cowork/Cowork.md", "CoworkHubNav", "BODY-9"],
+        ["spice/cowork/Daily Hub.md", "CoworkDailyHubCards", "BODY-10"],
+        ["spice/cowork/Weekly Hub.md", "CoworkWeeklyHubCards", "BODY-11"],
+        ["spice/cowork/Monthly Hub.md", "CoworkMonthlyHubCards", "BODY-12"],
+        ["spice/projects/Projects.md", "ProjectsHubCards", "BODY-13"],
+        ["spice/people/People.md", "PeopleHubCards", "BODY-14"],
+        ["spice/products/Products.md", "ProductsHubCards", "BODY-15"],
+        ["spice/scratch/Scratch.md", "ScratchHubCards", "BODY-16"],
+        ["spice/to-do/All-ToDos.md", "ToDoAllList", "BODY-17"],
+    ];
+    for (const [relPath, classSubstr, tag] of bodyChecks) {
+        let body = "";
+        let exists = false;
+        if (helpers.fileExists(vault, relPath)) {
+            exists = true;
+            try { body = helpers.readNote(vault, relPath); } catch (e) {}
+        }
+        ok(
+            `HC-V01100-SEED-${tag} ${relPath} body refs ${classSubstr}`,
+            exists && body.includes(classSubstr),
+            exists ? "class missing" : "note missing"
+        );
     }
 
     // ===== Idempotency phase: snapshot, second install, compare =====
