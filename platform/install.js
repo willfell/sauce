@@ -1111,6 +1111,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyFinanceMigrations(tp, mech, variables, history, git);             // NEW v0.107.0 S2 — finance defaults scaffolding (create-if-absent) + categories group backfill (append-only + .sauce-backup snapshot)
   await applyOrphanedHelperCleanup(tp, mech, variables, history, git);         // NEW v0.110.0 — deletes obsolete *.js and *.js.bak helper files left on disk after manifest removals
   await applyEntityCreateGuardMigration(tp, mech, variables, history, git);    // NEW v0.110.1 — rewrites direct customJS.EntityCreate.render(dv,...) calls in vault notes to the customjs-guard form (cold-load race fix)
+  await applyCustomJsGuardMigration(tp, mech, variables, history, git);        // NEW v0.110.2 — generalized: rewrites ANY direct customJS.<Class>.render(dv[,opts]) call in vault notes to guard form (mobile cold-load race fix)
   await applyExternalPluginInstall(tp, mech, adapter.basePath || (typeof adapter.getBasePath === "function" ? adapter.getBasePath() : null), workshopPath, history, git);  // NEW v0.94.0 — install missing
   await applyExternalPlugins(tp, mech, history, git);
   await scaffoldFoundationalPluginData(tp, mech, workshopPath, variables, history, git);  // NEW v0.26.0
@@ -4215,6 +4216,124 @@ async function applyEntityCreateGuardMigration(tp, mech, variables, history, git
 
   history?.push({ event: "info", step: "entity_create_guard_migration", name: "platform",
     summary: { scanned, rewritten, callsReplaced },
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+    completed_at: new Date().toISOString() });
+}
+
+// applyCustomJsGuardMigration — v0.110.2. Generalizes v0.110.1's
+// applyEntityCreateGuardMigration to ANY direct customJS.<Class>.render(dv...)
+// call in note bodies. The customjs-guard view polls window.customJS for 2s
+// before invoking; direct calls bypass that and race on cold load (especially
+// noticeable on mobile Obsidian where Capacitor's startup is slower).
+//
+// Patterns matched (vault-wide, recursive .md walk under spice/):
+//
+//   await customJS.<Class>.render(dv);
+//   await customJS.<Class>.render(dv, <opts-object>);
+//
+// Rewritten to:
+//
+//   await dv.view("ranch/views/customjs-guard", { class: "<Class>" });
+//   await dv.view("ranch/views/customjs-guard", { class: "<Class>", args: [<opts-object>] });
+//
+// Constraints:
+//   - Only matches when the first arg is exactly `dv` (so helpers that pass
+//     sub-containers like btnRowProxy are unaffected — those fix themselves
+//     via inline poll in their CustomJS class code).
+//   - Only matches `.render` (not other method calls like `.create`).
+//   - opts must be a balanced `{...}` (no nested objects in the regex; for
+//     complex opts the existing direct call stays put — rare in practice).
+//   - Skips guard-form invocations naturally (the regex requires
+//     `customJS.X.render(dv` not `dv.view`).
+//
+// Idempotent. Per-file failure-loud + .sauce-backup snapshot before write.
+async function applyCustomJsGuardMigration(tp, mech, variables, history, git) {
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+
+  // Direct-call regex with optional opts. Capture groups:
+  //   1 = ClassName (must start with uppercase, alphanumeric)
+  //   2 = optional opts-object literal (balanced `{...}` with no nested braces)
+  const DIRECT_RENDER_RE = /await\s+customJS\.([A-Z][A-Za-z0-9_]*)\.render\(\s*dv\s*(?:,\s*(\{[^{}]*\}))?\s*\)\s*;?/g;
+
+  function _rewriteAnyDirectRenderCall(body) {
+    let touched = 0;
+    const out = body.replace(DIRECT_RENDER_RE, (_m, className, opts) => {
+      touched++;
+      const argsClause = opts ? `, args: [${opts}]` : "";
+      return `await dv.view("ranch/views/customjs-guard", { class: "${className}"${argsClause} });`;
+    });
+    return { body: out, touched };
+  }
+
+  async function _walkMd(dir, files = []) {
+    try {
+      const listing = await adapter.list(dir);
+      for (const fp of (listing.files || [])) {
+        if (fp.endsWith(".md")) files.push(fp);
+      }
+      for (const sub of (listing.folders || [])) {
+        await _walkMd(sub, files);
+      }
+    } catch (_e) { /* dir missing or unreadable — skip */ }
+    return files;
+  }
+
+  if (!(await adapter.exists("spice"))) {
+    history?.push({ event: "info", step: "customjs_guard_migration", name: "platform",
+      summary: { scanned: 0, rewritten: 0, callsReplaced: 0 },
+      reason: "spice/ root absent; nothing to migrate",
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+      completed_at: new Date().toISOString() });
+    return;
+  }
+
+  const files = await _walkMd("spice");
+  if (files.length === 0) return;
+
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  let scanned = 0;
+  let rewritten = 0;
+  let callsReplaced = 0;
+  const classCounts = {};
+
+  for (const fp of files) {
+    scanned++;
+    try {
+      const body = await adapter.read(fp);
+      if (!DIRECT_RENDER_RE.test(body)) continue;
+      DIRECT_RENDER_RE.lastIndex = 0;
+      // Tally class names BEFORE rewrite (for the summary log)
+      const matches = body.match(DIRECT_RENDER_RE) || [];
+      for (const m of matches) {
+        const cm = m.match(/customJS\.([A-Z][A-Za-z0-9_]*)\.render/);
+        if (cm) classCounts[cm[1]] = (classCounts[cm[1]] || 0) + 1;
+      }
+      DIRECT_RENDER_RE.lastIndex = 0;
+      const { body: out, touched } = _rewriteAnyDirectRenderCall(body);
+      if (touched === 0 || out === body) continue;
+      // Snapshot before write
+      const backupPath = `.sauce-backup/${ts}/${fp}`;
+      const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+      try { await adapter.mkdir(backupParent); } catch (_e) { /* ok */ }
+      try { await adapter.write(backupPath, body); } catch (_e) { /* best-effort */ }
+      await adapter.write(fp, out);
+      rewritten++;
+      callsReplaced += touched;
+      history?.push({ event: "info", step: "customjs_guard_migration", name: "platform",
+        action: "rewrote", path: fp, callsReplaced: touched, snapshot: backupPath,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    } catch (e) {
+      history?.push({ event: "warning", step: "customjs_guard_migration", name: "platform",
+        path: fp, reason: e.message,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    }
+  }
+
+  history?.push({ event: "info", step: "customjs_guard_migration", name: "platform",
+    summary: { scanned, rewritten, callsReplaced, classCounts },
     git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
     completed_at: new Date().toISOString() });
 }
@@ -10645,6 +10764,8 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports.applyOrphanedHelperCleanup = applyOrphanedHelperCleanup;
     // v0.110.1 — vault-wide EntityCreate direct-call → guard rewrite.
     module.exports.applyEntityCreateGuardMigration = applyEntityCreateGuardMigration;
+    // v0.110.2 — generalized: ANY direct customJS.<Class>.render(dv,...) → guard.
+    module.exports.applyCustomJsGuardMigration = applyCustomJsGuardMigration;
     //
     // CF-2: by default, capture run-install.js's stdio (Phase B/C surfaced
     // 2200-line JSON dumps mixed into the user's terminal). We tee the
