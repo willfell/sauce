@@ -248,6 +248,36 @@ class EntityCreate {
             }
         }
 
+        // v0.7.1 (v0.108.0): resolve_wikilinks — AFTER per_item_set merge,
+        // BEFORE return. When seed_from_defaults.resolve_wikilinks is set, walk
+        // copied items, resolve the named wikilink field to a target vault file,
+        // read target frontmatter from metadataCache, and merge keys per merge
+        // map. Fully opt-in (missing field = no-op). Per-item failure-soft:
+        // unresolvable wikilinks or missing frontmatter keys leave item unchanged.
+        if (sfd.resolve_wikilinks && typeof sfd.resolve_wikilinks === "object") {
+            const { field, merge } = sfd.resolve_wikilinks;
+            if (typeof field === "string" && merge && typeof merge === "object") {
+                for (const item of copied) {
+                    const linkValue = item[field];
+                    if (typeof linkValue !== "string") continue;
+                    const m = linkValue.match(/^\[\[(.+?)\]\]$/);
+                    if (!m) continue;
+                    const targetName = m[1];
+                    const targetFile = _resolveWikilinkToFile(app, targetName);
+                    if (!targetFile) continue;
+                    try {
+                        const fm = _readFrontmatterFromCache(app, targetFile);
+                        if (!fm) continue;
+                        for (const [fromKey, toKey] of Object.entries(merge)) {
+                            if (fm[fromKey] !== undefined) {
+                                item[toKey] = fm[fromKey];
+                            }
+                        }
+                    } catch (_e) { /* per-item failure-soft; skip this item */ }
+                }
+            }
+        }
+
         return spec;
     }
 
@@ -887,5 +917,34 @@ class EntityCreate {
             ? `---\n${fm}---\n\n${body}`
             : body;
         await app.vault.create(xPath, content);
+    }
+}
+
+// ---------- v0.7.1 module-level helpers for resolve_wikilinks ----------
+//
+// These are module-level (outside the class) so they can be tested and called
+// without a class instance. Both receive `app` (the Obsidian App global) as
+// their first argument; at Obsidian runtime `app` is a global, so callers
+// inside _resolveSeedFromDefaults pass the same reference directly.
+
+// Resolve a wikilink name to its TFile using the metadata cache's link
+// resolver. Returns null when the name cannot be resolved.
+function _resolveWikilinkToFile(app, name) {
+    try {
+        return app.metadataCache.getFirstLinkpathDest(name, "") || null;
+    } catch (_e) {
+        return null;
+    }
+}
+
+// Read the frontmatter of a TFile from the metadata cache. Prefers the
+// cached frontmatter (fast, correct at Obsidian runtime; equivalent to
+// reading the YAML block). Returns null when no frontmatter is available.
+function _readFrontmatterFromCache(app, file) {
+    try {
+        const cache = app.metadataCache.getFileCache(file);
+        return (cache && cache.frontmatter) ? cache.frontmatter : null;
+    } catch (_e) {
+        return null;
     }
 }
