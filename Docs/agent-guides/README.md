@@ -19,6 +19,7 @@ These guides are not auto-injected into every conversation. They earn their cont
 | [cycle-status.md](cycle-status.md) | Current platform state: workshop version, mechanism + blueprint catalogue, harness count, landmines summary, in-flight queue. Updated at every cycle close. |
 | [asking-before-acting.md](asking-before-acting.md) | Before any destructive/shared/cross-vault action. The full ask-before list with landmine context. |
 | [project-blueprint-ui.md](project-blueprint-ui.md) | Editing any project-blueprint helper or template. Shared rendering primitives (Breadcrumb, SectionLabel, DocSearch, EntityCreate) + section ordering + spacing rules locked in v0.109.0. |
+| [migration-regression-net.md](migration-regression-net.md) | Adding an install-time migration, editing `platform/test/seed-vault/`, authoring an `HC-V0XYZ-SEED-*` family, running `npm run seed:rebaseline`, or debugging `run-seed-migrations.js` on CI. |
 
 ## What does not belong here
 
