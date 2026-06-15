@@ -8320,10 +8320,10 @@ async function caseHCV0891Versions() {
     path.join(WORKSHOP, "manifest.json"), "utf8"));
   const wsVer = platformMan.workshop_version || platformMan.version
     || (platformMan.workshop && platformMan.workshop.version);
-  assertEqual(wsVer, "0.109.0", "HC-V0891-VERSION-C: workshop pin = 0.93.3 (v0.93.3 bump)");
+  assertEqual(wsVer, "0.110.0", "HC-V0891-VERSION-C: workshop pin = 0.93.3 (v0.93.3 bump)");
   const pkg = JSON.parse(fs.readFileSync(
     path.resolve(WORKSHOP, "..", "package.json"), "utf8"));
-  assertEqual(pkg.version, "0.109.0", "HC-V0891-VERSION-C: package.json = 0.93.3 (v0.93.3 bump)");
+  assertEqual(pkg.version, "0.110.0", "HC-V0891-VERSION-C: package.json = 0.93.3 (v0.93.3 bump)");
 
   // D: mechanism count unchanged
   const mechs = (platformMan.mechanisms && Array.isArray(platformMan.mechanisms))
@@ -10691,8 +10691,11 @@ async function caseV01020ProjTpl1DocsHubInvokesSections() {
       || /customJS\.ProjectDocsIndex\.render/.test(body));
   assertTrue("HC-V01020-PROJ-TPL-1b: Docs Hub no longer invokes ProjectDocsCards",
     !/ProjectDocsCards/.test(body));
-  assertTrue("HC-V01020-PROJ-TPL-1c: Docs Hub no longer contains entity-create:doc-note marker",
-    !/entity-create:doc-note/.test(body));
+  // v0.110.0 reverses this: Docs Hub.md NOW carries the entity-create:doc-note sentinel
+  // again so injectAccentButtonBlock's verify pass finds an anchor (no more "no sentinel"
+  // warnings on every install). Re-added with the canonical EntityCreate.render call.
+  assertTrue("HC-V01020-PROJ-TPL-1c: Docs Hub carries entity-create:doc-note sentinel (re-added v0.110.0)",
+    /entity-create:doc-note/.test(body));
 }
 
 async function caseV01020ProjTpl2MeetingsPanelInProjectTemplate() {
@@ -11127,8 +11130,8 @@ async function caseV01030ProjMan1VersionAndCustomjs() {
   // + SectionLabel primitive + ProjectsHubCards search + Template Project.md
   // rewrite + Breadcrumb extension + marker cleanup).
   // Breadcrumb + ProjectDocsIndex + SectionHub carryover assertions still apply.
-  assertTrue("HC-V01030-PROJ-MAN-1a: project manifest version is exactly 1.21.0",
-    m && m.version === "1.21.0", `got: ${m && m.version}`);
+  assertTrue("HC-V01030-PROJ-MAN-1a: project manifest version 1.21.x",
+    m && /^1\.21\.\d+$/.test(m.version), `got: ${m && m.version}`);
   const cls = (m && Array.isArray(m.customjs_classes)) ? m.customjs_classes : [];
   assertTrue("HC-V01030-PROJ-MAN-1b: customjs_classes includes Breadcrumb",
     cls.indexOf("Breadcrumb") !== -1);
@@ -11502,7 +11505,7 @@ async function caseV01040Man1Manifest118() {
   // v0.106.0 → 1.20.0 (DocSearch persistence + dashboard widgets).
   // v0.109.0 → 1.21.0 (projects visual overhaul: DocSearch params, SectionLabel,
   // ProjectsHubCards search, template rewrite, Breadcrumb extension, marker cleanup).
-  assertTrue("HC-V01040-MAN-1: project blueprint version 1.21.0", m.version === "1.21.0");
+  assertTrue("HC-V01040-MAN-1: project blueprint version 1.21.x", /^1\.21\.\d+$/.test(m.version));
   assertTrue("HC-V01040-MAN-1: customjs_classes includes DocSearch",
     Array.isArray(m.customjs_classes) && m.customjs_classes.includes("DocSearch"));
   const sources = (m.files || []).map(f => f.source);
@@ -11601,7 +11604,7 @@ async function caseV01050Man1ProjectManifest119() {
   console.log("\n--- Case HC-V01050-MAN-1: project blueprint manifest 1.21.0 (v0.109.0 bump) + doc-note prompts use new options_source ---");
   const m = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/manifest.json"), "utf8"));
   // v0.109.0 bumped project blueprint 1.20.0 → 1.21.0 (projects visual overhaul).
-  assertTrue("HC-V01050-MAN-1: project blueprint version 1.21.0", m.version === "1.21.0",
+  assertTrue("HC-V01050-MAN-1: project blueprint version 1.21.x", /^1\.21\.\d+$/.test(m.version),
     `got: ${m.version}`);
   // Locate doc-note entity-create entry.
   const docNote = (m.new_entity_buttons || []).find(b => b.id === "doc-note");
@@ -12150,9 +12153,9 @@ async function caseV01070FinMan1Versions() {
   //   finance 0.5.2 → 0.6.0 (CF-3 + v0.108.0 ship)
   //   entity-create 0.7.0 → 0.7.1 (v0.108.0 S1 resolve_wikilinks PATCH)
   // v0.109.0 bumps workshop_version on top of v0.108.0's finance/EC ship.
-  assertEqual(fin.version, "0.6.0", "HC-V01070-FIN-MAN-1: finance version");
+  assertTrue("HC-V01070-FIN-MAN-1: finance version 0.6.x", /^0\.6\.\d+$/.test(fin.version), `got: ${fin.version}`);
   assertEqual(ec.version, "0.7.1", "HC-V01070-FIN-MAN-1: entity-create version");
-  assertEqual(ws.workshop_version, "0.109.0", "HC-V01070-FIN-MAN-1: workshop_version");
+  assertEqual(ws.workshop_version, "0.110.0", "HC-V01070-FIN-MAN-1: workshop_version");
   assertTrue("HC-V01070-FIN-MAN-1: finance depends_on entity-create >=0.7.0",
     fin.depends_on.some(d => d.name === "entity-create" && /0\.7/.test(d.range)));
 }
@@ -12454,22 +12457,22 @@ async function caseV01080FinanceVersionBump() {
   console.log("\n--- Case V01080-FV: finance 0.6.0 + workshop manifest pin ---");
   const finance = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
-  assertTrue("V01080-FV-1: finance.version === 0.6.0",
-    finance.version === "0.6.0", `got: ${finance.version}`);
+  assertTrue("V01080-FV-1: finance.version 0.6.x",
+    /^0\.6\.\d+$/.test(finance.version), `got: ${finance.version}`);
   assertTrue("V01080-FV-2: description references v0.6.0",
     /v0\.6\.0/.test(finance.description));
 
   const workshop = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
   const fbp = (workshop.blueprints || []).find(b => b.name === "finance");
-  assertTrue("V01080-FV-3: workshop manifest pin finance === 0.6.0",
-    fbp && fbp.version === "0.6.0", `got: ${fbp?.version}`);
+  assertTrue("V01080-FV-3: workshop manifest pin finance 0.6.x",
+    fbp && /^0\.6\.\d+$/.test(fbp.version), `got: ${fbp?.version}`);
   const ec = (workshop.mechanisms || []).find(m => m.name === "entity-create");
   assertTrue("V01080-FV-4: workshop manifest pin entity-create === 0.7.1",
     ec && ec.version === "0.7.1", `got: ${ec?.version}`);
   // v0.109.0 supersedes 0.108.0: workshop bumped again for projects-visual-overhaul.
   assertTrue("V01080-FV-5: workshop_version === 0.109.0 (v0.109.0 supersedes the v0.108.0 baseline this case originally pinned)",
-    workshop.workshop_version === "0.109.0", `got: ${workshop.workshop_version}`);
+    workshop.workshop_version === "0.110.0", `got: ${workshop.workshop_version}`);
 }
 
 async function caseV01080FinanceNewEntityButtonDebt() {
@@ -12518,6 +12521,89 @@ async function caseV01080FinanceCustomJsClasses() {
     assertTrue(`V01080-CJS-added-${added}: ${added} present in customjs_classes`,
       cls.includes(added));
   }
+}
+
+// v0.110.0 — installer healing MINOR. 4 items:
+//   1. applyFinanceHubsRepair — heals stale pre-CF-3 finance hub bodies
+//   2. applyOrphanedHelperCleanup — removes obsolete *.js + *.js.bak files
+//   3. applyFinanceDebtScaffolding extension — auto-scaffolds Debt-*.md per Defaults row
+//   4. Project blueprint template sentinels (doc-note, section-hub, sub-section-hub)
+async function caseV0110FinanceHubsRepair() {
+  console.log("\n--- Case V0110-FHR: applyFinanceHubsRepair shipped + wired ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
+  assertTrue("V0110-FHR-1: function defined",
+    /async function applyFinanceHubsRepair\(/.test(src));
+  assertTrue("V0110-FHR-2: orchestrator calls it",
+    /await applyFinanceHubsRepair\(tp,\s*manifest/.test(src));
+  assertTrue("V0110-FHR-3: module.exports declares it",
+    /module\.exports\.applyFinanceHubsRepair\s*=\s*applyFinanceHubsRepair/.test(src));
+  assertTrue("V0110-FHR-4: hub body templates dict declared",
+    /FINANCE_HUB_BODY_TEMPLATES/.test(src));
+  assertTrue("V0110-FHR-5: detection via FinanceHubActions presence",
+    /customJS\\\\\.FinanceHubActions\\\\\.render/.test(src) || /customJS\\.FinanceHubActions\\.render/.test(src));
+}
+
+async function caseV0110OrphanedHelperCleanup() {
+  console.log("\n--- Case V0110-ORPH: applyOrphanedHelperCleanup shipped + wired ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
+  assertTrue("V0110-ORPH-1: function defined",
+    /async function applyOrphanedHelperCleanup\(/.test(src));
+  assertTrue("V0110-ORPH-2: top-level install calls it",
+    /await applyOrphanedHelperCleanup\(tp,\s*mech/.test(src));
+  assertTrue("V0110-ORPH-3: module.exports declares it",
+    /module\.exports\.applyOrphanedHelperCleanup\s*=\s*applyOrphanedHelperCleanup/.test(src));
+  assertTrue("V0110-ORPH-4: KNOWN_ORPHANS lists 3 NavButtons files",
+    /budget-nav-buttons\.js/.test(src) &&
+    /paycheck-nav-buttons\.js/.test(src) &&
+    /invoice-nav-buttons\.js/.test(src));
+  assertTrue("V0110-ORPH-5: deletes *.js.bak siblings recursively",
+    /\.js\.bak/.test(src) && /_walkAndDeleteBaks/.test(src));
+}
+
+async function caseV0110FinanceDebtAutoScaffold() {
+  console.log("\n--- Case V0110-FDS-AUTO: applyFinanceDebtScaffolding auto-scaffolds Debt-*.md per Defaults row ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
+  assertTrue("V0110-FDS-AUTO-1: iterates debts[] from defaults",
+    /defaultsFm\?\.debts|fm\?\.debts|defaults.*debts/.test(src));
+  assertTrue("V0110-FDS-AUTO-2: slugifies name for path",
+    /Debt-\$\{slug\}/.test(src) || /replace\(\/\\\\s\+\/g/.test(src));
+  assertTrue("V0110-FDS-AUTO-3: emits install-seed balance_history row",
+    /install-seed/.test(src) && /balance_history/.test(src));
+  assertTrue("V0110-FDS-AUTO-4: create-if-absent semantics (entitiesPreserved counter)",
+    /entitiesPreserved/.test(src));
+}
+
+async function caseV0110ProjectTemplateSentinels() {
+  console.log("\n--- Case V0110-PROJ-SENT: project Docs Hub + Section Hub templates carry entity-create sentinels ---");
+  const docsHub = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/project/templates/Docs Hub.md"), "utf8");
+  const sectionHub = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/project/templates/Section Hub.md"), "utf8");
+  assertTrue("V0110-PROJ-SENT-1: Docs Hub.md has // entity-create:doc-note sentinel",
+    /\/\/\s*entity-create:doc-note/.test(docsHub));
+  assertTrue("V0110-PROJ-SENT-2: Section Hub.md has // entity-create:section-hub sentinel",
+    /\/\/\s*entity-create:section-hub/.test(sectionHub));
+  assertTrue("V0110-PROJ-SENT-3: Section Hub.md has // entity-create:sub-section-hub sentinel",
+    /\/\/\s*entity-create:sub-section-hub/.test(sectionHub));
+}
+
+async function caseV0110VersionBump() {
+  console.log("\n--- Case V0110-VER: workshop 0.110.0 + finance 0.6.1 + project 1.21.1 ---");
+  const ws = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
+  assertTrue("V0110-VER-1: workshop_version === 0.110.0",
+    ws.workshop_version === "0.110.0", `got: ${ws.workshop_version}`);
+  const fbp = (ws.blueprints || []).find(b => b.name === "finance");
+  assertTrue("V0110-VER-2: finance pin === 0.6.1",
+    fbp && fbp.version === "0.6.1", `got: ${fbp?.version}`);
+  const pbp = (ws.blueprints || []).find(b => b.name === "project");
+  assertTrue("V0110-VER-3: project pin === 1.21.1",
+    pbp && pbp.version === "1.21.1", `got: ${pbp?.version}`);
+  const fin = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
+  assertTrue("V0110-VER-4: finance manifest version === 0.6.1",
+    fin.version === "0.6.1", `got: ${fin.version}`);
+  const proj = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/manifest.json"), "utf8"));
+  assertTrue("V0110-VER-5: project manifest version === 1.21.1",
+    proj.version === "1.21.1", `got: ${proj.version}`);
 }
 
 // v0.5.3 CF-3 — applyFinancePaycheckBodyMigration (PaycheckSummary block
@@ -13508,6 +13594,13 @@ async function caseV01090Ds1EntityTypeOpt() {
   await caseV01080FinanceNewEntityButtonDebt();
   await caseV01080FinanceRuleFragmentsExpanded();
   await caseV01080FinanceCustomJsClasses();
+
+  // v0.110.0 — installer healing MINOR
+  await caseV0110FinanceHubsRepair();
+  await caseV0110OrphanedHelperCleanup();
+  await caseV0110FinanceDebtAutoScaffold();
+  await caseV0110ProjectTemplateSentinels();
+  await caseV0110VersionBump();
 
   // v0.65.0 HC-V065-RUN-NOTE: write-run-note-* sub-skill lint
   {
@@ -14737,10 +14830,10 @@ async function caseV01090Ds1EntityTypeOpt() {
       // NOTE: top-level WORKSHOP at line 29 = path.resolve(__dirname, "../..") = workshop ROOT
       // (distinct from the local WORKSHOP inside caseHCV0891Versions which is platform/).
       const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
-      assertTrue("HC-V0900-VERSION-A: package.json version === '0.93.3'", pkg.version === "0.109.0");
+      assertTrue("HC-V0900-VERSION-A: package.json version === '0.93.3'", pkg.version === "0.110.0");
       const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
       assertTrue("HC-V0900-VERSION-B: platform/manifest.json workshop_version === '0.93.3'",
-        platMan.workshop_version === "0.109.0");
+        platMan.workshop_version === "0.110.0");
       const coworkMan = JSON.parse(fs.readFileSync(
         path.join(WORKSHOP, "platform/blueprints/cowork/manifest.json"), "utf8"));
       assertTrue("HC-V0900-VERSION-C: cowork manifest version === '0.31.0'",
@@ -15716,12 +15809,12 @@ type: cowork-microscope
   try {
     const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
     assertTrue("HC-V0920-VERSION-A1: workshop_version === 0.93.3",
-      platMan.workshop_version === "0.109.0");
+      platMan.workshop_version === "0.110.0");
     assertTrue("HC-V0920-VERSION-A2: blueprints[].cowork.version === 0.31.2",
       platMan.blueprints.find(b => b.name === "cowork").version === "0.40.0");
     const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
     assertTrue("HC-V0920-VERSION-A3: package.json version === 0.93.3",
-      pkg.version === "0.109.0");
+      pkg.version === "0.110.0");
     const workshopSub = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "ranch/platform-subscription.json"), "utf8"));
     assertTrue("HC-V0920-VERSION-A4: workshop subscription cowork pin === 0.31.0",
       workshopSub.blueprints.find(b => b.name === "cowork").version === "0.40.0");
@@ -15993,12 +16086,12 @@ type: cowork-microscope
   try {
     const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
     assertTrue("HC-V0930-VERSION-A1: workshop_version === 0.93.3",
-      platMan.workshop_version === "0.109.0");
+      platMan.workshop_version === "0.110.0");
     assertTrue("HC-V0930-VERSION-A2: blueprints[].cowork.version === 0.31.2",
       platMan.blueprints.find(b => b.name === "cowork").version === "0.40.0");
     const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
     assertTrue("HC-V0930-VERSION-A3: package.json version === 0.93.3",
-      pkg.version === "0.109.0");
+      pkg.version === "0.110.0");
     const workshopSub = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "ranch/platform-subscription.json"), "utf8"));
     assertTrue("HC-V0930-VERSION-A4: workshop subscription cowork pin === 0.31.1",
       workshopSub.blueprints.find(b => b.name === "cowork").version === "0.40.0");
@@ -16100,12 +16193,12 @@ type: cowork-microscope
   try {
     const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
     assertTrue("HC-V0931-VERSION-D1: workshop_version === 0.93.3",
-      platMan.workshop_version === "0.109.0");
+      platMan.workshop_version === "0.110.0");
     assertTrue("HC-V0931-VERSION-D2: blueprints[].cowork.version === 0.31.2",
       platMan.blueprints.find(b => b.name === "cowork").version === "0.40.0");
     const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
     assertTrue("HC-V0931-VERSION-D3: package.json version === 0.93.3",
-      pkg.version === "0.109.0");
+      pkg.version === "0.110.0");
     const coworkMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/cowork/manifest.json"), "utf8"));
     assertTrue("HC-V0931-VERSION-D4: cowork manifest.version === 0.31.1",
       coworkMan.version === "0.40.0");

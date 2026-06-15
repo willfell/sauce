@@ -1109,6 +1109,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyDocNoteBreadcrumbMarkerCleanup(tp, mech, variables, history, git); // NEW v0.109.0 S8 — strips legacy <!-- breadcrumb-v1.17.0 --> markers from doc-notes (block preserved; new idempotency guard inside _migrateDocNote uses the class invocation substring)
   await applyProjectSectionsCloseRepair(tp, mech, variables, history, git);    // NEW v0.103.0.1 — fixes the regex-induced -"[[--]]" damage from v0.103.0 deploy
   await applyFinanceMigrations(tp, mech, variables, history, git);             // NEW v0.107.0 S2 — finance defaults scaffolding (create-if-absent) + categories group backfill (append-only + .sauce-backup snapshot)
+  await applyOrphanedHelperCleanup(tp, mech, variables, history, git);         // NEW v0.110.0 — deletes obsolete *.js and *.js.bak helper files left on disk after manifest removals
   await applyExternalPluginInstall(tp, mech, adapter.basePath || (typeof adapter.getBasePath === "function" ? adapter.getBasePath() : null), workshopPath, history, git);  // NEW v0.94.0 — install missing
   await applyExternalPlugins(tp, mech, history, git);
   await scaffoldFoundationalPluginData(tp, mech, workshopPath, variables, history, git);  // NEW v0.26.0
@@ -3960,6 +3961,155 @@ async function applyFinanceMigrations(tp, manifest, variables, history, git) {
   await applyFinancePaycheckBodyMigration(tp, manifest, variables, history, git);        // CF-3 v0.107.0
   await applyFinancePaycheckDefaultsDebtLinking(tp, manifest, variables, history, git);  // NEW v0.108.0
   await applyFinanceNavRowMigration(tp, manifest, variables, history, git);              // NEW v0.108.0 - runs LAST
+  await applyFinanceHubsRepair(tp, manifest, variables, history, git);                    // NEW v0.110.0 — heals stale pre-CF-3 hub bodies
+}
+
+// applyFinanceHubsRepair — v0.110.0 (finance 0.6.1). Heals consumer vaults
+// whose Finance/Budgets/Paychecks/Invoices hub bodies pre-date CF-3 v0.107.0
+// (the file-install step is create-if-absent, so consumers stuck with pre-CF-3
+// hubs never got the FinanceHubActions consolidated row). Detection: file
+// missing customJS.FinanceHubActions reference => stale. Action: rewrite body
+// to canonical shape, preserving the existing frontmatter block verbatim.
+// Idempotent — files already using FinanceHubActions are skipped. Per-file
+// .sauce-backup snapshot before write. Failure-loud per-file.
+const FINANCE_HUB_BODY_TEMPLATES = {
+  "spice/finance/Finance.md": "\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait customJS.FinanceHubActions.render(dv, { here: \"finance\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceHubCards\" });\n```\n",
+  "spice/finance/budgets/Budgets.md": "\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\n// entity-create:budget — installer-managed; do not delete this comment\nawait customJS.FinanceHubActions.render(dv, {\n  here: \"budgets\",\n  instance: \"budget\",\n  defaultsPath: \"spice/finance/Budget Defaults.md\"\n});\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"BudgetsCards\" });\n```\n",
+  "spice/finance/paychecks/Paychecks.md": "\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\n// entity-create:paycheck — installer-managed; do not delete this comment\nawait customJS.FinanceHubActions.render(dv, {\n  here: \"paychecks\",\n  instance: \"paycheck\",\n  defaultsPath: \"spice/finance/Paycheck Defaults.md\"\n});\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PaychecksCards\" });\n```\n",
+  "spice/finance/invoices/Invoices.md": "\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\n// entity-create:invoice — installer-managed; do not delete this comment\nawait customJS.FinanceHubActions.render(dv, {\n  here: \"invoices\",\n  instance: \"invoice\"\n});\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"InvoicesCards\" });\n```\n",
+};
+
+async function applyFinanceHubsRepair(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "finance") return;
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  let repaired = 0;
+  let alreadyCanonical = 0;
+  let absent = 0;
+
+  for (const [hubPath, canonicalBody] of Object.entries(FINANCE_HUB_BODY_TEMPLATES)) {
+    try {
+      if (!(await adapter.exists(hubPath))) { absent++; continue; }
+      const existing = await adapter.read(hubPath);
+      if (/customJS\.FinanceHubActions\.render/.test(existing)) {
+        alreadyCanonical++;
+        continue;
+      }
+      // Stale — preserve frontmatter, rewrite body.
+      const fmMatch = existing.match(/^(---\n[\s\S]*?\n---\n)/);
+      const fm = fmMatch ? fmMatch[1] : "";
+      const newContent = fm + canonicalBody;
+      // Snapshot before write
+      const backupPath = `.sauce-backup/${ts}/${hubPath}`;
+      const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+      try { await adapter.mkdir(backupParent); } catch (_e) { /* already exists */ }
+      try { await adapter.write(backupPath, existing); } catch (_e) { /* snapshot is best-effort */ }
+      await adapter.write(hubPath, newContent);
+      repaired++;
+      history?.push({ event: "info", step: "finance_hubs_repair", name: "finance",
+        action: "repaired", path: hubPath, snapshot: backupPath,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    } catch (e) {
+      history?.push({ event: "warning", step: "finance_hubs_repair", name: "finance",
+        path: hubPath, reason: e.message,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    }
+  }
+
+  history?.push({ event: "info", step: "finance_hubs_repair", name: "finance",
+    summary: { repaired, alreadyCanonical, absent },
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+    completed_at: new Date().toISOString() });
+}
+
+// applyOrphanedHelperCleanup — v0.110.0. Removes obsolete *.js helper files
+// (and their *.js.bak siblings) from consumer ranch/scripts/<blueprint>/
+// directories. The installer's file-install step overwrites existing files
+// and creates new ones, but it does NOT delete files for entries that have
+// been removed from a blueprint's manifest files[]. This step closes that gap.
+//
+// v0.110.0 known orphans:
+//   - finance/budget-nav-buttons.js   (removed in v0.108.0 finance 0.6.0)
+//   - finance/paycheck-nav-buttons.js (removed in v0.108.0 finance 0.6.0)
+//   - finance/invoice-nav-buttons.js  (removed in v0.108.0 finance 0.6.0)
+//
+// Also deletes any *.js.bak file under ranch/scripts/ (they are install backups
+// that lingered after previous overwrites; never canonical, never loaded by
+// CustomJS, but they confuse vault-side inspections).
+//
+// Top-level step (not blueprint-scoped); runs once per install. Failure-loud
+// per file. Idempotent.
+async function applyOrphanedHelperCleanup(tp, mech, variables, history, git) {
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+
+  const KNOWN_ORPHANS = [
+    "ranch/scripts/finance/budget-nav-buttons.js",
+    "ranch/scripts/finance/paycheck-nav-buttons.js",
+    "ranch/scripts/finance/invoice-nav-buttons.js",
+  ];
+
+  let removed = 0;
+  let bakRemoved = 0;
+  let absent = 0;
+
+  // 1. Delete known orphans
+  for (const path of KNOWN_ORPHANS) {
+    try {
+      if (!(await adapter.exists(path))) { absent++; continue; }
+      await adapter.remove(path);
+      removed++;
+      history?.push({ event: "info", step: "orphaned_helper_cleanup", name: "platform",
+        action: "removed_orphan", path,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    } catch (e) {
+      history?.push({ event: "warning", step: "orphaned_helper_cleanup", name: "platform",
+        path, reason: e.message,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    }
+  }
+
+  // 2. Delete *.js.bak files under ranch/scripts/ (recursive walk).
+  async function _walkAndDeleteBaks(dir) {
+    try {
+      const listing = await adapter.list(dir);
+      for (const file of (listing.files || [])) {
+        if (file.endsWith(".js.bak")) {
+          try {
+            await adapter.remove(file);
+            bakRemoved++;
+            history?.push({ event: "info", step: "orphaned_helper_cleanup", name: "platform",
+              action: "removed_bak", path: file,
+              git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+              attempted_at: new Date().toISOString() });
+          } catch (e) {
+            history?.push({ event: "warning", step: "orphaned_helper_cleanup", name: "platform",
+              path: file, reason: e.message,
+              git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+              attempted_at: new Date().toISOString() });
+          }
+        }
+      }
+      for (const sub of (listing.folders || [])) {
+        await _walkAndDeleteBaks(sub);
+      }
+    } catch (_e) { /* dir missing or unreadable — skip */ }
+  }
+
+  if (await adapter.exists("ranch/scripts")) {
+    await _walkAndDeleteBaks("ranch/scripts");
+  }
+
+  history?.push({ event: "info", step: "orphaned_helper_cleanup", name: "platform",
+    summary: { orphanRemoved: removed, orphanAbsent: absent, bakRemoved },
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+    completed_at: new Date().toISOString() });
 }
 
 // applyFinancePaycheckBodyMigration — v0.107.0 CF-3 (finance 0.5.3). Heals
@@ -4469,8 +4619,83 @@ async function applyFinanceDebtScaffolding(tp, manifest, variables, history, git
     }
   }
 
+  // 4. NEW v0.110.0 — iterate Debt Defaults debts[] and create-if-absent each Debt-<slug>.md.
+  // This lets users populate Debt Defaults at any time; the next install auto-scaffolds
+  // entities for any new rows. Existing Debt-*.md files are never overwritten.
+  let entitiesCreated = 0;
+  let entitiesPreserved = 0;
+  try {
+    if (await adapter.exists(debtDefaultsPath)) {
+      const defaultsBody = await adapter.read(debtDefaultsPath);
+      const defaultsFm = _parseFrontmatterStrict(defaultsBody);
+      const debts = Array.isArray(defaultsFm?.debts) ? defaultsFm.debts : [];
+      const todayIso = new Date().toISOString().slice(0, 10);
+      const nowIso = new Date().toISOString();
+      for (const debt of debts) {
+        if (!debt || typeof debt.name !== "string" || debt.name.length === 0) continue;
+        const slug = debt.name.replace(/\s+/g, "-").replace(/[^A-Za-z0-9-]/g, "");
+        if (slug.length === 0) continue;
+        const entityPath = `${debtsRoot}/Debt-${slug}.md`;
+        if (await adapter.exists(entityPath)) { entitiesPreserved++; continue; }
+        const kind = debt.kind || "credit-card";
+        const balance = Number(debt.current_balance) || 0;
+        const limit = debt.credit_limit !== undefined ? Number(debt.credit_limit) : null;
+        const apr = Number(debt.apr) || 0;
+        const minPay = Number(debt.min_payment) || 0;
+        const planned = Number(debt.planned_monthly_payment) || 0;
+        const url = typeof debt.url === "string" ? debt.url : "";
+        const opened = debt.opened_date || null;
+        const entityFm = `---
+type: debt
+kind: ${kind}
+name: ${JSON.stringify(debt.name)}
+current_balance: ${balance}
+${limit !== null ? `credit_limit: ${limit}\n` : ""}apr: ${apr}
+min_payment: ${minPay}
+planned_monthly_payment: ${planned}
+url: ${JSON.stringify(url)}
+opened_date: ${opened === null ? "null" : opened}
+last_updated: ${todayIso}
+balance_history:
+  - { date: ${todayIso}, balance: ${balance}, source: install-seed }
+created_at: "${nowIso}"
+cssclasses:
+  - wide
+---
+
+\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "FinanceNavRow" });
+\`\`\`
+
+<!-- debt-summary-v0.6.0 -->
+\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "DebtSummary" });
+\`\`\`
+`;
+        try {
+          await adapter.write(entityPath, entityFm);
+          entitiesCreated++;
+          history?.push({ event: "info", step: "finance_debt_scaffolding", name: "finance",
+            action: "created_entity", path: entityPath,
+            git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+            attempted_at: new Date().toISOString() });
+        } catch (e) {
+          history?.push({ event: "warning", step: "finance_debt_scaffolding", name: "finance",
+            reason: `write failed for ${entityPath}: ${e.message}`,
+            git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+            attempted_at: new Date().toISOString() });
+        }
+      }
+    }
+  } catch (e) {
+    history?.push({ event: "warning", step: "finance_debt_scaffolding", name: "finance",
+      reason: `defaults iteration failed: ${e.message}`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+      attempted_at: new Date().toISOString() });
+  }
+
   history?.push({ event: "info", step: "finance_debt_scaffolding", name: "finance",
-    summary: { created, preserved },
+    summary: { created, preserved, entitiesCreated, entitiesPreserved },
     git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
     completed_at: new Date().toISOString() });
 }
@@ -10308,6 +10533,9 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports.applyFinanceNavRowMigration = applyFinanceNavRowMigration;
     // v0.109.0 S8 — doc-note breadcrumb marker cleanup (run-install.js CLN-1..2).
     module.exports.applyDocNoteBreadcrumbMarkerCleanup = applyDocNoteBreadcrumbMarkerCleanup;
+    // v0.110.0 — finance hubs repair + orphaned helper cleanup.
+    module.exports.applyFinanceHubsRepair = applyFinanceHubsRepair;
+    module.exports.applyOrphanedHelperCleanup = applyOrphanedHelperCleanup;
     //
     // CF-2: by default, capture run-install.js's stdio (Phase B/C surfaced
     // 2200-line JSON dumps mixed into the user's terminal). We tee the
