@@ -1106,6 +1106,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyDocsHubButtonRepair(tp, mech, variables, history, git);   // NEW v0.100.2 — heals existing broken "+ New Doc" blocks (backfill is create-if-absent)
   await applyProjectSectionsMigration(tp, mech, variables, history, git);   // NEW v0.102.0 S4 — Strategy A auto-migration (flat docs/*.md → docs/knowledge/ + sections[])
   await applyProjectSectionsHubMigration(tp, mech, variables, history, git);   // NEW v0.103.0 S4 — heals v0.102.0 vaults: Docs.md → ProjectDocsIndex + materialize Section Hubs + wikilink frontmatter + breadcrumb injection
+  await applyDocNoteBreadcrumbMarkerCleanup(tp, mech, variables, history, git); // NEW v0.109.0 S8 — strips legacy <!-- breadcrumb-v1.17.0 --> markers from doc-notes (block preserved; new idempotency guard inside _migrateDocNote uses the class invocation substring)
   await applyProjectSectionsCloseRepair(tp, mech, variables, history, git);    // NEW v0.103.0.1 — fixes the regex-induced -"[[--]]" damage from v0.103.0 deploy
   await applyFinanceMigrations(tp, mech, variables, history, git);             // NEW v0.107.0 S2 — finance defaults scaffolding (create-if-absent) + categories group backfill (append-only + .sauce-backup snapshot)
   await applyExternalPluginInstall(tp, mech, adapter.basePath || (typeof adapter.getBasePath === "function" ? adapter.getBasePath() : null), workshopPath, history, git);  // NEW v0.94.0 — install missing
@@ -2704,9 +2705,9 @@ await customJS.SectionHub.render(dv);
 //   2. Add sub_section: "[[<label>]]" frontmatter field when subSectionLabel is
 //      provided AND sub_section: is absent.
 //   3. Inject a breadcrumb dataviewjs block at the top of the body (immediately
-//      after the frontmatter close ---), guarded by a
-//      <!-- breadcrumb-v1.17.0 --> marker for idempotency. Skip if the marker
-//      is already present.
+//      after the frontmatter close ---). v0.109.0 S8: idempotency guard is the
+//      class-invocation substring `class: "Breadcrumb"` itself — the visible
+//      marker comment is gone. Skip if the block invocation is already present.
 // Writes only when the body changed.
 async function _migrateDocNote(adapter, fp, sectionLabel, subSectionLabel) {
   const body = await adapter.read(fp);
@@ -2729,20 +2730,166 @@ async function _migrateDocNote(adapter, fp, sectionLabel, subSectionLabel) {
     }
   }
 
-  // 3. Inject breadcrumb block at top of body (after frontmatter close) if marker absent.
-  if (!out.includes("<!-- breadcrumb-v1.17.0 -->")) {
+  // 3. Inject breadcrumb block at top of body (after frontmatter close) if the
+  // block isn't already present.
+  // v0.109.0 S8 — idempotency proxy is the class invocation substring, not the
+  // legacy <!-- breadcrumb-v1.17.0 --> marker. The marker is stripped post-pass
+  // by applyDocNoteBreadcrumbMarkerCleanup; pre-v0.103 vaults still need the
+  // block injection. The injected block no longer carries the marker line.
+  if (!out.includes('class: "Breadcrumb"')) {
     // Find the closing --- of the leading frontmatter block.
     const fmEnd = out.indexOf("---\n", 4);
     if (fmEnd !== -1) {
       const fmCloseIdx = fmEnd + 4;
       const before = out.slice(0, fmCloseIdx);
       const after = out.slice(fmCloseIdx);
-      const breadcrumbBlock = `\n<!-- breadcrumb-v1.17.0 -->\n\`\`\`dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "Breadcrumb" });\n\`\`\`\n\n---\n`;
+      const breadcrumbBlock = `\n\`\`\`dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "Breadcrumb" });\n\`\`\`\n\n---\n`;
       out = before + breadcrumbBlock + after;
     }
   }
 
   if (out !== body) await adapter.write(fp, out);
+}
+
+// applyDocNoteBreadcrumbMarkerCleanup — v0.109.0 S8. Walks every project's
+// docs/ tree recursively and strips the legacy v0.103.0 marker comment line
+// (<!-- breadcrumb-v1.17.0 -->) from doc-note bodies. Idempotent: when the
+// marker is absent the file is untouched. The Breadcrumb dataviewjs block
+// itself is preserved; only the visible marker comment is removed. After this
+// step runs, _migrateDocNote's new idempotency guard (the class-invocation
+// substring `class: "Breadcrumb"`) ensures the block isn't re-injected.
+//
+// Project-gated (manifest.name === "project"). Failure-loud per-file: wraps
+// each read/write in try/catch and emits warning history events, NEVER throws.
+async function applyDocNoteBreadcrumbMarkerCleanup(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "project") return;
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+
+  const projectsRoot = "spice/projects";
+  if (!(await adapter.exists(projectsRoot))) return;
+
+  let projectsList;
+  try {
+    projectsList = await adapter.list(projectsRoot);
+  } catch (e) {
+    if (history) {
+      history.push({
+        event: "warning",
+        step: "doc_note_breadcrumb_marker_cleanup",
+        name: "project",
+        reason: `list failed for ${projectsRoot}: ${e.message}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  const projectDirs = (projectsList.folders || []).filter((d) => d.split("/").pop() !== "All Projects");
+
+  let cleanedCount = 0;
+  let untouchedCount = 0;
+
+  for (const projectDir of projectDirs) {
+    const docsRoot = `${projectDir}/docs`;
+    try {
+      if (!(await adapter.exists(docsRoot))) continue;
+    } catch (_e) { continue; }
+    let docFiles = [];
+    try {
+      docFiles = await _listAllMarkdownRecursive(adapter, docsRoot);
+    } catch (e) {
+      if (history) {
+        history.push({
+          event: "warning",
+          step: "doc_note_breadcrumb_marker_cleanup",
+          name: "project",
+          reason: `recursive list failed for ${docsRoot}: ${e.message}`,
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      continue;
+    }
+    for (const fp of docFiles) {
+      try {
+        const before = await adapter.read(fp);
+        if (!before.includes("<!-- breadcrumb-v1.17.0 -->")) {
+          untouchedCount += 1;
+          continue;
+        }
+        // Strip the marker line + its trailing newline.
+        // Embedded form (most common — \n<!-- ... -->\n collapses to \n).
+        let after = before.replace(/\n<!-- breadcrumb-v1\.17\.0 -->\n/g, "\n");
+        // Edge case: marker at very start of body (no leading \n).
+        after = after.replace(/^<!-- breadcrumb-v1\.17\.0 -->\n/g, "");
+        if (after !== before) {
+          await adapter.write(fp, after);
+          cleanedCount += 1;
+          if (history) {
+            history.push({
+              event: "info",
+              step: "doc_note_breadcrumb_marker_cleanup",
+              name: "project",
+              target: fp,
+              action: "marker_stripped",
+              git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+              attempted_at: new Date().toISOString(),
+            });
+          }
+        } else {
+          untouchedCount += 1;
+        }
+      } catch (e) {
+        if (history) {
+          history.push({
+            event: "warning",
+            step: "doc_note_breadcrumb_marker_cleanup",
+            name: "project",
+            target: fp,
+            reason: e.message,
+            git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+            attempted_at: new Date().toISOString(),
+          });
+        }
+      }
+    }
+  }
+
+  if (history) {
+    history.push({
+      event: "info",
+      step: "doc_note_breadcrumb_marker_cleanup",
+      name: "project",
+      action: "summary",
+      cleaned_count: cleanedCount,
+      untouched_count: untouchedCount,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+      attempted_at: new Date().toISOString(),
+    });
+  }
+}
+
+// Recursive markdown listing under a folder. Uses adapter.list, which returns
+// { files, folders } per directory.
+async function _listAllMarkdownRecursive(adapter, root) {
+  const out = [];
+  const queue = [root];
+  while (queue.length) {
+    const cur = queue.shift();
+    let listing;
+    try {
+      listing = await adapter.list(cur);
+    } catch (_e) { continue; }
+    for (const f of (listing.files || [])) {
+      if (f.endsWith(".md")) out.push(f);
+    }
+    for (const sub of (listing.folders || [])) {
+      queue.push(sub);
+    }
+  }
+  return out;
 }
 
 // _migrateProjectSectionsToWikilinks — pure string transform on project body.
@@ -10159,6 +10306,8 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports.applyFinanceBudgetGroupSeed = applyFinanceBudgetGroupSeed;
     module.exports.applyFinancePaycheckDefaultsDebtLinking = applyFinancePaycheckDefaultsDebtLinking;
     module.exports.applyFinanceNavRowMigration = applyFinanceNavRowMigration;
+    // v0.109.0 S8 — doc-note breadcrumb marker cleanup (run-install.js CLN-1..2).
+    module.exports.applyDocNoteBreadcrumbMarkerCleanup = applyDocNoteBreadcrumbMarkerCleanup;
     //
     // CF-2: by default, capture run-install.js's stdio (Phase B/C surfaced
     // 2200-line JSON dumps mixed into the user's terminal). We tee the

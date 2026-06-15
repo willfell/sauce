@@ -19,6 +19,8 @@ const _rewriteWikiToDocsBody = installModule._rewriteWikiToDocsBody;
 // form → canonical EntityCreate.render). Shares this harness's adapter stub.
 const applyDocsHubButtonRepair = installModule.applyDocsHubButtonRepair;
 const _repairDocsHubButtonBody = installModule._repairDocsHubButtonBody;
+// v0.109.0 S8 — doc-note breadcrumb marker cleanup. Shares the adapter stub.
+const applyDocNoteBreadcrumbMarkerCleanup = installModule.applyDocNoteBreadcrumbMarkerCleanup;
 
 const BROKEN_DOCS_HUB = '---\ntype: docs-hub\nproject_slug: demo\n---\n\n```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });\n```\n\n```dataviewjs\n// entity-create:doc-note — installer-managed; do not delete this comment\nawait dv.view("ranch/views/customjs-guard", { class: "AccentButton", args: [{ id: "doc-note", label: "+ New Doc", icon: "file-plus" }] });\n```\n\n```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "ProjectDocsCards" });\n```\n';
 const CANONICAL_DISPATCH = 'await customJS.EntityCreate.render(dv, { instance: "doc-note" });';
@@ -238,6 +240,68 @@ async function caseDHBR3PureHelper() {
   ok("DHBR-3.3 helper is a no-op on already-canonical input", _repairDocsHubButtonBody(out) === out);
 }
 
+// ---------------------------------------------------------------------------
+// v0.109.0 S8 — applyDocNoteBreadcrumbMarkerCleanup. Walks every project's
+// docs/ tree (recursively, depth-2 deep covers the section-hubs hierarchy)
+// and strips legacy <!-- breadcrumb-v1.17.0 --> markers from doc-note bodies.
+// Block preserved; marker removed; idempotent on re-run.
+// ---------------------------------------------------------------------------
+
+async function caseCLN1MarkerStripped() {
+  console.log("\n--- Case CLN-1: marker stripped + block preserved + idempotent on re-run ---");
+  const bodyWithMarker = `---\ntype: doc-note\nproject_slug: foo\n---\n\n<!-- breadcrumb-v1.17.0 -->\n\`\`\`dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "Breadcrumb" });\n\`\`\`\n\n---\n\nBody text here.\n`;
+  const adapter = makeAdapter({
+    "spice/projects/foo/Foo.md": '---\ntype: project\nname: "Foo"\n---\nbody',
+    "spice/projects/foo/docs/Docs.md": '---\ntype: docs-hub\n---\nhub body',
+    "spice/projects/foo/docs/knowledge/Knowledge.md": '---\ntype: section-hub\n---\nsh body',
+    "spice/projects/foo/docs/knowledge/Some Doc.md": bodyWithMarker,
+  });
+  const tp = { app: { vault: { adapter } } };
+  const history = [];
+  await applyDocNoteBreadcrumbMarkerCleanup(tp, mockManifest, mockVariables, history, mockGit);
+
+  const after = await adapter.read("spice/projects/foo/docs/knowledge/Some Doc.md");
+  ok("CLN-1.1 marker line stripped", !after.includes("<!-- breadcrumb-v1.17.0 -->"));
+  ok("CLN-1.2 breadcrumb block preserved", after.includes('class: "Breadcrumb"'));
+  ok("CLN-1.3 no quadruple newline pileup",  !/\n\n\n\n/.test(after));
+
+  // Re-run: idempotent.
+  await applyDocNoteBreadcrumbMarkerCleanup(tp, mockManifest, mockVariables, history, mockGit);
+  const afterTwice = await adapter.read("spice/projects/foo/docs/knowledge/Some Doc.md");
+  ok("CLN-1.4 idempotent on second run", afterTwice === after);
+
+  const summary = history.find((e) => e.step === "doc_note_breadcrumb_marker_cleanup" && e.action === "summary");
+  ok("CLN-1.5 history summary recorded", !!summary && summary.cleaned_count >= 1);
+}
+
+async function caseCLN2NoMarkerNoop() {
+  console.log("\n--- Case CLN-2: no-marker file untouched ---");
+  const clean = `---\ntype: doc-note\n---\n\n\`\`\`dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "Breadcrumb" });\n\`\`\`\n\n---\n\nClean body.\n`;
+  const adapter = makeAdapter({
+    "spice/projects/foo/Foo.md": '---\ntype: project\nname: "Foo"\n---\nbody',
+    "spice/projects/foo/docs/Docs.md": '---\ntype: docs-hub\n---\nhub body',
+    "spice/projects/foo/docs/knowledge/Clean.md": clean,
+  });
+  const tp = { app: { vault: { adapter } } };
+  const history = [];
+  await applyDocNoteBreadcrumbMarkerCleanup(tp, mockManifest, mockVariables, history, mockGit);
+
+  const after = await adapter.read("spice/projects/foo/docs/knowledge/Clean.md");
+  ok("CLN-2.1 no-marker file unchanged", after === clean);
+}
+
+async function caseCLN3MigrateGuardRewrite() {
+  console.log("\n--- Case CLN-3: _migrateDocNote guard uses class invocation substring + drops marker from injected block ---");
+  // Source-text assertions on install.js: marker no longer in injected block; new guard is the class substring.
+  const src = fs.readFileSync(path.join(__dirname, "..", "install.js"), "utf8");
+  ok("CLN-3.1 idempotency guard checks class invocation substring",
+    /!out\.includes\(\s*['"]class:\s*"Breadcrumb"['"]\s*\)/.test(src));
+  // Locate the injected-block constant (named `breadcrumbBlock`).
+  const injected = src.match(/const breadcrumbBlock = `[^`]*`/);
+  ok("CLN-3.2 injected block does not carry the marker line",
+    !!injected && !/breadcrumb-v1\.17\.0/.test(injected[0]));
+}
+
 (async () => {
   await caseWTDMIG1HappyPath();
   await caseWTDMIG2Idempotent();
@@ -246,6 +310,9 @@ async function caseDHBR3PureHelper() {
   await caseDHBR1RepairsBrokenBlock();
   await caseDHBR2IdempotentCanonical();
   await caseDHBR3PureHelper();
+  await caseCLN1MarkerStripped();
+  await caseCLN2NoMarkerNoop();
+  await caseCLN3MigrateGuardRewrite();
   console.log(`\nrun-wiki-to-docs-migration.js: ${passed} pass · ${failed} fail`);
   process.exit(failed === 0 ? 0 : 1);
 })();
