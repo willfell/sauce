@@ -12269,6 +12269,30 @@ async function caseV01070FpbmPaycheckBodyMigration() {
 
 // v0.109.0 — projects visual overhaul. See Docs/plans/2026-06-15-v0.109.0-projects-visual-overhaul-design.md.
 
+// S4 — Docs.md section card metadata.
+async function caseV01090Pdi1MaxMtimeComputed() {
+  console.log("\n--- Case HC-V01090-PDI-1: ProjectDocsIndex section cards compute maxMtime + mostRecentDoc ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/project-docs-index.js"), "utf8");
+  assertTrue("HC-V01090-PDI-1: maxMtime computed per section",
+    /maxMtime/.test(src));
+  assertTrue("HC-V01090-PDI-1: most recent doc captured",
+    /mostRecentDoc/.test(src));
+}
+
+async function caseV01090Pdi2SectionsSortedDesc() {
+  console.log("\n--- Case HC-V01090-PDI-2: section cards sorted by maxMtime desc ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/project-docs-index.js"), "utf8");
+  assertTrue("HC-V01090-PDI-2: sectionPages sorted",
+    /sectionPages\.sort/.test(src));
+}
+
+async function caseV01090Pdi3MetaIncludesUpdated() {
+  console.log("\n--- Case HC-V01090-PDI-3: section card meta carries 'updated' suffix when populated ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/project-docs-index.js"), "utf8");
+  assertTrue("HC-V01090-PDI-3: meta includes 'updated' for populated sections",
+    /["'`]updated /.test(src));
+}
+
 // S3 — ProjectsHubCards adopts DocSearch.
 async function caseV01090Phc1DocSearchInvoked() {
   console.log("\n--- Case HC-V01090-PHC-1: ProjectsHubCards invokes DocSearch ---");
@@ -13020,6 +13044,9 @@ async function caseV01090Ds1EntityTypeOpt() {
   await caseV01090Sl3ManifestRegistered();   // S2
   await caseV01090Phc1DocSearchInvoked();    // S3
   await caseV01090Phc2MatchesAppliedToFilter(); // S3
+  await caseV01090Pdi1MaxMtimeComputed();    // S4
+  await caseV01090Pdi2SectionsSortedDesc();  // S4
+  await caseV01090Pdi3MetaIncludesUpdated(); // S4
   await caseV01070FbbmBudgetBodyMigration();
 
   // v0.5.3 CF-3 — PaycheckSummary + FinanceHubActions + paycheck body migration
