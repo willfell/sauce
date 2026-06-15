@@ -11859,6 +11859,103 @@ async function caseV01070EcSfd5TemplateWinsOnConflict() {
     /(\.length\s*===?\s*0|!\s*\w+\[)/.test(src));
 }
 
+// v0.107.0 — installer migration block: applyFinanceMigrations orchestrator
+// wrapping applyFinanceDefaultsScaffolding (create-if-absent) and
+// applyFinanceCategoriesGroupBackfill (append-only group field + .sauce-backup
+// snapshot before write). Both gated on manifest.name === "finance".
+
+async function caseV01070Fds1OrchestratorPresent() {
+  console.log("\n--- Case HC-V01070-FDS-1: applyFinanceMigrations orchestrator declared ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
+  assertTrue("HC-V01070-FDS-1: applyFinanceMigrations function present",
+    /async\s+function\s+applyFinanceMigrations\s*\(/.test(src));
+  assertTrue("HC-V01070-FDS-1: applyFinanceMigrations called from main install loop",
+    /await\s+applyFinanceMigrations\s*\(/.test(src));
+  assertTrue("HC-V01070-FDS-1: gated on manifest.name === \"finance\"",
+    /manifest\.name\s*===?\s*["']finance["']/.test(src));
+}
+
+async function caseV01070Fds2ScaffoldingCreateIfAbsent() {
+  console.log("\n--- Case HC-V01070-FDS-2: applyFinanceDefaultsScaffolding create-if-absent ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
+  assertTrue("HC-V01070-FDS-2: applyFinanceDefaultsScaffolding function present",
+    /async\s+function\s+applyFinanceDefaultsScaffolding\s*\(/.test(src));
+  // Match either:
+  //   • literal `adapter.exists(...Budget Defaults...)` — when the path is inlined; or
+  //   • `if (!(await adapter.exists(budgetDefaultsPath))) {` shape — when stored
+  //     in a path variable named `budgetDefaultsPath` (our impl).
+  assertTrue("HC-V01070-FDS-2: exists-check guards write",
+    /adapter\.exists\([^)]*Budget Defaults/.test(src) ||
+    /adapter\.exists\(\s*budgetDefaultsPath\s*\)/.test(src) ||
+    /await\s+adapter\.exists\([^)]*defaults[^)]*\.md/i.test(src));
+}
+
+async function caseV01070Fds3BothDefaultsTargets() {
+  console.log("\n--- Case HC-V01070-FDS-3: both Budget Defaults + Paycheck Defaults targets ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
+  assertTrue("HC-V01070-FDS-3: Budget Defaults.md target string",
+    /Budget Defaults\.md/.test(src));
+  assertTrue("HC-V01070-FDS-3: Paycheck Defaults.md target string",
+    /Paycheck Defaults\.md/.test(src));
+  assertTrue("HC-V01070-FDS-3: budget-defaults type in content payload",
+    /budget-defaults/.test(src));
+  assertTrue("HC-V01070-FDS-3: paycheck-defaults type in content payload",
+    /paycheck-defaults/.test(src));
+}
+
+async function caseV01070Fcgb1BackfillPresent() {
+  console.log("\n--- Case HC-V01070-FCGB-1: applyFinanceCategoriesGroupBackfill declared ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
+  assertTrue("HC-V01070-FCGB-1: applyFinanceCategoriesGroupBackfill function present",
+    /async\s+function\s+applyFinanceCategoriesGroupBackfill\s*\(/.test(src));
+  assertTrue("HC-V01070-FCGB-1: walks Budget-*.md files under spice/finance/budgets",
+    /spice\/finance\/budgets/.test(src));
+}
+
+async function caseV01070Fcgb2SnapshotBeforeWrite() {
+  console.log("\n--- Case HC-V01070-FCGB-2: .sauce-backup snapshot precedes any write ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
+  assertTrue("HC-V01070-FCGB-2: .sauce-backup snapshot path used",
+    /\.sauce-backup/.test(src));
+  // Snapshot mechanism: adapter.read source + adapter.write to backup dest is
+  // acceptable; OR fs.copyFileSync. We use adapter.read+write here to match
+  // existing install.js patterns.
+  assertTrue("HC-V01070-FCGB-2: snapshot mechanism (adapter.write into backup path)",
+    /adapter\.write\([^)]*\.sauce-backup/.test(src) || /copyFileSync/.test(src));
+}
+
+async function caseV01070Fcgb3AppendOnlyGuard() {
+  console.log("\n--- Case HC-V01070-FCGB-3: 'Unassigned' fallback group ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
+  assertTrue("HC-V01070-FCGB-3: \"Unassigned\" fallback group present",
+    /["']Unassigned["']/.test(src));
+  assertTrue("HC-V01070-FCGB-3: append-only check (no overwrite when group already set)",
+    /!\s*cat\.group|cat\.group\s*===?\s*undefined|typeof\s+cat\.group\s*===?\s*["']undefined["']/.test(src));
+}
+
+async function caseV01070Fcgb4PerFileFailureLoud() {
+  console.log("\n--- Case HC-V01070-FCGB-4: per-file try/catch + Notice on failure ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
+  // Look for a try/catch block within applyFinanceCategoriesGroupBackfill that
+  // emits a Notice or history warning on failure. We grep for the function start
+  // through to the next async function declaration.
+  const m = src.match(/async\s+function\s+applyFinanceCategoriesGroupBackfill\s*\([^)]*\)\s*\{([\s\S]*?)\n\}/);
+  assertTrue("HC-V01070-FCGB-4: function body matched", m !== null);
+  if (m) {
+    assertTrue("HC-V01070-FCGB-4: try/catch present in body",
+      /try\s*\{[\s\S]*catch\s*\([^)]*\)/.test(m[1]));
+  }
+}
+
+async function caseV01070Fcgb5IdempotentSkip() {
+  console.log("\n--- Case HC-V01070-FCGB-5: idempotent — skip write when nothing changed ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
+  // Look for a change-detection guard so re-runs no-op once all budgets are
+  // backfilled. Accepts a 'changed' boolean, 'needsWrite', or 'modified' flag.
+  assertTrue("HC-V01070-FCGB-5: change-detection guard present",
+    /(let\s+changed\s*=\s*false|needsWrite|let\s+modified\s*=)/.test(src));
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -12503,6 +12600,16 @@ async function caseV01070EcSfd5TemplateWinsOnConflict() {
   await caseV01070EcSfd3PerItemSetMerge();
   await caseV01070EcSfd4CarryArraysCopy();
   await caseV01070EcSfd5TemplateWinsOnConflict();
+
+  // v0.107.0 — installer migration block (applyFinanceMigrations)
+  await caseV01070Fds1OrchestratorPresent();
+  await caseV01070Fds2ScaffoldingCreateIfAbsent();
+  await caseV01070Fds3BothDefaultsTargets();
+  await caseV01070Fcgb1BackfillPresent();
+  await caseV01070Fcgb2SnapshotBeforeWrite();
+  await caseV01070Fcgb3AppendOnlyGuard();
+  await caseV01070Fcgb4PerFileFailureLoud();
+  await caseV01070Fcgb5IdempotentSkip();
 
   // v0.65.0 HC-V065-RUN-NOTE: write-run-note-* sub-skill lint
   {

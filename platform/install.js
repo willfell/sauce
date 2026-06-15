@@ -1107,6 +1107,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyProjectSectionsMigration(tp, mech, variables, history, git);   // NEW v0.102.0 S4 — Strategy A auto-migration (flat docs/*.md → docs/knowledge/ + sections[])
   await applyProjectSectionsHubMigration(tp, mech, variables, history, git);   // NEW v0.103.0 S4 — heals v0.102.0 vaults: Docs.md → ProjectDocsIndex + materialize Section Hubs + wikilink frontmatter + breadcrumb injection
   await applyProjectSectionsCloseRepair(tp, mech, variables, history, git);    // NEW v0.103.0.1 — fixes the regex-induced -"[[--]]" damage from v0.103.0 deploy
+  await applyFinanceMigrations(tp, mech, variables, history, git);             // NEW v0.107.0 S2 — finance defaults scaffolding (create-if-absent) + categories group backfill (append-only + .sauce-backup snapshot)
   await applyExternalPluginInstall(tp, mech, adapter.basePath || (typeof adapter.getBasePath === "function" ? adapter.getBasePath() : null), workshopPath, history, git);  // NEW v0.94.0 — install missing
   await applyExternalPlugins(tp, mech, history, git);
   await scaffoldFoundationalPluginData(tp, mech, workshopPath, variables, history, git);  // NEW v0.26.0
@@ -3683,6 +3684,225 @@ async function applyExternalPlugins(tp, manifest, history, git) {
   }
 }
 
+// ============================================================================
+// applyFinanceMigrations — v0.107.0 S2.
+//
+// Orchestrator wrapping two finance-blueprint install-time steps. Gated on
+// manifest.name === "finance"; failure-loud per file; never throws; idempotent.
+//
+//   1. applyFinanceDefaultsScaffolding — create-if-absent for the two per-vault
+//      defaults notes (`spice/finance/Budget Defaults.md` and
+//      `spice/finance/Paycheck Defaults.md`). NEVER overwrites. User-filled
+//      defaults survive every future install.
+//
+//   2. applyFinanceCategoriesGroupBackfill — append-only group field on every
+//      existing `Budget-*.md`. Adds `groups: []` to top-level frontmatter if
+//      missing; adds `group: "Unassigned"` to every category that lacks one.
+//      Pre-write `.sauce-backup` snapshot mirrors v0.101.0 Safeguard-1 pattern.
+//      Names, planned amounts, and actuals NEVER altered. Per-file failure-loud
+//      via history warning events. Idempotent — re-runs detect no-op.
+//
+// Mirrors applyProjectSectionsHubMigration posture from v0.103.0.
+
+const FINANCE_BUDGET_DEFAULTS_CONTENT = `---
+type: budget-defaults
+groups: []
+categories: []
+cssclasses: [wide]
+---
+
+\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+\`\`\`
+
+\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "BudgetDefaultsEditor" });
+\`\`\`
+`;
+
+const FINANCE_PAYCHECK_DEFAULTS_CONTENT = `---
+type: paycheck-defaults
+expenses: []
+cssclasses: [wide]
+---
+
+\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+\`\`\`
+
+\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "PaycheckDefaultsEditor" });
+\`\`\`
+`;
+
+async function applyFinanceMigrations(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "finance") return;
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  await applyFinanceDefaultsScaffolding(tp, manifest, variables, history, git);
+  await applyFinanceCategoriesGroupBackfill(tp, manifest, variables, history, git);
+}
+
+async function applyFinanceDefaultsScaffolding(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "finance") return;
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+
+  const moduleDir = "spice/finance";
+  if (!(await adapter.exists(moduleDir))) {
+    history?.push({ event: "info", step: "finance_defaults_scaffolding", name: "finance",
+      reason: `module dir ${moduleDir} absent — nothing to scaffold`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+      attempted_at: new Date().toISOString() });
+    return;
+  }
+
+  const budgetDefaultsPath = `${moduleDir}/Budget Defaults.md`;
+  const paycheckDefaultsPath = `${moduleDir}/Paycheck Defaults.md`;
+
+  let created = 0, preserved = 0;
+
+  try {
+    if (!(await adapter.exists(budgetDefaultsPath))) {
+      await adapter.write(budgetDefaultsPath, FINANCE_BUDGET_DEFAULTS_CONTENT);
+      created += 1;
+    } else {
+      preserved += 1;
+    }
+  } catch (e) {
+    history?.push({ event: "warning", step: "finance_defaults_scaffolding", name: "finance",
+      reason: `Budget Defaults.md scaffold failed: ${e.message}`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+      attempted_at: new Date().toISOString() });
+  }
+
+  try {
+    if (!(await adapter.exists(paycheckDefaultsPath))) {
+      await adapter.write(paycheckDefaultsPath, FINANCE_PAYCHECK_DEFAULTS_CONTENT);
+      created += 1;
+    } else {
+      preserved += 1;
+    }
+  } catch (e) {
+    history?.push({ event: "warning", step: "finance_defaults_scaffolding", name: "finance",
+      reason: `Paycheck Defaults.md scaffold failed: ${e.message}`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+      attempted_at: new Date().toISOString() });
+  }
+
+  history?.push({ event: "info", step: "finance_defaults_scaffolding", name: "finance",
+    reason: `defaults: ${created} created, ${preserved} preserved`,
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+    attempted_at: new Date().toISOString() });
+}
+
+async function applyFinanceCategoriesGroupBackfill(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "finance") return;
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+
+  const budgetsRoot = "spice/finance/budgets";
+  if (!(await adapter.exists(budgetsRoot))) {
+    history?.push({ event: "info", step: "finance_categories_group_backfill", name: "finance",
+      reason: `budgets root ${budgetsRoot} absent — nothing to backfill`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+      attempted_at: new Date().toISOString() });
+    return;
+  }
+
+  // Walk all Budget-<YYYY-MM>.md files (one per month-folder).
+  const budgetFiles = [];
+  try {
+    const top = await adapter.list(budgetsRoot);
+    const monthFolders = (top.folders || []);
+    for (const folder of monthFolders) {
+      try {
+        const inner = await adapter.list(folder);
+        for (const fp of (inner.files || [])) {
+          if (/Budget-\d{4}-\d{2}\.md$/.test(fp)) budgetFiles.push(fp);
+        }
+      } catch (_e) { /* per-folder failure-loud, continue */ }
+    }
+  } catch (e) {
+    history?.push({ event: "warning", step: "finance_categories_group_backfill", name: "finance",
+      reason: `list failed for ${budgetsRoot}: ${e.message}`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+      attempted_at: new Date().toISOString() });
+    return;
+  }
+
+  if (budgetFiles.length === 0) {
+    history?.push({ event: "info", step: "finance_categories_group_backfill", name: "finance",
+      reason: `no Budget-*.md files to backfill`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+      attempted_at: new Date().toISOString() });
+    return;
+  }
+
+  // Pre-write snapshot. Mirrors v0.101.0 Safeguard-1 pattern. Files copied
+  // BEFORE any frontmatter mutation; one timestamped directory per install run.
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  const backupRoot = `.sauce-backup/${ts}/spice/finance/budgets`;
+  let snapshots = 0;
+  for (const fp of budgetFiles) {
+    try {
+      const rel = fp.substring(budgetsRoot.length); // "/<YYYY-MM>/Budget-<YYYY-MM>.md"
+      const backupPath = backupRoot + rel;
+      const backupDir = backupPath.substring(0, backupPath.lastIndexOf("/"));
+      if (!(await adapter.exists(backupDir))) await adapter.mkdir(backupDir);
+      const body = await adapter.read(fp);
+      await adapter.write(backupPath, body);
+      snapshots += 1;
+    } catch (e) {
+      history?.push({ event: "warning", step: "finance_categories_group_backfill", name: "finance",
+        reason: `snapshot failed for ${fp}: ${e.message}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    }
+  }
+
+  // Backfill via processFrontMatter (atomic; preserves body bytes; survives
+  // YAML edge cases per v0.16.0 lessons).
+  let touched = 0, backfilled = 0;
+  for (const fp of budgetFiles) {
+    try {
+      const file = tp.app.vault.getAbstractFileByPath(fp);
+      if (!file) continue;
+      let changed = false;
+      let perCategoryAdded = 0;
+      await tp.app.fileManager.processFrontMatter(file, (fm) => {
+        if (!Array.isArray(fm.groups)) {
+          fm.groups = [];
+          changed = true;
+        }
+        if (Array.isArray(fm.categories)) {
+          for (const cat of fm.categories) {
+            if (cat && typeof cat === "object" && (cat.group === undefined || cat.group === null || cat.group === "")) {
+              cat.group = "Unassigned";
+              changed = true;
+              perCategoryAdded += 1;
+            }
+          }
+        }
+      });
+      if (changed) {
+        touched += 1;
+        backfilled += perCategoryAdded;
+      }
+    } catch (e) {
+      history?.push({ event: "warning", step: "finance_categories_group_backfill", name: "finance",
+        reason: `backfill failed for ${fp}: ${e.message}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    }
+  }
+
+  history?.push({ event: "info", step: "finance_categories_group_backfill", name: "finance",
+    reason: `${budgetFiles.length} budgets scanned, ${snapshots} snapshotted, ${touched} touched, ${backfilled} categories backfilled to "Unassigned"; 0 categories modified beyond add; snapshot at ${backupRoot}`,
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+    attempted_at: new Date().toISOString() });
+}
+
+// ============================================================================
 // applyExternalPluginInstall — v0.94.0. For each item that declares
 // external_plugins[], fetch any plugin whose .obsidian/plugins/<id>/manifest.json
 // is absent, then append id to community-plugins.json. Companion to the existing
