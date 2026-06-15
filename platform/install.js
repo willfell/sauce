@@ -4173,6 +4173,7 @@ async function applyFinanceMigrations(tp, manifest, variables, history, git) {
   await applyFinanceNavRowMigration(tp, manifest, variables, history, git);              // NEW v0.108.0
   await applyFinanceNavRowGuardFormMigration(tp, manifest, variables, history, git);     // NEW v0.110.3 — guard-form regression: rewrites class:"BudgetNavButtons"|"PaycheckNavButtons"|"InvoiceNavButtons" guard-form refs missed by v0.108.0's direct-call regex
   await applyFinanceHubFrontmatterHeal(tp, manifest, variables, history, git);           // NEW v0.115.1 — heals corrupted hub frontmatter (dup keys + mangled tag/cssclass values) BEFORE the body repair preserves it
+  await applyFinanceInvoiceWorkspaceNavInjection(tp, manifest, variables, history, git); // NEW v0.115.2 — injects InvoiceWorkspaceNav block + rewrites legacy InvoiceNavButtons -> FinanceNav on every existing Invoice-*.md
   await applyFinanceHubsRepair(tp, manifest, variables, history, git);                    // NEW v0.110.0 — heals stale pre-CF-3 hub bodies (now also strips top-hub FinanceHubActions via v0.110.3 template change)
   await applyFinanceTopHubNavRowDedup(tp, manifest, variables, history, git);             // NEW v0.110.3 — strips FinanceHubActions(here:"finance") block from spice/finance/Finance.md (user feedback: duplicate finance nav section)
   await applyFinanceDefaultsNavRowInjection(tp, manifest, variables, history, git);       // NEW v0.110.3 — injects FinanceNavRow block into Budget/Paycheck/Debt Defaults notes that lack it
@@ -4189,6 +4190,119 @@ async function applyFinanceMigrations(tp, manifest, variables, history, git) {
 // v0.111.0: bodies use the unified context-aware FinanceNav (single-line, no
 // args). Finance.md now ALSO has a FinanceNav block (was missing entirely
 // in earlier templates — the user reported no Debts button on Finance.md).
+// applyFinanceInvoiceWorkspaceNavInjection — v0.115.2 PATCH.
+//
+// Heals existing Invoice-*.md notes by injecting the InvoiceWorkspaceNav
+// dataviewjs block between the FinanceNav block and the FinanceStatus.renderBadge
+// block. Closes a gap reported on the ero v0.115.1 deploy: from an invoice
+// note there was no path to its Time-Log or Board sidecars.
+//
+// Block injected (byte-identical to the manifest invoice inline_body fragment):
+//   <!-- invoice-workspace-nav-v0.9.1 -->
+//   ```dataviewjs
+//   await dv.view("ranch/views/customjs-guard", { class: "InvoiceWorkspaceNav" });
+//   ```
+//
+// Also rewrites legacy `InvoiceNavButtons` invocations to `FinanceNav` in
+// the same pass — a class that was deleted in v0.108.0 but lingered in
+// Invoice Template renders on older consumer vaults (observed in ero).
+//
+// Anchor priority for the InvoiceWorkspaceNav block:
+//   1. marker present  -> no-op (idempotent).
+//   2. FinanceNav block exists -> inject AFTER it.
+//   3. FinanceStatus.renderBadge block exists -> inject BEFORE it.
+//   4. frontmatter close -> inject AFTER it.
+//
+// Headless-safe (adapter.read + regex + adapter.write); .sauce-backup
+// snapshot before write; per-file failure-loud; idempotent.
+function _injectInvoiceWorkspaceNav(body) {
+  const MARKER = "<!-- invoice-workspace-nav-v0.9.1 -->";
+  const BLOCK =
+    MARKER + "\n" +
+    "```dataviewjs\n" +
+    "await dv.view(\"ranch/views/customjs-guard\", { class: \"InvoiceWorkspaceNav\" });\n" +
+    "```\n";
+
+  // First, rewrite legacy InvoiceNavButtons -> FinanceNav (regardless of whether
+  // the workspace-nav block is already present).
+  const legacyNavRe = /class:\s*"InvoiceNavButtons"/g;
+  let rewritten = body.replace(legacyNavRe, 'class: "FinanceNav"');
+
+  // Idempotent guard.
+  if (rewritten.includes(MARKER)) return { body: rewritten, touched: rewritten !== body };
+
+  // Anchor: AFTER FinanceNav block (whole dataviewjs fence ending after `class: "FinanceNav"`).
+  const navBlockRe = /(```dataviewjs\s*\n[^\n]*class:\s*"FinanceNav"[^\n]*\n```\s*\n)/;
+  if (navBlockRe.test(rewritten)) {
+    rewritten = rewritten.replace(navBlockRe, (m) => m + "\n" + BLOCK + "\n");
+    return { body: rewritten, touched: true };
+  }
+  // Anchor: BEFORE FinanceStatus.renderBadge block.
+  const statusBlockRe = /(```dataviewjs\s*\n[^\n]*FinanceStatus\.renderBadge[^\n]*\n```\s*\n)/;
+  if (statusBlockRe.test(rewritten)) {
+    rewritten = rewritten.replace(statusBlockRe, "\n" + BLOCK + "\n$1");
+    return { body: rewritten, touched: true };
+  }
+  // Anchor: after the closing `---\n` of frontmatter.
+  const fmCloseRe = /^---\n[\s\S]*?\n---\n/;
+  if (fmCloseRe.test(rewritten)) {
+    rewritten = rewritten.replace(fmCloseRe, (m) => m + "\n" + BLOCK + "\n");
+    return { body: rewritten, touched: true };
+  }
+  return { body: rewritten, touched: rewritten !== body };
+}
+
+async function applyFinanceInvoiceWorkspaceNavInjection(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "finance") return;
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  let scanned = 0;
+  let touched = 0;
+  let unchanged = 0;
+
+  let invoiceFiles = [];
+  try {
+    const monthDirs = (await adapter.list("spice/finance/invoices")).folders || [];
+    for (const monthDir of monthDirs) {
+      const files = (await adapter.list(monthDir)).files || [];
+      for (const f of files) {
+        if (/\/Invoice-\d{4}-\d{2}\.md$/.test(f)) invoiceFiles.push(f);
+      }
+    }
+  } catch (_e) { /* spice/finance/invoices may not exist on minimal vaults */ }
+
+  for (const invoicePath of invoiceFiles) {
+    try {
+      scanned++;
+      const existing = await adapter.read(invoicePath);
+      const result = _injectInvoiceWorkspaceNav(existing);
+      if (!result.touched) { unchanged++; continue; }
+      const backupPath = `.sauce-backup/${ts}/${invoicePath}`;
+      const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+      try { await adapter.mkdir(backupParent); } catch (_e) { /* already exists */ }
+      try { await adapter.write(backupPath, existing); } catch (_e) { /* snapshot best-effort */ }
+      await adapter.write(invoicePath, result.body);
+      touched++;
+      history?.push({ event: "info", step: "finance_invoice_workspace_nav_injection", name: "finance",
+        action: "injected", path: invoicePath, snapshot: backupPath,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    } catch (e) {
+      history?.push({ event: "warning", step: "finance_invoice_workspace_nav_injection", name: "finance",
+        path: invoicePath, reason: e.message,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    }
+  }
+
+  history?.push({ event: "info", step: "finance_invoice_workspace_nav_injection", name: "finance",
+    summary: { scanned, touched, unchanged },
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+    completed_at: new Date().toISOString() });
+}
+
 // FINANCE_HUB_CANONICAL_TYPES — maps each hub path to its canonical
 // `type` frontmatter value. Used by applyFinanceHubFrontmatterHeal to
 // detect + rewrite corrupted hub frontmatter (Obsidian "Invalid properties"
@@ -11841,6 +11955,8 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports.applyFinanceHubFrontmatterHeal = applyFinanceHubFrontmatterHeal;
     module.exports._detectFinanceHubFrontmatterCorruption = _detectFinanceHubFrontmatterCorruption;
     module.exports._buildCanonicalFinanceHubFrontmatter = _buildCanonicalFinanceHubFrontmatter;
+    module.exports.applyFinanceInvoiceWorkspaceNavInjection = applyFinanceInvoiceWorkspaceNavInjection;
+    module.exports._injectInvoiceWorkspaceNav = _injectInvoiceWorkspaceNav;
     module.exports.applyOrphanedHelperCleanup = applyOrphanedHelperCleanup;
     // v0.110.3 — MonthlyOverview band injection on Budget-YYYY-MM.md
     module.exports.applyFinanceBudgetMonthlyBandInjection = applyFinanceBudgetMonthlyBandInjection;

@@ -16,7 +16,11 @@ await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 ```
 
 ```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "InvoiceNavButtons" });
+await dv.view("ranch/views/customjs-guard", { class: "FinanceNav" });
+```
+
+```dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "InvoiceWorkspaceNav" });
 ```
 
 ```dataviewjs
@@ -26,4 +30,3 @@ await customJS.FinanceStatus.renderBadge(dv, "invoice");
 ```dataviewjs
 await dv.view("ranch/views/customjs-guard", { class: "InvoiceControls" });
 ```
-

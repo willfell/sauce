@@ -1,8 +1,20 @@
 /**
  * FinanceHubSummary — Debt-forward landing widget for spice/finance/Finance.md.
  *
- * Hero: TOTAL DEBT + ZERO-DEBT DATE + weighted APR + monthly attack stats.
- * Secondary tiles (3): this-month budget progress, latest paycheck, open invoices.
+ * Hero (top): debt-forward stat block — TOTAL DEBT (large) · ZERO-DEBT DATE ·
+ * compact sub-stats (weighted APR, monthly attack, monthly interest).
+ * Tile row (below): this-month budget progress · latest paycheck · open invoices.
+ *
+ * v0.115.2 visual cleanup:
+ *   - Tighter hero padding; value/label hierarchy made consistent across
+ *     hero + tiles (uppercase muted label above a numeric value).
+ *   - Sub-stats split into a small grid for scannability rather than a
+ *     single bullet-separated run-on line.
+ *   - Tiles get a hover affordance + accent left-border to telegraph clickability.
+ *   - Latest-paycheck sort routes through FinanceMath._coerceDateString so
+ *     unquoted-YAML paychecks (Luxon DateTime) sort correctly against quoted
+ *     ones (strings). v0.115.1 used inline coercion which only handled
+ *     Luxon; FinanceMath now also covers native Date + moment.
  *
  * Path guard: renders only on spice/finance/Finance.md.
  * CSS root: fhs-root. Embed-deduped. Never writes. Pure derivation.
@@ -19,7 +31,7 @@ class FinanceHubSummary {
         if (page.file.path !== "spice/finance/Finance.md") return;
 
         const root = dv.container.createEl("div", { cls: "fhs-root" });
-        root.style.cssText = "margin: 12px 0 20px;";
+        root.style.cssText = "margin: 14px 0 22px; display: flex; flex-direction: column; gap: 12px;";
 
         this._renderHero(root, dv);
         this._renderTiles(root, dv);
@@ -38,59 +50,74 @@ class FinanceHubSummary {
         return el;
     }
 
-    _sectionWrap(root, cls, extraCss) {
-        const s = root.createEl("div", { cls });
-        s.style.cssText = "padding: 14px 16px; border: 1px solid var(--background-modifier-border); border-radius: 10px; background: var(--background-secondary-alt);" + (extraCss || "");
-        return s;
-    }
-
     // ----------------------------------------------------------------- Hero
 
     _renderHero(root, dv) {
         const debts = customJS.FinanceMath.readDebts(dv);
-        const hero = this._sectionWrap(root, "fhs-hero", " margin-bottom: 14px;");
+        const hero = root.createEl("div", { cls: "fhs-hero" });
+        hero.style.cssText = "padding: 16px 18px; border: 1px solid var(--background-modifier-border); border-radius: 10px; background: var(--background-secondary-alt); display: flex; flex-direction: column; gap: 10px;";
 
         if (!debts || debts.length === 0) {
+            const lab = hero.createEl("div");
+            lab.textContent = "TOTAL DEBT";
+            lab.style.cssText = "font-size: 0.7em; color: var(--text-muted); letter-spacing: 0.08em; font-weight: 600; text-transform: uppercase;";
             this._muted(hero, "No debt tracked.");
             const btn = hero.createEl("button");
-            btn.textContent = "Debts Hub";
-            btn.style.cssText = "margin-top: 8px; font-size: 0.82em; padding: 4px 10px; border-radius: 4px; cursor: pointer; border: 1px solid var(--background-modifier-border); background: var(--background-secondary); color: var(--text-normal);";
-            btn.addEventListener("click", () => {
-                app.workspace.openLinkText("spice/finance/debts/Debts.md", "");
-            });
+            btn.textContent = "Open Debts Hub";
+            btn.style.cssText = "align-self: flex-start; margin-top: 4px; font-size: 0.82em; padding: 5px 12px; border-radius: 6px; cursor: pointer; border: 1px solid var(--background-modifier-border); background: var(--background-secondary); color: var(--text-normal);";
+            btn.addEventListener("click", () => app.workspace.openLinkText("spice/finance/debts/Debts.md", ""));
             return;
         }
 
         const totals = customJS.FinanceMath.debtTotals(debts);
 
-        const totalEl = hero.createEl("div", { cls: "fhs-total-debt" });
-        totalEl.style.cssText = "margin-bottom: 4px;";
-        const totalLab = totalEl.createEl("span");
-        totalLab.textContent = "TOTAL DEBT ";
-        totalLab.style.cssText = "font-size: 0.72em; color: var(--text-muted); letter-spacing: 0.05em; font-weight: 600; text-transform: uppercase;";
-        const totalVal = totalEl.createEl("span");
-        totalVal.textContent = this._fmtMoney(totals.totalBalance);
-        totalVal.style.cssText = "font-size: 1.6em; font-weight: 700; font-variant-numeric: tabular-nums;";
+        // Top row: TOTAL DEBT (large) + ZERO-DEBT DATE (right-aligned).
+        const topRow = hero.createEl("div");
+        topRow.style.cssText = "display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; justify-content: space-between;";
 
-        const zeroEl = hero.createEl("div", { cls: "fhs-zero-date" });
-        zeroEl.style.cssText = "margin-bottom: 10px;";
-        const zeroLab = zeroEl.createEl("span");
-        zeroLab.textContent = "ZERO-DEBT DATE ";
-        zeroLab.style.cssText = "font-size: 0.72em; color: var(--text-muted); letter-spacing: 0.05em; font-weight: 600; text-transform: uppercase;";
-        const zeroVal = zeroEl.createEl("span");
+        const debtBlock = topRow.createEl("div");
+        debtBlock.style.cssText = "display: flex; flex-direction: column; gap: 2px; min-width: 0;";
+        const debtLab = debtBlock.createEl("div");
+        debtLab.textContent = "TOTAL DEBT";
+        debtLab.style.cssText = "font-size: 0.7em; color: var(--text-muted); letter-spacing: 0.08em; font-weight: 600; text-transform: uppercase;";
+        const debtVal = debtBlock.createEl("div");
+        debtVal.textContent = this._fmtMoney(totals.totalBalance);
+        debtVal.style.cssText = "font-size: 1.7em; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.15; color: var(--text-normal);";
+
+        const zeroBlock = topRow.createEl("div");
+        zeroBlock.style.cssText = "display: flex; flex-direction: column; gap: 2px; align-items: flex-end; text-align: right;";
+        const zeroLab = zeroBlock.createEl("div");
+        zeroLab.textContent = "ZERO-DEBT DATE";
+        zeroLab.style.cssText = "font-size: 0.7em; color: var(--text-muted); letter-spacing: 0.08em; font-weight: 600; text-transform: uppercase;";
+        const zeroVal = zeroBlock.createEl("div");
         zeroVal.textContent = totals.zeroDebtDate;
-        zeroVal.style.cssText = "font-size: 1em; font-weight: 500; font-variant-numeric: tabular-nums;";
+        zeroVal.style.cssText = "font-size: 1.05em; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text-normal);";
 
-        const subStats = hero.createEl("div", { cls: "fhs-sub-stats" });
-        subStats.textContent = `Weighted APR ${totals.weightedApr.toFixed(2)}% · Monthly attack ${this._fmtMoney(totals.plannedAttack)} · Monthly interest ${this._fmtMoney(totals.monthlyInterest)}`;
-        subStats.style.cssText = "font-size: 0.82em; color: var(--text-muted); font-variant-numeric: tabular-nums;";
+        // Sub-stats row: weighted APR · monthly attack · monthly interest as a
+        // mini three-cell grid (was a run-on bullet-separated line in v0.115.1).
+        const sub = hero.createEl("div");
+        sub.style.cssText = "display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding-top: 8px; border-top: 1px solid var(--background-modifier-border);";
+
+        const subCell = (label, value) => {
+            const cell = sub.createEl("div");
+            cell.style.cssText = "display: flex; flex-direction: column; gap: 1px; min-width: 0;";
+            const l = cell.createEl("div");
+            l.textContent = label;
+            l.style.cssText = "font-size: 0.62em; color: var(--text-muted); letter-spacing: 0.06em; font-weight: 600; text-transform: uppercase;";
+            const v = cell.createEl("div");
+            v.textContent = value;
+            v.style.cssText = "font-size: 0.92em; font-variant-numeric: tabular-nums; color: var(--text-normal);";
+        };
+        subCell("Weighted APR", `${totals.weightedApr.toFixed(2)}%`);
+        subCell("Monthly attack", this._fmtMoney(totals.plannedAttack));
+        subCell("Monthly interest", this._fmtMoney(totals.monthlyInterest));
     }
 
     // ----------------------------------------------------------------- Tiles
 
     _renderTiles(root, dv) {
         const row = root.createEl("div", { cls: "fhs-tiles" });
-        row.style.cssText = "display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px;";
+        row.style.cssText = "display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px;";
 
         this._renderBudgetTile(row, dv);
         this._renderPaycheckTile(row, dv);
@@ -99,28 +126,30 @@ class FinanceHubSummary {
 
     _makeTile(parent, cls) {
         const tile = parent.createEl("div", { cls });
-        tile.style.cssText = "padding: 10px 12px; border: 1px solid var(--background-modifier-border); border-radius: 8px; cursor: pointer; background: var(--background-secondary);";
+        tile.style.cssText = "padding: 12px 14px; border: 1px solid var(--background-modifier-border); border-left: 3px solid var(--interactive-accent); border-radius: 8px; cursor: pointer; background: var(--background-secondary); display: flex; flex-direction: column; gap: 6px; transition: background-color 0.15s;";
+        tile.addEventListener("mouseenter", () => tile.style.backgroundColor = "var(--background-modifier-hover)");
+        tile.addEventListener("mouseleave", () => tile.style.backgroundColor = "var(--background-secondary)");
         return tile;
     }
 
     _tileLabel(tile, text) {
         const el = tile.createEl("div");
         el.textContent = text;
-        el.style.cssText = "font-size: 0.72em; color: var(--text-muted); letter-spacing: 0.04em; font-weight: 600; text-transform: uppercase; margin-bottom: 4px;";
+        el.style.cssText = "font-size: 0.7em; color: var(--text-muted); letter-spacing: 0.06em; font-weight: 600; text-transform: uppercase;";
         return el;
     }
 
     _tileValue(tile, text) {
         const el = tile.createEl("div");
         el.textContent = text;
-        el.style.cssText = "font-size: 1em; font-weight: 500; font-variant-numeric: tabular-nums; margin-bottom: 4px;";
+        el.style.cssText = "font-size: 1.05em; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text-normal);";
         return el;
     }
 
     _tileMuted(tile, text) {
         const el = tile.createEl("div");
         el.textContent = text;
-        el.style.cssText = "font-size: 0.78em; color: var(--text-muted);";
+        el.style.cssText = "font-size: 0.78em; color: var(--text-muted); font-variant-numeric: tabular-nums;";
         return el;
     }
 
@@ -142,18 +171,18 @@ class FinanceHubSummary {
             const spending = customJS.FinanceMath.monthSpending(budget);
             const pct = totalPlanned > 0 ? Math.round(spending / totalPlanned * 100) : 0;
 
-            this._tileValue(tile, `${this._fmtMoney(spending)} / ${this._fmtMoney(totalPlanned)} (${pct}%)`);
+            this._tileValue(tile, `${this._fmtMoney(spending)} / ${this._fmtMoney(totalPlanned)}`);
 
             const barWrap = tile.createEl("div");
-            barWrap.style.cssText = "height: 4px; background: var(--background-modifier-border); border-radius: 2px; margin-bottom: 6px;";
+            barWrap.style.cssText = "height: 4px; background: var(--background-modifier-border); border-radius: 2px; overflow: hidden;";
             const barFill = barWrap.createEl("div");
             const fillPct = Math.min(100, pct);
             const barColor = pct <= 90 ? "#16a34a" : pct <= 110 ? "#b45309" : "#dc2626";
-            barFill.style.cssText = `height: 100%; width: ${fillPct}%; background: ${barColor}; border-radius: 2px;`;
+            barFill.style.cssText = `height: 100%; width: ${fillPct}%; background: ${barColor};`;
 
             const currentDay = now.getDate();
             const daysInMonth = new Date(year, month, 0).getDate();
-            this._tileMuted(tile, `${currentDay}/${daysInMonth} days in month`);
+            this._tileMuted(tile, `${pct}% spent · day ${currentDay}/${daysInMonth}`);
         }
 
         tile.addEventListener("click", () => {
@@ -175,21 +204,18 @@ class FinanceHubSummary {
         if (allPaychecks.length === 0) {
             this._tileMuted(tile, "No paychecks yet.");
         } else {
+            const FM = customJS.FinanceMath;
             const latest = allPaychecks.slice().sort((a, b) => {
-                const as = (typeof a.pay_period_start === "string") ? a.pay_period_start
-                    : (a.pay_period_start && typeof a.pay_period_start.toISODate === "function")
-                        ? a.pay_period_start.toISODate() : "";
-                const bs = (typeof b.pay_period_start === "string") ? b.pay_period_start
-                    : (b.pay_period_start && typeof b.pay_period_start.toISODate === "function")
-                        ? b.pay_period_start.toISODate() : "";
-                return bs.localeCompare(as);
+                const as = FM._coerceDateString(a.pay_period_start) || "";
+                const bs = FM._coerceDateString(b.pay_period_start) || "";
+                // DESC: latest (largest string) first
+                if (as === bs) return 0;
+                return as < bs ? 1 : -1;
             })[0];
 
-            const startStr = (typeof latest.pay_period_start === "string") ? latest.pay_period_start
-                : (latest.pay_period_start && typeof latest.pay_period_start.toISODate === "function")
-                    ? latest.pay_period_start.toISODate() : String(latest.pay_period_start || "");
+            const startStr = FM._coerceDateString(latest.pay_period_start) || String(latest.pay_period_start || "");
             const amount = typeof latest.paycheck_amount === "number" ? latest.paycheck_amount : 0;
-            this._tileValue(tile, `${this._fmtMoney(amount)}`);
+            this._tileValue(tile, this._fmtMoney(amount));
             this._tileMuted(tile, startStr);
         }
 

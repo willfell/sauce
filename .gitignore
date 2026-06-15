@@ -37,3 +37,4 @@ node_modules/
 
 # Git worktrees (created via /Users/willfellhoelter/.claude/.../using-git-worktrees skill).
 .worktrees/
+.superpowers/

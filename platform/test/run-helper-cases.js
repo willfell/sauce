@@ -13636,13 +13636,14 @@ async function caseV01151HubFrontmatterHealCanonicalBuilder() {
 }
 
 async function caseV01151ManifestsBumped() {
-  console.log("\n--- Case V01151-VER: workshop 0.115.0 -> 0.115.1 PATCH bump ---");
+  console.log("\n--- Case V01151-VER: workshop 0.115.x PATCH range ---");
+  // v0.115.2 widened from === "0.115.1" to /^0.115.\d+$/ pattern (PATCH range).
   const root = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
-  assertTrue("V01151-VER-1: workshop_version === 0.115.1",
-    root.workshop_version === "0.115.1", `got: ${root.workshop_version}`);
+  assertTrue("V01151-VER-1: workshop_version matches 0.115.x",
+    /^0\.115\.\d+$/.test(root.workshop_version), `got: ${root.workshop_version}`);
   const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
-  assertTrue("V01151-VER-2: package.json version === 0.115.1",
-    pkg.version === "0.115.1", `got: ${pkg.version}`);
+  assertTrue("V01151-VER-2: package.json version matches 0.115.x",
+    /^0\.115\.\d+$/.test(pkg.version), `got: ${pkg.version}`);
 }
 
 async function caseV01103InjectMonthlyBandIdempotent() {

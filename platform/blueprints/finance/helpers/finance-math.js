@@ -1,4 +1,34 @@
 class FinanceMath {
+    // ---- date coercion (v0.115.2) ----
+    // Dataview parses unquoted YAML dates (e.g. `pay_period_start: 2026-05-15`)
+    // as Luxon DateTime objects; quoted ones (`"2026-05-15"`) stay strings.
+    // Without coercion, `p.pay_period_start === "2026-05-15"` is false even when
+    // the file's literal value matches — same gotcha v0.114.0 closed in
+    // MonthlyOverview. Coercion accepts string / Luxon DateTime / native Date
+    // / moment and returns canonical strings.
+    _coerceDateString(v) {
+        if (v == null) return null;
+        if (typeof v === "string") return v;
+        if (typeof v.toISODate === "function") {
+            // Luxon DateTime — toISODate() returns "YYYY-MM-DD"
+            const s = v.toISODate();
+            return typeof s === "string" ? s : null;
+        }
+        if (v instanceof Date && !isNaN(v.getTime())) {
+            return v.toISOString().slice(0, 10);
+        }
+        if (typeof v.format === "function") {
+            // moment
+            const s = v.format("YYYY-MM-DD");
+            return typeof s === "string" ? s : null;
+        }
+        return null;
+    }
+    _coerceMonthString(v) {
+        const s = this._coerceDateString(v);
+        return s ? s.slice(0, 7) : null;
+    }
+
     // ---- reads ----
     readDebts(dv) {
         try { return dv.pages('"spice/finance/debts"').where(p => p && p.type === "debt").array(); }
@@ -6,16 +36,21 @@ class FinanceMath {
     }
     readPaychecksForMonth(dv, monthKey) {
         try {
-            return dv.pages('"spice/finance/paychecks"').where(p =>
-                p && p.type === "paycheck" &&
-                typeof p.pay_period_start === "string" &&
-                p.pay_period_start.startsWith(monthKey)).array();
+            return dv.pages('"spice/finance/paychecks"').where(p => {
+                if (!p || p.type !== "paycheck") return false;
+                const s = this._coerceDateString(p.pay_period_start);
+                return typeof s === "string" && s.startsWith(monthKey);
+            }).array();
         } catch (_e) { return []; }
     }
     readBudgetForMonth(dv, monthKey) {
         try {
-            const hits = dv.pages('"spice/finance/budgets"').where(p =>
-                p && p.type === "budget" && p.month === monthKey).array();
+            const hits = dv.pages('"spice/finance/budgets"').where(p => {
+                if (!p || p.type !== "budget") return false;
+                // Accept p.month as string, Luxon DateTime, Date, or moment.
+                const m = this._coerceMonthString(p.month);
+                return m === monthKey;
+            }).array();
             return hits.length ? hits[0] : null;
         } catch (_e) { return null; }
     }
@@ -98,11 +133,13 @@ class FinanceMath {
             let opening = null;
             let closing = null;
             for (const h of hist) {
-                if (!h || typeof h.date !== "string" || typeof h.balance !== "number") continue;
-                if (h.date < first) { if (!opening || h.date > opening.date) opening = h; }
-                if (h.date < lastExclusive) { if (!closing || h.date > closing.date) closing = h; }
+                if (!h || typeof h.balance !== "number") continue;
+                const dateStr = this._coerceDateString(h.date);
+                if (!dateStr) continue;
+                if (dateStr < first) { if (!opening || dateStr > opening._dateStr) opening = Object.assign({}, h, { _dateStr: dateStr }); }
+                if (dateStr < lastExclusive) { if (!closing || dateStr > closing._dateStr) closing = Object.assign({}, h, { _dateStr: dateStr }); }
             }
-            const sig = !!(opening && closing && opening.date !== closing.date);
+            const sig = !!(opening && closing && opening._dateStr !== closing._dateStr);
             const dDelta = sig ? (closing.balance - opening.balance) : 0;
             perDebt.set(d.name || (d.file && d.file.name) || "(unnamed)", {
                 opening: opening ? opening.balance : null,
