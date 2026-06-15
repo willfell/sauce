@@ -1825,10 +1825,15 @@ async function testRWikiHubTemplateBody() {
   const hasSectionsDispatch = /class:\s*["'](?:ProjectDocsSections|ProjectDocsIndex)["']/.test(body)
     || /customJS\.ProjectDocsIndex\.render/.test(body);
   const noLegacyCardsDispatch = !/class:\s*["']ProjectDocsCards["']/.test(body);
-  const noLegacySentinel = !/\/\/\s*entity-create:doc-note/.test(body);
+  // v0.110.3: the entity-create:doc-note sentinel was INTENTIONALLY re-added in
+  // v0.110.0 so injectAccentButtonBlock's verify pass finds an anchor (see
+  // HC-V01020-PROJ-TPL-1c + V0110-PROJ-SENT-1). The original v0.50.0 R-WIKI-1
+  // notion of "no legacy sentinel" was superseded — the sentinel is now a
+  // canonical anchor, not legacy. This assertion was the only test treating it
+  // as legacy and is now coherent with the rest of the suite.
   const noBrokenAccentForm = !/class:\s*["']AccentButton["'],\s*args:\s*\[\{\s*id:\s*["']doc-note["']/.test(body);
-  const allPass = hasSectionsDispatch && noLegacyCardsDispatch && noLegacySentinel && noBrokenAccentForm;
-  console.log(`  hasSectionsDispatch=${hasSectionsDispatch} noLegacyCardsDispatch=${noLegacyCardsDispatch} noLegacySentinel=${noLegacySentinel} noBrokenAccentForm=${noBrokenAccentForm}`);
+  const allPass = hasSectionsDispatch && noLegacyCardsDispatch && noBrokenAccentForm;
+  console.log(`  hasSectionsDispatch=${hasSectionsDispatch} noLegacyCardsDispatch=${noLegacyCardsDispatch} noBrokenAccentForm=${noBrokenAccentForm}`);
   console.log(`  ${allPass ? 'PASS' : 'FAIL'}`);
   return allPass;
 }

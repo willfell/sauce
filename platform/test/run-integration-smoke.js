@@ -402,10 +402,17 @@ withTempHomeAndVault(({ home, vault }) => {
     //
     // v0.103.0 S3 update: ProjectDocsSections is RETIRED from the Docs Hub
     // template — ProjectDocsIndex (the new sections-index landing helper)
-    // takes over. The assertion now checks (a) ProjectDocsIndex OR
-    // ProjectDocsSections is invoked, (b) ProjectDocsCards is GONE,
-    // (c) the standalone entity-create:doc-note sentinel is GONE, and
-    // (d) project_slug is present in frontmatter.
+    // takes over.
+    //
+    // v0.110.3 update: the entity-create:doc-note sentinel was INTENTIONALLY
+    // re-added in v0.110.0 (see HC-V01020-PROJ-TPL-1c + V0110-PROJ-SENT-1
+    // canonical anchor cases) so installer's verify pass finds an anchor.
+    // The "noLegacySentinel" check was the last carry-over of the v0.102.0
+    // intent and is now inconsistent with the rest of the suite. Removed.
+    //
+    // The assertion now checks (a) ProjectDocsIndex OR ProjectDocsSections is
+    // invoked, (b) ProjectDocsCards is GONE, (c) project_slug present in
+    // frontmatter.
     let docsContentOk = true;
     let docsContentDetail = "";
     for (const slug of seededProjectSlugs) {
@@ -415,15 +422,14 @@ withTempHomeAndVault(({ home, vault }) => {
         const hasSections = /class:\s*["'](?:ProjectDocsSections|ProjectDocsIndex)["']/.test(body)
             || /customJS\.ProjectDocsIndex\.render/.test(body);
         const noLegacyCards = !/class:\s*["']ProjectDocsCards["']/.test(body);
-        const noLegacySentinel = !/\/\/\s*entity-create:doc-note/.test(body);
         const hasSlug = new RegExp(`project_slug:\\s*${slug}`).test(body);
-        if (!hasSections || !noLegacyCards || !noLegacySentinel || !hasSlug) {
+        if (!hasSections || !noLegacyCards || !hasSlug) {
             docsContentOk = false;
-            docsContentDetail = `${slug}: sections=${hasSections} noLegacyCards=${noLegacyCards} noLegacySentinel=${noLegacySentinel} slug=${hasSlug}`;
+            docsContentDetail = `${slug}: sections=${hasSections} noLegacyCards=${noLegacyCards} slug=${hasSlug}`;
             break;
         }
     }
-    ok("DOCS-INT-2 materialized Docs.md contains ProjectDocsIndex/Sections + project_slug (no legacy ProjectDocsCards/sentinel)",
+    ok("DOCS-INT-2 materialized Docs.md contains ProjectDocsIndex/Sections + project_slug (no legacy ProjectDocsCards)",
         docsContentOk, docsContentDetail);
 
     // DOCS-INT-3: re-running install does NOT modify existing Docs.md (idempotent).
