@@ -23,8 +23,19 @@ class Breadcrumb {
   async render(dv) {
     const cur = dv.current();
     if (!cur || !cur.file) return;
-    const projectName = this._stripLink(cur.project) || cur.project_name;
-    const projectSlug = cur.project_slug;
+
+    // v0.109.0 S7 — accept path-based fallback when frontmatter doesn't carry
+    // project / project_slug. Map / Board / Task notes don't have those fields;
+    // the file path itself (spice/projects/<slug>/...) is authoritative.
+    let projectName = this._stripLink(cur.project) || cur.project_name;
+    let projectSlug = cur.project_slug;
+    if (!projectName || !projectSlug) {
+      const resolved = this._resolveProjectFromPath(dv, cur.file.path);
+      if (resolved) {
+        projectSlug = projectSlug || resolved.projectSlug;
+        projectName = projectName || resolved.projectName;
+      }
+    }
     if (!projectName || !projectSlug) return;
 
     const parts = [];
@@ -32,7 +43,7 @@ class Breadcrumb {
 
     // Dispatch on p.type (`cur.type` here; the type-branch labels echo the
     // p.type values listed in the header docstring above):
-    //   - project / docs-hub / section-hub / doc-note.
+    //   - project / docs-hub / section-hub / doc-note / map / kanban / task-note.
     if (cur.type === "project") { /* just project */ }
     else if (cur.type === "docs-hub") {
       parts.push(this._currentLabel("Docs"));
@@ -57,11 +68,44 @@ class Breadcrumb {
         }
       }
       parts.push(this._currentLabel(cur.file.name));
+    } else if (cur.type === "map") {
+      // v0.109.0 S7 — Project Map sits one level below the project hub.
+      parts.push(this._currentLabel("Map"));
+    } else if (cur.type === "kanban") {
+      // v0.109.0 S7 — Project Board (the kanban-plugin board) sits one level
+      // below the project hub. cur.type is "kanban" per the v0.106.x conventions.
+      parts.push(this._currentLabel("Board"));
+    } else if (cur.type === "task-note") {
+      // v0.109.0 S7 — Task notes are children of the Project Board. Walking the
+      // task_parent chain isn't worth the complexity here (it can be deep + can
+      // race with the kanban-status-sync helper); the user's natural drill is
+      // Project → Board → Task, so we render that.
+      parts.push(this._link("Board", `spice/projects/${projectSlug}/${projectSlug}-board.md`));
+      parts.push(this._currentLabel(cur.file.name));
     }
 
     const wrap = dv.el("div", "", { cls: "project-breadcrumb" });
     wrap.style.cssText = "font-size: 0.85em; color: var(--text-muted); margin-bottom: 8px;";
     wrap.innerHTML = parts.join(' <span style="opacity:0.5;"> / </span> ');
+  }
+
+  // v0.109.0 S7 — path-based projectSlug + projectName resolver. Used when
+  // frontmatter is missing the project / project_slug fields (Map / Board /
+  // Task notes don't carry them by convention). Returns null when the file
+  // path doesn't sit under spice/projects/<slug>/...
+  _resolveProjectFromPath(dv, filePath) {
+    const m = String(filePath || "").match(/^spice\/projects\/([^\/]+)\//);
+    if (!m) return null;
+    const projectSlug = m[1];
+    try {
+      const hubs = dv.pages(`"spice/projects/${projectSlug}"`)
+        .where((p) => p.type === "project");
+      if (hubs.length > 0) {
+        return { projectSlug, projectName: String(hubs[0].file.name) };
+      }
+    } catch (_e) {}
+    // Fall back to slug-as-name when the hub note isn't discoverable.
+    return { projectSlug, projectName: projectSlug };
   }
 
   // Emit an Obsidian-native wikilink as an anchor with the canonical

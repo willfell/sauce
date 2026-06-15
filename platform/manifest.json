@@ -1,7 +1,7 @@
 {
   "_comment": "Workshop platform manifest. Each mechanism + blueprint has its own version.",
-  "workshop_version": "0.108.0",
-  "date": "2026-06-15",
+  "workshop_version": "0.109.0",
+  "date": "2026-05-23",
   "foundational_plugins": [
     {
       "id": "templater-obsidian"
@@ -156,7 +156,7 @@
     },
     {
       "name": "project",
-      "version": "1.20.0",
+      "version": "1.21.0",
       "path": "blueprints/project"
     },
     {
