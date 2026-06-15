@@ -12269,6 +12269,36 @@ async function caseV01070FpbmPaycheckBodyMigration() {
 
 // v0.109.0 — projects visual overhaul. See Docs/plans/2026-06-15-v0.109.0-projects-visual-overhaul-design.md.
 
+// S2 — SectionLabel primitive.
+async function caseV01090Sl1ClassDefined() {
+  console.log("\n--- Case HC-V01090-SL-1: SectionLabel class defined ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/section-label.js"), "utf8");
+  assertTrue("HC-V01090-SL-1: class SectionLabel declared", /class\s+SectionLabel\s*\{/.test(src));
+  assertTrue("HC-V01090-SL-1: instance render method", /\brender\s*\(\s*dv\s*,\s*opts\s*\)/.test(src));
+}
+
+async function caseV01090Sl2RendersHrAndLabel() {
+  console.log("\n--- Case HC-V01090-SL-2: SectionLabel emits hr + uppercase muted label ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/section-label.js"), "utf8");
+  assertTrue("HC-V01090-SL-2: hr emitted unless opts.top",
+    /createEl\(\s*["']hr["']/.test(src));
+  assertTrue("HC-V01090-SL-2: opts.top branch present",
+    /opts\.top/.test(src));
+  assertTrue("HC-V01090-SL-2: uppercase styling",
+    /text-transform:\s*uppercase/.test(src));
+  assertTrue("HC-V01090-SL-2: muted color",
+    /var\(--text-muted\)/.test(src));
+}
+
+async function caseV01090Sl3ManifestRegistered() {
+  console.log("\n--- Case HC-V01090-SL-3: section-label.js registered in project manifest ---");
+  const mf = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/manifest.json"), "utf8"));
+  const files = mf.files || [];
+  const found = files.find((f) => f.source === "helpers/section-label.js"
+                              && f.dest === "{{scripts_path}}/project/section-label.js");
+  assertTrue("HC-V01090-SL-3: section-label.js registered in manifest files[]", !!found);
+}
+
 // S1 — DocSearch parameterization.
 async function caseV01090Ds1EntityTypeOpt() {
   console.log("\n--- Case HC-V01090-DS-1: DocSearch accepts entityType/placeholder/tagExclude opts ---");
@@ -12966,6 +12996,9 @@ async function caseV01090Ds1EntityTypeOpt() {
   // v0.107.0 CF-2 — body migration on existing budgets
   // v0.109.0 — projects visual overhaul.
   await caseV01090Ds1EntityTypeOpt();        // S1
+  await caseV01090Sl1ClassDefined();         // S2
+  await caseV01090Sl2RendersHrAndLabel();    // S2
+  await caseV01090Sl3ManifestRegistered();   // S2
   await caseV01070FbbmBudgetBodyMigration();
 
   // v0.5.3 CF-3 — PaycheckSummary + FinanceHubActions + paycheck body migration

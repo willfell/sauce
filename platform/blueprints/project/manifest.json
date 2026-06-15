@@ -60,6 +60,7 @@
     { "source": "helpers/breadcrumb.js",                 "dest": "{{scripts_path}}/project/breadcrumb.js" },
     { "source": "helpers/project-docs-index.js",         "dest": "{{scripts_path}}/project/project-docs-index.js" },
     { "source": "helpers/section-hub.js",                "dest": "{{scripts_path}}/project/section-hub.js" },
+    { "source": "helpers/section-label.js",              "dest": "{{scripts_path}}/project/section-label.js" },
     { "source": "templates/Section Hub.md",              "dest": "{{templates_path}}/Template, Section Hub.md" },
     { "source": "helpers/doc-search.js",                  "dest": "{{scripts_path}}/project/doc-search.js" }
   ],
