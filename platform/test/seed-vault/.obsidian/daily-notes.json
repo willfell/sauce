@@ -1,0 +1,6 @@
+{
+  "folder": "spice/daily",
+  "format": "YYYY/MM-MMMM/dddd-YYYY-MM-DD",
+  "template": "ranch/templates/Daily Note.md",
+  "autorun": true
+}

@@ -1,0 +1,316 @@
+---
+name: cowork:bootstrap-vault
+description: Canonical first-run entry point for any Sauce-shape vault hosting cowork. Interactively interviews the user, dynamically introspects installed blueprints + engagement-type registry, materializes per-engagement context dirs + nav-button table on Cowork.md, and emits a 7-section bootstrap report including inline audit-receipt. Phrasings = "bootstrap this vault", "set up cowork", "first-time cowork setup", "onboard this vault to cowork".
+schedule: User-invoked (never cron-scheduled)
+scope: shared
+tags: [cowork, orchestrator, onboarding, bootstrap, engagement-aware]
+---
+
+# cowork:bootstrap-vault
+
+The canonical first-run entry point for any Sauce-shape vault hosting cowork. Replaces the v0.30.0 binary `vault_scope` interview with a dynamic, blueprint-introspecting, engagement-aware flow. Interactively interviews the user one question at a time, probes MCP backends, introspects the engagement-type registry + each installed blueprint's `bootstrap_contributions[]`, materializes per-engagement context directories, renders an engagement × cadence nav-button table on `Cowork.md`, and emits a 7-section bootstrap report with an inline audit receipt. Runs serially (no parallel sub-skill dispatch from this orchestrator body). Idempotent on re-bootstrap via additive-merge semantics — never clobbers existing engagement context files.
+
+## Inputs
+
+```
+{
+  resume_from_step?: number,   // re-bootstrap continues mid-flow if interrupted
+  debug_log?: boolean          // emit per-step Notices for tracing
+}
+```
+
+If `resume_from_step` is set, skip steps `< resume_from_step` and pick up from there (caller is responsible for supplying any state the resumed step needs).
+
+## Pre-flight
+
+1. Use Skill `cowork:check-vault-routing` with `{ required: ["obsidian"], bootstrapped_required: false }`. (NEW input arg `bootstrapped_required` — bootstrap-vault is the ONE skill that runs against an unbootstrapped vault.) If the return is not `"ready"`, emit the following Notice and exit:
+
+   ```
+   cowork:bootstrap-vault aborted -- obsidian MCP unavailable
+   ```
+
+2. Use Skill `cowork:date-context` with `{}`. Capture `context`. If `context.error` exists, emit Notice and exit.
+
+3. Read `<vault>/ranch/platform-installed.json` via `mcp__obsidian__read_note`. If the cowork blueprint is NOT in the `blueprints[]` array, emit Notice `cowork not installed in this vault; add cowork to subscription then run "sauce update" first` and exit.
+
+4. Check for prior bootstrap state via `mcp__obsidian__get_notes_info` on `<vault>/spice/cowork/context/vault-config.md`.
+
+   - **Absent:** fresh bootstrap — continue to step 5 with `prior_state = "fresh"`.
+   - **Present:** read frontmatter via `mcp__obsidian__get_frontmatter`. Parse:
+     - **`engagements[]` present + non-empty:** `prior_state = "re-bootstrap"`. Capture `existing_engagements`. Continue with additive-merge semantics per §3-bis of the design doc.
+     - **`vault_scope` present + `engagements[]` absent:** v0.30.0 legacy state. Emit the following Notice verbatim:
+
+       ```
+       cowork:bootstrap-vault aborted -- detected v0.30.0 vault_scope schema.
+       Migrator not shipped in v0.31.0 (planned for v0.31.x).
+       To proceed now: remove the vault_scope frontmatter from vault-config.md
+       (or delete the file entirely) and re-run bootstrap to perform a fresh interview.
+       Your existing context/*.md files will not be touched.
+       ```
+
+       Exit without writing.
+     - **Neither present:** schema-invalid file. Ask user `vault-config.md exists but doesn't match expected shape; replace? (yes/no)`. `no` → exit. `yes` → `prior_state = "fresh"`, continue.
+
+5. Check for prior bootstrap report at `<vault>/spice/cowork/bootstrap-report.md`. If present, do NOT prompt yet — additive-merge re-runs idempotently replace it. (v0.30.0's prompt-to-replace removed in v0.31.0.)
+
+## Discover (MCP probing — no user interaction)
+
+6. Probe each known MCP backend with one lightweight read; capture `mcp_map`:
+   - gmail: `mcp__claude_ai_Gmail__list_labels` — success → `"connected"`, error → `"missing"`
+   - google-calendar: `mcp__claude_ai_Google_Calendar__list_calendars` — same coding
+   - brex: `mcp__claude_ai_Brex__get_user_myself` — same coding
+   - imessage: no MCP available yet, mark `"unavailable"` unconditionally
+   - obsidian: from step 1, always `"connected"` here
+
+   On any backend missing, emit the exact Notice:
+
+   ```
+   cowork:bootstrap-vault -- <backend> MCP missing; will mark engagement-scoped questions for that backend as skip
+   ```
+
+6.bis. **Auto-detect connected MCPs (NEW v0.96.0).** Before any engagement interview runs (and before context-builder is later invoked per-engagement), enumerate the agent's tool list and call `classifyConnectedKinds({ reachable_namespaces, tools_by_namespace, vault_root })` from `helpers/kind-classifier-helper.js`. Walk every `mcp__<ns>__<tool>` tool name in your current tool inventory; build `reachable_namespaces[]` (deduped) and `tools_by_namespace = { <ns>: [<tool_short_name>, ...] }`. The helper consults `spice/cowork/data/kind-patterns.json` for deterministic namespace + tool-name glob matching and persists per-namespace results in `spice/cowork/data/kind-classifier-cache.json` keyed by `classifier_version`. Capture result shape `{ classified, unclassified, new_since_last_fire, cache_hits }` as `classifier_result`. Pass `classifier_result` INTO context-builder as input so its Section 0 (auto-fill) can pre-populate the per-MCP interview from the classification. Classifier failures are non-fatal — on any throw, set `classifier_result = { classified: [], unclassified: [], new_since_last_fire: [], cache_hits: 0 }` and continue. The final bootstrap report (step 24) shows the auto-detection result (in §1) + the user's overrides (in §2) for transparency.
+
+7. Capture `blueprints_installed = []` from the `blueprints[]` array of platform-installed.json read in step 3.
+
+8. **Load engagement-type registry from materialized path.** List `<vault>/spice/cowork/context/engagement-types/*.json` via `mcp__obsidian__list_files_in_dir`. If the dir is not found (the registry is materialized at install time; an absent dir means the vault has not been installed against a v0.83.0+ workshop), emit Notice `cowork:bootstrap-vault aborted -- spice/cowork/context/engagement-types/ not found; ensure sauce update --bump-pins ran against v0.83.0+ workshop` and exit. If the dir is empty, emit Notice `cowork:bootstrap-vault aborted -- spice/cowork/context/engagement-types/ is empty; ensure sauce update --bump-pins ran against v0.83.0+ workshop` and exit. For each `.json` file, Read + parse; key by `id`. Capture `engagement_types_registry = { <id>: <manifest>, ... }`.
+
+9. **NEW** — Load blueprint bootstrap_contributions:
+   - For each blueprint in `blueprints_installed`:
+     - Read its `manifest.json` from the workshop tree.
+     - If `bootstrap_contributions[]` field is present + non-empty, accumulate into `contributions_registry = { <blueprint>: [...], ... }`.
+     - Absent or empty → passive blueprint, skip.
+
+10. Probe vault surface via `mcp__obsidian__list_directory` at `spice/`. For each `<module>` dir present, shallow `list_directory` to count entries. Capture `vault_surface = { <module>_count, ... }`. (Historically this step also asserted a `[//]: # (COWORK_CALLOUTS)` anchor in the daily template — a vestigial precondition from the v0.45.0 callout-patching surface that v0.65.0's atomic-note write contract retired. Orchestrators now write to `spice/cowork/daily/.../YYYY-MM-DD/<slug>.md` and never patch the daily callout, so the anchor is no longer required; precondition removed in cowork@0.10.2.)
+
+## Interview (interactive — one question at a time)
+
+11. If `prior_state == "re-bootstrap"`, present existing engagements summary table and Ask user:
+
+    ```
+    Found N existing engagement(s): <list of id (type) label>.
+    What would you like to do?
+      (a) Add a new engagement (existing untouched)
+      (b) Update an existing engagement's fields
+      (c) Drop an engagement (requires confirmation)
+      (d) Re-run full interview (existing replaced)
+    ```
+
+    Capture `re_bootstrap_mode`. Drop mode (`c`) requires per-engagement confirmation `Drop engagement '<id>'? This deletes vault-config.md entry only; context dir spice/cowork/context/<id>/ stays untouched. (yes/no)`.
+
+    For fresh state (`prior_state == "fresh"`), skip step 11; flow directly to step 12.
+
+12. Ask user: `How many engagements does this vault host? (1, 2, 3, or "exploring" — add one for now with type=personal-exploring placeholder)`. Capture `engagement_count`.
+
+13. **Per-engagement interview loop.** For each new engagement E (count from step 12, OR the single engagement being updated/added in re-bootstrap modes):
+
+    - **13a.** Ask `Engagement ID (lowercase-hyphens, e.g., "accuris", "ero-acme", "personal"). Must be vault-unique.` Validate against `^[a-z][a-z0-9-]+$` and uniqueness against existing engagements. Re-ask on failure.
+    - **13b.** Ask `Engagement type? Options: <list keys of engagement_types_registry, with labels>`. Validate against `engagement_types_registry`. Re-ask on failure. Capture `E.type`.
+    - **13c.** Compute the field set for E:
+
+      ```
+      fields = engagement_types_registry[E.type].required_fields
+             + engagement_types_registry[E.type].optional_fields
+             + ⋃ {contributions_registry[B].engagement_field_offer : E.type ∈ that offer's consumed_by_types}
+      ```
+
+      Required fields ask without blank-allowed (re-ask on blank). Optional fields ask with blank-allowed (default applies per the offer's `default_value` if any; flag as `USING DEFAULT` for report §5).
+    - **13d.** For each MCP backend marked `connected` in `mcp_map`, ask the engagement-scoped MCP question — but ONLY if the engagement type's `render_aspects` references that backend (or a blueprint's `engagement_field_offer` does). E.g., gmail: `Which gmail label/account does engagement '<id>' use?`. Skip backends whose `render_aspects` are all `"skip"` for this type.
+    - **13e.** Cadence overrides: present `engagement_types_registry[E.type].default_cadences`. Ask user `Override any cadences for engagement '<id>'? (yes/no)`. If yes, walk cadences one at a time and capture overrides.
+    - **13f.** **Anti-echo opt-in (v0.95.1 Y/N1 — Knobs 1 + 2 BUNDLED).** Ask user:
+
+      > `Enable anti-echo memory-drift detection for engagement '<id>'? Adds a 'outside yesterday's frame' callout per daily atomic note AND flags stuck frames across days. (default: no)`
+
+      **Idempotent re-bootstrap default:** if `existing_engagements[E.id].overrides.render_aspects.anti_echo == "include"` AND `existing_engagements[E.id].overrides.tripwire_aspects` already includes `"frame_drift"`, the question defaults to `Y` (current-state Y); otherwise defaults to `N`. Blank input accepts the default.
+
+      - **On Y:** stage TWO writes to `E.overrides` (do NOT touch bundle defaults — overrides are a sparse layer):
+        - `E.overrides.render_aspects.anti_echo: "include"`
+        - `E.overrides.tripwire_aspects: [...engagement_types_registry[E.type].tripwire_aspects, "frame_drift"]` (REPLACE-semantics array; copy the engagement-type's bundle defaults then append `"frame_drift"`; do not duplicate if already present)
+      - **On N:** write NOTHING — leave `E.overrides` untouched so the engagement inherits the engagement-type's bundle defaults verbatim at runtime (render_aspects.anti_echo: "skip"; tripwire_aspects: bundle's default array). The opt-in-everywhere posture (design § 2.5) means default-N preserves pre-v0.95.1 behavior for every engagement.
+
+      Power-user case (Knob 1 only, no Knob 2): documented in the bootstrap-report §5 and About-Cowork prose — user manually edits `vault-config.md` `engagements[].overrides` post-bootstrap to set `render_aspects.anti_echo: "include"` without also adding `"frame_drift"` to `tripwire_aspects`.
+    - **13g.** **Lens-shift opt-in (v0.95.1 Y/N2 — Knob 3 SEPARATE).** Ask user:
+
+      > `Enable weekly cold-perspective morning briefing for engagement '<id>'? Fires a memory-skip MB on Saturday mornings (default 07:00), paired with that day's warm MB on the Daily Hub for empirical anti-echo. (default: no)`
+
+      **Idempotent re-bootstrap default:** if `existing_engagements[E.id].cadences.lens_shift` is currently set (any cron value), the question defaults to `Y`; otherwise defaults to `N`. Blank input accepts the default. (Rationale for the split from Y/N1: Knob 3 doubles MB cost weekly + produces a visible second atomic note — operationally distinct from Knobs 1+2's per-note callout additions, worth its own explicit consent per design § 6.5.)
+
+      - **On Y:** stage ONE write to `E.cadences`:
+        - `E.cadences.lens_shift: { cron: "0 7 * * 6" }` (canonical default — Saturday 07:00)
+      - **On N:** write NOTHING — no `lens_shift` entry appears in `E.cadences`. The default warm-MB cadence on Saturday (governed by `default_cadences.morning`) is unaffected by this answer; only the cold-MB companion is gated by `lens_shift` opt-in.
+    - **13h.** **Preference-learning opt-in (v0.96.0 Y/N3 — Rail L).** Ask user:
+
+      > `Enable preference learning for this engagement? Adds a 'Was today useful?' rating callout to every atomic note; per-kind weights update nightly from your ticks. Atomic-note quality should improve over 1-2 weeks. (default: yes)`
+
+      **Idempotent re-bootstrap default:** if `existing_engagements[E.id].learning_enabled === false`, the question defaults to `N`; otherwise (unset OR `true`) defaults to `Y`. Blank input accepts the default.
+
+      - **On Y:** stage ONE write to `E` (top-level engagement record key, not inside `overrides`):
+        - `E.learning_enabled: true`
+        - No installer change for `learned_weights` — lazy-initialized by `cowork:learn-from-checks` on first post-upgrade fire (per S0.5 mitigation).
+      - **On N:** stage ONE write to `E`:
+        - `E.learning_enabled: false` — composeBody never emits the rating callout; `cowork:learn-from-checks` skips this engagement.
+    - **13i.** Capture engagement E as a full record (id, type, type_schema_version, label, captured field map, cadences, overrides, learning_enabled).
+
+14. Vault-scoped questions (from `contributions_registry` where `vault_question` kind exists): ask once per vault, not per engagement. Capture into the vault-wide substitution map.
+
+15. Ask `Where should I drop the cron-job SKILL.md bodies? Options: (a) print in bootstrap-report only [default]; (b) print AND copy to <vault>/.scratch/cron-bodies/ for easy paste`. Capture `cron_drop_mode`.
+
+## Compose (write files)
+
+16. Accumulate substitution maps:
+    - Vault-wide: vault-question answers (step 14) + vault basename + today's date + `mcp_map`.
+    - Per engagement E: `E.id` + `E.type` + E's captured field map.
+
+17. Write/update `<vault>/spice/cowork/context/vault-config.md`:
+
+    Frontmatter:
+
+    ```yaml
+    type: cowork-vault-config
+    updated: <today>
+    updated_by: cowork:bootstrap-vault
+    cowork_version: 0.2.0
+    schema_version: 1
+    engagements:
+      - id: <id>
+        type: <type>
+        type_schema_version: <from registry>
+        label: <label>
+        ...captured fields...
+        cadences:
+          morning: <bool>
+          midday:  <bool>
+          eod:     <bool>
+          weekly:  <bool>
+          monthly: <bool>
+          # v0.95.1 Knob 3 — present ONLY when user opted in to Y/N2 at step 13g:
+          lens_shift:
+            cron: "0 7 * * 6"   # canonical default — Saturday 07:00
+        # v0.95.0 cowork-spine layered-preferences schema. Present ONLY when
+        # user staged at least one override (e.g., Y/N1 anti-echo opt-in at
+        # step 13f). Sparse — only keys the user overrode appear; everything
+        # else inherits the engagement-type's bundle defaults at runtime.
+        # v0.95.1 Y/N1-driven shape (when user answered Y):
+        overrides:
+          render_aspects:
+            anti_echo: "include"   # Knob 1
+          tripwire_aspects:        # Knob 2 — REPLACES bundle array (per overrides schema)
+            - <each entry from engagement_types_registry[E.type].tripwire_aspects>
+            - "frame_drift"
+      - ...
+    mcp_map:
+      gmail: connected | missing
+      ...
+    ```
+
+    Body: human-readable per-engagement summary block + MCP map block. Re-bootstrap modes: preserve any non-managed body content via patch-merge (use `mcp__obsidian__patch_note` if a fresh write would clobber; use `mcp__obsidian__write_note` for fresh state). The `overrides` and `cadences.lens_shift` keys are managed-region content: bootstrap-vault re-writes them on every run, but never clobbers other body content. User edits to `overrides` (e.g., Knob 1 power-user case adding `render_aspects.anti_echo: "include"` WITHOUT `frame_drift` in `tripwire_aspects`) survive `sauce update` because the installer never touches this canonical path (`<vault>/spice/cowork/context/vault-config.md` is bootstrap-vault-owned, NOT in `files[]`).
+
+18. For each engagement E, ensure the directory `<vault>/spice/cowork/context/<E.id>/` exists. Then for each template file in `engagement-templates/<E.type>/`:
+    - Read the template body from the workshop tree.
+    - Substitute `{{<field>}}` placeholders using E's substitution map.
+    - Unresolved placeholders → leave intact + FLAG for report §5.
+    - Write to `<vault>/spice/cowork/context/<E.id>/<filename>.md` via `mcp__obsidian__write_note`.
+    - **Idempotence (re-bootstrap):** if the target file already exists, do NOT clobber — instead write `<filename>.template.md` alongside so the user can diff + merge by hand.
+
+    Plus apply `context_file_offer` contributions from blueprint manifests: each offer that targets engagement E (type match in `consumed_by_types`) materializes its declared template into the engagement's context dir.
+
+19. Seed (or update) vault-wide files in `<vault>/spice/cowork/context/`:
+    - `active-threads.md` — seed empty schema if absent; preserve if present.
+    - `weekly-snapshot.md` — seed empty schema if absent; preserve if present.
+    - `README.md` — overwrite from `engagement-shared-templates/README.md` (read-only template source).
+    - `obsidian-vault-guide.md` — overwrite from template source.
+
+20. Render the nav-button table on `<vault>/spice/cowork/Cowork.md`:
+    - Header section with a `[!warning]` callout that auto-suppresses (dataviewjs guard: `if (vault-config.md exists && engagements[].length > 0) hide`).
+    - Static markdown table: rows = engagements, columns = supported cadences (union across all engagements).
+    - Each cell = nav-button using `invoke_command` action with `{ command_id: "cowork:<orchestrator-id>", args: { engagement_id: "<id>" } }` (requires nav-buttons@2.6.0 `args` passthrough — N1).
+    - Below the table: dataviewjs block reading recent daily notes for engagement-tagged H2 callouts; surfaces a "Last run" timestamp column per (engagement, cadence) pair.
+
+21. Write `<vault>/.claude/cowork-routing.md` (N3 resolution): NL routing cheat-sheet listing phrasings → skill IDs + engagement-id disambiguation rules. One section per engagement with engagement-aware phrasing examples.
+
+22. Compose cron paste-blocks per (engagement, cadence) pair from the recommended-schedule table in design §3-sexies. If `cron_drop_mode == "b"`, also write each block to `<vault>/.scratch/cron-bodies/<engagement>-<cadence>.md`.
+
+## Audit
+
+23. **NEW** — Run audit inline via `Use Skill cowork:run-audit-receipt` with `{ vault_path: <vault>, workshop_path: <workshop> }`. The sub-skill wraps `node platform/cli/sauce-cli.js audit --vault <vault> --only cowork --format json` via Bash, parses the JSON, and returns `{ status, summary, receipt_lines, raw_violations }`. Capture `audit_receipt`. Embed `receipt_lines` verbatim into report §6.
+
+    Alternative if Bash dispatch is unavailable in skill context (sub-skill returns `status: "unavailable"`): emit a placeholder + run-this-yourself instruction into §6 (degraded mode). Bootstrap continues either way — bootstrap-vault's job is to MATERIALIZE state; the audit surfaces any post-write drift but does not gate completion.
+
+## Report
+
+24. Compose the bootstrap report (7 sections per design §3-octies) and write to `<vault>/spice/cowork/bootstrap-report.md` via `mcp__obsidian__write_note` with frontmatter:
+
+    ```yaml
+    type: cowork-bootstrap-report
+    generated: <today>
+    generated_by: cowork:bootstrap-vault
+    cowork_version: 0.2.0
+    prior_state: fresh | re-bootstrap
+    engagement_count: <N>
+    engagements_summary: [<id (type)>, ...]
+    audit_receipt: pass | fail | warn
+    ```
+
+    Sections:
+
+    - **§1 What I discovered** — `mcp_map` as a table, `vault_surface` stats as a list, blueprints installed, daily-template marker presence (always confirmed by step 10 or we would have exited). v0.96.0 NEW: append a `Kind classifier results` subsection listing `classifier_result.classified` (one row per detected namespace → kind), `classifier_result.unclassified` (namespaces the deterministic classifier could not place; user resolved during per-engagement context-builder runs or skipped), and `classifier_result.new_since_last_fire` (namespaces detected for the first time this run — surfaced as `pending_confirmations[]` to downstream cadences via plan-dispatch).
+    - **§2 Engagements** — per-engagement subsection (id, type, label, captured fields, cadences).
+    - **§3 Cron jobs** — per-engagement table with columns `cadence | schedule | job-name | SKILL.md body` populated from step 22.
+    - **§4 Skipped** — per-(engagement, cadence) one-liner with reason: missing MCP / engagement-type opt-out / user override.
+    - **§5 Unresolved fields** — per engagement, list every `{{...}}` placeholder still unresolved AND every `USING DEFAULT` flag, with the exact `ranch/platform-config.json` `variables` key the user should populate.
+    - **§6 Audit receipt** — verbatim `receipt_lines` from step 23 (or the degraded-mode instruction if Bash was unavailable).
+    - **§7 Manual Obsidian + natural-language parity** — pointer to `spice/cowork/Cowork.md` (nav-button table) + NL phrasing examples (drawn from `.claude/cowork-routing.md` written in step 21) + scheduled cron pointer to §3.
+
+25. Use Skill `cowork:scaffold-timeframes` with `{}`. Capture the receipt as `timeframe_scaffold`. Include it in the final bootstrap report under "Timeframe scaffold" heading: list `created` + `existed` + `missing_prompts` arrays.
+26. **(Bootstrap-only) Emit stub finance snapshot.** First-run readiness aid: write a one-line stub `cowork-finance-snapshot` so the CoworkReadiness panel can render "last runs" rows with at least one entry before any scheduled job has fired. Use Skill `cowork:write-run-note-finance` with `{ engagement: bootstrapped_engagement, date: <today YYYY-MM-DD>, weekday: <today dddd>, month_name: <today MMMM>, body: "(stub finance snapshot emitted by cowork:bootstrap-vault — replace with first real run)", prompt_source: null, warning: "bootstrap_stub" }`. Best-effort: log status; do not fail the bootstrap if the write fails.
+
+## Done
+
+27. Emit final Notice: `Bootstrap complete (<engagement_count> engagement(s)). Open spice/cowork/bootstrap-report.md for next steps.` This orchestrator never patches the daily note and never mutates `active-threads.md` or `weekly-snapshot.md` beyond the empty-schema seed in step 19. Cadenced state writes are owned by the cron-scheduled orchestrators.
+
+## Dependencies
+
+This orchestrator depends on:
+
+- `cowork:check-vault-routing` (extended in S2 with `bootstrapped_required` input)
+- `cowork:date-context` (UNCHANGED from v0.30.0)
+- `cowork:run-audit-receipt` (NEW sub-skill in S2 — wraps audit CLI invocation)
+
+This orchestrator writes to (or seeds):
+
+- `<vault>/spice/cowork/context/vault-config.md` (canonical engagement record)
+- `<vault>/spice/cowork/context/<engagement-id>/<file>.md` (per-engagement materialization)
+- `<vault>/spice/cowork/context/active-threads.md` (seed empty)
+- `<vault>/spice/cowork/context/weekly-snapshot.md` (seed empty)
+- `<vault>/spice/cowork/context/README.md` (overwrite from template)
+- `<vault>/spice/cowork/context/obsidian-vault-guide.md` (overwrite from template)
+- `<vault>/spice/cowork/Cowork.md` (nav-button table + dataviewjs last-run block)
+- `<vault>/.claude/cowork-routing.md` (NL routing cheat-sheet)
+- `<vault>/spice/cowork/bootstrap-report.md` (7-section report)
+
+This orchestrator does NOT write to:
+
+- `<vault>/ranch/platform-installed.json` (installer-owned)
+- `<vault>/ranch/platform-config.json` (user-owned; bootstrap only READS placeholders for the report)
+- `<vault>/.obsidian/*` (per landmine #12 allowlist; bootstrap-vault touches NONE of the allowlisted paths)
+- `<vault>/ranch/templates/Daily Note.md` (daily blueprint owns)
+
+## Error modes
+
+| Mode | Behavior |
+|---|---|
+| `obsidian` MCP missing | Step 1 exits cleanly with Notice. No state written. |
+| `platform-installed.json` lacks cowork | Step 3 exits cleanly with Notice. |
+| v0.30.0 legacy state detected | Step 4 exits cleanly with the detailed Notice. No state mutated. |
+| User-supplied invalid engagement ID | Step 13a re-asks until valid. |
+| User-supplied unregistered engagement type | Step 13b re-asks until valid. |
+| Required field left blank | Step 13c re-asks (required fields cannot default). |
+| Audit (step 23) returns FAIL | Report §6 surfaces the failure verbatim; bootstrap continues — bootstrap-vault's job is to MATERIALIZE state; if audit detects post-write drift, the report makes it visible. User runs corrective action. |
+| Existing context file conflict in re-bootstrap | Step 18 writes alongside (`.template.md`); never clobbers. |
+
+## Outputs
+
+Structured report frontmatter (per step 24) written to `<vault>/spice/cowork/bootstrap-report.md`. Final Notice (per step 25) confirms completion + engagement count.
+
+## Reference
+
+Canonical spec: `Docs/plans/2026-05-11-v0.31.0-bootstrap-vault-skill-spec.md` (spec-locked 2026-05-11). Architectural decisions: `Docs/plans/2026-05-11-v0.31.0-cowork-engagement-model-design.md` (§3-bis through §3-novies). Cycle plan: `Docs/plans/2026-05-11-v0.31.0-cowork-engagement-model-plan.md` (S3).

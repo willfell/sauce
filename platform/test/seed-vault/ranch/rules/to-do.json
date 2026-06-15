@@ -1,0 +1,20 @@
+{
+  "contributions": {
+    "to-do": [
+      {
+        "scope": {
+          "path_glob": "spice/to-do/**/ToDo-*.md"
+        },
+        "extends": "_canonical-vocab",
+        "required_frontmatter": {
+          "type": {
+            "required": true,
+            "type": "string",
+            "equals": "to-do"
+          }
+        },
+        "naming_pattern": "^ToDo-\\d{4}-\\d{2}-\\d{2}\\.md$"
+      }
+    ]
+  }
+}

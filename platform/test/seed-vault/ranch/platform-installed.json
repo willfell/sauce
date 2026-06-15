@@ -1,0 +1,3817 @@
+{
+  "mechanisms": [
+    {
+      "name": "customjs-guard",
+      "version": "1.0.0",
+      "installed_at": "2026-06-15T05:05:37.378Z"
+    },
+    {
+      "name": "validator",
+      "version": "0.3.0",
+      "installed_at": "2026-06-15T05:05:37.582Z"
+    },
+    {
+      "name": "cards",
+      "version": "0.2.6",
+      "installed_at": "2026-06-15T05:05:37.584Z"
+    },
+    {
+      "name": "activity-feed",
+      "version": "0.7.1",
+      "installed_at": "2026-06-15T05:05:37.585Z"
+    },
+    {
+      "name": "kanban-status-sync",
+      "version": "0.2.0",
+      "installed_at": "2026-06-15T05:05:37.586Z"
+    },
+    {
+      "name": "audit",
+      "version": "0.3.0",
+      "installed_at": "2026-06-15T05:05:37.589Z"
+    },
+    {
+      "name": "backlink-panel",
+      "version": "0.1.0",
+      "installed_at": "2026-06-15T05:05:37.589Z"
+    },
+    {
+      "name": "icons",
+      "version": "0.1.1",
+      "installed_at": "2026-06-15T05:05:37.590Z"
+    },
+    {
+      "name": "nav-buttons",
+      "version": "2.7.0",
+      "installed_at": "2026-06-15T05:05:37.591Z"
+    },
+    {
+      "name": "accent-button",
+      "version": "0.1.1",
+      "installed_at": "2026-06-15T05:05:37.592Z"
+    },
+    {
+      "name": "entity-create",
+      "version": "0.7.1",
+      "installed_at": "2026-06-15T05:05:37.593Z"
+    },
+    {
+      "name": "people-rendering",
+      "version": "0.1.0",
+      "installed_at": "2026-06-15T05:05:37.594Z"
+    },
+    {
+      "name": "people-identity",
+      "version": "0.1.0",
+      "installed_at": "2026-06-15T05:05:37.594Z"
+    },
+    {
+      "name": "styling",
+      "version": "0.2.1",
+      "installed_at": "2026-06-15T05:05:37.603Z"
+    },
+    {
+      "name": "convenience",
+      "version": "0.4.1",
+      "installed_at": "2026-06-15T05:05:37.609Z"
+    },
+    {
+      "name": "platform-claude",
+      "version": "0.1.3",
+      "installed_at": "2026-06-15T05:05:37.610Z"
+    },
+    {
+      "name": "smart-connections-bridge",
+      "version": "0.2.0",
+      "installed_at": "2026-06-15T05:05:37.611Z"
+    }
+  ],
+  "blueprints": [
+    {
+      "name": "boards",
+      "version": "0.2.1",
+      "installed_at": "2026-06-15T05:05:37.614Z"
+    },
+    {
+      "name": "daily",
+      "version": "0.13.6",
+      "installed_at": "2026-06-15T05:05:37.617Z"
+    },
+    {
+      "name": "people",
+      "version": "0.6.0",
+      "installed_at": "2026-06-15T05:05:37.621Z",
+      "new_entity_buttons": [
+        {
+          "id": "person",
+          "label": "+ New Person",
+          "icon": "user-plus",
+          "prompts": [
+            {
+              "key": "name",
+              "label": "Name",
+              "type": "string",
+              "required": true,
+              "validate": "safe-filename"
+            }
+          ],
+          "destination": {
+            "folder_prefix": "{{module_directory}}",
+            "filename_prefix": "{{prompts.name}}"
+          },
+          "frontmatter_template": {
+            "type": "person",
+            "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+            "company": "",
+            "location": "",
+            "title": "",
+            "email": "",
+            "website": "",
+            "aliases": [],
+            "phone": "",
+            "tags": []
+          },
+          "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PersonNavButtons\" });\n```\n\n# [[{{prompts.name}}]]\n\n## Notes\n-\n\n## Meetings\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"PeopleRendering\",\n  method: \"renderMentionList\",\n  args: [dv, { mode: \"mentioning_person\", personLink: dv.current().file.link, scopePath: \"spice/meetings\" }, { style: \"cards\", limit: 50 }]\n});\n```\n\n## Daily Mentions\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"PeopleRendering\",\n  method: \"renderMentionList\",\n  args: [dv, { mode: \"mentioning_person\", personLink: dv.current().file.link, scopePath: \"spice/daily\" }, { style: \"list\", limit: 30 }]\n});\n```\n\n## Mentions\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"BacklinkPanel\",\n  method: \"render\",\n  args: [{ entityType: \"person\" }]\n});\n```\n",
+          "render_in": {
+            "kind": "hub",
+            "target_path": "{{module_directory}}/People.md"
+          }
+        }
+      ]
+    },
+    {
+      "name": "cowork",
+      "version": "0.40.0",
+      "installed_at": "2026-06-15T05:05:37.675Z"
+    },
+    {
+      "name": "meetings",
+      "version": "0.8.0",
+      "installed_at": "2026-06-15T05:05:37.678Z",
+      "new_entity_buttons": [
+        {
+          "id": "meeting",
+          "label": "New Meeting",
+          "icon": "users-plus",
+          "prompts": [
+            {
+              "key": "title",
+              "label": "Meeting title",
+              "type": "string",
+              "required": true
+            },
+            {
+              "key": "project",
+              "label": "Project (optional)",
+              "type": "select",
+              "required": false,
+              "options_source": "all_projects",
+              "default": "(none)"
+            }
+          ],
+          "destination": {
+            "folder_prefix": "{{module_directory}}/notes",
+            "folder_date_pattern": "YYYY/MM-MMMM",
+            "filename_prefix": "{{prompts.title}}-",
+            "filename_date_pattern": "YYYY-MM-DD",
+            "filename_suffix": ""
+          },
+          "frontmatter_template": {
+            "date": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+            "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+            "type": "meeting",
+            "summary": "",
+            "attendees": [],
+            "project": "{{prompts.project}}",
+            "people": [],
+            "tags": [],
+            "cssclasses": [
+              "wide"
+            ]
+          },
+          "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n",
+          "render_in": {
+            "kind": "hub",
+            "target_path": "{{templates_path}}/Meeting Hub.md"
+          }
+        }
+      ]
+    },
+    {
+      "name": "products",
+      "version": "0.3.0",
+      "installed_at": "2026-06-15T05:05:37.681Z"
+    },
+    {
+      "name": "project",
+      "version": "1.21.0",
+      "installed_at": "2026-06-15T05:05:37.697Z",
+      "new_entity_buttons": [
+        {
+          "id": "project",
+          "label": "New Project",
+          "icon": "folder-plus",
+          "prompts": [
+            {
+              "key": "name",
+              "label": "Project name",
+              "type": "string",
+              "required": true
+            },
+            {
+              "key": "slug",
+              "type": "string",
+              "derive": "slugify(prompts.name)"
+            }
+          ],
+          "destination": {
+            "folder_prefix": "spice/projects/{{prompts.slug}}",
+            "filename_prefix": "{{prompts.name|sanitize-filename}}"
+          },
+          "frontmatter_template": {
+            "type": "project",
+            "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+            "description": "",
+            "status": "idea",
+            "status_changed_at": "{{now.YYYY-MM-DD}}",
+            "workstreams": [],
+            "teams": [],
+            "products": [],
+            "sections": [],
+            "tags": []
+          },
+          "body_template": "Template, Project.md",
+          "extra_files": [
+            {
+              "filename_pattern": "Project Map.md",
+              "body_template": "Template, Project Map.md"
+            },
+            {
+              "filename_pattern": "{{prompts.slug}}-board.md",
+              "body_template": "Template, Project Board.md"
+            },
+            {
+              "subfolder": "docs",
+              "filename_pattern": "Docs.md",
+              "body_template": "Template, Docs Hub.md"
+            },
+            {
+              "subfolder": "docs/knowledge",
+              "filename_pattern": "Knowledge.md",
+              "frontmatter_template": {
+                "type": "section-hub",
+                "project": "[[{{prompts.name}}]]",
+                "project_slug": "{{prompts.slug}}",
+                "section": "Knowledge",
+                "section_slug": "knowledge",
+                "parent_section": "",
+                "depth": 1,
+                "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+                "tags": [
+                  "section-hub"
+                ]
+              },
+              "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"Breadcrumb\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ProjectNavButtons\" });\n```\n\n---\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SectionHub\" });\n```\n"
+            },
+            {
+              "subfolder": "docs/notes",
+              "filename_pattern": "Notes.md",
+              "frontmatter_template": {
+                "type": "section-hub",
+                "project": "[[{{prompts.name}}]]",
+                "project_slug": "{{prompts.slug}}",
+                "section": "Notes",
+                "section_slug": "notes",
+                "parent_section": "",
+                "depth": 1,
+                "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+                "tags": [
+                  "section-hub"
+                ]
+              },
+              "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"Breadcrumb\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ProjectNavButtons\" });\n```\n\n---\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SectionHub\" });\n```\n"
+            }
+          ],
+          "render_in": {
+            "kind": "hub",
+            "target_path": "{{module_directory}}/Projects.md"
+          }
+        },
+        {
+          "id": "doc-note",
+          "label": "+ New Doc",
+          "icon": "file-plus",
+          "prompts": [
+            {
+              "key": "title",
+              "label": "Doc title",
+              "type": "string",
+              "required": true,
+              "validate": "safe-filename"
+            },
+            {
+              "key": "section",
+              "label": "Section",
+              "type": "select",
+              "options_source": "current_project_sections",
+              "required": true
+            },
+            {
+              "key": "section_slug",
+              "label": "(derived from section)",
+              "type": "string",
+              "derive": "slugify(prompts.section)"
+            },
+            {
+              "key": "sub_section",
+              "label": "Sub-section",
+              "type": "select",
+              "options_source": "current_section_sub_sections",
+              "required": false,
+              "default": ""
+            },
+            {
+              "key": "sub_section_slug",
+              "label": "(derived from sub_section)",
+              "type": "string",
+              "derive": "slugify(prompts.sub_section)"
+            }
+          ],
+          "destination": {
+            "folder_prefix": "spice/projects/{{current_file.frontmatter.project_slug}}/docs/{{prompts.section_slug}}/{{prompts.sub_section_slug}}",
+            "filename_prefix": "{{prompts.title|sanitize-filename}}"
+          },
+          "frontmatter_template": {
+            "type": "doc-note",
+            "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+            "project": "{{current_file.frontmatter.project}}",
+            "project_slug": "{{current_file.frontmatter.project_slug}}",
+            "section": "{{prompts.section}}",
+            "sub_section": "{{prompts.sub_section}}",
+            "tags": [
+              "doc-note"
+            ]
+          },
+          "body_template": "Template, Doc Note.md",
+          "render_in": {
+            "kind": "hub",
+            "target_path": "{{templates_path}}/Template, Docs Hub.md"
+          }
+        },
+        {
+          "id": "section-hub",
+          "label": "+ New Section",
+          "icon": "folder-plus",
+          "prompts": [
+            {
+              "key": "name",
+              "label": "Section name",
+              "type": "string",
+              "required": true,
+              "validate": "safe-filename"
+            },
+            {
+              "key": "slug",
+              "label": "(derived from name)",
+              "type": "string",
+              "derive": "slugify(prompts.name)"
+            }
+          ],
+          "destination": {
+            "folder_prefix": "spice/projects/{{current_file.frontmatter.project_slug}}/docs/{{prompts.slug}}",
+            "filename_prefix": "{{prompts.name|sanitize-filename}}"
+          },
+          "frontmatter_template": {
+            "type": "section-hub",
+            "project": "{{current_file.frontmatter.project}}",
+            "project_slug": "{{current_file.frontmatter.project_slug}}",
+            "section": "{{prompts.name}}",
+            "section_slug": "{{prompts.slug}}",
+            "parent_section": "",
+            "depth": 1,
+            "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+            "tags": [
+              "section-hub"
+            ]
+          },
+          "body_template": "Template, Section Hub.md",
+          "render_in": {
+            "kind": "hub",
+            "target_path": "{{templates_path}}/Template, Docs Hub.md"
+          }
+        },
+        {
+          "id": "sub-section-hub",
+          "label": "+ New Sub-Section",
+          "icon": "folder-plus",
+          "prompts": [
+            {
+              "key": "name",
+              "label": "Sub-section name",
+              "type": "string",
+              "required": true,
+              "validate": "safe-filename"
+            },
+            {
+              "key": "slug",
+              "label": "(derived from name)",
+              "type": "string",
+              "derive": "slugify(prompts.name)"
+            },
+            {
+              "key": "parent_slug",
+              "label": "Parent section slug",
+              "type": "string",
+              "required": true
+            }
+          ],
+          "destination": {
+            "folder_prefix": "spice/projects/{{current_file.frontmatter.project_slug}}/docs/{{prompts.parent_slug}}/{{prompts.slug}}",
+            "filename_prefix": "{{prompts.name|sanitize-filename}}"
+          },
+          "frontmatter_template": {
+            "type": "section-hub",
+            "project": "{{current_file.frontmatter.project}}",
+            "project_slug": "{{current_file.frontmatter.project_slug}}",
+            "section": "{{prompts.name}}",
+            "section_slug": "{{prompts.slug}}",
+            "parent_section": "[[{{current_file.frontmatter.section}}]]",
+            "depth": 2,
+            "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+            "tags": [
+              "section-hub"
+            ]
+          },
+          "body_template": "Template, Section Hub.md",
+          "render_in": {
+            "kind": "hub",
+            "target_path": "{{templates_path}}/Template, Section Hub.md"
+          }
+        }
+      ]
+    },
+    {
+      "name": "to-do",
+      "version": "0.3.3",
+      "installed_at": "2026-06-15T05:05:37.701Z"
+    },
+    {
+      "name": "journal",
+      "version": "0.2.0",
+      "installed_at": "2026-06-15T05:05:37.703Z"
+    },
+    {
+      "name": "trips",
+      "version": "0.3.0",
+      "installed_at": "2026-06-15T05:05:37.709Z"
+    },
+    {
+      "name": "finance",
+      "version": "0.6.0",
+      "installed_at": "2026-06-15T05:05:37.732Z",
+      "new_entity_buttons": [
+        {
+          "id": "budget",
+          "label": "New Budget",
+          "icon": "wallet-plus",
+          "prompts": [
+            {
+              "key": "month",
+              "label": "Month",
+              "type": "month",
+              "required": true,
+              "default": "{{now.YYYY-MM}}"
+            }
+          ],
+          "destination": {
+            "folder_prefix": "spice/finance/budgets/{{prompts.month}}",
+            "filename_prefix": "Budget-{{prompts.month}}"
+          },
+          "frontmatter_template": {
+            "type": "budget",
+            "month": "{{prompts.month}}",
+            "categories": [],
+            "groups": [],
+            "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+            "cssclasses": [
+              "wide"
+            ]
+          },
+          "seed_from_defaults": {
+            "source_path": "spice/finance/Budget Defaults.md",
+            "source_array": "categories",
+            "carry_arrays": [
+              "groups"
+            ],
+            "per_item_set": {
+              "actual": 0
+            }
+          },
+          "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNavRow\" });\n```\n\n```dataviewjs\nawait customJS.FinanceStatus.renderBadge(dv, \"budget\");\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"BudgetSummary\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"BudgetCategoriesEditor\" });\n```\n",
+          "render_in": {
+            "kind": "hub",
+            "target_path": "{{module_directory}}/budgets/Budgets.md"
+          }
+        },
+        {
+          "id": "paycheck",
+          "label": "New Paycheck",
+          "icon": "wallet-plus",
+          "prompts": [
+            {
+              "key": "start_date",
+              "label": "Start date",
+              "type": "date",
+              "required": true
+            },
+            {
+              "key": "end_date",
+              "label": "End date",
+              "type": "date",
+              "required": true,
+              "validate": "gte:start_date"
+            },
+            {
+              "key": "amount",
+              "label": "Amount",
+              "type": "number",
+              "required": true,
+              "min": 0
+            }
+          ],
+          "destination": {
+            "folder_prefix": "spice/finance/paychecks/{{prompts.start_date}}",
+            "filename_prefix": "Paycheck-{{prompts.start_date}}"
+          },
+          "frontmatter_template": {
+            "type": "paycheck",
+            "pay_period_start": "{{prompts.start_date}}",
+            "pay_period_end": "{{prompts.end_date}}",
+            "paycheck_amount": "{{prompts.amount|number}}",
+            "expenses": [],
+            "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+            "cssclasses": [
+              "wide"
+            ]
+          },
+          "seed_from_defaults": {
+            "source_path": "spice/finance/Paycheck Defaults.md",
+            "source_array": "expenses",
+            "per_item_set": {
+              "paid": false
+            },
+            "resolve_wikilinks": {
+              "field": "debt",
+              "merge": {
+                "planned_monthly_payment": "amount",
+                "url": "url"
+              }
+            }
+          },
+          "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNavRow\" });\n```\n\n```dataviewjs\nawait customJS.FinanceStatus.renderBadge(dv, \"paycheck\");\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PaycheckSummary\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PaycheckExpensesEditor\" });\n```\n",
+          "render_in": {
+            "kind": "hub",
+            "target_path": "{{module_directory}}/paychecks/Paychecks.md"
+          }
+        },
+        {
+          "id": "invoice",
+          "label": "New Invoice",
+          "icon": "file-plus",
+          "prompts": [
+            {
+              "key": "month",
+              "label": "Month",
+              "type": "month",
+              "required": true,
+              "default": "{{now.YYYY-MM}}"
+            }
+          ],
+          "destination": {
+            "folder_prefix": "spice/finance/invoices/{{prompts.month}}",
+            "filename_prefix": "Invoice-{{prompts.month}}"
+          },
+          "frontmatter_template": {
+            "type": "invoice",
+            "month": "{{prompts.month}}",
+            "date": "{{prompts.month}}-01",
+            "rate": 0,
+            "hours": 0,
+            "amount": 0,
+            "submitted_date": null,
+            "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+            "cssclasses": [
+              "wide"
+            ]
+          },
+          "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNavRow\" });\n```\n\n```dataviewjs\nawait customJS.FinanceStatus.renderBadge(dv, \"invoice\");\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"InvoiceControls\" });\n```\n",
+          "extra_files": [
+            {
+              "filename_pattern": "Time-Log-{{prompts.month}}.md",
+              "frontmatter_template": {
+                "type": "time-log",
+                "month": "{{prompts.month}}",
+                "date": "{{prompts.month}}-01",
+                "total_hours": 0,
+                "entries": [],
+                "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+                "cssclasses": [
+                  "wide"
+                ]
+              },
+              "inline_body": "%% nav buttons rendered conditionally — suppressed when this note is embedded elsewhere %%\n```dataviewjs\nconst isEmbedded = dv.container.closest(\".markdown-embed\") != null;\nif (!isEmbedded) {\n    await dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n    await dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNavRow\" });\n}\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"InvoiceTimeLogEditor\" });\n```\n"
+            },
+            {
+              "filename_pattern": "Board-{{prompts.month}}.md",
+              "subfolder": "board",
+              "frontmatter_template": {
+                "kanban-plugin": "board",
+                "title": "Invoice {{prompts.month}} Board",
+                "type": "kanban",
+                "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+                "tags": [
+                  "invoice/{{prompts.month}}"
+                ]
+              },
+              "inline_body": "## To Do\n\n## In Progress\n\n## Completed\n\n%% kanban:settings\n```\n{\"kanban-plugin\":\"board\",\"list-collapse\":[false,false,false],\"new-note-folder\":\"spice/finance/invoices/{{prompts.month}}/board\",\"new-note-template\":\"ranch/templates/Template, Invoice Board Card.md\"}\n```\n%%\n"
+            }
+          ],
+          "render_in": {
+            "kind": "hub",
+            "target_path": "{{module_directory}}/invoices/Invoices.md"
+          }
+        },
+        {
+          "id": "debt",
+          "label": "New Debt",
+          "icon": "credit-card",
+          "prompts": [
+            {
+              "key": "name",
+              "label": "Name",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "kind",
+              "label": "Kind",
+              "type": "select",
+              "options": [
+                "credit-card",
+                "student-loan",
+                "other"
+              ],
+              "required": true,
+              "default": "credit-card"
+            }
+          ],
+          "destination": {
+            "folder_prefix": "spice/finance/debts",
+            "filename_prefix": "Debt-{{prompts.name|slugify}}"
+          },
+          "frontmatter_template": {
+            "type": "debt",
+            "kind": "{{prompts.kind}}",
+            "name": "{{prompts.name}}",
+            "current_balance": 0,
+            "apr": 0,
+            "min_payment": 0,
+            "planned_monthly_payment": 0,
+            "balance_history": [],
+            "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+            "cssclasses": [
+              "wide"
+            ]
+          },
+          "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNavRow\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"DebtSummary\" });\n```\n",
+          "render_in": {
+            "kind": "hub",
+            "target_path": "{{module_directory}}/debts/Debts.md"
+          }
+        }
+      ]
+    },
+    {
+      "name": "scratch",
+      "version": "0.5.2",
+      "installed_at": "2026-06-15T05:05:37.739Z",
+      "new_entity_buttons": [
+        {
+          "id": "scratch",
+          "label": "+ New Scratch",
+          "icon": "pencil-plus",
+          "prompts": [
+            {
+              "key": "title",
+              "label": "Scratch title (optional)",
+              "type": "string",
+              "required": false
+            }
+          ],
+          "destination": {
+            "folder_prefix": "spice/scratch/{{current_file.frontmatter.day}}-routed",
+            "filename_prefix": "Scratch-{{current_file.frontmatter.day}}-",
+            "filename_date_pattern": "HH-mm",
+            "filename_suffix": ""
+          },
+          "frontmatter_template": {
+            "type": "scratch",
+            "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+            "day": "{{current_file.frontmatter.day}}",
+            "title": "{{prompts.title}}"
+          },
+          "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n---\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ScratchLeafActions\" });\n```\n\n---\n"
+        }
+      ]
+    },
+    {
+      "name": "teams",
+      "version": "0.3.0",
+      "installed_at": "2026-06-15T05:05:37.744Z"
+    }
+  ],
+  "history": [
+    {
+      "event": "info",
+      "step": "customjs_settings",
+      "action": "applied_fresh",
+      "jsFolder": "ranch/scripts",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.360Z"
+    },
+    {
+      "event": "info",
+      "step": "app_settings",
+      "action": "applied",
+      "keys_written": [
+        "alwaysOpenInNewTab",
+        "defaultViewMode",
+        "livePreview",
+        "propertiesInDocument"
+      ],
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.361Z"
+    },
+    {
+      "event": "info",
+      "step": "vault_default_paths",
+      "name": "platform",
+      "action": "applied_canonical_defaults",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.362Z"
+    },
+    {
+      "event": "info",
+      "step": "scaffold_foundational",
+      "name": "customjs-guard",
+      "item": "customjs-guard",
+      "id": "templater-obsidian",
+      "action": "scaffolded",
+      "path": ".obsidian/plugins/templater-obsidian/data.json",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.377Z"
+    },
+    {
+      "event": "install",
+      "kind": "mechanism",
+      "name": "customjs-guard",
+      "version": "1.0.0",
+      "installed_at": "2026-06-15T05:05:37.378Z",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true
+    },
+    {
+      "event": "info",
+      "step": "scaffold_foundational",
+      "name": "validator",
+      "item": "validator",
+      "id": "templater-obsidian",
+      "action": "skipped_already_present",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.582Z"
+    },
+    {
+      "event": "info",
+      "step": "templater_hotkeys",
+      "name": "validator",
+      "template_path": "ranch/templates/Validate.md",
+      "action": "applied",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.582Z"
+    },
+    {
+      "event": "warning",
+      "step": "slash_commander_bindings",
+      "name": "validator",
+      "message": ".obsidian/plugins/slash-commander/data.json absent",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.582Z"
+    },
+    {
+      "event": "install",
+      "kind": "mechanism",
+      "name": "validator",
+      "version": "0.3.0",
+      "installed_at": "2026-06-15T05:05:37.582Z",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true
+    },
+    {
+      "event": "info",
+      "step": "scaffold_foundational",
+      "name": "cards",
+      "item": "cards",
+      "id": "templater-obsidian",
+      "action": "skipped_already_present",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.584Z"
+    },
+    {
+      "event": "install",
+      "kind": "mechanism",
+      "name": "cards",
+      "version": "0.2.6",
+      "installed_at": "2026-06-15T05:05:37.584Z",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true
+    },
+    {
+      "event": "info",
+      "step": "scaffold_foundational",
+      "name": "activity-feed",
+      "item": "activity-feed",
+      "id": "templater-obsidian",
+      "action": "skipped_already_present",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.585Z"
+    },
+    {
+      "event": "install",
+      "kind": "mechanism",
+      "name": "activity-feed",
+      "version": "0.7.1",
+      "installed_at": "2026-06-15T05:05:37.585Z",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true
+    },
+    {
+      "event": "info",
+      "step": "scaffold_foundational",
+      "name": "kanban-status-sync",
+      "item": "kanban-status-sync",
+      "id": "templater-obsidian",
+      "action": "skipped_already_present",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.586Z"
+    },
+    {
+      "event": "info",
+      "step": "customjs_startup_scripts",
+      "name": "kanban-status-sync",
+      "script": "KanbanStatusSyncInit",
+      "action": "applied",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.586Z"
+    },
+    {
+      "event": "install",
+      "kind": "mechanism",
+      "name": "kanban-status-sync",
+      "version": "0.2.0",
+      "installed_at": "2026-06-15T05:05:37.586Z",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true
+    },
+    {
+      "event": "info",
+      "step": "scaffold_foundational",
+      "name": "audit",
+      "item": "audit",
+      "id": "templater-obsidian",
+      "action": "skipped_already_present",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.588Z"
+    },
+    {
+      "event": "info",
+      "step": "templater_hotkeys",
+      "name": "audit",
+      "template_path": "ranch/templates/Audit.md",
+      "action": "applied",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.588Z"
+    },
+    {
+      "event": "warning",
+      "step": "slash_commander_bindings",
+      "name": "audit",
+      "message": ".obsidian/plugins/slash-commander/data.json absent",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.589Z"
+    },
+    {
+      "event": "install",
+      "kind": "mechanism",
+      "name": "audit",
+      "version": "0.3.0",
+      "installed_at": "2026-06-15T05:05:37.589Z",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true
+    },
+    {
+      "event": "info",
+      "step": "scaffold_foundational",
+      "name": "backlink-panel",
+      "item": "backlink-panel",
+      "id": "templater-obsidian",
+      "action": "skipped_already_present",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.589Z"
+    },
+    {
+      "event": "install",
+      "kind": "mechanism",
+      "name": "backlink-panel",
+      "version": "0.1.0",
+      "installed_at": "2026-06-15T05:05:37.589Z",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true
+    },
+    {
+      "event": "info",
+      "step": "scaffold_foundational",
+      "name": "icons",
+      "item": "icons",
+      "id": "templater-obsidian",
+      "action": "skipped_already_present",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.590Z"
+    },
+    {
+      "event": "install",
+      "kind": "mechanism",
+      "name": "icons",
+      "version": "0.1.1",
+      "installed_at": "2026-06-15T05:05:37.590Z",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true
+    },
+    {
+      "event": "info",
+      "step": "scaffold_foundational",
+      "name": "nav-buttons",
+      "item": "nav-buttons",
+      "id": "templater-obsidian",
+      "action": "skipped_already_present",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.591Z"
+    },
+    {
+      "event": "install",
+      "kind": "mechanism",
+      "name": "nav-buttons",
+      "version": "2.7.0",
+      "installed_at": "2026-06-15T05:05:37.591Z",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true
+    },
+    {
+      "event": "info",
+      "step": "scaffold_foundational",
+      "name": "accent-button",
+      "item": "accent-button",
+      "id": "templater-obsidian",
+      "action": "skipped_already_present",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.592Z"
+    },
+    {
+      "event": "install",
+      "kind": "mechanism",
+      "name": "accent-button",
+      "version": "0.1.1",
+      "installed_at": "2026-06-15T05:05:37.592Z",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true
+    },
+    {
+      "event": "info",
+      "step": "scaffold_foundational",
+      "name": "entity-create",
+      "item": "entity-create",
+      "id": "templater-obsidian",
+      "action": "skipped_already_present",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.593Z"
+    },
+    {
+      "event": "install",
+      "kind": "mechanism",
+      "name": "entity-create",
+      "version": "0.7.1",
+      "installed_at": "2026-06-15T05:05:37.593Z",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true
+    },
+    {
+      "event": "info",
+      "step": "scaffold_foundational",
+      "name": "people-rendering",
+      "item": "people-rendering",
+      "id": "templater-obsidian",
+      "action": "skipped_already_present",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.594Z"
+    },
+    {
+      "event": "install",
+      "kind": "mechanism",
+      "name": "people-rendering",
+      "version": "0.1.0",
+      "installed_at": "2026-06-15T05:05:37.594Z",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true
+    },
+    {
+      "event": "info",
+      "step": "scaffold_foundational",
+      "name": "people-identity",
+      "item": "people-identity",
+      "id": "templater-obsidian",
+      "action": "skipped_already_present",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.594Z"
+    },
+    {
+      "event": "install",
+      "kind": "mechanism",
+      "name": "people-identity",
+      "version": "0.1.0",
+      "installed_at": "2026-06-15T05:05:37.594Z",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true
+    },
+    {
+      "event": "info",
+      "step": "scaffold_foundational",
+      "name": "styling",
+      "item": "styling",
+      "id": "templater-obsidian",
+      "action": "skipped_already_present",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.595Z"
+    },
+    {
+      "event": "replace",
+      "step": "theme_overwrite",
+      "name": "styling",
+      "theme": "Baseline",
+      "dest": ".obsidian/themes/Baseline/manifest.json",
+      "new_sha": "53c57317a61d68dece9c1844bb5ef5e11962d6ab686ef4ddd7d1ba1226d62c5e",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.596Z"
+    },
+    {
+      "event": "replace",
+      "step": "theme_overwrite",
+      "name": "styling",
+      "theme": "Baseline",
+      "dest": ".obsidian/themes/Baseline/theme.css",
+      "new_sha": "b1fda42d790f9a1fdd6ce7938e5d96ae2b2b5946e75e3f4b34e0515cfb300b4b",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.600Z"
+    },
+    {
+      "event": "info",
+      "step": "snippets",
+      "name": "styling",
+      "snippet": "sauce-callouts",
+      "action": "applied",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.601Z"
+    },
+    {
+      "event": "info",
+      "step": "appearance",
+      "name": "styling",
+      "action": "applied",
+      "backup_path": ".obsidian/appearance.json.sauce-backup",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.602Z"
+    },
+    {
+      "event": "info",
+      "step": "style_settings",
+      "name": "styling",
+      "action": "applied",
+      "backup_path": null,
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.603Z"
+    },
+    {
+      "event": "install",
+      "kind": "mechanism",
+      "name": "styling",
+      "version": "0.2.1",
+      "installed_at": "2026-06-15T05:05:37.603Z",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true
+    },
+    {
+      "event": "info",
+      "step": "scaffold_foundational",
+      "name": "convenience",
+      "item": "convenience",
+      "id": "templater-obsidian",
+      "action": "skipped_already_present",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.605Z"
+    },
+    {
+      "event": "info",
+      "step": "community_plugin_data",
+      "name": "convenience",
+      "plugin_id": "dataview",
+      "action": "applied",
+      "keys": [
+        "enableDataviewJs",
+        "enableInlineDataviewJs"
+      ],
+      "backup_path": null,
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.607Z"
+    },
+    {
+      "event": "info",
+      "step": "community_plugin_data",
+      "name": "convenience",
+      "plugin_id": "obsidian-tasks-plugin",
+      "action": "applied",
+      "keys": [
+        "taskFormat"
+      ],
+      "backup_path": null,
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.607Z"
+    },
+    {
+      "event": "info",
+      "step": "community_plugin_data",
+      "name": "convenience",
+      "plugin_id": "new-tab-default-page",
+      "action": "applied",
+      "keys": [
+        "whatToOpen",
+        "filePath",
+        "mode",
+        "compatibilityMode"
+      ],
+      "backup_path": null,
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.608Z"
+    },
+    {
+      "event": "info",
+      "step": "snippets",
+      "name": "convenience",
+      "snippet": "sauce-tasks-icons",
+      "action": "applied",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.609Z"
+    },
+    {
+      "event": "info",
+      "step": "appearance",
+      "name": "convenience",
+      "action": "applied",
+      "backup_path": ".obsidian/appearance.json.sauce-backup",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.609Z"
+    },
+    {
+      "event": "info",
+      "step": "hotkeys",
+      "name": "convenience",
+      "command_id": "workspace:copy-full-path",
+      "action": "applied",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.609Z"
+    },
+    {
+      "event": "info",
+      "step": "hotkeys",
+      "name": "convenience",
+      "command_id": "workspace:copy-path",
+      "action": "applied",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.609Z"
+    },
+    {
+      "event": "info",
+      "step": "hotkeys",
+      "name": "convenience",
+      "command_id": "daily-notes:goto-today",
+      "action": "applied",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.609Z"
+    },
+    {
+      "event": "info",
+      "step": "hotkeys",
+      "name": "convenience",
+      "command_id": "markdown:toggle-preview",
+      "action": "applied",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.609Z"
+    },
+    {
+      "event": "info",
+      "step": "hotkeys",
+      "name": "convenience",
+      "command_id": "obsidian-tasks-plugin:edit-task",
+      "action": "applied",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.609Z"
+    },
+    {
+      "event": "install",
+      "kind": "mechanism",
+      "name": "convenience",
+      "version": "0.4.1",
+      "installed_at": "2026-06-15T05:05:37.609Z",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true
+    },
+    {
+      "event": "info",
+      "step": "scaffold_foundational",
+      "name": "platform-claude",
+      "item": "platform-claude",
+      "id": "templater-obsidian",
+      "action": "skipped_already_present",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.610Z"
+    },
+    {
+      "event": "install",
+      "kind": "mechanism",
+      "name": "platform-claude",
+      "version": "0.1.3",
+      "installed_at": "2026-06-15T05:05:37.610Z",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true
+    },
+    {
+      "event": "info",
+      "step": "scaffold_foundational",
+      "name": "smart-connections-bridge",
+      "item": "smart-connections-bridge",
+      "id": "templater-obsidian",
+      "action": "skipped_already_present",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.611Z"
+    },
+    {
+      "event": "install",
+      "kind": "mechanism",
+      "name": "smart-connections-bridge",
+      "version": "0.2.0",
+      "installed_at": "2026-06-15T05:05:37.611Z",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true
+    },
+    {
+      "event": "info",
+      "step": "pre_install_delete_skip",
+      "name": "boards",
+      "path": "boards/To-Do-Board.md",
+      "reason": "v0.1.1-era top-level Dataview-kanban file (project blueprint Board contribution); superseded by spice/boards/To-Do-Board.md (Kanban-plugin format) at this blueprint's install.",
+      "message": "file already absent",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.611Z"
+    },
+    {
+      "event": "info",
+      "step": "module_directory",
+      "name": "boards",
+      "path": "spice/boards",
+      "action": "created",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.611Z"
+    },
+    {
+      "event": "info",
+      "step": "scaffold_foundational",
+      "name": "boards",
+      "item": "boards",
+      "id": "templater-obsidian",
+      "action": "skipped_already_present",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.614Z"
+    },
+    {
+      "event": "install",
+      "kind": "blueprint",
+      "name": "boards",
+      "version": "0.2.1",
+      "installed_at": "2026-06-15T05:05:37.614Z",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true
+    },
+    {
+      "event": "info",
+      "step": "module_directory",
+      "name": "daily",
+      "path": "spice/daily",
+      "action": "created",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.614Z"
+    },
+    {
+      "event": "info",
+      "step": "scaffold_foundational",
+      "name": "daily",
+      "item": "daily",
+      "id": "templater-obsidian",
+      "action": "skipped_already_present",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.616Z"
+    },
+    {
+      "event": "info",
+      "step": "core_plugin_settings",
+      "name": "daily",
+      "plugin_id": "daily-notes",
+      "action": "applied",
+      "settings_keys": [
+        "folder",
+        "format",
+        "template",
+        "autorun"
+      ],
+      "backup_path": null,
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.616Z"
+    },
+    {
+      "event": "info",
+      "step": "snippets",
+      "name": "daily",
+      "snippet": "sauce-daily-dashboard",
+      "action": "applied",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.616Z"
+    },
+    {
+      "event": "info",
+      "step": "appearance",
+      "name": "daily",
+      "action": "applied",
+      "backup_path": ".obsidian/appearance.json.sauce-backup",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.617Z"
+    },
+    {
+      "event": "info",
+      "step": "hotkeys",
+      "name": "daily",
+      "command_id": "daily-notes",
+      "action": "applied",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.617Z"
+    },
+    {
+      "event": "install",
+      "kind": "blueprint",
+      "name": "daily",
+      "version": "0.13.6",
+      "installed_at": "2026-06-15T05:05:37.617Z",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true
+    },
+    {
+      "event": "info",
+      "step": "module_directory",
+      "name": "people",
+      "path": "spice/people",
+      "action": "created",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.617Z"
+    },
+    {
+      "event": "info",
+      "step": "entity_create_block_verified",
+      "name": "people",
+      "target": "spice/people/People.md",
+      "instance": "person",
+      "sentinel": "// entity-create:person",
+      "action": "verified_present",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.620Z"
+    },
+    {
+      "event": "info",
+      "step": "scaffold_foundational",
+      "name": "people",
+      "item": "people",
+      "id": "templater-obsidian",
+      "action": "skipped_already_present",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.621Z"
+    },
+    {
+      "event": "install",
+      "kind": "blueprint",
+      "name": "people",
+      "version": "0.6.0",
+      "installed_at": "2026-06-15T05:05:37.621Z",
+      "new_entity_buttons": [
+        {
+          "id": "person",
+          "label": "+ New Person",
+          "icon": "user-plus",
+          "prompts": [
+            {
+              "key": "name",
+              "label": "Name",
+              "type": "string",
+              "required": true,
+              "validate": "safe-filename"
+            }
+          ],
+          "destination": {
+            "folder_prefix": "{{module_directory}}",
+            "filename_prefix": "{{prompts.name}}"
+          },
+          "frontmatter_template": {
+            "type": "person",
+            "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+            "company": "",
+            "location": "",
+            "title": "",
+            "email": "",
+            "website": "",
+            "aliases": [],
+            "phone": "",
+            "tags": []
+          },
+          "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PersonNavButtons\" });\n```\n\n# [[{{prompts.name}}]]\n\n## Notes\n-\n\n## Meetings\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"PeopleRendering\",\n  method: \"renderMentionList\",\n  args: [dv, { mode: \"mentioning_person\", personLink: dv.current().file.link, scopePath: \"spice/meetings\" }, { style: \"cards\", limit: 50 }]\n});\n```\n\n## Daily Mentions\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"PeopleRendering\",\n  method: \"renderMentionList\",\n  args: [dv, { mode: \"mentioning_person\", personLink: dv.current().file.link, scopePath: \"spice/daily\" }, { style: \"list\", limit: 30 }]\n});\n```\n\n## Mentions\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"BacklinkPanel\",\n  method: \"render\",\n  args: [{ entityType: \"person\" }]\n});\n```\n",
+          "render_in": {
+            "kind": "hub",
+            "target_path": "{{module_directory}}/People.md"
+          }
+        }
+      ],
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true
+    },
+    {
+      "event": "info",
+      "step": "module_directory",
+      "name": "cowork",
+      "path": "spice/cowork",
+      "action": "created",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.621Z"
+    },
+    {
+      "event": "info",
+      "step": "scaffold_foundational",
+      "name": "cowork",
+      "item": "cowork",
+      "id": "templater-obsidian",
+      "action": "skipped_already_present",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.675Z"
+    },
+    {
+      "event": "install",
+      "kind": "blueprint",
+      "name": "cowork",
+      "version": "0.40.0",
+      "installed_at": "2026-06-15T05:05:37.675Z",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true
+    },
+    {
+      "event": "info",
+      "step": "module_directory",
+      "name": "meetings",
+      "path": "spice/meetings",
+      "action": "created",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.675Z"
+    },
+    {
+      "event": "info",
+      "step": "entity_create_block_verified",
+      "name": "meetings",
+      "target": "ranch/templates/Meeting Hub.md",
+      "instance": "meeting",
+      "sentinel": "// entity-create:meeting",
+      "action": "verified_present",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.677Z"
+    },
+    {
+      "event": "info",
+      "step": "scaffold_foundational",
+      "name": "meetings",
+      "item": "meetings",
+      "id": "templater-obsidian",
+      "action": "skipped_already_present",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.677Z"
+    },
+    {
+      "event": "info",
+      "step": "templater_folder_templates",
+      "name": "meetings",
+      "folder": "spice/meetings/notes",
+      "template": "ranch/templates/Meeting.md",
+      "action": "applied",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.678Z"
+    },
+    {
+      "event": "info",
+      "step": "templater_folder_templates",
+      "name": "meetings",
+      "folder": "spice/meetings/hubs",
+      "template": "ranch/templates/Meeting Hub.md",
+      "action": "applied",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.678Z"
+    },
+    {
+      "event": "install",
+      "kind": "blueprint",
+      "name": "meetings",
+      "version": "0.8.0",
+      "installed_at": "2026-06-15T05:05:37.678Z",
+      "new_entity_buttons": [
+        {
+          "id": "meeting",
+          "label": "New Meeting",
+          "icon": "users-plus",
+          "prompts": [
+            {
+              "key": "title",
+              "label": "Meeting title",
+              "type": "string",
+              "required": true
+            },
+            {
+              "key": "project",
+              "label": "Project (optional)",
+              "type": "select",
+              "required": false,
+              "options_source": "all_projects",
+              "default": "(none)"
+            }
+          ],
+          "destination": {
+            "folder_prefix": "{{module_directory}}/notes",
+            "folder_date_pattern": "YYYY/MM-MMMM",
+            "filename_prefix": "{{prompts.title}}-",
+            "filename_date_pattern": "YYYY-MM-DD",
+            "filename_suffix": ""
+          },
+          "frontmatter_template": {
+            "date": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+            "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+            "type": "meeting",
+            "summary": "",
+            "attendees": [],
+            "project": "{{prompts.project}}",
+            "people": [],
+            "tags": [],
+            "cssclasses": [
+              "wide"
+            ]
+          },
+          "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n",
+          "render_in": {
+            "kind": "hub",
+            "target_path": "{{templates_path}}/Meeting Hub.md"
+          }
+        }
+      ],
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true
+    },
+    {
+      "event": "info",
+      "step": "module_directory",
+      "name": "products",
+      "path": "spice/products",
+      "action": "created",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.678Z"
+    },
+    {
+      "event": "info",
+      "step": "scaffold_foundational",
+      "name": "products",
+      "item": "products",
+      "id": "templater-obsidian",
+      "action": "skipped_already_present",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.681Z"
+    },
+    {
+      "event": "info",
+      "step": "templater_folder_templates",
+      "name": "products",
+      "folder": "spice/products",
+      "template": "ranch/templates/Template, Product.md",
+      "action": "applied",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.681Z"
+    },
+    {
+      "event": "install",
+      "kind": "blueprint",
+      "name": "products",
+      "version": "0.3.0",
+      "installed_at": "2026-06-15T05:05:37.681Z",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true
+    },
+    {
+      "event": "info",
+      "step": "pre_install_delete_skip",
+      "name": "project",
+      "path": "boards/To-Do-Board.md",
+      "reason": null,
+      "message": "file already absent",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.681Z"
+    },
+    {
+      "event": "info",
+      "step": "module_directory",
+      "name": "project",
+      "path": "spice/projects",
+      "action": "created",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.681Z"
+    },
+    {
+      "event": "info",
+      "step": "entity_create_block_verified",
+      "name": "project",
+      "target": "spice/projects/Projects.md",
+      "instance": "project",
+      "sentinel": "// entity-create:project",
+      "action": "verified_present",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.695Z"
+    },
+    {
+      "event": "warning",
+      "step": "entity_create_block_missing",
+      "name": "project",
+      "target": "ranch/templates/Template, Docs Hub.md",
+      "instance": "doc-note",
+      "message": "entity-create block missing in ranch/templates/Template, Docs Hub.md: expected sentinel \"// entity-create:doc-note\" inside a dataviewjs fence (entry doc-note in project)",
+      "action": "missing_skip_inject",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.696Z"
+    },
+    {
+      "event": "warning",
+      "step": "entity_create_block_missing",
+      "name": "project",
+      "target": "ranch/templates/Template, Docs Hub.md",
+      "instance": "section-hub",
+      "message": "entity-create block missing in ranch/templates/Template, Docs Hub.md: expected sentinel \"// entity-create:section-hub\" inside a dataviewjs fence (entry section-hub in project)",
+      "action": "missing_skip_inject",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.696Z"
+    },
+    {
+      "event": "warning",
+      "step": "entity_create_block_missing",
+      "name": "project",
+      "target": "ranch/templates/Template, Section Hub.md",
+      "instance": "sub-section-hub",
+      "message": "entity-create block missing in ranch/templates/Template, Section Hub.md: expected sentinel \"// entity-create:sub-section-hub\" inside a dataviewjs fence (entry sub-section-hub in project)",
+      "action": "missing_skip_inject",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.696Z"
+    },
+    {
+      "event": "info",
+      "step": "wiki_to_docs_migration",
+      "name": "project",
+      "reason": "migrated 0; skipped-already-migrated 0; skipped-no-wiki 0; warn-coexist 0; warn-fail 0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.696Z"
+    },
+    {
+      "event": "info",
+      "step": "docs_backfill",
+      "name": "project",
+      "reason": "backfilled 0 project(s); skipped 0 (already had Docs.md); 0 warning(s)",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.696Z"
+    },
+    {
+      "event": "info",
+      "step": "docs_hub_button_repair",
+      "name": "project",
+      "reason": "repaired 0 project(s); 0 warning(s)",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.696Z"
+    },
+    {
+      "event": "info",
+      "step": "project_sections_migration",
+      "name": "project",
+      "reason": "migrated 0 project(s); skipped 0; 0 warning(s)",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.697Z"
+    },
+    {
+      "event": "info",
+      "step": "project_sections_hub_migration",
+      "name": "project",
+      "reason": "migrated 0 project(s); skipped 0; 0 warning(s)",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.697Z"
+    },
+    {
+      "event": "info",
+      "step": "doc_note_breadcrumb_marker_cleanup",
+      "name": "project",
+      "action": "summary",
+      "cleaned_count": 0,
+      "untouched_count": 0,
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.697Z"
+    },
+    {
+      "event": "info",
+      "step": "project_sections_close_repair",
+      "name": "project",
+      "reason": "repaired 0 project note(s)",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.697Z"
+    },
+    {
+      "event": "info",
+      "step": "scaffold_foundational",
+      "name": "project",
+      "item": "project",
+      "id": "templater-obsidian",
+      "action": "skipped_already_present",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.697Z"
+    },
+    {
+      "event": "info",
+      "step": "customjs_startup_scripts",
+      "name": "project",
+      "script": "ProjectTaskCreateListenerInit",
+      "action": "applied",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.697Z"
+    },
+    {
+      "event": "install",
+      "kind": "blueprint",
+      "name": "project",
+      "version": "1.21.0",
+      "installed_at": "2026-06-15T05:05:37.697Z",
+      "new_entity_buttons": [
+        {
+          "id": "project",
+          "label": "New Project",
+          "icon": "folder-plus",
+          "prompts": [
+            {
+              "key": "name",
+              "label": "Project name",
+              "type": "string",
+              "required": true
+            },
+            {
+              "key": "slug",
+              "type": "string",
+              "derive": "slugify(prompts.name)"
+            }
+          ],
+          "destination": {
+            "folder_prefix": "spice/projects/{{prompts.slug}}",
+            "filename_prefix": "{{prompts.name|sanitize-filename}}"
+          },
+          "frontmatter_template": {
+            "type": "project",
+            "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+            "description": "",
+            "status": "idea",
+            "status_changed_at": "{{now.YYYY-MM-DD}}",
+            "workstreams": [],
+            "teams": [],
+            "products": [],
+            "sections": [],
+            "tags": []
+          },
+          "body_template": "Template, Project.md",
+          "extra_files": [
+            {
+              "filename_pattern": "Project Map.md",
+              "body_template": "Template, Project Map.md"
+            },
+            {
+              "filename_pattern": "{{prompts.slug}}-board.md",
+              "body_template": "Template, Project Board.md"
+            },
+            {
+              "subfolder": "docs",
+              "filename_pattern": "Docs.md",
+              "body_template": "Template, Docs Hub.md"
+            },
+            {
+              "subfolder": "docs/knowledge",
+              "filename_pattern": "Knowledge.md",
+              "frontmatter_template": {
+                "type": "section-hub",
+                "project": "[[{{prompts.name}}]]",
+                "project_slug": "{{prompts.slug}}",
+                "section": "Knowledge",
+                "section_slug": "knowledge",
+                "parent_section": "",
+                "depth": 1,
+                "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+                "tags": [
+                  "section-hub"
+                ]
+              },
+              "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"Breadcrumb\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ProjectNavButtons\" });\n```\n\n---\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SectionHub\" });\n```\n"
+            },
+            {
+              "subfolder": "docs/notes",
+              "filename_pattern": "Notes.md",
+              "frontmatter_template": {
+                "type": "section-hub",
+                "project": "[[{{prompts.name}}]]",
+                "project_slug": "{{prompts.slug}}",
+                "section": "Notes",
+                "section_slug": "notes",
+                "parent_section": "",
+                "depth": 1,
+                "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+                "tags": [
+                  "section-hub"
+                ]
+              },
+              "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"Breadcrumb\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ProjectNavButtons\" });\n```\n\n---\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SectionHub\" });\n```\n"
+            }
+          ],
+          "render_in": {
+            "kind": "hub",
+            "target_path": "{{module_directory}}/Projects.md"
+          }
+        },
+        {
+          "id": "doc-note",
+          "label": "+ New Doc",
+          "icon": "file-plus",
+          "prompts": [
+            {
+              "key": "title",
+              "label": "Doc title",
+              "type": "string",
+              "required": true,
+              "validate": "safe-filename"
+            },
+            {
+              "key": "section",
+              "label": "Section",
+              "type": "select",
+              "options_source": "current_project_sections",
+              "required": true
+            },
+            {
+              "key": "section_slug",
+              "label": "(derived from section)",
+              "type": "string",
+              "derive": "slugify(prompts.section)"
+            },
+            {
+              "key": "sub_section",
+              "label": "Sub-section",
+              "type": "select",
+              "options_source": "current_section_sub_sections",
+              "required": false,
+              "default": ""
+            },
+            {
+              "key": "sub_section_slug",
+              "label": "(derived from sub_section)",
+              "type": "string",
+              "derive": "slugify(prompts.sub_section)"
+            }
+          ],
+          "destination": {
+            "folder_prefix": "spice/projects/{{current_file.frontmatter.project_slug}}/docs/{{prompts.section_slug}}/{{prompts.sub_section_slug}}",
+            "filename_prefix": "{{prompts.title|sanitize-filename}}"
+          },
+          "frontmatter_template": {
+            "type": "doc-note",
+            "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+            "project": "{{current_file.frontmatter.project}}",
+            "project_slug": "{{current_file.frontmatter.project_slug}}",
+            "section": "{{prompts.section}}",
+            "sub_section": "{{prompts.sub_section}}",
+            "tags": [
+              "doc-note"
+            ]
+          },
+          "body_template": "Template, Doc Note.md",
+          "render_in": {
+            "kind": "hub",
+            "target_path": "{{templates_path}}/Template, Docs Hub.md"
+          }
+        },
+        {
+          "id": "section-hub",
+          "label": "+ New Section",
+          "icon": "folder-plus",
+          "prompts": [
+            {
+              "key": "name",
+              "label": "Section name",
+              "type": "string",
+              "required": true,
+              "validate": "safe-filename"
+            },
+            {
+              "key": "slug",
+              "label": "(derived from name)",
+              "type": "string",
+              "derive": "slugify(prompts.name)"
+            }
+          ],
+          "destination": {
+            "folder_prefix": "spice/projects/{{current_file.frontmatter.project_slug}}/docs/{{prompts.slug}}",
+            "filename_prefix": "{{prompts.name|sanitize-filename}}"
+          },
+          "frontmatter_template": {
+            "type": "section-hub",
+            "project": "{{current_file.frontmatter.project}}",
+            "project_slug": "{{current_file.frontmatter.project_slug}}",
+            "section": "{{prompts.name}}",
+            "section_slug": "{{prompts.slug}}",
+            "parent_section": "",
+            "depth": 1,
+            "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+            "tags": [
+              "section-hub"
+            ]
+          },
+          "body_template": "Template, Section Hub.md",
+          "render_in": {
+            "kind": "hub",
+            "target_path": "{{templates_path}}/Template, Docs Hub.md"
+          }
+        },
+        {
+          "id": "sub-section-hub",
+          "label": "+ New Sub-Section",
+          "icon": "folder-plus",
+          "prompts": [
+            {
+              "key": "name",
+              "label": "Sub-section name",
+              "type": "string",
+              "required": true,
+              "validate": "safe-filename"
+            },
+            {
+              "key": "slug",
+              "label": "(derived from name)",
+              "type": "string",
+              "derive": "slugify(prompts.name)"
+            },
+            {
+              "key": "parent_slug",
+              "label": "Parent section slug",
+              "type": "string",
+              "required": true
+            }
+          ],
+          "destination": {
+            "folder_prefix": "spice/projects/{{current_file.frontmatter.project_slug}}/docs/{{prompts.parent_slug}}/{{prompts.slug}}",
+            "filename_prefix": "{{prompts.name|sanitize-filename}}"
+          },
+          "frontmatter_template": {
+            "type": "section-hub",
+            "project": "{{current_file.frontmatter.project}}",
+            "project_slug": "{{current_file.frontmatter.project_slug}}",
+            "section": "{{prompts.name}}",
+            "section_slug": "{{prompts.slug}}",
+            "parent_section": "[[{{current_file.frontmatter.section}}]]",
+            "depth": 2,
+            "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+            "tags": [
+              "section-hub"
+            ]
+          },
+          "body_template": "Template, Section Hub.md",
+          "render_in": {
+            "kind": "hub",
+            "target_path": "{{templates_path}}/Template, Section Hub.md"
+          }
+        }
+      ],
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true
+    },
+    {
+      "event": "info",
+      "step": "module_directory",
+      "name": "to-do",
+      "path": "spice/to-do",
+      "action": "created",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.697Z"
+    },
+    {
+      "event": "info",
+      "step": "scaffold_foundational",
+      "name": "to-do",
+      "item": "to-do",
+      "id": "templater-obsidian",
+      "action": "skipped_already_present",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.700Z"
+    },
+    {
+      "event": "info",
+      "step": "templater_folder_templates",
+      "name": "to-do",
+      "folder": "spice/to-do",
+      "template": "ranch/templates/Today To-Do.md",
+      "action": "applied",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.701Z"
+    },
+    {
+      "event": "info",
+      "step": "customjs_startup_scripts",
+      "name": "to-do",
+      "script": "ToDoMigrateInit",
+      "action": "applied",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.701Z"
+    },
+    {
+      "event": "install",
+      "kind": "blueprint",
+      "name": "to-do",
+      "version": "0.3.3",
+      "installed_at": "2026-06-15T05:05:37.701Z",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true
+    },
+    {
+      "event": "info",
+      "step": "module_directory",
+      "name": "journal",
+      "path": "spice/journal",
+      "action": "created",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.701Z"
+    },
+    {
+      "event": "info",
+      "step": "scaffold_foundational",
+      "name": "journal",
+      "item": "journal",
+      "id": "templater-obsidian",
+      "action": "skipped_already_present",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.702Z"
+    },
+    {
+      "event": "info",
+      "step": "templater_folder_templates",
+      "name": "journal",
+      "folder": "spice/journal",
+      "template": "ranch/templates/Today Journal.md",
+      "action": "applied",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.703Z"
+    },
+    {
+      "event": "install",
+      "kind": "blueprint",
+      "name": "journal",
+      "version": "0.2.0",
+      "installed_at": "2026-06-15T05:05:37.703Z",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true
+    },
+    {
+      "event": "info",
+      "step": "module_directory",
+      "name": "trips",
+      "path": "spice/trips",
+      "action": "created",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.703Z"
+    },
+    {
+      "event": "info",
+      "step": "scaffold_foundational",
+      "name": "trips",
+      "item": "trips",
+      "id": "templater-obsidian",
+      "action": "skipped_already_present",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.709Z"
+    },
+    {
+      "event": "install",
+      "kind": "blueprint",
+      "name": "trips",
+      "version": "0.3.0",
+      "installed_at": "2026-06-15T05:05:37.709Z",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true
+    },
+    {
+      "event": "info",
+      "step": "module_directory",
+      "name": "finance",
+      "path": "spice/finance",
+      "action": "created",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.709Z"
+    },
+    {
+      "event": "warning",
+      "step": "new_entity_buttons",
+      "name": "finance",
+      "reason": "entry debt: prompts[0].type \"text\" is not one of string, date, month, number, select",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.728Z"
+    },
+    {
+      "event": "info",
+      "step": "entity_create_block_verified",
+      "name": "finance",
+      "target": "spice/finance/budgets/Budgets.md",
+      "instance": "budget",
+      "sentinel": "// entity-create:budget",
+      "action": "verified_present",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.728Z"
+    },
+    {
+      "event": "info",
+      "step": "entity_create_block_verified",
+      "name": "finance",
+      "target": "spice/finance/paychecks/Paychecks.md",
+      "instance": "paycheck",
+      "sentinel": "// entity-create:paycheck",
+      "action": "verified_present",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.728Z"
+    },
+    {
+      "event": "info",
+      "step": "entity_create_block_verified",
+      "name": "finance",
+      "target": "spice/finance/invoices/Invoices.md",
+      "instance": "invoice",
+      "sentinel": "// entity-create:invoice",
+      "action": "verified_present",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.728Z"
+    },
+    {
+      "event": "info",
+      "step": "finance_defaults_scaffolding",
+      "name": "finance",
+      "reason": "defaults: 2 created, 0 preserved",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.729Z"
+    },
+    {
+      "event": "info",
+      "step": "finance_debt_scaffolding",
+      "name": "finance",
+      "action": "created",
+      "path": "spice/finance/Debt Defaults.md",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.729Z"
+    },
+    {
+      "event": "info",
+      "step": "finance_debt_scaffolding",
+      "name": "finance",
+      "summary": {
+        "created": 1,
+        "preserved": 1
+      },
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "completed_at": "2026-06-15T05:05:37.729Z"
+    },
+    {
+      "event": "info",
+      "step": "finance_categories_group_backfill",
+      "name": "finance",
+      "reason": "no Budget-*.md files to backfill",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.729Z"
+    },
+    {
+      "event": "info",
+      "step": "finance_nav_row_migration",
+      "name": "finance",
+      "summary": {
+        "scanned": 8,
+        "touched": 0,
+        "blocksRewritten": 0
+      },
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "completed_at": "2026-06-15T05:05:37.732Z"
+    },
+    {
+      "event": "info",
+      "step": "scaffold_foundational",
+      "name": "finance",
+      "item": "finance",
+      "id": "templater-obsidian",
+      "action": "skipped_already_present",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.732Z"
+    },
+    {
+      "event": "info",
+      "step": "templater_folder_templates",
+      "name": "finance",
+      "folder": "spice/finance/budgets",
+      "template": "ranch/templates/Template, Budget.md",
+      "action": "applied",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.732Z"
+    },
+    {
+      "event": "info",
+      "step": "templater_folder_templates",
+      "name": "finance",
+      "folder": "spice/finance/paychecks",
+      "template": "ranch/templates/Template, Paycheck.md",
+      "action": "applied",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.732Z"
+    },
+    {
+      "event": "install",
+      "kind": "blueprint",
+      "name": "finance",
+      "version": "0.6.0",
+      "installed_at": "2026-06-15T05:05:37.732Z",
+      "new_entity_buttons": [
+        {
+          "id": "budget",
+          "label": "New Budget",
+          "icon": "wallet-plus",
+          "prompts": [
+            {
+              "key": "month",
+              "label": "Month",
+              "type": "month",
+              "required": true,
+              "default": "{{now.YYYY-MM}}"
+            }
+          ],
+          "destination": {
+            "folder_prefix": "spice/finance/budgets/{{prompts.month}}",
+            "filename_prefix": "Budget-{{prompts.month}}"
+          },
+          "frontmatter_template": {
+            "type": "budget",
+            "month": "{{prompts.month}}",
+            "categories": [],
+            "groups": [],
+            "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+            "cssclasses": [
+              "wide"
+            ]
+          },
+          "seed_from_defaults": {
+            "source_path": "spice/finance/Budget Defaults.md",
+            "source_array": "categories",
+            "carry_arrays": [
+              "groups"
+            ],
+            "per_item_set": {
+              "actual": 0
+            }
+          },
+          "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNavRow\" });\n```\n\n```dataviewjs\nawait customJS.FinanceStatus.renderBadge(dv, \"budget\");\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"BudgetSummary\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"BudgetCategoriesEditor\" });\n```\n",
+          "render_in": {
+            "kind": "hub",
+            "target_path": "{{module_directory}}/budgets/Budgets.md"
+          }
+        },
+        {
+          "id": "paycheck",
+          "label": "New Paycheck",
+          "icon": "wallet-plus",
+          "prompts": [
+            {
+              "key": "start_date",
+              "label": "Start date",
+              "type": "date",
+              "required": true
+            },
+            {
+              "key": "end_date",
+              "label": "End date",
+              "type": "date",
+              "required": true,
+              "validate": "gte:start_date"
+            },
+            {
+              "key": "amount",
+              "label": "Amount",
+              "type": "number",
+              "required": true,
+              "min": 0
+            }
+          ],
+          "destination": {
+            "folder_prefix": "spice/finance/paychecks/{{prompts.start_date}}",
+            "filename_prefix": "Paycheck-{{prompts.start_date}}"
+          },
+          "frontmatter_template": {
+            "type": "paycheck",
+            "pay_period_start": "{{prompts.start_date}}",
+            "pay_period_end": "{{prompts.end_date}}",
+            "paycheck_amount": "{{prompts.amount|number}}",
+            "expenses": [],
+            "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+            "cssclasses": [
+              "wide"
+            ]
+          },
+          "seed_from_defaults": {
+            "source_path": "spice/finance/Paycheck Defaults.md",
+            "source_array": "expenses",
+            "per_item_set": {
+              "paid": false
+            },
+            "resolve_wikilinks": {
+              "field": "debt",
+              "merge": {
+                "planned_monthly_payment": "amount",
+                "url": "url"
+              }
+            }
+          },
+          "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNavRow\" });\n```\n\n```dataviewjs\nawait customJS.FinanceStatus.renderBadge(dv, \"paycheck\");\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PaycheckSummary\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PaycheckExpensesEditor\" });\n```\n",
+          "render_in": {
+            "kind": "hub",
+            "target_path": "{{module_directory}}/paychecks/Paychecks.md"
+          }
+        },
+        {
+          "id": "invoice",
+          "label": "New Invoice",
+          "icon": "file-plus",
+          "prompts": [
+            {
+              "key": "month",
+              "label": "Month",
+              "type": "month",
+              "required": true,
+              "default": "{{now.YYYY-MM}}"
+            }
+          ],
+          "destination": {
+            "folder_prefix": "spice/finance/invoices/{{prompts.month}}",
+            "filename_prefix": "Invoice-{{prompts.month}}"
+          },
+          "frontmatter_template": {
+            "type": "invoice",
+            "month": "{{prompts.month}}",
+            "date": "{{prompts.month}}-01",
+            "rate": 0,
+            "hours": 0,
+            "amount": 0,
+            "submitted_date": null,
+            "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+            "cssclasses": [
+              "wide"
+            ]
+          },
+          "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNavRow\" });\n```\n\n```dataviewjs\nawait customJS.FinanceStatus.renderBadge(dv, \"invoice\");\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"InvoiceControls\" });\n```\n",
+          "extra_files": [
+            {
+              "filename_pattern": "Time-Log-{{prompts.month}}.md",
+              "frontmatter_template": {
+                "type": "time-log",
+                "month": "{{prompts.month}}",
+                "date": "{{prompts.month}}-01",
+                "total_hours": 0,
+                "entries": [],
+                "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+                "cssclasses": [
+                  "wide"
+                ]
+              },
+              "inline_body": "%% nav buttons rendered conditionally — suppressed when this note is embedded elsewhere %%\n```dataviewjs\nconst isEmbedded = dv.container.closest(\".markdown-embed\") != null;\nif (!isEmbedded) {\n    await dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n    await dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNavRow\" });\n}\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"InvoiceTimeLogEditor\" });\n```\n"
+            },
+            {
+              "filename_pattern": "Board-{{prompts.month}}.md",
+              "subfolder": "board",
+              "frontmatter_template": {
+                "kanban-plugin": "board",
+                "title": "Invoice {{prompts.month}} Board",
+                "type": "kanban",
+                "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+                "tags": [
+                  "invoice/{{prompts.month}}"
+                ]
+              },
+              "inline_body": "## To Do\n\n## In Progress\n\n## Completed\n\n%% kanban:settings\n```\n{\"kanban-plugin\":\"board\",\"list-collapse\":[false,false,false],\"new-note-folder\":\"spice/finance/invoices/{{prompts.month}}/board\",\"new-note-template\":\"ranch/templates/Template, Invoice Board Card.md\"}\n```\n%%\n"
+            }
+          ],
+          "render_in": {
+            "kind": "hub",
+            "target_path": "{{module_directory}}/invoices/Invoices.md"
+          }
+        },
+        {
+          "id": "debt",
+          "label": "New Debt",
+          "icon": "credit-card",
+          "prompts": [
+            {
+              "key": "name",
+              "label": "Name",
+              "type": "text",
+              "required": true
+            },
+            {
+              "key": "kind",
+              "label": "Kind",
+              "type": "select",
+              "options": [
+                "credit-card",
+                "student-loan",
+                "other"
+              ],
+              "required": true,
+              "default": "credit-card"
+            }
+          ],
+          "destination": {
+            "folder_prefix": "spice/finance/debts",
+            "filename_prefix": "Debt-{{prompts.name|slugify}}"
+          },
+          "frontmatter_template": {
+            "type": "debt",
+            "kind": "{{prompts.kind}}",
+            "name": "{{prompts.name}}",
+            "current_balance": 0,
+            "apr": 0,
+            "min_payment": 0,
+            "planned_monthly_payment": 0,
+            "balance_history": [],
+            "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+            "cssclasses": [
+              "wide"
+            ]
+          },
+          "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNavRow\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"DebtSummary\" });\n```\n",
+          "render_in": {
+            "kind": "hub",
+            "target_path": "{{module_directory}}/debts/Debts.md"
+          }
+        }
+      ],
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true
+    },
+    {
+      "event": "info",
+      "step": "module_directory",
+      "name": "scratch",
+      "path": "spice/scratch",
+      "action": "created",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.733Z"
+    },
+    {
+      "event": "info",
+      "step": "scaffold_foundational",
+      "name": "scratch",
+      "item": "scratch",
+      "id": "templater-obsidian",
+      "action": "skipped_already_present",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.738Z"
+    },
+    {
+      "event": "info",
+      "step": "templater_folder_templates",
+      "name": "scratch",
+      "folder": "spice/scratch",
+      "template": "ranch/templates/Scratch.md",
+      "action": "applied",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.738Z"
+    },
+    {
+      "event": "info",
+      "step": "customjs_startup_scripts",
+      "name": "scratch",
+      "script": "ScratchDayMigrateInit",
+      "action": "applied",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.739Z"
+    },
+    {
+      "event": "install",
+      "kind": "blueprint",
+      "name": "scratch",
+      "version": "0.5.2",
+      "installed_at": "2026-06-15T05:05:37.739Z",
+      "new_entity_buttons": [
+        {
+          "id": "scratch",
+          "label": "+ New Scratch",
+          "icon": "pencil-plus",
+          "prompts": [
+            {
+              "key": "title",
+              "label": "Scratch title (optional)",
+              "type": "string",
+              "required": false
+            }
+          ],
+          "destination": {
+            "folder_prefix": "spice/scratch/{{current_file.frontmatter.day}}-routed",
+            "filename_prefix": "Scratch-{{current_file.frontmatter.day}}-",
+            "filename_date_pattern": "HH-mm",
+            "filename_suffix": ""
+          },
+          "frontmatter_template": {
+            "type": "scratch",
+            "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+            "day": "{{current_file.frontmatter.day}}",
+            "title": "{{prompts.title}}"
+          },
+          "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n---\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ScratchLeafActions\" });\n```\n\n---\n"
+        }
+      ],
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true
+    },
+    {
+      "event": "info",
+      "step": "module_directory",
+      "name": "teams",
+      "path": "spice/teams",
+      "action": "created",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.739Z"
+    },
+    {
+      "event": "info",
+      "step": "scaffold_foundational",
+      "name": "teams",
+      "item": "teams",
+      "id": "templater-obsidian",
+      "action": "skipped_already_present",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.743Z"
+    },
+    {
+      "event": "info",
+      "step": "templater_folder_templates",
+      "name": "teams",
+      "folder": "spice/teams",
+      "template": "ranch/templates/Template, Team.md",
+      "action": "applied",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.743Z"
+    },
+    {
+      "event": "install",
+      "kind": "blueprint",
+      "name": "teams",
+      "version": "0.3.0",
+      "installed_at": "2026-06-15T05:05:37.744Z",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true
+    },
+    {
+      "event": "aggregate",
+      "step": "claude_surface_aggregate",
+      "contributions": 9,
+      "entries": 99,
+      "rejected": 0,
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.744Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/audit.md",
+      "owner": "audit",
+      "version": "0.3.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.745Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/audit/drift/SKILL.md",
+      "owner": "audit",
+      "version": "0.3.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.746Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/install.md",
+      "owner": "platform-claude",
+      "version": "0.1.3",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.746Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/upgrade.md",
+      "owner": "platform-claude",
+      "version": "0.1.3",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.746Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/bootstrap.md",
+      "owner": "platform-claude",
+      "version": "0.1.3",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.747Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/platform/install/SKILL.md",
+      "owner": "platform-claude",
+      "version": "0.1.3",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.748Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/platform/upgrade/SKILL.md",
+      "owner": "platform-claude",
+      "version": "0.1.3",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.748Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/platform/bootstrap/SKILL.md",
+      "owner": "platform-claude",
+      "version": "0.1.3",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.749Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/cowork.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.749Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/bootstrap-vault/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.750Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/morning-briefing/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.750Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/midday-tripwire/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.751Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/eod-review/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.751Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/weekly-review/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.752Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/monthly-review/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.752Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/reconcile-cowork/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.752Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/onboard-scheduled-jobs/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.753Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/context-builder/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.753Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/edit-microscope/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.754Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/audit-siblings/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.754Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/check-vault-routing/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.755Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/date-context/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.755Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/ensure-daily-note/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.756Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-weather/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.756Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-calendar/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.756Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-gmail/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.757Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-imessage/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.757Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-finance-yesterday/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.758Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-finance-cc-today/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.758Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-cc-debt-snapshot/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.758Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-projects/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.759Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-threads/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.759Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-semantic-related/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.760Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/write-run-note-morning-briefing/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.761Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/write-run-note-eod-review/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.762Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/write-run-note-midday-tripwire/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.763Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/write-run-note-finance/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.763Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/write-run-note-weekly-review/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.764Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/write-run-note-monthly-review/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.764Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/write-summary-invoice-prep/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.765Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/write-summary-fte-status/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.765Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/update-active-threads/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.765Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/update-active-projects/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.766Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/update-weekly-snapshot/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.766Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/run-audit-receipt/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.767Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/weekly.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.767Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/monthly.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.767Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/scaffold-timeframes/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.768Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/read-user-preferences/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.768Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/plan-dispatch/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.769Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-from-served-by/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.769Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/capture-tick/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.770Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/synthesize-day/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.771Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/read-memory/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.771Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/capture-frame-drift/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.772Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/learn-from-checks/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.772Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/check-heartbeat/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.772Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-semantic-memory/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.773Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/compose-body/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.773Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/compose-feedback-capture/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.774Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/ingest-feedback/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.774Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/resolve-person/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.774Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/synthesize-week/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.774Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/discover-people/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.775Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/find-missing-people/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.775Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/sync-scheduled-jobs/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.775Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/daily.md",
+      "owner": "daily",
+      "version": "0.13.6",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.776Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/daily/open-today/SKILL.md",
+      "owner": "daily",
+      "version": "0.13.6",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.776Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/meetings.md",
+      "owner": "meetings",
+      "version": "0.8.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.776Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/meetings/new-meeting/SKILL.md",
+      "owner": "meetings",
+      "version": "0.8.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.777Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/products.md",
+      "owner": "products",
+      "version": "0.3.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.778Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/products/new-product/SKILL.md",
+      "owner": "products",
+      "version": "0.3.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.778Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/project.md",
+      "owner": "project",
+      "version": "1.21.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.778Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/project/new-project/SKILL.md",
+      "owner": "project",
+      "version": "1.21.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.779Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/scratch.md",
+      "owner": "scratch",
+      "version": "0.5.2",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.779Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/scratch/new-scratch/SKILL.md",
+      "owner": "scratch",
+      "version": "0.5.2",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.780Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/teams.md",
+      "owner": "teams",
+      "version": "0.3.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.780Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/teams/new-team/SKILL.md",
+      "owner": "teams",
+      "version": "0.3.0",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.780Z"
+    },
+    {
+      "event": "notice",
+      "step": "claude_md_regen",
+      "message": "CLAUDE.md not present; skipping regen (first-touch scaffold ships in S6)",
+      "git_commit": "566e44d4a03ba7f19167b61d6e6bd5f2c86db6f0",
+      "git_tag": null,
+      "git_dirty": true,
+      "attempted_at": "2026-06-15T05:05:37.781Z"
+    }
+  ],
+  "workshop_version": "0.109.0"
+}

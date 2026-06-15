@@ -1,0 +1,37 @@
+/* sauce-callouts.css — v0.79.0 (styling 0.2.0)
+ * Per-type callout colors. The Baseline theme renders callouts monochrome by
+ * default (single --callout-color); this restores type differentiation so
+ * info / warning / tip / example / note / quote read distinctly.
+ * Light hues tuned to rose-pine-light; dark hues to melange-dark. */
+
+/* ---- Light (rose-pine-light) ---- */
+.theme-light .callout[data-callout="info"],
+.theme-light .callout[data-callout="note"]      { --callout-color:  40, 105, 131; }   /* pine */
+.theme-light .callout[data-callout="tip"],
+.theme-light .callout[data-callout="success"],
+.theme-light .callout[data-callout="done"]       { --callout-color:  86, 148, 128; }   /* foam */
+.theme-light .callout[data-callout="warning"],
+.theme-light .callout[data-callout="caution"],
+.theme-light .callout[data-callout="attention"]  { --callout-color: 234, 157,  52; }   /* gold */
+.theme-light .callout[data-callout="example"]    { --callout-color: 144, 122, 169; }   /* iris */
+.theme-light .callout[data-callout="quote"],
+.theme-light .callout[data-callout="cite"]       { --callout-color: 121, 117, 147; }   /* muted */
+.theme-light .callout[data-callout="danger"],
+.theme-light .callout[data-callout="error"],
+.theme-light .callout[data-callout="bug"]        { --callout-color: 180,  99, 122; }   /* love */
+
+/* ---- Dark (melange-dark) ---- */
+.theme-dark .callout[data-callout="info"],
+.theme-dark .callout[data-callout="note"]        { --callout-color: 138, 173, 244; }
+.theme-dark .callout[data-callout="tip"],
+.theme-dark .callout[data-callout="success"],
+.theme-dark .callout[data-callout="done"]        { --callout-color: 166, 209, 137; }
+.theme-dark .callout[data-callout="warning"],
+.theme-dark .callout[data-callout="caution"],
+.theme-dark .callout[data-callout="attention"]   { --callout-color: 229, 192, 123; }
+.theme-dark .callout[data-callout="example"]     { --callout-color: 198, 160, 246; }
+.theme-dark .callout[data-callout="quote"],
+.theme-dark .callout[data-callout="cite"]        { --callout-color: 169, 177, 214; }
+.theme-dark .callout[data-callout="danger"],
+.theme-dark .callout[data-callout="error"],
+.theme-dark .callout[data-callout="bug"]         { --callout-color: 237, 135, 150; }

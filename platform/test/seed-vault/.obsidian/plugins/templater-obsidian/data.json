@@ -1,0 +1,49 @@
+{
+  "templates_folder": "ranch/templates",
+  "trigger_on_file_creation": true,
+  "enable_folder_templates": true,
+  "folder_templates": [
+    {
+      "folder": "spice/meetings/notes",
+      "template": "ranch/templates/Meeting.md"
+    },
+    {
+      "folder": "spice/meetings/hubs",
+      "template": "ranch/templates/Meeting Hub.md"
+    },
+    {
+      "folder": "spice/products",
+      "template": "ranch/templates/Template, Product.md"
+    },
+    {
+      "folder": "spice/to-do",
+      "template": "ranch/templates/Today To-Do.md"
+    },
+    {
+      "folder": "spice/journal",
+      "template": "ranch/templates/Today Journal.md"
+    },
+    {
+      "folder": "spice/finance/budgets",
+      "template": "ranch/templates/Template, Budget.md"
+    },
+    {
+      "folder": "spice/finance/paychecks",
+      "template": "ranch/templates/Template, Paycheck.md"
+    },
+    {
+      "folder": "spice/scratch",
+      "template": "ranch/templates/Scratch.md"
+    },
+    {
+      "folder": "spice/teams",
+      "template": "ranch/templates/Template, Team.md"
+    }
+  ],
+  "enabled_templates_hotkeys": [
+    "ranch/templates/Validate.md",
+    "ranch/templates/Audit.md"
+  ],
+  "startup_templates": [],
+  "enable_system_commands": true
+}

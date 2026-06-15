@@ -1,0 +1,12 @@
+{
+  "jsFolder": "ranch/scripts",
+  "jsFiles": "",
+  "startupScriptNames": [
+    "KanbanStatusSyncInit",
+    "ProjectTaskCreateListenerInit",
+    "ToDoMigrateInit",
+    "ScratchDayMigrateInit"
+  ],
+  "registeredInvocableScriptNames": [],
+  "rerunStartupScriptsOnFileChange": false
+}

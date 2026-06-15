@@ -1,0 +1,186 @@
+{
+  "contributions": {
+    "finance": [
+      {
+        "scope": {
+          "path_glob": "spice/finance/budgets/**/*.md"
+        },
+        "extends": "_canonical-vocab",
+        "required_frontmatter": {
+          "type": {
+            "required": true,
+            "type": "string",
+            "equals": "budget"
+          },
+          "month": {
+            "required": true,
+            "type": "string",
+            "matches": "^\\d{4}-\\d{2}$"
+          },
+          "groups": {
+            "required": false,
+            "type": "array"
+          }
+        },
+        "naming_pattern": "^Budget-\\d{4}-\\d{2}\\.md$"
+      },
+      {
+        "scope": {
+          "path_glob": "spice/finance/Budget Defaults.md"
+        },
+        "extends": "_canonical-vocab",
+        "required_frontmatter": {
+          "type": {
+            "required": true,
+            "type": "string",
+            "equals": "budget-defaults"
+          },
+          "groups": {
+            "required": true,
+            "type": "array"
+          },
+          "categories": {
+            "required": true,
+            "type": "array"
+          }
+        },
+        "naming_pattern": "^Budget Defaults\\.md$"
+      },
+      {
+        "scope": {
+          "path_glob": "spice/finance/Paycheck Defaults.md"
+        },
+        "extends": "_canonical-vocab",
+        "required_frontmatter": {
+          "type": {
+            "required": true,
+            "type": "string",
+            "equals": "paycheck-defaults"
+          },
+          "expenses": {
+            "required": true,
+            "type": "array"
+          }
+        },
+        "naming_pattern": "^Paycheck Defaults\\.md$"
+      },
+      {
+        "scope": {
+          "path_glob": "spice/finance/paychecks/**/*.md"
+        },
+        "extends": "_canonical-vocab",
+        "required_frontmatter": {
+          "type": {
+            "required": true,
+            "type": "string",
+            "equals": "paycheck"
+          },
+          "pay_period_start": {
+            "required": true,
+            "type": "string",
+            "matches": "^\\d{4}-\\d{2}-\\d{2}(T.*)?$"
+          },
+          "pay_period_end": {
+            "required": true,
+            "type": "string",
+            "matches": "^\\d{4}-\\d{2}-\\d{2}(T.*)?$"
+          }
+        },
+        "naming_pattern": "^Paycheck-\\d{4}-\\d{2}-\\d{2}\\.md$"
+      },
+      {
+        "scope": {
+          "path_glob": "spice/finance/invoices/*/Invoice-*.md"
+        },
+        "extends": "_canonical-vocab",
+        "required_frontmatter": {
+          "type": {
+            "required": true,
+            "type": "string",
+            "equals": "invoice"
+          },
+          "month": {
+            "required": true,
+            "type": "string",
+            "matches": "^\\d{4}-\\d{2}$"
+          },
+          "date": {
+            "required": true,
+            "type": "string",
+            "matches": "^\\d{4}-\\d{2}-\\d{2}(T.*)?$"
+          }
+        }
+      },
+      {
+        "scope": {
+          "path_glob": "spice/finance/invoices/*/Time-Log-*.md"
+        },
+        "extends": "_canonical-vocab",
+        "required_frontmatter": {
+          "type": {
+            "required": true,
+            "type": "string",
+            "equals": "time-log"
+          },
+          "month": {
+            "required": true,
+            "type": "string",
+            "matches": "^\\d{4}-\\d{2}$"
+          }
+        }
+      },
+      {
+        "scope": {
+          "path_glob": "spice/finance/debts/Debt-*.md"
+        },
+        "extends": "_canonical-vocab",
+        "required_frontmatter": {
+          "type": {
+            "required": true,
+            "type": "string",
+            "equals": "debt"
+          },
+          "kind": {
+            "required": true,
+            "type": "string"
+          },
+          "name": {
+            "required": true,
+            "type": "string"
+          },
+          "current_balance": {
+            "required": true,
+            "type": "number"
+          },
+          "apr": {
+            "required": false,
+            "type": "number"
+          },
+          "balance_history": {
+            "required": false,
+            "type": "array"
+          }
+        },
+        "naming_pattern": "^Debt-.+\\.md$"
+      },
+      {
+        "scope": {
+          "path_glob": "spice/finance/Debt Defaults.md"
+        },
+        "extends": "_canonical-vocab",
+        "required_frontmatter": {
+          "type": {
+            "required": true,
+            "type": "string",
+            "equals": "debt-defaults"
+          },
+          "debts": {
+            "required": true,
+            "type": "array"
+          }
+        },
+        "naming_pattern": "^Debt Defaults\\.md$"
+      }
+    ]
+  }
+}
