@@ -120,14 +120,15 @@ class FinanceNav {
 
     _renderCrossHub(root, mode) {
         const row = root.createEl("div", { cls: "fnav-row fnav-hubs" });
-        row.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 4px 0;";
+        // Centered with even gap; buttons share the row width.
+        row.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; margin: 4px 0;";
 
         const HUBS = [
-            { key: "finance",   label: "Finance",   path: "spice/finance/Finance.md" },
-            { key: "budgets",   label: "Budgets",   path: "spice/finance/budgets/Budgets.md" },
-            { key: "paychecks", label: "Paychecks", path: "spice/finance/paychecks/Paychecks.md" },
-            { key: "invoices",  label: "Invoices",  path: "spice/finance/invoices/Invoices.md" },
-            { key: "debts",     label: "Debts",     path: "spice/finance/debts/Debts.md" },
+            { key: "finance",   label: "Finance",   path: "spice/finance/Finance.md",             icon: this._icon("wallet") },
+            { key: "budgets",   label: "Budgets",   path: "spice/finance/budgets/Budgets.md",     icon: this._icon("calculator") },
+            { key: "paychecks", label: "Paychecks", path: "spice/finance/paychecks/Paychecks.md", icon: this._icon("coins") },
+            { key: "invoices",  label: "Invoices",  path: "spice/finance/invoices/Invoices.md",   icon: this._icon("file-text") },
+            { key: "debts",     label: "Debts",     path: "spice/finance/debts/Debts.md",         icon: this._icon("credit-card") },
         ];
 
         const here = this._hereKey(mode);
@@ -136,6 +137,7 @@ class FinanceNav {
             if (hub.key === here) continue;
             customJS.AccentButton.render(row, {
                 label: hub.label,
+                icon: hub.icon,
                 onClick: () => app.workspace.openLinkText(hub.path, "")
             });
         }
@@ -143,13 +145,13 @@ class FinanceNav {
 
     async _renderHubContext(dv, root, mode) {
         const row = root.createEl("div", { cls: "fnav-row fnav-context" });
-        row.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 4px 0;";
+        row.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; margin: 4px 0;";
 
         const config = {
-            "hub-budgets":   { instance: "budget",   defaultsLabel: "Budget Defaults",   defaultsPath: "spice/finance/Budget Defaults.md" },
-            "hub-paychecks": { instance: "paycheck", defaultsLabel: "Paycheck Defaults", defaultsPath: "spice/finance/Paycheck Defaults.md" },
-            "hub-invoices":  { instance: "invoice",  defaultsLabel: null,                defaultsPath: null },
-            "hub-debts":     { instance: "debt",     defaultsLabel: "Debt Defaults",     defaultsPath: "spice/finance/Debt Defaults.md" },
+            "hub-budgets":   { instance: "budget",   defaultsLabel: "Budget Defaults",   defaultsPath: "spice/finance/Budget Defaults.md",   defaultsIcon: this._icon("settings") },
+            "hub-paychecks": { instance: "paycheck", defaultsLabel: "Paycheck Defaults", defaultsPath: "spice/finance/Paycheck Defaults.md", defaultsIcon: this._icon("settings") },
+            "hub-invoices":  { instance: "invoice",  defaultsLabel: null,                defaultsPath: null,                                 defaultsIcon: null },
+            "hub-debts":     { instance: "debt",     defaultsLabel: "Debt Defaults",     defaultsPath: "spice/finance/Debt Defaults.md",     defaultsIcon: this._icon("settings") },
         };
         const cfg = config[mode];
         if (!cfg) return;
@@ -173,6 +175,7 @@ class FinanceNav {
         if (cfg.defaultsPath && cfg.defaultsLabel) {
             customJS.AccentButton.render(row, {
                 label: cfg.defaultsLabel,
+                icon: cfg.defaultsIcon,
                 onClick: () => app.workspace.openLinkText(cfg.defaultsPath, "")
             });
         }
@@ -180,13 +183,13 @@ class FinanceNav {
 
     _renderEntityContext(root, mode, page) {
         const row = root.createEl("div", { cls: "fnav-row fnav-context" });
-        row.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 4px 0;";
+        row.style.cssText = "display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; margin: 4px 0;";
 
         const subAreaConfig = {
-            "entity-budget":   { hubLabel: "Budgets Hub",   hubPath: "spice/finance/budgets/Budgets.md",     sub: "budgets",   sortKey: "month",            dir: "ASC"  },
-            "entity-paycheck": { hubLabel: "Paychecks Hub", hubPath: "spice/finance/paychecks/Paychecks.md", sub: "paychecks", sortKey: "pay_period_start", dir: "ASC"  },
-            "entity-invoice":  { hubLabel: "Invoices Hub",  hubPath: "spice/finance/invoices/Invoices.md",   sub: "invoices",  sortKey: "month",            dir: "ASC"  },
-            "entity-debt":     { hubLabel: "Debts Hub",     hubPath: "spice/finance/debts/Debts.md",         sub: "debts",     sortKey: "current_balance",  dir: "DESC" },
+            "entity-budget":   { hubLabel: "Budgets Hub",   hubIcon: this._icon("calculator"),  hubPath: "spice/finance/budgets/Budgets.md",     sub: "budgets",   sortKey: "month",            dir: "ASC"  },
+            "entity-paycheck": { hubLabel: "Paychecks Hub", hubIcon: this._icon("coins"),       hubPath: "spice/finance/paychecks/Paychecks.md", sub: "paychecks", sortKey: "pay_period_start", dir: "ASC"  },
+            "entity-invoice":  { hubLabel: "Invoices Hub",  hubIcon: this._icon("file-text"),   hubPath: "spice/finance/invoices/Invoices.md",   sub: "invoices",  sortKey: "month",            dir: "ASC"  },
+            "entity-debt":     { hubLabel: "Debts Hub",     hubIcon: this._icon("credit-card"), hubPath: "spice/finance/debts/Debts.md",         sub: "debts",     sortKey: "current_balance",  dir: "DESC" },
         };
         const cfg = subAreaConfig[mode];
         if (!cfg) return;
@@ -194,6 +197,7 @@ class FinanceNav {
         // Sub-area hub button
         customJS.AccentButton.render(row, {
             label: cfg.hubLabel,
+            icon: cfg.hubIcon,
             onClick: () => app.workspace.openLinkText(cfg.hubPath, "")
         });
 
@@ -228,16 +232,43 @@ class FinanceNav {
             const nextSib = siblings[idx + 1];
             if (prevSib) {
                 customJS.AccentButton.render(row, {
-                    label: "← Prev",
+                    label: "Prev",
+                    icon: this._icon("chevron-left"),
                     onClick: () => app.workspace.openLinkText(prevSib.path, "")
                 });
             }
             if (nextSib) {
                 customJS.AccentButton.render(row, {
-                    label: "Next →",
+                    label: "Next",
+                    icon: this._icon("chevron-right"),
                     onClick: () => app.workspace.openLinkText(nextSib.path, "")
                 });
             }
         } catch (_e) { /* fail-soft — sibling nav is best-effort */ }
+    }
+
+    _icon(key) {
+        // Inline 14x14 SVGs (lucide-style). Returns SVG string suitable for
+        // customJS.AccentButton.render's icon parameter.
+        switch (key) {
+            case "wallet":
+                return '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg>';
+            case "calculator":
+                return '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="10" x2="8" y2="10"/><line x1="12" y1="10" x2="12" y2="10"/><line x1="16" y1="10" x2="16" y2="10"/><line x1="8" y1="14" x2="8" y2="14"/><line x1="12" y1="14" x2="12" y2="14"/><line x1="16" y1="14" x2="16" y2="14"/><line x1="8" y1="18" x2="12" y2="18"/><line x1="16" y1="18" x2="16" y2="18"/></svg>';
+            case "coins":
+                return '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6"/><path d="M18.09 10.37A6 6 0 1 1 10.34 18"/><path d="M7 6h1v4"/><path d="m16.71 13.88.7.71-2.82 2.82"/></svg>';
+            case "file-text":
+                return '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/></svg>';
+            case "credit-card":
+                return '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>';
+            case "settings":
+                return '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>';
+            case "chevron-left":
+                return '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>';
+            case "chevron-right":
+                return '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>';
+            default:
+                return null;
+        }
     }
 }
