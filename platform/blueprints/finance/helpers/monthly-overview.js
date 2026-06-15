@@ -97,14 +97,44 @@ class MonthlyOverview {
             for (const p of pages) {
                 if (!p) continue;
                 if (p.type !== "paycheck") continue;
-                if (typeof p.pay_period_start !== "string") continue;
-                if (!p.pay_period_start.startsWith(monthKey)) continue;
+                // v0.114.0: Dataview parses unquoted YYYY-MM-DD frontmatter
+                // scalars as Date objects (Luxon DateTime under the hood). The
+                // pre-v0.114.0 filter required `typeof === "string"`, silently
+                // dropping all such paychecks — observed on production headspace
+                // where May paychecks (unquoted dates) were excluded and Income
+                // rendered as $0. Accept both forms via _coerceDateString.
+                const startStr = this._coerceDateString(p.pay_period_start);
+                if (!startStr) continue;
+                if (!startStr.startsWith(monthKey)) continue;
                 out.push(p);
             }
             return out;
         } catch (_e) {
             return [];
         }
+    }
+
+    _coerceDateString(v) {
+        if (typeof v === "string") return v;
+        // Dataview/Luxon DateTime form — has .toISODate() returning YYYY-MM-DD.
+        if (v && typeof v.toISODate === "function") {
+            try {
+                const d = v.toISODate();
+                if (typeof d === "string") return d;
+            } catch (_e) { /* fall through */ }
+        }
+        // Native Date form — toISOString() starts with YYYY-MM-DD.
+        if (v instanceof Date && !isNaN(v.getTime())) {
+            try { return v.toISOString().slice(0, 10); } catch (_e) { /* fall through */ }
+        }
+        // moment.js form — has .format("YYYY-MM-DD").
+        if (v && typeof v.format === "function") {
+            try {
+                const d = v.format("YYYY-MM-DD");
+                if (typeof d === "string") return d;
+            } catch (_e) { /* fall through */ }
+        }
+        return null;
     }
 
     _readDebts(dv) {

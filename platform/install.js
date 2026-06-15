@@ -4169,6 +4169,7 @@ async function applyFinanceMigrations(tp, manifest, variables, history, git) {
   await applyFinancePaycheckBodyMigration(tp, manifest, variables, history, git);        // CF-3 v0.107.0
   await applyFinancePaycheckDebtBandInjection(tp, manifest, variables, history, git);    // NEW v0.112.0 — PaycheckDebtBand between PaycheckSummary and PaycheckExpensesEditor
   await applyFinancePaycheckDefaultsDebtLinking(tp, manifest, variables, history, git);  // NEW v0.108.0
+  await applyFinancePaycheckDefaultsDebtBackfill(tp, manifest, variables, history, git); // NEW v0.114.0 — word-overlap matcher + auto-injection of orphan debts (supersedes the v0.108.0 CC_NAME_RE; complementary not redundant — v0.108.0 still runs for the CC pattern)
   await applyFinanceNavRowMigration(tp, manifest, variables, history, git);              // NEW v0.108.0
   await applyFinanceNavRowGuardFormMigration(tp, manifest, variables, history, git);     // NEW v0.110.3 — guard-form regression: rewrites class:"BudgetNavButtons"|"PaycheckNavButtons"|"InvoiceNavButtons" guard-form refs missed by v0.108.0's direct-call regex
   await applyFinanceHubsRepair(tp, manifest, variables, history, git);                    // NEW v0.110.0 — heals stale pre-CF-3 hub bodies (now also strips top-hub FinanceHubActions via v0.110.3 template change)
@@ -5818,6 +5819,290 @@ async function applyFinancePaycheckDefaultsDebtLinking(tp, manifest, variables, 
       completed_at: new Date().toISOString() });
   } catch (e) {
     history?.push({ event: "warning", step: "finance_paycheck_defaults_debt_linking", name: "finance",
+      reason: `write failed: ${e.message}`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+      attempted_at: new Date().toISOString() });
+  }
+}
+
+// ============================================================================
+// v0.114.0 — applyFinancePaycheckDefaultsDebtBackfill
+//
+// Two-phase migration on `spice/finance/Paycheck Defaults.md`:
+//
+// PHASE 1 (backfill) — Existing expense items lacking a `debt:` wikilink get
+// matched against Debt-*.md entities by word-overlap on item.name vs debt.name.
+// Stricter than v0.108.0's applyFinancePaycheckDefaultsDebtLinking (which only
+// matched a hardcoded CC_NAME_RE — missed "Capital One Platinum" against
+// "Cap1 Platinum" because the debt name uses an abbreviation). On match, inject
+// `      debt: "[[Debt-<slug>]]"`.
+//
+// PHASE 2 (auto-injection) — Any Debt-*.md entity NOT already referenced by
+// any expense's debt: wikilink gets appended as a NEW expense row. Uses
+// debt.name as item, debt.planned_monthly_payment (or min_payment, or 0) as
+// amount, derives category from debt.kind, debt.url as url, paid: false,
+// debt: "[[Debt-<slug>]]". This is the auto-discovery the user requested:
+// new Debt-*.md entries surface in the next paycheck automatically (via
+// seed_from_defaults) without manual Paycheck Defaults maintenance.
+//
+// Naturally idempotent (no marker needed): both phases short-circuit when no
+// work remains. Safe to re-run on every install — that's the feature.
+// .sauce-backup snapshot before any write.
+
+const _PCD_STOPWORDS = new Set([
+  "the", "and", "for", "with", "from", "card", "cards", "loan", "loans",
+  "payment", "payments", "credit"
+]);
+
+function _pcdTokenize(s) {
+  if (typeof s !== "string") return [];
+  return s.toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter(t => t.length >= 3 && !_PCD_STOPWORDS.has(t));
+}
+
+function _pcdScoreItemAgainstDebt(itemName, debtName) {
+  const itemTokens = new Set(_pcdTokenize(itemName));
+  const debtTokens = _pcdTokenize(debtName);
+  if (debtTokens.length === 0 || itemTokens.size === 0) return 0;
+  let score = 0;
+  for (const t of debtTokens) if (itemTokens.has(t)) score++;
+  return score;
+}
+
+function _pcdBestDebtForItem(itemName, debtList) {
+  let best = null;
+  let bestScore = 0;
+  let bestLen = 0;
+  for (const d of debtList) {
+    const score = _pcdScoreItemAgainstDebt(itemName, d.name);
+    if (score > bestScore || (score === bestScore && score > 0 && d.name.length > bestLen)) {
+      bestScore = score;
+      bestLen = d.name.length;
+      best = d;
+    }
+  }
+  return bestScore > 0 ? best : null;
+}
+
+function _pcdCategoryFromDebtKind(kind) {
+  if (kind === "credit-card") return "Credit Payment";
+  if (kind === "student-loan") return "Student Loans";
+  return "Debt Payment";
+}
+
+// _pcdBackfillExistingExpenses — PHASE 1 line-level YAML transform.
+// Mirrors _linkPaycheckDefaultsDebt's traversal pattern (block-list expenses[]
+// with `  - ` start lines and `    ` continuations) so the output stays in the
+// existing file's format.
+function _pcdBackfillExistingExpenses(body, debtList) {
+  const fmMatch = body.match(/^---\n([\s\S]*?)\n---/);
+  if (!fmMatch) return { body, touched: false, linked: 0 };
+  const fmLines = fmMatch[1].split("\n");
+  let touched = false;
+  let linked = 0;
+  let inExpenses = false;
+  let i = 0;
+  const isItemStart = (line) => /^  - /.test(line);
+  const isItemContinuation = (line) => /^    \S/.test(line);
+
+  while (i < fmLines.length) {
+    if (/^expenses:\s*$/.test(fmLines[i])) { inExpenses = true; i++; continue; }
+    if (inExpenses) {
+      if (isItemStart(fmLines[i])) {
+        const itemStartIdx = i;
+        let j = i + 1;
+        while (j < fmLines.length && isItemContinuation(fmLines[j])) j++;
+        const itemLines = fmLines.slice(itemStartIdx, j);
+
+        // Parse item name from this block (item: key on either the - line or a continuation).
+        let itemName = null;
+        let hasDebt = false;
+        for (const il of itemLines) {
+          if (/^\s*debt:\s/.test(il)) hasDebt = true;
+          const im = il.match(/(?:^  - item:|^    item:)\s*(.*)/);
+          if (im && !itemName) {
+            itemName = im[1].trim().replace(/^["']|["']$/g, "").replace(/,\s*$/, "");
+          }
+          // Also handle inline-style `  - { item: X, ... }`
+          if (!itemName) {
+            const inline = il.match(/^  - \{[^}]*item:\s*([^,}]+)/);
+            if (inline) itemName = inline[1].trim().replace(/^["']|["']$/g, "");
+          }
+        }
+
+        if (itemName && !hasDebt) {
+          const debt = _pcdBestDebtForItem(itemName, debtList);
+          if (debt) {
+            const newLines = [];
+            let insertedDebt = false;
+            for (let k = 0; k < itemLines.length; k++) {
+              const il = itemLines[k];
+              newLines.push(il);
+              // Insert debt: line after the FIRST `  - ` line of the item.
+              if (!insertedDebt && /^  - /.test(il)) {
+                newLines.push(`      debt: "[[${debt.slug}]]"`);
+                insertedDebt = true;
+                linked++;
+                touched = true;
+              }
+            }
+            fmLines.splice(itemStartIdx, j - itemStartIdx, ...newLines);
+            j = itemStartIdx + newLines.length;
+          }
+        }
+        i = j;
+        continue;
+      } else if (fmLines[i] === "" || /^  /.test(fmLines[i])) {
+        i++;
+        continue;
+      } else {
+        inExpenses = false;
+      }
+    }
+    i++;
+  }
+
+  if (!touched) return { body, touched: false, linked: 0 };
+  const newFm = fmLines.join("\n");
+  const newBody = body.replace(/^---\n[\s\S]*?\n---/, `---\n${newFm}\n---`);
+  return { body: newBody, touched: true, linked };
+}
+
+// _pcdReferencedDebtSlugs — scan expenses[] for any debt: "[[Debt-X]]" wikilinks.
+function _pcdReferencedDebtSlugs(body) {
+  const set = new Set();
+  const fmMatch = body.match(/^---\n([\s\S]*?)\n---/);
+  if (!fmMatch) return set;
+  const re = /debt:\s*["']\[\[([^\]]+)\]\]["']/g;
+  let m;
+  while ((m = re.exec(fmMatch[1])) !== null) set.add(m[1]);
+  return set;
+}
+
+// _pcdAppendOrphanDebts — PHASE 2. Appends one expense block per orphan debt to
+// the expenses[] block-list at the END (right before the next top-level key or
+// the closing ---). YAML format matches the file's existing block-list style.
+function _pcdAppendOrphanDebts(body, debtList, referencedSlugs) {
+  const orphans = debtList.filter(d => !referencedSlugs.has(d.slug));
+  if (orphans.length === 0) return { body, touched: false, appended: 0 };
+
+  const fmMatch = body.match(/^(---\n)([\s\S]*?)(\n---)/);
+  if (!fmMatch) return { body, touched: false, appended: 0 };
+  const fmLines = fmMatch[2].split("\n");
+
+  // Find the end of the expenses: block (line index AFTER the last continuation
+  // of the last expense item under `expenses:`).
+  let inExpenses = false;
+  let expensesEndIdx = -1;
+  for (let i = 0; i < fmLines.length; i++) {
+    const line = fmLines[i];
+    if (/^expenses:\s*$/.test(line)) { inExpenses = true; expensesEndIdx = i; continue; }
+    if (inExpenses) {
+      if (/^  - /.test(line) || /^    \S/.test(line) || line === "") {
+        expensesEndIdx = i;
+        continue;
+      }
+      // Hit a new top-level key — expenses block ended at expensesEndIdx.
+      break;
+    }
+  }
+  if (expensesEndIdx === -1) return { body, touched: false, appended: 0 };
+
+  const blocks = [];
+  for (const d of orphans) {
+    const amount = (typeof d.planned_monthly_payment === "number" && d.planned_monthly_payment > 0)
+      ? d.planned_monthly_payment
+      : (typeof d.min_payment === "number" && d.min_payment > 0 ? d.min_payment : 0);
+    const category = _pcdCategoryFromDebtKind(d.kind);
+    const url = (typeof d.url === "string" && d.url.length > 0) ? d.url.replace(/"/g, '\\"') : "";
+    blocks.push(
+      `  - item: ${d.name}\n` +
+      `      debt: "[[${d.slug}]]"\n` +
+      `      amount: ${amount}\n` +
+      `      category: ${category}\n` +
+      `      url: "${url}"\n` +
+      `      paid: false`
+    );
+  }
+  const insertion = blocks.join("\n");
+  fmLines.splice(expensesEndIdx + 1, 0, insertion);
+  const newFm = fmLines.join("\n");
+  const newBody = body.replace(/^---\n[\s\S]*?\n---/, `---\n${newFm}\n---`);
+  return { body: newBody, touched: true, appended: orphans.length };
+}
+
+async function applyFinancePaycheckDefaultsDebtBackfill(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "finance") return;
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+
+  const paycheckDefaultsPath = "spice/finance/Paycheck Defaults.md";
+  if (!(await adapter.exists(paycheckDefaultsPath))) return;
+  const debtsRoot = "spice/finance/debts";
+  if (!(await adapter.exists(debtsRoot))) return;
+
+  // Build debt list: name + slug + kind + planned_monthly_payment + min_payment + url.
+  let debtListing;
+  try { debtListing = await adapter.list(debtsRoot); } catch (_e) { return; }
+  const debtFiles = (debtListing.files || []).filter(p => /Debt-[^/]+\.md$/.test(p));
+  const debtList = [];
+  for (const dp of debtFiles) {
+    try {
+      const debtBody = await adapter.read(dp);
+      const fm = _parseFrontmatterStrict(debtBody);
+      if (!fm || !fm.name) continue;
+      const slug = dp.replace(/\\/g, "/").split("/").pop().replace(/\.md$/, "");
+      debtList.push({
+        slug,
+        name: String(fm.name),
+        kind: typeof fm.kind === "string" ? fm.kind : "other",
+        planned_monthly_payment: typeof fm.planned_monthly_payment === "number" ? fm.planned_monthly_payment : null,
+        min_payment: typeof fm.min_payment === "number" ? fm.min_payment : null,
+        url: typeof fm.url === "string" ? fm.url : ""
+      });
+    } catch (_e) { /* per-file failure-loud */ }
+  }
+  if (debtList.length === 0) return;
+
+  let body;
+  try { body = await adapter.read(paycheckDefaultsPath); } catch (_e) { return; }
+  const originalBody = body;
+
+  // PHASE 1 — backfill wikilinks on existing matched items.
+  const phase1 = _pcdBackfillExistingExpenses(body, debtList);
+  body = phase1.body;
+
+  // PHASE 2 — append rows for orphan debts.
+  const referencedSlugs = _pcdReferencedDebtSlugs(body);
+  const phase2 = _pcdAppendOrphanDebts(body, debtList, referencedSlugs);
+  body = phase2.body;
+
+  if (!phase1.touched && !phase2.touched) return;  // truly idempotent: no-op
+
+  // Snapshot original before write.
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  const backupPath = `.sauce-backup/${ts}/spice/finance/Paycheck Defaults.md`;
+  const backupDir = backupPath.substring(0, backupPath.lastIndexOf("/"));
+  try {
+    if (!(await adapter.exists(backupDir))) await adapter.mkdir(backupDir);
+    await adapter.write(backupPath, originalBody);
+  } catch (e) {
+    history?.push({ event: "warning", step: "finance_paycheck_defaults_debt_backfill", name: "finance",
+      reason: `snapshot failed: ${e.message}`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+      attempted_at: new Date().toISOString() });
+  }
+
+  try {
+    await adapter.write(paycheckDefaultsPath, body);
+    history?.push({ event: "info", step: "finance_paycheck_defaults_debt_backfill", name: "finance",
+      summary: { linked: phase1.linked, appended: phase2.appended, debtsKnown: debtList.length, snapshot: backupPath },
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+      completed_at: new Date().toISOString() });
+  } catch (e) {
+    history?.push({ event: "warning", step: "finance_paycheck_defaults_debt_backfill", name: "finance",
       reason: `write failed: ${e.message}`,
       git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
       attempted_at: new Date().toISOString() });
