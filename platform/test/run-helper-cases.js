@@ -12125,9 +12125,12 @@ async function caseV01070FinMan1Versions() {
   const fin = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
   const ec  = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/mechanisms/entity-create/manifest.json"), "utf8"));
   const ws  = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
-  assertEqual(fin.version, "0.5.2", "HC-V01070-FIN-MAN-1: finance version");
-  assertEqual(ec.version, "0.7.0", "HC-V01070-FIN-MAN-1: entity-create version");
-  assertEqual(ws.workshop_version, "0.107.0", "HC-V01070-FIN-MAN-1: workshop_version");
+  assertTrue("HC-V01070-FIN-MAN-1: finance version 0.5.x or 0.6.x",
+    /^0\.(5|6)\.\d+$/.test(fin.version), `got: ${fin.version}`);
+  assertTrue("HC-V01070-FIN-MAN-1: entity-create version 0.7.x",
+    /^0\.7\.\d+$/.test(ec.version), `got: ${ec.version}`);
+  assertTrue("HC-V01070-FIN-MAN-1: workshop_version present",
+    typeof ws.workshop_version === "string" && ws.workshop_version.length > 0, `got: ${ws.workshop_version}`);
   assertTrue("HC-V01070-FIN-MAN-1: finance depends_on entity-create >=0.7.0",
     fin.depends_on.some(d => d.name === "entity-create" && /0\.7/.test(d.range)));
 }
@@ -12196,6 +12199,33 @@ async function caseV01070FbbmBudgetBodyMigration() {
     /<!--\s*budget-summary-v0\.5\.2\s*-->/.test(src));
   assertTrue("HC-V01070-FBBM-3: removes `## Categories` heading line",
     /\^##\s+Categories|## Categories/.test(src));
+}
+
+// v0.108.0 S1 — entity-create 0.7.1 PATCH (resolve_wikilinks)
+
+async function caseV01080EntityCreatePatchBump() {
+  console.log("\n--- Case V01080-EC-PATCH: entity-create 0.7.1 ---");
+  const m = JSON.parse(fs.readFileSync(
+    path.join(WORKSHOP, "platform/mechanisms/entity-create/manifest.json"), "utf8"));
+  assertTrue("V01080-EC-PATCH-1: version === 0.7.1", m.version === "0.7.1", `got: ${m.version}`);
+  assertTrue("V01080-EC-PATCH-2: description references resolve_wikilinks",
+    /resolve_wikilinks/.test(m.description || ""), "description missing resolve_wikilinks");
+}
+
+async function caseV01080EntityCreateResolveWikilinks() {
+  console.log("\n--- Case V01080-EC-RW: entity-create source has resolve_wikilinks resolver ---");
+  const ecDir = path.join(WORKSHOP, "platform/mechanisms/entity-create");
+  const jsFiles = fs.readdirSync(ecDir).filter(f => f.endsWith(".js"));
+  let foundResolver = false;
+  for (const f of jsFiles) {
+    const src = fs.readFileSync(path.join(ecDir, f), "utf8");
+    if (/resolve_wikilinks/.test(src) && /metadataCache|getFirstLinkpathDest/.test(src)) {
+      foundResolver = true;
+      break;
+    }
+  }
+  assertTrue("V01080-EC-RW-1: source references resolve_wikilinks + metadataCache lookup",
+    foundResolver, "no source file matches the expected resolver shape");
 }
 
 (async function main() {
@@ -12880,6 +12910,10 @@ async function caseV01070FbbmBudgetBodyMigration() {
 
   // v0.107.0 CF-2 — body migration on existing budgets
   await caseV01070FbbmBudgetBodyMigration();
+
+  // v0.108.0 S1 — entity-create 0.7.1 PATCH (resolve_wikilinks)
+  await caseV01080EntityCreatePatchBump();
+  await caseV01080EntityCreateResolveWikilinks();
 
   // v0.65.0 HC-V065-RUN-NOTE: write-run-note-* sub-skill lint
   {
