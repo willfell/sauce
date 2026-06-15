@@ -154,7 +154,8 @@ class ProjectDocsIndex {
     }
 
     // 3. Section card row.
-    proxyDv.header(3, "Sections");
+    // v0.109.0 S5 — SectionLabel replaces the prior dv.header(3, ...) call.
+    customJS.SectionLabel.render(proxyDv, { text: "Sections" });
     const folderIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--interactive-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`;
 
     // v0.109.0 S4 — each section card carries last-updated meta + most-recent-doc

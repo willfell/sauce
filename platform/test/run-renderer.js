@@ -2052,8 +2052,14 @@ async function testRendV067Todo1() {
       results.push(['R-WIKI-1 docs-hub-template-body', await testRWikiHubTemplateBody()]);
     }
     if (which === 'finance' || which === 'all') {
-      results.push(['FF1 budget-nav-in-path', await testFF1BudgetNavInPath()]);
-      results.push(['FF2 budget-nav-out-of-path', await testFF2BudgetNavOutOfPath()]);
+      // v0.108.0 S3 deleted budget-nav-buttons.js (FinanceNavRow subsumed the
+      // per-area BudgetNavButtons / PaycheckNavButtons / InvoiceNavButtons
+      // surfaces); the FF1 + FF2 in-path / out-of-path renderer tests targeted
+      // that deleted helper. Inheriting the gap with a v0.109.0 SUPERSEDED
+      // comment so the harness stops ENOENT'ing on the missing file. The new
+      // FinanceNavRow surface has its own dedicated coverage in run-helper-cases.
+      // results.push(['FF1 budget-nav-in-path', await testFF1BudgetNavInPath()]);
+      // results.push(['FF2 budget-nav-out-of-path', await testFF2BudgetNavOutOfPath()]);
       results.push(['FF3 hub-area-row-icons', await testFF3HubAreaRowIcons()]);
       results.push(['FF4 budget-categories-editor-add-button', await testFF4BudgetCategoriesAddButton()]);
       results.push(['FF5 paycheck-expenses-editor-add-button', await testFF5PaycheckExpensesAddButton()]);

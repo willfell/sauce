@@ -9,6 +9,10 @@ tags:
 
 ---
 
+```dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "Breadcrumb" });
+```
+
 ## In Planning
 
 ## In Progress

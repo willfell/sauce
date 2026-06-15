@@ -6720,14 +6720,16 @@ async function casePSW5ManifestRegistration() {
 }
 
 async function casePSW6TemplateBlock() {
-    console.log("\n--- Case PSW-6: Template, Project.md includes ProjectStatusWidget block ---");
+    console.log("\n--- Case PSW-6: Template, Project.md includes ProjectStatusWidget block (v0.109.0: no H2) ---");
     const tplPath = path.join(WORKSHOP, "platform/blueprints/project/templates/Project.md");
     const src = fs.readFileSync(tplPath, "utf8");
-    const hasHeading = /^## Status\s*$/m.test(src);
+    // v0.109.0 S6 SUPERSEDES v0.51.0: the ## Status H2 was dropped. The widget
+    // still renders (the at-a-glance chip is the signal); the H2 label was
+    // redundant. Assert the block presence only.
     const hasBlock = /class:\s*"ProjectStatusWidget"/.test(src);
-    assertTrue("PSW-6: Template, Project.md has ## Status heading + ProjectStatusWidget dataviewjs block",
-        hasHeading && hasBlock,
-        `heading=${hasHeading} block=${hasBlock}`);
+    assertTrue("PSW-6: Template, Project.md has ProjectStatusWidget dataviewjs block",
+        hasBlock,
+        `block=${hasBlock}`);
 }
 
 // -------------------------------------------------------------------------
@@ -8318,10 +8320,10 @@ async function caseHCV0891Versions() {
     path.join(WORKSHOP, "manifest.json"), "utf8"));
   const wsVer = platformMan.workshop_version || platformMan.version
     || (platformMan.workshop && platformMan.workshop.version);
-  assertEqual(wsVer, "0.108.0", "HC-V0891-VERSION-C: workshop pin = 0.93.3 (v0.93.3 bump)");
+  assertEqual(wsVer, "0.109.0", "HC-V0891-VERSION-C: workshop pin = 0.93.3 (v0.93.3 bump)");
   const pkg = JSON.parse(fs.readFileSync(
     path.resolve(WORKSHOP, "..", "package.json"), "utf8"));
-  assertEqual(pkg.version, "0.108.0", "HC-V0891-VERSION-C: package.json = 0.93.3 (v0.93.3 bump)");
+  assertEqual(pkg.version, "0.109.0", "HC-V0891-VERSION-C: package.json = 0.93.3 (v0.93.3 bump)");
 
   // D: mechanism count unchanged
   const mechs = (platformMan.mechanisms && Array.isArray(platformMan.mechanisms))
@@ -10527,12 +10529,16 @@ async function caseV01020PMP2QueriesMeetingsAndMatchesProject() {
 }
 
 async function caseV01020PMP3SortByDateDescTake5() {
-  console.log(`\n--- Case HC-V01020-PMP-3: sorts by date desc + limits/takes to 5 ---`);
+  console.log(`\n--- Case HC-V01020-PMP-3: sorts by date desc + caps to N (5 in v0.102.0; 3 in v0.109.0) ---`);
   const src = _readPmpSrc();
+  // v0.109.0 S5 — the sort target loosened from `p => p.date` to a more general
+  // arrow expression (the helper now passes a function reference), so the regex
+  // accepts either the legacy literal `p => p.date` form OR any `.sort((p) => p.date, "desc")`.
   assertTrue("HC-V01020-PMP-3a: sort by p.date desc",
-    /\.sort\s*\(\s*p\s*=>\s*p\.date\s*,\s*["']desc["']\s*\)/.test(src));
-  assertTrue("HC-V01020-PMP-3b: limits to 5 via .limit(5), .slice(0, 5), or .take(5)",
-    /\.limit\s*\(\s*5\s*\)/.test(src) || /\.slice\s*\(\s*0\s*,\s*5\s*\)/.test(src) || /\.take\s*\(\s*5\s*\)/.test(src));
+    /\.sort\s*\(\s*\(?\s*p\s*\)?\s*=>\s*p\.date\s*,\s*["']desc["']\s*\)/.test(src));
+  // v0.109.0 S5 cap reduced from 5 → 3 (SpaceDailyDashboard-style panel).
+  assertTrue("HC-V01020-PMP-3b: caps to 3 (v0.109.0) or 5 (legacy) via .limit/.slice/.take",
+    /\.limit\s*\(\s*[35]\s*\)/.test(src) || /\.slice\s*\(\s*0\s*,\s*[35]\s*\)/.test(src) || /\.take\s*\(\s*[35]\s*\)/.test(src));
 }
 
 async function caseV01020PMP4NewMeetingButtonPresetPrompts() {
@@ -10545,10 +10551,15 @@ async function caseV01020PMP4NewMeetingButtonPresetPrompts() {
 }
 
 async function caseV01020PMP5EmptyStateLanguage() {
-  console.log(`\n--- Case HC-V01020-PMP-5: empty-state "No meetings linked" language present ---`);
+  console.log(`\n--- Case HC-V01020-PMP-5: empty-state rendering (v0.109.0 superseded — assert no info callout) ---`);
   const src = _readPmpSrc();
-  assertTrue("HC-V01020-PMP-5: empty-state \"No meetings linked\" copy present",
-    /No meetings linked/.test(src));
+  // v0.109.0 S5 SUPERSEDES v0.102.0: the info callout + "No meetings linked"
+  // copy were dropped per v0.106.0.1's empty-state-callout-removal policy.
+  // Empty state now renders NOTHING (caller surfaces the always-available
+  // + New meeting button BEFORE the empty-state check). Assert the absence
+  // to lock the new contract.
+  assertTrue("HC-V01020-PMP-5: empty-state info callout removed",
+    !/\[!info\]\+/.test(src) && !/No meetings linked/.test(src));
 }
 
 async function caseV01020PMP6AliasLinkMatch() {
@@ -10559,10 +10570,13 @@ async function caseV01020PMP6AliasLinkMatch() {
 }
 
 async function caseV01020PMP7ExpandToggleReentryGuard() {
-  console.log(`\n--- Case HC-V01020-PMP-7: View-all expand toggle guards against double-click re-entry ---`);
+  console.log(`\n--- Case HC-V01020-PMP-7: expand toggle (v0.109.0 superseded — assert toggle removed) ---`);
   const src = _readPmpSrc();
-  assertTrue("HC-V01020-PMP-7: re-entry guard via `let expanded = false` + `expanded = true` flag",
-    /let\s+expanded\s*=\s*false/.test(src) && /expanded\s*=\s*true/.test(src));
+  // v0.109.0 S5 SUPERSEDES v0.102.0: the View-all expand toggle was dropped
+  // (cards capped hard at 3; deeper digs happen via the meeting note itself).
+  // Lock the new contract by asserting the toggle scaffolding is gone.
+  assertTrue("HC-V01020-PMP-7: expand toggle removed",
+    !/let\s+expanded\s*=\s*false/.test(src) && !/View all/.test(src));
 }
 
 // v0.102.0 S4 — project blueprint MINOR 1.16.0 (sections schema, modified doc-note button,
@@ -10682,19 +10696,19 @@ async function caseV01020ProjTpl1DocsHubInvokesSections() {
 }
 
 async function caseV01020ProjTpl2MeetingsPanelInProjectTemplate() {
-  console.log(`\n--- Case HC-V01020-PROJ-TPL-2: Project template has ## Meetings between ## Workstreams and ## Mentions + invokes ProjectMeetingsPanel ---`);
+  console.log(`\n--- Case HC-V01020-PROJ-TPL-2: Project template invokes ProjectMeetingsPanel (v0.109.0 superseded H2 + order) ---`);
   assertTrue("HC-V01020-PROJ-TPL-2: Project.md exists", fs.existsSync(_PROJ_TPL));
   const body = fs.readFileSync(_PROJ_TPL, "utf8");
-  const ws = body.indexOf("## Workstreams");
-  const mt = body.indexOf("## Meetings");
-  const mn = body.indexOf("## Mentions");
-  assertTrue("HC-V01020-PROJ-TPL-2a: ## Workstreams present", ws !== -1);
-  assertTrue("HC-V01020-PROJ-TPL-2b: ## Meetings present", mt !== -1);
-  assertTrue("HC-V01020-PROJ-TPL-2c: ## Mentions present", mn !== -1);
-  assertTrue("HC-V01020-PROJ-TPL-2d: ordering Workstreams < Meetings < Mentions",
-    ws < mt && mt < mn);
+  // v0.109.0 S6 SUPERSEDES v0.102.0: section H2s (## Workstreams / ## Meetings
+  // / ## Mentions) were dropped — helpers emit their own SectionLabel now —
+  // and Mentions was removed entirely. ProjectMeetingsPanel still ships and
+  // is invoked; section order is now Status → Meetings → Workstreams.
   assertTrue("HC-V01020-PROJ-TPL-2e: invokes ProjectMeetingsPanel via customjs-guard view",
     /customjs-guard["'\s,\n]+[^}]*class\s*:\s*["']ProjectMeetingsPanel["']/.test(body));
+  const idxMeetings    = body.indexOf('class: "ProjectMeetingsPanel"');
+  const idxWorkstreams = body.indexOf('class: "ProjectWorkstreamManager"');
+  assertTrue("HC-V01020-PROJ-TPL-2-ORDER: Meetings BEFORE Workstreams (v0.109.0 ordering)",
+    idxMeetings >= 0 && idxWorkstreams > idxMeetings);
 }
 
 async function caseV01020ProjTpl3DocNoteRuleGlobNested() {
@@ -11102,16 +11116,19 @@ const _PROJ_SECTION_HUB_TPL = path.join(WORKSHOP, "platform", "blueprints", "pro
 const _PROJ_DOC_NOTE_TPL = path.join(WORKSHOP, "platform", "blueprints", "project", "templates", "Doc Note.md");
 
 async function caseV01030ProjMan1VersionAndCustomjs() {
-  console.log("\n--- Case HC-V01030-PROJ-MAN-1: project manifest version 1.20.0 + customjs_classes adds Breadcrumb + ProjectDocsIndex + SectionHub ---");
+  console.log("\n--- Case HC-V01030-PROJ-MAN-1: project manifest version 1.21.0 + customjs_classes adds Breadcrumb + ProjectDocsIndex + SectionHub ---");
   const m = _readProjManifest();
   // v0.104.0 superseded the v0.103.0 hard-pin (1.17.0) → 1.18.0.
   // v0.105.0 superseded the v0.104.0 hard-pin → 1.19.0 (docs-system-fixes
   // brief reshapes the doc-note prompt schema + ships DocSearch + section-hub
   // refactor). v0.106.0 supersedes → 1.20.0 (DocSearch persistent filter state
   // + 150ms debounce + ProjectDocsIndex dashboard widgets expansion).
+  // v0.109.0 supersedes → 1.21.0 (projects visual overhaul: DocSearch params
+  // + SectionLabel primitive + ProjectsHubCards search + Template Project.md
+  // rewrite + Breadcrumb extension + marker cleanup).
   // Breadcrumb + ProjectDocsIndex + SectionHub carryover assertions still apply.
-  assertTrue("HC-V01030-PROJ-MAN-1a: project manifest version is exactly 1.20.0",
-    m && m.version === "1.20.0", `got: ${m && m.version}`);
+  assertTrue("HC-V01030-PROJ-MAN-1a: project manifest version is exactly 1.21.0",
+    m && m.version === "1.21.0", `got: ${m && m.version}`);
   const cls = (m && Array.isArray(m.customjs_classes)) ? m.customjs_classes : [];
   assertTrue("HC-V01030-PROJ-MAN-1b: customjs_classes includes Breadcrumb",
     cls.indexOf("Breadcrumb") !== -1);
@@ -11480,9 +11497,12 @@ async function caseV01040Man1Manifest118() {
   // registered) + the live project blueprint version (bumped to 1.19.0 in
   // v0.105.0 per docs-system-fixes brief; then 1.20.0 in v0.106.0 per the
   // DocSearch persistence + dashboard widgets brief).
-  console.log("\n--- Case HC-V01040-MAN-1: project blueprint version 1.20.0 + DocSearch registered + doc-search.js shipped ---");
+  console.log("\n--- Case HC-V01040-MAN-1: project blueprint version 1.21.0 (v0.109.0) + DocSearch registered + doc-search.js shipped ---");
   const m = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/manifest.json"), "utf8"));
-  assertTrue("HC-V01040-MAN-1: project blueprint version 1.20.0", m.version === "1.20.0");
+  // v0.106.0 → 1.20.0 (DocSearch persistence + dashboard widgets).
+  // v0.109.0 → 1.21.0 (projects visual overhaul: DocSearch params, SectionLabel,
+  // ProjectsHubCards search, template rewrite, Breadcrumb extension, marker cleanup).
+  assertTrue("HC-V01040-MAN-1: project blueprint version 1.21.0", m.version === "1.21.0");
   assertTrue("HC-V01040-MAN-1: customjs_classes includes DocSearch",
     Array.isArray(m.customjs_classes) && m.customjs_classes.includes("DocSearch"));
   const sources = (m.files || []).map(f => f.source);
@@ -11578,9 +11598,10 @@ async function caseV01050EcMan1Manifest060() {
 }
 
 async function caseV01050Man1ProjectManifest119() {
-  console.log("\n--- Case HC-V01050-MAN-1: project blueprint manifest 1.20.0 + doc-note prompts use new options_source ---");
+  console.log("\n--- Case HC-V01050-MAN-1: project blueprint manifest 1.21.0 (v0.109.0 bump) + doc-note prompts use new options_source ---");
   const m = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/manifest.json"), "utf8"));
-  assertTrue("HC-V01050-MAN-1: project blueprint version 1.20.0", m.version === "1.20.0",
+  // v0.109.0 bumped project blueprint 1.20.0 → 1.21.0 (projects visual overhaul).
+  assertTrue("HC-V01050-MAN-1: project blueprint version 1.21.0", m.version === "1.21.0",
     `got: ${m.version}`);
   // Locate doc-note entity-create entry.
   const docNote = (m.new_entity_buttons || []).find(b => b.id === "doc-note");
@@ -12125,12 +12146,13 @@ async function caseV01070FinMan1Versions() {
   const fin = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
   const ec  = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/mechanisms/entity-create/manifest.json"), "utf8"));
   const ws  = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
-  assertTrue("HC-V01070-FIN-MAN-1: finance version 0.5.x or 0.6.x",
-    /^0\.(5|6)\.\d+$/.test(fin.version), `got: ${fin.version}`);
-  assertTrue("HC-V01070-FIN-MAN-1: entity-create version 0.7.x",
-    /^0\.7\.\d+$/.test(ec.version), `got: ${ec.version}`);
-  assertTrue("HC-V01070-FIN-MAN-1: workshop_version present",
-    typeof ws.workshop_version === "string" && ws.workshop_version.length > 0, `got: ${ws.workshop_version}`);
+  // v0.108.0 superseded the v0.107.0 finance + entity-create pins:
+  //   finance 0.5.2 → 0.6.0 (CF-3 + v0.108.0 ship)
+  //   entity-create 0.7.0 → 0.7.1 (v0.108.0 S1 resolve_wikilinks PATCH)
+  // v0.109.0 bumps workshop_version on top of v0.108.0's finance/EC ship.
+  assertEqual(fin.version, "0.6.0", "HC-V01070-FIN-MAN-1: finance version");
+  assertEqual(ec.version, "0.7.1", "HC-V01070-FIN-MAN-1: entity-create version");
+  assertEqual(ws.workshop_version, "0.109.0", "HC-V01070-FIN-MAN-1: workshop_version");
   assertTrue("HC-V01070-FIN-MAN-1: finance depends_on entity-create >=0.7.0",
     fin.depends_on.some(d => d.name === "entity-create" && /0\.7/.test(d.range)));
 }
@@ -12445,8 +12467,9 @@ async function caseV01080FinanceVersionBump() {
   const ec = (workshop.mechanisms || []).find(m => m.name === "entity-create");
   assertTrue("V01080-FV-4: workshop manifest pin entity-create === 0.7.1",
     ec && ec.version === "0.7.1", `got: ${ec?.version}`);
-  assertTrue("V01080-FV-5: workshop_version bumped to 0.108.0",
-    workshop.workshop_version === "0.108.0", `got: ${workshop.workshop_version}`);
+  // v0.109.0 supersedes 0.108.0: workshop bumped again for projects-visual-overhaul.
+  assertTrue("V01080-FV-5: workshop_version === 0.109.0 (v0.109.0 supersedes the v0.108.0 baseline this case originally pinned)",
+    workshop.workshop_version === "0.109.0", `got: ${workshop.workshop_version}`);
 }
 
 async function caseV01080FinanceNewEntityButtonDebt() {
@@ -12516,6 +12539,142 @@ async function caseV01070FpbmPaycheckBodyMigration() {
 }
 
 // v0.109.0 — projects visual overhaul. See Docs/plans/2026-06-15-v0.109.0-projects-visual-overhaul-design.md.
+
+// S7 — Breadcrumb extension + template additions.
+async function caseV01090Bc1TypeBranches() {
+  console.log("\n--- Case HC-V01090-BC-1: Breadcrumb handles map/kanban/task-note types ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/breadcrumb.js"), "utf8");
+  assertTrue("HC-V01090-BC-1: handles type map",       /cur\.type\s*===\s*["']map["']/.test(src));
+  assertTrue("HC-V01090-BC-1: handles type kanban",    /cur\.type\s*===\s*["']kanban["']/.test(src));
+  assertTrue("HC-V01090-BC-1: handles type task-note", /cur\.type\s*===\s*["']task-note["']/.test(src));
+}
+
+async function caseV01090Bc2PathFallback() {
+  console.log("\n--- Case HC-V01090-BC-2: Breadcrumb has path-based projectSlug fallback ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/breadcrumb.js"), "utf8");
+  assertTrue("HC-V01090-BC-2: _resolveProjectFromPath helper present",
+    /_resolveProjectFromPath\s*\(/.test(src));
+  assertTrue("HC-V01090-BC-2: path regex anchors on spice/projects/<slug>/",
+    /\^spice\\\/projects\\\/\(\[\^\\\/\]\+\)\\\//.test(src));
+}
+
+async function caseV01090TplMapHasBreadcrumb() {
+  console.log("\n--- Case HC-V01090-TPL-MAP-BC: Project Map.md ships Breadcrumb block ---");
+  const t = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/templates/Project Map.md"), "utf8");
+  assertTrue("HC-V01090-TPL-MAP-BC: Project Map invokes Breadcrumb before SpaceNavButtons",
+    /class: "Breadcrumb"[\s\S]*?class: "SpaceNavButtons"/.test(t));
+}
+
+async function caseV01090TplTaskHasBreadcrumb() {
+  console.log("\n--- Case HC-V01090-TPL-TASK-BC: Task Note.md ships Breadcrumb block ---");
+  const t = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/templates/Task Note.md"), "utf8");
+  assertTrue("HC-V01090-TPL-TASK-BC: Task Note invokes Breadcrumb before SpaceNavButtons",
+    /class: "Breadcrumb"[\s\S]*?class: "SpaceNavButtons"/.test(t));
+}
+
+async function caseV01090TplBoardHasBreadcrumb() {
+  console.log("\n--- Case HC-V01090-TPL-BOARD-BC: Project Board.md ships Breadcrumb block above columns ---");
+  const t = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/templates/Project Board.md"), "utf8");
+  assertTrue("HC-V01090-TPL-BOARD-BC: Project Board invokes Breadcrumb",
+    /class: "Breadcrumb"/.test(t));
+  assertTrue("HC-V01090-TPL-BOARD-BC: Breadcrumb sits above ## In Planning column",
+    t.indexOf('class: "Breadcrumb"') < t.indexOf("## In Planning"));
+}
+
+// S6 — Template, Project.md rewrite.
+async function caseV01090TplBreadcrumbFirst() {
+  console.log("\n--- Case HC-V01090-TPL-BC: Template, Project.md has Breadcrumb as first block ---");
+  const tpl = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/templates/Project.md"), "utf8");
+  assertTrue("HC-V01090-TPL-BC: first block invokes Breadcrumb",
+    /^```dataviewjs\nawait dv\.view\("ranch\/views\/customjs-guard", \{ class: "Breadcrumb" \}\);\n```/.test(tpl));
+}
+
+async function caseV01090TplNoStatusH2() {
+  console.log("\n--- Case HC-V01090-TPL-NSH2: Template, Project.md drops every section H2 ---");
+  const tpl = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/templates/Project.md"), "utf8");
+  assertTrue("HC-V01090-TPL-NSH2: no ## Status H2",      !/^## Status$/m.test(tpl));
+  assertTrue("HC-V01090-TPL-NSH2: no ## Workstreams H2", !/^## Workstreams$/m.test(tpl));
+  assertTrue("HC-V01090-TPL-NSH2: no ## Meetings H2",    !/^## Meetings$/m.test(tpl));
+  assertTrue("HC-V01090-TPL-NSH2: no ## Mentions H2",    !/^## Mentions$/m.test(tpl));
+}
+
+async function caseV01090TplNoLegacyPanels() {
+  console.log("\n--- Case HC-V01090-TPL-NLP: Template, Project.md drops BacklinkPanel + ProjectNotes&ReferencedBy ---");
+  const tpl = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/templates/Project.md"), "utf8");
+  assertTrue("HC-V01090-TPL-NLP: no BacklinkPanel invocation",            !/class:\s*"BacklinkPanel"/.test(tpl));
+  assertTrue("HC-V01090-TPL-NLP: no ProjectNotesCards invocation",        !/class:\s*"ProjectNotesCards"/.test(tpl));
+  assertTrue("HC-V01090-TPL-NLP: no ProjectReferencedByCards invocation", !/class:\s*"ProjectReferencedByCards"/.test(tpl));
+}
+
+async function caseV01090TplSectionOrder() {
+  console.log("\n--- Case HC-V01090-TPL-SO: Template, Project.md ordering = Status → Meetings → Workstreams ---");
+  const tpl = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/templates/Project.md"), "utf8");
+  const idxStatus      = tpl.indexOf('class: "ProjectStatusWidget"');
+  const idxMeetings    = tpl.indexOf('class: "ProjectMeetingsPanel"');
+  const idxWorkstreams = tpl.indexOf('class: "ProjectWorkstreamManager"');
+  assertTrue("HC-V01090-TPL-SO: Status BEFORE Meetings",  idxStatus >= 0 && idxMeetings > idxStatus);
+  assertTrue("HC-V01090-TPL-SO: Meetings BEFORE Workstreams", idxMeetings >= 0 && idxWorkstreams > idxMeetings);
+}
+
+// S5 — ProjectMeetingsPanel rewrite + SectionLabel adoption everywhere.
+async function caseV01090Pmp1Cap3Cards() {
+  console.log("\n--- Case HC-V01090-PMP-1: ProjectMeetingsPanel caps at 3 + drops expand toggle ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/project-meetings-panel.js"), "utf8");
+  assertTrue("HC-V01090-PMP-1: caps at 3 meetings",
+    /limit\(3\)|slice\(0,\s*3\)/.test(src));
+  assertTrue("HC-V01090-PMP-1: no expand toggle",
+    !/View all/.test(src));
+}
+
+async function caseV01090Pmp2EnrichMeeting() {
+  console.log("\n--- Case HC-V01090-PMP-2: ProjectMeetingsPanel ports _enrichMeeting ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/project-meetings-panel.js"), "utf8");
+  assertTrue("HC-V01090-PMP-2: _enrichMeeting present", /_enrichMeeting\s*\(/.test(src));
+  assertTrue("HC-V01090-PMP-2: reads body via app.vault.read", /app\.vault\.read/.test(src));
+  assertTrue("HC-V01090-PMP-2: counts unchecked tasks", /openTasks/.test(src));
+  assertTrue("HC-V01090-PMP-2: detects notes section", /hasNotes/.test(src));
+}
+
+async function caseV01090Pmp3SectionLabelInvoked() {
+  console.log("\n--- Case HC-V01090-PMP-3: ProjectMeetingsPanel invokes SectionLabel ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/project-meetings-panel.js"), "utf8");
+  assertTrue("HC-V01090-PMP-3: SectionLabel invoked",
+    /customJS\.SectionLabel\.render\(/.test(src));
+}
+
+async function caseV01090Pmp4NoInfoCalloutOnEmpty() {
+  console.log("\n--- Case HC-V01090-PMP-4: ProjectMeetingsPanel renders nothing on empty (no info callout) ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/project-meetings-panel.js"), "utf8");
+  assertTrue("HC-V01090-PMP-4: no info callout on empty state",
+    !/\[!info\]\+/.test(src));
+}
+
+async function caseV01090Pwm1SectionLabelInvoked() {
+  console.log("\n--- Case HC-V01090-PWM-1: ProjectWorkstreamManager invokes SectionLabel ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/project-workstream-manager.js"), "utf8");
+  assertTrue("HC-V01090-PWM-1: SectionLabel invoked at top of render",
+    /customJS\.SectionLabel\.render\(/.test(src));
+}
+
+async function caseV01090ShSlabel() {
+  console.log("\n--- Case HC-V01090-SH-SL: SectionHub adopts SectionLabel for Sub-sections + Docs ---");
+  const sh = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/section-hub.js"), "utf8");
+  assertTrue("HC-V01090-SH-SL: SectionHub uses SectionLabel for Sub-sections",
+    /customJS\.SectionLabel\.render[\s\S]{0,160}Sub-sections/.test(sh));
+  assertTrue("HC-V01090-SH-SL: SectionHub uses SectionLabel for Docs",
+    /customJS\.SectionLabel\.render[\s\S]{0,160}Docs/.test(sh));
+  assertTrue("HC-V01090-SH-SL: no proxyDv.header(3) survivors",
+    !/proxyDv\.header\(\s*3\b/.test(sh));
+}
+
+async function caseV01090PdiSlabel() {
+  console.log("\n--- Case HC-V01090-PDI-SL: ProjectDocsIndex adopts SectionLabel for Sections ---");
+  const pdi = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/project-docs-index.js"), "utf8");
+  assertTrue("HC-V01090-PDI-SL: ProjectDocsIndex uses SectionLabel for Sections",
+    /customJS\.SectionLabel\.render[\s\S]{0,160}Sections/.test(pdi));
+  assertTrue("HC-V01090-PDI-SL: no proxyDv.header(3) survivors",
+    !/proxyDv\.header\(\s*3\b/.test(pdi));
+}
 
 // S4 — Docs.md section card metadata.
 async function caseV01090Pdi1MaxMtimeComputed() {
@@ -13295,6 +13454,22 @@ async function caseV01090Ds1EntityTypeOpt() {
   await caseV01090Pdi1MaxMtimeComputed();    // S4
   await caseV01090Pdi2SectionsSortedDesc();  // S4
   await caseV01090Pdi3MetaIncludesUpdated(); // S4
+  await caseV01090Pmp1Cap3Cards();           // S5
+  await caseV01090Pmp2EnrichMeeting();       // S5
+  await caseV01090Pmp3SectionLabelInvoked(); // S5
+  await caseV01090Pmp4NoInfoCalloutOnEmpty();// S5
+  await caseV01090Pwm1SectionLabelInvoked(); // S5
+  await caseV01090ShSlabel();                // S5
+  await caseV01090PdiSlabel();               // S5
+  await caseV01090TplBreadcrumbFirst();      // S6
+  await caseV01090TplNoStatusH2();           // S6
+  await caseV01090TplNoLegacyPanels();       // S6
+  await caseV01090TplSectionOrder();         // S6
+  await caseV01090Bc1TypeBranches();         // S7
+  await caseV01090Bc2PathFallback();         // S7
+  await caseV01090TplMapHasBreadcrumb();     // S7
+  await caseV01090TplTaskHasBreadcrumb();    // S7
+  await caseV01090TplBoardHasBreadcrumb();   // S7
   await caseV01070FbbmBudgetBodyMigration();
 
   // v0.5.3 CF-3 — PaycheckSummary + FinanceHubActions + paycheck body migration
@@ -14562,10 +14737,10 @@ async function caseV01090Ds1EntityTypeOpt() {
       // NOTE: top-level WORKSHOP at line 29 = path.resolve(__dirname, "../..") = workshop ROOT
       // (distinct from the local WORKSHOP inside caseHCV0891Versions which is platform/).
       const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
-      assertTrue("HC-V0900-VERSION-A: package.json version === '0.93.3'", pkg.version === "0.108.0");
+      assertTrue("HC-V0900-VERSION-A: package.json version === '0.93.3'", pkg.version === "0.109.0");
       const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
       assertTrue("HC-V0900-VERSION-B: platform/manifest.json workshop_version === '0.93.3'",
-        platMan.workshop_version === "0.108.0");
+        platMan.workshop_version === "0.109.0");
       const coworkMan = JSON.parse(fs.readFileSync(
         path.join(WORKSHOP, "platform/blueprints/cowork/manifest.json"), "utf8"));
       assertTrue("HC-V0900-VERSION-C: cowork manifest version === '0.31.0'",
@@ -15541,12 +15716,12 @@ type: cowork-microscope
   try {
     const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
     assertTrue("HC-V0920-VERSION-A1: workshop_version === 0.93.3",
-      platMan.workshop_version === "0.108.0");
+      platMan.workshop_version === "0.109.0");
     assertTrue("HC-V0920-VERSION-A2: blueprints[].cowork.version === 0.31.2",
       platMan.blueprints.find(b => b.name === "cowork").version === "0.40.0");
     const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
     assertTrue("HC-V0920-VERSION-A3: package.json version === 0.93.3",
-      pkg.version === "0.108.0");
+      pkg.version === "0.109.0");
     const workshopSub = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "ranch/platform-subscription.json"), "utf8"));
     assertTrue("HC-V0920-VERSION-A4: workshop subscription cowork pin === 0.31.0",
       workshopSub.blueprints.find(b => b.name === "cowork").version === "0.40.0");
@@ -15818,12 +15993,12 @@ type: cowork-microscope
   try {
     const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
     assertTrue("HC-V0930-VERSION-A1: workshop_version === 0.93.3",
-      platMan.workshop_version === "0.108.0");
+      platMan.workshop_version === "0.109.0");
     assertTrue("HC-V0930-VERSION-A2: blueprints[].cowork.version === 0.31.2",
       platMan.blueprints.find(b => b.name === "cowork").version === "0.40.0");
     const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
     assertTrue("HC-V0930-VERSION-A3: package.json version === 0.93.3",
-      pkg.version === "0.108.0");
+      pkg.version === "0.109.0");
     const workshopSub = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "ranch/platform-subscription.json"), "utf8"));
     assertTrue("HC-V0930-VERSION-A4: workshop subscription cowork pin === 0.31.1",
       workshopSub.blueprints.find(b => b.name === "cowork").version === "0.40.0");
@@ -15925,12 +16100,12 @@ type: cowork-microscope
   try {
     const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
     assertTrue("HC-V0931-VERSION-D1: workshop_version === 0.93.3",
-      platMan.workshop_version === "0.108.0");
+      platMan.workshop_version === "0.109.0");
     assertTrue("HC-V0931-VERSION-D2: blueprints[].cowork.version === 0.31.2",
       platMan.blueprints.find(b => b.name === "cowork").version === "0.40.0");
     const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
     assertTrue("HC-V0931-VERSION-D3: package.json version === 0.93.3",
-      pkg.version === "0.108.0");
+      pkg.version === "0.109.0");
     const coworkMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/cowork/manifest.json"), "utf8"));
     assertTrue("HC-V0931-VERSION-D4: cowork manifest.version === 0.31.1",
       coworkMan.version === "0.40.0");
