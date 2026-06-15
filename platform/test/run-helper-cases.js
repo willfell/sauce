@@ -12267,6 +12267,22 @@ async function caseV01070FpbmPaycheckBodyMigration() {
     /## Expenses/.test(src));
 }
 
+// v0.109.0 — projects visual overhaul. See Docs/plans/2026-06-15-v0.109.0-projects-visual-overhaul-design.md.
+
+// S1 — DocSearch parameterization.
+async function caseV01090Ds1EntityTypeOpt() {
+  console.log("\n--- Case HC-V01090-DS-1: DocSearch accepts entityType/placeholder/tagExclude opts ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/doc-search.js"), "utf8");
+  assertTrue("HC-V01090-DS-1: entityType opt referenced",
+    /opts\.entityType/.test(src));
+  assertTrue("HC-V01090-DS-1: default falls back to doc-note",
+    /opts\.entityType\s*\|\|\s*["']doc-note["']/.test(src));
+  assertTrue("HC-V01090-DS-1: placeholder opt referenced",
+    /opts\.placeholder/.test(src));
+  assertTrue("HC-V01090-DS-1: tagExclude opt referenced",
+    /opts\.tagExclude/.test(src));
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -12948,6 +12964,8 @@ async function caseV01070FpbmPaycheckBodyMigration() {
   await caseV01070FinMan3SeedFromDefaults();
 
   // v0.107.0 CF-2 — body migration on existing budgets
+  // v0.109.0 — projects visual overhaul.
+  await caseV01090Ds1EntityTypeOpt();        // S1
   await caseV01070FbbmBudgetBodyMigration();
 
   // v0.5.3 CF-3 — PaycheckSummary + FinanceHubActions + paycheck body migration

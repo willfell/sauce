@@ -26,8 +26,17 @@ class DocSearch {
    * @returns initial filterContext { text: "", tags: Set, hasActiveFilter: false, resultsContainer }
    */
   render(dv, opts) {
-    const allDocs = dv.pages(`"${opts.scopePath}"`).where(p => p.type === "doc-note");
-    const tagCounts = this._countTags(allDocs);
+    // v0.109.0 S1 — entity-agnostic. opts.entityType (default "doc-note") drives both
+    // the default page predicate AND the default tag exclusion. opts.entityFilter
+    // overrides the predicate entirely when the caller needs custom logic.
+    // opts.tagExclude is a list of additional tag names beyond the entity-type tag
+    // to suppress from the chip pool. opts.placeholder overrides the input's
+    // placeholder string. Existing doc-note callsites pass none of these and pick
+    // up the legacy behavior byte-for-byte.
+    const entityType = opts.entityType || "doc-note";
+    const entityFilter = opts.entityFilter || ((p) => p.type === entityType);
+    const allDocs = dv.pages(`"${opts.scopePath}"`).where(entityFilter);
+    const tagCounts = this._countTags(allDocs, opts.tagExclude || [], entityType);
     const topTags = Object.entries(tagCounts).sort((a, b) => b[1] - a[1]).slice(0, 8).map(e => e[0]);
 
     // PERMANENT strip — built once, never rebuilt. Survives keystrokes.
@@ -40,7 +49,8 @@ class DocSearch {
     // Row 1: input + scoped-search button
     const row1 = stripContainer.createEl("div");
     row1.style.cssText = "display: flex; gap: 8px; align-items: center;";
-    const input = row1.createEl("input", { attr: { type: "text", placeholder: "Filter docs by title, tags, or content…" } });
+    const placeholder = opts.placeholder || `Filter ${entityType}s by title, tags, or content…`;
+    const input = row1.createEl("input", { attr: { type: "text", placeholder } });
     input.style.cssText = "flex: 1; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--background-modifier-border); background: var(--background-secondary); color: var(--text-normal);";
 
     const nativeBtn = row1.createEl("button");
@@ -171,13 +181,18 @@ class DocSearch {
     return ctx;
   }
 
-  _countTags(pages) {
+  _countTags(pages, extraExcludes, entityType) {
+    // v0.109.0 S1 — excludes the entity-type tag (so doc-note vaults still
+    // suppress "doc-note" from chips; project vaults suppress "project") plus
+    // any additional tags the caller wants out. Legacy callers passed no args;
+    // the signature defaults keep their semantics intact.
+    const excludes = new Set([entityType || "doc-note", ...(extraExcludes || [])]);
     const counts = {};
     for (const p of pages) {
       const tags = Array.isArray(p.tags) ? p.tags : (p.file?.tags || []);
       for (const t of tags) {
         const clean = String(t).replace(/^#/, "");
-        if (!clean || clean === "doc-note") continue;
+        if (!clean || excludes.has(clean)) continue;
         counts[clean] = (counts[clean] || 0) + 1;
       }
     }
