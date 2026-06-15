@@ -12540,8 +12540,10 @@ async function caseV0110FinanceHubsRepair() {
     /module\.exports\.applyFinanceHubsRepair\s*=\s*applyFinanceHubsRepair/.test(src));
   assertTrue("V0110-FHR-4: hub body templates dict declared",
     /FINANCE_HUB_BODY_TEMPLATES/.test(src));
-  assertTrue("V0110-FHR-5: detection via FinanceHubActions presence",
-    /customJS\\\\\.FinanceHubActions\\\\\.render/.test(src) || /customJS\\.FinanceHubActions\\.render/.test(src));
+  // v0.111.0 updated detection: file is canonical when it invokes FinanceNav
+  // via the customjs-guard (was: FinanceHubActions presence).
+  assertTrue("V0110-FHR-5: detection via FinanceNav guard presence (v0.111.0+)",
+    /class:\\s\*\["']FinanceNav\["']/.test(src) || /class:\s*\["']FinanceNav\["']/.test(src));
 }
 
 async function caseV0110OrphanedHelperCleanup() {

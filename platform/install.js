@@ -3991,11 +3991,15 @@ async function applyFinanceMigrations(tp, manifest, variables, history, git) {
 // to canonical shape, preserving the existing frontmatter block verbatim.
 // Idempotent — files already using FinanceHubActions are skipped. Per-file
 // .sauce-backup snapshot before write. Failure-loud per-file.
+// v0.111.0: bodies use the unified context-aware FinanceNav (single-line, no
+// args). Finance.md now ALSO has a FinanceNav block (was missing entirely
+// in earlier templates — the user reported no Debts button on Finance.md).
 const FINANCE_HUB_BODY_TEMPLATES = {
-  "spice/finance/Finance.md": "\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceHubCards\" });\n```\n",
-  "spice/finance/budgets/Budgets.md": "\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\n// entity-create:budget — installer-managed; do not delete this comment\nawait customJS.FinanceHubActions.render(dv, {\n  here: \"budgets\",\n  instance: \"budget\",\n  defaultsPath: \"spice/finance/Budget Defaults.md\"\n});\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"BudgetsCards\" });\n```\n",
-  "spice/finance/paychecks/Paychecks.md": "\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\n// entity-create:paycheck — installer-managed; do not delete this comment\nawait customJS.FinanceHubActions.render(dv, {\n  here: \"paychecks\",\n  instance: \"paycheck\",\n  defaultsPath: \"spice/finance/Paycheck Defaults.md\"\n});\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PaychecksCards\" });\n```\n",
-  "spice/finance/invoices/Invoices.md": "\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\n// entity-create:invoice — installer-managed; do not delete this comment\nawait customJS.FinanceHubActions.render(dv, {\n  here: \"invoices\",\n  instance: \"invoice\"\n});\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"InvoicesCards\" });\n```\n",
+  "spice/finance/Finance.md": "\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceHubCards\" });\n```\n",
+  "spice/finance/budgets/Budgets.md": "\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\n// entity-create:budget — installer-managed; do not delete this comment\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"BudgetsCards\" });\n```\n",
+  "spice/finance/paychecks/Paychecks.md": "\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\n// entity-create:paycheck — installer-managed; do not delete this comment\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PaychecksCards\" });\n```\n",
+  "spice/finance/invoices/Invoices.md": "\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\n// entity-create:invoice — installer-managed; do not delete this comment\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"InvoicesCards\" });\n```\n",
+  "spice/finance/debts/Debts.md": "\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\n// entity-create:debt — installer-managed; do not delete this comment\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"DebtsHubSummary\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"DebtsCards\" });\n```\n",
 };
 
 async function applyFinanceHubsRepair(tp, manifest, variables, history, git) {
@@ -4012,7 +4016,11 @@ async function applyFinanceHubsRepair(tp, manifest, variables, history, git) {
     try {
       if (!(await adapter.exists(hubPath))) { absent++; continue; }
       const existing = await adapter.read(hubPath);
-      if (/customJS\.FinanceHubActions\.render/.test(existing)) {
+      // v0.111.0: detection updated — file is canonical when it invokes
+      // FinanceNav via the customjs-guard. Old FinanceHubActions or
+      // FinanceNavRow invocations get rewritten via applyFinanceUnifiedNav
+      // Migration; this repair only HEALS files that have neither.
+      if (/class:\s*["']FinanceNav["']/.test(existing)) {
         alreadyCanonical++;
         continue;
       }
