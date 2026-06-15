@@ -81,23 +81,52 @@ class BudgetCategoriesEditor {
             actualSum += (typeof c?.actual === "number") ? c.actual : 0;
         }
         const variance = actualSum - plannedSum;
-        const overrunRatio = plannedSum > 0 ? (actualSum / plannedSum) : 0;
-        const toneColor = (actualSum <= plannedSum)
-            ? "var(--text-success, #16a34a)"
-            : (overrunRatio <= 1.10 ? "var(--text-warning, #b45309)" : "var(--text-error, #dc2626)");
+
+        // Hardcoded palette so colors show regardless of Obsidian theme (matches BudgetSummary).
+        const PALETTE = {
+            green: "#16a34a", greenBg: "rgba(22, 163, 74, 0.10)",
+            amber: "#b45309", amberBg: "rgba(180, 83, 9, 0.10)",
+            red:   "#dc2626", redBg:   "rgba(220, 38, 38, 0.10)",
+            muted: "var(--text-muted)", mutedBg: "transparent"
+        };
+        let tone = "muted";
+        if (plannedSum > 0) {
+            if (actualSum <= plannedSum) tone = "green";
+            else if (actualSum <= 1.10 * plannedSum) tone = "amber";
+            else tone = "red";
+        }
+        const fg = PALETTE[tone];
+        const bg = PALETTE[`${tone}Bg`];
 
         const summary = details.createEl("summary");
-        summary.style.cssText = "cursor: pointer; padding: 6px 0; display: flex; gap: 12px; align-items: baseline;";
+        summary.style.cssText = "cursor: pointer; padding: 6px 0; display: flex; gap: 12px; align-items: center;";
 
         const nameSpan = summary.createEl("span");
         nameSpan.textContent = groupName;
         nameSpan.style.cssText = "font-size: 0.95em; font-weight: 600;";
 
-        const subtotalSpan = summary.createEl("span");
-        const fmt = (v) => (typeof v === "number" ? v.toFixed(2) : "0.00");
-        const sign = variance >= 0 ? "+" : "";
-        subtotalSpan.textContent = `SUBTOTAL  ${fmt(plannedSum)} / ${fmt(actualSum)}  (${sign}${fmt(variance)})`;
-        subtotalSpan.style.cssText = `margin-left: auto; font-size: 0.78em; font-variant-numeric: tabular-nums; color: ${toneColor};`;
+        const fmtMoney = (n) => {
+            const sign = n < 0 ? "-" : "";
+            const abs = Math.abs(typeof n === "number" ? n : 0).toFixed(2);
+            const parts = abs.split(".");
+            return sign + "$" + parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ",") + "." + parts[1];
+        };
+
+        const pill = summary.createEl("span");
+        pill.style.cssText = `margin-left: auto; display: inline-flex; align-items: center; gap: 8px; font-size: 0.78em; font-variant-numeric: tabular-nums; color: ${fg}; padding: 3px 10px; border-radius: 999px; background: ${bg}; border: 1px solid ${fg}33;`;
+        const pillTotals = pill.createEl("span");
+        pillTotals.textContent = `${fmtMoney(plannedSum)} → ${fmtMoney(actualSum)}`;
+        pillTotals.style.cssText = "color: var(--text-normal);";
+        const pillDir = pill.createEl("span");
+        if (plannedSum <= 0) {
+            pillDir.textContent = "—";
+        } else if (variance === 0) {
+            pillDir.textContent = "on plan";
+        } else {
+            const overUnder = variance > 0 ? "over" : "under";
+            pillDir.textContent = `${fmtMoney(Math.abs(variance))} ${overUnder}`;
+        }
+        pillDir.style.cssText = `color: ${fg}; font-weight: 500;`;
 
         if (items.length === 0) {
             const empty = details.createEl("div");

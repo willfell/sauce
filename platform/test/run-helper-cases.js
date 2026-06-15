@@ -12125,7 +12125,7 @@ async function caseV01070FinMan1Versions() {
   const fin = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
   const ec  = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/mechanisms/entity-create/manifest.json"), "utf8"));
   const ws  = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
-  assertEqual(fin.version, "0.5.2", "HC-V01070-FIN-MAN-1: finance version");
+  assertEqual(fin.version, "0.5.3", "HC-V01070-FIN-MAN-1: finance version");
   assertEqual(ec.version, "0.7.0", "HC-V01070-FIN-MAN-1: entity-create version");
   assertEqual(ws.workshop_version, "0.107.0", "HC-V01070-FIN-MAN-1: workshop_version");
   assertTrue("HC-V01070-FIN-MAN-1: finance depends_on entity-create >=0.7.0",
@@ -12133,13 +12133,21 @@ async function caseV01070FinMan1Versions() {
 }
 
 async function caseV01070FinMan2NewClassesAndFiles() {
-  console.log("\n--- Case HC-V01070-FIN-MAN-2: finance customjs_classes + files include 3 new entries ---");
+  console.log("\n--- Case HC-V01070-FIN-MAN-2: finance customjs_classes + files include new entries ---");
   const fin = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
-  for (const cls of ["BudgetDefaultsEditor", "PaycheckDefaultsEditor", "BudgetSummary"]) {
+  // v0.5.3 CF-3 added PaycheckSummary + FinanceHubActions (alongside the
+  // three v0.5.0 classes).
+  for (const cls of ["BudgetDefaultsEditor", "PaycheckDefaultsEditor", "BudgetSummary", "PaycheckSummary", "FinanceHubActions"]) {
     assertTrue(`HC-V01070-FIN-MAN-2: customjs_classes includes ${cls}`,
       fin.customjs_classes.includes(cls));
   }
-  for (const src of ["helpers/budget-defaults-editor.js", "helpers/paycheck-defaults-editor.js", "helpers/budget-summary.js"]) {
+  for (const src of [
+    "helpers/budget-defaults-editor.js",
+    "helpers/paycheck-defaults-editor.js",
+    "helpers/budget-summary.js",
+    "helpers/paycheck-summary.js",
+    "helpers/finance-hub-actions.js"
+  ]) {
     assertTrue(`HC-V01070-FIN-MAN-2: files[] includes ${src}`,
       fin.files.some(f => f.source === src));
   }
@@ -12180,6 +12188,49 @@ async function caseV01070FinMan3SeedFromDefaults() {
     !/##\s+Categories/.test(budget.inline_body));
 }
 
+// v0.5.3 CF-3 — PaycheckSummary widget shipped.
+
+async function caseV01070PsClassDeclared() {
+  console.log("\n--- Case HC-V01070-PS-1: PaycheckSummary class declared + read-only ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/helpers/paycheck-summary.js"), "utf8");
+  assertTrue("HC-V01070-PS-1: class PaycheckSummary declared",
+    /class\s+PaycheckSummary\s*\{/.test(src));
+  assertTrue("HC-V01070-PS-1: async render(dv) method present",
+    /async\s+render\s*\(\s*dv\s*\)/.test(src));
+  assertTrue("HC-V01070-PS-1: embed-dedup guard",
+    /markdown-embed/.test(src));
+  assertTrue("HC-V01070-PS-1: does NOT write frontmatter",
+    !/FinanceFrontmatter\.update/.test(src) && !/processFrontMatter/.test(src));
+}
+
+async function caseV01070PsThreeBands() {
+  console.log("\n--- Case HC-V01070-PS-2: PaycheckSummary three bands (pay/paid/remaining + progress + per-category) ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/helpers/paycheck-summary.js"), "utf8");
+  assertTrue("HC-V01070-PS-2: Band 1 — pay amount + paid + remaining",
+    /paycheck_amount/.test(src) && /paidExpenses/.test(src) && /remaining/i.test(src));
+  assertTrue("HC-V01070-PS-2: Band 2 — paid X of N progress",
+    /paidCount/.test(src) && /totalCount/.test(src));
+  assertTrue("HC-V01070-PS-2: Band 3 — per-category aggregation",
+    /buckets|category|e\.category/.test(src));
+}
+
+// v0.5.3 CF-3 — FinanceHubActions widget shipped.
+
+async function caseV01070FhaClassDeclared() {
+  console.log("\n--- Case HC-V01070-FHA-1: FinanceHubActions class + cross-hub nav ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/helpers/finance-hub-actions.js"), "utf8");
+  assertTrue("HC-V01070-FHA-1: class FinanceHubActions declared",
+    /class\s+FinanceHubActions\s*\{/.test(src));
+  assertTrue("HC-V01070-FHA-1: render(dv, opts) accepts here/instance/defaultsPath",
+    /here\s*=\s*null/.test(src) && /instance\s*=\s*null/.test(src) && /defaultsPath\s*=\s*null/.test(src));
+  assertTrue("HC-V01070-FHA-1: lists all four finance hubs",
+    /finance/.test(src) && /budgets/.test(src) && /paychecks/.test(src) && /invoices/.test(src));
+  assertTrue("HC-V01070-FHA-1: hides current hub via `here` key",
+    /hub\.key\s*===\s*here|here\s*===\s*hub\.key/.test(src));
+  assertTrue("HC-V01070-FHA-1: delegates + New X to customJS.EntityCreate.render",
+    /customJS\.EntityCreate\.render/.test(src));
+}
+
 // v0.5.2 CF-2 — applyFinanceBudgetBodyMigration (BudgetSummary block injection
 // + `## Categories` heading removal on existing Budget-*.md files).
 
@@ -12196,6 +12247,24 @@ async function caseV01070FbbmBudgetBodyMigration() {
     /<!--\s*budget-summary-v0\.5\.2\s*-->/.test(src));
   assertTrue("HC-V01070-FBBM-3: removes `## Categories` heading line",
     /\^##\s+Categories|## Categories/.test(src));
+}
+
+// v0.5.3 CF-3 — applyFinancePaycheckBodyMigration (PaycheckSummary block
+// injection + `## Expenses` heading removal on existing Paycheck-*.md files).
+
+async function caseV01070FpbmPaycheckBodyMigration() {
+  console.log("\n--- Case HC-V01070-FPBM: applyFinancePaycheckBodyMigration shipped ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
+  assertTrue("HC-V01070-FPBM-1: applyFinancePaycheckBodyMigration function present",
+    /async\s+function\s+applyFinancePaycheckBodyMigration\s*\(/.test(src));
+  assertTrue("HC-V01070-FPBM-1: wired into applyFinanceMigrations orchestrator",
+    /await\s+applyFinancePaycheckBodyMigration\s*\(/.test(src));
+  assertTrue("HC-V01070-FPBM-2: _migratePaycheckBody helper present",
+    /function\s+_migratePaycheckBody\s*\(/.test(src));
+  assertTrue("HC-V01070-FPBM-2: marker-guarded PaycheckSummary injection",
+    /<!--\s*paycheck-summary-v0\.5\.3\s*-->/.test(src));
+  assertTrue("HC-V01070-FPBM-3: removes `## Expenses` heading line",
+    /## Expenses/.test(src));
 }
 
 (async function main() {
@@ -12880,6 +12949,12 @@ async function caseV01070FbbmBudgetBodyMigration() {
 
   // v0.107.0 CF-2 — body migration on existing budgets
   await caseV01070FbbmBudgetBodyMigration();
+
+  // v0.5.3 CF-3 — PaycheckSummary + FinanceHubActions + paycheck body migration
+  await caseV01070PsClassDeclared();
+  await caseV01070PsThreeBands();
+  await caseV01070FhaClassDeclared();
+  await caseV01070FpbmPaycheckBodyMigration();
 
   // v0.65.0 HC-V065-RUN-NOTE: write-run-note-* sub-skill lint
   {

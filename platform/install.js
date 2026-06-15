@@ -3741,6 +3741,102 @@ async function applyFinanceMigrations(tp, manifest, variables, history, git) {
   await applyFinanceDefaultsScaffolding(tp, manifest, variables, history, git);
   await applyFinanceCategoriesGroupBackfill(tp, manifest, variables, history, git);
   await applyFinanceBudgetBodyMigration(tp, manifest, variables, history, git);
+  await applyFinancePaycheckBodyMigration(tp, manifest, variables, history, git);
+}
+
+// applyFinancePaycheckBodyMigration — v0.107.0 CF-3 (finance 0.5.3). Heals
+// pre-v0.5.3 paycheck bodies (created from the older Paycheck Template):
+//
+//   1. Injects the PaycheckSummary dataviewjs block (guarded by
+//      `<!-- paycheck-summary-v0.5.3 -->` marker) immediately after the
+//      FinanceStatus.renderBadge block — so the three-band rollup renders at
+//      the top of every Paycheck note, including ones created before 0.5.3.
+//   2. Removes the `## Expenses` heading line (post-0.5.3 the editor stands
+//      on its own).
+//
+// Mirrors applyFinanceBudgetBodyMigration / _migrateBudgetBody from CF-2.
+// Body-text mutation only. Idempotent — marker-guarded. Failure-loud per file.
+async function applyFinancePaycheckBodyMigration(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "finance") return;
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+
+  const paychecksRoot = "spice/finance/paychecks";
+  if (!(await adapter.exists(paychecksRoot))) return;
+
+  const paycheckFiles = [];
+  try {
+    const top = await adapter.list(paychecksRoot);
+    for (const folder of (top.folders || [])) {
+      try {
+        const inner = await adapter.list(folder);
+        for (const fp of (inner.files || [])) {
+          if (/Paycheck-\d{4}-\d{2}-\d{2}\.md$/.test(fp)) paycheckFiles.push(fp);
+        }
+      } catch (_e) { /* per-folder failure-loud */ }
+    }
+  } catch (e) {
+    history?.push({ event: "warning", step: "finance_paycheck_body_migration", name: "finance",
+      reason: `list failed for ${paychecksRoot}: ${e.message}`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+      attempted_at: new Date().toISOString() });
+    return;
+  }
+
+  if (paycheckFiles.length === 0) return;
+
+  let touched = 0;
+  for (const fp of paycheckFiles) {
+    try {
+      const body = await adapter.read(fp);
+      const result = _migratePaycheckBody(body);
+      if (result.touched) {
+        await adapter.write(fp, result.body);
+        touched += 1;
+      }
+    } catch (e) {
+      history?.push({ event: "warning", step: "finance_paycheck_body_migration", name: "finance",
+        reason: `paycheck body migration failed for ${fp}: ${e.message}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    }
+  }
+
+  history?.push({ event: "info", step: "finance_paycheck_body_migration", name: "finance",
+    reason: `${paycheckFiles.length} paychecks scanned, ${touched} bodies migrated (PaycheckSummary block injected; ## Expenses heading removed)`,
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+    attempted_at: new Date().toISOString() });
+}
+
+// _migratePaycheckBody — pure body transform. Idempotent. Marker-guarded.
+function _migratePaycheckBody(body) {
+  let out = body;
+  let touched = false;
+
+  const MARKER = "<!-- paycheck-summary-v0.5.3 -->";
+  if (!out.includes(MARKER) && !/customJS\.PaycheckSummary|class:\s*["']PaycheckSummary["']/.test(out)) {
+    const badgeBlockRe = /(```dataviewjs\s*\n[^`]*FinanceStatus\.renderBadge[^`]*```\s*\n)/;
+    const m = out.match(badgeBlockRe);
+    const summaryBlock = `${MARKER}\n\`\`\`dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "PaycheckSummary" });\n\`\`\`\n\n`;
+    if (m) {
+      out = out.replace(badgeBlockRe, `$1\n${summaryBlock}`);
+      touched = true;
+    } else {
+      const fmEnd = out.indexOf("---\n", 4);
+      if (fmEnd !== -1) {
+        const cutIdx = fmEnd + 4;
+        out = out.slice(0, cutIdx) + `\n${summaryBlock}` + out.slice(cutIdx);
+        touched = true;
+      }
+    }
+  }
+
+  if (/^## Expenses\s*$/m.test(out)) {
+    out = out.replace(/^## Expenses\s*\n\n?/m, "");
+    touched = true;
+  }
+
+  return { body: out, touched };
 }
 
 // applyFinanceBudgetBodyMigration — v0.107.0 CF-2 (finance 0.5.2). Heals
