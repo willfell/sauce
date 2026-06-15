@@ -167,6 +167,8 @@ Helper count UNCHANGED at 13 in v0.32.0 — the new writes are handled by extens
 - v0.102.0 (2026-06-13): project workspace cycle — sections + meetings link + vault-defaults; lessons captured in result doc.
 - v0.103.0 (2026-06-13): section hubs cycle — hierarchical navigation tree replaces v0.102.0's single-page Confluence; user-observed post-dogfood that single-page sections didn't communicate hierarchy.
 - v0.104.0 (2026-06-13): search & filter cycle — pure additive, no migration required; closes the original v0.102.0 ask.
+- v0.106.0 (2026-06-14): install posture + filter persistence + debounce + dashboard widgets — 4-item bundled MINOR. S1 helper-script content-overwrite posture closes the 3-cycle `cp` workaround (allowlist UNCHANGED; helper-count UNCHANGED at 15; this is a posture extension inside the existing per-item install loop, NOT a new sanctioned write zone).
+- v0.106.0.1 (2026-06-14): section hub UX cleanup — empty-state removal, label rename, sub-sections/docs separator. Pure visual / nav-label PATCH; no allowlist touch.
 
 ### 13. Bootstrap stub is content-static; never re-edit (per-consumer drift forbidden)
 
