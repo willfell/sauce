@@ -445,6 +445,32 @@ v0.102.0 shipped doc-note `section:` frontmatter as a STRING (`section: "Knowled
 
 **Future hardening candidate:** an `applyProjectSectionsHubMigration` post-pass that asserts every doc-note's `section:` is in wikilink form before declaring the project migrated; OR a `/audit` rule that flags any string-form `section:` after the migration window closes.
 
+### 26. Manual edits to `platform/test/seed-vault/` bypass the rebaseline loop
+
+The seed vault under `platform/test/seed-vault/` is the canonical input to the migration-regression harness (`platform/test/run-seed-migrations.js`). Hand-editing files inside it without going through `scripts/rebaseline-seed.js` bakes in drift that doesn't reflect what `sauce install` actually produces. The harness will keep passing locally on the drifted seed but stop catching the failure modes the seed was built to surface.
+
+**Rule:** the ONLY hand-edits sanctioned in `seed-vault/` are:
+- Adding a new note at a *pre-migration schema* to anchor a new `HC-V0XYZ-SEED-MIGRATE-*` assert family (intentional setup for an in-flight cycle).
+- Adding a hand-authored user note to anchor a `SEED-PRESERVE-*` assert (extends the "install never touches user content" coverage).
+- Updating the CLAUDE.md outside-marker prose to keep the SEED-CLAUDE assertions meaningful.
+
+For anything else (schema changes, post-install state updates, registry refreshes), run at cycle close:
+
+```
+npm run seed:prev
+npm run seed:rebaseline
+```
+
+This archives the current seed to `seed-vault-prev/` and forward-ratchets `seed-vault/` to current install output.
+
+**Watch when:** about to edit anything under `platform/test/seed-vault/` other than the three sanctioned hand-edit targets above. If you're tempted to change a hub note, a registry, or a frontmatter shape directly — stop, re-run install on a tmp copy, and use rebaseline.
+
+**Symptom.** Seed drifts away from install output. Local harness keeps passing because it asserts against the drifted seed. CI keeps passing for the same reason. A consumer vault hits the actual install path and breaks in a way the harness was supposed to catch.
+
+**Fix when surfaced.** `rm -rf platform/test/seed-vault/<drifted-path>`; re-run install on a tmp copy; copy the relevant subtree back; verify the harness still passes against the fresh state.
+
+**Surfaced:** v0.110.0 — codified at the moment the seed-vault was introduced. The rebaseline loop is the mechanism; the rule keeps the loop intact.
+
 ## Operational gotchas
 
 ### CustomJS scan folder is per-vault and configured in `.obsidian/plugins/customjs/data.json`
