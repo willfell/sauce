@@ -13,6 +13,7 @@
     { "name": "entity-create",  "range": ">=0.7.0" }
   ],
   "customjs_classes": [
+    "FinanceMath",
     "FinanceStatus",
     "FinanceHubCards",
     "BudgetsCards",
@@ -36,7 +37,10 @@
     "DebtsHubSummary",
     "FinanceHubActions",
     "FinanceNav",
-    "MonthlyOverview"
+    "MonthlyOverview",
+    "MonthsCards",
+    "MonthDashboard",
+    "FinanceHubSummary"
   ],
   "files": [
     { "source": "helpers/finance-status.js",       "dest": "{{scripts_path}}/finance/finance-status.js" },
@@ -61,10 +65,15 @@
     { "source": "helpers/debt-summary.js",              "dest": "{{scripts_path}}/finance/debt-summary.js" },
     { "source": "helpers/debts-hub-summary.js",         "dest": "{{scripts_path}}/finance/debts-hub-summary.js" },
     { "source": "helpers/finance-hub-actions.js",       "dest": "{{scripts_path}}/finance/finance-hub-actions.js" },
+    { "source": "helpers/finance-math.js",          "dest": "{{scripts_path}}/finance/finance-math.js" },
     { "source": "helpers/finance-nav.js",               "dest": "{{scripts_path}}/finance/finance-nav.js" },
+    { "source": "helpers/finance-hub-summary.js",   "dest": "{{scripts_path}}/finance/finance-hub-summary.js" },
+    { "source": "helpers/month-dashboard.js",        "dest": "{{scripts_path}}/finance/month-dashboard.js" },
     { "source": "helpers/monthly-overview.js",          "dest": "{{scripts_path}}/finance/monthly-overview.js" },
+    { "source": "helpers/months-cards.js",           "dest": "{{scripts_path}}/finance/months-cards.js" },
 
     { "source": "content/Finance.md",              "dest": "{{module_directory}}/Finance.md" },
+    { "source": "content/Months.md",               "dest": "{{module_directory}}/months/Months.md" },
     { "source": "content/Budgets.md",              "dest": "{{module_directory}}/budgets/Budgets.md" },
     { "source": "content/Paychecks.md",            "dest": "{{module_directory}}/paychecks/Paychecks.md" },
     { "source": "content/Invoices.md",             "dest": "{{module_directory}}/invoices/Invoices.md" },

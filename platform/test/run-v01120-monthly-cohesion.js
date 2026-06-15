@@ -253,6 +253,271 @@ console.log("\n=== Section 5 — FinanceMath.fmtMoney ===");
 })();
 
 // ===========================================================================
+// SECTION 6 — Widget behavioral fixtures
+// (MonthsCards, MonthDashboard, FinanceHubSummary)
+//
+// All widgets call customJS.FinanceMath.* so we must set up a global
+// `customJS` shim before loading them.
+// ===========================================================================
+
+console.log("\n=== Section 6 — Widget behavioral fixtures ===");
+
+// ---------------------------------------------------------------------------
+// DOM stub (mirrors run-v01103-monthly-overview.js makeEl / makeDA / makeDv)
+// ---------------------------------------------------------------------------
+
+function makeEl(tagName) {
+  const el = {
+    tagName: String(tagName).toUpperCase(),
+    style: { cssText: "" },
+    _textContent: "",
+    get textContent() { return this._textContent; },
+    set textContent(v) { this._textContent = String(v); },
+    children: [],
+    parentElement: null,
+    attrs: {},
+    createEl(tag, opts) {
+      const o = opts || {};
+      const child = makeEl(tag);
+      if (o.text != null) child.textContent = String(o.text);
+      if (o.cls != null) child.attrs.cls = o.cls;
+      child.parentElement = this;
+      this.children.push(child);
+      return child;
+    },
+    setAttribute(k, v) { this.attrs[k] = String(v); },
+    getAttribute(k) { return this.attrs[k]; },
+    addEventListener() {},
+    closest(sel) {
+      let node = this;
+      const want = String(sel).replace(/^\./, "");
+      while (node) {
+        if (node.attrs && node.attrs.cls === want) return node;
+        node = node.parentElement;
+      }
+      return null;
+    },
+    querySelector(sel) {
+      const want = String(sel).replace(/^:scope\s*>\s*\./, "").replace(/^\./, "");
+      for (const c of this.children) {
+        if (c.attrs && c.attrs.cls === want) return c;
+      }
+      return null;
+    },
+    remove() {
+      if (this.parentElement) {
+        const idx = this.parentElement.children.indexOf(this);
+        if (idx >= 0) this.parentElement.children.splice(idx, 1);
+        this.parentElement = null;
+      }
+    },
+  };
+  return el;
+}
+
+function makeDA(items) {
+  const arr = (items || []).slice();
+  arr.where = (fn) => makeDA(arr.filter(fn));
+  arr.array = () => arr.slice();
+  return arr;
+}
+
+function makeDv(opts) {
+  const o = opts || {};
+  const container = makeEl("div");
+  const pagesByScope = o.pagesByScope || {};
+  return {
+    container,
+    current: () => (o.current !== undefined ? o.current : null),
+    pages: (q) => {
+      const scope = String(q || "").replace(/"/g, "");
+      return makeDA(pagesByScope[scope] || []);
+    },
+  };
+}
+
+function walkTree(el, predicate) {
+  if (!el) return null;
+  if (predicate(el)) return el;
+  for (const c of (el.children || [])) {
+    const hit = walkTree(c, predicate);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+function collectText(el) {
+  if (!el) return "";
+  let out = el._textContent || "";
+  for (const c of (el.children || [])) out += " " + collectText(c);
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Global customJS shim — widgets reference customJS.FinanceMath and customJS.FinanceStatus
+// ---------------------------------------------------------------------------
+
+// We run in Node (no global `customJS`), so set it up before loading widgets.
+if (typeof global.customJS === "undefined") {
+  global.customJS = {};
+}
+global.customJS.FinanceMath = FinanceMath;
+
+// Minimal FinanceStatus shim for FinanceHubSummary's open-invoices tile.
+global.customJS.FinanceStatus = {
+  derive(page, type) {
+    if (type === "invoice") {
+      if (page.submitted_date) return { label: "Done", tone: "success" };
+      if (page.hours > 0) return { label: "In Progress", tone: "warn" };
+      return { label: "Planning", tone: "muted" };
+    }
+    return { label: "Planning", tone: "muted" };
+  }
+};
+
+// `app` stub for openLinkText calls (widgets call app.workspace.openLinkText)
+if (typeof global.app === "undefined") {
+  global.app = { workspace: { openLinkText() {} } };
+}
+
+// ---------------------------------------------------------------------------
+// Load widget classes
+// ---------------------------------------------------------------------------
+
+const MonthsCards = loadClass("months-cards.js", "MonthsCards");
+const MonthDashboard = loadClass("month-dashboard.js", "MonthDashboard");
+const FinanceHubSummary = loadClass("finance-hub-summary.js", "FinanceHubSummary");
+
+// ---------------------------------------------------------------------------
+// MC — MonthsCards fixtures
+// ---------------------------------------------------------------------------
+
+console.log("\n--- MC-1: empty month set → empty-state text ---");
+(async function MC_1() {
+  const dv = makeDv({ current: { file: { path: "spice/finance/months/Months.md", name: "Months" } } });
+  const widget = new MonthsCards();
+  await widget.render(dv);
+  const root = walkTree(dv.container, (e) => e.attrs && e.attrs.cls === "fmc-root");
+  ok("MC-1.1 fmc-root rendered", !!root);
+  const text = root ? collectText(root) : "";
+  ok("MC-1.2 empty-state text present", /No months yet/.test(text), `got: "${text.slice(0, 80)}"`);
+  ok("MC-1.3 no grid children", !root || !root.children.some(c => c.attrs && c.attrs.cls === "fmc-grid") || (function() {
+    const grid = walkTree(root, (e) => e.attrs && e.attrs.cls === "fmc-grid");
+    return !grid || grid.children.length === 0;
+  })());
+})();
+
+console.log("\n--- MC-2: two type:month pages → 2 cards DESC order ---");
+(async function MC_2() {
+  const page2026_05 = { type: "month", month: "2026-05", file: { name: "Month-2026-05", path: "spice/finance/months/Month-2026-05.md" } };
+  const page2026_06 = { type: "month", month: "2026-06", file: { name: "Month-2026-06", path: "spice/finance/months/Month-2026-06.md" } };
+  const dv = makeDv({
+    current: { file: { path: "spice/finance/months/Months.md", name: "Months" } },
+    pagesByScope: {
+      "spice/finance/months": [page2026_05, page2026_06],
+      "spice/finance/paychecks": [],
+      "spice/finance/budgets": [],
+    }
+  });
+  const widget = new MonthsCards();
+  await widget.render(dv);
+  const root = walkTree(dv.container, (e) => e.attrs && e.attrs.cls === "fmc-root");
+  ok("MC-2.1 fmc-root rendered", !!root);
+  const grid = walkTree(root, (e) => e.attrs && e.attrs.cls === "fmc-grid");
+  ok("MC-2.2 grid rendered", !!grid);
+  ok("MC-2.3 two card children", grid && grid.children.length === 2, `got ${grid && grid.children.length}`);
+  // DESC order: first card should be 2026-06, second 2026-05
+  if (grid && grid.children.length === 2) {
+    const first = collectText(grid.children[0]);
+    const second = collectText(grid.children[1]);
+    ok("MC-2.4 first card is 2026-06 (DESC order)", /2026-06/.test(first), `got: "${first.slice(0, 40)}"`);
+    ok("MC-2.5 second card is 2026-05", /2026-05/.test(second), `got: "${second.slice(0, 40)}"`);
+  }
+})();
+
+// ---------------------------------------------------------------------------
+// MD — MonthDashboard fixtures
+// ---------------------------------------------------------------------------
+
+console.log("\n--- MD-1: non-month type → no mdash-root rendered ---");
+(async function MD_1() {
+  const dv = makeDv({
+    current: { type: "budget", month: "2026-06", file: { name: "Budget-2026-06", path: "spice/finance/budgets/2026-06/Budget-2026-06.md" } }
+  });
+  const widget = new MonthDashboard();
+  await widget.render(dv);
+  const root = walkTree(dv.container, (e) => e.attrs && e.attrs.cls === "mdash-root");
+  ok("MD-1.1 no mdash-root for non-month type", !root);
+})();
+
+console.log("\n--- MD-2: type:month page → three section roots present ---");
+(async function MD_2() {
+  const monthPage = {
+    type: "month",
+    month: "2026-06",
+    file: { name: "Month-2026-06", path: "spice/finance/months/Month-2026-06.md" }
+  };
+  const dv = makeDv({
+    current: monthPage,
+    pagesByScope: {
+      "spice/finance/paychecks": [],
+      "spice/finance/budgets": [],
+      "spice/finance/debts": [],
+    }
+  });
+  const widget = new MonthDashboard();
+  await widget.render(dv);
+  const root = walkTree(dv.container, (e) => e.attrs && e.attrs.cls === "mdash-root");
+  ok("MD-2.1 mdash-root rendered", !!root);
+  // Three section wrappers should be direct children (mdash-budget, mdash-paychecks, mdash-debts)
+  ok("MD-2.2 at least 3 children in root", root && root.children.length >= 3,
+    `got ${root && root.children.length}`);
+  const budgetSection = root && walkTree(root, (e) => e.attrs && e.attrs.cls === "mdash-budget");
+  const paycheckSection = root && walkTree(root, (e) => e.attrs && e.attrs.cls === "mdash-paychecks");
+  const debtSection = root && walkTree(root, (e) => e.attrs && e.attrs.cls === "mdash-debts");
+  ok("MD-2.3 mdash-budget section present", !!budgetSection);
+  ok("MD-2.4 mdash-paychecks section present", !!paycheckSection);
+  ok("MD-2.5 mdash-debts section present", !!debtSection);
+})();
+
+// ---------------------------------------------------------------------------
+// FHS — FinanceHubSummary fixtures
+// ---------------------------------------------------------------------------
+
+console.log("\n--- FHS-1: non-Finance.md path → no fhs-root rendered (path guard) ---");
+(async function FHS_1() {
+  const dv = makeDv({
+    current: { type: "finance-hub", file: { name: "Finance", path: "spice/finance/NOT-Finance.md" } }
+  });
+  const widget = new FinanceHubSummary();
+  await widget.render(dv);
+  const root = walkTree(dv.container, (e) => e.attrs && e.attrs.cls === "fhs-root");
+  ok("FHS-1.1 no fhs-root for non-Finance.md path", !root);
+})();
+
+console.log("\n--- FHS-2: Finance.md + no debts → muted 'No debt tracked' hero ---");
+(async function FHS_2() {
+  const dv = makeDv({
+    current: { type: "finance-hub", file: { name: "Finance", path: "spice/finance/Finance.md" } },
+    pagesByScope: {
+      "spice/finance/debts": [],
+      "spice/finance/paychecks": [],
+      "spice/finance/budgets": [],
+      "spice/finance/invoices": [],
+    }
+  });
+  const widget = new FinanceHubSummary();
+  await widget.render(dv);
+  const root = walkTree(dv.container, (e) => e.attrs && e.attrs.cls === "fhs-root");
+  ok("FHS-2.1 fhs-root rendered on Finance.md", !!root);
+  const hero = root && walkTree(root, (e) => e.attrs && e.attrs.cls === "fhs-hero");
+  ok("FHS-2.2 fhs-hero section present", !!hero);
+  const heroText = hero ? collectText(hero) : "";
+  ok("FHS-2.3 muted 'No debt tracked' text in hero", /No debt tracked/.test(heroText),
+    `got: "${heroText.slice(0, 80)}"`);
+})();
+
+// ===========================================================================
 // Verdict
 // ===========================================================================
 

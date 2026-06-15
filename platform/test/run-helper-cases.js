@@ -13253,6 +13253,169 @@ async function caseV01120HubsRepairFinanceSummary() {
   }
 }
 
+// v0.115.0 finance Stage A — MonthsCards + MonthDashboard + FinanceHubSummary + FinanceMath manifest
+
+async function caseV01150MonthsCardsPresent() {
+  console.log("\n--- Case V01150-MC-PRESENT: months-cards.js helper shipped ---");
+  const helperPath = path.join(WORKSHOP, "platform/blueprints/finance/helpers/months-cards.js");
+  if (!assertTrue("V01150-MC-PRESENT-1: file exists",
+    fs.existsSync(helperPath), `missing: ${helperPath}`)) return;
+  const src = fs.readFileSync(helperPath, "utf8");
+  assertTrue("V01150-MC-PRESENT-2: class MonthsCards declared",
+    /class\s+MonthsCards\b/.test(src));
+  assertTrue("V01150-MC-PRESENT-3: no \"use strict\" directive",
+    !/^"use strict";?\s*$/m.test(src));
+  assertTrue("V01150-MC-PRESENT-4: has render method",
+    /\basync\s+render\s*\(/.test(src));
+  assertTrue("V01150-MC-PRESENT-5: CSS root fmc-root referenced",
+    /fmc-root/.test(src));
+  assertTrue("V01150-MC-PRESENT-6: references FinanceMath",
+    /FinanceMath/.test(src));
+  const lines = src.split(/\r?\n/);
+  let classCloseLine = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (/^}\s*$/.test(lines[i])) { classCloseLine = i; break; }
+  }
+  assertTrue("V01150-MC-PRESENT-7: class closing brace found", classCloseLine !== -1);
+  if (classCloseLine !== -1) {
+    const tail = lines.slice(classCloseLine + 1);
+    let inBlock = false;
+    const offending = tail.filter((l) => {
+      const t = l.trim();
+      if (t === "") return false;
+      if (inBlock) { if (/\*\//.test(t)) inBlock = false; return false; }
+      if (/^\/\*/.test(t)) { if (!/\*\/$/.test(t)) inBlock = true; return false; }
+      if (/^\/\//.test(t)) return false;
+      return true;
+    });
+    assertTrue("V01150-MC-PRESENT-8: no code after class closing brace",
+      offending.length === 0,
+      `${offending.length} non-comment line(s) after class. First: ${JSON.stringify(offending[0])}`);
+  }
+}
+
+async function caseV01150MonthDashboardPresent() {
+  console.log("\n--- Case V01150-MD-PRESENT: month-dashboard.js helper shipped ---");
+  const helperPath = path.join(WORKSHOP, "platform/blueprints/finance/helpers/month-dashboard.js");
+  if (!assertTrue("V01150-MD-PRESENT-1: file exists",
+    fs.existsSync(helperPath), `missing: ${helperPath}`)) return;
+  const src = fs.readFileSync(helperPath, "utf8");
+  assertTrue("V01150-MD-PRESENT-2: class MonthDashboard declared",
+    /class\s+MonthDashboard\b/.test(src));
+  assertTrue("V01150-MD-PRESENT-3: no \"use strict\" directive",
+    !/^"use strict";?\s*$/m.test(src));
+  assertTrue("V01150-MD-PRESENT-4: has render method",
+    /\basync\s+render\s*\(/.test(src));
+  assertTrue("V01150-MD-PRESENT-5: CSS root mdash-root referenced",
+    /mdash-root/.test(src));
+  assertTrue("V01150-MD-PRESENT-6: references FinanceMath",
+    /FinanceMath/.test(src));
+  assertTrue("V01150-MD-PRESENT-7: references measuredMovement",
+    /measuredMovement/.test(src));
+  assertTrue("V01150-MD-PRESENT-8: references reconcile",
+    /reconcile/.test(src));
+  assertTrue("V01150-MD-PRESENT-9: type guard for month",
+    /type\s*!==\s*["']month["']|page\.type\s*===\s*["']month["']/.test(src));
+  const lines = src.split(/\r?\n/);
+  let classCloseLine = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (/^}\s*$/.test(lines[i])) { classCloseLine = i; break; }
+  }
+  assertTrue("V01150-MD-PRESENT-10: class closing brace found", classCloseLine !== -1);
+  if (classCloseLine !== -1) {
+    const tail = lines.slice(classCloseLine + 1);
+    let inBlock = false;
+    const offending = tail.filter((l) => {
+      const t = l.trim();
+      if (t === "") return false;
+      if (inBlock) { if (/\*\//.test(t)) inBlock = false; return false; }
+      if (/^\/\*/.test(t)) { if (!/\*\/$/.test(t)) inBlock = true; return false; }
+      if (/^\/\//.test(t)) return false;
+      return true;
+    });
+    assertTrue("V01150-MD-PRESENT-11: no code after class closing brace",
+      offending.length === 0,
+      `${offending.length} non-comment line(s) after class. First: ${JSON.stringify(offending[0])}`);
+  }
+}
+
+async function caseV01150FinanceHubSummaryPresent() {
+  console.log("\n--- Case V01150-FHS-PRESENT: finance-hub-summary.js helper shipped ---");
+  const helperPath = path.join(WORKSHOP, "platform/blueprints/finance/helpers/finance-hub-summary.js");
+  if (!assertTrue("V01150-FHS-PRESENT-1: file exists",
+    fs.existsSync(helperPath), `missing: ${helperPath}`)) return;
+  const src = fs.readFileSync(helperPath, "utf8");
+  assertTrue("V01150-FHS-PRESENT-2: class FinanceHubSummary declared",
+    /class\s+FinanceHubSummary\b/.test(src));
+  assertTrue("V01150-FHS-PRESENT-3: no \"use strict\" directive",
+    !/^"use strict";?\s*$/m.test(src));
+  assertTrue("V01150-FHS-PRESENT-4: has render method",
+    /\basync\s+render\s*\(/.test(src));
+  assertTrue("V01150-FHS-PRESENT-5: CSS root fhs-root referenced",
+    /fhs-root/.test(src));
+  assertTrue("V01150-FHS-PRESENT-6: references FinanceMath",
+    /FinanceMath/.test(src));
+  assertTrue("V01150-FHS-PRESENT-7: references FinanceMath.debtTotals literal",
+    /FinanceMath\.debtTotals/.test(src));
+  assertTrue("V01150-FHS-PRESENT-8: references path guard spice/finance/Finance.md",
+    /spice\/finance\/Finance\.md/.test(src));
+  const lines = src.split(/\r?\n/);
+  let classCloseLine = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (/^}\s*$/.test(lines[i])) { classCloseLine = i; break; }
+  }
+  assertTrue("V01150-FHS-PRESENT-9: class closing brace found", classCloseLine !== -1);
+  if (classCloseLine !== -1) {
+    const tail = lines.slice(classCloseLine + 1);
+    let inBlock = false;
+    const offending = tail.filter((l) => {
+      const t = l.trim();
+      if (t === "") return false;
+      if (inBlock) { if (/\*\//.test(t)) inBlock = false; return false; }
+      if (/^\/\*/.test(t)) { if (!/\*\/$/.test(t)) inBlock = true; return false; }
+      if (/^\/\//.test(t)) return false;
+      return true;
+    });
+    assertTrue("V01150-FHS-PRESENT-10: no code after class closing brace",
+      offending.length === 0,
+      `${offending.length} non-comment line(s) after class. First: ${JSON.stringify(offending[0])}`);
+  }
+}
+
+async function caseV01150FinanceMathRegistered() {
+  console.log("\n--- Case V01150-FM-REG: FinanceMath in manifest customjs_classes and files ---");
+  const manifestPath = path.join(WORKSHOP, "platform/blueprints/finance/manifest.json");
+  if (!assertTrue("V01150-FM-REG-1: manifest file exists",
+    fs.existsSync(manifestPath), `missing: ${manifestPath}`)) return;
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  assertTrue("V01150-FM-REG-2: FinanceMath in customjs_classes[]",
+    Array.isArray(manifest.customjs_classes) && manifest.customjs_classes.includes("FinanceMath"));
+  assertTrue("V01150-FM-REG-3: files[] has entry whose source ends in finance-math.js",
+    Array.isArray(manifest.files) && manifest.files.some(f => f && typeof f.source === "string" && f.source.endsWith("finance-math.js")));
+}
+
+async function caseV01150ThreeNewClassesRegistered() {
+  console.log("\n--- Case V01150-3CLS-REG: MonthsCards + MonthDashboard + FinanceHubSummary in manifest ---");
+  const manifestPath = path.join(WORKSHOP, "platform/blueprints/finance/manifest.json");
+  if (!assertTrue("V01150-3CLS-REG-1: manifest file exists",
+    fs.existsSync(manifestPath), `missing: ${manifestPath}`)) return;
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  const classes = Array.isArray(manifest.customjs_classes) ? manifest.customjs_classes : [];
+  const files = Array.isArray(manifest.files) ? manifest.files : [];
+  assertTrue("V01150-3CLS-REG-2: MonthsCards in customjs_classes[]",
+    classes.includes("MonthsCards"));
+  assertTrue("V01150-3CLS-REG-3: MonthDashboard in customjs_classes[]",
+    classes.includes("MonthDashboard"));
+  assertTrue("V01150-3CLS-REG-4: FinanceHubSummary in customjs_classes[]",
+    classes.includes("FinanceHubSummary"));
+  assertTrue("V01150-3CLS-REG-5: files[] has months-cards.js source",
+    files.some(f => f && typeof f.source === "string" && f.source.endsWith("months-cards.js")));
+  assertTrue("V01150-3CLS-REG-6: files[] has month-dashboard.js source",
+    files.some(f => f && typeof f.source === "string" && f.source.endsWith("month-dashboard.js")));
+  assertTrue("V01150-3CLS-REG-7: files[] has finance-hub-summary.js source",
+    files.some(f => f && typeof f.source === "string" && f.source.endsWith("finance-hub-summary.js")));
+}
+
 async function caseV01103InjectMonthlyBandIdempotent() {
   console.log("\n--- Case V01103-MO-IDEM: _injectMonthlyBand transform is idempotent ---");
   const installer = require(path.join(WORKSHOP, "platform/install.js"));
@@ -22617,6 +22780,13 @@ type: cowork-microscope
   await caseV01120PaycheckDebtBandIdempotent();
   await caseV01120HubsRepairMonths();
   await caseV01120HubsRepairFinanceSummary();
+
+  // v0.115.0 finance Stage A — new widget helpers + manifest wiring
+  await caseV01150MonthsCardsPresent();
+  await caseV01150MonthDashboardPresent();
+  await caseV01150FinanceHubSummaryPresent();
+  await caseV01150FinanceMathRegistered();
+  await caseV01150ThreeNewClassesRegistered();
 
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
