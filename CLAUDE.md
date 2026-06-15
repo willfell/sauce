@@ -14,6 +14,7 @@ Before any write, run `ls /Users/willfellhoelter/projects/repos/sauce`. Expected
 - [`Docs/agent-guides/architecture.md`](Docs/agent-guides/architecture.md) — mechanisms vs blueprints, installer, distribution model, `claude_surface[]`.
 - [`Docs/agent-guides/build-test-verify.md`](Docs/agent-guides/build-test-verify.md) — preflight, release workflow, brew-tap chain, dogfood, cycle-close artifacts.
 - [`Docs/agent-guides/code-conventions.md`](Docs/agent-guides/code-conventions.md) — the five non-negotiables, customjs gotchas, module-directory invariant, marker regions.
+- [`Docs/agent-guides/project-blueprint-ui.md`](Docs/agent-guides/project-blueprint-ui.md) — shared rendering primitives (Breadcrumb, SectionLabel, DocSearch) + section-ordering + spacing conventions for the project blueprint.
 - [`Docs/agent-guides/vault-paths.md`](Docs/agent-guides/vault-paths.md) — workshop / consumer / legacy source vault paths on this machine.
 - [`Docs/agent-guides/cycle-status.md`](Docs/agent-guides/cycle-status.md) — live workshop version, mechanism + blueprint catalogue, harness count, in-flight queue.
 - [`Docs/agent-guides/asking-before-acting.md`](Docs/agent-guides/asking-before-acting.md) — full ask-before list with landmine context.
