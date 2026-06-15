@@ -689,6 +689,298 @@ function assertOrder(name, body, before, after) {
 })();
 
 // ===========================================================================
+// SECTION 3 — Coverage expansion (added 2026-06-15 post-cycle):
+//   • DV-PROXY-* — Dataview-proxy fidelity (chainable .where/.sort/.limit
+//     guards, non-Array-typed iterables).
+//   • MO-PERF-*  — performance ceiling at realistic vault scale (100
+//     paychecks × 20 expenses; 50 debts × 30 balance_history entries).
+//   • MO-XYR-*   — cross-year month-key boundary correctness (Dec budget
+//     viewed in January; paychecks must not bleed across the year).
+// ===========================================================================
+
+console.log("\n=== Section 3 — Dataview-proxy fidelity / performance / cross-year ===");
+
+// ---------------------------------------------------------------------------
+// Stricter Dataview-proxy stub: instead of inheriting from Array (so iteration
+// uses native Array semantics), we use a NON-Array iterable that exposes only
+// the methods Dataview itself documents on a DataArray: .where, .sort, .limit,
+// .array, .first, .length, Symbol.iterator. If MonthlyOverview ever leans on
+// Array.prototype.* (e.g. .filter, .map, .find) the helper will throw against
+// this stub even though it passes with the loose array-based stub.
+// ---------------------------------------------------------------------------
+
+function makeStrictDA(items) {
+  const inner = (items || []).slice();
+  const obj = {
+    _kind: "DataArray",
+    get length() { return inner.length; },
+    where(fn) {
+      const out = [];
+      for (const x of inner) { if (fn(x)) out.push(x); }
+      return makeStrictDA(out);
+    },
+    sort(keyFn, dir) {
+      const copy = inner.slice().sort((a, b) => {
+        const ka = typeof keyFn === "function" ? keyFn(a) : a;
+        const kb = typeof keyFn === "function" ? keyFn(b) : b;
+        if (ka == null && kb == null) return 0;
+        if (ka == null) return 1;
+        if (kb == null) return -1;
+        if (ka < kb) return dir === "desc" ? 1 : -1;
+        if (ka > kb) return dir === "desc" ? -1 : 1;
+        return 0;
+      });
+      return makeStrictDA(copy);
+    },
+    limit(n) { return makeStrictDA(inner.slice(0, n)); },
+    first() { return inner[0]; },
+    array() { return inner.slice(); },
+    [Symbol.iterator]() {
+      let i = 0;
+      return { next: () => i < inner.length ? { value: inner[i++], done: false } : { value: undefined, done: true } };
+    },
+  };
+  return obj;
+}
+
+function makeStrictDv(opts = {}) {
+  const container = makeEl("div");
+  const pagesByScope = opts.pagesByScope || {};
+  return {
+    container,
+    current: () => (opts.current !== undefined ? opts.current : null),
+    pages: (q) => {
+      const scope = String(q || "").replace(/"/g, "");
+      const pages = pagesByScope[scope] || [];
+      return makeStrictDA(pages);
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// DV-PROXY-1: MonthlyOverview renders correctly when dv.pages(...) returns a
+// non-Array iterable (only .where + for-of iteration available). Catches any
+// future drift toward Array.prototype.* method usage.
+// ---------------------------------------------------------------------------
+(async function DV_PROXY_1() {
+  console.log("\n--- Case DV-PROXY-1: helper survives non-Array Dataview proxy ---");
+  const mo = new MonthlyOverview();
+  const dv = makeStrictDv({
+    current: fxBudget("2026-07", [{ name: "Rent", actual: 1000 }]),
+    pagesByScope: {
+      "spice/finance/paychecks": [
+        fxPaycheck("2026-07-01", 2500, [
+          { item: "Apple Card", amount: 600, paid: true, debt: "[[Debt-Apple]]" },
+        ]),
+        fxPaycheck("2026-07-15", 2500, []),
+      ],
+      "spice/finance/debts": [fxDebt("Apple", 14400, [
+        { date: "2026-07-01", balance: 15000 },
+        { date: "2026-07-28", balance: 14400 },
+      ])],
+    },
+  });
+  let threw = null;
+  try { await mo.render(dv); } catch (e) { threw = e; }
+  ok("DV-PROXY-1.1 render did not throw on strict DA proxy",
+    threw === null, threw && threw.message);
+  const root = walkTree(dv.container, (e) => e.attrs && e.attrs.cls === "mo-root");
+  ok("DV-PROXY-1.2 mo-root rendered through strict proxy", !!root);
+  const text = collectText(root);
+  ok("DV-PROXY-1.3 income $5,000.00 from strict-proxy paychecks", /\$5,000\.00/.test(text));
+  ok("DV-PROXY-1.4 debt paydown $600.00 from strict-proxy expenses", /\$600\.00/.test(text));
+  ok("DV-PROXY-1.5 net cashflow +$3,400.00", /\+\$3,400\.00/.test(text));
+})();
+
+// ---------------------------------------------------------------------------
+// DV-PROXY-2: strict-proxy edge — Symbol.iterator is the ONLY iteration path.
+// If the helper accidentally calls .filter / .map / .reduce on the proxy it'll
+// throw TypeError, which is what we want as a regression net.
+// ---------------------------------------------------------------------------
+(async function DV_PROXY_2() {
+  console.log("\n--- Case DV-PROXY-2: strict proxy has no Array.prototype methods ---");
+  const da = makeStrictDA([{ a: 1 }, { a: 2 }]);
+  ok("DV-PROXY-2.1 strict DA has no .filter", typeof da.filter !== "function");
+  ok("DV-PROXY-2.2 strict DA has no .map", typeof da.map !== "function");
+  ok("DV-PROXY-2.3 strict DA has no .reduce", typeof da.reduce !== "function");
+  ok("DV-PROXY-2.4 strict DA has no .find", typeof da.find !== "function");
+  // Documented Dataview surface
+  ok("DV-PROXY-2.5 strict DA has .where", typeof da.where === "function");
+  ok("DV-PROXY-2.6 strict DA has .sort", typeof da.sort === "function");
+  ok("DV-PROXY-2.7 strict DA has .limit", typeof da.limit === "function");
+  ok("DV-PROXY-2.8 strict DA has Symbol.iterator", typeof da[Symbol.iterator] === "function");
+})();
+
+// ---------------------------------------------------------------------------
+// DV-PROXY-3: chained .where returns another DA (NOT a plain array). If the
+// helper calls .where(...).where(...), the second call must work.
+// ---------------------------------------------------------------------------
+(async function DV_PROXY_3() {
+  console.log("\n--- Case DV-PROXY-3: chained .where returns DA ---");
+  const da = makeStrictDA([
+    { type: "a", v: 1 },
+    { type: "b", v: 2 },
+    { type: "a", v: 3 },
+  ]);
+  const filtered = da.where((p) => p.type === "a");
+  ok("DV-PROXY-3.1 chained .where returns DA-shaped object",
+    filtered && filtered._kind === "DataArray");
+  const second = filtered.where((p) => p.v > 1);
+  ok("DV-PROXY-3.2 second .where also returns DA", second && second._kind === "DataArray");
+  let n = 0;
+  for (const _ of second) n += 1;
+  eq("DV-PROXY-3.3 chained filter yields 1 item (v=3)", n, 1);
+})();
+
+// ---------------------------------------------------------------------------
+// MO-PERF-1: render time bounded at realistic vault scale.
+//   • 100 paychecks × 20 expenses each (50% paid debt expenses)
+//   • 50 debts × 30 balance_history entries each
+// Bound is intentionally generous (1s) — this is a smoke test for catastrophic
+// regressions, not a benchmark. If render() ever goes O(n²) on either axis,
+// this test fails. If hardware varies, the bound is loose enough to survive.
+// ---------------------------------------------------------------------------
+(async function MO_PERF_1() {
+  console.log("\n--- Case MO-PERF-1: render bounded at vault scale (100p × 20e, 50d × 30h) ---");
+  const PAYCHECK_COUNT = 100;
+  const EXPENSES_PER_PAYCHECK = 20;
+  const DEBT_COUNT = 50;
+  const HIST_PER_DEBT = 30;
+
+  const paychecks = [];
+  let expectedIncome = 0;
+  let expectedDebtPaid = 0;
+  for (let i = 0; i < PAYCHECK_COUNT; i += 1) {
+    const day = 1 + (i % 28); // keeps in July
+    const dd = day < 10 ? `0${day}` : `${day}`;
+    const expenses = [];
+    for (let j = 0; j < EXPENSES_PER_PAYCHECK; j += 1) {
+      const isDebt = (j % 2) === 0;
+      const expense = { item: `exp-${j}`, amount: 10 };
+      if (isDebt) { expense.paid = true; expense.debt = `[[Debt-${j}]]`; expectedDebtPaid += 10; }
+      expenses.push(expense);
+    }
+    paychecks.push(fxPaycheck(`2026-07-${dd}`, 100, expenses));
+    expectedIncome += 100;
+  }
+
+  const debts = [];
+  for (let i = 0; i < DEBT_COUNT; i += 1) {
+    const hist = [];
+    for (let h = 0; h < HIST_PER_DEBT; h += 1) {
+      const day = 1 + (h % 28);
+      const dd = day < 10 ? `0${day}` : `${day}`;
+      hist.push({ date: `2026-07-${dd}`, balance: 1000 - h });
+    }
+    debts.push(fxDebt(`d-${i}`, 500, hist));
+  }
+
+  const dv = makeStrictDv({
+    current: fxBudget("2026-07", [{ name: "Rent", actual: 2000 }]),
+    pagesByScope: {
+      "spice/finance/paychecks": paychecks,
+      "spice/finance/debts": debts,
+    },
+  });
+  const mo = new MonthlyOverview();
+  const t0 = process.hrtime.bigint();
+  await mo.render(dv);
+  const t1 = process.hrtime.bigint();
+  const ms = Number(t1 - t0) / 1e6;
+  console.log(`  → render time: ${ms.toFixed(2)}ms (bound 1000ms)`);
+  ok("MO-PERF-1.1 render completes under 1s bound", ms < 1000, `actual ${ms.toFixed(2)}ms`);
+
+  const root = walkTree(dv.container, (e) => e.attrs && e.attrs.cls === "mo-root");
+  ok("MO-PERF-1.2 mo-root rendered at scale", !!root);
+  const text = collectText(root);
+  // Correctness preserved at scale — income / debtPaid sums match exactly
+  const expectedNet = expectedIncome - 2000 - expectedDebtPaid;
+  ok(`MO-PERF-1.3 income sum correct at scale ($${expectedIncome.toFixed(2)})`,
+    text.includes(`$${expectedIncome.toLocaleString("en-US")}.00`),
+    `expected income string in band 1`);
+  ok(`MO-PERF-1.4 debt paydown sum correct at scale ($${expectedDebtPaid.toFixed(2)})`,
+    text.includes(`$${expectedDebtPaid.toLocaleString("en-US")}.00`),
+    `expected debtPaid string in band 1`);
+  const signedNet = (expectedNet >= 0 ? "+" : "-") + "$" + Math.abs(expectedNet).toLocaleString("en-US") + ".00";
+  ok(`MO-PERF-1.5 net cashflow sign + magnitude correct at scale (${signedNet})`,
+    text.includes(signedNet), `expected ${signedNet}`);
+  ok(`MO-PERF-1.6 audit footer counts 100 paychecks`,
+    /From 100 paychecks/.test(text));
+  ok(`MO-PERF-1.7 audit footer counts 50 debt entities`,
+    /50 debt entities/.test(text));
+})();
+
+// ---------------------------------------------------------------------------
+// MO-XYR-1: cross-year — Budget-2026-12.md viewed on/after Jan 1 2027.
+// Paychecks dated 2027-01-* must NOT bleed into the December bucket; the
+// month-key filter is a pure prefix match so this is enforced by
+// pay_period_start.startsWith("2026-12"). Catches any future shift to
+// loose YYYY-MM matching (e.g. trimming the dash).
+// ---------------------------------------------------------------------------
+(async function MO_XYR_1() {
+  console.log("\n--- Case MO-XYR-1: cross-year boundary — December budget excludes January paychecks ---");
+  const mo = new MonthlyOverview();
+  const dv = makeStrictDv({
+    current: fxBudget("2026-12", [{ name: "Holidays", actual: 800 }]),
+    pagesByScope: {
+      "spice/finance/paychecks": [
+        fxPaycheck("2026-12-15", 3000, []),    // in December — counts
+        fxPaycheck("2026-12-31", 3000, []),    // last day of December — counts
+        fxPaycheck("2027-01-01", 3000, []),    // first day of January — MUST NOT count
+        fxPaycheck("2027-01-15", 3000, []),    // mid-January — MUST NOT count
+      ],
+      "spice/finance/debts": [],
+    },
+  });
+  await mo.render(dv);
+  const root = walkTree(dv.container, (e) => e.attrs && e.attrs.cls === "mo-root");
+  eq("MO-XYR-1.1 data-month = 2026-12", root && root.getAttribute("data-month"), "2026-12");
+  const text = collectText(root);
+  // Only 2 paychecks count → income $6000
+  ok("MO-XYR-1.2 income $6,000.00 (only Dec paychecks counted)",
+    /Income[\s\S]{0,200}\$6,000\.00/.test(text));
+  ok("MO-XYR-1.3 audit footer shows 2 paychecks (NOT 4)",
+    /From\s+2\s+paychecks/.test(text), `text: ${text.slice(0, 500)}`);
+  // Net = 6000 - 800 - 0 = 5200 → +$5,200.00
+  ok("MO-XYR-1.4 net cashflow +$5,200.00 (Dec income only)",
+    /\+\$5,200\.00/.test(text));
+})();
+
+// ---------------------------------------------------------------------------
+// MO-XYR-2: cross-year balance_history MoM — debt with snapshots spanning the
+// year boundary must only contribute December-window snapshots when viewing
+// Budget-2026-12.md.
+// ---------------------------------------------------------------------------
+(async function MO_XYR_2() {
+  console.log("\n--- Case MO-XYR-2: cross-year MoM — December window excludes January snapshots ---");
+  const mo = new MonthlyOverview();
+  const dv = makeStrictDv({
+    current: fxBudget("2026-12", []),
+    pagesByScope: {
+      "spice/finance/paychecks": [],
+      "spice/finance/debts": [
+        fxDebt("X", 1000, [
+          { date: "2026-11-30", balance: 1500 },  // pre-window — must NOT contribute
+          { date: "2026-12-01", balance: 1400 },  // first-of-Dec → first
+          { date: "2026-12-31", balance: 1000 },  // last-of-Dec → last
+          { date: "2027-01-05", balance: 900 },   // post-window — must NOT contribute
+        ]),
+      ],
+    },
+  });
+  await mo.render(dv);
+  const root = walkTree(dv.container, (e) => e.attrs && e.attrs.cls === "mo-root");
+  const pill = walkTree(root, (e) => /^MoM/.test(e._textContent || ""));
+  ok("MO-XYR-2.1 MoM pill present (in-window snapshots found)", !!pill);
+  // Delta = 1000 - 1400 = -400 → debt went down → green ↓ pill
+  ok("MO-XYR-2.2 MoM delta = -$400 (1000 - 1400, December window only)",
+    pill && /MoM\s*↓\s*\$400\.00/.test(pill._textContent),
+    `pill text: ${pill && pill._textContent}`);
+  ok("MO-XYR-2.3 pill colored green (debt went down)",
+    pill && /#16a34a/.test(pill.style.cssText));
+})();
+
+// ===========================================================================
 // Verdict
 // ===========================================================================
 

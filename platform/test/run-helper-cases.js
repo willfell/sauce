@@ -12858,6 +12858,15 @@ async function caseV01103BehavioralHarnessShipped() {
   assertTrue("V01103-MO-BH-6: release:preflight script invokes run-v01103-monthly-overview.js",
     typeof preflight === "string" && preflight.includes(harnessRel),
     `preflight chain missing harness invocation`);
+  // Coverage expansion (post-cycle additions 2026-06-15):
+  assertTrue("V01103-MO-BH-7: harness covers Dataview-proxy fidelity (DV-PROXY-1..3)",
+    /DV-PROXY-1[\s\S]{0,6000}DV-PROXY-2[\s\S]{0,6000}DV-PROXY-3/.test(src));
+  assertTrue("V01103-MO-BH-8: harness covers performance ceiling (MO-PERF-1)",
+    /MO-PERF-1[\s\S]{0,400}render time|MO-PERF-1[\s\S]{0,400}vault scale/.test(src));
+  assertTrue("V01103-MO-BH-9: harness covers cross-year month-key boundary (MO-XYR-1..2)",
+    /MO-XYR-1[\s\S]{0,6000}MO-XYR-2/.test(src));
+  assertTrue("V01103-MO-BH-10: strict Dataview proxy stub asserts no Array.prototype methods",
+    /makeStrictDA[\s\S]{0,2000}_kind:\s*["']DataArray["']/.test(src));
 }
 
 async function caseV01103InjectMonthlyBandIdempotent() {
