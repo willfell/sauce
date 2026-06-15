@@ -5278,7 +5278,7 @@ function _backfillBudgetGroupsFromText(body) {
   // item's `  - ...` start line.
   const fmLines = fm.split("\n");
   const isItemStart = (line) => /^  - /.test(line);
-  const isItemContinuation = (line) => /^    \S/.test(line);
+  const isItemContinuation = (line) => /^\s{4,}\S/.test(line);
 
   let i = 0;
   while (i < fmLines.length) {
@@ -5766,7 +5766,7 @@ function _seedBudgetGroups(body, defaultGroupsArr, catToGroup) {
     // Walk frontmatter lines looking for categories block
     const fmLines = fm.split("\n");
     const isItemStart = (line) => /^  - /.test(line);
-    const isItemContinuation = (line) => /^    \S/.test(line);
+    const isItemContinuation = (line) => /^\s{4,}\S/.test(line);
     let inCategories = false;
     let i = 0;
     while (i < fmLines.length) {
@@ -5926,7 +5926,7 @@ function _linkPaycheckDefaultsDebt(body, nameToSlugMap) {
   let urlsStripped = 0;
 
   const isItemStart = (line) => /^  - /.test(line);
-  const isItemContinuation = (line) => /^    \S/.test(line);
+  const isItemContinuation = (line) => /^\s{4,}\S/.test(line);
   let inExpenses = false;
   let i = 0;
 
@@ -6157,7 +6157,7 @@ function _pcdBackfillExistingExpenses(body, debtList) {
   let inExpenses = false;
   let i = 0;
   const isItemStart = (line) => /^  - /.test(line);
-  const isItemContinuation = (line) => /^    \S/.test(line);
+  const isItemContinuation = (line) => /^\s{4,}\S/.test(line);
 
   while (i < fmLines.length) {
     if (/^expenses:\s*$/.test(fmLines[i])) { inExpenses = true; i++; continue; }
@@ -6171,8 +6171,22 @@ function _pcdBackfillExistingExpenses(body, debtList) {
         // Parse item name from this block (item: key on either the - line or a continuation).
         let itemName = null;
         let hasDebt = false;
+        // v0.115.4: detect inline-form rows (`  - { item: X, ..., debt: "[[Debt-X]]" }`).
+        // The prior implementation used a line-anchored `/^\s*debt:\s/` test which
+        // missed inline `debt:` keys nested in JSON braces, so inline rows that
+        // already had `debt:` set looked debt-less and got duplicate orphan
+        // `      debt: "[[Debt-X]]"` lines injected below — producing unparseable
+        // YAML. Now: scan the whole item block (joined) for any `debt: "[[...]]"`
+        // shape, regardless of inline vs block form.
+        const itemBlockText = itemLines.join("\n");
+        if (/\bdebt:\s*["']?\[\[/.test(itemBlockText)) hasDebt = true;
+        // Inline-form rows are also unsafe targets for separate-line injection —
+        // appending `      debt: "[[X]]"` BELOW a `  - { ... }` line breaks YAML
+        // because the inline form is a complete single-line YAML node. Flag and
+        // skip injection on inline rows even when debt is absent (we'd need to
+        // rewrite the row to block form to safely add, which is out of scope here).
+        const isInlineForm = itemLines.length === 1 && /^  - \{/.test(itemLines[0]);
         for (const il of itemLines) {
-          if (/^\s*debt:\s/.test(il)) hasDebt = true;
           const im = il.match(/(?:^  - item:|^    item:)\s*(.*)/);
           if (im && !itemName) {
             itemName = im[1].trim().replace(/^["']|["']$/g, "").replace(/,\s*$/, "");
@@ -6184,7 +6198,7 @@ function _pcdBackfillExistingExpenses(body, debtList) {
           }
         }
 
-        if (itemName && !hasDebt) {
+        if (itemName && !hasDebt && !isInlineForm) {
           const debt = _pcdBestDebtForItem(itemName, debtList);
           if (debt) {
             const newLines = [];
@@ -11957,6 +11971,7 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports._buildCanonicalFinanceHubFrontmatter = _buildCanonicalFinanceHubFrontmatter;
     module.exports.applyFinanceInvoiceWorkspaceNavInjection = applyFinanceInvoiceWorkspaceNavInjection;
     module.exports._injectInvoiceWorkspaceNav = _injectInvoiceWorkspaceNav;
+    module.exports._pcdBackfillExistingExpenses = _pcdBackfillExistingExpenses;
     module.exports.applyOrphanedHelperCleanup = applyOrphanedHelperCleanup;
     // v0.110.3 — MonthlyOverview band injection on Budget-YYYY-MM.md
     module.exports.applyFinanceBudgetMonthlyBandInjection = applyFinanceBudgetMonthlyBandInjection;

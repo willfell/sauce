@@ -13731,6 +13731,94 @@ async function caseV01153PaycheckDebtBandLinkSlug() {
     PDB._parseDebtSlug(null) === null);
 }
 
+// =========================================================================
+// v0.115.4 PATCH — _pcdBackfillExistingExpenses inline-row idempotency guard
+// =========================================================================
+//
+// v0.114.0 backfill migration silently corrupted Paycheck Defaults on every
+// install by adding orphan `      debt: "[[Debt-X]]"` lines below inline rows
+// that already had `debt:` set inside `{ ... }`. v0.115.4 detects inline form
+// + scans the whole item-block for any debt: wikilink shape, and skips both:
+// (1) rows that already have debt: anywhere in the block, and
+// (2) all inline-form rows (separate-line injection cannot safely target an
+//     inline `  - { ... }` single-node YAML row).
+
+async function caseV01154BackfillInlineWithDebtUntouched() {
+  console.log("\n--- Case V01154-BF-INLINE-DEBT: inline rows with debt: already set are NOT touched ---");
+  const installer = require(path.join(WORKSHOP, "platform/install.js"));
+  const backfill = installer._pcdBackfillExistingExpenses;
+  assertTrue("V01154-BF-INLINE-DEBT-1: _pcdBackfillExistingExpenses exported",
+    typeof backfill === "function");
+  const body = [
+    "---",
+    "type: paycheck-defaults",
+    "expenses:",
+    '  - { item: Apple Card, amount: 500, category: Credit Payment, url: "", debt: "[[Debt-Apple-Card]]" }',
+    '  - { item: Brex Card, amount: 0, category: Credit Payment, url: "", debt: "[[Debt-Brex-Card]]" }',
+    "---",
+    "",
+  ].join("\n");
+  const debtList = [
+    { name: "Apple Card", slug: "Debt-Apple-Card", planned_monthly_payment: 380, url: "", kind: "credit-card" },
+    { name: "Brex Card",  slug: "Debt-Brex-Card",  planned_monthly_payment: 0,   url: "", kind: "credit-card" },
+  ];
+  const r = backfill(body, debtList);
+  assertTrue("V01154-BF-INLINE-DEBT-2: touched === false (idempotent on already-linked inline rows)",
+    r.touched === false);
+  assertTrue("V01154-BF-INLINE-DEBT-3: body bytes identical to input",
+    r.body === body);
+}
+
+async function caseV01154BackfillInlineWithoutDebtUntouched() {
+  console.log("\n--- Case V01154-BF-INLINE-NODEBT: inline rows without debt: are also skipped (cannot safely inject) ---");
+  const installer = require(path.join(WORKSHOP, "platform/install.js"));
+  const backfill = installer._pcdBackfillExistingExpenses;
+  const body = [
+    "---",
+    "type: paycheck-defaults",
+    "expenses:",
+    '  - { item: Apple Card, amount: 500, category: Credit Payment, url: "" }',
+    "---",
+    "",
+  ].join("\n");
+  const debtList = [
+    { name: "Apple Card", slug: "Debt-Apple-Card", planned_monthly_payment: 380, url: "", kind: "credit-card" },
+  ];
+  const r = backfill(body, debtList);
+  assertTrue("V01154-BF-INLINE-NODEBT-1: touched === false (inline rows always skipped)",
+    r.touched === false, "inline rows must never be modified by backfill");
+}
+
+async function caseV01154BackfillBlockFormStillWorks() {
+  console.log("\n--- Case V01154-BF-BLOCK: block-form rows without debt: still get backfilled ---");
+  const installer = require(path.join(WORKSHOP, "platform/install.js"));
+  const backfill = installer._pcdBackfillExistingExpenses;
+  const body = [
+    "---",
+    "type: paycheck-defaults",
+    "expenses:",
+    "  - item: Apple Card",
+    "      amount: 500",
+    "      category: Credit Payment",
+    '      url: ""',
+    "---",
+    "",
+  ].join("\n");
+  const debtList = [
+    { name: "Apple Card", slug: "Debt-Apple-Card", planned_monthly_payment: 380, url: "", kind: "credit-card" },
+  ];
+  const r = backfill(body, debtList);
+  assertTrue("V01154-BF-BLOCK-1: block-form row got backfilled (touched === true)",
+    r.touched === true);
+  assertTrue("V01154-BF-BLOCK-2: debt: line injected",
+    /^      debt: "\[\[Debt-Apple-Card\]\]"$/m.test(r.body));
+  assertTrue("V01154-BF-BLOCK-3: linked count is 1", r.linked === 1);
+  // Run again — should now be a no-op (the row HAS debt now).
+  const r2 = backfill(r.body, debtList);
+  assertTrue("V01154-BF-BLOCK-4: second pass on backfilled body is no-op (idempotent)",
+    r2.touched === false && r2.body === r.body);
+}
+
 async function caseV01103InjectMonthlyBandIdempotent() {
   console.log("\n--- Case V01103-MO-IDEM: _injectMonthlyBand transform is idempotent ---");
   const installer = require(path.join(WORKSHOP, "platform/install.js"));
@@ -23129,6 +23217,11 @@ type: cowork-microscope
   await caseV01153FinanceMathLinkObjectDebtPaid();
   await caseV01153PaycheckDebtBandLinkObjectFilter();
   await caseV01153PaycheckDebtBandLinkSlug();
+
+  // v0.115.4 PATCH — backfill migration inline-row idempotency
+  await caseV01154BackfillInlineWithDebtUntouched();
+  await caseV01154BackfillInlineWithoutDebtUntouched();
+  await caseV01154BackfillBlockFormStillWorks();
 
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
