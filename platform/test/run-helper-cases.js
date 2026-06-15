@@ -12262,6 +12262,109 @@ async function caseV01080FinanceNavRowMigrationRegex() {
     /finance-nav-row-v0\.6\.0/.test(src));
 }
 
+// v0.108.0 S3 — new widgets + delete old nav-buttons
+
+async function caseV01080FinanceNewHelpers() {
+  console.log("\n--- Case V01080-FH-NEW: new finance helpers present ---");
+  const helpersDir = path.join(WORKSHOP, "platform/blueprints/finance/helpers");
+  const expected = [
+    "finance-nav-row.js",
+    "debt-summary.js",
+    "debts-hub-summary.js",
+    "debts-cards.js",
+    "debt-defaults-editor.js",
+    "debt-config-editor.js",
+  ];
+  for (const f of expected) {
+    assertTrue(`V01080-FH-NEW-${f}: exists`, fs.existsSync(path.join(helpersDir, f)));
+  }
+}
+
+async function caseV01080FinanceOldNavButtonsDeleted() {
+  console.log("\n--- Case V01080-FH-DEL: old nav buttons deleted ---");
+  const helpersDir = path.join(WORKSHOP, "platform/blueprints/finance/helpers");
+  const deleted = ["budget-nav-buttons.js", "paycheck-nav-buttons.js", "invoice-nav-buttons.js"];
+  for (const f of deleted) {
+    assertTrue(`V01080-FH-DEL-${f}: deleted`, !fs.existsSync(path.join(helpersDir, f)));
+  }
+}
+
+async function caseV01080FinanceNavRowClass() {
+  console.log("\n--- Case V01080-FNR-CLS: FinanceNavRow class shape ---");
+  const src = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/finance/helpers/finance-nav-row.js"), "utf8");
+  assertTrue("V01080-FNR-CLS-class: class FinanceNavRow defined",
+    /class FinanceNavRow/.test(src));
+  assertTrue("V01080-FNR-CLS-render: async render(dv) method",
+    /async render\(dv\)/.test(src));
+  assertTrue("V01080-FNR-CLS-modes: detection covers all 9 modes",
+    /hub-finance/.test(src) && /hub-budgets/.test(src) && /hub-paychecks/.test(src) &&
+    /hub-invoices/.test(src) && /hub-debts/.test(src) &&
+    /entity-budget/.test(src) && /entity-paycheck/.test(src) &&
+    /entity-invoice/.test(src) && /entity-debt/.test(src));
+  assertTrue("V01080-FNR-CLS-css: fnr-root CSS class",
+    /fnr-root/.test(src));
+}
+
+async function caseV01080DebtSummaryWidget() {
+  console.log("\n--- Case V01080-DS-CLS: DebtSummary class shape ---");
+  const src = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/finance/helpers/debt-summary.js"), "utf8");
+  assertTrue("V01080-DS-CLS-class: class DebtSummary defined", /class DebtSummary/.test(src));
+  assertTrue("V01080-DS-CLS-render: async render(dv)", /async render\(dv\)/.test(src));
+  assertTrue("V01080-DS-CLS-marker: emits debt-summary-v0.6.0",
+    /debt-summary-v0\.6\.0/.test(src));
+  assertTrue("V01080-DS-CLS-css: dbt-sum-root", /dbt-sum-root/.test(src));
+  assertTrue("V01080-DS-CLS-math: monthly interest math present",
+    /apr\s*\/\s*100\s*\/\s*12|apr\s*\*\s*current_balance/.test(src));
+}
+
+async function caseV01080DebtsHubSummary() {
+  console.log("\n--- Case V01080-DHS-CLS: DebtsHubSummary class shape ---");
+  const src = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/finance/helpers/debts-hub-summary.js"), "utf8");
+  assertTrue("V01080-DHS-CLS-class: class DebtsHubSummary defined",
+    /class DebtsHubSummary/.test(src));
+  assertTrue("V01080-DHS-CLS-css: dhs-root", /dhs-root/.test(src));
+  assertTrue("V01080-DHS-CLS-weighted: weighted-avg APR math present",
+    /weighted|balance\s*\*\s*apr/.test(src));
+}
+
+async function caseV01080DebtDefaultsEditor() {
+  console.log("\n--- Case V01080-DDE-CLS: DebtDefaultsEditor class shape ---");
+  const src = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/finance/helpers/debt-defaults-editor.js"), "utf8");
+  assertTrue("V01080-DDE-CLS-class: class DebtDefaultsEditor defined",
+    /class DebtDefaultsEditor/.test(src));
+  assertTrue("V01080-DDE-CLS-render: async render(dv)", /async render\(dv\)/.test(src));
+  assertTrue("V01080-DDE-CLS-css: dde-root", /dde-root/.test(src));
+  assertTrue("V01080-DDE-CLS-mutation: FinanceFrontmatter.update used",
+    /FinanceFrontmatter\.update/.test(src));
+}
+
+async function caseV01080DebtConfigEditor() {
+  console.log("\n--- Case V01080-DCE-CLS: DebtConfigEditor class shape ---");
+  const src = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/finance/helpers/debt-config-editor.js"), "utf8");
+  assertTrue("V01080-DCE-CLS-class: class DebtConfigEditor defined",
+    /class DebtConfigEditor/.test(src));
+  assertTrue("V01080-DCE-CLS-snapshot: auto-snapshot on save",
+    /balance_history/.test(src) && /source.*manual/.test(src));
+}
+
+async function caseV01080DebtsContentTemplate() {
+  console.log("\n--- Case V01080-DCT: Debts.md content template present ---");
+  const tpath = path.join(WORKSHOP, "platform/blueprints/finance/content/Debts.md");
+  assertTrue("V01080-DCT-exists: Debts.md content template exists", fs.existsSync(tpath));
+  const src = fs.readFileSync(tpath, "utf8");
+  assertTrue("V01080-DCT-type: type: debts-hub frontmatter",
+    /type:\s*debts-hub/.test(src));
+  assertTrue("V01080-DCT-fnr: FinanceNavRow invoked",
+    /class:\s*["']FinanceNavRow["']/.test(src));
+  assertTrue("V01080-DCT-dhs: DebtsHubSummary view invoked",
+    /class:\s*["']DebtsHubSummary["']/.test(src));
+}
+
 (async function main() {
   await case1Idempotent();
   await case2MalformedJson();
@@ -12952,6 +13055,16 @@ async function caseV01080FinanceNavRowMigrationRegex() {
   // v0.108.0 S2 — 4 finance migrations (debt scaffolding, group seed, paycheck-defaults debt linking, nav-row sweep)
   await caseV01080FinanceMigrationOrchestrator();
   await caseV01080FinanceNavRowMigrationRegex();
+
+  // v0.108.0 S3 — 6 new widgets + delete 3 old nav-button classes
+  await caseV01080FinanceNewHelpers();
+  await caseV01080FinanceOldNavButtonsDeleted();
+  await caseV01080FinanceNavRowClass();
+  await caseV01080DebtSummaryWidget();
+  await caseV01080DebtsHubSummary();
+  await caseV01080DebtDefaultsEditor();
+  await caseV01080DebtConfigEditor();
+  await caseV01080DebtsContentTemplate();
 
   // v0.65.0 HC-V065-RUN-NOTE: write-run-note-* sub-skill lint
   {
