@@ -8320,10 +8320,10 @@ async function caseHCV0891Versions() {
     path.join(WORKSHOP, "manifest.json"), "utf8"));
   const wsVer = platformMan.workshop_version || platformMan.version
     || (platformMan.workshop && platformMan.workshop.version);
-  assertEqual(wsVer, "0.115.0", "HC-V0891-VERSION-C: workshop pin = 0.93.3 (v0.93.3 bump)");
+  assertTrue("HC-V0891-VERSION-C: workshop pin 0.115.x", /^0.115.\d+$/.test(wsVer)); assertEqual(wsVer, wsVer, "HC-V0891-VERSION-C: workshop pin = 0.93.3 (v0.93.3 bump)");
   const pkg = JSON.parse(fs.readFileSync(
     path.resolve(WORKSHOP, "..", "package.json"), "utf8"));
-  assertEqual(pkg.version, "0.115.0", "HC-V0891-VERSION-C: package.json = 0.93.3 (v0.93.3 bump)");
+  assertTrue("HC-V0891-VERSION-C: pkg pin 0.115.x", /^0.115.\d+$/.test(pkg.version)); assertEqual(pkg.version, pkg.version, "HC-V0891-VERSION-C: package.json = 0.93.3 (v0.93.3 bump)");
 
   // D: mechanism count unchanged
   const mechs = (platformMan.mechanisms && Array.isArray(platformMan.mechanisms))
@@ -12155,7 +12155,7 @@ async function caseV01070FinMan1Versions() {
   // v0.109.0 bumps workshop_version on top of v0.108.0's finance/EC ship.
   assertTrue("HC-V01070-FIN-MAN-1: finance version 0.6.x or 0.7.x or 0.8.x", /^0\.(6|7|8|9)\.\d+$/.test(fin.version), `got: ${fin.version}`);
   assertEqual(ec.version, "0.7.2", "HC-V01070-FIN-MAN-1: entity-create version");
-  assertEqual(ws.workshop_version, "0.115.0", "HC-V01070-FIN-MAN-1: workshop_version");
+  assertTrue("HC-V01070-FIN-MAN-1: workshop_version 0.115.x", /^0.115.\d+$/.test(ws.workshop_version));
   assertTrue("HC-V01070-FIN-MAN-1: finance depends_on entity-create >=0.7.0",
     fin.depends_on.some(d => d.name === "entity-create" && /0\.7/.test(d.range)));
 }
@@ -12473,7 +12473,7 @@ async function caseV01080FinanceVersionBump() {
     ec && /^0\.7\.\d+$/.test(ec.version), `got: ${ec?.version}`);
   // v0.109.0 supersedes 0.108.0: workshop bumped again for projects-visual-overhaul.
   assertTrue("V01080-FV-5: workshop_version === 0.109.0 (v0.109.0 supersedes the v0.108.0 baseline this case originally pinned)",
-    workshop.workshop_version === "0.115.0", `got: ${workshop.workshop_version}`);
+    workshop.workshop_version .match(/^0.115.\d+$/), `got: ${workshop.workshop_version}`);
 }
 
 async function caseV01080FinanceNewEntityButtonDebt() {
@@ -12819,7 +12819,7 @@ async function caseV01103FinanceManifestBumped() {
 async function caseV01103WorkshopManifestBumped() {
   console.log("\n--- Case V01103-MO-WS: workshop manifest at 0.110.3 ---");
   const ws = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
-  assertEqual(ws.workshop_version, "0.115.0", "V01103-MO-WS-1: workshop_version");
+  assertTrue("V01103-MO-WS-1: workshop_version 0.115.x", /^0.115.\d+$/.test(ws.workshop_version));
 }
 
 async function caseV01103BudgetTemplateUpdated() {
@@ -13089,7 +13089,7 @@ async function caseV01120FinanceMathPresent() {
 }
 
 async function caseV01120FinanceMathStaticApi() {
-  console.log("\n--- Case V01120-FM-API: FinanceMath declares all static methods ---");
+  console.log("\n--- Case V01120-FM-API: FinanceMath declares all instance methods (v0.115.1: NOT static — CustomJS exposes instances) ---");
   const helperPath = path.join(WORKSHOP, "platform/blueprints/finance/helpers/finance-math.js");
   if (!fs.existsSync(helperPath)) {
     assertTrue("V01120-FM-API-file-exists: helper file must exist first", false, `missing: ${helperPath}`);
@@ -13103,10 +13103,16 @@ async function caseV01120FinanceMathStaticApi() {
     "measuredMovement", "reconcile", "fmtMoney",
   ];
   for (const m of methods) {
-    assertTrue(`V01120-FM-API-${m}: static ${m} declared`,
-      new RegExp(`static\\s+${m}\\s*\\(`).test(src),
-      `missing static method ${m}`);
+    assertTrue(`V01120-FM-API-${m}: instance ${m} declared (not static)`,
+      new RegExp(`^\\s{4}${m}\\s*\\(`, "m").test(src),
+      `missing instance method ${m}`);
   }
+  // v0.115.1 regression guard: FinanceMath methods MUST NOT be `static`. CustomJS
+  // stores instances on customJS.<Class>; static methods are unreachable that way
+  // — this is what broke FinanceHubSummary in Obsidian at the v0.115.0 deploy.
+  assertTrue("V01120-FM-API-no-static: no method declared `static`",
+    !/\bstatic\s+\w+\s*\(/.test(src),
+    "FinanceMath contains a `static` method — CustomJS will hide it from widgets");
 }
 
 // v0.112.0 finance — installer migrations S2
@@ -13240,7 +13246,11 @@ async function caseV01120HubsRepairFinanceSummary() {
   // The dict values use escaped JS string literals on one line. Rather than trying to
   // extract the full string value (which contains \" sequences), we find the dict entry
   // line for Finance.md and check the ordering of class names within that line.
-  const lines = src.split("\n");
+  // v0.115.1: scope the search to the FINANCE_HUB_BODY_TEMPLATES dict only —
+  // FINANCE_HUB_CANONICAL_TYPES (new in v0.115.1) ALSO has a Finance.md row but
+  // it carries only the canonical `type` string, not the body template.
+  const bodyTemplatesDict = src.split("const FINANCE_HUB_BODY_TEMPLATES")[1];
+  const lines = (bodyTemplatesDict || "").split("\n");
   const financeLine = lines.find(l => /["']spice\/finance\/Finance\.md["']/.test(l));
   if (financeLine) {
     const navIdx = financeLine.indexOf("FinanceNav");
@@ -13469,16 +13479,22 @@ async function caseV01150PaycheckTemplateAlignsManifest() {
 // v0.115.0 Stage C — manifest additions (month entity-create + months rule_fragment + version bumps)
 
 async function caseV01150ManifestsBumped() {
-  console.log("\n--- Case V01150-C-MANIFESTS: v0.115.0 + finance 0.9.0 version pins ---");
+  console.log("\n--- Case V01150-C-MANIFESTS: workshop 0.115.x + finance 0.9.x version pins ---");
+  // v0.115.1: widened from exact 0.115.0 to 0.115.x pattern (precedent: EC-2 /
+  // FA3-PROJ-1 / V01080-NEB-count range guards). Patch bumps shouldn't whack-a-mole
+  // every assert.
   const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
-  assertEqual(platMan.workshop_version, "0.115.0", "V01150-C-MANIFESTS-1: platform/manifest.json workshop_version");
+  assertTrue("V01150-C-MANIFESTS-1: platform/manifest.json workshop_version matches 0.115.x",
+    /^0\.115\.\d+$/.test(platMan.workshop_version), `got: ${platMan.workshop_version}`);
   const finPin = (platMan.blueprints || []).find(b => b.name === "finance");
-  assertTrue("V01150-C-MANIFESTS-2: platform/manifest.json finance blueprint pin === 0.9.0",
-    finPin && finPin.version === "0.9.0", `got: ${finPin?.version}`);
+  assertTrue("V01150-C-MANIFESTS-2: platform/manifest.json finance blueprint pin matches 0.9.x",
+    finPin && /^0\.9\.\d+$/.test(finPin.version), `got: ${finPin?.version}`);
   const finMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
-  assertEqual(finMan.version, "0.9.0", "V01150-C-MANIFESTS-3: finance manifest version");
+  assertTrue("V01150-C-MANIFESTS-3: finance manifest version matches 0.9.x",
+    /^0\.9\.\d+$/.test(finMan.version), `got: ${finMan.version}`);
   const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
-  assertEqual(pkg.version, "0.115.0", "V01150-C-MANIFESTS-4: package.json version");
+  assertTrue("V01150-C-MANIFESTS-4: package.json version matches 0.115.x",
+    /^0\.115\.\d+$/.test(pkg.version), `got: ${pkg.version}`);
 }
 
 async function caseV01150MonthEntityCreateEntry() {
@@ -13509,6 +13525,124 @@ async function caseV01150MonthsRuleFragment() {
   assertTrue("V01150-C-RF-MONTHS-2: naming_pattern matches Month-YYYY-MM.md",
     monthsFrag && /Month-\\d\{4\}-\\d\{2\}/.test(monthsFrag.fragment.naming_pattern),
     `got: ${monthsFrag?.fragment?.naming_pattern}`);
+}
+
+// =========================================================================
+// v0.115.1 PATCH — FinanceMath instance methods + hub frontmatter heal
+// =========================================================================
+
+async function caseV01151FinanceMathInstanceMethods() {
+  console.log("\n--- Case V01151-FM-INST: FinanceMath methods callable on an instance (CustomJS contract) ---");
+  // Load the source via IIFE-eval (mirrors run-v01120 harness pattern).
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/helpers/finance-math.js"), "utf8");
+  const wrapper = `${src}\n; return FinanceMath;`;
+  const FinanceMathClass = new Function(wrapper)();
+  const fm = new FinanceMathClass();
+  assertTrue("V01151-FM-INST-1: fm.readDebts is a function on instance",
+    typeof fm.readDebts === "function");
+  assertTrue("V01151-FM-INST-2: fm.debtTotals is a function on instance",
+    typeof fm.debtTotals === "function");
+  assertTrue("V01151-FM-INST-3: fm.measuredMovement is a function on instance",
+    typeof fm.measuredMovement === "function");
+  assertTrue("V01151-FM-INST-4: fm.fmtMoney is a function on instance",
+    typeof fm.fmtMoney === "function");
+  // Static-call MUST fail (regression guard — verifies the bug that broke v0.115.0).
+  assertTrue("V01151-FM-INST-5: FinanceMathClass.readDebts is NOT a function (static would defeat CustomJS contract)",
+    typeof FinanceMathClass.readDebts !== "function");
+  // Smoke an actual computation through the instance to confirm `this` references work.
+  const totals = fm.debtTotals([{ current_balance: 1000, apr: 24, planned_monthly_payment: 100 }]);
+  assertTrue("V01151-FM-INST-6: instance debtTotals computes (totalBalance===1000)",
+    totals && totals.totalBalance === 1000, `got: ${JSON.stringify(totals)}`);
+}
+
+async function caseV01151HubFrontmatterHealDefined() {
+  console.log("\n--- Case V01151-FMH-DEF: applyFinanceHubFrontmatterHeal exported function ---");
+  const installer = require(path.join(WORKSHOP, "platform/install.js"));
+  assertTrue("V01151-FMH-DEF-1: applyFinanceHubFrontmatterHeal is a function",
+    typeof installer.applyFinanceHubFrontmatterHeal === "function");
+  assertTrue("V01151-FMH-DEF-2: _detectFinanceHubFrontmatterCorruption exported",
+    typeof installer._detectFinanceHubFrontmatterCorruption === "function");
+  assertTrue("V01151-FMH-DEF-3: _buildCanonicalFinanceHubFrontmatter exported",
+    typeof installer._buildCanonicalFinanceHubFrontmatter === "function");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
+  assertTrue("V01151-FMH-DEF-4: async function applyFinanceHubFrontmatterHeal declared",
+    /async\s+function\s+applyFinanceHubFrontmatterHeal\s*\(/.test(src));
+  assertTrue("V01151-FMH-DEF-5: FINANCE_HUB_CANONICAL_TYPES table declared",
+    /const\s+FINANCE_HUB_CANONICAL_TYPES\s*=/.test(src));
+}
+
+async function caseV01151HubFrontmatterHealOrchestrated() {
+  console.log("\n--- Case V01151-FMH-ORCH: heal wired BEFORE applyFinanceHubsRepair in orchestrator ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
+  // Locate applyFinanceMigrations body
+  const bodyMatch = src.match(/async\s+function\s+applyFinanceMigrations[\s\S]*?\n\}/);
+  assertTrue("V01151-FMH-ORCH-1: applyFinanceMigrations body locatable",
+    !!bodyMatch);
+  if (!bodyMatch) return;
+  const body = bodyMatch[0];
+  const healIdx = body.indexOf("applyFinanceHubFrontmatterHeal");
+  const repairIdx = body.indexOf("applyFinanceHubsRepair");
+  assertTrue("V01151-FMH-ORCH-2: heal call present in orchestrator", healIdx > -1);
+  assertTrue("V01151-FMH-ORCH-3: repair call present in orchestrator", repairIdx > -1);
+  assertTrue("V01151-FMH-ORCH-4: heal runs BEFORE repair (so repair preserves clean frontmatter)",
+    healIdx > -1 && repairIdx > -1 && healIdx < repairIdx,
+    `healIdx=${healIdx} repairIdx=${repairIdx}`);
+}
+
+async function caseV01151HubFrontmatterHealDetector() {
+  console.log("\n--- Case V01151-FMH-DET: detector recognizes real ero corruption + accepts clean ---");
+  const installer = require(path.join(WORKSHOP, "platform/install.js"));
+  const det = installer._detectFinanceHubFrontmatterCorruption;
+  // Real ero v0.111.3 Finance.md inner FM (verbatim from production observation)
+  const eroFin = 'type: finance-hub\ncreated_at: "2026-05-17T16:45:00-06:00"\ncreated_at: "2026-05-17T16:45:00-06:00"\ntags:\n  - finance-hub-hub\ncssclasses:\n  - wide';
+  // Real ero Invoices.md inner FM
+  const eroInv = 'type: invoices-hub\ncreated_at: "2026-05-17T16:45:00-06:00"\nhub\ncreated_at: "2026-05-17T16:45:00-06:00"\ntags:\n  - finance-hubssclasses:\n  - wide';
+  // Clean canonical FM
+  const cleanFin   = 'type: finance-hub\ncreated_at: "2026-05-17T16:45:00-06:00"\ntags:\n  - finance-hub\ncssclasses:\n  - wide';
+  const cleanMonths = 'type: months-hub\ncreated_at: "2026-06-15T18:00:00-06:00"\ntags:\n  - finance-hub\ncssclasses:\n  - wide';
+  const r1 = det(eroFin);
+  assertTrue("V01151-FMH-DET-1: ero Finance.md flagged corrupt (duplicate created_at)",
+    r1.corrupt === true && r1.reason.includes("created_at"),
+    `got: ${JSON.stringify(r1)}`);
+  const r2 = det(eroInv);
+  assertTrue("V01151-FMH-DET-2: ero Invoices.md flagged corrupt",
+    r2.corrupt === true,
+    `got: ${JSON.stringify(r2)}`);
+  const r3 = det(cleanFin);
+  assertTrue("V01151-FMH-DET-3: clean Finance.md accepted",
+    r3.corrupt === false,
+    `got: ${JSON.stringify(r3)}`);
+  const r4 = det(cleanMonths);
+  assertTrue("V01151-FMH-DET-4: clean Months.md accepted",
+    r4.corrupt === false,
+    `got: ${JSON.stringify(r4)}`);
+}
+
+async function caseV01151HubFrontmatterHealCanonicalBuilder() {
+  console.log("\n--- Case V01151-FMH-CAN: canonical frontmatter builder shape ---");
+  const installer = require(path.join(WORKSHOP, "platform/install.js"));
+  const build = installer._buildCanonicalFinanceHubFrontmatter;
+  const fm = build("finance-hub", "2026-05-17T16:45:00-06:00");
+  assertTrue("V01151-FMH-CAN-1: starts with ---", fm.startsWith("---\n"));
+  assertTrue("V01151-FMH-CAN-2: ends with ---<newline>", fm.endsWith("---\n"));
+  assertTrue("V01151-FMH-CAN-3: contains canonical type", fm.includes("type: finance-hub"));
+  assertTrue("V01151-FMH-CAN-4: preserves created_at", fm.includes('created_at: "2026-05-17T16:45:00-06:00"'));
+  assertTrue("V01151-FMH-CAN-5: emits clean tags block", fm.includes("tags:\n  - finance-hub\n"));
+  assertTrue("V01151-FMH-CAN-6: emits clean cssclasses block", fm.includes("cssclasses:\n  - wide\n"));
+  // No created_at given -> uses a now-ish ISO timestamp
+  const fmNow = build("months-hub", null);
+  assertTrue("V01151-FMH-CAN-7: fallback now-timestamp valid ISO",
+    /created_at: "\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(fmNow));
+}
+
+async function caseV01151ManifestsBumped() {
+  console.log("\n--- Case V01151-VER: workshop 0.115.0 -> 0.115.1 PATCH bump ---");
+  const root = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
+  assertTrue("V01151-VER-1: workshop_version === 0.115.1",
+    root.workshop_version === "0.115.1", `got: ${root.workshop_version}`);
+  const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
+  assertTrue("V01151-VER-2: package.json version === 0.115.1",
+    pkg.version === "0.115.1", `got: ${pkg.version}`);
 }
 
 async function caseV01103InjectMonthlyBandIdempotent() {
@@ -15904,10 +16038,10 @@ async function caseV01090Ds1EntityTypeOpt() {
       // NOTE: top-level WORKSHOP at line 29 = path.resolve(__dirname, "../..") = workshop ROOT
       // (distinct from the local WORKSHOP inside caseHCV0891Versions which is platform/).
       const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
-      assertTrue("HC-V0900-VERSION-A: package.json version === '0.93.3'", pkg.version === "0.115.0");
+      assertTrue("HC-V0900-VERSION-A: package.json version === '0.93.3'", pkg.version .match(/^0.115.\d+$/));
       const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
       assertTrue("HC-V0900-VERSION-B: platform/manifest.json workshop_version === '0.93.3'",
-        platMan.workshop_version === "0.115.0");
+        platMan.workshop_version .match(/^0.115.\d+$/));
       const coworkMan = JSON.parse(fs.readFileSync(
         path.join(WORKSHOP, "platform/blueprints/cowork/manifest.json"), "utf8"));
       assertTrue("HC-V0900-VERSION-C: cowork manifest version === '0.31.0'",
@@ -16883,12 +17017,12 @@ type: cowork-microscope
   try {
     const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
     assertTrue("HC-V0920-VERSION-A1: workshop_version === 0.93.3",
-      platMan.workshop_version === "0.115.0");
+      platMan.workshop_version .match(/^0.115.\d+$/));
     assertTrue("HC-V0920-VERSION-A2: blueprints[].cowork.version === 0.31.2",
       platMan.blueprints.find(b => b.name === "cowork").version === "0.40.2");
     const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
     assertTrue("HC-V0920-VERSION-A3: package.json version === 0.93.3",
-      pkg.version === "0.115.0");
+      pkg.version .match(/^0.115.\d+$/));
     const workshopSub = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "ranch/platform-subscription.json"), "utf8"));
     assertTrue("HC-V0920-VERSION-A4: workshop subscription cowork pin === 0.31.0",
       workshopSub.blueprints.find(b => b.name === "cowork").version === "0.40.2");
@@ -17160,12 +17294,12 @@ type: cowork-microscope
   try {
     const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
     assertTrue("HC-V0930-VERSION-A1: workshop_version === 0.93.3",
-      platMan.workshop_version === "0.115.0");
+      platMan.workshop_version .match(/^0.115.\d+$/));
     assertTrue("HC-V0930-VERSION-A2: blueprints[].cowork.version === 0.31.2",
       platMan.blueprints.find(b => b.name === "cowork").version === "0.40.2");
     const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
     assertTrue("HC-V0930-VERSION-A3: package.json version === 0.93.3",
-      pkg.version === "0.115.0");
+      pkg.version .match(/^0.115.\d+$/));
     const workshopSub = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "ranch/platform-subscription.json"), "utf8"));
     assertTrue("HC-V0930-VERSION-A4: workshop subscription cowork pin === 0.31.1",
       workshopSub.blueprints.find(b => b.name === "cowork").version === "0.40.2");
@@ -17267,12 +17401,12 @@ type: cowork-microscope
   try {
     const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
     assertTrue("HC-V0931-VERSION-D1: workshop_version === 0.93.3",
-      platMan.workshop_version === "0.115.0");
+      platMan.workshop_version .match(/^0.115.\d+$/));
     assertTrue("HC-V0931-VERSION-D2: blueprints[].cowork.version === 0.31.2",
       platMan.blueprints.find(b => b.name === "cowork").version === "0.40.2");
     const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
     assertTrue("HC-V0931-VERSION-D3: package.json version === 0.93.3",
-      pkg.version === "0.115.0");
+      pkg.version .match(/^0.115.\d+$/));
     const coworkMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/cowork/manifest.json"), "utf8"));
     assertTrue("HC-V0931-VERSION-D4: cowork manifest.version === 0.31.1",
       coworkMan.version === "0.40.2");
@@ -22864,6 +22998,8 @@ type: cowork-microscope
   }
 
   // v0.112.0 finance — FinanceMath shared aggregation helper (S1)
+  // Note: caseV01120FinanceMathStaticApi was renamed semantically to assert
+  // INSTANCE methods (not static) in v0.115.1 — CustomJS exposes instances.
   await caseV01120FinanceMathPresent();
   await caseV01120FinanceMathStaticApi();
 
@@ -22893,6 +23029,14 @@ type: cowork-microscope
   await caseV01150ManifestsBumped();
   await caseV01150MonthEntityCreateEntry();
   await caseV01150MonthsRuleFragment();
+
+  // v0.115.1 PATCH — FinanceMath instance-method fix + hub frontmatter heal migration
+  await caseV01151FinanceMathInstanceMethods();
+  await caseV01151HubFrontmatterHealDefined();
+  await caseV01151HubFrontmatterHealOrchestrated();
+  await caseV01151HubFrontmatterHealDetector();
+  await caseV01151HubFrontmatterHealCanonicalBuilder();
+  await caseV01151ManifestsBumped();
 
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);

@@ -1,10 +1,10 @@
 class FinanceMath {
     // ---- reads ----
-    static readDebts(dv) {
+    readDebts(dv) {
         try { return dv.pages('"spice/finance/debts"').where(p => p && p.type === "debt").array(); }
         catch (_e) { return []; }
     }
-    static readPaychecksForMonth(dv, monthKey) {
+    readPaychecksForMonth(dv, monthKey) {
         try {
             return dv.pages('"spice/finance/paychecks"').where(p =>
                 p && p.type === "paycheck" &&
@@ -12,14 +12,14 @@ class FinanceMath {
                 p.pay_period_start.startsWith(monthKey)).array();
         } catch (_e) { return []; }
     }
-    static readBudgetForMonth(dv, monthKey) {
+    readBudgetForMonth(dv, monthKey) {
         try {
             const hits = dv.pages('"spice/finance/budgets"').where(p =>
                 p && p.type === "budget" && p.month === monthKey).array();
             return hits.length ? hits[0] : null;
         } catch (_e) { return null; }
     }
-    static monthBounds(monthKey) {
+    monthBounds(monthKey) {
         const [y, m] = monthKey.split("-").map(Number);
         const first = `${monthKey}-01`;
         const ny = m === 12 ? y + 1 : y;
@@ -27,7 +27,7 @@ class FinanceMath {
         const lastExclusive = `${ny}-${String(nm).padStart(2, "0")}-01`;
         return { first, lastExclusive };
     }
-    static debtTotals(debts) {
+    debtTotals(debts) {
         const totalBalance = debts.reduce((s, d) => s + (Number(d.current_balance) || 0), 0);
         const monthlyInterest = debts.reduce((s, d) =>
             s + ((Number(d.current_balance) || 0) * (Number(d.apr) || 0) / 100 / 12), 0);
@@ -45,14 +45,14 @@ class FinanceMath {
         }
         return { totalBalance, monthlyInterest, plannedAttack, weightedApr, zeroDebtDate };
     }
-    static monthIncome(paychecks) {
+    monthIncome(paychecks) {
         return paychecks.reduce((s, p) => s + (typeof p.paycheck_amount === "number" ? p.paycheck_amount : 0), 0);
     }
-    static monthSpending(budget) {
+    monthSpending(budget) {
         if (!budget || !Array.isArray(budget.categories)) return 0;
         return budget.categories.reduce((s, c) => s + (c && typeof c.actual === "number" ? c.actual : 0), 0);
     }
-    static monthExpensesTotal(paychecks) {
+    monthExpensesTotal(paychecks) {
         let total = 0;
         for (const p of paychecks) {
             const ex = Array.isArray(p.expenses) ? p.expenses : [];
@@ -60,7 +60,7 @@ class FinanceMath {
         }
         return total;
     }
-    static monthDebtPaid(paychecks) {
+    monthDebtPaid(paychecks) {
         let total = 0;
         for (const p of paychecks) {
             const ex = Array.isArray(p.expenses) ? p.expenses : [];
@@ -72,7 +72,7 @@ class FinanceMath {
         }
         return total;
     }
-    static debtPaidByDebt(paychecks, opts) {
+    debtPaidByDebt(paychecks, opts) {
         const paidOnly = !opts || opts.paidOnly !== false;
         const map = new Map();
         for (const p of paychecks) {
@@ -88,8 +88,8 @@ class FinanceMath {
         }
         return map;
     }
-    static measuredMovement(debts, monthKey) {
-        const { first, lastExclusive } = FinanceMath.monthBounds(monthKey);
+    measuredMovement(debts, monthKey) {
+        const { first, lastExclusive } = this.monthBounds(monthKey);
         const perDebt = new Map();
         let delta = 0;
         let hasSignal = false;
@@ -114,11 +114,11 @@ class FinanceMath {
         }
         return { delta, perDebt, hasSignal };
     }
-    static reconcile(paydownApplied, measuredMovement) {
+    reconcile(paydownApplied, measuredMovement) {
         const measuredDrop = -((measuredMovement && measuredMovement.delta) || 0);
         return { paydownApplied, measuredDrop, interestAndCharges: paydownApplied - measuredDrop };
     }
-    static fmtMoney(n, opts) {
+    fmtMoney(n, opts) {
         const o = opts || {};
         const num = typeof n === "number" && isFinite(n) ? n : 0;
         const abs = Math.abs(num).toFixed(2).split(".");

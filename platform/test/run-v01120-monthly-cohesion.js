@@ -66,7 +66,11 @@ function loadClass(filename, className) {
 // Load FinanceMath
 // ---------------------------------------------------------------------------
 
-const FinanceMath = loadClass("finance-math.js", "FinanceMath");
+// v0.115.1: FinanceMath methods are now INSTANCE methods (CustomJS exposes
+// instances, not classes — static would be unreachable as customJS.FinanceMath.X).
+// Instantiate once; all existing FinanceMath.X(...) call-sites in this harness
+// continue to work because they're now calls on the instance.
+const FinanceMath = new (loadClass("finance-math.js", "FinanceMath"))();
 
 // ===========================================================================
 // SECTION 1 — debtTotals

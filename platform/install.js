@@ -4172,6 +4172,7 @@ async function applyFinanceMigrations(tp, manifest, variables, history, git) {
   await applyFinancePaycheckDefaultsDebtBackfill(tp, manifest, variables, history, git); // NEW v0.114.0 — word-overlap matcher + auto-injection of orphan debts (supersedes the v0.108.0 CC_NAME_RE; complementary not redundant — v0.108.0 still runs for the CC pattern)
   await applyFinanceNavRowMigration(tp, manifest, variables, history, git);              // NEW v0.108.0
   await applyFinanceNavRowGuardFormMigration(tp, manifest, variables, history, git);     // NEW v0.110.3 — guard-form regression: rewrites class:"BudgetNavButtons"|"PaycheckNavButtons"|"InvoiceNavButtons" guard-form refs missed by v0.108.0's direct-call regex
+  await applyFinanceHubFrontmatterHeal(tp, manifest, variables, history, git);           // NEW v0.115.1 — heals corrupted hub frontmatter (dup keys + mangled tag/cssclass values) BEFORE the body repair preserves it
   await applyFinanceHubsRepair(tp, manifest, variables, history, git);                    // NEW v0.110.0 — heals stale pre-CF-3 hub bodies (now also strips top-hub FinanceHubActions via v0.110.3 template change)
   await applyFinanceTopHubNavRowDedup(tp, manifest, variables, history, git);             // NEW v0.110.3 — strips FinanceHubActions(here:"finance") block from spice/finance/Finance.md (user feedback: duplicate finance nav section)
   await applyFinanceDefaultsNavRowInjection(tp, manifest, variables, history, git);       // NEW v0.110.3 — injects FinanceNavRow block into Budget/Paycheck/Debt Defaults notes that lack it
@@ -4188,6 +4189,143 @@ async function applyFinanceMigrations(tp, manifest, variables, history, git) {
 // v0.111.0: bodies use the unified context-aware FinanceNav (single-line, no
 // args). Finance.md now ALSO has a FinanceNav block (was missing entirely
 // in earlier templates — the user reported no Debts button on Finance.md).
+// FINANCE_HUB_CANONICAL_TYPES — maps each hub path to its canonical
+// `type` frontmatter value. Used by applyFinanceHubFrontmatterHeal to
+// detect + rewrite corrupted hub frontmatter (Obsidian "Invalid properties"
+// triggers from duplicate keys + mangled tag/cssclass lines on consumer
+// vaults — observed on ero pre-v0.115.1 deploy).
+const FINANCE_HUB_CANONICAL_TYPES = {
+  "spice/finance/Finance.md":            "finance-hub",
+  "spice/finance/budgets/Budgets.md":    "budgets-hub",
+  "spice/finance/paychecks/Paychecks.md": "paychecks-hub",
+  "spice/finance/invoices/Invoices.md":  "invoices-hub",
+  "spice/finance/debts/Debts.md":        "debts-hub",
+  "spice/finance/months/Months.md":      "months-hub",
+};
+
+// applyFinanceHubFrontmatterHeal — v0.115.1 PATCH.
+//
+// Detects corrupted YAML frontmatter on finance hub files and rewrites it
+// to the canonical form. Corruption signals (any one triggers a heal):
+//   - duplicate top-level keys (e.g. two `created_at:` lines)
+//   - mangled tag/cssclass values (e.g. `finance-hub-hub`,
+//     `finance-hubssclasses:` — concatenated lines)
+//   - orphan content (non-key non-list lines inside the frontmatter block)
+//
+// Canonical frontmatter per hub:
+//   ---
+//   type: <hub-type>            # from FINANCE_HUB_CANONICAL_TYPES
+//   created_at: "<preserved or now>"
+//   tags:
+//     - finance-hub
+//   cssclasses:
+//     - wide
+//   ---
+//
+// `created_at` is preserved if a valid ISO timestamp is extractable from the
+// existing frontmatter; otherwise the current ISO timestamp is used.
+//
+// Body of the file is preserved verbatim. Heal runs BEFORE
+// applyFinanceHubsRepair so the body-repair step sees clean frontmatter.
+//
+// Idempotent: clean frontmatter is a no-op (no corruption signals).
+// Per-file failure-loud + .sauce-backup snapshot before each write.
+function _detectFinanceHubFrontmatterCorruption(fmInner) {
+  // fmInner is the content BETWEEN the two `---` markers, without them.
+  const lines = fmInner.split("\n");
+  const keyCounts = {};
+  for (const line of lines) {
+    const m = line.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\s*:/);
+    if (m) keyCounts[m[1]] = (keyCounts[m[1]] || 0) + 1;
+  }
+  for (const k of Object.keys(keyCounts)) {
+    if (keyCounts[k] > 1) return { corrupt: true, reason: `duplicate key: ${k}` };
+  }
+  // Mangled known patterns observed in the wild (ero v0.111.3 -> v0.115.0 state).
+  if (/finance-hub-hub/.test(fmInner)) return { corrupt: true, reason: "tag mangled: finance-hub-hub" };
+  if (/finance-hubssclasses:/.test(fmInner)) return { corrupt: true, reason: "tag/cssclass concatenation: finance-hubssclasses:" };
+  // Orphan lines: any non-empty line that is not a top-level key (`foo:`),
+  // not a list item (`  - foo`), and not a quoted-string continuation.
+  for (const raw of lines) {
+    const line = raw.replace(/\r$/, "");
+    if (line.length === 0) continue;
+    if (/^[a-zA-Z_][a-zA-Z0-9_]*\s*:/.test(line)) continue;     // key:
+    if (/^\s+-\s+\S/.test(line)) continue;                       // - item
+    if (/^\s+[a-zA-Z_]/.test(line)) continue;                    // continuation under a key (multi-line)
+    if (/^\s*#/.test(line)) continue;                            // YAML comment
+    return { corrupt: true, reason: `orphan line: "${line.trim()}"` };
+  }
+  return { corrupt: false };
+}
+
+function _buildCanonicalFinanceHubFrontmatter(canonicalType, preservedCreatedAt) {
+  const now = new Date().toISOString();
+  const createdAt = preservedCreatedAt || now;
+  return `---\ntype: ${canonicalType}\ncreated_at: "${createdAt}"\ntags:\n  - finance-hub\ncssclasses:\n  - wide\n---\n`;
+}
+
+function _extractValidCreatedAt(fmInner) {
+  // Find the FIRST valid created_at value. Accepts ISO 8601 datetime strings
+  // with optional quoting. If multiple created_at lines exist (corruption),
+  // prefer the first that parses.
+  const matches = fmInner.matchAll(/^created_at\s*:\s*"?([^"\n]+?)"?\s*$/gm);
+  for (const m of matches) {
+    const v = m[1].trim();
+    // Crude ISO 8601 sniff — YYYY-MM-DDTHH:MM:SS optionally with TZ.
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(v)) return v;
+  }
+  return null;
+}
+
+async function applyFinanceHubFrontmatterHeal(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "finance") return;
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  let healed = 0;
+  let clean = 0;
+  let absent = 0;
+
+  for (const [hubPath, canonicalType] of Object.entries(FINANCE_HUB_CANONICAL_TYPES)) {
+    try {
+      if (!(await adapter.exists(hubPath))) { absent++; continue; }
+      const existing = await adapter.read(hubPath);
+      // Split into frontmatter block + body. If the file has no frontmatter
+      // at all, we don't heal here — applyFinanceHubsRepair owns body recovery.
+      const fmMatch = existing.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+      if (!fmMatch) { clean++; continue; }
+      const fmInner = fmMatch[1];
+      const body = fmMatch[2];
+      const detection = _detectFinanceHubFrontmatterCorruption(fmInner);
+      if (!detection.corrupt) { clean++; continue; }
+      const preservedCreatedAt = _extractValidCreatedAt(fmInner);
+      const newFm = _buildCanonicalFinanceHubFrontmatter(canonicalType, preservedCreatedAt);
+      const newContent = newFm + body;
+      const backupPath = `.sauce-backup/${ts}/${hubPath}`;
+      const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+      try { await adapter.mkdir(backupParent); } catch (_e) { /* already exists */ }
+      try { await adapter.write(backupPath, existing); } catch (_e) { /* snapshot best-effort */ }
+      await adapter.write(hubPath, newContent);
+      healed++;
+      history?.push({ event: "info", step: "finance_hub_frontmatter_heal", name: "finance",
+        action: "healed", path: hubPath, reason: detection.reason, snapshot: backupPath,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    } catch (e) {
+      history?.push({ event: "warning", step: "finance_hub_frontmatter_heal", name: "finance",
+        path: hubPath, reason: e.message,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    }
+  }
+
+  history?.push({ event: "info", step: "finance_hub_frontmatter_heal", name: "finance",
+    summary: { healed, clean, absent },
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+    completed_at: new Date().toISOString() });
+}
+
 const FINANCE_HUB_BODY_TEMPLATES = {
   "spice/finance/Finance.md": "\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceHubSummary\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceHubCards\" });\n```\n",
   "spice/finance/budgets/Budgets.md": "\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\n// entity-create:budget — installer-managed; do not delete this comment\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"BudgetsCards\" });\n```\n",
@@ -11700,6 +11838,9 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports.applyDocNoteBreadcrumbMarkerCleanup = applyDocNoteBreadcrumbMarkerCleanup;
     // v0.110.0 — finance hubs repair + orphaned helper cleanup.
     module.exports.applyFinanceHubsRepair = applyFinanceHubsRepair;
+    module.exports.applyFinanceHubFrontmatterHeal = applyFinanceHubFrontmatterHeal;
+    module.exports._detectFinanceHubFrontmatterCorruption = _detectFinanceHubFrontmatterCorruption;
+    module.exports._buildCanonicalFinanceHubFrontmatter = _buildCanonicalFinanceHubFrontmatter;
     module.exports.applyOrphanedHelperCleanup = applyOrphanedHelperCleanup;
     // v0.110.3 — MonthlyOverview band injection on Budget-YYYY-MM.md
     module.exports.applyFinanceBudgetMonthlyBandInjection = applyFinanceBudgetMonthlyBandInjection;
