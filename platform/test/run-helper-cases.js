@@ -6720,14 +6720,16 @@ async function casePSW5ManifestRegistration() {
 }
 
 async function casePSW6TemplateBlock() {
-    console.log("\n--- Case PSW-6: Template, Project.md includes ProjectStatusWidget block ---");
+    console.log("\n--- Case PSW-6: Template, Project.md includes ProjectStatusWidget block (v0.109.0: no H2) ---");
     const tplPath = path.join(WORKSHOP, "platform/blueprints/project/templates/Project.md");
     const src = fs.readFileSync(tplPath, "utf8");
-    const hasHeading = /^## Status\s*$/m.test(src);
+    // v0.109.0 S6 SUPERSEDES v0.51.0: the ## Status H2 was dropped. The widget
+    // still renders (the at-a-glance chip is the signal); the H2 label was
+    // redundant. Assert the block presence only.
     const hasBlock = /class:\s*"ProjectStatusWidget"/.test(src);
-    assertTrue("PSW-6: Template, Project.md has ## Status heading + ProjectStatusWidget dataviewjs block",
-        hasHeading && hasBlock,
-        `heading=${hasHeading} block=${hasBlock}`);
+    assertTrue("PSW-6: Template, Project.md has ProjectStatusWidget dataviewjs block",
+        hasBlock,
+        `block=${hasBlock}`);
 }
 
 // -------------------------------------------------------------------------
@@ -10694,19 +10696,19 @@ async function caseV01020ProjTpl1DocsHubInvokesSections() {
 }
 
 async function caseV01020ProjTpl2MeetingsPanelInProjectTemplate() {
-  console.log(`\n--- Case HC-V01020-PROJ-TPL-2: Project template has ## Meetings between ## Workstreams and ## Mentions + invokes ProjectMeetingsPanel ---`);
+  console.log(`\n--- Case HC-V01020-PROJ-TPL-2: Project template invokes ProjectMeetingsPanel (v0.109.0 superseded H2 + order) ---`);
   assertTrue("HC-V01020-PROJ-TPL-2: Project.md exists", fs.existsSync(_PROJ_TPL));
   const body = fs.readFileSync(_PROJ_TPL, "utf8");
-  const ws = body.indexOf("## Workstreams");
-  const mt = body.indexOf("## Meetings");
-  const mn = body.indexOf("## Mentions");
-  assertTrue("HC-V01020-PROJ-TPL-2a: ## Workstreams present", ws !== -1);
-  assertTrue("HC-V01020-PROJ-TPL-2b: ## Meetings present", mt !== -1);
-  assertTrue("HC-V01020-PROJ-TPL-2c: ## Mentions present", mn !== -1);
-  assertTrue("HC-V01020-PROJ-TPL-2d: ordering Workstreams < Meetings < Mentions",
-    ws < mt && mt < mn);
+  // v0.109.0 S6 SUPERSEDES v0.102.0: section H2s (## Workstreams / ## Meetings
+  // / ## Mentions) were dropped — helpers emit their own SectionLabel now —
+  // and Mentions was removed entirely. ProjectMeetingsPanel still ships and
+  // is invoked; section order is now Status → Meetings → Workstreams.
   assertTrue("HC-V01020-PROJ-TPL-2e: invokes ProjectMeetingsPanel via customjs-guard view",
     /customjs-guard["'\s,\n]+[^}]*class\s*:\s*["']ProjectMeetingsPanel["']/.test(body));
+  const idxMeetings    = body.indexOf('class: "ProjectMeetingsPanel"');
+  const idxWorkstreams = body.indexOf('class: "ProjectWorkstreamManager"');
+  assertTrue("HC-V01020-PROJ-TPL-2-ORDER: Meetings BEFORE Workstreams (v0.109.0 ordering)",
+    idxMeetings >= 0 && idxWorkstreams > idxMeetings);
 }
 
 async function caseV01020ProjTpl3DocNoteRuleGlobNested() {
@@ -12529,6 +12531,41 @@ async function caseV01070FpbmPaycheckBodyMigration() {
 
 // v0.109.0 — projects visual overhaul. See Docs/plans/2026-06-15-v0.109.0-projects-visual-overhaul-design.md.
 
+// S6 — Template, Project.md rewrite.
+async function caseV01090TplBreadcrumbFirst() {
+  console.log("\n--- Case HC-V01090-TPL-BC: Template, Project.md has Breadcrumb as first block ---");
+  const tpl = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/templates/Project.md"), "utf8");
+  assertTrue("HC-V01090-TPL-BC: first block invokes Breadcrumb",
+    /^```dataviewjs\nawait dv\.view\("ranch\/views\/customjs-guard", \{ class: "Breadcrumb" \}\);\n```/.test(tpl));
+}
+
+async function caseV01090TplNoStatusH2() {
+  console.log("\n--- Case HC-V01090-TPL-NSH2: Template, Project.md drops every section H2 ---");
+  const tpl = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/templates/Project.md"), "utf8");
+  assertTrue("HC-V01090-TPL-NSH2: no ## Status H2",      !/^## Status$/m.test(tpl));
+  assertTrue("HC-V01090-TPL-NSH2: no ## Workstreams H2", !/^## Workstreams$/m.test(tpl));
+  assertTrue("HC-V01090-TPL-NSH2: no ## Meetings H2",    !/^## Meetings$/m.test(tpl));
+  assertTrue("HC-V01090-TPL-NSH2: no ## Mentions H2",    !/^## Mentions$/m.test(tpl));
+}
+
+async function caseV01090TplNoLegacyPanels() {
+  console.log("\n--- Case HC-V01090-TPL-NLP: Template, Project.md drops BacklinkPanel + ProjectNotes&ReferencedBy ---");
+  const tpl = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/templates/Project.md"), "utf8");
+  assertTrue("HC-V01090-TPL-NLP: no BacklinkPanel invocation",            !/class:\s*"BacklinkPanel"/.test(tpl));
+  assertTrue("HC-V01090-TPL-NLP: no ProjectNotesCards invocation",        !/class:\s*"ProjectNotesCards"/.test(tpl));
+  assertTrue("HC-V01090-TPL-NLP: no ProjectReferencedByCards invocation", !/class:\s*"ProjectReferencedByCards"/.test(tpl));
+}
+
+async function caseV01090TplSectionOrder() {
+  console.log("\n--- Case HC-V01090-TPL-SO: Template, Project.md ordering = Status → Meetings → Workstreams ---");
+  const tpl = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/templates/Project.md"), "utf8");
+  const idxStatus      = tpl.indexOf('class: "ProjectStatusWidget"');
+  const idxMeetings    = tpl.indexOf('class: "ProjectMeetingsPanel"');
+  const idxWorkstreams = tpl.indexOf('class: "ProjectWorkstreamManager"');
+  assertTrue("HC-V01090-TPL-SO: Status BEFORE Meetings",  idxStatus >= 0 && idxMeetings > idxStatus);
+  assertTrue("HC-V01090-TPL-SO: Meetings BEFORE Workstreams", idxMeetings >= 0 && idxWorkstreams > idxMeetings);
+}
+
 // S5 — ProjectMeetingsPanel rewrite + SectionLabel adoption everywhere.
 async function caseV01090Pmp1Cap3Cards() {
   console.log("\n--- Case HC-V01090-PMP-1: ProjectMeetingsPanel caps at 3 + drops expand toggle ---");
@@ -13374,6 +13411,10 @@ async function caseV01090Ds1EntityTypeOpt() {
   await caseV01090Pwm1SectionLabelInvoked(); // S5
   await caseV01090ShSlabel();                // S5
   await caseV01090PdiSlabel();               // S5
+  await caseV01090TplBreadcrumbFirst();      // S6
+  await caseV01090TplNoStatusH2();           // S6
+  await caseV01090TplNoLegacyPanels();       // S6
+  await caseV01090TplSectionOrder();         // S6
   await caseV01070FbbmBudgetBodyMigration();
 
   // v0.5.3 CF-3 — PaycheckSummary + FinanceHubActions + paycheck body migration
