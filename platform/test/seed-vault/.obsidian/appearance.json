@@ -1,0 +1,9 @@
+{
+  "enabledCssSnippets": [
+    "customjs-loader",
+    "sauce-callouts",
+    "sauce-tasks-icons",
+    "sauce-daily-dashboard"
+  ],
+  "cssTheme": "Baseline"
+}

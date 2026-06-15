@@ -13,7 +13,7 @@ npm run release:preflight
 
 Runs `scripts/check-version-sync.js` first (gates workshop_version vs `platform/manifest.json` vs `package.json`), then every harness in `platform/test/run-*.js`. Whole-suite GREEN is the bar — any harness failure on a fresh checkout means something regressed.
 
-Current count: **23 load-bearing harnesses** (whole-suite GREEN preserved v0.21.0 → current). See [cycle-status.md](cycle-status.md) for the exact catalogue and per-cycle sub-assert deltas.
+Current count: **24 load-bearing harnesses** (whole-suite GREEN preserved v0.21.0 → current). See [cycle-status.md](cycle-status.md) for the exact catalogue and per-cycle sub-assert deltas.
 
 **Per-cycle behavioral harness pattern.** Where `run-helper-cases.js` asserts source-text contracts via regex (cheap, fast, source-stable), per-cycle behavioral harnesses LOAD each helper into a sandboxed scope, INSTANTIATE it, and exercise its methods against minimal Dataview / DOM / Obsidian app stubs. Use this when the cycle ships a new shared primitive (e.g. `SectionLabel` v0.109.0) or non-trivial render dispatch (e.g. `Breadcrumb` type branches v0.109.0) where a regression would manifest as wrong DOM rather than wrong source text. Reference impl: [`platform/test/run-v0109-projects-overhaul.js`](../../platform/test/run-v0109-projects-overhaul.js) covers SectionLabel render, Breadcrumb type branches + path fallback, ProjectMeetingsPanel._enrichMeeting parse correctness, ProjectDocsIndex section sort algorithm, applyDocNoteBreadcrumbMarkerCleanup edge cases, and Template, Project.md structural integrity. Wired into `release:preflight` after `run-smart-connections-bridge`; runs on every PR + push to `main` via `ci.yml` and on every annotated tag via `release.yml`.
 
@@ -63,6 +63,47 @@ Single-branch direct-push to `origin/main`. No feature branches, no PR review (f
 6. Tap PR merge → `brew upgrade sauce` picks up the new release.
 
 Don't sign as Claude (no `Co-authored-by: Claude` trailer). Don't skip hooks (`--no-verify`) unless explicitly requested. Don't force-push or rewrite history on `origin/main` without explicit approval — see [asking-before-acting.md](asking-before-acting.md).
+
+## Branch + PR workflow (preferred from v0.110.0)
+
+Direct-push to `origin/main` remains possible (admin override) but the preferred path for any cycle that touches mechanisms, blueprints, or migrations is now feature-branch + PR + CI gate.
+
+### Branch + PR mechanics
+
+1. Branch off `origin/main`: `git switch -c cycle/v0.X.Y-<topic>` (or use a worktree under `.worktrees/`).
+2. Cycle stages commit normally; push to the branch instead of main: `git push -u origin cycle/v0.X.Y-<topic>`.
+3. Open a PR (`gh pr create`). The existing `.github/workflows/ci.yml` triggers on `pull_request: branches: [main]` and runs `npm run release:preflight` on `macos-latest` + `ubuntu-latest`. The 23rd harness `platform/test/run-seed-migrations.js` runs as part of that chain.
+4. CI red → merge blocked (once branch protection is on; see below).
+5. Merge to main via the PR.
+6. Post-merge cycle-close on main directly: `workshop_version` bump (per § Cycle-close artifacts), tag, rebaseline (see § Seed-vault rebaseline below).
+
+### Seed-vault rebaseline (cycle close)
+
+The migration-regression harness runs against a checked-in synthetic seed vault under `platform/test/seed-vault/`. After every cycle that ships migrations or schema changes, the seed should be ratcheted forward to represent the just-released state:
+
+```
+npm run seed:prev         # archive current seed -> seed-vault-prev/
+npm run seed:rebaseline   # run install on a copy of seed; write result back
+git commit -am "chore(seed): rebaseline to v0.X.Y"
+```
+
+The `seed-vault-prev/` snapshot is the one-cycle-back safety net referenced in landmine #26. Dry-run mode (`node scripts/rebaseline-seed.js --dry-run`) prints the diff without writing — useful for previewing what install would change.
+
+### Branch protection setup (one-time, manual; user approval required)
+
+The repo currently allows direct-push to main. To enforce the PR-gated path, set a branch-protection rule on `main` requiring the CI checks before merge. This is a manual step (per `asking-before-acting.md` § Git, this requires user approval):
+
+```
+gh api -X PUT repos/willfell/sauce/branches/main/protection \
+  --field required_status_checks[strict]=true \
+  --field 'required_status_checks[contexts][]=preflight (macos-latest)' \
+  --field 'required_status_checks[contexts][]=preflight (ubuntu-latest)' \
+  --field enforce_admins=false \
+  --field required_pull_request_reviews=null \
+  --field restrictions=null
+```
+
+Run this once when the project is ready to enforce the PR gate. Until then, the PR workflow remains the *recommended* but not *enforced* path.
 
 ## Cycle-close artifacts
 

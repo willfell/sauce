@@ -1,0 +1,39 @@
+{
+  "id": "w2-fte",
+  "version": "0.5.0",
+  "schema_version": 1,
+  "label": "W2 full-time employment",
+  "consumes": ["daily", "meetings", "project", "to-do", "people"],
+  "required_fields": [
+    { "id": "role",         "type": "string",   "prompt": "Job title (e.g., \"Principal Software Engineer\")" },
+    { "id": "employer",     "type": "string",   "prompt": "Employer name (e.g., \"Acme Corp\")" },
+    { "id": "stakeholders", "type": "string[]", "prompt": "Key stakeholders by name (comma-separated)" }
+  ],
+  "optional_fields": [
+    { "id": "manager",     "type": "string", "prompt": "Direct manager's name" },
+    { "id": "gmail_label", "type": "string", "prompt": "Gmail label scoping this engagement's email (e.g., \"Work\")" },
+    { "id": "calendar_id", "type": "string", "prompt": "Calendar ID scoping this engagement's events (e.g., your work email)" }
+  ],
+  "supported_cadences": ["morning", "midday", "eod", "weekly", "tick", "synthesize_day", "synthesize_week", "lens_shift"],
+  "default_cadences": {
+    "morning": true,
+    "midday":  false,
+    "eod":     true,
+    "weekly":  true,
+    "monthly": false,
+    "tick": true,
+    "synthesize_day": true,
+    "synthesize_week": true
+  },
+  "render_aspects": {
+    "finance_block":          "skip",
+    "invoice_prep":           "skip",
+    "ai_committee":           "include",
+    "kanban_projects":        "include",
+    "inner_circle_imessage":  "skip",
+    "new_mcp_notice":         "include",
+    "semantic_related":       "include",
+    "anti_echo":              "skip"
+  },
+  "tripwire_aspects": ["calendar_drift", "queue_growth"]
+}

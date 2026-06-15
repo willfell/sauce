@@ -1,0 +1,9 @@
+{
+  "alwaysOpenInNewTab": true,
+  "defaultViewMode": "preview",
+  "livePreview": true,
+  "propertiesInDocument": "hidden",
+  "newFileLocation": "folder",
+  "newFileFolderPath": "spice/resources/notes",
+  "attachmentFolderPath": "spice/resources/attachments"
+}

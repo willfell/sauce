@@ -1,0 +1,60 @@
+{
+  "contributions": {
+    "project": [
+      {
+        "scope": {
+          "path_glob": "spice/projects/*/docs/**/*.md",
+          "exclude_basenames": [
+            "Docs.md"
+          ]
+        },
+        "extends": "_canonical-vocab",
+        "frontmatter_branch": [
+          {
+            "when": {
+              "frontmatter": {
+                "type": "section-hub"
+              }
+            },
+            "required_frontmatter": {
+              "type": {
+                "required": true,
+                "type": "string",
+                "matches": "^section-hub$"
+              },
+              "project": {
+                "required": true,
+                "type": "string"
+              },
+              "project_slug": {
+                "required": true,
+                "type": "string"
+              },
+              "section": {
+                "required": true,
+                "type": "string"
+              },
+              "section_slug": {
+                "required": true,
+                "type": "string"
+              },
+              "parent_section": {
+                "required": true,
+                "type": "string"
+              },
+              "depth": {
+                "required": true,
+                "type": "number"
+              }
+            },
+            "required_tags": [
+              {
+                "tag": "section-hub"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

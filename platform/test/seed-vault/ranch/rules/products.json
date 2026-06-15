@@ -1,0 +1,27 @@
+{
+  "contributions": {
+    "products": [
+      {
+        "scope": {
+          "path_glob": "spice/products/*.md",
+          "exclude_basenames": [
+            "Products.md"
+          ]
+        },
+        "extends": "_canonical-vocab",
+        "required_frontmatter": {
+          "type": {
+            "required": true,
+            "type": "string",
+            "equals": "product"
+          },
+          "name": {
+            "required": true,
+            "type": "string"
+          }
+        },
+        "naming_pattern": "^[A-Z][\\w '\\-&]+\\.md$"
+      }
+    ]
+  }
+}

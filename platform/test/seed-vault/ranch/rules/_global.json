@@ -1,0 +1,14 @@
+{
+  "contributions": {
+    "customjs-guard": [
+      {
+        "forbid_dataviewjs_patterns": [
+          {
+            "pattern": "await customJS\\.",
+            "reason": "use customjs-guard instead"
+          }
+        ]
+      }
+    ]
+  }
+}
