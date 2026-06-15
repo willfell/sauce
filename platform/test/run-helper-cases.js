@@ -12929,11 +12929,118 @@ async function caseV0112NpmScriptsWired() {
 }
 
 async function caseV0112VersionBumped() {
-  console.log("\n--- Case V0112-T-VER: workshop 0.112.0 + package.json 0.112.0 ---");
+  console.log("\n--- Case V0112-T-VER: workshop 0.112.0+ + package.json 0.112.0+ ---");
   const ws = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
-  assertEqual(ws.workshop_version, "0.112.0", "V0112-T-VER-1: workshop_version");
+  assertTrue("V0112-T-VER-1: workshop_version 0.112.x or 0.113.x",
+    /^0\.(112|113)\.\d+$/.test(ws.workshop_version), `got: ${ws.workshop_version}`);
   const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
-  assertEqual(pkg.version, "0.112.0", "V0112-T-VER-2: package.json version");
+  assertTrue("V0112-T-VER-2: package.json version 0.112.x or 0.113.x",
+    /^0\.(112|113)\.\d+$/.test(pkg.version), `got: ${pkg.version}`);
+}
+
+// v0.113.0 — schema registry MINOR (Stage A). See
+// Docs/plans/2026-06-15-v0.113.0-schema-registry-{brief,design,plan}.md.
+
+async function caseV0113SchemaIndexShipped() {
+  console.log("\n--- Case V0113-S-IDX: platform/schemas-index.json shipped + valid ---");
+  const abs = path.join(WORKSHOP, "platform/schemas-index.json");
+  assertTrue("V0113-S-IDX-1: file exists",
+    fs.existsSync(abs), `missing: ${abs}`);
+  let parsed;
+  try { parsed = JSON.parse(fs.readFileSync(abs, "utf8")); }
+  catch (e) { assertTrue("V0113-S-IDX-2: file is valid JSON", false, e.message); return; }
+  assertTrue("V0113-S-IDX-2: file is valid JSON", true);
+  assertEqual(parsed.schema_version, 1, "V0113-S-IDX-3: schema_version === 1");
+}
+
+async function caseV0113SchemaIndexNonEmpty() {
+  console.log("\n--- Case V0113-S-COUNT: schemas[] has the seeded entries ---");
+  const m = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/schemas-index.json"), "utf8"));
+  const schemas = Array.isArray(m.schemas) ? m.schemas : [];
+  assertTrue("V0113-S-COUNT-1: schemas[] length >= 15",
+    schemas.length >= 15, `got: ${schemas.length}`);
+  const first = schemas[0] || {};
+  for (const k of ["id", "kind", "owner", "source"]) {
+    assertTrue(`V0113-S-COUNT-2: first entry has ${k}`,
+      first[k] !== undefined, `missing: ${k}`);
+  }
+}
+
+async function caseV0113SchemaIndexValidEntries() {
+  console.log("\n--- Case V0113-S-VALID: every entry has required keys + source on disk ---");
+  const m = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/schemas-index.json"), "utf8"));
+  const KINDS = new Set([
+    "sidecar-schema", "rule-fragment-bundle", "contract", "data-file",
+    "workshop-manifest", "learned-state-schema", "entity-create-prompts", "helper-read-contract",
+  ]);
+  const OWNER_TYPES = new Set(["blueprint", "mechanism", "workshop"]);
+  let missingKeys = 0;
+  let missingSources = 0;
+  let badKinds = 0;
+  let badOwners = 0;
+  for (const e of (m.schemas || [])) {
+    for (const k of ["id", "kind", "owner", "source"]) if (e[k] === undefined) missingKeys += 1;
+    if (e.kind && !KINDS.has(e.kind)) badKinds += 1;
+    if (e.owner && !OWNER_TYPES.has(e.owner.type)) badOwners += 1;
+    if (e.source && !fs.existsSync(path.join(WORKSHOP, e.source))) missingSources += 1;
+  }
+  assertEqual(missingKeys, 0, "V0113-S-VALID-1: every entry has all required keys");
+  assertEqual(missingSources, 0, "V0113-S-VALID-2: every source file exists on disk");
+  assertEqual(badKinds, 0, "V0113-S-VALID-3: every kind is in the enum");
+  assertEqual(badOwners, 0, "V0113-S-VALID-4: every owner.type is in {blueprint,mechanism,workshop}");
+}
+
+async function caseV0113SchemaIndexNoDuplicates() {
+  console.log("\n--- Case V0113-S-UNIQ: schema ids are unique ---");
+  const m = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/schemas-index.json"), "utf8"));
+  const ids = (m.schemas || []).map(e => e.id);
+  const dupes = ids.filter((id, i) => ids.indexOf(id) !== i);
+  assertEqual(dupes.length, 0, "V0113-S-UNIQ-1: no duplicate ids");
+}
+
+async function caseV0113LintSchemasShipped() {
+  console.log("\n--- Case V0113-LINT: scripts/lint-schemas.js shipped ---");
+  const abs = path.join(WORKSHOP, "scripts/lint-schemas.js");
+  assertTrue("V0113-LINT-1: file exists",
+    fs.existsSync(abs), `missing: ${abs}`);
+  const src = fs.readFileSync(abs, "utf8");
+  assertTrue("V0113-LINT-2: supports --check + --list + --json flags",
+    /--check/.test(src) && /--list/.test(src) && /--json/.test(src));
+}
+
+async function caseV0113LintInPreflight() {
+  console.log("\n--- Case V0113-PF: release:preflight invokes lint-schemas.js ---");
+  const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
+  const preflight = pkg.scripts && pkg.scripts["release:preflight"];
+  assertTrue("V0113-PF-1: release:preflight chain includes lint-schemas.js",
+    typeof preflight === "string" && preflight.includes("lint-schemas.js"),
+    `preflight chain missing lint-schemas.js`);
+}
+
+async function caseV0113SchemasGuideShipped() {
+  console.log("\n--- Case V0113-GUIDE: schemas.md shipped + CLAUDE.md router links it ---");
+  const abs = path.join(WORKSHOP, "Docs/agent-guides/schemas.md");
+  assertTrue("V0113-GUIDE-1: file exists",
+    fs.existsSync(abs), `missing: ${abs}`);
+  const claude = fs.readFileSync(path.join(WORKSHOP, "CLAUDE.md"), "utf8");
+  assertTrue("V0113-GUIDE-2: CLAUDE.md router links to schemas.md",
+    /Docs\/agent-guides\/schemas\.md/.test(claude));
+}
+
+async function caseV0113NpmScriptWired() {
+  console.log("\n--- Case V0113-NPM: npm run lint-schemas wired ---");
+  const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
+  const scripts = pkg.scripts || {};
+  assertTrue("V0113-NPM-1: lint-schemas npm script points at scripts/lint-schemas.js",
+    scripts["lint-schemas"] && scripts["lint-schemas"].includes("lint-schemas.js"));
+}
+
+async function caseV0113WorkshopBumped() {
+  console.log("\n--- Case V0113-VER: workshop 0.113.0 + package.json 0.113.0 ---");
+  const ws = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
+  assertEqual(ws.workshop_version, "0.113.0", "V0113-VER-1: workshop_version");
+  const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
+  assertEqual(pkg.version, "0.113.0", "V0113-VER-2: package.json version");
 }
 
 // v0.112.0 finance (MINOR) — FinanceMath shared aggregation helper + tests (S1)
@@ -12994,6 +13101,150 @@ async function caseV01120FinanceMathStaticApi() {
     assertTrue(`V01120-FM-API-${m}: static ${m} declared`,
       new RegExp(`static\\s+${m}\\s*\\(`).test(src),
       `missing static method ${m}`);
+  }
+}
+
+// v0.112.0 finance — installer migrations S2
+// See Docs/plans/2026-06-15-v0.112.0-monthly-cohesion-plan.md S2.
+
+async function caseV01120MonthsScaffoldingDefined() {
+  console.log("\n--- Case V01120-FMS-DEF: applyFinanceMonthsScaffolding exported function ---");
+  const installer = require(path.join(WORKSHOP, "platform/install.js"));
+  assertTrue("V01120-FMS-DEF-1: applyFinanceMonthsScaffolding is a function",
+    typeof installer.applyFinanceMonthsScaffolding === "function");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
+  assertTrue("V01120-FMS-DEF-2: async function applyFinanceMonthsScaffolding declared",
+    /async\s+function\s+applyFinanceMonthsScaffolding\s*\(/.test(src));
+  assertTrue("V01120-FMS-DEF-3: months hub path spice/finance/months/Months.md referenced",
+    /spice\/finance\/months\/Months\.md/.test(src));
+  assertTrue("V01120-FMS-DEF-4: MonthsCards referenced in scaffold body",
+    /MonthsCards/.test(src));
+}
+
+async function caseV01120MonthsScaffoldingOrchestrated() {
+  console.log("\n--- Case V01120-FMS-ORCH: applyFinanceMonthsScaffolding wired into orchestrator ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
+  assertTrue("V01120-FMS-ORCH-1: orchestrator calls applyFinanceMonthsScaffolding",
+    /await\s+applyFinanceMonthsScaffolding\s*\(/.test(src));
+  const dsIdx = src.indexOf("await applyFinanceDebtScaffolding(tp");
+  const msIdx = src.indexOf("await applyFinanceMonthsScaffolding(tp");
+  assertTrue("V01120-FMS-ORCH-2: MonthsScaffolding runs after DebtScaffolding in orchestrator",
+    dsIdx > 0 && msIdx > dsIdx, `dsIdx=${dsIdx} msIdx=${msIdx}`);
+  assertTrue("V01120-FMS-ORCH-3: module.exports.applyFinanceMonthsScaffolding registered",
+    /module\.exports\.applyFinanceMonthsScaffolding\s*=\s*applyFinanceMonthsScaffolding/.test(src));
+}
+
+async function caseV01120PaycheckDebtBandInjectionDefined() {
+  console.log("\n--- Case V01120-FPDBI-DEF: applyFinancePaycheckDebtBandInjection exported function ---");
+  const installer = require(path.join(WORKSHOP, "platform/install.js"));
+  assertTrue("V01120-FPDBI-DEF-1: applyFinancePaycheckDebtBandInjection is a function",
+    typeof installer.applyFinancePaycheckDebtBandInjection === "function");
+  assertTrue("V01120-FPDBI-DEF-2: _injectPaycheckDebtBand is a function",
+    typeof installer._injectPaycheckDebtBand === "function");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
+  assertTrue("V01120-FPDBI-DEF-3: async function applyFinancePaycheckDebtBandInjection declared",
+    /async\s+function\s+applyFinancePaycheckDebtBandInjection\s*\(/.test(src));
+  assertTrue("V01120-FPDBI-DEF-4: _injectPaycheckDebtBand pure helper declared",
+    /function\s+_injectPaycheckDebtBand\s*\(/.test(src));
+  assertTrue("V01120-FPDBI-DEF-5: marker paycheck-debt-band-v0.8.0 present",
+    /<!--\s*paycheck-debt-band-v0\.8\.0\s*-->/.test(src));
+  assertTrue("V01120-FPDBI-DEF-6: PaycheckDebtBand class referenced in injected block",
+    /PaycheckDebtBand/.test(src));
+}
+
+async function caseV01120PaycheckDebtBandInjectionOrchestrated() {
+  console.log("\n--- Case V01120-FPDBI-ORCH: applyFinancePaycheckDebtBandInjection wired into orchestrator ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
+  assertTrue("V01120-FPDBI-ORCH-1: orchestrator calls applyFinancePaycheckDebtBandInjection",
+    /await\s+applyFinancePaycheckDebtBandInjection\s*\(/.test(src));
+  const pbmIdx = src.indexOf("await applyFinancePaycheckBodyMigration(tp");
+  const pdbiIdx = src.indexOf("await applyFinancePaycheckDebtBandInjection(tp");
+  assertTrue("V01120-FPDBI-ORCH-2: PaycheckDebtBandInjection runs after PaycheckBodyMigration",
+    pbmIdx > 0 && pdbiIdx > pbmIdx, `pbmIdx=${pbmIdx} pdbiIdx=${pdbiIdx}`);
+  assertTrue("V01120-FPDBI-ORCH-3: module.exports.applyFinancePaycheckDebtBandInjection registered",
+    /module\.exports\.applyFinancePaycheckDebtBandInjection\s*=\s*applyFinancePaycheckDebtBandInjection/.test(src));
+}
+
+async function caseV01120PaycheckDebtBandIdempotent() {
+  console.log("\n--- Case V01120-FPDBI-IDEM: _injectPaycheckDebtBand transform is idempotent ---");
+  const installer = require(path.join(WORKSHOP, "platform/install.js"));
+  assertTrue("V01120-FPDBI-IDEM-1: _injectPaycheckDebtBand exported",
+    typeof installer._injectPaycheckDebtBand === "function");
+
+  // Sample paycheck with both PaycheckSummary and PaycheckExpensesEditor blocks
+  const sampleBodyFull =
+    "---\ntype: paycheck\npay_period_start: 2026-06-01\n---\n\n" +
+    "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n" +
+    "<!-- paycheck-summary-v0.5.3 -->\n" +
+    "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PaycheckSummary\" });\n```\n\n" +
+    "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PaycheckExpensesEditor\" });\n```\n";
+
+  const r1 = installer._injectPaycheckDebtBand(sampleBodyFull);
+  assertTrue("V01120-FPDBI-IDEM-2: first pass injects (touched)", r1.touched === true);
+  assertTrue("V01120-FPDBI-IDEM-3: first pass body contains marker",
+    /<!--\s*paycheck-debt-band-v0\.8\.0\s*-->/.test(r1.body));
+
+  const r2 = installer._injectPaycheckDebtBand(r1.body);
+  assertTrue("V01120-FPDBI-IDEM-4: second pass is a no-op (idempotent)",
+    r2.touched === false && r2.body === r1.body);
+
+  // Anchor priority: PaycheckDebtBand must appear AFTER PaycheckSummary and BEFORE PaycheckExpensesEditor
+  const markerIdx = r1.body.indexOf("<!-- paycheck-debt-band-v0.8.0 -->");
+  const summaryIdx = r1.body.indexOf("PaycheckSummary");
+  const editorIdx = r1.body.indexOf("PaycheckExpensesEditor");
+  assertTrue("V01120-FPDBI-IDEM-5: PaycheckDebtBand block lands between PaycheckSummary and PaycheckExpensesEditor",
+    markerIdx > summaryIdx && markerIdx < editorIdx,
+    `markerIdx=${markerIdx} summaryIdx=${summaryIdx} editorIdx=${editorIdx}`);
+
+  // Sample paycheck with only PaycheckSummary (no PaycheckExpensesEditor) — anchor priority 3
+  const sampleBodySummaryOnly =
+    "---\ntype: paycheck\npay_period_start: 2026-06-01\n---\n\n" +
+    "<!-- paycheck-summary-v0.5.3 -->\n" +
+    "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PaycheckSummary\" });\n```\n\n";
+  const r3 = installer._injectPaycheckDebtBand(sampleBodySummaryOnly);
+  assertTrue("V01120-FPDBI-IDEM-6: anchor priority 3 — injects after PaycheckSummary when no editor block",
+    r3.touched === true && /<!--\s*paycheck-debt-band-v0\.8\.0\s*-->/.test(r3.body));
+  const r4 = installer._injectPaycheckDebtBand(r3.body);
+  assertTrue("V01120-FPDBI-IDEM-7: idempotency holds on priority-3 anchor result",
+    r4.touched === false && r4.body === r3.body);
+}
+
+async function caseV01120HubsRepairMonths() {
+  console.log("\n--- Case V01120-FHR-MONTHS: applyFinanceHubsRepair dict includes months/Months.md ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
+  assertTrue("V01120-FHR-MONTHS-1: FINANCE_HUB_BODY_TEMPLATES contains months/Months.md key",
+    /spice\/finance\/months\/Months\.md/.test(src));
+  assertTrue("V01120-FHR-MONTHS-2: months hub template references MonthsCards",
+    /MonthsCards/.test(src));
+  // Verify the key is in the dict literal (not just a standalone string elsewhere)
+  const dictMatch = src.match(/const FINANCE_HUB_BODY_TEMPLATES\s*=\s*\{([\s\S]*?)\};/);
+  assertTrue("V01120-FHR-MONTHS-3: FINANCE_HUB_BODY_TEMPLATES dict found",
+    dictMatch !== null);
+  if (dictMatch) {
+    assertTrue("V01120-FHR-MONTHS-4: dict body contains months/Months.md entry",
+      /months\/Months\.md/.test(dictMatch[1]));
+  }
+}
+
+async function caseV01120HubsRepairFinanceSummary() {
+  console.log("\n--- Case V01120-FHR-FHS: applyFinanceHubsRepair Finance.md template includes FinanceHubSummary ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
+  assertTrue("V01120-FHR-FHS-1: FINANCE_HUB_BODY_TEMPLATES Finance.md entry references FinanceHubSummary",
+    /FinanceHubSummary/.test(src));
+  // Verify FinanceHubSummary appears after FinanceNav in the Finance.md template
+  const dictMatch = src.match(/const FINANCE_HUB_BODY_TEMPLATES\s*=\s*\{([\s\S]*?)\};/);
+  if (dictMatch) {
+    const financeEntry = dictMatch[1].match(/"spice\/finance\/Finance\.md":\s*"([^"]*)"/);
+    if (financeEntry) {
+      const tpl = financeEntry[1];
+      const navIdx = tpl.indexOf("FinanceNav");
+      const fhsIdx = tpl.indexOf("FinanceHubSummary");
+      assertTrue("V01120-FHR-FHS-2: FinanceHubSummary appears after FinanceNav in Finance.md template",
+        navIdx >= 0 && fhsIdx > navIdx, `navIdx=${navIdx} fhsIdx=${fhsIdx}`);
+    } else {
+      assertTrue("V01120-FHR-FHS-2: Finance.md template entry must be present in dict", false,
+        "Could not extract Finance.md template from dict");
+    }
   }
 }
 
@@ -14150,6 +14401,17 @@ async function caseV01090Ds1EntityTypeOpt() {
   await caseV0112DevWorkflowGuideShipped();
   await caseV0112NpmScriptsWired();
   await caseV0112VersionBumped();
+
+  // v0.113.0 — schema registry MINOR (Stage A)
+  await caseV0113SchemaIndexShipped();
+  await caseV0113SchemaIndexNonEmpty();
+  await caseV0113SchemaIndexValidEntries();
+  await caseV0113SchemaIndexNoDuplicates();
+  await caseV0113LintSchemasShipped();
+  await caseV0113LintInPreflight();
+  await caseV0113SchemasGuideShipped();
+  await caseV0113NpmScriptWired();
+  await caseV0113WorkshopBumped();
 
   // v0.65.0 HC-V065-RUN-NOTE: write-run-note-* sub-skill lint
   {
@@ -22341,6 +22603,15 @@ type: cowork-microscope
   // v0.112.0 finance — FinanceMath shared aggregation helper (S1)
   await caseV01120FinanceMathPresent();
   await caseV01120FinanceMathStaticApi();
+
+  // v0.112.0 finance — installer migrations S2 (months scaffolding + paycheck-debt-band + hubs-repair)
+  await caseV01120MonthsScaffoldingDefined();
+  await caseV01120MonthsScaffoldingOrchestrated();
+  await caseV01120PaycheckDebtBandInjectionDefined();
+  await caseV01120PaycheckDebtBandInjectionOrchestrated();
+  await caseV01120PaycheckDebtBandIdempotent();
+  await caseV01120HubsRepairMonths();
+  await caseV01120HubsRepairFinanceSummary();
 
   console.log(`\n========`);
   console.log(`Result: ${pass} passed, ${fail} failed.`);
