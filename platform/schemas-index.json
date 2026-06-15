@@ -1,0 +1,244 @@
+{
+  "_comment": "Workshop-wide schema registry — every schema-shaped surface tracked at dev time. See Docs/agent-guides/schemas.md for authoring guidance. Verified by scripts/lint-schemas.js (release:preflight gate). v0.113.0 (workshop 0.113.0).",
+  "schema_version": 1,
+  "schemas": [
+    {
+      "id": "cowork-eod-review-sidecar",
+      "kind": "sidecar-schema",
+      "owner": { "type": "blueprint", "name": "cowork" },
+      "source": "platform/blueprints/cowork/data/schemas/eod-review@1.0.0.json",
+      "accepted_versions": ["1.0.0", "1.1.0", "1.2.0", "1.3.0", "1.4.0"],
+      "validator": "platform/blueprints/cowork/helpers/validate-sidecar-helper.js",
+      "consumers": [
+        "platform/blueprints/cowork/skills/orchestrators/eod-review/SKILL.md",
+        "platform/blueprints/cowork/helpers/write-atomic-note-helper.js"
+      ],
+      "notes": "EOD review sidecar — JSON Schema draft-07. Latest accepted version 1.4.0 (v0.101.0 sparse-signal-feedback)."
+    },
+    {
+      "id": "cowork-morning-briefing-sidecar",
+      "kind": "sidecar-schema",
+      "owner": { "type": "blueprint", "name": "cowork" },
+      "source": "platform/blueprints/cowork/data/schemas/morning-briefing@1.0.0.json",
+      "accepted_versions": ["1.0.0", "1.1.0"],
+      "validator": "platform/blueprints/cowork/helpers/validate-sidecar-helper.js",
+      "consumers": [
+        "platform/blueprints/cowork/skills/orchestrators/morning-briefing/SKILL.md",
+        "platform/blueprints/cowork/helpers/write-atomic-note-helper.js"
+      ],
+      "notes": "Morning briefing sidecar. Latest accepted version 1.1.0."
+    },
+    {
+      "id": "cowork-midday-tripwire-sidecar",
+      "kind": "sidecar-schema",
+      "owner": { "type": "blueprint", "name": "cowork" },
+      "source": "platform/blueprints/cowork/data/schemas/midday-tripwire@1.0.0.json",
+      "accepted_versions": ["1.0.0", "1.1.0"],
+      "validator": "platform/blueprints/cowork/helpers/validate-sidecar-helper.js",
+      "consumers": [
+        "platform/blueprints/cowork/skills/orchestrators/midday-tripwire/SKILL.md",
+        "platform/blueprints/cowork/helpers/write-atomic-note-helper.js"
+      ],
+      "notes": "Midday tripwire sidecar. Tripwire-aspects (cc_drift / calendar_drift / queue_growth) gated by engagement.tripwire_aspects."
+    },
+    {
+      "id": "cowork-weekly-review-sidecar",
+      "kind": "sidecar-schema",
+      "owner": { "type": "blueprint", "name": "cowork" },
+      "source": "platform/blueprints/cowork/data/schemas/weekly-review@1.0.0.json",
+      "accepted_versions": ["1.0.0", "1.1.0"],
+      "validator": "platform/blueprints/cowork/helpers/validate-sidecar-helper.js",
+      "consumers": [
+        "platform/blueprints/cowork/skills/orchestrators/weekly-review/SKILL.md",
+        "platform/blueprints/cowork/helpers/write-atomic-note-helper.js"
+      ],
+      "notes": "Weekly review sidecar."
+    },
+    {
+      "id": "cowork-monthly-review-sidecar",
+      "kind": "sidecar-schema",
+      "owner": { "type": "blueprint", "name": "cowork" },
+      "source": "platform/blueprints/cowork/data/schemas/monthly-review@1.0.0.json",
+      "accepted_versions": ["1.0.0", "1.1.0"],
+      "validator": "platform/blueprints/cowork/helpers/validate-sidecar-helper.js",
+      "consumers": [
+        "platform/blueprints/cowork/skills/orchestrators/monthly-review/SKILL.md",
+        "platform/blueprints/cowork/helpers/write-atomic-note-helper.js"
+      ],
+      "notes": "Monthly review sidecar."
+    },
+    {
+      "id": "cowork-morning-briefing-cold-sidecar",
+      "kind": "sidecar-schema",
+      "owner": { "type": "blueprint", "name": "cowork" },
+      "source": "platform/blueprints/cowork/data/schemas/morning-briefing-cold@1.0.0.json",
+      "accepted_versions": ["1.0.0"],
+      "validator": "platform/blueprints/cowork/helpers/validate-sidecar-helper.js",
+      "consumers": [
+        "platform/blueprints/cowork/skills/orchestrators/morning-briefing/SKILL.md"
+      ],
+      "notes": "Cold-mode morning briefing sidecar (v0.95.1 lens_shift cadence). Skips memory-read + anti-echo + semantic-echoes."
+    },
+    {
+      "id": "scheduled-job-contract",
+      "kind": "contract",
+      "owner": { "type": "blueprint", "name": "cowork" },
+      "source": "platform/blueprints/cowork/data/scheduled-job-contract.json",
+      "accepted_versions": ["0.35.1"],
+      "validator": "platform/blueprints/cowork/helpers/compose-scheduled-job-wrappers-helper.js",
+      "consumers": [
+        "platform/blueprints/cowork/helpers/compose-scheduled-job-wrappers-helper.js",
+        "platform/blueprints/cowork/skills/orchestrators/onboard-scheduled-jobs/SKILL.md",
+        "platform/blueprints/cowork/skills/orchestrators/sync-scheduled-jobs/SKILL.md"
+      ],
+      "notes": "Canonical Cowork scheduled-job wrapper contract. contract_version MUST mirror cowork blueprint version (landmine #20). Substitution tokens {{$varname}} + {{shared.<key>}}."
+    },
+    {
+      "id": "cowork-kind-titles",
+      "kind": "data-file",
+      "owner": { "type": "blueprint", "name": "cowork" },
+      "source": "platform/blueprints/cowork/data/kind-titles.json",
+      "consumers": [
+        "platform/blueprints/cowork/helpers/dispatch-plan-helper.js"
+      ],
+      "notes": "Canonical 7-entry kind→title display map (v0.95.0). loadKindTitles() reads this; CANONICAL_TITLES const is the in-helper fallback."
+    },
+    {
+      "id": "cowork-kind-patterns",
+      "kind": "data-file",
+      "owner": { "type": "blueprint", "name": "cowork" },
+      "source": "platform/blueprints/cowork/data/kind-patterns.json",
+      "consumers": [
+        "platform/blueprints/cowork/helpers/dispatch-plan-helper.js"
+      ],
+      "notes": "Kind-classification patterns used by context-builder MCP-routing."
+    },
+    {
+      "id": "cowork-kind-classifier-cache",
+      "kind": "data-file",
+      "owner": { "type": "blueprint", "name": "cowork" },
+      "source": "platform/blueprints/cowork/data/kind-classifier-cache.json",
+      "consumers": [
+        "platform/blueprints/cowork/helpers/dispatch-plan-helper.js"
+      ],
+      "notes": "Memoized classifier results to avoid redundant LLM calls. Cache entries keyed by namespace + tool-set hash."
+    },
+    {
+      "id": "cowork-cadence-freshness-windows",
+      "kind": "data-file",
+      "owner": { "type": "blueprint", "name": "cowork" },
+      "source": "platform/blueprints/cowork/data/cadence-freshness-windows.json",
+      "consumers": [
+        "platform/blueprints/cowork/helpers/dispatch-plan-helper.js"
+      ],
+      "notes": "Per-cadence freshness windows (how recent a gather result is allowed to be before it triggers re-fetch)."
+    },
+    {
+      "id": "cowork-learned-weights",
+      "kind": "learned-state-schema",
+      "owner": { "type": "blueprint", "name": "cowork" },
+      "source": "platform/blueprints/cowork/helpers/ingest-feedback-helper.js",
+      "accepted_versions": ["2", "3", "4", "5"],
+      "validator": "platform/blueprints/cowork/helpers/ingest-feedback-helper.js",
+      "consumers": [
+        "platform/blueprints/cowork/helpers/learn-from-checks-helper.js",
+        "platform/blueprints/cowork/skills/orchestrators/reconcile-cowork/SKILL.md"
+      ],
+      "notes": "learned_weights schema is encoded as normalizeLearnedWeightsV3 / V4 / V5 migrators inside ingest-feedback-helper.js. Schema 5 (v0.101.0) added per-cadence satisfaction series; schema 4 (v0.99.0) added silence-reset migration; schema 3 (v0.98.2) added nested per-kind entity maps. Migration is always purely additive — counters intact across version bumps."
+    },
+    {
+      "id": "finance-rule-fragments",
+      "kind": "rule-fragment-bundle",
+      "owner": { "type": "blueprint", "name": "finance" },
+      "source": "platform/blueprints/finance/manifest.json",
+      "validator": "platform/install.js",
+      "consumers": [
+        "platform/blueprints/finance/helpers/finance-frontmatter.js",
+        "platform/blueprints/finance/helpers/budget-summary.js",
+        "platform/blueprints/finance/helpers/monthly-overview.js"
+      ],
+      "notes": "8 rule_fragments covering: budget / paycheck / invoice / debt / budget-defaults / paycheck-defaults / debt-defaults / hub types. Validates frontmatter on per-blueprint paths via the validator mechanism."
+    },
+    {
+      "id": "cowork-rule-fragments",
+      "kind": "rule-fragment-bundle",
+      "owner": { "type": "blueprint", "name": "cowork" },
+      "source": "platform/blueprints/cowork/manifest.json",
+      "validator": "platform/install.js",
+      "consumers": [
+        "platform/blueprints/cowork/helpers/write-atomic-note-helper.js"
+      ],
+      "notes": "24 rule_fragments — largest bundle. Covers 7 atomic-note types (cowork-morning-briefing / midday-tripwire / eod-review / weekly-review / monthly-review / finance-snapshot / scheduled-jobs) + hub types + memory types."
+    },
+    {
+      "id": "project-rule-fragments",
+      "kind": "rule-fragment-bundle",
+      "owner": { "type": "blueprint", "name": "project" },
+      "source": "platform/blueprints/project/manifest.json",
+      "consumers": [
+        "platform/blueprints/project/helpers/breadcrumb.js",
+        "platform/blueprints/project/helpers/project-docs-index.js",
+        "platform/blueprints/project/helpers/section-hub.js"
+      ],
+      "notes": "4 rule_fragments: project / doc-note / section-hub / sub-section-hub (v0.103.0 section-hubs + breadcrumbs)."
+    },
+    {
+      "id": "workshop-platform-manifest",
+      "kind": "workshop-manifest",
+      "owner": { "type": "workshop", "name": "sauce" },
+      "source": "platform/manifest.json",
+      "validator": "scripts/check-version-sync.js",
+      "consumers": [
+        "platform/install.js",
+        "platform/cli/sauce-cli.js",
+        "scripts/check-version-sync.js",
+        "scripts/workshop-status.js"
+      ],
+      "notes": "Workshop master manifest. Keys: workshop_version, blueprints[], mechanisms[], foundational_plugins. check-version-sync.js gates workshop_version vs package.json vs ranch/platform-subscription.json at preflight start."
+    },
+    {
+      "id": "workshop-platform-subscription",
+      "kind": "workshop-manifest",
+      "owner": { "type": "workshop", "name": "sauce" },
+      "source": "ranch/platform-subscription.json",
+      "consumers": [
+        "platform/install.js",
+        "platform/cli/sauce-cli.js"
+      ],
+      "notes": "Workshop's own subscription file (workshop dogfoods itself per build-test-verify.md). Pinned to the workshop's own manifest version. Per-vault consumer subscriptions follow the same shape."
+    },
+    {
+      "id": "finance-new-entity-buttons",
+      "kind": "entity-create-prompts",
+      "owner": { "type": "blueprint", "name": "finance" },
+      "source": "platform/blueprints/finance/manifest.json",
+      "validator": "platform/mechanisms/entity-create/entity-create.js",
+      "consumers": [
+        "platform/blueprints/finance/helpers/finance-nav-row.js"
+      ],
+      "notes": "Finance has 4 new_entity_button entries: budget / paycheck / invoice / debt. Each declares prompts[] (text/date/number/select fields), destination, frontmatter_template, inline_body. entity-create@0.7.1 consumes seed_from_defaults.resolve_wikilinks (v0.108.0)."
+    },
+    {
+      "id": "cowork-vault-config-engagement",
+      "kind": "helper-read-contract",
+      "owner": { "type": "blueprint", "name": "cowork" },
+      "source": "platform/blueprints/cowork/helpers/read-user-preferences-helper.js",
+      "consumers": [
+        "platform/blueprints/cowork/helpers/dispatch-plan-helper.js",
+        "platform/blueprints/cowork/skills/orchestrators/morning-briefing/SKILL.md",
+        "platform/blueprints/cowork/skills/orchestrators/eod-review/SKILL.md"
+      ],
+      "notes": "Engagement shape read out of consumer vault-config.md: {id, label, type, priorities[], rendering[], tripwire_aspects[], overrides{}, ...}. Layered preferences tree (bundle ⨁ overrides ⨁ ad_hoc → final). v0.95.0 introduced overrides; per-key wins on objects, REPLACES on arrays."
+    },
+    {
+      "id": "finance-monthly-overview-page-read",
+      "kind": "helper-read-contract",
+      "owner": { "type": "blueprint", "name": "finance" },
+      "source": "platform/blueprints/finance/helpers/monthly-overview.js",
+      "consumers": [
+        "platform/blueprints/finance/templates/Budget Template.md"
+      ],
+      "notes": "MonthlyOverview (v0.110.3) reads page.type === 'budget' + page.month + page.categories[*].actual + dv.pages('spice/finance/paychecks').where(p => p.type === 'paycheck' && p.pay_period_start.startsWith(monthKey)) + dv.pages('spice/finance/debts').where(p => p.type === 'debt'). Paycheck expenses[*].debt + paid:true expected when summing debtPaid. Behavioral coverage in platform/test/run-v01103-monthly-overview.js."
+    }
+  ]
+}
