@@ -3740,6 +3740,111 @@ async function applyFinanceMigrations(tp, manifest, variables, history, git) {
   if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
   await applyFinanceDefaultsScaffolding(tp, manifest, variables, history, git);
   await applyFinanceCategoriesGroupBackfill(tp, manifest, variables, history, git);
+  await applyFinanceBudgetBodyMigration(tp, manifest, variables, history, git);
+}
+
+// applyFinanceBudgetBodyMigration — v0.107.0 CF-2 (finance 0.5.2). Heals
+// pre-v0.107.0 budget bodies that were created from the older Budget Template:
+//
+//   1. Injects the BudgetSummary dataviewjs block (guarded by
+//      `<!-- budget-summary-v0.5.2 -->` marker) immediately after the
+//      FinanceStatus.renderBadge block — so the three-band rollup renders at
+//      the top of every Budget note, including ones created before v0.107.0.
+//   2. Removes the `## Categories` heading line (post-v0.5.2 the editor stands
+//      on its own; the section heading was redundant).
+//
+// Body-text mutation only (no frontmatter change). Idempotent — guarded by the
+// HTML comment marker. Per-file failure-loud.
+async function applyFinanceBudgetBodyMigration(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "finance") return;
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+
+  const budgetsRoot = "spice/finance/budgets";
+  if (!(await adapter.exists(budgetsRoot))) return;
+
+  const budgetFiles = [];
+  try {
+    const top = await adapter.list(budgetsRoot);
+    for (const folder of (top.folders || [])) {
+      try {
+        const inner = await adapter.list(folder);
+        for (const fp of (inner.files || [])) {
+          if (/Budget-\d{4}-\d{2}\.md$/.test(fp)) budgetFiles.push(fp);
+        }
+      } catch (_e) { /* per-folder failure-loud */ }
+    }
+  } catch (e) {
+    history?.push({ event: "warning", step: "finance_budget_body_migration", name: "finance",
+      reason: `list failed for ${budgetsRoot}: ${e.message}`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+      attempted_at: new Date().toISOString() });
+    return;
+  }
+
+  if (budgetFiles.length === 0) return;
+
+  let touched = 0;
+  for (const fp of budgetFiles) {
+    try {
+      const body = await adapter.read(fp);
+      const result = _migrateBudgetBody(body);
+      if (result.touched) {
+        await adapter.write(fp, result.body);
+        touched += 1;
+      }
+    } catch (e) {
+      history?.push({ event: "warning", step: "finance_budget_body_migration", name: "finance",
+        reason: `body migration failed for ${fp}: ${e.message}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    }
+  }
+
+  history?.push({ event: "info", step: "finance_budget_body_migration", name: "finance",
+    reason: `${budgetFiles.length} budgets scanned, ${touched} bodies migrated (BudgetSummary block injected; ## Categories heading removed)`,
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+    attempted_at: new Date().toISOString() });
+}
+
+// _migrateBudgetBody — pure body transform. Idempotent.
+//   • Inserts BudgetSummary dataviewjs block (marker-guarded) immediately after
+//     the FinanceStatus.renderBadge block if absent.
+//   • Removes the `## Categories` heading line (matches `^## Categories$`).
+function _migrateBudgetBody(body) {
+  let out = body;
+  let touched = false;
+
+  // 1. Inject BudgetSummary block if marker absent.
+  const SUMMARY_MARKER = "<!-- budget-summary-v0.5.2 -->";
+  if (!out.includes(SUMMARY_MARKER) && !/customJS\.BudgetSummary|class:\s*["']BudgetSummary["']/.test(out)) {
+    // Insert after the FinanceStatus.renderBadge dataviewjs block. Match the
+    // block and capture its trailing ```. If not found, fall back to after the
+    // frontmatter close.
+    const badgeBlockRe = /(```dataviewjs\s*\n[^`]*FinanceStatus\.renderBadge[^`]*```\s*\n)/;
+    const m = out.match(badgeBlockRe);
+    const summaryBlock = `${SUMMARY_MARKER}\n\`\`\`dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "BudgetSummary" });\n\`\`\`\n\n`;
+    if (m) {
+      out = out.replace(badgeBlockRe, `$1\n${summaryBlock}`);
+      touched = true;
+    } else {
+      // Fallback: inject after the closing `---` of frontmatter.
+      const fmEnd = out.indexOf("---\n", 4);
+      if (fmEnd !== -1) {
+        const cutIdx = fmEnd + 4;
+        out = out.slice(0, cutIdx) + `\n${summaryBlock}` + out.slice(cutIdx);
+        touched = true;
+      }
+    }
+  }
+
+  // 2. Remove `## Categories` heading line (and any trailing blank line right after).
+  if (/^## Categories\s*$/m.test(out)) {
+    out = out.replace(/^## Categories\s*\n\n?/m, "");
+    touched = true;
+  }
+
+  return { body: out, touched };
 }
 
 // _backfillBudgetGroupsFromText — pure string transform on Budget-*.md body.

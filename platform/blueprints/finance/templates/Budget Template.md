@@ -24,8 +24,6 @@ await customJS.FinanceStatus.renderBadge(dv, "budget");
 await dv.view("ranch/views/customjs-guard", { class: "BudgetSummary" });
 ```
 
-## Categories
-
 ```dataviewjs
 await dv.view("ranch/views/customjs-guard", { class: "BudgetCategoriesEditor" });
 ```

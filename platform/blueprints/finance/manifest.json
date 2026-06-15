@@ -1,6 +1,6 @@
 {
   "name": "finance",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "kind": "blueprint",
   "module_directory": "finance",
   "description": "Finance blueprint covering Budgets + Paychecks + Invoices under spice/finance/. Top hub Finance.md aggregates pending items from all three sub-areas. Budgets/Paychecks are flat dated entities; Invoices use a per-month folder ecosystem mirroring trips/<slug>/. Status pills (Planning/In Progress/Done) derived from frontmatter via shared FinanceStatus helper. v0.2.7 PATCH: 8 outline-accent button call sites migrated to customJS.AccentButton.render. v0.2.8 PATCH (in-cycle CF-1): InvoiceControls Save now also recomputes amount = round(rate * hours, 2) on save; Save's enabled state additionally considers amount drift (enabled when stored amount != rate * hours) so stale-amount entities can be re-synced without changing the rate. Misleading caveat note removed. v0.3.0 MINOR (v0.46.0 S8+S9+S10): three New*Button classes (NewBudgetButton/NewPaycheckButton/NewInvoiceButton) deleted; manifest declares new_entity_buttons[] entries for budget/paycheck/invoice via entity-create@0.1.0 mechanism — schema extensions exercised: month/number prompt types, validate gte/min predicates, |number substitution pipe, inline_body, extra_files[] (invoice scaffolds Time-Log + Board sidecars). Total ~500 LOC of overlay-dialog code retired. v0.5.0 MINOR (v0.107.0): per-vault defaults (Budget Defaults.md + Paycheck Defaults.md) scaffolded create-if-absent at install time; new BudgetDefaultsEditor + PaycheckDefaultsEditor widgets manage the seed lists via dialogue (groups + categories + expenses). Budget categories grow `group` field — BudgetCategoriesEditor renders grouped <details> sections with per-group subtotals; budgets carry their own snapshot of `groups[]` so renames in defaults don't propagate. New BudgetSummary widget at top of every Budget note renders a three-band rollup (planned/actual/variance + month-progress + pace + per-group cards). + New Budget/Paycheck consume entity-create's new seed_from_defaults schema field to auto-populate from defaults. Existing budgets append-only migrated (group: \"Unassigned\" backfill + .sauce-backup snapshot).",
@@ -114,12 +114,12 @@
         "cssclasses": ["wide"]
       },
       "seed_from_defaults": {
-        "source_path": "{{module_directory}}/Budget Defaults.md",
+        "source_path": "spice/finance/Budget Defaults.md",
         "source_array": "categories",
         "carry_arrays": ["groups"],
         "per_item_set": { "actual": 0 }
       },
-      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"BudgetNavButtons\" });\n```\n\n```dataviewjs\nawait customJS.FinanceStatus.renderBadge(dv, \"budget\");\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"BudgetSummary\" });\n```\n\n## Categories\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"BudgetCategoriesEditor\" });\n```\n",
+      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"BudgetNavButtons\" });\n```\n\n```dataviewjs\nawait customJS.FinanceStatus.renderBadge(dv, \"budget\");\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"BudgetSummary\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"BudgetCategoriesEditor\" });\n```\n",
       "render_in": { "kind": "hub", "target_path": "{{module_directory}}/budgets/Budgets.md" }
     },
     {
@@ -145,7 +145,7 @@
         "cssclasses": ["wide"]
       },
       "seed_from_defaults": {
-        "source_path": "{{module_directory}}/Paycheck Defaults.md",
+        "source_path": "spice/finance/Paycheck Defaults.md",
         "source_array": "expenses",
         "per_item_set": { "paid": false }
       },

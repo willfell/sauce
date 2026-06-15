@@ -12125,7 +12125,7 @@ async function caseV01070FinMan1Versions() {
   const fin = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
   const ec  = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/mechanisms/entity-create/manifest.json"), "utf8"));
   const ws  = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
-  assertEqual(fin.version, "0.5.1", "HC-V01070-FIN-MAN-1: finance version");
+  assertEqual(fin.version, "0.5.2", "HC-V01070-FIN-MAN-1: finance version");
   assertEqual(ec.version, "0.7.0", "HC-V01070-FIN-MAN-1: entity-create version");
   assertEqual(ws.workshop_version, "0.107.0", "HC-V01070-FIN-MAN-1: workshop_version");
   assertTrue("HC-V01070-FIN-MAN-1: finance depends_on entity-create >=0.7.0",
@@ -12151,8 +12151,11 @@ async function caseV01070FinMan3SeedFromDefaults() {
   const budget = fin.new_entity_buttons.find(b => b.id === "budget");
   const paycheck = fin.new_entity_buttons.find(b => b.id === "paycheck");
 
+  // v0.5.2 (CF-2): source_path is a literal path; {{module_directory}} is an
+  // installer-time token and is NOT in entity-create's runtime _substitute
+  // catalogue (which only handles prompts/now/current_file).
   assertTrue("HC-V01070-FIN-MAN-3: budget.seed_from_defaults present",
-    budget && budget.seed_from_defaults && budget.seed_from_defaults.source_path === "{{module_directory}}/Budget Defaults.md");
+    budget && budget.seed_from_defaults && budget.seed_from_defaults.source_path === "spice/finance/Budget Defaults.md");
   assertTrue("HC-V01070-FIN-MAN-3: budget.seed_from_defaults source_array=categories",
     budget.seed_from_defaults.source_array === "categories");
   assertTrue("HC-V01070-FIN-MAN-3: budget.seed_from_defaults carries groups",
@@ -12165,11 +12168,34 @@ async function caseV01070FinMan3SeedFromDefaults() {
     /BudgetSummary/.test(budget.inline_body));
 
   assertTrue("HC-V01070-FIN-MAN-3: paycheck.seed_from_defaults present",
-    paycheck && paycheck.seed_from_defaults && paycheck.seed_from_defaults.source_path === "{{module_directory}}/Paycheck Defaults.md");
+    paycheck && paycheck.seed_from_defaults && paycheck.seed_from_defaults.source_path === "spice/finance/Paycheck Defaults.md");
   assertTrue("HC-V01070-FIN-MAN-3: paycheck.seed_from_defaults source_array=expenses",
     paycheck.seed_from_defaults.source_array === "expenses");
   assertTrue("HC-V01070-FIN-MAN-3: paycheck.seed_from_defaults sets paid: false",
     paycheck.seed_from_defaults.per_item_set && paycheck.seed_from_defaults.per_item_set.paid === false);
+
+  // v0.5.2 (CF-2): budget.inline_body must NOT contain a `## Categories`
+  // heading line — the heading was redundant. Editor stands on its own.
+  assertTrue("HC-V01070-FIN-MAN-3: budget.inline_body drops `## Categories` heading",
+    !/##\s+Categories/.test(budget.inline_body));
+}
+
+// v0.5.2 CF-2 — applyFinanceBudgetBodyMigration (BudgetSummary block injection
+// + `## Categories` heading removal on existing Budget-*.md files).
+
+async function caseV01070FbbmBudgetBodyMigration() {
+  console.log("\n--- Case HC-V01070-FBBM: applyFinanceBudgetBodyMigration shipped ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
+  assertTrue("HC-V01070-FBBM-1: applyFinanceBudgetBodyMigration function present",
+    /async\s+function\s+applyFinanceBudgetBodyMigration\s*\(/.test(src));
+  assertTrue("HC-V01070-FBBM-1: wired into applyFinanceMigrations orchestrator",
+    /await\s+applyFinanceBudgetBodyMigration\s*\(/.test(src));
+  assertTrue("HC-V01070-FBBM-2: _migrateBudgetBody helper present",
+    /function\s+_migrateBudgetBody\s*\(/.test(src));
+  assertTrue("HC-V01070-FBBM-2: marker-guarded BudgetSummary injection",
+    /<!--\s*budget-summary-v0\.5\.2\s*-->/.test(src));
+  assertTrue("HC-V01070-FBBM-3: removes `## Categories` heading line",
+    /\^##\s+Categories|## Categories/.test(src));
 }
 
 (async function main() {
@@ -12851,6 +12877,9 @@ async function caseV01070FinMan3SeedFromDefaults() {
   await caseV01070FinMan1Versions();
   await caseV01070FinMan2NewClassesAndFiles();
   await caseV01070FinMan3SeedFromDefaults();
+
+  // v0.107.0 CF-2 — body migration on existing budgets
+  await caseV01070FbbmBudgetBodyMigration();
 
   // v0.65.0 HC-V065-RUN-NOTE: write-run-note-* sub-skill lint
   {
