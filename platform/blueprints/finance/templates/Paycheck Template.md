@@ -14,7 +14,7 @@ await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 ```
 
 ```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "PaycheckNavButtons" });
+await dv.view("ranch/views/customjs-guard", { class: "FinanceNavRow" });
 ```
 
 ```dataviewjs

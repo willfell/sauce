@@ -8320,10 +8320,10 @@ async function caseHCV0891Versions() {
     path.join(WORKSHOP, "manifest.json"), "utf8"));
   const wsVer = platformMan.workshop_version || platformMan.version
     || (platformMan.workshop && platformMan.workshop.version);
-  assertEqual(wsVer, "0.110.2", "HC-V0891-VERSION-C: workshop pin = 0.93.3 (v0.93.3 bump)");
+  assertEqual(wsVer, "0.110.3", "HC-V0891-VERSION-C: workshop pin = 0.93.3 (v0.93.3 bump)");
   const pkg = JSON.parse(fs.readFileSync(
     path.resolve(WORKSHOP, "..", "package.json"), "utf8"));
-  assertEqual(pkg.version, "0.110.2", "HC-V0891-VERSION-C: package.json = 0.93.3 (v0.93.3 bump)");
+  assertEqual(pkg.version, "0.110.3", "HC-V0891-VERSION-C: package.json = 0.93.3 (v0.93.3 bump)");
 
   // D: mechanism count unchanged
   const mechs = (platformMan.mechanisms && Array.isArray(platformMan.mechanisms))
@@ -12155,7 +12155,7 @@ async function caseV01070FinMan1Versions() {
   // v0.109.0 bumps workshop_version on top of v0.108.0's finance/EC ship.
   assertTrue("HC-V01070-FIN-MAN-1: finance version 0.6.x", /^0\.6\.\d+$/.test(fin.version), `got: ${fin.version}`);
   assertEqual(ec.version, "0.7.1", "HC-V01070-FIN-MAN-1: entity-create version");
-  assertEqual(ws.workshop_version, "0.110.2", "HC-V01070-FIN-MAN-1: workshop_version");
+  assertEqual(ws.workshop_version, "0.110.3", "HC-V01070-FIN-MAN-1: workshop_version");
   assertTrue("HC-V01070-FIN-MAN-1: finance depends_on entity-create >=0.7.0",
     fin.depends_on.some(d => d.name === "entity-create" && /0\.7/.test(d.range)));
 }
@@ -12472,7 +12472,7 @@ async function caseV01080FinanceVersionBump() {
     ec && ec.version === "0.7.1", `got: ${ec?.version}`);
   // v0.109.0 supersedes 0.108.0: workshop bumped again for projects-visual-overhaul.
   assertTrue("V01080-FV-5: workshop_version === 0.109.0 (v0.109.0 supersedes the v0.108.0 baseline this case originally pinned)",
-    workshop.workshop_version === "0.110.2", `got: ${workshop.workshop_version}`);
+    workshop.workshop_version === "0.110.3", `got: ${workshop.workshop_version}`);
 }
 
 async function caseV01080FinanceNewEntityButtonDebt() {
@@ -12643,6 +12643,142 @@ async function caseV01101SourceTemplatesUseGuard() {
       /customjs-guard[\s\S]{0,200}EntityCreate/.test(src),
       `${rel} missing customjs-guard EntityCreate dispatch`);
   }
+}
+
+// v0.110.3 — MonthlyOverview band on Budget-YYYY-MM.md.
+// See Docs/plans/2026-06-15-v0.110.3-monthly-overview-{brief,design,plan}.md.
+
+async function caseV01103MonthlyOverviewHelperPresent() {
+  console.log("\n--- Case V01103-MO-HELPER: monthly-overview.js helper shipped ---");
+  const helperPath = path.join(WORKSHOP, "platform/blueprints/finance/helpers/monthly-overview.js");
+  assertTrue("V01103-MO-HELPER-1: helper file exists",
+    fs.existsSync(helperPath), `missing: ${helperPath}`);
+  const src = fs.readFileSync(helperPath, "utf8");
+  assertTrue("V01103-MO-HELPER-2: class MonthlyOverview defined",
+    /class\s+MonthlyOverview\b/.test(src));
+  assertTrue("V01103-MO-HELPER-3: async render(dv) method present",
+    /async\s+render\s*\(\s*dv\s*\)/.test(src));
+}
+
+async function caseV01103MonthlyOverviewShape() {
+  console.log("\n--- Case V01103-MO-SHAPE: helper internal structure ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/helpers/monthly-overview.js"), "utf8");
+  assertTrue("V01103-MO-SHAPE-1: mo-root CSS class for embed-dedup",
+    /\.mo-root|cls:\s*["']mo-root["']/.test(src));
+  assertTrue("V01103-MO-SHAPE-2: _renderBand1 method present",
+    /_renderBand1\s*\(/.test(src));
+  assertTrue("V01103-MO-SHAPE-3: _renderBand2 method present",
+    /_renderBand2\s*\(/.test(src));
+  assertTrue("V01103-MO-SHAPE-4: _renderBand3 method present",
+    /_renderBand3\s*\(/.test(src));
+  assertTrue("V01103-MO-SHAPE-5: _fmtMoney currency formatter",
+    /_fmtMoney\s*\(/.test(src));
+}
+
+async function caseV01103MonthlyOverviewDataReads() {
+  console.log("\n--- Case V01103-MO-READS: helper queries paychecks + debts folders ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/helpers/monthly-overview.js"), "utf8");
+  assertTrue("V01103-MO-READS-1: queries spice/finance/paychecks",
+    /spice\/finance\/paychecks/.test(src));
+  assertTrue("V01103-MO-READS-2: queries spice/finance/debts",
+    /spice\/finance\/debts/.test(src));
+  assertTrue("V01103-MO-READS-3: filters by pay_period_start month prefix",
+    /pay_period_start[\s\S]{0,40}startsWith/.test(src));
+  assertTrue("V01103-MO-READS-4: sums paycheck_amount + expenses + current_balance + balance_history",
+    /paycheck_amount/.test(src) && /\.expenses\b/.test(src) && /current_balance/.test(src) && /balance_history/.test(src));
+}
+
+async function caseV01103InjectionMigrationDefined() {
+  console.log("\n--- Case V01103-MO-MIG: applyFinanceBudgetMonthlyBandInjection installer migration ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
+  assertTrue("V01103-MO-MIG-1: applyFinanceBudgetMonthlyBandInjection function present",
+    /async\s+function\s+applyFinanceBudgetMonthlyBandInjection\s*\(/.test(src));
+  assertTrue("V01103-MO-MIG-2: _injectMonthlyBand body-transform present",
+    /function\s+_injectMonthlyBand\s*\(/.test(src));
+  assertTrue("V01103-MO-MIG-3: marker constant `<!-- monthly-overview-v0.6.3 -->`",
+    /<!--\s*monthly-overview-v0\.6\.3\s*-->/.test(src));
+}
+
+async function caseV01103InjectionMigrationOrchestrated() {
+  console.log("\n--- Case V01103-MO-ORCH: applyFinanceMigrations orchestrator wiring ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
+  assertTrue("V01103-MO-ORCH-1: orchestrator calls applyFinanceBudgetMonthlyBandInjection",
+    /await\s+applyFinanceBudgetMonthlyBandInjection\s*\(/.test(src));
+  // Verify ordering: MonthlyBandInjection must be called AFTER BudgetBodyMigration
+  // (anchor relies on BudgetSummary block having been injected by the prior step
+  // on stale v0.106.x bodies).
+  const bbm = src.indexOf("await applyFinanceBudgetBodyMigration(tp");
+  const mbi = src.indexOf("await applyFinanceBudgetMonthlyBandInjection(tp");
+  assertTrue("V01103-MO-ORCH-2: MonthlyBandInjection runs after BudgetBodyMigration",
+    bbm > 0 && mbi > bbm, `bbm=${bbm} mbi=${mbi}`);
+}
+
+async function caseV01103InjectionMigrationExported() {
+  console.log("\n--- Case V01103-MO-EXPORT: module.exports registers migration ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/install.js"), "utf8");
+  assertTrue("V01103-MO-EXPORT-1: module.exports.applyFinanceBudgetMonthlyBandInjection",
+    /module\.exports\.applyFinanceBudgetMonthlyBandInjection\s*=\s*applyFinanceBudgetMonthlyBandInjection/.test(src));
+}
+
+async function caseV01103FinanceManifestBumped() {
+  console.log("\n--- Case V01103-MO-FBP: finance manifest version + classes + files ---");
+  const m = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
+  assertEqual(m.version, "0.6.3", "V01103-MO-FBP-1: finance version");
+  const cls = m.customjs_classes || [];
+  assertTrue("V01103-MO-FBP-2: MonthlyOverview in customjs_classes",
+    cls.includes("MonthlyOverview"), `got: ${cls.join(",")}`);
+  const files = m.files || [];
+  assertTrue("V01103-MO-FBP-3: monthly-overview.js in files[]",
+    files.some(f => (f.source || "") === "helpers/monthly-overview.js"));
+  assertTrue("V01103-MO-FBP-4: description mentions MonthlyOverview",
+    /MonthlyOverview/i.test(m.description || ""));
+}
+
+async function caseV01103WorkshopManifestBumped() {
+  console.log("\n--- Case V01103-MO-WS: workshop manifest at 0.110.3 ---");
+  const ws = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
+  assertEqual(ws.workshop_version, "0.110.3", "V01103-MO-WS-1: workshop_version");
+}
+
+async function caseV01103BudgetTemplateUpdated() {
+  console.log("\n--- Case V01103-MO-TPL: Budget Template embeds MonthlyOverview ---");
+  const tpl = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/templates/Budget Template.md"), "utf8");
+  assertTrue("V01103-MO-TPL-1: MonthlyOverview class reference",
+    /class:\s*["']MonthlyOverview["']/.test(tpl));
+  assertTrue("V01103-MO-TPL-2: monthly-overview-v0.6.3 marker comment",
+    /<!--\s*monthly-overview-v0\.6\.3\s*-->/.test(tpl));
+  // Ordering: MonthlyOverview must appear AFTER FinanceStatus.renderBadge and
+  // BEFORE BudgetSummary so the cohesion band sits above the sliced view.
+  const moIdx = tpl.search(/class:\s*["']MonthlyOverview["']/);
+  const bsIdx = tpl.search(/class:\s*["']BudgetSummary["']/);
+  const fsIdx = tpl.search(/FinanceStatus\.renderBadge/);
+  assertTrue("V01103-MO-TPL-3: MonthlyOverview between FinanceStatus and BudgetSummary",
+    fsIdx > 0 && moIdx > fsIdx && moIdx < bsIdx, `fsIdx=${fsIdx} moIdx=${moIdx} bsIdx=${bsIdx}`);
+}
+
+async function caseV01103InjectMonthlyBandIdempotent() {
+  console.log("\n--- Case V01103-MO-IDEM: _injectMonthlyBand transform is idempotent ---");
+  const installer = require(path.join(WORKSHOP, "platform/install.js"));
+  assertTrue("V01103-MO-IDEM-1: _injectMonthlyBand exported",
+    typeof installer._injectMonthlyBand === "function");
+  const sampleBody =
+    "---\ntype: budget\nmonth: 2026-07\n---\n\n" +
+    "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNavRow\" });\n```\n\n" +
+    "```dataviewjs\nawait customJS.FinanceStatus.renderBadge(dv, \"budget\");\n```\n\n" +
+    "<!-- budget-summary-v0.5.2 -->\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"BudgetSummary\" });\n```\n";
+  const r1 = installer._injectMonthlyBand(sampleBody);
+  assertTrue("V01103-MO-IDEM-2: first pass injects (touched)",
+    r1.touched === true);
+  assertTrue("V01103-MO-IDEM-3: first pass body contains marker",
+    /<!--\s*monthly-overview-v0\.6\.3\s*-->/.test(r1.body));
+  const r2 = installer._injectMonthlyBand(r1.body);
+  assertTrue("V01103-MO-IDEM-4: second pass no-op (idempotent)",
+    r2.touched === false && r2.body === r1.body);
+  // Anchor priority: MonthlyOverview must appear BEFORE budget-summary marker.
+  const moMarkerIdx = r1.body.indexOf("<!-- monthly-overview-v0.6.3 -->");
+  const bsMarkerIdx = r1.body.indexOf("<!-- budget-summary-v0.5.2 -->");
+  assertTrue("V01103-MO-IDEM-5: MonthlyOverview block precedes BudgetSummary marker",
+    moMarkerIdx > 0 && moMarkerIdx < bsMarkerIdx, `mo=${moMarkerIdx} bs=${bsMarkerIdx}`);
 }
 
 async function caseV0110VersionBump() {
@@ -13667,6 +13803,18 @@ async function caseV01090Ds1EntityTypeOpt() {
 
   // v0.110.2 — generalized direct-call → guard migration (mobile race fix)
   await caseV01102CustomJsGuardMigration();
+
+  // v0.110.3 — MonthlyOverview band on Budget-YYYY-MM.md
+  await caseV01103MonthlyOverviewHelperPresent();
+  await caseV01103MonthlyOverviewShape();
+  await caseV01103MonthlyOverviewDataReads();
+  await caseV01103InjectionMigrationDefined();
+  await caseV01103InjectionMigrationOrchestrated();
+  await caseV01103InjectionMigrationExported();
+  await caseV01103FinanceManifestBumped();
+  await caseV01103WorkshopManifestBumped();
+  await caseV01103BudgetTemplateUpdated();
+  await caseV01103InjectMonthlyBandIdempotent();
 
   // v0.65.0 HC-V065-RUN-NOTE: write-run-note-* sub-skill lint
   {
@@ -14896,10 +15044,10 @@ async function caseV01090Ds1EntityTypeOpt() {
       // NOTE: top-level WORKSHOP at line 29 = path.resolve(__dirname, "../..") = workshop ROOT
       // (distinct from the local WORKSHOP inside caseHCV0891Versions which is platform/).
       const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
-      assertTrue("HC-V0900-VERSION-A: package.json version === '0.93.3'", pkg.version === "0.110.2");
+      assertTrue("HC-V0900-VERSION-A: package.json version === '0.93.3'", pkg.version === "0.110.3");
       const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
       assertTrue("HC-V0900-VERSION-B: platform/manifest.json workshop_version === '0.93.3'",
-        platMan.workshop_version === "0.110.2");
+        platMan.workshop_version === "0.110.3");
       const coworkMan = JSON.parse(fs.readFileSync(
         path.join(WORKSHOP, "platform/blueprints/cowork/manifest.json"), "utf8"));
       assertTrue("HC-V0900-VERSION-C: cowork manifest version === '0.31.0'",
@@ -15875,12 +16023,12 @@ type: cowork-microscope
   try {
     const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
     assertTrue("HC-V0920-VERSION-A1: workshop_version === 0.93.3",
-      platMan.workshop_version === "0.110.2");
+      platMan.workshop_version === "0.110.3");
     assertTrue("HC-V0920-VERSION-A2: blueprints[].cowork.version === 0.31.2",
       platMan.blueprints.find(b => b.name === "cowork").version === "0.40.0");
     const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
     assertTrue("HC-V0920-VERSION-A3: package.json version === 0.93.3",
-      pkg.version === "0.110.2");
+      pkg.version === "0.110.3");
     const workshopSub = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "ranch/platform-subscription.json"), "utf8"));
     assertTrue("HC-V0920-VERSION-A4: workshop subscription cowork pin === 0.31.0",
       workshopSub.blueprints.find(b => b.name === "cowork").version === "0.40.0");
@@ -16152,12 +16300,12 @@ type: cowork-microscope
   try {
     const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
     assertTrue("HC-V0930-VERSION-A1: workshop_version === 0.93.3",
-      platMan.workshop_version === "0.110.2");
+      platMan.workshop_version === "0.110.3");
     assertTrue("HC-V0930-VERSION-A2: blueprints[].cowork.version === 0.31.2",
       platMan.blueprints.find(b => b.name === "cowork").version === "0.40.0");
     const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
     assertTrue("HC-V0930-VERSION-A3: package.json version === 0.93.3",
-      pkg.version === "0.110.2");
+      pkg.version === "0.110.3");
     const workshopSub = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "ranch/platform-subscription.json"), "utf8"));
     assertTrue("HC-V0930-VERSION-A4: workshop subscription cowork pin === 0.31.1",
       workshopSub.blueprints.find(b => b.name === "cowork").version === "0.40.0");
@@ -16259,12 +16407,12 @@ type: cowork-microscope
   try {
     const platMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
     assertTrue("HC-V0931-VERSION-D1: workshop_version === 0.93.3",
-      platMan.workshop_version === "0.110.2");
+      platMan.workshop_version === "0.110.3");
     assertTrue("HC-V0931-VERSION-D2: blueprints[].cowork.version === 0.31.2",
       platMan.blueprints.find(b => b.name === "cowork").version === "0.40.0");
     const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
     assertTrue("HC-V0931-VERSION-D3: package.json version === 0.93.3",
-      pkg.version === "0.110.2");
+      pkg.version === "0.110.3");
     const coworkMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/cowork/manifest.json"), "utf8"));
     assertTrue("HC-V0931-VERSION-D4: cowork manifest.version === 0.31.1",
       coworkMan.version === "0.40.0");

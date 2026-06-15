@@ -71,11 +71,14 @@ class FinanceHubActions {
             // shim that points at our sub-container instead.
             const shim = Object.create(dv);
             shim.container = subContainer;
-            // v0.110.1: poll for customJS.EntityCreate (cold-vault load race —
+            // v0.110.3: poll for customJS.EntityCreate (cold-vault load race —
             // CustomJS plugin registers asynchronously; mirrors the polling in
-            // ranch/views/customjs-guard/view.js). Up to 2s, then fall back to
-            // a muted placeholder rather than throwing.
-            for (let i = 0; i < 40 && !window.customJS?.EntityCreate; i++) {
+            // ranch/views/customjs-guard/view.js). Up to 5s, then fall back to
+            // a muted placeholder rather than throwing. v0.110.1 used 2s but
+            // mobile/cold-load on real consumer vaults still missed; users
+            // reported "EntityCreate unavailable" on Budgets hub. Match the
+            // guard view's effective wait window better.
+            for (let i = 0; i < 100 && !window.customJS?.EntityCreate; i++) {
                 await new Promise((r) => setTimeout(r, 50));
             }
             if (window.customJS?.EntityCreate) {

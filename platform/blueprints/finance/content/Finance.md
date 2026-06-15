@@ -12,9 +12,5 @@ await dv.view("{{views_path}}/customjs-guard", { class: "SpaceNavButtons" });
 ```
 
 ```dataviewjs
-await customJS.FinanceHubActions.render(dv, { here: "finance" });
-```
-
-```dataviewjs
 await dv.view("{{views_path}}/customjs-guard", { class: "FinanceHubCards" });
 ```

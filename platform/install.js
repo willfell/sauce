@@ -3883,6 +3883,10 @@ await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 \`\`\`
 
 \`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "FinanceNavRow" });
+\`\`\`
+
+\`\`\`dataviewjs
 await dv.view("ranch/views/customjs-guard", { class: "BudgetDefaultsEditor" });
 \`\`\`
 `;
@@ -3895,6 +3899,10 @@ cssclasses: [wide]
 
 \`\`\`dataviewjs
 await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+\`\`\`
+
+\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "FinanceNavRow" });
 \`\`\`
 
 \`\`\`dataviewjs
@@ -3948,6 +3956,10 @@ await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 \`\`\`
 
 \`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "FinanceNavRow" });
+\`\`\`
+
+\`\`\`dataviewjs
 await dv.view("ranch/views/customjs-guard", { class: "DebtDefaultsEditor" });
 \`\`\`
 `;
@@ -3960,10 +3972,14 @@ async function applyFinanceMigrations(tp, manifest, variables, history, git) {
   await applyFinanceCategoriesGroupBackfill(tp, manifest, variables, history, git);
   await applyFinanceBudgetGroupSeed(tp, manifest, variables, history, git);              // NEW v0.108.0
   await applyFinanceBudgetBodyMigration(tp, manifest, variables, history, git);
+  await applyFinanceBudgetMonthlyBandInjection(tp, manifest, variables, history, git);   // NEW v0.110.3 — MonthlyOverview band above BudgetSummary
   await applyFinancePaycheckBodyMigration(tp, manifest, variables, history, git);        // CF-3 v0.107.0
   await applyFinancePaycheckDefaultsDebtLinking(tp, manifest, variables, history, git);  // NEW v0.108.0
-  await applyFinanceNavRowMigration(tp, manifest, variables, history, git);              // NEW v0.108.0 - runs LAST
-  await applyFinanceHubsRepair(tp, manifest, variables, history, git);                    // NEW v0.110.0 — heals stale pre-CF-3 hub bodies
+  await applyFinanceNavRowMigration(tp, manifest, variables, history, git);              // NEW v0.108.0
+  await applyFinanceNavRowGuardFormMigration(tp, manifest, variables, history, git);     // NEW v0.110.3 — guard-form regression: rewrites class:"BudgetNavButtons"|"PaycheckNavButtons"|"InvoiceNavButtons" guard-form refs missed by v0.108.0's direct-call regex
+  await applyFinanceHubsRepair(tp, manifest, variables, history, git);                    // NEW v0.110.0 — heals stale pre-CF-3 hub bodies (now also strips top-hub FinanceHubActions via v0.110.3 template change)
+  await applyFinanceTopHubNavRowDedup(tp, manifest, variables, history, git);             // NEW v0.110.3 — strips FinanceHubActions(here:"finance") block from spice/finance/Finance.md (user feedback: duplicate finance nav section)
+  await applyFinanceDefaultsNavRowInjection(tp, manifest, variables, history, git);       // NEW v0.110.3 — injects FinanceNavRow block into Budget/Paycheck/Debt Defaults notes that lack it
 }
 
 // applyFinanceHubsRepair — v0.110.0 (finance 0.6.1). Heals consumer vaults
@@ -3975,7 +3991,7 @@ async function applyFinanceMigrations(tp, manifest, variables, history, git) {
 // Idempotent — files already using FinanceHubActions are skipped. Per-file
 // .sauce-backup snapshot before write. Failure-loud per-file.
 const FINANCE_HUB_BODY_TEMPLATES = {
-  "spice/finance/Finance.md": "\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait customJS.FinanceHubActions.render(dv, { here: \"finance\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceHubCards\" });\n```\n",
+  "spice/finance/Finance.md": "\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceHubCards\" });\n```\n",
   "spice/finance/budgets/Budgets.md": "\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\n// entity-create:budget — installer-managed; do not delete this comment\nawait customJS.FinanceHubActions.render(dv, {\n  here: \"budgets\",\n  instance: \"budget\",\n  defaultsPath: \"spice/finance/Budget Defaults.md\"\n});\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"BudgetsCards\" });\n```\n",
   "spice/finance/paychecks/Paychecks.md": "\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\n// entity-create:paycheck — installer-managed; do not delete this comment\nawait customJS.FinanceHubActions.render(dv, {\n  here: \"paychecks\",\n  instance: \"paycheck\",\n  defaultsPath: \"spice/finance/Paycheck Defaults.md\"\n});\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PaychecksCards\" });\n```\n",
   "spice/finance/invoices/Invoices.md": "\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\n// entity-create:invoice — installer-managed; do not delete this comment\nawait customJS.FinanceHubActions.render(dv, {\n  here: \"invoices\",\n  instance: \"invoice\"\n});\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"InvoicesCards\" });\n```\n",
@@ -4532,6 +4548,115 @@ function _migrateBudgetBody(body) {
   if (/^## Categories\s*$/m.test(out)) {
     out = out.replace(/^## Categories\s*\n\n?/m, "");
     touched = true;
+  }
+
+  return { body: out, touched };
+}
+
+// ============================================================================
+// applyFinanceBudgetMonthlyBandInjection — v0.110.3 (finance 0.6.3). Injects
+// the MonthlyOverview dataviewjs block (marker-guarded by
+// `<!-- monthly-overview-v0.6.3 -->`) immediately ABOVE the BudgetSummary block
+// on every Budget-YYYY-MM.md. Body-text mutation only. Idempotent — marker
+// presence short-circuits. Per-file failure-loud via history warning events.
+// Mirrors applyFinanceBudgetBodyMigration / _migrateBudgetBody posture.
+// ============================================================================
+async function applyFinanceBudgetMonthlyBandInjection(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "finance") return;
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+
+  const budgetsRoot = "spice/finance/budgets";
+  if (!(await adapter.exists(budgetsRoot))) return;
+
+  const budgetFiles = [];
+  try {
+    const top = await adapter.list(budgetsRoot);
+    for (const folder of (top.folders || [])) {
+      try {
+        const inner = await adapter.list(folder);
+        for (const fp of (inner.files || [])) {
+          if (/Budget-\d{4}-\d{2}\.md$/.test(fp)) budgetFiles.push(fp);
+        }
+      } catch (_e) { /* per-folder failure-loud */ }
+    }
+  } catch (e) {
+    history?.push({ event: "warning", step: "finance_budget_monthly_band_injection", name: "finance",
+      reason: `list failed for ${budgetsRoot}: ${e.message}`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+      attempted_at: new Date().toISOString() });
+    return;
+  }
+
+  if (budgetFiles.length === 0) return;
+
+  let touched = 0;
+  for (const fp of budgetFiles) {
+    try {
+      const body = await adapter.read(fp);
+      const result = _injectMonthlyBand(body);
+      if (result.touched) {
+        await adapter.write(fp, result.body);
+        touched += 1;
+      }
+    } catch (e) {
+      history?.push({ event: "warning", step: "finance_budget_monthly_band_injection", name: "finance",
+        reason: `body migration failed for ${fp}: ${e.message}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    }
+  }
+
+  history?.push({ event: "info", step: "finance_budget_monthly_band_injection", name: "finance",
+    reason: `${budgetFiles.length} budgets scanned, ${touched} bodies injected (MonthlyOverview block above BudgetSummary)`,
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+    attempted_at: new Date().toISOString() });
+}
+
+// _injectMonthlyBand — pure body transform. Idempotent. Marker-guarded.
+//   Anchor priority:
+//     1. `<!-- budget-summary-v... -->` marker line → inject BEFORE.
+//     2. BudgetSummary dataviewjs block → inject BEFORE.
+//     3. FinanceStatus.renderBadge block → inject AFTER.
+//     4. Frontmatter close → inject AFTER.
+function _injectMonthlyBand(body) {
+  let out = body;
+  let touched = false;
+
+  const MARKER = "<!-- monthly-overview-v0.6.3 -->";
+  if (out.includes(MARKER)) return { body: out, touched: false };
+  if (/customJS\.MonthlyOverview|class:\s*["']MonthlyOverview["']/.test(out)) {
+    return { body: out, touched: false };
+  }
+
+  const overviewBlock = `${MARKER}\n\`\`\`dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "MonthlyOverview" });\n\`\`\`\n\n`;
+
+  const summaryMarkerRe = /(<!--\s*budget-summary-v[\d.]+\s*-->\s*\n)/;
+  const sm = out.match(summaryMarkerRe);
+  if (sm) {
+    out = out.replace(summaryMarkerRe, `${overviewBlock}$1`);
+    return { body: out, touched: true };
+  }
+
+  const summaryBlockRe = /(```dataviewjs\s*\n[^`]*class:\s*["']BudgetSummary["'][^`]*```\s*\n)/;
+  const sb = out.match(summaryBlockRe);
+  if (sb) {
+    out = out.replace(summaryBlockRe, `${overviewBlock}$1`);
+    return { body: out, touched: true };
+  }
+
+  const badgeBlockRe = /(```dataviewjs\s*\n[^`]*FinanceStatus\.renderBadge[^`]*```\s*\n)/;
+  const bb = out.match(badgeBlockRe);
+  if (bb) {
+    out = out.replace(badgeBlockRe, `$1\n${overviewBlock}`);
+    return { body: out, touched: true };
+  }
+
+  const fmEnd = out.indexOf("---\n", 4);
+  if (fmEnd !== -1) {
+    const cutIdx = fmEnd + 4;
+    out = out.slice(0, cutIdx) + `\n${overviewBlock}` + out.slice(cutIdx);
+    return { body: out, touched: true };
   }
 
   return { body: out, touched };
@@ -5513,6 +5638,209 @@ async function applyFinanceNavRowMigration(tp, manifest, variables, history, git
     summary: { scanned: allMd.length, touched: touchedFiles, blocksRewritten },
     git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
     completed_at: new Date().toISOString() });
+}
+
+// ============================================================================
+// applyFinanceNavRowGuardFormMigration — v0.110.3 (finance 0.6.3).
+//
+// v0.108.0's applyFinanceNavRowMigration only matched DIRECT
+// `customJS.{Budget,Paycheck,Invoice}NavButtons.render(...)` calls. Vaults
+// whose nav-button calls had already been converted to the customjs-guard
+// form (via an earlier guard-shim migration) had bodies like
+//   await dv.view("ranch/views/customjs-guard", { class: "BudgetNavButtons" });
+// These never got rewritten. The deleted classes silently fail loud at render
+// time as "BudgetNavButtons unavailable" / "PaycheckNavButtons unavailable" /
+// "InvoiceNavButtons unavailable".
+//
+// This migration sweeps spice/finance/**/*.md and rewrites any guard-form
+// `class: "<DeletedClass>"` token to `class: "FinanceNavRow"`. Idempotent
+// (the rewritten form does not match the regex). Per-file .sauce-backup
+// snapshot. Failure-loud per file.
+async function applyFinanceNavRowGuardFormMigration(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "finance") return;
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+
+  const financeRoot = "spice/finance";
+  if (!(await adapter.exists(financeRoot))) return;
+
+  const allMd = await _walkMdFiles(adapter, financeRoot);
+  if (allMd.length === 0) return;
+
+  // Guard-form: matches dv.view("...customjs-guard...", { class: "DeletedClass"...
+  // Class names spelled out so static-grep assertions can find them:
+  //   BudgetNavButtons, PaycheckNavButtons, InvoiceNavButtons
+  const GUARD_RE = /(dv\.view\(\s*["'][^"']*customjs-guard[^"']*["']\s*,\s*\{\s*class\s*:\s*["'])(BudgetNavButtons|PaycheckNavButtons|InvoiceNavButtons)(["'])/g;
+
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  let touchedFiles = 0;
+  let callsRewritten = 0;
+
+  for (const fp of allMd) {
+    try {
+      const body = await adapter.read(fp);
+      GUARD_RE.lastIndex = 0;
+      if (!GUARD_RE.test(body)) continue;
+      GUARD_RE.lastIndex = 0;
+      let fileCount = 0;
+      const out = body.replace(GUARD_RE, (_m, prefix, _cls, suffix) => {
+        fileCount++;
+        return `${prefix}FinanceNavRow${suffix}`;
+      });
+      if (out === body || fileCount === 0) continue;
+      const backupPath = `.sauce-backup/${ts}/${fp}`;
+      const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+      try { await adapter.mkdir(backupParent); } catch (_e) { /* ok */ }
+      try { await adapter.write(backupPath, body); } catch (_e) { /* best-effort */ }
+      await adapter.write(fp, out);
+      touchedFiles++;
+      callsRewritten += fileCount;
+      history?.push({ event: "info", step: "finance_nav_row_guard_form_migration", name: "finance",
+        path: fp, callsRewritten: fileCount, snapshot: backupPath,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    } catch (e) {
+      history?.push({ event: "warning", step: "finance_nav_row_guard_form_migration", name: "finance",
+        path: fp, reason: e.message,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    }
+  }
+
+  history?.push({ event: "info", step: "finance_nav_row_guard_form_migration", name: "finance",
+    summary: { scanned: allMd.length, touched: touchedFiles, callsRewritten },
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+    completed_at: new Date().toISOString() });
+}
+
+// ============================================================================
+// applyFinanceDefaultsNavRowInjection — v0.110.3 (finance 0.6.3).
+//
+// Pre-v0.110.3 scaffolding of `Budget Defaults.md`, `Paycheck Defaults.md`,
+// and `Debt Defaults.md` shipped without a FinanceNavRow widget block, so
+// existing user Defaults notes show no finance-area navigation at the top.
+// This migration injects a FinanceNavRow block after the SpaceNavButtons
+// block on each of the three Defaults notes that's present and lacks it.
+// Idempotent (skips files that already contain a FinanceNavRow class
+// reference). Per-file .sauce-backup snapshot. Failure-loud per file.
+async function applyFinanceDefaultsNavRowInjection(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "finance") return;
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+
+  const DEFAULTS_PATHS = [
+    "spice/finance/Budget Defaults.md",
+    "spice/finance/Paycheck Defaults.md",
+    "spice/finance/Debt Defaults.md",
+  ];
+
+  const NAVROW_BLOCK =
+    "\n```dataviewjs\n" +
+    "await dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNavRow\" });\n" +
+    "```\n";
+
+  // Match the SpaceNavButtons block and inject NAVROW immediately after.
+  const ANCHOR_RE = /(```dataviewjs\s*\n\s*await\s+dv\.view\(\s*["'][^"']*customjs-guard[^"']*["']\s*,\s*\{\s*class\s*:\s*["']SpaceNavButtons["']\s*\}\s*\)\s*;?\s*\n```)/;
+
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  let injected = 0, alreadyPresent = 0, absent = 0, noAnchor = 0;
+
+  for (const fp of DEFAULTS_PATHS) {
+    try {
+      if (!(await adapter.exists(fp))) { absent++; continue; }
+      const body = await adapter.read(fp);
+      if (/class\s*:\s*["']FinanceNavRow["']/.test(body)) {
+        alreadyPresent++;
+        continue;
+      }
+      if (!ANCHOR_RE.test(body)) {
+        noAnchor++;
+        history?.push({ event: "warning", step: "finance_defaults_nav_row_injection", name: "finance",
+          path: fp, reason: "SpaceNavButtons anchor block not found; cannot inject safely",
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+          attempted_at: new Date().toISOString() });
+        continue;
+      }
+      const out = body.replace(ANCHOR_RE, "$1\n" + NAVROW_BLOCK.trimStart());
+      if (out === body) continue;
+      const backupPath = `.sauce-backup/${ts}/${fp}`;
+      const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+      try { await adapter.mkdir(backupParent); } catch (_e) { /* ok */ }
+      try { await adapter.write(backupPath, body); } catch (_e) { /* best-effort */ }
+      await adapter.write(fp, out);
+      injected++;
+      history?.push({ event: "info", step: "finance_defaults_nav_row_injection", name: "finance",
+        path: fp, snapshot: backupPath,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    } catch (e) {
+      history?.push({ event: "warning", step: "finance_defaults_nav_row_injection", name: "finance",
+        path: fp, reason: e.message,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    }
+  }
+
+  history?.push({ event: "info", step: "finance_defaults_nav_row_injection", name: "finance",
+    summary: { injected, alreadyPresent, absent, noAnchor },
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+    completed_at: new Date().toISOString() });
+}
+
+// ============================================================================
+// applyFinanceTopHubNavRowDedup — v0.110.3 (finance 0.6.3).
+//
+// Strips the FinanceHubActions block from `spice/finance/Finance.md` (top
+// finance hub). Pre-v0.110.3 the top hub injected a cross-hub nav row via
+// FinanceHubActions(here:"finance") in addition to the SpaceNavButtons row.
+// Users perceived this as a duplicated "finance nav buttons" section. On the
+// top-level Finance.md, cross-hub navigation is redundant: SpaceNavButtons
+// already pins the Finance space, and FinanceHubCards below renders clickable
+// cards to each sub-hub.
+//
+// Matches any FinanceHubActions block on Finance.md (direct call or guard-form)
+// with here:"finance" and removes the entire dataviewjs block including
+// surrounding blank lines. Idempotent. Per-file .sauce-backup snapshot.
+async function applyFinanceTopHubNavRowDedup(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "finance") return;
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+
+  const fp = "spice/finance/Finance.md";
+  if (!(await adapter.exists(fp))) return;
+
+  // Match a dataviewjs code block whose body contains FinanceHubActions with
+  // here:"finance" (either direct call form or guard-shim form). The match
+  // includes the trailing blank line so removal does not leave double blanks.
+  const BLOCK_RE = /\n?```dataviewjs\s*\n[\s\S]*?FinanceHubActions[\s\S]*?here\s*:\s*["']finance["'][\s\S]*?\n```\n/;
+
+  try {
+    const body = await adapter.read(fp);
+    if (!BLOCK_RE.test(body)) {
+      history?.push({ event: "info", step: "finance_top_hub_nav_row_dedup", name: "finance",
+        path: fp, reason: "no FinanceHubActions(here:'finance') block found — nothing to strip",
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+      return;
+    }
+    const out = body.replace(BLOCK_RE, "\n");
+    if (out === body) return;
+    const ts = new Date().toISOString().replace(/[:.]/g, "-");
+    const backupPath = `.sauce-backup/${ts}/${fp}`;
+    const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+    try { await adapter.mkdir(backupParent); } catch (_e) { /* ok */ }
+    try { await adapter.write(backupPath, body); } catch (_e) { /* best-effort */ }
+    await adapter.write(fp, out);
+    history?.push({ event: "info", step: "finance_top_hub_nav_row_dedup", name: "finance",
+      path: fp, action: "stripped FinanceHubActions block", snapshot: backupPath,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+      attempted_at: new Date().toISOString() });
+  } catch (e) {
+    history?.push({ event: "warning", step: "finance_top_hub_nav_row_dedup", name: "finance",
+      path: fp, reason: e.message,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+      attempted_at: new Date().toISOString() });
+  }
 }
 
 // ============================================================================
@@ -10762,6 +11090,9 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     // v0.110.0 — finance hubs repair + orphaned helper cleanup.
     module.exports.applyFinanceHubsRepair = applyFinanceHubsRepair;
     module.exports.applyOrphanedHelperCleanup = applyOrphanedHelperCleanup;
+    // v0.110.3 — MonthlyOverview band injection on Budget-YYYY-MM.md
+    module.exports.applyFinanceBudgetMonthlyBandInjection = applyFinanceBudgetMonthlyBandInjection;
+    module.exports._injectMonthlyBand = _injectMonthlyBand;
     // v0.110.1 — vault-wide EntityCreate direct-call → guard rewrite.
     module.exports.applyEntityCreateGuardMigration = applyEntityCreateGuardMigration;
     // v0.110.2 — generalized: ANY direct customJS.<Class>.render(dv,...) → guard.
