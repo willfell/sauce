@@ -10527,12 +10527,16 @@ async function caseV01020PMP2QueriesMeetingsAndMatchesProject() {
 }
 
 async function caseV01020PMP3SortByDateDescTake5() {
-  console.log(`\n--- Case HC-V01020-PMP-3: sorts by date desc + limits/takes to 5 ---`);
+  console.log(`\n--- Case HC-V01020-PMP-3: sorts by date desc + caps to N (5 in v0.102.0; 3 in v0.109.0) ---`);
   const src = _readPmpSrc();
+  // v0.109.0 S5 — the sort target loosened from `p => p.date` to a more general
+  // arrow expression (the helper now passes a function reference), so the regex
+  // accepts either the legacy literal `p => p.date` form OR any `.sort((p) => p.date, "desc")`.
   assertTrue("HC-V01020-PMP-3a: sort by p.date desc",
-    /\.sort\s*\(\s*p\s*=>\s*p\.date\s*,\s*["']desc["']\s*\)/.test(src));
-  assertTrue("HC-V01020-PMP-3b: limits to 5 via .limit(5), .slice(0, 5), or .take(5)",
-    /\.limit\s*\(\s*5\s*\)/.test(src) || /\.slice\s*\(\s*0\s*,\s*5\s*\)/.test(src) || /\.take\s*\(\s*5\s*\)/.test(src));
+    /\.sort\s*\(\s*\(?\s*p\s*\)?\s*=>\s*p\.date\s*,\s*["']desc["']\s*\)/.test(src));
+  // v0.109.0 S5 cap reduced from 5 → 3 (SpaceDailyDashboard-style panel).
+  assertTrue("HC-V01020-PMP-3b: caps to 3 (v0.109.0) or 5 (legacy) via .limit/.slice/.take",
+    /\.limit\s*\(\s*[35]\s*\)/.test(src) || /\.slice\s*\(\s*0\s*,\s*[35]\s*\)/.test(src) || /\.take\s*\(\s*[35]\s*\)/.test(src));
 }
 
 async function caseV01020PMP4NewMeetingButtonPresetPrompts() {
@@ -10545,10 +10549,15 @@ async function caseV01020PMP4NewMeetingButtonPresetPrompts() {
 }
 
 async function caseV01020PMP5EmptyStateLanguage() {
-  console.log(`\n--- Case HC-V01020-PMP-5: empty-state "No meetings linked" language present ---`);
+  console.log(`\n--- Case HC-V01020-PMP-5: empty-state rendering (v0.109.0 superseded — assert no info callout) ---`);
   const src = _readPmpSrc();
-  assertTrue("HC-V01020-PMP-5: empty-state \"No meetings linked\" copy present",
-    /No meetings linked/.test(src));
+  // v0.109.0 S5 SUPERSEDES v0.102.0: the info callout + "No meetings linked"
+  // copy were dropped per v0.106.0.1's empty-state-callout-removal policy.
+  // Empty state now renders NOTHING (caller surfaces the always-available
+  // + New meeting button BEFORE the empty-state check). Assert the absence
+  // to lock the new contract.
+  assertTrue("HC-V01020-PMP-5: empty-state info callout removed",
+    !/\[!info\]\+/.test(src) && !/No meetings linked/.test(src));
 }
 
 async function caseV01020PMP6AliasLinkMatch() {
@@ -10559,10 +10568,13 @@ async function caseV01020PMP6AliasLinkMatch() {
 }
 
 async function caseV01020PMP7ExpandToggleReentryGuard() {
-  console.log(`\n--- Case HC-V01020-PMP-7: View-all expand toggle guards against double-click re-entry ---`);
+  console.log(`\n--- Case HC-V01020-PMP-7: expand toggle (v0.109.0 superseded — assert toggle removed) ---`);
   const src = _readPmpSrc();
-  assertTrue("HC-V01020-PMP-7: re-entry guard via `let expanded = false` + `expanded = true` flag",
-    /let\s+expanded\s*=\s*false/.test(src) && /expanded\s*=\s*true/.test(src));
+  // v0.109.0 S5 SUPERSEDES v0.102.0: the View-all expand toggle was dropped
+  // (cards capped hard at 3; deeper digs happen via the meeting note itself).
+  // Lock the new contract by asserting the toggle scaffolding is gone.
+  assertTrue("HC-V01020-PMP-7: expand toggle removed",
+    !/let\s+expanded\s*=\s*false/.test(src) && !/View all/.test(src));
 }
 
 // v0.102.0 S4 — project blueprint MINOR 1.16.0 (sections schema, modified doc-note button,
@@ -12517,6 +12529,66 @@ async function caseV01070FpbmPaycheckBodyMigration() {
 
 // v0.109.0 — projects visual overhaul. See Docs/plans/2026-06-15-v0.109.0-projects-visual-overhaul-design.md.
 
+// S5 — ProjectMeetingsPanel rewrite + SectionLabel adoption everywhere.
+async function caseV01090Pmp1Cap3Cards() {
+  console.log("\n--- Case HC-V01090-PMP-1: ProjectMeetingsPanel caps at 3 + drops expand toggle ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/project-meetings-panel.js"), "utf8");
+  assertTrue("HC-V01090-PMP-1: caps at 3 meetings",
+    /limit\(3\)|slice\(0,\s*3\)/.test(src));
+  assertTrue("HC-V01090-PMP-1: no expand toggle",
+    !/View all/.test(src));
+}
+
+async function caseV01090Pmp2EnrichMeeting() {
+  console.log("\n--- Case HC-V01090-PMP-2: ProjectMeetingsPanel ports _enrichMeeting ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/project-meetings-panel.js"), "utf8");
+  assertTrue("HC-V01090-PMP-2: _enrichMeeting present", /_enrichMeeting\s*\(/.test(src));
+  assertTrue("HC-V01090-PMP-2: reads body via app.vault.read", /app\.vault\.read/.test(src));
+  assertTrue("HC-V01090-PMP-2: counts unchecked tasks", /openTasks/.test(src));
+  assertTrue("HC-V01090-PMP-2: detects notes section", /hasNotes/.test(src));
+}
+
+async function caseV01090Pmp3SectionLabelInvoked() {
+  console.log("\n--- Case HC-V01090-PMP-3: ProjectMeetingsPanel invokes SectionLabel ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/project-meetings-panel.js"), "utf8");
+  assertTrue("HC-V01090-PMP-3: SectionLabel invoked",
+    /customJS\.SectionLabel\.render\(/.test(src));
+}
+
+async function caseV01090Pmp4NoInfoCalloutOnEmpty() {
+  console.log("\n--- Case HC-V01090-PMP-4: ProjectMeetingsPanel renders nothing on empty (no info callout) ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/project-meetings-panel.js"), "utf8");
+  assertTrue("HC-V01090-PMP-4: no info callout on empty state",
+    !/\[!info\]\+/.test(src));
+}
+
+async function caseV01090Pwm1SectionLabelInvoked() {
+  console.log("\n--- Case HC-V01090-PWM-1: ProjectWorkstreamManager invokes SectionLabel ---");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/project-workstream-manager.js"), "utf8");
+  assertTrue("HC-V01090-PWM-1: SectionLabel invoked at top of render",
+    /customJS\.SectionLabel\.render\(/.test(src));
+}
+
+async function caseV01090ShSlabel() {
+  console.log("\n--- Case HC-V01090-SH-SL: SectionHub adopts SectionLabel for Sub-sections + Docs ---");
+  const sh = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/section-hub.js"), "utf8");
+  assertTrue("HC-V01090-SH-SL: SectionHub uses SectionLabel for Sub-sections",
+    /customJS\.SectionLabel\.render[\s\S]{0,160}Sub-sections/.test(sh));
+  assertTrue("HC-V01090-SH-SL: SectionHub uses SectionLabel for Docs",
+    /customJS\.SectionLabel\.render[\s\S]{0,160}Docs/.test(sh));
+  assertTrue("HC-V01090-SH-SL: no proxyDv.header(3) survivors",
+    !/proxyDv\.header\(\s*3\b/.test(sh));
+}
+
+async function caseV01090PdiSlabel() {
+  console.log("\n--- Case HC-V01090-PDI-SL: ProjectDocsIndex adopts SectionLabel for Sections ---");
+  const pdi = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/project-docs-index.js"), "utf8");
+  assertTrue("HC-V01090-PDI-SL: ProjectDocsIndex uses SectionLabel for Sections",
+    /customJS\.SectionLabel\.render[\s\S]{0,160}Sections/.test(pdi));
+  assertTrue("HC-V01090-PDI-SL: no proxyDv.header(3) survivors",
+    !/proxyDv\.header\(\s*3\b/.test(pdi));
+}
+
 // S4 — Docs.md section card metadata.
 async function caseV01090Pdi1MaxMtimeComputed() {
   console.log("\n--- Case HC-V01090-PDI-1: ProjectDocsIndex section cards compute maxMtime + mostRecentDoc ---");
@@ -13295,6 +13367,13 @@ async function caseV01090Ds1EntityTypeOpt() {
   await caseV01090Pdi1MaxMtimeComputed();    // S4
   await caseV01090Pdi2SectionsSortedDesc();  // S4
   await caseV01090Pdi3MetaIncludesUpdated(); // S4
+  await caseV01090Pmp1Cap3Cards();           // S5
+  await caseV01090Pmp2EnrichMeeting();       // S5
+  await caseV01090Pmp3SectionLabelInvoked(); // S5
+  await caseV01090Pmp4NoInfoCalloutOnEmpty();// S5
+  await caseV01090Pwm1SectionLabelInvoked(); // S5
+  await caseV01090ShSlabel();                // S5
+  await caseV01090PdiSlabel();               // S5
   await caseV01070FbbmBudgetBodyMigration();
 
   // v0.5.3 CF-3 — PaycheckSummary + FinanceHubActions + paycheck body migration

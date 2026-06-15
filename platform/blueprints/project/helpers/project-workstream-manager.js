@@ -172,6 +172,12 @@ class ProjectWorkstreamManager {
             });
         };
 
+        // v0.109.0 S5 — emit the canonical Workstreams section label at the top.
+        // Template, Project.md dropped the `## Workstreams` H2 in this cycle;
+        // the helper now owns the label so the section reads cohesively
+        // alongside ProjectMeetingsPanel's "Meetings" SectionLabel.
+        customJS.SectionLabel.render(dv, { text: "Workstreams" });
+
         const root = dv.container.createEl("div");
 
         const btnRow = root.createEl("div");
