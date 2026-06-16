@@ -1,6 +1,5 @@
 ---
 type: to-do-recurring
-created_at: "<% tp.file.creation_date("YYYY-MM-DDTHH:mm:ssZ") %>"
 tags:
   - "seed-test-vault"
 cssclasses:

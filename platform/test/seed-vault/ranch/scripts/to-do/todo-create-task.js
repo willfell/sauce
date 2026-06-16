@@ -512,7 +512,10 @@ class ToDoCreateTask {
             const insertPos = m.index + m[0].length;
             const head = content.slice(0, insertPos).replace(/\n+$/, '\n');
             const tail = content.slice(insertPos).replace(/^\n+/, '');
-            return head + `\n${line}\n\n` + tail;
+            // v0.120.0: emit single-newline separator (was `\n\n` which produced an
+            // empty blank line BETWEEN consecutive task entries on the daily — user
+            // feedback 2026-06-16). Trailing `\n` keeps the task line terminated.
+            return head + `\n${line}\n` + tail;
         }
         // Legacy fallback — match an `## H2` heading; preserved for transition
         // window so older notes still get the task inserted in a sensible place.
