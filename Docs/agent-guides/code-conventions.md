@@ -60,3 +60,41 @@ Touching content inside a marker block without going through the mechanism = you
 - All 22 landmines with rationale + history blocks → `Docs/landmines.md`.
 - Architecture and installer mechanics → [architecture.md](architecture.md) + `Docs/how.md`.
 - Past cycle decisions and platform values → `Docs/cycle-history.md`.
+
+## Dispatcher contracts
+
+| Dispatcher | Loading behavior | What it means for consumers |
+| --- | --- | --- |
+| customJS (CustomJS plugin) | `customJS.X = new X()` — stores instances | Members called via `customJS.X.method` must be non-static. Static-only utility classes are tolerated (detect-by-shape via `platform/test/run-customjs-contract.js`). |
+| Templater (`tp`) | Copies executing in source file context | `tp.file.creation_date(...)` resolves against the SOURCE file, not the destination. Always render template-injected values before scaffolding. |
+| installer (`runInstall`) | Subprocess-spawning | Cannot share in-process state with caller. Errors propagate via exit codes + stdout; the calling process must catch + surface them. |
+
+Adding a new dispatcher consumer: grep the dispatcher's loader code (e.g., search for `customJS`
+assignment patterns or Templater's `evaluate` invocation), then read one working consumer to
+confirm the contract before authoring the new one. v0.93.3 / v0.94.0 / v0.118.0 each paid this
+tax by not.
+
+See also: landmine #28.
+
+## Stable anchors vs display markers
+
+Parsers MUST NOT key on display-mutable markers (headings, SectionLabel text labels) that future
+cosmetic migrations may rewrite. Instead, key on stable anchors:
+
+- HTML comments — `<!-- recurring-entries -->`, `<!-- recurring-materialized-... -->`
+- Frontmatter fields — `recurring_section_start: true`
+- Block-ids — `^todo-recur-abc123`
+- Native dataviewjs invocations (whose code never changes shape)
+
+Display markers (FLAGGED by `scripts/lint-display-markers.js`):
+
+- `^# `, `^## `, `^### ` heading regex
+- SectionLabel text labels (e.g., `text: "Recurring Tasks"`)
+- Markdown formatting characters used as section delimiters
+
+Migrations legitimately match old display forms (in `platform/migrate/`); those files are
+excluded from the lint by default. Opt-out marker for individual lines:
+`// lint-display-markers:allow <reason>`.
+
+Source: v0.118.1 cycle postmortem item #4 (parseRegistry kept matching `## Recurring Tasks`
+after v0.117.0 rewrote that H2 to a SectionLabel block).

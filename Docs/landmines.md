@@ -488,3 +488,36 @@ Workshop has no daily notes, no kanban boards, no projects. If you leave Calenda
 ### Don't carry a bug across vaults
 
 Every mechanism update goes through the workshop first, dogfoods on the workshop's own self-install, THEN promotes to consumers. If the workshop self-test fails, do not push the update into consumers. The workshop's "production" status validates the mechanism end-to-end.
+
+### Landmine #27 — Cycle scope discipline: smaller is faster
+
+v0.116.0 → v0.118.1 thrashed 8 cycles to ship a working to-do dialog because v0.116.0 bit
+off 8 new customJS classes + a recurrence engine + a +New Task dialog all at once. The bigger
+the bundle, the more failure modes hide inside each other. When a feature exceeds 3 distinct
+surfaces (class, schema, template, dialog, widget, migration), split into smaller cycles where
+each is verified end-to-end before the next.
+
+Counter-examples that shipped clean first try: v0.94.0 (single demo-driving blueprint),
+v0.113.0 (single index + linter).
+
+Source: v0.118.1 cycle postmortem item #6.
+
+### Landmine #28 — Verify dispatcher / loader contracts before designing against them
+
+"Verify helpers before design asserts them" (existing rule) extends to runtime dispatchers
+and loaders:
+
+- **customJS** stores classes as instances (`new Class()`) → methods called via
+  `customJS.X.method` must be on the prototype (non-static). Static methods are NOT visible to
+  the dispatcher. Caught at preflight by `platform/test/run-customjs-contract.js`.
+- **Templater** copies executing in source file context, not vault context. `tp.file.creation_date`
+  resolves against the SOURCE file, not the destination.
+- **installer `runInstall`** is subprocess-spawning, not in-process. Cannot share in-process
+  state with the caller; errors propagate via exit codes + stdout.
+
+Before designing a new consumer of a dispatcher: grep the dispatcher's loader code AND read one
+working consumer to confirm the contract.
+
+Catalog: `Docs/agent-guides/code-conventions.md` § Dispatcher contracts.
+
+Source: v0.118.1 postmortem item #10; reinforced by v0.93.3 + v0.94.0 + v0.118.0.

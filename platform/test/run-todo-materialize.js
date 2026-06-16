@@ -73,6 +73,19 @@ function makeEl(tag) {
         children: [],
         style: { cssText: '' },
         onclick: null,
+        // innerHTML setter mirrors textContent (with tags stripped) so flattenEl —
+        // which only reads textContent — still sees the rendered text body. This
+        // is the path used by v0.7.0 inline-markdown render (writes innerHTML).
+        get innerHTML() { return this._innerHTML || ''; },
+        set innerHTML(v) {
+            this._innerHTML = String(v == null ? '' : v);
+            // Loop-strip tags until fixed point (CodeQL js/incomplete-multi-character-sanitization).
+            // Test-only stub; processes fixtures, never untrusted input.
+            let s = this._innerHTML;
+            let prev;
+            do { prev = s; s = s.replace(/<[^>]+>/g, ''); } while (s !== prev);
+            this.textContent = s;
+        },
         get lastElementChild() { return this.children[this.children.length - 1] || null; },
         createEl(t, opts) {
             const child = makeEl(t);
@@ -200,12 +213,19 @@ console.log('run-todo-materialize:');
 })();
 
 // --- REC-9: hasSentinel + writeSentinel round-trip ---
+// v0.7.0: writeSentinel now emits the additive form `<!-- recurring-materialized-DATE: HASHES -->`
+// even when called with no hashes (empty-set form: `: `). hasSentinel still recognizes both
+// the new and the legacy (date-only) shapes.
 (() => {
     const today = ['---', 'type: to-do', '---', '', '## Today\'s Capture'].join('\n');
     ok('REC-9 hasSentinel false on plain', !ToDoDailyRecurring.hasSentinel(today));
     const w = ToDoDailyRecurring.writeSentinel(today, '2026-06-15');
     ok('REC-9a sentinel present', ToDoDailyRecurring.hasSentinel(w));
-    ok('REC-9b sentinel format', w.includes('<!-- recurring-materialized-2026-06-15 -->'));
+    ok('REC-9b sentinel format (v0.7.0 additive empty-set)',
+        w.includes('<!-- recurring-materialized-2026-06-15: -->'), `got w:\n${w}`);
+    // hasSentinel must also recognize the legacy date-only form (for migration coexistence).
+    const legacy = today + '\n<!-- recurring-materialized-2026-06-15 -->';
+    ok('REC-9c hasSentinel recognizes legacy date-only form', ToDoDailyRecurring.hasSentinel(legacy));
 })();
 
 // --- REC-10: parseRegistry skips lines outside ## Recurring Tasks ---
@@ -262,6 +282,65 @@ console.log('run-todo-materialize:');
 (() => {
     const e = ToDoDailyRecurring.parseRegistryLine('- [ ] No grammar here');
     ok('REC-11 no-recurrence flagged invalid', e && e.invalid === true);
+})();
+
+// ---------- v0.7.0 additive sentinel (HC-V0119-SENT-A..D) ----------
+// Direct unit asserts for the four pure helpers introduced in v0.119.0 stage-1a:
+//   hashEntry, parseSentinel, formatSentinel, writeSentinel.
+// Repros the v0.118.1-postmortem bug-(b) blind-spot at the helper level.
+
+// HC-V0119-SENT-A: hashEntry is stable across whitespace variations + emits 7-char hex.
+(() => {
+    const h1 = ToDoDailyRecurring.hashEntry('- [ ] test recurring task [recurrence:: every day]');
+    const h2 = ToDoDailyRecurring.hashEntry('- [ ]  test recurring task   [recurrence:: every day]');
+    ok('HC-V0119-SENT-A hashEntry length 7', h1.length === 7, `got ${h1}`);
+    ok('HC-V0119-SENT-A hashEntry is hex', /^[0-9a-f]{7}$/.test(h1), `got ${h1}`);
+    ok('HC-V0119-SENT-A hashEntry whitespace-normalized stable', h1 === h2, `h1=${h1} h2=${h2}`);
+})();
+
+// HC-V0119-SENT-B: parseSentinel handles all four forms.
+(() => {
+    const legacy = ToDoDailyRecurring.parseSentinel('<!-- recurring-materialized-2026-06-16 -->');
+    ok('HC-V0119-SENT-B legacy present', legacy.present === true);
+    ok('HC-V0119-SENT-B legacy date', legacy.date === '2026-06-16', `got ${legacy.date}`);
+    ok('HC-V0119-SENT-B legacy hashes empty', legacy.hashes.size === 0);
+
+    const empty = ToDoDailyRecurring.parseSentinel('<!-- recurring-materialized-2026-06-16: -->');
+    ok('HC-V0119-SENT-B empty-set present', empty.present === true);
+    ok('HC-V0119-SENT-B empty-set hashes empty', empty.hashes.size === 0);
+
+    const populated = ToDoDailyRecurring.parseSentinel('<!-- recurring-materialized-2026-06-16: a1b2c3d,e4f5g6h -->');
+    ok('HC-V0119-SENT-B populated present', populated.present === true);
+    ok('HC-V0119-SENT-B populated has a1b2c3d', populated.hashes.has('a1b2c3d'));
+    ok('HC-V0119-SENT-B populated has e4f5g6h', populated.hashes.has('e4f5g6h'));
+
+    const absent = ToDoDailyRecurring.parseSentinel('no sentinel here');
+    ok('HC-V0119-SENT-B absent present=false', absent.present === false);
+    ok('HC-V0119-SENT-B absent hashes empty', absent.hashes.size === 0);
+})();
+
+// HC-V0119-SENT-C: formatSentinel round-trips through parseSentinel; empty set yields the `: -->` form.
+(() => {
+    const s = ToDoDailyRecurring.formatSentinel('2026-06-16', new Set(['a1b2c3d', 'e4f5g6h']));
+    const parsed = ToDoDailyRecurring.parseSentinel(s);
+    ok('HC-V0119-SENT-C round-trip a1b2c3d', parsed.hashes.has('a1b2c3d'));
+    ok('HC-V0119-SENT-C round-trip e4f5g6h', parsed.hashes.has('e4f5g6h'));
+
+    const empty = ToDoDailyRecurring.formatSentinel('2026-06-16', new Set());
+    ok('HC-V0119-SENT-C empty emits `: -->` form',
+        empty === '<!-- recurring-materialized-2026-06-16: -->', `got ${empty}`);
+})();
+
+// HC-V0119-SENT-D: writeSentinel replaces a legacy date-only sentinel without duplicating it.
+(() => {
+    const legacy = '---\ntype: to-do\n---\n<!-- recurring-materialized-2026-06-16 -->\n\nbody';
+    const updated = ToDoDailyRecurring.writeSentinel(legacy, '2026-06-16', new Set(['a1b2c3d']));
+    const parsed = ToDoDailyRecurring.parseSentinel(updated);
+    ok('HC-V0119-SENT-D sentinel present after rewrite', parsed.present === true);
+    ok('HC-V0119-SENT-D sentinel carries the new hash', parsed.hashes.has('a1b2c3d'));
+    const matches = updated.match(/recurring-materialized-/g);
+    ok('HC-V0119-SENT-D exactly one sentinel line (no dupes)',
+        matches && matches.length === 1, `got ${matches && matches.length} matches:\n${updated}`);
 })();
 
 // --- PG-1: _normalizeProjectName resolves every reference shape (v0.117.x) ---
@@ -361,11 +440,95 @@ console.log('run-todo-materialize:');
     sharedWindow.app = undefined;
 })();
 
-console.log('');
-console.log(`Tests: ${pass}/${pass + fail}`);
-if (fail > 0) {
-    console.log('Failures:');
-    for (const f of failures) console.log(`  ${f}`);
-    process.exit(1);
-}
-process.exit(0);
+// ---------- TDMAT-MIDDAY-1: mid-day-added recurring task (bug-(b) repro) ----------
+// E2E case across materialize() — exercises the additive sentinel against a
+// daily that already bears a LEGACY date-only sentinel (the v0.118.1 regression
+// shape). Fails on v0.118.1 (date-only sentinel short-circuits); passes on
+// v0.119.0+ (legacy sentinel parses as empty-set; entry materializes; second
+// run is a no-op).
+(async () => {
+    try {
+        const todayStr = '2026-06-16';
+        const todayPath = `spice/to-do/2026/06-June/ToDo-${todayStr}.md`;
+        const initialToday = [
+            '---',
+            'type: to-do',
+            'created_at: "2026-06-16T00:00:00-0600"',
+            '---',
+            `<!-- recurring-materialized-${todayStr} -->`,
+            '',
+            '```dataviewjs',
+            'await dv.view("ranch/views/customjs-guard", { class: "ToDoDailyRecurring" });',
+            '```',
+            '',
+        ].join('\n');
+
+        const registryContent = [
+            '---',
+            'type: to-do-recurring',
+            'created_at: "2026-06-01T00:00:00-0600"',
+            '---',
+            '',
+            '```dataviewjs',
+            'await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Recurring Tasks", top: true }] });',
+            '```',
+            '',
+            '- [ ] test recurring task [recurrence:: every day]',
+            '',
+            '```dataviewjs',
+            'await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Last 7 days of materialization" }] });',
+            '```',
+            '',
+        ].join('\n');
+
+        // Build a small in-memory vault stub. Mirrors the shape used in UM-1 above.
+        const writes = { [todayPath]: initialToday, 'spice/to-do/Recurring Tasks.md': registryContent };
+        const vault = {
+            getAbstractFileByPath: (p) => (p in writes) ? { path: p } : null,
+            read: async (f) => writes[f.path],
+            modify: async (f, c) => { writes[f.path] = c; },
+        };
+
+        // The class was loaded into a scope with its own captured `window`. Mutate
+        // that closure-shared object so materialize() sees our fixture vault.
+        sharedWindow.app = { vault };
+
+        // Build a fresh instance via the same loader (so it shares the closure).
+        const FreshToDoDailyRecurring = loadHelperClass('todo-daily-recurring.js', 'ToDoDailyRecurring');
+        const r = new FreshToDoDailyRecurring();
+        await r.materialize(todayPath, todayStr);
+
+        const after1 = writes[todayPath];
+
+        // (a) Sentinel was migrated to the v0.7.0 additive form with the entry's hash.
+        const sentinel = FreshToDoDailyRecurring.parseSentinel(after1);
+        ok('TDMAT-MIDDAY-1 sentinel present after materialize', sentinel.present === true);
+        ok('TDMAT-MIDDAY-1 sentinel has exactly one hash (the materialized entry)',
+            sentinel.hashes.size === 1, `got ${sentinel.hashes.size} hashes; after1:\n${after1}`);
+
+        // (b) The materialized task line is in the daily body.
+        ok('TDMAT-MIDDAY-1 task line materialized into today',
+            /test recurring task/.test(after1), `after1:\n${after1}`);
+
+        // (c) Re-running materialize() is byte-identical (idempotent).
+        await r.materialize(todayPath, todayStr);
+        const after2 = writes[todayPath];
+        ok('TDMAT-MIDDAY-1 second materialize is byte-identical (idempotent)',
+            after1 === after2,
+            `diff:\n--- after1 ---\n${after1}\n--- after2 ---\n${after2}`);
+
+        sharedWindow.app = undefined;
+    } catch (e) {
+        ok('TDMAT-MIDDAY-1 case ran without throwing', false, e && (e.stack || e.message));
+        sharedWindow.app = undefined;
+    }
+
+    console.log('');
+    console.log(`Tests: ${pass}/${pass + fail}`);
+    if (fail > 0) {
+        console.log('Failures:');
+        for (const f of failures) console.log(`  ${f}`);
+        process.exit(1);
+    }
+    process.exit(0);
+})();

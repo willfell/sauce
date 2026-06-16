@@ -1110,6 +1110,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyProjectSectionsCloseRepair(tp, mech, variables, history, git);    // NEW v0.103.0.1 — fixes the regex-induced -"[[--]]" damage from v0.103.0 deploy
   await applyFinanceMigrations(tp, mech, variables, history, git);             // NEW v0.107.0 S2 — finance defaults scaffolding (create-if-absent) + categories group backfill (append-only + .sauce-backup snapshot)
   await applyToDoBlueprintMigration(tp, mech, variables, history, git);        // NEW v0.116.0 — reshapes v0.3.3 daily-note bodies to v0.4.0 5-block shape (.sauce-backup snapshot before write; absorbs ## Tasks heading; preserves ## Notes)
+  await applyRecurringSentinelV070Migration(tp, mech, variables, history, git); // NEW v0.119.0 — heals date-only recurring sentinels to additive (empty-set) form so next render re-materializes (fixes mid-day-added-recurring blind spot; .sauce-backup snapshot before write)
   await applyProjectTodoBackfill(tp, mech, variables, history, git);           // NEW v0.116.0 — creates spice/projects/<slug>/<Name> To-Do.md for every project lacking one (skip-if-exists)
   await applyOrphanedHelperCleanup(tp, mech, variables, history, git);         // NEW v0.110.0 — deletes obsolete *.js and *.js.bak helper files left on disk after manifest removals
   await applyEntityCreateGuardMigration(tp, mech, variables, history, git);    // NEW v0.110.1 — rewrites direct customJS.EntityCreate.render(dv,...) calls in vault notes to the customjs-guard form (cold-load race fix)
@@ -4950,6 +4951,92 @@ async function applyToDoBlueprintMigration(tp, mech, variables, history, git) {
     summary: { migrated, alreadyCurrent, absorbedTasksHeading, dailyHeadingsReshaped, projectTodoReshaped, registryReshaped, errors },
     git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
     completed_at: new Date().toISOString() });
+}
+
+// applyRecurringSentinelV070Migration — v0.119.0 (to-do v0.7.0).
+//
+// Heals legacy date-only `<!-- recurring-materialized-YYYY-MM-DD -->` sentinels
+// in daily To-Do notes by rewriting them in place to the empty-set form
+// `<!-- recurring-materialized-YYYY-MM-DD: -->`. On the next Obsidian render,
+// ToDoDailyRecurring.materialize() repopulates the set with current registry
+// hashes — fixing the mid-day-added-recurring-task blind spot (v0.118.1
+// postmortem item #5). Idempotent: files already in the new form are skipped.
+// .sauce-backup snapshot before any write.
+async function applyRecurringSentinelV070Migration(tp, mech, variables, history, git) {
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const TODO_ROOT = "spice/to-do";
+  const exists = await adapter.exists(TODO_ROOT).catch(() => false);
+  if (!exists) {
+    history?.push({ event: "info", step: "applyRecurringSentinelV070Migration",
+      healed: 0, errors: [], skipped_reason: "spice/to-do not present",
+      git_commit: (git && git.commit), git_tag: (git && git.tag), git_dirty: (git && git.dirty),
+      completed_at: new Date().toISOString() });
+    return;
+  }
+
+  async function _walkDailies(dir) {
+    const out = [];
+    let listing;
+    try { listing = await adapter.list(dir); } catch (_e) { return out; }
+    for (const f of (listing.files || [])) {
+      if (/\/ToDo-\d{4}-\d{2}-\d{2}\.md$/.test(f)) out.push(f);
+    }
+    for (const sub of (listing.folders || [])) {
+      const nested = await _walkDailies(sub);
+      out.push(...nested);
+    }
+    return out;
+  }
+
+  const dailies = await _walkDailies(TODO_ROOT);
+  if (!dailies.length) {
+    history?.push({ event: "info", step: "applyRecurringSentinelV070Migration",
+      healed: 0, errors: [], skipped_reason: "no daily to-do notes found",
+      git_commit: (git && git.commit), git_tag: (git && git.tag), git_dirty: (git && git.dirty),
+      completed_at: new Date().toISOString() });
+    return;
+  }
+
+  // Match a legacy date-only sentinel: `<!-- recurring-materialized-YYYY-MM-DD -->`.
+  // The new form carries a `:` after the date — explicitly excluded.
+  const LEGACY_RE = /<!-- recurring-materialized-(\d{4}-\d{2}-\d{2}) -->/g;
+
+  let healed = 0;
+  const errors = [];
+  const ts = new Date().toISOString().replace(/[:.]/g, '-');
+  for (const path of dailies) {
+    let content;
+    try { content = await adapter.read(path); }
+    catch (e) { errors.push({ path, error: e && e.message }); continue; }
+    if (!/<!-- recurring-materialized-/.test(content)) continue;
+    // Already in new form? Skip.
+    if (/<!-- recurring-materialized-\d{4}-\d{2}-\d{2}:/.test(content)) continue;
+    const updated = content.replace(LEGACY_RE, '<!-- recurring-materialized-$1: -->');
+    if (updated === content) continue;
+    try {
+      // .sauce-backup snapshot first; tolerate adapters that don't expose mkdir.
+      const backupDir = `.sauce-backup/${ts}/${path.split('/').slice(0, -1).join('/')}`;
+      const backupPath = `.sauce-backup/${ts}/${path}`;
+      if (typeof adapter.mkdir === 'function') {
+        try { await adapter.mkdir(backupDir); } catch (_e) { /* tolerate */ }
+      }
+      try { await adapter.write(backupPath, content); } catch (_e) { /* tolerate */ }
+      await adapter.write(path, updated);
+      healed++;
+    } catch (e) {
+      errors.push({ path, error: e && e.message });
+    }
+  }
+
+  history?.push({ event: "info", step: "applyRecurringSentinelV070Migration",
+    healed, errors,
+    git_commit: (git && git.commit), git_tag: (git && git.tag), git_dirty: (git && git.dirty),
+    completed_at: new Date().toISOString() });
+
+  if (errors.length) {
+    throw new Error(`applyRecurringSentinelV070Migration: ${errors.length} file(s) failed; first: ${errors[0].path} — ${errors[0].error}`);
+  }
 }
 
 // applyProjectTodoBackfill — v0.116.0. Creates `spice/projects/<slug>/<Name> To-Do.md`
@@ -12461,6 +12548,8 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     // v0.116.0 — to-do blueprint v0.4.0 migrations.
     module.exports.applyToDoBlueprintMigration = applyToDoBlueprintMigration;
     module.exports.applyProjectTodoBackfill = applyProjectTodoBackfill;
+    // v0.119.0 — to-do v0.7.0 additive recurring sentinel heal.
+    module.exports.applyRecurringSentinelV070Migration = applyRecurringSentinelV070Migration;
     //
     // CF-2: by default, capture run-install.js's stdio (Phase B/C surfaced
     // 2200-line JSON dumps mixed into the user's terminal). We tee the

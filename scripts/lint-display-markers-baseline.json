@@ -1,0 +1,299 @@
+{
+  "warnings": [
+    {
+      "file": "platform/mechanisms/kanban-status-sync/kanban-status-sync.js",
+      "line": 150,
+      "snippet": "* - A column is a depth-2 heading: `## ColumnName`."
+    },
+    {
+      "file": "platform/mechanisms/cowork-reconciler/reconciler-log.js",
+      "line": 18,
+      "snippet": "const lines = [`## ${ts} (run-id: rl-${timestamp.getTime()})`];"
+    },
+    {
+      "file": "platform/mechanisms/cowork-reconciler/reconciler-log.js",
+      "line": 45,
+      "snippet": "const sections = content.split(/^## /m).slice(1);"
+    },
+    {
+      "file": "platform/mechanisms/cowork-reconciler/reconciler-log.js",
+      "line": 46,
+      "snippet": "for (const s of sections) entries.push({ body: `## ${s}`.trimEnd() });"
+    },
+    {
+      "file": "platform/mechanisms/audit/audit-walker.js",
+      "line": 74,
+      "snippet": "\"## Platform drift\","
+    },
+    {
+      "file": "platform/mechanisms/audit/audit-walker.js",
+      "line": 84,
+      "snippet": "lines.push(\"\", \"## Violations summary\", \"\");"
+    },
+    {
+      "file": "platform/mechanisms/audit/audit-walker.js",
+      "line": 92,
+      "snippet": "lines.push(\"\", \"## Violations by file\", \"\");"
+    },
+    {
+      "file": "platform/cli/cmd-audit.js",
+      "line": 106,
+      "snippet": "lines.push(`## ${sev} (${rows.length})`);"
+    },
+    {
+      "file": "platform/cli/cmd-audit.js",
+      "line": 135,
+      "snippet": "lines.push(`## ${sev} (${rows.length})`);"
+    },
+    {
+      "file": "platform/cli/cmd-audit.js",
+      "line": 167,
+      "snippet": "lines.push(`## ${sev} (${rows.length})`);"
+    },
+    {
+      "file": "platform/cli/cmd-migrate-frontmatter.js",
+      "line": 610,
+      "snippet": "lines.push(\"## Summary\");"
+    },
+    {
+      "file": "platform/cli/cmd-migrate-frontmatter.js",
+      "line": 616,
+      "snippet": "lines.push(\"## By blueprint\");"
+    },
+    {
+      "file": "platform/cli/cmd-migrate-frontmatter.js",
+      "line": 624,
+      "snippet": "lines.push(\"## Proposed changes by file\");"
+    },
+    {
+      "file": "platform/blueprints/to-do/helpers/task-parser.js",
+      "line": 20,
+      "snippet": "*   - If a `## Tasks` heading exists, scan only between it and the next `## ` heading or EOF."
+    },
+    {
+      "file": "platform/blueprints/to-do/helpers/task-parser.js",
+      "line": 50,
+      "snippet": "if (lines[i].trim() === '## Tasks') {"
+    },
+    {
+      "file": "platform/blueprints/to-do/helpers/task-parser.js",
+      "line": 69,
+      "snippet": "if (/^## /.test(lines[i])) {"
+    },
+    {
+      "file": "platform/blueprints/to-do/helpers/todo-all-list.js",
+      "line": 4,
+      "snippet": "* date desc, each group rendered as `## YYYY-MM-DD` heading + linked task"
+    },
+    {
+      "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
+      "line": 520,
+      "snippet": "if (payload.mode === 'recurring') heading = '## Recurring Tasks';"
+    },
+    {
+      "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
+      "line": 521,
+      "snippet": "else if (payload.destination && payload.destination.type === 'project') heading = '## Owned Tasks';"
+    },
+    {
+      "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
+      "line": 522,
+      "snippet": "else heading = '## Today';"
+    },
+    {
+      "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
+      "line": 557,
+      "snippet": "'## Recurring Tasks',"
+    },
+    {
+      "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
+      "line": 572,
+      "snippet": "'## Owned Tasks',"
+    },
+    {
+      "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
+      "line": 574,
+      "snippet": "'## From Meetings',"
+    },
+    {
+      "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
+      "line": 586,
+      "snippet": "\"## Today's Capture\","
+    },
+    {
+      "file": "platform/blueprints/to-do/helpers/todo-daily-carryover.js",
+      "line": 7,
+      "snippet": "* `## Carryover (from YYYY-MM-DD)` in today's daily after the"
+    },
+    {
+      "file": "platform/blueprints/to-do/helpers/todo-daily-carryover.js",
+      "line": 162,
+      "snippet": "if (lines[i].trim() === '## Tasks') { tasksStart = i + 1; break; }"
+    },
+    {
+      "file": "platform/blueprints/to-do/helpers/todo-daily-carryover.js",
+      "line": 174,
+      "snippet": "if (/^## /.test(lines[i])) { tasksEnd = i; break; }"
+    },
+    {
+      "file": "platform/blueprints/to-do/helpers/todo-daily-recurring.js",
+      "line": 5,
+      "snippet": "* `## Recurring Tasks` heading; evaluates each entry's recurrence against today;"
+    },
+    {
+      "file": "platform/blueprints/to-do/helpers/todo-daily-recurring.js",
+      "line": 9,
+      "snippet": "* `## Last 7 days of materialization` table (cap 50 rows)."
+    },
+    {
+      "file": "platform/blueprints/to-do/helpers/todo-daily-recurring.js",
+      "line": 15,
+      "snippet": "* materialize into `## Recurring Today` like everyone else; the project tag is"
+    },
+    {
+      "file": "platform/blueprints/to-do/helpers/todo-daily-recurring.js",
+      "line": 177,
+      "snippet": "if (/^## Recurring Tasks/.test(line) ||"
+    },
+    {
+      "file": "platform/blueprints/to-do/helpers/todo-daily-recurring.js",
+      "line": 182,
+      "snippet": "if (inRecurring && (/^## /.test(line) ||"
+    },
+    {
+      "file": "platform/blueprints/to-do/helpers/todo-daily-recurring.js",
+      "line": 439,
+      "snippet": "const h2 = registryContent.indexOf('## Last 7 days of materialization');"
+    },
+    {
+      "file": "platform/blueprints/project/helpers/project-workstream-manager.js",
+      "line": 36,
+      "snippet": "if (line.startsWith(\"## \")) {"
+    },
+    {
+      "file": "platform/blueprints/project/helpers/project-workstream-manager.js",
+      "line": 37,
+      "snippet": "currentLane = line.replace(\"## \", \"\").trim();"
+    },
+    {
+      "file": "platform/blueprints/project/helpers/project-workstreams.js",
+      "line": 48,
+      "snippet": "if (line.startsWith(\"## \")) lane = line.replace(\"## \", \"\").trim();"
+    },
+    {
+      "file": "platform/blueprints/project/helpers/projects-hub-cards.js",
+      "line": 217,
+      "snippet": "if (line.startsWith(\"## \")) lane = line.replace(\"## \", \"\").trim();"
+    },
+    {
+      "file": "platform/blueprints/daily/helpers/space-daily-dashboard.js",
+      "line": 1080,
+      "snippet": "*   2. Fallback: `## Attendees` body section with `- [[Name]]` bullets."
+    },
+    {
+      "file": "platform/blueprints/daily/helpers/space-daily-dashboard.js",
+      "line": 1083,
+      "snippet": "*   - `## Notes` heading with >5 chars of content → true."
+    },
+    {
+      "file": "platform/blueprints/cowork/helpers/compose-scheduled-job-wrappers-helper.js",
+      "line": 389,
+      "snippet": "`## ${sectionIndex} — DISABLED — cowork-${cad}-${engagement.id}\\n` +"
+    },
+    {
+      "file": "platform/blueprints/cowork/helpers/compose-scheduled-job-wrappers-helper.js",
+      "line": 425,
+      "snippet": "`## ${sectionIndex} — cowork-${cad}-${engagement.id} (${cadDef.schedule_hint})\\n` +"
+    },
+    {
+      "file": "platform/blueprints/cowork/helpers/compose-scheduled-job-wrappers-helper.js",
+      "line": 488,
+      "snippet": "const sectionRx = /^## (\\w+)\\s*$/gm;"
+    },
+    {
+      "file": "platform/blueprints/cowork/helpers/cowork-lens-shift-cards.js",
+      "line": 5,
+      "snippet": "* comparison cards on Daily Hub's \"## Lens-shift companions\" section."
+    },
+    {
+      "file": "platform/blueprints/cowork/helpers/discover-people-helper.js",
+      "line": 497,
+      "snippet": "lines.push(\"## Applied\");"
+    },
+    {
+      "file": "platform/blueprints/cowork/helpers/discover-people-helper.js",
+      "line": 502,
+      "snippet": "lines.push(\"## Skipped\");"
+    },
+    {
+      "file": "platform/blueprints/cowork/helpers/discover-people-helper.js",
+      "line": 507,
+      "snippet": "lines.push(\"## Sources scanned\");"
+    },
+    {
+      "file": "platform/blueprints/cowork/helpers/edit-microscope-helper.js",
+      "line": 48,
+      "snippet": "sections.push(\"## What matters\");"
+    },
+    {
+      "file": "platform/blueprints/cowork/helpers/edit-microscope-helper.js",
+      "line": 55,
+      "snippet": "sections.push(\"## Tools & how to use them\");"
+    },
+    {
+      "file": "platform/blueprints/cowork/helpers/edit-microscope-helper.js",
+      "line": 59,
+      "snippet": "sections.push(\"## Gaps & handling\");"
+    },
+    {
+      "file": "platform/blueprints/cowork/helpers/edit-microscope-helper.js",
+      "line": 69,
+      "snippet": "sections.push(\"## Output shape\");"
+    },
+    {
+      "file": "platform/blueprints/cowork/helpers/edit-microscope-helper.js",
+      "line": 75,
+      "snippet": "sections.push(\"## References\");"
+    },
+    {
+      "file": "platform/blueprints/cowork/helpers/edit-microscope-helper.js",
+      "line": 88,
+      "snippet": "(whatMatters ? `## What matters (added)\\n${whatMatters}\\n` : \"\") +"
+    },
+    {
+      "file": "platform/blueprints/cowork/helpers/find-missing-people-helper.js",
+      "line": 180,
+      "snippet": "lines.push(\"## Applied (new person-note stubs created)\");"
+    },
+    {
+      "file": "platform/blueprints/cowork/helpers/find-missing-people-helper.js",
+      "line": 185,
+      "snippet": "lines.push(\"## Skipped\");"
+    },
+    {
+      "file": "platform/blueprints/cowork/helpers/ingest-feedback-helper.js",
+      "line": 459,
+      "snippet": "`## ${o.day} (run-id: ${o.run_id})`,"
+    },
+    {
+      "file": "platform/audit/report.js",
+      "line": 75,
+      "snippet": "lines.push(\"## Summary\");"
+    },
+    {
+      "file": "platform/audit/report.js",
+      "line": 89,
+      "snippet": "lines.push(\"## Untracked top-level directories\");"
+    },
+    {
+      "file": "platform/audit/report.js",
+      "line": 107,
+      "snippet": "lines.push(\"## Violations by blueprint\");"
+    },
+    {
+      "file": "platform/audit/report.js",
+      "line": 140,
+      "snippet": "lines.push(\"## Warnings\");"
+    }
+  ]
+}

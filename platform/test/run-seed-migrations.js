@@ -553,6 +553,67 @@ async function runMigrateFamily() {
                 "one or more files mutated on second invocation"
             );
         }
+
+        // ===== HC-V0119-MIGRATE — applyRecurringSentinelV070Migration =====
+        // Stamp a fresh daily with a LEGACY date-only sentinel into the same tmp
+        // vault, run the new migration directly, and assert the heal +
+        // idempotency contract.
+        {
+            const { applyRecurringSentinelV070Migration } = require("../install.js");
+
+            const F_LEGACY = `${DAY_DIR}/ToDo-2026-06-16.md`;
+            const LEGACY_BODY = [
+                "---", "type: to-do", "---",
+                "<!-- recurring-materialized-2026-06-16 -->",
+                "",
+                "body",
+                "",
+            ].join("\n");
+            writeFixture(F_LEGACY, LEGACY_BODY);
+
+            const history2 = [];
+            await applyRecurringSentinelV070Migration(tp, { name: "to-do" }, variables, history2, git);
+
+            const updated = readVault(F_LEGACY);
+            ok(
+                "HC-V0119-MIGRATE-1 legacy date-only sentinel rewritten to empty-set form",
+                /<!-- recurring-materialized-2026-06-16: -->/.test(updated),
+                `got:\n${updated}`
+            );
+            ok(
+                "HC-V0119-MIGRATE-2 no leftover date-only sentinel",
+                !/<!-- recurring-materialized-2026-06-16 -->/.test(updated),
+                `got:\n${updated}`
+            );
+            // Note: the earlier applyToDoBlueprintMigration test also seeded
+            // a date-only sentinel fixture (F_SENTINEL) which this migration
+            // legitimately heals — so healed >= 1 is the assertion.
+            ok(
+                "HC-V0119-MIGRATE-3 history records healed >= 1 (F_LEGACY at minimum)",
+                history2.length > 0 && history2[0].healed >= 1,
+                `got history2=${JSON.stringify(history2)}`
+            );
+            ok(
+                "HC-V0119-MIGRATE-4 history records empty errors[]",
+                history2.length > 0 && Array.isArray(history2[0].errors) && history2[0].errors.length === 0,
+                `got errors=${JSON.stringify(history2[0] && history2[0].errors)}`
+            );
+
+            // Idempotency: a second invocation must heal nothing (file already in new form).
+            const beforeSecond = readVault(F_LEGACY);
+            const history3 = [];
+            await applyRecurringSentinelV070Migration(tp, { name: "to-do" }, variables, history3, git);
+            const afterSecond = readVault(F_LEGACY);
+            ok(
+                "HC-V0119-MIGRATE-5 second invocation healed=0 (idempotent)",
+                history3.length > 0 && history3[0].healed === 0,
+                `got history3=${JSON.stringify(history3)}`
+            );
+            ok(
+                "HC-V0119-MIGRATE-6 second invocation leaves file byte-identical",
+                beforeSecond === afterSecond
+            );
+        }
     } finally {
         if (KEEP) {
             console.log(`  KEEP_SEED_VAULT=1: ${migRoot}`);

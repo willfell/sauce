@@ -46,19 +46,27 @@ class ToDoDailyRecurring {
             const todayFile = vault.getAbstractFileByPath(todayPath);
             if (!todayFile) return;
             const todayContent = await vault.read(todayFile);
-            if (ToDoDailyRecurring.hasSentinel(todayContent)) return;
+
+            // Parse existing sentinel: hashes set may be empty (legacy date-only, empty, or absent).
+            const sentinelState = ToDoDailyRecurring.parseSentinel(todayContent);
+            const startingHashes = new Set(sentinelState.hashes);
 
             const registryPath = 'spice/to-do/Recurring Tasks.md';
             const registryFile = vault.getAbstractFileByPath(registryPath);
             if (!registryFile) {
-                const updated = ToDoDailyRecurring.writeSentinel(todayContent, todayStr);
-                await vault.modify(todayFile, updated);
+                // No registry, nothing to materialize. Still write the sentinel
+                // (preserves "we've run today" semantic; empty set form).
+                const updated = ToDoDailyRecurring.writeSentinel(todayContent, todayStr, startingHashes);
+                if (updated !== todayContent) {
+                    await vault.modify(todayFile, updated);
+                }
                 return;
             }
             const registryContent = await vault.read(registryFile);
             const entries = ToDoDailyRecurring.parseRegistry(registryContent);
             const registryCreatedAt = ToDoDailyRecurring._extractRegistryCreatedAt(registryContent);
 
+            const newHashes = new Set(startingHashes);
             const materialized = [];
             const auditRows = [];
             for (const entry of entries) {
@@ -74,13 +82,24 @@ class ToDoDailyRecurring {
                     }
                     continue;
                 }
-                materialized.push(ToDoDailyRecurring.materializeLineFromEntry(entry));
+                const line = ToDoDailyRecurring.materializeLineFromEntry(entry);
+                const hash = ToDoDailyRecurring.hashEntry(line);
+                if (newHashes.has(hash)) continue;   // already materialized into this daily
+                newHashes.add(hash);
+                materialized.push(line);
                 const route = entry.project ? `ToDo-${todayStr}.md (${entry.project})` : `ToDo-${todayStr}.md`;
                 auditRows.push({ date: todayStr, title: entry.title, route });
             }
 
+            // Idempotency: if no new materializations AND sentinel already present
+            // in the new form on the correct date, skip both file writes.
+            const sentinelUpToDate = sentinelState.present
+                && sentinelState.date === todayStr
+                && newHashes.size === startingHashes.size;
+            if (materialized.length === 0 && sentinelUpToDate) return;
+
             let newToday = ToDoDailyRecurring.insertRecurringIntoToday(todayContent, materialized);
-            newToday = ToDoDailyRecurring.writeSentinel(newToday, todayStr);
+            newToday = ToDoDailyRecurring.writeSentinel(newToday, todayStr, newHashes);
 
             let newRegistry = registryContent;
             for (const row of auditRows) {
@@ -278,27 +297,90 @@ class ToDoDailyRecurring {
         return todayContent.replace(/\n+$/, '') + '\n' + block + '\n';
     }
 
-    static hasSentinel(content) {
-        return /<!-- recurring-materialized-[^>]+ -->/.test(content);
+    // ---------- Sentinel (v0.7.0 additive) ----------
+    //
+    // Schema:
+    //   Date-only (legacy, pre-v0.7.0):
+    //     <!-- recurring-materialized-2026-06-16 -->
+    //   New (v0.7.0+):
+    //     <!-- recurring-materialized-2026-06-16: a1b2c3d,e4f5g6h -->
+    //     <!-- recurring-materialized-2026-06-16: -->         (empty set; "we've run today, materialized nothing")
+    //
+    // The set is the union of 7-char sha1 prefixes of normalized registry-entry lines
+    // that have already been materialized into THIS daily note. On every render,
+    // ToDoDailyRecurring computes hashes for currently-matching registry entries,
+    // materializes those not in the set, and rewrites the sentinel with the new union.
+    // Legacy date-only sentinels are treated as empty-set on read (re-runs once,
+    // then writes the new form). This fixes the "mid-day-added recurring task
+    // blind forever" bug (v0.118.1 postmortem item #5).
+
+    static SENTINEL_RE = /<!-- recurring-materialized-([0-9-]+)(?::\s*([^>]*?))?\s*-->/;
+
+    static parseSentinel(content) {
+        const m = ToDoDailyRecurring.SENTINEL_RE.exec(content);
+        if (!m) return { present: false, date: null, hashes: new Set() };
+        const date = m[1];
+        const payload = (m[2] || '').trim();
+        const hashes = new Set(payload ? payload.split(',').map(h => h.trim()).filter(Boolean) : []);
+        return { present: true, date, hashes };
     }
 
-    static writeSentinel(content, dateStr) {
-        // Sentinel lives OUTSIDE the frontmatter (HTML comment immediately AFTER the closing `---`).
-        // v0.117.1 fix: previously placed inside the frontmatter block which broke YAML parsing.
+    static formatSentinel(date, hashes) {
+        const list = Array.from(hashes).sort().join(',');
+        // Note: even with an empty set we always emit the `: ` form (no trailing
+        // space-pair) so the new schema is detectable on read and we never collide
+        // with the legacy date-only form.
+        return list
+            ? `<!-- recurring-materialized-${date}: ${list} -->`
+            : `<!-- recurring-materialized-${date}: -->`;
+    }
+
+    static hashEntry(line) {
+        // Stable 7-char sha1 prefix of the registry entry line, normalized.
+        // Used as the per-task identity key in the sentinel set.
+        const crypto = (typeof require === 'function')
+            ? require('crypto')
+            : null;
+        const normalized = String(line || '').replace(/\s+/g, ' ').trim();
+        if (crypto) {
+            return crypto.createHash('sha1').update(normalized, 'utf8').digest('hex').slice(0, 7);
+        }
+        // Browser/Obsidian fallback: simple DJB2-style hash (deterministic, 7-hex).
+        let h = 5381;
+        for (let i = 0; i < normalized.length; i++) {
+            h = ((h << 5) + h + normalized.charCodeAt(i)) | 0;
+        }
+        const hex = (h >>> 0).toString(16);
+        return ('0000000' + hex).slice(-7);
+    }
+
+    static hasSentinel(content) {
+        // Backwards-compat shim; preserved because seed-migration code + a couple
+        // of legacy callsites still check for "any sentinel present". The v0.7.0
+        // render path uses parseSentinel directly.
+        return ToDoDailyRecurring.SENTINEL_RE.test(content);
+    }
+
+    static writeSentinel(content, dateStr, hashes) {
+        // Sentinel lives OUTSIDE the frontmatter (HTML comment immediately AFTER
+        // the closing `---`). v0.7.0: accepts a Set/Array of hashes; emits the
+        // new comma-separated form even when empty.
+        const set = (hashes instanceof Set) ? hashes : new Set(Array.isArray(hashes) ? hashes : []);
+        const sentinelLine = ToDoDailyRecurring.formatSentinel(dateStr, set);
         const lines = content.split('\n');
         if (lines[0] !== '---') {
-            return `<!-- recurring-materialized-${dateStr} -->\n` + content;
+            return sentinelLine + '\n' + content;
         }
         let closeIdx = -1;
         for (let i = 1; i < lines.length; i++) {
             if (lines[i] === '---') { closeIdx = i; break; }
         }
         if (closeIdx === -1) {
-            return `<!-- recurring-materialized-${dateStr} -->\n` + content;
+            return sentinelLine + '\n' + content;
         }
         const fmRegion = lines.slice(0, closeIdx + 1).filter(l => !/^<!-- recurring-materialized-/.test(l));
         const after = lines.slice(closeIdx + 1).filter(l => !/^<!-- recurring-materialized-/.test(l));
-        return fmRegion.concat([`<!-- recurring-materialized-${dateStr} -->`], after).join('\n');
+        return fmRegion.concat([sentinelLine], after).join('\n');
     }
 
     static appendAuditRow(registryContent, row) {
