@@ -25,6 +25,10 @@
     {
       "folder": "spice/scratch",
       "template": "ranch/templates/Scratch.md"
+    },
+    {
+      "folder": "spice/to-do",
+      "template": "ranch/templates/Today To-Do.md"
     }
   ],
   "enable_file_templates": false,

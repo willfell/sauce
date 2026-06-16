@@ -1,0 +1,19 @@
+{
+  "contributions": {
+    "to-do": [
+      {
+        "scope": {
+          "path_glob": "spice/to-do/Recurring Tasks.md"
+        },
+        "extends": "_canonical-vocab",
+        "required_frontmatter": {
+          "type": {
+            "required": true,
+            "type": "string",
+            "equals": "to-do-recurring"
+          }
+        }
+      }
+    ]
+  }
+}
