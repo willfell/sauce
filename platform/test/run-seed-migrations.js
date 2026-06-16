@@ -335,11 +335,248 @@ withTempVault((vault) => {
     }
 });
 
-console.log("");
-console.log(`Tests: ${pass}/${pass + fail}`);
-if (fail > 0) {
-    console.log(`Failures:`);
-    for (const f of failures) console.log(`  ${f}`);
-    process.exit(1);
+// =============================================================================
+// HC-V01174-MIGRATE-* — direct applyToDoBlueprintMigration coverage.
+//
+// Self-contained, independent of the seed-based families above. The seed
+// install short-circuits on version match, so seed anchors are NOT migrated
+// this cycle — instead we DIRECTLY INVOKE the exported migration against a
+// throwaway tmp vault and assert the real end-state. This makes the coverage
+// permanent regardless of the seed's installed-version state.
+//
+// The function reshapes consumer to-do notes across the v0.116.0 -> v0.117.3
+// arc: v0.3.3-shape daily -> 5-block v0.5.0 body; v0.4.0-shape daily ->
+// SectionLabel "Today" injected; misplaced frontmatter sentinels healed;
+// orphan `## Today` H2 stripped; project-todo `## Owned Tasks` H2 -> SectionLabel.
+// =============================================================================
+async function runMigrateFamily() {
+    const { applyToDoBlueprintMigration } = require("../install.js");
+
+    // Thin fs-backed adapter over a tmp vault root. Every relPath (vault-relative)
+    // maps to path.join(root, relPath). list() returns entries as `dir + "/" + name`.
+    function makeAdapter(root) {
+        const abs = (rel) => path.join(root, rel);
+        return {
+            async exists(rel) { return fs.existsSync(abs(rel)); },
+            async list(rel) {
+                const dir = abs(rel);
+                if (!fs.existsSync(dir)) return { files: [], folders: [] };
+                const ents = fs.readdirSync(dir, { withFileTypes: true });
+                const files = [], folders = [];
+                for (const e of ents) {
+                    const child = rel + "/" + e.name;
+                    if (e.isDirectory()) folders.push(child);
+                    else files.push(child);
+                }
+                return { files, folders };
+            },
+            async read(rel) { return fs.readFileSync(abs(rel), "utf8"); },
+            async write(rel, content) {
+                const f = abs(rel);
+                fs.mkdirSync(path.dirname(f), { recursive: true });
+                fs.writeFileSync(f, content);
+            },
+            async mkdir(rel) { fs.mkdirSync(abs(rel), { recursive: true }); },
+        };
+    }
+
+    // dataviewjs block matching the real to-do templates' customjs-guard form.
+    const dv = (cls, args) =>
+        '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "' + cls + '"' +
+        (args ? ', args: ' + args : '') + ' });\n```';
+
+    const migRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-todo-mig-"));
+    const writeFixture = (rel, content) => {
+        const f = path.join(migRoot, rel);
+        fs.mkdirSync(path.dirname(f), { recursive: true });
+        fs.writeFileSync(f, content);
+    };
+
+    // Daily fixtures live under a YYYY/MM-Month subtree so _walkToDos recurses.
+    const DAY_DIR = "spice/to-do/2026/06-June";
+    const F_V033 = `${DAY_DIR}/ToDo-2026-06-01.md`;
+    const F_V040 = `${DAY_DIR}/ToDo-2026-06-02.md`;
+    const F_SENTINEL = `${DAY_DIR}/ToDo-2026-06-03.md`;
+    const F_ORPHAN = `${DAY_DIR}/ToDo-2026-06-04.md`;
+    const F_PROJ = "spice/projects/seed-project/Seed Project To-Do.md";
+
+    try {
+        // 1. v0.3.3 shape: SpaceNavButtons + ToDoLeafActions, NO ToDoDailyCarryover.
+        writeFixture(F_V033, [
+            "---", "type: to-do", "---", "",
+            dv("SpaceNavButtons"), "",
+            dv("ToDoLeafActions"), "",
+            "- [ ] anchor v033 task", "",
+            "## Notes",
+            "<!-- some-note-sentinel keep me -->", "",
+        ].join("\n"));
+
+        // 2. v0.4.0 shape: has ToDoDailyCarryover but NO SectionLabel "Today".
+        writeFixture(F_V040, [
+            "---", "type: to-do", "---", "",
+            dv("SpaceNavButtons"), "",
+            dv("ToDoLeafActions"), "",
+            dv("ToDoDailyCarryover"), "",
+            dv("ToDoDailyRecurring"), "",
+            "- [ ] anchor v040 task", "",
+        ].join("\n"));
+
+        // 3. Misplaced sentinel INSIDE frontmatter (between the two `---`).
+        writeFixture(F_SENTINEL, [
+            "---", "type: to-do",
+            "<!-- recurring-materialized-2026-06-03 -->",
+            "---", "",
+            dv("ToDoLeafActions"), "",
+            dv("SectionLabel", '[{ text: "Today", top: true }]'), "",
+            dv("ToDoDailyCarryover"), "",
+        ].join("\n"));
+
+        // 4. v0.4.0-ish body with an orphan `## Today` H2 near EOF.
+        writeFixture(F_ORPHAN, [
+            "---", "type: to-do", "---", "",
+            dv("ToDoLeafActions"), "",
+            dv("SectionLabel", '[{ text: "Today", top: true }]'), "",
+            dv("ToDoDailyCarryover"), "",
+            "- [ ] keep task", "",
+            "## Today", "",
+        ].join("\n"));
+
+        // 5. project-todo with `## Owned Tasks` (and `## From Meetings`) H2.
+        writeFixture(F_PROJ, [
+            "---", "type: project-todo", "---", "",
+            dv("ToDoLeafActions"), "",
+            "## Owned Tasks",
+            "- [ ] owned", "",
+            "## From Meetings", "",
+        ].join("\n"));
+
+        const adapter = makeAdapter(migRoot);
+        const tp = { app: { vault: { adapter } } };
+        // git is dereferenced (git.commit/.tag/.dirty) when a file is touched —
+        // null would throw, so pass a minimal stub. history is an array it pushes
+        // audit entries onto.
+        const git = { commit: "test", tag: "test", dirty: false };
+        const history = [];
+        const variables = { views_path: "ranch/views" };
+
+        const readVault = (rel) => fs.readFileSync(path.join(migRoot, rel), "utf8");
+
+        {
+            await applyToDoBlueprintMigration(tp, { name: "to-do" }, variables, history, git);
+
+            const v033 = readVault(F_V033);
+            const v040 = readVault(F_V040);
+            const sentinel = readVault(F_SENTINEL);
+            const orphan = readVault(F_ORPHAN);
+            const proj = readVault(F_PROJ);
+
+            // --- v0.3.3 daily: full reshape to 5-block v0.5.0 body ---
+            ok(
+                "HC-V01174-MIGRATE-1 v033 daily gained ToDoDailyCarryover block",
+                v033.includes('class: "ToDoDailyCarryover"')
+            );
+            // NOTE: the reshape emits SectionLabel "Today's Capture", but the v0.5.1
+            // cosmetic rename pass then converts it to "Today" — so the ACTUAL
+            // end-state text is "Today" (same as the v0.4.0 inject path; they do NOT differ).
+            ok(
+                "HC-V01174-MIGRATE-2 v033 daily SectionLabel text is \"Today\" (post-rename)",
+                /class: "SectionLabel"[^`]*text:\s*"Today"/.test(v033),
+                `body=${v033.slice(0, 400)}`
+            );
+            ok(
+                "HC-V01174-MIGRATE-3 v033 daily preserves anchor task line",
+                v033.includes("- [ ] anchor v033 task")
+            );
+            ok(
+                "HC-V01174-MIGRATE-4 v033 daily preserves ## Notes + its sentinel",
+                v033.includes("## Notes") && v033.includes("<!-- some-note-sentinel keep me -->")
+            );
+
+            // --- v0.4.0 daily: SectionLabel "Today" injected ---
+            ok(
+                "HC-V01174-MIGRATE-5 v040 daily gained SectionLabel \"Today\" block",
+                /class: "SectionLabel"[^`]*Today/.test(v040)
+            );
+            ok(
+                "HC-V01174-MIGRATE-6 v040 daily preserves anchor task line",
+                v040.includes("- [ ] anchor v040 task")
+            );
+
+            // --- sentinel daily: misplaced sentinel relocated after closing `---` ---
+            const sLines = sentinel.split("\n");
+            let secondDash = -1, dashCount = 0;
+            for (let i = 0; i < sLines.length; i++) {
+                if (sLines[i] === "---") { dashCount++; if (dashCount === 2) { secondDash = i; break; } }
+            }
+            const sentLine = sLines.findIndex((l) => l.includes("recurring-materialized"));
+            ok(
+                "HC-V01174-MIGRATE-7 sentinel daily frontmatter valid (opens + closes with ---)",
+                sLines[0] === "---" && secondDash > 0
+            );
+            ok(
+                "HC-V01174-MIGRATE-8 sentinel no longer inside frontmatter (sits after closing ---)",
+                sentLine > secondDash,
+                `secondDash=${secondDash} sentLine=${sentLine}`
+            );
+            ok(
+                "HC-V01174-MIGRATE-9 sentinel: no recurring-materialized line before closing ---",
+                !sLines.slice(0, secondDash + 1).some((l) => l.includes("recurring-materialized"))
+            );
+
+            // --- orphan-H2 daily: standalone `## Today` removed ---
+            ok(
+                "HC-V01174-MIGRATE-10 orphan daily: raw \"## Today\" H2 gone",
+                !/^## Today\s*$/m.test(orphan)
+            );
+            ok(
+                "HC-V01174-MIGRATE-11 orphan daily: task line still present",
+                orphan.includes("- [ ] keep task")
+            );
+
+            // --- project-todo: ## Owned Tasks H2 -> SectionLabel block ---
+            ok(
+                "HC-V01174-MIGRATE-12 project-todo: raw \"## Owned Tasks\" H2 gone",
+                !/^## Owned Tasks\s*$/m.test(proj)
+            );
+            ok(
+                "HC-V01174-MIGRATE-13 project-todo: SectionLabel \"Owned Tasks\" block present",
+                /class: "SectionLabel"[^`]*text:\s*"Owned Tasks"/.test(proj)
+            );
+
+            // --- idempotency: a 2nd invocation is a no-op (byte-identical) ---
+            const before2 = [F_V033, F_V040, F_SENTINEL, F_ORPHAN, F_PROJ].map(readVault);
+            await applyToDoBlueprintMigration(tp, { name: "to-do" }, variables, history, git);
+            const after2 = [F_V033, F_V040, F_SENTINEL, F_ORPHAN, F_PROJ].map(readVault);
+            ok(
+                "HC-V01174-MIGRATE-14 idempotent: 2nd invocation leaves all 5 files byte-identical",
+                before2.every((b, i) => b === after2[i]),
+                "one or more files mutated on second invocation"
+            );
+        }
+    } finally {
+        if (KEEP) {
+            console.log(`  KEEP_SEED_VAULT=1: ${migRoot}`);
+        } else {
+            try { fs.rmSync(migRoot, { recursive: true, force: true }); } catch (e) {}
+        }
+    }
 }
-process.exit(0);
+
+// The MIGRATE family is async (the migration is async). Run it to completion,
+// then emit the final tally + exit code so its asserts are counted.
+runMigrateFamily()
+    .catch((e) => {
+        console.log(`  FAIL HC-V01174-MIGRATE-FAMILY threw — ${e && e.message}`);
+        fail++;
+        failures.push("HC-V01174-MIGRATE-FAMILY");
+    })
+    .finally(() => {
+        console.log("");
+        console.log(`Tests: ${pass}/${pass + fail}`);
+        if (fail > 0) {
+            console.log(`Failures:`);
+            for (const f of failures) console.log(`  ${f}`);
+            process.exit(1);
+        }
+        process.exit(0);
+    });
