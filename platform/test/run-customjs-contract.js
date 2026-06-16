@@ -40,12 +40,12 @@ const SKIP_PATTERNS = [
     /Docs\/cycle-history\.md$/,                          // very large; can't contain real callsites
 ];
 
-function shouldSkip(file) {
+function shouldSkip(file, skipPatterns) {
     const rel = path.relative(REPO_ROOT, file);
-    return SKIP_PATTERNS.some(re => re.test(rel));
+    return (skipPatterns || SKIP_PATTERNS).some(re => re.test(rel));
 }
 
-function walkDir(dir, exts) {
+function walkDir(dir, exts, skipPatterns) {
     const out = [];
     const abs = path.join(REPO_ROOT, dir);
     if (!fs.existsSync(abs)) return out;
@@ -58,7 +58,7 @@ function walkDir(dir, exts) {
             const p = path.join(cur, e.name);
             if (e.isDirectory()) { stack.push(p); continue; }
             if (!exts.some(x => p.endsWith(x))) continue;
-            if (shouldSkip(p)) continue;
+            if (shouldSkip(p, skipPatterns)) continue;
             out.push(p);
         }
     }
@@ -141,13 +141,14 @@ function scan(opts) {
     opts = opts || {};
     const classRoots = opts.classRoots || CLASS_DIRS;
     const callsiteRoots = opts.callsiteRoots || CALLSITE_DIRS;
+    const skipPatterns = opts.skipPatterns || SKIP_PATTERNS;
 
     const classDefs = new Map();   // name → { file, members }
     const classDupes = new Map();  // name → [file1, file2]
     const callsites = [];
 
     for (const dir of classRoots) {
-        for (const f of walkDir(dir, ['.js'])) {
+        for (const f of walkDir(dir, ['.js'], skipPatterns)) {
             const src = fs.readFileSync(f, 'utf8');
             const found = parseClassMembers(src);
             for (const c of found) {
@@ -163,7 +164,7 @@ function scan(opts) {
     }
 
     for (const dir of callsiteRoots) {
-        for (const f of walkDir(dir, ['.js', '.md', '.json'])) {
+        for (const f of walkDir(dir, ['.js', '.md', '.json'], skipPatterns)) {
             const src = fs.readFileSync(f, 'utf8');
             const found = parseCallsites(src);
             for (const c of found) {
@@ -241,9 +242,14 @@ if (process.argv.includes('--self-test')) {
     const fixturesDir = 'platform/test/fixtures/customjs-contract';
 
     // Each fixture is scanned in isolation: scan the fixture as the only class root
-    // AND the only callsite root.
+    // AND the only callsite root. Override skipPatterns so the fixtures themselves
+    // aren't excluded by the default SKIP_PATTERNS list.
     function run(fixture) {
-        return scan({ classRoots: [`${fixturesDir}/${fixture}`], callsiteRoots: [`${fixturesDir}/${fixture}`] });
+        return scan({
+            classRoots: [`${fixturesDir}/${fixture}`],
+            callsiteRoots: [`${fixturesDir}/${fixture}`],
+            skipPatterns: [],
+        });
     }
 
     const cases = [
