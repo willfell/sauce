@@ -46,6 +46,42 @@ function withTempVault(fn) {
     }
 }
 
+// Thin fs-backed adapter over a tmp vault root. Every relPath (vault-relative)
+// maps to path.join(root, relPath). list() returns entries as `dir + "/" + name`.
+// Shared by every runMigrateFamily-style helper below — keep this the single
+// source of truth for the adapter contract so impl-2/impl-3 (and beyond) don't
+// each grow their own near-duplicate shim.
+function makeFsAdapter(root) {
+    const abs = (rel) => path.join(root, rel);
+    return {
+        async exists(rel) { return fs.existsSync(abs(rel)); },
+        async list(rel) {
+            const dir = abs(rel);
+            if (!fs.existsSync(dir)) return { files: [], folders: [] };
+            const ents = fs.readdirSync(dir, { withFileTypes: true });
+            const files = [], folders = [];
+            for (const e of ents) {
+                const child = rel + "/" + e.name;
+                if (e.isDirectory()) folders.push(child);
+                else files.push(child);
+            }
+            return { files, folders };
+        },
+        async read(rel) { return fs.readFileSync(abs(rel), "utf8"); },
+        async write(rel, content) {
+            const f = abs(rel);
+            fs.mkdirSync(path.dirname(f), { recursive: true });
+            fs.writeFileSync(f, content);
+        },
+        async mkdir(rel) { fs.mkdirSync(abs(rel), { recursive: true }); },
+        async remove(rel) {
+            try { fs.unlinkSync(abs(rel)); } catch (e) {
+                if (e && e.code !== "ENOENT") throw e;
+            }
+        },
+    };
+}
+
 // ----- main ------------------------------------------------------------------
 
 if (!fs.existsSync(SEED_DIR)) {
@@ -352,34 +388,6 @@ withTempVault((vault) => {
 async function runMigrateFamily() {
     const { applyToDoBlueprintMigration } = require("../install.js");
 
-    // Thin fs-backed adapter over a tmp vault root. Every relPath (vault-relative)
-    // maps to path.join(root, relPath). list() returns entries as `dir + "/" + name`.
-    function makeAdapter(root) {
-        const abs = (rel) => path.join(root, rel);
-        return {
-            async exists(rel) { return fs.existsSync(abs(rel)); },
-            async list(rel) {
-                const dir = abs(rel);
-                if (!fs.existsSync(dir)) return { files: [], folders: [] };
-                const ents = fs.readdirSync(dir, { withFileTypes: true });
-                const files = [], folders = [];
-                for (const e of ents) {
-                    const child = rel + "/" + e.name;
-                    if (e.isDirectory()) folders.push(child);
-                    else files.push(child);
-                }
-                return { files, folders };
-            },
-            async read(rel) { return fs.readFileSync(abs(rel), "utf8"); },
-            async write(rel, content) {
-                const f = abs(rel);
-                fs.mkdirSync(path.dirname(f), { recursive: true });
-                fs.writeFileSync(f, content);
-            },
-            async mkdir(rel) { fs.mkdirSync(abs(rel), { recursive: true }); },
-        };
-    }
-
     // dataviewjs block matching the real to-do templates' customjs-guard form.
     const dv = (cls, args) =>
         '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "' + cls + '"' +
@@ -450,7 +458,7 @@ async function runMigrateFamily() {
             "## From Meetings", "",
         ].join("\n"));
 
-        const adapter = makeAdapter(migRoot);
+        const adapter = makeFsAdapter(migRoot);
         const tp = { app: { vault: { adapter } } };
         // git is dereferenced (git.commit/.tag/.dirty) when a file is touched —
         // null would throw, so pass a minimal stub. history is an array it pushes
@@ -842,33 +850,6 @@ async function runProjectMigrateFamily() {
         applyProjectTodoBackfill,
     } = require("../install.js");
 
-    function makeAdapter(root) {
-        const abs = (rel) => path.join(root, rel);
-        return {
-            async exists(rel) { return fs.existsSync(abs(rel)); },
-            async list(rel) {
-                const dir = abs(rel);
-                if (!fs.existsSync(dir)) return { files: [], folders: [] };
-                const ents = fs.readdirSync(dir, { withFileTypes: true });
-                const files = [], folders = [];
-                for (const e of ents) {
-                    const child = rel + "/" + e.name;
-                    if (e.isDirectory()) folders.push(child);
-                    else files.push(child);
-                }
-                return { files, folders };
-            },
-            async read(rel) { return fs.readFileSync(abs(rel), "utf8"); },
-            async write(rel, content) {
-                const f = abs(rel);
-                fs.mkdirSync(path.dirname(f), { recursive: true });
-                fs.writeFileSync(f, content);
-            },
-            async mkdir(rel) { fs.mkdirSync(abs(rel), { recursive: true }); },
-            async remove(rel) { fs.unlinkSync(abs(rel)); },
-        };
-    }
-
     const projRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-proj-mig-"));
     try {
         const LEGACY_PROJ_DIR = "spice/projects/Legacy Project";
@@ -878,7 +859,7 @@ async function runProjectMigrateFamily() {
         // the asserts test the same pre-migration shape that the seed-vault carries.
         helpers.copyDir(SEED_LEGACY, path.join(projRoot, LEGACY_PROJ_DIR));
 
-        const adapter = makeAdapter(projRoot);
+        const adapter = makeFsAdapter(projRoot);
         const tp = { app: { vault: { adapter } } };
         const git = { commit: "test", tag: "test", dirty: false };
         const variables = { views_path: "ranch/views", vault_identity_tag: "seed-test-vault" };
