@@ -271,6 +271,65 @@ console.log('run-todo-materialize:');
     ok('REC-11 no-recurrence flagged invalid', e && e.invalid === true);
 })();
 
+// ---------- v0.7.0 additive sentinel (HC-V0119-SENT-A..D) ----------
+// Direct unit asserts for the four pure helpers introduced in v0.119.0 stage-1a:
+//   hashEntry, parseSentinel, formatSentinel, writeSentinel.
+// Repros the v0.118.1-postmortem bug-(b) blind-spot at the helper level.
+
+// HC-V0119-SENT-A: hashEntry is stable across whitespace variations + emits 7-char hex.
+(() => {
+    const h1 = ToDoDailyRecurring.hashEntry('- [ ] test recurring task [recurrence:: every day]');
+    const h2 = ToDoDailyRecurring.hashEntry('- [ ]  test recurring task   [recurrence:: every day]');
+    ok('HC-V0119-SENT-A hashEntry length 7', h1.length === 7, `got ${h1}`);
+    ok('HC-V0119-SENT-A hashEntry is hex', /^[0-9a-f]{7}$/.test(h1), `got ${h1}`);
+    ok('HC-V0119-SENT-A hashEntry whitespace-normalized stable', h1 === h2, `h1=${h1} h2=${h2}`);
+})();
+
+// HC-V0119-SENT-B: parseSentinel handles all four forms.
+(() => {
+    const legacy = ToDoDailyRecurring.parseSentinel('<!-- recurring-materialized-2026-06-16 -->');
+    ok('HC-V0119-SENT-B legacy present', legacy.present === true);
+    ok('HC-V0119-SENT-B legacy date', legacy.date === '2026-06-16', `got ${legacy.date}`);
+    ok('HC-V0119-SENT-B legacy hashes empty', legacy.hashes.size === 0);
+
+    const empty = ToDoDailyRecurring.parseSentinel('<!-- recurring-materialized-2026-06-16: -->');
+    ok('HC-V0119-SENT-B empty-set present', empty.present === true);
+    ok('HC-V0119-SENT-B empty-set hashes empty', empty.hashes.size === 0);
+
+    const populated = ToDoDailyRecurring.parseSentinel('<!-- recurring-materialized-2026-06-16: a1b2c3d,e4f5g6h -->');
+    ok('HC-V0119-SENT-B populated present', populated.present === true);
+    ok('HC-V0119-SENT-B populated has a1b2c3d', populated.hashes.has('a1b2c3d'));
+    ok('HC-V0119-SENT-B populated has e4f5g6h', populated.hashes.has('e4f5g6h'));
+
+    const absent = ToDoDailyRecurring.parseSentinel('no sentinel here');
+    ok('HC-V0119-SENT-B absent present=false', absent.present === false);
+    ok('HC-V0119-SENT-B absent hashes empty', absent.hashes.size === 0);
+})();
+
+// HC-V0119-SENT-C: formatSentinel round-trips through parseSentinel; empty set yields the `: -->` form.
+(() => {
+    const s = ToDoDailyRecurring.formatSentinel('2026-06-16', new Set(['a1b2c3d', 'e4f5g6h']));
+    const parsed = ToDoDailyRecurring.parseSentinel(s);
+    ok('HC-V0119-SENT-C round-trip a1b2c3d', parsed.hashes.has('a1b2c3d'));
+    ok('HC-V0119-SENT-C round-trip e4f5g6h', parsed.hashes.has('e4f5g6h'));
+
+    const empty = ToDoDailyRecurring.formatSentinel('2026-06-16', new Set());
+    ok('HC-V0119-SENT-C empty emits `: -->` form',
+        empty === '<!-- recurring-materialized-2026-06-16: -->', `got ${empty}`);
+})();
+
+// HC-V0119-SENT-D: writeSentinel replaces a legacy date-only sentinel without duplicating it.
+(() => {
+    const legacy = '---\ntype: to-do\n---\n<!-- recurring-materialized-2026-06-16 -->\n\nbody';
+    const updated = ToDoDailyRecurring.writeSentinel(legacy, '2026-06-16', new Set(['a1b2c3d']));
+    const parsed = ToDoDailyRecurring.parseSentinel(updated);
+    ok('HC-V0119-SENT-D sentinel present after rewrite', parsed.present === true);
+    ok('HC-V0119-SENT-D sentinel carries the new hash', parsed.hashes.has('a1b2c3d'));
+    const matches = updated.match(/recurring-materialized-/g);
+    ok('HC-V0119-SENT-D exactly one sentinel line (no dupes)',
+        matches && matches.length === 1, `got ${matches && matches.length} matches:\n${updated}`);
+})();
+
 // --- PG-1: _normalizeProjectName resolves every reference shape (v0.117.x) ---
 // Static helper called the same way the source references it.
 (() => {
