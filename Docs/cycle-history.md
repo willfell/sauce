@@ -2372,3 +2372,28 @@ See `Docs/plans/2026-06-15-v0.117.0-to-do-section-label-result.md` + `Docs/promp
 
 See `Docs/plans/2026-06-15-v0.117.4-todo-regression-net-design.md` + `Docs/plans/2026-06-15-v0.117.4-todo-regression-net-plan.md`.
 
+---
+
+## v0.118.0 recurring-task fix + flexible create CLOSED 2026-06-15
+
+**Workshop:** 0.117.4 → 0.118.0
+**Blueprints:** to-do 0.5.3 → **0.6.0** (MINOR); project 1.22.1 UNCHANGED
+
+**Headline:** Two independently valuable deliverables in one MINOR. (A) Fixes the +New Task dialog's Recurring-tab Create button never enabling — the real root cause, missed by v0.116.1's misdiagnosis. (B) Adds a searchable "Link a note" picker and an "Add link" label+URL control to both dialog tabs, letting tasks carry `[[Note Name]]` wikilinks or `[label](url)` hyperlinks verbatim in the task title.
+
+**Root cause (Part A):** The Obsidian customJS plugin stores **instances** under `window.customJS.<ClassName>`. `RecurrenceParser.isSupported` and `RecurrenceParser.matches` were declared `static`; on the stored instance they are `undefined`. Calling them threw `TypeError: …isSupported is not a function` inside `validatePayload()`, which aborted `updateSubmit()` before it could set `submit.disabled = false` — so the Create button stayed disabled forever on the Recurring tab regardless of input. v0.116.1 had (mis)diagnosed this as a closure-binding issue; the headless harness masked the real defect by never setting `customJS.RecurrenceParser` to an instance. Blast radius beyond the dialog: `ToDoDailyRecurring` called `customJS.RecurrenceParser.isSupported/matches` (recurring materialization threw live) and `ToDoDailyCarryover` called `customJS.TaskParser.parseTasks` (`TaskParser.parseTasks` is also static → carryover task-parsing threw live).
+
+**Fix (Part A):** Instance-method delegators on `RecurrenceParser` (`isSupported`, `matches`) and `TaskParser` (`parseTasks`) that forward to the statics (statics kept for internal `_parse` calls and Node harnesses). Defense-in-depth `try/catch` at all three consumer call sites (`validatePayload`, `ToDoDailyRecurring`, `ToDoDailyCarryover`) so a throwing or absent helper degrades gracefully instead of bricking the surface. A repo-wide sweep found no other `static`-on-customJS footguns.
+
+**Feature (Part B):** Both tabs of the +New Task dialog gained a `_renderInserters` helper that renders two optional controls: (1) a searchable `<select>` of note basenames ("Link a note" — inserts `[[Note Name]]` into the title), and (2) a label + URL text pair with an "Insert link" button (inserts `[label](url)` via pure static `composeMarkdownLink(label, url)`). A shared `_loadNoteList` + `_appendToTitle` back both. The title field stays the single free-text field; `serializePayloadToLine` passes it verbatim so wikilinks and hyperlinks flow into the `- [ ] …` task line and render live in Obsidian.
+
+**Tests:** Instance-path coverage in `run-recurrence-parser` (36/36), `run-todo-dialog` (50/50), `run-todo-carryover` (23/23). A live-mimicking test sets `customJS.RecurrenceParser` to an instance and asserts `validatePayload({mode:'recurring', …})` returns valid. `composeMarkdownLink` + `serializePayloadToLine` markdown-preservation coverage. VERSION pin sweep widened ~20 assertions to accept workshop 0.118.x + to-do 0.6.x; seed-vault subscription pin bumped to to-do 0.6.0. Preflight exit 0; workshop dogfood exit 0.
+
+**LESSON — customJS convention:** any class consumed via `customJS.<ClassName>.<method>` MUST expose that method as an **instance** method. `static` is fine only for methods called by class name within the same file, or in Node harnesses. The convention is already the norm for `SectionLabel`, `FinanceMath`, `DocSearch` (all instance methods) — `RecurrenceParser` and `TaskParser` were the outliers.
+
+**Harnesses:** 32 (UNCHANGED — extended existing harnesses; no new harness file added). `version-sync ok: 0.118.0`.
+
+**Commits:** `4bfc9c3` (design) → `50adc2d` (fix: instance methods + try/catch guards + reproducing tests) → `bb7e11a` (feat: note-link picker + URL inserter) → `b9841fe` (VERSION pin sweep) → `3cca14d` (version bump) → `3433a66` (dogfood regen).
+
+See `Docs/plans/2026-06-15-v0.118.0-recurring-fix-flexible-create-design.md` + `Docs/plans/2026-06-15-v0.118.0-recurring-fix-flexible-create-result.md`.
+

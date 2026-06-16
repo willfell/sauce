@@ -14,27 +14,11 @@
 const fs = require('fs');
 const path = require('path');
 
-const HELPER = path.resolve(__dirname, '..', 'blueprints', 'to-do', 'helpers', 'todo-create-task.js');
-
-function loadClass() {
-    const src = fs.readFileSync(HELPER, 'utf8');
-    const stubs = `
-        const window = { moment: undefined, customJS: undefined, app: undefined };
-        const document = {};
-        const app = {};
-        const Notice = function () {};
-        const console = { error: function () {} };
-    `;
-    // eslint-disable-next-line no-new-func
-    const make = new Function(`${stubs}\n${src}\nreturn ToDoCreateTask;`);
-    return make();
-}
-
-const ToDoCreateTask = loadClass();
-
-// --- Shared mutable globals for the ToDoCreateTaskInit case below. ---
-// The loaded class references window.app / Notice at call-time against the
-// closure it was defined in, so we inject ONE set of stubs and mutate them.
+// --- Shared mutable globals. ---
+// The loaded classes reference window.* (window.app / window.customJS / Notice)
+// at call-time against the closure they were defined in, so we inject ONE set of
+// stubs and mutate them between cases. This lets DLG-16 inject a live-style
+// customJS.RecurrenceParser INSTANCE that validatePayload actually reads.
 const sharedWindow = { moment: undefined, customJS: undefined, app: undefined };
 
 function loadHelperClass(fileName, className) {
@@ -50,7 +34,11 @@ function loadHelperClass(fileName, className) {
     return make(sharedWindow);
 }
 
+// Load ToDoCreateTask against the SAME mutable sharedWindow so validatePayload's
+// `window.customJS.RecurrenceParser` reads can be exercised from the test (DLG-16).
+const ToDoCreateTask = loadHelperClass('todo-create-task.js', 'ToDoCreateTask');
 const ToDoCreateTaskInit = loadHelperClass('todo-create-task-init.js', 'ToDoCreateTaskInit');
+const RecurrenceParser = loadHelperClass('recurrence-parser.js', 'RecurrenceParser');
 
 let pass = 0, fail = 0;
 const failures = [];
@@ -228,6 +216,98 @@ ok('DLG-13b destinationPath today (with stub moment)',
     ok('DLG-15i tier3 creates NO new heading', !/^##\s/m.test(bareOut), `out:\n${bareOut}`);
     ok('DLG-15j tier3 appends at EOF',
         bareOut.replace(/\n+$/, '').endsWith(line), `out:\n${bareOut}`);
+})();
+
+// --- DLG-16: LIVE recurring validate with customJS.RecurrenceParser INSTANCE ---
+// Reproduces the user-reported "Create button permanently disabled" bug. In live
+// Obsidian customJS stores INSTANCES under window.customJS.RecurrenceParser; the
+// dialog's validatePayload calls customJS.RecurrenceParser.isSupported(g). If that
+// method is static-only, the instance call throws, validatePayload throws, and the
+// submit button is never enabled. With the instance delegator + try/catch guard,
+// validatePayload must return { valid: true } WITHOUT throwing.
+(() => {
+    sharedWindow.customJS = { RecurrenceParser: new RecurrenceParser() };
+    let threw = false;
+    let result;
+    try {
+        result = ToDoCreateTask.validatePayload({ mode: 'recurring', title: 'X', frequency: 'daily', frequencyArg: null });
+    } catch (_e) {
+        threw = true;
+    }
+    ok('DLG-16 recurring validate does NOT throw with instance RecurrenceParser', !threw);
+    ok('DLG-16a recurring validate returns valid:true', !threw && result && result.valid === true,
+        `got ${JSON.stringify(result)}`);
+    sharedWindow.customJS = undefined;
+})();
+
+// --- DLG-17: composeMarkdownLink static helper ---
+ok('DLG-17 composeMarkdownLink label+url',
+    ToDoCreateTask.composeMarkdownLink('spec', 'https://x/y') === '[spec](https://x/y)');
+
+ok('DLG-17a composeMarkdownLink empty label falls back to url',
+    ToDoCreateTask.composeMarkdownLink('', 'https://x/y') === '[https://x/y](https://x/y)');
+
+ok('DLG-17b composeMarkdownLink whitespace url → null',
+    ToDoCreateTask.composeMarkdownLink('lbl', '   ') === null);
+
+ok('DLG-17c composeMarkdownLink empty url → null',
+    ToDoCreateTask.composeMarkdownLink('lbl', '') === null);
+
+// --- DLG-18: serializePayloadToLine preserves embedded markdown verbatim ---
+// A title like `Read [spec](https://x) [[Acme]]` must flow through unchanged —
+// the dialog's inserters write markdown straight into the title field.
+ok('DLG-18 serialize preserves [label](url) + [[wikilink]]',
+    ToDoCreateTask.serializePayloadToLine({
+        mode: 'one-shot', title: 'Read [spec](https://x) [[Acme]]', destination: 'today',
+    }) === '- [ ] Read [spec](https://x) [[Acme]]');
+
+// --- DLG-19: _appendToTitle instance helper ---
+// The harness DOM stub (document = {}) cannot render a real form, so we exercise
+// the inserter's core mutation directly with a fake titleInput + state. This is
+// the documented fallback when a full DOM-render is impractical in the harness.
+(() => {
+    const inst = new ToDoCreateTask();
+    const titleInput = { value: '' };
+    const state = { title: '' };
+
+    inst._appendToTitle(state, titleInput, '[[Note]]');
+    ok('DLG-19 _appendToTitle sets state.title', state.title === '[[Note]]', `got ${JSON.stringify(state.title)}`);
+    ok('DLG-19a _appendToTitle mirrors to titleInput.value', titleInput.value === '[[Note]]', `got ${JSON.stringify(titleInput.value)}`);
+
+    // Second append inserts a single separating space.
+    inst._appendToTitle(state, titleInput, '[spec](https://x)');
+    ok('DLG-19b second append adds separating space',
+        state.title === '[[Note]] [spec](https://x)', `got ${JSON.stringify(state.title)}`);
+    ok('DLG-19c second append mirrors to titleInput.value',
+        titleInput.value === '[[Note]] [spec](https://x)', `got ${JSON.stringify(titleInput.value)}`);
+})();
+
+// --- DLG-20: _loadNoteList defensive fallbacks ---
+(() => {
+    const inst = new ToDoCreateTask();
+
+    // No vault / missing getMarkdownFiles → [] (no throw).
+    sharedWindow.app = undefined;
+    ok('DLG-20 _loadNoteList returns [] without app', Array.isArray(inst._loadNoteList()) && inst._loadNoteList().length === 0);
+
+    sharedWindow.app = { vault: {} };
+    ok('DLG-20a _loadNoteList returns [] when getMarkdownFiles absent',
+        Array.isArray(inst._loadNoteList()) && inst._loadNoteList().length === 0);
+
+    // With a stub vault, returns { name, path } sorted by name, capped at 200.
+    sharedWindow.app = {
+        vault: {
+            getMarkdownFiles: () => [
+                { basename: 'Zebra', path: 'a/Zebra.md' },
+                { basename: 'Acme', path: 'b/Acme.md' },
+            ],
+        },
+    };
+    const list = inst._loadNoteList();
+    ok('DLG-20b _loadNoteList maps + sorts by name',
+        list.length === 2 && list[0].name === 'Acme' && list[1].name === 'Zebra', `got ${JSON.stringify(list)}`);
+    ok('DLG-20c _loadNoteList carries path', list[0].path === 'b/Acme.md', `got ${JSON.stringify(list[0])}`);
+    sharedWindow.app = undefined;
 })();
 
 console.log('');

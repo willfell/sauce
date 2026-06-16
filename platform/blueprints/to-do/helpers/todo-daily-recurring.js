@@ -117,11 +117,17 @@ class ToDoDailyRecurring {
         }
         if (fields.project) out.project = fields.project;
         if (fields.priority) out.priority = fields.priority;
-        // Validate recurrence is supported.
-        if (window.customJS && window.customJS.RecurrenceParser) {
-            if (!window.customJS.RecurrenceParser.isSupported(recurrence)) {
-                out.invalid = true;
+        // Validate recurrence is supported. A throwing/missing parser must not
+        // brick registry parsing — degrade to "treat as supported" (skip the
+        // gate) so the entry is still evaluated by matchesToday below.
+        try {
+            if (window.customJS && window.customJS.RecurrenceParser) {
+                if (!window.customJS.RecurrenceParser.isSupported(recurrence)) {
+                    out.invalid = true;
+                }
             }
+        } catch (_e) {
+            // skip the isSupported gate; entry stays eligible.
         }
         return out;
     }
@@ -160,10 +166,16 @@ class ToDoDailyRecurring {
         // Use a small moment-lite to evaluate.
         const dateMoment = ToDoDailyRecurring._makeMomentLite(todayDateStr);
         const anchor = registryCreatedAt ? ToDoDailyRecurring._makeMomentLite(registryCreatedAt) : null;
-        if (window.customJS && window.customJS.RecurrenceParser) {
-            return window.customJS.RecurrenceParser.matches(entry.recurrence, dateMoment, { registryCreatedAt: anchor });
+        // Prefer the customJS parser, but a throwing/missing instance must not
+        // throw out of render — fall through to the inline fallback parser.
+        try {
+            if (window.customJS && window.customJS.RecurrenceParser) {
+                return window.customJS.RecurrenceParser.matches(entry.recurrence, dateMoment, { registryCreatedAt: anchor });
+            }
+        } catch (_e) {
+            // fall through to the inline fallback below.
         }
-        // Fallback (Node testing) — pull recurrence-parser body inline.
+        // Fallback (Node testing / parser failure) — pull recurrence-parser body inline.
         return ToDoDailyRecurring._fallbackRecurrenceMatch(entry.recurrence, dateMoment, anchor);
     }
 

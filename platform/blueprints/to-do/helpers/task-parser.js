@@ -29,6 +29,15 @@
  */
 class TaskParser {
 
+    // ---------- Instance delegator (customJS stores INSTANCES) ----------
+    //
+    // customJS stores an INSTANCE under window.customJS.TaskParser, and the
+    // guard dispatches customJS.TaskParser.parseTasks(content) on it. The method
+    // MUST exist as an instance method or live Obsidian throws "… is not a
+    // function". Delegates to the static so the Node harness keeps the static API.
+
+    parseTasks(content) { return TaskParser.parseTasks(content); }
+
     static parseTasks(content) {
         const lines = content.split('\n');
         // Find ## Tasks section bounds. If no `## Tasks` heading exists (v0.3.3+

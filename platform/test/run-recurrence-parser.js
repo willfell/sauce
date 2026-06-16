@@ -140,6 +140,24 @@ ok('RP-31 empty string → false',
 ok('RP-32 gibberish → false + isSupported false',
     !RecurrenceParser.matches('asldkjf', mon) && !RecurrenceParser.isSupported('asldkjf'));
 
+// ===== INSTANCE path — RP-33..RP-36 =====
+// customJS stores INSTANCES under window.customJS.RecurrenceParser, then the
+// guard dispatches customJS.RecurrenceParser.isSupported(...) / .matches(...) on
+// that stored instance. The consumed methods MUST exist as instance methods
+// (delegating to the statics) or live Obsidian throws "is not a function".
+(() => {
+    const rp = new RecurrenceParser();
+    ok('RP-33 instance isSupported("every day") === true',
+        rp.isSupported('every day') === true);
+    ok('RP-34 instance isSupported("garbage") === false',
+        rp.isSupported('garbage') === false);
+    ok('RP-35 instance matches() agrees with static (every day, Wed)',
+        rp.matches('every day', wed) === RecurrenceParser.matches('every day', wed));
+    ok('RP-36 instance matches() agrees with static (every Wednesday, Thu → false)',
+        rp.matches('every Wednesday', thu) === RecurrenceParser.matches('every Wednesday', thu)
+        && rp.matches('every Wednesday', thu) === false);
+})();
+
 console.log('');
 console.log(`Tests: ${pass}/${pass + fail}`);
 if (fail > 0) {

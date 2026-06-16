@@ -1321,3 +1321,27 @@ The `cowork:gather-semantic-related` skill (used by morning-briefing) needs SC's
 ### Fresh consumer vaults (sauce bootstrap)
 
 If you're setting up a new vault via `sauce bootstrap` (not upgrading an existing one), both plugins are installed and configured automatically — `phaseFetchPlugins` reads every subscribed mechanism's `external_plugins[]` and fetches each from GitHub release assets. No manual step required.
+
+## Upgrading from v0.117.x to v0.118.0
+
+`brew upgrade sauce` distributes the new release. Existing consumers should run `sauce update --bump-pins` from inside each vault. This is a MINOR release — workshop 0.117.4 → 0.118.0, to-do blueprint 0.5.3 → **0.6.0**.
+
+**What this release fixes:**
+
+The +New Task dialog's **Recurring tab Create button** was permanently disabled regardless of input. Root cause: the Obsidian customJS plugin stores **instances** under `window.customJS.<ClassName>`, but `RecurrenceParser.isSupported/matches` and `TaskParser.parseTasks` were declared `static`. Calling a static method on a stored instance returns `undefined`, and `undefined()` throws `TypeError`. In the dialog, this throw aborted `validatePayload()` before it could set `submit.disabled = false`, so the button never enabled. The same defect caused recurring task materialization (`ToDoDailyRecurring`) and carryover task-parsing (`ToDoDailyCarryover`) to throw in live Obsidian. v0.116.1 had misdiagnosed this as a closure-binding issue; the headless test harness masked it by never setting `customJS.RecurrenceParser` to an instance.
+
+Fix: instance-method delegators added to `RecurrenceParser` (`isSupported`, `matches`) and `TaskParser` (`parseTasks`) that forward to the statics. Defense-in-depth `try/catch` wraps all three consumer call sites so a throwing helper degrades gracefully instead of bricking the surface. A repo-wide sweep confirmed no other `static`-on-customJS footguns exist.
+
+**What this release adds:**
+
+Both tabs of the +New Task dialog gained two optional inserter controls:
+
+- **Link a note** — a searchable dropdown of note basenames. Selecting a note appends `[[Note Name]]` to the task title.
+- **Add link** — a label text input + URL input + "Insert link" button. Clicking appends `[label](url)` (or `[url](url)` if label is empty) to the title.
+
+The title field remains the single free-text field; `serializePayloadToLine` passes it verbatim, so wikilinks and hyperlinks flow into the `- [ ] …` task line and render live in Obsidian.
+
+**What does NOT change:**
+
+- No new migrations fire for this upgrade — `sauce update --bump-pins` reinstalls the to-do blueprint at 0.6.0, which is an additive dialog enhancement only.
+- All 3 consumer vaults redeploy cleanly as a no-op apart from the updated CustomJS helper files. Cmd+R Obsidian after the update to pick up the new code.
