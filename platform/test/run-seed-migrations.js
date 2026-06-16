@@ -1214,6 +1214,16 @@ async function runFinanceMigrateFamily() {
             "HC-V01190-FIN-SEED-MIGRATE-D4 Paycheck-2026-01-15.md body still has title heading '# Paycheck 2026-01-15' (no over-stripping)",
             /^#\s+Paycheck 2026-01-15\s*$/m.test(dPaycheckBody)
         );
+
+        // ===== E: months (#3) =====
+        ok(
+            "HC-V01190-FIN-SEED-MIGRATE-E1 spice/finance/months/ directory exists post #3 (applyFinanceMonthsScaffolding)",
+            fs.existsSync(path.join(finRoot, LEGACY_FIN_DIR, "months"))
+        );
+        ok(
+            "HC-V01190-FIN-SEED-MIGRATE-E2 spice/finance/months/Months.md exists post #3 (hub scaffold)",
+            existsFin("months/Months.md")
+        );
     } finally {
         if (KEEP) {
             console.log(`  KEEP_SEED_VAULT=1: ${finRoot}`);
