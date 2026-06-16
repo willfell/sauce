@@ -22,6 +22,21 @@
  */
 class RecurrenceParser {
 
+    // ---------- Instance delegators (customJS stores INSTANCES) ----------
+    //
+    // The Obsidian customJS plugin stores INSTANCES under
+    // window.customJS.RecurrenceParser, and the customjs-guard dispatches
+    // customJS.RecurrenceParser.isSupported(...) / .matches(...) on that stored
+    // instance. The two consumed methods MUST therefore exist as INSTANCE
+    // methods or live Obsidian throws "… is not a function" (which, in the
+    // +New Task dialog's validatePayload, aborts before the submit button is
+    // enabled — permanently disabling Create). These delegate to the statics so
+    // internal _parse callers and the Node harness keep using the static API.
+
+    isSupported(grammar) { return RecurrenceParser.isSupported(grammar); }
+
+    matches(grammar, dateMoment, opts) { return RecurrenceParser.matches(grammar, dateMoment, opts); }
+
     /**
      * Returns true iff the recurrence grammar fires on dateMoment.
      *

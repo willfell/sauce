@@ -135,9 +135,16 @@ class ToDoDailyCarryover {
 
     static eligibleBlocks(content) {
         // Defer to TaskParser; filter out project-routed and recurring-routed.
-        const all = (window.customJS && window.customJS.TaskParser)
-            ? window.customJS.TaskParser.parseTasks(content)
-            : ToDoDailyCarryover._fallbackParse(content);
+        // A throwing/missing TaskParser instance must not throw out of render —
+        // fall through to the inline fallback parser.
+        let all;
+        try {
+            all = (window.customJS && window.customJS.TaskParser)
+                ? window.customJS.TaskParser.parseTasks(content)
+                : ToDoDailyCarryover._fallbackParse(content);
+        } catch (_e) {
+            all = ToDoDailyCarryover._fallbackParse(content);
+        }
         return all.filter(b =>
             !/\[project::\s*\[\[/.test(b.topLine) &&
             !/\[recurring_from::\s*\[\[/.test(b.topLine)
