@@ -7425,6 +7425,69 @@ async function caseTodoManifestV3() {
     `got ${scope}`);
 }
 
+// ============================================================
+// v0.117.4 HC-V01174 — to-do blueprint v0.5.3 manifest + template
+// source contracts. Locks the manifest shape (version, depends_on:project,
+// the exact 11-element customjs_classes, no retired ToDoMigrate* classes)
+// and the SectionLabel-only template shape (no load-bearing ## H2 sections,
+// retired in v0.116.0 / v0.117.0).
+// ============================================================
+
+async function caseHCV01174TodoManifest() {
+  console.log("\n--- Case HC-V01174-TODO-MANIFEST: to-do v0.5.3 manifest source contract ---");
+  const m = JSON.parse(fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/to-do/manifest.json"), "utf8"));
+
+  assertTrue("HC-V01174-TODO-MANIFEST-1: version === \"0.5.3\"",
+    m.version === "0.5.3", `got: ${m.version}`);
+
+  const projDep = (m.depends_on || []).find(d => d && d.name === "project");
+  assertTrue("HC-V01174-TODO-MANIFEST-2: depends_on has project@>=1.21.0",
+    !!projDep && projDep.range === ">=1.21.0",
+    `got: ${JSON.stringify(projDep)}`);
+
+  const expectedClasses = [
+    "ToDoHubActions", "ToDoLeafActions", "ToDoAllList", "TaskParser",
+    "RecurrenceParser", "ToDoDailyCarryover", "ToDoDailyRecurring",
+    "ToDoDailyProjectGroups", "ToDoDailyUnassignedMeetings", "ToDoCreateTask",
+    "ToDoCreateTaskInit",
+  ];
+  assertTrue("HC-V01174-TODO-MANIFEST-3: customjs_classes deep-equals exact 11-element array (order)",
+    JSON.stringify(m.customjs_classes) === JSON.stringify(expectedClasses),
+    `got: ${JSON.stringify(m.customjs_classes)}`);
+
+  const cls = Array.isArray(m.customjs_classes) ? m.customjs_classes : [];
+  assertTrue("HC-V01174-TODO-MANIFEST-4: customjs_classes drops retired ToDoMigrate{Modal,Init} (v0.116.0)",
+    !cls.includes("ToDoMigrateModal") && !cls.includes("ToDoMigrateInit"),
+    `got: ${JSON.stringify(cls)}`);
+}
+
+async function caseHCV01174TodoTemplate() {
+  console.log("\n--- Case HC-V01174-TODO-TEMPLATE: to-do templates are SectionLabel-only (no load-bearing ## H2) ---");
+  const todayBody = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/to-do/templates/Today To-Do.md"), "utf8");
+  const projectBody = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/to-do/templates/Project To-Do.md"), "utf8");
+
+  assertTrue("HC-V01174-TODO-TEMPLATE-1: Today To-Do.md uses class: \"SectionLabel\"",
+    /class:\s*"SectionLabel"/.test(todayBody),
+    `today body:\n${todayBody.slice(0, 400)}`);
+
+  const todayBanned = [/^## Today\s*$/m, /^## Today's Capture\s*$/m, /^## Carryover\s*$/m, /^## Recurring\s*$/m];
+  assertTrue("HC-V01174-TODO-TEMPLATE-2: Today To-Do.md has NO load-bearing ## H2 (Today / Today's Capture / Carryover / Recurring)",
+    todayBanned.every(re => !re.test(todayBody)),
+    `today body:\n${todayBody.slice(0, 600)}`);
+
+  assertTrue("HC-V01174-TODO-TEMPLATE-3: Project To-Do.md uses class: \"SectionLabel\"",
+    /class:\s*"SectionLabel"/.test(projectBody),
+    `project body:\n${projectBody.slice(0, 400)}`);
+
+  const projectBanned = [/^## Owned Tasks\s*$/m, /^## From Meetings\s*$/m];
+  assertTrue("HC-V01174-TODO-TEMPLATE-4: Project To-Do.md has NO load-bearing ## H2 (Owned Tasks / From Meetings)",
+    projectBanned.every(re => !re.test(projectBody)),
+    `project body:\n${projectBody.slice(0, 600)}`);
+}
+
 async function caseFA2RuleFragmentsExtends() {
   console.log("\n--- Case FA2-EXTENDS: all 4 blueprints' rule_fragments declare extends ---");
   const blueprints = ["meetings", "people", "products", "teams"];
@@ -14581,6 +14644,10 @@ async function caseV01090Ds1EntityTypeOpt() {
 
   // v0.63.0 S7 — TD-HC-1: to-do v0.3.0 manifest schema clean
   await caseTodoManifestV3();
+
+  // v0.117.4 HC-V01174 — to-do v0.5.3 manifest + SectionLabel-only template source contracts
+  await caseHCV01174TodoManifest();
+  await caseHCV01174TodoTemplate();
 
   // v0.60.0 SQ — shellSingleQuote helper round-trips through bash
   await caseV60ShellSingleQuote();
