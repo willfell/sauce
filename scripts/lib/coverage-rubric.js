@@ -7,13 +7,15 @@
 
 const fs = require("fs");
 const path = require("path");
-const { execSync } = require("child_process");
+const { spawnSync } = require("child_process");
 
 function tryGrep(pattern, dir, opts = {}) {
     try {
-        const flags = opts.flags || "-r -l";
-        const out = execSync(`grep ${flags} ${JSON.stringify(pattern)} ${dir}`, { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] });
-        return out.trim().split("\n").filter(Boolean);
+        const flagStr = opts.flags || "-r -l";
+        const flagArgs = flagStr.split(/\s+/).filter(Boolean);
+        const result = spawnSync("grep", [...flagArgs, pattern, dir], { encoding: "utf8" });
+        if (result.error || result.status > 1) return [];
+        return (result.stdout || "").trim().split("\n").filter(Boolean);
     } catch (e) {
         return [];
     }
@@ -314,12 +316,9 @@ function axisWeight(name) {
 function recentIncidents(name, repoRoot) {
     // Count PATCH (X.Y.Z where Z > 0) commits in last 30 days that mention this surface name in the subject.
     try {
-        const since = "30 days ago";
-        const out = execSync(
-            `git -C ${JSON.stringify(repoRoot)} log --since=${JSON.stringify(since)} --pretty=format:%s`,
-            { encoding: "utf8" }
-        );
-        const lines = out.split("\n").filter(Boolean);
+        const result = spawnSync("git", ["-C", repoRoot, "log", "--since=30 days ago", "--pretty=format:%s"], { encoding: "utf8" });
+        if (result.error || result.status !== 0) return 0;
+        const lines = (result.stdout || "").split("\n").filter(Boolean);
         const lcName = name.toLowerCase();
         return lines.filter(l => {
             const lc = l.toLowerCase();

@@ -1129,7 +1129,7 @@ async function runFinanceMigrateFamily() {
         );
         ok(
             "HC-V01190-FIN-SEED-MIGRATE-B4 Paycheck Defaults original url line stripped (post #10 url removal)",
-            !bPaycheckDefaultsBody.includes("https://example.com/applecard")
+            !/^\s*url:\s*["']?https:\/\/example\.com\/applecard["']?\s*$/m.test(bPaycheckDefaultsBody)
         );
         ok(
             "HC-V01190-FIN-SEED-MIGRATE-B5 Paycheck Defaults frontmatter has __debt_links_migrated: v0.108.0 marker",
