@@ -310,10 +310,26 @@ Coverage matrix for all blueprints + mechanisms scored against the 6-axis rubric
 | 9 | blueprint/products | customjs_behavioral | behavioral-runner | platform/test/run-products-productshubcards.js | 1.20 |
 | 10 | blueprint/people | customjs_behavioral | behavioral-runner | platform/test/run-people-peoplehubcards.js | 1.08 |
 
-## Picks for this arc
+## Picks for this arc (manual override after qualitative validation)
 
-- **impl-1**: rank-1 above
-- **impl-2**: rank-2 above
-- **impl-3**: rank-3 above
+The deterministic scorer's rank-1 (blueprint/cowork customjs_behavioral 0.0) and rank-4 (blueprint/daily customjs_behavioral 0.0) are qualitative-validated rubric noise:
 
-If two ranks above belong to the same blueprint, impl-2 = next distinct blueprint OR next gap on the same blueprint when the design's `out of scope` allows — pick whichever maximizes total composite lift.
+- **cowork** has 954 asserts in `run-cowork-smoke.js` validating all 9 customjs classes via structural patterns; the deterministic grep heuristic doesn't recognize the pattern. True coverage is much higher than 0.0 suggests. Picking cowork would waste cycle on a fake gap. Rubric heuristic fix queued for v1.1.0 rubric revision (carry-forward).
+- **daily** has an architectural mismatch: `SpaceDailyDashboard.render()` is unreachable via the current test harness pattern; would require a behavioral runner with full dataviewjs surface stub. Real gap, but expensive to close and not the highest-ROI work for this arc.
+
+Final picks (all priority 2.00, qualitative-validated as REAL gaps, identical archetype + target file — coherent triple extending the seed migration regression net):
+
+- **impl-1**: `blueprint/project` / `installer_migration` / `seed-migrate` (deterministic rank-2). Five untested `apply*` migrations: `applyProjectSectionsMigration`, `applyProjectSectionsHubMigration`, `applyProjectSectionsCloseRepair`, `applyEmptyProjectWikilinkRepair`, `applyProjectTodoBackfill`. Static source-checks exist but no functional validation against vault adapters.
+- **impl-2**: `blueprint/finance` / `installer_migration` / `seed-migrate` (deterministic rank-3). Twenty-three `apply*` migrations covering finance defaults / debts / paychecks / months / budgets scaffolding + healing — zero `HC-V0XYZ-SEED-MIGRATE-*` families.
+- **impl-3**: `mechanism/entity-create` / `installer_migration` / `seed-migrate` (deterministic rank-5). Two `apply*` migrations: `applyNewEntityButtons` (registry materialization) + `applyEntityCreateGuardMigration` (vault-wide rewrite). Run on every install; high blast radius; zero seed coverage today.
+
+All three impls target the same file (`platform/test/run-seed-migrations.js`) and the same axis (installer_migration). The arc's three cycles each extend the seed-vault with pre-migration fixtures for one surface and add a new `HC-V0XYZ-SEED-MIGRATE-<topic>` family.
+
+### Carry-forwards (not addressed in this arc)
+
+- **Rubric heuristic v1.1.0**: teach the scorer to recognize cowork-smoke's structural-assert pattern (would lift cowork composite from 0.4 to ~0.85).
+- **Substring-collision false positives**: `daily` substring collides with multiple unrelated test files; `trips` substring collides with cowork's `midday-tripwire`; `teams` collides with cowork MCP variant. Patch rubric to use word-boundary or class-name matching.
+- **Behavioral runner for daily**: `SpaceDailyDashboard.render()` requires a full dataviewjs stub; out-of-scope here. Queue for v0.120.x.
+- **Widget render gap on to-do**: seven widgets uncovered in run-renderer.js (ToDoHubActions, ToDoLeafActions, ToDoAllList, ToDoDailyCarryover, ToDoDailyRecurring, ToDoDailyProjectGroups, ToDoDailyUnassignedMeetings). Real gap. Queue for v0.120.x.
+- **customjs-guard installer migrations**: two load-bearing v0.110.x+ migrations (applyEntityCreateGuardMigration, applyCustomJsGuardMigration) only tested at manifest level. Real gap, high blast radius. Queue for v0.120.x.
+- **Meetings + scratch + products + people widget gaps**: each has at least one untested customjs widget render path. Queue for v0.120.x via run-renderer.js fixtures.
