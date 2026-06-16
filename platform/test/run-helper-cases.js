@@ -7233,7 +7233,8 @@ async function caseFA6DomainManifests() {
   console.log("\n--- Case FA6-MANIFESTS: 3 domain blueprints bumped ---");
   // v0.116.1 — widened to-do from "0.4.0" → /^0\.(4|5)\.\d+$/ to permit PATCH bumps within the cycle.
   // v0.118.0 — widened to-do to accept 0.6.x (MINOR bump).
-  for (const [bp, expected] of [["trips", "0.3.0"], ["to-do", /^0\.(4|5|6)\.\d+$/], ["boards", "0.2.1"]]) {
+  // v0.119.0 — widened to-do to accept 0.7.x (MINOR bump for additive sentinel + markdown render).
+  for (const [bp, expected] of [["trips", "0.3.0"], ["to-do", /^0\.(4|5|6|7)\.\d+$/], ["boards", "0.2.1"]]) {
     const m = JSON.parse(fs.readFileSync(
       path.join(WORKSHOP, `platform/blueprints/${bp}/manifest.json`), "utf8"));
     const match = expected instanceof RegExp ? expected.test(m.version) : m.version === expected;
@@ -7400,8 +7401,9 @@ async function caseTodoManifestV3() {
     path.join(WORKSHOP, "platform/blueprints/to-do/manifest.json"), "utf8"));
 
   // v0.116.0 widened from === "0.3.3" → 0.(3|4).x lineage; v0.4.0 retires ToDoMigrate{Modal,Init}
-  // and replaces with ToDoCreateTaskInit startup script.
-  assertTrue("TD-HC-1 version 0.3.x or 0.4.x or 0.5.x", /^0\.(3|4|5|6)\.\d+$/.test(m.version), `got ${m.version}`);
+  // and replaces with ToDoCreateTaskInit startup script. v0.119.0 widened to accept 0.7.x.
+  assertTrue("TD-HC-1 version 0.3.x or 0.4.x or 0.5.x or 0.6.x or 0.7.x",
+    /^0\.(3|4|5|6|7)\.\d+$/.test(m.version), `got ${m.version}`);
   assertTrue("TD-HC-1 customjs_classes includes ToDoCreateTaskInit (v0.4.0)",
     Array.isArray(m.customjs_classes) && m.customjs_classes.includes("ToDoCreateTaskInit"));
   assertTrue("TD-HC-1 customjs_classes includes ToDoLeafActions (v0.63.1)",
@@ -7435,12 +7437,13 @@ async function caseTodoManifestV3() {
 // ============================================================
 
 async function caseHCV01174TodoManifest() {
-  console.log("\n--- Case HC-V01174-TODO-MANIFEST: to-do v0.6.1 manifest source contract ---");
+  console.log("\n--- Case HC-V01174-TODO-MANIFEST: to-do v0.7.0 manifest source contract ---");
   const m = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/to-do/manifest.json"), "utf8"));
 
-  assertTrue("HC-V01174-TODO-MANIFEST-1: version === \"0.6.1\"",
-    m.version === "0.6.1", `got: ${m.version}`);
+  // v0.119.0: bumped 0.6.1 → 0.7.0 (additive sentinel + markdown rendering + applyRecurringSentinelV070Migration).
+  assertTrue("HC-V01174-TODO-MANIFEST-1: version === \"0.7.0\"",
+    m.version === "0.7.0", `got: ${m.version}`);
 
   const projDep = (m.depends_on || []).find(d => d && d.name === "project");
   assertTrue("HC-V01174-TODO-MANIFEST-2: depends_on has project@>=1.21.0",
