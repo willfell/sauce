@@ -131,6 +131,12 @@ class ProjectNavButtons {
             return { context: "project-hub", pathParts, planningIdx, projectSlug, projectDir };
         }
 
+        // v0.116.1 — project-todo context: type:project-todo file at the project root
+        // (e.g. spice/projects/sauce/Sauce To-Do.md).
+        if (fm.type === "project-todo" && pathParts.length === planningIdx + 3) {
+            return { context: "project-todo", pathParts, planningIdx, projectSlug, projectDir };
+        }
+
         // Projects hub: spice/projects/Projects.md (single fixed-path hub note)
         if (pathParts.length === planningIdx + 2 && basename === "Projects") {
             return { context: "projects-hub", pathParts, planningIdx };
@@ -336,12 +342,18 @@ class ProjectNavButtons {
             map: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12h-8"/><path d="M21 6H8"/><path d="M21 18h-8"/><path d="M3 6v4c0 1.1.9 2 2 2h3"/><path d="M3 10v6c0 1.1.9 2 2 2h3"/></svg>`,
             board: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/></svg>`,
             task: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="m9 12 2 2 4-4"/></svg>`,
-            docs: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg>`
+            docs: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg>`,
+            todo: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>`
         };
 
         const filePath = dv.current().file.path;
         const ctx = this.detectContext(filePath, dv);
         if (ctx.context === "non-project" || ctx.context === "unknown" || ctx.context === "projects-hub") return;
+
+        // v0.116.1 — project-todo context renders the standard project nav row
+        // (Project, Map, Board, Docs) with the To-Do entry self-hidden. Falls
+        // through into the shared button-build logic below; the buttons[] loop
+        // handles self-hide via the context check.
 
         const { pathParts, planningIdx, projectSlug, projectDir } = ctx;
         const boardPath = `${projectDir}/${projectSlug}-board.md`;
@@ -411,6 +423,16 @@ class ProjectNavButtons {
         // task-hub, task-note, legacy-sub-note, doc-note.
         if (ctx.context !== "docs-hub") {
             buttons.push({ label: "Docs", icon: icons.docs, path: `${projectDir}/docs/Docs.md` });
+        }
+        // v0.116.1 — To-Do button: shown on every project context except project-todo
+        // itself, AND only when the project's <Name> To-Do.md exists. Detection by
+        // mainNote.basename + " To-Do.md" so the filename convention stays consistent
+        // with applyProjectTodoBackfill + entity-create extra_files entry.
+        if (ctx.context !== "project-todo" && mainNote) {
+            const toDoPath = `${projectDir}/${mainNote.basename} To-Do.md`;
+            if (app.vault.getAbstractFileByPath(toDoPath)) {
+                buttons.push({ label: "To-Do", icon: icons.todo, path: toDoPath });
+            }
         }
 
         // Task-note context: ensure a Task: <X> button leads back to the parent task hub.

@@ -1,17 +1,35 @@
 {
   "name": "project",
-  "version": "1.22.0",
+  "version": "1.22.1",
   "kind": "blueprint",
   "module_directory": "projects",
   "skills_dir": ".claude/skills/project",
-  "description": "Per-project atlas + map + Kanban board with hierarchical tasks, workstream-tagged cards, and All-Projects hub. v1.4.0 MINOR (v0.31.0 S6.5): hub note filename now defaults to the user-typed project name (e.g. 'Testing It All Out.md' under spice/projects/testing-it-all-out/) for native Obsidian tab title display. Configurable HUB_NOTE_FILENAME_STYLE constant in project-nav-buttons.js (name|slug|fixed). Rule_fragment refactored to type-discrimination via frontmatter_branch so audit + hub-cards filters are filename-independent. v1.4.1 PATCH CF-1: projects-hub-cards.js filter restored to match EITHER type:project OR legacy #project tag (older hub notes without type:project frontmatter were excluded from the Projects.md card grid); defensive type:map/kanban exclusions handle dataview's nested-tag expansion (#project/<slug> would otherwise falsely include Project Map + Project Board). v1.5.0 MINOR (v0.33.0 cohesion wave 2): adopts claude_surface[] — ships canonical /project slash command + new-project SKILL.md + resolvers row. Stale consumer-side .claude/commands/project.md bodies overwritten on next install. v1.6.0 MINOR (v0.39.0): NEW frontmatter fields status (7-state enum, required) + status_changed_at (YYYY-MM-DD, required) + teams[] + products[] (both optional wikilink lists). Default-active hub scope hides terminal statuses (superseded/cancelled/done). Tier 1 action buttons (Bump Status / Set Teams / Set Products) ship via ProjectActionButtons customjs class (S7). v1.7.0 MINOR (v0.46.0 S6): New Project create flow extracted to entity-create@0.1.0 mechanism — ProjectNavButtons._promptForProjectName / _createProject / _renderProjectsHub deleted (~184 LOC stripped), the class retains task-note + workstream + nav-row rendering only. Manifest declares new_entity_buttons[] with id=project, exercising three schema extensions for the first time: prompts[].derive (slugify(prompts.name)), extra_files[] for the Project Map + <slug>-board sidecars, and frontmatter_template with literal defaults (status:idea, status_changed_at:{{now.YYYY-MM-DD}}, workstreams:[]). content/Projects.md swaps the inline ProjectNavButtons-dispatched dataviewjs block for an <!-- entity-create:project --> marker. v1.7.2 PATCH (v0.47.0): no on-disk manifest changes; PATCH bump captures the fact that the installer's resolveEntityCreateEntry now auto-prepends {{templates_path}}/ on bare body_template basenames, changing this blueprint's registry output. Fixes BUG-3/4 from headspace Phase 3 (project atlas + Map + Board bodies were empty because the runtime _readBody resolved bare basenames against vault root). v1.8.0 MINOR (v0.48.0): NEW ProjectTaskCreateListener customjs class subscribes once at vault load (via NEW Templater startup template Project Task Create Listener.md) to vault.create for files matching ^spice/projects/<slug>/tasks/<file>.md$ and invokes Templater's replace-in-file-templater command on them. Fixes BUG-5 (kanban \"+ Add a card\" doesn't run Templater post-paste). NEW manifest field templater_startup_templates[]. Template, Kanban Card.md enhanced with \"+ Create new workstream\" sentinel + empty-workstreams Notice. v1.9.0 MINOR (v0.49.0 S1): NEW ProjectTaskCreateListenerInit customjs class registered in customjs plugin's startupScriptNames[] via NEW manifest field customjs_startup_scripts[]. Replaces v0.48.0's Templater startup_template registration mechanism (which failed silently at consumer vaults). v0.48.0's Templater wiring stays as belt-and-suspenders backstop (idempotent init via _initialized flag). v1.9.1 PATCH (v0.49.1): Template, Kanban Card.md source-board detection + auto-promote fix. Previously detectPath = targetPath || activePath produced vault-root path when kanban-plugin invokes Templater's create-new-note-from-template (Templater controls folder placement, defaulting to vault root). The new logic prefers tp.config.active_file (the source board the user clicked + Add a card on), so the workstream picker and auto-promote tp.file.move both fire correctly regardless of where Templater initially placed the file. Surfaced 2026-05-16: user reported new card files landing at vault root with no workstream prompt; root cause was that the kanban-plugin's per-board new-note-folder setting is ignored when new-note-template is set (kanban delegates folder placement to Templater). v1.10.4 PATCH (v0.50.5): ProjectNavButtons.render() main button row wraps to multiple flex rows when buttons don't fit (flex-wrap: wrap + flex: 0 1 auto + label white-space: nowrap). Fixes mobile clutter on long project/task names without removing buttons or labels. v1.11.0 MINOR (v0.51.0): NEW ProjectStatusWidget customjs class — colored status chip on the project hub with click-to-change picker (7-option overlay). Writes status + status_changed_at via app.fileManager.processFrontMatter. Sibling to ProjectWorkstreamManager. Adds new ## Status H2 section to Template, Project.md between the nav-buttons row and the existing ## Workstreams section. v1.11.1 PATCH (v0.51.1): Kanban Card template's _findSourceKanbanBoard now tries app.metadataCache.getBacklinksForFile(newFile) first (identity-based indexed lookup, no IO when cache is warm) before falling back to v0.49.2's vault-scan. Fallback preserved byte-for-byte for cold-cache safety. More robust on title collisions across the vault than substring-on-raw-bytes. v1.12.0 MINOR (v0.52.0): renamed the v0.50.0 \"Wiki\" surface to \"Docs\". ProjectWikiCards → ProjectDocsCards; templates Wiki Hub.md / Wiki Note.md → Docs Hub.md / Doc Note.md; subfolder convention spice/projects/<slug>/wiki/ → docs/; frontmatter types wiki-hub/wiki-note → docs-hub/doc-note; rules + tags ditto; entity-create entry id wiki-note → doc-note label \"+ New Doc\"; installer step applyWikiBackfill → applyDocsBackfill (folds FLN-1: now unconditional + repairs 0-byte Docs.md). NEW installer step applyWikiToDocsMigration runs per-project: backs up wiki/ to .sauce-backup/<slug>/wiki/<ts>/, renames wiki/ → docs/, renames Wiki.md → Docs.md, rewrites frontmatter (type + tags) + customJS.ProjectWikiCards → ProjectDocsCards refs inside each migrated .md. Idempotent (skips if docs/ already exists). Project-atlas \"Wiki\" button at project-nav-buttons.js:357 RENAMED to \"Docs\" (no new button surface). v1.12.1 PATCH (v0.52.1): _rmDirRecursive in applyWikiToDocsMigration falls back to Node fs.rmSync when adapter.rmdir is absent (CLI-mode adapter doesn't expose it). Without the fix, v0.52.0 install left empty wiki/ dirs alongside the new docs/ dirs at the first migration run. Fix adds WTD-MIG-4 test case exercising the fallback against a real tmpdir adapter. v1.13.4 PATCH (v0.59.8): retires v0.48.0's Templater startup_templates[] backstop. The Template, Project Task Create Listener.md template body calls customJS.ProjectTaskCreateListener.init() at Templater startup, but customJS hasn't finished loading its classes at that point — so customJS.ProjectTaskCreateListener is undefined and .init() throws \"Cannot read properties of undefined (reading 'init')\" in the console on every vault load. v0.49.0's customjs startupScriptNames[] path (ProjectTaskCreateListenerInit) is the working registration and remains. Edits: drop templater_startup_templates[] field + the Template, Project Task Create Listener.md files[] entry; delete the template source. NEW installer step pruneTemplaterStartupOrphans removes the orphan entry from each consumer's .obsidian/plugins/templater-obsidian/data.json startup_templates[] on next install (sunset after a couple releases). v1.13.6 PATCH (v0.59.11): Template, Kanban Card.md name-collision fix. (A) NEW Strategy 0 sibling-board detection runs FIRST in _findSourceKanbanBoard — if the new file's parent directory contains exactly one kanban-plugin board file, that board IS the source (path-based, bypasses title-substring pitfalls under collision). (B) Auto-promote `if (!existing)` skip replaced with suffix-disambiguation loop — when ${projectDir}/tasks/${fileName}/${fileName}.md exists, picks ${fileName}-2, ${fileName}-3, ... until a free slot is found (bounded ≤999); surfaces the rename via Notice. Fixes the bug where same-name tasks across projects (or sibling sub-tasks within same project) caused the new file to orphan at vault root or land in the wrong project. v1.14.0 MINOR (v0.61.0 FA-8): depends_on backlink-panel >=0.1.0; Template, Project.md grows ## Mentions H2 above the existing 'Project Notes & Referenced By' callout block — universal cross-blueprint backlink panel via canonical projects: cross-ref reverse query, grouped by note type (groupBy: 'type'). Additive to the existing ProjectReferencedByCards outlinks-based panel. v1.16.0 MINOR (v0.102.0 S3): NEW sections[] field on project frontmatter (declares per-project Docs Hub buckets — defaults to [Knowledge, Notes] when absent/empty). doc-note entity-create button extended with section + section_slug prompts (section prompts the user with default 'Knowledge'; section_slug derives via slugify(prompts.section)) AND destination.folder_prefix gains the {{prompts.section_slug}} subfolder AND frontmatter_template gains section: '{{prompts.section}}'. NEW ProjectDocsSections customjs class replaces ProjectDocsCards on Template, Docs Hub.md (Confluence-style per-section buckets with + New <Section> buttons via EntityCreate presetPrompts). NEW ProjectMeetingsPanel customjs class renders a ## Meetings H2 panel on Template, Project.md between ## Workstreams and ## Mentions (5 most-recent meetings + expand toggle + + New meeting button via EntityCreate presetPrompts.project). doc-note rule_fragment path_glob extended from spice/projects/*/docs/*.md → spice/projects/*/docs/**/*.md to cover docs nested in section subfolders. Strategy A migration is delivered in a follow-up Task 6 (within v0.102.0 cycle) as applyProjectSectionsMigration — hardcoded dispatch in install.js following the applyDocsHubButtonRepair pattern. v1.17.0 MINOR (v0.103.0 S3): hierarchical section-hub navigation tree replaces v0.102.0's Confluence-style single-page Docs Hub. NEW section-hub frontmatter schema (type, project, project_slug, section, section_slug, parent_section, depth: 1|2) + NEW doc-note sub_section field for depth-2 nesting. THREE new CustomJS helpers consumed: Breadcrumb (clickable trail rendered on every node), ProjectDocsIndex (replaces ProjectDocsSections on Docs.md — section cards + dashboard chips + + New Section / + New Doc shortcuts), SectionHub (depth-aware section + sub-section + doc rendering with + New Doc / + New Sub-Section buttons). TWO new entity-create entries (section-hub + sub-section-hub) plus doc-note button extended with optional sub_section + sub_section_slug prompts (destination.folder_prefix appends {{prompts.sub_section_slug}}, frontmatter_template gains sub_section: '{{prompts.sub_section}}'). Docs Hub template REWRITTEN to invoke Breadcrumb + ProjectDocsIndex. NEW Section Hub template (canonical for both depth 1 + depth 2 section-hubs). Doc Note template extended with a <!-- breadcrumb-v1.17.0 --> marker + Breadcrumb dataviewjs block at the top (above prior content). Project entity-create entry's extra_files[] gains Knowledge.md + Notes.md depth-1 section-hub materializations (out-of-box default sections for new projects). NEW rule_fragment target section-hub. Migration step applyProjectSectionsHubMigration is delivered in a follow-up Task 6 (within v0.103.0 cycle): heals existing Docs.md bodies (ProjectDocsCards / ProjectDocsSections → ProjectDocsIndex), materializes missing Section Hub notes per existing docs/<slug>/ subfolder, migrates doc-note section: 'Knowledge' frontmatter to wikilink form, injects the breadcrumb marker + block. v1.18.0 MINOR (v0.104.0 S3): registers DocSearch CustomJS helper consumed by ProjectDocsIndex + SectionHub. Adds an in-page filter UI (text input + dynamic tag chips + scoped-Obsidian-search button) on Docs.md and every Section Hub. Pure additive — no schema or template changes; existing v0.103.x vaults pick up the filter UI on next install via the materialized doc-search.js. v1.19.0 MINOR (v0.105.0 S3): docs-system-fixes brief — 10 issues across entity-create, templates, and helpers. (1) Doc Note template no longer ships the <!-- breadcrumb-v1.17.0 --> marker line — new docs come without it (the v0.103 install-time migration still injects the marker on EXISTING pre-v0.103 docs for idempotency, so the marker logic in _migrateDocNote stays intact). (2) Section Hub template no longer ships its own leading frontmatter block — entity-create's frontmatter_template provides the full block, so duplicating the body's frontmatter produced two stacked --- blocks with unresolved {{prompts.X}} markers. Template now starts with the first dataviewjs block. (3) doc-note section + sub_section prompts switch from free-text string to type: select with options_source: current_project_sections (section) and options_source: current_section_sub_sections (sub_section). Required entity-create@0.6.0. Empty options_source on an optional prompt is skipped silently (sub_section auto-defaults to \"\" when the section has no sub-sections). (4) section-hub.js drops the dv.header(3, \"Docs\") line — the # H1 file-name already labels the section, and the strip-of-docs cards is contextually clear. (5) section-hub.js + project-docs-index.js + doc-search.js polish: DocSearch refactor splits the input strip from the results container (input survives keystrokes — Issue 6 P0); inline SVG search icon replaces 🔎 emoji (Issue 9); EntityCreate render() calls wrapped in flex containers with flex: 1 styling so buttons span full width (Issue 8); docs queries sort by file.mtime desc for newest-first ordering (Issue 10). v1.20.0 MINOR (v0.106.0 S2-S3): DocSearch filter state persists to localStorage keyed by scopePath (independent state for Docs.md cross-section + each Section Hub within-section) — saved text + selected tags survive reload; restoration runs AFTER listeners are wired so chip-styling restore + initial filter render flow through the same code paths user interactions do. Input listener wrapped in a 150ms debounce — coalesces rapid keystrokes so the filter recomputes once after typing stops (tag-chip clicks remain synchronous). ProjectDocsIndex dashboard chip strip extended with three new chips beside the existing docs/meetings/status row: (a) task-note count under spice/projects/<slug>/tasks/ — chip omitted silently when zero; (b) recent activity — count of filtered docs whose file.mtime is within the last 7 days, omitted when zero; (c) top-3 tag chips via NEW _topTags helper that mirrors DocSearch._countTags semantics (doc-note universal tag excluded). All new chips share the existing chipStyle; flex-wrap handles overflow on narrow viewports. v1.21.0 MINOR (v0.109.0 — projects visual overhaul, MAJOR project-blueprint UX cycle covering Sections A–F of the post-v0.106.0.1 handoff): (A) DocSearch generalized in-place with entityType + placeholder + tagExclude opts; ProjectsHubCards adopts DocSearch (entityType: project) so Projects.md grows a text + tag-chip filter strip above the status/team/product chips. (B) Template, Project.md rewritten: drops the ## Status / ## Workstreams / ## Meetings / ## Mentions H2s + the BacklinkPanel block + the Project Notes & Referenced By callout entirely; new section order is Status → Meetings → Workstreams (Workstreams moved lower per user request); Breadcrumb is the first block of the template. ProjectMeetingsPanel rewritten as a SpaceDailyDashboard-style 3-card panel (no expand toggle, no empty-state callout) with attendees subtitle + Notes / open-task badges; ports _enrichMeeting from the daily-dashboard helper. (C) ProjectDocsIndex section cards on Docs.md gain last-updated meta + most-recent-doc subtitle + maxMtime DESC ordering. (D) NEW SectionLabel customjs primitive (small uppercase muted label + hairline divider) replaces every dv.header(3, ...) call across ProjectMeetingsPanel, ProjectWorkstreamManager, ProjectDocsIndex, SectionHub. (E) Breadcrumb extended with map / kanban / task-note type branches + path-based projectSlug fallback; Breadcrumb block added to Project Map / Project Board / Task Note templates. NEW installer step applyDocNoteBreadcrumbMarkerCleanup walks every project's docs/ tree recursively and strips legacy v0.103.0 <!-- breadcrumb-v1.17.0 --> markers (block preserved); _migrateDocNote's idempotency guard rewritten to check the class invocation substring instead of the visible marker comment. (F) NEW Docs/agent-guides/project-blueprint-ui.md locks the shared rendering primitives + section-ordering + spacing conventions. BacklinkPanel + ProjectNotesCards + ProjectReferencedByCards helper files stay shipped (cowork consumes BacklinkPanel; the other two are earmarked for cross-blueprint audit + sunset in a later cycle). Mechanism count UNCHANGED at 17.",
+  "description": "Per-project atlas + map + Kanban board with hierarchical tasks, workstream-tagged cards, and All-Projects hub. v1.4.0 MINOR (v0.31.0 S6.5): hub note filename now defaults to the user-typed project name (e.g. 'Testing It All Out.md' under spice/projects/testing-it-all-out/) for native Obsidian tab title display. Configurable HUB_NOTE_FILENAME_STYLE constant in project-nav-buttons.js (name|slug|fixed). Rule_fragment refactored to type-discrimination via frontmatter_branch so audit + hub-cards filters are filename-independent. v1.4.1 PATCH CF-1: projects-hub-cards.js filter restored to match EITHER type:project OR legacy #project tag (older hub notes without type:project frontmatter were excluded from the Projects.md card grid); defensive type:map/kanban exclusions handle dataview's nested-tag expansion (#project/<slug> would otherwise falsely include Project Map + Project Board). v1.5.0 MINOR (v0.33.0 cohesion wave 2): adopts claude_surface[] \u2014 ships canonical /project slash command + new-project SKILL.md + resolvers row. Stale consumer-side .claude/commands/project.md bodies overwritten on next install. v1.6.0 MINOR (v0.39.0): NEW frontmatter fields status (7-state enum, required) + status_changed_at (YYYY-MM-DD, required) + teams[] + products[] (both optional wikilink lists). Default-active hub scope hides terminal statuses (superseded/cancelled/done). Tier 1 action buttons (Bump Status / Set Teams / Set Products) ship via ProjectActionButtons customjs class (S7). v1.7.0 MINOR (v0.46.0 S6): New Project create flow extracted to entity-create@0.1.0 mechanism \u2014 ProjectNavButtons._promptForProjectName / _createProject / _renderProjectsHub deleted (~184 LOC stripped), the class retains task-note + workstream + nav-row rendering only. Manifest declares new_entity_buttons[] with id=project, exercising three schema extensions for the first time: prompts[].derive (slugify(prompts.name)), extra_files[] for the Project Map + <slug>-board sidecars, and frontmatter_template with literal defaults (status:idea, status_changed_at:{{now.YYYY-MM-DD}}, workstreams:[]). content/Projects.md swaps the inline ProjectNavButtons-dispatched dataviewjs block for an <!-- entity-create:project --> marker. v1.7.2 PATCH (v0.47.0): no on-disk manifest changes; PATCH bump captures the fact that the installer's resolveEntityCreateEntry now auto-prepends {{templates_path}}/ on bare body_template basenames, changing this blueprint's registry output. Fixes BUG-3/4 from headspace Phase 3 (project atlas + Map + Board bodies were empty because the runtime _readBody resolved bare basenames against vault root). v1.8.0 MINOR (v0.48.0): NEW ProjectTaskCreateListener customjs class subscribes once at vault load (via NEW Templater startup template Project Task Create Listener.md) to vault.create for files matching ^spice/projects/<slug>/tasks/<file>.md$ and invokes Templater's replace-in-file-templater command on them. Fixes BUG-5 (kanban \"+ Add a card\" doesn't run Templater post-paste). NEW manifest field templater_startup_templates[]. Template, Kanban Card.md enhanced with \"+ Create new workstream\" sentinel + empty-workstreams Notice. v1.9.0 MINOR (v0.49.0 S1): NEW ProjectTaskCreateListenerInit customjs class registered in customjs plugin's startupScriptNames[] via NEW manifest field customjs_startup_scripts[]. Replaces v0.48.0's Templater startup_template registration mechanism (which failed silently at consumer vaults). v0.48.0's Templater wiring stays as belt-and-suspenders backstop (idempotent init via _initialized flag). v1.9.1 PATCH (v0.49.1): Template, Kanban Card.md source-board detection + auto-promote fix. Previously detectPath = targetPath || activePath produced vault-root path when kanban-plugin invokes Templater's create-new-note-from-template (Templater controls folder placement, defaulting to vault root). The new logic prefers tp.config.active_file (the source board the user clicked + Add a card on), so the workstream picker and auto-promote tp.file.move both fire correctly regardless of where Templater initially placed the file. Surfaced 2026-05-16: user reported new card files landing at vault root with no workstream prompt; root cause was that the kanban-plugin's per-board new-note-folder setting is ignored when new-note-template is set (kanban delegates folder placement to Templater). v1.10.4 PATCH (v0.50.5): ProjectNavButtons.render() main button row wraps to multiple flex rows when buttons don't fit (flex-wrap: wrap + flex: 0 1 auto + label white-space: nowrap). Fixes mobile clutter on long project/task names without removing buttons or labels. v1.11.0 MINOR (v0.51.0): NEW ProjectStatusWidget customjs class \u2014 colored status chip on the project hub with click-to-change picker (7-option overlay). Writes status + status_changed_at via app.fileManager.processFrontMatter. Sibling to ProjectWorkstreamManager. Adds new ## Status H2 section to Template, Project.md between the nav-buttons row and the existing ## Workstreams section. v1.11.1 PATCH (v0.51.1): Kanban Card template's _findSourceKanbanBoard now tries app.metadataCache.getBacklinksForFile(newFile) first (identity-based indexed lookup, no IO when cache is warm) before falling back to v0.49.2's vault-scan. Fallback preserved byte-for-byte for cold-cache safety. More robust on title collisions across the vault than substring-on-raw-bytes. v1.12.0 MINOR (v0.52.0): renamed the v0.50.0 \"Wiki\" surface to \"Docs\". ProjectWikiCards \u2192 ProjectDocsCards; templates Wiki Hub.md / Wiki Note.md \u2192 Docs Hub.md / Doc Note.md; subfolder convention spice/projects/<slug>/wiki/ \u2192 docs/; frontmatter types wiki-hub/wiki-note \u2192 docs-hub/doc-note; rules + tags ditto; entity-create entry id wiki-note \u2192 doc-note label \"+ New Doc\"; installer step applyWikiBackfill \u2192 applyDocsBackfill (folds FLN-1: now unconditional + repairs 0-byte Docs.md). NEW installer step applyWikiToDocsMigration runs per-project: backs up wiki/ to .sauce-backup/<slug>/wiki/<ts>/, renames wiki/ \u2192 docs/, renames Wiki.md \u2192 Docs.md, rewrites frontmatter (type + tags) + customJS.ProjectWikiCards \u2192 ProjectDocsCards refs inside each migrated .md. Idempotent (skips if docs/ already exists). Project-atlas \"Wiki\" button at project-nav-buttons.js:357 RENAMED to \"Docs\" (no new button surface). v1.12.1 PATCH (v0.52.1): _rmDirRecursive in applyWikiToDocsMigration falls back to Node fs.rmSync when adapter.rmdir is absent (CLI-mode adapter doesn't expose it). Without the fix, v0.52.0 install left empty wiki/ dirs alongside the new docs/ dirs at the first migration run. Fix adds WTD-MIG-4 test case exercising the fallback against a real tmpdir adapter. v1.13.4 PATCH (v0.59.8): retires v0.48.0's Templater startup_templates[] backstop. The Template, Project Task Create Listener.md template body calls customJS.ProjectTaskCreateListener.init() at Templater startup, but customJS hasn't finished loading its classes at that point \u2014 so customJS.ProjectTaskCreateListener is undefined and .init() throws \"Cannot read properties of undefined (reading 'init')\" in the console on every vault load. v0.49.0's customjs startupScriptNames[] path (ProjectTaskCreateListenerInit) is the working registration and remains. Edits: drop templater_startup_templates[] field + the Template, Project Task Create Listener.md files[] entry; delete the template source. NEW installer step pruneTemplaterStartupOrphans removes the orphan entry from each consumer's .obsidian/plugins/templater-obsidian/data.json startup_templates[] on next install (sunset after a couple releases). v1.13.6 PATCH (v0.59.11): Template, Kanban Card.md name-collision fix. (A) NEW Strategy 0 sibling-board detection runs FIRST in _findSourceKanbanBoard \u2014 if the new file's parent directory contains exactly one kanban-plugin board file, that board IS the source (path-based, bypasses title-substring pitfalls under collision). (B) Auto-promote `if (!existing)` skip replaced with suffix-disambiguation loop \u2014 when ${projectDir}/tasks/${fileName}/${fileName}.md exists, picks ${fileName}-2, ${fileName}-3, ... until a free slot is found (bounded \u2264999); surfaces the rename via Notice. Fixes the bug where same-name tasks across projects (or sibling sub-tasks within same project) caused the new file to orphan at vault root or land in the wrong project. v1.14.0 MINOR (v0.61.0 FA-8): depends_on backlink-panel >=0.1.0; Template, Project.md grows ## Mentions H2 above the existing 'Project Notes & Referenced By' callout block \u2014 universal cross-blueprint backlink panel via canonical projects: cross-ref reverse query, grouped by note type (groupBy: 'type'). Additive to the existing ProjectReferencedByCards outlinks-based panel. v1.16.0 MINOR (v0.102.0 S3): NEW sections[] field on project frontmatter (declares per-project Docs Hub buckets \u2014 defaults to [Knowledge, Notes] when absent/empty). doc-note entity-create button extended with section + section_slug prompts (section prompts the user with default 'Knowledge'; section_slug derives via slugify(prompts.section)) AND destination.folder_prefix gains the {{prompts.section_slug}} subfolder AND frontmatter_template gains section: '{{prompts.section}}'. NEW ProjectDocsSections customjs class replaces ProjectDocsCards on Template, Docs Hub.md (Confluence-style per-section buckets with + New <Section> buttons via EntityCreate presetPrompts). NEW ProjectMeetingsPanel customjs class renders a ## Meetings H2 panel on Template, Project.md between ## Workstreams and ## Mentions (5 most-recent meetings + expand toggle + + New meeting button via EntityCreate presetPrompts.project). doc-note rule_fragment path_glob extended from spice/projects/*/docs/*.md \u2192 spice/projects/*/docs/**/*.md to cover docs nested in section subfolders. Strategy A migration is delivered in a follow-up Task 6 (within v0.102.0 cycle) as applyProjectSectionsMigration \u2014 hardcoded dispatch in install.js following the applyDocsHubButtonRepair pattern. v1.17.0 MINOR (v0.103.0 S3): hierarchical section-hub navigation tree replaces v0.102.0's Confluence-style single-page Docs Hub. NEW section-hub frontmatter schema (type, project, project_slug, section, section_slug, parent_section, depth: 1|2) + NEW doc-note sub_section field for depth-2 nesting. THREE new CustomJS helpers consumed: Breadcrumb (clickable trail rendered on every node), ProjectDocsIndex (replaces ProjectDocsSections on Docs.md \u2014 section cards + dashboard chips + + New Section / + New Doc shortcuts), SectionHub (depth-aware section + sub-section + doc rendering with + New Doc / + New Sub-Section buttons). TWO new entity-create entries (section-hub + sub-section-hub) plus doc-note button extended with optional sub_section + sub_section_slug prompts (destination.folder_prefix appends {{prompts.sub_section_slug}}, frontmatter_template gains sub_section: '{{prompts.sub_section}}'). Docs Hub template REWRITTEN to invoke Breadcrumb + ProjectDocsIndex. NEW Section Hub template (canonical for both depth 1 + depth 2 section-hubs). Doc Note template extended with a <!-- breadcrumb-v1.17.0 --> marker + Breadcrumb dataviewjs block at the top (above prior content). Project entity-create entry's extra_files[] gains Knowledge.md + Notes.md depth-1 section-hub materializations (out-of-box default sections for new projects). NEW rule_fragment target section-hub. Migration step applyProjectSectionsHubMigration is delivered in a follow-up Task 6 (within v0.103.0 cycle): heals existing Docs.md bodies (ProjectDocsCards / ProjectDocsSections \u2192 ProjectDocsIndex), materializes missing Section Hub notes per existing docs/<slug>/ subfolder, migrates doc-note section: 'Knowledge' frontmatter to wikilink form, injects the breadcrumb marker + block. v1.18.0 MINOR (v0.104.0 S3): registers DocSearch CustomJS helper consumed by ProjectDocsIndex + SectionHub. Adds an in-page filter UI (text input + dynamic tag chips + scoped-Obsidian-search button) on Docs.md and every Section Hub. Pure additive \u2014 no schema or template changes; existing v0.103.x vaults pick up the filter UI on next install via the materialized doc-search.js. v1.19.0 MINOR (v0.105.0 S3): docs-system-fixes brief \u2014 10 issues across entity-create, templates, and helpers. (1) Doc Note template no longer ships the <!-- breadcrumb-v1.17.0 --> marker line \u2014 new docs come without it (the v0.103 install-time migration still injects the marker on EXISTING pre-v0.103 docs for idempotency, so the marker logic in _migrateDocNote stays intact). (2) Section Hub template no longer ships its own leading frontmatter block \u2014 entity-create's frontmatter_template provides the full block, so duplicating the body's frontmatter produced two stacked --- blocks with unresolved {{prompts.X}} markers. Template now starts with the first dataviewjs block. (3) doc-note section + sub_section prompts switch from free-text string to type: select with options_source: current_project_sections (section) and options_source: current_section_sub_sections (sub_section). Required entity-create@0.6.0. Empty options_source on an optional prompt is skipped silently (sub_section auto-defaults to \"\" when the section has no sub-sections). (4) section-hub.js drops the dv.header(3, \"Docs\") line \u2014 the # H1 file-name already labels the section, and the strip-of-docs cards is contextually clear. (5) section-hub.js + project-docs-index.js + doc-search.js polish: DocSearch refactor splits the input strip from the results container (input survives keystrokes \u2014 Issue 6 P0); inline SVG search icon replaces \ud83d\udd0e emoji (Issue 9); EntityCreate render() calls wrapped in flex containers with flex: 1 styling so buttons span full width (Issue 8); docs queries sort by file.mtime desc for newest-first ordering (Issue 10). v1.20.0 MINOR (v0.106.0 S2-S3): DocSearch filter state persists to localStorage keyed by scopePath (independent state for Docs.md cross-section + each Section Hub within-section) \u2014 saved text + selected tags survive reload; restoration runs AFTER listeners are wired so chip-styling restore + initial filter render flow through the same code paths user interactions do. Input listener wrapped in a 150ms debounce \u2014 coalesces rapid keystrokes so the filter recomputes once after typing stops (tag-chip clicks remain synchronous). ProjectDocsIndex dashboard chip strip extended with three new chips beside the existing docs/meetings/status row: (a) task-note count under spice/projects/<slug>/tasks/ \u2014 chip omitted silently when zero; (b) recent activity \u2014 count of filtered docs whose file.mtime is within the last 7 days, omitted when zero; (c) top-3 tag chips via NEW _topTags helper that mirrors DocSearch._countTags semantics (doc-note universal tag excluded). All new chips share the existing chipStyle; flex-wrap handles overflow on narrow viewports. v1.21.0 MINOR (v0.109.0 \u2014 projects visual overhaul, MAJOR project-blueprint UX cycle covering Sections A\u2013F of the post-v0.106.0.1 handoff): (A) DocSearch generalized in-place with entityType + placeholder + tagExclude opts; ProjectsHubCards adopts DocSearch (entityType: project) so Projects.md grows a text + tag-chip filter strip above the status/team/product chips. (B) Template, Project.md rewritten: drops the ## Status / ## Workstreams / ## Meetings / ## Mentions H2s + the BacklinkPanel block + the Project Notes & Referenced By callout entirely; new section order is Status \u2192 Meetings \u2192 Workstreams (Workstreams moved lower per user request); Breadcrumb is the first block of the template. ProjectMeetingsPanel rewritten as a SpaceDailyDashboard-style 3-card panel (no expand toggle, no empty-state callout) with attendees subtitle + Notes / open-task badges; ports _enrichMeeting from the daily-dashboard helper. (C) ProjectDocsIndex section cards on Docs.md gain last-updated meta + most-recent-doc subtitle + maxMtime DESC ordering. (D) NEW SectionLabel customjs primitive (small uppercase muted label + hairline divider) replaces every dv.header(3, ...) call across ProjectMeetingsPanel, ProjectWorkstreamManager, ProjectDocsIndex, SectionHub. (E) Breadcrumb extended with map / kanban / task-note type branches + path-based projectSlug fallback; Breadcrumb block added to Project Map / Project Board / Task Note templates. NEW installer step applyDocNoteBreadcrumbMarkerCleanup walks every project's docs/ tree recursively and strips legacy v0.103.0 <!-- breadcrumb-v1.17.0 --> markers (block preserved); _migrateDocNote's idempotency guard rewritten to check the class invocation substring instead of the visible marker comment. (F) NEW Docs/agent-guides/project-blueprint-ui.md locks the shared rendering primitives + section-ordering + spacing conventions. BacklinkPanel + ProjectNotesCards + ProjectReferencedByCards helper files stay shipped (cowork consumes BacklinkPanel; the other two are earmarked for cross-blueprint audit + sunset in a later cycle). Mechanism count UNCHANGED at 17.",
   "depends_on": [
-    { "name": "nav-buttons",     "range": ">=2.3.0" },
-    { "name": "customjs-guard",  "range": ">=1.0.0" },
-    { "name": "cards",           "range": ">=0.1.1" },
-    { "name": "accent-button",   "range": ">=0.1.0" },
-    { "name": "convenience",     "range": ">=0.1.0" },
-    { "name": "backlink-panel",  "range": ">=0.1.0" }
+    {
+      "name": "nav-buttons",
+      "range": ">=2.3.0"
+    },
+    {
+      "name": "customjs-guard",
+      "range": ">=1.0.0"
+    },
+    {
+      "name": "cards",
+      "range": ">=0.1.1"
+    },
+    {
+      "name": "accent-button",
+      "range": ">=0.1.0"
+    },
+    {
+      "name": "convenience",
+      "range": ">=0.1.0"
+    },
+    {
+      "name": "backlink-panel",
+      "range": ">=0.1.0"
+    }
   ],
   "customjs_classes": [
     "ProjectNavButtons",
@@ -32,45 +50,148 @@
     "DocSearch"
   ],
   "pre_install": [
-    { "type": "delete", "path": "boards/To-Do-Board.md" }
+    {
+      "type": "delete",
+      "path": "boards/To-Do-Board.md"
+    }
   ],
   "files": [
-    { "source": "templates/Project.md",                  "dest": "{{templates_path}}/Template, Project.md" },
-    { "source": "templates/Project Map.md",              "dest": "{{templates_path}}/Template, Project Map.md" },
-    { "source": "templates/Project Board.md",            "dest": "{{templates_path}}/Template, Project Board.md" },
-    { "source": "templates/Kanban Card.md",              "dest": "{{templates_path}}/Template, Kanban Card.md" },
-    { "source": "templates/Task Note.md",                "dest": "{{templates_path}}/Template, Task Note.md" },
-    { "source": "templates/Task Board.md",               "dest": "{{templates_path}}/Template, Task Board.md" },
-    { "source": "templates/Task Board Card.md",          "dest": "{{templates_path}}/Template, Task Board Card.md" },
-    { "source": "helpers/project-nav-buttons.js",        "dest": "{{scripts_path}}/project/project-nav-buttons.js" },
-    { "source": "helpers/project-workstream-manager.js", "dest": "{{scripts_path}}/project/project-workstream-manager.js" },
-    { "source": "helpers/project-workstreams.js",        "dest": "{{scripts_path}}/project/project-workstreams.js" },
-    { "source": "helpers/projects-hub-cards.js",         "dest": "{{scripts_path}}/project/projects-hub-cards.js" },
-    { "source": "helpers/project-notes-cards.js",        "dest": "{{scripts_path}}/project/project-notes-cards.js" },
-    { "source": "helpers/project-referenced-by-cards.js","dest": "{{scripts_path}}/project/project-referenced-by-cards.js" },
-    { "source": "helpers/project-task-create-listener.js","dest": "{{scripts_path}}/project/project-task-create-listener.js" },
-    { "source": "helpers/project-task-create-listener-init.js","dest": "{{scripts_path}}/project/project-task-create-listener-init.js" },
-    { "source": "content/Projects.md",                   "dest": "{{module_directory}}/Projects.md" },
-    { "source": "templates/Docs Hub.md",                 "dest": "{{templates_path}}/Template, Docs Hub.md" },
-    { "source": "templates/Doc Note.md",                 "dest": "{{templates_path}}/Template, Doc Note.md" },
-    { "source": "helpers/project-docs-cards.js",         "dest": "{{scripts_path}}/project/project-docs-cards.js" },
-    { "source": "helpers/project-status-widget.js",      "dest": "{{scripts_path}}/project/project-status-widget.js" },
-    { "source": "helpers/project-docs-sections.js",      "dest": "{{scripts_path}}/project/project-docs-sections.js" },
-    { "source": "helpers/project-meetings-panel.js",     "dest": "{{scripts_path}}/project/project-meetings-panel.js" },
-    { "source": "helpers/breadcrumb.js",                 "dest": "{{scripts_path}}/project/breadcrumb.js" },
-    { "source": "helpers/project-docs-index.js",         "dest": "{{scripts_path}}/project/project-docs-index.js" },
-    { "source": "helpers/section-hub.js",                "dest": "{{scripts_path}}/project/section-hub.js" },
-    { "source": "helpers/section-label.js",              "dest": "{{scripts_path}}/project/section-label.js" },
-    { "source": "templates/Section Hub.md",              "dest": "{{templates_path}}/Template, Section Hub.md" },
-    { "source": "helpers/doc-search.js",                  "dest": "{{scripts_path}}/project/doc-search.js" }
+    {
+      "source": "templates/Project.md",
+      "dest": "{{templates_path}}/Template, Project.md"
+    },
+    {
+      "source": "templates/Project Map.md",
+      "dest": "{{templates_path}}/Template, Project Map.md"
+    },
+    {
+      "source": "templates/Project Board.md",
+      "dest": "{{templates_path}}/Template, Project Board.md"
+    },
+    {
+      "source": "templates/Kanban Card.md",
+      "dest": "{{templates_path}}/Template, Kanban Card.md"
+    },
+    {
+      "source": "templates/Task Note.md",
+      "dest": "{{templates_path}}/Template, Task Note.md"
+    },
+    {
+      "source": "templates/Task Board.md",
+      "dest": "{{templates_path}}/Template, Task Board.md"
+    },
+    {
+      "source": "templates/Task Board Card.md",
+      "dest": "{{templates_path}}/Template, Task Board Card.md"
+    },
+    {
+      "source": "helpers/project-nav-buttons.js",
+      "dest": "{{scripts_path}}/project/project-nav-buttons.js"
+    },
+    {
+      "source": "helpers/project-workstream-manager.js",
+      "dest": "{{scripts_path}}/project/project-workstream-manager.js"
+    },
+    {
+      "source": "helpers/project-workstreams.js",
+      "dest": "{{scripts_path}}/project/project-workstreams.js"
+    },
+    {
+      "source": "helpers/projects-hub-cards.js",
+      "dest": "{{scripts_path}}/project/projects-hub-cards.js"
+    },
+    {
+      "source": "helpers/project-notes-cards.js",
+      "dest": "{{scripts_path}}/project/project-notes-cards.js"
+    },
+    {
+      "source": "helpers/project-referenced-by-cards.js",
+      "dest": "{{scripts_path}}/project/project-referenced-by-cards.js"
+    },
+    {
+      "source": "helpers/project-task-create-listener.js",
+      "dest": "{{scripts_path}}/project/project-task-create-listener.js"
+    },
+    {
+      "source": "helpers/project-task-create-listener-init.js",
+      "dest": "{{scripts_path}}/project/project-task-create-listener-init.js"
+    },
+    {
+      "source": "content/Projects.md",
+      "dest": "{{module_directory}}/Projects.md"
+    },
+    {
+      "source": "templates/Docs Hub.md",
+      "dest": "{{templates_path}}/Template, Docs Hub.md"
+    },
+    {
+      "source": "templates/Doc Note.md",
+      "dest": "{{templates_path}}/Template, Doc Note.md"
+    },
+    {
+      "source": "helpers/project-docs-cards.js",
+      "dest": "{{scripts_path}}/project/project-docs-cards.js"
+    },
+    {
+      "source": "helpers/project-status-widget.js",
+      "dest": "{{scripts_path}}/project/project-status-widget.js"
+    },
+    {
+      "source": "helpers/project-docs-sections.js",
+      "dest": "{{scripts_path}}/project/project-docs-sections.js"
+    },
+    {
+      "source": "helpers/project-meetings-panel.js",
+      "dest": "{{scripts_path}}/project/project-meetings-panel.js"
+    },
+    {
+      "source": "helpers/breadcrumb.js",
+      "dest": "{{scripts_path}}/project/breadcrumb.js"
+    },
+    {
+      "source": "helpers/project-docs-index.js",
+      "dest": "{{scripts_path}}/project/project-docs-index.js"
+    },
+    {
+      "source": "helpers/section-hub.js",
+      "dest": "{{scripts_path}}/project/section-hub.js"
+    },
+    {
+      "source": "helpers/section-label.js",
+      "dest": "{{scripts_path}}/project/section-label.js"
+    },
+    {
+      "source": "templates/Section Hub.md",
+      "dest": "{{templates_path}}/Template, Section Hub.md"
+    },
+    {
+      "source": "helpers/doc-search.js",
+      "dest": "{{scripts_path}}/project/doc-search.js"
+    }
   ],
   "customjs_startup_scripts": [
     "ProjectTaskCreateListenerInit"
   ],
   "claude_surface": [
-    { "kind": "command", "source": "commands/project.md", "dest": ".claude/commands/project.md" },
-    { "kind": "skill",   "source": "skills/new-project/SKILL.md", "dest": "{{skills_dir}}/new-project/SKILL.md" },
-    { "kind": "claude_md_row", "table": "resolvers", "row": { "topic": "Projects", "path": "{{module_directory}}", "command": "/project" } }
+    {
+      "kind": "command",
+      "source": "commands/project.md",
+      "dest": ".claude/commands/project.md"
+    },
+    {
+      "kind": "skill",
+      "source": "skills/new-project/SKILL.md",
+      "dest": "{{skills_dir}}/new-project/SKILL.md"
+    },
+    {
+      "kind": "claude_md_row",
+      "table": "resolvers",
+      "row": {
+        "topic": "Projects",
+        "path": "{{module_directory}}",
+        "command": "/project"
+      }
+    }
   ],
   "new_entity_buttons": [
     {
@@ -78,8 +199,17 @@
       "label": "New Project",
       "icon": "folder-plus",
       "prompts": [
-        { "key": "name", "label": "Project name", "type": "string", "required": true },
-        { "key": "slug", "type": "string", "derive": "slugify(prompts.name)" }
+        {
+          "key": "name",
+          "label": "Project name",
+          "type": "string",
+          "required": true
+        },
+        {
+          "key": "slug",
+          "type": "string",
+          "derive": "slugify(prompts.name)"
+        }
       ],
       "destination": {
         "folder_prefix": "spice/projects/{{prompts.slug}}",
@@ -99,9 +229,19 @@
       },
       "body_template": "Template, Project.md",
       "extra_files": [
-        { "filename_pattern": "Project Map.md", "body_template": "Template, Project Map.md" },
-        { "filename_pattern": "{{prompts.slug}}-board.md", "body_template": "Template, Project Board.md" },
-        { "subfolder": "docs", "filename_pattern": "Docs.md", "body_template": "Template, Docs Hub.md" },
+        {
+          "filename_pattern": "Project Map.md",
+          "body_template": "Template, Project Map.md"
+        },
+        {
+          "filename_pattern": "{{prompts.slug}}-board.md",
+          "body_template": "Template, Project Board.md"
+        },
+        {
+          "subfolder": "docs",
+          "filename_pattern": "Docs.md",
+          "body_template": "Template, Docs Hub.md"
+        },
         {
           "subfolder": "docs/knowledge",
           "filename_pattern": "Knowledge.md",
@@ -114,7 +254,9 @@
             "parent_section": "",
             "depth": 1,
             "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
-            "tags": ["section-hub"]
+            "tags": [
+              "section-hub"
+            ]
           },
           "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"Breadcrumb\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ProjectNavButtons\" });\n```\n\n---\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SectionHub\" });\n```\n"
         },
@@ -130,7 +272,9 @@
             "parent_section": "",
             "depth": 1,
             "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
-            "tags": ["section-hub"]
+            "tags": [
+              "section-hub"
+            ]
           },
           "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"Breadcrumb\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ProjectNavButtons\" });\n```\n\n---\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SectionHub\" });\n```\n"
         },
@@ -141,23 +285,57 @@
             "project": "[[{{prompts.name}}]]",
             "project_slug": "{{prompts.slug}}",
             "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
-            "cssclasses": ["wide"]
+            "cssclasses": [
+              "wide"
+            ]
           },
           "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"Breadcrumb\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ProjectNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ToDoLeafActions\" });\n```\n\n## Owned Tasks\n\n## From Meetings\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ToDoDailyProjectGroups\", args: [{ scope: \"project-todo\" }] });\n```\n"
         }
       ],
-      "render_in": { "kind": "hub", "target_path": "{{module_directory}}/Projects.md" }
+      "render_in": {
+        "kind": "hub",
+        "target_path": "{{module_directory}}/Projects.md"
+      }
     },
     {
       "id": "doc-note",
       "label": "+ New Doc",
       "icon": "file-plus",
       "prompts": [
-        { "key": "title", "label": "Doc title", "type": "string", "required": true, "validate": "safe-filename" },
-        { "key": "section", "label": "Section", "type": "select", "options_source": "current_project_sections", "required": true },
-        { "key": "section_slug", "label": "(derived from section)", "type": "string", "derive": "slugify(prompts.section)" },
-        { "key": "sub_section", "label": "Sub-section", "type": "select", "options_source": "current_section_sub_sections", "required": false, "default": "" },
-        { "key": "sub_section_slug", "label": "(derived from sub_section)", "type": "string", "derive": "slugify(prompts.sub_section)" }
+        {
+          "key": "title",
+          "label": "Doc title",
+          "type": "string",
+          "required": true,
+          "validate": "safe-filename"
+        },
+        {
+          "key": "section",
+          "label": "Section",
+          "type": "select",
+          "options_source": "current_project_sections",
+          "required": true
+        },
+        {
+          "key": "section_slug",
+          "label": "(derived from section)",
+          "type": "string",
+          "derive": "slugify(prompts.section)"
+        },
+        {
+          "key": "sub_section",
+          "label": "Sub-section",
+          "type": "select",
+          "options_source": "current_section_sub_sections",
+          "required": false,
+          "default": ""
+        },
+        {
+          "key": "sub_section_slug",
+          "label": "(derived from sub_section)",
+          "type": "string",
+          "derive": "slugify(prompts.sub_section)"
+        }
       ],
       "destination": {
         "folder_prefix": "spice/projects/{{current_file.frontmatter.project_slug}}/docs/{{prompts.section_slug}}/{{prompts.sub_section_slug}}",
@@ -170,18 +348,34 @@
         "project_slug": "{{current_file.frontmatter.project_slug}}",
         "section": "{{prompts.section}}",
         "sub_section": "{{prompts.sub_section}}",
-        "tags": ["doc-note"]
+        "tags": [
+          "doc-note"
+        ]
       },
       "body_template": "Template, Doc Note.md",
-      "render_in": { "kind": "hub", "target_path": "{{templates_path}}/Template, Docs Hub.md" }
+      "render_in": {
+        "kind": "hub",
+        "target_path": "{{templates_path}}/Template, Docs Hub.md"
+      }
     },
     {
       "id": "section-hub",
       "label": "+ New Section",
       "icon": "folder-plus",
       "prompts": [
-        { "key": "name", "label": "Section name", "type": "string", "required": true, "validate": "safe-filename" },
-        { "key": "slug", "label": "(derived from name)", "type": "string", "derive": "slugify(prompts.name)" }
+        {
+          "key": "name",
+          "label": "Section name",
+          "type": "string",
+          "required": true,
+          "validate": "safe-filename"
+        },
+        {
+          "key": "slug",
+          "label": "(derived from name)",
+          "type": "string",
+          "derive": "slugify(prompts.name)"
+        }
       ],
       "destination": {
         "folder_prefix": "spice/projects/{{current_file.frontmatter.project_slug}}/docs/{{prompts.slug}}",
@@ -196,19 +390,40 @@
         "parent_section": "",
         "depth": 1,
         "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
-        "tags": ["section-hub"]
+        "tags": [
+          "section-hub"
+        ]
       },
       "body_template": "Template, Section Hub.md",
-      "render_in": { "kind": "hub", "target_path": "{{templates_path}}/Template, Docs Hub.md" }
+      "render_in": {
+        "kind": "hub",
+        "target_path": "{{templates_path}}/Template, Docs Hub.md"
+      }
     },
     {
       "id": "sub-section-hub",
       "label": "+ New Sub-Section",
       "icon": "folder-plus",
       "prompts": [
-        { "key": "name", "label": "Sub-section name", "type": "string", "required": true, "validate": "safe-filename" },
-        { "key": "slug", "label": "(derived from name)", "type": "string", "derive": "slugify(prompts.name)" },
-        { "key": "parent_slug", "label": "Parent section slug", "type": "string", "required": true }
+        {
+          "key": "name",
+          "label": "Sub-section name",
+          "type": "string",
+          "required": true,
+          "validate": "safe-filename"
+        },
+        {
+          "key": "slug",
+          "label": "(derived from name)",
+          "type": "string",
+          "derive": "slugify(prompts.name)"
+        },
+        {
+          "key": "parent_slug",
+          "label": "Parent section slug",
+          "type": "string",
+          "required": true
+        }
       ],
       "destination": {
         "folder_prefix": "spice/projects/{{current_file.frontmatter.project_slug}}/docs/{{prompts.parent_slug}}/{{prompts.slug}}",
@@ -223,10 +438,15 @@
         "parent_section": "[[{{current_file.frontmatter.section}}]]",
         "depth": 2,
         "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
-        "tags": ["section-hub"]
+        "tags": [
+          "section-hub"
+        ]
       },
       "body_template": "Template, Section Hub.md",
-      "render_in": { "kind": "hub", "target_path": "{{templates_path}}/Template, Section Hub.md" }
+      "render_in": {
+        "kind": "hub",
+        "target_path": "{{templates_path}}/Template, Section Hub.md"
+      }
     }
   ],
   "nav_buttons": [
@@ -235,34 +455,73 @@
       "label": "Projects",
       "icon": "projects",
       "order": 100,
-      "action": { "type": "openLink", "target": "{{module_directory}}/Projects.md" }
+      "action": {
+        "type": "openLink",
+        "target": "{{module_directory}}/Projects.md"
+      }
     }
   ],
   "post_install": [
     {
       "type": "notice",
-      "message": "Project blueprint v1.0.0 installed at spice/projects/. To create your first project: open spice/projects/Projects.md (Cmd+O → search 'Projects') and click the 'New Project' action button. Per-project Kanban cards auto-promote to folder-style (tasks/<X>/<X>.md and board/<Y>/<Y>.md) via Templater. Workstream tagging on cards via the Change/Assign widget rendered on each card. Cmd+R required after this install to load the 3 CustomJS classes."
+      "message": "Project blueprint v1.0.0 installed at spice/projects/. To create your first project: open spice/projects/Projects.md (Cmd+O \u2192 search 'Projects') and click the 'New Project' action button. Per-project Kanban cards auto-promote to folder-style (tasks/<X>/<X>.md and board/<Y>/<Y>.md) via Templater. Workstream tagging on cards via the Change/Assign widget rendered on each card. Cmd+R required after this install to load the 3 CustomJS classes."
     }
   ],
   "bootstrap_contributions": [
-    { "kind": "engagement_field_offer", "engagement_field_id": "project.primary_kanban_filter", "type": "string", "prompt": "Filter expression for this engagement's primary kanban (blank = no filter)", "consumed_by_types": ["w2-fte", "consulting", "personal"] }
+    {
+      "kind": "engagement_field_offer",
+      "engagement_field_id": "project.primary_kanban_filter",
+      "type": "string",
+      "prompt": "Filter expression for this engagement's primary kanban (blank = no filter)",
+      "consumed_by_types": [
+        "w2-fte",
+        "consulting",
+        "personal"
+      ]
+    }
   ],
   "rule_fragments": [
     {
       "target": "project",
       "fragment": {
-        "scope": { "path_glob": "spice/projects/*/*.md" },
+        "scope": {
+          "path_glob": "spice/projects/*/*.md"
+        },
         "extends": "_canonical-vocab",
         "frontmatter_branch": [
           {
-            "when": { "frontmatter": { "type": "project" } },
+            "when": {
+              "frontmatter": {
+                "type": "project"
+              }
+            },
             "required_frontmatter": {
-              "description":       { "required": true,  "type": "string" },
-              "workstreams":       { "required": true,  "type": "list" },
-              "status":            { "required": true,  "type": "string", "matches": "^(idea|planning|in-progress|blocked|superseded|cancelled|done)$" },
-              "status_changed_at": { "required": true,  "type": "string", "matches": "^\\d{4}-\\d{2}-\\d{2}$" },
-              "teams":             { "required": false, "type": "list" },
-              "products":          { "required": false, "type": "list" }
+              "description": {
+                "required": true,
+                "type": "string"
+              },
+              "workstreams": {
+                "required": true,
+                "type": "list"
+              },
+              "status": {
+                "required": true,
+                "type": "string",
+                "matches": "^(idea|planning|in-progress|blocked|superseded|cancelled|done)$"
+              },
+              "status_changed_at": {
+                "required": true,
+                "type": "string",
+                "matches": "^\\d{4}-\\d{2}-\\d{2}$"
+              },
+              "teams": {
+                "required": false,
+                "type": "list"
+              },
+              "products": {
+                "required": false,
+                "type": "list"
+              }
             }
           }
         ]
@@ -271,17 +530,37 @@
     {
       "target": "docs-hub",
       "fragment": {
-        "scope": { "path_glob": "spice/projects/*/docs/Docs.md" },
+        "scope": {
+          "path_glob": "spice/projects/*/docs/Docs.md"
+        },
         "extends": "_canonical-vocab",
         "frontmatter_branch": [
           {
-            "when": { "frontmatter": { "type": "docs-hub" } },
-            "required_frontmatter": {
-              "type":         { "required": true, "type": "string", "matches": "^docs-hub$" },
-              "project_slug": { "required": true, "type": "string" },
-              "project_name": { "required": true, "type": "string" }
+            "when": {
+              "frontmatter": {
+                "type": "docs-hub"
+              }
             },
-            "required_tags": [{ "tag": "docs-hub" }]
+            "required_frontmatter": {
+              "type": {
+                "required": true,
+                "type": "string",
+                "matches": "^docs-hub$"
+              },
+              "project_slug": {
+                "required": true,
+                "type": "string"
+              },
+              "project_name": {
+                "required": true,
+                "type": "string"
+              }
+            },
+            "required_tags": [
+              {
+                "tag": "docs-hub"
+              }
+            ]
           }
         ]
       }
@@ -289,17 +568,40 @@
     {
       "target": "doc-note",
       "fragment": {
-        "scope": { "path_glob": "spice/projects/*/docs/**/*.md", "exclude_basenames": ["Docs.md"] },
+        "scope": {
+          "path_glob": "spice/projects/*/docs/**/*.md",
+          "exclude_basenames": [
+            "Docs.md"
+          ]
+        },
         "extends": "_canonical-vocab",
         "frontmatter_branch": [
           {
-            "when": { "frontmatter": { "type": "doc-note" } },
-            "required_frontmatter": {
-              "type":         { "required": true, "type": "string", "matches": "^doc-note$" },
-              "project":      { "required": true, "type": "string" },
-              "project_slug": { "required": true, "type": "string" }
+            "when": {
+              "frontmatter": {
+                "type": "doc-note"
+              }
             },
-            "required_tags": [{ "tag": "doc-note" }]
+            "required_frontmatter": {
+              "type": {
+                "required": true,
+                "type": "string",
+                "matches": "^doc-note$"
+              },
+              "project": {
+                "required": true,
+                "type": "string"
+              },
+              "project_slug": {
+                "required": true,
+                "type": "string"
+              }
+            },
+            "required_tags": [
+              {
+                "tag": "doc-note"
+              }
+            ]
           }
         ]
       }
@@ -307,21 +609,56 @@
     {
       "target": "section-hub",
       "fragment": {
-        "scope": { "path_glob": "spice/projects/*/docs/**/*.md", "exclude_basenames": ["Docs.md"] },
+        "scope": {
+          "path_glob": "spice/projects/*/docs/**/*.md",
+          "exclude_basenames": [
+            "Docs.md"
+          ]
+        },
         "extends": "_canonical-vocab",
         "frontmatter_branch": [
           {
-            "when": { "frontmatter": { "type": "section-hub" } },
-            "required_frontmatter": {
-              "type":           { "required": true, "type": "string", "matches": "^section-hub$" },
-              "project":        { "required": true, "type": "string" },
-              "project_slug":   { "required": true, "type": "string" },
-              "section":        { "required": true, "type": "string" },
-              "section_slug":   { "required": true, "type": "string" },
-              "parent_section": { "required": true, "type": "string" },
-              "depth":          { "required": true, "type": "number" }
+            "when": {
+              "frontmatter": {
+                "type": "section-hub"
+              }
             },
-            "required_tags": [{ "tag": "section-hub" }]
+            "required_frontmatter": {
+              "type": {
+                "required": true,
+                "type": "string",
+                "matches": "^section-hub$"
+              },
+              "project": {
+                "required": true,
+                "type": "string"
+              },
+              "project_slug": {
+                "required": true,
+                "type": "string"
+              },
+              "section": {
+                "required": true,
+                "type": "string"
+              },
+              "section_slug": {
+                "required": true,
+                "type": "string"
+              },
+              "parent_section": {
+                "required": true,
+                "type": "string"
+              },
+              "depth": {
+                "required": true,
+                "type": "number"
+              }
+            },
+            "required_tags": [
+              {
+                "tag": "section-hub"
+              }
+            ]
           }
         ]
       }
@@ -329,15 +666,31 @@
     {
       "target": "project-todo",
       "fragment": {
-        "scope": { "path_glob": "spice/projects/*/*.md" },
+        "scope": {
+          "path_glob": "spice/projects/*/*.md"
+        },
         "extends": "_canonical-vocab",
         "frontmatter_branch": [
           {
-            "when": { "frontmatter": { "type": "project-todo" } },
+            "when": {
+              "frontmatter": {
+                "type": "project-todo"
+              }
+            },
             "required_frontmatter": {
-              "type":         { "required": true, "type": "string", "matches": "^project-todo$" },
-              "project":      { "required": true, "type": "string" },
-              "project_slug": { "required": true, "type": "string" }
+              "type": {
+                "required": true,
+                "type": "string",
+                "matches": "^project-todo$"
+              },
+              "project": {
+                "required": true,
+                "type": "string"
+              },
+              "project_slug": {
+                "required": true,
+                "type": "string"
+              }
             }
           }
         ]
