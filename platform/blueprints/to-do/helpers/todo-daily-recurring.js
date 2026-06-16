@@ -46,19 +46,27 @@ class ToDoDailyRecurring {
             const todayFile = vault.getAbstractFileByPath(todayPath);
             if (!todayFile) return;
             const todayContent = await vault.read(todayFile);
-            if (ToDoDailyRecurring.hasSentinel(todayContent)) return;
+
+            // Parse existing sentinel: hashes set may be empty (legacy date-only, empty, or absent).
+            const sentinelState = ToDoDailyRecurring.parseSentinel(todayContent);
+            const startingHashes = new Set(sentinelState.hashes);
 
             const registryPath = 'spice/to-do/Recurring Tasks.md';
             const registryFile = vault.getAbstractFileByPath(registryPath);
             if (!registryFile) {
-                const updated = ToDoDailyRecurring.writeSentinel(todayContent, todayStr);
-                await vault.modify(todayFile, updated);
+                // No registry, nothing to materialize. Still write the sentinel
+                // (preserves "we've run today" semantic; empty set form).
+                const updated = ToDoDailyRecurring.writeSentinel(todayContent, todayStr, startingHashes);
+                if (updated !== todayContent) {
+                    await vault.modify(todayFile, updated);
+                }
                 return;
             }
             const registryContent = await vault.read(registryFile);
             const entries = ToDoDailyRecurring.parseRegistry(registryContent);
             const registryCreatedAt = ToDoDailyRecurring._extractRegistryCreatedAt(registryContent);
 
+            const newHashes = new Set(startingHashes);
             const materialized = [];
             const auditRows = [];
             for (const entry of entries) {
@@ -74,13 +82,24 @@ class ToDoDailyRecurring {
                     }
                     continue;
                 }
-                materialized.push(ToDoDailyRecurring.materializeLineFromEntry(entry));
+                const line = ToDoDailyRecurring.materializeLineFromEntry(entry);
+                const hash = ToDoDailyRecurring.hashEntry(line);
+                if (newHashes.has(hash)) continue;   // already materialized into this daily
+                newHashes.add(hash);
+                materialized.push(line);
                 const route = entry.project ? `ToDo-${todayStr}.md (${entry.project})` : `ToDo-${todayStr}.md`;
                 auditRows.push({ date: todayStr, title: entry.title, route });
             }
 
+            // Idempotency: if no new materializations AND sentinel already present
+            // in the new form on the correct date, skip both file writes.
+            const sentinelUpToDate = sentinelState.present
+                && sentinelState.date === todayStr
+                && newHashes.size === startingHashes.size;
+            if (materialized.length === 0 && sentinelUpToDate) return;
+
             let newToday = ToDoDailyRecurring.insertRecurringIntoToday(todayContent, materialized);
-            newToday = ToDoDailyRecurring.writeSentinel(newToday, todayStr);
+            newToday = ToDoDailyRecurring.writeSentinel(newToday, todayStr, newHashes);
 
             let newRegistry = registryContent;
             for (const row of auditRows) {
