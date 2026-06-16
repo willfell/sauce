@@ -3,7 +3,7 @@ purpose: Design for v0.116.0 — to-do blueprint MINOR expansion. Promotes the c
 load_when: Implementing v0.116.0, or any later cycle that touches the to-do blueprint, the project blueprint's project-todo extra_files entry, the recurrence parser, ToDoCreateTask dialog, or the daily-note section renderers.
 status: brainstorm-complete (2026-06-15 evening, immediately after v0.115.0 finance B ship); awaiting implementation-plan execution.
 cycle: v0.116.0
-predecessor: v0.115.0 finance B (MonthsCards + MonthDashboard + Paycheck Template band fix, shipped 2026-06-15). Reverify HEAD + preflight green + workshop_version pin at execution start.
+predecessor: v0.115.4 (workshop) + PR #2 merged (`f591008` migration regression net foundation, 2026-06-15 evening). Reverify HEAD + preflight green + workshop_version pin at execution start. Predecessor lineage: v0.115.0 finance B → v0.115.1 / v0.115.2 / v0.115.3 / v0.115.4 PATCHes → PR #2 merge.
 informs: v0.116.x dialog/recurrence polish; v0.117.0 (carry-forwards — Tasks-plugin checkbox-click delegation, drag-to-reorder, mobile dialog layout)
 vision: integrated daily workspace where today's note is the single home for everything you've committed to do today — owned, recurring, project-routed, and meeting-borne — without losing single-source-of-truth in the originating file.
 ---
@@ -41,9 +41,9 @@ Workshop MINOR cycle bundling one to-do blueprint MINOR + one project blueprint 
 | --- | --- | --- | --- |
 | `to-do` blueprint | 0.3.3 | **0.4.0** | MINOR (new note types + helpers + dialog + carryover + recurrence) |
 | `project` blueprint | 1.21.2 | **1.22.0** | MINOR (project-todo `extra_files`, `ProjectNavButtons` branch, `ProjectsHubCards` task-pill) |
-| `platform/manifest.json` workshop_version | 0.115.0 | **0.116.0** | workshop MINOR |
-| `package.json` version | 0.115.0 | **0.116.0** | lockstep |
-| `ranch/platform-subscription.json` workshop_version | 0.115.0 | **0.116.0** | lockstep |
+| `platform/manifest.json` workshop_version | 0.115.4 | **0.116.0** | workshop MINOR |
+| `package.json` version | 0.115.4 | **0.116.0** | lockstep |
+| `ranch/platform-subscription.json` workshop_version | 0.115.4 | **0.116.0** | lockstep |
 | New customjs classes | 5 (existing) | 3 existing kept + 6 NEW + 2 RETIRED = 9 registered | additive net |
 | New note types | `to-do`, `to-do-hub` | + `project-todo`, + `to-do-recurring` | additive |
 | New templates | `Today To-Do.md`, `All To-Dos.md` | + `Project To-Do.md`, + `Recurring Tasks.md` | additive |
@@ -524,7 +524,7 @@ PR #2 (`cycle/migration-regression-net`) ships `platform/test/run-seed-migration
 
 Family wires into `run-seed-migrations.js` per PR #2's authoring pattern (assertion-helper choice + `withTempVault` scaffold), `HC-V0116-*` namespace.
 
-**Total preflight cases at v0.116.0 close (with PR #2 merged):** ~3064 (current main, pre-PR-#2) + PR #2's seed-foundation 48 + PR #2's BODY-* / CLAUDE-EXT-* 27 + this cycle's ~117 v0.116.0 contracts + ~14 seed-migrate = **~3270 named asserts.** Numbers track when the chain actually runs.
+**Total preflight cases at v0.116.0 close (with PR #2 merged, post-`f591008`):** existing main HEAD baseline (incl. PR #2's seed-foundation 48 + BODY-* / CLAUDE-* 16 ≈ 64 seed sub-asserts) + this cycle's ~117 v0.116.0 contracts + ~14 seed-migrate = roughly +131 net add over current main. Numbers track when the chain actually runs.
 
 **If PR #2 is NOT merged before v0.116.0** — drop this sub-section from the implementation plan; the ~117 cases above stand alone and ship the cycle. Carry seed-migrate integration to v0.116.x once PR #2 lands. The implementation plan's preconditions check MUST verify `platform/test/run-seed-migrations.js` exists in `main` HEAD before claiming this sub-section is in scope.
 

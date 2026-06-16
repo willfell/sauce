@@ -1109,6 +1109,8 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyDocNoteBreadcrumbMarkerCleanup(tp, mech, variables, history, git); // NEW v0.109.0 S8 — strips legacy <!-- breadcrumb-v1.17.0 --> markers from doc-notes (block preserved; new idempotency guard inside _migrateDocNote uses the class invocation substring)
   await applyProjectSectionsCloseRepair(tp, mech, variables, history, git);    // NEW v0.103.0.1 — fixes the regex-induced -"[[--]]" damage from v0.103.0 deploy
   await applyFinanceMigrations(tp, mech, variables, history, git);             // NEW v0.107.0 S2 — finance defaults scaffolding (create-if-absent) + categories group backfill (append-only + .sauce-backup snapshot)
+  await applyToDoBlueprintMigration(tp, mech, variables, history, git);        // NEW v0.116.0 — reshapes v0.3.3 daily-note bodies to v0.4.0 5-block shape (.sauce-backup snapshot before write; absorbs ## Tasks heading; preserves ## Notes)
+  await applyProjectTodoBackfill(tp, mech, variables, history, git);           // NEW v0.116.0 — creates spice/projects/<slug>/<Name> To-Do.md for every project lacking one (skip-if-exists)
   await applyOrphanedHelperCleanup(tp, mech, variables, history, git);         // NEW v0.110.0 — deletes obsolete *.js and *.js.bak helper files left on disk after manifest removals
   await applyEntityCreateGuardMigration(tp, mech, variables, history, git);    // NEW v0.110.1 — rewrites direct customJS.EntityCreate.render(dv,...) calls in vault notes to the customjs-guard form (cold-load race fix)
   await applyCustomJsGuardMigration(tp, mech, variables, history, git);        // NEW v0.110.2 — generalized: rewrites ANY direct customJS.<Class>.render(dv[,opts]) call in vault notes to guard form (mobile cold-load race fix)
@@ -4525,6 +4527,9 @@ async function applyOrphanedHelperCleanup(tp, mech, variables, history, git) {
     "ranch/scripts/finance/budget-nav-buttons.js",
     "ranch/scripts/finance/paycheck-nav-buttons.js",
     "ranch/scripts/finance/invoice-nav-buttons.js",
+    // v0.116.0 — Migrate-to-tomorrow modal retired.
+    "ranch/scripts/to-do/todo-migrate-modal.js",
+    "ranch/scripts/to-do/todo-migrate-init.js",
   ];
 
   let removed = 0;
@@ -4582,6 +4587,266 @@ async function applyOrphanedHelperCleanup(tp, mech, variables, history, git) {
 
   history?.push({ event: "info", step: "orphaned_helper_cleanup", name: "platform",
     summary: { orphanRemoved: removed, orphanAbsent: absent, bakRemoved },
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+    completed_at: new Date().toISOString() });
+}
+
+// applyToDoBlueprintMigration — v0.116.0. Reshapes v0.3.3 daily-note bodies
+// (2 dataviewjs blocks + free-form `- [ ]` lines underneath) into the v0.4.0
+// 5-block shape (SpaceNavButtons + ToDoLeafActions + `## Today's Capture` +
+// 4 materializer dataviewjs blocks). User-typed `- [ ]` lines under the v0.3.3
+// dataviewjs blocks become the `## Today's Capture` section content. Edge
+// cases:
+//   - `## Tasks` heading (manually added): heading dropped, tasks absorbed into
+//     Capture.
+//   - `## Notes` heading (manually added): section preserved verbatim AFTER the
+//     four materializer dataviewjs blocks.
+// Idempotent via body-substring check ('class: "ToDoDailyCarryover"').
+// .sauce-backup snapshot before any write.
+async function applyToDoBlueprintMigration(tp, mech, variables, history, git) {
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const TODO_ROOT = "spice/to-do";
+  if (!(await adapter.exists(TODO_ROOT))) return;
+
+  let migrated = 0, alreadyCurrent = 0, absorbedTasksHeading = 0, errors = 0;
+
+  async function _walkToDos(dir) {
+    const out = [];
+    try {
+      const listing = await adapter.list(dir);
+      for (const file of (listing.files || [])) {
+        if (/\/ToDo-\d{4}-\d{2}-\d{2}\.md$/.test(file)) out.push(file);
+      }
+      for (const sub of (listing.folders || [])) {
+        const sf = await _walkToDos(sub);
+        out.push(...sf);
+      }
+    } catch (_e) { /* ignore */ }
+    return out;
+  }
+  const dailies = await _walkToDos(TODO_ROOT);
+
+  function _isV040(body) {
+    return body.includes('class: "ToDoDailyCarryover"');
+  }
+
+  function _isV033Shape(body) {
+    // v0.3.3 shape: has SpaceNavButtons + ToDoLeafActions dataviewjs blocks
+    // but NOT ToDoDailyCarryover.
+    return body.includes('class: "SpaceNavButtons"') &&
+        body.includes('class: "ToDoLeafActions"') &&
+        !body.includes('class: "ToDoDailyCarryover"');
+  }
+
+  function _reshapeToV040(body, viewsPath) {
+    // Capture frontmatter region.
+    const lines = body.split('\n');
+    let fmEnd = -1;
+    if (lines[0] === '---') {
+      for (let i = 1; i < lines.length; i++) {
+        if (lines[i] === '---') { fmEnd = i; break; }
+      }
+    }
+    const fmBlock = (fmEnd > 0) ? lines.slice(0, fmEnd + 1).join('\n') + '\n' : '';
+    const rest = (fmEnd > 0) ? lines.slice(fmEnd + 1).join('\n') : body;
+
+    // Extract task lines (top-level `- [ ]` or `- [x]`) anywhere in `rest`.
+    // Also preserve any `## Notes` section content (post-Notes-heading) verbatim.
+    const restLines = rest.split('\n');
+    const captured = [];
+    let notesSection = null;
+    let inNotes = false;
+    let tasksHeadingFound = false;
+    for (const ln of restLines) {
+      if (/^## Notes$/.test(ln)) {
+        inNotes = true;
+        notesSection = [ln];
+        continue;
+      }
+      if (inNotes) {
+        if (/^## /.test(ln)) {
+          inNotes = false;
+        } else {
+          notesSection.push(ln);
+          continue;
+        }
+      }
+      if (/^## Tasks$/.test(ln)) { tasksHeadingFound = true; continue; }
+      if (/^- \[(?: |x)\] /i.test(ln)) {
+        captured.push(ln);
+      } else if (/^\s+- /.test(ln) || /^\s+/.test(ln)) {
+        // Indented continuation; if last captured was a `- [ ]`, keep.
+        if (captured.length && /^- \[/.test(captured[captured.length - 1])) {
+          captured.push(ln);
+        }
+      }
+    }
+    if (tasksHeadingFound) absorbedTasksHeading++;
+
+    const vp = viewsPath || 'ranch/views';
+    const dvBlock = (cls, args) => {
+      const argPart = args ? `, args: ${args}` : '';
+      return '```dataviewjs\nawait dv.view("' + vp + '/customjs-guard", { class: "' + cls + '"' + argPart + ' });\n```';
+    };
+
+    const parts = [
+      fmBlock.replace(/\n$/, ''),
+      '',
+      dvBlock('SpaceNavButtons'),
+      '',
+      dvBlock('ToDoLeafActions'),
+      '',
+      "## Today's Capture",
+      '',
+    ];
+    if (captured.length) parts.push(captured.join('\n'), '');
+    parts.push(
+      dvBlock('ToDoDailyCarryover'),
+      '',
+      dvBlock('ToDoDailyRecurring'),
+      '',
+      dvBlock('ToDoDailyProjectGroups'),
+      '',
+      dvBlock('ToDoDailyUnassignedMeetings'),
+      '',
+    );
+    if (notesSection && notesSection.length > 1) parts.push(notesSection.join('\n'), '');
+    return parts.join('\n');
+  }
+
+  const viewsPath = (variables && variables.views_path) || 'ranch/views';
+
+  for (const relPath of dailies) {
+    try {
+      const body = await adapter.read(relPath);
+      if (_isV040(body)) { alreadyCurrent++; continue; }
+      if (!_isV033Shape(body)) { alreadyCurrent++; continue; }
+      // Backup before write.
+      const backupPath = '.sauce-backup/' + new Date().toISOString().replace(/[:.]/g, '-') + '/' + relPath;
+      try {
+        const backupFolder = backupPath.split('/').slice(0, -1).join('/');
+        if (!(await adapter.exists(backupFolder))) await adapter.mkdir(backupFolder);
+        await adapter.write(backupPath, body);
+      } catch (_e) { /* best-effort backup */ }
+      const newBody = _reshapeToV040(body, viewsPath);
+      await adapter.write(relPath, newBody);
+      migrated++;
+      history?.push({ event: "info", step: "to_do_blueprint_migration", name: "to-do",
+        action: "reshaped", path: relPath,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    } catch (e) {
+      errors++;
+      history?.push({ event: "error", step: "to_do_blueprint_migration", name: "to-do",
+        path: relPath, reason: e.message,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    }
+  }
+
+  history?.push({ event: "info", step: "to_do_blueprint_migration", name: "to-do",
+    summary: { migrated, alreadyCurrent, absorbedTasksHeading, errors },
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+    completed_at: new Date().toISOString() });
+}
+
+// applyProjectTodoBackfill — v0.116.0. Creates `spice/projects/<slug>/<Name> To-Do.md`
+// for every project lacking one. Skip-if-exists. The hub note's basename is used
+// as the To-Do filename prefix (mirrors the project blueprint's HUB_NOTE_FILENAME_STYLE
+// = "name" default). Frontmatter:
+//   type: project-todo
+//   project: "[[<Name>]]"
+//   project_slug: <slug>
+async function applyProjectTodoBackfill(tp, mech, variables, history, git) {
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const PROJ_ROOT = "spice/projects";
+  if (!(await adapter.exists(PROJ_ROOT))) return;
+
+  let created = 0, skipped = 0, errors = 0;
+
+  let listing;
+  try { listing = await adapter.list(PROJ_ROOT); }
+  catch (_e) { return; }
+
+  for (const projDir of (listing.folders || [])) {
+    try {
+      const subListing = await adapter.list(projDir);
+      // Find the project's hub note — the .md whose frontmatter has type: project.
+      let hubName = null;
+      for (const file of (subListing.files || [])) {
+        if (!file.endsWith('.md')) continue;
+        // Skip our own To-Do file (if it exists) and obvious system files.
+        if (/ To-Do\.md$/.test(file)) continue;
+        if (/Project Map\.md$/.test(file)) continue;
+        if (/-board\.md$/.test(file)) continue;
+        const content = await adapter.read(file);
+        if (/^type:\s*project\b/m.test(content) || /^type:\s*"project"/m.test(content)) {
+          hubName = file.split('/').pop().replace(/\.md$/, '');
+          break;
+        }
+      }
+      if (!hubName) { skipped++; continue; }
+      const slug = projDir.split('/').pop();
+      const toDoPath = `${projDir}/${hubName} To-Do.md`;
+      if (await adapter.exists(toDoPath)) { skipped++; continue; }
+      const vaultTag = (variables && variables.vault_identity_tag) || '';
+      const viewsPath = (variables && variables.views_path) || 'ranch/views';
+      const body = [
+        '---',
+        'type: project-todo',
+        `project: "[[${hubName}]]"`,
+        `project_slug: ${slug}`,
+        `created_at: "${new Date().toISOString()}"`,
+        'tags:',
+        `  - "${vaultTag}"`,
+        'cssclasses:',
+        '  - wide',
+        '---',
+        '',
+        '```dataviewjs',
+        `await dv.view("${viewsPath}/customjs-guard", { class: "Breadcrumb" });`,
+        '```',
+        '',
+        '```dataviewjs',
+        `await dv.view("${viewsPath}/customjs-guard", { class: "SpaceNavButtons" });`,
+        '```',
+        '',
+        '```dataviewjs',
+        `await dv.view("${viewsPath}/customjs-guard", { class: "ProjectNavButtons" });`,
+        '```',
+        '',
+        '```dataviewjs',
+        `await dv.view("${viewsPath}/customjs-guard", { class: "ToDoLeafActions" });`,
+        '```',
+        '',
+        '## Owned Tasks',
+        '',
+        '## From Meetings',
+        '',
+        '```dataviewjs',
+        `await dv.view("${viewsPath}/customjs-guard", { class: "ToDoDailyProjectGroups", args: [{ scope: "project-todo" }] });`,
+        '```',
+        '',
+      ].join('\n');
+      await adapter.write(toDoPath, body);
+      created++;
+      history?.push({ event: "info", step: "project_todo_backfill", name: "project",
+        action: "created", path: toDoPath,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    } catch (e) {
+      errors++;
+      history?.push({ event: "error", step: "project_todo_backfill", name: "project",
+        projDir, reason: e.message,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    }
+  }
+
+  history?.push({ event: "info", step: "project_todo_backfill", name: "project",
+    summary: { created, skipped, errors },
     git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
     completed_at: new Date().toISOString() });
 }
@@ -11988,6 +12253,9 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports.applyFinanceMonthsScaffolding = applyFinanceMonthsScaffolding;
     module.exports.applyFinancePaycheckDebtBandInjection = applyFinancePaycheckDebtBandInjection;
     module.exports._injectPaycheckDebtBand = _injectPaycheckDebtBand;
+    // v0.116.0 — to-do blueprint v0.4.0 migrations.
+    module.exports.applyToDoBlueprintMigration = applyToDoBlueprintMigration;
+    module.exports.applyProjectTodoBackfill = applyProjectTodoBackfill;
     //
     // CF-2: by default, capture run-install.js's stdio (Phase B/C surfaced
     // 2200-line JSON dumps mixed into the user's terminal). We tee the
