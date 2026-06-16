@@ -279,6 +279,30 @@ class ToDoDailyRecurring {
     static insertRecurringIntoToday(todayContent, materializedLines) {
         if (!materializedLines || !materializedLines.length) return todayContent;
         // v0.5.0: emit a SectionLabel dataviewjs block instead of `## Recurring Today` H2.
+        //
+        // v0.7.1 PATCH: append to an EXISTING "Recurring Today" SectionLabel block when
+        // present, rather than creating a new one each call. Without this, mid-day
+        // additions (handled by v0.7.0's additive sentinel) produced a separate "Recurring
+        // Today" section per call — the new tasks landed in their own block above the
+        // pre-existing block. Reported on accuris 2026-06-16 after creating a new
+        // recurring task in a daily that already had two materialized recurring tasks.
+        const RECURRING_LABEL_RE = /```dataviewjs\s*\n\s*await\s+dv\.view\(\s*"ranch\/views\/customjs-guard"\s*,\s*\{\s*class:\s*"SectionLabel"\s*,\s*args:\s*\[\s*\{\s*text:\s*"Recurring Today"[^}]*\}\s*\]\s*\}\s*\)\s*;?\s*\n\s*```/;
+        const existing = RECURRING_LABEL_RE.exec(todayContent);
+        if (existing) {
+            // Append new task lines to the end of the existing "Recurring Today" section.
+            // The section ends at the next dataviewjs block, the next SectionLabel block
+            // (any text), an H1/H2 heading, or EOF.
+            const sectionStart = existing.index + existing[0].length;
+            const tail = todayContent.slice(sectionStart);
+            // Find the section terminator in `tail`.
+            const TERMINATOR_RE = /\n(?=```dataviewjs|## |# )/;
+            const termMatch = TERMINATOR_RE.exec(tail);
+            const sectionEnd = termMatch ? (sectionStart + termMatch.index) : todayContent.length;
+            // Trim trailing blank lines from the existing section + emit new lines + one blank.
+            const head = todayContent.slice(0, sectionEnd).replace(/\n+$/, '');
+            const insertion = '\n' + materializedLines.join('\n') + '\n';
+            return head + insertion + todayContent.slice(sectionEnd);
+        }
         const labelLines = [
             '',
             '```dataviewjs',

@@ -132,9 +132,15 @@ class ToDoDailyUnassignedMeetings {
 
     _isSafeUrl(url) {
         try {
+            // v0.119.0 PATCH (C1 from code review): trim before scheme detection.
+            // Browsers strip leading whitespace from href attrs at resolution time,
+            // so " javascript:alert(1)" executes as javascript: — but the scheme
+            // regex `^[a-z]...:` doesn't match leading whitespace, falling through
+            // the "relative URL" allow-path. Trim first.
+            const trimmed = String(url == null ? '' : url).trim();
             // Allow relative URLs (no scheme) too — they're treated as same-origin.
-            if (!/^[a-z][a-z0-9+.-]*:/i.test(url)) return true;
-            const lower = url.toLowerCase();
+            if (!/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) return true;
+            const lower = trimmed.toLowerCase();
             return ToDoDailyUnassignedMeetings.SAFE_URL_SCHEMES.some(s => lower.startsWith(s));
         } catch (_e) { return false; }
     }
