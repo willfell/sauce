@@ -1224,6 +1224,73 @@ async function runFinanceMigrateFamily() {
             "HC-V01190-FIN-SEED-MIGRATE-E2 spice/finance/months/Months.md exists post #3 (hub scaffold)",
             existsFin("months/Months.md")
         );
+
+        // ===== F: nav (#12 + #13 + #17 + #18 + #19) =====
+        // Walk every .md under spice/finance/ to perform vault-wide assertions.
+        function _walkMd(root) {
+            const out = [];
+            function recur(dir) {
+                if (!fs.existsSync(dir)) return;
+                for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+                    const abs = path.join(dir, ent.name);
+                    if (ent.isDirectory()) recur(abs);
+                    else if (ent.isFile() && ent.name.endsWith(".md")) out.push(abs);
+                }
+            }
+            recur(root);
+            return out;
+        }
+        const fAllMd = _walkMd(path.join(finRoot, LEGACY_FIN_DIR));
+        const fAllBodies = fAllMd.map(p => fs.readFileSync(p, "utf8")).join("\n\n---FILE---\n\n");
+
+        ok(
+            "HC-V01190-FIN-SEED-MIGRATE-F1 Budget-2026-02.md no longer has 'BudgetNavButtons' anywhere (#12 + #13)",
+            !cBudget02Body.includes("BudgetNavButtons")
+        );
+        const fInvoiceBody = readFin("invoices/2026-01/Invoice-2026-01.md");
+        ok(
+            "HC-V01190-FIN-SEED-MIGRATE-F2 Invoice-2026-01.md no longer has 'InvoiceNavButtons' anywhere (#12 + #13 + #16)",
+            !fInvoiceBody.includes("InvoiceNavButtons")
+        );
+        ok(
+            "HC-V01190-FIN-SEED-MIGRATE-F3 no file under spice/finance/ contains 'FinanceHubActions' (#17 + #19)",
+            !fAllBodies.includes("FinanceHubActions")
+        );
+        ok(
+            "HC-V01190-FIN-SEED-MIGRATE-F4 no file under spice/finance/ contains 'class: \"FinanceNavRow\"' (#17 collapses all to FinanceNav)",
+            !/class:\s*"FinanceNavRow"/.test(fAllBodies)
+        );
+        const fBudgetDefaultsBody = readFin("Budget Defaults.md");
+        ok(
+            "HC-V01190-FIN-SEED-MIGRATE-F5 Budget Defaults has FinanceNav reference (#18 inject + #17 unify)",
+            /class:\s*"FinanceNav"/.test(fBudgetDefaultsBody)
+        );
+        ok(
+            "HC-V01190-FIN-SEED-MIGRATE-F6 Paycheck Defaults has FinanceNav reference (#18 inject + #17 unify)",
+            /class:\s*"FinanceNav"/.test(bPaycheckDefaultsBody)
+        );
+        const fDebtDefaultsBody = readFin("Debt Defaults.md");
+        ok(
+            "HC-V01190-FIN-SEED-MIGRATE-F7 Debt Defaults has FinanceNav reference (#18 inject + #17 unify)",
+            /class:\s*"FinanceNav"/.test(fDebtDefaultsBody)
+        );
+        ok(
+            "HC-V01190-FIN-SEED-MIGRATE-F8 Finance.md body has NO FinanceHubActions (#19 top-hub dedup + #17)",
+            !a1FinBody.includes("FinanceHubActions")
+        );
+        ok(
+            "HC-V01190-FIN-SEED-MIGRATE-F9 Finance.md body has FinanceNav reference (#15 + #17 canonical)",
+            /class:\s*"FinanceNav"/.test(a1FinBody)
+        );
+        // F10: no file vault-wide contains any of the deleted NavButtons class
+        // names in either form (customJS.<X>NavButtons.render OR class: "<X>NavButtons").
+        const fNoDeletedClasses =
+            !/customJS\.(Budget|Paycheck|Invoice)NavButtons/.test(fAllBodies)
+            && !/class:\s*"(Budget|Paycheck|Invoice)NavButtons"/.test(fAllBodies);
+        ok(
+            "HC-V01190-FIN-SEED-MIGRATE-F10 no file has any deleted NavButtons class (BudgetNavButtons/PaycheckNavButtons/InvoiceNavButtons) in direct OR guard form",
+            fNoDeletedClasses
+        );
     } finally {
         if (KEEP) {
             console.log(`  KEEP_SEED_VAULT=1: ${finRoot}`);
