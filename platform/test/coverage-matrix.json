@@ -1,5 +1,5 @@
 {
-  "generated_at": "0.119.0",
+  "generated_at": "0.120.0",
   "rubric_version": "1.0.0",
   "entries": [
     {
@@ -329,658 +329,6 @@
         ],
         "primary_user_flow": "Engagement-aware daily/weekly/monthly orchestrators gather cross-MCP signals and synthesize atomic notes rendered via cowork helper classes.",
         "qualitative_recommendation": "True coverage is much higher than 0.0 scores suggest; cowork-smoke is comprehensive at structural level. Closing rubric gap could come from either migrating widget asserts to run-renderer.js OR adding explicit method-call patterns to cowork-smoke to match the grep heuristic."
-      }
-    },
-    {
-      "kind": "blueprint",
-      "name": "finance",
-      "current_version": "0.9.2",
-      "axes": {
-        "customjs_behavioral": {
-          "score": 0.4222222222222222,
-          "covered": 19,
-          "total": 45,
-          "methods": [
-            {
-              "cls": "FinanceMath",
-              "method": "readDebts",
-              "covered": true,
-              "hits": 4
-            },
-            {
-              "cls": "FinanceMath",
-              "method": "readPaychecksForMonth",
-              "covered": true,
-              "hits": 4
-            },
-            {
-              "cls": "FinanceMath",
-              "method": "readBudgetForMonth",
-              "covered": true,
-              "hits": 6
-            },
-            {
-              "cls": "FinanceMath",
-              "method": "monthBounds",
-              "covered": true,
-              "hits": 1
-            },
-            {
-              "cls": "FinanceMath",
-              "method": "debtTotals",
-              "covered": true,
-              "hits": 4
-            },
-            {
-              "cls": "FinanceMath",
-              "method": "monthIncome",
-              "covered": true,
-              "hits": 4
-            },
-            {
-              "cls": "FinanceMath",
-              "method": "monthSpending",
-              "covered": true,
-              "hits": 6
-            },
-            {
-              "cls": "FinanceMath",
-              "method": "monthExpensesTotal",
-              "covered": true,
-              "hits": 2
-            },
-            {
-              "cls": "FinanceMath",
-              "method": "monthDebtPaid",
-              "covered": true,
-              "hits": 5
-            },
-            {
-              "cls": "FinanceMath",
-              "method": "debtPaidByDebt",
-              "covered": true,
-              "hits": 3
-            },
-            {
-              "cls": "FinanceMath",
-              "method": "measuredMovement",
-              "covered": true,
-              "hits": 3
-            },
-            {
-              "cls": "FinanceMath",
-              "method": "reconcile",
-              "covered": true,
-              "hits": 3
-            },
-            {
-              "cls": "FinanceMath",
-              "method": "fmtMoney",
-              "covered": true,
-              "hits": 7
-            },
-            {
-              "cls": "FinanceStatus",
-              "method": "derive",
-              "covered": true,
-              "hits": 12
-            },
-            {
-              "cls": "FinanceStatus",
-              "method": "renderBadge",
-              "covered": true,
-              "hits": 14
-            },
-            {
-              "cls": "FinanceStatus",
-              "method": "formatDate",
-              "covered": true,
-              "hits": 8
-            },
-            {
-              "cls": "FinanceHubCards",
-              "method": "render",
-              "covered": false,
-              "hits": 0
-            },
-            {
-              "cls": "BudgetsCards",
-              "method": "render",
-              "covered": false,
-              "hits": 0
-            },
-            {
-              "cls": "PaychecksCards",
-              "method": "render",
-              "covered": false,
-              "hits": 0
-            },
-            {
-              "cls": "InvoicesCards",
-              "method": "render",
-              "covered": false,
-              "hits": 0
-            },
-            {
-              "cls": "DebtsCards",
-              "method": "render",
-              "covered": false,
-              "hits": 0
-            },
-            {
-              "cls": "FinanceFrontmatter",
-              "method": "update",
-              "covered": true,
-              "hits": 19
-            },
-            {
-              "cls": "FinanceFrontmatter",
-              "method": "read",
-              "covered": false,
-              "hits": 0
-            },
-            {
-              "cls": "FinanceFrontmatter",
-              "method": "isTruthy",
-              "covered": false,
-              "hits": 0
-            },
-            {
-              "cls": "FinanceNavRow",
-              "method": "render",
-              "covered": false,
-              "hits": 0
-            },
-            {
-              "cls": "BudgetCategoriesEditor",
-              "method": "render",
-              "covered": false,
-              "hits": 0
-            },
-            {
-              "cls": "PaycheckExpensesEditor",
-              "method": "render",
-              "covered": false,
-              "hits": 0
-            },
-            {
-              "cls": "InvoiceTimeLogEditor",
-              "method": "render",
-              "covered": false,
-              "hits": 0
-            },
-            {
-              "cls": "InvoiceControls",
-              "method": "render",
-              "covered": false,
-              "hits": 0
-            },
-            {
-              "cls": "InvoiceWorkspaceNav",
-              "method": "render",
-              "covered": false,
-              "hits": 0
-            },
-            {
-              "cls": "BudgetDefaultsEditor",
-              "method": "render",
-              "covered": false,
-              "hits": 0
-            },
-            {
-              "cls": "PaycheckDefaultsEditor",
-              "method": "render",
-              "covered": false,
-              "hits": 0
-            },
-            {
-              "cls": "DebtDefaultsEditor",
-              "method": "render",
-              "covered": false,
-              "hits": 0
-            },
-            {
-              "cls": "DebtConfigEditor",
-              "method": "render",
-              "covered": true,
-              "hits": 4
-            },
-            {
-              "cls": "BudgetSummary",
-              "method": "render",
-              "covered": false,
-              "hits": 0
-            },
-            {
-              "cls": "PaycheckSummary",
-              "method": "render",
-              "covered": false,
-              "hits": 0
-            },
-            {
-              "cls": "PaycheckDebtBand",
-              "method": "render",
-              "covered": false,
-              "hits": 0
-            },
-            {
-              "cls": "DebtSummary",
-              "method": "render",
-              "covered": false,
-              "hits": 0
-            },
-            {
-              "cls": "DebtsHubSummary",
-              "method": "render",
-              "covered": false,
-              "hits": 0
-            },
-            {
-              "cls": "FinanceHubActions",
-              "method": "render",
-              "covered": true,
-              "hits": 4
-            },
-            {
-              "cls": "FinanceNav",
-              "method": "render",
-              "covered": false,
-              "hits": 0
-            },
-            {
-              "cls": "MonthlyOverview",
-              "method": "render",
-              "covered": false,
-              "hits": 0
-            },
-            {
-              "cls": "MonthsCards",
-              "method": "render",
-              "covered": false,
-              "hits": 0
-            },
-            {
-              "cls": "MonthDashboard",
-              "method": "render",
-              "covered": false,
-              "hits": 0
-            },
-            {
-              "cls": "FinanceHubSummary",
-              "method": "render",
-              "covered": false,
-              "hits": 0
-            }
-          ],
-          "suggested_archetype": "behavioral-runner",
-          "suggested_target_file": "platform/test/run-finance-financemath.js"
-        },
-        "installer_migration": {
-          "score": 0,
-          "covered": 0,
-          "total": 23,
-          "migrations": [
-            {
-              "fn": "applyExternalPlugins",
-              "covered": false
-            },
-            {
-              "fn": "applyFinanceMonthsScaffolding",
-              "covered": false
-            },
-            {
-              "fn": "applyFinancePaycheckDebtBandInjection",
-              "covered": false
-            },
-            {
-              "fn": "applyFinanceMigrations",
-              "covered": false
-            },
-            {
-              "fn": "applyFinanceInvoiceWorkspaceNavInjection",
-              "covered": false
-            },
-            {
-              "fn": "applyFinanceHubFrontmatterHeal",
-              "covered": false
-            },
-            {
-              "fn": "applyFinanceHubsRepair",
-              "covered": false
-            },
-            {
-              "fn": "applyOrphanedHelperCleanup",
-              "covered": false
-            },
-            {
-              "fn": "applyFinanceUnifiedNavMigration",
-              "covered": false
-            },
-            {
-              "fn": "applyFinancePaycheckBodyMigration",
-              "covered": false
-            },
-            {
-              "fn": "applyFinanceBudgetBodyMigration",
-              "covered": false
-            },
-            {
-              "fn": "applyFinanceBudgetMonthlyBandInjection",
-              "covered": false
-            },
-            {
-              "fn": "applyFinanceDefaultsScaffolding",
-              "covered": false
-            },
-            {
-              "fn": "applyFinanceCategoriesGroupBackfill",
-              "covered": false
-            },
-            {
-              "fn": "applyFinanceDebtScaffolding",
-              "covered": false
-            },
-            {
-              "fn": "applyFinanceBudgetGroupSeed",
-              "covered": false
-            },
-            {
-              "fn": "applyFinancePaycheckDefaultsDebtLinking",
-              "covered": false
-            },
-            {
-              "fn": "applyFinancePaycheckDefaultsDebtBackfill",
-              "covered": false
-            },
-            {
-              "fn": "applyFinanceNavRowMigration",
-              "covered": false
-            },
-            {
-              "fn": "applyFinanceNavRowGuardFormMigration",
-              "covered": false
-            },
-            {
-              "fn": "applyFinanceDefaultsNavRowInjection",
-              "covered": false
-            },
-            {
-              "fn": "applyFinanceTopHubNavRowDedup",
-              "covered": false
-            },
-            {
-              "fn": "applyPreInstall",
-              "covered": false
-            }
-          ],
-          "suggested_archetype": "seed-migrate",
-          "suggested_target_file": "platform/test/run-seed-migrations.js"
-        },
-        "manifest_schema": {
-          "score": 1,
-          "manifest_ratio": 1,
-          "schema_ratio": 1,
-          "manifest_fields": [
-            {
-              "field": "name",
-              "asserted": true
-            },
-            {
-              "field": "version",
-              "asserted": true
-            },
-            {
-              "field": "customjs_classes",
-              "asserted": true
-            },
-            {
-              "field": "files",
-              "asserted": true
-            },
-            {
-              "field": "rule_fragments",
-              "asserted": true
-            },
-            {
-              "field": "depends_on",
-              "asserted": true
-            }
-          ],
-          "schema_owned": 0,
-          "suggested_archetype": "hc-family",
-          "suggested_target_file": "platform/test/run-helper-cases.js"
-        },
-        "template_lockstep": {
-          "score": 1,
-          "covered": 15,
-          "total": 15,
-          "items": [
-            {
-              "kind": "template",
-              "name": "Budget Template.md",
-              "covered": true
-            },
-            {
-              "kind": "template",
-              "name": "Paycheck Template.md",
-              "covered": true
-            },
-            {
-              "kind": "template",
-              "name": "Invoice Template.md",
-              "covered": true
-            },
-            {
-              "kind": "template",
-              "name": "Time Log Template.md",
-              "covered": true
-            },
-            {
-              "kind": "template",
-              "name": "Invoice Board.md",
-              "covered": true
-            },
-            {
-              "kind": "template",
-              "name": "Invoice Board Card.md",
-              "covered": true
-            },
-            {
-              "kind": "rule_fragment",
-              "name": "finance",
-              "covered": true
-            },
-            {
-              "kind": "rule_fragment",
-              "name": "finance",
-              "covered": true
-            },
-            {
-              "kind": "rule_fragment",
-              "name": "finance",
-              "covered": true
-            },
-            {
-              "kind": "rule_fragment",
-              "name": "finance",
-              "covered": true
-            },
-            {
-              "kind": "rule_fragment",
-              "name": "finance",
-              "covered": true
-            },
-            {
-              "kind": "rule_fragment",
-              "name": "finance",
-              "covered": true
-            },
-            {
-              "kind": "rule_fragment",
-              "name": "finance",
-              "covered": true
-            },
-            {
-              "kind": "rule_fragment",
-              "name": "finance",
-              "covered": true
-            },
-            {
-              "kind": "rule_fragment",
-              "name": "finance",
-              "covered": true
-            }
-          ],
-          "suggested_archetype": "template-assert",
-          "suggested_target_file": "platform/test/run-helper-cases.js"
-        },
-        "widget_render": {
-          "score": 0.38461538461538464,
-          "covered": 10,
-          "total": 26,
-          "widgets": [
-            {
-              "widget": "FinanceHubCards",
-              "covered": true
-            },
-            {
-              "widget": "BudgetsCards",
-              "covered": true
-            },
-            {
-              "widget": "PaychecksCards",
-              "covered": true
-            },
-            {
-              "widget": "InvoicesCards",
-              "covered": true
-            },
-            {
-              "widget": "DebtsCards",
-              "covered": false
-            },
-            {
-              "widget": "FinanceNavRow",
-              "covered": true
-            },
-            {
-              "widget": "BudgetCategoriesEditor",
-              "covered": true
-            },
-            {
-              "widget": "PaycheckExpensesEditor",
-              "covered": true
-            },
-            {
-              "widget": "InvoiceTimeLogEditor",
-              "covered": true
-            },
-            {
-              "widget": "InvoiceControls",
-              "covered": true
-            },
-            {
-              "widget": "InvoiceWorkspaceNav",
-              "covered": false
-            },
-            {
-              "widget": "BudgetDefaultsEditor",
-              "covered": false
-            },
-            {
-              "widget": "PaycheckDefaultsEditor",
-              "covered": false
-            },
-            {
-              "widget": "DebtDefaultsEditor",
-              "covered": false
-            },
-            {
-              "widget": "DebtConfigEditor",
-              "covered": false
-            },
-            {
-              "widget": "BudgetSummary",
-              "covered": false
-            },
-            {
-              "widget": "PaycheckSummary",
-              "covered": false
-            },
-            {
-              "widget": "PaycheckDebtBand",
-              "covered": false
-            },
-            {
-              "widget": "DebtSummary",
-              "covered": false
-            },
-            {
-              "widget": "DebtsHubSummary",
-              "covered": false
-            },
-            {
-              "widget": "FinanceHubActions",
-              "covered": false
-            },
-            {
-              "widget": "FinanceNav",
-              "covered": true
-            },
-            {
-              "widget": "MonthlyOverview",
-              "covered": false
-            },
-            {
-              "widget": "MonthsCards",
-              "covered": false
-            },
-            {
-              "widget": "MonthDashboard",
-              "covered": false
-            },
-            {
-              "widget": "FinanceHubSummary",
-              "covered": false
-            }
-          ],
-          "suggested_archetype": "renderer-extend",
-          "suggested_target_file": "platform/test/run-renderer.js"
-        },
-        "integration_smoke": {
-          "score": 1,
-          "happy_path": true,
-          "failure_mode": true,
-          "suggested_archetype": "smoke-extend",
-          "suggested_target_file": "platform/test/run-integration-smoke.js"
-        }
-      },
-      "composite_score": 0.6344729344729345,
-      "blast_radius": "high",
-      "blast_radius_rationale": "v0.108-v0.115 rapid evolution; load-bearing schemas + measured-debt math.",
-      "recent_incidents_30d": 10,
-      "priority_score": 2,
-      "top_gap": {
-        "axis": "installer_migration",
-        "score": 2,
-        "archetype": "seed-migrate",
-        "target_file": "platform/test/run-seed-migrations.js"
-      },
-      "qualitative": {
-        "validates_scores": "yes",
-        "false_positives": [],
-        "false_negatives": [
-          {
-            "axis": "installer_migration",
-            "note": "Score 0.0 is technically correct (no HC-V0XYZ-SEED-MIGRATE families) but SHAPE-*/FM-*/BODY-* families in run-seed-migrations.js verify post-state of the 20 apply* functions via integration. This is weak signal coverage (proves execution, not per-function correctness)."
-          },
-          {
-            "axis": "customjs_behavioral",
-            "note": "Score 19/45 = 42% is accurate but 12+ finance widget classes (DebtsHubSummary, DebtDefaultsEditor, BudgetDefaultsEditor, PaycheckDefaultsEditor, BudgetsCards, PaychecksCards, InvoicesCards) ship with zero behavioral coverage despite being DOM-heavy with state logic."
-          }
-        ],
-        "primary_user_flow": "Create a budget note, view monthly overview dashboard of income/spending/debt paydown metrics, edit debt defaults, and track paycheck expenses with debt-account linking.",
-        "qualitative_recommendation": "Solid behavioral coverage on high-cycle helpers (MonthlyOverview, FinanceMath, _injectMonthlyBand). Installer migrations lack isolation asserts. Priority: (1) Add HC-V0XYZ-SEED-MIGRATE-* families for 5-10 critical apply* functions (applyFinanceDefaultsScaffolding, applyFinanceDebtScaffolding, applyFinanceBudgetGroupSeed, applyFinancePaycheckDefaultsDebtLinking, applyFinanceMigrations); (2) extend behavioral coverage to remaining widget renderers."
       }
     },
     {
@@ -1316,12 +664,12 @@
     {
       "kind": "blueprint",
       "name": "to-do",
-      "current_version": "0.7.0",
+      "current_version": "0.8.0",
       "axes": {
         "customjs_behavioral": {
-          "score": 0.8157894736842105,
-          "covered": 31,
-          "total": 38,
+          "score": 0.8064516129032258,
+          "covered": 25,
+          "total": 31,
           "methods": [
             {
               "cls": "ToDoHubActions",
@@ -1416,8 +764,8 @@
             {
               "cls": "ToDoDailyRecurring",
               "method": "render",
-              "covered": false,
-              "hits": 0
+              "covered": true,
+              "hits": 1
             },
             {
               "cls": "ToDoDailyRecurring",
@@ -1452,48 +800,6 @@
             {
               "cls": "ToDoDailyRecurring",
               "method": "insertRecurringIntoToday",
-              "covered": true,
-              "hits": 3
-            },
-            {
-              "cls": "ToDoDailyRecurring",
-              "method": "parseSentinel",
-              "covered": true,
-              "hits": 2
-            },
-            {
-              "cls": "ToDoDailyRecurring",
-              "method": "formatSentinel",
-              "covered": true,
-              "hits": 2
-            },
-            {
-              "cls": "ToDoDailyRecurring",
-              "method": "hashEntry",
-              "covered": true,
-              "hits": 2
-            },
-            {
-              "cls": "ToDoDailyRecurring",
-              "method": "hasSentinel",
-              "covered": true,
-              "hits": 2
-            },
-            {
-              "cls": "ToDoDailyRecurring",
-              "method": "writeSentinel",
-              "covered": true,
-              "hits": 3
-            },
-            {
-              "cls": "ToDoDailyRecurring",
-              "method": "appendAuditRow",
-              "covered": true,
-              "hits": 3
-            },
-            {
-              "cls": "ToDoDailyRecurring",
-              "method": "trimAuditTable",
               "covered": true,
               "hits": 3
             },
@@ -1701,10 +1007,10 @@
           "suggested_target_file": "platform/test/run-integration-smoke.js"
         }
       },
-      "composite_score": 0.7192982456140351,
+      "composite_score": 0.717741935483871,
       "blast_radius": "high",
       "blast_radius_rationale": "Multi-cycle storm v0.116-v0.118; highest recent-incident rate.",
-      "recent_incidents_30d": 18,
+      "recent_incidents_30d": 19,
       "priority_score": 1.5,
       "top_gap": {
         "axis": "widget_render",
@@ -2253,6 +1559,658 @@
         ],
         "primary_user_flow": "User creates a meeting note via new-meeting button (entity-create v0.5.0 integration) with optional project link; Meeting Hub renders today's meetings as cards with project pills, attendee chips, task badges via MeetingsHubCards.render().",
         "qualitative_recommendation": "Well-covered on template lockstep + manifest schema, but widget_render axis is critical gap. MeetingsHubCards.render() is the primary user-facing component (displays cards, filters by date, enriches async file reads, renders project pills, delegates to BeaconCards). Zero behavioral tests means layout/enrichment/pill bugs would ship. Single MEET-3 case in run-helper-cases.js (or run-renderer.js fixture) would unlock both axes to 1.0."
+      }
+    },
+    {
+      "kind": "blueprint",
+      "name": "finance",
+      "current_version": "0.9.2",
+      "axes": {
+        "customjs_behavioral": {
+          "score": 0.4444444444444444,
+          "covered": 20,
+          "total": 45,
+          "methods": [
+            {
+              "cls": "FinanceMath",
+              "method": "readDebts",
+              "covered": true,
+              "hits": 4
+            },
+            {
+              "cls": "FinanceMath",
+              "method": "readPaychecksForMonth",
+              "covered": true,
+              "hits": 4
+            },
+            {
+              "cls": "FinanceMath",
+              "method": "readBudgetForMonth",
+              "covered": true,
+              "hits": 6
+            },
+            {
+              "cls": "FinanceMath",
+              "method": "monthBounds",
+              "covered": true,
+              "hits": 1
+            },
+            {
+              "cls": "FinanceMath",
+              "method": "debtTotals",
+              "covered": true,
+              "hits": 4
+            },
+            {
+              "cls": "FinanceMath",
+              "method": "monthIncome",
+              "covered": true,
+              "hits": 4
+            },
+            {
+              "cls": "FinanceMath",
+              "method": "monthSpending",
+              "covered": true,
+              "hits": 6
+            },
+            {
+              "cls": "FinanceMath",
+              "method": "monthExpensesTotal",
+              "covered": true,
+              "hits": 2
+            },
+            {
+              "cls": "FinanceMath",
+              "method": "monthDebtPaid",
+              "covered": true,
+              "hits": 5
+            },
+            {
+              "cls": "FinanceMath",
+              "method": "debtPaidByDebt",
+              "covered": true,
+              "hits": 3
+            },
+            {
+              "cls": "FinanceMath",
+              "method": "measuredMovement",
+              "covered": true,
+              "hits": 3
+            },
+            {
+              "cls": "FinanceMath",
+              "method": "reconcile",
+              "covered": true,
+              "hits": 3
+            },
+            {
+              "cls": "FinanceMath",
+              "method": "fmtMoney",
+              "covered": true,
+              "hits": 7
+            },
+            {
+              "cls": "FinanceStatus",
+              "method": "derive",
+              "covered": true,
+              "hits": 12
+            },
+            {
+              "cls": "FinanceStatus",
+              "method": "renderBadge",
+              "covered": true,
+              "hits": 14
+            },
+            {
+              "cls": "FinanceStatus",
+              "method": "formatDate",
+              "covered": true,
+              "hits": 8
+            },
+            {
+              "cls": "FinanceHubCards",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "BudgetsCards",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "PaychecksCards",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "InvoicesCards",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "DebtsCards",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "FinanceFrontmatter",
+              "method": "update",
+              "covered": true,
+              "hits": 19
+            },
+            {
+              "cls": "FinanceFrontmatter",
+              "method": "read",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "FinanceFrontmatter",
+              "method": "isTruthy",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "FinanceNavRow",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "BudgetCategoriesEditor",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "PaycheckExpensesEditor",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "InvoiceTimeLogEditor",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "InvoiceControls",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "InvoiceWorkspaceNav",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "BudgetDefaultsEditor",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "PaycheckDefaultsEditor",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "DebtDefaultsEditor",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "DebtConfigEditor",
+              "method": "render",
+              "covered": true,
+              "hits": 4
+            },
+            {
+              "cls": "BudgetSummary",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "PaycheckSummary",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "PaycheckDebtBand",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "DebtSummary",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "DebtsHubSummary",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "FinanceHubActions",
+              "method": "render",
+              "covered": true,
+              "hits": 5
+            },
+            {
+              "cls": "FinanceNav",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "MonthlyOverview",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "MonthsCards",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "MonthDashboard",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "FinanceHubSummary",
+              "method": "render",
+              "covered": true,
+              "hits": 1
+            }
+          ],
+          "suggested_archetype": "behavioral-runner",
+          "suggested_target_file": "platform/test/run-finance-financemath.js"
+        },
+        "installer_migration": {
+          "score": 0.8695652173913043,
+          "covered": 20,
+          "total": 23,
+          "migrations": [
+            {
+              "fn": "applyExternalPlugins",
+              "covered": false
+            },
+            {
+              "fn": "applyFinanceMonthsScaffolding",
+              "covered": true
+            },
+            {
+              "fn": "applyFinancePaycheckDebtBandInjection",
+              "covered": true
+            },
+            {
+              "fn": "applyFinanceMigrations",
+              "covered": true
+            },
+            {
+              "fn": "applyFinanceInvoiceWorkspaceNavInjection",
+              "covered": true
+            },
+            {
+              "fn": "applyFinanceHubFrontmatterHeal",
+              "covered": true
+            },
+            {
+              "fn": "applyFinanceHubsRepair",
+              "covered": true
+            },
+            {
+              "fn": "applyOrphanedHelperCleanup",
+              "covered": false
+            },
+            {
+              "fn": "applyFinanceUnifiedNavMigration",
+              "covered": true
+            },
+            {
+              "fn": "applyFinancePaycheckBodyMigration",
+              "covered": true
+            },
+            {
+              "fn": "applyFinanceBudgetBodyMigration",
+              "covered": true
+            },
+            {
+              "fn": "applyFinanceBudgetMonthlyBandInjection",
+              "covered": true
+            },
+            {
+              "fn": "applyFinanceDefaultsScaffolding",
+              "covered": true
+            },
+            {
+              "fn": "applyFinanceCategoriesGroupBackfill",
+              "covered": true
+            },
+            {
+              "fn": "applyFinanceDebtScaffolding",
+              "covered": true
+            },
+            {
+              "fn": "applyFinanceBudgetGroupSeed",
+              "covered": true
+            },
+            {
+              "fn": "applyFinancePaycheckDefaultsDebtLinking",
+              "covered": true
+            },
+            {
+              "fn": "applyFinancePaycheckDefaultsDebtBackfill",
+              "covered": true
+            },
+            {
+              "fn": "applyFinanceNavRowMigration",
+              "covered": true
+            },
+            {
+              "fn": "applyFinanceNavRowGuardFormMigration",
+              "covered": true
+            },
+            {
+              "fn": "applyFinanceDefaultsNavRowInjection",
+              "covered": true
+            },
+            {
+              "fn": "applyFinanceTopHubNavRowDedup",
+              "covered": true
+            },
+            {
+              "fn": "applyPreInstall",
+              "covered": false
+            }
+          ],
+          "suggested_archetype": "seed-migrate",
+          "suggested_target_file": "platform/test/run-seed-migrations.js"
+        },
+        "manifest_schema": {
+          "score": 1,
+          "manifest_ratio": 1,
+          "schema_ratio": 1,
+          "manifest_fields": [
+            {
+              "field": "name",
+              "asserted": true
+            },
+            {
+              "field": "version",
+              "asserted": true
+            },
+            {
+              "field": "customjs_classes",
+              "asserted": true
+            },
+            {
+              "field": "files",
+              "asserted": true
+            },
+            {
+              "field": "rule_fragments",
+              "asserted": true
+            },
+            {
+              "field": "depends_on",
+              "asserted": true
+            }
+          ],
+          "schema_owned": 0,
+          "suggested_archetype": "hc-family",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "template_lockstep": {
+          "score": 1,
+          "covered": 15,
+          "total": 15,
+          "items": [
+            {
+              "kind": "template",
+              "name": "Budget Template.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Paycheck Template.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Invoice Template.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Time Log Template.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Invoice Board.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Invoice Board Card.md",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "finance",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "finance",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "finance",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "finance",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "finance",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "finance",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "finance",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "finance",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "finance",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "template-assert",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "widget_render": {
+          "score": 0.38461538461538464,
+          "covered": 10,
+          "total": 26,
+          "widgets": [
+            {
+              "widget": "FinanceHubCards",
+              "covered": true
+            },
+            {
+              "widget": "BudgetsCards",
+              "covered": true
+            },
+            {
+              "widget": "PaychecksCards",
+              "covered": true
+            },
+            {
+              "widget": "InvoicesCards",
+              "covered": true
+            },
+            {
+              "widget": "DebtsCards",
+              "covered": false
+            },
+            {
+              "widget": "FinanceNavRow",
+              "covered": true
+            },
+            {
+              "widget": "BudgetCategoriesEditor",
+              "covered": true
+            },
+            {
+              "widget": "PaycheckExpensesEditor",
+              "covered": true
+            },
+            {
+              "widget": "InvoiceTimeLogEditor",
+              "covered": true
+            },
+            {
+              "widget": "InvoiceControls",
+              "covered": true
+            },
+            {
+              "widget": "InvoiceWorkspaceNav",
+              "covered": false
+            },
+            {
+              "widget": "BudgetDefaultsEditor",
+              "covered": false
+            },
+            {
+              "widget": "PaycheckDefaultsEditor",
+              "covered": false
+            },
+            {
+              "widget": "DebtDefaultsEditor",
+              "covered": false
+            },
+            {
+              "widget": "DebtConfigEditor",
+              "covered": false
+            },
+            {
+              "widget": "BudgetSummary",
+              "covered": false
+            },
+            {
+              "widget": "PaycheckSummary",
+              "covered": false
+            },
+            {
+              "widget": "PaycheckDebtBand",
+              "covered": false
+            },
+            {
+              "widget": "DebtSummary",
+              "covered": false
+            },
+            {
+              "widget": "DebtsHubSummary",
+              "covered": false
+            },
+            {
+              "widget": "FinanceHubActions",
+              "covered": false
+            },
+            {
+              "widget": "FinanceNav",
+              "covered": true
+            },
+            {
+              "widget": "MonthlyOverview",
+              "covered": false
+            },
+            {
+              "widget": "MonthsCards",
+              "covered": false
+            },
+            {
+              "widget": "MonthDashboard",
+              "covered": false
+            },
+            {
+              "widget": "FinanceHubSummary",
+              "covered": false
+            }
+          ],
+          "suggested_archetype": "renderer-extend",
+          "suggested_target_file": "platform/test/run-renderer.js"
+        },
+        "integration_smoke": {
+          "score": 1,
+          "happy_path": true,
+          "failure_mode": true,
+          "suggested_archetype": "smoke-extend",
+          "suggested_target_file": "platform/test/run-integration-smoke.js"
+        }
+      },
+      "composite_score": 0.7831041744085222,
+      "blast_radius": "high",
+      "blast_radius_rationale": "v0.108-v0.115 rapid evolution; load-bearing schemas + measured-debt math.",
+      "recent_incidents_30d": 10,
+      "priority_score": 1.1111111111111112,
+      "top_gap": {
+        "axis": "customjs_behavioral",
+        "score": 1.1111111111111112,
+        "archetype": "behavioral-runner",
+        "target_file": "platform/test/run-finance-financemath.js"
+      },
+      "qualitative": {
+        "validates_scores": "yes",
+        "false_positives": [],
+        "false_negatives": [
+          {
+            "axis": "installer_migration",
+            "note": "Score 0.0 is technically correct (no HC-V0XYZ-SEED-MIGRATE families) but SHAPE-*/FM-*/BODY-* families in run-seed-migrations.js verify post-state of the 20 apply* functions via integration. This is weak signal coverage (proves execution, not per-function correctness)."
+          },
+          {
+            "axis": "customjs_behavioral",
+            "note": "Score 19/45 = 42% is accurate but 12+ finance widget classes (DebtsHubSummary, DebtDefaultsEditor, BudgetDefaultsEditor, PaycheckDefaultsEditor, BudgetsCards, PaychecksCards, InvoicesCards) ship with zero behavioral coverage despite being DOM-heavy with state logic."
+          }
+        ],
+        "primary_user_flow": "Create a budget note, view monthly overview dashboard of income/spending/debt paydown metrics, edit debt defaults, and track paycheck expenses with debt-account linking.",
+        "qualitative_recommendation": "Solid behavioral coverage on high-cycle helpers (MonthlyOverview, FinanceMath, _injectMonthlyBand). Installer migrations lack isolation asserts. Priority: (1) Add HC-V0XYZ-SEED-MIGRATE-* families for 5-10 critical apply* functions (applyFinanceDefaultsScaffolding, applyFinanceDebtScaffolding, applyFinanceBudgetGroupSeed, applyFinancePaycheckDefaultsDebtLinking, applyFinanceMigrations); (2) extend behavioral coverage to remaining widget renderers."
       }
     },
     {
