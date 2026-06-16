@@ -111,12 +111,15 @@ ok('CARR-3a returns null when list empty',
         { topLine: '- [ ] migrated task [from:: [[ToDo-2026-06-14]]]', childLines: [] },
     ];
     const out = ToDoDailyCarryover.insertCarryoverIntoToday(todayContent, decorated, '2026-06-14');
-    const carryHeadingIdx = out.indexOf('## Carryover (from 2026-06-14)');
+    // v0.5.0: SectionLabel dataviewjs block carries the heading text (no raw `## H2`).
+    const carryLabelRe = /SectionLabel[\s\S]*?Carryover \(from 2026-06-14\)/;
     const carryDvIdx = out.indexOf('class: "ToDoDailyCarryover"');
     const recDvIdx = out.indexOf('class: "ToDoDailyRecurring"');
-    ok('CARR-6 carryover heading present', carryHeadingIdx > -1, `out:\n${out}`);
-    ok('CARR-6 heading after the carryover dataviewjs block', carryHeadingIdx > carryDvIdx);
-    ok('CARR-6 heading before the recurring dataviewjs block', carryHeadingIdx < recDvIdx);
+    const carryLabelIdx = out.search(carryLabelRe);
+    ok('CARR-6 carryover SectionLabel present', carryLabelIdx > -1, `out:\n${out}`);
+    ok('CARR-6 SectionLabel after the ToDoDailyCarryover block', carryLabelIdx > carryDvIdx);
+    ok('CARR-6 SectionLabel before the recurring block', carryLabelIdx < recDvIdx);
+    ok('CARR-6 NO raw ## Carryover heading materialized', !out.includes('## Carryover (from 2026-06-14)'));
     ok('CARR-6 migrated line included', out.includes('- [ ] migrated task [from:: [[ToDo-2026-06-14]]]'));
 })();
 

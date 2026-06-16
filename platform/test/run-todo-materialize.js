@@ -91,13 +91,16 @@ console.log('run-todo-materialize:');
         '- [ ] Standup [recurring_from:: [[Recurring Tasks]]] [project:: [[Headspace]]]',
     ];
     const out = ToDoDailyRecurring.insertRecurringIntoToday(today, lines);
-    const headIdx = out.indexOf('## Recurring Today');
+    // v0.5.0: SectionLabel dataviewjs block carries the heading (no raw `## Recurring Today`).
+    const recLabelRe = /SectionLabel[\s\S]*?Recurring Today/;
+    const labelIdx = out.search(recLabelRe);
     const recDvIdx = out.indexOf('class: "ToDoDailyRecurring"');
     const projDvIdx = out.indexOf('class: "ToDoDailyProjectGroups"');
-    ok('REC-6 heading present', headIdx > -1);
-    ok('REC-6a heading after recurring dv block', headIdx > recDvIdx);
-    ok('REC-6b heading before project-groups dv block', headIdx < projDvIdx);
-    ok('REC-6c both lines included', out.includes('Take out trash') && out.includes('Standup'));
+    ok('REC-6 SectionLabel block present', labelIdx > -1, `out:\n${out}`);
+    ok('REC-6a SectionLabel after ToDoDailyRecurring block', labelIdx > recDvIdx);
+    ok('REC-6b SectionLabel before ToDoDailyProjectGroups block', labelIdx < projDvIdx);
+    ok('REC-6c NO raw ## Recurring Today heading', !out.includes('## Recurring Today'));
+    ok('REC-6d both task lines included', out.includes('Take out trash') && out.includes('Standup'));
 })();
 
 // --- REC-7: appendAuditRow appends a row ---

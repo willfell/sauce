@@ -1366,12 +1366,15 @@ async function caseTD1ToDoPostInstall() {
             "--mechanisms=all"],
             { stdio: "pipe", encoding: "utf8" });
 
-        // Patch the subscription to include the to-do blueprint.
+        // Patch the subscription to include the to-do blueprint + project blueprint
+        // (v0.5.0: to-do depends on project >=1.21.0 for the SectionLabel primitive).
         const subPath = path.join(tempDir, "ranch/platform-subscription.json");
         const sub = JSON.parse(fs.readFileSync(subPath, "utf8"));
-        const todoEntry = manifest.blueprints.find(b => b.name === "to-do");
-        if (todoEntry && !sub.blueprints.find(b => b.name === "to-do")) {
-            sub.blueprints.push({ name: todoEntry.name, version: todoEntry.version });
+        for (const name of ["project", "to-do"]) {
+            const entry = manifest.blueprints.find(b => b.name === name);
+            if (entry && !sub.blueprints.find(b => b.name === name)) {
+                sub.blueprints.push({ name: entry.name, version: entry.version });
+            }
         }
         fs.writeFileSync(subPath, JSON.stringify(sub, null, 2), "utf8");
 

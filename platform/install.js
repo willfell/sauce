@@ -4591,25 +4591,48 @@ async function applyOrphanedHelperCleanup(tp, mech, variables, history, git) {
     completed_at: new Date().toISOString() });
 }
 
-// applyToDoBlueprintMigration — v0.116.0. Reshapes v0.3.3 daily-note bodies
-// (2 dataviewjs blocks + free-form `- [ ]` lines underneath) into the v0.4.0
-// 5-block shape (SpaceNavButtons + ToDoLeafActions + `## Today's Capture` +
-// 4 materializer dataviewjs blocks). User-typed `- [ ]` lines under the v0.3.3
-// dataviewjs blocks become the `## Today's Capture` section content. Edge
-// cases:
-//   - `## Tasks` heading (manually added): heading dropped, tasks absorbed into
-//     Capture.
-//   - `## Notes` heading (manually added): section preserved verbatim AFTER the
-//     four materializer dataviewjs blocks.
-// Idempotent via body-substring check ('class: "ToDoDailyCarryover"').
-// .sauce-backup snapshot before any write.
+// applyToDoBlueprintMigration — v0.116.0 (extended in v0.117.0 / to-do v0.5.0).
+//
+// Reshapes consumer-vault notes to the current to-do v0.5.0 visual shape:
+//   - daily To-Do notes (type: to-do) get the 5-block body + SectionLabel
+//     "Today's Capture" dataviewjs block inserted between LeafActions and
+//     ToDoDailyCarryover (or 5 helper blocks appended if v0.3.3 shape).
+//   - persisted `## Carryover (...)` / `## Recurring Today` H2 headings inside
+//     daily notes get rewritten to `<dataviewjs SectionLabel(...)>` blocks.
+//   - per-project To-Do notes (type: project-todo) get `## Owned Tasks` and
+//     `## From Meetings` H2 headings rewritten to SectionLabel blocks.
+//   - Recurring Tasks.md registry gets `## Recurring Tasks` + `## Last 7 days
+//     of materialization` H2 headings rewritten to SectionLabel blocks.
+//
+// User content (free-form `- [ ]` lines, ## Notes section, etc.) is preserved
+// verbatim. .sauce-backup snapshot before any write. Idempotent (multiple
+// invocations on already-migrated content are no-ops).
 async function applyToDoBlueprintMigration(tp, mech, variables, history, git) {
   if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
   const adapter = tp.app.vault.adapter;
   const TODO_ROOT = "spice/to-do";
-  if (!(await adapter.exists(TODO_ROOT))) return;
+  const PROJ_ROOT = "spice/projects";
+  if (!(await adapter.exists(TODO_ROOT)) && !(await adapter.exists(PROJ_ROOT))) return;
 
   let migrated = 0, alreadyCurrent = 0, absorbedTasksHeading = 0, errors = 0;
+  let projectTodoReshaped = 0, registryReshaped = 0, dailyHeadingsReshaped = 0;
+
+  const viewsPath = (variables && variables.views_path) || 'ranch/views';
+
+  // v0.5.0 — generic H2 → SectionLabel rewriter. Replaces a markdown `## <Heading>`
+  // line with a `<dataviewjs SectionLabel(text: ...)>` block. Idempotent: skips if
+  // the same SectionLabel block already exists nearby.
+  function _rewriteH2ToSectionLabel(body, headingPattern) {
+    // headingPattern: regex matching the H2 line (NOT including the surrounding newlines).
+    return body.replace(new RegExp('^' + headingPattern.source + '$', 'gm'), (match) => {
+      const text = match.replace(/^## /, '').trim();
+      return [
+        '```dataviewjs',
+        `await dv.view("${viewsPath}/customjs-guard", { class: "SectionLabel", args: [{ text: ${JSON.stringify(text)} }] });`,
+        '```'
+      ].join('\n');
+    });
+  }
 
   async function _walkToDos(dir) {
     const out = [];
@@ -4637,6 +4660,13 @@ async function applyToDoBlueprintMigration(tp, mech, variables, history, git) {
     return body.includes('class: "SpaceNavButtons"') &&
         body.includes('class: "ToDoLeafActions"') &&
         !body.includes('class: "ToDoDailyCarryover"');
+  }
+
+  function _isV040ShapeMissingSectionLabel(body) {
+    // v0.4.0 shape: has ToDoDailyCarryover but does NOT have a SectionLabel
+    // dataviewjs block for "Today's Capture" between LeafActions and Carryover.
+    return body.includes('class: "ToDoDailyCarryover"') &&
+        !/class: "SectionLabel"[^`]*Today's Capture/.test(body);
   }
 
   function _reshapeToV040(body, viewsPath) {
@@ -4697,7 +4727,7 @@ async function applyToDoBlueprintMigration(tp, mech, variables, history, git) {
       '',
       dvBlock('ToDoLeafActions'),
       '',
-      "## Today's Capture",
+      dvBlock('SectionLabel', '[{ text: "Today\'s Capture", top: true }]'),
       '',
     ];
     if (captured.length) parts.push(captured.join('\n'), '');
@@ -4715,21 +4745,57 @@ async function applyToDoBlueprintMigration(tp, mech, variables, history, git) {
     return parts.join('\n');
   }
 
-  const viewsPath = (variables && variables.views_path) || 'ranch/views';
+  function _injectSectionLabelIntoV040(body) {
+    // Insert the SectionLabel("Today's Capture", top: true) dataviewjs block
+    // immediately after the ToDoLeafActions block + a blank line. Idempotent:
+    // returns body unchanged if the SectionLabel marker is already present.
+    if (/class: "SectionLabel"[^`]*Today's Capture/.test(body)) return body;
+    const ANCHOR_RE = /(```dataviewjs[^`]*class:\s*"ToDoLeafActions"[^`]*```\n?)/;
+    const m = ANCHOR_RE.exec(body);
+    if (!m) return body;
+    const labelBlock = [
+      '',
+      '```dataviewjs',
+      `await dv.view("${viewsPath}/customjs-guard", { class: "SectionLabel", args: [{ text: "Today's Capture", top: true }] });`,
+      '```',
+      '',
+    ].join('\n');
+    const insertPos = m.index + m[0].length;
+    return body.slice(0, insertPos) + labelBlock + body.slice(insertPos);
+  }
 
   for (const relPath of dailies) {
     try {
       const body = await adapter.read(relPath);
-      if (_isV040(body)) { alreadyCurrent++; continue; }
-      if (!_isV033Shape(body)) { alreadyCurrent++; continue; }
-      // Backup before write.
-      const backupPath = '.sauce-backup/' + new Date().toISOString().replace(/[:.]/g, '-') + '/' + relPath;
-      try {
-        const backupFolder = backupPath.split('/').slice(0, -1).join('/');
-        if (!(await adapter.exists(backupFolder))) await adapter.mkdir(backupFolder);
-        await adapter.write(backupPath, body);
-      } catch (_e) { /* best-effort backup */ }
-      const newBody = _reshapeToV040(body, viewsPath);
+      let newBody = body;
+      let touched = false;
+
+      if (_isV033Shape(newBody)) {
+        // v0.3.3 → v0.5.0 full reshape.
+        const backupPath = '.sauce-backup/' + new Date().toISOString().replace(/[:.]/g, '-') + '/' + relPath;
+        try {
+          const backupFolder = backupPath.split('/').slice(0, -1).join('/');
+          if (!(await adapter.exists(backupFolder))) await adapter.mkdir(backupFolder);
+          await adapter.write(backupPath, body);
+        } catch (_e) { /* best-effort */ }
+        newBody = _reshapeToV040(newBody, viewsPath);
+        touched = true;
+      } else if (_isV040ShapeMissingSectionLabel(newBody)) {
+        // v0.4.0 → v0.5.0: insert SectionLabel block.
+        newBody = _injectSectionLabelIntoV040(newBody);
+        if (newBody !== body) touched = true;
+      }
+
+      // v0.5.0 H2 → SectionLabel rewrite for persisted Carryover/Recurring headings.
+      const beforeHeadings = newBody;
+      newBody = _rewriteH2ToSectionLabel(newBody, /## Carryover \(from \d{4}-\d{2}-\d{2}\)/);
+      newBody = _rewriteH2ToSectionLabel(newBody, /## Recurring Today/);
+      if (newBody !== beforeHeadings) { dailyHeadingsReshaped++; touched = true; }
+
+      if (!touched) { alreadyCurrent++; continue; }
+      // (skip-old to-do block start)
+      if (false) {
+      }  // (skip-old to-do block end)
       await adapter.write(relPath, newBody);
       migrated++;
       history?.push({ event: "info", step: "to_do_blueprint_migration", name: "to-do",
@@ -4745,8 +4811,92 @@ async function applyToDoBlueprintMigration(tp, mech, variables, history, git) {
     }
   }
 
+  // v0.5.0 — rewrite persistent H2 headings inside project-todo notes to
+  // SectionLabel dataviewjs blocks. Walks spice/projects/*/<Name> To-Do.md
+  // and rewrites `## Owned Tasks` + `## From Meetings` headings.
+  async function _walkProjectTodos(dir) {
+    const out = [];
+    try {
+      const listing = await adapter.list(dir);
+      for (const sub of (listing.folders || [])) {
+        try {
+          const subListing = await adapter.list(sub);
+          for (const f of (subListing.files || [])) {
+            if (/ To-Do\.md$/.test(f)) out.push(f);
+          }
+        } catch (_e) {}
+      }
+    } catch (_e) {}
+    return out;
+  }
+
+  if (await adapter.exists(PROJ_ROOT)) {
+    const projectTodos = await _walkProjectTodos(PROJ_ROOT);
+    for (const relPath of projectTodos) {
+      try {
+        const body = await adapter.read(relPath);
+        if (!body.includes('## Owned Tasks') && !body.includes('## From Meetings')) continue;
+        let newBody = body;
+        newBody = _rewriteH2ToSectionLabel(newBody, /## Owned Tasks/);
+        newBody = _rewriteH2ToSectionLabel(newBody, /## From Meetings/);
+        if (newBody === body) continue;
+        try {
+          const backupPath = '.sauce-backup/' + new Date().toISOString().replace(/[:.]/g, '-') + '/' + relPath;
+          const backupFolder = backupPath.split('/').slice(0, -1).join('/');
+          if (!(await adapter.exists(backupFolder))) await adapter.mkdir(backupFolder);
+          await adapter.write(backupPath, body);
+        } catch (_e) {}
+        await adapter.write(relPath, newBody);
+        projectTodoReshaped++;
+        history?.push({ event: "info", step: "to_do_blueprint_migration", name: "to-do",
+          action: "reshaped_project_todo", path: relPath,
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+          attempted_at: new Date().toISOString() });
+      } catch (e) {
+        errors++;
+        history?.push({ event: "error", step: "to_do_blueprint_migration", name: "to-do",
+          path: relPath, reason: e.message,
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+          attempted_at: new Date().toISOString() });
+      }
+    }
+  }
+
+  // v0.5.0 — rewrite Recurring Tasks.md registry's H2 headings to SectionLabel blocks.
+  const registryPath = 'spice/to-do/Recurring Tasks.md';
+  if (await adapter.exists(registryPath)) {
+    try {
+      const body = await adapter.read(registryPath);
+      if (body.includes('## Recurring Tasks') || body.includes('## Last 7 days of materialization')) {
+        let newBody = body;
+        newBody = _rewriteH2ToSectionLabel(newBody, /## Recurring Tasks/);
+        newBody = _rewriteH2ToSectionLabel(newBody, /## Last 7 days of materialization/);
+        if (newBody !== body) {
+          try {
+            const backupPath = '.sauce-backup/' + new Date().toISOString().replace(/[:.]/g, '-') + '/' + registryPath;
+            const backupFolder = backupPath.split('/').slice(0, -1).join('/');
+            if (!(await adapter.exists(backupFolder))) await adapter.mkdir(backupFolder);
+            await adapter.write(backupPath, body);
+          } catch (_e) {}
+          await adapter.write(registryPath, newBody);
+          registryReshaped++;
+          history?.push({ event: "info", step: "to_do_blueprint_migration", name: "to-do",
+            action: "reshaped_recurring_registry", path: registryPath,
+            git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+            attempted_at: new Date().toISOString() });
+        }
+      }
+    } catch (e) {
+      errors++;
+      history?.push({ event: "error", step: "to_do_blueprint_migration", name: "to-do",
+        path: registryPath, reason: e.message,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    }
+  }
+
   history?.push({ event: "info", step: "to_do_blueprint_migration", name: "to-do",
-    summary: { migrated, alreadyCurrent, absorbedTasksHeading, errors },
+    summary: { migrated, alreadyCurrent, absorbedTasksHeading, dailyHeadingsReshaped, projectTodoReshaped, registryReshaped, errors },
     git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
     completed_at: new Date().toISOString() });
 }
@@ -4821,9 +4971,13 @@ async function applyProjectTodoBackfill(tp, mech, variables, history, git) {
         `await dv.view("${viewsPath}/customjs-guard", { class: "ToDoLeafActions" });`,
         '```',
         '',
-        '## Owned Tasks',
+        '```dataviewjs',
+        `await dv.view("${viewsPath}/customjs-guard", { class: "SectionLabel", args: [{ text: "Owned Tasks", top: true }] });`,
+        '```',
         '',
-        '## From Meetings',
+        '```dataviewjs',
+        `await dv.view("${viewsPath}/customjs-guard", { class: "SectionLabel", args: [{ text: "From Meetings" }] });`,
+        '```',
         '',
         '```dataviewjs',
         `await dv.view("${viewsPath}/customjs-guard", { class: "ToDoDailyProjectGroups", args: [{ scope: "project-todo" }] });`,

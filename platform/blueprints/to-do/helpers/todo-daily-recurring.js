@@ -237,8 +237,15 @@ class ToDoDailyRecurring {
 
     static insertRecurringIntoToday(todayContent, materializedLines) {
         if (!materializedLines || !materializedLines.length) return todayContent;
-        const heading = '## Recurring Today';
-        const block = ['', heading, ''].concat(materializedLines).concat(['']).join('\n');
+        // v0.5.0: emit a SectionLabel dataviewjs block instead of `## Recurring Today` H2.
+        const labelLines = [
+            '',
+            '```dataviewjs',
+            'await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Recurring Today" }] });',
+            '```',
+            '',
+        ];
+        const block = labelLines.concat(materializedLines).concat(['']).join('\n');
         // Find the ToDoDailyRecurring dataviewjs block; insert immediately after it.
         const ANCHOR_RE = /(```dataviewjs[^`]*class:\s*"ToDoDailyRecurring"[^`]*```\n?)/;
         const m = ANCHOR_RE.exec(todayContent);
@@ -273,42 +280,39 @@ class ToDoDailyRecurring {
 
     static appendAuditRow(registryContent, row) {
         // row = { date, title, route }
-        const tableHeading = '## Last 7 days of materialization';
+        // v0.5.0: the audit-log section header is a SectionLabel dataviewjs block
+        // OR (legacy) a `## Last 7 days of materialization` H2. Find by substring.
         const headerRow = '| Date | Title | Routed to |';
         const sepRow = '| --- | --- | --- |';
-        const idx = registryContent.indexOf(tableHeading);
         const newRow = `| ${row.date} | ${row.title} | ${row.route} |`;
+        const idx = ToDoDailyRecurring._findAuditSectionStart(registryContent);
         if (idx === -1) {
-            // No section yet — append at EOF.
-            return registryContent.replace(/\n+$/, '') + '\n\n' + [tableHeading, '', headerRow, sepRow, newRow].join('\n') + '\n';
+            // No audit section yet — append at EOF with a SectionLabel block.
+            const labelBlock = [
+                '```dataviewjs',
+                'await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Last 7 days of materialization" }] });',
+                '```',
+                '',
+            ].join('\n');
+            return registryContent.replace(/\n+$/, '') + '\n\n' + labelBlock + '\n' + [headerRow, sepRow, newRow].join('\n') + '\n';
         }
-        // Find end of the section (next `## ` or EOF).
-        const rest = registryContent.slice(idx);
-        const next = rest.slice(tableHeading.length).search(/\n## /);
-        const sectionEnd = next === -1 ? registryContent.length : idx + tableHeading.length + next;
+        // Find end of the section (next ## heading or another SectionLabel block, or EOF).
+        const sectionEnd = ToDoDailyRecurring._findAuditSectionEnd(registryContent, idx);
         const head = registryContent.slice(0, sectionEnd);
         const tail = registryContent.slice(sectionEnd);
-        // Ensure header rows present; append.
         if (!head.includes(headerRow)) {
-            return registryContent.slice(0, idx) +
-                [tableHeading, '', headerRow, sepRow, newRow, ''].join('\n') +
-                tail;
+            return head + '\n' + headerRow + '\n' + sepRow + '\n' + newRow + '\n' + tail.replace(/^\n+/, '');
         }
-        // Append after the last existing table row.
         const trimmedHead = head.replace(/\n+$/, '');
         return trimmedHead + '\n' + newRow + '\n' + tail.replace(/^\n+/, '');
     }
 
     static trimAuditTable(registryContent, maxRows) {
-        const tableHeading = '## Last 7 days of materialization';
-        const idx = registryContent.indexOf(tableHeading);
+        const idx = ToDoDailyRecurring._findAuditSectionStart(registryContent);
         if (idx === -1) return registryContent;
-        const rest = registryContent.slice(idx);
-        const nextRel = rest.slice(tableHeading.length).search(/\n## /);
-        const sectionEnd = nextRel === -1 ? registryContent.length : idx + tableHeading.length + nextRel;
+        const sectionEnd = ToDoDailyRecurring._findAuditSectionEnd(registryContent, idx);
         const sectionText = registryContent.slice(idx, sectionEnd);
         const lines = sectionText.split('\n');
-        // Identify table rows (start with `|` AND not header/sep).
         const dataLines = lines.filter(l => /^\|/.test(l) && !/^\| Date \|/.test(l) && !/^\| --- \|/.test(l));
         if (dataLines.length <= maxRows) return registryContent;
         const drop = dataLines.length - maxRows;
@@ -322,6 +326,24 @@ class ToDoDailyRecurring {
             kept.push(l);
         }
         return registryContent.slice(0, idx) + kept.join('\n') + registryContent.slice(sectionEnd);
+    }
+
+    static _findAuditSectionStart(registryContent) {
+        // Match `## Last 7 days of materialization` (legacy H2) OR
+        // a SectionLabel dataviewjs block carrying that text.
+        const h2 = registryContent.indexOf('## Last 7 days of materialization');
+        if (h2 !== -1) return h2;
+        const slRe = /```dataviewjs[^`]*SectionLabel[^`]*Last 7 days of materialization[^`]*```/;
+        const m = slRe.exec(registryContent);
+        return m ? m.index : -1;
+    }
+
+    static _findAuditSectionEnd(registryContent, sectionStart) {
+        // Section ends at the next `## ` heading or the EOF — whichever comes first.
+        const rest = registryContent.slice(sectionStart + 1);
+        const next = rest.search(/\n## /);
+        if (next === -1) return registryContent.length;
+        return sectionStart + 1 + next;
     }
 
     static _extractRegistryCreatedAt(registryContent) {
