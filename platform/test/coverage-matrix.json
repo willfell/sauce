@@ -1,5 +1,5 @@
 {
-  "generated_at": "0.120.0",
+  "generated_at": "0.120.1",
   "rubric_version": "1.0.0",
   "entries": [
     {
@@ -332,134 +332,6 @@
       }
     },
     {
-      "kind": "mechanism",
-      "name": "entity-create",
-      "current_version": "0.7.2",
-      "axes": {
-        "customjs_behavioral": {
-          "score": 1,
-          "covered": 2,
-          "total": 2,
-          "methods": [
-            {
-              "cls": "EntityCreate",
-              "method": "render",
-              "covered": true,
-              "hits": 20
-            },
-            {
-              "cls": "EntityCreate",
-              "method": "create",
-              "covered": true,
-              "hits": 4
-            }
-          ],
-          "suggested_archetype": "behavioral-runner",
-          "suggested_target_file": "platform/test/run-entity-create-entitycreate.js"
-        },
-        "installer_migration": {
-          "score": 0,
-          "covered": 0,
-          "total": 1,
-          "migrations": [
-            {
-              "fn": "applyEntityCreateGuardMigration",
-              "covered": false
-            }
-          ],
-          "suggested_archetype": "seed-migrate",
-          "suggested_target_file": "platform/test/run-seed-migrations.js"
-        },
-        "manifest_schema": {
-          "score": 0.9166666666666667,
-          "manifest_ratio": 0.8333333333333334,
-          "schema_ratio": 1,
-          "manifest_fields": [
-            {
-              "field": "name",
-              "asserted": true
-            },
-            {
-              "field": "version",
-              "asserted": true
-            },
-            {
-              "field": "customjs_classes",
-              "asserted": true
-            },
-            {
-              "field": "files",
-              "asserted": true
-            },
-            {
-              "field": "rule_fragments",
-              "asserted": false
-            },
-            {
-              "field": "depends_on",
-              "asserted": true
-            }
-          ],
-          "schema_owned": 0,
-          "suggested_archetype": "hc-family",
-          "suggested_target_file": "platform/test/run-helper-cases.js"
-        },
-        "template_lockstep": {
-          "score": null,
-          "reason": "no templates or rule_fragments",
-          "suggested_archetype": null,
-          "suggested_target_file": null
-        },
-        "widget_render": {
-          "score": 1,
-          "covered": 1,
-          "total": 1,
-          "widgets": [
-            {
-              "widget": "EntityCreate",
-              "covered": true
-            }
-          ],
-          "suggested_archetype": "renderer-extend",
-          "suggested_target_file": "platform/test/run-renderer.js"
-        },
-        "integration_smoke": {
-          "score": 1,
-          "happy_path": true,
-          "failure_mode": true,
-          "suggested_archetype": "smoke-extend",
-          "suggested_target_file": "platform/test/run-integration-smoke.js"
-        }
-      },
-      "composite_score": 0.7833333333333334,
-      "blast_radius": "high",
-      "blast_radius_rationale": "Every + New button uses it; v0.94 + v0.102 + v0.108 evolution.",
-      "recent_incidents_30d": 6,
-      "priority_score": 2,
-      "top_gap": {
-        "axis": "installer_migration",
-        "score": 2,
-        "archetype": "seed-migrate",
-        "target_file": "platform/test/run-seed-migrations.js"
-      },
-      "qualitative": {
-        "validates_scores": "yes",
-        "false_positives": [],
-        "false_negatives": [
-          {
-            "axis": "installer_migration",
-            "note": "applyNewEntityButtons + applyEntityCreateGuardMigration untested in seed harness; no HC-V0XYZ-SEED-MIGRATE family covers registry materialization or guard-form rewrite logic"
-          },
-          {
-            "axis": "manifest_schema",
-            "note": "render_in.kind='nav_buttons' deferred case not explicitly asserted; minor schema coverage gap"
-          }
-        ],
-        "primary_user_flow": "Click EntityCreate-rendered button in hub note -> prompts loop -> frontmatter template hydration + seed_from_defaults injection -> create new note at routed destination -> open in editor",
-        "qualitative_recommendation": "Strong on pure logic (customjs_behavioral 1.0, schema 0.917, widget 1.0) but critical gap in installer_migration (0.0). The two apply* fns run on every install and materialize the registry or rewrite vault notes; their behavior must be directly asserted in the seed harness. Single gap carries high blast radius (installs touch every vault)."
-      }
-    },
-    {
       "kind": "blueprint",
       "name": "scratch",
       "current_version": "0.5.2",
@@ -664,7 +536,7 @@
     {
       "kind": "blueprint",
       "name": "to-do",
-      "current_version": "0.8.0",
+      "current_version": "0.8.1",
       "axes": {
         "customjs_behavioral": {
           "score": 0.8064516129032258,
@@ -1010,7 +882,7 @@
       "composite_score": 0.717741935483871,
       "blast_radius": "high",
       "blast_radius_rationale": "Multi-cycle storm v0.116-v0.118; highest recent-incident rate.",
-      "recent_incidents_30d": 19,
+      "recent_incidents_30d": 20,
       "priority_score": 1.5,
       "top_gap": {
         "axis": "widget_render",
@@ -4523,6 +4395,134 @@
         ],
         "primary_user_flow": "Open daily note -> dataviewjs evaluates SpaceDailyDashboard.render(dv) -> panels for tasks, meetings, activity display without throwing.",
         "qualitative_recommendation": "Current test architecture mismatch: blueprint requires behavioral-runner with full dataviewjs surface stub, not renderer-extend pattern. Either upgrade scorer to invoke render() with mocked dv, or create dedicated behavioral runner."
+      }
+    },
+    {
+      "kind": "mechanism",
+      "name": "entity-create",
+      "current_version": "0.7.2",
+      "axes": {
+        "customjs_behavioral": {
+          "score": 1,
+          "covered": 2,
+          "total": 2,
+          "methods": [
+            {
+              "cls": "EntityCreate",
+              "method": "render",
+              "covered": true,
+              "hits": 23
+            },
+            {
+              "cls": "EntityCreate",
+              "method": "create",
+              "covered": true,
+              "hits": 4
+            }
+          ],
+          "suggested_archetype": "behavioral-runner",
+          "suggested_target_file": "platform/test/run-entity-create-entitycreate.js"
+        },
+        "installer_migration": {
+          "score": 1,
+          "covered": 1,
+          "total": 1,
+          "migrations": [
+            {
+              "fn": "applyEntityCreateGuardMigration",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "seed-migrate",
+          "suggested_target_file": "platform/test/run-seed-migrations.js"
+        },
+        "manifest_schema": {
+          "score": 0.9166666666666667,
+          "manifest_ratio": 0.8333333333333334,
+          "schema_ratio": 1,
+          "manifest_fields": [
+            {
+              "field": "name",
+              "asserted": true
+            },
+            {
+              "field": "version",
+              "asserted": true
+            },
+            {
+              "field": "customjs_classes",
+              "asserted": true
+            },
+            {
+              "field": "files",
+              "asserted": true
+            },
+            {
+              "field": "rule_fragments",
+              "asserted": false
+            },
+            {
+              "field": "depends_on",
+              "asserted": true
+            }
+          ],
+          "schema_owned": 0,
+          "suggested_archetype": "hc-family",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "template_lockstep": {
+          "score": null,
+          "reason": "no templates or rule_fragments",
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "widget_render": {
+          "score": 1,
+          "covered": 1,
+          "total": 1,
+          "widgets": [
+            {
+              "widget": "EntityCreate",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "renderer-extend",
+          "suggested_target_file": "platform/test/run-renderer.js"
+        },
+        "integration_smoke": {
+          "score": 1,
+          "happy_path": true,
+          "failure_mode": true,
+          "suggested_archetype": "smoke-extend",
+          "suggested_target_file": "platform/test/run-integration-smoke.js"
+        }
+      },
+      "composite_score": 0.9833333333333334,
+      "blast_radius": "high",
+      "blast_radius_rationale": "Every + New button uses it; v0.94 + v0.102 + v0.108 evolution.",
+      "recent_incidents_30d": 6,
+      "priority_score": 0.08333333333333326,
+      "top_gap": {
+        "axis": "manifest_schema",
+        "score": 0.08333333333333326,
+        "archetype": "hc-family",
+        "target_file": "platform/test/run-helper-cases.js"
+      },
+      "qualitative": {
+        "validates_scores": "yes",
+        "false_positives": [],
+        "false_negatives": [
+          {
+            "axis": "installer_migration",
+            "note": "applyNewEntityButtons + applyEntityCreateGuardMigration untested in seed harness; no HC-V0XYZ-SEED-MIGRATE family covers registry materialization or guard-form rewrite logic"
+          },
+          {
+            "axis": "manifest_schema",
+            "note": "render_in.kind='nav_buttons' deferred case not explicitly asserted; minor schema coverage gap"
+          }
+        ],
+        "primary_user_flow": "Click EntityCreate-rendered button in hub note -> prompts loop -> frontmatter template hydration + seed_from_defaults injection -> create new note at routed destination -> open in editor",
+        "qualitative_recommendation": "Strong on pure logic (customjs_behavioral 1.0, schema 0.917, widget 1.0) but critical gap in installer_migration (0.0). The two apply* fns run on every install and materialize the registry or rewrite vault notes; their behavior must be directly asserted in the seed harness. Single gap carries high blast radius (installs touch every vault)."
       }
     },
     {
