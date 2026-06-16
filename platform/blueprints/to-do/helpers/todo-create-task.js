@@ -485,6 +485,7 @@ class ToDoCreateTask {
         // Auto-open the destination for context, unless it's the registry (background quietly).
         if (payload.mode !== 'recurring') {
             window.app.workspace.openLinkText(dest, '', false);
+            window.customJS.OpenHelpers.forceActiveLeafPreview();
         }
     }
 
