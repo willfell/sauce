@@ -82,6 +82,7 @@
       "version": "0.1.2",
       "path": "mechanisms/accent-button"
     },
+    { "name": "open-helpers", "version": "0.1.0", "path": "mechanisms/open-helpers" },
     {
       "name": "icons",
       "version": "0.1.1",
