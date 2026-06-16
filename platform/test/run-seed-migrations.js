@@ -1480,8 +1480,48 @@ async function runEntityCreateMigrateFamily() {
         await install.applyNewEntityButtons(tp, manifest, variables, history, git);
         await install.applyEntityCreateGuardMigration(tp, manifest, variables, history, git);
 
-        // ===== Asserts A1..A5, B1..B5, D1..D2 inline below =====
-        // (sub-families appended in subsequent commits)
+        // ===== A: applyNewEntityButtons =====
+        // The migration writes ranch/entity-create-registry.json with a
+        // contribution keyed by the manifest name. The hub-kind entry triggers
+        // injectAccentButtonBlock which (since v0.49.0) is VERIFY-ONLY: it
+        // doesn't edit the hub file, but pushes a history event recording
+        // either "verified_present" (sentinel found) or "missing_skip_inject"
+        // (sentinel absent). The Legacy Hub fixture has no sentinel comment,
+        // so we expect the "missing_skip_inject" path.
+        const aRegistryPath = path.join(ecRoot, "ranch/entity-create-registry.json");
+        ok(
+            "HC-V01190-EC-SEED-MIGRATE-A1 entity-create-registry.json materialized",
+            fs.existsSync(aRegistryPath)
+        );
+        const aRegistry = JSON.parse(fs.readFileSync(aRegistryPath, "utf8"));
+        ok(
+            "HC-V01190-EC-SEED-MIGRATE-A2 registry has schema_version: 1",
+            aRegistry.schema_version === 1
+        );
+        ok(
+            "HC-V01190-EC-SEED-MIGRATE-A3 contributions keyed under synthetic manifest name",
+            aRegistry.contributions && Array.isArray(aRegistry.contributions["legacy-fixture-blueprint"])
+        );
+        ok(
+            "HC-V01190-EC-SEED-MIGRATE-A4 contribution has exactly 2 entries (one per new_entity_buttons[])",
+            (aRegistry.contributions["legacy-fixture-blueprint"] || []).length === 2
+        );
+        // A5: hub-kind entry produces an injectAccentButtonBlock history event
+        // recording the verify-only outcome on Legacy Hub.md. Since v0.49.0 the
+        // installer does NOT edit the hub file; the only observable side-effect
+        // is this history row. We assert the row exists with the expected
+        // target_path + instance.
+        const a5HubVerifyEvent = history.find(h =>
+            h
+            && (h.step === "entity_create_block_verified" || h.step === "entity_create_block_missing")
+            && h.target === "spice/entity-create-legacy/Legacy Hub.md"
+            && h.instance === "legacy-doc"
+        );
+        ok(
+            "HC-V01190-EC-SEED-MIGRATE-A5 history records injectAccentButtonBlock verify event for Legacy Hub.md (hub-kind entry processed)",
+            !!a5HubVerifyEvent,
+            a5HubVerifyEvent ? `event=${a5HubVerifyEvent.event} action=${a5HubVerifyEvent.action}` : "no verify event found"
+        );
 
         // Snapshot for idempotency (C family) — AFTER pass 1, BEFORE pass 2.
         const ecHubAfterPass1 = fs.readFileSync(
