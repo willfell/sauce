@@ -12787,6 +12787,8 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports._migrateBudgetBody = _migrateBudgetBody;
     // v0.110.1 — vault-wide EntityCreate direct-call → guard rewrite.
     module.exports.applyEntityCreateGuardMigration = applyEntityCreateGuardMigration;
+    // v0.119.0 impl-3 — registry materializer for entity-create direct-invocation harness.
+    module.exports.applyNewEntityButtons = applyNewEntityButtons;
     // v0.110.2 — generalized: ANY direct customJS.<Class>.render(dv,...) → guard.
     module.exports.applyCustomJsGuardMigration = applyCustomJsGuardMigration;
     // v0.111.0 — collapse FinanceHubActions + FinanceNavRow → single-line FinanceNav.
