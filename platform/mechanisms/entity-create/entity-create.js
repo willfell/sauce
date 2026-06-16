@@ -141,6 +141,7 @@ class EntityCreate {
         if (existing) {
             new Notice(`${targetPath} already exists; opening.`);
             await app.workspace.getLeaf(false).openFile(existing);
+            customJS.OpenHelpers.forceActiveLeafPreview();
             return;
         }
         // v0.107.0: seed_from_defaults — read a per-vault defaults file at
@@ -157,6 +158,7 @@ class EntityCreate {
         const newFile = await app.vault.create(targetPath, `---\n${fm}---\n\n${body}`);
         for (const xf of (spec.extra_files || [])) await this._createExtra(xf, ctx, folder);
         await app.workspace.getLeaf(false).openFile(newFile);
+        customJS.OpenHelpers.forceActiveLeafPreview();
     }
 
     // ---------- v0.107.0: seed_from_defaults resolution ----------
