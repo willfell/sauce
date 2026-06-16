@@ -15,11 +15,15 @@ await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 await dv.view("ranch/views/customjs-guard", { class: "ToDoLeafActions" });
 ```
 
-## Recurring Tasks
+```dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Recurring Tasks", top: true }] });
+```
 
 <!-- Each line is a template. Sauce parses these on daily-note creation; matching ones get freshly copied into today's daily. Do not check these off — check the copy in your daily note. -->
 
-## Last 7 days of materialization
+```dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Last 7 days of materialization" }] });
+```
 
 <!-- Audit log; auto-appended by ToDoDailyRecurring. -->
 

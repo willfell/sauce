@@ -221,28 +221,30 @@ class ToDoDailyCarryover {
     }
 
     static insertCarryoverIntoToday(todayContent, decoratedBlocks, sourceDate) {
-        // Find the ToDoDailyCarryover dataviewjs block; insert the heading + blocks
-        // immediately AFTER that block.
+        // Find the ToDoDailyCarryover dataviewjs block; insert the SectionLabel
+        // dataviewjs block + the migrated task lines immediately AFTER that block.
+        // v0.5.0: emits `<dataviewjs SectionLabel(...)>` instead of raw `## H2`.
         const ANCHOR_RE = /(```dataviewjs[^`]*class:\s*"ToDoDailyCarryover"[^`]*```\n?)/;
         const m = ANCHOR_RE.exec(todayContent);
-        const headingAndLines = [
+        const labelBlock = [
             '',
-            `## Carryover (from ${sourceDate})`,
+            '```dataviewjs',
+            `await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Carryover (from ${sourceDate})" }] });`,
+            '```',
             '',
         ];
         for (const b of decoratedBlocks) {
-            headingAndLines.push(b.topLine);
+            labelBlock.push(b.topLine);
             if (b.childLines && b.childLines.length) {
-                for (const cl of b.childLines) headingAndLines.push(cl);
+                for (const cl of b.childLines) labelBlock.push(cl);
             }
         }
-        headingAndLines.push('');
-        const block = headingAndLines.join('\n');
+        labelBlock.push('');
+        const block = labelBlock.join('\n');
         if (m) {
             const insertPos = m.index + m[0].length;
             return todayContent.slice(0, insertPos) + block + todayContent.slice(insertPos);
         }
-        // Fallback: append at EOF.
         return todayContent.replace(/\n+$/, '') + '\n' + block + '\n';
     }
 

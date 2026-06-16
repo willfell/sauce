@@ -103,11 +103,14 @@ class ToDoLeafActions {
             app.workspace.openLinkText(path, '');
         };
 
-        // Render order: + New Task, + Recurring, All To-Dos.
-        customJS.AccentButton.render(row, { label: '+ New Task', icon: plusIcon, onClick: openNewTask, flex: true });
-        customJS.AccentButton.render(row, { label: '+ Recurring', icon: repeatIcon, onClick: openNewRecurring, flex: true });
+        // Render order: New Task, Recurring, All. Labels intentionally short so
+        // 3 buttons fit on a single phone-width row without overlapping their
+        // tap targets. Icons carry the action signal (+ for new, repeat for
+        // recurring, list for backlog).
+        customJS.AccentButton.render(row, { label: 'New Task', icon: plusIcon, onClick: openNewTask, flex: true });
+        customJS.AccentButton.render(row, { label: 'Recurring', icon: repeatIcon, onClick: openNewRecurring, flex: true });
         if (noteType !== 'project-todo') {
-            customJS.AccentButton.render(row, { label: 'All To-Dos', icon: listIcon, onClick: openAllToDos, flex: true });
+            customJS.AccentButton.render(row, { label: 'All', icon: listIcon, onClick: openAllToDos, flex: true });
         }
     }
 }
