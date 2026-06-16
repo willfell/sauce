@@ -15,3 +15,22 @@ await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 await dv.view("ranch/views/customjs-guard", { class: "ToDoLeafActions" });
 ```
 
+```dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Today's Capture", top: true }] });
+```
+
+```dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "ToDoDailyCarryover" });
+```
+
+```dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "ToDoDailyRecurring" });
+```
+
+```dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "ToDoDailyProjectGroups" });
+```
+
+```dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "ToDoDailyUnassignedMeetings" });
+```

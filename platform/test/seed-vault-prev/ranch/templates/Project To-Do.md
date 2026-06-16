@@ -25,9 +25,13 @@ await dv.view("ranch/views/customjs-guard", { class: "ProjectNavButtons" });
 await dv.view("ranch/views/customjs-guard", { class: "ToDoLeafActions" });
 ```
 
-## Owned Tasks
+```dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Owned Tasks", top: true }] });
+```
 
-## From Meetings
+```dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "From Meetings" }] });
+```
 
 ```dataviewjs
 await dv.view("ranch/views/customjs-guard", { class: "ToDoDailyProjectGroups", args: [{ scope: "project-todo" }] });

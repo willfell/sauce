@@ -10,11 +10,15 @@
  *   "project-todo" — render only the meeting tasks linked to THIS project (read
  *                  cur.project_slug); used inside Project To-Do note template.
  *
+ * v0.5.0 (workshop v0.117.0) — section headers use SectionLabel primitive
+ * (project blueprint v1.21.0+) instead of raw H2; rows render as styled flex
+ * blocks with primary task text + muted source attribution chip.
+ *
  * Each rendered row is a click-through link that opens the source file via
- * app.workspace.openLinkText (no in-place checkbox toggle in v0.4.0 — see
+ * app.workspace.openLinkText (no in-place checkbox toggle in v0.5.x — see
  * carry-forward in design doc).
  *
- * Empty section → renders nothing (no info callout — empty-state policy).
+ * Empty section → renders nothing.
  */
 class ToDoDailyProjectGroups {
 
@@ -47,27 +51,12 @@ class ToDoDailyProjectGroups {
         }
         if (!blocks.length) return;
 
-        const h2 = dv.container.createEl('h2');
-        h2.textContent = 'Open Project Tasks';
+        this._renderLabel(dv, 'Open Project Tasks');
         for (const blk of blocks) {
             const anchor = document.createComment(` project-group-anchor-${blk.projSlug} `);
             dv.container.appendChild(anchor);
-            const h3 = dv.container.createEl('h3');
-            const a = h3.createEl('a');
-            a.textContent = blk.projName;
-            a.classList.add('internal-link');
-            a.setAttribute('data-href', blk.projPath);
-            a.onclick = (ev) => { ev.preventDefault(); window.app.workspace.openLinkText(blk.projPath, '', false); };
-            const ul = dv.container.createEl('ul');
-            ul.style.cssText = 'margin: 0; padding-left: 20px; list-style-type: none;';
-            for (const t of blk.tasks) {
-                const li = ul.createEl('li');
-                li.style.cssText = 'padding: 2px 0; cursor: pointer;';
-                const text = this._cleanTaskText(t.text);
-                const fname = t.source.split('/').pop().replace(/\.md$/, '');
-                li.innerHTML = `☐ ${this._escapeHtml(text)} <small style="opacity:0.6">(${this._escapeHtml(fname)})</small>`;
-                li.onclick = () => window.app.workspace.openLinkText(t.source, '', false);
-            }
+            this._renderLabel(dv, blk.projName, { link: blk.projPath });
+            for (const t of blk.tasks) this._renderTaskRow(dv.container, t);
         }
     }
 
@@ -81,16 +70,57 @@ class ToDoDailyProjectGroups {
         const meetingTasks = this._collectMeetingTasksForProject(dv, projName);
         if (!meetingTasks.length) return;
 
-        const ul = dv.container.createEl('ul');
-        ul.style.cssText = 'margin: 0; padding-left: 20px; list-style-type: none;';
-        for (const t of meetingTasks) {
-            const li = ul.createEl('li');
-            li.style.cssText = 'padding: 2px 0; cursor: pointer;';
-            const text = this._cleanTaskText(t.text);
-            const fname = t.source.split('/').pop().replace(/\.md$/, '');
-            li.innerHTML = `☐ ${this._escapeHtml(text)} <small style="opacity:0.6">(${this._escapeHtml(fname)})</small>`;
-            li.onclick = () => window.app.workspace.openLinkText(t.source, '', false);
+        // Note: no SectionLabel here; the "From Meetings" label is in the template
+        // directly above this block. Helper just renders the rows.
+        for (const t of meetingTasks) this._renderTaskRow(dv.container, t);
+    }
+
+    // ---------- Render helpers ----------
+
+    _renderLabel(dv, text, opts) {
+        opts = opts || {};
+        // Prefer SectionLabel primitive (small uppercase + hairline above).
+        if (window.customJS && window.customJS.SectionLabel) {
+            // Project name labels are NOT top (visual separator between projects).
+            window.customJS.SectionLabel.render(dv, { text });
+        } else {
+            // Fallback: muted h3.
+            const h = dv.container.createEl('div');
+            h.textContent = String(text || '').toUpperCase();
+            h.style.cssText = 'font-size:0.78em; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-muted); margin:10px 0 6px; font-weight:600;';
         }
+        // Convert the label into a clickable link if a project hub path was provided.
+        if (opts.link) {
+            const labelEl = dv.container.lastElementChild;
+            if (labelEl && labelEl.tagName !== 'A') {
+                labelEl.style.cursor = 'pointer';
+                labelEl.onclick = (ev) => {
+                    ev.preventDefault();
+                    if (window.app && window.app.workspace) window.app.workspace.openLinkText(opts.link, '', false);
+                };
+            }
+        }
+    }
+
+    _renderTaskRow(container, t) {
+        const row = container.createEl('div');
+        row.style.cssText = 'display:flex; align-items:baseline; gap:8px; padding:4px 0; cursor:pointer; line-height:1.45;';
+        row.onclick = () => {
+            if (window.app && window.app.workspace) window.app.workspace.openLinkText(t.source, '', false);
+        };
+
+        const box = row.createEl('span');
+        box.textContent = '☐';
+        box.style.cssText = 'flex-shrink:0; opacity:0.6; font-size:0.95em;';
+
+        const txt = row.createEl('span');
+        txt.textContent = this._cleanTaskText(t.text);
+        txt.style.cssText = 'flex:1; color:var(--text-normal); overflow-wrap:anywhere;';
+
+        const src = row.createEl('span');
+        const fname = t.source.split('/').pop().replace(/\.md$/, '');
+        src.textContent = `‹${fname}›`;
+        src.style.cssText = 'font-size:0.85em; opacity:0.6; font-style:italic; flex-shrink:0; max-width:50%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
     }
 
     // ---------- Collection helpers ----------
@@ -131,14 +161,8 @@ class ToDoDailyProjectGroups {
     }
 
     _cleanTaskText(text) {
-        // Strip inline [field:: value] for display.
+        // Strip inline [field:: value] for display (project / from / recurring_from / etc.).
         return String(text || '').replace(/\s*\[\w+::\s*(?:\[\[[^\]]+\]\]|[^\]]+)\]/g, '').trim();
-    }
-
-    _escapeHtml(s) {
-        return String(s).replace(/[&<>"']/g, c => ({
-            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-        }[c]));
     }
 
     _slugify(name) {
