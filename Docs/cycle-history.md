@@ -6,6 +6,74 @@ This file archives the per-cycle status snapshots that previously lived in `CLAU
 
 ---
 
+## v0.119.0 — to-do hot-fixes + thrash-defenses MINOR (2026-06-16)
+
+Closed two live consumer-visible bugs surfaced post-v0.118.1 on the accuris vault, and landed
+the Cluster A "would-have-stopped-the-thrash" verification net from the v0.118.1 cycle postmortem.
+
+**Bug fixes (consumer-facing):**
+
+- **(b) Additive sentinel for recurring-task materialization.** Old `<!-- recurring-materialized-YYYY-MM-DD -->`
+  date-only sentinel conflated "already ran today" with "nothing to do" — mid-day-added recurring
+  tasks went invisible until the user hand-deleted the sentinel. v0.7.0 replaces with per-task hash
+  set: `<!-- recurring-materialized-YYYY-MM-DD: hash1,hash2,... -->`. On every render: parse
+  registry → compute 7-char sha1 hashes → materialize entries not in the set → append hashes.
+  Idempotent (no file write if set unchanged). NEW `applyRecurringSentinelV070Migration` heals
+  legacy date-only sentinels in place by rewriting to the empty-set form; next Obsidian re-render
+  populates with current hashes.
+- **(c) Markdown rendering in live-render to-do widgets.** `ToDoDailyUnassignedMeetings._renderTaskRow`
+  + `ToDoDailyProjectGroups._renderTaskRow` previously used `txt.textContent = ...` — `[label](url)`
+  and `[[wikilink]]` rendered as raw text. v0.7.0 adds private `_tokenizeInline` +
+  `_renderInlineMarkdown` methods (mirroring the established pattern in
+  `space-daily-dashboard.js`); emits raw `<a href>` for external URLs (with `target="_blank"
+  rel="noopener noreferrer"` + scheme allowlist) and `<a class="internal-link" data-href>` for
+  wikilinks. NEW DOM-render stub at `platform/test/helpers/dom-render-stub.js` (narrow, NOT the
+  full shared #2 helper); NEW `platform/test/run-todo-markdown-render.js` harness with TDM-1..6
+  cases.
+
+**Verification net (Cluster A from v0.118.1 postmortem):**
+
+- **#1 customJS static-vs-instance contract test.** NEW `platform/test/run-customjs-contract.js`
+  scans `platform/customjs/` + `platform/blueprints/*/helpers/` for class definitions and
+  workshop-wide for `customJS.X.member` callsites. Detect-by-shape: if a class has ANY instance
+  method, customJS stores it as an instance and members called via the dispatcher must be
+  non-static. Five self-test fixtures under `platform/test/fixtures/customjs-contract/`
+  (CCONTRACT-1..5). Live-tree mode (CCONTRACT-LIVE) wired into preflight; future regressions
+  fail the build. Would have caught v0.116.0's RecurrenceParser/TaskParser bug at preflight.
+- **#4 anchor lint + PR checklist + fixture landmine.** NEW `scripts/lint-display-markers.js`
+  flags regex literals + string-prefix checks anchored on `^## ` / `^### ` heading patterns.
+  Baseline-aware (`scripts/lint-display-markers-baseline.json` grandfathers existing matches;
+  only NEW warnings fail). Opt-out marker `// lint-display-markers:allow <reason>`. NEW
+  `.github/PULL_REQUEST_TEMPLATE.md` adds migration-consumer-enumeration + fixture-regeneration
+  checklist. NEW `code-conventions.md` § "Stable anchors vs display markers" subsection.
+- **#7 workshop self-subscription of to-do.** `ranch/platform-subscription.json` blueprints[]
+  gains `to-do@0.7.0` — workshop dogfood now materializes the full to-do surface (the v0.116.0
+  template Write no-op would have been caught at preflight dogfood). NEW
+  `Docs/agent-guides/smoke-checklists/` directory: load-bearing `to-do.md` (with explicit
+  bug-(b) and bug-(c) verification items) + 6 placeholder scaffolds for the other dogfooded
+  blueprints. NEW `Docs/agent-guides/build-test-verify.md` § "Manual smoke" gate note.
+- **#6 + #10 landmines.** Two new entries in `Docs/landmines.md`: #27 "Cycle scope discipline:
+  smaller is faster" (v0.116.0 8-cycle thrash → cap at 3 distinct surfaces per cycle) +
+  #28 "Verify dispatcher / loader contracts before designing against them" (extends the
+  verify-helpers rule to customJS, Templater, installer subprocess). NEW
+  `code-conventions.md` § "Dispatcher contracts" subsection catalogs the three runtime
+  contracts.
+
+**Versions:**
+
+- workshop_version: `0.118.1` → **`0.119.0`** MINOR
+- to-do blueprint: `0.6.1` → **`0.7.0`** MINOR
+- All other mechanisms + blueprints: UNCHANGED
+
+**Harness count:** 32 → **34** (`run-customjs-contract.js` + `run-todo-markdown-render.js`).
+`lint-display-markers.js` is a preflight script, not a harness (matches existing convention for
+`lint-schemas.js` + `check-version-sync.js`).
+
+**Result doc:** `Docs/plans/2026-06-16-v0.119.0-todo-hotfix-thrash-defenses-result.md`.
+Handoff prompt: `Docs/prompts/2026-06-16-post-v0.119.0-next-cycle-handoff.md`.
+
+---
+
 ## v0.115.0 monthly cohesion + Months sub-area + FinanceHubSummary landing + Paycheck Template lockstep fix CODE COMPLETE 2026-06-15 (push/tag/brew/dev-sync pending)
 
 **CODE COMPLETE 2026-06-15** (push to origin/main, tag, brew tap PR, and per-consumer dev-sync all pending user approval per `Docs/agent-guides/asking-before-acting.md` annotated-tag rule). MINOR finance cycle closing the monthly-cohesion arc that was originally designed as v0.112.0 (codename `monthly-cohesion`) but rebased to v0.115.0 after a concurrent session shipped workshop 0.112.0 (tooling sprint) + 0.113.0 (schema registry Stage A) + 0.114.0 (PaycheckDebtBand + MonthlyOverview Date filter) while this cycle was in flight. Plan content remained authoritative throughout the rebase — only version numbers swept. Commits: `d4ef749` (FinanceMath foundation + tests — commit message carries stale v0.112.0 label, code is the v0.115.0 foundation) → `dfa015d` (installer migrations S2 — same stale-label situation) → `bc6ee37` (Stage A: MonthsCards + MonthDashboard + FinanceHubSummary widgets + wire FinanceMath) → `6a35548` (Stage B: FinanceNav months modes + Months/Finance content + Paycheck Template lockstep fix) → `4f35c31` (Stage C: finance 0.9.0 + workshop 0.115.0 + Month new_entity + months rule_fragment + version sweep) → `b9bd56a` (Stage D: self-install dogfood + behavioral harness wired into release:preflight).
