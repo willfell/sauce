@@ -1385,24 +1385,30 @@ async function caseTD1ToDoPostInstall() {
         assertTrue(fs.existsSync(allTodosPath),
             "TD-CLI-1 All-ToDos.md materialized at spice/to-do/All-ToDos.md");
 
-        // TD-CLI-2: customjs/data.json startupScriptNames[] includes ToDoMigrateInit
+        // TD-CLI-2: customjs/data.json startupScriptNames[] includes ToDoCreateTaskInit (v0.4.0)
         const dataJsonPath = path.join(tempDir, ".obsidian/plugins/customjs/data.json");
         if (fs.existsSync(dataJsonPath)) {
             const data = JSON.parse(fs.readFileSync(dataJsonPath, "utf8"));
             const list = Array.isArray(data.startupScriptNames) ? data.startupScriptNames : [];
-            assertTrue(list.includes("ToDoMigrateInit"),
-                "TD-CLI-2 ToDoMigrateInit in customjs startupScriptNames");
+            assertTrue(list.includes("ToDoCreateTaskInit"),
+                "TD-CLI-2 ToDoCreateTaskInit in customjs startupScriptNames (v0.4.0)");
         } else {
-            assertTrue(false, "TD-CLI-2 ToDoMigrateInit in customjs startupScriptNames — data.json absent");
+            assertTrue(false, "TD-CLI-2 ToDoCreateTaskInit in customjs startupScriptNames — data.json absent");
         }
 
-        // TD-CLI-3: all 5 helper scripts materialized under ranch/scripts/to-do/ (v0.63.1 adds todo-leaf-actions.js)
+        // TD-CLI-3: helper scripts materialized under ranch/scripts/to-do/ (v0.4.0 retires migrate{Modal,Init})
         const helpers = [
             "ranch/scripts/to-do/todo-hub-actions.js",
             "ranch/scripts/to-do/todo-leaf-actions.js",
             "ranch/scripts/to-do/todo-all-list.js",
-            "ranch/scripts/to-do/todo-migrate-modal.js",
-            "ranch/scripts/to-do/todo-migrate-init.js",
+            "ranch/scripts/to-do/todo-create-task.js",
+            "ranch/scripts/to-do/todo-create-task-init.js",
+            "ranch/scripts/to-do/task-parser.js",
+            "ranch/scripts/to-do/recurrence-parser.js",
+            "ranch/scripts/to-do/todo-daily-carryover.js",
+            "ranch/scripts/to-do/todo-daily-recurring.js",
+            "ranch/scripts/to-do/todo-daily-project-groups.js",
+            "ranch/scripts/to-do/todo-daily-unassigned-meetings.js",
         ];
         for (const rel of helpers) {
             assertTrue(fs.existsSync(path.join(tempDir, rel)),
