@@ -1195,6 +1195,25 @@ async function runFinanceMigrateFamily() {
             "HC-V01190-FIN-SEED-MIGRATE-C8 Budget-2026-02.md body has FinanceNav reference (#12 rewrite + #17 unification chain)",
             /class:\s*"FinanceNav"/.test(cBudget02Body)
         );
+
+        // ===== D: paycheck (#8 + #9) =====
+        const dPaycheckBody = readFin("paychecks/2026-01/Paycheck-2026-01-15.md");
+        ok(
+            "HC-V01190-FIN-SEED-MIGRATE-D1 Paycheck-2026-01-15.md body has <!-- paycheck-summary- marker (post #8 inject)",
+            /<!--\s*paycheck-summary-v[\d.]+\s*-->/.test(dPaycheckBody)
+        );
+        ok(
+            "HC-V01190-FIN-SEED-MIGRATE-D2 Paycheck-2026-01-15.md body has <!-- paycheck-debt-band- marker (post #9 inject)",
+            /<!--\s*paycheck-debt-band-v[\d.]+\s*-->/.test(dPaycheckBody)
+        );
+        ok(
+            "HC-V01190-FIN-SEED-MIGRATE-D3 Paycheck-2026-01-15.md body no longer has '## Expenses' heading (#8 strip)",
+            !/^## Expenses\s*$/m.test(dPaycheckBody)
+        );
+        ok(
+            "HC-V01190-FIN-SEED-MIGRATE-D4 Paycheck-2026-01-15.md body still has title heading '# Paycheck 2026-01-15' (no over-stripping)",
+            /^#\s+Paycheck 2026-01-15\s*$/m.test(dPaycheckBody)
+        );
     } finally {
         if (KEEP) {
             console.log(`  KEEP_SEED_VAULT=1: ${finRoot}`);
