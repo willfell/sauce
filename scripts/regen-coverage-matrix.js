@@ -85,6 +85,17 @@ function main() {
     const blastRadiusSeed = fs.existsSync(BLAST_RADIUS_SEED)
         ? readJson(BLAST_RADIUS_SEED)
         : {};
+    const priorQualByKey = {};
+    if (fs.existsSync(OUT_JSON)) {
+        try {
+            const prior = readJson(OUT_JSON);
+            for (const e of (prior.entries || [])) {
+                if (e.qualitative) priorQualByKey[`${e.kind}/${e.name}`] = e.qualitative;
+            }
+        } catch (e) {
+            // ignore parse errors; re-runs should not fail on stale file
+        }
+    }
     const surfaces = listSurfaces();
     const entries = surfaces
         .map(s => {
@@ -94,6 +105,11 @@ function main() {
         })
         .filter(Boolean)
         .map(applyPriority)
+        .map(e => {
+            const q = priorQualByKey[`${e.kind}/${e.name}`];
+            if (q) e.qualitative = q;
+            return e;
+        })
         .sort((a, b) => {
             if (b.priority_score !== a.priority_score) return b.priority_score - a.priority_score;
             const ac = a.composite_score ?? 1;

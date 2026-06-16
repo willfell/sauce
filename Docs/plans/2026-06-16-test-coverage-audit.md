@@ -1,7 +1,7 @@
 ---
 arc: test-coverage-arc
 phase: audit
-generated_against_workshop_version: 0.118.1
+generated_against_workshop_version: 0.119.0
 rubric_version: 1.0.0
 ---
 
@@ -14,19 +14,18 @@ Coverage matrix for all blueprints + mechanisms scored against the 6-axis rubric
 | Kind | Name | v | CustomJS | Migration | Manifest+Schema | Template | Widget | Smoke | Composite | Blast | Incidents 30d | Priority |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
  | blueprint | cowork | 0.40.2 | 0.00 (0/9) | n/a | 0.83 | 1.00 (26/26) | 0.00 (0/9) | 1.00 | 0.57 | high | 103 | 2.00 | 
- | blueprint | project | 1.22.1 | 0.21 (4/19) | 0.00 (0/5) | 1.00 | 1.00 (15/15) | 0.21 (3/14) | 1.00 | 0.57 | high | 32 | 2.00 | 
+ | blueprint | project | 1.22.2 | 0.21 (4/19) | 0.00 (0/5) | 1.00 | 1.00 (15/15) | 0.21 (3/14) | 1.00 | 0.57 | high | 33 | 2.00 | 
  | blueprint | finance | 0.9.2 | 0.42 (19/45) | 0.00 (0/23) | 1.00 | 1.00 (15/15) | 0.38 (10/26) | 1.00 | 0.63 | high | 10 | 2.00 | 
- | blueprint | daily | 0.13.6 | 0.00 (0/1) | n/a | 0.92 | 1.00 (2/2) | 1.00 (1/1) | 1.00 | 0.78 | high | 34 | 2.00 | 
  | mechanism | entity-create | 0.7.2 | 1.00 (2/2) | 0.00 (0/1) | 0.92 | n/a | 1.00 (1/1) | 1.00 | 0.78 | high | 6 | 2.00 | 
- | blueprint | meetings | 0.8.0 | 0.00 (0/1) | n/a | 0.92 | 1.00 (4/4) | 0.00 (0/1) | 1.00 | 0.58 | high | 4 | 1.80 | 
- | blueprint | scratch | 0.5.2 | 0.13 (1/8) | n/a | 0.92 | 1.00 (4/4) | 0.00 (0/5) | 1.00 | 0.61 | high | 6 | 1.75 | 
- | blueprint | to-do | 0.6.1 | 0.80 (28/35) | 0.20 (1/5) | 1.00 | 1.00 (5/5) | 0.00 (0/7) | 1.00 | 0.67 | high | 15 | 1.60 | 
- | blueprint | products | 0.3.0 | 0.00 (0/3) | n/a | 0.92 | 1.00 (2/2) | 0.00 (0/3) | 1.00 | 0.58 | med | 5 | 1.20 | 
+ | blueprint | to-do | 0.7.0 | 0.82 (31/38) | 0.33 (2/6) | 1.00 | 1.00 (5/5) | 0.00 (0/7) | 1.00 | 0.69 | high | 18 | 1.50 | 
+ | blueprint | scratch | 0.5.2 | 0.63 (5/8) | n/a | 0.92 | 1.00 (4/4) | 0.00 (0/5) | 1.00 | 0.71 | high | 6 | 1.50 | 
+ | blueprint | meetings | 0.8.0 | 1.00 (1/1) | n/a | 0.92 | 1.00 (4/4) | 0.00 (0/1) | 1.00 | 0.78 | high | 4 | 1.35 | 
  | blueprint | people | 0.6.0 | 0.00 (0/2) | n/a | 1.00 | 1.00 (2/2) | 0.00 (0/2) | 1.00 | 0.60 | med | 4 | 1.08 | 
  | mechanism | platform-claude | 0.1.3 | n/a | n/a | 0.75 | n/a | n/a | 0.00 | 0.38 | high | 2 | 1.05 | 
+ | blueprint | products | 0.3.0 | 0.33 (1/3) | n/a | 0.92 | 1.00 (2/2) | 0.00 (0/3) | 1.00 | 0.65 | med | 5 | 0.90 | 
  | mechanism | smart-connections-bridge | 0.2.0 | n/a | n/a | 0.50 | n/a | n/a | 0.00 | 0.25 | med | 2 | 0.63 | 
- | mechanism | backlink-panel | 0.1.0 | 0.00 (0/1) | n/a | 0.58 | n/a | 0.00 (0/1) | 0.00 | 0.15 | med | 0 | 0.60 | 
- | mechanism | nav-buttons | 2.7.0 | 0.00 (0/1) | 0.00 (0/1) | 0.83 | n/a | 1.00 (1/1) | 1.00 | 0.57 | med | 0 | 0.60 | 
+ | mechanism | nav-buttons | 2.7.0 | 1.00 (1/1) | 0.00 (0/1) | 0.83 | n/a | 1.00 (1/1) | 1.00 | 0.77 | med | 0 | 0.60 | 
+ | mechanism | backlink-panel | 0.1.0 | 1.00 (1/1) | n/a | 0.58 | n/a | 0.00 (0/1) | 0.00 | 0.40 | med | 0 | 0.45 | 
  | blueprint | journal | 0.2.0 | n/a | n/a | 0.70 | 1.00 (2/2) | n/a | 0.00 | 0.57 | med | 0 | 0.45 | 
  | blueprint | trips | 0.3.0 | 0.00 (0/4) | n/a | 0.83 | 1.00 (10/10) | 0.00 (0/3) | 1.00 | 0.57 | low | 1 | 0.36 | 
  | mechanism | convenience | 0.4.1 | n/a | n/a | 0.50 | n/a | n/a | 0.00 | 0.25 | low | 2 | 0.32 | 
@@ -39,6 +38,7 @@ Coverage matrix for all blueprints + mechanisms scored against the 6-axis rubric
  | mechanism | audit | 0.3.0 | n/a | n/a | 0.83 | 1.00 (1/1) | n/a | 1.00 | 0.94 | high | 7 | 0.17 | 
  | mechanism | activity-feed | 0.7.1 | 1.00 (1/1) | n/a | 0.75 | n/a | 1.00 (1/1) | 1.00 | 0.94 | med | 14 | 0.15 | 
  | mechanism | validator | 0.3.0 | n/a | n/a | 0.83 | 1.00 (1/1) | n/a | 1.00 | 0.94 | high | 1 | 0.10 | 
+ | blueprint | daily | 0.13.6 | 1.00 (1/1) | n/a | 0.92 | 1.00 (2/2) | 1.00 (1/1) | 1.00 | 0.98 | high | 34 | 0.08 | 
  | blueprint | boards | 0.2.1 | n/a | n/a | 0.70 | 1.00 (2/2) | n/a | 1.00 | 0.90 | low | 1 | 0.05 | 
  | mechanism | accent-button | 0.1.1 | 1.00 (1/1) | n/a | 0.75 | n/a | 1.00 (1/1) | 1.00 | 0.94 | low | 1 | 0.04 | 
  | mechanism | styling | 0.2.1 | n/a | n/a | 0.80 | n/a | n/a | 1.00 | 0.90 | low | 0 | 0.03 | 
@@ -54,9 +54,9 @@ Coverage matrix for all blueprints + mechanisms scored against the 6-axis rubric
 - False negatives: customjs_behavioral: run-cowork-smoke.js (954 asserts) validates class declarations + manifest contracts + hub-file usage but does not pattern-match grep heuristic; actual render() invocation only at runtime; widget_render: 9 customjs widgets exercised in cowork-smoke via structural asserts; run-renderer.js has no cowork fixtures
 - Top gap: axis=`customjs_behavioral` archetype=`behavioral-runner` target=`platform/test/run-cowork-coworkdailyhubcards.js`
 
-### blueprint/project (v1.22.1)
+### blueprint/project (v1.22.2)
 - Blast radius: **high** — Docs hub + sections + section hubs + search arc; load-bearing.
-- Composite: **0.57** · Priority: **2.00** · Incidents 30d: 32
+- Composite: **0.57** · Priority: **2.00** · Incidents 30d: 33
 - Primary flow (Axis 6 grounding): Create a new project via entity-create button -> scaffold project folder + docs/knowledge + docs/notes section hubs -> add doc-notes to sections with Breadcrumb navigation + DocSearch filter.
 - Qualitative recommendation: Frontloaded on manifest + template lockstep (both 1.0) but severely under-covered on behavioral execution and migrations. The 5 project-specific installer migrations receive only static source checks, not functional validation against vault adapters. Impl-1 candidate: target installer_migration (0/5) with HC-V0XYZ-PROJ-SEED-MIGRATE families for the three most-recent migrations (applyProjectSectionsMigration, applyProjectSectionsHubMigration, applyProjectTodoBackfill).
 - False positives: installer_migration: Source-checks (HC-V01020-PSM-1, HC-V01030-PSHM-1) verify function declaration but not execution; all 5 project migrations are structurally untested
@@ -71,15 +71,6 @@ Coverage matrix for all blueprints + mechanisms scored against the 6-axis rubric
 - False negatives: installer_migration: Score 0.0 is technically correct (no HC-V0XYZ-SEED-MIGRATE families) but SHAPE-*/FM-*/BODY-* families in run-seed-migrations.js verify post-state of the 20 apply* functions via integration. This is weak signal coverage (proves execution, not per-function correctness).; customjs_behavioral: Score 19/45 = 42% is accurate but 12+ finance widget classes (DebtsHubSummary, DebtDefaultsEditor, BudgetDefaultsEditor, PaycheckDefaultsEditor, BudgetsCards, PaychecksCards, InvoicesCards) ship with zero behavioral coverage despite being DOM-heavy with state logic.
 - Top gap: axis=`installer_migration` archetype=`seed-migrate` target=`platform/test/run-seed-migrations.js`
 
-### blueprint/daily (v0.13.6)
-- Blast radius: **high** — Every consumer hits daily notes; touched by carryover + recurring.
-- Composite: **0.78** · Priority: **2.00** · Incidents 30d: 34
-- Primary flow (Axis 6 grounding): Open daily note -> dataviewjs evaluates SpaceDailyDashboard.render(dv) -> panels for tasks, meetings, activity display without throwing.
-- Qualitative recommendation: Current test architecture mismatch: blueprint requires behavioral-runner with full dataviewjs surface stub, not renderer-extend pattern. Either upgrade scorer to invoke render() with mocked dv, or create dedicated behavioral runner.
-- False positives: widget_render: Substring 'SpaceDailyDashboard' matches in comments/test names but render() method is never actually invoked under DOM stub.
-- False negatives: customjs_behavioral: Render() is unreachable via current test harness pattern; would require fuller integration test with seeded vault + dataviewjs shim invoking dv.view(customjs-guard).
-- Top gap: axis=`customjs_behavioral` archetype=`behavioral-runner` target=`platform/test/run-daily-spacedailydashboard.js`
-
 ### mechanism/entity-create (v0.7.2)
 - Blast radius: **high** — Every + New button uses it; v0.94 + v0.102 + v0.108 evolution.
 - Composite: **0.78** · Priority: **2.00** · Incidents 30d: 6
@@ -88,41 +79,32 @@ Coverage matrix for all blueprints + mechanisms scored against the 6-axis rubric
 - False negatives: installer_migration: applyNewEntityButtons + applyEntityCreateGuardMigration untested in seed harness; no HC-V0XYZ-SEED-MIGRATE family covers registry materialization or guard-form rewrite logic; manifest_schema: render_in.kind='nav_buttons' deferred case not explicitly asserted; minor schema coverage gap
 - Top gap: axis=`installer_migration` archetype=`seed-migrate` target=`platform/test/run-seed-migrations.js`
 
-### blueprint/meetings (v0.8.0)
-- Blast radius: **high** — Linked from project + cowork; recent project-link migration.
-- Composite: **0.58** · Priority: **1.80** · Incidents 30d: 4
-- Primary flow (Axis 6 grounding): User creates a meeting note via new-meeting button (entity-create v0.5.0 integration) with optional project link; Meeting Hub renders today's meetings as cards with project pills, attendee chips, task badges via MeetingsHubCards.render().
-- Qualitative recommendation: Well-covered on template lockstep + manifest schema, but widget_render axis is critical gap. MeetingsHubCards.render() is the primary user-facing component (displays cards, filters by date, enriches async file reads, renders project pills, delegates to BeaconCards). Zero behavioral tests means layout/enrichment/pill bugs would ship. Single MEET-3 case in run-helper-cases.js (or run-renderer.js fixture) would unlock both axes to 1.0.
-- False positives: widget_render: MeetingsHubCards listed in customjs_classes[] but render() never instantiated or called with stub DOM
-- False negatives: customjs_behavioral: MeetingsHubCards.render(dv) is never invoked in any test harness; method signature verified statically but no behavioral assertions on rendered DOM, async data enrichment, or BeaconCards delegation with project-pill meta
-- Top gap: axis=`customjs_behavioral` archetype=`behavioral-runner` target=`platform/test/run-meetings-meetingshubcards.js`
-
-### blueprint/scratch (v0.5.2)
-- Blast radius: **high** — Daily hits; carries todo capture surface.
-- Composite: **0.61** · Priority: **1.75** · Incidents 30d: 6
-- Primary flow (Axis 6 grounding): User opens Scratch nav-button -> day-hub created or opened -> ScratchDayActions renders '+ New Scratch' and 'Hub' buttons -> entity-create collects title -> new Scratch leaf with ScratchLeafActions buttons.
-- Qualitative recommendation: Test debt is material despite high template/integration scores. Recommend: (1) add template-assert HC family for 3 template files; (2) extend run-renderer.js with ScratchDayList + ScratchHubCards fixtures; (3) add behavioral-runner for ScratchDayActions + ScratchLeafActions render() to cover vault read/Notice/workspace orchestration.
-- False positives: customjs_behavioral: run-scratch.js tests private _coerceDay and _migrateFrontmatter via HC-V0841-* families; deterministic scorer counts only public methods. Public render() on 5 of 7 classes never harnessed.; widget_render: run-renderer.js covers R-SCRATCH-DAYHUB (nav-button dispatch) but does NOT render ScratchDayList or ScratchHubCards widgets.
-- False negatives: customjs_behavioral: ScratchDayActions.render(), ScratchLeafActions.render(), ScratchHubActions.render() have zero behavioral harness; ScratchDayList.render() + _extractPreviewFromBody + _pollForDayArg untested under stub Obsidian app
-- Top gap: axis=`customjs_behavioral` archetype=`behavioral-runner` target=`platform/test/run-scratch-scratchhubcards.js`
-
-### blueprint/to-do (v0.6.1)
+### blueprint/to-do (v0.7.0)
 - Blast radius: **high** — Multi-cycle storm v0.116-v0.118; highest recent-incident rate.
-- Composite: **0.67** · Priority: **1.60** · Incidents 30d: 15
+- Composite: **0.69** · Priority: **1.50** · Incidents 30d: 18
 - Primary flow (Axis 6 grounding): Create daily to-do via nav button -> carryover yesterday's tasks -> view recurring registry materialization -> add/complete tasks via new dialog -> browse all-to-dos aggregator.
 - Qualitative recommendation: Two implementation cycles candidate: (1) HC-V0XYZ-SEED-MIGRATE-PROJECT-TODO family in run-seed-migrations.js extending seed-vault with pre-v0.4.0 project structure; (2) extend run-renderer.js with 7 to-do widget fixtures.
 - False positives: customjs_behavioral: Score 0.800 (28/35) overstates coverage. Five dedicated runners exist but test only 10 of 11 classes (ToDoHubActions, ToDoLeafActions, ToDoAllList, ToDoCreateTaskInit untested).
 - False negatives: installer_migration: applyProjectTodoBackfill (v0.4.0 project-todo backfill) has zero seed-migrate coverage; only applyToDoBlueprintMigration is tested via HC-V01174-MIGRATE-*; widget_render: All 7 render-capable classes (ToDoHubActions, ToDoLeafActions, ToDoAllList, ToDoDailyCarryover, ToDoDailyRecurring, ToDoDailyProjectGroups, ToDoDailyUnassignedMeetings) absent from run-renderer.js. Most critical widget gap for a high-blast-radius blueprint.
-- Top gap: axis=`installer_migration` archetype=`seed-migrate` target=`platform/test/run-seed-migrations.js`
+- Top gap: axis=`widget_render` archetype=`renderer-extend` target=`platform/test/run-renderer.js`
 
-### blueprint/products (v0.3.0)
-- Blast radius: **med** — Consumer-vault hub; relatively static.
-- Composite: **0.58** · Priority: **1.20** · Incidents 30d: 5
-- Primary flow (Axis 6 grounding): Create a product via /products or + New Product -> product note materializes with ProductPageCards + SpaceNavButtons + BacklinkPanel -> hub aggregates member teams and active projects.
-- Qualitative recommendation: Weak behavioral coverage despite high composite score. All three classes have non-trivial render() methods integrating Dataview queries + Obsidian plugin APIs + cross-blueprint rollups. Recommend extending run-renderer.js with ProductsHubCards + ProductActionButtons fixtures.
-- False positives: template_lockstep: Asserts only file existence and frontmatter naming; does not verify ProductPageCards/SpaceNavButtons/BacklinkPanel class invocations or template syntax validity; manifest_schema: 0.917 is high but missing assertions for depends_on[], claude_surface[], templater_folder_templates[], post_install[]
-- False negatives: customjs_behavioral: ProductActionButtons.render() Templater dispatch + onClick handler codepath untested; ProductsHubCards dataview filtering + sorting logic untested
-- Top gap: axis=`customjs_behavioral` archetype=`behavioral-runner` target=`platform/test/run-products-productshubcards.js`
+### blueprint/scratch (v0.5.2)
+- Blast radius: **high** — Daily hits; carries todo capture surface.
+- Composite: **0.71** · Priority: **1.50** · Incidents 30d: 6
+- Primary flow (Axis 6 grounding): User opens Scratch nav-button -> day-hub created or opened -> ScratchDayActions renders '+ New Scratch' and 'Hub' buttons -> entity-create collects title -> new Scratch leaf with ScratchLeafActions buttons.
+- Qualitative recommendation: Test debt is material despite high template/integration scores. Recommend: (1) add template-assert HC family for 3 template files; (2) extend run-renderer.js with ScratchDayList + ScratchHubCards fixtures; (3) add behavioral-runner for ScratchDayActions + ScratchLeafActions render() to cover vault read/Notice/workspace orchestration.
+- False positives: customjs_behavioral: run-scratch.js tests private _coerceDay and _migrateFrontmatter via HC-V0841-* families; deterministic scorer counts only public methods. Public render() on 5 of 7 classes never harnessed.; widget_render: run-renderer.js covers R-SCRATCH-DAYHUB (nav-button dispatch) but does NOT render ScratchDayList or ScratchHubCards widgets.
+- False negatives: customjs_behavioral: ScratchDayActions.render(), ScratchLeafActions.render(), ScratchHubActions.render() have zero behavioral harness; ScratchDayList.render() + _extractPreviewFromBody + _pollForDayArg untested under stub Obsidian app
+- Top gap: axis=`widget_render` archetype=`renderer-extend` target=`platform/test/run-renderer.js`
+
+### blueprint/meetings (v0.8.0)
+- Blast radius: **high** — Linked from project + cowork; recent project-link migration.
+- Composite: **0.78** · Priority: **1.35** · Incidents 30d: 4
+- Primary flow (Axis 6 grounding): User creates a meeting note via new-meeting button (entity-create v0.5.0 integration) with optional project link; Meeting Hub renders today's meetings as cards with project pills, attendee chips, task badges via MeetingsHubCards.render().
+- Qualitative recommendation: Well-covered on template lockstep + manifest schema, but widget_render axis is critical gap. MeetingsHubCards.render() is the primary user-facing component (displays cards, filters by date, enriches async file reads, renders project pills, delegates to BeaconCards). Zero behavioral tests means layout/enrichment/pill bugs would ship. Single MEET-3 case in run-helper-cases.js (or run-renderer.js fixture) would unlock both axes to 1.0.
+- False positives: widget_render: MeetingsHubCards listed in customjs_classes[] but render() never instantiated or called with stub DOM
+- False negatives: customjs_behavioral: MeetingsHubCards.render(dv) is never invoked in any test harness; method signature verified statically but no behavioral assertions on rendered DOM, async data enrichment, or BeaconCards delegation with project-pill meta
+- Top gap: axis=`widget_render` archetype=`renderer-extend` target=`platform/test/run-renderer.js`
 
 ### blueprint/people (v0.6.0)
 - Blast radius: **med** — Cross-cutting via people-identity; stable shape.
@@ -142,6 +124,15 @@ Coverage matrix for all blueprints + mechanisms scored against the 6-axis rubric
 - False negatives: integration_smoke: run-claude-surface.js covers aggregation, materialization, rendering (36 cases); 0.0 score is correct because no end-to-end harness exercises slash-command -> apply* -> file-generation chain
 - Top gap: axis=`integration_smoke` archetype=`behavioral-runner` target=`platform/test/run-integration-smoke.js`
 
+### blueprint/products (v0.3.0)
+- Blast radius: **med** — Consumer-vault hub; relatively static.
+- Composite: **0.65** · Priority: **0.90** · Incidents 30d: 5
+- Primary flow (Axis 6 grounding): Create a product via /products or + New Product -> product note materializes with ProductPageCards + SpaceNavButtons + BacklinkPanel -> hub aggregates member teams and active projects.
+- Qualitative recommendation: Weak behavioral coverage despite high composite score. All three classes have non-trivial render() methods integrating Dataview queries + Obsidian plugin APIs + cross-blueprint rollups. Recommend extending run-renderer.js with ProductsHubCards + ProductActionButtons fixtures.
+- False positives: template_lockstep: Asserts only file existence and frontmatter naming; does not verify ProductPageCards/SpaceNavButtons/BacklinkPanel class invocations or template syntax validity; manifest_schema: 0.917 is high but missing assertions for depends_on[], claude_surface[], templater_folder_templates[], post_install[]
+- False negatives: customjs_behavioral: ProductActionButtons.render() Templater dispatch + onClick handler codepath untested; ProductsHubCards dataview filtering + sorting logic untested
+- Top gap: axis=`widget_render` archetype=`renderer-extend` target=`platform/test/run-renderer.js`
+
 ### mechanism/smart-connections-bridge (v0.2.0)
 - Blast radius: **med** — Cowork-adjacent embedding bridge; opt-in.
 - Composite: **0.25** · Priority: **0.63** · Incidents 30d: 2
@@ -149,22 +140,22 @@ Coverage matrix for all blueprints + mechanisms scored against the 6-axis rubric
 - Qualitative recommendation: Run-smart-connections-bridge.js is thorough at the unit level: all three CLI ops, error paths, flag handling, vault fixture edge cases. The 0.0 smoke score is correct - never exercises cowork's gather-semantic-related/-memory skills invoking bridge against real vault index. Close via behavioral harness case in run-cowork-smoke.js.
 - Top gap: axis=`integration_smoke` archetype=`behavioral-runner` target=`platform/test/run-integration-smoke.js`
 
-### mechanism/backlink-panel (v0.1.0)
-- Blast radius: **med** — Visible on every project + meeting.
-- Composite: **0.15** · Priority: **0.60** · Incidents 30d: 0
-- Primary flow (Axis 6 grounding): Person/project/team/product/trip/meeting atlas page renders a backlinks panel showing cross-referenced notes, grouped or sorted per options.
-- Qualitative recommendation: Robust lint harness catches v0.117.x-style silent bugs but the public render() API is untested. One renderer fixture + one HC family for _ENTITY_TYPE_TO_KEY would lift customjs_behavioral to 0.5 and widget_render to 1.0.
-- False negatives: customjs_behavioral: run-backlink-panel.js covers lint (BP-4..16) but zero behavioral asserts on render(dv,opts); no DOM stub, no Dataview query, no reverse-link matching; widget_render: BacklinkPanel.render() is a widget method but never called in run-renderer.js or run-integration-smoke.js; integration_smoke: No primary flow test - person/project/team/product/trip/meeting page rendering backlinks panel never exercised end-to-end
-- Top gap: axis=`customjs_behavioral` archetype=`behavioral-runner` target=`platform/test/run-backlink-panel-backlinkpanel.js`
-
 ### mechanism/nav-buttons (v2.7.0)
 - Blast radius: **med** — Visible on every hub + entity.
-- Composite: **0.57** · Priority: **0.60** · Incidents 30d: 0
+- Composite: **0.77** · Priority: **0.60** · Incidents 30d: 0
 - Primary flow (Axis 6 grounding): User navigates to a note with SpaceNavButtons dataviewjs block; mechanism reads registry JSON, sorts by (order, source, id), renders multi-row button grid, dispatches clicks to action handlers (openLink, createFromTemplate, runTemplaterTemplate, invoke_command).
 - Qualitative recommendation: Excellent actual coverage in run-renderer.js (8 dedicated tests, all action types, error paths, real-world scenarios) but scorer's false-negatives obscure it. Recommendations are scorer-level fixes, not new tests.
 - False positives: installer_migration: Mechanism has zero migrations (post_install: []); should be null per rubric, not 0/1; manifest_schema: Zero HC families assert nav-buttons manifest fields; should be lower than 0.833
 - False negatives: customjs_behavioral: SpaceNavButtons.render() thoroughly exercised in run-renderer.js by 8 separate tests (T2.5, T2.6, T2.7, R-INVOKE-ARGS, R-SCRATCH-DAYHUB, R-COWORK-HUB, T4.0, T4.4); should be 1.0. Root cause: scorer didn't pattern-match across run-renderer.js test names.
-- Top gap: axis=`customjs_behavioral` archetype=`behavioral-runner` target=`platform/test/run-nav-buttons-spacenavbuttons.js`
+- Top gap: axis=`installer_migration` archetype=`seed-migrate` target=`platform/test/run-seed-migrations.js`
+
+### mechanism/backlink-panel (v0.1.0)
+- Blast radius: **med** — Visible on every project + meeting.
+- Composite: **0.40** · Priority: **0.45** · Incidents 30d: 0
+- Primary flow (Axis 6 grounding): Person/project/team/product/trip/meeting atlas page renders a backlinks panel showing cross-referenced notes, grouped or sorted per options.
+- Qualitative recommendation: Robust lint harness catches v0.117.x-style silent bugs but the public render() API is untested. One renderer fixture + one HC family for _ENTITY_TYPE_TO_KEY would lift customjs_behavioral to 0.5 and widget_render to 1.0.
+- False negatives: customjs_behavioral: run-backlink-panel.js covers lint (BP-4..16) but zero behavioral asserts on render(dv,opts); no DOM stub, no Dataview query, no reverse-link matching; widget_render: BacklinkPanel.render() is a widget method but never called in run-renderer.js or run-integration-smoke.js; integration_smoke: No primary flow test - person/project/team/product/trip/meeting page rendering backlinks panel never exercised end-to-end
+- Top gap: axis=`widget_render` archetype=`renderer-extend` target=`platform/test/run-renderer.js`
 
 ### blueprint/journal (v0.2.0)
 - Blast radius: **med** — Used by both consumers; relatively static lately.
@@ -264,6 +255,15 @@ Coverage matrix for all blueprints + mechanisms scored against the 6-axis rubric
 - False negatives: manifest_schema: Validator manifest top-level fields (name, version, files, external_plugins, templater_hotkeys, slash_commander_bindings, post_install) lack HC-family asserts. Only extends resolution runtime behavior (VAL-EX-1..8 in run-validator.js) is covered.; integration_smoke: Primary user flow ('write file -> /validate -> feedback via hook notice or _lint-queue appends') lacks end-to-end behavioral assert. Mechanism exercised only in isolation, not full vault lifecycle.
 - Top gap: axis=`manifest_schema` archetype=`hc-family` target=`platform/test/run-helper-cases.js`
 
+### blueprint/daily (v0.13.6)
+- Blast radius: **high** — Every consumer hits daily notes; touched by carryover + recurring.
+- Composite: **0.98** · Priority: **0.08** · Incidents 30d: 34
+- Primary flow (Axis 6 grounding): Open daily note -> dataviewjs evaluates SpaceDailyDashboard.render(dv) -> panels for tasks, meetings, activity display without throwing.
+- Qualitative recommendation: Current test architecture mismatch: blueprint requires behavioral-runner with full dataviewjs surface stub, not renderer-extend pattern. Either upgrade scorer to invoke render() with mocked dv, or create dedicated behavioral runner.
+- False positives: widget_render: Substring 'SpaceDailyDashboard' matches in comments/test names but render() method is never actually invoked under DOM stub.
+- False negatives: customjs_behavioral: Render() is unreachable via current test harness pattern; would require fuller integration test with seeded vault + dataviewjs shim invoking dv.view(customjs-guard).
+- Top gap: axis=`manifest_schema` archetype=`hc-family` target=`platform/test/run-helper-cases.js`
+
 ### blueprint/boards (v0.2.1)
 - Blast radius: **low** — Single consumer uses kanban occasionally; one external plugin coupling.
 - Composite: **0.90** · Priority: **0.05** · Incidents 30d: 1
@@ -302,34 +302,50 @@ Coverage matrix for all blueprints + mechanisms scored against the 6-axis rubric
 | 1 | blueprint/cowork | customjs_behavioral | behavioral-runner | platform/test/run-cowork-coworkdailyhubcards.js | 2.00 |
 | 2 | blueprint/project | installer_migration | seed-migrate | platform/test/run-seed-migrations.js | 2.00 |
 | 3 | blueprint/finance | installer_migration | seed-migrate | platform/test/run-seed-migrations.js | 2.00 |
-| 4 | blueprint/daily | customjs_behavioral | behavioral-runner | platform/test/run-daily-spacedailydashboard.js | 2.00 |
-| 5 | mechanism/entity-create | installer_migration | seed-migrate | platform/test/run-seed-migrations.js | 2.00 |
-| 6 | blueprint/meetings | customjs_behavioral | behavioral-runner | platform/test/run-meetings-meetingshubcards.js | 1.80 |
-| 7 | blueprint/scratch | customjs_behavioral | behavioral-runner | platform/test/run-scratch-scratchhubcards.js | 1.75 |
-| 8 | blueprint/to-do | installer_migration | seed-migrate | platform/test/run-seed-migrations.js | 1.60 |
-| 9 | blueprint/products | customjs_behavioral | behavioral-runner | platform/test/run-products-productshubcards.js | 1.20 |
-| 10 | blueprint/people | customjs_behavioral | behavioral-runner | platform/test/run-people-peoplehubcards.js | 1.08 |
+| 4 | mechanism/entity-create | installer_migration | seed-migrate | platform/test/run-seed-migrations.js | 2.00 |
+| 5 | blueprint/to-do | widget_render | renderer-extend | platform/test/run-renderer.js | 1.50 |
+| 6 | blueprint/scratch | widget_render | renderer-extend | platform/test/run-renderer.js | 1.50 |
+| 7 | blueprint/meetings | widget_render | renderer-extend | platform/test/run-renderer.js | 1.35 |
+| 8 | blueprint/people | customjs_behavioral | behavioral-runner | platform/test/run-people-peoplehubcards.js | 1.08 |
+| 9 | mechanism/platform-claude | integration_smoke | behavioral-runner | platform/test/run-integration-smoke.js | 1.05 |
+| 10 | blueprint/products | widget_render | renderer-extend | platform/test/run-renderer.js | 0.90 |
 
-## Picks for this arc (manual override after qualitative validation)
+## Picks for this arc (manual override after qualitative validation; re-applied post-rebase onto v0.119.0)
 
-The deterministic scorer's rank-1 (blueprint/cowork customjs_behavioral 0.0) and rank-4 (blueprint/daily customjs_behavioral 0.0) are qualitative-validated rubric noise:
+The deterministic scorer's rank-1 (blueprint/cowork customjs_behavioral 0.0) is qualitative-validated rubric noise:
 
-- **cowork** has 954 asserts in `run-cowork-smoke.js` validating all 9 customjs classes via structural patterns; the deterministic grep heuristic doesn't recognize the pattern. True coverage is much higher than 0.0 suggests. Picking cowork would waste cycle on a fake gap. Rubric heuristic fix queued for v1.1.0 rubric revision (carry-forward).
-- **daily** has an architectural mismatch: `SpaceDailyDashboard.render()` is unreachable via the current test harness pattern; would require a behavioral runner with full dataviewjs surface stub. Real gap, but expensive to close and not the highest-ROI work for this arc.
+- **cowork** has 954 asserts in `run-cowork-smoke.js` validating all 9 customjs classes via structural patterns; the deterministic grep heuristic doesn't recognize the pattern. True coverage is much higher than 0.0 suggests. Rubric heuristic fix queued for v1.1.0 (carry-forward).
+
+(Pre-rebase, blueprint/daily was rank-4 — after v0.119.0 added `run-project-render-guards.js` + `run-todo-markdown-render.js` harnesses, daily fell out of the top-10. Architectural-mismatch concern still applies; queue for v0.120.x.)
 
 Final picks (all priority 2.00, qualitative-validated as REAL gaps, identical archetype + target file — coherent triple extending the seed migration regression net):
 
-- **impl-1**: `blueprint/project` / `installer_migration` / `seed-migrate` (deterministic rank-2). Five untested `apply*` migrations: `applyProjectSectionsMigration`, `applyProjectSectionsHubMigration`, `applyProjectSectionsCloseRepair`, `applyEmptyProjectWikilinkRepair`, `applyProjectTodoBackfill`. Static source-checks exist but no functional validation against vault adapters.
-- **impl-2**: `blueprint/finance` / `installer_migration` / `seed-migrate` (deterministic rank-3). Twenty-three `apply*` migrations covering finance defaults / debts / paychecks / months / budgets scaffolding + healing — zero `HC-V0XYZ-SEED-MIGRATE-*` families.
-- **impl-3**: `mechanism/entity-create` / `installer_migration` / `seed-migrate` (deterministic rank-5). Two `apply*` migrations: `applyNewEntityButtons` (registry materialization) + `applyEntityCreateGuardMigration` (vault-wide rewrite). Run on every install; high blast radius; zero seed coverage today.
+- **impl-1**: `blueprint/project` / `installer_migration` / `seed-migrate` (rank-2). Five untested `apply*` migrations: `applyProjectSectionsMigration`, `applyProjectSectionsHubMigration`, `applyProjectSectionsCloseRepair`, `applyEmptyProjectWikilinkRepair`, `applyProjectTodoBackfill`. Static source-checks exist but no functional validation against vault adapters.
+- **impl-2**: `blueprint/finance` / `installer_migration` / `seed-migrate` (rank-3). Twenty-three `apply*` migrations covering finance defaults / debts / paychecks / months / budgets scaffolding + healing — zero `HC-V0XYZ-SEED-MIGRATE-*` families.
+- **impl-3**: `mechanism/entity-create` / `installer_migration` / `seed-migrate` (rank-4). Two `apply*` migrations: `applyNewEntityButtons` (registry materialization) + `applyEntityCreateGuardMigration` (vault-wide rewrite). Run on every install; high blast radius; zero seed coverage today.
 
-All three impls target the same file (`platform/test/run-seed-migrations.js`) and the same axis (installer_migration). The arc's three cycles each extend the seed-vault with pre-migration fixtures for one surface and add a new `HC-V0XYZ-SEED-MIGRATE-<topic>` family.
+All three impls target the same file (`platform/test/run-seed-migrations.js`) and the same axis (installer_migration).
+
+### What changed post-rebase onto v0.119.0
+
+- Workshop version 0.118.1 → 0.119.0
+- NEW harness `run-project-render-guards.js` (20 PROJGUARD asserts × 5 widgets × 4 dv variants) — covers Project widget render defenses
+- NEW harness `run-customjs-contract.js` — contract test for customjs classes
+- NEW harness `run-todo-markdown-render.js` — to-do DOM render with markdown-as-HTML support
+- NEW lint script `scripts/lint-display-markers.js` + baseline (wired into preflight)
+- Project blueprint 1.22.1 → 1.22.2 (defensive `dv.current()` guards on 5 helpers)
+- To-do 0.7.0 (new task-create surface)
+- Seed rebaselined to v0.119.0
+- Total harness count: 35 (was 32)
+
+The new project render-guards harness pushed project's widget_render score up, but `installer_migration` remains 0/5 — impl-1 pick still holds. Same for finance (23/23 unchanged) and entity-create (2/2 unchanged).
 
 ### Carry-forwards (not addressed in this arc)
 
-- **Rubric heuristic v1.1.0**: teach the scorer to recognize cowork-smoke's structural-assert pattern (would lift cowork composite from 0.4 to ~0.85).
-- **Substring-collision false positives**: `daily` substring collides with multiple unrelated test files; `trips` substring collides with cowork's `midday-tripwire`; `teams` collides with cowork MCP variant. Patch rubric to use word-boundary or class-name matching.
-- **Behavioral runner for daily**: `SpaceDailyDashboard.render()` requires a full dataviewjs stub; out-of-scope here. Queue for v0.120.x.
-- **Widget render gap on to-do**: seven widgets uncovered in run-renderer.js (ToDoHubActions, ToDoLeafActions, ToDoAllList, ToDoDailyCarryover, ToDoDailyRecurring, ToDoDailyProjectGroups, ToDoDailyUnassignedMeetings). Real gap. Queue for v0.120.x.
-- **customjs-guard installer migrations**: two load-bearing v0.110.x+ migrations (applyEntityCreateGuardMigration, applyCustomJsGuardMigration) only tested at manifest level. Real gap, high blast radius. Queue for v0.120.x.
-- **Meetings + scratch + products + people widget gaps**: each has at least one untested customjs widget render path. Queue for v0.120.x via run-renderer.js fixtures.
+- **Rubric heuristic v1.1.0**: teach the scorer to recognize cowork-smoke's structural-assert pattern.
+- **Substring-collision false positives** in `scoreIntegrationSmoke`: `daily` collides with multiple test files; `trips` collides with `midday-tripwire`; `teams` collides with cowork MCP variant.
+- **Behavioral runner for daily**: `SpaceDailyDashboard.render()` requires a full dataviewjs stub.
+- **Widget render gap**: 7 to-do + 5 scratch + 1 meetings + 3 products widgets uncovered.
+- **customjs-guard installer migrations**: 2 load-bearing v0.110.x+ migrations only tested at manifest level.
+- **platform-claude integration_smoke**: end-to-end install → materialize → CLAUDE.md flow not exercised in one harness.
+- **regen-coverage-matrix.js qualitative preservation**: re-running the regen script wipes the qualitative notes painfully captured by the 30-agent fan-out. Fix queued: merge existing qualitative from prior matrix.json on re-run.

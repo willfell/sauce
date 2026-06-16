@@ -1,5 +1,5 @@
 {
-  "generated_at": "0.118.1",
+  "generated_at": "0.119.0",
   "rubric_version": "1.0.0",
   "entries": [
     {
@@ -334,7 +334,7 @@
     {
       "kind": "blueprint",
       "name": "project",
-      "current_version": "1.22.1",
+      "current_version": "1.22.2",
       "axes": {
         "customjs_behavioral": {
           "score": 0.21052631578947367,
@@ -682,7 +682,7 @@
       "composite_score": 0.5708020050125313,
       "blast_radius": "high",
       "blast_radius_rationale": "Docs hub + sections + section hubs + search arc; load-bearing.",
-      "recent_incidents_30d": 32,
+      "recent_incidents_30d": 33,
       "priority_score": 2,
       "top_gap": {
         "axis": "installer_migration",
@@ -1365,136 +1365,6 @@
       }
     },
     {
-      "kind": "blueprint",
-      "name": "daily",
-      "current_version": "0.13.6",
-      "axes": {
-        "customjs_behavioral": {
-          "score": 0,
-          "covered": 0,
-          "total": 1,
-          "methods": [
-            {
-              "cls": "SpaceDailyDashboard",
-              "method": "render",
-              "covered": false,
-              "hits": 0
-            }
-          ],
-          "suggested_archetype": "behavioral-runner",
-          "suggested_target_file": "platform/test/run-daily-spacedailydashboard.js"
-        },
-        "installer_migration": {
-          "score": null,
-          "reason": "no install-time migrations attributed",
-          "migrations": [],
-          "suggested_archetype": null,
-          "suggested_target_file": null
-        },
-        "manifest_schema": {
-          "score": 0.9166666666666667,
-          "manifest_ratio": 0.8333333333333334,
-          "schema_ratio": 1,
-          "manifest_fields": [
-            {
-              "field": "name",
-              "asserted": true
-            },
-            {
-              "field": "version",
-              "asserted": true
-            },
-            {
-              "field": "customjs_classes",
-              "asserted": true
-            },
-            {
-              "field": "files",
-              "asserted": true
-            },
-            {
-              "field": "rule_fragments",
-              "asserted": true
-            },
-            {
-              "field": "depends_on",
-              "asserted": false
-            }
-          ],
-          "schema_owned": 0,
-          "suggested_archetype": "hc-family",
-          "suggested_target_file": "platform/test/run-helper-cases.js"
-        },
-        "template_lockstep": {
-          "score": 1,
-          "covered": 2,
-          "total": 2,
-          "items": [
-            {
-              "kind": "template",
-              "name": "daily-template.md",
-              "covered": true
-            },
-            {
-              "kind": "rule_fragment",
-              "name": "daily",
-              "covered": true
-            }
-          ],
-          "suggested_archetype": "template-assert",
-          "suggested_target_file": "platform/test/run-helper-cases.js"
-        },
-        "widget_render": {
-          "score": 1,
-          "covered": 1,
-          "total": 1,
-          "widgets": [
-            {
-              "widget": "SpaceDailyDashboard",
-              "covered": true
-            }
-          ],
-          "suggested_archetype": "renderer-extend",
-          "suggested_target_file": "platform/test/run-renderer.js"
-        },
-        "integration_smoke": {
-          "score": 1,
-          "happy_path": true,
-          "failure_mode": true,
-          "suggested_archetype": "smoke-extend",
-          "suggested_target_file": "platform/test/run-integration-smoke.js"
-        }
-      },
-      "composite_score": 0.7833333333333334,
-      "blast_radius": "high",
-      "blast_radius_rationale": "Every consumer hits daily notes; touched by carryover + recurring.",
-      "recent_incidents_30d": 34,
-      "priority_score": 2,
-      "top_gap": {
-        "axis": "customjs_behavioral",
-        "score": 2,
-        "archetype": "behavioral-runner",
-        "target_file": "platform/test/run-daily-spacedailydashboard.js"
-      },
-      "qualitative": {
-        "validates_scores": "no",
-        "false_positives": [
-          {
-            "axis": "widget_render",
-            "note": "Substring 'SpaceDailyDashboard' matches in comments/test names but render() method is never actually invoked under DOM stub."
-          }
-        ],
-        "false_negatives": [
-          {
-            "axis": "customjs_behavioral",
-            "note": "Render() is unreachable via current test harness pattern; would require fuller integration test with seeded vault + dataviewjs shim invoking dv.view(customjs-guard)."
-          }
-        ],
-        "primary_user_flow": "Open daily note -> dataviewjs evaluates SpaceDailyDashboard.render(dv) -> panels for tasks, meetings, activity display without throwing.",
-        "qualitative_recommendation": "Current test architecture mismatch: blueprint requires behavioral-runner with full dataviewjs surface stub, not renderer-extend pattern. Either upgrade scorer to invoke render() with mocked dv, or create dedicated behavioral runner."
-      }
-    },
-    {
       "kind": "mechanism",
       "name": "entity-create",
       "current_version": "0.7.2",
@@ -1514,7 +1384,7 @@
               "cls": "EntityCreate",
               "method": "create",
               "covered": true,
-              "hits": 3
+              "hits": 4
             }
           ],
           "suggested_archetype": "behavioral-runner",
@@ -1624,355 +1494,13 @@
     },
     {
       "kind": "blueprint",
-      "name": "meetings",
-      "current_version": "0.8.0",
-      "axes": {
-        "customjs_behavioral": {
-          "score": 0,
-          "covered": 0,
-          "total": 1,
-          "methods": [
-            {
-              "cls": "MeetingsHubCards",
-              "method": "render",
-              "covered": false,
-              "hits": 0
-            }
-          ],
-          "suggested_archetype": "behavioral-runner",
-          "suggested_target_file": "platform/test/run-meetings-meetingshubcards.js"
-        },
-        "installer_migration": {
-          "score": null,
-          "reason": "no install-time migrations attributed",
-          "migrations": [],
-          "suggested_archetype": null,
-          "suggested_target_file": null
-        },
-        "manifest_schema": {
-          "score": 0.9166666666666667,
-          "manifest_ratio": 0.8333333333333334,
-          "schema_ratio": 1,
-          "manifest_fields": [
-            {
-              "field": "name",
-              "asserted": true
-            },
-            {
-              "field": "version",
-              "asserted": true
-            },
-            {
-              "field": "customjs_classes",
-              "asserted": true
-            },
-            {
-              "field": "files",
-              "asserted": true
-            },
-            {
-              "field": "rule_fragments",
-              "asserted": true
-            },
-            {
-              "field": "depends_on",
-              "asserted": false
-            }
-          ],
-          "schema_owned": 0,
-          "suggested_archetype": "hc-family",
-          "suggested_target_file": "platform/test/run-helper-cases.js"
-        },
-        "template_lockstep": {
-          "score": 1,
-          "covered": 4,
-          "total": 4,
-          "items": [
-            {
-              "kind": "template",
-              "name": "Meeting.md",
-              "covered": true
-            },
-            {
-              "kind": "template",
-              "name": "Meeting Hub.md",
-              "covered": true
-            },
-            {
-              "kind": "rule_fragment",
-              "name": "meetings",
-              "covered": true
-            },
-            {
-              "kind": "rule_fragment",
-              "name": "meetings",
-              "covered": true
-            }
-          ],
-          "suggested_archetype": "template-assert",
-          "suggested_target_file": "platform/test/run-helper-cases.js"
-        },
-        "widget_render": {
-          "score": 0,
-          "covered": 0,
-          "total": 1,
-          "widgets": [
-            {
-              "widget": "MeetingsHubCards",
-              "covered": false
-            }
-          ],
-          "suggested_archetype": "renderer-extend",
-          "suggested_target_file": "platform/test/run-renderer.js"
-        },
-        "integration_smoke": {
-          "score": 1,
-          "happy_path": true,
-          "failure_mode": true,
-          "suggested_archetype": "smoke-extend",
-          "suggested_target_file": "platform/test/run-integration-smoke.js"
-        }
-      },
-      "composite_score": 0.5833333333333334,
-      "blast_radius": "high",
-      "blast_radius_rationale": "Linked from project + cowork; recent project-link migration.",
-      "recent_incidents_30d": 4,
-      "priority_score": 1.8,
-      "top_gap": {
-        "axis": "customjs_behavioral",
-        "score": 1.8,
-        "archetype": "behavioral-runner",
-        "target_file": "platform/test/run-meetings-meetingshubcards.js"
-      },
-      "qualitative": {
-        "validates_scores": "yes",
-        "false_positives": [
-          {
-            "axis": "widget_render",
-            "note": "MeetingsHubCards listed in customjs_classes[] but render() never instantiated or called with stub DOM"
-          }
-        ],
-        "false_negatives": [
-          {
-            "axis": "customjs_behavioral",
-            "note": "MeetingsHubCards.render(dv) is never invoked in any test harness; method signature verified statically but no behavioral assertions on rendered DOM, async data enrichment, or BeaconCards delegation with project-pill meta"
-          }
-        ],
-        "primary_user_flow": "User creates a meeting note via new-meeting button (entity-create v0.5.0 integration) with optional project link; Meeting Hub renders today's meetings as cards with project pills, attendee chips, task badges via MeetingsHubCards.render().",
-        "qualitative_recommendation": "Well-covered on template lockstep + manifest schema, but widget_render axis is critical gap. MeetingsHubCards.render() is the primary user-facing component (displays cards, filters by date, enriches async file reads, renders project pills, delegates to BeaconCards). Zero behavioral tests means layout/enrichment/pill bugs would ship. Single MEET-3 case in run-helper-cases.js (or run-renderer.js fixture) would unlock both axes to 1.0."
-      }
-    },
-    {
-      "kind": "blueprint",
-      "name": "scratch",
-      "current_version": "0.5.2",
-      "axes": {
-        "customjs_behavioral": {
-          "score": 0.125,
-          "covered": 1,
-          "total": 8,
-          "methods": [
-            {
-              "cls": "ScratchHubCards",
-              "method": "render",
-              "covered": false,
-              "hits": 0
-            },
-            {
-              "cls": "ScratchDayList",
-              "method": "render",
-              "covered": false,
-              "hits": 0
-            },
-            {
-              "cls": "ScratchDayActions",
-              "method": "render",
-              "covered": false,
-              "hits": 0
-            },
-            {
-              "cls": "ScratchLeafActions",
-              "method": "render",
-              "covered": false,
-              "hits": 0
-            },
-            {
-              "cls": "ScratchHubActions",
-              "method": "render",
-              "covered": false,
-              "hits": 0
-            },
-            {
-              "cls": "ScratchDayMigrate",
-              "method": "migrate",
-              "covered": false,
-              "hits": 0
-            },
-            {
-              "cls": "ScratchDayMigrate",
-              "method": "migrateAll",
-              "covered": true,
-              "hits": 2
-            },
-            {
-              "cls": "ScratchDayMigrateInit",
-              "method": "invoke",
-              "covered": false,
-              "hits": 0
-            }
-          ],
-          "suggested_archetype": "behavioral-runner",
-          "suggested_target_file": "platform/test/run-scratch-scratchhubcards.js"
-        },
-        "installer_migration": {
-          "score": null,
-          "reason": "no install-time migrations attributed",
-          "migrations": [],
-          "suggested_archetype": null,
-          "suggested_target_file": null
-        },
-        "manifest_schema": {
-          "score": 0.9166666666666667,
-          "manifest_ratio": 0.8333333333333334,
-          "schema_ratio": 1,
-          "manifest_fields": [
-            {
-              "field": "name",
-              "asserted": true
-            },
-            {
-              "field": "version",
-              "asserted": true
-            },
-            {
-              "field": "customjs_classes",
-              "asserted": true
-            },
-            {
-              "field": "files",
-              "asserted": true
-            },
-            {
-              "field": "rule_fragments",
-              "asserted": true
-            },
-            {
-              "field": "depends_on",
-              "asserted": false
-            }
-          ],
-          "schema_owned": 0,
-          "suggested_archetype": "hc-family",
-          "suggested_target_file": "platform/test/run-helper-cases.js"
-        },
-        "template_lockstep": {
-          "score": 1,
-          "covered": 4,
-          "total": 4,
-          "items": [
-            {
-              "kind": "template",
-              "name": "Scratch.md",
-              "covered": true
-            },
-            {
-              "kind": "template",
-              "name": "Scratch Day Hub.md",
-              "covered": true
-            },
-            {
-              "kind": "rule_fragment",
-              "name": "scratch",
-              "covered": true
-            },
-            {
-              "kind": "rule_fragment",
-              "name": "scratch-day-hub",
-              "covered": true
-            }
-          ],
-          "suggested_archetype": "template-assert",
-          "suggested_target_file": "platform/test/run-helper-cases.js"
-        },
-        "widget_render": {
-          "score": 0,
-          "covered": 0,
-          "total": 5,
-          "widgets": [
-            {
-              "widget": "ScratchHubCards",
-              "covered": false
-            },
-            {
-              "widget": "ScratchDayList",
-              "covered": false
-            },
-            {
-              "widget": "ScratchDayActions",
-              "covered": false
-            },
-            {
-              "widget": "ScratchLeafActions",
-              "covered": false
-            },
-            {
-              "widget": "ScratchHubActions",
-              "covered": false
-            }
-          ],
-          "suggested_archetype": "renderer-extend",
-          "suggested_target_file": "platform/test/run-renderer.js"
-        },
-        "integration_smoke": {
-          "score": 1,
-          "happy_path": true,
-          "failure_mode": true,
-          "suggested_archetype": "smoke-extend",
-          "suggested_target_file": "platform/test/run-integration-smoke.js"
-        }
-      },
-      "composite_score": 0.6083333333333334,
-      "blast_radius": "high",
-      "blast_radius_rationale": "Daily hits; carries todo capture surface.",
-      "recent_incidents_30d": 6,
-      "priority_score": 1.75,
-      "top_gap": {
-        "axis": "customjs_behavioral",
-        "score": 1.75,
-        "archetype": "behavioral-runner",
-        "target_file": "platform/test/run-scratch-scratchhubcards.js"
-      },
-      "qualitative": {
-        "validates_scores": "no",
-        "false_positives": [
-          {
-            "axis": "customjs_behavioral",
-            "note": "run-scratch.js tests private _coerceDay and _migrateFrontmatter via HC-V0841-* families; deterministic scorer counts only public methods. Public render() on 5 of 7 classes never harnessed."
-          },
-          {
-            "axis": "widget_render",
-            "note": "run-renderer.js covers R-SCRATCH-DAYHUB (nav-button dispatch) but does NOT render ScratchDayList or ScratchHubCards widgets."
-          }
-        ],
-        "false_negatives": [
-          {
-            "axis": "customjs_behavioral",
-            "note": "ScratchDayActions.render(), ScratchLeafActions.render(), ScratchHubActions.render() have zero behavioral harness; ScratchDayList.render() + _extractPreviewFromBody + _pollForDayArg untested under stub Obsidian app"
-          }
-        ],
-        "primary_user_flow": "User opens Scratch nav-button -> day-hub created or opened -> ScratchDayActions renders '+ New Scratch' and 'Hub' buttons -> entity-create collects title -> new Scratch leaf with ScratchLeafActions buttons.",
-        "qualitative_recommendation": "Test debt is material despite high template/integration scores. Recommend: (1) add template-assert HC family for 3 template files; (2) extend run-renderer.js with ScratchDayList + ScratchHubCards fixtures; (3) add behavioral-runner for ScratchDayActions + ScratchLeafActions render() to cover vault read/Notice/workspace orchestration."
-      }
-    },
-    {
-      "kind": "blueprint",
       "name": "to-do",
-      "current_version": "0.6.1",
+      "current_version": "0.7.0",
       "axes": {
         "customjs_behavioral": {
-          "score": 0.8,
-          "covered": 28,
-          "total": 35,
+          "score": 0.8157894736842105,
+          "covered": 31,
+          "total": 38,
           "methods": [
             {
               "cls": "ToDoHubActions",
@@ -2108,9 +1636,27 @@
             },
             {
               "cls": "ToDoDailyRecurring",
+              "method": "parseSentinel",
+              "covered": true,
+              "hits": 2
+            },
+            {
+              "cls": "ToDoDailyRecurring",
+              "method": "formatSentinel",
+              "covered": true,
+              "hits": 2
+            },
+            {
+              "cls": "ToDoDailyRecurring",
+              "method": "hashEntry",
+              "covered": true,
+              "hits": 2
+            },
+            {
+              "cls": "ToDoDailyRecurring",
               "method": "hasSentinel",
               "covered": true,
-              "hits": 3
+              "hits": 2
             },
             {
               "cls": "ToDoDailyRecurring",
@@ -2189,9 +1735,9 @@
           "suggested_target_file": "platform/test/run-to-do-todohubactions.js"
         },
         "installer_migration": {
-          "score": 0.2,
-          "covered": 1,
-          "total": 5,
+          "score": 0.3333333333333333,
+          "covered": 2,
+          "total": 6,
           "migrations": [
             {
               "fn": "applyWikiToDocsMigration",
@@ -2203,6 +1749,10 @@
             },
             {
               "fn": "applyToDoBlueprintMigration",
+              "covered": true
+            },
+            {
+              "fn": "applyRecurringSentinelV070Migration",
               "covered": true
             },
             {
@@ -2330,16 +1880,16 @@
           "suggested_target_file": "platform/test/run-integration-smoke.js"
         }
       },
-      "composite_score": 0.6666666666666666,
+      "composite_score": 0.6915204678362573,
       "blast_radius": "high",
       "blast_radius_rationale": "Multi-cycle storm v0.116-v0.118; highest recent-incident rate.",
-      "recent_incidents_30d": 15,
-      "priority_score": 1.6,
+      "recent_incidents_30d": 18,
+      "priority_score": 1.5,
       "top_gap": {
-        "axis": "installer_migration",
-        "score": 1.6,
-        "archetype": "seed-migrate",
-        "target_file": "platform/test/run-seed-migrations.js"
+        "axis": "widget_render",
+        "score": 1.5,
+        "archetype": "renderer-extend",
+        "target_file": "platform/test/run-renderer.js"
       },
       "qualitative": {
         "validates_scores": "no",
@@ -2365,35 +1915,65 @@
     },
     {
       "kind": "blueprint",
-      "name": "products",
-      "current_version": "0.3.0",
+      "name": "scratch",
+      "current_version": "0.5.2",
       "axes": {
         "customjs_behavioral": {
-          "score": 0,
-          "covered": 0,
-          "total": 3,
+          "score": 0.625,
+          "covered": 5,
+          "total": 8,
           "methods": [
             {
-              "cls": "ProductsHubCards",
+              "cls": "ScratchHubCards",
               "method": "render",
               "covered": false,
               "hits": 0
             },
             {
-              "cls": "ProductPageCards",
+              "cls": "ScratchDayList",
               "method": "render",
+              "covered": true,
+              "hits": 1
+            },
+            {
+              "cls": "ScratchDayActions",
+              "method": "render",
+              "covered": true,
+              "hits": 1
+            },
+            {
+              "cls": "ScratchLeafActions",
+              "method": "render",
+              "covered": true,
+              "hits": 1
+            },
+            {
+              "cls": "ScratchHubActions",
+              "method": "render",
+              "covered": true,
+              "hits": 1
+            },
+            {
+              "cls": "ScratchDayMigrate",
+              "method": "migrate",
               "covered": false,
               "hits": 0
             },
             {
-              "cls": "ProductActionButtons",
-              "method": "render",
+              "cls": "ScratchDayMigrate",
+              "method": "migrateAll",
+              "covered": true,
+              "hits": 2
+            },
+            {
+              "cls": "ScratchDayMigrateInit",
+              "method": "invoke",
               "covered": false,
               "hits": 0
             }
           ],
           "suggested_archetype": "behavioral-runner",
-          "suggested_target_file": "platform/test/run-products-productshubcards.js"
+          "suggested_target_file": "platform/test/run-scratch-scratchhubcards.js"
         },
         "installer_migration": {
           "score": null,
@@ -2417,7 +1997,7 @@
             },
             {
               "field": "customjs_classes",
-              "asserted": false
+              "asserted": true
             },
             {
               "field": "files",
@@ -2429,7 +2009,7 @@
             },
             {
               "field": "depends_on",
-              "asserted": true
+              "asserted": false
             }
           ],
           "schema_owned": 0,
@@ -2438,17 +2018,27 @@
         },
         "template_lockstep": {
           "score": 1,
-          "covered": 2,
-          "total": 2,
+          "covered": 4,
+          "total": 4,
           "items": [
             {
               "kind": "template",
-              "name": "Template, Product.md",
+              "name": "Scratch.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Scratch Day Hub.md",
               "covered": true
             },
             {
               "kind": "rule_fragment",
-              "name": "products",
+              "name": "scratch",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "scratch-day-hub",
               "covered": true
             }
           ],
@@ -2458,18 +2048,26 @@
         "widget_render": {
           "score": 0,
           "covered": 0,
-          "total": 3,
+          "total": 5,
           "widgets": [
             {
-              "widget": "ProductsHubCards",
+              "widget": "ScratchHubCards",
               "covered": false
             },
             {
-              "widget": "ProductPageCards",
+              "widget": "ScratchDayList",
               "covered": false
             },
             {
-              "widget": "ProductActionButtons",
+              "widget": "ScratchDayActions",
+              "covered": false
+            },
+            {
+              "widget": "ScratchLeafActions",
+              "covered": false
+            },
+            {
+              "widget": "ScratchHubActions",
               "covered": false
             }
           ],
@@ -2484,37 +2082,177 @@
           "suggested_target_file": "platform/test/run-integration-smoke.js"
         }
       },
-      "composite_score": 0.5833333333333334,
-      "blast_radius": "med",
-      "blast_radius_rationale": "Consumer-vault hub; relatively static.",
-      "recent_incidents_30d": 5,
-      "priority_score": 1.2,
+      "composite_score": 0.7083333333333334,
+      "blast_radius": "high",
+      "blast_radius_rationale": "Daily hits; carries todo capture surface.",
+      "recent_incidents_30d": 6,
+      "priority_score": 1.5,
       "top_gap": {
-        "axis": "customjs_behavioral",
-        "score": 1.2,
-        "archetype": "behavioral-runner",
-        "target_file": "platform/test/run-products-productshubcards.js"
+        "axis": "widget_render",
+        "score": 1.5,
+        "archetype": "renderer-extend",
+        "target_file": "platform/test/run-renderer.js"
       },
       "qualitative": {
         "validates_scores": "no",
         "false_positives": [
           {
-            "axis": "template_lockstep",
-            "note": "Asserts only file existence and frontmatter naming; does not verify ProductPageCards/SpaceNavButtons/BacklinkPanel class invocations or template syntax validity"
+            "axis": "customjs_behavioral",
+            "note": "run-scratch.js tests private _coerceDay and _migrateFrontmatter via HC-V0841-* families; deterministic scorer counts only public methods. Public render() on 5 of 7 classes never harnessed."
           },
           {
-            "axis": "manifest_schema",
-            "note": "0.917 is high but missing assertions for depends_on[], claude_surface[], templater_folder_templates[], post_install[]"
+            "axis": "widget_render",
+            "note": "run-renderer.js covers R-SCRATCH-DAYHUB (nav-button dispatch) but does NOT render ScratchDayList or ScratchHubCards widgets."
           }
         ],
         "false_negatives": [
           {
             "axis": "customjs_behavioral",
-            "note": "ProductActionButtons.render() Templater dispatch + onClick handler codepath untested; ProductsHubCards dataview filtering + sorting logic untested"
+            "note": "ScratchDayActions.render(), ScratchLeafActions.render(), ScratchHubActions.render() have zero behavioral harness; ScratchDayList.render() + _extractPreviewFromBody + _pollForDayArg untested under stub Obsidian app"
           }
         ],
-        "primary_user_flow": "Create a product via /products or + New Product -> product note materializes with ProductPageCards + SpaceNavButtons + BacklinkPanel -> hub aggregates member teams and active projects.",
-        "qualitative_recommendation": "Weak behavioral coverage despite high composite score. All three classes have non-trivial render() methods integrating Dataview queries + Obsidian plugin APIs + cross-blueprint rollups. Recommend extending run-renderer.js with ProductsHubCards + ProductActionButtons fixtures."
+        "primary_user_flow": "User opens Scratch nav-button -> day-hub created or opened -> ScratchDayActions renders '+ New Scratch' and 'Hub' buttons -> entity-create collects title -> new Scratch leaf with ScratchLeafActions buttons.",
+        "qualitative_recommendation": "Test debt is material despite high template/integration scores. Recommend: (1) add template-assert HC family for 3 template files; (2) extend run-renderer.js with ScratchDayList + ScratchHubCards fixtures; (3) add behavioral-runner for ScratchDayActions + ScratchLeafActions render() to cover vault read/Notice/workspace orchestration."
+      }
+    },
+    {
+      "kind": "blueprint",
+      "name": "meetings",
+      "current_version": "0.8.0",
+      "axes": {
+        "customjs_behavioral": {
+          "score": 1,
+          "covered": 1,
+          "total": 1,
+          "methods": [
+            {
+              "cls": "MeetingsHubCards",
+              "method": "render",
+              "covered": true,
+              "hits": 1
+            }
+          ],
+          "suggested_archetype": "behavioral-runner",
+          "suggested_target_file": "platform/test/run-meetings-meetingshubcards.js"
+        },
+        "installer_migration": {
+          "score": null,
+          "reason": "no install-time migrations attributed",
+          "migrations": [],
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "manifest_schema": {
+          "score": 0.9166666666666667,
+          "manifest_ratio": 0.8333333333333334,
+          "schema_ratio": 1,
+          "manifest_fields": [
+            {
+              "field": "name",
+              "asserted": true
+            },
+            {
+              "field": "version",
+              "asserted": true
+            },
+            {
+              "field": "customjs_classes",
+              "asserted": true
+            },
+            {
+              "field": "files",
+              "asserted": true
+            },
+            {
+              "field": "rule_fragments",
+              "asserted": true
+            },
+            {
+              "field": "depends_on",
+              "asserted": false
+            }
+          ],
+          "schema_owned": 0,
+          "suggested_archetype": "hc-family",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "template_lockstep": {
+          "score": 1,
+          "covered": 4,
+          "total": 4,
+          "items": [
+            {
+              "kind": "template",
+              "name": "Meeting.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Meeting Hub.md",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "meetings",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "meetings",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "template-assert",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "widget_render": {
+          "score": 0,
+          "covered": 0,
+          "total": 1,
+          "widgets": [
+            {
+              "widget": "MeetingsHubCards",
+              "covered": false
+            }
+          ],
+          "suggested_archetype": "renderer-extend",
+          "suggested_target_file": "platform/test/run-renderer.js"
+        },
+        "integration_smoke": {
+          "score": 1,
+          "happy_path": true,
+          "failure_mode": true,
+          "suggested_archetype": "smoke-extend",
+          "suggested_target_file": "platform/test/run-integration-smoke.js"
+        }
+      },
+      "composite_score": 0.7833333333333334,
+      "blast_radius": "high",
+      "blast_radius_rationale": "Linked from project + cowork; recent project-link migration.",
+      "recent_incidents_30d": 4,
+      "priority_score": 1.35,
+      "top_gap": {
+        "axis": "widget_render",
+        "score": 1.35,
+        "archetype": "renderer-extend",
+        "target_file": "platform/test/run-renderer.js"
+      },
+      "qualitative": {
+        "validates_scores": "yes",
+        "false_positives": [
+          {
+            "axis": "widget_render",
+            "note": "MeetingsHubCards listed in customjs_classes[] but render() never instantiated or called with stub DOM"
+          }
+        ],
+        "false_negatives": [
+          {
+            "axis": "customjs_behavioral",
+            "note": "MeetingsHubCards.render(dv) is never invoked in any test harness; method signature verified statically but no behavioral assertions on rendered DOM, async data enrichment, or BeaconCards delegation with project-pill meta"
+          }
+        ],
+        "primary_user_flow": "User creates a meeting note via new-meeting button (entity-create v0.5.0 integration) with optional project link; Meeting Hub renders today's meetings as cards with project pills, attendee chips, task badges via MeetingsHubCards.render().",
+        "qualitative_recommendation": "Well-covered on template lockstep + manifest schema, but widget_render axis is critical gap. MeetingsHubCards.render() is the primary user-facing component (displays cards, filters by date, enriches async file reads, renders project pills, delegates to BeaconCards). Zero behavioral tests means layout/enrichment/pill bugs would ship. Single MEET-3 case in run-helper-cases.js (or run-renderer.js fixture) would unlock both axes to 1.0."
       }
     },
     {
@@ -2751,6 +2489,160 @@
       }
     },
     {
+      "kind": "blueprint",
+      "name": "products",
+      "current_version": "0.3.0",
+      "axes": {
+        "customjs_behavioral": {
+          "score": 0.3333333333333333,
+          "covered": 1,
+          "total": 3,
+          "methods": [
+            {
+              "cls": "ProductsHubCards",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "ProductPageCards",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "ProductActionButtons",
+              "method": "render",
+              "covered": true,
+              "hits": 1
+            }
+          ],
+          "suggested_archetype": "behavioral-runner",
+          "suggested_target_file": "platform/test/run-products-productshubcards.js"
+        },
+        "installer_migration": {
+          "score": null,
+          "reason": "no install-time migrations attributed",
+          "migrations": [],
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "manifest_schema": {
+          "score": 0.9166666666666667,
+          "manifest_ratio": 0.8333333333333334,
+          "schema_ratio": 1,
+          "manifest_fields": [
+            {
+              "field": "name",
+              "asserted": true
+            },
+            {
+              "field": "version",
+              "asserted": true
+            },
+            {
+              "field": "customjs_classes",
+              "asserted": false
+            },
+            {
+              "field": "files",
+              "asserted": true
+            },
+            {
+              "field": "rule_fragments",
+              "asserted": true
+            },
+            {
+              "field": "depends_on",
+              "asserted": true
+            }
+          ],
+          "schema_owned": 0,
+          "suggested_archetype": "hc-family",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "template_lockstep": {
+          "score": 1,
+          "covered": 2,
+          "total": 2,
+          "items": [
+            {
+              "kind": "template",
+              "name": "Template, Product.md",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "products",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "template-assert",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "widget_render": {
+          "score": 0,
+          "covered": 0,
+          "total": 3,
+          "widgets": [
+            {
+              "widget": "ProductsHubCards",
+              "covered": false
+            },
+            {
+              "widget": "ProductPageCards",
+              "covered": false
+            },
+            {
+              "widget": "ProductActionButtons",
+              "covered": false
+            }
+          ],
+          "suggested_archetype": "renderer-extend",
+          "suggested_target_file": "platform/test/run-renderer.js"
+        },
+        "integration_smoke": {
+          "score": 1,
+          "happy_path": true,
+          "failure_mode": true,
+          "suggested_archetype": "smoke-extend",
+          "suggested_target_file": "platform/test/run-integration-smoke.js"
+        }
+      },
+      "composite_score": 0.65,
+      "blast_radius": "med",
+      "blast_radius_rationale": "Consumer-vault hub; relatively static.",
+      "recent_incidents_30d": 5,
+      "priority_score": 0.8999999999999999,
+      "top_gap": {
+        "axis": "widget_render",
+        "score": 0.8999999999999999,
+        "archetype": "renderer-extend",
+        "target_file": "platform/test/run-renderer.js"
+      },
+      "qualitative": {
+        "validates_scores": "no",
+        "false_positives": [
+          {
+            "axis": "template_lockstep",
+            "note": "Asserts only file existence and frontmatter naming; does not verify ProductPageCards/SpaceNavButtons/BacklinkPanel class invocations or template syntax validity"
+          },
+          {
+            "axis": "manifest_schema",
+            "note": "0.917 is high but missing assertions for depends_on[], claude_surface[], templater_folder_templates[], post_install[]"
+          }
+        ],
+        "false_negatives": [
+          {
+            "axis": "customjs_behavioral",
+            "note": "ProductActionButtons.render() Templater dispatch + onClick handler codepath untested; ProductsHubCards dataview filtering + sorting logic untested"
+          }
+        ],
+        "primary_user_flow": "Create a product via /products or + New Product -> product note materializes with ProductPageCards + SpaceNavButtons + BacklinkPanel -> hub aggregates member teams and active projects.",
+        "qualitative_recommendation": "Weak behavioral coverage despite high composite score. All three classes have non-trivial render() methods integrating Dataview queries + Obsidian plugin APIs + cross-blueprint rollups. Recommend extending run-renderer.js with ProductsHubCards + ProductActionButtons fixtures."
+      }
+    },
+    {
       "kind": "mechanism",
       "name": "smart-connections-bridge",
       "current_version": "0.2.0",
@@ -2839,139 +2731,19 @@
     },
     {
       "kind": "mechanism",
-      "name": "backlink-panel",
-      "current_version": "0.1.0",
-      "axes": {
-        "customjs_behavioral": {
-          "score": 0,
-          "covered": 0,
-          "total": 1,
-          "methods": [
-            {
-              "cls": "BacklinkPanel",
-              "method": "render",
-              "covered": false,
-              "hits": 0
-            }
-          ],
-          "suggested_archetype": "behavioral-runner",
-          "suggested_target_file": "platform/test/run-backlink-panel-backlinkpanel.js"
-        },
-        "installer_migration": {
-          "score": null,
-          "reason": "no install-time migrations attributed",
-          "migrations": [],
-          "suggested_archetype": null,
-          "suggested_target_file": null
-        },
-        "manifest_schema": {
-          "score": 0.5833333333333334,
-          "manifest_ratio": 0.16666666666666666,
-          "schema_ratio": 1,
-          "manifest_fields": [
-            {
-              "field": "name",
-              "asserted": false
-            },
-            {
-              "field": "version",
-              "asserted": false
-            },
-            {
-              "field": "customjs_classes",
-              "asserted": false
-            },
-            {
-              "field": "files",
-              "asserted": true
-            },
-            {
-              "field": "rule_fragments",
-              "asserted": false
-            },
-            {
-              "field": "depends_on",
-              "asserted": false
-            }
-          ],
-          "schema_owned": 0,
-          "suggested_archetype": "hc-family",
-          "suggested_target_file": "platform/test/run-helper-cases.js"
-        },
-        "template_lockstep": {
-          "score": null,
-          "reason": "no templates or rule_fragments",
-          "suggested_archetype": null,
-          "suggested_target_file": null
-        },
-        "widget_render": {
-          "score": 0,
-          "covered": 0,
-          "total": 1,
-          "widgets": [
-            {
-              "widget": "BacklinkPanel",
-              "covered": false
-            }
-          ],
-          "suggested_archetype": "renderer-extend",
-          "suggested_target_file": "platform/test/run-renderer.js"
-        },
-        "integration_smoke": {
-          "score": 0,
-          "happy_path": false,
-          "failure_mode": true,
-          "suggested_archetype": "behavioral-runner",
-          "suggested_target_file": "platform/test/run-integration-smoke.js"
-        }
-      },
-      "composite_score": 0.14583333333333334,
-      "blast_radius": "med",
-      "blast_radius_rationale": "Visible on every project + meeting.",
-      "recent_incidents_30d": 0,
-      "priority_score": 0.6,
-      "top_gap": {
-        "axis": "customjs_behavioral",
-        "score": 0.6,
-        "archetype": "behavioral-runner",
-        "target_file": "platform/test/run-backlink-panel-backlinkpanel.js"
-      },
-      "qualitative": {
-        "validates_scores": "no",
-        "false_positives": [],
-        "false_negatives": [
-          {
-            "axis": "customjs_behavioral",
-            "note": "run-backlink-panel.js covers lint (BP-4..16) but zero behavioral asserts on render(dv,opts); no DOM stub, no Dataview query, no reverse-link matching"
-          },
-          {
-            "axis": "widget_render",
-            "note": "BacklinkPanel.render() is a widget method but never called in run-renderer.js or run-integration-smoke.js"
-          },
-          {
-            "axis": "integration_smoke",
-            "note": "No primary flow test - person/project/team/product/trip/meeting page rendering backlinks panel never exercised end-to-end"
-          }
-        ],
-        "primary_user_flow": "Person/project/team/product/trip/meeting atlas page renders a backlinks panel showing cross-referenced notes, grouped or sorted per options.",
-        "qualitative_recommendation": "Robust lint harness catches v0.117.x-style silent bugs but the public render() API is untested. One renderer fixture + one HC family for _ENTITY_TYPE_TO_KEY would lift customjs_behavioral to 0.5 and widget_render to 1.0."
-      }
-    },
-    {
-      "kind": "mechanism",
       "name": "nav-buttons",
       "current_version": "2.7.0",
       "axes": {
         "customjs_behavioral": {
-          "score": 0,
-          "covered": 0,
+          "score": 1,
+          "covered": 1,
           "total": 1,
           "methods": [
             {
               "cls": "SpaceNavButtons",
               "method": "render",
-              "covered": false,
-              "hits": 0
+              "covered": true,
+              "hits": 1
             }
           ],
           "suggested_archetype": "behavioral-runner",
@@ -3051,16 +2823,16 @@
           "suggested_target_file": "platform/test/run-integration-smoke.js"
         }
       },
-      "composite_score": 0.5666666666666667,
+      "composite_score": 0.7666666666666666,
       "blast_radius": "med",
       "blast_radius_rationale": "Visible on every hub + entity.",
       "recent_incidents_30d": 0,
       "priority_score": 0.6,
       "top_gap": {
-        "axis": "customjs_behavioral",
+        "axis": "installer_migration",
         "score": 0.6,
-        "archetype": "behavioral-runner",
-        "target_file": "platform/test/run-nav-buttons-spacenavbuttons.js"
+        "archetype": "seed-migrate",
+        "target_file": "platform/test/run-seed-migrations.js"
       },
       "qualitative": {
         "validates_scores": "no",
@@ -3082,6 +2854,126 @@
         ],
         "primary_user_flow": "User navigates to a note with SpaceNavButtons dataviewjs block; mechanism reads registry JSON, sorts by (order, source, id), renders multi-row button grid, dispatches clicks to action handlers (openLink, createFromTemplate, runTemplaterTemplate, invoke_command).",
         "qualitative_recommendation": "Excellent actual coverage in run-renderer.js (8 dedicated tests, all action types, error paths, real-world scenarios) but scorer's false-negatives obscure it. Recommendations are scorer-level fixes, not new tests."
+      }
+    },
+    {
+      "kind": "mechanism",
+      "name": "backlink-panel",
+      "current_version": "0.1.0",
+      "axes": {
+        "customjs_behavioral": {
+          "score": 1,
+          "covered": 1,
+          "total": 1,
+          "methods": [
+            {
+              "cls": "BacklinkPanel",
+              "method": "render",
+              "covered": true,
+              "hits": 1
+            }
+          ],
+          "suggested_archetype": "behavioral-runner",
+          "suggested_target_file": "platform/test/run-backlink-panel-backlinkpanel.js"
+        },
+        "installer_migration": {
+          "score": null,
+          "reason": "no install-time migrations attributed",
+          "migrations": [],
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "manifest_schema": {
+          "score": 0.5833333333333334,
+          "manifest_ratio": 0.16666666666666666,
+          "schema_ratio": 1,
+          "manifest_fields": [
+            {
+              "field": "name",
+              "asserted": false
+            },
+            {
+              "field": "version",
+              "asserted": false
+            },
+            {
+              "field": "customjs_classes",
+              "asserted": false
+            },
+            {
+              "field": "files",
+              "asserted": true
+            },
+            {
+              "field": "rule_fragments",
+              "asserted": false
+            },
+            {
+              "field": "depends_on",
+              "asserted": false
+            }
+          ],
+          "schema_owned": 0,
+          "suggested_archetype": "hc-family",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "template_lockstep": {
+          "score": null,
+          "reason": "no templates or rule_fragments",
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "widget_render": {
+          "score": 0,
+          "covered": 0,
+          "total": 1,
+          "widgets": [
+            {
+              "widget": "BacklinkPanel",
+              "covered": false
+            }
+          ],
+          "suggested_archetype": "renderer-extend",
+          "suggested_target_file": "platform/test/run-renderer.js"
+        },
+        "integration_smoke": {
+          "score": 0,
+          "happy_path": false,
+          "failure_mode": true,
+          "suggested_archetype": "behavioral-runner",
+          "suggested_target_file": "platform/test/run-integration-smoke.js"
+        }
+      },
+      "composite_score": 0.39583333333333337,
+      "blast_radius": "med",
+      "blast_radius_rationale": "Visible on every project + meeting.",
+      "recent_incidents_30d": 0,
+      "priority_score": 0.44999999999999996,
+      "top_gap": {
+        "axis": "widget_render",
+        "score": 0.44999999999999996,
+        "archetype": "renderer-extend",
+        "target_file": "platform/test/run-renderer.js"
+      },
+      "qualitative": {
+        "validates_scores": "no",
+        "false_positives": [],
+        "false_negatives": [
+          {
+            "axis": "customjs_behavioral",
+            "note": "run-backlink-panel.js covers lint (BP-4..16) but zero behavioral asserts on render(dv,opts); no DOM stub, no Dataview query, no reverse-link matching"
+          },
+          {
+            "axis": "widget_render",
+            "note": "BacklinkPanel.render() is a widget method but never called in run-renderer.js or run-integration-smoke.js"
+          },
+          {
+            "axis": "integration_smoke",
+            "note": "No primary flow test - person/project/team/product/trip/meeting page rendering backlinks panel never exercised end-to-end"
+          }
+        ],
+        "primary_user_flow": "Person/project/team/product/trip/meeting atlas page renders a backlinks panel showing cross-referenced notes, grouped or sorted per options.",
+        "qualitative_recommendation": "Robust lint harness catches v0.117.x-style silent bugs but the public render() API is untested. One renderer fixture + one HC family for _ENTITY_TYPE_TO_KEY would lift customjs_behavioral to 0.5 and widget_render to 1.0."
       }
     },
     {
@@ -3487,7 +3379,7 @@
               "cls": "Icons",
               "method": "resolve",
               "covered": true,
-              "hits": 8
+              "hits": 9
             }
           ],
           "suggested_archetype": "behavioral-runner",
@@ -4543,6 +4435,136 @@
         ],
         "primary_user_flow": "Author writes a file -> Templater post-execution hook validates frontmatter/tags/blocks/naming against rule_fragments -> violations surface as notices and append to _lint-queue.yml for bulk review.",
         "qualitative_recommendation": "Phase 2-3 candidate if room permits. Two additions (manifest HC family + integration_smoke for full flow) lift manifest_schema to ~1.0 and integration_smoke to 0.5-1.0. Risk is low - schema enforcement tool, gaps are visibility, not functional bugs."
+      }
+    },
+    {
+      "kind": "blueprint",
+      "name": "daily",
+      "current_version": "0.13.6",
+      "axes": {
+        "customjs_behavioral": {
+          "score": 1,
+          "covered": 1,
+          "total": 1,
+          "methods": [
+            {
+              "cls": "SpaceDailyDashboard",
+              "method": "render",
+              "covered": true,
+              "hits": 1
+            }
+          ],
+          "suggested_archetype": "behavioral-runner",
+          "suggested_target_file": "platform/test/run-daily-spacedailydashboard.js"
+        },
+        "installer_migration": {
+          "score": null,
+          "reason": "no install-time migrations attributed",
+          "migrations": [],
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "manifest_schema": {
+          "score": 0.9166666666666667,
+          "manifest_ratio": 0.8333333333333334,
+          "schema_ratio": 1,
+          "manifest_fields": [
+            {
+              "field": "name",
+              "asserted": true
+            },
+            {
+              "field": "version",
+              "asserted": true
+            },
+            {
+              "field": "customjs_classes",
+              "asserted": true
+            },
+            {
+              "field": "files",
+              "asserted": true
+            },
+            {
+              "field": "rule_fragments",
+              "asserted": true
+            },
+            {
+              "field": "depends_on",
+              "asserted": false
+            }
+          ],
+          "schema_owned": 0,
+          "suggested_archetype": "hc-family",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "template_lockstep": {
+          "score": 1,
+          "covered": 2,
+          "total": 2,
+          "items": [
+            {
+              "kind": "template",
+              "name": "daily-template.md",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "daily",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "template-assert",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "widget_render": {
+          "score": 1,
+          "covered": 1,
+          "total": 1,
+          "widgets": [
+            {
+              "widget": "SpaceDailyDashboard",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "renderer-extend",
+          "suggested_target_file": "platform/test/run-renderer.js"
+        },
+        "integration_smoke": {
+          "score": 1,
+          "happy_path": true,
+          "failure_mode": true,
+          "suggested_archetype": "smoke-extend",
+          "suggested_target_file": "platform/test/run-integration-smoke.js"
+        }
+      },
+      "composite_score": 0.9833333333333334,
+      "blast_radius": "high",
+      "blast_radius_rationale": "Every consumer hits daily notes; touched by carryover + recurring.",
+      "recent_incidents_30d": 34,
+      "priority_score": 0.08333333333333326,
+      "top_gap": {
+        "axis": "manifest_schema",
+        "score": 0.08333333333333326,
+        "archetype": "hc-family",
+        "target_file": "platform/test/run-helper-cases.js"
+      },
+      "qualitative": {
+        "validates_scores": "no",
+        "false_positives": [
+          {
+            "axis": "widget_render",
+            "note": "Substring 'SpaceDailyDashboard' matches in comments/test names but render() method is never actually invoked under DOM stub."
+          }
+        ],
+        "false_negatives": [
+          {
+            "axis": "customjs_behavioral",
+            "note": "Render() is unreachable via current test harness pattern; would require fuller integration test with seeded vault + dataviewjs shim invoking dv.view(customjs-guard)."
+          }
+        ],
+        "primary_user_flow": "Open daily note -> dataviewjs evaluates SpaceDailyDashboard.render(dv) -> panels for tasks, meetings, activity display without throwing.",
+        "qualitative_recommendation": "Current test architecture mismatch: blueprint requires behavioral-runner with full dataviewjs surface stub, not renderer-extend pattern. Either upgrade scorer to invoke render() with mocked dv, or create dedicated behavioral runner."
       }
     },
     {
