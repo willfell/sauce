@@ -93,5 +93,34 @@ ok('TDM-6 ToDoDailyProjectGroups also renders external link as <a>', () => {
     assertEq(ext[0].text, 'docs');
 });
 
+// ---------- TDM-7: XSS — whitespace-prefixed javascript: scheme must be rejected ----------
+// Regression for C1 from final code review: " javascript:alert(1)" (with leading
+// whitespace) bypassed _isSafeUrl because the scheme regex `^[a-z]...:` doesn't
+// match leading whitespace, fell into the "relative URL — allow" branch, and
+// emitted as a clickable <a href> — browsers trim href whitespace before resolve,
+// executing the javascript: scheme on click.
+ok('TDM-7 leading-whitespace javascript: URL is escaped as plain text (not anchor)', () => {
+    const widget = new ToDoDailyUnassignedMeetings();
+    // Direct unit-test of _isSafeUrl: all three whitespace/scheme variants must be rejected.
+    if (widget._isSafeUrl(' javascript:alert(1)')) throw new Error('leading-space javascript: not rejected');
+    if (widget._isSafeUrl('\tjavascript:alert(1)')) throw new Error('leading-tab javascript: not rejected');
+    if (widget._isSafeUrl('javascript:alert(1)')) throw new Error('plain javascript: not rejected');
+    if (widget._isSafeUrl('JAVASCRIPT:alert(1)')) throw new Error('uppercase javascript: not rejected');
+    // Render-path: malicious link emits as escaped text, not anchor.
+    const c = renderAgainst(ToDoDailyUnassignedMeetings, '[click](< javascript:alert(1)>)');
+    const anchors = c._collectAnchors();
+    const danger = anchors.filter(a => /javascript/i.test(a.href || ''));
+    assertEq(danger.length, 0, `expected 0 javascript: anchors, got ${danger.length}`);
+});
+
+// ---------- TDM-8: same XSS guard for ToDoDailyProjectGroups ----------
+ok('TDM-8 ProjectGroups also rejects whitespace-prefixed javascript:', () => {
+    const widget = new ToDoDailyProjectGroups();
+    if (widget._isSafeUrl(' javascript:alert(1)')) throw new Error('ProjectGroups leading-space javascript: not rejected');
+    const c = renderAgainst(ToDoDailyProjectGroups, '[click](< javascript:alert(1)>)');
+    const danger = c._collectAnchors().filter(a => /javascript/i.test(a.href || ''));
+    assertEq(danger.length, 0);
+});
+
 console.log(`\n${passes} passed, ${fails} failed`);
 process.exit(fails === 0 ? 0 : 1);
