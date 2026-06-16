@@ -194,6 +194,12 @@ function makeApp(opts) {
   const captureWrites = opts.allowDiskWrites !== true;
   const captured_open = [];
   const captured_writes = [];
+  // Paths created during this test run (capture mode). vault.create() returns a
+  // TFile-shaped stub in real Obsidian, and getAbstractFileByPath resolves the
+  // just-created file immediately after — mirror that so nav-buttons'
+  // createFromTemplate tail (which re-fetches the target by path before opening
+  // it on a captured leaf) sees the file it just wrote.
+  const created_paths = new Set();
   return {
     isMobile: false,
     vault: {
@@ -213,6 +219,9 @@ function makeApp(opts) {
         },
       },
       getAbstractFileByPath(p) {
+        // A file created earlier in THIS run resolves to a TFile regardless of
+        // the (pre-create) fileExistsHook answer.
+        if (created_paths.has(p)) return { path: p };
         if (typeof opts.fileExistsHook === 'function') {
           const r = opts.fileExistsHook(p);
           if (r !== undefined) return r;
@@ -228,11 +237,14 @@ function makeApp(opts) {
       async create(p, body) {
         if (captureWrites) {
           captured_writes.push({ method: 'create', path: p, body, bodyLength: body.length });
-          return;
+          created_paths.add(p);
+          return { path: p };
         }
         const abs = path.join(VAULT, p);
         await fs.promises.mkdir(path.dirname(abs), { recursive: true });
         await fs.promises.writeFile(abs, body, 'utf8');
+        created_paths.add(p);
+        return { path: p };
       },
       async createFolder(p) {
         if (captureWrites) {
@@ -247,6 +259,20 @@ function makeApp(opts) {
       openLinkText(p, _) {
         captured_open.push(p);
       },
+      // v0.120.3 review: createFromTemplate's new-note tail now opens the
+      // created TFile on a captured leaf (getLeaf(false).openFile(file)) so the
+      // deferred read-mode flip targets THIS note. Record the opened path so the
+      // lazy-scaffold assertion still sees exactly one open of the target.
+      activeLeaf: null,
+      getLeaf(_split) {
+        const leaf = {
+          async openFile(file) {
+            captured_open.push(file && file.path ? file.path : '<no-path>');
+          },
+        };
+        this.activeLeaf = leaf;
+        return leaf;
+      },
     },
     __captured_open: captured_open,
     __captured_writes: captured_writes,
@@ -255,7 +281,7 @@ function makeApp(opts) {
 
 // ── Load renderer class ──────────────────────────────────────────────────
 function loadRendererClass(app, Notice) {
-  const customJS = { Icons: ICONS_INSTANCE };
+  const customJS = { Icons: ICONS_INSTANCE, OpenHelpers: { forceActiveLeafPreview() {}, forceLeafPreview() {} } };
   const fn = new Function('app', 'Notice', 'customJS', `${RENDERER_SRC}\nreturn SpaceNavButtons;`);
   return fn(app, Notice, customJS);
 }
@@ -1401,22 +1427,62 @@ async function testBB5IconHtmlInlinedBeforeLabel() {
 }
 
 async function testBB6HoverEnterLeaveSwapsColors() {
-  console.log('\n=== BB6 — hover-enter swaps to filled accent; hover-leave restores ===');
+  console.log('\n=== BB6 — hover-enter swaps to filled accent; hover-leave restores (individual props) ===');
   const app = makeApp();
   const Cls = loadAccentButtonClass(app);
   if (!Cls) { console.log('  FAIL — AccentButton class not loaded'); return false; }
   const parent = makeEl('div', {});
   const btn = new Cls().render(parent, { label: 'Hi', icon: '<svg/>', onClick: () => {} });
   if (btn && typeof btn.onmouseenter === 'function') btn.onmouseenter();
-  const cssEnter = (btn && btn.style && btn.style.cssText) || '';
-  const enteredFill = cssEnter.includes('background: var(--interactive-accent)')
-    && cssEnter.includes('color: var(--text-on-accent)');
+  const enteredFill = btn.style.background === 'var(--interactive-accent)'
+    && btn.style.color === 'var(--text-on-accent)';
   if (btn && typeof btn.onmouseleave === 'function') btn.onmouseleave();
-  const cssLeave = (btn && btn.style && btn.style.cssText) || '';
-  const restored = cssLeave.includes('background: var(--background-primary)')
-    && cssLeave.includes('color: var(--interactive-accent)');
+  const restored = btn.style.background === 'var(--background-primary)'
+    && btn.style.color === 'var(--interactive-accent)';
   const pass = enteredFill && restored;
   console.log(`  enteredFill: ${enteredFill}; restored: ${restored}`);
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
+async function testBB7HoverDoesNotReassignCssText() {
+  console.log('\n=== BB7 — hover mutates individual props only; cssText unchanged (no jitter) ===');
+  const app = makeApp();
+  const Cls = loadAccentButtonClass(app);
+  if (!Cls) { console.log('  FAIL — AccentButton class not loaded'); return false; }
+  const parent = makeEl('div', {});
+  const btn = new Cls().render(parent, { label: 'Hi', icon: '<svg/>', onClick: () => {} });
+  const resting = btn.style.cssText;
+  if (btn && typeof btn.onmouseenter === 'function') btn.onmouseenter();
+  const unchangedOnEnter = btn.style.cssText === resting;
+  if (btn && typeof btn.onmouseleave === 'function') btn.onmouseleave();
+  const unchangedOnLeave = btn.style.cssText === resting;
+  const pass = unchangedOnEnter && unchangedOnLeave;
+  console.log(`  unchangedOnEnter: ${unchangedOnEnter}; unchangedOnLeave: ${unchangedOnLeave}`);
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
+async function testBB8BaseCssClipsOverflow() {
+  console.log('\n=== BB8 — base cssText clips overflow (label cannot spill past button) ===');
+  const app = makeApp();
+  const Cls = loadAccentButtonClass(app);
+  if (!Cls) { console.log('  FAIL — AccentButton class not loaded'); return false; }
+  const parent = makeEl('div', {});
+  const btn = new Cls().render(parent, { label: 'A very long button label here', icon: '<svg/>', onClick: () => {} });
+  const css = (btn && btn.style && btn.style.cssText) || '';
+  const pass = css.includes('overflow: hidden');
+  console.log(`  cssText: ${css}`);
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
+async function testNavWrapRowStyleWraps() {
+  console.log('\n=== NAV-WRAP — SpaceNavButtons row style wraps (no crush/overflow on narrow screens) ===');
+  const wraps = RENDERER_SRC.includes('flex-wrap: wrap');
+  const noNowrap = !RENDERER_SRC.includes('flex-wrap: nowrap');
+  const pass = wraps && noNowrap;
+  console.log(`  wraps: ${wraps}; noNowrap: ${noNowrap}`);
   console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
   return pass;
 }
@@ -2037,6 +2103,9 @@ async function testRendV067Todo1() {
       results.push(['BB4 disabled-hover-noop', await testBB4DisabledHoverNoOp()]);
       results.push(['BB5 icon-before-label', await testBB5IconHtmlInlinedBeforeLabel()]);
       results.push(['BB6 hover-swap', await testBB6HoverEnterLeaveSwapsColors()]);
+      results.push(['BB7 hover-no-csstext-reassign', await testBB7HoverDoesNotReassignCssText()]);
+      results.push(['BB8 base-overflow-clip', await testBB8BaseCssClipsOverflow()]);
+      results.push(['NAV-WRAP rowstyle-wraps', await testNavWrapRowStyleWraps()]);
     }
     if (which === 'date-aware' || which === 'all') {
       results.push(['DA1 active-file-with-date', await testDA1ActiveFileWithDate()]);

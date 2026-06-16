@@ -105,6 +105,7 @@ function loadEntityCreate(opts = {}) {
                 return { tagName: "BUTTON" };
             },
         },
+        OpenHelpers: { forceActiveLeafPreview() {}, forceLeafPreview() {} },
     };
     const FakeNotice = function (msg) { (FakeNotice.captured ||= []).push(String(msg)); };
     FakeNotice.captured = [];

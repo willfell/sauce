@@ -27,7 +27,7 @@
     },
     {
       "name": "nav-buttons",
-      "version": "2.7.0"
+      "version": "2.7.3"
     },
     {
       "name": "cards",
@@ -35,6 +35,10 @@
     },
     {
       "name": "accent-button",
+      "version": "0.1.2"
+    },
+    {
+      "name": "open-helpers",
       "version": "0.1.1"
     },
     {
@@ -43,7 +47,7 @@
     },
     {
       "name": "entity-create",
-      "version": "0.7.2"
+      "version": "0.7.4"
     },
     {
       "name": "people-rendering",
@@ -81,7 +85,7 @@
     },
     {
       "name": "daily",
-      "version": "0.13.6"
+      "version": "0.13.7"
     },
     {
       "name": "meetings",
@@ -101,7 +105,7 @@
     },
     {
       "name": "to-do",
-      "version": "0.8.1"
+      "version": "0.8.3"
     },
     {
       "name": "journal",

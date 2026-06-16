@@ -1,6 +1,6 @@
 {
   "name": "accent-button",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Shared outline-accent action button renderer (AccentButton; renamed from BeaconButton in v0.24.0). Any blueprint creating an outline-accent action button calls customJS.AccentButton.render(parent, opts) instead of inline cssText + hover handlers. opts: {label, icon, onClick, flex?, disabled?, tone?}. tone reserved for future additive tones; only 'accent' valid at v0.1.0 (this mechanism's launch version). Returns HTMLButtonElement; callers may mutate btn.disabled post-render (hover handlers honor it). v0.1.1 PATCH (v0.88.1 people-cohesion-1 followup): null-guard the icon concat. Pre-fix, calling with `icon: null` produced the literal string \"null\" before the label in the rendered button DOM — the latent bug exposed by v0.88.0's PersonNavButtons render path. Fix: `(opts.icon || \"\")` in the innerHTML concat.",
   "depends_on": [
     { "name": "customjs-guard", "range": ">=1.0.0" }

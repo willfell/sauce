@@ -40,25 +40,27 @@ class AccentButton {
     render(parent, opts) {
         const btn = parent.createEl("button");
         // Null-guard the icon concat: null + "<span>..." would render the
-        // literal string "null" in the button DOM (PersonNavButtons passes
-        // icon: null intentionally for icon-less back-link). v0.1.1 fix.
+        // literal string "null" (PersonNavButtons passes icon: null for the
+        // icon-less back-link). v0.1.1 fix.
         btn.innerHTML = (opts.icon || "") + `<span>${opts.label}</span>`;
-        const baseCss = "cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 6px 14px; border-radius: 6px; border: 1px solid var(--interactive-accent); background: var(--background-primary); color: var(--interactive-accent); font-size: 0.82em; font-weight: 500; font-family: inherit; letter-spacing: 0.01em; transition: all 0.15s ease;";
+        // v0.1.2: + overflow:hidden so a long label can never spill past the
+        // button boundary (wrapping across rows is the row container's job).
+        const baseCss = "cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 6px 14px; border-radius: 6px; border: 1px solid var(--interactive-accent); background: var(--background-primary); color: var(--interactive-accent); font-size: 0.82em; font-weight: 500; font-family: inherit; letter-spacing: 0.01em; transition: all 0.15s ease; overflow: hidden;";
         const flexSuffix = opts.flex === true ? " flex: 1; min-width: 0;" : "";
         const restingCss = baseCss + flexSuffix;
-        const hoverCss = restingCss
-            .replace("background: var(--background-primary)", "background: var(--interactive-accent)")
-            .replace("color: var(--interactive-accent);", "color: var(--text-on-accent);");
         btn.style.cssText = restingCss;
+        // v0.1.2: hover mutates individual style properties only — it never
+        // rebuilds cssText. The prior cssText .replace()/reassign produced
+        // duplicate declarations + a micro-reflow that visibly shifted adjacent
+        // flex buttons (the New Doc / New Section "jump"). Individual writes keep
+        // box geometry identical between resting and hover.
         btn.onmouseenter = () => {
             if (btn.disabled) return;
-            btn.style.cssText = hoverCss;
             btn.style.background = "var(--interactive-accent)";
             btn.style.color = "var(--text-on-accent)";
         };
         btn.onmouseleave = () => {
             if (btn.disabled) return;
-            btn.style.cssText = restingCss;
             btn.style.background = "var(--background-primary)";
             btn.style.color = "var(--interactive-accent)";
         };
