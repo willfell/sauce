@@ -249,11 +249,11 @@ class ToDoDailyCarryover {
     }
 
     static writeSentinel(content, sourceDate) {
-        // Sentinel goes into the frontmatter region (between the two `---` lines).
-        // Format: `<!-- carryover-from-<sourceDate> -->\n` inserted on the line BEFORE the closing `---`.
+        // Sentinel lives OUTSIDE the frontmatter (HTML comment immediately AFTER the closing `---`).
+        // v0.117.1 fix: previously placed the sentinel INSIDE the frontmatter block which broke
+        // YAML parsing on render (the comment line was not valid YAML).
         const lines = content.split('\n');
         if (lines[0] !== '---') {
-            // No frontmatter — prepend at top.
             return `<!-- carryover-from-${sourceDate} -->\n` + content;
         }
         let closeIdx = -1;
@@ -261,13 +261,13 @@ class ToDoDailyCarryover {
             if (lines[i] === '---') { closeIdx = i; break; }
         }
         if (closeIdx === -1) {
-            // Malformed frontmatter; prepend sentinel.
             return `<!-- carryover-from-${sourceDate} -->\n` + content;
         }
-        // Replace prior sentinel(s) in the frontmatter region if present.
-        const before = lines.slice(0, closeIdx).filter(l => !/^<!-- carryover-from-/.test(l));
-        const after = lines.slice(closeIdx);
-        before.push(`<!-- carryover-from-${sourceDate} -->`);
-        return before.concat(after).join('\n');
+        // Keep frontmatter [0..closeIdx] intact; insert sentinel BELOW the closing `---`,
+        // stripping any prior sentinels from BOTH the frontmatter region (legacy bug)
+        // and from the lines immediately after.
+        const fmRegion = lines.slice(0, closeIdx + 1).filter(l => !/^<!-- carryover-from-/.test(l));
+        const after = lines.slice(closeIdx + 1).filter(l => !/^<!-- carryover-from-/.test(l));
+        return fmRegion.concat([`<!-- carryover-from-${sourceDate} -->`], after).join('\n');
     }
 }

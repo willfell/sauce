@@ -1,5 +1,5 @@
 {
-  "workshop_version": "0.117.1",
+  "workshop_version": "0.117.2",
   "mechanisms": [
     {
       "name": "customjs-guard",
@@ -101,7 +101,7 @@
     },
     {
       "name": "to-do",
-      "version": "0.5.1"
+      "version": "0.5.2"
     },
     {
       "name": "journal",

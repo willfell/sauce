@@ -461,24 +461,49 @@ class ToDoCreateTask {
     }
 
     _insertLineUnderSection(content, line, payload) {
+        // v0.5.2: anchor on the SectionLabel dataviewjs block (not a legacy `## H2`
+        // markdown heading). Templates ship SectionLabel("Today") /
+        // SectionLabel("Owned Tasks") / SectionLabel("Recurring Tasks") instead of
+        // raw H2; the dialog must insert immediately AFTER the closing
+        // ``` of the matching SectionLabel block.
+        let labelText;
+        if (payload.mode === 'recurring') labelText = 'Recurring Tasks';
+        else if (payload.destination && payload.destination.type === 'project') labelText = 'Owned Tasks';
+        else labelText = 'Today';
+
+        // Match a dataviewjs block carrying SectionLabel + the labelText. We escape
+        // the apostrophe in "Today's Capture" too for backward compat during the
+        // transition window.
+        const labelRe = new RegExp(
+            '(```dataviewjs[^`]*class:\\s*"SectionLabel"[^`]*text:\\s*"' +
+            labelText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') +
+            '"[^`]*```\\n?)'
+        );
+        const m = labelRe.exec(content);
+        if (m) {
+            const insertPos = m.index + m[0].length;
+            const head = content.slice(0, insertPos).replace(/\n+$/, '\n');
+            const tail = content.slice(insertPos).replace(/^\n+/, '');
+            return head + `\n${line}\n\n` + tail;
+        }
+        // Legacy fallback — match an `## H2` heading; preserved for transition
+        // window so older notes still get the task inserted in a sensible place.
         let heading;
         if (payload.mode === 'recurring') heading = '## Recurring Tasks';
         else if (payload.destination && payload.destination.type === 'project') heading = '## Owned Tasks';
-        else heading = "## Today's Capture";
-
+        else heading = '## Today';
         const idx = content.indexOf(heading);
-        if (idx === -1) {
-            // No section — append at EOF.
-            return content.replace(/\n+$/, '') + `\n\n${heading}\n\n${line}\n`;
+        if (idx !== -1) {
+            const after = content.slice(idx + heading.length);
+            const nextRel = after.search(/\n## /);
+            const sectionEnd = nextRel === -1 ? content.length : idx + heading.length + nextRel;
+            let head = content.slice(0, sectionEnd).replace(/\n+$/, '');
+            let tail = content.slice(sectionEnd).replace(/^\n+/, '\n');
+            return head + `\n${line}\n` + tail;
         }
-        // Find end of the section (next `## ` heading or EOF).
-        const after = content.slice(idx + heading.length);
-        const nextRel = after.search(/\n## /);
-        const sectionEnd = nextRel === -1 ? content.length : idx + heading.length + nextRel;
-        let head = content.slice(0, sectionEnd);
-        let tail = content.slice(sectionEnd);
-        head = head.replace(/\n+$/, '');
-        return head + `\n${line}\n` + tail.replace(/^\n+/, '\n');
+        // Last-resort fallback — append at EOF with NO new heading (rely on the
+        // SectionLabel block at the top of the file rather than creating an H2).
+        return content.replace(/\n+$/, '') + `\n${line}\n`;
     }
 
     async _ensureFolder(filePath) {
