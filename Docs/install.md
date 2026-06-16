@@ -1345,3 +1345,28 @@ The title field remains the single free-text field; `serializePayloadToLine` pas
 
 - No new migrations fire for this upgrade — `sauce update --bump-pins` reinstalls the to-do blueprint at 0.6.0, which is an additive dialog enhancement only.
 - All 3 consumer vaults redeploy cleanly as a no-op apart from the updated CustomJS helper files. Cmd+R Obsidian after the update to pick up the new code.
+
+---
+
+## Upgrading from v0.118.0 to v0.118.1
+
+After `brew upgrade sauce`, run from each consumer vault:
+
+```bash
+sauce update --bump-pins
+sauce install
+```
+
+This is a **PATCH** that fixes recurring tasks not appearing on daily notes — workshop 0.118.0 → 0.118.1, to-do blueprint 0.6.0 → **0.6.1**.
+
+**What this fixes:**
+
+`ToDoDailyRecurring.parseRegistry` — the function that reads the To-Do Recurring Registry to determine which tasks should materialize onto a daily note — matched only on a literal `## Recurring Tasks` H2 heading as the section start. v0.117.0's SectionLabel migration had replaced that H2 with a dataviewjs `SectionLabel "Recurring Tasks"` block on all existing registries and new-registry scaffolds. As a result, `parseRegistry` returned zero entries on every migrated vault, and recurring tasks stopped materializing onto daily notes entirely from v0.117.0 onward. The regression was invisible in CI because the existing test fixture (`REC-10`) used the legacy H2 form.
+
+Fix: `parseRegistry` now accepts both the SectionLabel block and the legacy H2 as the section start. Section end is recognized by `SectionLabel "Last 7 days of materialization"`, any `## ` heading, or EOF. Existing recurring-task entries are parsed correctly again.
+
+**What does NOT change:**
+
+- No vault content is modified — this is a pure code fix in the to-do blueprint's CustomJS helper.
+- All previously-materialized daily notes are unaffected. Today's already-opened daily note may carry a spent `recurring-materialized-<date>` sentinel; only future dailies auto-populate from the next open onward.
+- `sauce update --bump-pins` reinstalls the to-do blueprint at 0.6.1. Cmd+R Obsidian after the update to reload the helper.
