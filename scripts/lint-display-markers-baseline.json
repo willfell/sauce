@@ -167,17 +167,17 @@
     },
     {
       "file": "platform/blueprints/project/helpers/project-workstream-manager.js",
-      "line": 32,
+      "line": 36,
       "snippet": "if (line.startsWith(\"## \")) {"
     },
     {
       "file": "platform/blueprints/project/helpers/project-workstream-manager.js",
-      "line": 33,
+      "line": 37,
       "snippet": "currentLane = line.replace(\"## \", \"\").trim();"
     },
     {
       "file": "platform/blueprints/project/helpers/project-workstreams.js",
-      "line": 44,
+      "line": 48,
       "snippet": "if (line.startsWith(\"## \")) lane = line.replace(\"## \", \"\").trim();"
     },
     {
