@@ -74,7 +74,7 @@ assignment patterns or Templater's `evaluate` invocation), then read one working
 confirm the contract before authoring the new one. v0.93.3 / v0.94.0 / v0.118.0 each paid this
 tax by not.
 
-See also: landmine #24.
+See also: landmine #28.
 
 ## Stable anchors vs display markers
 
