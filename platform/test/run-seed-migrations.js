@@ -1552,6 +1552,22 @@ async function runEntityCreateMigrateFamily() {
             bAlreadyGuardedAfter === alreadyGuardedBefore
         );
 
+        // ===== D: history audit-trail =====
+        // Each migration pushes >= 1 event into history. Pass 1 alone emits
+        // the injectAccentButtonBlock verify event (warning, missing_skip_inject)
+        // + per-file rewrite events from the guard migration + a summary event.
+        // None of the events use the errors[]-array shape (which other migrations
+        // populate); we still assert it stays empty as a forward-compat contract.
+        ok(
+            "HC-V01190-EC-SEED-MIGRATE-D1 history records >= 2 events (one per migration)",
+            history.length >= 2
+        );
+        const dHasErrors = history.some(h => Array.isArray(h.errors) && h.errors.length > 0);
+        ok(
+            "HC-V01190-EC-SEED-MIGRATE-D2 no event has populated errors[]",
+            !dHasErrors
+        );
+
         // Snapshot for idempotency (C family) — AFTER pass 1, BEFORE pass 2.
         const ecHubAfterPass1 = fs.readFileSync(
             path.join(ecRoot, LEGACY_EC_DIR, "Legacy Hub.md"), "utf8");
