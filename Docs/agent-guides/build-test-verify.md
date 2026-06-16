@@ -13,7 +13,7 @@ npm run release:preflight
 
 Runs `scripts/check-version-sync.js` first (gates workshop_version vs `platform/manifest.json` vs `package.json`), then every harness in `platform/test/run-*.js`. Whole-suite GREEN is the bar — any harness failure on a fresh checkout means something regressed.
 
-Current count: **24 load-bearing harnesses** (whole-suite GREEN preserved v0.21.0 → current). See [cycle-status.md](cycle-status.md) for the exact catalogue and per-cycle sub-assert deltas.
+Current count: **32 load-bearing harnesses** (whole-suite GREEN preserved v0.21.0 → current). See [cycle-status.md](cycle-status.md) for the exact catalogue and per-cycle sub-assert deltas.
 
 **Per-cycle behavioral harness pattern.** Where `run-helper-cases.js` asserts source-text contracts via regex (cheap, fast, source-stable), per-cycle behavioral harnesses LOAD each helper into a sandboxed scope, INSTANTIATE it, and exercise its methods against minimal Dataview / DOM / Obsidian app stubs. Use this when the cycle ships a new shared primitive (e.g. `SectionLabel` v0.109.0) or non-trivial render dispatch (e.g. `Breadcrumb` type branches v0.109.0) where a regression would manifest as wrong DOM rather than wrong source text. Reference impl: [`platform/test/run-v0109-projects-overhaul.js`](../../platform/test/run-v0109-projects-overhaul.js) covers SectionLabel render, Breadcrumb type branches + path fallback, ProjectMeetingsPanel._enrichMeeting parse correctness, ProjectDocsIndex section sort algorithm, applyDocNoteBreadcrumbMarkerCleanup edge cases, and Template, Project.md structural integrity. Wired into `release:preflight` after `run-smart-connections-bridge`; runs on every PR + push to `main` via `ci.yml` and on every annotated tag via `release.yml`.
 

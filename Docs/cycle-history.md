@@ -2254,3 +2254,121 @@ See `Docs/plans/2026-05-22-v0.74.0-cowork-orchestrator-rigor-{design,plan,result
 
 See `Docs/plans/2026-05-22-v0.75.0-cowork-skill-routing-hardening-{design,plan,result}.md`.
 
+---
+
+## v0.116.0 to-do blueprint expansion CLOSED 2026-06-15
+
+**Workshop:** 0.115.4 → 0.116.0
+**Blueprints:** to-do 0.3.3 → **0.4.0**; project 1.21.2 → **1.22.0**
+
+**Headline:** Six-cycle gap since the to-do blueprint was last touched. v0.116.0 ships the full recurrence engine, a per-project To-Do note type, a +New Task dialog, and the daily materialization aggregators — 8 new customjs classes, 2 new note types, 2 new installer steps, 5 new pure-helper harnesses. PR #3 merged.
+
+**Deliverables (to-do 0.4.0):**
+- **8 new customjs classes** shipped in stages: `RecurrenceParser` (pure helper, 32-case harness); `TaskParser` (extraction helper); `ToDoDailyCarryover` (yesterday-only materializer); `ToDoDailyRecurring` (registry materializer); `ToDoDailyProjectGroups` + `ToDoDailyUnassignedMeetings` (live aggregators); `ToDoCreateTask` dialog + `ToDoCreateTaskInit` startup registration.
+- **2 new note types** (`project-todo` — per-project To-Do hub; `to-do-recurring` — recurring-task registry) with 3 new templates (Today To-Do.md, Project To-Do.md, To-Do Recurring.md).
+- **2 new installer steps** wired into `applyToDoBlueprintMigration`: backfill of project-todo notes for existing projects; entity-create registry hydration.
+- **2 new schema-registry entries** for project-todo + to-do-recurring.
+- **Retired:** `ToDoMigrateModal`, `ToDoMigrateInit` (the Migrate-to-tomorrow modal pattern replaced by the carryover materializer).
+- **Project 1.22.0:** `extra_files[]` entry to scaffold `Project To-Do.md` per project; new `project-todo` rule_fragment; ProjectNavButtons gains project-todo context.
+
+**Harnesses:** 5 new pure-helper harnesses (`run-task-parser.js`, `run-recurrence-parser.js`, `run-todo-carryover.js`, `run-todo-dialog.js`, `run-todo-materialize.js`; 103 sub-asserts total). Wiring gap: `run-todo-carryover/dialog/materialize` tracked in git but NOT yet in the preflight chain (carry-forward to v0.117.4). `run-task-parser` + `run-recurrence-parser` WIRED. Preflight exit 0 at 0.116.0.
+
+**Lesson:** the `Write` tool silently no-ops overwrites of existing files when a Read was not done first. `Today To-Do.md` template was NEVER updated to v0.4.0 shape — only the two NEW templates landed. Caught by post-deploy user smoke; fixed in v0.117.0.
+
+**Commits:** `1225e97` (S1 RecurrenceParser) → `96a40cb` (S2 TaskParser + run-task-parser rename) → `8477464` (S2 follow-up preflight chain) → `b5a9f40` (S3 ToDoDailyCarryover) → `63bb626` (S4 ToDoDailyRecurring) → `9bc7e64` (S5 ProjectGroups + UnassignedMeetings) → `4bdb40c` (S6+S7 ToDoCreateTask dialog + Init + LeafActions) → `4365d8c` (S8+S9 manifest v0.4.0 + 3 templates + retire Migrate classes) → `5b46213` (S10 applyToDoBlueprintMigration steps) → `b3d0421` (S11 workshop catalogue + project v1.22.0 + ranch lockstep + schema-index + VERSION sweep) → `83d67c0` (S12 TD-HC-1 + FA6-EXTENDS widening) → `9b36007` (S15 TD-CLI assertions + seed pins) → `d5a5f98` (dogfood self-install) → `d3a368b` (result doc) → `fddb0fd` (PR #3 merge) → `62c7ce7` (seed rebaseline to v0.116.0).
+
+See `Docs/plans/2026-06-15-v0.116.0-todo-blueprint-expansion-result.md`.
+
+---
+
+## v0.116.1 to-do dialog + nav + mobile PATCH CLOSED 2026-06-15
+
+**Workshop:** 0.116.0 → 0.116.1
+**Blueprints:** to-do 0.4.0 → **0.4.1** (UNCHANGED in cycle-status; actually project 1.22.0 → **1.22.1**)
+
+**Headline:** Three post-deploy user-reported issues from the v0.116.0 same-day dogfood, direct-pushed.
+
+- **Recurring-tab Create-button enable fix:** `updateSubmit` was referenced inside closures before it was defined; forward-declared as `let updateSubmit; … updateSubmit = () => …` so all closures see the stable binding.
+- **Project-todo nav buttons:** `ProjectNavButtons.detectContext` now handles `type: project-todo` notes with a new branch; a "To-Do" shortcut button added to the project nav row.
+- **Mobile button labels:** `ToDoLeafActions` renders short labels ("Add", "Rec", "All") when the viewport is narrow, replacing the full-width labels that overflowed on phone.
+
+**Commits:** `1e3155a` (fix commit, direct-push); `9b58f8d` (seed rebaseline to v0.116.1). Tag + tap PR auto-merged.
+
+---
+
+## v0.117.0 to-do SectionLabel polish + load-bearing template fix CLOSED 2026-06-15
+
+**Workshop:** 0.116.1 → 0.117.0
+**Blueprints:** to-do 0.4.1 → **0.5.0** (adds `depends_on: project >=1.21.0`); project 1.22.1 UNCHANGED
+
+**Headline:** MINOR. Closed a load-bearing silent bug: the `Today To-Do.md` template had NEVER been updated to the v0.4.0 five-section shape (`Write` tool silently no-op'd overwriting an existing file at v0.116.0 time; only the two NEW templates had landed). Fixed in this cycle by reading the file first, then rewriting. Also: comprehensive H2-to-SectionLabel migration across all three daily/project-todo/recurring-registry surfaces.
+
+**Deliverables:**
+- **Load-bearing template fix:** `platform/blueprints/to-do/templates/Today To-Do.md` rewritten to the full v0.4.0 five-section shape (SpaceNavButtons + ToDoLeafActions + `SectionLabel("Today")` + `SectionLabel("Carryover")` + `SectionLabel("Recurring Tasks")` + `SectionLabel("Owned Tasks")` + `SectionLabel("From Meetings")` dataviewjs blocks). No more silent write no-op.
+- **SectionLabel visual polish:** `ToDoDailyCarryover.insertCarryoverIntoToday` + `ToDoDailyRecurring.insertRecurringIntoToday` now materialize `<dataviewjs SectionLabel(...)>` blocks instead of `## H2`; `ToDoDailyProjectGroups` + `ToDoDailyUnassignedMeetings` use `customJS.SectionLabel.render(...)` for section labels; task rows rendered as styled flex blocks (leading ☐ + primary text + italic muted source attribution chip).
+- **`applyToDoBlueprintMigration` extended:** detects v0.4.0 shape missing SectionLabel and injects it; rewrites persisted `## Carryover / ## Recurring / ## Owned Tasks / ## From Meetings / ## Recurring Tasks / ## Last 7 days` H2s to SectionLabel blocks across daily + project-todo + registry notes. Idempotent. `.sauce-backup/<ts>/` snapshots.
+
+**Harnesses:** 29 load-bearing harnesses in preflight (including the 5 to-do harnesses from v0.116.0; the 3 orphaned harnesses remain unwired — carry-forward to v0.117.4). Preflight exit 0; `version-sync ok: 0.117.0`. All three consumer vaults (headspace + accuris + ero) deployed clean post-brew.
+
+**Commits:** `8007a53` (feat commit); `849b79c` (seed rebaseline to v0.117.0); `c9c6d7e` (cycle-close docs — result + handoff + cycle-status pointer). Tag `v0.117.0` pushed; brew tap auto-merged.
+
+See `Docs/plans/2026-06-15-v0.117.0-to-do-section-label-result.md` + `Docs/prompts/2026-06-15-post-v0.117.0-next-cycle-handoff.md`.
+
+---
+
+## v0.117.1 frontmatter sentinel placement fix + Today rename PATCH CLOSED 2026-06-15
+
+**Workshop:** 0.117.0 → 0.117.1
+**Blueprints:** to-do 0.5.0 → **0.5.1**; project 1.22.1 UNCHANGED
+
+**Headline:** Post-v0.117.0 deploy: user's freshly-created daily had broken Properties — the YAML frontmatter block contained an HTML-comment sentinel (e.g., `<!-- recurring-materialized-2026-06-15 -->`) INSIDE the closing `---`, corrupting the YAML parse. Root cause: `writeSentinel` in both `ToDoDailyCarryover` + `ToDoDailyRecurring` was inserting the sentinel BEFORE the closing `---`. Fixed to insert IMMEDIATELY AFTER the closing `---`. Migration helper `_healMisplacedSentinels` added to `applyToDoBlueprintMigration` to relocate misplaced sentinels on existing notes. Also in this PATCH: "Today's Capture" label renamed to "Today" per user request; cosmetic rewrite of `SectionLabel(text: "Today's Capture")` → `SectionLabel(text: "Today")` for already-shipped notes.
+
+**Commits:** `a810f99` (fix commit, direct-push); `87d7e89` (seed rebaseline to v0.117.1). Tag + tap PR auto-merged.
+
+---
+
+## v0.117.2 dialog SectionLabel anchor + orphan H2 cleanup PATCH CLOSED 2026-06-15
+
+**Workshop:** 0.117.1 → 0.117.2
+**Blueprints:** to-do 0.5.1 → **0.5.2**; project 1.22.1 UNCHANGED
+
+**Headline:** Post-v0.117.1 deploy: the +New Task dialog was creating an orphan `## Today` H2 at EOF on the daily. Root cause: `ToDoCreateTask._insertLineUnderSection` was anchored on the legacy `## Today` H2, which the v0.5.0 template no longer ships (it ships a `SectionLabel("Today")` dataviewjs block instead). When the H2 was not found, the fallback created one at EOF. Fix: anchor on the SectionLabel dataviewjs block (matched by `class: "SectionLabel"` + `text: "Today"|"Owned Tasks"|"Recurring Tasks"`). Three-tier fallback: SectionLabel block → legacy H2 (transition window) → EOF without creating any new heading. Also added a cleanup pass in `applyToDoBlueprintMigration` to strip orphan `## Today's Capture` / `## Today` H2 lines from existing daily notes (bullets underneath preserved as free-form lines under the existing SectionLabel block at top).
+
+**Commits:** `eda9d8f` (fix commit, direct-push); `b2f7251` (seed rebaseline to v0.117.2). Tag + tap PR auto-merged.
+
+---
+
+## v0.117.3 defensive project-name normalization in ToDoDailyProjectGroups PATCH CLOSED 2026-06-15
+
+**Workshop:** 0.117.2 → 0.117.3
+**Blueprints:** to-do 0.5.2 → **0.5.3**; project 1.22.1 UNCHANGED
+
+**Headline:** Meeting-task-assigned-to-project not appearing in the daily's project section (`OPEN PROJECT TASKS > SAUCE`), even though the same meeting's task appeared in `Sauce To-Do.md`'s `From Meetings` aggregator. Both surfaces call the same `ToDoDailyProjectGroups._collectMeetingTasksForProject(dv, "Sauce")`. Root cause: the `where`-clause used `String(m.project)` which is brittle across Dataview Link object representations — `Link.toString()` returns `"Sauce"` in some versions and `"[[Sauce]]"` in others; a single `String()` throw inside the `where` callback blanked the ENTIRE meetings array silently.
+
+**Fix:** NEW `ToDoDailyProjectGroups._normalizeProjectName(value)` static method handles all forms — plain strings, `"[[Name]]"` wikilink strings, `"[[path|display]]"` pipe form, Dataview Link objects with `.path` or `.display`, arrays of Link, nulls. `_collectMeetingTasksForProject` now iterates meetings WITHOUT a `where`-clause and applies the match per-meeting inside `try/catch` so one bad meeting cannot blank the rest. `_renderProjectTodoScope` also uses the same normalizer for `cur.project`. Tested headlessly with 6 input shapes.
+
+**Commits:** `1ef07ab` (fix commit, direct-push); `bc50681` (seed rebaseline to v0.117.3); `3ecb96a` (handoff doc update). Tag `v0.117.3` pushed; brew tap auto-merged. All 3 consumer vaults deployed clean.
+
+---
+
+## v0.117.4 to-do regression-net + cycle-close backfill PATCH CLOSED 2026-06-15
+
+**Workshop:** 0.117.3 → 0.117.4
+**Blueprints:** to-do 0.5.3 UNCHANGED; project 1.22.1 UNCHANGED
+
+**Headline:** Pure test-debt + documentation hardening for code already shipped in v0.116.0 → v0.117.3. No new consumer behavior; no new migrations fire at install time. Closes the regression net carried forward from the entire to-do expansion arc.
+
+**Deliverables:**
+- **Harness wiring (Part 1):** `run-todo-carryover.js`, `run-todo-dialog.js`, `run-todo-materialize.js` added to the `release:preflight` chain (`package.json`); 3 new `test:todo-*` npm scripts for parity; untracked `run-helper-cases.js.bak` (1.2 MB) deleted. Harness count: **29 → 32**.
+- **Behavioral coverage (Part 2):** `run-todo-materialize.js` extended with `_normalizeProjectName` (7 input shapes including `null`), `_collectMeetingTasksForProject` per-meeting try/catch resilience, and `ToDoDailyUnassignedMeetings.render` cases. `run-todo-dialog.js` extended with `ToDoCreateTaskInit` initialization + SectionLabel-anchor insertion (3-tier fallback) + pure migration sub-function coverage (`_rewriteH2ToSectionLabel`, `_reshapeToV040`, `_healMisplacedSentinels`).
+- **HC-V01174 source contracts (Part 3):** ~15-20 new regex/source contracts in `run-helper-cases.js` — to-do manifest `version: "0.5.3"`, 11-class `customjs_classes` catalogue, `depends_on: project >=1.21.0`, SectionLabel presence in templates, retirement of load-bearing H2s.
+- **HC-V01174-SEED-MIGRATE-* end-to-end (Part 4):** pre-migration anchors added to `platform/test/seed-vault/` (v0.3.3 daily, v0.4.0-missing-SectionLabel daily, misplaced-sentinel daily, orphan-H2 daily, project-todo with H2); ~14 sub-asserts covering reshape / sentinel relocation / H2 cleanup / user-line preservation / backup / idempotency.
+- **Cycle-close doc backfill (Part 5, this section):** `Docs/cycle-history.md` (this file), `Docs/agent-guides/cycle-status.md`, `Docs/install.md`, `Docs/agent-guides/build-test-verify.md` harness count 24 → 32.
+- **Version bump (Part 6):** `platform/manifest.json` + `package.json` workshop_version 0.117.3 → 0.117.4; `ranch/platform-subscription.json` lockstep; HC-VERSION pin sweep; `scheduled-job-contract.json` `contract_version` UNCHANGED (cowork untouched, landmine #20 does not fire).
+
+**Harnesses:** preflight chain now **32 / 0** after Parts 1–4; `version-sync ok: 0.117.4`. Workshop dogfood exit 0. All 3 consumer vaults redeploy as a clean no-op (no migration re-runs; to-do pin unchanged at 0.5.3).
+
+**Commits:** `74c71e1` (design doc) → `75c5984` (plan doc) → `79bb8ef` (Task 1: wire 3 harnesses + rm bak).
+
+See `Docs/plans/2026-06-15-v0.117.4-todo-regression-net-design.md` + `Docs/plans/2026-06-15-v0.117.4-todo-regression-net-plan.md`.
+
