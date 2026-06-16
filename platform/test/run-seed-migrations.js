@@ -1403,6 +1403,115 @@ async function runFinanceMigrateFamily() {
     }
 }
 
+// ===== HC-V01190-EC-SEED-MIGRATE-* — entity-create mechanism installer migrations =====
+//
+// Direct-invocation pattern (mirrors HC-V01190-PROJ + HC-V01190-FIN). See impl-3 design.
+// 2 entity-create apply* fns covered via the Legacy EntityCreate fixture at
+// platform/test/seed-vault/spice/entity-create-legacy/.
+async function runEntityCreateMigrateFamily() {
+    const install = require("../install.js");
+
+    // applyNewEntityButtons + injectAccentButtonBlock construct `new Notice(...)`
+    // on validation warnings (e.g., missing inside-block sentinel). The headless
+    // harness has no Obsidian Notice global; shim it. Matches run-install.js's
+    // approach. Restored on exit.
+    const prevNotice = global.Notice;
+    global.Notice = global.Notice || class Notice { constructor(_msg) { /* suppress */ } };
+
+    const ecRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-ec-migrate-"));
+    try {
+        const LEGACY_EC_DIR = "spice/entity-create-legacy";
+        const SEED_LEGACY = path.join(SEED_DIR, LEGACY_EC_DIR);
+
+        // Copy fixture into the tmp vault at the same path — the guard migration
+        // walks spice/ recursively so it'll find them. Also pre-create ranch/
+        // so the registry write has a stable parent.
+        helpers.copyDir(SEED_LEGACY, path.join(ecRoot, LEGACY_EC_DIR));
+        fs.mkdirSync(path.join(ecRoot, "ranch"), { recursive: true });
+
+        const adapter = makeFsAdapter(ecRoot);
+        const tp = { app: { vault: { adapter } } };
+        const git = { commit: "test", tag: "test", dirty: false };
+        const variables = { views_path: "ranch/views", vault_identity_tag: "seed-test-vault" };
+        const history = [];
+
+        // Synthetic manifest for applyNewEntityButtons. Shape matches
+        // resolveEntityCreateEntry's required-key checks: id (regex), label,
+        // prompts: [] (array), destination.{folder_prefix, filename_prefix}
+        // (strings), frontmatter_template: {} (object). render_in.kind === "hub"
+        // with target_path drives injectAccentButtonBlock's verify-only path —
+        // since the Legacy Hub fixture has NO sentinel comment inside its
+        // dataviewjs fence, that produces a "missing_skip_inject" warning event
+        // (not an error). Registry write still happens.
+        const manifest = {
+            name: "legacy-fixture-blueprint",
+            version: "0.1.0",
+            new_entity_buttons: [
+                {
+                    id: "legacy-doc",
+                    label: "New Legacy Doc",
+                    prompts: [],
+                    destination: {
+                        folder_prefix: "spice/entity-create-legacy/docs",
+                        filename_prefix: "Legacy-Doc-",
+                    },
+                    frontmatter_template: { type: "legacy-doc", title: "{{title}}" },
+                    render_in: { kind: "hub", target_path: "spice/entity-create-legacy/Legacy Hub.md" },
+                },
+                {
+                    id: "legacy-detail-create",
+                    label: "New Legacy Detail",
+                    prompts: [],
+                    destination: {
+                        folder_prefix: "spice/entity-create-legacy/details",
+                        filename_prefix: "Legacy-Detail-",
+                    },
+                    frontmatter_template: { type: "legacy-detail", title: "{{title}}" },
+                },
+            ],
+        };
+
+        // Snapshot Already Guarded.md BEFORE pass 1 (for B5 byte-identity check —
+        // the guard migration should leave already-guarded files alone).
+        const alreadyGuardedBefore = fs.readFileSync(
+            path.join(ecRoot, LEGACY_EC_DIR, "Already Guarded.md"), "utf8");
+
+        // Pass 1: invoke both migrations.
+        await install.applyNewEntityButtons(tp, manifest, variables, history, git);
+        await install.applyEntityCreateGuardMigration(tp, manifest, variables, history, git);
+
+        // ===== Asserts A1..A5, B1..B5, D1..D2 inline below =====
+        // (sub-families appended in subsequent commits)
+
+        // Snapshot for idempotency (C family) — AFTER pass 1, BEFORE pass 2.
+        const ecHubAfterPass1 = fs.readFileSync(
+            path.join(ecRoot, LEGACY_EC_DIR, "Legacy Hub.md"), "utf8");
+        const ecRegistryAfterPass1 = JSON.parse(fs.readFileSync(
+            path.join(ecRoot, "ranch/entity-create-registry.json"), "utf8"));
+        const historyLenAfterPass1 = history.length;
+
+        // Pass 2: invoke again for idempotency.
+        await install.applyNewEntityButtons(tp, manifest, variables, history, git);
+        await install.applyEntityCreateGuardMigration(tp, manifest, variables, history, git);
+
+        // ===== Asserts C1..C3 inline below =====
+        // (idempotency family appended in a subsequent commit)
+
+        // Suppress unused-var warnings until assert blocks are appended.
+        void alreadyGuardedBefore;
+        void ecHubAfterPass1;
+        void ecRegistryAfterPass1;
+        void historyLenAfterPass1;
+    } finally {
+        if (KEEP) {
+            console.log(`  KEEP_SEED_VAULT=1: ${ecRoot}`);
+        } else {
+            try { fs.rmSync(ecRoot, { recursive: true, force: true }); } catch (e) {}
+        }
+        global.Notice = prevNotice;
+    }
+}
+
 // The MIGRATE families are async (the migrations are async). Run them to
 // completion, then emit the final tally + exit code so all asserts are counted.
 runMigrateFamily()
@@ -1422,6 +1531,12 @@ runMigrateFamily()
         console.log(`  FAIL HC-V01190-FIN-SEED-MIGRATE-FAMILY threw — ${e && e.message}`);
         fail++;
         failures.push("HC-V01190-FIN-SEED-MIGRATE-FAMILY");
+    })
+    .then(() => runEntityCreateMigrateFamily())
+    .catch((e) => {
+        console.log(`  FAIL HC-V01190-EC-SEED-MIGRATE-FAMILY threw — ${e && e.message}`);
+        fail++;
+        failures.push("HC-V01190-EC-SEED-MIGRATE-FAMILY");
     })
     .finally(() => {
         console.log("");
