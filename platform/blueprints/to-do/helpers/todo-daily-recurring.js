@@ -152,8 +152,18 @@ class ToDoDailyRecurring {
         let inRecurring = false;
         const entries = [];
         for (const line of lines) {
-            if (/^## Recurring Tasks/.test(line)) { inRecurring = true; continue; }
-            if (inRecurring && /^## /.test(line)) { inRecurring = false; continue; }
+            // Section start: legacy `## Recurring Tasks` H2 OR the v0.117.0 SectionLabel
+            // block (the SectionLabel migration replaced the H2; parseRegistry was the
+            // one read-path that wasn't updated — recurring tasks stopped materializing).
+            if (/^## Recurring Tasks/.test(line) ||
+                (/SectionLabel/.test(line) && /text:\s*["']Recurring Tasks["']/.test(line))) {
+                inRecurring = true; continue;
+            }
+            // Section end: next `## ` H2 OR the audit SectionLabel ("Last 7 days …").
+            if (inRecurring && (/^## /.test(line) ||
+                (/SectionLabel/.test(line) && /text:\s*["']Last 7 days/.test(line)))) {
+                inRecurring = false; continue;
+            }
             if (!inRecurring) continue;
             const entry = ToDoDailyRecurring.parseRegistryLine(line);
             if (entry) entries.push(entry);
