@@ -333,387 +333,6 @@
     },
     {
       "kind": "blueprint",
-      "name": "project",
-      "current_version": "1.22.2",
-      "axes": {
-        "customjs_behavioral": {
-          "score": 0.21052631578947367,
-          "covered": 4,
-          "total": 19,
-          "methods": [
-            {
-              "cls": "ProjectNavButtons",
-              "method": "detectContext",
-              "covered": false,
-              "hits": 0
-            },
-            {
-              "cls": "ProjectNavButtons",
-              "method": "renderTaskNoteTiles",
-              "covered": false,
-              "hits": 0
-            },
-            {
-              "cls": "ProjectNavButtons",
-              "method": "render",
-              "covered": false,
-              "hits": 0
-            },
-            {
-              "cls": "ProjectWorkstreams",
-              "method": "render",
-              "covered": false,
-              "hits": 0
-            },
-            {
-              "cls": "ProjectWorkstreamManager",
-              "method": "render",
-              "covered": false,
-              "hits": 0
-            },
-            {
-              "cls": "ProjectsHubCards",
-              "method": "render",
-              "covered": false,
-              "hits": 0
-            },
-            {
-              "cls": "ProjectNotesCards",
-              "method": "render",
-              "covered": false,
-              "hits": 0
-            },
-            {
-              "cls": "ProjectReferencedByCards",
-              "method": "render",
-              "covered": false,
-              "hits": 0
-            },
-            {
-              "cls": "ProjectTaskCreateListener",
-              "method": "init",
-              "covered": true,
-              "hits": 5
-            },
-            {
-              "cls": "ProjectTaskCreateListenerInit",
-              "method": "invoke",
-              "covered": false,
-              "hits": 0
-            },
-            {
-              "cls": "ProjectDocsCards",
-              "method": "render",
-              "covered": false,
-              "hits": 0
-            },
-            {
-              "cls": "ProjectStatusWidget",
-              "method": "render",
-              "covered": false,
-              "hits": 0
-            },
-            {
-              "cls": "ProjectDocsSections",
-              "method": "render",
-              "covered": false,
-              "hits": 0
-            },
-            {
-              "cls": "ProjectMeetingsPanel",
-              "method": "render",
-              "covered": false,
-              "hits": 0
-            },
-            {
-              "cls": "Breadcrumb",
-              "method": "render",
-              "covered": false,
-              "hits": 0
-            },
-            {
-              "cls": "ProjectDocsIndex",
-              "method": "render",
-              "covered": false,
-              "hits": 0
-            },
-            {
-              "cls": "SectionHub",
-              "method": "render",
-              "covered": true,
-              "hits": 1
-            },
-            {
-              "cls": "DocSearch",
-              "method": "render",
-              "covered": true,
-              "hits": 7
-            },
-            {
-              "cls": "DocSearch",
-              "method": "matches",
-              "covered": true,
-              "hits": 9
-            }
-          ],
-          "suggested_archetype": "behavioral-runner",
-          "suggested_target_file": "platform/test/run-project-projectnavbuttons.js"
-        },
-        "installer_migration": {
-          "score": 0,
-          "covered": 0,
-          "total": 5,
-          "migrations": [
-            {
-              "fn": "applyProjectSectionsMigration",
-              "covered": false
-            },
-            {
-              "fn": "applyProjectSectionsHubMigration",
-              "covered": false
-            },
-            {
-              "fn": "applyProjectSectionsCloseRepair",
-              "covered": false
-            },
-            {
-              "fn": "applyEmptyProjectWikilinkRepair",
-              "covered": false
-            },
-            {
-              "fn": "applyProjectTodoBackfill",
-              "covered": false
-            }
-          ],
-          "suggested_archetype": "seed-migrate",
-          "suggested_target_file": "platform/test/run-seed-migrations.js"
-        },
-        "manifest_schema": {
-          "score": 1,
-          "manifest_ratio": 1,
-          "schema_ratio": 1,
-          "manifest_fields": [
-            {
-              "field": "name",
-              "asserted": true
-            },
-            {
-              "field": "version",
-              "asserted": true
-            },
-            {
-              "field": "customjs_classes",
-              "asserted": true
-            },
-            {
-              "field": "files",
-              "asserted": true
-            },
-            {
-              "field": "rule_fragments",
-              "asserted": true
-            },
-            {
-              "field": "depends_on",
-              "asserted": true
-            }
-          ],
-          "schema_owned": 0,
-          "suggested_archetype": "hc-family",
-          "suggested_target_file": "platform/test/run-helper-cases.js"
-        },
-        "template_lockstep": {
-          "score": 1,
-          "covered": 15,
-          "total": 15,
-          "items": [
-            {
-              "kind": "template",
-              "name": "Project.md",
-              "covered": true
-            },
-            {
-              "kind": "template",
-              "name": "Project Map.md",
-              "covered": true
-            },
-            {
-              "kind": "template",
-              "name": "Project Board.md",
-              "covered": true
-            },
-            {
-              "kind": "template",
-              "name": "Kanban Card.md",
-              "covered": true
-            },
-            {
-              "kind": "template",
-              "name": "Task Note.md",
-              "covered": true
-            },
-            {
-              "kind": "template",
-              "name": "Task Board.md",
-              "covered": true
-            },
-            {
-              "kind": "template",
-              "name": "Task Board Card.md",
-              "covered": true
-            },
-            {
-              "kind": "template",
-              "name": "Docs Hub.md",
-              "covered": true
-            },
-            {
-              "kind": "template",
-              "name": "Doc Note.md",
-              "covered": true
-            },
-            {
-              "kind": "template",
-              "name": "Section Hub.md",
-              "covered": true
-            },
-            {
-              "kind": "rule_fragment",
-              "name": "project",
-              "covered": true
-            },
-            {
-              "kind": "rule_fragment",
-              "name": "docs-hub",
-              "covered": true
-            },
-            {
-              "kind": "rule_fragment",
-              "name": "doc-note",
-              "covered": true
-            },
-            {
-              "kind": "rule_fragment",
-              "name": "section-hub",
-              "covered": true
-            },
-            {
-              "kind": "rule_fragment",
-              "name": "project-todo",
-              "covered": true
-            }
-          ],
-          "suggested_archetype": "template-assert",
-          "suggested_target_file": "platform/test/run-helper-cases.js"
-        },
-        "widget_render": {
-          "score": 0.21428571428571427,
-          "covered": 3,
-          "total": 14,
-          "widgets": [
-            {
-              "widget": "ProjectNavButtons",
-              "covered": false
-            },
-            {
-              "widget": "ProjectWorkstreams",
-              "covered": false
-            },
-            {
-              "widget": "ProjectWorkstreamManager",
-              "covered": false
-            },
-            {
-              "widget": "ProjectsHubCards",
-              "covered": false
-            },
-            {
-              "widget": "ProjectNotesCards",
-              "covered": false
-            },
-            {
-              "widget": "ProjectReferencedByCards",
-              "covered": false
-            },
-            {
-              "widget": "ProjectDocsCards",
-              "covered": true
-            },
-            {
-              "widget": "ProjectStatusWidget",
-              "covered": false
-            },
-            {
-              "widget": "ProjectDocsSections",
-              "covered": true
-            },
-            {
-              "widget": "ProjectMeetingsPanel",
-              "covered": false
-            },
-            {
-              "widget": "Breadcrumb",
-              "covered": false
-            },
-            {
-              "widget": "ProjectDocsIndex",
-              "covered": true
-            },
-            {
-              "widget": "SectionHub",
-              "covered": false
-            },
-            {
-              "widget": "DocSearch",
-              "covered": false
-            }
-          ],
-          "suggested_archetype": "renderer-extend",
-          "suggested_target_file": "platform/test/run-renderer.js"
-        },
-        "integration_smoke": {
-          "score": 1,
-          "happy_path": true,
-          "failure_mode": true,
-          "suggested_archetype": "smoke-extend",
-          "suggested_target_file": "platform/test/run-integration-smoke.js"
-        }
-      },
-      "composite_score": 0.5708020050125313,
-      "blast_radius": "high",
-      "blast_radius_rationale": "Docs hub + sections + section hubs + search arc; load-bearing.",
-      "recent_incidents_30d": 33,
-      "priority_score": 2,
-      "top_gap": {
-        "axis": "installer_migration",
-        "score": 2,
-        "archetype": "seed-migrate",
-        "target_file": "platform/test/run-seed-migrations.js"
-      },
-      "qualitative": {
-        "validates_scores": "no",
-        "false_positives": [
-          {
-            "axis": "installer_migration",
-            "note": "Source-checks (HC-V01020-PSM-1, HC-V01030-PSHM-1) verify function declaration but not execution; all 5 project migrations are structurally untested"
-          }
-        ],
-        "false_negatives": [
-          {
-            "axis": "customjs_behavioral",
-            "note": "12 classes lack behavioral asserts: ProjectNavButtons, ProjectWorkstreams, ProjectsHubCards, ProjectNotesCards, ProjectReferencedByCards, ProjectTaskCreateListener, ProjectStatusWidget, ProjectDocsSections, ProjectDocsCards, DocSearch, SectionHub, ProjectWorkstreamManager"
-          },
-          {
-            "axis": "widget_render",
-            "note": "10 widget classes with render() methods lack run-renderer.js fixtures: ProjectNavButtons, ProjectWorkstreams, ProjectsHubCards, ProjectDocsCards, ProjectDocsSections, ProjectDocsIndex, SectionHub, DocSearch, ProjectStatusWidget, ProjectWorkstreamManager"
-          }
-        ],
-        "primary_user_flow": "Create a new project via entity-create button -> scaffold project folder + docs/knowledge + docs/notes section hubs -> add doc-notes to sections with Breadcrumb navigation + DocSearch filter.",
-        "qualitative_recommendation": "Frontloaded on manifest + template lockstep (both 1.0) but severely under-covered on behavioral execution and migrations. The 5 project-specific installer migrations receive only static source checks, not functional validation against vault adapters. Impl-1 candidate: target installer_migration (0/5) with HC-V0XYZ-PROJ-SEED-MIGRATE families for the three most-recent migrations (applyProjectSectionsMigration, applyProjectSectionsHubMigration, applyProjectTodoBackfill)."
-      }
-    },
-    {
-      "kind": "blueprint",
       "name": "finance",
       "current_version": "0.9.2",
       "axes": {
@@ -1494,6 +1113,208 @@
     },
     {
       "kind": "blueprint",
+      "name": "scratch",
+      "current_version": "0.5.2",
+      "axes": {
+        "customjs_behavioral": {
+          "score": 0.625,
+          "covered": 5,
+          "total": 8,
+          "methods": [
+            {
+              "cls": "ScratchHubCards",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "ScratchDayList",
+              "method": "render",
+              "covered": true,
+              "hits": 1
+            },
+            {
+              "cls": "ScratchDayActions",
+              "method": "render",
+              "covered": true,
+              "hits": 1
+            },
+            {
+              "cls": "ScratchLeafActions",
+              "method": "render",
+              "covered": true,
+              "hits": 1
+            },
+            {
+              "cls": "ScratchHubActions",
+              "method": "render",
+              "covered": true,
+              "hits": 1
+            },
+            {
+              "cls": "ScratchDayMigrate",
+              "method": "migrate",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "ScratchDayMigrate",
+              "method": "migrateAll",
+              "covered": true,
+              "hits": 2
+            },
+            {
+              "cls": "ScratchDayMigrateInit",
+              "method": "invoke",
+              "covered": false,
+              "hits": 0
+            }
+          ],
+          "suggested_archetype": "behavioral-runner",
+          "suggested_target_file": "platform/test/run-scratch-scratchhubcards.js"
+        },
+        "installer_migration": {
+          "score": null,
+          "reason": "no install-time migrations attributed",
+          "migrations": [],
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "manifest_schema": {
+          "score": 0.9166666666666667,
+          "manifest_ratio": 0.8333333333333334,
+          "schema_ratio": 1,
+          "manifest_fields": [
+            {
+              "field": "name",
+              "asserted": true
+            },
+            {
+              "field": "version",
+              "asserted": true
+            },
+            {
+              "field": "customjs_classes",
+              "asserted": true
+            },
+            {
+              "field": "files",
+              "asserted": true
+            },
+            {
+              "field": "rule_fragments",
+              "asserted": true
+            },
+            {
+              "field": "depends_on",
+              "asserted": false
+            }
+          ],
+          "schema_owned": 0,
+          "suggested_archetype": "hc-family",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "template_lockstep": {
+          "score": 1,
+          "covered": 4,
+          "total": 4,
+          "items": [
+            {
+              "kind": "template",
+              "name": "Scratch.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Scratch Day Hub.md",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "scratch",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "scratch-day-hub",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "template-assert",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "widget_render": {
+          "score": 0,
+          "covered": 0,
+          "total": 5,
+          "widgets": [
+            {
+              "widget": "ScratchHubCards",
+              "covered": false
+            },
+            {
+              "widget": "ScratchDayList",
+              "covered": false
+            },
+            {
+              "widget": "ScratchDayActions",
+              "covered": false
+            },
+            {
+              "widget": "ScratchLeafActions",
+              "covered": false
+            },
+            {
+              "widget": "ScratchHubActions",
+              "covered": false
+            }
+          ],
+          "suggested_archetype": "renderer-extend",
+          "suggested_target_file": "platform/test/run-renderer.js"
+        },
+        "integration_smoke": {
+          "score": 1,
+          "happy_path": true,
+          "failure_mode": true,
+          "suggested_archetype": "smoke-extend",
+          "suggested_target_file": "platform/test/run-integration-smoke.js"
+        }
+      },
+      "composite_score": 0.7083333333333334,
+      "blast_radius": "high",
+      "blast_radius_rationale": "Daily hits; carries todo capture surface.",
+      "recent_incidents_30d": 6,
+      "priority_score": 1.5,
+      "top_gap": {
+        "axis": "widget_render",
+        "score": 1.5,
+        "archetype": "renderer-extend",
+        "target_file": "platform/test/run-renderer.js"
+      },
+      "qualitative": {
+        "validates_scores": "no",
+        "false_positives": [
+          {
+            "axis": "customjs_behavioral",
+            "note": "run-scratch.js tests private _coerceDay and _migrateFrontmatter via HC-V0841-* families; deterministic scorer counts only public methods. Public render() on 5 of 7 classes never harnessed."
+          },
+          {
+            "axis": "widget_render",
+            "note": "run-renderer.js covers R-SCRATCH-DAYHUB (nav-button dispatch) but does NOT render ScratchDayList or ScratchHubCards widgets."
+          }
+        ],
+        "false_negatives": [
+          {
+            "axis": "customjs_behavioral",
+            "note": "ScratchDayActions.render(), ScratchLeafActions.render(), ScratchHubActions.render() have zero behavioral harness; ScratchDayList.render() + _extractPreviewFromBody + _pollForDayArg untested under stub Obsidian app"
+          }
+        ],
+        "primary_user_flow": "User opens Scratch nav-button -> day-hub created or opened -> ScratchDayActions renders '+ New Scratch' and 'Hub' buttons -> entity-create collects title -> new Scratch leaf with ScratchLeafActions buttons.",
+        "qualitative_recommendation": "Test debt is material despite high template/integration scores. Recommend: (1) add template-assert HC family for 3 template files; (2) extend run-renderer.js with ScratchDayList + ScratchHubCards fixtures; (3) add behavioral-runner for ScratchDayActions + ScratchLeafActions render() to cover vault read/Notice/workspace orchestration."
+      }
+    },
+    {
+      "kind": "blueprint",
       "name": "to-do",
       "current_version": "0.7.0",
       "axes": {
@@ -1735,8 +1556,8 @@
           "suggested_target_file": "platform/test/run-to-do-todohubactions.js"
         },
         "installer_migration": {
-          "score": 0.3333333333333333,
-          "covered": 2,
+          "score": 0.5,
+          "covered": 3,
           "total": 6,
           "migrations": [
             {
@@ -1757,7 +1578,7 @@
             },
             {
               "fn": "applyProjectTodoBackfill",
-              "covered": false
+              "covered": true
             },
             {
               "fn": "applyPreInstall",
@@ -1880,7 +1701,7 @@
           "suggested_target_file": "platform/test/run-integration-smoke.js"
         }
       },
-      "composite_score": 0.6915204678362573,
+      "composite_score": 0.7192982456140351,
       "blast_radius": "high",
       "blast_radius_rationale": "Multi-cycle storm v0.116-v0.118; highest recent-incident rate.",
       "recent_incidents_30d": 18,
@@ -1915,76 +1736,164 @@
     },
     {
       "kind": "blueprint",
-      "name": "scratch",
-      "current_version": "0.5.2",
+      "name": "project",
+      "current_version": "1.22.2",
       "axes": {
         "customjs_behavioral": {
-          "score": 0.625,
-          "covered": 5,
-          "total": 8,
+          "score": 0.3157894736842105,
+          "covered": 6,
+          "total": 19,
           "methods": [
             {
-              "cls": "ScratchHubCards",
+              "cls": "ProjectNavButtons",
+              "method": "detectContext",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "ProjectNavButtons",
+              "method": "renderTaskNoteTiles",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "ProjectNavButtons",
+              "method": "render",
+              "covered": true,
+              "hits": 1
+            },
+            {
+              "cls": "ProjectWorkstreams",
               "method": "render",
               "covered": false,
               "hits": 0
             },
             {
-              "cls": "ScratchDayList",
+              "cls": "ProjectWorkstreamManager",
               "method": "render",
-              "covered": true,
-              "hits": 1
-            },
-            {
-              "cls": "ScratchDayActions",
-              "method": "render",
-              "covered": true,
-              "hits": 1
-            },
-            {
-              "cls": "ScratchLeafActions",
-              "method": "render",
-              "covered": true,
-              "hits": 1
-            },
-            {
-              "cls": "ScratchHubActions",
-              "method": "render",
-              "covered": true,
-              "hits": 1
-            },
-            {
-              "cls": "ScratchDayMigrate",
-              "method": "migrate",
               "covered": false,
               "hits": 0
             },
             {
-              "cls": "ScratchDayMigrate",
-              "method": "migrateAll",
-              "covered": true,
-              "hits": 2
+              "cls": "ProjectsHubCards",
+              "method": "render",
+              "covered": false,
+              "hits": 0
             },
             {
-              "cls": "ScratchDayMigrateInit",
+              "cls": "ProjectNotesCards",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "ProjectReferencedByCards",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "ProjectTaskCreateListener",
+              "method": "init",
+              "covered": true,
+              "hits": 5
+            },
+            {
+              "cls": "ProjectTaskCreateListenerInit",
               "method": "invoke",
               "covered": false,
               "hits": 0
+            },
+            {
+              "cls": "ProjectDocsCards",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "ProjectStatusWidget",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "ProjectDocsSections",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "ProjectMeetingsPanel",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "Breadcrumb",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "ProjectDocsIndex",
+              "method": "render",
+              "covered": true,
+              "hits": 1
+            },
+            {
+              "cls": "SectionHub",
+              "method": "render",
+              "covered": true,
+              "hits": 1
+            },
+            {
+              "cls": "DocSearch",
+              "method": "render",
+              "covered": true,
+              "hits": 7
+            },
+            {
+              "cls": "DocSearch",
+              "method": "matches",
+              "covered": true,
+              "hits": 9
             }
           ],
           "suggested_archetype": "behavioral-runner",
-          "suggested_target_file": "platform/test/run-scratch-scratchhubcards.js"
+          "suggested_target_file": "platform/test/run-project-projectnavbuttons.js"
         },
         "installer_migration": {
-          "score": null,
-          "reason": "no install-time migrations attributed",
-          "migrations": [],
-          "suggested_archetype": null,
-          "suggested_target_file": null
+          "score": 1,
+          "covered": 5,
+          "total": 5,
+          "migrations": [
+            {
+              "fn": "applyProjectSectionsMigration",
+              "covered": true
+            },
+            {
+              "fn": "applyProjectSectionsHubMigration",
+              "covered": true
+            },
+            {
+              "fn": "applyProjectSectionsCloseRepair",
+              "covered": true
+            },
+            {
+              "fn": "applyEmptyProjectWikilinkRepair",
+              "covered": true
+            },
+            {
+              "fn": "applyProjectTodoBackfill",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "seed-migrate",
+          "suggested_target_file": "platform/test/run-seed-migrations.js"
         },
         "manifest_schema": {
-          "score": 0.9166666666666667,
-          "manifest_ratio": 0.8333333333333334,
+          "score": 1,
+          "manifest_ratio": 1,
           "schema_ratio": 1,
           "manifest_fields": [
             {
@@ -2009,7 +1918,7 @@
             },
             {
               "field": "depends_on",
-              "asserted": false
+              "asserted": true
             }
           ],
           "schema_owned": 0,
@@ -2018,27 +1927,82 @@
         },
         "template_lockstep": {
           "score": 1,
-          "covered": 4,
-          "total": 4,
+          "covered": 15,
+          "total": 15,
           "items": [
             {
               "kind": "template",
-              "name": "Scratch.md",
+              "name": "Project.md",
               "covered": true
             },
             {
               "kind": "template",
-              "name": "Scratch Day Hub.md",
+              "name": "Project Map.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Project Board.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Kanban Card.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Task Note.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Task Board.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Task Board Card.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Docs Hub.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Doc Note.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Section Hub.md",
               "covered": true
             },
             {
               "kind": "rule_fragment",
-              "name": "scratch",
+              "name": "project",
               "covered": true
             },
             {
               "kind": "rule_fragment",
-              "name": "scratch-day-hub",
+              "name": "docs-hub",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "doc-note",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "section-hub",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "project-todo",
               "covered": true
             }
           ],
@@ -2046,28 +2010,64 @@
           "suggested_target_file": "platform/test/run-helper-cases.js"
         },
         "widget_render": {
-          "score": 0,
-          "covered": 0,
-          "total": 5,
+          "score": 0.21428571428571427,
+          "covered": 3,
+          "total": 14,
           "widgets": [
             {
-              "widget": "ScratchHubCards",
+              "widget": "ProjectNavButtons",
               "covered": false
             },
             {
-              "widget": "ScratchDayList",
+              "widget": "ProjectWorkstreams",
               "covered": false
             },
             {
-              "widget": "ScratchDayActions",
+              "widget": "ProjectWorkstreamManager",
               "covered": false
             },
             {
-              "widget": "ScratchLeafActions",
+              "widget": "ProjectsHubCards",
               "covered": false
             },
             {
-              "widget": "ScratchHubActions",
+              "widget": "ProjectNotesCards",
+              "covered": false
+            },
+            {
+              "widget": "ProjectReferencedByCards",
+              "covered": false
+            },
+            {
+              "widget": "ProjectDocsCards",
+              "covered": true
+            },
+            {
+              "widget": "ProjectStatusWidget",
+              "covered": false
+            },
+            {
+              "widget": "ProjectDocsSections",
+              "covered": true
+            },
+            {
+              "widget": "ProjectMeetingsPanel",
+              "covered": false
+            },
+            {
+              "widget": "Breadcrumb",
+              "covered": false
+            },
+            {
+              "widget": "ProjectDocsIndex",
+              "covered": true
+            },
+            {
+              "widget": "SectionHub",
+              "covered": false
+            },
+            {
+              "widget": "DocSearch",
               "covered": false
             }
           ],
@@ -2082,37 +2082,37 @@
           "suggested_target_file": "platform/test/run-integration-smoke.js"
         }
       },
-      "composite_score": 0.7083333333333334,
+      "composite_score": 0.7550125313283208,
       "blast_radius": "high",
-      "blast_radius_rationale": "Daily hits; carries todo capture surface.",
-      "recent_incidents_30d": 6,
-      "priority_score": 1.5,
+      "blast_radius_rationale": "Docs hub + sections + section hubs + search arc; load-bearing.",
+      "recent_incidents_30d": 32,
+      "priority_score": 1.368421052631579,
       "top_gap": {
-        "axis": "widget_render",
-        "score": 1.5,
-        "archetype": "renderer-extend",
-        "target_file": "platform/test/run-renderer.js"
+        "axis": "customjs_behavioral",
+        "score": 1.368421052631579,
+        "archetype": "behavioral-runner",
+        "target_file": "platform/test/run-project-projectnavbuttons.js"
       },
       "qualitative": {
         "validates_scores": "no",
         "false_positives": [
           {
-            "axis": "customjs_behavioral",
-            "note": "run-scratch.js tests private _coerceDay and _migrateFrontmatter via HC-V0841-* families; deterministic scorer counts only public methods. Public render() on 5 of 7 classes never harnessed."
-          },
-          {
-            "axis": "widget_render",
-            "note": "run-renderer.js covers R-SCRATCH-DAYHUB (nav-button dispatch) but does NOT render ScratchDayList or ScratchHubCards widgets."
+            "axis": "installer_migration",
+            "note": "Source-checks (HC-V01020-PSM-1, HC-V01030-PSHM-1) verify function declaration but not execution; all 5 project migrations are structurally untested"
           }
         ],
         "false_negatives": [
           {
             "axis": "customjs_behavioral",
-            "note": "ScratchDayActions.render(), ScratchLeafActions.render(), ScratchHubActions.render() have zero behavioral harness; ScratchDayList.render() + _extractPreviewFromBody + _pollForDayArg untested under stub Obsidian app"
+            "note": "12 classes lack behavioral asserts: ProjectNavButtons, ProjectWorkstreams, ProjectsHubCards, ProjectNotesCards, ProjectReferencedByCards, ProjectTaskCreateListener, ProjectStatusWidget, ProjectDocsSections, ProjectDocsCards, DocSearch, SectionHub, ProjectWorkstreamManager"
+          },
+          {
+            "axis": "widget_render",
+            "note": "10 widget classes with render() methods lack run-renderer.js fixtures: ProjectNavButtons, ProjectWorkstreams, ProjectsHubCards, ProjectDocsCards, ProjectDocsSections, ProjectDocsIndex, SectionHub, DocSearch, ProjectStatusWidget, ProjectWorkstreamManager"
           }
         ],
-        "primary_user_flow": "User opens Scratch nav-button -> day-hub created or opened -> ScratchDayActions renders '+ New Scratch' and 'Hub' buttons -> entity-create collects title -> new Scratch leaf with ScratchLeafActions buttons.",
-        "qualitative_recommendation": "Test debt is material despite high template/integration scores. Recommend: (1) add template-assert HC family for 3 template files; (2) extend run-renderer.js with ScratchDayList + ScratchHubCards fixtures; (3) add behavioral-runner for ScratchDayActions + ScratchLeafActions render() to cover vault read/Notice/workspace orchestration."
+        "primary_user_flow": "Create a new project via entity-create button -> scaffold project folder + docs/knowledge + docs/notes section hubs -> add doc-notes to sections with Breadcrumb navigation + DocSearch filter.",
+        "qualitative_recommendation": "Frontloaded on manifest + template lockstep (both 1.0) but severely under-covered on behavioral execution and migrations. The 5 project-specific installer migrations receive only static source checks, not functional validation against vault adapters. Impl-1 candidate: target installer_migration (0/5) with HC-V0XYZ-PROJ-SEED-MIGRATE families for the three most-recent migrations (applyProjectSectionsMigration, applyProjectSectionsHubMigration, applyProjectTodoBackfill)."
       }
     },
     {

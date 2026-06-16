@@ -14,11 +14,11 @@ Coverage matrix for all blueprints + mechanisms scored against the 6-axis rubric
 | Kind | Name | v | CustomJS | Migration | Manifest+Schema | Template | Widget | Smoke | Composite | Blast | Incidents 30d | Priority |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
  | blueprint | cowork | 0.40.2 | 0.00 (0/9) | n/a | 0.83 | 1.00 (26/26) | 0.00 (0/9) | 1.00 | 0.57 | high | 103 | 2.00 | 
- | blueprint | project | 1.22.2 | 0.21 (4/19) | 0.00 (0/5) | 1.00 | 1.00 (15/15) | 0.21 (3/14) | 1.00 | 0.57 | high | 33 | 2.00 | 
  | blueprint | finance | 0.9.2 | 0.42 (19/45) | 0.00 (0/23) | 1.00 | 1.00 (15/15) | 0.38 (10/26) | 1.00 | 0.63 | high | 10 | 2.00 | 
  | mechanism | entity-create | 0.7.2 | 1.00 (2/2) | 0.00 (0/1) | 0.92 | n/a | 1.00 (1/1) | 1.00 | 0.78 | high | 6 | 2.00 | 
- | blueprint | to-do | 0.7.0 | 0.82 (31/38) | 0.33 (2/6) | 1.00 | 1.00 (5/5) | 0.00 (0/7) | 1.00 | 0.69 | high | 18 | 1.50 | 
  | blueprint | scratch | 0.5.2 | 0.63 (5/8) | n/a | 0.92 | 1.00 (4/4) | 0.00 (0/5) | 1.00 | 0.71 | high | 6 | 1.50 | 
+ | blueprint | to-do | 0.7.0 | 0.82 (31/38) | 0.50 (3/6) | 1.00 | 1.00 (5/5) | 0.00 (0/7) | 1.00 | 0.72 | high | 18 | 1.50 | 
+ | blueprint | project | 1.22.2 | 0.32 (6/19) | 1.00 (5/5) | 1.00 | 1.00 (15/15) | 0.21 (3/14) | 1.00 | 0.76 | high | 32 | 1.37 | 
  | blueprint | meetings | 0.8.0 | 1.00 (1/1) | n/a | 0.92 | 1.00 (4/4) | 0.00 (0/1) | 1.00 | 0.78 | high | 4 | 1.35 | 
  | blueprint | people | 0.6.0 | 0.00 (0/2) | n/a | 1.00 | 1.00 (2/2) | 0.00 (0/2) | 1.00 | 0.60 | med | 4 | 1.08 | 
  | mechanism | platform-claude | 0.1.3 | n/a | n/a | 0.75 | n/a | n/a | 0.00 | 0.38 | high | 2 | 1.05 | 
@@ -54,15 +54,6 @@ Coverage matrix for all blueprints + mechanisms scored against the 6-axis rubric
 - False negatives: customjs_behavioral: run-cowork-smoke.js (954 asserts) validates class declarations + manifest contracts + hub-file usage but does not pattern-match grep heuristic; actual render() invocation only at runtime; widget_render: 9 customjs widgets exercised in cowork-smoke via structural asserts; run-renderer.js has no cowork fixtures
 - Top gap: axis=`customjs_behavioral` archetype=`behavioral-runner` target=`platform/test/run-cowork-coworkdailyhubcards.js`
 
-### blueprint/project (v1.22.2)
-- Blast radius: **high** — Docs hub + sections + section hubs + search arc; load-bearing.
-- Composite: **0.57** · Priority: **2.00** · Incidents 30d: 33
-- Primary flow (Axis 6 grounding): Create a new project via entity-create button -> scaffold project folder + docs/knowledge + docs/notes section hubs -> add doc-notes to sections with Breadcrumb navigation + DocSearch filter.
-- Qualitative recommendation: Frontloaded on manifest + template lockstep (both 1.0) but severely under-covered on behavioral execution and migrations. The 5 project-specific installer migrations receive only static source checks, not functional validation against vault adapters. Impl-1 candidate: target installer_migration (0/5) with HC-V0XYZ-PROJ-SEED-MIGRATE families for the three most-recent migrations (applyProjectSectionsMigration, applyProjectSectionsHubMigration, applyProjectTodoBackfill).
-- False positives: installer_migration: Source-checks (HC-V01020-PSM-1, HC-V01030-PSHM-1) verify function declaration but not execution; all 5 project migrations are structurally untested
-- False negatives: customjs_behavioral: 12 classes lack behavioral asserts: ProjectNavButtons, ProjectWorkstreams, ProjectsHubCards, ProjectNotesCards, ProjectReferencedByCards, ProjectTaskCreateListener, ProjectStatusWidget, ProjectDocsSections, ProjectDocsCards, DocSearch, SectionHub, ProjectWorkstreamManager; widget_render: 10 widget classes with render() methods lack run-renderer.js fixtures: ProjectNavButtons, ProjectWorkstreams, ProjectsHubCards, ProjectDocsCards, ProjectDocsSections, ProjectDocsIndex, SectionHub, DocSearch, ProjectStatusWidget, ProjectWorkstreamManager
-- Top gap: axis=`installer_migration` archetype=`seed-migrate` target=`platform/test/run-seed-migrations.js`
-
 ### blueprint/finance (v0.9.2)
 - Blast radius: **high** — v0.108-v0.115 rapid evolution; load-bearing schemas + measured-debt math.
 - Composite: **0.63** · Priority: **2.00** · Incidents 30d: 10
@@ -79,15 +70,6 @@ Coverage matrix for all blueprints + mechanisms scored against the 6-axis rubric
 - False negatives: installer_migration: applyNewEntityButtons + applyEntityCreateGuardMigration untested in seed harness; no HC-V0XYZ-SEED-MIGRATE family covers registry materialization or guard-form rewrite logic; manifest_schema: render_in.kind='nav_buttons' deferred case not explicitly asserted; minor schema coverage gap
 - Top gap: axis=`installer_migration` archetype=`seed-migrate` target=`platform/test/run-seed-migrations.js`
 
-### blueprint/to-do (v0.7.0)
-- Blast radius: **high** — Multi-cycle storm v0.116-v0.118; highest recent-incident rate.
-- Composite: **0.69** · Priority: **1.50** · Incidents 30d: 18
-- Primary flow (Axis 6 grounding): Create daily to-do via nav button -> carryover yesterday's tasks -> view recurring registry materialization -> add/complete tasks via new dialog -> browse all-to-dos aggregator.
-- Qualitative recommendation: Two implementation cycles candidate: (1) HC-V0XYZ-SEED-MIGRATE-PROJECT-TODO family in run-seed-migrations.js extending seed-vault with pre-v0.4.0 project structure; (2) extend run-renderer.js with 7 to-do widget fixtures.
-- False positives: customjs_behavioral: Score 0.800 (28/35) overstates coverage. Five dedicated runners exist but test only 10 of 11 classes (ToDoHubActions, ToDoLeafActions, ToDoAllList, ToDoCreateTaskInit untested).
-- False negatives: installer_migration: applyProjectTodoBackfill (v0.4.0 project-todo backfill) has zero seed-migrate coverage; only applyToDoBlueprintMigration is tested via HC-V01174-MIGRATE-*; widget_render: All 7 render-capable classes (ToDoHubActions, ToDoLeafActions, ToDoAllList, ToDoDailyCarryover, ToDoDailyRecurring, ToDoDailyProjectGroups, ToDoDailyUnassignedMeetings) absent from run-renderer.js. Most critical widget gap for a high-blast-radius blueprint.
-- Top gap: axis=`widget_render` archetype=`renderer-extend` target=`platform/test/run-renderer.js`
-
 ### blueprint/scratch (v0.5.2)
 - Blast radius: **high** — Daily hits; carries todo capture surface.
 - Composite: **0.71** · Priority: **1.50** · Incidents 30d: 6
@@ -96,6 +78,24 @@ Coverage matrix for all blueprints + mechanisms scored against the 6-axis rubric
 - False positives: customjs_behavioral: run-scratch.js tests private _coerceDay and _migrateFrontmatter via HC-V0841-* families; deterministic scorer counts only public methods. Public render() on 5 of 7 classes never harnessed.; widget_render: run-renderer.js covers R-SCRATCH-DAYHUB (nav-button dispatch) but does NOT render ScratchDayList or ScratchHubCards widgets.
 - False negatives: customjs_behavioral: ScratchDayActions.render(), ScratchLeafActions.render(), ScratchHubActions.render() have zero behavioral harness; ScratchDayList.render() + _extractPreviewFromBody + _pollForDayArg untested under stub Obsidian app
 - Top gap: axis=`widget_render` archetype=`renderer-extend` target=`platform/test/run-renderer.js`
+
+### blueprint/to-do (v0.7.0)
+- Blast radius: **high** — Multi-cycle storm v0.116-v0.118; highest recent-incident rate.
+- Composite: **0.72** · Priority: **1.50** · Incidents 30d: 18
+- Primary flow (Axis 6 grounding): Create daily to-do via nav button -> carryover yesterday's tasks -> view recurring registry materialization -> add/complete tasks via new dialog -> browse all-to-dos aggregator.
+- Qualitative recommendation: Two implementation cycles candidate: (1) HC-V0XYZ-SEED-MIGRATE-PROJECT-TODO family in run-seed-migrations.js extending seed-vault with pre-v0.4.0 project structure; (2) extend run-renderer.js with 7 to-do widget fixtures.
+- False positives: customjs_behavioral: Score 0.800 (28/35) overstates coverage. Five dedicated runners exist but test only 10 of 11 classes (ToDoHubActions, ToDoLeafActions, ToDoAllList, ToDoCreateTaskInit untested).
+- False negatives: installer_migration: applyProjectTodoBackfill (v0.4.0 project-todo backfill) has zero seed-migrate coverage; only applyToDoBlueprintMigration is tested via HC-V01174-MIGRATE-*; widget_render: All 7 render-capable classes (ToDoHubActions, ToDoLeafActions, ToDoAllList, ToDoDailyCarryover, ToDoDailyRecurring, ToDoDailyProjectGroups, ToDoDailyUnassignedMeetings) absent from run-renderer.js. Most critical widget gap for a high-blast-radius blueprint.
+- Top gap: axis=`widget_render` archetype=`renderer-extend` target=`platform/test/run-renderer.js`
+
+### blueprint/project (v1.22.2)
+- Blast radius: **high** — Docs hub + sections + section hubs + search arc; load-bearing.
+- Composite: **0.76** · Priority: **1.37** · Incidents 30d: 32
+- Primary flow (Axis 6 grounding): Create a new project via entity-create button -> scaffold project folder + docs/knowledge + docs/notes section hubs -> add doc-notes to sections with Breadcrumb navigation + DocSearch filter.
+- Qualitative recommendation: Frontloaded on manifest + template lockstep (both 1.0) but severely under-covered on behavioral execution and migrations. The 5 project-specific installer migrations receive only static source checks, not functional validation against vault adapters. Impl-1 candidate: target installer_migration (0/5) with HC-V0XYZ-PROJ-SEED-MIGRATE families for the three most-recent migrations (applyProjectSectionsMigration, applyProjectSectionsHubMigration, applyProjectTodoBackfill).
+- False positives: installer_migration: Source-checks (HC-V01020-PSM-1, HC-V01030-PSHM-1) verify function declaration but not execution; all 5 project migrations are structurally untested
+- False negatives: customjs_behavioral: 12 classes lack behavioral asserts: ProjectNavButtons, ProjectWorkstreams, ProjectsHubCards, ProjectNotesCards, ProjectReferencedByCards, ProjectTaskCreateListener, ProjectStatusWidget, ProjectDocsSections, ProjectDocsCards, DocSearch, SectionHub, ProjectWorkstreamManager; widget_render: 10 widget classes with render() methods lack run-renderer.js fixtures: ProjectNavButtons, ProjectWorkstreams, ProjectsHubCards, ProjectDocsCards, ProjectDocsSections, ProjectDocsIndex, SectionHub, DocSearch, ProjectStatusWidget, ProjectWorkstreamManager
+- Top gap: axis=`customjs_behavioral` archetype=`behavioral-runner` target=`platform/test/run-project-projectnavbuttons.js`
 
 ### blueprint/meetings (v0.8.0)
 - Blast radius: **high** — Linked from project + cowork; recent project-link migration.
@@ -300,52 +300,33 @@ Coverage matrix for all blueprints + mechanisms scored against the 6-axis rubric
 | Rank | Surface | Axis | Archetype | Target file | Priority |
 |---|---|---|---|---|---|
 | 1 | blueprint/cowork | customjs_behavioral | behavioral-runner | platform/test/run-cowork-coworkdailyhubcards.js | 2.00 |
-| 2 | blueprint/project | installer_migration | seed-migrate | platform/test/run-seed-migrations.js | 2.00 |
-| 3 | blueprint/finance | installer_migration | seed-migrate | platform/test/run-seed-migrations.js | 2.00 |
-| 4 | mechanism/entity-create | installer_migration | seed-migrate | platform/test/run-seed-migrations.js | 2.00 |
+| 2 | blueprint/finance | installer_migration | seed-migrate | platform/test/run-seed-migrations.js | 2.00 |
+| 3 | mechanism/entity-create | installer_migration | seed-migrate | platform/test/run-seed-migrations.js | 2.00 |
+| 4 | blueprint/scratch | widget_render | renderer-extend | platform/test/run-renderer.js | 1.50 |
 | 5 | blueprint/to-do | widget_render | renderer-extend | platform/test/run-renderer.js | 1.50 |
-| 6 | blueprint/scratch | widget_render | renderer-extend | platform/test/run-renderer.js | 1.50 |
+| 6 | blueprint/project | customjs_behavioral | behavioral-runner | platform/test/run-project-projectnavbuttons.js | 1.37 |
 | 7 | blueprint/meetings | widget_render | renderer-extend | platform/test/run-renderer.js | 1.35 |
 | 8 | blueprint/people | customjs_behavioral | behavioral-runner | platform/test/run-people-peoplehubcards.js | 1.08 |
 | 9 | mechanism/platform-claude | integration_smoke | behavioral-runner | platform/test/run-integration-smoke.js | 1.05 |
 | 10 | blueprint/products | widget_render | renderer-extend | platform/test/run-renderer.js | 0.90 |
 
-## Picks for this arc (manual override after qualitative validation; re-applied post-rebase onto v0.119.0)
+## Picks for this arc (manual override after qualitative validation; updated post-impl-1)
 
-The deterministic scorer's rank-1 (blueprint/cowork customjs_behavioral 0.0) is qualitative-validated rubric noise:
+The deterministic scorer's rank-1 (blueprint/cowork customjs_behavioral 0.0) is qualitative-validated rubric noise. cowork-smoke (954 asserts) validates classes via structural patterns the grep heuristic doesn't match. Rubric heuristic fix queued for v1.1.0 (carry-forward).
 
-- **cowork** has 954 asserts in `run-cowork-smoke.js` validating all 9 customjs classes via structural patterns; the deterministic grep heuristic doesn't recognize the pattern. True coverage is much higher than 0.0 suggests. Rubric heuristic fix queued for v1.1.0 (carry-forward).
+### Status
 
-(Pre-rebase, blueprint/daily was rank-4 — after v0.119.0 added `run-project-render-guards.js` + `run-todo-markdown-render.js` harnesses, daily fell out of the top-10. Architectural-mismatch concern still applies; queue for v0.120.x.)
+- **impl-1**: `blueprint/project` / `installer_migration` / `seed-migrate` — **DONE** (lifted 0.0 → 1.0; composite 0.617 → 0.755; +0.14 — within rounding of the +0.15 design target).
+- **impl-2**: `blueprint/finance` / `installer_migration` / `seed-migrate` (now rank-2 of real gaps). Twenty-three `apply*` migrations untested.
+- **impl-3**: `mechanism/entity-create` / `installer_migration` / `seed-migrate` (rank-3). Two `apply*` migrations untested.
 
-Final picks (all priority 2.00, qualitative-validated as REAL gaps, identical archetype + target file — coherent triple extending the seed migration regression net):
+### Carry-forwards (still deferred to v1.1.0 rubric or v0.120.x cycles)
 
-- **impl-1**: `blueprint/project` / `installer_migration` / `seed-migrate` (rank-2). Five untested `apply*` migrations: `applyProjectSectionsMigration`, `applyProjectSectionsHubMigration`, `applyProjectSectionsCloseRepair`, `applyEmptyProjectWikilinkRepair`, `applyProjectTodoBackfill`. Static source-checks exist but no functional validation against vault adapters.
-- **impl-2**: `blueprint/finance` / `installer_migration` / `seed-migrate` (rank-3). Twenty-three `apply*` migrations covering finance defaults / debts / paychecks / months / budgets scaffolding + healing — zero `HC-V0XYZ-SEED-MIGRATE-*` families.
-- **impl-3**: `mechanism/entity-create` / `installer_migration` / `seed-migrate` (rank-4). Two `apply*` migrations: `applyNewEntityButtons` (registry materialization) + `applyEntityCreateGuardMigration` (vault-wide rewrite). Run on every install; high blast radius; zero seed coverage today.
-
-All three impls target the same file (`platform/test/run-seed-migrations.js`) and the same axis (installer_migration).
-
-### What changed post-rebase onto v0.119.0
-
-- Workshop version 0.118.1 → 0.119.0
-- NEW harness `run-project-render-guards.js` (20 PROJGUARD asserts × 5 widgets × 4 dv variants) — covers Project widget render defenses
-- NEW harness `run-customjs-contract.js` — contract test for customjs classes
-- NEW harness `run-todo-markdown-render.js` — to-do DOM render with markdown-as-HTML support
-- NEW lint script `scripts/lint-display-markers.js` + baseline (wired into preflight)
-- Project blueprint 1.22.1 → 1.22.2 (defensive `dv.current()` guards on 5 helpers)
-- To-do 0.7.0 (new task-create surface)
-- Seed rebaselined to v0.119.0
-- Total harness count: 35 (was 32)
-
-The new project render-guards harness pushed project's widget_render score up, but `installer_migration` remains 0/5 — impl-1 pick still holds. Same for finance (23/23 unchanged) and entity-create (2/2 unchanged).
-
-### Carry-forwards (not addressed in this arc)
-
-- **Rubric heuristic v1.1.0**: teach the scorer to recognize cowork-smoke's structural-assert pattern.
+- **Rubric heuristic v1.1.0**: teach the scorer to recognize cowork-smoke's structural-assert pattern; promote the picks-override block to a sidecar JSON the renderer reads (current manual re-apply on every regen is painful).
 - **Substring-collision false positives** in `scoreIntegrationSmoke`: `daily` collides with multiple test files; `trips` collides with `midday-tripwire`; `teams` collides with cowork MCP variant.
 - **Behavioral runner for daily**: `SpaceDailyDashboard.render()` requires a full dataviewjs stub.
 - **Widget render gap**: 7 to-do + 5 scratch + 1 meetings + 3 products widgets uncovered.
 - **customjs-guard installer migrations**: 2 load-bearing v0.110.x+ migrations only tested at manifest level.
 - **platform-claude integration_smoke**: end-to-end install → materialize → CLAUDE.md flow not exercised in one harness.
-- **regen-coverage-matrix.js qualitative preservation**: re-running the regen script wipes the qualitative notes painfully captured by the 30-agent fan-out. Fix queued: merge existing qualitative from prior matrix.json on re-run.
+- **Project blueprint discovered latent install-order bug** (impl-1 finding): real install order runs `applyProjectSectionsMigration` BEFORE `applyProjectSectionsCloseRepair`, so a project with malformed `-"[[--]]"` YAML close would silently skip `sections[]` registration. Impl-1's test harness uses repair-first order to validate each migration's contract; production order remains untested.
+- **Project widget_render** (0.21, rank-... ): 11 widgets still uncovered. Queue for v0.120.x.
