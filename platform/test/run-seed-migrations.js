@@ -1523,6 +1523,35 @@ async function runEntityCreateMigrateFamily() {
             a5HubVerifyEvent ? `event=${a5HubVerifyEvent.event} action=${a5HubVerifyEvent.action}` : "no verify event found"
         );
 
+        // ===== B: applyEntityCreateGuardMigration =====
+        // Vault-wide .md walk under spice/ rewriting direct-call
+        // customJS.EntityCreate.render(dv,...) → dv.view("ranch/views/customjs-guard", ...).
+        // Idempotent against already-guarded files (regex requires direct-call
+        // shape).
+        const bHubBody = fs.readFileSync(path.join(ecRoot, LEGACY_EC_DIR, "Legacy Hub.md"), "utf8");
+        ok(
+            "HC-V01190-EC-SEED-MIGRATE-B1 Legacy Hub.md no longer has direct customJS.EntityCreate.render call",
+            !/customJS\.EntityCreate\.render\s*\(/.test(bHubBody)
+        );
+        ok(
+            "HC-V01190-EC-SEED-MIGRATE-B2 Legacy Hub.md has guard form dv.view ranch/views/customjs-guard",
+            bHubBody.includes('dv.view("ranch/views/customjs-guard"')
+        );
+        const bDetailBody = fs.readFileSync(path.join(ecRoot, LEGACY_EC_DIR, "Legacy Detail.md"), "utf8");
+        ok(
+            "HC-V01190-EC-SEED-MIGRATE-B3 Legacy Detail.md no longer has direct call (vault-walk reached it)",
+            !/customJS\.EntityCreate\.render\s*\(/.test(bDetailBody)
+        );
+        ok(
+            "HC-V01190-EC-SEED-MIGRATE-B4 Legacy Detail.md has guard form",
+            bDetailBody.includes('dv.view("ranch/views/customjs-guard"')
+        );
+        const bAlreadyGuardedAfter = fs.readFileSync(path.join(ecRoot, LEGACY_EC_DIR, "Already Guarded.md"), "utf8");
+        ok(
+            "HC-V01190-EC-SEED-MIGRATE-B5 Already Guarded.md byte-identical to fixture (idempotent on already-guarded)",
+            bAlreadyGuardedAfter === alreadyGuardedBefore
+        );
+
         // Snapshot for idempotency (C family) — AFTER pass 1, BEFORE pass 2.
         const ecHubAfterPass1 = fs.readFileSync(
             path.join(ecRoot, LEGACY_EC_DIR, "Legacy Hub.md"), "utf8");
@@ -1538,7 +1567,6 @@ async function runEntityCreateMigrateFamily() {
         // (idempotency family appended in a subsequent commit)
 
         // Suppress unused-var warnings until assert blocks are appended.
-        void alreadyGuardedBefore;
         void ecHubAfterPass1;
         void ecRegistryAfterPass1;
         void historyLenAfterPass1;
