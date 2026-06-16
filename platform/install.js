@@ -1110,8 +1110,9 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyProjectSectionsCloseRepair(tp, mech, variables, history, git);    // NEW v0.103.0.1 — fixes the regex-induced -"[[--]]" damage from v0.103.0 deploy
   await applyFinanceMigrations(tp, mech, variables, history, git);             // NEW v0.107.0 S2 — finance defaults scaffolding (create-if-absent) + categories group backfill (append-only + .sauce-backup snapshot)
   await applyToDoBlueprintMigration(tp, mech, variables, history, git);        // NEW v0.116.0 — reshapes v0.3.3 daily-note bodies to v0.4.0 5-block shape (.sauce-backup snapshot before write; absorbs ## Tasks heading; preserves ## Notes)
-  await applyRecurringSentinelV070Migration(tp, mech, variables, history, git); // NEW v0.119.0 — heals date-only recurring sentinels to additive (empty-set) form so next render re-materializes (fixes mid-day-added-recurring blind spot; .sauce-backup snapshot before write)
-  await mergeDuplicateRecurringSections(tp, mech, variables, history, git); // NEW v0.119.1 — heals dailies with multiple "Recurring Today" SectionLabel blocks (insertRecurringIntoToday pre-v0.7.1 created a new block per call instead of appending; .sauce-backup snapshot before write)
+  await applyRecurringSentinelV070Migration(tp, mech, variables, history, git); // v0.119.0 — date-only sentinels → additive (empty-set) form. SUPERSEDED by stripPersistedRecurringSection (v0.120.0) but kept for files-in-flight; runs as a no-op once stripPersistedRecurringSection has run.
+  await mergeDuplicateRecurringSections(tp, mech, variables, history, git); // v0.119.1 — merges duplicate "Recurring Today" blocks. SUPERSEDED by stripPersistedRecurringSection (v0.120.0) but kept for files-in-flight; runs as a no-op once stripPersistedRecurringSection has run.
+  await stripPersistedRecurringSection(tp, mech, variables, history, git); // NEW v0.120.0 — retires materialized "Recurring Today" / "Recurring" SectionLabel blocks + recurring_from task lines + sentinels from dailies, since ToDoDailyRecurring.render() now live-queries the registry instead of writing to today's file. Idempotent. .sauce-backup snapshot before write.
   await applyProjectTodoBackfill(tp, mech, variables, history, git);           // NEW v0.116.0 — creates spice/projects/<slug>/<Name> To-Do.md for every project lacking one (skip-if-exists)
   await applyOrphanedHelperCleanup(tp, mech, variables, history, git);         // NEW v0.110.0 — deletes obsolete *.js and *.js.bak helper files left on disk after manifest removals
   await applyEntityCreateGuardMigration(tp, mech, variables, history, git);    // NEW v0.110.1 — rewrites direct customJS.EntityCreate.render(dv,...) calls in vault notes to the customjs-guard form (cold-load race fix)
@@ -5171,6 +5172,120 @@ async function mergeDuplicateRecurringSections(tp, mech, variables, history, git
 
   if (errors.length) {
     throw new Error(`mergeDuplicateRecurringSections: ${errors.length} file(s) failed; first: ${errors[0].path} — ${errors[0].error}`);
+  }
+}
+
+// stripPersistedRecurringSection — v0.120.0 (to-do v0.8.0).
+//
+// v0.8.0 retires recurring-task materialization in favor of live render
+// (ToDoDailyRecurring.render() now queries the registry on every render
+// and emits matching tasks directly into dv.container — no writes to today's
+// daily file). Existing dailies still carry persisted "Recurring Today" /
+// "Recurring" SectionLabel blocks + materialized `- [ ] ... [recurring_from::
+// [[Recurring Tasks]]]` task lines + `<!-- recurring-materialized-... -->`
+// sentinels left over from v0.7.x materialization. This migration strips them
+// in place so the live render is the only source of those task rows.
+//
+// Strategy: for each `spice/to-do/**/ToDo-*.md`:
+//   1. Remove every `<!-- recurring-materialized-... -->` sentinel.
+//   2. Find each "Recurring Today" / "Recurring" SectionLabel dataviewjs block.
+//      For each: drop the block AND every following line until the next
+//      dataviewjs block / H1-H2 heading / EOF.
+// Idempotent. .sauce-backup snapshot before write. Failure-loud per-file.
+async function stripPersistedRecurringSection(tp, mech, variables, history, git) {
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const TODO_ROOT = "spice/to-do";
+  const exists = await adapter.exists(TODO_ROOT).catch(() => false);
+  if (!exists) {
+    history?.push({ event: "info", step: "stripPersistedRecurringSection",
+      stripped: 0, errors: [], skipped_reason: "spice/to-do not present",
+      git_commit: (git && git.commit), git_tag: (git && git.tag), git_dirty: (git && git.dirty),
+      completed_at: new Date().toISOString() });
+    return;
+  }
+
+  async function _walkDailies(dir) {
+    const out = [];
+    let listing;
+    try { listing = await adapter.list(dir); } catch (_e) { return out; }
+    for (const f of (listing.files || [])) {
+      if (/\/ToDo-\d{4}-\d{2}-\d{2}\.md$/.test(f)) out.push(f);
+    }
+    for (const sub of (listing.folders || [])) {
+      const nested = await _walkDailies(sub);
+      out.push(...nested);
+    }
+    return out;
+  }
+
+  const RECURRING_LABEL_RE = /```dataviewjs\s*\n\s*await\s+dv\.view\(\s*"ranch\/views\/customjs-guard"\s*,\s*\{\s*class:\s*"SectionLabel"\s*,\s*args:\s*\[\s*\{\s*text:\s*"Recurring(?: Today)?"[^}]*\}\s*\]\s*\}\s*\)\s*;?\s*\n\s*```/g;
+  const SENTINEL_RE = /<!-- recurring-materialized-[^>]+-->\n?/g;
+
+  function _stripFile(content) {
+    let s = content;
+    // (1) Drop sentinels.
+    s = s.replace(SENTINEL_RE, '');
+    // (2) Walk through and strip each "Recurring (Today)" SectionLabel block AND
+    // every line after it up to the next dataviewjs block / H1-H2 / EOF.
+    while (true) {
+      RECURRING_LABEL_RE.lastIndex = 0;
+      const m = RECURRING_LABEL_RE.exec(s);
+      if (!m) break;
+      const sectionStart = m.index;
+      const tail = s.slice(m.index + m[0].length);
+      const TERMINATOR_RE = /\n(?=```dataviewjs|## |# )/;
+      const t = TERMINATOR_RE.exec(tail);
+      const sectionEnd = t ? (m.index + m[0].length + t.index) : s.length;
+      // Strip block + body. Also clean up surrounding blank-line clutter so the
+      // surrounding dataviewjs blocks remain visually separated by one blank line.
+      const head = s.slice(0, sectionStart).replace(/\n+$/, '\n');
+      const rest = s.slice(sectionEnd).replace(/^\n+/, '\n');
+      s = head + rest;
+    }
+    return s;
+  }
+
+  const dailies = await _walkDailies(TODO_ROOT);
+  if (!dailies.length) {
+    history?.push({ event: "info", step: "stripPersistedRecurringSection",
+      stripped: 0, errors: [], skipped_reason: "no daily to-do notes found",
+      git_commit: (git && git.commit), git_tag: (git && git.tag), git_dirty: (git && git.dirty),
+      completed_at: new Date().toISOString() });
+    return;
+  }
+
+  let stripped = 0;
+  const errors = [];
+  const ts = new Date().toISOString().replace(/[:.]/g, '-');
+  for (const path of dailies) {
+    let content;
+    try { content = await adapter.read(path); }
+    catch (e) { errors.push({ path, error: e && e.message }); continue; }
+    if (!/SectionLabel.*"Recurring/.test(content) && !/<!-- recurring-materialized-/.test(content)) continue;
+    const updated = _stripFile(content);
+    if (updated === content) continue;
+    try {
+      const backupDir = `.sauce-backup/${ts}/${path.split('/').slice(0, -1).join('/')}`;
+      const backupPath = `.sauce-backup/${ts}/${path}`;
+      if (typeof adapter.mkdir === 'function') {
+        try { await adapter.mkdir(backupDir); } catch (_e) { /* tolerate */ }
+      }
+      try { await adapter.write(backupPath, content); } catch (_e) { /* tolerate */ }
+      await adapter.write(path, updated);
+      stripped++;
+    } catch (e) {
+      errors.push({ path, error: e && e.message });
+    }
+  }
+
+  history?.push({ event: "info", step: "stripPersistedRecurringSection",
+    stripped, errors,
+    git_commit: (git && git.commit), git_tag: (git && git.tag), git_dirty: (git && git.dirty),
+    completed_at: new Date().toISOString() });
+
+  if (errors.length) {
+    throw new Error(`stripPersistedRecurringSection: ${errors.length} file(s) failed; first: ${errors[0].path} — ${errors[0].error}`);
   }
 }
 
@@ -12686,6 +12801,7 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     // v0.119.0 — to-do v0.7.0 additive recurring sentinel heal.
     module.exports.applyRecurringSentinelV070Migration = applyRecurringSentinelV070Migration;
     module.exports.mergeDuplicateRecurringSections = mergeDuplicateRecurringSections;
+    module.exports.stripPersistedRecurringSection = stripPersistedRecurringSection;
     //
     // CF-2: by default, capture run-install.js's stdio (Phase B/C surfaced
     // 2200-line JSON dumps mixed into the user's terminal). We tee the

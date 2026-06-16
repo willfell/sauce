@@ -87,37 +87,37 @@
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
-      "line": 520,
+      "line": 523,
       "snippet": "if (payload.mode === 'recurring') heading = '## Recurring Tasks';"
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
-      "line": 521,
+      "line": 524,
       "snippet": "else if (payload.destination && payload.destination.type === 'project') heading = '## Owned Tasks';"
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
-      "line": 522,
+      "line": 525,
       "snippet": "else heading = '## Today';"
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
-      "line": 557,
+      "line": 560,
       "snippet": "'## Recurring Tasks',"
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
-      "line": 572,
+      "line": 575,
       "snippet": "'## Owned Tasks',"
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
-      "line": 574,
+      "line": 577,
       "snippet": "'## From Meetings',"
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
-      "line": 586,
+      "line": 589,
       "snippet": "\"## Today's Capture\","
     },
     {
@@ -137,32 +137,17 @@
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-daily-recurring.js",
-      "line": 5,
-      "snippet": "* `## Recurring Tasks` heading; evaluates each entry's recurrence against today;"
-    },
-    {
-      "file": "platform/blueprints/to-do/helpers/todo-daily-recurring.js",
-      "line": 9,
-      "snippet": "* `## Last 7 days of materialization` table (cap 50 rows)."
-    },
-    {
-      "file": "platform/blueprints/to-do/helpers/todo-daily-recurring.js",
-      "line": 15,
-      "snippet": "* materialize into `## Recurring Today` like everyone else; the project tag is"
-    },
-    {
-      "file": "platform/blueprints/to-do/helpers/todo-daily-recurring.js",
-      "line": 177,
+      "line": 314,
       "snippet": "if (/^## Recurring Tasks/.test(line) ||"
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-daily-recurring.js",
-      "line": 182,
+      "line": 319,
       "snippet": "if (inRecurring && (/^## /.test(line) ||"
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-daily-recurring.js",
-      "line": 463,
+      "line": 598,
       "snippet": "const h2 = registryContent.indexOf('## Last 7 days of materialization');"
     },
     {

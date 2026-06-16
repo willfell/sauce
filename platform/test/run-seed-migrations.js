@@ -713,6 +713,92 @@ async function runMigrateFamily() {
                 beforeSingle === afterSingle
             );
         }
+
+        // ===== HC-V0120-STRIP — stripPersistedRecurringSection =====
+        // v0.8.0 retires materialization; this migration strips the persisted
+        // SectionLabel + recurring_from task-lines + sentinel from all dailies.
+        {
+            const { stripPersistedRecurringSection } = require("../install.js");
+            const LABEL_OLD =
+                '```dataviewjs\n' +
+                'await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Recurring Today" }] });\n' +
+                '```';
+            const LABEL_NEW =
+                '```dataviewjs\n' +
+                'await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Recurring" }] });\n' +
+                '```';
+            const PROJECT_GROUPS =
+                '```dataviewjs\n' +
+                'await dv.view("ranch/views/customjs-guard", { class: "ToDoDailyProjectGroups" });\n' +
+                '```';
+
+            // STRIP-1: daily with old "Recurring Today" label + sentinel → both gone.
+            const F_OLD = `${DAY_DIR}/ToDo-2026-06-20.md`;
+            writeFixture(F_OLD, [
+                "---", "type: to-do", "---",
+                "<!-- recurring-materialized-2026-06-20: a1b2c3d -->",
+                "",
+                LABEL_OLD,
+                "",
+                "- [ ] test recurring task [recurring_from:: [[Recurring Tasks]]]",
+                "- [ ] Monitor this Dashboard [recurring_from:: [[Recurring Tasks]]]",
+                "",
+                PROJECT_GROUPS,
+                "",
+            ].join("\n"));
+            const hist1 = [];
+            await stripPersistedRecurringSection(tp, { name: "to-do" }, variables, hist1, git);
+            const after1 = readVault(F_OLD);
+            ok("HC-V0120-STRIP-1 sentinel removed",
+               !/recurring-materialized-/.test(after1), `after:\n${after1}`);
+            ok("HC-V0120-STRIP-2 'Recurring Today' SectionLabel block removed",
+               !/text:\s*"Recurring Today"/.test(after1), `after:\n${after1}`);
+            ok("HC-V0120-STRIP-3 materialized task lines removed",
+               !/recurring_from::/.test(after1), `after:\n${after1}`);
+            ok("HC-V0120-STRIP-4 ProjectGroups block preserved",
+               /class: "ToDoDailyProjectGroups"/.test(after1));
+            ok("HC-V0120-STRIP-5 history records stripped >= 1",
+               hist1.length > 0 && hist1[0].stripped >= 1,
+               `got history=${JSON.stringify(hist1)}`);
+
+            // STRIP-6: new "Recurring" label also stripped.
+            const F_NEW = `${DAY_DIR}/ToDo-2026-06-21.md`;
+            writeFixture(F_NEW, [
+                "---", "type: to-do", "---",
+                LABEL_NEW,
+                "- [ ] new label task [recurring_from:: [[Recurring Tasks]]]",
+                "",
+                PROJECT_GROUPS,
+                "",
+            ].join("\n"));
+            const hist2 = [];
+            await stripPersistedRecurringSection(tp, { name: "to-do" }, variables, hist2, git);
+            const after2 = readVault(F_NEW);
+            ok("HC-V0120-STRIP-6 'Recurring' (new label) SectionLabel block removed",
+               !/text:\s*"Recurring"/.test(after2), `after:\n${after2}`);
+
+            // STRIP-7: idempotent.
+            const before3 = readVault(F_OLD);
+            const hist3 = [];
+            await stripPersistedRecurringSection(tp, { name: "to-do" }, variables, hist3, git);
+            const after3 = readVault(F_OLD);
+            ok("HC-V0120-STRIP-7 second invocation byte-identical (idempotent)",
+               before3 === after3);
+
+            // STRIP-8: daily with no recurring section is untouched.
+            const F_CLEAN = `${DAY_DIR}/ToDo-2026-06-22.md`;
+            const CLEAN_BODY = [
+                "---", "type: to-do", "---",
+                "",
+                PROJECT_GROUPS,
+                "",
+            ].join("\n");
+            writeFixture(F_CLEAN, CLEAN_BODY);
+            const histClean = [];
+            await stripPersistedRecurringSection(tp, { name: "to-do" }, variables, histClean, git);
+            ok("HC-V0120-STRIP-8 daily without recurring section untouched",
+               readVault(F_CLEAN) === CLEAN_BODY);
+        }
     } finally {
         if (KEEP) {
             console.log(`  KEEP_SEED_VAULT=1: ${migRoot}`);
