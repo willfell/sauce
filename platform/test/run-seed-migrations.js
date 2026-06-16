@@ -1112,6 +1112,50 @@ async function runFinanceMigrateFamily() {
             "HC-V01190-FIN-SEED-MIGRATE-A6 Paychecks.md body has FinanceNav reference (hubs-repair)",
             /class:\s*"FinanceNav"/.test(a6PaychecksBody)
         );
+
+        // ===== B: debt (#2 + #10 + #11) =====
+        ok(
+            "HC-V01190-FIN-SEED-MIGRATE-B1 debts/Debt-Discover-it.md exists (auto-scaffolded by #2 from Debt Defaults)",
+            existsFin("debts/Debt-Discover-it.md")
+        );
+        ok(
+            "HC-V01190-FIN-SEED-MIGRATE-B2 debts/Debt-Apple-Card.md still exists (existing entity preserved by #2)",
+            existsFin("debts/Debt-Apple-Card.md")
+        );
+        const bPaycheckDefaultsBody = readFin("Paycheck Defaults.md");
+        ok(
+            "HC-V01190-FIN-SEED-MIGRATE-B3 Paycheck Defaults expenses block contains [[Debt-Apple-Card]] wikilink (post #10 linking)",
+            /debt:\s*"\[\[Debt-Apple-Card\]\]"/.test(bPaycheckDefaultsBody)
+        );
+        ok(
+            "HC-V01190-FIN-SEED-MIGRATE-B4 Paycheck Defaults original url line stripped (post #10 url removal)",
+            !bPaycheckDefaultsBody.includes("https://example.com/applecard")
+        );
+        ok(
+            "HC-V01190-FIN-SEED-MIGRATE-B5 Paycheck Defaults frontmatter has __debt_links_migrated: v0.108.0 marker",
+            /__debt_links_migrated:\s*v0\.108\.0/.test(bPaycheckDefaultsBody)
+        );
+        ok(
+            "HC-V01190-FIN-SEED-MIGRATE-B6 Paycheck Defaults expenses contains Discover-it entry (post #11 phase-2 orphan append)",
+            /debt:\s*"\[\[Debt-Discover-it\]\]"/.test(bPaycheckDefaultsBody)
+        );
+        const bDebtDefaultsBody = readFin("Debt Defaults.md");
+        const bAppleCardEntries = (bDebtDefaultsBody.match(/^\s+-\s+name:\s*Apple Card\b/gm) || []).length;
+        const bDiscoverItEntries = (bDebtDefaultsBody.match(/^\s+-\s+name:\s*Discover it\b/gm) || []).length;
+        ok(
+            "HC-V01190-FIN-SEED-MIGRATE-B7 Debt Defaults debts[] unchanged (still exactly 1 Apple Card + 1 Discover it; #2 reads but never mutates)",
+            bAppleCardEntries === 1 && bDiscoverItEntries === 1,
+            `got apple=${bAppleCardEntries} discover=${bDiscoverItEntries}`
+        );
+        const bDiscoverItBody = readFin("debts/Debt-Discover-it.md");
+        ok(
+            "HC-V01190-FIN-SEED-MIGRATE-B8 Debt-Discover-it.md has kind: credit-card (from Debt Defaults entry)",
+            /^kind:\s*credit-card\s*$/m.test(bDiscoverItBody)
+        );
+        ok(
+            "HC-V01190-FIN-SEED-MIGRATE-B9 Debt-Discover-it.md has planned_monthly_payment: 150 (from Debt Defaults entry)",
+            /^planned_monthly_payment:\s*150\s*$/m.test(bDiscoverItBody)
+        );
     } finally {
         if (KEEP) {
             console.log(`  KEEP_SEED_VAULT=1: ${finRoot}`);
