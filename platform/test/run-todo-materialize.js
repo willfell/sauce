@@ -200,12 +200,19 @@ console.log('run-todo-materialize:');
 })();
 
 // --- REC-9: hasSentinel + writeSentinel round-trip ---
+// v0.7.0: writeSentinel now emits the additive form `<!-- recurring-materialized-DATE: HASHES -->`
+// even when called with no hashes (empty-set form: `: `). hasSentinel still recognizes both
+// the new and the legacy (date-only) shapes.
 (() => {
     const today = ['---', 'type: to-do', '---', '', '## Today\'s Capture'].join('\n');
     ok('REC-9 hasSentinel false on plain', !ToDoDailyRecurring.hasSentinel(today));
     const w = ToDoDailyRecurring.writeSentinel(today, '2026-06-15');
     ok('REC-9a sentinel present', ToDoDailyRecurring.hasSentinel(w));
-    ok('REC-9b sentinel format', w.includes('<!-- recurring-materialized-2026-06-15 -->'));
+    ok('REC-9b sentinel format (v0.7.0 additive empty-set)',
+        w.includes('<!-- recurring-materialized-2026-06-15: -->'), `got w:\n${w}`);
+    // hasSentinel must also recognize the legacy date-only form (for migration coexistence).
+    const legacy = today + '\n<!-- recurring-materialized-2026-06-15 -->';
+    ok('REC-9c hasSentinel recognizes legacy date-only form', ToDoDailyRecurring.hasSentinel(legacy));
 })();
 
 // --- REC-10: parseRegistry skips lines outside ## Recurring Tasks ---
