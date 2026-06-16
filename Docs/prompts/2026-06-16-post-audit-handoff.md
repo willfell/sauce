@@ -13,9 +13,11 @@ audit_matrix: platform/test/coverage-matrix.json
 
 ## Where you are
 - Worktree: `/Users/willfellhoelter/projects/repos/sauce-test-coverage` (stays alive across sessions)
-- Branch: `feature/test-coverage-arc` (long-lived; no PR until arc close)
-- Just closed: Phase 1 — audit
-- Current preflight: exit 0, 89/89 green (re-run from worktree with `npm run release:preflight`)
+- Branch: `feature/test-coverage-arc` (long-lived, rebased onto v0.119.0 main; no PR until arc close)
+- Just closed: Phase 1 — audit (rebased onto v0.119.0)
+- Current preflight: exit 0, 95/95 green (was 89/89 pre-rebase; v0.119.0 added asserts)
+- Workshop version: 0.119.0 (rebase absorbed v0.118.1 → v0.119.0 + project 1.22.2 + to-do 0.7.0 + 35 harnesses)
+- The `regen-coverage-matrix.js` script now preserves qualitative notes across re-runs (no need to re-fan-out 30 agents each Phase)
 
 ## What just shipped (Phase 1)
 - `scripts/regen-coverage-matrix.js` — re-runnable audit script
