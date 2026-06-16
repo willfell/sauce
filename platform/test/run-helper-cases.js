@@ -7847,7 +7847,7 @@ async function caseHCV0890VersionD() {
   if (Array.isArray(m.mechanisms)) mechCount = m.mechanisms.length;
   else if (Array.isArray(m.items)) mechCount = m.items.filter(x => x.kind === "mechanism").length;
   else if (m.catalogue && Array.isArray(m.catalogue.mechanisms)) mechCount = m.catalogue.mechanisms.length;
-  assertEqual(mechCount, 17, "HC-V0890-VERSION-D: mechanism count = 17 (was 16, +people-identity)");
+  assertEqual(mechCount, 18, "HC-V0890-VERSION-D: mechanism count = 18 (was 17, +open-helpers in v0.120.3)");
 }
 
 async function caseHCV0890ResolvePersonA() {
@@ -8384,7 +8384,7 @@ async function caseHCV0891Versions() {
   // B: daily manifest pin
   const dailyMan = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "blueprints/daily/manifest.json"), "utf8"));
-  assertEqual(dailyMan.version, "0.13.6", "HC-V0891-VERSION-B: daily pin = 0.13.5");
+  assertEqual(dailyMan.version, "0.13.7", "HC-V0891-VERSION-B: daily pin = 0.13.7");
 
   // C: workshop manifest pin + package.json
   const platformMan = JSON.parse(fs.readFileSync(
@@ -8400,7 +8400,7 @@ async function caseHCV0891Versions() {
   const mechs = (platformMan.mechanisms && Array.isArray(platformMan.mechanisms))
     ? platformMan.mechanisms
     : (Array.isArray(platformMan.items) ? platformMan.items.filter(x => x.kind === "mechanism") : []);
-  assertEqual(mechs.length, 17, "HC-V0891-VERSION-D: mechanism count unchanged at 17");
+  assertEqual(mechs.length, 18, "HC-V0891-VERSION-D: mechanism count = 18 (+open-helpers in v0.120.3)");
 }
 
 // ========================================================================
@@ -12225,7 +12225,7 @@ async function caseV01070FinMan1Versions() {
   //   entity-create 0.7.0 → 0.7.1 (v0.108.0 S1 resolve_wikilinks PATCH)
   // v0.109.0 bumps workshop_version on top of v0.108.0's finance/EC ship.
   assertTrue("HC-V01070-FIN-MAN-1: finance version 0.6.x or 0.7.x or 0.8.x", /^0\.(6|7|8|9)\.\d+$/.test(fin.version), `got: ${fin.version}`);
-  assertEqual(ec.version, "0.7.2", "HC-V01070-FIN-MAN-1: entity-create version");
+  assertEqual(ec.version, "0.7.3", "HC-V01070-FIN-MAN-1: entity-create version");
   assertTrue("HC-V01070-FIN-MAN-1: workshop_version 0.115.x or 0.116.x or 0.117.x or 0.118.x or 0.119.x", /^0.(115|116|117|118|119|120|121).\d+$/.test(ws.workshop_version));
   assertTrue("HC-V01070-FIN-MAN-1: finance depends_on entity-create >=0.7.0",
     fin.depends_on.some(d => d.name === "entity-create" && /0\.7/.test(d.range)));
@@ -15093,7 +15093,7 @@ async function caseV01090Ds1EntityTypeOpt() {
   // (sauce v0.84.1 — Tasks header open · done); cards untouched.
   {
     const pins = [
-      ["daily",         "platform/blueprints/daily/manifest.json",            "0.13.6"],
+      ["daily",         "platform/blueprints/daily/manifest.json",            "0.13.7"],
       ["activity-feed", "platform/mechanisms/activity-feed/manifest.json",    "0.7.1"],
       ["cards",         "platform/mechanisms/cards/manifest.json",            "0.2.6"],
     ];
