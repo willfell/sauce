@@ -239,6 +239,29 @@
         "platform/blueprints/finance/templates/Budget Template.md"
       ],
       "notes": "MonthlyOverview (v0.110.3) reads page.type === 'budget' + page.month + page.categories[*].actual + dv.pages('spice/finance/paychecks').where(p => p.type === 'paycheck' && p.pay_period_start.startsWith(monthKey)) + dv.pages('spice/finance/debts').where(p => p.type === 'debt'). Paycheck expenses[*].debt + paid:true expected when summing debtPaid. Behavioral coverage in platform/test/run-v01103-monthly-overview.js."
+    },
+    {
+      "id": "to-do-recurring-frontmatter",
+      "kind": "contract",
+      "owner": { "type": "blueprint", "name": "to-do" },
+      "source": "platform/blueprints/to-do/manifest.json",
+      "consumers": [
+        "platform/blueprints/to-do/helpers/todo-daily-recurring.js",
+        "platform/blueprints/to-do/templates/Recurring Tasks.md"
+      ],
+      "notes": "v0.116.0 — Recurring Tasks registry frontmatter (type: to-do-recurring). Validated via the to-do manifest's rule_fragment for path_glob 'spice/to-do/Recurring Tasks.md'."
+    },
+    {
+      "id": "project-todo-frontmatter",
+      "kind": "contract",
+      "owner": { "type": "blueprint", "name": "project" },
+      "source": "platform/blueprints/project/manifest.json",
+      "consumers": [
+        "platform/blueprints/to-do/helpers/todo-create-task.js",
+        "platform/blueprints/to-do/helpers/todo-daily-project-groups.js",
+        "platform/blueprints/to-do/helpers/todo-leaf-actions.js"
+      ],
+      "notes": "v0.116.0 — Per-project To-Do note frontmatter (type: project-todo). Validated via the project manifest's rule_fragment with frontmatter_branch on type. Backfilled by applyProjectTodoBackfill in install.js."
     }
   ]
 }
