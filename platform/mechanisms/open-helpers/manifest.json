@@ -1,7 +1,7 @@
 {
   "name": "open-helpers",
-  "version": "0.1.0",
-  "description": "Shared post-open view-mode helper. customJS.OpenHelpers.forceActiveLeafPreview() flips the active markdown leaf to reading mode after a create-and-open dispatch, deferred one macrotask + guarded (markdown-only, never throws, skips kanban/board leaves). Routes every new-note create path to read mode so notes never open in edit-with-title-selected. v0.1.0 launch (sauce v0.120.3).",
+  "version": "0.1.1",
+  "description": "Shared post-open view-mode helper. customJS.OpenHelpers.forceActiveLeafPreview() flips the active markdown leaf, and forceLeafPreview(leaf) flips a leaf captured at call time, to reading mode after a create-and-open dispatch — deferred one macrotask + guarded (markdown-only, never throws, skips kanban/board leaves). Routes every new-note create path to read mode so notes never open in edit-with-title-selected. v0.1.1 adds forceLeafPreview(leaf) + cold-load optional-chaining at call sites (sauce v0.120.3).",
   "depends_on": [
     { "name": "customjs-guard", "range": ">=1.0.0" }
   ],

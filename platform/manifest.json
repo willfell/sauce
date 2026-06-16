@@ -69,7 +69,7 @@
     },
     {
       "name": "nav-buttons",
-      "version": "2.7.2",
+      "version": "2.7.3",
       "path": "mechanisms/nav-buttons"
     },
     {
@@ -82,7 +82,7 @@
       "version": "0.1.2",
       "path": "mechanisms/accent-button"
     },
-    { "name": "open-helpers", "version": "0.1.0", "path": "mechanisms/open-helpers" },
+    { "name": "open-helpers", "version": "0.1.1", "path": "mechanisms/open-helpers" },
     {
       "name": "icons",
       "version": "0.1.1",
@@ -90,7 +90,7 @@
     },
     {
       "name": "entity-create",
-      "version": "0.7.3",
+      "version": "0.7.4",
       "path": "mechanisms/entity-create"
     },
     {
@@ -162,7 +162,7 @@
     },
     {
       "name": "to-do",
-      "version": "0.8.2",
+      "version": "0.8.3",
       "path": "blueprints/to-do"
     },
     {

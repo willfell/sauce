@@ -194,6 +194,12 @@ function makeApp(opts) {
   const captureWrites = opts.allowDiskWrites !== true;
   const captured_open = [];
   const captured_writes = [];
+  // Paths created during this test run (capture mode). vault.create() returns a
+  // TFile-shaped stub in real Obsidian, and getAbstractFileByPath resolves the
+  // just-created file immediately after — mirror that so nav-buttons'
+  // createFromTemplate tail (which re-fetches the target by path before opening
+  // it on a captured leaf) sees the file it just wrote.
+  const created_paths = new Set();
   return {
     isMobile: false,
     vault: {
@@ -213,6 +219,9 @@ function makeApp(opts) {
         },
       },
       getAbstractFileByPath(p) {
+        // A file created earlier in THIS run resolves to a TFile regardless of
+        // the (pre-create) fileExistsHook answer.
+        if (created_paths.has(p)) return { path: p };
         if (typeof opts.fileExistsHook === 'function') {
           const r = opts.fileExistsHook(p);
           if (r !== undefined) return r;
@@ -228,11 +237,14 @@ function makeApp(opts) {
       async create(p, body) {
         if (captureWrites) {
           captured_writes.push({ method: 'create', path: p, body, bodyLength: body.length });
-          return;
+          created_paths.add(p);
+          return { path: p };
         }
         const abs = path.join(VAULT, p);
         await fs.promises.mkdir(path.dirname(abs), { recursive: true });
         await fs.promises.writeFile(abs, body, 'utf8');
+        created_paths.add(p);
+        return { path: p };
       },
       async createFolder(p) {
         if (captureWrites) {
@@ -247,6 +259,20 @@ function makeApp(opts) {
       openLinkText(p, _) {
         captured_open.push(p);
       },
+      // v0.120.3 review: createFromTemplate's new-note tail now opens the
+      // created TFile on a captured leaf (getLeaf(false).openFile(file)) so the
+      // deferred read-mode flip targets THIS note. Record the opened path so the
+      // lazy-scaffold assertion still sees exactly one open of the target.
+      activeLeaf: null,
+      getLeaf(_split) {
+        const leaf = {
+          async openFile(file) {
+            captured_open.push(file && file.path ? file.path : '<no-path>');
+          },
+        };
+        this.activeLeaf = leaf;
+        return leaf;
+      },
     },
     __captured_open: captured_open,
     __captured_writes: captured_writes,
@@ -255,7 +281,7 @@ function makeApp(opts) {
 
 // ── Load renderer class ──────────────────────────────────────────────────
 function loadRendererClass(app, Notice) {
-  const customJS = { Icons: ICONS_INSTANCE, OpenHelpers: { forceActiveLeafPreview() {} } };
+  const customJS = { Icons: ICONS_INSTANCE, OpenHelpers: { forceActiveLeafPreview() {}, forceLeafPreview() {} } };
   const fn = new Function('app', 'Notice', 'customJS', `${RENDERER_SRC}\nreturn SpaceNavButtons;`);
   return fn(app, Notice, customJS);
 }

@@ -87,37 +87,37 @@
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
-      "line": 524,
+      "line": 527,
       "snippet": "if (payload.mode === 'recurring') heading = '## Recurring Tasks';"
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
-      "line": 525,
+      "line": 528,
       "snippet": "else if (payload.destination && payload.destination.type === 'project') heading = '## Owned Tasks';"
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
-      "line": 526,
+      "line": 529,
       "snippet": "else heading = '## Today';"
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
-      "line": 561,
+      "line": 564,
       "snippet": "'## Recurring Tasks',"
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
-      "line": 576,
+      "line": 579,
       "snippet": "'## Owned Tasks',"
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
-      "line": 578,
+      "line": 581,
       "snippet": "'## From Meetings',"
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
-      "line": 590,
+      "line": 593,
       "snippet": "\"## Today's Capture\","
     },
     {

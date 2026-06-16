@@ -257,7 +257,9 @@ class SpaceNavButtons {
     }
 
     if (type === "createFromTemplate") {
-      // If target already exists, just open it.
+      // If target already exists, just open it. Read-mode forcing is
+      // intentionally scoped to NEW notes only (see new-file tail below) — an
+      // already-existing note keeps whatever view mode the user left it in.
       const existing = app.vault.getAbstractFileByPath(action.target);
       if (existing) {
         app.workspace.openLinkText(action.target, "");
@@ -298,8 +300,12 @@ class SpaceNavButtons {
           return;
         }
       }
-      app.workspace.openLinkText(action.target, "");
-      customJS.OpenHelpers.forceActiveLeafPreview();
+      // Open the just-created TFile on a captured leaf so the deferred
+      // read-mode flip targets THIS note even if focus moves first.
+      const f = app.vault.getAbstractFileByPath(action.target);
+      const leaf = app.workspace.getLeaf(false);
+      await leaf.openFile(f);
+      customJS.OpenHelpers?.forceLeafPreview?.(leaf);
       return;
     }
 
@@ -329,6 +335,8 @@ class SpaceNavButtons {
       const filenameNoExt = filenameComposed.trim() ? filenameComposed : "Untitled";
       const target = folder ? `${folder}/${filenameNoExt}.md` : `${filenameNoExt}.md`;
 
+      // Read-mode forcing is intentionally scoped to NEW notes only (see tail
+      // below) — an already-existing note keeps its current view mode.
       const existingTarget = app.vault.getAbstractFileByPath(target);
       if (existingTarget) {
         app.workspace.openLinkText(target, "");
@@ -362,7 +370,11 @@ class SpaceNavButtons {
         }
         app.workspace.openLinkText(target, "");
       }
-      customJS.OpenHelpers.forceActiveLeafPreview();
+      // Templater opened the note itself; capture the leaf it landed on NOW
+      // (synchronously) so the deferred flip targets THIS note, not whatever
+      // the active leaf becomes later.
+      const leaf = app.workspace.activeLeaf;
+      customJS.OpenHelpers?.forceLeafPreview?.(leaf);
       return;
     }
 
@@ -414,7 +426,7 @@ class SpaceNavButtons {
       // Only force read mode when the nav entry opts in (note-opening commands
       // like daily/journal goto-today). Without the opt-in we'd risk flipping a
       // non-note command's active leaf to preview.
-      if (action.read_mode_after === true) customJS.OpenHelpers.forceActiveLeafPreview();
+      if (action.read_mode_after === true) customJS.OpenHelpers?.forceActiveLeafPreview?.();
       return;
     }
 

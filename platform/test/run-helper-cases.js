@@ -11597,8 +11597,14 @@ async function caseV01050EcOpenFile1() {
     /\.openFile\s*\(/.test(src));
   assertTrue("HC-V01050-EC-OPENFILE-1: create() captures the returned TFile",
     /const\s+newFile\s*=\s*await\s+app\.vault\.create\(/.test(src));
-  assertTrue("HC-V01050-EC-OPENFILE-1: create() opens via getLeaf(false).openFile(newFile)",
-    /workspace\.getLeaf\(\s*false\s*\)\.openFile\(\s*newFile\s*\)/.test(src));
+  // v0.7.4 (v0.120.3 review): the open now captures the leaf in a local so the
+  // deferred read-mode flip can target THIS leaf — `const leaf =
+  // app.workspace.getLeaf(false); await leaf.openFile(newFile);`. Accept either
+  // the captured-leaf form or the legacy inline-chained form.
+  assertTrue("HC-V01050-EC-OPENFILE-1: create() opens newFile via a getLeaf(false) leaf",
+    /workspace\.getLeaf\(\s*false\s*\)\.openFile\(\s*newFile\s*\)/.test(src)
+    || (/const\s+leaf\s*=\s*app\.workspace\.getLeaf\(\s*false\s*\)/.test(src)
+        && /leaf\.openFile\(\s*newFile\s*\)/.test(src)));
   // The existing branch (existing path) also uses openFile rather than
   // openLinkText — sanity check.
   assertTrue("HC-V01050-EC-OPENFILE-1: existing-file branch also uses openFile",
@@ -12225,7 +12231,7 @@ async function caseV01070FinMan1Versions() {
   //   entity-create 0.7.0 → 0.7.1 (v0.108.0 S1 resolve_wikilinks PATCH)
   // v0.109.0 bumps workshop_version on top of v0.108.0's finance/EC ship.
   assertTrue("HC-V01070-FIN-MAN-1: finance version 0.6.x or 0.7.x or 0.8.x", /^0\.(6|7|8|9)\.\d+$/.test(fin.version), `got: ${fin.version}`);
-  assertEqual(ec.version, "0.7.3", "HC-V01070-FIN-MAN-1: entity-create version");
+  assertEqual(ec.version, "0.7.4", "HC-V01070-FIN-MAN-1: entity-create version");
   assertTrue("HC-V01070-FIN-MAN-1: workshop_version 0.115.x or 0.116.x or 0.117.x or 0.118.x or 0.119.x", /^0.(115|116|117|118|119|120|121).\d+$/.test(ws.workshop_version));
   assertTrue("HC-V01070-FIN-MAN-1: finance depends_on entity-create >=0.7.0",
     fin.depends_on.some(d => d.name === "entity-create" && /0\.7/.test(d.range)));

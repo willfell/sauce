@@ -52,6 +52,32 @@ function ok(name, cond) { results.push([name, !!cond]); console.log(`  ${cond ? 
   try { new (loadClass(app))().forceActiveLeafPreview(); } catch (_e) { threw = true; }
   ok('OH4 no active leaf → no throw', !threw);
 }
+// OH5 — forceLeafPreview(leaf) flips the CAPTURED leaf and never reads
+// activeLeaf, even when activeLeaf points at a different (decoy) note. This is
+// the capture-vs-activeLeaf guarantee: focus may move between call time and the
+// deferred flip, so the helper must operate on the passed handle only.
+{
+  const captured = fakeLeaf({ type: 'markdown', state: { mode: 'source' } });
+  const decoy = fakeLeaf({ type: 'markdown', state: { mode: 'source' } });
+  // Trap any read of activeLeaf — forceLeafPreview must never touch it.
+  let activeLeafRead = false;
+  const app = {
+    workspace: {
+      // decoy IS the active leaf; if the helper (wrongly) read activeLeaf it
+      // would flip the decoy. The getter also records that a read happened.
+      get activeLeaf() { activeLeafRead = true; return decoy; },
+    },
+  };
+  // Capture happens at call time; the sync setTimeout shim fires the body
+  // immediately. activeLeaf already = decoy, so a capture-respecting helper
+  // ignores it entirely.
+  new (loadClass(app))().forceLeafPreview(captured);
+  ok('OH5 forceLeafPreview flips the CAPTURED leaf',
+     captured._applied && captured._applied.state.mode === 'preview');
+  ok('OH5 forceLeafPreview leaves the decoy (activeLeaf) untouched',
+     decoy._applied === undefined);
+  ok('OH5 forceLeafPreview never reads activeLeaf', activeLeafRead === false);
+}
 
 const allPass = results.every(([, p]) => p);
 console.log(`\n${results.filter(([, p]) => p).length}/${results.length} passed`);
