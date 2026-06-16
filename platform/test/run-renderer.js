@@ -2078,6 +2078,7 @@ async function testRendV067Todo1() {
       results.push(['BB5 icon-before-label', await testBB5IconHtmlInlinedBeforeLabel()]);
       results.push(['BB6 hover-swap', await testBB6HoverEnterLeaveSwapsColors()]);
       results.push(['BB7 hover-no-csstext-reassign', await testBB7HoverDoesNotReassignCssText()]);
+      results.push(['BB8 base-overflow-clip', await testBB8BaseCssClipsOverflow()]);
     }
     if (which === 'date-aware' || which === 'all') {
       results.push(['DA1 active-file-with-date', await testDA1ActiveFileWithDate()]);
