@@ -6,6 +6,91 @@ This file archives the per-cycle status snapshots that previously lived in `CLAU
 
 ---
 
+## v0.120.1 — note-picker fix PATCH (2026-06-16)
+
+Reported on accuris immediately after v0.120.0 deploy: "Link a note" dropdown in `+ New Task`
+dialog listed every note alphabetically and was capped at 200 BEFORE the filter ran. Vaults
+with >200 notes lost everything past "D"-ish; verbatim matches past the cap returned nothing.
+
+**Fix:** `_loadNoteList()` returns ALL notes as `{name, path, mtime}` (no cap). `repopulate(filter)`:
+no filter → top 50 most-recently-modified (recency-first default); filter set → full-list
+substring match, "starts-with priority + alpha" sort, cap rendered options at 50, surfaces
+`"… N more — refine the filter to narrow"` hint when matches exceed cap, `"(no matches)"` when
+zero. Placeholder shows total: `"Filter N notes…"`.
+
+**Bonus latent fix:** `runInstall` (`platform/test/helpers/seed-vault-helpers.js`) `maxBuffer`
+bumped 1MB → 64MB. The default 1MB cap was eating large install stdout on the second-install
+idempotency check and reporting it as exit-1 with empty stderr — a misleading failure mode that
+masked the real `clean run — exit 0` verdict. v0.120.0 preflight passed because it ran BEFORE
+the seed rebaseline; AFTER rebaseline the seed crossed the threshold. Now error message also
+captures `e.signal` + `e.message` so future buffer issues surface immediately.
+
+Versions: workshop 0.120.0 → **0.120.1** PATCH; to-do 0.8.0 → **0.8.1** PATCH; all other
+mechanisms + blueprints UNCHANGED. Harness count UNCHANGED at 35. Preflight Tests: 110/110.
+DLG-20 family extended: DLG-20d (mtime carried), DLG-20e (300-note input → all 300, no cap),
+DLG-20f (Z-letter notes survive the alphabet past "D"). Deployed live to accuris + headspace +
+ero. See `Docs/plans/2026-06-16-v0.120.1-note-picker-fix-result.md`.
+
+## v0.120.0 — live-render recurring + 5 UX fixes MINOR (2026-06-16)
+
+User reported six issues on the recurring-tasks surface post-v0.119.1 + explicitly opted into
+the live-render approach the v0.118.1 postmortem item #5 had flagged as the right long-term
+shape.
+
+**Six fixes:**
+1. Drop unrendered `created_at: "<% tp.file.creation_date(...) %>"` Templater expression from
+   `Recurring Tasks.md` template frontmatter (was visible as literal text on accuris + headspace
+   because the installer copies templates as plain strings — Templater never runs over them).
+2. `+ Recurring` button on `ToDoLeafActions` now opens `spice/to-do/Recurring Tasks.md` directly
+   (was opening the create-task dialog).
+3. `ToDoCreateTask` insert path emits `\n${line}\n` (was `\n${line}\n\n`) — no more blank lines
+   between consecutive task entries on the daily.
+4. `Recurring Today` SectionLabel renamed to `Recurring`.
+5. `insertRecurringIntoToday` legacy emit no longer carries a leading blank between SectionLabel
+   block and first task.
+
+**Architecture shift (postmortem #5 closed):** `ToDoDailyRecurring.render()` rewritten as a
+live Dataview-rendered view. Reads the registry on every render, evaluates `matchesToday`,
+renders matching tasks inline into `dv.container` via `_renderRow` + `_renderInlineMarkdown`.
+NO writes to today's daily file. NO sentinels. NO materialization. Mid-day-added tasks appear
+on next render. Legacy `materialize()` / `insertRecurringIntoToday` static helpers preserved
+for harness regression coverage but not invoked from the live render path.
+
+**Heal migration** `stripPersistedRecurringSection` retires the persisted `Recurring Today`/`Recurring`
+SectionLabel blocks + `recurring_from::` task lines + `<!-- recurring-materialized-... -->`
+sentinels from existing dailies. Wired after v0.119.0/v0.119.1 migrations (which become no-ops
+post-strip). Idempotent. `.sauce-backup` snapshot before write.
+
+Versions: workshop 0.119.1 → **0.120.0** MINOR; to-do 0.7.1 → **0.8.0** MINOR; project 1.22.2
+UNCHANGED. Harness count UNCHANGED at 35 (+8 HC-V0120-STRIP-1..8 in `run-seed-migrations.js`).
+Preflight Tests: 110/110. **Deploy caveat caught + healed:** `materialize_once: true` (added
+v0.119.1) prevents the registry-overwrite, but ALSO prevents the template fix (line a above)
+from propagating via install. Hand-stripped the Templater literal on accuris + ero (headspace
+already clean). See `Docs/plans/2026-06-16-v0.120.0-live-render-recurring-result.md`.
+
+## v0.119.1 — recurring-section merge + materialize_once PATCH (2026-06-16)
+
+Two consumer bugs closed immediately post-v0.119.0 deploy on accuris:
+
+**Bug 1 — Duplicate "Recurring Today" SectionLabel blocks.** v0.7.0's additive sentinel
+correctly materialized only NEW tasks per call, but each call routed through
+`insertRecurringIntoToday`'s create-new-block path → daily ended up with one block per call.
+Fix: detect existing "Recurring Today" block via regex; append to its section when present;
+create-new only when absent.
+
+**Bug 2 — Pre-existing data-loss bug (since v0.116.0).** `spice/to-do/Recurring Tasks.md`
+files[] entry lacked `materialize_once: true`. Every install with a non-identical source SHA
+overwrote the user's accumulated registry to the empty template. v0.119.0 deploy triggered this
+on accuris (lost 2 tasks) + headspace (lost 1 task); restored from `.bak`. Fix: add
+`materialize_once: true` to the manifest entry.
+
+NEW `mergeDuplicateRecurringSections` heal migration walks every daily and merges duplicate
+"Recurring Today" blocks in place. Idempotent. `.sauce-backup` snapshot before write.
+
+Versions: workshop 0.119.0 → **0.119.1** PATCH; to-do 0.7.0 → **0.7.1** PATCH. Harness count
+UNCHANGED at 35 (+13 sub-asserts: HC-V0119-INSERT-1..5 + HC-V0119-MERGE-1..7). Preflight Tests:
+102/102. See `Docs/plans/2026-06-16-v0.119.1-recurring-section-merge-and-materialize-once-result.md`.
+
 ## v0.119.0 — to-do hot-fixes + thrash-defenses MINOR (2026-06-16)
 
 Closed two live consumer-visible bugs surfaced post-v0.118.1 on the accuris vault, and landed
