@@ -1017,6 +1017,90 @@ async function runProjectMigrateFamily() {
     }
 }
 
+// ===== HC-V01190-FIN-SEED-MIGRATE-* — finance blueprint installer migrations =====
+//
+// Direct-invocation pattern (mirrors HC-V01190-PROJ family). See impl-2 design doc.
+// 19 finance apply* fns covered via the Legacy Finance fixture at
+// platform/test/seed-vault/spice/finance-legacy/.
+//
+// Production install order (install.js applyFinanceMigrations): defaults-scaff ->
+// debt-scaff -> months-scaff -> categories-group-backfill -> budget-group-seed ->
+// budget-body -> budget-monthly-band -> paycheck-body -> paycheck-debt-band ->
+// paycheck-defaults-debt-linking -> paycheck-defaults-debt-backfill -> nav-row ->
+// nav-row-guard-form -> hub-frontmatter-heal -> invoice-workspace-nav-injection ->
+// hubs-repair -> top-hub-nav-row-dedup -> defaults-nav-row-injection -> unified-nav
+// (unified-nav runs AFTER hubs-repair in production via the platform sweep). The
+// test invokes these in production order and asserts each contract. Idempotency
+// tested by invoking twice.
+//
+// The finance-legacy fixture is staged at spice/finance-legacy/ in the seed but
+// gets copied INTO the tmp vault at spice/finance/ (canonical install path).
+async function runFinanceMigrateFamily() {
+    const install = require("../install.js");
+
+    const finRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-fin-mig-"));
+    try {
+        const SEED_LEGACY = path.join(SEED_DIR, "spice/finance-legacy");
+        // Copy fixture into the tmp vault at the canonical spice/finance/ path.
+        helpers.copyDir(SEED_LEGACY, path.join(finRoot, "spice/finance"));
+
+        const LEGACY_FIN_DIR = "spice/finance";  // path inside the tmp vault
+        const adapter = makeFsAdapter(finRoot);
+        const tp = { app: { vault: { adapter } } };
+        const git = { commit: "test", tag: "test", dirty: false };
+        const variables = { views_path: "ranch/views", vault_identity_tag: "seed-test-vault" };
+        const manifest = { name: "finance" };
+        const history = [];
+
+        // Pass 1: invoke each finance migration in production order.
+        await install.applyFinanceDefaultsScaffolding(tp, manifest, variables, history, git);
+        await install.applyFinanceDebtScaffolding(tp, manifest, variables, history, git);
+        await install.applyFinanceMonthsScaffolding(tp, manifest, variables, history, git);
+        await install.applyFinanceCategoriesGroupBackfill(tp, manifest, variables, history, git);
+        await install.applyFinanceBudgetGroupSeed(tp, manifest, variables, history, git);
+        await install.applyFinanceBudgetBodyMigration(tp, manifest, variables, history, git);
+        await install.applyFinanceBudgetMonthlyBandInjection(tp, manifest, variables, history, git);
+        await install.applyFinancePaycheckBodyMigration(tp, manifest, variables, history, git);
+        await install.applyFinancePaycheckDebtBandInjection(tp, manifest, variables, history, git);
+        await install.applyFinancePaycheckDefaultsDebtLinking(tp, manifest, variables, history, git);
+        await install.applyFinancePaycheckDefaultsDebtBackfill(tp, manifest, variables, history, git);
+        await install.applyFinanceNavRowMigration(tp, manifest, variables, history, git);
+        await install.applyFinanceNavRowGuardFormMigration(tp, manifest, variables, history, git);
+        await install.applyFinanceHubFrontmatterHeal(tp, manifest, variables, history, git);
+        await install.applyFinanceInvoiceWorkspaceNavInjection(tp, manifest, variables, history, git);
+        await install.applyFinanceHubsRepair(tp, manifest, variables, history, git);
+        await install.applyFinanceTopHubNavRowDedup(tp, manifest, variables, history, git);
+        await install.applyFinanceDefaultsNavRowInjection(tp, manifest, variables, history, git);
+        // Unified-nav is the FinanceHubActions/FinanceNavRow -> FinanceNav vault-wide
+        // sweep; runs LAST so it sees the canonical post-repair shapes.
+        await install.applyFinanceUnifiedNavMigration(tp, manifest, variables, history, git);
+
+        // Helpers for assert blocks below.
+        const readFin = (rel) => fs.readFileSync(path.join(finRoot, LEGACY_FIN_DIR, rel), "utf8");
+        const existsFin = (rel) => fs.existsSync(path.join(finRoot, LEGACY_FIN_DIR, rel));
+
+        // ===== A1..A6 (hub/defaults) inserted in Task 2.2 =====
+        // ===== B1..B9 (debt) inserted in Task 2.3 =====
+        // ===== C1..C8 (budget) inserted in Task 2.4 =====
+        // ===== D1..D4 (paycheck) inserted in Task 2.5 =====
+        // ===== E1..E2 (months) inserted in Task 2.6 =====
+        // ===== F1..F10 (nav) inserted in Task 2.7 =====
+        // ===== G1..G3 (invoice + history) inserted in Task 2.8 =====
+        // ===== H1..H6 (idempotency) inserted in Task 2.9 =====
+        // ===== I1..I2 (history audit-trail) inserted in Task 2.10 =====
+
+        // Silence unused warnings while skeleton has no asserts yet.
+        void readFin;
+        void existsFin;
+    } finally {
+        if (KEEP) {
+            console.log(`  KEEP_SEED_VAULT=1: ${finRoot}`);
+        } else {
+            try { fs.rmSync(finRoot, { recursive: true, force: true }); } catch (e) {}
+        }
+    }
+}
+
 // The MIGRATE families are async (the migrations are async). Run them to
 // completion, then emit the final tally + exit code so all asserts are counted.
 runMigrateFamily()
@@ -1030,6 +1114,12 @@ runMigrateFamily()
         console.log(`  FAIL HC-V01190-PROJ-SEED-MIGRATE-FAMILY threw — ${e && e.message}`);
         fail++;
         failures.push("HC-V01190-PROJ-SEED-MIGRATE-FAMILY");
+    })
+    .then(() => runFinanceMigrateFamily())
+    .catch((e) => {
+        console.log(`  FAIL HC-V01190-FIN-SEED-MIGRATE-FAMILY threw — ${e && e.message}`);
+        fail++;
+        failures.push("HC-V01190-FIN-SEED-MIGRATE-FAMILY");
     })
     .finally(() => {
         console.log("");

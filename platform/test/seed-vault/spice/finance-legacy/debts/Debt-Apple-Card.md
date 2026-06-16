@@ -1,7 +1,7 @@
 ---
 type: debt
 kind: credit-card
-name: "Apple Card"
+name: Apple Card
 current_balance: 1000
 credit_limit: 3000
 apr: 0.18
