@@ -1111,6 +1111,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyFinanceMigrations(tp, mech, variables, history, git);             // NEW v0.107.0 S2 — finance defaults scaffolding (create-if-absent) + categories group backfill (append-only + .sauce-backup snapshot)
   await applyToDoBlueprintMigration(tp, mech, variables, history, git);        // NEW v0.116.0 — reshapes v0.3.3 daily-note bodies to v0.4.0 5-block shape (.sauce-backup snapshot before write; absorbs ## Tasks heading; preserves ## Notes)
   await applyRecurringSentinelV070Migration(tp, mech, variables, history, git); // NEW v0.119.0 — heals date-only recurring sentinels to additive (empty-set) form so next render re-materializes (fixes mid-day-added-recurring blind spot; .sauce-backup snapshot before write)
+  await mergeDuplicateRecurringSections(tp, mech, variables, history, git); // NEW v0.119.1 — heals dailies with multiple "Recurring Today" SectionLabel blocks (insertRecurringIntoToday pre-v0.7.1 created a new block per call instead of appending; .sauce-backup snapshot before write)
   await applyProjectTodoBackfill(tp, mech, variables, history, git);           // NEW v0.116.0 — creates spice/projects/<slug>/<Name> To-Do.md for every project lacking one (skip-if-exists)
   await applyOrphanedHelperCleanup(tp, mech, variables, history, git);         // NEW v0.110.0 — deletes obsolete *.js and *.js.bak helper files left on disk after manifest removals
   await applyEntityCreateGuardMigration(tp, mech, variables, history, git);    // NEW v0.110.1 — rewrites direct customJS.EntityCreate.render(dv,...) calls in vault notes to the customjs-guard form (cold-load race fix)
@@ -5036,6 +5037,140 @@ async function applyRecurringSentinelV070Migration(tp, mech, variables, history,
 
   if (errors.length) {
     throw new Error(`applyRecurringSentinelV070Migration: ${errors.length} file(s) failed; first: ${errors[0].path} — ${errors[0].error}`);
+  }
+}
+
+// mergeDuplicateRecurringSections — v0.119.1 (to-do v0.7.1).
+//
+// Heals daily To-Do notes that have MULTIPLE "Recurring Today" SectionLabel
+// dataviewjs blocks. Reported on accuris 2026-06-16: after creating a new
+// recurring task in a daily that already had materialized recurring tasks,
+// `ToDoDailyRecurring.insertRecurringIntoToday` inserted a NEW SectionLabel
+// block instead of appending to the existing one. v0.7.1 fixes the live render
+// path; this migration heals already-broken dailies in place.
+//
+// Strategy: scan each daily for >1 "Recurring Today" SectionLabel blocks.
+// If found: keep the FIRST block; collect all task-lines from every subsequent
+// block; append them to the first block's section; delete the redundant
+// SectionLabel dataviewjs blocks. Idempotent: files with 0-1 such blocks are
+// unchanged. .sauce-backup snapshot before any write.
+async function mergeDuplicateRecurringSections(tp, mech, variables, history, git) {
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const TODO_ROOT = "spice/to-do";
+  const exists = await adapter.exists(TODO_ROOT).catch(() => false);
+  if (!exists) {
+    history?.push({ event: "info", step: "mergeDuplicateRecurringSections",
+      merged: 0, errors: [], skipped_reason: "spice/to-do not present",
+      git_commit: (git && git.commit), git_tag: (git && git.tag), git_dirty: (git && git.dirty),
+      completed_at: new Date().toISOString() });
+    return;
+  }
+
+  async function _walkDailies(dir) {
+    const out = [];
+    let listing;
+    try { listing = await adapter.list(dir); } catch (_e) { return out; }
+    for (const f of (listing.files || [])) {
+      if (/\/ToDo-\d{4}-\d{2}-\d{2}\.md$/.test(f)) out.push(f);
+    }
+    for (const sub of (listing.folders || [])) {
+      const nested = await _walkDailies(sub);
+      out.push(...nested);
+    }
+    return out;
+  }
+
+  // SectionLabel block targeting "Recurring Today" (any args shape with text:"Recurring Today").
+  const RECURRING_LABEL_RE = /```dataviewjs\s*\n\s*await\s+dv\.view\(\s*"ranch\/views\/customjs-guard"\s*,\s*\{\s*class:\s*"SectionLabel"\s*,\s*args:\s*\[\s*\{\s*text:\s*"Recurring Today"[^}]*\}\s*\]\s*\}\s*\)\s*;?\s*\n\s*```/g;
+
+  function _findRecurringBlocks(content) {
+    const out = [];
+    let m;
+    RECURRING_LABEL_RE.lastIndex = 0;
+    while ((m = RECURRING_LABEL_RE.exec(content)) !== null) {
+      out.push({ start: m.index, end: m.index + m[0].length });
+    }
+    return out;
+  }
+
+  function _sectionEnd(content, sectionStart) {
+    const tail = content.slice(sectionStart);
+    const TERMINATOR_RE = /\n(?=```dataviewjs|## |# )/;
+    const t = TERMINATOR_RE.exec(tail);
+    return t ? (sectionStart + t.index) : content.length;
+  }
+
+  function _mergeFile(content) {
+    const blocks = _findRecurringBlocks(content);
+    if (blocks.length < 2) return content;
+
+    // Collect task-line bodies for every block after the first.
+    const firstBlock = blocks[0];
+    const tailBodies = [];
+    for (let i = 1; i < blocks.length; i++) {
+      const b = blocks[i];
+      const bEnd = _sectionEnd(content, b.end);
+      const body = content.slice(b.end, bEnd).replace(/^\n+/, '').replace(/\n+$/, '');
+      if (body) tailBodies.push(body);
+    }
+
+    // First block's section end.
+    const firstEnd = _sectionEnd(content, firstBlock.end);
+    const firstBody = content.slice(firstBlock.end, firstEnd).replace(/\n+$/, '');
+    const mergedBody = [firstBody, ...tailBodies].filter(Boolean).join('\n');
+
+    // Compose: head (everything before first block) + first block + merged body +
+    //          (content after the last redundant block — i.e., from the end of the
+    //          LAST block's section onward).
+    const lastBlock = blocks[blocks.length - 1];
+    const lastEnd = _sectionEnd(content, lastBlock.end);
+
+    const head = content.slice(0, firstBlock.end);
+    const tail = content.slice(lastEnd);
+    return head + (mergedBody ? '\n' + mergedBody + '\n' : '\n') + tail.replace(/^\n+/, '\n');
+  }
+
+  const dailies = await _walkDailies(TODO_ROOT);
+  if (!dailies.length) {
+    history?.push({ event: "info", step: "mergeDuplicateRecurringSections",
+      merged: 0, errors: [], skipped_reason: "no daily to-do notes found",
+      git_commit: (git && git.commit), git_tag: (git && git.tag), git_dirty: (git && git.dirty),
+      completed_at: new Date().toISOString() });
+    return;
+  }
+
+  let merged = 0;
+  const errors = [];
+  const ts = new Date().toISOString().replace(/[:.]/g, '-');
+  for (const path of dailies) {
+    let content;
+    try { content = await adapter.read(path); }
+    catch (e) { errors.push({ path, error: e && e.message }); continue; }
+    if (!/SectionLabel.*"Recurring Today"/.test(content)) continue;
+    const updated = _mergeFile(content);
+    if (updated === content) continue;
+    try {
+      const backupDir = `.sauce-backup/${ts}/${path.split('/').slice(0, -1).join('/')}`;
+      const backupPath = `.sauce-backup/${ts}/${path}`;
+      if (typeof adapter.mkdir === 'function') {
+        try { await adapter.mkdir(backupDir); } catch (_e) { /* tolerate */ }
+      }
+      try { await adapter.write(backupPath, content); } catch (_e) { /* tolerate */ }
+      await adapter.write(path, updated);
+      merged++;
+    } catch (e) {
+      errors.push({ path, error: e && e.message });
+    }
+  }
+
+  history?.push({ event: "info", step: "mergeDuplicateRecurringSections",
+    merged, errors,
+    git_commit: (git && git.commit), git_tag: (git && git.tag), git_dirty: (git && git.dirty),
+    completed_at: new Date().toISOString() });
+
+  if (errors.length) {
+    throw new Error(`mergeDuplicateRecurringSections: ${errors.length} file(s) failed; first: ${errors[0].path} — ${errors[0].error}`);
   }
 }
 
@@ -12550,6 +12685,7 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports.applyProjectTodoBackfill = applyProjectTodoBackfill;
     // v0.119.0 — to-do v0.7.0 additive recurring sentinel heal.
     module.exports.applyRecurringSentinelV070Migration = applyRecurringSentinelV070Migration;
+    module.exports.mergeDuplicateRecurringSections = mergeDuplicateRecurringSections;
     //
     // CF-2: by default, capture run-install.js's stdio (Phase B/C surfaced
     // 2200-line JSON dumps mixed into the user's terminal). We tee the

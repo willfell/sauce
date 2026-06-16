@@ -162,7 +162,7 @@
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-daily-recurring.js",
-      "line": 439,
+      "line": 463,
       "snippet": "const h2 = registryContent.indexOf('## Last 7 days of materialization');"
     },
     {
