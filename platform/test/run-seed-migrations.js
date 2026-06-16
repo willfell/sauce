@@ -1079,19 +1079,39 @@ async function runFinanceMigrateFamily() {
         const readFin = (rel) => fs.readFileSync(path.join(finRoot, LEGACY_FIN_DIR, rel), "utf8");
         const existsFin = (rel) => fs.existsSync(path.join(finRoot, LEGACY_FIN_DIR, rel));
 
-        // ===== A1..A6 (hub/defaults) inserted in Task 2.2 =====
-        // ===== B1..B9 (debt) inserted in Task 2.3 =====
-        // ===== C1..C8 (budget) inserted in Task 2.4 =====
-        // ===== D1..D4 (paycheck) inserted in Task 2.5 =====
-        // ===== E1..E2 (months) inserted in Task 2.6 =====
-        // ===== F1..F10 (nav) inserted in Task 2.7 =====
-        // ===== G1..G3 (invoice + history) inserted in Task 2.8 =====
-        // ===== H1..H6 (idempotency) inserted in Task 2.9 =====
-        // ===== I1..I2 (history audit-trail) inserted in Task 2.10 =====
-
-        // Silence unused warnings while skeleton has no asserts yet.
-        void readFin;
-        void existsFin;
+        // ===== A: hub/defaults scaffolding (#14 + #15 + #19) =====
+        const a1FinBody = readFin("Finance.md");
+        const a1FinFm = helpers.parseFrontmatter(a1FinBody).frontmatter;
+        const a1Tags = Array.isArray(a1FinFm.tags) ? a1FinFm.tags : [];
+        ok(
+            "HC-V01190-FIN-SEED-MIGRATE-A1 Finance.md hub frontmatter healed (no 'finance-hub-hub' mangled tag)",
+            !a1Tags.some(t => /finance-hub-hub/.test(String(t)))
+                && a1Tags.some(t => String(t) === "finance-hub"),
+            `got tags=${JSON.stringify(a1Tags)}`
+        );
+        ok(
+            "HC-V01190-FIN-SEED-MIGRATE-A2 Finance.md body strips FinanceHubActions (top-hub dedup + hubs-repair + unified-nav)",
+            !a1FinBody.includes("FinanceHubActions")
+        );
+        ok(
+            "HC-V01190-FIN-SEED-MIGRATE-A3 Finance.md body has FinanceNav reference (hubs-repair canonical)",
+            /class:\s*"FinanceNav"/.test(a1FinBody)
+        );
+        const a4BudgetsBody = readFin("budgets/Budgets.md");
+        ok(
+            "HC-V01190-FIN-SEED-MIGRATE-A4 Budgets.md body has FinanceNav reference (hubs-repair)",
+            /class:\s*"FinanceNav"/.test(a4BudgetsBody)
+        );
+        const a5DebtsBody = readFin("debts/Debts.md");
+        ok(
+            "HC-V01190-FIN-SEED-MIGRATE-A5 Debts.md body has FinanceNav reference (hubs-repair)",
+            /class:\s*"FinanceNav"/.test(a5DebtsBody)
+        );
+        const a6PaychecksBody = readFin("paychecks/Paychecks.md");
+        ok(
+            "HC-V01190-FIN-SEED-MIGRATE-A6 Paychecks.md body has FinanceNav reference (hubs-repair)",
+            /class:\s*"FinanceNav"/.test(a6PaychecksBody)
+        );
     } finally {
         if (KEEP) {
             console.log(`  KEEP_SEED_VAULT=1: ${finRoot}`);
