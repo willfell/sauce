@@ -63,9 +63,14 @@ the Cluster A "would-have-stopped-the-thrash" verification net from the v0.118.1
 
 - workshop_version: `0.118.1` → **`0.119.0`** MINOR
 - to-do blueprint: `0.6.1` → **`0.7.0`** MINOR
+- project blueprint: `1.22.1` → **`1.22.2`** PATCH (defensive `dv.current()` guards on five render helpers; no behavior change in normal path)
 - All other mechanisms + blueprints: UNCHANGED
 
-**Harness count:** 32 → **34** (`run-customjs-contract.js` + `run-todo-markdown-render.js`).
+**Late-cycle additions (bundled per user request 2026-06-16 17:13 UTC):**
+- **Project render-guards.** `ProjectNavButtons.render`, `ProjectWorkstreamManager.render`, `ProjectWorkstreams.render`, `ProjectNotesCards.render`, `ProjectReferencedByCards.render` previously read `dv.current().file.path` (or `.name` / `.folder`) without guarding. After EntityCreate.create → openFile, Dataview hasn't indexed the new file yet so `dv.current()` returns undefined → TypeError. Surfaced live on accuris when creating a new project (spice/projects/dev-enablement/Dev-Enablement.md). Fix: optional-chain + early-return pattern at the top of each render() (mirrors the existing pattern in ProjectStatusWidget + the to-do helpers). NEW `platform/test/run-project-render-guards.js` harness exercises each widget against four dv-stub variants (undefined / null / file-less / no-current-method) — 20 PROJGUARD asserts total. Project blueprint bumped 1.22.1 → 1.22.2 PATCH.
+- **C1 XSS fix.** Final code reviewer surfaced a leading-whitespace bypass in `_isSafeUrl` (both `ToDoDailyUnassignedMeetings` + `ToDoDailyProjectGroups`). Browsers strip leading whitespace from href attrs before resolution, so ` javascript:alert(1)` executes as `javascript:` — but the scheme regex `^[a-z]...:` doesn't match the leading whitespace, falling through the "relative URL — allow" path. Fix: trim before scheme detection. NEW TDM-7 + TDM-8 regression tests assert both widgets reject ` javascript:`, `\tjavascript:`, `JAVASCRIPT:` schemes, and that the render path emits escaped plain text (not an anchor) for malicious links.
+
+**Harness count:** 32 → **35** (`run-customjs-contract.js` + `run-todo-markdown-render.js` + `run-project-render-guards.js`).
 `lint-display-markers.js` is a preflight script, not a harness (matches existing convention for
 `lint-schemas.js` + `check-version-sync.js`).
 
