@@ -59,7 +59,7 @@ class ToDoDailyUnassignedMeetings {
         box.style.cssText = 'flex-shrink:0; opacity:0.6; font-size:0.95em;';
 
         const txt = row.createEl('span');
-        txt.textContent = this._cleanTaskText(t.text);
+        this._renderInlineMarkdown(txt, this._cleanTaskText(t.text));
         txt.style.cssText = 'flex:1; color:var(--text-normal); overflow-wrap:anywhere;';
 
         const src = row.createEl('span');
@@ -70,5 +70,92 @@ class ToDoDailyUnassignedMeetings {
 
     _cleanTaskText(text) {
         return String(text || '').replace(/\s*\[\w+::\s*(?:\[\[[^\]]+\]\]|[^\]]+)\]/g, '').trim();
+    }
+
+    // ---------- v0.7.0: inline markdown rendering ----------
+    // Tokenize `[label](url)` external links + `[[target]]` / `[[target|alias]]`
+    // wikilinks out of task text. Emit raw <a> HTML matching the established
+    // pattern from platform/blueprints/daily/helpers/space-daily-dashboard.js.
+    // Intentionally duplicated in ToDoDailyProjectGroups (two callsites; per
+    // code-conventions.md "three similar lines is better than a premature
+    // abstraction"). If a third widget needs this, extract to a shared util.
+
+    static SAFE_URL_SCHEMES = ['http:', 'https:', 'mailto:', 'obsidian:', 'file:'];
+
+    _tokenizeInline(text) {
+        const tokens = [];
+        const s = String(text || '');
+        let i = 0;
+        while (i < s.length) {
+            // [[target]] or [[target|alias]] — non-greedy wikilink
+            const wl = /^\[\[([^\]\n]+?)\]\]/.exec(s.slice(i));
+            if (wl) {
+                const inner = wl[1];
+                const pipe = inner.indexOf('|');
+                if (pipe === -1) {
+                    tokens.push({ kind: 'wikilink', target: inner, alias: inner });
+                } else {
+                    tokens.push({ kind: 'wikilink', target: inner.slice(0, pipe), alias: inner.slice(pipe + 1) });
+                }
+                i += wl[0].length;
+                continue;
+            }
+            // [label](url) or [label](<url>) — Obsidian allows angle-bracketed URLs
+            const lk = /^\[([^\]\n]+)\]\((<[^>\n]+>|[^)\n]+)\)/.exec(s.slice(i));
+            if (lk) {
+                let url = lk[2];
+                if (url.startsWith('<') && url.endsWith('>')) url = url.slice(1, -1);
+                tokens.push({ kind: 'link', label: lk[1], url });
+                i += lk[0].length;
+                continue;
+            }
+            // Plain text — accumulate up to the next `[` (which might start a link/wikilink).
+            const nextBracket = s.indexOf('[', i + 1);
+            if (nextBracket === -1) {
+                tokens.push({ kind: 'text', value: s.slice(i) });
+                break;
+            }
+            tokens.push({ kind: 'text', value: s.slice(i, nextBracket) });
+            i = nextBracket;
+        }
+        return tokens;
+    }
+
+    _escapeHtml(s) {
+        return String(s == null ? '' : s)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    _isSafeUrl(url) {
+        try {
+            // Allow relative URLs (no scheme) too — they're treated as same-origin.
+            if (!/^[a-z][a-z0-9+.-]*:/i.test(url)) return true;
+            const lower = url.toLowerCase();
+            return ToDoDailyUnassignedMeetings.SAFE_URL_SCHEMES.some(s => lower.startsWith(s));
+        } catch (_e) { return false; }
+    }
+
+    _renderInlineMarkdown(spanEl, text) {
+        const tokens = this._tokenizeInline(text);
+        const parts = [];
+        for (const t of tokens) {
+            if (t.kind === 'text') {
+                parts.push(this._escapeHtml(t.value));
+            } else if (t.kind === 'link') {
+                if (this._isSafeUrl(t.url)) {
+                    parts.push(`<a href="${this._escapeHtml(t.url)}" target="_blank" rel="noopener noreferrer">${this._escapeHtml(t.label)}</a>`);
+                } else {
+                    parts.push(this._escapeHtml(`[${t.label}](${t.url})`));
+                }
+            } else if (t.kind === 'wikilink') {
+                const target = this._escapeHtml(t.target);
+                parts.push(`<a class="internal-link" data-href="${target}" href="${target}">${this._escapeHtml(t.alias || t.target)}</a>`);
+            }
+        }
+        spanEl.innerHTML = parts.join('');
     }
 }
