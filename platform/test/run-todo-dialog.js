@@ -294,19 +294,40 @@ ok('DLG-18 serialize preserves [label](url) + [[wikilink]]',
     ok('DLG-20a _loadNoteList returns [] when getMarkdownFiles absent',
         Array.isArray(inst._loadNoteList()) && inst._loadNoteList().length === 0);
 
-    // With a stub vault, returns { name, path } sorted by name, capped at 200.
+    // v0.8.1 PATCH: returns { name, path, mtime } unsorted (filter handles sort).
+    // No cap — was .slice(0, 200) which hid every note past "D"-ish in vaults
+    // with >200 markdown files (reported on accuris 2026-06-16).
     sharedWindow.app = {
         vault: {
             getMarkdownFiles: () => [
-                { basename: 'Zebra', path: 'a/Zebra.md' },
-                { basename: 'Acme', path: 'b/Acme.md' },
+                { basename: 'Zebra', path: 'a/Zebra.md', stat: { mtime: 1000 } },
+                { basename: 'Acme', path: 'b/Acme.md', stat: { mtime: 2000 } },
             ],
         },
     };
     const list = inst._loadNoteList();
-    ok('DLG-20b _loadNoteList maps + sorts by name',
-        list.length === 2 && list[0].name === 'Acme' && list[1].name === 'Zebra', `got ${JSON.stringify(list)}`);
-    ok('DLG-20c _loadNoteList carries path', list[0].path === 'b/Acme.md', `got ${JSON.stringify(list[0])}`);
+    ok('DLG-20b _loadNoteList maps full list (2 entries)',
+        list.length === 2, `got ${JSON.stringify(list)}`);
+    ok('DLG-20c _loadNoteList carries path',
+        list.find(n => n.name === 'Acme') && list.find(n => n.name === 'Acme').path === 'b/Acme.md',
+        `got ${JSON.stringify(list)}`);
+    ok('DLG-20d _loadNoteList carries mtime',
+        list.find(n => n.name === 'Acme').mtime === 2000, `got ${JSON.stringify(list)}`);
+
+    // v0.8.1 regression: 300 notes — every entry present (was capped at 200).
+    const huge = [];
+    for (let i = 0; i < 300; i++) {
+        const letter = String.fromCharCode(65 + (i % 26));
+        huge.push({ basename: `${letter}-note-${i}`, path: `vault/${letter}/note-${i}.md`, stat: { mtime: 1000 + i } });
+    }
+    sharedWindow.app = { vault: { getMarkdownFiles: () => huge } };
+    const big = inst._loadNoteList();
+    ok('DLG-20e _loadNoteList returns ALL 300 notes (no 200 cap)',
+        big.length === 300, `got ${big.length}`);
+    // Ensure a note alphabetically past "D" survives (the user-reported repro).
+    ok('DLG-20f notes past "D" alphabetically still present',
+        big.some(n => n.name.startsWith('Z-note-')), `Z-notes missing in: ${big.length} total`);
+
     sharedWindow.app = undefined;
 })();
 

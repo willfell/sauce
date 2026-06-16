@@ -82,7 +82,7 @@ function runInstall(vaultPath, repoRoot) {
         const stdout = execFileSync(
             "node",
             [path.join(repoRoot, "platform/install.js"), "--vault", vaultPath, "--auto-approve"],
-            { cwd: repoRoot, stdio: ["ignore", "pipe", "pipe"], encoding: "utf8" }
+            { cwd: repoRoot, stdio: ["ignore", "pipe", "pipe"], encoding: "utf8", maxBuffer: 64 * 1024 * 1024 }
         );
         return { code: 0, stdout, stderr: "" };
     } catch (e) {
@@ -90,6 +90,8 @@ function runInstall(vaultPath, repoRoot) {
             code: e.status || 1,
             stdout: (e.stdout && e.stdout.toString()) || "",
             stderr: (e.stderr && e.stderr.toString()) || "",
+            signal: e.signal,
+            err: e.message || String(e),
         };
     }
 }
