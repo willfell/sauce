@@ -203,12 +203,6 @@ class ToDoCreateTask {
     }
 
     _renderOneShotForm(host, state, overlay) {
-        // Forward-declare updateSubmit so input-handler closures see a stable
-        // binding from the moment they're attached. The real updateSubmit is
-        // assigned after _appendFooter; let-rebinding propagates to all
-        // closures because they capture the binding, not the value.
-        let updateSubmit = () => {};
-
         const label = (text) => {
             const el = host.createEl('div', { text });
             el.style.cssText = 'font-size:10px; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-muted, #999); margin-top:10px; margin-bottom:4px;';
@@ -255,7 +249,6 @@ class ToDoCreateTask {
                 state.priority = p;
                 for (const cc of chipRow.children) cc.style.background = '';
                 c.style.background = 'var(--interactive-accent, #6a6abf)';
-                updateSubmit();
             };
         }
 
@@ -271,16 +264,11 @@ class ToDoCreateTask {
         schedInput.value = state.scheduled;
         schedInput.onchange = () => { state.scheduled = schedInput.value; updateSubmit(); };
 
-        const footer = this._appendFooter(host, state, overlay);
-        updateSubmit = footer.updateSubmit;     // bind closures to the real evaluator
-        host.appendChild(footer.submitBtn.parentNode);
-        updateSubmit();                         // evaluate initial state (in case of presets)
+        const { submitBtn, updateSubmit } = this._appendFooter(host, state, overlay);
+        host.appendChild(submitBtn.parentNode);
     }
 
     _renderRecurringForm(host, state, overlay) {
-        // Forward-declare updateSubmit (see _renderOneShotForm for rationale).
-        let updateSubmit = () => {};
-
         const label = (text) => {
             const el = host.createEl('div', { text });
             el.style.cssText = 'font-size:10px; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-muted, #999); margin-top:10px; margin-bottom:4px;';
@@ -379,14 +367,11 @@ class ToDoCreateTask {
                 state.priority = p;
                 for (const cc of chipRow.children) cc.style.background = '';
                 c.style.background = 'var(--interactive-accent, #6a6abf)';
-                updateSubmit();
             };
         }
 
-        const footer = this._appendFooter(host, state, overlay);
-        updateSubmit = footer.updateSubmit;     // bind closures to the real evaluator
-        host.appendChild(footer.submitBtn.parentNode);
-        updateSubmit();                         // evaluate initial state — submit enables once title+frequency are valid
+        const { submitBtn, updateSubmit } = this._appendFooter(host, state, overlay);
+        host.appendChild(submitBtn.parentNode);
     }
 
     _appendFooter(host, state, overlay) {

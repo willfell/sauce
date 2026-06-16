@@ -1,0 +1,36 @@
+{
+  "contributions": {
+    "project": [
+      {
+        "scope": {
+          "path_glob": "spice/projects/*/*.md"
+        },
+        "extends": "_canonical-vocab",
+        "frontmatter_branch": [
+          {
+            "when": {
+              "frontmatter": {
+                "type": "project-todo"
+              }
+            },
+            "required_frontmatter": {
+              "type": {
+                "required": true,
+                "type": "string",
+                "matches": "^project-todo$"
+              },
+              "project": {
+                "required": true,
+                "type": "string"
+              },
+              "project_slug": {
+                "required": true,
+                "type": "string"
+              }
+            }
+          }
+        ]
+      }
+    ]
+  }
+}
