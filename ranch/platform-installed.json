@@ -89,8 +89,8 @@
   "blueprints": [
     {
       "name": "project",
-      "version": "1.21.2",
-      "installed_at": "2026-06-15T06:03:50.273Z",
+      "version": "1.22.0",
+      "installed_at": "2026-06-16T00:18:11.904Z",
       "new_entity_buttons": [
         {
           "id": "project",
@@ -175,6 +175,19 @@
                 ]
               },
               "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"Breadcrumb\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ProjectNavButtons\" });\n```\n\n---\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SectionHub\" });\n```\n"
+            },
+            {
+              "filename_pattern": "{{prompts.name}} To-Do.md",
+              "frontmatter_template": {
+                "type": "project-todo",
+                "project": "[[{{prompts.name}}]]",
+                "project_slug": "{{prompts.slug}}",
+                "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+                "cssclasses": [
+                  "wide"
+                ]
+              },
+              "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"Breadcrumb\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ProjectNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ToDoLeafActions\" });\n```\n\n## Owned Tasks\n\n## From Meetings\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ToDoDailyProjectGroups\", args: [{ scope: \"project-todo\" }] });\n```\n"
             }
           ],
           "render_in": {
@@ -194127,8 +194140,1474 @@
       "git_tag": "v0.115.1",
       "git_dirty": true,
       "attempted_at": "2026-06-15T23:04:41.415Z"
+    },
+    {
+      "event": "info",
+      "step": "customjs_settings",
+      "action": "skipped_user_customized",
+      "jsFolder": "ranch/Scripts",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.852Z"
+    },
+    {
+      "event": "info",
+      "step": "app_settings",
+      "action": "applied",
+      "keys_written": [
+        "alwaysOpenInNewTab",
+        "defaultViewMode",
+        "livePreview",
+        "propertiesInDocument"
+      ],
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.854Z"
+    },
+    {
+      "event": "info",
+      "step": "vault_default_paths",
+      "name": "platform",
+      "reason": "all keys already customized; no changes",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.854Z"
+    },
+    {
+      "event": "info",
+      "step": "empty_project_wikilink_repair",
+      "name": "vault",
+      "reason": "repaired 0 note(s)",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.854Z"
+    },
+    {
+      "event": "info",
+      "step": "pre_install_delete_skip",
+      "name": "project",
+      "path": "boards/To-Do-Board.md",
+      "reason": null,
+      "message": "file already absent",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.866Z"
+    },
+    {
+      "event": "info",
+      "step": "module_directory",
+      "name": "project",
+      "path": "spice/projects",
+      "action": "already_exists",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.866Z"
+    },
+    {
+      "event": "info",
+      "step": "entity_create_block_verified",
+      "name": "project",
+      "target": "spice/projects/Projects.md",
+      "instance": "project",
+      "sentinel": "// entity-create:project",
+      "action": "verified_present",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.882Z"
+    },
+    {
+      "event": "info",
+      "step": "entity_create_block_verified",
+      "name": "project",
+      "target": "ranch/templates/Template, Docs Hub.md",
+      "instance": "doc-note",
+      "sentinel": "// entity-create:doc-note",
+      "action": "verified_present",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.882Z"
+    },
+    {
+      "event": "warning",
+      "step": "entity_create_block_missing",
+      "name": "project",
+      "target": "ranch/templates/Template, Docs Hub.md",
+      "instance": "section-hub",
+      "message": "entity-create block missing in ranch/templates/Template, Docs Hub.md: expected sentinel \"// entity-create:section-hub\" inside a dataviewjs fence (entry section-hub in project)",
+      "action": "missing_skip_inject",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.882Z"
+    },
+    {
+      "event": "info",
+      "step": "entity_create_block_verified",
+      "name": "project",
+      "target": "ranch/templates/Template, Section Hub.md",
+      "instance": "sub-section-hub",
+      "sentinel": "// entity-create:sub-section-hub",
+      "action": "verified_present",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.882Z"
+    },
+    {
+      "event": "info",
+      "step": "wiki_to_docs_migration",
+      "name": "project",
+      "reason": "migrated 0; skipped-already-migrated 0; skipped-no-wiki 0; warn-coexist 0; warn-fail 0",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.883Z"
+    },
+    {
+      "event": "info",
+      "step": "docs_backfill",
+      "name": "project",
+      "reason": "backfilled 0 project(s); skipped 0 (already had Docs.md); 0 warning(s)",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.883Z"
+    },
+    {
+      "event": "info",
+      "step": "docs_hub_button_repair",
+      "name": "project",
+      "reason": "repaired 0 project(s); 0 warning(s)",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.883Z"
+    },
+    {
+      "event": "info",
+      "step": "project_sections_migration",
+      "name": "project",
+      "reason": "migrated 0 project(s); skipped 0; 0 warning(s)",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.883Z"
+    },
+    {
+      "event": "info",
+      "step": "project_sections_hub_migration",
+      "name": "project",
+      "reason": "migrated 0 project(s); skipped 0; 0 warning(s)",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.883Z"
+    },
+    {
+      "event": "info",
+      "step": "doc_note_breadcrumb_marker_cleanup",
+      "name": "project",
+      "action": "summary",
+      "cleaned_count": 0,
+      "untouched_count": 0,
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.884Z"
+    },
+    {
+      "event": "info",
+      "step": "project_sections_close_repair",
+      "name": "project",
+      "reason": "repaired 0 project note(s)",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.884Z"
+    },
+    {
+      "event": "info",
+      "step": "project_todo_backfill",
+      "name": "project",
+      "summary": {
+        "created": 0,
+        "skipped": 0,
+        "errors": 0
+      },
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "completed_at": "2026-06-16T00:18:11.884Z"
+    },
+    {
+      "event": "info",
+      "step": "orphaned_helper_cleanup",
+      "name": "platform",
+      "summary": {
+        "orphanRemoved": 0,
+        "orphanAbsent": 5,
+        "bakRemoved": 0
+      },
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "completed_at": "2026-06-16T00:18:11.885Z"
+    },
+    {
+      "event": "info",
+      "step": "entity_create_guard_migration",
+      "name": "platform",
+      "summary": {
+        "scanned": 61,
+        "rewritten": 0,
+        "callsReplaced": 0
+      },
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "completed_at": "2026-06-16T00:18:11.896Z"
+    },
+    {
+      "event": "info",
+      "step": "customjs_guard_migration",
+      "name": "platform",
+      "summary": {
+        "scanned": 61,
+        "rewritten": 0,
+        "callsReplaced": 0,
+        "classCounts": {}
+      },
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "completed_at": "2026-06-16T00:18:11.902Z"
+    },
+    {
+      "event": "info",
+      "step": "finance_unified_nav_migration",
+      "name": "finance",
+      "summary": {
+        "scanned": 0,
+        "rewritten": 0,
+        "callsReplaced": 0
+      },
+      "reason": "spice/finance/ absent; nothing to migrate",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "completed_at": "2026-06-16T00:18:11.902Z"
+    },
+    {
+      "event": "info",
+      "step": "scaffold_foundational",
+      "name": "project",
+      "item": "project",
+      "id": "templater-obsidian",
+      "action": "skipped_already_present",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.903Z"
+    },
+    {
+      "event": "info",
+      "step": "customjs_startup_scripts",
+      "name": "project",
+      "script": "ProjectTaskCreateListenerInit",
+      "action": "skipped_existing",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.903Z"
+    },
+    {
+      "event": "install",
+      "kind": "blueprint",
+      "name": "project",
+      "version": "1.22.0",
+      "installed_at": "2026-06-16T00:18:11.904Z",
+      "new_entity_buttons": [
+        {
+          "id": "project",
+          "label": "New Project",
+          "icon": "folder-plus",
+          "prompts": [
+            {
+              "key": "name",
+              "label": "Project name",
+              "type": "string",
+              "required": true
+            },
+            {
+              "key": "slug",
+              "type": "string",
+              "derive": "slugify(prompts.name)"
+            }
+          ],
+          "destination": {
+            "folder_prefix": "spice/projects/{{prompts.slug}}",
+            "filename_prefix": "{{prompts.name|sanitize-filename}}"
+          },
+          "frontmatter_template": {
+            "type": "project",
+            "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+            "description": "",
+            "status": "idea",
+            "status_changed_at": "{{now.YYYY-MM-DD}}",
+            "workstreams": [],
+            "teams": [],
+            "products": [],
+            "sections": [],
+            "tags": []
+          },
+          "body_template": "Template, Project.md",
+          "extra_files": [
+            {
+              "filename_pattern": "Project Map.md",
+              "body_template": "Template, Project Map.md"
+            },
+            {
+              "filename_pattern": "{{prompts.slug}}-board.md",
+              "body_template": "Template, Project Board.md"
+            },
+            {
+              "subfolder": "docs",
+              "filename_pattern": "Docs.md",
+              "body_template": "Template, Docs Hub.md"
+            },
+            {
+              "subfolder": "docs/knowledge",
+              "filename_pattern": "Knowledge.md",
+              "frontmatter_template": {
+                "type": "section-hub",
+                "project": "[[{{prompts.name}}]]",
+                "project_slug": "{{prompts.slug}}",
+                "section": "Knowledge",
+                "section_slug": "knowledge",
+                "parent_section": "",
+                "depth": 1,
+                "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+                "tags": [
+                  "section-hub"
+                ]
+              },
+              "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"Breadcrumb\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ProjectNavButtons\" });\n```\n\n---\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SectionHub\" });\n```\n"
+            },
+            {
+              "subfolder": "docs/notes",
+              "filename_pattern": "Notes.md",
+              "frontmatter_template": {
+                "type": "section-hub",
+                "project": "[[{{prompts.name}}]]",
+                "project_slug": "{{prompts.slug}}",
+                "section": "Notes",
+                "section_slug": "notes",
+                "parent_section": "",
+                "depth": 1,
+                "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+                "tags": [
+                  "section-hub"
+                ]
+              },
+              "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"Breadcrumb\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ProjectNavButtons\" });\n```\n\n---\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SectionHub\" });\n```\n"
+            },
+            {
+              "filename_pattern": "{{prompts.name}} To-Do.md",
+              "frontmatter_template": {
+                "type": "project-todo",
+                "project": "[[{{prompts.name}}]]",
+                "project_slug": "{{prompts.slug}}",
+                "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+                "cssclasses": [
+                  "wide"
+                ]
+              },
+              "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"Breadcrumb\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ProjectNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ToDoLeafActions\" });\n```\n\n## Owned Tasks\n\n## From Meetings\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ToDoDailyProjectGroups\", args: [{ scope: \"project-todo\" }] });\n```\n"
+            }
+          ],
+          "render_in": {
+            "kind": "hub",
+            "target_path": "{{module_directory}}/Projects.md"
+          }
+        },
+        {
+          "id": "doc-note",
+          "label": "+ New Doc",
+          "icon": "file-plus",
+          "prompts": [
+            {
+              "key": "title",
+              "label": "Doc title",
+              "type": "string",
+              "required": true,
+              "validate": "safe-filename"
+            },
+            {
+              "key": "section",
+              "label": "Section",
+              "type": "select",
+              "options_source": "current_project_sections",
+              "required": true
+            },
+            {
+              "key": "section_slug",
+              "label": "(derived from section)",
+              "type": "string",
+              "derive": "slugify(prompts.section)"
+            },
+            {
+              "key": "sub_section",
+              "label": "Sub-section",
+              "type": "select",
+              "options_source": "current_section_sub_sections",
+              "required": false,
+              "default": ""
+            },
+            {
+              "key": "sub_section_slug",
+              "label": "(derived from sub_section)",
+              "type": "string",
+              "derive": "slugify(prompts.sub_section)"
+            }
+          ],
+          "destination": {
+            "folder_prefix": "spice/projects/{{current_file.frontmatter.project_slug}}/docs/{{prompts.section_slug}}/{{prompts.sub_section_slug}}",
+            "filename_prefix": "{{prompts.title|sanitize-filename}}"
+          },
+          "frontmatter_template": {
+            "type": "doc-note",
+            "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+            "project": "{{current_file.frontmatter.project}}",
+            "project_slug": "{{current_file.frontmatter.project_slug}}",
+            "section": "{{prompts.section}}",
+            "sub_section": "{{prompts.sub_section}}",
+            "tags": [
+              "doc-note"
+            ]
+          },
+          "body_template": "Template, Doc Note.md",
+          "render_in": {
+            "kind": "hub",
+            "target_path": "{{templates_path}}/Template, Docs Hub.md"
+          }
+        },
+        {
+          "id": "section-hub",
+          "label": "+ New Section",
+          "icon": "folder-plus",
+          "prompts": [
+            {
+              "key": "name",
+              "label": "Section name",
+              "type": "string",
+              "required": true,
+              "validate": "safe-filename"
+            },
+            {
+              "key": "slug",
+              "label": "(derived from name)",
+              "type": "string",
+              "derive": "slugify(prompts.name)"
+            }
+          ],
+          "destination": {
+            "folder_prefix": "spice/projects/{{current_file.frontmatter.project_slug}}/docs/{{prompts.slug}}",
+            "filename_prefix": "{{prompts.name|sanitize-filename}}"
+          },
+          "frontmatter_template": {
+            "type": "section-hub",
+            "project": "{{current_file.frontmatter.project}}",
+            "project_slug": "{{current_file.frontmatter.project_slug}}",
+            "section": "{{prompts.name}}",
+            "section_slug": "{{prompts.slug}}",
+            "parent_section": "",
+            "depth": 1,
+            "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+            "tags": [
+              "section-hub"
+            ]
+          },
+          "body_template": "Template, Section Hub.md",
+          "render_in": {
+            "kind": "hub",
+            "target_path": "{{templates_path}}/Template, Docs Hub.md"
+          }
+        },
+        {
+          "id": "sub-section-hub",
+          "label": "+ New Sub-Section",
+          "icon": "folder-plus",
+          "prompts": [
+            {
+              "key": "name",
+              "label": "Sub-section name",
+              "type": "string",
+              "required": true,
+              "validate": "safe-filename"
+            },
+            {
+              "key": "slug",
+              "label": "(derived from name)",
+              "type": "string",
+              "derive": "slugify(prompts.name)"
+            },
+            {
+              "key": "parent_slug",
+              "label": "Parent section slug",
+              "type": "string",
+              "required": true
+            }
+          ],
+          "destination": {
+            "folder_prefix": "spice/projects/{{current_file.frontmatter.project_slug}}/docs/{{prompts.parent_slug}}/{{prompts.slug}}",
+            "filename_prefix": "{{prompts.name|sanitize-filename}}"
+          },
+          "frontmatter_template": {
+            "type": "section-hub",
+            "project": "{{current_file.frontmatter.project}}",
+            "project_slug": "{{current_file.frontmatter.project_slug}}",
+            "section": "{{prompts.name}}",
+            "section_slug": "{{prompts.slug}}",
+            "parent_section": "[[{{current_file.frontmatter.section}}]]",
+            "depth": 2,
+            "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
+            "tags": [
+              "section-hub"
+            ]
+          },
+          "body_template": "Template, Section Hub.md",
+          "render_in": {
+            "kind": "hub",
+            "target_path": "{{templates_path}}/Template, Section Hub.md"
+          }
+        }
+      ],
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false
+    },
+    {
+      "event": "aggregate",
+      "step": "claude_surface_aggregate",
+      "contributions": 7,
+      "entries": 93,
+      "rejected": 0,
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.905Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/audit.md",
+      "owner": "audit",
+      "version": "0.3.0",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.906Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/audit/drift/SKILL.md",
+      "owner": "audit",
+      "version": "0.3.0",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.906Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/install.md",
+      "owner": "platform-claude",
+      "version": "0.1.3",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.909Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/upgrade.md",
+      "owner": "platform-claude",
+      "version": "0.1.3",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.910Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/bootstrap.md",
+      "owner": "platform-claude",
+      "version": "0.1.3",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.910Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/platform/install/SKILL.md",
+      "owner": "platform-claude",
+      "version": "0.1.3",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.910Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/platform/upgrade/SKILL.md",
+      "owner": "platform-claude",
+      "version": "0.1.3",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.910Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/platform/bootstrap/SKILL.md",
+      "owner": "platform-claude",
+      "version": "0.1.3",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.911Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/project.md",
+      "owner": "project",
+      "version": "1.22.0",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.911Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/project/new-project/SKILL.md",
+      "owner": "project",
+      "version": "1.22.0",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.911Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/daily.md",
+      "owner": "daily",
+      "version": "0.13.6",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.912Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/daily/open-today/SKILL.md",
+      "owner": "daily",
+      "version": "0.13.6",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.913Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/meetings.md",
+      "owner": "meetings",
+      "version": "0.8.0",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.913Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/meetings/new-meeting/SKILL.md",
+      "owner": "meetings",
+      "version": "0.8.0",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.914Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/scratch.md",
+      "owner": "scratch",
+      "version": "0.5.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.914Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/scratch/new-scratch/SKILL.md",
+      "owner": "scratch",
+      "version": "0.5.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.914Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/cowork.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.915Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/bootstrap-vault/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.916Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/morning-briefing/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.916Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/midday-tripwire/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.917Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/eod-review/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.917Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/weekly-review/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.917Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/monthly-review/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.918Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/reconcile-cowork/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.918Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/onboard-scheduled-jobs/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.918Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/context-builder/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.919Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/edit-microscope/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.919Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/audit-siblings/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.919Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/check-vault-routing/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.920Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/date-context/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.920Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/ensure-daily-note/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.920Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-weather/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.921Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-calendar/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.921Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-gmail/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.921Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-imessage/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.922Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-finance-yesterday/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.922Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-finance-cc-today/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.922Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-cc-debt-snapshot/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.923Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-projects/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.923Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-threads/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.923Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-semantic-related/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.924Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/write-run-note-morning-briefing/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.924Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/write-run-note-eod-review/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.925Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/write-run-note-midday-tripwire/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.925Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/write-run-note-finance/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.925Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/write-run-note-weekly-review/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.926Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/write-run-note-monthly-review/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.926Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/write-summary-invoice-prep/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.926Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/write-summary-fte-status/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.926Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/update-active-threads/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.927Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/update-active-projects/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.927Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/update-weekly-snapshot/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.928Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/run-audit-receipt/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.928Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/weekly.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.928Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "command",
+      "dest": ".claude/commands/monthly.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.928Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/scaffold-timeframes/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.929Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/read-user-preferences/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.929Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/plan-dispatch/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.930Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-from-served-by/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.930Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/capture-tick/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.930Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/synthesize-day/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.931Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/read-memory/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.931Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/capture-frame-drift/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.931Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/learn-from-checks/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.932Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/check-heartbeat/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.932Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/gather-semantic-memory/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.932Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/compose-body/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.933Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/compose-feedback-capture/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.933Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/ingest-feedback/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.933Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/skills/resolve-person/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.934Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/synthesize-week/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.934Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/discover-people/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.934Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/find-missing-people/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.935Z"
+    },
+    {
+      "event": "claude_surface_install",
+      "step": "claude_surface_install",
+      "kind": "skill",
+      "dest": ".claude/skills/cowork/sync-scheduled-jobs/SKILL.md",
+      "owner": "cowork",
+      "version": "0.40.2",
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.935Z"
+    },
+    {
+      "event": "claude_md_regen",
+      "step": "claude_md_regen",
+      "tables_updated": [
+        "directory-map",
+        "resolvers",
+        "skills-index"
+      ],
+      "rows_total": 24,
+      "git_commit": "83d67c076a9126c849674d66d4e884fb11cf42c8",
+      "git_tag": null,
+      "git_dirty": false,
+      "attempted_at": "2026-06-16T00:18:11.936Z"
     }
   ],
-  "workshop_version": "0.115.2",
+  "workshop_version": "0.116.0",
   "workshop_path": "/opt/homebrew/Cellar/sauce/0.97.4/libexec"
 }
