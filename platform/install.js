@@ -4834,6 +4834,15 @@ async function applyToDoBlueprintMigration(tp, mech, variables, history, git) {
       const renamed = newBody.replace(/SectionLabel"[^`]*text:\s*"Today's Capture"/g, (m) => m.replace("Today's Capture", "Today"));
       if (renamed !== newBody) { newBody = renamed; touched = true; }
 
+      // v0.5.2 cleanup: the v0.5.0 dialog's _insertLineUnderSection bug created
+      // orphan `## Today's Capture` H2 lines at EOF on daily notes. The SectionLabel
+      // block at the top of the body already provides the label; the H2 is just
+      // cruft. Remove the orphan heading (the task lines stay; they become
+      // free-form bullets under the existing SectionLabel block).
+      const orphanRe = /^## (Today's Capture|Today)\s*$/gm;
+      const stripped = newBody.replace(orphanRe, '').replace(/\n{3,}/g, '\n\n');
+      if (stripped !== newBody) { newBody = stripped; touched = true; }
+
       if (!touched) { alreadyCurrent++; continue; }
       // (skip-old to-do block start)
       if (false) {
