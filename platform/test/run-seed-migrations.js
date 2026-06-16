@@ -936,7 +936,7 @@ async function runProjectMigrateFamily() {
         const bDocsBody = fs.readFileSync(path.join(projRoot, LEGACY_PROJ_DIR, "docs/Docs.md"), "utf8");
         ok(
             "HC-V01190-PROJ-SEED-MIGRATE-B3 Docs.md body rewired to customJS.ProjectDocsIndex.render",
-            bDocsBody.includes("customJS.ProjectDocsIndex.render") || bDocsBody.includes("ProjectDocsIndex")
+            bDocsBody.includes("ProjectDocsIndex")
         );
         const bCustomNoteFm = helpers.parseFrontmatter(
             fs.readFileSync(path.join(projRoot, LEGACY_PROJ_DIR, "docs/Custom Section/Custom Note.md"), "utf8")
@@ -957,9 +957,11 @@ async function runProjectMigrateFamily() {
         const dBadLinkFm = helpers.parseFrontmatter(
             fs.readFileSync(path.join(projRoot, LEGACY_PROJ_DIR, "docs/Custom Section/Bad Link Note.md"), "utf8")
         ).frontmatter;
+        const dProj = String(dBadLinkFm.project || "");
+        const dD1 = dProj.includes("Legacy Project") && dProj.startsWith("[[") && dProj.endsWith("]]");
         ok(
             "HC-V01190-PROJ-SEED-MIGRATE-D1 empty project wikilink rewritten to [[Legacy Project]]",
-            String(dBadLinkFm.project || "").includes("Legacy Project") && !String(dBadLinkFm.project).includes("[[]]")
+            dD1
         );
 
         // ----- E: applyProjectTodoBackfill -----
@@ -975,10 +977,27 @@ async function runProjectMigrateFamily() {
             eTodoBody.includes("ToDoDailyProjectGroups")
         );
 
+        // ----- G: history accumulators (audit-trail contract) -----
+        // Project migrations write `event: "info"` records (one or more per
+        // migration step). Audit-trail contract: at least one event per
+        // migration (5 distinct `step` values) and no event surfaces an
+        // errors[] payload (field absent OR field present but empty).
+        const gSteps = new Set(history.map(h => h && h.step).filter(Boolean));
+        const gNoErrors = history.every(h => !h.errors || (Array.isArray(h.errors) && h.errors.length === 0));
+        ok(
+            "HC-V01190-PROJ-SEED-MIGRATE-G1 history records >= 1 event per migration with empty errors[]",
+            gSteps.size >= 5 && gNoErrors,
+            `got steps=${JSON.stringify([...gSteps])} hasErrors=${!gNoErrors}`
+        );
+
         // ----- F: idempotency on a SECOND full invocation pass -----
         // Snapshot key files BEFORE the second pass so we can compare byte-identity.
         const fLegacyBefore = fs.readFileSync(path.join(projRoot, LEGACY_PROJ_DIR, "Legacy Project.md"), "utf8");
         const fTodoBefore = fs.readFileSync(path.join(projRoot, LEGACY_PROJ_DIR, "Legacy Project To-Do.md"), "utf8");
+        const fKnowledgeHubPath = path.join(projRoot, LEGACY_PROJ_DIR, "docs/knowledge/Knowledge.md");
+        const fCustomHubPath = path.join(projRoot, LEGACY_PROJ_DIR, "docs/Custom Section/Custom Section.md");
+        const fKnowledgeBefore = fs.existsSync(fKnowledgeHubPath) ? fs.readFileSync(fKnowledgeHubPath, "utf8") : "";
+        const fCustomBefore = fs.existsSync(fCustomHubPath) ? fs.readFileSync(fCustomHubPath, "utf8") : "";
 
         const history2 = [];
         await applyProjectSectionsCloseRepair(tp, manifest, variables, history2, git);
@@ -992,11 +1011,11 @@ async function runProjectMigrateFamily() {
             "HC-V01190-PROJ-SEED-MIGRATE-F1 second invocation: Old Note still in knowledge/ (no second move)",
             fOldNoteStill
         );
-        const fNoBakHubs = !fs.existsSync(path.join(projRoot, LEGACY_PROJ_DIR, "docs/knowledge/Knowledge.md.bak"))
-            && !fs.existsSync(path.join(projRoot, LEGACY_PROJ_DIR, "docs/Custom Section/Custom Section.md.bak"));
+        const fKnowledgeAfter = fs.existsSync(fKnowledgeHubPath) ? fs.readFileSync(fKnowledgeHubPath, "utf8") : "";
+        const fCustomAfter = fs.existsSync(fCustomHubPath) ? fs.readFileSync(fCustomHubPath, "utf8") : "";
         ok(
-            "HC-V01190-PROJ-SEED-MIGRATE-F2 second invocation: no .bak files from section-hub re-materialization",
-            fNoBakHubs
+            "HC-V01190-PROJ-SEED-MIGRATE-F2 second invocation: section hubs byte-identical (hub-migration idempotent)",
+            fKnowledgeBefore !== "" && fKnowledgeBefore === fKnowledgeAfter && fCustomBefore === fCustomAfter
         );
         const fLegacyAfter = fs.readFileSync(path.join(projRoot, LEGACY_PROJ_DIR, "Legacy Project.md"), "utf8");
         ok(
