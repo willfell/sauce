@@ -40,8 +40,9 @@ function publicMethodsFromJsFile(jsPath) {
         }
         const body = src.slice(start, i - 1);
         // method-definition lines: optional static/async, name, (args), {
-        // Require `{` at end-of-line (after optional whitespace) so call-exprs like `doStuff();` are skipped.
-        const methodRe = /^[ \t]*(?:static\s+)?(?:async\s+)?(?:get\s+|set\s+)?([A-Za-z_$][A-Za-z0-9_$]*)\s*\([^)]*\)\s*\{[ \t]*$/gm;
+        // Anchored to start-of-line (with leading whitespace); class-body brace-walk
+        // already excludes top-level function decls and call expressions like `doStuff();`.
+        const methodRe = /^[ \t]*(?:static\s+)?(?:async\s+)?(?:get\s+|set\s+)?([A-Za-z_$][A-Za-z0-9_$]*)\s*\([^)]*\)\s*\{/gm;
         let mm;
         while ((mm = methodRe.exec(body)) !== null) {
             const name = mm[1];
