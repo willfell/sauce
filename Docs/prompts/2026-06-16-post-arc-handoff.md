@@ -2,7 +2,7 @@
 arc_closed: test-coverage-arc
 worktree: /Users/willfellhoelter/projects/repos/sauce-test-coverage
 branch: feature/test-coverage-arc
-pr_url: <to-be-filled-after-Task-5.4>
+pr_url: https://github.com/willfell/sauce/pull/11
 ---
 
 # Post-arc handoff
