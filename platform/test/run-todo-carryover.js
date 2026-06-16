@@ -35,6 +35,22 @@ function loadClass() {
 
 const ToDoDailyCarryover = loadClass();
 
+function loadHelperClass(fileName, className) {
+    const helperPath = path.resolve(__dirname, '..', 'blueprints', 'to-do', 'helpers', fileName);
+    const src = fs.readFileSync(helperPath, 'utf8');
+    const stubs = `
+        const window = { moment: undefined, customJS: undefined, app: undefined };
+        const document = {};
+        const Notice = function () {};
+        const console = { error: function () {} };
+    `;
+    // eslint-disable-next-line no-new-func
+    const make = new Function(`${stubs}\n${src}\nreturn ${className};`);
+    return make();
+}
+
+const TaskParser = loadHelperClass('task-parser.js', 'TaskParser');
+
 let pass = 0, fail = 0;
 const failures = [];
 function ok(label, cond, detail) {
@@ -177,6 +193,30 @@ ok('CARR-7a decorate is idempotent on already-tagged',
     ok('CARR-9 strip removes target', !out.includes('remove me'));
     ok('CARR-9a strip preserves survivors',
         out.includes('- [ ] keep me') && out.includes('- [ ] keep me too'));
+})();
+
+// --- CARR-10: TaskParser INSTANCE path ---
+// customJS stores an INSTANCE under window.customJS.TaskParser; the guard then
+// dispatches customJS.TaskParser.parseTasks(content) on it. parseTasks MUST exist
+// as an instance method or live Obsidian throws "is not a function".
+(() => {
+    const content = [
+        '---',
+        'type: to-do',
+        '---',
+        '',
+        '- [ ] alpha task',
+        '- [ ] beta task [project:: [[Sauce]]]',
+        '- [x] done task',
+    ].join('\n');
+    const tp = new TaskParser();
+    const blocks = tp.parseTasks(content);
+    ok('CARR-10 instance parseTasks returns parsed tasks',
+        Array.isArray(blocks) && blocks.length === 2,
+        `got ${Array.isArray(blocks) ? blocks.length : typeof blocks}`);
+    ok('CARR-10a instance parseTasks agrees with static',
+        Array.isArray(blocks) && blocks[0].topLine === '- [ ] alpha task'
+        && blocks[1].topLine === '- [ ] beta task [project:: [[Sauce]]]');
 })();
 
 console.log('');

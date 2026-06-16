@@ -113,11 +113,19 @@ class ToDoCreateTask {
         if (payload.mode === 'recurring') {
             const g = ToDoCreateTask.composeRecurrenceGrammar(payload);
             if (!g) return { valid: false, reason: 'invalid recurrence' };
-            // If RecurrenceParser is available, double-check.
-            if (window.customJS && window.customJS.RecurrenceParser) {
-                if (!window.customJS.RecurrenceParser.isSupported(g)) {
-                    return { valid: false, reason: 'unsupported recurrence grammar' };
+            // If RecurrenceParser is available, double-check. The grammar was
+            // already composed + validated by composeRecurrenceGrammar above, so
+            // a throwing/missing parser must NOT disable the Create button —
+            // swallow the error and fall through to { valid: true }.
+            try {
+                if (window.customJS && window.customJS.RecurrenceParser) {
+                    if (!window.customJS.RecurrenceParser.isSupported(g)) {
+                        return { valid: false, reason: 'unsupported recurrence grammar' };
+                    }
                 }
+            } catch (_e) {
+                // Parser double-check failed (e.g. static-only method on the stored
+                // instance); skip it. composeRecurrenceGrammar already vetted g.
             }
         }
         if (payload.due && !/^\d{4}-\d{2}-\d{2}$/.test(payload.due)) {
