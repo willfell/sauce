@@ -1291,6 +1291,23 @@ async function runFinanceMigrateFamily() {
             "HC-V01190-FIN-SEED-MIGRATE-F10 no file has any deleted NavButtons class (BudgetNavButtons/PaycheckNavButtons/InvoiceNavButtons) in direct OR guard form",
             fNoDeletedClasses
         );
+
+        // ===== G: invoice + orchestration history (#16) =====
+        ok(
+            "HC-V01190-FIN-SEED-MIGRATE-G1 Invoice-2026-01.md body has <!-- invoice-workspace-nav- marker (post #16 inject)",
+            /<!--\s*invoice-workspace-nav-v[\d.]+\s*-->/.test(fInvoiceBody)
+        );
+        ok(
+            "HC-V01190-FIN-SEED-MIGRATE-G2 Invoice-2026-01.md body has InvoiceWorkspaceNav class reference (#16 canonical)",
+            /class:\s*"InvoiceWorkspaceNav"/.test(fInvoiceBody)
+        );
+        // G3: history accumulator records events from each invoked migration.
+        const gSteps = new Set(history.map(h => h && h.step).filter(Boolean));
+        ok(
+            "HC-V01190-FIN-SEED-MIGRATE-G3 history accumulated >= 15 distinct step values (audit-trail contract across 19 invocations)",
+            gSteps.size >= 15,
+            `got steps=${JSON.stringify([...gSteps])} (count=${gSteps.size})`
+        );
     } finally {
         if (KEEP) {
             console.log(`  KEEP_SEED_VAULT=1: ${finRoot}`);
