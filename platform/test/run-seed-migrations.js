@@ -1579,13 +1579,31 @@ async function runEntityCreateMigrateFamily() {
         await install.applyNewEntityButtons(tp, manifest, variables, history, git);
         await install.applyEntityCreateGuardMigration(tp, manifest, variables, history, git);
 
-        // ===== Asserts C1..C3 inline below =====
-        // (idempotency family appended in a subsequent commit)
-
-        // Suppress unused-var warnings until assert blocks are appended.
-        void ecHubAfterPass1;
-        void ecRegistryAfterPass1;
-        void historyLenAfterPass1;
+        // ===== C: idempotency on second invocation =====
+        // Pass 2 should NOT re-rewrite Legacy Hub.md (regex requires direct-call
+        // shape; pass 1 already converted it to guard form). Registry contribution
+        // count should match (overwrite-with-same-array is the v0.46.0 S2 design).
+        // New history events from pass 2 should record no errors.
+        const cHubAfterPass2 = fs.readFileSync(path.join(ecRoot, LEGACY_EC_DIR, "Legacy Hub.md"), "utf8");
+        ok(
+            "HC-V01190-EC-SEED-MIGRATE-C1 second invocation: Legacy Hub.md byte-identical pass 1 vs pass 2",
+            ecHubAfterPass1 === cHubAfterPass2
+        );
+        const cRegistryAfterPass2 = JSON.parse(fs.readFileSync(path.join(ecRoot, "ranch/entity-create-registry.json"), "utf8"));
+        const cContribPass1Len = (ecRegistryAfterPass1.contributions["legacy-fixture-blueprint"] || []).length;
+        const cContribPass2Len = (cRegistryAfterPass2.contributions["legacy-fixture-blueprint"] || []).length;
+        ok(
+            "HC-V01190-EC-SEED-MIGRATE-C2 second invocation: contribution count unchanged (no duplicates)",
+            cContribPass1Len === cContribPass2Len
+        );
+        // history grew on pass 2 (verify event + guard summary), but the new
+        // events should not have populated errors[].
+        const cNewEvents = history.slice(historyLenAfterPass1);
+        const cNewHasErrors = cNewEvents.some(h => Array.isArray(h.errors) && h.errors.length > 0);
+        ok(
+            "HC-V01190-EC-SEED-MIGRATE-C3 second invocation: no new history event has errors[]",
+            !cNewHasErrors
+        );
     } finally {
         if (KEEP) {
             console.log(`  KEEP_SEED_VAULT=1: ${ecRoot}`);
