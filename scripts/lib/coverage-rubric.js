@@ -22,15 +22,33 @@ function tryGrep(pattern, dir, opts = {}) {
 function publicMethodsFromJsFile(jsPath) {
     if (!fs.existsSync(jsPath)) return [];
     const src = fs.readFileSync(jsPath, "utf8");
-    // matches:  methodName(args) {   /  static methodName(args) {  /  async methodName(args) {
-    const re = /^\s*(?:static\s+)?(?:async\s+)?([a-zA-Z][a-zA-Z0-9_]*)\s*\(/gm;
     const out = new Set();
-    let m;
-    while ((m = re.exec(src)) !== null) {
-        const name = m[1];
-        if (name.startsWith("_")) continue;
-        if (["constructor", "if", "for", "while", "switch", "catch", "function", "return"].includes(name)) continue;
-        out.add(name);
+    const reserved = new Set(["constructor", "if", "for", "while", "switch", "catch", "function", "return", "do", "else", "try"]);
+    // Walk class blocks. For each `class Foo ... {`, find the matching `}` via depth counter,
+    // then scan only method-definition lines inside.
+    const classRe = /\bclass\s+[A-Za-z_$][A-Za-z0-9_$]*[^{]*\{/g;
+    let cm;
+    while ((cm = classRe.exec(src)) !== null) {
+        let depth = 1;
+        let i = cm.index + cm[0].length;
+        const start = i;
+        while (i < src.length && depth > 0) {
+            const ch = src[i];
+            if (ch === "{") depth++;
+            else if (ch === "}") depth--;
+            i++;
+        }
+        const body = src.slice(start, i - 1);
+        // method-definition lines: optional static/async, name, (args), {
+        // Require `{` at end-of-line (after optional whitespace) so call-exprs like `doStuff();` are skipped.
+        const methodRe = /^[ \t]*(?:static\s+)?(?:async\s+)?(?:get\s+|set\s+)?([A-Za-z_$][A-Za-z0-9_$]*)\s*\([^)]*\)\s*\{[ \t]*$/gm;
+        let mm;
+        while ((mm = methodRe.exec(body)) !== null) {
+            const name = mm[1];
+            if (name.startsWith("_")) continue;
+            if (reserved.has(name)) continue;
+            out.add(name);
+        }
     }
     return [...out];
 }
@@ -97,7 +115,7 @@ function scoreInstallerMigration(surface, manifest, repoRoot) {
     const lcName = surface.name.toLowerCase();
     const moduleDir = manifest.module_directory || "";
     const ownFns = allFns.filter(fn => {
-        if (fn.toLowerCase().includes(lcName.replace("-", ""))) return true;
+        if (fn.toLowerCase().includes(lcName.replace(/-/g, ""))) return true;
         if (moduleDir && src.includes(`"${moduleDir}"`) && src.indexOf(`function ${fn}`) >= 0) {
             // weak signal; still include
             const i = src.indexOf(`async function ${fn}`);

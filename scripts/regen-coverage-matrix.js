@@ -94,7 +94,13 @@ function main() {
         })
         .filter(Boolean)
         .map(applyPriority)
-        .sort((a, b) => b.priority_score - a.priority_score);
+        .sort((a, b) => {
+            if (b.priority_score !== a.priority_score) return b.priority_score - a.priority_score;
+            const ac = a.composite_score ?? 1;
+            const bc = b.composite_score ?? 1;
+            if (ac !== bc) return ac - bc;
+            return a.name.localeCompare(b.name);
+        });
 
     const workshopVersion = readJson(path.join(REPO_ROOT, "package.json")).version;
     const out = {
