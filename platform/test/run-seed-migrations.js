@@ -1381,6 +1381,19 @@ async function runFinanceMigrateFamily() {
             "HC-V01190-FIN-SEED-MIGRATE-H6 second invocation: Debt-Apple-Card.md byte-identical (#2 skip-if-exists; #17 already canonical)",
             hAppleCardBefore === readFin("debts/Debt-Apple-Card.md")
         );
+
+        // ===== I: history audit-trail contract =====
+        const iNoErrors = history.every(h => !h.errors || (Array.isArray(h.errors) && h.errors.length === 0));
+        ok(
+            "HC-V01190-FIN-SEED-MIGRATE-I1 every pass-1 history event has empty errors[] (audit-trail contract)",
+            iNoErrors
+        );
+        const iWarnings = history.filter(h => h && h.event === "warning");
+        ok(
+            "HC-V01190-FIN-SEED-MIGRATE-I2 zero warning events in pass-1 history (all 19 migrations succeeded loud)",
+            iWarnings.length === 0,
+            `got ${iWarnings.length} warnings — first: ${iWarnings[0] ? JSON.stringify(iWarnings[0]).slice(0, 200) : "(none)"}`
+        );
     } finally {
         if (KEEP) {
             console.log(`  KEEP_SEED_VAULT=1: ${finRoot}`);
