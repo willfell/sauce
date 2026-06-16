@@ -240,6 +240,76 @@ ok('DLG-13b destinationPath today (with stub moment)',
     sharedWindow.customJS = undefined;
 })();
 
+// --- DLG-17: composeMarkdownLink static helper ---
+ok('DLG-17 composeMarkdownLink label+url',
+    ToDoCreateTask.composeMarkdownLink('spec', 'https://x/y') === '[spec](https://x/y)');
+
+ok('DLG-17a composeMarkdownLink empty label falls back to url',
+    ToDoCreateTask.composeMarkdownLink('', 'https://x/y') === '[https://x/y](https://x/y)');
+
+ok('DLG-17b composeMarkdownLink whitespace url → null',
+    ToDoCreateTask.composeMarkdownLink('lbl', '   ') === null);
+
+ok('DLG-17c composeMarkdownLink empty url → null',
+    ToDoCreateTask.composeMarkdownLink('lbl', '') === null);
+
+// --- DLG-18: serializePayloadToLine preserves embedded markdown verbatim ---
+// A title like `Read [spec](https://x) [[Acme]]` must flow through unchanged —
+// the dialog's inserters write markdown straight into the title field.
+ok('DLG-18 serialize preserves [label](url) + [[wikilink]]',
+    ToDoCreateTask.serializePayloadToLine({
+        mode: 'one-shot', title: 'Read [spec](https://x) [[Acme]]', destination: 'today',
+    }) === '- [ ] Read [spec](https://x) [[Acme]]');
+
+// --- DLG-19: _appendToTitle instance helper ---
+// The harness DOM stub (document = {}) cannot render a real form, so we exercise
+// the inserter's core mutation directly with a fake titleInput + state. This is
+// the documented fallback when a full DOM-render is impractical in the harness.
+(() => {
+    const inst = new ToDoCreateTask();
+    const titleInput = { value: '' };
+    const state = { title: '' };
+
+    inst._appendToTitle(state, titleInput, '[[Note]]');
+    ok('DLG-19 _appendToTitle sets state.title', state.title === '[[Note]]', `got ${JSON.stringify(state.title)}`);
+    ok('DLG-19a _appendToTitle mirrors to titleInput.value', titleInput.value === '[[Note]]', `got ${JSON.stringify(titleInput.value)}`);
+
+    // Second append inserts a single separating space.
+    inst._appendToTitle(state, titleInput, '[spec](https://x)');
+    ok('DLG-19b second append adds separating space',
+        state.title === '[[Note]] [spec](https://x)', `got ${JSON.stringify(state.title)}`);
+    ok('DLG-19c second append mirrors to titleInput.value',
+        titleInput.value === '[[Note]] [spec](https://x)', `got ${JSON.stringify(titleInput.value)}`);
+})();
+
+// --- DLG-20: _loadNoteList defensive fallbacks ---
+(() => {
+    const inst = new ToDoCreateTask();
+
+    // No vault / missing getMarkdownFiles → [] (no throw).
+    sharedWindow.app = undefined;
+    ok('DLG-20 _loadNoteList returns [] without app', Array.isArray(inst._loadNoteList()) && inst._loadNoteList().length === 0);
+
+    sharedWindow.app = { vault: {} };
+    ok('DLG-20a _loadNoteList returns [] when getMarkdownFiles absent',
+        Array.isArray(inst._loadNoteList()) && inst._loadNoteList().length === 0);
+
+    // With a stub vault, returns { name, path } sorted by name, capped at 200.
+    sharedWindow.app = {
+        vault: {
+            getMarkdownFiles: () => [
+                { basename: 'Zebra', path: 'a/Zebra.md' },
+                { basename: 'Acme', path: 'b/Acme.md' },
+            ],
+        },
+    };
+    const list = inst._loadNoteList();
+    ok('DLG-20b _loadNoteList maps + sorts by name',
+        list.length === 2 && list[0].name === 'Acme' && list[1].name === 'Zebra', `got ${JSON.stringify(list)}`);
+    ok('DLG-20c _loadNoteList carries path', list[0].path === 'b/Acme.md', `got ${JSON.stringify(list[0])}`);
+    sharedWindow.app = undefined;
+})();
+
 console.log('');
 console.log(`Tests: ${pass}/${pass + fail}`);
 if (fail > 0) {

@@ -101,6 +101,18 @@ class ToDoCreateTask {
         return 'th';
     }
 
+    /**
+     * Compose a Markdown hyperlink `[label](url)` for the +New Task inserter.
+     * Returns null when the URL is empty (after trim). When the label is empty,
+     * falls back to the URL itself so the link still renders.
+     */
+    static composeMarkdownLink(label, url) {
+        const u = (url || '').trim();
+        if (!u) return null;
+        const l = (label || '').trim() || u;
+        return `[${l}](${u})`;
+    }
+
     static validatePayload(payload) {
         if (!payload) return { valid: false, reason: 'empty payload' };
         if (!payload.title || !payload.title.trim()) return { valid: false, reason: 'title required' };
@@ -230,6 +242,10 @@ class ToDoCreateTask {
         titleInput.oninput = () => { state.title = titleInput.value; updateSubmit(); };
         setTimeout(() => titleInput.focus(), 50);
 
+        // Optional inserters (note-link picker + URL hyperlink) append to the title.
+        // Pass a getter so handlers call the REAL updateSubmit rebound below.
+        this._renderInserters(host, state, titleInput, () => updateSubmit);
+
         label('Destination');
         const destSelect = host.createEl('select');
         destSelect.style.cssText = titleInput.style.cssText;
@@ -301,6 +317,10 @@ class ToDoCreateTask {
         titleInput.value = state.title;
         titleInput.oninput = () => { state.title = titleInput.value; updateSubmit(); };
         setTimeout(() => titleInput.focus(), 50);
+
+        // Optional inserters (note-link picker + URL hyperlink) append to the title.
+        // Pass a getter so handlers call the REAL updateSubmit rebound below.
+        this._renderInserters(host, state, titleInput, () => updateSubmit);
 
         label('Frequency');
         const freqSel = host.createEl('select');
@@ -579,5 +599,102 @@ class ToDoCreateTask {
         } catch (e) {
             return [];
         }
+    }
+
+    /**
+     * Return up to 200 vault markdown notes as { name, path }, sorted by name.
+     * Mirrors _loadProjectList's defensive style: any failure → [].
+     */
+    _loadNoteList() {
+        try {
+            const vault = window.app && window.app.vault;
+            if (!vault || typeof vault.getMarkdownFiles !== 'function') return [];
+            const files = vault.getMarkdownFiles() || [];
+            const notes = files.map(f => ({ name: f.basename, path: f.path }));
+            notes.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+            return notes.slice(0, 200);
+        } catch (e) {
+            return [];
+        }
+    }
+
+    /**
+     * Append `text` to the running title (state + input), inserting a single
+     * separating space when the title is non-empty. Does NOT call updateSubmit —
+     * the caller is responsible for re-evaluating the submit button.
+     */
+    _appendToTitle(state, titleInput, text) {
+        state.title = (state.title ? state.title.trimEnd() + ' ' : '') + text;
+        titleInput.value = state.title;
+    }
+
+    /**
+     * Shared inserter UI rendered immediately after the Title input on BOTH the
+     * one-shot and recurring forms. Provides:
+     *   - "Link a note (optional)": filter box + <select> → appends [[Note Name]]
+     *   - "Add link (optional)": label + url + button → appends [label](url)
+     *
+     * `getUpdateSubmit` returns the REAL (rebound) updateSubmit at call time. The
+     * forms forward-declare `updateSubmit` as a `let` and rebind it after the
+     * footer is built, so we must re-read it through the getter rather than
+     * capturing its initial no-op value.
+     */
+    _renderInserters(host, state, titleInput, getUpdateSubmit) {
+        const label = (text) => {
+            const el = host.createEl('div', { text });
+            el.style.cssText = 'font-size:10px; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-muted, #999); margin-top:10px; margin-bottom:4px;';
+            return el;
+        };
+        const fieldCss = 'width:100%; padding:6px 8px; background:var(--background-secondary,#2a2a2a); border:1px solid var(--background-modifier-border,#444); border-radius:4px; color:var(--text-normal,#ddd);';
+
+        // --- Link a note (optional): filter + select → [[Note Name]] ---
+        label('Link a note (optional)');
+        const notes = this._loadNoteList();
+        const noteFilter = host.createEl('input', { type: 'text' });
+        noteFilter.placeholder = 'Filter notes…';
+        noteFilter.style.cssText = fieldCss;
+        const noteSelect = host.createEl('select');
+        noteSelect.style.cssText = fieldCss + ' margin-top:4px;';
+        const repopulate = (filter) => {
+            noteSelect.innerHTML = '';
+            const none = noteSelect.createEl('option', { text: '(none)' });
+            none.value = '';
+            const f = (filter || '').trim().toLowerCase();
+            for (const n of notes) {
+                if (f && !String(n.name).toLowerCase().includes(f)) continue;
+                const o = noteSelect.createEl('option', { text: n.name });
+                o.value = n.name;
+            }
+        };
+        repopulate('');
+        noteFilter.oninput = () => repopulate(noteFilter.value);
+        noteSelect.onchange = () => {
+            const value = noteSelect.value;
+            if (value) {
+                this._appendToTitle(state, titleInput, '[[' + value + ']]');
+                noteSelect.value = '';
+                getUpdateSubmit()();
+            }
+        };
+
+        // --- Add link (optional): label + url + button → [label](url) ---
+        label('Add link (optional)');
+        const labelInput = host.createEl('input', { type: 'text' });
+        labelInput.placeholder = 'Label';
+        labelInput.style.cssText = fieldCss;
+        const urlInput = host.createEl('input', { type: 'text' });
+        urlInput.placeholder = 'https://…';
+        urlInput.style.cssText = fieldCss + ' margin-top:4px;';
+        const insertBtn = host.createEl('button', { text: 'Insert link' });
+        insertBtn.style.cssText = 'margin-top:6px; padding:5px 12px; border-radius:4px; border:1px solid var(--background-modifier-border,#444); background:var(--background-secondary,#2a2a2a); color:var(--text-normal,#ddd); cursor:pointer;';
+        insertBtn.onclick = () => {
+            const md = ToDoCreateTask.composeMarkdownLink(labelInput.value, urlInput.value);
+            if (md) {
+                this._appendToTitle(state, titleInput, md);
+                labelInput.value = '';
+                urlInput.value = '';
+                getUpdateSubmit()();
+            }
+        };
     }
 }
