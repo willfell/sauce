@@ -12787,6 +12787,8 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports._migrateBudgetBody = _migrateBudgetBody;
     // v0.110.1 — vault-wide EntityCreate direct-call → guard rewrite.
     module.exports.applyEntityCreateGuardMigration = applyEntityCreateGuardMigration;
+    // v0.119.0 impl-3 — registry materializer for entity-create direct-invocation harness.
+    module.exports.applyNewEntityButtons = applyNewEntityButtons;
     // v0.110.2 — generalized: ANY direct customJS.<Class>.render(dv,...) → guard.
     module.exports.applyCustomJsGuardMigration = applyCustomJsGuardMigration;
     // v0.111.0 — collapse FinanceHubActions + FinanceNavRow → single-line FinanceNav.
@@ -12802,6 +12804,22 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports.applyRecurringSentinelV070Migration = applyRecurringSentinelV070Migration;
     module.exports.mergeDuplicateRecurringSections = mergeDuplicateRecurringSections;
     module.exports.stripPersistedRecurringSection = stripPersistedRecurringSection;
+    // v0.119.0 impl-1 — project blueprint installer migrations (for run-seed-migrations.js
+    // HC-V01190-PROJ-SEED-MIGRATE-* direct-invocation family). Pure additive.
+    module.exports.applyProjectSectionsMigration = applyProjectSectionsMigration;
+    module.exports.applyProjectSectionsHubMigration = applyProjectSectionsHubMigration;
+    module.exports.applyProjectSectionsCloseRepair = applyProjectSectionsCloseRepair;
+    module.exports.applyEmptyProjectWikilinkRepair = applyEmptyProjectWikilinkRepair;
+    // v0.119.0 impl-2 — finance blueprint installer migrations (for run-seed-migrations.js
+    // HC-V01190-FIN-SEED-MIGRATE-* direct-invocation family). Pure additive.
+    module.exports.applyFinanceBudgetBodyMigration = applyFinanceBudgetBodyMigration;
+    module.exports.applyFinanceCategoriesGroupBackfill = applyFinanceCategoriesGroupBackfill;
+    module.exports.applyFinanceDefaultsNavRowInjection = applyFinanceDefaultsNavRowInjection;
+    module.exports.applyFinanceDefaultsScaffolding = applyFinanceDefaultsScaffolding;
+    module.exports.applyFinanceNavRowGuardFormMigration = applyFinanceNavRowGuardFormMigration;
+    module.exports.applyFinancePaycheckBodyMigration = applyFinancePaycheckBodyMigration;
+    module.exports.applyFinancePaycheckDefaultsDebtBackfill = applyFinancePaycheckDefaultsDebtBackfill;
+    module.exports.applyFinanceTopHubNavRowDedup = applyFinanceTopHubNavRowDedup;
     //
     // CF-2: by default, capture run-install.js's stdio (Phase B/C surfaced
     // 2200-line JSON dumps mixed into the user's terminal). We tee the

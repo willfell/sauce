@@ -1,0 +1,4949 @@
+{
+  "generated_at": "0.120.1",
+  "rubric_version": "1.0.0",
+  "entries": [
+    {
+      "kind": "blueprint",
+      "name": "cowork",
+      "current_version": "0.40.2",
+      "axes": {
+        "customjs_behavioral": {
+          "score": 0,
+          "covered": 0,
+          "total": 9,
+          "methods": [
+            {
+              "cls": "CoworkDailyHubCards",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "CoworkWeeklyHubCards",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "CoworkMonthlyHubCards",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "CoworkTimeframeButtons",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "CoworkHubNav",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "CoworkDailyActions",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "CoworkReadiness",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "CoworkLatestRuns",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "CoworkLensShiftCards",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            }
+          ],
+          "suggested_archetype": "behavioral-runner",
+          "suggested_target_file": "platform/test/run-cowork-coworkdailyhubcards.js"
+        },
+        "installer_migration": {
+          "score": null,
+          "reason": "no install-time migrations attributed",
+          "migrations": [],
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "manifest_schema": {
+          "score": 0.8333333333333333,
+          "manifest_ratio": 0.6666666666666666,
+          "schema_ratio": 1,
+          "manifest_fields": [
+            {
+              "field": "name",
+              "asserted": true
+            },
+            {
+              "field": "version",
+              "asserted": true
+            },
+            {
+              "field": "customjs_classes",
+              "asserted": false
+            },
+            {
+              "field": "files",
+              "asserted": true
+            },
+            {
+              "field": "rule_fragments",
+              "asserted": true
+            },
+            {
+              "field": "depends_on",
+              "asserted": false
+            }
+          ],
+          "schema_owned": 0,
+          "suggested_archetype": "hc-family",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "template_lockstep": {
+          "score": 1,
+          "covered": 26,
+          "total": 26,
+          "items": [
+            {
+              "kind": "template",
+              "name": "Weekly Note.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Monthly Note.md",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "cowork",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "cowork",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "cowork",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "cowork",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "cowork",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "cowork",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "cowork",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "cowork",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "cowork",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "cowork",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "cowork",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "cowork",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "cowork",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "cowork",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "cowork",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "cowork",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "cowork",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "cowork",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "cowork",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "cowork",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "cowork",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "cowork",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "cowork",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "cowork",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "template-assert",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "widget_render": {
+          "score": 0,
+          "covered": 0,
+          "total": 9,
+          "widgets": [
+            {
+              "widget": "CoworkDailyHubCards",
+              "covered": false
+            },
+            {
+              "widget": "CoworkWeeklyHubCards",
+              "covered": false
+            },
+            {
+              "widget": "CoworkMonthlyHubCards",
+              "covered": false
+            },
+            {
+              "widget": "CoworkTimeframeButtons",
+              "covered": false
+            },
+            {
+              "widget": "CoworkHubNav",
+              "covered": false
+            },
+            {
+              "widget": "CoworkDailyActions",
+              "covered": false
+            },
+            {
+              "widget": "CoworkReadiness",
+              "covered": false
+            },
+            {
+              "widget": "CoworkLatestRuns",
+              "covered": false
+            },
+            {
+              "widget": "CoworkLensShiftCards",
+              "covered": false
+            }
+          ],
+          "suggested_archetype": "renderer-extend",
+          "suggested_target_file": "platform/test/run-renderer.js"
+        },
+        "integration_smoke": {
+          "score": 1,
+          "happy_path": true,
+          "failure_mode": true,
+          "suggested_archetype": "smoke-extend",
+          "suggested_target_file": "platform/test/run-integration-smoke.js"
+        }
+      },
+      "composite_score": 0.5666666666666667,
+      "blast_radius": "high",
+      "blast_radius_rationale": "Active arc with cross-machine state; recent migrations every cycle.",
+      "recent_incidents_30d": 103,
+      "priority_score": 2,
+      "top_gap": {
+        "axis": "customjs_behavioral",
+        "score": 2,
+        "archetype": "behavioral-runner",
+        "target_file": "platform/test/run-cowork-coworkdailyhubcards.js"
+      },
+      "qualitative": {
+        "validates_scores": "no",
+        "false_positives": [],
+        "false_negatives": [
+          {
+            "axis": "customjs_behavioral",
+            "note": "run-cowork-smoke.js (954 asserts) validates class declarations + manifest contracts + hub-file usage but does not pattern-match grep heuristic; actual render() invocation only at runtime"
+          },
+          {
+            "axis": "widget_render",
+            "note": "9 customjs widgets exercised in cowork-smoke via structural asserts; run-renderer.js has no cowork fixtures"
+          }
+        ],
+        "primary_user_flow": "Engagement-aware daily/weekly/monthly orchestrators gather cross-MCP signals and synthesize atomic notes rendered via cowork helper classes.",
+        "qualitative_recommendation": "True coverage is much higher than 0.0 scores suggest; cowork-smoke is comprehensive at structural level. Closing rubric gap could come from either migrating widget asserts to run-renderer.js OR adding explicit method-call patterns to cowork-smoke to match the grep heuristic."
+      }
+    },
+    {
+      "kind": "blueprint",
+      "name": "scratch",
+      "current_version": "0.5.2",
+      "axes": {
+        "customjs_behavioral": {
+          "score": 0.625,
+          "covered": 5,
+          "total": 8,
+          "methods": [
+            {
+              "cls": "ScratchHubCards",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "ScratchDayList",
+              "method": "render",
+              "covered": true,
+              "hits": 1
+            },
+            {
+              "cls": "ScratchDayActions",
+              "method": "render",
+              "covered": true,
+              "hits": 1
+            },
+            {
+              "cls": "ScratchLeafActions",
+              "method": "render",
+              "covered": true,
+              "hits": 1
+            },
+            {
+              "cls": "ScratchHubActions",
+              "method": "render",
+              "covered": true,
+              "hits": 1
+            },
+            {
+              "cls": "ScratchDayMigrate",
+              "method": "migrate",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "ScratchDayMigrate",
+              "method": "migrateAll",
+              "covered": true,
+              "hits": 2
+            },
+            {
+              "cls": "ScratchDayMigrateInit",
+              "method": "invoke",
+              "covered": false,
+              "hits": 0
+            }
+          ],
+          "suggested_archetype": "behavioral-runner",
+          "suggested_target_file": "platform/test/run-scratch-scratchhubcards.js"
+        },
+        "installer_migration": {
+          "score": null,
+          "reason": "no install-time migrations attributed",
+          "migrations": [],
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "manifest_schema": {
+          "score": 0.9166666666666667,
+          "manifest_ratio": 0.8333333333333334,
+          "schema_ratio": 1,
+          "manifest_fields": [
+            {
+              "field": "name",
+              "asserted": true
+            },
+            {
+              "field": "version",
+              "asserted": true
+            },
+            {
+              "field": "customjs_classes",
+              "asserted": true
+            },
+            {
+              "field": "files",
+              "asserted": true
+            },
+            {
+              "field": "rule_fragments",
+              "asserted": true
+            },
+            {
+              "field": "depends_on",
+              "asserted": false
+            }
+          ],
+          "schema_owned": 0,
+          "suggested_archetype": "hc-family",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "template_lockstep": {
+          "score": 1,
+          "covered": 4,
+          "total": 4,
+          "items": [
+            {
+              "kind": "template",
+              "name": "Scratch.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Scratch Day Hub.md",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "scratch",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "scratch-day-hub",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "template-assert",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "widget_render": {
+          "score": 0,
+          "covered": 0,
+          "total": 5,
+          "widgets": [
+            {
+              "widget": "ScratchHubCards",
+              "covered": false
+            },
+            {
+              "widget": "ScratchDayList",
+              "covered": false
+            },
+            {
+              "widget": "ScratchDayActions",
+              "covered": false
+            },
+            {
+              "widget": "ScratchLeafActions",
+              "covered": false
+            },
+            {
+              "widget": "ScratchHubActions",
+              "covered": false
+            }
+          ],
+          "suggested_archetype": "renderer-extend",
+          "suggested_target_file": "platform/test/run-renderer.js"
+        },
+        "integration_smoke": {
+          "score": 1,
+          "happy_path": true,
+          "failure_mode": true,
+          "suggested_archetype": "smoke-extend",
+          "suggested_target_file": "platform/test/run-integration-smoke.js"
+        }
+      },
+      "composite_score": 0.7083333333333334,
+      "blast_radius": "high",
+      "blast_radius_rationale": "Daily hits; carries todo capture surface.",
+      "recent_incidents_30d": 6,
+      "priority_score": 1.5,
+      "top_gap": {
+        "axis": "widget_render",
+        "score": 1.5,
+        "archetype": "renderer-extend",
+        "target_file": "platform/test/run-renderer.js"
+      },
+      "qualitative": {
+        "validates_scores": "no",
+        "false_positives": [
+          {
+            "axis": "customjs_behavioral",
+            "note": "run-scratch.js tests private _coerceDay and _migrateFrontmatter via HC-V0841-* families; deterministic scorer counts only public methods. Public render() on 5 of 7 classes never harnessed."
+          },
+          {
+            "axis": "widget_render",
+            "note": "run-renderer.js covers R-SCRATCH-DAYHUB (nav-button dispatch) but does NOT render ScratchDayList or ScratchHubCards widgets."
+          }
+        ],
+        "false_negatives": [
+          {
+            "axis": "customjs_behavioral",
+            "note": "ScratchDayActions.render(), ScratchLeafActions.render(), ScratchHubActions.render() have zero behavioral harness; ScratchDayList.render() + _extractPreviewFromBody + _pollForDayArg untested under stub Obsidian app"
+          }
+        ],
+        "primary_user_flow": "User opens Scratch nav-button -> day-hub created or opened -> ScratchDayActions renders '+ New Scratch' and 'Hub' buttons -> entity-create collects title -> new Scratch leaf with ScratchLeafActions buttons.",
+        "qualitative_recommendation": "Test debt is material despite high template/integration scores. Recommend: (1) add template-assert HC family for 3 template files; (2) extend run-renderer.js with ScratchDayList + ScratchHubCards fixtures; (3) add behavioral-runner for ScratchDayActions + ScratchLeafActions render() to cover vault read/Notice/workspace orchestration."
+      }
+    },
+    {
+      "kind": "blueprint",
+      "name": "to-do",
+      "current_version": "0.8.1",
+      "axes": {
+        "customjs_behavioral": {
+          "score": 0.8064516129032258,
+          "covered": 25,
+          "total": 31,
+          "methods": [
+            {
+              "cls": "ToDoHubActions",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "ToDoLeafActions",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "ToDoAllList",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "TaskParser",
+              "method": "parseTasks",
+              "covered": true,
+              "hits": 6
+            },
+            {
+              "cls": "RecurrenceParser",
+              "method": "isSupported",
+              "covered": true,
+              "hits": 8
+            },
+            {
+              "cls": "RecurrenceParser",
+              "method": "matches",
+              "covered": true,
+              "hits": 5
+            },
+            {
+              "cls": "ToDoDailyCarryover",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "ToDoDailyCarryover",
+              "method": "materialize",
+              "covered": true,
+              "hits": 2
+            },
+            {
+              "cls": "ToDoDailyCarryover",
+              "method": "hasSentinel",
+              "covered": true,
+              "hits": 3
+            },
+            {
+              "cls": "ToDoDailyCarryover",
+              "method": "findPriorDateInList",
+              "covered": true,
+              "hits": 3
+            },
+            {
+              "cls": "ToDoDailyCarryover",
+              "method": "eligibleBlocks",
+              "covered": true,
+              "hits": 3
+            },
+            {
+              "cls": "ToDoDailyCarryover",
+              "method": "stripBlocks",
+              "covered": true,
+              "hits": 3
+            },
+            {
+              "cls": "ToDoDailyCarryover",
+              "method": "decorateTopLine",
+              "covered": true,
+              "hits": 3
+            },
+            {
+              "cls": "ToDoDailyCarryover",
+              "method": "insertCarryoverIntoToday",
+              "covered": true,
+              "hits": 3
+            },
+            {
+              "cls": "ToDoDailyCarryover",
+              "method": "writeSentinel",
+              "covered": true,
+              "hits": 3
+            },
+            {
+              "cls": "ToDoDailyRecurring",
+              "method": "render",
+              "covered": true,
+              "hits": 1
+            },
+            {
+              "cls": "ToDoDailyRecurring",
+              "method": "materialize",
+              "covered": true,
+              "hits": 2
+            },
+            {
+              "cls": "ToDoDailyRecurring",
+              "method": "parseRegistryLine",
+              "covered": true,
+              "hits": 3
+            },
+            {
+              "cls": "ToDoDailyRecurring",
+              "method": "parseRegistry",
+              "covered": true,
+              "hits": 3
+            },
+            {
+              "cls": "ToDoDailyRecurring",
+              "method": "matchesToday",
+              "covered": true,
+              "hits": 2
+            },
+            {
+              "cls": "ToDoDailyRecurring",
+              "method": "materializeLineFromEntry",
+              "covered": true,
+              "hits": 3
+            },
+            {
+              "cls": "ToDoDailyRecurring",
+              "method": "insertRecurringIntoToday",
+              "covered": true,
+              "hits": 3
+            },
+            {
+              "cls": "ToDoDailyProjectGroups",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "ToDoDailyUnassignedMeetings",
+              "method": "render",
+              "covered": true,
+              "hits": 1
+            },
+            {
+              "cls": "ToDoCreateTask",
+              "method": "serializePayloadToLine",
+              "covered": true,
+              "hits": 3
+            },
+            {
+              "cls": "ToDoCreateTask",
+              "method": "destinationPath",
+              "covered": true,
+              "hits": 3
+            },
+            {
+              "cls": "ToDoCreateTask",
+              "method": "composeRecurrenceGrammar",
+              "covered": true,
+              "hits": 3
+            },
+            {
+              "cls": "ToDoCreateTask",
+              "method": "composeMarkdownLink",
+              "covered": true,
+              "hits": 3
+            },
+            {
+              "cls": "ToDoCreateTask",
+              "method": "validatePayload",
+              "covered": true,
+              "hits": 3
+            },
+            {
+              "cls": "ToDoCreateTask",
+              "method": "open",
+              "covered": true,
+              "hits": 6
+            },
+            {
+              "cls": "ToDoCreateTaskInit",
+              "method": "invoke",
+              "covered": false,
+              "hits": 0
+            }
+          ],
+          "suggested_archetype": "behavioral-runner",
+          "suggested_target_file": "platform/test/run-to-do-todohubactions.js"
+        },
+        "installer_migration": {
+          "score": 0.5,
+          "covered": 3,
+          "total": 6,
+          "migrations": [
+            {
+              "fn": "applyWikiToDocsMigration",
+              "covered": false
+            },
+            {
+              "fn": "applyOrphanedHelperCleanup",
+              "covered": false
+            },
+            {
+              "fn": "applyToDoBlueprintMigration",
+              "covered": true
+            },
+            {
+              "fn": "applyRecurringSentinelV070Migration",
+              "covered": true
+            },
+            {
+              "fn": "applyProjectTodoBackfill",
+              "covered": true
+            },
+            {
+              "fn": "applyPreInstall",
+              "covered": false
+            }
+          ],
+          "suggested_archetype": "seed-migrate",
+          "suggested_target_file": "platform/test/run-seed-migrations.js"
+        },
+        "manifest_schema": {
+          "score": 1,
+          "manifest_ratio": 1,
+          "schema_ratio": 1,
+          "manifest_fields": [
+            {
+              "field": "name",
+              "asserted": true
+            },
+            {
+              "field": "version",
+              "asserted": true
+            },
+            {
+              "field": "customjs_classes",
+              "asserted": true
+            },
+            {
+              "field": "files",
+              "asserted": true
+            },
+            {
+              "field": "rule_fragments",
+              "asserted": true
+            },
+            {
+              "field": "depends_on",
+              "asserted": true
+            }
+          ],
+          "schema_owned": 0,
+          "suggested_archetype": "hc-family",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "template_lockstep": {
+          "score": 1,
+          "covered": 5,
+          "total": 5,
+          "items": [
+            {
+              "kind": "template",
+              "name": "Today To-Do.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Project To-Do.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Recurring Tasks.md",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "to-do",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "to-do-recurring",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "template-assert",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "widget_render": {
+          "score": 0,
+          "covered": 0,
+          "total": 7,
+          "widgets": [
+            {
+              "widget": "ToDoHubActions",
+              "covered": false
+            },
+            {
+              "widget": "ToDoLeafActions",
+              "covered": false
+            },
+            {
+              "widget": "ToDoAllList",
+              "covered": false
+            },
+            {
+              "widget": "ToDoDailyCarryover",
+              "covered": false
+            },
+            {
+              "widget": "ToDoDailyRecurring",
+              "covered": false
+            },
+            {
+              "widget": "ToDoDailyProjectGroups",
+              "covered": false
+            },
+            {
+              "widget": "ToDoDailyUnassignedMeetings",
+              "covered": false
+            }
+          ],
+          "suggested_archetype": "renderer-extend",
+          "suggested_target_file": "platform/test/run-renderer.js"
+        },
+        "integration_smoke": {
+          "score": 1,
+          "happy_path": true,
+          "failure_mode": true,
+          "suggested_archetype": "smoke-extend",
+          "suggested_target_file": "platform/test/run-integration-smoke.js"
+        }
+      },
+      "composite_score": 0.717741935483871,
+      "blast_radius": "high",
+      "blast_radius_rationale": "Multi-cycle storm v0.116-v0.118; highest recent-incident rate.",
+      "recent_incidents_30d": 20,
+      "priority_score": 1.5,
+      "top_gap": {
+        "axis": "widget_render",
+        "score": 1.5,
+        "archetype": "renderer-extend",
+        "target_file": "platform/test/run-renderer.js"
+      },
+      "qualitative": {
+        "validates_scores": "no",
+        "false_positives": [
+          {
+            "axis": "customjs_behavioral",
+            "note": "Score 0.800 (28/35) overstates coverage. Five dedicated runners exist but test only 10 of 11 classes (ToDoHubActions, ToDoLeafActions, ToDoAllList, ToDoCreateTaskInit untested)."
+          }
+        ],
+        "false_negatives": [
+          {
+            "axis": "installer_migration",
+            "note": "applyProjectTodoBackfill (v0.4.0 project-todo backfill) has zero seed-migrate coverage; only applyToDoBlueprintMigration is tested via HC-V01174-MIGRATE-*"
+          },
+          {
+            "axis": "widget_render",
+            "note": "All 7 render-capable classes (ToDoHubActions, ToDoLeafActions, ToDoAllList, ToDoDailyCarryover, ToDoDailyRecurring, ToDoDailyProjectGroups, ToDoDailyUnassignedMeetings) absent from run-renderer.js. Most critical widget gap for a high-blast-radius blueprint."
+          }
+        ],
+        "primary_user_flow": "Create daily to-do via nav button -> carryover yesterday's tasks -> view recurring registry materialization -> add/complete tasks via new dialog -> browse all-to-dos aggregator.",
+        "qualitative_recommendation": "Two implementation cycles candidate: (1) HC-V0XYZ-SEED-MIGRATE-PROJECT-TODO family in run-seed-migrations.js extending seed-vault with pre-v0.4.0 project structure; (2) extend run-renderer.js with 7 to-do widget fixtures."
+      }
+    },
+    {
+      "kind": "blueprint",
+      "name": "project",
+      "current_version": "1.22.2",
+      "axes": {
+        "customjs_behavioral": {
+          "score": 0.3157894736842105,
+          "covered": 6,
+          "total": 19,
+          "methods": [
+            {
+              "cls": "ProjectNavButtons",
+              "method": "detectContext",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "ProjectNavButtons",
+              "method": "renderTaskNoteTiles",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "ProjectNavButtons",
+              "method": "render",
+              "covered": true,
+              "hits": 1
+            },
+            {
+              "cls": "ProjectWorkstreams",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "ProjectWorkstreamManager",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "ProjectsHubCards",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "ProjectNotesCards",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "ProjectReferencedByCards",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "ProjectTaskCreateListener",
+              "method": "init",
+              "covered": true,
+              "hits": 5
+            },
+            {
+              "cls": "ProjectTaskCreateListenerInit",
+              "method": "invoke",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "ProjectDocsCards",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "ProjectStatusWidget",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "ProjectDocsSections",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "ProjectMeetingsPanel",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "Breadcrumb",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "ProjectDocsIndex",
+              "method": "render",
+              "covered": true,
+              "hits": 1
+            },
+            {
+              "cls": "SectionHub",
+              "method": "render",
+              "covered": true,
+              "hits": 1
+            },
+            {
+              "cls": "DocSearch",
+              "method": "render",
+              "covered": true,
+              "hits": 7
+            },
+            {
+              "cls": "DocSearch",
+              "method": "matches",
+              "covered": true,
+              "hits": 9
+            }
+          ],
+          "suggested_archetype": "behavioral-runner",
+          "suggested_target_file": "platform/test/run-project-projectnavbuttons.js"
+        },
+        "installer_migration": {
+          "score": 1,
+          "covered": 5,
+          "total": 5,
+          "migrations": [
+            {
+              "fn": "applyProjectSectionsMigration",
+              "covered": true
+            },
+            {
+              "fn": "applyProjectSectionsHubMigration",
+              "covered": true
+            },
+            {
+              "fn": "applyProjectSectionsCloseRepair",
+              "covered": true
+            },
+            {
+              "fn": "applyEmptyProjectWikilinkRepair",
+              "covered": true
+            },
+            {
+              "fn": "applyProjectTodoBackfill",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "seed-migrate",
+          "suggested_target_file": "platform/test/run-seed-migrations.js"
+        },
+        "manifest_schema": {
+          "score": 1,
+          "manifest_ratio": 1,
+          "schema_ratio": 1,
+          "manifest_fields": [
+            {
+              "field": "name",
+              "asserted": true
+            },
+            {
+              "field": "version",
+              "asserted": true
+            },
+            {
+              "field": "customjs_classes",
+              "asserted": true
+            },
+            {
+              "field": "files",
+              "asserted": true
+            },
+            {
+              "field": "rule_fragments",
+              "asserted": true
+            },
+            {
+              "field": "depends_on",
+              "asserted": true
+            }
+          ],
+          "schema_owned": 0,
+          "suggested_archetype": "hc-family",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "template_lockstep": {
+          "score": 1,
+          "covered": 15,
+          "total": 15,
+          "items": [
+            {
+              "kind": "template",
+              "name": "Project.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Project Map.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Project Board.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Kanban Card.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Task Note.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Task Board.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Task Board Card.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Docs Hub.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Doc Note.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Section Hub.md",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "project",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "docs-hub",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "doc-note",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "section-hub",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "project-todo",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "template-assert",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "widget_render": {
+          "score": 0.21428571428571427,
+          "covered": 3,
+          "total": 14,
+          "widgets": [
+            {
+              "widget": "ProjectNavButtons",
+              "covered": false
+            },
+            {
+              "widget": "ProjectWorkstreams",
+              "covered": false
+            },
+            {
+              "widget": "ProjectWorkstreamManager",
+              "covered": false
+            },
+            {
+              "widget": "ProjectsHubCards",
+              "covered": false
+            },
+            {
+              "widget": "ProjectNotesCards",
+              "covered": false
+            },
+            {
+              "widget": "ProjectReferencedByCards",
+              "covered": false
+            },
+            {
+              "widget": "ProjectDocsCards",
+              "covered": true
+            },
+            {
+              "widget": "ProjectStatusWidget",
+              "covered": false
+            },
+            {
+              "widget": "ProjectDocsSections",
+              "covered": true
+            },
+            {
+              "widget": "ProjectMeetingsPanel",
+              "covered": false
+            },
+            {
+              "widget": "Breadcrumb",
+              "covered": false
+            },
+            {
+              "widget": "ProjectDocsIndex",
+              "covered": true
+            },
+            {
+              "widget": "SectionHub",
+              "covered": false
+            },
+            {
+              "widget": "DocSearch",
+              "covered": false
+            }
+          ],
+          "suggested_archetype": "renderer-extend",
+          "suggested_target_file": "platform/test/run-renderer.js"
+        },
+        "integration_smoke": {
+          "score": 1,
+          "happy_path": true,
+          "failure_mode": true,
+          "suggested_archetype": "smoke-extend",
+          "suggested_target_file": "platform/test/run-integration-smoke.js"
+        }
+      },
+      "composite_score": 0.7550125313283208,
+      "blast_radius": "high",
+      "blast_radius_rationale": "Docs hub + sections + section hubs + search arc; load-bearing.",
+      "recent_incidents_30d": 32,
+      "priority_score": 1.368421052631579,
+      "top_gap": {
+        "axis": "customjs_behavioral",
+        "score": 1.368421052631579,
+        "archetype": "behavioral-runner",
+        "target_file": "platform/test/run-project-projectnavbuttons.js"
+      },
+      "qualitative": {
+        "validates_scores": "no",
+        "false_positives": [
+          {
+            "axis": "installer_migration",
+            "note": "Source-checks (HC-V01020-PSM-1, HC-V01030-PSHM-1) verify function declaration but not execution; all 5 project migrations are structurally untested"
+          }
+        ],
+        "false_negatives": [
+          {
+            "axis": "customjs_behavioral",
+            "note": "12 classes lack behavioral asserts: ProjectNavButtons, ProjectWorkstreams, ProjectsHubCards, ProjectNotesCards, ProjectReferencedByCards, ProjectTaskCreateListener, ProjectStatusWidget, ProjectDocsSections, ProjectDocsCards, DocSearch, SectionHub, ProjectWorkstreamManager"
+          },
+          {
+            "axis": "widget_render",
+            "note": "10 widget classes with render() methods lack run-renderer.js fixtures: ProjectNavButtons, ProjectWorkstreams, ProjectsHubCards, ProjectDocsCards, ProjectDocsSections, ProjectDocsIndex, SectionHub, DocSearch, ProjectStatusWidget, ProjectWorkstreamManager"
+          }
+        ],
+        "primary_user_flow": "Create a new project via entity-create button -> scaffold project folder + docs/knowledge + docs/notes section hubs -> add doc-notes to sections with Breadcrumb navigation + DocSearch filter.",
+        "qualitative_recommendation": "Frontloaded on manifest + template lockstep (both 1.0) but severely under-covered on behavioral execution and migrations. The 5 project-specific installer migrations receive only static source checks, not functional validation against vault adapters. Impl-1 candidate: target installer_migration (0/5) with HC-V0XYZ-PROJ-SEED-MIGRATE families for the three most-recent migrations (applyProjectSectionsMigration, applyProjectSectionsHubMigration, applyProjectTodoBackfill)."
+      }
+    },
+    {
+      "kind": "blueprint",
+      "name": "meetings",
+      "current_version": "0.8.0",
+      "axes": {
+        "customjs_behavioral": {
+          "score": 1,
+          "covered": 1,
+          "total": 1,
+          "methods": [
+            {
+              "cls": "MeetingsHubCards",
+              "method": "render",
+              "covered": true,
+              "hits": 1
+            }
+          ],
+          "suggested_archetype": "behavioral-runner",
+          "suggested_target_file": "platform/test/run-meetings-meetingshubcards.js"
+        },
+        "installer_migration": {
+          "score": null,
+          "reason": "no install-time migrations attributed",
+          "migrations": [],
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "manifest_schema": {
+          "score": 0.9166666666666667,
+          "manifest_ratio": 0.8333333333333334,
+          "schema_ratio": 1,
+          "manifest_fields": [
+            {
+              "field": "name",
+              "asserted": true
+            },
+            {
+              "field": "version",
+              "asserted": true
+            },
+            {
+              "field": "customjs_classes",
+              "asserted": true
+            },
+            {
+              "field": "files",
+              "asserted": true
+            },
+            {
+              "field": "rule_fragments",
+              "asserted": true
+            },
+            {
+              "field": "depends_on",
+              "asserted": false
+            }
+          ],
+          "schema_owned": 0,
+          "suggested_archetype": "hc-family",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "template_lockstep": {
+          "score": 1,
+          "covered": 4,
+          "total": 4,
+          "items": [
+            {
+              "kind": "template",
+              "name": "Meeting.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Meeting Hub.md",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "meetings",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "meetings",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "template-assert",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "widget_render": {
+          "score": 0,
+          "covered": 0,
+          "total": 1,
+          "widgets": [
+            {
+              "widget": "MeetingsHubCards",
+              "covered": false
+            }
+          ],
+          "suggested_archetype": "renderer-extend",
+          "suggested_target_file": "platform/test/run-renderer.js"
+        },
+        "integration_smoke": {
+          "score": 1,
+          "happy_path": true,
+          "failure_mode": true,
+          "suggested_archetype": "smoke-extend",
+          "suggested_target_file": "platform/test/run-integration-smoke.js"
+        }
+      },
+      "composite_score": 0.7833333333333334,
+      "blast_radius": "high",
+      "blast_radius_rationale": "Linked from project + cowork; recent project-link migration.",
+      "recent_incidents_30d": 4,
+      "priority_score": 1.35,
+      "top_gap": {
+        "axis": "widget_render",
+        "score": 1.35,
+        "archetype": "renderer-extend",
+        "target_file": "platform/test/run-renderer.js"
+      },
+      "qualitative": {
+        "validates_scores": "yes",
+        "false_positives": [
+          {
+            "axis": "widget_render",
+            "note": "MeetingsHubCards listed in customjs_classes[] but render() never instantiated or called with stub DOM"
+          }
+        ],
+        "false_negatives": [
+          {
+            "axis": "customjs_behavioral",
+            "note": "MeetingsHubCards.render(dv) is never invoked in any test harness; method signature verified statically but no behavioral assertions on rendered DOM, async data enrichment, or BeaconCards delegation with project-pill meta"
+          }
+        ],
+        "primary_user_flow": "User creates a meeting note via new-meeting button (entity-create v0.5.0 integration) with optional project link; Meeting Hub renders today's meetings as cards with project pills, attendee chips, task badges via MeetingsHubCards.render().",
+        "qualitative_recommendation": "Well-covered on template lockstep + manifest schema, but widget_render axis is critical gap. MeetingsHubCards.render() is the primary user-facing component (displays cards, filters by date, enriches async file reads, renders project pills, delegates to BeaconCards). Zero behavioral tests means layout/enrichment/pill bugs would ship. Single MEET-3 case in run-helper-cases.js (or run-renderer.js fixture) would unlock both axes to 1.0."
+      }
+    },
+    {
+      "kind": "blueprint",
+      "name": "finance",
+      "current_version": "0.9.2",
+      "axes": {
+        "customjs_behavioral": {
+          "score": 0.4444444444444444,
+          "covered": 20,
+          "total": 45,
+          "methods": [
+            {
+              "cls": "FinanceMath",
+              "method": "readDebts",
+              "covered": true,
+              "hits": 4
+            },
+            {
+              "cls": "FinanceMath",
+              "method": "readPaychecksForMonth",
+              "covered": true,
+              "hits": 4
+            },
+            {
+              "cls": "FinanceMath",
+              "method": "readBudgetForMonth",
+              "covered": true,
+              "hits": 6
+            },
+            {
+              "cls": "FinanceMath",
+              "method": "monthBounds",
+              "covered": true,
+              "hits": 1
+            },
+            {
+              "cls": "FinanceMath",
+              "method": "debtTotals",
+              "covered": true,
+              "hits": 4
+            },
+            {
+              "cls": "FinanceMath",
+              "method": "monthIncome",
+              "covered": true,
+              "hits": 4
+            },
+            {
+              "cls": "FinanceMath",
+              "method": "monthSpending",
+              "covered": true,
+              "hits": 6
+            },
+            {
+              "cls": "FinanceMath",
+              "method": "monthExpensesTotal",
+              "covered": true,
+              "hits": 2
+            },
+            {
+              "cls": "FinanceMath",
+              "method": "monthDebtPaid",
+              "covered": true,
+              "hits": 5
+            },
+            {
+              "cls": "FinanceMath",
+              "method": "debtPaidByDebt",
+              "covered": true,
+              "hits": 3
+            },
+            {
+              "cls": "FinanceMath",
+              "method": "measuredMovement",
+              "covered": true,
+              "hits": 3
+            },
+            {
+              "cls": "FinanceMath",
+              "method": "reconcile",
+              "covered": true,
+              "hits": 3
+            },
+            {
+              "cls": "FinanceMath",
+              "method": "fmtMoney",
+              "covered": true,
+              "hits": 7
+            },
+            {
+              "cls": "FinanceStatus",
+              "method": "derive",
+              "covered": true,
+              "hits": 12
+            },
+            {
+              "cls": "FinanceStatus",
+              "method": "renderBadge",
+              "covered": true,
+              "hits": 14
+            },
+            {
+              "cls": "FinanceStatus",
+              "method": "formatDate",
+              "covered": true,
+              "hits": 8
+            },
+            {
+              "cls": "FinanceHubCards",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "BudgetsCards",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "PaychecksCards",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "InvoicesCards",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "DebtsCards",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "FinanceFrontmatter",
+              "method": "update",
+              "covered": true,
+              "hits": 19
+            },
+            {
+              "cls": "FinanceFrontmatter",
+              "method": "read",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "FinanceFrontmatter",
+              "method": "isTruthy",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "FinanceNavRow",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "BudgetCategoriesEditor",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "PaycheckExpensesEditor",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "InvoiceTimeLogEditor",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "InvoiceControls",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "InvoiceWorkspaceNav",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "BudgetDefaultsEditor",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "PaycheckDefaultsEditor",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "DebtDefaultsEditor",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "DebtConfigEditor",
+              "method": "render",
+              "covered": true,
+              "hits": 4
+            },
+            {
+              "cls": "BudgetSummary",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "PaycheckSummary",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "PaycheckDebtBand",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "DebtSummary",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "DebtsHubSummary",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "FinanceHubActions",
+              "method": "render",
+              "covered": true,
+              "hits": 5
+            },
+            {
+              "cls": "FinanceNav",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "MonthlyOverview",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "MonthsCards",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "MonthDashboard",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "FinanceHubSummary",
+              "method": "render",
+              "covered": true,
+              "hits": 1
+            }
+          ],
+          "suggested_archetype": "behavioral-runner",
+          "suggested_target_file": "platform/test/run-finance-financemath.js"
+        },
+        "installer_migration": {
+          "score": 0.8695652173913043,
+          "covered": 20,
+          "total": 23,
+          "migrations": [
+            {
+              "fn": "applyExternalPlugins",
+              "covered": false
+            },
+            {
+              "fn": "applyFinanceMonthsScaffolding",
+              "covered": true
+            },
+            {
+              "fn": "applyFinancePaycheckDebtBandInjection",
+              "covered": true
+            },
+            {
+              "fn": "applyFinanceMigrations",
+              "covered": true
+            },
+            {
+              "fn": "applyFinanceInvoiceWorkspaceNavInjection",
+              "covered": true
+            },
+            {
+              "fn": "applyFinanceHubFrontmatterHeal",
+              "covered": true
+            },
+            {
+              "fn": "applyFinanceHubsRepair",
+              "covered": true
+            },
+            {
+              "fn": "applyOrphanedHelperCleanup",
+              "covered": false
+            },
+            {
+              "fn": "applyFinanceUnifiedNavMigration",
+              "covered": true
+            },
+            {
+              "fn": "applyFinancePaycheckBodyMigration",
+              "covered": true
+            },
+            {
+              "fn": "applyFinanceBudgetBodyMigration",
+              "covered": true
+            },
+            {
+              "fn": "applyFinanceBudgetMonthlyBandInjection",
+              "covered": true
+            },
+            {
+              "fn": "applyFinanceDefaultsScaffolding",
+              "covered": true
+            },
+            {
+              "fn": "applyFinanceCategoriesGroupBackfill",
+              "covered": true
+            },
+            {
+              "fn": "applyFinanceDebtScaffolding",
+              "covered": true
+            },
+            {
+              "fn": "applyFinanceBudgetGroupSeed",
+              "covered": true
+            },
+            {
+              "fn": "applyFinancePaycheckDefaultsDebtLinking",
+              "covered": true
+            },
+            {
+              "fn": "applyFinancePaycheckDefaultsDebtBackfill",
+              "covered": true
+            },
+            {
+              "fn": "applyFinanceNavRowMigration",
+              "covered": true
+            },
+            {
+              "fn": "applyFinanceNavRowGuardFormMigration",
+              "covered": true
+            },
+            {
+              "fn": "applyFinanceDefaultsNavRowInjection",
+              "covered": true
+            },
+            {
+              "fn": "applyFinanceTopHubNavRowDedup",
+              "covered": true
+            },
+            {
+              "fn": "applyPreInstall",
+              "covered": false
+            }
+          ],
+          "suggested_archetype": "seed-migrate",
+          "suggested_target_file": "platform/test/run-seed-migrations.js"
+        },
+        "manifest_schema": {
+          "score": 1,
+          "manifest_ratio": 1,
+          "schema_ratio": 1,
+          "manifest_fields": [
+            {
+              "field": "name",
+              "asserted": true
+            },
+            {
+              "field": "version",
+              "asserted": true
+            },
+            {
+              "field": "customjs_classes",
+              "asserted": true
+            },
+            {
+              "field": "files",
+              "asserted": true
+            },
+            {
+              "field": "rule_fragments",
+              "asserted": true
+            },
+            {
+              "field": "depends_on",
+              "asserted": true
+            }
+          ],
+          "schema_owned": 0,
+          "suggested_archetype": "hc-family",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "template_lockstep": {
+          "score": 1,
+          "covered": 15,
+          "total": 15,
+          "items": [
+            {
+              "kind": "template",
+              "name": "Budget Template.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Paycheck Template.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Invoice Template.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Time Log Template.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Invoice Board.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Invoice Board Card.md",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "finance",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "finance",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "finance",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "finance",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "finance",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "finance",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "finance",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "finance",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "finance",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "template-assert",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "widget_render": {
+          "score": 0.38461538461538464,
+          "covered": 10,
+          "total": 26,
+          "widgets": [
+            {
+              "widget": "FinanceHubCards",
+              "covered": true
+            },
+            {
+              "widget": "BudgetsCards",
+              "covered": true
+            },
+            {
+              "widget": "PaychecksCards",
+              "covered": true
+            },
+            {
+              "widget": "InvoicesCards",
+              "covered": true
+            },
+            {
+              "widget": "DebtsCards",
+              "covered": false
+            },
+            {
+              "widget": "FinanceNavRow",
+              "covered": true
+            },
+            {
+              "widget": "BudgetCategoriesEditor",
+              "covered": true
+            },
+            {
+              "widget": "PaycheckExpensesEditor",
+              "covered": true
+            },
+            {
+              "widget": "InvoiceTimeLogEditor",
+              "covered": true
+            },
+            {
+              "widget": "InvoiceControls",
+              "covered": true
+            },
+            {
+              "widget": "InvoiceWorkspaceNav",
+              "covered": false
+            },
+            {
+              "widget": "BudgetDefaultsEditor",
+              "covered": false
+            },
+            {
+              "widget": "PaycheckDefaultsEditor",
+              "covered": false
+            },
+            {
+              "widget": "DebtDefaultsEditor",
+              "covered": false
+            },
+            {
+              "widget": "DebtConfigEditor",
+              "covered": false
+            },
+            {
+              "widget": "BudgetSummary",
+              "covered": false
+            },
+            {
+              "widget": "PaycheckSummary",
+              "covered": false
+            },
+            {
+              "widget": "PaycheckDebtBand",
+              "covered": false
+            },
+            {
+              "widget": "DebtSummary",
+              "covered": false
+            },
+            {
+              "widget": "DebtsHubSummary",
+              "covered": false
+            },
+            {
+              "widget": "FinanceHubActions",
+              "covered": false
+            },
+            {
+              "widget": "FinanceNav",
+              "covered": true
+            },
+            {
+              "widget": "MonthlyOverview",
+              "covered": false
+            },
+            {
+              "widget": "MonthsCards",
+              "covered": false
+            },
+            {
+              "widget": "MonthDashboard",
+              "covered": false
+            },
+            {
+              "widget": "FinanceHubSummary",
+              "covered": false
+            }
+          ],
+          "suggested_archetype": "renderer-extend",
+          "suggested_target_file": "platform/test/run-renderer.js"
+        },
+        "integration_smoke": {
+          "score": 1,
+          "happy_path": true,
+          "failure_mode": true,
+          "suggested_archetype": "smoke-extend",
+          "suggested_target_file": "platform/test/run-integration-smoke.js"
+        }
+      },
+      "composite_score": 0.7831041744085222,
+      "blast_radius": "high",
+      "blast_radius_rationale": "v0.108-v0.115 rapid evolution; load-bearing schemas + measured-debt math.",
+      "recent_incidents_30d": 10,
+      "priority_score": 1.1111111111111112,
+      "top_gap": {
+        "axis": "customjs_behavioral",
+        "score": 1.1111111111111112,
+        "archetype": "behavioral-runner",
+        "target_file": "platform/test/run-finance-financemath.js"
+      },
+      "qualitative": {
+        "validates_scores": "yes",
+        "false_positives": [],
+        "false_negatives": [
+          {
+            "axis": "installer_migration",
+            "note": "Score 0.0 is technically correct (no HC-V0XYZ-SEED-MIGRATE families) but SHAPE-*/FM-*/BODY-* families in run-seed-migrations.js verify post-state of the 20 apply* functions via integration. This is weak signal coverage (proves execution, not per-function correctness)."
+          },
+          {
+            "axis": "customjs_behavioral",
+            "note": "Score 19/45 = 42% is accurate but 12+ finance widget classes (DebtsHubSummary, DebtDefaultsEditor, BudgetDefaultsEditor, PaycheckDefaultsEditor, BudgetsCards, PaychecksCards, InvoicesCards) ship with zero behavioral coverage despite being DOM-heavy with state logic."
+          }
+        ],
+        "primary_user_flow": "Create a budget note, view monthly overview dashboard of income/spending/debt paydown metrics, edit debt defaults, and track paycheck expenses with debt-account linking.",
+        "qualitative_recommendation": "Solid behavioral coverage on high-cycle helpers (MonthlyOverview, FinanceMath, _injectMonthlyBand). Installer migrations lack isolation asserts. Priority: (1) Add HC-V0XYZ-SEED-MIGRATE-* families for 5-10 critical apply* functions (applyFinanceDefaultsScaffolding, applyFinanceDebtScaffolding, applyFinanceBudgetGroupSeed, applyFinancePaycheckDefaultsDebtLinking, applyFinanceMigrations); (2) extend behavioral coverage to remaining widget renderers."
+      }
+    },
+    {
+      "kind": "blueprint",
+      "name": "people",
+      "current_version": "0.6.0",
+      "axes": {
+        "customjs_behavioral": {
+          "score": 0,
+          "covered": 0,
+          "total": 2,
+          "methods": [
+            {
+              "cls": "PeopleHubCards",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "PersonNavButtons",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            }
+          ],
+          "suggested_archetype": "behavioral-runner",
+          "suggested_target_file": "platform/test/run-people-peoplehubcards.js"
+        },
+        "installer_migration": {
+          "score": null,
+          "reason": "no install-time migrations attributed",
+          "migrations": [],
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "manifest_schema": {
+          "score": 1,
+          "manifest_ratio": 1,
+          "schema_ratio": 1,
+          "manifest_fields": [
+            {
+              "field": "name",
+              "asserted": true
+            },
+            {
+              "field": "version",
+              "asserted": true
+            },
+            {
+              "field": "customjs_classes",
+              "asserted": true
+            },
+            {
+              "field": "files",
+              "asserted": true
+            },
+            {
+              "field": "rule_fragments",
+              "asserted": true
+            },
+            {
+              "field": "depends_on",
+              "asserted": true
+            }
+          ],
+          "schema_owned": 0,
+          "suggested_archetype": "hc-family",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "template_lockstep": {
+          "score": 1,
+          "covered": 2,
+          "total": 2,
+          "items": [
+            {
+              "kind": "template",
+              "name": "Template, People.md",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "people",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "template-assert",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "widget_render": {
+          "score": 0,
+          "covered": 0,
+          "total": 2,
+          "widgets": [
+            {
+              "widget": "PeopleHubCards",
+              "covered": false
+            },
+            {
+              "widget": "PersonNavButtons",
+              "covered": false
+            }
+          ],
+          "suggested_archetype": "renderer-extend",
+          "suggested_target_file": "platform/test/run-renderer.js"
+        },
+        "integration_smoke": {
+          "score": 1,
+          "happy_path": true,
+          "failure_mode": true,
+          "suggested_archetype": "smoke-extend",
+          "suggested_target_file": "platform/test/run-integration-smoke.js"
+        }
+      },
+      "composite_score": 0.6,
+      "blast_radius": "med",
+      "blast_radius_rationale": "Cross-cutting via people-identity; stable shape.",
+      "recent_incidents_30d": 4,
+      "priority_score": 1.08,
+      "top_gap": {
+        "axis": "customjs_behavioral",
+        "score": 1.08,
+        "archetype": "behavioral-runner",
+        "target_file": "platform/test/run-people-peoplehubcards.js"
+      },
+      "qualitative": {
+        "validates_scores": "no",
+        "false_positives": [
+          {
+            "axis": "integration_smoke",
+            "note": "Claims 1.0 (both happy + failure modes) but neither PeopleHubCards nor PersonNavButtons render methods directly tested; only indirectly via integration smoke."
+          }
+        ],
+        "false_negatives": [
+          {
+            "axis": "widget_render",
+            "note": "Both customjs classes have render() methods but zero coverage in run-renderer.js. Delegate to tested mechanisms (BeaconCards, AccentButton) so isolated tests potentially redundant unless testing orchestration/configuration."
+          }
+        ],
+        "primary_user_flow": "Open People.md hub (PeopleHubCards renders person cards), click a person, view person note (PersonNavButtons renders identity + back-button, PeopleRendering shows mentions), click back to People Hub.",
+        "qualitative_recommendation": "Gaps partially mitigated by delegation to tested mechanisms. A renderer-extend harness adding PeopleHubCards + PersonNavButtons to run-renderer.js would close widget_render and surface any orchestration bugs."
+      }
+    },
+    {
+      "kind": "mechanism",
+      "name": "platform-claude",
+      "current_version": "0.1.3",
+      "axes": {
+        "customjs_behavioral": {
+          "score": null,
+          "reason": "no customjs_classes",
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "installer_migration": {
+          "score": null,
+          "reason": "no install-time migrations attributed",
+          "migrations": [],
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "manifest_schema": {
+          "score": 0.75,
+          "manifest_ratio": 0.5,
+          "schema_ratio": 1,
+          "manifest_fields": [
+            {
+              "field": "name",
+              "asserted": false
+            },
+            {
+              "field": "version",
+              "asserted": true
+            },
+            {
+              "field": "files",
+              "asserted": true
+            },
+            {
+              "field": "depends_on",
+              "asserted": false
+            }
+          ],
+          "schema_owned": 0,
+          "suggested_archetype": "hc-family",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "template_lockstep": {
+          "score": null,
+          "reason": "no templates or rule_fragments",
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "widget_render": {
+          "score": null,
+          "reason": "no customjs_classes",
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "integration_smoke": {
+          "score": 0,
+          "happy_path": false,
+          "failure_mode": true,
+          "suggested_archetype": "behavioral-runner",
+          "suggested_target_file": "platform/test/run-integration-smoke.js"
+        }
+      },
+      "composite_score": 0.375,
+      "blast_radius": "high",
+      "blast_radius_rationale": "Owns CLAUDE.md + claude_surface[]; touched every cycle close.",
+      "recent_incidents_30d": 2,
+      "priority_score": 1.0499999999999998,
+      "top_gap": {
+        "axis": "integration_smoke",
+        "score": 1.0499999999999998,
+        "archetype": "behavioral-runner",
+        "target_file": "platform/test/run-integration-smoke.js"
+      },
+      "qualitative": {
+        "validates_scores": "yes",
+        "false_positives": [
+          {
+            "axis": "manifest_schema",
+            "note": "0.75 is correct but name + depends_on fields not asserted; only version+files asserted in HC-V01020-CLAUDE-MD-RES-1"
+          }
+        ],
+        "false_negatives": [
+          {
+            "axis": "integration_smoke",
+            "note": "run-claude-surface.js covers aggregation, materialization, rendering (36 cases); 0.0 score is correct because no end-to-end harness exercises slash-command -> apply* -> file-generation chain"
+          }
+        ],
+        "primary_user_flow": "Install/upgrade/bootstrap lifecycle slash commands trigger aggregateClaudeSurface + materializeClaudeSurface + regenerateClaudeMd to sync CLAUDE.md tables and materialize .claude/commands+skills from all subscribed surfaces.",
+        "qualitative_recommendation": "Strong unit-layer coverage; gap is end-to-end install -> materialize -> CLAUDE.md flow. Recommend HC-V0XYZ-PLATFORM-CLAUDE-INSTALL-SMOKE family in run-integration-smoke.js or lightweight behavioral runner."
+      }
+    },
+    {
+      "kind": "blueprint",
+      "name": "products",
+      "current_version": "0.3.0",
+      "axes": {
+        "customjs_behavioral": {
+          "score": 0.3333333333333333,
+          "covered": 1,
+          "total": 3,
+          "methods": [
+            {
+              "cls": "ProductsHubCards",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "ProductPageCards",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "ProductActionButtons",
+              "method": "render",
+              "covered": true,
+              "hits": 1
+            }
+          ],
+          "suggested_archetype": "behavioral-runner",
+          "suggested_target_file": "platform/test/run-products-productshubcards.js"
+        },
+        "installer_migration": {
+          "score": null,
+          "reason": "no install-time migrations attributed",
+          "migrations": [],
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "manifest_schema": {
+          "score": 0.9166666666666667,
+          "manifest_ratio": 0.8333333333333334,
+          "schema_ratio": 1,
+          "manifest_fields": [
+            {
+              "field": "name",
+              "asserted": true
+            },
+            {
+              "field": "version",
+              "asserted": true
+            },
+            {
+              "field": "customjs_classes",
+              "asserted": false
+            },
+            {
+              "field": "files",
+              "asserted": true
+            },
+            {
+              "field": "rule_fragments",
+              "asserted": true
+            },
+            {
+              "field": "depends_on",
+              "asserted": true
+            }
+          ],
+          "schema_owned": 0,
+          "suggested_archetype": "hc-family",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "template_lockstep": {
+          "score": 1,
+          "covered": 2,
+          "total": 2,
+          "items": [
+            {
+              "kind": "template",
+              "name": "Template, Product.md",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "products",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "template-assert",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "widget_render": {
+          "score": 0,
+          "covered": 0,
+          "total": 3,
+          "widgets": [
+            {
+              "widget": "ProductsHubCards",
+              "covered": false
+            },
+            {
+              "widget": "ProductPageCards",
+              "covered": false
+            },
+            {
+              "widget": "ProductActionButtons",
+              "covered": false
+            }
+          ],
+          "suggested_archetype": "renderer-extend",
+          "suggested_target_file": "platform/test/run-renderer.js"
+        },
+        "integration_smoke": {
+          "score": 1,
+          "happy_path": true,
+          "failure_mode": true,
+          "suggested_archetype": "smoke-extend",
+          "suggested_target_file": "platform/test/run-integration-smoke.js"
+        }
+      },
+      "composite_score": 0.65,
+      "blast_radius": "med",
+      "blast_radius_rationale": "Consumer-vault hub; relatively static.",
+      "recent_incidents_30d": 5,
+      "priority_score": 0.8999999999999999,
+      "top_gap": {
+        "axis": "widget_render",
+        "score": 0.8999999999999999,
+        "archetype": "renderer-extend",
+        "target_file": "platform/test/run-renderer.js"
+      },
+      "qualitative": {
+        "validates_scores": "no",
+        "false_positives": [
+          {
+            "axis": "template_lockstep",
+            "note": "Asserts only file existence and frontmatter naming; does not verify ProductPageCards/SpaceNavButtons/BacklinkPanel class invocations or template syntax validity"
+          },
+          {
+            "axis": "manifest_schema",
+            "note": "0.917 is high but missing assertions for depends_on[], claude_surface[], templater_folder_templates[], post_install[]"
+          }
+        ],
+        "false_negatives": [
+          {
+            "axis": "customjs_behavioral",
+            "note": "ProductActionButtons.render() Templater dispatch + onClick handler codepath untested; ProductsHubCards dataview filtering + sorting logic untested"
+          }
+        ],
+        "primary_user_flow": "Create a product via /products or + New Product -> product note materializes with ProductPageCards + SpaceNavButtons + BacklinkPanel -> hub aggregates member teams and active projects.",
+        "qualitative_recommendation": "Weak behavioral coverage despite high composite score. All three classes have non-trivial render() methods integrating Dataview queries + Obsidian plugin APIs + cross-blueprint rollups. Recommend extending run-renderer.js with ProductsHubCards + ProductActionButtons fixtures."
+      }
+    },
+    {
+      "kind": "mechanism",
+      "name": "smart-connections-bridge",
+      "current_version": "0.2.0",
+      "axes": {
+        "customjs_behavioral": {
+          "score": null,
+          "reason": "no customjs_classes",
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "installer_migration": {
+          "score": null,
+          "reason": "no install-time migrations attributed",
+          "migrations": [],
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "manifest_schema": {
+          "score": 0.5,
+          "manifest_ratio": 0,
+          "schema_ratio": 1,
+          "manifest_fields": [
+            {
+              "field": "name",
+              "asserted": false
+            },
+            {
+              "field": "version",
+              "asserted": false
+            },
+            {
+              "field": "files",
+              "asserted": false
+            },
+            {
+              "field": "rule_fragments",
+              "asserted": false
+            },
+            {
+              "field": "depends_on",
+              "asserted": false
+            }
+          ],
+          "schema_owned": 0,
+          "suggested_archetype": "hc-family",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "template_lockstep": {
+          "score": null,
+          "reason": "no templates or rule_fragments",
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "widget_render": {
+          "score": null,
+          "reason": "no customjs_classes",
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "integration_smoke": {
+          "score": 0,
+          "happy_path": false,
+          "failure_mode": true,
+          "suggested_archetype": "behavioral-runner",
+          "suggested_target_file": "platform/test/run-integration-smoke.js"
+        }
+      },
+      "composite_score": 0.25,
+      "blast_radius": "med",
+      "blast_radius_rationale": "Cowork-adjacent embedding bridge; opt-in.",
+      "recent_incidents_30d": 2,
+      "priority_score": 0.63,
+      "top_gap": {
+        "axis": "integration_smoke",
+        "score": 0.63,
+        "archetype": "behavioral-runner",
+        "target_file": "platform/test/run-integration-smoke.js"
+      },
+      "qualitative": {
+        "validates_scores": "yes",
+        "false_positives": [],
+        "false_negatives": [],
+        "primary_user_flow": "Cowork orchestrators invoke sc-bridge CLI to find semantically related vault notes and display them in daily/weekly reviews.",
+        "qualitative_recommendation": "Run-smart-connections-bridge.js is thorough at the unit level: all three CLI ops, error paths, flag handling, vault fixture edge cases. The 0.0 smoke score is correct - never exercises cowork's gather-semantic-related/-memory skills invoking bridge against real vault index. Close via behavioral harness case in run-cowork-smoke.js."
+      }
+    },
+    {
+      "kind": "mechanism",
+      "name": "nav-buttons",
+      "current_version": "2.7.0",
+      "axes": {
+        "customjs_behavioral": {
+          "score": 1,
+          "covered": 1,
+          "total": 1,
+          "methods": [
+            {
+              "cls": "SpaceNavButtons",
+              "method": "render",
+              "covered": true,
+              "hits": 1
+            }
+          ],
+          "suggested_archetype": "behavioral-runner",
+          "suggested_target_file": "platform/test/run-nav-buttons-spacenavbuttons.js"
+        },
+        "installer_migration": {
+          "score": 0,
+          "covered": 0,
+          "total": 1,
+          "migrations": [
+            {
+              "fn": "applyNavButtons",
+              "covered": false
+            }
+          ],
+          "suggested_archetype": "seed-migrate",
+          "suggested_target_file": "platform/test/run-seed-migrations.js"
+        },
+        "manifest_schema": {
+          "score": 0.8333333333333333,
+          "manifest_ratio": 0.6666666666666666,
+          "schema_ratio": 1,
+          "manifest_fields": [
+            {
+              "field": "name",
+              "asserted": true
+            },
+            {
+              "field": "version",
+              "asserted": false
+            },
+            {
+              "field": "customjs_classes",
+              "asserted": true
+            },
+            {
+              "field": "files",
+              "asserted": true
+            },
+            {
+              "field": "rule_fragments",
+              "asserted": true
+            },
+            {
+              "field": "depends_on",
+              "asserted": false
+            }
+          ],
+          "schema_owned": 0,
+          "suggested_archetype": "hc-family",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "template_lockstep": {
+          "score": null,
+          "reason": "no templates or rule_fragments",
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "widget_render": {
+          "score": 1,
+          "covered": 1,
+          "total": 1,
+          "widgets": [
+            {
+              "widget": "SpaceNavButtons",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "renderer-extend",
+          "suggested_target_file": "platform/test/run-renderer.js"
+        },
+        "integration_smoke": {
+          "score": 1,
+          "happy_path": true,
+          "failure_mode": true,
+          "suggested_archetype": "smoke-extend",
+          "suggested_target_file": "platform/test/run-integration-smoke.js"
+        }
+      },
+      "composite_score": 0.7666666666666666,
+      "blast_radius": "med",
+      "blast_radius_rationale": "Visible on every hub + entity.",
+      "recent_incidents_30d": 0,
+      "priority_score": 0.6,
+      "top_gap": {
+        "axis": "installer_migration",
+        "score": 0.6,
+        "archetype": "seed-migrate",
+        "target_file": "platform/test/run-seed-migrations.js"
+      },
+      "qualitative": {
+        "validates_scores": "no",
+        "false_positives": [
+          {
+            "axis": "installer_migration",
+            "note": "Mechanism has zero migrations (post_install: []); should be null per rubric, not 0/1"
+          },
+          {
+            "axis": "manifest_schema",
+            "note": "Zero HC families assert nav-buttons manifest fields; should be lower than 0.833"
+          }
+        ],
+        "false_negatives": [
+          {
+            "axis": "customjs_behavioral",
+            "note": "SpaceNavButtons.render() thoroughly exercised in run-renderer.js by 8 separate tests (T2.5, T2.6, T2.7, R-INVOKE-ARGS, R-SCRATCH-DAYHUB, R-COWORK-HUB, T4.0, T4.4); should be 1.0. Root cause: scorer didn't pattern-match across run-renderer.js test names."
+          }
+        ],
+        "primary_user_flow": "User navigates to a note with SpaceNavButtons dataviewjs block; mechanism reads registry JSON, sorts by (order, source, id), renders multi-row button grid, dispatches clicks to action handlers (openLink, createFromTemplate, runTemplaterTemplate, invoke_command).",
+        "qualitative_recommendation": "Excellent actual coverage in run-renderer.js (8 dedicated tests, all action types, error paths, real-world scenarios) but scorer's false-negatives obscure it. Recommendations are scorer-level fixes, not new tests."
+      }
+    },
+    {
+      "kind": "mechanism",
+      "name": "backlink-panel",
+      "current_version": "0.1.0",
+      "axes": {
+        "customjs_behavioral": {
+          "score": 1,
+          "covered": 1,
+          "total": 1,
+          "methods": [
+            {
+              "cls": "BacklinkPanel",
+              "method": "render",
+              "covered": true,
+              "hits": 1
+            }
+          ],
+          "suggested_archetype": "behavioral-runner",
+          "suggested_target_file": "platform/test/run-backlink-panel-backlinkpanel.js"
+        },
+        "installer_migration": {
+          "score": null,
+          "reason": "no install-time migrations attributed",
+          "migrations": [],
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "manifest_schema": {
+          "score": 0.5833333333333334,
+          "manifest_ratio": 0.16666666666666666,
+          "schema_ratio": 1,
+          "manifest_fields": [
+            {
+              "field": "name",
+              "asserted": false
+            },
+            {
+              "field": "version",
+              "asserted": false
+            },
+            {
+              "field": "customjs_classes",
+              "asserted": false
+            },
+            {
+              "field": "files",
+              "asserted": true
+            },
+            {
+              "field": "rule_fragments",
+              "asserted": false
+            },
+            {
+              "field": "depends_on",
+              "asserted": false
+            }
+          ],
+          "schema_owned": 0,
+          "suggested_archetype": "hc-family",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "template_lockstep": {
+          "score": null,
+          "reason": "no templates or rule_fragments",
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "widget_render": {
+          "score": 0,
+          "covered": 0,
+          "total": 1,
+          "widgets": [
+            {
+              "widget": "BacklinkPanel",
+              "covered": false
+            }
+          ],
+          "suggested_archetype": "renderer-extend",
+          "suggested_target_file": "platform/test/run-renderer.js"
+        },
+        "integration_smoke": {
+          "score": 0,
+          "happy_path": false,
+          "failure_mode": true,
+          "suggested_archetype": "behavioral-runner",
+          "suggested_target_file": "platform/test/run-integration-smoke.js"
+        }
+      },
+      "composite_score": 0.39583333333333337,
+      "blast_radius": "med",
+      "blast_radius_rationale": "Visible on every project + meeting.",
+      "recent_incidents_30d": 0,
+      "priority_score": 0.44999999999999996,
+      "top_gap": {
+        "axis": "widget_render",
+        "score": 0.44999999999999996,
+        "archetype": "renderer-extend",
+        "target_file": "platform/test/run-renderer.js"
+      },
+      "qualitative": {
+        "validates_scores": "no",
+        "false_positives": [],
+        "false_negatives": [
+          {
+            "axis": "customjs_behavioral",
+            "note": "run-backlink-panel.js covers lint (BP-4..16) but zero behavioral asserts on render(dv,opts); no DOM stub, no Dataview query, no reverse-link matching"
+          },
+          {
+            "axis": "widget_render",
+            "note": "BacklinkPanel.render() is a widget method but never called in run-renderer.js or run-integration-smoke.js"
+          },
+          {
+            "axis": "integration_smoke",
+            "note": "No primary flow test - person/project/team/product/trip/meeting page rendering backlinks panel never exercised end-to-end"
+          }
+        ],
+        "primary_user_flow": "Person/project/team/product/trip/meeting atlas page renders a backlinks panel showing cross-referenced notes, grouped or sorted per options.",
+        "qualitative_recommendation": "Robust lint harness catches v0.117.x-style silent bugs but the public render() API is untested. One renderer fixture + one HC family for _ENTITY_TYPE_TO_KEY would lift customjs_behavioral to 0.5 and widget_render to 1.0."
+      }
+    },
+    {
+      "kind": "blueprint",
+      "name": "journal",
+      "current_version": "0.2.0",
+      "axes": {
+        "customjs_behavioral": {
+          "score": null,
+          "reason": "no customjs_classes",
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "installer_migration": {
+          "score": null,
+          "reason": "no install-time migrations attributed",
+          "migrations": [],
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "manifest_schema": {
+          "score": 0.7,
+          "manifest_ratio": 0.4,
+          "schema_ratio": 1,
+          "manifest_fields": [
+            {
+              "field": "name",
+              "asserted": false
+            },
+            {
+              "field": "version",
+              "asserted": false
+            },
+            {
+              "field": "files",
+              "asserted": true
+            },
+            {
+              "field": "rule_fragments",
+              "asserted": true
+            },
+            {
+              "field": "depends_on",
+              "asserted": false
+            }
+          ],
+          "schema_owned": 0,
+          "suggested_archetype": "hc-family",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "template_lockstep": {
+          "score": 1,
+          "covered": 2,
+          "total": 2,
+          "items": [
+            {
+              "kind": "template",
+              "name": "Today Journal.md",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "journal",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "template-assert",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "widget_render": {
+          "score": null,
+          "reason": "no customjs_classes",
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "integration_smoke": {
+          "score": 0,
+          "happy_path": false,
+          "failure_mode": true,
+          "suggested_archetype": "behavioral-runner",
+          "suggested_target_file": "platform/test/run-integration-smoke.js"
+        }
+      },
+      "composite_score": 0.5666666666666667,
+      "blast_radius": "med",
+      "blast_radius_rationale": "Used by both consumers; relatively static lately.",
+      "recent_incidents_30d": 0,
+      "priority_score": 0.44999999999999996,
+      "top_gap": {
+        "axis": "integration_smoke",
+        "score": 0.44999999999999996,
+        "archetype": "behavioral-runner",
+        "target_file": "platform/test/run-integration-smoke.js"
+      },
+      "qualitative": {
+        "validates_scores": "yes",
+        "false_positives": [],
+        "false_negatives": [
+          {
+            "axis": "integration_smoke",
+            "note": "Primary flow (nav-button-triggered template creation) not exercised in any harness. run-integration-smoke bootstraps + seeds vault but omits journal creation step."
+          }
+        ],
+        "primary_user_flow": "Click 'Journal' nav button to create a new dated journal entry at spice/journal/YYYY/MM-MMMM/Journal-YYYY-MM-DD.md with Templater auto-apply.",
+        "qualitative_recommendation": "Minimal, stable blueprint with only template + rule_fragment; template lockstep coverage complete. integration_smoke gap is only meaningful gap. Low priority (0.6 med blast-radius, stable). Consider deferring or addressing via small extension to run-integration-smoke.js."
+      }
+    },
+    {
+      "kind": "blueprint",
+      "name": "trips",
+      "current_version": "0.3.0",
+      "axes": {
+        "customjs_behavioral": {
+          "score": 0,
+          "covered": 0,
+          "total": 4,
+          "methods": [
+            {
+              "cls": "TripsHubCards",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "TripNavButtons",
+              "method": "detectContext",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "TripNavButtons",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "TripSectionsCards",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            }
+          ],
+          "suggested_archetype": "behavioral-runner",
+          "suggested_target_file": "platform/test/run-trips-tripshubcards.js"
+        },
+        "installer_migration": {
+          "score": null,
+          "reason": "no install-time migrations attributed",
+          "migrations": [],
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "manifest_schema": {
+          "score": 0.8333333333333333,
+          "manifest_ratio": 0.6666666666666666,
+          "schema_ratio": 1,
+          "manifest_fields": [
+            {
+              "field": "name",
+              "asserted": true
+            },
+            {
+              "field": "version",
+              "asserted": true
+            },
+            {
+              "field": "customjs_classes",
+              "asserted": false
+            },
+            {
+              "field": "files",
+              "asserted": true
+            },
+            {
+              "field": "rule_fragments",
+              "asserted": true
+            },
+            {
+              "field": "depends_on",
+              "asserted": false
+            }
+          ],
+          "schema_owned": 0,
+          "suggested_archetype": "hc-family",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "template_lockstep": {
+          "score": 1,
+          "covered": 10,
+          "total": 10,
+          "items": [
+            {
+              "kind": "template",
+              "name": "Trip Atlas.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Trip Flights.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Trip Stay.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Trip Packing List.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Trip To Do.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Trip Notes.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Trip Board.md",
+              "covered": true
+            },
+            {
+              "kind": "template",
+              "name": "Trip Board Card.md",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "trips",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "trips",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "template-assert",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "widget_render": {
+          "score": 0,
+          "covered": 0,
+          "total": 3,
+          "widgets": [
+            {
+              "widget": "TripsHubCards",
+              "covered": false
+            },
+            {
+              "widget": "TripNavButtons",
+              "covered": false
+            },
+            {
+              "widget": "TripSectionsCards",
+              "covered": false
+            }
+          ],
+          "suggested_archetype": "renderer-extend",
+          "suggested_target_file": "platform/test/run-renderer.js"
+        },
+        "integration_smoke": {
+          "score": 1,
+          "happy_path": true,
+          "failure_mode": true,
+          "suggested_archetype": "smoke-extend",
+          "suggested_target_file": "platform/test/run-integration-smoke.js"
+        }
+      },
+      "composite_score": 0.5666666666666667,
+      "blast_radius": "low",
+      "blast_radius_rationale": "Niche use; rare touches.",
+      "recent_incidents_30d": 1,
+      "priority_score": 0.36,
+      "top_gap": {
+        "axis": "customjs_behavioral",
+        "score": 0.36,
+        "archetype": "behavioral-runner",
+        "target_file": "platform/test/run-trips-tripshubcards.js"
+      },
+      "qualitative": {
+        "validates_scores": "no",
+        "false_positives": [
+          {
+            "axis": "integration_smoke",
+            "note": "Scorer matches 'trip' substring in 'midday-tripwire' (cowork cadence) in run-cowork-smoke.js; actual trips user flow has zero end-to-end test coverage. Should be 0.0."
+          }
+        ],
+        "false_negatives": [],
+        "primary_user_flow": "Create a new trip with dates and location, then view its sections (atlas, flights, stay, packing list, to-do, notes) via BeaconCards and TripSectionsCards widget.",
+        "qualitative_recommendation": "Thin test coverage: zero widget render tests, zero behavioral tests for three customJS classes. Template_lockstep score is artificially high from infrastructure tests. Substring-collision false-positive on integration_smoke."
+      }
+    },
+    {
+      "kind": "mechanism",
+      "name": "convenience",
+      "current_version": "0.4.1",
+      "axes": {
+        "customjs_behavioral": {
+          "score": null,
+          "reason": "no customjs_classes",
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "installer_migration": {
+          "score": null,
+          "reason": "no install-time migrations attributed",
+          "migrations": [],
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "manifest_schema": {
+          "score": 0.5,
+          "manifest_ratio": 0,
+          "schema_ratio": 1,
+          "manifest_fields": [
+            {
+              "field": "name",
+              "asserted": false
+            },
+            {
+              "field": "version",
+              "asserted": false
+            },
+            {
+              "field": "files",
+              "asserted": false
+            },
+            {
+              "field": "depends_on",
+              "asserted": false
+            }
+          ],
+          "schema_owned": 0,
+          "suggested_archetype": "hc-family",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "template_lockstep": {
+          "score": null,
+          "reason": "no templates or rule_fragments",
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "widget_render": {
+          "score": null,
+          "reason": "no customjs_classes",
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "integration_smoke": {
+          "score": 0,
+          "happy_path": false,
+          "failure_mode": true,
+          "suggested_archetype": "behavioral-runner",
+          "suggested_target_file": "platform/test/run-integration-smoke.js"
+        }
+      },
+      "composite_score": 0.25,
+      "blast_radius": "low",
+      "blast_radius_rationale": "Misc plugin install; rare edits.",
+      "recent_incidents_30d": 2,
+      "priority_score": 0.315,
+      "top_gap": {
+        "axis": "integration_smoke",
+        "score": 0.315,
+        "archetype": "behavioral-runner",
+        "target_file": "platform/test/run-integration-smoke.js"
+      },
+      "qualitative": {
+        "validates_scores": "yes",
+        "false_positives": [
+          {
+            "axis": "manifest_schema",
+            "note": "Rubric only checks for name/version/files/depends_on fields; convenience manifest also has external_plugins, hotkeys, community_plugin_settings, snippets, appearance — load-bearing fields not in HC family population"
+          }
+        ],
+        "false_negatives": [
+          {
+            "axis": "integration_smoke",
+            "note": "No happy-path smoke test exists exercising install convenience -> verify hotkeys bound -> trigger hotkey -> verify action; bootstrap tests dependency add but not hotkey/plugin functionality"
+          }
+        ],
+        "primary_user_flow": "Install convenience mechanism to auto-enable workspace hotkeys (Cmd+T for daily, Cmd+- for full path copy, Cmd+= for path copy) + Dataview JS support + Tasks emoji-to-icon CSS snippet.",
+        "qualitative_recommendation": "Low blast radius (0.315 priority). Real debt is missing happy-path smoke; close by extending run-integration-smoke.js with a hotkey-registration verify case."
+      }
+    },
+    {
+      "kind": "mechanism",
+      "name": "icons",
+      "current_version": "0.1.1",
+      "axes": {
+        "customjs_behavioral": {
+          "score": 1,
+          "covered": 1,
+          "total": 1,
+          "methods": [
+            {
+              "cls": "Icons",
+              "method": "resolve",
+              "covered": true,
+              "hits": 9
+            }
+          ],
+          "suggested_archetype": "behavioral-runner",
+          "suggested_target_file": "platform/test/run-icons-icons.js"
+        },
+        "installer_migration": {
+          "score": null,
+          "reason": "no install-time migrations attributed",
+          "migrations": [],
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "manifest_schema": {
+          "score": 0.75,
+          "manifest_ratio": 0.5,
+          "schema_ratio": 1,
+          "manifest_fields": [
+            {
+              "field": "name",
+              "asserted": true
+            },
+            {
+              "field": "version",
+              "asserted": true
+            },
+            {
+              "field": "customjs_classes",
+              "asserted": false
+            },
+            {
+              "field": "files",
+              "asserted": true
+            },
+            {
+              "field": "rule_fragments",
+              "asserted": false
+            },
+            {
+              "field": "depends_on",
+              "asserted": false
+            }
+          ],
+          "schema_owned": 0,
+          "suggested_archetype": "hc-family",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "template_lockstep": {
+          "score": null,
+          "reason": "no templates or rule_fragments",
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "widget_render": {
+          "score": 1,
+          "covered": 1,
+          "total": 1,
+          "widgets": [
+            {
+              "widget": "Icons",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "renderer-extend",
+          "suggested_target_file": "platform/test/run-renderer.js"
+        },
+        "integration_smoke": {
+          "score": 0,
+          "happy_path": false,
+          "failure_mode": true,
+          "suggested_archetype": "behavioral-runner",
+          "suggested_target_file": "platform/test/run-integration-smoke.js"
+        }
+      },
+      "composite_score": 0.6875,
+      "blast_radius": "low",
+      "blast_radius_rationale": "Static glyph map; rare touches.",
+      "recent_incidents_30d": 2,
+      "priority_score": 0.315,
+      "top_gap": {
+        "axis": "integration_smoke",
+        "score": 0.315,
+        "archetype": "behavioral-runner",
+        "target_file": "platform/test/run-integration-smoke.js"
+      },
+      "qualitative": {
+        "validates_scores": "yes",
+        "false_positives": [],
+        "false_negatives": [],
+        "primary_user_flow": "Caller invokes customJS.Icons.resolve(kebab_name) to fetch vendored SVG from Tier 1 map or Tier 2 Obsidian fallback, returning HTML or null.",
+        "qualitative_recommendation": "Pure stateless utility with no end-to-end user flow of its own; integration_smoke=0 is correct per rubric. Existing coverage across run-helper-cases (ICN-1) and run-renderer (R-EC-ICON Tier 1 + AccentButton chaining) is sufficient. No dedicated harness warranted. Defer."
+      }
+    },
+    {
+      "kind": "mechanism",
+      "name": "people-identity",
+      "current_version": "0.1.0",
+      "axes": {
+        "customjs_behavioral": {
+          "score": 0,
+          "covered": 0,
+          "total": 4,
+          "methods": [
+            {
+              "cls": "PeopleIdentity",
+              "method": "resolvePerson",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "PeopleIdentity",
+              "method": "findByAlias",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "PeopleIdentity",
+              "method": "getAliases",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "PeopleIdentity",
+              "method": "listAliasesOfType",
+              "covered": false,
+              "hits": 0
+            }
+          ],
+          "suggested_archetype": "behavioral-runner",
+          "suggested_target_file": "platform/test/run-people-identity-peopleidentity.js"
+        },
+        "installer_migration": {
+          "score": null,
+          "reason": "no install-time migrations attributed",
+          "migrations": [],
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "manifest_schema": {
+          "score": 1,
+          "manifest_ratio": 1,
+          "schema_ratio": 1,
+          "manifest_fields": [
+            {
+              "field": "name",
+              "asserted": true
+            },
+            {
+              "field": "version",
+              "asserted": true
+            },
+            {
+              "field": "customjs_classes",
+              "asserted": true
+            },
+            {
+              "field": "files",
+              "asserted": true
+            },
+            {
+              "field": "depends_on",
+              "asserted": true
+            }
+          ],
+          "schema_owned": 0,
+          "suggested_archetype": "hc-family",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "template_lockstep": {
+          "score": null,
+          "reason": "no templates or rule_fragments",
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "widget_render": {
+          "score": null,
+          "reason": "no render() widgets",
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "integration_smoke": {
+          "score": 0,
+          "happy_path": false,
+          "failure_mode": true,
+          "suggested_archetype": "behavioral-runner",
+          "suggested_target_file": "platform/test/run-integration-smoke.js"
+        }
+      },
+      "composite_score": 0.3333333333333333,
+      "blast_radius": "low",
+      "blast_radius_rationale": "Stable resolver; rare edits.",
+      "recent_incidents_30d": 0,
+      "priority_score": 0.3,
+      "top_gap": {
+        "axis": "customjs_behavioral",
+        "score": 0.3,
+        "archetype": "behavioral-runner",
+        "target_file": "platform/test/run-people-identity-peopleidentity.js"
+      },
+      "qualitative": {
+        "validates_scores": "yes",
+        "false_positives": [
+          {
+            "axis": "customjs_behavioral",
+            "note": "Two uncovered methods (findByAlias, listAliasesOfType) explicitly deferred to future cycles per README (brain-map, hub views, validator audit). Covering now tracks infrastructure prep, not current debt."
+          },
+          {
+            "axis": "integration_smoke",
+            "note": "Primary flow is agent-side (cowork:resolve-person sub-skill); no in-Obsidian consumers this cycle per README. Smoke deferral is intentional."
+          }
+        ],
+        "false_negatives": [],
+        "primary_user_flow": "Resolve person names and typed aliases (phone, email, handle) to wikilinks via customJS.PeopleIdentity for renderers, validators, and hub views.",
+        "qualitative_recommendation": "Foundation-building infrastructure, not a test-debt priority this cycle. Defer both gaps to v0.119.x. Focus arc capacity on mechanisms with live consumers and no forward-planning deferral."
+      }
+    },
+    {
+      "kind": "blueprint",
+      "name": "teams",
+      "current_version": "0.3.0",
+      "axes": {
+        "customjs_behavioral": {
+          "score": 0,
+          "covered": 0,
+          "total": 3,
+          "methods": [
+            {
+              "cls": "TeamsHubCards",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "TeamPageCards",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "TeamActionButtons",
+              "method": "render",
+              "covered": false,
+              "hits": 0
+            }
+          ],
+          "suggested_archetype": "behavioral-runner",
+          "suggested_target_file": "platform/test/run-teams-teamshubcards.js"
+        },
+        "installer_migration": {
+          "score": null,
+          "reason": "no install-time migrations attributed",
+          "migrations": [],
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "manifest_schema": {
+          "score": 0.9166666666666667,
+          "manifest_ratio": 0.8333333333333334,
+          "schema_ratio": 1,
+          "manifest_fields": [
+            {
+              "field": "name",
+              "asserted": true
+            },
+            {
+              "field": "version",
+              "asserted": true
+            },
+            {
+              "field": "customjs_classes",
+              "asserted": false
+            },
+            {
+              "field": "files",
+              "asserted": true
+            },
+            {
+              "field": "rule_fragments",
+              "asserted": true
+            },
+            {
+              "field": "depends_on",
+              "asserted": true
+            }
+          ],
+          "schema_owned": 0,
+          "suggested_archetype": "hc-family",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "template_lockstep": {
+          "score": 1,
+          "covered": 2,
+          "total": 2,
+          "items": [
+            {
+              "kind": "template",
+              "name": "Template, Team.md",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "teams",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "template-assert",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "widget_render": {
+          "score": 0,
+          "covered": 0,
+          "total": 3,
+          "widgets": [
+            {
+              "widget": "TeamsHubCards",
+              "covered": false
+            },
+            {
+              "widget": "TeamPageCards",
+              "covered": false
+            },
+            {
+              "widget": "TeamActionButtons",
+              "covered": false
+            }
+          ],
+          "suggested_archetype": "renderer-extend",
+          "suggested_target_file": "platform/test/run-renderer.js"
+        },
+        "integration_smoke": {
+          "score": 1,
+          "happy_path": true,
+          "failure_mode": true,
+          "suggested_archetype": "smoke-extend",
+          "suggested_target_file": "platform/test/run-integration-smoke.js"
+        }
+      },
+      "composite_score": 0.5833333333333334,
+      "blast_radius": "low",
+      "blast_radius_rationale": "Not in active use by either consumer vault.",
+      "recent_incidents_30d": 0,
+      "priority_score": 0.3,
+      "top_gap": {
+        "axis": "customjs_behavioral",
+        "score": 0.3,
+        "archetype": "behavioral-runner",
+        "target_file": "platform/test/run-teams-teamshubcards.js"
+      },
+      "qualitative": {
+        "validates_scores": "yes",
+        "false_positives": [
+          {
+            "axis": "integration_smoke",
+            "note": "Score 1.0 from substring matching on 'teams' in run-cowork-smoke.js (MCP tool variant) and run-migrate-frontmatter.js; teams blueprint primary flow (create -> assign products -> appear in hub) has zero coverage. Should be 0.0."
+          },
+          {
+            "axis": "manifest_schema",
+            "note": "customjs_classes field not asserted; 3 widget classes never mentioned in assertions (TEAM-1/2/3 cover files/nav/rule_fragments/depends_on only)"
+          }
+        ],
+        "false_negatives": [
+          {
+            "axis": "widget_render",
+            "note": "All 3 customjs classes (TeamsHubCards, TeamPageCards, TeamActionButtons) have render() methods, scored 0.0; legitimately uncovered in run-renderer.js"
+          }
+        ],
+        "primary_user_flow": "Create a team, assign it one or more products, and verify it appears in Teams hub grouped by product with member projects rolled up.",
+        "qualitative_recommendation": "Low priority (0.583 composite, blast_radius=low, 0 recent_incidents). Recommend behavioral-runner for customjs_behavioral + widget_render gaps (candidate: run-teams-customjs.js). manifest_schema gap lower priority."
+      }
+    },
+    {
+      "kind": "mechanism",
+      "name": "customjs-guard",
+      "current_version": "1.0.0",
+      "axes": {
+        "customjs_behavioral": {
+          "score": null,
+          "reason": "no customjs_classes",
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "installer_migration": {
+          "score": 0,
+          "covered": 0,
+          "total": 1,
+          "migrations": [
+            {
+              "fn": "applyCustomJsGuardMigration",
+              "covered": false
+            }
+          ],
+          "suggested_archetype": "seed-migrate",
+          "suggested_target_file": "platform/test/run-seed-migrations.js"
+        },
+        "manifest_schema": {
+          "score": 0.75,
+          "manifest_ratio": 0.5,
+          "schema_ratio": 1,
+          "manifest_fields": [
+            {
+              "field": "name",
+              "asserted": true
+            },
+            {
+              "field": "version",
+              "asserted": false
+            },
+            {
+              "field": "files",
+              "asserted": true
+            },
+            {
+              "field": "rule_fragments",
+              "asserted": false
+            }
+          ],
+          "schema_owned": 0,
+          "suggested_archetype": "hc-family",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "template_lockstep": {
+          "score": 1,
+          "covered": 1,
+          "total": 1,
+          "items": [
+            {
+              "kind": "rule_fragment",
+              "name": "_global",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "template-assert",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "widget_render": {
+          "score": null,
+          "reason": "no customjs_classes",
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "integration_smoke": {
+          "score": 1,
+          "happy_path": true,
+          "failure_mode": true,
+          "suggested_archetype": "smoke-extend",
+          "suggested_target_file": "platform/test/run-integration-smoke.js"
+        }
+      },
+      "composite_score": 0.6875,
+      "blast_radius": "low",
+      "blast_radius_rationale": "Pure-fn guard utility; stable.",
+      "recent_incidents_30d": 0,
+      "priority_score": 0.3,
+      "top_gap": {
+        "axis": "installer_migration",
+        "score": 0.3,
+        "archetype": "seed-migrate",
+        "target_file": "platform/test/run-seed-migrations.js"
+      },
+      "qualitative": {
+        "validates_scores": "yes",
+        "false_positives": [],
+        "false_negatives": [
+          {
+            "axis": "installer_migration",
+            "note": "applyEntityCreateGuardMigration + applyCustomJsGuardMigration tested only at manifest level (V01102-CJSG regex-scans); no end-to-end run + vault post-state asserts"
+          },
+          {
+            "axis": "customjs_behavioral",
+            "note": "view.js input validation logic (missing class, invalid args, method-not-found fallback) has no dedicated harness"
+          }
+        ],
+        "primary_user_flow": "Caller invokes dv.view('customjs-guard', {class, method?, args?}) -> guard polls window.customJS for ~2s -> dispatches to target class method -> renders or shows error fallback.",
+        "qualitative_recommendation": "Critical infrastructure for cold-load reliability across every blueprint using CustomJS. The two v0.110.x+ migrations are load-bearing but tested only at manifest level. Recommend behavioral runner stubbing Obsidian app + window.customJS, valid/invalid input paths, ~15-20 asserts."
+      }
+    },
+    {
+      "kind": "mechanism",
+      "name": "kanban-status-sync",
+      "current_version": "0.2.0",
+      "axes": {
+        "customjs_behavioral": {
+          "score": 0.6666666666666666,
+          "covered": 4,
+          "total": 6,
+          "methods": [
+            {
+              "cls": "KanbanStatusSync",
+              "method": "syncAllBoards",
+              "covered": true,
+              "hits": 4
+            },
+            {
+              "cls": "KanbanStatusSync",
+              "method": "syncBoard",
+              "covered": false,
+              "hits": 0
+            },
+            {
+              "cls": "KanbanStatusSync",
+              "method": "parseBoardColumns",
+              "covered": true,
+              "hits": 3
+            },
+            {
+              "cls": "KanbanStatusSync",
+              "method": "slugifyStatus",
+              "covered": true,
+              "hits": 3
+            },
+            {
+              "cls": "KanbanStatusSync",
+              "method": "computeDiff",
+              "covered": true,
+              "hits": 3
+            },
+            {
+              "cls": "KanbanStatusSyncInit",
+              "method": "invoke",
+              "covered": false,
+              "hits": 0
+            }
+          ],
+          "suggested_archetype": "behavioral-runner",
+          "suggested_target_file": "platform/test/run-kanban-status-sync-kanbanstatussync.js"
+        },
+        "installer_migration": {
+          "score": null,
+          "reason": "no install-time migrations attributed",
+          "migrations": [],
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "manifest_schema": {
+          "score": 0.5833333333333334,
+          "manifest_ratio": 0.16666666666666666,
+          "schema_ratio": 1,
+          "manifest_fields": [
+            {
+              "field": "name",
+              "asserted": false
+            },
+            {
+              "field": "version",
+              "asserted": false
+            },
+            {
+              "field": "customjs_classes",
+              "asserted": false
+            },
+            {
+              "field": "files",
+              "asserted": true
+            },
+            {
+              "field": "rule_fragments",
+              "asserted": false
+            },
+            {
+              "field": "depends_on",
+              "asserted": false
+            }
+          ],
+          "schema_owned": 0,
+          "suggested_archetype": "hc-family",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "template_lockstep": {
+          "score": null,
+          "reason": "no templates or rule_fragments",
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "widget_render": {
+          "score": null,
+          "reason": "no render() widgets",
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "integration_smoke": {
+          "score": 0,
+          "happy_path": false,
+          "failure_mode": true,
+          "suggested_archetype": "behavioral-runner",
+          "suggested_target_file": "platform/test/run-integration-smoke.js"
+        }
+      },
+      "composite_score": 0.4166666666666667,
+      "blast_radius": "low",
+      "blast_radius_rationale": "Boards-coupled; low traffic.",
+      "recent_incidents_30d": 1,
+      "priority_score": 0.27,
+      "top_gap": {
+        "axis": "integration_smoke",
+        "score": 0.27,
+        "archetype": "behavioral-runner",
+        "target_file": "platform/test/run-integration-smoke.js"
+      },
+      "qualitative": {
+        "validates_scores": "yes",
+        "false_positives": [],
+        "false_negatives": [
+          {
+            "axis": "customjs_behavioral",
+            "note": "syncBoard method (forward/reverse vault I/O passes) not exercised; requires Obsidian app/metadataCache stubs and cannot be tested via pure static helpers alone"
+          },
+          {
+            "axis": "integration_smoke",
+            "note": "Score 0.0 is correct; missing vault setup with kanban board, dataview availability, Obsidian app stubs, frontmatter write verification"
+          }
+        ],
+        "primary_user_flow": "User moves a card in obsidian-kanban board, triggering vault startup or manual re-sync command, which discovers boards via Dataview and writes each card's frontmatter (status/status_prev/status_changed_at) reflecting its current column; orphaned cards marked archived.",
+        "qualitative_recommendation": "Pure utility functions well-covered; behavioral core (syncBoard with vault I/O + metadataCache + dataview + frontmatter writes) has zero coverage. Behavioral-runner candidate: stub Obsidian app + metadataCache + dataview; seeded board with moving cards; forward + reverse pass; KanbanStatusSyncInit retry-with-backoff + command registration."
+      }
+    },
+    {
+      "kind": "mechanism",
+      "name": "people-rendering",
+      "current_version": "0.1.0",
+      "axes": {
+        "customjs_behavioral": {
+          "score": 1,
+          "covered": 4,
+          "total": 4,
+          "methods": [
+            {
+              "cls": "PeopleRendering",
+              "method": "renderChip",
+              "covered": true,
+              "hits": 4
+            },
+            {
+              "cls": "PeopleRendering",
+              "method": "renderCard",
+              "covered": true,
+              "hits": 2
+            },
+            {
+              "cls": "PeopleRendering",
+              "method": "renderMentionList",
+              "covered": true,
+              "hits": 4
+            },
+            {
+              "cls": "PeopleRendering",
+              "method": "extractMentions",
+              "covered": true,
+              "hits": 2
+            }
+          ],
+          "suggested_archetype": "behavioral-runner",
+          "suggested_target_file": "platform/test/run-people-rendering-peoplerendering.js"
+        },
+        "installer_migration": {
+          "score": null,
+          "reason": "no install-time migrations attributed",
+          "migrations": [],
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "manifest_schema": {
+          "score": 0.5,
+          "manifest_ratio": 0,
+          "schema_ratio": 1,
+          "manifest_fields": [
+            {
+              "field": "name",
+              "asserted": false
+            },
+            {
+              "field": "version",
+              "asserted": false
+            },
+            {
+              "field": "customjs_classes",
+              "asserted": false
+            },
+            {
+              "field": "files",
+              "asserted": false
+            },
+            {
+              "field": "rule_fragments",
+              "asserted": false
+            },
+            {
+              "field": "depends_on",
+              "asserted": false
+            }
+          ],
+          "schema_owned": 0,
+          "suggested_archetype": "hc-family",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "template_lockstep": {
+          "score": null,
+          "reason": "no templates or rule_fragments",
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "widget_render": {
+          "score": 1,
+          "covered": 1,
+          "total": 1,
+          "widgets": [
+            {
+              "widget": "PeopleRendering",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "renderer-extend",
+          "suggested_target_file": "platform/test/run-renderer.js"
+        },
+        "integration_smoke": {
+          "score": 0,
+          "happy_path": false,
+          "failure_mode": true,
+          "suggested_archetype": "behavioral-runner",
+          "suggested_target_file": "platform/test/run-integration-smoke.js"
+        }
+      },
+      "composite_score": 0.625,
+      "blast_radius": "low",
+      "blast_radius_rationale": "Pure widget; stable.",
+      "recent_incidents_30d": 0,
+      "priority_score": 0.22499999999999998,
+      "top_gap": {
+        "axis": "integration_smoke",
+        "score": 0.22499999999999998,
+        "archetype": "behavioral-runner",
+        "target_file": "platform/test/run-integration-smoke.js"
+      },
+      "qualitative": {
+        "validates_scores": "no",
+        "false_positives": [
+          {
+            "axis": "customjs_behavioral",
+            "note": "4/4 public methods tested under DOM stub unit tests, not integration scenarios; doesn't validate behavior in real rendering contexts (chips in meeting attendees, lists in daily context)"
+          },
+          {
+            "axis": "widget_render",
+            "note": "renderChip scores 1.0 because it renders without throw under DOM stub; doesn't validate visual contract (layout, tooltips, fallback) or integration into live page render"
+          }
+        ],
+        "false_negatives": [
+          {
+            "axis": "manifest_schema",
+            "note": "0/6 manifest fields asserted in HC families; depends_on (customjs-guard, cards) never validated"
+          },
+          {
+            "axis": "integration_smoke",
+            "note": "Primary flow 'render [[Person]] references in other blueprints (meetings, daily, journal, projects)' not exercised. integration-smoke exercises people blueprint but never calls renderChip/renderCard/renderMentionList/extractMentions from a consuming blueprint"
+          }
+        ],
+        "primary_user_flow": "Render person references as interactive chips, cards, or mention-lists within host blueprint pages, filtering to spice/people/ namespace and delegating card rendering to BeaconCards.",
+        "qualitative_recommendation": "Composite 0.625 masks integration gap. Unit tests pass under DOM stub but no test validates the primary user flow in a consuming blueprint's output. Recommendation: extend run-integration-smoke.js with 'meeting note with [[Person]] attendee -> renders as chip via people-rendering' happy path."
+      }
+    },
+    {
+      "kind": "mechanism",
+      "name": "audit",
+      "current_version": "0.3.0",
+      "axes": {
+        "customjs_behavioral": {
+          "score": null,
+          "reason": "no customjs_classes",
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "installer_migration": {
+          "score": null,
+          "reason": "no install-time migrations attributed",
+          "migrations": [],
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "manifest_schema": {
+          "score": 0.8333333333333333,
+          "manifest_ratio": 0.6666666666666666,
+          "schema_ratio": 1,
+          "manifest_fields": [
+            {
+              "field": "name",
+              "asserted": false
+            },
+            {
+              "field": "version",
+              "asserted": true
+            },
+            {
+              "field": "files",
+              "asserted": true
+            }
+          ],
+          "schema_owned": 0,
+          "suggested_archetype": "hc-family",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "template_lockstep": {
+          "score": 1,
+          "covered": 1,
+          "total": 1,
+          "items": [
+            {
+              "kind": "template",
+              "name": "Audit.md",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "template-assert",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "widget_render": {
+          "score": null,
+          "reason": "no customjs_classes",
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "integration_smoke": {
+          "score": 1,
+          "happy_path": true,
+          "failure_mode": true,
+          "suggested_archetype": "smoke-extend",
+          "suggested_target_file": "platform/test/run-integration-smoke.js"
+        }
+      },
+      "composite_score": 0.9444444444444443,
+      "blast_radius": "high",
+      "blast_radius_rationale": "Self-grading harness; touched by every install.",
+      "recent_incidents_30d": 7,
+      "priority_score": 0.16666666666666674,
+      "top_gap": {
+        "axis": "manifest_schema",
+        "score": 0.16666666666666674,
+        "archetype": "hc-family",
+        "target_file": "platform/test/run-helper-cases.js"
+      },
+      "qualitative": {
+        "validates_scores": "yes",
+        "false_positives": [
+          {
+            "axis": "manifest_schema",
+            "note": "Claims 0.833 (2/3 manifest fields asserted) but 'name' field marked as NOT asserted, yet integration_smoke validates the full /audit command end-to-end which exercises name lookup"
+          }
+        ],
+        "false_negatives": [
+          {
+            "axis": "manifest_schema",
+            "note": "Mechanism contributes three claude-surface entries (command, skill, claude_md_row) but run-audit.js does NOT validate registrations round-trip through claude-surface-walker; blind spot where the audit mechanism could break its own deployed surface"
+          }
+        ],
+        "primary_user_flow": "Run /audit slash command to walk vault, detect violations and platform drift, write audit report.",
+        "qualitative_recommendation": "Score 0.944 composite; manifest_schema gap minor. Real gap: claude-surface walker self-validation missing. Address by adding meta-test invoking walkClaudeSurface on fixture with audit's own registry entries."
+      }
+    },
+    {
+      "kind": "mechanism",
+      "name": "activity-feed",
+      "current_version": "0.7.1",
+      "axes": {
+        "customjs_behavioral": {
+          "score": 1,
+          "covered": 1,
+          "total": 1,
+          "methods": [
+            {
+              "cls": "ActivityFeed",
+              "method": "render",
+              "covered": true,
+              "hits": 5
+            }
+          ],
+          "suggested_archetype": "behavioral-runner",
+          "suggested_target_file": "platform/test/run-activity-feed-activityfeed.js"
+        },
+        "installer_migration": {
+          "score": null,
+          "reason": "no install-time migrations attributed",
+          "migrations": [],
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "manifest_schema": {
+          "score": 0.75,
+          "manifest_ratio": 0.5,
+          "schema_ratio": 1,
+          "manifest_fields": [
+            {
+              "field": "name",
+              "asserted": true
+            },
+            {
+              "field": "version",
+              "asserted": true
+            },
+            {
+              "field": "customjs_classes",
+              "asserted": false
+            },
+            {
+              "field": "files",
+              "asserted": true
+            },
+            {
+              "field": "rule_fragments",
+              "asserted": false
+            },
+            {
+              "field": "depends_on",
+              "asserted": false
+            }
+          ],
+          "schema_owned": 0,
+          "suggested_archetype": "hc-family",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "template_lockstep": {
+          "score": null,
+          "reason": "no templates or rule_fragments",
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "widget_render": {
+          "score": 1,
+          "covered": 1,
+          "total": 1,
+          "widgets": [
+            {
+              "widget": "ActivityFeed",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "renderer-extend",
+          "suggested_target_file": "platform/test/run-renderer.js"
+        },
+        "integration_smoke": {
+          "score": 1,
+          "happy_path": true,
+          "failure_mode": true,
+          "suggested_archetype": "smoke-extend",
+          "suggested_target_file": "platform/test/run-integration-smoke.js"
+        }
+      },
+      "composite_score": 0.9375,
+      "blast_radius": "med",
+      "blast_radius_rationale": "Hub embed; visible on hubs widely.",
+      "recent_incidents_30d": 14,
+      "priority_score": 0.15,
+      "top_gap": {
+        "axis": "manifest_schema",
+        "score": 0.15,
+        "archetype": "hc-family",
+        "target_file": "platform/test/run-helper-cases.js"
+      },
+      "qualitative": {
+        "validates_scores": "yes",
+        "false_positives": [],
+        "false_negatives": [],
+        "primary_user_flow": "Query pages by time-window scope (today/week/month) and render them grouped by blueprint with optional rollup, bucketing, preview, and persistent group state.",
+        "qualitative_recommendation": "Exceptionally well-covered. run-activity-feed.js has 8 distinct test passes covering manifest validation, source linting, runtime behavior under synthetic dataview/DOM stubs, and edge cases (strict created_at, ISO timezones, empty groups, group state). 120 asserts deterministic. No new harness needed."
+      }
+    },
+    {
+      "kind": "mechanism",
+      "name": "validator",
+      "current_version": "0.3.0",
+      "axes": {
+        "customjs_behavioral": {
+          "score": null,
+          "reason": "no customjs_classes",
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "installer_migration": {
+          "score": null,
+          "reason": "no install-time migrations attributed",
+          "migrations": [],
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "manifest_schema": {
+          "score": 0.8333333333333333,
+          "manifest_ratio": 0.6666666666666666,
+          "schema_ratio": 1,
+          "manifest_fields": [
+            {
+              "field": "name",
+              "asserted": true
+            },
+            {
+              "field": "version",
+              "asserted": false
+            },
+            {
+              "field": "files",
+              "asserted": true
+            }
+          ],
+          "schema_owned": 0,
+          "suggested_archetype": "hc-family",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "template_lockstep": {
+          "score": 1,
+          "covered": 1,
+          "total": 1,
+          "items": [
+            {
+              "kind": "template",
+              "name": "Validate.md",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "template-assert",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "widget_render": {
+          "score": null,
+          "reason": "no customjs_classes",
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "integration_smoke": {
+          "score": 1,
+          "happy_path": true,
+          "failure_mode": true,
+          "suggested_archetype": "smoke-extend",
+          "suggested_target_file": "platform/test/run-integration-smoke.js"
+        }
+      },
+      "composite_score": 0.9444444444444443,
+      "blast_radius": "high",
+      "blast_radius_rationale": "Front-line schema gate; touched by every blueprint change.",
+      "recent_incidents_30d": 1,
+      "priority_score": 0.10000000000000005,
+      "top_gap": {
+        "axis": "manifest_schema",
+        "score": 0.10000000000000005,
+        "archetype": "hc-family",
+        "target_file": "platform/test/run-helper-cases.js"
+      },
+      "qualitative": {
+        "validates_scores": "yes",
+        "false_positives": [],
+        "false_negatives": [
+          {
+            "axis": "manifest_schema",
+            "note": "Validator manifest top-level fields (name, version, files, external_plugins, templater_hotkeys, slash_commander_bindings, post_install) lack HC-family asserts. Only extends resolution runtime behavior (VAL-EX-1..8 in run-validator.js) is covered."
+          },
+          {
+            "axis": "integration_smoke",
+            "note": "Primary user flow ('write file -> /validate -> feedback via hook notice or _lint-queue appends') lacks end-to-end behavioral assert. Mechanism exercised only in isolation, not full vault lifecycle."
+          }
+        ],
+        "primary_user_flow": "Author writes a file -> Templater post-execution hook validates frontmatter/tags/blocks/naming against rule_fragments -> violations surface as notices and append to _lint-queue.yml for bulk review.",
+        "qualitative_recommendation": "Phase 2-3 candidate if room permits. Two additions (manifest HC family + integration_smoke for full flow) lift manifest_schema to ~1.0 and integration_smoke to 0.5-1.0. Risk is low - schema enforcement tool, gaps are visibility, not functional bugs."
+      }
+    },
+    {
+      "kind": "blueprint",
+      "name": "daily",
+      "current_version": "0.13.6",
+      "axes": {
+        "customjs_behavioral": {
+          "score": 1,
+          "covered": 1,
+          "total": 1,
+          "methods": [
+            {
+              "cls": "SpaceDailyDashboard",
+              "method": "render",
+              "covered": true,
+              "hits": 1
+            }
+          ],
+          "suggested_archetype": "behavioral-runner",
+          "suggested_target_file": "platform/test/run-daily-spacedailydashboard.js"
+        },
+        "installer_migration": {
+          "score": null,
+          "reason": "no install-time migrations attributed",
+          "migrations": [],
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "manifest_schema": {
+          "score": 0.9166666666666667,
+          "manifest_ratio": 0.8333333333333334,
+          "schema_ratio": 1,
+          "manifest_fields": [
+            {
+              "field": "name",
+              "asserted": true
+            },
+            {
+              "field": "version",
+              "asserted": true
+            },
+            {
+              "field": "customjs_classes",
+              "asserted": true
+            },
+            {
+              "field": "files",
+              "asserted": true
+            },
+            {
+              "field": "rule_fragments",
+              "asserted": true
+            },
+            {
+              "field": "depends_on",
+              "asserted": false
+            }
+          ],
+          "schema_owned": 0,
+          "suggested_archetype": "hc-family",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "template_lockstep": {
+          "score": 1,
+          "covered": 2,
+          "total": 2,
+          "items": [
+            {
+              "kind": "template",
+              "name": "daily-template.md",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "daily",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "template-assert",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "widget_render": {
+          "score": 1,
+          "covered": 1,
+          "total": 1,
+          "widgets": [
+            {
+              "widget": "SpaceDailyDashboard",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "renderer-extend",
+          "suggested_target_file": "platform/test/run-renderer.js"
+        },
+        "integration_smoke": {
+          "score": 1,
+          "happy_path": true,
+          "failure_mode": true,
+          "suggested_archetype": "smoke-extend",
+          "suggested_target_file": "platform/test/run-integration-smoke.js"
+        }
+      },
+      "composite_score": 0.9833333333333334,
+      "blast_radius": "high",
+      "blast_radius_rationale": "Every consumer hits daily notes; touched by carryover + recurring.",
+      "recent_incidents_30d": 34,
+      "priority_score": 0.08333333333333326,
+      "top_gap": {
+        "axis": "manifest_schema",
+        "score": 0.08333333333333326,
+        "archetype": "hc-family",
+        "target_file": "platform/test/run-helper-cases.js"
+      },
+      "qualitative": {
+        "validates_scores": "no",
+        "false_positives": [
+          {
+            "axis": "widget_render",
+            "note": "Substring 'SpaceDailyDashboard' matches in comments/test names but render() method is never actually invoked under DOM stub."
+          }
+        ],
+        "false_negatives": [
+          {
+            "axis": "customjs_behavioral",
+            "note": "Render() is unreachable via current test harness pattern; would require fuller integration test with seeded vault + dataviewjs shim invoking dv.view(customjs-guard)."
+          }
+        ],
+        "primary_user_flow": "Open daily note -> dataviewjs evaluates SpaceDailyDashboard.render(dv) -> panels for tasks, meetings, activity display without throwing.",
+        "qualitative_recommendation": "Current test architecture mismatch: blueprint requires behavioral-runner with full dataviewjs surface stub, not renderer-extend pattern. Either upgrade scorer to invoke render() with mocked dv, or create dedicated behavioral runner."
+      }
+    },
+    {
+      "kind": "mechanism",
+      "name": "entity-create",
+      "current_version": "0.7.2",
+      "axes": {
+        "customjs_behavioral": {
+          "score": 1,
+          "covered": 2,
+          "total": 2,
+          "methods": [
+            {
+              "cls": "EntityCreate",
+              "method": "render",
+              "covered": true,
+              "hits": 23
+            },
+            {
+              "cls": "EntityCreate",
+              "method": "create",
+              "covered": true,
+              "hits": 4
+            }
+          ],
+          "suggested_archetype": "behavioral-runner",
+          "suggested_target_file": "platform/test/run-entity-create-entitycreate.js"
+        },
+        "installer_migration": {
+          "score": 1,
+          "covered": 1,
+          "total": 1,
+          "migrations": [
+            {
+              "fn": "applyEntityCreateGuardMigration",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "seed-migrate",
+          "suggested_target_file": "platform/test/run-seed-migrations.js"
+        },
+        "manifest_schema": {
+          "score": 0.9166666666666667,
+          "manifest_ratio": 0.8333333333333334,
+          "schema_ratio": 1,
+          "manifest_fields": [
+            {
+              "field": "name",
+              "asserted": true
+            },
+            {
+              "field": "version",
+              "asserted": true
+            },
+            {
+              "field": "customjs_classes",
+              "asserted": true
+            },
+            {
+              "field": "files",
+              "asserted": true
+            },
+            {
+              "field": "rule_fragments",
+              "asserted": false
+            },
+            {
+              "field": "depends_on",
+              "asserted": true
+            }
+          ],
+          "schema_owned": 0,
+          "suggested_archetype": "hc-family",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "template_lockstep": {
+          "score": null,
+          "reason": "no templates or rule_fragments",
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "widget_render": {
+          "score": 1,
+          "covered": 1,
+          "total": 1,
+          "widgets": [
+            {
+              "widget": "EntityCreate",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "renderer-extend",
+          "suggested_target_file": "platform/test/run-renderer.js"
+        },
+        "integration_smoke": {
+          "score": 1,
+          "happy_path": true,
+          "failure_mode": true,
+          "suggested_archetype": "smoke-extend",
+          "suggested_target_file": "platform/test/run-integration-smoke.js"
+        }
+      },
+      "composite_score": 0.9833333333333334,
+      "blast_radius": "high",
+      "blast_radius_rationale": "Every + New button uses it; v0.94 + v0.102 + v0.108 evolution.",
+      "recent_incidents_30d": 6,
+      "priority_score": 0.08333333333333326,
+      "top_gap": {
+        "axis": "manifest_schema",
+        "score": 0.08333333333333326,
+        "archetype": "hc-family",
+        "target_file": "platform/test/run-helper-cases.js"
+      },
+      "qualitative": {
+        "validates_scores": "yes",
+        "false_positives": [],
+        "false_negatives": [
+          {
+            "axis": "installer_migration",
+            "note": "applyNewEntityButtons + applyEntityCreateGuardMigration untested in seed harness; no HC-V0XYZ-SEED-MIGRATE family covers registry materialization or guard-form rewrite logic"
+          },
+          {
+            "axis": "manifest_schema",
+            "note": "render_in.kind='nav_buttons' deferred case not explicitly asserted; minor schema coverage gap"
+          }
+        ],
+        "primary_user_flow": "Click EntityCreate-rendered button in hub note -> prompts loop -> frontmatter template hydration + seed_from_defaults injection -> create new note at routed destination -> open in editor",
+        "qualitative_recommendation": "Strong on pure logic (customjs_behavioral 1.0, schema 0.917, widget 1.0) but critical gap in installer_migration (0.0). The two apply* fns run on every install and materialize the registry or rewrite vault notes; their behavior must be directly asserted in the seed harness. Single gap carries high blast radius (installs touch every vault)."
+      }
+    },
+    {
+      "kind": "blueprint",
+      "name": "boards",
+      "current_version": "0.2.1",
+      "axes": {
+        "customjs_behavioral": {
+          "score": null,
+          "reason": "no customjs_classes",
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "installer_migration": {
+          "score": null,
+          "reason": "no install-time migrations attributed",
+          "migrations": [],
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "manifest_schema": {
+          "score": 0.7,
+          "manifest_ratio": 0.4,
+          "schema_ratio": 1,
+          "manifest_fields": [
+            {
+              "field": "name",
+              "asserted": false
+            },
+            {
+              "field": "version",
+              "asserted": false
+            },
+            {
+              "field": "files",
+              "asserted": true
+            },
+            {
+              "field": "rule_fragments",
+              "asserted": true
+            },
+            {
+              "field": "depends_on",
+              "asserted": false
+            }
+          ],
+          "schema_owned": 0,
+          "suggested_archetype": "hc-family",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "template_lockstep": {
+          "score": 1,
+          "covered": 2,
+          "total": 2,
+          "items": [
+            {
+              "kind": "template",
+              "name": "Template, Board Card.md",
+              "covered": true
+            },
+            {
+              "kind": "rule_fragment",
+              "name": "boards",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "template-assert",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "widget_render": {
+          "score": null,
+          "reason": "no customjs_classes",
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "integration_smoke": {
+          "score": 1,
+          "happy_path": true,
+          "failure_mode": true,
+          "suggested_archetype": "smoke-extend",
+          "suggested_target_file": "platform/test/run-integration-smoke.js"
+        }
+      },
+      "composite_score": 0.9,
+      "blast_radius": "low",
+      "blast_radius_rationale": "Single consumer uses kanban occasionally; one external plugin coupling.",
+      "recent_incidents_30d": 1,
+      "priority_score": 0.054000000000000006,
+      "top_gap": {
+        "axis": "manifest_schema",
+        "score": 0.054000000000000006,
+        "archetype": "hc-family",
+        "target_file": "platform/test/run-helper-cases.js"
+      },
+      "qualitative": {
+        "validates_scores": "yes",
+        "false_positives": [],
+        "false_negatives": [],
+        "primary_user_flow": "Create kanban board from nav button; kanban-plugin renders To-Do-Board.md; create card auto-routes to spice/boards/cards/YYYY/MM-MMMM/title.md via Templater rule_fragment.",
+        "qualitative_recommendation": "Validates cleanly. 0.9 composite reflects minor manifest_schema gap (3 fields lack HC asserts). Low priority given blast_radius=low and strong external-plugin coupling. Closing the gap via 3-field HC-family extension is low-lift."
+      }
+    },
+    {
+      "kind": "mechanism",
+      "name": "accent-button",
+      "current_version": "0.1.1",
+      "axes": {
+        "customjs_behavioral": {
+          "score": 1,
+          "covered": 1,
+          "total": 1,
+          "methods": [
+            {
+              "cls": "AccentButton",
+              "method": "render",
+              "covered": true,
+              "hits": 49
+            }
+          ],
+          "suggested_archetype": "behavioral-runner",
+          "suggested_target_file": "platform/test/run-accent-button-accentbutton.js"
+        },
+        "installer_migration": {
+          "score": null,
+          "reason": "no install-time migrations attributed",
+          "migrations": [],
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "manifest_schema": {
+          "score": 0.75,
+          "manifest_ratio": 0.5,
+          "schema_ratio": 1,
+          "manifest_fields": [
+            {
+              "field": "name",
+              "asserted": false
+            },
+            {
+              "field": "version",
+              "asserted": true
+            },
+            {
+              "field": "customjs_classes",
+              "asserted": true
+            },
+            {
+              "field": "files",
+              "asserted": true
+            },
+            {
+              "field": "rule_fragments",
+              "asserted": false
+            },
+            {
+              "field": "depends_on",
+              "asserted": false
+            }
+          ],
+          "schema_owned": 0,
+          "suggested_archetype": "hc-family",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "template_lockstep": {
+          "score": null,
+          "reason": "no templates or rule_fragments",
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "widget_render": {
+          "score": 1,
+          "covered": 1,
+          "total": 1,
+          "widgets": [
+            {
+              "widget": "AccentButton",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "renderer-extend",
+          "suggested_target_file": "platform/test/run-renderer.js"
+        },
+        "integration_smoke": {
+          "score": 1,
+          "happy_path": true,
+          "failure_mode": true,
+          "suggested_archetype": "smoke-extend",
+          "suggested_target_file": "platform/test/run-integration-smoke.js"
+        }
+      },
+      "composite_score": 0.9375,
+      "blast_radius": "low",
+      "blast_radius_rationale": "Trivial wrapper; v0.88 bug already netted.",
+      "recent_incidents_30d": 1,
+      "priority_score": 0.045,
+      "top_gap": {
+        "axis": "manifest_schema",
+        "score": 0.045,
+        "archetype": "hc-family",
+        "target_file": "platform/test/run-helper-cases.js"
+      },
+      "qualitative": {
+        "validates_scores": "yes",
+        "false_positives": [],
+        "false_negatives": [
+          {
+            "axis": "manifest_schema",
+            "note": "name, rule_fragments, depends_on fields unasserted; low-risk for trivial wrapper mechanism (name/dependencies statically validated by CI, behavior exercised in integration tests)"
+          }
+        ],
+        "primary_user_flow": "Render an outline-accent action button with configurable label, icon SVG, click handler, flex fill, disabled state, and hover color transitions.",
+        "qualitative_recommendation": "Fully covered across all applicable axes. The manifest_schema 0.75 reflects trivial unasserted fields statically validated in CI. No harness extensions required. Single HC family in run-helper-cases.js could upgrade to 1.0 but not risk-justified."
+      }
+    },
+    {
+      "kind": "mechanism",
+      "name": "styling",
+      "current_version": "0.2.1",
+      "axes": {
+        "customjs_behavioral": {
+          "score": null,
+          "reason": "no customjs_classes",
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "installer_migration": {
+          "score": null,
+          "reason": "no install-time migrations attributed",
+          "migrations": [],
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "manifest_schema": {
+          "score": 0.8,
+          "manifest_ratio": 0.6,
+          "schema_ratio": 1,
+          "manifest_fields": [
+            {
+              "field": "name",
+              "asserted": true
+            },
+            {
+              "field": "version",
+              "asserted": true
+            },
+            {
+              "field": "files",
+              "asserted": true
+            },
+            {
+              "field": "rule_fragments",
+              "asserted": false
+            },
+            {
+              "field": "depends_on",
+              "asserted": false
+            }
+          ],
+          "schema_owned": 0,
+          "suggested_archetype": "hc-family",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "template_lockstep": {
+          "score": null,
+          "reason": "no templates or rule_fragments",
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "widget_render": {
+          "score": null,
+          "reason": "no customjs_classes",
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "integration_smoke": {
+          "score": 1,
+          "happy_path": true,
+          "failure_mode": true,
+          "suggested_archetype": "smoke-extend",
+          "suggested_target_file": "platform/test/run-integration-smoke.js"
+        }
+      },
+      "composite_score": 0.9,
+      "blast_radius": "low",
+      "blast_radius_rationale": "CSS surface; visual only.",
+      "recent_incidents_30d": 0,
+      "priority_score": 0.029999999999999992,
+      "top_gap": {
+        "axis": "manifest_schema",
+        "score": 0.029999999999999992,
+        "archetype": "hc-family",
+        "target_file": "platform/test/run-helper-cases.js"
+      },
+      "qualitative": {
+        "validates_scores": "yes",
+        "false_positives": [
+          {
+            "axis": "manifest_schema",
+            "note": "0.800 score reflects behavioral testing of installer helpers (VT/AP/SS) but lacks explicit HC family asserting manifest field contract (name, version, external_plugins, snippets, appearance structure, style_settings_defaults_src path)"
+          }
+        ],
+        "false_negatives": [],
+        "primary_user_flow": "Install and apply Baseline theme, enable sauce-callouts CSS snippet, merge canonical style-settings defaults into consumer config.",
+        "qualitative_recommendation": "CSS-only manifest-driven surface with no behavioral code. Current 15 VT/AP/SS cases + integration smoke verify installer helpers well. Adding one HC-V0####-STYLING-MANIFEST family (3-4 asserts on manifest structure + file paths) would close the gap without needing a dedicated harness."
+      }
+    },
+    {
+      "kind": "mechanism",
+      "name": "cards",
+      "current_version": "0.2.6",
+      "axes": {
+        "customjs_behavioral": {
+          "score": 1,
+          "covered": 1,
+          "total": 1,
+          "methods": [
+            {
+              "cls": "BeaconCards",
+              "method": "render",
+              "covered": true,
+              "hits": 63
+            }
+          ],
+          "suggested_archetype": "behavioral-runner",
+          "suggested_target_file": "platform/test/run-cards-beaconcards.js"
+        },
+        "installer_migration": {
+          "score": null,
+          "reason": "no install-time migrations attributed",
+          "migrations": [],
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "manifest_schema": {
+          "score": 1,
+          "manifest_ratio": 1,
+          "schema_ratio": 1,
+          "manifest_fields": [
+            {
+              "field": "name",
+              "asserted": true
+            },
+            {
+              "field": "version",
+              "asserted": true
+            },
+            {
+              "field": "customjs_classes",
+              "asserted": true
+            },
+            {
+              "field": "files",
+              "asserted": true
+            },
+            {
+              "field": "rule_fragments",
+              "asserted": true
+            },
+            {
+              "field": "depends_on",
+              "asserted": true
+            }
+          ],
+          "schema_owned": 0,
+          "suggested_archetype": "hc-family",
+          "suggested_target_file": "platform/test/run-helper-cases.js"
+        },
+        "template_lockstep": {
+          "score": null,
+          "reason": "no templates or rule_fragments",
+          "suggested_archetype": null,
+          "suggested_target_file": null
+        },
+        "widget_render": {
+          "score": 1,
+          "covered": 1,
+          "total": 1,
+          "widgets": [
+            {
+              "widget": "BeaconCards",
+              "covered": true
+            }
+          ],
+          "suggested_archetype": "renderer-extend",
+          "suggested_target_file": "platform/test/run-renderer.js"
+        },
+        "integration_smoke": {
+          "score": 1,
+          "happy_path": true,
+          "failure_mode": true,
+          "suggested_archetype": "smoke-extend",
+          "suggested_target_file": "platform/test/run-integration-smoke.js"
+        }
+      },
+      "composite_score": 1,
+      "blast_radius": "low",
+      "blast_radius_rationale": "Pure renderer primitive.",
+      "recent_incidents_30d": 9,
+      "priority_score": 0,
+      "top_gap": {
+        "axis": "customjs_behavioral",
+        "score": 0,
+        "archetype": "behavioral-runner",
+        "target_file": "platform/test/run-cards-beaconcards.js"
+      },
+      "qualitative": {
+        "validates_scores": "no",
+        "false_positives": [
+          {
+            "axis": "widget_render",
+            "note": "icon option used in production (project-docs-index.js) but untested in BC1-BC9 suite"
+          },
+          {
+            "axis": "integration_smoke",
+            "note": "Score 1.0 claims happy+failure modes but only negative regression assertion exists (legacy ProjectDocsCards removal); no positive flow exercised end-to-end"
+          }
+        ],
+        "false_negatives": [],
+        "primary_user_flow": "Render a list of pages into a mobile-aware card grid with title, optional subtitle/badges/meta, grouping, and custom click handlers.",
+        "qualitative_recommendation": "Icon option (actively used in production) should be added to BC test coverage; integration_smoke should be demoted to 0.5 (happy-path only) unless dedicated multi-blueprint flow added. The render() method itself is thoroughly exercised (63 hits across 9 test cases)."
+      }
+    }
+  ]
+}
