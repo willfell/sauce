@@ -73,6 +73,14 @@ function makeEl(tag) {
         children: [],
         style: { cssText: '' },
         onclick: null,
+        // innerHTML setter mirrors textContent (with tags stripped) so flattenEl —
+        // which only reads textContent — still sees the rendered text body. This
+        // is the path used by v0.7.0 inline-markdown render (writes innerHTML).
+        get innerHTML() { return this._innerHTML || ''; },
+        set innerHTML(v) {
+            this._innerHTML = String(v == null ? '' : v);
+            this.textContent = this._innerHTML.replace(/<[^>]+>/g, '');
+        },
         get lastElementChild() { return this.children[this.children.length - 1] || null; },
         createEl(t, opts) {
             const child = makeEl(t);
