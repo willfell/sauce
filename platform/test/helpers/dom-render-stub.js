@@ -136,7 +136,15 @@ function parseAnchorsFromHtml(html) {
 }
 
 function stripTags(html) {
-    return String(html || '').replace(/<[^>]+>/g, '');
+    // Loop until fixed point so embedded patterns like `<scr<script>ipt>` don't
+    // round-trip through a single pass. Test-only utility (the stubs process
+    // test fixtures, never untrusted user input) but CodeQL flags the
+    // single-pass form (js/incomplete-multi-character-sanitization) so we use
+    // the safe form here too.
+    let s = String(html || '');
+    let prev;
+    do { prev = s; s = s.replace(/<[^>]+>/g, ''); } while (s !== prev);
+    return s;
 }
 
 module.exports = { makeStubElement };

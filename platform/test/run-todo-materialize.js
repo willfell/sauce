@@ -79,7 +79,12 @@ function makeEl(tag) {
         get innerHTML() { return this._innerHTML || ''; },
         set innerHTML(v) {
             this._innerHTML = String(v == null ? '' : v);
-            this.textContent = this._innerHTML.replace(/<[^>]+>/g, '');
+            // Loop-strip tags until fixed point (CodeQL js/incomplete-multi-character-sanitization).
+            // Test-only stub; processes fixtures, never untrusted input.
+            let s = this._innerHTML;
+            let prev;
+            do { prev = s; s = s.replace(/<[^>]+>/g, ''); } while (s !== prev);
+            this.textContent = s;
         },
         get lastElementChild() { return this.children[this.children.length - 1] || null; },
         createEl(t, opts) {
