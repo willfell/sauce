@@ -34,6 +34,67 @@ function loadClass() {
 
 const ToDoDailyRecurring = loadClass();
 
+// --- Shared mutable globals for render-based cases (PG/UM groups below). ---
+// The loaded class methods reference window.customJS / window.app / document at
+// call-time against the closure they were defined in. We therefore inject ONE
+// set of stub objects into the loader scope and mutate THOSE same objects from
+// the test body so the class sees our fixtures.
+const sharedWindow = { moment: undefined, customJS: undefined, app: undefined };
+const sharedDocument = {
+    createComment(text) { return { nodeType: 8, textContent: String(text) }; },
+};
+
+/**
+ * Load a CustomJS helper class (no module.exports) into a sandbox that shares
+ * the `sharedWindow` / `sharedDocument` stubs declared above, matching the
+ * existing loadClass() pattern (new Function + stubbed globals).
+ */
+function loadHelperClass(fileName, className) {
+    const helperPath = path.resolve(__dirname, '..', 'blueprints', 'to-do', 'helpers', fileName);
+    const src = fs.readFileSync(helperPath, 'utf8');
+    const stubs = `
+        const Notice = function () {};
+        const console = { error: function () {} };
+    `;
+    // eslint-disable-next-line no-new-func
+    const make = new Function('window', 'document', 'app', `${stubs}\n${src}\nreturn ${className};`);
+    return make(sharedWindow, sharedDocument, sharedWindow.app);
+}
+
+const ToDoDailyProjectGroups = loadHelperClass('todo-daily-project-groups.js', 'ToDoDailyProjectGroups');
+const ToDoDailyUnassignedMeetings = loadHelperClass('todo-daily-unassigned-meetings.js', 'ToDoDailyUnassignedMeetings');
+
+// --- Minimal Obsidian-style DOM element stub (createEl / appendChild). ---
+// Mirrors the container/flatten approach used by run-helper-cases render cases.
+function makeEl(tag) {
+    const el = {
+        tag: tag || 'div',
+        textContent: '',
+        children: [],
+        style: { cssText: '' },
+        onclick: null,
+        get lastElementChild() { return this.children[this.children.length - 1] || null; },
+        createEl(t, opts) {
+            const child = makeEl(t);
+            if (opts && typeof opts.text === 'string') child.textContent = opts.text;
+            this.children.push(child);
+            return child;
+        },
+        createDiv(opts) { return this.createEl('div', opts); },
+        appendChild(node) { this.children.push(node); return node; },
+        closest() { return null; },
+    };
+    return el;
+}
+
+function flattenEl(node) {
+    if (!node) return '';
+    const parts = [];
+    if (typeof node.textContent === 'string') parts.push(node.textContent);
+    if (Array.isArray(node.children)) for (const c of node.children) parts.push(flattenEl(c));
+    return parts.join(' ');
+}
+
 let pass = 0, fail = 0;
 const failures = [];
 function ok(label, cond, detail) {
@@ -168,6 +229,103 @@ console.log('run-todo-materialize:');
 (() => {
     const e = ToDoDailyRecurring.parseRegistryLine('- [ ] No grammar here');
     ok('REC-11 no-recurrence flagged invalid', e && e.invalid === true);
+})();
+
+// --- PG-1: _normalizeProjectName resolves every reference shape (v0.117.x) ---
+// Static helper called the same way the source references it.
+(() => {
+    const N = (v) => ToDoDailyProjectGroups._normalizeProjectName(v);
+    ok('PG-1 plain string → Sauce', N('Sauce') === 'Sauce', `got ${JSON.stringify(N('Sauce'))}`);
+    ok('PG-1a wikilink string → Sauce', N('[[Sauce]]') === 'Sauce', `got ${JSON.stringify(N('[[Sauce]]'))}`);
+    ok('PG-1b piped wikilink → display side Sauce',
+        N('[[notes/Sauce|Sauce]]') === 'Sauce', `got ${JSON.stringify(N('[[notes/Sauce|Sauce]]'))}`);
+    ok('PG-1c Link-like { path } → Sauce',
+        N({ path: 'Sauce' }) === 'Sauce', `got ${JSON.stringify(N({ path: 'Sauce' }))}`);
+    ok('PG-1d Link-like { display, path } → Sauce (path wins, basename)',
+        N({ display: 'Sauce', path: 'notes/Sauce' }) === 'Sauce',
+        `got ${JSON.stringify(N({ display: 'Sauce', path: 'notes/Sauce' }))}`);
+    ok('PG-1e array-of-Link → first element Sauce',
+        N([{ path: 'Sauce' }]) === 'Sauce', `got ${JSON.stringify(N([{ path: 'Sauce' }]))}`);
+    // null / undefined must return falsy/empty without throwing.
+    let threw = false;
+    let nullOut, undefOut;
+    try { nullOut = N(null); undefOut = N(undefined); } catch (_e) { threw = true; }
+    ok('PG-1f null/undefined do not throw', !threw);
+    ok('PG-1g null → empty string', nullOut === '', `got ${JSON.stringify(nullOut)}`);
+    ok('PG-1h undefined → empty string', undefOut === '', `got ${JSON.stringify(undefOut)}`);
+})();
+
+// --- PG-2: _collectMeetingTasksForProject is resilient to a throwing meeting ---
+// One meeting throws on `project` access; others are well-formed. The v0.117.3
+// per-meeting try/catch must keep the good results instead of blanking the array.
+(() => {
+    const boomMeeting = { file: { path: 'spice/meetings/notes/Boom.md', tasks: [] } };
+    Object.defineProperty(boomMeeting, 'project', { get() { throw new Error('boom'); } });
+    const goodMeeting = {
+        project: '[[Sauce]]',
+        file: {
+            path: 'spice/meetings/notes/Standup.md',
+            tasks: [{ text: 'Ship spec', completed: false }],
+        },
+    };
+    const dv = {
+        pages(glob) {
+            if (glob !== '"spice/meetings/notes"') return { array() { return []; } };
+            return { array() { return [boomMeeting, goodMeeting]; } };
+        },
+    };
+    const inst = new ToDoDailyProjectGroups();
+    let threw = false;
+    let out;
+    try { out = inst._collectMeetingTasksForProject(dv, 'Sauce'); }
+    catch (_e) { threw = true; }
+    ok('PG-2 collect does not throw on a bad meeting', !threw);
+    ok('PG-2a returns the well-formed meeting task',
+        Array.isArray(out) && out.length === 1 && out[0].text === 'Ship spec',
+        `got ${JSON.stringify(out)}`);
+    ok('PG-2b task carries its source path',
+        out && out[0] && out[0].source === 'spice/meetings/notes/Standup.md',
+        `got ${out && out[0] && out[0].source}`);
+})();
+
+// --- UM-1: ToDoDailyUnassignedMeetings.render surfaces only unassigned tasks ---
+// One meeting is project-assigned (excluded); one is unassigned (included).
+(() => {
+    sharedWindow.customJS = undefined; // exercise the muted-div fallback label
+    sharedWindow.app = {};
+    const assigned = {
+        project: '[[Sauce]]',
+        file: { path: 'spice/meetings/notes/Assigned.md', tasks: [{ text: 'Assigned task', completed: false }] },
+    };
+    const unassigned = {
+        project: null,
+        file: { path: 'spice/meetings/notes/Unassigned.md', tasks: [{ text: 'Loose meeting task', completed: false }] },
+    };
+    const container = makeEl('div');
+    const dv = {
+        container,
+        current() { return { type: 'to-do' }; },
+        pages(glob) {
+            if (glob !== '"spice/meetings/notes"') return { where() { return { array() { return []; } }; } };
+            return {
+                where(fn) {
+                    const filtered = [assigned, unassigned].filter(fn);
+                    return { array() { return filtered; } };
+                },
+            };
+        },
+    };
+    const inst = new ToDoDailyUnassignedMeetings();
+    let threw = false;
+    try {
+        const r = inst.render(dv);
+        if (r && typeof r.then === 'function') { /* async; resolved synchronously below */ }
+    } catch (_e) { threw = true; }
+    const dom = flattenEl(container);
+    ok('UM-1 render does not throw', !threw);
+    ok('UM-1a includes the unassigned task', dom.includes('Loose meeting task'), `dom: ${dom}`);
+    ok('UM-1b excludes the project-assigned task', !dom.includes('Assigned task'), `dom: ${dom}`);
+    sharedWindow.app = undefined;
 })();
 
 console.log('');
