@@ -12808,6 +12808,16 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports.applyProjectSectionsHubMigration = applyProjectSectionsHubMigration;
     module.exports.applyProjectSectionsCloseRepair = applyProjectSectionsCloseRepair;
     module.exports.applyEmptyProjectWikilinkRepair = applyEmptyProjectWikilinkRepair;
+    // v0.119.0 impl-2 — finance blueprint installer migrations (for run-seed-migrations.js
+    // HC-V01190-FIN-SEED-MIGRATE-* direct-invocation family). Pure additive.
+    module.exports.applyFinanceBudgetBodyMigration = applyFinanceBudgetBodyMigration;
+    module.exports.applyFinanceCategoriesGroupBackfill = applyFinanceCategoriesGroupBackfill;
+    module.exports.applyFinanceDefaultsNavRowInjection = applyFinanceDefaultsNavRowInjection;
+    module.exports.applyFinanceDefaultsScaffolding = applyFinanceDefaultsScaffolding;
+    module.exports.applyFinanceNavRowGuardFormMigration = applyFinanceNavRowGuardFormMigration;
+    module.exports.applyFinancePaycheckBodyMigration = applyFinancePaycheckBodyMigration;
+    module.exports.applyFinancePaycheckDefaultsDebtBackfill = applyFinancePaycheckDefaultsDebtBackfill;
+    module.exports.applyFinanceTopHubNavRowDedup = applyFinanceTopHubNavRowDedup;
     //
     // CF-2: by default, capture run-install.js's stdio (Phase B/C surfaced
     // 2200-line JSON dumps mixed into the user's terminal). We tee the
