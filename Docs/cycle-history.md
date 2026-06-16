@@ -2397,3 +2397,26 @@ See `Docs/plans/2026-06-15-v0.117.4-todo-regression-net-design.md` + `Docs/plans
 
 See `Docs/plans/2026-06-15-v0.118.0-recurring-fix-flexible-create-design.md` + `Docs/plans/2026-06-15-v0.118.0-recurring-fix-flexible-create-result.md`.
 
+---
+
+## v0.118.1 recurring-materialization parseRegistry fix CLOSED 2026-06-16
+
+**Workshop:** 0.118.0 → 0.118.1
+**Blueprints:** to-do 0.6.0 → **0.6.1** (PATCH); project 1.22.1 UNCHANGED
+
+**Headline:** PATCH fixing a silent regression introduced in v0.117.0: recurring tasks never materialized onto any daily note after the SectionLabel migration.
+
+**Root cause:** `ToDoDailyRecurring.parseRegistry` collected recurring-task entries by scanning for a literal `## Recurring Tasks` H2 heading as the section start. v0.117.0's SectionLabel migration replaced that H2 with a dataviewjs `SectionLabel "Recurring Tasks"` block on all existing registries — so the section-start pattern never matched, `parseRegistry` returned zero entries, and no recurring tasks were inserted into any daily note from v0.117.0 onward. The write path (`insertRecurringIntoToday`) and the audit-log path (`_findAuditSectionStart`) had both been updated for SectionLabel in v0.117.0; `parseRegistry` was the one that was missed. The gap surfaced when a user created a recurring task with a daily recurrence rule that never appeared on the next day's daily note.
+
+**Fix:** `parseRegistry` now recognizes both forms of section delimiter. The SectionLabel `"Recurring Tasks"` dataviewjs block is accepted as the section start (in addition to the legacy `## Recurring Tasks` H2). The section end is triggered by the SectionLabel `"Last 7 days of materialization"` dataviewjs block OR any `## ` H2 heading — covering both SectionLabel-form and pre-migration registries. The legacy H2 forms are retained so the parser is tolerant of vaults that were never migrated.
+
+**Tests:** New `REC-12` / `REC-12a` / `REC-12b` in `run-todo-materialize.js` using a SectionLabel-form registry fixture (the existing `REC-10` used the legacy `## Recurring Tasks` H2 form — which is exactly why the gap shipped without a failing test at v0.117.0). `REC-12` fails on the old parser and passes on the fix. `REC-12a` locks in that a `[[note-link]]` inserted via v0.118.0's note-link picker is preserved verbatim in the parsed title and flows into the materialized task line. `run-todo-materialize` 41 / 41; preflight 89 / 89; dogfood exit 0. Confirmed against the real headspace registry (0 → 1 entry resolved).
+
+**LESSON — lockstep read/write migration:** When a migration changes a structural marker (H2 → SectionLabel), every code path keyed off that marker — read paths, write paths, and audit paths — must be updated in a single lockstep change. In v0.117.0 the write path and audit path were updated, but `parseRegistry` (the read path) was missed because its test fixture (`REC-10`) used the pre-migration H2 form and therefore never exercised the regression. Going forward: after any marker-format migration, grep for ALL callsites that match on the old pattern string and verify each one is updated or explicitly tolerance-wrapped.
+
+**Harnesses:** 32 (UNCHANGED). `version-sync ok: 0.118.1`.
+
+**Commits:** `86436ed` (fix + test) → `4f4115e` (version bump).
+
+See `Docs/plans/2026-06-16-v0.118.1-recurring-parseregistry-result.md`.
+

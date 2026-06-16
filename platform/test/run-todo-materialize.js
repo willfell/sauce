@@ -225,6 +225,39 @@ console.log('run-todo-materialize:');
     ok('REC-10a correct entry', entries[0] && entries[0].title === 'In section');
 })();
 
+// --- REC-12: parseRegistry recognizes the v0.117.0 SectionLabel registry form ---
+// The SectionLabel migration replaced `## Recurring Tasks` H2 with a dataviewjs
+// SectionLabel block; the registry's audit section is likewise a SectionLabel
+// ("Last 7 days of materialization"). parseRegistry must treat the SectionLabel
+// block as the section start AND stop at the audit SectionLabel — otherwise it
+// returns zero entries and recurring tasks never materialize (the live regression).
+(() => {
+    const reg = [
+        '---', 'type: to-do-recurring', '---', '',
+        '```dataviewjs',
+        'await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Recurring Tasks", top: true }] });',
+        '```',
+        '',
+        '- [ ] Get it going [[Some Note]] [recurrence:: every day]',
+        '',
+        '<!-- Each line is a template. -->',
+        '',
+        '```dataviewjs',
+        'await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Last 7 days of materialization" }] });',
+        '```',
+        '',
+        '| Date | Title | Routed to |',
+        '| --- | --- | --- |',
+        '| 2026-06-15 | Should NOT be parsed as a task | x |',
+    ].join('\n');
+    const entries = ToDoDailyRecurring.parseRegistry(reg);
+    ok('REC-12 SectionLabel-form registry yields the entry', entries.length === 1, `got ${entries.length}`);
+    // The note-link [[Some Note]] is user content (not an inline field) so it is
+    // preserved in the title → it flows into the materialized recurring task line.
+    ok('REC-12a title preserves the note-link', entries[0] && entries[0].title === 'Get it going [[Some Note]]', `got ${entries[0] && entries[0].title}`);
+    ok('REC-12b correct recurrence', entries[0] && entries[0].recurrence === 'every day');
+})();
+
 // --- REC-11: parseRegistryLine handles missing recurrence as invalid ---
 (() => {
     const e = ToDoDailyRecurring.parseRegistryLine('- [ ] No grammar here');

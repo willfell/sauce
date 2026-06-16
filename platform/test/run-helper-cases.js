@@ -7435,12 +7435,12 @@ async function caseTodoManifestV3() {
 // ============================================================
 
 async function caseHCV01174TodoManifest() {
-  console.log("\n--- Case HC-V01174-TODO-MANIFEST: to-do v0.6.0 manifest source contract ---");
+  console.log("\n--- Case HC-V01174-TODO-MANIFEST: to-do v0.6.1 manifest source contract ---");
   const m = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/to-do/manifest.json"), "utf8"));
 
-  assertTrue("HC-V01174-TODO-MANIFEST-1: version === \"0.6.0\"",
-    m.version === "0.6.0", `got: ${m.version}`);
+  assertTrue("HC-V01174-TODO-MANIFEST-1: version === \"0.6.1\"",
+    m.version === "0.6.1", `got: ${m.version}`);
 
   const projDep = (m.depends_on || []).find(d => d && d.name === "project");
   assertTrue("HC-V01174-TODO-MANIFEST-2: depends_on has project@>=1.21.0",
