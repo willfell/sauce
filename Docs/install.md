@@ -880,6 +880,47 @@ After the update, verify by checking that `.claude/skills/cowork/skills/gather-s
 
 **Optional post-deploy validation (FLN-v87-1).** The `min_similarity: 0.45` threshold is a design-time guess. Review the first 3-5 morning briefings on each consumer vault: if Echoes callouts surface obviously-unrelated matches, the threshold should be raised; if relevant matches are consistently filtered out (callout omits even on days with clear historical analogues), the threshold should be lowered. A v0.87.1 PATCH can ship the empirically-validated threshold.
 
+## Upgrading from v0.115.x to v0.117.4
+
+After `brew upgrade sauce`, run from each consumer vault:
+
+```bash
+sauce update --bump-pins
+sauce install
+```
+
+v0.117.4 is a **test/doc hardening PATCH** — no new consumer behavior and no new migrations fire at install time. The to-do and project blueprint versions are unchanged (to-do 0.5.3, project 1.22.1). The redeploy is a clean no-op for vault users. Workshop 0.117.3 → 0.117.4.
+
+**What this upgrade arc shipped (v0.116.0 → v0.117.4):**
+
+The six-cycle arc added a full recurrence engine, per-project To-Do notes, a +New Task dialog, daily materialization aggregators, and four follow-up PATCHes closing post-deploy regressions:
+
+- **v0.116.0 (to-do blueprint expansion MINOR):** 8 new customjs classes (RecurrenceParser, TaskParser, ToDoDailyCarryover, ToDoDailyRecurring, ToDoDailyProjectGroups, ToDoDailyUnassignedMeetings, ToDoCreateTask, ToDoCreateTaskInit), 2 new note types (`project-todo` + `to-do-recurring`), 2 new installer steps (`applyToDoBlueprintMigration` backfill + entity-create registry hydration), retired ToDoMigrateModal/Init. Project blueprint 1.21.2 → 1.22.0 (extra_files scaffolds Project To-Do.md per project; new project-todo rule_fragment).
+- **v0.116.1 (dialog + nav + mobile PATCH):** Recurring-tab Create-button enable fix; project-todo context in ProjectNavButtons; mobile-friendly LeafActions labels. Project 1.22.0 → 1.22.1.
+- **v0.117.0 (SectionLabel visual polish + LOAD-BEARING template fix MINOR):** Fixed the v0.116.0 silent bug where `Today To-Do.md` template was never updated (Write tool no-op on an existing file). H2-to-SectionLabel migration across all daily/project-todo/recurring surfaces. to-do 0.4.1 → 0.5.0 (adds `depends_on: project >=1.21.0`).
+- **v0.117.1 (frontmatter sentinel PATCH):** Fixed misplaced HTML-comment sentinels that were breaking the YAML frontmatter block on newly-created dailies. "Today's Capture" renamed to "Today". to-do 0.5.0 → 0.5.1.
+- **v0.117.2 (dialog anchor PATCH):** Fixed the +New Task dialog creating orphan `## Today` H2 at EOF when the SectionLabel anchor was missing. 3-tier fallback (SectionLabel → legacy H2 → EOF-no-new-heading). Orphan H2 cleanup migration added. to-do 0.5.1 → 0.5.2.
+- **v0.117.3 (project-name normalization PATCH):** Fixed meeting-task-assigned-to-project not appearing in the daily's project section. NEW `_normalizeProjectName` static method handles all Dataview Link object representations; per-meeting try/catch prevents one bad meeting from blanking the whole array. to-do 0.5.2 → 0.5.3.
+- **v0.117.4 (regression-net + doc backfill PATCH):** Three orphaned to-do harnesses wired into release:preflight (run-todo-carryover, run-todo-dialog, run-todo-materialize). Behavioral coverage for all v0.117.x fixes. HC-V01174 source contracts. Seed-migration end-to-end. This is the current version.
+
+**What `sauce install` does on update:**
+
+`applyToDoBlueprintMigration` runs on every install (unconditional, idempotent). On vaults still on the pre-v0.116.0 shape it will:
+
+1. Reshape v0.3.3-shape To-Do dailies to the five-section v0.4.0/v0.5.0 shape (SpaceNavButtons + ToDoLeafActions + SectionLabel blocks for Today / Carryover / Recurring Tasks / Owned Tasks / From Meetings).
+2. Inject or repair misplaced `SectionLabel("Today")` blocks on v0.4.0 dailies that are missing them.
+3. Relocate any HTML-comment sentinels that landed inside the YAML frontmatter block (v0.117.1 heal).
+4. Strip orphan `## Today's Capture` / `## Today` H2 lines from daily notes (v0.117.2 cleanup).
+5. Backfill `Project To-Do.md` via `extra_files[]` for any project that doesn't yet have one.
+
+All steps are idempotent. `.sauce-backup/<ts>/` snapshots are written before any note body is modified.
+
+**Post-deploy check.** Open today's daily note. It should render five sections — Today, Carryover (from yesterday), Recurring Tasks, Owned Tasks, and From Meetings — each headed by a SectionLabel dataviewjs block (not a `## H2`). The +New Task button should insert tasks under the Today SectionLabel, not at EOF. Meeting tasks assigned to a project should appear under `OPEN PROJECT TASKS > <PROJECT NAME>`.
+
+**No cowork surface touched.** `scheduled-job-contract.json` `contract_version` UNCHANGED. No `/cowork sync-scheduled-jobs` run required.
+
+---
+
 ## Upgrading from v0.103.0.1
 
 After `brew upgrade sauce`, run from each consumer vault:
