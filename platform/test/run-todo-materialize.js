@@ -427,11 +427,95 @@ console.log('run-todo-materialize:');
     sharedWindow.app = undefined;
 })();
 
-console.log('');
-console.log(`Tests: ${pass}/${pass + fail}`);
-if (fail > 0) {
-    console.log('Failures:');
-    for (const f of failures) console.log(`  ${f}`);
-    process.exit(1);
-}
-process.exit(0);
+// ---------- TDMAT-MIDDAY-1: mid-day-added recurring task (bug-(b) repro) ----------
+// E2E case across materialize() — exercises the additive sentinel against a
+// daily that already bears a LEGACY date-only sentinel (the v0.118.1 regression
+// shape). Fails on v0.118.1 (date-only sentinel short-circuits); passes on
+// v0.119.0+ (legacy sentinel parses as empty-set; entry materializes; second
+// run is a no-op).
+(async () => {
+    try {
+        const todayStr = '2026-06-16';
+        const todayPath = `spice/to-do/2026/06-June/ToDo-${todayStr}.md`;
+        const initialToday = [
+            '---',
+            'type: to-do',
+            'created_at: "2026-06-16T00:00:00-0600"',
+            '---',
+            `<!-- recurring-materialized-${todayStr} -->`,
+            '',
+            '```dataviewjs',
+            'await dv.view("ranch/views/customjs-guard", { class: "ToDoDailyRecurring" });',
+            '```',
+            '',
+        ].join('\n');
+
+        const registryContent = [
+            '---',
+            'type: to-do-recurring',
+            'created_at: "2026-06-01T00:00:00-0600"',
+            '---',
+            '',
+            '```dataviewjs',
+            'await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Recurring Tasks", top: true }] });',
+            '```',
+            '',
+            '- [ ] test recurring task [recurrence:: every day]',
+            '',
+            '```dataviewjs',
+            'await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Last 7 days of materialization" }] });',
+            '```',
+            '',
+        ].join('\n');
+
+        // Build a small in-memory vault stub. Mirrors the shape used in UM-1 above.
+        const writes = { [todayPath]: initialToday, 'spice/to-do/Recurring Tasks.md': registryContent };
+        const vault = {
+            getAbstractFileByPath: (p) => (p in writes) ? { path: p } : null,
+            read: async (f) => writes[f.path],
+            modify: async (f, c) => { writes[f.path] = c; },
+        };
+
+        // The class was loaded into a scope with its own captured `window`. Mutate
+        // that closure-shared object so materialize() sees our fixture vault.
+        sharedWindow.app = { vault };
+
+        // Build a fresh instance via the same loader (so it shares the closure).
+        const FreshToDoDailyRecurring = loadHelperClass('todo-daily-recurring.js', 'ToDoDailyRecurring');
+        const r = new FreshToDoDailyRecurring();
+        await r.materialize(todayPath, todayStr);
+
+        const after1 = writes[todayPath];
+
+        // (a) Sentinel was migrated to the v0.7.0 additive form with the entry's hash.
+        const sentinel = FreshToDoDailyRecurring.parseSentinel(after1);
+        ok('TDMAT-MIDDAY-1 sentinel present after materialize', sentinel.present === true);
+        ok('TDMAT-MIDDAY-1 sentinel has exactly one hash (the materialized entry)',
+            sentinel.hashes.size === 1, `got ${sentinel.hashes.size} hashes; after1:\n${after1}`);
+
+        // (b) The materialized task line is in the daily body.
+        ok('TDMAT-MIDDAY-1 task line materialized into today',
+            /test recurring task/.test(after1), `after1:\n${after1}`);
+
+        // (c) Re-running materialize() is byte-identical (idempotent).
+        await r.materialize(todayPath, todayStr);
+        const after2 = writes[todayPath];
+        ok('TDMAT-MIDDAY-1 second materialize is byte-identical (idempotent)',
+            after1 === after2,
+            `diff:\n--- after1 ---\n${after1}\n--- after2 ---\n${after2}`);
+
+        sharedWindow.app = undefined;
+    } catch (e) {
+        ok('TDMAT-MIDDAY-1 case ran without throwing', false, e && (e.stack || e.message));
+        sharedWindow.app = undefined;
+    }
+
+    console.log('');
+    console.log(`Tests: ${pass}/${pass + fail}`);
+    if (fail > 0) {
+        console.log('Failures:');
+        for (const f of failures) console.log(`  ${f}`);
+        process.exit(1);
+    }
+    process.exit(0);
+})();
