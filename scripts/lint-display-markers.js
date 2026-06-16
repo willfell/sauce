@@ -25,7 +25,8 @@ const HEADING_STRING_PATTERN = /['"`]## .+?['"`]/;        // '## Recurring Tasks
 const HEADING_STARTSWITH_PATTERN = /\.startsWith\(\s*['"`]## /;
 const HEADING_INDEXOF_PATTERN = /\.indexOf\(\s*['"`]## /;
 
-function walkDir(dir, exts) {
+function walkDir(dir, exts, skipPatterns) {
+    const patterns = skipPatterns || SKIP_PATTERNS;
     const out = [];
     const abs = path.join(REPO_ROOT, dir);
     if (!fs.existsSync(abs)) return out;
@@ -39,7 +40,7 @@ function walkDir(dir, exts) {
             if (e.isDirectory()) { stack.push(p); continue; }
             if (!exts.some(x => p.endsWith(x))) continue;
             const rel = path.relative(REPO_ROOT, p);
-            if (SKIP_PATTERNS.some(re => re.test(rel))) continue;
+            if (patterns.some(re => re.test(rel))) continue;
             out.push(p);
         }
     }
@@ -90,9 +91,10 @@ function main() {
     const args = process.argv.slice(2);
 
     // --self-test mode: scan only platform/test/fixtures/lint-display-markers/
+    // (bypass the platform/test/ skip rule so fixtures are visited.)
     if (args.includes('--self-test')) {
         const fixturesDir = 'platform/test/fixtures/lint-display-markers';
-        const files = walkDir(fixturesDir, ['.js']);
+        const files = walkDir(fixturesDir, ['.js'], []);
         const expectations = {
             'clean.js': 0,
             'regex-heading.js': 1,
