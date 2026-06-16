@@ -523,6 +523,64 @@ console.log('run-todo-materialize:');
         sharedWindow.app = undefined;
     }
 
+    // ---------- v0.7.1 insertRecurringIntoToday merge-into-existing (HC-V0119-INSERT-*) ----------
+    // Regression for the accuris 2026-06-16 bug: insertRecurringIntoToday() was creating
+    // a NEW "Recurring Today" SectionLabel block on every call instead of appending to
+    // the existing one. After v0.7.0 materialize wrote 2 tasks, the user added a 3rd via
+    // dialog → next render call inserted a SECOND SectionLabel block above the first.
+    {
+        const ANCHOR =
+            '```dataviewjs\n' +
+            'await dv.view("ranch/views/customjs-guard", { class: "ToDoDailyRecurring" });\n' +
+            '```\n';
+        const LABEL =
+            '```dataviewjs\n' +
+            'await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Recurring Today" }] });\n' +
+            '```\n';
+        const PROJECT_GROUPS =
+            '```dataviewjs\n' +
+            'await dv.view("ranch/views/customjs-guard", { class: "ToDoDailyProjectGroups" });\n' +
+            '```\n';
+
+        // HC-V0119-INSERT-1: first call with no existing section creates a new block.
+        const empty = '---\ntype: to-do\n---\n\n' + ANCHOR + '\n' + PROJECT_GROUPS;
+        const after1 = ToDoDailyRecurring.insertRecurringIntoToday(empty, ['- [ ] task one']);
+        const labelCount1 = (after1.match(/text:\s*"Recurring Today"/g) || []).length;
+        ok('HC-V0119-INSERT-1 first call adds exactly one "Recurring Today" block',
+            labelCount1 === 1, `got ${labelCount1} labels; after:\n${after1}`);
+        ok('HC-V0119-INSERT-1 first call materializes the task line',
+            /- \[ \] task one/.test(after1), `after:\n${after1}`);
+
+        // HC-V0119-INSERT-2: second call with existing section APPENDS, does NOT create a 2nd block.
+        const after2 = ToDoDailyRecurring.insertRecurringIntoToday(after1, ['- [ ] task two']);
+        const labelCount2 = (after2.match(/text:\s*"Recurring Today"/g) || []).length;
+        ok('HC-V0119-INSERT-2 second call still has exactly one "Recurring Today" block',
+            labelCount2 === 1, `got ${labelCount2} labels; after:\n${after2}`);
+        ok('HC-V0119-INSERT-2 both task lines present',
+            /- \[ \] task one/.test(after2) && /- \[ \] task two/.test(after2),
+            `after:\n${after2}`);
+
+        // HC-V0119-INSERT-3: a third call with multiple lines further appends without dup.
+        const after3 = ToDoDailyRecurring.insertRecurringIntoToday(after2, ['- [ ] task three', '- [ ] task four']);
+        const labelCount3 = (after3.match(/text:\s*"Recurring Today"/g) || []).length;
+        ok('HC-V0119-INSERT-3 still exactly one "Recurring Today" block after third call',
+            labelCount3 === 1, `got ${labelCount3} labels; after:\n${after3}`);
+        ok('HC-V0119-INSERT-3 all four task lines present in order',
+            after3.indexOf('task one') < after3.indexOf('task two') &&
+            after3.indexOf('task two') < after3.indexOf('task three') &&
+            after3.indexOf('task three') < after3.indexOf('task four'),
+            `order broken; after:\n${after3}`);
+
+        // HC-V0119-INSERT-4: empty input is a no-op.
+        const after4 = ToDoDailyRecurring.insertRecurringIntoToday(after3, []);
+        ok('HC-V0119-INSERT-4 empty input is byte-identical', after4 === after3);
+
+        // HC-V0119-INSERT-5: section boundary respected — content AFTER the next dataviewjs
+        // block is preserved verbatim.
+        ok('HC-V0119-INSERT-5 ToDoDailyProjectGroups block preserved',
+            /class: "ToDoDailyProjectGroups"/.test(after3), `after:\n${after3}`);
+    }
+
     console.log('');
     console.log(`Tests: ${pass}/${pass + fail}`);
     if (fail > 0) {

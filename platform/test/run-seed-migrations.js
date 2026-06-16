@@ -614,6 +614,105 @@ async function runMigrateFamily() {
                 beforeSecond === afterSecond
             );
         }
+
+        // ===== HC-V0119-MERGE — mergeDuplicateRecurringSections =====
+        // Stamp a daily with TWO "Recurring Today" SectionLabel blocks; run the new
+        // migration; assert merge + idempotency.
+        {
+            const { mergeDuplicateRecurringSections } = require("../install.js");
+
+            const F_DUPE = `${DAY_DIR}/ToDo-2026-06-17.md`;
+            const LABEL =
+                '```dataviewjs\n' +
+                'await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Recurring Today" }] });\n' +
+                '```';
+            const PROJECT_GROUPS =
+                '```dataviewjs\n' +
+                'await dv.view("ranch/views/customjs-guard", { class: "ToDoDailyProjectGroups" });\n' +
+                '```';
+            const DUPE_BODY = [
+                "---", "type: to-do", "---",
+                "<!-- recurring-materialized-2026-06-17: -->",
+                "",
+                LABEL,
+                "",
+                "- [ ] get your life together [recurring_from:: [[Recurring Tasks]]]",
+                "",
+                LABEL,
+                "",
+                "- [ ] test recurring task [recurring_from:: [[Recurring Tasks]]]",
+                "- [ ] Monitor this Dashboard [recurring_from:: [[Recurring Tasks]]]",
+                "",
+                PROJECT_GROUPS,
+                "",
+            ].join("\n");
+            writeFixture(F_DUPE, DUPE_BODY);
+
+            const historyMerge1 = [];
+            await mergeDuplicateRecurringSections(tp, { name: "to-do" }, variables, historyMerge1, git);
+
+            const merged = readVault(F_DUPE);
+            const labelCount = (merged.match(/text:\s*"Recurring Today"/g) || []).length;
+            ok(
+                "HC-V0119-MERGE-1 dailies with duplicate sections merged to exactly one label",
+                labelCount === 1,
+                `got ${labelCount} labels; merged:\n${merged}`
+            );
+            ok(
+                "HC-V0119-MERGE-2 all task lines preserved after merge",
+                /get your life together/.test(merged) &&
+                /test recurring task/.test(merged) &&
+                /Monitor this Dashboard/.test(merged),
+                `merged:\n${merged}`
+            );
+            ok(
+                "HC-V0119-MERGE-3 ProjectGroups block preserved",
+                /class: "ToDoDailyProjectGroups"/.test(merged)
+            );
+            ok(
+                "HC-V0119-MERGE-4 history records merged >= 1",
+                historyMerge1.length > 0 && historyMerge1[0].merged >= 1,
+                `got history=${JSON.stringify(historyMerge1)}`
+            );
+
+            // Idempotency: second run does nothing.
+            const beforeMerge2 = readVault(F_DUPE);
+            const historyMerge2 = [];
+            await mergeDuplicateRecurringSections(tp, { name: "to-do" }, variables, historyMerge2, git);
+            const afterMerge2 = readVault(F_DUPE);
+            ok(
+                "HC-V0119-MERGE-5 second invocation merged=0 (idempotent)",
+                historyMerge2.length > 0 && historyMerge2[0].merged === 0,
+                `got history=${JSON.stringify(historyMerge2)}`
+            );
+            ok(
+                "HC-V0119-MERGE-6 second invocation leaves file byte-identical",
+                beforeMerge2 === afterMerge2
+            );
+
+            // Single-block daily: untouched.
+            const F_SINGLE = `${DAY_DIR}/ToDo-2026-06-18.md`;
+            const SINGLE_BODY = [
+                "---", "type: to-do", "---",
+                "<!-- recurring-materialized-2026-06-18: -->",
+                "",
+                LABEL,
+                "",
+                "- [ ] single recurring [recurring_from:: [[Recurring Tasks]]]",
+                "",
+                PROJECT_GROUPS,
+                "",
+            ].join("\n");
+            writeFixture(F_SINGLE, SINGLE_BODY);
+            const beforeSingle = readVault(F_SINGLE);
+            const historySingle = [];
+            await mergeDuplicateRecurringSections(tp, { name: "to-do" }, variables, historySingle, git);
+            const afterSingle = readVault(F_SINGLE);
+            ok(
+                "HC-V0119-MERGE-7 single-block daily untouched",
+                beforeSingle === afterSingle
+            );
+        }
     } finally {
         if (KEEP) {
             console.log(`  KEEP_SEED_VAULT=1: ${migRoot}`);
