@@ -299,6 +299,7 @@ class SpaceNavButtons {
         }
       }
       app.workspace.openLinkText(action.target, "");
+      customJS.OpenHelpers.forceActiveLeafPreview();
       return;
     }
 
@@ -361,6 +362,7 @@ class SpaceNavButtons {
         }
         app.workspace.openLinkText(target, "");
       }
+      customJS.OpenHelpers.forceActiveLeafPreview();
       return;
     }
 
@@ -409,6 +411,10 @@ class SpaceNavButtons {
       } else {
         app.commands.executeCommandById(action.command_id);
       }
+      // Only force read mode when the nav entry opts in (note-opening commands
+      // like daily/journal goto-today). Without the opt-in we'd risk flipping a
+      // non-note command's active leaf to preview.
+      if (action.read_mode_after === true) customJS.OpenHelpers.forceActiveLeafPreview();
       return;
     }
 

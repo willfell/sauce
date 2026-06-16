@@ -255,7 +255,7 @@ function makeApp(opts) {
 
 // ── Load renderer class ──────────────────────────────────────────────────
 function loadRendererClass(app, Notice) {
-  const customJS = { Icons: ICONS_INSTANCE };
+  const customJS = { Icons: ICONS_INSTANCE, OpenHelpers: { forceActiveLeafPreview() {} } };
   const fn = new Function('app', 'Notice', 'customJS', `${RENDERER_SRC}\nreturn SpaceNavButtons;`);
   return fn(app, Notice, customJS);
 }
