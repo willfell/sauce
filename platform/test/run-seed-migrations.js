@@ -1156,6 +1156,45 @@ async function runFinanceMigrateFamily() {
             "HC-V01190-FIN-SEED-MIGRATE-B9 Debt-Discover-it.md has planned_monthly_payment: 150 (from Debt Defaults entry)",
             /^planned_monthly_payment:\s*150\s*$/m.test(bDiscoverItBody)
         );
+
+        // ===== C: budget (#4 + #5 + #6 + #7 + #12) =====
+        const cBudget01Body = readFin("budgets/2026-01/Budget-2026-01.md");
+        ok(
+            "HC-V01190-FIN-SEED-MIGRATE-C1 Budget-2026-01.md groups[] seeded from Budget Defaults (Essentials + Discretionary)",
+            /^\s+-\s+Essentials\s*$/m.test(cBudget01Body)
+                && /^\s+-\s+Discretionary\s*$/m.test(cBudget01Body)
+        );
+        ok(
+            "HC-V01190-FIN-SEED-MIGRATE-C2 Budget-2026-01.md frontmatter has __group_seed_migrated: v0.108.0 marker",
+            /__group_seed_migrated:\s*v0\.108\.0/.test(cBudget01Body)
+        );
+        ok(
+            "HC-V01190-FIN-SEED-MIGRATE-C3 Budget-2026-01.md body has <!-- budget-summary- marker (post #6 inject)",
+            /<!--\s*budget-summary-v[\d.]+\s*-->/.test(cBudget01Body)
+        );
+        ok(
+            "HC-V01190-FIN-SEED-MIGRATE-C4 Budget-2026-01.md body has <!-- monthly-overview- marker (post #7 inject)",
+            /<!--\s*monthly-overview-v[\d.]+\s*-->/.test(cBudget01Body)
+        );
+        ok(
+            "HC-V01190-FIN-SEED-MIGRATE-C5 Budget-2026-01.md body no longer has '## Categories' heading (#6 strip)",
+            !/^## Categories\s*$/m.test(cBudget01Body)
+        );
+        ok(
+            "HC-V01190-FIN-SEED-MIGRATE-C6 Budget-2026-01.md categories[0].group reassigned from Unassigned (#5 name-match to Essentials)",
+            /^\s+group:\s*Essentials\s*$/m.test(cBudget01Body)
+                && !/^\s+group:\s*Unassigned\s*$/m.test(cBudget01Body)
+        );
+        const cBudget02Body = readFin("budgets/2026-02/Budget-2026-02.md");
+        ok(
+            "HC-V01190-FIN-SEED-MIGRATE-C7 Budget-2026-02.md body no longer has customJS.BudgetNavButtons direct call (#12 rewrite)",
+            !cBudget02Body.includes("customJS.BudgetNavButtons")
+                && !cBudget02Body.includes('class: "BudgetNavButtons"')
+        );
+        ok(
+            "HC-V01190-FIN-SEED-MIGRATE-C8 Budget-2026-02.md body has FinanceNav reference (#12 rewrite + #17 unification chain)",
+            /class:\s*"FinanceNav"/.test(cBudget02Body)
+        );
     } finally {
         if (KEEP) {
             console.log(`  KEEP_SEED_VAULT=1: ${finRoot}`);
