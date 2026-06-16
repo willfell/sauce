@@ -180,7 +180,7 @@ class SpaceNavButtons {
 
     const rowStyle = `
       display: flex;
-      flex-wrap: nowrap;
+      flex-wrap: wrap;
       gap: 6px;
     `;
 
