@@ -808,13 +808,228 @@ async function runMigrateFamily() {
     }
 }
 
-// The MIGRATE family is async (the migration is async). Run it to completion,
-// then emit the final tally + exit code so its asserts are counted.
+// =============================================================================
+// HC-V01190-PROJ-SEED-MIGRATE-* — project blueprint installer migrations.
+//
+// Self-contained, independent of the seed-based families above. Like the
+// HC-V01174-MIGRATE family, the seed install short-circuits on version match
+// (subscription.project = installed.project = 1.22.2), so per-blueprint
+// apply* functions never fire against seed fixtures. Instead we DIRECTLY
+// INVOKE each exported migration against a throwaway tmp vault built from
+// the same Legacy Project fixture committed under
+// platform/test/seed-vault/spice/projects/Legacy Project/.
+//
+// Covers 5 untested project apply* functions plus idempotency:
+//   #1 applyProjectSectionsMigration       (v0.102.0) — flat docs/*.md → docs/knowledge/, sections[]
+//   #2 applyProjectSectionsHubMigration    (v0.103.0) — section hubs + Docs.md rewire + wikilink convert
+//   #3 applyProjectSectionsCloseRepair     (v0.103.0.1) — repair -"[[--]]" → ---
+//   #4 applyEmptyProjectWikilinkRepair     (v0.105.0.2) — [[]] → [[Legacy Project]]
+//   #5 applyProjectTodoBackfill            (v0.116.0) — backfill <Name> To-Do.md
+//
+// Execution order: close-repair (#3) FIRST so Legacy Project.md's malformed
+// frontmatter heals; then wikilink-repair (#4) on `[[]]`; then sections-
+// migration (#1) sees a valid FM and can register sections[]; then sections-
+// hub-migration (#2); then todo-backfill (#5). This departs from install.js's
+// emit order (which runs sections-migration before close-repair) so each
+// contract can be unit-tested independently against this single fixture.
+// =============================================================================
+async function runProjectMigrateFamily() {
+    const {
+        applyProjectSectionsMigration,
+        applyProjectSectionsHubMigration,
+        applyProjectSectionsCloseRepair,
+        applyEmptyProjectWikilinkRepair,
+        applyProjectTodoBackfill,
+    } = require("../install.js");
+
+    function makeAdapter(root) {
+        const abs = (rel) => path.join(root, rel);
+        return {
+            async exists(rel) { return fs.existsSync(abs(rel)); },
+            async list(rel) {
+                const dir = abs(rel);
+                if (!fs.existsSync(dir)) return { files: [], folders: [] };
+                const ents = fs.readdirSync(dir, { withFileTypes: true });
+                const files = [], folders = [];
+                for (const e of ents) {
+                    const child = rel + "/" + e.name;
+                    if (e.isDirectory()) folders.push(child);
+                    else files.push(child);
+                }
+                return { files, folders };
+            },
+            async read(rel) { return fs.readFileSync(abs(rel), "utf8"); },
+            async write(rel, content) {
+                const f = abs(rel);
+                fs.mkdirSync(path.dirname(f), { recursive: true });
+                fs.writeFileSync(f, content);
+            },
+            async mkdir(rel) { fs.mkdirSync(abs(rel), { recursive: true }); },
+            async remove(rel) { fs.unlinkSync(abs(rel)); },
+        };
+    }
+
+    const projRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-proj-mig-"));
+    try {
+        const LEGACY_PROJ_DIR = "spice/projects/Legacy Project";
+        const SEED_LEGACY = path.join(SEED_DIR, LEGACY_PROJ_DIR);
+
+        // Copy the committed Legacy Project fixture into the throwaway vault so
+        // the asserts test the same pre-migration shape that the seed-vault carries.
+        helpers.copyDir(SEED_LEGACY, path.join(projRoot, LEGACY_PROJ_DIR));
+
+        const adapter = makeAdapter(projRoot);
+        const tp = { app: { vault: { adapter } } };
+        const git = { commit: "test", tag: "test", dirty: false };
+        const variables = { views_path: "ranch/views", vault_identity_tag: "seed-test-vault" };
+        const manifest = { name: "project" };
+        const history = [];
+
+        // ----- First invocation pass: close-repair → wikilink-repair → sections-
+        //       migration → sections-hub-migration → todo-backfill. The order
+        //       fixes Legacy Project.md's malformed frontmatter before sections-
+        //       migration walks it (so sections[] can be injected — install.js
+        //       runs sections-migration first and would skip the sections[]
+        //       inject on this fixture, a separate findable issue out of scope
+        //       for impl-1).
+        await applyProjectSectionsCloseRepair(tp, manifest, variables, history, git);
+        await applyEmptyProjectWikilinkRepair(tp, history, git);
+        await applyProjectSectionsMigration(tp, manifest, variables, history, git);
+        await applyProjectSectionsHubMigration(tp, manifest, variables, history, git);
+        await applyProjectTodoBackfill(tp, manifest, variables, history, git);
+
+        // ----- A: applyProjectSectionsMigration -----
+        const aOldNoteInKnowledge = fs.existsSync(path.join(projRoot, LEGACY_PROJ_DIR, "docs/knowledge/Old Note.md"));
+        ok(
+            "HC-V01190-PROJ-SEED-MIGRATE-A1 Old Note moved into docs/knowledge/",
+            aOldNoteInKnowledge
+        );
+        const aOldNoteFlatGone = !fs.existsSync(path.join(projRoot, LEGACY_PROJ_DIR, "docs/Old Note.md"));
+        ok(
+            "HC-V01190-PROJ-SEED-MIGRATE-A2 flat docs/Old Note.md removed by sections migration",
+            aOldNoteFlatGone
+        );
+        const aLegacyProjFm = helpers.parseFrontmatter(
+            fs.readFileSync(path.join(projRoot, LEGACY_PROJ_DIR, "Legacy Project.md"), "utf8")
+        ).frontmatter;
+        const aSections = Array.isArray(aLegacyProjFm.sections) ? aLegacyProjFm.sections : [];
+        const aSectionsHasAll = ["Knowledge", "Notes", "Custom Section"].every(want =>
+            aSections.some(s => String(s).includes(want))
+        );
+        ok(
+            "HC-V01190-PROJ-SEED-MIGRATE-A3 sections[] registered Knowledge + Notes + Custom Section",
+            aSectionsHasAll,
+            `got sections=${JSON.stringify(aSections)}`
+        );
+
+        // ----- B: applyProjectSectionsHubMigration -----
+        const bKnowledgeHubExists = fs.existsSync(path.join(projRoot, LEGACY_PROJ_DIR, "docs/knowledge/Knowledge.md"));
+        ok(
+            "HC-V01190-PROJ-SEED-MIGRATE-B1 knowledge/Knowledge.md section-hub materialized",
+            bKnowledgeHubExists
+        );
+        const bCustomHubExists = fs.existsSync(path.join(projRoot, LEGACY_PROJ_DIR, "docs/Custom Section/Custom Section.md"));
+        ok(
+            "HC-V01190-PROJ-SEED-MIGRATE-B2 Custom Section/Custom Section.md section-hub materialized",
+            bCustomHubExists
+        );
+        const bDocsBody = fs.readFileSync(path.join(projRoot, LEGACY_PROJ_DIR, "docs/Docs.md"), "utf8");
+        ok(
+            "HC-V01190-PROJ-SEED-MIGRATE-B3 Docs.md body rewired to customJS.ProjectDocsIndex.render",
+            bDocsBody.includes("customJS.ProjectDocsIndex.render") || bDocsBody.includes("ProjectDocsIndex")
+        );
+        const bCustomNoteFm = helpers.parseFrontmatter(
+            fs.readFileSync(path.join(projRoot, LEGACY_PROJ_DIR, "docs/Custom Section/Custom Note.md"), "utf8")
+        ).frontmatter;
+        ok(
+            "HC-V01190-PROJ-SEED-MIGRATE-B4 Custom Note section: string converted to wikilink",
+            String(bCustomNoteFm.section || "").includes("[[") && String(bCustomNoteFm.section).includes("Custom Section")
+        );
+
+        // ----- C: applyProjectSectionsCloseRepair -----
+        const cLegacyBody = fs.readFileSync(path.join(projRoot, LEGACY_PROJ_DIR, "Legacy Project.md"), "utf8");
+        ok(
+            "HC-V01190-PROJ-SEED-MIGRATE-C1 malformed frontmatter close repaired (no -\"[[--]]\")",
+            !cLegacyBody.includes('-"[[--]]"')
+        );
+
+        // ----- D: applyEmptyProjectWikilinkRepair -----
+        const dBadLinkFm = helpers.parseFrontmatter(
+            fs.readFileSync(path.join(projRoot, LEGACY_PROJ_DIR, "docs/Custom Section/Bad Link Note.md"), "utf8")
+        ).frontmatter;
+        ok(
+            "HC-V01190-PROJ-SEED-MIGRATE-D1 empty project wikilink rewritten to [[Legacy Project]]",
+            String(dBadLinkFm.project || "").includes("Legacy Project") && !String(dBadLinkFm.project).includes("[[]]")
+        );
+
+        // ----- E: applyProjectTodoBackfill -----
+        const eTodoPath = path.join(projRoot, LEGACY_PROJ_DIR, "Legacy Project To-Do.md");
+        const eTodoExists = fs.existsSync(eTodoPath);
+        ok(
+            "HC-V01190-PROJ-SEED-MIGRATE-E1 Legacy Project To-Do.md backfilled",
+            eTodoExists
+        );
+        const eTodoBody = eTodoExists ? fs.readFileSync(eTodoPath, "utf8") : "";
+        ok(
+            "HC-V01190-PROJ-SEED-MIGRATE-E2 backfilled to-do body uses ToDoDailyProjectGroups",
+            eTodoBody.includes("ToDoDailyProjectGroups")
+        );
+
+        // ----- F: idempotency on a SECOND full invocation pass -----
+        // Snapshot key files BEFORE the second pass so we can compare byte-identity.
+        const fLegacyBefore = fs.readFileSync(path.join(projRoot, LEGACY_PROJ_DIR, "Legacy Project.md"), "utf8");
+        const fTodoBefore = fs.readFileSync(path.join(projRoot, LEGACY_PROJ_DIR, "Legacy Project To-Do.md"), "utf8");
+
+        const history2 = [];
+        await applyProjectSectionsCloseRepair(tp, manifest, variables, history2, git);
+        await applyEmptyProjectWikilinkRepair(tp, history2, git);
+        await applyProjectSectionsMigration(tp, manifest, variables, history2, git);
+        await applyProjectSectionsHubMigration(tp, manifest, variables, history2, git);
+        await applyProjectTodoBackfill(tp, manifest, variables, history2, git);
+
+        const fOldNoteStill = fs.existsSync(path.join(projRoot, LEGACY_PROJ_DIR, "docs/knowledge/Old Note.md"));
+        ok(
+            "HC-V01190-PROJ-SEED-MIGRATE-F1 second invocation: Old Note still in knowledge/ (no second move)",
+            fOldNoteStill
+        );
+        const fNoBakHubs = !fs.existsSync(path.join(projRoot, LEGACY_PROJ_DIR, "docs/knowledge/Knowledge.md.bak"))
+            && !fs.existsSync(path.join(projRoot, LEGACY_PROJ_DIR, "docs/Custom Section/Custom Section.md.bak"));
+        ok(
+            "HC-V01190-PROJ-SEED-MIGRATE-F2 second invocation: no .bak files from section-hub re-materialization",
+            fNoBakHubs
+        );
+        const fLegacyAfter = fs.readFileSync(path.join(projRoot, LEGACY_PROJ_DIR, "Legacy Project.md"), "utf8");
+        ok(
+            "HC-V01190-PROJ-SEED-MIGRATE-F3 second invocation: Legacy Project.md byte-identical (close-repair idempotent)",
+            fLegacyBefore === fLegacyAfter
+        );
+        const fTodoAfter = fs.readFileSync(path.join(projRoot, LEGACY_PROJ_DIR, "Legacy Project To-Do.md"), "utf8");
+        ok(
+            "HC-V01190-PROJ-SEED-MIGRATE-F4 second invocation: To-Do.md byte-identical (backfill skip-if-exists)",
+            fTodoBefore === fTodoAfter
+        );
+    } finally {
+        if (KEEP) {
+            console.log(`  KEEP_SEED_VAULT=1: ${projRoot}`);
+        } else {
+            try { fs.rmSync(projRoot, { recursive: true, force: true }); } catch (e) {}
+        }
+    }
+}
+
+// The MIGRATE families are async (the migrations are async). Run them to
+// completion, then emit the final tally + exit code so all asserts are counted.
 runMigrateFamily()
     .catch((e) => {
         console.log(`  FAIL HC-V01174-MIGRATE-FAMILY threw — ${e && e.message}`);
         fail++;
         failures.push("HC-V01174-MIGRATE-FAMILY");
+    })
+    .then(() => runProjectMigrateFamily())
+    .catch((e) => {
+        console.log(`  FAIL HC-V01190-PROJ-SEED-MIGRATE-FAMILY threw — ${e && e.message}`);
+        fail++;
+        failures.push("HC-V01190-PROJ-SEED-MIGRATE-FAMILY");
     })
     .finally(() => {
         console.log("");

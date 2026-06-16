@@ -12802,6 +12802,12 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports.applyRecurringSentinelV070Migration = applyRecurringSentinelV070Migration;
     module.exports.mergeDuplicateRecurringSections = mergeDuplicateRecurringSections;
     module.exports.stripPersistedRecurringSection = stripPersistedRecurringSection;
+    // v0.119.0 impl-1 — project blueprint installer migrations (for run-seed-migrations.js
+    // HC-V01190-PROJ-SEED-MIGRATE-* direct-invocation family). Pure additive.
+    module.exports.applyProjectSectionsMigration = applyProjectSectionsMigration;
+    module.exports.applyProjectSectionsHubMigration = applyProjectSectionsHubMigration;
+    module.exports.applyProjectSectionsCloseRepair = applyProjectSectionsCloseRepair;
+    module.exports.applyEmptyProjectWikilinkRepair = applyEmptyProjectWikilinkRepair;
     //
     // CF-2: by default, capture run-install.js's stdio (Phase B/C surfaced
     // 2200-line JSON dumps mixed into the user's terminal). We tee the
