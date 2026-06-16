@@ -1,9 +1,9 @@
 {
   "name": "to-do",
-  "version": "0.3.3",
+  "version": "0.4.0",
   "kind": "blueprint",
   "module_directory": "to-do",
-  "description": "Date-routed daily to-do notes feeding SpaceDailyDashboard's tasks panel under spice/to-do/. v0.1.2: filename pattern <Name>-YYYY-MM-DD (filename_prefix \"ToDo-\") per v0.4.2 platform invariant. v0.2.0 MINOR (v0.58.0 FA-6): canonical-vocab adoption per Frontmatter Alignment. Template now emits type: \"to-do\" + canonical created_at: (ISO+TZ; replaces legacy created:). Discriminator tag todo stripped; temporal YYYY/MM/DD tag stripped. NEW canonical-vocab rule_fragment. v0.3.0 MINOR (v0.63.0): All-To-Dos aggregator at spice/to-do/All-ToDos.md (live Dataview, uncompleted tasks from prior days grouped by source date, excludes today); Migrate-to-tomorrow dialog (modal task picker; selected tasks + indented children moved from today to tomorrow's note, creating tomorrow from template if absent). v0.3.1 PATCH (v0.63.1): (1) fix customJS singleton-instance bug — todo-migrate-init.js used `new customJS.ToDoMigrateModal()` but customjs auto-instantiates; corrected to `customJS.ToDoMigrateModal.open()`. (2) scope re-balance — All-To-Dos + Migrate buttons removed from global nav_buttons[] (where they appeared on every note via SpaceNavButtons) and moved to NEW ToDoLeafActions CustomJS class that renders them as AccentButtons inline under the nav row in Today To-Do.md only. Mirrors ScratchLeafActions pattern. Rule-fragment scope tightened from spice/to-do/**/*.md to spice/to-do/**/ToDo-*.md so the new All-ToDos.md hub isn't validated against the daily-note naming pattern. v0.3.2 PATCH (v0.63.2): three UX/recovery fixes — (a) _renderTomorrowTemplate now embeds the ToDoLeafActions dataviewjs block so auto-created tomorrow notes match Templater-created ones; (b) ToDoMigrateModal._submit opens tomorrow note in workspace after successful migration so user immediately sees the result; (c) ToDoLeafActions.openAllToDos detects missing/empty hub file and re-writes canonical body before opening (recovery from user-deleted hub, since installer treats {{module_directory}} destinations as idempotent and never re-materializes). v0.3.3 PATCH (v0.63.3): minimal-template redesign — Today To-Do.md template strips ## Tasks heading, ## Notes heading, and the pre-existing - [ ] placeholder. _renderTomorrowTemplate matches. parseTasks gains frontmatter-aware fallback so free-form tasks added under the dataviewjs blocks (no ## Tasks heading required) get parsed. applyMigration gains end-of-file append path: when tomorrow has no ## Tasks heading, migrated content is appended at the end of the file with a blank-line separator (rather than the prior return-tomorrow-unchanged silent fail). Fixes the v0.63.2 smoke discovery where the - [ ] placeholder in tomorrow visually obscured the migrated task right below it. v0.63.3 ALSO corrects the post_install Notice text from v0.3.1 → v0.3.3 (FLN-todo-17).",
+  "description": "Date-routed daily to-do notes feeding SpaceDailyDashboard's tasks panel under spice/to-do/. v0.4.0 MINOR (v0.116.0): five-section daily-note shape (Capture / Carryover / Recurring / Project Groups / Unassigned Meetings). NEW Recurring Tasks registry at spice/to-do/Recurring Tasks.md (type: to-do-recurring) parsed on render and materialized into today's daily under ## Recurring Today. NEW per-project To-Do note shape (type: project-todo) at spice/projects/<slug>/<Name> To-Do.md (created by the project blueprint v1.22.0 backfill / extra_files). NEW tabbed +New Task dialog (ToDoCreateTask) with One-shot + Recurring modes. NEW palette commands sauce:new-task + sauce:new-recurring-task. NEW helpers: ToDoDailyCarryover (yesterday-only auto-migration into today's note), ToDoDailyRecurring (registry → today materializer), ToDoDailyProjectGroups (live aggregator over project To-Do notes + meeting tasks linked to projects), ToDoDailyUnassignedMeetings (live aggregator over meetings without project: frontmatter), TaskParser (parseTasks extracted from v0.3.3 ToDoMigrateModal), RecurrenceParser (pure recurrence-grammar evaluator covering 4 supported families: daily / weekday-set / day-of-month / every-N-weeks-on-day). RETIRED ToDoMigrateModal + ToDoMigrateInit (the Migrate-to-tomorrow modal is superseded by [scheduled:: YYYY-MM-DD] on the task line + the new tabbed dialog). depends_on +1 entity-create@>=0.5.0 (project list resolution at dialog open-time mirrors meetings@v0.8.0 options_source pattern). Two new schema-registry entries: project-todo (project blueprint-owned) + to-do-recurring (to-do blueprint-owned). Carries forward: v0.3.x All-ToDos hub + backlog aggregator + ToDoLeafActions self-heal posture (all retained; LeafActions extended to 3-button row).",
   "depends_on": [
     {
       "name": "nav-buttons",
@@ -16,17 +16,27 @@
     {
       "name": "accent-button",
       "range": ">=0.1.0"
+    },
+    {
+      "name": "entity-create",
+      "range": ">=0.5.0"
     }
   ],
   "customjs_classes": [
     "ToDoHubActions",
     "ToDoLeafActions",
     "ToDoAllList",
-    "ToDoMigrateModal",
-    "ToDoMigrateInit"
+    "TaskParser",
+    "RecurrenceParser",
+    "ToDoDailyCarryover",
+    "ToDoDailyRecurring",
+    "ToDoDailyProjectGroups",
+    "ToDoDailyUnassignedMeetings",
+    "ToDoCreateTask",
+    "ToDoCreateTaskInit"
   ],
   "customjs_startup_scripts": [
-    "ToDoMigrateInit"
+    "ToDoCreateTaskInit"
   ],
   "files": [
     {
@@ -36,6 +46,18 @@
     {
       "source": "templates/All To-Dos.md",
       "dest": "{{module_directory}}/All-ToDos.md"
+    },
+    {
+      "source": "templates/Project To-Do.md",
+      "dest": "{{templates_path}}/Project To-Do.md"
+    },
+    {
+      "source": "templates/Recurring Tasks.md",
+      "dest": "{{templates_path}}/Recurring Tasks.md"
+    },
+    {
+      "source": "templates/Recurring Tasks.md",
+      "dest": "{{module_directory}}/Recurring Tasks.md"
     },
     {
       "source": "helpers/todo-hub-actions.js",
@@ -50,12 +72,36 @@
       "dest": "{{scripts_path}}/to-do/todo-all-list.js"
     },
     {
-      "source": "helpers/todo-migrate-modal.js",
-      "dest": "{{scripts_path}}/to-do/todo-migrate-modal.js"
+      "source": "helpers/task-parser.js",
+      "dest": "{{scripts_path}}/to-do/task-parser.js"
     },
     {
-      "source": "helpers/todo-migrate-init.js",
-      "dest": "{{scripts_path}}/to-do/todo-migrate-init.js"
+      "source": "helpers/recurrence-parser.js",
+      "dest": "{{scripts_path}}/to-do/recurrence-parser.js"
+    },
+    {
+      "source": "helpers/todo-daily-carryover.js",
+      "dest": "{{scripts_path}}/to-do/todo-daily-carryover.js"
+    },
+    {
+      "source": "helpers/todo-daily-recurring.js",
+      "dest": "{{scripts_path}}/to-do/todo-daily-recurring.js"
+    },
+    {
+      "source": "helpers/todo-daily-project-groups.js",
+      "dest": "{{scripts_path}}/to-do/todo-daily-project-groups.js"
+    },
+    {
+      "source": "helpers/todo-daily-unassigned-meetings.js",
+      "dest": "{{scripts_path}}/to-do/todo-daily-unassigned-meetings.js"
+    },
+    {
+      "source": "helpers/todo-create-task.js",
+      "dest": "{{scripts_path}}/to-do/todo-create-task.js"
+    },
+    {
+      "source": "helpers/todo-create-task-init.js",
+      "dest": "{{scripts_path}}/to-do/todo-create-task-init.js"
     }
   ],
   "nav_buttons": [
@@ -84,7 +130,7 @@
   "post_install": [
     {
       "type": "notice",
-      "message": "To-do blueprint v0.3.3 installed at spice/to-do/. Daily note: click 'To Do' nav-button to create today's file. Inside the daily note, two inline AccentButtons appear: 'All To-Dos' (opens spice/to-do/All-ToDos.md — backlog of uncompleted tasks from prior days) and 'Migrate' (opens a dialog to move unchecked tasks to tomorrow). Buttons only render on daily to-do notes; not visible elsewhere."
+      "message": "To-do blueprint v0.4.0 installed at spice/to-do/. Daily To-Do note now has 5 sections (Capture / Carryover from yesterday / Recurring Today / Open Project Tasks / Meeting Tasks). NEW: spice/to-do/Recurring Tasks.md registry for recurring task templates. NEW per-project To-Do notes at spice/projects/<slug>/<Name> To-Do.md (scaffolded by the project blueprint backfill). Use the +New Task button or palette command 'Sauce: New task' to capture tasks. Use +Recurring or 'Sauce: New recurring task' for the registry. Migrate-to-tomorrow modal is retired; use [scheduled:: YYYY-MM-DD] instead."
     }
   ],
   "rule_fragments": [
@@ -103,6 +149,22 @@
           }
         },
         "naming_pattern": "^ToDo-\\d{4}-\\d{2}-\\d{2}\\.md$"
+      }
+    },
+    {
+      "target": "to-do-recurring",
+      "fragment": {
+        "scope": {
+          "path_glob": "spice/to-do/Recurring Tasks.md"
+        },
+        "extends": "_canonical-vocab",
+        "required_frontmatter": {
+          "type": {
+            "required": true,
+            "type": "string",
+            "equals": "to-do-recurring"
+          }
+        }
       }
     }
   ]
