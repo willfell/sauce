@@ -1,0 +1,19 @@
+{
+  "contributions": {
+    "boards": [
+      {
+        "scope": {
+          "path_glob": "spice/boards/cards/**/*.md"
+        },
+        "extends": "_canonical-vocab",
+        "required_frontmatter": {
+          "type": {
+            "required": true,
+            "type": "string",
+            "equals": "board-card"
+          }
+        }
+      }
+    ]
+  }
+}

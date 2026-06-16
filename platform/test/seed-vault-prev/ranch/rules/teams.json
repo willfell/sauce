@@ -1,0 +1,32 @@
+{
+  "contributions": {
+    "teams": [
+      {
+        "scope": {
+          "path_glob": "spice/teams/*.md",
+          "exclude_basenames": [
+            "Teams.md"
+          ]
+        },
+        "extends": "_canonical-vocab",
+        "required_frontmatter": {
+          "type": {
+            "required": true,
+            "type": "string",
+            "equals": "team"
+          },
+          "name": {
+            "required": true,
+            "type": "string"
+          },
+          "products": {
+            "required": true,
+            "type": "list",
+            "min_length": 1
+          }
+        },
+        "naming_pattern": "^[A-Z][\\w '\\-&]+\\.md$"
+      }
+    ]
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "version": "1.0.0",
+  "canonical_titles": {
+    "calendar":   "Today's calendar",
+    "email":      "Email triage",
+    "chat":       "Chat",
+    "finance":    "Finance",
+    "github":     "GitHub",
+    "ado":        "ADO",
+    "monitoring": "Monitoring"
+  },
+  "fallback_strategy": "title-case kind_name with underscore/whitespace split"
+}

@@ -1,0 +1,34 @@
+{
+  "contributions": {
+    "people": [
+      {
+        "scope": {
+          "path_glob": "spice/people/*.md",
+          "exclude_basenames": [
+            "People.md"
+          ]
+        },
+        "extends": "_canonical-vocab",
+        "naming_pattern": "^[A-ZÀ-Ý][A-Za-zÀ-ÿ''\\.\\- ]*\\.md$",
+        "aliases_schema": {
+          "entry_types": [
+            "typed_object",
+            "bare_string"
+          ],
+          "typed_object_shape": {
+            "type": "string",
+            "value": "string"
+          },
+          "bare_string_meaning": "implicit name-type alias (back-compat)",
+          "allowed_types": [
+            "phone",
+            "email",
+            "name",
+            "handle"
+          ],
+          "collision_audit": "warn"
+        }
+      }
+    ]
+  }
+}

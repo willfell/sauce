@@ -1,0 +1,13 @@
+{
+  "contributions": {
+    "journal": [
+      {
+        "scope": {
+          "path_glob": "spice/journal/**/Journal-*.md"
+        },
+        "extends": "_canonical-vocab",
+        "naming_pattern": "^Journal-\\d{4}-\\d{2}-\\d{2}\\.md$"
+      }
+    ]
+  }
+}

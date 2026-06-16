@@ -1,0 +1,34 @@
+{
+  "version": "2.0.0",
+  "comment": "Maps capabilities to tool-pattern signatures. context-builder uses tool-name presence (not namespace regex) so enterprise gateways like Outlook/M365 (UUID namespace) are detected by what they expose, not how they're named. An MCP namespace can satisfy multiple kinds (capability-subset model).",
+  "kinds": [
+    {
+      "kind": "calendar",
+      "required_tools": ["list_events", "create_event"],
+      "optional_tools": ["update_event", "delete_event"],
+      "gather_skill": "cowork:gather-calendar",
+      "rename_from_v1": null
+    },
+    {
+      "kind": "email",
+      "required_tools": ["search_threads", "send_message"],
+      "optional_tools": ["list_drafts", "create_draft", "label_message"],
+      "gather_skill": "cowork:gather-gmail",
+      "rename_from_v1": "gmail"
+    },
+    {
+      "kind": "chat",
+      "required_tools": ["send_message"],
+      "tool_alternatives": [["list_chats"], ["list_threads"], ["list_conversations"]],
+      "gather_skill": "cowork:gather-imessage",
+      "rename_from_v1": "imessage"
+    },
+    {
+      "kind": "finance",
+      "required_tools": ["list_expenses"],
+      "optional_tools": ["list_cards", "list_transactions"],
+      "gather_skill": "cowork:gather-finance-yesterday",
+      "rename_from_v1": null
+    }
+  ]
+}

@@ -5,7 +5,8 @@
     "KanbanStatusSyncInit",
     "ProjectTaskCreateListenerInit",
     "ToDoMigrateInit",
-    "ScratchDayMigrateInit"
+    "ScratchDayMigrateInit",
+    "ToDoCreateTaskInit"
   ],
   "registeredInvocableScriptNames": [],
   "rerunStartupScriptsOnFileChange": false

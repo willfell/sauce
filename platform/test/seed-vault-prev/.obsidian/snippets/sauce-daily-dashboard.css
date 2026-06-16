@@ -1,0 +1,423 @@
+/* sauce-daily-dashboard.css — v0.7.0 (workshop v0.66.0)
+ * Materialized to .obsidian/snippets/sauce-daily-dashboard.css via
+ * installer's applySnippets helper (convenience mech v0.41.0 plumbing).
+ * Scopes ALL rules under .space-daily-dashboard so nothing leaks. */
+
+/* ── Section frame ─────────────────────────────────────────────────────── *
+ * v0.10.4 (sauce v0.70.4): "Quiet Frames" — neutral 1px border around every
+ * section + sub-group; accent color migrates OFF the frame and onto the
+ * section icon (outer) / dot (inner). Goal: let neutrals handle structure,
+ * let color become punctuation, not background. Spacing between sibling
+ * sections shares the --sauce-section-gap token. */
+.space-daily-dashboard .sauce-section {
+  background: var(--background-primary-alt);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  margin-bottom: var(--sauce-section-gap, 12px);
+  padding: 0;
+}
+/* Accent per section maps to a custom property; consumed by the section icon. */
+.space-daily-dashboard .sauce-section[data-accent="cyan"]   { --section-accent: var(--color-cyan); }
+.space-daily-dashboard .sauce-section[data-accent="blue"]   { --section-accent: var(--color-blue); }
+.space-daily-dashboard .sauce-section[data-accent="purple"] { --section-accent: var(--color-purple); }
+.space-daily-dashboard .sauce-section[data-accent="grey"]   { --section-accent: var(--text-faint); }
+.space-daily-dashboard .sauce-section[data-accent] .sauce-section-icon {
+  color: var(--section-accent, var(--text-faint));
+}
+.space-daily-dashboard .sauce-section > details { padding: 0.55em 0.85em; }
+
+/* ── Custom chevron — hide native, render Lucide instead ───────────────── */
+.space-daily-dashboard .sauce-section-summary {
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 0.95em;
+  color: var(--text-normal);
+}
+.space-daily-dashboard .sauce-section-summary::-webkit-details-marker { display: none; }
+.space-daily-dashboard .sauce-section-summary::marker { display: none; }
+/* v0.8.1 (v0.67.1): section icon baseline-aligned with the title text.
+ * The summary's align-items: center centers the wrapping span, but the inline
+ * SVG inside the span had a small baseline offset. Force the icon span to be
+ * inline-flex + the SVG to display:block to remove the inline baseline gap. */
+.space-daily-dashboard .sauce-section-icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.space-daily-dashboard .sauce-section-icon svg { display: block; }
+.space-daily-dashboard .sauce-section-chevron {
+  display: inline-flex;
+  margin-left: auto;
+  color: var(--text-muted);
+  transition: transform 0.18s ease;
+}
+.space-daily-dashboard .sauce-section > details[open] > .sauce-section-summary .sauce-section-chevron {
+  transform: rotate(90deg);
+}
+/* v0.13.4 (sauce v0.84.4): when a counts span precedes the chevron, suppress
+ * the chevron's auto-margin so counts hugs the right edge. The original
+ * margin-left:auto rule above is still the correct fallback for any future
+ * caller that omits rightHtml. */
+.space-daily-dashboard .sauce-section-counts + .sauce-section-chevron {
+  margin-left: 0;
+}
+
+/* ── Framed group (v0.10.0 sauce v0.70.0, refined v0.10.2 sauce v0.70.2) ───
+ * v0.10.2: accent moved from a 4px left stripe to a thin (1px) border
+ * wrapping all four sides of the group; vertical spacing between sibling
+ * groups (and between the outer section header and the first inner group)
+ * unified via --sauce-section-gap token. */
+.space-daily-dashboard { --sauce-section-gap: 12px; }
+.space-daily-dashboard .sauce-group {
+  background: transparent;
+  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+  margin: var(--sauce-section-gap, 12px) 0;
+}
+/* v0.10.4: --group-accent is still applied as an inline style by the
+ * renderer; the inner `.sauce-group-dot` consumes it for its background.
+ * The frame stays neutral so the dot carries the blueprint identity. */
+.space-daily-dashboard .sauce-group > details { padding: 0; }
+.space-daily-dashboard .sauce-group-header {
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  font-weight: 600;
+  font-size: 0.9em;
+  color: var(--text-normal);
+}
+.space-daily-dashboard .sauce-group-header::-webkit-details-marker { display: none; }
+.space-daily-dashboard .sauce-group-header::marker { display: none; }
+.space-daily-dashboard .sauce-group-chevron {
+  display: inline-flex;
+  color: var(--text-muted);
+  transition: transform 0.18s ease;
+}
+.space-daily-dashboard .sauce-group > details[open] > .sauce-group-header .sauce-group-chevron {
+  transform: rotate(90deg);
+}
+.space-daily-dashboard .sauce-group-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.space-daily-dashboard .sauce-group-label { letter-spacing: 0.01em; }
+.space-daily-dashboard .sauce-group-count {
+  color: var(--text-faint);
+  font-weight: 500;
+  margin-left: 2px;
+}
+.space-daily-dashboard .sauce-group-body {
+  display: flex;
+  flex-direction: column;
+}
+.space-daily-dashboard .sauce-group-row {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  position: relative;
+  cursor: pointer;
+}
+.space-daily-dashboard .sauce-group-row + .sauce-group-row {
+  border-top: 1px solid var(--background-modifier-border);
+}
+.space-daily-dashboard .sauce-group-row:hover { background: var(--background-modifier-hover); }
+.space-daily-dashboard .sauce-group-row-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 16px;
+}
+.space-daily-dashboard .sauce-group-row-title {
+  flex: 1;
+  min-width: 0;
+  font-weight: 500;
+  color: var(--text-normal);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.space-daily-dashboard .sauce-group-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px 14px;
+  font-size: 0.78em;
+  color: var(--text-muted);
+}
+/* v0.10.1 — anchor the time element to a fixed-width right-aligned cell so
+ * times line up vertically across rows in the same group. tabular-nums
+ * makes "1:30 PM" and "12:22 PM" share digit widths. */
+.space-daily-dashboard .sauce-group-row-meta > time {
+  min-width: 56px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ── Per-card meta line ────────────────────────────────────────────────── */
+.space-daily-dashboard .sauce-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin-top: 6px;
+  font-size: 0.78em;
+  color: var(--text-muted);
+}
+.space-daily-dashboard .sauce-meta time { white-space: nowrap; }
+.space-daily-dashboard .sauce-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 9px 1px 7px;
+  border-radius: 999px;
+  font-size: 0.92em;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  border: 1px solid var(--background-modifier-border);
+  background: transparent;
+  color: var(--text-normal);
+}
+.space-daily-dashboard .sauce-pill-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.space-daily-dashboard .sauce-bread { color: var(--text-faint); white-space: nowrap; }
+
+/* ── Drill-in (rollup breadcrumb → inline child list) ─────────────────── */
+.space-daily-dashboard .sauce-bread {
+  cursor: pointer;
+  user-select: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.space-daily-dashboard .sauce-bread:hover { color: var(--text-muted); }
+.space-daily-dashboard .sauce-bread-chevron {
+  display: inline-flex;
+  transition: transform 0.18s ease;
+}
+.space-daily-dashboard .sauce-bread[data-expanded="true"] .sauce-bread-chevron {
+  transform: rotate(90deg);
+}
+/* v0.8.1 (v0.67.1): display:flex moved into :not([hidden]) so the [hidden]
+ * attribute's UA `display: none` actually wins. The pre-existing rule's
+ * `display: flex` clobbered [hidden], leaving the drill-in always visible. */
+.space-daily-dashboard .sauce-drill-in {
+  width: 100%;
+  margin: 6px 0 2px 0;
+  padding: 4px 0 0 12px;
+}
+.space-daily-dashboard .sauce-drill-in:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.space-daily-dashboard .sauce-drill-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 3px 6px;
+  border-radius: 4px;
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 0.95em;
+}
+.space-daily-dashboard .sauce-drill-row:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+.space-daily-dashboard .sauce-drill-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.space-daily-dashboard .sauce-drill-time {
+  color: var(--text-faint);
+  white-space: nowrap;
+  margin-left: 12px;
+}
+.space-daily-dashboard .sauce-drill-more {
+  color: var(--text-faint);
+  font-size: 0.9em;
+  padding: 3px 6px;
+}
+
+/* ── Open-todo pill (universal across Meetings + Activity) ─────────────── */
+.space-daily-dashboard .sauce-todo-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px 1px 6px;
+  border-radius: 999px;
+  font-size: 0.92em;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  border: 1px solid var(--background-modifier-border);
+  background: transparent;
+  color: var(--text-muted);
+}
+.space-daily-dashboard .sauce-todo-pill .sauce-todo-icon {
+  display: inline-flex;
+  opacity: 0.8;
+}
+.space-daily-dashboard .sauce-todo-count { font-variant-numeric: tabular-nums; }
+
+/* ── v0.13.3 (sauce v0.84.3) — right-aligned section header pills ─────── *
+ * Container pushed right via margin-left:auto. Tasks gets the colorful
+ * orange+green pair; Meetings + Activity get a single neutral count pill. */
+.space-daily-dashboard .sauce-section-counts {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Open-tasks pill — orange tint + soft glow. Used in the Tasks section header. */
+.space-daily-dashboard .sauce-section-open-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px 1px 6px;
+  border-radius: 999px;
+  font-size: 0.85em;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  background: color-mix(in srgb, var(--color-orange) 12%, transparent);
+  border: 1px solid var(--color-orange);
+  color: var(--color-orange);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--color-orange) 35%, transparent);
+  font-variant-numeric: tabular-nums;
+}
+.space-daily-dashboard .sauce-section-open-pill::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-orange);
+}
+
+/* Done-tasks pill — green tint, no glow (acknowledgment, not call-to-action). */
+.space-daily-dashboard .sauce-section-done-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px 1px 6px;
+  border-radius: 999px;
+  font-size: 0.85em;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  background: color-mix(in srgb, var(--color-green) 12%, transparent);
+  border: 1px solid var(--color-green);
+  color: var(--color-green);
+  font-variant-numeric: tabular-nums;
+}
+.space-daily-dashboard .sauce-section-done-pill::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-green);
+}
+
+/* Neutral count pill — used by Meetings + Activity section headers. */
+.space-daily-dashboard .sauce-section-count-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 9px;
+  border-radius: 999px;
+  font-size: 0.85em;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  background: transparent;
+  border: 1px solid var(--background-modifier-border-hover);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 1.5em;
+  justify-content: center;
+}
+
+/* ── Empty state (v0.10.3 sauce v0.70.3) ────────────────────────────────── *
+ * Rendered when the day has no tasks, meetings, or activity. Replaces the
+ * prior silent-return behavior so the user always gets a visible signal. */
+.space-daily-dashboard .sauce-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 36px 16px;
+  margin: 4px 0;
+  border: 1px dashed var(--background-modifier-border);
+  border-radius: 8px;
+  color: var(--text-muted);
+  font-size: 0.9em;
+  letter-spacing: 0.02em;
+  background: transparent;
+}
+.space-daily-dashboard .sauce-empty-state svg { opacity: 0.5; }
+.space-daily-dashboard .sauce-empty-state span { font-style: italic; }
+
+
+/* ── Mobile pass — narrow viewports ────────────────────────────────────── */
+@media (max-width: 480px) {
+  .space-daily-dashboard { padding: 14px !important; }
+  .space-daily-dashboard .sauce-section > details { padding: 0.5em 0.65em; }
+  .space-daily-dashboard .sauce-meta { gap: 4px 8px; font-size: 0.75em; }
+  .space-daily-dashboard .sauce-pill { padding: 1px 8px 1px 6px; }
+  .space-daily-dashboard .sauce-drill-in { padding-left: 8px; }
+  .space-daily-dashboard .sauce-drill-row { font-size: 0.9em; padding: 2px 4px; }
+  .space-daily-dashboard .sauce-drill-time { margin-left: 8px; }
+  .space-daily-dashboard .sauce-todo-pill { padding: 1px 7px 1px 5px; font-size: 0.88em; }
+  .space-daily-dashboard .sauce-section-open-pill,
+  .space-daily-dashboard .sauce-section-done-pill,
+  .space-daily-dashboard .sauce-section-count-pill { padding: 1px 6px; font-size: 0.82em; }
+  .space-daily-dashboard .sauce-section-counts { gap: 4px; }
+  .space-daily-dashboard { --sauce-section-gap: 8px; }
+  .space-daily-dashboard .sauce-group-header { padding: 8px 10px; gap: 6px; }
+  /* v0.10.1 — on mobile, stack title above meta and let the title use the full
+   * row width with wrapping. Pre-v0.10.1 the flex-row layout collapsed titles
+   * to width:0 (showing "..." or nothing) whenever the meta cluster was wide
+   * enough — most visibly on the kanban "To Do Board" row. */
+  .space-daily-dashboard .sauce-group-row-line {
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: flex-start;
+    gap: 4px;
+    padding: 8px 12px;
+  }
+  .space-daily-dashboard .sauce-group-row-title {
+    width: 100%;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+  }
+  .space-daily-dashboard .sauce-group-row-meta {
+    width: 100%;
+    justify-content: flex-start;
+  }
+  .space-daily-dashboard .sauce-group-row-meta > time {
+    min-width: auto;
+    text-align: left;
+  }
+  .space-daily-dashboard .sauce-group-dot { width: 7px; height: 7px; }
+}
+
+

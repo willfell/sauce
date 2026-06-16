@@ -1,17 +1,20 @@
 /**
- * ToDoLeafActions (CustomJS) — renders two AccentButtons (All To-Dos + Migrate)
- * in a centered flex row on a daily to-do note (ToDo-YYYY-MM-DD.md).
+ * ToDoLeafActions (CustomJS) — inline action-bar with `+ New Task`,
+ * `+ Recurring`, and `All To-Dos` AccentButtons. Renders on:
+ *   - daily to-do notes (type: to-do — ToDo-YYYY-MM-DD.md)
+ *   - per-project To-Do notes (type: project-todo — <Name> To-Do.md)
+ *   - the Recurring Tasks registry (type: to-do-recurring)
  *
- * v0.63.1 PATCH replaces v0.63.0's global nav-button approach. SpaceNavButtons
- * is a global registry that surfaces every blueprint's nav_buttons[] on every
- * note; v0.63.0 exposed All-To-Dos + Migrate everywhere, which was correct for
- * navigation buttons but wrong UX for these two (one is a backlog view, one is
- * a contextual action that only makes sense on a daily to-do). Both moved here
- * as inline AccentButtons embedded into Today To-Do.md via a new dataviewjs
- * block — only renders inside the daily template body.
+ * The button set adapts: on a project-todo, "All To-Dos" hides because the
+ * backlog hub is daily-scoped. On the registry, "+ Recurring" is preselected
+ * by `+ New Task` opening straight into the Recurring tab and "All To-Dos"
+ * still works to navigate to backlog.
  *
- * Mirrors the ScratchLeafActions pattern (`platform/blueprints/scratch/helpers/
- * scratch-leaf-actions.js`). Empties dv.container before rendering; embed-safe.
+ * v0.116.0 (was v0.63.x): retires the `Migrate` button (the Migrate-to-tomorrow
+ * modal is gone — use [scheduled:: YYYY-MM-DD] on the task line instead).
+ *
+ * Mirrors the existing structural conventions: empty container before render,
+ * embed-safe early return, render-gen counter.
  */
 class ToDoLeafActions {
     async render(dv) {
@@ -22,18 +25,45 @@ class ToDoLeafActions {
 
         while (dv.container.firstChild) dv.container.removeChild(dv.container.firstChild);
 
+        const cur = dv.current && dv.current();
+        const noteType = cur && cur.type;
+
+        const plusIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`;
+        const repeatIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>`;
         const listIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>`;
-        const arrowIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>`;
 
         const row = dv.container.createEl('div');
         row.style.cssText = 'display: flex; gap: 12px; margin: 0.5em auto; justify-content: center; align-items: stretch; max-width: 600px; flex-wrap: wrap;';
 
+        const defaultDestForCurrent = () => {
+            if (noteType === 'project-todo' && cur && cur.project) {
+                const name = String(cur.project).replace(/^\[\[|\]\]$/g, '');
+                const slug = cur.project_slug || name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+                return { type: 'project', slug, name };
+            }
+            return 'today';
+        };
+
+        const openNewTask = () => {
+            try {
+                customJS.ToDoCreateTask.open({
+                    preselectTab: noteType === 'to-do-recurring' ? 'recurring' : 'one-shot',
+                    preselectDestination: defaultDestForCurrent(),
+                });
+            } catch (e) {
+                new Notice('Could not open dialog: ' + (e.message || e), 6000);
+            }
+        };
+
+        const openNewRecurring = () => {
+            try {
+                customJS.ToDoCreateTask.open({ preselectTab: 'recurring' });
+            } catch (e) {
+                new Notice('Could not open dialog: ' + (e.message || e), 6000);
+            }
+        };
+
         const openAllToDos = async () => {
-            // v0.63.2 PATCH: Obsidian's openLinkText creates an empty placeholder if the
-            // target file doesn't exist (or has been deleted by the user). The installer's
-            // spice/to-do-scoped destinations are idempotent (skip-if-exists), so
-            // a deleted-then-re-clicked hub note stays empty forever otherwise. Detect
-            // missing OR empty file and write the canonical body inline before opening.
             const path = 'spice/to-do/All-ToDos.md';
             const file = app.vault.getAbstractFileByPath(path);
             const body = [
@@ -73,16 +103,11 @@ class ToDoLeafActions {
             app.workspace.openLinkText(path, '');
         };
 
-        const openMigrate = () => {
-            const id = 'sauce:to-do-migrate';
-            if (app.commands.commands && app.commands.commands[id]) {
-                app.commands.executeCommandById(id);
-                return;
-            }
-            new Notice('Migrate command not registered. Reload Obsidian (Cmd-R) to re-run customjs startup scripts.', 8000);
-        };
-
-        customJS.AccentButton.render(row, { label: 'All To-Dos', icon: listIcon, onClick: openAllToDos, flex: true });
-        customJS.AccentButton.render(row, { label: 'Migrate', icon: arrowIcon, onClick: openMigrate, flex: true });
+        // Render order: + New Task, + Recurring, All To-Dos.
+        customJS.AccentButton.render(row, { label: '+ New Task', icon: plusIcon, onClick: openNewTask, flex: true });
+        customJS.AccentButton.render(row, { label: '+ Recurring', icon: repeatIcon, onClick: openNewRecurring, flex: true });
+        if (noteType !== 'project-todo') {
+            customJS.AccentButton.render(row, { label: 'All To-Dos', icon: listIcon, onClick: openAllToDos, flex: true });
+        }
     }
 }

@@ -2,7 +2,7 @@
 type: to-do-hub
 created_at: "<% tp.file.creation_date("YYYY-MM-DDTHH:mm:ssZ") %>"
 tags:
-  - "sauce-seed-gen2.kvykhe"
+  - "seed-test-vault"
 cssclasses:
   - wide
 ---
