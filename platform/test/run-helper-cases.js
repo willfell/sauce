@@ -7288,13 +7288,13 @@ async function caseFA6DomainRuleFragments() {
     !(tripAtlasFrag.fragment.required_frontmatter || {}).attending);
   assertTrue("FA6-EXTENDS-trips: Trip Atlas rule drops trip required_tag",
     !(tripAtlasFrag.fragment.required_tags || []).some(t => t.tag === "trip"));
-  // to-do: NEW rule_fragment (was empty)
+  // to-do: NEW rule_fragment (was empty). v0.116.0 adds a 2nd fragment for `to-do-recurring`.
   const todo = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/to-do/manifest.json"), "utf8"));
-  assertTrue("FA6-EXTENDS-to-do: NEW rule_fragment exists",
-    todo.rule_fragments.length === 1);
-  assertTrue("FA6-EXTENDS-to-do: rule_fragment declares extends",
-    todo.rule_fragments[0].fragment.extends === "_canonical-vocab");
+  assertTrue("FA6-EXTENDS-to-do: rule_fragment exists (>=1)",
+    todo.rule_fragments.length >= 1);
+  assertTrue("FA6-EXTENDS-to-do: all rule_fragments declare extends",
+    todo.rule_fragments.every(rf => rf.fragment.extends === "_canonical-vocab"));
   // boards: NEW rule_fragment scoping cards
   const boards = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/boards/manifest.json"), "utf8"));
@@ -7397,13 +7397,15 @@ async function caseTodoManifestV3() {
   const m = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/to-do/manifest.json"), "utf8"));
 
-  assertTrue("TD-HC-1 version is 0.3.3", m.version === "0.3.3", `got ${m.version}`);
-  assertTrue("TD-HC-1 customjs_classes includes ToDoMigrateInit",
-    Array.isArray(m.customjs_classes) && m.customjs_classes.includes("ToDoMigrateInit"));
+  // v0.116.0 widened from === "0.3.3" → 0.(3|4).x lineage; v0.4.0 retires ToDoMigrate{Modal,Init}
+  // and replaces with ToDoCreateTaskInit startup script.
+  assertTrue("TD-HC-1 version 0.3.x or 0.4.x", /^0\.(3|4)\.\d+$/.test(m.version), `got ${m.version}`);
+  assertTrue("TD-HC-1 customjs_classes includes ToDoCreateTaskInit (v0.4.0)",
+    Array.isArray(m.customjs_classes) && m.customjs_classes.includes("ToDoCreateTaskInit"));
   assertTrue("TD-HC-1 customjs_classes includes ToDoLeafActions (v0.63.1)",
     Array.isArray(m.customjs_classes) && m.customjs_classes.includes("ToDoLeafActions"));
-  assertTrue("TD-HC-1 customjs_startup_scripts has ToDoMigrateInit",
-    Array.isArray(m.customjs_startup_scripts) && m.customjs_startup_scripts.includes("ToDoMigrateInit"));
+  assertTrue("TD-HC-1 customjs_startup_scripts has ToDoCreateTaskInit (v0.4.0)",
+    Array.isArray(m.customjs_startup_scripts) && m.customjs_startup_scripts.includes("ToDoCreateTaskInit"));
 
   const navIds = (m.nav_buttons || []).map(b => b.id);
   assertTrue("TD-HC-1 nav_buttons has todo-today", navIds.includes("todo-today"));
