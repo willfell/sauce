@@ -4595,7 +4595,7 @@ async function applyOrphanedHelperCleanup(tp, mech, variables, history, git) {
 //
 // Reshapes consumer-vault notes to the current to-do v0.5.0 visual shape:
 //   - daily To-Do notes (type: to-do) get the 5-block body + SectionLabel
-//     "Today's Capture" dataviewjs block inserted between LeafActions and
+//     "Today" dataviewjs block inserted between LeafActions and
 //     ToDoDailyCarryover (or 5 helper blocks appended if v0.3.3 shape).
 //   - persisted `## Carryover (...)` / `## Recurring Today` H2 headings inside
 //     daily notes get rewritten to `<dataviewjs SectionLabel(...)>` blocks.
@@ -4664,9 +4664,9 @@ async function applyToDoBlueprintMigration(tp, mech, variables, history, git) {
 
   function _isV040ShapeMissingSectionLabel(body) {
     // v0.4.0 shape: has ToDoDailyCarryover but does NOT have a SectionLabel
-    // dataviewjs block for "Today's Capture" between LeafActions and Carryover.
+    // dataviewjs block for "Today" between LeafActions and Carryover.
     return body.includes('class: "ToDoDailyCarryover"') &&
-        !/class: "SectionLabel"[^`]*Today's Capture/.test(body);
+        !/class: "SectionLabel"[^`]*Today/.test(body);
   }
 
   function _reshapeToV040(body, viewsPath) {
@@ -4745,18 +4745,50 @@ async function applyToDoBlueprintMigration(tp, mech, variables, history, git) {
     return parts.join('\n');
   }
 
+  // v0.5.1 — heal frontmatter where v0.5.0's writeSentinel placed the sentinel INSIDE
+  // the frontmatter region. Returns the body with any such sentinels relocated to the
+  // line IMMEDIATELY AFTER the closing `---`. Idempotent.
+  function _healMisplacedSentinels(body) {
+    const lines = body.split('\n');
+    if (lines[0] !== '---') return body;
+    let closeIdx = -1;
+    for (let i = 1; i < lines.length; i++) {
+      if (lines[i] === '---') { closeIdx = i; break; }
+    }
+    if (closeIdx === -1) {
+      // Closing `---` was eaten — look for the misplaced sentinel and recover.
+      let sentinelIdx = -1;
+      for (let i = 1; i < lines.length; i++) {
+        if (/^<!-- (carryover-from-|recurring-materialized-)/.test(lines[i])) { sentinelIdx = i; break; }
+      }
+      if (sentinelIdx === -1) return body;
+      // Insert `---` BEFORE the misplaced sentinel; sentinel becomes line after the close.
+      const fmRegion = lines.slice(0, sentinelIdx).concat(['---']);
+      const sentinel = lines[sentinelIdx];
+      const after = lines.slice(sentinelIdx + 1);
+      return fmRegion.concat([sentinel], after).join('\n');
+    }
+    // Closing `---` is present — check whether any sentinels live BETWEEN [0..closeIdx].
+    const misplaced = lines.slice(0, closeIdx).filter(l => /^<!-- (carryover-from-|recurring-materialized-)/.test(l));
+    if (misplaced.length === 0) return body;
+    // Strip misplaced sentinels from inside frontmatter; put them AFTER the closing `---`.
+    const fmRegion = lines.slice(0, closeIdx + 1).filter(l => !/^<!-- (carryover-from-|recurring-materialized-)/.test(l));
+    const after = lines.slice(closeIdx + 1).filter(l => !/^<!-- (carryover-from-|recurring-materialized-)/.test(l));
+    return fmRegion.concat(misplaced, after).join('\n');
+  }
+
   function _injectSectionLabelIntoV040(body) {
-    // Insert the SectionLabel("Today's Capture", top: true) dataviewjs block
+    // Insert the SectionLabel("Today", top: true) dataviewjs block
     // immediately after the ToDoLeafActions block + a blank line. Idempotent:
     // returns body unchanged if the SectionLabel marker is already present.
-    if (/class: "SectionLabel"[^`]*Today's Capture/.test(body)) return body;
+    if (/class: "SectionLabel"[^`]*Today/.test(body)) return body;
     const ANCHOR_RE = /(```dataviewjs[^`]*class:\s*"ToDoLeafActions"[^`]*```\n?)/;
     const m = ANCHOR_RE.exec(body);
     if (!m) return body;
     const labelBlock = [
       '',
       '```dataviewjs',
-      `await dv.view("${viewsPath}/customjs-guard", { class: "SectionLabel", args: [{ text: "Today's Capture", top: true }] });`,
+      `await dv.view("${viewsPath}/customjs-guard", { class: "SectionLabel", args: [{ text: "Today", top: true }] });`,
       '```',
       '',
     ].join('\n');
@@ -4791,6 +4823,16 @@ async function applyToDoBlueprintMigration(tp, mech, variables, history, git) {
       newBody = _rewriteH2ToSectionLabel(newBody, /## Carryover \(from \d{4}-\d{2}-\d{2}\)/);
       newBody = _rewriteH2ToSectionLabel(newBody, /## Recurring Today/);
       if (newBody !== beforeHeadings) { dailyHeadingsReshaped++; touched = true; }
+
+      // v0.5.1 heal: move misplaced sentinels (carryover-from-* / recurring-materialized-*)
+      // OUT of the frontmatter region — they were inserted INSIDE the YAML by the v0.5.0
+      // writeSentinel bug, breaking properties parse. Repositions to OUTSIDE (after closing `---`).
+      const healed = _healMisplacedSentinels(newBody);
+      if (healed !== newBody) { newBody = healed; touched = true; }
+
+      // v0.5.1 cosmetic: rename existing "Today's Capture" SectionLabel → "Today".
+      const renamed = newBody.replace(/SectionLabel"[^`]*text:\s*"Today's Capture"/g, (m) => m.replace("Today's Capture", "Today"));
+      if (renamed !== newBody) { newBody = renamed; touched = true; }
 
       if (!touched) { alreadyCurrent++; continue; }
       // (skip-old to-do block start)

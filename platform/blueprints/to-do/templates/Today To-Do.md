@@ -16,7 +16,7 @@ await dv.view("{{views_path}}/customjs-guard", { class: "ToDoLeafActions" });
 ```
 
 ```dataviewjs
-await dv.view("{{views_path}}/customjs-guard", { class: "SectionLabel", args: [{ text: "Today's Capture", top: true }] });
+await dv.view("{{views_path}}/customjs-guard", { class: "SectionLabel", args: [{ text: "Today", top: true }] });
 ```
 
 ```dataviewjs

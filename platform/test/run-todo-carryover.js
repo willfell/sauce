@@ -145,8 +145,13 @@ ok('CARR-7a decorate is idempotent on already-tagged',
     const withS = ToDoDailyCarryover.writeSentinel(original, '2026-06-14');
     ok('CARR-8a writeSentinel adds the marker', withS.includes('<!-- carryover-from-2026-06-14 -->'));
     ok('CARR-8b hasSentinel true after write', ToDoDailyCarryover.hasSentinel(withS));
-    ok('CARR-8c sentinel inside frontmatter region',
-        withS.indexOf('<!-- carryover-from-') < withS.indexOf('\n---\n\n## Today'));
+    // v0.117.1 fix: sentinel lives OUTSIDE the frontmatter (after the closing `---`),
+    // not inside (which previously broke YAML parsing on render).
+    ok('CARR-8c sentinel OUTSIDE frontmatter block',
+        withS.indexOf('<!-- carryover-from-') > withS.indexOf('---\ntype'));
+    const fmEnd = withS.indexOf('\n---\n', 4);
+    ok('CARR-8c-frontmatter frontmatter has both delimiters and no sentinel inside',
+        fmEnd > -1 && withS.substring(0, fmEnd).indexOf('<!-- carryover-from-') === -1);
     // Re-write idempotency — second writeSentinel doesn't double-stamp.
     const withS2 = ToDoDailyCarryover.writeSentinel(withS, '2026-06-13');
     const count = (withS2.match(/<!-- carryover-from-/g) || []).length;

@@ -261,6 +261,8 @@ class ToDoDailyRecurring {
     }
 
     static writeSentinel(content, dateStr) {
+        // Sentinel lives OUTSIDE the frontmatter (HTML comment immediately AFTER the closing `---`).
+        // v0.117.1 fix: previously placed inside the frontmatter block which broke YAML parsing.
         const lines = content.split('\n');
         if (lines[0] !== '---') {
             return `<!-- recurring-materialized-${dateStr} -->\n` + content;
@@ -272,10 +274,9 @@ class ToDoDailyRecurring {
         if (closeIdx === -1) {
             return `<!-- recurring-materialized-${dateStr} -->\n` + content;
         }
-        const before = lines.slice(0, closeIdx).filter(l => !/^<!-- recurring-materialized-/.test(l));
-        const after = lines.slice(closeIdx);
-        before.push(`<!-- recurring-materialized-${dateStr} -->`);
-        return before.concat(after).join('\n');
+        const fmRegion = lines.slice(0, closeIdx + 1).filter(l => !/^<!-- recurring-materialized-/.test(l));
+        const after = lines.slice(closeIdx + 1).filter(l => !/^<!-- recurring-materialized-/.test(l));
+        return fmRegion.concat([`<!-- recurring-materialized-${dateStr} -->`], after).join('\n');
     }
 
     static appendAuditRow(registryContent, row) {
