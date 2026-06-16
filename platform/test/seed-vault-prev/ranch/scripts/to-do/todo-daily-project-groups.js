@@ -64,7 +64,7 @@ class ToDoDailyProjectGroups {
         if (!dv || !dv.current) return;
         const cur = dv.current();
         if (!cur || cur.type !== 'project-todo') return;
-        const projName = cur.project ? String(cur.project).replace(/^\[\[|\]\]$/g, '') : null;
+        const projName = ToDoDailyProjectGroups._normalizeProjectName(cur.project);
         if (!projName) return;
 
         const meetingTasks = this._collectMeetingTasksForProject(dv, projName);
@@ -141,23 +141,69 @@ class ToDoDailyProjectGroups {
     }
 
     _collectMeetingTasksForProject(dv, projName) {
+        // v0.5.3: iterate all meetings without a where-clause and do the project
+        // match per-meeting inside try/catch. The prior where-clause used
+        // `String(m.project)` which broke on certain Dataview Link object
+        // representations (Link.toString() returns "Sauce" in some versions and
+        // "[[Sauce]]" in others; the strip-brackets regex handled both, but a
+        // throwing toString on a different field broke the whole array).
+        // Also normalizes projName comparison to handle the Link-vs-string drift.
         const out = [];
-        let meetings;
-        try {
-            meetings = dv.pages('"spice/meetings/notes"').where(m => {
-                if (!m || !m.project) return false;
-                const v = String(m.project).replace(/^\[\[|\]\]$/g, '');
-                return v === projName;
-            }).array();
-        } catch (e) { return out; }
-        for (const meet of meetings) {
-            if (meet.file && meet.file.tasks) {
-                for (const t of meet.file.tasks) {
-                    if (!t.completed) out.push({ text: t.text, source: meet.file.path });
+        const targetName = ToDoDailyProjectGroups._normalizeProjectName(projName);
+        if (!targetName) return out;
+        let allMeetings;
+        try { allMeetings = dv.pages('"spice/meetings/notes"').array(); }
+        catch (e) { return out; }
+        for (const meet of allMeetings) {
+            try {
+                if (!meet || meet.project == null) continue;
+                const meetProj = ToDoDailyProjectGroups._normalizeProjectName(meet.project);
+                if (!meetProj || meetProj !== targetName) continue;
+                if (meet.file && meet.file.tasks) {
+                    for (const t of meet.file.tasks) {
+                        if (!t.completed) out.push({ text: t.text, source: meet.file.path });
+                    }
                 }
-            }
+            } catch (_e) { /* skip this meeting; don't blank the rest */ }
         }
         return out;
+    }
+
+    /**
+     * Normalize a project reference into a bare project name string.
+     * Handles: plain strings, "[[Name]]" wikilink strings, Dataview Link
+     * objects (.path / .display), arrays (takes first element), nulls.
+     * Returns "" when nothing usable can be extracted.
+     */
+    static _normalizeProjectName(value) {
+        if (value == null) return '';
+        // Dataview Link object — has .path, possibly .display.
+        if (typeof value === 'object' && !Array.isArray(value)) {
+            if (typeof value.path === 'string') {
+                // Strip "spice/projects/<slug>/<Name>.md" → "<Name>"
+                const last = value.path.split('/').pop() || '';
+                return last.replace(/\.md$/, '').replace(/^\[\[|\]\]$/g, '').trim();
+            }
+            if (typeof value.display === 'string') return value.display.trim();
+            // Fallback toString.
+            try { return String(value).replace(/^\[\[|\]\]$/g, '').trim(); }
+            catch (_e) { return ''; }
+        }
+        if (Array.isArray(value)) {
+            if (!value.length) return '';
+            return ToDoDailyProjectGroups._normalizeProjectName(value[0]);
+        }
+        // String/number/etc.
+        const s = String(value).trim();
+        // Strip surrounding wikilink brackets if present (`[[Name]]` or `[[path|display]]`).
+        const wl = /^\[\[([^\]]+)\]\]$/.exec(s);
+        if (wl) {
+            const inner = wl[1];
+            const pipe = inner.indexOf('|');
+            if (pipe !== -1) return inner.slice(pipe + 1).trim();
+            return inner.split('/').pop().replace(/\.md$/, '').trim();
+        }
+        return s.replace(/\.md$/, '').trim();
     }
 
     _cleanTaskText(text) {
