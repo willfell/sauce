@@ -471,6 +471,32 @@ This archives the current seed to `seed-vault-prev/` and forward-ratchets `seed-
 
 **Surfaced:** v0.110.0 — codified at the moment the seed-vault was introduced. The rebaseline loop is the mechanism; the rule keeps the loop intact.
 
+### 29. Managed adopted-blueprint templates MUST conform to the note-chrome grammar — heal existing notes, never hand-edit
+
+Every template in an **adopted** blueprint (one declaring a `breadcrumb` block in its `manifest.json` — currently `project`, `meetings`, `scratch`, `to-do`) MUST conform to the note-chrome grammar: breadcrumb view FIRST, no `---` between breadcrumb and the nav bar, and **no `## H2` content headings** — content sections use `SectionLabel` (a dataviewjs view) instead. The `scripts/lint-note-chrome.js` preflight gate enforces this on any blueprint with a `breadcrumb` manifest block (kanban-board templates with `kanban-plugin:` frontmatter are exempt — their `## Column` headings are plugin structure, not content headings).
+
+**Existing notes are healed at install** by `applyNoteChromeHeal` (`platform/install.js`): per-vault, idempotent, `.sauce-backup` snapshot before any write, fence-aware H2 rewrite, fails loud but never throws. It keys on the dataviewjs invocation substring + frontmatter `type`, never on display markers.
+
+**Rule.** Never hand-edit a note body to make it conform — the heal owns existing notes, the template owns new ones. Hand-edits drift from what the heal produces and confuse idempotency.
+
+**Accepted regression.** The heal targets notes by `type` ∈ {`meeting`, `scratch`, `scratch-day`, `to-do`}. Tag-based hubs with no `type` field (e.g. Meeting Hub, `tags: meetings-hub`) are NOT reached — their template is fixed for new notes, but existing hubs keep their incidental `## H2`. This is an accepted cosmetic regression (the cards list below the heading is unaffected), not a bug.
+
+**SectionLabel tradeoff (documented cost).** `SectionLabel` renders a `<div>`, not a markdown heading — so converted sections leave the Obsidian outline pane and any `[[note#Heading]]` anchor link breaks. Deliberate; `.sauce-backup`-reversible. Full rationale: [`agent-guides/note-chrome.md`](agent-guides/note-chrome.md).
+
+**Surfaced:** v0.124.0 (note-chrome wave 1 — `meetings` / `scratch` / `to-do` adoption + the lint gate + `applyNoteChromeHeal`).
+
+### 30. `.gitignore /Scripts/` + `core.ignorecase=true` silently ignores everything under `scripts/`
+
+This repo's `.gitignore` carries `/Scripts/` (line 30 — for the workshop self-bootstrap activation dir written by `phaseWriteActivation`). On macOS, git defaults to `core.ignorecase=true`, so git treats the lowercase `scripts/` path as matching the `/Scripts/` rule. **Files under `scripts/` are therefore ignored** — and because the rule matches, even MODIFYING an already-tracked file under `scripts/` is rejected by a plain `git add` (git reports the path as ignored).
+
+**Symptom.** `git add scripts/lint-note-chrome.js` exits with `The following paths are ignored by one of your .gitignore files: scripts/lint-note-chrome.js` even though the file is real and you want it staged.
+
+**Fix.** Use `git add -f scripts/<file>` to force-stage anything under `scripts/`. (Files already tracked still show diffs in `git status`; it's the `add` that needs `-f`.)
+
+**Why not just narrow the `.gitignore`.** `/Scripts/` is anchored to the repo root and intentionally scoped (the comment block at lines 26–29 explains it's the bootstrap activation dir). Loosening it risks accidentally tracking the activation artifacts. The `-f` flag is the surgical workaround for the case-fold collision.
+
+**Surfaced:** v0.124.0 — discovered adding `scripts/lint-note-chrome.js`.
+
 ## Operational gotchas
 
 ### CustomJS scan folder is per-vault and configured in `.obsidian/plugins/customjs/data.json`
