@@ -8,8 +8,9 @@
 // key. Today that is exactly { project, meetings, scratch, to-do }; later
 // adoption waves widen the set by adding a `breadcrumb` block, and this gate
 // starts enforcing the new blueprint automatically. Un-adopted blueprints
-// (daily, journal, finance, trips, boards, people, products, teams, cowork, …)
-// still legitimately use `## H2` and MUST NOT be flagged.
+// (daily, journal, finance, trips, people, products, teams, cowork, …) still
+// legitimately use `## H2` and MUST NOT be flagged. (Kanban boards are not a
+// blueprint of their own — they live inside the `project` blueprint.)
 //
 // Rules over adopted templates (platform/blueprints/<bp>/templates/*.md where
 // <bp>/manifest.json has a `breadcrumb` key):
@@ -43,6 +44,8 @@ const path = require('path');
 const REPO_ROOT = path.join(__dirname, '..');
 const BLUEPRINTS_DIR = path.join(REPO_ROOT, 'platform', 'blueprints');
 
+// Rule 1 targets only `## H2` / `### H3`; `#### H4`+ are intentionally out of
+// scope (and `# H1` note titles are allowed).
 const HEADING_RE = /^#{2,3}\s/;                 // ## or ### at line start
 const ALLOW_RE = /<!--\s*lint-note-chrome:allow\b.*?-->/;
 const BREADCRUMB_CALL = 'class: "Breadcrumb"';
@@ -52,14 +55,50 @@ const NAV_CALL = 'class: "SpaceNavButtons"';
 // Frontmatter helpers
 // ---------------------------------------------------------------------------
 
-// Returns the raw `type:` frontmatter value (string) or null. Only reads the
-// leading `---`-fenced YAML block. Tolerant of templater expressions / quotes.
-function frontmatterType(content) {
+// Returns the body lines of the leading `---`-fenced YAML block (exclusive of
+// the two `---` fences), or null if no frontmatter is found. Robust to a
+// leading Templater header block: several adopted templates (e.g. the meetings
+// `Meeting.md`) open with a `<%* … -%>` / `<% … %>` region BEFORE their
+// frontmatter, so the opening `---` is not at byte 0. We skip one leading
+// Templater region plus any leading blank lines, then accept the first `---`
+// as the frontmatter open and read until the closing `---`.
+function frontmatterLines(content) {
     const lines = content.split('\n');
-    if (lines[0].trim() !== '---') return null;
-    for (let i = 1; i < lines.length; i++) {
-        if (lines[i].trim() === '---') break;
-        const m = /^type:\s*(.+?)\s*$/.exec(lines[i]);
+    let i = 0;
+
+    // Skip a single leading Templater header region: a line opening with `<%*`
+    // or `<%` through the first line whose trimmed end is `-%>` or `%>`.
+    if (i < lines.length && /^\s*<%/.test(lines[i])) {
+        // If the opener also closes on the same line, consume just that line.
+        if (/(-%>|%>)\s*$/.test(lines[i])) {
+            i++;
+        } else {
+            i++;
+            while (i < lines.length && !/(-%>|%>)\s*$/.test(lines[i])) i++;
+            if (i < lines.length) i++;   // consume the closing `-%>`/`%>` line
+        }
+    }
+
+    // Skip any leading blank lines between the Templater header and the `---`.
+    while (i < lines.length && lines[i].trim() === '') i++;
+
+    // The next non-blank line must open the frontmatter.
+    if (i >= lines.length || lines[i].trim() !== '---') return null;
+    const open = i;
+    for (let j = open + 1; j < lines.length; j++) {
+        if (lines[j].trim() === '---') return lines.slice(open + 1, j);
+    }
+    return null;   // unterminated → treat as no frontmatter
+}
+
+// Returns the raw `type:` frontmatter value (string) or null. Reads the leading
+// `---`-fenced YAML block (see frontmatterLines for Templater-header handling).
+// Tolerant of templater expressions / quotes.
+function frontmatterType(content) {
+    const fm = frontmatterLines(content);
+    if (!fm) return null;
+    for (const line of fm) {
+        const m = /^type:\s*(.+?)\s*$/.exec(line);
         if (m) return m[1].replace(/^["']|["']$/g, '').trim();
     }
     return null;
@@ -68,13 +107,9 @@ function frontmatterType(content) {
 // Kanban-board templates declare `kanban-plugin:` in frontmatter. Their `## …`
 // lines are obsidian-kanban column definitions, not content headings.
 function isKanbanBoard(content) {
-    const lines = content.split('\n');
-    if (lines[0].trim() !== '---') return false;
-    for (let i = 1; i < lines.length; i++) {
-        if (lines[i].trim() === '---') break;
-        if (/^kanban-plugin:\s*/.test(lines[i])) return true;
-    }
-    return false;
+    const fm = frontmatterLines(content);
+    if (!fm) return false;
+    return fm.some(line => /^kanban-plugin:\s*/.test(line));
 }
 
 // ---------------------------------------------------------------------------
