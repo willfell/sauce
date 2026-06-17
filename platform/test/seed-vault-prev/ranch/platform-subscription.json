@@ -27,7 +27,7 @@
     },
     {
       "name": "nav-buttons",
-      "version": "2.8.0"
+      "version": "2.7.0"
     },
     {
       "name": "cards",
@@ -35,18 +35,6 @@
     },
     {
       "name": "accent-button",
-      "version": "0.1.2"
-    },
-    {
-      "name": "section-label",
-      "version": "0.1.0"
-    },
-    {
-      "name": "breadcrumb",
-      "version": "0.1.0"
-    },
-    {
-      "name": "open-helpers",
       "version": "0.1.1"
     },
     {
@@ -55,7 +43,7 @@
     },
     {
       "name": "entity-create",
-      "version": "0.7.4"
+      "version": "0.7.2"
     },
     {
       "name": "people-rendering",
@@ -93,11 +81,11 @@
     },
     {
       "name": "daily",
-      "version": "0.13.7"
+      "version": "0.13.6"
     },
     {
       "name": "meetings",
-      "version": "0.9.0"
+      "version": "0.8.0"
     },
     {
       "name": "people",
@@ -109,11 +97,11 @@
     },
     {
       "name": "project",
-      "version": "1.25.0"
+      "version": "1.22.1"
     },
     {
       "name": "to-do",
-      "version": "0.11.0"
+      "version": "0.6.1"
     },
     {
       "name": "journal",
@@ -129,7 +117,7 @@
     },
     {
       "name": "scratch",
-      "version": "0.6.0"
+      "version": "0.5.2"
     },
     {
       "name": "teams",

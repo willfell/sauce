@@ -56,16 +56,10 @@ class ToDoLeafActions {
         };
 
         const openNewRecurring = () => {
-            // v0.120.0: open the registry file directly instead of the create-task dialog.
-            // Recurring tasks are managed by editing the registry markdown, not via a
-            // dialog (user feedback 2026-06-16: registry is the source of truth; the
-            // dialog round-trip added friction without value). The registry file is
-            // materialized once at install and persists per-vault.
-            const path = 'spice/to-do/Recurring Tasks.md';
             try {
-                app.workspace.openLinkText(path, '', false);
+                customJS.ToDoCreateTask.open({ preselectTab: 'recurring' });
             } catch (e) {
-                new Notice('Could not open Recurring Tasks registry: ' + (e.message || e), 6000);
+                new Notice('Could not open dialog: ' + (e.message || e), 6000);
             }
         };
 
