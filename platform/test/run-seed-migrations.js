@@ -392,6 +392,17 @@ withTempVault((vault) => {
        /class:\s*"Breadcrumb"/.test(sd) &&
        sd.indexOf("# ") < sd.indexOf('class: "Breadcrumb"') &&
        sd.indexOf('class: "Breadcrumb"') < sd.indexOf('class: "SpaceNavButtons"'));
+
+    // ===== HC-V01240-SEED-PNAME-* — applyProjectNameBackfill (note-chrome wave 1) =====
+    // The seed carries a mixed-case project ("My Cool Project" under slug
+    // my-cool-project) whose Project Map note has NO project_name field. The
+    // per-mechanism heal resolves the display name from the project hub note's
+    // basename and stamps project_name into the map's frontmatter — so the
+    // breadcrumb's fm:project_name resolver shows "My Cool Project", not the slug.
+    const mapNote = helpers.readNote(vault, "spice/projects/my-cool-project/Project Map.md");
+    const { frontmatter: mapFm } = helpers.parseFrontmatter(mapNote);
+    ok("HC-V01240-SEED-PNAME-1 map project_name backfilled", typeof mapFm.project_name === "string" && mapFm.project_name.length > 0);
+    ok("HC-V01240-SEED-PNAME-2 map project_name is display name not slug", mapFm.project_name === "My Cool Project");
 });
 
 // =============================================================================

@@ -272,6 +272,26 @@
         "platform/mechanisms/breadcrumb/breadcrumb.js"
       ],
       "notes": "Aggregated at install time from per-blueprint manifest `breadcrumb: { types: { ... } }` blocks via applyBreadcrumb in install.js. First-match-wins over contributions{} keyed by current-note `type` frontmatter. Schema: { schema_version:1, contributions:{ <bp>:{ types:{ <type>:{ ancestors[], current? } } } } } where each segment has { when?:{}, label, link? } with `|`-chain labels + `{atom}` template links + `fm:`/`path:`/`file:`/`lit:` + `slug:` transform resolver grammar. See Docs/plans/2026-06-17-v0.123.0-breadcrumb-mechanism-design.md."
+    },
+    {
+      "id": "nav-buttons-registry",
+      "kind": "data-file",
+      "owner": { "type": "mechanism", "name": "nav-buttons" },
+      "source": "ranch/nav-buttons-registry.json",
+      "consumers": [
+        "platform/mechanisms/nav-buttons/space-nav-buttons.js"
+      ],
+      "notes": "Aggregated at install from per-blueprint manifest nav_buttons blocks via applyNavButtons in install.js. Read-modify-write so the registry accumulates across the install loop, with prune-on-empty for re-installs. SpaceNavButtons reads it at render time."
+    },
+    {
+      "id": "entity-create-registry",
+      "kind": "data-file",
+      "owner": { "type": "mechanism", "name": "entity-create" },
+      "source": "ranch/entity-create-registry.json",
+      "consumers": [
+        "platform/mechanisms/entity-create/entity-create.js"
+      ],
+      "notes": "Aggregated at install from per-blueprint manifest new_entity_buttons[] specs via applyNewEntityButtons in install.js. Schema: { schema_version:1, contributions:{ <bp>:[...] }, entries:[...] } with a flattened top-level entries[] view. EntityCreate reads it at render time."
     }
   ]
 }

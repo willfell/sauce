@@ -1,9 +1,8 @@
 ---
 type: map
-project_name: "{{prompts.name}}"
-created_at: "{{now.YYYY-MM-DDTHH:mm:ssZ}}"
+created_at: 2026-01-01T00:00:00.000Z
 tags:
-  - project/{{prompts.slug}}
+  - project/my-cool-project
 workstreams: []
 ---
 

@@ -1155,6 +1155,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyProjectSectionsHubMigration(tp, mech, variables, history, git);   // NEW v0.103.0 S4 — heals v0.102.0 vaults: Docs.md → ProjectDocsIndex + materialize Section Hubs + wikilink frontmatter + breadcrumb injection
   await applyDocNoteBreadcrumbMarkerCleanup(tp, mech, variables, history, git); // NEW v0.109.0 S8 — strips legacy <!-- breadcrumb-v1.17.0 --> markers from doc-notes (block preserved; new idempotency guard inside _migrateDocNote uses the class invocation substring)
   await applyProjectSectionsCloseRepair(tp, mech, variables, history, git);    // NEW v0.103.0.1 — fixes the regex-induced -"[[--]]" damage from v0.103.0 deploy
+  await applyProjectNameBackfill(tp, mech, variables, history, git);   // NEW v0.124.0 — backfill project_name FM on map/kanban/task-note for breadcrumb name display
   await applyFinanceMigrations(tp, mech, variables, history, git);             // NEW v0.107.0 S2 — finance defaults scaffolding (create-if-absent) + categories group backfill (append-only + .sauce-backup snapshot)
   await applyToDoBlueprintMigration(tp, mech, variables, history, git);        // NEW v0.116.0 — reshapes v0.3.3 daily-note bodies to v0.4.0 5-block shape (.sauce-backup snapshot before write; absorbs ## Tasks heading; preserves ## Notes)
   await applyRecurringSentinelV070Migration(tp, mech, variables, history, git); // v0.119.0 — date-only sentinels → additive (empty-set) form. SUPERSEDED by stripPersistedRecurringSection (v0.120.0) but kept for files-in-flight; runs as a no-op once stripPersistedRecurringSection has run.
@@ -3428,6 +3429,137 @@ async function applyNoteChromeHeal(tp, history, git) {
   }
   history?.push({ event: "info", step: "note_chrome_heal", name: "vault",
     reason: `healed ${healed}; ${warned} warning(s)`,
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+}
+
+// _resolveProjectDisplayName — given a project dir's markdown files (paths) +
+// an adapter, returns the basename (sans .md) of the note that lives DIRECTLY
+// under projectDir and carries frontmatter type:project. This is the project's
+// display name (mirrors the legacy ProjectNavButtons._resolveProjectFromPath
+// convention: the hub note's filename IS the display name). Returns null when
+// no such note is found. Reads the type via _noteChromeFrontmatterType.
+async function _resolveProjectDisplayName(adapter, projectDir, candidateFiles) {
+  const prefix = projectDir + "/";
+  for (const fpath of candidateFiles) {
+    // Hub note sits directly under projectDir (no further nested segment).
+    if (!fpath.startsWith(prefix)) continue;
+    if (fpath.slice(prefix.length).includes("/")) continue;
+    let body;
+    try { body = await adapter.read(fpath); } catch (_e) { continue; }
+    if (_noteChromeFrontmatterType(body) === "project") {
+      const base = fpath.split("/").pop();
+      return base.endsWith(".md") ? base.slice(0, -3) : base;
+    }
+  }
+  return null;
+}
+
+// _injectProjectNameFrontmatter — pure, idempotent transform. When the body has
+// a leading frontmatter block whose `type:` is map/kanban/task-note and which
+// LACKS a `project_name:` field, inserts `project_name: "<name>"` immediately
+// after the `type:` line (mirrors the template field placement). Returns the
+// body unchanged when there's no FM block, the type doesn't match, project_name
+// already exists, or the type: line can't be located (driver short-circuits on
+// `after === before`). The display name is YAML-double-quote escaped.
+function _injectProjectNameFrontmatter(body, name) {
+  if (typeof body !== "string") return body;
+  // Require a leading frontmatter block.
+  const fmMatch = body.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!fmMatch) return body;
+  const fmText = fmMatch[1];
+  // Type gate — only the three breadcrumb-bearing project note types.
+  const typeMatch = fmText.match(/^type:\s*["']?([A-Za-z0-9_-]+)["']?\s*$/m);
+  if (!typeMatch) return body;
+  if (!["map", "kanban", "task-note"].includes(typeMatch[1])) return body;
+  // Idempotency: bail if project_name already present (any value).
+  if (/^project_name:\s*/m.test(fmText)) return body;
+  // YAML double-quote escaping: backslash + double-quote.
+  const escaped = String(name).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  const insert = `\nproject_name: "${escaped}"`;
+  // Insert immediately after the matched type: line.
+  const fmStart = body.indexOf(fmText);
+  const typeLineFull = typeMatch[0];
+  const typeIdxInFm = fmText.indexOf(typeLineFull);
+  const absIdx = fmStart + typeIdxInFm + typeLineFull.length;
+  return body.slice(0, absIdx) + insert + body.slice(absIdx);
+}
+
+// applyProjectNameBackfill — v0.124.0 (note-chrome wave 1). Per-mechanism scope
+// (project-gated, mirrors applyDocsHubButtonRepair). Task 1 added project_name
+// FM to the Project Map / Project Board / Task Note templates so NEW notes carry
+// the display name; this heal back-fills it into EXISTING map/kanban/task-note
+// notes so the breadcrumb's fm:project_name resolver shows the mixed-case
+// display name instead of the lowercase path:2 slug fallback. For each project
+// dir it resolves the display name from the hub note (type:project) basename,
+// then stamps project_name onto every map/kanban/task-note note under that dir
+// that lacks it. Idempotent (skips notes that already carry project_name + uses
+// `after === before` short-circuit), per-note try/catch, never throws, full git
+// fields on every history push, .sauce-backup snapshot before any write. Reuses
+// _listAllMarkdownRecursive + _noteChromeFrontmatterType.
+async function applyProjectNameBackfill(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "project") return;
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+
+  const projectsRoot = "spice/projects";
+  if (!(await adapter.exists(projectsRoot))) return;
+
+  let projectsList;
+  try {
+    projectsList = await adapter.list(projectsRoot);
+  } catch (e) {
+    history?.push({ event: "warning", step: "project_name_backfill", name: "project",
+      reason: `list failed for ${projectsRoot}: ${e && e.message ? e.message : String(e)}`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    return;
+  }
+
+  const projectDirs = (projectsList.folders || []).filter((d) => d.split("/").pop() !== "All Projects");
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  let stamped = 0, warned = 0;
+
+  for (const projectDir of projectDirs) {
+    let files;
+    try {
+      files = await _listAllMarkdownRecursive(adapter, projectDir);
+    } catch (e) {
+      warned += 1;
+      history?.push({ event: "warning", step: "project_name_backfill", name: "project",
+        reason: `list failed for ${projectDir}: ${e && e.message ? e.message : String(e)}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+      continue;
+    }
+
+    const displayName = await _resolveProjectDisplayName(adapter, projectDir, files);
+    if (!displayName) continue; // no hub note resolvable — leave notes untouched.
+
+    for (const fpath of files) {
+      try {
+        const before = await adapter.read(fpath);
+        const type = _noteChromeFrontmatterType(before);
+        if (!["map", "kanban", "task-note"].includes(type)) continue;
+        const after = _injectProjectNameFrontmatter(before, displayName);
+        if (after === before) continue;
+        // .sauce-backup snapshot before write (mirrors applyNoteChromeHeal).
+        const backupPath = `.sauce-backup/${ts}/${fpath}`;
+        const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+        try { await adapter.mkdir(backupParent); } catch (_e) { /* already exists */ }
+        try { await adapter.write(backupPath, before); } catch (_e) { /* best-effort */ }
+        await adapter.write(fpath, after);
+        stamped += 1;
+        history?.push({ event: "info", step: "project_name_backfill", name: "project", target: fpath, action: "stamped_project_name",
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+      } catch (e) {
+        warned += 1;
+        history?.push({ event: "warning", step: "project_name_backfill", name: "project",
+          reason: `${fpath}: ${e && e.message ? e.message : String(e)}`,
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+      }
+    }
+  }
+
+  history?.push({ event: "info", step: "project_name_backfill", name: "project",
+    reason: `stamped ${stamped}; ${warned} warning(s)`,
     git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
 }
 
