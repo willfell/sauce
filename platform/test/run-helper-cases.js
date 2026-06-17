@@ -7234,7 +7234,8 @@ async function caseFA6DomainManifests() {
   // v0.116.1 — widened to-do from "0.4.0" → /^0\.(4|5)\.\d+$/ to permit PATCH bumps within the cycle.
   // v0.118.0 — widened to-do to accept 0.6.x (MINOR bump).
   // v0.119.0 — widened to-do to accept 0.7.x (MINOR bump for additive sentinel + markdown render).
-  for (const [bp, expected] of [["trips", "0.3.0"], ["to-do", /^0\.(4|5|6|7|8|9)\.\d+$/], ["boards", "0.2.1"]]) {
+  // v0.123.0 — widened to-do to accept 0.10.x (MINOR bump: drop project dep, add breadcrumb dep).
+  for (const [bp, expected] of [["trips", "0.3.0"], ["to-do", /^0\.(4|5|6|7|8|9|10)\.\d+$/], ["boards", "0.2.1"]]) {
     const m = JSON.parse(fs.readFileSync(
       path.join(WORKSHOP, `platform/blueprints/${bp}/manifest.json`), "utf8"));
     const match = expected instanceof RegExp ? expected.test(m.version) : m.version === expected;
@@ -7402,8 +7403,9 @@ async function caseTodoManifestV3() {
 
   // v0.116.0 widened from === "0.3.3" → 0.(3|4).x lineage; v0.4.0 retires ToDoMigrate{Modal,Init}
   // and replaces with ToDoCreateTaskInit startup script. v0.119.0 widened to accept 0.7.x.
-  assertTrue("TD-HC-1 version 0.3.x or 0.4.x or 0.5.x or 0.6.x or 0.7.x or 0.8.x or 0.9.x",
-    /^0\.(3|4|5|6|7|8|9)\.\d+$/.test(m.version), `got ${m.version}`);
+  // v0.123.0 bumps to 0.10.0 (drops project dep, adds breadcrumb dep).
+  assertTrue("TD-HC-1 version 0.3.x through 0.10.x",
+    /^0\.(3|4|5|6|7|8|9|10)\.\d+$/.test(m.version), `got ${m.version}`);
   assertTrue("TD-HC-1 customjs_classes includes ToDoCreateTaskInit (v0.4.0)",
     Array.isArray(m.customjs_classes) && m.customjs_classes.includes("ToDoCreateTaskInit"));
   assertTrue("TD-HC-1 customjs_classes includes ToDoLeafActions (v0.63.1)",
@@ -7443,13 +7445,18 @@ async function caseHCV01174TodoManifest() {
 
   // v0.119.0: bumped 0.6.1 → 0.7.0 (additive sentinel + markdown rendering + applyRecurringSentinelV070Migration).
   // v0.119.1: bumped 0.7.0 → 0.7.1 (insertRecurringIntoToday merge-into-existing + mergeDuplicateRecurringSections heal + materialize_once on registry).
-  assertTrue("HC-V01174-TODO-MANIFEST-1: version matches 0.7.x or 0.8.x or 0.9.x",
-    /^0\.(7|8|9)\.\d+$/.test(m.version), `got: ${m.version}`);
+  // v0.123.0: bumped 0.9.0 → 0.10.0 (drops project >=1.21.0 dep, adds breadcrumb >=0.1.0 dep).
+  assertTrue("HC-V01174-TODO-MANIFEST-1: version matches 0.7.x through 0.10.x",
+    /^0\.(7|8|9|10)\.\d+$/.test(m.version), `got: ${m.version}`);
 
+  // v0.123.0: to-do's only reason to depend on project was Breadcrumb. The
+  // breadcrumb mechanism (v0.123.0) ships it as a shared primitive; to-do now
+  // depends directly on breadcrumb and drops the project dep.
   const projDep = (m.depends_on || []).find(d => d && d.name === "project");
-  assertTrue("HC-V01174-TODO-MANIFEST-2: depends_on has project@>=1.21.0",
-    !!projDep && projDep.range === ">=1.21.0",
-    `got: ${JSON.stringify(projDep)}`);
+  const breadcrumbDep = (m.depends_on || []).find(d => d && d.name === "breadcrumb");
+  assertTrue("HC-V01174-TODO-MANIFEST-2: depends_on has project@>=1.21.0 (pre-v0.123.0) OR breadcrumb@>=0.1.0 (v0.123.0+)",
+    (!!projDep && projDep.range === ">=1.21.0") || (!!breadcrumbDep && breadcrumbDep.range === ">=0.1.0"),
+    `got project=${JSON.stringify(projDep)} breadcrumb=${JSON.stringify(breadcrumbDep)}`);
 
   const expectedClasses = [
     "ToDoHubActions", "ToDoLeafActions", "ToDoAllList", "TaskParser",
