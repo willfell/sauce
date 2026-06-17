@@ -7234,7 +7234,7 @@ async function caseFA6DomainManifests() {
   // v0.116.1 — widened to-do from "0.4.0" → /^0\.(4|5)\.\d+$/ to permit PATCH bumps within the cycle.
   // v0.118.0 — widened to-do to accept 0.6.x (MINOR bump).
   // v0.119.0 — widened to-do to accept 0.7.x (MINOR bump for additive sentinel + markdown render).
-  for (const [bp, expected] of [["trips", "0.3.0"], ["to-do", /^0\.(4|5|6|7|8)\.\d+$/], ["boards", "0.2.1"]]) {
+  for (const [bp, expected] of [["trips", "0.3.0"], ["to-do", /^0\.(4|5|6|7|8|9)\.\d+$/], ["boards", "0.2.1"]]) {
     const m = JSON.parse(fs.readFileSync(
       path.join(WORKSHOP, `platform/blueprints/${bp}/manifest.json`), "utf8"));
     const match = expected instanceof RegExp ? expected.test(m.version) : m.version === expected;
@@ -7402,8 +7402,8 @@ async function caseTodoManifestV3() {
 
   // v0.116.0 widened from === "0.3.3" → 0.(3|4).x lineage; v0.4.0 retires ToDoMigrate{Modal,Init}
   // and replaces with ToDoCreateTaskInit startup script. v0.119.0 widened to accept 0.7.x.
-  assertTrue("TD-HC-1 version 0.3.x or 0.4.x or 0.5.x or 0.6.x or 0.7.x",
-    /^0\.(3|4|5|6|7|8)\.\d+$/.test(m.version), `got ${m.version}`);
+  assertTrue("TD-HC-1 version 0.3.x or 0.4.x or 0.5.x or 0.6.x or 0.7.x or 0.8.x or 0.9.x",
+    /^0\.(3|4|5|6|7|8|9)\.\d+$/.test(m.version), `got ${m.version}`);
   assertTrue("TD-HC-1 customjs_classes includes ToDoCreateTaskInit (v0.4.0)",
     Array.isArray(m.customjs_classes) && m.customjs_classes.includes("ToDoCreateTaskInit"));
   assertTrue("TD-HC-1 customjs_classes includes ToDoLeafActions (v0.63.1)",
@@ -7443,8 +7443,8 @@ async function caseHCV01174TodoManifest() {
 
   // v0.119.0: bumped 0.6.1 → 0.7.0 (additive sentinel + markdown rendering + applyRecurringSentinelV070Migration).
   // v0.119.1: bumped 0.7.0 → 0.7.1 (insertRecurringIntoToday merge-into-existing + mergeDuplicateRecurringSections heal + materialize_once on registry).
-  assertTrue("HC-V01174-TODO-MANIFEST-1: version matches 0.7.x or 0.8.x",
-    /^0\.(7|8)\.\d+$/.test(m.version), `got: ${m.version}`);
+  assertTrue("HC-V01174-TODO-MANIFEST-1: version matches 0.7.x or 0.8.x or 0.9.x",
+    /^0\.(7|8|9)\.\d+$/.test(m.version), `got: ${m.version}`);
 
   const projDep = (m.depends_on || []).find(d => d && d.name === "project");
   assertTrue("HC-V01174-TODO-MANIFEST-2: depends_on has project@>=1.21.0",
@@ -7847,7 +7847,7 @@ async function caseHCV0890VersionD() {
   if (Array.isArray(m.mechanisms)) mechCount = m.mechanisms.length;
   else if (Array.isArray(m.items)) mechCount = m.items.filter(x => x.kind === "mechanism").length;
   else if (m.catalogue && Array.isArray(m.catalogue.mechanisms)) mechCount = m.catalogue.mechanisms.length;
-  assertEqual(mechCount, 18, "HC-V0890-VERSION-D: mechanism count = 18 (was 17, +open-helpers in v0.120.3)");
+  assertEqual(mechCount, 19, "HC-V0890-VERSION-D: mechanism count = 19 (+section-label in v0.122.0)");
 }
 
 async function caseHCV0890ResolvePersonA() {
@@ -8400,7 +8400,7 @@ async function caseHCV0891Versions() {
   const mechs = (platformMan.mechanisms && Array.isArray(platformMan.mechanisms))
     ? platformMan.mechanisms
     : (Array.isArray(platformMan.items) ? platformMan.items.filter(x => x.kind === "mechanism") : []);
-  assertEqual(mechs.length, 18, "HC-V0891-VERSION-D: mechanism count = 18 (+open-helpers in v0.120.3)");
+  assertEqual(mechs.length, 19, "HC-V0891-VERSION-D: mechanism count = 19 (+section-label in v0.122.0)");
 }
 
 // ========================================================================
@@ -11201,8 +11201,8 @@ async function caseV01030ProjMan1VersionAndCustomjs() {
   // + SectionLabel primitive + ProjectsHubCards search + Template Project.md
   // rewrite + Breadcrumb extension + marker cleanup).
   // Breadcrumb + ProjectDocsIndex + SectionHub carryover assertions still apply.
-  assertTrue("HC-V01030-PROJ-MAN-1a: project manifest version 1.21.x",
-    m && /^1\.(21|22)\.\d+$/.test(m.version), `got: ${m && m.version}`);
+  assertTrue("HC-V01030-PROJ-MAN-1a: project manifest version 1.21.x or 1.22.x or 1.23.x",
+    m && /^1\.(21|22|23)\.\d+$/.test(m.version), `got: ${m && m.version}`);
   const cls = (m && Array.isArray(m.customjs_classes)) ? m.customjs_classes : [];
   assertTrue("HC-V01030-PROJ-MAN-1b: customjs_classes includes Breadcrumb",
     cls.indexOf("Breadcrumb") !== -1);
@@ -11576,7 +11576,7 @@ async function caseV01040Man1Manifest118() {
   // v0.106.0 → 1.20.0 (DocSearch persistence + dashboard widgets).
   // v0.109.0 → 1.21.0 (projects visual overhaul: DocSearch params, SectionLabel,
   // ProjectsHubCards search, template rewrite, Breadcrumb extension, marker cleanup).
-  assertTrue("HC-V01040-MAN-1: project blueprint version 1.21.x or 1.22.x", /^1\.(21|22)\.\d+$/.test(m.version));
+  assertTrue("HC-V01040-MAN-1: project blueprint version 1.21.x or 1.22.x or 1.23.x", /^1\.(21|22|23)\.\d+$/.test(m.version));
   assertTrue("HC-V01040-MAN-1: customjs_classes includes DocSearch",
     Array.isArray(m.customjs_classes) && m.customjs_classes.includes("DocSearch"));
   const sources = (m.files || []).map(f => f.source);
@@ -11681,7 +11681,7 @@ async function caseV01050Man1ProjectManifest119() {
   console.log("\n--- Case HC-V01050-MAN-1: project blueprint manifest 1.21.0 (v0.109.0 bump) + doc-note prompts use new options_source ---");
   const m = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/manifest.json"), "utf8"));
   // v0.109.0 bumped project blueprint 1.20.0 → 1.21.0 (projects visual overhaul).
-  assertTrue("HC-V01050-MAN-1: project blueprint version 1.21.x or 1.22.x", /^1\.(21|22)\.\d+$/.test(m.version),
+  assertTrue("HC-V01050-MAN-1: project blueprint version 1.21.x or 1.22.x or 1.23.x", /^1\.(21|22|23)\.\d+$/.test(m.version),
     `got: ${m.version}`);
   // Locate doc-note entity-create entry.
   const docNote = (m.new_entity_buttons || []).find(b => b.id === "doc-note");
@@ -14006,14 +14006,14 @@ async function caseV0110VersionBump() {
   assertTrue("V0110-VER-2: finance pin 0.6.x or 0.7.x or 0.8.x",
     fbp && /^0\.(6|7|8|9)\.\d+$/.test(fbp.version), `got: ${fbp?.version}`);
   const pbp = (ws.blueprints || []).find(b => b.name === "project");
-  assertTrue("V0110-VER-3: project pin 1.21.x",
-    pbp && /^1\.(21|22)\.\d+$/.test(pbp.version), `got: ${pbp?.version}`);
+  assertTrue("V0110-VER-3: project pin 1.21.x or 1.22.x or 1.23.x",
+    pbp && /^1\.(21|22|23)\.\d+$/.test(pbp.version), `got: ${pbp?.version}`);
   const fin = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
   assertTrue("V0110-VER-4: finance manifest version 0.6.x or 0.7.x or 0.8.x",
     /^0\.(6|7|8|9)\.\d+$/.test(fin.version), `got: ${fin.version}`);
   const proj = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/manifest.json"), "utf8"));
-  assertTrue("V0110-VER-5: project manifest version 1.21.x",
-    /^1\.(21|22)\.\d+$/.test(proj.version), `got: ${proj.version}`);
+  assertTrue("V0110-VER-5: project manifest version 1.21.x or 1.22.x or 1.23.x",
+    /^1\.(21|22|23)\.\d+$/.test(proj.version), `got: ${proj.version}`);
 }
 
 // v0.5.3 CF-3 — applyFinancePaycheckBodyMigration (PaycheckSummary block
@@ -14218,14 +14218,14 @@ async function caseV01090Phc2MatchesAppliedToFilter() {
 // S2 — SectionLabel primitive.
 async function caseV01090Sl1ClassDefined() {
   console.log("\n--- Case HC-V01090-SL-1: SectionLabel class defined ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/section-label.js"), "utf8");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/mechanisms/section-label/section-label.js"), "utf8");
   assertTrue("HC-V01090-SL-1: class SectionLabel declared", /class\s+SectionLabel\s*\{/.test(src));
   assertTrue("HC-V01090-SL-1: instance render method", /\brender\s*\(\s*dv\s*,\s*opts\s*\)/.test(src));
 }
 
 async function caseV01090Sl2RendersHrAndLabel() {
   console.log("\n--- Case HC-V01090-SL-2: SectionLabel emits hr + uppercase muted label ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/section-label.js"), "utf8");
+  const src = fs.readFileSync(path.join(WORKSHOP, "platform/mechanisms/section-label/section-label.js"), "utf8");
   assertTrue("HC-V01090-SL-2: hr emitted unless opts.top",
     /createEl\(\s*["']hr["']/.test(src));
   assertTrue("HC-V01090-SL-2: opts.top branch present",
@@ -14237,11 +14237,11 @@ async function caseV01090Sl2RendersHrAndLabel() {
 }
 
 async function caseV01090Sl3ManifestRegistered() {
-  console.log("\n--- Case HC-V01090-SL-3: section-label.js registered in project manifest ---");
-  const mf = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/manifest.json"), "utf8"));
+  console.log("\n--- Case HC-V01090-SL-3: section-label.js registered in section-label mechanism manifest ---");
+  const mf = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/mechanisms/section-label/manifest.json"), "utf8"));
   const files = mf.files || [];
-  const found = files.find((f) => f.source === "helpers/section-label.js"
-                              && f.dest === "{{scripts_path}}/project/section-label.js");
+  const found = files.find((f) => f.source === "section-label.js"
+                              && f.dest === "{{scripts_path}}/section-label/section-label.js");
   assertTrue("HC-V01090-SL-3: section-label.js registered in manifest files[]", !!found);
 }
 

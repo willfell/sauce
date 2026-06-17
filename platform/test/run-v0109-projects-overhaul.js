@@ -27,6 +27,8 @@ const path = require("path");
 const WORKSHOP = path.resolve(__dirname, "../..");
 const HELPERS  = path.join(WORKSHOP, "platform/blueprints/project/helpers");
 const TPLDIR   = path.join(WORKSHOP, "platform/blueprints/project/templates");
+// v0.122.0: SectionLabel promoted out of project/helpers into its own mechanism.
+const SECTION_LABEL_SRC = path.join(WORKSHOP, "platform/mechanisms/section-label/section-label.js");
 
 let passed = 0;
 let failed = 0;
@@ -171,6 +173,14 @@ function loadClass(filename, className, env) {
   return new Function(...argNames, wrapper)(...argVals);
 }
 
+function loadClassFromAbs(abs, className, env) {
+  const source = fs.readFileSync(abs, "utf8");
+  const argNames = Object.keys(env || {});
+  const argVals = Object.values(env || {});
+  const wrapper = `${source}\n; return ${className};`;
+  return new Function(...argNames, wrapper)(...argVals);
+}
+
 // ---------------------------------------------------------------------------
 // momentShim — fromNow / format / toFormat surface used by the helpers under
 // test. Anchored to a fixed "now" to keep assertions deterministic.
@@ -204,7 +214,7 @@ momentShim.now = 1718000000000;
 
 (function testSectionLabel() {
   console.log("\n=== S2 SectionLabel behavioral ===");
-  const SectionLabel = loadClass("section-label.js", "SectionLabel", {});
+  const SectionLabel = loadClassFromAbs(SECTION_LABEL_SRC, "SectionLabel", {});
   const sl = new SectionLabel();
 
   // SL-B-1: opts.top=false (default) emits hr + div, with expected styles

@@ -1,6 +1,6 @@
 {
   "name": "project",
-  "version": "1.22.2",
+  "version": "1.23.0",
   "kind": "blueprint",
   "module_directory": "projects",
   "skills_dir": ".claude/skills/project",
@@ -28,6 +28,10 @@
     },
     {
       "name": "backlink-panel",
+      "range": ">=0.1.0"
+    },
+    {
+      "name": "section-label",
       "range": ">=0.1.0"
     }
   ],
@@ -155,10 +159,6 @@
     {
       "source": "helpers/section-hub.js",
       "dest": "{{scripts_path}}/project/section-hub.js"
-    },
-    {
-      "source": "helpers/section-label.js",
-      "dest": "{{scripts_path}}/project/section-label.js"
     },
     {
       "source": "templates/Section Hub.md",
