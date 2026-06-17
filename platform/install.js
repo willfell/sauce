@@ -130,11 +130,12 @@ module.exports = async function (tp) {
     await applyEmptyProjectWikilinkRepair(tp, installedNow.history, git);   // NEW v0.105.0.2 — heals doc-note + section-hub with project: "[[]]" from v0.105.0 substitution bug; per-vault scope so it runs unconditionally
     // NOTE: applyNoteChromeHeal is NOT wired here (per-vault block) even though
     // its signature is (tp, history, git) like the heals above. It MUST run
-    // AFTER applyToDoBlueprintMigration (~L1140) — that migration rebuilds
-    // v0.3.3 daily-to-do bodies from a hardcoded block list (_reshapeToV040),
-    // discarding any Breadcrumb injected earlier. Running the chrome heal here
-    // would never converge (reshape strips the breadcrumb on run 1, heal
-    // re-adds it on run 2). Wired post-to-do-migrations instead. See L~1144.
+    // AFTER applyToDoBlueprintMigration (which runs inside installItem) — that
+    // migration rebuilds v0.3.3 daily-to-do bodies from a hardcoded block list
+    // (_reshapeToV040), discarding any Breadcrumb injected earlier. Running the
+    // chrome heal here would never converge (reshape strips the breadcrumb on
+    // run 1, heal re-adds it on run 2). Wired after the install loop instead —
+    // see the applyNoteChromeHeal call following pruneTemplaterStartupOrphans.
 
     // 1. resolve which items to install + their order
     const { nodes, skipped: missingItems } = resolveDependencies(subscription, manifest);
@@ -492,11 +493,12 @@ module.exports = async function (tp) {
     // block into EXISTING meetings/scratch/to-do notes (and rewrite meeting
     // ## H2 content headers to SectionLabel), so notes created before Task 1's
     // template edits render the same chrome as new ones. Per-vault scope (runs
-    // once). MUST run HERE — after the install loop — not in the per-vault
-    // block at L130: applyToDoBlueprintMigration (inside installItem) rebuilds
-    // v0.3.3 daily-to-do bodies from a hardcoded block list, discarding any
-    // breadcrumb injected earlier. Running post-loop lets the heal inject into
-    // the FINAL note shape, so a second install is a true no-op (idempotent).
+    // once). MUST run HERE — after the install loop / after
+    // pruneTemplaterStartupOrphans — not in the per-vault heals block near the
+    // top of install(): applyToDoBlueprintMigration (inside installItem)
+    // rebuilds v0.3.3 daily-to-do bodies from a hardcoded block list, discarding
+    // any breadcrumb injected earlier. Running post-loop lets the heal inject
+    // into the FINAL note shape, so a second install is a true no-op (idempotent).
     await applyNoteChromeHeal(tp, installedNow.history, git);
 
     // 6b. v0.32.0 S3 — aggregate claude_surface[] contributions across
@@ -3324,16 +3326,50 @@ function _healNoteChromeBody(body, type) {
     }
   }
   // 2. meeting only: rewrite "## Heading" content headers to SectionLabel.
+  //    Fence-aware, line-by-line scan: a heading is only converted at code-fence
+  //    depth 0, so a target heading a user pasted INSIDE a ```markdown sample is
+  //    left untouched (rewriting it would corrupt both their fence and ours).
+  //    Preserves the prior behavior for depth-0 headings: a preceding `---`
+  //    divider line is dropped, the exact SectionLabel block text + view path are
+  //    unchanged, and Attendees gets `top: true`. Idempotent: once a heading is a
+  //    dataviewjs fence it no longer matches the `^##` test, so a second pass is a
+  //    no-op.
   if (type === "meeting") {
-    const map = [["Attendees", true], ["Agenda", false], ["Notes", false], ["Action Items", false]];
-    for (const [text, top] of map) {
-      const re = new RegExp("(?:^|\\n)(?:---\\s*\\n)?##\\s+" + text.replace(/ /g, "\\s+") + "\\s*\\n");
-      if (re.test(out)) {
-        const args = top ? `[{ text: "${text}", top: true }]` : `[{ text: "${text}" }]`;
-        const sl = '\n```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: ' + args + ' });\n```\n';
-        out = out.replace(re, sl);
+    const labels = { "Attendees": true, "Agenda": false, "Notes": false, "Action Items": false };
+    const lines = out.split("\n");
+    const result = [];
+    let inFence = false;
+    let changed = false;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (line.trimStart().startsWith("```")) {
+        inFence = !inFence;
+        result.push(line);
+        continue;
       }
+      if (!inFence) {
+        const m = line.match(/^##\s+(Attendees|Agenda|Notes|Action Items)\s*$/);
+        if (m) {
+          const text = m[1];
+          // Drop a `---` divider immediately preceding this heading (the prior
+          // regex consumed it). result's tail is the line above this heading.
+          if (result.length && /^---\s*$/.test(result[result.length - 1])) result.pop();
+          const args = labels[text] ? `[{ text: "${text}", top: true }]` : `[{ text: "${text}" }]`;
+          result.push('```dataviewjs');
+          result.push('await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: ' + args + ' });');
+          result.push('```');
+          // Match the Meeting.md template spacing: exactly one blank line between
+          // the closing fence and the following content line. If the source kept
+          // its own blank after the heading, consume it so we don't double up.
+          result.push('');
+          if (i + 1 < lines.length && lines[i + 1].trim() === '') i++;
+          changed = true;
+          continue;
+        }
+      }
+      result.push(line);
     }
+    if (changed) out = result.join("\n");
   }
   return out;
 }

@@ -387,6 +387,11 @@ withTempVault((vault) => {
     ok("HC-V01240-SEED-CHROME-5 .sauce-backup snapshot exists", fs.existsSync(path.join(vault, ".sauce-backup")));
     ok("HC-V01240-SEED-CHROME-6 meeting breadcrumb injected exactly once",
        (mtg.match(/class:\s*"Breadcrumb"/g) || []).length === 1);
+    const sd = helpers.readNote(vault, "spice/scratch/2026/06-June/2026-06-17/Scratch-Day-2026-06-17.md");
+    ok("HC-V01240-SEED-CHROME-7 scratch-day breadcrumb injected after H1, before SpaceNavButtons",
+       /class:\s*"Breadcrumb"/.test(sd) &&
+       sd.indexOf("# ") < sd.indexOf('class: "Breadcrumb"') &&
+       sd.indexOf('class: "Breadcrumb"') < sd.indexOf('class: "SpaceNavButtons"'));
 });
 
 // =============================================================================
