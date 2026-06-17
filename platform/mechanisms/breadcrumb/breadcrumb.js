@@ -88,8 +88,14 @@ class Breadcrumb {
 
   // ── Registry load ──────────────────────────────────────────────────────
   // Read ranch/breadcrumb-registry.json via app.vault.adapter.read. Cache on
-  // the instance so a single render pass doesn't re-read. Tolerate missing /
-  // malformed silently (render nothing).
+  // the instance so a single render pass doesn't re-read. CustomJS keeps one
+  // instance per class for the vault session, so this cache is effectively
+  // session-scoped — a mid-session re-install that rewrites the registry will
+  // not be picked up until Cmd+R. The install side already protects the file
+  // (C4 hardening in applyBreadcrumb); the user-reload-after-install path is
+  // the documented contract. Tolerate missing / malformed silently (render
+  // nothing) but emit a one-line console hint on JSON parse failure so a
+  // hand-edited registry file with bad JSON is easy to diagnose.
   async _loadRegistry() {
     if (this._registryCache !== undefined) return this._registryCache;
     const empty = { schema_version: 1, contributions: {} };
@@ -106,6 +112,7 @@ class Breadcrumb {
         this._registryCache = empty;
         return empty;
       } catch (_e) {
+        try { console.warn("[breadcrumb] malformed ranch/breadcrumb-registry.json — rendering nothing"); } catch (_) {}
         this._registryCache = empty;
         return empty;
       }

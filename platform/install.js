@@ -1705,8 +1705,11 @@ async function applyBreadcrumb(tp, manifest, variables, history, git) {
   if (typeof registry.schema_version !== "number") registry.schema_version = 1;
 
   // Manifest declared `breadcrumb` but the shape is wrong (e.g. types is not
-  // an object). Record + return without mutating.
+  // an object). Mirror applyNavButtons posture: surface a Notice so the
+  // blueprint author sees the misformat in-vault, then record + return without
+  // mutating the registry.
   if (breadcrumbBlock && !typesBlock) {
+    new Notice(`applyBreadcrumb: manifest.breadcrumb.types is not an object for ${manifest.name}. Skipping contribution.`, 8000);
     if (history) {
       history.push({
         event: "error",
