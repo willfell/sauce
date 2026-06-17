@@ -227,7 +227,7 @@ class SpaceNavButtons {
       for (const btn of rowButtons) {
         const el = row.createEl("button");
         const iconHtml = customJS.Icons.resolve(btn.icon) || fallbackIcon(btn.label);
-        el.innerHTML = iconHtml + `<span>${btn.label}</span>`;
+        el.innerHTML = iconHtml + `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;">${btn.label}</span>`;
         el.style.cssText = btnBase;
 
         el.onmouseenter = () => {

@@ -219,7 +219,7 @@ class ProjectNavButtons {
         });
     }
 
-    async _createTaskNote(notesFolder, title, projectSlug, taskFolder, taskHubPath) {
+    async _createTaskNote(notesFolder, title, projectSlug, taskFolder, taskHubPath, projectDir) {
         const tplPath = "ranch/templates/Template, Task Note.md";
         const tplFile = app.vault.getAbstractFileByPath(tplPath);
         if (!tplFile) {
@@ -234,6 +234,10 @@ class ProjectNavButtons {
         const dateStr = this._isoWithTz(now);
         const dateTag = `${now.getFullYear()}/${pad(now.getMonth() + 1)}/${pad(now.getDate())}`;
         const alias = `${projectSlug}-${taskFolder}: ${title}`;
+        // v0.124.0: stamp project_name FM (display name) so the breadcrumb's
+        // fm:project_name resolver shows the mixed-case name, not the slug.
+        // Falls back to the slug when the hub note can't be resolved.
+        const projectName = this._resolveProjectName(projectDir) || projectSlug;
 
         if (!app.vault.getAbstractFileByPath(notesFolder)) {
             await app.vault.createFolder(notesFolder);
@@ -243,11 +247,32 @@ class ProjectNavButtons {
             .replaceAll("{{DATE}}", dateStr)
             .replaceAll("{{TASK_PARENT_PATH}}", taskHubPath)
             .replaceAll("{{ALIAS}}", alias)
-            .replaceAll("{{DATE_TAG}}", dateTag);
+            .replaceAll("{{DATE_TAG}}", dateTag)
+            .replaceAll("{{PROJECT_NAME}}", projectName);
 
         const targetPath = `${notesFolder}/${title}.md`;
         await app.vault.create(targetPath, content);
         return targetPath;
+    }
+
+    // v0.124.0: resolve a project's display name from its hub note basename.
+    // Convention (mirrors install.js applyProjectNameBackfill + the legacy
+    // _resolveProjectFromPath): the project dir holds exactly one note with
+    // frontmatter type:project; its filename (sans .md) IS the display name.
+    // Returns null when projectDir is falsy or no type:project note is found.
+    _resolveProjectName(projectDir) {
+        if (!projectDir) return null;
+        try {
+            const prefix = projectDir + "/";
+            for (const f of app.vault.getMarkdownFiles()) {
+                // Hub note lives DIRECTLY under projectDir (no nested segments).
+                if (!f.path.startsWith(prefix)) continue;
+                if (f.path.slice(prefix.length).includes("/")) continue;
+                const fm = app.metadataCache.getFileCache(f)?.frontmatter;
+                if (fm && fm.type === "project") return f.basename;
+            }
+        } catch (_e) { /* best-effort — fall back to slug */ }
+        return null;
     }
 
     async _createTaskBoard(projectDir, taskFolder) {
@@ -337,6 +362,15 @@ class ProjectNavButtons {
     }
 
     async render(dv) {
+        // v0.119.0 PATCH: dv.current() returns undefined immediately after
+        // EntityCreate.create → openFile, before Dataview has indexed the new
+        // file. Bail out gracefully; next render tick will succeed once the
+        // metadata cache catches up. Reported on accuris 2026-06-16 when
+        // creating a new project from + New Project. See landmine #28 / the
+        // dispatcher-contracts subsection of code-conventions.md.
+        const cur = dv && dv.current ? dv.current() : null;
+        if (!cur || !cur.file) return;
+
         const icons = {
             project: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>`,
             map: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12h-8"/><path d="M21 6H8"/><path d="M21 18h-8"/><path d="M3 6v4c0 1.1.9 2 2 2h3"/><path d="M3 10v6c0 1.1.9 2 2 2h3"/></svg>`,
@@ -693,7 +727,7 @@ class ProjectNavButtons {
                 onClick: async () => {
                     const title = await this._promptForTitle(notesFolder);
                     if (!title) return;
-                    const targetPath = await this._createTaskNote(notesFolder, title, projectSlug, ctx.taskFolder, taskHubPath);
+                    const targetPath = await this._createTaskNote(notesFolder, title, projectSlug, ctx.taskFolder, taskHubPath, projectDir);
                     if (targetPath) {
                         new Notice(`Created: ${title}`);
                         app.workspace.openLinkText(targetPath, "");

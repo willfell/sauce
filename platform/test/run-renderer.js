@@ -355,8 +355,14 @@ function countButtons(root) {
   for (const c of root.children) n += countButtons(c);
   return n;
 }
+// SpaceNavButtons wraps the label in a span that may carry inline styles
+// (overflow/ellipsis safety, nav-buttons@2.8.0), so match the label text inside
+// a <span ...> with optional attributes rather than the bare <span>label</span>.
+function labelSpanRe(label) {
+  return new RegExp(`<span(?:\\s[^>]*)?>${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}</span>`);
+}
 function findButtonByLabel(root, label) {
-  if (root.tag === 'button' && root.innerHTML.includes(`<span>${label}</span>`)) return root;
+  if (root.tag === 'button' && labelSpanRe(label).test(root.innerHTML)) return root;
   for (const c of root.children) {
     const f = findButtonByLabel(c, label);
     if (f) return f;
@@ -878,14 +884,14 @@ async function testBarebonesOneButton() {
   console.log(`  vault-nav container: ${navContainer ? 'present' : 'absent'}`);
   console.log(`  buttons rendered: ${all.length}`);
   for (const b of all) {
-    const m = b.innerHTML.match(/<span>([^<]+)<\/span>/);
+    const m = b.innerHTML.match(/<span(?:\s[^>]*)?>([^<]+)<\/span>/);
     console.log(`    button label="${m && m[1]}" iconHasBoardSvg=${b.innerHTML.includes('rect width="18" height="18"')}`);
   }
   if (all.length !== 1) {
     console.log('  FAIL — expected exactly 1 button');
     return false;
   }
-  const labelOk = all[0].innerHTML.includes('<span>Board</span>');
+  const labelOk = labelSpanRe('Board').test(all[0].innerHTML);
   // Board icon: lucide "board" svg has rect 18x18 + the three vertical paths
   const iconOk = all[0].innerHTML.includes('M8 7v7') && all[0].innerHTML.includes('M16 7v9');
   console.log(`  label is Board: ${labelOk}`);

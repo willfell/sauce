@@ -164,9 +164,55 @@ const PROJECT_TYPES = {
   }
 };
 
+// ── Wave-1 types — inlined verbatim from Task 1 §3–§5 (mirrors what this task
+// adds to platform/blueprints/{meetings,scratch,to-do}/manifest.json). Kept
+// self-contained so BR24–BR27 don't depend on manifest-edit ordering. ──
+const MEETINGS_TYPES = {
+  "meeting": {
+    "ancestors": [
+      { "label": "lit:Meetings" },
+      { "label": "path:4" }
+    ],
+    "current": { "label": "file:basename" }
+  }
+};
+
+const SCRATCH_TYPES = {
+  "scratch": {
+    "ancestors": [
+      { "label": "lit:Scratch" },
+      { "label": "path:3" },
+      { "label": "path:4", "link": "spice/scratch/{path:2}/{path:3}/{path:4}/Scratch-Day-{path:4}.md" }
+    ],
+    "current": { "label": "fm:time|file:basename" }
+  },
+  "scratch-day": {
+    "ancestors": [
+      { "label": "lit:Scratch" },
+      { "label": "path:3" }
+    ],
+    "current": { "label": "path:4" }
+  }
+};
+
+const TODO_TYPES = {
+  "to-do": {
+    "ancestors": [
+      { "label": "lit:To-Do" },
+      { "label": "path:3" }
+    ],
+    "current": { "label": "file:basename" }
+  }
+};
+
 const REGISTRY = {
   schema_version: 1,
-  contributions: { project: { types: PROJECT_TYPES } }
+  contributions: {
+    project:  { types: PROJECT_TYPES },
+    meetings: { types: MEETINGS_TYPES },
+    scratch:  { types: SCRATCH_TYPES },
+    "to-do":  { types: TODO_TYPES }
+  }
 };
 
 // Inject global `app` with stub adapter.read so the mechanism's _loadRegistry works.
@@ -341,6 +387,36 @@ async function runAsync(fn) { return await fn(); }
     const eq = a === b;
     ok(fx.name + ' byte-identical innerHTML', eq);
     if (!eq) console.log(`    DIFF: ${firstDiff(a, b)}`);
+  }
+
+  // ── BR24–BR27: wave-1 adoption (meetings / scratch / scratch-day / to-do) ──
+  const WAVE1 = [
+    { name: 'BR24 meeting',
+      cur: { type: 'meeting',
+             file: { path: 'spice/meetings/notes/2026/06-June/Standup-2026-06-17.md', name: 'Standup-2026-06-17' } },
+      expect: ['Meetings', '06-June', 'Standup-2026-06-17'] },
+    { name: 'BR25 scratch',
+      cur: { type: 'scratch', time: '14:30',
+             file: { path: 'spice/scratch/2026/06-June/2026-06-17/Scratch-2026-06-17-14-30.md', name: 'Scratch-2026-06-17-14-30' } },
+      expect: ['Scratch', '06-June', '2026-06-17', '14:30'] },
+    { name: 'BR26 scratch-day',
+      cur: { type: 'scratch-day',
+             file: { path: 'spice/scratch/2026/06-June/2026-06-17/Scratch-Day-2026-06-17.md', name: 'Scratch-Day-2026-06-17' } },
+      expect: ['Scratch', '06-June', '2026-06-17'] },
+    { name: 'BR27 to-do',
+      cur: { type: 'to-do',
+             file: { path: 'spice/to-do/2026/06-June/ToDo-2026-06-17.md', name: 'ToDo-2026-06-17' } },
+      expect: ['To-Do', '06-June', 'ToDo-2026-06-17'] },
+  ];
+  for (const fx of WAVE1) {
+    const dv = makeDv(fx.cur);
+    const inst = new NewBreadcrumb();
+    await inst.render(dv);
+    const wrap = dv._els[0];
+    const html = wrap ? wrap.innerHTML : '';
+    const all = fx.expect.every((seg) => html.includes(seg));
+    ok(fx.name + ' trail contains ' + fx.expect.join(' / '), !!wrap && all);
+    if (!all) console.log(`    HTML: ${html}`);
   }
 
   finish();

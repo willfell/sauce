@@ -369,6 +369,40 @@ withTempVault((vault) => {
             seedContent.equals(vaultContent)
         );
     }
+
+    // ===== HC-V01240-SEED-CHROME-* — applyNoteChromeHeal (note-chrome wave 1) =====
+    // The seed carries pre-heal fixtures (SpaceNavButtons block, no Breadcrumb;
+    // meeting note with raw ## H2 content headers). The per-vault heal injects
+    // the Breadcrumb dataviewjs block before SpaceNavButtons and (meeting only)
+    // rewrites the four ## headings to SectionLabel. Asserts run AFTER the
+    // idempotency phase (two installs) so CHROME-6 proves exactly-once injection.
+    const mtg = helpers.readNote(vault, "spice/meetings/notes/2026/06-June/Standup-2026-06-17.md");
+    ok("HC-V01240-SEED-CHROME-1 meeting breadcrumb injected", /class:\s*"Breadcrumb"/.test(mtg));
+    ok("HC-V01240-SEED-CHROME-2 meeting ## Attendees rewritten to SectionLabel",
+       !/^##\s+Attendees\s*$/m.test(mtg) && /SectionLabel[\s\S]*Attendees/.test(mtg));
+    const scr = helpers.readNote(vault, "spice/scratch/2026/06-June/2026-06-17/Scratch-2026-06-17-14-30.md");
+    ok("HC-V01240-SEED-CHROME-3 scratch breadcrumb injected", /class:\s*"Breadcrumb"/.test(scr));
+    const td = helpers.readNote(vault, "spice/to-do/2026/06-June/ToDo-2026-06-17.md");
+    ok("HC-V01240-SEED-CHROME-4 to-do breadcrumb injected", /class:\s*"Breadcrumb"/.test(td));
+    ok("HC-V01240-SEED-CHROME-5 .sauce-backup snapshot exists", fs.existsSync(path.join(vault, ".sauce-backup")));
+    ok("HC-V01240-SEED-CHROME-6 meeting breadcrumb injected exactly once",
+       (mtg.match(/class:\s*"Breadcrumb"/g) || []).length === 1);
+    const sd = helpers.readNote(vault, "spice/scratch/2026/06-June/2026-06-17/Scratch-Day-2026-06-17.md");
+    ok("HC-V01240-SEED-CHROME-7 scratch-day breadcrumb injected after H1, before SpaceNavButtons",
+       /class:\s*"Breadcrumb"/.test(sd) &&
+       sd.indexOf("# ") < sd.indexOf('class: "Breadcrumb"') &&
+       sd.indexOf('class: "Breadcrumb"') < sd.indexOf('class: "SpaceNavButtons"'));
+
+    // ===== HC-V01240-SEED-PNAME-* — applyProjectNameBackfill (note-chrome wave 1) =====
+    // The seed carries a mixed-case project ("My Cool Project" under slug
+    // my-cool-project) whose Project Map note has NO project_name field. The
+    // per-mechanism heal resolves the display name from the project hub note's
+    // basename and stamps project_name into the map's frontmatter — so the
+    // breadcrumb's fm:project_name resolver shows "My Cool Project", not the slug.
+    const mapNote = helpers.readNote(vault, "spice/projects/my-cool-project/Project Map.md");
+    const { frontmatter: mapFm } = helpers.parseFrontmatter(mapNote);
+    ok("HC-V01240-SEED-PNAME-1 map project_name backfilled", typeof mapFm.project_name === "string" && mapFm.project_name.length > 0);
+    ok("HC-V01240-SEED-PNAME-2 map project_name is display name not slug", mapFm.project_name === "My Cool Project");
 });
 
 // =============================================================================

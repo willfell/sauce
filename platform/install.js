@@ -128,6 +128,14 @@ module.exports = async function (tp) {
     await applyAppSettings(tp, manifest, installedNow.history, git);
     await applyVaultDefaultPaths(tp, installedNow.history, git);   // NEW v0.102.0 — codify default attachment + new-note paths
     await applyEmptyProjectWikilinkRepair(tp, installedNow.history, git);   // NEW v0.105.0.2 — heals doc-note + section-hub with project: "[[]]" from v0.105.0 substitution bug; per-vault scope so it runs unconditionally
+    // NOTE: applyNoteChromeHeal is NOT wired here (per-vault block) even though
+    // its signature is (tp, history, git) like the heals above. It MUST run
+    // AFTER applyToDoBlueprintMigration (which runs inside installItem) — that
+    // migration rebuilds v0.3.3 daily-to-do bodies from a hardcoded block list
+    // (_reshapeToV040), discarding any Breadcrumb injected earlier. Running the
+    // chrome heal here would never converge (reshape strips the breadcrumb on
+    // run 1, heal re-adds it on run 2). Wired after the install loop instead —
+    // see the applyNoteChromeHeal call following pruneTemplaterStartupOrphans.
 
     // 1. resolve which items to install + their order
     const { nodes, skipped: missingItems } = resolveDependencies(subscription, manifest);
@@ -480,6 +488,18 @@ module.exports = async function (tp) {
         attempted_at: new Date().toISOString(),
       });
     }
+
+    // 6a3. v0.124.0 (note-chrome wave 1) — inject the Breadcrumb dataviewjs
+    // block into EXISTING meetings/scratch/to-do notes (and rewrite meeting
+    // ## H2 content headers to SectionLabel), so notes created before Task 1's
+    // template edits render the same chrome as new ones. Per-vault scope (runs
+    // once). MUST run HERE — after the install loop / after
+    // pruneTemplaterStartupOrphans — not in the per-vault heals block near the
+    // top of install(): applyToDoBlueprintMigration (inside installItem)
+    // rebuilds v0.3.3 daily-to-do bodies from a hardcoded block list, discarding
+    // any breadcrumb injected earlier. Running post-loop lets the heal inject
+    // into the FINAL note shape, so a second install is a true no-op (idempotent).
+    await applyNoteChromeHeal(tp, installedNow.history, git);
 
     // 6b. v0.32.0 S3 — aggregate claude_surface[] contributions across
     // subscribed mechanisms + blueprints. Wrapped in its own try/catch so
@@ -1135,6 +1155,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyProjectSectionsHubMigration(tp, mech, variables, history, git);   // NEW v0.103.0 S4 — heals v0.102.0 vaults: Docs.md → ProjectDocsIndex + materialize Section Hubs + wikilink frontmatter + breadcrumb injection
   await applyDocNoteBreadcrumbMarkerCleanup(tp, mech, variables, history, git); // NEW v0.109.0 S8 — strips legacy <!-- breadcrumb-v1.17.0 --> markers from doc-notes (block preserved; new idempotency guard inside _migrateDocNote uses the class invocation substring)
   await applyProjectSectionsCloseRepair(tp, mech, variables, history, git);    // NEW v0.103.0.1 — fixes the regex-induced -"[[--]]" damage from v0.103.0 deploy
+  await applyProjectNameBackfill(tp, mech, variables, history, git);   // NEW v0.124.0 — backfill project_name FM on map/kanban/task-note for breadcrumb name display
   await applyFinanceMigrations(tp, mech, variables, history, git);             // NEW v0.107.0 S2 — finance defaults scaffolding (create-if-absent) + categories group backfill (append-only + .sauce-backup snapshot)
   await applyToDoBlueprintMigration(tp, mech, variables, history, git);        // NEW v0.116.0 — reshapes v0.3.3 daily-note bodies to v0.4.0 5-block shape (.sauce-backup snapshot before write; absorbs ## Tasks heading; preserves ## Notes)
   await applyRecurringSentinelV070Migration(tp, mech, variables, history, git); // v0.119.0 — date-only sentinels → additive (empty-set) form. SUPERSEDED by stripPersistedRecurringSection (v0.120.0) but kept for files-in-flight; runs as a no-op once stripPersistedRecurringSection has run.
@@ -3273,6 +3294,273 @@ async function applyEmptyProjectWikilinkRepair(tp, history, git) {
   history?.push({ event: "info", step: "empty_project_wikilink_repair", name: "vault",
                   reason: `repaired ${repaired} note(s)`,
                   git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+}
+
+// _noteChromeFrontmatterType — extracts the frontmatter `type:` value from a
+// markdown body. Mirrors the inline `type:` regex idiom used across the
+// installer (e.g. applyEmptyProjectWikilinkRepair). Returns null when no
+// frontmatter `type:` line is present.
+function _noteChromeFrontmatterType(body) {
+  if (typeof body !== "string") return null;
+  const m = body.match(/^type:\s*["']?([A-Za-z0-9_-]+)["']?\s*$/m);
+  return m ? m[1] : null;
+}
+
+// _healNoteChromeBody — pure, idempotent body transform for the note-chrome
+// wave-1 heal. (1) Injects a Breadcrumb dataviewjs block immediately before the
+// first SpaceNavButtons dataviewjs fence when absent — the Breadcrumb guard
+// (!/Breadcrumb/) makes the inject a no-op on already-healed notes. (2) For
+// meeting notes only, rewrites the four `## H2` content headers to SectionLabel
+// dataviewjs blocks matching the Meeting.md template's args shape. Returns the
+// body unchanged when nothing applies (driver relies on `after === before`).
+function _healNoteChromeBody(body, type) {
+  if (typeof body !== "string") return body;
+  let out = body;
+  // 1. Inject breadcrumb if absent — before the first SpaceNavButtons dataviewjs
+  //    fence (which, for scratch-day, sits after the H1, so this lands after H1).
+  if (!/class:\s*"Breadcrumb"/.test(out)) {
+    const bc = '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "Breadcrumb" });\n```\n\n';
+    const navIdx = out.indexOf('class: "SpaceNavButtons"');
+    if (navIdx !== -1) {
+      const fence = out.lastIndexOf('```dataviewjs', navIdx);
+      if (fence !== -1) out = out.slice(0, fence) + bc + out.slice(fence);
+    }
+  }
+  // 2. meeting only: rewrite "## Heading" content headers to SectionLabel.
+  //    Fence-aware, line-by-line scan: a heading is only converted at code-fence
+  //    depth 0, so a target heading a user pasted INSIDE a ```markdown sample is
+  //    left untouched (rewriting it would corrupt both their fence and ours).
+  //    Preserves the prior behavior for depth-0 headings: a preceding `---`
+  //    divider line is dropped, the exact SectionLabel block text + view path are
+  //    unchanged, and Attendees gets `top: true`. Idempotent: once a heading is a
+  //    dataviewjs fence it no longer matches the `^##` test, so a second pass is a
+  //    no-op.
+  if (type === "meeting") {
+    const labels = { "Attendees": true, "Agenda": false, "Notes": false, "Action Items": false };
+    const lines = out.split("\n");
+    const result = [];
+    let inFence = false;
+    let changed = false;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (line.trimStart().startsWith("```")) {
+        inFence = !inFence;
+        result.push(line);
+        continue;
+      }
+      if (!inFence) {
+        const m = line.match(/^##\s+(Attendees|Agenda|Notes|Action Items)\s*$/);
+        if (m) {
+          const text = m[1];
+          // Drop a `---` divider immediately preceding this heading (the prior
+          // regex consumed it). result's tail is the line above this heading.
+          if (result.length && /^---\s*$/.test(result[result.length - 1])) result.pop();
+          const args = labels[text] ? `[{ text: "${text}", top: true }]` : `[{ text: "${text}" }]`;
+          result.push('```dataviewjs');
+          result.push('await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: ' + args + ' });');
+          result.push('```');
+          // Match the Meeting.md template spacing: exactly one blank line between
+          // the closing fence and the following content line. If the source kept
+          // its own blank after the heading, consume it so we don't double up.
+          result.push('');
+          if (i + 1 < lines.length && lines[i + 1].trim() === '') i++;
+          changed = true;
+          continue;
+        }
+      }
+      result.push(line);
+    }
+    if (changed) out = result.join("\n");
+  }
+  return out;
+}
+
+// applyNoteChromeHeal — v0.124.0 (note-chrome wave 1). Per-vault scope heal
+// (signature (tp, history, git), wired unconditionally like
+// applyEmptyProjectWikilinkRepair). Task 1 added the Breadcrumb dv.view(...)
+// call to the meetings/scratch/to-do TEMPLATES, so NEW notes get chrome; this
+// heal back-injects it into EXISTING notes (and rewrites meeting ## H2 content
+// headers to SectionLabel) so old + new notes render identically. Idempotent:
+// the Breadcrumb guard + `after === before` short-circuit make re-runs no-ops.
+// Posture mirrors the established heals: per-note try/catch, fails-loud (history
+// warning) but never throws, full git fields on every push, .sauce-backup
+// snapshot before any write. Reuses _listAllMarkdownRecursive.
+async function applyNoteChromeHeal(tp, history, git) {
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const roots = ["spice/meetings", "spice/scratch", "spice/to-do"];
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  let healed = 0, warned = 0;
+  for (const root of roots) {
+    if (!(await adapter.exists(root))) continue;
+    let files;
+    try {
+      files = await _listAllMarkdownRecursive(adapter, root);
+    } catch (e) {
+      warned += 1;
+      history?.push({ event: "warning", step: "note_chrome_heal",
+        reason: `list failed for ${root}: ${e && e.message ? e.message : String(e)}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+      continue;
+    }
+    for (const fpath of files) {
+      try {
+        const before = await adapter.read(fpath);
+        const type = _noteChromeFrontmatterType(before);
+        if (!["meeting", "scratch", "scratch-day", "to-do"].includes(type)) continue;
+        const after = _healNoteChromeBody(before, type);
+        if (after === before) continue;
+        // .sauce-backup snapshot before write (mirrors applyFinanceMigrations).
+        const backupPath = `.sauce-backup/${ts}/${fpath}`;
+        const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+        try { await adapter.mkdir(backupParent); } catch (_e) { /* already exists */ }
+        try { await adapter.write(backupPath, before); } catch (_e) { /* best-effort */ }
+        await adapter.write(fpath, after);
+        healed += 1;
+        history?.push({ event: "info", step: "note_chrome_heal", target: fpath, action: "healed",
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+      } catch (e) {
+        warned += 1;
+        history?.push({ event: "warning", step: "note_chrome_heal",
+          reason: `${fpath}: ${e && e.message ? e.message : String(e)}`,
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+      }
+    }
+  }
+  history?.push({ event: "info", step: "note_chrome_heal", name: "vault",
+    reason: `healed ${healed}; ${warned} warning(s)`,
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+}
+
+// _resolveProjectDisplayName — given a project dir's markdown files (paths) +
+// an adapter, returns the basename (sans .md) of the note that lives DIRECTLY
+// under projectDir and carries frontmatter type:project. This is the project's
+// display name (mirrors the legacy ProjectNavButtons._resolveProjectFromPath
+// convention: the hub note's filename IS the display name). Returns null when
+// no such note is found. Reads the type via _noteChromeFrontmatterType.
+async function _resolveProjectDisplayName(adapter, projectDir, candidateFiles) {
+  const prefix = projectDir + "/";
+  for (const fpath of candidateFiles) {
+    // Hub note sits directly under projectDir (no further nested segment).
+    if (!fpath.startsWith(prefix)) continue;
+    if (fpath.slice(prefix.length).includes("/")) continue;
+    let body;
+    try { body = await adapter.read(fpath); } catch (_e) { continue; }
+    if (_noteChromeFrontmatterType(body) === "project") {
+      const base = fpath.split("/").pop();
+      return base.endsWith(".md") ? base.slice(0, -3) : base;
+    }
+  }
+  return null;
+}
+
+// _injectProjectNameFrontmatter — pure, idempotent transform. When the body has
+// a leading frontmatter block whose `type:` is map/kanban/task-note and which
+// LACKS a `project_name:` field, inserts `project_name: "<name>"` immediately
+// after the `type:` line (mirrors the template field placement). Returns the
+// body unchanged when there's no FM block, the type doesn't match, project_name
+// already exists, or the type: line can't be located (driver short-circuits on
+// `after === before`). The display name is YAML-double-quote escaped.
+function _injectProjectNameFrontmatter(body, name) {
+  if (typeof body !== "string") return body;
+  // Require a leading frontmatter block.
+  const fmMatch = body.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!fmMatch) return body;
+  const fmText = fmMatch[1];
+  // Type gate — only the three breadcrumb-bearing project note types.
+  const typeMatch = fmText.match(/^type:\s*["']?([A-Za-z0-9_-]+)["']?\s*$/m);
+  if (!typeMatch) return body;
+  if (!["map", "kanban", "task-note"].includes(typeMatch[1])) return body;
+  // Idempotency: bail if project_name already present (any value).
+  if (/^project_name:\s*/m.test(fmText)) return body;
+  // YAML double-quote escaping: backslash + double-quote.
+  const escaped = String(name).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  const insert = `\nproject_name: "${escaped}"`;
+  // Insert immediately after the matched type: line.
+  const fmStart = body.indexOf(fmText);
+  const typeLineFull = typeMatch[0];
+  const typeIdxInFm = fmText.indexOf(typeLineFull);
+  const absIdx = fmStart + typeIdxInFm + typeLineFull.length;
+  return body.slice(0, absIdx) + insert + body.slice(absIdx);
+}
+
+// applyProjectNameBackfill — v0.124.0 (note-chrome wave 1). Per-mechanism scope
+// (project-gated, mirrors applyDocsHubButtonRepair). Task 1 added project_name
+// FM to the Project Map / Project Board / Task Note templates so NEW notes carry
+// the display name; this heal back-fills it into EXISTING map/kanban/task-note
+// notes so the breadcrumb's fm:project_name resolver shows the mixed-case
+// display name instead of the lowercase path:2 slug fallback. For each project
+// dir it resolves the display name from the hub note (type:project) basename,
+// then stamps project_name onto every map/kanban/task-note note under that dir
+// that lacks it. Idempotent (skips notes that already carry project_name + uses
+// `after === before` short-circuit), per-note try/catch, never throws, full git
+// fields on every history push, .sauce-backup snapshot before any write. Reuses
+// _listAllMarkdownRecursive + _noteChromeFrontmatterType.
+async function applyProjectNameBackfill(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "project") return;
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+
+  const projectsRoot = "spice/projects";
+  if (!(await adapter.exists(projectsRoot))) return;
+
+  let projectsList;
+  try {
+    projectsList = await adapter.list(projectsRoot);
+  } catch (e) {
+    history?.push({ event: "warning", step: "project_name_backfill", name: "project",
+      reason: `list failed for ${projectsRoot}: ${e && e.message ? e.message : String(e)}`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    return;
+  }
+
+  const projectDirs = (projectsList.folders || []).filter((d) => d.split("/").pop() !== "All Projects");
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  let stamped = 0, warned = 0;
+
+  for (const projectDir of projectDirs) {
+    let files;
+    try {
+      files = await _listAllMarkdownRecursive(adapter, projectDir);
+    } catch (e) {
+      warned += 1;
+      history?.push({ event: "warning", step: "project_name_backfill", name: "project",
+        reason: `list failed for ${projectDir}: ${e && e.message ? e.message : String(e)}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+      continue;
+    }
+
+    const displayName = await _resolveProjectDisplayName(adapter, projectDir, files);
+    if (!displayName) continue; // no hub note resolvable — leave notes untouched.
+
+    for (const fpath of files) {
+      try {
+        const before = await adapter.read(fpath);
+        const type = _noteChromeFrontmatterType(before);
+        if (!["map", "kanban", "task-note"].includes(type)) continue;
+        const after = _injectProjectNameFrontmatter(before, displayName);
+        if (after === before) continue;
+        // .sauce-backup snapshot before write (mirrors applyNoteChromeHeal).
+        const backupPath = `.sauce-backup/${ts}/${fpath}`;
+        const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+        try { await adapter.mkdir(backupParent); } catch (_e) { /* already exists */ }
+        try { await adapter.write(backupPath, before); } catch (_e) { /* best-effort */ }
+        await adapter.write(fpath, after);
+        stamped += 1;
+        history?.push({ event: "info", step: "project_name_backfill", name: "project", target: fpath, action: "stamped_project_name",
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+      } catch (e) {
+        warned += 1;
+        history?.push({ event: "warning", step: "project_name_backfill", name: "project",
+          reason: `${fpath}: ${e && e.message ? e.message : String(e)}`,
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+      }
+    }
+  }
+
+  history?.push({ event: "info", step: "project_name_backfill", name: "project",
+    reason: `stamped ${stamped}; ${warned} warning(s)`,
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
 }
 
 // applyNewEntityButtons — v0.46.0 S2. Aggregates this item's

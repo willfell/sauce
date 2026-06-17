@@ -7,6 +7,10 @@ day: "<% tp.date.now("YYYY-MM-DD") %>"
 # <% tp.date.now("dddd, MMMM Do YYYY") %>
 
 ```dataviewjs
+await dv.view("{{views_path}}/customjs-guard", { class: "Breadcrumb" });
+```
+
+```dataviewjs
 await dv.view("{{views_path}}/customjs-guard", { class: "SpaceNavButtons" });
 ```
 

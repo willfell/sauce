@@ -219,7 +219,7 @@ class ProjectNavButtons {
         });
     }
 
-    async _createTaskNote(notesFolder, title, projectSlug, taskFolder, taskHubPath) {
+    async _createTaskNote(notesFolder, title, projectSlug, taskFolder, taskHubPath, projectDir) {
         const tplPath = "{{templates_path}}/Template, Task Note.md";
         const tplFile = app.vault.getAbstractFileByPath(tplPath);
         if (!tplFile) {
@@ -234,6 +234,10 @@ class ProjectNavButtons {
         const dateStr = this._isoWithTz(now);
         const dateTag = `${now.getFullYear()}/${pad(now.getMonth() + 1)}/${pad(now.getDate())}`;
         const alias = `${projectSlug}-${taskFolder}: ${title}`;
+        // v0.124.0: stamp project_name FM (display name) so the breadcrumb's
+        // fm:project_name resolver shows the mixed-case name, not the slug.
+        // Falls back to the slug when the hub note can't be resolved.
+        const projectName = this._resolveProjectName(projectDir) || projectSlug;
 
         if (!app.vault.getAbstractFileByPath(notesFolder)) {
             await app.vault.createFolder(notesFolder);
@@ -243,11 +247,32 @@ class ProjectNavButtons {
             .replaceAll("{{DATE}}", dateStr)
             .replaceAll("{{TASK_PARENT_PATH}}", taskHubPath)
             .replaceAll("{{ALIAS}}", alias)
-            .replaceAll("{{DATE_TAG}}", dateTag);
+            .replaceAll("{{DATE_TAG}}", dateTag)
+            .replaceAll("{{PROJECT_NAME}}", projectName);
 
         const targetPath = `${notesFolder}/${title}.md`;
         await app.vault.create(targetPath, content);
         return targetPath;
+    }
+
+    // v0.124.0: resolve a project's display name from its hub note basename.
+    // Convention (mirrors install.js applyProjectNameBackfill + the legacy
+    // _resolveProjectFromPath): the project dir holds exactly one note with
+    // frontmatter type:project; its filename (sans .md) IS the display name.
+    // Returns null when projectDir is falsy or no type:project note is found.
+    _resolveProjectName(projectDir) {
+        if (!projectDir) return null;
+        try {
+            const prefix = projectDir + "/";
+            for (const f of app.vault.getMarkdownFiles()) {
+                // Hub note lives DIRECTLY under projectDir (no nested segments).
+                if (!f.path.startsWith(prefix)) continue;
+                if (f.path.slice(prefix.length).includes("/")) continue;
+                const fm = app.metadataCache.getFileCache(f)?.frontmatter;
+                if (fm && fm.type === "project") return f.basename;
+            }
+        } catch (_e) { /* best-effort — fall back to slug */ }
+        return null;
     }
 
     async _createTaskBoard(projectDir, taskFolder) {
@@ -702,7 +727,7 @@ class ProjectNavButtons {
                 onClick: async () => {
                     const title = await this._promptForTitle(notesFolder);
                     if (!title) return;
-                    const targetPath = await this._createTaskNote(notesFolder, title, projectSlug, ctx.taskFolder, taskHubPath);
+                    const targetPath = await this._createTaskNote(notesFolder, title, projectSlug, ctx.taskFolder, taskHubPath, projectDir);
                     if (targetPath) {
                         new Notice(`Created: ${title}`);
                         app.workspace.openLinkText(targetPath, "");

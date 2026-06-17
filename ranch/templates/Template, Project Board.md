@@ -3,6 +3,7 @@
 kanban-plugin: board
 title: {{prompts.name}} Board
 type: kanban
+project_name: "{{prompts.name|sanitize-filename}}"
 created_at: "{{now.YYYY-MM-DDTHH:mm:ssZ}}"
 tags:
   - project/{{prompts.slug}}

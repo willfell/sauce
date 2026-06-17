@@ -1,6 +1,6 @@
 {
   "_comment": "Workshop self-subscription. Pinned to the workshop's own manifest version.",
-  "workshop_version": "0.123.0",
+  "workshop_version": "0.124.0",
   "mechanisms": [
     {
       "name": "customjs-guard",
@@ -16,7 +16,7 @@
     },
     {
       "name": "nav-buttons",
-      "version": "2.7.3"
+      "version": "2.8.0"
     },
     {
       "name": "cards",
@@ -86,7 +86,7 @@
   "blueprints": [
     {
       "name": "project",
-      "version": "1.24.0"
+      "version": "1.25.0"
     },
     {
       "name": "daily",
@@ -94,11 +94,11 @@
     },
     {
       "name": "meetings",
-      "version": "0.8.0"
+      "version": "0.9.0"
     },
     {
       "name": "scratch",
-      "version": "0.5.2"
+      "version": "0.6.0"
     },
     {
       "name": "people",
@@ -110,7 +110,7 @@
     },
     {
       "name": "to-do",
-      "version": "0.10.0"
+      "version": "0.11.0"
     }
   ]
 }
