@@ -1,6 +1,6 @@
 ---
 type: map
-project_name: "{{prompts.name}}"
+project_name: "{{prompts.name|sanitize-filename}}"
 created_at: "{{now.YYYY-MM-DDTHH:mm:ssZ}}"
 tags:
   - project/{{prompts.slug}}
