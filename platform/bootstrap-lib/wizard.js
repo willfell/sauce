@@ -40,6 +40,18 @@ const DEFAULT_MECHANISMS_CHECKED = [
                      // "skipping nav-buttons — depends on icons >=0.1.0 but it
                      // is not subscribed". Must precede nav-buttons for
                      // deps-first install ordering.
+    "open-helpers",  // v0.122.0 — nav-buttons depends on open-helpers since
+                     // v0.121.2 (read-mode chokepoint); omission caused
+                     // fresh-vault bootstrap CI on macos-latest to fail with
+                     // "skipping nav-buttons — depends on open-helpers >=0.1.0
+                     // but it is not subscribed". Same shape as the icons
+                     // precedent above. Must precede nav-buttons for deps-first
+                     // install ordering.
+    "section-label", // v0.122.0 — project + to-do blueprints (both in the
+                     // default blueprint set) depend on section-label since
+                     // this release; pre-include so fresh-vault bootstrap
+                     // doesn't skip them. Same class of bug as the open-helpers
+                     // entry above.
     "nav-buttons",
     "cards",
     "accent-button",
