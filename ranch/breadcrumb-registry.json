@@ -1,0 +1,124 @@
+{
+  "schema_version": 1,
+  "contributions": {
+    "project": {
+      "types": {
+        "project": {
+          "ancestors": [
+            {
+              "label": "fm:project_name|path:2",
+              "link": "spice/projects/{path:2}/{fm:project_name|path:2}.md"
+            }
+          ]
+        },
+        "project-todo": {
+          "ancestors": [
+            {
+              "label": "fm:project_name|path:2",
+              "link": "spice/projects/{path:2}/{fm:project_name|path:2}.md"
+            }
+          ]
+        },
+        "docs-hub": {
+          "ancestors": [
+            {
+              "label": "fm:project_name|path:2",
+              "link": "spice/projects/{path:2}/{fm:project_name|path:2}.md"
+            }
+          ],
+          "current": {
+            "label": "lit:Docs"
+          }
+        },
+        "section-hub": {
+          "ancestors": [
+            {
+              "label": "fm:project_name|path:2",
+              "link": "spice/projects/{path:2}/{fm:project_name|path:2}.md"
+            },
+            {
+              "label": "lit:Docs",
+              "link": "spice/projects/{path:2}/docs/Docs.md"
+            },
+            {
+              "when": {
+                "fm:depth": "2"
+              },
+              "label": "fm:parent_section",
+              "link": "spice/projects/{path:2}/docs/{slug:fm:parent_section}/{fm:parent_section}.md"
+            }
+          ],
+          "current": {
+            "label": "fm:section|file:basename"
+          }
+        },
+        "doc-note": {
+          "ancestors": [
+            {
+              "label": "fm:project_name|path:2",
+              "link": "spice/projects/{path:2}/{fm:project_name|path:2}.md"
+            },
+            {
+              "label": "lit:Docs",
+              "link": "spice/projects/{path:2}/docs/Docs.md"
+            },
+            {
+              "when": {
+                "fm:section": "present"
+              },
+              "label": "fm:section",
+              "link": "spice/projects/{path:2}/docs/{slug:fm:section}/{fm:section}.md"
+            },
+            {
+              "when": {
+                "fm:sub_section": "present"
+              },
+              "label": "fm:sub_section",
+              "link": "spice/projects/{path:2}/docs/{slug:fm:section}/{slug:fm:sub_section}/{fm:sub_section}.md"
+            }
+          ],
+          "current": {
+            "label": "file:basename"
+          }
+        },
+        "map": {
+          "ancestors": [
+            {
+              "label": "fm:project_name|path:2",
+              "link": "spice/projects/{path:2}/{fm:project_name|path:2}.md"
+            }
+          ],
+          "current": {
+            "label": "lit:Map"
+          }
+        },
+        "kanban": {
+          "ancestors": [
+            {
+              "label": "fm:project_name|path:2",
+              "link": "spice/projects/{path:2}/{fm:project_name|path:2}.md"
+            }
+          ],
+          "current": {
+            "label": "lit:Board"
+          }
+        },
+        "task-note": {
+          "ancestors": [
+            {
+              "label": "fm:project_name|path:2",
+              "link": "spice/projects/{path:2}/{fm:project_name|path:2}.md"
+            },
+            {
+              "label": "lit:Board",
+              "link": "spice/projects/{path:2}/{path:2}-board.md"
+            }
+          ],
+          "current": {
+            "label": "file:basename"
+          }
+        }
+      }
+    }
+  }
+}

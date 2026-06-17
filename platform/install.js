@@ -697,6 +697,28 @@ module.exports = async function (tp) {
       });
     }
 
+    // 7c. Subscription-aware pruning of ranch/breadcrumb-registry.json.
+    // Symmetric with the nav-buttons + entity-create prunes above: removes
+    // contributions.<source> for any source no longer in the current
+    // subscription. Closes the "entirely unsubscribed blueprint" gap that
+    // applyBreadcrumb can't see (it only runs for items still in the
+    // subscription). Wrapped in its own try/catch so a malformed registry
+    // never aborts the broader install.
+    try {
+      await pruneBreadcrumbRegistry(tp, subscription, installedNow.history, git);
+    } catch (e) {
+      new Notice(`platformInstall: breadcrumb registry prune failed — ${e.message}`, 6000);
+      installedNow.history.push({
+        event: "error",
+        step: "breadcrumb_prune",
+        message: e.message,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+
     // 8. Subscription-aware pruning of ranch/platform-installed.json
     // bucket arrays (mechanisms[], blueprints[]). Symmetric with the
     // nav-buttons-registry prune above: drops install ledger entries whose
@@ -1101,6 +1123,11 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   // render_in.target_path. nav_buttons-kind render_in is schema-reserved but
   // installer-rejected with a deferred warning for Cycle 1.
   await applyNewEntityButtons(tp, mech, variables, history, git);
+  // v0.123.0 — aggregate per-blueprint breadcrumb: { types: {...} } into
+  // ranch/breadcrumb-registry.json (read-modify-write so the registry
+  // accumulates across the install loop, with prune-on-empty for re-installs).
+  // The Breadcrumb mechanism reads from this registry at render time.
+  await applyBreadcrumb(tp, mech, variables, history, git);
   await applyWikiToDocsMigration(tp, mech, variables, history, git);   // NEW v0.52.0 — must run BEFORE applyDocsBackfill
   await applyDocsBackfill(tp, mech, variables, history, git);          // NEW v0.50.0; renamed from applyWikiBackfill v0.52.0
   await applyDocsHubButtonRepair(tp, mech, variables, history, git);   // NEW v0.100.2 — heals existing broken "+ New Doc" blocks (backfill is create-if-absent)
@@ -1616,6 +1643,183 @@ async function applyNavButtons(tp, manifest, variables, history, git) {
   }
 
   registry.contributions[manifest.name] = validated;
+  await adapter.write(registryPath, JSON.stringify(registry, null, 2));
+}
+
+// applyBreadcrumb — v0.123.0. Aggregate this item's breadcrumb: { types: {...} }
+// declaration into ranch/breadcrumb-registry.json under contributions.<name>.
+// Mirrors applyNavButtons posture byte-for-byte: malformed pre-existing JSON
+// preserved (C4 hardening), per-entry validation skips bad entries without
+// taking the whole contribution down, empty/missing declaration on a
+// re-installing item prunes the prior contribution, failures record history
+// but never throw.
+async function applyBreadcrumb(tp, manifest, variables, history, git) {
+  if (!manifest) return;
+  const breadcrumbBlock = manifest.breadcrumb && typeof manifest.breadcrumb === "object" ? manifest.breadcrumb : null;
+  const typesBlock = breadcrumbBlock && breadcrumbBlock.types && typeof breadcrumbBlock.types === "object" ? breadcrumbBlock.types : null;
+  const adapter = tp.app.vault.adapter;
+  const registryPath = "ranch/breadcrumb-registry.json";
+
+  let registry = { schema_version: 1, contributions: {} };
+  if (await adapter.exists(registryPath)) {
+    let raw;
+    try {
+      raw = await adapter.read(registryPath);
+    } catch (e) {
+      new Notice(`applyBreadcrumb: cannot read ${registryPath} (${e.message}). Skipping contribution from ${manifest.name}.`, 8000);
+      if (history) {
+        history.push({
+          event: "error",
+          step: "breadcrumb",
+          name: manifest.name,
+          message: `read failed for ${registryPath}: ${e.message}`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      return;
+    }
+    try {
+      registry = JSON.parse(raw);
+    } catch (e) {
+      // C4: do NOT silently overwrite a malformed pre-existing registry file.
+      new Notice(`applyBreadcrumb: ${registryPath} is malformed JSON (${e.message}). Skipping contribution from ${manifest.name}.`, 8000);
+      if (history) {
+        history.push({
+          event: "error",
+          step: "breadcrumb",
+          name: manifest.name,
+          message: `${registryPath} is malformed JSON: ${e.message}`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      return;
+    }
+  }
+  registry.contributions = registry.contributions || {};
+  if (typeof registry.schema_version !== "number") registry.schema_version = 1;
+
+  // Manifest declared `breadcrumb` but the shape is wrong (e.g. types is not
+  // an object). Record + return without mutating.
+  if (breadcrumbBlock && !typesBlock) {
+    if (history) {
+      history.push({
+        event: "error",
+        step: "breadcrumb",
+        name: manifest.name,
+        message: "manifest.breadcrumb.types is not an object",
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  // Empty/missing breadcrumb block on a re-installing item → prune any prior
+  // contribution + return.
+  if (!typesBlock || Object.keys(typesBlock).length === 0) {
+    if (manifest.name in registry.contributions) {
+      delete registry.contributions[manifest.name];
+      await adapter.write(registryPath, JSON.stringify(registry, null, 2));
+      if (history) {
+        history.push({
+          event: "info",
+          step: "breadcrumb",
+          name: manifest.name,
+          action: "pruned_empty_declaration",
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    }
+    return;
+  }
+
+  // Per-entry validation. Each types[<t>] must have an `ancestors` array
+  // (may be empty) and an optional `current` object that has at least a
+  // `label` string when present. Bad entries are dropped + logged; do not
+  // take the whole contribution down.
+  const validated = {};
+  for (const [typeName, entry] of Object.entries(typesBlock)) {
+    if (!entry || typeof entry !== "object") {
+      if (history) {
+        history.push({
+          event: "error",
+          step: "breadcrumb",
+          name: manifest.name,
+          type: typeName,
+          message: "entry is not an object",
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      continue;
+    }
+    if (!Array.isArray(entry.ancestors)) {
+      if (history) {
+        history.push({
+          event: "error",
+          step: "breadcrumb",
+          name: manifest.name,
+          type: typeName,
+          message: "ancestors is not an array",
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      continue;
+    }
+    if (entry.current !== undefined) {
+      if (!entry.current || typeof entry.current !== "object" || typeof entry.current.label !== "string") {
+        if (history) {
+          history.push({
+            event: "error",
+            step: "breadcrumb",
+            name: manifest.name,
+            type: typeName,
+            message: "current must be an object with a string label",
+            git_commit: git.commit,
+            git_tag: git.tag,
+            git_dirty: git.dirty,
+            attempted_at: new Date().toISOString(),
+          });
+        }
+        continue;
+      }
+    }
+    validated[typeName] = entry;
+  }
+
+  if (Object.keys(validated).length === 0) {
+    if (history) {
+      history.push({
+        event: "error",
+        step: "breadcrumb",
+        name: manifest.name,
+        reason: "all entries invalid",
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  registry.contributions[manifest.name] = { types: validated };
   await adapter.write(registryPath, JSON.stringify(registry, null, 2));
 }
 
@@ -12166,6 +12370,101 @@ async function pruneNavButtonsRegistry(tp, subscription, history, git) {
     if (!subscribedNames.has(source)) {
       delete registry.contributions[source];
       mutated = true;
+    }
+  }
+
+  if (mutated) {
+    await adapter.write(registryPath, JSON.stringify(registry, null, 2));
+  }
+}
+
+// pruneBreadcrumbRegistry — v0.123.0. Drop contributions.<X> for any X not
+// in the current subscription. Symmetric with pruneNavButtonsRegistry: same
+// C4 hardening, same Notice + history posture, same idempotency. Closes the
+// "consumer unsubscribes from a blueprint entirely" gap that applyBreadcrumb
+// alone can't see (applyBreadcrumb only runs for items still in the
+// subscription, so an entirely-removed blueprint's prior contribution would
+// otherwise persist forever in the registry).
+async function pruneBreadcrumbRegistry(tp, subscription, history, git) {
+  const adapter = tp.app.vault.adapter;
+  const registryPath = "ranch/breadcrumb-registry.json";
+  if (!(await adapter.exists(registryPath))) return;
+
+  let raw;
+  try {
+    raw = await adapter.read(registryPath);
+  } catch (e) {
+    new Notice(`pruneBreadcrumbRegistry: cannot read ${registryPath} (${e.message}). Skipping prune.`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "breadcrumb_prune",
+        message: `read failed for ${registryPath}: ${e.message}`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+  let registry;
+  try {
+    registry = JSON.parse(raw);
+  } catch (e) {
+    new Notice(`pruneBreadcrumbRegistry: ${registryPath} is malformed JSON (${e.message}). Skipping prune.`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "breadcrumb_prune",
+        message: `${registryPath} is malformed JSON: ${e.message}`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+  if (registry === null || typeof registry !== "object" || Array.isArray(registry)) {
+    new Notice(`pruneBreadcrumbRegistry: ${registryPath} parsed but has unexpected shape (expected object). Skipping prune.`, 8000);
+    if (history) {
+      history.push({
+        event: "error",
+        step: "breadcrumb_prune",
+        message: `${registryPath} parsed but has unexpected shape (expected object)`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+  if (!registry.contributions || typeof registry.contributions !== "object") return;
+
+  const subscribedNames = new Set([
+    ...((subscription && subscription.mechanisms) || []).map((m) => m.name),
+    ...((subscription && subscription.blueprints) || []).map((b) => b.name),
+  ]);
+
+  let mutated = false;
+  for (const source of Object.keys(registry.contributions)) {
+    if (!subscribedNames.has(source)) {
+      delete registry.contributions[source];
+      mutated = true;
+      if (history) {
+        history.push({
+          event: "info",
+          step: "breadcrumb_prune",
+          action: "pruned_unsubscribed_blueprint",
+          source,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
     }
   }
 

@@ -7847,7 +7847,7 @@ async function caseHCV0890VersionD() {
   if (Array.isArray(m.mechanisms)) mechCount = m.mechanisms.length;
   else if (Array.isArray(m.items)) mechCount = m.items.filter(x => x.kind === "mechanism").length;
   else if (m.catalogue && Array.isArray(m.catalogue.mechanisms)) mechCount = m.catalogue.mechanisms.length;
-  assertEqual(mechCount, 19, "HC-V0890-VERSION-D: mechanism count = 19 (+section-label in v0.122.0)");
+  assertEqual(mechCount, 20, "HC-V0890-VERSION-D: mechanism count = 20 (+breadcrumb in v0.123.0)");
 }
 
 async function caseHCV0890ResolvePersonA() {
@@ -8400,7 +8400,7 @@ async function caseHCV0891Versions() {
   const mechs = (platformMan.mechanisms && Array.isArray(platformMan.mechanisms))
     ? platformMan.mechanisms
     : (Array.isArray(platformMan.items) ? platformMan.items.filter(x => x.kind === "mechanism") : []);
-  assertEqual(mechs.length, 19, "HC-V0891-VERSION-D: mechanism count = 19 (+section-label in v0.122.0)");
+  assertEqual(mechs.length, 20, "HC-V0891-VERSION-D: mechanism count = 20 (+breadcrumb in v0.123.0)");
 }
 
 // ========================================================================
@@ -10972,7 +10972,9 @@ async function caseV01020Meet2ProjectPill() {
 
 // v0.103.0 S1 — Breadcrumb helper (clickable navigation trail at the top of
 // project-related notes). Static-string asserts against the helper source.
-const _BC_PATH = path.join(WORKSHOP, "platform", "blueprints", "project", "helpers", "breadcrumb.js");
+// v0.123.0 — breadcrumb.js was promoted from a project-helper to a shared
+// mechanism. The class invariants still hold; only the file path moved.
+const _BC_PATH = path.join(WORKSHOP, "platform", "mechanisms", "breadcrumb", "breadcrumb.js");
 
 function _readBcSrc() {
   if (!fs.existsSync(_BC_PATH)) return "";
@@ -10991,21 +10993,33 @@ async function caseV01030Bc2ReadsCurrentFrontmatter() {
   console.log("\n--- Case HC-V01030-BC-2: Breadcrumb reads project/section/sub_section ---");
   const src = _readBcSrc();
   assertTrue("HC-V01030-BC-2: reads dv.current()", /dv\.current\(\)/.test(src));
-  assertTrue("HC-V01030-BC-2: walks project + section + sub_section", /project[^}]*section/.test(src) || /\.section/.test(src));
+  // v0.123.0 — the mechanism is purely generic. Per-blueprint type dispatch
+  // (including which FM fields to read for which type) is declared in the
+  // project manifest's `breadcrumb.types` block. The mechanism reads any FM
+  // field referenced via `fm:<field>` atoms.
+  const man = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/manifest.json"), "utf8"));
+  const types = (man.breadcrumb && man.breadcrumb.types) || {};
+  const dispatchString = JSON.stringify(types);
+  assertTrue("HC-V01030-BC-2: walks project + section + sub_section",
+    /fm:project_name/.test(dispatchString) && /fm:section/.test(dispatchString) && /fm:sub_section/.test(dispatchString));
 }
 
 async function caseV01030Bc3EmitsWikilinks() {
   console.log("\n--- Case HC-V01030-BC-3: Breadcrumb emits wikilink trail ---");
   const src = _readBcSrc();
+  // v0.123.0 — _link() still emits the canonical [[${vaultPath}|${label}]] form.
   assertTrue("HC-V01030-BC-3: emits [[...]] form via openLinkText or wikilink markdown",
     /openLinkText|\[\[\$\{|app\.workspace\.openLinkText/.test(src));
 }
 
 async function caseV01030Bc4HandlesAllTypes() {
   console.log("\n--- Case HC-V01030-BC-4: Breadcrumb handles project + docs-hub + section-hub + doc-note ---");
-  const src = _readBcSrc();
-  assertTrue("HC-V01030-BC-4: branches on type", /p\.type|type:\s*["']/.test(src));
-  assertTrue("HC-V01030-BC-4: docs-hub or section-hub branches", /docs-hub|section-hub/.test(src));
+  // v0.123.0 — type dispatch declared in the project manifest, not in the class.
+  const man = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/manifest.json"), "utf8"));
+  const types = (man.breadcrumb && man.breadcrumb.types) || {};
+  assertTrue("HC-V01030-BC-4: branches on type", Object.keys(types).length > 0);
+  assertTrue("HC-V01030-BC-4: docs-hub or section-hub branches",
+    !!types["docs-hub"] || !!types["section-hub"]);
 }
 
 // v0.103.0 S2.1 — ProjectDocsIndex helper (Docs.md sections-index landing).
@@ -11201,11 +11215,17 @@ async function caseV01030ProjMan1VersionAndCustomjs() {
   // + SectionLabel primitive + ProjectsHubCards search + Template Project.md
   // rewrite + Breadcrumb extension + marker cleanup).
   // Breadcrumb + ProjectDocsIndex + SectionHub carryover assertions still apply.
-  assertTrue("HC-V01030-PROJ-MAN-1a: project manifest version 1.21.x or 1.22.x or 1.23.x",
-    m && /^1\.(21|22|23)\.\d+$/.test(m.version), `got: ${m && m.version}`);
+  // v0.123.0 — bumped to 1.24.0 (depends_on: breadcrumb mech + breadcrumb.types
+  // block; helpers/breadcrumb.js dropped from files[]; Breadcrumb dropped from
+  // customjs_classes since the mechanism owns it now).
+  assertTrue("HC-V01030-PROJ-MAN-1a: project manifest version 1.21.x or 1.22.x or 1.23.x or 1.24.x",
+    m && /^1\.(21|22|23|24)\.\d+$/.test(m.version), `got: ${m && m.version}`);
   const cls = (m && Array.isArray(m.customjs_classes)) ? m.customjs_classes : [];
-  assertTrue("HC-V01030-PROJ-MAN-1b: customjs_classes includes Breadcrumb",
-    cls.indexOf("Breadcrumb") !== -1);
+  // v0.123.0 — Breadcrumb migrated to the breadcrumb mechanism. The project
+  // blueprint depends on it via depends_on instead of listing the class directly.
+  const breadcrumbMechDep = (m && Array.isArray(m.depends_on)) && m.depends_on.some(d => d && d.name === "breadcrumb");
+  assertTrue("HC-V01030-PROJ-MAN-1b: depends_on includes breadcrumb mechanism (was customjs_classes Breadcrumb pre-v0.123.0)",
+    cls.indexOf("Breadcrumb") !== -1 || breadcrumbMechDep);
   assertTrue("HC-V01030-PROJ-MAN-1c: customjs_classes includes ProjectDocsIndex",
     cls.indexOf("ProjectDocsIndex") !== -1);
   assertTrue("HC-V01030-PROJ-MAN-1d: customjs_classes includes SectionHub",
@@ -11280,7 +11300,14 @@ async function caseV01030ProjMan4FilesAndExtraFiles() {
   const pdi = files.find(f => f && f.source === "helpers/project-docs-index.js");
   const sh = files.find(f => f && f.source === "helpers/section-hub.js");
   const shTpl = files.find(f => f && f.source === "templates/Section Hub.md");
-  assertTrue("HC-V01030-PROJ-MAN-4a: files[] includes helpers/breadcrumb.js", !!bc);
+  // v0.123.0 — helpers/breadcrumb.js dropped from files[]; the project blueprint
+  // now depends on the breadcrumb mechanism via depends_on and contributes its
+  // type dispatch via the breadcrumb.types block. Either pre-v0.123.0 files[]
+  // entry OR post-v0.123.0 dependency satisfies this assertion.
+  const breadcrumbDep = (m && Array.isArray(m.depends_on)) && m.depends_on.some(d => d && d.name === "breadcrumb");
+  const breadcrumbBlock = m && m.breadcrumb && m.breadcrumb.types && Object.keys(m.breadcrumb.types).length > 0;
+  assertTrue("HC-V01030-PROJ-MAN-4a: files[] includes helpers/breadcrumb.js (or v0.123.0+ depends_on + breadcrumb.types)",
+    !!bc || (breadcrumbDep && breadcrumbBlock));
   assertTrue("HC-V01030-PROJ-MAN-4b: files[] includes helpers/project-docs-index.js", !!pdi);
   assertTrue("HC-V01030-PROJ-MAN-4c: files[] includes helpers/section-hub.js", !!sh);
   assertTrue("HC-V01030-PROJ-MAN-4d: files[] includes templates/Section Hub.md", !!shTpl);
@@ -11576,7 +11603,7 @@ async function caseV01040Man1Manifest118() {
   // v0.106.0 → 1.20.0 (DocSearch persistence + dashboard widgets).
   // v0.109.0 → 1.21.0 (projects visual overhaul: DocSearch params, SectionLabel,
   // ProjectsHubCards search, template rewrite, Breadcrumb extension, marker cleanup).
-  assertTrue("HC-V01040-MAN-1: project blueprint version 1.21.x or 1.22.x or 1.23.x", /^1\.(21|22|23)\.\d+$/.test(m.version));
+  assertTrue("HC-V01040-MAN-1: project blueprint version 1.21.x or 1.22.x or 1.23.x", /^1\.(21|22|23|24)\.\d+$/.test(m.version));
   assertTrue("HC-V01040-MAN-1: customjs_classes includes DocSearch",
     Array.isArray(m.customjs_classes) && m.customjs_classes.includes("DocSearch"));
   const sources = (m.files || []).map(f => f.source);
@@ -11681,7 +11708,7 @@ async function caseV01050Man1ProjectManifest119() {
   console.log("\n--- Case HC-V01050-MAN-1: project blueprint manifest 1.21.0 (v0.109.0 bump) + doc-note prompts use new options_source ---");
   const m = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/manifest.json"), "utf8"));
   // v0.109.0 bumped project blueprint 1.20.0 → 1.21.0 (projects visual overhaul).
-  assertTrue("HC-V01050-MAN-1: project blueprint version 1.21.x or 1.22.x or 1.23.x", /^1\.(21|22|23)\.\d+$/.test(m.version),
+  assertTrue("HC-V01050-MAN-1: project blueprint version 1.21.x or 1.22.x or 1.23.x", /^1\.(21|22|23|24)\.\d+$/.test(m.version),
     `got: ${m.version}`);
   // Locate doc-note entity-create entry.
   const docNote = (m.new_entity_buttons || []).find(b => b.id === "doc-note");
@@ -14007,13 +14034,13 @@ async function caseV0110VersionBump() {
     fbp && /^0\.(6|7|8|9)\.\d+$/.test(fbp.version), `got: ${fbp?.version}`);
   const pbp = (ws.blueprints || []).find(b => b.name === "project");
   assertTrue("V0110-VER-3: project pin 1.21.x or 1.22.x or 1.23.x",
-    pbp && /^1\.(21|22|23)\.\d+$/.test(pbp.version), `got: ${pbp?.version}`);
+    pbp && /^1\.(21|22|23|24)\.\d+$/.test(pbp.version), `got: ${pbp?.version}`);
   const fin = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
   assertTrue("V0110-VER-4: finance manifest version 0.6.x or 0.7.x or 0.8.x",
     /^0\.(6|7|8|9)\.\d+$/.test(fin.version), `got: ${fin.version}`);
   const proj = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/manifest.json"), "utf8"));
   assertTrue("V0110-VER-5: project manifest version 1.21.x or 1.22.x or 1.23.x",
-    /^1\.(21|22|23)\.\d+$/.test(proj.version), `got: ${proj.version}`);
+    /^1\.(21|22|23|24)\.\d+$/.test(proj.version), `got: ${proj.version}`);
 }
 
 // v0.5.3 CF-3 — applyFinancePaycheckBodyMigration (PaycheckSummary block
@@ -14036,22 +14063,34 @@ async function caseV01070FpbmPaycheckBodyMigration() {
 
 // v0.109.0 — projects visual overhaul. See Docs/plans/2026-06-15-v0.109.0-projects-visual-overhaul-design.md.
 
-// S7 — Breadcrumb extension + template additions.
+// S7 — Breadcrumb extension. Updated v0.123.0: the project-helper file was
+// promoted to platform/mechanisms/breadcrumb/breadcrumb.js, and the type
+// dispatch is now declared in the project manifest's `breadcrumb.types` block
+// (consumed by applyBreadcrumb at install time). The class itself no longer
+// hardcodes any project-specific paths — it walks the registry.
 async function caseV01090Bc1TypeBranches() {
   console.log("\n--- Case HC-V01090-BC-1: Breadcrumb handles map/kanban/task-note types ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/breadcrumb.js"), "utf8");
-  assertTrue("HC-V01090-BC-1: handles type map",       /cur\.type\s*===\s*["']map["']/.test(src));
-  assertTrue("HC-V01090-BC-1: handles type kanban",    /cur\.type\s*===\s*["']kanban["']/.test(src));
-  assertTrue("HC-V01090-BC-1: handles type task-note", /cur\.type\s*===\s*["']task-note["']/.test(src));
+  const man = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/manifest.json"), "utf8"));
+  const types = (man.breadcrumb && man.breadcrumb.types) || {};
+  assertTrue("HC-V01090-BC-1: handles type map",       !!types["map"]);
+  assertTrue("HC-V01090-BC-1: handles type kanban",    !!types["kanban"]);
+  assertTrue("HC-V01090-BC-1: handles type task-note", !!types["task-note"]);
 }
 
 async function caseV01090Bc2PathFallback() {
   console.log("\n--- Case HC-V01090-BC-2: Breadcrumb has path-based projectSlug fallback ---");
-  const src = fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/helpers/breadcrumb.js"), "utf8");
-  assertTrue("HC-V01090-BC-2: _resolveProjectFromPath helper present",
-    /_resolveProjectFromPath\s*\(/.test(src));
-  assertTrue("HC-V01090-BC-2: path regex anchors on spice/projects/<slug>/",
-    /\^spice\\\/projects\\\/\(\[\^\\\/\]\+\)\\\//.test(src));
+  // v0.123.0: the per-blueprint registry uses `fm:project_name|path:2` chains
+  // so the project-slug path segment falls in when frontmatter is missing
+  // (map/kanban/task-note). The mechanism's _resolveAtom("path:2") provides
+  // the path-based resolver primitive that backs this.
+  const man = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/manifest.json"), "utf8"));
+  const types = (man.breadcrumb && man.breadcrumb.types) || {};
+  const ancestorChain = types["map"] && types["map"].ancestors && types["map"].ancestors[0] && types["map"].ancestors[0].label;
+  assertTrue("HC-V01090-BC-2: map ancestor falls back to path:2",
+    typeof ancestorChain === "string" && ancestorChain.includes("path:2"));
+  const mechSrc = fs.readFileSync(path.join(WORKSHOP, "platform/mechanisms/breadcrumb/breadcrumb.js"), "utf8");
+  assertTrue("HC-V01090-BC-2: mechanism implements path: atom",
+    /atom\.startsWith\("path:"\)/.test(mechSrc));
 }
 
 async function caseV01090TplMapHasBreadcrumb() {
