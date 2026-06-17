@@ -27,7 +27,7 @@
     },
     {
       "name": "nav-buttons",
-      "version": "2.7.3"
+      "version": "2.8.0"
     },
     {
       "name": "cards",
@@ -97,7 +97,7 @@
     },
     {
       "name": "meetings",
-      "version": "0.8.0"
+      "version": "0.9.0"
     },
     {
       "name": "people",
@@ -109,11 +109,11 @@
     },
     {
       "name": "project",
-      "version": "1.24.0"
+      "version": "1.25.0"
     },
     {
       "name": "to-do",
-      "version": "0.10.0"
+      "version": "0.11.0"
     },
     {
       "name": "journal",
@@ -129,7 +129,7 @@
     },
     {
       "name": "scratch",
-      "version": "0.5.2"
+      "version": "0.6.0"
     },
     {
       "name": "teams",

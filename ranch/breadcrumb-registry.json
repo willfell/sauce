@@ -119,6 +119,74 @@
           }
         }
       }
+    },
+    "meetings": {
+      "types": {
+        "meeting": {
+          "ancestors": [
+            {
+              "label": "lit:Meetings"
+            },
+            {
+              "label": "path:4"
+            }
+          ],
+          "current": {
+            "label": "file:basename"
+          }
+        }
+      }
+    },
+    "scratch": {
+      "types": {
+        "scratch": {
+          "ancestors": [
+            {
+              "label": "lit:Scratch"
+            },
+            {
+              "label": "path:3"
+            },
+            {
+              "label": "path:4",
+              "link": "spice/scratch/{path:2}/{path:3}/{path:4}/Scratch-Day-{path:4}.md"
+            }
+          ],
+          "current": {
+            "label": "fm:time|file:basename"
+          }
+        },
+        "scratch-day": {
+          "ancestors": [
+            {
+              "label": "lit:Scratch"
+            },
+            {
+              "label": "path:3"
+            }
+          ],
+          "current": {
+            "label": "path:4"
+          }
+        }
+      }
+    },
+    "to-do": {
+      "types": {
+        "to-do": {
+          "ancestors": [
+            {
+              "label": "lit:To-Do"
+            },
+            {
+              "label": "path:3"
+            }
+          ],
+          "current": {
+            "label": "file:basename"
+          }
+        }
+      }
     }
   }
 }

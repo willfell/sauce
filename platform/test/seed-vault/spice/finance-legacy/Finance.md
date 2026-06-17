@@ -8,9 +8,9 @@ cssclasses:
 ---
 
 ```dataviewjs
-await customJS.FinanceHubActions.render(dv, {here: "finance"});
+await dv.view("ranch/views/customjs-guard", { class: "FinanceHubActions", args: [{here: "finance"}] });
 ```
 
 ```dataviewjs
-await customJS.FinanceHubSummary.render(dv);
+await dv.view("ranch/views/customjs-guard", { class: "FinanceHubSummary" });
 ```

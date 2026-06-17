@@ -483,8 +483,12 @@ class ToDoCreateTask {
         await vault.modify(file, updated);
         new Notice(`Created task in ${dest.split('/').pop()}`);
         // Auto-open the destination for context, unless it's the registry (background quietly).
+        // Open the TFile on a captured leaf so the deferred read-mode flip
+        // targets THIS note even if focus moves first.
         if (payload.mode !== 'recurring') {
-            window.app.workspace.openLinkText(dest, '', false);
+            const leaf = window.app.workspace.getLeaf(false);
+            await leaf.openFile(file);
+            window.customJS.OpenHelpers?.forceLeafPreview?.(leaf);
         }
     }
 
@@ -512,7 +516,10 @@ class ToDoCreateTask {
             const insertPos = m.index + m[0].length;
             const head = content.slice(0, insertPos).replace(/\n+$/, '\n');
             const tail = content.slice(insertPos).replace(/^\n+/, '');
-            return head + `\n${line}\n\n` + tail;
+            // v0.120.0: emit single-newline separator (was `\n\n` which produced an
+            // empty blank line BETWEEN consecutive task entries on the daily — user
+            // feedback 2026-06-16). Trailing `\n` keeps the task line terminated.
+            return head + `\n${line}\n` + tail;
         }
         // Legacy fallback — match an `## H2` heading; preserved for transition
         // window so older notes still get the task inserted in a sensible place.
@@ -602,17 +609,27 @@ class ToDoCreateTask {
     }
 
     /**
-     * Return up to 200 vault markdown notes as { name, path }, sorted by name.
-     * Mirrors _loadProjectList's defensive style: any failure → [].
+     * Return ALL vault markdown notes as { name, path, mtime }. No cap — the
+     * filter pipeline below handles pruning. mtime carries the file's last
+     * modified timestamp (ms) so the picker can default to recently-modified.
+     *
+     * v0.8.1 PATCH: previously hard-capped at .slice(0, 200) AFTER an
+     * alphabetical sort — vaults with >200 notes silently lost everything past
+     * "D"-ish in the alphabet, regardless of what the user typed in the filter.
+     * The filter ran over the already-capped subset, so even verbatim matches
+     * past the cap returned nothing. Reported on accuris 2026-06-16.
+     * Any failure → [].
      */
     _loadNoteList() {
         try {
             const vault = window.app && window.app.vault;
             if (!vault || typeof vault.getMarkdownFiles !== 'function') return [];
             const files = vault.getMarkdownFiles() || [];
-            const notes = files.map(f => ({ name: f.basename, path: f.path }));
-            notes.sort((a, b) => String(a.name).localeCompare(String(b.name)));
-            return notes.slice(0, 200);
+            return files.map(f => ({
+                name: f.basename,
+                path: f.path,
+                mtime: (f.stat && f.stat.mtime) || 0,
+            }));
         } catch (e) {
             return [];
         }
@@ -651,19 +668,55 @@ class ToDoCreateTask {
         label('Link a note (optional)');
         const notes = this._loadNoteList();
         const noteFilter = host.createEl('input', { type: 'text' });
-        noteFilter.placeholder = 'Filter notes…';
+        noteFilter.placeholder = notes.length
+            ? `Filter ${notes.length} note${notes.length === 1 ? '' : 's'}…`
+            : 'Filter notes…';
         noteFilter.style.cssText = fieldCss;
         const noteSelect = host.createEl('select');
         noteSelect.style.cssText = fieldCss + ' margin-top:4px;';
+
+        // v0.8.1: the filter pipeline now runs over the FULL note list (was
+        // capped to 200 alphabetically pre-filter). When no filter is set,
+        // show the 50 most-recently-modified notes (recency-first default).
+        // When a filter is set, substring-match the full list (case-insensitive
+        // on the basename) and cap the rendered options at 50; surface a hint
+        // option when matches exceed the cap so the user knows to refine.
+        const CAP = 50;
         const repopulate = (filter) => {
             noteSelect.innerHTML = '';
             const none = noteSelect.createEl('option', { text: '(none)' });
             none.value = '';
             const f = (filter || '').trim().toLowerCase();
-            for (const n of notes) {
-                if (f && !String(n.name).toLowerCase().includes(f)) continue;
+            let matches;
+            if (!f) {
+                // Recency-first default — top 50 by mtime DESC.
+                matches = notes.slice().sort((a, b) => (b.mtime || 0) - (a.mtime || 0));
+            } else {
+                matches = notes.filter(n => String(n.name).toLowerCase().includes(f));
+                // Prefer "starts-with" matches over "contains" for relevance.
+                matches.sort((a, b) => {
+                    const aStarts = String(a.name).toLowerCase().startsWith(f) ? 0 : 1;
+                    const bStarts = String(b.name).toLowerCase().startsWith(f) ? 0 : 1;
+                    if (aStarts !== bStarts) return aStarts - bStarts;
+                    return String(a.name).localeCompare(String(b.name));
+                });
+            }
+            const total = matches.length;
+            const shown = matches.slice(0, CAP);
+            for (const n of shown) {
                 const o = noteSelect.createEl('option', { text: n.name });
                 o.value = n.name;
+            }
+            if (total > CAP) {
+                const more = noteSelect.createEl('option', {
+                    text: `… ${total - CAP} more — refine the filter to narrow`
+                });
+                more.value = '';
+                more.disabled = true;
+            } else if (f && total === 0) {
+                const hint = noteSelect.createEl('option', { text: '(no matches)' });
+                hint.value = '';
+                hint.disabled = true;
             }
         };
         repopulate('');

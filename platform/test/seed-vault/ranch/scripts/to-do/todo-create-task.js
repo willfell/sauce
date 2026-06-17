@@ -483,8 +483,12 @@ class ToDoCreateTask {
         await vault.modify(file, updated);
         new Notice(`Created task in ${dest.split('/').pop()}`);
         // Auto-open the destination for context, unless it's the registry (background quietly).
+        // Open the TFile on a captured leaf so the deferred read-mode flip
+        // targets THIS note even if focus moves first.
         if (payload.mode !== 'recurring') {
-            window.app.workspace.openLinkText(dest, '', false);
+            const leaf = window.app.workspace.getLeaf(false);
+            await leaf.openFile(file);
+            window.customJS.OpenHelpers?.forceLeafPreview?.(leaf);
         }
     }
 

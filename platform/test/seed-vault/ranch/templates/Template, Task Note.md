@@ -1,5 +1,6 @@
 ---
 type: task-note
+project_name: "{{PROJECT_NAME}}"
 created_at: "{{DATE}}"
 task_parent: {{TASK_PARENT_PATH}}
 aliases:

@@ -21,7 +21,8 @@
         "order": 50,
         "action": {
           "type": "invoke_command",
-          "command_id": "daily-notes"
+          "command_id": "daily-notes",
+          "read_mode_after": true
         }
       }
     ],

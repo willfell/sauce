@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-06-16T20:22:36.696Z",
-  "workshop_version": "0.120.1",
+  "generated_at": "2026-06-17T20:58:21.546Z",
+  "workshop_version": "0.124.0",
   "contributions": {
     "audit": [
       {
@@ -545,13 +545,13 @@
         "kind": "command",
         "source": "commands/daily.md",
         "dest": ".claude/commands/daily.md",
-        "version": "0.13.6"
+        "version": "0.13.7"
       },
       {
         "kind": "skill",
         "source": "skills/open-today/SKILL.md",
         "dest": ".claude/skills/daily/open-today/SKILL.md",
-        "version": "0.13.6"
+        "version": "0.13.7"
       },
       {
         "kind": "claude_md_row",
@@ -568,13 +568,13 @@
         "kind": "command",
         "source": "commands/meetings.md",
         "dest": ".claude/commands/meetings.md",
-        "version": "0.8.0"
+        "version": "0.9.0"
       },
       {
         "kind": "skill",
         "source": "skills/new-meeting/SKILL.md",
         "dest": ".claude/skills/meetings/new-meeting/SKILL.md",
-        "version": "0.8.0"
+        "version": "0.9.0"
       },
       {
         "kind": "claude_md_row",
@@ -614,13 +614,13 @@
         "kind": "command",
         "source": "commands/project.md",
         "dest": ".claude/commands/project.md",
-        "version": "1.22.2"
+        "version": "1.25.0"
       },
       {
         "kind": "skill",
         "source": "skills/new-project/SKILL.md",
         "dest": ".claude/skills/project/new-project/SKILL.md",
-        "version": "1.22.2"
+        "version": "1.25.0"
       },
       {
         "kind": "claude_md_row",
@@ -637,13 +637,13 @@
         "kind": "command",
         "source": "commands/scratch.md",
         "dest": ".claude/commands/scratch.md",
-        "version": "0.5.2"
+        "version": "0.6.0"
       },
       {
         "kind": "skill",
         "source": "skills/new-scratch/SKILL.md",
         "dest": ".claude/skills/scratch/new-scratch/SKILL.md",
-        "version": "0.5.2"
+        "version": "0.6.0"
       },
       {
         "kind": "claude_md_row",
