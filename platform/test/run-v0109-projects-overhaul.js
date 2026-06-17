@@ -29,6 +29,30 @@ const HELPERS  = path.join(WORKSHOP, "platform/blueprints/project/helpers");
 const TPLDIR   = path.join(WORKSHOP, "platform/blueprints/project/templates");
 // v0.122.0: SectionLabel promoted out of project/helpers into its own mechanism.
 const SECTION_LABEL_SRC = path.join(WORKSHOP, "platform/mechanisms/section-label/section-label.js");
+// v0.123.0: Breadcrumb promoted out of project/helpers into its own mechanism.
+// The mechanism is registry-driven; the per-blueprint dispatch lives in the
+// project manifest's `breadcrumb.types` block and is loaded into a stub
+// `app.vault.adapter.read` so the mechanism resolves the same trail it would
+// in-vault. v0.109.0 BC-B-1..6 keep their semantics: same fixtures, same
+// asserted HTML.
+const BREADCRUMB_SRC = path.join(WORKSHOP, "platform/mechanisms/breadcrumb/breadcrumb.js");
+const PROJECT_MAN_PATH = path.join(WORKSHOP, "platform/blueprints/project/manifest.json");
+function _buildBreadcrumbEnv() {
+  const man = JSON.parse(fs.readFileSync(PROJECT_MAN_PATH, "utf8"));
+  const types = (man.breadcrumb && man.breadcrumb.types) || {};
+  const registry = JSON.stringify({ schema_version: 1, contributions: { project: { types } } });
+  const stubApp = {
+    vault: {
+      adapter: {
+        read: async (p) => {
+          if (p === "ranch/breadcrumb-registry.json") return registry;
+          throw new Error("ENOENT " + p);
+        }
+      }
+    }
+  };
+  return { app: stubApp };
+}
 
 let passed = 0;
 let failed = 0;
@@ -280,7 +304,7 @@ momentShim.now = 1718000000000;
 
 (function testBreadcrumb() {
   console.log("\n=== S7 Breadcrumb behavioral ===");
-  const Breadcrumb = loadClass("breadcrumb.js", "Breadcrumb", {});
+  const Breadcrumb = loadClassFromAbs(BREADCRUMB_SRC, "Breadcrumb", _buildBreadcrumbEnv());
   const bc = new Breadcrumb();
 
   function curOfType(type, fields = {}) {
@@ -298,9 +322,15 @@ momentShim.now = 1718000000000;
   }
 
   // BC-B-1: type=map renders Project (link) → Map (current label)
+  // v0.123.0: the mechanism resolves project name via `fm:project_name|path:2`.
+  // The legacy helper resolved `fm:project` first (with _stripLink) and only
+  // fell back to `project_name`. The migration accepts this minor renaming —
+  // fixtures now declare `project_name` (which is what real hub notes carry
+  // since v0.102.0). Same fixture shape that the BR15–BR23 byte-parity proof
+  // exercises.
   {
     console.log("\n--- Case BC-B-1: type=map renders Project → Map ---");
-    const cur = curOfType("map", { path: "spice/projects/demo/Project Map.md", project: "[[Demo]]", project_slug: "demo" });
+    const cur = curOfType("map", { path: "spice/projects/demo/Project Map.md", project_name: "Demo", project_slug: "demo" });
     const dv = makeDv({ current: cur });
     return bc.render(dv).then(() => {
       const wrap = dv.container.children[0];
@@ -313,11 +343,11 @@ momentShim.now = 1718000000000;
 })().then(() => {
   // BC-B-2: type=kanban renders Project → Board
   console.log("\n--- Case BC-B-2: type=kanban renders Project → Board ---");
-  const Breadcrumb = loadClass("breadcrumb.js", "Breadcrumb", {});
+  const Breadcrumb = loadClassFromAbs(BREADCRUMB_SRC, "Breadcrumb", _buildBreadcrumbEnv());
   const bc = new Breadcrumb();
   const cur = {
     file: { path: "spice/projects/demo/demo-board.md", name: "demo-board" },
-    type: "kanban", project: "[[Demo]]", project_slug: "demo",
+    type: "kanban", project_name: "Demo", project_slug: "demo",
   };
   const dv = makeDv({ current: cur });
   return bc.render(dv).then(() => {
@@ -329,11 +359,11 @@ momentShim.now = 1718000000000;
 }).then(() => {
   // BC-B-3: type=task-note renders Project → Board(link) → filename(current)
   console.log("\n--- Case BC-B-3: type=task-note renders Project → Board → filename ---");
-  const Breadcrumb = loadClass("breadcrumb.js", "Breadcrumb", {});
+  const Breadcrumb = loadClassFromAbs(BREADCRUMB_SRC, "Breadcrumb", _buildBreadcrumbEnv());
   const bc = new Breadcrumb();
   const cur = {
     file: { path: "spice/projects/demo/tasks/Foo/Foo.md", name: "Foo" },
-    type: "task-note", project: "[[Demo]]", project_slug: "demo",
+    type: "task-note", project_name: "Demo", project_slug: "demo",
   };
   const dv = makeDv({ current: cur });
   return bc.render(dv).then(() => {
@@ -345,26 +375,33 @@ momentShim.now = 1718000000000;
   });
 }).then(() => {
   // BC-B-4: path fallback when frontmatter is missing project / project_slug.
-  console.log("\n--- Case BC-B-4: path fallback resolves projectSlug + projectName from spice/projects/<slug>/<Name>.md ---");
-  const Breadcrumb = loadClass("breadcrumb.js", "Breadcrumb", {});
+  // v0.123.0: the dv.pages-based fallback that recovered the project_name from
+  // the hub note is no longer the resolver; instead, `fm:project_name|path:2`
+  // falls all the way back to `path:2` (the project slug). For test-project
+  // parity (slug == name), the rendered href is unchanged. Mixed-case projects
+  // show the slug — accepted regression per the design doc; healed in a
+  // follow-up cycle via a project_name backfill migration.
+  console.log("\n--- Case BC-B-4: path fallback uses path:2 (slug) when project_name FM is absent ---");
+  const Breadcrumb = loadClassFromAbs(BREADCRUMB_SRC, "Breadcrumb", _buildBreadcrumbEnv());
   const bc = new Breadcrumb();
   const cur = {
     file: { path: "spice/projects/global-k8s/Project Map.md", name: "Project Map" },
     type: "map",
-    // project + project_slug intentionally absent
+    // project_name + project_slug intentionally absent — path:2 = "global-k8s"
   };
   const hub = { file: { name: "Global K8s", path: "spice/projects/global-k8s/Global K8s.md" }, type: "project" };
   const dv = makeDv({ current: cur, pages: [hub] });
   return bc.render(dv).then(() => {
     const wrap = dv.container.children[0];
     ok("BC-B-4.1 wrap div created (path-fallback resolved)", !!wrap);
-    ok("BC-B-4.2 trail contains Global K8s link", /data-href="spice\/projects\/global-k8s\/Global K8s\.md"/.test(wrap.innerHTML));
+    ok("BC-B-4.2 trail uses slug 'global-k8s' as the name (accepted v0.123.0 regression)",
+      /data-href="spice\/projects\/global-k8s\/global-k8s\.md"/.test(wrap.innerHTML));
     ok("BC-B-4.3 trail contains Map current label", /<span[^>]*font-weight:600[^>]*>Map<\/span>/.test(wrap.innerHTML));
   });
 }).then(() => {
   // BC-B-5: path fallback with NO hub note — slug used as name.
   console.log("\n--- Case BC-B-5: path fallback with no hub note uses slug as name ---");
-  const Breadcrumb = loadClass("breadcrumb.js", "Breadcrumb", {});
+  const Breadcrumb = loadClassFromAbs(BREADCRUMB_SRC, "Breadcrumb", _buildBreadcrumbEnv());
   const bc = new Breadcrumb();
   const cur = {
     file: { path: "spice/projects/orphan-slug/orphan-slug-board.md", name: "orphan-slug-board" },
@@ -380,7 +417,7 @@ momentShim.now = 1718000000000;
 }).then(() => {
   // BC-B-6: file NOT under spice/projects/ — render returns early (no wrap).
   console.log("\n--- Case BC-B-6: file outside spice/projects/ short-circuits ---");
-  const Breadcrumb = loadClass("breadcrumb.js", "Breadcrumb", {});
+  const Breadcrumb = loadClassFromAbs(BREADCRUMB_SRC, "Breadcrumb", _buildBreadcrumbEnv());
   const bc = new Breadcrumb();
   const cur = {
     file: { path: "spice/finance/budgets/2026.md", name: "2026" },
