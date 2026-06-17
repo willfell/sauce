@@ -369,6 +369,24 @@ withTempVault((vault) => {
             seedContent.equals(vaultContent)
         );
     }
+
+    // ===== HC-V01240-SEED-CHROME-* — applyNoteChromeHeal (note-chrome wave 1) =====
+    // The seed carries pre-heal fixtures (SpaceNavButtons block, no Breadcrumb;
+    // meeting note with raw ## H2 content headers). The per-vault heal injects
+    // the Breadcrumb dataviewjs block before SpaceNavButtons and (meeting only)
+    // rewrites the four ## headings to SectionLabel. Asserts run AFTER the
+    // idempotency phase (two installs) so CHROME-6 proves exactly-once injection.
+    const mtg = helpers.readNote(vault, "spice/meetings/notes/2026/06-June/Standup-2026-06-17.md");
+    ok("HC-V01240-SEED-CHROME-1 meeting breadcrumb injected", /class:\s*"Breadcrumb"/.test(mtg));
+    ok("HC-V01240-SEED-CHROME-2 meeting ## Attendees rewritten to SectionLabel",
+       !/^##\s+Attendees\s*$/m.test(mtg) && /SectionLabel[\s\S]*Attendees/.test(mtg));
+    const scr = helpers.readNote(vault, "spice/scratch/2026/06-June/2026-06-17/Scratch-2026-06-17-14-30.md");
+    ok("HC-V01240-SEED-CHROME-3 scratch breadcrumb injected", /class:\s*"Breadcrumb"/.test(scr));
+    const td = helpers.readNote(vault, "spice/to-do/2026/06-June/ToDo-2026-06-17.md");
+    ok("HC-V01240-SEED-CHROME-4 to-do breadcrumb injected", /class:\s*"Breadcrumb"/.test(td));
+    ok("HC-V01240-SEED-CHROME-5 .sauce-backup snapshot exists", fs.existsSync(path.join(vault, ".sauce-backup")));
+    ok("HC-V01240-SEED-CHROME-6 meeting breadcrumb injected exactly once",
+       (mtg.match(/class:\s*"Breadcrumb"/g) || []).length === 1);
 });
 
 // =============================================================================

@@ -128,6 +128,13 @@ module.exports = async function (tp) {
     await applyAppSettings(tp, manifest, installedNow.history, git);
     await applyVaultDefaultPaths(tp, installedNow.history, git);   // NEW v0.102.0 — codify default attachment + new-note paths
     await applyEmptyProjectWikilinkRepair(tp, installedNow.history, git);   // NEW v0.105.0.2 — heals doc-note + section-hub with project: "[[]]" from v0.105.0 substitution bug; per-vault scope so it runs unconditionally
+    // NOTE: applyNoteChromeHeal is NOT wired here (per-vault block) even though
+    // its signature is (tp, history, git) like the heals above. It MUST run
+    // AFTER applyToDoBlueprintMigration (~L1140) — that migration rebuilds
+    // v0.3.3 daily-to-do bodies from a hardcoded block list (_reshapeToV040),
+    // discarding any Breadcrumb injected earlier. Running the chrome heal here
+    // would never converge (reshape strips the breadcrumb on run 1, heal
+    // re-adds it on run 2). Wired post-to-do-migrations instead. See L~1144.
 
     // 1. resolve which items to install + their order
     const { nodes, skipped: missingItems } = resolveDependencies(subscription, manifest);
@@ -480,6 +487,17 @@ module.exports = async function (tp) {
         attempted_at: new Date().toISOString(),
       });
     }
+
+    // 6a3. v0.124.0 (note-chrome wave 1) — inject the Breadcrumb dataviewjs
+    // block into EXISTING meetings/scratch/to-do notes (and rewrite meeting
+    // ## H2 content headers to SectionLabel), so notes created before Task 1's
+    // template edits render the same chrome as new ones. Per-vault scope (runs
+    // once). MUST run HERE — after the install loop — not in the per-vault
+    // block at L130: applyToDoBlueprintMigration (inside installItem) rebuilds
+    // v0.3.3 daily-to-do bodies from a hardcoded block list, discarding any
+    // breadcrumb injected earlier. Running post-loop lets the heal inject into
+    // the FINAL note shape, so a second install is a true no-op (idempotent).
+    await applyNoteChromeHeal(tp, installedNow.history, git);
 
     // 6b. v0.32.0 S3 — aggregate claude_surface[] contributions across
     // subscribed mechanisms + blueprints. Wrapped in its own try/catch so
@@ -3273,6 +3291,108 @@ async function applyEmptyProjectWikilinkRepair(tp, history, git) {
   history?.push({ event: "info", step: "empty_project_wikilink_repair", name: "vault",
                   reason: `repaired ${repaired} note(s)`,
                   git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+}
+
+// _noteChromeFrontmatterType — extracts the frontmatter `type:` value from a
+// markdown body. Mirrors the inline `type:` regex idiom used across the
+// installer (e.g. applyEmptyProjectWikilinkRepair). Returns null when no
+// frontmatter `type:` line is present.
+function _noteChromeFrontmatterType(body) {
+  if (typeof body !== "string") return null;
+  const m = body.match(/^type:\s*["']?([A-Za-z0-9_-]+)["']?\s*$/m);
+  return m ? m[1] : null;
+}
+
+// _healNoteChromeBody — pure, idempotent body transform for the note-chrome
+// wave-1 heal. (1) Injects a Breadcrumb dataviewjs block immediately before the
+// first SpaceNavButtons dataviewjs fence when absent — the Breadcrumb guard
+// (!/Breadcrumb/) makes the inject a no-op on already-healed notes. (2) For
+// meeting notes only, rewrites the four `## H2` content headers to SectionLabel
+// dataviewjs blocks matching the Meeting.md template's args shape. Returns the
+// body unchanged when nothing applies (driver relies on `after === before`).
+function _healNoteChromeBody(body, type) {
+  if (typeof body !== "string") return body;
+  let out = body;
+  // 1. Inject breadcrumb if absent — before the first SpaceNavButtons dataviewjs
+  //    fence (which, for scratch-day, sits after the H1, so this lands after H1).
+  if (!/class:\s*"Breadcrumb"/.test(out)) {
+    const bc = '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "Breadcrumb" });\n```\n\n';
+    const navIdx = out.indexOf('class: "SpaceNavButtons"');
+    if (navIdx !== -1) {
+      const fence = out.lastIndexOf('```dataviewjs', navIdx);
+      if (fence !== -1) out = out.slice(0, fence) + bc + out.slice(fence);
+    }
+  }
+  // 2. meeting only: rewrite "## Heading" content headers to SectionLabel.
+  if (type === "meeting") {
+    const map = [["Attendees", true], ["Agenda", false], ["Notes", false], ["Action Items", false]];
+    for (const [text, top] of map) {
+      const re = new RegExp("(?:^|\\n)(?:---\\s*\\n)?##\\s+" + text.replace(/ /g, "\\s+") + "\\s*\\n");
+      if (re.test(out)) {
+        const args = top ? `[{ text: "${text}", top: true }]` : `[{ text: "${text}" }]`;
+        const sl = '\n```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: ' + args + ' });\n```\n';
+        out = out.replace(re, sl);
+      }
+    }
+  }
+  return out;
+}
+
+// applyNoteChromeHeal — v0.124.0 (note-chrome wave 1). Per-vault scope heal
+// (signature (tp, history, git), wired unconditionally like
+// applyEmptyProjectWikilinkRepair). Task 1 added the Breadcrumb dv.view(...)
+// call to the meetings/scratch/to-do TEMPLATES, so NEW notes get chrome; this
+// heal back-injects it into EXISTING notes (and rewrites meeting ## H2 content
+// headers to SectionLabel) so old + new notes render identically. Idempotent:
+// the Breadcrumb guard + `after === before` short-circuit make re-runs no-ops.
+// Posture mirrors the established heals: per-note try/catch, fails-loud (history
+// warning) but never throws, full git fields on every push, .sauce-backup
+// snapshot before any write. Reuses _listAllMarkdownRecursive.
+async function applyNoteChromeHeal(tp, history, git) {
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const roots = ["spice/meetings", "spice/scratch", "spice/to-do"];
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  let healed = 0, warned = 0;
+  for (const root of roots) {
+    if (!(await adapter.exists(root))) continue;
+    let files;
+    try {
+      files = await _listAllMarkdownRecursive(adapter, root);
+    } catch (e) {
+      warned += 1;
+      history?.push({ event: "warning", step: "note_chrome_heal",
+        reason: `list failed for ${root}: ${e && e.message ? e.message : String(e)}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+      continue;
+    }
+    for (const fpath of files) {
+      try {
+        const before = await adapter.read(fpath);
+        const type = _noteChromeFrontmatterType(before);
+        if (!["meeting", "scratch", "scratch-day", "to-do"].includes(type)) continue;
+        const after = _healNoteChromeBody(before, type);
+        if (after === before) continue;
+        // .sauce-backup snapshot before write (mirrors applyFinanceMigrations).
+        const backupPath = `.sauce-backup/${ts}/${fpath}`;
+        const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+        try { await adapter.mkdir(backupParent); } catch (_e) { /* already exists */ }
+        try { await adapter.write(backupPath, before); } catch (_e) { /* best-effort */ }
+        await adapter.write(fpath, after);
+        healed += 1;
+        history?.push({ event: "info", step: "note_chrome_heal", target: fpath, action: "healed",
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+      } catch (e) {
+        warned += 1;
+        history?.push({ event: "warning", step: "note_chrome_heal",
+          reason: `${fpath}: ${e && e.message ? e.message : String(e)}`,
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+      }
+    }
+  }
+  history?.push({ event: "info", step: "note_chrome_heal", name: "vault",
+    reason: `healed ${healed}; ${warned} warning(s)`,
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
 }
 
 // applyNewEntityButtons — v0.46.0 S2. Aggregates this item's
