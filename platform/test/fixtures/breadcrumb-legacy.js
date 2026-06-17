@@ -1,3 +1,8 @@
+// breadcrumb-legacy.js — frozen snapshot of the v0.122.0 project-blueprint
+// helpers/breadcrumb.js, captured at v0.123.0 Task 1 for the project parity
+// proof in run-breadcrumb.js. Do NOT modify — this is the byte-identical
+// oracle for the migration. If a future cycle changes Breadcrumb's rendered
+// output, update this snapshot in the same commit + bump the parity expectations.
 // breadcrumb.js — v1.17.0 helper (sauce v0.103.0 S1).
 //
 // Emits a clickable Project / Section / Sub-section / Doc trail at the top of

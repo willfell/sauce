@@ -176,7 +176,7 @@
       "owner": { "type": "blueprint", "name": "project" },
       "source": "platform/blueprints/project/manifest.json",
       "consumers": [
-        "platform/blueprints/project/helpers/breadcrumb.js",
+        "platform/mechanisms/breadcrumb/breadcrumb.js",
         "platform/blueprints/project/helpers/project-docs-index.js",
         "platform/blueprints/project/helpers/section-hub.js"
       ],
@@ -262,6 +262,16 @@
         "platform/blueprints/to-do/helpers/todo-leaf-actions.js"
       ],
       "notes": "v0.116.0 — Per-project To-Do note frontmatter (type: project-todo). Validated via the project manifest's rule_fragment with frontmatter_branch on type. Backfilled by applyProjectTodoBackfill in install.js."
+    },
+    {
+      "id": "breadcrumb-registry",
+      "kind": "data-file",
+      "owner": { "type": "mechanism", "name": "breadcrumb" },
+      "source": "ranch/breadcrumb-registry.json",
+      "consumers": [
+        "platform/mechanisms/breadcrumb/breadcrumb.js"
+      ],
+      "notes": "Aggregated at install time from per-blueprint manifest `breadcrumb: { types: { ... } }` blocks via applyBreadcrumb in install.js. First-match-wins over contributions{} keyed by current-note `type` frontmatter. Schema: { schema_version:1, contributions:{ <bp>:{ types:{ <type>:{ ancestors[], current? } } } } } where each segment has { when?:{}, label, link? } with `|`-chain labels + `{atom}` template links + `fm:`/`path:`/`file:`/`lit:` + `slug:` transform resolver grammar. See Docs/plans/2026-06-17-v0.123.0-breadcrumb-mechanism-design.md."
     }
   ]
 }

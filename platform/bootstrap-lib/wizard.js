@@ -52,6 +52,11 @@ const DEFAULT_MECHANISMS_CHECKED = [
                      // this release; pre-include so fresh-vault bootstrap
                      // doesn't skip them. Same class of bug as the open-helpers
                      // entry above.
+    "breadcrumb",    // v0.123.0 — project + to-do blueprints (both in the
+                     // default blueprint set) depend on breadcrumb since this
+                     // release; pre-include so fresh-vault bootstrap doesn't
+                     // skip them. Same class of bug as the section-label entry
+                     // above.
     "nav-buttons",
     "cards",
     "accent-button",
