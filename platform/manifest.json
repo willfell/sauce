@@ -82,6 +82,11 @@
       "version": "0.1.2",
       "path": "mechanisms/accent-button"
     },
+    {
+      "name": "section-label",
+      "version": "0.1.0",
+      "path": "mechanisms/section-label"
+    },
     { "name": "open-helpers", "version": "0.1.1", "path": "mechanisms/open-helpers" },
     {
       "name": "icons",
