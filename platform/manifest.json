@@ -68,6 +68,11 @@
       "path": "mechanisms/backlink-panel"
     },
     {
+      "name": "breadcrumb",
+      "version": "0.1.0",
+      "path": "mechanisms/breadcrumb"
+    },
+    {
       "name": "nav-buttons",
       "version": "2.7.3",
       "path": "mechanisms/nav-buttons"
