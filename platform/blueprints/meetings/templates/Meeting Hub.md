@@ -24,7 +24,9 @@ await dv.view("{{views_path}}/customjs-guard", { class: "EntityCreate", args: [{
 
 ---
 
-## Today's Meetings
+```dataviewjs
+await dv.view("{{views_path}}/customjs-guard", { class: "SectionLabel", args: [{ text: "Today's Meetings" }] });
+```
 
 ```dataviewjs
 await dv.view("{{views_path}}/customjs-guard", { class: "MeetingsHubCards" });
