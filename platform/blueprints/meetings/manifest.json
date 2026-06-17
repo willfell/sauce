@@ -11,9 +11,22 @@
     { "name": "accent-button",    "range": ">=0.1.0" },
     { "name": "convenience",      "range": ">=0.1.0" },
     { "name": "people-rendering", "range": ">=0.1.0" },
-    { "name": "cards",            "range": ">=0.2.4" }
+    { "name": "cards",            "range": ">=0.2.4" },
+    { "name": "breadcrumb",       "range": ">=0.1.0" },
+    { "name": "section-label",    "range": ">=0.1.0" }
   ],
   "customjs_classes": ["MeetingsHubCards"],
+  "breadcrumb": {
+    "types": {
+      "meeting": {
+        "ancestors": [
+          { "label": "lit:Meetings" },
+          { "label": "path:4" }
+        ],
+        "current": { "label": "file:basename" }
+      }
+    }
+  },
   "files": [
     { "source": "templates/Meeting.md",         "dest": "{{templates_path}}/Meeting.md" },
     { "source": "templates/Meeting Hub.md",     "dest": "{{templates_path}}/Meeting Hub.md" },

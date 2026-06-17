@@ -65,12 +65,16 @@ cssclasses:
 ---
 
 ```dataviewjs
+await dv.view("{{views_path}}/customjs-guard", { class: "Breadcrumb" });
+```
+
+```dataviewjs
 await dv.view("{{views_path}}/customjs-guard", { class: "SpaceNavButtons" });
 ```
 
----
-
-## Attendees
+```dataviewjs
+await dv.view("{{views_path}}/customjs-guard", { class: "SectionLabel", args: [{ text: "Attendees", top: true }] });
+```
 
 ```dataviewjs
 await dv.view("{{views_path}}/customjs-guard", {
@@ -87,19 +91,17 @@ if (attendees.length === 0) {
   tR += `-\n`;
 } -%>
 
----
-
-## Agenda
+```dataviewjs
+await dv.view("{{views_path}}/customjs-guard", { class: "SectionLabel", args: [{ text: "Agenda" }] });
+```
 
 -
 
----
+```dataviewjs
+await dv.view("{{views_path}}/customjs-guard", { class: "SectionLabel", args: [{ text: "Notes" }] });
+```
 
-## Notes
-
-
-
----
-
-## Action Items
+```dataviewjs
+await dv.view("{{views_path}}/customjs-guard", { class: "SectionLabel", args: [{ text: "Action Items" }] });
+```
 

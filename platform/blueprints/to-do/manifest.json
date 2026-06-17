@@ -34,6 +34,17 @@
       "range": ">=0.1.0"
     }
   ],
+  "breadcrumb": {
+    "types": {
+      "to-do": {
+        "ancestors": [
+          { "label": "lit:To-Do" },
+          { "label": "path:3" }
+        ],
+        "current": { "label": "file:basename" }
+      }
+    }
+  },
   "customjs_classes": [
     "ToDoHubActions",
     "ToDoLeafActions",
