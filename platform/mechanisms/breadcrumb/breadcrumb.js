@@ -1,113 +1,257 @@
-// breadcrumb.js — v1.17.0 helper (sauce v0.103.0 S1).
+// breadcrumb.js — breadcrumb mechanism v0.1.0 (promoted from the project
+// blueprint helper at sauce v0.123.0; originally shipped at sauce v0.103.0 S1).
 //
-// Emits a clickable Project / Section / Sub-section / Doc trail at the top of
-// any project-related note. Reads the current note's frontmatter (type, project,
-// project_slug, section, sub_section, parent_section, depth) and walks the
-// parent chain to construct the wikilink trail.
+// Shared rendering primitive. customJS.Breadcrumb.render(dv) renders the
+// clickable trail at the top of any note whose `type` frontmatter is declared
+// in ranch/breadcrumb-registry.json. The registry is aggregated at install
+// time from per-blueprint manifest `breadcrumb: { types: { ... } }` blocks
+// via applyBreadcrumb() in install.js — the mechanism itself is purely
+// generic and knows zero blueprint paths.
 //
-// Consumed by Docs.md, Section Hub (depth 1 + 2), and Doc Note templates. The
-// foundational helper of v0.103.0's hierarchical navigation tree.
+// Resolver grammar (see Docs/plans/2026-06-17-v0.123.0-breadcrumb-mechanism-design.md §2):
+//   • Atoms:      fm:<field> / path:<n> / file:basename|stem / lit:<text>
+//   • Transform:  slug:<atom>  (single-level slugify)
+//   • Chains:     <atom>|<atom>|...  (first non-empty wins)
+//   • Templates:  "<text>{<chain>}<text>{<chain>}..."  (any empty slot → null)
+//   • Predicates: when: { "fm:<field>": "present"|"absent"|"<literal>" }
+//                 (AND-conjoined across keys)
 //
-// Type branches (dispatch on p.type — see below):
-//   • project       → just the project label (no trail).
-//   • docs-hub      → Project / Docs.
-//   • section-hub   → Project / Docs / [Section /] CurrentSection (depth-aware).
-//   • doc-note      → Project / Docs / Section [/ Sub-section] / Doc.
+// Registry shape:
+//   {
+//     "schema_version": 1,
+//     "contributions": {
+//       "<blueprint>": {
+//         "types": {
+//           "<type>": {
+//             "ancestors": [ { when?, label, link? }, ... ],
+//             "current":   { label, link? }   // optional
+//           }
+//         }
+//       }
+//     }
+//   }
 //
-// Each prior segment renders as an Obsidian wikilink (`[[${vaultPath}|${label}]]`
-// markdown form) so hover-preview, click-to-open, and graph-view all wire
-// through natively; the final segment renders as a bold un-clickable label
-// for the current note. We dispatch via dv.el to mount the trail as a single
-// inline span at the top of the rendering view.
+// First-match-wins across Object.values(contributions): if two blueprints
+// declare the same `type`, the first one in iteration order wins; a one-time
+// console.warn is logged. Frontmatter type values are globally unique today.
 class Breadcrumb {
   async render(dv) {
     const cur = dv.current();
     if (!cur || !cur.file) return;
 
-    // v0.109.0 S7 — accept path-based fallback when frontmatter doesn't carry
-    // project / project_slug. Map / Board / Task notes don't have those fields;
-    // the file path itself (spice/projects/<slug>/...) is authoritative.
-    let projectName = this._stripLink(cur.project) || cur.project_name;
-    let projectSlug = cur.project_slug;
-    if (!projectName || !projectSlug) {
-      const resolved = this._resolveProjectFromPath(dv, cur.file.path);
-      if (resolved) {
-        projectSlug = projectSlug || resolved.projectSlug;
-        projectName = projectName || resolved.projectName;
+    const registry = await this._loadRegistry();
+    const entry = this._findTypeEntry(registry, cur);
+    if (!entry) return;
+
+    const segments = [];
+
+    // Ancestors — render in order, skip when-gated entries that fail predicates.
+    const ancestors = Array.isArray(entry.ancestors) ? entry.ancestors : [];
+    for (const anc of ancestors) {
+      if (anc.when && !this._evalWhen(anc.when, dv)) continue;
+      const label = this._resolveChain(anc.label || "", dv);
+      if (!label) continue; // empty label → drop this ancestor segment
+      let link = null;
+      if (anc.link) link = this._resolveTemplate(anc.link, dv);
+      if (link) {
+        segments.push(this._link(label, link));
+      } else {
+        // link template failed (or absent) → plain bold label
+        segments.push(this._currentLabel(label));
       }
     }
-    if (!projectName || !projectSlug) return;
 
-    const parts = [];
-    parts.push(this._link(projectName, `spice/projects/${projectSlug}/${projectName}.md`));
-
-    // Dispatch on p.type (`cur.type` here; the type-branch labels echo the
-    // p.type values listed in the header docstring above):
-    //   - project / docs-hub / section-hub / doc-note / map / kanban / task-note.
-    if (cur.type === "project") { /* just project */ }
-    else if (cur.type === "docs-hub") {
-      parts.push(this._currentLabel("Docs"));
-    } else if (cur.type === "section-hub") {
-      parts.push(this._link("Docs", `spice/projects/${projectSlug}/docs/Docs.md`));
-      if (cur.depth === 2 && cur.parent_section) {
-        const parentName = this._stripLink(cur.parent_section);
-        const parentSlug = this._slugify(parentName);
-        parts.push(this._link(parentName, `spice/projects/${projectSlug}/docs/${parentSlug}/${parentName}.md`));
-      }
-      parts.push(this._currentLabel(cur.section || cur.file.name));
-    } else if (cur.type === "doc-note") {
-      parts.push(this._link("Docs", `spice/projects/${projectSlug}/docs/Docs.md`));
-      if (cur.section) {
-        const secName = this._stripLink(cur.section);
-        const secSlug = this._slugify(secName);
-        parts.push(this._link(secName, `spice/projects/${projectSlug}/docs/${secSlug}/${secName}.md`));
-        if (cur.sub_section) {
-          const subName = this._stripLink(cur.sub_section);
-          const subSlug = this._slugify(subName);
-          parts.push(this._link(subName, `spice/projects/${projectSlug}/docs/${secSlug}/${subSlug}/${subName}.md`));
+    // Current — optional. Three shapes:
+    //   1. omitted → trail ends at last ancestor
+    //   2. { label } → plain bold (label resolves; fall back to file:basename if empty)
+    //   3. { label, link } → wikilink (falls back to plain bold if link fails)
+    if (entry.current) {
+      let label = this._resolveChain(entry.current.label || "", dv);
+      if (!label) label = this._resolveAtom("file:basename", dv);
+      if (label) {
+        let link = null;
+        if (entry.current.link) link = this._resolveTemplate(entry.current.link, dv);
+        if (link) {
+          segments.push(this._link(label, link));
+        } else {
+          segments.push(this._currentLabel(label));
         }
       }
-      parts.push(this._currentLabel(cur.file.name));
-    } else if (cur.type === "map") {
-      // v0.109.0 S7 — Project Map sits one level below the project hub.
-      parts.push(this._currentLabel("Map"));
-    } else if (cur.type === "kanban") {
-      // v0.109.0 S7 — Project Board (the kanban-plugin board) sits one level
-      // below the project hub. cur.type is "kanban" per the v0.106.x conventions.
-      parts.push(this._currentLabel("Board"));
-    } else if (cur.type === "task-note") {
-      // v0.109.0 S7 — Task notes are children of the Project Board. Walking the
-      // task_parent chain isn't worth the complexity here (it can be deep + can
-      // race with the kanban-status-sync helper); the user's natural drill is
-      // Project → Board → Task, so we render that.
-      parts.push(this._link("Board", `spice/projects/${projectSlug}/${projectSlug}-board.md`));
-      parts.push(this._currentLabel(cur.file.name));
     }
+
+    if (segments.length === 0) return;
 
     const wrap = dv.el("div", "", { cls: "project-breadcrumb" });
     wrap.style.cssText = "font-size: 0.85em; color: var(--text-muted); margin-bottom: 8px;";
-    wrap.innerHTML = parts.join(' <span style="opacity:0.5;"> / </span> ');
+    wrap.innerHTML = segments.join(' <span style="opacity:0.5;"> / </span> ');
   }
 
-  // v0.109.0 S7 — path-based projectSlug + projectName resolver. Used when
-  // frontmatter is missing the project / project_slug fields (Map / Board /
-  // Task notes don't carry them by convention). Returns null when the file
-  // path doesn't sit under spice/projects/<slug>/...
-  _resolveProjectFromPath(dv, filePath) {
-    const m = String(filePath || "").match(/^spice\/projects\/([^\/]+)\//);
-    if (!m) return null;
-    const projectSlug = m[1];
+  // ── Registry load ──────────────────────────────────────────────────────
+  // Read ranch/breadcrumb-registry.json via app.vault.adapter.read. Cache on
+  // the instance so a single render pass doesn't re-read. Tolerate missing /
+  // malformed silently (render nothing).
+  async _loadRegistry() {
+    if (this._registryCache !== undefined) return this._registryCache;
+    const empty = { schema_version: 1, contributions: {} };
+    const REGISTRY_PATH = "ranch/breadcrumb-registry.json";
     try {
-      const hubs = dv.pages(`"spice/projects/${projectSlug}"`)
-        .where((p) => p.type === "project");
-      if (hubs.length > 0) {
-        return { projectSlug, projectName: String(hubs[0].file.name) };
+      // global `app` provided by Obsidian at runtime
+      const raw = await app.vault.adapter.read(REGISTRY_PATH);
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object" && parsed.contributions && typeof parsed.contributions === "object") {
+          this._registryCache = parsed;
+          return parsed;
+        }
+        this._registryCache = empty;
+        return empty;
+      } catch (_e) {
+        this._registryCache = empty;
+        return empty;
       }
-    } catch (_e) {}
-    // Fall back to slug-as-name when the hub note isn't discoverable.
-    return { projectSlug, projectName: projectSlug };
+    } catch (_e) {
+      // ENOENT / missing file → empty registry
+      this._registryCache = empty;
+      return empty;
+    }
   }
 
+  // First-match-wins scan over contributions for cur.type. One-time
+  // console.warn on collision (multiple contributions declaring the same type).
+  _findTypeEntry(registry, cur) {
+    const type = cur && cur.type;
+    if (!type) return null;
+    let found = null;
+    let foundSource = null;
+    const collisions = [];
+    for (const [source, contribution] of Object.entries(registry.contributions || {})) {
+      const types = contribution && contribution.types;
+      if (!types || typeof types !== "object") continue;
+      const entry = types[type];
+      if (entry) {
+        if (!found) {
+          found = entry;
+          foundSource = source;
+        } else {
+          collisions.push(source);
+        }
+      }
+    }
+    if (collisions.length > 0) {
+      if (!Breadcrumb._warnedCollisions) Breadcrumb._warnedCollisions = new Set();
+      const key = `${type}:${foundSource}:${collisions.join(",")}`;
+      if (!Breadcrumb._warnedCollisions.has(key)) {
+        Breadcrumb._warnedCollisions.add(key);
+        try {
+          console.warn(`[breadcrumb] type "${type}" declared by multiple contributions; using ${foundSource}, ignoring ${collisions.join(", ")}`);
+        } catch (_e) {}
+      }
+    }
+    return found;
+  }
+
+  // ── Resolver primitives ────────────────────────────────────────────────
+  // Atom: switch on prefix. Returns string ("" if missing/empty).
+  _resolveAtom(atom, dv) {
+    if (!atom || typeof atom !== "string") return "";
+    // slug:<atom> — single-level transform.
+    if (atom.startsWith("slug:")) {
+      const inner = atom.slice(5);
+      return this._slugify(this._resolveAtom(inner, dv));
+    }
+    if (atom.startsWith("fm:")) {
+      const field = atom.slice(3);
+      const cur = dv.current();
+      if (!cur) return "";
+      return this._stripLink(cur[field]);
+    }
+    if (atom.startsWith("path:")) {
+      // Indexed 0-based — `spice/projects/<slug>/...` → path:2 = <slug>. The
+      // design-doc examples (e.g. `spice/projects/{path:2}/...`) require this
+      // indexing for parity with the legacy helper's projectSlug resolution.
+      const n = parseInt(atom.slice(5), 10);
+      if (!Number.isFinite(n) || n < 0) return "";
+      const cur = dv.current();
+      const filePath = (cur && cur.file && cur.file.path) || "";
+      const segs = String(filePath).split("/");
+      const v = segs[n];
+      return v == null ? "" : String(v);
+    }
+    if (atom === "file:basename" || atom === "file:stem") {
+      const cur = dv.current();
+      return (cur && cur.file && cur.file.name) ? String(cur.file.name) : "";
+    }
+    if (atom.startsWith("lit:")) {
+      return atom.slice(4);
+    }
+    return "";
+  }
+
+  // Chain: <atom>|<atom>|... — first non-empty atom wins.
+  _resolveChain(chain, dv) {
+    if (!chain || typeof chain !== "string") return "";
+    const atoms = chain.split("|");
+    for (const a of atoms) {
+      const v = this._resolveAtom(a, dv);
+      if (v !== "" && v != null) return v;
+    }
+    return "";
+  }
+
+  // Template: "<text>{<chain>}<text>{<chain>}..." — any empty slot → null.
+  _resolveTemplate(tpl, dv) {
+    if (!tpl || typeof tpl !== "string") return null;
+    let failed = false;
+    const out = tpl.replace(/\{([^}]+)\}/g, (_m, inner) => {
+      const v = this._resolveChain(inner, dv);
+      if (v === "" || v == null) { failed = true; return ""; }
+      return v;
+    });
+    if (failed) return null;
+    return out;
+  }
+
+  // Predicate evaluation. For each key "fm:<field>", read FM value and
+  // compare to predicate. AND-conjoined across keys.
+  //   "present"  → non-empty after wikilink-strip
+  //   "absent"   → empty / missing
+  //   "<literal>" → exact match (after wikilink-strip)
+  _evalWhen(whenObj, dv) {
+    if (!whenObj || typeof whenObj !== "object") return true;
+    for (const [key, pred] of Object.entries(whenObj)) {
+      if (!key.startsWith("fm:")) {
+        // unknown predicate key → fail closed
+        return false;
+      }
+      const field = key.slice(3);
+      const cur = dv.current();
+      const raw = cur ? cur[field] : undefined;
+      const stripped = this._stripLink(raw);
+      if (pred === "present") {
+        // Numbers / booleans count as present even when _stripLink returns "".
+        const isPresent = stripped !== "" && stripped != null
+          ? true
+          : (raw !== undefined && raw !== null && raw !== "");
+        if (!isPresent) return false;
+      } else if (pred === "absent") {
+        const isPresent = stripped !== "" && stripped != null
+          ? true
+          : (raw !== undefined && raw !== null && raw !== "");
+        if (isPresent) return false;
+      } else {
+        // Literal compare — prefer the wikilink-stripped form for strings, but
+        // fall back to the raw FM value for numbers / booleans so `depth: 2`
+        // matches `"fm:depth": "2"`.
+        const candidate = (stripped !== "" && stripped != null)
+          ? String(stripped)
+          : (raw === undefined || raw === null ? "" : String(raw));
+        if (candidate !== String(pred)) return false;
+      }
+    }
+    return true;
+  }
+
+  // ── HTML primitives (preserved byte-for-byte from legacy) ──────────────
   // Emit an Obsidian-native wikilink as an anchor with the canonical
   // `[[${vaultPath}|${label}]]` data-href shape — click + hover-preview wire
   // through Obsidian's openLinkText + internal-link handlers natively.
