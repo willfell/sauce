@@ -283,11 +283,7 @@
             "section-hub"
           ]
         },
-        "body_template": "ranch/templates/Template, Section Hub.md",
-        "render_in": {
-          "kind": "hub",
-          "target_path": "ranch/templates/Template, Docs Hub.md"
-        }
+        "body_template": "ranch/templates/Template, Section Hub.md"
       },
       {
         "blueprint": "project",
@@ -332,11 +328,7 @@
             "section-hub"
           ]
         },
-        "body_template": "ranch/templates/Template, Section Hub.md",
-        "render_in": {
-          "kind": "hub",
-          "target_path": "ranch/templates/Template, Section Hub.md"
-        }
+        "body_template": "ranch/templates/Template, Section Hub.md"
       }
     ],
     "people": [
@@ -656,11 +648,7 @@
           "section-hub"
         ]
       },
-      "body_template": "ranch/templates/Template, Section Hub.md",
-      "render_in": {
-        "kind": "hub",
-        "target_path": "ranch/templates/Template, Docs Hub.md"
-      }
+      "body_template": "ranch/templates/Template, Section Hub.md"
     },
     {
       "blueprint": "project",
@@ -705,11 +693,7 @@
           "section-hub"
         ]
       },
-      "body_template": "ranch/templates/Template, Section Hub.md",
-      "render_in": {
-        "kind": "hub",
-        "target_path": "ranch/templates/Template, Section Hub.md"
-      }
+      "body_template": "ranch/templates/Template, Section Hub.md"
     },
     {
       "blueprint": "people",

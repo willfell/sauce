@@ -393,6 +393,64 @@ withTempVault((vault) => {
        sd.indexOf("# ") < sd.indexOf('class: "Breadcrumb"') &&
        sd.indexOf('class: "Breadcrumb"') < sd.indexOf('class: "SpaceNavButtons"'));
 
+    // ===== HC-V01241-SEED-DBLDIV-* — double-divider cleanup (v0.124.1) =====
+    // The seed meeting fixture carries the real old Meeting.md shape: each `##`
+    // content header is preceded by a `---` divider SHIELDED by a blank line
+    // (...```\n\n---\n\n## Attendees). v0.124.0's H2->SectionLabel conversion only
+    // dropped a `---` DIRECTLY adjacent to the heading, so the blank-shielded
+    // `---` survived — leaving a markdown `---` PLUS the SectionLabel's own
+    // hairline (a double divider) before Agenda/Notes/Action Items. The v0.124.1
+    // normalization pass removes a fence-depth-0 `---` whose next non-blank
+    // content opens a SectionLabel dataviewjs block, leaving one blank line.
+    // `mtg` is the post-two-install state (asserts run after the idempotency
+    // phase), so a clean `mtg` here also proves the cleanup is idempotent.
+    //
+    // Robust line-scan: does any `---` line have a SectionLabel dataviewjs block
+    // as its next non-blank content (skipping blank lines)?
+    const dividerBeforeSectionLabel = (txt) => {
+        const ls = txt.split("\n");
+        for (let i = 0; i < ls.length; i++) {
+            if (!/^---\s*$/.test(ls[i])) continue;
+            let j = i + 1;
+            while (j < ls.length && ls[j].trim() === "") j++;
+            if (j < ls.length && /^\s*```dataviewjs\s*$/.test(ls[j])) {
+                // peek into the fence body for SectionLabel before it closes
+                for (let k = j + 1; k < ls.length; k++) {
+                    if (/^\s*```\s*$/.test(ls[k])) break;
+                    if (/SectionLabel/.test(ls[k])) return true;
+                }
+            }
+        }
+        return false;
+    };
+    ok("HC-V01241-SEED-DBLDIV-1 no markdown --- precedes a SectionLabel block",
+       !dividerBeforeSectionLabel(mtg));
+    ok("HC-V01241-SEED-DBLDIV-2 the four SectionLabels survive the cleanup",
+       /SectionLabel[\s\S]*?Attendees/.test(mtg) &&
+       /SectionLabel[\s\S]*?Agenda/.test(mtg) &&
+       /SectionLabel[\s\S]*?Notes/.test(mtg) &&
+       /SectionLabel[\s\S]*?Action Items/.test(mtg));
+    ok("HC-V01241-SEED-DBLDIV-3 idempotent: one breadcrumb + no leftover divider after two installs",
+       (mtg.match(/class:\s*"Breadcrumb"/g) || []).length === 1 &&
+       !dividerBeforeSectionLabel(mtg));
+
+    // DBLDIV-4/5 — frontmatter-delimiter safety (content-safety guard, v0.124.1).
+    // A nav-less meeting note (NO SpaceNavButtons block, so the breadcrumb inject
+    // no-ops) whose FIRST body element is `## Notes` gets that heading rewritten
+    // to a SectionLabel block as the first body element. Without the guard, the
+    // double-divider cleanup would see the YAML frontmatter-closing `---` sitting
+    // immediately before that SectionLabel block and EAT it — leaving only the
+    // opening `---` (unterminated frontmatter, corrupted note). The fmEnd guard
+    // refuses to drop any `---` at or before the leading frontmatter close.
+    const navless = helpers.readNote(vault, "spice/meetings/notes/2026/06-June/Navless-2026-06-17.md");
+    const navlessFm = helpers.parseFrontmatter(navless).frontmatter;
+    ok("HC-V01241-SEED-DBLDIV-4 nav-less meeting frontmatter still closed + heading converted",
+       navlessFm.type === "meeting" &&
+       !/^##\s+Notes\s*$/m.test(navless) &&
+       /SectionLabel[\s\S]*?Notes/.test(navless));
+    ok("HC-V01241-SEED-DBLDIV-5 nav-less meeting prose preserved verbatim",
+       navless.includes("- some user note line") && navless.includes("- another line"));
+
     // ===== HC-V01240-SEED-PNAME-* — applyProjectNameBackfill (note-chrome wave 1) =====
     // The seed carries a mixed-case project ("My Cool Project" under slug
     // my-cool-project) whose Project Map note has NO project_name field. The
@@ -1648,6 +1706,119 @@ async function runEntityCreateMigrateFamily() {
     }
 }
 
+// ===== HC-V01241-SEED-SECHUB-* — section-hub redundant entity-create cleanup =====
+//
+// v0.124.1 Task B2. The committed Reference.md fixture under
+// Legacy Project/docs/reference/ carries the two standalone "+ New Section" /
+// "+ New Sub-Section" entity-create blocks (pre-v0.124.1 deployed shape) plus
+// the SectionHub view block, breadcrumb chrome, and hand-written user content.
+// applySectionHubEntityCreateCleanup must strip ONLY the two marker blocks,
+// preserving the SectionHub view + breadcrumb + user prose, and be idempotent.
+async function runSectionHubCleanupFamily() {
+    const { applySectionHubEntityCreateCleanup } = require("../install.js");
+
+    const shRoot = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-sechub-mig-"));
+    try {
+        const LEGACY_PROJ_DIR = "spice/projects/Legacy Project";
+        const REF_REL = `${LEGACY_PROJ_DIR}/docs/reference/Reference.md`;
+        const SEED_REF = path.join(SEED_DIR, REF_REL);
+
+        // Copy just the fixture note into the throwaway vault.
+        const destRef = path.join(shRoot, REF_REL);
+        fs.mkdirSync(path.dirname(destRef), { recursive: true });
+        fs.copyFileSync(SEED_REF, destRef);
+
+        const adapter = makeFsAdapter(shRoot);
+        const tp = { app: { vault: { adapter } } };
+        const git = { commit: "test", tag: "test", dirty: false };
+        const variables = { views_path: "ranch/views", vault_identity_tag: "seed-test-vault" };
+        const manifest = { name: "project" };
+        const history = [];
+
+        // Sanity: the fixture starts WITH both standalone markers.
+        const preBody = fs.readFileSync(destRef, "utf8");
+        ok(
+            "HC-V01241-SEED-SECHUB-0a fixture starts with // entity-create:section-hub marker",
+            preBody.includes("// entity-create:section-hub")
+        );
+        ok(
+            "HC-V01241-SEED-SECHUB-0b fixture starts with // entity-create:sub-section-hub marker",
+            preBody.includes("// entity-create:sub-section-hub")
+        );
+
+        // ----- Pass 1: heal -----
+        await applySectionHubEntityCreateCleanup(tp, manifest, variables, history, git);
+
+        const afterBody = fs.readFileSync(destRef, "utf8");
+        ok(
+            "HC-V01241-SEED-SECHUB-1 section-hub standalone block removed (no // entity-create:section-hub)",
+            !afterBody.includes("// entity-create:section-hub")
+        );
+        ok(
+            "HC-V01241-SEED-SECHUB-2 sub-section-hub standalone block removed (no // entity-create:sub-section-hub)",
+            !afterBody.includes("// entity-create:sub-section-hub")
+        );
+        ok(
+            "HC-V01241-SEED-SECHUB-3 SectionHub view block preserved",
+            /class:\s*["']SectionHub["']/.test(afterBody)
+        );
+        ok(
+            "HC-V01241-SEED-SECHUB-4 Breadcrumb chrome preserved",
+            /class:\s*["']Breadcrumb["']/.test(afterBody)
+        );
+        ok(
+            "HC-V01241-SEED-SECHUB-5 hand-written user content preserved",
+            afterBody.includes("Some hand-written user notes that must survive the heal.")
+        );
+        ok(
+            "HC-V01241-SEED-SECHUB-6 EntityCreate standalone invocations gone from body",
+            !/instance:\s*["']section-hub["']/.test(afterBody)
+                && !/instance:\s*["']sub-section-hub["']/.test(afterBody)
+        );
+        ok(
+            "HC-V01241-SEED-SECHUB-7 .sauce-backup snapshot of the original written",
+            (() => {
+                const root = path.join(shRoot, ".sauce-backup");
+                if (!fs.existsSync(root)) return false;
+                // Walk for a backed-up copy carrying the original markers.
+                const stack = [root];
+                while (stack.length) {
+                    const cur = stack.pop();
+                    for (const ent of fs.readdirSync(cur, { withFileTypes: true })) {
+                        const child = path.join(cur, ent.name);
+                        if (ent.isDirectory()) stack.push(child);
+                        else if (ent.name === "Reference.md"
+                            && fs.readFileSync(child, "utf8").includes("// entity-create:section-hub")) {
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            })()
+        );
+
+        // ----- Pass 2: idempotency -----
+        const beforeSecond = fs.readFileSync(destRef, "utf8");
+        const history2 = [];
+        await applySectionHubEntityCreateCleanup(tp, manifest, variables, history2, git);
+        const afterSecond = fs.readFileSync(destRef, "utf8");
+        ok(
+            "HC-V01241-SEED-SECHUB-8 second invocation byte-identical (idempotent, no re-write)",
+            beforeSecond === afterSecond
+        );
+        ok(
+            "HC-V01241-SEED-SECHUB-9 second pass logs the file as untouched (no second blocks_stripped)",
+            !history2.some(h => h && h.action === "blocks_stripped")
+        );
+    } finally {
+        if (KEEP) {
+            console.log(`  KEEP_SEED_VAULT=1: ${shRoot}`);
+        } else {
+            try { fs.rmSync(shRoot, { recursive: true, force: true }); } catch (e) {}
+        }
+    }
+}
+
 // The MIGRATE families are async (the migrations are async). Run them to
 // completion, then emit the final tally + exit code so all asserts are counted.
 runMigrateFamily()
@@ -1673,6 +1844,12 @@ runMigrateFamily()
         console.log(`  FAIL HC-V01190-EC-SEED-MIGRATE-FAMILY threw — ${e && e.message}`);
         fail++;
         failures.push("HC-V01190-EC-SEED-MIGRATE-FAMILY");
+    })
+    .then(() => runSectionHubCleanupFamily())
+    .catch((e) => {
+        console.log(`  FAIL HC-V01241-SEED-SECHUB-FAMILY threw — ${e && e.message}`);
+        fail++;
+        failures.push("HC-V01241-SEED-SECHUB-FAMILY");
     })
     .finally(() => {
         console.log("");

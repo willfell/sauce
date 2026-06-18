@@ -93,7 +93,7 @@
     },
     {
       "name": "daily",
-      "version": "0.13.7"
+      "version": "0.13.8"
     },
     {
       "name": "meetings",
@@ -109,7 +109,7 @@
     },
     {
       "name": "project",
-      "version": "1.25.0"
+      "version": "1.25.1"
     },
     {
       "name": "to-do",

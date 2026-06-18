@@ -8391,7 +8391,7 @@ async function caseHCV0891Versions() {
   // B: daily manifest pin
   const dailyMan = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "blueprints/daily/manifest.json"), "utf8"));
-  assertEqual(dailyMan.version, "0.13.7", "HC-V0891-VERSION-B: daily pin = 0.13.7");
+  assertEqual(dailyMan.version, "0.13.8", "HC-V0891-VERSION-B: daily pin = 0.13.8");
 
   // C: workshop manifest pin + package.json
   const platformMan = JSON.parse(fs.readFileSync(
@@ -12688,17 +12688,27 @@ async function caseV0110FinanceDebtAutoScaffold() {
 }
 
 async function caseV0110ProjectTemplateSentinels() {
-  console.log("\n--- Case V0110-PROJ-SENT: project Docs Hub + Section Hub templates carry entity-create sentinels ---");
+  console.log("\n--- Case V0110-PROJ-SENT: project Docs Hub keeps the doc-note sentinel; Section Hub drops the redundant section/sub-section entity-create blocks (v0.124.1 Task B2) ---");
   const docsHub = fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/project/templates/Docs Hub.md"), "utf8");
   const sectionHub = fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/project/templates/Section Hub.md"), "utf8");
   assertTrue("V0110-PROJ-SENT-1: Docs Hub.md has // entity-create:doc-note sentinel",
     /\/\/\s*entity-create:doc-note/.test(docsHub));
-  assertTrue("V0110-PROJ-SENT-2: Section Hub.md has // entity-create:section-hub sentinel",
-    /\/\/\s*entity-create:section-hub/.test(sectionHub));
-  assertTrue("V0110-PROJ-SENT-3: Section Hub.md has // entity-create:sub-section-hub sentinel",
-    /\/\/\s*entity-create:sub-section-hub/.test(sectionHub));
+  // v0.124.1 Task B2: the standalone "+ New Section" / "+ New Sub-Section"
+  // entity-create blocks are removed from the Section Hub template — the
+  // SectionHub view renders "+ New Doc" / "+ New Sub-Section" inline, and the
+  // Docs hub renders "+ New Section" inline. Asserts inverted accordingly.
+  assertTrue("V0110-PROJ-SENT-2: Section Hub.md no longer ships the standalone // entity-create:section-hub block (v0.124.1 Task B2)",
+    !/\/\/\s*entity-create:section-hub/.test(sectionHub));
+  assertTrue("V0110-PROJ-SENT-3: Section Hub.md no longer ships the standalone // entity-create:sub-section-hub block (v0.124.1 Task B2)",
+    !/\/\/\s*entity-create:sub-section-hub/.test(sectionHub));
+  // Sanity: the SectionHub view (which provides the inline create buttons) and
+  // the Breadcrumb chrome both survive the block removal.
+  assertTrue("V0110-PROJ-SENT-4: Section Hub.md still invokes the SectionHub view (inline create buttons intact)",
+    /class:\s*["']SectionHub["']/.test(sectionHub));
+  assertTrue("V0110-PROJ-SENT-5: Section Hub.md still invokes Breadcrumb chrome",
+    /class:\s*["']Breadcrumb["']/.test(sectionHub));
 }
 
 async function caseV01101EntityCreateGuardMigration() {
@@ -12819,10 +12829,13 @@ async function caseV01104CustomJsClassFilesAreClean() {
 
 async function caseV01101SourceTemplatesUseGuard() {
   console.log("\n--- Case V01101-TPL-GUARD: blueprint content templates emit guard form, not direct EntityCreate calls ---");
+  // v0.124.1 Task B2: Section Hub.md no longer hosts a standalone EntityCreate
+  // block (the SectionHub view renders the create buttons inline), so it's
+  // dropped from this guard-form list — there's no EntityCreate dispatch left
+  // to assert on.
   const TEMPLATES = [
     "platform/blueprints/project/content/Projects.md",
     "platform/blueprints/project/templates/Docs Hub.md",
-    "platform/blueprints/project/templates/Section Hub.md",
     "platform/blueprints/people/content/People.md",
     "platform/blueprints/meetings/templates/Meeting Hub.md",
   ];
@@ -15145,7 +15158,7 @@ async function caseV01090Ds1EntityTypeOpt() {
   // (sauce v0.84.1 — Tasks header open · done); cards untouched.
   {
     const pins = [
-      ["daily",         "platform/blueprints/daily/manifest.json",            "0.13.7"],
+      ["daily",         "platform/blueprints/daily/manifest.json",            "0.13.8"],
       ["activity-feed", "platform/mechanisms/activity-feed/manifest.json",    "0.7.1"],
       ["cards",         "platform/mechanisms/cards/manifest.json",            "0.2.6"],
     ];

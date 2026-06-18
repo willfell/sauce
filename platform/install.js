@@ -1154,6 +1154,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyProjectSectionsMigration(tp, mech, variables, history, git);   // NEW v0.102.0 S4 — Strategy A auto-migration (flat docs/*.md → docs/knowledge/ + sections[])
   await applyProjectSectionsHubMigration(tp, mech, variables, history, git);   // NEW v0.103.0 S4 — heals v0.102.0 vaults: Docs.md → ProjectDocsIndex + materialize Section Hubs + wikilink frontmatter + breadcrumb injection
   await applyDocNoteBreadcrumbMarkerCleanup(tp, mech, variables, history, git); // NEW v0.109.0 S8 — strips legacy <!-- breadcrumb-v1.17.0 --> markers from doc-notes (block preserved; new idempotency guard inside _migrateDocNote uses the class invocation substring)
+  await applySectionHubEntityCreateCleanup(tp, mech, variables, history, git); // NEW v0.124.1 Task B2 — strips redundant standalone "+ New Section" / "+ New Sub-Section" entity-create blocks from existing section-hub notes (SectionHub view + Docs hub render those buttons inline; entity-create INSTANCES stay registered for inline create)
   await applyProjectSectionsCloseRepair(tp, mech, variables, history, git);    // NEW v0.103.0.1 — fixes the regex-induced -"[[--]]" damage from v0.103.0 deploy
   await applyProjectNameBackfill(tp, mech, variables, history, git);   // NEW v0.124.0 — backfill project_name FM on map/kanban/task-note for breadcrumb name display
   await applyFinanceMigrations(tp, mech, variables, history, git);             // NEW v0.107.0 S2 — finance defaults scaffolding (create-if-absent) + categories group backfill (append-only + .sauce-backup snapshot)
@@ -3108,6 +3109,187 @@ async function applyDocNoteBreadcrumbMarkerCleanup(tp, manifest, variables, hist
   }
 }
 
+// _stripEntityCreateMarkerBlocks — v0.124.1. Pure string transform: removes any
+// ```dataviewjs … ``` fenced block whose body carries a
+// `// entity-create:<id>` marker comment for one of the supplied marker ids.
+// Used by applySectionHubEntityCreateCleanup to strip the redundant
+// "+ New Section" / "+ New Sub-Section" standalone blocks from existing
+// section-hub notes (the SectionHub view renders those buttons inline, and the
+// Docs hub renders "+ New Section" inline too — see v0.124.1 Task B2). Surgical:
+// only the fenced block containing a target marker is dropped; every other line
+// (the SectionHub view block, breadcrumb chrome, frontmatter, user content) is
+// preserved. Collapses the extra blank lines left behind so the body doesn't
+// accumulate whitespace across repeat installs. Idempotent: returns the input
+// unchanged when no target marker is present.
+function _stripEntityCreateMarkerBlocks(body, markerIds) {
+  if (typeof body !== "string" || !Array.isArray(markerIds) || markerIds.length === 0) {
+    return body;
+  }
+  const lines = body.split("\n");
+  const out = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    // Detect a dataviewjs fence open (allowing trailing whitespace).
+    if (/^```dataviewjs[ \t]*$/.test(line)) {
+      // Scan forward to the matching closing fence.
+      let j = i + 1;
+      let hasMarker = false;
+      while (j < lines.length && !/^```\s*$/.test(lines[j])) {
+        for (const id of markerIds) {
+          if (lines[j].includes(`// entity-create:${id}`)) { hasMarker = true; break; }
+        }
+        j++;
+      }
+      const closedFence = j < lines.length; // lines[j] is the closing ``` (or EOF)
+      if (hasMarker && closedFence) {
+        // Drop the whole block: open fence … closing fence inclusive.
+        i = j + 1;
+        continue;
+      }
+      // Not a target block (or unterminated) → keep verbatim. Emit through the
+      // closing fence so we don't re-enter the scanner mid-block.
+      const end = closedFence ? j : lines.length - 1;
+      for (let k = i; k <= end; k++) out.push(lines[k]);
+      i = end + 1;
+      continue;
+    }
+    out.push(line);
+    i++;
+  }
+  // Collapse runs of 3+ blank lines (left by a dropped block) down to 1.
+  let result = out.join("\n").replace(/\n{3,}/g, "\n\n");
+  return result;
+}
+
+// applySectionHubEntityCreateCleanup — v0.124.1 Task B2. Walks every project's
+// docs/ tree recursively and strips the redundant standalone
+// "+ New Section" (entity-create:section-hub) and "+ New Sub-Section"
+// (entity-create:sub-section-hub) dataviewjs blocks from existing section-hub
+// notes. The SectionHub view (rendered by the surviving block) already provides
+// "+ New Doc" / "+ New Sub-Section" inline, and the Docs hub provides
+// "+ New Section" inline — so these standalone blocks were duplicate buttons.
+// The entity-create INSTANCES stay registered (render_in removed from the
+// manifest, not the entries), so the inline create buttons keep working.
+//
+// Project-gated (manifest.name === "project"). Idempotent: when neither marker
+// is present the file is untouched. .sauce-backup snapshot before any write.
+// Per-file try/catch; emits warning/info history events; NEVER throws.
+async function applySectionHubEntityCreateCleanup(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "project") return;
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+
+  const projectsRoot = "spice/projects";
+  if (!(await adapter.exists(projectsRoot))) return;
+
+  let projectsList;
+  try {
+    projectsList = await adapter.list(projectsRoot);
+  } catch (e) {
+    if (history) {
+      history.push({
+        event: "warning",
+        step: "section_hub_entity_create_cleanup",
+        name: "project",
+        reason: `list failed for ${projectsRoot}: ${e.message}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  const MARKERS = ["section-hub", "sub-section-hub"];
+  const projectDirs = (projectsList.folders || []).filter((d) => d.split("/").pop() !== "All Projects");
+
+  let cleanedCount = 0;
+  let untouchedCount = 0;
+
+  for (const projectDir of projectDirs) {
+    const docsRoot = `${projectDir}/docs`;
+    try {
+      if (!(await adapter.exists(docsRoot))) continue;
+    } catch (_e) { continue; }
+    let docFiles = [];
+    try {
+      docFiles = await _listAllMarkdownRecursive(adapter, docsRoot);
+    } catch (e) {
+      if (history) {
+        history.push({
+          event: "warning",
+          step: "section_hub_entity_create_cleanup",
+          name: "project",
+          reason: `recursive list failed for ${docsRoot}: ${e.message}`,
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+      continue;
+    }
+    for (const fp of docFiles) {
+      try {
+        const before = await adapter.read(fp);
+        // Idempotency fast-path: skip files carrying neither marker.
+        if (!before.includes("// entity-create:section-hub")
+          && !before.includes("// entity-create:sub-section-hub")) {
+          untouchedCount += 1;
+          continue;
+        }
+        const after = _stripEntityCreateMarkerBlocks(before, MARKERS);
+        if (after === before) {
+          untouchedCount += 1;
+          continue;
+        }
+        // .sauce-backup snapshot before write.
+        const backupPath = `.sauce-backup/${ts}/${fp}`;
+        const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+        try { await adapter.mkdir(backupParent); } catch (_e) { /* already exists */ }
+        try { await adapter.write(backupPath, before); } catch (_e) { /* best-effort */ }
+        await adapter.write(fp, after);
+        cleanedCount += 1;
+        if (history) {
+          history.push({
+            event: "info",
+            step: "section_hub_entity_create_cleanup",
+            name: "project",
+            target: fp,
+            action: "blocks_stripped",
+            git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+            attempted_at: new Date().toISOString(),
+          });
+        }
+      } catch (e) {
+        if (history) {
+          history.push({
+            event: "warning",
+            step: "section_hub_entity_create_cleanup",
+            name: "project",
+            target: fp,
+            reason: e && e.message ? e.message : String(e),
+            git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+            attempted_at: new Date().toISOString(),
+          });
+        }
+      }
+    }
+  }
+
+  if (history) {
+    history.push({
+      event: "info",
+      step: "section_hub_entity_create_cleanup",
+      name: "project",
+      action: "summary",
+      cleaned_count: cleanedCount,
+      untouched_count: untouchedCount,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+      attempted_at: new Date().toISOString(),
+    });
+  }
+}
+
 // Recursive markdown listing under a folder. Uses adapter.list, which returns
 // { files, folders } per directory.
 async function _listAllMarkdownRecursive(adapter, root) {
@@ -3311,8 +3493,11 @@ function _noteChromeFrontmatterType(body) {
 // first SpaceNavButtons dataviewjs fence when absent — the Breadcrumb guard
 // (!/Breadcrumb/) makes the inject a no-op on already-healed notes. (2) For
 // meeting notes only, rewrites the four `## H2` content headers to SectionLabel
-// dataviewjs blocks matching the Meeting.md template's args shape. Returns the
-// body unchanged when nothing applies (driver relies on `after === before`).
+// dataviewjs blocks matching the Meeting.md template's args shape. (3) For
+// meeting notes only, drops a leftover markdown `---` divider that the old
+// blank-shielded Meeting.md template left before each header (double-divider
+// cleanup, v0.124.1). Returns the body unchanged when nothing applies (driver
+// relies on `after === before`).
 function _healNoteChromeBody(body, type) {
   if (typeof body !== "string") return body;
   let out = body;
@@ -3371,8 +3556,79 @@ function _healNoteChromeBody(body, type) {
       result.push(line);
     }
     if (changed) out = result.join("\n");
+    // 3. meeting only: drop a leftover markdown `---` divider when its next
+    //    non-blank content is a SectionLabel dataviewjs block. v0.124.0 only
+    //    consumed a `---` DIRECTLY adjacent to a `## Heading`; the old Meeting.md
+    //    template shielded its `---` with a blank line (...```\n\n---\n\n## H2),
+    //    so that `---` survived the H2->SectionLabel rewrite and now renders as a
+    //    double divider (leftover `---` PLUS the SectionLabel hairline). This runs
+    //    on the post-step-2 body so it cleans BOTH freshly-converted notes (step 2
+    //    just emitted the SectionLabel blocks) AND already-healed notes from the
+    //    v0.124.0 install (whose blocks are SectionLabel already — no `## H2` to
+    //    re-trigger step 2). Content-safe: a `---` is removed ONLY when its next
+    //    non-blank line opens a SectionLabel dataviewjs fence; a `---` before
+    //    prose, a list, a heading, or any other block is left untouched.
+    out = _dropDividersBeforeSectionLabels(out);
   }
   return out;
+}
+
+// _dropDividersBeforeSectionLabels — fence-aware, content-safe normalization.
+// Removes a fence-depth-0 markdown `---` line whose next non-blank content opens
+// a ```dataviewjs block containing "SectionLabel", collapsing to exactly ONE
+// blank line before that block. A `---` inside a fenced code block (depth > 0) is
+// user content and never touched; a `---` whose lookahead is anything other than
+// a SectionLabel block is left verbatim. We never remove or alter a non-`---`
+// line, so prose loss is impossible. Idempotent: after the pass no `---` precedes
+// a SectionLabel block, so a second run finds nothing to drop (after === before).
+function _dropDividersBeforeSectionLabels(body) {
+  if (typeof body !== "string") return body;
+  const lines = body.split("\n");
+  // Never treat the leading YAML frontmatter delimiters as droppable dividers.
+  let fmEnd = -1;
+  if (lines.length && lines[0].trim() === "---") {
+    for (let f = 1; f < lines.length; f++) {
+      if (lines[f].trim() === "---") { fmEnd = f; break; }
+    }
+  }
+  const result = [];
+  let inFence = false;
+  let changed = false;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.trimStart().startsWith("```")) {
+      inFence = !inFence;
+      result.push(line);
+      continue;
+    }
+    // Only a depth-0 `---` can be a markdown divider; one inside a fence is content.
+    // A `---` at or before the leading frontmatter close (fmEnd) is a YAML
+    // delimiter, never a divider — pushing it verbatim keeps the note's
+    // frontmatter terminated (content-safety guard, v0.124.1).
+    if (i > fmEnd && !inFence && /^---\s*$/.test(line)) {
+      // Look ahead past blank lines to the next content line.
+      let j = i + 1;
+      while (j < lines.length && lines[j].trim() === "") j++;
+      // Does that next content line open a SectionLabel dataviewjs block?
+      let isSectionLabel = false;
+      if (j < lines.length && /^\s*```dataviewjs\s*$/.test(lines[j])) {
+        for (let k = j + 1; k < lines.length; k++) {
+          if (/^\s*```\s*$/.test(lines[k])) break; // fence closed before a hit
+          if (lines[k].includes("SectionLabel")) { isSectionLabel = true; break; }
+        }
+      }
+      if (isSectionLabel) {
+        // Drop this `---` and the blank run between it and the block, then push
+        // exactly one blank separator (unless the emitted tail is already blank).
+        if (result.length && result[result.length - 1].trim() !== "") result.push("");
+        i = j - 1; // resume at the SectionLabel fence opener next iteration
+        changed = true;
+        continue;
+      }
+    }
+    result.push(line);
+  }
+  return changed ? result.join("\n") : body;
 }
 
 // applyNoteChromeHeal — v0.124.0 (note-chrome wave 1). Per-vault scope heal
@@ -13361,6 +13617,9 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports.applyFinanceNavRowMigration = applyFinanceNavRowMigration;
     // v0.109.0 S8 — doc-note breadcrumb marker cleanup (run-install.js CLN-1..2).
     module.exports.applyDocNoteBreadcrumbMarkerCleanup = applyDocNoteBreadcrumbMarkerCleanup;
+    // v0.124.1 Task B2 — section-hub redundant entity-create block cleanup.
+    module.exports.applySectionHubEntityCreateCleanup = applySectionHubEntityCreateCleanup;
+    module.exports._stripEntityCreateMarkerBlocks = _stripEntityCreateMarkerBlocks;
     // v0.110.0 — finance hubs repair + orphaned helper cleanup.
     module.exports.applyFinanceHubsRepair = applyFinanceHubsRepair;
     module.exports.applyFinanceHubFrontmatterHeal = applyFinanceHubFrontmatterHeal;

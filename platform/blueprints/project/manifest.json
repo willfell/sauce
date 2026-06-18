@@ -1,6 +1,6 @@
 {
   "name": "project",
-  "version": "1.25.0",
+  "version": "1.25.1",
   "kind": "blueprint",
   "module_directory": "projects",
   "skills_dir": ".claude/skills/project",
@@ -393,11 +393,7 @@
           "section-hub"
         ]
       },
-      "body_template": "Template, Section Hub.md",
-      "render_in": {
-        "kind": "hub",
-        "target_path": "{{templates_path}}/Template, Docs Hub.md"
-      }
+      "body_template": "Template, Section Hub.md"
     },
     {
       "id": "sub-section-hub",
@@ -441,11 +437,7 @@
           "section-hub"
         ]
       },
-      "body_template": "Template, Section Hub.md",
-      "render_in": {
-        "kind": "hub",
-        "target_path": "{{templates_path}}/Template, Section Hub.md"
-      }
+      "body_template": "Template, Section Hub.md"
     }
   ],
   "breadcrumb": {
