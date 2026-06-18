@@ -3402,6 +3402,13 @@ function _healNoteChromeBody(body, type) {
 function _dropDividersBeforeSectionLabels(body) {
   if (typeof body !== "string") return body;
   const lines = body.split("\n");
+  // Never treat the leading YAML frontmatter delimiters as droppable dividers.
+  let fmEnd = -1;
+  if (lines.length && lines[0].trim() === "---") {
+    for (let f = 1; f < lines.length; f++) {
+      if (lines[f].trim() === "---") { fmEnd = f; break; }
+    }
+  }
   const result = [];
   let inFence = false;
   let changed = false;
@@ -3413,7 +3420,10 @@ function _dropDividersBeforeSectionLabels(body) {
       continue;
     }
     // Only a depth-0 `---` can be a markdown divider; one inside a fence is content.
-    if (!inFence && /^---\s*$/.test(line)) {
+    // A `---` at or before the leading frontmatter close (fmEnd) is a YAML
+    // delimiter, never a divider — pushing it verbatim keeps the note's
+    // frontmatter terminated (content-safety guard, v0.124.1).
+    if (i > fmEnd && !inFence && /^---\s*$/.test(line)) {
       // Look ahead past blank lines to the next content line.
       let j = i + 1;
       while (j < lines.length && lines[j].trim() === "") j++;

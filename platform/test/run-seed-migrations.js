@@ -434,6 +434,23 @@ withTempVault((vault) => {
        (mtg.match(/class:\s*"Breadcrumb"/g) || []).length === 1 &&
        !dividerBeforeSectionLabel(mtg));
 
+    // DBLDIV-4/5 — frontmatter-delimiter safety (content-safety guard, v0.124.1).
+    // A nav-less meeting note (NO SpaceNavButtons block, so the breadcrumb inject
+    // no-ops) whose FIRST body element is `## Notes` gets that heading rewritten
+    // to a SectionLabel block as the first body element. Without the guard, the
+    // double-divider cleanup would see the YAML frontmatter-closing `---` sitting
+    // immediately before that SectionLabel block and EAT it — leaving only the
+    // opening `---` (unterminated frontmatter, corrupted note). The fmEnd guard
+    // refuses to drop any `---` at or before the leading frontmatter close.
+    const navless = helpers.readNote(vault, "spice/meetings/notes/2026/06-June/Navless-2026-06-17.md");
+    const navlessFm = helpers.parseFrontmatter(navless).frontmatter;
+    ok("HC-V01241-SEED-DBLDIV-4 nav-less meeting frontmatter still closed + heading converted",
+       navlessFm.type === "meeting" &&
+       !/^##\s+Notes\s*$/m.test(navless) &&
+       /SectionLabel[\s\S]*?Notes/.test(navless));
+    ok("HC-V01241-SEED-DBLDIV-5 nav-less meeting prose preserved verbatim",
+       navless.includes("- some user note line") && navless.includes("- another line"));
+
     // ===== HC-V01240-SEED-PNAME-* — applyProjectNameBackfill (note-chrome wave 1) =====
     // The seed carries a mixed-case project ("My Cool Project" under slug
     // my-cool-project) whose Project Map note has NO project_name field. The
