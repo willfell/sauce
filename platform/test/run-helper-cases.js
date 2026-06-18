@@ -8391,7 +8391,7 @@ async function caseHCV0891Versions() {
   // B: daily manifest pin
   const dailyMan = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "blueprints/daily/manifest.json"), "utf8"));
-  assertEqual(dailyMan.version, "0.13.7", "HC-V0891-VERSION-B: daily pin = 0.13.7");
+  assertEqual(dailyMan.version, "0.13.8", "HC-V0891-VERSION-B: daily pin = 0.13.8");
 
   // C: workshop manifest pin + package.json
   const platformMan = JSON.parse(fs.readFileSync(
@@ -15158,7 +15158,7 @@ async function caseV01090Ds1EntityTypeOpt() {
   // (sauce v0.84.1 — Tasks header open · done); cards untouched.
   {
     const pins = [
-      ["daily",         "platform/blueprints/daily/manifest.json",            "0.13.7"],
+      ["daily",         "platform/blueprints/daily/manifest.json",            "0.13.8"],
       ["activity-feed", "platform/mechanisms/activity-feed/manifest.json",    "0.7.1"],
       ["cards",         "platform/mechanisms/cards/manifest.json",            "0.2.6"],
     ];
