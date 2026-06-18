@@ -2068,6 +2068,72 @@ async function testRendV067Todo1() {
   return ok;
 }
 
+// ── REND-V01241-LINK-1: _renderTaskHTML balanced-paren scan for link URLs ──
+// v0.124.1: task text containing markdown links whose URL embeds literal parens
+// (Microsoft Teams deep-links, e.g. channelName=...(Lounge)) must capture the
+// FULL url. The old `indexOf(")")` truncated at the inner ")", leaking the URL
+// tail as escaped literal text after </a>. A CommonMark-style balanced-paren
+// scan fixes this.
+async function testRendV01241Link1() {
+  console.log('\n=== REND-V01241-LINK-1 — _renderTaskHTML balanced-paren scan for link URLs ===');
+  let ok = true;
+  try {
+    const dailySrc = fs.readFileSync(
+      path.join(WORKSHOP, "platform/blueprints/daily/helpers/space-daily-dashboard.js"),
+      "utf8"
+    );
+    const factory = new Function(
+      "window",
+      dailySrc + "\nreturn SpaceDailyDashboard;"
+    );
+    const Klass = factory({ moment: () => ({ isValid: () => false }) });
+    const inst = new Klass();
+
+    // Case 1: Teams-style deep-link with literal parens in query params.
+    const teamsTask = "Help Sachin - [chat](https://teams.microsoft.com/l/message/19:x@thread.tacv2/1?tenantId=y&channelName=Developer%20Enablement%20(Lounge)&createdTime=1781776427950&ngc=true)";
+    const teamsHtml = inst._renderTaskHTML(teamsTask);
+    const anchorCount = (teamsHtml.match(/<a /g) || []).length;
+    const sub1a = anchorCount === 1;
+    console.log(`  REND-V01241-LINK-1a (exactly one <a anchor): ${sub1a ? 'PASS' : 'FAIL'} (got ${anchorCount})`);
+    ok = ok && sub1a;
+
+    // href must include the full url ending in ngc=true (& escaped to &amp;).
+    const sub1b = teamsHtml.includes("createdTime=1781776427950&amp;ngc=true");
+    console.log(`  REND-V01241-LINK-1b (href contains full url tail createdTime=...&amp;ngc=true): ${sub1b ? 'PASS' : 'FAIL'}`);
+    ok = ok && sub1b;
+
+    // No leaked literal tail OUTSIDE the anchor (no "</a>&amp;createdTime"), and
+    // the rendered string ends cleanly with </a> (no trailing leaked text).
+    const sub1c = !teamsHtml.includes("</a>&amp;createdTime") && teamsHtml.endsWith("</a>");
+    console.log(`  REND-V01241-LINK-1c (no leaked tail after </a>; ends with </a>): ${sub1c ? 'PASS' : 'FAIL'}`);
+    ok = ok && sub1c;
+
+    // Case 2: control — simple URL, no inner parens.
+    const ctrlHtml = inst._renderTaskHTML("[docs](https://example.com/page)");
+    const sub2a = ctrlHtml === '<a href="https://example.com/page" target="_blank" rel="noopener noreferrer">docs</a>';
+    console.log(`  REND-V01241-LINK-2a (control renders one correct anchor): ${sub2a ? 'PASS' : 'FAIL'}`);
+    if (!sub2a) console.log(`    got: ${ctrlHtml}`);
+    ok = ok && sub2a;
+
+    // Case 3: balanced nested parens in the URL.
+    const nestedHtml = inst._renderTaskHTML("[x](https://e.com/a(b(c))d)");
+    const nestedAnchors = (nestedHtml.match(/<a /g) || []).length;
+    const sub3a = nestedAnchors === 1;
+    console.log(`  REND-V01241-LINK-3a (one anchor for nested parens): ${sub3a ? 'PASS' : 'FAIL'} (got ${nestedAnchors})`);
+    ok = ok && sub3a;
+
+    const sub3b = nestedHtml === '<a href="https://e.com/a(b(c))d" target="_blank" rel="noopener noreferrer">x</a>';
+    console.log(`  REND-V01241-LINK-3b (href is full nested-paren url, no leak): ${sub3b ? 'PASS' : 'FAIL'}`);
+    if (!sub3b) console.log(`    got: ${nestedHtml}`);
+    ok = ok && sub3b;
+  } catch (e) {
+    console.log(`  REND-V01241-LINK-1a (exactly one <a anchor): FAIL — ${e && e.message}`);
+    ok = false;
+  }
+  console.log(`  ${ok ? 'PASS' : 'FAIL'}`);
+  return ok;
+}
+
 // ── Main ─────────────────────────────────────────────────────────────────
 (async () => {
   const which = ARGS.selector;
@@ -2161,6 +2227,7 @@ async function testRendV067Todo1() {
     if (which === 'daily' || which === 'all') {
       results.push(['REND-V067-TIME-1 _formatTime duck-types Luxon + moment', await testRendV067Time1()]);
       results.push(['REND-V067-TODO-1 _renderTodoBadge pill when open > 0', await testRendV067Todo1()]);
+      results.push(['REND-V01241-LINK-1 _renderTaskHTML balanced-paren scan for link URLs', await testRendV01241Link1()]);
     }
   } catch (e) {
     console.error(`\nFATAL: ${e.message}`);

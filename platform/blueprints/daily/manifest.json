@@ -1,6 +1,6 @@
 {
   "name": "daily",
-  "version": "0.13.7",
+  "version": "0.13.8",
   "kind": "blueprint",
   "module_directory": "daily",
   "skills_dir": ".claude/skills/daily",
