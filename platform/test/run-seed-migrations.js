@@ -393,6 +393,47 @@ withTempVault((vault) => {
        sd.indexOf("# ") < sd.indexOf('class: "Breadcrumb"') &&
        sd.indexOf('class: "Breadcrumb"') < sd.indexOf('class: "SpaceNavButtons"'));
 
+    // ===== HC-V01241-SEED-DBLDIV-* — double-divider cleanup (v0.124.1) =====
+    // The seed meeting fixture carries the real old Meeting.md shape: each `##`
+    // content header is preceded by a `---` divider SHIELDED by a blank line
+    // (...```\n\n---\n\n## Attendees). v0.124.0's H2->SectionLabel conversion only
+    // dropped a `---` DIRECTLY adjacent to the heading, so the blank-shielded
+    // `---` survived — leaving a markdown `---` PLUS the SectionLabel's own
+    // hairline (a double divider) before Agenda/Notes/Action Items. The v0.124.1
+    // normalization pass removes a fence-depth-0 `---` whose next non-blank
+    // content opens a SectionLabel dataviewjs block, leaving one blank line.
+    // `mtg` is the post-two-install state (asserts run after the idempotency
+    // phase), so a clean `mtg` here also proves the cleanup is idempotent.
+    //
+    // Robust line-scan: does any `---` line have a SectionLabel dataviewjs block
+    // as its next non-blank content (skipping blank lines)?
+    const dividerBeforeSectionLabel = (txt) => {
+        const ls = txt.split("\n");
+        for (let i = 0; i < ls.length; i++) {
+            if (!/^---\s*$/.test(ls[i])) continue;
+            let j = i + 1;
+            while (j < ls.length && ls[j].trim() === "") j++;
+            if (j < ls.length && /^\s*```dataviewjs\s*$/.test(ls[j])) {
+                // peek into the fence body for SectionLabel before it closes
+                for (let k = j + 1; k < ls.length; k++) {
+                    if (/^\s*```\s*$/.test(ls[k])) break;
+                    if (/SectionLabel/.test(ls[k])) return true;
+                }
+            }
+        }
+        return false;
+    };
+    ok("HC-V01241-SEED-DBLDIV-1 no markdown --- precedes a SectionLabel block",
+       !dividerBeforeSectionLabel(mtg));
+    ok("HC-V01241-SEED-DBLDIV-2 the four SectionLabels survive the cleanup",
+       /SectionLabel[\s\S]*?Attendees/.test(mtg) &&
+       /SectionLabel[\s\S]*?Agenda/.test(mtg) &&
+       /SectionLabel[\s\S]*?Notes/.test(mtg) &&
+       /SectionLabel[\s\S]*?Action Items/.test(mtg));
+    ok("HC-V01241-SEED-DBLDIV-3 idempotent: one breadcrumb + no leftover divider after two installs",
+       (mtg.match(/class:\s*"Breadcrumb"/g) || []).length === 1 &&
+       !dividerBeforeSectionLabel(mtg));
+
     // ===== HC-V01240-SEED-PNAME-* — applyProjectNameBackfill (note-chrome wave 1) =====
     // The seed carries a mixed-case project ("My Cool Project" under slug
     // my-cool-project) whose Project Map note has NO project_name field. The

@@ -3311,8 +3311,11 @@ function _noteChromeFrontmatterType(body) {
 // first SpaceNavButtons dataviewjs fence when absent — the Breadcrumb guard
 // (!/Breadcrumb/) makes the inject a no-op on already-healed notes. (2) For
 // meeting notes only, rewrites the four `## H2` content headers to SectionLabel
-// dataviewjs blocks matching the Meeting.md template's args shape. Returns the
-// body unchanged when nothing applies (driver relies on `after === before`).
+// dataviewjs blocks matching the Meeting.md template's args shape. (3) For
+// meeting notes only, drops a leftover markdown `---` divider that the old
+// blank-shielded Meeting.md template left before each header (double-divider
+// cleanup, v0.124.1). Returns the body unchanged when nothing applies (driver
+// relies on `after === before`).
 function _healNoteChromeBody(body, type) {
   if (typeof body !== "string") return body;
   let out = body;
@@ -3371,8 +3374,69 @@ function _healNoteChromeBody(body, type) {
       result.push(line);
     }
     if (changed) out = result.join("\n");
+    // 3. meeting only: drop a leftover markdown `---` divider when its next
+    //    non-blank content is a SectionLabel dataviewjs block. v0.124.0 only
+    //    consumed a `---` DIRECTLY adjacent to a `## Heading`; the old Meeting.md
+    //    template shielded its `---` with a blank line (...```\n\n---\n\n## H2),
+    //    so that `---` survived the H2->SectionLabel rewrite and now renders as a
+    //    double divider (leftover `---` PLUS the SectionLabel hairline). This runs
+    //    on the post-step-2 body so it cleans BOTH freshly-converted notes (step 2
+    //    just emitted the SectionLabel blocks) AND already-healed notes from the
+    //    v0.124.0 install (whose blocks are SectionLabel already — no `## H2` to
+    //    re-trigger step 2). Content-safe: a `---` is removed ONLY when its next
+    //    non-blank line opens a SectionLabel dataviewjs fence; a `---` before
+    //    prose, a list, a heading, or any other block is left untouched.
+    out = _dropDividersBeforeSectionLabels(out);
   }
   return out;
+}
+
+// _dropDividersBeforeSectionLabels — fence-aware, content-safe normalization.
+// Removes a fence-depth-0 markdown `---` line whose next non-blank content opens
+// a ```dataviewjs block containing "SectionLabel", collapsing to exactly ONE
+// blank line before that block. A `---` inside a fenced code block (depth > 0) is
+// user content and never touched; a `---` whose lookahead is anything other than
+// a SectionLabel block is left verbatim. We never remove or alter a non-`---`
+// line, so prose loss is impossible. Idempotent: after the pass no `---` precedes
+// a SectionLabel block, so a second run finds nothing to drop (after === before).
+function _dropDividersBeforeSectionLabels(body) {
+  if (typeof body !== "string") return body;
+  const lines = body.split("\n");
+  const result = [];
+  let inFence = false;
+  let changed = false;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.trimStart().startsWith("```")) {
+      inFence = !inFence;
+      result.push(line);
+      continue;
+    }
+    // Only a depth-0 `---` can be a markdown divider; one inside a fence is content.
+    if (!inFence && /^---\s*$/.test(line)) {
+      // Look ahead past blank lines to the next content line.
+      let j = i + 1;
+      while (j < lines.length && lines[j].trim() === "") j++;
+      // Does that next content line open a SectionLabel dataviewjs block?
+      let isSectionLabel = false;
+      if (j < lines.length && /^\s*```dataviewjs\s*$/.test(lines[j])) {
+        for (let k = j + 1; k < lines.length; k++) {
+          if (/^\s*```\s*$/.test(lines[k])) break; // fence closed before a hit
+          if (lines[k].includes("SectionLabel")) { isSectionLabel = true; break; }
+        }
+      }
+      if (isSectionLabel) {
+        // Drop this `---` and the blank run between it and the block, then push
+        // exactly one blank separator (unless the emitted tail is already blank).
+        if (result.length && result[result.length - 1].trim() !== "") result.push("");
+        i = j - 1; // resume at the SectionLabel fence opener next iteration
+        changed = true;
+        continue;
+      }
+    }
+    result.push(line);
+  }
+  return changed ? result.join("\n") : body;
 }
 
 // applyNoteChromeHeal — v0.124.0 (note-chrome wave 1). Per-vault scope heal
