@@ -3569,6 +3569,21 @@ function _healNoteChromeBody(body, type) {
     //    non-blank line opens a SectionLabel dataviewjs fence; a `---` before
     //    prose, a list, a heading, or any other block is left untouched.
     out = _dropDividersBeforeSectionLabels(out);
+    // Inject the MeetingLeafActions row after the first SpaceNavButtons block,
+    // for meeting LEAF notes only (skip Meeting Hubs, which carry the
+    // `meetings-hub` tag in some vaults). Insert-only + idempotent.
+    const isMeetingHub = /(^|\n)\s*-\s*meetings-hub\s*$/m.test(out);
+    if (!isMeetingHub && !out.includes('class: "MeetingLeafActions"')) {
+      const navIdx2 = out.indexOf('class: "SpaceNavButtons"');
+      if (navIdx2 !== -1) {
+        const closeRel = out.indexOf('\n```', navIdx2);   // closing fence of the SpaceNavButtons block
+        if (closeRel !== -1) {
+          const insertAt = closeRel + 4;                  // just after "\n```"
+          const block = '\n\n```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "MeetingLeafActions" });\n```';
+          out = out.slice(0, insertAt) + block + out.slice(insertAt);
+        }
+      }
+    }
   }
   return out;
 }
