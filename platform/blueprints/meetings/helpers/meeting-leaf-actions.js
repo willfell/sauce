@@ -83,13 +83,16 @@ class MeetingLeafActions {
   }
 
   _onAddToProject(dv) {
+    const cur = dv.current && dv.current();
+    if (!cur || !cur.file) { new Notice("Open a meeting note to use this action."); return; }
+    const file = app.vault.getAbstractFileByPath(cur.file.path);
+    if (!file) { new Notice("Could not resolve the current note."); return; }
     const projects = this._listProjects(dv);
     this._openModal({ title: "Add meeting to project", build: (panel, close) => {
       const list = panel.createEl("div");
       list.style.cssText = "display:flex; flex-direction:column; gap:6px; margin-top:10px;";
       const choose = async (name) => {
         try {
-          const file = app.vault.getAbstractFileByPath(dv.current().file.path);
           await app.fileManager.processFrontMatter(file, (fm) => { fm.project = name ? `[[${name}]]` : ""; });
           new Notice(name ? `Added to ${name}` : "Cleared project");
         } catch (e) { new Notice("Could not set project: " + (e.message || e), 6000); }
@@ -104,8 +107,12 @@ class MeetingLeafActions {
   }
 
   _onEditAttendees(dv) {
+    const cur = dv.current && dv.current();
+    if (!cur || !cur.file) { new Notice("Open a meeting note to use this action."); return; }
+    const file = app.vault.getAbstractFileByPath(cur.file.path);
+    if (!file) { new Notice("Could not resolve the current note."); return; }
     const people = this._listPeople();
-    const current = new Set(((dv.current() && dv.current().attendees) || []).map(MeetingLeafActions.stripWikilink));
+    const current = new Set(((cur.attendees) || []).map(MeetingLeafActions.stripWikilink));
     const selected = new Set([...current].filter(Boolean));
     this._openModal({ title: "Edit attendees", build: (panel, close) => {
       const list = panel.createEl("div");
@@ -135,7 +142,6 @@ class MeetingLeafActions {
       save.style.cssText = "margin-top:12px; width:100%; padding:8px; border-radius:6px; border:1px solid var(--interactive-accent); background:var(--interactive-accent); color:var(--text-on-accent); cursor:pointer; font-weight:600;";
       save.onclick = async () => {
         try {
-          const file = app.vault.getAbstractFileByPath(dv.current().file.path);
           const { attendees, people: ppl } = MeetingLeafActions.buildAttendeeFrontmatter([...selected]);
           await app.fileManager.processFrontMatter(file, (fm) => { fm.attendees = attendees; fm.people = ppl; });
           new Notice(`Attendees updated (${attendees.length})`);
@@ -153,11 +159,10 @@ class MeetingLeafActions {
     overlay.style.cssText = "position: fixed; inset: 0; background: rgba(0,0,0,0.55); display: flex; align-items: center; justify-content: center; z-index: 9999;";
     const modal = overlay.createDiv();
     modal.style.cssText = "background: var(--background-primary, #1c1c1c); color: var(--text-normal, #ddd); border: 1px solid var(--background-modifier-border, #444); border-radius: 10px; padding: 18px 20px; width: min(440px, 92vw); max-height: 80vh; overflow: auto; box-shadow: 0 8px 24px rgba(0,0,0,0.4);";
-    const close = () => overlay.remove();
-    overlay.onclick = (e) => { if (e.target === overlay) close(); };
     const escListener = (ev) => { if (ev.key === "Escape") close(); };
+    const close = () => { document.removeEventListener("keydown", escListener); overlay.remove(); };
+    overlay.onclick = (e) => { if (e.target === overlay) close(); };
     document.addEventListener("keydown", escListener);
-    overlay.addEventListener("remove", () => document.removeEventListener("keydown", escListener));
     const h = modal.createEl("div", { text: title });
     h.style.cssText = "font-weight:600; font-size:1.05em; margin-bottom:4px;";
     build(modal, close);
