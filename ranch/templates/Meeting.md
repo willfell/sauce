@@ -73,6 +73,10 @@ await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 ```
 
 ```dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "MeetingLeafActions" });
+```
+
+```dataviewjs
 await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Attendees", top: true }] });
 ```
 

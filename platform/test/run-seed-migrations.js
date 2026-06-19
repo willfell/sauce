@@ -451,6 +451,22 @@ withTempVault((vault) => {
     ok("HC-V01241-SEED-DBLDIV-5 nav-less meeting prose preserved verbatim",
        navless.includes("- some user note line") && navless.includes("- another line"));
 
+    // ===== HC-V01250-SEED-MLA-* — applyNoteChromeHeal injects MeetingLeafActions =====
+    // Tasks 1–2 added the MeetingLeafActions button row to the Meeting.md template
+    // so NEW meeting leaf notes carry it; this heal back-injects it into EXISTING
+    // meeting leaf notes, right after the SpaceNavButtons block. Insert-only +
+    // idempotent (CHROME-6-style exactly-once), hub-skipping (a meetings-hub note
+    // is template-only scope). `mlaMtg` is the post-two-install state, so MLA-3
+    // proves exactly-once injection. The nav-less meeting has no SpaceNavButtons
+    // anchor, so the inject no-ops there (MLA-4). No meetings-hub-tagged seed note
+    // exists under spice/meetings/hubs/, so the hub skip-assert (MLA-5) is omitted.
+    const mlaMtg = helpers.readNote(vault, "spice/meetings/notes/2026/06-June/Standup-2026-06-17.md");
+    ok("HC-V01250-SEED-MLA-1 meeting has MeetingLeafActions block", /class:\s*"MeetingLeafActions"/.test(mlaMtg));
+    ok("HC-V01250-SEED-MLA-2 MeetingLeafActions sits after SpaceNavButtons", mlaMtg.indexOf('class: "SpaceNavButtons"') !== -1 && mlaMtg.indexOf('class: "SpaceNavButtons"') < mlaMtg.indexOf('class: "MeetingLeafActions"'));
+    ok("HC-V01250-SEED-MLA-3 injected exactly once", (mlaMtg.match(/class:\s*"MeetingLeafActions"/g) || []).length === 1);
+    const mlaNav = helpers.readNote(vault, "spice/meetings/notes/2026/06-June/Navless-2026-06-17.md");
+    ok("HC-V01250-SEED-MLA-4 nav-less note NOT injected (no anchor)", !/class:\s*"MeetingLeafActions"/.test(mlaNav));
+
     // ===== HC-V01240-SEED-PNAME-* — applyProjectNameBackfill (note-chrome wave 1) =====
     // The seed carries a mixed-case project ("My Cool Project" under slug
     // my-cool-project) whose Project Map note has NO project_name field. The
