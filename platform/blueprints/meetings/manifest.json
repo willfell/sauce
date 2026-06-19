@@ -15,7 +15,7 @@
     { "name": "breadcrumb",       "range": ">=0.1.0" },
     { "name": "section-label",    "range": ">=0.1.0" }
   ],
-  "customjs_classes": ["MeetingsHubCards"],
+  "customjs_classes": ["MeetingsHubCards", "MeetingLeafActions"],
   "breadcrumb": {
     "types": {
       "meeting": {
@@ -30,7 +30,8 @@
   "files": [
     { "source": "templates/Meeting.md",         "dest": "{{templates_path}}/Meeting.md" },
     { "source": "templates/Meeting Hub.md",     "dest": "{{templates_path}}/Meeting Hub.md" },
-    { "source": "helpers/meetings-hub-cards.js", "dest": "{{scripts_path}}/meetings/meetings-hub-cards.js" }
+    { "source": "helpers/meetings-hub-cards.js", "dest": "{{scripts_path}}/meetings/meetings-hub-cards.js" },
+    { "source": "helpers/meeting-leaf-actions.js", "dest": "{{scripts_path}}/meetings/meeting-leaf-actions.js" }
   ],
   "claude_surface": [
     { "kind": "command", "source": "commands/meetings.md", "dest": ".claude/commands/meetings.md" },
