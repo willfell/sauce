@@ -1151,6 +1151,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyWikiToDocsMigration(tp, mech, variables, history, git);   // NEW v0.52.0 — must run BEFORE applyDocsBackfill
   await applyDocsBackfill(tp, mech, variables, history, git);          // NEW v0.50.0; renamed from applyWikiBackfill v0.52.0
   await applyDocsHubButtonRepair(tp, mech, variables, history, git);   // NEW v0.100.2 — heals existing broken "+ New Doc" blocks (backfill is create-if-absent)
+  await applyProjectMeetingsPanelHeal(tp, mech, variables, history, git); // NEW v0.127.0 §D — injects ProjectMeetingsPanel dataviewjs block into stale type:project hubs (insert-only, idempotent, .sauce-backup snapshot before write)
   await applyProjectSectionsMigration(tp, mech, variables, history, git);   // NEW v0.102.0 S4 — Strategy A auto-migration (flat docs/*.md → docs/knowledge/ + sections[])
   await applyProjectSectionsHubMigration(tp, mech, variables, history, git);   // NEW v0.103.0 S4 — heals v0.102.0 vaults: Docs.md → ProjectDocsIndex + materialize Section Hubs + wikilink frontmatter + breadcrumb injection
   await applyDocNoteBreadcrumbMarkerCleanup(tp, mech, variables, history, git); // NEW v0.109.0 S8 — strips legacy <!-- breadcrumb-v1.17.0 --> markers from doc-notes (block preserved; new idempotency guard inside _migrateDocNote uses the class invocation substring)
@@ -2397,6 +2398,182 @@ async function applyDocsHubButtonRepair(tp, manifest, variables, history, git) {
       step: "docs_hub_button_repair",
       name: "project",
       reason: `repaired ${repairedCount} project(s); ${warnCount} warning(s)`,
+      git_commit: git.commit,
+      git_tag: git.tag,
+      git_dirty: git.dirty,
+      attempted_at: new Date().toISOString(),
+    });
+  }
+}
+
+// applyProjectMeetingsPanelHeal — v0.127.0 §D. Walks spice/projects/*/ and
+// injects a `class: "ProjectMeetingsPanel"` dataviewjs block into any
+// `type: project` hub note that lacks one. Insert-only + idempotent per
+// landmine #16. Anchor preference: after ProjectStatusWidget closing fence
+// (canonical v0.109.0+ template order) → fallback after ProjectNavButtons
+// → fallback after the first dataviewjs block. Warning history when no
+// dataviewjs anchor exists. .sauce-backup snapshot before write per the
+// applyNoteChromeHeal posture. Failure-loud per-project (catch + log,
+// never throws).
+async function applyProjectMeetingsPanelHeal(tp, manifest, variables, history, git) {
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const root = "spice/projects";
+  if (!(await adapter.exists(root))) return;
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  let healed = 0;
+  let skipped = 0;
+  let warned = 0;
+
+  let projectDirs;
+  try {
+    const listing = await adapter.list(root);
+    projectDirs = (listing.folders || []).filter((f) => f.startsWith(root + "/"));
+  } catch (e) {
+    if (history) {
+      history.push({
+        event: "warning",
+        step: "project_meetings_panel_heal",
+        reason: `list failed for ${root}: ${e && e.message ? e.message : String(e)}`,
+        git_commit: git.commit,
+        git_tag: git.tag,
+        git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  for (const projectDir of projectDirs) {
+    try {
+      // Find the hub note: a *.md DIRECTLY inside projectDir (not nested) with
+      // frontmatter type: project. Mirrors applyProjectNameBackfill's pattern.
+      const sub = await adapter.list(projectDir);
+      const candidates = (sub.files || []).filter((p) => p.endsWith(".md"));
+      let hubPath = null;
+      for (const cand of candidates) {
+        const body = await adapter.read(cand);
+        if (_noteChromeFrontmatterType(body) === "project") {
+          hubPath = cand;
+          break;
+        }
+      }
+      if (!hubPath) continue;
+
+      const before = await adapter.read(hubPath);
+
+      // Idempotency guard: already healed.
+      if (before.includes('class: "ProjectMeetingsPanel"')) {
+        skipped += 1;
+        if (history) {
+          history.push({
+            event: "info",
+            step: "project_meetings_panel_heal",
+            target: hubPath,
+            action: "skipped_already_healed",
+            git_commit: git.commit,
+            git_tag: git.tag,
+            git_dirty: git.dirty,
+            attempted_at: new Date().toISOString(),
+          });
+        }
+        continue;
+      }
+
+      // Locate the insertion anchor. Preference order:
+      //   1. After the closing fence of `class: "ProjectStatusWidget"` block
+      //   2. After the closing fence of `class: "ProjectNavButtons"` block
+      //   3. After the closing fence of the FIRST dataviewjs block (fallback)
+      const block = '\n\n```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "ProjectMeetingsPanel" });\n```';
+      let after = null;
+      for (const anchorClass of ["ProjectStatusWidget", "ProjectNavButtons"]) {
+        const anchorStr = `class: "${anchorClass}"`;
+        const anchorIdx = before.indexOf(anchorStr);
+        if (anchorIdx === -1) continue;
+        const closeRel = before.indexOf("\n```", anchorIdx);
+        if (closeRel === -1) continue;
+        const insertAt = closeRel + 4; // just after "\n```"
+        after = before.slice(0, insertAt) + block + before.slice(insertAt);
+        break;
+      }
+      if (after === null) {
+        const firstDvIdx = before.indexOf("```dataviewjs");
+        if (firstDvIdx !== -1) {
+          const closeRel = before.indexOf("\n```", firstDvIdx);
+          if (closeRel !== -1) {
+            const insertAt = closeRel + 4;
+            after = before.slice(0, insertAt) + block + before.slice(insertAt);
+          }
+        }
+      }
+      if (after === null) {
+        warned += 1;
+        if (history) {
+          history.push({
+            event: "warning",
+            step: "project_meetings_panel_heal",
+            target: hubPath,
+            action: "no_anchor_found",
+            reason: "no ProjectStatusWidget/ProjectNavButtons/dataviewjs block to anchor on",
+            git_commit: git.commit,
+            git_tag: git.tag,
+            git_dirty: git.dirty,
+            attempted_at: new Date().toISOString(),
+          });
+        }
+        continue;
+      }
+      if (after === before) {
+        skipped += 1;
+        continue;
+      }
+
+      // .sauce-backup snapshot before write (mirrors applyNoteChromeHeal posture).
+      const backupPath = `.sauce-backup/${ts}/${hubPath}`;
+      const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+      try {
+        await adapter.mkdir(backupParent);
+      } catch (_e) { /* already exists */ }
+      try {
+        await adapter.write(backupPath, before);
+      } catch (_e) { /* best-effort */ }
+
+      await adapter.write(hubPath, after);
+      healed += 1;
+      if (history) {
+        history.push({
+          event: "info",
+          step: "project_meetings_panel_heal",
+          target: hubPath,
+          action: "healed",
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    } catch (e) {
+      warned += 1;
+      if (history) {
+        history.push({
+          event: "warning",
+          step: "project_meetings_panel_heal",
+          reason: `${projectDir}: ${e && e.message ? e.message : String(e)}`,
+          git_commit: git.commit,
+          git_tag: git.tag,
+          git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    }
+  }
+
+  if (history) {
+    history.push({
+      event: "info",
+      step: "project_meetings_panel_heal",
+      name: "vault",
+      reason: `healed ${healed}; skipped ${skipped}; ${warned} warning(s)`,
       git_commit: git.commit,
       git_tag: git.tag,
       git_dirty: git.dirty,
@@ -13684,6 +13861,12 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     // v0.100.2 — docs-hub "+ New Doc" button repair (run-wiki-to-docs-migration.js DHBR-1..3).
     module.exports.applyDocsHubButtonRepair = applyDocsHubButtonRepair;
     module.exports._repairDocsHubButtonBody = _repairDocsHubButtonBody;
+    // v0.127.0 §D — ProjectMeetingsPanel heal (run-v0127-project-hub-heal.js).
+    // Also export note-chrome internals so the heal harness can reuse the
+    // frontmatter-type detector / body transform when authoring future cases.
+    module.exports.applyProjectMeetingsPanelHeal = applyProjectMeetingsPanelHeal;
+    module.exports._noteChromeFrontmatterType = _noteChromeFrontmatterType;
+    module.exports._healNoteChromeBody = _healNoteChromeBody;
     // v0.108.0 S2 — expose 4 new finance migrations for HC test coverage.
     module.exports.applyFinanceDebtScaffolding = applyFinanceDebtScaffolding;
     module.exports.applyFinanceBudgetGroupSeed = applyFinanceBudgetGroupSeed;
