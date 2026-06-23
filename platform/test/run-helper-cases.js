@@ -14333,13 +14333,15 @@ async function caseHCV0127Versions() {
   const sub = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "ranch/platform-subscription.json"), "utf8"));
 
-  // A: workshop_version === 0.127.0 across the three canonical version files.
-  assertEqual(platformMan.workshop_version, "0.127.0",
-    "HC-V0127-VERSION-A1: platform/manifest.json workshop_version === 0.127.0");
-  assertEqual(pkg.version, "0.127.0",
-    "HC-V0127-VERSION-A2: package.json version === 0.127.0");
-  assertEqual(sub.workshop_version, "0.127.0",
-    "HC-V0127-VERSION-A3: ranch/platform-subscription.json workshop_version === 0.127.0");
+  // A: workshop_version is on the 0.127.x line across the three canonical
+  // version files. PATCH-tolerant (regex /^0\.127\.\d+$/) so in-cycle PATCHes
+  // (v0.127.1+) don't require a sweep; landmine #16 hygiene.
+  assertTrue("HC-V0127-VERSION-A1: platform/manifest.json workshop_version matches /^0\\.127\\.\\d+$/",
+    /^0\.127\.\d+$/.test(platformMan.workshop_version), `got: ${platformMan.workshop_version}`);
+  assertTrue("HC-V0127-VERSION-A2: package.json version matches /^0\\.127\\.\\d+$/",
+    /^0\.127\.\d+$/.test(pkg.version), `got: ${pkg.version}`);
+  assertTrue("HC-V0127-VERSION-A3: ranch/platform-subscription.json workshop_version matches /^0\\.127\\.\\d+$/",
+    /^0\.127\.\d+$/.test(sub.workshop_version), `got: ${sub.workshop_version}`);
 
   // B: meetings catalogue pin 0.12.0 in both manifest + subscription.
   const meetings = (platformMan.blueprints || []).find(b => b && b.name === "meetings");

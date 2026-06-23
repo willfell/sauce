@@ -3804,9 +3804,16 @@ function _healNoteChromeBody(body, type) {
       }
     }
   }
-  // Step 6 (v0.127.0 §F) — inject TODAY_CAPTURE_MARKER into daily to-do notes
-  // so TodayCaptureEditableList + appendTask have a stable anchor. Idempotent.
-  if (type === 'to-do' && !out.includes(TODAY_CAPTURE_MARKER)) {
+  // Step 6 (v0.127.0 §F; v0.127.1 PATCH — also inject the renderer block) —
+  // inject TODAY_CAPTURE_MARKER + the TodayCaptureEditableList dataviewjs
+  // block into daily to-do notes. v0.127.0 only injected the marker comment;
+  // existing pre-deploy daily notes ended up with the anchor but no renderer
+  // (the template was correct for NEW notes, but the heal didn't back-inject
+  // the dataviewjs block). v0.127.1 closes that gap by inserting both
+  // together. Idempotent guards: skip marker insert if marker present; skip
+  // renderer insert if block already present (independent guards so a
+  // partially-healed note from v0.127.0 still gets the renderer added).
+  if (type === 'to-do') {
     const sectionLabelStr = 'class: "SectionLabel", args: [{ text: "Today", top: true }]';
     const slIdx = out.indexOf(sectionLabelStr);
     if (slIdx !== -1) {
@@ -3815,9 +3822,25 @@ function _healNoteChromeBody(body, type) {
       const closeRel = out.indexOf('\n```', slIdx);
       if (closeRel !== -1) {
         const insertAt = closeRel + 4; // just after "\n```"
-        out = out.slice(0, insertAt)
-            + '\n\n' + TODAY_CAPTURE_MARKER
-            + out.slice(insertAt);
+        // (a) Inject marker if absent.
+        if (!out.includes(TODAY_CAPTURE_MARKER)) {
+          out = out.slice(0, insertAt)
+              + '\n\n' + TODAY_CAPTURE_MARKER
+              + out.slice(insertAt);
+        }
+        // (b) Inject TodayCaptureEditableList block if absent. Position:
+        // immediately after the marker line (so renderer reads tasks BETWEEN
+        // SectionLabel("Today") fence and ToDoDailyCarryover block above).
+        if (!out.includes('class: "TodayCaptureEditableList"')) {
+          const markerIdx = out.indexOf(TODAY_CAPTURE_MARKER);
+          if (markerIdx !== -1) {
+            const markerLineEnd = markerIdx + TODAY_CAPTURE_MARKER.length;
+            const rendererBlock = '\n\n```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "TodayCaptureEditableList" });\n```';
+            out = out.slice(0, markerLineEnd)
+                + rendererBlock
+                + out.slice(markerLineEnd);
+          }
+        }
       }
     }
   }
