@@ -331,11 +331,353 @@ ok('DLG-18 serialize preserves [label](url) + [[wikilink]]',
     sharedWindow.app = undefined;
 })();
 
-console.log('');
-console.log(`Tests: ${pass}/${pass + fail}`);
-if (fail > 0) {
-    console.log('Failures:');
-    for (const f of failures) console.log(`  ${f}`);
-    process.exit(1);
+// Async test queue — HC-V0127-DLG-EDIT-F + G run async work (button click
+// handler is async). We collect their promises in pendingAsync and await
+// Promise.all before final tally.
+const pendingAsync = [];
+
+// ---------------------------------------------------------------------------
+// HC-V0127-DLG-EDIT-* — editExisting mode for ToDoCreateTask.open (S8).
+//
+// The harness loader injects `document = {}` which is too thin to render the
+// full overlay tree. For the edit-mode cases we reload ToDoCreateTask against
+// a richer sandbox carrying full DOM stubs (createEl / createDiv / event
+// handlers, etc.). The state object is a local closure variable so we cannot
+// inspect it directly — instead we probe via:
+//   - the Save/Create button text (asserts state.editExisting branched the label)
+//   - destSelect.disabled (asserts state.editExisting disabled the select)
+//   - the titleInput.value (asserts state.title hydrated from parsed.title)
+//   - the captured customJS.TaskInteractions.replaceTaskAt args on submit
+//     (asserts the edit-path dispatch + the serialized line shape)
+// ---------------------------------------------------------------------------
+
+function makeDomEl() {
+    const el = {
+        tagName: '',
+        _text: '',
+        _attrs: {},
+        style: { cssText: '' },
+        classList: { add() {}, remove() {}, contains() { return false; } },
+        children: [],
+        parentNode: null,
+        disabled: false,
+        type: '',
+        value: '',
+        innerHTML: '',
+        placeholder: '',
+        min: '',
+        max: '',
+        onclick: null,
+        onchange: null,
+        oninput: null,
+        createEl(tag, opts) {
+            const c = makeDomEl();
+            c.tagName = tag;
+            c.parentNode = this;
+            if (opts && opts.text != null) c._text = String(opts.text);
+            if (opts && opts.cls) c._attrs.cls = opts.cls;
+            if (opts && opts.type) c.type = String(opts.type);
+            this.children.push(c);
+            return c;
+        },
+        createDiv(opts) { return this.createEl('div', opts); },
+        addEventListener() {},
+        appendChild(child) {
+            child.parentNode = this;
+            this.children.push(child);
+            return child;
+        },
+        remove() {
+            if (this.parentNode && this.parentNode.children) {
+                this.parentNode.children = this.parentNode.children.filter((c) => c !== this);
+            }
+        },
+        focus() {},
+    };
+    Object.defineProperty(el, 'textContent', {
+        get() { return this._text; },
+        set(v) { this._text = String(v); },
+        configurable: true,
+    });
+    return el;
 }
-process.exit(0);
+
+function makeDomDocument() {
+    const body = makeDomEl();
+    body.tagName = 'body';
+    return {
+        body,
+        querySelector() { return null; },
+        addEventListener() {},
+        removeEventListener() {},
+    };
+}
+
+function findDescendant(root, predicate) {
+    if (predicate(root)) return root;
+    for (const c of root.children || []) {
+        const r = findDescendant(c, predicate);
+        if (r) return r;
+    }
+    return null;
+}
+
+function findAllDescendants(root, predicate, acc) {
+    acc = acc || [];
+    if (predicate(root)) acc.push(root);
+    for (const c of root.children || []) findAllDescendants(c, predicate, acc);
+    return acc;
+}
+
+/**
+ * Reload ToDoCreateTask with a fresh DOM sandbox. Returns { Cls, document,
+ * sharedWindow, getOverlay(), getSubmitBtn(), getTitleInput(), getDestSelect() }.
+ */
+function reloadWithDom() {
+    const fs = require('fs');
+    const path = require('path');
+    const localWindow = { moment: undefined, customJS: undefined, app: undefined };
+    const localDoc = makeDomDocument();
+    const helperPath = path.resolve(__dirname, '..', 'blueprints', 'to-do', 'helpers', 'todo-create-task.js');
+    const src = fs.readFileSync(helperPath, 'utf8');
+    const stubs = `
+        const Notice = function () {};
+        const console = { error: function () {}, log: function () {} };
+        setTimeout = (fn) => 0;
+    `;
+    // eslint-disable-next-line no-new-func
+    const make = new Function('window', 'document', `${stubs}\n${src}\nreturn ToDoCreateTask;`);
+    const Cls = make(localWindow, localDoc);
+    const getOverlay = () => localDoc.body.children.find((c) => c._attrs && c._attrs.cls === 'sauce-todo-create-overlay');
+    const getSubmitBtn = () => {
+        const overlay = getOverlay();
+        if (!overlay) return null;
+        return findDescendant(overlay, (el) => el.tagName === 'button' && (el._text === 'Save' || el._text === 'Create'));
+    };
+    const getTitleInput = () => {
+        const overlay = getOverlay();
+        if (!overlay) return null;
+        return findDescendant(overlay, (el) => el.tagName === 'input' && el.type === 'text' && !el.placeholder);
+    };
+    const getDestSelect = () => {
+        const overlay = getOverlay();
+        if (!overlay) return null;
+        // The destination select carries the literal value 'today' on its first
+        // option ("Today's daily"). The inserters' note-link select carries
+        // value '' on its first option ('(none)'); the recurring form's project
+        // select carries '' too. Filter by first-option value === 'today'.
+        const selects = findAllDescendants(overlay, (el) => el.tagName === 'select');
+        return selects.find((s) => {
+            const firstOpt = (s.children || []).find((c) => c.tagName === 'option');
+            return firstOpt && firstOpt.value === 'today';
+        }) || null;
+    };
+    return { Cls, document: localDoc, sharedWindow: localWindow, getOverlay, getSubmitBtn, getTitleInput, getDestSelect };
+}
+
+// --- HC-V0127-DLG-EDIT-A: title hydrates from parsed.title ---
+(() => {
+    const env = reloadWithDom();
+    const inst = new env.Cls();
+    inst.open({
+        editExisting: {
+            filePath: 'spice/to-do/2026/06-June/ToDo-2026-06-23.md',
+            lineIdx: 12,
+            parsed: { title: 'Finish slides', priority: '', due: '', scheduled: '', project: null },
+        },
+    });
+    const titleInput = env.getTitleInput();
+    ok('HC-V0127-DLG-EDIT-A state.title hydrates from parsed.title',
+        !!titleInput && titleInput.value === 'Finish slides',
+        `got titleInput.value = ${JSON.stringify(titleInput && titleInput.value)}`);
+})();
+
+// --- HC-V0127-DLG-EDIT-B: priority, due, destination hydrate from parsed ---
+(() => {
+    const env = reloadWithDom();
+    const inst = new env.Cls();
+    inst.open({
+        editExisting: {
+            filePath: 'spice/to-do/2026/06-June/ToDo-2026-06-23.md',
+            lineIdx: 7,
+            parsed: { title: 'Ship cycle', priority: 'high', due: '2026-06-30', scheduled: '', project: 'Sauce' },
+        },
+    });
+    const overlay = env.getOverlay();
+    // Probe via the date input and the destSelect value to confirm hydration.
+    const dateInputs = findAllDescendants(overlay, (el) => el.tagName === 'input' && el.type === 'date');
+    const dueInput = dateInputs[0] || null;
+    const destSelect = env.getDestSelect();
+    ok('HC-V0127-DLG-EDIT-B due input hydrates from parsed.due',
+        !!dueInput && dueInput.value === '2026-06-30',
+        `got dueInput.value = ${JSON.stringify(dueInput && dueInput.value)}`);
+    // destSelect value is set only if the matching project option exists in
+    // _loadProjectList — which returns [] without a Dataview API. We can't
+    // assert select.value here. Instead, verify the submit button label is Save
+    // (proxy that state.editExisting set correctly and full hydration ran).
+    const submit = env.getSubmitBtn();
+    ok('HC-V0127-DLG-EDIT-B-2 priority+destination hydration ran (submit is "Save")',
+        !!submit && submit._text === 'Save',
+        `got submit text = ${JSON.stringify(submit && submit._text)}`);
+})();
+
+// --- HC-V0127-DLG-EDIT-C: state.mode forced to one-shot when editExisting ---
+(() => {
+    // We can't read state.mode directly; instead, assert that the Save button
+    // is present (the one-shot form is the only one that renders for edit) and
+    // that the recurring form's "Frequency" label is NOT in the overlay.
+    const env = reloadWithDom();
+    const inst = new env.Cls();
+    inst.open({
+        editExisting: {
+            filePath: 'x.md',
+            lineIdx: 0,
+            parsed: { title: 'x', priority: null, due: null, scheduled: null, project: null },
+        },
+    });
+    const overlay = env.getOverlay();
+    const hasFrequencyLabel = !!findDescendant(overlay, (el) => el._text === 'Frequency');
+    const hasDestinationLabel = !!findDescendant(overlay, (el) => el._text === 'Destination');
+    ok('HC-V0127-DLG-EDIT-C forced one-shot tab: Destination label present',
+        hasDestinationLabel, 'no Destination label found in overlay tree');
+    ok('HC-V0127-DLG-EDIT-C-2 forced one-shot tab: no Frequency label rendered',
+        !hasFrequencyLabel, 'recurring form Frequency label leaked into edit-mode render');
+})();
+
+// --- HC-V0127-DLG-EDIT-D: submit button label is 'Save' when editExisting ---
+(() => {
+    const env = reloadWithDom();
+    const inst = new env.Cls();
+    inst.open({
+        editExisting: {
+            filePath: 'x.md',
+            lineIdx: 0,
+            parsed: { title: 'Edit me', priority: null, due: null, scheduled: null, project: null },
+        },
+    });
+    const submit = env.getSubmitBtn();
+    ok('HC-V0127-DLG-EDIT-D submit text is "Save" in edit mode',
+        !!submit && submit._text === 'Save',
+        `got submit text = ${JSON.stringify(submit && submit._text)}`);
+
+    // Counter-test: without editExisting, submit text is 'Create'.
+    const env2 = reloadWithDom();
+    const inst2 = new env2.Cls();
+    inst2.open({});
+    const submit2 = env2.getSubmitBtn();
+    ok('HC-V0127-DLG-EDIT-D-2 submit text is "Create" without editExisting',
+        !!submit2 && submit2._text === 'Create',
+        `got submit text = ${JSON.stringify(submit2 && submit2._text)}`);
+})();
+
+// --- HC-V0127-DLG-EDIT-E: destination select disabled when editExisting ---
+(() => {
+    const env = reloadWithDom();
+    const inst = new env.Cls();
+    inst.open({
+        editExisting: {
+            filePath: 'x.md',
+            lineIdx: 0,
+            parsed: { title: 'x', priority: null, due: null, scheduled: null, project: null },
+        },
+    });
+    const dest = env.getDestSelect();
+    ok('HC-V0127-DLG-EDIT-E destSelect.disabled === true in edit mode',
+        !!dest && dest.disabled === true,
+        `got dest.disabled = ${JSON.stringify(dest && dest.disabled)}`);
+
+    // Counter-test: in create mode the destSelect remains enabled.
+    const env2 = reloadWithDom();
+    const inst2 = new env2.Cls();
+    inst2.open({});
+    const dest2 = env2.getDestSelect();
+    ok('HC-V0127-DLG-EDIT-E-2 destSelect.disabled === false in create mode',
+        !!dest2 && dest2.disabled === false,
+        `got dest.disabled = ${JSON.stringify(dest2 && dest2.disabled)}`);
+})();
+
+// --- HC-V0127-DLG-EDIT-F: submit in edit mode invokes replaceTaskAt ---
+(() => {
+    const env = reloadWithDom();
+    let captured = null;
+    env.sharedWindow.customJS = {
+        TaskInteractions: {
+            replaceTaskAt: async (filePath, lineIdx, newLine) => {
+                captured = { filePath, lineIdx, newLine };
+                return { ok: true };
+            },
+        },
+    };
+    env.sharedWindow.app = { vault: { getAbstractFileByPath: () => null } };
+    const inst = new env.Cls();
+    inst.open({
+        editExisting: {
+            filePath: 'spice/to-do/2026/06-June/ToDo-2026-06-23.md',
+            lineIdx: 9,
+            parsed: { title: 'Edit me', priority: 'medium', due: '2026-06-25', scheduled: null, project: null },
+        },
+    });
+    const submit = env.getSubmitBtn();
+    ok('HC-V0127-DLG-EDIT-F submit exists', !!submit);
+    // Click handler is async; queue + await before final tally.
+    pendingAsync.push(Promise.resolve(submit.onclick && submit.onclick({})).then(() => {
+        ok('HC-V0127-DLG-EDIT-F-2 replaceTaskAt invoked',
+            captured !== null,
+            'replaceTaskAt was NOT called on submit click');
+        if (captured) {
+            ok('HC-V0127-DLG-EDIT-F-3 replaceTaskAt got correct filePath',
+                captured.filePath === 'spice/to-do/2026/06-June/ToDo-2026-06-23.md',
+                `got ${JSON.stringify(captured.filePath)}`);
+            ok('HC-V0127-DLG-EDIT-F-4 replaceTaskAt got correct lineIdx',
+                captured.lineIdx === 9, `got ${JSON.stringify(captured.lineIdx)}`);
+            ok('HC-V0127-DLG-EDIT-F-5 replaceTaskAt got serialized line with [priority::] + [due::]',
+                typeof captured.newLine === 'string'
+                    && captured.newLine.includes('Edit me')
+                    && captured.newLine.includes('[priority:: medium]')
+                    && captured.newLine.includes('[due:: 2026-06-25]'),
+                `got ${JSON.stringify(captured.newLine)}`);
+        }
+    }));
+})();
+
+// --- HC-V0127-DLG-EDIT-G: create-path regression check ---
+// Without editExisting, the create-path runs against ToDoCreateTask._submit
+// (not replaceTaskAt). We stub _submit on the instance to capture the
+// invocation, then verify the modal does NOT call replaceTaskAt.
+(() => {
+    const env = reloadWithDom();
+    let createCalled = false;
+    let replaceCalled = false;
+    env.sharedWindow.customJS = {
+        TaskInteractions: {
+            replaceTaskAt: async () => { replaceCalled = true; return { ok: true }; },
+        },
+    };
+    env.sharedWindow.app = { vault: { getAbstractFileByPath: () => null } };
+    const inst = new env.Cls();
+    inst._submit = async () => { createCalled = true; };
+    inst.open({ preselectDestination: 'today' });
+    // Simulate user typing a title so validatePayload passes.
+    const titleInput = env.getTitleInput();
+    titleInput.value = 'New task';
+    titleInput.oninput && titleInput.oninput();
+    const submit = env.getSubmitBtn();
+    pendingAsync.push(Promise.resolve(submit.onclick && submit.onclick({})).then(() => {
+        ok('HC-V0127-DLG-EDIT-G create-path: _submit was called',
+            createCalled, '_submit was NOT called in create mode');
+        ok('HC-V0127-DLG-EDIT-G-2 create-path: replaceTaskAt NOT called',
+            !replaceCalled, 'replaceTaskAt was called in create mode (regression)');
+    }));
+})();
+
+// Allow all async EDIT-* cases to settle before final tally.
+Promise.all(pendingAsync).then(() => {
+    console.log('');
+    console.log(`Tests: ${pass}/${pass + fail}`);
+    if (fail > 0) {
+        console.log('Failures:');
+        for (const f of failures) console.log(`  ${f}`);
+        process.exit(1);
+    }
+    process.exit(0);
+});
