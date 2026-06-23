@@ -50,8 +50,11 @@ class TaskInteractions {
         if (!m) return null;
         const body = m[1];
 
-        // Discover inline fields: [key:: value]
-        const fieldRe = /\[(\w+)::\s*([^\]]+)\]/g;
+        // Discover inline fields: [key:: value]. The value alternation accepts
+        // either a wikilink (`[[...]]` — must be matched before the bare-value
+        // branch, because `[^\]]+` would otherwise stop at the first `]` and
+        // truncate `[[Databricks]]` to `[[Databricks`) or any non-`]` chars.
+        const fieldRe = /\[(\w+)::\s*(\[\[[^\]]+\]\]|[^\]]+)\]/g;
         const fields = {};
         let firstFieldIdx = -1;
         let mm;
