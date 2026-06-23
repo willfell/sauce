@@ -6956,7 +6956,7 @@ async function caseFA2MeetingsCanonical() {
   console.log("\n--- Case FA2-MEETINGS: meetings@0.8.0 canonical vocab adoption ---");
   const manifest = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/meetings/manifest.json"), "utf8"));
-  assertTrue("FA2-MEETINGS-1: meetings version 0.11.0", manifest.version === "0.11.0",
+  assertTrue("FA2-MEETINGS-1: meetings version 0.11.1", manifest.version === "0.11.1",
     `got: ${manifest.version}`);
   const ec = manifest.new_entity_buttons[0].frontmatter_template;
   assertTrue("FA2-MEETINGS-2: entity-create frontmatter_template has created_at",
@@ -7688,8 +7688,8 @@ async function caseHCV0880MeetingsD() {
   console.log("\n--- Case HC-V0880-MEETINGS-D: meetings version exactly 0.8.0 ---");
   const m = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/meetings/manifest.json"), "utf8"));
-  assertTrue("HC-V0880-MEETINGS-D: meetings manifest.version === '0.11.0'",
-    m.version === "0.11.0",
+  assertTrue("HC-V0880-MEETINGS-D: meetings manifest.version === '0.11.1'",
+    m.version === "0.11.1",
     `got: ${m.version}`);
 }
 
@@ -8048,15 +8048,15 @@ async function caseHCV0890VersionA() {
 }
 
 async function caseHCV0890VersionB() {
-  console.log("\n--- Case HC-V0890-VERSION-B: people pin accepts 0.6.0 ---");
+  console.log("\n--- Case HC-V0890-VERSION-B: people pin accepts 0.6.1 ---");
   const m = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/people/manifest.json"), "utf8"));
-  assertEqual(m.version, "0.6.0", "HC-V0890-VERSION-B: people manifest version === 0.6.0");
+  assertEqual(m.version, "0.6.1", "HC-V0890-VERSION-B: people manifest version === 0.6.1");
   const cat = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
   const flat = JSON.stringify(cat);
-  assertTrue("HC-V0890-VERSION-B: platform/manifest.json catalogue pin people@0.6.0",
-    flat.includes("\"people\"") && flat.includes("0.6.0"));
+  assertTrue("HC-V0890-VERSION-B: platform/manifest.json catalogue pin people@0.6.1",
+    flat.includes("\"people\"") && flat.includes("0.6.1"));
 }
 
 async function caseHCV0890VersionC() {
@@ -10952,7 +10952,7 @@ async function caseV01020Meet1ManifestProjectField() {
   console.log("\n--- Case HC-V01020-MEET-1: meetings manifest 0.10.0 + project field + picker ---");
   const m = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/meetings/manifest.json"), "utf8"));
-  assertTrue("HC-V01020-MEET-1: version is 0.11.0", m.version === "0.11.0");
+  assertTrue("HC-V01020-MEET-1: version is 0.11.1", m.version === "0.11.1");
   const meetBtn = (m.new_entity_buttons || []).find(b => b.id === "meeting");
   assertTrue("HC-V01020-MEET-1: meeting button frontmatter_template includes project",
     meetBtn && meetBtn.frontmatter_template &&

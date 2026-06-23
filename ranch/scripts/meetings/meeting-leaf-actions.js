@@ -124,19 +124,43 @@ class MeetingLeafActions {
         cb.onchange = () => { if (cb.checked) selected.add(name); else selected.delete(name); };
         r.createEl("span", { text: name });
       };
-      [...new Set([...people, ...selected])].sort().forEach(renderRow);
+      const redrawList = (filter) => {
+        while (list.firstChild) list.removeChild(list.firstChild);
+        const q = (filter || "").toLowerCase();
+        const candidates = [...new Set([...people, ...selected])].sort();
+        const filtered = q
+          ? candidates.filter((n) => n.toLowerCase().includes(q) || selected.has(n))
+          : candidates;
+        filtered.forEach(renderRow);
+      };
+      redrawList("");
       const addWrap = panel.createEl("div");
       addWrap.style.cssText = "display:flex; gap:6px; margin-top:8px;";
-      const addInput = addWrap.createEl("input"); addInput.type = "text"; addInput.placeholder = "+ Add new person…";
+      const addInput = addWrap.createEl("input"); addInput.type = "text"; addInput.placeholder = "Search or add new…";
       addInput.style.cssText = "flex:1; padding:5px 8px; border-radius:6px; border:1px solid var(--background-modifier-border); background:var(--background-primary); color:var(--text-normal);";
       const addBtn = addWrap.createEl("button", { text: "Add" });
+      const updateAddButton = () => {
+        const typed = (addInput.value || "").trim();
+        const typedLc = typed.toLowerCase();
+        const matchesExisting = typed.length > 0 && people.some((n) => n.toLowerCase() === typedLc);
+        const canAdd = typed.length > 0 && !matchesExisting;
+        addBtn.disabled = !canAdd;
+        addBtn.style.opacity = canAdd ? "1" : "0.5";
+        addBtn.style.cursor = canAdd ? "pointer" : "not-allowed";
+        addBtn.textContent = canAdd ? `Add "${typed}" as new person` : "Add";
+      };
+      addInput.oninput = () => { redrawList(addInput.value); updateAddButton(); };
+      updateAddButton();
       addBtn.onclick = async () => {
+        if (addBtn.disabled) return;
         const name = (addInput.value || "").trim(); if (!name) return;
         const stubPath = `spice/people/${name}.md`;
         try { if (!app.vault.getAbstractFileByPath(stubPath)) await app.vault.create(stubPath, MeetingLeafActions.personStubBody(name, window.moment().format("YYYY-MM-DDTHH:mm:ssZZ"))); }
         catch (e) { new Notice("Could not add person: " + (e.message || e), 6000); return; }
-        selected.add(name); addInput.value = ""; while (list.firstChild) list.removeChild(list.firstChild);
-        [...new Set([...people, name, ...selected])].sort().forEach(renderRow);
+        selected.add(name); people.push(name);
+        addInput.value = "";
+        redrawList("");
+        updateAddButton();
       };
       const save = panel.createEl("button", { text: "Save attendees" });
       save.style.cssText = "margin-top:12px; width:100%; padding:8px; border-radius:6px; border:1px solid var(--interactive-accent); background:var(--interactive-accent); color:var(--text-on-accent); cursor:pointer; font-weight:600;";

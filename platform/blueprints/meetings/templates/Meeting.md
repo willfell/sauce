@@ -72,9 +72,13 @@ await dv.view("{{views_path}}/customjs-guard", { class: "Breadcrumb" });
 await dv.view("{{views_path}}/customjs-guard", { class: "SpaceNavButtons" });
 ```
 
+---
+
 ```dataviewjs
 await dv.view("{{views_path}}/customjs-guard", { class: "MeetingLeafActions" });
 ```
+
+---
 
 ```dataviewjs
 await dv.view("{{views_path}}/customjs-guard", { class: "SectionLabel", args: [{ text: "Attendees", top: true }] });
@@ -84,16 +88,9 @@ await dv.view("{{views_path}}/customjs-guard", { class: "SectionLabel", args: [{
 await dv.view("{{views_path}}/customjs-guard", {
   class: "PeopleRendering",
   method: "renderMentionList",
-  args: [dv, { mode: "mentioned_in_note", notePath: dv.current().file.path, scopePath: "spice/people" }, { style: "chips" }]
+  args: [{ mode: "mentioned_in_note", notePath: dv.current().file.path, scopePath: "spice/people" }, { style: "chips" }]
 });
 ```
-
-<%* for (const attendee of attendees) {
-  tR += `- [[${attendee}]]\n`;
-}
-if (attendees.length === 0) {
-  tR += `-\n`;
-} -%>
 
 ```dataviewjs
 await dv.view("{{views_path}}/customjs-guard", { class: "SectionLabel", args: [{ text: "Agenda" }] });
