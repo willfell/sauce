@@ -3488,6 +3488,13 @@ function _noteChromeFrontmatterType(body) {
   return m ? m[1] : null;
 }
 
+// Mirrors task-interactions@0.1.0's TaskInteractions.actionItemsAnchor() and
+// .todayCaptureAnchor(). install.js cannot reach customJS (runs in Templater
+// Node context, not Obsidian renderer), so these constants are intentionally
+// duplicated. Keep them in sync if the mechanism's anchor strings change.
+const ACTION_ITEMS_MARKER = '<!-- ACTION_ITEMS_MARKER -->';
+const TODAY_CAPTURE_MARKER = '<!-- TODAY_CAPTURE_MARKER -->';
+
 // _healNoteChromeBody — pure, idempotent body transform for the note-chrome
 // wave-1 heal. (1) Injects a Breadcrumb dataviewjs block immediately before the
 // first SpaceNavButtons dataviewjs fence when absent — the Breadcrumb guard
@@ -3496,8 +3503,13 @@ function _noteChromeFrontmatterType(body) {
 // dataviewjs blocks matching the Meeting.md template's args shape. (3) For
 // meeting notes only, drops a leftover markdown `---` divider that the old
 // blank-shielded Meeting.md template left before each header (double-divider
-// cleanup, v0.124.1). Returns the body unchanged when nothing applies (driver
-// relies on `after === before`).
+// cleanup, v0.124.1). (4) Any type: scrub `args: [dv, ...]` from PeopleRendering
+// invocations (v0.127.0 §A; bug shipped in <0.126.1 templates + inline_body).
+// (5) Meeting only: inject ACTION_ITEMS_MARKER above the Action Items
+// SectionLabel block (v0.127.0 §B; task-interactions appendTask anchor).
+// (6) To-do only: inject TODAY_CAPTURE_MARKER below the Today SectionLabel
+// block (v0.127.0 §F; TodayCaptureEditableList anchor). Returns the body
+// unchanged when nothing applies (driver relies on `after === before`).
 function _healNoteChromeBody(body, type) {
   if (typeof body !== "string") return body;
   let out = body;
@@ -3585,6 +3597,53 @@ function _healNoteChromeBody(body, type) {
       }
     }
   }
+  // Step 4 (v0.127.0 §A) — scrub `args: [dv, ...]` from PeopleRendering
+  // invocations. v0.126.1 fixed the source (template + inline_body), but 411+
+  // existing notes carry the bug on-disk. The {0,400} bound restricts the match
+  // to a single dataviewjs block — never rewrites a stray "[dv," outside a
+  // PeopleRendering call. Fence-aware: handled by the larger function — this
+  // step does a string replace AFTER fence-aware passes have run, because the
+  // bug is inside a dataviewjs FENCE BODY (which means our step-1/2 fence
+  // tracking treated it as content, not as bypass).
+  const PEOPLE_RENDERING_BAD = /(class:\s*"PeopleRendering"[\s\S]{0,400}?args:\s*\[)\s*dv\s*,\s*/g;
+  out = out.replace(PEOPLE_RENDERING_BAD, '$1');
+  // `out` may have changed; downstream steps (5, 6) operate on the scrubbed
+  // content.
+  // Step 5 (v0.127.0 §B) — inject ACTION_ITEMS_MARKER into meeting notes so
+  // task-interactions appendTask() has a stable anchor. Idempotent guard via
+  // out.includes(ACTION_ITEMS_MARKER).
+  if (type === 'meeting' && !out.includes(ACTION_ITEMS_MARKER)) {
+    const sectionLabelStr = 'class: "SectionLabel", args: [{ text: "Action Items" }]';
+    const slIdx = out.indexOf(sectionLabelStr);
+    if (slIdx !== -1) {
+      // Walk backwards from slIdx to find the opening ```dataviewjs fence line.
+      const before = out.slice(0, slIdx);
+      const fenceIdx = before.lastIndexOf('```dataviewjs');
+      if (fenceIdx !== -1) {
+        // Insert the marker on its own line, with a blank line above and below.
+        out = out.slice(0, fenceIdx)
+            + ACTION_ITEMS_MARKER + '\n\n'
+            + out.slice(fenceIdx);
+      }
+    }
+  }
+  // Step 6 (v0.127.0 §F) — inject TODAY_CAPTURE_MARKER into daily to-do notes
+  // so TodayCaptureEditableList + appendTask have a stable anchor. Idempotent.
+  if (type === 'to-do' && !out.includes(TODAY_CAPTURE_MARKER)) {
+    const sectionLabelStr = 'class: "SectionLabel", args: [{ text: "Today", top: true }]';
+    const slIdx = out.indexOf(sectionLabelStr);
+    if (slIdx !== -1) {
+      // Find the closing fence of THIS dataviewjs block: walk forward from slIdx
+      // looking for the next "\n```" sequence.
+      const closeRel = out.indexOf('\n```', slIdx);
+      if (closeRel !== -1) {
+        const insertAt = closeRel + 4; // just after "\n```"
+        out = out.slice(0, insertAt)
+            + '\n\n' + TODAY_CAPTURE_MARKER
+            + out.slice(insertAt);
+      }
+    }
+  }
   return out;
 }
 
@@ -3659,7 +3718,7 @@ function _dropDividersBeforeSectionLabels(body) {
 async function applyNoteChromeHeal(tp, history, git) {
   if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
   const adapter = tp.app.vault.adapter;
-  const roots = ["spice/meetings", "spice/scratch", "spice/to-do"];
+  const roots = ["spice/meetings", "spice/scratch", "spice/to-do", "spice/people"];
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
   let healed = 0, warned = 0;
   for (const root of roots) {
@@ -3678,7 +3737,7 @@ async function applyNoteChromeHeal(tp, history, git) {
       try {
         const before = await adapter.read(fpath);
         const type = _noteChromeFrontmatterType(before);
-        if (!["meeting", "scratch", "scratch-day", "to-do"].includes(type)) continue;
+        if (!["meeting", "scratch", "scratch-day", "to-do", "person"].includes(type)) continue;
         const after = _healNoteChromeBody(before, type);
         if (after === before) continue;
         // .sauce-backup snapshot before write (mirrors applyFinanceMigrations).
