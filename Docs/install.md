@@ -1370,3 +1370,44 @@ Fix: `parseRegistry` now accepts both the SectionLabel block and the legacy H2 a
 - No vault content is modified — this is a pure code fix in the to-do blueprint's CustomJS helper.
 - All previously-materialized daily notes are unaffected. Today's already-opened daily note may carry a spent `recurring-materialized-<date>` sentinel; only future dailies auto-populate from the next open onward.
 - `sauce update --bump-pins` reinstalls the to-do blueprint at 0.6.1. Cmd+R Obsidian after the update to reload the helper.
+
+---
+
+## Upgrading from v0.126.x
+
+`brew update && brew upgrade sauce` (waits for the tap PR to merge after tag push). Then in each consumer vault:
+
+```bash
+sauce update --bump-pins
+sauce install
+```
+
+This is a **MINOR** release — workshop 0.126.1 → **0.127.0**.
+
+`--bump-pins` advances the v0.126.x pins to:
+
+- `workshop_version` → **0.127.0**
+- `meetings` blueprint → **0.12.0**
+- `project` blueprint → **1.26.0**
+- `to-do` blueprint → **0.12.1** (MINOR 0.11.0 → 0.12.0 + in-cycle PATCH → 0.12.1 for a `customJS.ToDoCreateTask.serializePayloadToLine` static-on-instance fix)
+- NEW mechanism `task-interactions` → **0.1.0**
+
+**What this release adds:**
+
+- **NEW cross-blueprint mechanism `task-interactions@0.1.0`** — a single `customJS.TaskInteractions` instance with 9 methods (parse / serialize / actionItemsAnchor / todayCaptureAnchor / injectActionItemsMarker / injectTodayCaptureMarker / findTaskLines / appendTask / replaceTaskAt). The inline-dataview-field grammar (`- [ ] x [project:: [[Y]]] [priority:: high] [due:: Z]`) that the +New Task dialog has emitted since v0.118.0 becomes a first-class bidirectional contract consumed by meetings, to-do, and (in a follow-up) project.
+- **Meeting New Task dual-write** — the meeting `+ New Task` button now writes the new task into BOTH the meeting's Action Items section AND the corresponding project's `<Name> To-Do.md` (when the meeting's `project:` frontmatter is set). Five Notice variants cover every success / partial-success / failure path.
+- **Click-to-edit on `## Today` raw checkboxes** — a NEW `TodayCaptureEditableList` widget renders below the `Today` SectionLabel on each daily To-Do note; each row is clickable; clicking the pencil icon opens the existing `+ New Task` modal in NEW edit mode (Submit-button label flips `Create` → `Save`; destination select disabled; project select stays enabled so you can reassign `[project:: [[Y]]]` without moving the file).
+- **Projects.md hub defaults flipped** — the hub now shows all 7 statuses by default (was: 4 active statuses); within-group sort flipped from status priority to latest-folder-mtime DESC so the most-recently-touched project is at the top. Status chips still let you toggle interactively.
+
+**What this release fixes (four post-v0.126.1 bugs):**
+
+- **PeopleRendering `args: [dv, ...]` scrub** — v0.126.1 fixed the double-prepend in the SOURCE (templates + inline_body) but the 411+ existing meeting + people leaf notes in the typical accuris vault still carried the bad pattern on-disk. The installer's `_healNoteChromeBody` now scrubs the `dv,` token from inside any `class: "PeopleRendering"` block (fence-aware, bounded regex, idempotent). Roots extended to include `spice/people`; person notes are now within the heal allowlist.
+- **`ProjectMeetingsPanel` heal injection** — existing project hubs created before v0.126.0 were missing the meetings panel that lists every meeting tagged with the project. NEW `applyProjectMeetingsPanelHeal` walks `spice/projects/<slug>/` per project and injects the panel block at a stable anchor (preference: after `ProjectStatusWidget` → after `ProjectNavButtons` → after the first dataviewjs block). Insert-only and idempotent; never touches surrounding user content.
+- **Sentinel injection** — `<!-- ACTION_ITEMS_MARKER -->` is back-injected into existing meeting notes (anchor for the new dual-write); `<!-- TODAY_CAPTURE_MARKER -->` is back-injected into existing daily To-Do notes (anchor for `TodayCaptureEditableList`).
+
+**What does NOT change:**
+
+- No manual migration steps required. All four installer heals (args-scrub, `ACTION_ITEMS_MARKER` injection, `TODAY_CAPTURE_MARKER` injection, `applyProjectMeetingsPanelHeal`) run automatically during `sauce install` and are idempotent on re-run.
+- The `+ New Task` dialog's create path is unchanged. Only the new `editExisting` mode + the meeting-context dual-write are new behavior.
+- No vault data is dropped or restructured. Each transform is fenced + bounded + reads-write-back via the existing `.sauce-backup/<ts>/` snapshot path.
+- Cmd+R Obsidian after `sauce install` so the new CustomJS classes (`TaskInteractions` + `TodayCaptureEditableList`) load.

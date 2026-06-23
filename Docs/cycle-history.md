@@ -2633,3 +2633,41 @@ See `Docs/plans/2026-06-15-v0.118.0-recurring-fix-flexible-create-design.md` + `
 
 See `Docs/plans/2026-06-16-v0.118.1-recurring-parseregistry-result.md`.
 
+---
+
+## v0.127.0 task-interactions + four post-v0.126.1 fixes CLOSED 2026-06-23
+
+**Workshop:** 0.126.1 → 0.127.0
+**Blueprints:** meetings 0.11.1 → **0.12.0**; project 1.25.1 → **1.26.0**; to-do 0.11.0 → **0.12.1** (in-cycle PATCH)
+**NEW mechanism:** `task-interactions` 0.1.0
+**Mechanism count:** 20 → **21** (customjs_classes count 11 → 12)
+**Harnesses:** 32 → **36** (+4 NEW behavioral)
+
+**Headline:** Bundled four post-v0.126.1 bugs (snackbar args scrub, meeting New Task dual-write, ProjectMeetingsPanel heal, Projects.md defaults) with a NEW cross-blueprint `task-interactions` mechanism and click-to-edit on raw `## Today` checkboxes via a reused `ToDoCreateTask` modal (editExisting mode). The cycle thesis: the inline-dataview-field grammar emitted by `ToDoCreateTask.serializePayloadToLine` was already a universal task language since v0.118.0; what was missing was one parser, one writer, and one editor that consume it. v0.127.0 introduces the contract layer (`customJS.TaskInteractions`) and four consumer surfaces (meeting + project-todo + to-do + edit-modal) snap into symmetry against it.
+
+**Deliverables (six work-streams §A–§F):**
+
+- **§A args-scrub heal (`b10fada1`):** `_healNoteChromeBody` extended with step 4 (bounded PeopleRendering args-scrub regex strips the `dv,` token; fence-aware; idempotent) + step 5 + step 6 (inline `ACTION_ITEMS_MARKER` + `TODAY_CAPTURE_MARKER` sentinel injectors; idempotent via substring guard). `applyNoteChromeHeal` roots extended to include `spice/people`; allowed-types filter widened to include `"person"`. Person notes only execute step 4; steps 1-3 + 5-6 stay type-gated.
+
+- **§B task-interactions mechanism (`db6877cf` + `c8a02b1b` harness):** NEW single-class `customJS.TaskInteractions` mechanism at `platform/mechanisms/task-interactions/` with 9 public methods (parse / serialize / actionItemsAnchor / todayCaptureAnchor / injectActionItemsMarker / injectTodayCaptureMarker / findTaskLines / appendTask / replaceTaskAt). Instance-delegator pattern: every static also exposed as instance method so `customJS.X.method` always resolves. NEW behavioral harness `run-task-interactions.js` 112/112 — round-trip parse/serialize for 8+ payload shapes; idempotency; dispatch matrix; fence-awareness. Harness surfaced + fixed a wikilink-strip regex bug in the parser pre-merge.
+
+- **§C meetings consumer + ACTION_ITEMS_MARKER (`808067b9`):** `meeting-leaf-actions.js` `_onNewTask` rewritten to dual-write via `customJS.TaskInteractions.appendTask`. New helpers `_openTaskModal` (minimal one-shot fields; project read-only from meeting context), `_projectTodoPath` (resolves project To-Do file path), `_noticeDualWrite` (5 Notice variants). `meetings/manifest.json` 0.11.1 → 0.12.0 with `depends_on: + task-interactions >=0.1.0`. Template + inline_body ship `<!-- ACTION_ITEMS_MARKER -->`. `run-meeting-leaf-actions.js` extended 11 → 20 sub-asserts (HC-V0127-MLA-NT-* cases).
+
+- **§D ProjectMeetingsPanel heal (`a56c2810`):** NEW `applyProjectMeetingsPanelHeal` in `platform/install.js`, wired AFTER `applyDocsHubButtonRepair`. Per-project walk under `spice/projects/`; injects PMP dataviewjs block at anchor preference Status → NavButtons → first dataviewjs block; idempotent via `class: "ProjectMeetingsPanel"` guard. Behavioral harness `run-v0127-project-hub-heal.js` 12/12 covering all 4 anchor cases + idempotency.
+
+- **§E Projects.md hub defaults (`e6b8c42b`):** `projects-hub-cards.js` two source changes. Default `_activeStatuses` expanded from 4 active statuses to all 7 (idea / planning / in-progress / blocked / done / superseded / cancelled). `_renderCards` primary sort key flipped from `PRIORITY[status]` ASC → `latestMtime` DESC; status priority + `status_changed_at` remain as tiebreakers. `project/manifest.json` 1.25.1 → 1.26.0. Behavioral harness `run-v0127-projects-hub-defaults.js` 16/16.
+
+- **§F click-to-edit + TodayCaptureEditableList (`bd5f7bfd`):** NEW class `TodayCaptureEditableList` reads daily to-do body via `customJS.TaskInteractions.findTaskLines(content, "todayCapture")`, emits one clickable row per task with pencil → opens `ToDoCreateTask.open({ editExisting: { filePath, lineIdx, parsed } })`. `ToDoCreateTask.open` extended with `editExisting` option; modal opens on one-shot tab, state pre-populated from `parsed`, submit-button label flips `Create` → `Save`, destination select disabled. Submit dispatch branches to `customJS.TaskInteractions.replaceTaskAt`. `Today To-Do.md` template grows `<!-- TODAY_CAPTURE_MARKER -->` + new dataviewjs block. `to-do/manifest.json` 0.11.0 → 0.12.0 → in-cycle PATCH **0.12.1** (see § Lesson 3) with `depends_on: + task-interactions >=0.1.0`. NEW behavioral harness `run-v0127-today-capture-editable-list.js` 16/16; `run-todo-dialog.js` extended 50 → 69 sub-asserts.
+
+**Tests:** preflight 27 harness suites GREEN; `run-helper-cases` 3661/0; `version-sync ok: 0.127.0`; workshop dogfood exit 0. 4 NEW behavioral harnesses; 2 existing extended.
+
+**Lessons captured:**
+
+1. **Universal-grammar consolidation.** When an existing serializer is consumed by multiple producers, promote its inverse + writer to a mechanism so consumer surfaces stay symmetric. The inline-field grammar had existed since v0.118.0 but only one path could emit it; v0.127.0 makes it bidirectional via a single mechanism.
+2. **Stable-anchor sentinels over display markers.** `<!-- ACTION_ITEMS_MARKER -->` + `<!-- TODAY_CAPTURE_MARKER -->` are the correct anchor primitives because `SectionLabel` is explicitly headless DOM (no `data-section`, no `id`). Reaffirms v0.118.1's parseRegistry-keyed-on-H2 incident.
+3. **customjs static-on-instance trap (third recurrence).** `ToDoCreateTask.serializePayloadToLine` was declared `static`; `task-interactions.js` consumed it via `customJS.ToDoCreateTask.serializePayloadToLine` — same shape that bit `RecurrenceParser`/`TaskParser` in v0.118.0. Surfaced via `run-customjs-contract` at S9 preflight time. In-cycle PATCH bump to-do 0.12.0 → 0.12.1 added the instance delegator on `serializePayloadToLine` above the static (source order matters — contract checker's `.find()` returns first match). **RULE reaffirmed:** any class consumed via `customJS.X.method` MUST expose that method as an instance method.
+
+**Commits:** `9dab9552` (design + plan) → `db6877cf` (task-interactions mechanism) → `c8a02b1b` (S3 behavioral harness) → `b10fada1` (§A args-scrub heal + sentinel injection) → `808067b9` (§C meetings dual-write + ACTION_ITEMS_MARKER) → `a56c2810` (§D ProjectMeetingsPanel heal) → `e6b8c42b` (§E Projects.md defaults + sort) → `bd5f7bfd` (§F click-to-edit + TodayCaptureEditableList) → `c359136c` (S9 version sweep + lockstep subscriptions; in-cycle PATCH to-do 0.12.0 → 0.12.1). PR #20 merge `980972f9`.
+
+See `Docs/plans/2026-06-23-v0.127.0-task-interactions-and-fixes-result.md` + design + plan.
+
