@@ -1,0 +1,15 @@
+{
+  "name": "task-interactions",
+  "version": "0.1.0",
+  "kind": "mechanism",
+  "description": "Cross-blueprint contract layer for the inline-dataview-field task grammar (`- [ ] x [project:: [[Y]]] [priority:: high] [due:: Z]`). Exposes `customJS.TaskInteractions` with one parser, one serializer (delegates to ToDoCreateTask.serializePayloadToLine for byte-identical output), pure sentinel-marker injectors (`<!-- ACTION_ITEMS_MARKER -->`, `<!-- TODAY_CAPTURE_MARKER -->`), a fence-aware task-line scanner, plus type-dispatched `appendTask` / `replaceTaskAt` writers that never throw. Introduced at sauce v0.127.0 as the foundation for the meeting New-Task dual-write (§C) and to-do click-to-edit (§F) consumers; positioned for project blueprint consumption (rich ProjectMeetingsPanel rows) in a later cycle.",
+  "depends_on": [
+    { "name": "customjs-guard", "range": ">=1.0.0" }
+  ],
+  "customjs_classes": ["TaskInteractions"],
+  "files": [
+    { "source": "task-interactions.js", "dest": "{{scripts_path}}/task-interactions/task-interactions.js" }
+  ],
+  "post_install": [],
+  "rule_fragments": []
+}

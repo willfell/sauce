@@ -92,6 +92,11 @@
       "version": "0.1.0",
       "path": "mechanisms/section-label"
     },
+    {
+      "name": "task-interactions",
+      "version": "0.1.0",
+      "path": "mechanisms/task-interactions"
+    },
     { "name": "open-helpers", "version": "0.1.1", "path": "mechanisms/open-helpers" },
     {
       "name": "icons",
