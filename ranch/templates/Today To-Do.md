@@ -23,6 +23,12 @@ await dv.view("ranch/views/customjs-guard", { class: "ToDoLeafActions" });
 await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Today", top: true }] });
 ```
 
+<!-- TODAY_CAPTURE_MARKER -->
+
+```dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "TodayCaptureEditableList" });
+```
+
 ```dataviewjs
 await dv.view("ranch/views/customjs-guard", { class: "ToDoDailyCarryover" });
 ```

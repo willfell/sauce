@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-06-23T18:13:35.605Z",
-  "workshop_version": "0.126.1",
+  "generated_at": "2026-06-23T23:05:11.180Z",
+  "workshop_version": "0.127.0",
   "contributions": {
     "audit": [
       {
@@ -96,13 +96,13 @@
         "kind": "command",
         "source": "commands/project.md",
         "dest": ".claude/commands/project.md",
-        "version": "1.25.1"
+        "version": "1.26.0"
       },
       {
         "kind": "skill",
         "source": "skills/new-project/SKILL.md",
         "dest": ".claude/skills/project/new-project/SKILL.md",
-        "version": "1.25.1"
+        "version": "1.26.0"
       },
       {
         "kind": "claude_md_row",
@@ -142,13 +142,13 @@
         "kind": "command",
         "source": "commands/meetings.md",
         "dest": ".claude/commands/meetings.md",
-        "version": "0.11.1"
+        "version": "0.12.0"
       },
       {
         "kind": "skill",
         "source": "skills/new-meeting/SKILL.md",
         "dest": ".claude/skills/meetings/new-meeting/SKILL.md",
-        "version": "0.11.1"
+        "version": "0.12.0"
       },
       {
         "kind": "claude_md_row",
