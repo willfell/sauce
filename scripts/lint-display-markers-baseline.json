@@ -1,6 +1,11 @@
 {
   "warnings": [
     {
+      "file": "platform/mechanisms/task-interactions/task-interactions.js",
+      "line": 226,
+      "snippet": "if (/^## /.test(lines[i])) { endIdx = i; break; }"
+    },
+    {
       "file": "platform/mechanisms/kanban-status-sync/kanban-status-sync.js",
       "line": 150,
       "snippet": "* - A column is a depth-2 heading: `## ColumnName`."
@@ -81,43 +86,48 @@
       "snippet": "if (/^## /.test(lines[i])) {"
     },
     {
+      "file": "platform/blueprints/to-do/helpers/today-capture-editable-list.js",
+      "line": 3,
+      "snippet": "* `## Today` checkbox rows as a click-to-edit list. Each row exposes a"
+    },
+    {
       "file": "platform/blueprints/to-do/helpers/todo-all-list.js",
       "line": 4,
       "snippet": "* date desc, each group rendered as `## YYYY-MM-DD` heading + linked task"
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
-      "line": 527,
+      "line": 625,
       "snippet": "if (payload.mode === 'recurring') heading = '## Recurring Tasks';"
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
-      "line": 528,
+      "line": 626,
       "snippet": "else if (payload.destination && payload.destination.type === 'project') heading = '## Owned Tasks';"
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
-      "line": 529,
+      "line": 627,
       "snippet": "else heading = '## Today';"
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
-      "line": 564,
+      "line": 662,
       "snippet": "'## Recurring Tasks',"
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
-      "line": 579,
+      "line": 677,
       "snippet": "'## Owned Tasks',"
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
-      "line": 581,
+      "line": 679,
       "snippet": "'## From Meetings',"
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
-      "line": 593,
+      "line": 691,
       "snippet": "\"## Today's Capture\","
     },
     {
@@ -167,7 +177,7 @@
     },
     {
       "file": "platform/blueprints/project/helpers/projects-hub-cards.js",
-      "line": 217,
+      "line": 219,
       "snippet": "if (line.startsWith(\"## \")) lane = line.replace(\"## \", \"\").trim();"
     },
     {

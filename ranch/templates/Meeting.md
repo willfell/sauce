@@ -102,6 +102,8 @@ await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ te
 await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Notes" }] });
 ```
 
+<!-- ACTION_ITEMS_MARKER -->
+
 ```dataviewjs
 await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Action Items" }] });
 ```
