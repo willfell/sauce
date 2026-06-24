@@ -218,6 +218,37 @@ ok('DLG-13b destinationPath today (with stub moment)',
         bareOut.replace(/\n+$/, '').endsWith(line), `out:\n${bareOut}`);
 })();
 
+// DLG-MARK: today task inserts AFTER the TODAY_CAPTURE_MARKER (#3).
+(() => {
+    const inst = new ToDoCreateTask();
+    const content = [
+        '---','type: to-do','---','',
+        '```dataviewjs','await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Today", top: true }] });','```','',
+        '<!-- TODAY_CAPTURE_MARKER -->','',
+        '```dataviewjs','await dv.view("ranch/views/customjs-guard", { class: "TodayCaptureEditableList" });','```',
+    ].join('\n');
+    const out = inst._insertLineUnderSection(content, '- [ ] new one', { destination: 'today' });
+    const markIdx = out.indexOf('<!-- TODAY_CAPTURE_MARKER -->');
+    const taskIdx = out.indexOf('- [ ] new one');
+    ok('DLG-MARK task after marker', taskIdx > markIdx, `marker@${markIdx} task@${taskIdx}`);
+})();
+// DLG-SCAFFOLD: _todayBody fallback contains the full chrome (#2).
+(() => {
+    const body = ToDoCreateTask._todayBody(null, '2026-06-24T09:00:00-06:00');
+    ok('DLG-SCAFFOLD has marker', body.includes('<!-- TODAY_CAPTURE_MARKER -->'));
+    ok('DLG-SCAFFOLD has editable list', body.includes('TodayCaptureEditableList'));
+    ok('DLG-SCAFFOLD has carryover', body.includes('ToDoDailyCarryover'));
+    ok('DLG-SCAFFOLD has leaf actions', body.includes('ToDoLeafActions'));
+    ok('DLG-SCAFFOLD dividers around buttons', body.split('---').length >= 4);
+})();
+// DLG-SCAFFOLD-TPL: when given the materialized template, substitutes the date token.
+(() => {
+    const tpl = '---\ntype: to-do\ncreated_at: "<% tp.file.creation_date(\"YYYY-MM-DDTHH:mm:ssZ\") %>"\ntags:\n  - "accuris"\n---\n<!-- TODAY_CAPTURE_MARKER -->\nTodayCaptureEditableList';
+    const body = ToDoCreateTask._todayBody(tpl, '2026-06-24T09:00:00-06:00');
+    ok('DLG-SCAFFOLD-TPL token substituted', body.includes('2026-06-24T09:00:00-06:00') && !body.includes('tp.file.creation_date'));
+    ok('DLG-SCAFFOLD-TPL keeps vault tag', body.includes('"accuris"'));
+})();
+
 // --- DLG-16: LIVE recurring validate with customJS.RecurrenceParser INSTANCE ---
 // Reproduces the user-reported "Create button permanently disabled" bug. In live
 // Obsidian customJS stores INSTANCES under window.customJS.RecurrenceParser; the

@@ -18,6 +18,18 @@
  */
 class ToDoCreateTask {
 
+    // ---------- Instance delegators (customJS stores INSTANCES) ----------
+    //
+    // customJS stores an INSTANCE under window.customJS.ToDoCreateTask, and
+    // cross-class consumers (TaskInteractions mechanism at v0.127.0+) reach
+    // serializePayloadToLine via that instance. Static-only declarations are
+    // not on the prototype → call throws at runtime. Mirrors TaskParser +
+    // RecurrenceParser delegator posture (instance method must precede the
+    // static in source order so run-customjs-contract.js .find() returns the
+    // non-static first; see customjs-guard semantics).
+
+    serializePayloadToLine(payload) { return ToDoCreateTask.serializePayloadToLine(payload); }
+
     // ---------- Static pure helpers ----------
 
     /**
@@ -50,17 +62,6 @@ class ToDoCreateTask {
         if (payload.due) parts.push(`[due:: ${payload.due}]`);
         if (payload.scheduled) parts.push(`[scheduled:: ${payload.scheduled}]`);
         return parts.join(' ');
-    }
-
-    /**
-     * Instance delegator for `serializePayloadToLine`. customJS stores classes
-     * with instance methods as INSTANCES → static methods are unreachable on
-     * `window.customJS.ToDoCreateTask`. Cross-class consumers (TaskInteractions
-     * mechanism at v0.127.0+) need an instance method to bridge to the static.
-     * Keep the static the canonical impl; this just routes the lookup.
-     */
-    serializePayloadToLine(payload) {
-        return ToDoCreateTask.serializePayloadToLine(payload);
     }
 
     static destinationPath(payload, vaultMoment) {
@@ -590,6 +591,23 @@ class ToDoCreateTask {
     }
 
     _insertLineUnderSection(content, line, payload) {
+        // #3: for the today daily, insert AFTER the stable TODAY_CAPTURE_MARKER so
+        // the new task falls inside TodayCaptureEditableList's scan window
+        // (findTaskLines(_, 'todayCapture') scans only below the marker). Mirrors
+        // TaskInteractions.appendTask's to-do branch. SectionLabel-anchor logic
+        // below remains the fallback for notes without the marker.
+        const isToday = !(payload.mode === 'recurring')
+            && !(payload.destination && payload.destination.type === 'project');
+        if (isToday) {
+            const MARK = '<!-- TODAY_CAPTURE_MARKER -->';
+            const mi = content.indexOf(MARK);
+            if (mi !== -1) {
+                const insertPos = mi + MARK.length;
+                const head = content.slice(0, insertPos);
+                const tail = content.slice(insertPos).replace(/^\n+/, '');
+                return head + `\n${line}\n` + (tail ? '\n' + tail : '');
+            }
+        }
         // v0.5.2: anchor on the SectionLabel dataviewjs block (not a legacy `## H2`
         // markdown heading). Templates ship SectionLabel("Today") /
         // SectionLabel("Owned Tasks") / SectionLabel("Recurring Tasks") instead of
@@ -647,6 +665,36 @@ class ToDoCreateTask {
         }
     }
 
+    /**
+     * #2: build the full daily-to-do body. If `templateContent` looks like the
+     * materialized Today To-Do template, substitute the Templater creation_date
+     * token (inherits the correct vault tag + live block list). Otherwise emit a
+     * hardcoded full scaffold. `isoNow` is the YYYY-MM-DDTHH:mm:ssZ timestamp.
+     */
+    static _todayBody(templateContent, isoNow) {
+        const TOKEN = /<%\s*tp\.file\.creation_date\([^)]*\)\s*%>/g;
+        if (typeof templateContent === 'string'
+            && templateContent.includes('TODAY_CAPTURE_MARKER')
+            && templateContent.includes('TodayCaptureEditableList')) {
+            return templateContent.replace(TOKEN, isoNow);
+        }
+        return [
+            '---', 'type: to-do', `created_at: "${isoNow}"`, 'cssclasses:', '  - wide', '---', '',
+            '```dataviewjs', 'await dv.view("ranch/views/customjs-guard", { class: "Breadcrumb" });', '```', '',
+            '```dataviewjs', 'await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });', '```', '',
+            '---', '',
+            '```dataviewjs', 'await dv.view("ranch/views/customjs-guard", { class: "ToDoLeafActions" });', '```', '',
+            '---', '',
+            '```dataviewjs', 'await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Today", top: true }] });', '```', '',
+            '<!-- TODAY_CAPTURE_MARKER -->', '',
+            '```dataviewjs', 'await dv.view("ranch/views/customjs-guard", { class: "TodayCaptureEditableList" });', '```', '',
+            '```dataviewjs', 'await dv.view("ranch/views/customjs-guard", { class: "ToDoDailyCarryover" });', '```', '',
+            '```dataviewjs', 'await dv.view("ranch/views/customjs-guard", { class: "ToDoDailyRecurring" });', '```', '',
+            '```dataviewjs', 'await dv.view("ranch/views/customjs-guard", { class: "ToDoDailyProjectGroups" });', '```', '',
+            '```dataviewjs', 'await dv.view("ranch/views/customjs-guard", { class: "ToDoDailyUnassignedMeetings" });', '```', '',
+        ].join('\n');
+    }
+
     async _initialBodyFor(payload, dest) {
         // Per-destination minimal body (fallback when template not picked up by Templater).
         if (payload.mode === 'recurring') {
@@ -679,17 +727,15 @@ class ToDoCreateTask {
                 '',
             ].join('\n');
         }
-        return [
-            '---',
-            'type: to-do',
-            `created_at: "${new Date().toISOString()}"`,
-            'cssclasses:',
-            '  - wide',
-            '---',
-            '',
-            "## Today's Capture",
-            '',
-        ].join('\n');
+        // #2: full daily scaffold. Try the materialized template (correct vault
+        // tag + live blocks), fall back to the hardcoded scaffold.
+        const isoNow = (window && window.moment) ? window.moment().format('YYYY-MM-DDTHH:mm:ssZ') : new Date().toISOString();
+        let tpl = null;
+        try {
+            const tf = window.app && window.app.vault && window.app.vault.getAbstractFileByPath('ranch/templates/Today To-Do.md');
+            if (tf) tpl = await window.app.vault.read(tf);
+        } catch (_e) { /* fall back to hardcoded */ }
+        return ToDoCreateTask._todayBody(tpl, isoNow);
     }
 
     _loadProjectList() {
