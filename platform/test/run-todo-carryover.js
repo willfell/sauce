@@ -35,6 +35,23 @@ function loadClass() {
 
 const ToDoDailyCarryover = loadClass();
 
+// Window-injectable loader (mirrors run-todo-dialog.js's `new Function('window', …)`
+// pattern). The base loadClass() bakes a FIXED lexical `window`, so it cannot
+// exercise materialize() which reads window.app / window.moment at call time.
+// This returns a class whose lexical `window` IS the supplied object.
+function loadClassWithWindow(win) {
+    const src = fs.readFileSync(HELPER, 'utf8');
+    const stubs = `
+        const document = {};
+        const app = {};
+        const Notice = function () {};
+        const console = { error: function () {} };
+    `;
+    // eslint-disable-next-line no-new-func
+    const make = new Function('window', `${stubs}\n${src}\nreturn ToDoDailyCarryover;`);
+    return make(win);
+}
+
 function loadHelperClass(fileName, className) {
     const helperPath = path.resolve(__dirname, '..', 'blueprints', 'to-do', 'helpers', fileName);
     const src = fs.readFileSync(helperPath, 'utf8');
@@ -87,6 +104,20 @@ ok('CARR-3a returns null when list empty',
     ].join('\n');
     const blocks = ToDoDailyCarryover.eligibleBlocks(content);
     ok('CARR-4 skips project-tagged', blocks.length === 1 && blocks[0].topLine === '- [ ] regular task',
+        `got ${blocks.length} blocks; first=${blocks[0] && blocks[0].topLine}`);
+})();
+
+// --- CARR-4b: eligibleBlocks returns `* [ ]` (asterisk-marker) tasks (#4A) ---
+(() => {
+    const content = [
+        '---',
+        'type: to-do',
+        '---',
+        '',
+        '* [ ] regular task',
+    ].join('\n');
+    const blocks = ToDoDailyCarryover.eligibleBlocks(content);
+    ok('CARR-4b returns asterisk-marker task', blocks.length === 1 && blocks[0].topLine === '* [ ] regular task',
         `got ${blocks.length} blocks; first=${blocks[0] && blocks[0].topLine}`);
 })();
 
@@ -219,11 +250,66 @@ ok('CARR-7a decorate is idempotent on already-tagged',
         && blocks[1].topLine === '- [ ] beta task [project:: [[Sauce]]]');
 })();
 
-console.log('');
-console.log(`Tests: ${pass}/${pass + fail}`);
-if (fail > 0) {
-    console.log('Failures:');
-    for (const f of failures) console.log(`  ${f}`);
-    process.exit(1);
-}
-process.exit(0);
+// CARR-ORDER: materialize writes TODAY before stripping PRIOR; a today-write
+// failure leaves the prior file intact (no data loss) (#4B).
+// NOTE (harness deviation): this harness loads ToDoDailyCarryover with a FIXED
+// lexical `window`, so materialize() cannot see a global.window mutation. Instead
+// of the plan's `global.window` + top-loaded class, we build the world's window
+// and load a class instance with that window injected via loadClassWithWindow().
+const carrOrder = (async () => {
+    const p2 = (n) => String(n).padStart(2, '0');
+    const monthName = (mo) => ['January','February','March','April','May','June','July','August','September','October','November','December'][mo-1];
+    const makeMoment = (s) => {
+        const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+        const base = { y:+m[1], mo:+m[2], d:+m[3] };
+        const wrap = (o) => ({
+            clone: () => wrap({ ...o }),
+            subtract: (n) => { const dt = new Date(Date.UTC(o.y,o.mo-1,o.d)); dt.setUTCDate(dt.getUTCDate()-n); return wrap({y:dt.getUTCFullYear(),mo:dt.getUTCMonth()+1,d:dt.getUTCDate()}); },
+            format: (f) => f === 'YYYY/MM-MMMM' ? `${o.y}/${p2(o.mo)}-${monthName(o.mo)}` : `${o.y}-${p2(o.mo)}-${p2(o.d)}`,
+        });
+        return wrap(base);
+    };
+    const prior = '---\ntype: to-do\n---\n- [ ] carry me';
+    const today0 = '---\ntype: to-do\n---\n<dvjs>ToDoDailyCarryover</dvjs>'.replace('<dvjs>ToDoDailyCarryover</dvjs>',
+        '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "ToDoDailyCarryover" });\n```');
+    function world(throwOnToday) {
+        const files = {
+            'spice/to-do/2026/06-June/ToDo-2026-06-22.md': { path:'spice/to-do/2026/06-June/ToDo-2026-06-22.md', body: prior },
+            'spice/to-do/2026/06-June/ToDo-2026-06-23.md': { path:'spice/to-do/2026/06-June/ToDo-2026-06-23.md', body: today0 },
+        };
+        const order = [];
+        const win = {
+            moment: makeMoment,
+            app: { vault: {
+                getAbstractFileByPath: (p) => files[p] || null,
+                read: async (f) => f.body,
+                modify: async (f, c) => {
+                    if (throwOnToday && f.path.endsWith('06-23.md')) throw new Error('boom');
+                    order.push(f.path.endsWith('06-23.md') ? 'today' : 'prior');
+                    f.body = c;
+                },
+            } },
+        };
+        return { files, order, win };
+    }
+    const w1 = world(false);
+    const Klass1 = loadClassWithWindow(w1.win);
+    await new Klass1().materialize('spice/to-do/2026/06-June/ToDo-2026-06-23.md', '2026-06-23');
+    ok('CARR-ORDER today written before prior', w1.order[0] === 'today' && w1.order[1] === 'prior', `order=${w1.order.join(',')}`);
+    const w2 = world(true);
+    const Klass2 = loadClassWithWindow(w2.win);
+    await new Klass2().materialize('spice/to-do/2026/06-June/ToDo-2026-06-23.md', '2026-06-23');
+    ok('CARR-ORDER prior intact when today-write fails', w2.files['spice/to-do/2026/06-June/ToDo-2026-06-22.md'].body === prior, 'prior was mutated despite today failure');
+})();
+
+// Await the async CARR-ORDER block before the final tally.
+carrOrder.then(() => {
+    console.log('');
+    console.log(`Tests: ${pass}/${pass + fail}`);
+    if (fail > 0) {
+        console.log('Failures:');
+        for (const f of failures) console.log(`  ${f}`);
+        process.exit(1);
+    }
+    process.exit(0);
+});

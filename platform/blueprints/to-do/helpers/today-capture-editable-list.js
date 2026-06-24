@@ -68,14 +68,14 @@ class TodayCaptureEditableList {
             // via Obsidian's built-in reading-view click handler on the line itself).
             const cb = row.createEl('input');
             cb.type = 'checkbox';
-            cb.checked = /^- \[[xX]\] /.test(entry.line);
+            cb.checked = /^[-*+] \[[xX]\] /.test(entry.line);
             cb.disabled = true;
             cb.style.cssText = 'margin: 0;';
 
             // Title.
             const title = row.createEl('span');
             const parsed = entry.parsed || {};
-            title.textContent = parsed.title || entry.line.replace(/^- \[[ xX]\] /, '');
+            title.textContent = parsed.title || entry.line.replace(/^[-*+] \[[ xX]\] /, '');
             title.style.cssText = 'flex: 1; ' + (cb.checked
                 ? 'text-decoration: line-through; color: var(--text-muted);'
                 : 'color: var(--text-normal);');

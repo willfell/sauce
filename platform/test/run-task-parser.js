@@ -125,6 +125,24 @@ console.log('run-task-parser:');
     ok('TM-7 second task with child', blocks[1] && blocks[1].childLines.length === 1);
 })();
 
+// TM-8: asterisk + plus bullets parse as top-level tasks (#4A).
+(() => {
+    const md = '---\ntype: to-do\n---\n* [ ] star task\n+ [ ] plus task\n- [ ] dash task';
+    const blocks = TaskParser.parseTasks(md);
+    ok('TM-8 mixed-marker count', blocks.length === 3, `got ${blocks.length}`);
+    ok('TM-8 star top line', blocks[0] && blocks[0].topLine === '* [ ] star task');
+    ok('TM-8 plus top line', blocks[1] && blocks[1].topLine === '+ [ ] plus task');
+})();
+// TM-9: nested children under a * parent carry; * [x] checked is skipped (#4A).
+(() => {
+    const md = '---\ntype: to-do\n---\n* [ ] parent\n   * detail line\n* [x] done parent\n   * done detail\n* [ ] after';
+    const blocks = TaskParser.parseTasks(md);
+    ok('TM-9 unchecked count (checked skipped)', blocks.length === 2, `got ${blocks.length}`);
+    ok('TM-9 child captured', blocks[0] && blocks[0].childLines.length === 1, `got ${blocks[0] && blocks[0].childLines.length}`);
+    ok('TM-9 child text', blocks[0] && blocks[0].childLines[0] === '   * detail line');
+    ok('TM-9 second is "after"', blocks[1] && blocks[1].topLine === '* [ ] after');
+})();
+
 console.log('');
 console.log(`Tests: ${pass}/${pass + fail}`);
 if (fail > 0) {

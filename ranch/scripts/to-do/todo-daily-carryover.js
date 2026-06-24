@@ -73,8 +73,11 @@ class ToDoDailyCarryover {
             const todayWithCarryover = ToDoDailyCarryover.insertCarryoverIntoToday(todayContent, decorated, prior.dateStr);
             const todayWithSentinel = ToDoDailyCarryover.writeSentinel(todayWithCarryover, prior.dateStr);
 
-            await vault.modify(priorFile, newPrior);
+            // v0.X (#4B): write TODAY first so a mid-operation failure DUPLICATES
+            // (recoverable) rather than DELETES (silent loss). Only strip the prior
+            // file after today is safely persisted. Satisfies "never lose a to-do item".
             await vault.modify(todayFile, todayWithSentinel);
+            await vault.modify(priorFile, newPrior);
         } catch (e) {
             // Failure-loud via console; never throw to avoid breaking render.
             console.error('ToDoDailyCarryover.materialize:', e);
@@ -178,14 +181,14 @@ class ToDoDailyCarryover {
         let i = tasksStart;
         while (i < tasksEnd) {
             const line = lines[i];
-            if (/^- \[ \] /.test(line)) {
+            if (/^[-*+] \[ \] /.test(line)) {
                 const start = i;
                 const topLine = line;
                 const childLines = [];
                 let j = i + 1;
                 while (j < tasksEnd) {
                     const nxt = lines[j];
-                    if (/^- \[(?: |x)\] /i.test(nxt)) break;
+                    if (/^[-*+] \[(?: |x)\] /i.test(nxt)) break;
                     if (nxt.length > 0 && !/^[ \t]/.test(nxt)) break;
                     childLines.push(nxt);
                     j++;
@@ -195,11 +198,11 @@ class ToDoDailyCarryover {
                 i = start + 1 + childLines.length;
                 continue;
             }
-            if (/^- \[x\] /i.test(line)) {
+            if (/^[-*+] \[x\] /i.test(line)) {
                 let j = i + 1;
                 while (j < tasksEnd) {
                     const nxt = lines[j];
-                    if (/^- \[(?: |x)\] /i.test(nxt)) break;
+                    if (/^[-*+] \[(?: |x)\] /i.test(nxt)) break;
                     if (nxt.length > 0 && !/^[ \t]/.test(nxt)) break;
                     j++;
                 }
