@@ -23,8 +23,10 @@ class TaskInteractions {
     serializeTaskLine(payload) { return TaskInteractions.serializeTaskLine(payload); }
     actionItemsAnchor() { return TaskInteractions.actionItemsAnchor(); }
     todayCaptureAnchor() { return TaskInteractions.todayCaptureAnchor(); }
+    ownedTasksAnchor() { return TaskInteractions.ownedTasksAnchor(); }
     injectActionItemsMarker(body) { return TaskInteractions.injectActionItemsMarker(body); }
     injectTodayCaptureMarker(body) { return TaskInteractions.injectTodayCaptureMarker(body); }
+    injectOwnedTasksMarker(body) { return TaskInteractions.injectOwnedTasksMarker(body); }
     findTaskLines(content, sectionAnchor) { return TaskInteractions.findTaskLines(content, sectionAnchor); }
     async appendTask(filePath, payload, opts) { return TaskInteractions.appendTask(filePath, payload, opts); }
     async replaceTaskAt(filePath, lineIdx, newLine) { return TaskInteractions.replaceTaskAt(filePath, lineIdx, newLine); }
@@ -33,6 +35,7 @@ class TaskInteractions {
 
     static actionItemsAnchor() { return "<!-- ACTION_ITEMS_MARKER -->"; }
     static todayCaptureAnchor() { return "<!-- TODAY_CAPTURE_MARKER -->"; }
+    static ownedTasksAnchor() { return "<!-- OWNED_TASKS_MARKER -->"; }
 
     // ---------- parseTaskLine ----------
 
@@ -192,6 +195,36 @@ class TaskInteractions {
         return lines.join("\n");
     }
 
+    /**
+     * Insert the OWNED_TASKS_MARKER on its own line immediately AFTER the
+     * closing ``` fence of the SectionLabel("Owned Tasks") block. Idempotent;
+     * accepts BOTH `text: "Owned Tasks"` and `text: "Owned Tasks", top: true`
+     * forms via regex (vs. the v0.127.0 literal-string approach used by
+     * injectActionItemsMarker / injectTodayCaptureMarker). Returns body
+     * unchanged when the anchor SectionLabel is absent.
+     */
+    static injectOwnedTasksMarker(body) {
+        if (typeof body !== "string") return body;
+        if (body.includes(TaskInteractions.ownedTasksAnchor())) return body;
+        const OWNED_TASKS_RE = /class:\s*"SectionLabel",\s*args:\s*\[\{\s*text:\s*"Owned Tasks"(?:\s*,\s*top:\s*true)?\s*\}\]/;
+        const lines = body.split("\n");
+        let labelLineIdx = -1;
+        for (let i = 0; i < lines.length; i++) {
+            if (OWNED_TASKS_RE.test(lines[i])) { labelLineIdx = i; break; }
+        }
+        if (labelLineIdx === -1) return body;
+        // Walk forward to closing ``` fence of THAT dataviewjs block.
+        let closingFenceIdx = -1;
+        for (let i = labelLineIdx + 1; i < lines.length; i++) {
+            if (lines[i].trimStart().startsWith("```")) { closingFenceIdx = i; break; }
+        }
+        if (closingFenceIdx === -1) return body;
+        // Insert: blank, marker, blank immediately after the closing fence.
+        const insertAt = closingFenceIdx + 1;
+        lines.splice(insertAt, 0, "", TaskInteractions.ownedTasksAnchor(), "");
+        return lines.join("\n");
+    }
+
     // ---------- findTaskLines (fence-aware) ----------
 
     /**
@@ -199,7 +232,7 @@ class TaskInteractions {
      * task at fence-depth 0 within the optional anchor scope.
      *
      * @param {string} content
-     * @param {string} [sectionAnchor] — "todayCapture" | "actionItems" | undefined.
+     * @param {string} [sectionAnchor] — "todayCapture" | "actionItems" | "ownedTasks" | undefined.
      *   When set, scanning starts AFTER the matching marker line and stops at
      *   the next SectionLabel block, the next `## ` markdown heading, or EOF.
      * @returns {Array<{idx, line, parsed}>}
@@ -210,10 +243,11 @@ class TaskInteractions {
 
         let startIdx = 0;
         let endIdx = lines.length;
-        if (sectionAnchor === "todayCapture" || sectionAnchor === "actionItems") {
-            const marker = sectionAnchor === "todayCapture"
-                ? TaskInteractions.todayCaptureAnchor()
-                : TaskInteractions.actionItemsAnchor();
+        if (sectionAnchor === "todayCapture" || sectionAnchor === "actionItems" || sectionAnchor === "ownedTasks") {
+            let marker;
+            if (sectionAnchor === "todayCapture") marker = TaskInteractions.todayCaptureAnchor();
+            else if (sectionAnchor === "actionItems") marker = TaskInteractions.actionItemsAnchor();
+            else marker = TaskInteractions.ownedTasksAnchor();
             let markerIdx = -1;
             for (let i = 0; i < lines.length; i++) {
                 if (lines[i].includes(marker)) { markerIdx = i; break; }
@@ -332,30 +366,57 @@ class TaskInteractions {
                 lines.splice(markerLineIdx, 0, line, "");
                 newContent = lines.join("\n");
             } else if (type === "project-todo") {
-                const needle = `class: "SectionLabel", args: [{ text: "Owned Tasks" }]`;
-                const lines = body.split("\n");
-                let labelLineIdx = -1;
-                for (let i = 0; i < lines.length; i++) {
-                    if (lines[i].includes(needle)) { labelLineIdx = i; break; }
+                const OWNED_TASKS_RE = /class:\s*"SectionLabel",\s*args:\s*\[\{\s*text:\s*"Owned Tasks"(?:\s*,\s*top:\s*true)?\s*\}\]/;
+                const marker = TaskInteractions.ownedTasksAnchor();
+                let working = body;
+                if (!working.includes(marker)) {
+                    working = TaskInteractions.injectOwnedTasksMarker(working);
                 }
-                if (labelLineIdx === -1) {
-                    // Fallback: append to end of file with a leading blank line.
-                    if (lines[lines.length - 1] !== "") lines.push("");
-                    lines.push(line);
-                    newContent = lines.join("\n");
-                } else {
-                    // Walk forward to closing ``` fence of the Owned Tasks block.
-                    let closingFenceIdx = -1;
-                    for (let i = labelLineIdx + 1; i < lines.length; i++) {
-                        if (lines[i].trimStart().startsWith("```")) { closingFenceIdx = i; break; }
+                if (working.includes(marker)) {
+                    // Marker present (either was already there OR injection
+                    // succeeded). Insert the new task line on the line
+                    // immediately AFTER the marker, preceded by one blank line.
+                    const lines = working.split("\n");
+                    let markerLineIdx = -1;
+                    for (let i = 0; i < lines.length; i++) {
+                        if (lines[i].includes(marker)) { markerLineIdx = i; break; }
                     }
-                    if (closingFenceIdx === -1) {
+                    if (markerLineIdx !== -1) {
+                        lines.splice(markerLineIdx + 1, 0, "", line);
+                        newContent = lines.join("\n");
+                    } else {
+                        // Defensive: marker disappeared between checks.
+                        return { ok: false, reason: "no-owned-tasks-anchor" };
+                    }
+                } else {
+                    // Marker injection failed — no Owned Tasks SectionLabel at
+                    // all. Fall back to v0.127.0 SectionLabel-fence-append
+                    // behavior with the loosened regex. Maintains v0.127.0
+                    // compatibility for files that somehow lack the
+                    // SectionLabel entirely.
+                    const lines = working.split("\n");
+                    let labelLineIdx = -1;
+                    for (let i = 0; i < lines.length; i++) {
+                        if (OWNED_TASKS_RE.test(lines[i])) { labelLineIdx = i; break; }
+                    }
+                    if (labelLineIdx === -1) {
+                        // Final fallback: append to end of file with leading blank.
                         if (lines[lines.length - 1] !== "") lines.push("");
                         lines.push(line);
+                        newContent = lines.join("\n");
                     } else {
-                        lines.splice(closingFenceIdx + 1, 0, "", line);
+                        let closingFenceIdx = -1;
+                        for (let i = labelLineIdx + 1; i < lines.length; i++) {
+                            if (lines[i].trimStart().startsWith("```")) { closingFenceIdx = i; break; }
+                        }
+                        if (closingFenceIdx === -1) {
+                            if (lines[lines.length - 1] !== "") lines.push("");
+                            lines.push(line);
+                        } else {
+                            lines.splice(closingFenceIdx + 1, 0, "", line);
+                        }
+                        newContent = lines.join("\n");
                     }
-                    newContent = lines.join("\n");
                 }
             } else if (type === "to-do") {
                 const marker = TaskInteractions.todayCaptureAnchor();
