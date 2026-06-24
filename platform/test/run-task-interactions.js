@@ -575,6 +575,36 @@ function todayBody(includeMarker) {
 })();
 
 // ===========================================================================
+// VI-b. marker generalization — HC-V0127-TI-MARKER-* (#4A)
+// `*` and `+` bullets are valid task markers, not just `-`.
+// ===========================================================================
+
+(function testMarkers() {
+  console.log("\n=== VI-b. marker generalization ===");
+  const { TaskInteractions: TI } = fresh();
+
+  // A. parseTaskLine accepts a `*` marker and still extracts inline fields.
+  {
+    const p = TI.parseTaskLine("* [ ] x [priority:: high]");
+    eq("HC-V0127-TI-MARKER-A.title", p && p.title, "x");
+    eq("HC-V0127-TI-MARKER-A.priority", p && p.priority, "high");
+  }
+
+  // B. findTaskLines returns `* [ ]` / `+ [ ]` rows at fence-depth 0.
+  {
+    const content = [
+      "* [ ] star-task",
+      "+ [ ] plus-task",
+      "- [ ] dash-task",
+    ].join("\n");
+    const out = TI.findTaskLines(content);
+    eq("HC-V0127-TI-MARKER-B.count", out.length, 3);
+    eq("HC-V0127-TI-MARKER-B.star", out[0].line, "* [ ] star-task");
+    eq("HC-V0127-TI-MARKER-B.plus", out[1].line, "+ [ ] plus-task");
+  }
+})();
+
+// ===========================================================================
 // VII. appendTask — HC-V0127-TI-APPEND-*
 // ===========================================================================
 

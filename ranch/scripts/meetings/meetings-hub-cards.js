@@ -60,8 +60,7 @@ class MeetingsHubCards {
       const peopleAttendeeLinks = peopleMentions.map(m => "[[" + m.display + "]]");
       const openTasks = (content.match(/- \[ \]/g) || []).length;
       const doneTasks = (content.match(/- \[x\]/gi) || []).length;
-      const notesSection = content.match(/## Notes\s*([\s\S]*?)(?=---|##|$)/);
-      const hasNotes = notesSection && notesSection[1].trim().length > 5;
+      const hasNotes = MeetingsHubCards._bodyHasNotes(content);
       let summary = p.summary || "";
       if (typeof summary === "string") {
         summary = summary.trim();
@@ -150,6 +149,31 @@ class MeetingsHubCards {
       empty: "No meetings scheduled for today",
       sort: () => 0  // pre-sorted by Dataview .sort() above
     });
+  }
+
+  /**
+   * #1: does the meeting body carry REAL notes content, ignoring scaffold?
+   * Strips frontmatter, fenced code blocks, HTML comments, horizontal rules,
+   * heading lines, task lines (any of -,*,+ markers), and lone/empty bullets;
+   * "has notes" iff > 5 non-whitespace chars remain. Works on SectionLabel-shaped
+   * AND legacy ## Notes notes. Keys on scaffold SHAPE, not on the "Notes" label
+   * (lint-display-markers).
+   */
+  static _bodyHasNotes(content) {
+    if (typeof content !== "string" || !content) return false;
+    let body = content;
+    const fmEnd = body.indexOf("\n---", 4);
+    if (body.indexOf("---") === 0 && fmEnd >= 0) body = body.slice(fmEnd + 4);
+    body = body.replace(/```[\s\S]*?```/g, "");          // fenced blocks
+    body = body.replace(/<!--[\s\S]*?-->/g, "");          // HTML comments (markers)
+    body = body
+      .split("\n")
+      .filter((l) => !/^\s*---+\s*$/.test(l))             // horizontal rules
+      .filter((l) => !/^\s*[-*+]\s*\[[ xX]\]/.test(l))    // task lines (-,*,+)
+      .filter((l) => !/^\s*[-*+]\s*$/.test(l))            // lone/empty bullets
+      .filter((l) => !/^#+\s/.test(l))                    // heading lines
+      .join("\n");
+    return body.replace(/\s/g, "").length > 5;
   }
 
   /**

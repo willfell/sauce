@@ -77,8 +77,8 @@ class TaskParser {
         let i = tasksStart;
         while (i < tasksEnd) {
             const line = lines[i];
-            const isUnchecked = /^- \[ \] /.test(line);
-            const isChecked = /^- \[x\] /i.test(line);
+            const isUnchecked = /^[-*+] \[ \] /.test(line);
+            const isChecked = /^[-*+] \[x\] /i.test(line);
             if (isUnchecked) {
                 const start = i;
                 const topLine = line;
@@ -87,7 +87,7 @@ class TaskParser {
                 while (j < tasksEnd) {
                     const next = lines[j];
                     // Stop on next top-level task line (checked OR unchecked).
-                    if (/^- \[(?: |x)\] /i.test(next)) break;
+                    if (/^[-*+] \[(?: |x)\] /i.test(next)) break;
                     // Top-level non-task line at column 0 (no leading whitespace) AND non-blank
                     // terminates children.
                     if (next.length > 0 && !/^[ \t]/.test(next)) break;
@@ -107,7 +107,7 @@ class TaskParser {
                 let j = i + 1;
                 while (j < tasksEnd) {
                     const next = lines[j];
-                    if (/^- \[(?: |x)\] /i.test(next)) break;
+                    if (/^[-*+] \[(?: |x)\] /i.test(next)) break;
                     if (next.length > 0 && !/^[ \t]/.test(next)) break;
                     j++;
                 }

@@ -85,11 +85,15 @@ await dv.view("{{views_path}}/customjs-guard", { class: "SectionLabel", args: [{
 ```
 
 ```dataviewjs
-await dv.view("{{views_path}}/customjs-guard", {
-  class: "PeopleRendering",
-  method: "renderMentionList",
-  args: [{ mode: "mentioned_in_note", notePath: dv.current().file.path, scopePath: "spice/people" }, { style: "chips" }]
-});
+const cur = dv.current();
+const notePath = (cur && cur.file && cur.file.path) || (app.workspace.getActiveFile && app.workspace.getActiveFile()?.path);
+if (notePath) {
+  await dv.view("{{views_path}}/customjs-guard", {
+    class: "PeopleRendering",
+    method: "renderMentionList",
+    args: [{ mode: "mentioned_in_note", notePath, scopePath: "spice/people" }, { style: "chips" }]
+  });
+}
 ```
 
 ```dataviewjs

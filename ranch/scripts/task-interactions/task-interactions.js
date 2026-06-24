@@ -46,7 +46,7 @@ class TaskInteractions {
      */
     static parseTaskLine(line) {
         if (typeof line !== "string") return null;
-        const m = line.match(/^- \[[ xX]\] (.*)$/);
+        const m = line.match(/^[-*+] \[[ xX]\] (.*)$/);
         if (!m) return null;
         const body = m[1];
 
@@ -237,7 +237,7 @@ class TaskInteractions {
             }
             if (i < startIdx || i >= endIdx) continue;
             if (fenceDepth !== 0) continue;
-            if (/^- \[[ xX]\] /.test(lines[i])) {
+            if (/^[-*+] \[[ xX]\] /.test(lines[i])) {
                 out.push({ idx: i, line: lines[i], parsed: TaskInteractions.parseTaskLine(lines[i]) });
             }
         }
@@ -409,7 +409,7 @@ class TaskInteractions {
             if (typeof lineIdx !== "number" || lineIdx < 0 || lineIdx >= lines.length) {
                 return { ok: false, reason: "line-out-of-bounds" };
             }
-            if (!/^- \[[ xX]\] /.test(lines[lineIdx])) {
+            if (!/^[-*+] \[[ xX]\] /.test(lines[lineIdx])) {
                 return { ok: false, reason: "line mismatch" };
             }
             lines[lineIdx] = newLine;
