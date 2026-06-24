@@ -2671,3 +2671,28 @@ See `Docs/plans/2026-06-16-v0.118.1-recurring-parseregistry-result.md`.
 
 See `Docs/plans/2026-06-23-v0.127.0-task-interactions-and-fixes-result.md` + design + plan.
 
+## v0.127.1 today-capture renderer-heal PATCH CLOSED 2026-06-23
+
+**Workshop:** 0.127.0 → 0.127.1
+**Blueprints:** UNCHANGED
+**Mechanism count:** UNCHANGED at 21
+**Harnesses:** 36 → 37 (+1 NEW behavioral)
+
+**Headline:** PATCH closing the v0.127.0 §F gap — `_healNoteChromeBody` step 6 injected the `<!-- TODAY_CAPTURE_MARKER -->` sentinel but not the `TodayCaptureEditableList` renderer block. Existing pre-v0.127.0 daily notes ended up with the anchor but no editable-list UI (18 daily notes in accuris alone; matching counts in headspace + ero).
+
+**Root cause:** v0.127.0 step 6's guard `if (type === 'to-do' && !out.includes(TODAY_CAPTURE_MARKER))` was single-all-or-nothing. Once the marker landed, the whole step short-circuited; the renderer block (which the v0.127.0 §F design specified as a sibling injection) never ran. The template `Today To-Do.md` shipped both correctly for NEW notes, but the heal missed it for existing.
+
+**Fix:** Split step 6 into two independent guards — `(a)` marker if absent, `(b)` `class: "TodayCaptureEditableList"` block if absent (positioned immediately after the marker line). Makes the heal **resumable**: a v0.127.0 half-pass becomes a v0.127.1 full-pass; a fully-healed note stays unchanged.
+
+**Tests:** NEW `run-v01271-today-capture-renderer-heal.js` (15/15) covers fresh-inject, back-fill on marker-only, idempotency, no-anchor short-circuit, type-gating, second-pass idempotency. `HC-V0127-VERSION-A1..A3` widened to PATCH-tolerant regex `/^0\.127\.\d+$/` per landmine #16 hygiene. Preflight 27 suites GREEN; helper-cases 3661/0; `version-sync ok: 0.127.1`; workshop dogfood exit 0.
+
+**LESSON — heal-step pairing:** When a heal step injects an anchor that a sibling renderer block consumes, both injections must be paired guards (NOT a single all-or-nothing gate). A single guard breaks resumability — a partial v0.127.0 heal couldn't progress to v0.127.0's full intent without the v0.127.1 split. RULE for future heal additions: every anchor-renderer pair gets independent guards.
+
+**LESSON — pre-deploy regression coverage gap:** `run-task-interactions.js` covered the mechanism's logic but not the install.js heal's end-to-end shape on synthetic pre-deploy notes. The bug only surfaced on actual consumer vaults. Going forward: heal steps that ship anchor + renderer pairs need an integration test that LOADS a pre-deploy body through `_healNoteChromeBody` and asserts the renderer fires.
+
+**Harnesses:** 37.
+
+**Commits:** `b92f767d`. PR #21 merge `16886ccc`.
+
+See `Docs/plans/2026-06-23-v0.127.1-today-capture-renderer-heal-result.md`.
+
