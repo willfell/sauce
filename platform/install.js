@@ -4959,7 +4959,7 @@ await dv.view("ranch/views/customjs-guard", { class: "PaycheckDefaultsEditor" })
 // ship in S3. The dataviewjs blocks will fail silently until those helpers land.
 const FINANCE_DEBTS_HUB_TEMPLATE = `---
 type: debts-hub
-created_at: "${new Date().toISOString()}"
+created_at: "${new Date().toISOString().replace(/\.\d{3}Z$/, "Z")}"
 tags:
   - finance-hub
 cssclasses:
@@ -4987,7 +4987,7 @@ await dv.view("ranch/views/customjs-guard", { class: "DebtsCards" });
 const FINANCE_DEBT_DEFAULTS_TEMPLATE = `---
 type: debt-defaults
 debts: []
-created_at: "${new Date().toISOString()}"
+created_at: "${new Date().toISOString().replace(/\.\d{3}Z$/, "Z")}"
 tags:
   - finance-defaults
 cssclasses:
@@ -5024,7 +5024,7 @@ savings_glide:
 overflow: { attack_pct: 80, flex_pct: 20 }
 lever_order: [discretionary, savings, attack]
 avalanche_order_by: apr
-created_at: "${new Date().toISOString()}"
+created_at: "${new Date().toISOString().replace(/\.\d{3}Z$/, "Z")}"
 cssclasses:
   - wide
 ---
@@ -5044,7 +5044,7 @@ await dv.view("ranch/views/customjs-guard", { class: "FinancePlanDashboard" });
 
 const FINANCE_SAVINGS_HUB_TEMPLATE = `---
 type: savings-hub
-created_at: "${new Date().toISOString()}"
+created_at: "${new Date().toISOString().replace(/\.\d{3}Z$/, "Z")}"
 tags:
   - finance-hub
 cssclasses:
@@ -5073,7 +5073,7 @@ current_balance: 0
 last_updated: "${new Date().toISOString().slice(0, 10)}"
 balance_history:
   - { date: ${new Date().toISOString().slice(0, 10)}, balance: 0, source: install-seed }
-created_at: "${new Date().toISOString()}"
+created_at: "${new Date().toISOString().replace(/\.\d{3}Z$/, "Z")}"
 cssclasses:
   - wide
 ---
@@ -6621,7 +6621,7 @@ async function applyProjectTodoBackfill(tp, mech, variables, history, git) {
         'type: project-todo',
         `project: "[[${hubName}]]"`,
         `project_slug: ${slug}`,
-        `created_at: "${new Date().toISOString()}"`,
+        `created_at: "${new Date().toISOString().replace(/\.\d{3}Z$/, "Z")}"`,
         'tags:',
         `  - "${vaultTag}"`,
         'cssclasses:',
@@ -7652,7 +7652,7 @@ async function applyFinanceDebtScaffolding(tp, manifest, variables, history, git
       const defaultsFm = _parseFrontmatterStrict(defaultsBody);
       const debts = Array.isArray(defaultsFm?.debts) ? defaultsFm.debts : [];
       const todayIso = new Date().toISOString().slice(0, 10);
-      const nowIso = new Date().toISOString();
+      const nowIso = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
       for (const debt of debts) {
         if (!debt || typeof debt.name !== "string" || debt.name.length === 0) continue;
         const slug = debt.name.replace(/\s+/g, "-").replace(/[^A-Za-z0-9-]/g, "");
