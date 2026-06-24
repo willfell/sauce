@@ -48,5 +48,50 @@ eq("HC-V0129-RELEASE-CONV-L: fix -> patch", bumpLevel(parseCommit("fix: y"), tru
 eq("HC-V0129-RELEASE-CONV-M: chore -> none", bumpLevel(parseCommit("chore: z"), true), "none");
 eq("HC-V0129-RELEASE-CONV-N: null -> none", bumpLevel(null, true), "none");
 
+// ---- Task 3: compute-release plan ----
+const cr = require("../../scripts/release/compute-release.js");
+console.log("\n--- HC-V0129-RELEASE-PLAN ---");
+
+const FIX_MANIFEST = {
+    workshop_version: "0.128.0",
+    blueprints: [
+        { name: "meetings", version: "0.12.0", path: "blueprints/meetings" },
+        { name: "project", version: "1.26.0", path: "blueprints/project" },
+    ],
+    mechanisms: [
+        { name: "breadcrumb", version: "0.1.0", path: "mechanisms/breadcrumb" },
+    ],
+};
+const idx = cr.buildIndex(FIX_MANIFEST);
+
+eq("HC-V0129-RELEASE-PLAN-A: attribute meetings file",
+    cr.attribute(["platform/blueprints/meetings/Template.md"], idx).components[0], "meetings");
+ok("HC-V0129-RELEASE-PLAN-B: shared root -> umbrella only",
+    cr.attribute(["platform/helpers/foo.js"], idx).umbrellaOnly === true);
+{
+    const a = cr.attribute(["platform/blueprints/meetings/a.md", "platform/mechanisms/breadcrumb/b.js"], idx);
+    eq("HC-V0129-RELEASE-PLAN-C: multi-component", a.components.slice().sort().join(","), "breadcrumb,meetings");
+}
+
+const COMMITS = [
+    { hash: "a1", message: "feat(meetings): leaf actions", files: ["platform/blueprints/meetings/T.md"] },
+    { hash: "a2", message: "fix(project): guard null", files: ["platform/blueprints/project/P.js"] },
+    { hash: "a3", message: "feat!: drop legacy", files: ["platform/mechanisms/breadcrumb/b.js"] },
+    { hash: "a4", message: "chore: tidy docs", files: ["Docs/x.md"] },
+];
+const plan = cr.computePlan(COMMITS, FIX_MANIFEST);
+const byName = Object.fromEntries(plan.components.map((c) => [c.name, c]));
+eq("HC-V0129-RELEASE-PLAN-D: meetings feat -> 0.13.0", byName.meetings.to, "0.13.0");
+eq("HC-V0129-RELEASE-PLAN-E: project fix -> 1.26.1", byName.project.to, "1.26.1");
+eq("HC-V0129-RELEASE-PLAN-F: breadcrumb breaking pre1 -> 0.2.0", byName.breadcrumb.to, "0.2.0");
+eq("HC-V0129-RELEASE-PLAN-G: workshop max=minor -> 0.129.0", plan.workshop.to, "0.129.0");
+
+// Release-As override
+const planRA = cr.computePlan(
+    [{ hash: "b1", message: "feat(meetings): x\n\nRelease-As: 2.5.0", files: ["platform/blueprints/meetings/T.md"] }],
+    FIX_MANIFEST);
+eq("HC-V0129-RELEASE-PLAN-H: release-as override",
+    planRA.components.find((c) => c.name === "meetings").to, "2.5.0");
+
 console.log(`\nrun-release-bumper: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
