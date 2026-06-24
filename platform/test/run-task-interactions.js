@@ -764,7 +764,7 @@ function todayBody(includeMarker) {
       res && typeof res.reason === "string" && res.reason.length > 0
     );
   }
-})().then(testReplace).then(emit);
+})().then(testReplace).then(testAppendProjectTodoOwnedTasks).then(emit);
 
 // ===========================================================================
 // VIII. replaceTaskAt — HC-V0127-TI-REPLACE-A..C + NEVER-THROWS
@@ -840,6 +840,416 @@ async function testReplace() {
     }
     ok("HC-V0127-TI-REPLACE-NEVER-THROWS.did-not-throw", threw === false);
     ok("HC-V0127-TI-REPLACE-NEVER-THROWS.failed-result", res && res.ok === false);
+  }
+}
+
+// ===========================================================================
+// Shared fixtures for v0.128.0 Owned Tasks cases (Groups IX–XI).
+// ===========================================================================
+
+const OWNED_TASKS_SECTION_BLOCK_PLAIN = [
+  '```dataviewjs',
+  'await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Owned Tasks" }] });',
+  '```',
+].join("\n");
+
+const OWNED_TASKS_SECTION_BLOCK_TOP = [
+  '```dataviewjs',
+  'await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Owned Tasks", top: true }] });',
+  '```',
+].join("\n");
+
+const FROM_MEETINGS_SECTION_BLOCK = [
+  '```dataviewjs',
+  'await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "From Meetings" }] });',
+  '```',
+].join("\n");
+
+// project-todo body with the Owned Tasks SectionLabel and (optionally) the
+// marker. `form` controls whether the SectionLabel is `{ text: "Owned Tasks" }`
+// (plain) or `{ text: "Owned Tasks", top: true }` (topForm).
+function projectTodoBody(opts) {
+  opts = opts || {};
+  const labelBlock = opts.form === "top"
+    ? OWNED_TASKS_SECTION_BLOCK_TOP
+    : OWNED_TASKS_SECTION_BLOCK_PLAIN;
+  const parts = [
+    "---",
+    "type: project-todo",
+    "---",
+    "",
+    labelBlock,
+  ];
+  if (opts.includeMarker) {
+    parts.push("");
+    parts.push("<!-- OWNED_TASKS_MARKER -->");
+    parts.push("");
+  } else {
+    parts.push("");
+  }
+  if (opts.tasksBeforeNextSection && opts.tasksBeforeNextSection.length) {
+    for (const t of opts.tasksBeforeNextSection) parts.push(t);
+    parts.push("");
+  }
+  parts.push(FROM_MEETINGS_SECTION_BLOCK);
+  parts.push("");
+  if (opts.tasksBelowNextSection && opts.tasksBelowNextSection.length) {
+    for (const t of opts.tasksBelowNextSection) parts.push(t);
+    parts.push("");
+  }
+  return parts.join("\n");
+}
+
+// ===========================================================================
+// IX. ownedTasksAnchor + injectOwnedTasksMarker — HC-V0128-TI-OT-ANCHOR/INJECT
+// ===========================================================================
+
+(function testOwnedTasksAnchorInject() {
+  console.log("\n=== IX. ownedTasksAnchor + injectOwnedTasksMarker ===");
+  const { TaskInteractions: TI } = fresh();
+
+  // ANCHOR-A: literal sentinel.
+  eq(
+    "HC-V0128-TI-OT-ANCHOR-A.literal",
+    TI.ownedTasksAnchor(),
+    "<!-- OWNED_TASKS_MARKER -->"
+  );
+
+  // INJECT-A: plain SectionLabel form (no top:true) — marker injected after
+  // the closing fence of the Owned Tasks SectionLabel block.
+  {
+    const before = projectTodoBody({ form: "plain", includeMarker: false });
+    ok(
+      "HC-V0128-TI-OT-INJECT-A.precondition-no-marker",
+      !before.includes("<!-- OWNED_TASKS_MARKER -->")
+    );
+    const after = TI.injectOwnedTasksMarker(before);
+    ok(
+      "HC-V0128-TI-OT-INJECT-A.marker-present",
+      after.includes("<!-- OWNED_TASKS_MARKER -->")
+    );
+    const lines = after.split("\n");
+    // Find the SectionLabel "Owned Tasks" line (without top:true).
+    let labelLineIdx = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].includes('class: "SectionLabel", args: [{ text: "Owned Tasks" }]')) {
+        labelLineIdx = i; break;
+      }
+    }
+    // Closing fence of that block.
+    let closingFenceIdx = -1;
+    for (let i = labelLineIdx + 1; i < lines.length; i++) {
+      if (lines[i].trimStart().startsWith("```")) { closingFenceIdx = i; break; }
+    }
+    const markerIdx = lines.findIndex((l) => l.includes("<!-- OWNED_TASKS_MARKER -->"));
+    ok(
+      "HC-V0128-TI-OT-INJECT-A.marker-after-closing-fence",
+      labelLineIdx >= 0 && closingFenceIdx > labelLineIdx && markerIdx > closingFenceIdx
+    );
+    // INJECT-E (positioning correctness): marker sits exactly one blank line
+    // after the closing fence and one blank line before the next non-blank.
+    eq(
+      "HC-V0128-TI-OT-INJECT-E.blank-before-marker",
+      lines[markerIdx - 1],
+      ""
+    );
+    // Next non-blank line below marker — find it.
+    let nextNonBlankIdx = -1;
+    for (let i = markerIdx + 1; i < lines.length; i++) {
+      if (lines[i] !== "") { nextNonBlankIdx = i; break; }
+    }
+    ok(
+      "HC-V0128-TI-OT-INJECT-E.blank-after-marker",
+      nextNonBlankIdx > markerIdx + 1
+    );
+  }
+
+  // INJECT-B: top:true SectionLabel form ALSO triggers marker injection.
+  {
+    const before = projectTodoBody({ form: "top", includeMarker: false });
+    ok(
+      "HC-V0128-TI-OT-INJECT-B.precondition-no-marker",
+      !before.includes("<!-- OWNED_TASKS_MARKER -->")
+    );
+    const after = TI.injectOwnedTasksMarker(before);
+    ok(
+      "HC-V0128-TI-OT-INJECT-B.marker-present",
+      after.includes("<!-- OWNED_TASKS_MARKER -->")
+    );
+    const lines = after.split("\n");
+    let labelLineIdx = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].includes('class: "SectionLabel", args: [{ text: "Owned Tasks", top: true }]')) {
+        labelLineIdx = i; break;
+      }
+    }
+    let closingFenceIdx = -1;
+    for (let i = labelLineIdx + 1; i < lines.length; i++) {
+      if (lines[i].trimStart().startsWith("```")) { closingFenceIdx = i; break; }
+    }
+    const markerIdx = lines.findIndex((l) => l.includes("<!-- OWNED_TASKS_MARKER -->"));
+    ok(
+      "HC-V0128-TI-OT-INJECT-B.marker-after-closing-fence",
+      labelLineIdx >= 0 && closingFenceIdx > labelLineIdx && markerIdx > closingFenceIdx
+    );
+  }
+
+  // INJECT-C: idempotency — 5 successive applies are string-equal.
+  {
+    let body = projectTodoBody({ form: "top", includeMarker: false });
+    body = TI.injectOwnedTasksMarker(body); // first apply lands marker
+    const baseline = body;
+    for (let i = 0; i < 5; i++) body = TI.injectOwnedTasksMarker(body);
+    eq("HC-V0128-TI-OT-INJECT-C.idempotent", body, baseline);
+  }
+
+  // INJECT-D: body with NO Owned Tasks SectionLabel → unchanged.
+  {
+    const before = [
+      "---",
+      "type: project-todo",
+      "---",
+      "",
+      "No SectionLabel at all here.",
+      "",
+      FROM_MEETINGS_SECTION_BLOCK,
+      "",
+    ].join("\n");
+    const after = TI.injectOwnedTasksMarker(before);
+    eq("HC-V0128-TI-OT-INJECT-D.unchanged", after, before);
+  }
+})();
+
+// ===========================================================================
+// X. findTaskLines("ownedTasks") — HC-V0128-TI-OT-FIND-*
+// ===========================================================================
+
+(function testFindTaskLinesOwnedTasks() {
+  console.log("\n=== X. findTaskLines(\"ownedTasks\") ===");
+  const { TaskInteractions: TI } = fresh();
+
+  // FIND-A: marker present + 3 raw tasks below the marker (before the next
+  // SectionLabel) → returns 3 entries with correct line indices.
+  {
+    const body = projectTodoBody({
+      form: "top",
+      includeMarker: true,
+      tasksBeforeNextSection: ["- [ ] alpha", "- [x] beta", "- [ ] gamma"],
+    });
+    const out = TI.findTaskLines(body, "ownedTasks");
+    eq("HC-V0128-TI-OT-FIND-A.count", out.length, 3);
+    eq("HC-V0128-TI-OT-FIND-A.first-line", out[0].line, "- [ ] alpha");
+    eq("HC-V0128-TI-OT-FIND-A.second-line", out[1].line, "- [x] beta");
+    eq("HC-V0128-TI-OT-FIND-A.third-line", out[2].line, "- [ ] gamma");
+    // Each entry's idx must point at the literal line in the body.
+    const lines = body.split("\n");
+    ok(
+      "HC-V0128-TI-OT-FIND-A.idx-correct",
+      out.every((e) => lines[e.idx] === e.line)
+    );
+  }
+
+  // FIND-B: terminates at next SectionLabel — a `- [ ]` line BELOW the
+  // "From Meetings" SectionLabel is NOT included.
+  {
+    const body = projectTodoBody({
+      form: "top",
+      includeMarker: true,
+      tasksBeforeNextSection: ["- [ ] inside-1", "- [ ] inside-2"],
+      tasksBelowNextSection: ["- [ ] below-from-meetings"],
+    });
+    const out = TI.findTaskLines(body, "ownedTasks");
+    eq("HC-V0128-TI-OT-FIND-B.count", out.length, 2);
+    eq("HC-V0128-TI-OT-FIND-B.first", out[0].line, "- [ ] inside-1");
+    eq("HC-V0128-TI-OT-FIND-B.second", out[1].line, "- [ ] inside-2");
+    ok(
+      "HC-V0128-TI-OT-FIND-B.below-section-label-excluded",
+      out.every((e) => e.line !== "- [ ] below-from-meetings")
+    );
+  }
+
+  // FIND-C: fence-aware — a `- [ ]` line inside a ```markdown ... ``` fence
+  // between the marker and the From Meetings SectionLabel is excluded.
+  {
+    const body = [
+      "---",
+      "type: project-todo",
+      "---",
+      "",
+      OWNED_TASKS_SECTION_BLOCK_TOP,
+      "",
+      "<!-- OWNED_TASKS_MARKER -->",
+      "",
+      "- [ ] real-task",
+      "```markdown",
+      "- [ ] inside-fence",
+      "```",
+      "- [ ] another-real",
+      "",
+      FROM_MEETINGS_SECTION_BLOCK,
+      "",
+    ].join("\n");
+    const out = TI.findTaskLines(body, "ownedTasks");
+    eq("HC-V0128-TI-OT-FIND-C.count", out.length, 2);
+    eq("HC-V0128-TI-OT-FIND-C.first", out[0].line, "- [ ] real-task");
+    eq("HC-V0128-TI-OT-FIND-C.second", out[1].line, "- [ ] another-real");
+  }
+
+  // FIND-D: body with no marker → empty array.
+  {
+    const body = projectTodoBody({
+      form: "top",
+      includeMarker: false,
+      tasksBeforeNextSection: ["- [ ] orphan-1", "- [ ] orphan-2"],
+    });
+    const out = TI.findTaskLines(body, "ownedTasks");
+    eq("HC-V0128-TI-OT-FIND-D.empty", out.length, 0);
+  }
+})();
+
+// ===========================================================================
+// XI. appendTask project-todo — HC-V0128-TI-OT-APPEND-* (async)
+// ===========================================================================
+
+async function testAppendProjectTodoOwnedTasks() {
+  console.log("\n=== XI. appendTask project-todo (Owned Tasks) ===");
+
+  function setup() {
+    return fresh({ serializer: refSerializePayloadToLine });
+  }
+
+  // APPEND-A: project-todo body WITH OWNED_TASKS_MARKER → new task line
+  // inserted immediately after the marker (with one blank line above).
+  {
+    const { TaskInteractions: TI, adapter } = setup();
+    const p = "spice/projects/sauce/Sauce To-Do.md";
+    adapter.set(p, projectTodoBody({ form: "top", includeMarker: true }));
+    const res = await TI.appendTask(p, { title: "alpha-task" });
+    ok("HC-V0128-TI-OT-APPEND-A.ok", res && res.ok === true);
+    const after = adapter.get(p);
+    const markerCount = (after.match(/<!-- OWNED_TASKS_MARKER -->/g) || []).length;
+    eq("HC-V0128-TI-OT-APPEND-A.exactly-one-marker", markerCount, 1);
+    const lines = after.split("\n");
+    const markerIdx = lines.findIndex((l) => l.includes("<!-- OWNED_TASKS_MARKER -->"));
+    const newLineIdx = lines.findIndex((l) => l.startsWith("- [ ] alpha-task"));
+    ok(
+      "HC-V0128-TI-OT-APPEND-A.line-after-marker",
+      markerIdx >= 0 && newLineIdx > markerIdx
+    );
+    // appendTask project-todo branch splices ["", line] after the marker, so
+    // exactly one blank line sits between the marker and the inserted line.
+    eq("HC-V0128-TI-OT-APPEND-A.blank-between", lines[markerIdx + 1], "");
+    eq("HC-V0128-TI-OT-APPEND-A.line-at-marker+2", lines[markerIdx + 2], "- [ ] alpha-task");
+  }
+
+  // APPEND-B: project-todo body WITHOUT marker but WITH plain Owned Tasks
+  // SectionLabel → marker injected first, then line inserted. After the call:
+  // exactly one marker AND the new task line on the line below the marker.
+  {
+    const { TaskInteractions: TI, adapter } = setup();
+    const p = "spice/projects/graphene/Graphene To-Do.md";
+    adapter.set(p, projectTodoBody({ form: "plain", includeMarker: false }));
+    const res = await TI.appendTask(p, { title: "beta-task" });
+    ok("HC-V0128-TI-OT-APPEND-B.ok", res && res.ok === true);
+    const after = adapter.get(p);
+    const markerCount = (after.match(/<!-- OWNED_TASKS_MARKER -->/g) || []).length;
+    eq("HC-V0128-TI-OT-APPEND-B.exactly-one-marker", markerCount, 1);
+    ok("HC-V0128-TI-OT-APPEND-B.task-present", after.includes("- [ ] beta-task"));
+    const lines = after.split("\n");
+    const markerIdx = lines.findIndex((l) => l.includes("<!-- OWNED_TASKS_MARKER -->"));
+    const newLineIdx = lines.findIndex((l) => l.startsWith("- [ ] beta-task"));
+    ok(
+      "HC-V0128-TI-OT-APPEND-B.line-below-marker",
+      markerIdx >= 0 && newLineIdx > markerIdx
+    );
+  }
+
+  // APPEND-C: project-todo body with `top: true` Owned Tasks SectionLabel and
+  // NO marker → marker injected correctly (this is the v0.127.0 regression
+  // repro — the literal-string needle didn't match top:true; the regex does).
+  {
+    const { TaskInteractions: TI, adapter } = setup();
+    const p = "spice/projects/sauce/Sauce To-Do.md";
+    adapter.set(p, projectTodoBody({ form: "top", includeMarker: false }));
+    const res = await TI.appendTask(p, { title: "gamma-task" });
+    ok("HC-V0128-TI-OT-APPEND-C.ok", res && res.ok === true);
+    const after = adapter.get(p);
+    const markerCount = (after.match(/<!-- OWNED_TASKS_MARKER -->/g) || []).length;
+    eq("HC-V0128-TI-OT-APPEND-C.exactly-one-marker", markerCount, 1);
+    ok("HC-V0128-TI-OT-APPEND-C.task-present", after.includes("- [ ] gamma-task"));
+    const lines = after.split("\n");
+    const markerIdx = lines.findIndex((l) => l.includes("<!-- OWNED_TASKS_MARKER -->"));
+    const newLineIdx = lines.findIndex((l) => l.startsWith("- [ ] gamma-task"));
+    ok(
+      "HC-V0128-TI-OT-APPEND-C.line-below-marker",
+      markerIdx >= 0 && newLineIdx > markerIdx
+    );
+    // Regression guard: the v0.127.0 fall-through put the line at end-of-file
+    // when the SectionLabel had top:true. Now it MUST land via the marker
+    // path, immediately after the marker (not as the file's last task line).
+    const fromMeetingsIdx = lines.findIndex(
+      (l) => l.includes('class: "SectionLabel", args: [{ text: "From Meetings" }]')
+    );
+    ok(
+      "HC-V0128-TI-OT-APPEND-C.line-above-from-meetings",
+      fromMeetingsIdx > 0 && newLineIdx < fromMeetingsIdx
+    );
+  }
+
+  // APPEND-D: project-todo body with NO Owned Tasks SectionLabel at all →
+  // falls back to v0.127.0 append-to-end-of-file behavior. Returns ok:true.
+  {
+    const { TaskInteractions: TI, adapter } = setup();
+    const p = "spice/projects/orphan/Orphan To-Do.md";
+    const before = [
+      "---",
+      "type: project-todo",
+      "---",
+      "",
+      "Body content with no Owned Tasks SectionLabel.",
+      "",
+    ].join("\n");
+    adapter.set(p, before);
+    const res = await TI.appendTask(p, { title: "delta-task" });
+    ok("HC-V0128-TI-OT-APPEND-D.ok", res && res.ok === true);
+    const after = adapter.get(p);
+    ok("HC-V0128-TI-OT-APPEND-D.task-present", after.includes("- [ ] delta-task"));
+    // No marker injected (no SectionLabel anchor to attach to).
+    const markerCount = (after.match(/<!-- OWNED_TASKS_MARKER -->/g) || []).length;
+    eq("HC-V0128-TI-OT-APPEND-D.no-marker", markerCount, 0);
+    // Task line lands at the end of the file (last non-blank line).
+    const lines = after.split("\n");
+    let lastNonBlankIdx = -1;
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (lines[i] !== "") { lastNonBlankIdx = i; break; }
+    }
+    eq(
+      "HC-V0128-TI-OT-APPEND-D.line-at-eof",
+      lines[lastNonBlankIdx],
+      "- [ ] delta-task"
+    );
+  }
+
+  // APPEND-E: never-throws — adapter stub configured to throw on read →
+  // appendTask catches and returns { ok: false, reason: ... }.
+  {
+    const { TaskInteractions: TI, adapter } = setup();
+    const p = "spice/projects/sauce/Sauce To-Do.md";
+    adapter.set(p, projectTodoBody({ form: "top", includeMarker: true }));
+    adapter.setThrow(true);
+    let threw = false;
+    let res;
+    try {
+      res = await TI.appendTask(p, { title: "epsilon-task" });
+    } catch (_e) {
+      threw = true;
+    }
+    ok("HC-V0128-TI-OT-APPEND-E.did-not-throw", threw === false);
+    ok("HC-V0128-TI-OT-APPEND-E.failed-result", res && res.ok === false);
+    ok(
+      "HC-V0128-TI-OT-APPEND-E.reason-string",
+      res && typeof res.reason === "string" && res.reason.length > 0
+    );
   }
 }
 
