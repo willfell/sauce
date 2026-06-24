@@ -2779,3 +2779,21 @@ declaring a deploy validated.
 
 See `Docs/plans/2026-06-24-finance-hub-correctness-result.md`.
 
+## v0.131.0 finance Copilot actuals-sync badge MINOR CLOSED 2026-06-24
+
+**Workshop:** 0.130.0 → 0.131.0 · **finance:** 0.10.3 → 0.11.0.
+
+**Headline:** Sub-project 2 of the hub-as-brain arc. Makes the hub's "spent / left" real Copilot data instead of hand-typed. Ships a generic `actuals_synced_at` / `actuals_source` budget marker (additive, **no migration**) + a **live / stale / typed** freshness badge on `FinanceHubSummary` (Budget tile) + `MonthDashboard`, gated to governed months (baseline months keep the v0.130.0 "not scored" framing). New shared `FinanceMath.actualsFreshness(budget, monthKey, governedFrom, nowMs)` (8-day live threshold). The actual Copilot pull is **local skill infra, not shipped** (`~/.claude/skills/finance/`): a pure deterministic `sync-actuals-core.mjs` mapper + a sync route (interactive + `--unattended`) + a weekly launchd cron (installed, dormant until July's governed month).
+
+**Tests:** run-finance-plan-state 51/0 (NEW HC-V0128-FRESH-1..6); run-finance-plan-widgets 32/0 (NEW WIDGET-FRESH-1..4 + first MonthDashboard/FinanceHubSummary render coverage); run-helper-cases 3710/0. Preflight GREEN; `version-sync ok: 0.131.0`. CI green macOS + Ubuntu (PR #28). Deployed headspace + ero finance 0.11.0, accuris workshop 0.131.0; `sauce doctor` 0 fail.
+
+**FINDING — the auto-release pipeline can't ship a BLUEPRINT bump.** The no-PAT pipeline went live on main mid-cycle. Its `prepare-release` runs `compute-release.js --write` + preflight, but `applyPlan` doesn't mirror the **seed-vault** subscription pin, and `run-seed-migrations.js` fails (install exit 1) on the seed-pin/catalogue skew. Shipped via a manual bump (incl. seed pin) + a `chore(release):` squash-merge → `prepare-release` skips, `tag-and-ship` fires on the validated state. **FIX before the pipeline can auto-release blueprints:** add `platform/test/seed-vault/ranch/platform-subscription.json` to `compute-release.js` applyPlan's mirror list (or make run-seed-migrations tolerate pin < catalogue). Also: the `rebaseline-seed` job's push-to-main step failed (branch protection / non-ff) — benign here, but currently broken.
+
+**FINDING — headless `claude -p` denies all tools in "don't-ask mode."** The unattended cron needs explicit `--allowedTools` (+ `--permission-mode acceptEdits`) — added to the plist; validate before the first July sync. Fails closed (no corruption).
+
+**LESSON — landmine #16 residue.** 9 finance version-range hard-codes in run-helper-cases.js the Phase 0b collapse missed (silently widened `(6|7|8|9|10)`, broke at 11) → converted to `=== VERSION_SNAPSHOT.components.finance`. Fully retired for finance.
+
+**Commits:** branch `cycle/finance-actuals-sync`; PR #28; tag v0.131.0; tap PR #215.
+
+See `Docs/plans/2026-06-23-finance-actuals-sync-result.md`.
+
