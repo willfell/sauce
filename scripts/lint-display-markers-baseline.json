@@ -97,38 +97,33 @@
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
-      "line": 625,
+      "line": 642,
       "snippet": "if (payload.mode === 'recurring') heading = '## Recurring Tasks';"
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
-      "line": 626,
+      "line": 643,
       "snippet": "else if (payload.destination && payload.destination.type === 'project') heading = '## Owned Tasks';"
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
-      "line": 627,
+      "line": 644,
       "snippet": "else heading = '## Today';"
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
-      "line": 662,
+      "line": 709,
       "snippet": "'## Recurring Tasks',"
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
-      "line": 677,
+      "line": 724,
       "snippet": "'## Owned Tasks',"
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
-      "line": 679,
+      "line": 726,
       "snippet": "'## From Meetings',"
-    },
-    {
-      "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
-      "line": 691,
-      "snippet": "\"## Today's Capture\","
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-daily-carryover.js",
@@ -137,12 +132,12 @@
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-daily-carryover.js",
-      "line": 162,
+      "line": 165,
       "snippet": "if (lines[i].trim() === '## Tasks') { tasksStart = i + 1; break; }"
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-daily-carryover.js",
-      "line": 174,
+      "line": 177,
       "snippet": "if (/^## /.test(lines[i])) { tasksEnd = i; break; }"
     },
     {
@@ -179,16 +174,6 @@
       "file": "platform/blueprints/project/helpers/projects-hub-cards.js",
       "line": 219,
       "snippet": "if (line.startsWith(\"## \")) lane = line.replace(\"## \", \"\").trim();"
-    },
-    {
-      "file": "platform/blueprints/daily/helpers/space-daily-dashboard.js",
-      "line": 1080,
-      "snippet": "*   2. Fallback: `## Attendees` body section with `- [[Name]]` bullets."
-    },
-    {
-      "file": "platform/blueprints/daily/helpers/space-daily-dashboard.js",
-      "line": 1083,
-      "snippet": "*   - `## Notes` heading with >5 chars of content → true."
     },
     {
       "file": "platform/blueprints/cowork/helpers/compose-scheduled-job-wrappers-helper.js",
