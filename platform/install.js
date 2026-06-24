@@ -3983,7 +3983,13 @@ function _dropDividersBeforeSectionLabels(body) {
 async function applyNoteChromeHeal(tp, history, git) {
   if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
   const adapter = tp.app.vault.adapter;
-  const roots = ["spice/meetings", "spice/scratch", "spice/to-do", "spice/people"];
+  // v0.128.0: spice/projects added so step 7 (project-todo paired guards) can
+  // reach existing consumer-vault project-todo notes nested under
+  // spice/projects/<slug>/<Name> To-Do.md. Steps 1-6 are type-gated internally
+  // (meeting/to-do/scratch-only), so project hub notes (type: project) +
+  // map/kanban/etc. siblings under spice/projects/ are skipped. Step 7 is
+  // type: project-todo only.
+  const roots = ["spice/meetings", "spice/scratch", "spice/to-do", "spice/people", "spice/projects"];
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
   let healed = 0, warned = 0;
   for (const root of roots) {
