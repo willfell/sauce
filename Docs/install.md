@@ -1411,3 +1411,27 @@ This is a **MINOR** release — workshop 0.126.1 → **0.127.0**.
 - The `+ New Task` dialog's create path is unchanged. Only the new `editExisting` mode + the meeting-context dual-write are new behavior.
 - No vault data is dropped or restructured. Each transform is fenced + bounded + reads-write-back via the existing `.sauce-backup/<ts>/` snapshot path.
 - Cmd+R Obsidian after `sauce install` so the new CustomJS classes (`TaskInteractions` + `TodayCaptureEditableList`) load.
+
+## Upgrading from v0.127.0
+
+This is a **PATCH** — workshop 0.127.0 → **0.127.1**. No blueprint bumps; install.js heal fix only.
+
+```bash
+brew update && brew upgrade sauce
+```
+
+Then in each consumer vault:
+
+```bash
+sauce update --bump-pins
+```
+
+`--bump-pins` advances `workshop_version` only (mechanism + blueprint pins unchanged from v0.127.0).
+
+**What this release fixes:**
+
+- **`TodayCaptureEditableList` back-injection into existing daily To-Do notes.** v0.127.0's heal step 6 injected the `<!-- TODAY_CAPTURE_MARKER -->` sentinel but missed the `TodayCaptureEditableList` dataviewjs renderer block. Existing pre-v0.127.0 daily notes ended up with the anchor but no click-to-edit UI. v0.127.1 splits the heal guard so the renderer block back-fills on any note where the marker exists but the renderer doesn't (and remains idempotent on fully-healed notes).
+
+**Effect of running this upgrade:** every pre-v0.127.0 daily To-Do note (any note with `type: to-do` frontmatter + a `Today` SectionLabel) gets the `TodayCaptureEditableList` dataviewjs block back-injected during the next install pass. After `sauce install`, the click-to-edit pencil rows render below the `## Today` SectionLabel on every daily note, matching the experience NEW daily notes have been getting since v0.127.0 deployed.
+
+**What does NOT change:** no manifest bumps; no blueprint source changes; no `TaskInteractions` API change. The fix is a one-function patch in `_healNoteChromeBody`.

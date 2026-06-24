@@ -14333,15 +14333,16 @@ async function caseHCV0127Versions() {
   const sub = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "ranch/platform-subscription.json"), "utf8"));
 
-  // A: workshop_version === 0.128.0 across the three canonical version files.
-  // (Value bumped at v0.128.0 finance-planning-layer cycle per landmine #16; label
-  // kept archaeological — what matters is the assertion VALUE matches current state.)
-  assertEqual(platformMan.workshop_version, "0.128.0",
-    "HC-V0127-VERSION-A1: platform/manifest.json workshop_version === 0.128.0");
-  assertEqual(pkg.version, "0.128.0",
-    "HC-V0127-VERSION-A2: package.json version === 0.128.0");
-  assertEqual(sub.workshop_version, "0.128.0",
-    "HC-V0127-VERSION-A3: ranch/platform-subscription.json workshop_version === 0.128.0");
+  // A: workshop_version is on the 0.128.x line across the three canonical
+  // version files. PATCH-tolerant (regex /^0\.128\.\d+$/) so in-cycle PATCHes
+  // (v0.128.1+) don't require a sweep; landmine #16 hygiene. Bumped from 0.127.x
+  // at the v0.128.0 finance-planning-layer cycle (merge of v0.127.1).
+  assertTrue("HC-V0127-VERSION-A1: platform/manifest.json workshop_version matches /^0\\.128\\.\\d+$/",
+    /^0\.128\.\d+$/.test(platformMan.workshop_version), `got: ${platformMan.workshop_version}`);
+  assertTrue("HC-V0127-VERSION-A2: package.json version matches /^0\\.128\\.\\d+$/",
+    /^0\.128\.\d+$/.test(pkg.version), `got: ${pkg.version}`);
+  assertTrue("HC-V0127-VERSION-A3: ranch/platform-subscription.json workshop_version matches /^0\\.128\\.\\d+$/",
+    /^0\.128\.\d+$/.test(sub.workshop_version), `got: ${sub.workshop_version}`);
 
   // F (v0.128.0): finance catalogue pin 0.10.0 — NEW planning/lever/allocation layer.
   const finance = (platformMan.blueprints || []).find(b => b && b.name === "finance");
