@@ -10965,7 +10965,7 @@ async function caseV01020Meet1ManifestProjectField() {
   console.log("\n--- Case HC-V01020-MEET-1: meetings manifest 0.10.0 + project field + picker ---");
   const m = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/meetings/manifest.json"), "utf8"));
-  assertTrue("HC-V01020-MEET-1: version is 0.12.0", m.version === "0.12.0");
+  assertTrue("HC-V01020-MEET-1: version matches snapshot SSOT", m.version === VERSION_SNAPSHOT.components.meetings, `got: ${m.version}, snapshot: ${VERSION_SNAPSHOT.components.meetings}`);
   const meetBtn = (m.new_entity_buttons || []).find(b => b.id === "meeting");
   assertTrue("HC-V01020-MEET-1: meeting button frontmatter_template includes project",
     meetBtn && meetBtn.frontmatter_template &&
@@ -15298,7 +15298,7 @@ async function caseHCV0128FinancePlanning() {
   // (sauce v0.84.1 — Tasks header open · done); cards untouched.
   {
     const pins = [
-      ["daily",         "platform/blueprints/daily/manifest.json",            "0.13.8"],
+      ["daily",         "platform/blueprints/daily/manifest.json",            VERSION_SNAPSHOT.components.daily],
       ["activity-feed", "platform/mechanisms/activity-feed/manifest.json",    "0.7.1"],
       ["cards",         "platform/mechanisms/cards/manifest.json",            "0.2.6"],
     ];
