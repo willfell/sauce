@@ -347,6 +347,14 @@ withTempVault((vault) => {
             "HC-V0128-SEED-MIGRATE-PLAN-8 .sauce-backup snapshot written for the injected Budget",
             helpers.dirExists(vault, ".sauce-backup")
         );
+        // v0.10.2: scaffolded created_at must match the canonical-vocab pattern (no millis) —
+        // new Date().toISOString() emits ".SSSZ" which the validator rejects; templates strip it.
+        const CANON_TS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}([+-]\d{2}:\d{2}|Z)$/;
+        ok(
+            "HC-V0128-SEED-MIGRATE-PLAN-9 scaffolded created_at matches canonical pattern (no millis)",
+            CANON_TS.test(String(planFm.created_at || "")) && CANON_TS.test(String(savFm.created_at || "")),
+            `plan=${planFm.created_at} ef=${savFm.created_at}`
+        );
     }
 
     // ===== Idempotency phase: snapshot, second install, compare =====
