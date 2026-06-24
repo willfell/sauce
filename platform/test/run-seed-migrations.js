@@ -305,6 +305,50 @@ withTempVault((vault) => {
         );
     }
 
+    // ===== HC-V0128-SEED-MIGRATE-PLAN-* — finance v0.10.0 planning layer =====
+    // applyFinancePlanScaffolding + applyFinanceSavingsScaffolding + applyFinancePlanBandInjection.
+    {
+        ok(
+            "HC-V0128-SEED-MIGRATE-PLAN-1 Finance Plan.md scaffolded",
+            helpers.fileExists(vault, "spice/finance/Finance Plan.md")
+        );
+        let planFm = {};
+        try { planFm = helpers.parseFrontmatter(helpers.readNote(vault, "spice/finance/Finance Plan.md")).frontmatter; } catch (e) {}
+        ok(
+            "HC-V0128-SEED-MIGRATE-PLAN-2 Finance Plan type=finance-plan",
+            planFm.type === "finance-plan"
+        );
+        ok(
+            "HC-V0128-SEED-MIGRATE-PLAN-3 savings/ + Savings.md hub scaffolded",
+            helpers.dirExists(vault, "spice/finance/savings") && helpers.fileExists(vault, "spice/finance/savings/Savings.md")
+        );
+        ok(
+            "HC-V0128-SEED-MIGRATE-PLAN-4 Savings-Emergency-Fund.md scaffolded",
+            helpers.fileExists(vault, "spice/finance/savings/Savings-Emergency-Fund.md")
+        );
+        let savFm = {};
+        try { savFm = helpers.parseFrontmatter(helpers.readNote(vault, "spice/finance/savings/Savings-Emergency-Fund.md")).frontmatter; } catch (e) {}
+        ok(
+            "HC-V0128-SEED-MIGRATE-PLAN-5 Emergency Fund type=savings-account",
+            savFm.type === "savings-account"
+        );
+        let budgetBody = "";
+        try { budgetBody = helpers.readNote(vault, "spice/finance/budgets/2026-05/Budget-2026-05.md"); } catch (e) {}
+        ok(
+            "HC-V0128-SEED-MIGRATE-PLAN-6 PlanBand marker injected into existing Budget",
+            budgetBody.includes("<!-- plan-band-v0.10.0 -->") && budgetBody.includes('class: "PlanBand"')
+        );
+        ok(
+            "HC-V0128-SEED-MIGRATE-PLAN-7 PlanBand lands above MonthlyOverview",
+            budgetBody.indexOf("plan-band-v0.10.0") !== -1 &&
+            budgetBody.indexOf("plan-band-v0.10.0") < budgetBody.indexOf("monthly-overview-v0.6.3")
+        );
+        ok(
+            "HC-V0128-SEED-MIGRATE-PLAN-8 .sauce-backup snapshot written for the injected Budget",
+            helpers.dirExists(vault, ".sauce-backup")
+        );
+    }
+
     // ===== Idempotency phase: snapshot, second install, compare =====
     const firstSnapshot = helpers.snapshotTree(vault);
     const result2 = helpers.runInstall(vault, REPO_ROOT);

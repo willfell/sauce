@@ -5007,6 +5007,91 @@ await dv.view("ranch/views/customjs-guard", { class: "DebtDefaultsEditor" });
 \`\`\`
 `;
 
+// v0.10.0 — planning-layer scaffolding templates. The finance-plan singleton holds
+// per-vault policy (safe zero defaults shipped; the user fills in real knobs once),
+// and the savings sub-area mirrors the debts sub-area. FinancePlanDashboard /
+// SavingsCards / SavingsSummary ship as helpers in the same cycle; the dataviewjs
+// blocks render once Cmd+R loads the new CustomJS classes.
+const FINANCE_PLAN_TEMPLATE = `---
+type: finance-plan
+income_floor: 0
+fixed_living_monthly: 0
+attack_above_minimums: 0
+pay_periods_per_month: 2
+roll_freed_savings_to_attack: true
+savings_glide:
+  - { at_or_above: 0, monthly: 0 }
+overflow: { attack_pct: 80, flex_pct: 20 }
+lever_order: [discretionary, savings, attack]
+avalanche_order_by: apr
+created_at: "${new Date().toISOString()}"
+cssclasses:
+  - wide
+---
+
+\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+\`\`\`
+
+\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "FinanceNav" });
+\`\`\`
+
+\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "FinancePlanDashboard" });
+\`\`\`
+`;
+
+const FINANCE_SAVINGS_HUB_TEMPLATE = `---
+type: savings-hub
+created_at: "${new Date().toISOString()}"
+tags:
+  - finance-hub
+cssclasses:
+  - wide
+---
+
+\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+\`\`\`
+
+\`\`\`dataviewjs
+// entity-create:savings — installer-managed; do not delete this comment
+await dv.view("ranch/views/customjs-guard", { class: "FinanceNav" });
+\`\`\`
+
+\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "SavingsCards" });
+\`\`\`
+`;
+
+const FINANCE_SAVINGS_EMERGENCY_TEMPLATE = `---
+type: savings-account
+name: "Emergency Fund"
+target: 5000
+current_balance: 0
+last_updated: "${new Date().toISOString().slice(0, 10)}"
+balance_history:
+  - { date: ${new Date().toISOString().slice(0, 10)}, balance: 0, source: install-seed }
+created_at: "${new Date().toISOString()}"
+cssclasses:
+  - wide
+---
+
+\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
+\`\`\`
+
+\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "FinanceNav" });
+\`\`\`
+
+<!-- savings-summary-v0.10.0 -->
+\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "SavingsSummary" });
+\`\`\`
+`;
+
 // v0.112.0 S2a — months hub body (byte-identical to content/Months.md body and
 // FINANCE_HUB_BODY_TEMPLATES entry — all three must stay in sync).
 const FINANCE_MONTHS_HUB_BODY = `\`\`\`dataviewjs
@@ -5186,18 +5271,193 @@ function _injectPaycheckDebtBand(body) {
   return { body: out, touched: false };
 }
 
+// applyFinancePlanScaffolding — v0.10.0. Create-if-absent the finance-plan singleton
+// (spice/finance/Finance Plan.md), which holds per-vault lever/glide/overflow policy.
+// Never overwrites an existing plan (it carries user config). No snapshot — create-only.
+async function applyFinancePlanScaffolding(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "finance") return;
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const planPath = "spice/finance/Finance Plan.md";
+  try {
+    if (await adapter.exists(planPath)) {
+      history?.push({ event: "info", step: "finance_plan_scaffolding", name: "finance",
+        action: "preserved", path: planPath,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+      return;
+    }
+    await adapter.write(planPath, FINANCE_PLAN_TEMPLATE);
+    history?.push({ event: "info", step: "finance_plan_scaffolding", name: "finance",
+      action: "created", path: planPath,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+      attempted_at: new Date().toISOString() });
+  } catch (e) {
+    history?.push({ event: "warning", step: "finance_plan_scaffolding", name: "finance",
+      reason: `write failed for ${planPath}: ${e.message}`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+      attempted_at: new Date().toISOString() });
+  }
+}
+
+// applyFinanceSavingsScaffolding — v0.10.0. Create-if-absent the savings sub-area
+// (spice/finance/savings/ + Savings.md hub + Savings-Emergency-Fund.md). Mirrors
+// applyFinanceDebtScaffolding posture. Never overwrites existing files. No snapshot.
+async function applyFinanceSavingsScaffolding(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "finance") return;
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const savingsRoot = "spice/finance/savings";
+  const savingsHubPath = `${savingsRoot}/Savings.md`;
+  const emergencyPath = `${savingsRoot}/Savings-Emergency-Fund.md`;
+  let created = 0, preserved = 0;
+
+  if (!(await adapter.exists(savingsRoot))) {
+    try {
+      await adapter.mkdir(savingsRoot);
+    } catch (e) {
+      history?.push({ event: "warning", step: "finance_savings_scaffolding", name: "finance",
+        reason: `mkdir failed for ${savingsRoot}: ${e.message}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+      return;
+    }
+  }
+
+  const writes = [[savingsHubPath, FINANCE_SAVINGS_HUB_TEMPLATE], [emergencyPath, FINANCE_SAVINGS_EMERGENCY_TEMPLATE]];
+  for (const [p, tmpl] of writes) {
+    if (await adapter.exists(p)) { preserved++; continue; }
+    try {
+      await adapter.write(p, tmpl);
+      created++;
+      history?.push({ event: "info", step: "finance_savings_scaffolding", name: "finance",
+        action: "created", path: p,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    } catch (e) {
+      history?.push({ event: "warning", step: "finance_savings_scaffolding", name: "finance",
+        reason: `write failed for ${p}: ${e.message}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    }
+  }
+
+  history?.push({ event: "info", step: "finance_savings_scaffolding", name: "finance",
+    summary: { created, preserved },
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+    completed_at: new Date().toISOString() });
+}
+
+// applyFinancePlanBandInjection — v0.10.0. Injects the PlanBand dataviewjs block at the
+// TOP of every Budget-*.md (above MonthlyOverview / BudgetSummary). Marker-guarded by
+// `<!-- plan-band-v0.10.0 -->`. .sauce-backup snapshot before write. Per-file failure-loud.
+// Mirrors applyFinancePaycheckDebtBandInjection (snapshot-bearing) posture.
+async function applyFinancePlanBandInjection(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "finance") return;
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+
+  const budgetsRoot = "spice/finance/budgets";
+  if (!(await adapter.exists(budgetsRoot))) return;
+
+  const budgetFiles = [];
+  try {
+    const top = await adapter.list(budgetsRoot);
+    for (const folder of (top.folders || [])) {
+      try {
+        const inner = await adapter.list(folder);
+        for (const fp of (inner.files || [])) {
+          if (/Budget-\d{4}-\d{2}\.md$/.test(fp)) budgetFiles.push(fp);
+        }
+      } catch (_e) { /* per-folder failure-loud */ }
+    }
+  } catch (e) {
+    history?.push({ event: "warning", step: "finance_plan_band_injection", name: "finance",
+      reason: `list failed for ${budgetsRoot}: ${e.message}`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+      attempted_at: new Date().toISOString() });
+    return;
+  }
+
+  if (budgetFiles.length === 0) return;
+
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  let touched = 0;
+  for (const fp of budgetFiles) {
+    try {
+      const body = await adapter.read(fp);
+      const result = _injectPlanBand(body);
+      if (result.touched) {
+        const backupPath = `.sauce-backup/${ts}/${fp}`;
+        const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+        try { await adapter.mkdir(backupParent); } catch (_e) { /* already exists */ }
+        try { await adapter.write(backupPath, body); } catch (_e) { /* best-effort */ }
+        await adapter.write(fp, result.body);
+        touched += 1;
+      }
+    } catch (e) {
+      history?.push({ event: "warning", step: "finance_plan_band_injection", name: "finance",
+        reason: `body injection failed for ${fp}: ${e.message}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    }
+  }
+
+  history?.push({ event: "info", step: "finance_plan_band_injection", name: "finance",
+    reason: `${budgetFiles.length} budgets scanned, ${touched} bodies injected (PlanBand at top)`,
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+    attempted_at: new Date().toISOString() });
+}
+
+// _injectPlanBand — pure body transform. Idempotent. Marker-guarded. Lands the PlanBand
+// block at the TOP of the note's content (above all other bands).
+//   Anchor priority:
+//     1. marker present → no-op.
+//     2. monthly-overview marker → inject BEFORE it.
+//     3. budget-summary marker → inject BEFORE it.
+//     4. FinanceNav / FinanceNavRow block → inject AFTER it.
+//     5. Frontmatter close (second `---\n`) → inject AFTER it.
+function _injectPlanBand(body) {
+  let out = body;
+  const MARKER = "<!-- plan-band-v0.10.0 -->";
+  if (out.includes(MARKER)) return { body: out, touched: false };
+
+  const block = `${MARKER}\n\`\`\`dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "PlanBand" });\n\`\`\`\n\n`;
+
+  const moMarkerRe = /(<!--\s*monthly-overview-v[\d.]+\s*-->\s*\n)/;
+  if (moMarkerRe.test(out)) { out = out.replace(moMarkerRe, `${block}$1`); return { body: out, touched: true }; }
+
+  const bsMarkerRe = /(<!--\s*budget-summary-v[\d.]+\s*-->\s*\n)/;
+  if (bsMarkerRe.test(out)) { out = out.replace(bsMarkerRe, `${block}$1`); return { body: out, touched: true }; }
+
+  const navBlockRe = /(```dataviewjs\s*\n[^`]*class:\s*["']FinanceNav(?:Row)?["'][^`]*```\s*\n)/;
+  const nb = out.match(navBlockRe);
+  if (nb) { out = out.replace(navBlockRe, `$1\n${block}`); return { body: out, touched: true }; }
+
+  const fmEnd = out.indexOf("---\n", 4);
+  if (fmEnd !== -1) {
+    const cutIdx = fmEnd + 4;
+    out = out.slice(0, cutIdx) + `\n${block}` + out.slice(cutIdx);
+    return { body: out, touched: true };
+  }
+  return { body: out, touched: false };
+}
+
 async function applyFinanceMigrations(tp, manifest, variables, history, git) {
   if (!manifest || manifest.name !== "finance") return;
   if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
   await applyFinanceDefaultsScaffolding(tp, manifest, variables, history, git);
   await applyFinanceDebtScaffolding(tp, manifest, variables, history, git);              // NEW v0.108.0
   await applyFinanceMonthsScaffolding(tp, manifest, variables, history, git);            // NEW v0.112.0 — create-if-absent months/ + Months.md
+  await applyFinancePlanScaffolding(tp, manifest, variables, history, git);              // NEW v0.10.0 — create-if-absent Finance Plan.md singleton
+  await applyFinanceSavingsScaffolding(tp, manifest, variables, history, git);           // NEW v0.10.0 — create-if-absent savings/ + Savings.md + Savings-Emergency-Fund.md
   await applyFinanceCategoriesGroupBackfill(tp, manifest, variables, history, git);
   await applyFinanceBudgetGroupSeed(tp, manifest, variables, history, git);              // NEW v0.108.0
   await applyFinanceBudgetBodyMigration(tp, manifest, variables, history, git);
   await applyFinanceBudgetMonthlyBandInjection(tp, manifest, variables, history, git);   // NEW v0.110.3 — MonthlyOverview band above BudgetSummary
   await applyFinancePaycheckBodyMigration(tp, manifest, variables, history, git);        // CF-3 v0.107.0
   await applyFinancePaycheckDebtBandInjection(tp, manifest, variables, history, git);    // NEW v0.112.0 — PaycheckDebtBand between PaycheckSummary and PaycheckExpensesEditor
+  await applyFinancePlanBandInjection(tp, manifest, variables, history, git);            // NEW v0.10.0 — PlanBand over-envelope flag at top of every Budget
   await applyFinancePaycheckDefaultsDebtLinking(tp, manifest, variables, history, git);  // NEW v0.108.0
   await applyFinancePaycheckDefaultsDebtBackfill(tp, manifest, variables, history, git); // NEW v0.114.0 — word-overlap matcher + auto-injection of orphan debts (supersedes the v0.108.0 CC_NAME_RE; complementary not redundant — v0.108.0 still runs for the CC pattern)
   await applyFinanceNavRowMigration(tp, manifest, variables, history, git);              // NEW v0.108.0

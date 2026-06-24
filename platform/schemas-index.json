@@ -155,9 +155,10 @@
       "consumers": [
         "platform/blueprints/finance/helpers/finance-frontmatter.js",
         "platform/blueprints/finance/helpers/budget-summary.js",
-        "platform/blueprints/finance/helpers/monthly-overview.js"
+        "platform/blueprints/finance/helpers/monthly-overview.js",
+        "platform/blueprints/finance/helpers/finance-math.js"
       ],
-      "notes": "8 rule_fragments covering: budget / paycheck / invoice / debt / budget-defaults / paycheck-defaults / debt-defaults / hub types. Validates frontmatter on per-blueprint paths via the validator mechanism."
+      "notes": "10 rule_fragments covering: budget / paycheck / invoice / debt / budget-defaults / paycheck-defaults / debt-defaults / month / finance-plan (v0.10.0) / savings-accounts (v0.10.0) / hub types. Validates frontmatter on per-blueprint paths via the validator mechanism."
     },
     {
       "id": "cowork-rule-fragments",
@@ -239,6 +240,18 @@
         "platform/blueprints/finance/templates/Budget Template.md"
       ],
       "notes": "MonthlyOverview (v0.110.3) reads page.type === 'budget' + page.month + page.categories[*].actual + dv.pages('spice/finance/paychecks').where(p => p.type === 'paycheck' && p.pay_period_start.startsWith(monthKey)) + dv.pages('spice/finance/debts').where(p => p.type === 'debt'). Paycheck expenses[*].debt + paid:true expected when summing debtPaid. Behavioral coverage in platform/test/run-v01103-monthly-overview.js."
+    },
+    {
+      "id": "finance-plan-state-read",
+      "kind": "helper-read-contract",
+      "owner": { "type": "blueprint", "name": "finance" },
+      "source": "platform/blueprints/finance/helpers/finance-math.js",
+      "consumers": [
+        "platform/blueprints/finance/helpers/finance-plan-dashboard.js",
+        "platform/blueprints/finance/helpers/plan-band.js",
+        "platform/blueprints/finance/helpers/finance-hub-summary.js"
+      ],
+      "notes": "FinanceMath.computePlanState(dv, monthKey) (v0.10.0) reads the type:'finance-plan' singleton (income_floor / fixed_living_monthly / attack_above_minimums / pay_periods_per_month / savings_glide / roll_freed_savings_to_attack / overflow / avalanche_order_by / attack_target_override) + debts + type:'savings-account' under spice/finance/savings + paychecks + the month's + prior month's budget. Returns { ok, envelope, savings, attack, allocation[], payoff, overflow, whatIf, applyPlan }. ok:false reason:'no-plan' when the singleton is absent (degrade-gracefully). Behavioral coverage in platform/test/run-finance-plan-state.js."
     },
     {
       "id": "to-do-recurring-frontmatter",
