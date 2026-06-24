@@ -1,9 +1,19 @@
 #!/usr/bin/env node
 // run-v01271-today-capture-renderer-heal.js — behavioral harness for the v0.127.1 PATCH.
 // Asserts that _healNoteChromeBody step 6 injects BOTH the TODAY_CAPTURE_MARKER
-// sentinel AND the TodayCaptureEditableList dataviewjs renderer block — closing
+// sentinel AND the EditableTaskList dataviewjs renderer block — closing
 // the v0.127.0 gap where the marker landed but the renderer didn't, leaving
 // existing pre-deploy daily notes with the anchor but no editable list UI.
+//
+// v0.128.0 update: the renderer class was renamed from TodayCaptureEditableList
+// to EditableTaskList (with explicit sectionAnchor arg). Heal step 6 (b) now
+// injects the canonical EditableTaskList form directly; the (b) guard accepts
+// either canonical OR legacy class names so v0.127.x notes carrying the legacy
+// invocation aren't double-injected. Heal step 6 (c) rewrites any remaining
+// legacy invocations to canonical on subsequent passes. This harness was
+// updated to assert on the canonical class name in the heal output, with a
+// dedicated case (HC-V01271-TCRH-G) verifying back-compat against bodies that
+// already ship the legacy class string.
 
 const path = require('path');
 const install = require(path.join(__dirname, '..', 'install.js'));
@@ -11,7 +21,8 @@ const { _healNoteChromeBody } = install;
 
 const TODAY_LABEL = 'class: "SectionLabel", args: [{ text: "Today", top: true }]';
 const TODAY_MARKER = '<!-- TODAY_CAPTURE_MARKER -->';
-const RENDERER_CLASS = 'class: "TodayCaptureEditableList"';
+const RENDERER_CLASS = 'class: "EditableTaskList"';
+const LEGACY_RENDERER_CLASS = 'class: "TodayCaptureEditableList"';
 
 const TODO_NOTE_NO_MARKER = `---
 type: to-do
@@ -63,7 +74,7 @@ await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ te
 <!-- TODAY_CAPTURE_MARKER -->
 
 \`\`\`dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "TodayCaptureEditableList" });
+await dv.view("ranch/views/customjs-guard", { class: "EditableTaskList", args: [{ sectionAnchor: "todayCapture" }] });
 \`\`\`
 `;
 

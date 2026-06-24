@@ -3833,14 +3833,21 @@ function _healNoteChromeBody(body, type) {
               + '\n\n' + TODAY_CAPTURE_MARKER
               + out.slice(insertAt);
         }
-        // (b) Inject TodayCaptureEditableList block if absent. Position:
-        // immediately after the marker line (so renderer reads tasks BETWEEN
+        // (b) Inject EditableTaskList block if absent. Position: immediately
+        // after the marker line (so renderer reads tasks BETWEEN
         // SectionLabel("Today") fence and ToDoDailyCarryover block above).
-        if (!out.includes('class: "TodayCaptureEditableList"')) {
+        // v0.128.0: injects the canonical EditableTaskList class with explicit
+        // sectionAnchor arg from the start; guard accepts either the canonical
+        // form OR the legacy `TodayCaptureEditableList` form so v0.127.x notes
+        // already carrying the legacy invocation aren't double-injected (step
+        // 6 (c) below then rewrites those legacy invocations to canonical).
+        const hasRenderer = out.includes('class: "EditableTaskList"')
+            || out.includes('class: "TodayCaptureEditableList"');
+        if (!hasRenderer) {
           const markerIdx = out.indexOf(TODAY_CAPTURE_MARKER);
           if (markerIdx !== -1) {
             const markerLineEnd = markerIdx + TODAY_CAPTURE_MARKER.length;
-            const rendererBlock = '\n\n```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "TodayCaptureEditableList" });\n```';
+            const rendererBlock = '\n\n```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "EditableTaskList", args: [{ sectionAnchor: "todayCapture" }] });\n```';
             out = out.slice(0, markerLineEnd)
                 + rendererBlock
                 + out.slice(markerLineEnd);
