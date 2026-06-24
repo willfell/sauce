@@ -105,6 +105,7 @@ const PLAN = {
     pay_periods_per_month: 2, roll_freed_savings_to_attack: true,
     savings_glide: [{ under: 1500, monthly: 300 }, { under: 3500, monthly: 150 }, { at_or_above: 3500, monthly: 0 }],
     overflow: { attack_pct: 80, flex_pct: 20 }, avalanche_order_by: "apr",
+    governed_from: "2020-01", // governed so the over-envelope flag renders in the widget tests
     attack_target_override: { debt: "[[Debt-Apple-Card]]", until_balance_below: 13950 },
     file: { path: "spice/finance/Finance Plan.md", name: "Finance Plan" },
 };
@@ -151,6 +152,14 @@ const ALL = [PLAN, ...DEBTS, SAV, BUDGET, PAYCHECK];
         let degErr = null;
         try { await w2.render(dv2); } catch (e) { degErr = e; }
         ok("HC-V0128-WIDGET-DASH-10 no-plan degrade renders setup prompt", degErr === null && /Set up your Finance Plan/.test(treeText(dv2.container)), degErr && degErr.message);
+
+        // baseline framing: an ungoverned month shows the "Baseline month" note, not the over-flag
+        const PLAN_NG = Object.assign({}, PLAN, { governed_from: null });
+        const dvNG = makeDv([PLAN_NG, ...DEBTS, SAV, BUDGET, PAYCHECK], PLAN_NG);
+        let ngErr = null;
+        try { await new Dash().render(dvNG); } catch (e) { ngErr = e; }
+        const ngTxt = treeText(dvNG.container);
+        ok("HC-V0128-WIDGET-DASH-11 ungoverned month → 'Baseline month' note, no over-flag", ngErr === null && /Baseline month/.test(ngTxt) && !/OVER by/.test(ngTxt), ngErr && ngErr.message);
 
         // ===== PlanBand =====
         const PB = loadClass("plan-band.js", "PlanBand", env);

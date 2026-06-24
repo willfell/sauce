@@ -139,7 +139,8 @@ class FinanceHubSummary {
             this._tileMuted(tile, "No plan yet");
         } else {
             this._tileValue(tile, `${this._fmtMoney(ps.envelope.left)} left`);
-            this._tileMuted(tile, `envelope ${this._fmtMoney(ps.envelope.effective)} · zero-debt ${ps.payoff.zeroDebtDate}`);
+            const baseTag = ps.envelope.governed ? "" : " · baseline";
+            this._tileMuted(tile, `envelope ${this._fmtMoney(ps.envelope.effective)} · zero-debt ${ps.payoff.zeroDebtDate}${baseTag}`);
         }
         tile.addEventListener("click", () => app.workspace.openLinkText("spice/finance/Finance Plan.md", ""));
     }

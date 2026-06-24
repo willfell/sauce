@@ -62,10 +62,14 @@ class FinancePlanDashboard {
         cell("Planned", money(e.planned));
         cell("Spent", money(e.spent));
         cell("Left", money(e.left), e.left < 0 ? RED : GREEN);
-        if (e.over > 0) {
+        if (e.governed && e.over > 0) {
             const flag = b1.createEl("div");
             flag.textContent = `⚠ OVER by ${money(e.over)} — trim a discretionary line or it lands on next month's envelope`;
             flag.style.cssText = `margin-top: 10px; padding: 6px 10px; border-radius: 6px; background: rgba(220,38,38,0.10); color: ${RED}; font-size: 0.84em;`;
+        } else if (!e.governed) {
+            const note = b1.createEl("div");
+            note.textContent = `Baseline month — not scored against the envelope (governed from ${e.governedFrom || "—"}).`;
+            note.style.cssText = "margin-top: 10px; padding: 6px 10px; border-radius: 6px; background: var(--background-secondary); color: var(--text-muted); font-size: 0.82em;";
         }
 
         // ---------- Band 2 — Allocation ----------
