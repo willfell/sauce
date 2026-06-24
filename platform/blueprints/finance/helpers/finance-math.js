@@ -70,14 +70,11 @@ class FinanceMath {
         const wNumer = debts.reduce((s, d) =>
             s + (Number(d.current_balance) || 0) * (Number(d.apr) || 0), 0);
         const weightedApr = totalBalance > 0 ? wNumer / totalBalance : 0;
-        let zeroDebtDate = "—";
-        const principalAttack = plannedAttack - monthlyInterest;
-        if (principalAttack > 0 && totalBalance > 0) {
-            const months = Math.ceil(totalBalance / principalAttack);
-            const d = new Date();
-            d.setMonth(d.getMonth() + months);
-            zeroDebtDate = d.toISOString().slice(0, 10);
-        }
+        // Accurate payoff via the avalanche simulation (rolls freed minimums, finance 0.10.1) so
+        // the hub hero + Debts hub match the planning dashboard. attack-above-mins = plannedAttack
+        // − Σ active minimums; the sim holds total monthly outlay constant.
+        const _minsSum = debts.reduce((s, d) => s + ((Number(d.current_balance) || 0) > 0 ? (Number(d.min_payment) || 0) : 0), 0);
+        const zeroDebtDate = this.simulateAvalanche(debts, Math.max(0, plannedAttack - _minsSum)).zeroDebtDate;
         return { totalBalance, monthlyInterest, plannedAttack, weightedApr, zeroDebtDate };
     }
     monthIncome(paychecks) {
@@ -320,10 +317,18 @@ class FinanceMath {
 
         // envelope (base is constant across glide tiers when freed rolls to attack)
         const base = incomeFloor - fixedLiving - minimums - attackTotal - contribution;
+        const governedFrom = this._coerceMonthString(plan.governed_from);
+        const isGoverned = (m) => !!(governedFrom && m && this._coerceMonthString(m) >= governedFrom);
         const prevKey = this._prevMonthKey(monthKey);
         const prevBudget = prevKey ? this.readBudgetForMonth(dv, prevKey) : null;
         const priorSpent = prevBudget ? this.monthSpending(prevBudget) : 0;
-        const overageCarry = (incomeFloor > 0 && prevBudget) ? Math.max(0, priorSpent - base) : 0;
+        const priorPlanned = (prevBudget && Array.isArray(prevBudget.categories))
+            ? prevBudget.categories.reduce((s, c) => s + num(c && c.planned), 0) : 0;
+        // Overage carry flows ONLY governed → governed: a pre-system baseline month (e.g. an old
+        // $6k full budget with $11k of real spend) must NOT punish the new envelope. And it
+        // compares the prior month's spend to its OWN plan, never to this month's envelope.
+        const carryApplies = incomeFloor > 0 && isGoverned(monthKey) && isGoverned(prevKey) && !!prevBudget && priorPlanned > 0;
+        const overageCarry = carryApplies ? Math.max(0, priorSpent - priorPlanned) : 0;
         const effective = base - overageCarry;
         const planned = (budget && Array.isArray(budget.categories))
             ? budget.categories.reduce((s, c) => s + num(c && c.planned), 0) : 0;
@@ -377,7 +382,7 @@ class FinanceMath {
             ok: true,
             monthKey: monthKey || null,
             inputs: { incomeFloor, fixedLiving, minimums, savingsBalance, savingsTarget },
-            envelope: { base, overageCarry, effective, planned, spent, left, over, status },
+            envelope: { base, overageCarry, effective, planned, spent, left, over, status, governed: isGoverned(monthKey), governedFrom },
             savings: { balance: savingsBalance, target: savingsTarget, tier: g.tier, contribution, freed, toTarget: Math.max(0, savingsTarget - savingsBalance) },
             attack: { base: attackBase, freed, total: attackTotal },
             allocation,

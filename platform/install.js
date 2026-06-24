@@ -5024,6 +5024,7 @@ savings_glide:
 overflow: { attack_pct: 80, flex_pct: 20 }
 lever_order: [discretionary, savings, attack]
 avalanche_order_by: apr
+governed_from: null
 created_at: "${new Date().toISOString().replace(/\.\d{3}Z$/, "Z")}"
 cssclasses:
   - wide
