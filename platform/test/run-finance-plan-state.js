@@ -102,6 +102,10 @@ function makeDv(cfg) {
     ok("HC-V0128-PLANSTATE-BASE-11 zeroDebtDate iso", /^\d{4}-\d{2}-\d{2}$/.test(ps.payoff.zeroDebtDate));
     ok("HC-V0128-PLANSTATE-BASE-12 applyPlan savingsPerCheck 150", near(ps.applyPlan.savingsPerCheck, 150));
     ok("HC-V0128-PLANSTATE-BASE-13 whatIf finite", isFinite(ps.whatIf.skipAttackThisMonth.weeksSlipped) && ps.whatIf.skipAttackThisMonth.weeksSlipped >= 0);
+    // Avalanche rolls freed minimums (total outlay held constant) → payoff ~39mo on the
+    // $49.7k/$1900 headspace shape. A regression to the no-roll model jumps to ~53mo.
+    ok("HC-V0128-PLANSTATE-BASE-14 payoff rolls freed minimums (~34-44 mo, not ~53)",
+        ps.payoff.months >= 34 && ps.payoff.months <= 44, `got ${ps.payoff.months}`);
 }
 
 // ===== HC-V0128-PLANSTATE-TIER-* — glide tiers + freed-rolls-to-attack keeps envelope constant =====

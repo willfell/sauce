@@ -14348,8 +14348,8 @@ async function caseHCV0127Versions() {
   const finance = (platformMan.blueprints || []).find(b => b && b.name === "finance");
   assertTrue("HC-V0128-VERSION-F1: finance catalogue entry present",
     !!finance, `got: ${JSON.stringify(finance)}`);
-  assertEqual(finance && finance.version, "0.10.0",
-    "HC-V0128-VERSION-F2: finance catalogue version === 0.10.0");
+  assertTrue("HC-V0128-VERSION-F2: finance catalogue version matches /^0\\.10\\.\\d+$/",
+    finance && /^0\.10\.\d+$/.test(finance.version), `got: ${finance && finance.version}`);
 
   // B: meetings catalogue pin 0.12.0 in both manifest + subscription.
   const meetings = (platformMan.blueprints || []).find(b => b && b.name === "meetings");

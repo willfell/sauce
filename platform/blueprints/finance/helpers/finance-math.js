@@ -242,6 +242,10 @@ class FinanceMath {
                 min: Number(d.min_payment) || 0,
             }));
         if (work.length === 0) return { months: 0, zeroDebtDate: "—", killOrder: [] };
+        // Avalanche holds the TOTAL monthly debt outlay constant: when a card pays off, its
+        // freed minimum rolls into the extra paid to the next target (Lever Protocol "roll the
+        // whole payment to the next card"). monthlyBudget = current active minimums + attack.
+        const monthlyBudget = work.reduce((s, w) => s + (w.min || 0), 0) + atk;
         const killOrder = [];
         const cap = 600;
         let months = 0;
@@ -256,10 +260,15 @@ class FinanceMath {
                 if (o) target = o;
             }
             if (!target) target = active.slice().sort((a, b) => (b.apr - a.apr) || (a.bal - b.bal))[0] || null;
-            const monthAttack = (skipFirstMonthAttack && months === 1) ? 0 : atk;
-            for (const w of work) { if (w.bal > 0) w.bal -= Math.min(w.min, w.bal); }
-            if (target && target.bal > 0 && monthAttack > 0) {
-                target.bal -= monthAttack;
+            // pay each active card its minimum (capped at balance), tracking total paid
+            let minsPaid = 0;
+            for (const w of work) { if (w.bal > 0) { const p = Math.min(w.min, w.bal); w.bal -= p; minsPaid += p; } }
+            // the leftover (attack + any freed minimums) goes entirely to the target; the
+            // what-if skips only the attack portion in month 1 (minimums are still paid).
+            let extra = (skipFirstMonthAttack && months === 1) ? 0 : (monthlyBudget - minsPaid);
+            if (extra < 0) extra = 0;
+            if (target && target.bal > 0 && extra > 0) {
+                target.bal -= extra;
                 if (target.bal < 0) target.bal = 0;
             }
             for (const w of work) {
