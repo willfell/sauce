@@ -1,0 +1,185 @@
+#!/usr/bin/env node
+/*
+ * run-finance-plan-state.js — behavioral harness for FinanceMath.computePlanState (finance v0.10.0).
+ * Loads finance-math.js into a sandbox, instantiates, exercises the allocation engine against
+ * minimal Dataview stubs. Asserts the lever/glide/overflow/avalanche/what-if contract that
+ * replaces the headspace hand-built system. Family: HC-V0128-PLANSTATE-*.
+ */
+const fs = require("fs");
+const path = require("path");
+
+const SRC = fs.readFileSync(
+    path.join(__dirname, "../blueprints/finance/helpers/finance-math.js"), "utf8");
+// eslint-disable-next-line no-eval
+const FinanceMath = eval(`(function () { ${SRC}\n; return FinanceMath; })()`);
+const fm = new FinanceMath();
+
+let pass = 0, fail = 0;
+const ok = (label, cond) => { if (cond) { pass++; } else { fail++; console.error(`  FAIL ${label}`); } };
+const near = (a, b, eps = 0.5) => Math.abs(Number(a) - Number(b)) <= eps;
+
+// ---- fixture builders ----
+function debt(name, balance, apr, min) {
+    return { type: "debt", name, current_balance: balance, apr, min_payment: min, planned_monthly_payment: min,
+        file: { path: `spice/finance/debts/Debt-${name}.md`, name: `Debt-${name}` } };
+}
+const HEADSPACE_DEBTS = [
+    debt("Cap1-Platinum", 7643.93, 28.74, 285),
+    debt("Discover-It", 15839.84, 24.74, 430),
+    debt("SCHEELS-Signature", 11704.69, 24.24, 235),
+    debt("Apple-Card", 14551.55, 22.74, 380),
+];
+function savingsAcct(balance, target) {
+    return { type: "savings-account", name: "Emergency Fund", current_balance: balance, target,
+        file: { path: "spice/finance/savings/Savings-Emergency-Fund.md", name: "Savings-Emergency-Fund" } };
+}
+function budget(monthKey, plannedTotal) {
+    // single category carrying the whole planned total keeps the sum exact
+    return { type: "budget", month: monthKey, categories: [{ group: "Discretionary", name: "All", planned: plannedTotal, actual: 0 }],
+        file: { path: `spice/finance/budgets/${monthKey}/Budget-${monthKey}.md`, name: `Budget-${monthKey}` } };
+}
+function paycheck(start, amount) {
+    return { type: "paycheck", pay_period_start: start, pay_period_end: start, paycheck_amount: amount, expenses: [],
+        file: { path: `spice/finance/paychecks/${start}/Paycheck-${start}.md`, name: `Paycheck-${start}` } };
+}
+function plan(overrides) {
+    return Object.assign({
+        type: "finance-plan",
+        income_floor: 9000,
+        fixed_living_monthly: 3851,
+        attack_above_minimums: 570,
+        pay_periods_per_month: 2,
+        roll_freed_savings_to_attack: true,
+        savings_glide: [
+            { under: 1500, monthly: 300 },
+            { under: 3500, monthly: 150 },
+            { at_or_above: 3500, monthly: 0 },
+        ],
+        overflow: { attack_pct: 80, flex_pct: 20 },
+        lever_order: ["discretionary", "savings", "attack"],
+        avalanche_order_by: "apr",
+        file: { path: "spice/finance/Finance Plan.md", name: "Finance Plan" },
+    }, overrides || {});
+}
+function arr(a) { return { where: (fn) => arr(a.filter(fn)), array: () => a }; }
+function makeDv(cfg) {
+    const planPage = cfg.plan === null ? null : plan(cfg.plan);
+    const debts = cfg.debts || [];
+    const savings = cfg.savings || [];
+    const budgets = cfg.budgets || [];
+    const paychecks = cfg.paychecks || [];
+    const all = [].concat(planPage ? [planPage] : [], debts, savings, budgets, paychecks);
+    const byPath = {
+        '"spice/finance"': all,
+        '"spice/finance/debts"': debts,
+        '"spice/finance/savings"': savings,
+        '"spice/finance/budgets"': budgets,
+        '"spice/finance/paychecks"': paychecks,
+    };
+    return { pages: (p) => arr(byPath[p] || []) };
+}
+
+// ===== HC-V0128-PLANSTATE-BASE-* — headspace baseline (month-1 Apple override active) =====
+{
+    const dv = makeDv({
+        plan: { attack_target_override: { debt: "[[Debt-Apple-Card]]", until_balance_below: 13950 } },
+        debts: HEADSPACE_DEBTS, savings: [savingsAcct(639.94, 5000)],
+        budgets: [budget("2026-07", 2949)], paychecks: [paycheck("2026-07-01", 9000)],
+    });
+    const ps = fm.computePlanState(dv, "2026-07");
+    ok("HC-V0128-PLANSTATE-BASE-1 ok", ps.ok === true);
+    ok("HC-V0128-PLANSTATE-BASE-2 envelope.base 2949", near(ps.envelope.base, 2949));
+    ok("HC-V0128-PLANSTATE-BASE-3 minimums 1330", near(ps.inputs.minimums, 1330));
+    ok("HC-V0128-PLANSTATE-BASE-4 savings tier1/300", ps.savings.tier === 1 && near(ps.savings.contribution, 300));
+    ok("HC-V0128-PLANSTATE-BASE-5 attack.total 570", near(ps.attack.total, 570));
+    ok("HC-V0128-PLANSTATE-BASE-6 envelope.left = effective - 0", near(ps.envelope.left, ps.envelope.effective));
+    const apple = ps.allocation.find(a => a.slug === "Debt-Apple-Card");
+    const cap1 = ps.allocation.find(a => a.slug === "Debt-Cap1-Platinum");
+    ok("HC-V0128-PLANSTATE-BASE-7 override targets Apple", apple && apple.isTarget === true && near(apple.total, 950));
+    ok("HC-V0128-PLANSTATE-BASE-8 Cap1 min-only", cap1 && cap1.isTarget === false && near(cap1.total, 285));
+    ok("HC-V0128-PLANSTATE-BASE-9 overflow null at floor", ps.overflow === null);
+    ok("HC-V0128-PLANSTATE-BASE-10 payoff converges", isFinite(ps.payoff.months) && ps.payoff.months > 0 && ps.payoff.months < 600);
+    ok("HC-V0128-PLANSTATE-BASE-11 zeroDebtDate iso", /^\d{4}-\d{2}-\d{2}$/.test(ps.payoff.zeroDebtDate));
+    ok("HC-V0128-PLANSTATE-BASE-12 applyPlan savingsPerCheck 150", near(ps.applyPlan.savingsPerCheck, 150));
+    ok("HC-V0128-PLANSTATE-BASE-13 whatIf finite", isFinite(ps.whatIf.skipAttackThisMonth.weeksSlipped) && ps.whatIf.skipAttackThisMonth.weeksSlipped >= 0);
+}
+
+// ===== HC-V0128-PLANSTATE-TIER-* — glide tiers + freed-rolls-to-attack keeps envelope constant =====
+function tierCase(balance) {
+    const dv = makeDv({ plan: {}, debts: HEADSPACE_DEBTS, savings: [savingsAcct(balance, 5000)],
+        budgets: [budget("2026-07", 2949)], paychecks: [paycheck("2026-07-01", 9000)] });
+    return fm.computePlanState(dv, "2026-07");
+}
+{
+    const t1 = tierCase(1499);
+    ok("HC-V0128-PLANSTATE-TIER-1 <1500 → tier1/300", t1.savings.tier === 1 && near(t1.savings.contribution, 300));
+    ok("HC-V0128-PLANSTATE-TIER-2 tier1 freed 0 attack 570", near(t1.attack.freed, 0) && near(t1.attack.total, 570));
+    ok("HC-V0128-PLANSTATE-TIER-3 tier1 envelope 2949", near(t1.envelope.base, 2949));
+    const t2 = tierCase(1500);
+    ok("HC-V0128-PLANSTATE-TIER-4 1500 → tier2/150", t2.savings.tier === 2 && near(t2.savings.contribution, 150));
+    ok("HC-V0128-PLANSTATE-TIER-5 tier2 freed 150 attack 720", near(t2.attack.freed, 150) && near(t2.attack.total, 720));
+    ok("HC-V0128-PLANSTATE-TIER-6 tier2 envelope STILL 2949", near(t2.envelope.base, 2949));
+    const t3 = tierCase(3500);
+    ok("HC-V0128-PLANSTATE-TIER-7 3500 → tier3/0", t3.savings.tier === 3 && near(t3.savings.contribution, 0));
+    ok("HC-V0128-PLANSTATE-TIER-8 tier3 freed 300 attack 870", near(t3.attack.freed, 300) && near(t3.attack.total, 870));
+    ok("HC-V0128-PLANSTATE-TIER-9 tier3 envelope STILL 2949", near(t3.envelope.base, 2949));
+}
+
+// ===== HC-V0128-PLANSTATE-ROLL-* — paid-off card rolls target to next avalanche debt =====
+{
+    const rolled = HEADSPACE_DEBTS.map(d => d.file.name === "Debt-Cap1-Platinum" ? Object.assign({}, d, { current_balance: 0 }) : d);
+    const dv = makeDv({ plan: {}, debts: rolled, savings: [savingsAcct(639.94, 5000)],
+        budgets: [budget("2026-07", 2949)], paychecks: [paycheck("2026-07-01", 9000)] });
+    const ps = fm.computePlanState(dv, "2026-07");
+    const target = ps.allocation.find(a => a.isTarget);
+    ok("HC-V0128-PLANSTATE-ROLL-1 Cap1 absent (paid off)", !ps.allocation.find(a => a.slug === "Debt-Cap1-Platinum"));
+    ok("HC-V0128-PLANSTATE-ROLL-2 target rolled to Discover (next APR)", target && target.slug === "Debt-Discover-It");
+    ok("HC-V0128-PLANSTATE-ROLL-3 minimums drop to 1045", near(ps.inputs.minimums, 1045));
+}
+
+// ===== HC-V0128-PLANSTATE-UNDERWATER-* — planned > effective flags over =====
+{
+    const dv = makeDv({ plan: {}, debts: HEADSPACE_DEBTS, savings: [savingsAcct(639.94, 5000)],
+        budgets: [budget("2026-07", 3120)], paychecks: [paycheck("2026-07-01", 9000)] });
+    const ps = fm.computePlanState(dv, "2026-07");
+    ok("HC-V0128-PLANSTATE-UNDERWATER-1 over 171", near(ps.envelope.over, 171));
+    ok("HC-V0128-PLANSTATE-UNDERWATER-2 status over", ps.envelope.status === "over");
+}
+
+// ===== HC-V0128-PLANSTATE-OVERFLOW-* — income above floor → 80/20 split =====
+{
+    const dv = makeDv({ plan: {}, debts: HEADSPACE_DEBTS, savings: [savingsAcct(639.94, 5000)],
+        budgets: [budget("2026-07", 2949)], paychecks: [paycheck("2026-07-01", 10000)] });
+    const ps = fm.computePlanState(dv, "2026-07");
+    ok("HC-V0128-PLANSTATE-OVERFLOW-1 surplus 1000", ps.overflow && near(ps.overflow.surplus, 1000));
+    ok("HC-V0128-PLANSTATE-OVERFLOW-2 toAttack 800", near(ps.overflow.toAttack, 800));
+    ok("HC-V0128-PLANSTATE-OVERFLOW-3 toFlex 200", near(ps.overflow.toFlex, 200));
+}
+
+// ===== HC-V0128-PLANSTATE-CARRY-* — prior-month overspend shrinks effective envelope =====
+{
+    const prior = budget("2026-06", 2949); prior.categories[0].actual = 3100; // overspent 151 vs base 2949
+    const dv = makeDv({ plan: {}, debts: HEADSPACE_DEBTS, savings: [savingsAcct(639.94, 5000)],
+        budgets: [prior, budget("2026-07", 2949)], paychecks: [paycheck("2026-07-01", 9000)] });
+    const ps = fm.computePlanState(dv, "2026-07");
+    ok("HC-V0128-PLANSTATE-CARRY-1 overageCarry 151", near(ps.envelope.overageCarry, 151));
+    ok("HC-V0128-PLANSTATE-CARRY-2 effective = base - carry", near(ps.envelope.effective, ps.envelope.base - 151));
+}
+
+// ===== HC-V0128-PLANSTATE-DEGRADE-* — degrade gracefully =====
+{
+    const noPlan = fm.computePlanState(makeDv({ plan: null, debts: HEADSPACE_DEBTS }), "2026-07");
+    ok("HC-V0128-PLANSTATE-DEGRADE-1 no-plan → ok:false", noPlan.ok === false && noPlan.reason === "no-plan");
+
+    const noDebts = fm.computePlanState(makeDv({ plan: {}, debts: [], savings: [savingsAcct(639.94, 5000)],
+        budgets: [budget("2026-07", 2949)], paychecks: [paycheck("2026-07-01", 9000)] }), "2026-07");
+    ok("HC-V0128-PLANSTATE-DEGRADE-2 no-debts → allocation []", Array.isArray(noDebts.allocation) && noDebts.allocation.length === 0);
+    ok("HC-V0128-PLANSTATE-DEGRADE-3 no-debts → payoff '—'", noDebts.payoff.zeroDebtDate === "—");
+
+    const noFloor = fm.computePlanState(makeDv({ plan: { income_floor: 0 }, debts: HEADSPACE_DEBTS,
+        savings: [savingsAcct(639.94, 5000)], budgets: [budget("2026-07", 3120)], paychecks: [] }), "2026-07");
+    ok("HC-V0128-PLANSTATE-DEGRADE-4 floor 0 → over suppressed", noFloor.envelope.over === 0 && noFloor.envelope.status === "ok");
+}
+
+console.log(`\nrun-finance-plan-state.js: ${pass} passed, ${fail} failed`);
+process.exit(fail === 0 ? 0 : 1);
