@@ -47,6 +47,7 @@ jobs:
         if: steps.diff.outputs.changed == 'true'
         uses: peter-evans/create-pull-request@v6
         with:
+          token: ${{ secrets.RELEASE_PAT }}
           branch: release/next
           delete-branch: false
           commit-message: "chore(release): v${{ steps.ver.outputs.version }}"
@@ -151,6 +152,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.RELEASE_PAT }}
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
