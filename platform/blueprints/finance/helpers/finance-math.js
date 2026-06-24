@@ -54,6 +54,25 @@ class FinanceMath {
             return hits.length ? hits[0] : null;
         } catch (_e) { return null; }
     }
+    // ---- actuals freshness (finance 0.11.0) ----
+    // Classifies a governed month's budget actuals for the hub/month badge.
+    // Returns { state, label, tone } where state ∈ "live" | "stale" | "typed" | "none".
+    // "none" = not applicable (baseline month or no budget) → caller renders no badge.
+    // nowMs defaults to Date.now(); tests pass an explicit ms for determinism.
+    actualsFreshness(budget, monthKey, governedFrom, nowMs) {
+        if (!budget) return { state: "none", label: "", tone: "muted" };
+        const gf = this._coerceMonthString(governedFrom);
+        const mk = this._coerceMonthString(monthKey);
+        if (!(gf && mk && mk >= gf)) return { state: "none", label: "", tone: "muted" };
+        const syncedRaw = this._coerceDateString(budget.actuals_synced_at);
+        if (!syncedRaw) return { state: "typed", label: "typed", tone: "muted" };
+        const t = Date.parse(syncedRaw.length <= 10 ? syncedRaw + "T00:00:00Z" : syncedRaw);
+        const now = (typeof nowMs === "number") ? nowMs : Date.now();
+        const ageDays = Number.isFinite(t) ? (now - t) / 86400000 : Infinity;
+        const dateLabel = syncedRaw.slice(0, 10);
+        if (ageDays <= 8) return { state: "live", label: `live · ${dateLabel}`, tone: "green" };
+        return { state: "stale", label: `stale · synced ${dateLabel}`, tone: "amber" };
+    }
     monthBounds(monthKey) {
         const [y, m] = monthKey.split("-").map(Number);
         const first = `${monthKey}-01`;
