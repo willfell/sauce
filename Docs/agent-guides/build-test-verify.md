@@ -67,15 +67,15 @@ sauce migrate --from <path>   # migrate legacy source vault into Sauce shape (RE
 
 1. You merge feature work to `main` (conventional commits).
 2. `release.yml :: prepare-release` runs `node scripts/release/compute-release.js --write` → attributes each commit since the last `v*` tag to a component (via manifest `path`; shared roots → umbrella), computes per-component + umbrella semver bumps (standard semver, `feat!`→major once a component is ≥1.0), writes all version records + regenerates the snapshot fixture, and opens/updates one standing **release PR**.
-3. You merge the release PR (the single human gate). Its `chore(release): vX` commit triggers `tag-on-release-merge` → pushes `v<X.Y.Z>` (via `RELEASE_PAT`).
-4. The tag fires the existing `preflight` + `bump-tap` jobs → patches `Formula/sauce.rb` in `willfell/homebrew-sauce` → **auto-merges** the tap PR → `brew upgrade sauce` serves it.
+3. You merge the release PR (the single human gate). Its `chore(release): vX` commit triggers the `tag-and-ship` job → runs preflight, creates + pushes `v<X.Y.Z>` (built-in `GITHUB_TOKEN` — **no PAT**), then patches `Formula/sauce.rb` in `willfell/homebrew-sauce` and **auto-merges** the tap PR (existing `TAP_PR_TOKEN`).
+4. `brew upgrade sauce` serves it. (The release PR's bumped state was already preflight-validated inside `prepare-release` before the PR opened — GITHUB_TOKEN-opened PRs don't get auto-CI, so prepare-release runs the gate itself.)
 5. `rebaseline-seed` (post-merge only) ratchets the seed vault forward.
 
 Engine + full design: `scripts/release/compute-release.js`, `scripts/release/lib/`, `platform/test/run-release-bumper.js`, and `Docs/plans/2026-06-23-v0.129.0-auto-release-pipeline-{design,plan,result}.md`. Preview a bump anytime with `npm run release:plan` (dry-run; writes nothing).
 
 ### Manual escape hatch (automation down / not yet deployed)
 
-The pipeline is active only once `.github/workflows/release.yml` + the `RELEASE_PAT` secret are deployed (`Docs/plans/2026-06-23-v0.129.0-release-yml-patch.md`). If you must cut a release by hand: run `node scripts/release/compute-release.js --write` locally (it does the same version-record writes + snapshot regen), commit as `chore(release): vX.Y.Z`, then the **annotated tag `v<X.Y.Z>` REQUIRES user approval** per the ask-before-acting list. `contract_version` in `scheduled-job-contract.json` is independent (NOT a cowork mirror — landmine #20 wording is stale) and is never touched by the bumper.
+The pipeline is active once `.github/workflows/release.yml` is deployed — the canonical no-PAT version to copy in is `Docs/plans/2026-06-23-v0.129.0-release.yml.FINAL.txt` (no secrets to create beyond the existing `TAP_PR_TOKEN`; the user pushes that one workflow file because Claude's OAuth scope can't push workflow YAML). If you must cut a release by hand: run `node scripts/release/compute-release.js --write` locally (it does the same version-record writes + snapshot regen), commit as `chore(release): vX.Y.Z`, then the **annotated tag `v<X.Y.Z>` REQUIRES user approval** per the ask-before-acting list. `contract_version` in `scheduled-job-contract.json` is independent (NOT a cowork mirror — landmine #20 wording is stale) and is never touched by the bumper.
 
 Don't sign as Claude (no `Co-authored-by: Claude` trailer). Don't skip hooks (`--no-verify`) unless explicitly requested. Don't force-push or rewrite history on `origin/main` without explicit approval — see [asking-before-acting.md](asking-before-acting.md).
 

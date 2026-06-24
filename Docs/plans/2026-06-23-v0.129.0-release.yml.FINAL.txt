@@ -3,46 +3,111 @@
 #   git add .github/workflows/release.yml
 #   git commit -m "ci(release): automate version bump + tag + tap auto-merge (v0.129.0 Phase 1)"
 #   git push
-# (You push it — Claude's OAuth scope can't push .github/workflows/*.yml.)
-# Requires repo secret RELEASE_PAT (see Docs/plans/2026-06-23-v0.129.0-release-yml-patch.md).
+# (You push it — Claude's OAuth scope can't push .github/workflows/*.yml. This is the ONLY step left.)
+#
+# NO PAT REQUIRED. This design uses the built-in GITHUB_TOKEN for everything in
+# willfell/sauce (open the release PR, push the tag) and the EXISTING TAP_PR_TOKEN
+# only for the homebrew-sauce tap. The release PR's bumped state is validated by
+# running preflight INSIDE prepare-release before the PR is opened (GITHUB_TOKEN-
+# opened PRs don't get auto-CI), and shipping happens in one tag-and-ship job
+# triggered by the release-PR merge (no reliance on a tag push re-triggering jobs,
+# which GITHUB_TOKEN can't do — that's the gotcha a PAT would have papered over).
+#
 # Everything below this comment block is the file content; delete these comment lines when you paste.
 ---
 name: release
 
 on:
   push:
-    tags:
-      - 'v*.*.*'
     branches:
       - main
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
 
 jobs:
-  # ---- existing: run only on tag pushes ----
-  preflight:
-    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
-    runs-on: macos-latest
-    steps:
-      - name: Checkout sauce repo
-        uses: actions/checkout@v4
-      - name: Set up Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      - name: Install dev deps
-        run: npm install --omit=dev
-      - name: Run release:preflight (full chain incl. integration smoke)
-        run: npm run release:preflight
-
-  bump-tap:
-    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
-    needs: preflight
+  # ---- maintain the standing release PR on every main push (skip the bot's own commits) ----
+  prepare-release:
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.ref == 'refs/heads/main' && !startsWith(github.event.head_commit.message, 'chore(release):') && !startsWith(github.event.head_commit.message, 'chore(seed):')) }}
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install deps
+        run: npm install --omit=dev
+      - name: Compute + apply per-component + umbrella bumps
+        run: node scripts/release/compute-release.js --write
+      - name: Detect whether anything is releasable
+        id: diff
+        run: |
+          if git diff --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No releasable changes since the last tag — nothing to do."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Validate the bumped state (preflight gate — replaces the PR's missing auto-CI)
+        if: steps.diff.outputs.changed == 'true'
+        run: npm run release:preflight
+      - name: Read computed version
+        if: steps.diff.outputs.changed == 'true'
+        id: ver
+        run: echo "version=$(node -e "console.log(require('./package.json').version)")" >> "$GITHUB_OUTPUT"
+      - name: Open/update the standing release PR
+        if: steps.diff.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: release/next
+          delete-branch: false
+          commit-message: "chore(release): v${{ steps.ver.outputs.version }}"
+          title: "chore(release): v${{ steps.ver.outputs.version }}"
+          body: |
+            Automated release PR — merging this tags **v${{ steps.ver.outputs.version }}** and ships to brew.
+
+            `compute-release.js` computed these per-component + umbrella bumps from the conventional
+            commits since the last `v*` tag, and **preflight already passed on this exact bumped state**
+            (run inside prepare-release). Merge to release.
+
+  # ---- on release-PR merge: preflight -> tag -> patch + auto-merge the tap (GITHUB_TOKEN + TAP_PR_TOKEN; no PAT) ----
+  tag-and-ship:
+    if: ${{ github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'chore(release):') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install deps
+        run: npm install --omit=dev
+      - name: Preflight (final gate before shipping)
+        run: npm run release:preflight
+      - name: Create + push annotated tag
+        id: tag
+        run: |
+          VERSION=$(node -e "console.log(require('./package.json').version)")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if git rev-parse "v$VERSION" >/dev/null 2>&1; then
+            echo "tag v$VERSION already exists — skipping tag push"; exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "v$VERSION" -m "v$VERSION"
+          git push origin "v$VERSION"
       - name: Compute tarball sha256 + URL
         id: sha
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          URL="https://github.com/willfell/sauce/archive/refs/tags/${GITHUB_REF_NAME}.tar.gz"
+          VERSION="${{ steps.tag.outputs.version }}"
+          URL="https://github.com/willfell/sauce/archive/refs/tags/v${VERSION}.tar.gz"
           SHA=""
           for i in 1 2 3 4 5; do
             if SHA=$(curl -fsSL "$URL" | shasum -a 256 | awk '{print $1}'); then
@@ -51,58 +116,43 @@ jobs:
             echo "Retry $i: tarball not ready, sleeping 5s..."
             sleep 5
           done
-          if [ -z "$SHA" ]; then
-            echo "ERROR: failed to compute tarball sha after 5 retries" >&2
-            exit 1
-          fi
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "sha=${SHA}"         >> "$GITHUB_OUTPUT"
-          echo "url=${URL}"         >> "$GITHUB_OUTPUT"
+          if [ -z "$SHA" ]; then echo "ERROR: failed to compute tarball sha" >&2; exit 1; fi
+          echo "url=${URL}" >> "$GITHUB_OUTPUT"
+          echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
           echo "Computed sha256: ${SHA}"
-
       - name: Checkout tap
         uses: actions/checkout@v4
         with:
           repository: willfell/homebrew-sauce
           token: ${{ secrets.TAP_PR_TOKEN }}
           path: tap
-
       - name: Patch Formula/sauce.rb
         run: |
           cd tap
           FORMULA="Formula/sauce.rb"
-          if [ ! -f "$FORMULA" ]; then
-            echo "ERROR: $FORMULA not found in tap repo" >&2
-            exit 1
-          fi
-          awk -v url='${{ steps.sha.outputs.url }}' \
-              -v sha='${{ steps.sha.outputs.sha }}' '
+          if [ ! -f "$FORMULA" ]; then echo "ERROR: $FORMULA not found" >&2; exit 1; fi
+          awk -v url='${{ steps.sha.outputs.url }}' -v sha='${{ steps.sha.outputs.sha }}' '
             /^  url "/   { print "  url \"" url "\""; next }
             /^  sha256 / { print "  sha256 \"" sha "\""; next }
                          { print }
           ' "$FORMULA" > "${FORMULA}.new"
           mv "${FORMULA}.new" "$FORMULA"
-          echo "----- patched ${FORMULA} -----"
           head -8 "$FORMULA"
-
-      - name: Open PR in tap
+      - name: Open tap PR
         id: cpr_tap
         uses: peter-evans/create-pull-request@v6
         with:
           token: ${{ secrets.TAP_PR_TOKEN }}
           path: tap
-          branch: bump-v${{ steps.sha.outputs.version }}
+          branch: bump-v${{ steps.tag.outputs.version }}
           delete-branch: true
-          commit-message: "feat: sauce v${{ steps.sha.outputs.version }} formula"
-          title: "sauce v${{ steps.sha.outputs.version }}"
+          commit-message: "feat: sauce v${{ steps.tag.outputs.version }} formula"
+          title: "sauce v${{ steps.tag.outputs.version }}"
           body: |
-            Auto-generated bump from `willfell/sauce` tag push (`${{ github.ref_name }}`).
+            Auto-generated bump from `willfell/sauce` release of v${{ steps.tag.outputs.version }}.
 
             - URL: `${{ steps.sha.outputs.url }}`
             - SHA256: `${{ steps.sha.outputs.sha }}`
-
-            Merge to ship `brew upgrade sauce` to consumers.
-
       - name: Auto-merge the tap PR
         if: ${{ steps.cpr_tap.outputs.pull-request-number != '' }}
         env:
@@ -112,73 +162,17 @@ jobs:
           gh pr merge "$PR" --repo willfell/homebrew-sauce --squash --delete-branch \
             || gh pr merge "$PR" --repo willfell/homebrew-sauce --squash --admin --delete-branch
 
-  # ---- NEW: maintain the standing release PR on every main push ----
-  prepare-release:
-    if: ${{ github.ref == 'refs/heads/main' && !startsWith(github.event.head_commit.message, 'chore(release):') && !startsWith(github.event.head_commit.message, 'chore(seed):') }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          fetch-tags: true
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      - name: Compute + apply per-component + umbrella bumps
-        run: node scripts/release/compute-release.js --write
-      - name: Read computed version
-        id: ver
-        run: echo "version=$(node -e "console.log(require('./package.json').version)")" >> "$GITHUB_OUTPUT"
-      - name: Open/update the standing release PR
-        uses: peter-evans/create-pull-request@v6
-        with:
-          token: ${{ secrets.RELEASE_PAT }}
-          branch: release/next
-          delete-branch: false
-          commit-message: "chore(release): v${{ steps.ver.outputs.version }}"
-          title: "chore(release): v${{ steps.ver.outputs.version }}"
-          body: |
-            Automated release PR — merging this tags **v${{ steps.ver.outputs.version }}** and ships to brew.
-
-            `compute-release.js` computed these per-component + umbrella bumps from the conventional
-            commits since the last `v*` tag. Review the version diff, then merge to release.
-
-  # ---- NEW: on release-PR merge, create the tag (PAT so it re-triggers the tag jobs above) ----
-  tag-on-release-merge:
-    if: ${{ github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'chore(release):') }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          fetch-tags: true
-          token: ${{ secrets.RELEASE_PAT }}
-      - name: Create + push annotated tag
-        run: |
-          VERSION=$(node -e "console.log(require('./package.json').version)")
-          if git rev-parse "v$VERSION" >/dev/null 2>&1; then
-            echo "tag v$VERSION already exists — skipping"; exit 0
-          fi
-          git config user.name "sauce-release-bot"
-          git config user.email "release-bot@users.noreply.github.com"
-          git tag -a "v$VERSION" -m "v$VERSION"
-          git push origin "v$VERSION"
-
-  # ---- NEW: post-merge seed rebaseline (NEVER on-branch — landmine) ----
+  # ---- post-merge seed rebaseline (NEVER on-branch — landmine) ----
   rebaseline-seed:
     if: ${{ github.ref == 'refs/heads/main' && startsWith(github.event.head_commit.message, 'chore(release):') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.RELEASE_PAT }}
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - run: npm install --omit=dev
+      - name: Install deps
+        run: npm install --omit=dev
       - name: Rebaseline seed (post-merge only)
         run: |
           npm run seed:prev
@@ -186,8 +180,8 @@ jobs:
       - name: Commit rebaselined seed
         run: |
           VERSION=$(node -e "console.log(require('./package.json').version)")
-          git config user.name "sauce-release-bot"
-          git config user.email "release-bot@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
           git add platform/test/seed-vault platform/test/seed-vault-prev
           git diff --cached --quiet || git commit -m "chore(seed): rebaseline to v$VERSION"
           git push origin HEAD:main
