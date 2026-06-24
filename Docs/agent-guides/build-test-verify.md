@@ -53,14 +53,29 @@ sauce migrate --from <path>   # migrate legacy source vault into Sauce shape (RE
 
 ## Release workflow
 
-Single-branch direct-push to `origin/main`. No feature branches, no PR review (for now).
+**Versioning, tagging, pin sweeps, and the brew update are AUTOMATED (v0.129.0 release pipeline). Claude does NOT do them by hand.** Your job for a cycle is: write conventional-commit messages, get the work green, and merge. The pipeline computes every version from those commits and ships it.
 
-1. Cycle stage commits: bundle per-stage work into one commit each, conventional-commits format (`feat(installer,validator): v0.X.Y patch S1 — ...`). Use HEREDOC for multiline messages.
-2. Push to `origin/main` after each commit. No staging.
-3. At cycle close: bump `workshop_version` in `platform/manifest.json` AND `package.json`. After `brew upgrade sauce` distributes the new release, run `sauce update --bump-pins` from inside each consumer vault to auto-update `ranch/platform-subscription.json` (replaces the previous manual `vim ranch/platform-subscription.json` step — lockstep enforced by `check-version-sync.js`). See `/install` for full `--bump-pins` flag reference. Two related pin-sweep requirements: (a) per landmine #16, every `workshop_version` bump implies a sweep across `HC-V0*-VERSION-*` assertions in `run-helper-cases.js` + `run-bootstrap.js` plus fixture `cowork_version` / `sauce_version` strings; (b) per landmine #20, `scheduled-job-contract.json#contract_version` mirrors the cowork blueprint version exactly. The workshop's own `ranch/platform-subscription.json` requires manual edit at the same stage (no `sauce update --bump-pins` runs on the workshop itself).
-4. Annotated git tag `v<X.Y.Z>` at HEAD — **REQUIRES user approval** per the ask-before-acting list.
-5. `release.yml` GitHub Action fires on tag: runs preflight + `bump-tap` chain that auto-bumps `Formula/sauce.rb` in `willfell/homebrew-sauce` via PR.
-6. Tap PR merge → `brew upgrade sauce` picks up the new release.
+### What Claude does (and does NOT do)
+
+- **DO** write conventional-commit messages — `feat(scope):` / `fix(scope):` / `feat(scope)!:` / `BREAKING CHANGE:`. They are the *only* input the version bumper reads. (Attribution is path-based off the manifest `path` field, so a mis-scoped commit still bumps the right component — but the type still classifies the bump level, so get the type right.)
+- **DO NOT** bump `workshop_version` / `package.json` / per-component manifest versions / `ranch/platform-subscription.json` pins by hand.
+- **DO NOT** create or push git tags.
+- **DO NOT** widen `HC-V0*-VERSION-*` regex ranges or edit version literals in `run-helper-cases.js`. Those assertions now read `platform/test/fixtures/component-versions.snapshot.json`, which the bumper regenerates. **Landmine #16's manual VERSION-pin sweep is retired** — if you find yourself editing a version literal in a test, stop: you're doing the bumper's job.
+- **DO NOT** edit the homebrew tap or run `--bump-pins` as a release step — the pipeline handles the tap; consumer `--bump-pins` is a per-vault user action on their own machine (out of GitHub's reach).
+
+### How the pipeline works (context, not a to-do list)
+
+1. You merge feature work to `main` (conventional commits).
+2. `release.yml :: prepare-release` runs `node scripts/release/compute-release.js --write` → attributes each commit since the last `v*` tag to a component (via manifest `path`; shared roots → umbrella), computes per-component + umbrella semver bumps (standard semver, `feat!`→major once a component is ≥1.0), writes all version records + regenerates the snapshot fixture, and opens/updates one standing **release PR**.
+3. You merge the release PR (the single human gate). Its `chore(release): vX` commit triggers `tag-on-release-merge` → pushes `v<X.Y.Z>` (via `RELEASE_PAT`).
+4. The tag fires the existing `preflight` + `bump-tap` jobs → patches `Formula/sauce.rb` in `willfell/homebrew-sauce` → **auto-merges** the tap PR → `brew upgrade sauce` serves it.
+5. `rebaseline-seed` (post-merge only) ratchets the seed vault forward.
+
+Engine + full design: `scripts/release/compute-release.js`, `scripts/release/lib/`, `platform/test/run-release-bumper.js`, and `Docs/plans/2026-06-23-v0.129.0-auto-release-pipeline-{design,plan,result}.md`. Preview a bump anytime with `npm run release:plan` (dry-run; writes nothing).
+
+### Manual escape hatch (automation down / not yet deployed)
+
+The pipeline is active only once `.github/workflows/release.yml` + the `RELEASE_PAT` secret are deployed (`Docs/plans/2026-06-23-v0.129.0-release-yml-patch.md`). If you must cut a release by hand: run `node scripts/release/compute-release.js --write` locally (it does the same version-record writes + snapshot regen), commit as `chore(release): vX.Y.Z`, then the **annotated tag `v<X.Y.Z>` REQUIRES user approval** per the ask-before-acting list. `contract_version` in `scheduled-job-contract.json` is independent (NOT a cowork mirror — landmine #20 wording is stale) and is never touched by the bumper.
 
 Don't sign as Claude (no `Co-authored-by: Claude` trailer). Don't skip hooks (`--no-verify`) unless explicitly requested. Don't force-push or rewrite history on `origin/main` without explicit approval — see [asking-before-acting.md](asking-before-acting.md).
 
@@ -178,9 +193,9 @@ Durable principles distilled from recent cycles' result docs. Each entry cites i
 
 ### Release hygiene
 
-- **Per-cycle VERSION pin sweep is mandatory at S1.4b.** Every `workshop_version` / blueprint bump implies a sweep across `HC-V0*-VERSION-*` assertions in `run-helper-cases.js` + `run-bootstrap.js`, fixture `cowork_version` / `sauce_version` strings, and `scheduled-job-contract.json#contract_version` per landmine #20. Standard hygiene — add to every plan as an explicit S1.4b-equivalent step (v0.93.3 lesson: this was implicit and got missed; v0.95.0 codified the stage label).
+- **~~Per-cycle VERSION pin sweep~~ — RETIRED (v0.129.0 Phase 0b).** The manual sweep across `HC-V0*-VERSION-*` assertions + regex-range widening is gone: those assertions now read `platform/test/fixtures/component-versions.snapshot.json`, which the release bumper regenerates on `--write`. Do NOT hand-edit version literals in `run-helper-cases.js`. `contract_version` is independent (NOT swept). See § Release workflow.
 
-- **`ranch/platform-subscription.json` lockstep is required for workshop dogfood.** Manual edit (no `sauce update --bump-pins` runs on the workshop itself); install correctly refuses to "downgrade" a mechanism whose subscription pins to an older version. Land at the same stage as the `workshop_version` bump.
+- **Version-record lockstep is automated.** The bumper writes `workshop_version` + `package.json` + per-component manifests + `ranch/platform-subscription.json` pins together (and the snapshot), so they can't drift. Don't hand-edit any of them. (`check-version-sync.js` remains the backstop gate.)
 
 - **Workshop dogfood is a useful contract verifier.** Run before EVERY push (not just cycle close). ~4 seconds, ~82 history entries; catches manifest entry order, materialization paths, and path-resolution drift that preflight misses. v0.95.0 S2 caught a `claude_surface[]` entry-order issue that preflight passed.
 

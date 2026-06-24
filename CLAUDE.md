@@ -76,4 +76,5 @@ Before any write, run `ls /Users/willfellhoelter/projects/repos/sauce`. Expected
 - Don't bloat this file. It is a router, not a manual — see [`Docs/agent-guides/`](Docs/agent-guides/) for content.
 - Don't duplicate content from `Docs/` into the agent-guides, or from agent-guides into this router.
 - Don't edit content between `claude-surface` marker pairs. The `platform-claude` mechanism rewrites those regions on every install.
+- Don't manually version, tag, or sweep version pins. The release pipeline owns versioning end-to-end: write conventional commits, merge, and the bumper computes per-component + umbrella semver, tags, and ships to brew. Hand-editing `workshop_version` / `package.json` / per-component manifests / `ranch` pins, creating tags, or widening `HC-V0*-VERSION-*` regexes/literals is the bumper's job, not yours — see [`Docs/agent-guides/build-test-verify.md`](Docs/agent-guides/build-test-verify.md) § Release workflow.
 - Don't take destructive, cross-vault, or shared-state actions without confirming — see [`Docs/agent-guides/asking-before-acting.md`](Docs/agent-guides/asking-before-acting.md).
