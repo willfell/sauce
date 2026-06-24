@@ -114,6 +114,11 @@ try {
     fs.mkdirSync(path.join(tmp, "platform/blueprints/cowork/data"), { recursive: true });
     fs.writeFileSync(path.join(tmp, "platform/blueprints/cowork/data/scheduled-job-contract.json"),
         JSON.stringify({ contract_version: "0.35.1" }, null, 2) + "\n");
+    // seed-vault subscription: meetings pin tracks the catalogue; workshop_version
+    // is intentionally frozen (drives migration coverage) and must NOT be bumped.
+    fs.mkdirSync(path.join(tmp, "platform/test/seed-vault/ranch"), { recursive: true });
+    fs.writeFileSync(path.join(tmp, "platform/test/seed-vault/ranch/platform-subscription.json"),
+        JSON.stringify({ workshop_version: "0.100.0", blueprints: [{ name: "meetings", version: "0.12.0" }], mechanisms: [] }, null, 2) + "\n");
 
     const plan = cr.computePlan(
         [{ hash: "z1", message: "feat(meetings): leaf actions", files: ["platform/blueprints/meetings/T.md"] }],
@@ -132,6 +137,9 @@ try {
     eq("HC-V0129-RELEASE-WRITE-F: package.json bumped", pkg2.version, "0.129.0");
     const contract2 = JSON.parse(fs.readFileSync(path.join(tmp, "platform/blueprints/cowork/data/scheduled-job-contract.json"), "utf8"));
     eq("HC-V0129-RELEASE-WRITE-G: contract_version UNTOUCHED", contract2.contract_version, "0.35.1");
+    const seedSub2 = JSON.parse(fs.readFileSync(path.join(tmp, "platform/test/seed-vault/ranch/platform-subscription.json"), "utf8"));
+    eq("HC-V0129-RELEASE-WRITE-I: seed-vault sub meetings pin bumped", seedSub2.blueprints[0].version, "0.13.0");
+    eq("HC-V0129-RELEASE-WRITE-J: seed-vault sub workshop_version UNTOUCHED", seedSub2.workshop_version, "0.100.0");
 
     // idempotence: recomputing against the now-updated manifest with the SAME
     // commits still maps meetings feat to a single minor bump from the new base
