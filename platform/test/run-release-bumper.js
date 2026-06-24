@@ -143,5 +143,43 @@ try {
     fs.rmSync(tmp, { recursive: true, force: true });
 }
 
+// ---- Phase 0b: snapshot generation ----
+console.log("\n--- HC-V0129-RELEASE-SNAPSHOT ---");
+{
+    const snap = cr.buildSnapshot({
+        workshop_version: "0.128.2",
+        blueprints: [{ name: "meetings", version: "0.12.0", path: "blueprints/meetings" }],
+        mechanisms: [{ name: "breadcrumb", version: "0.1.0", path: "mechanisms/breadcrumb" }],
+    });
+    eq("HC-V0129-RELEASE-SNAPSHOT-A: workshop_version", snap.workshop_version, "0.128.2");
+    eq("HC-V0129-RELEASE-SNAPSHOT-B: component meetings", snap.components.meetings, "0.12.0");
+    eq("HC-V0129-RELEASE-SNAPSHOT-C: component breadcrumb", snap.components.breadcrumb, "0.1.0");
+    eq("HC-V0129-RELEASE-SNAPSHOT-D: only declared components", Object.keys(snap.components).length, 2);
+}
+{
+    // applyPlan regenerates the snapshot fixture when the fixtures dir exists
+    const t2 = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-snap-"));
+    try {
+        fs.mkdirSync(path.join(t2, "platform/blueprints/meetings"), { recursive: true });
+        fs.mkdirSync(path.join(t2, "platform/test/fixtures"), { recursive: true });
+        const man = {
+            workshop_version: "0.128.0",
+            blueprints: [{ name: "meetings", version: "0.12.0", path: "blueprints/meetings" }],
+            mechanisms: [],
+        };
+        fs.writeFileSync(path.join(t2, "platform/manifest.json"), JSON.stringify(man, null, 2) + "\n");
+        fs.writeFileSync(path.join(t2, "platform/blueprints/meetings/manifest.json"),
+            JSON.stringify({ name: "meetings", version: "0.12.0" }, null, 2) + "\n");
+        const plan = cr.computePlan(
+            [{ hash: "s1", message: "feat(meetings): x", files: ["platform/blueprints/meetings/T.md"] }], man);
+        cr.applyPlan(plan, t2);
+        const snap = JSON.parse(fs.readFileSync(path.join(t2, cr.SNAPSHOT_REL), "utf8"));
+        eq("HC-V0129-RELEASE-SNAPSHOT-E: regen workshop matches bump", snap.workshop_version, "0.129.0");
+        eq("HC-V0129-RELEASE-SNAPSHOT-F: regen component matches bump", snap.components.meetings, "0.13.0");
+    } finally {
+        fs.rmSync(t2, { recursive: true, force: true });
+    }
+}
+
 console.log(`\nrun-release-bumper: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

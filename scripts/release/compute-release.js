@@ -92,6 +92,25 @@ function renderChangelog(components, workshop) {
     return lines.join("\n");
 }
 
+// --- version-pin snapshot (the SSOT the test harnesses cross-check against) ---
+// platform/test/run-helper-cases.js asserts every mirror (catalogue, per-component
+// manifest, ranch pin, package.json) agrees with this snapshot. The bumper
+// regenerates it on every --write so the bot's bumps never require hand-widening
+// regex ranges or editing version literals in test source (landmine #16 retired).
+const SNAPSHOT_REL = "platform/test/fixtures/component-versions.snapshot.json";
+
+function buildSnapshot(manifest) {
+    const components = {};
+    for (const c of [...(manifest.blueprints || []), ...(manifest.mechanisms || [])]) {
+        components[c.name] = c.version;
+    }
+    return { workshop_version: manifest.workshop_version, components };
+}
+
+function writeSnapshot(snapshot, root) {
+    writeJson(path.join(root, SNAPSHOT_REL), snapshot);
+}
+
 // --- git range reader (CLI path) ---
 function getCommits(range) {
     const RS = "\x1e", US = "\x1f";
@@ -159,9 +178,15 @@ function applyPlan(plan, root) {
         pkg.version = plan.workshop.to;
         writeJson(pkgPath, pkg);
     }
+
+    // regenerate the version-pin snapshot from the updated manifest (if the
+    // fixtures dir exists — it always does in the workshop; absent in bare temp
+    // fixtures that don't exercise it).
+    const snapDir = path.dirname(path.join(root, SNAPSHOT_REL));
+    if (fs.existsSync(snapDir)) writeSnapshot(buildSnapshot(man), root);
 }
 
-module.exports = { loadManifest, buildIndex, attribute, computePlan, renderChangelog, getCommits, lastTag, applyPlan };
+module.exports = { loadManifest, buildIndex, attribute, computePlan, renderChangelog, getCommits, lastTag, applyPlan, buildSnapshot, writeSnapshot, SNAPSHOT_REL };
 
 // --- CLI ---
 if (require.main === module) {
