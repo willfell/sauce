@@ -44,6 +44,7 @@ jobs:
         id: ver
         run: echo "version=$(node -e "console.log(require('./package.json').version)")" >> "$GITHUB_OUTPUT"
       - name: Open/update the standing release PR
+        id: cpr
         if: steps.diff.outputs.changed == 'true'
         uses: peter-evans/create-pull-request@v6
         with:
@@ -58,6 +59,14 @@ jobs:
             `compute-release.js` computed these per-component + umbrella bumps from the conventional
             commits since the last `v*` tag, and **preflight already passed on this exact bumped state**
             (run inside prepare-release). Merge to release.
+      - name: Auto-merge the release PR when checks pass (squash)
+        if: steps.diff.outputs.changed == 'true' && steps.cpr.outputs.pull-request-number != ''
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+        run: |
+          PR="${{ steps.cpr.outputs.pull-request-number }}"
+          gh pr merge "$PR" --repo "${{ github.repository }}" --squash --auto \
+            || gh pr merge "$PR" --repo "${{ github.repository }}" --squash
 
   # ---- on release-PR merge: preflight -> tag -> patch + auto-merge the tap (GITHUB_TOKEN + TAP_PR_TOKEN; no PAT) ----
   tag-and-ship:
