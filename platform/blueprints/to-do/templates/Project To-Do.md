@@ -29,6 +29,12 @@ await dv.view("{{views_path}}/customjs-guard", { class: "ToDoLeafActions" });
 await dv.view("{{views_path}}/customjs-guard", { class: "SectionLabel", args: [{ text: "Owned Tasks", top: true }] });
 ```
 
+<!-- OWNED_TASKS_MARKER -->
+
+```dataviewjs
+await dv.view("{{views_path}}/customjs-guard", { class: "EditableTaskList", args: [{ sectionAnchor: "ownedTasks" }] });
+```
+
 ```dataviewjs
 await dv.view("{{views_path}}/customjs-guard", { class: "SectionLabel", args: [{ text: "From Meetings" }] });
 ```

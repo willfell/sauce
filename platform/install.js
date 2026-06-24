@@ -3671,6 +3671,11 @@ function _noteChromeFrontmatterType(body) {
 // duplicated. Keep them in sync if the mechanism's anchor strings change.
 const ACTION_ITEMS_MARKER = '<!-- ACTION_ITEMS_MARKER -->';
 const TODAY_CAPTURE_MARKER = '<!-- TODAY_CAPTURE_MARKER -->';
+// Mirrors task-interactions@0.2.0's TaskInteractions.ownedTasksAnchor().
+// install.js cannot reach customJS (runs in Templater Node context),
+// so this constant is intentionally duplicated. Keep in sync if the
+// mechanism's anchor string changes.
+const OWNED_TASKS_MARKER = '<!-- OWNED_TASKS_MARKER -->';
 
 // _healNoteChromeBody — pure, idempotent body transform for the note-chrome
 // wave-1 heal. (1) Injects a Breadcrumb dataviewjs block immediately before the
@@ -3843,6 +3848,66 @@ function _healNoteChromeBody(body, type) {
         }
       }
     }
+    // (c) v0.128.0 §D — Rewrite legacy TodayCaptureEditableList invocations to
+    // EditableTaskList with explicit sectionAnchor arg. The customjs-guard
+    // shape is `class: "TodayCaptureEditableList"` followed by closing `}`
+    // (no args). The bounded regex matches only the invocation form;
+    // preserves any incidental mention of the class name in user text.
+    if (out.includes('class: "TodayCaptureEditableList"')) {
+      out = out.replace(
+        /class:\s*"TodayCaptureEditableList"\s*\}/g,
+        'class: "EditableTaskList", args: [{ sectionAnchor: "todayCapture" }] }'
+      );
+    }
+  }
+  // Step 7 (v0.128.0 §D) — inject OWNED_TASKS_MARKER + EditableTaskList
+  // renderer block into existing project-todo notes. Paired guards (lesson
+  // from v0.127.1): independent (a) marker / (b) renderer guards so a
+  // half-pass becomes a full-pass on next install; fully-healed note stays
+  // unchanged. Regex matcher accepts both `text: "Owned Tasks"` and
+  // `text: "Owned Tasks", top: true` SectionLabel forms.
+  if (type === 'project-todo') {
+    const ownedTasksRe = /class:\s*"SectionLabel",\s*args:\s*\[\{\s*text:\s*"Owned Tasks"(?:\s*,\s*top:\s*true)?\s*\}\]/;
+    const lines = out.split("\n");
+    let labelLineIdx = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (ownedTasksRe.test(lines[i])) { labelLineIdx = i; break; }
+    }
+    if (labelLineIdx !== -1) {
+      // Walk forward to closing fence of THE Owned Tasks SectionLabel block.
+      let closingFenceIdx = -1;
+      for (let i = labelLineIdx + 1; i < lines.length; i++) {
+        if (lines[i].trimStart().startsWith("```")) { closingFenceIdx = i; break; }
+      }
+      if (closingFenceIdx !== -1) {
+        // (a) Inject marker if absent.
+        if (!out.includes(OWNED_TASKS_MARKER)) {
+          const insertAt = closingFenceIdx + 1;
+          lines.splice(insertAt, 0, "", OWNED_TASKS_MARKER, "");
+          out = lines.join("\n");
+        }
+        // (b) Inject renderer block if absent. Position: immediately after
+        // the marker line, with one blank above + one blank below.
+        if (!out.includes('class: "EditableTaskList"')) {
+          const refreshed = out.split("\n");
+          let markerIdx = -1;
+          for (let i = 0; i < refreshed.length; i++) {
+            if (refreshed[i].includes(OWNED_TASKS_MARKER)) { markerIdx = i; break; }
+          }
+          if (markerIdx !== -1) {
+            const rendererBlock = [
+              '',
+              '```dataviewjs',
+              'await dv.view("ranch/views/customjs-guard", { class: "EditableTaskList", args: [{ sectionAnchor: "ownedTasks" }] });',
+              '```',
+              ''
+            ];
+            refreshed.splice(markerIdx + 1, 0, ...rendererBlock);
+            out = refreshed.join("\n");
+          }
+        }
+      }
+    }
   }
   return out;
 }
@@ -3937,7 +4002,7 @@ async function applyNoteChromeHeal(tp, history, git) {
       try {
         const before = await adapter.read(fpath);
         const type = _noteChromeFrontmatterType(before);
-        if (!["meeting", "scratch", "scratch-day", "to-do", "person"].includes(type)) continue;
+        if (!["meeting", "scratch", "scratch-day", "to-do", "person", "project-todo"].includes(type)) continue;
         const after = _healNoteChromeBody(before, type);
         if (after === before) continue;
         // .sauce-backup snapshot before write (mirrors applyFinanceMigrations).

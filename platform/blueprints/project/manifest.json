@@ -288,7 +288,7 @@
               "wide"
             ]
           },
-          "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"Breadcrumb\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ProjectNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ToDoLeafActions\" });\n```\n\n## Owned Tasks\n\n## From Meetings\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ToDoDailyProjectGroups\", args: [{ scope: \"project-todo\" }] });\n```\n"
+          "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"Breadcrumb\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ProjectNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ToDoLeafActions\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SectionLabel\", args: [{ text: \"Owned Tasks\", top: true }] });\n```\n\n<!-- OWNED_TASKS_MARKER -->\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"EditableTaskList\", args: [{ sectionAnchor: \"ownedTasks\" }] });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SectionLabel\", args: [{ text: \"From Meetings\" }] });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ToDoDailyProjectGroups\", args: [{ scope: \"project-todo\" }] });\n```\n"
         }
       ],
       "render_in": {
