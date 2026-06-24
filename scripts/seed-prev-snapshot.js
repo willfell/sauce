@@ -28,6 +28,12 @@ function countFiles(root) {
 }
 
 function main() {
+    // Manual-only (see rebaseline-seed.js). The CI rebaseline-seed job must not
+    // archive/ratchet the seed — that's a deliberate, reviewed local action.
+    if (process.env.GITHUB_ACTIONS) {
+        console.log("seed-prev-snapshot: skipping in CI — manual-only.");
+        return;
+    }
     if (!fs.existsSync(SEED_DIR)) {
         console.error(`seed dir missing: ${SEED_DIR}`);
         process.exit(1);

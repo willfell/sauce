@@ -70,9 +70,9 @@ sauce migrate --from <path>   # migrate legacy source vault into Sauce shape (RE
 2. `release.yml :: prepare-release` runs `node scripts/release/compute-release.js --write` → attributes each commit since the last `v*` tag to a component (via manifest `path`; shared roots → umbrella), computes per-component + umbrella semver bumps (standard semver, `feat!`→major once a component is ≥1.0), writes **all version records** (catalogue, per-component manifests, `ranch/platform-subscription.json`, `package.json`, the snapshot fixture, AND `platform/test/seed-vault/ranch/platform-subscription.json` per-item pins so `run-seed-migrations` doesn't skew), runs preflight on the bumped state, opens/updates one standing **release PR via `RELEASE_PAT`** (so the PR triggers CI), and **enables GitHub auto-merge (`--squash`)** on it.
 3. The release PR's required checks run → pass → GitHub **auto-squash-merges** it. **No human step.** The squash commit `chore(release): vX` triggers `tag-and-ship`.
 4. `tag-and-ship` creates + pushes `v<X.Y.Z>` (`GITHUB_TOKEN`), patches `Formula/sauce.rb` in `willfell/homebrew-sauce`, and **auto-merges** the tap PR (`TAP_PR_TOKEN`) → `brew upgrade sauce` serves it.
-5. `rebaseline-seed` (post-merge only) ratchets the seed vault forward, pushing via `RELEASE_PAT` (admin-bypass past branch protection).
+5. The seed vault is **NOT** auto-rebaselined — auto-regenerating it over-heals the pre-heal migration fixtures and wedges `run-seed-migrations` on main (incident: v0.132.0, commit `68b75aa9`). `scripts/rebaseline-seed.js` + `seed-prev-snapshot.js` are **CI no-ops** (`GITHUB_ACTIONS` guard), so the `rebaseline-seed` job runs but changes nothing. Ratcheting the seed is a **manual, reviewed** action (§ Seed-vault rebaseline).
 
-**Net: develop → merge to `main` → done.** Everything after step 1 is automatic — you do not touch versions, tags, the tap, or even the release PR. `RELEASE_PAT` (a repo secret; classic `repo`+`workflow`) is what lets the release PR get CI and the seed-rebaseline push land; it is the only secret beyond the pre-existing `TAP_PR_TOKEN`. Repo setting "Allow auto-merge" must stay ON.
+**Net: develop → merge to `main` → done.** Everything after step 1 is automatic — you do not touch versions, tags, the tap, or even the release PR. `RELEASE_PAT` (a repo secret; classic `repo`+`workflow`) is what lets the release PR get CI (it's opened by the PAT, not `GITHUB_TOKEN`); it is the only secret beyond the pre-existing `TAP_PR_TOKEN`. Repo setting "Allow auto-merge" must stay ON.
 
 Engine + full design: `scripts/release/compute-release.js`, `scripts/release/lib/`, `platform/test/run-release-bumper.js`, and `Docs/plans/2026-06-23-v0.129.0-auto-release-pipeline-{design,plan,result}.md`. Preview a bump anytime with `npm run release:plan` (dry-run; writes nothing).
 
@@ -93,11 +93,11 @@ Direct-push to `origin/main` remains possible (admin override) but the preferred
 3. Open a PR (`gh pr create`). The existing `.github/workflows/ci.yml` triggers on `pull_request: branches: [main]` and runs `npm run release:preflight` on `macos-latest` + `ubuntu-latest`. The 23rd harness `platform/test/run-seed-migrations.js` runs as part of that chain.
 4. CI red → merge blocked (once branch protection is on; see below).
 5. Merge to main via the PR.
-6. On merge to `main`, the **release pipeline takes over automatically** — it bumps every version record, opens + auto-merges the release PR, tags `v<X.Y.Z>`, ships to brew, and rebaselines the seed (§ Release workflow). You do **not** bump / tag / rebaseline by hand. (The `§ Seed-vault rebaseline` commands below are the manual escape-hatch only.)
+6. On merge to `main`, the **release pipeline takes over automatically** — it bumps every version record, opens + auto-merges the release PR, tags `v<X.Y.Z>`, and ships to brew (§ Release workflow). You do **not** bump / tag by hand. The seed vault is **not** auto-rebaselined — that's a manual, reviewed action (§ Seed-vault rebaseline).
 
 ### Seed-vault rebaseline (cycle close)
 
-The migration-regression harness runs against a checked-in synthetic seed vault under `platform/test/seed-vault/`. After every cycle that ships migrations or schema changes, the seed should be ratcheted forward to represent the just-released state:
+The migration-regression harness runs against a checked-in synthetic seed vault under `platform/test/seed-vault/`. **This is a manual, reviewed action — never automated.** The CI `rebaseline-seed` job is a no-op (`GITHUB_ACTIONS` guard in both scripts) because a blind rebaseline **heals the pre-heal fixtures the harness depends on**, wedging `run-seed-migrations` on main (incident: v0.132.0). Rebaseline only when you deliberately need to ratchet the seed forward, and **review the diff + re-run `node platform/test/run-seed-migrations.js` (must stay green) before committing**:
 
 ```
 npm run seed:prev         # archive current seed -> seed-vault-prev/

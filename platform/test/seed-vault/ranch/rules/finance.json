@@ -199,54 +199,6 @@
           }
         },
         "naming_pattern": "^Month-\\d{4}-\\d{2}\\.md$"
-      },
-      {
-        "scope": {
-          "path_glob": "spice/finance/Finance Plan.md"
-        },
-        "extends": "_canonical-vocab",
-        "required_frontmatter": {
-          "type": {
-            "required": true,
-            "type": "string",
-            "equals": "finance-plan"
-          },
-          "income_floor": {
-            "required": true,
-            "type": "number"
-          },
-          "savings_glide": {
-            "required": false,
-            "type": "array"
-          }
-        },
-        "naming_pattern": "^Finance Plan\\.md$"
-      },
-      {
-        "scope": {
-          "path_glob": "spice/finance/savings/Savings-*.md"
-        },
-        "extends": "_canonical-vocab",
-        "required_frontmatter": {
-          "type": {
-            "required": true,
-            "type": "string",
-            "equals": "savings-account"
-          },
-          "name": {
-            "required": true,
-            "type": "string"
-          },
-          "current_balance": {
-            "required": true,
-            "type": "number"
-          },
-          "balance_history": {
-            "required": false,
-            "type": "array"
-          }
-        },
-        "naming_pattern": "^Savings-.+\\.md$"
       }
     ]
   }

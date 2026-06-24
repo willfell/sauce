@@ -1256,14 +1256,7 @@ class SpaceDailyDashboard {
       if (text.charAt(i) === "[") {
         const closeBracket = text.indexOf("]", i + 1);
         if (closeBracket >= 0 && text.charAt(closeBracket + 1) === "(") {
-          // find the closing paren, allowing balanced parens inside the URL
-          // (Teams deep-links contain literal "(...)" in query params)
-          let depth = 0, closeParen = -1;
-          for (let k = closeBracket + 2; k < text.length; k++) {
-            const c = text.charAt(k);
-            if (c === "(") depth++;
-            else if (c === ")") { if (depth === 0) { closeParen = k; break; } depth--; }
-          }
+          const closeParen = text.indexOf(")", closeBracket + 2);
           if (closeParen >= 0) {
             const linkText = text.slice(i + 1, closeBracket);
             const url      = text.slice(closeBracket + 2, closeParen);
