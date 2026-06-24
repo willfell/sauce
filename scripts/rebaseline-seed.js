@@ -66,6 +66,15 @@ function diffTree(a, b) {
 }
 
 function main() {
+    // Seed rebaseline is a MANUAL, reviewed action only. Auto-running it in CI
+    // (the release.yml rebaseline-seed job) over-heals the pre-heal migration
+    // fixtures and wedges run-seed-migrations on main (incident: v0.132.0,
+    // commit 68b75aa9). Skip in CI; run locally to ratchet the seed deliberately.
+    // See build-test-verify.md § Seed-vault rebaseline.
+    if (process.env.GITHUB_ACTIONS) {
+        console.log("rebaseline-seed: skipping in CI — manual-only (auto-rebaseline over-heals fixtures).");
+        return;
+    }
     if (!fs.existsSync(SEED_DIR)) {
         console.error(`seed dir missing: ${SEED_DIR}`);
         process.exit(1);
