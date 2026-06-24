@@ -2761,3 +2761,21 @@ declaring a deploy validated.
 
 **Commits:** branch `cycle/v0.128.2-finance-created-at`; PR #24.
 
+## v0.130.0 finance hub correctness — governed_from + carry fix + payoff unify MINOR CLOSED 2026-06-24
+
+**Workshop:** 0.128.2 → 0.130.0 (0.129.0 reserved for the in-flight auto-release-pipeline PR #25) · **finance:** 0.10.2 → 0.10.3.
+
+**Headline:** Found by the user looking at the live Finance hub — the Plan tile showed **−$5,126 left**. Root cause: the overage carry compared last month's *spend* to *this month's new envelope*, so May (a pre-system $6,353 budget with $11,024 of real spend) generated a bogus $8,075 penalty. Fix: a `governed_from: "YYYY-MM"` date on the plan; the carry flows **only governed → governed** and compares prior spend to the prior month's **own** plan (`max(0, priorSpent − priorPlanned)`) — May = baseline → no carry → envelope back to **+$2,949**. Also unified the payoff date: `FinanceMath.debtTotals.zeroDebtDate` now uses the avalanche sim (was a stale flat ~2031 estimate on the hub hero while the Plan tile showed the accurate ~2029) so hero + Debts hub + tile all match. Views label pre-governed months "baseline — not scored."
+
+**Tests:** run-finance-plan-state 45/0 (CARRY governed-gated; NEW BASELINE-1..4 + DEBTTOTALS-1..3); run-finance-plan-widgets 28/0 (NEW DASH-11). Preflight GREEN; `version-sync ok: 0.130.0`; dogfood exit 0. CI green macOS + Ubuntu (PR #26).
+
+**LESSON — derived "carry/penalty" math must be aware of when the system started.** A scorecard that silently penalizes months the system never governed produces alarming nonsense (a negative envelope) on real historical data. Gate any cross-month carry/penalty on an explicit `governed_from` boundary, and compare a month's spend to its OWN plan, never to a later month's target.
+
+**LESSON — verify against REAL multi-month vault data, not single-month fixtures.** 63 green single-month fixture asserts never exercised a prior baseline month; the bug only appeared on the live headspace ledger. (Reinforces the v0.128.1 lesson.)
+
+**Brainstorm decomposition:** this is sub-project 1 of a 3-part "hub-as-brain" arc (1: correctness · 2: Copilot actuals sync [G7] · 3: seed + go-live on a governed month). 2 + 3 get their own cycles.
+
+**Commits:** branch `cycle/finance-hub-correctness`; PR #26.
+
+See `Docs/plans/2026-06-24-finance-hub-correctness-result.md`.
+
