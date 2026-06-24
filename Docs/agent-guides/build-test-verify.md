@@ -58,24 +58,27 @@ sauce migrate --from <path>   # migrate legacy source vault into Sauce shape (RE
 ### What Claude does (and does NOT do)
 
 - **DO** write conventional-commit messages — `feat(scope):` / `fix(scope):` / `feat(scope)!:` / `BREAKING CHANGE:`. They are the *only* input the version bumper reads. (Attribution is path-based off the manifest `path` field, so a mis-scoped commit still bumps the right component — but the type still classifies the bump level, so get the type right.)
-- **DO NOT** bump `workshop_version` / `package.json` / per-component manifest versions / `ranch/platform-subscription.json` pins by hand.
+- **DO NOT** bump `workshop_version` / `package.json` / per-component manifest versions / `ranch/platform-subscription.json` pins / the **seed-vault** subscription pins by hand. The bumper writes all of them.
+- **DO NOT** merge (or even open) the release PR — it **auto-merges** once its required checks pass. Don't `--admin`-merge it.
 - **DO NOT** create or push git tags.
 - **DO NOT** widen `HC-V0*-VERSION-*` regex ranges or edit version literals in `run-helper-cases.js`. Those assertions now read `platform/test/fixtures/component-versions.snapshot.json`, which the bumper regenerates. **Landmine #16's manual VERSION-pin sweep is retired** — if you find yourself editing a version literal in a test, stop: you're doing the bumper's job.
 - **DO NOT** edit the homebrew tap or run `--bump-pins` as a release step — the pipeline handles the tap; consumer `--bump-pins` is a per-vault user action on their own machine (out of GitHub's reach).
 
 ### How the pipeline works (context, not a to-do list)
 
-1. You merge feature work to `main` (conventional commits).
-2. `release.yml :: prepare-release` runs `node scripts/release/compute-release.js --write` → attributes each commit since the last `v*` tag to a component (via manifest `path`; shared roots → umbrella), computes per-component + umbrella semver bumps (standard semver, `feat!`→major once a component is ≥1.0), writes all version records + regenerates the snapshot fixture, and opens/updates one standing **release PR**.
-3. You merge the release PR (the single human gate). Its `chore(release): vX` commit triggers the `tag-and-ship` job → runs preflight, creates + pushes `v<X.Y.Z>` (built-in `GITHUB_TOKEN` — **no PAT**), then patches `Formula/sauce.rb` in `willfell/homebrew-sauce` and **auto-merges** the tap PR (existing `TAP_PR_TOKEN`).
-4. `brew upgrade sauce` serves it. (The release PR's bumped state was already preflight-validated inside `prepare-release` before the PR opened — GITHUB_TOKEN-opened PRs don't get auto-CI, so prepare-release runs the gate itself.)
-5. `rebaseline-seed` (post-merge only) ratchets the seed vault forward.
+1. You merge feature work to `main` (conventional commits). **This is the only manual step.**
+2. `release.yml :: prepare-release` runs `node scripts/release/compute-release.js --write` → attributes each commit since the last `v*` tag to a component (via manifest `path`; shared roots → umbrella), computes per-component + umbrella semver bumps (standard semver, `feat!`→major once a component is ≥1.0), writes **all version records** (catalogue, per-component manifests, `ranch/platform-subscription.json`, `package.json`, the snapshot fixture, AND `platform/test/seed-vault/ranch/platform-subscription.json` per-item pins so `run-seed-migrations` doesn't skew), runs preflight on the bumped state, opens/updates one standing **release PR via `RELEASE_PAT`** (so the PR triggers CI), and **enables GitHub auto-merge (`--squash`)** on it.
+3. The release PR's required checks run → pass → GitHub **auto-squash-merges** it. **No human step.** The squash commit `chore(release): vX` triggers `tag-and-ship`.
+4. `tag-and-ship` creates + pushes `v<X.Y.Z>` (`GITHUB_TOKEN`), patches `Formula/sauce.rb` in `willfell/homebrew-sauce`, and **auto-merges** the tap PR (`TAP_PR_TOKEN`) → `brew upgrade sauce` serves it.
+5. `rebaseline-seed` (post-merge only) ratchets the seed vault forward, pushing via `RELEASE_PAT` (admin-bypass past branch protection).
+
+**Net: develop → merge to `main` → done.** Everything after step 1 is automatic — you do not touch versions, tags, the tap, or even the release PR. `RELEASE_PAT` (a repo secret; classic `repo`+`workflow`) is what lets the release PR get CI and the seed-rebaseline push land; it is the only secret beyond the pre-existing `TAP_PR_TOKEN`. Repo setting "Allow auto-merge" must stay ON.
 
 Engine + full design: `scripts/release/compute-release.js`, `scripts/release/lib/`, `platform/test/run-release-bumper.js`, and `Docs/plans/2026-06-23-v0.129.0-auto-release-pipeline-{design,plan,result}.md`. Preview a bump anytime with `npm run release:plan` (dry-run; writes nothing).
 
 ### Manual escape hatch (automation down / not yet deployed)
 
-The pipeline is active once `.github/workflows/release.yml` is deployed — the canonical no-PAT version to copy in is `Docs/plans/2026-06-23-v0.129.0-release.yml.FINAL.txt` (no secrets to create beyond the existing `TAP_PR_TOKEN`; the user pushes that one workflow file because Claude's OAuth scope can't push workflow YAML). If you must cut a release by hand: run `node scripts/release/compute-release.js --write` locally (it does the same version-record writes + snapshot regen), commit as `chore(release): vX.Y.Z`, then the **annotated tag `v<X.Y.Z>` REQUIRES user approval** per the ask-before-acting list. `contract_version` in `scheduled-job-contract.json` is independent (NOT a cowork mirror — landmine #20 wording is stale) and is never touched by the bumper.
+The pipeline is **deployed + live on `main`** (`.github/workflows/release.yml`): PAT-for-PR + GitHub auto-merge. It needs the `RELEASE_PAT` repo secret (classic `repo`+`workflow`) and the repo's "Allow auto-merge" setting ON. Editing `release.yml` requires a `workflow`-scoped token (Claude's OAuth scope can't push workflow YAML — have the user supply a short-lived token or apply it themselves). If automation is down and you must cut a release by hand: run `node scripts/release/compute-release.js --write` locally (same version-record writes incl. seed-vault pins + snapshot regen), commit as `chore(release): vX.Y.Z`, then the **annotated tag `v<X.Y.Z>` REQUIRES user approval** per the ask-before-acting list. `contract_version` in `scheduled-job-contract.json` is independent (NOT a cowork mirror — landmine #20 wording is stale) and is never touched by the bumper.
 
 Don't sign as Claude (no `Co-authored-by: Claude` trailer). Don't skip hooks (`--no-verify`) unless explicitly requested. Don't force-push or rewrite history on `origin/main` without explicit approval — see [asking-before-acting.md](asking-before-acting.md).
 
