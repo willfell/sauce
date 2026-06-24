@@ -28,7 +28,7 @@ class PlanBand {
         const e = ps.envelope;
         const money = (n, opts) => fm.fmtMoney(n, opts);
         const GREEN = "#16a34a", RED = "#dc2626";
-        const over = e.over > 0;
+        const over = e.governed && e.over > 0;
 
         const root = dv.container.createEl("div", { cls: "planband-root" });
         root.style.cssText = `margin: 10px 0 14px; padding: 10px 14px; border-radius: 10px; border: 1px solid ${over ? "rgba(220,38,38,0.35)" : "var(--background-modifier-border)"}; background: ${over ? "rgba(220,38,38,0.08)" : "var(--background-secondary-alt)"};`;
@@ -46,6 +46,10 @@ class PlanBand {
             const flag = root.createEl("div");
             flag.textContent = `⚠ OVER ENVELOPE by ${money(e.over)} — trim a discretionary category, or this overage reduces next month's envelope.`;
             flag.style.cssText = `margin-top: 6px; color: ${RED}; font-size: 0.82em;`;
+        } else if (!e.governed) {
+            const note = root.createEl("div");
+            note.textContent = `Baseline month — not scored against the envelope (governed from ${e.governedFrom || "—"}).`;
+            note.style.cssText = "margin-top: 6px; color: var(--text-muted); font-size: 0.8em;";
         }
     }
 }
