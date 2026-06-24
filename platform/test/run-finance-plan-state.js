@@ -222,5 +222,19 @@ function tierCase(balance) {
     ok("HC-V0128-PLANSTATE-DEGRADE-4 floor 0 → over suppressed", noFloor.envelope.over === 0 && noFloor.envelope.status === "ok");
 }
 
+// ===== HC-V0128-FRESH-* — actualsFreshness badge math =====
+{
+    const NOW = Date.parse("2026-07-20T00:00:00Z");
+    const govBudgetLive  = { type: "budget", month: "2026-07", actuals_synced_at: "2026-07-18T09:00:00Z", categories: [] };
+    const govBudgetStale = { type: "budget", month: "2026-07", actuals_synced_at: "2026-06-25T09:00:00Z", categories: [] };
+    const govBudgetTyped = { type: "budget", month: "2026-07", categories: [] };
+    ok("HC-V0128-FRESH-1 recent sync → live",   fm.actualsFreshness(govBudgetLive,  "2026-07", "2026-07", NOW).state === "live");
+    ok("HC-V0128-FRESH-2 old sync → stale",     fm.actualsFreshness(govBudgetStale, "2026-07", "2026-07", NOW).state === "stale");
+    ok("HC-V0128-FRESH-3 no sync stamp → typed", fm.actualsFreshness(govBudgetTyped, "2026-07", "2026-07", NOW).state === "typed");
+    ok("HC-V0128-FRESH-4 baseline month → none", fm.actualsFreshness(govBudgetLive, "2026-06", "2026-07", NOW).state === "none");
+    ok("HC-V0128-FRESH-5 no budget → none",      fm.actualsFreshness(null,           "2026-07", "2026-07", NOW).state === "none");
+    ok("HC-V0128-FRESH-6 live label carries date", /2026-07-18/.test(fm.actualsFreshness(govBudgetLive, "2026-07", "2026-07", NOW).label));
+}
+
 console.log(`\nrun-finance-plan-state.js: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

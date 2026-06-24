@@ -174,6 +174,14 @@ class FinanceHubSummary {
         return el;
     }
 
+    _freshBadge(tile, fresh) {
+        const COLORS = { green: "#16a34a", amber: "#b45309", muted: "var(--text-muted)" };
+        const fg = COLORS[fresh.tone] || COLORS.muted;
+        const pill = tile.createEl("div");
+        pill.textContent = fresh.label || fresh.state;
+        pill.style.cssText = `align-self: flex-start; margin-top: 2px; font-size: 0.62em; letter-spacing: 0.04em; text-transform: uppercase; font-weight: 600; color: ${fg};`;
+    }
+
     _renderBudgetTile(row, dv) {
         const tile = this._makeTile(row, "fhs-tile-budget");
         this._tileLabel(tile, "This Month Budget");
@@ -204,6 +212,10 @@ class FinanceHubSummary {
             const currentDay = now.getDate();
             const daysInMonth = new Date(year, month, 0).getDate();
             this._tileMuted(tile, `${pct}% spent · day ${currentDay}/${daysInMonth}`);
+
+            const plan = customJS.FinanceMath.readPlan(dv);
+            const fresh = customJS.FinanceMath.actualsFreshness(budget, currentMonth, plan && plan.governed_from);
+            if (fresh.state !== "none") this._freshBadge(tile, fresh);
         }
 
         tile.addEventListener("click", () => {

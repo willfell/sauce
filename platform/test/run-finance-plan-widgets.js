@@ -216,6 +216,31 @@ const ALL = [PLAN, ...DEBTS, SAV, BUDGET, PAYCHECK];
         ok("HC-V0128-WIDGET-NAV-5 _hereKey savings", nav._hereKey("hub-savings") === "savings" && nav._hereKey("entity-savings") === "savings");
         ok("HC-V0128-WIDGET-NAV-6 piggy-bank icon defined", typeof nav._icon("piggy-bank") === "string" && nav._icon("piggy-bank").includes("<svg"));
 
+        // ===== HC-V0128-WIDGET-FRESH-* — actuals freshness badge =====
+        // Budget synced "yesterday" relative to real now → must read "live" regardless of CI clock.
+        const _y = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+        const SYNCED_BUDGET = { type: "budget", month: NOW_MONTH, actuals_synced_at: _y,
+            categories: [{ group: "D", name: "All", planned: 3120, actual: 1200 }],
+            file: { path: `spice/finance/budgets/${NOW_MONTH}/Budget-${NOW_MONTH}.md`, name: `Budget-${NOW_MONTH}` } };
+
+        // MonthDashboard on a governed month note
+        const MD = loadClass("month-dashboard.js", "MonthDashboard", env);
+        const monthPage = { type: "month", month: NOW_MONTH, file: { path: `spice/finance/months/Month-${NOW_MONTH}.md`, name: `Month-${NOW_MONTH}` } };
+        const mdDv = makeDv([PLAN, ...DEBTS, SYNCED_BUDGET, PAYCHECK, monthPage], monthPage);
+        let mdErr = null;
+        try { await new MD().render(mdDv); } catch (e) { mdErr = e; }
+        ok("HC-V0128-WIDGET-FRESH-1 MonthDashboard renders without throwing", mdErr === null, mdErr && mdErr.message);
+        ok("HC-V0128-WIDGET-FRESH-2 MonthDashboard shows live badge", /live ·/.test(treeText(mdDv.container)), mdErr && mdErr.message);
+
+        // FinanceHubSummary Budget tile
+        const FHS = loadClass("finance-hub-summary.js", "FinanceHubSummary", env);
+        const finPage = { type: "finance-hub", file: { path: "spice/finance/Finance.md", name: "Finance" } };
+        const fhsDv = makeDv([PLAN, ...DEBTS, SYNCED_BUDGET, PAYCHECK, finPage], finPage);
+        let fhsErr = null;
+        try { await new FHS().render(fhsDv); } catch (e) { fhsErr = e; }
+        ok("HC-V0128-WIDGET-FRESH-3 FinanceHubSummary renders without throwing", fhsErr === null, fhsErr && fhsErr.message);
+        ok("HC-V0128-WIDGET-FRESH-4 FinanceHubSummary Budget tile shows live badge", /live ·/.test(treeText(fhsDv.container)), fhsErr && fhsErr.message);
+
         console.log(`\nrun-finance-plan-widgets.js: ${pass} passed, ${fail} failed`);
         process.exit(fail === 0 ? 0 : 1);
     }
