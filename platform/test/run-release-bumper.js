@@ -25,5 +25,28 @@ eq("HC-V0129-RELEASE-SEMVER-E: maxLevel picks higher", maxLevel("patch", "minor"
 eq("HC-V0129-RELEASE-SEMVER-F: maxLevel none<patch", maxLevel("none", "patch"), "patch");
 ok("HC-V0129-RELEASE-SEMVER-G: parse rejects junk", (() => { try { parse("1.2"); return false; } catch (e) { return true; } })());
 
+// ---- Task 2: conventional classifier ----
+const { parseCommit, bumpLevel } = require("../../scripts/release/lib/conventional.js");
+console.log("\n--- HC-V0129-RELEASE-CONV ---");
+const c1 = parseCommit("feat(meetings): add leaf actions");
+eq("HC-V0129-RELEASE-CONV-A: type", c1.type, "feat");
+eq("HC-V0129-RELEASE-CONV-B: scope", c1.scope, "meetings");
+ok("HC-V0129-RELEASE-CONV-C: not breaking", c1.breaking === false);
+const c2 = parseCommit("feat(installer,validator): big change");
+eq("HC-V0129-RELEASE-CONV-D: multi-scope count", c2.scopes.length, 2);
+const c3 = parseCommit("feat(api)!: drop legacy field");
+ok("HC-V0129-RELEASE-CONV-E: bang breaking", c3.breaking === true);
+const c4 = parseCommit("fix: thing\n\nBREAKING CHANGE: removed X");
+ok("HC-V0129-RELEASE-CONV-F: footer breaking", c4.breaking === true);
+const c5 = parseCommit("feat(meetings): x\n\nRelease-As: 1.0.0");
+eq("HC-V0129-RELEASE-CONV-G: release-as", c5.releaseAs, "1.0.0");
+ok("HC-V0129-RELEASE-CONV-H: junk header -> null", parseCommit("just some words") === null);
+eq("HC-V0129-RELEASE-CONV-I: feat pre1 -> minor", bumpLevel(c1, true), "minor");
+eq("HC-V0129-RELEASE-CONV-J: breaking pre1 -> minor", bumpLevel(c3, true), "minor");
+eq("HC-V0129-RELEASE-CONV-K: breaking post1 -> major", bumpLevel(c3, false), "major");
+eq("HC-V0129-RELEASE-CONV-L: fix -> patch", bumpLevel(parseCommit("fix: y"), true), "patch");
+eq("HC-V0129-RELEASE-CONV-M: chore -> none", bumpLevel(parseCommit("chore: z"), true), "none");
+eq("HC-V0129-RELEASE-CONV-N: null -> none", bumpLevel(null, true), "none");
+
 console.log(`\nrun-release-bumper: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
