@@ -92,4 +92,73 @@ function renderChangelog(components, workshop) {
     return lines.join("\n");
 }
 
-module.exports = { loadManifest, buildIndex, attribute, computePlan, renderChangelog };
+// --- git range reader (CLI path) ---
+function getCommits(range) {
+    const RS = "\x1e", US = "\x1f";
+    const fmt = `${RS}%H${US}%B${US}`;
+    let out;
+    try {
+        out = execFileSync("git", ["log", range, "--no-merges", `--format=${fmt}`, "--name-only"],
+            { cwd: REPO_ROOT, maxBuffer: 64 * 1024 * 1024, encoding: "utf8" });
+    } catch (e) {
+        throw new Error(`getCommits failed (signal=${e.signal || "none"}): ${e.message}`);
+    }
+    return out.split(RS).map((s) => s.replace(/^\n/, "")).filter((s) => s.trim()).map((rec) => {
+        const [hash, body, filesBlock] = rec.split(US);
+        const files = (filesBlock || "").split("\n").map((s) => s.trim()).filter(Boolean);
+        return { hash: (hash || "").trim(), message: body || "", files };
+    });
+}
+
+function lastTag() {
+    try {
+        return execFileSync("git", ["describe", "--tags", "--abbrev=0", "--match", "v*"],
+            { cwd: REPO_ROOT, encoding: "utf8" }).trim();
+    } catch (e) { return null; }
+}
+
+function writeJson(p, obj) { fs.writeFileSync(p, JSON.stringify(obj, null, 2) + "\n"); }
+
+// applyPlan(plan, root) — mutate every version record under `root`. Never the contract.
+function applyPlan(plan, root) {
+    const toByName = Object.fromEntries(plan.components.map((c) => [c.name, c.to]));
+
+    const manPath = path.join(root, "platform/manifest.json");
+    const man = JSON.parse(fs.readFileSync(manPath, "utf8"));
+    man.workshop_version = plan.workshop.to;
+    for (const arr of [man.blueprints || [], man.mechanisms || []]) {
+        for (const c of arr) if (toByName[c.name]) c.version = toByName[c.name];
+    }
+    writeJson(manPath, man);
+
+    // per-component manifests
+    for (const c of plan.components) {
+        const cm = path.join(root, "platform", c.path, "manifest.json");
+        if (fs.existsSync(cm)) {
+            const obj = JSON.parse(fs.readFileSync(cm, "utf8"));
+            obj.version = c.to;
+            writeJson(cm, obj);
+        }
+    }
+
+    // ranch subscription pins
+    const ranchPath = path.join(root, "ranch/platform-subscription.json");
+    if (fs.existsSync(ranchPath)) {
+        const r = JSON.parse(fs.readFileSync(ranchPath, "utf8"));
+        r.workshop_version = plan.workshop.to;
+        for (const arr of [r.blueprints || [], r.mechanisms || []]) {
+            for (const c of arr) if (toByName[c.name]) c.version = toByName[c.name];
+        }
+        writeJson(ranchPath, r);
+    }
+
+    // package.json
+    const pkgPath = path.join(root, "package.json");
+    if (fs.existsSync(pkgPath)) {
+        const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
+        pkg.version = plan.workshop.to;
+        writeJson(pkgPath, pkg);
+    }
+}
+
+module.exports = { loadManifest, buildIndex, attribute, computePlan, renderChangelog, getCommits, lastTag, applyPlan };

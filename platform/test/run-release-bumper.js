@@ -93,5 +93,55 @@ const planRA = cr.computePlan(
 eq("HC-V0129-RELEASE-PLAN-H: release-as override",
     planRA.components.find((c) => c.name === "meetings").to, "2.5.0");
 
+// ---- Task 4: write path against a temp fixture vault ----
+console.log("\n--- HC-V0129-RELEASE-WRITE ---");
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "sauce-bumper-"));
+try {
+    fs.mkdirSync(path.join(tmp, "platform/blueprints/meetings"), { recursive: true });
+    fs.mkdirSync(path.join(tmp, "ranch"), { recursive: true });
+    const man = {
+        workshop_version: "0.128.0",
+        blueprints: [{ name: "meetings", version: "0.12.0", path: "blueprints/meetings" }],
+        mechanisms: [],
+    };
+    fs.writeFileSync(path.join(tmp, "platform/manifest.json"), JSON.stringify(man, null, 2) + "\n");
+    fs.writeFileSync(path.join(tmp, "platform/blueprints/meetings/manifest.json"),
+        JSON.stringify({ name: "meetings", version: "0.12.0", kind: "blueprint" }, null, 2) + "\n");
+    fs.writeFileSync(path.join(tmp, "ranch/platform-subscription.json"),
+        JSON.stringify({ workshop_version: "0.128.0", blueprints: [{ name: "meetings", version: "0.12.0" }], mechanisms: [] }, null, 2) + "\n");
+    fs.writeFileSync(path.join(tmp, "package.json"), JSON.stringify({ name: "sauce", version: "0.128.0" }, null, 2) + "\n");
+    // a contract file the bumper must NOT touch
+    fs.mkdirSync(path.join(tmp, "platform/blueprints/cowork/data"), { recursive: true });
+    fs.writeFileSync(path.join(tmp, "platform/blueprints/cowork/data/scheduled-job-contract.json"),
+        JSON.stringify({ contract_version: "0.35.1" }, null, 2) + "\n");
+
+    const plan = cr.computePlan(
+        [{ hash: "z1", message: "feat(meetings): leaf actions", files: ["platform/blueprints/meetings/T.md"] }],
+        man);
+    cr.applyPlan(plan, tmp);
+
+    const man2 = JSON.parse(fs.readFileSync(path.join(tmp, "platform/manifest.json"), "utf8"));
+    eq("HC-V0129-RELEASE-WRITE-A: catalogue meetings bumped", man2.blueprints[0].version, "0.13.0");
+    eq("HC-V0129-RELEASE-WRITE-B: workshop_version bumped", man2.workshop_version, "0.129.0");
+    const comp2 = JSON.parse(fs.readFileSync(path.join(tmp, "platform/blueprints/meetings/manifest.json"), "utf8"));
+    eq("HC-V0129-RELEASE-WRITE-C: per-component manifest bumped", comp2.version, "0.13.0");
+    const ranch2 = JSON.parse(fs.readFileSync(path.join(tmp, "ranch/platform-subscription.json"), "utf8"));
+    eq("HC-V0129-RELEASE-WRITE-D: ranch pin bumped", ranch2.blueprints[0].version, "0.13.0");
+    eq("HC-V0129-RELEASE-WRITE-E: ranch workshop bumped", ranch2.workshop_version, "0.129.0");
+    const pkg2 = JSON.parse(fs.readFileSync(path.join(tmp, "package.json"), "utf8"));
+    eq("HC-V0129-RELEASE-WRITE-F: package.json bumped", pkg2.version, "0.129.0");
+    const contract2 = JSON.parse(fs.readFileSync(path.join(tmp, "platform/blueprints/cowork/data/scheduled-job-contract.json"), "utf8"));
+    eq("HC-V0129-RELEASE-WRITE-G: contract_version UNTOUCHED", contract2.contract_version, "0.35.1");
+
+    // idempotence: recomputing against the now-updated manifest with the SAME
+    // commits still maps meetings feat to a single minor bump from the new base
+    const planAgain = cr.computePlan(
+        [{ hash: "z1", message: "feat(meetings): leaf actions", files: ["platform/blueprints/meetings/T.md"] }],
+        man2);
+    eq("HC-V0129-RELEASE-WRITE-H: idempotent re-plan from new base", planAgain.components[0].to, "0.14.0");
+} finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+}
+
 console.log(`\nrun-release-bumper: ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
