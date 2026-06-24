@@ -2134,6 +2134,63 @@ async function testRendV01241Link1() {
   return ok;
 }
 
+// ── REND-HASNOTES: scaffold-aware "has notes" (#1) ──────────────────────────
+// v0.X (#1): SpaceDailyDashboard._bodyHasNotes + MeetingsHubCards._bodyHasNotes
+// (byte-identical statics) must agree: a blank SectionLabel-shaped meeting body
+// (scaffold only) → false; a body with real notes content → true. Both classes
+// loaded the same way the daily helper is loaded above (new Function).
+async function testRendHasNotes() {
+  console.log('\n=== REND-HASNOTES — scaffold-aware has-notes (SDD + hub) (#1) ===');
+  let _ok = true;
+  const ok = (label, cond, detail) => {
+    const pass = !!cond;
+    _ok = _ok && pass;
+    console.log(`  ${label}: ${pass ? 'PASS' : 'FAIL'}${pass ? '' : (detail ? ` — ${detail}` : '')}`);
+    return pass;
+  };
+  try {
+    const sddSrc = fs.readFileSync(
+      path.join(WORKSHOP, "platform/blueprints/daily/helpers/space-daily-dashboard.js"),
+      "utf8"
+    );
+    const SpaceDailyDashboard = new Function(
+      "window",
+      sddSrc + "\nreturn SpaceDailyDashboard;"
+    )({ moment: () => ({ isValid: () => false }) });
+
+    const mhcSrc = fs.readFileSync(
+      path.join(WORKSHOP, "platform/blueprints/meetings/helpers/meetings-hub-cards.js"),
+      "utf8"
+    );
+    const MeetingsHubCards = new Function(
+      "window",
+      mhcSrc + "\nreturn MeetingsHubCards;"
+    )({ moment: () => ({ isValid: () => false }) });
+
+    // REND-HASNOTES: blank SectionLabel meeting → false; with notes → true (#1).
+    (() => {
+      const blank = [
+        '---','type: meeting','---','',
+        '```dataviewjs','await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Agenda" }] });','```','',
+        '-','',
+        '```dataviewjs','await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Notes" }] });','```','',
+        '<!-- ACTION_ITEMS_MARKER -->','',
+        '```dataviewjs','await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Action Items" }] });','```',
+      ].join('\n');
+      const withNotes = blank.replace('<!-- ACTION_ITEMS_MARKER -->', 'We discussed the Q3 roadmap and next steps in detail.\n<!-- ACTION_ITEMS_MARKER -->');
+      ok('REND-HASNOTES blank → false (SDD)', SpaceDailyDashboard._bodyHasNotes(blank) === false, `got ${SpaceDailyDashboard._bodyHasNotes(blank)}`);
+      ok('REND-HASNOTES notes → true (SDD)', SpaceDailyDashboard._bodyHasNotes(withNotes) === true);
+      ok('REND-HASNOTES blank → false (hub)', MeetingsHubCards._bodyHasNotes(blank) === false);
+      ok('REND-HASNOTES notes → true (hub)', MeetingsHubCards._bodyHasNotes(withNotes) === true);
+    })();
+  } catch (e) {
+    console.log(`  REND-HASNOTES: FAIL — ${e && e.message}`);
+    _ok = false;
+  }
+  console.log(`  ${_ok ? 'PASS' : 'FAIL'}`);
+  return _ok;
+}
+
 // ── Main ─────────────────────────────────────────────────────────────────
 (async () => {
   const which = ARGS.selector;
@@ -2228,6 +2285,7 @@ async function testRendV01241Link1() {
       results.push(['REND-V067-TIME-1 _formatTime duck-types Luxon + moment', await testRendV067Time1()]);
       results.push(['REND-V067-TODO-1 _renderTodoBadge pill when open > 0', await testRendV067Todo1()]);
       results.push(['REND-V01241-LINK-1 _renderTaskHTML balanced-paren scan for link URLs', await testRendV01241Link1()]);
+      results.push(['REND-HASNOTES scaffold-aware has-notes (SDD + hub)', await testRendHasNotes()]);
     }
   } catch (e) {
     console.error(`\nFATAL: ${e.message}`);

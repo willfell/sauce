@@ -1067,6 +1067,31 @@ class SpaceDailyDashboard {
   }
 
   /**
+   * #1: does the meeting body carry REAL notes content, ignoring scaffold?
+   * Strips frontmatter, fenced code blocks, HTML comments, horizontal rules,
+   * heading lines, task lines (any of -,*,+ markers), and lone/empty bullets;
+   * "has notes" iff > 5 non-whitespace chars remain. Works on SectionLabel-shaped
+   * AND legacy ## Notes notes. Keys on scaffold SHAPE, not on the "Notes" label
+   * (lint-display-markers).
+   */
+  static _bodyHasNotes(content) {
+    if (typeof content !== "string" || !content) return false;
+    let body = content;
+    const fmEnd = body.indexOf("\n---", 4);
+    if (body.indexOf("---") === 0 && fmEnd >= 0) body = body.slice(fmEnd + 4);
+    body = body.replace(/```[\s\S]*?```/g, "");          // fenced blocks
+    body = body.replace(/<!--[\s\S]*?-->/g, "");          // HTML comments (markers)
+    body = body
+      .split("\n")
+      .filter((l) => !/^\s*---+\s*$/.test(l))             // horizontal rules
+      .filter((l) => !/^\s*[-*+]\s*\[[ xX]\]/.test(l))    // task lines (-,*,+)
+      .filter((l) => !/^\s*[-*+]\s*$/.test(l))            // lone/empty bullets
+      .filter((l) => !/^#+\s/.test(l))                    // heading lines
+      .join("\n");
+    return body.replace(/\s/g, "").length > 5;
+  }
+
+  /**
    * v0.10.5 (sauce v0.70.5): read meeting body + derive attendees, open-task
    * count, and a "has notes" flag for the daily-dashboard Meetings panel.
    * Mirrors the meetings-hub enrichment pattern. Returns a synthetic page
@@ -1077,13 +1102,13 @@ class SpaceDailyDashboard {
    *   1. Frontmatter `attendees:` array (Dataview's `p.attendees` DataArray) —
    *      preferred. Wikilink tokens like "[[Jason Batai]]" are stripped to
    *      bare display names.
-   *   2. Fallback: `## Attendees` body section with `- [[Name]]` bullets.
+   *   2. Fallback: an Attendees body section with `- [[Name]]` bullets.
    *
-   * Has-notes heuristic:
-   *   - `## Notes` heading with >5 chars of content → true.
-   *   - Otherwise, body content (frontmatter + dataviewjs blocks + task
-   *     lines + heading markers stripped) with >20 non-whitespace chars → true.
-   *   The body fallback catches the common heading-less bullet-style notes.
+   * Has-notes flag (#1): delegated to the scaffold-aware `_bodyHasNotes`
+   *   helper, which strips frontmatter, fenced blocks, HTML-comment markers,
+   *   horizontal rules, heading lines, task lines, and lone bullets, then
+   *   reports true iff real content remains. Keys on scaffold SHAPE rather
+   *   than any heading label, so it agrees with the meetings-hub copy.
    */
   async _enrichMeeting(p) {
     let content = "";
@@ -1123,19 +1148,7 @@ class SpaceDailyDashboard {
 
     const openTasks = (content.match(/- \[ \]/g) || []).length;
 
-    let hasNotes = false;
-    const notesMatch = content.match(/## Notes\s*([\s\S]*?)(?=---|##|$)/);
-    if (notesMatch && notesMatch[1].trim().length > 5) {
-      hasNotes = true;
-    } else if (content) {
-      let body = content;
-      const fmEnd = body.indexOf("\n---", 4);
-      if (body.indexOf("---") === 0 && fmEnd >= 0) body = body.slice(fmEnd + 4);
-      body = body.replace(/```[\s\S]*?```/g, "");
-      body = body.split("\n").filter(l => !/^\s*-\s*\[[ xX]\]/.test(l)).join("\n");
-      body = body.replace(/^#+\s.*$/gm, "");
-      if (body.replace(/\s/g, "").length > 20) hasNotes = true;
-    }
+    const hasNotes = SpaceDailyDashboard._bodyHasNotes(content);
 
     return {
       file: p.file,
