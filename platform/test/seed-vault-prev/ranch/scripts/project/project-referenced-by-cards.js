@@ -10,11 +10,7 @@
  */
 class ProjectReferencedByCards {
     async render(dv) {
-        const current = dv && dv.current ? dv.current() : null;
-        // v0.119.0 PATCH: bail when Dataview hasn't indexed the file yet
-        // (typically the first render after EntityCreate.openFile on a newly
-        // created project). Next render tick will succeed.
-        if (!current || !current.file) return;
+        const current = dv.current();
         const projectFolder = current.file.folder;
         const incoming = dv.pages().where(p =>
             p.file.outlinks && p.file.outlinks.some(l => l.path === current.file.path)

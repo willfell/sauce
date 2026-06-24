@@ -114,9 +114,7 @@ class ProjectsHubCards {
         // a "?" status pill rather than being filtered out (preserves
         // v1.4.1 CF-1 legacy-tag-compat posture).
         if (!this._activeStatuses) {
-            // v0.127.0 §E1: default scope shows ALL statuses including terminal
-            // (done/superseded/cancelled). Users still toggle chips off interactively.
-            this._activeStatuses = new Set(["idea", "planning", "in-progress", "blocked", "done", "superseded", "cancelled"]);
+            this._activeStatuses = new Set(["idea", "planning", "in-progress", "blocked"]);
         }
 
         // v0.109.0 S3 — DocSearch filter strip wraps the existing status/team/product
@@ -268,17 +266,13 @@ class ProjectsHubCards {
         }
         const briefcase = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--interactive-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>`;
         const lookup = this._lookup;
-        // v0.127.0 §E2: sort primary by max folder mtime DESC (most-recently-touched
-        // project surfaces first regardless of status_changed_at). Status priority
-        // + status_changed_at retained as tiebreakers (only fire when two projects
-        // share the exact same latest-mtime millisecond — extremely rare).
+        // v0.39.0 S6.7: within-group sort — status priority ascending then
+        // status_changed_at descending. status_changed_at is read as a string
+        // and compared via localeCompare for type-stability (CLAUDE.md
+        // gotcha: YAML auto-parses YYYY-MM-DD to Date|Luxon; coerce to string
+        // before compare).
         const PRIORITY = { "in-progress": 0, "planning": 1, "blocked": 2, "idea": 3, "done": 4, "superseded": 5, "cancelled": 6 };
         const sorted = [...pages].sort((a, b) => {
-            const ea = lookup && lookup.get ? lookup.get(a.file.path) : null;
-            const eb = lookup && lookup.get ? lookup.get(b.file.path) : null;
-            const ma = (ea && ea.latestMtime && ea.latestMtime.ts) || 0;
-            const mb = (eb && eb.latestMtime && eb.latestMtime.ts) || 0;
-            if (mb !== ma) return mb - ma;
             const pa = PRIORITY[a.status] ?? 99;
             const pb = PRIORITY[b.status] ?? 99;
             if (pa !== pb) return pa - pb;

@@ -32,7 +32,7 @@
           "phone": "",
           "tags": []
         },
-        "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PersonNavButtons\" });\n```\n\n# [[{{prompts.name}}]]\n\n## Notes\n-\n\n## Meetings\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"PeopleRendering\",\n  method: \"renderMentionList\",\n  args: [{ mode: \"mentioning_person\", personLink: dv.current().file.link, scopePath: \"spice/meetings\" }, { style: \"cards\", limit: 50 }]\n});\n```\n\n## Daily Mentions\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"PeopleRendering\",\n  method: \"renderMentionList\",\n  args: [{ mode: \"mentioning_person\", personLink: dv.current().file.link, scopePath: \"spice/daily\" }, { style: \"list\", limit: 30 }]\n});\n```\n\n## Mentions\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"BacklinkPanel\",\n  method: \"render\",\n  args: [{ entityType: \"person\" }]\n});\n```\n",
+        "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PersonNavButtons\" });\n```\n\n# [[{{prompts.name}}]]\n\n## Notes\n-\n\n## Meetings\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"PeopleRendering\",\n  method: \"renderMentionList\",\n  args: [dv, { mode: \"mentioning_person\", personLink: dv.current().file.link, scopePath: \"spice/meetings\" }, { style: \"cards\", limit: 50 }]\n});\n```\n\n## Daily Mentions\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"PeopleRendering\",\n  method: \"renderMentionList\",\n  args: [dv, { mode: \"mentioning_person\", personLink: dv.current().file.link, scopePath: \"spice/daily\" }, { style: \"list\", limit: 30 }]\n});\n```\n\n## Mentions\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"BacklinkPanel\",\n  method: \"render\",\n  args: [{ entityType: \"person\" }]\n});\n```\n",
         "render_in": {
           "kind": "hub",
           "target_path": "spice/people/People.md"
@@ -81,7 +81,7 @@
             "wide"
           ]
         },
-        "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"Breadcrumb\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n---\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"MeetingLeafActions\" });\n```\n\n---\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SectionLabel\", args: [{ text: \"Attendees\", top: true }] });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"PeopleRendering\",\n  method: \"renderMentionList\",\n  args: [{ mode: \"mentioned_in_note\", notePath: dv.current().file.path, scopePath: \"spice/people\" }, { style: \"chips\" }]\n});\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SectionLabel\", args: [{ text: \"Agenda\" }] });\n```\n\n-\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SectionLabel\", args: [{ text: \"Notes\" }] });\n```\n\n<!-- ACTION_ITEMS_MARKER -->\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SectionLabel\", args: [{ text: \"Action Items\" }] });\n```\n",
+        "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n",
         "render_in": {
           "kind": "hub",
           "target_path": "ranch/templates/Meeting Hub.md"
@@ -292,7 +292,11 @@
             "section-hub"
           ]
         },
-        "body_template": "ranch/templates/Template, Section Hub.md"
+        "body_template": "ranch/templates/Template, Section Hub.md",
+        "render_in": {
+          "kind": "hub",
+          "target_path": "ranch/templates/Template, Docs Hub.md"
+        }
       },
       {
         "blueprint": "project",
@@ -337,7 +341,11 @@
             "section-hub"
           ]
         },
-        "body_template": "ranch/templates/Template, Section Hub.md"
+        "body_template": "ranch/templates/Template, Section Hub.md",
+        "render_in": {
+          "kind": "hub",
+          "target_path": "ranch/templates/Template, Section Hub.md"
+        }
       }
     ],
     "finance": [
@@ -595,42 +603,6 @@
           "kind": "hub",
           "target_path": "spice/finance/months/Months.md"
         }
-      },
-      {
-        "blueprint": "finance",
-        "id": "savings",
-        "label": "New Savings",
-        "icon": "piggy-bank",
-        "prompts": [
-          {
-            "key": "name",
-            "label": "Name",
-            "type": "string",
-            "required": true,
-            "default": "Emergency Fund"
-          }
-        ],
-        "destination": {
-          "folder_prefix": "spice/finance/savings",
-          "filename_prefix": "Savings-{{prompts.name|slugify}}"
-        },
-        "frontmatter_template": {
-          "type": "savings-account",
-          "name": "{{prompts.name}}",
-          "target": 0,
-          "current_balance": 0,
-          "balance_history": [],
-          "last_updated": "{{now.YYYY-MM-DD}}",
-          "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
-          "cssclasses": [
-            "wide"
-          ]
-        },
-        "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n<!-- savings-summary-v0.10.0 -->\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SavingsSummary\" });\n```\n",
-        "render_in": {
-          "kind": "hub",
-          "target_path": "spice/finance/savings/Savings.md"
-        }
       }
     ],
     "scratch": [
@@ -694,7 +666,7 @@
         "phone": "",
         "tags": []
       },
-      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PersonNavButtons\" });\n```\n\n# [[{{prompts.name}}]]\n\n## Notes\n-\n\n## Meetings\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"PeopleRendering\",\n  method: \"renderMentionList\",\n  args: [{ mode: \"mentioning_person\", personLink: dv.current().file.link, scopePath: \"spice/meetings\" }, { style: \"cards\", limit: 50 }]\n});\n```\n\n## Daily Mentions\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"PeopleRendering\",\n  method: \"renderMentionList\",\n  args: [{ mode: \"mentioning_person\", personLink: dv.current().file.link, scopePath: \"spice/daily\" }, { style: \"list\", limit: 30 }]\n});\n```\n\n## Mentions\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"BacklinkPanel\",\n  method: \"render\",\n  args: [{ entityType: \"person\" }]\n});\n```\n",
+      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"PersonNavButtons\" });\n```\n\n# [[{{prompts.name}}]]\n\n## Notes\n-\n\n## Meetings\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"PeopleRendering\",\n  method: \"renderMentionList\",\n  args: [dv, { mode: \"mentioning_person\", personLink: dv.current().file.link, scopePath: \"spice/meetings\" }, { style: \"cards\", limit: 50 }]\n});\n```\n\n## Daily Mentions\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"PeopleRendering\",\n  method: \"renderMentionList\",\n  args: [dv, { mode: \"mentioning_person\", personLink: dv.current().file.link, scopePath: \"spice/daily\" }, { style: \"list\", limit: 30 }]\n});\n```\n\n## Mentions\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"BacklinkPanel\",\n  method: \"render\",\n  args: [{ entityType: \"person\" }]\n});\n```\n",
       "render_in": {
         "kind": "hub",
         "target_path": "spice/people/People.md"
@@ -741,7 +713,7 @@
           "wide"
         ]
       },
-      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"Breadcrumb\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n---\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"MeetingLeafActions\" });\n```\n\n---\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SectionLabel\", args: [{ text: \"Attendees\", top: true }] });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", {\n  class: \"PeopleRendering\",\n  method: \"renderMentionList\",\n  args: [{ mode: \"mentioned_in_note\", notePath: dv.current().file.path, scopePath: \"spice/people\" }, { style: \"chips\" }]\n});\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SectionLabel\", args: [{ text: \"Agenda\" }] });\n```\n\n-\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SectionLabel\", args: [{ text: \"Notes\" }] });\n```\n\n<!-- ACTION_ITEMS_MARKER -->\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SectionLabel\", args: [{ text: \"Action Items\" }] });\n```\n",
+      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n",
       "render_in": {
         "kind": "hub",
         "target_path": "ranch/templates/Meeting Hub.md"
@@ -950,7 +922,11 @@
           "section-hub"
         ]
       },
-      "body_template": "ranch/templates/Template, Section Hub.md"
+      "body_template": "ranch/templates/Template, Section Hub.md",
+      "render_in": {
+        "kind": "hub",
+        "target_path": "ranch/templates/Template, Docs Hub.md"
+      }
     },
     {
       "blueprint": "project",
@@ -995,7 +971,11 @@
           "section-hub"
         ]
       },
-      "body_template": "ranch/templates/Template, Section Hub.md"
+      "body_template": "ranch/templates/Template, Section Hub.md",
+      "render_in": {
+        "kind": "hub",
+        "target_path": "ranch/templates/Template, Section Hub.md"
+      }
     },
     {
       "blueprint": "finance",
@@ -1250,42 +1230,6 @@
       "render_in": {
         "kind": "hub",
         "target_path": "spice/finance/months/Months.md"
-      }
-    },
-    {
-      "blueprint": "finance",
-      "id": "savings",
-      "label": "New Savings",
-      "icon": "piggy-bank",
-      "prompts": [
-        {
-          "key": "name",
-          "label": "Name",
-          "type": "string",
-          "required": true,
-          "default": "Emergency Fund"
-        }
-      ],
-      "destination": {
-        "folder_prefix": "spice/finance/savings",
-        "filename_prefix": "Savings-{{prompts.name|slugify}}"
-      },
-      "frontmatter_template": {
-        "type": "savings-account",
-        "name": "{{prompts.name}}",
-        "target": 0,
-        "current_balance": 0,
-        "balance_history": [],
-        "last_updated": "{{now.YYYY-MM-DD}}",
-        "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
-        "cssclasses": [
-          "wide"
-        ]
-      },
-      "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"FinanceNav\" });\n```\n\n<!-- savings-summary-v0.10.0 -->\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SavingsSummary\" });\n```\n",
-      "render_in": {
-        "kind": "hub",
-        "target_path": "spice/finance/savings/Savings.md"
       }
     },
     {

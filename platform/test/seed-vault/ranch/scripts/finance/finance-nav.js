@@ -88,7 +88,7 @@ class FinanceNav {
         } else if (mode.startsWith("entity-")) {
             this._renderEntityContext(root, mode, page);
             this._hr(root);
-        } else if (mode.startsWith("defaults-") || mode === "config-plan") {
+        } else if (mode.startsWith("defaults-")) {
             this._renderDefaultsContext(root, mode);
             this._hr(root);
         }
@@ -102,7 +102,6 @@ class FinanceNav {
             "defaults-budget":   { hubLabel: "Budgets Hub",   hubIcon: this._icon("calculator"),  hubPath: "spice/finance/budgets/Budgets.md" },
             "defaults-paycheck": { hubLabel: "Paychecks Hub", hubIcon: this._icon("coins"),       hubPath: "spice/finance/paychecks/Paychecks.md" },
             "defaults-debt":     { hubLabel: "Debts Hub",     hubIcon: this._icon("credit-card"), hubPath: "spice/finance/debts/Debts.md" },
-            "config-plan":       { hubLabel: "Finance Hub",   hubIcon: this._icon("wallet"),      hubPath: "spice/finance/Finance.md" },
         };
         const cfg = config[mode];
         if (!cfg) return;
@@ -131,15 +130,11 @@ class FinanceNav {
         if (filePath === "spice/finance/Paycheck Defaults.md") return "defaults-paycheck";
         if (filePath === "spice/finance/Debt Defaults.md") return "defaults-debt";
         if (filePath === "spice/finance/months/Months.md") return "hub-months";
-        if (filePath === "spice/finance/savings/Savings.md") return "hub-savings";   // NEW v0.10.0
-        if (filePath === "spice/finance/Finance Plan.md") return "config-plan";       // NEW v0.10.0
         if (type === "budget") return "entity-budget";
         if (type === "paycheck") return "entity-paycheck";
         if (type === "invoice") return "entity-invoice";
         if (type === "debt") return "entity-debt";
         if (type === "month") return "entity-month";
-        if (type === "savings-account") return "entity-savings";   // NEW v0.10.0
-        if (type === "finance-plan") return "config-plan";          // NEW v0.10.0
         return "hub-finance";
     }
 
@@ -150,7 +145,6 @@ class FinanceNav {
         if (mode === "hub-invoices" || mode === "entity-invoice") return "invoices";
         if (mode === "hub-debts" || mode === "entity-debt" || mode === "defaults-debt") return "debts";
         if (mode === "hub-months" || mode === "entity-month") return "months";
-        if (mode === "hub-savings" || mode === "entity-savings") return "savings";   // NEW v0.10.0
         return null;
     }
 
@@ -166,7 +160,6 @@ class FinanceNav {
             { key: "invoices",  label: "Invoices",  path: "spice/finance/invoices/Invoices.md",   icon: this._icon("file-text") },
             { key: "debts",     label: "Debts",     path: "spice/finance/debts/Debts.md",         icon: this._icon("credit-card") },
             { key: "months",    label: "Months",    path: "spice/finance/months/Months.md",       icon: this._icon("calendar") },
-            { key: "savings",   label: "Savings",   path: "spice/finance/savings/Savings.md",      icon: this._icon("piggy-bank") },
         ];
 
         const here = this._hereKey(mode);
@@ -191,7 +184,6 @@ class FinanceNav {
             "hub-invoices":  { instance: "invoice",  defaultsLabel: null,                defaultsPath: null,                                 defaultsIcon: null },
             "hub-debts":     { instance: "debt",     defaultsLabel: "Debt Defaults",     defaultsPath: "spice/finance/Debt Defaults.md",     defaultsIcon: this._icon("settings") },
             "hub-months":    { instance: "month",    defaultsLabel: null,                defaultsPath: null,                                 defaultsIcon: null },
-            "hub-savings":   { instance: "savings",  defaultsLabel: null,                defaultsPath: null,                                 defaultsIcon: null },
         };
         const cfg = config[mode];
         if (!cfg) return;
@@ -231,7 +223,6 @@ class FinanceNav {
             "entity-invoice":  { hubLabel: "Invoices Hub",  hubIcon: this._icon("file-text"),   hubPath: "spice/finance/invoices/Invoices.md",   sub: "invoices",  sortKey: "month",            dir: "ASC"  },
             "entity-debt":     { hubLabel: "Debts Hub",     hubIcon: this._icon("credit-card"), hubPath: "spice/finance/debts/Debts.md",         sub: "debts",     sortKey: "current_balance",  dir: "DESC" },
             "entity-month":    { hubLabel: "Months Hub",    hubIcon: this._icon("calendar"),    hubPath: "spice/finance/months/Months.md",       sub: "months",    sortKey: "month",            dir: "DESC" },
-            "entity-savings":  { hubLabel: "Savings Hub",   hubIcon: this._icon("piggy-bank"),  hubPath: "spice/finance/savings/Savings.md",     sub: "savings",   sortKey: "current_balance",  dir: "DESC" },
         };
         const cfg = subAreaConfig[mode];
         if (!cfg) return;
@@ -311,8 +302,6 @@ class FinanceNav {
                 return '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>';
             case "calendar":
                 return '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>';
-            case "piggy-bank":
-                return '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 5c-1.5 0-2.8 1.4-3 2.5S17.5 10 19 10c.5 0 .9-.1 1.3-.3.4 1.1.7 2.3.7 3.3 0 4.4-3.6 8-8 8s-8-3.6-8-8 3.6-8 8-8c1.4 0 2.7.4 3.9 1"/><path d="M9 11h.01"/></svg>';
             default:
                 return null;
         }

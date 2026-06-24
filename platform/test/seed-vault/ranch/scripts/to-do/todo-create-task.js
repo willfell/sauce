@@ -18,18 +18,6 @@
  */
 class ToDoCreateTask {
 
-    // ---------- Instance delegators (customJS stores INSTANCES) ----------
-    //
-    // customJS stores an INSTANCE under window.customJS.ToDoCreateTask, and
-    // cross-class consumers (TaskInteractions mechanism at v0.127.0+) reach
-    // serializePayloadToLine via that instance. Static-only declarations are
-    // not on the prototype → call throws at runtime. Mirrors TaskParser +
-    // RecurrenceParser delegator posture (instance method must precede the
-    // static in source order so run-customjs-contract.js .find() returns the
-    // non-static first; see customjs-guard semantics).
-
-    serializePayloadToLine(payload) { return ToDoCreateTask.serializePayloadToLine(payload); }
-
     // ---------- Static pure helpers ----------
 
     /**
@@ -219,31 +207,7 @@ class ToDoCreateTask {
             frequency: 'daily',
             frequencyArg: null,
             project: null,
-            editExisting: null,
         };
-
-        // v0.127.0 §F: editExisting mode — opening the modal pre-filled to update
-        // an existing `- [ ] ` line in place. Forces one-shot tab (recurring edit
-        // is out of scope for this cycle); hydrates state from the parsed task.
-        // The submit handler in _appendFooter branches on state.editExisting and
-        // dispatches to customJS.TaskInteractions.replaceTaskAt instead of the
-        // create-path. Destination cross-file moves are disabled — the source
-        // file path is the SAME file we're editing.
-        if (opts && opts.editExisting && opts.editExisting.parsed) {
-            const p = opts.editExisting.parsed;
-            state.editExisting = opts.editExisting;
-            state.mode = 'one-shot';
-            state.title = p.title || '';
-            state.priority = p.priority || '';
-            state.due = p.due || '';
-            state.scheduled = p.scheduled || '';
-            if (p.project) {
-                const slug = String(p.project).toLowerCase().replace(/[^a-z0-9]+/g, '-');
-                state.destination = { type: 'project', slug, name: p.project };
-            } else {
-                state.destination = 'today';
-            }
-        }
 
         const setTab = (which) => {
             state.mode = which;
@@ -294,12 +258,6 @@ class ToDoCreateTask {
         }
         if (state.destination && state.destination !== 'today' && state.destination.type === 'project') {
             destSelect.value = `project:${state.destination.slug}:${state.destination.name}`;
-        }
-        // v0.127.0 §F: in editExisting mode, destination is the file we're
-        // editing — cross-file moves are out of scope for the inline edit modal.
-        if (state.editExisting) {
-            destSelect.disabled = true;
-            destSelect.style.opacity = '0.5';
         }
         destSelect.onchange = () => {
             if (destSelect.value === 'today') state.destination = 'today';
@@ -466,11 +424,7 @@ class ToDoCreateTask {
         cancel.style.cssText = 'padding:6px 14px; border-radius:4px; border:1px solid var(--background-modifier-border,#444); background:var(--background-secondary,#2a2a2a); color:var(--text-normal,#ddd);';
         cancel.onclick = () => overlay.remove();
 
-        // v0.127.0 §F: submit label is 'Save' when editing an existing task
-        // line in place, 'Create' for the default create-path. state.editExisting
-        // is set BEFORE _appendFooter is called from setTab/_renderOneShotForm.
-        const submitLabel = state.editExisting ? 'Save' : 'Create';
-        const submit = footer.createEl('button', { text: submitLabel });
+        const submit = footer.createEl('button', { text: 'Create' });
         submit.classList.add('mod-cta');
         submit.style.cssText = 'padding:6px 14px; border-radius:4px; border:1px solid var(--interactive-accent,#6a6abf); background:var(--interactive-accent,#6a6abf); color:white;';
         submit.disabled = true;
@@ -483,20 +437,6 @@ class ToDoCreateTask {
             const payload = this._payloadFromState(state);
             const v = ToDoCreateTask.validatePayload(payload);
             if (!v.valid) { new Notice('Invalid task: ' + v.reason); return; }
-            // v0.127.0 §F: editExisting branch — serialize the payload and call
-            // TaskInteractions.replaceTaskAt instead of the create-path. On
-            // success, close overlay + focus the source file (reuses the
-            // forceLeafPreview pattern from _submit). On failure, notice the
-            // reason; never throw — TaskInteractions never throws either.
-            if (state.editExisting) {
-                try {
-                    await this._submitEdit(payload, state.editExisting);
-                    overlay.remove();
-                } catch (e) {
-                    new Notice('Save failed: ' + (e.message || e), 6000);
-                }
-                return;
-            }
             try {
                 await this._submit(payload);
                 overlay.remove();
@@ -505,44 +445,6 @@ class ToDoCreateTask {
             }
         };
         return { submitBtn: submit, updateSubmit };
-    }
-
-    /**
-     * v0.127.0 §F: edit-existing submit path. Serializes the payload, dispatches
-     * to customJS.TaskInteractions.replaceTaskAt, and on success opens the
-     * source file on a captured leaf (mirrors _submit's auto-open posture).
-     * NEVER throws past the wrapping try/catch in the click handler — every
-     * recoverable error surfaces as a Notice.
-     */
-    async _submitEdit(payload, editExisting) {
-        const ti = window.customJS && window.customJS.TaskInteractions;
-        if (!ti || typeof ti.replaceTaskAt !== 'function') {
-            new Notice('task-interactions mechanism not loaded; cannot save edit', 6000);
-            return;
-        }
-        const line = ToDoCreateTask.serializePayloadToLine(payload);
-        if (!line) {
-            new Notice('Could not serialize task line', 6000);
-            return;
-        }
-        const res = await ti.replaceTaskAt(editExisting.filePath, editExisting.lineIdx, line);
-        if (!res || !res.ok) {
-            new Notice('Could not update task: ' + ((res && res.reason) || 'unknown'), 6000);
-            return;
-        }
-        new Notice('Task updated');
-        // Mirror _submit's auto-open posture: focus the source file so the
-        // user sees the updated line. Defensive: skip when app.vault is absent
-        // (CLI / test contexts) — the overlay close still happens upstream.
-        try {
-            const vault = window.app && window.app.vault;
-            if (!vault) return;
-            const file = vault.getAbstractFileByPath(editExisting.filePath);
-            if (!file) return;
-            const leaf = window.app.workspace.getLeaf(false);
-            await leaf.openFile(file);
-            window.customJS.OpenHelpers?.forceLeafPreview?.(leaf);
-        } catch (_e) { /* swallow — focus is best-effort */ }
     }
 
     _payloadFromState(state) {
@@ -581,12 +483,8 @@ class ToDoCreateTask {
         await vault.modify(file, updated);
         new Notice(`Created task in ${dest.split('/').pop()}`);
         // Auto-open the destination for context, unless it's the registry (background quietly).
-        // Open the TFile on a captured leaf so the deferred read-mode flip
-        // targets THIS note even if focus moves first.
         if (payload.mode !== 'recurring') {
-            const leaf = window.app.workspace.getLeaf(false);
-            await leaf.openFile(file);
-            window.customJS.OpenHelpers?.forceLeafPreview?.(leaf);
+            window.app.workspace.openLinkText(dest, '', false);
         }
     }
 

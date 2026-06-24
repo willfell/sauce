@@ -1,7 +1,7 @@
 ---
 created: <% tp.file.creation_date("YYYY-MM-DD HH:mm") %>
 tags:
-  - "seed-test-vault"
+  - "sauce-seed-gen2.kvykhe"
   - meetings-hub
   - <% tp.date.now("YYYY/MM/DD") %>
 cssclasses:
@@ -18,15 +18,13 @@ await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 
 ```dataviewjs
 // entity-create:meeting — installer-managed; do not delete this comment
-await dv.view("ranch/views/customjs-guard", { class: "EntityCreate", args: [{ instance: "meeting" }] });
+await customJS.EntityCreate.render(dv, { instance: "meeting" });
 ```
 
 
 ---
 
-```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Today's Meetings" }] });
-```
+## Today's Meetings
 
 ```dataviewjs
 await dv.view("ranch/views/customjs-guard", { class: "MeetingsHubCards" });

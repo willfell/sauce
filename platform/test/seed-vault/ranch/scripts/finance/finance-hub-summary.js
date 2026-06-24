@@ -119,29 +119,9 @@ class FinanceHubSummary {
         const row = root.createEl("div", { cls: "fhs-tiles" });
         row.style.cssText = "display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px;";
 
-        this._renderPlanTile(row, dv);
         this._renderBudgetTile(row, dv);
         this._renderPaycheckTile(row, dv);
         this._renderInvoicesTile(row, dv);
-    }
-
-    // ----- Plan tile (v0.10.0) — envelope left + zero-debt date, links to Finance Plan.md
-    _renderPlanTile(row, dv) {
-        const tile = this._makeTile(row, "fhs-tile-plan");
-        this._tileLabel(tile, "Plan");
-        let ps = null;
-        try {
-            const now = new Date();
-            const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-            ps = customJS.FinanceMath.computePlanState(dv, monthKey);
-        } catch (_e) {}
-        if (!ps || !ps.ok) {
-            this._tileMuted(tile, "No plan yet");
-        } else {
-            this._tileValue(tile, `${this._fmtMoney(ps.envelope.left)} left`);
-            this._tileMuted(tile, `envelope ${this._fmtMoney(ps.envelope.effective)} · zero-debt ${ps.payoff.zeroDebtDate}`);
-        }
-        tile.addEventListener("click", () => app.workspace.openLinkText("spice/finance/Finance Plan.md", ""));
     }
 
     _makeTile(parent, cls) {

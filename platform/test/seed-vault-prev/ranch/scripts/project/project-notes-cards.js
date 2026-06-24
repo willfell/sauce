@@ -10,11 +10,7 @@
  */
 class ProjectNotesCards {
     async render(dv) {
-        const current = dv && dv.current ? dv.current() : null;
-        // v0.119.0 PATCH: bail when Dataview hasn't indexed the file yet
-        // (typically the first render after EntityCreate.openFile on a newly
-        // created project). Next render tick will succeed.
-        if (!current || !current.file) return;
+        const current = dv.current();
         const folder = current.file.folder;
         const pages = dv.pages(`"${folder}"`)
             .where(p => p.file.name !== current.file.name && !p.file.name.endsWith("-board"));

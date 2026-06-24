@@ -50,7 +50,7 @@ date: <% tp.file.creation_date("YYYY-MM-DDTHH:mm:ssZ") %>
 created_at: "<% tp.file.creation_date("YYYY-MM-DDTHH:mm:ssZ") %>"
 type: meeting
 tags:
-  - "seed-test-vault"
+  - "sauce-seed-gen2.kvykhe"
 summary: ""
 attendees:
 <%* for (const attendee of attendees) {
@@ -65,46 +65,41 @@ cssclasses:
 ---
 
 ```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "Breadcrumb" });
-```
-
-```dataviewjs
 await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 ```
 
 ---
 
-```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "MeetingLeafActions" });
-```
-
----
-
-```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Attendees", top: true }] });
-```
+## Attendees
 
 ```dataviewjs
 await dv.view("ranch/views/customjs-guard", {
   class: "PeopleRendering",
   method: "renderMentionList",
-  args: [{ mode: "mentioned_in_note", notePath: dv.current().file.path, scopePath: "spice/people" }, { style: "chips" }]
+  args: [dv, { mode: "mentioned_in_note", notePath: dv.current().file.path, scopePath: "spice/people" }, { style: "chips" }]
 });
 ```
 
-```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Agenda" }] });
-```
+<%* for (const attendee of attendees) {
+  tR += `- [[${attendee}]]\n`;
+}
+if (attendees.length === 0) {
+  tR += `-\n`;
+} -%>
+
+---
+
+## Agenda
 
 -
 
-```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Notes" }] });
-```
+---
 
-<!-- ACTION_ITEMS_MARKER -->
+## Notes
 
-```dataviewjs
-await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Action Items" }] });
-```
+
+
+---
+
+## Action Items
 
