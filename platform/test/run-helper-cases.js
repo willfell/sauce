@@ -7235,7 +7235,7 @@ async function caseFA6DomainManifests() {
   // v0.118.0 — widened to-do to accept 0.6.x (MINOR bump).
   // v0.119.0 — widened to-do to accept 0.7.x (MINOR bump for additive sentinel + markdown render).
   // v0.123.0 — widened to-do to accept 0.10.x (MINOR bump: drop project dep, add breadcrumb dep).
-  for (const [bp, expected] of [["trips", "0.3.0"], ["to-do", /^0\.(4|5|6|7|8|9|10|11|12)\.\d+$/], ["boards", "0.2.1"]]) {
+  for (const [bp, expected] of [["trips", "0.3.0"], ["to-do", /^0\.(4|5|6|7|8|9|10|11|12|13)\.\d+$/], ["boards", "0.2.1"]]) {
     const m = JSON.parse(fs.readFileSync(
       path.join(WORKSHOP, `platform/blueprints/${bp}/manifest.json`), "utf8"));
     const match = expected instanceof RegExp ? expected.test(m.version) : m.version === expected;
@@ -7404,8 +7404,8 @@ async function caseTodoManifestV3() {
   // v0.116.0 widened from === "0.3.3" → 0.(3|4).x lineage; v0.4.0 retires ToDoMigrate{Modal,Init}
   // and replaces with ToDoCreateTaskInit startup script. v0.119.0 widened to accept 0.7.x.
   // v0.123.0 bumps to 0.10.0 (drops project dep, adds breadcrumb dep).
-  assertTrue("TD-HC-1 version 0.3.x through 0.12.x",
-    /^0\.(3|4|5|6|7|8|9|10|11|12)\.\d+$/.test(m.version), `got ${m.version}`);
+  assertTrue("TD-HC-1 version 0.3.x through 0.13.x",
+    /^0\.(3|4|5|6|7|8|9|10|11|12|13)\.\d+$/.test(m.version), `got ${m.version}`);
   assertTrue("TD-HC-1 customjs_classes includes ToDoCreateTaskInit (v0.4.0)",
     Array.isArray(m.customjs_classes) && m.customjs_classes.includes("ToDoCreateTaskInit"));
   assertTrue("TD-HC-1 customjs_classes includes ToDoLeafActions (v0.63.1)",
@@ -7446,8 +7446,8 @@ async function caseHCV01174TodoManifest() {
   // v0.119.0: bumped 0.6.1 → 0.7.0 (additive sentinel + markdown rendering + applyRecurringSentinelV070Migration).
   // v0.119.1: bumped 0.7.0 → 0.7.1 (insertRecurringIntoToday merge-into-existing + mergeDuplicateRecurringSections heal + materialize_once on registry).
   // v0.123.0: bumped 0.9.0 → 0.10.0 (drops project >=1.21.0 dep, adds breadcrumb >=0.1.0 dep).
-  assertTrue("HC-V01174-TODO-MANIFEST-1: version matches 0.7.x through 0.12.x",
-    /^0\.(7|8|9|10|11|12)\.\d+$/.test(m.version), `got: ${m.version}`);
+  assertTrue("HC-V01174-TODO-MANIFEST-1: version matches 0.7.x through 0.13.x",
+    /^0\.(7|8|9|10|11|12|13)\.\d+$/.test(m.version), `got: ${m.version}`);
 
   // v0.123.0: to-do's only reason to depend on project was Breadcrumb. The
   // breadcrumb mechanism (v0.123.0) ships it as a shared primitive; to-do now
@@ -7458,13 +7458,17 @@ async function caseHCV01174TodoManifest() {
     (!!projDep && projDep.range === ">=1.21.0") || (!!breadcrumbDep && breadcrumbDep.range === ">=0.1.0"),
     `got project=${JSON.stringify(projDep)} breadcrumb=${JSON.stringify(breadcrumbDep)}`);
 
+  // v0.128.0: customjs_classes[] grew from 12 → 13 entries. EditableTaskList
+  // is the canonical name post-rename; TodayCaptureEditableList is kept as a
+  // back-compat alias so v0.127.x notes keep rendering until heal step 6's
+  // class-rewrite pass migrates them.
   const expectedClasses = [
     "ToDoHubActions", "ToDoLeafActions", "ToDoAllList", "TaskParser",
     "RecurrenceParser", "ToDoDailyCarryover", "ToDoDailyRecurring",
     "ToDoDailyProjectGroups", "ToDoDailyUnassignedMeetings", "ToDoCreateTask",
-    "ToDoCreateTaskInit", "TodayCaptureEditableList",
+    "ToDoCreateTaskInit", "EditableTaskList", "TodayCaptureEditableList",
   ];
-  assertTrue("HC-V01174-TODO-MANIFEST-3: customjs_classes deep-equals exact 12-element array (order; +TodayCaptureEditableList in v0.127.0)",
+  assertTrue("HC-V01174-TODO-MANIFEST-3: customjs_classes deep-equals exact 13-element array (order; +EditableTaskList canonical name in v0.128.0; TodayCaptureEditableList alias retained for back-compat)",
     JSON.stringify(m.customjs_classes) === JSON.stringify(expectedClasses),
     `got: ${JSON.stringify(m.customjs_classes)}`);
 
@@ -11226,7 +11230,7 @@ async function caseV01030ProjMan1VersionAndCustomjs() {
   // block; helpers/breadcrumb.js dropped from files[]; Breadcrumb dropped from
   // customjs_classes since the mechanism owns it now).
   assertTrue("HC-V01030-PROJ-MAN-1a: project manifest version 1.21.x or 1.22.x or 1.23.x or 1.24.x",
-    m && /^1\.(21|22|23|24|25|26)\.\d+$/.test(m.version), `got: ${m && m.version}`);
+    m && /^1\.(21|22|23|24|25|26|27)\.\d+$/.test(m.version), `got: ${m && m.version}`);
   const cls = (m && Array.isArray(m.customjs_classes)) ? m.customjs_classes : [];
   // v0.123.0 — Breadcrumb migrated to the breadcrumb mechanism. The project
   // blueprint depends on it via depends_on instead of listing the class directly.
@@ -11610,7 +11614,7 @@ async function caseV01040Man1Manifest118() {
   // v0.106.0 → 1.20.0 (DocSearch persistence + dashboard widgets).
   // v0.109.0 → 1.21.0 (projects visual overhaul: DocSearch params, SectionLabel,
   // ProjectsHubCards search, template rewrite, Breadcrumb extension, marker cleanup).
-  assertTrue("HC-V01040-MAN-1: project blueprint version 1.21.x or 1.22.x or 1.23.x", /^1\.(21|22|23|24|25|26)\.\d+$/.test(m.version));
+  assertTrue("HC-V01040-MAN-1: project blueprint version 1.21.x or 1.22.x or 1.23.x", /^1\.(21|22|23|24|25|26|27)\.\d+$/.test(m.version));
   assertTrue("HC-V01040-MAN-1: customjs_classes includes DocSearch",
     Array.isArray(m.customjs_classes) && m.customjs_classes.includes("DocSearch"));
   const sources = (m.files || []).map(f => f.source);
@@ -11715,7 +11719,7 @@ async function caseV01050Man1ProjectManifest119() {
   console.log("\n--- Case HC-V01050-MAN-1: project blueprint manifest 1.21.0 (v0.109.0 bump) + doc-note prompts use new options_source ---");
   const m = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/manifest.json"), "utf8"));
   // v0.109.0 bumped project blueprint 1.20.0 → 1.21.0 (projects visual overhaul).
-  assertTrue("HC-V01050-MAN-1: project blueprint version 1.21.x or 1.22.x or 1.23.x", /^1\.(21|22|23|24|25|26)\.\d+$/.test(m.version),
+  assertTrue("HC-V01050-MAN-1: project blueprint version 1.21.x or 1.22.x or 1.23.x", /^1\.(21|22|23|24|25|26|27)\.\d+$/.test(m.version),
     `got: ${m.version}`);
   // Locate doc-note entity-create entry.
   const docNote = (m.new_entity_buttons || []).find(b => b.id === "doc-note");
@@ -14054,13 +14058,13 @@ async function caseV0110VersionBump() {
     fbp && /^0\.(6|7|8|9|10)\.\d+$/.test(fbp.version), `got: ${fbp?.version}`);
   const pbp = (ws.blueprints || []).find(b => b.name === "project");
   assertTrue("V0110-VER-3: project pin 1.21.x or 1.22.x or 1.23.x",
-    pbp && /^1\.(21|22|23|24|25|26)\.\d+$/.test(pbp.version), `got: ${pbp?.version}`);
+    pbp && /^1\.(21|22|23|24|25|26|27)\.\d+$/.test(pbp.version), `got: ${pbp?.version}`);
   const fin = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
   assertTrue("V0110-VER-4: finance manifest version 0.6.x or 0.7.x or 0.8.x",
     /^0\.(6|7|8|9|10)\.\d+$/.test(fin.version), `got: ${fin.version}`);
   const proj = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/manifest.json"), "utf8"));
   assertTrue("V0110-VER-5: project manifest version 1.21.x or 1.22.x or 1.23.x",
-    /^1\.(21|22|23|24|25|26)\.\d+$/.test(proj.version), `got: ${proj.version}`);
+    /^1\.(21|22|23|24|25|26|27)\.\d+$/.test(proj.version), `got: ${proj.version}`);
 }
 
 // v0.5.3 CF-3 — applyFinancePaycheckBodyMigration (PaycheckSummary block
@@ -14333,18 +14337,21 @@ async function caseHCV0127Versions() {
   const sub = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "ranch/platform-subscription.json"), "utf8"));
 
-  // A: workshop_version is on the 0.128.x line across the three canonical
-  // version files. PATCH-tolerant (regex /^0\.128\.\d+$/) so in-cycle PATCHes
-  // (v0.128.1+) don't require a sweep; landmine #16 hygiene. Bumped from 0.127.x
-  // at the v0.128.0 finance-planning-layer cycle (merge of v0.127.1).
-  assertTrue("HC-V0127-VERSION-A1: platform/manifest.json workshop_version matches /^0\\.128\\.\\d+$/",
-    /^0\.128\.\d+$/.test(platformMan.workshop_version), `got: ${platformMan.workshop_version}`);
-  assertTrue("HC-V0127-VERSION-A2: package.json version matches /^0\\.128\\.\\d+$/",
-    /^0\.128\.\d+$/.test(pkg.version), `got: ${pkg.version}`);
-  assertTrue("HC-V0127-VERSION-A3: ranch/platform-subscription.json workshop_version matches /^0\\.128\\.\\d+$/",
-    /^0\.128\.\d+$/.test(sub.workshop_version), `got: ${sub.workshop_version}`);
+  // A: workshop_version is on the 0.129.x line across the three canonical
+  // version files. PATCH-tolerant (regex /^0\.129\.\d+$/) so in-cycle PATCHes
+  // don't require a sweep; landmine #16 hygiene. Bumped from 0.128.x at the
+  // v0.129.0 project-todo click-to-edit cycle (which originally targeted
+  // v0.128.0 but rebased onto v0.128.2 after the finance-planning-layer
+  // cycle shipped first).
+  assertTrue("HC-V0127-VERSION-A1: platform/manifest.json workshop_version matches /^0\\.129\\.\\d+$/",
+    /^0\.129\.\d+$/.test(platformMan.workshop_version), `got: ${platformMan.workshop_version}`);
+  assertTrue("HC-V0127-VERSION-A2: package.json version matches /^0\\.129\\.\\d+$/",
+    /^0\.129\.\d+$/.test(pkg.version), `got: ${pkg.version}`);
+  assertTrue("HC-V0127-VERSION-A3: ranch/platform-subscription.json workshop_version matches /^0\\.129\\.\\d+$/",
+    /^0\.129\.\d+$/.test(sub.workshop_version), `got: ${sub.workshop_version}`);
 
-  // F (v0.128.0): finance catalogue pin 0.10.0 — NEW planning/lever/allocation layer.
+  // F (v0.128.0): finance catalogue pin 0.10.x — NEW planning/lever/allocation
+  // layer. Shipped on origin/main; preserved across the v0.129.0 rebase.
   const finance = (platformMan.blueprints || []).find(b => b && b.name === "finance");
   assertTrue("HC-V0128-VERSION-F1: finance catalogue entry present",
     !!finance, `got: ${JSON.stringify(finance)}`);
@@ -14352,6 +14359,7 @@ async function caseHCV0127Versions() {
     finance && /^0\.10\.\d+$/.test(finance.version), `got: ${finance && finance.version}`);
 
   // B: meetings catalogue pin 0.12.0 in both manifest + subscription.
+  // (Untouched by v0.128.0; meetings still pinned at 0.12.0.)
   const meetings = (platformMan.blueprints || []).find(b => b && b.name === "meetings");
   assertTrue("HC-V0127-VERSION-B1: meetings catalogue entry present",
     !!meetings, `got: ${JSON.stringify(meetings)}`);
@@ -14361,41 +14369,112 @@ async function caseHCV0127Versions() {
   assertEqual(meetingsSub && meetingsSub.version, "0.12.0",
     "HC-V0127-VERSION-B3: meetings subscription pin === 0.12.0");
 
-  // C: project catalogue pin 1.26.0 in both manifest + subscription.
+  // C: project catalogue pin on the 1.27.x line in both manifest + subscription
+  // (widened from exact 1.26.0 at v0.128.0 S7 — S5.1 bumped project to 1.27.0
+  // for the new_entity_buttons project-todo inline_body mirror; PATCH-tolerant
+  // regex per landmine #16 v0.127.1 lesson).
   const project = (platformMan.blueprints || []).find(b => b && b.name === "project");
   assertTrue("HC-V0127-VERSION-C1: project catalogue entry present",
     !!project, `got: ${JSON.stringify(project)}`);
-  assertEqual(project && project.version, "1.26.0",
-    "HC-V0127-VERSION-C2: project catalogue version === 1.26.0");
+  assertTrue("HC-V0127-VERSION-C2: project catalogue version matches /^1\\.27\\.\\d+$/",
+    project && /^1\.27\.\d+$/.test(project.version), `got: ${project && project.version}`);
   const projectSub = (sub.blueprints || []).find(b => b && b.name === "project");
-  assertEqual(projectSub && projectSub.version, "1.26.0",
-    "HC-V0127-VERSION-C3: project subscription pin === 1.26.0");
+  assertTrue("HC-V0127-VERSION-C3: project subscription pin matches /^1\\.27\\.\\d+$/",
+    projectSub && /^1\.27\.\d+$/.test(projectSub.version), `got: ${projectSub && projectSub.version}`);
 
-  // D: to-do catalogue pin 0.12.x in both manifest + subscription. PATCH-tolerant
-  // because v0.127.0 shipped an in-cycle 0.12.0 → 0.12.1 bump (instance delegator
-  // for serializePayloadToLine after the customJS contract check surfaced the
-  // unreachable-static issue mid-S9).
+  // D: to-do catalogue pin on the 0.13.x line in both manifest + subscription
+  // (widened from /^0\.12\.\d+$/ at v0.128.0 S7 — S4 bumped to-do 0.12.1 → 0.13.0
+  // for TodayCaptureEditableList → EditableTaskList rename + sectionAnchor arg;
+  // PATCH-tolerant regex per landmine #16 v0.127.1 lesson).
   const todo = (platformMan.blueprints || []).find(b => b && b.name === "to-do");
   assertTrue("HC-V0127-VERSION-D1: to-do catalogue entry present",
     !!todo, `got: ${JSON.stringify(todo)}`);
-  assertTrue("HC-V0127-VERSION-D2: to-do catalogue version === 0.12.x",
-    todo && /^0\.12\.\d+$/.test(todo.version), `got: ${todo && todo.version}`);
+  assertTrue("HC-V0127-VERSION-D2: to-do catalogue version matches /^0\\.13\\.\\d+$/",
+    todo && /^0\.13\.\d+$/.test(todo.version), `got: ${todo && todo.version}`);
   const todoSub = (sub.blueprints || []).find(b => b && b.name === "to-do");
-  assertTrue("HC-V0127-VERSION-D3: to-do subscription pin === 0.12.x",
-    todoSub && /^0\.12\.\d+$/.test(todoSub.version), `got: ${todoSub && todoSub.version}`);
+  assertTrue("HC-V0127-VERSION-D3: to-do subscription pin matches /^0\\.13\\.\\d+$/",
+    todoSub && /^0\.13\.\d+$/.test(todoSub.version), `got: ${todoSub && todoSub.version}`);
 
-  // E: NEW mechanism task-interactions catalogue pin 0.1.0 in both manifest +
-  // subscription. This is the first cycle to ship it.
+  // E: mechanism task-interactions catalogue pin on the 0.2.x line in both
+  // manifest + subscription (widened from exact 0.1.0 at v0.128.0 S7 — S2 bumped
+  // task-interactions 0.1.0 → 0.2.0 for ownedTasksAnchor + injectOwnedTasksMarker
+  // + appendTask project-todo loosen; PATCH-tolerant regex per landmine #16).
   const taskI = (platformMan.mechanisms || []).find(m => m && m.name === "task-interactions");
   assertTrue("HC-V0127-VERSION-E1: task-interactions catalogue entry present",
     !!taskI, `got: ${JSON.stringify(taskI)}`);
-  assertEqual(taskI && taskI.version, "0.1.0",
-    "HC-V0127-VERSION-E2: task-interactions catalogue version === 0.1.0");
+  assertTrue("HC-V0127-VERSION-E2: task-interactions catalogue version matches /^0\\.2\\.\\d+$/",
+    taskI && /^0\.2\.\d+$/.test(taskI.version), `got: ${taskI && taskI.version}`);
   assertEqual(taskI && taskI.path, "mechanisms/task-interactions",
     "HC-V0127-VERSION-E3: task-interactions catalogue path === mechanisms/task-interactions");
   const taskISub = (sub.mechanisms || []).find(m => m && m.name === "task-interactions");
-  assertEqual(taskISub && taskISub.version, "0.1.0",
-    "HC-V0127-VERSION-E4: task-interactions subscription pin === 0.1.0");
+  assertTrue("HC-V0127-VERSION-E4: task-interactions subscription pin matches /^0\\.2\\.\\d+$/",
+    taskISub && /^0\.2\.\d+$/.test(taskISub.version), `got: ${taskISub && taskISub.version}`);
+}
+
+// ========================================================================
+// v0.128.0 HC-V0128-VERSION-* — exact catalogue pins for the v0.128.0
+// (project-todo click-to-edit) catalogue state. Sub-asserts pin the NEW
+// state shipped in this cycle:
+//   - workshop_version on the 0.128.x line (manifest + package.json + workshop sub)
+//   - task-interactions mechanism 0.2.0 (S2: ownedTasksAnchor + injectOwnedTasksMarker)
+//   - to-do blueprint 0.13.0 (S4: EditableTaskList rename + sectionAnchor arg)
+//   - project blueprint 1.27.0 (S5.1: new_entity_buttons project-todo inline_body mirror)
+// Per landmine #16 v0.127.1 lesson: PATCH-tolerant regexes by default so a
+// future PATCH bump (v0.128.1+) doesn't re-sweep these lines.
+// ========================================================================
+async function caseHCV0128Versions() {
+  console.log("\n--- Case HC-V0128-VERSION-A..D: v0.128.0 catalogue pins ---");
+  const platformMan = JSON.parse(fs.readFileSync(
+    path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
+  const pkg = JSON.parse(fs.readFileSync(
+    path.join(WORKSHOP, "package.json"), "utf8"));
+  const sub = JSON.parse(fs.readFileSync(
+    path.join(WORKSHOP, "ranch/platform-subscription.json"), "utf8"));
+
+  // A: workshop_version on the 0.128.x line — manifest + package.json + workshop sub.
+  // PATCH-tolerant regex per landmine #16 v0.127.1 lesson.
+  assertTrue("HC-V0128-VERSION-A1: platform/manifest.json workshop_version matches /^0\\.128\\.\\d+$/",
+    /^0\.128\.\d+$/.test(platformMan.workshop_version), `got: ${platformMan.workshop_version}`);
+  assertTrue("HC-V0128-VERSION-A2: package.json version matches /^0\\.128\\.\\d+$/",
+    /^0\.128\.\d+$/.test(pkg.version), `got: ${pkg.version}`);
+  assertTrue("HC-V0128-VERSION-A3: ranch/platform-subscription.json workshop_version matches /^0\\.128\\.\\d+$/",
+    /^0\.128\.\d+$/.test(sub.workshop_version), `got: ${sub.workshop_version}`);
+
+  // B: task-interactions mechanism on the 0.2.x line in both manifest + subscription.
+  // S2 bumped 0.1.0 → 0.2.0 for ownedTasksAnchor + injectOwnedTasksMarker +
+  // appendTask project-todo loosen.
+  const taskI = (platformMan.mechanisms || []).find(m => m && m.name === "task-interactions");
+  assertTrue("HC-V0128-VERSION-B1: task-interactions catalogue entry present",
+    !!taskI, `got: ${JSON.stringify(taskI)}`);
+  assertTrue("HC-V0128-VERSION-B2: task-interactions catalogue version matches /^0\\.2\\.\\d+$/",
+    taskI && /^0\.2\.\d+$/.test(taskI.version), `got: ${taskI && taskI.version}`);
+  const taskISub = (sub.mechanisms || []).find(m => m && m.name === "task-interactions");
+  assertTrue("HC-V0128-VERSION-B3: task-interactions subscription pin matches /^0\\.2\\.\\d+$/",
+    taskISub && /^0\.2\.\d+$/.test(taskISub.version), `got: ${taskISub && taskISub.version}`);
+
+  // C: to-do blueprint on the 0.13.x line in both manifest + subscription.
+  // S4 bumped 0.12.1 → 0.13.0 for TodayCaptureEditableList → EditableTaskList
+  // rename + sectionAnchor arg dispatch.
+  const todo = (platformMan.blueprints || []).find(b => b && b.name === "to-do");
+  assertTrue("HC-V0128-VERSION-C1: to-do catalogue entry present",
+    !!todo, `got: ${JSON.stringify(todo)}`);
+  assertTrue("HC-V0128-VERSION-C2: to-do catalogue version matches /^0\\.13\\.\\d+$/",
+    todo && /^0\.13\.\d+$/.test(todo.version), `got: ${todo && todo.version}`);
+  const todoSub = (sub.blueprints || []).find(b => b && b.name === "to-do");
+  assertTrue("HC-V0128-VERSION-C3: to-do subscription pin matches /^0\\.13\\.\\d+$/",
+    todoSub && /^0\.13\.\d+$/.test(todoSub.version), `got: ${todoSub && todoSub.version}`);
+
+  // D: project blueprint on the 1.27.x line in both manifest + subscription.
+  // S5.1 bumped 1.26.0 → 1.27.0 for new_entity_buttons project-todo inline_body
+  // mirror.
+  const project = (platformMan.blueprints || []).find(b => b && b.name === "project");
+  assertTrue("HC-V0128-VERSION-D1: project catalogue entry present",
+    !!project, `got: ${JSON.stringify(project)}`);
+  assertTrue("HC-V0128-VERSION-D2: project catalogue version matches /^1\\.27\\.\\d+$/",
+    project && /^1\.27\.\d+$/.test(project.version), `got: ${project && project.version}`);
+  const projectSub = (sub.blueprints || []).find(b => b && b.name === "project");
+  assertTrue("HC-V0128-VERSION-D3: project subscription pin matches /^1\\.27\\.\\d+$/",
+    projectSub && /^1\.27\.\d+$/.test(projectSub.version), `got: ${projectSub && projectSub.version}`);
 }
 
 // v0.128.0 HC-V0128-FIN-PLAN-* — finance planning/lever/allocation layer source contracts.
@@ -14808,6 +14887,7 @@ async function caseHCV0128FinancePlanning() {
   await caseHCV0891Versions();
   await caseHCV0127Versions();
   await caseHCV0128FinancePlanning();
+  await caseHCV0128Versions();
   await caseFA2ProductsCanonical();
   await caseFA2TeamsCanonical();
   await caseFA2RuleFragmentsExtends();

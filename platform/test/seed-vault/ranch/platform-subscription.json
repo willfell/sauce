@@ -43,7 +43,7 @@
     },
     {
       "name": "task-interactions",
-      "version": "0.1.0"
+      "version": "0.2.0"
     },
     {
       "name": "breadcrumb",
@@ -113,11 +113,11 @@
     },
     {
       "name": "project",
-      "version": "1.26.0"
+      "version": "1.27.0"
     },
     {
       "name": "to-do",
-      "version": "0.12.1"
+      "version": "0.13.0"
     },
     {
       "name": "journal",

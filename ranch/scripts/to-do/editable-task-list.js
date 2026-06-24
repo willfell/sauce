@@ -6,12 +6,12 @@
  * priority, scheduled) without raw markdown editing.
  *
  * Provenance: v0.127.0 §F introduced this surface as TodayCaptureEditableList
- * scoped to the daily-note Today section via the  // lint-display-markers:allow prose mention, not a renderer marker
+ * scoped to the daily-note `## Today` section via the
  * <!-- TODAY_CAPTURE_MARKER --> sentinel. v0.128.0 §B generalized the surface
  * into EditableTaskList driven by a `sectionAnchor` opts argument so the same
  * renderer can target multiple bounded scopes. Two consumer surfaces ship at
  * v0.128.0:
- *   - Today To-Do (daily note Today section) via `sectionAnchor: "todayCapture"`  // lint-display-markers:allow prose mention
+ *   - Today To-Do (daily note `## Today` section) via `sectionAnchor: "todayCapture"`
  *   - Project To-Do (project-todo note Owned Tasks section) via `sectionAnchor: "ownedTasks"`
  *
  * Anchor scope: TaskInteractions.findTaskLines(content, sectionAnchor)
@@ -134,11 +134,4 @@ class EditableTaskList {
 // to keep those notes rendering until heal step 6's class-rewrite pass
 // (v0.128.0 §D) migrates them to the canonical EditableTaskList invocation
 // with explicit sectionAnchor arg.
-//
-// Multi-line body (not `class Foo extends Bar {}` on one line) so the
-// V01104-CJS-CLEAN contract checker — which finds the LAST column-1 `^}\s*$`
-// to locate the trailing class — anchors on THIS class's closer rather than
-// the prior EditableTaskList class's closer (avoiding "code after class
-// closing brace" failure).
-class TodayCaptureEditableList extends EditableTaskList {
-}
+class TodayCaptureEditableList extends EditableTaskList {}

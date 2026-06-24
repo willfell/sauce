@@ -257,7 +257,7 @@ class TaskInteractions {
             // Stop at next SectionLabel block opener or next `## ` heading.
             for (let i = startIdx; i < lines.length; i++) {
                 if (lines[i].includes('class: "SectionLabel"')) { endIdx = i; break; }
-                if (/^## /.test(lines[i])) { endIdx = i; break; }
+                if (/^## /.test(lines[i])) { endIdx = i; break; }  // lint-display-markers:allow stop-at-next-H2 boundary scan, not a marker
             }
         }
 

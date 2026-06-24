@@ -18,6 +18,18 @@
  */
 class ToDoCreateTask {
 
+    // ---------- Instance delegators (customJS stores INSTANCES) ----------
+    //
+    // customJS stores an INSTANCE under window.customJS.ToDoCreateTask, and
+    // cross-class consumers (TaskInteractions mechanism at v0.127.0+) reach
+    // serializePayloadToLine via that instance. Static-only declarations are
+    // not on the prototype → call throws at runtime. Mirrors TaskParser +
+    // RecurrenceParser delegator posture (instance method must precede the
+    // static in source order so run-customjs-contract.js .find() returns the
+    // non-static first; see customjs-guard semantics).
+
+    serializePayloadToLine(payload) { return ToDoCreateTask.serializePayloadToLine(payload); }
+
     // ---------- Static pure helpers ----------
 
     /**
@@ -50,17 +62,6 @@ class ToDoCreateTask {
         if (payload.due) parts.push(`[due:: ${payload.due}]`);
         if (payload.scheduled) parts.push(`[scheduled:: ${payload.scheduled}]`);
         return parts.join(' ');
-    }
-
-    /**
-     * Instance delegator for `serializePayloadToLine`. customJS stores classes
-     * with instance methods as INSTANCES → static methods are unreachable on
-     * `window.customJS.ToDoCreateTask`. Cross-class consumers (TaskInteractions
-     * mechanism at v0.127.0+) need an instance method to bridge to the static.
-     * Keep the static the canonical impl; this just routes the lookup.
-     */
-    serializePayloadToLine(payload) {
-        return ToDoCreateTask.serializePayloadToLine(payload);
     }
 
     static destinationPath(payload, vaultMoment) {
