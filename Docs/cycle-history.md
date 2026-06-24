@@ -2737,3 +2737,27 @@ See `Docs/plans/2026-06-22-v0.10.0-finance-planning-layer-result.md`.
 
 See `Docs/plans/2026-06-23-v0.128.1-finance-payoff-roll-result.md`.
 
+## v0.128.2 finance scaffolded created_at conformance PATCH CLOSED 2026-06-23
+
+**Workshop:** 0.128.1 → 0.128.2 · **finance:** 0.10.1 → 0.10.2 · **Harnesses:** 39 (seed +1 sub-assert).
+
+**Headline:** Found during post-deploy `sauce audit` validation of headspace + ero. The finance
+scaffolding templates emitted `new Date().toISOString()` → `...T01:38:50.581Z` (milliseconds),
+which fails the canonical-vocab `created_at` pattern `^...T..:..:..(Z|[+-]hh:mm)$` → an audit
+**error** on every freshly scaffolded `Finance Plan.md` + `savings/Savings-*.md` (functional
+behavior unaffected — dashboard / engine / widgets all fine). Fixed by stripping the millis
+(`.replace(/\.\d{3}Z$/, "Z")`) across all 6 finance scaffold templates + the debt-scaffold `nowIso`.
+`HC-V0128-SEED-MIGRATE-PLAN-9` locks it. The already-deployed headspace + ero entities were fixed
+directly (audit now 0 errors on the planning-layer entities; only benign decimal/block-list warns
+remain, identical to the debt entities).
+
+**Tests:** seed 229/229; preflight GREEN; `version-sync ok: 0.128.2`; dogfood exit 0. CI green (PR #24).
+
+**LESSON — `sauce audit` the deployed entities as part of cycle validation.** The scaffold-template
+millisecond bug passed every workshop harness (none asserted the `created_at` *format* of scaffolded
+entities) and only surfaced when auditing the live vaults post-deploy. Add a created_at-format
+assertion whenever a cycle adds a scaffolder, and run `sauce audit` on the target vault before
+declaring a deploy validated.
+
+**Commits:** branch `cycle/v0.128.2-finance-created-at`; PR #24.
+
