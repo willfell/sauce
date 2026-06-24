@@ -1,7 +1,13 @@
 #!/usr/bin/env node
 // run-v0127-today-capture-editable-list.js — behavioral harness for v0.127.0 §F.
+// v0.128.0 update: source file renamed (today-capture-editable-list.js →
+// editable-task-list.js) and class renamed (TodayCaptureEditableList →
+// EditableTaskList). This harness continues to exercise the legacy class name
+// against the v0.128.0 source file to verify the back-compat alias
+// (`class TodayCaptureEditableList extends EditableTaskList {}`, at the bottom
+// of editable-task-list.js) keeps v0.127.x consumer notes rendering.
 //
-// Loads platform/blueprints/to-do/helpers/today-capture-editable-list.js into
+// Loads platform/blueprints/to-do/helpers/editable-task-list.js into
 // a vm sandbox + asserts the render flow:
 //   HC-V0127-TCEL-A: one row per task entry returned by findTaskLines.
 //   HC-V0127-TCEL-B: project/priority/due chips appear when parsed has them.
@@ -16,7 +22,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-const SRC_PATH = path.join(__dirname, '..', 'blueprints', 'to-do', 'helpers', 'today-capture-editable-list.js');
+const SRC_PATH = path.join(__dirname, '..', 'blueprints', 'to-do', 'helpers', 'editable-task-list.js');
 const src = fs.readFileSync(SRC_PATH, 'utf8');
 
 function makeEl() {

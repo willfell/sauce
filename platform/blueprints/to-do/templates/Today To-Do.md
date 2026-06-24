@@ -26,7 +26,7 @@ await dv.view("{{views_path}}/customjs-guard", { class: "SectionLabel", args: [{
 <!-- TODAY_CAPTURE_MARKER -->
 
 ```dataviewjs
-await dv.view("{{views_path}}/customjs-guard", { class: "TodayCaptureEditableList" });
+await dv.view("{{views_path}}/customjs-guard", { class: "EditableTaskList", args: [{ sectionAnchor: "todayCapture" }] });
 ```
 
 ```dataviewjs

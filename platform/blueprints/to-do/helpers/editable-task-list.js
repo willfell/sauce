@@ -1,21 +1,33 @@
 /**
- * TodayCaptureEditableList (CustomJS) — renders the daily note's free-form
- * `## Today` checkbox rows as a click-to-edit list. Each row exposes a
+ * EditableTaskList (CustomJS) — renders a bounded section of a note's
+ * free-form checkbox rows as a click-to-edit list. Each row exposes a
  * pencil icon that opens the ToDoCreateTask modal in editExisting mode
  * (v0.127.0 §F), letting users update inline-field metadata (project, due,
  * priority, scheduled) without raw markdown editing.
  *
- * Sister surface to ToDoLeafActions; consumed exclusively by
- * `type: to-do` daily notes between SectionLabel("Today", top:true) and
- * ToDoDailyCarryover.
+ * Provenance: v0.127.0 §F introduced this surface as TodayCaptureEditableList
+ * scoped to the daily-note `## Today` section via the
+ * <!-- TODAY_CAPTURE_MARKER --> sentinel. v0.128.0 §B generalized the surface
+ * into EditableTaskList driven by a `sectionAnchor` opts argument so the same
+ * renderer can target multiple bounded scopes. Two consumer surfaces ship at
+ * v0.128.0:
+ *   - Today To-Do (daily note `## Today` section) via `sectionAnchor: "todayCapture"`
+ *   - Project To-Do (project-todo note Owned Tasks section) via `sectionAnchor: "ownedTasks"`
  *
- * Anchor scope: TaskInteractions.findTaskLines(content, 'todayCapture')
- * (mechanism task-interactions@0.1.0) — bounded by the
- * <!-- TODAY_CAPTURE_MARKER --> sentinel that ships in the template and
- * is back-injected into existing notes by install.js step 6.
+ * Anchor scope: TaskInteractions.findTaskLines(content, sectionAnchor)
+ * (mechanism task-interactions@>=0.2.0) — bounded by the matching sentinel
+ * marker that ships in each template and is back-injected into existing notes
+ * by install.js heal step 6 (todayCapture) and step 7 (ownedTasks).
+ *
+ * Back-compat alias: a TodayCaptureEditableList subclass is registered at the
+ * bottom of this file so legacy notes materialized at v0.127.0/v0.127.1 keep
+ * rendering until heal step 6's class-rewrite pass (v0.128.0 §D) migrates
+ * their invocations to the canonical EditableTaskList form with explicit
+ * sectionAnchor arg.
  */
-class TodayCaptureEditableList {
-    async render(dv) {
+class EditableTaskList {
+    async render(dv, opts) {
+        const sectionAnchor = (opts && opts.sectionAnchor) || "todayCapture";
         if (!dv || !dv.container) return;
         // Skip rendering inside embeds — the host note already renders its own list.
         if (dv.container.closest && dv.container.closest('.markdown-embed')) return;
@@ -48,7 +60,7 @@ class TodayCaptureEditableList {
             return;
         }
 
-        const entries = ti.findTaskLines(content, 'todayCapture');
+        const entries = ti.findTaskLines(content, sectionAnchor);
         if (!entries || entries.length === 0) {
             const empty = dv.container.createEl('div', { text: 'No tasks yet. Add a checkbox above.' });
             empty.style.cssText = 'color: var(--text-muted); font-size: 0.85em; font-style: italic; padding: 6px 0;';
@@ -115,3 +127,11 @@ class TodayCaptureEditableList {
         }
     }
 }
+
+// ── v0.128.0 back-compat alias ──────────────────────────────────────────────
+// Legacy notes materialized at v0.127.0/v0.127.1 invoke this class name via
+// `class: "TodayCaptureEditableList"`. The customjs registry needs both names
+// to keep those notes rendering until heal step 6's class-rewrite pass
+// (v0.128.0 §D) migrates them to the canonical EditableTaskList invocation
+// with explicit sectionAnchor arg.
+class TodayCaptureEditableList extends EditableTaskList {}
