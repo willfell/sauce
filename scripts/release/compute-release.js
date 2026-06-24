@@ -171,6 +171,21 @@ function applyPlan(plan, root) {
         writeJson(ranchPath, r);
     }
 
+    // seed-vault subscription pins — per-item ONLY. The installer reconciles
+    // subscription vs catalogue with an exact-match check (install.js:1307), so a
+    // component bump must move the seed's matching pin too or run-seed-migrations
+    // skews + skips it. Leave the seed's workshop_version (intentionally frozen →
+    // drives migration coverage) and its installed state alone (the post-merge
+    // rebaseline-seed job owns those).
+    const seedSubPath = path.join(root, "platform/test/seed-vault/ranch/platform-subscription.json");
+    if (fs.existsSync(seedSubPath)) {
+        const seed = JSON.parse(fs.readFileSync(seedSubPath, "utf8"));
+        for (const arr of [seed.blueprints || [], seed.mechanisms || []]) {
+            for (const c of arr) if (toByName[c.name]) c.version = toByName[c.name];
+        }
+        writeJson(seedSubPath, seed);
+    }
+
     // package.json
     const pkgPath = path.join(root, "package.json");
     if (fs.existsSync(pkgPath)) {
