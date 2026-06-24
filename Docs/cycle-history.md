@@ -2696,3 +2696,26 @@ See `Docs/plans/2026-06-23-v0.127.0-task-interactions-and-fixes-result.md` + des
 
 See `Docs/plans/2026-06-23-v0.127.1-today-capture-renderer-heal-result.md`.
 
+## v0.128.0 finance planning / lever / allocation layer MINOR CLOSED 2026-06-23
+
+**Workshop:** 0.127.1 → 0.128.0
+**Blueprints:** finance 0.9.2 → 0.10.0
+**Mechanism count:** UNCHANGED at 21
+**Harnesses:** 37 → 38 (+1 NEW behavioral: `run-finance-plan-state.js`)
+
+**Headline:** Moves the headspace hand-built lever system into the finance blueprint as native config + engine + dashboard. NEW `Finance Plan.md` singleton (`type: finance-plan`) holding income_floor / fixed_living_monthly / attack_above_minimums / savings_glide tiers / roll_freed_savings_to_attack / overflow / attack_target_override (generalizes the headspace month-1 Apple util-bump). NEW `savings-account` sub-area (`savings/` + Savings.md hub + Emergency Fund seed + SavingsSummary / SavingsConfigEditor / SavingsCards mirroring debts). NEW `FinanceMath.computePlanState` engine: income-bound discretionary envelope (constant across glide tiers because freed savings rolls to attack), avalanche allocation with automatic roll + override target, month-by-month payoff simulation, overflow 80/20, one-month-skip what-if, prior-month overage carry; degrade-gracefully (`ok:false` when no plan). FinancePlanDashboard cockpit on Finance Plan.md (compute-live read-only + one-click Apply confirm-modal writing debt `planned_monthly_payment` + Paycheck Defaults Savings row). PlanBand over-envelope flag injected atop every Budget. Finance.md Plan tile.
+
+**Migrations:** `applyFinancePlanScaffolding` + `applyFinanceSavingsScaffolding` (create-if-absent) + `applyFinancePlanBandInjection` (marker `<!-- plan-band-v0.10.0 -->`, `.sauce-backup`, per-file failure-loud). FinanceNav: hub-savings / entity-savings / config-plan modes + Savings cross-hub + piggy-bank icon. 2 new rule_fragments (finance-plan + savings-accounts) + schemas-index read-contract entry.
+
+**Tests:** `run-finance-plan-state.js` 36/0; seed `HC-V0128-SEED-MIGRATE-PLAN-*` 228/228; helper-cases `HC-V0128-FIN-PLAN-*` + landmine-#16 version-range sweep (→128 / finance →10) + NEB count 5→6, 3710/0; customjs-contract clean; lint-schemas clean. Preflight 27 suites GREEN; `version-sync ok: 0.128.0`; workshop dogfood exit 0. CI green macOS + Ubuntu (PR #22).
+
+**LESSON — a migration needs a version bump to fire.** `applyFinanceMigrations` only runs when the finance item is NOT version-short-circuited (`install.js:223`). A migration-bearing cycle MUST bump the blueprint version AND the seed's subscription pin, or the seed harness silently no-ops the new migration (first symptom this cycle: scaffolders never ran on the seed).
+
+**LESSON — the workshop catalogue is a third version site (#24).** `platform/manifest.json` `blueprints[].finance.version` is independent of the blueprint manifest + the subscription pin. Missing it surfaces as install `event:"skip"` `"subscription pins finance@0.10.0 but workshop has 0.9.2"` → exit 1 with empty stderr (the failure-loud verdict counts the skip).
+
+**LESSON — rebaseline ratchets test fixtures.** `npm run seed:rebaseline` naively migrates multi-test FIXTURES (the `Legacy Project` section-hub anchors) into post-migration shape, breaking `HC-V01190-PROJ` + `HC-V01241-SECHUB`. Restore those from `seed-vault-prev` after rebaseline (sanctioned per landmine #26).
+
+**Commits:** branch `cycle/v0.128.0-finance-planning-layer`; PR #22 (merged main's v0.127.1 mid-cycle, version conflicts resolved keeping 0.128.0).
+
+See `Docs/plans/2026-06-22-v0.10.0-finance-planning-layer-result.md`.
+

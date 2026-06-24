@@ -1435,3 +1435,26 @@ sauce update --bump-pins
 **Effect of running this upgrade:** every pre-v0.127.0 daily To-Do note (any note with `type: to-do` frontmatter + a `Today` SectionLabel) gets the `TodayCaptureEditableList` dataviewjs block back-injected during the next install pass. After `sauce install`, the click-to-edit pencil rows render below the `## Today` SectionLabel on every daily note, matching the experience NEW daily notes have been getting since v0.127.0 deployed.
 
 **What does NOT change:** no manifest bumps; no blueprint source changes; no `TaskInteractions` API change. The fix is a one-function patch in `_healNoteChromeBody`.
+
+## Upgrading from v0.127.1
+
+```bash
+brew update && brew upgrade sauce
+```
+
+Then in each consumer vault:
+
+```bash
+sauce update --bump-pins
+```
+
+`--bump-pins` advances `workshop_version` 0.127.1 → 0.128.0 + finance 0.9.2 → 0.10.0.
+
+**What this release adds (finance planning / lever / allocation layer):**
+
+- **NEW `spice/finance/Finance Plan.md`** (`type: finance-plan`) — a per-vault policy singleton (income_floor, fixed_living_monthly, attack_above_minimums, savings_glide tiers, overflow, attack_target_override). Scaffolded create-if-absent with safe zero defaults; fill in your real numbers once.
+- **NEW `spice/finance/savings/` sub-area** — Savings.md hub + a seeded Emergency Fund + SavingsSummary / SavingsConfigEditor / SavingsCards.
+- **NEW FinancePlanDashboard** on Finance Plan.md — live envelope + avalanche allocation (auto-roll) + savings glide tier + payoff + what-if, with a one-click **Apply** that writes debt `planned_monthly_payment` + your Paycheck Defaults Savings row.
+- **NEW PlanBand** flag injected atop every existing `Budget-*.md` (marker `<!-- plan-band-v0.10.0 -->`; `.sauce-backup` snapshot before write) — warns when planned spend exceeds the income-bound envelope.
+
+**Effect of running this upgrade:** `applyFinancePlanScaffolding` + `applyFinanceSavingsScaffolding` create the plan + savings entities (create-if-absent; existing data untouched), and `applyFinancePlanBandInjection` adds the PlanBand block to every Budget. Cmd+R to load the 5 new CustomJS classes. Additive + backcompat: zero new required fields on existing Budget/Paycheck/Debt notes; the dashboard shows a "set up your plan" prompt until you fill in `Finance Plan.md`.
