@@ -162,3 +162,29 @@ function applyPlan(plan, root) {
 }
 
 module.exports = { loadManifest, buildIndex, attribute, computePlan, renderChangelog, getCommits, lastTag, applyPlan };
+
+// --- CLI ---
+if (require.main === module) {
+    const WRITE = process.argv.includes("--write");
+    const manifest = loadManifest();
+    const tag = lastTag();
+    const range = tag ? `${tag}..HEAD` : "HEAD";
+    const commits = getCommits(range);
+    const plan = computePlan(commits, manifest);
+
+    console.log(`compute-release: range ${range} — ${commits.length} commit(s)`);
+    if (!plan.components.length && plan.workshop.level === "none") {
+        console.log("compute-release: no releasable changes.");
+        process.exit(0);
+    }
+    console.log(plan.changelog);
+    console.log(`workshop_version: ${plan.workshop.from} -> ${plan.workshop.to} (${plan.workshop.level})`);
+
+    if (!WRITE) {
+        console.log("compute-release: dry-run (default). Re-run with --write to apply.");
+        process.exit(0);
+    }
+    applyPlan(plan, REPO_ROOT);
+    console.log("compute-release: version records updated. (No tag/push/seed — those are workflow steps.)");
+    process.exit(0);
+}
