@@ -2719,3 +2719,21 @@ See `Docs/plans/2026-06-23-v0.127.1-today-capture-renderer-heal-result.md`.
 
 See `Docs/plans/2026-06-22-v0.10.0-finance-planning-layer-result.md`.
 
+## v0.128.1 finance avalanche payoff-roll fix + widget render harness PATCH CLOSED 2026-06-23
+
+**Workshop:** 0.128.0 → 0.128.1
+**Blueprints:** finance 0.10.0 → 0.10.1
+**Harnesses:** 38 → 39 (+1 NEW behavioral: `run-finance-plan-widgets.js`)
+
+**Headline:** Post-ship hardening of the v0.10.0 planning layer, found by running `computePlanState` against **live headspace data**. (1) **Payoff bug:** `simulateAvalanche` did not roll a paid-off card's freed *minimum* onto the next target — it let the minimum vanish, so the projection under-paid as cards died. Headspace shape ($49.7k / $1,900-per-mo) computed **2030-11 (53 mo)** vs the hand-built plan's ~mid-2029. Fixed to hold the **total monthly debt outlay constant** (Lever Protocol "roll the whole payment to the next card"): now **2029-09 (~39 mo)**; the what-if "skip this month's attack" now shows a real ~4-week slip (was 0). Envelope / allocation / savings / glide were already correct — only the sim changed. `HC-V0128-PLANSTATE-BASE-14` locks it. (2) **Render harness:** NEW `run-finance-plan-widgets.js` (27 asserts) instantiates + `render()`s every widget (dashboard incl. Apply confirm-modal, PlanBand, SavingsSummary/ConfigEditor/Cards) + FinanceNav mode detection against DOM/dv/app/customJS stubs — catches runtime crashes the source-contract harness can't (found 0 widget bugs; all render clean). (3) NEW `Docs/agent-guides/smoke-checklists/finance.md`.
+
+**Tests:** run-finance-plan-state 37/0 (+BASE-14); run-finance-plan-widgets 27/0; seed 228/228; helper-cases green (HC-V0128-VERSION-F2 made PATCH-tolerant `/^0\.10\.\d+$/`). Preflight GREEN; `version-sync ok: 0.128.1`; workshop dogfood exit 0. CI green macOS + Ubuntu (PR #23).
+
+**LESSON — verify the engine against REAL consumer data before declaring done.** The fixture harnesses (36 + 27 asserts) were all green, but only a `computePlanState` run against the live headspace debts surfaced the missing avalanche min-roll (a 14-month payoff error). A throwaway "parse the real vault → run the engine → eyeball the numbers" check is cheap and catches modeling gaps fixtures rubber-stamp.
+
+**Known refinement (carry-forward):** the per-cycle *allocation* display gives the target `min + attack`; it's correct while all cards are alive, but after a card pays off the freed minimum does not auto-roll into the displayed attack across cycles (the user bumps `attack_above_minimums` to keep total outlay constant — or a future `total_debt_outlay` plan field). The payoff *simulation* already rolls within its projection.
+
+**Commits:** branch `cycle/v0.128.1-finance-payoff-roll`; PR #23.
+
+See `Docs/plans/2026-06-23-v0.128.1-finance-payoff-roll-result.md`.
+
