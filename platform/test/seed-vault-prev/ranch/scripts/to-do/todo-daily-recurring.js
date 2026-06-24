@@ -1,30 +1,40 @@
 /**
- * ToDoDailyRecurring (CustomJS) — materialization-on-render helper.
+ * ToDoDailyRecurring (CustomJS) — live-render helper (v0.8.0).
  *
- * Reads `spice/to-do/Recurring Tasks.md` registry; parses each `- [ ]` line under
- * `## Recurring Tasks` heading; evaluates each entry's recurrence against today;
- * for matching entries, generates a fresh `- [ ]` line (strips `[recurrence::]`,
- * adds `[recurring_from:: [[Recurring Tasks]]]`) and inserts under `## Recurring
- * Today` in the daily note. Writes an audit row into the registry's
- * `## Last 7 days of materialization` table (cap 50 rows).
+ * Reads `spice/to-do/Recurring Tasks.md` registry on every render; parses
+ * `- [ ]` entries; filters to those whose recurrence matches today; renders
+ * them inline into `dv.container` (NO writes to today's daily file).
  *
- * Sentinel-gated idempotency: `<!-- recurring-materialized-YYYY-MM-DD -->` in
- * today's frontmatter region.
+ * Architectural shift from v0.7.x → v0.8.0: previously materialized matching
+ * tasks into today's daily as persisted markdown (with sentinel-gated
+ * idempotency, additive hash sets, heal migrations). The materialize-once
+ * design proved fragile (postmortem item #5; duplicate-section bug v0.7.0 →
+ * v0.7.1). v0.8.0 retires materialization entirely: the section is a Dataview-
+ * rendered live view that reflects the registry as of NOW. Mid-day-added
+ * tasks appear on next render. No sentinels. No heal migrations needed for
+ * future drift.
  *
- * v0.4.0 shipping note: project-linked recurring entries (`[project:: [[X]]]`)
- * materialize into `## Recurring Today` like everyone else; the project tag is
- * preserved on the line. v0.117.0 carry-forward: route project-linked materialized
- * lines into the daily's per-project sub-section anchor.
- *
- * Pure static helpers (Node-testable):
- *   parseRegistryLine(line) → entry | null
- *   parseRegistry(content) → entry[]
- *   materializeLineFromEntry(entry) → string
- *   matchesToday(entry, todayDateStr, registryCreatedAt) → boolean
- *   insertRecurringIntoToday(todayContent, lines) → string
- *   hasSentinel(content) → boolean
- *   writeSentinel(content, dateStr) → string
- *   appendAuditRow(registryContent, row) → string
+ * Backwards-compat shims retained for callers (tests + carryover dataflow):
+ *   parseRegistry(content)        — entry[] for callers that need to know which
+ *                                   tasks would fire today
+ *   parseRegistryLine(line)       — single-line variant
+ *   matchesToday(entry, date, ca) — recurrence evaluator (unchanged)
+ *   materializeLineFromEntry(e)   — synthesizes a `- [ ] ...` line (used by
+ *                                   render() to format each row)
+ *   appendAuditRow / trimAuditTable — registry's "Last 7 days" audit log;
+ *                                     written when materialize() is called by
+ *                                     legacy code paths. v0.8.0 render() does
+ *                                     not write the audit table (live view
+ *                                     does not need it).
+ *   parseSentinel / formatSentinel / writeSentinel / hashEntry — preserved
+ *                                                                for harness
+ *                                                                regression
+ *                                                                tests.
+ *   insertRecurringIntoToday        — preserved for harness regression tests.
+ *   hasSentinel                     — preserved.
+ *   materialize(path, dateStr)      — preserved as the LEGACY entrypoint; can
+ *                                     be invoked manually. v0.8.0 render()
+ *                                     does NOT call this — it renders live.
  */
 class ToDoDailyRecurring {
 
@@ -36,7 +46,134 @@ class ToDoDailyRecurring {
         const m = cur.file.name && cur.file.name.match(/^ToDo-(\d{4}-\d{2}-\d{2})$/);
         if (!m) return;
         const todayStr = m[1];
-        await this.materialize(cur.file.path, todayStr);
+
+        // Live read of the registry. If absent → render nothing (don't crash).
+        const vault = window.app && window.app.vault;
+        if (!vault) return;
+        const registryPath = 'spice/to-do/Recurring Tasks.md';
+        const registryFile = vault.getAbstractFileByPath(registryPath);
+        if (!registryFile) return;
+        let registryContent;
+        try { registryContent = await vault.read(registryFile); } catch (_e) { return; }
+
+        const entries = ToDoDailyRecurring.parseRegistry(registryContent);
+        const registryCreatedAt = ToDoDailyRecurring._extractRegistryCreatedAt(registryContent);
+        const matching = [];
+        for (const entry of entries) {
+            let fires = false;
+            try { fires = ToDoDailyRecurring.matchesToday(entry, todayStr, registryCreatedAt); }
+            catch (_e) { fires = false; }
+            if (fires) matching.push(entry);
+        }
+
+        if (!matching.length) return;
+
+        // Section label (no leading blank — pinned tight to the section).
+        if (window.customJS && window.customJS.SectionLabel) {
+            try { window.customJS.SectionLabel.render(dv, { text: 'Recurring' }); }
+            catch (_e) { /* fall through to bare div */ }
+        } else {
+            const h = dv.container.createEl('div');
+            h.style.cssText = 'font-size:0.75em; letter-spacing:0.08em; text-transform:uppercase; color:var(--text-muted); border-bottom:1px solid var(--background-modifier-border); padding-bottom:4px; margin-bottom:6px;';
+            h.textContent = 'Recurring';
+        }
+
+        for (const entry of matching) this._renderRow(dv, entry);
+    }
+
+    _renderRow(dv, entry) {
+        const row = dv.container.createEl('div');
+        row.style.cssText = 'display:flex; align-items:baseline; gap:8px; padding:2px 0; cursor:pointer; line-height:1.45;';
+        row.onclick = () => {
+            if (window.app && window.app.workspace) {
+                window.app.workspace.openLinkText('spice/to-do/Recurring Tasks.md', '', false);
+            }
+        };
+        const box = row.createEl('span');
+        box.textContent = '☐';
+        box.style.cssText = 'flex-shrink:0; opacity:0.6; font-size:0.95em;';
+
+        const txt = row.createEl('span');
+        txt.style.cssText = 'flex:1; color:var(--text-normal); overflow-wrap:anywhere;';
+        // Render the title with inline-markdown support so [label](url) + [[wikilink]]
+        // appear as links (mirrors the v0.7.0 ToDoDailyUnassignedMeetings tokenizer).
+        this._renderInlineMarkdown(txt, entry.title || '');
+
+        if (entry.priority) {
+            const pr = row.createEl('span');
+            pr.textContent = entry.priority;
+            pr.style.cssText = 'font-size:0.75em; padding:1px 6px; border-radius:8px; background:var(--background-modifier-border); color:var(--text-muted); flex-shrink:0;';
+        }
+
+        const src = row.createEl('span');
+        src.textContent = '‹Recurring Tasks›';
+        src.style.cssText = 'font-size:0.85em; opacity:0.6; font-style:italic; flex-shrink:0;';
+    }
+
+    static SAFE_URL_SCHEMES = ['http:', 'https:', 'mailto:', 'obsidian:', 'file:'];
+
+    _tokenizeInline(text) {
+        const tokens = [];
+        const s = String(text || '');
+        let i = 0;
+        while (i < s.length) {
+            const wl = /^\[\[([^\]\n]+?)\]\]/.exec(s.slice(i));
+            if (wl) {
+                const inner = wl[1];
+                const pipe = inner.indexOf('|');
+                if (pipe === -1) tokens.push({ kind: 'wikilink', target: inner, alias: inner });
+                else tokens.push({ kind: 'wikilink', target: inner.slice(0, pipe), alias: inner.slice(pipe + 1) });
+                i += wl[0].length;
+                continue;
+            }
+            const lk = /^\[([^\]\n]+)\]\((<[^>\n]+>|[^)\n]+)\)/.exec(s.slice(i));
+            if (lk) {
+                let url = lk[2];
+                if (url.startsWith('<') && url.endsWith('>')) url = url.slice(1, -1);
+                tokens.push({ kind: 'link', label: lk[1], url });
+                i += lk[0].length;
+                continue;
+            }
+            const nextBracket = s.indexOf('[', i + 1);
+            if (nextBracket === -1) { tokens.push({ kind: 'text', value: s.slice(i) }); break; }
+            tokens.push({ kind: 'text', value: s.slice(i, nextBracket) });
+            i = nextBracket;
+        }
+        return tokens;
+    }
+
+    _escapeHtml(s) {
+        return String(s == null ? '' : s)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    _isSafeUrl(url) {
+        try {
+            const trimmed = String(url == null ? '' : url).trim();
+            if (!/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) return true;
+            const lower = trimmed.toLowerCase();
+            return ToDoDailyRecurring.SAFE_URL_SCHEMES.some(s => lower.startsWith(s));
+        } catch (_e) { return false; }
+    }
+
+    _renderInlineMarkdown(spanEl, text) {
+        const tokens = this._tokenizeInline(text);
+        const parts = [];
+        for (const t of tokens) {
+            if (t.kind === 'text') parts.push(this._escapeHtml(t.value));
+            else if (t.kind === 'link') {
+                if (this._isSafeUrl(t.url)) parts.push(`<a href="${this._escapeHtml(t.url)}" target="_blank" rel="noopener noreferrer">${this._escapeHtml(t.label)}</a>`);
+                else parts.push(this._escapeHtml(`[${t.label}](${t.url})`));
+            } else if (t.kind === 'wikilink') {
+                const target = this._escapeHtml(t.target);
+                parts.push(`<a class="internal-link" data-href="${target}" href="${target}">${this._escapeHtml(t.alias || t.target)}</a>`);
+            }
+        }
+        spanEl.innerHTML = parts.join('');
     }
 
     async materialize(todayPath, todayStr) {
@@ -46,19 +183,27 @@ class ToDoDailyRecurring {
             const todayFile = vault.getAbstractFileByPath(todayPath);
             if (!todayFile) return;
             const todayContent = await vault.read(todayFile);
-            if (ToDoDailyRecurring.hasSentinel(todayContent)) return;
+
+            // Parse existing sentinel: hashes set may be empty (legacy date-only, empty, or absent).
+            const sentinelState = ToDoDailyRecurring.parseSentinel(todayContent);
+            const startingHashes = new Set(sentinelState.hashes);
 
             const registryPath = 'spice/to-do/Recurring Tasks.md';
             const registryFile = vault.getAbstractFileByPath(registryPath);
             if (!registryFile) {
-                const updated = ToDoDailyRecurring.writeSentinel(todayContent, todayStr);
-                await vault.modify(todayFile, updated);
+                // No registry, nothing to materialize. Still write the sentinel
+                // (preserves "we've run today" semantic; empty set form).
+                const updated = ToDoDailyRecurring.writeSentinel(todayContent, todayStr, startingHashes);
+                if (updated !== todayContent) {
+                    await vault.modify(todayFile, updated);
+                }
                 return;
             }
             const registryContent = await vault.read(registryFile);
             const entries = ToDoDailyRecurring.parseRegistry(registryContent);
             const registryCreatedAt = ToDoDailyRecurring._extractRegistryCreatedAt(registryContent);
 
+            const newHashes = new Set(startingHashes);
             const materialized = [];
             const auditRows = [];
             for (const entry of entries) {
@@ -74,13 +219,24 @@ class ToDoDailyRecurring {
                     }
                     continue;
                 }
-                materialized.push(ToDoDailyRecurring.materializeLineFromEntry(entry));
+                const line = ToDoDailyRecurring.materializeLineFromEntry(entry);
+                const hash = ToDoDailyRecurring.hashEntry(line);
+                if (newHashes.has(hash)) continue;   // already materialized into this daily
+                newHashes.add(hash);
+                materialized.push(line);
                 const route = entry.project ? `ToDo-${todayStr}.md (${entry.project})` : `ToDo-${todayStr}.md`;
                 auditRows.push({ date: todayStr, title: entry.title, route });
             }
 
+            // Idempotency: if no new materializations AND sentinel already present
+            // in the new form on the correct date, skip both file writes.
+            const sentinelUpToDate = sentinelState.present
+                && sentinelState.date === todayStr
+                && newHashes.size === startingHashes.size;
+            if (materialized.length === 0 && sentinelUpToDate) return;
+
             let newToday = ToDoDailyRecurring.insertRecurringIntoToday(todayContent, materialized);
-            newToday = ToDoDailyRecurring.writeSentinel(newToday, todayStr);
+            newToday = ToDoDailyRecurring.writeSentinel(newToday, todayStr, newHashes);
 
             let newRegistry = registryContent;
             for (const row of auditRows) {
@@ -152,8 +308,18 @@ class ToDoDailyRecurring {
         let inRecurring = false;
         const entries = [];
         for (const line of lines) {
-            if (/^## Recurring Tasks/.test(line)) { inRecurring = true; continue; }
-            if (inRecurring && /^## /.test(line)) { inRecurring = false; continue; }
+            // Section start: legacy `## Recurring Tasks` H2 OR the v0.117.0 SectionLabel
+            // block (the SectionLabel migration replaced the H2; parseRegistry was the
+            // one read-path that wasn't updated — recurring tasks stopped materializing).
+            if (/^## Recurring Tasks/.test(line) ||
+                (/SectionLabel/.test(line) && /text:\s*["']Recurring Tasks["']/.test(line))) {
+                inRecurring = true; continue;
+            }
+            // Section end: next `## ` H2 OR the audit SectionLabel ("Last 7 days …").
+            if (inRecurring && (/^## /.test(line) ||
+                (/SectionLabel/.test(line) && /text:\s*["']Last 7 days/.test(line)))) {
+                inRecurring = false; continue;
+            }
             if (!inRecurring) continue;
             const entry = ToDoDailyRecurring.parseRegistryLine(line);
             if (entry) entries.push(entry);
@@ -249,14 +415,36 @@ class ToDoDailyRecurring {
 
     static insertRecurringIntoToday(todayContent, materializedLines) {
         if (!materializedLines || !materializedLines.length) return todayContent;
-        // v0.5.0: emit a SectionLabel dataviewjs block instead of `## Recurring Today` H2.
+        // v0.5.0: emits a SectionLabel dataviewjs block instead of `## Recurring Today` H2.
+        // v0.7.1: append to an EXISTING block instead of creating a new one each call.
+        // v0.8.0: label renamed "Recurring Today" → "Recurring" per user feedback; regex
+        // matches BOTH labels so legacy "Recurring Today" sections still found + appended.
+        //
+        // NOTE: ToDoDailyRecurring.render() in v0.8.0 no longer calls this method — the
+        // section is now live-rendered. Preserved for harness regression coverage and
+        // for callers that explicitly invoke the legacy materialize() path.
+        const RECURRING_LABEL_RE = /```dataviewjs\s*\n\s*await\s+dv\.view\(\s*"ranch\/views\/customjs-guard"\s*,\s*\{\s*class:\s*"SectionLabel"\s*,\s*args:\s*\[\s*\{\s*text:\s*"Recurring(?: Today)?"[^}]*\}\s*\]\s*\}\s*\)\s*;?\s*\n\s*```/;
+        const existing = RECURRING_LABEL_RE.exec(todayContent);
+        if (existing) {
+            const sectionStart = existing.index + existing[0].length;
+            const tail = todayContent.slice(sectionStart);
+            const TERMINATOR_RE = /\n(?=```dataviewjs|## |# )/;
+            const termMatch = TERMINATOR_RE.exec(tail);
+            const sectionEnd = termMatch ? (sectionStart + termMatch.index) : todayContent.length;
+            // v0.8.0: trim ALL trailing whitespace from the existing section header +
+            // emit task lines IMMEDIATELY (no leading blank). User feedback: leading
+            // blank between SectionLabel block and first `- [ ]` task was visually noisy.
+            const head = todayContent.slice(0, sectionEnd).replace(/\n+$/, '');
+            const insertion = '\n' + materializedLines.join('\n') + '\n';
+            return head + insertion + todayContent.slice(sectionEnd);
+        }
         const labelLines = [
             '',
             '```dataviewjs',
-            'await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Recurring Today" }] });',
+            'await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Recurring" }] });',
             '```',
-            '',
         ];
+        // v0.8.0: NO leading blank between SectionLabel block and first task line.
         const block = labelLines.concat(materializedLines).concat(['']).join('\n');
         // Find the ToDoDailyRecurring dataviewjs block; insert immediately after it.
         const ANCHOR_RE = /(```dataviewjs[^`]*class:\s*"ToDoDailyRecurring"[^`]*```\n?)/;
@@ -268,27 +456,90 @@ class ToDoDailyRecurring {
         return todayContent.replace(/\n+$/, '') + '\n' + block + '\n';
     }
 
-    static hasSentinel(content) {
-        return /<!-- recurring-materialized-[^>]+ -->/.test(content);
+    // ---------- Sentinel (v0.7.0 additive) ----------
+    //
+    // Schema:
+    //   Date-only (legacy, pre-v0.7.0):
+    //     <!-- recurring-materialized-2026-06-16 -->
+    //   New (v0.7.0+):
+    //     <!-- recurring-materialized-2026-06-16: a1b2c3d,e4f5g6h -->
+    //     <!-- recurring-materialized-2026-06-16: -->         (empty set; "we've run today, materialized nothing")
+    //
+    // The set is the union of 7-char sha1 prefixes of normalized registry-entry lines
+    // that have already been materialized into THIS daily note. On every render,
+    // ToDoDailyRecurring computes hashes for currently-matching registry entries,
+    // materializes those not in the set, and rewrites the sentinel with the new union.
+    // Legacy date-only sentinels are treated as empty-set on read (re-runs once,
+    // then writes the new form). This fixes the "mid-day-added recurring task
+    // blind forever" bug (v0.118.1 postmortem item #5).
+
+    static SENTINEL_RE = /<!-- recurring-materialized-([0-9-]+)(?::\s*([^>]*?))?\s*-->/;
+
+    static parseSentinel(content) {
+        const m = ToDoDailyRecurring.SENTINEL_RE.exec(content);
+        if (!m) return { present: false, date: null, hashes: new Set() };
+        const date = m[1];
+        const payload = (m[2] || '').trim();
+        const hashes = new Set(payload ? payload.split(',').map(h => h.trim()).filter(Boolean) : []);
+        return { present: true, date, hashes };
     }
 
-    static writeSentinel(content, dateStr) {
-        // Sentinel lives OUTSIDE the frontmatter (HTML comment immediately AFTER the closing `---`).
-        // v0.117.1 fix: previously placed inside the frontmatter block which broke YAML parsing.
+    static formatSentinel(date, hashes) {
+        const list = Array.from(hashes).sort().join(',');
+        // Note: even with an empty set we always emit the `: ` form (no trailing
+        // space-pair) so the new schema is detectable on read and we never collide
+        // with the legacy date-only form.
+        return list
+            ? `<!-- recurring-materialized-${date}: ${list} -->`
+            : `<!-- recurring-materialized-${date}: -->`;
+    }
+
+    static hashEntry(line) {
+        // Stable 7-char sha1 prefix of the registry entry line, normalized.
+        // Used as the per-task identity key in the sentinel set.
+        const crypto = (typeof require === 'function')
+            ? require('crypto')
+            : null;
+        const normalized = String(line || '').replace(/\s+/g, ' ').trim();
+        if (crypto) {
+            return crypto.createHash('sha1').update(normalized, 'utf8').digest('hex').slice(0, 7);
+        }
+        // Browser/Obsidian fallback: simple DJB2-style hash (deterministic, 7-hex).
+        let h = 5381;
+        for (let i = 0; i < normalized.length; i++) {
+            h = ((h << 5) + h + normalized.charCodeAt(i)) | 0;
+        }
+        const hex = (h >>> 0).toString(16);
+        return ('0000000' + hex).slice(-7);
+    }
+
+    static hasSentinel(content) {
+        // Backwards-compat shim; preserved because seed-migration code + a couple
+        // of legacy callsites still check for "any sentinel present". The v0.7.0
+        // render path uses parseSentinel directly.
+        return ToDoDailyRecurring.SENTINEL_RE.test(content);
+    }
+
+    static writeSentinel(content, dateStr, hashes) {
+        // Sentinel lives OUTSIDE the frontmatter (HTML comment immediately AFTER
+        // the closing `---`). v0.7.0: accepts a Set/Array of hashes; emits the
+        // new comma-separated form even when empty.
+        const set = (hashes instanceof Set) ? hashes : new Set(Array.isArray(hashes) ? hashes : []);
+        const sentinelLine = ToDoDailyRecurring.formatSentinel(dateStr, set);
         const lines = content.split('\n');
         if (lines[0] !== '---') {
-            return `<!-- recurring-materialized-${dateStr} -->\n` + content;
+            return sentinelLine + '\n' + content;
         }
         let closeIdx = -1;
         for (let i = 1; i < lines.length; i++) {
             if (lines[i] === '---') { closeIdx = i; break; }
         }
         if (closeIdx === -1) {
-            return `<!-- recurring-materialized-${dateStr} -->\n` + content;
+            return sentinelLine + '\n' + content;
         }
         const fmRegion = lines.slice(0, closeIdx + 1).filter(l => !/^<!-- recurring-materialized-/.test(l));
         const after = lines.slice(closeIdx + 1).filter(l => !/^<!-- recurring-materialized-/.test(l));
-        return fmRegion.concat([`<!-- recurring-materialized-${dateStr} -->`], after).join('\n');
+        return fmRegion.concat([sentinelLine], after).join('\n');
     }
 
     static appendAuditRow(registryContent, row) {

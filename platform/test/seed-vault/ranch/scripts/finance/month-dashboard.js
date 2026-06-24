@@ -108,6 +108,15 @@ class MonthDashboard {
         headerEl.textContent = `Planned ${this._fmtMoney(totalPlanned)} · Actual ${this._fmtMoney(totalActual)} · Variance ${this._fmtMoney(variance, { signed: true })}`;
         headerEl.style.cssText = "font-size: 0.9em; font-variant-numeric: tabular-nums; margin-bottom: 10px;";
 
+        const plan = customJS.FinanceMath.readPlan(dv);
+        const fresh = customJS.FinanceMath.actualsFreshness(budget, monthKey, plan && plan.governed_from);
+        if (fresh.state !== "none") {
+            const COLORS = { green: "#16a34a", amber: "#b45309", muted: "var(--text-muted)" };
+            const badge = section.createEl("div");
+            badge.textContent = fresh.label || fresh.state;
+            badge.style.cssText = `display: inline-block; font-size: 0.66em; letter-spacing: 0.04em; text-transform: uppercase; font-weight: 600; margin-bottom: 10px; color: ${COLORS[fresh.tone] || COLORS.muted};`;
+        }
+
         const groups = new Map();
         for (const c of cats) {
             if (!c) continue;

@@ -54,6 +54,25 @@ class FinanceMath {
             return hits.length ? hits[0] : null;
         } catch (_e) { return null; }
     }
+    // ---- actuals freshness (finance 0.11.0) ----
+    // Classifies a governed month's budget actuals for the hub/month badge.
+    // Returns { state, label, tone } where state ∈ "live" | "stale" | "typed" | "none".
+    // "none" = not applicable (baseline month or no budget) → caller renders no badge.
+    // nowMs defaults to Date.now(); tests pass an explicit ms for determinism.
+    actualsFreshness(budget, monthKey, governedFrom, nowMs) {
+        if (!budget) return { state: "none", label: "", tone: "muted" };
+        const gf = this._coerceMonthString(governedFrom);
+        const mk = this._coerceMonthString(monthKey);
+        if (!(gf && mk && mk >= gf)) return { state: "none", label: "", tone: "muted" };
+        const syncedRaw = this._coerceDateString(budget.actuals_synced_at);
+        if (!syncedRaw) return { state: "typed", label: "typed", tone: "muted" };
+        const t = Date.parse(syncedRaw.length <= 10 ? syncedRaw + "T00:00:00Z" : syncedRaw);
+        const now = (typeof nowMs === "number") ? nowMs : Date.now();
+        const ageDays = Number.isFinite(t) ? (now - t) / 86400000 : Infinity;
+        const dateLabel = syncedRaw.slice(0, 10);
+        if (ageDays <= 8) return { state: "live", label: `live · ${dateLabel}`, tone: "green" };
+        return { state: "stale", label: `stale · synced ${dateLabel}`, tone: "amber" };
+    }
     monthBounds(monthKey) {
         const [y, m] = monthKey.split("-").map(Number);
         const first = `${monthKey}-01`;
@@ -70,14 +89,11 @@ class FinanceMath {
         const wNumer = debts.reduce((s, d) =>
             s + (Number(d.current_balance) || 0) * (Number(d.apr) || 0), 0);
         const weightedApr = totalBalance > 0 ? wNumer / totalBalance : 0;
-        let zeroDebtDate = "—";
-        const principalAttack = plannedAttack - monthlyInterest;
-        if (principalAttack > 0 && totalBalance > 0) {
-            const months = Math.ceil(totalBalance / principalAttack);
-            const d = new Date();
-            d.setMonth(d.getMonth() + months);
-            zeroDebtDate = d.toISOString().slice(0, 10);
-        }
+        // Accurate payoff via the avalanche simulation (rolls freed minimums, finance 0.10.1) so
+        // the hub hero + Debts hub match the planning dashboard. attack-above-mins = plannedAttack
+        // − Σ active minimums; the sim holds total monthly outlay constant.
+        const _minsSum = debts.reduce((s, d) => s + ((Number(d.current_balance) || 0) > 0 ? (Number(d.min_payment) || 0) : 0), 0);
+        const zeroDebtDate = this.simulateAvalanche(debts, Math.max(0, plannedAttack - _minsSum)).zeroDebtDate;
         return { totalBalance, monthlyInterest, plannedAttack, weightedApr, zeroDebtDate };
     }
     monthIncome(paychecks) {
@@ -182,5 +198,217 @@ class FinanceMath {
         if (o.signed) sign = num >= 0 ? "+" : "-";
         else if (num < 0) sign = "-";
         return `${sign}$${dollars}.${abs[1]}`;
+    }
+
+    // ===== v0.10.0 planning / lever / allocation layer =====
+
+    // The single finance-plan config singleton, or null.
+    readPlan(dv) {
+        try {
+            const hits = dv.pages('"spice/finance"').where(p => p && p.type === "finance-plan").array();
+            return hits.length ? hits[0] : null;
+        } catch (_e) { return null; }
+    }
+
+    // All savings-account entities under spice/finance/savings.
+    readSavings(dv) {
+        try { return dv.pages('"spice/finance/savings"').where(p => p && p.type === "savings-account").array(); }
+        catch (_e) { return []; }
+    }
+
+    // Pick the glide tier for a savings balance. tiers: [{under, monthly} | {at_or_above, monthly}], in order.
+    // Returns { tier (1-based), contribution }.
+    glide(balance, tiers) {
+        const bal = Number(balance) || 0;
+        if (!Array.isArray(tiers) || tiers.length === 0) return { tier: 1, contribution: 0 };
+        for (let i = 0; i < tiers.length; i++) {
+            const t = tiers[i] || {};
+            if (t.under != null && bal < Number(t.under)) return { tier: i + 1, contribution: Number(t.monthly) || 0 };
+            if (t.at_or_above != null && bal >= Number(t.at_or_above)) return { tier: i + 1, contribution: Number(t.monthly) || 0 };
+        }
+        const last = tiers[tiers.length - 1] || {};
+        return { tier: tiers.length, contribution: Number(last.monthly) || 0 };
+    }
+
+    _prevMonthKey(monthKey) {
+        const m = this._coerceMonthString(monthKey);
+        if (!m || !/^\d{4}-\d{2}$/.test(m)) return null;
+        let [y, mo] = m.split("-").map(Number);
+        mo -= 1; if (mo < 1) { mo = 12; y -= 1; }
+        return `${y}-${String(mo).padStart(2, "0")}`;
+    }
+
+    // Month-by-month avalanche simulation. attackTotal goes to one target (override while its
+    // balance >= overrideBelow, else highest-APR active debt). No intra-month attack spill
+    // (a paid-off target wastes the month's leftover — conservative by design). Cap 600 iters;
+    // non-convergence (minimums < interest) → months Infinity / zeroDebtDate "—".
+    simulateAvalanche(debts, attackTotal, opts) {
+        opts = opts || {};
+        const overrideKey = opts.overrideKey || null;
+        const overrideBelow = (opts.overrideBelow != null) ? Number(opts.overrideBelow) : null;
+        const skipFirstMonthAttack = !!opts.skipFirstMonthAttack;
+        const atk = Number(attackTotal) || 0;
+        let work = (Array.isArray(debts) ? debts : [])
+            .filter(d => (Number(d.current_balance) || 0) > 0)
+            .map(d => ({
+                slug: (d.file && d.file.name) ? d.file.name : (d.name || "debt"),
+                name: d.name || (d.file && d.file.name) || "debt",
+                bal: Number(d.current_balance) || 0,
+                apr: Number(d.apr) || 0,
+                min: Number(d.min_payment) || 0,
+            }));
+        if (work.length === 0) return { months: 0, zeroDebtDate: "—", killOrder: [] };
+        // Avalanche holds the TOTAL monthly debt outlay constant: when a card pays off, its
+        // freed minimum rolls into the extra paid to the next target (Lever Protocol "roll the
+        // whole payment to the next card"). monthlyBudget = current active minimums + attack.
+        const monthlyBudget = work.reduce((s, w) => s + (w.min || 0), 0) + atk;
+        const killOrder = [];
+        const cap = 600;
+        let months = 0;
+        const start = new Date();
+        while (work.some(w => w.bal > 0) && months < cap) {
+            months++;
+            for (const w of work) { if (w.bal > 0) w.bal += w.bal * w.apr / 1200; }
+            const active = work.filter(w => w.bal > 0);
+            let target = null;
+            if (overrideKey && overrideBelow != null) {
+                const o = active.find(w => w.slug === overrideKey && w.bal >= overrideBelow);
+                if (o) target = o;
+            }
+            if (!target) target = active.slice().sort((a, b) => (b.apr - a.apr) || (a.bal - b.bal))[0] || null;
+            // pay each active card its minimum (capped at balance), tracking total paid
+            let minsPaid = 0;
+            for (const w of work) { if (w.bal > 0) { const p = Math.min(w.min, w.bal); w.bal -= p; minsPaid += p; } }
+            // the leftover (attack + any freed minimums) goes entirely to the target; the
+            // what-if skips only the attack portion in month 1 (minimums are still paid).
+            let extra = (skipFirstMonthAttack && months === 1) ? 0 : (monthlyBudget - minsPaid);
+            if (extra < 0) extra = 0;
+            if (target && target.bal > 0 && extra > 0) {
+                target.bal -= extra;
+                if (target.bal < 0) target.bal = 0;
+            }
+            for (const w of work) {
+                if (w.bal <= 0 && !killOrder.find(k => k.slug === w.slug)) {
+                    const d = new Date(start); d.setMonth(d.getMonth() + months);
+                    killOrder.push({ debt: w.name, slug: w.slug, date: d.toISOString().slice(0, 10) });
+                    w.bal = 0;
+                }
+            }
+        }
+        const converged = months < cap && work.every(w => w.bal <= 0);
+        let zeroDebtDate = "—";
+        if (converged) { const d = new Date(start); d.setMonth(d.getMonth() + months); zeroDebtDate = d.toISOString().slice(0, 10); }
+        return { months: converged ? months : Infinity, zeroDebtDate, killOrder };
+    }
+
+    // The keystone: one read of plan + entities → the whole plan-state object every widget views.
+    computePlanState(dv, monthKey) {
+        const plan = this.readPlan(dv);
+        if (!plan) return { ok: false, reason: "no-plan", monthKey: monthKey || null };
+        const num = (v, d = 0) => { const n = Number(v); return isFinite(n) ? n : d; };
+
+        const incomeFloor = num(plan.income_floor);
+        const fixedLiving = num(plan.fixed_living_monthly);
+        const attackBase = num(plan.attack_above_minimums);
+        const payPeriods = num(plan.pay_periods_per_month, 2) || 2;
+        const rollFreed = plan.roll_freed_savings_to_attack !== false;
+        const tiers = Array.isArray(plan.savings_glide) ? plan.savings_glide : [];
+        const overflowCfg = plan.overflow || { attack_pct: 80, flex_pct: 20 };
+
+        const debts = this.readDebts(dv);
+        const savings = this.readSavings(dv);
+        const paychecks = this.readPaychecksForMonth(dv, monthKey);
+        const budget = this.readBudgetForMonth(dv, monthKey);
+
+        // savings + glide
+        const ef = savings.find(s => String(s.name || "").toLowerCase() === "emergency fund") || savings[0] || null;
+        const savingsBalance = ef ? num(ef.current_balance) : 0;
+        const savingsTarget = ef ? num(ef.target) : 0;
+        const g = this.glide(savingsBalance, tiers);
+        const tier1Monthly = tiers.length ? num(tiers[0].monthly) : 0;
+        const contribution = g.contribution;
+        const freed = rollFreed ? Math.max(0, tier1Monthly - contribution) : 0;
+
+        // minimums + attack
+        const activeDebts = debts.filter(d => num(d.current_balance) > 0);
+        const minimums = activeDebts.reduce((s, d) => s + num(d.min_payment), 0);
+        const attackTotal = attackBase + freed;
+
+        // envelope (base is constant across glide tiers when freed rolls to attack)
+        const base = incomeFloor - fixedLiving - minimums - attackTotal - contribution;
+        const governedFrom = this._coerceMonthString(plan.governed_from);
+        const isGoverned = (m) => !!(governedFrom && m && this._coerceMonthString(m) >= governedFrom);
+        const prevKey = this._prevMonthKey(monthKey);
+        const prevBudget = prevKey ? this.readBudgetForMonth(dv, prevKey) : null;
+        const priorSpent = prevBudget ? this.monthSpending(prevBudget) : 0;
+        const priorPlanned = (prevBudget && Array.isArray(prevBudget.categories))
+            ? prevBudget.categories.reduce((s, c) => s + num(c && c.planned), 0) : 0;
+        // Overage carry flows ONLY governed → governed: a pre-system baseline month (e.g. an old
+        // $6k full budget with $11k of real spend) must NOT punish the new envelope. And it
+        // compares the prior month's spend to its OWN plan, never to this month's envelope.
+        const carryApplies = incomeFloor > 0 && isGoverned(monthKey) && isGoverned(prevKey) && !!prevBudget && priorPlanned > 0;
+        const overageCarry = carryApplies ? Math.max(0, priorSpent - priorPlanned) : 0;
+        const effective = base - overageCarry;
+        const planned = (budget && Array.isArray(budget.categories))
+            ? budget.categories.reduce((s, c) => s + num(c && c.planned), 0) : 0;
+        const spent = this.monthSpending(budget);
+        const left = effective - spent;
+        const over = (incomeFloor > 0 && planned > effective) ? planned - effective : 0;
+        const status = over > 0 ? "over" : "ok";
+
+        // allocation (avalanche + override + automatic roll via current balances)
+        const overrideCfg = plan.attack_target_override || null;
+        let overrideKey = null, overrideBelow = null;
+        if (overrideCfg && overrideCfg.debt) {
+            overrideKey = String(this._debtKey(overrideCfg.debt) || "").replace(/^\[\[|\]\]$/g, "").replace(/\.md$/, "");
+            overrideBelow = (overrideCfg.until_balance_below != null) ? num(overrideCfg.until_balance_below) : null;
+        }
+        const ranked = activeDebts.slice().sort((a, b) => (num(b.apr) - num(a.apr)) || (num(a.current_balance) - num(b.current_balance)));
+        let targetSlug = ranked.length ? ((ranked[0].file && ranked[0].file.name) || ranked[0].name) : null;
+        if (overrideKey && overrideBelow != null) {
+            const o = activeDebts.find(d => ((d.file && d.file.name) || d.name) === overrideKey && num(d.current_balance) >= overrideBelow);
+            if (o) targetSlug = (o.file && o.file.name) || o.name;
+        }
+        const allocation = ranked.map(d => {
+            const slug = (d.file && d.file.name) ? d.file.name : (d.name || "debt");
+            const isTarget = slug === targetSlug;
+            const min = num(d.min_payment);
+            const atk = isTarget ? attackTotal : 0;
+            return { debt: d.name || slug, slug, balance: num(d.current_balance), apr: num(d.apr), min, attack: atk, total: min + atk, isTarget, paidOff: false };
+        });
+
+        // payoff + what-if
+        const payoff = this.simulateAvalanche(debts, attackTotal, { overrideKey, overrideBelow });
+        const skip = this.simulateAvalanche(debts, attackTotal, { overrideKey, overrideBelow, skipFirstMonthAttack: true });
+        const weeksSlipped = (isFinite(payoff.months) && isFinite(skip.months))
+            ? Math.max(0, Math.round((skip.months - payoff.months) * 4.345)) : 0;
+        const whatIf = { skipAttackThisMonth: { weeksSlipped, newZeroDebtDate: skip.zeroDebtDate } };
+
+        // overflow (only when actual income exceeds the floor)
+        const actualIncome = this.monthIncome(paychecks);
+        const surplus = Math.max(0, actualIncome - incomeFloor);
+        const overflow = surplus > 0 ? {
+            actualIncome, surplus,
+            toAttack: surplus * num(overflowCfg.attack_pct, 80) / 100,
+            toFlex: surplus * num(overflowCfg.flex_pct, 20) / 100,
+        } : null;
+
+        // apply targets
+        const debtTargets = allocation.map(a => ({ slug: a.slug, planned_monthly_payment: a.total }));
+        const savingsPerCheck = Math.round((contribution / payPeriods) * 100) / 100;
+
+        return {
+            ok: true,
+            monthKey: monthKey || null,
+            inputs: { incomeFloor, fixedLiving, minimums, savingsBalance, savingsTarget },
+            envelope: { base, overageCarry, effective, planned, spent, left, over, status, governed: isGoverned(monthKey), governedFrom },
+            savings: { balance: savingsBalance, target: savingsTarget, tier: g.tier, contribution, freed, toTarget: Math.max(0, savingsTarget - savingsBalance) },
+            attack: { base: attackBase, freed, total: attackTotal },
+            allocation,
+            payoff,
+            overflow,
+            whatIf,
+            applyPlan: { debtTargets, savingsContribution: contribution, savingsPerCheck },
+        };
     }
 }

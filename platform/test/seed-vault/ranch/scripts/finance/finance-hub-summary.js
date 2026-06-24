@@ -119,9 +119,30 @@ class FinanceHubSummary {
         const row = root.createEl("div", { cls: "fhs-tiles" });
         row.style.cssText = "display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px;";
 
+        this._renderPlanTile(row, dv);
         this._renderBudgetTile(row, dv);
         this._renderPaycheckTile(row, dv);
         this._renderInvoicesTile(row, dv);
+    }
+
+    // ----- Plan tile (v0.10.0) — envelope left + zero-debt date, links to Finance Plan.md
+    _renderPlanTile(row, dv) {
+        const tile = this._makeTile(row, "fhs-tile-plan");
+        this._tileLabel(tile, "Plan");
+        let ps = null;
+        try {
+            const now = new Date();
+            const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+            ps = customJS.FinanceMath.computePlanState(dv, monthKey);
+        } catch (_e) {}
+        if (!ps || !ps.ok) {
+            this._tileMuted(tile, "No plan yet");
+        } else {
+            this._tileValue(tile, `${this._fmtMoney(ps.envelope.left)} left`);
+            const baseTag = ps.envelope.governed ? "" : " · baseline";
+            this._tileMuted(tile, `envelope ${this._fmtMoney(ps.envelope.effective)} · zero-debt ${ps.payoff.zeroDebtDate}${baseTag}`);
+        }
+        tile.addEventListener("click", () => app.workspace.openLinkText("spice/finance/Finance Plan.md", ""));
     }
 
     _makeTile(parent, cls) {
@@ -151,6 +172,14 @@ class FinanceHubSummary {
         el.textContent = text;
         el.style.cssText = "font-size: 0.78em; color: var(--text-muted); font-variant-numeric: tabular-nums;";
         return el;
+    }
+
+    _freshBadge(tile, fresh) {
+        const COLORS = { green: "#16a34a", amber: "#b45309", muted: "var(--text-muted)" };
+        const fg = COLORS[fresh.tone] || COLORS.muted;
+        const pill = tile.createEl("div");
+        pill.textContent = fresh.label || fresh.state;
+        pill.style.cssText = `align-self: flex-start; margin-top: 2px; font-size: 0.62em; letter-spacing: 0.04em; text-transform: uppercase; font-weight: 600; color: ${fg};`;
     }
 
     _renderBudgetTile(row, dv) {
@@ -183,6 +212,10 @@ class FinanceHubSummary {
             const currentDay = now.getDate();
             const daysInMonth = new Date(year, month, 0).getDate();
             this._tileMuted(tile, `${pct}% spent · day ${currentDay}/${daysInMonth}`);
+
+            const plan = customJS.FinanceMath.readPlan(dv);
+            const fresh = customJS.FinanceMath.actualsFreshness(budget, currentMonth, plan && plan.governed_from);
+            if (fresh.state !== "none") this._freshBadge(tile, fresh);
         }
 
         tile.addEventListener("click", () => {
