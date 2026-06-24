@@ -7334,8 +7334,8 @@ async function caseFA7FinanceManifest() {
   // v0.107.0 widened from === "0.4.0" → /^0\.(4|5)\.\d+$/. v0.108.0 widens
   // again to include 0.6.x (debt sub-area MINOR). Same posture as FA3-PROJ-1
   // widening at v0.104.0.
-  assertTrue("FA7-MANIFEST-1: finance@0.4.x or 0.5.x or 0.6.x or 0.7.x or 0.8.x or 0.9.x",
-    /^0\.(4|5|6|7|8|9|10)\.\d+$/.test(m.version), `got: ${m.version}`);
+  assertTrue("FA7-MANIFEST-1: finance manifest version matches snapshot SSOT",
+    m.version === VERSION_SNAPSHOT.components.finance, `got: ${m.version}, snapshot: ${VERSION_SNAPSHOT.components.finance}`);
 }
 
 async function caseFA7FinanceTemplates() {
@@ -12277,7 +12277,7 @@ async function caseV01070FinMan1Versions() {
   //   finance 0.5.2 → 0.6.0 (CF-3 + v0.108.0 ship)
   //   entity-create 0.7.0 → 0.7.1 (v0.108.0 S1 resolve_wikilinks PATCH)
   // v0.109.0 bumps workshop_version on top of v0.108.0's finance/EC ship.
-  assertTrue("HC-V01070-FIN-MAN-1: finance version 0.6.x or 0.7.x or 0.8.x", /^0\.(6|7|8|9|10)\.\d+$/.test(fin.version), `got: ${fin.version}`);
+  assertTrue("HC-V01070-FIN-MAN-1: finance version matches snapshot SSOT", fin.version === VERSION_SNAPSHOT.components.finance, `got: ${fin.version}, snapshot: ${VERSION_SNAPSHOT.components.finance}`);
   assertEqual(ec.version, "0.7.4", "HC-V01070-FIN-MAN-1: entity-create version");
   assertTrue("HC-V01070-FIN-MAN-1: workshop_version 0.115.x or 0.116.x or 0.117.x or 0.118.x or 0.119.x", sameMajorMinor(ws.workshop_version, VERSION_SNAPSHOT.workshop_version));
   assertTrue("HC-V01070-FIN-MAN-1: finance depends_on entity-create >=0.7.0",
@@ -12582,16 +12582,16 @@ async function caseV01080FinanceVersionBump() {
   console.log("\n--- Case V01080-FV: finance 0.6.0 + workshop manifest pin ---");
   const finance = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
-  assertTrue("V01080-FV-1: finance.version 0.6.x or 0.7.x or 0.8.x",
-    /^0\.(6|7|8|9|10)\.\d+$/.test(finance.version), `got: ${finance.version}`);
+  assertTrue("V01080-FV-1: finance.version matches snapshot SSOT",
+    finance.version === VERSION_SNAPSHOT.components.finance, `got: ${finance.version}, snapshot: ${VERSION_SNAPSHOT.components.finance}`);
   assertTrue("V01080-FV-2: description references v0.6.0",
     /v0\.6\.0/.test(finance.description));
 
   const workshop = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
   const fbp = (workshop.blueprints || []).find(b => b.name === "finance");
-  assertTrue("V01080-FV-3: workshop manifest pin finance 0.6.x or 0.7.x or 0.8.x",
-    fbp && /^0\.(6|7|8|9|10)\.\d+$/.test(fbp.version), `got: ${fbp?.version}`);
+  assertTrue("V01080-FV-3: workshop manifest pin finance matches snapshot SSOT",
+    fbp && fbp.version === VERSION_SNAPSHOT.components.finance, `got: ${fbp?.version}, snapshot: ${VERSION_SNAPSHOT.components.finance}`);
   const ec = (workshop.mechanisms || []).find(m => m.name === "entity-create");
   assertTrue("V01080-FV-4: workshop manifest pin entity-create 0.7.x",
     ec && /^0\.7\.\d+$/.test(ec.version), `got: ${ec?.version}`);
@@ -12941,8 +12941,8 @@ async function caseV01103InjectionMigrationExported() {
 async function caseV01103FinanceManifestBumped() {
   console.log("\n--- Case V01103-MO-FBP: finance manifest version + classes + files ---");
   const m = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
-  assertTrue("V01103-MO-FBP-1: finance version 0.6.x or 0.7.x or 0.8.x",
-    /^0\.(6|7|8|9|10)\.\d+$/.test(m.version), `got: ${m.version}`);
+  assertTrue("V01103-MO-FBP-1: finance version matches snapshot SSOT",
+    m.version === VERSION_SNAPSHOT.components.finance, `got: ${m.version}, snapshot: ${VERSION_SNAPSHOT.components.finance}`);
   const cls = m.customjs_classes || [];
   assertTrue("V01103-MO-FBP-2: MonthlyOverview in customjs_classes",
     cls.includes("MonthlyOverview"), `got: ${cls.join(",")}`);
@@ -13616,7 +13616,7 @@ async function caseV01150PaycheckTemplateAlignsManifest() {
 // v0.115.0 Stage C — manifest additions (month entity-create + months rule_fragment + version bumps)
 
 async function caseV01150ManifestsBumped() {
-  console.log("\n--- Case V01150-C-MANIFESTS: workshop 0.115.x + finance 0.9.x version pins ---");
+  console.log("\n--- Case V01150-C-MANIFESTS: workshop + finance version pins (snapshot SSOT) ---");
   // v0.115.1: widened from exact 0.115.0 to 0.115.x pattern (precedent: EC-2 /
   // FA3-PROJ-1 / V01080-NEB-count range guards). Patch bumps shouldn't whack-a-mole
   // every assert.
@@ -13624,11 +13624,11 @@ async function caseV01150ManifestsBumped() {
   assertTrue("V01150-C-MANIFESTS-1: platform/manifest.json workshop_version matches 0.115.x..0.119.x",
     sameMajorMinor(platMan.workshop_version, VERSION_SNAPSHOT.workshop_version), `got: ${platMan.workshop_version}`);
   const finPin = (platMan.blueprints || []).find(b => b.name === "finance");
-  assertTrue("V01150-C-MANIFESTS-2: platform/manifest.json finance blueprint pin matches 0.9.x",
-    finPin && /^0\.(9|10)\.\d+$/.test(finPin.version), `got: ${finPin?.version}`);
+  assertTrue("V01150-C-MANIFESTS-2: platform/manifest.json finance blueprint pin matches snapshot SSOT",
+    finPin && finPin.version === VERSION_SNAPSHOT.components.finance, `got: ${finPin?.version}, snapshot: ${VERSION_SNAPSHOT.components.finance}`);
   const finMan = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
-  assertTrue("V01150-C-MANIFESTS-3: finance manifest version matches 0.9.x",
-    /^0\.(9|10)\.\d+$/.test(finMan.version), `got: ${finMan.version}`);
+  assertTrue("V01150-C-MANIFESTS-3: finance manifest version matches snapshot SSOT",
+    finMan.version === VERSION_SNAPSHOT.components.finance, `got: ${finMan.version}, snapshot: ${VERSION_SNAPSHOT.components.finance}`);
   const pkg = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "package.json"), "utf8"));
   assertTrue("V01150-C-MANIFESTS-4: package.json version matches 0.115.x..0.119.x",
     sameMajorMinor(pkg.version, VERSION_SNAPSHOT.workshop_version), `got: ${pkg.version}`);
@@ -14063,14 +14063,14 @@ async function caseV0110VersionBump() {
   assertTrue("V0110-VER-1: workshop_version 0.110.x..0.119.x",
     sameMajorMinor(ws.workshop_version, VERSION_SNAPSHOT.workshop_version), `got: ${ws.workshop_version}`);
   const fbp = (ws.blueprints || []).find(b => b.name === "finance");
-  assertTrue("V0110-VER-2: finance pin 0.6.x or 0.7.x or 0.8.x",
-    fbp && /^0\.(6|7|8|9|10)\.\d+$/.test(fbp.version), `got: ${fbp?.version}`);
+  assertTrue("V0110-VER-2: finance pin matches snapshot SSOT",
+    fbp && fbp.version === VERSION_SNAPSHOT.components.finance, `got: ${fbp?.version}, snapshot: ${VERSION_SNAPSHOT.components.finance}`);
   const pbp = (ws.blueprints || []).find(b => b.name === "project");
   assertTrue("V0110-VER-3: project pin 1.21.x or 1.22.x or 1.23.x",
     pbp && /^1\.(21|22|23|24|25|26)\.\d+$/.test(pbp.version), `got: ${pbp?.version}`);
   const fin = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
-  assertTrue("V0110-VER-4: finance manifest version 0.6.x or 0.7.x or 0.8.x",
-    /^0\.(6|7|8|9|10)\.\d+$/.test(fin.version), `got: ${fin.version}`);
+  assertTrue("V0110-VER-4: finance manifest version matches snapshot SSOT",
+    fin.version === VERSION_SNAPSHOT.components.finance, `got: ${fin.version}, snapshot: ${VERSION_SNAPSHOT.components.finance}`);
   const proj = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/manifest.json"), "utf8"));
   assertTrue("V0110-VER-5: project manifest version 1.21.x or 1.22.x or 1.23.x",
     /^1\.(21|22|23|24|25|26)\.\d+$/.test(proj.version), `got: ${proj.version}`);
