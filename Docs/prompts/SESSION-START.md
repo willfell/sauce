@@ -97,7 +97,7 @@ The cycle-close convention (above) requires every cycle to author the next hando
 
 ## Anti-patterns to avoid
 
-- **Don't pre-emptively bump versions** before completing the cycle. Workshop_version is held until S3 close (USER APPROVAL gate per `Docs/agent-guides/asking-before-acting.md`).
+- **Don't bump versions or tag at all — the release pipeline does it automatically.** `compute-release.js` computes every version record from conventional commits, opens the release PR (which auto-merges on green CI), tags, and ships to brew. Write conventional commits + merge feature work to `main`; that's it. Hand-editing versions/tags is an automation-down escape-hatch only. See `Docs/agent-guides/build-test-verify.md` § Release workflow.
 - **Don't `git add -A`** — always stage explicit files (per v0.23.0 lesson g; reaffirmed at v0.26.0 commit `dea7c41`).
 - **Don't dispatch parallel implementer subagents on coupled tasks** — only when files are 800+ LOC apart and posture is shared (v0.21.1 lesson a; reaffirmed v0.27.0 lesson b).
 - **Don't skip two-stage subagent review at S2 close** — spec + quality reviewers serve different functions; both required (v0.20.0 lesson d; 8 data points reaffirmation).

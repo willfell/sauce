@@ -118,6 +118,8 @@ The `install.sh` curl|bash flow was the install entry point from v0.22.0 through
 
 ---
 
+> **Note (release process):** the workshop→brew **release** is fully automated (compute-release → auto-merged release PR → tag-and-ship → brew). Do NOT bump versions or tag by hand. The canonical, current description is `Docs/agent-guides/build-test-verify.md` § Release workflow. The legacy `tp.user.platformInstall` / Obsidian-Sync steps below predate the brew + CLI distribution model and are kept only as historical context.
+
 ## Updating an existing consumer
 
 Consumer is at version A; workshop has version B (newer):

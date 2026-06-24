@@ -29,7 +29,7 @@ Stop and ask the user before any of these. The router's "What not to do" section
 
 ## Platform internals
 
-- **Bumping `workshop_version` in `platform/manifest.json`.** It is the global release marker; bumping is reserved for cycle close after USER APPROVAL (per `Docs/prompts/SESSION-START.md` § Anti-patterns).
+- **Bumping `workshop_version` (or any version record) in `platform/manifest.json` / `package.json` / `ranch` / seed-vault by hand.** The release bumper (`compute-release.js`) computes + writes every version automatically from conventional commits — don't touch them. Manual version edits are an escape-hatch only (automation down) and then warrant user confirmation. See `build-test-verify.md` § Release workflow.
 - **Editing or removing files inside `platform/mechanisms/*/`** after a version has been promoted to a consumer.
 - **Editing a consumer's `platform-installed.json` by hand.** It is auto-managed by the installer.
 - **Editing canonical `.claude/commands/<x>.md` or `.claude/skills/<bp>/**/SKILL.md`** in any consumer vault. These are **REVERTED on next install** per landmine #22. Use `.claude/commands.local/` or `.claude/skills.local/` as the override seam. `/audit` surfaces direct-canonical edits as `consumer_edit_at_risk`.
@@ -42,7 +42,7 @@ Stop and ask the user before any of these. The router's "What not to do" section
 
 - **Force-pushing or rewriting history** on `origin/main` of the `sauce` remote: `git push --force`, `git reset --hard origin/...`, `git rebase -i` on already-pushed commits, etc.
 - **Skipping hooks** (`--no-verify`, `--no-gpg-sign`, etc.) without explicit user request. If a pre-commit hook fails, fix the underlying issue and create a NEW commit.
-- **Annotated git tags** at HEAD. Cycle-close tags `v<X.Y.Z>` require user approval before pushing.
+- **Creating/pushing git tags by hand.** Release tags `v<X.Y.Z>` are created automatically by the `tag-and-ship` job once the auto-merged release PR lands — don't tag manually. A hand-cut tag (escape hatch, automation down) still requires user approval before pushing.
 - **Changes to GitHub branch-protection rules on `origin/main`.** The `gh api -X PUT repos/willfell/sauce/branches/main/protection ...` calls documented in `build-test-verify.md` § "Branch + PR workflow" require user approval before invocation. Rule changes affect every contributor and silently change the merge gate.
 
 ## New top-level files / directories
