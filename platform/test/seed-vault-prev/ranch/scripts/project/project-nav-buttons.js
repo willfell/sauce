@@ -337,6 +337,15 @@ class ProjectNavButtons {
     }
 
     async render(dv) {
+        // v0.119.0 PATCH: dv.current() returns undefined immediately after
+        // EntityCreate.create → openFile, before Dataview has indexed the new
+        // file. Bail out gracefully; next render tick will succeed once the
+        // metadata cache catches up. Reported on accuris 2026-06-16 when
+        // creating a new project from + New Project. See landmine #28 / the
+        // dispatcher-contracts subsection of code-conventions.md.
+        const cur = dv && dv.current ? dv.current() : null;
+        if (!cur || !cur.file) return;
+
         const icons = {
             project: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>`,
             map: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12h-8"/><path d="M21 6H8"/><path d="M21 18h-8"/><path d="M3 6v4c0 1.1.9 2 2 2h3"/><path d="M3 10v6c0 1.1.9 2 2 2h3"/></svg>`,

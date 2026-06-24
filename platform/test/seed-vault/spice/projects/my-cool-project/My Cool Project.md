@@ -3,6 +3,9 @@ title: My Cool Project
 type: project
 created_at: 2026-01-01T00:00:00.000Z
 status: active
+sections:
+  - Knowledge
+  - Notes
 ---
 
 # My Cool Project
@@ -11,4 +14,8 @@ status: active
 
 ```dataviewjs
 customJS.ProjectNavButtons.render(dv);
+```
+
+```dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "ProjectMeetingsPanel" });
 ```

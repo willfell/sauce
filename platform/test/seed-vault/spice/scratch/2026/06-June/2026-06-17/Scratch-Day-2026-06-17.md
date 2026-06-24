@@ -9,6 +9,10 @@ tags:
 # 2026-06-17
 
 ```dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "Breadcrumb" });
+```
+
+```dataviewjs
 await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 ```
 
