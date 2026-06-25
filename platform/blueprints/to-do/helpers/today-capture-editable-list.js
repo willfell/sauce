@@ -1,9 +1,16 @@
 /**
- * TodayCaptureEditableList (CustomJS) — renders the daily note's free-form
- * `## Today` checkbox rows as a click-to-edit list. Each row exposes a
- * pencil icon that opens the ToDoCreateTask modal in editExisting mode
- * (v0.127.0 §F), letting users update inline-field metadata (project, due,
- * priority, scheduled) without raw markdown editing.
+ * TodayCaptureEditableList (CustomJS) — the SOLE Today-capture UI on a daily
+ * to-do note. Renders the free-form Today `- [ ]` lines as a click-to-edit
+ * list: each row carries a functional checkbox (clicking toggles `[ ]`/`[x]`
+ * in the file via TaskInteractions.replaceTaskAt), metadata chips, and a pencil
+ * that opens the ToDoCreateTask modal in editExisting mode.
+ *
+ * v0.132.x: previously the widget only ENHANCED the raw lines — Obsidian also
+ * rendered the source `- [ ]` lines as native checkboxes, so the user saw the
+ * task TWICE (raw + editable). Now `_hideRawCaptureLines` suppresses the native
+ * rendering (reading mode) so this list is the only thing shown, and the
+ * checkbox is functional (was read-only, which relied on the now-hidden native
+ * checkbox for toggling). Live-preview still shows source while editing.
  *
  * Sister surface to ToDoLeafActions; consumed exclusively by
  * `type: to-do` daily notes between SectionLabel("Today", top:true) and
@@ -15,6 +22,43 @@
  * is back-injected into existing notes by install.js step 6.
  */
 class TodayCaptureEditableList {
+
+    /**
+     * Return `line` with its checkbox marker set to `[x]` (checked) or `[ ]`
+     * (unchecked). Pure; preserves the bullet marker (-,*,+) and everything
+     * after the checkbox. Returns the line unchanged if it is not a task line.
+     */
+    static _setChecked(line, checked) {
+        if (typeof line !== 'string') return line;
+        return line.replace(/^([-*+] \[)[ xX](\])/, (_m, p1, p2) => p1 + (checked ? 'x' : ' ') + p2);
+    }
+
+    /**
+     * Best-effort: hide the native-rendered raw `- [ ]` capture lines so this
+     * widget is the only Today list shown. Reading-mode only — feature-detected
+     * and wrapped so it no-ops in live-preview, embeds, and test stubs, and
+     * never throws out of render. The capture region is the only NATIVE task
+     * list on a daily note (carryover/recurring/etc. are dataviewjs-rendered),
+     * and it sits ABOVE this block, so we hide native `ul.contains-task-list`
+     * elements that precede our container and are not inside a dataviewjs block.
+     */
+    _hideRawCaptureLines(container) {
+        try {
+            if (!container || typeof container.closest !== 'function') return;
+            const preview = container.closest('.markdown-preview-view');
+            if (!preview || typeof preview.querySelectorAll !== 'function') return;
+            const ourBlock = container.closest('.block-language-dataviewjs');
+            const lists = preview.querySelectorAll('ul.contains-task-list');
+            for (const ul of lists) {
+                if (ul.closest && ul.closest('.block-language-dataviewjs')) continue;
+                // DOCUMENT_POSITION_PRECEDING (2): only hide lists BEFORE our block.
+                if (ourBlock && typeof ourBlock.compareDocumentPosition === 'function'
+                    && !(ourBlock.compareDocumentPosition(ul) & 2)) continue;
+                ul.style.display = 'none';
+            }
+        } catch (_e) { /* best-effort; never break render */ }
+    }
+
     async render(dv) {
         if (!dv || !dv.container) return;
         // Skip rendering inside embeds — the host note already renders its own list.
@@ -64,13 +108,23 @@ class TodayCaptureEditableList {
             row.addEventListener('mouseenter', () => { row.style.background = 'var(--background-secondary)'; });
             row.addEventListener('mouseleave', () => { row.style.background = ''; });
 
-            // Checkbox state visual (read-only — toggling stays in raw markdown
-            // via Obsidian's built-in reading-view click handler on the line itself).
+            // Functional checkbox: this list is now the SOLE Today UI (the raw
+            // native lines are hidden), so clicking toggles [ ]/[x] in the file
+            // via TaskInteractions.replaceTaskAt. On failure, revert + notice.
             const cb = row.createEl('input');
             cb.type = 'checkbox';
             cb.checked = /^[-*+] \[[xX]\] /.test(entry.line);
-            cb.disabled = true;
-            cb.style.cssText = 'margin: 0;';
+            cb.style.cssText = 'margin: 0; cursor: pointer;';
+            cb.addEventListener('change', async () => {
+                const want = cb.checked;
+                const newLine = TodayCaptureEditableList._setChecked(entry.line, want);
+                const res = await ti.replaceTaskAt(filePath, entry.idx, newLine);
+                if (!res || !res.ok) {
+                    cb.checked = !want;
+                    new Notice('Could not update task: ' + ((res && res.reason) || 'unknown'), 6000);
+                }
+                // On success, vault.modify re-renders this block with fresh state.
+            });
 
             // Title.
             const title = row.createEl('span');
@@ -112,6 +166,14 @@ class TodayCaptureEditableList {
                     },
                 });
             });
+        }
+
+        // Suppress the native-rendered raw capture checkboxes so this list is
+        // the only Today UI. Retries catch raw lines that render after us.
+        this._hideRawCaptureLines(dv.container);
+        if (typeof setTimeout === 'function') {
+            setTimeout(() => this._hideRawCaptureLines(dv.container), 60);
+            setTimeout(() => this._hideRawCaptureLines(dv.container), 250);
         }
     }
 }

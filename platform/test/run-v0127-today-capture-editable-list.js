@@ -318,6 +318,61 @@ function ok(cond, msg) {
             `HC-V0127-TCEL-F-2: no children added in embed (got ${container._children.length})`);
     }
 
+    // -----------------------------------------------------------------------
+    // HC-V0127-TCEL-G: _setChecked pure transform (flip [ ]/[x], keep marker).
+    // -----------------------------------------------------------------------
+    {
+        const T = loadIntoSandbox({}).TodayCaptureEditableList;
+        ok(T._setChecked('- [ ] Task one', true) === '- [x] Task one', 'HC-V0127-TCEL-G: [ ]->[x]');
+        ok(T._setChecked('- [x] Task one', false) === '- [ ] Task one', 'HC-V0127-TCEL-G-2: [x]->[ ]');
+        ok(T._setChecked('* [ ] Star', true) === '* [x] Star', 'HC-V0127-TCEL-G-3: preserves * marker');
+        ok(T._setChecked('+ [ ] Plus [due:: 2026-06-30]', true) === '+ [x] Plus [due:: 2026-06-30]',
+            'HC-V0127-TCEL-G-4: preserves + marker + trailing fields');
+        ok(T._setChecked('not a task', true) === 'not a task', 'HC-V0127-TCEL-G-5: non-task unchanged');
+    }
+
+    // -----------------------------------------------------------------------
+    // HC-V0127-TCEL-H: checkbox is functional; toggling calls replaceTaskAt
+    // with the flipped line (was read-only/disabled in v0.127.0).
+    // -----------------------------------------------------------------------
+    {
+        const entries = [{
+            idx: 9, line: '- [ ] Toggle me',
+            parsed: { title: 'Toggle me', priority: null, due: null, scheduled: null, project: null },
+        }];
+        let replaceArgs = null;
+        const sandbox = loadIntoSandbox({
+            customJS: {
+                TaskInteractions: {
+                    findTaskLines: () => entries,
+                    replaceTaskAt: async (fp, idx, line) => { replaceArgs = { fp, idx, line }; return { ok: true }; },
+                },
+                ToDoCreateTask: { open: () => {} },
+            },
+        });
+        const container = makeEl();
+        const dv = {
+            container,
+            current: () => ({ file: { path: 'spice/to-do/2026/06-June/ToDo-2026-06-25.md' } }),
+        };
+        const inst = new sandbox.TodayCaptureEditableList();
+        await inst.render(dv);
+
+        const cbs = findAll(container, (el) => el.tagName === 'input' && el.type === 'checkbox');
+        ok(cbs.length === 1, `HC-V0127-TCEL-H: one checkbox rendered (got ${cbs.length})`);
+        if (cbs.length) {
+            ok(cbs[0].disabled !== true, 'HC-V0127-TCEL-H-2: checkbox is functional (not disabled)');
+            cbs[0].checked = true;
+            const handlers = (cbs[0]._listeners && cbs[0]._listeners.change) || [];
+            ok(handlers.length === 1, 'HC-V0127-TCEL-H-3: change handler attached');
+            if (handlers.length) await handlers[0]({});
+            ok(replaceArgs && replaceArgs.idx === 9
+                && replaceArgs.line === '- [x] Toggle me'
+                && replaceArgs.fp === 'spice/to-do/2026/06-June/ToDo-2026-06-25.md',
+                `HC-V0127-TCEL-H-4: replaceTaskAt called with flipped line (got ${JSON.stringify(replaceArgs)})`);
+        }
+    }
+
     console.log('');
     if (fail === 0) {
         console.log(`PASS ${pass}/${pass + fail}`);
