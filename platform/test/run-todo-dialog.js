@@ -392,6 +392,7 @@ function makeDomEl() {
         children: [],
         parentNode: null,
         disabled: false,
+        _listeners: {},
         type: '',
         value: '',
         innerHTML: '',
@@ -412,7 +413,14 @@ function makeDomEl() {
             return c;
         },
         createDiv(opts) { return this.createEl('div', opts); },
-        addEventListener() {},
+        addEventListener(type, fn) {
+            (this._listeners[type] || (this._listeners[type] = [])).push(fn);
+        },
+        dispatchEvent(ev) {
+            for (const fn of (this._listeners[ev && ev.type] || [])) fn(ev);
+            return true;
+        },
+        click() { if (typeof this.onclick === 'function') this.onclick(); },
         appendChild(child) {
             child.parentNode = this;
             this.children.push(child);
@@ -699,6 +707,37 @@ function reloadWithDom() {
         ok('HC-V0127-DLG-EDIT-G-2 create-path: replaceTaskAt NOT called',
             !replaceCalled, 'replaceTaskAt was called in create mode (regression)');
     }));
+})();
+
+// --- HC-V01330-DLG-ENTER-*: Enter in the Title field submits the task ---
+(() => {
+    const env = reloadWithDom();
+    const inst = new env.Cls();
+    let submitCalled = 0;
+    let submittedTitle = null;
+    inst._submit = async (payload) => { submitCalled++; submittedTitle = payload && payload.title; };
+    inst.open({ preselectDestination: 'today' });
+    const titleInput = env.getTitleInput();
+    const fireEnter = (el) => (el._listeners.keydown || []).forEach(
+        (fn) => fn({ key: 'Enter', isComposing: false, preventDefault() {} }));
+
+    ok('HC-V01330-DLG-ENTER-A keydown handler wired on Title input',
+        !!(titleInput && titleInput._listeners.keydown && titleInput._listeners.keydown.length),
+        'no keydown listener attached to the title input');
+
+    // Empty title → submit disabled → Enter must NOT create a blank task.
+    fireEnter(titleInput);
+    ok('HC-V01330-DLG-ENTER-B empty title: Enter does not submit', submitCalled === 0,
+        `_submit called ${submitCalled}x with empty title`);
+
+    // Typed title → submit enabled → Enter submits with that title.
+    titleInput.value = 'Ship it';
+    titleInput.oninput && titleInput.oninput();
+    fireEnter(titleInput);
+    ok('HC-V01330-DLG-ENTER-C typed title: Enter submits once', submitCalled === 1,
+        `_submit called ${submitCalled}x`);
+    ok('HC-V01330-DLG-ENTER-D Enter submits the typed title', submittedTitle === 'Ship it',
+        `submitted title = ${JSON.stringify(submittedTitle)}`);
 })();
 
 // Allow all async EDIT-* cases to settle before final tally.
