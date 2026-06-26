@@ -3784,6 +3784,18 @@ function _healNoteChromeBody(body, type) {
   // tracking treated it as content, not as bypass).
   const PEOPLE_RENDERING_BAD = /(class:\s*"PeopleRendering"[\s\S]{0,400}?args:\s*\[)\s*dv\s*,\s*/g;
   out = out.replace(PEOPLE_RENDERING_BAD, '$1');
+  // Step 4b — guard the eager `dv.current().file.path` in the meeting
+  // PeopleRendering inline_body. On cold load dv.current() is undefined, so
+  // reading `.file` throws the transient "Cannot read properties of undefined
+  // (reading 'file')" Evaluation Error that flashes then clears on re-render.
+  // Rewrite to an optional-chained form with an active-file fallback (resolves
+  // on the FIRST render, so no flash). Targets only the button-created shape;
+  // the Templater template already guards via `const cur = dv.current(); … if
+  // (notePath)`. Idempotent: `dv.current()?.file?.path` no longer matches.
+  out = out.replace(
+    /notePath:\s*dv\.current\(\)\.file\.path\b/g,
+    'notePath: (dv.current()?.file?.path || app.workspace.getActiveFile()?.path)'
+  );
   // `out` may have changed; downstream steps (5, 6) operate on the scrubbed
   // content.
   // Step 5 — ensure the ACTION_ITEMS_MARKER sits INSIDE the Action Items
