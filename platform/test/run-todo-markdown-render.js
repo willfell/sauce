@@ -122,5 +122,20 @@ ok('TDM-8 ProjectGroups also rejects whitespace-prefixed javascript:', () => {
     assertEq(danger.length, 0);
 });
 
+// ---------- TDM-9: URLs with literal parens (Teams deep-links) not truncated ----------
+// Repro: a Teams URL with `channelName=...(Lounge)...` truncated at the first ')'
+// under the old naive `[^)\n]+` regex, leaking the tail ("&...ngc=true)") as text.
+ok('TDM-9 paren-URL not truncated by balanced-paren scan (both widgets)', () => {
+    const url = 'https://teams.microsoft.com/l/message/19:abc@thread.tacv2/178?channelName=Dev%20Enablement%20(Lounge)&createdTime=178&ngc=true';
+    [['unassigned', ToDoDailyUnassignedMeetings], ['project', ToDoDailyProjectGroups]].forEach(([tag, W]) => {
+        const c = renderAgainst(W, 'Fix this - [Chat](' + url + ')');
+        const chat = c._collectAnchors().filter(a => a.text === 'Chat');
+        assertEq(chat.length, 1, tag + ': exactly one Chat anchor');
+        const href = chat[0].href || '';
+        if (!href.includes('ngc=true')) throw new Error(tag + ': href truncated (missing ngc=true): ' + href);
+        if (!href.includes('(Lounge)')) throw new Error(tag + ': (Lounge) parens lost from href: ' + href);
+    });
+});
+
 console.log(`\n${passes} passed, ${fails} failed`);
 process.exit(fails === 0 ? 0 : 1);

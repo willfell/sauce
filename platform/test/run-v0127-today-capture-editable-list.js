@@ -409,6 +409,36 @@ function ok(cond, msg) {
         ok(html.includes('>Automation</a>'), 'HC-V0127-TCEL-I-5: wikilink alias is "Automation"');
     }
 
+    // -----------------------------------------------------------------------
+    // HC-V0127-TCEL-J: URLs with literal parens (Teams deep-links) aren't
+    // truncated — the full URL lands in href and nothing leaks after the link.
+    // -----------------------------------------------------------------------
+    {
+        const url = 'https://teams.microsoft.com/l/message/19:abc@thread.tacv2/178?channelName=Developer%20Enablement%20(Lounge)&createdTime=178&ngc=true';
+        const line = '- [ ] Fix this up for Stefan - [Chat](' + url + ')';
+        const entries = [{
+            idx: 5, line,
+            parsed: { title: 'Fix this up for Stefan - [Chat](' + url + ')', priority: null, due: null, scheduled: null, project: null },
+        }];
+        const sandbox = loadIntoSandbox({
+            customJS: {
+                TaskInteractions: { findTaskLines: () => entries },
+                ToDoCreateTask: { open: () => {} },
+            },
+        });
+        const container = makeEl();
+        const dv = { container, current: () => ({ file: { path: 'today.md' } }) };
+        const inst = new sandbox.TodayCaptureEditableList();
+        await inst.render(dv);
+
+        const titleSpan = findAll(container, (el) => el.tagName === 'span' && (el.innerHTML || '').includes('Fix this up for Stefan'))[0];
+        const th = titleSpan ? titleSpan.innerHTML : '';
+        ok(th.includes('ngc=true'), `HC-V0127-TCEL-J: full URL captured incl. ngc=true (tail: ...${th.slice(-50)})`);
+        ok(th.includes('(Lounge)'), 'HC-V0127-TCEL-J-2: (Lounge) parens preserved in URL');
+        ok(th.includes('>Chat</a>'), 'HC-V0127-TCEL-J-3: link label is "Chat"');
+        ok(th.trim().endsWith('</a>'), `HC-V0127-TCEL-J-4: no leaked ")" tail after the link (tail: ...${th.slice(-30)})`);
+    }
+
     console.log('');
     if (fail === 0) {
         console.log(`PASS ${pass}/${pass + fail}`);
