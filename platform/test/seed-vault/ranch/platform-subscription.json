@@ -43,7 +43,7 @@
     },
     {
       "name": "task-interactions",
-      "version": "0.1.1"
+      "version": "0.1.2"
     },
     {
       "name": "breadcrumb",
@@ -101,7 +101,7 @@
     },
     {
       "name": "meetings",
-      "version": "0.12.1"
+      "version": "0.12.2"
     },
     {
       "name": "people",
