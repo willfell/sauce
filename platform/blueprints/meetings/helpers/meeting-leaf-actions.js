@@ -166,6 +166,13 @@ class MeetingLeafActions {
         catch (e) { new Notice("Could not add task: " + (e.message || e), 6000); }
         close();
       };
+      // Enter in the Title field submits the task (skips the mouse). Ignore IME
+      // composition Enter; no-op while the button is disabled (empty title).
+      titleInput.addEventListener("keydown", (ev) => {
+        if (ev.key !== "Enter" || ev.isComposing) return;
+        ev.preventDefault();
+        if (!save.disabled) save.click();
+      });
       setTimeout(() => titleInput.focus(), 0);
     }});
   }
