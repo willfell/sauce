@@ -243,14 +243,29 @@ class ToDoDailyProjectGroups {
                 i += wl[0].length;
                 continue;
             }
-            // [label](url) or [label](<url>) — Obsidian allows angle-bracketed URLs
-            const lk = /^\[([^\]\n]+)\]\((<[^>\n]+>|[^)\n]+)\)/.exec(s.slice(i));
-            if (lk) {
-                let url = lk[2];
-                if (url.startsWith('<') && url.endsWith('>')) url = url.slice(1, -1);
-                tokens.push({ kind: 'link', label: lk[1], url });
-                i += lk[0].length;
-                continue;
+            // [label](url) — scan to the BALANCED closing paren so URLs that
+            // contain literal parens (e.g. Teams deep-links "...(Lounge)...")
+            // aren't truncated at the first ')'. Mirrors space-daily-dashboard
+            // _renderTaskHTML's balanced scan. Angle-bracketed <url> still ok.
+            if (s.charAt(i) === '[') {
+                const closeBracket = s.indexOf(']', i + 1);
+                if (closeBracket > i && s.charAt(closeBracket + 1) === '(') {
+                    let depth = 0, closeParen = -1;
+                    for (let k = closeBracket + 2; k < s.length; k++) {
+                        const c = s.charAt(k);
+                        if (c === '\n') break;
+                        if (c === '(') depth++;
+                        else if (c === ')') { if (depth === 0) { closeParen = k; break; } depth--; }
+                    }
+                    if (closeParen >= 0) {
+                        const label = s.slice(i + 1, closeBracket);
+                        let url = s.slice(closeBracket + 2, closeParen);
+                        if (url.startsWith('<') && url.endsWith('>')) url = url.slice(1, -1);
+                        tokens.push({ kind: 'link', label, url });
+                        i = closeParen + 1;
+                        continue;
+                    }
+                }
             }
             // Plain text — accumulate up to the next `[` (which might start a link/wikilink).
             const nextBracket = s.indexOf('[', i + 1);
