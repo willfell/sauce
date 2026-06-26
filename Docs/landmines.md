@@ -553,3 +553,42 @@ working consumer to confirm the contract.
 Catalog: `Docs/agent-guides/code-conventions.md` § Dispatcher contracts.
 
 Source: v0.118.1 postmortem item #10; reinforced by v0.93.3 + v0.94.0 + v0.118.0.
+
+### Landmine #31 — Guard `dv.current()` before reading `.file` in dataviewjs blocks
+
+A `dataviewjs` block that dereferences `dv.current().file...` eagerly throws on COLD LOAD.
+Dataview runs the block once before the note's query context is ready, so `dv.current()` is
+`undefined` and reading `.file` raises `TypeError: Cannot read properties of undefined (reading
+'file')`. The block re-renders correctly a beat later, so the error *flashes in the note and
+clears* — but it logs to the console on every open and reads as broken.
+
+**Symptom.**
+```
+Evaluation Error: TypeError: Cannot read properties of undefined (reading 'file')
+    at eval (eval at <anonymous> (plugin:dataview), <anonymous>:4:61)
+    ...
+    at DataviewJSRenderer.render (plugin:dataview:...)
+```
+
+**Fix.** Never dereference `dv.current()` unguarded. Use optional chaining with an active-file
+fallback — which resolves on the FIRST render (the active file is known even when `dv.current()`
+isn't), so there is no flash and no "loading" placeholder is needed:
+```js
+const notePath = dv.current()?.file?.path || app.workspace.getActiveFile()?.path;
+```
+Use the fuller form when the block must NOT run without a path (avoids a downstream
+"requires notePath"-style Notice in embeds/previews with no active file):
+```js
+const cur = dv.current();
+const notePath = (cur && cur.file && cur.file.path) || app.workspace.getActiveFile()?.path;
+if (notePath) { /* render */ }
+```
+
+**Where it bit.** The meetings button-created `inline_body` PeopleRendering block shipped
+`notePath: dv.current().file.path` (unguarded) while the Templater `Meeting.md` template used
+the guarded form — so button-created meeting notes flashed the error on open, template-created
+ones did not. The manifest `inline_body` is fixed at source; `install.js` `_healNoteChromeBody`
+step 4b rewrites the unguarded form in existing notes (idempotent — the optional-chained result
+no longer matches).
+
+**Surfaced:** v0.133.0 (real-user repro on new meeting notes).

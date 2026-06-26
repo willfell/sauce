@@ -340,6 +340,7 @@ class ToDoCreateTask {
         const footer = this._appendFooter(host, state, overlay);
         updateSubmit = footer.updateSubmit;     // bind closures to the real evaluator
         host.appendChild(footer.submitBtn.parentNode);
+        this._wireEnterSubmit(titleInput, footer.submitBtn);   // Enter in Title submits
         updateSubmit();                         // evaluate initial state (in case of presets)
     }
 
@@ -456,6 +457,7 @@ class ToDoCreateTask {
         const footer = this._appendFooter(host, state, overlay);
         updateSubmit = footer.updateSubmit;     // bind closures to the real evaluator
         host.appendChild(footer.submitBtn.parentNode);
+        this._wireEnterSubmit(titleInput, footer.submitBtn);   // Enter in Title submits
         updateSubmit();                         // evaluate initial state — submit enables once title+frequency are valid
     }
 
@@ -505,6 +507,19 @@ class ToDoCreateTask {
             }
         };
         return { submitBtn: submit, updateSubmit };
+    }
+
+    // Wire Enter-in-Title to the submit button so the task can be created
+    // without reaching for the mouse. Mirrors MeetingLeafActions' task modal.
+    // Guards: ignore IME composition Enter; no-op when submit is disabled
+    // (empty/invalid title) so an empty Enter never creates a blank task.
+    _wireEnterSubmit(input, submitBtn) {
+        if (!input || !submitBtn) return;
+        input.addEventListener('keydown', (ev) => {
+            if (ev.key !== 'Enter' || ev.isComposing) return;
+            ev.preventDefault();
+            if (!submitBtn.disabled) submitBtn.click();
+        });
     }
 
     /**

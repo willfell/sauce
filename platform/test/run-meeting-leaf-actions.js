@@ -107,5 +107,22 @@ ok('HC-V0127-MLA-NT-SLUG-A _projectSlugFor returns listed slug',
 ok('HC-V0127-MLA-NT-SLUG-B _projectSlugFor falls back to slugified default for unlisted',
   slugInst._projectSlugFor('Some New Thing!', {}) === 'some-new-thing-');
 
+// ── HC-V01330-* — source-contract regression guards ────────────────────────
+// Enter-to-submit on the New Task modal + the dv.current() cold-load guard.
+const mlaSrc = fs.readFileSync(path.resolve(__dirname, '..', 'blueprints/meetings/helpers/meeting-leaf-actions.js'), 'utf8');
+ok('HC-V01330-MLA-ENTER-A New Task modal wires Enter → save',
+  /addEventListener\("keydown"[\s\S]{0,220}ev\.key[\s\S]{0,40}"Enter"[\s\S]{0,160}save\.click\(\)/.test(mlaSrc),
+  'no Enter→save keydown handler found in _openTaskModal');
+
+const meetManifest = fs.readFileSync(path.resolve(__dirname, '..', 'blueprints/meetings/manifest.json'), 'utf8');
+ok('HC-V01330-MLA-DVGUARD-A manifest inline_body has no unguarded dv.current().file.path',
+  !/dv\.current\(\)\.file\.path/.test(meetManifest));
+ok('HC-V01330-MLA-DVGUARD-B manifest inline_body uses the guarded optional-chained form',
+  meetManifest.includes('dv.current()?.file?.path') && meetManifest.includes('getActiveFile()'));
+
+const meetTemplate = fs.readFileSync(path.resolve(__dirname, '..', 'blueprints/meetings/templates/Meeting.md'), 'utf8');
+ok('HC-V01330-MLA-DVGUARD-C Meeting.md template has no unguarded dv.current().file.path',
+  !/dv\.current\(\)\.file\.path/.test(meetTemplate));
+
 console.log(`\nResult: ${pass} passed, ${fail} failed.`);
 if (fail) { console.log('Failures:'); failures.forEach(f => console.log('  ' + f)); process.exit(1); }

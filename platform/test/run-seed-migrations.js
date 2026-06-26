@@ -556,6 +556,16 @@ withTempVault((vault) => {
     ok("HC-V01325-SEED-AIMARKER-5 no task lines remain between Notes and the Action Items label",
        (aimNotesIdx !== -1 && aimLabelIdx !== -1 && aimNotesIdx < aimLabelIdx &&
         !aimLines.slice(aimNotesIdx + 1, aimLabelIdx).some((l) => /^[-*+] \[[ xX]\] /.test(l))));
+
+    // ===== HC-V01330-SEED-DVGUARD-* — applyNoteChromeHeal step 4b guards the
+    // eager dv.current().file.path in the PeopleRendering inline_body. The same
+    // seed note carries the unguarded button-created form; the heal must rewrite
+    // it to an optional-chained, active-file-fallback expression so it no longer
+    // throws "Cannot read properties of undefined (reading 'file')" on cold load.
+    ok("HC-V01330-SEED-DVGUARD-1 unguarded dv.current().file.path removed",
+       !/dv\.current\(\)\.file\.path/.test(aim));
+    ok("HC-V01330-SEED-DVGUARD-2 rewritten to optional-chained + active-file fallback",
+       aim.includes("dv.current()?.file?.path") && aim.includes("app.workspace.getActiveFile()"));
 });
 
 // =============================================================================
