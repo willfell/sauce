@@ -125,11 +125,18 @@ class TaskInteractions {
     // ---------- Marker injectors (pure body transforms) ----------
 
     /**
-     * Insert the ACTION_ITEMS_MARKER on its own line immediately BEFORE the
-     * opening ``` fence of the Action Items SectionLabel block. Idempotent.
-     * Returns body unchanged if either the marker already exists OR the
-     * SectionLabel anchor is absent (the caller relies on _healNoteChromeBody
-     * to insert the SectionLabel itself in a prior step).
+     * Insert the ACTION_ITEMS_MARKER on its own line immediately AFTER the
+     * closing ``` fence of the Action Items SectionLabel block — so the marker
+     * lives INSIDE the Action Items section and appended tasks land below the
+     * "Action Items" label. Idempotent. Returns body unchanged if either the
+     * marker already exists OR the SectionLabel anchor is absent (the caller
+     * relies on _healNoteChromeBody to insert the SectionLabel itself in a prior
+     * step).
+     *
+     * Earlier revisions parked the marker BEFORE the opening fence; combined
+     * with appendTask's insert-before-marker write, that deposited every meeting
+     * task into the preceding Notes section. The marker now mirrors
+     * injectTodayCaptureMarker (after the label; tasks below it).
      */
     static injectActionItemsMarker(body) {
         const marker = TaskInteractions.actionItemsAnchor();
@@ -140,23 +147,21 @@ class TaskInteractions {
         if (idx === -1) return body;
 
         const lines = body.split("\n");
-        // Locate the line index that contains the SectionLabel call, then walk
-        // backwards to the preceding opening ``` fence (start of the
-        // dataviewjs block that wraps the SectionLabel call).
         let labelLineIdx = -1;
         for (let i = 0; i < lines.length; i++) {
             if (lines[i].includes(needle)) { labelLineIdx = i; break; }
         }
         if (labelLineIdx === -1) return body;
 
-        let fenceLineIdx = -1;
-        for (let i = labelLineIdx - 1; i >= 0; i--) {
-            if (lines[i].trimStart().startsWith("```")) { fenceLineIdx = i; break; }
+        // Walk forward to the closing ``` fence of this dataviewjs block.
+        let closingFenceIdx = -1;
+        for (let i = labelLineIdx + 1; i < lines.length; i++) {
+            if (lines[i].trimStart().startsWith("```")) { closingFenceIdx = i; break; }
         }
-        if (fenceLineIdx === -1) return body;
+        if (closingFenceIdx === -1) return body;
 
-        // Insert: [blank, marker, blank] before the fence line.
-        lines.splice(fenceLineIdx, 0, "", marker, "");
+        // Insert: [blank, marker] AFTER the closing fence.
+        lines.splice(closingFenceIdx + 1, 0, "", marker);
         return lines.join("\n");
     }
 
@@ -327,9 +332,11 @@ class TaskInteractions {
                     if (lines[i].includes(marker)) { markerLineIdx = i; break; }
                 }
                 if (markerLineIdx === -1) return { ok: false, reason: "no-action-items-anchor" };
-                // Insert the new task line on the line immediately BEFORE the
-                // marker, preceded by exactly one blank line.
-                lines.splice(markerLineIdx, 0, line, "");
+                // Insert the new task line AFTER the marker, with one blank line
+                // between the marker and the inserted line — the marker sits just
+                // below the "Action Items" SectionLabel, so the task lands inside
+                // the Action Items section. Mirrors the todayCapture branch.
+                lines.splice(markerLineIdx + 1, 0, "", line);
                 newContent = lines.join("\n");
             } else if (type === "project-todo") {
                 const needle = `class: "SectionLabel", args: [{ text: "Owned Tasks" }]`;

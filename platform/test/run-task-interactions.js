@@ -366,9 +366,9 @@ function meetingBodyWithMarker() {
     "## Notes",
     "Some preceding content.",
     "",
-    "<!-- ACTION_ITEMS_MARKER -->",
-    "",
     ACTION_ITEMS_SECTION_BLOCK,
+    "",
+    "<!-- ACTION_ITEMS_MARKER -->",
     "",
   ].join("\n");
 }
@@ -409,23 +409,24 @@ function todayBody(includeMarker) {
   }
 
   // B. Insertion site: a body with the SectionLabel("Action Items") block but
-  // no marker → the marker is placed on its own line before the opening ```
-  // fence of that block.
+  // no marker → the marker is placed on its own line AFTER the closing ```
+  // fence of that block (inside the Action Items section, below the label).
   {
     const before = meetingBodyNoMarker();
     const after = TI.injectActionItemsMarker(before);
     ok("HC-V0127-TI-INJECT-AI-B.marker-present", after.includes("<!-- ACTION_ITEMS_MARKER -->"));
     const lines = after.split("\n");
     const markerIdx = lines.findIndex((l) => l.includes("<!-- ACTION_ITEMS_MARKER -->"));
-    const fenceIdx = lines.findIndex(
-      (l, i) => i > markerIdx && l.trimStart().startsWith("```")
-    );
-    ok("HC-V0127-TI-INJECT-AI-B.marker-before-fence", markerIdx >= 0 && fenceIdx > markerIdx);
-    // SectionLabel call must be inside that fence (i.e., still after the marker).
     const labelIdx = lines.findIndex(
       (l) => l.includes('class: "SectionLabel", args: [{ text: "Action Items" }]')
     );
-    ok("HC-V0127-TI-INJECT-AI-B.label-after-marker", labelIdx > markerIdx);
+    ok("HC-V0127-TI-INJECT-AI-B.label-before-marker", labelIdx >= 0 && labelIdx < markerIdx);
+    // The closing fence of the Action Items block sits between the label and the
+    // marker — i.e. the marker is AFTER the block, not above it.
+    const closeFenceIdx = lines.findIndex(
+      (l, i) => i > labelIdx && l.trimStart().startsWith("```")
+    );
+    ok("HC-V0127-TI-INJECT-AI-B.marker-after-fence", closeFenceIdx > labelIdx && markerIdx > closeFenceIdx);
   }
 
   // C. No SectionLabel match → body returned unchanged.
@@ -617,7 +618,8 @@ function todayBody(includeMarker) {
   }
 
   // APPEND-MEETING: meeting body w/ marker → new line inserted immediately
-  // before the marker, with a blank-line separator.
+  // AFTER the marker (marker, "", line), so the task lands inside the Action
+  // Items section (the marker sits just below the "Action Items" label).
   {
     const { TaskInteractions: TI, app, adapter } = setup();
     const p = "spice/meetings/m1.md";
@@ -628,11 +630,11 @@ function todayBody(includeMarker) {
     const lines = after.split("\n");
     const markerIdx = lines.findIndex((l) => l.includes("<!-- ACTION_ITEMS_MARKER -->"));
     ok("HC-V0127-TI-APPEND-MEETING.marker-present", markerIdx >= 0);
-    // Inserted line should sit two lines above the marker (line, "", marker).
+    // Inserted line should sit two lines below the marker (marker, "", line).
     const insertedIdx = lines.findIndex((l) => l.startsWith("- [ ] do thing"));
-    ok("HC-V0127-TI-APPEND-MEETING.line-above-marker", insertedIdx >= 0 && insertedIdx < markerIdx);
-    eq("HC-V0127-TI-APPEND-MEETING.blank-between", lines[insertedIdx + 1], "");
-    eq("HC-V0127-TI-APPEND-MEETING.marker-after-blank", lines[insertedIdx + 2], "<!-- ACTION_ITEMS_MARKER -->");
+    ok("HC-V0127-TI-APPEND-MEETING.line-below-marker", insertedIdx >= 0 && insertedIdx > markerIdx);
+    eq("HC-V0127-TI-APPEND-MEETING.blank-between", lines[markerIdx + 1], "");
+    ok("HC-V0127-TI-APPEND-MEETING.line-after-blank", (lines[markerIdx + 2] || "").startsWith("- [ ] do thing"));
   }
 
   // APPEND-MEETING-NEEDS-INJECT: meeting body w/o marker but with the
