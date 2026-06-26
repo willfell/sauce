@@ -23,6 +23,8 @@
  */
 class TodayCaptureEditableList {
 
+    static SAFE_URL_SCHEMES = ['http:', 'https:', 'mailto:', 'obsidian:', 'file:'];
+
     /**
      * Return `line` with its checkbox marker set to `[x]` (checked) or `[ ]`
      * (unchecked). Pure; preserves the bullet marker (-,*,+) and everything
@@ -57,6 +59,88 @@ class TodayCaptureEditableList {
                 ul.style.display = 'none';
             }
         } catch (_e) { /* best-effort; never break render */ }
+    }
+
+    // ---------- inline markdown rendering ----------
+    // Third consumer of the v0.7.0 tokenizer (sibling copies in
+    // ToDoDailyProjectGroups + ToDoDailyUnassignedMeetings). Renders
+    // `[label](url)` external links + `[[target]]`/`[[target|alias]]` wikilinks
+    // as real <a> elements so task titles aren't shown as raw markdown.
+    // FOLLOW-UP: per the sibling note, this trio should be extracted to a shared
+    // util (e.g. a TaskInteractions static) — deferred to keep this patch low-risk.
+
+    _tokenizeInline(text) {
+        const tokens = [];
+        const s = String(text || '');
+        let i = 0;
+        while (i < s.length) {
+            const wl = /^\[\[([^\]\n]+?)\]\]/.exec(s.slice(i));
+            if (wl) {
+                const inner = wl[1];
+                const pipe = inner.indexOf('|');
+                if (pipe === -1) {
+                    tokens.push({ kind: 'wikilink', target: inner, alias: inner });
+                } else {
+                    tokens.push({ kind: 'wikilink', target: inner.slice(0, pipe), alias: inner.slice(pipe + 1) });
+                }
+                i += wl[0].length;
+                continue;
+            }
+            const lk = /^\[([^\]\n]+)\]\((<[^>\n]+>|[^)\n]+)\)/.exec(s.slice(i));
+            if (lk) {
+                let url = lk[2];
+                if (url.startsWith('<') && url.endsWith('>')) url = url.slice(1, -1);
+                tokens.push({ kind: 'link', label: lk[1], url });
+                i += lk[0].length;
+                continue;
+            }
+            const nextBracket = s.indexOf('[', i + 1);
+            if (nextBracket === -1) {
+                tokens.push({ kind: 'text', value: s.slice(i) });
+                break;
+            }
+            tokens.push({ kind: 'text', value: s.slice(i, nextBracket) });
+            i = nextBracket;
+        }
+        return tokens;
+    }
+
+    _escapeHtml(s) {
+        return String(s == null ? '' : s)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    _isSafeUrl(url) {
+        try {
+            const trimmed = String(url == null ? '' : url).trim();
+            if (!/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) return true;
+            const lower = trimmed.toLowerCase();
+            return TodayCaptureEditableList.SAFE_URL_SCHEMES.some(s => lower.startsWith(s));
+        } catch (_e) { return false; }
+    }
+
+    _renderInlineMarkdown(spanEl, text) {
+        const tokens = this._tokenizeInline(text);
+        const parts = [];
+        for (const t of tokens) {
+            if (t.kind === 'text') {
+                parts.push(this._escapeHtml(t.value));
+            } else if (t.kind === 'link') {
+                if (this._isSafeUrl(t.url)) {
+                    parts.push(`<a href="${this._escapeHtml(t.url)}" target="_blank" rel="noopener noreferrer">${this._escapeHtml(t.label)}</a>`);
+                } else {
+                    parts.push(this._escapeHtml(`[${t.label}](${t.url})`));
+                }
+            } else if (t.kind === 'wikilink') {
+                const target = this._escapeHtml(t.target);
+                parts.push(`<a class="internal-link" data-href="${target}" href="${target}">${this._escapeHtml(t.alias || t.target)}</a>`);
+            }
+        }
+        spanEl.innerHTML = parts.join('');
     }
 
     async render(dv) {
@@ -126,11 +210,15 @@ class TodayCaptureEditableList {
                 // On success, vault.modify re-renders this block with fresh state.
             });
 
-            // Title.
+            // Title — render inline markdown so `[label](url)` external links and
+            // `[[wikilink]]` internal links become real <a> elements (not raw
+            // text). min-width:0 + overflow-wrap let long content wrap instead of
+            // forcing a horizontal scroll on the flex row.
             const title = row.createEl('span');
             const parsed = entry.parsed || {};
-            title.textContent = parsed.title || entry.line.replace(/^[-*+] \[[ xX]\] /, '');
-            title.style.cssText = 'flex: 1; ' + (cb.checked
+            const titleText = parsed.title || entry.line.replace(/^[-*+] \[[ xX]\] /, '');
+            this._renderInlineMarkdown(title, titleText);
+            title.style.cssText = 'flex: 1; min-width: 0; overflow-wrap: anywhere; ' + (cb.checked
                 ? 'text-decoration: line-through; color: var(--text-muted);'
                 : 'color: var(--text-normal);');
 

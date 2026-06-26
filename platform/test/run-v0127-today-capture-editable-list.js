@@ -162,7 +162,8 @@ function ok(cond, msg) {
             ok(list._children.length === 3,
                 `HC-V0127-TCEL-A-2: 3 rows for 3 entries (got ${list._children.length})`);
             // Each row contains a title span with the parsed.title text.
-            const titles = findAll(list, (el) => el.tagName === 'span' && (el._text === 'Task one' || el._text === 'Task two' || el._text === 'Task three'));
+            // Titles now render via innerHTML (inline markdown), not textContent.
+            const titles = findAll(list, (el) => el.tagName === 'span' && /Task (one|two|three)/.test(el.innerHTML || ''));
             ok(titles.length === 3,
                 `HC-V0127-TCEL-A-3: each row carries its title (got ${titles.length})`);
         }
@@ -371,6 +372,41 @@ function ok(cond, msg) {
                 && replaceArgs.fp === 'spice/to-do/2026/06-June/ToDo-2026-06-25.md',
                 `HC-V0127-TCEL-H-4: replaceTaskAt called with flipped line (got ${JSON.stringify(replaceArgs)})`);
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // HC-V0127-TCEL-I: task titles render inline markdown (links, not raw text).
+    // -----------------------------------------------------------------------
+    {
+        const entries = [
+            {
+                idx: 5, line: '- [ ] Fix this - [Chat](https://teams.microsoft.com/l/x?a=1&b=2)',
+                parsed: { title: 'Fix this - [Chat](https://teams.microsoft.com/l/x?a=1&b=2)', priority: null, due: null, scheduled: null, project: null },
+            },
+            {
+                idx: 6, line: '- [ ] test with note [[Automation]]',
+                parsed: { title: 'test with note [[Automation]]', priority: null, due: null, scheduled: null, project: null },
+            },
+        ];
+        const sandbox = loadIntoSandbox({
+            customJS: {
+                TaskInteractions: { findTaskLines: () => entries },
+                ToDoCreateTask: { open: () => {} },
+            },
+        });
+        const container = makeEl();
+        const dv = { container, current: () => ({ file: { path: 'today.md' } }) };
+        const inst = new sandbox.TodayCaptureEditableList();
+        await inst.render(dv);
+
+        const html = findAll(container, (el) => el.tagName === 'span').map((el) => el.innerHTML || '').join('|');
+        ok(/<a href="https:\/\/teams\.microsoft\.com[^"]*" target="_blank"/.test(html),
+            `HC-V0127-TCEL-I: external link rendered as <a href> (html: ${html.slice(0, 180)})`);
+        ok(html.includes('>Chat</a>'), 'HC-V0127-TCEL-I-2: external link label is "Chat" (not the URL)');
+        ok(html.includes('a=1&amp;b=2'), 'HC-V0127-TCEL-I-3: URL ampersands HTML-escaped in href');
+        ok(/<a class="internal-link" data-href="Automation"/.test(html),
+            'HC-V0127-TCEL-I-4: wikilink rendered as internal-link');
+        ok(html.includes('>Automation</a>'), 'HC-V0127-TCEL-I-5: wikilink alias is "Automation"');
     }
 
     console.log('');
