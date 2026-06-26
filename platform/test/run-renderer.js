@@ -2169,19 +2169,37 @@ async function testRendHasNotes() {
 
     // REND-HASNOTES: blank SectionLabel meeting → false; with notes → true (#1).
     (() => {
+      // Scaffold matches the current Meeting.md: marker sits AFTER the Action
+      // Items SectionLabel block (top of that section). _bodyHasNotes is
+      // position-independent — it strips all markers + task lines — so an empty
+      // Notes section reads false regardless of where the marker lives.
       const blank = [
         '---','type: meeting','---','',
         '```dataviewjs','await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Agenda" }] });','```','',
         '-','',
         '```dataviewjs','await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Notes" }] });','```','',
-        '<!-- ACTION_ITEMS_MARKER -->','',
-        '```dataviewjs','await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Action Items" }] });','```',
+        '-','',
+        '```dataviewjs','await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Action Items" }] });','```','',
+        '<!-- ACTION_ITEMS_MARKER -->',
       ].join('\n');
-      const withNotes = blank.replace('<!-- ACTION_ITEMS_MARKER -->', 'We discussed the Q3 roadmap and next steps in detail.\n<!-- ACTION_ITEMS_MARKER -->');
+      const withNotes = [
+        '---','type: meeting','---','',
+        '```dataviewjs','await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Agenda" }] });','```','',
+        '-','',
+        '```dataviewjs','await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Notes" }] });','```','',
+        'We discussed the Q3 roadmap and next steps in detail.','',
+        '```dataviewjs','await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Action Items" }] });','```','',
+        '<!-- ACTION_ITEMS_MARKER -->',
+      ].join('\n');
+      // Action items present but NO notes prose → still false (tasks below the
+      // marker must not register as Notes content — guards the marker move).
+      const withActionItems = [blank, '', '- [x] shipped the thing ✅ 2026-06-26'].join('\n');
       ok('REND-HASNOTES blank → false (SDD)', SpaceDailyDashboard._bodyHasNotes(blank) === false, `got ${SpaceDailyDashboard._bodyHasNotes(blank)}`);
       ok('REND-HASNOTES notes → true (SDD)', SpaceDailyDashboard._bodyHasNotes(withNotes) === true);
+      ok('REND-HASNOTES action-items-only → false (SDD)', SpaceDailyDashboard._bodyHasNotes(withActionItems) === false, `got ${SpaceDailyDashboard._bodyHasNotes(withActionItems)}`);
       ok('REND-HASNOTES blank → false (hub)', MeetingsHubCards._bodyHasNotes(blank) === false);
       ok('REND-HASNOTES notes → true (hub)', MeetingsHubCards._bodyHasNotes(withNotes) === true);
+      ok('REND-HASNOTES action-items-only → false (hub)', MeetingsHubCards._bodyHasNotes(withActionItems) === false);
     })();
   } catch (e) {
     console.log(`  REND-HASNOTES: FAIL — ${e && e.message}`);

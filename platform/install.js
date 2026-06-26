@@ -3786,23 +3786,17 @@ function _healNoteChromeBody(body, type) {
   out = out.replace(PEOPLE_RENDERING_BAD, '$1');
   // `out` may have changed; downstream steps (5, 6) operate on the scrubbed
   // content.
-  // Step 5 (v0.127.0 §B) — inject ACTION_ITEMS_MARKER into meeting notes so
-  // task-interactions appendTask() has a stable anchor. Idempotent guard via
-  // out.includes(ACTION_ITEMS_MARKER).
-  if (type === 'meeting' && !out.includes(ACTION_ITEMS_MARKER)) {
-    const sectionLabelStr = 'class: "SectionLabel", args: [{ text: "Action Items" }]';
-    const slIdx = out.indexOf(sectionLabelStr);
-    if (slIdx !== -1) {
-      // Walk backwards from slIdx to find the opening ```dataviewjs fence line.
-      const before = out.slice(0, slIdx);
-      const fenceIdx = before.lastIndexOf('```dataviewjs');
-      if (fenceIdx !== -1) {
-        // Insert the marker on its own line, with a blank line above and below.
-        out = out.slice(0, fenceIdx)
-            + ACTION_ITEMS_MARKER + '\n\n'
-            + out.slice(fenceIdx);
-      }
-    }
+  // Step 5 — ensure the ACTION_ITEMS_MARKER sits INSIDE the Action Items
+  // section (immediately after the "Action Items" SectionLabel block) so
+  // task-interactions appendTask() deposits tasks BELOW the label, not above
+  // it. Supersedes the v0.127.0 §B inject (which parked the marker above the
+  // label; combined with the old insert-before-marker write, every button-
+  // created task landed in the preceding Notes section). _relocateActionItemsMarker
+  // handles all three states idempotently: no marker → inject after the label;
+  // marker mis-placed above the label → relocate it AND drag the mis-placed
+  // task run down into Action Items; marker already below the label → no-op.
+  if (type === 'meeting') {
+    out = _relocateActionItemsMarker(out);
   }
   // Step 6 (v0.127.0 §F; v0.127.1 PATCH — also inject the renderer block) —
   // inject TODAY_CAPTURE_MARKER + the TodayCaptureEditableList dataviewjs
@@ -3845,6 +3839,77 @@ function _healNoteChromeBody(body, type) {
     }
   }
   return out;
+}
+
+// _relocateActionItemsMarker — meeting-only, pure, idempotent. Guarantees the
+// ACTION_ITEMS_MARKER lives immediately AFTER the Action Items SectionLabel
+// block — the stable anchor task-interactions@appendTask writes BELOW. Three
+// states:
+//   (a) no marker present → inject "[blank, marker]" after the label's closing
+//       fence.
+//   (b) marker present but at/above the label (the original v0.127.0 placement,
+//       which parked every button-created task under the Notes section) →
+//       excise the marker PLUS the contiguous run of mis-placed task lines
+//       directly above it, then re-emit "[blank, marker, blank, ...tasks]"
+//       after the label's closing fence (tasks kept in document order).
+//   (c) marker already below the label's closing fence → return unchanged.
+// Conservative: only the contiguous (blank|task) run immediately above a
+// mis-placed marker is moved; real Notes prose above that run is preserved
+// (the upward walk stops at the first non-blank, non-task line). Idempotent:
+// after one pass the marker is below the fence, so a second pass hits state (c)
+// and returns the body unchanged (after === before).
+function _relocateActionItemsMarker(body) {
+  if (typeof body !== "string") return body;
+  const sectionLabelStr = 'class: "SectionLabel", args: [{ text: "Action Items" }]';
+  let lines = body.split("\n");
+  const labelIdx = lines.findIndex((l) => l.includes(sectionLabelStr));
+  if (labelIdx === -1) return body;                       // no Action Items section
+  // Closing ``` fence of the Action Items dataviewjs block.
+  let closeIdx = -1;
+  for (let i = labelIdx + 1; i < lines.length; i++) {
+    if (lines[i].trimStart().startsWith("```")) { closeIdx = i; break; }
+  }
+  if (closeIdx === -1) return body;
+
+  const markerIdx = lines.findIndex((l) => l.includes(ACTION_ITEMS_MARKER));
+  if (markerIdx !== -1 && markerIdx > closeIdx) return body;   // (c) already correct
+
+  let movedTasks = [];
+  if (markerIdx !== -1) {
+    // (b) marker mis-placed. Collect the contiguous (blank|task) run directly
+    //     above it — those task lines are the mis-placed action items.
+    const isTask = (s) => /^[-*+] \[[ xX]\] /.test(s);
+    let regionEnd = markerIdx;
+    if (markerIdx + 1 < lines.length && lines[markerIdx + 1].trim() === "") regionEnd = markerIdx + 1;
+    const taskIdxs = [];
+    for (let i = markerIdx - 1; i >= 0; i--) {
+      const t = lines[i];
+      if (t.trim() === "") continue;                      // blank — keep walking
+      if (isTask(t)) { taskIdxs.push(i); continue; }      // task — collect
+      break;                                              // prose / fence — stop
+    }
+    movedTasks = taskIdxs.slice().reverse().map((idx) => lines[idx]); // document order
+    let regionStart = taskIdxs.length ? Math.min.apply(null, taskIdxs) : markerIdx;
+    // Absorb the leading blank lines below the run's anchor so the excised gap
+    // collapses to a single blank separator.
+    while (regionStart - 1 >= 0 && lines[regionStart - 1].trim() === "") regionStart--;
+    // Excise [regionStart..regionEnd], replacing it with one blank line — keeps
+    // the Notes section and the Action Items label one blank apart.
+    lines = lines.slice(0, regionStart).concat([""], lines.slice(regionEnd + 1));
+  }
+
+  // Re-locate the Action Items closing fence in the (possibly excised) array.
+  const labelIdx2 = lines.findIndex((l) => l.includes(sectionLabelStr));
+  let closeIdx2 = -1;
+  for (let i = labelIdx2 + 1; i < lines.length; i++) {
+    if (lines[i].trimStart().startsWith("```")) { closeIdx2 = i; break; }
+  }
+  if (closeIdx2 === -1) return lines.join("\n");          // defensive; shouldn't happen
+
+  const insert = ["", ACTION_ITEMS_MARKER];
+  if (movedTasks.length) insert.push("", ...movedTasks);
+  lines.splice(closeIdx2 + 1, 0, ...insert);
+  return lines.join("\n");
 }
 
 // _dropDividersBeforeSectionLabels — fence-aware, content-safe normalization.
