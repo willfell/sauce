@@ -85,11 +85,15 @@ await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ te
 ```
 
 ```dataviewjs
-await dv.view("ranch/views/customjs-guard", {
-  class: "PeopleRendering",
-  method: "renderMentionList",
-  args: [{ mode: "mentioned_in_note", notePath: dv.current().file.path, scopePath: "spice/people" }, { style: "chips" }]
-});
+const cur = dv.current();
+const notePath = (cur && cur.file && cur.file.path) || (app.workspace.getActiveFile && app.workspace.getActiveFile()?.path);
+if (notePath) {
+  await dv.view("ranch/views/customjs-guard", {
+    class: "PeopleRendering",
+    method: "renderMentionList",
+    args: [{ mode: "mentioned_in_note", notePath, scopePath: "spice/people" }, { style: "chips" }]
+  });
+}
 ```
 
 ```dataviewjs
@@ -102,9 +106,11 @@ await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ te
 await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Notes" }] });
 ```
 
-<!-- ACTION_ITEMS_MARKER -->
+-
 
 ```dataviewjs
 await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Action Items" }] });
 ```
+
+<!-- ACTION_ITEMS_MARKER -->
 
