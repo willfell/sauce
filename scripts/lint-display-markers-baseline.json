@@ -2,7 +2,7 @@
   "warnings": [
     {
       "file": "platform/mechanisms/task-interactions/task-interactions.js",
-      "line": 226,
+      "line": 231,
       "snippet": "if (/^## /.test(lines[i])) { endIdx = i; break; }"
     },
     {
@@ -84,11 +84,6 @@
       "file": "platform/blueprints/to-do/helpers/task-parser.js",
       "line": 69,
       "snippet": "if (/^## /.test(lines[i])) {"
-    },
-    {
-      "file": "platform/blueprints/to-do/helpers/today-capture-editable-list.js",
-      "line": 3,
-      "snippet": "* `## Today` checkbox rows as a click-to-edit list. Each row exposes a"
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-all-list.js",

@@ -529,6 +529,33 @@ withTempVault((vault) => {
     const { frontmatter: mapFm } = helpers.parseFrontmatter(mapNote);
     ok("HC-V01240-SEED-PNAME-1 map project_name backfilled", typeof mapFm.project_name === "string" && mapFm.project_name.length > 0);
     ok("HC-V01240-SEED-PNAME-2 map project_name is display name not slug", mapFm.project_name === "My Cool Project");
+
+    // ===== HC-V01325-SEED-AIMARKER-* — applyNoteChromeHeal relocates a
+    // mis-placed ACTION_ITEMS_MARKER (and the task run that landed with it).
+    // The seed carries a meeting note frozen at the v0.127.0 buggy shape: the
+    // marker sits ABOVE the "Action Items" SectionLabel and two button-created
+    // action items are parked under Notes (directly above the marker, exactly
+    // where appendTask deposited them). The per-vault note-chrome heal
+    // (_relocateActionItemsMarker, _healNoteChromeBody step 5) moves the marker
+    // BELOW the label and drags both tasks down into the Action Items section.
+    const aim = helpers.readNote(vault, "spice/meetings/notes/2026/06-June/Action-Items-Misplaced-2026-06-18.md");
+    const aimLines = aim.split("\n");
+    const aimNotesIdx = aimLines.findIndex((l) => l.includes('class: "SectionLabel", args: [{ text: "Notes" }]'));
+    const aimLabelIdx = aimLines.findIndex((l) => l.includes('class: "SectionLabel", args: [{ text: "Action Items" }]'));
+    const aimMarkerIdx = aimLines.findIndex((l) => l.includes("<!-- ACTION_ITEMS_MARKER -->"));
+    const aimTask1Idx = aimLines.findIndex((l) => l.includes("Wire up the Planner Agent"));
+    const aimTask2Idx = aimLines.findIndex((l) => l.includes("Draft the CR board mapping doc"));
+    ok("HC-V01325-SEED-AIMARKER-1 marker present exactly once",
+       (aim.match(/<!-- ACTION_ITEMS_MARKER -->/g) || []).length === 1);
+    ok("HC-V01325-SEED-AIMARKER-2 marker now sits BELOW the Action Items label",
+       aimLabelIdx !== -1 && aimMarkerIdx !== -1 && aimLabelIdx < aimMarkerIdx);
+    ok("HC-V01325-SEED-AIMARKER-3 both tasks relocated BELOW the marker (into Action Items)",
+       aimTask1Idx > aimMarkerIdx && aimTask2Idx > aimMarkerIdx);
+    ok("HC-V01325-SEED-AIMARKER-4 tasks kept in document order",
+       aimTask1Idx !== -1 && aimTask2Idx !== -1 && aimTask1Idx < aimTask2Idx);
+    ok("HC-V01325-SEED-AIMARKER-5 no task lines remain between Notes and the Action Items label",
+       (aimNotesIdx !== -1 && aimLabelIdx !== -1 && aimNotesIdx < aimLabelIdx &&
+        !aimLines.slice(aimNotesIdx + 1, aimLabelIdx).some((l) => /^[-*+] \[[ xX]\] /.test(l))));
 });
 
 // =============================================================================
