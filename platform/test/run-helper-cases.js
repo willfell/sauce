@@ -7248,7 +7248,7 @@ async function caseFA6DomainManifests() {
   // v0.118.0 — widened to-do to accept 0.6.x (MINOR bump).
   // v0.119.0 — widened to-do to accept 0.7.x (MINOR bump for additive sentinel + markdown render).
   // v0.123.0 — widened to-do to accept 0.10.x (MINOR bump: drop project dep, add breadcrumb dep).
-  for (const [bp, expected] of [["trips", "0.3.0"], ["to-do", /^0\.(4|5|6|7|8|9|10|11|12)\.\d+$/], ["boards", "0.2.1"]]) {
+  for (const [bp, expected] of [["trips", "0.3.0"], ["to-do", VERSION_SNAPSHOT.components["to-do"]], ["boards", "0.2.1"]]) {
     const m = JSON.parse(fs.readFileSync(
       path.join(WORKSHOP, `platform/blueprints/${bp}/manifest.json`), "utf8"));
     const match = expected instanceof RegExp ? expected.test(m.version) : m.version === expected;
@@ -7417,8 +7417,8 @@ async function caseTodoManifestV3() {
   // v0.116.0 widened from === "0.3.3" → 0.(3|4).x lineage; v0.4.0 retires ToDoMigrate{Modal,Init}
   // and replaces with ToDoCreateTaskInit startup script. v0.119.0 widened to accept 0.7.x.
   // v0.123.0 bumps to 0.10.0 (drops project dep, adds breadcrumb dep).
-  assertTrue("TD-HC-1 version 0.3.x through 0.12.x",
-    /^0\.(3|4|5|6|7|8|9|10|11|12)\.\d+$/.test(m.version), `got ${m.version}`);
+  assertTrue("TD-HC-1 version matches snapshot SSOT",
+    m.version === VERSION_SNAPSHOT.components["to-do"], `got ${m.version}, snapshot ${VERSION_SNAPSHOT.components["to-do"]}`);
   assertTrue("TD-HC-1 customjs_classes includes ToDoCreateTaskInit (v0.4.0)",
     Array.isArray(m.customjs_classes) && m.customjs_classes.includes("ToDoCreateTaskInit"));
   assertTrue("TD-HC-1 customjs_classes includes ToDoLeafActions (v0.63.1)",
@@ -7459,8 +7459,8 @@ async function caseHCV01174TodoManifest() {
   // v0.119.0: bumped 0.6.1 → 0.7.0 (additive sentinel + markdown rendering + applyRecurringSentinelV070Migration).
   // v0.119.1: bumped 0.7.0 → 0.7.1 (insertRecurringIntoToday merge-into-existing + mergeDuplicateRecurringSections heal + materialize_once on registry).
   // v0.123.0: bumped 0.9.0 → 0.10.0 (drops project >=1.21.0 dep, adds breadcrumb >=0.1.0 dep).
-  assertTrue("HC-V01174-TODO-MANIFEST-1: version matches 0.7.x through 0.12.x",
-    /^0\.(7|8|9|10|11|12)\.\d+$/.test(m.version), `got: ${m.version}`);
+  assertTrue("HC-V01174-TODO-MANIFEST-1: version matches snapshot SSOT",
+    m.version === VERSION_SNAPSHOT.components["to-do"], `got: ${m.version}, snapshot: ${VERSION_SNAPSHOT.components["to-do"]}`);
 
   // v0.123.0: to-do's only reason to depend on project was Breadcrumb. The
   // breadcrumb mechanism (v0.123.0) ships it as a shared primitive; to-do now
