@@ -17,7 +17,7 @@ await dv.view("ranch/views/customjs-guard", { class: "FinanceNavRow" });
 ```
 
 ```dataviewjs
-await customJS.FinanceStatus.renderBadge(dv, "budget");
+await dv.view("ranch/views/customjs-guard", { class: "FinanceStatus", method: "renderBadge", args: ["budget"] });
 ```
 
 <!-- monthly-overview-v0.6.3 -->

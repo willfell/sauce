@@ -12970,7 +12970,7 @@ async function caseV01103BudgetTemplateUpdated() {
   // BEFORE BudgetSummary so the cohesion band sits above the sliced view.
   const moIdx = tpl.search(/class:\s*["']MonthlyOverview["']/);
   const bsIdx = tpl.search(/class:\s*["']BudgetSummary["']/);
-  const fsIdx = tpl.search(/FinanceStatus\.renderBadge/);
+  const fsIdx = tpl.search(/class:\s*["']FinanceStatus["']/);
   assertTrue("V01103-MO-TPL-3: MonthlyOverview between FinanceStatus and BudgetSummary",
     fsIdx > 0 && moIdx > fsIdx && moIdx < bsIdx, `fsIdx=${fsIdx} moIdx=${moIdx} bsIdx=${bsIdx}`);
 }
