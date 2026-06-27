@@ -1,25 +1,25 @@
 {
-  "workshop_version": "0.134.0",
+  "workshop_version": "0.135.0",
   "components": {
     "boards": "0.2.1",
     "cowork": "0.40.2",
     "daily": "0.13.9",
     "meetings": "0.14.0",
-    "people": "0.6.1",
+    "people": "0.6.2",
     "products": "0.3.0",
-    "project": "1.27.0",
+    "project": "1.28.0",
     "to-do": "0.13.0",
     "journal": "0.2.0",
-    "trips": "0.3.0",
-    "finance": "0.11.0",
-    "scratch": "0.6.0",
+    "trips": "0.4.0",
+    "finance": "0.11.1",
+    "scratch": "0.7.0",
     "teams": "0.3.0",
     "customjs-guard": "1.0.0",
     "validator": "0.3.0",
     "activity-feed": "0.7.1",
     "kanban-status-sync": "0.2.0",
     "audit": "0.3.0",
-    "backlink-panel": "0.1.0",
+    "backlink-panel": "0.1.1",
     "breadcrumb": "0.1.0",
     "nav-buttons": "2.8.0",
     "cards": "0.2.6",
@@ -34,6 +34,7 @@
     "styling": "0.2.1",
     "convenience": "0.4.1",
     "platform-claude": "0.1.3",
-    "smart-connections-bridge": "0.2.0"
+    "smart-connections-bridge": "0.2.0",
+    "render-safe": "0.2.0"
   }
 }
