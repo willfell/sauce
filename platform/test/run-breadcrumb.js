@@ -8,6 +8,7 @@
  */
 const fs = require('fs');
 const path = require('path');
+const VERSION_SNAPSHOT = require('./fixtures/component-versions.snapshot.json');
 const ROOT = path.resolve(__dirname, '..', '..');
 const MECH    = path.join(ROOT, 'platform', 'mechanisms', 'breadcrumb', 'breadcrumb.js');
 const MAN     = path.join(ROOT, 'platform', 'mechanisms', 'breadcrumb', 'manifest.json');
@@ -55,7 +56,7 @@ ok('BR3 mechanism manifest declares customjs_classes: ["Breadcrumb"]',
 let cat = null;
 try { cat = JSON.parse(fs.readFileSync(CAT, 'utf8')); } catch (_e) {}
 const catEntry = cat && Array.isArray(cat.mechanisms) && cat.mechanisms.find(m => m.name === 'breadcrumb');
-ok('BR4 catalogue includes breadcrumb@0.1.0', catEntry && catEntry.version === '0.1.0');
+ok('BR4 catalogue includes breadcrumb', catEntry && catEntry.version === VERSION_SNAPSHOT.components.breadcrumb);
 
 // ── Load NEW class ────────────────────────────────────────────────────────
 const NEW_SRC = fs.existsSync(MECH) ? fs.readFileSync(MECH, 'utf8') : '';

@@ -12336,7 +12336,7 @@ async function caseV01070FinMan1Versions() {
   //   entity-create 0.7.0 → 0.7.1 (v0.108.0 S1 resolve_wikilinks PATCH)
   // v0.109.0 bumps workshop_version on top of v0.108.0's finance/EC ship.
   assertTrue("HC-V01070-FIN-MAN-1: finance version matches snapshot SSOT", fin.version === VERSION_SNAPSHOT.components.finance, `got: ${fin.version}, snapshot: ${VERSION_SNAPSHOT.components.finance}`);
-  assertEqual(ec.version, "0.7.4", "HC-V01070-FIN-MAN-1: entity-create version");
+  assertEqual(ec.version, VERSION_SNAPSHOT.components["entity-create"], "HC-V01070-FIN-MAN-1: entity-create version");
   assertTrue("HC-V01070-FIN-MAN-1: workshop_version 0.115.x or 0.116.x or 0.117.x or 0.118.x or 0.119.x", sameMajorMinor(ws.workshop_version, VERSION_SNAPSHOT.workshop_version));
   assertTrue("HC-V01070-FIN-MAN-1: finance depends_on entity-create >=0.7.0",
     fin.depends_on.some(d => d.name === "entity-create" && /0\.7/.test(d.range)));
@@ -15358,8 +15358,8 @@ async function caseHCV0128FinancePlanning() {
   {
     const pins = [
       ["daily",         "platform/blueprints/daily/manifest.json",            VERSION_SNAPSHOT.components.daily],
-      ["activity-feed", "platform/mechanisms/activity-feed/manifest.json",    "0.7.1"],
-      ["cards",         "platform/mechanisms/cards/manifest.json",            "0.2.6"],
+      ["activity-feed", "platform/mechanisms/activity-feed/manifest.json",    VERSION_SNAPSHOT.components["activity-feed"]],
+      ["cards",         "platform/mechanisms/cards/manifest.json",            VERSION_SNAPSHOT.components.cards],
     ];
     for (const [name, relPath, expected] of pins) {
       const m = JSON.parse(fs.readFileSync(path.join(WORKSHOP, relPath), "utf8"));
