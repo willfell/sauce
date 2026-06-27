@@ -1,7 +1,7 @@
 ---
 description: Sauce Autoloop — ONE non-interactive autonomous turn against the board, then exit
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep, Skill, Agent, Workflow
-argument-hint: "[--dry-run] (default) | --live"
+argument-hint: "[--live] (default: dry-run)"
 ---
 
 # /sauce-autoloop
@@ -13,8 +13,8 @@ and the findings doc at
 `~/notes/sauce/headspace-sauce/spice/projects/sauce/docs/workflow-loops/initial-brainstorm/Init.md`.
 
 **Mode:** Default is **dry-run** (select + propose + write a dry-run handoff; NO implementation,
-NO commits, NO PR). Pass `--live` to enable the implement→gate→PR path. During the assessment
-window, stay in dry-run.
+NO commits, NO PR). Pass `--live` to enable the implement→gate→PR path; `--dry-run` is also
+accepted explicitly but is the default. During the assessment window, stay in dry-run.
 
 **Repo + path facts** (same as `/sauce-pipeline`):
 - Workshop repo: `~/projects/repos/sauce/`
@@ -28,8 +28,8 @@ window, stay in dry-run.
 ## Phase A — Orient + gate (autonomous)
 
 1. **Halt check.** If `~/projects/repos/sauce/.autoloop-halt` exists, print "autoloop halted by sentinel" and **exit** (no handoff, no further work).
-2. Run `npm run status` (workshop survey) and confirm a clean tree on `main` (or resume branch). If the tree is dirty with someone else's work, print the state and **exit** (do not stomp).
-3. Find the latest handoff: `ls -t ~/projects/repos/sauce/Docs/prompts/sauce-autoloop-*-handoff.md 2>/dev/null | head -1`. Read it if present.
+2. Run `npm run status` (workshop survey) and confirm a clean tree on `main` (or resume branch). If the working tree has uncommitted changes, or a lingering `autoloop/*` branch this turn did not create, print the state and **exit** (do not stomp).
+3. Find the latest handoff: `ls -t ~/projects/repos/sauce/Docs/prompts/*sauce-autoloop*-handoff.md 2>/dev/null | head -1`. Read it if present.
 
 ## Phase B — Select (deterministic, NO AskUserQuestion)
 
@@ -42,8 +42,8 @@ window, stay in dry-run.
      --cards-root ~/notes/sauce/headspace-sauce/spice/projects/sauce/tasks \
      --json
    ```
-2. Branch on `action`:
-   - `halt` / `no-work` / `no-eligible-work` / `needs-attention` → write a dry-run handoff via `render-handoff.js` (Phase E), print one line, **exit cheaply** (no model-heavy work). For `needs-attention`, the handoff names the stuck In-Progress card(s) for the human.
+2. Branch on `action` (note: `halt` is already terminal in Phase A and never reaches here):
+   - `no-work` / `no-eligible-work` / `needs-attention` → write a handoff via `render-handoff.js` (Phase E), print one line, **exit cheaply** (no model-heavy work). For `needs-attention`, the handoff names the stuck In-Progress card(s) for the human. **(Deferred — Increment 2:** on `no-work`, the Scout will self-discover work instead of exiting; for Increment 1, exit.)
    - `work` → proceed with `result.card`.
 
 ## Phase C — Implement (only if `--live`; in dry-run, PROPOSE only)
@@ -66,11 +66,18 @@ window, stay in dry-run.
 
 - Leave the card In Progress with a status note "PR open, auto-merge pending"; the NEXT turn's Phase A reconciles (merged+shipped → Completed; CI failed/PR closed → Blocked). (Synchronous close + canary deploy arrive in Increment 4.)
 
+## Deferred (NOT in Increment 1 — labeled so the gaps are visible, not silent)
+
+- **Scout / self-discovery (Increment 2):** when Phase B yields `no-work`, a Scout agent will generate fresh work (bug hunt, coverage gaps, doc drift, tech-debt) instead of exiting. Increment 1 exits.
+- **Gate B — separate adversarial verifier (Increment 3):** an independent-context agent that tries to refute each change and enforces "no behavioral change without a harness". Increment 1 relies on Gate A (`release:preflight` + dogfood install) + the PR's CI only.
+- **Canary deploy + synchronous close (Increment 4):** auto-`sauce update` to the ERO vault + verify, then a promotion surface for accuris/headspace. Increment 1 stops at the merged PR.
+- **Substrate hardening (Increment 5):** the launchd scheduler, `caffeinate`, fail-closed auth check, structured logging, daily-turn budget, kill-switch UX. Increment 1 ships only a minimal dry-run plist sample.
+
 ## Phase E — Handoff + EXIT
 
-1. Determine turn number N = (count of existing `sauce-autoloop-*-handoff.md`) + 1.
-2. Render the handoff with `scripts/autoloop/render-handoff.js` (call `renderHandoff()` with the gathered state: roundN, today's date, mode, outcome `{action, card, reason}`, post-turn board via `parseBoard`, recommendedNext). Write it to `~/projects/repos/sauce/Docs/prompts/<YYYY-MM-DD>-sauce-autoloop-turn-N-handoff.md`.
-3. **Live only:** commit + push the handoff to `main` (`docs(prompts): autoloop turn N handoff`). **Dry-run:** leave it as an uncommitted local artifact (or commit on the branch if one exists) — do not push noise to main during the assessment window.
+1. Determine turn number N = (count of existing `*sauce-autoloop*-handoff.md`) + 1.
+2. Render the handoff with `scripts/autoloop/render-handoff.js` (call `renderHandoff()` with the gathered state: `roundN`, today's `date`, `mode`, `outcome` `{action, card, reason}`, post-turn `board` via `parseBoard`, `recommendedNext`, and `notes` = the dry-run "Intended approach" paragraph from Phase C if applicable). Write it to `~/projects/repos/sauce/Docs/prompts/<YYYY-MM-DD>-sauce-autoloop-turn-N-handoff.md` — the date prefix is matched by Phase A's `*sauce-autoloop*-handoff.md` glob.
+3. **Live only:** commit + push the handoff to `main` (`docs(prompts): autoloop turn N handoff`). **Dry-run:** leave it as an uncommitted local artifact — never push to main during the assessment window.
 4. **EXIT.** Do NOT call `ScheduleWakeup`. The external scheduler fires the next turn.
 
 ## Usage / cost guardrails (always)
