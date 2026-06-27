@@ -8,6 +8,8 @@
 const path = require('path');
 const { isBroadScope, parseBoard, recommendedFrom, selectCard } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'select-card.js'));
+const { renderHandoff } =
+  require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'render-handoff.js'));
 
 let pass = 0, fail = 0; const failures = [];
 function ok(label, cond, detail) {
@@ -60,6 +62,19 @@ const skipPick = selectCard({ boardMd: broadBoard, loadBody });
 ok('SC-6 skips broad card, picks next', skipPick.action === 'work' && skipPick.card === 'Fix breadcrumb paren' && skipPick.skipped.length === 1);
 const allBroad = '## In Planning\n- [ ] [[Wiki area redesign]]\n## In Progress\n';
 ok('SC-7 all broad -> no-eligible-work', selectCard({ boardMd: allBroad, loadBody }).action === 'no-eligible-work');
+
+// ---- renderHandoff (RH-*) ----
+const ho = renderHandoff({
+  roundN: 7, date: '2026-06-27', mode: 'dry-run',
+  outcome: { action: 'work', card: 'Fix breadcrumb paren' },
+  board: parseBoard(BOARD),
+  recommendedNext: 'Add render harness',
+});
+ok('RH-1 has title with round', /Sauce Autoloop Turn 7/.test(ho));
+ok('RH-2 names the card', ho.includes('Fix breadcrumb paren'));
+ok('RH-3 marks dry-run', /dry-run/i.test(ho));
+ok('RH-4 lists In Planning section', ho.includes('### In Planning'));
+ok('RH-5 carries recommended next', ho.includes('Add render harness'));
 
 console.log('');
 console.log(`Tests: ${pass}/${pass + fail}`);
