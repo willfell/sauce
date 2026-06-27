@@ -1152,6 +1152,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyDocsBackfill(tp, mech, variables, history, git);          // NEW v0.50.0; renamed from applyWikiBackfill v0.52.0
   await applyDocsHubButtonRepair(tp, mech, variables, history, git);   // NEW v0.100.2 — heals existing broken "+ New Doc" blocks (backfill is create-if-absent)
   await applyProjectMeetingsPanelHeal(tp, mech, variables, history, git); // NEW v0.127.0 §D — injects ProjectMeetingsPanel dataviewjs block into stale type:project hubs (insert-only, idempotent, .sauce-backup snapshot before write)
+  await applyProjectActivityPanelsHeal(tp, mech, variables, history, git); // injects ProjectActivityPanel + ProjectOpenTasks before the MeetingsPanel block (insert-only, idempotent)
   await applyProjectSectionsMigration(tp, mech, variables, history, git);   // NEW v0.102.0 S4 — Strategy A auto-migration (flat docs/*.md → docs/knowledge/ + sections[])
   await applyProjectSectionsHubMigration(tp, mech, variables, history, git);   // NEW v0.103.0 S4 — heals v0.102.0 vaults: Docs.md → ProjectDocsIndex + materialize Section Hubs + wikilink frontmatter + breadcrumb injection
   await applyDocNoteBreadcrumbMarkerCleanup(tp, mech, variables, history, git); // NEW v0.109.0 S8 — strips legacy <!-- breadcrumb-v1.17.0 --> markers from doc-notes (block preserved; new idempotency guard inside _migrateDocNote uses the class invocation substring)
@@ -2580,6 +2581,120 @@ async function applyProjectMeetingsPanelHeal(tp, manifest, variables, history, g
       attempted_at: new Date().toISOString(),
     });
   }
+}
+
+// applyProjectActivityPanelsHeal — injects ProjectActivityPanel + ProjectOpenTasks
+// dataviewjs blocks into existing type:project hubs. Anchor preference:
+//   1. BEFORE the opening fence of the `class: "ProjectMeetingsPanel"` block
+//      (universal across all live hubs → primary)
+//   2. after the closing fence of `class: "ProjectStatusWidget"`
+//   3. after the closing fence of `class: "ProjectNavButtons"`
+//   4. after the closing fence of the first dataviewjs block
+//   5. none → warning, no write.
+// Mirrors applyProjectMeetingsPanelHeal: exact type:project match, idempotent
+// (skip when ProjectActivityPanel already present), .sauce-backup snapshot,
+// per-project try/catch, history events, never throws. Both blocks inserted
+// together. MUST run AFTER applyProjectMeetingsPanelHeal so the primary anchor
+// exists on hubs that just received a Meetings block this pass.
+async function applyProjectActivityPanelsHeal(tp, manifest, variables, history, git) {
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const root = "spice/projects";
+  if (!(await adapter.exists(root))) return;
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  let healed = 0, skipped = 0, warned = 0;
+
+  let projectDirs;
+  try {
+    const listing = await adapter.list(root);
+    projectDirs = (listing.folders || []).filter((f) => f.startsWith(root + "/"));
+  } catch (e) {
+    if (history) history.push({ event: "warning", step: "project_activity_panels_heal",
+      reason: `list failed for ${root}: ${e && e.message ? e.message : String(e)}`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    return;
+  }
+
+  const blockA = '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "ProjectActivityPanel" });\n```';
+  const blockB = '```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "ProjectOpenTasks" });\n```';
+
+  for (const projectDir of projectDirs) {
+    try {
+      const sub = await adapter.list(projectDir);
+      const candidates = (sub.files || []).filter((p) => p.endsWith(".md"));
+      let hubPath = null;
+      for (const cand of candidates) {
+        const body = await adapter.read(cand);
+        if (_noteChromeFrontmatterType(body) === "project") { hubPath = cand; break; }
+      }
+      if (!hubPath) continue;
+
+      const before = await adapter.read(hubPath);
+      if (before.includes('class: "ProjectActivityPanel"')) {
+        skipped += 1;
+        if (history) history.push({ event: "info", step: "project_activity_panels_heal", target: hubPath,
+          action: "skipped_already_healed", git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+        continue;
+      }
+
+      let after = null;
+      const pmpIdx = before.indexOf('class: "ProjectMeetingsPanel"');
+      if (pmpIdx !== -1) {
+        const openIdx = before.lastIndexOf("```dataviewjs", pmpIdx);
+        if (openIdx !== -1) {
+          after = before.slice(0, openIdx) + blockA + "\n\n" + blockB + "\n\n" + before.slice(openIdx);
+        }
+      }
+      if (after === null) {
+        for (const anchorClass of ["ProjectStatusWidget", "ProjectNavButtons"]) {
+          const anchorIdx = before.indexOf(`class: "${anchorClass}"`);
+          if (anchorIdx === -1) continue;
+          const closeRel = before.indexOf("\n```", anchorIdx);
+          if (closeRel === -1) continue;
+          const insertAt = closeRel + 4;
+          after = before.slice(0, insertAt) + "\n\n" + blockA + "\n\n" + blockB + before.slice(insertAt);
+          break;
+        }
+      }
+      if (after === null) {
+        const firstDvIdx = before.indexOf("```dataviewjs");
+        if (firstDvIdx !== -1) {
+          const closeRel = before.indexOf("\n```", firstDvIdx);
+          if (closeRel !== -1) {
+            const insertAt = closeRel + 4;
+            after = before.slice(0, insertAt) + "\n\n" + blockA + "\n\n" + blockB + before.slice(insertAt);
+          }
+        }
+      }
+      if (after === null) {
+        warned += 1;
+        if (history) history.push({ event: "warning", step: "project_activity_panels_heal", target: hubPath,
+          action: "no_anchor_found", reason: "no MeetingsPanel/Status/Nav/dataviewjs block to anchor on",
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+        continue;
+      }
+      if (after === before) { skipped += 1; continue; }
+
+      const backupPath = `.sauce-backup/${ts}/${hubPath}`;
+      const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+      try { await adapter.mkdir(backupParent); } catch (_e) {}
+      try { await adapter.write(backupPath, before); } catch (_e) {}
+
+      await adapter.write(hubPath, after);
+      healed += 1;
+      if (history) history.push({ event: "info", step: "project_activity_panels_heal", target: hubPath,
+        action: "healed", git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    } catch (e) {
+      warned += 1;
+      if (history) history.push({ event: "warning", step: "project_activity_panels_heal",
+        reason: `${projectDir}: ${e && e.message ? e.message : String(e)}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+    }
+  }
+
+  if (history) history.push({ event: "info", step: "project_activity_panels_heal", name: "vault",
+    reason: `healed ${healed}; skipped ${skipped}; ${warned} warning(s)`,
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
 }
 
 // applyProjectSectionsMigration — v0.102.0 S4 (Task 6). Strategy A auto-migration
@@ -14226,6 +14341,7 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     // Also export note-chrome internals so the heal harness can reuse the
     // frontmatter-type detector / body transform when authoring future cases.
     module.exports.applyProjectMeetingsPanelHeal = applyProjectMeetingsPanelHeal;
+    module.exports.applyProjectActivityPanelsHeal = applyProjectActivityPanelsHeal;
     module.exports._noteChromeFrontmatterType = _noteChromeFrontmatterType;
     module.exports._healNoteChromeBody = _healNoteChromeBody;
     // v0.108.0 S2 — expose 4 new finance migrations for HC test coverage.
