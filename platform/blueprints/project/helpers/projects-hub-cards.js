@@ -106,6 +106,30 @@ class ProjectsHubCards {
         });
     }
 
+    _renderRecentStrip(dv, enriched) {
+        if (!enriched || enriched.length === 0) return;   // empty-renders-nothing
+        const sorted = [...enriched].sort((a, b) => {
+            const ma = (a.latestMtime && a.latestMtime.ts) || 0;
+            const mb = (b.latestMtime && b.latestMtime.ts) || 0;
+            return mb - ma;
+        }).slice(0, 4);
+
+        customJS.SectionLabel.render(dv, { text: "Recently active" });
+        const bar = dv.container.createEl("div");
+        bar.style.cssText = "display:flex;gap:8px;flex-wrap:wrap;margin:4px 0 10px 0;";
+        for (const e of sorted) {
+            const p = e.project;
+            const name = p.name || p.file.name;
+            const when = (e.latestMtime && e.latestMtime.ts) ? window.moment(e.latestMtime.ts).fromNow() : "";
+            const chip = bar.createEl("span");
+            chip.textContent = when ? `${name} · ${when}` : name;
+            chip.style.cssText = "cursor:pointer;padding:3px 12px;border-radius:12px;font-size:0.85em;background:var(--background-secondary);color:var(--text-normal);border:1px solid var(--background-modifier-border);";
+            chip.addEventListener("click", () => {
+                try { app.workspace.openLinkText(p.file.path, ""); } catch (_e) {}
+            });
+        }
+    }
+
     async render(dv) {
         // v0.39.0 S6.3: default scope filter — hide terminal statuses unless
         // the chip UI (rendered in S6.4) toggles them on. Records WITHOUT a
@@ -228,6 +252,10 @@ class ProjectsHubCards {
         }
 
         this._lookup = new Map(enriched.map(e => [e.project.file.path, e]));
+
+        // v?: 'Recently active' strip — top-4 by recency from the filtered set,
+        // rendered just above the grouped grid (cross-status recency access).
+        this._renderRecentStrip(dv, enriched);
 
         // v0.39.0 S6.6: dispatch on this._groupBy. "none" renders all
         // projects as a single grid (preserves existing behavior). "status"
