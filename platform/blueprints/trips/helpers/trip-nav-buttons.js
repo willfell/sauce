@@ -16,7 +16,8 @@ class TripNavButtons {
 
         // spice/trips/<slug>/<file>.md
         if (pathParts.length === tripsIdx + 3) {
-            const cache = app.metadataCache.getFileCache(dv.current().file);
+            const page = customJS.RenderSafe.page(dv);
+            const cache = app.metadataCache.getFileCache(page.file);
             const fmType = cache?.frontmatter?.type;
             if (fmType === "trip") {
                 return { context: "trip-atlas", slug, tripDir };
@@ -44,7 +45,9 @@ class TripNavButtons {
     }
 
     async render(dv) {
-        const filePath = dv.current().file.path;
+        const page = customJS.RenderSafe.page(dv);
+        if (!page || !page.file) return;
+        const filePath = page.file.path;
         const ctx = this.detectContext(filePath, dv);
 
         // Dedupe: re-renders should replace previous output, not append.

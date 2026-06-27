@@ -1,6 +1,8 @@
 class TripSectionsCards {
   async render(dv) {
-    const filePath = dv.current().file.path;
+    const page = customJS.RenderSafe.page(dv);
+    if (!page || !page.file) return;
+    const filePath = page.file.path;
     const pathParts = filePath.split("/");
     const tripsIdx = pathParts.indexOf("trips");
     if (tripsIdx < 1 || pathParts[tripsIdx - 1] !== "spice" || pathParts.length !== tripsIdx + 3) {
