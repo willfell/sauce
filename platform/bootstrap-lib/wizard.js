@@ -35,6 +35,11 @@ function _loadInquirer() {
 
 const DEFAULT_MECHANISMS_CHECKED = [
     "customjs-guard",
+    "render-safe",   // v0.13x.0 — project/scratch/trips blueprints (project +
+                     // scratch are in the default blueprint set) depend on
+                     // render-safe since this release; pre-include so
+                     // fresh-vault bootstrap doesn't skip them. Same class of
+                     // bug as the section-label / breadcrumb entries below.
     "icons",         // v0.60.0 — nav-buttons depends on icons since v0.21.0;
                      // omission caused fresh-vault bootstrap CI to fail with
                      // "skipping nav-buttons — depends on icons >=0.1.0 but it
