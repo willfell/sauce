@@ -101,7 +101,7 @@
     },
     {
       "name": "meetings",
-      "version": "0.13.0"
+      "version": "0.14.0"
     },
     {
       "name": "people",
@@ -113,7 +113,7 @@
     },
     {
       "name": "project",
-      "version": "1.26.0"
+      "version": "1.27.0"
     },
     {
       "name": "to-do",
