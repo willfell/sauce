@@ -4163,12 +4163,19 @@ async function applyNoteChromeHeal(tp, history, git) {
 async function _resolveProjectDisplayName(adapter, projectDir, candidateFiles) {
   const prefix = projectDir + "/";
   for (const fpath of candidateFiles) {
-    // Hub note sits directly under projectDir (no further nested segment).
     if (!fpath.startsWith(prefix)) continue;
     if (fpath.slice(prefix.length).includes("/")) continue;
     let body;
     try { body = await adapter.read(fpath); } catch (_e) { continue; }
     if (_noteChromeFrontmatterType(body) === "project") {
+      const fm = body.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+      if (fm) {
+        const nm = fm[1].match(/^name:\s*(.+?)\s*$/m);
+        if (nm) {
+          const v = nm[1].trim().replace(/^["']|["']$/g, "");
+          if (v) return v;
+        }
+      }
       const base = fpath.split("/").pop();
       return base.endsWith(".md") ? base.slice(0, -3) : base;
     }
@@ -4185,20 +4192,26 @@ async function _resolveProjectDisplayName(adapter, projectDir, candidateFiles) {
 // `after === before`). The display name is YAML-double-quote escaped.
 function _injectProjectNameFrontmatter(body, name) {
   if (typeof body !== "string") return body;
-  // Require a leading frontmatter block.
   const fmMatch = body.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (!fmMatch) return body;
   const fmText = fmMatch[1];
-  // Type gate — only the three breadcrumb-bearing project note types.
   const typeMatch = fmText.match(/^type:\s*["']?([A-Za-z0-9_-]+)["']?\s*$/m);
   if (!typeMatch) return body;
   if (!["map", "kanban", "task-note"].includes(typeMatch[1])) return body;
-  // Idempotency: bail if project_name already present (any value).
-  if (/^project_name:\s*/m.test(fmText)) return body;
-  // YAML double-quote escaping: backslash + double-quote.
   const escaped = String(name).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+
+  const existing = fmText.match(/^project_name:\s*(.*)\s*$/m);
+  if (existing) {
+    const curVal = existing[1].trim().replace(/^["']|["']$/g, "");
+    if (curVal === String(name)) return body;        // idempotent no-op
+    const fmStart = body.indexOf(fmText);
+    const lineIdxInFm = fmText.indexOf(existing[0]);
+    const head = body.slice(0, fmStart + lineIdxInFm);
+    const tail = body.slice(fmStart + lineIdxInFm + existing[0].length);
+    return head + `project_name: "${escaped}"` + tail;  // repair
+  }
+
   const insert = `\nproject_name: "${escaped}"`;
-  // Insert immediately after the matched type: line.
   const fmStart = body.indexOf(fmText);
   const typeLineFull = typeMatch[0];
   const typeIdxInFm = fmText.indexOf(typeLineFull);
@@ -14342,6 +14355,8 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     // frontmatter-type detector / body transform when authoring future cases.
     module.exports.applyProjectMeetingsPanelHeal = applyProjectMeetingsPanelHeal;
     module.exports.applyProjectActivityPanelsHeal = applyProjectActivityPanelsHeal;
+    module.exports._resolveProjectDisplayName = _resolveProjectDisplayName;
+    module.exports._injectProjectNameFrontmatter = _injectProjectNameFrontmatter;
     module.exports._noteChromeFrontmatterType = _noteChromeFrontmatterType;
     module.exports._healNoteChromeBody = _healNoteChromeBody;
     // v0.108.0 S2 — expose 4 new finance migrations for HC test coverage.
