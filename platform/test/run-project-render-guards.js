@@ -28,6 +28,8 @@ const widgets = [
     { name: 'ProjectWorkstreams',         path: 'platform/blueprints/project/helpers/project-workstreams.js' },
     { name: 'ProjectNotesCards',          path: 'platform/blueprints/project/helpers/project-notes-cards.js' },
     { name: 'ProjectReferencedByCards',   path: 'platform/blueprints/project/helpers/project-referenced-by-cards.js' },
+    { name: 'ProjectActivityPanel',       path: 'platform/blueprints/project/helpers/project-activity-panel.js' },
+    { name: 'ProjectOpenTasks',           path: 'platform/blueprints/project/helpers/project-open-tasks.js' },
 ];
 
 // dv stub variants the guards must tolerate.

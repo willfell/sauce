@@ -152,6 +152,14 @@
       "dest": "{{scripts_path}}/project/project-meetings-panel.js"
     },
     {
+      "source": "helpers/project-activity-panel.js",
+      "dest": "{{scripts_path}}/project/project-activity-panel.js"
+    },
+    {
+      "source": "helpers/project-open-tasks.js",
+      "dest": "{{scripts_path}}/project/project-open-tasks.js"
+    },
+    {
       "source": "helpers/project-docs-index.js",
       "dest": "{{scripts_path}}/project/project-docs-index.js"
     },
