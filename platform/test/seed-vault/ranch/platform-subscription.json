@@ -101,7 +101,7 @@
     },
     {
       "name": "meetings",
-      "version": "0.12.2"
+      "version": "0.13.0"
     },
     {
       "name": "people",
@@ -117,7 +117,7 @@
     },
     {
       "name": "to-do",
-      "version": "0.12.5"
+      "version": "0.13.0"
     },
     {
       "name": "journal",
