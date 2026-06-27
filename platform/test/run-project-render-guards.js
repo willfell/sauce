@@ -52,6 +52,14 @@ const dvVariants = [
     },
 ];
 
+// render-safe wiring: after the cold-load conversion the project helpers call
+// customJS.RenderSafe.page(dv). Provide the real RenderSafe instance as a global
+// so the guard exercises the genuine fallback. With `app` unset in this harness,
+// page(dv) returns null on every stub above, so the helpers' `if (!page ||
+// !page.file) return;` early-returns cleanly — exactly the no-throw this asserts.
+const RenderSafeClass = loadWidget('platform/mechanisms/render-safe/render-safe.js', 'RenderSafe');
+global.customJS = Object.assign(global.customJS || {}, { RenderSafe: new RenderSafeClass() });
+
 (async () => {
     for (const w of widgets) {
         let WidgetClass;

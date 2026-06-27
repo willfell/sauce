@@ -27,10 +27,10 @@ class ScratchLeafActions {
     }
 
     async _pollForDay(dv) {
-        let day = this._coerceDay(dv.current().day);
+        let day = this._coerceDay(customJS.RenderSafe.page(dv)?.day);
         for (let i = 0; i < 40 && (!day || !/^\d{4}-\d{2}-\d{2}$/.test(day)); i++) {
             await new Promise(r => setTimeout(r, 50));
-            day = this._coerceDay(dv.current().day);
+            day = this._coerceDay(customJS.RenderSafe.page(dv)?.day);
         }
         return day;
     }

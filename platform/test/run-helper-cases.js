@@ -7867,7 +7867,7 @@ async function caseHCV0890VersionD() {
   if (Array.isArray(m.mechanisms)) mechCount = m.mechanisms.length;
   else if (Array.isArray(m.items)) mechCount = m.items.filter(x => x.kind === "mechanism").length;
   else if (m.catalogue && Array.isArray(m.catalogue.mechanisms)) mechCount = m.catalogue.mechanisms.length;
-  assertEqual(mechCount, 21, "HC-V0890-VERSION-D: mechanism count = 21 (+task-interactions in v0.127.0)");
+  assertEqual(mechCount, 22, "HC-V0890-VERSION-D: mechanism count = 22 (+render-safe in cold-load-eradication cycle)");
 }
 
 async function caseHCV0890ResolvePersonA() {
@@ -8420,7 +8420,56 @@ async function caseHCV0891Versions() {
   const mechs = (platformMan.mechanisms && Array.isArray(platformMan.mechanisms))
     ? platformMan.mechanisms
     : (Array.isArray(platformMan.items) ? platformMan.items.filter(x => x.kind === "mechanism") : []);
-  assertEqual(mechs.length, 21, "HC-V0891-VERSION-D: mechanism count = 21 (+task-interactions in v0.127.0)");
+  assertEqual(mechs.length, 22, "HC-V0891-VERSION-D: mechanism count = 22 (+render-safe in cold-load-eradication cycle)");
+}
+
+// HC-V01340-RS — render-safe mechanism source contract + the no-bare-deref
+// invariant the cold-load-eradication cycle establishes. Source-text assertions
+// (the behavioral RenderSafe harness is platform/test/run-render-safe.js; the
+// build-failing scan is scripts/lint-cold-load.js — this is the catalogue/contract
+// snapshot inside the helper-cases suite).
+async function caseHCV01340RenderSafe() {
+  console.log("\n--- Case HC-V01340-RS: render-safe mechanism + no-bare-deref contract ---");
+  // (a) mechanism manifest declares the class.
+  const rsMan = JSON.parse(fs.readFileSync(
+    path.join(WORKSHOP, "platform/mechanisms/render-safe/manifest.json"), "utf8"));
+  assertEqual(rsMan.name, "render-safe", "HC-V01340-RS-A: render-safe manifest name");
+  assertEqual(rsMan.version, "0.1.0", "HC-V01340-RS-A: render-safe manifest version 0.1.0");
+  assertTrue("HC-V01340-RS-A: render-safe declares customjs_classes RenderSafe",
+    Array.isArray(rsMan.customjs_classes) && rsMan.customjs_classes.includes("RenderSafe"));
+  // (b) catalogue carries the render-safe pin.
+  const plat = JSON.parse(fs.readFileSync(
+    path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
+  assertTrue("HC-V01340-RS-B: platform catalogue declares render-safe@0.1.0",
+    Array.isArray(plat.mechanisms) && plat.mechanisms.some(x => x.name === "render-safe" && x.version === "0.1.0"));
+  // (c) workshop subscription includes render-safe (dogfood install materializes it).
+  const sub = JSON.parse(fs.readFileSync(
+    path.join(WORKSHOP, "ranch/platform-subscription.json"), "utf8"));
+  assertTrue("HC-V01340-RS-C: workshop subscribes render-safe",
+    Array.isArray(sub.mechanisms) && sub.mechanisms.some(x => x.name === "render-safe"));
+  // (d) methods are INSTANCE methods (customJS stores instances; static would be
+  //     undefined on the instance and throw at render time).
+  const rsSrc = fs.readFileSync(
+    path.join(WORKSHOP, "platform/mechanisms/render-safe/render-safe.js"), "utf8");
+  assertTrue("HC-V01340-RS-D: render-safe defines class RenderSafe", /class\s+RenderSafe\b/.test(rsSrc));
+  assertTrue("HC-V01340-RS-D: page/filePath/fileName are instance methods (no `static`)",
+    /\n\s*page\s*\(dv\)/.test(rsSrc) && /filePath\s*\(dv\)/.test(rsSrc)
+    && /fileName\s*\(dv\)/.test(rsSrc) && !/static\s+(page|filePath|fileName)\b/.test(rsSrc));
+  // (e) no bare `dv.current().` deref remains in the converted helper files
+  //     (mirrors the lint's R1, evaluated over non-comment code lines).
+  const BARE = /dv\.current\(\)\s*\.(?!\s)/;
+  for (const rel of [
+    "platform/blueprints/project/helpers/project-nav-buttons.js",
+    "platform/blueprints/scratch/helpers/scratch-day-actions.js",
+    "platform/blueprints/scratch/helpers/scratch-day-list.js",
+    "platform/blueprints/scratch/helpers/scratch-leaf-actions.js",
+    "platform/blueprints/trips/helpers/trip-nav-buttons.js",
+    "platform/blueprints/trips/helpers/trip-sections-cards.js",
+  ]) {
+    const code = fs.readFileSync(path.join(WORKSHOP, rel), "utf8")
+      .split("\n").filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join("\n");
+    assertTrue("HC-V01340-RS-E: no bare dv.current(). in " + rel, !BARE.test(code));
+  }
 }
 
 // ========================================================================
@@ -12970,7 +13019,7 @@ async function caseV01103BudgetTemplateUpdated() {
   // BEFORE BudgetSummary so the cohesion band sits above the sliced view.
   const moIdx = tpl.search(/class:\s*["']MonthlyOverview["']/);
   const bsIdx = tpl.search(/class:\s*["']BudgetSummary["']/);
-  const fsIdx = tpl.search(/FinanceStatus\.renderBadge/);
+  const fsIdx = tpl.search(/class:\s*["']FinanceStatus["']/);
   assertTrue("V01103-MO-TPL-3: MonthlyOverview between FinanceStatus and BudgetSummary",
     fsIdx > 0 && moIdx > fsIdx && moIdx < bsIdx, `fsIdx=${fsIdx} moIdx=${moIdx} bsIdx=${bsIdx}`);
 }
@@ -14819,6 +14868,7 @@ async function caseHCV0128FinancePlanning() {
   await caseHCV0891OrchestratorA();
   await caseHCV0891OrchestratorBCDE();
   await caseHCV0891Versions();
+  await caseHCV01340RenderSafe();
   await caseHCV0127Versions();
   await caseHCV0128FinancePlanning();
   await caseFA2ProductsCanonical();

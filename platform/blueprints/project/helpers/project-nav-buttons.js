@@ -26,7 +26,8 @@ class ProjectNavButtons {
         const projectDir = pathParts.slice(0, planningIdx + 2).join("/");
         const tasksIdx = planningIdx + 2;
 
-        const basename = dv.current().file.name;
+        const page = customJS.RenderSafe.page(dv);
+        const basename = page.file.name;
         const isMap = basename.endsWith("- Map");
 
         // Project board: <slug>-board.md directly under project dir
@@ -88,7 +89,7 @@ class ProjectNavButtons {
         //   depth 1: spice/projects/<slug>/docs/<section_slug>/<Section Name>.md
         //   depth 2: spice/projects/<slug>/docs/<parent_slug>/<sub_slug>/<Sub Name>.md
         if (pathParts[tasksIdx] === "docs" && pathParts.length >= planningIdx + 5) {
-            const fcache = app.metadataCache.getFileCache(dv.current().file);
+            const fcache = app.metadataCache.getFileCache(page.file);
             const ffm = fcache?.frontmatter || {};
             if (ffm.type === "section-hub") {
                 const depth = Number(ffm.depth) || 1;
@@ -122,7 +123,7 @@ class ProjectNavButtons {
         // post-canonical-vocab atlas notes have type:project but no longer carry
         // the 'project' tag — checking tag-only previously left atlas pages in
         // unknown context with zero rendered buttons.
-        const cache = app.metadataCache.getFileCache(dv.current().file);
+        const cache = app.metadataCache.getFileCache(page.file);
         const fm = cache?.frontmatter || {};
         const tags = fm.tags || [];
         const isAtlasShape = fm.type === "project"
@@ -368,8 +369,8 @@ class ProjectNavButtons {
         // metadata cache catches up. Reported on accuris 2026-06-16 when
         // creating a new project from + New Project. See landmine #28 / the
         // dispatcher-contracts subsection of code-conventions.md.
-        const cur = dv && dv.current ? dv.current() : null;
-        if (!cur || !cur.file) return;
+        const page = customJS.RenderSafe.page(dv);
+        if (!page || !page.file) return;
 
         const icons = {
             project: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>`,
@@ -380,7 +381,7 @@ class ProjectNavButtons {
             todo: `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>`
         };
 
-        const filePath = dv.current().file.path;
+        const filePath = page.file.path;
         const ctx = this.detectContext(filePath, dv);
         if (ctx.context === "non-project" || ctx.context === "unknown" || ctx.context === "projects-hub") return;
 
@@ -412,8 +413,8 @@ class ProjectNavButtons {
         const mapNote = projectFiles.find(f => f.basename.endsWith("- Map"));
 
         const isMainNote = mainNote && filePath === mainNote.path;
-        const isMap = dv.current().file.name.endsWith("- Map");
-        const isBoard = dv.current().file.name.endsWith("-board");
+        const isMap = page.file.name.endsWith("- Map");
+        const isBoard = page.file.name.endsWith("-board");
 
         // ── Sub-note detection ──────────────────────────────────────────────
         // Path shape for a sub-note: spice/projects/<slug>/tasks/<TaskName>/<other>.md
@@ -429,7 +430,7 @@ class ProjectNavButtons {
             pathParts[tasksIdx] === "tasks"
         ) {
             taskFolderName = pathParts[tasksIdx + 1];
-            const currentBasename = dv.current().file.name;
+            const currentBasename = page.file.name;
             if (currentBasename !== taskFolderName) {
                 const taskNoteCandidate = pathParts.slice(0, tasksIdx + 2).join("/") + "/" + taskFolderName + ".md";
                 if (app.vault.getAbstractFileByPath(taskNoteCandidate)) {
@@ -583,7 +584,7 @@ class ProjectNavButtons {
         }
 
         // --- Workstream widget (card notes only) ---
-        const isCardNote = !isMainNote && !isMap && !isBoard && dv.current().source_board;
+        const isCardNote = !isMainNote && !isMap && !isBoard && page.source_board;
         if (isCardNote && mainNote) {
             // (Dedupe handled by the root-level cleanup at the top of render.)
             const atlasCache = app.metadataCache.getFileCache(mainNote);
@@ -593,7 +594,7 @@ class ProjectNavButtons {
             }
             if (!Array.isArray(workstreams)) workstreams = [];
 
-            const currentWsId = String(dv.current().workstream || "");
+            const currentWsId = String(page.workstream || "");
             const matched = workstreams.find(w => w.id === currentWsId);
 
             const wsRow = root.createEl("div", { cls: "workstream-widget" });

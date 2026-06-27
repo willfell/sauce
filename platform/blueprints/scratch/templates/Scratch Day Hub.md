@@ -23,5 +23,5 @@ await dv.view("{{views_path}}/customjs-guard", { class: "ScratchDayActions" });
 ---
 
 ```dataviewjs
-await dv.view("{{views_path}}/customjs-guard", { class: "ScratchDayList", args: [{ day: dv.current().day }] });
+await dv.view("{{views_path}}/customjs-guard", { class: "ScratchDayList", args: [{ day: dv.current()?.day }] });
 ```

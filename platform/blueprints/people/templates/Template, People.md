@@ -25,7 +25,7 @@ await dv.view("{{views_path}}/customjs-guard", { class: "PersonNavButtons" });
 await dv.view("{{views_path}}/customjs-guard", {
   class: "PeopleRendering",
   method: "renderMentionList",
-  args: [{ mode: "mentioning_person", personLink: dv.current().file.link, scopePath: "spice/meetings" }, { style: "cards", limit: 50 }]
+  args: [{ mode: "mentioning_person", personLink: dv.current()?.file?.link, scopePath: "spice/meetings" }, { style: "cards", limit: 50 }]
 });
 ```
 
@@ -34,7 +34,7 @@ await dv.view("{{views_path}}/customjs-guard", {
 await dv.view("{{views_path}}/customjs-guard", {
   class: "PeopleRendering",
   method: "renderMentionList",
-  args: [{ mode: "mentioning_person", personLink: dv.current().file.link, scopePath: "spice/daily" }, { style: "list", limit: 30 }]
+  args: [{ mode: "mentioning_person", personLink: dv.current()?.file?.link, scopePath: "spice/daily" }, { style: "list", limit: 30 }]
 });
 ```
 

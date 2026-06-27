@@ -141,6 +141,11 @@
       "name": "smart-connections-bridge",
       "version": "0.2.0",
       "path": "mechanisms/smart-connections-bridge"
+    },
+    {
+      "name": "render-safe",
+      "version": "0.1.0",
+      "path": "mechanisms/render-safe"
     }
   ],
   "blueprints": [

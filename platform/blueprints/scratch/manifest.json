@@ -33,6 +33,10 @@
     {
       "name": "breadcrumb",
       "range": ">=0.1.0"
+    },
+    {
+      "name": "render-safe",
+      "range": ">=0.1.0"
     }
   ],
   "breadcrumb": {
