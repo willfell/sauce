@@ -15,7 +15,11 @@ function loadClass(relPath, className) {
   const src = fs.readFileSync(path.join(__dirname, '..', relPath), 'utf8');
   return new Function(`${src}; return ${className};`)();
 }
-const RenderSafe = loadClass('mechanisms/render-safe/render-safe.js', 'RenderSafe');
+// customJS stores classes as INSTANCES (customJS.RenderSafe = new RenderSafe()),
+// and helpers call customJS.RenderSafe.page(dv). Exercise the SAME instance-call
+// form here so a regression to static methods (undefined-on-instance trap) fails.
+const RenderSafeClass = loadClass('mechanisms/render-safe/render-safe.js', 'RenderSafe');
+const RenderSafe = new RenderSafeClass();
 
 // Global `app` stub used by the getActiveFile fallback branch.
 function withApp(activeFile, frontmatter, run) {

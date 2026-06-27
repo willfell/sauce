@@ -11,10 +11,16 @@
 // Templates / dataviewjs-block args CANNOT use this class (customJS may be in the
 // TDZ pre-guard) — they use `dv.current()?.x || app.workspace.getActiveFile()?.x`
 // optional chaining instead. See Docs/agent-guides/code-conventions.md.
+//
+// Methods are INSTANCE methods (NOT static): the customJS plugin stores classes as
+// instances (`customJS.RenderSafe = new RenderSafe()`), so members reached via
+// `customJS.RenderSafe.page(dv)` must live on the prototype. A static method would
+// be undefined on the instance and throw at render time (the customjs
+// static-vs-instance trap — code-conventions.md "Dispatcher contracts").
 class RenderSafe {
   // Returns the live Dataview page when indexed, else a shim built from the
   // active file (path/name + cached frontmatter), else null. Never throws.
-  static page(dv) {
+  page(dv) {
     try {
       const cur = dv && typeof dv.current === 'function' ? dv.current() : null;
       if (cur && cur.file) return cur;
@@ -29,6 +35,6 @@ class RenderSafe {
     } catch (_e) { return null; }
   }
 
-  static filePath(dv) { const p = RenderSafe.page(dv); return (p && p.file && p.file.path) || null; }
-  static fileName(dv) { const p = RenderSafe.page(dv); return (p && p.file && p.file.name) || null; }
+  filePath(dv) { const p = this.page(dv); return (p && p.file && p.file.path) || null; }
+  fileName(dv) { const p = this.page(dv); return (p && p.file && p.file.name) || null; }
 }
