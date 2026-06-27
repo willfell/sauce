@@ -21,7 +21,7 @@ accepted explicitly but is the default. During the assessment window, stay in dr
 - Project board: `~/notes/sauce/headspace-sauce/spice/projects/sauce/sauce-board.md`
 - Cards root: `~/notes/sauce/headspace-sauce/spice/projects/sauce/tasks/`
 - Kill-switch sentinel: `~/projects/repos/sauce/.autoloop-halt` (if present → halt)
-- Handoff archive: `~/projects/repos/sauce/Docs/prompts/sauce-autoloop-*-handoff.md`
+- Handoff archive: `~/projects/repos/sauce/Docs/prompts/<YYYY-MM-DD>-sauce-autoloop-turn-N-handoff.md` (glob `*sauce-autoloop*-handoff.md`)
 
 ---
 
