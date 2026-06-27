@@ -1,0 +1,14 @@
+{
+  "name": "render-safe",
+  "version": "0.1.0",
+  "description": "Cold-load-safe Dataview accessor. customJS.RenderSafe.page(dv) / .filePath(dv) / .fileName(dv) return the live dv.current() page when Dataview has indexed the embedding file, else a shim built from app.workspace.getActiveFile() + cached frontmatter, else null — never the 'Cannot read properties of undefined' throw that flashes on cold vault load (landmines #1-#2). The single home for the dv.current() fallback that the v0.119/v0.132/v0.133 point-fixes each re-implemented. Enforced by scripts/lint-cold-load.js.",
+  "depends_on": [
+    { "name": "customjs-guard", "range": ">=1.0.0" }
+  ],
+  "customjs_classes": ["RenderSafe"],
+  "files": [
+    { "source": "render-safe.js", "dest": "{{scripts_path}}/render-safe/render-safe.js" }
+  ],
+  "post_install": [],
+  "rule_fragments": []
+}
