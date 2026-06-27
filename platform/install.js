@@ -3911,6 +3911,20 @@ function _healNoteChromeBody(body, type) {
     /notePath:\s*dv\.current\(\)\.file\.path\b/g,
     'notePath: (dv.current()?.file?.path || app.workspace.getActiveFile()?.path)'
   );
+  // Step 4c (cold-load-eradication cycle) — guard the eager
+  // `personLink: dv.current().file.link` in the person-note PeopleRendering
+  // inline_body (mentioning_person mode). Same cold-load failure + fix shape as
+  // Step 4b, but a Dataview Link has no TFile equivalent, so the guard is a plain
+  // optional-chain (no getActiveFile fallback) — matching the form the
+  // Template, People.md + people manifest inline_body now emit for NEW notes.
+  // Targets only the button-created person-note shape. Idempotent:
+  // `dv.current()?.file?.link` no longer matches the bare pattern.
+  // CYCLE-A-RETIREABLE: pure-additive + idempotent; lift into the migration-
+  // retirement registry once all consumers pass the cold-load-eradication release.
+  out = out.replace(
+    /personLink:\s*dv\.current\(\)\.file\.link\b/g,
+    'personLink: dv.current()?.file?.link'
+  );
   // `out` may have changed; downstream steps (5, 6) operate on the scrubbed
   // content.
   // Step 5 — ensure the ACTION_ITEMS_MARKER sits INSIDE the Action Items
