@@ -1,12 +1,15 @@
 ---
-title: Projects blueprint — discoverability overhaul (hub recent-strip + project-page panels)
+title: Projects blueprint — discoverability overhaul + hub name conformance
 date: 2026-06-26
 status: design-approved
 rc: sauce-enhance-1
 blueprint: project
+workstreams:
+  - "1: discoverability (hub recent-strip + project-page panels + heal)"
+  - "2: hub name conformance (harden enumerators + backfill→repair + rename 6 legacy hubs)"
 ---
 
-# Projects blueprint — discoverability overhaul
+# Projects blueprint — discoverability overhaul + hub name conformance
 
 ## Problem
 
@@ -37,6 +40,9 @@ anywhere in the blueprint.
 3. Stay inside the established project-blueprint-UI conventions (one helper per
    surface, `SectionLabel` + `BeaconCards`, empty-renders-nothing). No new
    frontmatter / schema surface.
+4. **(Workstream 2)** Make every project show its real display name in pickers,
+   nav, and breadcrumbs — fixing the legacy `Project.md` hubs that surface as
+   literal "Project" — and harden the enumerators so it can't recur.
 
 ## Non-goals (out of scope)
 
@@ -308,6 +314,95 @@ after:   ProjectActivityPanel → ProjectOpenTasks → ProjectMeetingsPanel
    headspace's sparse `claude-cowork` hub) renders both panels in order.
 5. Re-run `sauce update --bump-pins` on one vault to confirm the second pass is a
    pure no-op (`skipped N; healed 0`).
+6. **Workstream 2:** with the hardened code now live, the picker already shows
+   real names. Then rename the 6 legacy `Project.md` hubs in Obsidian
+   (Workstream 2c table) so `[[Name]]` links resolve, and run
+   `sauce update --bump-pins` once more per affected vault so the
+   backfill→repair clears the residual `project_name: "Project"` stamps.
+7. Verify: the "Add to project" / new-task pickers list real names with no
+   "Project" rows; a meeting linked to a renamed project shows under that
+   project's Meetings panel.
+
+## Workstream 2 — project hub name conformance
+
+Folded in per the 2026-06-26 remediation decision ("Rename + harden"). This is a
+**second, independent workstream** in the same cycle: it fixes the picker that
+shows literal "Project" entries.
+
+### Diagnosis (confirmed against live vaults)
+
+The hub-naming convention is **filename = display name** (`<Name>.md`). Both
+current creation paths honor it (the EntityCreate button's
+`filename_prefix: {{prompts.name|sanitize-filename}}`, and the `/project` skill's
+`Write to .../<Project Name>.md`). But **6 legacy hubs are named `Project.md`**
+(accuris 3, headspace 2, ero 1) with the real name only in `name:` frontmatter.
+Because several enumerators read `file.name` rather than `name:`, those six all
+surface as "Project" — colliding into identical, unusable picker rows — and
+`[[Name]]` wikilinks can't resolve to a file literally named `Project.md`.
+
+No creation path needs changing. This is one-time cleanup + defensive hardening.
+
+### Part 2a — harden enumerators to prefer `name:` (code)
+
+Every site that turns a project page into a display label or match key must use
+`p.name || p.file.name` (frontmatter first). Known sites (grep for the rest
+during planning):
+
+- `platform/blueprints/meetings/helpers/meeting-leaf-actions.js`
+  - `_listProjects` → `name: p.name || p.file.name` (currently `p.file.name`).
+  - `_projectSlugFor` / `_projectTodoPath` — make the match key consistent with
+    the hardened `_listProjects` name (avoid the `p.file.name === name` mismatch
+    once the displayed name comes from frontmatter).
+- `platform/blueprints/project/helpers/project-nav-buttons.js:~272` — the
+  `fm.type === "project" → return f.basename` resolver → prefer `fm.name`.
+- `platform/install.js` `_resolveProjectDisplayName` (used by the name backfill)
+  → read frontmatter `name:` first, fall back to the basename.
+- `projects-hub-cards.js` already does `p.name || p.file.name` — no change
+  (use it as the reference pattern).
+
+### Part 2b — backfill → repair (heal)
+
+`applyProjectNameBackfill` currently bails when `project_name` is already
+present, so it can't fix the **10 child notes** mis-stamped
+`project_name: "Project"`. Enhance `_injectProjectNameFrontmatter` (or the
+backfill driver) to **correct a wrong value**: when `project_name` is absent OR
+differs from the resolved display name, write the resolved name; when it already
+equals the resolved name, no-op (`after === before` short-circuit preserved).
+With `_resolveProjectDisplayName` now name-aware (2a), the resolved name is
+correct even before the file is renamed. Keep the existing posture: per-note
+try/catch, `.sauce-backup` snapshot, history events, never throws.
+
+### Part 2c — rename the 6 legacy hubs (manual, link-safe)
+
+The hubs must be renamed `Project.md` → `<Name>.md` so `[[Name]]` resolves and
+`file.name` equals the display name. **Renaming must go through Obsidian's rename
+engine** (it updates the 17 ambiguous `[[Project]]` backlinks; a file-move script
+would not). This is the post-deploy manual step the user pre-approved. Either the
+user renames each in Obsidian, or runs a one-shot paste of
+`app.fileManager.renameFile(...)` (link-safe) — provided as a throwaway snippet,
+not a shipped command.
+
+Exact renames:
+
+| Vault | folder | `Project.md` → |
+| --- | --- | --- |
+| accuris | `github-migration/` | `Github Migration.md` |
+| accuris | `engineering-solution-k8s-migration/` | `Engineering Solution K8s Migration.md` |
+| accuris | `denali-migrate-content-registry-to-gh-actions/` | `Denali - Migrate Content-Registry to GH Actions.md` |
+| headspace | `aligning-sauce-with-claude/` | `Aligning Sauce with Claude.md` |
+| headspace | `claude-cowork/` | `Claude CoWork.md` |
+| ero | `microsoft-egnyte-connector-rollout/` | `Microsoft - Egnyte Connector Rollout.md` |
+
+After renaming, re-run `sauce update --bump-pins` once more so the
+backfill→repair (2b) re-resolves child `project_name` from the now-correct
+basename and clears any residual "Project" stamps the name-aware resolver missed.
+
+### Interaction with Workstream 1
+
+The Workstream-1 panels heal (`applyProjectActivityPanelsHeal`) is name-agnostic
+— it anchors on the Meetings block and never reads the display name — so the two
+workstreams don't interact on the hub body. Order within the install pass is
+unconstrained between them.
 
 ## Testing & verification
 
@@ -347,8 +442,17 @@ after:   ProjectActivityPanel → ProjectOpenTasks → ProjectMeetingsPanel
   no seed-vault hub edits are required; if `run-seed-migrations.js` is extended,
   follow `Docs/agent-guides/migration-regression-net.md` (per-cycle authoring
   loop, portable-sentinel pattern).
+- **Workstream-2 coverage:**
+  - `_resolveProjectDisplayName` prefers frontmatter `name:` over basename
+    (case: a `Project.md` hub with `name: "Claude CoWork"` resolves to
+    "Claude CoWork", not "Project").
+  - `_injectProjectNameFrontmatter` (repair mode) overwrites
+    `project_name: "Project"` with the resolved name, AND is a no-op when the
+    value already equals the resolved name (idempotency / `after === before`).
+  - `_listProjects` (or a render-guard/helper-case) maps `p.name || p.file.name`
+    — a `Project.md` page with a `name:` surfaces under its real label.
 - **Dogfood:** verify rendering in the workshop vault (no project instances, so
-  the heal is a no-op there), then the per-vault rollout sequence above.
+  the heals are no-ops there), then the per-vault rollout sequence above.
 
 ## Open questions (resolved in design conversation)
 
@@ -362,3 +466,8 @@ after:   ProjectActivityPanel → ProjectOpenTasks → ProjectMeetingsPanel
   block universal across all 26 live hubs), with a fallback chain for
   Status-less / sparse notes; heal runs immediately after the meetings-panel
   heal. ✓ (decided after inspecting accuris / ero / headspace on 2026-06-26)
+- "Project"-label bug remediation → **Rename + harden** (Workstream 2): rename
+  the 6 legacy `Project.md` hubs to `<Name>.md` (link-safe, in Obsidian), harden
+  all enumerators to prefer frontmatter `name:`, and upgrade the name backfill to
+  repair mis-stamped `project_name: "Project"`. ✓ (decided 2026-06-26 after
+  confirming both creation paths already emit `<Name>.md`)
