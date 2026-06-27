@@ -11238,8 +11238,8 @@ async function caseV01030ProjMan1VersionAndCustomjs() {
   // v0.123.0 — bumped to 1.24.0 (depends_on: breadcrumb mech + breadcrumb.types
   // block; helpers/breadcrumb.js dropped from files[]; Breadcrumb dropped from
   // customjs_classes since the mechanism owns it now).
-  assertTrue("HC-V01030-PROJ-MAN-1a: project manifest version 1.21.x or 1.22.x or 1.23.x or 1.24.x",
-    m && /^1\.(21|22|23|24|25|26)\.\d+$/.test(m.version), `got: ${m && m.version}`);
+  assertTrue("HC-V01030-PROJ-MAN-1a: project manifest version matches snapshot SSOT",
+    m && m.version === VERSION_SNAPSHOT.components.project, `got: ${m && m.version}, snapshot: ${VERSION_SNAPSHOT.components.project}`);
   const cls = (m && Array.isArray(m.customjs_classes)) ? m.customjs_classes : [];
   // v0.123.0 — Breadcrumb migrated to the breadcrumb mechanism. The project
   // blueprint depends on it via depends_on instead of listing the class directly.
@@ -11623,7 +11623,7 @@ async function caseV01040Man1Manifest118() {
   // v0.106.0 → 1.20.0 (DocSearch persistence + dashboard widgets).
   // v0.109.0 → 1.21.0 (projects visual overhaul: DocSearch params, SectionLabel,
   // ProjectsHubCards search, template rewrite, Breadcrumb extension, marker cleanup).
-  assertTrue("HC-V01040-MAN-1: project blueprint version 1.21.x or 1.22.x or 1.23.x", /^1\.(21|22|23|24|25|26)\.\d+$/.test(m.version));
+  assertTrue("HC-V01040-MAN-1: project blueprint version matches snapshot SSOT", m.version === VERSION_SNAPSHOT.components.project, `got: ${m.version}, snapshot: ${VERSION_SNAPSHOT.components.project}`);
   assertTrue("HC-V01040-MAN-1: customjs_classes includes DocSearch",
     Array.isArray(m.customjs_classes) && m.customjs_classes.includes("DocSearch"));
   const sources = (m.files || []).map(f => f.source);
@@ -11728,8 +11728,8 @@ async function caseV01050Man1ProjectManifest119() {
   console.log("\n--- Case HC-V01050-MAN-1: project blueprint manifest 1.21.0 (v0.109.0 bump) + doc-note prompts use new options_source ---");
   const m = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/manifest.json"), "utf8"));
   // v0.109.0 bumped project blueprint 1.20.0 → 1.21.0 (projects visual overhaul).
-  assertTrue("HC-V01050-MAN-1: project blueprint version 1.21.x or 1.22.x or 1.23.x", /^1\.(21|22|23|24|25|26)\.\d+$/.test(m.version),
-    `got: ${m.version}`);
+  assertTrue("HC-V01050-MAN-1: project blueprint version matches snapshot SSOT", m.version === VERSION_SNAPSHOT.components.project,
+    `got: ${m.version}, snapshot: ${VERSION_SNAPSHOT.components.project}`);
   // Locate doc-note entity-create entry.
   const docNote = (m.new_entity_buttons || []).find(b => b.id === "doc-note");
   assertTrue("HC-V01050-MAN-1: doc-note new_entity_buttons entry present", !!docNote);
@@ -14066,14 +14066,14 @@ async function caseV0110VersionBump() {
   assertTrue("V0110-VER-2: finance pin matches snapshot SSOT",
     fbp && fbp.version === VERSION_SNAPSHOT.components.finance, `got: ${fbp?.version}, snapshot: ${VERSION_SNAPSHOT.components.finance}`);
   const pbp = (ws.blueprints || []).find(b => b.name === "project");
-  assertTrue("V0110-VER-3: project pin 1.21.x or 1.22.x or 1.23.x",
-    pbp && /^1\.(21|22|23|24|25|26)\.\d+$/.test(pbp.version), `got: ${pbp?.version}`);
+  assertTrue("V0110-VER-3: project pin matches snapshot SSOT",
+    pbp && pbp.version === VERSION_SNAPSHOT.components.project, `got: ${pbp?.version}, snapshot: ${VERSION_SNAPSHOT.components.project}`);
   const fin = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/finance/manifest.json"), "utf8"));
   assertTrue("V0110-VER-4: finance manifest version matches snapshot SSOT",
     fin.version === VERSION_SNAPSHOT.components.finance, `got: ${fin.version}, snapshot: ${VERSION_SNAPSHOT.components.finance}`);
   const proj = JSON.parse(fs.readFileSync(path.join(WORKSHOP, "platform/blueprints/project/manifest.json"), "utf8"));
-  assertTrue("V0110-VER-5: project manifest version 1.21.x or 1.22.x or 1.23.x",
-    /^1\.(21|22|23|24|25|26)\.\d+$/.test(proj.version), `got: ${proj.version}`);
+  assertTrue("V0110-VER-5: project manifest version matches snapshot SSOT",
+    proj.version === VERSION_SNAPSHOT.components.project, `got: ${proj.version}, snapshot: ${VERSION_SNAPSHOT.components.project}`);
 }
 
 // v0.5.3 CF-3 — applyFinancePaycheckBodyMigration (PaycheckSummary block
