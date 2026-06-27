@@ -38,7 +38,6 @@ accepted explicitly but is the default. During the assessment window, stay in dr
    node scripts/autoloop/select-card.js \
      --board ~/notes/sauce/headspace-sauce/spice/projects/sauce/sauce-board.md \
      --handoff "<latest handoff path, or omit>" \
-     --halt ~/projects/repos/sauce/.autoloop-halt \
      --cards-root ~/notes/sauce/headspace-sauce/spice/projects/sauce/tasks \
      --json
    ```

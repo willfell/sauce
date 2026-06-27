@@ -50,7 +50,7 @@ These are design invariants every task below must respect:
 | `platform/test/run-autoloop-select.js` | Create | Zero-dep behavioral harness for the two helpers. |
 | `package.json` | Modify | Add `test:autoloop`; append it to the `release:preflight` chain. |
 | `.claude/commands/sauce-autoloop.md` | Create | The non-interactive one-turn orchestrator prompt. |
-| `ranch-autoloop.plist.sample` (repo root, Inc 1 minimal) | Create | A documented launchd sample (dry-run, every 2h) for the assessment window. NOT auto-loaded. |
+| `sauce-autoloop.plist.sample` (repo root, Inc 1 minimal) | Create | A documented launchd sample (dry-run, every 2h) for the assessment window. NOT auto-loaded. |
 
 All implementation happens on branch `feat/sauce-autoloop-increment-1`, landed via a CI-gated auto-merge PR (dogfooding the target flow). **Do NOT manually bump versions or tag** — the release pipeline owns that on merge.
 
@@ -657,16 +657,16 @@ Expected: it orients, selects deterministically, writes a dry-run handoff with a
 ## Task 8: Minimal dry-run scheduler for the assessment window
 
 **Files:**
-- Create: `ranch-autoloop.plist.sample` (repo root)
+- Create: `sauce-autoloop.plist.sample` (repo root)
 
 This is the *minimal* cadence artifact so the loop "runs every couple hours" in dry-run during assessment. Full substrate hardening (auth fail-closed, logging, daily budget, kill-switch UX) is Increment 5.
 
-- [ ] **Step 1: Create `ranch-autoloop.plist.sample`** (clone of the finance cron shape)
+- [ ] **Step 1: Create `sauce-autoloop.plist.sample`** (clone of the finance cron shape)
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- Sauce Autoloop — DRY-RUN assessment scheduler. Fires every 2h.
-     Install:  cp ranch-autoloop.plist.sample ~/Library/LaunchAgents/com.will.sauce-autoloop.plist
+     Install:  cp sauce-autoloop.plist.sample ~/Library/LaunchAgents/com.will.sauce-autoloop.plist
                launchctl load ~/Library/LaunchAgents/com.will.sauce-autoloop.plist
      Halt:     touch ~/projects/repos/sauce/.autoloop-halt   (or launchctl unload …)
      Stays DRY-RUN until you flip --live after the assessment window. -->
@@ -698,7 +698,7 @@ Append to `.gitignore`:
 - [ ] **Step 3: Commit**
 
 ```bash
-git add ranch-autoloop.plist.sample .gitignore
+git add sauce-autoloop.plist.sample .gitignore
 git commit -m "chore(autoloop): minimal dry-run launchd sample + ignore runtime artifacts"
 ```
 

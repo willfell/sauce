@@ -21,7 +21,7 @@
   <array>
     <string>/bin/zsh</string>
     <string>-lc</string>
-    <string>caffeinate -i claude -p "/sauce-autoloop --dry-run" --permission-mode acceptEdits --allowedTools "Bash,Read,Write,Edit,Glob,Grep,Skill,Agent" --model claude-sonnet-4-6 --max-turns 40 >> /Users/willfellhoelter/projects/repos/sauce/.autoloop.log 2>&1</string>
+    <string>caffeinate -i claude -p "/sauce-autoloop --dry-run" --permission-mode acceptEdits --allowedTools "Bash,Read,Write,Edit,Glob,Grep,Skill,Agent,Workflow" --model claude-sonnet-4-6 --max-turns 40 >> /Users/willfellhoelter/projects/repos/sauce/.autoloop.log 2>&1</string>
   </array>
   <key>StartInterval</key><integer>7200</integer>
   <key>RunAtLoad</key><false/>
