@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Sauce Autoloop — DRY-RUN assessment scheduler. Fires every 2h.
+     This is a SAMPLE/template (Increment 1). Full substrate hardening
+     (fail-closed auth check, structured logging rotation, daily-turn budget,
+     kill-switch UX) lands in Increment 5.
+
+     Install:  cp sauce-autoloop.plist.sample ~/Library/LaunchAgents/com.will.sauce-autoloop.plist
+               launchctl load ~/Library/LaunchAgents/com.will.sauce-autoloop.plist
+     Halt:     touch ~/projects/repos/sauce/.autoloop-halt   (or: launchctl unload …)
+     Logs:     tail -f ~/projects/repos/sauce/.autoloop.log
+
+     Stays DRY-RUN (select + propose only, near-zero cost) until you flip the
+     prompt to "/sauce-autoloop --live" after the assessment window. Uses a
+     cheaper model + bounded turns to conserve usage. -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.will.sauce-autoloop</string>
+  <key>WorkingDirectory</key><string>/Users/willfellhoelter/projects/repos/sauce</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>-lc</string>
+    <string>caffeinate -i claude -p "/sauce-autoloop --dry-run" --permission-mode acceptEdits --allowedTools "Bash,Read,Write,Edit,Glob,Grep,Skill,Agent" --model claude-sonnet-4-6 --max-turns 40 >> /Users/willfellhoelter/projects/repos/sauce/.autoloop.log 2>&1</string>
+  </array>
+  <key>StartInterval</key><integer>7200</integer>
+  <key>RunAtLoad</key><false/>
+</dict>
+</plist>
