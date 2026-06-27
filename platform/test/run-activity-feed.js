@@ -12,6 +12,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const VERSION_SNAPSHOT = require("./fixtures/component-versions.snapshot.json");
 
 const WORKSHOP = path.resolve(__dirname, "../..");
 const MECH_DIR = path.join(WORKSHOP, "platform/mechanisms/activity-feed");
@@ -63,7 +64,7 @@ try {
 if (manifest) {
   assertTrue("AF-1b: manifest.json parses as JSON", true);
   assertEq("AF-1c: manifest.name === 'activity-feed'", manifest.name, "activity-feed");
-  assertEq("AF-1d: manifest.version === '0.7.1'", manifest.version, "0.7.1");
+  assertEq("AF-1d: manifest.version matches snapshot", manifest.version, VERSION_SNAPSHOT.components["activity-feed"]);
   assertEq("AF-1e: manifest.kind === 'mechanism'", manifest.kind, "mechanism");
 
   assertEq("AF-2: customjs_classes is ['ActivityFeed']", manifest.customjs_classes, ["ActivityFeed"]);
@@ -420,7 +421,7 @@ try {
     assertTrue(`AF-V065: _DEFAULT_BLUEPRINTS contains "${t}"`, src.includes(`"${t}"`));
   }
   const manifest = JSON.parse(fs.readFileSync("platform/mechanisms/activity-feed/manifest.json", "utf8"));
-  assertEq("AF-V065: activity-feed manifest version is 0.7.1", manifest.version, "0.7.1");
+  assertEq("AF-V065: activity-feed manifest version matches snapshot", manifest.version, VERSION_SNAPSHOT.components["activity-feed"]);
   assertTrue("AF-V065: activity-feed description mentions latest shipping version",
     typeof manifest.description === "string" && manifest.description.includes("v0.7.0"));
 }

@@ -16,6 +16,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const VERSION_SNAPSHOT = require("./fixtures/component-versions.snapshot.json");
 
 const WORKSHOP = path.resolve(__dirname, "../..");
 const MECH_DIR = path.join(WORKSHOP, "platform/mechanisms/kanban-status-sync");
@@ -67,7 +68,7 @@ try {
 if (manifest) {
   assertTrue("KSS-1b: manifest.json parses as JSON", true);
   assertEq("KSS-1c: manifest.name === 'kanban-status-sync'", manifest.name, "kanban-status-sync");
-  assertEq("KSS-1d: manifest.version === '0.2.0'", manifest.version, "0.2.0");
+  assertEq("KSS-1d: manifest.version matches snapshot", manifest.version, VERSION_SNAPSHOT.components["kanban-status-sync"]);
   assertEq("KSS-1e: manifest.kind === 'mechanism'", manifest.kind, "mechanism");
 
   // KSS-2 expanded in v0.2.0 (sauce v0.73.0) to include KanbanStatusSyncInit.
