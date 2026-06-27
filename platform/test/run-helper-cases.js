@@ -7248,7 +7248,11 @@ async function caseFA6DomainManifests() {
   // v0.118.0 — widened to-do to accept 0.6.x (MINOR bump).
   // v0.119.0 — widened to-do to accept 0.7.x (MINOR bump for additive sentinel + markdown render).
   // v0.123.0 — widened to-do to accept 0.10.x (MINOR bump: drop project dep, add breadcrumb dep).
-  for (const [bp, expected] of [["trips", "0.3.0"], ["to-do", VERSION_SNAPSHOT.components["to-do"]], ["boards", "0.2.1"]]) {
+  // All three read from the snapshot SSOT (the bumper rewrites it in lockstep with
+  // each manifest) so a per-component bump never wedges prepare-release (landmine:
+  // stale version assertions). trips + boards migrated off hardcoded literals in
+  // the cold-load-eradication cycle (trips bumped 0.3.0 -> 0.4.0 there).
+  for (const [bp, expected] of [["trips", VERSION_SNAPSHOT.components["trips"]], ["to-do", VERSION_SNAPSHOT.components["to-do"]], ["boards", VERSION_SNAPSHOT.components["boards"]]]) {
     const m = JSON.parse(fs.readFileSync(
       path.join(WORKSHOP, `platform/blueprints/${bp}/manifest.json`), "utf8"));
     const match = expected instanceof RegExp ? expected.test(m.version) : m.version === expected;
@@ -8434,14 +8438,19 @@ async function caseHCV01340RenderSafe() {
   const rsMan = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "platform/mechanisms/render-safe/manifest.json"), "utf8"));
   assertEqual(rsMan.name, "render-safe", "HC-V01340-RS-A: render-safe manifest name");
-  assertEqual(rsMan.version, "0.1.0", "HC-V01340-RS-A: render-safe manifest version 0.1.0");
+  // Version is asserted as well-formed semver, NOT a literal — the release bumper
+  // owns the exact value (it bumped render-safe past 0.1.0 in this very cycle), and
+  // manifest<->catalogue<->subscription version consistency is enforced by
+  // scripts/check-version-sync.js. Pinning a literal here wedges prepare-release.
+  assertTrue("HC-V01340-RS-A: render-safe manifest version is semver",
+    typeof rsMan.version === "string" && /^\d+\.\d+\.\d+$/.test(rsMan.version));
   assertTrue("HC-V01340-RS-A: render-safe declares customjs_classes RenderSafe",
     Array.isArray(rsMan.customjs_classes) && rsMan.customjs_classes.includes("RenderSafe"));
-  // (b) catalogue carries the render-safe pin.
+  // (b) catalogue carries the render-safe entry (presence, not exact version).
   const plat = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "platform/manifest.json"), "utf8"));
-  assertTrue("HC-V01340-RS-B: platform catalogue declares render-safe@0.1.0",
-    Array.isArray(plat.mechanisms) && plat.mechanisms.some(x => x.name === "render-safe" && x.version === "0.1.0"));
+  assertTrue("HC-V01340-RS-B: platform catalogue declares render-safe",
+    Array.isArray(plat.mechanisms) && plat.mechanisms.some(x => x.name === "render-safe"));
   // (c) workshop subscription includes render-safe (dogfood install materializes it).
   const sub = JSON.parse(fs.readFileSync(
     path.join(WORKSHOP, "ranch/platform-subscription.json"), "utf8"));

@@ -10,6 +10,9 @@
 
 const fs = require("fs");
 const path = require("path");
+// Snapshot SSOT (the release bumper rewrites it in lockstep with each manifest) so
+// a per-component bump never wedges prepare-release — landmine: stale version pins.
+const VERSION_SNAPSHOT = require("./fixtures/component-versions.snapshot.json");
 
 const WORKSHOP = path.resolve(__dirname, "../..");
 const MECH_DIR = path.join(WORKSHOP, "platform/mechanisms/backlink-panel");
@@ -61,7 +64,7 @@ try {
 if (manifest) {
   assertTrue("BP-1b: manifest.json parses as JSON", true);
   assertEq("BP-1c: manifest.name === 'backlink-panel'", manifest.name, "backlink-panel");
-  assertEq("BP-1d: manifest.version === '0.1.0'", manifest.version, "0.1.0");
+  assertEq("BP-1d: manifest.version matches snapshot SSOT", manifest.version, VERSION_SNAPSHOT.components["backlink-panel"]);
   assertEq("BP-1e: manifest.kind === 'mechanism'", manifest.kind, "mechanism");
 
   assertEq("BP-2: customjs_classes is ['BacklinkPanel']", manifest.customjs_classes, ["BacklinkPanel"]);
