@@ -59,7 +59,7 @@ class MeetingLeafActions {
   _listProjects(dv) {
     try {
       return dv.pages('"spice/projects"').where((p) => p && p.type === "project")
-        .map((p) => ({ slug: p.project_slug || String(p.file.name).toLowerCase().replace(/[^a-z0-9]+/g, "-"), name: p.file.name }))
+        .map((p) => ({ slug: p.project_slug || String(p.name || p.file.name).toLowerCase().replace(/[^a-z0-9]+/g, "-"), name: p.name || p.file.name }))
         .array();
     } catch (_e) { return []; }
   }
@@ -185,7 +185,7 @@ class MeetingLeafActions {
 
   _projectTodoPath(name, dv) {
     try {
-      const hubs = dv.pages('"spice/projects"').where((p) => p && p.type === "project" && p.file.name === name).array();
+      const hubs = dv.pages('"spice/projects"').where((p) => p && p.type === "project" && (p.name || p.file.name) === name).array();
       if (hubs.length === 0) return null;
       const folder = hubs[0].file.folder;
       return `${folder}/${name} To-Do.md`;

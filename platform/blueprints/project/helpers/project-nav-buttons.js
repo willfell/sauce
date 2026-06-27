@@ -269,7 +269,7 @@ class ProjectNavButtons {
                 if (!f.path.startsWith(prefix)) continue;
                 if (f.path.slice(prefix.length).includes("/")) continue;
                 const fm = app.metadataCache.getFileCache(f)?.frontmatter;
-                if (fm && fm.type === "project") return f.basename;
+                if (fm && fm.type === "project") return (fm.name || f.basename);
             }
         } catch (_e) { /* best-effort — fall back to slug */ }
         return null;
