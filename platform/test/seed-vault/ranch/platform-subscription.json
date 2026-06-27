@@ -23,7 +23,7 @@
     },
     {
       "name": "backlink-panel",
-      "version": "0.1.0"
+      "version": "0.1.1"
     },
     {
       "name": "nav-buttons",
@@ -87,7 +87,7 @@
     },
     {
       "name": "render-safe",
-      "version": "0.1.0"
+      "version": "0.2.0"
     }
   ],
   "blueprints": [
@@ -109,7 +109,7 @@
     },
     {
       "name": "people",
-      "version": "0.6.1"
+      "version": "0.6.2"
     },
     {
       "name": "products",
@@ -117,7 +117,7 @@
     },
     {
       "name": "project",
-      "version": "1.27.0"
+      "version": "1.28.0"
     },
     {
       "name": "to-do",
@@ -129,15 +129,15 @@
     },
     {
       "name": "trips",
-      "version": "0.3.0"
+      "version": "0.4.0"
     },
     {
       "name": "finance",
-      "version": "0.11.0"
+      "version": "0.11.1"
     },
     {
       "name": "scratch",
-      "version": "0.6.0"
+      "version": "0.7.0"
     },
     {
       "name": "teams",

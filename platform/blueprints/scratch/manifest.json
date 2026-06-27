@@ -1,6 +1,6 @@
 {
   "name": "scratch",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "kind": "blueprint",
   "module_directory": "scratch",
   "skills_dir": ".claude/skills/scratch",
@@ -43,18 +43,33 @@
     "types": {
       "scratch": {
         "ancestors": [
-          { "label": "lit:Scratch" },
-          { "label": "path:3" },
-          { "label": "path:4", "link": "spice/scratch/{path:2}/{path:3}/{path:4}/Scratch-Day-{path:4}.md" }
+          {
+            "label": "lit:Scratch"
+          },
+          {
+            "label": "path:3"
+          },
+          {
+            "label": "path:4",
+            "link": "spice/scratch/{path:2}/{path:3}/{path:4}/Scratch-Day-{path:4}.md"
+          }
         ],
-        "current": { "label": "fm:time|file:basename" }
+        "current": {
+          "label": "fm:time|file:basename"
+        }
       },
       "scratch-day": {
         "ancestors": [
-          { "label": "lit:Scratch" },
-          { "label": "path:3" }
+          {
+            "label": "lit:Scratch"
+          },
+          {
+            "label": "path:3"
+          }
         ],
-        "current": { "label": "path:4" }
+        "current": {
+          "label": "path:4"
+        }
       }
     }
   },
@@ -67,7 +82,9 @@
     "ScratchDayMigrate",
     "ScratchDayMigrateInit"
   ],
-  "customjs_startup_scripts": ["ScratchDayMigrateInit"],
+  "customjs_startup_scripts": [
+    "ScratchDayMigrateInit"
+  ],
   "files": [
     {
       "source": "templates/Scratch.md",
@@ -154,7 +171,12 @@
       "label": "+ New Scratch",
       "icon": "pencil-plus",
       "prompts": [
-        { "key": "title", "label": "Scratch title (optional)", "type": "string", "required": false }
+        {
+          "key": "title",
+          "label": "Scratch title (optional)",
+          "type": "string",
+          "required": false
+        }
       ],
       "destination": {
         "folder_prefix": "spice/scratch/{{current_file.frontmatter.day}}-routed",
@@ -181,11 +203,19 @@
     {
       "target": "scratch",
       "fragment": {
-        "scope": { "path_glob": "spice/scratch/**/Scratch-2*.md" },
+        "scope": {
+          "path_glob": "spice/scratch/**/Scratch-2*.md"
+        },
         "extends": "_canonical-vocab",
         "required_frontmatter": {
-          "type": { "required": true, "equals": "scratch" },
-          "day":  { "required": true, "type": "string" }
+          "type": {
+            "required": true,
+            "equals": "scratch"
+          },
+          "day": {
+            "required": true,
+            "type": "string"
+          }
         },
         "naming_pattern": "^Scratch-\\d{4}-\\d{2}-\\d{2}-\\d{2}-\\d{2}\\.md$"
       }
@@ -193,11 +223,19 @@
     {
       "target": "scratch-day-hub",
       "fragment": {
-        "scope": { "path_glob": "spice/scratch/**/Scratch-Day-*.md" },
+        "scope": {
+          "path_glob": "spice/scratch/**/Scratch-Day-*.md"
+        },
         "extends": "_canonical-vocab",
         "required_frontmatter": {
-          "type": { "required": true, "equals": "scratch-day" },
-          "day":  { "required": true, "type": "string" }
+          "type": {
+            "required": true,
+            "equals": "scratch-day"
+          },
+          "day": {
+            "required": true,
+            "type": "string"
+          }
         },
         "naming_pattern": "^Scratch-Day-\\d{4}-\\d{2}-\\d{2}\\.md$"
       }
