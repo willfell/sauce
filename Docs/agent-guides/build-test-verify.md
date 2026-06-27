@@ -76,6 +76,14 @@ sauce migrate --from <path>   # migrate legacy source vault into Sauce shape (RE
 
 Engine + full design: `scripts/release/compute-release.js`, `scripts/release/lib/`, `platform/test/run-release-bumper.js`, and `Docs/plans/2026-06-23-v0.129.0-auto-release-pipeline-{design,plan,result}.md`. Preview a bump anytime with `npm run release:plan` (dry-run; writes nothing).
 
+### Catch a `prepare-release` wedge BEFORE you merge
+
+`prepare-release` validates `release:preflight` on the **bumped** state (after the bumper rewrites every version record). A test that pins a component version as a hardcoded literal passes normal PR CI (which runs on the *un-bumped* tree) but **fails on the bumped state**, wedging the release after merge. This bit v0.133/v0.134/v0.135 in a row.
+
+Two defenses, both live as of the pipeline-hardening cycle:
+- **Version assertions read the snapshot SSOT.** Every component-version assertion reads `VERSION_SNAPSHOT.components["<name>"]` (from `platform/test/fixtures/component-versions.snapshot.json`, which the bumper regenerates in lockstep), never a literal. If you add a new version assertion, mirror that pattern — do NOT hardcode `"x.y.z"`.
+- **`npm run release:preflight-bumped`** replicates the `prepare-release` validation locally: it runs `compute-release --write`, runs the full preflight on the bumped tree, then hard-restores the working tree. Run it on a **clean** tree before merging any PR that bumps a component (it refuses on a dirty tree). Green here ⇒ `prepare-release` won't wedge. (The `&&` preflight chain stops at the first failing harness, so this is more reliable than eyeballing; for an exhaustive scan, artificially bump every component in lockstep and run each harness independently — that's how the full sweep was verified.)
+
 ### Manual escape hatch (automation down / not yet deployed)
 
 The pipeline is **deployed + live on `main`** (`.github/workflows/release.yml`): PAT-for-PR + GitHub auto-merge. It needs the `RELEASE_PAT` repo secret (classic `repo`+`workflow`) and the repo's "Allow auto-merge" setting ON. Editing `release.yml` requires a `workflow`-scoped token (Claude's OAuth scope can't push workflow YAML — have the user supply a short-lived token or apply it themselves). If automation is down and you must cut a release by hand: run `node scripts/release/compute-release.js --write` locally (same version-record writes incl. seed-vault pins + snapshot regen), commit as `chore(release): vX.Y.Z`, then the **annotated tag `v<X.Y.Z>` REQUIRES user approval** per the ask-before-acting list. `contract_version` in `scheduled-job-contract.json` is independent (NOT a cowork mirror — landmine #20 wording is stale) and is never touched by the bumper.
