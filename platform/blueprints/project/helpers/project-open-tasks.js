@@ -21,7 +21,7 @@ class ProjectOpenTasks {
     const open = [];
     let lane = "";
     for (const line of content.split("\n")) {
-      if (line.startsWith("## ")) { lane = line.replace("## ", "").trim(); continue; }
+      if (line.startsWith("## ")) { lane = line.replace("## ", "").trim(); continue; }  // lint-display-markers:allow Kanban board lane parse, not a display marker
       const m = line.match(/^- \[ \] (.+)$/);
       if (m && lane !== "Completed") {
         open.push({ text: m[1].trim(), lane });

@@ -240,7 +240,7 @@ class ProjectsHubCards {
                 const bc = await app.vault.read(boardFile);
                 let lane = "";
                 for (const line of bc.split("\n")) {
-                    if (line.startsWith("## ")) lane = line.replace("## ", "").trim();
+                    if (line.startsWith("## ")) lane = line.replace("## ", "").trim();  // lint-display-markers:allow Kanban board lane parse, not a display marker
                     if (line.match(/^- \[[ x]\] /)) {
                         total++;
                         if (lane === "Completed") done++;
