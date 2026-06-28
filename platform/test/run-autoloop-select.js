@@ -10,6 +10,8 @@ const { isBroadScope, parseBoard, recommendedFrom, selectCard } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'select-card.js'));
 const { renderHandoff } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'render-handoff.js'));
+const { reconcileInFlight, slugFromRef } =
+  require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'reconcile-inflight.js'));
 
 let pass = 0, fail = 0; const failures = [];
 function ok(label, cond, detail) {
@@ -75,6 +77,30 @@ ok('RH-2 names the card', ho.includes('Fix breadcrumb paren'));
 ok('RH-3 marks dry-run', /dry-run/i.test(ho));
 ok('RH-4 lists In Planning section', ho.includes('### In Planning'));
 ok('RH-5 carries recommended next', ho.includes('Add render harness'));
+
+// ---- reconcileInFlight (RI-*) ----
+ok('RI-1 slugFromRef strips local prefix', slugFromRef('autoloop/fix-x') === 'fix-x');
+ok('RI-2 slugFromRef strips remote prefix', slugFromRef('origin/autoloop/fix-x') === 'fix-x');
+ok('RI-3 idle when nothing in flight', reconcileInFlight({}).status === 'idle');
+ok('RI-4 open PR → pr-open/wait',
+  (r => r.status === 'pr-open' && r.nextAction === 'wait' && r.card === 'fix-x')
+  (reconcileInFlight({ prs: [{ headRefName: 'autoloop/fix-x', state: 'OPEN', number: 5 }] })));
+ok('RI-5 bare branch → implementing/resume-or-clean',
+  (r => r.status === 'implementing' && r.nextAction === 'resume-or-clean' && r.card === 'fix-x')
+  (reconcileInFlight({ branches: ['autoloop/fix-x'] })));
+ok('RI-6 merged PR → merged/close-card',
+  (r => r.status === 'merged' && r.nextAction === 'close-card')
+  (reconcileInFlight({ prs: [{ headRefName: 'autoloop/fix-x', state: 'MERGED', number: 5 }] })));
+ok('RI-7 closed PR → failed/block-card',
+  (r => r.status === 'failed' && r.nextAction === 'block-card')
+  (reconcileInFlight({ prs: [{ headRefName: 'autoloop/fix-x', state: 'CLOSED', number: 5 }] })));
+ok('RI-8 open beats older merged (most recent by number)',
+  reconcileInFlight({ prs: [
+    { headRefName: 'autoloop/a', state: 'MERGED', number: 4 },
+    { headRefName: 'autoloop/b', state: 'OPEN', number: 5 }] }).card === 'b');
+ok('RI-9 branch whose PR merged is NOT bare (→ merged, not implementing)',
+  reconcileInFlight({ branches: ['autoloop/fix-x'],
+    prs: [{ headRefName: 'autoloop/fix-x', state: 'MERGED', number: 5 }] }).status === 'merged');
 
 console.log('');
 console.log(`Tests: ${pass}/${pass + fail}`);
