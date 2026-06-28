@@ -12,6 +12,8 @@ const { renderHandoff } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'render-handoff.js'));
 const { reconcileInFlight, slugFromRef } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'reconcile-inflight.js'));
+const { coverageGapItems, docDriftItems, landmineGuardGapItems } =
+  require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'scout-signals.js'));
 
 let pass = 0, fail = 0; const failures = [];
 function ok(label, cond, detail) {
@@ -142,6 +144,25 @@ ok('SQ-4 empty queue → no-work',
   selectFromQueue({ queueMd: '# Autoloop queue\n' }).action === 'no-work');
 ok('SQ-5 broad-scope queue item skipped → no-eligible-work',
   selectFromQueue({ queueMd: '- id: x\n  title: Audit everything redesign\n  status: proposed\n' }).action === 'no-eligible-work');
+
+// ---- scout-signals detectors (SS-*) ----
+const COV = { entries: [
+  { kind: 'blueprint', name: 'cowork', axes: { customjs_behavioral: { covered: 0, total: 9 }, install: { covered: 3, total: 3 } } },
+  { kind: 'mechanism', name: 'nav-buttons', axes: { customjs_behavioral: { covered: 2, total: 4 } } },
+] };
+const covItems = coverageGapItems(COV);
+ok('SS-1 coverage gap detected for uncovered axis', covItems.some(i => i.id === 'cov-blueprint-cowork-customjs-behavioral' && i.category === 'test'));
+ok('SS-2 fully-covered axis is NOT proposed', !covItems.some(i => i.id.includes('install')));
+const DOCS = [{ path: 'Docs/a.md', content: 'see [good](b.md) and [bad](missing.md)' }];
+const exists = (target) => target === 'b.md';
+const ddItems = docDriftItems(DOCS, exists);
+ok('SS-3 broken md link proposed', ddItems.some(i => i.category === 'doc' && i.title.includes('missing.md')));
+ok('SS-4 resolving link NOT proposed', !ddItems.some(i => i.title.includes('b.md')));
+const LM = '### 1. First trap\nbody\n### 7. Guarded trap\nbody\n';
+const hasGuard = (n) => n === '7';
+const lmItems = landmineGuardGapItems(LM, hasGuard);
+ok('SS-5 unguarded landmine proposed', lmItems.some(i => i.id === 'landmine-1-guard'));
+ok('SS-6 guarded landmine NOT proposed', !lmItems.some(i => i.id === 'landmine-7-guard'));
 
 console.log('');
 console.log(`Tests: ${pass}/${pass + fail}`);
