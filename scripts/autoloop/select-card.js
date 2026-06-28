@@ -42,6 +42,21 @@ function parseBoard(md) {
   return cols;
 }
 
+// Names of cards in the "In Planning" column that are [x]/[X]-checked (treated
+// as done, not pickable). Scoped to In Planning only.
+function parsePlanningChecked(md) {
+  const set = new Set();
+  let inPlanning = false;
+  for (const raw of String(md || '').split('\n')) {
+    const h = raw.match(/^#{1,6}\s+(.*\S)\s*$/);
+    if (h) { inPlanning = h[1].trim() === 'In Planning'; continue; }
+    if (!inPlanning) continue;
+    const m = raw.match(/^\s*-\s*\[[xX]\]\s*\[\[([^\]|]+?)(?:\|[^\]]+)?\]\]/);
+    if (m) set.add(m[1].trim());
+  }
+  return set;
+}
+
 // Extract the "Recommended next" card name from a handoff markdown, if present.
 function recommendedFrom(handoffMd) {
   if (!handoffMd) return null;
@@ -57,9 +72,6 @@ function selectCard(o) {
   const { haltExists, boardMd, handoffMd, loadBody } = o || {};
   if (haltExists) return { action: 'halt', reason: 'kill-switch sentinel present' };
   const cols = parseBoard(boardMd);
-  if (cols['In Progress'].length) {
-    return { action: 'needs-attention', reason: 'In Progress non-empty', cards: cols['In Progress'] };
-  }
   const planning = cols['In Planning'];
   if (!planning.length) return { action: 'no-work', reason: 'Planning column empty' };
   const rec = recommendedFrom(handoffMd);
@@ -67,7 +79,9 @@ function selectCard(o) {
     ? [rec, ...planning.filter((c) => c !== rec)]
     : planning.slice();
   const skipped = [];
+  const checked = parsePlanningChecked(boardMd);
   for (const card of ordered) {
+    if (checked.has(card)) { skipped.push({ card, reason: 'checked (done) in Planning' }); continue; }
     const body = loadBody ? (loadBody(card) || '') : '';
     const scope = isBroadScope(`${card}\n${body}`);
     if (scope.broad) { skipped.push({ card, reason: scope.reason }); continue; }
@@ -76,7 +90,7 @@ function selectCard(o) {
       reason: rec === card ? 'recommended + in-scope' : 'first in-scope Planning card',
     };
   }
-  return { action: 'no-eligible-work', reason: 'all Planning cards are broad-scope', skipped };
+  return { action: 'no-eligible-work', reason: 'all Planning cards skipped (broad-scope or checked)', skipped };
 }
 
 function parseArgs(argv) {
@@ -108,7 +122,7 @@ function cliLoadBody(cardsRoot) {
   };
 }
 
-module.exports = { selectCard, isBroadScope, parseBoard, recommendedFrom };
+module.exports = { selectCard, isBroadScope, parseBoard, recommendedFrom, parsePlanningChecked };
 
 if (require.main === module) {
   const args = parseArgs(process.argv.slice(2));

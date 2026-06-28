@@ -25,13 +25,28 @@ accepted explicitly but is the default. During the assessment window, stay in dr
 
 ---
 
-## Phase A — Orient + gate (autonomous)
+## Phase A — Orient + reconcile (autonomous)
 
-1. **Halt check.** If `~/projects/repos/sauce/.autoloop-halt` exists, print "autoloop halted by sentinel" and **exit** (no handoff, no further work).
-2. Run `npm run status` (workshop survey) and confirm a clean tree on `main` (or resume branch). If the working tree has uncommitted changes, or a lingering `autoloop/*` branch this turn did not create, print the state and **exit** (do not stomp).
-3. Find the latest handoff: `ls -t ~/projects/repos/sauce/Docs/prompts/*sauce-autoloop*-handoff.md 2>/dev/null | head -1`. Read it if present.
+1. **Halt check.** If `~/projects/repos/sauce/.autoloop-halt` exists, print "autoloop halted by sentinel" and **exit** (no handoff).
+2. Run `npm run status`; confirm a clean tree on `main` (or a resume branch). If the working tree has uncommitted changes you didn't create, print the state and **exit** (do not stomp).
+3. **Reconcile in-flight state from git/PR (the source of truth — level-triggered, idempotent):**
+   ```bash
+   node scripts/autoloop/reconcile-inflight.js
+   ```
+   Branch on `status`:
+   - `unknown` → print "could not determine in-flight state (gh/git failed)" and **exit** (fail-safe — never assume idle; next fire retries).
+   - `pr-open` → write a handoff ("card `<card>` — PR #`<number>` open, auto-merge pending"), **exit**.
+   - `implementing` → **live:** resume the `autoloop/<card>` branch if recoverable, else discard it cleanly (`git checkout main && git branch -D autoloop/<card>` + delete the remote) and move the card back to Planning; write a handoff; **exit**. **dry-run:** note it in a handoff and **exit** (no writes).
+   - `merged` → **live:** close the card on the board (projection — move to Completed, set `completed_in_version`); write a handoff; **exit**. **dry-run:** note + **exit**.
+   - `failed` → **live:** move the card to Blocked (projection) with the PR number; write a handoff; **exit**. **dry-run:** note + **exit**.
+   - `idle` → continue to Phase B.
+
+   (One reconcile action per turn — closing/blocking/waiting IS the turn's work; the next turn, now `idle`, picks fresh. The board is a *projection*: if a marker ever disagrees with git/PR, git/PR wins.)
+4. Read the latest handoff (`ls -t ~/projects/repos/sauce/Docs/prompts/*sauce-autoloop*-handoff.md 2>/dev/null | head -1`) for the `Recommended next` card.
 
 ## Phase B — Select (deterministic, NO AskUserQuestion)
+
+Reached only when Phase A's reconcile returned `idle`. `selectCard` ignores the board's "In Progress" (your parked workstreams) and skips `[x]`-checked Planning cards — it picks only fresh, unchecked Planning work.
 
 1. Call the selector:
    ```bash
@@ -41,8 +56,8 @@ accepted explicitly but is the default. During the assessment window, stay in dr
      --cards-root ~/notes/sauce/headspace-sauce/spice/projects/sauce/tasks \
      --json
    ```
-2. Branch on `action` (note: `halt` is already terminal in Phase A and never reaches here):
-   - `no-work` / `no-eligible-work` / `needs-attention` → write a handoff via `render-handoff.js` (Phase E), print one line, **exit cheaply** (no model-heavy work). For `needs-attention`, the handoff names the stuck In-Progress card(s) for the human. **(Deferred — Increment 2:** on `no-work`, the Scout will self-discover work instead of exiting; for Increment 1, exit.)
+2. Branch on `action` (`selectCard` returns only `no-work` / `no-eligible-work` / `work` — `halt` is owned by Phase A; in-flight is owned by Phase A's reconcile):
+   - `no-work` / `no-eligible-work` → write a handoff via `render-handoff.js` (Phase E), print one line, **exit cheaply** (no model-heavy work). **(Deferred — Increment 2b:** on `no-work`, the Scout will self-discover work instead of exiting.)
    - `work` → proceed with `result.card`.
 
 ## Phase C — Implement (only if `--live`; in dry-run, PROPOSE only)
@@ -67,7 +82,7 @@ accepted explicitly but is the default. During the assessment window, stay in dr
 
 ## Deferred (NOT in Increment 1 — labeled so the gaps are visible, not silent)
 
-- **Scout / self-discovery (Increment 2):** when Phase B yields `no-work`, a Scout agent will generate fresh work (bug hunt, coverage gaps, doc drift, tech-debt) instead of exiting. Increment 1 exits.
+- **Scout / self-discovery (Increment 2b):** when Phase B yields `no-work`, a Scout agent will generate fresh work (bug hunt, coverage gaps, doc drift, tech-debt) instead of exiting. (Increment 2a wired the git/PR reconciliation in Phase A; the In-Progress + `[x]`-checked findings are resolved.)
 - **Gate B — separate adversarial verifier (Increment 3):** an independent-context agent that tries to refute each change and enforces "no behavioral change without a harness". Increment 1 relies on Gate A (`release:preflight` + dogfood install) + the PR's CI only.
 - **Canary deploy + synchronous close (Increment 4):** auto-`sauce update` to the ERO vault + verify, then a promotion surface for accuris/headspace. Increment 1 stops at the merged PR.
 - **Substrate hardening (Increment 5):** the launchd scheduler, `caffeinate`, fail-closed auth check, structured logging, daily-turn budget, kill-switch UX. Increment 1 ships only a minimal dry-run plist sample.
