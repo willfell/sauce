@@ -67,13 +67,18 @@ if (require.main === module) {
   const branches = [...clean(sh('git', ['branch', '--list', 'autoloop/*'])),
                     ...clean(sh('git', ['branch', '-r', '--list', 'origin/autoloop/*']))];
   // gh is authoritative for PR state. If it fails, do NOT assume idle — fail safe to halt.
-  const prJson = sh('gh', ['pr', 'list', '--state', 'all', '--limit', '30', '--json', 'headRefName,state,number']);
+  const prJson = sh('gh', ['pr', 'list', '--state', 'all', '--limit', '200', '--json', 'headRefName,state,number']);
   if (prJson === null) {
     console.log(JSON.stringify({ status: 'unknown', card: null, nextAction: 'halt', reason: 'gh query failed — not assuming idle' }));
     process.exit(0);
   }
-  let prs = [];
-  try { prs = JSON.parse(prJson); } catch (_) { prs = []; }
+  let prs;
+  try { prs = JSON.parse(prJson); }
+  catch (_) {
+    // Exit-0 but unparseable output (OOM-truncated, wrapper noise) — do NOT assume idle.
+    console.log(JSON.stringify({ status: 'unknown', card: null, nextAction: 'halt', reason: 'gh output not valid JSON — not assuming idle' }));
+    process.exit(0);
+  }
   console.log(JSON.stringify(reconcileInFlight({ branches, prs }), null, 2));
   process.exit(0);
 }

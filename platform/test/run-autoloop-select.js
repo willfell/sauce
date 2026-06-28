@@ -75,6 +75,9 @@ ok('PC-3 checked card in In Progress is NOT Planning-checked',
 const checkedBoard = '## In Planning\n- [x] [[Done card]]\n- [ ] [[Fix breadcrumb paren]]\n## In Progress\n';
 ok('SC-8 skips [x]-checked Planning card, picks next',
   selectCard({ boardMd: checkedBoard, loadBody }).card === 'Fix breadcrumb paren');
+const allChecked = '## In Planning\n- [x] [[Done one]]\n- [x] [[Done two]]\n## In Progress\n';
+ok('SC-9 all-checked Planning → no-eligible-work',
+  selectCard({ boardMd: allChecked, loadBody }).action === 'no-eligible-work');
 
 // ---- renderHandoff (RH-*) ----
 const ho = renderHandoff({

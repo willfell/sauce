@@ -90,7 +90,7 @@ function selectCard(o) {
       reason: rec === card ? 'recommended + in-scope' : 'first in-scope Planning card',
     };
   }
-  return { action: 'no-eligible-work', reason: 'all Planning cards are broad-scope', skipped };
+  return { action: 'no-eligible-work', reason: 'all Planning cards skipped (broad-scope or checked)', skipped };
 }
 
 function parseArgs(argv) {
