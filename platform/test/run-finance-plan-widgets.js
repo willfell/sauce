@@ -265,6 +265,18 @@ const ALL = [PLAN, ...DEBTS, SAV, BUDGET, PAYCHECK];
         ok("HC-V0627-WIDGET-PAYOFF-4 Debts hub shows the SAME zero-debt date as the hero",
             treeText(dhsDv.container).includes(expected), `expected ${expected}`);
 
+        // ===== HC-V0627-WIDGET-DEBTSUM-* — per-debt payoff comes from the killOrder =====
+        const DSUM = loadClass("debt-summary.js", "DebtSummary", env);
+        const applePage = DEBTS.find(d => d.file.name === "Debt-Apple-Card");
+        const ko = fm.projectedPayoff(makeDv(ALL, null), NM).killOrder.find(k => k.slug === "Debt-Apple-Card");
+        ok("HC-V0627-WIDGET-DEBTSUM-0 killOrder has Apple (sanity)", !!ko && /^\d{4}-\d{2}-\d{2}$/.test(ko.date), JSON.stringify(ko));
+        const dsumDv = makeDv([...ALL], applePage);
+        let dsumErr = null;
+        try { await new DSUM().render(dsumDv); } catch (e) { dsumErr = e; }
+        ok("HC-V0627-WIDGET-DEBTSUM-1 DebtSummary renders without throwing", dsumErr === null, dsumErr && dsumErr.message);
+        ok("HC-V0627-WIDGET-DEBTSUM-2 per-debt payoff shows the killOrder date",
+            treeText(dsumDv.container).includes(ko.date), `expected ${ko && ko.date}`);
+
         console.log(`\nrun-finance-plan-widgets.js: ${pass} passed, ${fail} failed`);
         process.exit(fail === 0 ? 0 : 1);
     }
