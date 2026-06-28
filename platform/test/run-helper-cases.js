@@ -13560,8 +13560,8 @@ async function caseV01150FinanceHubSummaryPresent() {
     /fhs-root/.test(src));
   assertTrue("V01150-FHS-PRESENT-6: references FinanceMath",
     /FinanceMath/.test(src));
-  assertTrue("V01150-FHS-PRESENT-7: references FinanceMath.debtTotals literal",
-    /FinanceMath\.debtTotals/.test(src));
+  assertTrue("V01150-FHS-PRESENT-7: references FinanceMath.projectedPayoff literal",
+    /FinanceMath\.projectedPayoff/.test(src));
   assertTrue("V01150-FHS-PRESENT-8: references path guard spice/finance/Finance.md",
     /spice\/finance\/Finance\.md/.test(src));
   const lines = src.split(/\r?\n/);

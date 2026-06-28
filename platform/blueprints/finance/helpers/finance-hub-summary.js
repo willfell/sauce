@@ -69,7 +69,9 @@ class FinanceHubSummary {
             return;
         }
 
-        const totals = customJS.FinanceMath.debtTotals(debts);
+        const now = new Date();
+        const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+        const totals = customJS.FinanceMath.projectedPayoff(dv, monthKey);
 
         // Top row: TOTAL DEBT (large) + ZERO-DEBT DATE (right-aligned).
         const topRow = hero.createEl("div");

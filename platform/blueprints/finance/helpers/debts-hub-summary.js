@@ -31,25 +31,15 @@ class DebtsHubSummary {
             return;
         }
 
-        // ----- Compute totals -----
-        const totalBal = debts.reduce((s, d) => s + (Number(d.current_balance) || 0), 0);
-        const totalInterest = debts.reduce((s, d) =>
-            s + ((Number(d.current_balance) || 0) * (Number(d.apr) || 0) / 100 / 12), 0);
-        const totalPlanned = debts.reduce((s, d) => s + (Number(d.planned_monthly_payment) || 0), 0);
-
-        // Weighted-avg APR = Σ(balance * apr) / Σ(balance)
-        const weightedAprNumer = debts.reduce((s, d) =>
-            s + (Number(d.current_balance) || 0) * (Number(d.apr) || 0), 0);
-        const wAvgApr = totalBal > 0 ? weightedAprNumer / totalBal : 0;
-
-        let zeroDate = "—";
-        const principalAttack = totalPlanned - totalInterest;
-        if (principalAttack > 0 && totalBal > 0) {
-            const months = Math.ceil(totalBal / principalAttack);
-            const d = new Date();
-            d.setMonth(d.getMonth() + months);
-            zeroDate = d.toISOString().slice(0, 10);
-        }
+        // ----- Compute totals (canonical payoff source so this hub == the Finance hub) -----
+        const _now = new Date();
+        const _monthKey = `${_now.getFullYear()}-${String(_now.getMonth() + 1).padStart(2, "0")}`;
+        const pp = customJS.FinanceMath.projectedPayoff(dv, _monthKey);
+        const totalBal = pp.totalBalance;
+        const totalInterest = pp.monthlyInterest;
+        const totalPlanned = pp.plannedAttack;
+        const wAvgApr = pp.weightedApr;
+        const zeroDate = pp.zeroDebtDate;
 
         // ----- Band 1 — Totals -----
         const b1 = root.createEl("div", { cls: "dhs-band-1" });

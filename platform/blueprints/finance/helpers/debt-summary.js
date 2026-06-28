@@ -12,7 +12,8 @@
  *
  * Math:
  *   monthlyInterest = balance * apr / 100 / 12
- *   payoffMonths = Math.ceil(balance / (planned - monthlyInterest))
+ *   payoff: per-debt date from FinanceMath.projectedPayoff().killOrder (avalanche roll),
+ *           with isolation Math.ceil(balance / (planned - monthlyInterest)) as fallback.
  *
  * CSS root: dbt-sum-root. Embed-deduped. Never writes. Pure derivation.
  */
@@ -55,7 +56,24 @@ class DebtSummary {
         mk("MONTHLY INTEREST", `$${monthlyInterest.toFixed(2)}`);
         mk("PLANNED ATTACK", `$${planned.toFixed(2)}`);
 
-        if (principalAttack <= 0) {
+        // Per-debt payoff comes from the canonical avalanche kill order (accounts for the roll
+        // of freed minimums), not this card in isolation. Fall back to the isolation estimate
+        // only when this debt isn't in the kill order (e.g. no plan + below-interest).
+        const _now = new Date();
+        const _monthKey = `${_now.getFullYear()}-${String(_now.getMonth() + 1).padStart(2, "0")}`;
+        let _ko = null;
+        try {
+            const _pp = customJS.FinanceMath.projectedPayoff(dv, _monthKey);
+            _ko = (_pp && Array.isArray(_pp.killOrder))
+                ? _pp.killOrder.find(k => k.slug === (page.file && page.file.name)) : null;
+        } catch (_e) { _ko = null; }
+        if (_ko && _ko.date) {
+            const eta = new Date(_ko.date + "T00:00:00Z");
+            const today = new Date();
+            const months = Math.max(0,
+                (eta.getUTCFullYear() - today.getFullYear()) * 12 + (eta.getUTCMonth() - today.getMonth()));
+            mk("PROJECTED PAYOFF", `${months}mo (${_ko.date})`);
+        } else if (principalAttack <= 0) {
             const warnEl = b1.createEl("div");
             warnEl.textContent = "Increase planned monthly attack — below interest";
             warnEl.style.cssText = "flex: 1 0 100%; font-size: 0.85em; color: #dc2626; margin-top: 4px;";
