@@ -57,13 +57,18 @@ Reached only when Phase A's reconcile returned `idle`. `selectCard` ignores the 
      --json
    ```
 2. Branch on `action` (`selectCard` returns only `no-work` / `no-eligible-work` / `work` — `halt` is owned by Phase A; in-flight is owned by Phase A's reconcile):
-   - `no-work` / `no-eligible-work` → write a handoff via `render-handoff.js` (Phase E), print one line, **exit cheaply** (no model-heavy work). **(Deferred — Increment 2b:** on `no-work`, the Scout will self-discover work instead of exiting.)
+   - `no-work` / `no-eligible-work` → **consult the Scout queue before idling:**
+     1. Read the queue: `node -e "const{selectFromQueue}=require('./scripts/autoloop/select-card.js');const fs=require('fs');console.log(JSON.stringify(selectFromQueue({queueMd:fs.readFileSync('autoloop-queue.md','utf8')})))"`.
+     2. If it returns `work` → that queue item (`card` = its id, `fromQueue: true`, `category` = `doc`/`test` — safe) is the turn's work; proceed to Phase C.
+     3. If `no-work` (queue empty) → run the deterministic Scout: `node scripts/autoloop/scout-signals.js` (appends safe items), then re-read the queue (step 1). If now `work` → proceed.
+     4. If still `no-work` after the Scout (no new signals) → write a handoff and **exit cheaply**. **(Deferred — Increment 2c:** a bounded model bug-hunt pass runs here before giving up.)
    - `work` → proceed with `result.card`.
 
 ## Phase C — Implement (only if `--live`; in dry-run, PROPOSE only)
 
 - **Dry-run:** emit a single short paragraph — "Intended approach for `<card>`" (≤120 words) derived from the card body — into the handoff's Notes. Do NOT edit any workshop file. Skip to Phase E.
 - **Live:**
+  - **Queue items (`fromQueue: true`)** have no board card — skip step 1's board edits; the branch is `autoloop/<id>`; implement the item's `title` (a `doc` fix or a new `test`/harness only — never a behavioral change); mark the item `status: done` in `autoloop-queue.md` as part of the change.
   1. Move the card to In Progress on the three surfaces (board, workstream sub-board, card frontmatter) — same edits as `/sauce-pipeline` Phase B step 7.
   2. `git checkout -b autoloop/<card-slug>`.
   3. Implement the card with conventional commits. **Hard rule:** any behavioral change to a mechanism/blueprint MUST ship a new/strengthened `platform/test/run-*.js` harness (scaffold via `npm run scaffold-harness`). (Gate B — the separate verifier — arrives in Increment 3; until then this rule is self-enforced + reviewed on the PR.)
