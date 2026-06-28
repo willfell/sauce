@@ -96,6 +96,46 @@ class FinanceMath {
         const zeroDebtDate = this.simulateAvalanche(debts, Math.max(0, plannedAttack - _minsSum)).zeroDebtDate;
         return { totalBalance, monthlyInterest, plannedAttack, weightedApr, zeroDebtDate };
     }
+    // One canonical payoff source so every widget agrees. Precedence:
+    //   plan-aware (computePlanState honors floor + attack + freed savings + override)
+    //   → entity-planned (debtTotals + sim over each debt's planned_monthly_payment)
+    //   → none (no debts with a balance).
+    // Returns the money figures + canonical { zeroDebtDate, months, killOrder, source }.
+    // killOrder[].slug === the Debt note's file.name (e.g. "Debt-Apple-Card").
+    projectedPayoff(dv, monthKey) {
+        const debts = this.readDebts(dv);
+        const totals = this.debtTotals(debts);
+        const base = {
+            totalBalance: totals.totalBalance,
+            monthlyInterest: totals.monthlyInterest,
+            plannedAttack: totals.plannedAttack,
+            weightedApr: totals.weightedApr,
+        };
+        const active = debts.filter(d => (Number(d.current_balance) || 0) > 0);
+        if (active.length === 0) {
+            return Object.assign(base, { zeroDebtDate: "—", months: Infinity, killOrder: [], source: "none" });
+        }
+        // Plan branch — prefer the plan-aware payoff when a finite plan payoff exists.
+        let ps = null;
+        try { ps = this.computePlanState(dv, monthKey); } catch (_e) { ps = null; }
+        if (ps && ps.ok && ps.payoff && isFinite(ps.payoff.months)) {
+            return Object.assign(base, {
+                zeroDebtDate: ps.payoff.zeroDebtDate,
+                months: ps.payoff.months,
+                killOrder: ps.payoff.killOrder || [],
+                source: "plan",
+            });
+        }
+        // Entity branch — same inputs debtTotals uses: planned attack minus active minimums.
+        const minsSum = active.reduce((s, d) => s + (Number(d.min_payment) || 0), 0);
+        const sim = this.simulateAvalanche(debts, Math.max(0, totals.plannedAttack - minsSum));
+        return Object.assign(base, {
+            zeroDebtDate: sim.zeroDebtDate,
+            months: sim.months,
+            killOrder: sim.killOrder || [],
+            source: "entities",
+        });
+    }
     monthIncome(paychecks) {
         return paychecks.reduce((s, p) => s + (typeof p.paycheck_amount === "number" ? p.paycheck_amount : 0), 0);
     }

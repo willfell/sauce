@@ -248,5 +248,37 @@ function tierCase(balance) {
         `got ${debtBtn && debtBtn.frontmatter_template && JSON.stringify(debtBtn.frontmatter_template.credit_limit)}`);
 }
 
+// ===== HC-V0627-PAYOFF-* — projectedPayoff: one canonical source (Fix 2a) =====
+{
+    // Plan present + finite payoff → source "plan", equals computePlanState.payoff.
+    const dvPlan = makeDv({
+        plan: {}, debts: HEADSPACE_DEBTS, savings: [savingsAcct(639.94, 5000)],
+        budgets: [budget("2026-07", 2949)], paychecks: [paycheck("2026-07-01", 9000)],
+    });
+    const ps = fm.computePlanState(dvPlan, "2026-07");
+    const ppPlan = fm.projectedPayoff(dvPlan, "2026-07");
+    ok("HC-V0627-PAYOFF-1 plan branch → source plan", ppPlan.source === "plan", `got ${ppPlan.source}`);
+    ok("HC-V0627-PAYOFF-2 plan branch zeroDebtDate == computePlanState",
+        ppPlan.zeroDebtDate === ps.payoff.zeroDebtDate, `${ppPlan.zeroDebtDate} vs ${ps.payoff.zeroDebtDate}`);
+    ok("HC-V0627-PAYOFF-3 killOrder slug matches a debt file.name",
+        Array.isArray(ppPlan.killOrder) && ppPlan.killOrder.length > 0 &&
+        ppPlan.killOrder.every(k => /^Debt-/.test(k.slug)));
+    ok("HC-V0627-PAYOFF-4 carries money figures", ppPlan.totalBalance > 0 && ppPlan.weightedApr > 0);
+
+    // No plan → source "entities", equals debtTotals.
+    const dvNoPlan = makeDv({ plan: null, debts: HEADSPACE_DEBTS });
+    const dt = fm.debtTotals(HEADSPACE_DEBTS);
+    const ppEnt = fm.projectedPayoff(dvNoPlan, "2026-07");
+    ok("HC-V0627-PAYOFF-5 no-plan → source entities", ppEnt.source === "entities", `got ${ppEnt.source}`);
+    ok("HC-V0627-PAYOFF-6 entity branch zeroDebtDate == debtTotals",
+        ppEnt.zeroDebtDate === dt.zeroDebtDate, `${ppEnt.zeroDebtDate} vs ${dt.zeroDebtDate}`);
+
+    // No debts → source "none".
+    const dvNoDebts = makeDv({ plan: null, debts: [] });
+    const ppNone = fm.projectedPayoff(dvNoDebts, "2026-07");
+    ok("HC-V0627-PAYOFF-7 no-debts → source none + dash",
+        ppNone.source === "none" && ppNone.zeroDebtDate === "—", `${ppNone.source}/${ppNone.zeroDebtDate}`);
+}
+
 console.log(`\nrun-finance-plan-state.js: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
