@@ -6,7 +6,7 @@
  */
 'use strict';
 const path = require('path');
-const { isBroadScope, parseBoard, recommendedFrom, selectCard, parsePlanningChecked } =
+const { isBroadScope, parseBoard, recommendedFrom, selectCard, parsePlanningChecked, parseQueue, selectFromQueue } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'select-card.js'));
 const { renderHandoff } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'render-handoff.js'));
@@ -115,6 +115,33 @@ ok('RI-8 open beats older merged (most recent by number)',
 ok('RI-9 branch whose PR merged is NOT bare (→ merged, not implementing)',
   reconcileInFlight({ branches: ['autoloop/fix-x'],
     prs: [{ headRefName: 'autoloop/fix-x', state: 'MERGED', number: 5 }] }).status === 'merged');
+
+// ---- parseQueue + selectFromQueue (Q-*, SQ-*) ----
+const QUEUE = [
+  '# Autoloop queue', '',
+  '- id: cov-blueprint-cowork-customjs_behavioral',
+  '  title: Add coverage for cowork customjs_behavioral (0/9)',
+  '  category: test', '  source: coverage-matrix', '  rationale: 9 uncovered', '  status: proposed', '',
+  '- id: doc-drift-readme-foo',
+  '  title: Fix broken link "foo.md" in README.md',
+  '  category: doc', '  source: doc-drift', '  rationale: link does not resolve', '  status: done', '',
+].join('\n');
+const q = parseQueue(QUEUE);
+ok('Q-1 parses two items', q.length === 2, JSON.stringify(q.map(i => i.id)));
+ok('Q-2 captures fields', q[0].id === 'cov-blueprint-cowork-customjs_behavioral' && q[0].category === 'test' && q[0].status === 'proposed');
+ok('Q-3 captures status done', q[1].status === 'done');
+ok('Q-4 empty/garbage → []', parseQueue('# Autoloop queue\n\nnothing here').length === 0);
+ok('SQ-1 picks the open proposed item',
+  (r => r.action === 'work' && r.card === 'cov-blueprint-cowork-customjs_behavioral' && r.fromQueue === true)
+  (selectFromQueue({ queueMd: QUEUE })));
+ok('SQ-2 skips done items',
+  selectFromQueue({ queueMd: QUEUE, shippedIds: [] }).card !== 'doc-drift-readme-foo');
+ok('SQ-3 dedup via shippedIds → no-work',
+  selectFromQueue({ queueMd: QUEUE, shippedIds: ['cov-blueprint-cowork-customjs_behavioral'] }).action === 'no-work');
+ok('SQ-4 empty queue → no-work',
+  selectFromQueue({ queueMd: '# Autoloop queue\n' }).action === 'no-work');
+ok('SQ-5 broad-scope queue item skipped → no-eligible-work',
+  selectFromQueue({ queueMd: '- id: x\n  title: Audit everything redesign\n  status: proposed\n' }).action === 'no-eligible-work');
 
 console.log('');
 console.log(`Tests: ${pass}/${pass + fail}`);

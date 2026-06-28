@@ -57,6 +57,39 @@ function parsePlanningChecked(md) {
   return set;
 }
 
+// Parse autoloop-queue.md into items. Each item starts at a `- id:` line; its
+// indented `key: value` lines become fields. Items without an id are dropped.
+function parseQueue(md) {
+  const items = [];
+  let cur = null;
+  for (const raw of String(md || '').split('\n')) {
+    const idm = raw.match(/^\s*-\s+id:\s*(\S.*?)\s*$/);
+    if (idm) { if (cur && cur.id) items.push(cur); cur = { id: idm[1].trim() }; continue; }
+    if (!cur) continue;
+    const kv = raw.match(/^\s+([a-zA-Z_]+):\s*(.*?)\s*$/);
+    if (kv) { cur[kv[1]] = kv[2].trim(); continue; }
+    if (raw.trim() === '') { if (cur && cur.id) items.push(cur); cur = null; }
+  }
+  if (cur && cur.id) items.push(cur);
+  return items;
+}
+
+// Pick the top open, in-scope, not-yet-shipped queue item.
+function selectFromQueue(o) {
+  const { queueMd, shippedIds = [] } = o || {};
+  const shipped = new Set(shippedIds);
+  const open = parseQueue(queueMd).filter((it) => (it.status || 'proposed') === 'proposed' && !shipped.has(it.id));
+  const skipped = [];
+  for (const it of open) {
+    const scope = isBroadScope(`${it.title || ''}\n${it.rationale || ''}`);
+    if (scope.broad) { skipped.push({ id: it.id, reason: scope.reason }); continue; }
+    return { action: 'work', card: it.id, title: it.title, category: it.category, fromQueue: true, skipped, reason: 'top eligible queue item' };
+  }
+  return open.length
+    ? { action: 'no-eligible-work', reason: 'all open queue items are broad-scope', skipped }
+    : { action: 'no-work', reason: 'queue has no eligible items' };
+}
+
 // Extract the "Recommended next" card name from a handoff markdown, if present.
 function recommendedFrom(handoffMd) {
   if (!handoffMd) return null;
@@ -122,7 +155,7 @@ function cliLoadBody(cardsRoot) {
   };
 }
 
-module.exports = { selectCard, isBroadScope, parseBoard, recommendedFrom, parsePlanningChecked };
+module.exports = { selectCard, isBroadScope, parseBoard, recommendedFrom, parsePlanningChecked, parseQueue, selectFromQueue };
 
 if (require.main === module) {
   const args = parseArgs(process.argv.slice(2));
