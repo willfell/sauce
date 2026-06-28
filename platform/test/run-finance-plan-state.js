@@ -236,5 +236,17 @@ function tierCase(balance) {
     ok("HC-V0128-FRESH-6 live label carries date", /2026-07-18/.test(fm.actualsFreshness(govBudgetLive, "2026-07", "2026-07", NOW).label));
 }
 
+// ===== HC-V0627-SCAFFOLD-* — new-debt scaffold carries credit_limit (Fix 1) =====
+{
+    const manifest = JSON.parse(fs.readFileSync(
+        path.join(__dirname, "../blueprints/finance/manifest.json"), "utf8"));
+    const debtBtn = (manifest.new_entity_buttons || []).find(e => e && e.id === "debt");
+    ok("HC-V0627-SCAFFOLD-1 debt new_entity_button exists",
+        !!debtBtn, `ids=${(manifest.new_entity_buttons || []).map(e => e && e.id).join(",")}`);
+    ok("HC-V0627-SCAFFOLD-2 debt scaffold includes credit_limit:0",
+        !!debtBtn && debtBtn.frontmatter_template && debtBtn.frontmatter_template.credit_limit === 0,
+        `got ${debtBtn && debtBtn.frontmatter_template && JSON.stringify(debtBtn.frontmatter_template.credit_limit)}`);
+}
+
 console.log(`\nrun-finance-plan-state.js: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

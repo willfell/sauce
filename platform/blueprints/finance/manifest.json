@@ -587,6 +587,7 @@
         "current_balance": 0,
         "apr": 0,
         "min_payment": 0,
+        "credit_limit": 0,
         "planned_monthly_payment": 0,
         "balance_history": [],
         "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
