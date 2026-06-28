@@ -61,7 +61,7 @@ Reached only when Phase A's reconcile returned `idle`. `selectCard` ignores the 
      1. Read the queue: `node -e "const{selectFromQueue}=require('./scripts/autoloop/select-card.js');const fs=require('fs');console.log(JSON.stringify(selectFromQueue({queueMd:fs.readFileSync('autoloop-queue.md','utf8')})))"`.
      2. If it returns `work` → that queue item (`card` = its id, `fromQueue: true`, `category` = `doc`/`test` — safe) is the turn's work; proceed to Phase C.
      3. If `no-work` (queue empty) → run the deterministic Scout: `node scripts/autoloop/scout-signals.js` (appends safe items), then re-read the queue (step 1). If now `work` → proceed.
-     4. If still `no-work` after the Scout (no new signals) → write a handoff and **exit cheaply**. **(Deferred — Increment 2c:** a bounded model bug-hunt pass runs here before giving up.)
+     4. If the queue returns `no-eligible-work` (items present but all broad-scope — the Scout won't unblock those), or still `no-work` after the Scout (no new signals) → write a handoff and **exit cheaply**. **(Deferred — Increment 2c:** a bounded model bug-hunt pass runs here before giving up.)
    - `work` → proceed with `result.card`.
 
 ## Phase C — Implement (only if `--live`; in dry-run, PROPOSE only)

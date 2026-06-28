@@ -39,7 +39,7 @@ function docDriftItems(docFiles, exists) {
       if (!target || /^https?:\/\//.test(target)) continue;
       if (!exists(target, f.path)) {
         items.push({
-          id: slug(`doc-drift-${f.path}-${target}`),
+          id: slug(`dd-${target}-${String(f.path).split('/').pop()}`),
           title: `Fix broken link "${target}" in ${f.path}`,
           category: 'doc', source: 'doc-drift',
           rationale: `${f.path} links to ${target} which does not resolve`,
@@ -112,14 +112,21 @@ if (require.main === module) {
   const testDir = path.join(ROOT, 'platform/test');
   let testBlob = '';
   try { for (const f of fs.readdirSync(testDir)) if (/^run-.*\.js$/.test(f)) testBlob += '\n' + f + '\n' + read(path.join(testDir, f)); } catch (_) {}
-  const hasGuard = (n) => new RegExp(`landmine[^0-9]{0,4}${n}\\b|#${n}\\b`, 'i').test(testBlob);
+  const hasGuard = (n) => new RegExp(`landmine[^0-9]{0,4}${n}\\b`, 'i').test(testBlob);
   const lm = landmineGuardGapItems(read(path.join(ROOT, 'Docs/landmines.md')), hasGuard);
 
   const { parseQueue } = require('./select-card.js');
   const queuePath = path.join(ROOT, 'autoloop-queue.md');
   const queueMd = read(queuePath);
   const have = new Set(parseQueue(queueMd).map((i) => i.id));
-  const fresh = [...cov, ...dd, ...lm].filter((it) => !have.has(it.id)).slice(0, MAX_NEW);
+  // Dedup against the existing queue AND within this batch (ids can collide).
+  const seen = new Set();
+  const fresh = [];
+  for (const it of [...cov, ...dd, ...lm]) {
+    if (have.has(it.id) || seen.has(it.id)) continue;
+    seen.add(it.id); fresh.push(it);
+    if (fresh.length >= MAX_NEW) break;
+  }
 
   if (!fresh.length) { console.log(JSON.stringify({ added: 0, reason: 'no new signals' })); process.exit(0); }
   fs.writeFileSync(queuePath, queueMd.replace(/\s*$/, '') + '\n\n' + toQueueBlocks(fresh), 'utf8');
