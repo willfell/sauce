@@ -241,6 +241,30 @@ const ALL = [PLAN, ...DEBTS, SAV, BUDGET, PAYCHECK];
         ok("HC-V0128-WIDGET-FRESH-3 FinanceHubSummary renders without throwing", fhsErr === null, fhsErr && fhsErr.message);
         ok("HC-V0128-WIDGET-FRESH-4 FinanceHubSummary Budget tile shows live badge", /live ·/.test(treeText(fhsDv.container)), fhsErr && fhsErr.message);
 
+        // ===== HC-V0627-WIDGET-PAYOFF-* — hub hero + Debts hub agree, via projectedPayoff =====
+        const HERO_FHS = loadClass("finance-hub-summary.js", "FinanceHubSummary", env);
+        const DHS = loadClass("debts-hub-summary.js", "DebtsHubSummary", env);
+        const _now = new Date();
+        const NM = `${_now.getFullYear()}-${String(_now.getMonth() + 1).padStart(2, "0")}`;
+        const expected = fm.projectedPayoff(makeDv(ALL, null), NM).zeroDebtDate;
+        ok("HC-V0627-WIDGET-PAYOFF-0 expected date is iso (sanity)", /^\d{4}-\d{2}-\d{2}$/.test(expected), expected);
+
+        const heroPage = { type: "finance-hub", file: { path: "spice/finance/Finance.md", name: "Finance" } };
+        const heroDv = makeDv([...ALL, heroPage], heroPage);
+        let heroErr = null;
+        try { await new HERO_FHS().render(heroDv); } catch (e) { heroErr = e; }
+        ok("HC-V0627-WIDGET-PAYOFF-1 hero renders without throwing", heroErr === null, heroErr && heroErr.message);
+        ok("HC-V0627-WIDGET-PAYOFF-2 hero shows the canonical zero-debt date",
+            treeText(heroDv.container).includes(expected), `expected ${expected}`);
+
+        const debtsHubPage = { type: "debt-hub", file: { path: "spice/finance/debts/Debts.md", name: "Debts" } };
+        const dhsDv = makeDv([...ALL, debtsHubPage], debtsHubPage);
+        let dhsErr = null;
+        try { await new DHS().render(dhsDv); } catch (e) { dhsErr = e; }
+        ok("HC-V0627-WIDGET-PAYOFF-3 Debts hub renders without throwing", dhsErr === null, dhsErr && dhsErr.message);
+        ok("HC-V0627-WIDGET-PAYOFF-4 Debts hub shows the SAME zero-debt date as the hero",
+            treeText(dhsDv.container).includes(expected), `expected ${expected}`);
+
         console.log(`\nrun-finance-plan-widgets.js: ${pass} passed, ${fail} failed`);
         process.exit(fail === 0 ? 0 : 1);
     }
