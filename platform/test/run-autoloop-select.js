@@ -6,7 +6,7 @@
  */
 'use strict';
 const path = require('path');
-const { isBroadScope, parseBoard, recommendedFrom, selectCard } =
+const { isBroadScope, parseBoard, recommendedFrom, selectCard, parsePlanningChecked } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'select-card.js'));
 const { renderHandoff } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'render-handoff.js'));
@@ -51,8 +51,8 @@ const bodies = {
 };
 const loadBody = (c) => bodies[c] || '';
 ok('SC-1 halt wins', selectCard({ haltExists: true, boardMd: BOARD, loadBody }).action === 'halt');
-ok('SC-2 in-progress -> needs-attention',
-  selectCard({ boardMd: BOARD.replace('## In Progress', '## In Progress\n- [ ] [[Busy card]]'), loadBody }).action === 'needs-attention');
+ok('SC-2 parked In Progress does NOT block a Planning pick',
+  selectCard({ boardMd: BOARD.replace('## In Progress', '## In Progress\n- [ ] [[Parked workstream]]'), loadBody }).action === 'work');
 ok('SC-3 empty planning -> no-work',
   selectCard({ boardMd: '## In Planning\n\n## In Progress\n', loadBody }).action === 'no-work');
 const pick = selectCard({ boardMd: BOARD, loadBody });
@@ -64,6 +64,17 @@ const skipPick = selectCard({ boardMd: broadBoard, loadBody });
 ok('SC-6 skips broad card, picks next', skipPick.action === 'work' && skipPick.card === 'Fix breadcrumb paren' && skipPick.skipped.length === 1);
 const allBroad = '## In Planning\n- [ ] [[Wiki area redesign]]\n## In Progress\n';
 ok('SC-7 all broad -> no-eligible-work', selectCard({ boardMd: allBroad, loadBody }).action === 'no-eligible-work');
+
+// ---- parsePlanningChecked + checked-skip (PC-*, SC-8) ----
+ok('PC-1 finds an [x]-checked Planning card',
+  parsePlanningChecked('## In Planning\n- [x] [[Done card]]\n- [ ] [[Active]]\n## In Progress\n').has('Done card'));
+ok('PC-2 unchecked card not in the set',
+  parsePlanningChecked('## In Planning\n- [ ] [[Active]]\n').has('Active') === false);
+ok('PC-3 checked card in In Progress is NOT Planning-checked',
+  parsePlanningChecked('## In Planning\n\n## In Progress\n- [x] [[Elsewhere]]\n').has('Elsewhere') === false);
+const checkedBoard = '## In Planning\n- [x] [[Done card]]\n- [ ] [[Fix breadcrumb paren]]\n## In Progress\n';
+ok('SC-8 skips [x]-checked Planning card, picks next',
+  selectCard({ boardMd: checkedBoard, loadBody }).card === 'Fix breadcrumb paren');
 
 // ---- renderHandoff (RH-*) ----
 const ho = renderHandoff({
