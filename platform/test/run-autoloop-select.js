@@ -6,12 +6,14 @@
  */
 'use strict';
 const path = require('path');
-const { isBroadScope, parseBoard, recommendedFrom, selectCard, parsePlanningChecked } =
+const { isBroadScope, parseBoard, recommendedFrom, selectCard, parsePlanningChecked, parseQueue, selectFromQueue } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'select-card.js'));
 const { renderHandoff } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'render-handoff.js'));
 const { reconcileInFlight, slugFromRef } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'reconcile-inflight.js'));
+const { coverageGapItems, docDriftItems, landmineGuardGapItems } =
+  require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'scout-signals.js'));
 
 let pass = 0, fail = 0; const failures = [];
 function ok(label, cond, detail) {
@@ -115,6 +117,52 @@ ok('RI-8 open beats older merged (most recent by number)',
 ok('RI-9 branch whose PR merged is NOT bare (→ merged, not implementing)',
   reconcileInFlight({ branches: ['autoloop/fix-x'],
     prs: [{ headRefName: 'autoloop/fix-x', state: 'MERGED', number: 5 }] }).status === 'merged');
+
+// ---- parseQueue + selectFromQueue (Q-*, SQ-*) ----
+const QUEUE = [
+  '# Autoloop queue', '',
+  '- id: cov-blueprint-cowork-customjs_behavioral',
+  '  title: Add coverage for cowork customjs_behavioral (0/9)',
+  '  category: test', '  source: coverage-matrix', '  rationale: 9 uncovered', '  status: proposed', '',
+  '- id: doc-drift-readme-foo',
+  '  title: Fix broken link "foo.md" in README.md',
+  '  category: doc', '  source: doc-drift', '  rationale: link does not resolve', '  status: done', '',
+].join('\n');
+const q = parseQueue(QUEUE);
+ok('Q-1 parses two items', q.length === 2, JSON.stringify(q.map(i => i.id)));
+ok('Q-2 captures fields', q[0].id === 'cov-blueprint-cowork-customjs_behavioral' && q[0].category === 'test' && q[0].status === 'proposed');
+ok('Q-3 captures status done', q[1].status === 'done');
+ok('Q-4 empty/garbage → []', parseQueue('# Autoloop queue\n\nnothing here').length === 0);
+ok('SQ-1 picks the open proposed item',
+  (r => r.action === 'work' && r.card === 'cov-blueprint-cowork-customjs_behavioral' && r.fromQueue === true)
+  (selectFromQueue({ queueMd: QUEUE })));
+ok('SQ-2 skips done items',
+  selectFromQueue({ queueMd: QUEUE, shippedIds: [] }).card !== 'doc-drift-readme-foo');
+ok('SQ-3 dedup via shippedIds → no-work',
+  selectFromQueue({ queueMd: QUEUE, shippedIds: ['cov-blueprint-cowork-customjs_behavioral'] }).action === 'no-work');
+ok('SQ-4 empty queue → no-work',
+  selectFromQueue({ queueMd: '# Autoloop queue\n' }).action === 'no-work');
+ok('SQ-5 broad-scope queue item skipped → no-eligible-work',
+  selectFromQueue({ queueMd: '- id: x\n  title: Audit everything redesign\n  status: proposed\n' }).action === 'no-eligible-work');
+
+// ---- scout-signals detectors (SS-*) ----
+const COV = { entries: [
+  { kind: 'blueprint', name: 'cowork', axes: { customjs_behavioral: { covered: 0, total: 9 }, install: { covered: 3, total: 3 } } },
+  { kind: 'mechanism', name: 'nav-buttons', axes: { customjs_behavioral: { covered: 2, total: 4 } } },
+] };
+const covItems = coverageGapItems(COV);
+ok('SS-1 coverage gap detected for uncovered axis', covItems.some(i => i.id === 'cov-blueprint-cowork-customjs-behavioral' && i.category === 'test'));
+ok('SS-2 fully-covered axis is NOT proposed', !covItems.some(i => i.id.includes('install')));
+const DOCS = [{ path: 'Docs/a.md', content: 'see [good](b.md) and [bad](missing.md)' }];
+const exists = (target) => target === 'b.md';
+const ddItems = docDriftItems(DOCS, exists);
+ok('SS-3 broken md link proposed', ddItems.some(i => i.category === 'doc' && i.title.includes('missing.md')));
+ok('SS-4 resolving link NOT proposed', !ddItems.some(i => i.title.includes('b.md')));
+const LM = '### 1. First trap\nbody\n### 7. Guarded trap\nbody\n';
+const hasGuard = (n) => n === '7';
+const lmItems = landmineGuardGapItems(LM, hasGuard);
+ok('SS-5 unguarded landmine proposed', lmItems.some(i => i.id === 'landmine-1-guard'));
+ok('SS-6 guarded landmine NOT proposed', !lmItems.some(i => i.id === 'landmine-7-guard'));
 
 console.log('');
 console.log(`Tests: ${pass}/${pass + fail}`);
