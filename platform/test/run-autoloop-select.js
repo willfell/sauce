@@ -14,6 +14,8 @@ const { reconcileInFlight, slugFromRef } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'reconcile-inflight.js'));
 const { coverageGapItems, docDriftItems, landmineGuardGapItems } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'scout-signals.js'));
+const { splitDiff, adequacyVerdict, gateVerdict, runAdequacyCheck } =
+  require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'gate.js'));
 
 let pass = 0, fail = 0; const failures = [];
 function ok(label, cond, detail) {
@@ -163,6 +165,38 @@ const hasGuard = (n) => n === '7';
 const lmItems = landmineGuardGapItems(LM, hasGuard);
 ok('SS-5 unguarded landmine proposed', lmItems.some(i => i.id === 'landmine-1-guard'));
 ok('SS-6 guarded landmine NOT proposed', !lmItems.some(i => i.id === 'landmine-7-guard'));
+
+// ---- splitDiff (SD-*) ----
+const sd = splitDiff(['scripts/autoloop/select-card.js', 'platform/test/run-foo.js', 'Docs/x.md', 'autoloop-queue.md']);
+ok('SD-1 test file classified', sd.testFiles.length === 1 && sd.testFiles[0] === 'platform/test/run-foo.js');
+ok('SD-2 source file classified', sd.sourceFiles.length === 1 && sd.sourceFiles[0] === 'scripts/autoloop/select-card.js');
+ok('SD-3 docs + queue excluded from source', !sd.sourceFiles.some(f => /\.md$/.test(f) || f === 'autoloop-queue.md'));
+// ---- adequacyVerdict (AV-*) ----
+ok('AV-1 no test → inadequate', adequacyVerdict({ hasTest: false }).adequate === false);
+ok('AV-2 passes without source → inadequate', adequacyVerdict({ hasTest: true, redWithoutSource: false, greenWithSource: true }).adequate === false);
+ok('AV-3 fails with source → inadequate', adequacyVerdict({ hasTest: true, redWithoutSource: true, greenWithSource: false }).adequate === false);
+ok('AV-4 red-without + green-with → adequate', adequacyVerdict({ hasTest: true, redWithoutSource: true, greenWithSource: true }).adequate === true);
+// ---- gateVerdict (GV-*) ----
+const adq = { adequate: true, reason: 'ok' };
+ok('GV-1 inadequate → block regardless of votes', gateVerdict({ adequacy: { adequate: false, reason: 'x' }, votes: [{ refuted: false }, { refuted: false }, { refuted: false }] }).gate === 'block');
+ok('GV-2 adequate + 0 refutes → pass', gateVerdict({ adequacy: adq, votes: [{ refuted: false }, { refuted: false }, { refuted: false }] }).gate === 'pass');
+ok('GV-3 adequate + 1 refute → pass', gateVerdict({ adequacy: adq, votes: [{ refuted: true }, { refuted: false }, { refuted: false }] }).gate === 'pass');
+ok('GV-4 adequate + 2 refutes → block', gateVerdict({ adequacy: adq, votes: [{ refuted: true }, { refuted: true }, { refuted: false }] }).gate === 'block');
+ok('GV-5 null verdict counts as refuted', gateVerdict({ adequacy: adq, votes: [null, { refuted: true }, { refuted: false }] }).gate === 'block');
+// ---- runAdequacyCheck (RA-*) ----
+const order = [];
+ok('RA-1 doc/test-only → behavioral:false adequate',
+  runAdequacyCheck({ paths: ['Docs/x.md', 'platform/test/run-foo.js'], runTest: () => true, mutate: () => {} }).behavioral === false);
+ok('RA-2 source but no test → inadequate',
+  runAdequacyCheck({ paths: ['scripts/a.js'], runTest: () => true, mutate: () => {} }).adequate === false);
+ok('RA-3 red-without + green-with → adequate',
+  runAdequacyCheck({ paths: ['scripts/a.js', 'platform/test/run-foo.js'],
+    mutate: (action) => order.push(action),
+    runTest: () => order[order.length - 1] === 'restore' }).adequate === true);
+ok('RA-4 restores on runTest throw (fail-closed)',
+  (() => { const seen = []; const r = runAdequacyCheck({ paths: ['scripts/a.js', 'platform/test/run-foo.js'],
+    mutate: (a) => seen.push(a), runTest: () => { throw new Error('boom'); } });
+    return r.adequate === false && seen.filter(x => x === 'restore').length >= 1; })());
 
 console.log('');
 console.log(`Tests: ${pass}/${pass + fail}`);
