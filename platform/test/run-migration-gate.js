@@ -1,0 +1,15 @@
+'use strict';
+const install = require('../install.js');
+const { semverLt, migrationGated, setPriorVersion } = install.__migrationGateTestHooks;
+let pass = 0, fail = 0; const ok = (n, c) => { if (c) { pass++; console.log('ok ' + n); } else { fail++; console.error('FAIL ' + n); } };
+ok('SL-1 0.50.0<0.135.0', semverLt('0.50.0','0.135.0'));
+ok('SL-2 equal !<', !semverLt('0.135.0','0.135.0'));
+ok('SL-3 4-seg 0.103.0<0.103.0.1', semverLt('0.103.0','0.103.0.1'));
+setPriorVersion('0.135.0');
+ok('GATE-1 past version gated', migrationGated('0.116.0') === true);
+ok('GATE-2 equal gated', migrationGated('0.135.0') === true);
+ok('GATE-3 future not gated', migrationGated('0.999.0') === false);
+ok('GATE-4 null introducedIn not gated', migrationGated(null) === false);
+setPriorVersion(null);
+ok('GATE-5 null prior fail-safe runs', migrationGated('0.116.0') === false);
+console.log(`\nrun-migration-gate: ${pass} passed, ${fail} failed`); process.exit(fail === 0 ? 0 : 1);
