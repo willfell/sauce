@@ -183,6 +183,8 @@ ok('GV-2 adequate + 0 refutes → pass', gateVerdict({ adequacy: adq, votes: [{ 
 ok('GV-3 adequate + 1 refute → pass', gateVerdict({ adequacy: adq, votes: [{ refuted: true }, { refuted: false }, { refuted: false }] }).gate === 'pass');
 ok('GV-4 adequate + 2 refutes → block', gateVerdict({ adequacy: adq, votes: [{ refuted: true }, { refuted: true }, { refuted: false }] }).gate === 'block');
 ok('GV-5 null verdict counts as refuted', gateVerdict({ adequacy: adq, votes: [null, { refuted: true }, { refuted: false }] }).gate === 'block');
+ok('GV-6 empty panel → block (fail-closed)', gateVerdict({ adequacy: adq, votes: [] }).gate === 'block');
+ok('GV-7 short panel (<3 verdicts) → block', gateVerdict({ adequacy: adq, votes: [{ refuted: false }, { refuted: false }] }).gate === 'block');
 // ---- runAdequacyCheck (RA-*) ----
 const order = [];
 ok('RA-1 doc/test-only → behavioral:false adequate',

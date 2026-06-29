@@ -5,6 +5,8 @@
 **Scope:** Increment 3 — Gate B, the two-layer verifier that runs in live Phase C before a PR opens, plus unlocking **bug-fixes** as a shippable category. Builds on 2b (v0.139.0).
 **Companion:** [2b design](2026-06-28-sauce-autoloop-increment-2b-design.md) · architecture reference (`~/notes/.../Implementation Setup - Architecture.md`).
 
+> **Implementation note (post-build):** both layers were unified into a single `scripts/autoloop/gate.js` (not a separate `verify-adequacy.js`). Below, references to `verify-adequacy.js` / `verify-adequacy` mean the `gate.js verify-adequacy` subcommand.
+
 ## Problem
 Through 2b the loop ships **safe categories only** (docs/tests) because nothing independently verifies a behavioral change. Gate A (`release:preflight` + dogfood) proves the suite is green, but a *plausible-but-wrong* fix can pass a green-but-shallow test. To let the loop safely ship **bug-fixes**, we need a separate verifier that (a) proves the regression test actually exercises the fix, and (b) adversarially refutes the change.
 

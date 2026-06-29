@@ -35,6 +35,9 @@ function gateVerdict(o) {
   if (!adequacy || adequacy.adequate !== true) {
     return { gate: 'block', reason: `Gate B L1 (adequacy): ${adequacy ? adequacy.reason : 'no adequacy result'}` };
   }
+  if (votes.length < 3) {
+    return { gate: 'block', reason: `Gate B L2 (panel): only ${votes.length}/3 verdicts received (fail-closed)` };
+  }
   const refutes = votes.filter((v) => !v || v.refuted === true).length;
   if (refutes >= 2) return { gate: 'block', reason: `Gate B L2 (panel): ${refutes}/${votes.length} lenses refuted` };
   return { gate: 'pass', reason: `adequate + ${refutes}/${votes.length} refutes` };
@@ -48,7 +51,8 @@ function runAdequacyCheck(o) {
   const allPass = () => testFiles.every((t) => runTest(t));
   let mutated = false, red = false, green = false, err = null;
   try {
-    mutate('revert', sourceFiles); mutated = true;
+    mutated = true;
+    mutate('revert', sourceFiles);
     red = !allPass();
     mutate('restore', sourceFiles); mutated = false;
     green = allPass();
