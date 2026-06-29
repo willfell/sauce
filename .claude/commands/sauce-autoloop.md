@@ -71,15 +71,18 @@ Reached only when Phase A's reconcile returned `idle`. `selectCard` ignores the 
   - **Queue items (`fromQueue: true`)** have no board card — skip step 1's board edits; the branch is `autoloop/<id>`; implement the item's `title` (a `doc` fix or a new `test`/harness only — never a behavioral change); mark the item `status: done` in `autoloop-queue.md` as part of the change.
   1. Move the card to In Progress on the three surfaces (board, workstream sub-board, card frontmatter) — same edits as `/sauce-pipeline` Phase B step 7.
   2. `git checkout -b autoloop/<card-slug>`.
-  3. Implement the card with conventional commits. **Hard rule:** any behavioral change to a mechanism/blueprint MUST ship a new/strengthened `platform/test/run-*.js` harness (scaffold via `npm run scaffold-harness`). (Gate B — the separate verifier — arrives in Increment 3; until then this rule is self-enforced + reviewed on the PR.)
-  4. **Gate A:** run `npm run release:preflight` AND `node platform/install.js --vault . --auto-approve`. If either is RED → discard the branch (`git checkout main && git branch -D autoloop/<card-slug>`), move the card to Blocked, write a blocked handoff, **exit**.
-  5. **Do NOT bump versions or tag.** Push the branch and open a CI-gated auto-merge PR:
-     ```bash
-     git push -u origin autoloop/<card-slug>
-     gh pr create --fill --base main --head autoloop/<card-slug>
-     gh pr merge --auto --squash
-     ```
-     The PR auto-merges only when the `ci` required checks (macOS + Ubuntu `release:preflight`) are green; the release pipeline then bumps/tags/ships. This turn does NOT wait for the merge.
+  3. Implement the card with conventional commits. **Bug-fixes are now allowed** (behavioral changes) — but EVERY behavioral change MUST ship a regression test in `platform/test/run-*.js` that fails without the fix. **Features remain out of scope** (don't implement a new feature autonomously). Commit the change (fix + test) before gating.
+  4. **Gate A (deterministic suite):** run `npm run release:preflight` AND `node platform/install.js --vault . --auto-approve`. RED → discard the branch (`git checkout main && git branch -D autoloop/<id>`), card → Blocked, blocked handoff, **exit**.
+  5. **Gate B Layer 1 (mutation check):** `node scripts/autoloop/gate.js verify-adequacy --json`.
+     - `behavioral: false` → no source change (doc/test-only): **skip Gate B**, go to step 7 (open PR).
+     - `adequate: false` → the regression test doesn't actually cover the change → discard the branch, card → Blocked (reason = the verdict), handoff, **exit**.
+     - `adequate: true` → continue to Layer 2.
+  6. **Gate B Layer 2 (3-lens adversarial panel):** dispatch a `Workflow` of **three** separate-context verifiers on `git diff main...HEAD`, each a distinct lens, each returning `{refuted: boolean, reason: string}`, each instructed to **default to `refuted: true` when uncertain**:
+     - **correctness** — "Does this change do what the card title claims, with no logic error? Try to find a case where it's wrong."
+     - **regression** — "Could this break existing behavior or other consumers? Find the regression."
+     - **test-adequacy** — "Beyond red/green, does the new test assert the RIGHT thing (not a tautology that would pass for a wrong fix)?"
+     Apply `gateVerdict({adequacy, votes})` (block if ≥2 refute; a missing/errored verdict counts as refuted). **block** → discard the branch, card → Blocked (reason = the gate reason + the refuting lenses), handoff, **exit**. **pass** → step 7.
+  7. **Do NOT bump versions or tag.** Push the branch and open the CI-gated auto-merge PR (`git push -u origin autoloop/<id>`; `gh pr create --fill --base main`; `gh pr merge --auto --squash`). Record the Gate B result (adequacy + the 3 votes) in the handoff. The PR auto-merges only when the `ci` required checks (macOS + Ubuntu `release:preflight`) are green; the release pipeline then bumps/tags/ships. This turn does NOT wait for the merge.
 
 ## Phase D — Close (live only)
 
@@ -88,7 +91,7 @@ Reached only when Phase A's reconcile returned `idle`. `selectCard` ignores the 
 ## Deferred (NOT in Increment 1 — labeled so the gaps are visible, not silent)
 
 - **Scout / self-discovery (Increment 2b):** when Phase B yields `no-work`, a Scout agent will generate fresh work (bug hunt, coverage gaps, doc drift, tech-debt) instead of exiting. (Increment 2a wired the git/PR reconciliation in Phase A; the In-Progress + `[x]`-checked findings are resolved.)
-- **Gate B — separate adversarial verifier (Increment 3):** an independent-context agent that tries to refute each change and enforces "no behavioral change without a harness". Increment 1 relies on Gate A (`release:preflight` + dogfood install) + the PR's CI only.
+- **Gate B — ✅ Increment 3:** live Phase C runs Layer 1 (mutation check: `gate.js verify-adequacy` — the regression test must go red without the fix) then Layer 2 (a 3-lens `Workflow` panel — correctness/regression/test-adequacy, block if ≥2 refute) before opening the PR. This unlocks **bug-fixes**; features remain out.
 - **Canary deploy + synchronous close (Increment 4):** auto-`sauce update` to the ERO vault + verify, then a promotion surface for accuris/headspace. Increment 1 stops at the merged PR.
 - **Substrate hardening (Increment 5):** the launchd scheduler, `caffeinate`, fail-closed auth check, structured logging, daily-turn budget, kill-switch UX. Increment 1 ships only a minimal dry-run plist sample.
 
