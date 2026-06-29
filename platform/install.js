@@ -55,6 +55,25 @@ function gitState(workshopPath) {
   return result;
 }
 
+// --- Per-vault migration gate ------------------------------------------------
+// A ONE-TIME-reshaper heal runs only when the vault's prior installed
+// workshop_version is unknown OR below the version the heal shipped in. Fail-safe:
+// unknown prior version => run. Set once per install from the consumer's existing
+// platform-installed.json:workshop_version. NOTE: only gate heals that reshape
+// PRE-EXISTING legacy content (new content is born correct via templates). NEVER
+// gate backfill/ensure/inject/repair/cleanup heals — they must run for new content.
+let __installPriorVersion = null;
+function semverLt(a, b) {
+  const pa = String(a).split('.').map(n => parseInt(n, 10) || 0);
+  const pb = String(b).split('.').map(n => parseInt(n, 10) || 0);
+  const len = Math.max(pa.length, pb.length);
+  for (let i = 0; i < len; i++) { const x = pa[i] || 0, y = pb[i] || 0; if (x < y) return true; if (x > y) return false; }
+  return false;
+}
+function _migrationGated(introducedIn) {
+  return __installPriorVersion != null && introducedIn != null && !semverLt(__installPriorVersion, introducedIn);
+}
+
 module.exports = async function (tp) {
   const app = tp.app;
 
@@ -63,6 +82,8 @@ module.exports = async function (tp) {
     blueprints: [],
     history: [],
   };
+
+  __installPriorVersion = (installed && typeof installed.workshop_version === "string" && installed.workshop_version) ? installed.workshop_version : null;
 
   // Always carry installedNow into the finally so partial state is preserved
   // even when something blows up mid-flow (E1 hardening).
@@ -1868,6 +1889,7 @@ async function applyBreadcrumb(tp, manifest, variables, history, git) {
 async function applyWikiToDocsMigration(tp, manifest, variables, history, git) {
   if (!manifest || manifest.name !== "project") return;
   if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  if (_migrationGated("0.52.0")) return;
   const adapter = tp.app.vault.adapter;
 
   const projectsRoot = "spice/projects";
@@ -2723,6 +2745,7 @@ async function applyProjectActivityPanelsHeal(tp, manifest, variables, history, 
 async function applyProjectSectionsMigration(tp, manifest, variables, history, git) {
   if (!manifest || manifest.name !== "project") return;
   if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  if (_migrationGated("0.102.0")) return;
   const adapter = tp.app.vault.adapter;
 
   const projectsRoot = "spice/projects";
@@ -3294,6 +3317,7 @@ async function _migrateDocNote(adapter, fp, sectionLabel, subSectionLabel) {
 async function applyDocNoteBreadcrumbMarkerCleanup(tp, manifest, variables, history, git) {
   if (!manifest || manifest.name !== "project") return;
   if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  if (_migrationGated("0.109.0")) return;
   const adapter = tp.app.vault.adapter;
 
   const projectsRoot = "spice/projects";
@@ -3647,6 +3671,7 @@ function _migrateProjectSectionsToWikilinks(body, fullLabels) {
 async function applyProjectSectionsCloseRepair(tp, manifest, variables, history, git) {
   if (!manifest || manifest.name !== "project") return;
   if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  if (_migrationGated("0.103.0.1")) return;
   const adapter = tp.app.vault.adapter;
   const projectsRoot = "spice/projects";
   if (!(await adapter.exists(projectsRoot))) return;
@@ -5904,6 +5929,7 @@ function _extractValidCreatedAt(fmInner) {
 async function applyFinanceHubFrontmatterHeal(tp, manifest, variables, history, git) {
   if (!manifest || manifest.name !== "finance") return;
   if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  if (_migrationGated("0.115.1")) return;
   const adapter = tp.app.vault.adapter;
 
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
@@ -5962,6 +5988,7 @@ const FINANCE_HUB_BODY_TEMPLATES = {
 async function applyFinanceHubsRepair(tp, manifest, variables, history, git) {
   if (!manifest || manifest.name !== "finance") return;
   if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  if (_migrationGated("0.110.0")) return;
   const adapter = tp.app.vault.adapter;
 
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
@@ -6117,6 +6144,7 @@ async function applyOrphanedHelperCleanup(tp, mech, variables, history, git) {
 // invocations on already-migrated content are no-ops).
 async function applyToDoBlueprintMigration(tp, mech, variables, history, git) {
   if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  if (_migrationGated("0.116.0")) return;
   const adapter = tp.app.vault.adapter;
   const TODO_ROOT = "spice/to-do";
   const PROJ_ROOT = "spice/projects";
@@ -6471,6 +6499,7 @@ async function applyToDoBlueprintMigration(tp, mech, variables, history, git) {
 // .sauce-backup snapshot before any write.
 async function applyRecurringSentinelV070Migration(tp, mech, variables, history, git) {
   if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  if (_migrationGated("0.119.0")) return;
   const adapter = tp.app.vault.adapter;
   const TODO_ROOT = "spice/to-do";
   const exists = await adapter.exists(TODO_ROOT).catch(() => false);
@@ -6562,6 +6591,7 @@ async function applyRecurringSentinelV070Migration(tp, mech, variables, history,
 // unchanged. .sauce-backup snapshot before any write.
 async function mergeDuplicateRecurringSections(tp, mech, variables, history, git) {
   if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  if (_migrationGated("0.119.1")) return;
   const adapter = tp.app.vault.adapter;
   const TODO_ROOT = "spice/to-do";
   const exists = await adapter.exists(TODO_ROOT).catch(() => false);
@@ -6699,6 +6729,7 @@ async function mergeDuplicateRecurringSections(tp, mech, variables, history, git
 // Idempotent. .sauce-backup snapshot before write. Failure-loud per-file.
 async function stripPersistedRecurringSection(tp, mech, variables, history, git) {
   if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  if (_migrationGated("0.120.0")) return;
   const adapter = tp.app.vault.adapter;
   const TODO_ROOT = "spice/to-do";
   const exists = await adapter.exists(TODO_ROOT).catch(() => false);
@@ -6921,6 +6952,7 @@ async function applyProjectTodoBackfill(tp, mech, variables, history, git) {
 // snapshot before write.
 async function applyEntityCreateGuardMigration(tp, mech, variables, history, git) {
   if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  if (_migrationGated("0.110.1")) return;
   const adapter = tp.app.vault.adapter;
 
   // Direct-call pattern: matches `await customJS.EntityCreate.render(dv,
@@ -7033,6 +7065,7 @@ async function applyEntityCreateGuardMigration(tp, mech, variables, history, git
 // Idempotent. Per-file failure-loud + .sauce-backup snapshot before write.
 async function applyCustomJsGuardMigration(tp, mech, variables, history, git) {
   if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  if (_migrationGated("0.110.2")) return;
   const adapter = tp.app.vault.adapter;
 
   // Direct-call regex with optional opts. Capture groups:
@@ -7143,6 +7176,7 @@ async function applyCustomJsGuardMigration(tp, mech, variables, history, git) {
 // failure-loud + .sauce-backup snapshot before write.
 async function applyFinanceUnifiedNavMigration(tp, mech, variables, history, git) {
   if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  if (_migrationGated("0.111.0")) return;
   const adapter = tp.app.vault.adapter;
 
   const financeRoot = "spice/finance";
@@ -7260,6 +7294,7 @@ async function applyFinanceUnifiedNavMigration(tp, mech, variables, history, git
 async function applyFinancePaycheckBodyMigration(tp, manifest, variables, history, git) {
   if (!manifest || manifest.name !== "finance") return;
   if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  if (_migrationGated("0.107.0")) return;
   const adapter = tp.app.vault.adapter;
 
   const paychecksRoot = "spice/finance/paychecks";
@@ -7355,6 +7390,7 @@ function _migratePaycheckBody(body) {
 async function applyFinanceBudgetBodyMigration(tp, manifest, variables, history, git) {
   if (!manifest || manifest.name !== "finance") return;
   if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  if (_migrationGated("0.107.0")) return;
   const adapter = tp.app.vault.adapter;
 
   const budgetsRoot = "spice/finance/budgets";
@@ -8775,6 +8811,7 @@ function _rewriteNavButtonsToNavRow(body) {
 async function applyFinanceNavRowMigration(tp, manifest, variables, history, git) {
   if (!manifest || manifest.name !== "finance") return;
   if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  if (_migrationGated("0.108.0")) return;
   const adapter = tp.app.vault.adapter;
 
   const financeRoot = "spice/finance";
@@ -8848,6 +8885,7 @@ async function applyFinanceNavRowMigration(tp, manifest, variables, history, git
 async function applyFinanceNavRowGuardFormMigration(tp, manifest, variables, history, git) {
   if (!manifest || manifest.name !== "finance") return;
   if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  if (_migrationGated("0.110.3")) return;
   const adapter = tp.app.vault.adapter;
 
   const financeRoot = "spice/finance";
@@ -14541,6 +14579,9 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
             throw new Error(`runInstall failed with exit ${result.status} — full log: ${logPath}`);
         }
     };
+    // Per-vault migration gate test hooks (purely additive) — exercised by
+    // platform/test/run-migration-gate.js.
+    module.exports.__migrationGateTestHooks = { semverLt, migrationGated: _migrationGated, setPriorVersion(v){ __installPriorVersion = v; } };
 }
 
 // ----- CLI handler (v0.80.1, closes FLN-v79-2) ------------------------------
