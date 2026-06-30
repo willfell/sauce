@@ -296,8 +296,8 @@ if (projectsIdx >= 0 && projectsIdx + 1 < sourceParts.length) {
 await dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });
 ```
 
----
-
 ```dataviewjs
 await dv.view("ranch/views/customjs-guard", { class: "ProjectNavButtons" });
 ```
+
+---

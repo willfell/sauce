@@ -656,6 +656,38 @@ async function testTemplateIntegrity() {
       ok(`TPL-B-5 ${t}: invokes Breadcrumb`, /class:\s*"Breadcrumb"/.test(body));
     }
   }
+
+  // TPL-B-6: Template, Kanban Card.md nav-tier divider hygiene. ProjectNavButtons
+  // emits its OWN topDivider <hr> at the top of its render (project-nav-buttons.js),
+  // so a literal `---` between the SpaceNavButtons and ProjectNavButtons blocks
+  // renders a DOUBLED divider — the bug reported in the "Board Note Template Fix
+  // from Projects Board" card. The chrome must (a) carry NO literal `---` between
+  // the two nav tiers, and (b) carry a trailing `---` after ProjectNavButtons so
+  // the chrome is separated from user-typed card content. Mirrors the canonical
+  // Project Map.md layout.
+  {
+    console.log("\n--- Case TPL-B-6: Kanban Card template nav-tier divider hygiene ---");
+    const tpl = fs.readFileSync(path.join(TPLDIR, "Kanban Card.md"), "utf8");
+    const spaceIdx = tpl.indexOf('class: "SpaceNavButtons"');
+    const projIdx = tpl.indexOf('class: "ProjectNavButtons"');
+    ok("TPL-B-6.1 SpaceNavButtons present", spaceIdx >= 0);
+    ok("TPL-B-6.2 ProjectNavButtons present", projIdx >= 0);
+    ok("TPL-B-6.3 SpaceNavButtons before ProjectNavButtons", spaceIdx >= 0 && projIdx > spaceIdx);
+    // Region from the SpaceNavButtons block's closing fence up to the
+    // ProjectNavButtons class line: must contain NO standalone `---` line.
+    const spaceFenceClose = tpl.indexOf("```", spaceIdx);
+    const between = tpl.slice(spaceFenceClose, projIdx);
+    ok("TPL-B-6.4 no literal --- between the two nav tiers (ProjectNavButtons emits its own topDivider)",
+      !/^---\s*$/m.test(between),
+      `unexpected literal --- between SpaceNavButtons and ProjectNavButtons: ${JSON.stringify(between)}`);
+    // After the ProjectNavButtons block's closing fence: a trailing `---` line
+    // separates the chrome from user content.
+    const projFenceClose = tpl.indexOf("```", projIdx);
+    const afterProj = tpl.slice(projFenceClose + 3);
+    ok("TPL-B-6.5 trailing --- after ProjectNavButtons separates chrome from content",
+      /^---\s*$/m.test(afterProj),
+      "no trailing --- after the ProjectNavButtons block");
+  }
 }
 
 // ===========================================================================
