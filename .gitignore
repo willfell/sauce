@@ -42,3 +42,4 @@ node_modules/
 # Sauce Autoloop runtime state (never tracked): turn log + kill-switch sentinel.
 .autoloop.log
 .autoloop-halt
+.autoloop-lock

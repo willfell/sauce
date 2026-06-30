@@ -12,6 +12,8 @@ const { renderHandoff } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'render-handoff.js'));
 const { reconcileInFlight, slugFromRef } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'reconcile-inflight.js'));
+const { lockState } =
+  require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'turn-lock.js'));
 const { coverageGapItems, docDriftItems, landmineGuardGapItems } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'scout-signals.js'));
 const { splitDiff, adequacyVerdict, gateVerdict, runAdequacyCheck } =
@@ -228,6 +230,19 @@ ok('BN-7 header string inside the reply does NOT break parsing',
 ok('BN-8 re-blocked card → reads the LAST section reply',
   (r => r.hasResponse === true && r.response.includes('second reply'))(parseBlockedResponse(blockSec + '\nold reply\n' + renderBlockedSection({ date: '2026-07-01', reason: 'again', needs: ['q'] }) + '\nsecond reply\n')));
 ok('BN-9 missing date/reason → no literal "undefined"', !renderBlockedSection({ needs: ['q'] }).includes('undefined'));
+
+// ---- turn-lock (TL-*) ----
+const TL_NOW = 1000000000000;
+const TL_MIN = 60 * 1000;
+ok('TL-1 empty lock → not present, not held',
+  (s => s.present === false && s.held === false)(lockState('', TL_NOW, 30 * TL_MIN)));
+ok('TL-2 fresh lock → held',
+  lockState(JSON.stringify({ pid: 1, startedAt: new Date(TL_NOW - 5 * TL_MIN).toISOString() }), TL_NOW, 30 * TL_MIN).held === true);
+ok('TL-3 stale lock → not held + stale',
+  (s => s.held === false && s.stale === true)(lockState(JSON.stringify({ pid: 1, startedAt: new Date(TL_NOW - 31 * TL_MIN).toISOString() }), TL_NOW, 30 * TL_MIN)));
+ok('TL-4 garbage lock → stale (overridable)', lockState('not json', TL_NOW, 30 * TL_MIN).stale === true);
+ok('TL-5 future-skewed lock (negative age) → not held + stale',
+  (s => s.held === false && s.stale === true)(lockState(JSON.stringify({ pid: 1, startedAt: new Date(TL_NOW + 10 * TL_MIN).toISOString() }), TL_NOW, 30 * TL_MIN)));
 
 console.log('');
 console.log(`Tests: ${pass}/${pass + fail}`);

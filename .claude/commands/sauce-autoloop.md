@@ -27,7 +27,7 @@ accepted explicitly but is the default. During the assessment window, stay in dr
 
 ## Phase A — Orient + reconcile (autonomous)
 
-1. **Halt check.** If `~/projects/repos/sauce/.autoloop-halt` exists, print "autoloop halted by sentinel" and **exit** (no handoff).
+1. **Halt check + acquire the single-turn lock.** First, if `~/projects/repos/sauce/.autoloop-halt` exists → print "autoloop halted by sentinel" and **exit** (no handoff). Then acquire the concurrency lock with an **absolute** path (so it always targets the main-repo lock, never a worktree copy's): `node /Users/willfellhoelter/projects/repos/sauce/scripts/autoloop/turn-lock.js acquire`. A non-zero exit (`{"acquired":false}`) means another turn (your 10m `/loop` or the 2h launchd job) is already running → print that and **exit immediately** (no handoff, no work). Once acquired you hold it for the whole turn — **every exit path below MUST run `node /Users/willfellhoelter/projects/repos/sauce/scripts/autoloop/turn-lock.js release`** (Phase E does this; on any early/error exit, release it yourself first — always with that absolute path, even from inside a worktree — and remove any worktree you created). Locks older than 30 min are treated as stale and auto-overridden.
 2. Run `npm run status`; confirm a clean tree on `main` (or a resume branch). If the working tree has uncommitted changes you didn't create, print the state and **exit** (do not stomp).
 3. **Reconcile in-flight state from git/PR (the source of truth — level-triggered, idempotent):**
    ```bash
@@ -36,7 +36,7 @@ accepted explicitly but is the default. During the assessment window, stay in dr
    Branch on `status`:
    - `unknown` → print "could not determine in-flight state (gh/git failed)" and **exit** (fail-safe — never assume idle; next fire retries).
    - `pr-open` → write a handoff ("card `<card>` — PR #`<number>` open, auto-merge pending"), **exit**.
-   - `implementing` → **live:** resume the `autoloop/<card>` branch if recoverable, else discard it cleanly (`git checkout main && git branch -D autoloop/<card>` + delete the remote) and move the card back to Planning; write a handoff; **exit**. **dry-run:** note it in a handoff and **exit** (no writes).
+   - `implementing` → **live:** a prior turn died mid-implementation. Its work lives in the `.worktrees/autoloop-<card>` worktree (not a branch on the main tree), so discard it cleanly: `git -C ~/projects/repos/sauce worktree remove .worktrees/autoloop-<card> --force 2>/dev/null; git -C ~/projects/repos/sauce worktree prune; git -C ~/projects/repos/sauce branch -D autoloop/<card> 2>/dev/null` (+ delete the remote branch if it was pushed), then move the card back to Planning; write a handoff; **exit**. **dry-run:** note it in a handoff and **exit** (no writes).
    - `merged` → **live:** close the card on the board (projection — move to Completed, set `completed_in_version`); write a handoff; **exit**. **dry-run:** note + **exit**.
    - `failed` → **live:** move the card to Blocked (projection) with the PR number; write a handoff; **exit**. **dry-run:** note + **exit**.
    - `idle` → continue to Phase B.
@@ -77,7 +77,13 @@ Reached only when Phase A's reconcile returned `idle`. `selectCard` ignores the 
 - **Live:**
   - **Queue items (`fromQueue: true`)** have no board card — skip step 1's board edits; the branch is `autoloop/<id>`; implement the item's `title` (a `doc` fix or a new `test`/harness only — never a behavioral change); mark the item `status: done` in `autoloop-queue.md` as part of the change.
   1. Move the card to In Progress on the three surfaces (board, workstream sub-board, card frontmatter) — same edits as `/sauce-pipeline` Phase B step 7.
-  2. `git checkout -b autoloop/<card-slug>`.
+  2. **Create an isolated git worktree for the change** (NEVER branch-switch the main working tree — concurrent turns / the user / other work live there):
+     ```bash
+     WT=~/projects/repos/sauce/.worktrees/autoloop-<card-slug>
+     git -C ~/projects/repos/sauce worktree add "$WT" -b autoloop/<card-slug> origin/main
+     cd "$WT"
+     ```
+     Do ALL of the following — implementation, commits, Gate A, Gate B, push, PR — from **inside `$WT`**. When the turn ends (PR opened) OR on any block/abort/gate-failure below, clean up: `cd ~/projects/repos/sauce && git worktree remove "$WT" --force` (the "discard the branch" steps below become this worktree removal instead of a branch delete), then continue to the handoff.
   3. Implement the card with conventional commits. **Attempt anything the card asks** — bug, feature, refactor, whatever. EVERY behavioral change still MUST ship a regression test in `platform/test/run-*.js` that fails without it (that's how Gate B verifies it). **Do NOT force it, and do NOT overturn a documented platform convention unilaterally.** If the work is genuinely too big for one bounded turn, conflicts with a convention (e.g. `project-blueprint-ui.md` / `note-chrome.md`), can't be verified, or needs a design decision only the user can make → use **block-with-questions** (below). Commit the change (fix/feature + test) before gating.
 
      **Block-with-questions (when you can't proceed):** call `renderBlockedSection({date, reason, needs})` from `scripts/autoloop/block-note.js` (a clear `reason` + a `needs` array of the specific questions/decisions) and **append it to the card note's body** (`~/notes/sauce/headspace-sauce/spice/projects/sauce/tasks/<W>/board/<Card>/<Card>.md`). Move the card to **Blocked** (board + frontmatter `status: blocked`). Write a handoff. **Exit.** Next turn's Phase A reconcile picks it up once the user replies in the card. (Every Blocked transition below — the Gate A/B failures included — uses this same in-card block-with-questions, so you always leave the user a concrete question.)
@@ -109,7 +115,8 @@ Reached only when Phase A's reconcile returned `idle`. `selectCard` ignores the 
 1. Determine turn number N = (count of existing `*sauce-autoloop*-handoff.md`) + 1.
 2. Render the handoff with `scripts/autoloop/render-handoff.js` (call `renderHandoff()` with the gathered state: `roundN`, today's `date`, `mode`, `outcome` `{action, card, reason}`, post-turn `board` via `parseBoard`, `recommendedNext`, and `notes` = the dry-run "Intended approach" paragraph from Phase C if applicable). Write it to `~/projects/repos/sauce/Docs/prompts/<YYYY-MM-DD>-sauce-autoloop-turn-N-handoff.md` — the date prefix is matched by Phase A's `*sauce-autoloop*-handoff.md` glob.
 3. **Live only:** commit + push the handoff to `main` (`docs(prompts): autoloop turn N handoff`). **Dry-run:** leave it as an uncommitted local artifact — never push to main during the assessment window.
-4. **EXIT.** Do NOT call `ScheduleWakeup`. The external scheduler fires the next turn.
+4. **Release the single-turn lock** acquired in Phase A (absolute path, so it works even if you're still inside a worktree): `node /Users/willfellhoelter/projects/repos/sauce/scripts/autoloop/turn-lock.js release`. This MUST run on every normal turn-end; on any early/error exit above you must release it there too (the lock is the one thing that, if leaked, wedges every later turn into "another turn in progress" until the 30-min stale window expires).
+5. **EXIT.** Do NOT call `ScheduleWakeup`. The external scheduler fires the next turn.
 
 ## Usage / cost guardrails (always)
 
