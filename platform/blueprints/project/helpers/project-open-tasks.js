@@ -32,10 +32,23 @@ class ProjectOpenTasks {
 
     customJS.SectionLabel.render(dv, { text: "Open tasks" });
 
-    const pages = open.map((t) => ({
-      file: { name: t.text, path: boardPath, folder },
-      _lane: t.lane,
-    }));
+    const pages = open.map((t) => {
+      // Board card text is typically a [[wikilink]] (optionally [[Name|Alias]]);
+      // fall back to plain text. The task note created from the board lives at
+      // <folder>/tasks/<Name>/<Name>.md (see Template, Kanban Card.md auto-promote).
+      const m = t.text.match(/^\[\[([^\]|]+)(?:\|([^\]]+))?\]\]$/);
+      const noteName = (m ? m[1] : t.text).trim();
+      const display = (m && m[2] ? m[2] : noteName).trim();
+      const taskNotePath = `${folder}/tasks/${noteName}/${noteName}.md`;
+      // Target the task note when it exists; fall back to the board for cards
+      // with no backing note so the click still does something sensible.
+      const exists = !!(app.vault.getAbstractFileByPath
+        && app.vault.getAbstractFileByPath(taskNotePath));
+      return {
+        file: { name: display, path: exists ? taskNotePath : boardPath, folder },
+        _lane: t.lane,
+      };
+    });
 
     await customJS.BeaconCards.render(dv, {
       pages,
