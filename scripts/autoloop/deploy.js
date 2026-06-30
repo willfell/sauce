@@ -88,29 +88,35 @@ if (require.main === module) {
   };
   const installedVersion = (vaultPath) => readVersion(path.join(vaultPath, 'ranch', 'platform-installed.json'));
   const bottleVersion = () => readVersion('/opt/homebrew/opt/sauce/libexec/platform/manifest.json');
-  const shippedVersion = () => {
+  const latestTag = () => {
     try { return execFileSync('git', ['-C', ROOT, 'tag', '--sort=-creatordate'], { encoding: 'utf8', maxBuffer: MAXBUF }).split('\n')[0].trim().replace(/^v/, ''); }
     catch (_) { return ''; }
   };
 
-  const shipped = shippedVersion();
+  // "shipped" = what is actually INSTALLABLE (the brew bottle), NOT the git
+  // tag. The release pipeline's brew-ship leg lags the tag, so targeting the
+  // tag would try to install a version the tap hasn't published yet and fail
+  // every turn. When a newer tag exists we poll the tap once (brew upgrade);
+  // whatever the bottle becomes is the deploy ceiling. A later turn retries
+  // until the tap catches up.
+  const tag = latestTag();
+  let brewOut = 'current';
+  if (!dry && cmpVersion(bottleVersion(), tag) < 0) {
+    try { execFileSync('brew', ['upgrade', 'sauce'], { encoding: 'utf8', stdio: 'pipe', maxBuffer: MAXBUF, env: { ...process.env, HOMEBREW_NO_AUTO_UPDATE: '1' } }); brewOut = `polled tap → bottle ${bottleVersion()}`; }
+    catch (e) { brewOut = `brew upgrade failed: ${e.message.split('\n')[0]}`; }
+  }
+  const shipped = bottleVersion();
   const canaryVersion = installedVersion(CANARY.path);
   const prodVersions = PROD.map((p) => ({ name: p.name, version: installedVersion(p.path) }));
   const plan = deployPlan({ shippedVersion: shipped, canaryVersion, prodVersions });
 
   if (plan.action === 'none' || dry) {
-    console.log(JSON.stringify({ shipped, canaryVersion, prodVersions, plan, executed: false }, null, 2));
+    const tagAhead = cmpVersion(tag, shipped) > 0 ? `tag ${tag} not yet on the tap` : null;
+    console.log(JSON.stringify({ tag, shipped, canaryVersion, prodVersions, plan, brew: brewOut, tagAhead, executed: false }, null, 2));
     process.exit(0);
   }
 
   const byName = Object.fromEntries([CANARY, ...PROD].map((v) => [v.name, v]));
-  // Ensure the local bottle is the shipped version before any vault install.
-  let brewOut = 'skipped';
-  if (cmpVersion(bottleVersion(), shipped) < 0) {
-    try { execFileSync('brew', ['upgrade', 'sauce'], { encoding: 'utf8', stdio: 'pipe', maxBuffer: MAXBUF, env: { ...process.env, HOMEBREW_NO_AUTO_UPDATE: '1' } }); brewOut = `upgraded to ${bottleVersion()}`; }
-    catch (e) { brewOut = `brew upgrade failed: ${e.message.split('\n')[0]}`; }
-  }
-
   const results = [];
   for (const name of plan.vaults) {
     const v = byName[name];
