@@ -427,7 +427,7 @@ momentShim.now = 1718000000000;
   return bc.render(dv).then(() => {
     eq("BC-B-6.1 no children (early return)", dv.container.children.length, 0);
   });
-}).then(() => testProjectMeetingsPanel()).then(() => testProjectMeetingsPanelButtonRemoved()).then(() => testProjectDocsIndexSort()).then(() => testTemplateIntegrity()).then(() => testApplyDocNoteCleanupEdges()).then(() => emit());
+}).then(() => testProjectMeetingsPanel()).then(() => testProjectMeetingsPanelButtonRemoved()).then(() => testProjectOpenTasksTarget()).then(() => testProjectDocsIndexSort()).then(() => testTemplateIntegrity()).then(() => testApplyDocNoteCleanupEdges()).then(() => emit());
 
 // ===========================================================================
 // SECTION S5 — ProjectMeetingsPanel._enrichMeeting behavioral
@@ -871,6 +871,71 @@ async function testProjectMeetingsPanelButtonRemoved() {
   ok("PMP-NB-1 render() does NOT invoke EntityCreate (New Meeting button removed)",
     entityCreateCalled === false,
     "EntityCreate.render was called — the New Meeting button is still present in ProjectMeetingsPanel");
+}
+
+// ---------------------------------------------------------------------------
+// S5c — ProjectOpenTasks: an open-task card links to its TASK NOTE, not the
+// board. The panel parses the project board for `- [ ] [[Task]]` cards; each
+// card's note lives at <folder>/tasks/<Task>/<Task>.md. Prior helper set every
+// card's target to the board path, so clicking any open task opened the board.
+// Behavioral: capture the BeaconCards opts and assert target() resolves the
+// task-note path (red against the prior helper, green after).
+// ---------------------------------------------------------------------------
+
+async function testProjectOpenTasksTarget() {
+  console.log("\n=== S5c ProjectOpenTasks — open-task link targets the task note, not the board ===");
+  const folder = "spice/projects/demo";
+  const boardPath = `${folder}/demo-board.md`;
+  const taskNotePath = `${folder}/tasks/My Task/My Task.md`;
+  const boardBody = "## In Planning\n\n- [ ] [[My Task]]\n\n## Completed\n\n- [ ] [[Done Task]]\n";
+  const existing = new Set([boardPath, taskNotePath]);
+  const fakeApp = {
+    vault: {
+      getAbstractFileByPath: (p) => (existing.has(p) ? { path: p } : null),
+      read: async (f) => (f && f.path === boardPath ? boardBody : ""),
+    },
+  };
+  let captured = null;
+  const customJS = {
+    SectionLabel: { render: () => {} },
+    BeaconCards: { render: async (_dv, opts) => { captured = opts; } },
+  };
+  const ProjectOpenTasks = loadClass("project-open-tasks.js", "ProjectOpenTasks", { app: fakeApp, customJS });
+  const pot = new ProjectOpenTasks();
+  const dv = makeDv({ current: { file: { folder } } });
+  await pot.render(dv);
+  ok("POT-B-1.1 BeaconCards received exactly one open-task page (Completed lane excluded)",
+    !!captured && Array.isArray(captured.pages) && captured.pages.length === 1,
+    `captured=${captured ? JSON.stringify(captured.pages && captured.pages.length) : "null"}`);
+  if (captured && captured.pages && captured.pages.length === 1) {
+    const p0 = captured.pages[0];
+    const target = captured.target(p0);
+    eq("POT-B-1.2 target resolves the task note path", target, taskNotePath);
+    ok("POT-B-1.3 target is NOT the board path", target !== boardPath, `target was ${target}`);
+    eq("POT-B-1.4 display title is the task name (wikilink stripped)", captured.title(p0), "My Task");
+  }
+
+  // POT-B-2: when the task note does NOT exist (orphan card), fall back to the
+  // board path — preserves prior behavior AND locks the existence guard so a
+  // future change that drops the guard (always targeting the constructed path)
+  // is caught.
+  let cap2 = null;
+  const app2 = {
+    vault: {
+      getAbstractFileByPath: (p) => (p === boardPath ? { path: p } : null), // task note absent
+      read: async () => boardBody,
+    },
+  };
+  const customJS2 = {
+    SectionLabel: { render: () => {} },
+    BeaconCards: { render: async (_dv, opts) => { cap2 = opts; } },
+  };
+  const ProjectOpenTasks2 = loadClass("project-open-tasks.js", "ProjectOpenTasks", { app: app2, customJS: customJS2 });
+  const dv2 = makeDv({ current: { file: { folder } } });
+  await new ProjectOpenTasks2().render(dv2);
+  ok("POT-B-2.1 missing task note falls back to the board path",
+    !!cap2 && Array.isArray(cap2.pages) && cap2.pages.length === 1 && cap2.target(cap2.pages[0]) === boardPath,
+    cap2 && cap2.pages && cap2.pages.length ? `target was ${cap2.target(cap2.pages[0])}` : "render produced no page");
 }
 
 // ---------------------------------------------------------------------------
