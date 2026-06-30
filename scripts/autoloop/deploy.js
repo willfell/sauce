@@ -96,14 +96,20 @@ if (require.main === module) {
   // "shipped" = what is actually INSTALLABLE (the brew bottle), NOT the git
   // tag. The release pipeline's brew-ship leg lags the tag, so targeting the
   // tag would try to install a version the tap hasn't published yet and fail
-  // every turn. When a newer tag exists we poll the tap once (brew upgrade);
-  // whatever the bottle becomes is the deploy ceiling. A later turn retries
-  // until the tap catches up.
+  // every turn. When a newer tag exists we poll the tap once and whatever the
+  // bottle becomes is the deploy ceiling; a later turn retries until the tap
+  // catches up. The poll MUST `brew update` first — without it the local tap
+  // clone is stale and `brew upgrade` never sees newly-published versions
+  // (so NO HOMEBREW_NO_AUTO_UPDATE here — that flag is exactly what would
+  // pin the deployer to whatever it last saw).
   const tag = latestTag();
   let brewOut = 'current';
   if (!dry && cmpVersion(bottleVersion(), tag) < 0) {
-    try { execFileSync('brew', ['upgrade', 'sauce'], { encoding: 'utf8', stdio: 'pipe', maxBuffer: MAXBUF, env: { ...process.env, HOMEBREW_NO_AUTO_UPDATE: '1' } }); brewOut = `polled tap → bottle ${bottleVersion()}`; }
-    catch (e) { brewOut = `brew upgrade failed: ${e.message.split('\n')[0]}`; }
+    try {
+      execFileSync('brew', ['update'], { encoding: 'utf8', stdio: 'pipe', maxBuffer: MAXBUF });
+      execFileSync('brew', ['upgrade', 'sauce'], { encoding: 'utf8', stdio: 'pipe', maxBuffer: MAXBUF });
+      brewOut = `polled tap → bottle ${bottleVersion()}`;
+    } catch (e) { brewOut = `brew update/upgrade failed: ${e.message.split('\n')[0]}`; }
   }
   const shipped = bottleVersion();
   const canaryVersion = installedVersion(CANARY.path);
