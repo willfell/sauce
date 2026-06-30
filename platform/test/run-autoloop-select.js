@@ -16,6 +16,8 @@ const { coverageGapItems, docDriftItems, landmineGuardGapItems } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'scout-signals.js'));
 const { splitDiff, adequacyVerdict, gateVerdict, runAdequacyCheck } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'gate.js'));
+const { renderBlockedSection, parseBlockedResponse } =
+  require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'block-note.js'));
 
 let pass = 0, fail = 0; const failures = [];
 function ok(label, cond, detail) {
@@ -65,9 +67,10 @@ const recPick = selectCard({ boardMd: BOARD, handoffMd: '## Recommended next [[A
 ok('SC-5 recommendation-first', recPick.action === 'work' && recPick.card === 'Add render harness');
 const broadBoard = '## In Planning\n- [ ] [[Wiki area redesign]]\n- [ ] [[Fix breadcrumb paren]]\n## In Progress\n';
 const skipPick = selectCard({ boardMd: broadBoard, loadBody });
-ok('SC-6 skips broad card, picks next', skipPick.action === 'work' && skipPick.card === 'Fix breadcrumb paren' && skipPick.skipped.length === 1);
+ok('SC-6 broad-looking board card is PICKED (attempt-anything) with a broadHint',
+  skipPick.action === 'work' && skipPick.card === 'Wiki area redesign' && !!skipPick.broadHint);
 const allBroad = '## In Planning\n- [ ] [[Wiki area redesign]]\n## In Progress\n';
-ok('SC-7 all broad -> no-eligible-work', selectCard({ boardMd: allBroad, loadBody }).action === 'no-eligible-work');
+ok('SC-7 broad-only board still returns work (no pre-filter)', selectCard({ boardMd: allBroad, loadBody }).action === 'work');
 
 // ---- parsePlanningChecked + checked-skip (PC-*, SC-8) ----
 ok('PC-1 finds an [x]-checked Planning card',
@@ -90,8 +93,8 @@ ok('SCH-2 strips dataviewjs fenced block', !stripCardChrome(CHROME).includes('cu
 ok('SCH-3 keeps the task prose', stripCardChrome(CHROME).includes('Fix the separator'));
 const chromeBoard = '## In Planning\n- [ ] [[Chrome card]]\n## In Progress\n';
 const chromeLoad = (c) => c === 'Chrome card' ? ('---\nx: ' + 'y'.repeat(1300) + '\n---\n```dataviewjs\ncode\n```\nFix a small styling bug.') : '';
-ok('SCH-4 chrome-inflated card eligible after strip (would be skipped raw)',
-  selectCard({ boardMd: chromeBoard, loadBody: chromeLoad }).action === 'work');
+ok('SCH-4 chrome-inflated card → broadHint null after strip (still picked)',
+  (r => r.action === 'work' && r.broadHint === null)(selectCard({ boardMd: chromeBoard, loadBody: chromeLoad })));
 
 // ---- renderHandoff (RH-*) ----
 const ho = renderHandoff({
@@ -209,6 +212,22 @@ ok('RA-4 restores on runTest throw (fail-closed)',
   (() => { const seen = []; const r = runAdequacyCheck({ paths: ['scripts/a.js', 'platform/test/run-foo.js'],
     mutate: (a) => seen.push(a), runTest: () => { throw new Error('boom'); } });
     return r.adequate === false && seen.filter(x => x === 'restore').length >= 1; })());
+
+// ---- block-note (BN-*) ----
+const blockSec = renderBlockedSection({ date: '2026-06-30', reason: 'convention conflict', needs: ['change the convention or drop the ask?', 'specify the target behavior'] });
+ok('BN-1 section has the reason', blockSec.includes('convention conflict'));
+ok('BN-2 section lists the needs', blockSec.includes('specify the target behavior'));
+ok('BN-3 section has the response marker', blockSec.includes('**Your response:**'));
+ok('BN-4 no section → hasSection false', parseBlockedResponse('just a normal card body').hasSection === false);
+ok('BN-5 section + empty response → hasResponse false', parseBlockedResponse(blockSec).hasResponse === false);
+const blockReplied = blockSec + '\nLet us change the convention — allow the separator here.\n';
+ok('BN-6 section + reply → hasResponse true + text',
+  (r => r.hasResponse === true && r.response.includes('change the convention'))(parseBlockedResponse(blockReplied)));
+ok('BN-7 header string inside the reply does NOT break parsing',
+  (r => r.hasResponse === true && r.response.includes('approve'))(parseBlockedResponse(blockSec + '\nYes, approve. (re the ## Autoloop — blocked, needs your input note)\n')));
+ok('BN-8 re-blocked card → reads the LAST section reply',
+  (r => r.hasResponse === true && r.response.includes('second reply'))(parseBlockedResponse(blockSec + '\nold reply\n' + renderBlockedSection({ date: '2026-07-01', reason: 'again', needs: ['q'] }) + '\nsecond reply\n')));
+ok('BN-9 missing date/reason → no literal "undefined"', !renderBlockedSection({ needs: ['q'] }).includes('undefined'));
 
 console.log('');
 console.log(`Tests: ${pass}/${pass + fail}`);

@@ -42,7 +42,14 @@ accepted explicitly but is the default. During the assessment window, stay in dr
    - `idle` → continue to Phase B.
 
    (One reconcile action per turn — closing/blocking/waiting IS the turn's work; the next turn, now `idle`, picks fresh. The board is a *projection*: if a marker ever disagrees with git/PR, git/PR wins.)
-4. Read the latest handoff (`ls -t ~/projects/repos/sauce/Docs/prompts/*sauce-autoloop*-handoff.md 2>/dev/null | head -1`) for the `Recommended next` card.
+4. **Reconcile the Blocked column (collaborative unblock).** Read the board's `## Blocked` cards. For each (in board order), read its card note `~/notes/sauce/headspace-sauce/spice/projects/sauce/tasks/<W>/board/<Card>/<Card>.md` and run (absolute require path so it works regardless of CWD):
+   ```bash
+   node -e "const{parseBlockedResponse}=require('/Users/willfellhoelter/projects/repos/sauce/scripts/autoloop/block-note.js');const fs=require('fs');console.log(JSON.stringify(parseBlockedResponse(fs.readFileSync(process.argv[1],'utf8'))))" "<card path>"
+   ```
+   - `hasResponse: false` → the user hasn't replied yet; leave it Blocked, check the next.
+   - `hasResponse: true` → READ the response. If it genuinely resolves the blocker (gives the design decision / clarifies scope / approves a convention change), **move the card Blocked → In Progress** (board + frontmatter `status: in_progress`), append a one-line `**User resolved:** <summary>` under the block section, and **this card is the turn's work** — go to Phase C with the user's guidance folded in. If the reply is ambiguous/insufficient, leave it Blocked and check the next. **One unblock per turn.**
+   - If no Blocked card unblocks → continue to the next step / Phase B.
+5. Read the latest handoff (`ls -t ~/projects/repos/sauce/Docs/prompts/*sauce-autoloop*-handoff.md 2>/dev/null | head -1`) for the `Recommended next` card.
 
 ## Phase B — Select (deterministic, NO AskUserQuestion)
 
@@ -71,7 +78,9 @@ Reached only when Phase A's reconcile returned `idle`. `selectCard` ignores the 
   - **Queue items (`fromQueue: true`)** have no board card — skip step 1's board edits; the branch is `autoloop/<id>`; implement the item's `title` (a `doc` fix or a new `test`/harness only — never a behavioral change); mark the item `status: done` in `autoloop-queue.md` as part of the change.
   1. Move the card to In Progress on the three surfaces (board, workstream sub-board, card frontmatter) — same edits as `/sauce-pipeline` Phase B step 7.
   2. `git checkout -b autoloop/<card-slug>`.
-  3. Implement the card with conventional commits. **Bug-fixes are now allowed** (behavioral changes) — but EVERY behavioral change MUST ship a regression test in `platform/test/run-*.js` that fails without the fix. **Features remain out of scope** (don't implement a new feature autonomously). Commit the change (fix + test) before gating.
+  3. Implement the card with conventional commits. **Attempt anything the card asks** — bug, feature, refactor, whatever. EVERY behavioral change still MUST ship a regression test in `platform/test/run-*.js` that fails without it (that's how Gate B verifies it). **Do NOT force it, and do NOT overturn a documented platform convention unilaterally.** If the work is genuinely too big for one bounded turn, conflicts with a convention (e.g. `project-blueprint-ui.md` / `note-chrome.md`), can't be verified, or needs a design decision only the user can make → use **block-with-questions** (below). Commit the change (fix/feature + test) before gating.
+
+     **Block-with-questions (when you can't proceed):** call `renderBlockedSection({date, reason, needs})` from `scripts/autoloop/block-note.js` (a clear `reason` + a `needs` array of the specific questions/decisions) and **append it to the card note's body** (`~/notes/sauce/headspace-sauce/spice/projects/sauce/tasks/<W>/board/<Card>/<Card>.md`). Move the card to **Blocked** (board + frontmatter `status: blocked`). Write a handoff. **Exit.** Next turn's Phase A reconcile picks it up once the user replies in the card. (Every Blocked transition below — the Gate A/B failures included — uses this same in-card block-with-questions, so you always leave the user a concrete question.)
   4. **Gate A (deterministic suite):** run `npm run release:preflight` AND `node platform/install.js --vault . --auto-approve`. RED → discard the branch (`git checkout main && git branch -D autoloop/<id>`), card → Blocked, blocked handoff, **exit**.
   5. **Gate B Layer 1 (mutation check):** `node scripts/autoloop/gate.js verify-adequacy --json`.
      - `behavioral: false` → no source change (doc/test-only): **skip Gate B**, go to step 7 (open PR).
@@ -91,7 +100,7 @@ Reached only when Phase A's reconcile returned `idle`. `selectCard` ignores the 
 ## Deferred (NOT in Increment 1 — labeled so the gaps are visible, not silent)
 
 - **Scout / self-discovery (Increment 2b):** when Phase B yields `no-work`, a Scout agent will generate fresh work (bug hunt, coverage gaps, doc drift, tech-debt) instead of exiting. (Increment 2a wired the git/PR reconciliation in Phase A; the In-Progress + `[x]`-checked findings are resolved.)
-- **Gate B — ✅ Increment 3:** live Phase C runs Layer 1 (mutation check: `gate.js verify-adequacy` — the regression test must go red without the fix) then Layer 2 (a 3-lens `Workflow` panel — correctness/regression/test-adequacy, block if ≥2 refute) before opening the PR. This unlocks **bug-fixes**; features remain out.
+- **Gate B — ✅ Increment 3:** live Phase C runs Layer 1 (mutation check: `gate.js verify-adequacy` — the regression test must go red without the fix) then Layer 2 (a 3-lens `Workflow` panel — correctness/regression/test-adequacy, block if ≥2 refute) before opening the PR. Gate B gates **every** change; the loop now **attempts anything** on the board (bug / feature / refactor) — what it can't verify or decide, it **blocks-with-questions** in the card, and Phase A reconciles your reply next turn.
 - **Canary deploy + synchronous close (Increment 4):** auto-`sauce update` to the ERO vault + verify, then a promotion surface for accuris/headspace. Increment 1 stops at the merged PR.
 - **Substrate hardening (Increment 5):** the launchd scheduler, `caffeinate`, fail-closed auth check, structured logging, daily-turn budget, kill-switch UX. Increment 1 ships only a minimal dry-run plist sample.
 
