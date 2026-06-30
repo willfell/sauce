@@ -42,9 +42,9 @@ accepted explicitly but is the default. During the assessment window, stay in dr
    - `idle` → continue to Phase B.
 
    (One reconcile action per turn — closing/blocking/waiting IS the turn's work; the next turn, now `idle`, picks fresh. The board is a *projection*: if a marker ever disagrees with git/PR, git/PR wins.)
-4. **Reconcile the Blocked column (collaborative unblock).** Read the board's `## Blocked` cards. For each (oldest first), read its card note `~/notes/sauce/headspace-sauce/spice/projects/sauce/tasks/<W>/board/<Card>/<Card>.md` and run:
+4. **Reconcile the Blocked column (collaborative unblock).** Read the board's `## Blocked` cards. For each (in board order), read its card note `~/notes/sauce/headspace-sauce/spice/projects/sauce/tasks/<W>/board/<Card>/<Card>.md` and run (absolute require path so it works regardless of CWD):
    ```bash
-   node -e "const{parseBlockedResponse}=require('./scripts/autoloop/block-note.js');const fs=require('fs');console.log(JSON.stringify(parseBlockedResponse(fs.readFileSync(process.argv[1],'utf8'))))" "<card path>"
+   node -e "const{parseBlockedResponse}=require('/Users/willfellhoelter/projects/repos/sauce/scripts/autoloop/block-note.js');const fs=require('fs');console.log(JSON.stringify(parseBlockedResponse(fs.readFileSync(process.argv[1],'utf8'))))" "<card path>"
    ```
    - `hasResponse: false` → the user hasn't replied yet; leave it Blocked, check the next.
    - `hasResponse: true` → READ the response. If it genuinely resolves the blocker (gives the design decision / clarifies scope / approves a convention change), **move the card Blocked → In Progress** (board + frontmatter `status: in_progress`), append a one-line `**User resolved:** <summary>` under the block section, and **this card is the turn's work** — go to Phase C with the user's guidance folded in. If the reply is ambiguous/insufficient, leave it Blocked and check the next. **One unblock per turn.**

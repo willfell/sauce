@@ -223,6 +223,11 @@ ok('BN-5 section + empty response → hasResponse false', parseBlockedResponse(b
 const blockReplied = blockSec + '\nLet us change the convention — allow the separator here.\n';
 ok('BN-6 section + reply → hasResponse true + text',
   (r => r.hasResponse === true && r.response.includes('change the convention'))(parseBlockedResponse(blockReplied)));
+ok('BN-7 header string inside the reply does NOT break parsing',
+  (r => r.hasResponse === true && r.response.includes('approve'))(parseBlockedResponse(blockSec + '\nYes, approve. (re the ## Autoloop — blocked, needs your input note)\n')));
+ok('BN-8 re-blocked card → reads the LAST section reply',
+  (r => r.hasResponse === true && r.response.includes('second reply'))(parseBlockedResponse(blockSec + '\nold reply\n' + renderBlockedSection({ date: '2026-07-01', reason: 'again', needs: ['q'] }) + '\nsecond reply\n')));
+ok('BN-9 missing date/reason → no literal "undefined"', !renderBlockedSection({ needs: ['q'] }).includes('undefined'));
 
 console.log('');
 console.log(`Tests: ${pass}/${pass + fail}`);
