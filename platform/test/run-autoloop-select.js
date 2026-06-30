@@ -16,6 +16,8 @@ const { coverageGapItems, docDriftItems, landmineGuardGapItems } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'scout-signals.js'));
 const { splitDiff, adequacyVerdict, gateVerdict, runAdequacyCheck } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'gate.js'));
+const { renderBlockedSection, parseBlockedResponse } =
+  require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'block-note.js'));
 
 let pass = 0, fail = 0; const failures = [];
 function ok(label, cond, detail) {
@@ -209,6 +211,17 @@ ok('RA-4 restores on runTest throw (fail-closed)',
   (() => { const seen = []; const r = runAdequacyCheck({ paths: ['scripts/a.js', 'platform/test/run-foo.js'],
     mutate: (a) => seen.push(a), runTest: () => { throw new Error('boom'); } });
     return r.adequate === false && seen.filter(x => x === 'restore').length >= 1; })());
+
+// ---- block-note (BN-*) ----
+const blockSec = renderBlockedSection({ date: '2026-06-30', reason: 'convention conflict', needs: ['change the convention or drop the ask?', 'specify the target behavior'] });
+ok('BN-1 section has the reason', blockSec.includes('convention conflict'));
+ok('BN-2 section lists the needs', blockSec.includes('specify the target behavior'));
+ok('BN-3 section has the response marker', blockSec.includes('**Your response:**'));
+ok('BN-4 no section → hasSection false', parseBlockedResponse('just a normal card body').hasSection === false);
+ok('BN-5 section + empty response → hasResponse false', parseBlockedResponse(blockSec).hasResponse === false);
+const blockReplied = blockSec + '\nLet us change the convention — allow the separator here.\n';
+ok('BN-6 section + reply → hasResponse true + text',
+  (r => r.hasResponse === true && r.response.includes('change the convention'))(parseBlockedResponse(blockReplied)));
 
 console.log('');
 console.log(`Tests: ${pass}/${pass + fail}`);
