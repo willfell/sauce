@@ -20,6 +20,8 @@ const { splitDiff, adequacyVerdict, gateVerdict, runAdequacyCheck } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'gate.js'));
 const { renderBlockedSection, parseBlockedResponse } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'block-note.js'));
+const { candidateId, filterCandidates, toQueueBlocks, nextArea, AREAS } =
+  require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'bughunt.js'));
 
 let pass = 0, fail = 0; const failures = [];
 function ok(label, cond, detail) {
@@ -243,6 +245,36 @@ ok('TL-3 stale lock → not held + stale',
 ok('TL-4 garbage lock → stale (overridable)', lockState('not json', TL_NOW, 30 * TL_MIN).stale === true);
 ok('TL-5 future-skewed lock (negative age) → not held + stale',
   (s => s.held === false && s.stale === true)(lockState(JSON.stringify({ pid: 1, startedAt: new Date(TL_NOW + 10 * TL_MIN).toISOString() }), TL_NOW, 30 * TL_MIN)));
+
+// ---- bug-hunt (BH-*) ----
+const BH_GOOD = { title: 'Off-by-one in payoff loop', file: 'platform/x.js', symptom: 'last month skipped', repro_hint: 'plan with 1 debt', fix_sketch: 'use <=', test_sketch: 'assert final month included', severity: 'high', confidence: 0.9 };
+const fe = () => true; // pretend every named file exists
+ok('BH-1 well-formed candidate survives',
+  (r => r.survivors.length === 1 && r.rejected.length === 0)(filterCandidates({ candidates: [BH_GOOD], fileExists: fe })));
+ok('BH-2 stable id from file basename + title',
+  candidateId(BH_GOOD) === candidateId({ ...BH_GOOD, symptom: 'different wording' }));
+ok('BH-3 missing test_sketch → rejected (cannot write a regression test)',
+  (r => r.survivors.length === 0 && /test_sketch/.test(r.rejected[0].reason))(filterCandidates({ candidates: [{ ...BH_GOOD, test_sketch: '' }], fileExists: fe })));
+ok('BH-4 file that does not exist → rejected',
+  (r => r.survivors.length === 0 && /file missing/.test(r.rejected[0].reason))(filterCandidates({ candidates: [BH_GOOD], fileExists: () => false })));
+ok('BH-5 low confidence → rejected at the floor',
+  (r => r.survivors.length === 0 && /confidence/.test(r.rejected[0].reason))(filterCandidates({ candidates: [{ ...BH_GOOD, confidence: 0.3 }], fileExists: fe, minConfidence: 0.6 })));
+ok('BH-6 dedup against the existing queue (any status)',
+  (r => r.survivors.length === 0 && /already in queue/.test(r.rejected[0].reason))(filterCandidates({ candidates: [BH_GOOD], haveIds: [candidateId(BH_GOOD)], fileExists: fe })));
+ok('BH-7 duplicate within the same batch dropped once',
+  (r => r.survivors.length === 1 && r.rejected.length === 1 && /duplicate within batch/.test(r.rejected[0].reason))(filterCandidates({ candidates: [BH_GOOD, { ...BH_GOOD }], fileExists: fe })));
+ok('BH-8 maxNew caps the batch',
+  filterCandidates({ candidates: [BH_GOOD, { ...BH_GOOD, title: 'B', file: 'platform/b.js' }, { ...BH_GOOD, title: 'C', file: 'platform/c.js' }], fileExists: fe, maxNew: 2 }).survivors.length === 2);
+ok('BH-9 queue block carries category:bug + file + folded test plan',
+  (b => /category: bug/.test(b) && /file: platform\/x\.js/.test(b) && /test: assert final month included/.test(b))(toQueueBlocks(filterCandidates({ candidates: [BH_GOOD], fileExists: fe }).survivors)));
+ok('BH-10 rationale stays one line even with multiline sketches',
+  toQueueBlocks([{ ...BH_GOOD, id: 'x', symptom: 'line1\nline2', test_sketch: 'a\nb' }]).split('\n').filter(l => l.startsWith('  rationale:')).length === 1);
+ok('BH-11 nextArea rotates deterministically by turn',
+  nextArea(0).name === AREAS[0].name && nextArea(AREAS.length).name === AREAS[0].name && nextArea(1).name === AREAS[1].name);
+ok('BH-12 nextArea tolerates a non-numeric turn → first area',
+  nextArea('not-a-number').name === AREAS[0].name);
+ok('BH-13 same basename in different dirs → distinct ids (no collision)',
+  candidateId({ file: 'a/x.js', title: 'guard for null user' }) !== candidateId({ file: 'b/x.js', title: 'guard for null user' }));
 
 console.log('');
 console.log(`Tests: ${pass}/${pass + fail}`);
