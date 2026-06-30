@@ -58,6 +58,11 @@ accepted explicitly but is the default. During the assessment window, stay in dr
      --date <YYYY-MM-DD>
    ```
    It only ever manages the Discovered lane (never your other columns): adds open queue items, drops shipped/removed ones, and — for any Discovered card you ticked `[x]` — flips that queue item to `status: dismissed` (the loop skips it and the bug-hunt never re-proposes it). **Live only** (dry-run: skip — no board writes during the assessment window).
+7. **Deploy shipped releases to the vaults (canary → promote — Increment 4).** A merged fix only *ships to brew*; this is the step that actually puts it in your vaults. Run:
+   ```bash
+   node /Users/willfellhoelter/projects/repos/sauce/scripts/autoloop/deploy.js run
+   ```
+   It compares the latest git tag (what shipped) to each vault's installed version and takes **at most one** deploy action per turn: if **ERO** (the canary) is behind, it `brew upgrade sauce` + `sauce update --bump-pins` on ERO only and verifies it reached the target; once ERO has held the new version for a full turn, the next turn **promotes** the protected vaults (accuris + headspace) to it. A canary that fails to reach the target is contained — prod never promotes past a stuck ERO. `action: none` (all vaults current) is the cheap common case. Fold the result (`action`, `target`, per-vault `ok`) into the handoff; if any `ok: false`, flag it prominently and do NOT treat the release as deployed. **Live only** (dry-run: skip — never touch the vaults during the assessment window). The user still runs Cmd+R in Obsidian to load freshly-installed scripts.
 
 ## Phase B — Select (deterministic, NO AskUserQuestion)
 
@@ -113,13 +118,13 @@ Reached only when Phase A's reconcile returned `idle`. `selectCard` ignores the 
 
 ## Phase D — Close (live only)
 
-- Leave the card In Progress with a status note "PR open, auto-merge pending"; the NEXT turn's Phase A reconciles (merged+shipped → Completed; CI failed/PR closed → Blocked). (Synchronous close + canary deploy arrive in Increment 4.)
+- Leave the card In Progress with a status note "PR open, auto-merge pending"; the NEXT turn's Phase A reconciles (merged+shipped → Completed; CI failed/PR closed → Blocked). Deployment to the vaults is handled separately by Phase A step 7 (canary → promote) once the release tags.
 
 ## Deferred (NOT in Increment 1 — labeled so the gaps are visible, not silent)
 
 - **Scout / self-discovery (Increment 2b):** when Phase B yields `no-work`, a Scout agent will generate fresh work (bug hunt, coverage gaps, doc drift, tech-debt) instead of exiting. (Increment 2a wired the git/PR reconciliation in Phase A; the In-Progress + `[x]`-checked findings are resolved.)
 - **Gate B — ✅ Increment 3:** live Phase C runs Layer 1 (mutation check: `gate.js verify-adequacy` — the regression test must go red without the fix) then Layer 2 (a 3-lens `Workflow` panel — correctness/regression/test-adequacy, block if ≥2 refute) before opening the PR. Gate B gates **every** change; the loop now **attempts anything** on the board (bug / feature / refactor) — what it can't verify or decide, it **blocks-with-questions** in the card, and Phase A reconciles your reply next turn.
-- **Canary deploy + synchronous close (Increment 4):** auto-`sauce update` to the ERO vault + verify, then a promotion surface for accuris/headspace. Increment 1 stops at the merged PR.
+- **Canary deploy — ✅ Increment 4:** Phase A step 7 (`deploy.js run`) auto-`sauce update`s the ERO canary to the latest shipped tag + verifies, then promotes accuris/headspace one turn later (stateless one-action-per-turn soak). A stuck canary never promotes prod.
 - **Substrate hardening (Increment 5):** the launchd scheduler, `caffeinate`, fail-closed auth check, structured logging, daily-turn budget, kill-switch UX. Increment 1 ships only a minimal dry-run plist sample.
 
 ## Phase E — Handoff + EXIT
