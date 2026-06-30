@@ -10691,12 +10691,17 @@ async function caseV01020PMP3SortByDateDescTake5() {
 }
 
 async function caseV01020PMP4NewMeetingButtonPresetPrompts() {
-  console.log(`\n--- Case HC-V01020-PMP-4: + New meeting button uses EntityCreate.render with presetPrompts.project + instance "meeting" ---`);
+  console.log(`\n--- Case HC-V01020-PMP-4: + New meeting button REMOVED (meetings are created from the meetings blueprint; user decision, sauce v0.142.x) ---`);
   const src = _readPmpSrc();
-  assertTrue("HC-V01020-PMP-4a: EntityCreate.render called with instance: \"meeting\"",
-    /customJS\.EntityCreate\.render\s*\(\s*dv\s*,\s*\{[\s\S]*?instance\s*:\s*["']meeting["']/.test(src));
-  assertTrue("HC-V01020-PMP-4b: presetPrompts.project forwarded",
-    /presetPrompts\s*:\s*\{\s*project\s*:/.test(src));
+  // SUPERSEDES the v0.102.0 contract: the project hub no longer surfaces its
+  // own "+ New meeting" button — meetings are created from the meetings
+  // blueprint. Lock the new contract by asserting the EntityCreate button is
+  // GONE. Behavioral coverage: PMP-NB-1 in run-v0109-projects-overhaul.js
+  // renders the panel and asserts EntityCreate is never invoked.
+  assertTrue("HC-V01020-PMP-4a: no EntityCreate.render with instance: \"meeting\" (New Meeting button removed)",
+    !/customJS\.EntityCreate\.render\s*\(\s*dv\s*,\s*\{[\s\S]*?instance\s*:\s*["']meeting["']/.test(src));
+  assertTrue("HC-V01020-PMP-4b: no meeting presetPrompts.project (New Meeting button removed)",
+    !/presetPrompts\s*:\s*\{\s*project\s*:/.test(src));
 }
 
 async function caseV01020PMP5EmptyStateLanguage() {
@@ -10704,9 +10709,9 @@ async function caseV01020PMP5EmptyStateLanguage() {
   const src = _readPmpSrc();
   // v0.109.0 S5 SUPERSEDES v0.102.0: the info callout + "No meetings linked"
   // copy were dropped per v0.106.0.1's empty-state-callout-removal policy.
-  // Empty state now renders NOTHING (caller surfaces the always-available
-  // + New meeting button BEFORE the empty-state check). Assert the absence
-  // to lock the new contract.
+  // Empty state now renders NOTHING. (The "+ New meeting" button that used to
+  // render before this check was removed in sauce v0.142.x — see PMP-4.)
+  // Assert the absence to lock the new contract.
   assertTrue("HC-V01020-PMP-5: empty-state info callout removed",
     !/\[!info\]\+/.test(src) && !/No meetings linked/.test(src));
 }
