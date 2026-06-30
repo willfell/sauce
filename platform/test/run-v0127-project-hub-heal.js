@@ -21,10 +21,14 @@
 const path = require("path");
 
 const install = require(path.join(__dirname, "..", "install.js"));
-const { applyProjectMeetingsPanelHeal } = install;
+const { applyProjectMeetingsPanelHeal, applyProjectHubLegacyHeadingCleanup } = install;
 
 if (typeof applyProjectMeetingsPanelHeal !== "function") {
   console.error("FATAL: applyProjectMeetingsPanelHeal not exported from install.js");
+  process.exit(2);
+}
+if (typeof applyProjectHubLegacyHeadingCleanup !== "function") {
+  console.error("FATAL: applyProjectHubLegacyHeadingCleanup not exported from install.js");
   process.exit(2);
 }
 
@@ -163,6 +167,53 @@ type: project-todo
 \`\`\`dataviewjs
 await dv.view("ranch/views/customjs-guard", { class: "Breadcrumb" });
 \`\`\`
+`;
+
+// Pre-v0.109.0 hub: literal `## Status` / `## Workstreams` H2s labelling their
+// widget blocks (the case applyProjectHubLegacyHeadingCleanup heals).
+const LEGACY_HUB_WITH_HEADINGS = `---
+type: project
+---
+
+\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "ProjectNavButtons" });
+\`\`\`
+
+---
+
+## Status
+
+\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "ProjectStatusWidget" });
+\`\`\`
+
+\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "ProjectMeetingsPanel" });
+\`\`\`
+
+---
+
+## Workstreams
+
+\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "ProjectWorkstreamManager" });
+\`\`\`
+`;
+
+// A `## Status` heading that is the user's OWN section (followed by prose, not
+// the ProjectStatusWidget block) — the heal must NOT touch it even though a
+// ProjectStatusWidget block exists elsewhere in the note.
+const USER_AUTHORED_STATUS_HEADING = `---
+type: project
+---
+
+\`\`\`dataviewjs
+await dv.view("ranch/views/customjs-guard", { class: "ProjectStatusWidget" });
+\`\`\`
+
+## Status
+
+My own status notes — not the widget label, keep this heading.
 `;
 
 // ---------------------------------------------------------------------------
@@ -319,6 +370,81 @@ async function run() {
       !threw,
       "empty spice/projects/ threw"
     );
+  }
+
+  // ----- applyProjectHubLegacyHeadingCleanup (HC-V0127-PHLH-*) -----
+
+  // PHLH-A — legacy hub: both `## Status` and `## Workstreams` heading lines
+  // removed; widget blocks preserved; .sauce-backup written; history healed.
+  {
+    const adapter = makeAdapter({
+      "spice/projects/legacy/Legacy.md": LEGACY_HUB_WITH_HEADINGS,
+    });
+    const history = [];
+    await applyProjectHubLegacyHeadingCleanup(makeTp(adapter), {}, {}, history, GIT);
+    const result = await adapter.read("spice/projects/legacy/Legacy.md");
+    ok("HC-V0127-PHLH-A.status-heading-removed", !/^## Status\s*$/m.test(result),
+      "## Status heading still present");
+    ok("HC-V0127-PHLH-A.workstreams-heading-removed", !/^## Workstreams\s*$/m.test(result),
+      "## Workstreams heading still present");
+    ok("HC-V0127-PHLH-A.status-widget-preserved", result.includes('class: "ProjectStatusWidget"'),
+      "ProjectStatusWidget block lost");
+    ok("HC-V0127-PHLH-A.workstream-widget-preserved", result.includes('class: "ProjectWorkstreamManager"'),
+      "ProjectWorkstreamManager block lost");
+    ok("HC-V0127-PHLH-A.meetings-widget-preserved", result.includes('class: "ProjectMeetingsPanel"'),
+      "ProjectMeetingsPanel block lost");
+    ok("HC-V0127-PHLH-A.backup-written",
+      [...adapter._files.keys()].some((k) => k.startsWith(".sauce-backup/") && k.endsWith("Legacy.md")),
+      "no .sauce-backup snapshot written");
+    ok("HC-V0127-PHLH-A.history-healed",
+      history.some((h) => h.action === "healed" && h.target && h.target.includes("Legacy.md")),
+      "no healed history entry");
+  }
+
+  // PHLH-B — idempotent: a second pass over the healed hub is a no-op.
+  {
+    const adapter = makeAdapter({
+      "spice/projects/legacy2/Legacy2.md": LEGACY_HUB_WITH_HEADINGS,
+    });
+    await applyProjectHubLegacyHeadingCleanup(makeTp(adapter), {}, {}, [], GIT);
+    const afterFirst = await adapter.read("spice/projects/legacy2/Legacy2.md");
+    await applyProjectHubLegacyHeadingCleanup(makeTp(adapter), {}, {}, [], GIT);
+    const afterSecond = await adapter.read("spice/projects/legacy2/Legacy2.md");
+    ok("HC-V0127-PHLH-B.idempotent", afterFirst === afterSecond,
+      "second pass changed the already-healed hub");
+  }
+
+  // PHLH-C — fresh (post-v0.109.0) hub with no legacy H2s: untouched.
+  {
+    const adapter = makeAdapter({
+      "spice/projects/fresh3/Fresh3.md": FRESH_HUB,
+    });
+    const before = await adapter.read("spice/projects/fresh3/Fresh3.md");
+    await applyProjectHubLegacyHeadingCleanup(makeTp(adapter), {}, {}, [], GIT);
+    const after = await adapter.read("spice/projects/fresh3/Fresh3.md");
+    ok("HC-V0127-PHLH-C.unchanged", before === after, "fresh hub was modified");
+  }
+
+  // PHLH-D — user-authored `## Status` heading (not labelling the widget): kept.
+  {
+    const adapter = makeAdapter({
+      "spice/projects/userstatus/UserStatus.md": USER_AUTHORED_STATUS_HEADING,
+    });
+    const before = await adapter.read("spice/projects/userstatus/UserStatus.md");
+    await applyProjectHubLegacyHeadingCleanup(makeTp(adapter), {}, {}, [], GIT);
+    const after = await adapter.read("spice/projects/userstatus/UserStatus.md");
+    ok("HC-V0127-PHLH-D.user-heading-preserved",
+      after === before && /^## Status\s*$/m.test(after),
+      "user-authored ## Status heading was stripped");
+  }
+
+  // PHLH-E — empty spice/projects/ runs without throwing.
+  {
+    const adapter = makeAdapter({});
+    let threw = false;
+    try { await applyProjectHubLegacyHeadingCleanup(makeTp(adapter), {}, {}, [], GIT); }
+    catch (_e) { threw = true; }
+    ok("HC-V0127-PHLH-E.no-throw", !threw, "empty spice/projects/ threw");
   }
 
   console.log("");

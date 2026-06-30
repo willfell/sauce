@@ -1177,6 +1177,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await applyProjectSectionsMigration(tp, mech, variables, history, git);   // NEW v0.102.0 S4 — Strategy A auto-migration (flat docs/*.md → docs/knowledge/ + sections[])
   await applyProjectSectionsHubMigration(tp, mech, variables, history, git);   // NEW v0.103.0 S4 — heals v0.102.0 vaults: Docs.md → ProjectDocsIndex + materialize Section Hubs + wikilink frontmatter + breadcrumb injection
   await applyDocNoteBreadcrumbMarkerCleanup(tp, mech, variables, history, git); // NEW v0.109.0 S8 — strips legacy <!-- breadcrumb-v1.17.0 --> markers from doc-notes (block preserved; new idempotency guard inside _migrateDocNote uses the class invocation substring)
+  await applyProjectHubLegacyHeadingCleanup(tp, mech, variables, history, git); // strips legacy ## Status / ## Workstreams H2 heading lines from pre-v0.109.0 project hubs (cleanup, idempotent, .sauce-backup; only when the heading labels its widget)
   await applySectionHubEntityCreateCleanup(tp, mech, variables, history, git); // NEW v0.124.1 Task B2 — strips redundant standalone "+ New Section" / "+ New Sub-Section" entity-create blocks from existing section-hub notes (SectionHub view + Docs hub render those buttons inline; entity-create INSTANCES stay registered for inline create)
   await applyProjectSectionsCloseRepair(tp, mech, variables, history, git);    // NEW v0.103.0.1 — fixes the regex-induced -"[[--]]" damage from v0.103.0 deploy
   await applyProjectNameBackfill(tp, mech, variables, history, git);   // NEW v0.124.0 — backfill project_name FM on map/kanban/task-note for breadcrumb name display
@@ -2600,6 +2601,131 @@ async function applyProjectMeetingsPanelHeal(tp, manifest, variables, history, g
       git_commit: git.commit,
       git_tag: git.tag,
       git_dirty: git.dirty,
+      attempted_at: new Date().toISOString(),
+    });
+  }
+}
+
+// applyProjectHubLegacyHeadingCleanup — strips the legacy `## Status` and
+// `## Workstreams` H2 heading lines from pre-v0.109.0 project hub notes. The
+// v0.109.0 template rewrite dropped those H2s (ProjectStatusWidget has no label;
+// ProjectWorkstreamManager renders its own "Workstreams" SectionLabel), but
+// existing hubs were never healed (applyNoteChromeHeal's scope excludes
+// type:project). Cleanup heal — runs every install, idempotent, no-op on
+// already-clean / freshly-templated hubs. A heading is removed ONLY when it
+// labels its matching widget block (the next non-blank line opens that widget's
+// dataviewjs), so a user-authored `## Status` heading is never touched.
+// .sauce-backup snapshot before any write. Mirrors applyProjectMeetingsPanelHeal.
+async function applyProjectHubLegacyHeadingCleanup(tp, manifest, variables, history, git) {
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const root = "spice/projects";
+  if (!(await adapter.exists(root))) return;
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  let healed = 0;
+  let skipped = 0;
+  let warned = 0;
+
+  const LEGACY = { "## Status": "ProjectStatusWidget", "## Workstreams": "ProjectWorkstreamManager" };
+  function stripLegacyHeadings(body) {
+    const lines = body.split("\n");
+    const out = [];
+    let changed = false;
+    let inFence = false;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const trimmed = line.trim();
+      if (/^(```|~~~)/.test(trimmed)) { inFence = !inFence; out.push(line); continue; }
+      const wantClass = !inFence ? LEGACY[trimmed] : undefined;
+      if (wantClass) {
+        // Strip ONLY when this heading labels its widget: the next non-blank line
+        // opens a dataviewjs block whose following line names the widget class.
+        let j = i + 1;
+        while (j < lines.length && lines[j].trim() === "") j++;
+        const opensDv = j < lines.length && lines[j].trim().startsWith("```dataviewjs");
+        const labelsWidget = opensDv && j + 1 < lines.length && lines[j + 1].includes(`class: "${wantClass}"`);
+        if (labelsWidget) {
+          changed = true;
+          // Drop the heading line + one trailing blank so no double blank remains.
+          if (i + 1 < lines.length && lines[i + 1].trim() === "") i++;
+          continue;
+        }
+      }
+      out.push(line);
+    }
+    return { changed, body: out.join("\n") };
+  }
+
+  let projectDirs;
+  try {
+    const listing = await adapter.list(root);
+    projectDirs = (listing.folders || []).filter((f) => f.startsWith(root + "/"));
+  } catch (e) {
+    if (history) {
+      history.push({
+        event: "warning",
+        step: "project_hub_legacy_heading_cleanup",
+        reason: `list failed for ${root}: ${e && e.message ? e.message : String(e)}`,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString(),
+      });
+    }
+    return;
+  }
+
+  for (const projectDir of projectDirs) {
+    try {
+      const sub = await adapter.list(projectDir);
+      const candidates = (sub.files || []).filter((p) => p.endsWith(".md"));
+      let hubPath = null;
+      for (const cand of candidates) {
+        const body = await adapter.read(cand);
+        if (_noteChromeFrontmatterType(body) === "project") { hubPath = cand; break; }
+      }
+      if (!hubPath) continue;
+
+      const before = await adapter.read(hubPath);
+      const { changed, body: after } = stripLegacyHeadings(before);
+      if (!changed || after === before) { skipped += 1; continue; }
+
+      const backupPath = `.sauce-backup/${ts}/${hubPath}`;
+      const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+      try { await adapter.mkdir(backupParent); } catch (_e) { /* already exists */ }
+      try { await adapter.write(backupPath, before); } catch (_e) { /* best-effort */ }
+
+      await adapter.write(hubPath, after);
+      healed += 1;
+      if (history) {
+        history.push({
+          event: "info",
+          step: "project_hub_legacy_heading_cleanup",
+          target: hubPath,
+          action: "healed",
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    } catch (e) {
+      warned += 1;
+      if (history) {
+        history.push({
+          event: "warning",
+          step: "project_hub_legacy_heading_cleanup",
+          reason: `${projectDir}: ${e && e.message ? e.message : String(e)}`,
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+          attempted_at: new Date().toISOString(),
+        });
+      }
+    }
+  }
+
+  if (history) {
+    history.push({
+      event: "info",
+      step: "project_hub_legacy_heading_cleanup",
+      name: "vault",
+      reason: `healed ${healed}; skipped ${skipped}; ${warned} warning(s)`,
+      git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
       attempted_at: new Date().toISOString(),
     });
   }
@@ -14418,6 +14544,7 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     module.exports.applyFinanceNavRowMigration = applyFinanceNavRowMigration;
     // v0.109.0 S8 — doc-note breadcrumb marker cleanup (run-install.js CLN-1..2).
     module.exports.applyDocNoteBreadcrumbMarkerCleanup = applyDocNoteBreadcrumbMarkerCleanup;
+    module.exports.applyProjectHubLegacyHeadingCleanup = applyProjectHubLegacyHeadingCleanup;
     // v0.124.1 Task B2 — section-hub redundant entity-create block cleanup.
     module.exports.applySectionHubEntityCreateCleanup = applySectionHubEntityCreateCleanup;
     module.exports._stripEntityCreateMarkerBlocks = _stripEntityCreateMarkerBlocks;
