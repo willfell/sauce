@@ -22,6 +22,8 @@ const { renderBlockedSection, parseBlockedResponse } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'block-note.js'));
 const { candidateId, filterCandidates, toQueueBlocks, nextArea, AREAS } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'bughunt.js'));
+const { parseLane, syncLane, laneLine, dismissInQueue, LANE } =
+  require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'board-mirror.js'));
 
 let pass = 0, fail = 0; const failures = [];
 function ok(label, cond, detail) {
@@ -275,6 +277,46 @@ ok('BH-12 nextArea tolerates a non-numeric turn → first area',
   nextArea('not-a-number').name === AREAS[0].name);
 ok('BH-13 same basename in different dirs → distinct ids (no collision)',
   candidateId({ file: 'a/x.js', title: 'guard for null user' }) !== candidateId({ file: 'b/x.js', title: 'guard for null user' }));
+
+// ---- board-mirror (BM-*) ----
+const BM_BOARD = '# Sauce Board\n\n## In Planning\n\n- [ ] [[Real human card]]\n\n## Completed\n\n- [x] [[Old card]]\n\n## Archive\n';
+const BM_Q = [
+  { id: 'bug-x-foo', title: 'Foo bug', category: 'bug', source: 'bug-hunt', status: 'proposed' },
+  { id: 'cov-y-bar', title: 'Cover bar', category: 'test', source: 'coverage-matrix', status: 'proposed' },
+  { id: 'bug-z-done', title: 'Done bug', category: 'bug', status: 'done' },
+];
+ok('BM-1 open queue items added to a new Discovered lane',
+  (r => /## Discovered \(autoloop\)/.test(r.boardMd) && r.added.includes('bug-x-foo') && r.added.includes('cov-y-bar'))(syncLane({ boardMd: BM_BOARD, queueItems: BM_Q })));
+ok('BM-2 done/non-open items are NOT mirrored',
+  !syncLane({ boardMd: BM_BOARD, queueItems: BM_Q }).boardMd.includes('bug-z-done'));
+ok('BM-3 lane inserted before Completed, human columns untouched',
+  (md => md.indexOf('## Discovered') < md.indexOf('## Completed') && /## In Planning\n\n- \[ \] \[\[Real human card\]\]/.test(md) && md.includes('[[Old card]]'))(syncLane({ boardMd: BM_BOARD, queueItems: BM_Q }).boardMd));
+ok('BM-4 cards rendered as [[id|title]]',
+  syncLane({ boardMd: BM_BOARD, queueItems: BM_Q }).boardMd.includes('[[bug-x-foo|Foo bug]]'));
+ok('BM-5 idempotent — second sync is a no-op',
+  (r1 => { const r2 = syncLane({ boardMd: r1.boardMd, queueItems: BM_Q }); return r2.boardMd === r1.boardMd && r2.added.length === 0; })(syncLane({ boardMd: BM_BOARD, queueItems: BM_Q })));
+ok('BM-6 user-checked card → reported as dismissed + dropped from lane',
+  (() => { const seeded = syncLane({ boardMd: BM_BOARD, queueItems: BM_Q }).boardMd.replace('[ ] [[bug-x-foo', '[x] [[bug-x-foo'); const r = syncLane({ boardMd: seeded, queueItems: BM_Q }); return r.dismissed.includes('bug-x-foo') && !r.boardMd.includes('bug-x-foo'); })());
+ok('BM-7 item that left the queue is removed from the lane',
+  (() => { const seeded = syncLane({ boardMd: BM_BOARD, queueItems: BM_Q }).boardMd; const r = syncLane({ boardMd: seeded, queueItems: [BM_Q[0]] }); return r.removed.includes('cov-y-bar') && !r.boardMd.includes('cov-y-bar') && r.boardMd.includes('bug-x-foo'); })());
+ok('BM-8 parseLane reads id, title, checked state',
+  (cards => cards.length === 1 && cards[0].id === 'bug-x-foo' && cards[0].title === 'Foo bug' && cards[0].checked === true)(parseLane('## Discovered (autoloop)\n\n- [x] [[bug-x-foo|Foo bug]]\n', LANE)));
+ok('BM-9 title with ]] / | chars is sanitized in the lane line',
+  (line => !/\]\]\s*\S*\|/.test(line.replace('[[bug-q|', '')) && line.startsWith('- [ ] [[bug-q|'))(laneLine({ id: 'bug-q', title: 'a]] b | c' })));
+ok('BM-10 empty queue → lane exists but has no cards',
+  (md => /## Discovered \(autoloop\)/.test(md) && !/\[\[/.test(md.split('## Discovered')[1].split('## Completed')[0]))(syncLane({ boardMd: BM_BOARD, queueItems: [] }).boardMd));
+// kanban:settings trailer must survive even when the lane is the LAST column.
+const BM_SETTINGS = '# Board\n\n## In Planning\n\n- [ ] [[Human]]\n\n%% kanban:settings\n```\n{"kanban-plugin":"board"}\n```\n%%';
+ok('BM-11 settings trailer survives when lane is appended last',
+  (md => md.includes('kanban-plugin') && md.includes('[[bug-x-foo|Foo bug]]') && md.indexOf('## Discovered') < md.indexOf('%% kanban:settings'))(syncLane({ boardMd: BM_SETTINGS, queueItems: BM_Q }).boardMd));
+ok('BM-12 re-sync of a settings-trailer board is idempotent + keeps settings',
+  (r1 => { const r2 = syncLane({ boardMd: r1.boardMd, queueItems: BM_Q }); return r2.boardMd === r1.boardMd && r2.boardMd.includes('kanban-plugin'); })(syncLane({ boardMd: BM_SETTINGS, queueItems: BM_Q })));
+// dismissInQueue: prefix-safe + cannot cross into the next item.
+const BM_DQ = '- id: bug-x\n  title: X\n  status: proposed\n\n- id: bug-x-foo\n  title: XF\n  status: proposed\n';
+ok('BM-13 dismiss bug-x flips ONLY bug-x, not the prefixed bug-x-foo',
+  (q => /id: bug-x\n  title: X\n  status: dismissed/.test(q) && /id: bug-x-foo\n  title: XF\n  status: proposed/.test(q))(dismissInQueue(BM_DQ, ['bug-x'])));
+ok('BM-14 dismiss a status-less item does NOT flip the next item',
+  (q => /id: cov-y\n  title: Y\n  status: proposed/.test(q))(dismissInQueue('- id: bug-ns\n  title: NS\n\n- id: cov-y\n  title: Y\n  status: proposed\n', ['bug-ns'])));
 
 console.log('');
 console.log(`Tests: ${pass}/${pass + fail}`);
