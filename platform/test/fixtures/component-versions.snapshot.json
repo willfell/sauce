@@ -1,5 +1,5 @@
 {
-  "workshop_version": "0.142.2",
+  "workshop_version": "0.143.0",
   "components": {
     "boards": "0.2.1",
     "cowork": "0.40.2",
