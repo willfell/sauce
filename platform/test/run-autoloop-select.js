@@ -67,9 +67,10 @@ const recPick = selectCard({ boardMd: BOARD, handoffMd: '## Recommended next [[A
 ok('SC-5 recommendation-first', recPick.action === 'work' && recPick.card === 'Add render harness');
 const broadBoard = '## In Planning\n- [ ] [[Wiki area redesign]]\n- [ ] [[Fix breadcrumb paren]]\n## In Progress\n';
 const skipPick = selectCard({ boardMd: broadBoard, loadBody });
-ok('SC-6 skips broad card, picks next', skipPick.action === 'work' && skipPick.card === 'Fix breadcrumb paren' && skipPick.skipped.length === 1);
+ok('SC-6 broad-looking board card is PICKED (attempt-anything) with a broadHint',
+  skipPick.action === 'work' && skipPick.card === 'Wiki area redesign' && !!skipPick.broadHint);
 const allBroad = '## In Planning\n- [ ] [[Wiki area redesign]]\n## In Progress\n';
-ok('SC-7 all broad -> no-eligible-work', selectCard({ boardMd: allBroad, loadBody }).action === 'no-eligible-work');
+ok('SC-7 broad-only board still returns work (no pre-filter)', selectCard({ boardMd: allBroad, loadBody }).action === 'work');
 
 // ---- parsePlanningChecked + checked-skip (PC-*, SC-8) ----
 ok('PC-1 finds an [x]-checked Planning card',
@@ -92,8 +93,8 @@ ok('SCH-2 strips dataviewjs fenced block', !stripCardChrome(CHROME).includes('cu
 ok('SCH-3 keeps the task prose', stripCardChrome(CHROME).includes('Fix the separator'));
 const chromeBoard = '## In Planning\n- [ ] [[Chrome card]]\n## In Progress\n';
 const chromeLoad = (c) => c === 'Chrome card' ? ('---\nx: ' + 'y'.repeat(1300) + '\n---\n```dataviewjs\ncode\n```\nFix a small styling bug.') : '';
-ok('SCH-4 chrome-inflated card eligible after strip (would be skipped raw)',
-  selectCard({ boardMd: chromeBoard, loadBody: chromeLoad }).action === 'work');
+ok('SCH-4 chrome-inflated card → broadHint null after strip (still picked)',
+  (r => r.action === 'work' && r.broadHint === null)(selectCard({ boardMd: chromeBoard, loadBody: chromeLoad })));
 
 // ---- renderHandoff (RH-*) ----
 const ho = renderHandoff({

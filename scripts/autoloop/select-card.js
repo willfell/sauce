@@ -126,15 +126,16 @@ function selectCard(o) {
   const checked = parsePlanningChecked(boardMd);
   for (const card of ordered) {
     if (checked.has(card)) { skipped.push({ card, reason: 'checked (done) in Planning' }); continue; }
+    // Attempt-anything: do NOT skip on broad scope — pick it and pass a hint so
+    // Phase C can scope / block-with-questions if it really is too big.
     const body = loadBody ? stripCardChrome(loadBody(card) || '') : '';
     const scope = isBroadScope(`${card}\n${body}`);
-    if (scope.broad) { skipped.push({ card, reason: scope.reason }); continue; }
     return {
-      action: 'work', card, skipped,
-      reason: rec === card ? 'recommended + in-scope' : 'first in-scope Planning card',
+      action: 'work', card, skipped, broadHint: scope.broad ? scope.reason : null,
+      reason: rec === card ? 'recommended' : 'first Planning card (attempt-anything)',
     };
   }
-  return { action: 'no-eligible-work', reason: 'all Planning cards skipped (broad-scope or checked)', skipped };
+  return { action: 'no-eligible-work', reason: 'all Planning cards are [x]-checked', skipped };
 }
 
 function parseArgs(argv) {
