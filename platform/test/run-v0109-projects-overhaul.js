@@ -427,7 +427,7 @@ momentShim.now = 1718000000000;
   return bc.render(dv).then(() => {
     eq("BC-B-6.1 no children (early return)", dv.container.children.length, 0);
   });
-}).then(() => testProjectMeetingsPanel()).then(() => testProjectDocsIndexSort()).then(() => testTemplateIntegrity()).then(() => testApplyDocNoteCleanupEdges()).then(() => emit());
+}).then(() => testProjectMeetingsPanel()).then(() => testProjectMeetingsPanelButtonRemoved()).then(() => testProjectDocsIndexSort()).then(() => testTemplateIntegrity()).then(() => testApplyDocNoteCleanupEdges()).then(() => emit());
 
 // ===========================================================================
 // SECTION S5 — ProjectMeetingsPanel._enrichMeeting behavioral
@@ -834,6 +834,43 @@ async function testApplyDocNoteCleanupEdges() {
     ok("CLN-B-5.3 summary recorded", !!summary);
     if (summary) eq("CLN-B-5.4 cleaned_count = 1", summary.cleaned_count, 1);
   }
+}
+
+// ---------------------------------------------------------------------------
+// S5b — ProjectMeetingsPanel no longer renders the "+ New meeting" button.
+// User decision (autoloop turn 7): meetings are created from the meetings
+// blueprint, so the project hub does not surface a New Meeting action.
+// Behavioral: render the panel with EntityCreate stubbed as a spy and assert
+// it is never invoked. Red against the prior helper (which called
+// EntityCreate.render at the top of render()), green after the removal.
+// ---------------------------------------------------------------------------
+
+async function testProjectMeetingsPanelButtonRemoved() {
+  console.log("\n=== S5b ProjectMeetingsPanel — New Meeting button removed ===");
+  let entityCreateCalled = false;
+  const customJS = {
+    EntityCreate: { render: async () => { entityCreateCalled = true; } },
+    SectionLabel: { render: () => {} },
+    BeaconCards: { render: async () => {} },
+  };
+  const fakeApp = { vault: { getAbstractFileByPath: () => null, read: async () => "" } };
+  // `window` is injected so the PRIOR helper's `window.customJS?.EntityCreate`
+  // guard resolves cleanly (truthy) during the mutation check, producing a
+  // clean assertion failure rather than a ReferenceError.
+  const ProjectMeetingsPanel = loadClass(
+    "project-meetings-panel.js",
+    "ProjectMeetingsPanel",
+    { app: fakeApp, customJS, window: { customJS }, moment: momentShim }
+  );
+  const pmp = new ProjectMeetingsPanel();
+  // current() = a project hub; pages() = no meetings, so render exits after the
+  // (now-absent) button block — the only thing under test is whether
+  // EntityCreate was invoked.
+  const dv = makeDv({ current: { file: { path: "spice/projects/demo/Demo.md", name: "Demo" } }, pages: [] });
+  await pmp.render(dv);
+  ok("PMP-NB-1 render() does NOT invoke EntityCreate (New Meeting button removed)",
+    entityCreateCalled === false,
+    "EntityCreate.render was called — the New Meeting button is still present in ProjectMeetingsPanel");
 }
 
 // ---------------------------------------------------------------------------
