@@ -50,6 +50,14 @@ accepted explicitly but is the default. During the assessment window, stay in dr
    - `hasResponse: true` → READ the response. If it genuinely resolves the blocker (gives the design decision / clarifies scope / approves a convention change), **move the card Blocked → In Progress** (board + frontmatter `status: in_progress`), append a one-line `**User resolved:** <summary>` under the block section, and **this card is the turn's work** — go to Phase C with the user's guidance folded in. If the reply is ambiguous/insufficient, leave it Blocked and check the next. **One unblock per turn.**
    - If no Blocked card unblocks → continue to the next step / Phase B.
 5. Read the latest handoff (`ls -t ~/projects/repos/sauce/Docs/prompts/*sauce-autoloop*-handoff.md 2>/dev/null | head -1`) for the `Recommended next` card.
+6. **Sync the Discovered lane (board mirror — Increment 2c-2).** Reflect the queue into the board's `## Discovered (autoloop)` lane and pick up any dismissals you checked off there:
+   ```bash
+   node /Users/willfellhoelter/projects/repos/sauce/scripts/autoloop/board-mirror.js sync \
+     --board ~/notes/sauce/headspace-sauce/spice/projects/sauce/sauce-board.md \
+     --cards-root ~/notes/sauce/headspace-sauce/spice/projects/sauce/tasks \
+     --date <YYYY-MM-DD>
+   ```
+   It only ever manages the Discovered lane (never your other columns): adds open queue items, drops shipped/removed ones, and — for any Discovered card you ticked `[x]` — flips that queue item to `status: dismissed` (the loop skips it and the bug-hunt never re-proposes it). **Live only** (dry-run: skip — no board writes during the assessment window).
 
 ## Phase B — Select (deterministic, NO AskUserQuestion)
 
@@ -71,7 +79,7 @@ Reached only when Phase A's reconcile returned `idle`. `selectCard` ignores the 
      4. If the queue returns `no-eligible-work` (items present but all broad-scope), or still `no-work` after the deterministic Scout → **run ONE bounded model bug-hunt pass** (Increment 2c) before idling:
         - Pick this turn's code slice (rotates by turn N so the whole platform is swept over time): `node scripts/autoloop/bughunt.js next-area --turn <N>` → `{name, globs, focus}`.
         - Dispatch **one** subagent (`Agent`, cheap model) scoped to that slice: *"Read ONLY these files: `<globs>`. Find up to 5 REAL, specific, test-catchable bugs (logic errors, wrong conditionals, off-by-one, missing guards/null-checks, incorrect API usage, broken dedup). For each, return an object `{title, file, symptom, repro_hint, fix_sketch, test_sketch, severity, confidence}` where `file` is a real repo-relative path, `test_sketch` describes a regression test for `platform/test/run-*.js` that would fail today, and `confidence` is 0..1. Do NOT report style/naming/preferences or anything you can't ground in the code. Return ONLY a JSON array."* Keep it bounded — one slice, ≤5 candidates, no broad exploration.
-        - Write the returned JSON array to a temp file, then filter + append: `node scripts/autoloop/bughunt.js append --candidates <tmp>` (it rejects candidates whose `file` doesn't exist or that lack a `test_sketch`, drops low-confidence, dedups against the queue, caps the batch, and appends survivors as `category: bug` items). Mirror the survivors to the board's Discovered lane **(Increment 2c-2 — until then, queue only)**.
+        - Write the returned JSON array to a temp file, then filter + append: `node scripts/autoloop/bughunt.js append --candidates <tmp>` (it rejects candidates whose `file` doesn't exist or that lack a `test_sketch`, drops low-confidence, dedups against the queue, caps the batch, and appends survivors as `category: bug` items). Then mirror the freshened queue onto the board with the same `board-mirror.js sync` call as Phase A step 6 — the survivors appear in the `## Discovered (autoloop)` lane so you can see (and `[x]`-dismiss) them.
         - Re-read the queue (step 1). If now `work` → proceed to Phase C. Else write a handoff and **exit cheaply**. **One bug-hunt per turn** — discovery IS this turn's work; the next turn picks the top discovered item.
    - `work` → proceed with `result.card`.
 
