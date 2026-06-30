@@ -24,6 +24,8 @@ const { candidateId, filterCandidates, toQueueBlocks, nextArea, AREAS } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'bughunt.js'));
 const { parseLane, syncLane, laneLine, dismissInQueue, LANE } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'board-mirror.js'));
+const { cmpVersion, deployPlan, verifyDeploy } =
+  require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'deploy.js'));
 
 let pass = 0, fail = 0; const failures = [];
 function ok(label, cond, detail) {
@@ -317,6 +319,34 @@ ok('BM-13 dismiss bug-x flips ONLY bug-x, not the prefixed bug-x-foo',
   (q => /id: bug-x\n  title: X\n  status: dismissed/.test(q) && /id: bug-x-foo\n  title: XF\n  status: proposed/.test(q))(dismissInQueue(BM_DQ, ['bug-x'])));
 ok('BM-14 dismiss a status-less item does NOT flip the next item',
   (q => /id: cov-y\n  title: Y\n  status: proposed/.test(q))(dismissInQueue('- id: bug-ns\n  title: NS\n\n- id: cov-y\n  title: Y\n  status: proposed\n', ['bug-ns'])));
+
+// ---- deploy (DP-*) ----
+ok('DP-1 cmpVersion orders patch/minor/major + tolerates v-prefix',
+  cmpVersion('0.145.1', '0.145.0') === 1 && cmpVersion('0.145.0', '0.146.0') === -1 && cmpVersion('v0.145.1', '0.145.1') === 0);
+ok('DP-2 canary behind shipped → deploy ERO only',
+  (p => p.action === 'canary' && p.target === '0.146.0' && p.vaults.length === 1 && p.vaults[0] === 'ero-sauce')(
+    deployPlan({ shippedVersion: '0.146.0', canaryVersion: '0.145.1', prodVersions: [{ name: 'accuris-sauce', version: '0.145.1' }, { name: 'headspace-sauce', version: '0.145.1' }] })));
+ok('DP-3 canary current, prod behind → promote prod to the soaked version',
+  (p => p.action === 'promote' && p.target === '0.146.0' && p.vaults.includes('accuris-sauce') && p.vaults.includes('headspace-sauce'))(
+    deployPlan({ shippedVersion: '0.146.0', canaryVersion: '0.146.0', prodVersions: [{ name: 'accuris-sauce', version: '0.145.1' }, { name: 'headspace-sauce', version: '0.145.1' }] })));
+ok('DP-4 all current → no action',
+  deployPlan({ shippedVersion: '0.146.0', canaryVersion: '0.146.0', prodVersions: [{ name: 'accuris-sauce', version: '0.146.0' }, { name: 'headspace-sauce', version: '0.146.0' }] }).action === 'none');
+ok('DP-5 one-turn soak: canary just caught up + prod behind does NOT promote same turn as it canaries',
+  // when ERO is still behind shipped, the plan is ALWAYS canary first (prod waits a turn) — soak is structural
+  deployPlan({ shippedVersion: '0.147.0', canaryVersion: '0.146.0', prodVersions: [{ name: 'accuris-sauce', version: '0.146.0' }] }).action === 'canary');
+ok('DP-6 canary failure contains to ERO — prod never promotes past a stuck canary',
+  // ERO stuck at 0.145.1 while shipped is 0.146.0 → plan keeps targeting ERO, never prod
+  (p => p.action === 'canary' && p.vaults[0] === 'ero-sauce')(
+    deployPlan({ shippedVersion: '0.146.0', canaryVersion: '0.145.1', prodVersions: [{ name: 'accuris-sauce', version: '0.145.1' }] })));
+ok('DP-7 only the behind prod vaults are promoted',
+  (p => p.action === 'promote' && p.vaults.length === 1 && p.vaults[0] === 'headspace-sauce')(
+    deployPlan({ shippedVersion: '0.146.0', canaryVersion: '0.146.0', prodVersions: [{ name: 'accuris-sauce', version: '0.146.0' }, { name: 'headspace-sauce', version: '0.145.1' }] })));
+ok('DP-8 no shipped version → no action (fail-safe)',
+  deployPlan({ shippedVersion: '', canaryVersion: '0.145.1', prodVersions: [] }).action === 'none');
+ok('DP-9 verifyDeploy ok only when installed matches target',
+  verifyDeploy({ target: '0.146.0', installed: '0.146.0' }).ok === true && verifyDeploy({ target: '0.146.0', installed: '0.145.1' }).ok === false && verifyDeploy({ target: '0.146.0', installed: '' }).ok === false);
+ok('DP-10 cmpVersion is numeric not lexical (0.9.0 < 0.10.0); unequal length compares + treats trailing zero as equal',
+  cmpVersion('0.9.0', '0.10.0') === -1 && cmpVersion('0.145', '0.145.1') === -1 && cmpVersion('0.146.1', '0.146') === 1 && cmpVersion('0.146.0', '0.146') === 0);
 
 console.log('');
 console.log(`Tests: ${pass}/${pass + fail}`);
