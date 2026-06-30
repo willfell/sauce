@@ -6,7 +6,7 @@
  */
 'use strict';
 const path = require('path');
-const { isBroadScope, parseBoard, recommendedFrom, selectCard, parsePlanningChecked, parseQueue, selectFromQueue } =
+const { isBroadScope, parseBoard, recommendedFrom, selectCard, parsePlanningChecked, parseQueue, selectFromQueue, stripCardChrome } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'select-card.js'));
 const { renderHandoff } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'render-handoff.js'));
@@ -28,7 +28,7 @@ ok('AB-1 "audit the project blueprint" is broad', isBroadScope('audit the projec
 ok('AB-2 "redesign navigation" is broad', isBroadScope('Redesign navigation').broad === true);
 ok('AB-3 "fix breadcrumb paren bug" is NOT broad', isBroadScope('fix breadcrumb paren bug').broad === false);
 ok('AB-4 empty text is NOT broad', isBroadScope('').broad === false);
-ok('AB-5 >1200 char body is broad', isBroadScope('x'.repeat(1300)).broad === true);
+ok('AB-5 >2500 char body is broad', isBroadScope('x'.repeat(3000)).broad === true);
 
 // ---- parseBoard + recommendedFrom (PB-*) ----
 const BOARD = [
@@ -82,6 +82,16 @@ ok('SC-8 skips [x]-checked Planning card, picks next',
 const allChecked = '## In Planning\n- [x] [[Done one]]\n- [x] [[Done two]]\n## In Progress\n';
 ok('SC-9 all-checked Planning → no-eligible-work',
   selectCard({ boardMd: allChecked, loadBody }).action === 'no-eligible-work');
+
+// ---- stripCardChrome (SCH-*) — scope heuristic must measure task body, not chrome ----
+const CHROME = '---\nkey: value\nstatus: in-planning\n---\n\n```dataviewjs\nawait dv.view("ranch/views/customjs-guard", { class: "SpaceNavButtons" });\n```\n\n---\n\nFix the separator between Open Tasks and Meetings.';
+ok('SCH-1 strips frontmatter', !stripCardChrome(CHROME).includes('status: in-planning'));
+ok('SCH-2 strips dataviewjs fenced block', !stripCardChrome(CHROME).includes('customjs-guard'));
+ok('SCH-3 keeps the task prose', stripCardChrome(CHROME).includes('Fix the separator'));
+const chromeBoard = '## In Planning\n- [ ] [[Chrome card]]\n## In Progress\n';
+const chromeLoad = (c) => c === 'Chrome card' ? ('---\nx: ' + 'y'.repeat(1300) + '\n---\n```dataviewjs\ncode\n```\nFix a small styling bug.') : '';
+ok('SCH-4 chrome-inflated card eligible after strip (would be skipped raw)',
+  selectCard({ boardMd: chromeBoard, loadBody: chromeLoad }).action === 'work');
 
 // ---- renderHandoff (RH-*) ----
 const ho = renderHandoff({

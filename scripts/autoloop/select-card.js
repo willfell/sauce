@@ -24,8 +24,19 @@ function isBroadScope(text) {
   for (const re of BROAD_PATTERNS) {
     if (re.test(text)) return { broad: true, reason: `matched ${re}` };
   }
-  if (text.length > 1200) return { broad: true, reason: 'body > 1200 chars' };
+  if (text.length > 2500) return { broad: true, reason: 'body > 2500 chars' };
   return { broad: false, reason: null };
+}
+
+// Strip a card's frontmatter + fenced (dataviewjs) chrome so the scope heuristic
+// measures the actual task description, not the ~700 chars of boilerplate that
+// sits on every project card.
+function stripCardChrome(raw) {
+  let s = String(raw || '');
+  s = s.replace(/^\s*---\n[\s\S]*?\n---\n/, '');   // leading YAML frontmatter
+  s = s.replace(/```[\s\S]*?```/g, '');             // fenced code blocks (dataviewjs chrome)
+  s = s.replace(/^\s*---\s*$/gm, '');               // standalone --- separators
+  return s.trim();
 }
 
 // Parse a kanban-ish board markdown into columns -> arrays of card link names.
@@ -115,7 +126,7 @@ function selectCard(o) {
   const checked = parsePlanningChecked(boardMd);
   for (const card of ordered) {
     if (checked.has(card)) { skipped.push({ card, reason: 'checked (done) in Planning' }); continue; }
-    const body = loadBody ? (loadBody(card) || '') : '';
+    const body = loadBody ? stripCardChrome(loadBody(card) || '') : '';
     const scope = isBroadScope(`${card}\n${body}`);
     if (scope.broad) { skipped.push({ card, reason: scope.reason }); continue; }
     return {
@@ -155,7 +166,7 @@ function cliLoadBody(cardsRoot) {
   };
 }
 
-module.exports = { selectCard, isBroadScope, parseBoard, recommendedFrom, parsePlanningChecked, parseQueue, selectFromQueue };
+module.exports = { selectCard, isBroadScope, parseBoard, recommendedFrom, parsePlanningChecked, parseQueue, selectFromQueue, stripCardChrome };
 
 if (require.main === module) {
   const args = parseArgs(process.argv.slice(2));
