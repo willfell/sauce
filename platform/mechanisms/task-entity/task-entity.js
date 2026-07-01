@@ -47,6 +47,7 @@ class TaskEntity {
     parseNote(page) { return TaskEntity.parseNote(page); }
     queryToday(tasks, todayStr) { return TaskEntity.queryToday(tasks, todayStr); }
     validatePayload(payload) { return TaskEntity.validatePayload(payload); }
+    _toDateStr(v) { return TaskEntity._toDateStr(v); }
 
     // ---------- Static pure helpers ----------
 
@@ -67,6 +68,38 @@ class TaskEntity {
         // Fold to 16 bits and render as exactly 4 hex chars.
         const v = (h ^ (h >>> 16)) & 0xffff;
         return ('0000' + (v >>> 0).toString(16)).slice(-4);
+    }
+
+    /**
+     * Normalize any date-ish value to a `YYYY-MM-DD` string (or null). Dataview
+     * parses an UNQUOTED frontmatter date (`scheduled: 2026-07-01`) into a Luxon
+     * DateTime object, NOT a string — so comparing `page.scheduled` against a
+     * string todayStr (buildBands / queryToday) always fails and every scheduled
+     * task falls into neither band (empty daily list). parseNote runs every date
+     * through this on READ so downstream comparisons see plain strings. Handles:
+     * string (ISO or date), Luxon DateTime (toISODate / toFormat), moment
+     * (format), and JS Date. Empty / null / unparseable → null.
+     */
+    static _toDateStr(v) {
+        if (v == null || v === '') return null;
+        if (typeof v === 'string') {
+            const s = v.trim();
+            if (!s) return null;
+            const m = /^(\d{4}-\d{2}-\d{2})/.exec(s);
+            return m ? m[1] : s;
+        }
+        // Luxon DateTime (Dataview) — toISODate() → "yyyy-MM-dd" or null
+        if (typeof v.toISODate === 'function') { const s = v.toISODate(); return s || null; }
+        if (typeof v.toFormat === 'function') { return v.toFormat('yyyy-MM-dd'); }
+        // moment
+        if (typeof v.format === 'function') { const s = v.format('YYYY-MM-DD'); return s || null; }
+        // JS Date
+        if (Object.prototype.toString.call(v) === '[object Date]' && !isNaN(v.getTime())) {
+            const p = (n) => String(n).padStart(2, '0');
+            return v.getFullYear() + '-' + p(v.getMonth() + 1) + '-' + p(v.getDate());
+        }
+        const m2 = /(\d{4}-\d{2}-\d{2})/.exec(String(v));
+        return m2 ? m2[1] : null;
     }
 
     /**
@@ -140,8 +173,8 @@ class TaskEntity {
         return {
             title: p.title != null ? String(p.title) : '',
             status: p.status || 'open',
-            scheduled: blankToNull(p.scheduled),
-            due: blankToNull(p.due),
+            scheduled: TaskEntity._toDateStr(p.scheduled),
+            due: TaskEntity._toDateStr(p.due),
             priority: p.priority || '',
             project: p.project != null ? p.project : null,
             project_slug: p.project_slug != null ? p.project_slug : null,

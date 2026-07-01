@@ -43,6 +43,7 @@ class TaskDialog {
     defaultsForSurface(opts) { return TaskDialog.defaultsForSurface(opts); }
     trashPath(path) { return TaskDialog.trashPath(path); }
     donePath(path) { return TaskDialog.donePath(path); }
+    _loadProjectList(app) { return TaskDialog._loadProjectList(app); }
 
     // ---------- Static pure helpers ----------
 
@@ -110,6 +111,35 @@ class TaskDialog {
             .toLowerCase()
             .replace(/[^a-z0-9]+/g, '-')
             .replace(/^-+|-+$/g, '');
+    }
+
+    /**
+     * Enumerate the vault's projects (for the create/edit dialog's project
+     * dropdown) dependency-free via metadataCache — TaskDialog is button-invoked
+     * so there's no `dv` to query. Scans markdown files under spice/projects/
+     * whose frontmatter `type === 'project'`, reading `{ name, slug }` (falling
+     * back to basename / slugified name). Deduped by slug, sorted by name. Never
+     * throws — a missing app / cache just yields [].
+     */
+    static _loadProjectList(app) {
+        const out = [];
+        try {
+            const files = app.vault.getMarkdownFiles();
+            for (const f of files) {
+                if (f.path.indexOf('spice/projects/') !== 0) continue;
+                const fm = app.metadataCache.getFileCache(f) && app.metadataCache.getFileCache(f).frontmatter;
+                if (fm && fm.type === 'project') {
+                    const name = fm.name || f.basename;
+                    const slug = fm.slug || TaskDialog._slugify(name);
+                    out.push({ name: String(name), slug: String(slug) });
+                }
+            }
+        } catch (_e) {}
+        // dedupe by slug, sort by name
+        const seen = {}; const uniq = [];
+        for (const p of out) { if (!seen[p.slug]) { seen[p.slug] = 1; uniq.push(p); } }
+        uniq.sort((a, b) => a.name.localeCompare(b.name));
+        return uniq;
     }
 
     /**
@@ -268,7 +298,7 @@ class TaskDialog {
         heading.style.cssText = 'margin: 0 0 14px;';
 
         const host = modal.createDiv();
-        const fieldCss = 'width:100%; padding:6px 8px; background:var(--background-secondary,#2a2a2a); border:1px solid var(--background-modifier-border,#444); border-radius:4px; color:var(--text-normal,#ddd);';
+        const fieldCss = 'width:100%; box-sizing:border-box; padding:6px 8px; background:var(--background-secondary,#2a2a2a); border:1px solid var(--background-modifier-border,#444); border-radius:4px; color:var(--text-normal,#ddd);';
         const label = (text) => {
             const el = host.createEl('div', { text });
             el.style.cssText = 'font-size:10px; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-muted, #999); margin-top:10px; margin-bottom:4px;';
@@ -312,25 +342,50 @@ class TaskDialog {
             };
         }
 
-        // Project — free-text name (slug derived on save). v1 keeps this a plain
-        // text input rather than the heavier project <select>; the surface that
-        // opens the dialog already seeds the project name for project/meeting tasks.
+        // Project — dropdown of the vault's projects (restored parity with the old
+        // ToDoCreateTask picker). Enumerated dependency-free via metadataCache
+        // (no `dv` in a button-invoked dialog). First option is "— none —"; a
+        // seeded/edited project not in the list is preserved via a temp option so
+        // it's never silently lost.
         label('Project (optional)');
-        const projInput = host.createEl('input', { type: 'text' });
-        projInput.placeholder = 'Project name';
-        projInput.style.cssText = fieldCss;
-        projInput.value = state.projectName;
-        projInput.oninput = () => { state.projectName = projInput.value; };
+        const projSelect = host.createEl('select');
+        projSelect.style.cssText = fieldCss;
+        const projects = TaskDialog._loadProjectList(app);
+        const noneOpt = projSelect.createEl('option', { text: '— none —' });
+        noneOpt.value = '';
+        const curName = (state.projectName || '').trim();
+        let matched = !curName; // "none" pre-selected when there's no current project
+        for (const p of projects) {
+            const opt = projSelect.createEl('option', { text: p.name });
+            opt.value = p.slug;
+            if (curName && p.name === curName) { opt.selected = true; matched = true; }
+        }
+        // Preserve a seeded/edited project that isn't in the enumerated list.
+        if (!matched && curName) {
+            const tmp = projSelect.createEl('option', { text: curName });
+            tmp.value = TaskDialog._slugify(curName);
+            tmp.selected = true;
+        }
+        projSelect.onchange = () => {
+            const opt = projSelect.options[projSelect.selectedIndex];
+            state.projectName = (opt && opt.value) ? opt.text : '';
+        };
 
-        // Notes → note body (create-mode only; edit preserves the existing body
-        // untouched via processFrontMatter, so we hide it when editing).
-        let notesInput = null;
-        if (!editPath) {
-            label('Notes (optional)');
-            notesInput = host.createEl('textarea');
-            notesInput.style.cssText = fieldCss + ' min-height:60px; resize:vertical;';
-            notesInput.value = state.notes;
-            notesInput.oninput = () => { state.notes = notesInput.value; };
+        // Notes → note body (both modes). In edit mode we load the task file's
+        // existing body (minus its frontmatter) just-in-time so notes/hyperlinks
+        // can be added or edited on an existing task; the save path writes them
+        // back into the task's OWN file only (single-file invariant intact).
+        label('Notes (optional)');
+        const notesInput = host.createEl('textarea');
+        notesInput.style.cssText = fieldCss + ' min-height:60px; resize:vertical;';
+        notesInput.value = state.notes;
+        notesInput.oninput = () => { state.notes = notesInput.value; };
+        if (editPath && editFile && app.vault && typeof app.vault.read === 'function') {
+            app.vault.read(editFile).then((txt) => {
+                const body = TaskDialog._stripFrontmatter(txt);
+                notesInput.value = body;
+                state.notes = body;
+            }).catch(() => { /* leave notes blank on read failure */ });
         }
 
         // ----- Footer -----
@@ -374,7 +429,7 @@ class TaskDialog {
         };
         saveBtn.onclick = async () => {
             try {
-                if (editPath) await this._saveEdit(app, editFile, buildPayload());
+                if (editPath) await this._saveEdit(app, editFile, buildPayload(), state.notes);
                 else await this._create(app, buildPayload(), state.notes);
                 closeOverlay();
             } catch (e) {
@@ -429,9 +484,12 @@ class TaskDialog {
 
     /**
      * EDIT/SAVE — mutate ONLY this file's frontmatter via processFrontMatter,
-     * preserving its body. Never read+rewrite the whole file.
+     * then (if notes were edited) swap ONLY this file's body via vault.process.
+     * Both writes touch the task's OWN file only — never a surface note — so the
+     * single-file-write invariant holds. The body write is guarded so a vault
+     * without vault.process still saves the frontmatter.
      */
-    async _saveEdit(app, file, payload) {
+    async _saveEdit(app, file, payload, notes) {
         if (!file) { try { new Notice('TaskDialog: task file not found'); } catch (_e) {} return; }
         const TE = TaskDialog._taskEntity();
         const v = TE ? TE.validatePayload(payload) : { valid: !!(payload.title && String(payload.title).trim()) };
@@ -449,6 +507,19 @@ class TaskDialog {
                 fm.project_slug = '';
             }
         });
+        // Persist the Notes body back into THIS file only. Prefer vault.process
+        // (atomic read-modify-write of the single file); fall back to read+modify.
+        if (notes != null) {
+            const body = String(notes);
+            try {
+                if (app.vault && typeof app.vault.process === 'function') {
+                    await app.vault.process(file, (data) => TaskDialog._replaceBody(data, body));
+                } else if (app.vault && typeof app.vault.read === 'function' && typeof app.vault.modify === 'function') {
+                    const data = await app.vault.read(file);
+                    await app.vault.modify(file, TaskDialog._replaceBody(data, body));
+                }
+            } catch (_e) { /* frontmatter already saved; body write best-effort */ }
+        }
         try { new Notice('Task saved'); } catch (_e) {}
     }
 
@@ -511,5 +582,32 @@ class TaskDialog {
         const s = String(v == null ? '' : v).trim();
         const m = /^\[\[([^\]]+)\]\]$/.exec(s);
         return m ? m[1] : s;
+    }
+
+    /**
+     * Remove a leading `---\n...\n---\n` frontmatter block from a file's text,
+     * returning just the body (for populating the Notes textarea in edit mode). A
+     * file with no leading frontmatter block is returned unchanged.
+     */
+    static _stripFrontmatter(txt) {
+        const s = String(txt == null ? '' : txt);
+        const m = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/.exec(s);
+        return m ? s.slice(m[0].length) : s;
+    }
+
+    /**
+     * Swap the body of a task file's text while preserving its leading
+     * frontmatter block verbatim. Keeps everything through the closing `---`
+     * line, then appends `\n` + newBody. A file with no leading frontmatter is
+     * treated as all-body. Pure string work — used by _saveEdit to persist the
+     * Notes textarea back into the task's OWN file only.
+     */
+    static _replaceBody(fileText, newBody) {
+        const s = String(fileText == null ? '' : fileText);
+        const body = String(newBody == null ? '' : newBody);
+        const m = /^(---\r?\n[\s\S]*?\r?\n---)\r?\n?/.exec(s);
+        const header = m ? m[1] : '';
+        if (!header) return body ? body + (body.endsWith('\n') ? '' : '\n') : '';
+        return header + '\n' + (body ? body + (body.endsWith('\n') ? '' : '\n') : '');
     }
 }
