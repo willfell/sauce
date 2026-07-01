@@ -75,11 +75,50 @@ class BudgetAllocationsEditor {
 
     // ----- Full-picture line -----
 
+    // Income → Fixed · Debt · Savings · Discretionary rendered as a mini-waterfall
+    // that sums to a bold "Total allocated", with a delta note reconciling against
+    // income (fully allocated / +$X over / $X unallocated). The component figures
+    // are a VIEW; the discretionary envelope + over-flag stay categories[]-only.
     _renderFullPicture(root, view) {
         const t = (view && view.totals) || {};
-        const line = root.createEl("div", { cls: "bae-fullpicture" });
-        line.textContent = `Income ${this._fmt(t.income)} → Fixed ${this._fmt(t.fixed)} · Debt ${this._fmt(t.debt)} · Savings ${this._fmt(t.savings)} · Discretionary ${this._fmt(t.discretionary)}`;
-        line.style.cssText = "font-size: 0.9em; font-variant-numeric: tabular-nums; color: var(--text-normal); padding-bottom: 12px; margin-bottom: 4px; border-bottom: 1px solid var(--background-modifier-border);";
+        const wrap = root.createEl("div", { cls: "bae-fullpicture" });
+        wrap.style.cssText = "padding-bottom: 12px; margin-bottom: 4px; border-bottom: 1px solid var(--background-modifier-border); font-variant-numeric: tabular-nums;";
+
+        const head = wrap.createEl("div");
+        head.textContent = `Income ${this._fmt(t.income)}`;
+        head.style.cssText = "font-size: 0.9em; font-weight: 600; margin-bottom: 4px;";
+
+        const parts = [["Fixed", t.fixed], ["Debt", t.debt], ["Savings", t.savings], ["Discretionary", t.discretionary]];
+        for (const [label, val] of parts) {
+            const r = wrap.createEl("div");
+            r.style.cssText = "display: flex; justify-content: space-between; font-size: 0.82em; color: var(--text-muted); padding: 1px 0 1px 12px;";
+            r.createEl("span").textContent = label;
+            const v = r.createEl("span");
+            v.textContent = this._fmt(val);
+            v.style.cssText = "color: var(--text-normal);";
+        }
+
+        const totalAllocated = (Number(t.fixed) || 0) + (Number(t.debt) || 0) + (Number(t.savings) || 0) + (Number(t.discretionary) || 0);
+        const income = Number(t.income) || 0;
+        const delta = totalAllocated - income;
+
+        const totalRow = wrap.createEl("div");
+        totalRow.style.cssText = "display: flex; justify-content: space-between; font-size: 0.85em; font-weight: 600; margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--background-modifier-border);";
+        totalRow.createEl("span").textContent = "Total allocated";
+        totalRow.createEl("span").textContent = this._fmt(totalAllocated);
+
+        if (income > 0) {
+            const eps = 0.005;
+            let note, color;
+            if (Math.abs(delta) < eps) { note = "fully allocated"; color = "#16a34a"; }
+            else {
+                note = delta > 0 ? `+${this._fmt(delta)} over income` : `${this._fmt(-delta)} unallocated`;
+                color = Math.abs(delta) < 1 ? "var(--text-muted)" : "#b45309";
+            }
+            const noteEl = wrap.createEl("div");
+            noteEl.textContent = note;
+            noteEl.style.cssText = `font-size: 0.72em; text-align: right; margin-top: 2px; color: ${color};`;
+        }
     }
 
     // ----- Debt / Savings section (grouped rows + per-group total) -----
