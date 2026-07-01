@@ -424,6 +424,44 @@ withTempVault((vault) => {
         // malformed (trailing-marker) existing hub.
     }
 
+    // ===== HC-V0151-SEED-MIGRATE-PAYCHECK-ARCHIVE-* — applyFinancePaycheckArchiveLegacy =====
+    // The seed carries a LEGACY per-check paycheck note at
+    // spice/finance/paychecks/2026-05/Paycheck-2026-05-01.md (type: paycheck,
+    // pay_period_start present, NO deposits[] array). The month rollup only reads
+    // the NEW month-keyed notes (deposits[]) and excludes _archive/, so the
+    // clean-cutover heal MOVES every legacy per-check note into
+    // spice/finance/paychecks/_archive/ (copy + remove — nothing is deleted).
+    // Asserts run AFTER the idempotency phase's first install; the move happens on
+    // the FIRST install only (second install finds it already archived → no-op),
+    // so this is inherently idempotent against the IDEMP snapshot below.
+    // (The V0151 prefix is a cosmetic label; the release pipeline computes the
+    // real shipping version — this is not a version gate.)
+    {
+        ok(
+            "HC-V0151-SEED-MIGRATE-PAYCHECK-ARCHIVE-1 legacy per-check note GONE from its original path",
+            !helpers.fileExists(vault, "spice/finance/paychecks/2026-05/Paycheck-2026-05-01.md")
+        );
+        ok(
+            "HC-V0151-SEED-MIGRATE-PAYCHECK-ARCHIVE-2 legacy per-check note PRESENT under paychecks/_archive/",
+            helpers.fileExists(vault, "spice/finance/paychecks/_archive/Paycheck-2026-05-01.md")
+        );
+        // Archived copy preserves the original body byte-for-byte.
+        let archivedOk = false;
+        try {
+            const orig = helpers.readNote(SEED_DIR, "spice/finance/paychecks/2026-05/Paycheck-2026-05-01.md");
+            const archived = helpers.readNote(vault, "spice/finance/paychecks/_archive/Paycheck-2026-05-01.md");
+            archivedOk = orig === archived;
+        } catch (e) {}
+        ok(
+            "HC-V0151-SEED-MIGRATE-PAYCHECK-ARCHIVE-3 archived copy preserves the original body byte-for-byte",
+            archivedOk
+        );
+        ok(
+            "HC-V0151-SEED-MIGRATE-PAYCHECK-ARCHIVE-4 .sauce-backup snapshot exists",
+            helpers.dirExists(vault, ".sauce-backup")
+        );
+    }
+
     // ===== Idempotency phase: snapshot, second install, compare =====
     const firstSnapshot = helpers.snapshotTree(vault);
     const result2 = helpers.runInstall(vault, REPO_ROOT);
