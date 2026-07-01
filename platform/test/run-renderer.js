@@ -1989,6 +1989,76 @@ async function testFF22PaycheckSummaryLegacy() {
   return pass;
 }
 
+// FF23 — PaycheckDefaultsEditor edit sets+preserves a per-expense `deposit`, and
+// merges on edit so an installer-added extra field (e.g. `debt`) survives even
+// though the modal doesn't return it (Object.assign({}, current, result)).
+async function testFF23PaycheckDefaultsDepositMerge() {
+  console.log('\n=== FF23 — PaycheckDefaultsEditor edit sets deposit + preserves extra field (merge-on-edit) ===');
+  const app = makeApp({ fileExistsHook: (p) => ({ path: p }) });
+  const Cls = loadFinanceClass('PaycheckDefaultsEditor', app);
+  const inst = new Cls();
+  const store = { expenses: [
+    // Row carries an extra `debt` field the modal never returns; must survive.
+    { item: 'Apple', amount: 950, category: 'Credit Payment', debt: '[[Debt-Apple-Card]]', deposit: 1 },
+  ] };
+  inst._mutate = async (file, mutator) => {
+    const fm = { expenses: store.expenses.slice() };
+    await mutator(fm);
+    store.expenses = fm.expenses;
+  };
+  // Modal returns edited fields including a NEW deposit=2, but NOT the debt field.
+  inst._promptForExpense = async () => ({ item: 'Apple', amount: 950, category: 'Credit Payment', url: '', deposit: 2 });
+  const dv = makeDvWithCurrentAndFrontmatter(
+    { name: 'Paycheck Defaults', path: 'spice/finance/Paycheck Defaults.md' },
+    { expenses: store.expenses.slice() }
+  );
+  const file = app.vault.getAbstractFileByPath('spice/finance/Paycheck Defaults.md');
+  await inst._editFlow(file, dv, 0, store.expenses[0]);
+  const setDeposit = store.expenses[0].deposit === 2;
+  const keptDebt = store.expenses[0].debt === '[[Debt-Apple-Card]]';
+  console.log(`  deposit set to 2: ${setDeposit} ; extra debt field survived merge: ${keptDebt}`);
+  const pass = setDeposit && keptDebt;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
+// FF24 — PaycheckDefaultsEditor renders a deposit_schedule editor section and
+// editing a schedule row writes fm.deposit_schedule (render-from-authoritative).
+async function testFF24PaycheckDefaultsScheduleEditor() {
+  console.log('\n=== FF24 — PaycheckDefaultsEditor renders + edits deposit_schedule ===');
+  const app = makeApp({ fileExistsHook: (p) => ({ path: p }) });
+  const Cls = loadFinanceClass('PaycheckDefaultsEditor', app);
+  const inst = new Cls();
+  const store = { expenses: [], deposit_schedule: [{ day: 1, amount: 4500 }, { day: 15, amount: 4500 }] };
+  inst._mutate = async (file, mutator) => {
+    const fm = { expenses: store.expenses.slice(), deposit_schedule: store.deposit_schedule.slice() };
+    await mutator(fm);
+    store.expenses = fm.expenses;
+    store.deposit_schedule = fm.deposit_schedule;
+  };
+  // Render: the schedule section shows both schedule rows (day + amount).
+  const dv = makeDvWithCurrentAndFrontmatter(
+    { name: 'Paycheck Defaults', path: 'spice/finance/Paycheck Defaults.md' },
+    { expenses: store.expenses.slice(), deposit_schedule: store.deposit_schedule.slice() }
+  );
+  await inst.render(dv);
+  const root = findClass(dv.container, 'pde-root');
+  const texts = root ? collectAll(root, () => true).map(n => n.textContent).filter(t => typeof t === 'string') : [];
+  const joined = texts.join(' | ');
+  const showsScheduleLabel = joined.toLowerCase().includes('deposit schedule');
+  const showsDay1 = joined.includes('1') && (joined.includes('4500') || joined.includes('4,500') || joined.includes('4500.00') || joined.includes('4,500.00'));
+  const showsDay15 = joined.includes('15');
+  // Edit: stub the row prompt to change deposit 1's amount → 5000, write authoritatively.
+  inst._promptForScheduleRow = async () => ({ day: 1, amount: 5000 });
+  const file = app.vault.getAbstractFileByPath('spice/finance/Paycheck Defaults.md');
+  await inst._scheduleEditFlow(file, dv, 0, store.deposit_schedule[0]);
+  const wroteEdit = store.deposit_schedule[0].amount === 5000 && store.deposit_schedule[0].day === 1;
+  console.log(`  schedule label: ${showsScheduleLabel} ; day1/day15 rows: ${showsDay1}/${showsDay15} ; edit wrote amount 5000: ${wroteEdit}`);
+  const pass = !!root && showsScheduleLabel && showsDay1 && showsDay15 && wroteEdit;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
 // FF11 — BudgetCategoriesEditor delete re-renders from the authoritative array,
 // not the frozen dv.current(). Same render-from-authoritative proof as FF9.
 async function testFF11BudgetCategoriesDeleteRendersAuthoritative() {
@@ -2910,6 +2980,8 @@ async function testRendHasNotes() {
       results.push(['FF20 paycheck-editor-legacy-flat-render', await testFF20PaycheckLegacyFlatRender()]);
       results.push(['FF21 paycheck-summary-per-deposit-line', await testFF21PaycheckSummaryPerDeposit()]);
       results.push(['FF22 paycheck-summary-legacy-single-amount', await testFF22PaycheckSummaryLegacy()]);
+      results.push(['FF23 paycheck-defaults-editor-deposit-merge', await testFF23PaycheckDefaultsDepositMerge()]);
+      results.push(['FF24 paycheck-defaults-editor-schedule-editor', await testFF24PaycheckDefaultsScheduleEditor()]);
       results.push(['FF11 budget-categories-editor-delete-renders-authoritative', await testFF11BudgetCategoriesDeleteRendersAuthoritative()]);
       results.push(['FF12 budget-categories-editor-edit-preserves-extra', await testFF12BudgetCategoriesEditPreservesExtra()]);
       results.push(['FF13 budget-defaults-editor-delete-renders-authoritative', await testFF13BudgetDefaultsDeleteRendersAuthoritative()]);
