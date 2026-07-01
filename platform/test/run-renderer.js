@@ -1863,9 +1863,14 @@ async function testFF15BudgetAllocationsRendersSections() {
   const joined = texts.join(' | ');
   const hasDebtRow = texts.includes('Apple Card');
   const hasSavingsRow = texts.includes('Emergency Fund');
-  const hasFullPicture = joined.includes('Income $9000.00') && joined.includes('Discretionary $2950.00') && joined.includes('Debt $380.00') && joined.includes('Savings $300.00');
+  // Waterfall: income header + Fixed/Debt/Savings/Discretionary component values +
+  // a "Total allocated" sum (3851+380+300+2950=7481) + delta note vs income (1519 unallocated).
+  const hasFullPicture = joined.includes('Income $9000.00')
+    && joined.includes('$3851.00') && joined.includes('$380.00') && joined.includes('$300.00') && joined.includes('$2950.00')
+    && joined.includes('Total allocated') && joined.includes('$7481.00')
+    && joined.includes('unallocated');
   const noWrites = app.__captured_writes.length === 0;
-  console.log(`  bae-root: ${!!root} ; debt row: ${hasDebtRow} ; savings row: ${hasSavingsRow} ; full-picture: ${hasFullPicture} ; no writes: ${noWrites}`);
+  console.log(`  bae-root: ${!!root} ; debt row: ${hasDebtRow} ; savings row: ${hasSavingsRow} ; full-picture waterfall+total: ${hasFullPicture} ; no writes: ${noWrites}`);
   const pass = !!root && hasDebtRow && hasSavingsRow && hasFullPicture && noWrites;
   console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
   return pass;
