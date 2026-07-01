@@ -160,6 +160,54 @@ class TaskDialog {
         }
     }
 
+    /**
+     * Complete a task by PATH (no dialog). Resolves app + the task file from the
+     * path, then routes through the SAME single-file _markDone internal that the
+     * edit-dialog's Done button uses (status=done + completed_at, then move to
+     * spice/tasks/_done/). Consumed by surface widgets (TaskTodayList's row
+     * checkbox) so a one-tap complete never opens the modal. Returns
+     * { ok: true } on success or { ok: false, reason } so the caller can revert
+     * its optimistic UI. Never throws.
+     */
+    async markDone(path) {
+        try {
+            const { app, file } = this._resolveFile(path);
+            if (!app) return { ok: false, reason: 'app unavailable' };
+            if (!file) return { ok: false, reason: 'task file not found' };
+            await this._markDone(app, file);
+            return { ok: true };
+        } catch (e) {
+            return { ok: false, reason: (e && (e.message || String(e))) || 'unknown' };
+        }
+    }
+
+    /**
+     * Recoverable-delete a task by PATH (no dialog). Routes through the SAME
+     * single-file _markDeleted internal that the edit-dialog's Delete button
+     * uses (status=deleted, then move to spice/tasks/_trash/). Returns
+     * { ok: true } / { ok: false, reason }. Never throws.
+     */
+    async markDeleted(path) {
+        try {
+            const { app, file } = this._resolveFile(path);
+            if (!app) return { ok: false, reason: 'app unavailable' };
+            if (!file) return { ok: false, reason: 'task file not found' };
+            await this._markDeleted(app, file);
+            return { ok: true };
+        } catch (e) {
+            return { ok: false, reason: (e && (e.message || String(e))) || 'unknown' };
+        }
+    }
+
+    /** Resolve { app, file } from a vault-relative task path (browser-side). */
+    _resolveFile(path) {
+        const app = (typeof window !== 'undefined' && window.app) || (typeof globalThis !== 'undefined' && globalThis.app) || null;
+        const file = (app && app.vault && typeof app.vault.getAbstractFileByPath === 'function')
+            ? app.vault.getAbstractFileByPath(String(path == null ? '' : path))
+            : null;
+        return { app: app, file: file };
+    }
+
     _render(opts) {
         const app = (typeof window !== 'undefined' && window.app) || (typeof globalThis !== 'undefined' && globalThis.app);
         if (!app) { try { new Notice('TaskDialog: app unavailable'); } catch (_e) {} return; }

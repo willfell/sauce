@@ -11,7 +11,8 @@
   ],
   "customjs_classes": [
     "TaskEntity",
-    "TaskDialog"
+    "TaskDialog",
+    "TaskTodayList"
   ],
   "files": [
     {
@@ -21,6 +22,10 @@
     {
       "source": "task-dialog.js",
       "dest": "{{scripts_path}}/task-entity/task-dialog.js"
+    },
+    {
+      "source": "task-today-list.js",
+      "dest": "{{scripts_path}}/task-entity/task-today-list.js"
     }
   ],
   "post_install": [],

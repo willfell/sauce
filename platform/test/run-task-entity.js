@@ -154,5 +154,44 @@ ok('TD-5 donePath rewrites prefix into _done', () => {
     'got ' + TaskDialog.donePath('spice/tasks/task-a.md'));
 });
 
+// ---------- TaskTodayList static helpers (pure) ----------
+
+// TaskTodayList is the daily live-query widget. Its render() is browser-only
+// (exercised in-vault), but buildBands is a PURE partition helper mirroring
+// TaskEntity.queryToday: open-only, today = scheduled === todayStr, overdue =
+// scheduled < todayStr. We load it the same bare-class way and call the static
+// through an INSTANCE so a regression to instance-less statics fails loudly.
+const TaskTodayListClass = loadClass('mechanisms/task-entity/task-today-list.js', 'TaskTodayList');
+const TaskTodayList = new TaskTodayListClass();
+
+// TTL-1. buildBands partitions parsed tasks into today / overdue (open only).
+ok('TTL-1 buildBands partitions today + overdue (open only)', () => {
+  const res = TaskTodayList.buildBands([
+    { scheduled: '2026-07-01', status: 'open' },
+    { scheduled: '2026-06-29', status: 'open' },
+    { scheduled: '2026-07-01', status: 'done' },
+  ], '2026-07-01');
+  assert(res.today.length === 1, 'today = the single open 07-01: got ' + res.today.length);
+  assert(res.overdue.length === 1, 'overdue = the open 06-29: got ' + res.overdue.length);
+});
+
+// TTL-2. buildBands excludes future-scheduled + unscheduled open tasks.
+ok('TTL-2 buildBands excludes future + unscheduled open tasks', () => {
+  const res = TaskTodayList.buildBands([
+    { scheduled: '2026-07-02', status: 'open' },  // future → neither
+    { scheduled: '', status: 'open' },            // unscheduled → neither
+    { scheduled: null, status: 'open' },          // unscheduled → neither
+  ], '2026-07-01');
+  assert(res.today.length === 0, 'no today: got ' + res.today.length);
+  assert(res.overdue.length === 0, 'no overdue: got ' + res.overdue.length);
+});
+
+// TTL-3. buildBands tolerates a null/undefined list (never throws).
+ok('TTL-3 buildBands tolerates non-array input', () => {
+  const res = TaskTodayList.buildBands(null, '2026-07-01');
+  assert(Array.isArray(res.today) && res.today.length === 0, 'today empty array');
+  assert(Array.isArray(res.overdue) && res.overdue.length === 0, 'overdue empty array');
+});
+
 console.log(`\nrun-task-entity: ${passes} passed, ${fails} failed`);
 process.exit(fails === 0 ? 0 : 1);
