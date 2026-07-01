@@ -87,6 +87,11 @@ const pages = [
 
   // pageCount: Page-A1 + Page-B1 both sit under spice/wiki/a so count should be 2
   ok('W1b pageCount for folder a === 2', countA === 2);
+
+  // #2 fix: the section entry captures the REAL hub-note path (so cards link to it,
+  // not a reconstructed folder+slug+".md" that 404s on case-sensitive filesystems).
+  ok('W1c hubPath resolves the real section-hub note path',
+     subA && subA.hubPath === 'spice/wiki/a/A Hub.md');
 }
 
 // ---------------------------------------------------------------------------

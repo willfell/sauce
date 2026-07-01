@@ -34,12 +34,15 @@ function makeEl(tag, txt, opts) {
 
 // Stub dv: dv.current() returns the provided cur object; dv.el captures elements;
 // dv.pages returns an empty Dataview-like proxy (legacy code calls it from _resolveProjectFromPath).
-function makeDv(cur) {
+function makeDv(cur, pagesData) {
   const els = [];
+  const data = Array.isArray(pagesData) ? pagesData : [];
+  // Array-like + Dataview-like: supports .where(fn), .array(), Array.from(), and .length.
+  const result = { where: (fn) => data.filter(fn), array: () => data, length: data.length };
   return {
     current: () => cur,
     el: (tag, txt, opts) => { const e = makeEl(tag, txt, opts); els.push(e); return e; },
-    pages: () => ({ where: () => [], length: 0 }),
+    pages: () => result,
     _els: els
   };
 }
@@ -428,28 +431,49 @@ async function runAsync(fn) { return await fn(); }
     if (!all) console.log(`    HTML: ${html}`);
   }
 
-  // ── BC-WIKI-1: deep wiki-page (root + two folder segments + current) ────
+  // ── BC-WIKI-1: deep wiki-page — intermediate crumbs resolve section-hub TITLE + real path ──
   {
+    // Section hubs present in the vault: folders are slugified (infra/aws), hubs Display-Case.
+    const sectionHubs = [
+      { type: 'wiki-section', title: 'Infra', file: { folder: 'spice/wiki/infra', path: 'spice/wiki/infra/Infra.md', name: 'Infra.md' } },
+      { type: 'wiki-section', title: 'AWS', file: { folder: 'spice/wiki/infra/aws', path: 'spice/wiki/infra/aws/AWS.md', name: 'AWS.md' } },
+    ];
     const dv = makeDv({
       type: 'wiki-page',
       title: 'VPC Peering',
       file: { path: 'spice/wiki/infra/aws/VPC Peering.md', name: 'VPC Peering.md' }
-    });
+    }, sectionHubs);
     const inst = new NewBreadcrumb();
     await inst.render(dv);
     const wrap = dv._els[0];
     const html = wrap ? wrap.innerHTML : '';
     // Root crumb: linked to spice/wiki/Wiki.md with label "Wiki"
     const hasRoot = html.includes('href="spice/wiki/Wiki.md"') && html.includes('>Wiki<');
-    // infra crumb: linked, label "infra"
-    const hasInfra = html.includes('href="spice/wiki/infra/infra.md"') && html.includes('>infra<');
-    // aws crumb: linked, label "aws"
-    const hasAws = html.includes('href="spice/wiki/infra/aws/aws.md"') && html.includes('>aws<');
+    // infra crumb: linked to the REAL hub path, label is the display TITLE "Infra"
+    const hasInfra = html.includes('href="spice/wiki/infra/Infra.md"') && html.includes('>Infra<');
+    // aws crumb: linked to the REAL hub path, label is the display TITLE "AWS"
+    const hasAws = html.includes('href="spice/wiki/infra/aws/AWS.md"') && html.includes('>AWS<');
     // current crumb: not linked (span), label "VPC Peering"
     const hasCurrent = html.includes('>VPC Peering<') && !html.includes('href="spice/wiki/infra/aws/VPC Peering.md"');
-    ok('BC-WIKI-1 deep page: root+infra+aws+current', !!wrap && hasRoot && hasInfra && hasAws && hasCurrent);
+    ok('BC-WIKI-1 deep page: root+Infra+AWS(title+realpath)+current', !!wrap && hasRoot && hasInfra && hasAws && hasCurrent);
     if (!wrap || !hasRoot || !hasInfra || !hasAws || !hasCurrent)
       console.log(`    BC-WIKI-1 HTML: ${html}`);
+  }
+
+  // ── BC-WIKI-1b: fallback — no section hub found → uses folder segment + <seg>.md link ──
+  {
+    const dv = makeDv({
+      type: 'wiki-page',
+      title: 'Orphan',
+      file: { path: 'spice/wiki/loosedir/Orphan.md', name: 'Orphan.md' }
+    }); // no pagesData → no hub resolvable
+    const inst = new NewBreadcrumb();
+    await inst.render(dv);
+    const html = dv._els[0] ? dv._els[0].innerHTML : '';
+    const fallbackCrumb = html.includes('href="spice/wiki/loosedir/loosedir.md"') && html.includes('>loosedir<');
+    const hasCurrent = html.includes('>Orphan<');
+    ok('BC-WIKI-1b fallback: segment label + <seg>.md link when no hub found', fallbackCrumb && hasCurrent);
+    if (!fallbackCrumb || !hasCurrent) console.log(`    BC-WIKI-1b HTML: ${html}`);
   }
 
   // ── BC-WIKI-2: section hub (root + current, no self-crumb for folder) ───

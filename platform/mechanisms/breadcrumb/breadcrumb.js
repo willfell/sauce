@@ -173,16 +173,24 @@ class Breadcrumb {
         // (it would be a self-crumb — e.g. "infra" → "Infra.md" which IS this note).
         const isLastSeg = i === relSegs.length - 1;
         if (isLastSeg && isSectionHub) continue;
-        // Link target: <accumulated_path>/<DisplaySeg>.md
-        // The section hub is named with the folder's display title. Since we only
-        // have the folder segment text (e.g. "infra"), we use it capitalised as the
-        // basename — matching the title-cased convention used in the seed + manifest.
-        // The link comparison in the harness asserts the folder name is present + linked;
-        // we use the raw segment (not title-cased) to match the folder name exactly,
-        // which is what creates e.g. "spice/wiki/infra/infra.md". If the plan ever
-        // stores a display title, it can be read from FM; for now folder-segment=basename.
-        const segLink = accumulated + "/" + seg + ".md";
-        segments.push(this._link(seg, segLink));
+        // Resolve the section-hub note living DIRECTLY in `accumulated` so the crumb
+        // shows its display title + links to its real path. Folder names are slugified
+        // (lower-case, e.g. "infra"/"aws") but hub notes are Display-Case ("Infra.md"/
+        // "AWS.md") — using the raw segment would render lower-case labels and produce
+        // links that only resolve on a case-insensitive filesystem. Fall back to the
+        // segment when no hub is found (defensive; e.g. a folder with pages but no hub).
+        let segLabel = seg;
+        let segLink = accumulated + "/" + seg + ".md";
+        try {
+          const raw = dv.pages('"' + accumulated + '"');
+          const list = raw && typeof raw.array === "function" ? raw.array() : Array.from(raw || []);
+          const hub = list.find((p) => p && p.type === "wiki-section" && p.file && p.file.folder === accumulated);
+          if (hub && hub.file) {
+            segLabel = (hub.title && String(hub.title).trim()) || (hub.file.name ? String(hub.file.name).replace(/\.md$/, "") : seg);
+            segLink = hub.file.path;
+          }
+        } catch (_e) { /* keep the folder-segment fallback */ }
+        segments.push(this._link(segLabel, segLink));
       }
     }
 

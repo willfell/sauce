@@ -2,8 +2,11 @@ class WikiLeafActions {
     render(dv) {
         const cur = dv.current();
         if (!cur || !cur.file) return;
-        if (cur.type !== "wiki-page" && cur.type !== "wiki-section") return;
-        const pages = dv.pages('"spice/wiki"').array ? dv.pages('"spice/wiki"').array() : Array.from(dv.pages('"spice/wiki"'));
+        // Move applies to leaf pages only. Moving a section hub would rename just the
+        // hub note and orphan its folder's contents — a folder-move is out of scope for v1.
+        if (cur.type !== "wiki-page") return;
+        const wikiPages = dv.pages('"spice/wiki"');
+        const pages = wikiPages.array ? wikiPages.array() : Array.from(wikiPages);
         const options = this._buildMoveOptions(pages, cur.file.path);
         customJS.AccentButton.render(dv.container, {
             label: "Move",

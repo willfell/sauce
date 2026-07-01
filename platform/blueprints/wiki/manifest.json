@@ -4,7 +4,7 @@
   "kind": "blueprint",
   "module_directory": "wiki",
   "skills_dir": ".claude/skills/wiki",
-  "description": "Standalone, project-independent, arbitrary-depth knowledge base. spice/wiki/ root hub (wiki-hub) → section hubs (wiki-section) nested to any depth → wiki-page leaves. Folder-is-truth: the folder path IS the hierarchy; frontmatter carries identity only. Reuses nav-buttons, entity-create, section-label, breadcrumb (path_walk mode), cards, accent-button, render-safe, open-helpers, doc-search. WikiTree renders hub + section views recursively; WikiMove relocates pages/sections between folders; WikiLeafActions renders the Move action. C1 decision: entity-create has no {{current_file.folder}} token; using dir-frontmatter fallback (dir field on hub+sections, child create routes via {{current_file.frontmatter.dir}}). Icon: book-open absent from registry; using 'journal' for the wiki nav button.",
+  "description": "Standalone, project-independent, arbitrary-depth knowledge base. spice/wiki/ root hub (wiki-hub) → section hubs (wiki-section) nested to any depth → wiki-page leaves. Folder-is-truth: the folder path IS the hierarchy; frontmatter carries identity only. Reuses nav-buttons, entity-create, section-label, breadcrumb (path_walk mode), cards, accent-button, render-safe, open-helpers, doc-search. WikiTree renders hub + section views recursively; WikiMove relocates pages/sections between folders; WikiLeafActions renders the Move action. Routing: child entities route by the {{current_file.folder}} token (the active note real folder) so nesting is robust to a missing frontmatter field. Icon: journal (book-open absent from the icons registry).",
   "depends_on": [
     { "name": "nav-buttons", "range": ">=2.8.0" },
     { "name": "customjs-guard", "range": ">=1.0.0" },
@@ -59,13 +59,13 @@
         { "key": "slug", "label": "(derived from name)", "type": "string", "derive": "slugify(prompts.name)" }
       ],
       "destination": {
-        "folder_prefix": "{{current_file.frontmatter.dir}}/{{prompts.slug}}",
+        "folder_prefix": "{{current_file.folder}}/{{prompts.slug}}",
         "filename_prefix": "{{prompts.name|sanitize-filename}}"
       },
       "frontmatter_template": {
         "type": "wiki-section",
         "title": "{{prompts.name}}",
-        "dir": "{{current_file.frontmatter.dir}}/{{prompts.slug}}",
+        "dir": "{{current_file.folder}}/{{prompts.slug}}",
         "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
         "tags": ["wiki-section"]
       },
@@ -79,7 +79,7 @@
         { "key": "title", "label": "Page title", "type": "string", "required": true, "validate": "safe-filename" }
       ],
       "destination": {
-        "folder_prefix": "{{current_file.frontmatter.dir}}",
+        "folder_prefix": "{{current_file.folder}}",
         "filename_prefix": "{{prompts.title|sanitize-filename}}"
       },
       "frontmatter_template": {

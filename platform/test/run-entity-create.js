@@ -223,6 +223,15 @@ ok("EC-5 _substitute({{now.YYYY-MM-DD}}) === 2026-05-14",
 ok("EC-7 _substitute({{prompts.title}}) === X",
     inst._substitute("{{prompts.title}}", baseCtx({ prompts: { title: "X" } })) === "X");
 
+// 7b. _substitute({{current_file.folder}}) — routes new entities by the active
+// note's REAL folder (used by the wiki blueprint for folder-is-truth nesting).
+ok("EC-FOLDER-1 {{current_file.folder}} uses Dataview file.folder",
+    inst._substitute("{{current_file.folder}}", baseCtx({ current_file: { file: { folder: "spice/wiki/infra", path: "spice/wiki/infra/Infra.md" } } })) === "spice/wiki/infra");
+ok("EC-FOLDER-2 {{current_file.folder}} path-derived fallback when file.folder absent",
+    inst._substitute("{{current_file.folder}}", baseCtx({ current_file: { file: { path: "spice/wiki/a/b/Page.md" } } })) === "spice/wiki/a/b");
+ok("EC-FOLDER-3 {{current_file.folder}} === '' when no current_file",
+    inst._substitute("{{current_file.folder}}", baseCtx()) === "");
+
 // 8. _substitute with |number pipe via _renderFrontmatter (end-to-end)
 {
     const ctx = baseCtx({ prompts: { amount: "42.5" } });

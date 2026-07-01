@@ -658,6 +658,20 @@ class EntityCreate {
             return v == null ? "" : String(v);
         });
 
+        // 3c. {{current_file.folder}} — the active note's parent folder (Dataview
+        // file.folder), with a path-derived fallback. Lets blueprints route new
+        // entities relative to the current note's ACTUAL folder instead of a
+        // frontmatter field that a hand-made note might be missing (which would
+        // otherwise resolve to "" and route the new note to the vault root).
+        out = out.replace(/\{\{current_file\.folder\}\}/g, () => {
+            const file = ctx && ctx.current_file && ctx.current_file.file;
+            if (!file) return "";
+            if (file.folder != null && String(file.folder) !== "") return String(file.folder);
+            const p = file.path != null ? String(file.path) : "";
+            const i = p.lastIndexOf("/");
+            return i >= 0 ? p.slice(0, i) : "";
+        });
+
         // 4. {{prompts.<key>|<pipe>}}
         out = out.replace(/\{\{prompts\.([a-zA-Z0-9_]+)\|([a-zA-Z0-9_-]+)\}\}/g, (_, key, pipe) => {
             const v = ctx.prompts ? ctx.prompts[key] : undefined;

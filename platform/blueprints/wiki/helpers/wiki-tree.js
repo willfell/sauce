@@ -37,7 +37,7 @@ class WikiTree {
                 layout: "row",
                 title: (s) => s.title,
                 icon: () => folderIcon,
-                link: (s) => s.folder + "/" + s.title + ".md",
+                link: (s) => s.hubPath || (s.folder + "/" + s.title + ".md"),
                 meta: (s) => {
                     if (s.pageCount === 0) return undefined;
                     const ago = window.moment ? window.moment(s.maxMtime).fromNow() : "";
@@ -106,7 +106,6 @@ class WikiTree {
     }
 
     _immediateChildFolders(scopePath, pages) {
-        const depth = scopePath.split("/").length;
         const seen = new Map();
         for (const p of pages) {
             if (!p || !p.file || !p.file.path) continue;
@@ -115,8 +114,16 @@ class WikiTree {
             const segs = folder.slice(scopePath.length + 1).split("/");
             if (segs.length < 1) continue;
             const child = scopePath + "/" + segs[0];
-            if (!seen.has(child)) seen.set(child, { folder: child, title: segs[0], pageCount: 0, maxMtime: 0 });
+            // Default title = folder slug; real title/link resolved from the child's own
+            // section-hub note below (folders are slugified, hub notes are Display-Case, so
+            // reconstructing folder+slug+".md" would 404 on case-sensitive filesystems).
+            if (!seen.has(child)) seen.set(child, { folder: child, title: segs[0], hubPath: null, pageCount: 0, maxMtime: 0 });
             const entry = seen.get(child);
+            // Capture the child's section-hub note (the wiki-section living DIRECTLY in `child`).
+            if (p.type === "wiki-section" && folder === child) {
+                entry.title = (p.title && String(p.title).trim()) || (p.file.name ? String(p.file.name).replace(/\.md$/, "") : entry.title);
+                entry.hubPath = p.file.path;
+            }
             if (p.type === "wiki-page") {
                 entry.pageCount++;
                 const ts = p.file.mtime && p.file.mtime.ts != null ? p.file.mtime.ts : 0;
