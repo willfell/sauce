@@ -45,6 +45,22 @@ class ToDoLeafActions {
         };
 
         const openNewTask = () => {
+            // v0.14.0 (task-entity daily wiring, Phase 1): the daily to-do surface
+            // (type: to-do) now creates tasks as one-file-per-task notes via the
+            // task-entity mechanism's TaskDialog. Other surfaces (the recurring
+            // registry, per-project To-Do notes) stay on the legacy ToDoCreateTask
+            // path until their own phases wire task-entity — do NOT reroute them here.
+            if (noteType === 'to-do') {
+                try {
+                    window.customJS.TaskDialog.open({
+                        surface: 'daily',
+                        today: window.moment().format('YYYY-MM-DD'),
+                    });
+                } catch (e) {
+                    new Notice('Could not open task dialog: ' + (e.message || e), 6000);
+                }
+                return;
+            }
             try {
                 customJS.ToDoCreateTask.open({
                     preselectTab: noteType === 'to-do-recurring' ? 'recurring' : 'one-shot',

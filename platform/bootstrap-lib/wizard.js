@@ -62,6 +62,13 @@ const DEFAULT_MECHANISMS_CHECKED = [
                      // release; pre-include so fresh-vault bootstrap doesn't
                      // skip them. Same class of bug as the section-label entry
                      // above.
+    "task-entity",   // v0.14.0 (to-do) — the to-do blueprint (in the default
+                     // blueprint set) gains a depends_on task-entity >=0.1.0 in
+                     // this release to render the daily surface via TaskTodayList
+                     // + TaskDialog; pre-include so fresh-vault bootstrap doesn't
+                     // skip to-do with "depends on task-entity ... not
+                     // subscribed". Same class of bug as the breadcrumb entry
+                     // above.
     "nav-buttons",
     "cards",
     "accent-button",
