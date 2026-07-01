@@ -13696,6 +13696,14 @@ async function caseV01150ContentMonthsExists() {
     /MonthsCards/.test(body));
   assertTrue("V01150-CME-3: body contains FinanceNav block",
     /FinanceNav/.test(body));
+  // The `// entity-create:month` marker must LEAD the FinanceNav block (byte-
+  // matching content/Budgets.md). A trailing marker comments out Dataview's
+  // injected closing brace → "Evaluation Error: eval@[native code]" on render.
+  const cmeMarkerIdx = body.indexOf("// entity-create:month");
+  const cmeNavIdx = body.indexOf('class: "FinanceNav"');
+  assertTrue("V01150-CME-4: entity-create:month marker present and LEADS the FinanceNav call",
+    cmeMarkerIdx !== -1 && cmeNavIdx !== -1 && cmeMarkerIdx < cmeNavIdx,
+    `markerIdx=${cmeMarkerIdx} navIdx=${cmeNavIdx}`);
 }
 
 async function caseV01150ContentFinanceLanding() {

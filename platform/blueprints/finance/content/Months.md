@@ -12,6 +12,7 @@ await dv.view("{{views_path}}/customjs-guard", { class: "SpaceNavButtons" });
 ```
 
 ```dataviewjs
+// entity-create:month — installer-managed; do not delete this comment
 await dv.view("{{views_path}}/customjs-guard", { class: "FinanceNav" });
 ```
 
