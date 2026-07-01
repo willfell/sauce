@@ -73,6 +73,11 @@
       "path": "mechanisms/breadcrumb"
     },
     {
+      "name": "doc-search",
+      "version": "0.1.0",
+      "path": "mechanisms/doc-search"
+    },
+    {
       "name": "nav-buttons",
       "version": "2.8.0",
       "path": "mechanisms/nav-buttons"

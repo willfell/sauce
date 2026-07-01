@@ -1,0 +1,14 @@
+{
+  "name": "doc-search",
+  "version": "0.1.0",
+  "description": "Shared doc-search primitive. customJS.DocSearch.render(dv, opts) renders a permanent filter strip (text input + dynamic tag chips + scoped Obsidian-search button, 150ms debounce, localStorage-persisted keyed by scopePath) + a separate resultsContainer consumers render into; customJS.DocSearch.matches(page, ctx) is the pure text+tag AND-logic predicate. Entity-agnostic via opts.entityType (default \"doc-note\"). Promoted verbatim from the project blueprint helper at this release so non-project blueprints (wiki) can consume it. Class name unchanged (DocSearch) — existing ProjectDocsIndex / SectionHub / ProjectsHubCards callers keep working.",
+  "depends_on": [
+    { "name": "customjs-guard", "range": ">=1.0.0" }
+  ],
+  "customjs_classes": ["DocSearch"],
+  "files": [
+    { "source": "doc-search.js", "dest": "{{scripts_path}}/doc-search/doc-search.js" }
+  ],
+  "post_install": [],
+  "rule_fragments": []
+}
