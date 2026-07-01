@@ -42,8 +42,17 @@ A standalone, project-independent, arbitrary-depth **`wiki` blueprint** (`spice/
 - **Hub content-files are deliberately NOT `materialize_once`** (Scratch/Finance/People/Projects/Cowork hubs all `false`) — they're render-only chrome that should refresh on install; only genuine user-content files get `materialize_once`. The design doc's §10 note was over-cautious; the wiki hub correctly follows the hub convention.
 - **`origin/main` advanced under the worktree** (autoloop shipped v0.161.0/0.161.1 mid-cycle). Merged main into the branch, resolved the single `package.json` `release:preflight`-chain conflict (kept both main's `run-workstreams-analysis` and my `run-doc-search`/`run-wiki`), re-ran preflight green. Isolated worktree kept the build clean throughout.
 
+## Final review (adversarial) + fixes applied
+
+A fresh adversarial reviewer verified the whole diff (verdict: SHIP-WITH-FIXES). **All Critical + Important findings were fixed in the same session** and regression-tested:
+
+- **[Critical] Breadcrumb + section-card 404s** — `path_walk` and `WikiTree` section cards linked to `folder/<slug>.md` (lower-case), but hubs are Display-Case (`AWS.md`) → broken links on case-sensitive filesystems + lower-case labels. Fixed: both now resolve the real section-hub note (title + `file.path`) via `dv.pages`, with a graceful segment fallback. Tests: `BC-WIKI-1` (title+realpath), `BC-WIKI-1b` (fallback), `W1c` (hubPath).
+- **[Important] Missing `dir` → vault-root routing** — creates routed via `{{current_file.frontmatter.dir}}`, which resolves to `""` on a note lacking `dir`, dumping new notes at the vault root. Fixed: added a `{{current_file.folder}}` token to `entity-create` (derives from the note's real Dataview folder, path fallback); wiki creates now route by it. Tests: `EC-FOLDER-1/2/3`.
+- **[Minor] Move on a section** would orphan its folder — gated `WikiLeafActions` Move to `wiki-page` only.
+
+**Remaining minor follow-ups (non-blocking):** (5) tighten `rule_fragments` — add a `wiki-page` fragment + type-discriminating scope (current `wiki-section` glob matches all `.md`); (6) derive `spice/wiki` from `module_directory` in the 3 helpers instead of hardcoding (portability).
+
 ## Carry-forward / iteration items
 
-- **Breadcrumb intermediate-crumb polish:** `path_walk` originally used the raw folder slug (`infra`) for intermediate crumb labels + link basenames; resolved to use each section hub's display title + real path (so trails read "Wiki / Infra / AWS / …" and links resolve on case-sensitive FS). [If this was deferred, it is the top iteration item.]
 - **Deferred (separate specs):** (1) ingestion — Obsidian Web Clipper capture + LLM/search pass; (2) project correlation — relate/move a wiki-page into a project (bidirectional links); (3) MOC auto-index generator.
 - **Deploy:** consumers ero → headspace → accuris need `wiki` + `doc-search` added to each `ranch/platform-subscription.json` (a new blueprint is not added by `--bump-pins` alone), then `sauce update --bump-pins && sauce install`, then `Cmd+R`.
