@@ -1,32 +1,33 @@
 #!/usr/bin/env node
 /**
- * deploy — the autoloop's canary-and-promote deployer. After a release ships
- * to the brew tap, the loop pulls it into the consumer vaults: ERO is the
- * CANARY (gets it first), and only once ERO has held the new version for a
- * full turn does it PROMOTE to the protected vaults (accuris + headspace).
+ * deploy — the autoloop's vault deployer. After a release ships to the brew
+ * tap, the loop pulls it into ALL consumer vaults on this machine — ERO,
+ * accuris, and headspace — in a single action, per-vault fail-closed.
  *
- * The soak is stateless — enforced by doing at most ONE deploy action per turn:
- *   turn A: ERO behind shipped  → deploy ERO (canary)            [ERO now current, prod behind]
- *   turn B: ERO == shipped, prod behind ERO → promote prod       [one full turn elapsed = soak]
- * A canary that fails to reach the target never lets prod promote, so a bad
- * release is contained to ERO.
+ * Deploy model: any vault behind the latest INSTALLABLE bottle is upgraded
+ * this turn; each vault must verify to the target version or it is flagged
+ * `ok:false` (a failed vault never counts as deployed, and the CLI exits
+ * non-zero). There is no canary/soak tier — a green-CI release propagates to
+ * every vault at once. Blast-radius containment now lives entirely in the
+ * gate stack (CI + Gate A/B) that runs before the release ships, not in a
+ * per-vault rollout order.
  *
  * Pure: cmpVersion, deployPlan, verifyDeploy. Side effects (brew upgrade +
  * `sauce update --bump-pins` + version read) live only in the CLI.
  *
- * Exports: cmpVersion, deployPlan, verifyDeploy, CANARY, PROD
+ * Exports: cmpVersion, deployPlan, verifyDeploy, VAULTS
  * CLI: node scripts/autoloop/deploy.js run [--dry] [--json]
  *      node scripts/autoloop/deploy.js plan        (compute only, no side effects)
  */
 'use strict';
 
 // Machine-local loop infrastructure (not shipped platform code): the consumer
-// vaults on this dev machine and their deploy roles.
+// vaults on this dev machine. All three deploy together (no canary tier).
 const HOME = require('os').homedir();
-const CANARY = { name: 'ero-sauce', path: `${HOME}/notes/sauce/ero-sauce`, role: 'canary' };
-const PROD = [
-  { name: 'accuris-sauce', path: `${HOME}/notes/sauce/accuris-sauce`, role: 'prod' },
-  { name: 'headspace-sauce', path: `${HOME}/notes/sauce/headspace-sauce`, role: 'prod' },
+const VAULTS = [
+  { name: 'ero-sauce', path: `${HOME}/notes/sauce/ero-sauce` },
+  { name: 'accuris-sauce', path: `${HOME}/notes/sauce/accuris-sauce` },
+  { name: 'headspace-sauce', path: `${HOME}/notes/sauce/headspace-sauce` },
 ];
 
 // Compare dotted numeric versions ("0.145.1"). → -1 | 0 | 1.
@@ -42,23 +43,20 @@ function cmpVersion(a, b) {
 }
 
 /**
- * deployPlan — decide the single deploy action for this turn.
- * @param {{shippedVersion:string, canaryVersion:string, prodVersions:{name:string,version:string}[]}} o
- * @returns {{action:'canary'|'promote'|'none', target?:string, vaults?:string[], reason:string}}
+ * deployPlan — decide this turn's deploy action: upgrade every vault behind
+ * the shipped bottle, all at once.
+ * @param {{shippedVersion:string, vaults:{name:string,version:string}[]}} o
+ * @returns {{action:'deploy'|'none', target?:string, vaults?:string[], reason:string}}
  */
 function deployPlan(o) {
-  const { shippedVersion, canaryVersion, prodVersions = [] } = o || {};
+  const { shippedVersion, vaults = [] } = o || {};
   if (!shippedVersion) return { action: 'none', reason: 'no shipped version known' };
-  // 1. Canary first: ERO must reach the latest shipped version before anything else.
-  if (cmpVersion(canaryVersion, shippedVersion) < 0) {
-    return { action: 'canary', target: shippedVersion, vaults: [CANARY.name],
-      reason: `canary ${canaryVersion || '(none)'} < shipped ${shippedVersion}` };
-  }
-  // 2. Promote: ERO is current (soaked ≥1 turn since it caught up) → bring prod up to ERO's version.
-  const behind = prodVersions.filter((p) => cmpVersion(p.version, canaryVersion) < 0);
+  // Any vault below the installable bottle is deployed this turn (a missing/
+  // empty version reads as behind). No canary ordering — all behind vaults go.
+  const behind = vaults.filter((v) => cmpVersion(v.version, shippedVersion) < 0);
   if (behind.length) {
-    return { action: 'promote', target: canaryVersion, vaults: behind.map((p) => p.name),
-      reason: `canary stable on ${canaryVersion}; prod behind: ${behind.map((p) => `${p.name}@${p.version || 'none'}`).join(', ')}` };
+    return { action: 'deploy', target: shippedVersion, vaults: behind.map((v) => v.name),
+      reason: `behind shipped ${shippedVersion}: ${behind.map((v) => `${v.name}@${v.version || 'none'}`).join(', ')}` };
   }
   return { action: 'none', reason: `all vaults current at ${shippedVersion}` };
 }
@@ -71,7 +69,7 @@ function verifyDeploy(o) {
   return { ok: true };
 }
 
-module.exports = { cmpVersion, deployPlan, verifyDeploy, CANARY, PROD };
+module.exports = { cmpVersion, deployPlan, verifyDeploy, VAULTS };
 
 if (require.main === module) {
   const fs = require('fs');
@@ -112,17 +110,16 @@ if (require.main === module) {
     } catch (e) { brewOut = `brew update/upgrade failed: ${e.message.split('\n')[0]}`; }
   }
   const shipped = bottleVersion();
-  const canaryVersion = installedVersion(CANARY.path);
-  const prodVersions = PROD.map((p) => ({ name: p.name, version: installedVersion(p.path) }));
-  const plan = deployPlan({ shippedVersion: shipped, canaryVersion, prodVersions });
+  const vaults = VAULTS.map((v) => ({ name: v.name, version: installedVersion(v.path) }));
+  const plan = deployPlan({ shippedVersion: shipped, vaults });
 
   if (plan.action === 'none' || dry) {
     const tagAhead = cmpVersion(tag, shipped) > 0 ? `tag ${tag} not yet on the tap` : null;
-    console.log(JSON.stringify({ tag, shipped, canaryVersion, prodVersions, plan, brew: brewOut, tagAhead, executed: false }, null, 2));
+    console.log(JSON.stringify({ tag, shipped, vaults, plan, brew: brewOut, tagAhead, executed: false }, null, 2));
     process.exit(0);
   }
 
-  const byName = Object.fromEntries([CANARY, ...PROD].map((v) => [v.name, v]));
+  const byName = Object.fromEntries(VAULTS.map((v) => [v.name, v]));
   const results = [];
   for (const name of plan.vaults) {
     const v = byName[name];
