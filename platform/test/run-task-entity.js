@@ -193,5 +193,46 @@ ok('TTL-3 buildBands tolerates non-array input', () => {
   assert(Array.isArray(res.overdue) && res.overdue.length === 0, 'overdue empty array');
 });
 
+// ---------- Dataview DateTime coercion (FIX 1 — tasks-don't-render bug) ----------
+//
+// Dataview parses an UNQUOTED frontmatter date (`scheduled: 2026-07-01`) into a
+// Luxon DateTime object, NOT a string. If parseNote kept that object, buildBands
+// / queryToday compare a DateTime against a STRING (`sched === todayStr`) which is
+// never true, so EVERY scheduled task falls into neither band and the daily list
+// renders empty. TaskEntity._toDateStr normalizes any date-ish value to
+// "YYYY-MM-DD" (or null) on READ, so parseNote always yields comparable strings.
+const luxon = (iso) => ({ toISODate: () => iso });
+
+// DT-1. _toDateStr normalizes Luxon / string / blank / null / DateTime-format.
+ok('DT-1 _toDateStr coerces date-ish values to YYYY-MM-DD strings', () => {
+  assert(TaskEntity._toDateStr(luxon('2026-07-01')) === '2026-07-01', 'luxon → string');
+  assert(TaskEntity._toDateStr('2026-07-01T00:00:00') === '2026-07-01', 'ISO datetime → date');
+  assert(TaskEntity._toDateStr('') === null, 'blank string → null');
+  assert(TaskEntity._toDateStr(null) === null, 'null → null');
+  assert(TaskEntity._toDateStr({ toFormat: () => '2026-07-01' }) === '2026-07-01', 'toFormat → string');
+});
+
+// DT-2. parseNote coerces a Luxon `scheduled` into a plain string (was a DateTime).
+ok('DT-2 parseNote coerces Luxon scheduled → string', () => {
+  const parsed = TaskEntity.parseNote({
+    type: 'task', status: 'open',
+    scheduled: luxon('2026-07-01'), due: '',
+    file: { path: 'spice/tasks/a.md' },
+  });
+  assert(parsed.scheduled === '2026-07-01', 'scheduled is the string, not a DateTime: got ' + JSON.stringify(parsed.scheduled));
+  assert(parsed.due === null, 'blank due → null');
+});
+
+// DT-3. THE REPRO — Luxon-scheduled open tasks must land in a band, not vanish.
+ok('DT-3 buildBands partitions Luxon-scheduled tasks (the render bug)', () => {
+  const tasks = [
+    TaskEntity.parseNote({ status: 'open', scheduled: luxon('2026-07-01') }),
+    TaskEntity.parseNote({ status: 'open', scheduled: luxon('2026-06-28') }),
+  ];
+  const res = TaskTodayList.buildBands(tasks, '2026-07-01');
+  assert(res.today.length === 1, 'today = the 07-01 Luxon task: got ' + res.today.length);
+  assert(res.overdue.length === 1, 'overdue = the 06-28 Luxon task: got ' + res.overdue.length);
+});
+
 console.log(`\nrun-task-entity: ${passes} passed, ${fails} failed`);
 process.exit(fails === 0 ? 0 : 1);
