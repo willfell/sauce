@@ -325,5 +325,29 @@ function tierCase(balance) {
         typeof a.totals.debt === "number" && typeof a.totals.discretionary === "number");
 }
 
+// HC-V0630-BA-ISOLATE — envelope isolation: a debt_allocations override is a VIEW
+// only; it must never move the discretionary envelope (which stays categories[]-only
+// in computePlanState). Design.md §Architecture promised this test.
+{
+    const baseCfg = {
+        plan: {},
+        debts: [debt("Apple-Card", 14000, 22.74, 380), debt("Discover-It", 3000, 25, 100)],
+        savings: [savingsAcct(640, 5000)],
+    };
+    const noOv = makeDv(Object.assign({}, baseCfg, { budgets: [{
+        type: "budget", month: "2026-07", categories: [],
+        file: { path: "spice/finance/budgets/2026-07/Budget-2026-07.md", name: "Budget-2026-07" },
+    }] }));
+    const withOv = makeDv(Object.assign({}, baseCfg, { budgets: [{
+        type: "budget", month: "2026-07", categories: [],
+        debt_allocations: [{ slug: "Debt-Apple-Card", planned: 100 }], savings_allocations: [],
+        file: { path: "spice/finance/budgets/2026-07/Budget-2026-07.md", name: "Budget-2026-07" },
+    }] }));
+    const dNo = fm.budgetAllocations(noOv, "2026-07").totals.discretionary;
+    const dOv = fm.budgetAllocations(withOv, "2026-07").totals.discretionary;
+    ok("HC-V0630-BA-ISOLATE-1 debt override does not change the discretionary envelope",
+        dNo === dOv && typeof dNo === "number");
+}
+
 console.log(`\nrun-finance-plan-state.js: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

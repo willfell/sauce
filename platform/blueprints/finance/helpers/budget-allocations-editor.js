@@ -10,9 +10,10 @@
  * planned numbers are a VIEW — they never enter the discretionary envelope.
  *
  * Editor mechanics mirror the fixed paycheck-expenses-editor.js:
- *   • render-from-authoritative — an edit/reset flow captures the freshly
- *     recomputed budgetAllocations view and re-renders from it, never re-reading
- *     Dataview's lagging dv.current() metadata cache.
+ *   • render-from-authoritative — an edit/reset flow re-applies the just-written
+ *     override arrays on top of the recomputed view, so the render reflects the
+ *     write even before Dataview's lagging page index (which readBudgetForMonth
+ *     reads) catches up.
  *   • merge-on-edit — writing an override entry merges into the existing entry
  *     (by slug / name) instead of clobbering any other fields it may carry.
  *
@@ -154,15 +155,60 @@ class BudgetAllocationsEditor {
     async _editFlow(file, dv, kind, row) {
         const amount = await this._promptForAmount((row && (row.name || row.slug)) || "", row && row.planned);
         if (amount == null) return;
-        await this._mutate(file, (fm) => this._upsertOverride(fm, kind, row, amount));
-        const fresh = customJS.FinanceMath.budgetAllocations(dv, this._monthKeyFor(dv));
-        await this.render(dv, fresh);
+        const written = await this._mutateCapture(file, (fm) => this._upsertOverride(fm, kind, row, amount));
+        await this.render(dv, this._authoritativeView(dv, written));
     }
 
     async _resetFlow(file, dv, kind, row) {
-        await this._mutate(file, (fm) => this._removeOverride(fm, kind, row));
-        const fresh = customJS.FinanceMath.budgetAllocations(dv, this._monthKeyFor(dv));
-        await this.render(dv, fresh);
+        const written = await this._mutateCapture(file, (fm) => this._removeOverride(fm, kind, row));
+        await this.render(dv, this._authoritativeView(dv, written));
+    }
+
+    // Run the mutator, then capture the freshly-written override arrays so the
+    // re-render's override layer is authoritative — independent of Dataview's
+    // lagging page index (which readBudgetForMonth reads via dv.pages).
+    async _mutateCapture(file, mutator) {
+        let written = { debt: [], savings: [] };
+        await this._mutate(file, (fm) => {
+            mutator(fm);
+            written = {
+                debt: Array.isArray(fm.debt_allocations) ? fm.debt_allocations.slice() : [],
+                savings: Array.isArray(fm.savings_allocations) ? fm.savings_allocations.slice() : [],
+            };
+        });
+        return written;
+    }
+
+    // Recompute the live view, then re-apply the just-written override layer on
+    // top of it. The plan half comes from the entities (which this flow never
+    // wrote); the override half is authoritative from `written`, so the render is
+    // correct even if dv.pages still returns the pre-write budget.
+    _authoritativeView(dv, written) {
+        const view = customJS.FinanceMath.budgetAllocations(dv, this._monthKeyFor(dv));
+        this._applyOverrides(view, written.debt, written.savings);
+        return view;
+    }
+
+    _applyOverrides(view, debtOv, savOv) {
+        const applyTo = (rows, ovs, idKey) => {
+            if (!Array.isArray(rows)) return;
+            const map = new Map();
+            (Array.isArray(ovs) ? ovs : []).forEach((o) => {
+                const id = o && (o[idKey] != null ? o[idKey] : (o.slug || o.name));
+                if (id != null) map.set(String(id), Number(o.planned) || 0);
+            });
+            rows.forEach((r) => {
+                const id = String(r[idKey] != null ? r[idKey] : (r.slug || r.name));
+                if (map.has(id)) { r.planned = map.get(id); r.override = map.get(id); r.source = "override"; }
+                else { r.planned = (typeof r.plannedLive === "number") ? r.plannedLive : (Number(r.planned) || 0); r.override = null; r.source = "plan"; }
+            });
+        };
+        applyTo(view.debt, debtOv, "slug");
+        applyTo(view.savings, savOv, "name");
+        if (view.totals) {
+            view.totals.debt = (view.debt || []).reduce((s, r) => s + (Number(r.planned) || 0), 0);
+            view.totals.savings = (view.savings || []).reduce((s, r) => s + (Number(r.planned) || 0), 0);
+        }
     }
 
     // Merge-on-edit: keep any other fields on an existing override entry; only

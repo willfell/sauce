@@ -1848,32 +1848,32 @@ async function testFF15BudgetAllocationsRendersSections() {
 }
 
 // FF16 — editing a debt row writes a {slug,planned} override into
-// debt_allocations AND the re-render reflects the freshly-recomputed
-// (authoritative) view — showing the adjusted amount + "(adjusted)" — rather
-// than the stale pre-edit dv.current(). Proves render-from-authoritative + merge.
+// debt_allocations AND the re-render shows the adjusted amount EVEN THOUGH the
+// stubbed budgetAllocations returns the STALE pre-write view (simulating
+// Dataview's lagging page index). The adjusted value can only appear via the
+// authoritative override overlay — proving the render-from-authoritative fix.
 async function testFF16BudgetAllocationsEditMaterializesOverride() {
-  console.log('\n=== FF16 — BudgetAllocationsEditor edit materializes debt_allocations override + re-renders authoritative ===');
+  console.log('\n=== FF16 — BudgetAllocationsEditor edit re-renders authoritative despite a lagging dv ===');
   const app = makeApp({ fileExistsHook: (p) => ({ path: p }) });
-  // Mutable authoritative state the stubbed budgetAllocations reflects.
-  let plannedApple = 380;
-  let sourceApple = 'plan';
   let capturedDebtAlloc = [];
-  const makeView = () => ({
-    debt: [{ slug: 'Debt-Apple-Card', name: 'Apple Card', plannedLive: 380, override: sourceApple === 'override' ? plannedApple : null, planned: plannedApple, source: sourceApple }],
+  // budgetAllocations ALWAYS returns the stale pre-write plan view (Apple 380 /
+  // plan). If the widget merely re-rendered from this, it would show 380. Showing
+  // 350 (adjusted) is only possible if the just-written override array is overlaid.
+  const makeStaleView = () => ({
+    debt: [{ slug: 'Debt-Apple-Card', name: 'Apple Card', plannedLive: 380, override: null, planned: 380, source: 'plan' }],
     savings: [{ name: 'Emergency Fund', plannedLive: 300, override: null, planned: 300, source: 'plan' }],
-    totals: { debt: plannedApple, savings: 300, fixed: 3851, income: 9000, discretionary: 2950 },
+    totals: { debt: 380, savings: 300, fixed: 3851, income: 9000, discretionary: 2950 },
   });
   const src = fs.readFileSync(path.join(WORKSHOP, 'platform', 'blueprints', 'finance', 'helpers', 'budget-allocations-editor.js'), 'utf8');
   const cjs = makeFinanceCustomJsStub();
-  cjs.FinanceMath = { budgetAllocations: () => makeView(), fmtMoney: (n) => `$${(Number(n) || 0).toFixed(2)}` };
-  // Capture the frontmatter write and reflect it back into the authoritative view.
+  cjs.FinanceMath = { budgetAllocations: () => makeStaleView(), fmtMoney: (n) => `$${(Number(n) || 0).toFixed(2)}` };
+  // Capture the frontmatter write (durable), but DO NOT reflect it into the view —
+  // the view stays stale, exactly like Dataview before it reindexes.
   cjs.FinanceFrontmatter = {
     update: async (file, mut) => {
       const fm = { debt_allocations: capturedDebtAlloc.slice(), savings_allocations: [] };
       await mut(fm);
-      capturedDebtAlloc = fm.debt_allocations;
-      const entry = capturedDebtAlloc.find(o => o && o.slug === 'Debt-Apple-Card');
-      if (entry) { plannedApple = entry.planned; sourceApple = 'override'; }
+      capturedDebtAlloc = Array.isArray(fm.debt_allocations) ? fm.debt_allocations : [];
     },
     read: () => null,
     isTruthy: (v) => v === true,
@@ -1893,8 +1893,9 @@ async function testFF16BudgetAllocationsEditMaterializesOverride() {
   const root = findClass(dv.container, 'bae-root');
   const texts = root ? collectAll(root, () => true).map(n => n.textContent).filter(t => typeof t === 'string') : [];
   const joined = texts.join(' | ');
-  const rendersAdjusted = joined.includes('(adjusted)') && joined.includes('$350.00');
-  console.log(`  wrote {slug:Debt-Apple-Card, planned:350} to debt_allocations: ${wroteOverride} ; re-render shows adjusted $350.00 (authoritative): ${rendersAdjusted}`);
+  // Stale view says 380/plan; a correct overlay shows 350 (adjusted) and no 380.
+  const rendersAdjusted = joined.includes('(adjusted)') && joined.includes('$350.00') && !joined.includes('$380.00');
+  console.log(`  wrote {slug:Debt-Apple-Card, planned:350}: ${wroteOverride} ; re-render shows adjusted $350.00 despite stale dv (no $380.00): ${rendersAdjusted}`);
   const pass = wroteOverride && rendersAdjusted;
   console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
   return pass;

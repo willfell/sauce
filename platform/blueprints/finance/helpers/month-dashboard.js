@@ -165,9 +165,12 @@ class MonthDashboard {
         const rowWrap = section.createEl("div", { cls: "mdash-paychecks-rows" });
         rowWrap.style.cssText = "display: flex; flex-direction: column; gap: 4px;";
         for (const p of paychecks) {
-            const startStr = (typeof p.pay_period_start === "string") ? p.pay_period_start
-                : (p.pay_period_start && typeof p.pay_period_start.toISODate === "function")
-                    ? p.pay_period_start.toISODate() : String(p.pay_period_start || "");
+            // Label by the pay date (pay_period_end, the month-attribution anchor),
+            // falling back to pay_period_start for legacy checks.
+            const payDate = (p.pay_period_end != null) ? p.pay_period_end : p.pay_period_start;
+            const startStr = (typeof payDate === "string") ? payDate
+                : (payDate && typeof payDate.toISODate === "function")
+                    ? payDate.toISODate() : String(payDate || "");
             const amount = typeof p.paycheck_amount === "number" ? p.paycheck_amount : 0;
             const row = rowWrap.createEl("div", { cls: "mdash-paycheck-row" });
             row.style.cssText = "font-size: 0.82em; font-variant-numeric: tabular-nums; cursor: pointer; color: var(--text-normal);";

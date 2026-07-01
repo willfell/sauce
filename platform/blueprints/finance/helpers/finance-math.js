@@ -486,8 +486,12 @@ class FinanceMath {
             });
 
         const savLive = ps && ps.ok && ps.savings ? num(ps.savings.contribution) : 0;
-        const savName = "Emergency Fund";
-        const savOv = overridesSav.find(o => o && String(o.name || savName).toLowerCase() === savName.toLowerCase()) || overridesSav[0] || null;
+        // Derive the savings row label from the actual chosen savings entity
+        // (mirrors computePlanState's emergency-fund selection) — no baked-in name.
+        const savEntities = this.readSavings(dv);
+        const savEf = savEntities.find(s => String(s.name || "").toLowerCase() === "emergency fund") || savEntities[0] || null;
+        const savName = (savEf && savEf.name) ? String(savEf.name) : "Emergency Fund";
+        const savOv = overridesSav.find(o => o && String(o.name || "").toLowerCase() === savName.toLowerCase()) || overridesSav[0] || null;
         const savings = [{
             name: (savOv && savOv.name) || savName,
             plannedLive: savLive,
