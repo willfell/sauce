@@ -60,7 +60,8 @@
     "SectionHub",
     "DocSearch",
     "DocMove",
-    "ProjectLinksPanel"
+    "ProjectLinksPanel",
+    "WorkstreamSource"
   ],
   "pre_install": [
     {
@@ -192,6 +193,10 @@
     {
       "source": "templates/Links Hub.md",
       "dest": "{{templates_path}}/Template, Links Hub.md"
+    },
+    {
+      "source": "helpers/workstream-source.js",
+      "dest": "{{scripts_path}}/project/workstream-source.js"
     }
   ],
   "customjs_startup_scripts": [
