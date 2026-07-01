@@ -198,6 +198,40 @@
           }
         }
       }
+    },
+    "wiki": {
+      "types": {
+        "wiki-hub": {
+          "path_walk": {
+            "root_label": "Wiki",
+            "root_dir": "spice/wiki",
+            "root_file": "Wiki.md"
+          },
+          "current": {
+            "label": "lit:Wiki"
+          }
+        },
+        "wiki-section": {
+          "path_walk": {
+            "root_label": "Wiki",
+            "root_dir": "spice/wiki",
+            "root_file": "Wiki.md"
+          },
+          "current": {
+            "label": "fm:title|file:basename"
+          }
+        },
+        "wiki-page": {
+          "path_walk": {
+            "root_label": "Wiki",
+            "root_dir": "spice/wiki",
+            "root_file": "Wiki.md"
+          },
+          "current": {
+            "label": "fm:title|file:basename"
+          }
+        }
+      }
     }
   }
 }
