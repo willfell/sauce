@@ -232,6 +232,31 @@ const ALL = [PLAN, ...DEBTS, SAV, BUDGET, PAYCHECK];
         ok("HC-V0128-WIDGET-FRESH-1 MonthDashboard renders without throwing", mdErr === null, mdErr && mdErr.message);
         ok("HC-V0128-WIDGET-FRESH-2 MonthDashboard shows live badge", /live ·/.test(treeText(mdDv.container)), mdErr && mdErr.message);
 
+        // ===== HC-V0630-WIDGET-MONTH-PLANNED-* — Debt Changes shows planned (budget) per debt row =====
+        // The month's budget carries a debt_allocations override; a paycheck pays that debt.
+        // Each debt row should read `planned {budget} · paydown {paid} · measured drop {drop}`.
+        const MD2 = loadClass("month-dashboard.js", "MonthDashboard", env);
+        const plannedBudget = {
+            type: "budget", month: NOW_MONTH,
+            categories: [{ group: "D", name: "All", planned: 3120, actual: 1200 }],
+            debt_allocations: [{ slug: "Debt-Apple-Card", planned: 350 }],
+            savings_allocations: [],
+            file: { path: `spice/finance/budgets/${NOW_MONTH}/Budget-${NOW_MONTH}.md`, name: `Budget-${NOW_MONTH}` },
+        };
+        const paidPaycheck = {
+            type: "paycheck", pay_period_start: `${NOW_MONTH}-01`, pay_period_end: `${NOW_MONTH}-01`, paycheck_amount: 9000,
+            expenses: [{ item: "Apple Card Payment", amount: 400, category: "Credit Payment", paid: true, debt: "[[Debt-Apple-Card]]" }],
+            file: { path: `spice/finance/paychecks/${NOW_MONTH}-01/Paycheck-${NOW_MONTH}-01.md`, name: `Paycheck-${NOW_MONTH}-01` },
+        };
+        const monthPage2 = { type: "month", month: NOW_MONTH, file: { path: `spice/finance/months/Month-${NOW_MONTH}.md`, name: `Month-${NOW_MONTH}` } };
+        const md2Dv = makeDv([PLAN, ...DEBTS, plannedBudget, paidPaycheck, monthPage2], monthPage2);
+        let md2Err = null;
+        try { await new MD2().render(md2Dv); } catch (e) { md2Err = e; }
+        ok("HC-V0630-WIDGET-MONTH-PLANNED-1 MonthDashboard renders without throwing", md2Err === null, md2Err && md2Err.message);
+        const md2Txt = treeText(md2Dv.container);
+        ok("HC-V0630-WIDGET-MONTH-PLANNED-2 debt row shows planned (budget) figure + paydown",
+            /planned \$350\.00/.test(md2Txt) && /paydown \$400\.00/.test(md2Txt), md2Txt.slice(0, 800));
+
         // FinanceHubSummary Budget tile
         const FHS = loadClass("finance-hub-summary.js", "FinanceHubSummary", env);
         const finPage = { type: "finance-hub", file: { path: "spice/finance/Finance.md", name: "Finance" } };
