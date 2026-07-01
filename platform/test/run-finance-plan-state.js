@@ -393,5 +393,38 @@ function tierCase(balance) {
         fm.readPaychecksForMonth(dv, "2026-07").length === 0);
 }
 
+// ===== HC-MP-DOUBLECOUNT-* — when a monthly note exists for the month, legacy
+// (no deposits[]) notes for that SAME month are dropped so income/expenses are
+// never double-counted. A month with ONLY a legacy note still returns it
+// (backward-compat: pre-cutover / not-yet-archived notes keep attributing).
+{
+    const monthly = {
+        type: "paycheck", month: "2026-07",
+        deposits: [{ date: "2026-07-01", amount: 4500 }, { date: "2026-07-15", amount: 4500 }],
+        expenses: [{ item: "Rent", amount: 2200, category: "Rent", deposit: 1, paid: false }],
+        file: { path: "spice/finance/paychecks/2026-07/Paycheck-2026-07.md", name: "Paycheck-2026-07" },
+    };
+    // Legacy per-check note for the SAME month (not archived, no deposits[]).
+    const legacyA = { type: "paycheck", pay_period_start: "2026-07-01", pay_period_end: "2026-07-15",
+        paycheck_amount: 4500, expenses: [{ item: "Utilities", amount: 300, paid: false }],
+        file: { path: "spice/finance/paychecks/2026-07-01/Paycheck-2026-07-01.md", name: "Paycheck-2026-07-01" } };
+    const legacyB = { type: "paycheck", pay_period_start: "2026-07-16", pay_period_end: "2026-07-31",
+        paycheck_amount: 4500, expenses: [],
+        file: { path: "spice/finance/paychecks/2026-07-16/Paycheck-2026-07-16.md", name: "Paycheck-2026-07-16" } };
+
+    const dvBoth = makeDv({ paychecks: [legacyA, monthly, legacyB] });
+    const got = fm.readPaychecksForMonth(dvBoth, "2026-07");
+    ok("HC-MP-DOUBLECOUNT-1 monthly present → legacy notes dropped (no double-count)",
+        got.length === 1 && Array.isArray(got[0].deposits) && got[0].file.name === "Paycheck-2026-07");
+    ok("HC-MP-DOUBLECOUNT-2 income counts monthly only (Σ deposits = 9000, not +legacy)",
+        fm.monthIncome(got) === 9000);
+
+    // Backward-compat: a month with ONLY legacy notes still returns them.
+    const dvLegacyOnly = makeDv({ paychecks: [legacyA, legacyB] });
+    const gotLegacy = fm.readPaychecksForMonth(dvLegacyOnly, "2026-07");
+    ok("HC-MP-DOUBLECOUNT-3 legacy-only month still returns legacy notes (backward-compat)",
+        gotLegacy.length === 2 && gotLegacy.every(p => !Array.isArray(p.deposits)));
+}
+
 console.log(`\nrun-finance-plan-state.js: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

@@ -62,7 +62,7 @@ The "+ New Paycheck" button prompts for a **month** (not start/end dates) and cr
 
 ### Transition — clean cutover + archive
 
-- **Functional cutover:** the month rollup reads only new-format notes (`deposits[]` present); old per-check notes (`pay_period_start`, no `deposits[]`) are not summed. This is the correctness guarantee — independent of any file move.
+- **Functional cutover:** `readPaychecksForMonth` is a **backward-compatible reader** — it collects every non-archived note attributed to the month (new-format by `month`, legacy by `pay_period_end`→`pay_period_start` fallback), then applies a **double-count guard**: if *any* matched note is new-format (`deposits[]` present), the legacy (no-`deposits[]`) notes for that month are dropped so income/expenses are never summed twice during the transition. A month with *only* legacy notes still returns them (so pre-cutover months keep attributing). Archived (`_archive/`) notes are excluded outright. This is the correctness guarantee — independent of any file move; the archive heal below then provides the clean cutover by physically removing the superseded legacy notes.
 - **Tidiness heal (ungated, snapshot-guarded, idempotent):** move old-format paycheck notes into `paychecks/_archive/` (copy + remove original; `.sauce-backup` first; skip if already archived or already new-format). The rollup query excludes `_archive/`.
 - The user's current `Paycheck-2026-07-01.md` (old format) is archived by this heal; the user creates one monthly `Paycheck-2026-07.md`.
 

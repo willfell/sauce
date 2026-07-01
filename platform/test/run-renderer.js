@@ -1900,6 +1900,64 @@ async function testFF20PaycheckLegacyFlatRender() {
   return pass;
 }
 
+// FF25 — editing a deposit amount re-renders from the AUTHORITATIVE array:
+// _editDepositAmount mutates a deposit's amount, then must render the new amount
+// (and recomputed subtotals) even though dv.current() is FROZEN to the OLD page.
+// Mirrors FF19's move-flow authoritative-render assertion. RED before the fix:
+// a plain this.render(dv) reads the frozen dv.current() → shows the OLD amount.
+async function testFF25PaycheckEditDepositAmountAuthoritative() {
+  console.log('\n=== FF25 — PaycheckExpensesEditor edit-deposit-amount renders authoritative (frozen dv.current) ===');
+  const app = makeApp({ fileExistsHook: (p) => ({ path: p }) });
+  app.metadataCache = { getFirstLinkpathDest: () => null, getFileCache: () => null };
+  const overrides = {
+    FinanceMath: {
+      _depositIndex: (e, c) => { const n = Math.trunc(Number(e && e.deposit)); return (!isFinite(n) || n < 1) ? 1 : (c && n > c ? c : n); },
+      // depositTotals derives from the passed page so the header reflects the
+      // authoritative (post-edit) deposits, not the frozen dv.current().
+      depositTotals: (pg) => (Array.isArray(pg && pg.deposits) ? pg.deposits : []).map(d => ({ date: d.date, amount: Number(d.amount) || 0, assigned: 0, leftover: Number(d.amount) || 0 })),
+    },
+  };
+  const Cls = loadFinanceClass('PaycheckExpensesEditor', app, overrides);
+  const inst = new Cls();
+  // deposit[1] is a distinct amount (3000) so the "stale 4500.00" check isolates
+  // deposit[0]: if the re-render were stale it would still show deposit[0]'s 4500.
+  const store = {
+    month: '2026-07',
+    deposits: [{ date: '2026-07-01', amount: 4500 }, { date: '2026-07-15', amount: 3000 }],
+    expenses: [],
+  };
+  inst._mutate = async (file, mutator) => {
+    const fm = { month: store.month, deposits: store.deposits.map(d => ({ ...d })), expenses: store.expenses.slice() };
+    await mutator(fm);
+    store.deposits = fm.deposits;
+    store.expenses = fm.expenses;
+  };
+  // Stub window.prompt to type the NEW deposit amount (6000).
+  const restoreWin = (() => { const prior = global.window; global.window = { prompt: () => '6000' }; return () => { global.window = prior; }; })();
+  // dv.current() is FROZEN to the PRE-edit page (deposit 0 amount = 4500).
+  const page = {
+    file: { name: 'Paycheck-2026-07', path: 'spice/finance/paychecks/2026-07/Paycheck-2026-07.md' },
+    month: '2026-07',
+    deposits: store.deposits.map(d => ({ ...d })),
+    expenses: [],
+  };
+  const dv = makeDvWithCurrent(page);
+  const file = app.vault.getAbstractFileByPath(page.file.path);
+  await inst._editDepositAmount(file, dv, 0);
+  restoreWin();
+  const wroteAmount = store.deposits[0].amount === 6000;
+  const root = findClass(dv.container, 'pee-root');
+  const texts = root ? collectAll(root, () => true).map(n => n.textContent).filter(t => typeof t === 'string') : [];
+  const joined = texts.join(' | ');
+  // The re-render must show the NEW amount (6000.00), NOT the frozen 4500.00.
+  const showsNew = joined.includes('6000.00');
+  const showsStale = joined.includes('4500.00');
+  console.log(`  wrote deposit[0]=6000: ${wroteAmount} ; re-render shows 6000.00: ${showsNew} ; stale 4500.00 still shown: ${showsStale}`);
+  const pass = wroteAmount && showsNew && !showsStale;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
 // FF21 — PaycheckSummary per-deposit line: a MONTHLY paycheck (deposits[] +
 // tagged expenses) renders a per-deposit income/assigned/leftover line (from
 // stubbed depositTotals), while Band 1's Pay = Σ deposits (not paycheck_amount).
@@ -2978,6 +3036,7 @@ async function testRendHasNotes() {
       results.push(['FF18 paycheck-editor-per-deposit-render', await testFF18PaycheckPerDepositRender()]);
       results.push(['FF19 paycheck-editor-move-between-deposits', await testFF19PaycheckMoveBetweenDeposits()]);
       results.push(['FF20 paycheck-editor-legacy-flat-render', await testFF20PaycheckLegacyFlatRender()]);
+      results.push(['FF25 paycheck-editor-edit-deposit-amount-authoritative', await testFF25PaycheckEditDepositAmountAuthoritative()]);
       results.push(['FF21 paycheck-summary-per-deposit-line', await testFF21PaycheckSummaryPerDeposit()]);
       results.push(['FF22 paycheck-summary-legacy-single-amount', await testFF22PaycheckSummaryLegacy()]);
       results.push(['FF23 paycheck-defaults-editor-deposit-merge', await testFF23PaycheckDefaultsDepositMerge()]);

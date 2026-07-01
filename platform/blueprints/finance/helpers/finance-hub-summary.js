@@ -233,6 +233,9 @@ class FinanceHubSummary {
         try {
             allPaychecks = dv.pages('"spice/finance/paychecks"')
                 .where(p => p && p.type === "paycheck")
+                // Archived notes are never eligible for the "Latest Paycheck" tile
+                // (mirrors FinanceMath.readPaychecksForMonth / monthly-overview).
+                .where(p => !(p.file && typeof p.file.path === "string" && p.file.path.includes("/_archive/")))
                 .array();
         } catch (_e) { allPaychecks = []; }
 

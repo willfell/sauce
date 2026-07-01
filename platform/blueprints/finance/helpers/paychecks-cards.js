@@ -19,6 +19,9 @@ class PaychecksCards {
         const filter = opts.filter || "all";
         const pages = dv.pages('"spice/finance/paychecks"')
             .where(p => p.type === "paycheck")
+            // Archived notes never show as cards (mirrors
+            // FinanceMath.readPaychecksForMonth / monthly-overview).
+            .where(p => !(p.file && typeof p.file.path === "string" && p.file.path.includes("/_archive/")))
             .array()
             .sort((a, b) => String(this._sortKey(b) || "").localeCompare(String(this._sortKey(a) || "")));
         const filtered = filter === "pending"

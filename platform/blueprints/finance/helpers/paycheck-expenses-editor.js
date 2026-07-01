@@ -327,16 +327,29 @@ class PaycheckExpensesEditor {
         if (raw === null) return;
         const amount = Number(raw);
         if (!isFinite(amount) || amount < 0) return;
+        const page = dv.current();
+        const base = (page && Array.isArray(page.deposits)) ? page.deposits : [];
+        let newDeposits = base.map((d) => Object.assign({}, d));
         await this._mutate(file, (fm) => {
             const list = Array.isArray(fm.deposits) ? fm.deposits.slice() : [];
             if (i >= 0 && i < list.length) {
                 list[i] = Object.assign({}, list[i], { amount });
                 fm.deposits = list;
             }
+            newDeposits = list;
         });
-        // Render-from-authoritative: re-read via dv.current() would lag, so the
-        // simplest authoritative re-render is a plain render() (deposits present).
-        await this.render(dv);
+        // Render-from-authoritative: dv.current() lags the just-written deposits
+        // (in tests it's frozen to the OLD amount), so the new amount + recomputed
+        // Assigned/Leftover would not show. Repoint dv.current() at the updated
+        // page for the re-render, then restore (mirrors _materializeDeposits).
+        const nextPage = Object.assign({}, page, { deposits: newDeposits });
+        const prevCurrent = dv.current;
+        dv.current = () => nextPage;
+        try {
+            await this.render(dv);
+        } finally {
+            dv.current = prevCurrent;
+        }
     }
 
     async _resolveDebt(linkStr) {

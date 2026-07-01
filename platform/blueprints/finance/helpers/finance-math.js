@@ -64,7 +64,7 @@ class FinanceMath {
     }
     readPaychecksForMonth(dv, monthKey) {
         try {
-            return dv.pages('"spice/finance/paychecks"').where(p => {
+            const hits = dv.pages('"spice/finance/paychecks"').where(p => {
                 if (!p || p.type !== "paycheck") return false;
                 // Archived notes are never part of the live monthly rollup.
                 if (p.file && typeof p.file.path === "string" && p.file.path.includes("/_archive/")) return false;
@@ -75,6 +75,12 @@ class FinanceMath {
                     || this._coerceMonthString(this._coerceDateString(p.pay_period_end) || this._coerceDateString(p.pay_period_start));
                 return m === monthKey;
             }).array();
+            // Double-count guard: if a new-format (deposits[]) note exists for this
+            // month, drop the legacy (no deposits[]) notes for that month so income /
+            // expenses are never summed twice during the pre-cutover transition.
+            // A month with ONLY legacy notes still returns them (backward-compat).
+            const hasMonthly = hits.some(p => Array.isArray(p.deposits));
+            return hasMonthly ? hits.filter(p => Array.isArray(p.deposits)) : hits;
         } catch (_e) { return []; }
     }
     readBudgetForMonth(dv, monthKey) {
