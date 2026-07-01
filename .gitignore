@@ -39,7 +39,8 @@ node_modules/
 .worktrees/
 .superpowers/
 
-# Sauce Autoloop runtime state (never tracked): turn log + kill-switch sentinel.
+# Sauce Autoloop runtime state (never tracked): turn log + kill-switch sentinel + reconciled-PR ledger.
 .autoloop.log
 .autoloop-halt
 .autoloop-lock
+.autoloop-reconciled.json

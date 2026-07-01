@@ -10,7 +10,7 @@ const { isBroadScope, parseBoard, recommendedFrom, selectCard, parsePlanningChec
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'select-card.js'));
 const { renderHandoff } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'render-handoff.js'));
-const { reconcileInFlight, slugFromRef } =
+const { reconcileInFlight, slugFromRef, nextLedger } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'reconcile-inflight.js'));
 const { lockState, pidAlive } =
   require(path.resolve(__dirname, '..', '..', 'scripts', 'autoloop', 'turn-lock.js'));
@@ -140,6 +140,26 @@ ok('RI-8 open beats older merged (most recent by number)',
 ok('RI-9 branch whose PR merged is NOT bare (→ merged, not implementing)',
   reconcileInFlight({ branches: ['autoloop/fix-x'],
     prs: [{ headRefName: 'autoloop/fix-x', state: 'MERGED', number: 5 }] }).status === 'merged');
+// reconciled-PR ledger — a terminal PR fires exactly once, then the loop reaches idle (merged-deadlock fix):
+ok('RI-10 merged PR already in ledger → idle (no re-fire)',
+  reconcileInFlight({ prs: [{ headRefName: 'autoloop/fix-x', state: 'MERGED', number: 5 }], reconciled: [5] }).status === 'idle');
+ok('RI-11 failed PR already in ledger → idle',
+  reconcileInFlight({ prs: [{ headRefName: 'autoloop/fix-x', state: 'CLOSED', number: 5 }], reconciled: [5] }).status === 'idle');
+ok('RI-12 ledger only skips the ledgered PR; a newer un-ledgered merged still fires',
+  (r => r.status === 'merged' && r.number === 6)(reconcileInFlight({ prs: [
+    { headRefName: 'autoloop/a', state: 'MERGED', number: 5 },
+    { headRefName: 'autoloop/b', state: 'MERGED', number: 6 }], reconciled: [5] })));
+ok('RI-13 ledger NEVER suppresses an OPEN PR (still pr-open even if number is ledgered)',
+  reconcileInFlight({ prs: [{ headRefName: 'autoloop/fix-x', state: 'OPEN', number: 5 }], reconciled: [5] }).status === 'pr-open');
+ok('RI-14 ledger does NOT suppress a bare branch (still implementing)',
+  reconcileInFlight({ branches: ['autoloop/fix-x'], reconciled: [5] }).status === 'implementing');
+ok('RI-15 nextLedger appends + dedups (idempotent record)',
+  (a => a.length === 2 && a.includes(5) && a.includes(6))(nextLedger(nextLedger([5], 6), 5)));
+ok('RI-16 nextLedger caps to the most-recent N (runaway guard, keeps newest)',
+  (a => a.length === 2 && a[0] === 9 && a[1] === 10)(nextLedger([7, 8, 9], 10, 2)));
+ok('RI-17 a corrupt non-array ledger is coerced to empty, never throws (fail-safe read)',
+  reconcileInFlight({ prs: [{ headRefName: 'autoloop/fix-x', state: 'MERGED', number: 5 }], reconciled: 'oops' }).status === 'merged'
+  && (a => a.length === 1 && a[0] === 5)(nextLedger('oops', 5)));
 
 // ---- parseQueue + selectFromQueue (Q-*, SQ-*) ----
 const QUEUE = [
