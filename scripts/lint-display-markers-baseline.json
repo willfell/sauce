@@ -1,11 +1,6 @@
 {
   "warnings": [
     {
-      "file": "platform/mechanisms/task-interactions/task-interactions.js",
-      "line": 231,
-      "snippet": "if (/^## /.test(lines[i])) { endIdx = i; break; }"
-    },
-    {
       "file": "platform/mechanisms/kanban-status-sync/kanban-status-sync.js",
       "line": 150,
       "snippet": "* - A column is a depth-2 heading: `## ColumnName`."
@@ -92,32 +87,32 @@
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
-      "line": 657,
+      "line": 663,
       "snippet": "if (payload.mode === 'recurring') heading = '## Recurring Tasks';"
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
-      "line": 658,
+      "line": 664,
       "snippet": "else if (payload.destination && payload.destination.type === 'project') heading = '## Owned Tasks';"
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
-      "line": 659,
+      "line": 665,
       "snippet": "else heading = '## Today';"
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
-      "line": 724,
+      "line": 730,
       "snippet": "'## Recurring Tasks',"
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
-      "line": 739,
+      "line": 745,
       "snippet": "'## Owned Tasks',"
     },
     {
       "file": "platform/blueprints/to-do/helpers/todo-create-task.js",
-      "line": 741,
+      "line": 747,
       "snippet": "'## From Meetings',"
     },
     {
@@ -163,11 +158,6 @@
     {
       "file": "platform/blueprints/project/helpers/project-workstreams.js",
       "line": 48,
-      "snippet": "if (line.startsWith(\"## \")) lane = line.replace(\"## \", \"\").trim();"
-    },
-    {
-      "file": "platform/blueprints/project/helpers/projects-hub-cards.js",
-      "line": 219,
       "snippet": "if (line.startsWith(\"## \")) lane = line.replace(\"## \", \"\").trim();"
     },
     {

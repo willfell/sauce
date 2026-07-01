@@ -606,18 +606,24 @@ class ToDoCreateTask {
     }
 
     _insertLineUnderSection(content, line, payload) {
-        // #3: for the today daily, insert AFTER the stable TODAY_CAPTURE_MARKER so
-        // the new task falls inside TodayCaptureEditableList's scan window
-        // (findTaskLines(_, 'todayCapture') scans only below the marker). Mirrors
-        // TaskInteractions.appendTask's to-do branch. SectionLabel-anchor logic
-        // below remains the fallback for notes without the marker.
-        const isToday = !(payload.mode === 'recurring')
-            && !(payload.destination && payload.destination.type === 'project');
-        if (isToday) {
-            const MARK = '<!-- TODAY_CAPTURE_MARKER -->';
-            const mi = content.indexOf(MARK);
+        // #3 + project Owned Tasks: insert AFTER the stable capture marker so the
+        // new task falls inside TodayCaptureEditableList's scan window
+        // (findTaskLines scans only below the marker) — TODAY_CAPTURE_MARKER for a
+        // daily Today capture, OWNED_TASKS_MARKER for a project-todo Owned Tasks
+        // note. Mirrors TaskInteractions.appendTask. Without the project case a
+        // dialog-created project task would land ABOVE the marker: outside the
+        // editable-list scope AND hidden by _hideRawCaptureLines (invisible in
+        // reading mode). The SectionLabel-anchor logic below remains the fallback
+        // for notes that predate the marker (unhealed — no renderer either, so the
+        // native checkbox still renders).
+        const isRecurring = payload.mode === 'recurring';
+        const isProject = !!(payload.destination && payload.destination.type === 'project');
+        const captureMarker = isRecurring ? null
+            : (isProject ? '<!-- OWNED_TASKS_MARKER -->' : '<!-- TODAY_CAPTURE_MARKER -->');
+        if (captureMarker) {
+            const mi = content.indexOf(captureMarker);
             if (mi !== -1) {
-                const insertPos = mi + MARK.length;
+                const insertPos = mi + captureMarker.length;
                 const head = content.slice(0, insertPos);
                 const tail = content.slice(insertPos).replace(/^\n+/, '');
                 return head + `\n${line}\n` + (tail ? '\n' + tail : '');
