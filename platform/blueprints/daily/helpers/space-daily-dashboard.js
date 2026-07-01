@@ -111,6 +111,49 @@
  *    handler opens individual card files unchanged.
  */
 class SpaceDailyDashboard {
+  // ---- pure date helpers (Node-testable; no dv/DOM/customJS) ----
+  // Card "To Do number on daily note to show to items for all": the daily
+  // To-Do pill should also count tasks living in project + meeting notes, but
+  // ONLY those due today or already overdue (per the user's scope decision).
+  // The decision logic lives here as pure statics so it can be regression-
+  // tested; getTasks() is just the dv adapter that feeds it task records.
+
+  // Pull an ISO date (YYYY-MM-DD) out of a task's text: supports the dataview
+  // `due:: 2026-06-30` inline field (bare or [bracketed]) and the Tasks-plugin
+  // `📅 2026-06-30` emoji. Returns the date string, or null when there is none.
+  static _parseTaskDue(text) {
+    if (!text || typeof text !== "string") return null;
+    // \b before `due` so `overdue:: …` / `startdue:: …` don't false-match.
+    const m = text.match(/(?:\bdue\s*::\s*|📅\s*)(\d{4}-\d{2}-\d{2})/);
+    return m ? m[1] : null;
+  }
+
+  // A dated external task counts toward "today" iff its due date is today or
+  // earlier (overdue). No date, or a future date, → does NOT count. ISO date
+  // strings sort lexicographically, so a string compare is correct here.
+  static _countsTowardToday(due, today) {
+    if (!due || !today) return false;
+    return due <= today;
+  }
+
+  // Select the OPEN external task records ({text, completed, parentPath}) that
+  // belong on today's pill: not completed, and due today or overdue. Completed
+  // external tasks are intentionally NOT counted — project/meeting notes don't
+  // record a completion date, so "done today" is unknowable and counting "done
+  // ever" would grow the Done pill with the whole vault history. The Done count
+  // therefore stays scoped to today's own to-do note; only the OPEN count gains
+  // these external items. Pure — the dv adapter in getTasks() builds the records.
+  static _foldExternalTasks(records, today) {
+    const open = [];
+    for (const r of (records || [])) {
+      if (!r || r.completed) continue;
+      const due = SpaceDailyDashboard._parseTaskDue(r.text);
+      if (!SpaceDailyDashboard._countsTowardToday(due, today)) continue;
+      open.push({ text: r.text, parentPath: r.parentPath, due });
+    }
+    return open;
+  }
+
   async render(dv) {
     const icons = {
       calendar: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>`,
@@ -132,7 +175,10 @@ class SpaceDailyDashboard {
 
     const config = {
       meetingsPath: "spice/meetings/notes",
-      todoPaths: ["spice/to-do"]
+      todoPaths: ["spice/to-do"],
+      // Card "To Do number ... for all": project + meeting notes whose tasks
+      // (due today or overdue) also feed the daily To-Do count.
+      externalTaskPaths: ["spice/projects", "spice/meetings/notes"]
     };
 
     const getMeetings = () => {
@@ -163,6 +209,22 @@ class SpaceDailyDashboard {
             (task.completed ? done : open).push(item);
           }
         }
+      }
+      // Fold in project + meeting tasks that are DUE TODAY or OVERDUE. These
+      // notes are NOT date-named, so we can't filter by filename — we walk them
+      // and let the pure _foldExternalTasks decide by each task's due date.
+      // (Undated / future-dated tasks are skipped: the pill is "what's on my
+      // plate today", not every open task in the vault.)
+      for (const extPath of config.externalTaskPaths) {
+        const records = [];
+        for (const page of dv.pages(`"${extPath}"`)) {
+          if (!page.file || !page.file.tasks) continue;
+          for (const task of page.file.tasks) {
+            records.push({ text: task.text, completed: task.completed, parentPath: page.file.path });
+          }
+        }
+        const externalOpen = SpaceDailyDashboard._foldExternalTasks(records, today);
+        for (const it of externalOpen) open.push(it);
       }
       return { open, done };
     };
@@ -1306,4 +1368,12 @@ class SpaceDailyDashboard {
     }
     return html;
   }
+}
+
+// Dual-export the class so its pure statics (_parseTaskDue / _countsTowardToday
+// / _foldExternalTasks) can be regression-tested in the Node harness. Guarded:
+// in the Obsidian customJS runtime `module` is undefined, so this is a no-op
+// there and the live render path is completely unaffected.
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = { SpaceDailyDashboard };
 }
