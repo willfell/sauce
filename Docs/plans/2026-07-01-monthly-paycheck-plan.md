@@ -57,21 +57,21 @@ expenses:
 
 - [ ] **Step 2: "+ New Paycheck" button → month prompt.** Re-grep the paycheck `new_entity_buttons[]` entry. Change its `prompts` to prompt for `month` (like the budget button — copy the budget button's month prompt verbatim). Set dest to `spice/finance/paychecks/{{prompts.month}}` / `Paycheck-{{prompts.month}}`. `frontmatter_template`: `type: paycheck`, `month: "{{prompts.month}}"`, `deposits: []`, `expenses: []`. Keep `seed_from_defaults` (source Paycheck Defaults `expenses`, `resolve_wikilinks` for debt) and add nothing that computes dates (deposits are materialized on first render — Task 3).
 
-- [ ] **Step 3: Paycheck Defaults source shape.** In `platform/blueprints/finance/content/Paycheck Defaults.md`, add a `deposit_schedule` frontmatter array and a `deposit` field to each expense:
+- [ ] **Step 3: Paycheck Defaults source shape.** There is NO `content/Paycheck Defaults.md`; the create-if-absent source is the constant `FINANCE_PAYCHECK_DEFAULTS_CONTENT` in `platform/install.js` (re-grep — ~line 5527). Add a `deposit_schedule` to its frontmatter (expenses stays `[]`; users add their own with per-expense `deposit` via the defaults editor, Task 5):
 ```yaml
+type: paycheck-defaults
 deposit_schedule:
-  - { day: 1, amount: 4500 }
-  - { day: 15, amount: 4500 }
-expenses:
-  - { item: Example Bill, amount: 0, category: "", deposit: 1 }
+  - { day: 1, amount: 0 }
+  - { day: 15, amount: 0 }
+expenses: []
 ```
-(Keep the existing example expenses; add `deposit: 1` to each. Fixed-type examples → 1, debt/savings examples → 2.)
+The deposit-materialize (Task 3) reads `deposit_schedule`; if a vault's Paycheck Defaults lacks it, the editor falls back to a default `[{day:1,amount:0},{day:15,amount:0}]` — so NO backfill heal is needed for existing Paycheck Defaults.
 
 - [ ] **Step 4: Schema note.** In `schemas-index.json`, update the `finance-rule-fragments` + `finance-new-entity-buttons` notes to describe month-keyed paycheck + `deposits[]` + per-expense `deposit` + `deposit_schedule`.
 
 - [ ] **Step 5: Verify + commit.** `npm run lint-schemas` (0 issues) and `node platform/install.js --vault . --auto-approve` (self-install exit 0; manifest parses).
 ```bash
-git add platform/blueprints/finance/manifest.json "platform/blueprints/finance/content/Paycheck Defaults.md" platform/schemas-index.json
+git add platform/blueprints/finance/manifest.json platform/install.js platform/schemas-index.json
 git commit -m "feat(finance): paycheck entity is month-keyed with deposits[] + per-expense deposit tag (schema + scaffold)"
 ```
 
@@ -190,12 +190,18 @@ git commit -m "feat(finance): paycheck editor renders per-deposit columns, mater
 - [ ] **Step 3: Implement.**
   - `paycheck-summary.js`: header line uses `customJS.FinanceMath.depositTotals(page)` — show each deposit's income + assigned + leftover, and a combined total (Σ deposits vs Σ expenses).
   - `month-dashboard.js` `_renderPaycheckTotals`: re-grep; instead of one row per note, render one row per deposit across the month's monthly note(s): `date — income — assigned`. Income total = `customJS.FinanceMath.monthIncome(paychecks)`.
-  - `monthly-overview.js`: re-grep its paycheck income; change to sum `deposits[].amount` for the month's monthly note (fallback `paycheck_amount`).
+  - `monthly-overview.js`: re-grep BOTH `_readPaychecks` (retarget to `p.month === monthKey`, exclude `/_archive/`, require `deposits[]`) AND `_sumIncome` (sum `deposits[].amount`, fallback `paycheck_amount`).
+  - **Secondary paycheck-reading widgets (all read `pay_period_start`/`paycheck_amount` today — re-grep each):**
+    - `finance-hub-summary.js` "latest paycheck" tile (~243-254): sort/pick the latest by `month` (not `pay_period_start`); income from `deposits[]`.
+    - `finance-status.js` paycheck status branch (~48-65): derive status from `month`/deposits instead of `pay_period_start`.
+    - `paychecks-cards.js` sort + subtitle (~15/22/31-34): sort by `month`; subtitle shows deposits/month total.
+    - `finance-nav-row.js` (~119) + `finance-nav.js` (~230): `sortKey` off `pay_period_start` → `month`.
+  - **Schema notes:** in `schemas-index.json` update the MonthlyOverview note (re-grep ~line 242) from `(p.pay_period_end || p.pay_period_start).startsWith(monthKey)` → `p.month === monthKey`, and the computePlanState note (~254) if income sourcing wording changes.
 
 - [ ] **Step 4: GREEN + Step 5: Commit.**
 ```bash
-git add platform/blueprints/finance/helpers/paycheck-summary.js platform/blueprints/finance/helpers/month-dashboard.js platform/blueprints/finance/helpers/monthly-overview.js platform/test/run-renderer.js platform/test/run-finance-plan-widgets.js platform/test/run-v01103-monthly-overview.js
-git commit -m "feat(finance): paycheck summary + month dashboard + monthly overview read per-deposit income"
+git add platform/blueprints/finance/helpers/paycheck-summary.js platform/blueprints/finance/helpers/month-dashboard.js platform/blueprints/finance/helpers/monthly-overview.js platform/blueprints/finance/helpers/finance-hub-summary.js platform/blueprints/finance/helpers/finance-status.js platform/blueprints/finance/helpers/paychecks-cards.js platform/blueprints/finance/helpers/finance-nav-row.js platform/blueprints/finance/helpers/finance-nav.js platform/schemas-index.json platform/test/run-renderer.js platform/test/run-finance-plan-widgets.js platform/test/run-v01103-monthly-overview.js
+git commit -m "feat(finance): all paycheck-reading widgets read per-deposit income + month-keyed sort/status"
 ```
 
 ---
