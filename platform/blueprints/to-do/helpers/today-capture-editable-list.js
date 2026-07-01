@@ -159,10 +159,15 @@ class TodayCaptureEditableList {
         spanEl.innerHTML = parts.join('');
     }
 
-    async render(dv) {
+    async render(dv, opts) {
         if (!dv || !dv.container) return;
         // Skip rendering inside embeds — the host note already renders its own list.
         if (dv.container.closest && dv.container.closest('.markdown-embed')) return;
+
+        // Which task-interactions section anchor to scope to. Defaults to the
+        // daily-note Today capture; project-todo notes pass { anchor: "ownedTasks" }
+        // to render their "Owned Tasks" section with the same editable UI.
+        const anchor = (opts && opts.anchor) || 'todayCapture';
 
         // Clear container defensively.
         while (dv.container.firstChild) dv.container.removeChild(dv.container.firstChild);
@@ -192,7 +197,7 @@ class TodayCaptureEditableList {
             return;
         }
 
-        const entries = ti.findTaskLines(content, 'todayCapture');
+        const entries = ti.findTaskLines(content, anchor);
         if (!entries || entries.length === 0) {
             const empty = dv.container.createEl('div', { text: 'No tasks yet. Add a checkbox above.' });
             empty.style.cssText = 'color: var(--text-muted); font-size: 0.85em; font-style: italic; padding: 6px 0;';

@@ -232,6 +232,43 @@ ok('DLG-13b destinationPath today (with stub moment)',
     const taskIdx = out.indexOf('- [ ] new one');
     ok('DLG-MARK task after marker', taskIdx > markIdx, `marker@${markIdx} task@${taskIdx}`);
 })();
+// DLG-OWNED-MARK: a project-destination task inserts AFTER the OWNED_TASKS_MARKER
+// (not after the SectionLabel fence above it) so it lands inside the editable-list
+// scope and is not hidden by _hideRawCaptureLines. Regression guard for the
+// editable-Owned-Tasks feature (Gate B L2 regression finding).
+(() => {
+    const inst = new ToDoCreateTask();
+    const content = [
+        '---','type: project-todo','project: "[[Sauce]]"','---','',
+        '```dataviewjs','await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Owned Tasks", top: true }] });','```','',
+        '<!-- OWNED_TASKS_MARKER -->','',
+        '```dataviewjs','await dv.view("ranch/views/customjs-guard", { class: "TodayCaptureEditableList", args: [{ anchor: "ownedTasks" }] });','```','',
+        '```dataviewjs','await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "From Meetings" }] });','```',
+    ].join('\n');
+    const payload = { destination: { type: 'project', name: 'Sauce' } };
+    const out = inst._insertLineUnderSection(content, '- [ ] proj task [project:: [[Sauce]]]', payload);
+    const markIdx = out.indexOf('<!-- OWNED_TASKS_MARKER -->');
+    const taskIdx = out.indexOf('- [ ] proj task');
+    const rendIdx = out.indexOf('anchor: "ownedTasks"');
+    ok('DLG-OWNED-MARK task after marker', markIdx >= 0 && taskIdx > markIdx, `marker@${markIdx} task@${taskIdx}`);
+    ok('DLG-OWNED-MARK task above renderer', taskIdx >= 0 && rendIdx > taskIdx, `task@${taskIdx} renderer@${rendIdx}`);
+})();
+// DLG-OWNED-FALLBACK: an unhealed project note (no marker) still inserts after the
+// Owned Tasks SectionLabel fence (pre-heal behavior — visible native checkbox).
+(() => {
+    const inst = new ToDoCreateTask();
+    const content = [
+        '---','type: project-todo','---','',
+        '```dataviewjs','await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "Owned Tasks" }] });','```','',
+        '```dataviewjs','await dv.view("ranch/views/customjs-guard", { class: "SectionLabel", args: [{ text: "From Meetings" }] });','```',
+    ].join('\n');
+    const payload = { destination: { type: 'project', name: 'Sauce' } };
+    const out = inst._insertLineUnderSection(content, '- [ ] legacy proj', payload);
+    const labelIdx = out.indexOf('text: "Owned Tasks"');
+    const taskIdx = out.indexOf('- [ ] legacy proj');
+    const meetingsIdx = out.indexOf('text: "From Meetings"');
+    ok('DLG-OWNED-FALLBACK inserted in Owned Tasks section', labelIdx >= 0 && taskIdx > labelIdx && taskIdx < meetingsIdx);
+})();
 // DLG-SCAFFOLD: _todayBody fallback contains the full chrome (#2).
 (() => {
     const body = ToDoCreateTask._todayBody(null, '2026-06-24T09:00:00-06:00');

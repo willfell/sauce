@@ -1187,6 +1187,7 @@ async function installItem(tp, workshopPath, target, itemMan, variables, history
   await mergeDuplicateRecurringSections(tp, mech, variables, history, git); // v0.119.1 — merges duplicate "Recurring Today" blocks. SUPERSEDED by stripPersistedRecurringSection (v0.120.0) but kept for files-in-flight; runs as a no-op once stripPersistedRecurringSection has run.
   await stripPersistedRecurringSection(tp, mech, variables, history, git); // NEW v0.120.0 — retires materialized "Recurring Today" / "Recurring" SectionLabel blocks + recurring_from task lines + sentinels from dailies, since ToDoDailyRecurring.render() now live-queries the registry instead of writing to today's file. Idempotent. .sauce-backup snapshot before write.
   await applyProjectTodoBackfill(tp, mech, variables, history, git);           // NEW v0.116.0 — creates spice/projects/<slug>/<Name> To-Do.md for every project lacking one (skip-if-exists)
+  await applyProjectTodoOwnedTasksHeal(tp, history, git);                      // NEW — makes existing project-todo "Owned Tasks" sections editable (inject OWNED_TASKS_MARKER + TodayCaptureEditableList renderer); ungated, idempotent, .sauce-backup before write
   await applyOrphanedHelperCleanup(tp, mech, variables, history, git);         // NEW v0.110.0 — deletes obsolete *.js and *.js.bak helper files left on disk after manifest removals
   await applyEntityCreateGuardMigration(tp, mech, variables, history, git);    // NEW v0.110.1 — rewrites direct customJS.EntityCreate.render(dv,...) calls in vault notes to the customjs-guard form (cold-load race fix)
   await applyCustomJsGuardMigration(tp, mech, variables, history, git);        // NEW v0.110.2 — generalized: rewrites ANY direct customJS.<Class>.render(dv[,opts]) call in vault notes to guard form (mobile cold-load race fix)
@@ -7026,6 +7027,12 @@ async function applyProjectTodoBackfill(tp, mech, variables, history, git) {
         `await dv.view("${viewsPath}/customjs-guard", { class: "SectionLabel", args: [{ text: "Owned Tasks", top: true }] });`,
         '```',
         '',
+        '<!-- OWNED_TASKS_MARKER -->',
+        '',
+        '```dataviewjs',
+        `await dv.view("${viewsPath}/customjs-guard", { class: "TodayCaptureEditableList", args: [{ anchor: "ownedTasks" }] });`,
+        '```',
+        '',
         '```dataviewjs',
         `await dv.view("${viewsPath}/customjs-guard", { class: "SectionLabel", args: [{ text: "From Meetings" }] });`,
         '```',
@@ -7054,6 +7061,150 @@ async function applyProjectTodoBackfill(tp, mech, variables, history, git) {
     summary: { created, skipped, errors },
     git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
     completed_at: new Date().toISOString() });
+}
+
+// _healProjectTodoOwnedTasksBody — pure, idempotent body transform (project-todo
+// only). Makes the "Owned Tasks" section editable by TodayCaptureEditableList:
+//   (1) injects the OWNED_TASKS_MARKER directly below the "Owned Tasks"
+//       SectionLabel block, and
+//   (2) inserts the TodayCaptureEditableList({ anchor: "ownedTasks" }) renderer
+//       block directly BELOW the section's existing raw `- [ ]` task lines.
+// The renderer sits after the raw lines so the raw native task list PRECEDES it
+// and _hideRawCaptureLines can suppress it — the same layout the daily-note
+// Today capture relies on. Anchors on the SectionLabel class + "Owned Tasks"
+// text so it matches both shipped label forms (`{ text: "Owned Tasks" }` on
+// healed notes and `{ text: "Owned Tasks", top: true }` from
+// applyProjectTodoBackfill). Returns body unchanged when the section is absent
+// or already has BOTH marker + renderer (idempotent).
+function _healProjectTodoOwnedTasksBody(body) {
+  if (typeof body !== "string") return body;
+  const MARKER = "<!-- OWNED_TASKS_MARKER -->";
+  if (body.includes(MARKER) && body.includes('anchor: "ownedTasks"')) return body;
+
+  const lines = body.split("\n");
+  // Anchor on the Owned Tasks header in EITHER shipped form: a SectionLabel
+  // dataviewjs block (healed notes / applyProjectTodoBackfill scaffold) OR a
+  // plain `## Owned Tasks` H2 heading (the project entity-create inline_body,
+  // which the H2->SectionLabel rewrite — version-gated to 0.116.0 — no longer
+  // converts on vaults already past that version). `headerEnd` is the LAST line
+  // of the header block (the closing ``` for a SectionLabel; the H2 line itself
+  // for a heading), i.e. the line the marker is injected directly below.
+  let labelIdx = -1;
+  let headerEnd = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].includes('class: "SectionLabel"') && lines[i].includes('text: "Owned Tasks"')) {
+      labelIdx = i;
+      for (let j = i + 1; j < lines.length; j++) {
+        if (lines[j].trimStart().startsWith("```")) { headerEnd = j; break; }
+      }
+      break;
+    }
+  }
+  if (labelIdx === -1) {
+    for (let i = 0; i < lines.length; i++) {
+      if (/^## +Owned Tasks\s*$/.test(lines[i])) { labelIdx = i; headerEnd = i; break; }
+    }
+  }
+  if (labelIdx === -1 || headerEnd === -1) return body;  // no Owned Tasks header to anchor on
+  const fenceIdx = headerEnd;                            // insert point = last line of the header
+
+  // End of the Owned Tasks section: the opener of the next SectionLabel
+  // dataviewjs block (e.g. "From Meetings"), the next `## ` heading, or EOF.
+  let sectionEnd = lines.length;
+  for (let i = fenceIdx + 1; i < lines.length; i++) {
+    if (/^## /.test(lines[i])) { sectionEnd = i; break; }
+    if (lines[i].trimStart().startsWith("```dataviewjs")
+        && i + 1 < lines.length && lines[i + 1].includes("SectionLabel")) {
+      sectionEnd = i; break;
+    }
+  }
+
+  // Retain the section's raw task lines verbatim; strip any prior marker line and
+  // any prior ownedTasks renderer block so a re-emit stays idempotent.
+  const between = lines.slice(fenceIdx + 1, sectionEnd);
+  const kept = [];
+  for (let i = 0; i < between.length; i++) {
+    const ln = between[i];
+    if (ln.includes(MARKER)) continue;
+    if (ln.trimStart().startsWith("```dataviewjs")
+        && i + 1 < between.length && between[i + 1].includes('anchor: "ownedTasks"')) {
+      let j = i + 1;
+      while (j < between.length && !between[j].trimStart().startsWith("```")) j++;
+      i = j;                                            // skip through closing fence
+      continue;
+    }
+    kept.push(ln);
+  }
+  let s = 0, e = kept.length;
+  while (s < e && kept[s].trim() === "") s++;
+  while (e > s && kept[e - 1].trim() === "") e--;
+  const raw = kept.slice(s, e);
+
+  const rendererBlock = [
+    "```dataviewjs",
+    'await dv.view("ranch/views/customjs-guard", { class: "TodayCaptureEditableList", args: [{ anchor: "ownedTasks" }] });',
+    "```",
+  ];
+
+  const rebuilt = ["", MARKER, ""];
+  if (raw.length) rebuilt.push(...raw, "");
+  rebuilt.push(...rendererBlock, "");
+
+  return lines.slice(0, fenceIdx + 1)
+    .concat(rebuilt)
+    .concat(lines.slice(sectionEnd))
+    .join("\n");
+}
+
+// applyProjectTodoOwnedTasksHeal — ungated backfill (runs every install; NOT
+// version-gated because it back-injects NEW content into existing notes, per the
+// migration-lifecycle rule). Walks spice/projects/<slug>/<Name> To-Do.md and
+// makes each note's Owned Tasks section editable via _healProjectTodoOwnedTasksBody.
+// .sauce-backup snapshot before any write; per-note try/catch; fails-loud (history
+// warning) but never throws; idempotent (already-editable notes are no-ops).
+// Mirrors applyNoteChromeHeal posture.
+async function applyProjectTodoOwnedTasksHeal(tp, history, git) {
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+  const PROJ_ROOT = "spice/projects";
+  if (!(await adapter.exists(PROJ_ROOT))) return;
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  let healed = 0, warned = 0;
+
+  let listing;
+  try { listing = await adapter.list(PROJ_ROOT); }
+  catch (_e) { return; }
+
+  for (const projDir of (listing.folders || [])) {
+    let subListing;
+    try { subListing = await adapter.list(projDir); }
+    catch (_e) { continue; }
+    for (const fpath of (subListing.files || [])) {
+      if (!/ To-Do\.md$/.test(fpath)) continue;
+      try {
+        const before = await adapter.read(fpath);
+        if (!/^type:\s*project-todo\b/m.test(before) && !/^type:\s*"project-todo"/m.test(before)) continue;
+        const after = _healProjectTodoOwnedTasksBody(before);
+        if (after === before) continue;
+        const backupPath = `.sauce-backup/${ts}/${fpath}`;
+        const backupParent = backupPath.substring(0, backupPath.lastIndexOf("/"));
+        try { await adapter.mkdir(backupParent); } catch (_e) { /* already exists */ }
+        try { await adapter.write(backupPath, before); } catch (_e) { /* best-effort */ }
+        await adapter.write(fpath, after);
+        healed += 1;
+        history?.push({ event: "info", step: "project_todo_owned_tasks_heal", target: fpath, action: "healed",
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+      } catch (e) {
+        warned += 1;
+        history?.push({ event: "warning", step: "project_todo_owned_tasks_heal",
+          reason: `${fpath}: ${e && e.message ? e.message : String(e)}`,
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, attempted_at: new Date().toISOString() });
+      }
+    }
+  }
+  history?.push({ event: "info", step: "project_todo_owned_tasks_heal", name: "vault",
+    summary: { healed, warned },
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty, completed_at: new Date().toISOString() });
 }
 
 // applyEntityCreateGuardMigration — v0.110.1. Heals the cold-vault load race
@@ -14651,6 +14802,7 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     // v0.116.0 — to-do blueprint v0.4.0 migrations.
     module.exports.applyToDoBlueprintMigration = applyToDoBlueprintMigration;
     module.exports.applyProjectTodoBackfill = applyProjectTodoBackfill;
+    module.exports._healProjectTodoOwnedTasksBody = _healProjectTodoOwnedTasksBody;
     // v0.119.0 — to-do v0.7.0 additive recurring sentinel heal.
     module.exports.applyRecurringSentinelV070Migration = applyRecurringSentinelV070Migration;
     module.exports.mergeDuplicateRecurringSections = mergeDuplicateRecurringSections;

@@ -1,6 +1,6 @@
 {
   "name": "project",
-  "version": "1.28.3",
+  "version": "1.29.0",
   "kind": "blueprint",
   "module_directory": "projects",
   "skills_dir": ".claude/skills/project",
@@ -300,7 +300,7 @@
               "wide"
             ]
           },
-          "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"Breadcrumb\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ProjectNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ToDoLeafActions\" });\n```\n\n## Owned Tasks\n\n## From Meetings\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ToDoDailyProjectGroups\", args: [{ scope: \"project-todo\" }] });\n```\n"
+          "inline_body": "```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"Breadcrumb\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"SpaceNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ProjectNavButtons\" });\n```\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ToDoLeafActions\" });\n```\n\n## Owned Tasks\n\n<!-- OWNED_TASKS_MARKER -->\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"TodayCaptureEditableList\", args: [{ anchor: \"ownedTasks\" }] });\n```\n\n## From Meetings\n\n```dataviewjs\nawait dv.view(\"ranch/views/customjs-guard\", { class: \"ToDoDailyProjectGroups\", args: [{ scope: \"project-todo\" }] });\n```\n"
         }
       ],
       "render_in": {
