@@ -133,7 +133,7 @@ class TaskTodayList {
 
         // ----- Render -----
         const wrap = dv.container.createEl('div', { cls: 'sauce-task-today' });
-        wrap.style.cssText = 'display: flex; flex-direction: column; gap: 10px; margin: 4px 0;';
+        wrap.style.cssText = 'display: flex; flex-direction: column; gap: 10px; margin: 4px 0; width: 100%;';
 
         // + New Task button (top) → delegate to TaskDialog with the daily surface.
         const newBtn = wrap.createEl('button', { cls: 'sauce-task-today-new', text: '+ New Task' });
@@ -162,7 +162,7 @@ class TaskTodayList {
      */
     _renderBand(wrap, label, tasks, emptyHint) {
         const band = wrap.createEl('div', { cls: 'sauce-task-today-band' });
-        band.style.cssText = 'display: flex; flex-direction: column; gap: 4px;';
+        band.style.cssText = 'display: flex; flex-direction: column; gap: 4px; width: 100%; box-sizing: border-box;';
 
         const cap = band.createEl('div', { cls: 'sauce-task-today-label', text: label });
         cap.style.cssText = 'font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted, #999); margin-bottom: 2px;';
@@ -191,7 +191,10 @@ class TaskTodayList {
     _renderRow(band, task) {
         const path = task && task.path;
         const row = band.createEl('div', { cls: 'sauce-task-today-row' });
-        row.style.cssText = 'display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 4px; border: 1px solid transparent;';
+        // flex-wrap so a long title + its chips never squeeze the title into a
+        // one-char-per-line column on a narrow (mobile) container: the title
+        // holds line 1, chips flow onto line 2 when there isn't room.
+        row.style.cssText = 'display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; padding: 4px 6px; border-radius: 4px; border: 1px solid transparent; width: 100%; box-sizing: border-box;';
         row.addEventListener('mouseenter', () => { row.style.background = 'var(--background-secondary)'; });
         row.addEventListener('mouseleave', () => { row.style.background = ''; });
 
@@ -202,7 +205,7 @@ class TaskTodayList {
         const cb = row.createEl('input');
         cb.type = 'checkbox';
         cb.checked = false;
-        cb.style.cssText = 'margin: 0; cursor: pointer;';
+        cb.style.cssText = 'margin: 0; cursor: pointer; flex-shrink: 0;';
         cb.addEventListener('click', (ev) => { ev.stopPropagation(); });
         cb.addEventListener('change', async () => {
             if (!path) { cb.checked = false; return; }
@@ -222,7 +225,9 @@ class TaskTodayList {
 
         // Title — clicking the row (not the checkbox) opens the editor.
         const title = row.createEl('span', { cls: 'sauce-task-today-title', text: (task && task.title) || '(untitled)' });
-        title.style.cssText = 'flex: 1; min-width: 0; overflow-wrap: anywhere; color: var(--text-normal); cursor: pointer;';
+        // flex-basis 60% + a readable min-width keeps the title the dominant
+        // column; break-word wraps only long words (not every character).
+        title.style.cssText = 'flex: 1 1 60%; min-width: 8em; overflow-wrap: break-word; word-break: break-word; color: var(--text-normal); cursor: pointer;';
 
         const openEditor = () => {
             if (!path) return;
