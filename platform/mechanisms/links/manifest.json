@@ -1,13 +1,21 @@
 {
   "name": "links",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Reusable helpful-links primitive. customJS.Links.parse(value) normalizes a note's `links` frontmatter (array of {url,text}|{url,label}|{href,text}, bare-URL strings, or a JSON string) into an ordered, de-duplicated [{url,text}] (text defaults to url; entries without a url dropped). customJS.Links.render(dv, {links, title?, empty?}) renders the read-only list of external anchors (target=_blank rel=noopener) in added order, cold-load safe. First wired into the project blueprint's per-project Link Hub note; generic so daily/meeting/other notes can adopt it later.",
   "depends_on": [
-    { "name": "customjs-guard", "range": ">=1.0.0" }
+    {
+      "name": "customjs-guard",
+      "range": ">=1.0.0"
+    }
   ],
-  "customjs_classes": ["Links"],
+  "customjs_classes": [
+    "Links"
+  ],
   "files": [
-    { "source": "links.js", "dest": "{{scripts_path}}/links/links.js" }
+    {
+      "source": "links.js",
+      "dest": "{{scripts_path}}/links/links.js"
+    }
   ],
   "post_install": [],
   "rule_fragments": []
