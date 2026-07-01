@@ -20,16 +20,22 @@ function slugFromRef(ref) {
  * @param {object} o
  * @param {string[]} [o.branches] branch names matching autoloop/* (local and/or remote)
  * @param {Array<{headRefName:string,state:string,number:number}>} [o.prs] autoloop/* PRs, any state
+ * @param {number[]} [o.reconciled] PR numbers already reconciled by a prior turn (the ledger).
+ *   Terminal (merged/failed) PRs on this list are SKIPPED when judging the newest terminal
+ *   state — without it, the newest merged PR re-fires `merged` forever and the loop never
+ *   reaches `idle` (the merged-deadlock). Open PRs / bare branches are never filtered: an
+ *   open or in-implementation card is in-flight regardless of what was reconciled before.
  * @returns {{status:string, card:(string|null), nextAction:string, number?:number, extra?:string[]}}
  */
 function reconcileInFlight(o) {
-  const { branches = [], prs = [] } = o || {};
+  const { branches = [], prs = [], reconciled = [] } = o || {};
+  const reconciledSet = new Set((Array.isArray(reconciled) ? reconciled : []).map(Number).filter(Number.isFinite));
   const branchSlugs = [...new Set(branches.map(slugFromRef).filter(Boolean))];
   const prRecs = prs
     .map((p) => ({ slug: slugFromRef(p.headRefName), state: String(p.state || '').toUpperCase(), number: Number(p.number) || 0 }))
     .filter((p) => p.slug);
 
-  // 1. Any OPEN autoloop PR wins (highest number = most recent).
+  // 1. Any OPEN autoloop PR wins (highest number = most recent). Never ledger-filtered.
   const open = prRecs.filter((p) => p.state === 'OPEN').sort((a, b) => b.number - a.number);
   if (open.length) {
     return { status: 'pr-open', card: open[0].slug, number: open[0].number, nextAction: 'wait',
@@ -44,23 +50,55 @@ function reconcileInFlight(o) {
       ...(bare.length > 1 ? { extra: bare.slice(1) } : {}) };
   }
 
-  // 3. No open PR, no bare branch → judge by the most-recent PR's terminal state.
-  if (prRecs.length) {
-    const recent = prRecs.slice().sort((a, b) => b.number - a.number)[0];
+  // 3. No open PR, no bare branch → judge by the most-recent NOT-YET-RECONCILED terminal PR.
+  //    A PR already in the ledger was closed/blocked by a prior turn; skipping it is what
+  //    lets the loop fall through to `idle` instead of re-firing merged/failed forever.
+  const terminal = prRecs.filter((p) => !reconciledSet.has(p.number));
+  if (terminal.length) {
+    const recent = terminal.slice().sort((a, b) => b.number - a.number)[0];
     if (recent.state === 'MERGED') return { status: 'merged', card: recent.slug, number: recent.number, nextAction: 'close-card' };
     return { status: 'failed', card: recent.slug, number: recent.number, nextAction: 'block-card' };
   }
 
-  // 4. Nothing in flight.
+  // 4. Nothing un-reconciled in flight.
   return { status: 'idle', card: null, nextAction: 'pick' };
 }
 
-module.exports = { reconcileInFlight, slugFromRef };
+// Pure ledger update: add `number` to `existing` (deduped, numeric), keep the most-recent `cap`.
+// Small integers, so the cap is only a runaway guard; the tail is what matters (newest PRs).
+function nextLedger(existing, number, cap = 500) {
+  const nums = (Array.isArray(existing) ? existing : []).map(Number).filter(Number.isFinite);
+  const n = Number(number);
+  if (Number.isFinite(n) && !nums.includes(n)) nums.push(n);
+  return cap > 0 ? nums.slice(-cap) : nums;
+}
+
+module.exports = { reconcileInFlight, slugFromRef, nextLedger };
 
 if (require.main === module) {
+  const fs = require('fs');
+  const path = require('path');
   const { execFileSync } = require('child_process');
-  const sh = (cmd, args) => {
-    try { return execFileSync(cmd, args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }); }
+  const ROOT = path.resolve(__dirname, '..', '..');
+  const LEDGER = path.join(ROOT, '.autoloop-reconciled.json'); // local-only (gitignored), one machine
+  const readLedger = () => { try { const v = JSON.parse(fs.readFileSync(LEDGER, 'utf8')).reconciled; return Array.isArray(v) ? v : []; } catch (_) { return []; } };
+  const writeLedger = (nums) => fs.writeFileSync(LEDGER, JSON.stringify({ reconciled: nums }), 'utf8');
+
+  const cmd = process.argv[2];
+  // `record <pr-number>` — the live merged/failed branch calls this AFTER it closes/blocks the
+  // card, so the NEXT turn skips that PR and can reach idle. Read-only reconcile never mutates.
+  if (cmd === 'record') {
+    const n = Number(process.argv[3]);
+    if (!Number.isFinite(n)) { console.error('usage: reconcile-inflight.js record <pr-number>'); process.exit(2); }
+    const updated = nextLedger(readLedger(), n);
+    writeLedger(updated);
+    console.log(JSON.stringify({ recorded: n, count: updated.length }));
+    process.exit(0);
+  }
+  if (cmd === 'list') { console.log(JSON.stringify({ reconciled: readLedger() })); process.exit(0); }
+
+  const sh = (c, args) => {
+    try { return execFileSync(c, args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }); }
     catch (_) { return null; }
   };
   const clean = (out) => (out || '').split('\n').map((s) => s.replace(/^[*+]?\s*/, '').trim()).filter(Boolean);
@@ -79,6 +117,6 @@ if (require.main === module) {
     console.log(JSON.stringify({ status: 'unknown', card: null, nextAction: 'halt', reason: 'gh output not valid JSON — not assuming idle' }));
     process.exit(0);
   }
-  console.log(JSON.stringify(reconcileInFlight({ branches, prs }), null, 2));
+  console.log(JSON.stringify(reconcileInFlight({ branches, prs, reconciled: readLedger() }), null, 2));
   process.exit(0);
 }
