@@ -1,6 +1,6 @@
 {
   "name": "project",
-  "version": "1.32.0",
+  "version": "1.33.0",
   "kind": "blueprint",
   "module_directory": "projects",
   "skills_dir": ".claude/skills/project",
@@ -63,7 +63,8 @@
     "ProjectDocsIndex",
     "SectionHub",
     "DocMove",
-    "ProjectLinksPanel"
+    "ProjectLinksPanel",
+    "WorkstreamSource"
   ],
   "pre_install": [
     {
@@ -191,6 +192,10 @@
     {
       "source": "templates/Links Hub.md",
       "dest": "{{templates_path}}/Template, Links Hub.md"
+    },
+    {
+      "source": "helpers/workstream-source.js",
+      "dest": "{{scripts_path}}/project/workstream-source.js"
     }
   ],
   "customjs_startup_scripts": [
