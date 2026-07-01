@@ -1427,9 +1427,33 @@ async function testBB5IconHtmlInlinedBeforeLabel() {
   const btn = new Cls().render(parent, { label: 'Save', icon: iconHtml, onClick: () => {} });
   const html = (btn && btn.innerHTML) || '';
   const idxIcon = html.indexOf('data-test="icon"');
-  const idxLabel = html.indexOf('<span>Save</span>');
+  // Label span may carry truncation styling (a style="..." attr), so match the
+  // tag close + text rather than a bare <span>.
+  const idxLabel = html.indexOf('>Save</span>');
   const pass = idxIcon !== -1 && idxLabel !== -1 && idxIcon < idxLabel;
   console.log(`  innerHTML: ${html}`);
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
+async function testBB9LabelSpanTruncates() {
+  console.log('\n=== BB9 — label span carries single-line truncation styling (no wrap → centering stays clean) ===');
+  const app = makeApp();
+  const Cls = loadAccentButtonClass(app);
+  if (!Cls) { console.log('  FAIL — AccentButton class not loaded'); return false; }
+  const parent = makeEl('div', {});
+  const btn = new Cls().render(parent, { label: 'Project Board', icon: '<svg/>', onClick: () => {}, flex: true });
+  const html = (btn && btn.innerHTML) || '';
+  // Isolate the label span (the one wrapping the text, not the icon).
+  const m = html.match(/<span([^>]*)>Project Board<\/span>/);
+  const attrs = (m && m[1]) || '';
+  const hasNowrap = /white-space\s*:\s*nowrap/.test(attrs);
+  const hasEllipsis = /text-overflow\s*:\s*ellipsis/.test(attrs);
+  const hasOverflowHidden = /overflow\s*:\s*hidden/.test(attrs);
+  const hasMinWidth0 = /min-width\s*:\s*0/.test(attrs);
+  const pass = !!m && hasNowrap && hasEllipsis && hasOverflowHidden && hasMinWidth0;
+  console.log(`  label span attrs: ${attrs}`);
+  console.log(`  nowrap=${hasNowrap} ellipsis=${hasEllipsis} overflowHidden=${hasOverflowHidden} minWidth0=${hasMinWidth0}`);
   console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
   return pass;
 }
@@ -2550,6 +2574,7 @@ async function testRendHasNotes() {
       results.push(['BB6 hover-swap', await testBB6HoverEnterLeaveSwapsColors()]);
       results.push(['BB7 hover-no-csstext-reassign', await testBB7HoverDoesNotReassignCssText()]);
       results.push(['BB8 base-overflow-clip', await testBB8BaseCssClipsOverflow()]);
+      results.push(['BB9 label-span-truncates', await testBB9LabelSpanTruncates()]);
       results.push(['NAV-WRAP rowstyle-wraps', await testNavWrapRowStyleWraps()]);
     }
     if (which === 'date-aware' || which === 'all') {
