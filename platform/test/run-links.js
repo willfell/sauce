@@ -43,6 +43,11 @@ const L = Cls ? new Cls() : null;
   const r = L && L.parse([{ url: 'https://a.com', label: 'Alpha' }, { href: 'https://b.com', text: 'Beta' }]);
   ok('L2 label/href aliases', r && r.length === 2 && r[0].text === 'Alpha' && r[1].url === 'https://b.com' && r[1].text === 'Beta');
 }
+// L2b — {link} url alias and {title}/{name} text aliases resolve
+{
+  const r = L && L.parse([{ link: 'https://a.com', title: 'Ay' }, { url: 'https://b.com', name: 'Bee' }]);
+  ok('L2b link/title/name aliases', r && r.length === 2 && r[0].url === 'https://a.com' && r[0].text === 'Ay' && r[1].text === 'Bee');
+}
 // L3 — bare URL strings: text defaults to the url
 {
   const r = L && L.parse(['https://a.com', 'https://b.com']);
@@ -97,9 +102,13 @@ const L = Cls ? new Cls() : null;
   const anchors = [];
   const walk = (el) => { for (const ch of el.children) { if (ch.tag === 'a') anchors.push(ch); walk(ch); } };
   walk(c);
-  ok('L12 anchors rendered', n === 2 && anchors.length === 2 &&
+  // Assert EVERY anchor carries the external-safe attrs (not just the first) —
+  // a per-anchor rel="noopener"/target regression must not slip through.
+  const everyAnchorSafe = anchors.length === 2 &&
+    anchors.every(a => a.attrs.target === '_blank' && a.attrs.rel === 'noopener' && typeof a.href === 'string' && a.href.length > 0);
+  ok('L12 anchors rendered (per-anchor target/rel/href/text)', n === 2 && everyAnchorSafe &&
     anchors[0].href === 'https://a.com' && anchors[0].textContent === 'A' &&
-    anchors[0].attrs.target === '_blank' && anchors[0].attrs.rel === 'noopener');
+    anchors[1].href === 'https://b.com' && anchors[1].textContent === 'B');
 }
 // L13 — empty links renders no anchors and returns 0
 {
