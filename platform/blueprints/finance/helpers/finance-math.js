@@ -29,6 +29,34 @@ class FinanceMath {
         return s ? s.slice(0, 7) : null;
     }
 
+    // ---- deposit helpers (monthly paycheck) ----
+    // 1-based deposit index for an expense; missing/invalid → 1 (first check).
+    _depositIndex(exp, depositCount) {
+        const n = Math.trunc(Number(exp && exp.deposit));
+        if (!isFinite(n) || n < 1) return 1;
+        if (depositCount && n > depositCount) return depositCount;
+        return n;
+    }
+    // A note is the NEW monthly format iff it has a deposits[] array.
+    _isMonthlyPaycheck(p) { return !!(p && Array.isArray(p.deposits)); }
+    // Per-deposit rollup: for each deposit, { date, amount, assigned, leftover }
+    // where assigned = Σ expenses tagged to that deposit (missing/invalid → 1).
+    depositTotals(paycheck) {
+        const deposits = Array.isArray(paycheck && paycheck.deposits) ? paycheck.deposits : [];
+        const expenses = Array.isArray(paycheck && paycheck.expenses) ? paycheck.expenses : [];
+        const assigned = deposits.map(() => 0);
+        for (const e of expenses) {
+            const idx = this._depositIndex(e, deposits.length) - 1;
+            if (idx >= 0 && idx < assigned.length) assigned[idx] += (Number(e && e.amount) || 0);
+        }
+        return deposits.map((d, i) => ({
+            date: d && d.date,
+            amount: Number(d && d.amount) || 0,
+            assigned: assigned[i],
+            leftover: (Number(d && d.amount) || 0) - assigned[i],
+        }));
+    }
+
     // ---- reads ----
     readDebts(dv) {
         try { return dv.pages('"spice/finance/debts"').where(p => p && p.type === "debt").array(); }
@@ -36,13 +64,23 @@ class FinanceMath {
     }
     readPaychecksForMonth(dv, monthKey) {
         try {
-            return dv.pages('"spice/finance/paychecks"').where(p => {
+            const hits = dv.pages('"spice/finance/paychecks"').where(p => {
                 if (!p || p.type !== "paycheck") return false;
-                // Attribute to the month the check is PAID (pay_period_end),
-                // falling back to pay_period_start for legacy checks lacking an end.
-                const key = this._coerceDateString(p.pay_period_end) || this._coerceDateString(p.pay_period_start);
-                return typeof key === "string" && key.startsWith(monthKey);
+                // Archived notes are never part of the live monthly rollup.
+                if (p.file && typeof p.file.path === "string" && p.file.path.includes("/_archive/")) return false;
+                // Prefer the new month-keyed shape; fall back to the legacy
+                // pay_period_* (attribute to the month PAID: end, then start) so
+                // pre-cutover notes still attribute until the archive heal runs.
+                const m = this._coerceMonthString(p.month)
+                    || this._coerceMonthString(this._coerceDateString(p.pay_period_end) || this._coerceDateString(p.pay_period_start));
+                return m === monthKey;
             }).array();
+            // Double-count guard: if a new-format (deposits[]) note exists for this
+            // month, drop the legacy (no deposits[]) notes for that month so income /
+            // expenses are never summed twice during the pre-cutover transition.
+            // A month with ONLY legacy notes still returns them (backward-compat).
+            const hasMonthly = hits.some(p => Array.isArray(p.deposits));
+            return hasMonthly ? hits.filter(p => Array.isArray(p.deposits)) : hits;
         } catch (_e) { return []; }
     }
     readBudgetForMonth(dv, monthKey) {
@@ -139,7 +177,11 @@ class FinanceMath {
         });
     }
     monthIncome(paychecks) {
-        return paychecks.reduce((s, p) => s + (typeof p.paycheck_amount === "number" ? p.paycheck_amount : 0), 0);
+        return paychecks.reduce((s, p) => {
+            // Prefer the new deposits[] shape; fall back to legacy scalar paycheck_amount.
+            if (Array.isArray(p.deposits) && p.deposits.length) return s + p.deposits.reduce((d, x) => d + (Number(x && x.amount) || 0), 0);
+            return s + (typeof p.paycheck_amount === "number" ? p.paycheck_amount : 0);
+        }, 0);
     }
     monthSpending(budget) {
         if (!budget || !Array.isArray(budget.categories)) return 0;

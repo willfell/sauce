@@ -116,7 +116,7 @@ class FinanceNavRow {
             await this._renderSiblingNav(row, page, "budgets", "month", "ASC", btnStyle);
         } else if (mode === "entity-paycheck") {
             mkBtn("Paychecks Hub", "spice/finance/paychecks/Paychecks.md");
-            await this._renderSiblingNav(row, page, "paychecks", "pay_period_start", "ASC", btnStyle);
+            await this._renderSiblingNav(row, page, "paychecks", "month", "ASC", btnStyle);
         } else if (mode === "entity-invoice") {
             mkBtn("Invoices Hub", "spice/finance/invoices/Invoices.md");
         } else if (mode === "entity-debt") {
@@ -133,7 +133,12 @@ class FinanceNavRow {
 
             const siblings = allFiles.map(f => {
                 const fm = app.metadataCache.getFileCache(f)?.frontmatter || {};
-                return { path: f.path, name: f.name, sortVal: fm[sortKey], fm };
+                // Month-keyed entities sort by `month`; legacy paycheck notes lack
+                // it, so fall back to pay_period_start (harmless for budgets/months
+                // whose `month` is always present).
+                let sortVal = fm[sortKey];
+                if ((sortVal === undefined || sortVal === null) && sortKey === "month") sortVal = fm.pay_period_start;
+                return { path: f.path, name: f.name, sortVal, fm };
             }).filter(s => s.sortVal !== undefined && s.sortVal !== null);
 
             siblings.sort((a, b) => {

@@ -13013,8 +13013,10 @@ async function caseV01103MonthlyOverviewDataReads() {
     /spice\/finance\/paychecks/.test(src));
   assertTrue("V01103-MO-READS-2: queries spice/finance/debts",
     /spice\/finance\/debts/.test(src));
-  assertTrue("V01103-MO-READS-3: filters paychecks by pay_period_end month prefix (start fallback)",
-    /pay_period_end[\s\S]{0,400}startsWith/.test(src));
+  assertTrue("V01103-MO-READS-3: attributes paychecks by month (month-keyed primary) with legacy pay_period_end prefix fallback",
+    /_coerceMonthString\(p\.month\)/.test(src)
+    && /monthStr !== monthKey/.test(src)
+    && /pay_period_end[\s\S]{0,400}startsWith/.test(src));
   assertTrue("V01103-MO-READS-4: sums paycheck_amount + expenses + current_balance + balance_history",
     /paycheck_amount/.test(src) && /\.expenses\b/.test(src) && /current_balance/.test(src) && /balance_history/.test(src));
 }
@@ -13351,6 +13353,7 @@ async function caseV01120FinanceMathStaticApi() {
     "monthBounds", "debtTotals", "monthIncome", "monthSpending",
     "monthExpensesTotal", "monthDebtPaid", "debtPaidByDebt",
     "measuredMovement", "reconcile", "fmtMoney", "budgetAllocations",
+    "depositTotals", "_depositIndex",
   ];
   for (const m of methods) {
     assertTrue(`V01120-FM-API-${m}: instance ${m} declared (not static)`,

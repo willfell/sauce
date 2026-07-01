@@ -158,7 +158,7 @@
         "platform/blueprints/finance/helpers/monthly-overview.js",
         "platform/blueprints/finance/helpers/finance-math.js"
       ],
-      "notes": "11 rule_fragments covering: budget / paycheck / invoice / debt / budget-defaults / paycheck-defaults / debt-defaults / month / finance-plan (v0.10.0) / savings-accounts (v0.10.0) / hub types. Budget fragment carries optional `debt_allocations[]` + `savings_allocations[]` arrays (finance month-reality WS2 — per-row plan/override allocations, never summed into the discretionary envelope). Validates frontmatter on per-blueprint paths via the validator mechanism."
+      "notes": "11 rule_fragments covering: budget / paycheck / invoice / debt / budget-defaults / paycheck-defaults / debt-defaults / month / finance-plan (v0.10.0) / savings-accounts (v0.10.0) / hub types. Paycheck is month-keyed: requires `month` (^\\d{4}-\\d{2}$), naming `^Paycheck-\\d{4}-\\d{2}\\.md$`, optional `deposits[]` ({date, amount}); each `expenses[]` row carries a 1-based `deposit` index tying it to which check pays it. Legacy `pay_period_start`/`pay_period_end` are downgraded to optional (archived/pre-cutover notes). paycheck-defaults carries a `deposit_schedule[]` ({day, amount}) that seeds a new month's deposits. Budget fragment carries optional `debt_allocations[]` + `savings_allocations[]` arrays (finance month-reality WS2 — per-row plan/override allocations, never summed into the discretionary envelope). Validates frontmatter on per-blueprint paths via the validator mechanism."
     },
     {
       "id": "cowork-rule-fragments",
@@ -217,7 +217,7 @@
       "consumers": [
         "platform/blueprints/finance/helpers/finance-nav-row.js"
       ],
-      "notes": "Finance has 4 new_entity_button entries: budget / paycheck / invoice / debt. Each declares prompts[] (text/date/number/select fields), destination, frontmatter_template, inline_body. entity-create@0.7.1 consumes seed_from_defaults.resolve_wikilinks (v0.108.0)."
+      "notes": "Finance has 4 new_entity_button entries: budget / paycheck / invoice / debt. Each declares prompts[] (text/date/number/select fields), destination, frontmatter_template, inline_body. The paycheck button prompts for a single `month` (type:month, like the invoice/budget buttons) and scaffolds Paycheck-{{month}}.md with `month`, `deposits: []`, `expenses: []` — deposits are materialized on first render from the Paycheck Defaults `deposit_schedule`; each seeded expense carries a 1-based `deposit` index. entity-create@0.7.1 consumes seed_from_defaults.resolve_wikilinks (v0.108.0)."
     },
     {
       "id": "cowork-vault-config-engagement",
@@ -239,7 +239,7 @@
       "consumers": [
         "platform/blueprints/finance/templates/Budget Template.md"
       ],
-      "notes": "MonthlyOverview (v0.110.3) reads page.type === 'budget' + page.month + page.categories[*].actual + dv.pages('spice/finance/paychecks').where(p => p.type === 'paycheck' && (p.pay_period_end || p.pay_period_start).startsWith(monthKey)) + dv.pages('spice/finance/debts').where(p => p.type === 'debt'). Paychecks attribute to the month they are paid (pay_period_end, start fallback). Paycheck expenses[*].debt + paid:true expected when summing debtPaid. Behavioral coverage in platform/test/run-v01103-monthly-overview.js."
+      "notes": "MonthlyOverview reads page.type === 'budget' + page.month + page.categories[*].actual + dv.pages('spice/finance/paychecks').where(p => p.type === 'paycheck' && !p.file.path.includes('/_archive/') && p.month === monthKey) + dv.pages('spice/finance/debts').where(p => p.type === 'debt'). Month-keyed paychecks attribute by `month`; legacy per-check notes (no `month`) fall back to the pay_period_end (start fallback) window; archived legacy notes under /_archive/ are excluded. Income = Σ deposits[].amount for the month-keyed shape, falling back to the scalar paycheck_amount for legacy notes. Paycheck expenses[*] carry a per-expense `deposit` (1-based index into deposits[]); expenses[*].debt + paid:true expected when summing debtPaid. Behavioral coverage in platform/test/run-v01103-monthly-overview.js."
     },
     {
       "id": "finance-plan-state-read",

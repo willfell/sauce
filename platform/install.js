@@ -5526,6 +5526,9 @@ await dv.view("ranch/views/customjs-guard", { class: "BudgetDefaultsEditor" });
 
 const FINANCE_PAYCHECK_DEFAULTS_CONTENT = `---
 type: paycheck-defaults
+deposit_schedule:
+  - { day: 1, amount: 0 }
+  - { day: 15, amount: 0 }
 expenses: []
 cssclasses: [wide]
 ---
@@ -5834,6 +5837,7 @@ async function applyFinancePaycheckDebtBandInjection(tp, manifest, variables, hi
   try {
     const top = await adapter.list(paychecksRoot);
     for (const folder of (top.folders || [])) {
+      if (folder.includes("/_archive")) continue;  // archived legacy notes are inert — never re-inject
       try {
         const inner = await adapter.list(folder);
         for (const fp of (inner.files || [])) {
@@ -6108,6 +6112,7 @@ async function applyFinanceMigrations(tp, manifest, variables, history, git) {
   await applyFinanceBudgetMonthlyBandInjection(tp, manifest, variables, history, git);   // NEW v0.110.3 — MonthlyOverview band above BudgetSummary
   await applyFinanceBudgetAllocationsBandInjection(tp, manifest, variables, history, git); // NEW (month reality WS2) — BudgetAllocationsEditor block after BudgetCategoriesEditor
   await applyFinancePaycheckBodyMigration(tp, manifest, variables, history, git);        // CF-3 v0.107.0
+  await applyFinancePaycheckArchiveLegacy(tp, manifest, variables, history, git);        // NEW (monthly-paycheck) — MOVE legacy per-check notes (pay_period_start, no deposits[]) into paychecks/_archive/ so the month rollup ignores them (ungated, one-time-ish, copy+remove)
   await applyFinancePaycheckDebtBandInjection(tp, manifest, variables, history, git);    // NEW v0.112.0 — PaycheckDebtBand between PaycheckSummary and PaycheckExpensesEditor
   await applyFinancePlanBandInjection(tp, manifest, variables, history, git);            // NEW v0.10.0 — PlanBand over-envelope flag at top of every Budget
   await applyFinancePaycheckDefaultsDebtLinking(tp, manifest, variables, history, git);  // NEW v0.108.0
@@ -7861,6 +7866,7 @@ async function applyFinancePaycheckBodyMigration(tp, manifest, variables, histor
   try {
     const top = await adapter.list(paychecksRoot);
     for (const folder of (top.folders || [])) {
+      if (folder.includes("/_archive")) continue;  // archived legacy notes are inert — never re-heal
       try {
         const inner = await adapter.list(folder);
         for (const fp of (inner.files || [])) {
@@ -8870,6 +8876,120 @@ async function applyFinanceBudgetGroupSeed(tp, manifest, variables, history, git
 
   history?.push({ event: "info", step: "finance_budget_group_seed", name: "finance",
     summary: { groupsSeeded, categoriesReassigned, scanned: budgetFiles.length },
+    git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+    completed_at: new Date().toISOString() });
+}
+
+// ============================================================================
+// applyFinancePaycheckArchiveLegacy — monthly-paycheck clean cutover.
+//
+// The paycheck entity is now MONTH-KEYED (one note per month carrying
+// `deposits: [{date, amount}]` + `expenses[].deposit`). The month rollup reads
+// only new-format notes (those with a `deposits[]` array) and EXCLUDES
+// spice/finance/paychecks/_archive/. Any LEGACY per-check note (`type: paycheck`
+// with `pay_period_start` and NO `deposits[]`) would otherwise still be picked
+// up by widgets that scan the paychecks folder. This heal MOVES those legacy
+// notes into spice/finance/paychecks/_archive/ so the rollup ignores them.
+//
+// Nothing is deleted — it's a MOVE: snapshot the original body to .sauce-backup,
+// write a byte-identical copy to _archive/<basename>, then remove the original
+// (write-copy-then-remove, since the installer adapter exposes remove() but not
+// rename() in the headless harness). UNGATED — runs on every install so any
+// vault still holding legacy notes gets cleaned up. Idempotent: once archived,
+// a second install finds nothing to move (new-format notes have deposits[];
+// already-archived notes are under _archive/ and skipped). Failure-loud per file.
+// Mirrors applyFinanceBudgetGroupSeed's snapshot + history conventions.
+
+// _listPaycheckFiles — walk spice/finance/paychecks/<sub>/Paycheck-*.md,
+// EXCLUDING anything already under _archive/. Returns array of relative paths.
+// Per-folder failure-loud (skip folder). Matches BOTH the legacy per-check
+// naming (Paycheck-YYYY-MM-DD.md) and the new month-keyed naming
+// (Paycheck-YYYY-MM.md) — the archive filter is by frontmatter, not by name.
+async function _listPaycheckFiles(adapter, paychecksRoot) {
+  const paycheckFiles = [];
+  try {
+    const top = await adapter.list(paychecksRoot);
+    for (const folder of (top.folders || [])) {
+      if (folder.includes("/_archive")) continue;  // never re-scan archived notes
+      try {
+        const inner = await adapter.list(folder);
+        for (const fp of (inner.files || [])) {
+          if (/\/Paycheck-[^/]*\.md$/.test(fp)) paycheckFiles.push(fp);
+        }
+      } catch (_e) { /* per-folder failure-loud, continue */ }
+    }
+  } catch (_e) { /* root list failed — return empty */ }
+  return paycheckFiles;
+}
+
+async function applyFinancePaycheckArchiveLegacy(tp, manifest, variables, history, git) {
+  if (!manifest || manifest.name !== "finance") return;
+  if (!tp || !tp.app || !tp.app.vault || !tp.app.vault.adapter) return;
+  const adapter = tp.app.vault.adapter;
+
+  const paychecksRoot = "spice/finance/paychecks";
+  if (!(await adapter.exists(paychecksRoot))) return;
+
+  const archiveDir = `${paychecksRoot}/_archive`;
+  const paycheckFiles = await _listPaycheckFiles(adapter, paychecksRoot);
+  if (paycheckFiles.length === 0) return;
+
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  const backupRoot = `.sauce-backup/${ts}/spice/finance/paychecks`;
+  let archived = 0;
+
+  for (const fp of paycheckFiles) {
+    try {
+      if (fp.includes("/_archive/")) continue;  // already archived (belt-and-suspenders)
+      const body = await adapter.read(fp);
+      const fm = _parseFrontmatterStrict(body);
+      // Only LEGACY per-check notes: type paycheck + pay_period_start + NO deposits[].
+      if (!fm || fm.type !== "paycheck") continue;
+      if (!fm.pay_period_start) continue;
+      if (Array.isArray(fm.deposits)) continue;  // new month-keyed note — never touch
+
+      const basename = fp.substring(fp.lastIndexOf("/") + 1);
+      const dest = `${archiveDir}/${basename}`;
+      if (await adapter.exists(dest)) {
+        // A legacy note with this basename is already archived — remove the stray
+        // original (idempotent recovery from a half-completed prior move).
+        await adapter.remove(fp);
+        continue;
+      }
+
+      // Snapshot the original before touching it.
+      try {
+        const rel = fp.substring(paychecksRoot.length);
+        const backupPath = backupRoot + rel;
+        const backupDir = backupPath.substring(0, backupPath.lastIndexOf("/"));
+        if (!(await adapter.exists(backupDir))) await adapter.mkdir(backupDir);
+        await adapter.write(backupPath, body);
+      } catch (e) {
+        history?.push({ event: "warning", step: "finance_paycheck_archive_legacy", name: "finance",
+          path: fp, reason: `snapshot failed: ${e.message}`,
+          git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+          attempted_at: new Date().toISOString() });
+      }
+
+      // Move: ensure archive dir, write byte-identical copy, remove original.
+      if (!(await adapter.exists(archiveDir))) await adapter.mkdir(archiveDir);
+      await adapter.write(dest, body);
+      await adapter.remove(fp);
+      archived += 1;
+      history?.push({ event: "info", step: "finance_paycheck_archive_legacy", name: "finance",
+        path: fp, dest,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    } catch (e) {
+      history?.push({ event: "warning", step: "finance_paycheck_archive_legacy", name: "finance",
+        path: fp, reason: e.message,
+        git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
+        attempted_at: new Date().toISOString() });
+    }
+  }
+
+  history?.push({ event: "info", step: "finance_paycheck_archive_legacy", name: "finance",
+    summary: { archived, scanned: paycheckFiles.length },
     git_commit: git.commit, git_tag: git.tag, git_dirty: git.dirty,
     completed_at: new Date().toISOString() });
 }
@@ -15045,6 +15165,7 @@ if (typeof module !== "undefined" && module.exports && typeof module.exports ===
     // v0.108.0 S2 — expose 4 new finance migrations for HC test coverage.
     module.exports.applyFinanceDebtScaffolding = applyFinanceDebtScaffolding;
     module.exports.applyFinanceBudgetGroupSeed = applyFinanceBudgetGroupSeed;
+    module.exports.applyFinancePaycheckArchiveLegacy = applyFinancePaycheckArchiveLegacy;
     module.exports.applyFinancePaycheckDefaultsDebtLinking = applyFinancePaycheckDefaultsDebtLinking;
     module.exports.applyFinanceNavRowMigration = applyFinanceNavRowMigration;
     // v0.109.0 S8 — doc-note breadcrumb marker cleanup (run-install.js CLN-1..2).

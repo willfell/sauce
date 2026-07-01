@@ -233,6 +233,9 @@ class FinanceHubSummary {
         try {
             allPaychecks = dv.pages('"spice/finance/paychecks"')
                 .where(p => p && p.type === "paycheck")
+                // Archived notes are never eligible for the "Latest Paycheck" tile
+                // (mirrors FinanceMath.readPaychecksForMonth / monthly-overview).
+                .where(p => !(p.file && typeof p.file.path === "string" && p.file.path.includes("/_archive/")))
                 .array();
         } catch (_e) { allPaychecks = []; }
 
@@ -240,18 +243,28 @@ class FinanceHubSummary {
             this._tileMuted(tile, "No paychecks yet.");
         } else {
             const FM = customJS.FinanceMath;
+            // Sort key prefers the month-keyed shape (`month`), falling back to the
+            // legacy pay_period_start so pre-cutover per-check notes still order.
+            const sortKeyOf = (p) => FM._coerceMonthString(p.month)
+                || FM._coerceMonthString(FM._coerceDateString(p.pay_period_start))
+                || "";
             const latest = allPaychecks.slice().sort((a, b) => {
-                const as = FM._coerceDateString(a.pay_period_start) || "";
-                const bs = FM._coerceDateString(b.pay_period_start) || "";
+                const as = sortKeyOf(a);
+                const bs = sortKeyOf(b);
                 // DESC: latest (largest string) first
                 if (as === bs) return 0;
                 return as < bs ? 1 : -1;
             })[0];
 
-            const startStr = FM._coerceDateString(latest.pay_period_start) || String(latest.pay_period_start || "");
-            const amount = typeof latest.paycheck_amount === "number" ? latest.paycheck_amount : 0;
+            // Income prefers Σ deposits[]; falls back to the legacy scalar.
+            const amount = Array.isArray(latest.deposits) && latest.deposits.length
+                ? latest.deposits.reduce((s, d) => s + (Number(d && d.amount) || 0), 0)
+                : (typeof latest.paycheck_amount === "number" ? latest.paycheck_amount : 0);
+            const labelStr = FM._coerceMonthString(latest.month)
+                || FM._coerceDateString(latest.pay_period_start)
+                || String(latest.month || latest.pay_period_start || "");
             this._tileValue(tile, this._fmtMoney(amount));
-            this._tileMuted(tile, startStr);
+            this._tileMuted(tile, labelStr);
         }
 
         tile.addEventListener("click", () => {

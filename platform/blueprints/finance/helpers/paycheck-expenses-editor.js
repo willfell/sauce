@@ -2,8 +2,18 @@
  * PaycheckExpensesEditor — Add/Edit/Delete editor for the expenses[] frontmatter
  * array on Paycheck atlas pages. Hybrid UX: read-only rows + Add modal +
  * click-row-to-edit modal + per-row × delete. Fields: item + amount + category +
- * paid (boolean stored as JS true/false) + optional URL. All writes via
+ * paid (boolean stored as JS true/false) + optional URL + deposit (1-based index
+ * into deposits[], monthly shape only). All writes via
  * customJS.FinanceFrontmatter.update. Embed-deduped per v0.16.0 lesson.
+ *
+ * Two shapes:
+ *   - MONTHLY (has a `deposits` array): renders a per-deposit header (date +
+ *     editable amount + Assigned/Leftover) and tags each expense row with the
+ *     ordinal of its deposit's day (e.g. "1st"/"15th"), clickable to move the
+ *     bill between checks. On first render with `deposits: []`, deposits are
+ *     materialized ONCE from Paycheck Defaults' deposit_schedule (guarded).
+ *   - LEGACY per-check (no `deposits` key): flat expense list, no deposit
+ *     columns, no materialize — exactly as before the monthly redesign.
  */
 class PaycheckExpensesEditor {
     async render(dv, override) {
@@ -16,6 +26,19 @@ class PaycheckExpensesEditor {
         if (!page || !page.file) return;
         const file = app.vault.getAbstractFileByPath(page.file.path);
         if (!file) return;
+
+        // Monthly shape iff the note carries a `deposits` array. A legacy
+        // per-check note (no `deposits` key at all) renders flat, as before.
+        const isMonthly = Array.isArray(page.deposits);
+
+        // First-render materialize: born with `deposits: []` → seed from the
+        // Paycheck Defaults deposit_schedule ONCE, then re-render authoritative.
+        // Guarded by an in-flight flag + the empty check so there is no loop.
+        if (isMonthly && page.deposits.length === 0 && !this._materializing) {
+            await this._materializeDeposits(file, dv, page);
+            return;
+        }
+
         // Render-from-authoritative: prefer the freshly-written array captured by
         // the mutate flow over Dataview's lagging dv.current() metadata cache.
         // Kills the stuck-row symptom AND the delete index-cascade.
@@ -35,6 +58,12 @@ class PaycheckExpensesEditor {
             onClick: () => this._addFlow(file, dv)
         });
 
+        // Deposits header (monthly shape only): one cell per deposit with its
+        // date, an editable amount, and Assigned / Leftover subtotals.
+        if (isMonthly && page.deposits.length > 0) {
+            this._renderDepositsHeader(root, file, dv, page);
+        }
+
         const header = root.createEl("div");
         header.style.cssText = "display: flex; gap: 8px; padding: 6px 0; font-size: 0.78em; color: var(--text-muted); border-bottom: 1px solid var(--background-modifier-border); margin-top: 8px;";
         const hItem = header.createEl("div");
@@ -46,6 +75,11 @@ class PaycheckExpensesEditor {
         const hCategory = header.createEl("div");
         hCategory.textContent = "Category";
         hCategory.style.cssText = "flex: 1; min-width: 0;";
+        if (isMonthly) {
+            const hDep = header.createEl("div");
+            hDep.textContent = "Check";
+            hDep.style.cssText = "flex: 0 0 56px; text-align: center;";
+        }
         const hPaid = header.createEl("div");
         hPaid.textContent = "Paid";
         hPaid.style.cssText = "flex: 0 0 48px; text-align: center;";
@@ -72,6 +106,9 @@ class PaycheckExpensesEditor {
             if (typeof v === "string" && v.toLowerCase() === "true") return true;
             return false;
         };
+
+        // Precompute deposit ordinal labels (e.g. day 1 → "1st") for row tags.
+        const depositCount = isMonthly ? page.deposits.length : 0;
 
         expenses.forEach((exp, index) => {
             const row = rows.createEl("div");
@@ -119,6 +156,23 @@ class PaycheckExpensesEditor {
                 });
             }
 
+            // Per-row deposit tag (monthly shape): a small clickable ordinal of
+            // the deposit's day (e.g. "1st"/"15th"), opening the move flow.
+            if (isMonthly) {
+                const depCell = row.createEl("span");
+                depCell.style.cssText = "flex: 0 0 56px; text-align: center;";
+                const idx = this._depositIndex(exp, depositCount);
+                const dep = page.deposits[idx - 1];
+                const tag = depCell.createEl("span", { cls: "pee-deposit-tag" });
+                tag.textContent = this._depositTagLabel(dep, idx);
+                tag.style.cssText = "display: inline-block; padding: 2px 8px; border-radius: 999px; background: var(--background-modifier-hover); color: var(--text-normal); font-size: 0.75em; cursor: pointer; font-variant-numeric: tabular-nums;";
+                tag.title = "Move to another check";
+                tag.addEventListener("click", (e) => {
+                    e.stopPropagation();
+                    this._moveFlow(file, dv, index, exp);
+                });
+            }
+
             const paidCell = row.createEl("span");
             const paid = isPaid(exp);
             paidCell.textContent = paid ? "✓" : "○";
@@ -154,6 +208,148 @@ class PaycheckExpensesEditor {
 
             row.onclick = () => this._editFlow(file, dv, index, exp);
         });
+    }
+
+    // 1-based deposit index for an expense; missing/invalid → 1 (first check).
+    // Mirrors FinanceMath._depositIndex so the widget is self-contained even if
+    // the shared helper is unavailable.
+    _depositIndex(exp, depositCount) {
+        const n = Math.trunc(Number(exp && exp.deposit));
+        if (!isFinite(n) || n < 1) return 1;
+        if (depositCount && n > depositCount) return depositCount;
+        return n;
+    }
+
+    // Ordinal label for a deposit's day-of-month: "2026-07-15" → "15th".
+    // Falls back to "#<index>" when the date is unparseable.
+    _depositTagLabel(deposit, index) {
+        const date = deposit && typeof deposit.date === "string" ? deposit.date : null;
+        const m = date && date.match(/^\d{4}-\d{2}-(\d{2})$/);
+        if (!m) return `#${index}`;
+        const day = Number(m[1]);
+        if (!isFinite(day) || day < 1) return `#${index}`;
+        return `${day}${this._ordinalSuffix(day)}`;
+    }
+
+    _ordinalSuffix(n) {
+        const tens = n % 100;
+        if (tens >= 11 && tens <= 13) return "th";
+        switch (n % 10) {
+            case 1: return "st";
+            case 2: return "nd";
+            case 3: return "rd";
+            default: return "th";
+        }
+    }
+
+    // Read the Paycheck Defaults deposit_schedule and materialize the month's
+    // deposits ONCE. Guarded by this._materializing so the re-render (which sees
+    // deposits present) never re-enters this path.
+    async _materializeDeposits(file, dv, page) {
+        this._materializing = true;
+        let deposits = [];
+        try {
+            const pd = customJS.FinanceFrontmatter.read("spice/finance/Paycheck Defaults.md");
+            const sched = (pd && Array.isArray(pd.deposit_schedule) && pd.deposit_schedule.length)
+                ? pd.deposit_schedule
+                : [{ day: 1, amount: 0 }, { day: 15, amount: 0 }];
+            const monthKey = this._monthKey(page);
+            deposits = sched.map((s) => ({
+                date: `${monthKey}-${String(Number(s && s.day) || 1).padStart(2, "0")}`,
+                amount: Number(s && s.amount) || 0
+            }));
+            await this._mutate(file, (fm) => { fm.deposits = deposits; });
+        } finally {
+            this._materializing = false;
+        }
+        // Re-render from the freshly-materialized deposits. dv.current() lags the
+        // just-written frontmatter (in tests it's frozen to deposits: []), which
+        // would re-enter this path and loop — so point dv.current() at the
+        // authoritative page for the re-render (mirrors the post-write cache
+        // refresh in production).
+        const nextPage = Object.assign({}, page, { deposits });
+        const prevCurrent = dv.current;
+        dv.current = () => nextPage;
+        try {
+            await this.render(dv);
+        } finally {
+            dv.current = prevCurrent;
+        }
+    }
+
+    // Resolve the "YYYY-MM" month key from the page's `month` field, falling
+    // back to the filename (Paycheck-YYYY-MM).
+    _monthKey(page) {
+        if (page && typeof page.month === "string" && /^\d{4}-\d{2}$/.test(page.month)) {
+            return page.month;
+        }
+        const name = page && page.file && page.file.name;
+        const m = typeof name === "string" ? name.match(/Paycheck-(\d{4}-\d{2})/) : null;
+        return m ? m[1] : "";
+    }
+
+    _renderDepositsHeader(root, file, dv, page) {
+        const totals = (customJS.FinanceMath && typeof customJS.FinanceMath.depositTotals === "function")
+            ? customJS.FinanceMath.depositTotals(page)
+            : page.deposits.map((d) => ({ date: d && d.date, amount: Number(d && d.amount) || 0, assigned: 0, leftover: Number(d && d.amount) || 0 }));
+
+        const wrap = root.createEl("div", { cls: "pee-deposits" });
+        wrap.style.cssText = "display: flex; gap: 12px; margin-bottom: 8px; flex-wrap: wrap;";
+        const fmt = (v) => (typeof v === "number" ? v.toFixed(2) : (v || "0"));
+
+        totals.forEach((t, i) => {
+            const card = wrap.createEl("div", { cls: "pee-deposit-card" });
+            card.style.cssText = "flex: 1; min-width: 140px; border: 1px solid var(--background-modifier-border); border-radius: 8px; padding: 8px 10px;";
+
+            const dateLine = card.createEl("div");
+            dateLine.textContent = (t && t.date) || (page.deposits[i] && page.deposits[i].date) || "";
+            dateLine.style.cssText = "font-size: 0.85em; color: var(--text-muted); margin-bottom: 4px;";
+
+            const amountLine = card.createEl("div");
+            amountLine.textContent = fmt(t && t.amount);
+            amountLine.style.cssText = "font-size: 1.05em; font-weight: 600; font-variant-numeric: tabular-nums; cursor: pointer;";
+            amountLine.title = "Edit deposit amount";
+            amountLine.addEventListener("click", () => this._editDepositAmount(file, dv, i));
+
+            const assignedLine = card.createEl("div");
+            assignedLine.textContent = `Assigned ${fmt(t && t.assigned)}`;
+            assignedLine.style.cssText = "font-size: 0.78em; color: var(--text-muted); margin-top: 4px; font-variant-numeric: tabular-nums;";
+
+            const leftoverLine = card.createEl("div");
+            const leftover = t && typeof t.leftover === "number" ? t.leftover : 0;
+            leftoverLine.textContent = `Leftover ${fmt(leftover)}`;
+            leftoverLine.style.cssText = `font-size: 0.78em; margin-top: 2px; font-variant-numeric: tabular-nums; color: ${leftover < 0 ? "var(--text-error)" : "var(--text-muted)"};`;
+        });
+    }
+
+    async _editDepositAmount(file, dv, i) {
+        const raw = window.prompt("Deposit amount:");
+        if (raw === null) return;
+        const amount = Number(raw);
+        if (!isFinite(amount) || amount < 0) return;
+        const page = dv.current();
+        const base = (page && Array.isArray(page.deposits)) ? page.deposits : [];
+        let newDeposits = base.map((d) => Object.assign({}, d));
+        await this._mutate(file, (fm) => {
+            const list = Array.isArray(fm.deposits) ? fm.deposits.slice() : [];
+            if (i >= 0 && i < list.length) {
+                list[i] = Object.assign({}, list[i], { amount });
+                fm.deposits = list;
+            }
+            newDeposits = list;
+        });
+        // Render-from-authoritative: dv.current() lags the just-written deposits
+        // (in tests it's frozen to the OLD amount), so the new amount + recomputed
+        // Assigned/Leftover would not show. Repoint dv.current() at the updated
+        // page for the re-render, then restore (mirrors _materializeDeposits).
+        const nextPage = Object.assign({}, page, { deposits: newDeposits });
+        const prevCurrent = dv.current;
+        dv.current = () => nextPage;
+        try {
+            await this.render(dv);
+        } finally {
+            dv.current = prevCurrent;
+        }
     }
 
     async _resolveDebt(linkStr) {
@@ -302,7 +498,11 @@ class PaycheckExpensesEditor {
                     amount: Number(amountInput.value),
                     category: categoryInput.value.trim(),
                     paid: paidInput.checked,
-                    url: urlInput.value.trim()
+                    url: urlInput.value.trim(),
+                    // Preserve an existing deposit tag; default new rows to check 1.
+                    deposit: (initial && Number.isFinite(Number(initial.deposit)) && Number(initial.deposit) >= 1)
+                        ? Math.trunc(Number(initial.deposit))
+                        : 1
                 });
             };
 
@@ -325,6 +525,43 @@ class PaycheckExpensesEditor {
         });
     }
 
+    // Minimal deposit picker: list the month's deposits (ordinal + date +
+    // amount) and resolve the chosen 1-based index (null on cancel).
+    _promptForDeposit(deposits, currentIndex) {
+        return new Promise((resolve) => {
+            const overlay = document.createElement("div");
+            overlay.style.cssText = "position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; display: flex; align-items: center; justify-content: center;";
+            const dialog = document.createElement("div");
+            dialog.style.cssText = "background: var(--background-primary); border-radius: 12px; padding: 24px; min-width: 280px; max-width: 90vw; box-shadow: 0 8px 32px rgba(0,0,0,0.3);";
+
+            const heading = document.createElement("div");
+            heading.textContent = "Move to check";
+            heading.style.cssText = "font-size: 1.1em; font-weight: 600; margin-bottom: 12px;";
+            dialog.appendChild(heading);
+
+            const fmt = (v) => (typeof v === "number" ? v.toFixed(2) : (v || "0"));
+            (deposits || []).forEach((d, i) => {
+                const oneBased = i + 1;
+                const btn = document.createElement("button");
+                const label = this._depositTagLabel(d, oneBased);
+                btn.textContent = `${label} — ${(d && d.date) || ""} — ${fmt(Number(d && d.amount) || 0)}`;
+                btn.style.cssText = `display: block; width: 100%; text-align: left; margin-bottom: 6px; padding: 8px 10px; border-radius: 6px; cursor: pointer; border: 1px solid var(--background-modifier-border); background: ${oneBased === currentIndex ? "var(--background-modifier-hover)" : "var(--background-secondary)"}; color: var(--text-normal);`;
+                btn.onclick = () => { document.body.removeChild(overlay); resolve(oneBased); };
+                dialog.appendChild(btn);
+            });
+
+            const cancelBtn = document.createElement("button");
+            cancelBtn.textContent = "Cancel";
+            cancelBtn.style.cssText = "margin-top: 6px; padding: 6px 14px; border-radius: 6px; cursor: pointer; border: 1px solid var(--background-modifier-border); background: var(--background-primary); color: var(--text-muted);";
+            cancelBtn.onclick = () => { document.body.removeChild(overlay); resolve(null); };
+            dialog.appendChild(cancelBtn);
+
+            overlay.appendChild(dialog);
+            overlay.addEventListener("click", (e) => { if (e.target === overlay) cancelBtn.click(); });
+            document.body.appendChild(overlay);
+        });
+    }
+
     async _addFlow(file, dv) {
         const result = await this._promptForExpense(null);
         if (!result) return;
@@ -344,7 +581,28 @@ class PaycheckExpensesEditor {
             const list = (fm.expenses || []).slice();
             // Merge-on-edit: keep non-dialog fields (e.g. debt links) that the
             // modal doesn't surface, instead of replacing the whole row object.
+            // The dialog's resolve preserves `deposit`, so the merge keeps it too.
             list[index] = Object.assign({}, current, result);
+            fm.expenses = list;
+            next = list.slice();
+        });
+        await this.render(dv, next);
+    }
+
+    // Move an expense between deposits (checks). Picker returns the chosen
+    // 1-based deposit index; merge-write the `deposit` field, then render from
+    // the authoritative array (dv.current() lags).
+    async _moveFlow(file, dv, index, exp) {
+        const page = dv.current();
+        const deposits = (page && Array.isArray(page.deposits)) ? page.deposits : [];
+        const currentIndex = this._depositIndex(exp, deposits.length);
+        const chosen = await this._promptForDeposit(deposits, currentIndex);
+        if (chosen === null || chosen === undefined) return;
+        let next = null;
+        await this._mutate(file, (fm) => {
+            const list = (fm.expenses || []).slice();
+            const cur = list[index] || exp;
+            list[index] = Object.assign({}, cur, { deposit: chosen });
             fm.expenses = list;
             next = list.slice();
         });

@@ -46,7 +46,20 @@ class FinanceStatus {
             return { label: "Planning", tone: "muted" };
         }
         if (type === "paycheck") {
-            const start = this._toMoment(page.pay_period_start);
+            // Prefer the month-keyed anchor for the "started?" check: the earliest
+            // deposit date, or the first of `month`. Fall back to the legacy
+            // pay_period_start for pre-cutover per-check notes.
+            let startVal = null;
+            if (Array.isArray(page.deposits) && page.deposits.length) {
+                const dates = page.deposits
+                    .map(d => (d && typeof d.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d.date)) ? d.date : null)
+                    .filter(Boolean)
+                    .sort();
+                if (dates.length) startVal = dates[0];
+            }
+            if (!startVal && typeof page.month === "string" && /^\d{4}-\d{2}$/.test(page.month)) startVal = `${page.month}-01`;
+            if (!startVal) startVal = page.pay_period_start;
+            const start = this._toMoment(startVal);
             const expenses = Array.isArray(page.expenses) ? page.expenses : [];
             const isPaid = (e) => {
                 if (!e) return false;

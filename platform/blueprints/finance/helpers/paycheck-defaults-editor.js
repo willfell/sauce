@@ -55,6 +55,9 @@ class PaycheckDefaultsEditor {
         const hCategory = colHeader.createEl("div");
         hCategory.textContent = "Category";
         hCategory.style.cssText = "flex: 1.5; min-width: 0;";
+        const hDeposit = colHeader.createEl("div");
+        hDeposit.textContent = "Check";
+        hDeposit.style.cssText = "flex: 0.5; text-align: center; min-width: 0;";
         const hUrl = colHeader.createEl("div");
         hUrl.textContent = "URL";
         hUrl.style.cssText = "flex: 0.5; text-align: center; min-width: 0;";
@@ -63,14 +66,12 @@ class PaycheckDefaultsEditor {
         hDel.style.cssText = "flex: 0 0 32px;";
 
         const rows = root.createEl("div");
+        const fmt = (v) => (typeof v === "number" ? v.toFixed(2) : (v || ""));
         if (expenses.length === 0) {
             const empty = rows.createEl("div");
             empty.textContent = "No expenses yet. Click + Add Expense.";
             empty.style.cssText = "font-size: 0.85em; color: var(--text-muted); padding: 12px 0; text-align: center;";
-            return;
         }
-
-        const fmt = (v) => (typeof v === "number" ? v.toFixed(2) : (v || ""));
         expenses.forEach((expense, index) => {
             const row = rows.createEl("div");
             row.style.cssText = "display: flex; gap: 8px; padding: 8px 0; cursor: pointer; border-bottom: 1px solid var(--background-modifier-border); align-items: center;";
@@ -86,6 +87,11 @@ class PaycheckDefaultsEditor {
             const categoryCell = row.createEl("span");
             categoryCell.textContent = expense?.category || "";
             categoryCell.style.cssText = "flex: 1.5; font-size: 0.9em; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted);";
+
+            const depositCell = row.createEl("span");
+            const depN = Math.trunc(Number(expense?.deposit));
+            depositCell.textContent = "#" + String((isFinite(depN) && depN >= 1) ? depN : 1);
+            depositCell.style.cssText = "flex: 0.5; text-align: center; font-size: 0.9em; font-variant-numeric: tabular-nums; color: var(--text-muted);";
 
             const urlCell = row.createEl("span");
             urlCell.textContent = expense?.url ? "↗" : "";
@@ -109,6 +115,196 @@ class PaycheckDefaultsEditor {
 
             row.onclick = () => this._editFlow(file, dv, index, expense);
         });
+
+        // ---- Deposit schedule section ----
+        // deposit_schedule[] = { day, amount } — the check calendar new months
+        // materialize their deposits[] from. Fall back to a default 2-check
+        // schedule when the note lacks the field so the section always renders.
+        const schedule = Array.isArray(page.deposit_schedule) && page.deposit_schedule.length
+            ? page.deposit_schedule.slice()
+            : [{ day: 1, amount: 0 }, { day: 15, amount: 0 }];
+        this._renderScheduleSection(root, dv, file, schedule, fmt);
+    }
+
+    _renderScheduleSection(root, dv, file, schedule, fmt) {
+        const section = root.createEl("div", { cls: "pde-schedule" });
+        section.style.cssText = "margin-top: 20px;";
+
+        const headerRow = section.createEl("div");
+        headerRow.style.cssText = "display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;";
+        const label = headerRow.createEl("div");
+        label.textContent = "DEPOSIT SCHEDULE (checks per month)";
+        label.style.cssText = "font-size: 0.78em; font-weight: 600; color: var(--text-muted); letter-spacing: 0.04em;";
+
+        const plusIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>`;
+        customJS.AccentButton.render(headerRow, {
+            label: "Add Deposit",
+            icon: plusIcon,
+            onClick: () => this._scheduleAddFlow(file, dv)
+        });
+
+        const colHeader = section.createEl("div");
+        colHeader.style.cssText = "display: flex; gap: 8px; padding: 6px 0; font-size: 0.78em; color: var(--text-muted); border-bottom: 1px solid var(--background-modifier-border); margin-top: 4px;";
+        const hDay = colHeader.createEl("div");
+        hDay.textContent = "Day";
+        hDay.style.cssText = "flex: 1; min-width: 0;";
+        const hAmt = colHeader.createEl("div");
+        hAmt.textContent = "Amount";
+        hAmt.style.cssText = "flex: 1; text-align: right; min-width: 0;";
+        const hDel = colHeader.createEl("div");
+        hDel.textContent = "";
+        hDel.style.cssText = "flex: 0 0 32px;";
+
+        const rows = section.createEl("div");
+        schedule.forEach((entry, index) => {
+            const row = rows.createEl("div");
+            row.style.cssText = "display: flex; gap: 8px; padding: 8px 0; cursor: pointer; border-bottom: 1px solid var(--background-modifier-border); align-items: center;";
+
+            const dayCell = row.createEl("span");
+            const dayN = Math.trunc(Number(entry?.day));
+            dayCell.textContent = String(isFinite(dayN) ? dayN : "");
+            dayCell.style.cssText = "flex: 1; font-size: 0.9em; font-variant-numeric: tabular-nums;";
+
+            const amtCell = row.createEl("span");
+            amtCell.textContent = fmt(entry?.amount);
+            amtCell.style.cssText = "flex: 1; text-align: right; font-size: 0.9em; font-variant-numeric: tabular-nums;";
+
+            const delBtn = row.createEl("button");
+            delBtn.textContent = "×";
+            delBtn.style.cssText = "flex: 0 0 32px; cursor: pointer; padding: 4px 8px; border-radius: 4px; border: 1px solid transparent; background: transparent; color: var(--text-muted); font-size: 1em;";
+            delBtn.onclick = (e) => {
+                e.stopPropagation();
+                this._scheduleDeleteFlow(file, dv, index, entry);
+            };
+
+            row.onclick = () => this._scheduleEditFlow(file, dv, index, entry);
+        });
+    }
+
+    // Small modal for a deposit-schedule row: { day (1..31), amount }.
+    _promptForScheduleRow(initial) {
+        return new Promise((resolve) => {
+            const overlay = document.createElement("div");
+            overlay.style.cssText = "position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; display: flex; align-items: center; justify-content: center;";
+            const dialog = document.createElement("div");
+            dialog.style.cssText = "background: var(--background-primary); border-radius: 12px; padding: 24px; min-width: 320px; max-width: 90vw; box-shadow: 0 8px 32px rgba(0,0,0,0.3);";
+
+            const heading = document.createElement("div");
+            heading.textContent = initial ? "Edit Deposit" : "Add Deposit";
+            heading.style.cssText = "font-size: 1.1em; font-weight: 600; margin-bottom: 12px;";
+            dialog.appendChild(heading);
+
+            const mkField = (labelText, control) => {
+                const wrap = document.createElement("div");
+                wrap.style.cssText = "display: flex; align-items: center; gap: 8px; margin-bottom: 8px;";
+                const lab = document.createElement("label");
+                lab.textContent = labelText;
+                lab.style.cssText = "font-size: 0.85em; color: var(--text-muted); flex: 0 0 80px;";
+                wrap.appendChild(lab);
+                control.style.cssText = "flex: 1; min-width: 0; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--background-modifier-border); background: var(--background-secondary); color: var(--text-normal); font-size: 1em; box-sizing: border-box;";
+                wrap.appendChild(control);
+                dialog.appendChild(wrap);
+            };
+
+            const dayInput = document.createElement("input");
+            dayInput.type = "number";
+            dayInput.step = "1";
+            dayInput.min = "1";
+            dayInput.max = "31";
+            mkField("Day", dayInput);
+
+            const amountInput = document.createElement("input");
+            amountInput.type = "number";
+            amountInput.step = "0.01";
+            amountInput.min = "0";
+            mkField("Amount", amountInput);
+
+            if (initial) {
+                dayInput.value = String(initial.day ?? 1);
+                amountInput.value = String(initial.amount ?? 0);
+            } else {
+                dayInput.value = "1";
+                amountInput.value = "0";
+            }
+
+            const status = document.createElement("div");
+            status.style.cssText = "font-size: 0.8em; color: var(--text-error); min-height: 1.2em; margin-bottom: 12px;";
+            dialog.appendChild(status);
+
+            const validate = () => {
+                const d = Math.trunc(Number(dayInput.value));
+                if (!isFinite(d) || d < 1 || d > 31) return "Day must be 1–31.";
+                const a = Number(amountInput.value);
+                if (Number.isNaN(a) || a < 0) return "Amount must be >= 0.";
+                return null;
+            };
+            const refresh = () => { status.textContent = validate() || ""; };
+            dayInput.addEventListener("input", refresh);
+            amountInput.addEventListener("input", refresh);
+
+            const btnRow = document.createElement("div");
+            btnRow.style.cssText = "display: flex; gap: 8px; justify-content: flex-end;";
+            const cancelBtn = document.createElement("button");
+            cancelBtn.textContent = "Cancel";
+            cancelBtn.style.cssText = "padding: 6px 14px; border-radius: 6px; cursor: pointer; border: 1px solid var(--background-modifier-border); background: var(--background-primary); color: var(--text-muted);";
+            cancelBtn.onclick = () => { document.body.removeChild(overlay); resolve(null); };
+
+            const okBtn = document.createElement("button");
+            okBtn.textContent = "Save";
+            okBtn.style.cssText = "padding: 6px 14px; border-radius: 6px; cursor: pointer; border: 1px solid var(--interactive-accent); background: var(--interactive-accent); color: var(--text-on-accent);";
+            okBtn.onclick = () => {
+                const err = validate();
+                if (err) { status.textContent = err; return; }
+                document.body.removeChild(overlay);
+                resolve({ day: Math.trunc(Number(dayInput.value)), amount: Number(amountInput.value) });
+            };
+
+            const onKey = (e) => {
+                if (e.key === "Enter") okBtn.click();
+                if (e.key === "Escape") cancelBtn.click();
+            };
+            dayInput.addEventListener("keydown", onKey);
+            amountInput.addEventListener("keydown", onKey);
+
+            btnRow.appendChild(cancelBtn);
+            btnRow.appendChild(okBtn);
+            dialog.appendChild(btnRow);
+            overlay.appendChild(dialog);
+            overlay.addEventListener("click", (e) => { if (e.target === overlay) cancelBtn.click(); });
+            document.body.appendChild(overlay);
+            setTimeout(() => dayInput.focus(), 0);
+        });
+    }
+
+    async _scheduleAddFlow(file, dv) {
+        const result = await this._promptForScheduleRow(null);
+        if (!result) return;
+        await this._mutate(file, (fm) => {
+            fm.deposit_schedule = (Array.isArray(fm.deposit_schedule) ? fm.deposit_schedule : []).concat([result]);
+        });
+        await this.render(dv);
+    }
+
+    async _scheduleEditFlow(file, dv, index, current) {
+        const result = await this._promptForScheduleRow(current);
+        if (!result) return;
+        await this._mutate(file, (fm) => {
+            const list = (Array.isArray(fm.deposit_schedule) ? fm.deposit_schedule : []).slice();
+            // Merge onto the current row so no stray fields are dropped.
+            list[index] = Object.assign({}, list[index] || current, result);
+            fm.deposit_schedule = list;
+        });
+        await this.render(dv);
+    }
+
+    async _scheduleDeleteFlow(file, dv, index, current) {
+        if (!window.confirm(`Delete deposit on day ${current?.day ?? ""}?`)) return;
+        await this._mutate(file, (fm) => {
+            const list = (Array.isArray(fm.deposit_schedule) ? fm.deposit_schedule : []).slice();
+            list.splice(index, 1);
+            fm.deposit_schedule = list;
+        });
+        await this.render(dv);
     }
 
     // Reads Budget Defaults.md's categories[].name list for the modal datalist.
@@ -182,13 +378,23 @@ class PaycheckDefaultsEditor {
             urlInput.placeholder = "(optional)";
             mkField("URL", urlInput);
 
+            // Deposit — 1-based index of the check that pays this bill. Small
+            // integer input; defaults to 1 (first check) for new rows.
+            const depositInput = document.createElement("input");
+            depositInput.type = "number";
+            depositInput.step = "1";
+            depositInput.min = "1";
+            mkField("Deposit", depositInput);
+
             if (initial) {
                 itemInput.value = initial.item || "";
                 amountInput.value = String(initial.amount ?? 0);
                 categoryInput.value = initial.category || "";
                 urlInput.value = initial.url || "";
+                depositInput.value = String((Number(initial.deposit) >= 1 ? Math.trunc(Number(initial.deposit)) : 1));
             } else {
                 amountInput.value = "0";
+                depositInput.value = "1";
             }
 
             const status = document.createElement("div");
@@ -219,11 +425,13 @@ class PaycheckDefaultsEditor {
                 const err = validate();
                 if (err) { status.textContent = err; return; }
                 document.body.removeChild(overlay);
+                const depN = Math.trunc(Number(depositInput.value));
                 resolve({
                     item: itemInput.value.trim(),
                     amount: Number(amountInput.value),
                     category: categoryInput.value.trim(),
-                    url: urlInput.value.trim()
+                    url: urlInput.value.trim(),
+                    deposit: (isFinite(depN) && depN >= 1) ? depN : 1
                 });
             };
 
@@ -235,6 +443,7 @@ class PaycheckDefaultsEditor {
             amountInput.addEventListener("keydown", onKey);
             categoryInput.addEventListener("keydown", onKey);
             urlInput.addEventListener("keydown", onKey);
+            depositInput.addEventListener("keydown", onKey);
 
             btnRow.appendChild(cancelBtn);
             btnRow.appendChild(okBtn);
@@ -260,7 +469,9 @@ class PaycheckDefaultsEditor {
         if (!result) return;
         await this._mutate(file, (fm) => {
             const list = (fm.expenses || []).slice();
-            list[index] = result;
+            // Merge onto the CURRENT row (not a full replace) so installer-added
+            // fields the modal doesn't surface (e.g. `debt`) survive the edit.
+            list[index] = Object.assign({}, list[index] || current, result);
             fm.expenses = list;
         });
         await this.render(dv);

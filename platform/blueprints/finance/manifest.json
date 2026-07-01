@@ -437,35 +437,21 @@
       "icon": "wallet-plus",
       "prompts": [
         {
-          "key": "start_date",
-          "label": "Start date",
-          "type": "date",
-          "required": true
-        },
-        {
-          "key": "end_date",
-          "label": "End date",
-          "type": "date",
+          "key": "month",
+          "label": "Month",
+          "type": "month",
           "required": true,
-          "validate": "gte:start_date"
-        },
-        {
-          "key": "amount",
-          "label": "Amount",
-          "type": "number",
-          "required": true,
-          "min": 0
+          "default": "{{now.YYYY-MM}}"
         }
       ],
       "destination": {
-        "folder_prefix": "spice/finance/paychecks/{{prompts.start_date}}",
-        "filename_prefix": "Paycheck-{{prompts.start_date}}"
+        "folder_prefix": "spice/finance/paychecks/{{prompts.month}}",
+        "filename_prefix": "Paycheck-{{prompts.month}}"
       },
       "frontmatter_template": {
         "type": "paycheck",
-        "pay_period_start": "{{prompts.start_date}}",
-        "pay_period_end": "{{prompts.end_date}}",
-        "paycheck_amount": "{{prompts.amount|number}}",
+        "month": "{{prompts.month}}",
+        "deposits": [],
         "expenses": [],
         "created_at": "{{now.YYYY-MM-DDTHH:mm:ssZ}}",
         "cssclasses": [
@@ -769,18 +755,27 @@
             "type": "string",
             "equals": "paycheck"
           },
-          "pay_period_start": {
+          "month": {
             "required": true,
+            "type": "string",
+            "matches": "^\\d{4}-\\d{2}$"
+          },
+          "deposits": {
+            "required": false,
+            "type": "array"
+          },
+          "pay_period_start": {
+            "required": false,
             "type": "string",
             "matches": "^\\d{4}-\\d{2}-\\d{2}(T.*)?$"
           },
           "pay_period_end": {
-            "required": true,
+            "required": false,
             "type": "string",
             "matches": "^\\d{4}-\\d{2}-\\d{2}(T.*)?$"
           }
         },
-        "naming_pattern": "^Paycheck-\\d{4}-\\d{2}-\\d{2}\\.md$"
+        "naming_pattern": "^Paycheck-\\d{4}-\\d{2}\\.md$"
       }
     },
     {
