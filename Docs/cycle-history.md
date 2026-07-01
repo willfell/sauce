@@ -6,6 +6,14 @@ This file archives the per-cycle status snapshots that previously lived in `CLAU
 
 ---
 
+## v0.162.0 — wiki blueprint + doc-search mechanism MINOR (2026-07-01)
+
+New standalone **`wiki` blueprint** (`spice/wiki/`): arbitrary-depth, folder-is-truth knowledge base (types `wiki-hub` / `wiki-section` / `wiki-page`) with a global "Wiki" nav button, `WikiTree` hub+section renderer (DocSearch strip + section cards + recent-updates + page lists), folder-relative `+ New Section` / `+ New Page` create dialogs (arbitrary nesting via a `dir` frontmatter routing field), `WikiMove` (relocate via `app.fileManager.renameFile`), `/wiki` command + `new-wiki-page` skill. Fills the gap the project blueprint's project-bound docs structurally can't hold (cross-project standing reference).
+
+**Cross-cutting:** `DocSearch` graduated verbatim to a shared **`doc-search` mechanism** (project now `depends_on` it, dropped its local copy; wizard default-sub updated) — same precedent as the section-label/breadcrumb graduations. **`breadcrumb` gained an additive `path_walk` mode** (arbitrary-depth trails via the shared `Breadcrumb` class; installer validator extended to accept `path_walk`).
+
+**Tests:** NEW `run-wiki.js` (12) + `run-doc-search.js` (9), `run-breadcrumb.js` +4 `BC-WIKI-*`, seed `SEED-MIGRATE-WIKI-*` (+7 → 288); repointed the DocSearch contract asserts off the old project path onto the mechanism; mechanism-count assertions 24→25. Catalogue: 25 mechanisms / 14 blueprints. Merged origin/main (v0.161.1) into the cycle branch; full preflight + preflight-bumped green. See `Docs/plans/2026-07-01-wiki-blueprint-{design,plan,result}.md`.
+
 ## v0.121.0 (closed 2026-06-16) — test-coverage arc MINOR
 
 Four-phase test-coverage arc executed in a dedicated worktree on a long-lived feature branch. Audit + 3 risk-weighted implementation cycles closing the `installer_migration` axis on the top-3 high-blast-radius surfaces. Squash-merged via PR #11 at commit `552b272e`.
