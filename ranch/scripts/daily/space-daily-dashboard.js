@@ -425,7 +425,11 @@ class SpaceDailyDashboard {
           ],
           groupOrder: ["cowork", "project", "kanban", "trip"],
           groupOrderBottom: ["scratch"],
-          defaultClosed: ["scratch"],
+          // Scratch group now opens by default (was defaultClosed) and renders
+          // oldest-first so the day's scratch notes read in the order they were
+          // taken. See the "Daily Hub Scratch Notes" card.
+          defaultClosed: [],
+          ascendingGroups: ["scratch"],
           colorByType: this._BLUEPRINT_COLORS,
           rollUpRoots: this._buildRollupRules(dv),
           metaBuilder: (p, el) => this._renderActivityMeta(p, el, icons.square, this._CHEVRON_SVG),

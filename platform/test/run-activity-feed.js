@@ -1492,6 +1492,72 @@ assertTrue("HC-V0841-D2 _renderFramedGroup retains the toggle event listener",
   "_renderFramedGroup keeps writing persisted state on user toggle so non-defaultClosed groups still remember; " +
   "the fix only blocks the READ path for defaultClosed groups, not the WRITE path");
 
+// ── AF-ASC: ascendingGroups renders a named group oldest-first ────────────
+console.log("\n--- AF-ASC: ascendingGroups (oldest-first per group) ---");
+
+// Build three scratch pages on the same day with distinct created_at, fed in
+// a SHUFFLED order (09:00, 10:00, 08:00). tsKeys[0]="day" is absent on the
+// pages, so the global newest-first sort ties and preserves input order —
+// meaning WITHOUT the opt the render order is [09,10,08] (not ascending).
+function afAscSeed() {
+  const day = "2026-05-21";
+  const mk = (name, hh) => ({ file: { path: "spice/s/" + name + ".md", name }, type: "scratch", created_at: day + "T" + hh + ":00:00Z" });
+  return { day, pages: [mk("scratch-0900", "09"), mk("scratch-1000", "10"), mk("scratch-0800", "08")] };
+}
+
+// AF-ASC-1 — with ascendingGroups:["scratch"], rows render oldest-first.
+// (Red without the Pass B.5 change: default order would be [09,10,08].)
+try {
+  const { day, pages } = afAscSeed();
+  const dv = v066_makeFakeDv(pages);
+  const af = new (v066_loadAF())();
+  af.render(dv, {
+    scope: "today", asOf: day, blueprints: ["scratch"], framed: true, groupBy: "blueprint",
+    tsKeys: ["day", "created_at", "status_changed_at"],
+    ascendingGroups: ["scratch"],
+  });
+  const html = dv.container.innerHTML;
+  const i08 = html.indexOf("scratch-0800"), i09 = html.indexOf("scratch-0900"), i10 = html.indexOf("scratch-1000");
+  assertTrue("AF-ASC-1a: all three scratch rows rendered", i08 >= 0 && i09 >= 0 && i10 >= 0);
+  assertTrue("AF-ASC-1b: ascendingGroups renders scratch oldest-first (0800 < 0900 < 1000)",
+    i08 < i09 && i09 < i10, "render order was 08=" + i08 + " 09=" + i09 + " 10=" + i10);
+} catch (e) {
+  assertTrue("AF-ASC-1: ascendingGroups oldest-first", false, e && e.message);
+}
+
+// AF-ASC-2 — opt-in guard: WITHOUT ascendingGroups the scratch group is not
+// reordered ascending (the new opt must not change default behavior).
+try {
+  const { day, pages } = afAscSeed();
+  const dv = v066_makeFakeDv(pages);
+  const af = new (v066_loadAF())();
+  af.render(dv, {
+    scope: "today", asOf: day, blueprints: ["scratch"], framed: true, groupBy: "blueprint",
+    tsKeys: ["day", "created_at", "status_changed_at"],
+  });
+  const html = dv.container.innerHTML;
+  const i08 = html.indexOf("scratch-0800"), i09 = html.indexOf("scratch-0900"), i10 = html.indexOf("scratch-1000");
+  assertTrue("AF-ASC-2: without ascendingGroups scratch is NOT reordered ascending (opt-in only)",
+    !(i08 < i09 && i09 < i10), "render order was 08=" + i08 + " 09=" + i09 + " 10=" + i10);
+} catch (e) {
+  assertTrue("AF-ASC-2: opt-in default unchanged", false, e && e.message);
+}
+
+// AF-ASC-3 — daily dashboard wiring: the scratch section opens by default and
+// renders oldest-first. (Red without the space-daily-dashboard.js config edit.)
+try {
+  const dailyDashSrc = fs.readFileSync(
+    path.join(WORKSHOP, "platform/blueprints/daily/helpers/space-daily-dashboard.js"), "utf8");
+  assertTrue("AF-ASC-3a: daily dashboard passes ascendingGroups: ['scratch']",
+    /ascendingGroups:\s*\[\s*["']scratch["']\s*\]/.test(dailyDashSrc),
+    "space-daily-dashboard.js must pass ascendingGroups: ['scratch'] so the daily hub renders scratch oldest-first");
+  assertTrue("AF-ASC-3b: daily dashboard no longer defaultCloses the scratch group",
+    !/defaultClosed:\s*\[[^\]]*["']scratch["'][^\]]*\]/.test(dailyDashSrc),
+    "space-daily-dashboard.js must not list 'scratch' in defaultClosed so the section opens by default");
+} catch (e) {
+  assertTrue("AF-ASC-3: daily dashboard wiring", false, e && e.message);
+}
+
 // ── Summary ───────────────────────────────────────────────────────────────
 
 console.log(`\nrun-activity-feed.js: ${pass} pass · ${fail} fail`);
