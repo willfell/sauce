@@ -1958,6 +1958,157 @@ async function testFF25PaycheckEditDepositAmountAuthoritative() {
   return pass;
 }
 
+// FF26 — grouped-by-check display order (finance tweak #1): with expenses authored
+// OUT of deposit order (a deposit-2 row BEFORE a deposit-1 row), the editor must
+// render all deposit-1 rows first, then deposit-2 — but edit/delete/move flows must
+// still hit the ORIGINAL expenses[] index. Proven by deleting the FIRST rendered row
+// (which is the deposit-1 expense, authored SECOND) and asserting the surviving
+// expense is the deposit-2 one (original index 0), not a naive display-position delete.
+async function testFF26PaycheckGroupedByCheckOrder() {
+  console.log('\n=== FF26 — PaycheckExpensesEditor renders grouped by check + delete hits original index ===');
+  const app = makeApp({ fileExistsHook: (p) => ({ path: p }) });
+  app.metadataCache = { getFirstLinkpathDest: () => null, getFileCache: () => null };
+  const overrides = {
+    FinanceMath: {
+      _depositIndex: (e, c) => { const n = Math.trunc(Number(e && e.deposit)); return (!isFinite(n) || n < 1) ? 1 : (c && n > c ? c : n); },
+      _coerceDateString: (v) => (typeof v === 'string' ? v : (v && typeof v.toISODate === 'function' ? v.toISODate() : null)),
+      depositTotals: (pg) => (Array.isArray(pg && pg.deposits) ? pg.deposits : []).map(d => ({ date: d.date, amount: Number(d.amount) || 0, assigned: 0, leftover: Number(d.amount) || 0 })),
+    },
+  };
+  const Cls = loadFinanceClass('PaycheckExpensesEditor', app, overrides);
+  const inst = new Cls();
+  // Authoritative store — expenses authored OUT of deposit order: Apple (deposit 2)
+  // at index 0, Rent (deposit 1) at index 1.
+  const store = {
+    expenses: [
+      { item: 'Apple', amount: 950, category: 'Credit Payment', deposit: 2, paid: true },
+      { item: 'Rent', amount: 2200, category: 'Rent', deposit: 1, paid: false },
+    ],
+  };
+  inst._mutate = async (file, mutator) => {
+    const fm = { expenses: store.expenses.slice() };
+    await mutator(fm);
+    store.expenses = fm.expenses;
+  };
+  const page = {
+    file: { name: 'Paycheck-2026-07', path: 'spice/finance/paychecks/2026-07/Paycheck-2026-07.md' },
+    month: '2026-07',
+    deposits: [{ date: '2026-07-01', amount: 4500 }, { date: '2026-07-15', amount: 4500 }],
+    expenses: store.expenses.slice(),
+  };
+  const dv = makeDvWithCurrent(page);
+  const file = app.vault.getAbstractFileByPath('spice/finance/paychecks/2026-07/Paycheck-2026-07.md');
+  await inst.render(dv);
+  const root = findClass(dv.container, 'pee-root');
+  // Collect the item-cell texts in render order (each row's first flex:2 span).
+  // Rows are the direct children carrying a delete button; grab the item text order.
+  const itemTexts = root
+    ? collectAll(root, (n) => n.tag === 'span').map(n => n.textContent).filter(t => t === 'Rent' || t === 'Apple')
+    : [];
+  const rentBeforeApple = itemTexts.indexOf('Rent') >= 0 && itemTexts.indexOf('Apple') >= 0
+    && itemTexts.indexOf('Rent') < itemTexts.indexOf('Apple');
+
+  // Now delete the FIRST rendered row (Rent, deposit 1). It lives at ORIGINAL index 1.
+  // A naive display-position delete would pass index 0 and wrongly remove Apple.
+  global.window = { confirm: () => true };
+  // Find the first row's delete button and click it (mirrors a real click).
+  const buttons = root ? collectButtons(root) : [];
+  const delButtons = buttons.filter(b => b.textContent === '×');
+  if (delButtons.length > 0 && typeof delButtons[0].onclick === 'function') {
+    await delButtons[0].onclick({ stopPropagation() {} });
+  }
+  const deletedRent = store.expenses.length === 1 && store.expenses[0].item === 'Apple';
+  console.log(`  Rent (deposit1) rendered before Apple (deposit2): ${rentBeforeApple} ; deleting display-first row removed Rent (original idx 1), Apple survives: ${deletedRent}`);
+  const pass = !!root && rentBeforeApple && deletedRent;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
+// FF27 — clean deposit date display (finance tweak #2): Dataview parses the deposit
+// `date` into a Luxon-like DateTime; the editor must render a clean "YYYY-MM-DD" via
+// _coerceDateString, NOT the raw ISO timestamp. Stub deposit.date as a DateTime-like
+// object exposing toISODate() (+ a noisy toString) to prove coercion at the header.
+async function testFF27PaycheckDepositDateCoerced() {
+  console.log('\n=== FF27 — PaycheckExpensesEditor renders clean deposit date (coerced, not ISO timestamp) ===');
+  const app = makeApp({ fileExistsHook: (p) => ({ path: p }) });
+  app.metadataCache = { getFirstLinkpathDest: () => null, getFileCache: () => null };
+  const mkDateTime = (iso) => ({
+    toISODate: () => iso,
+    toString: () => `${iso}T00:00:00.000-06:00`,
+  });
+  const d1 = mkDateTime('2026-07-01');
+  const d15 = mkDateTime('2026-07-15');
+  const overrides = {
+    FinanceMath: {
+      _depositIndex: (e, c) => { const n = Math.trunc(Number(e && e.deposit)); return (!isFinite(n) || n < 1) ? 1 : (c && n > c ? c : n); },
+      _coerceDateString: (v) => (typeof v === 'string' ? v : (v && typeof v.toISODate === 'function' ? v.toISODate() : null)),
+      // depositTotals must ALSO coerce so downstream consumers get clean strings.
+      depositTotals: (pg) => (Array.isArray(pg && pg.deposits) ? pg.deposits : []).map(d => ({
+        date: (d.date && typeof d.date.toISODate === 'function') ? d.date.toISODate() : d.date,
+        amount: Number(d.amount) || 0, assigned: 0, leftover: Number(d.amount) || 0,
+      })),
+    },
+  };
+  const Cls = loadFinanceClass('PaycheckExpensesEditor', app, overrides);
+  const inst = new Cls();
+  const page = {
+    file: { name: 'Paycheck-2026-07', path: 'spice/finance/paychecks/2026-07/Paycheck-2026-07.md' },
+    month: '2026-07',
+    deposits: [{ date: d1, amount: 4500 }, { date: d15, amount: 4500 }],
+    expenses: [{ item: 'Rent', amount: 2200, category: 'Rent', deposit: 1, paid: false }],
+  };
+  const dv = makeDvWithCurrent(page);
+  await inst.render(dv);
+  const root = findClass(dv.container, 'pee-root');
+  const texts = root ? collectAll(root, () => true).map(n => n.textContent).filter(t => typeof t === 'string') : [];
+  const joined = texts.join(' | ');
+  const showsClean1 = joined.includes('2026-07-01');
+  const showsClean15 = joined.includes('2026-07-15');
+  const showsIso = joined.includes('T00:00:00');
+  // Row tag ordinal still derived from the (coerced) date: day 1 → "1st".
+  const hasTag1st = texts.some(t => t === '1st') || joined.includes('1st');
+  console.log(`  clean dates 07-01/07-15: ${showsClean1}/${showsClean15} ; NO ISO timestamp: ${!showsIso} ; ordinal tag 1st derived: ${hasTag1st}`);
+  const pass = !!root && showsClean1 && showsClean15 && !showsIso && hasTag1st;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
+// FF28 — itemized Fixed section (finance tweak #3, Option A): BudgetAllocationsEditor
+// renders a read-only Fixed section (itemized {item,amount} rows) above Debt when
+// budgetAllocations returns a non-empty fixed[] — no writes, no editable fields.
+async function testFF28BudgetAllocationsRendersFixedSection() {
+  console.log('\n=== FF28 — BudgetAllocationsEditor renders itemized read-only Fixed section ===');
+  const app = makeApp({ fileExistsHook: (p) => ({ path: p }) });
+  const view = {
+    fixed: [{ item: 'Rent', amount: 2200 }, { item: 'Utilities', amount: 300 }],
+    debt: [{ slug: 'Debt-Apple-Card', name: 'Apple Card', plannedLive: 380, override: null, planned: 380, source: 'plan' }],
+    savings: [{ name: 'Emergency Fund', plannedLive: 300, override: null, planned: 300, source: 'plan' }],
+    totals: { fixed: 2500, debt: 380, savings: 300, income: 9000, discretionary: 2950 },
+  };
+  const src = fs.readFileSync(path.join(WORKSHOP, 'platform', 'blueprints', 'finance', 'helpers', 'budget-allocations-editor.js'), 'utf8');
+  const cjs = makeFinanceCustomJsStub();
+  cjs.FinanceMath = { budgetAllocations: () => view, fmtMoney: (n) => `$${(Number(n) || 0).toFixed(2)}` };
+  const Cls = new Function('app', 'customJS', 'Notice', `${src}\nreturn BudgetAllocationsEditor;`)(app, cjs, FakeNotice);
+  const inst = new Cls();
+  const dv = makeDvWithCurrentAndFrontmatter(
+    { name: 'Budget-2026-07', path: 'spice/finance/budgets/2026-07/Budget-2026-07.md' },
+    { type: 'budget', month: '2026-07' }
+  );
+  await inst.render(dv);
+  const root = findClass(dv.container, 'bae-root');
+  const texts = root ? collectAll(root, () => true).map(n => n.textContent).filter(t => typeof t === 'string') : [];
+  const joined = texts.join(' | ');
+  const hasFixedSection = !!(root && collectAll(root, (n) => typeof n.cls === 'string' && n.cls.split(/\s+/).includes('bae-section-fixed')).length > 0);
+  const hasRentRow = texts.includes('Rent');
+  const hasUtilitiesRow = texts.includes('Utilities');
+  const hasFixedTotal = joined.includes('Fixed total') && joined.includes('$2500.00');
+  const noWrites = app.__captured_writes.length === 0;
+  console.log(`  fixed section: ${hasFixedSection} ; Rent row: ${hasRentRow} ; Utilities row: ${hasUtilitiesRow} ; Fixed total $2500.00: ${hasFixedTotal} ; no writes: ${noWrites}`);
+  const pass = !!root && hasFixedSection && hasRentRow && hasUtilitiesRow && hasFixedTotal && noWrites;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
 // FF21 — PaycheckSummary per-deposit line: a MONTHLY paycheck (deposits[] +
 // tagged expenses) renders a per-deposit income/assigned/leftover line (from
 // stubbed depositTotals), while Band 1's Pay = Σ deposits (not paycheck_amount).
@@ -3037,6 +3188,8 @@ async function testRendHasNotes() {
       results.push(['FF19 paycheck-editor-move-between-deposits', await testFF19PaycheckMoveBetweenDeposits()]);
       results.push(['FF20 paycheck-editor-legacy-flat-render', await testFF20PaycheckLegacyFlatRender()]);
       results.push(['FF25 paycheck-editor-edit-deposit-amount-authoritative', await testFF25PaycheckEditDepositAmountAuthoritative()]);
+      results.push(['FF26 paycheck-editor-grouped-by-check-order', await testFF26PaycheckGroupedByCheckOrder()]);
+      results.push(['FF27 paycheck-editor-deposit-date-coerced', await testFF27PaycheckDepositDateCoerced()]);
       results.push(['FF21 paycheck-summary-per-deposit-line', await testFF21PaycheckSummaryPerDeposit()]);
       results.push(['FF22 paycheck-summary-legacy-single-amount', await testFF22PaycheckSummaryLegacy()]);
       results.push(['FF23 paycheck-defaults-editor-deposit-merge', await testFF23PaycheckDefaultsDepositMerge()]);
@@ -3047,6 +3200,7 @@ async function testRendHasNotes() {
       results.push(['FF14 budget-defaults-editor-edit-preserves-extra', await testFF14BudgetDefaultsEditPreservesExtra()]);
       results.push(['FF15 budget-allocations-editor-renders-sections', await testFF15BudgetAllocationsRendersSections()]);
       results.push(['FF16 budget-allocations-editor-edit-materializes-override', await testFF16BudgetAllocationsEditMaterializesOverride()]);
+      results.push(['FF28 budget-allocations-editor-renders-fixed-section', await testFF28BudgetAllocationsRendersFixedSection()]);
       results.push(['FF6 invoice-time-log-editor-out-of-path', await testFF6InvoiceTimeLogOutOfPath()]);
       results.push(['FF7 invoice-controls-rate-and-toggle', await testFF7InvoiceControlsRateAndToggle()]);
       results.push(['FF8 widget-embed-dedup', await testFF8WidgetEmbedDedup()]);

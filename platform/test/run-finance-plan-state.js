@@ -426,5 +426,101 @@ function tierCase(balance) {
         gotLegacy.length === 2 && gotLegacy.every(p => !Array.isArray(p.deposits)));
 }
 
+// ===== HC-FIXED-* — fixedBillsForMonth itemizes out-of-pocket bills (finance tweak #3) =====
+// fixedBillsForMonth reads the month's paycheck(s), collects the expenses that are
+// NEITHER debt-linked NOR savings, and returns { items:[{item,amount}], total }.
+// budgetAllocations.totals.fixed then prefers this itemized sum over the plan's
+// fixed_living_monthly WHEN a paycheck with fixed expenses exists (else falls back).
+{
+    // A monthly paycheck carrying: 2 real fixed bills (Rent, Utilities), 1 debt-linked
+    // payment (Apple), and 1 savings contribution. Only the two fixed bills should count.
+    const mp = {
+        type: "paycheck", month: "2026-07",
+        deposits: [{ date: "2026-07-01", amount: 4500 }, { date: "2026-07-15", amount: 4500 }],
+        expenses: [
+            { item: "Rent", amount: 2200, category: "Housing", deposit: 1, paid: false },
+            { item: "Utilities", amount: 300, category: "Utilities", deposit: 1, paid: false },
+            { item: "Apple", amount: 950, category: "Credit Payment", debt: "[[Debt-Apple-Card]]", deposit: 2, paid: true },
+            { item: "EF transfer", amount: 300, category: "Savings", deposit: 2, paid: false },
+        ],
+        file: { path: "spice/finance/paychecks/2026-07/Paycheck-2026-07.md", name: "Paycheck-2026-07" },
+    };
+    const dv = makeDv({
+        plan: {},
+        debts: [debt("Apple-Card", 14000, 22.74, 380), debt("Discover-It", 3000, 25, 100)],
+        savings: [savingsAcct(640, 5000)],
+        paychecks: [mp],
+        budgets: [{
+            type: "budget", month: "2026-07", categories: [],
+            file: { path: "spice/finance/budgets/2026-07/Budget-2026-07.md", name: "Budget-2026-07" },
+        }],
+    });
+    const fb = fm.fixedBillsForMonth(dv, "2026-07");
+    ok("HC-FIXED-1 items exclude debt + savings (only Rent + Utilities)",
+        Array.isArray(fb.items) && fb.items.length === 2
+        && fb.items.some(i => i.item === "Rent" && i.amount === 2200)
+        && fb.items.some(i => i.item === "Utilities" && i.amount === 300));
+    ok("HC-FIXED-2 total sums the fixed items", fb.total === 2500);
+    ok("HC-FIXED-3 no debt-linked or savings item leaked in",
+        !fb.items.some(i => i.item === "Apple" || i.item === "EF transfer"));
+
+    // budgetAllocations exposes fixed[] + totals.fixed = itemized sum when a paycheck exists.
+    const a = fm.budgetAllocations(dv, "2026-07");
+    ok("HC-FIXED-4 budgetAllocations exposes fixed breakdown array",
+        Array.isArray(a.fixed) && a.fixed.length === 2);
+    ok("HC-FIXED-5 totals.fixed = itemized paycheck sum (not plan fixed_living_monthly 3851)",
+        a.totals.fixed === 2500);
+}
+
+// HC-FIXED-FALLBACK — no paycheck (or no fixed expenses) → totals.fixed falls back to
+// the plan's fixed_living_monthly; fixed[] is empty. Proves the display-only itemization
+// never loses the plan number when there is nothing to itemize.
+{
+    const dv = makeDv({
+        plan: {}, // fixed_living_monthly defaults to 3851
+        debts: [debt("Apple-Card", 14000, 22.74, 380)],
+        savings: [savingsAcct(640, 5000)],
+        budgets: [{
+            type: "budget", month: "2026-07", categories: [],
+            file: { path: "spice/finance/budgets/2026-07/Budget-2026-07.md", name: "Budget-2026-07" },
+        }],
+        // no paychecks
+    });
+    const fb = fm.fixedBillsForMonth(dv, "2026-07");
+    ok("HC-FIXED-FALLBACK-1 no paycheck → empty items + 0 total",
+        Array.isArray(fb.items) && fb.items.length === 0 && fb.total === 0);
+    const a = fm.budgetAllocations(dv, "2026-07");
+    ok("HC-FIXED-FALLBACK-2 totals.fixed falls back to plan fixed_living_monthly (3851)",
+        a.totals.fixed === 3851);
+    ok("HC-FIXED-FALLBACK-3 fixed[] is empty when nothing to itemize",
+        Array.isArray(a.fixed) && a.fixed.length === 0);
+}
+
+// HC-FIXED-ISOLATE — itemizing fixed bills is DISPLAY-ONLY (Option A): it must NOT
+// change the discretionary envelope, which computePlanState keeps computing from the
+// plan's fixed_living_monthly. With vs without a fixed-bills paycheck → same discretionary.
+{
+    const baseCfg = {
+        plan: {},
+        debts: [debt("Apple-Card", 14000, 22.74, 380)],
+        savings: [savingsAcct(640, 5000)],
+        budgets: [{
+            type: "budget", month: "2026-07", categories: [],
+            file: { path: "spice/finance/budgets/2026-07/Budget-2026-07.md", name: "Budget-2026-07" },
+        }],
+    };
+    const noPay = makeDv(Object.assign({}, baseCfg));
+    const withPay = makeDv(Object.assign({}, baseCfg, { paychecks: [{
+        type: "paycheck", month: "2026-07",
+        deposits: [{ date: "2026-07-01", amount: 4500 }],
+        expenses: [{ item: "Rent", amount: 2200, category: "Housing", deposit: 1, paid: false }],
+        file: { path: "spice/finance/paychecks/2026-07/Paycheck-2026-07.md", name: "Paycheck-2026-07" },
+    }] }));
+    const dNo = fm.budgetAllocations(noPay, "2026-07").totals.discretionary;
+    const dWith = fm.budgetAllocations(withPay, "2026-07").totals.discretionary;
+    ok("HC-FIXED-ISOLATE-1 itemized fixed does not move the discretionary envelope",
+        dNo === dWith && typeof dNo === "number");
+}
+
 console.log(`\nrun-finance-plan-state.js: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
