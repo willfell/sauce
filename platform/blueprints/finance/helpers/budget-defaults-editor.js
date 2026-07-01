@@ -15,7 +15,7 @@
  * Embed-deduped per v0.16.0 lesson.
  */
 class BudgetDefaultsEditor {
-    async render(dv) {
+    async render(dv, override) {
         if (dv.container.closest && dv.container.closest(".markdown-embed")) return;
 
         const previous = dv.container.querySelector(":scope > .bde-root");
@@ -27,7 +27,14 @@ class BudgetDefaultsEditor {
         if (!file) return;
 
         const groups = Array.isArray(page.groups) ? page.groups.slice() : [];
-        const categories = Array.isArray(page.categories) ? page.categories.slice() : [];
+        // Render-from-authoritative: the category flows capture the freshly-written
+        // categories[] and pass it as override so the re-render reflects the true
+        // post-write state instead of Dataview's lagging dv.current() cache. Group
+        // flows pass no override and fall back to dv.current() (groups are the data
+        // they mutate; the category cascade is the data-loss risk this closes).
+        const categories = Array.isArray(override)
+            ? override
+            : (Array.isArray(page.categories) ? page.categories.slice() : []);
 
         const root = dv.container.createEl("div", { cls: "bde-root" });
         root.style.cssText = "margin: 8px 0;";
@@ -503,12 +510,14 @@ class BudgetDefaultsEditor {
         }
         const result = await this._promptForCategory(null, groups);
         if (!result) return;
+        let captured = null;
         await this._mutate(file, (fm) => {
             const next = Array.isArray(fm.categories) ? fm.categories.slice() : [];
             next.push(result);
             fm.categories = next;
+            captured = next.slice();
         });
-        await this.render(dv);
+        await this.render(dv, captured);
     }
 
     async _editCategoryFlow(file, dv, index, current) {
@@ -516,22 +525,27 @@ class BudgetDefaultsEditor {
         const groups = Array.isArray(cur?.groups) ? cur.groups : [];
         const result = await this._promptForCategory(current, groups);
         if (!result) return;
+        let captured = null;
         await this._mutate(file, (fm) => {
             const next = Array.isArray(fm.categories) ? fm.categories.slice() : [];
-            next[index] = result;
+            // Merge-on-edit: keep non-dialog fields the modal doesn't surface.
+            next[index] = Object.assign({}, current, result);
             fm.categories = next;
+            captured = next.slice();
         });
-        await this.render(dv);
+        await this.render(dv, captured);
     }
 
     async _deleteCategoryFlow(file, dv, index, current) {
         if (!window.confirm(`Delete category "${current?.name || ""}"?`)) return;
+        let captured = null;
         await this._mutate(file, (fm) => {
             const next = Array.isArray(fm.categories) ? fm.categories.slice() : [];
             next.splice(index, 1);
             fm.categories = next;
+            captured = next.slice();
         });
-        await this.render(dv);
+        await this.render(dv, captured);
     }
 
     // ------------------------------ Mutate helpers --------------------------

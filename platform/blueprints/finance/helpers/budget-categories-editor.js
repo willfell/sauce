@@ -18,7 +18,7 @@
  * Embed-deduped per v0.16.0 lesson.
  */
 class BudgetCategoriesEditor {
-    async render(dv) {
+    async render(dv, override) {
         if (dv.container.closest && dv.container.closest(".markdown-embed")) return;
 
         const previous = dv.container.querySelector(":scope > .bce-root");
@@ -30,7 +30,11 @@ class BudgetCategoriesEditor {
         if (!file) return;
 
         const groups = Array.isArray(page.groups) ? page.groups.slice() : [];
-        const categories = Array.isArray(page.categories) ? page.categories.slice() : [];
+        // Render-from-authoritative: prefer the freshly-written array captured by
+        // the mutate flow over Dataview's lagging dv.current() metadata cache.
+        const categories = Array.isArray(override)
+            ? override
+            : (Array.isArray(page.categories) ? page.categories.slice() : []);
 
         const root = dv.container.createEl("div", { cls: "bce-root" });
         root.style.cssText = "margin: 8px 0;";
@@ -324,31 +328,38 @@ class BudgetCategoriesEditor {
     async _addFlow(file, dv, groups) {
         const result = await this._promptForCategory(null, groups);
         if (!result) return;
+        let next = null;
         await this._mutate(file, (fm) => {
             fm.categories = (fm.categories || []).concat([result]);
+            next = fm.categories.slice();
         });
-        await this.render(dv);
+        await this.render(dv, next);
     }
 
     async _editFlow(file, dv, index, current, groups) {
         const result = await this._promptForCategory(current, groups);
         if (!result) return;
+        let next = null;
         await this._mutate(file, (fm) => {
             const list = (fm.categories || []).slice();
-            list[index] = result;
+            // Merge-on-edit: keep non-dialog fields the modal doesn't surface.
+            list[index] = Object.assign({}, current, result);
             fm.categories = list;
+            next = list.slice();
         });
-        await this.render(dv);
+        await this.render(dv, next);
     }
 
     async _deleteFlow(file, dv, index, current) {
         if (!window.confirm(`Delete category '${current?.name || ""}'?`)) return;
+        let next = null;
         await this._mutate(file, (fm) => {
             const list = (fm.categories || []).slice();
             list.splice(index, 1);
             fm.categories = list;
+            next = list.slice();
         });
-        await this.render(dv);
+        await this.render(dv, next);
     }
 
     async _mutate(file, mutator) {

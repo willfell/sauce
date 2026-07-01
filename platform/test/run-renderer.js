@@ -330,6 +330,7 @@ function loadFinanceClass(className, app) {
     : className === 'PaycheckNavButtons' ? 'paycheck-nav-buttons.js'
     : className === 'FinanceHubCards' ? 'finance-hub-cards.js'
     : className === 'BudgetCategoriesEditor' ? 'budget-categories-editor.js'
+    : className === 'BudgetDefaultsEditor' ? 'budget-defaults-editor.js'
     : className === 'PaycheckExpensesEditor' ? 'paycheck-expenses-editor.js'
     : className === 'InvoiceTimeLogEditor' ? 'invoice-time-log-editor.js'
     : className === 'InvoiceControls' ? 'invoice-controls.js'
@@ -1673,6 +1674,144 @@ async function testFF10PaycheckEditPreservesDebt() {
   return pass;
 }
 
+// FF11 — BudgetCategoriesEditor delete re-renders from the authoritative array,
+// not the frozen dv.current(). Same render-from-authoritative proof as FF9.
+async function testFF11BudgetCategoriesDeleteRendersAuthoritative() {
+  console.log('\n=== FF11 — BudgetCategoriesEditor delete renders from authoritative array (no index cascade) ===');
+  const app = makeApp({ fileExistsHook: (p) => ({ path: p }) });
+  const Cls = loadFinanceClass('BudgetCategoriesEditor', app);
+  const inst = new Cls();
+  const store = { groups: ['Essential'], categories: [
+    { group: 'Essential', name: 'Alpha', planned: 1, actual: 0 },
+    { group: 'Essential', name: 'Bravo', planned: 2, actual: 0 },
+  ] };
+  inst._mutate = async (file, mutator) => {
+    const fm = { groups: store.groups.slice(), categories: store.categories.slice() };
+    await mutator(fm);
+    store.groups = fm.groups;
+    store.categories = fm.categories;
+  };
+  const dv = makeDvWithCurrentAndFrontmatter(
+    { name: 'Budget-x', path: 'spice/finance/budgets/x/Budget-x.md' },
+    { groups: store.groups.slice(), categories: store.categories.slice() }
+  );
+  const file = app.vault.getAbstractFileByPath('spice/finance/budgets/x/Budget-x.md');
+  global.window = { confirm: () => true };
+  await inst._deleteFlow(file, dv, 0, store.categories[0]);
+  const writeOk = store.categories.length === 1 && store.categories[0].name === 'Bravo';
+  const root = findClass(dv.container, 'bce-root');
+  const texts = root ? collectAll(root, () => true).map(n => n.textContent).filter(t => typeof t === 'string') : [];
+  const rendersAlpha = texts.includes('Alpha');
+  const rendersBravo = texts.includes('Bravo');
+  const renderOk = !!root && rendersBravo && !rendersAlpha;
+  console.log(`  write shortened to [Bravo]: ${writeOk} ; render shows Bravo not Alpha (authoritative): ${renderOk}`);
+  const pass = writeOk && renderOk;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
+// FF12 — editing a BudgetCategoriesEditor row preserves an extra non-dialog
+// field (merge-on-edit). The modal returns only {group,name,planned,actual}.
+async function testFF12BudgetCategoriesEditPreservesExtra() {
+  console.log('\n=== FF12 — BudgetCategoriesEditor edit preserves extra row field (merge-on-edit) ===');
+  const app = makeApp({ fileExistsHook: (p) => ({ path: p }) });
+  const Cls = loadFinanceClass('BudgetCategoriesEditor', app);
+  const inst = new Cls();
+  const store = { groups: ['Essential'], categories: [
+    { group: 'Essential', name: 'Rent', planned: 1000, actual: 0, note: 'keep-me' },
+  ] };
+  inst._mutate = async (file, mutator) => {
+    const fm = { groups: store.groups.slice(), categories: store.categories.slice() };
+    await mutator(fm);
+    store.groups = fm.groups;
+    store.categories = fm.categories;
+  };
+  // Modal returns edited fields WITHOUT the note field (the bug's trigger).
+  inst._promptForCategory = async () => ({ group: 'Essential', name: 'Rent', planned: 1200, actual: 0 });
+  const dv = makeDvWithCurrentAndFrontmatter(
+    { name: 'Budget-x', path: 'spice/finance/budgets/x/Budget-x.md' },
+    { groups: store.groups.slice(), categories: store.categories.slice() }
+  );
+  const file = app.vault.getAbstractFileByPath('spice/finance/budgets/x/Budget-x.md');
+  await inst._editFlow(file, dv, 0, store.categories[0], store.groups.slice());
+  const keepsNote = store.categories[0].note === 'keep-me';
+  const appliedPlanned = store.categories[0].planned === 1200;
+  console.log(`  keeps extra note field: ${keepsNote} ; applied new planned: ${appliedPlanned}`);
+  const pass = keepsNote && appliedPlanned;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
+// FF13 — BudgetDefaultsEditor category delete re-renders from the authoritative
+// categories array, not the frozen dv.current().
+async function testFF13BudgetDefaultsDeleteRendersAuthoritative() {
+  console.log('\n=== FF13 — BudgetDefaultsEditor category delete renders from authoritative array ===');
+  const app = makeApp({ fileExistsHook: (p) => ({ path: p }) });
+  const Cls = loadFinanceClass('BudgetDefaultsEditor', app);
+  const inst = new Cls();
+  const store = { groups: ['Essential'], categories: [
+    { group: 'Essential', name: 'Alpha', planned: 1 },
+    { group: 'Essential', name: 'Bravo', planned: 2 },
+  ] };
+  inst._mutate = async (file, mutator) => {
+    const fm = { groups: store.groups.slice(), categories: store.categories.slice() };
+    await mutator(fm);
+    store.groups = fm.groups;
+    store.categories = fm.categories;
+  };
+  const dv = makeDvWithCurrentAndFrontmatter(
+    { name: 'Budget Defaults', path: 'spice/finance/Budget Defaults.md' },
+    { groups: store.groups.slice(), categories: store.categories.slice() }
+  );
+  const file = app.vault.getAbstractFileByPath('spice/finance/Budget Defaults.md');
+  global.window = { confirm: () => true };
+  await inst._deleteCategoryFlow(file, dv, 0, store.categories[0]);
+  const writeOk = store.categories.length === 1 && store.categories[0].name === 'Bravo';
+  const root = findClass(dv.container, 'bde-root');
+  const texts = root ? collectAll(root, () => true).map(n => n.textContent).filter(t => typeof t === 'string') : [];
+  const rendersAlpha = texts.includes('Alpha');
+  const rendersBravo = texts.includes('Bravo');
+  const renderOk = !!root && rendersBravo && !rendersAlpha;
+  console.log(`  write shortened to [Bravo]: ${writeOk} ; render shows Bravo not Alpha (authoritative): ${renderOk}`);
+  const pass = writeOk && renderOk;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
+// FF14 — editing a BudgetDefaultsEditor category preserves an extra non-dialog
+// field (merge-on-edit). The modal returns only {name,group,planned}.
+async function testFF14BudgetDefaultsEditPreservesExtra() {
+  console.log('\n=== FF14 — BudgetDefaultsEditor edit preserves extra row field (merge-on-edit) ===');
+  const app = makeApp({ fileExistsHook: (p) => ({ path: p }) });
+  const Cls = loadFinanceClass('BudgetDefaultsEditor', app);
+  const inst = new Cls();
+  const store = { groups: ['Essential'], categories: [
+    { group: 'Essential', name: 'Rent', planned: 1000, note: 'keep-me' },
+  ] };
+  inst._mutate = async (file, mutator) => {
+    const fm = { groups: store.groups.slice(), categories: store.categories.slice() };
+    await mutator(fm);
+    store.groups = fm.groups;
+    store.categories = fm.categories;
+  };
+  // _editCategoryFlow reads groups via _mutateRead (metadataCache) — stub it.
+  inst._mutateRead = () => ({ groups: store.groups.slice(), categories: store.categories.slice() });
+  // Modal returns edited fields WITHOUT the note field (the bug's trigger).
+  inst._promptForCategory = async () => ({ name: 'Rent', group: 'Essential', planned: 1200 });
+  const dv = makeDvWithCurrentAndFrontmatter(
+    { name: 'Budget Defaults', path: 'spice/finance/Budget Defaults.md' },
+    { groups: store.groups.slice(), categories: store.categories.slice() }
+  );
+  const file = app.vault.getAbstractFileByPath('spice/finance/Budget Defaults.md');
+  await inst._editCategoryFlow(file, dv, 0, store.categories[0]);
+  const keepsNote = store.categories[0].note === 'keep-me';
+  const appliedPlanned = store.categories[0].planned === 1200;
+  console.log(`  keeps extra note field: ${keepsNote} ; applied new planned: ${appliedPlanned}`);
+  const pass = keepsNote && appliedPlanned;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
 async function testFF6InvoiceTimeLogOutOfPath() {
   console.log('\n=== FF6 — InvoiceTimeLogEditor on non-Time-Log path renders nothing ===');
   const app = makeApp();
@@ -2356,6 +2495,10 @@ async function testRendHasNotes() {
       results.push(['FF5 paycheck-expenses-editor-add-button', await testFF5PaycheckExpensesAddButton()]);
       results.push(['FF9 paycheck-editor-delete-renders-authoritative', await testFF9PaycheckDeleteRendersAuthoritative()]);
       results.push(['FF10 paycheck-editor-edit-preserves-debt-link', await testFF10PaycheckEditPreservesDebt()]);
+      results.push(['FF11 budget-categories-editor-delete-renders-authoritative', await testFF11BudgetCategoriesDeleteRendersAuthoritative()]);
+      results.push(['FF12 budget-categories-editor-edit-preserves-extra', await testFF12BudgetCategoriesEditPreservesExtra()]);
+      results.push(['FF13 budget-defaults-editor-delete-renders-authoritative', await testFF13BudgetDefaultsDeleteRendersAuthoritative()]);
+      results.push(['FF14 budget-defaults-editor-edit-preserves-extra', await testFF14BudgetDefaultsEditPreservesExtra()]);
       results.push(['FF6 invoice-time-log-editor-out-of-path', await testFF6InvoiceTimeLogOutOfPath()]);
       results.push(['FF7 invoice-controls-rate-and-toggle', await testFF7InvoiceControlsRateAndToggle()]);
       results.push(['FF8 widget-embed-dedup', await testFF8WidgetEmbedDedup()]);
