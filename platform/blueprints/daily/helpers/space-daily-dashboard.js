@@ -1374,10 +1374,13 @@ class SpaceDailyDashboard {
   }
 }
 
-// Dual-export the class so its pure statics (_parseTaskDue / _countsTowardToday
-// / _foldExternalTasks) can be regression-tested in the Node harness. Guarded:
-// in the Obsidian customJS runtime `module` is undefined, so this is a no-op
-// there and the live render path is completely unaffected.
-if (typeof module !== "undefined" && module.exports) {
-  module.exports = { SpaceDailyDashboard };
-}
+// NOTE: do NOT append a `module.exports` / `if (typeof module ...)` trailer here.
+// CustomJS loads this file via `eval("(" + fileBody + ")")` then `new()` — it parses
+// the WHOLE file as ONE expression. A class expression followed by ANY statement
+// (like the old dual-export `if`) is a SyntaxError there ("Unexpected token 'if'"),
+// so the class silently fails to register on window.customJS and the daily note shows
+// "_SpaceDailyDashboard unavailable_". `node --check` / `require()` use a statement
+// parse and do NOT catch this. The Node harness loads the pure statics via
+// `new Function(src + "\nreturn SpaceDailyDashboard;")` (run-helper-cases.js DD-A9 /
+// run-renderer.js), which needs no export. Enforced by the CJS-LOAD gate
+// (platform/test/run-customjs-loadable.js).

@@ -4721,9 +4721,13 @@ async function caseDDA9DailyTodoExternalCount() {
   // dual-exported pure statics (not a source-regex), so a broken filter fails.
   console.log("\n--- Case DD-A9: daily To-Do count folds in due/overdue external tasks ---");
   const p = path.join(BLUEPRINTS_DIR, "daily", "helpers", "space-daily-dashboard.js");
-  const mod = require(p);
-  const D = mod && mod.SpaceDailyDashboard;
-  if (!assertTrue("DD-A9: space-daily-dashboard.js dual-exports SpaceDailyDashboard", !!D)) return;
+  // Load the class the SAME way the CustomJS plugin does — as a bare class with no
+  // `module.exports` trailer (see run-customjs-loadable.js for why a trailer would
+  // break customJS). `new Function(src + "\nreturn SpaceDailyDashboard;")` mirrors
+  // run-renderer.js and needs no export to reach the pure statics.
+  const sddSrc = fs.readFileSync(p, "utf8");
+  const D = new Function(sddSrc + "\nreturn SpaceDailyDashboard;")();
+  if (!assertTrue("DD-A9: space-daily-dashboard.js exposes SpaceDailyDashboard via new Function()", !!D)) return;
   const today = "2026-06-30";
 
   // _parseTaskDue: dataview due::, [due::], Tasks 📅, none, and NOT false-matching
