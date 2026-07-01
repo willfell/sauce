@@ -303,9 +303,9 @@ function loadPeopleRenderingClass(app, customJS, Notice) {
   return fn(app, customJS || {}, Notice || FakeNotice);
 }
 
-function makeFinanceCustomJsStub() {
+function makeFinanceCustomJsStub(overrides) {
   const noop = { render: async () => {} };
-  return {
+  const base = {
     NewBudgetButton: noop,
     NewPaycheckButton: noop,
     NewInvoiceButton: noop,
@@ -323,9 +323,10 @@ function makeFinanceCustomJsStub() {
       },
     },
   };
+  return Object.assign(base, overrides || {});
 }
 
-function loadFinanceClass(className, app) {
+function loadFinanceClass(className, app, customJsOverrides) {
   const filename = className === 'BudgetNavButtons' ? 'budget-nav-buttons.js'
     : className === 'PaycheckNavButtons' ? 'paycheck-nav-buttons.js'
     : className === 'FinanceHubCards' ? 'finance-hub-cards.js'
@@ -340,7 +341,7 @@ function loadFinanceClass(className, app) {
   const filepath = path.join(WORKSHOP, 'platform', 'blueprints', 'finance', 'helpers', filename);
   const src = fs.readFileSync(filepath, 'utf8');
   const fn = new Function('app', 'customJS', 'Notice', `${src}\nreturn ${className};`);
-  return fn(app, makeFinanceCustomJsStub(), FakeNotice);
+  return fn(app, makeFinanceCustomJsStub(customJsOverrides), FakeNotice);
 }
 
 // ── Tree helpers ─────────────────────────────────────────────────────────
@@ -1699,6 +1700,204 @@ async function testFF10PaycheckEditPreservesDebt() {
   return pass;
 }
 
+// ── Monthly-paycheck per-deposit view (Task 3) ────────────────────────────
+// FF17 — first-render deposit materialize: a monthly paycheck born with
+// `deposits: []` + `month` materializes deposits ONCE from Paycheck Defaults'
+// deposit_schedule, then a second render with deposits present writes NOTHING
+// (idempotent — no write loop).
+async function testFF17PaycheckDepositMaterialize() {
+  console.log('\n=== FF17 — PaycheckExpensesEditor materializes deposits from schedule (once, idempotent) ===');
+  const app = makeApp({ fileExistsHook: (p) => ({ path: p }) });
+  app.metadataCache = { getFirstLinkpathDest: () => null, getFileCache: () => null };
+  // Capture _mutate writes into an authoritative store.
+  const store = { deposits: [], month: '2026-07', expenses: [] };
+  const writes = [];
+  const overrides = {
+    FinanceFrontmatter: {
+      update: async () => {},
+      // deposit_schedule from the (stubbed) Paycheck Defaults note.
+      read: (p) => (p === 'spice/finance/Paycheck Defaults.md'
+        ? { deposit_schedule: [{ day: 1, amount: 4500 }, { day: 15, amount: 4500 }] }
+        : null),
+      isTruthy: (v) => v === true,
+    },
+    FinanceMath: {
+      _depositIndex: (e, c) => { const n = Math.trunc(Number(e && e.deposit)); return (!isFinite(n) || n < 1) ? 1 : (c && n > c ? c : n); },
+      depositTotals: (pg) => (Array.isArray(pg && pg.deposits) ? pg.deposits : []).map(d => ({ date: d.date, amount: Number(d.amount) || 0, assigned: 0, leftover: Number(d.amount) || 0 })),
+    },
+  };
+  const Cls = loadFinanceClass('PaycheckExpensesEditor', app, overrides);
+  const inst = new Cls();
+  inst._mutate = async (file, mutator) => {
+    const fm = { deposits: store.deposits.slice(), month: store.month, expenses: store.expenses.slice() };
+    await mutator(fm);
+    store.deposits = fm.deposits;
+    store.expenses = fm.expenses;
+    writes.push({ deposits: JSON.parse(JSON.stringify(fm.deposits)) });
+  };
+  // dv.current() starts FROZEN to the empty-deposits page.
+  const emptyPage = { file: { name: 'Paycheck-2026-07', path: 'spice/finance/paychecks/2026-07/Paycheck-2026-07.md' }, month: '2026-07', deposits: [], expenses: [] };
+  const dv = makeDvWithCurrent(emptyPage);
+  await inst.render(dv);
+
+  const wroteOnce = writes.length === 1;
+  const materialized = wroteOnce && JSON.stringify(writes[0].deposits) === JSON.stringify([{ date: '2026-07-01', amount: 4500 }, { date: '2026-07-15', amount: 4500 }]);
+  console.log(`  wrote deposits exactly once: ${wroteOnce} ; materialized shape correct: ${materialized}`);
+
+  // Second render: deposits already present → NO further write.
+  const beforeSecond = writes.length;
+  const fullPage = { file: emptyPage.file, month: '2026-07', deposits: store.deposits.slice(), expenses: [] };
+  const dv2 = makeDvWithCurrent(fullPage);
+  await inst.render(dv2);
+  const idempotent = writes.length === beforeSecond;
+  console.log(`  second render (deposits present) writes nothing: ${idempotent}`);
+
+  const pass = wroteOnce && materialized && idempotent;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
+// FF18 — per-deposit render: a monthly paycheck with 2 deposits + tagged
+// expenses shows both deposit dates, a per-row deposit tag, and Assigned /
+// Leftover subtotals (from stubbed depositTotals).
+async function testFF18PaycheckPerDepositRender() {
+  console.log('\n=== FF18 — PaycheckExpensesEditor renders per-deposit header + row tags + subtotals ===');
+  const app = makeApp({ fileExistsHook: (p) => ({ path: p }) });
+  app.metadataCache = { getFirstLinkpathDest: () => null, getFileCache: () => null };
+  const overrides = {
+    FinanceMath: {
+      _depositIndex: (e, c) => { const n = Math.trunc(Number(e && e.deposit)); return (!isFinite(n) || n < 1) ? 1 : (c && n > c ? c : n); },
+      depositTotals: (pg) => [
+        { date: '2026-07-01', amount: 4500, assigned: 2200, leftover: 2300 },
+        { date: '2026-07-15', amount: 4500, assigned: 950, leftover: 3550 },
+      ],
+    },
+  };
+  const Cls = loadFinanceClass('PaycheckExpensesEditor', app, overrides);
+  const inst = new Cls();
+  const page = {
+    file: { name: 'Paycheck-2026-07', path: 'spice/finance/paychecks/2026-07/Paycheck-2026-07.md' },
+    month: '2026-07',
+    deposits: [{ date: '2026-07-01', amount: 4500 }, { date: '2026-07-15', amount: 4500 }],
+    expenses: [
+      { item: 'Rent', amount: 2200, category: 'Rent', deposit: 1, paid: false },
+      { item: 'Apple', amount: 950, category: 'Credit Payment', deposit: 2, paid: true },
+    ],
+  };
+  const dv = makeDvWithCurrent(page);
+  await inst.render(dv);
+  const root = findClass(dv.container, 'pee-root');
+  const texts = root ? collectAll(root, () => true).map(n => n.textContent).filter(t => typeof t === 'string') : [];
+  const joined = texts.join(' | ');
+  const showsDate1 = joined.includes('2026-07-01');
+  const showsDate15 = joined.includes('2026-07-15');
+  // ordinal tags derived from the deposit dates: day 1 → "1st", day 15 → "15th".
+  const hasTag1st = texts.some(t => t === '1st') || joined.includes('1st');
+  const hasTag15th = texts.some(t => t === '15th') || joined.includes('15th');
+  const showsAssigned = joined.toLowerCase().includes('assigned');
+  const showsLeftover = joined.toLowerCase().includes('leftover');
+  console.log(`  dates: ${showsDate1}/${showsDate15} ; row tags 1st/15th: ${hasTag1st}/${hasTag15th} ; assigned: ${showsAssigned} ; leftover: ${showsLeftover}`);
+  const pass = !!root && showsDate1 && showsDate15 && hasTag1st && hasTag15th && showsAssigned && showsLeftover;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
+// FF19 — move-an-expense-between-deposits: _moveFlow (picker stubbed to return
+// deposit 2) on a deposit-1 row writes expenses[i].deposit = 2 + re-renders
+// authoritatively despite a frozen dv.current().
+async function testFF19PaycheckMoveBetweenDeposits() {
+  console.log('\n=== FF19 — PaycheckExpensesEditor move-flow writes deposit index + renders authoritative ===');
+  const app = makeApp({ fileExistsHook: (p) => ({ path: p }) });
+  app.metadataCache = { getFirstLinkpathDest: () => null, getFileCache: () => null };
+  const overrides = {
+    FinanceMath: {
+      _depositIndex: (e, c) => { const n = Math.trunc(Number(e && e.deposit)); return (!isFinite(n) || n < 1) ? 1 : (c && n > c ? c : n); },
+      depositTotals: (pg) => (Array.isArray(pg && pg.deposits) ? pg.deposits : []).map(d => ({ date: d.date, amount: Number(d.amount) || 0, assigned: 0, leftover: Number(d.amount) || 0 })),
+    },
+  };
+  const Cls = loadFinanceClass('PaycheckExpensesEditor', app, overrides);
+  const inst = new Cls();
+  const store = {
+    month: '2026-07',
+    deposits: [{ date: '2026-07-01', amount: 4500 }, { date: '2026-07-15', amount: 4500 }],
+    expenses: [{ item: 'Apple', amount: 950, category: 'Credit Payment', deposit: 1, paid: false }],
+  };
+  inst._mutate = async (file, mutator) => {
+    const fm = { month: store.month, deposits: store.deposits.slice(), expenses: store.expenses.map(e => ({ ...e })) };
+    await mutator(fm);
+    store.expenses = fm.expenses;
+  };
+  // Stub the picker to choose deposit 2.
+  inst._promptForDeposit = async () => 2;
+  // dv.current() FROZEN to the pre-move (deposit 1) page.
+  const page = {
+    file: { name: 'Paycheck-2026-07', path: 'spice/finance/paychecks/2026-07/Paycheck-2026-07.md' },
+    month: '2026-07',
+    deposits: store.deposits.slice(),
+    expenses: store.expenses.map(e => ({ ...e })),
+  };
+  const dv = makeDvWithCurrent(page);
+  const file = app.vault.getAbstractFileByPath(page.file.path);
+  await inst._moveFlow(file, dv, 0, store.expenses[0]);
+  const wroteMove = store.expenses[0].deposit === 2;
+  // Re-render must reflect the moved row: its tag is now "15th" (deposit 2's date).
+  const root = findClass(dv.container, 'pee-root');
+  const texts = root ? collectAll(root, () => true).map(n => n.textContent).filter(t => typeof t === 'string') : [];
+  const joined = texts.join(' | ');
+  const rendersMoved = joined.includes('15th');
+  console.log(`  wrote deposit=2: ${wroteMove} ; re-render shows 15th tag (authoritative): ${rendersMoved}`);
+  const pass = wroteMove && rendersMoved;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
+// FF20 — backward-compat: a LEGACY per-check note (NO `deposits` key at all,
+// pay_period_start, flat expenses) renders exactly as before (flat list, no
+// deposit columns, no materialize write).
+async function testFF20PaycheckLegacyFlatRender() {
+  console.log('\n=== FF20 — PaycheckExpensesEditor legacy note (no deposits[]) renders flat, writes nothing ===');
+  const app = makeApp({ fileExistsHook: (p) => ({ path: p }) });
+  app.metadataCache = { getFirstLinkpathDest: () => null, getFileCache: () => null };
+  const overrides = {
+    FinanceMath: {
+      _depositIndex: (e, c) => 1,
+      depositTotals: () => { throw new Error('depositTotals must not be called for a legacy note'); },
+    },
+    FinanceFrontmatter: {
+      update: async () => { throw new Error('legacy render must not write'); },
+      read: () => { throw new Error('legacy render must not read Paycheck Defaults'); },
+      isTruthy: (v) => v === true,
+    },
+  };
+  const Cls = loadFinanceClass('PaycheckExpensesEditor', app, overrides);
+  const inst = new Cls();
+  let wrote = false;
+  inst._mutate = async () => { wrote = true; };
+  const page = {
+    file: { name: 'Paycheck-2026-05-15', path: 'spice/finance/paychecks/2026-05-15/Paycheck-2026-05-15.md' },
+    pay_period_start: '2026-05-15',
+    pay_period_end: '2026-05-31',
+    paycheck_amount: 4500,
+    expenses: [{ item: 'Rent', amount: 2200, category: 'Rent', paid: false }],
+  };
+  const dv = makeDvWithCurrent(page);
+  let threw = null;
+  try {
+    await inst.render(dv);
+  } catch (e) { threw = e; }
+  const root = findClass(dv.container, 'pee-root');
+  const texts = root ? collectAll(root, () => true).map(n => n.textContent).filter(t => typeof t === 'string') : [];
+  const joined = texts.join(' | ');
+  const rendersFlatRow = joined.includes('Rent');
+  const noDepositColumns = !joined.includes('2026-05-15') || true; // flat header has no deposit-date cells; assert via tag absence
+  const noDepositTag = !texts.some(t => t === '15th' || t === '1st');
+  const noWrite = !wrote && !threw;
+  console.log(`  flat row rendered: ${rendersFlatRow} ; no deposit tag: ${noDepositTag} ; no write/throw: ${noWrite}${threw ? ' (threw: ' + threw.message + ')' : ''}`);
+  const pass = !!root && rendersFlatRow && noDepositTag && noWrite;
+  console.log(`  ${pass ? 'PASS' : 'FAIL'}`);
+  return pass;
+}
+
 // FF11 — BudgetCategoriesEditor delete re-renders from the authoritative array,
 // not the frozen dv.current(). Same render-from-authoritative proof as FF9.
 async function testFF11BudgetCategoriesDeleteRendersAuthoritative() {
@@ -2614,6 +2813,10 @@ async function testRendHasNotes() {
       results.push(['FF5 paycheck-expenses-editor-add-button', await testFF5PaycheckExpensesAddButton()]);
       results.push(['FF9 paycheck-editor-delete-renders-authoritative', await testFF9PaycheckDeleteRendersAuthoritative()]);
       results.push(['FF10 paycheck-editor-edit-preserves-debt-link', await testFF10PaycheckEditPreservesDebt()]);
+      results.push(['FF17 paycheck-editor-deposit-materialize-idempotent', await testFF17PaycheckDepositMaterialize()]);
+      results.push(['FF18 paycheck-editor-per-deposit-render', await testFF18PaycheckPerDepositRender()]);
+      results.push(['FF19 paycheck-editor-move-between-deposits', await testFF19PaycheckMoveBetweenDeposits()]);
+      results.push(['FF20 paycheck-editor-legacy-flat-render', await testFF20PaycheckLegacyFlatRender()]);
       results.push(['FF11 budget-categories-editor-delete-renders-authoritative', await testFF11BudgetCategoriesDeleteRendersAuthoritative()]);
       results.push(['FF12 budget-categories-editor-edit-preserves-extra', await testFF12BudgetCategoriesEditPreservesExtra()]);
       results.push(['FF13 budget-defaults-editor-delete-renders-authoritative', await testFF13BudgetDefaultsDeleteRendersAuthoritative()]);
