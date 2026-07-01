@@ -6,7 +6,7 @@ This file archives the per-cycle status snapshots that previously lived in `CLAU
 
 ---
 
-## v0.162.0 — wiki blueprint + doc-search mechanism MINOR (2026-07-01)
+## v0.163.0 — wiki blueprint + doc-search mechanism MINOR (2026-07-01)
 
 New standalone **`wiki` blueprint** (`spice/wiki/`): arbitrary-depth, folder-is-truth knowledge base (types `wiki-hub` / `wiki-section` / `wiki-page`) with a global "Wiki" nav button, `WikiTree` hub+section renderer (DocSearch strip + section cards + recent-updates + page lists), folder-relative `+ New Section` / `+ New Page` create dialogs (arbitrary nesting via a `dir` frontmatter routing field), `WikiMove` (relocate via `app.fileManager.renameFile`), `/wiki` command + `new-wiki-page` skill. Fills the gap the project blueprint's project-bound docs structurally can't hold (cross-project standing reference).
 

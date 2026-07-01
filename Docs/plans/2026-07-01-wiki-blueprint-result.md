@@ -1,7 +1,7 @@
 # Wiki blueprint — result
 
 - **Date:** 2026-07-01
-- **Version:** v0.162.0 (pipeline-computed; wiki 0.2.0 + doc-search 0.2.0 + breadcrumb 0.2.0 + project 1.32.1)
+- **Version:** v0.163.0 (pipeline-computed; wiki 0.2.0 + doc-search 0.2.0 + breadcrumb 0.2.0 + project 1.32.1)
 - **Design + plan:** `Docs/plans/2026-07-01-wiki-blueprint-{design,plan}.md`
 - **Branch:** `cycle/wiki-blueprint`
 
