@@ -349,5 +349,49 @@ function tierCase(balance) {
         dNo === dOv && typeof dNo === "number");
 }
 
+// ===== HC-MP-* — month-keyed paycheck with deposits[] + per-expense deposit tag =====
+{
+    // New monthly-format note: keyed by `month`, income from deposits[], expenses tagged by deposit.
+    const mp = {
+        type: "paycheck", month: "2026-07",
+        deposits: [{ date: "2026-07-01", amount: 4500 }, { date: "2026-07-15", amount: 4500 }],
+        expenses: [
+            { item: "Rent", amount: 2200, category: "Rent", deposit: 1, paid: false },
+            { item: "Apple", amount: 950, category: "Credit Payment", debt: "[[Debt-Apple-Card]]", deposit: 2, paid: true },
+        ],
+        file: { path: "spice/finance/paychecks/2026-07/Paycheck-2026-07.md", name: "Paycheck-2026-07" },
+    };
+    const dv = makeDv({ paychecks: [mp] });
+    const got = fm.readPaychecksForMonth(dv, "2026-07");
+    ok("HC-MP-1 monthly paycheck read by month", got.length === 1);
+    ok("HC-MP-2 monthIncome sums deposits", fm.monthIncome(got) === 9000);
+    ok("HC-MP-3 monthExpensesTotal sums expenses", fm.monthExpensesTotal(got) === 3150);
+    ok("HC-MP-4 monthDebtPaid counts paid+debt", fm.monthDebtPaid(got) === 950);
+
+    // depositTotals — per-deposit assigned + leftover from the tagged expenses.
+    const dt = fm.depositTotals(mp);
+    ok("HC-MP-5 depositTotals length matches deposits", Array.isArray(dt) && dt.length === 2);
+    ok("HC-MP-6 deposit 1 assigned=rent, leftover=amount-assigned",
+        dt[0].amount === 4500 && dt[0].assigned === 2200 && dt[0].leftover === 2300);
+    ok("HC-MP-7 deposit 2 assigned=apple, leftover=amount-assigned",
+        dt[1].amount === 4500 && dt[1].assigned === 950 && dt[1].leftover === 3550);
+
+    // _depositIndex — missing/invalid → 1; over-count clamps to last deposit.
+    ok("HC-MP-8 _depositIndex missing → 1", fm._depositIndex({}, 2) === 1);
+    ok("HC-MP-9 _depositIndex over-count clamps to last", fm._depositIndex({ deposit: 9 }, 2) === 2);
+}
+
+// ===== HC-MP-ARCHIVE-* — notes under paychecks/_archive/ are excluded from the monthly rollup =====
+{
+    const archived = {
+        type: "paycheck", month: "2026-07",
+        deposits: [{ date: "2026-07-01", amount: 4500 }], expenses: [],
+        file: { path: "spice/finance/paychecks/_archive/Paycheck-2026-07-01.md", name: "Paycheck-2026-07-01" },
+    };
+    const dv = makeDv({ paychecks: [archived] });
+    ok("HC-MP-ARCHIVE-1 archived note excluded from monthly rollup",
+        fm.readPaychecksForMonth(dv, "2026-07").length === 0);
+}
+
 console.log(`\nrun-finance-plan-state.js: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
